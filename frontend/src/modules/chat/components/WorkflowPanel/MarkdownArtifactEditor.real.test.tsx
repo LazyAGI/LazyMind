@@ -10,17 +10,23 @@ vi.mock('@mdxeditor/editor',async()=>{
   return <actual.MDXEditor {...props} ref={(editor)=>{capture.editor=editor;if(typeof ref==='function')ref(editor);else if(ref)ref.current=editor;}} />;
  })};
 });
+function openOptions(container: HTMLElement) {
+ const details = container.querySelector('details.writer-document-options')!;
+ details.setAttribute('open', '');
+ fireEvent(details, new Event('toggle'));
+}
 it.each([false,true])('keeps source read-only and allows rich editing after returning (reopening more menu: %s)',async(viaPreview)=>{
  const original='Old [https://example.org](https://example.org) A & B.\n';
  const onSave=vi.fn(async(markdown:string)=>({markdown,revision:2}));
  const {container,getByRole}=render(<MarkdownArtifactEditor markdown={original} sourceRevision={1} onSave={onSave} />);
  await waitFor(()=>expect(container.querySelector('[contenteditable=true]')).toHaveTextContent('Old'));
- container.querySelector('details.writer-document-options')?.setAttribute('open', '');
+ openOptions(container);
  fireEvent.click(getByRole('button',{name:'chat.writerSource.source'}));
  const source=original;
  expect(getByRole('textbox',{name:'chat.writerSource.source'})).toHaveAttribute('readonly');
  fireEvent.change(getByRole('textbox',{name:'chat.writerSource.source'}),{target:{value:source+'Attempted source edit'}});
- if(viaPreview){ container.querySelector('details.writer-document-options')?.removeAttribute('open'); container.querySelector('details.writer-document-options')?.setAttribute('open', ''); }
+ if(viaPreview) container.querySelector('details.writer-document-options')?.removeAttribute('open');
+ openOptions(container);
  fireEvent.click(getByRole('button',{name:'chat.writerLocal.backToDocument'}));
  await waitFor(()=>expect(container.querySelector('[contenteditable=true]')).toHaveTextContent('Old'));
  await act(async()=>capture.editor!.setMarkdown(source.replace('Old','Rich')));
@@ -88,11 +94,12 @@ it('keeps a newer rich edit after viewing source while an older save finishes',a
  await act(async()=>capture.editor!.setMarkdown('First [https://example.org](https://example.org)'));
  await act(async()=>capture.change?.(capture.editor!.getMarkdown(),false));
  await waitFor(()=>expect(onSave).toHaveBeenCalledTimes(1),{timeout:2500});
- container.querySelector('details.writer-document-options')?.setAttribute('open', '');
+ openOptions(container);
  fireEvent.click(getByRole('button',{name:'chat.writerSource.source'}));
  const source='First [https://example.org](https://example.org)\n';
  expect(getByRole('textbox',{name:'chat.writerSource.source'})).toHaveAttribute('readonly');
  fireEvent.change(getByRole('textbox',{name:'chat.writerSource.source'}),{target:{value:source+'Attempted source edit'}});
+ openOptions(container);
  fireEvent.click(getByRole('button',{name:'chat.writerLocal.backToDocument'}));
  await waitFor(()=>expect(container.querySelector('[contenteditable=true]')).toHaveTextContent('First'));
  await act(async()=>capture.editor!.setMarkdown(source.replace('First','Second')));
@@ -112,17 +119,18 @@ it.each([
  const onSave=vi.fn(async(markdown:string)=>({markdown,revision:2}));
  const {container,getByRole}=render(<MarkdownArtifactEditor markdown={original} sourceRevision={1} onSave={onSave} />);
  await waitFor(()=>expect(container.querySelector('[contenteditable=true]')).not.toBeNull());
- container.querySelector('details.writer-document-options')?.setAttribute('open', '');
+ openOptions(container);
  fireEvent.click(getByRole('button',{name:'chat.writerSource.source'}));
  expect(getByRole('textbox',{name:'chat.writerSource.source'})).toHaveAttribute('readonly');
  fireEvent.change(getByRole('textbox',{name:'chat.writerSource.source'}),{target:{value:source}});
- if(viaPreview){ container.querySelector('details.writer-document-options')?.removeAttribute('open'); container.querySelector('details.writer-document-options')?.setAttribute('open', ''); }
+ if(viaPreview) container.querySelector('details.writer-document-options')?.removeAttribute('open');
+ openOptions(container);
  vi.useFakeTimers();
  try {
   fireEvent.click(getByRole('button',{name:'chat.writerLocal.backToDocument'}));
   await act(async()=>vi.advanceTimersByTimeAsync(1500));
   expect(onSave).not.toHaveBeenCalled();
-  container.querySelector('details.writer-document-options')?.setAttribute('open', '');
+  openOptions(container);
   fireEvent.click(getByRole('button',{name:'chat.writerSource.source'}));
   expect(getByRole('textbox',{name:'chat.writerSource.source'})).toHaveValue(original);
  } finally {vi.useRealTimers();}
@@ -133,12 +141,13 @@ it.each([false,true])('does not save attempted source changes or an unchanged mo
  const onSave=vi.fn(async(markdown:string)=>({markdown,revision:2}));
  const {container,getByRole}=render(<MarkdownArtifactEditor markdown={original} sourceRevision={1} onSave={onSave} />);
  await waitFor(()=>expect(container.querySelector('[contenteditable=true]')).not.toBeNull());
- container.querySelector('details.writer-document-options')?.setAttribute('open', '');
+ openOptions(container);
  fireEvent.click(getByRole('button',{name:'chat.writerSource.source'}));
  if(revert){
   fireEvent.change(getByRole('textbox',{name:'chat.writerSource.source'}),{target:{value:original+'\n'}});
   fireEvent.change(getByRole('textbox',{name:'chat.writerSource.source'}),{target:{value:original}});
  }
+ openOptions(container);
  vi.useFakeTimers();
  try {
   fireEvent.click(getByRole('button',{name:'chat.writerLocal.backToDocument'}));
@@ -154,9 +163,10 @@ it('preserves link and text spelling after inspecting read-only source',async()=
  const onSave=vi.fn(async(markdown:string)=>({markdown,revision:++revision}));
  const {container,getByRole}=render(<MarkdownArtifactEditor markdown={original} sourceRevision={1} onSave={onSave} />);
  await waitFor(()=>expect(container.querySelector('[contenteditable=true]')).toHaveTextContent('Old'));
- container.querySelector('details.writer-document-options')?.setAttribute('open', '');
+ openOptions(container);
  fireEvent.click(getByRole('button',{name:'chat.writerSource.source'}));
  fireEvent.change(getByRole('textbox',{name:'chat.writerSource.source'}),{target:{value:source+'Attempted source edit'}});
+ openOptions(container);
  fireEvent.click(getByRole('button',{name:'chat.writerLocal.backToDocument'}));
  expect(onSave).not.toHaveBeenCalled();
  await act(async()=>capture.editor!.setMarkdown(source.replace('Old','New')));
@@ -193,4 +203,18 @@ it('shows outline prose without labels and keeps it out of editable Markdown acr
   rerender(<MarkdownArtifactEditor markdown={saved} sourceRevision={2} onSave={onSave} />);
   await waitFor(() => expect(container.querySelectorAll('[data-writer-outline-description]')).toHaveLength(1));
   expect(container.querySelector('[data-writer-outline-description]')).toHaveAttribute('data-writer-outline-description', displayed);
+});
+
+it('renders a paper outline and preserves chart ownership after a heading edit', async () => {
+  const charts = '<!-- paper-charts: ["accuracy", "cost"] -->';
+  const original = '# Paper\n\n<a id="block-sec-1"></a>\n## Results\n' + charts;
+  const onSave = vi.fn(async (markdown: string) => ({markdown, revision: 2}));
+  const {container} = render(<MarkdownArtifactEditor markdown={original} sourceRevision={1} onSave={onSave} />);
+  await waitFor(() => expect(container.querySelector('[contenteditable=true]')).toHaveTextContent('Results'));
+  expect(container.querySelector('.writer-markdown-editor__parse-fallback')).toBeNull();
+  expect(capture.editor!.getMarkdown()).not.toContain('paper-charts');
+  await act(async () => capture.editor!.setMarkdown(capture.editor!.getMarkdown().replace('Results', 'Verified results')));
+  await act(async () => capture.change?.(capture.editor!.getMarkdown(), false));
+  await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1), {timeout: 2500});
+  expect(onSave.mock.calls[0][0]).toContain('## Verified results\n' + charts);
 });

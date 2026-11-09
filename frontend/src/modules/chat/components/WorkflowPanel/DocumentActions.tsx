@@ -1,15 +1,16 @@
 import { useContext, useMemo, type ReactNode } from 'react';
 import { Dropdown } from 'antd';
-import { CloudUploadOutlined, CopyOutlined, DownOutlined, DownloadOutlined, ExportOutlined } from '@ant-design/icons';
+import { CloudUploadOutlined, CopyOutlined, DownOutlined, DownloadOutlined, ExportOutlined, FileTextOutlined } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 import { buildDocumentFooterItems } from './documentFooter';
 import { SlotEditingContext, type SlotEditingContextValue } from './slotEditingContext';
 import { useSlotFooterActions } from './useSlotFooterActions';
 
-export function DocumentActions({ documentFooter, actionPending = false, runFooterAction }: {
+export function DocumentActions({ documentFooter, actionPending = false, runFooterAction, compact = false }: {
   documentFooter: ReturnType<typeof buildDocumentFooterItems>;
   actionPending?: boolean;
   runFooterAction?: SlotEditingContextValue['runFooterAction'];
+  compact?: boolean;
 }) {
   const { t } = useTranslation();
   if (!documentFooter.actionItems.length && !documentFooter.statusMessages.length) return null;
@@ -45,14 +46,19 @@ export function DocumentActions({ documentFooter, actionPending = false, runFoot
             if (item.kind === 'link') return null;
 
             const { action } = item;
+            const resourceAction = compact && (action.icon === 'copy' || action.icon === 'download');
+            const label = resourceAction && action.label === t('chat.writerCopy.copyContent')
+              ? t('chat.copy') : action.label;
             return (
-              <div key={item.key} className={action.menu ? 'workflow-panel__split-action' : undefined}>
+              <div key={item.key} className={action.menu
+                ? `workflow-panel__split-action${resourceAction ? ' workflow-panel__split-action--resource' : ''}` : undefined}>
                 <button
                   key={item.key}
                   type='button'
                   className={`workflow-panel__action-btn workflow-panel__action-btn--${action.tone ?? 'secondary'}`}
                   disabled={actionPending || action.disabled}
                   aria-disabled={actionPending || action.disabled}
+                  aria-label={action.label}
                   onClick={() => {
                     if (action.flushBeforeAction && runFooterAction) {
                       void runFooterAction(action.onClick, action.flushKey);
@@ -62,9 +68,9 @@ export function DocumentActions({ documentFooter, actionPending = false, runFoot
                   }}
                 >
                   {action.icon === 'write-back' ? <CloudUploadOutlined aria-hidden /> : null}
-                  {action.icon === 'download' ? <DownloadOutlined aria-hidden /> : null}
-                  {action.icon === 'copy' ? <CopyOutlined aria-hidden /> : null}
-                  {action.label}
+                  {!resourceAction && action.icon === 'download' ? <DownloadOutlined aria-hidden /> : null}
+                  {!resourceAction && action.icon === 'copy' ? <CopyOutlined aria-hidden /> : null}
+                  {label}
                 </button>
                 {action.menu && (
                   <Dropdown
@@ -98,11 +104,12 @@ export function DocumentActions({ documentFooter, actionPending = false, runFoot
   );
 }
 
-/** Keep secondary document actions beside their content while sharing save/pending state. */
-export function DocumentActionScope({ inline, label, children }: {
+/** Keep each document's actions beside its content while sharing save/pending state. */
+export function DocumentActionScope({ inline, label, children, showTitle = true }: {
   inline: boolean;
   label: string;
   children: ReactNode;
+  showTitle?: boolean;
 }) {
   const parent = useContext(SlotEditingContext);
   const { footerActions, registerFooterAction } = useSlotFooterActions();
@@ -110,11 +117,16 @@ export function DocumentActionScope({ inline, label, children }: {
     [inline, parent, registerFooterAction]);
   return <SlotEditingContext.Provider value={context}>
     {inline ? <div className='workflow-panel__document-item' role='group' aria-label={label}>
-      {children}
-      <div className='workflow-panel__document-item-actions'>
-        <DocumentActions documentFooter={buildDocumentFooterItems(footerActions)}
-          actionPending={parent.actionPending} runFooterAction={parent.runFooterAction} />
+      <div className='workflow-panel__document-item-header'>
+        {showTitle && <div className='workflow-panel__document-item-title' title={label}>
+          <FileTextOutlined aria-hidden /><span>{label}</span>
+        </div>}
+        <div className='workflow-panel__document-item-actions'>
+          <DocumentActions compact documentFooter={buildDocumentFooterItems(footerActions)}
+            actionPending={parent.actionPending} runFooterAction={parent.runFooterAction} />
+        </div>
       </div>
+      {children}
     </div> : children}
   </SlotEditingContext.Provider>;
 }

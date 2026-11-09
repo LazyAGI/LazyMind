@@ -4,6 +4,7 @@ import {
   isAssistantBridgePlatformMismatch,
   syncLocalAssistantSession,
   type LocalAssistantSession,
+  type LocalAssistantSessionClear,
 } from "./assistantSession";
 
 export type DesktopBridgeUnavailableReason =
@@ -213,7 +214,7 @@ interface LazyMindDesktopBridge {
   openNotificationSettings?: () => Promise<void> | void;
   openBrowserExtensionDir?: () => Promise<void> | void;
   runtimeStatus?: () => Promise<unknown> | unknown;
-  agentIntegrationStatuses?: () => Promise<unknown> | unknown;
+  agentIntegrationStatuses?: (refreshInstallations?: boolean) => Promise<unknown> | unknown;
   agentIntegrationAction?: (agent: DesktopAgent, action: DesktopAgentIntegrationAction) => Promise<unknown> | unknown;
   executorIntegrationPolicies?: () => Promise<unknown> | unknown;
   executorIntegrationAction?: (provider: DesktopExecutorProvider, action: DesktopExecutorPolicyAction) => Promise<unknown> | unknown;
@@ -223,7 +224,7 @@ interface LazyMindDesktopBridge {
   agentExecutableBind?: (target: DesktopAgentBindingTarget, path: string) => Promise<unknown> | unknown;
   agentExecutableClear?: (target: DesktopAgentBindingTarget) => Promise<unknown> | unknown;
   assistantSessionSet?: (session: LocalAssistantSession) => Promise<unknown> | unknown;
-  assistantSessionClear?: () => Promise<unknown> | unknown;
+  assistantSessionClear?: (request: LocalAssistantSessionClear) => Promise<unknown> | unknown;
   restartRuntime?: (options?: { reload?: boolean }) => Promise<unknown> | unknown;
   resetRuntime?: (scope?: "kb" | "all") => Promise<unknown> | unknown;
   localFolderAccessStatus?: () => Promise<DesktopLocalFolderAccessState> | DesktopLocalFolderAccessState;
@@ -242,6 +243,7 @@ interface LazyMindDesktopBridge {
   openCloudLogin?: (url: string) => Promise<unknown> | unknown;
   openManagedProviderAuthorization?: (url: string) => Promise<unknown> | unknown;
   openFeishuCLIAuthorization?: (url: string) => Promise<unknown> | unknown;
+  openGitHubCLIAuthorization?: (url: string) => Promise<unknown> | unknown;
   openCloudRegister?: () => Promise<unknown> | unknown;
   openCloudTokenPlan?: (url: string) => Promise<unknown> | unknown;
   showItemInFolder?: (
@@ -459,19 +461,19 @@ async function syncCurrentLocalAssistantSession() {
   );
 }
 
-export async function agentIntegrationStatuses(): Promise<DesktopAgentIntegrationStatusesResult> {
+export async function agentIntegrationStatuses(refreshInstallations = false): Promise<DesktopAgentIntegrationStatusesResult> {
   const bridge = getDesktopBridge();
   try {
     await syncCurrentLocalAssistantSession();
     if (bridge?.agentIntegrationStatuses) {
-      const payload = await bridge.agentIntegrationStatuses() as {
+      const payload = await bridge.agentIntegrationStatuses(refreshInstallations) as {
         agents?: Partial<Record<DesktopAgent, DesktopAgentIntegrationStatus>>;
       };
       return { ok: true, data: payload?.agents || {} };
     }
     const payload = await assistantBridgeJSON<{
       agents?: Partial<Record<DesktopAgent, DesktopAgentIntegrationStatus>>;
-    }>("/agents", undefined, AGENT_STATUS_TIMEOUT_MS);
+    }>(refreshInstallations ? "/agents?refresh_installations=true" : "/agents", undefined, AGENT_STATUS_TIMEOUT_MS);
     return { ok: true, data: payload.agents || {} };
   } catch (error) {
     return localBridgeFailure(error);

@@ -1,0 +1,41 @@
+.pdf-study-dialog .pdf-visual-study>header h2 span{font-size:14px;font-weight:400;color:#65768b;margin-left:6px}
+.pdf-study-dialog .pdf-visual-preview{max-height:40vh;overflow:auto;background:#fff}
+.pdf-study-dialog .pdf-visual-preview.is-expanded{max-height:68vh}
+.pdf-study-dialog .pdf-visual-preview .pdf-visual-zoom{display:block;width:100%;padding:0;border:0;border-radius:0;background:transparent;cursor:zoom-in}
+.pdf-study-dialog .pdf-visual-preview.is-expanded .pdf-visual-zoom{width:max-content;min-width:100%;cursor:zoom-out}
+.pdf-study-dialog .pdf-visual-preview.is-expanded img{max-width:none;width:auto;min-width:100%}
+.pdf-study-dialog .pdf-visual-caption{font-size:13px;color:#61758b;margin:10px 0;line-height:1.75}
+.pdf-visual-caption summary,.pdf-visual-provenance summary{cursor:pointer;padding:6px 0;min-height:24px}
+.pdf-study-dialog .pdf-visual-source-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+.pdf-study-dialog .pdf-visual-body{padding-top:12px;font-size:15px;line-height:1.8}
+.pdf-study-dialog .pdf-visual-takeaway{background:#f5f9fe;border:1px solid #dbe7f4;border-radius:12px;padding:16px 18px;margin:8px 0 22px}
+.pdf-study-dialog .pdf-visual-takeaway h3{margin:0 0 8px;font-size:13px;color:#356799}
+.pdf-study-dialog .pdf-visual-takeaway p{margin:0}
+.pdf-study-dialog .pdf-visual-findings h3{font-size:15px;margin:0 0 10px}
+.pdf-study-dialog .pdf-visual-findings article{margin:0 0 16px;padding-left:14px;border-left:2px solid #d7e7f8}
+.pdf-study-dialog .pdf-visual-provenance{border-top:1px solid #e7edf4;margin-top:22px;padding-top:8px;font-size:13px;color:#61758b}
+.pdf-study-dialog .pdf-visual-generation{padding:14px 0;color:#526b84}
+.pdf-visual-generation>div{display:flex;align-items:center;justify-content:space-between;gap:16px}
+.pdf-visual-generation time{font-variant-numeric:tabular-nums}
+.pdf-visual-generation progress{display:block;width:100%;height:5px;margin:12px 0;accent-color:var(--color-primary,#006ae6)}
+.pdf-visual-generation small{font-size:12px;max-width:80%;line-height:1.6}
+.pdf-visual-footer{padding-top:18px}
+@media(max-width:600px){.pdf-study-dialog .pdf-visual-body{font-size:14px}.pdf-study-dialog .pdf-visual-takeaway{padding:13px}.pdf-study-dialog .pdf-visual-preview{max-height:34vh}}
+.pdf-visual-source .pdf-table-study.is-embedded{display:block;width:100%;max-width:none;height:auto;overflow:visible;background:transparent;border:0;box-shadow:none;outline:none;color:#26374c}
+.pdf-study-dialog .pdf-visual-source .pdf-table-study.is-embedded .pdf-study-body{padding:0}
+.pdf-study-dialog .pdf-visual-view-switch{display:flex;gap:4px;background:#f2f5f9;border-radius:20px;padding:4px;width:fit-content;margin-bottom:12px}
+.pdf-study-dialog .pdf-visual-view-switch button{border:0;border-radius:16px;background:transparent;font-size:13px;padding:5px 12px;color:#62758b}
+.pdf-study-dialog .pdf-visual-view-switch button[aria-pressed=true]{color:var(--color-primary,#006ae6);background:white;box-shadow:0 1px 3px #203b5614}
+.pdf-study-dialog .pdf-table-study.is-embedded .pdf-table-scroll{max-height:none;margin:8px 0;border-color:#dbe7f4}
+.pdf-study-dialog .pdf-table-study.is-embedded .pdf-table-scroll table{font-size:13px}
+.pdf-study-dialog .pdf-table-study.is-embedded .pdf-table-scroll th{background:#f4f8fd;color:#365b83}
+.pdf-study-dialog .pdf-table-study.is-embedded .pdf-table-cell-detail{background:#f5f9fe;border-color:#dbe7f4}
+.pdf-study-dialog .pdf-visual-preview:not(.is-expanded) .pdf-visual-zoom{display:flex;justify-content:center}
+.pdf-study-dialog .pdf-visual-preview:not(.is-expanded) img{max-height:38vh;width:auto;object-fit:contain}
+@media(max-width:600px){.pdf-study-dialog .pdf-visual-preview:not(.is-expanded) img{max-height:32vh}}
+.pdf-study-dialog .pdf-table-study.is-embedded .pdf-study-body>section{padding:0;border:0}
+.pdf-study-dialog .pdf-table-study.is-embedded .pdf-study-disclaimer{margin:8px 0;font-size:11px}
+/* Wide table cells scroll inside their own viewport, never the study dialog. */
+.pdf-study-dialog:has(>.pdf-visual-study){overflow-x:hidden}
+.pdf-study-dialog .pdf-visual-study .pdf-visual-preview:not(.is-expanded){max-height:none;overflow:hidden}
+.pdf-study-dialog .pdf-visual-body{overflow-wrap:anywhere}

@@ -676,6 +676,14 @@ Codex 的两个方向独立检测和授权：“Codex 桌面端使用 LazyMind M
 
 如果已经存在一个不属于当前 LazyMind 安装的同名 `lazymind` 服务，桥接器会拒绝覆盖或删除。连接成功后新建 Codex 任务即可加载工具。
 
+macOS 重连只请求 Codex 正常退出，不会强制结束拒绝退出的应用；检查运行中应用时会跳过没有 Bundle URL 的条目，退出未完成时可先处理 Codex 的退出确认，再在引导中重试。页面刷新和“重新检查”只读取状态，不会自动启动应用；需要启动或重启时，点击引导中的“重新连接”，保存当前工作后确认连接。
+
+会话接口检测只读取已存在的本地原始状态，不执行派生状态单元的 `get()`。渲染线程内的发现过程有时间和数量限制，失败后至少等待 5 秒再扫描；启动后的连接检测最多等待 45 秒，未就绪时返回错误供用户重试，不持续阻塞安装引导。
+
+插件安装确认与工作流会话控制分别报告。安装步骤确认插件配置及 Codex 启动就绪后即可进入开启确认；会话控制未就绪会单独提示，不把已安装插件判为安装失败。工作流执行及恢复仍须通过实时会话控制校验，安装成功不代表自动接续工作流已可用。
+
+在仅提供异步会话接口的 Codex 版本中，停止 Workflow 会禁止后续自动接续，但当前回复需要在 Codex 内手动停止。该接口无法在同一次操作中校验 Workflow 归属并中断回复，LazyMind 会提示手动停止，避免误中断期间收到新输入的任务。
+
 ### 16.2 Desktop 与 Docker 使用同一入口
 
 Desktop 通过 Electron IPC 调用 connector；Docker 网页通过本机回环 Assistant Bridge 调用相同 adapter。两种入口的探测、归属校验、工具预检和最终配置完全一致，没有 Plugin、Marketplace 或 Codex Skill 分支。
@@ -733,6 +741,26 @@ LazyMind 生成 Cursor 官方 `cursor://anysphere.cursor-deeplink/mcp/install` �
 - `workflow.artifact.get`
 
 使用 Workflow 时，外部 Agent 先通过 `workflow.start` 在当前外部会话对应的 LazyMind Conversation 中建立持久 Session，再按 `state → step.begin → 原生执行 → step.submit` 循环运行。新 Workflow 启动时会原子归档同一 Conversation 中已经 `completed`、`failed` 或 `stopped` 的旧 Session；`active` / `waiting` Session 仍需先停止。Agent 丢失 Session ID 时用 `workflow.session.list` 找回，该列表默认只返回当前外部会话的唯一未归档 Session，不再混入同一用户的其他 Agent 会话；`state`、步骤、产物和 stop/resume 同样受当前 Conversation 约束。只有连接器中断但步骤仍在执行时才用 `workflow.step.resume` 恢复同一个 execution。LazyMind 固定 Workflow revision，并负责步骤状态、输入见证、产物内容、列表顺序和版本；外部 Agent 只执行 `step_contract`，不会成为 Core 内的 Executor 实现。
+
+有源文件时，优先在同一次 `workflow.start` 调用中提交 `inputs`。键使用 Workflow 声明的外部 material ID，值始终为有序数组；单文件输入放一个元素，列表输入按所需顺序放多个元素。每个元素二选一：`{"local_path":"绝对路径"}` 或已有资源的 `{"resource_id":"资源 ID","revision":1,"content_hash":"sha256:…"}`（已有资源可省略版本和哈希，由 Core 固定）。例如 PPT 的上传素材可直接这样提交：
+
+```json
+{
+  "workflow_id": "ppt-workflow",
+  "request_context": "根据简报与已有图表制作演示文稿",
+  "idempotency_key": "presentation-with-source-files-001",
+  "inputs": {
+    "uploaded_materials": [
+      {"local_path": "/Users/alice/project/brief.pdf"},
+      {"local_path": "/Users/alice/project/chart.png"}
+    ]
+  }
+}
+```
+
+Connector 先检查全部文件来源，再逐个上传为不可变输入资源，生成 `input_bindings` 后才准备和创建 Workflow Session；任一素材读取、上传或绑定失败都不会创建本次新 Session。中途已上传的资源可以复用，不会为失败的启动删除共享资源。重试应使用同一 `idempotency_key` 和未改变的文件内容；文件内容变化时应作为新的启动请求使用新 key。已有的 `workflow.input.import` 加 `input_bindings` 分步方式仍可用于提前上传、跨任务复用；同一个 material ID 不能同时出现在 `inputs` 和 `input_bindings`。单独导入资源不会把它附加到已经启动的 Session，文件名或路径仅写在 `request_context` 中也不构成输入绑定。
+
+本地文件路径指向运行 Connector 的机器，必须是绝对路径、普通文件，单文件最多 20 MiB。默认按照 Connector 运行账户的系统文件权限读取，不以 MCP 进程启动目录作为工作区，也不会自动继承外部 Agent 的会话沙箱。外部 Agent 应先把附件下载或解析到可读取的本地路径；远端机器的路径不能直接作为本机路径使用，压缩包内需要使用的素材应先解压再显式提交。需要限制读取范围时，在对应 `LAZYMIND_CONNECTOR_CONFIG` 连接记录中设置 `workflow_input_roots`，例如 `["/Users/alice/project", "/private/tmp"]`。配置后只允许读取这些目录内的文件，符号链接不能绕过目录范围；省略或空数组使用系统文件权限。该配置不会由工具参数改变，重新连接会保留它。
 
 每个 `tools/call` 都会先建立持久调用记录，结束后写入成功、失败或中断状态，并关联 Workflow、Session、Step、Attempt、Artifact 等安全 ID。记录只保存参数哈希和白名单摘要，不保存 prompt、知识库查询正文、文件内容、绝对路径、Base64 或访问令牌。当前版本已经收集这些数据，LazyMind 前端展示留到后续版本。
 

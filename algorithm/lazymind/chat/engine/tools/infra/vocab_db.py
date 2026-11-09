@@ -16,15 +16,15 @@ from __future__ import annotations
 import shlex
 import threading
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
 from urllib.parse import urlsplit, urlunsplit
 
 from lazyllm import LOG
-from sqlalchemy import text
-from sqlalchemy.engine import URL, Engine
 
 from lazymind.config import config as _cfg
-from lazymind.common.database.postgres import create_database_engine
+
+if TYPE_CHECKING:
+    from sqlalchemy.engine import Engine
 
 VOCAB_SCHEMA = 'public'
 VOCAB_TABLE = 'words'
@@ -60,6 +60,8 @@ def _ensure_postgres_driver(url: str) -> str:
 
 
 def _dsn_to_sqlalchemy_url(dsn: str) -> str:
+    from sqlalchemy.engine import URL
+
     if '://' in dsn:
         return _ensure_postgres_driver(dsn)
     parts: Dict[str, str] = {}
@@ -98,6 +100,8 @@ def _normalize_pg_url(url: Optional[str] = None, dsn: Optional[str] = None) -> s
 
 
 def _get_engine(*, url: Optional[str] = None, dsn: Optional[str] = None) -> Engine:
+    from lazymind.common.database.postgres import create_database_engine
+
     engine_url = _normalize_pg_url(url=url, dsn=dsn)
     engine = _engine_cache.get(engine_url)
     if engine is not None:
@@ -172,6 +176,8 @@ def ensure_vocab_table(db_url: Optional[str] = None) -> None:
         LOG.warning(f'[VocabDB] {_VOCAB_DB_ENV_HINT} not set; skipping vocab table check.')
         return
     try:
+        from sqlalchemy import text
+
         engine = _get_vocab_conn(db_url=db_url)
         with engine.connect() as conn:
             if engine.dialect.name == 'sqlite':
@@ -226,6 +232,8 @@ def fetch_vocab_for_user_id(user_id: str) -> List[Dict[str, Any]]:
         )
         return []
     try:
+        from sqlalchemy import text
+
         engine = _get_vocab_conn()
         with engine.connect() as conn:
             rows = conn.execute(
@@ -256,6 +264,8 @@ def fetch_vocab_groups_for_user_id(
         )
         return {}
     try:
+        from sqlalchemy import text
+
         engine = _get_vocab_conn(db_url=db_url)
         with engine.connect() as conn:
             rows = conn.execute(
@@ -320,6 +330,8 @@ def list_chat_users(
         ORDER BY user_id
     """
     try:
+        from sqlalchemy import text
+
         engine = _get_core_conn(db_dsn=db_dsn, db_url=db_url)
         with engine.connect() as conn:
             rows = [row for row in conn.execute(text(sql), params).scalars().all() if row]
@@ -361,6 +373,8 @@ def fetch_chat_histories_for_user_id(
         ORDER BY h.create_time ASC, h.seq ASC, h.id ASC
     """
     try:
+        from sqlalchemy import text
+
         engine = _get_core_conn(db_dsn=db_dsn, db_url=db_url)
         with engine.connect() as conn:
             rows = conn.execute(text(sql), params).mappings().all()
@@ -414,6 +428,8 @@ def fetch_chat_histories_for_session(
         ORDER BY h.create_time ASC, h.seq ASC, h.id ASC
     """
     try:
+        from sqlalchemy import text
+
         engine = _get_core_conn(db_dsn=db_dsn, db_url=db_url)
         with engine.connect() as conn:
             rows = conn.execute(text(sql), {'conversation_id': conversation_id}).mappings().all()

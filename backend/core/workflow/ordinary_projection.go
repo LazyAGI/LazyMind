@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -41,7 +42,7 @@ func projectOrdinarySession(ctx context.Context, db *gorm.DB, session *orm.Workf
 	if err != nil {
 		return out, err
 	}
-	hiddenSlots, err := ordinaryHiddenSlots(ctx, db, session.WorkflowRevisionID)
+	hiddenSlots, documentNames, err := ordinarySlotPresentation(ctx, db, session.WorkflowRevisionID)
 	if err != nil {
 		return out, err
 	}
@@ -168,6 +169,16 @@ func projectOrdinarySession(ctx context.Context, db *gorm.DB, session *orm.Workf
 			// SubAgent row. Only expose task_id when the adapter actually exists.
 			view.AttemptID, view.ExecutionID = taskdisplay.String(row.ID), row.ID
 			view.Status = ordinaryAttemptStatus(row)
+			if row.Status == "cancelled" && row.TerminalCode == "WORKFLOW_INPUT_REQUIRED" {
+				var result struct {
+					InputRequired struct {
+						Question string `json:"question"`
+					} `json:"input_required"`
+				}
+				if json.Unmarshal([]byte(row.ResultJSON), &result) == nil {
+					view.InputRequired = taskdisplay.Text(result.InputRequired.Question, 2000)
+				}
+			}
 			view.ParallelGroupID = taskdisplay.String(groups[row.TaskID])
 			applyOrdinaryAttemptEvents(&view, row, events)
 			// Slot revisions establish explicit visibility and attempt ownership for
@@ -197,6 +208,10 @@ func projectOrdinarySession(ctx context.Context, db *gorm.DB, session *orm.Workf
 			}
 			view.StageArtifacts = unbound
 			for _, artifact := range artifacts {
+				// Human edits can become inline Markdown; keep a user-facing filename.
+				if name := documentNames[artifact.slot]; name != "" && artifact.item.Name == artifact.slot {
+					artifact.item.Name = name
+				}
 				view.StageArtifacts = append(view.StageArtifacts, artifact.item)
 				if artifact.selected && row.Validity != "stale" && ((row.Status == "succeeded" && finalSlots[artifact.slot]) || published[artifact.revisionID]) {
 					run.FinalOutputRefs = append(run.FinalOutputRefs, artifact.item.ArtifactID)
@@ -554,37 +569,47 @@ func getOrdinarySessionProjection(w http.ResponseWriter, r *http.Request) {
 	common.ReplyOK(w, result)
 }
 
-// ordinaryHiddenSlots honors explicit visibility declarations from the Session's
-// immutable package. user_visible only controls presentation; it never removes
-// persisted outputs or runtime inputs. Omitted fields retain the visible default.
-func ordinaryHiddenSlots(ctx context.Context, db *gorm.DB, revisionID string) (map[string]bool, error) {
+// ordinarySlotPresentation honors explicit declarations from the Session's
+// immutable package. Both exposed and user_visible control presentation only.
+func ordinarySlotPresentation(ctx context.Context, db *gorm.DB, revisionID string) (map[string]bool, map[string]string, error) {
 	var row struct{ Content []byte }
 	result := db.WithContext(ctx).Table(orm.WorkflowRevisionEntry{}.TableName()+" AS entries").
 		Select("blobs.content").Joins("JOIN "+orm.WorkflowBlob{}.TableName()+" AS blobs ON blobs.hash = entries.blob_hash").
 		Where("entries.revision_id = ? AND entries.path = ?", revisionID, "workflow.yaml").Take(&row)
 	if errors.Is(result.Error, gorm.ErrRecordNotFound) {
-		return nil, nil
+		return nil, nil, nil
 	}
 	if result.Error != nil {
-		return nil, result.Error
+		return nil, nil, result.Error
 	}
 	var manifest struct {
 		Slots []struct {
 			ID          string `yaml:"id"`
+			Label       string `yaml:"label"`
 			Exposed     *bool  `yaml:"exposed"`
 			UserVisible *bool  `yaml:"user_visible"`
 		} `yaml:"slots"`
+		UI struct {
+			Slots map[string]struct {
+				WidgetType string `yaml:"widgetType"`
+			} `yaml:"slots"`
+		} `yaml:"ui"`
 	}
 	if err := yaml.Unmarshal(row.Content, &manifest); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	hidden := map[string]bool{}
+	names := map[string]string{}
 	for _, slot := range manifest.Slots {
 		if (slot.Exposed != nil && !*slot.Exposed) || (slot.UserVisible != nil && !*slot.UserVisible) {
 			hidden[slot.ID] = true
 		}
+		if slot.Label != "" && manifest.UI.Slots[slot.ID].WidgetType == "text-markdown" {
+			name := filepath.Base(strings.ReplaceAll(slot.Label, "\\", "/"))
+			names[slot.ID] = taskdisplay.Text(strings.TrimSuffix(name, ".md"), 90) + ".md"
+		}
 	}
-	return hidden, nil
+	return hidden, names, nil
 }
 
 // ReadOrdinaryTaskSources exposes the same authorized, persisted public projection

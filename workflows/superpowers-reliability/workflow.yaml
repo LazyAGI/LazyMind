@@ -10,9 +10,9 @@ steps:
   - {id: validate_completion, label: Validate completion}
   - {id: record, label: Record result}
 slots:
-  - {id: preparation, user_visible: false, label: Preparation, type: json, cardinality: single}
-  - {id: admission, user_visible: false, label: Dispatch admission, type: json, cardinality: single}
-  - {id: execution, user_visible: false, label: Child execution, type: json, cardinality: single}
-  - {id: evidence, user_visible: false, label: Execution evidence, type: json, cardinality: single}
-  - {id: completion, user_visible: false, label: Completion checks, type: json, cardinality: single}
+  - {id: preparation, user_visible: true, label: Preparation, type: json, cardinality: single}
+  - {id: admission, user_visible: true, label: Dispatch admission, type: json, cardinality: single}
+  - {id: execution, user_visible: true, label: Child execution, type: json, cardinality: single}
+  - {id: evidence, user_visible: true, label: Execution evidence, type: json, cardinality: single}
+  - {id: completion, user_visible: true, label: Completion checks, type: json, cardinality: single}
   - {id: result, user_visible: true, label: Result, type: json, cardinality: single}

@@ -1,0 +1,285 @@
+id: paper-writing
+name: 论文写作
+description: 支持选题、综述、实验、分析、写作、审稿与阅读心得；轻量实验可授权运行，复杂实验提供模拟数据，结果可继续分析绘图。
+when_to_use: >
+  按用户明确要求且尚未完成的工作选择入口；同时要求检索、分析与写作时，先综述，再 F3 数据准备、F4 分析、论文大纲与成稿。
+  仅要求实验或数据分析时，先选择 experiment（F3 实验与数据准备），再按阶段确认规则进入 data_analysis。
+  F3 从材料池中读取已提取的依据和完整数据表；已有结果仅整理展示，需要新计算时才运行实验。
+  补传附件先提取有效信息入池，已处理的附件不重复读取，不将原文全文复制到后续上下文。
+  Use when the user requests the paper-writing workflow or review of an uploaded academic manuscript.
+  Start broad paper-writing requests at research_topic, retaining the supplied study methods and results.
+  Literature reviews retain supplied papers and expand references through available academic sources and knowledge bases.
+  Honor explicit source restrictions, dates, counts and focus. Frozen review handoffs use only their selection
+  unless the user explicitly asks to expand it. Never substitute model knowledge for missing literature.
+  Start review handoffs at literature_review with the frozen selection.
+  Do not ask about experiment data or execution when starting unrelated stages (F1/F2/F5/F6/F7).
+  When reaching experiment (F3), inspect the current request, attachments and material pool for usable
+  user experiment data/results. Read existing materials when needed; filenames alone and reference-paper
+  tables are not evidence of user measurements.
+  If usable user data exists, directly use it in F3 without ask_user, a data-choice confirmation,
+  or an execution-permission question just to organize existing results.
+  Only when usable data is absent and the user has not already specified how to proceed, use framework
+  ask_user to ask whether they will supply real data or want labeled simulation, then wait for the answer.
+  Tailor the question to the actual research goal and missing data; do not use a fixed environment questionnaire.
+  If the user chooses to supply data, wait for it. If they already requested simulation, reuse that answer.
+  Preserve the answer and original research goal through the existing request_context/user_input mechanism.
+  Do not add a required input field, data-mode binding, or preparation node for this decision.
+  Only for a requested new computation needing code execution, ask about unresolved execution permission
+  in the current LazyMind deployment: bounded CPU execution, no network, dependency installation or GPU,
+  and at most 30 seconds. Bind the existing experiment_execution to allow_local only for explicit consent,
+  otherwise simulate_only. Refusing execution does not request synthetic data.
+  Failed computations on real data must report missing results, never substitute synthetic results.
+  If ask_user is unavailable, ask in Chat only for the missing information. A tool validation failure is
+  not a user answer: report it and stop.
+  For direct experiment entry, bind the user's stated goal to experiment_question; ask if missing for
+  a new experiment. Existing data does not require a new experimental question.
+  F1/F2 entries reuse the accumulated question and evidence. F3 returns final results for F4.
+  Never separately run generated code through Chat tools.
+  For an existing manuscript to review or revise, bind the exact attachment filename to manuscript_file;
+  do not first summarize or copy the manuscript through Chat.
+  Bind pasted manuscript text to manuscript_text; paper_topic and review_request are optional.
+  Choose the entry stage by the user's requested unfinished work, never by attachment format.
+  Requested literature search/review precedes requested data preparation/analysis, then outlining and drafting.
+  A new-paper request for literature retrieval and analysis of existing results starts at literature_review,
+  then experiment (organize supplied results), data_analysis, write_outline and write_document.
+  Markdown materials, images or existing data do not establish that literature retrieval or analysis is complete.
+  Enter write_outline directly only for an outline-only request, or when required earlier work is complete
+  or explicitly out of scope. Do not skip requested research or analysis just because the final deliverable is a paper.
+  Bind existing manuscripts to manuscript_file, regardless of format. Do not bind background/data/outline materials
+  as manuscripts or transcribe them into paper_input; steps read actual attachments and initialize their pool.
+  write_outline publishes an editable outline and
+  requires user confirmation before write_document. Stop after the outline even when the launch request
+  also asks for a complete manuscript or peer review. Continue only after the user confirms the outline.
+  Choose peer_review only when the user requests a review; uploading or having a manuscript does not request review.
+  Use write_document only to draft from the confirmed outline. Use revise_document for all existing-manuscript edits.
+  Respect native approval checkpoints. On Continue, resume the earliest unfinished requested stage.
+  Pass the current editing request unchanged through the existing request_context/user_input mechanism.
+  Direct edits go to revise_document and use the public Writer to plan changes from that request.
+  For review followed by revision, run peer_review first and honor its approval checkpoint, then proceed to revision.
+  When the user requests revision according to the review, use all current issues by default; honor explicit issue numbers, exclusions, or categories for selective revision.
+  Direct edits must ignore historical review advice. Never broaden a partial-review request to all issues; clarify only ambiguous selections. Missing materials or experiments remain pending and must not block other executable text edits.
+  A manuscript or historical review alone does not request review-driven revision.
+  If the request does not distinguish review from editing, clarify the intended action before execution.
+  Keep the file's request; pass additions through request_context. review_request is for peer review.
+  Ask which manuscript to review only when multiple attachments make the target ambiguous.
+  Never substitute a filename or summary for the manuscript.
+  For complete-paper tasks, call finish after the last requested stage is approved.
+  If optional review-driven revision yields no accepted change, deliver the current valid manuscript.
+  After the requested steps succeed and their artifacts are published, acknowledge completion in one
+  short sentence in the user's language and direct them to the workflow.
+  For the last step requested in the current turn, call the existing advance_step_and_hand_off tool
+  so execution publishes its result without another Chat model round. For earlier requested steps,
+  use advance_step and continue only along the requested path; do not hand off early in a multi-step task.
+  Do not repeat the document, review, or JSON, or list issues, conclusions, or next-step options.
+  Do not call list_artifacts, read_artifact, read_file_resource, or similar tools merely to summarize,
+  repeat, or reconfirm successfully published artifacts.
+  Read results when explicitly asked to explain them; continue subsequent steps when explicitly requested,
+  then acknowledge briefly once the current request is fulfilled.
+  For a review-only request, stop after successful review without automatically revising or finishing the workflow.
+  On failure or missing required input, explain the actual cause and wait for user action; do not claim success.
+  Never automatically retry a failed step or reread its error files to plan another attempt.
+  Retry only when the user explicitly requests a retry after seeing the failure.
+  Always relay necessary user_notice messages from tools.
+runtime:
+  trigger_inputs: [manuscript_file, manuscript_text, paper_topic, review_request, paper_input, experiment_execution, experiment_question]
+  transactional_outputs: true
+  recovery_inputs:
+    experiment:
+      recovery_experiment_pool: experiment_pool
+      recovery_experiment_document: experiment_document
+      recovery_data_analysis_pool: data_analysis_pool
+      recovery_data_analysis_document: data_analysis_document
+    data_analysis:
+      recovery_data_analysis_pool: data_analysis_pool
+      recovery_data_analysis_document: data_analysis_document
+      recovery_write_outline_pool: write_outline_pool
+      recovery_write_outline_document: write_outline_document
+      recovery_write_document_pool: write_document_pool
+      recovery_write_document_document: write_document_document
+      recovery_peer_review_pool: peer_review_pool
+      recovery_peer_review_document: peer_review_document
+      recovery_revise_document_pool: revise_document_pool
+      recovery_revise_document_document: revise_document_document
+    literature_review:
+      recovery_literature_pool: literature_review_pool
+      recovery_literature_document: literature_review_document
+      recovery_research_pool: refine_topic_pool
+      recovery_research_document: refine_topic_document
+    peer_review:
+      recovery_review_pool: revise_document_pool
+      recovery_review_document: revise_document_document
+    revise_document:
+      recovery_revise_document_pool: revise_document_pool
+      recovery_revise_document_document: revise_document_document
+tool_scripts:
+  - path: scripts/tools.py
+    functions: [run_paper_step]
+steps:
+  - {id: research_topic, label: "研究选题"}
+  - {id: literature_review, label: "文献综述"}
+  - {id: refine_topic, label: "调整选题"}
+  - {id: experiment, label: "实验数据准备"}
+  - {id: data_analysis, label: "数据分析"}
+  - {id: write_outline, label: "论文大纲"}
+  - {id: write_document, label: "论文写作"}
+  - {id: peer_review, label: "模拟审稿"}
+  - {id: revise_document, label: "论文修订"}
+  - {id: reading_reflection, label: "阅读心得"}
+  - {id: finish, label: "结束"}
+slots:
+  - {id: experiment_question, label: 实验问题, type: text, cardinality: single, external: true, exposed: false}
+  - {id: manuscript_file, label: 论文稿件, type: file, cardinality: single, external: true, exposed: false}
+  - {id: manuscript_text, label: 论文正文, type: text, cardinality: single, external: true, exposed: false}
+  - {id: paper_topic, label: 论文主题, type: text, cardinality: single, external: true, exposed: false}
+  - {id: review_request, label: 审稿要求, type: text, cardinality: single, external: true, exposed: false}
+  - {id: paper_input, type: json, cardinality: single, external: true, exposed: false}
+  - {id: experiment_execution, label: 实验运行偏好, type: text, cardinality: single, external: true, exposed: false}
+  - {id: recovery_experiment_pool, type: file, cardinality: single, external: true, exposed: false}
+  - {id: recovery_experiment_document, type: file, cardinality: single, external: true, exposed: false}
+  - {id: recovery_data_analysis_pool, type: file, cardinality: single, external: true, exposed: false}
+  - {id: recovery_data_analysis_document, type: file, cardinality: single, external: true, exposed: false}
+  - {id: recovery_write_outline_pool, type: file, cardinality: single, external: true, exposed: false}
+  - {id: recovery_write_outline_document, type: file, cardinality: single, external: true, exposed: false}
+  - {id: recovery_write_document_pool, type: file, cardinality: single, external: true, exposed: false}
+  - {id: recovery_write_document_document, type: file, cardinality: single, external: true, exposed: false}
+  - {id: recovery_peer_review_pool, type: file, cardinality: single, external: true, exposed: false}
+  - {id: recovery_peer_review_document, type: file, cardinality: single, external: true, exposed: false}
+  - {id: recovery_revise_document_pool, type: file, cardinality: single, external: true, exposed: false}
+  - {id: recovery_revise_document_document, type: file, cardinality: single, external: true, exposed: false}
+  - {id: recovery_research_pool, type: file, cardinality: single, external: true, exposed: false}
+  - {id: recovery_literature_pool, type: file, cardinality: single, external: true, exposed: false}
+  - {id: recovery_literature_document, type: file, cardinality: single, external: true, exposed: false}
+  - {id: recovery_research_document, type: file, cardinality: single, external: true, exposed: false}
+  - {id: recovery_review_pool, type: file, cardinality: single, external: true, exposed: false}
+  - {id: recovery_review_document, type: file, cardinality: single, external: true, exposed: false}
+  - {id: seed_pool, label: 输入材料池, type: file, cardinality: single, external: true, exposed: false}
+  - {id: research_topic_pool, label: "研究选题材料池", type: file, cardinality: single, exposed: false}
+  - {id: research_topic_document, label: "研究选题", type: file, cardinality: single}
+  - {id: literature_review_pool, label: "文献综述材料池", type: file, cardinality: single, exposed: false}
+  - {id: literature_review_document, label: "文献综述", type: file, cardinality: single}
+  - {id: refine_topic_pool, label: "调整选题材料池", type: file, cardinality: single, exposed: false}
+  - {id: refine_topic_document, label: "调整选题", type: file, cardinality: single}
+  - {id: experiment_pool, label: "实验研究材料池", type: file, cardinality: single, exposed: false}
+  - {id: experiment_document, label: "实验数据准备", type: file, cardinality: single}
+  - {id: experiment_code, label: "实验与数据包", type: file, cardinality: single}
+  - {id: experiment_results, label: "实验结果与来源", type: file, cardinality: single}
+  - {id: data_analysis_pool, label: "数据分析材料池", type: file, cardinality: single, exposed: false}
+  - {id: data_analysis_document, label: "数据分析", type: file, cardinality: single}
+  - {id: redrawn_manuscript_document, label: "重画后的论文", type: file, cardinality: single}
+  - {id: write_outline_pool, label: "论文大纲材料池", type: file, cardinality: single, exposed: false}
+  - {id: write_outline_document, label: "论文大纲", type: file, cardinality: single}
+  - {id: write_document_pool, label: "论文写作材料池", type: file, cardinality: single, exposed: false}
+  - {id: write_document_document, label: "论文写作", type: file, cardinality: single}
+  - {id: peer_review_pool, label: "模拟审稿材料池", type: file, cardinality: single, exposed: false}
+  - {id: peer_review_document, label: "模拟审稿", type: file, cardinality: single}
+  - {id: peer_review_data, label: "结构化审稿意见", type: file, cardinality: single, exposed: false}
+  - {id: revise_document_pool, label: "论文修订材料池", type: file, cardinality: single, exposed: false}
+  - {id: revise_document_document, label: "论文修订", type: file, cardinality: single}
+  - {id: revision_fact_check_document, label: "修订后事实核对", type: file, cardinality: single}
+  - {id: reading_reflection_pool, label: "阅读心得材料池", type: file, cardinality: single, exposed: false}
+  - {id: reading_reflection_document, label: "阅读心得", type: file, cardinality: single}
+  - {id: analysis_chart, label: 分析图表, type: file, cardinality: list, ordered: true}
+  - {id: finish_document, label: 结束说明, type: file, cardinality: single, exposed: true}
+ui:
+  follow_mode:
+    default: following
+  hide_skipped_steps: true
+  hide_unstarted_steps: true
+  slots:
+    seed_pool: {widgetType: json-block, readOnly: false, collapsed: false}
+    research_topic_document: {widgetType: text-markdown, readOnly: false}
+    literature_review_document: {widgetType: text-markdown, readOnly: false}
+    refine_topic_document: {widgetType: text-markdown, readOnly: false}
+    experiment_document: {widgetType: text-markdown, readOnly: false}
+    data_analysis_document: {widgetType: text-markdown, readOnly: false}
+    redrawn_manuscript_document: {widgetType: text-markdown, readOnly: true}
+    write_outline_document: {widgetType: text-markdown, readOnly: false}
+    write_document_document: {widgetType: text-markdown, readOnly: false}
+    peer_review_document: {widgetType: text-markdown, readOnly: false}
+    revise_document_document: {widgetType: text-markdown, readOnly: false}
+    revision_fact_check_document: {widgetType: text-markdown, readOnly: true}
+    reading_reflection_document: {widgetType: text-markdown, readOnly: false}
+    finish_document: {widgetType: text-markdown, readOnly: true}
+  tabs:
+    - id: research_topic
+      step_id: research_topic
+      label: "研究选题"
+      layout: list
+      allow_download: true
+      slots:
+        - {id: research_topic_document}
+    - id: literature_review
+      step_id: literature_review
+      label: "文献综述"
+      layout: list
+      allow_download: true
+      slots:
+        - {id: literature_review_document}
+    - id: refine_topic
+      hide_when_step_skipped: literature_review
+      step_id: refine_topic
+      label: "调整选题"
+      layout: list
+      allow_download: true
+      slots:
+        - {id: refine_topic_document}
+    - id: experiment
+      step_id: experiment
+      label: "实验数据准备"
+      layout: list
+      allow_download: true
+      slots:
+        - {id: experiment_document}
+        - {id: experiment_code}
+        - {id: experiment_results}
+    - id: data_analysis
+      step_id: data_analysis
+      label: "数据分析"
+      layout: list
+      allow_download: true
+      slots:
+        - {id: data_analysis_document}
+        - {id: redrawn_manuscript_document}
+        - {id: analysis_chart}
+    - id: write_outline
+      step_id: write_outline
+      label: "论文大纲"
+      layout: list
+      allow_download: true
+      slots:
+        - {id: write_outline_document}
+    - id: write_document
+      step_id: write_document
+      label: "论文写作"
+      layout: list
+      allow_download: true
+      slots:
+        - {id: write_document_document}
+    - id: peer_review
+      step_id: peer_review
+      label: "模拟审稿"
+      layout: list
+      allow_download: true
+      slots:
+        - {id: peer_review_document}
+    - id: revise_document
+      step_id: revise_document
+      label: "论文修订"
+      layout: list
+      allow_download: true
+      slots:
+        - {id: revise_document_document}
+        - {id: revision_fact_check_document}
+    - id: reading_reflection
+      step_id: reading_reflection
+      label: "阅读心得"
+      layout: list
+      allow_download: true
+      slots:
+        - {id: reading_reflection_document}
+    - id: finish
+      step_id: finish
+      label: 结束说明
+      layout: list
+      slots:
+        - {id: finish_document}

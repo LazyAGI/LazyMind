@@ -126,7 +126,8 @@ vi.mock('@ant-design/icons', () => ({
   PictureOutlined: () => null,
 }));
 
-vi.mock('antd', () => ({
+vi.mock('antd', async (importOriginal) => ({
+  Popover: (await importOriginal<typeof import('antd')>()).Popover,
   Segmented: () => null,
   Space: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
   Button: ({ children, disabled, loading, onClick }: { children: React.ReactNode; disabled?: boolean; loading?: boolean; onClick?: () => void }) => <button disabled={disabled || loading} onClick={onClick}>{children}</button>,
@@ -320,6 +321,30 @@ afterEach(() => {
 });
 
 describe('MarkdownArtifactEditor MDX compatibility', () => {
+  it('shows shared figure numbering without changing canonical image alt', async () => {
+    const props = {
+      markdown: '<a id="block-chart-001"></a>\n![比较](/static-files/paper-charts/test.svg)',
+      sourceRevision: 1,
+      onSave: vi.fn(async () => 2),
+    };
+    const { rerender } = render(<MarkdownArtifactEditor {...props}
+      numbering={{ entries: { 'chart-001': { label: '图1' } } }} />);
+    const block = document.createElement('div');
+    block.dataset.editorBlockType = 'image';
+    const image = document.createElement('img');
+    image.alt = '比较';
+    block.append(image);
+    screen.getByTestId('markdown-editable').append(block);
+    await waitFor(() => expect(block.dataset.writerImageCaption).toBe('图1 比较'));
+    expect(image.alt).toBe('比较');
+    expect(image.id).toBe('block-chart-001');
+    rerender(<MarkdownArtifactEditor {...props}
+      numbering={{ entries: { 'chart-001': { label: '图2' } } }} />);
+    await waitFor(() => expect(block.dataset.writerImageCaption).toBe('图2 比较'));
+    expect(image.alt).toBe('比较');
+    expect(props.onSave).not.toHaveBeenCalled();
+  });
+
   it('provides a labeled numbering button only for editable unordered headings', async () => {
     const props = {
       markdown: '<a id="block-sec-1"></a>\n## Heading',
@@ -1376,6 +1401,7 @@ it('does not publish attempted edits made in read-only source mode', async () =>
   const onContentChange = vi.fn();
   render(<MarkdownArtifactEditor markdown={'Alpha\n'} sourceRevision={1} onSave={async()=>1} onContentChange={onContentChange} />);
   document.querySelector('details.writer-document-options')?.setAttribute('open', '');
+  fireEvent(document.querySelector('details.writer-document-options')!, new Event('toggle'));
  fireEvent.click(screen.getByRole('button', {name:'chat.writerSource.source'}));
   const input = screen.getByRole('textbox', {name:'chat.writerSource.source'});
   expect(input).toHaveAttribute('readonly');
@@ -1386,8 +1412,11 @@ it('does not publish attempted edits made in read-only source mode', async () =>
 it('ignores source edits when switching back to the rich editor', () => {
  const {container}=render(<MarkdownArtifactEditor markdown='Original paragraph' sourceRevision={1} onSave={async()=>1} />);
  document.querySelector('details.writer-document-options')?.setAttribute('open', '');
+ fireEvent(document.querySelector('details.writer-document-options')!, new Event('toggle'));
  fireEvent.click(screen.getByRole('button',{name:'chat.writerSource.source'}));
  fireEvent.change(screen.getByRole('textbox',{name:'chat.writerSource.source'}),{target:{value:'Changed paragraph'}});
+ document.querySelector('details.writer-document-options')?.setAttribute('open', '');
+ fireEvent(document.querySelector('details.writer-document-options')!, new Event('toggle'));
  fireEvent.click(screen.getByRole('button',{name:'chat.writerLocal.backToDocument'}));
  expect(container.querySelector('.writer-markdown-editor__surface')).toHaveAttribute('data-markdown','Original paragraph');
 });

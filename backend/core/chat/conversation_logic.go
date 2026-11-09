@@ -21,6 +21,7 @@ import (
 	"gorm.io/gorm"
 
 	"lazymind/core/common"
+	"lazymind/core/common/askuser"
 	"lazymind/core/common/orm"
 	"lazymind/core/evolution"
 	"lazymind/core/localworkspace"
@@ -432,6 +433,7 @@ type askAnswersStructuredPayload struct {
 }
 
 type askAnsweredQuestionItem struct {
+	ID            string          `json:"id,omitempty"`
 	Text          string          `json:"text"`
 	Type          string          `json:"type"`
 	Choices       []string        `json:"choices"`
@@ -579,6 +581,25 @@ func buildHistoryMessages(histories []orm.ChatHistory, askAnswersStructured map[
 		out = append(out, map[string]any{
 			"role": "user", "content": h.RawContent, "history_seq": h.Seq,
 		})
+		if timeline := steeringTimelineFromHistory(h); len(timeline.Items) > 0 {
+			start := 0
+			for _, boundary := range timeline.Items {
+				if boundary.Offset > start {
+					out = append(out, map[string]any{
+						"role": "assistant", "content": h.Result[start:boundary.Offset], "history_seq": h.Seq,
+					})
+				}
+				out = append(out, map[string]any{"role": "user", "content": boundary.Text, "history_seq": h.Seq})
+				start = boundary.Offset
+			}
+			// The pending ask belongs to the last segment. Preserve the existing
+			// ask-answer rewrite, whose changes occur after all steering boundaries.
+			if strings.HasPrefix(assistantContent, h.Result[:start]) {
+				assistantContent = assistantContent[start:]
+			} else {
+				assistantContent = h.Result[start:]
+			}
+		}
 		out = append(out, map[string]any{
 			"role": "assistant", "content": assistantContent, "history_seq": h.Seq,
 		})
@@ -1537,6 +1558,9 @@ func buildChatRequestBody(ctx context.Context, db *gorm.DB, convID, sessionID, q
 		}
 	}
 	historyMessages := buildModelHistoryMessages(histories, askAnswersStructuredFromRaw(raw), modelCtx)
+	historyMessages = injectConversationSteeringMessages(
+		ctx, db, convID, userID, histories, historyMessages,
+	)
 	historyMessages = prependConversationSourceContext(ctx, db, convID, historyMessages)
 	historyMessages = appendPersistedSkillInvocations(historyMessages, resourceContext)
 	body := map[string]any{
@@ -2657,6 +2681,7 @@ func streamSingleAnswer(
 				Str("run_id", runID).Msg("failed to project active external chat run to cache")
 		}
 	}
+	isExternalRun := strings.HasPrefix(algorithmID, "external:")
 	var toolCallTurns int
 	var pendingAskPending any
 	var pendingConversationIntent *IntentUpdatedEvent
@@ -2669,10 +2694,16 @@ func streamSingleAnswer(
 	var progressRowCount int64
 	db.Model(&orm.ChatHistory{}).Where("id = ? AND run_id = ?", historyID, runID).Count(&progressRowCount)
 	progressRowCreated := progressRowCount > 0 || (target.IsRegeneration && target.Existing != nil)
-	persistThinkingProgress := func() {
+	var lastProgressPersistAt time.Time
+	lastProgressResultSize := -1
+	persistStreamProgress := func(force bool) error {
 		historyExt = outputOwner.ext(historyExt, output, convID, historyID)
 		committed := outputOwner.committed(output)
 		partialResult := committed.rawResult()
+		if !force && time.Since(lastProgressPersistAt) < 500*time.Millisecond &&
+			len(partialResult)-lastProgressResultSize < 4096 {
+			return nil
+		}
 		values := map[string]any{
 			"algorithm_id":        algorithmID,
 			"seq":                 seq,
@@ -2689,10 +2720,17 @@ func streamSingleAnswer(
 			values["retrieval_result"] = marshalRetrievalResult(committed.sources)
 		}
 		if progressRowCreated {
-			if _, err := updateOwnedChatHistory(chatCtx, db, historyID, runID, values); err != nil {
-				log.Logger.Warn().Err(err).Str("history_id", historyID).Msg("failed to persist thinking progress")
+			updated, err := updateOwnedChatHistory(chatCtx, db, historyID, runID, values)
+			if err != nil || !updated {
+				log.Logger.Warn().Err(err).Str("history_id", historyID).Msg("failed to persist stream progress")
+				if err != nil {
+					return err
+				}
+				return errors.New("stream run no longer owns history")
 			}
-			return
+			lastProgressPersistAt = time.Now()
+			lastProgressResultSize = len(partialResult)
+			return nil
 		}
 		now := time.Now()
 		if err := db.Create(&orm.ChatHistory{
@@ -2700,10 +2738,19 @@ func streamSingleAnswer(
 			Result: partialResult, RetrievalResult: marshalRetrievalResult(committed.sources), ThinkingDurationS: thinkingDurationS, RunID: runID, RunStatus: "generating", Ext: historyExt,
 			TimeMixin: orm.TimeMixin{CreateTime: now, UpdateTime: now},
 		}).Error; err != nil {
-			log.Logger.Warn().Err(err).Str("history_id", historyID).Msg("failed to create thinking progress")
-			return
+			log.Logger.Warn().Err(err).Str("history_id", historyID).Msg("failed to create stream progress")
+			return err
 		}
 		progressRowCreated = true
+		lastProgressPersistAt = time.Now()
+		lastProgressResultSize = len(partialResult)
+		return nil
+	}
+	// Persist the run owner as soon as a steerable upstream stream is established.
+	// External runs do not support steering and may be terminal replays; writing
+	// progress here would incorrectly reopen them and change their terminal time.
+	if !isExternalRun {
+		persistStreamProgress(true)
 	}
 	persistOutputProgress := func(owner chatModelOutput, ext *json.RawMessage, selectionBody map[string]any) error {
 		*ext = owner.ext(*ext, output, convID, historyID)
@@ -2721,7 +2768,7 @@ func streamSingleAnswer(
 	publishOutput := func(replace bool) {
 		chunk := &ChatChunkResponse{ConversationID: convID, HistoryID: historyID, Seq: int32(seq), ModelOutput: outputOwner.metadata()}
 		if replace {
-			chunk = outputOwner.replacement(output, convID, historyID, seq)
+			chunk = outputOwner.replacement(output, historyExt, convID, historyID, seq)
 		}
 		if reqCtx.Err() == nil {
 			writeSSEChunk(w, flusher, chunk)
@@ -2757,6 +2804,41 @@ func streamSingleAnswer(
 		accepted, outputErr := outputOwner.accept(d)
 		if outputErr != nil {
 			d.Err, d.ErrKind = outputErr, UpstreamStreamErrorProtocol
+		}
+		if d.Err == nil && accepted && len(d.SteeringApplied) > 0 {
+			// The algorithm has joined the old call. No further old tokens can
+			// arrive after this point; flush thinking before recording the offset.
+			if output.pendingThink != "" {
+				output.result += "<think>" + output.pendingThink + "</think>"
+				output.pendingThink = ""
+			}
+			boundaryErr := resolveSteeringIDs(chatCtx, db, convID, historyID, runID, d.SteeringApplied)
+			if boundaryErr == nil {
+				historyExt = withSteeringBoundary(historyExt, runID, len(output.result), d.SteeringApplied)
+				boundaryErr = persistStreamProgress(true)
+			}
+			if boundaryErr != nil {
+				log.Logger.Error().Err(boundaryErr).Str("history_id", historyID).Msg("failed to persist steering boundary")
+				event := failedRunEvent(runID, "steering_persistence_failed", output.result != "")
+				runTerminal, _ = event.Terminal()
+				runTerminal = resolveCandidateRunTerminal(
+					chatCtx, stateStore, convID, historyID, runID, runTerminal, "steering_persistence", useRunDecision,
+				)
+				event = runFinishedEvent(runID, *runTerminal)
+				publishRuntimeChunk(reqCtx, chatCtx, w, flusher, stateStore, convID, historyID, seq, event, nil, toolCallTurns, true)
+				break
+			}
+			chunk := &ChatChunkResponse{ConversationID: convID, Seq: int32(seq), HistoryID: historyID, SteeringApplied: d.SteeringApplied}
+			if stateStore != nil {
+				_ = appendChatChunk(chatCtx, stateStore, convID, historyID, chunk)
+			}
+			if reqCtx.Err() == nil {
+				writeSSEChunk(w, flusher, chunk)
+			}
+			thinkStart = time.Now()
+			thinkingDurationS = 0
+			output.thinkingActive = false
+			continue
 		}
 		if d.Err == nil && !accepted {
 			continue
@@ -2977,7 +3059,9 @@ func streamSingleAnswer(
 		if d.IntentUpdated != nil {
 			updated := handleIntentUpdated(chatCtx, db, stateStore, convID, d.IntentUpdated)
 			if updated != nil {
+				updated = intentForSteeringSegment(updated, output.result, historyExt, runID)
 				pendingConversationIntent = updated
+				historyExt = mergeIntentUpdatedIntoExt(historyExt, updated)
 				intentChunk := &ChatChunkResponse{ConversationID: convID, Seq: int32(seq), HistoryID: historyID, IntentUpdated: updated}
 				if reqCtx.Err() == nil {
 					writeSSEChunk(w, flusher, intentChunk)
@@ -3002,7 +3086,7 @@ func streamSingleAnswer(
 				if nextDuration != thinkingDurationS || d.Execution != nil {
 					thinkingDurationS = nextDuration
 					if output.thinkingActive {
-						persistThinkingProgress()
+						_ = persistStreamProgress(false)
 					}
 					thinkingChunk := &ChatChunkResponse{
 						ConversationID: convID, Seq: int32(seq), HistoryID: historyID,
@@ -3027,7 +3111,7 @@ func streamSingleAnswer(
 			}
 			output.pendingThink += d.ReasoningText
 			thinkingDurationS = elapsedThinkingSeconds(time.Since(thinkStart))
-			persistThinkingProgress()
+			persistStreamProgress(false)
 			thinkingChunk := &ChatChunkResponse{
 				ConversationID: convID, Seq: int32(seq), HistoryID: historyID,
 				ModelOutput:       d.ModelOutput,
@@ -3065,6 +3149,9 @@ func streamSingleAnswer(
 		}
 		output.text += d.Text
 		output.result += d.Text
+		if !isExternalRun {
+			_ = persistStreamProgress(false)
+		}
 		if len(d.Sources) > 0 {
 			output.sources = d.Sources
 		}
@@ -3087,11 +3174,11 @@ func streamSingleAnswer(
 			Execution:             d.Execution,
 			ModelRoute:            chatModelRouteFromBody(reqBody),
 		}
-		if reqCtx.Err() == nil {
-			writeSSEChunk(w, flusher, chunk)
-		}
 		if stateStore != nil {
 			_ = appendChatChunk(chatCtx, stateStore, convID, historyID, chunk)
+		}
+		if reqCtx.Err() == nil {
+			writeSSEChunk(w, flusher, chunk)
 		}
 	}
 	if outputOwner.rollback(&output) {
@@ -3133,7 +3220,7 @@ func streamSingleAnswer(
 		}
 		historyExt = withChatExports(historyExt, exports)
 		output.text = output.exportSnapshot.Content
-		output.result = replaceChatExportResult(output.result, output.text)
+		output.result = replaceSteeringTailExport(output.result, historyExt, runID, output.text)
 	}
 	// Persist ask_pending into ext so the ask card survives page reload.
 	if pendingAskPending != nil {
@@ -3146,7 +3233,7 @@ func streamSingleAnswer(
 	persistCtx, persistCancel := terminalWriteContext(chatCtx)
 	defer persistCancel()
 	persisted := false
-	externalFinalized := strings.HasPrefix(algorithmID, "external:")
+	externalFinalized := isExternalRun
 	if externalFinalized {
 		var persistedHistory orm.ChatHistory
 		persisted = db.Where("id = ? AND conversation_id = ? AND run_id = ?", historyID, convID, runID).
@@ -3224,7 +3311,7 @@ func streamSingleAnswer(
 		finalChunk := &ChatChunkResponse{ConversationID: convID, HistoryID: historyID, Seq: int32(seq),
 			Delta: output.exportSnapshot.Content, DeltaMode: ChatDeltaModeReplace, Exports: &visibleExports, ModelRoute: chatModelRouteFromBody(reqBody), ModelSwitches: modelSwitchesFromBody(reqBody)}
 		if outputOwner.enabled() {
-			finalChunk.Delta = stripThinkTags(stripToolTags(output.result))
+			finalChunk.Delta = stripThinkTags(stripToolTags(steeringTail(output.result, historyExt, runID)))
 			finalChunk.Sources = output.sources
 		}
 		if reqCtx.Err() == nil {
@@ -4867,6 +4954,9 @@ func SaveAskAnswers(w http.ResponseWriter, r *http.Request) {
 func validateWorkspaceAskSubmission(histories []orm.ChatHistory, raw map[string]any) error {
 	submission := askAnswersStructuredFromRaw(raw)
 	if submission == nil {
+		if value, exists := raw["ask_answers_structured"]; exists && value != nil {
+			return common.ResolveAppError("invalid request", http.StatusBadRequest)
+		}
 		return nil
 	}
 	if submittedAskHistoryIndex(histories, submission) >= 0 {
@@ -4938,11 +5028,18 @@ func validAskSubmission(pending, submission map[string]any) bool {
 		text, _ := question["text"].(string)
 		kind, _ := question["type"].(string)
 		item := submitted.Questions[index]
+		id, _ := question["id"].(string)
+		if id != item.ID {
+			return false
+		}
 		choices := askStringSlice(question["choices"])
 		if strings.TrimSpace(item.Text) != strings.TrimSpace(text) || item.Type != kind || !sameStrings(item.Choices, choices) || len(item.CustomChoices) != len(choices) {
 			return false
 		}
 		if len(item.Answer) == 0 || string(item.Answer) == "null" {
+			if required, _ := question["required"].(bool); required {
+				return false
+			}
 			continue
 		}
 		var answer struct {
@@ -4952,6 +5049,28 @@ func validAskSubmission(pending, submission map[string]any) bool {
 		}
 		if json.Unmarshal(item.Answer, &answer) != nil || answer.Type != kind ||
 			!validAskAnswerValue(kind, answer.Value, choices, answer.OtherText) {
+			return false
+		}
+		var contract askuser.Question
+		questionJSON, err := json.Marshal(question)
+		if err != nil || json.Unmarshal(questionJSON, &contract) != nil {
+			return false
+		}
+		if contract.Required && kind == "text" && strings.TrimSpace(fmt.Sprint(answer.Value)) == "" {
+			return false
+		}
+		answerText := ""
+		if kind == "text" {
+			answerText, _ = answer.Value.(string)
+		} else if value, ok := answer.Value.(string); ok && value == askuser.Other {
+			answerText = answer.OtherText
+		} else if values, ok := answer.Value.([]any); ok && slices.Contains(values, any(askuser.Other)) {
+			answerText = answer.OtherText
+		}
+		if answerText != "" && kind != "text" && contract.AllowOther != nil && !*contract.AllowOther {
+			return false
+		}
+		if (kind == "text" || answerText != "") && askuser.ValidateText(answerText, contract.Validation) != nil {
 			return false
 		}
 	}
@@ -5003,10 +5122,13 @@ func validAskAnswerValue(kind string, value any, choices []string, otherText str
 		if !ok || len(values) == 0 {
 			return false
 		}
+		seen := map[string]bool{}
 		for _, value := range values {
-			if !validChoice(value) {
+			text, ok := value.(string)
+			if !ok || seen[text] || !validChoice(value) {
 				return false
 			}
+			seen[text] = true
 		}
 		return true
 	default:

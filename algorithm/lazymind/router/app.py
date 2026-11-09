@@ -43,6 +43,7 @@ def _create_router_app() -> FastAPI:
         description='Knowledge-base-backed conversational and routing API service',
         version='1.0.0',
         lifespan=lifespan,
+        telemetry={'tracing': False},
     )
 
     # Mount all chat-side routers (health, rewrite, skill_review, model_features,

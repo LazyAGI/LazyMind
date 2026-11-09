@@ -38,6 +38,7 @@ func TestResolveWorkflowControlErrors(t *testing.T) {
 	}{
 		{"workflow controls require an interactive single Chat run", http.StatusBadRequest, 2004901},
 		{"native workflow controls require the LazyMind Chat executor", http.StatusConflict, 2004902},
+		{"workflow run changed before its state could be written", http.StatusConflict, 2000107},
 		{"lease_token required", http.StatusBadRequest, 2004903},
 		{"stream unavailable", http.StatusInternalServerError, 2004904},
 		{"workflow state unavailable", http.StatusInternalServerError, 2004905},

@@ -80,9 +80,14 @@ export interface LocalAssistantSession {
   tenant_id?: string;
 }
 
+export interface LocalAssistantSessionClear {
+  expected_session: LocalAssistantSession;
+  allow_renewed?: boolean;
+}
+
 interface DesktopSessionBridge {
   assistantSessionSet?: (session: LocalAssistantSession) => Promise<unknown> | unknown;
-  assistantSessionClear?: () => Promise<unknown> | unknown;
+  assistantSessionClear?: (request: LocalAssistantSessionClear) => Promise<unknown> | unknown;
 }
 
 function getDesktopSessionBridge(): DesktopSessionBridge | undefined {
@@ -144,7 +149,8 @@ export async function syncLocalAssistantSession(
   timeoutMs: number,
 ): Promise<void> {
   if (!user?.token || !user.refreshToken) {
-    await clearLocalAssistantSession(timeoutMs);
+    // Missing browser state does not identify which connector login to clear.
+    // Explicit logout supplies a matching snapshot through the clear operation.
     return;
   }
   const session: LocalAssistantSession = {
@@ -171,12 +177,19 @@ export async function syncLocalAssistantSession(
   );
 }
 
-export async function clearLocalAssistantSession(timeoutMs = 15_000): Promise<void> {
-  if (typeof window === "undefined") return;
+export async function clearLocalAssistantSession(
+  timeoutMs = 15_000,
+  expected?: LocalAssistantSession,
+  allowRenewed = false,
+): Promise<void> {
+  if (typeof window === "undefined" || !expected) return;
+  const request: LocalAssistantSessionClear = { expected_session: expected, allow_renewed: allowRenewed };
   const desktopBridge = getDesktopSessionBridge();
   if (desktopBridge?.assistantSessionClear) {
-    await desktopBridge.assistantSessionClear();
+    await desktopBridge.assistantSessionClear(request);
     return;
   }
-  await assistantBridgeJSON("/session", { method: "DELETE" }, timeoutMs);
+  await assistantBridgeJSON("/session", {
+    method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify(request),
+  }, timeoutMs);
 }

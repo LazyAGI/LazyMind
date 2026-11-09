@@ -254,6 +254,9 @@ func (m *AlgorithmServiceManager) preparePython(ctx context.Context, cfg Runtime
 		}
 		return fmt.Errorf("desktop algorithm Python not found: %s", paths.AlgorithmPython)
 	}
+	if err := validateLocalPythonPaths(paths, paths.AlgorithmVenv); err != nil {
+		return err
+	}
 	if err := ensureLazyLLMSubmodule(ctx, m.runner, paths.RepoRoot); err != nil {
 		return err
 	}
@@ -269,7 +272,7 @@ func (m *AlgorithmServiceManager) preparePython(ctx context.Context, cfg Runtime
 	}
 	if _, err := os.Stat(stamp); err == nil {
 		if m.pythonModuleAvailable(ctx, paths, "pkg_resources") {
-			return nil
+			return validatePythonEnvironment(ctx, m.runner, paths, paths.AlgorithmVenv, true)
 		}
 	}
 	_, pythonErr := os.Stat(paths.AlgorithmPython)
@@ -363,6 +366,9 @@ func (m *AlgorithmServiceManager) ensureTiktokenCache(ctx context.Context, paths
 }
 
 func (m *AlgorithmServiceManager) installAlgorithmPythonDeps(ctx context.Context, paths RuntimePaths, includeEvo, includeRAG bool) error {
+	if err := validatePythonEnvironment(ctx, m.runner, paths, paths.AlgorithmVenv, false); err != nil {
+		return err
+	}
 	version, err := lazyLLMVersion(paths.RepoRoot)
 	if err != nil {
 		return err
@@ -392,7 +398,7 @@ func (m *AlgorithmServiceManager) installAlgorithmPythonDeps(ctx context.Context
 			return fmt.Errorf("prepare algorithm python failed at %s %s: %w (%s)", step.Name, strings.Join(step.Args, " "), err, strings.TrimSpace(res.Stderr))
 		}
 	}
-	return nil
+	return validatePythonEnvironment(ctx, m.runner, paths, paths.AlgorithmVenv, true)
 }
 
 func algorithmReadyStamp(paths RuntimePaths, includeEvo, includeRAG bool) (string, error) {
@@ -652,6 +658,7 @@ func algorithmServiceEnv(cfg RuntimeConfig, paths RuntimePaths, service string) 
 	routerPoolStart, routerPoolEnd := localRouterPortPool(cfg)
 	trustedLocalMode := paths.TrustedLocalMode || envBool("LAZYMIND_TRUSTED_LOCAL_MODE", false)
 	env := []string{
+		runtimeProcessOwnerEnvVar + "=" + paths.RuntimeRoot,
 		"LAZYMIND_RUNTIME_MODE=local",
 		"LAZYMIND_TRUSTED_LOCAL_MODE=" + strconv.FormatBool(trustedLocalMode),
 		"PYTHONPATH=" + pythonPath,

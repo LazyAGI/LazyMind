@@ -49,6 +49,17 @@
     }
   }
 }
+.provider-key-row.is-revealed {
+  flex-wrap: wrap;
+  code {
+    flex: 1 0 100%;
+    overflow: visible;
+    text-overflow: clip;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    letter-spacing: normal;
+  }
+}
 @media (hover: hover) and (pointer: fine) {
   .provider-key-row-actions .ant-btn:not(.provider-key-row-reveal) {
     opacity: 0;

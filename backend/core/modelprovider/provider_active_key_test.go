@@ -243,6 +243,84 @@ func TestRemovingActiveKeyDoesNotEnableNextSavedKey(t *testing.T) {
 	assertStoredEncryptedAPIKeys(t, db, group.ID, "other-key", false)
 }
 
+func TestAddingFirstKeyAfterRemovingLastKeyEnablesNewKey(t *testing.T) {
+	db, parent, group := setupEncryptedGroupKeyTest(t, "old-key")
+	t.Cleanup(func() { store.Init(nil, nil, nil) })
+	if key, err := ResolveProviderAPIKey(t.Context(), db, group.ID); err != nil || key != "old-key" {
+		t.Fatalf("initial key unavailable: %q %v", key, err)
+	}
+	request := func(method, body string) *http.Request {
+		req := httptest.NewRequest(method, "/keys", strings.NewReader(body))
+		req.Header.Set("X-User-Id", "user-1")
+		return mux.SetURLVars(req, map[string]string{"model_provider_id": parent.ID, "group_id": group.ID})
+	}
+	removed := httptest.NewRecorder()
+	RemoveKey(removed, request(http.MethodDelete, `{"api_key":"old-key"}`))
+	if removed.Code != http.StatusOK {
+		t.Fatalf("remove old key: %d %s", removed.Code, removed.Body.String())
+	}
+	if _, err := ResolveProviderAPIKey(t.Context(), db, group.ID); !errors.Is(err, ErrProviderKeyDisabled) {
+		t.Fatalf("removed key remains active: %v", err)
+	}
+	added := httptest.NewRecorder()
+	AddKey(added, request(http.MethodPost, `{"api_key":"new-key"}`))
+	if added.Code != http.StatusOK {
+		t.Fatalf("add replacement key: %d %s", added.Code, added.Body.String())
+	}
+	listed := httptest.NewRecorder()
+	ListGroups(listed, request(http.MethodGet, ""))
+	if listed.Code != http.StatusOK {
+		t.Fatalf("list keys: %d %s", listed.Code, listed.Body.String())
+	}
+	var response struct {
+		Data groupListResponse `json:"data"`
+	}
+	if err := json.Unmarshal(listed.Body.Bytes(), &response); err != nil {
+		t.Fatal(err)
+	}
+	if len(response.Data.Groups) != 1 || len(response.Data.Groups[0].Keys) != 1 || !response.Data.Groups[0].Keys[0].Enabled {
+		t.Fatalf("new sole key is not enabled: %+v", response.Data.Groups)
+	}
+	if key, err := ResolveProviderAPIKey(t.Context(), db, group.ID); err != nil || key != "new-key" {
+		t.Fatalf("runtime did not select new sole key: %q %v", key, err)
+	}
+}
+
+func TestCreatingFirstKeyAfterRemovingLastGroupEnablesNewKey(t *testing.T) {
+	db, parent, oldGroup := setupEncryptedGroupKeyTest(t, "old-key")
+	t.Cleanup(func() { store.Init(nil, nil, nil) })
+	if err := db.AutoMigrate(&orm.UserSelectedModel{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Transaction(func(tx *gorm.DB) error {
+		if err := saveActiveProviderKey(tx, &parent, "", "", false, time.Now()); err != nil {
+			return err
+		}
+		return tx.Model(&oldGroup).Update("deleted_at", time.Now()).Error
+	}); err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/groups", strings.NewReader(`{"name":"Qwen","api_key":"new-key","verify":false}`))
+	req.Header.Set("X-User-Id", "user-1")
+	req = mux.SetURLVars(req, map[string]string{"model_provider_id": parent.ID})
+	created := httptest.NewRecorder()
+	CreateGroup(created, req)
+	if created.Code != http.StatusOK {
+		t.Fatalf("create group: %d %s", created.Code, created.Body.String())
+	}
+	var response struct {
+		Data struct {
+			ID string `json:"id"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(created.Body.Bytes(), &response); err != nil || response.Data.ID == "" {
+		t.Fatalf("new group ID missing: %s %v", created.Body.String(), err)
+	}
+	if key, err := ResolveProviderAPIKey(t.Context(), db, response.Data.ID); err != nil || key != "new-key" {
+		t.Fatalf("new group's first key was not enabled: %q %v", key, err)
+	}
+}
+
 func TestActiveKeyAppliesToConnectionWithoutItsOwnKeys(t *testing.T) {
 	db, parent, group := setupEncryptedGroupKeyTest(t, "chosen-key\nother-key")
 	t.Cleanup(func() { store.Init(nil, nil, nil) })

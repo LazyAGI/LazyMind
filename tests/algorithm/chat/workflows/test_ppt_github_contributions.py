@@ -168,6 +168,7 @@ def test_workflow_tools_connect_pr_description_to_native_template_publication(mo
               'text': evidence['description']} for slot in page['slots']]
     published = []
     monkeypatch.setattr(tools, '_save_artifact', lambda **kwargs: published.append(kwargs) or {'ok': True})
+    monkeypatch.setattr(tools, '_review_native_pptx', lambda *_: {'status': 'unavailable'})
     result = tools.ppt_fill_template(source.name, page['sha256'], edits)
     assert result['representation'] == 'native_pptx'
     assert published[0]['key'] == 'native_pptx'

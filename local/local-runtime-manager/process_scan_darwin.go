@@ -9,17 +9,18 @@ package main
 #include <sys/proc_info.h>
 #include <sys/sysctl.h>
 
-static char *lazymind_process_arguments(pid_t pid, size_t *size) {
- int mib[3] = {CTL_KERN, KERN_PROCARGS2, pid};
- int argmax = 0;
- size_t length = sizeof(argmax);
- int limit_mib[2] = {CTL_KERN, KERN_ARGMAX};
- if (sysctl(limit_mib, 2, &argmax, &length, NULL, 0) != 0 || argmax < sizeof(int)) return NULL;
- *size = (size_t)argmax;
- char *buffer = (char *)malloc(*size);
- if (buffer == NULL) return NULL;
- if (sysctl(mib, 3, buffer, size, NULL, 0) != 0) { free(buffer); return NULL; }
- return buffer;
+static char* lazymind_process_args(pid_t pid, int* length) {
+    int mib[3] = {CTL_KERN, KERN_PROCARGS2, pid};
+    int argmax = 0;
+    size_t argmax_size = sizeof(argmax);
+    int limit_mib[2] = {CTL_KERN, KERN_ARGMAX};
+    if (sysctl(limit_mib, 2, &argmax, &argmax_size, NULL, 0) != 0 || argmax < sizeof(int)) return NULL;
+    size_t size = (size_t)argmax;
+    char* buffer = (char*)malloc(size);
+    if (buffer == NULL) return NULL;
+    if (sysctl(mib, 3, buffer, &size, NULL, 0) != 0) { free(buffer); return NULL; }
+    *length = (int)size;
+    return buffer;
 }
 
 */
@@ -29,6 +30,8 @@ import (
 	"bytes"
 	"encoding/binary"
 	"os"
+
+	"golang.org/x/sys/unix"
 	"unsafe"
 )
 
@@ -58,60 +61,54 @@ func scanLocalRuntimeProcesses(paths RuntimePaths) ([]LocalProcessRecord, error)
 			continue
 		}
 		exe := C.GoString(&pathBuffer[0])
-		args, environment := darwinProcessArguments(pid)
-		if isRuntimeGuardCommand(exe, args) {
+		info, err := unix.SysctlKinfoProc("kern.proc.pid", pid)
+		if err != nil || info.Proc.P_stat == darwinZombieProcessState {
 			continue
 		}
-		if !processEnvironmentMatchesRuntime(paths, exe, args, environment) {
-			continue
+		var length C.int
+		raw := C.lazymind_process_args(C.pid_t(pid), &length)
+		var args []string
+		var owner string
+		if raw != nil {
+			args, owner = parseDarwinProcessArgs(C.GoBytes(unsafe.Pointer(raw), length))
+			C.free(unsafe.Pointer(raw))
 		}
 		records = append(records, LocalProcessRecord{
-			Service:     inferServiceFromProcessText(paths, exe),
-			PID:         pid,
-			PGID:        processGroupID(pid),
-			RepoRoot:    paths.RepoRoot,
-			RuntimeRoot: paths.RuntimeRoot,
-			Command:     args,
+			PID: pid, ParentPID: int(info.Eproc.Ppid), PGID: int(info.Eproc.Pgid),
+			Executable: exe, Command: args, OwnerRoot: owner,
+			StartID: uint64(info.Proc.P_starttime.Sec)*1_000_000 + uint64(info.Proc.P_starttime.Usec),
 		})
 	}
 	return records, nil
 }
 
-func darwinProcessArguments(pid int) ([]string, []string) {
-	var size C.size_t
-	raw := C.lazymind_process_arguments(C.pid_t(pid), &size)
-	if raw == nil {
-		return nil, nil
-	}
-	defer C.free(unsafe.Pointer(raw))
-	return parseDarwinProcessArguments(C.GoBytes(unsafe.Pointer(raw), C.int(size)))
-}
-
-func parseDarwinProcessArguments(raw []byte) ([]string, []string) {
+// KERN_PROCARGS2 contains argc, executable path, padding, argv, then environ.
+// Do not search argv for the ownership label: an argument is not an environment.
+func parseDarwinProcessArgs(raw []byte) ([]string, string) {
 	if len(raw) < 4 {
-		return nil, nil
+		return nil, ""
 	}
-	argc := int(binary.NativeEndian.Uint32(raw[:4]))
+	argc := int(binary.LittleEndian.Uint32(raw[:4]))
+	if argc <= 0 || argc > len(raw) {
+		return nil, ""
+	}
 	raw = raw[4:]
 	end := bytes.IndexByte(raw, 0)
 	if end < 0 {
-		return nil, nil
+		return nil, ""
 	}
-	raw = bytes.TrimLeft(raw[end+1:], "\x00")
-	args := []string{}
+	raw = raw[end+1:]
+	for len(raw) > 0 && raw[0] == 0 {
+		raw = raw[1:]
+	}
+	args := make([]string, 0, argc)
 	for i := 0; i < argc; i++ {
 		end = bytes.IndexByte(raw, 0)
 		if end < 0 {
-			return nil, nil
+			return nil, ""
 		}
 		args = append(args, string(raw[:end]))
 		raw = raw[end+1:]
 	}
-	environment := []string{}
-	for _, entry := range bytes.Split(raw, []byte{0}) {
-		if len(entry) > 0 {
-			environment = append(environment, string(entry))
-		}
-	}
-	return args, environment
+	return args, processOwnerFromEnvironment(raw)
 }

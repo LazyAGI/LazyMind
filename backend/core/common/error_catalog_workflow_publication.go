@@ -3,6 +3,7 @@ package common
 import "net/http"
 
 func init() {
+	registerAdditionalErrorPattern("resolve current artifact %s", "Internal server error", http.StatusInternalServerError, 2000000)
 	for _, source := range []string{
 		"WORKFLOW_ARTIFACT_NOT_FROZEN",
 		"WORKFLOW_PUBLICATION_INPUT_CHANGED",

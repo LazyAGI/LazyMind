@@ -112,6 +112,9 @@ func (m *ChannelGatewayManager) preparePythonEnv(ctx context.Context, cfg Runtim
 		}
 		return fmt.Errorf("desktop channel-gateway Python not found: %s", python)
 	}
+	if err := validateLocalPythonPaths(paths, paths.ChannelGatewayVenvDir); err != nil {
+		return err
+	}
 	if _, err := os.Stat(python); err != nil {
 		basePython, runtimeErr := ensureLocalPythonRuntime(ctx, m.runner, paths, cfg.ChannelGateway.PythonVersion)
 		if runtimeErr != nil {
@@ -131,8 +134,11 @@ func (m *ChannelGatewayManager) preparePythonEnv(ctx context.Context, cfg Runtim
 			return fmt.Errorf("create channel-gateway venv failed: %w (%s)", runErr, strings.TrimSpace(res.Stderr))
 		}
 	}
+	if err := validatePythonEnvironment(ctx, m.runner, paths, paths.ChannelGatewayVenvDir, false); err != nil {
+		return err
+	}
 	if !cfg.ChannelGateway.InstallDeps {
-		return nil
+		return validatePythonEnvironment(ctx, m.runner, paths, paths.ChannelGatewayVenvDir, true)
 	}
 
 	requirements := filepath.Join(paths.RepoRoot, channelGatewaySourceDirName, "requirements.txt")
@@ -144,7 +150,7 @@ func (m *ChannelGatewayManager) preparePythonEnv(ctx context.Context, cfg Runtim
 	hash := hex.EncodeToString(sum[:])
 	marker := filepath.Join(paths.ChannelGatewayVenvDir, ".lazymind-requirements.sha256")
 	if current, readErr := os.ReadFile(marker); readErr == nil && strings.TrimSpace(string(current)) == hash {
-		return nil
+		return validatePythonEnvironment(ctx, m.runner, paths, paths.ChannelGatewayVenvDir, true)
 	}
 	uv, ok := uvCommand()
 	if !ok {
@@ -158,6 +164,9 @@ func (m *ChannelGatewayManager) preparePythonEnv(ctx context.Context, cfg Runtim
 	})
 	if runErr != nil {
 		return fmt.Errorf("install channel-gateway requirements failed: %w (%s)", runErr, strings.TrimSpace(res.Stderr))
+	}
+	if err := validatePythonEnvironment(ctx, m.runner, paths, paths.ChannelGatewayVenvDir, true); err != nil {
+		return err
 	}
 	return os.WriteFile(marker, []byte(hash+"\n"), 0o644)
 }

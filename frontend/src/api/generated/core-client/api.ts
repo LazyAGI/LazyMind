@@ -45,16 +45,115 @@ export interface AbortUploadResponse {
     'upload_id'?: string;
     'upload_state'?: string;
 }
+export interface AcademicChatContext {
+    'completion'?: AcademicResearchCompletion;
+    'coverage_gaps'?: Array<AcademicCoverageGap>;
+    'dataset_id': string;
+    'expansion_id'?: string;
+    'goal'?: string;
+    'handoff_id'?: string;
+    'kind': string;
+    'next_conversation_id'?: string;
+    'paper_count'?: number;
+    'processing_count'?: number;
+    'ready_count'?: number;
+    'research_complete'?: boolean;
+    'source_available'?: boolean;
+    'source_conversation_id'?: string;
+    'status': string;
+    'version': number;
+    'input'?: AcademicHandoffInput;
+}
+export interface AcademicChatSummary {
+    'completion'?: AcademicResearchCompletion;
+    'coverage_gaps'?: Array<AcademicCoverageGap>;
+    'dataset_id': string;
+    'expansion_id'?: string;
+    'goal'?: string;
+    'handoff_id'?: string;
+    'kind': string;
+    'next_conversation_id'?: string;
+    'paper_count'?: number;
+    'processing_count'?: number;
+    'ready_count'?: number;
+    'research_complete'?: boolean;
+    'source_available'?: boolean;
+    'source_conversation_id'?: string;
+    'status': string;
+    'version': number;
+}
+export interface AcademicClueResolution {
+    'name': string;
+    'paper_id'?: string;
+    'query_ids': Array<string>;
+    'reason': string;
+    'source_paper_id': string;
+    'status': AcademicClueResolutionStatusEnum;
+}
+
+export const AcademicClueResolutionStatusEnum = {
+    Resolved: 'resolved',
+    Excluded: 'excluded',
+    Blocked: 'blocked',
+    Open: 'open'
+} as const;
+
+export type AcademicClueResolutionStatusEnum = typeof AcademicClueResolutionStatusEnum[keyof typeof AcademicClueResolutionStatusEnum];
+
 /**
  * @type AcademicContentRead
  */
-export type AcademicContentRead = AcademicContentReadOneOf | AcademicContentReadOneOf1 | ApiCoreAcademicPaperContentsRetryPostRequest;
+export type AcademicContentRead = AcademicContentReadOneOf | AcademicContentReadOneOf1 | AcademicContentReadOneOf2;
 
 export interface AcademicContentReadOneOf {
-    'handoff_id': string;
+    'expansion_id': string;
+    'keywords'?: Array<string>;
+    /**
+     * content/fulltext returns 1..5 blocks (default 5); references returns 1..20 clues (default 20), or at most 5 when resolving selected clues. The cursor preserves this limit.
+     */
+    'max_results'?: number;
+    'page_end'?: number;
+    'page_start'?: number;
     'paper_id': string;
+    'positions'?: Array<number>;
+    'preparation_revision'?: number;
+    'reference_keys'?: Array<string>;
+    'view'?: AcademicContentReadOneOfViewEnum;
 }
+
+export const AcademicContentReadOneOfViewEnum = {
+    Content: 'content',
+    Fulltext: 'fulltext',
+    References: 'references'
+} as const;
+
+export type AcademicContentReadOneOfViewEnum = typeof AcademicContentReadOneOfViewEnum[keyof typeof AcademicContentReadOneOfViewEnum];
+
 export interface AcademicContentReadOneOf1 {
+    'handoff_id': string;
+    'keywords'?: Array<string>;
+    /**
+     * content/fulltext returns 1..5 blocks (default 5); references returns 1..20 clues (default 20), or at most 5 when resolving selected clues. The cursor preserves this limit.
+     */
+    'max_results'?: number;
+    'page_end'?: number;
+    'page_start'?: number;
+    'paper_id': string;
+    'positions'?: Array<number>;
+    'preparation_revision'?: number;
+    'reference_keys'?: Array<string>;
+    'view'?: AcademicContentReadOneOf1ViewEnum;
+}
+
+export const AcademicContentReadOneOf1ViewEnum = {
+    Content: 'content',
+    Fulltext: 'fulltext',
+    References: 'references'
+} as const;
+
+export type AcademicContentReadOneOf1ViewEnum = typeof AcademicContentReadOneOf1ViewEnum[keyof typeof AcademicContentReadOneOf1ViewEnum];
+
+export interface AcademicContentReadOneOf2 {
     'cursor': string;
     'expansion_id'?: string;
     'handoff_id'?: string;
@@ -62,13 +161,20 @@ export interface AcademicContentReadOneOf1 {
 export interface AcademicContentResponse {
     'content_hash': string;
     'content_level': AcademicContentResponseContentLevelEnum;
+    'matched_references'?: number;
     'next_cursor': string;
-    'pages': Array<AcademicContentResponsePagesInner>;
+    'pages'?: Array<AcademicContentResponsePagesInner>;
     'paper': AcademicPaperRef;
     'parser_version'?: string;
+    'positions'?: Array<number>;
+    'quality'?: object;
+    'references'?: Array<AcademicContentResponseReferencesInner>;
     'source_kind'?: AcademicContentResponseSourceKindEnum;
     'source_version'?: string;
     'status': AcademicContentResponseStatusEnum;
+    'total_blocks'?: number;
+    'total_references'?: number;
+    'view'?: AcademicContentResponseViewEnum;
     'warnings': Array<string>;
 }
 
@@ -89,14 +195,79 @@ export const AcademicContentResponseStatusEnum = {
     Processing: 'processing',
     Ready: 'ready',
     Unavailable: 'unavailable',
-    Failed: 'failed'
+    Failed: 'failed',
+    NeedsReview: 'needs_review'
 } as const;
 
 export type AcademicContentResponseStatusEnum = typeof AcademicContentResponseStatusEnum[keyof typeof AcademicContentResponseStatusEnum];
+export const AcademicContentResponseViewEnum = {
+    Content: 'content',
+    References: 'references'
+} as const;
+
+export type AcademicContentResponseViewEnum = typeof AcademicContentResponseViewEnum[keyof typeof AcademicContentResponseViewEnum];
 
 export interface AcademicContentResponsePagesInner {
     'page': number;
     'text': string;
+}
+export interface AcademicContentResponseReferencesInner {
+    'arxiv_id'?: string;
+    'doi'?: string;
+    'error'?: string;
+    'paper'?: AcademicPaperRef;
+    'raw_text'?: string;
+    'reference_key'?: string;
+    'resolution_status'?: AcademicContentResponseReferencesInnerResolutionStatusEnum;
+    'title'?: string;
+    'year'?: number;
+}
+
+export const AcademicContentResponseReferencesInnerResolutionStatusEnum = {
+    Unresolved: 'unresolved',
+    Resolved: 'resolved',
+    Conflict: 'conflict',
+    Failed: 'failed'
+} as const;
+
+export type AcademicContentResponseReferencesInnerResolutionStatusEnum = typeof AcademicContentResponseReferencesInnerResolutionStatusEnum[keyof typeof AcademicContentResponseReferencesInnerResolutionStatusEnum];
+
+export interface AcademicCoverageGap {
+    'clue_name'?: string;
+    'direction': string;
+    'kind': AcademicCoverageGapKindEnum;
+    'question_id'?: string;
+    'reason'?: string;
+}
+
+export const AcademicCoverageGapKindEnum = {
+    Predecessor: 'predecessor',
+    Successor: 'successor',
+    Peer: 'peer'
+} as const;
+
+export type AcademicCoverageGapKindEnum = typeof AcademicCoverageGapKindEnum[keyof typeof AcademicCoverageGapKindEnum];
+
+export interface AcademicDiscoveryQuery {
+    'cache_key'?: string;
+    'candidates'?: { [key: string]: Array<AcademicImportCandidate>; };
+    'created_at'?: string;
+    'leads'?: Array<AcademicDiscoveryQueryLeadsInner>;
+    'max_results'?: number;
+    'mode'?: string;
+    'next'?: object;
+    'paper_id'?: string;
+    'papers'?: Array<AcademicPaperRef>;
+    'position'?: object;
+    'preparation_revision'?: number;
+    'query'?: string;
+    'session_id'?: string;
+    'sources'?: Array<AcademicSourceOutcome>;
+}
+export interface AcademicDiscoveryQueryLeadsInner {
+    'snippet'?: string;
+    'title'?: string;
+    'url'?: string;
 }
 export interface AcademicDocumentIdentity {
     'kind'?: AcademicDocumentIdentityKindEnum;
@@ -140,13 +311,22 @@ export const AcademicDocumentStateKindEnum = {
 export type AcademicDocumentStateKindEnum = typeof AcademicDocumentStateKindEnum[keyof typeof AcademicDocumentStateKindEnum];
 
 export interface AcademicExpansion {
-    'conversation_id': string;
+    /**
+     * Research depth fixed at task creation; controls investigation breadth and evidence checks, without a wall-clock budget.
+     */
+    'budget_mode': AcademicExpansionBudgetModeEnum;
+    'conversation_id'?: string;
     'created_at'?: string;
     'dataset_id': string;
     'discovery_mode'?: AcademicExpansionDiscoveryModeEnum;
     'goal'?: string;
     'id': string;
+    'material_progress'?: AcademicMaterialProgress;
+    'preparation'?: AcademicExpansionPreparation;
+    'preparation_revision': number;
     'progress'?: object;
+    'reading'?: { [key: string]: AcademicExpansionReadingValue; };
+    'report'?: AcademicExpansionReport;
     'result': AcademicReviewInput;
     'status': string;
     'title'?: string;
@@ -154,19 +334,213 @@ export interface AcademicExpansion {
     'version': number;
 }
 
+export const AcademicExpansionBudgetModeEnum = {
+    Fast: 'fast',
+    Balanced: 'balanced',
+    Deep: 'deep'
+} as const;
+
+export type AcademicExpansionBudgetModeEnum = typeof AcademicExpansionBudgetModeEnum[keyof typeof AcademicExpansionBudgetModeEnum];
 export const AcademicExpansionDiscoveryModeEnum = {
     External: 'external'
 } as const;
 
 export type AcademicExpansionDiscoveryModeEnum = typeof AcademicExpansionDiscoveryModeEnum[keyof typeof AcademicExpansionDiscoveryModeEnum];
 
+export interface AcademicExpansionPreparation {
+    'answers'?: { [key: string]: string; };
+    'auto_confirmed'?: boolean;
+    'direction_selection'?: AcademicExpansionPreparationDirectionSelectionEnum;
+    'directions'?: Array<AcademicExpansionPreparationDirectionsInner>;
+    'error'?: string;
+    'metrics'?: object;
+    'named_clues'?: Array<AcademicExpansionPreparationNamedCluesInner>;
+    'questions'?: Array<AcademicExpansionPreparationQuestionsInner>;
+    'research_questions'?: Array<AcademicExpansionPreparationResearchQuestionsInner>;
+    'selected_directions'?: Array<string>;
+    'skipped'?: boolean;
+    'summary'?: string;
+    'user_instruction'?: string;
+}
+
+export const AcademicExpansionPreparationDirectionSelectionEnum = {
+    All: 'all',
+    Manual: 'manual'
+} as const;
+
+export type AcademicExpansionPreparationDirectionSelectionEnum = typeof AcademicExpansionPreparationDirectionSelectionEnum[keyof typeof AcademicExpansionPreparationDirectionSelectionEnum];
+
+export interface AcademicExpansionPreparationDirectionsInner {
+    'difference': string;
+    'name': string;
+    'paper_ids': Array<string>;
+    'papers'?: Array<AcademicPaperRef>;
+    'question': string;
+    'reason': string;
+}
+/**
+ * Original-source clue. The excerpt must come from actually read content blocks or the named bibliography entry, with the matching source version.
+ */
+export interface AcademicExpansionPreparationNamedCluesInner {
+    'identity': { [key: string]: string; };
+    'name': string;
+    'paper_id'?: string;
+    'positions'?: Set<number>;
+    'question_ids': Array<string>;
+    'reference_key'?: string;
+    'role': string;
+    'source_excerpt': string;
+    'source_location': string;
+    'source_paper_id': string;
+    'source_version': string;
+}
+export interface AcademicExpansionPreparationNamedCluesInnerAnyOf {
+    'reference_key': string;
+}
+export interface AcademicExpansionPreparationQuestionsInner {
+    'id': string;
+    'options'?: Array<string>;
+    'question': string;
+}
+export interface AcademicExpansionPreparationResearchQuestionsInner {
+    'category': AcademicExpansionPreparationResearchQuestionsInnerCategoryEnum;
+    'direction': string;
+    'id': string;
+    'question': string;
+}
+
+export const AcademicExpansionPreparationResearchQuestionsInnerCategoryEnum = {
+    Predecessor: 'predecessor',
+    Successor: 'successor',
+    Peer: 'peer'
+} as const;
+
+export type AcademicExpansionPreparationResearchQuestionsInnerCategoryEnum = typeof AcademicExpansionPreparationResearchQuestionsInnerCategoryEnum[keyof typeof AcademicExpansionPreparationResearchQuestionsInnerCategoryEnum];
+
+export interface AcademicExpansionReadingValue {
+    'content_hash'?: string;
+    'pages'?: Array<number>;
+    'positions'?: Array<number>;
+    'read_level'?: AcademicExpansionReadingValueReadLevelEnum;
+    'source_version'?: string;
+    'total_blocks'?: number;
+}
+
+export const AcademicExpansionReadingValueReadLevelEnum = {
+    RelatedSections: 'related_sections',
+    Full: 'full'
+} as const;
+
+export type AcademicExpansionReadingValueReadLevelEnum = typeof AcademicExpansionReadingValueReadLevelEnum[keyof typeof AcademicExpansionReadingValueReadLevelEnum];
+
+export interface AcademicExpansionReport {
+    'analysis_version'?: string;
+    'claims'?: Array<AcademicResearchClaim>;
+    'completion'?: AcademicResearchCompletion;
+    'coverage_gaps'?: Array<AcademicCoverageGap>;
+    'currency_cost'?: number | null;
+    'execution_elapsed_ms'?: number;
+    'input'?: AcademicReviewInput;
+    'investigation'?: Array<AcademicInvestigation>;
+    'list_mode'?: AcademicExpansionReportListModeEnum;
+    'materials'?: Array<object>;
+    'narrative'?: string;
+    'preparation_attempts'?: Array<object>;
+    'preparation_metrics'?: object;
+    'reading'?: { [key: string]: AcademicExpansionReadingValue; };
+    'recommendations'?: Array<AcademicExpansionReportRecommendationsInner>;
+    'relations'?: Array<AcademicExpansionReportRelationsInner>;
+    'research_complete'?: boolean;
+    'research_structure'?: AcademicExpansionReportResearchStructure;
+    'result_projection_delay_ms'?: number;
+    'reused_source_queries'?: Array<AcademicDiscoveryQuery>;
+    'selection'?: AcademicPaperSelection;
+    'source_queries'?: Array<AcademicDiscoveryQuery>;
+    'source_versions'?: Array<AcademicSourceVersion>;
+    'stage_metrics'?: { [key: string]: AcademicExpansionReportStageMetricsValue; };
+    'stage_timing'?: Array<AcademicExpansionReportStageTimingInner>;
+}
+
+export const AcademicExpansionReportListModeEnum = {
+    Fast: 'fast',
+    Balanced: 'balanced'
+} as const;
+
+export type AcademicExpansionReportListModeEnum = typeof AcademicExpansionReportListModeEnum[keyof typeof AcademicExpansionReportListModeEnum];
+
+export interface AcademicExpansionReportRecommendationsInner {
+    'direction'?: string;
+    'paper_id': string;
+    'reason': string;
+}
+export interface AcademicExpansionReportRelationsInner {
+    'conditions': string;
+    'evidence': Array<AcademicSourceEvidence>;
+    'id': string;
+    'relation_type': AcademicExpansionReportRelationsInnerRelationTypeEnum;
+    'source_paper_id': string;
+    'statement': string;
+    'target_paper_id': string;
+}
+
+export const AcademicExpansionReportRelationsInnerRelationTypeEnum = {
+    MethodModification: 'method_modification',
+    DesignInspiration: 'design_inspiration',
+    ComponentUse: 'component_use',
+    ExperimentalComparison: 'experimental_comparison',
+    MechanismComparison: 'mechanism_comparison',
+    BackgroundCitation: 'background_citation'
+} as const;
+
+export type AcademicExpansionReportRelationsInnerRelationTypeEnum = typeof AcademicExpansionReportRelationsInnerRelationTypeEnum[keyof typeof AcademicExpansionReportRelationsInnerRelationTypeEnum];
+
+export interface AcademicExpansionReportResearchStructure {
+    'directions': Array<AcademicExpansionReportResearchStructureDirectionsInner>;
+    'nodes': Array<AcademicExpansionReportResearchStructureNodesInner>;
+}
+export interface AcademicExpansionReportResearchStructureDirectionsInner {
+    'id'?: string;
+    'name'?: string;
+    'question'?: string;
+}
+export interface AcademicExpansionReportResearchStructureNodesInner {
+    'branch_question'?: string;
+    'direction_id'?: string;
+    'paper_id'?: string;
+    'reason'?: string;
+}
+export interface AcademicExpansionReportStageMetricsValue {
+    'currency_cost'?: number | null;
+    'model'?: string;
+    'provider_usage_records'?: Array<object>;
+}
+export interface AcademicExpansionReportStageTimingInner {
+    'attempt'?: number;
+    'queue_and_execution_ms'?: number;
+    'status'?: string;
+    'step_id'?: string;
+}
 /**
  * @type AcademicHandoffInput
  */
 export type AcademicHandoffInput = AcademicPaperTaskInput | AcademicReviewInput;
 
+export interface AcademicHandoffLink {
+    'conversation_id': string;
+    'id': string;
+    'kind': string;
+    'version': number;
+}
+export interface AcademicHandoffResult {
+    'feedback': string;
+    'input': AcademicHandoffInput;
+    'kind': string;
+    'reflection_markdown'?: string;
+    'status': string;
+}
 export interface AcademicImportCandidate {
     'expected_mime'?: string;
+    'license'?: string;
     'source_provider'?: string;
     'source_type'?: string;
     'url'?: string;
@@ -230,11 +604,18 @@ export interface AcademicImportOperationItem {
     'current_state'?: string;
     'document_deleted'?: boolean;
     'document_id'?: string;
+    'error_code'?: string;
+    'error_detail'?: string;
+    'error_message'?: string;
+    'error_recovery'?: string;
     'item_id'?: string;
     'library_paper_id'?: string;
     'pending_paper'?: object;
     'resolved_later'?: boolean;
     'result_kind'?: string;
+    'source_provider'?: string;
+    'source_version'?: string;
+    'stage'?: string;
     'status'?: string;
     'title'?: string;
     'upload_request_key'?: string;
@@ -262,6 +643,7 @@ export interface AcademicImportPreview {
 export interface AcademicImportPreviewItemsInner {
     'disposition'?: string;
     'fulltext_candidates'?: Array<AcademicImportCandidate>;
+    'fulltext_error'?: ProcessingDiagnostic;
     'manual_download_urls'?: Array<string>;
     'paper'?: AcademicPaperRef;
     'presence'?: AcademicPresence;
@@ -294,6 +676,47 @@ export interface AcademicImportQueueItemCurrentDocument {
     'processing_error'?: string;
     'processing_status'?: string;
 }
+export interface AcademicInvestigation {
+    'clue_resolutions'?: Array<AcademicClueResolution>;
+    'conclusion': string;
+    'direction': string;
+    'gaps': Array<string>;
+    'kind': AcademicInvestigationKindEnum;
+    'paper_ids': Array<string>;
+    'queries': Array<string>;
+    'query_ids'?: Array<string>;
+    'question': string;
+    'question_id': string;
+    'relation_ids'?: Array<string>;
+    'status': AcademicInvestigationStatusEnum;
+    'unresolved_clues': Array<string>;
+}
+
+export const AcademicInvestigationKindEnum = {
+    Predecessor: 'predecessor',
+    Successor: 'successor',
+    Peer: 'peer'
+} as const;
+
+export type AcademicInvestigationKindEnum = typeof AcademicInvestigationKindEnum[keyof typeof AcademicInvestigationKindEnum];
+export const AcademicInvestigationStatusEnum = {
+    Resolved: 'resolved',
+    Excluded: 'excluded',
+    Blocked: 'blocked',
+    Open: 'open'
+} as const;
+
+export type AcademicInvestigationStatusEnum = typeof AcademicInvestigationStatusEnum[keyof typeof AcademicInvestigationStatusEnum];
+
+export interface AcademicMaterialProgress {
+    'distinct_ready_count'?: number;
+    'processing_count': number;
+}
+export interface AcademicModelMetrics {
+    'currency_cost'?: number | null;
+    'model'?: string;
+    'provider_usage_records'?: Array<object>;
+}
 export interface AcademicPaperRef {
     'abstract': string | null;
     'arxiv_id'?: string;
@@ -304,12 +727,34 @@ export interface AcademicPaperRef {
     'paper_id': string;
     'paper_url'?: string;
     'pdf_url'?: string;
+    'published_at'?: string;
     'source_provider'?: string;
     'source_version'?: string;
+    'source_version_date'?: string;
     'title'?: string;
     'venue'?: string;
     'year'?: number;
 }
+/**
+ * Frozen changes against the candidate_set bound to the research analysis, including the original paper metadata and a reason for every addition or removal.
+ */
+export interface AcademicPaperSelection {
+    'before_count': number;
+    'changes': Array<AcademicPaperSelectionChange>;
+}
+export interface AcademicPaperSelectionChange {
+    'action': AcademicPaperSelectionChangeActionEnum;
+    'paper': AcademicWorkflowPaper;
+    'reason': string;
+}
+
+export const AcademicPaperSelectionChangeActionEnum = {
+    Added: 'added',
+    Removed: 'removed'
+} as const;
+
+export type AcademicPaperSelectionChangeActionEnum = typeof AcademicPaperSelectionChangeActionEnum[keyof typeof AcademicPaperSelectionChangeActionEnum];
+
 export interface AcademicPaperTaskInput {
     'notes'?: Array<AcademicPaperTaskNote>;
     'papers': Array<AcademicPaperRef>;
@@ -339,11 +784,73 @@ export interface AcademicPresenceDocument {
     'source_provider'?: string;
     'source_version'?: string;
 }
+/**
+ * Research relation_analysis Workflow artifact; identities, source versions and coverage gaps belong to this analysis_version.
+ */
+export interface AcademicRelationAnalysis {
+    'analysis_version': string;
+    'claims': Array<AcademicResearchClaim>;
+    'completion': AcademicResearchCompletion;
+    'coverage_gaps': Array<AcademicCoverageGap>;
+    'input': AcademicReviewInput;
+    'investigation': Array<AcademicInvestigation>;
+    'metrics': AcademicExpansionReportStageMetricsValue;
+    'reading': { [key: string]: AcademicExpansionReadingValue; };
+    'relations': Array<AcademicExpansionReportRelationsInner>;
+    'research_complete': boolean;
+    'research_structure': AcademicExpansionReportResearchStructure;
+    'selection': AcademicPaperSelection;
+    'source_queries': Array<AcademicSourceQueryReceipt>;
+    'source_versions': Array<AcademicSourceVersion>;
+    'submission_hash': string;
+}
+export interface AcademicResearchClaim {
+    'available_sources'?: Array<string>;
+    'content_hash'?: string;
+    'evidence'?: Array<AcademicSourceEvidence>;
+    'field'?: AcademicResearchClaimFieldEnum;
+    'paper_id'?: string;
+    'positions'?: Array<number>;
+    'source_version'?: string;
+    'statement'?: string;
+}
+
+export const AcademicResearchClaimFieldEnum = {
+    SeedRelation: 'seed_relation',
+    DirectionRelation: 'direction_relation',
+    KeyContribution: 'key_contribution'
+} as const;
+
+export type AcademicResearchClaimFieldEnum = typeof AcademicResearchClaimFieldEnum[keyof typeof AcademicResearchClaimFieldEnum];
+
+/**
+ * Research outcome for the analysis, independent of the Workflow execution status. A complete outcome covers the research scope; an incomplete outcome preserves its actual stopping reason.
+ */
+export interface AcademicResearchCompletion {
+    'reason': AcademicResearchCompletionReasonEnum;
+    'status': AcademicResearchCompletionStatusEnum;
+}
+
+export const AcademicResearchCompletionReasonEnum = {
+    ScopeCovered: 'scope_covered',
+    BudgetExhausted: 'budget_exhausted',
+    MaterialLimited: 'material_limited'
+} as const;
+
+export type AcademicResearchCompletionReasonEnum = typeof AcademicResearchCompletionReasonEnum[keyof typeof AcademicResearchCompletionReasonEnum];
+export const AcademicResearchCompletionStatusEnum = {
+    Complete: 'complete',
+    Incomplete: 'incomplete'
+} as const;
+
+export type AcademicResearchCompletionStatusEnum = typeof AcademicResearchCompletionStatusEnum[keyof typeof AcademicResearchCompletionStatusEnum];
+
 export interface AcademicResolvedPapers {
     'contents': Array<AcademicResolvedPapersContentsInner>;
     'papers': Array<AcademicWorkflowPaper>;
 }
 export interface AcademicResolvedPapersContentsInner {
+    'content_hash'?: string;
     'error'?: string;
     'paper_id': string;
     'source_kind'?: string;
@@ -353,14 +860,44 @@ export interface AcademicResolvedPapersContentsInner {
 export interface AcademicReviewInput {
     'candidate_directions': Array<string>;
     'papers': Array<AcademicWorkflowPaper>;
+    'review_scope'?: AcademicReviewInputReviewScopeEnum;
     'selected_directions': Array<string>;
     'user_instruction': string;
+}
+
+export const AcademicReviewInputReviewScopeEnum = {
+    Selected: 'selected',
+    DirectReferences: 'direct_references'
+} as const;
+
+export type AcademicReviewInputReviewScopeEnum = typeof AcademicReviewInputReviewScopeEnum[keyof typeof AcademicReviewInputReviewScopeEnum];
+
+export interface AcademicReviewRecord {
+    'conversation_id': string;
+    'created_at': string;
+    'expansion_id': string;
+    'id': string;
+    'paper_count': number;
+    'source_available': boolean;
+    'source_title': string;
+    'title': string;
+    'updated_at': string;
+    'version': number;
+}
+export interface AcademicSourceEvidence {
+    'content_hash'?: string;
+    'paper_id': string;
+    'positions': Array<number>;
+    'source_version'?: string;
 }
 export interface AcademicSourceImportItem {
     'batch_id': string;
     'created_library': boolean;
     'document_id'?: string;
+    'error_code'?: string;
+    'error_detail'?: string;
     'error_message'?: string;
+    'error_recovery'?: string;
     'item_id': string;
     'paper_key': string;
     'processing_status'?: string;
@@ -373,9 +910,57 @@ export interface AcademicSourceImportItem {
     'target_name': string;
     'title': string;
 }
+export interface AcademicSourceOutcome {
+    'count': number;
+    'elapsed_ms': number;
+    'has_more': boolean;
+    'lead_count': number;
+    'limitation'?: string;
+    'new_paper_count': number;
+    'next_cursor'?: string;
+    'paper_count': number;
+    'retry_at'?: string;
+    'reused'?: boolean;
+    'source': string;
+    'status': AcademicSourceOutcomeStatusEnum;
+    'total_count'?: number;
+}
+
+export const AcademicSourceOutcomeStatusEnum = {
+    Ok: 'ok',
+    Empty: 'empty',
+    Failed: 'failed',
+    MissingConfiguration: 'missing_configuration',
+    AuthenticationFailed: 'authentication_failed',
+    RateLimited: 'rate_limited',
+    QuotaExhausted: 'quota_exhausted'
+} as const;
+
+export type AcademicSourceOutcomeStatusEnum = typeof AcademicSourceOutcomeStatusEnum[keyof typeof AcademicSourceOutcomeStatusEnum];
+
+export interface AcademicSourceQueryReceipt {
+    'created_at': string;
+    'id': string;
+    'mode': string;
+    'paper_id': string;
+    'paper_ids': Array<string>;
+    'query': string;
+    'sources': Array<AcademicSourceOutcome> | null;
+}
+export interface AcademicSourceVersion {
+    'content_hash': string;
+    'paper_id': string;
+    'source_version': string;
+    'status': string;
+}
 export interface AcademicTaskLaunch {
+    /**
+     * Research depth fixed at task creation; controls investigation breadth and evidence checks, without a wall-clock budget.
+     */
+    'budget_mode'?: AcademicTaskLaunchBudgetModeEnum;
     'dataset_id'?: string;
     'direction'?: string;
+    'direction_selection'?: AcademicTaskLaunchDirectionSelectionEnum;
     'document_ids'?: Array<string>;
     'expansion_id'?: string;
     'expansion_version'?: number;
@@ -383,9 +968,24 @@ export interface AcademicTaskLaunch {
     'paper_ids'?: Array<string>;
     'reflection_first'?: boolean;
     'request_key': string;
+    'review_scope'?: AcademicTaskLaunchReviewScopeEnum;
+    'skip_expansion'?: boolean;
     'user_instruction'?: string;
 }
 
+export const AcademicTaskLaunchBudgetModeEnum = {
+    Fast: 'fast',
+    Balanced: 'balanced',
+    Deep: 'deep'
+} as const;
+
+export type AcademicTaskLaunchBudgetModeEnum = typeof AcademicTaskLaunchBudgetModeEnum[keyof typeof AcademicTaskLaunchBudgetModeEnum];
+export const AcademicTaskLaunchDirectionSelectionEnum = {
+    All: 'all',
+    Manual: 'manual'
+} as const;
+
+export type AcademicTaskLaunchDirectionSelectionEnum = typeof AcademicTaskLaunchDirectionSelectionEnum[keyof typeof AcademicTaskLaunchDirectionSelectionEnum];
 export const AcademicTaskLaunchKindEnum = {
     Expansion: 'expansion',
     Review: 'review',
@@ -394,6 +994,12 @@ export const AcademicTaskLaunchKindEnum = {
 } as const;
 
 export type AcademicTaskLaunchKindEnum = typeof AcademicTaskLaunchKindEnum[keyof typeof AcademicTaskLaunchKindEnum];
+export const AcademicTaskLaunchReviewScopeEnum = {
+    Selected: 'selected',
+    DirectReferences: 'direct_references'
+} as const;
+
+export type AcademicTaskLaunchReviewScopeEnum = typeof AcademicTaskLaunchReviewScopeEnum[keyof typeof AcademicTaskLaunchReviewScopeEnum];
 
 export interface AcademicWorkflowPaper {
     'direction_relation'?: string;
@@ -779,28 +1385,24 @@ export interface Algo {
 export interface AllDatasetTagsResponse {
     'tags'?: Array<string>;
 }
-export interface ApiCoreAcademicChatContextGet200Response {
-    'contents'?: ApiCoreAcademicChatContextGet200ResponseContents;
-    'dataset_id'?: string;
-    'expansion_id'?: string;
-    'handoff_id'?: string;
-    'input'?: AcademicHandoffInput;
-    'kind'?: string;
-    'next_conversation_id'?: string;
-    'paper_count'?: number;
-    'ready_count'?: number;
-    'source_available'?: boolean;
-    'source_conversation_id'?: string;
-    'status'?: string;
-    'version'?: number;
-}
-/**
- * @type ApiCoreAcademicChatContextGet200ResponseContents
- */
-export type ApiCoreAcademicChatContextGet200ResponseContents = Array<object> | object;
-
 export interface ApiCoreAcademicDocumentsDocumentIdIdentityPatch200Response {
     'status'?: string;
+}
+export interface ApiCoreAcademicExpansionCapabilitiesGet200Response {
+    'budgets'?: object;
+    'openalex_key'?: boolean;
+    'sciverse'?: boolean;
+    'web_search'?: boolean;
+}
+export interface ApiCoreAcademicExpansionsExpansionIdConfirmPost200Response {
+    'conversation_id'?: string;
+    'expansion_id'?: string;
+    'status'?: string;
+}
+export interface ApiCoreAcademicExpansionsExpansionIdConfirmPostRequest {
+    'request_key': string;
+    'revision': number;
+    'selected_directions': Array<string>;
 }
 export interface ApiCoreAcademicExpansionsExpansionIdDelete200Response {
     'deleted'?: boolean;
@@ -811,14 +1413,19 @@ export interface ApiCoreAcademicExpansionsExpansionIdDeleteRequest {
 export interface ApiCoreAcademicExpansionsExpansionIdGet200Response {
     'chat_status'?: ApiCoreAcademicExpansionsExpansionIdGet200ResponseChatStatusEnum;
     'contents'?: Array<object>;
-    'handoffs'?: Array<object>;
+    'handoffs'?: Array<AcademicHandoffLink>;
+    'material_progress'?: AcademicMaterialProgress;
     'paper_importance'?: { [key: string]: boolean; };
     'presence'?: Array<AcademicPresence>;
     'record'?: AcademicExpansion;
+    'research_guidance'?: string;
     'rounds'?: Array<object>;
+    'source_queries'?: Array<AcademicSourceQueryReceipt>;
+    'workflow_steps'?: Array<ApiCoreAcademicExpansionsExpansionIdGet200ResponseWorkflowStepsInner>;
 }
 
 export const ApiCoreAcademicExpansionsExpansionIdGet200ResponseChatStatusEnum = {
+    Uncreated: 'uncreated',
     Available: 'available',
     Trashed: 'trashed',
     Deleted: 'deleted'
@@ -826,11 +1433,38 @@ export const ApiCoreAcademicExpansionsExpansionIdGet200ResponseChatStatusEnum = 
 
 export type ApiCoreAcademicExpansionsExpansionIdGet200ResponseChatStatusEnum = typeof ApiCoreAcademicExpansionsExpansionIdGet200ResponseChatStatusEnum[keyof typeof ApiCoreAcademicExpansionsExpansionIdGet200ResponseChatStatusEnum];
 
+export interface ApiCoreAcademicExpansionsExpansionIdGet200ResponseWorkflowStepsInner {
+    'label'?: string;
+    'status': string;
+    'step_id': string;
+}
 export interface ApiCoreAcademicExpansionsExpansionIdPapersResolvePostRequest {
     'paper_ids': Array<string>;
 }
+export interface ApiCoreAcademicExpansionsExpansionIdPreparationPost200Response {
+    'expansion_id'?: string;
+    'revision'?: number;
+    'status'?: string;
+}
+export interface ApiCoreAcademicExpansionsExpansionIdPreparationPostRequest {
+    'action': ApiCoreAcademicExpansionsExpansionIdPreparationPostRequestActionEnum;
+    'answers'?: { [key: string]: string; };
+    'request_key': string;
+    'revision': number;
+    'user_instruction'?: string;
+}
+
+export const ApiCoreAcademicExpansionsExpansionIdPreparationPostRequestActionEnum = {
+    Answer: 'answer',
+    Revise: 'revise',
+    Retry: 'retry'
+} as const;
+
+export type ApiCoreAcademicExpansionsExpansionIdPreparationPostRequestActionEnum = typeof ApiCoreAcademicExpansionsExpansionIdPreparationPostRequestActionEnum[keyof typeof ApiCoreAcademicExpansionsExpansionIdPreparationPostRequestActionEnum];
+
 export interface ApiCoreAcademicExpansionsGet200Response {
     'items'?: Array<AcademicExpansion>;
+    'reviews'?: Array<AcademicReviewRecord>;
 }
 /**
  * @type ApiCoreAcademicImportsBatchIdGet200Response
@@ -845,6 +1479,16 @@ export interface ApiCoreAcademicImportsBatchIdGet200ResponseOneOf1 {
     'items'?: Array<AcademicImportOperationItem>;
     'next_cursor'?: string;
     'operation'?: AcademicImportOperation;
+}
+export interface ApiCoreAcademicImportsBatchIdRetryPost200Response {
+    'batch_id'?: string;
+    'job_id'?: string;
+    'retry_items'?: number;
+    'status'?: string;
+}
+export interface ApiCoreAcademicImportsBatchIdRetryPostRequest {
+    'idempotency_key'?: string;
+    'item_ids'?: Array<string>;
 }
 /**
  * @type ApiCoreAcademicImportsGet200Response
@@ -878,6 +1522,7 @@ export interface ApiCoreAcademicImportsPost200ResponseOneOf {
 }
 export interface ApiCoreAcademicImportsPreviewPostRequest {
     'expansion_id'?: string;
+    'expansion_version'?: number;
     'identifier'?: string;
     'lookup_fulltext'?: boolean;
     'papers'?: Array<PaperLibraryPaper>;
@@ -903,10 +1548,11 @@ export interface ApiCoreAcademicLibraryFoldersPostRequest {
 export interface ApiCoreAcademicLibraryPapersLibraryPaperIdNotesPostRequest {
     'content': string;
     'id': string;
+    'source'?: PaperLibraryNoteSource;
 }
 export interface ApiCoreAcademicLibraryPapersLibraryPaperIdPatchRequest {
     'metadata'?: PaperLibraryMetadata;
-    'revision': number;
+    'revision'?: number;
     'status'?: ApiCoreAcademicLibraryPapersLibraryPaperIdPatchRequestStatusEnum;
     'tags'?: Array<string>;
 }
@@ -926,16 +1572,14 @@ export interface ApiCoreAcademicLibraryPapersMovePostRequest {
 export interface ApiCoreAcademicLibraryPapersRemovePostRequest {
     'items': Array<PaperLibraryTarget>;
 }
-export interface ApiCoreAcademicMockHandoffsHandoffIdSubmitPost200Response {
-    'feedback'?: string;
-    'input'?: AcademicHandoffInput;
-    'kind'?: string;
-    'papers'?: Array<AcademicPaperRef>;
-    'reflection_markdown'?: string;
-    'status'?: string;
-}
 export interface ApiCoreAcademicMockHandoffsHandoffIdSubmitPostRequest {
     'reflection_markdown'?: string;
+}
+export interface ApiCoreAcademicNotificationsGet200Response {
+    'items'?: Array<object>;
+}
+export interface ApiCoreAcademicNotificationsNotificationIdReadPost200Response {
+    'read'?: boolean;
 }
 export interface ApiCoreAcademicPaperContentsRetryPostRequest {
     'expansion_id': string;
@@ -943,16 +1587,32 @@ export interface ApiCoreAcademicPaperContentsRetryPostRequest {
 }
 export interface ApiCoreAcademicPaperSelectionsResolvePost200Response {
     'invalid'?: Array<ApiCoreAcademicPaperSelectionsResolvePost200ResponseInvalidInner>;
+    'materials'?: Array<ApiCoreAcademicPaperSelectionsResolvePost200ResponseMaterialsInner>;
     'papers'?: Array<AcademicWorkflowPaper>;
 }
 export interface ApiCoreAcademicPaperSelectionsResolvePost200ResponseInvalidInner {
     'document_id'?: string;
     'reason'?: string;
 }
+export interface ApiCoreAcademicPaperSelectionsResolvePost200ResponseMaterialsInner {
+    'eligible'?: boolean;
+    'paper_id'?: string;
+    'reason'?: string;
+    'status'?: string;
+}
 export interface ApiCoreAcademicPaperSelectionsResolvePostRequest {
     'dataset_id': string;
     'document_ids': Array<string>;
+    'kind'?: ApiCoreAcademicPaperSelectionsResolvePostRequestKindEnum;
+    'skip_expansion'?: boolean;
 }
+
+export const ApiCoreAcademicPaperSelectionsResolvePostRequestKindEnum = {
+    Review: 'review'
+} as const;
+
+export type ApiCoreAcademicPaperSelectionsResolvePostRequestKindEnum = typeof ApiCoreAcademicPaperSelectionsResolvePostRequestKindEnum[keyof typeof ApiCoreAcademicPaperSelectionsResolvePostRequestKindEnum];
+
 export interface ApiCoreAcademicPapersPaperIdImportancePut200Response {
     'is_important'?: boolean;
 }
@@ -961,19 +1621,55 @@ export interface ApiCoreAcademicPapersPaperIdImportancePutRequest {
     'is_important': boolean;
 }
 export interface ApiCoreAcademicPapersSearchPost200Response {
+    'cache_hit'?: boolean;
+    'leads'?: Array<object>;
     'mock'?: boolean;
     'papers'?: Array<AcademicPaperRef>;
-    'source'?: string;
+    'sources'?: Array<AcademicSourceOutcome>;
 }
 export interface ApiCoreAcademicPapersSearchPostRequest {
+    'cursor'?: string;
     'expansion_id': string;
     'max_results'?: number;
-    'query': string;
+    'mode'?: ApiCoreAcademicPapersSearchPostRequestModeEnum;
+    'paper_id'?: string;
+    'preparation_revision'?: number;
+    'query'?: string;
+    'sources'?: Array<ApiCoreAcademicPapersSearchPostRequestSourcesEnum>;
+}
+
+export const ApiCoreAcademicPapersSearchPostRequestModeEnum = {
+    Keyword: 'keyword',
+    References: 'references',
+    Citations: 'citations'
+} as const;
+
+export type ApiCoreAcademicPapersSearchPostRequestModeEnum = typeof ApiCoreAcademicPapersSearchPostRequestModeEnum[keyof typeof ApiCoreAcademicPapersSearchPostRequestModeEnum];
+export const ApiCoreAcademicPapersSearchPostRequestSourcesEnum = {
+    Openalex: 'openalex',
+    Arxiv: 'arxiv',
+    Sciverse: 'sciverse',
+    Web: 'web'
+} as const;
+
+export type ApiCoreAcademicPapersSearchPostRequestSourcesEnum = typeof ApiCoreAcademicPapersSearchPostRequestSourcesEnum[keyof typeof ApiCoreAcademicPapersSearchPostRequestSourcesEnum];
+
+export interface ApiCoreAcademicReviewTopicGeneratePost200Response {
+    'topic'?: string;
+}
+export interface ApiCoreAcademicReviewTopicGeneratePostRequest {
+    'dataset_id'?: string;
+    'document_ids'?: Array<string>;
+    'expansion_id'?: string;
+    'expansion_version'?: number;
+    'paper_ids'?: Array<string>;
+    'user_instruction'?: string;
 }
 export interface ApiCoreAcademicWorkflowLaunchesPost200Response {
     'conversation_id'?: string;
     'expansion_id'?: string;
     'handoff_id'?: string;
+    'status'?: string;
 }
 export interface ApiCoreAcademicZoteroAttachmentTransferPost200Response {
     'attachment_id': string;
@@ -1051,6 +1747,24 @@ export interface ApiCoreConversationsNameTitlePatch200Response {
 export interface ApiCoreConversationsNameTitlePatchRequest {
     'display_name': string;
     'title_revision': number;
+}
+export interface ApiCoreDatasetsDatasetDocumentsDocumentParseStatusGet200Response {
+    'status'?: ApiCoreDatasetsDatasetDocumentsDocumentParseStatusGet200ResponseStatusEnum;
+    'task_id'?: string;
+}
+
+export const ApiCoreDatasetsDatasetDocumentsDocumentParseStatusGet200ResponseStatusEnum = {
+    NotRequested: 'not_requested',
+    Parsed: 'parsed',
+    Parsing: 'parsing',
+    Failed: 'failed',
+    Unknown: 'unknown'
+} as const;
+
+export type ApiCoreDatasetsDatasetDocumentsDocumentParseStatusGet200ResponseStatusEnum = typeof ApiCoreDatasetsDatasetDocumentsDocumentParseStatusGet200ResponseStatusEnum[keyof typeof ApiCoreDatasetsDatasetDocumentsDocumentParseStatusGet200ResponseStatusEnum];
+
+export interface ApiCoreDatasetsDatasetDocumentsDocumentReadingPreparationGet200Response {
+    'data'?: ReadingPreparationStatus;
 }
 export interface ApiCoreKbGrantPrincipalsGet200Response {
     'code'?: number;
@@ -1153,6 +1867,9 @@ export interface ApiCoreTaskCenterTasksTaskIdNotificationsGet200Response {
 export interface ApiCoreUserNotificationPreferencesGet200Response {
     'code'?: number;
     'data'?: NotificationPreferences;
+}
+export interface ApiCoreUserReadingPreferencesGet200Response {
+    'data'?: ReadingPreparationPolicy;
 }
 export interface ApiCoreUserWechatNotificationTargetsGet200Response {
     'code'?: number;
@@ -2194,8 +2911,17 @@ export interface ConversationArchiveFolderListResponse {
     'unfiled_total_count': number;
 }
 export interface ConversationArchiveFolderRequest {
+    'kind'?: ConversationArchiveFolderRequestKindEnum;
     'name': string;
 }
+
+export const ConversationArchiveFolderRequestKindEnum = {
+    Dialog: 'dialog',
+    Task: 'task'
+} as const;
+
+export type ConversationArchiveFolderRequestKindEnum = typeof ConversationArchiveFolderRequestKindEnum[keyof typeof ConversationArchiveFolderRequestKindEnum];
+
 export interface ConversationArchiveRequest {
     'folder_id'?: string | null;
     'only_if_active'?: boolean;
@@ -2322,6 +3048,103 @@ export interface ConversationFeedbackRequest {
  */
 export type ConversationFeedbackRequestType = number | string;
 
+export interface ConversationFollowUp {
+    'accepted_at'?: string;
+    'content': object;
+    'conversation_id': string;
+    'created_at': string;
+    'error_code'?: string;
+    'error_message'?: string;
+    'id': string;
+    'mode': ConversationFollowUpModeEnum;
+    'revision': number;
+    'sort_order': number;
+    'status': ConversationFollowUpStatusEnum;
+    'steer_id'?: string;
+    'target_history_id'?: string;
+    'target_run_id'?: string;
+    'text': string;
+    'updated_at': string;
+}
+
+export const ConversationFollowUpModeEnum = {
+    Queued: 'queued',
+    Steer: 'steer'
+} as const;
+
+export type ConversationFollowUpModeEnum = typeof ConversationFollowUpModeEnum[keyof typeof ConversationFollowUpModeEnum];
+export const ConversationFollowUpStatusEnum = {
+    Pending: 'pending',
+    Steering: 'steering',
+    Accepted: 'accepted',
+    Failed: 'failed',
+    Dispatching: 'dispatching'
+} as const;
+
+export type ConversationFollowUpStatusEnum = typeof ConversationFollowUpStatusEnum[keyof typeof ConversationFollowUpStatusEnum];
+
+export interface ConversationFollowUpClaimData {
+    'item'?: ConversationFollowUp | null;
+}
+export interface ConversationFollowUpClaimResponse {
+    'code': number;
+    'data': ConversationFollowUpClaimData;
+    'message': string;
+}
+export interface ConversationFollowUpCompleteRequest {
+    'error_code'?: string;
+    'error_message'?: string;
+    'requeue'?: boolean;
+    'success': boolean;
+}
+export interface ConversationFollowUpCreateRequest {
+    'content': object;
+    'idempotency_key': string;
+    'text': string;
+}
+export interface ConversationFollowUpListData {
+    'active_run_id': string;
+    'items': Array<ConversationFollowUp>;
+    'supports_steering': boolean;
+}
+export interface ConversationFollowUpListResponse {
+    'code': number;
+    'data': ConversationFollowUpListData;
+    'message': string;
+}
+export interface ConversationFollowUpReorderRequest {
+    'ordered_ids': Array<string>;
+}
+export interface ConversationFollowUpResponse {
+    'code': number;
+    'data': ConversationFollowUp;
+    'message': string;
+}
+export interface ConversationFollowUpSteerData {
+    'delivery_mode': ConversationFollowUpSteerDataDeliveryModeEnum;
+    'item': ConversationFollowUp;
+    'reason'?: string;
+}
+
+export const ConversationFollowUpSteerDataDeliveryModeEnum = {
+    Queued: 'queued',
+    Steer: 'steer'
+} as const;
+
+export type ConversationFollowUpSteerDataDeliveryModeEnum = typeof ConversationFollowUpSteerDataDeliveryModeEnum[keyof typeof ConversationFollowUpSteerDataDeliveryModeEnum];
+
+export interface ConversationFollowUpSteerRequest {
+    'expected_run_id'?: string;
+}
+export interface ConversationFollowUpSteerResponse {
+    'code': number;
+    'data': ConversationFollowUpSteerData;
+    'message': string;
+}
+export interface ConversationFollowUpUpdateRequest {
+    'content': object;
+    'text': string;
+}
 export interface ConversationForkCapability {
     'reason_code'?: string;
     'supported': boolean;
@@ -3380,6 +4203,15 @@ export interface DatasetCapabilities {
     'read': boolean;
     'retrieve': boolean;
     'search': boolean;
+}
+export interface DatasetDeletionProgress {
+    'completed': number;
+    'dataset_id': string;
+    'display_name': string;
+    'error'?: string;
+    'failed': number;
+    'status': string;
+    'total': number;
 }
 export interface DatasetMember {
     'create_time'?: string;
@@ -4542,11 +5374,63 @@ export interface DocumentTableColumn {
 export interface DocumentTagsResponse {
     'tags'?: Array<string>;
 }
+export interface EmbeddingIndexStatusResponse {
+    'affected_knowledge_bases': number;
+    'indexed_knowledge_bases': number;
+    'model_name'?: string;
+    'pending_knowledge_bases': number;
+    'provider_name'?: string;
+    'status': EmbeddingIndexStatusResponseStatusEnum;
+}
+
+export const EmbeddingIndexStatusResponseStatusEnum = {
+    Empty: 'empty',
+    Indexed: 'indexed',
+    Rebuilding: 'rebuilding',
+    Clearing: 'clearing',
+    Cleared: 'cleared',
+    Unknown: 'unknown'
+} as const;
+
+export type EmbeddingIndexStatusResponseStatusEnum = typeof EmbeddingIndexStatusResponseStatusEnum[keyof typeof EmbeddingIndexStatusResponseStatusEnum];
+
 export interface EmbeddingOptions {
     'batch_size'?: number | null;
     'passage_prefix'?: string;
     'query_prefix'?: string;
 }
+export interface EmbeddingSignatureResponse {
+    'code': string;
+    'dimensions'?: number;
+    'model_type': string;
+    'passage_signature'?: string;
+    'query_signature'?: string;
+    'status': string;
+}
+export interface EmbeddingSwitchPreviewRequest {
+    'model_id': string;
+    'source': string;
+}
+export interface EmbeddingSwitchPreviewResponse {
+    'active_model_name'?: string;
+    'can_switch': boolean;
+    'candidate_model_name'?: string;
+    'generation': number;
+    'indexed_knowledge_bases': number;
+    'outcome': EmbeddingSwitchPreviewResponseOutcomeEnum;
+    'signature_status'?: string;
+}
+
+export const EmbeddingSwitchPreviewResponseOutcomeEnum = {
+    Unchanged: 'unchanged',
+    Empty: 'empty',
+    Same: 'same',
+    ClearRequired: 'clear_required',
+    ProbeFailed: 'probe_failed'
+} as const;
+
+export type EmbeddingSwitchPreviewResponseOutcomeEnum = typeof EmbeddingSwitchPreviewResponseOutcomeEnum[keyof typeof EmbeddingSwitchPreviewResponseOutcomeEnum];
+
 export interface EpisodeMemory {
     'conversation_id': string;
     'episode_type': EpisodeMemoryEpisodeTypeEnum;
@@ -6008,6 +6892,7 @@ export interface OrdinaryTaskView {
     'display_key': string;
     'execution_id': string;
     'failure_code'?: OrdinaryTaskViewFailureCodeEnum;
+    'input_required'?: string;
     'knowledge_operations'?: Array<KnowledgeOperation>;
     'model_switch'?: ChatModelSwitchRecord;
     'order': number;
@@ -6062,6 +6947,163 @@ export interface OrdinaryWorkflowResponse {
     'code': number;
     'data': OrdinaryWorkflowData;
     'message': string;
+}
+export interface PDFBlockTranslation {
+    'block_id': string;
+    'language': PDFBlockTranslationLanguageEnum;
+    'model': string;
+    /**
+     * Original PDF SHA-256; a supplied request hash must match the current source or the server returns409 before cache/model access.
+     */
+    'source_sha256': string;
+    'translated_text': string;
+}
+
+export const PDFBlockTranslationLanguageEnum = {
+    Zh: 'zh',
+    En: 'en'
+} as const;
+
+export type PDFBlockTranslationLanguageEnum = typeof PDFBlockTranslationLanguageEnum[keyof typeof PDFBlockTranslationLanguageEnum];
+
+export interface PDFBlockTranslationEnvelope {
+    'data': PDFBlockTranslation;
+}
+export interface PDFFormulaEvidence {
+    'bbox'?: Array<number>;
+    'id': string;
+    'page': number;
+    'text': string;
+}
+export interface PDFFormulaExplanation {
+    'display_latex'?: string;
+    'evidence': Array<PDFFormulaEvidence>;
+    'model'?: string;
+    'repair_note'?: string;
+    'steps': Array<PDFFormulaExplanationStepsInner>;
+    'summary': string;
+    'symbols': Array<PDFFormulaExplanationSymbolsInner>;
+    'warnings': Array<string>;
+}
+export interface PDFFormulaExplanationEnvelope {
+    'data': PDFFormulaExplanation;
+}
+export interface PDFFormulaExplanationRequest {
+    /**
+     * Optional nonblank exact substring of the target formula LaTeX; requests a focused symbol definition with a separate cache entry.
+     */
+    'focus_symbol'?: string;
+    'force'?: boolean;
+    'language'?: PDFFormulaExplanationRequestLanguageEnum;
+}
+
+export const PDFFormulaExplanationRequestLanguageEnum = {
+    Zh: 'zh',
+    En: 'en'
+} as const;
+
+export type PDFFormulaExplanationRequestLanguageEnum = typeof PDFFormulaExplanationRequestLanguageEnum[keyof typeof PDFFormulaExplanationRequestLanguageEnum];
+
+export interface PDFFormulaExplanationStepsInner {
+    'evidence_ids': Array<string>;
+    'inferred': boolean;
+    'text': string;
+}
+export interface PDFFormulaExplanationSymbolsInner {
+    'evidence_ids': Array<string>;
+    'inferred': boolean;
+    'meaning': string;
+    'symbol': string;
+}
+export interface PDFIRBlock {
+    /**
+     * [left, top, right, bottom], normalized to the original visible page with intrinsic rotation
+     */
+    'bbox'?: Array<number>;
+    'id': string;
+    'latex'?: string;
+    'page': number;
+    'text'?: string;
+    'type': string;
+}
+export interface PDFIRDocument {
+    'blocks': Array<PDFIRBlock>;
+    'coordinate_space': PDFIRDocumentCoordinateSpaceEnum;
+    'pages': Array<PDFIRDocumentPagesInner>;
+    'parser': PDFIRDocumentParser;
+    'source_sha256': string;
+    'version': number;
+    'warnings'?: Array<string>;
+}
+
+export const PDFIRDocumentCoordinateSpaceEnum = {
+    NormalizedTopLeft: 'normalized_top_left'
+} as const;
+
+export type PDFIRDocumentCoordinateSpaceEnum = typeof PDFIRDocumentCoordinateSpaceEnum[keyof typeof PDFIRDocumentCoordinateSpaceEnum];
+
+export interface PDFIRDocumentPagesInner {
+    'height'?: number;
+    'index': number;
+    'width'?: number;
+}
+export interface PDFIRDocumentParser {
+    'model': string;
+    'name': string;
+}
+export interface PDFIREnvelope {
+    'data': PDFIRState;
+}
+export interface PDFIRRequest {
+    'force'?: boolean;
+}
+export interface PDFIRState {
+    'document'?: PDFIRDocument;
+    'error_message'?: string;
+    'source_sha256'?: string;
+    'status': PDFIRStateStatusEnum;
+}
+
+export const PDFIRStateStatusEnum = {
+    NotRequested: 'not_requested',
+    Queued: 'queued',
+    Running: 'running',
+    Ready: 'ready',
+    Failed: 'failed',
+    Unavailable: 'unavailable'
+} as const;
+
+export type PDFIRStateStatusEnum = typeof PDFIRStateStatusEnum[keyof typeof PDFIRStateStatusEnum];
+
+export interface PDFPaperReadingRequest {
+    'force'?: boolean;
+    'language'?: PDFPaperReadingRequestLanguageEnum;
+    /**
+     * Original PDF SHA-256; a supplied request hash must match the current source or the server returns409 before cache/model access.
+     */
+    'source_sha256'?: string;
+}
+
+export const PDFPaperReadingRequestLanguageEnum = {
+    Zh: 'zh',
+    En: 'en'
+} as const;
+
+export type PDFPaperReadingRequestLanguageEnum = typeof PDFPaperReadingRequestLanguageEnum[keyof typeof PDFPaperReadingRequestLanguageEnum];
+
+export interface PDFVisualExplanation {
+    'evidence': Array<PDFFormulaEvidence>;
+    'model': string;
+    'observations': Array<PDFFormulaExplanationStepsInner>;
+    /**
+     * Original PDF SHA-256; a supplied request hash must match the current source or the server returns409 before cache/model access.
+     */
+    'source_sha256': string;
+    'summary': string;
+    'warnings': Array<string>;
+}
+export interface PDFVisualExplanationEnvelope {
+    'data': PDFVisualExplanation;
 }
 export interface Pages {
     'knowledge_operations': CollectionPage;
@@ -6126,9 +7168,32 @@ export interface PaperLibraryNote {
     'id': string;
     'kind': string;
     'paperId': string;
+    'source'?: PaperLibraryNoteSource;
     'title': string;
     'updatedAt': string;
 }
+export interface PaperLibraryNoteSource {
+    'attachmentId': string;
+    'bbox'?: Array<number>;
+    'color'?: PaperLibraryNoteSourceColorEnum;
+    'page': number;
+    'quote'?: string;
+    'rects'?: Array<Array<number>>;
+}
+
+export const PaperLibraryNoteSourceColorEnum = {
+    Red: 'red',
+    Orange: 'orange',
+    Yellow: 'yellow',
+    Green: 'green',
+    Blue: 'blue',
+    Indigo: 'indigo',
+    Purple: 'purple',
+    Rainbow: 'rainbow'
+} as const;
+
+export type PaperLibraryNoteSourceColorEnum = typeof PaperLibraryNoteSourceColorEnum[keyof typeof PaperLibraryNoteSourceColorEnum];
+
 export interface PaperLibraryPaper {
     'academicWorkId'?: string;
     'arxivVersion'?: string;
@@ -6559,6 +7624,7 @@ export interface ProviderRequestConfigOpenAPIResponse {
 
 export const ProviderRequestConfigOpenAPIResponseDefaultProtocolEnum = {
     Openai: 'openai',
+    OpenaiResponses: 'openai-responses',
     Anthropic: 'anthropic'
 } as const;
 
@@ -6689,6 +7755,92 @@ export interface QuestionTypeOption {
 }
 export interface QuestionTypeOptionsResponse {
     'items'?: Array<QuestionTypeOption>;
+}
+export interface ReadingPreparationPolicy {
+    'automatic_eligible_after'?: string;
+    'limits': ReadingPreparationPolicyLimits;
+    'modes': { [key: string]: ReadingPreparationPolicyModesEnum; };
+    'parser_ref'?: string;
+    'preset': ReadingPreparationPolicyPresetEnum;
+    'provider_selections'?: ReadingPreparationPolicyProviderSelections;
+    'study_model_ref'?: string;
+}
+
+export const ReadingPreparationPolicyModesEnum = {
+    OnDemand: 'on_demand',
+    Automatic: 'automatic',
+    Disabled: 'disabled'
+} as const;
+
+export type ReadingPreparationPolicyModesEnum = typeof ReadingPreparationPolicyModesEnum[keyof typeof ReadingPreparationPolicyModesEnum];
+export const ReadingPreparationPolicyPresetEnum = {
+    Demand: 'demand',
+    Advance: 'advance',
+    Full: 'full',
+    Custom: 'custom'
+} as const;
+
+export type ReadingPreparationPolicyPresetEnum = typeof ReadingPreparationPolicyPresetEnum[keyof typeof ReadingPreparationPolicyPresetEnum];
+
+export interface ReadingPreparationPolicyLimits {
+    'automatic_concurrency': ReadingPreparationPolicyLimitsAutomaticConcurrencyEnum;
+    'daily_documents': number;
+    'study_items_per_document': number;
+}
+
+export const ReadingPreparationPolicyLimitsAutomaticConcurrencyEnum = {
+    NUMBER_1: 1
+} as const;
+
+export type ReadingPreparationPolicyLimitsAutomaticConcurrencyEnum = typeof ReadingPreparationPolicyLimitsAutomaticConcurrencyEnum[keyof typeof ReadingPreparationPolicyLimitsAutomaticConcurrencyEnum];
+
+export interface ReadingPreparationPolicyProviderSelections {
+    'parser'?: ReadingProviderSelection;
+    'study'?: ReadingProviderSelection;
+}
+export interface ReadingPreparationRequest {
+    'scopes': Array<ReadingPreparationRequestScopesEnum>;
+}
+
+export const ReadingPreparationRequestScopesEnum = {
+    PdfParse: 'pdf_parse',
+    Formula: 'formula',
+    Figure: 'figure',
+    Table: 'table'
+} as const;
+
+export type ReadingPreparationRequestScopesEnum = typeof ReadingPreparationRequestScopesEnum[keyof typeof ReadingPreparationRequestScopesEnum];
+
+export interface ReadingPreparationStatus {
+    'error_message'?: string;
+    'job_id'?: string;
+    'model_requests'?: number;
+    'progress_current'?: number;
+    'progress_total'?: number;
+    'scopes'?: Array<string>;
+    'status': ReadingPreparationStatusStatusEnum;
+}
+
+export const ReadingPreparationStatusStatusEnum = {
+    NotRequested: 'not_requested',
+    Pending: 'pending',
+    Running: 'running',
+    Succeeded: 'succeeded',
+    Failed: 'failed',
+    Canceled: 'canceled'
+} as const;
+
+export type ReadingPreparationStatusStatusEnum = typeof ReadingPreparationStatusStatusEnum[keyof typeof ReadingPreparationStatusStatusEnum];
+
+export interface ReadingProviderSelection {
+    'default_label'?: string;
+    'effective_label'?: string;
+    'options'?: Array<ReadingProviderSelectionOptionsInner>;
+    'unavailable_reason'?: string;
+}
+export interface ReadingProviderSelectionOptionsInner {
+    'id': string;
+    'label': string;
 }
 export interface RecoveryDeleteCountResponse {
     'deleted_count'?: number;
@@ -7179,6 +8331,7 @@ export interface ShowcaseCase {
     'image_url': string;
     'output_label': string;
     'output_type': string;
+    'page_action'?: string;
     'provider': string;
     'result_summary': string;
     'source_url': string;
@@ -7874,6 +9027,7 @@ export interface SkillWriteOpenAPIResponse {
 export interface SlotDTO {
     'artifact_id': string;
     'artifact_value'?: any;
+    'attempt': number;
     'caption'?: string;
     'change_source'?: string;
     'content_type'?: string;
@@ -7886,6 +9040,7 @@ export interface SlotDTO {
     'last_synced_version'?: number;
     'list_index'?: number;
     'order_version'?: number;
+    'producer_attempt_id'?: string;
     'provider'?: string;
     'provider_document_id'?: string;
     'revision': number;
@@ -8465,13 +9620,14 @@ export interface UpdateProviderRequestConfigOpenAPIRequest {
     'advanced'?: ProviderRequestAdvanced;
     'default_protocol': UpdateProviderRequestConfigOpenAPIRequestDefaultProtocolEnum;
     /**
-     * Optional OpenAI/Anthropic API-root overrides keyed by openai or anthropic. Empty resets that protocol to its default root. Unsupported protocol keys are rejected.
+     * Optional API-root overrides keyed by openai, openai-responses or anthropic. Empty resets that protocol to its default root. Unsupported protocol keys are rejected.
      */
     'endpoints'?: { [key: string]: string; };
 }
 
 export const UpdateProviderRequestConfigOpenAPIRequestDefaultProtocolEnum = {
     Openai: 'openai',
+    OpenaiResponses: 'openai-responses',
     Anthropic: 'anthropic'
 } as const;
 
@@ -8646,6 +9802,127 @@ export interface VerifiedProviderOpenAPIResponse {
     'shared_by_id'?: string;
     'shared_by_name'?: string;
     'source'?: string;
+}
+export interface VocabularyCloudConnection {
+    'add_to_study': boolean;
+    'configured': boolean;
+    'enabled': boolean;
+    'failed': number;
+    'last_error': string;
+    'pending': number;
+    'provider': VocabularyCloudConnectionProviderEnum;
+    'succeeded': number;
+    'target_id': string;
+    'target_name': string;
+}
+
+export const VocabularyCloudConnectionProviderEnum = {
+    Eudic: 'eudic',
+    Maimemo: 'maimemo'
+} as const;
+
+export type VocabularyCloudConnectionProviderEnum = typeof VocabularyCloudConnectionProviderEnum[keyof typeof VocabularyCloudConnectionProviderEnum];
+
+export interface VocabularyCloudConnectionRequest {
+    'add_to_study'?: boolean;
+    'enabled'?: boolean;
+    'target_id'?: string;
+    'target_name'?: string;
+    /**
+     * Personal provider token. Omit or leave blank to retain the stored token; never returned in responses.
+     */
+    'token'?: string;
+}
+export interface VocabularyCloudConnectionResponse {
+    'code': number;
+    'data': VocabularyCloudConnection;
+    'message': string;
+}
+export interface VocabularyCloudConnectionsResponse {
+    'code': number;
+    'data': VocabularyCloudConnectionsResponseData;
+    'message': string;
+}
+export interface VocabularyCloudConnectionsResponseData {
+    'items': Array<VocabularyCloudConnection>;
+}
+export interface VocabularyCloudDisconnectResponse {
+    'code': number;
+    'data': VocabularyCloudDisconnectResponseData;
+    'message': string;
+}
+export interface VocabularyCloudDisconnectResponseData {
+    'deleted': boolean;
+}
+export interface VocabularyCloudOperation {
+    'id': string;
+    'last_error': string;
+    'provider': VocabularyCloudOperationProviderEnum;
+    'status': VocabularyCloudOperationStatusEnum;
+    'term': string;
+    'updated_at': string;
+}
+
+export const VocabularyCloudOperationProviderEnum = {
+    Eudic: 'eudic',
+    Maimemo: 'maimemo'
+} as const;
+
+export type VocabularyCloudOperationProviderEnum = typeof VocabularyCloudOperationProviderEnum[keyof typeof VocabularyCloudOperationProviderEnum];
+export const VocabularyCloudOperationStatusEnum = {
+    Pending: 'pending',
+    Failed: 'failed',
+    Succeeded: 'succeeded',
+    Canceled: 'canceled'
+} as const;
+
+export type VocabularyCloudOperationStatusEnum = typeof VocabularyCloudOperationStatusEnum[keyof typeof VocabularyCloudOperationStatusEnum];
+
+export interface VocabularyCloudOperationsResponse {
+    'code': number;
+    'data': VocabularyCloudOperationsResponseData;
+    'message': string;
+}
+export interface VocabularyCloudOperationsResponseData {
+    'items': Array<VocabularyCloudOperation>;
+}
+export interface VocabularyCloudSyncResponse {
+    'code': number;
+    'data': VocabularyCloudSyncResponseData;
+    'message': string;
+}
+export interface VocabularyCloudSyncResponseData {
+    'queued': number;
+}
+export interface VocabularyCloudTokenRequest {
+    /**
+     * Personal provider token. Omit or leave blank to retain the stored token; never returned in responses.
+     */
+    'token'?: string;
+}
+export interface VocabularyCloudWordbook {
+    'id': string;
+    'name': string;
+}
+export interface VocabularyCloudWordbookRequest {
+    'name': string;
+    /**
+     * Personal provider token. Omit or leave blank to retain the stored token; never returned in responses.
+     */
+    'token'?: string;
+}
+export interface VocabularyCloudWordbookResponse {
+    'code': number;
+    'data': VocabularyCloudWordbook;
+    'message': string;
+}
+export interface VocabularyCloudWordbooksResponse {
+    'code': number;
+    'data': VocabularyCloudWordbooksResponseData;
+    'message': string;
+}
+export interface VocabularyCloudWordbooksResponseData {
+    'items': Array<VocabularyCloudWordbook>;
 }
 export interface WeChatNotificationTargets {
     'items': Array<WeChatNotificationTargetsItemsInner>;
@@ -9036,12 +10313,13 @@ export const AcademicWorkflowsApiAxiosParamCreator = function (configuration?: C
     return {
         /**
          *
-         * @summary Read owned academic Chat progress and complete frozen handoff
+         * @summary Read owned academic Chat progress or frozen business input without internal sources
          * @param {string} conversationId
+         * @param {ApiCoreAcademicChatContextGetViewEnum} [view]
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        apiCoreAcademicChatContextGet: async (conversationId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+        apiCoreAcademicChatContextGet: async (conversationId: string, view?: ApiCoreAcademicChatContextGetViewEnum, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
             // verify required parameter 'conversationId' is not null or undefined
             assertParamExists('apiCoreAcademicChatContextGet', 'conversationId', conversationId)
             const localVarPath = `/api/core/academic/chat-context`;
@@ -9058,6 +10336,10 @@ export const AcademicWorkflowsApiAxiosParamCreator = function (configuration?: C
 
             if (conversationId !== undefined) {
                 localVarQueryParameter['conversation_id'] = conversationId;
+            }
+
+            if (view !== undefined) {
+                localVarQueryParameter['view'] = view;
             }
 
             localVarHeaderParameter['Accept'] = 'application/json';
@@ -9104,6 +10386,75 @@ export const AcademicWorkflowsApiAxiosParamCreator = function (configuration?: C
             let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
             localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
             localVarRequestOptions.data = serializeDataIfNeeded(academicDocumentIdentity, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary Read available academic search configuration and budget profiles
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreAcademicExpansionCapabilitiesGet: async (options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            const localVarPath = `/api/core/academic/expansion-capabilities`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary Confirm the current prepared scope and idempotently launch its Chat
+         * @param {string} expansionId
+         * @param {ApiCoreAcademicExpansionsExpansionIdConfirmPostRequest} apiCoreAcademicExpansionsExpansionIdConfirmPostRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreAcademicExpansionsExpansionIdConfirmPost: async (expansionId: string, apiCoreAcademicExpansionsExpansionIdConfirmPostRequest: ApiCoreAcademicExpansionsExpansionIdConfirmPostRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'expansionId' is not null or undefined
+            assertParamExists('apiCoreAcademicExpansionsExpansionIdConfirmPost', 'expansionId', expansionId)
+            // verify required parameter 'apiCoreAcademicExpansionsExpansionIdConfirmPostRequest' is not null or undefined
+            assertParamExists('apiCoreAcademicExpansionsExpansionIdConfirmPost', 'apiCoreAcademicExpansionsExpansionIdConfirmPostRequest', apiCoreAcademicExpansionsExpansionIdConfirmPostRequest)
+            const localVarPath = `/api/core/academic/expansions/{expansion_id}:confirm`
+                .replace(`{${"expansion_id"}}`, encodeURIComponent(String(expansionId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(apiCoreAcademicExpansionsExpansionIdConfirmPostRequest, localVarRequestOptions, configuration)
 
             return {
                 url: toPathString(localVarUrlObj),
@@ -9224,12 +10575,52 @@ export const AcademicWorkflowsApiAxiosParamCreator = function (configuration?: C
         },
         /**
          *
-         * @summary List current user\'s expansion records
-         * @param {string} datasetId
+         * @summary Answer, revise or retry the current preparation revision
+         * @param {string} expansionId
+         * @param {ApiCoreAcademicExpansionsExpansionIdPreparationPostRequest} apiCoreAcademicExpansionsExpansionIdPreparationPostRequest
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        apiCoreAcademicExpansionsGet: async (datasetId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+        apiCoreAcademicExpansionsExpansionIdPreparationPost: async (expansionId: string, apiCoreAcademicExpansionsExpansionIdPreparationPostRequest: ApiCoreAcademicExpansionsExpansionIdPreparationPostRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'expansionId' is not null or undefined
+            assertParamExists('apiCoreAcademicExpansionsExpansionIdPreparationPost', 'expansionId', expansionId)
+            // verify required parameter 'apiCoreAcademicExpansionsExpansionIdPreparationPostRequest' is not null or undefined
+            assertParamExists('apiCoreAcademicExpansionsExpansionIdPreparationPost', 'apiCoreAcademicExpansionsExpansionIdPreparationPostRequest', apiCoreAcademicExpansionsExpansionIdPreparationPostRequest)
+            const localVarPath = `/api/core/academic/expansions/{expansion_id}/preparation`
+                .replace(`{${"expansion_id"}}`, encodeURIComponent(String(expansionId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(apiCoreAcademicExpansionsExpansionIdPreparationPostRequest, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary List owned expansion records and optionally review handoffs
+         * @param {string} datasetId
+         * @param {boolean} [includeReviews]
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreAcademicExpansionsGet: async (datasetId: string, includeReviews?: boolean, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
             // verify required parameter 'datasetId' is not null or undefined
             assertParamExists('apiCoreAcademicExpansionsGet', 'datasetId', datasetId)
             const localVarPath = `/api/core/academic/expansions`;
@@ -9246,6 +10637,10 @@ export const AcademicWorkflowsApiAxiosParamCreator = function (configuration?: C
 
             if (datasetId !== undefined) {
                 localVarQueryParameter['dataset_id'] = datasetId;
+            }
+
+            if (includeReviews !== undefined) {
+                localVarQueryParameter['include_reviews'] = includeReviews;
             }
 
             localVarHeaderParameter['Accept'] = 'application/json';
@@ -9310,7 +10705,45 @@ export const AcademicWorkflowsApiAxiosParamCreator = function (configuration?: C
         },
         /**
          *
+         * @summary Retry failed imports or processing without duplicating saved originals
+         * @param {string} batchId
+         * @param {ApiCoreAcademicImportsBatchIdRetryPostRequest} [apiCoreAcademicImportsBatchIdRetryPostRequest]
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreAcademicImportsBatchIdRetryPost: async (batchId: string, apiCoreAcademicImportsBatchIdRetryPostRequest?: ApiCoreAcademicImportsBatchIdRetryPostRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'batchId' is not null or undefined
+            assertParamExists('apiCoreAcademicImportsBatchIdRetryPost', 'batchId', batchId)
+            const localVarPath = `/api/core/academic/imports/{batch_id}:retry`
+                .replace(`{${"batch_id"}}`, encodeURIComponent(String(batchId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(apiCoreAcademicImportsBatchIdRetryPostRequest, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
          * @summary Read source-scoped imports or a page of import operations
+         * @param {ApiCoreAcademicImportsGetFilterEnum} [filter]
          * @param {ApiCoreAcademicImportsGetViewEnum} [view]
          * @param {string} [cursor]
          * @param {number} [limit]
@@ -9324,7 +10757,7 @@ export const AcademicWorkflowsApiAxiosParamCreator = function (configuration?: C
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        apiCoreAcademicImportsGet: async (view?: ApiCoreAcademicImportsGetViewEnum, cursor?: string, limit?: number, targetDatasetId?: string, sourceDocumentId?: string, conversationId?: string, historyId?: string, taskId?: string, workflowSessionId?: string, workDisplayKey?: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+        apiCoreAcademicImportsGet: async (filter?: ApiCoreAcademicImportsGetFilterEnum, view?: ApiCoreAcademicImportsGetViewEnum, cursor?: string, limit?: number, targetDatasetId?: string, sourceDocumentId?: string, conversationId?: string, historyId?: string, taskId?: string, workflowSessionId?: string, workDisplayKey?: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
             const localVarPath = `/api/core/academic/imports`;
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
@@ -9336,6 +10769,10 @@ export const AcademicWorkflowsApiAxiosParamCreator = function (configuration?: C
             const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
             const localVarHeaderParameter = {} as any;
             const localVarQueryParameter = {} as any;
+
+            if (filter !== undefined) {
+                localVarQueryParameter['filter'] = filter;
+            }
 
             if (view !== undefined) {
                 localVarQueryParameter['view'] = view;
@@ -9594,12 +11031,13 @@ export const AcademicWorkflowsApiAxiosParamCreator = function (configuration?: C
         },
         /**
          *
-         * @summary Read paper entries, logical folders and active materials
+         * @summary Read paper entries, logical folders and active materials; include_processing=false skips independent processing status for note reads
          * @param {string} targetDatasetId
+         * @param {boolean} [includeProcessing]
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        apiCoreAcademicLibraryGet: async (targetDatasetId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+        apiCoreAcademicLibraryGet: async (targetDatasetId: string, includeProcessing?: boolean, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
             // verify required parameter 'targetDatasetId' is not null or undefined
             assertParamExists('apiCoreAcademicLibraryGet', 'targetDatasetId', targetDatasetId)
             const localVarPath = `/api/core/academic/library`;
@@ -9616,6 +11054,10 @@ export const AcademicWorkflowsApiAxiosParamCreator = function (configuration?: C
 
             if (targetDatasetId !== undefined) {
                 localVarQueryParameter['target_dataset_id'] = targetDatasetId;
+            }
+
+            if (includeProcessing !== undefined) {
+                localVarQueryParameter['include_processing'] = includeProcessing;
             }
 
             localVarHeaderParameter['Accept'] = 'application/json';
@@ -9727,7 +11169,7 @@ export const AcademicWorkflowsApiAxiosParamCreator = function (configuration?: C
         },
         /**
          *
-         * @summary Update one paper with its revision and validate every active attachment
+         * @summary Update personal reading status; shared fields require edit access and revision
          * @param {string} targetDatasetId
          * @param {string} libraryPaperId
          * @param {ApiCoreAcademicLibraryPapersLibraryPaperIdPatchRequest} apiCoreAcademicLibraryPapersLibraryPaperIdPatchRequest
@@ -9896,6 +11338,70 @@ export const AcademicWorkflowsApiAxiosParamCreator = function (configuration?: C
         },
         /**
          *
+         * @summary List unread paper preparation notifications
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreAcademicNotificationsGet: async (options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            const localVarPath = `/api/core/academic/notifications`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary Dismiss a paper notice without changing the pending action
+         * @param {string} notificationId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreAcademicNotificationsNotificationIdReadPost: async (notificationId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'notificationId' is not null or undefined
+            assertParamExists('apiCoreAcademicNotificationsNotificationIdReadPost', 'notificationId', notificationId)
+            const localVarPath = `/api/core/academic/notifications/{notification_id}:read`
+                .replace(`{${"notification_id"}}`, encodeURIComponent(String(notificationId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
          * @summary Read real full text without importing; continue using cursor only
          * @param {AcademicContentRead} academicContentRead
          * @param {*} [options] Override http request option.
@@ -10040,7 +11546,7 @@ export const AcademicWorkflowsApiAxiosParamCreator = function (configuration?: C
         },
         /**
          *
-         * @summary Search external arXiv candidates and pin their versions to an owned expansion
+         * @summary Search scholarly sources; continue one source with its task-bound cursor only
          * @param {ApiCoreAcademicPapersSearchPostRequest} apiCoreAcademicPapersSearchPostRequest
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
@@ -10075,7 +11581,42 @@ export const AcademicWorkflowsApiAxiosParamCreator = function (configuration?: C
         },
         /**
          *
-         * @summary Idempotently start expansion or a separate downstream Chat
+         * @summary Suggest a review topic from accessible paper metadata without starting a workflow
+         * @param {ApiCoreAcademicReviewTopicGeneratePostRequest} apiCoreAcademicReviewTopicGeneratePostRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreAcademicReviewTopicGeneratePost: async (apiCoreAcademicReviewTopicGeneratePostRequest: ApiCoreAcademicReviewTopicGeneratePostRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'apiCoreAcademicReviewTopicGeneratePostRequest' is not null or undefined
+            assertParamExists('apiCoreAcademicReviewTopicGeneratePost', 'apiCoreAcademicReviewTopicGeneratePostRequest', apiCoreAcademicReviewTopicGeneratePostRequest)
+            const localVarPath = `/api/core/academic/review-topic:generate`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(apiCoreAcademicReviewTopicGeneratePostRequest, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary Create background preparation, or start a separate downstream Chat
          * @param {AcademicTaskLaunch} academicTaskLaunch
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
@@ -10161,13 +11702,14 @@ export const AcademicWorkflowsApiFp = function(configuration?: Configuration) {
     return {
         /**
          *
-         * @summary Read owned academic Chat progress and complete frozen handoff
+         * @summary Read owned academic Chat progress or frozen business input without internal sources
          * @param {string} conversationId
+         * @param {ApiCoreAcademicChatContextGetViewEnum} [view]
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        async apiCoreAcademicChatContextGet(conversationId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ApiCoreAcademicChatContextGet200Response>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreAcademicChatContextGet(conversationId, options);
+        async apiCoreAcademicChatContextGet(conversationId: string, view?: ApiCoreAcademicChatContextGetViewEnum, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<AcademicChatContext>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreAcademicChatContextGet(conversationId, view, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['AcademicWorkflowsApi.apiCoreAcademicChatContextGet']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
@@ -10184,6 +11726,32 @@ export const AcademicWorkflowsApiFp = function(configuration?: Configuration) {
             const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreAcademicDocumentsDocumentIdIdentityPatch(documentId, academicDocumentIdentity, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['AcademicWorkflowsApi.apiCoreAcademicDocumentsDocumentIdIdentityPatch']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Read available academic search configuration and budget profiles
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreAcademicExpansionCapabilitiesGet(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ApiCoreAcademicExpansionCapabilitiesGet200Response>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreAcademicExpansionCapabilitiesGet(options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['AcademicWorkflowsApi.apiCoreAcademicExpansionCapabilitiesGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Confirm the current prepared scope and idempotently launch its Chat
+         * @param {string} expansionId
+         * @param {ApiCoreAcademicExpansionsExpansionIdConfirmPostRequest} apiCoreAcademicExpansionsExpansionIdConfirmPostRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreAcademicExpansionsExpansionIdConfirmPost(expansionId: string, apiCoreAcademicExpansionsExpansionIdConfirmPostRequest: ApiCoreAcademicExpansionsExpansionIdConfirmPostRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ApiCoreAcademicExpansionsExpansionIdConfirmPost200Response>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreAcademicExpansionsExpansionIdConfirmPost(expansionId, apiCoreAcademicExpansionsExpansionIdConfirmPostRequest, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['AcademicWorkflowsApi.apiCoreAcademicExpansionsExpansionIdConfirmPost']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
@@ -10229,13 +11797,28 @@ export const AcademicWorkflowsApiFp = function(configuration?: Configuration) {
         },
         /**
          *
-         * @summary List current user\'s expansion records
-         * @param {string} datasetId
+         * @summary Answer, revise or retry the current preparation revision
+         * @param {string} expansionId
+         * @param {ApiCoreAcademicExpansionsExpansionIdPreparationPostRequest} apiCoreAcademicExpansionsExpansionIdPreparationPostRequest
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        async apiCoreAcademicExpansionsGet(datasetId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ApiCoreAcademicExpansionsGet200Response>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreAcademicExpansionsGet(datasetId, options);
+        async apiCoreAcademicExpansionsExpansionIdPreparationPost(expansionId: string, apiCoreAcademicExpansionsExpansionIdPreparationPostRequest: ApiCoreAcademicExpansionsExpansionIdPreparationPostRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ApiCoreAcademicExpansionsExpansionIdPreparationPost200Response>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreAcademicExpansionsExpansionIdPreparationPost(expansionId, apiCoreAcademicExpansionsExpansionIdPreparationPostRequest, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['AcademicWorkflowsApi.apiCoreAcademicExpansionsExpansionIdPreparationPost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary List owned expansion records and optionally review handoffs
+         * @param {string} datasetId
+         * @param {boolean} [includeReviews]
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreAcademicExpansionsGet(datasetId: string, includeReviews?: boolean, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ApiCoreAcademicExpansionsGet200Response>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreAcademicExpansionsGet(datasetId, includeReviews, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['AcademicWorkflowsApi.apiCoreAcademicExpansionsGet']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
@@ -10258,7 +11841,22 @@ export const AcademicWorkflowsApiFp = function(configuration?: Configuration) {
         },
         /**
          *
+         * @summary Retry failed imports or processing without duplicating saved originals
+         * @param {string} batchId
+         * @param {ApiCoreAcademicImportsBatchIdRetryPostRequest} [apiCoreAcademicImportsBatchIdRetryPostRequest]
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreAcademicImportsBatchIdRetryPost(batchId: string, apiCoreAcademicImportsBatchIdRetryPostRequest?: ApiCoreAcademicImportsBatchIdRetryPostRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ApiCoreAcademicImportsBatchIdRetryPost200Response>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreAcademicImportsBatchIdRetryPost(batchId, apiCoreAcademicImportsBatchIdRetryPostRequest, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['AcademicWorkflowsApi.apiCoreAcademicImportsBatchIdRetryPost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
          * @summary Read source-scoped imports or a page of import operations
+         * @param {ApiCoreAcademicImportsGetFilterEnum} [filter]
          * @param {ApiCoreAcademicImportsGetViewEnum} [view]
          * @param {string} [cursor]
          * @param {number} [limit]
@@ -10272,8 +11870,8 @@ export const AcademicWorkflowsApiFp = function(configuration?: Configuration) {
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        async apiCoreAcademicImportsGet(view?: ApiCoreAcademicImportsGetViewEnum, cursor?: string, limit?: number, targetDatasetId?: string, sourceDocumentId?: string, conversationId?: string, historyId?: string, taskId?: string, workflowSessionId?: string, workDisplayKey?: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ApiCoreAcademicImportsGet200Response>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreAcademicImportsGet(view, cursor, limit, targetDatasetId, sourceDocumentId, conversationId, historyId, taskId, workflowSessionId, workDisplayKey, options);
+        async apiCoreAcademicImportsGet(filter?: ApiCoreAcademicImportsGetFilterEnum, view?: ApiCoreAcademicImportsGetViewEnum, cursor?: string, limit?: number, targetDatasetId?: string, sourceDocumentId?: string, conversationId?: string, historyId?: string, taskId?: string, workflowSessionId?: string, workDisplayKey?: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ApiCoreAcademicImportsGet200Response>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreAcademicImportsGet(filter, view, cursor, limit, targetDatasetId, sourceDocumentId, conversationId, historyId, taskId, workflowSessionId, workDisplayKey, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['AcademicWorkflowsApi.apiCoreAcademicImportsGet']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
@@ -10350,13 +11948,14 @@ export const AcademicWorkflowsApiFp = function(configuration?: Configuration) {
         },
         /**
          *
-         * @summary Read paper entries, logical folders and active materials
+         * @summary Read paper entries, logical folders and active materials; include_processing=false skips independent processing status for note reads
          * @param {string} targetDatasetId
+         * @param {boolean} [includeProcessing]
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        async apiCoreAcademicLibraryGet(targetDatasetId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<PaperLibraryResponse>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreAcademicLibraryGet(targetDatasetId, options);
+        async apiCoreAcademicLibraryGet(targetDatasetId: string, includeProcessing?: boolean, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<PaperLibraryResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreAcademicLibraryGet(targetDatasetId, includeProcessing, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['AcademicWorkflowsApi.apiCoreAcademicLibraryGet']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
@@ -10394,7 +11993,7 @@ export const AcademicWorkflowsApiFp = function(configuration?: Configuration) {
         },
         /**
          *
-         * @summary Update one paper with its revision and validate every active attachment
+         * @summary Update personal reading status; shared fields require edit access and revision
          * @param {string} targetDatasetId
          * @param {string} libraryPaperId
          * @param {ApiCoreAcademicLibraryPapersLibraryPaperIdPatchRequest} apiCoreAcademicLibraryPapersLibraryPaperIdPatchRequest
@@ -10443,10 +12042,35 @@ export const AcademicWorkflowsApiFp = function(configuration?: Configuration) {
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        async apiCoreAcademicMockHandoffsHandoffIdSubmitPost(handoffId: string, apiCoreAcademicMockHandoffsHandoffIdSubmitPostRequest: ApiCoreAcademicMockHandoffsHandoffIdSubmitPostRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ApiCoreAcademicMockHandoffsHandoffIdSubmitPost200Response>> {
+        async apiCoreAcademicMockHandoffsHandoffIdSubmitPost(handoffId: string, apiCoreAcademicMockHandoffsHandoffIdSubmitPostRequest: ApiCoreAcademicMockHandoffsHandoffIdSubmitPostRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<AcademicHandoffResult>> {
             const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreAcademicMockHandoffsHandoffIdSubmitPost(handoffId, apiCoreAcademicMockHandoffsHandoffIdSubmitPostRequest, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['AcademicWorkflowsApi.apiCoreAcademicMockHandoffsHandoffIdSubmitPost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary List unread paper preparation notifications
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreAcademicNotificationsGet(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ApiCoreAcademicNotificationsGet200Response>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreAcademicNotificationsGet(options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['AcademicWorkflowsApi.apiCoreAcademicNotificationsGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Dismiss a paper notice without changing the pending action
+         * @param {string} notificationId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreAcademicNotificationsNotificationIdReadPost(notificationId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ApiCoreAcademicNotificationsNotificationIdReadPost200Response>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreAcademicNotificationsNotificationIdReadPost(notificationId, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['AcademicWorkflowsApi.apiCoreAcademicNotificationsNotificationIdReadPost']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
@@ -10504,7 +12128,7 @@ export const AcademicWorkflowsApiFp = function(configuration?: Configuration) {
         },
         /**
          *
-         * @summary Search external arXiv candidates and pin their versions to an owned expansion
+         * @summary Search scholarly sources; continue one source with its task-bound cursor only
          * @param {ApiCoreAcademicPapersSearchPostRequest} apiCoreAcademicPapersSearchPostRequest
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
@@ -10517,7 +12141,20 @@ export const AcademicWorkflowsApiFp = function(configuration?: Configuration) {
         },
         /**
          *
-         * @summary Idempotently start expansion or a separate downstream Chat
+         * @summary Suggest a review topic from accessible paper metadata without starting a workflow
+         * @param {ApiCoreAcademicReviewTopicGeneratePostRequest} apiCoreAcademicReviewTopicGeneratePostRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreAcademicReviewTopicGeneratePost(apiCoreAcademicReviewTopicGeneratePostRequest: ApiCoreAcademicReviewTopicGeneratePostRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ApiCoreAcademicReviewTopicGeneratePost200Response>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreAcademicReviewTopicGeneratePost(apiCoreAcademicReviewTopicGeneratePostRequest, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['AcademicWorkflowsApi.apiCoreAcademicReviewTopicGeneratePost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Create background preparation, or start a separate downstream Chat
          * @param {AcademicTaskLaunch} academicTaskLaunch
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
@@ -10553,13 +12190,13 @@ export const AcademicWorkflowsApiFactory = function (configuration?: Configurati
     return {
         /**
          *
-         * @summary Read owned academic Chat progress and complete frozen handoff
+         * @summary Read owned academic Chat progress or frozen business input without internal sources
          * @param {AcademicWorkflowsApiApiCoreAcademicChatContextGetRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        apiCoreAcademicChatContextGet(requestParameters: AcademicWorkflowsApiApiCoreAcademicChatContextGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<ApiCoreAcademicChatContextGet200Response> {
-            return localVarFp.apiCoreAcademicChatContextGet(requestParameters.conversationId, options).then((request) => request(axios, basePath));
+        apiCoreAcademicChatContextGet(requestParameters: AcademicWorkflowsApiApiCoreAcademicChatContextGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<AcademicChatContext> {
+            return localVarFp.apiCoreAcademicChatContextGet(requestParameters.conversationId, requestParameters.view, options).then((request) => request(axios, basePath));
         },
         /**
          *
@@ -10570,6 +12207,25 @@ export const AcademicWorkflowsApiFactory = function (configuration?: Configurati
          */
         apiCoreAcademicDocumentsDocumentIdIdentityPatch(requestParameters: AcademicWorkflowsApiApiCoreAcademicDocumentsDocumentIdIdentityPatchRequest, options?: RawAxiosRequestConfig): AxiosPromise<ApiCoreAcademicDocumentsDocumentIdIdentityPatch200Response> {
             return localVarFp.apiCoreAcademicDocumentsDocumentIdIdentityPatch(requestParameters.documentId, requestParameters.academicDocumentIdentity, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Read available academic search configuration and budget profiles
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreAcademicExpansionCapabilitiesGet(options?: RawAxiosRequestConfig): AxiosPromise<ApiCoreAcademicExpansionCapabilitiesGet200Response> {
+            return localVarFp.apiCoreAcademicExpansionCapabilitiesGet(options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Confirm the current prepared scope and idempotently launch its Chat
+         * @param {AcademicWorkflowsApiApiCoreAcademicExpansionsExpansionIdConfirmPostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreAcademicExpansionsExpansionIdConfirmPost(requestParameters: AcademicWorkflowsApiApiCoreAcademicExpansionsExpansionIdConfirmPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<ApiCoreAcademicExpansionsExpansionIdConfirmPost200Response> {
+            return localVarFp.apiCoreAcademicExpansionsExpansionIdConfirmPost(requestParameters.expansionId, requestParameters.apiCoreAcademicExpansionsExpansionIdConfirmPostRequest, options).then((request) => request(axios, basePath));
         },
         /**
          *
@@ -10603,13 +12259,23 @@ export const AcademicWorkflowsApiFactory = function (configuration?: Configurati
         },
         /**
          *
-         * @summary List current user\'s expansion records
+         * @summary Answer, revise or retry the current preparation revision
+         * @param {AcademicWorkflowsApiApiCoreAcademicExpansionsExpansionIdPreparationPostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreAcademicExpansionsExpansionIdPreparationPost(requestParameters: AcademicWorkflowsApiApiCoreAcademicExpansionsExpansionIdPreparationPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<ApiCoreAcademicExpansionsExpansionIdPreparationPost200Response> {
+            return localVarFp.apiCoreAcademicExpansionsExpansionIdPreparationPost(requestParameters.expansionId, requestParameters.apiCoreAcademicExpansionsExpansionIdPreparationPostRequest, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary List owned expansion records and optionally review handoffs
          * @param {AcademicWorkflowsApiApiCoreAcademicExpansionsGetRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
         apiCoreAcademicExpansionsGet(requestParameters: AcademicWorkflowsApiApiCoreAcademicExpansionsGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<ApiCoreAcademicExpansionsGet200Response> {
-            return localVarFp.apiCoreAcademicExpansionsGet(requestParameters.datasetId, options).then((request) => request(axios, basePath));
+            return localVarFp.apiCoreAcademicExpansionsGet(requestParameters.datasetId, requestParameters.includeReviews, options).then((request) => request(axios, basePath));
         },
         /**
          *
@@ -10623,13 +12289,23 @@ export const AcademicWorkflowsApiFactory = function (configuration?: Configurati
         },
         /**
          *
+         * @summary Retry failed imports or processing without duplicating saved originals
+         * @param {AcademicWorkflowsApiApiCoreAcademicImportsBatchIdRetryPostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreAcademicImportsBatchIdRetryPost(requestParameters: AcademicWorkflowsApiApiCoreAcademicImportsBatchIdRetryPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<ApiCoreAcademicImportsBatchIdRetryPost200Response> {
+            return localVarFp.apiCoreAcademicImportsBatchIdRetryPost(requestParameters.batchId, requestParameters.apiCoreAcademicImportsBatchIdRetryPostRequest, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
          * @summary Read source-scoped imports or a page of import operations
          * @param {AcademicWorkflowsApiApiCoreAcademicImportsGetRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
         apiCoreAcademicImportsGet(requestParameters: AcademicWorkflowsApiApiCoreAcademicImportsGetRequest = {}, options?: RawAxiosRequestConfig): AxiosPromise<ApiCoreAcademicImportsGet200Response> {
-            return localVarFp.apiCoreAcademicImportsGet(requestParameters.view, requestParameters.cursor, requestParameters.limit, requestParameters.targetDatasetId, requestParameters.sourceDocumentId, requestParameters.conversationId, requestParameters.historyId, requestParameters.taskId, requestParameters.workflowSessionId, requestParameters.workDisplayKey, options).then((request) => request(axios, basePath));
+            return localVarFp.apiCoreAcademicImportsGet(requestParameters.filter, requestParameters.view, requestParameters.cursor, requestParameters.limit, requestParameters.targetDatasetId, requestParameters.sourceDocumentId, requestParameters.conversationId, requestParameters.historyId, requestParameters.taskId, requestParameters.workflowSessionId, requestParameters.workDisplayKey, options).then((request) => request(axios, basePath));
         },
         /**
          *
@@ -10683,13 +12359,13 @@ export const AcademicWorkflowsApiFactory = function (configuration?: Configurati
         },
         /**
          *
-         * @summary Read paper entries, logical folders and active materials
+         * @summary Read paper entries, logical folders and active materials; include_processing=false skips independent processing status for note reads
          * @param {AcademicWorkflowsApiApiCoreAcademicLibraryGetRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
         apiCoreAcademicLibraryGet(requestParameters: AcademicWorkflowsApiApiCoreAcademicLibraryGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<PaperLibraryResponse> {
-            return localVarFp.apiCoreAcademicLibraryGet(requestParameters.targetDatasetId, options).then((request) => request(axios, basePath));
+            return localVarFp.apiCoreAcademicLibraryGet(requestParameters.targetDatasetId, requestParameters.includeProcessing, options).then((request) => request(axios, basePath));
         },
         /**
          *
@@ -10713,7 +12389,7 @@ export const AcademicWorkflowsApiFactory = function (configuration?: Configurati
         },
         /**
          *
-         * @summary Update one paper with its revision and validate every active attachment
+         * @summary Update personal reading status; shared fields require edit access and revision
          * @param {AcademicWorkflowsApiApiCoreAcademicLibraryPapersLibraryPaperIdPatchRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
@@ -10748,8 +12424,27 @@ export const AcademicWorkflowsApiFactory = function (configuration?: Configurati
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        apiCoreAcademicMockHandoffsHandoffIdSubmitPost(requestParameters: AcademicWorkflowsApiApiCoreAcademicMockHandoffsHandoffIdSubmitPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<ApiCoreAcademicMockHandoffsHandoffIdSubmitPost200Response> {
+        apiCoreAcademicMockHandoffsHandoffIdSubmitPost(requestParameters: AcademicWorkflowsApiApiCoreAcademicMockHandoffsHandoffIdSubmitPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<AcademicHandoffResult> {
             return localVarFp.apiCoreAcademicMockHandoffsHandoffIdSubmitPost(requestParameters.handoffId, requestParameters.apiCoreAcademicMockHandoffsHandoffIdSubmitPostRequest, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary List unread paper preparation notifications
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreAcademicNotificationsGet(options?: RawAxiosRequestConfig): AxiosPromise<ApiCoreAcademicNotificationsGet200Response> {
+            return localVarFp.apiCoreAcademicNotificationsGet(options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Dismiss a paper notice without changing the pending action
+         * @param {AcademicWorkflowsApiApiCoreAcademicNotificationsNotificationIdReadPostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreAcademicNotificationsNotificationIdReadPost(requestParameters: AcademicWorkflowsApiApiCoreAcademicNotificationsNotificationIdReadPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<ApiCoreAcademicNotificationsNotificationIdReadPost200Response> {
+            return localVarFp.apiCoreAcademicNotificationsNotificationIdReadPost(requestParameters.notificationId, options).then((request) => request(axios, basePath));
         },
         /**
          *
@@ -10793,7 +12488,7 @@ export const AcademicWorkflowsApiFactory = function (configuration?: Configurati
         },
         /**
          *
-         * @summary Search external arXiv candidates and pin their versions to an owned expansion
+         * @summary Search scholarly sources; continue one source with its task-bound cursor only
          * @param {AcademicWorkflowsApiApiCoreAcademicPapersSearchPostRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
@@ -10803,7 +12498,17 @@ export const AcademicWorkflowsApiFactory = function (configuration?: Configurati
         },
         /**
          *
-         * @summary Idempotently start expansion or a separate downstream Chat
+         * @summary Suggest a review topic from accessible paper metadata without starting a workflow
+         * @param {AcademicWorkflowsApiApiCoreAcademicReviewTopicGeneratePostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreAcademicReviewTopicGeneratePost(requestParameters: AcademicWorkflowsApiApiCoreAcademicReviewTopicGeneratePostRequest, options?: RawAxiosRequestConfig): AxiosPromise<ApiCoreAcademicReviewTopicGeneratePost200Response> {
+            return localVarFp.apiCoreAcademicReviewTopicGeneratePost(requestParameters.apiCoreAcademicReviewTopicGeneratePostRequest, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Create background preparation, or start a separate downstream Chat
          * @param {AcademicWorkflowsApiApiCoreAcademicWorkflowLaunchesPostRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
@@ -10829,6 +12534,8 @@ export const AcademicWorkflowsApiFactory = function (configuration?: Configurati
  */
 export interface AcademicWorkflowsApiApiCoreAcademicChatContextGetRequest {
     readonly conversationId: string
+
+    readonly view?: ApiCoreAcademicChatContextGetViewEnum
 }
 
 /**
@@ -10838,6 +12545,15 @@ export interface AcademicWorkflowsApiApiCoreAcademicDocumentsDocumentIdIdentityP
     readonly documentId: string
 
     readonly academicDocumentIdentity: AcademicDocumentIdentity
+}
+
+/**
+ * Request parameters for apiCoreAcademicExpansionsExpansionIdConfirmPost operation in AcademicWorkflowsApi.
+ */
+export interface AcademicWorkflowsApiApiCoreAcademicExpansionsExpansionIdConfirmPostRequest {
+    readonly expansionId: string
+
+    readonly apiCoreAcademicExpansionsExpansionIdConfirmPostRequest: ApiCoreAcademicExpansionsExpansionIdConfirmPostRequest
 }
 
 /**
@@ -10866,10 +12582,21 @@ export interface AcademicWorkflowsApiApiCoreAcademicExpansionsExpansionIdPapersR
 }
 
 /**
+ * Request parameters for apiCoreAcademicExpansionsExpansionIdPreparationPost operation in AcademicWorkflowsApi.
+ */
+export interface AcademicWorkflowsApiApiCoreAcademicExpansionsExpansionIdPreparationPostRequest {
+    readonly expansionId: string
+
+    readonly apiCoreAcademicExpansionsExpansionIdPreparationPostRequest: ApiCoreAcademicExpansionsExpansionIdPreparationPostRequest
+}
+
+/**
  * Request parameters for apiCoreAcademicExpansionsGet operation in AcademicWorkflowsApi.
  */
 export interface AcademicWorkflowsApiApiCoreAcademicExpansionsGetRequest {
     readonly datasetId: string
+
+    readonly includeReviews?: boolean
 }
 
 /**
@@ -10886,9 +12613,20 @@ export interface AcademicWorkflowsApiApiCoreAcademicImportsBatchIdGetRequest {
 }
 
 /**
+ * Request parameters for apiCoreAcademicImportsBatchIdRetryPost operation in AcademicWorkflowsApi.
+ */
+export interface AcademicWorkflowsApiApiCoreAcademicImportsBatchIdRetryPostRequest {
+    readonly batchId: string
+
+    readonly apiCoreAcademicImportsBatchIdRetryPostRequest?: ApiCoreAcademicImportsBatchIdRetryPostRequest
+}
+
+/**
  * Request parameters for apiCoreAcademicImportsGet operation in AcademicWorkflowsApi.
  */
 export interface AcademicWorkflowsApiApiCoreAcademicImportsGetRequest {
+    readonly filter?: ApiCoreAcademicImportsGetFilterEnum
+
     readonly view?: ApiCoreAcademicImportsGetViewEnum
 
     readonly cursor?: string
@@ -10960,6 +12698,8 @@ export interface AcademicWorkflowsApiApiCoreAcademicLibraryFoldersPostRequest {
  */
 export interface AcademicWorkflowsApiApiCoreAcademicLibraryGetRequest {
     readonly targetDatasetId: string
+
+    readonly includeProcessing?: boolean
 }
 
 /**
@@ -11025,6 +12765,13 @@ export interface AcademicWorkflowsApiApiCoreAcademicMockHandoffsHandoffIdSubmitP
 }
 
 /**
+ * Request parameters for apiCoreAcademicNotificationsNotificationIdReadPost operation in AcademicWorkflowsApi.
+ */
+export interface AcademicWorkflowsApiApiCoreAcademicNotificationsNotificationIdReadPostRequest {
+    readonly notificationId: string
+}
+
+/**
  * Request parameters for apiCoreAcademicPaperContentsReadPost operation in AcademicWorkflowsApi.
  */
 export interface AcademicWorkflowsApiApiCoreAcademicPaperContentsReadPostRequest {
@@ -11062,6 +12809,13 @@ export interface AcademicWorkflowsApiApiCoreAcademicPapersSearchPostRequest {
 }
 
 /**
+ * Request parameters for apiCoreAcademicReviewTopicGeneratePost operation in AcademicWorkflowsApi.
+ */
+export interface AcademicWorkflowsApiApiCoreAcademicReviewTopicGeneratePostRequest {
+    readonly apiCoreAcademicReviewTopicGeneratePostRequest: ApiCoreAcademicReviewTopicGeneratePostRequest
+}
+
+/**
  * Request parameters for apiCoreAcademicWorkflowLaunchesPost operation in AcademicWorkflowsApi.
  */
 export interface AcademicWorkflowsApiApiCoreAcademicWorkflowLaunchesPostRequest {
@@ -11083,13 +12837,13 @@ export interface AcademicWorkflowsApiApiCoreAcademicZoteroAttachmentTransferPost
 export class AcademicWorkflowsApi extends BaseAPI {
     /**
      *
-     * @summary Read owned academic Chat progress and complete frozen handoff
+     * @summary Read owned academic Chat progress or frozen business input without internal sources
      * @param {AcademicWorkflowsApiApiCoreAcademicChatContextGetRequest} requestParameters Request parameters.
      * @param {*} [options] Override http request option.
      * @throws {RequiredError}
      */
     public apiCoreAcademicChatContextGet(requestParameters: AcademicWorkflowsApiApiCoreAcademicChatContextGetRequest, options?: RawAxiosRequestConfig) {
-        return AcademicWorkflowsApiFp(this.configuration).apiCoreAcademicChatContextGet(requestParameters.conversationId, options).then((request) => request(this.axios, this.basePath));
+        return AcademicWorkflowsApiFp(this.configuration).apiCoreAcademicChatContextGet(requestParameters.conversationId, requestParameters.view, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**
@@ -11101,6 +12855,27 @@ export class AcademicWorkflowsApi extends BaseAPI {
      */
     public apiCoreAcademicDocumentsDocumentIdIdentityPatch(requestParameters: AcademicWorkflowsApiApiCoreAcademicDocumentsDocumentIdIdentityPatchRequest, options?: RawAxiosRequestConfig) {
         return AcademicWorkflowsApiFp(this.configuration).apiCoreAcademicDocumentsDocumentIdIdentityPatch(requestParameters.documentId, requestParameters.academicDocumentIdentity, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Read available academic search configuration and budget profiles
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreAcademicExpansionCapabilitiesGet(options?: RawAxiosRequestConfig) {
+        return AcademicWorkflowsApiFp(this.configuration).apiCoreAcademicExpansionCapabilitiesGet(options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Confirm the current prepared scope and idempotently launch its Chat
+     * @param {AcademicWorkflowsApiApiCoreAcademicExpansionsExpansionIdConfirmPostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreAcademicExpansionsExpansionIdConfirmPost(requestParameters: AcademicWorkflowsApiApiCoreAcademicExpansionsExpansionIdConfirmPostRequest, options?: RawAxiosRequestConfig) {
+        return AcademicWorkflowsApiFp(this.configuration).apiCoreAcademicExpansionsExpansionIdConfirmPost(requestParameters.expansionId, requestParameters.apiCoreAcademicExpansionsExpansionIdConfirmPostRequest, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**
@@ -11138,13 +12913,24 @@ export class AcademicWorkflowsApi extends BaseAPI {
 
     /**
      *
-     * @summary List current user\'s expansion records
+     * @summary Answer, revise or retry the current preparation revision
+     * @param {AcademicWorkflowsApiApiCoreAcademicExpansionsExpansionIdPreparationPostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreAcademicExpansionsExpansionIdPreparationPost(requestParameters: AcademicWorkflowsApiApiCoreAcademicExpansionsExpansionIdPreparationPostRequest, options?: RawAxiosRequestConfig) {
+        return AcademicWorkflowsApiFp(this.configuration).apiCoreAcademicExpansionsExpansionIdPreparationPost(requestParameters.expansionId, requestParameters.apiCoreAcademicExpansionsExpansionIdPreparationPostRequest, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary List owned expansion records and optionally review handoffs
      * @param {AcademicWorkflowsApiApiCoreAcademicExpansionsGetRequest} requestParameters Request parameters.
      * @param {*} [options] Override http request option.
      * @throws {RequiredError}
      */
     public apiCoreAcademicExpansionsGet(requestParameters: AcademicWorkflowsApiApiCoreAcademicExpansionsGetRequest, options?: RawAxiosRequestConfig) {
-        return AcademicWorkflowsApiFp(this.configuration).apiCoreAcademicExpansionsGet(requestParameters.datasetId, options).then((request) => request(this.axios, this.basePath));
+        return AcademicWorkflowsApiFp(this.configuration).apiCoreAcademicExpansionsGet(requestParameters.datasetId, requestParameters.includeReviews, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**
@@ -11160,13 +12946,24 @@ export class AcademicWorkflowsApi extends BaseAPI {
 
     /**
      *
+     * @summary Retry failed imports or processing without duplicating saved originals
+     * @param {AcademicWorkflowsApiApiCoreAcademicImportsBatchIdRetryPostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreAcademicImportsBatchIdRetryPost(requestParameters: AcademicWorkflowsApiApiCoreAcademicImportsBatchIdRetryPostRequest, options?: RawAxiosRequestConfig) {
+        return AcademicWorkflowsApiFp(this.configuration).apiCoreAcademicImportsBatchIdRetryPost(requestParameters.batchId, requestParameters.apiCoreAcademicImportsBatchIdRetryPostRequest, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
      * @summary Read source-scoped imports or a page of import operations
      * @param {AcademicWorkflowsApiApiCoreAcademicImportsGetRequest} requestParameters Request parameters.
      * @param {*} [options] Override http request option.
      * @throws {RequiredError}
      */
     public apiCoreAcademicImportsGet(requestParameters: AcademicWorkflowsApiApiCoreAcademicImportsGetRequest = {}, options?: RawAxiosRequestConfig) {
-        return AcademicWorkflowsApiFp(this.configuration).apiCoreAcademicImportsGet(requestParameters.view, requestParameters.cursor, requestParameters.limit, requestParameters.targetDatasetId, requestParameters.sourceDocumentId, requestParameters.conversationId, requestParameters.historyId, requestParameters.taskId, requestParameters.workflowSessionId, requestParameters.workDisplayKey, options).then((request) => request(this.axios, this.basePath));
+        return AcademicWorkflowsApiFp(this.configuration).apiCoreAcademicImportsGet(requestParameters.filter, requestParameters.view, requestParameters.cursor, requestParameters.limit, requestParameters.targetDatasetId, requestParameters.sourceDocumentId, requestParameters.conversationId, requestParameters.historyId, requestParameters.taskId, requestParameters.workflowSessionId, requestParameters.workDisplayKey, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**
@@ -11226,13 +13023,13 @@ export class AcademicWorkflowsApi extends BaseAPI {
 
     /**
      *
-     * @summary Read paper entries, logical folders and active materials
+     * @summary Read paper entries, logical folders and active materials; include_processing=false skips independent processing status for note reads
      * @param {AcademicWorkflowsApiApiCoreAcademicLibraryGetRequest} requestParameters Request parameters.
      * @param {*} [options] Override http request option.
      * @throws {RequiredError}
      */
     public apiCoreAcademicLibraryGet(requestParameters: AcademicWorkflowsApiApiCoreAcademicLibraryGetRequest, options?: RawAxiosRequestConfig) {
-        return AcademicWorkflowsApiFp(this.configuration).apiCoreAcademicLibraryGet(requestParameters.targetDatasetId, options).then((request) => request(this.axios, this.basePath));
+        return AcademicWorkflowsApiFp(this.configuration).apiCoreAcademicLibraryGet(requestParameters.targetDatasetId, requestParameters.includeProcessing, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**
@@ -11259,7 +13056,7 @@ export class AcademicWorkflowsApi extends BaseAPI {
 
     /**
      *
-     * @summary Update one paper with its revision and validate every active attachment
+     * @summary Update personal reading status; shared fields require edit access and revision
      * @param {AcademicWorkflowsApiApiCoreAcademicLibraryPapersLibraryPaperIdPatchRequest} requestParameters Request parameters.
      * @param {*} [options] Override http request option.
      * @throws {RequiredError}
@@ -11299,6 +13096,27 @@ export class AcademicWorkflowsApi extends BaseAPI {
      */
     public apiCoreAcademicMockHandoffsHandoffIdSubmitPost(requestParameters: AcademicWorkflowsApiApiCoreAcademicMockHandoffsHandoffIdSubmitPostRequest, options?: RawAxiosRequestConfig) {
         return AcademicWorkflowsApiFp(this.configuration).apiCoreAcademicMockHandoffsHandoffIdSubmitPost(requestParameters.handoffId, requestParameters.apiCoreAcademicMockHandoffsHandoffIdSubmitPostRequest, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary List unread paper preparation notifications
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreAcademicNotificationsGet(options?: RawAxiosRequestConfig) {
+        return AcademicWorkflowsApiFp(this.configuration).apiCoreAcademicNotificationsGet(options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Dismiss a paper notice without changing the pending action
+     * @param {AcademicWorkflowsApiApiCoreAcademicNotificationsNotificationIdReadPostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreAcademicNotificationsNotificationIdReadPost(requestParameters: AcademicWorkflowsApiApiCoreAcademicNotificationsNotificationIdReadPostRequest, options?: RawAxiosRequestConfig) {
+        return AcademicWorkflowsApiFp(this.configuration).apiCoreAcademicNotificationsNotificationIdReadPost(requestParameters.notificationId, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**
@@ -11347,7 +13165,7 @@ export class AcademicWorkflowsApi extends BaseAPI {
 
     /**
      *
-     * @summary Search external arXiv candidates and pin their versions to an owned expansion
+     * @summary Search scholarly sources; continue one source with its task-bound cursor only
      * @param {AcademicWorkflowsApiApiCoreAcademicPapersSearchPostRequest} requestParameters Request parameters.
      * @param {*} [options] Override http request option.
      * @throws {RequiredError}
@@ -11358,7 +13176,18 @@ export class AcademicWorkflowsApi extends BaseAPI {
 
     /**
      *
-     * @summary Idempotently start expansion or a separate downstream Chat
+     * @summary Suggest a review topic from accessible paper metadata without starting a workflow
+     * @param {AcademicWorkflowsApiApiCoreAcademicReviewTopicGeneratePostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreAcademicReviewTopicGeneratePost(requestParameters: AcademicWorkflowsApiApiCoreAcademicReviewTopicGeneratePostRequest, options?: RawAxiosRequestConfig) {
+        return AcademicWorkflowsApiFp(this.configuration).apiCoreAcademicReviewTopicGeneratePost(requestParameters.apiCoreAcademicReviewTopicGeneratePostRequest, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Create background preparation, or start a separate downstream Chat
      * @param {AcademicWorkflowsApiApiCoreAcademicWorkflowLaunchesPostRequest} requestParameters Request parameters.
      * @param {*} [options] Override http request option.
      * @throws {RequiredError}
@@ -11379,10 +13208,19 @@ export class AcademicWorkflowsApi extends BaseAPI {
     }
 }
 
+export const ApiCoreAcademicChatContextGetViewEnum = {
+    Summary: 'summary'
+} as const;
+export type ApiCoreAcademicChatContextGetViewEnum = typeof ApiCoreAcademicChatContextGetViewEnum[keyof typeof ApiCoreAcademicChatContextGetViewEnum];
 export const ApiCoreAcademicImportsBatchIdGetViewEnum = {
     Operations: 'operations'
 } as const;
 export type ApiCoreAcademicImportsBatchIdGetViewEnum = typeof ApiCoreAcademicImportsBatchIdGetViewEnum[keyof typeof ApiCoreAcademicImportsBatchIdGetViewEnum];
+export const ApiCoreAcademicImportsGetFilterEnum = {
+    All: 'all',
+    Current: 'current'
+} as const;
+export type ApiCoreAcademicImportsGetFilterEnum = typeof ApiCoreAcademicImportsGetFilterEnum[keyof typeof ApiCoreAcademicImportsGetFilterEnum];
 export const ApiCoreAcademicImportsGetViewEnum = {
     Operations: 'operations'
 } as const;
@@ -17195,6 +19033,40 @@ export const DatasetsApiAxiosParamCreator = function (configuration?: Configurat
         },
         /**
          *
+         * @summary Get dataset cleanup progress
+         * @param {string} dataset
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreDatasetsDatasetDeletionGet: async (dataset: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'dataset' is not null or undefined
+            assertParamExists('apiCoreDatasetsDatasetDeletionGet', 'dataset', dataset)
+            const localVarPath = `/api/core/datasets/{dataset}/deletion`
+                .replace(`{${"dataset"}}`, encodeURIComponent(String(dataset)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
          * @summary Get dataset
          * @param {string} dataset
          * @param {*} [options] Override http request option.
@@ -17351,10 +19223,11 @@ export const DatasetsApiAxiosParamCreator = function (configuration?: Configurat
          * @param {string} [keyword]
          * @param {Array<string>} [tags]
          * @param {ApiCoreDatasetsGetSourceEnum} [source] Filter datasets by creation source: manual (local upload), cloud (cloud document sync) or official_installed (installed from the knowledge plaza).
+         * @param {string} [scene] Filter datasets by knowledge scene, for example academic_papers.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        apiCoreDatasetsGet: async (pageToken?: string, pageSize?: number, orderBy?: ApiCoreDatasetsGetOrderByEnum, keyword?: string, tags?: Array<string>, source?: ApiCoreDatasetsGetSourceEnum, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+        apiCoreDatasetsGet: async (pageToken?: string, pageSize?: number, orderBy?: ApiCoreDatasetsGetOrderByEnum, keyword?: string, tags?: Array<string>, source?: ApiCoreDatasetsGetSourceEnum, scene?: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
             const localVarPath = `/api/core/datasets`;
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
@@ -17389,6 +19262,10 @@ export const DatasetsApiAxiosParamCreator = function (configuration?: Configurat
 
             if (source !== undefined) {
                 localVarQueryParameter['source'] = source;
+            }
+
+            if (scene !== undefined) {
+                localVarQueryParameter['scene'] = scene;
             }
 
             localVarHeaderParameter['Accept'] = 'application/json';
@@ -17486,10 +19363,23 @@ export const DatasetsApiFp = function(configuration?: Configuration) {
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        async apiCoreDatasetsDatasetDelete(dataset: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<object>> {
+        async apiCoreDatasetsDatasetDelete(dataset: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ResourceOperationResult>> {
             const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreDatasetsDatasetDelete(dataset, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['DatasetsApi.apiCoreDatasetsDatasetDelete']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Get dataset cleanup progress
+         * @param {string} dataset
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreDatasetsDatasetDeletionGet(dataset: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<DatasetDeletionProgress>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreDatasetsDatasetDeletionGet(dataset, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DatasetsApi.apiCoreDatasetsDatasetDeletionGet']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
@@ -17556,11 +19446,12 @@ export const DatasetsApiFp = function(configuration?: Configuration) {
          * @param {string} [keyword]
          * @param {Array<string>} [tags]
          * @param {ApiCoreDatasetsGetSourceEnum} [source] Filter datasets by creation source: manual (local upload), cloud (cloud document sync) or official_installed (installed from the knowledge plaza).
+         * @param {string} [scene] Filter datasets by knowledge scene, for example academic_papers.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        async apiCoreDatasetsGet(pageToken?: string, pageSize?: number, orderBy?: ApiCoreDatasetsGetOrderByEnum, keyword?: string, tags?: Array<string>, source?: ApiCoreDatasetsGetSourceEnum, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ListDatasetsResponse>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreDatasetsGet(pageToken, pageSize, orderBy, keyword, tags, source, options);
+        async apiCoreDatasetsGet(pageToken?: string, pageSize?: number, orderBy?: ApiCoreDatasetsGetOrderByEnum, keyword?: string, tags?: Array<string>, source?: ApiCoreDatasetsGetSourceEnum, scene?: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ListDatasetsResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreDatasetsGet(pageToken, pageSize, orderBy, keyword, tags, source, scene, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['DatasetsApi.apiCoreDatasetsGet']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
@@ -17607,8 +19498,18 @@ export const DatasetsApiFactory = function (configuration?: Configuration, baseP
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        apiCoreDatasetsDatasetDelete(requestParameters: DatasetsApiApiCoreDatasetsDatasetDeleteRequest, options?: RawAxiosRequestConfig): AxiosPromise<object> {
+        apiCoreDatasetsDatasetDelete(requestParameters: DatasetsApiApiCoreDatasetsDatasetDeleteRequest, options?: RawAxiosRequestConfig): AxiosPromise<ResourceOperationResult> {
             return localVarFp.apiCoreDatasetsDatasetDelete(requestParameters.dataset, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Get dataset cleanup progress
+         * @param {DatasetsApiApiCoreDatasetsDatasetDeletionGetRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreDatasetsDatasetDeletionGet(requestParameters: DatasetsApiApiCoreDatasetsDatasetDeletionGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<DatasetDeletionProgress> {
+            return localVarFp.apiCoreDatasetsDatasetDeletionGet(requestParameters.dataset, options).then((request) => request(axios, basePath));
         },
         /**
          *
@@ -17658,7 +19559,7 @@ export const DatasetsApiFactory = function (configuration?: Configuration, baseP
          * @throws {RequiredError}
          */
         apiCoreDatasetsGet(requestParameters: DatasetsApiApiCoreDatasetsGetRequest = {}, options?: RawAxiosRequestConfig): AxiosPromise<ListDatasetsResponse> {
-            return localVarFp.apiCoreDatasetsGet(requestParameters.pageToken, requestParameters.pageSize, requestParameters.orderBy, requestParameters.keyword, requestParameters.tags, requestParameters.source, options).then((request) => request(axios, basePath));
+            return localVarFp.apiCoreDatasetsGet(requestParameters.pageToken, requestParameters.pageSize, requestParameters.orderBy, requestParameters.keyword, requestParameters.tags, requestParameters.source, requestParameters.scene, options).then((request) => request(axios, basePath));
         },
         /**
          *
@@ -17686,6 +19587,13 @@ export const DatasetsApiFactory = function (configuration?: Configuration, baseP
  * Request parameters for apiCoreDatasetsDatasetDelete operation in DatasetsApi.
  */
 export interface DatasetsApiApiCoreDatasetsDatasetDeleteRequest {
+    readonly dataset: string
+}
+
+/**
+ * Request parameters for apiCoreDatasetsDatasetDeletionGet operation in DatasetsApi.
+ */
+export interface DatasetsApiApiCoreDatasetsDatasetDeletionGetRequest {
     readonly dataset: string
 }
 
@@ -17744,6 +19652,11 @@ export interface DatasetsApiApiCoreDatasetsGetRequest {
      * Filter datasets by creation source: manual (local upload), cloud (cloud document sync) or official_installed (installed from the knowledge plaza).
      */
     readonly source?: ApiCoreDatasetsGetSourceEnum
+
+    /**
+     * Filter datasets by knowledge scene, for example academic_papers.
+     */
+    readonly scene?: string
 }
 
 /**
@@ -17768,6 +19681,17 @@ export class DatasetsApi extends BaseAPI {
      */
     public apiCoreDatasetsDatasetDelete(requestParameters: DatasetsApiApiCoreDatasetsDatasetDeleteRequest, options?: RawAxiosRequestConfig) {
         return DatasetsApiFp(this.configuration).apiCoreDatasetsDatasetDelete(requestParameters.dataset, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Get dataset cleanup progress
+     * @param {DatasetsApiApiCoreDatasetsDatasetDeletionGetRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreDatasetsDatasetDeletionGet(requestParameters: DatasetsApiApiCoreDatasetsDatasetDeletionGetRequest, options?: RawAxiosRequestConfig) {
+        return DatasetsApiFp(this.configuration).apiCoreDatasetsDatasetDeletionGet(requestParameters.dataset, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**
@@ -17822,7 +19746,7 @@ export class DatasetsApi extends BaseAPI {
      * @throws {RequiredError}
      */
     public apiCoreDatasetsGet(requestParameters: DatasetsApiApiCoreDatasetsGetRequest = {}, options?: RawAxiosRequestConfig) {
-        return DatasetsApiFp(this.configuration).apiCoreDatasetsGet(requestParameters.pageToken, requestParameters.pageSize, requestParameters.orderBy, requestParameters.keyword, requestParameters.tags, requestParameters.source, options).then((request) => request(this.axios, this.basePath));
+        return DatasetsApiFp(this.configuration).apiCoreDatasetsGet(requestParameters.pageToken, requestParameters.pageSize, requestParameters.orderBy, requestParameters.keyword, requestParameters.tags, requestParameters.source, requestParameters.scene, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**
@@ -17967,16 +19891,12 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
         },
         /**
          *
-         * @summary POST /academic/imports/{batch_id}:retry
-         * @param {string} batchId
+         * @summary POST /academic/library/papers:delete
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        apiCoreAcademicImportsBatchIdRetryPost: async (batchId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
-            // verify required parameter 'batchId' is not null or undefined
-            assertParamExists('apiCoreAcademicImportsBatchIdRetryPost', 'batchId', batchId)
-            const localVarPath = `/api/core/academic/imports/{batch_id}:retry`
-                .replace(`{${"batch_id"}}`, encodeURIComponent(String(batchId)));
+        apiCoreAcademicLibraryPapersDeletePost: async (options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            const localVarPath = `/api/core/academic/library/papers:delete`;
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -18064,6 +19984,35 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
          */
         apiCoreAcademicSourcesInspectPost: async (options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
             const localVarPath = `/api/core/academic/sources:inspect`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary POST /academic/sources:lookup-pdfs
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreAcademicSourcesLookupPdfsPost: async (options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            const localVarPath = `/api/core/academic/sources:lookup-pdfs`;
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -19387,10 +21336,11 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
         /**
          *
          * @summary List conversation archive folders
+         * @param {ApiCoreConversationArchiveFoldersGetKindEnum} [kind]
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        apiCoreConversationArchiveFoldersGet: async (options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+        apiCoreConversationArchiveFoldersGet: async (kind?: ApiCoreConversationArchiveFoldersGetKindEnum, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
             const localVarPath = `/api/core/conversation-archive-folders`;
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
@@ -19402,6 +21352,10 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
             const localVarHeaderParameter = {} as any;
             const localVarQueryParameter = {} as any;
+
+            if (kind !== undefined) {
+                localVarQueryParameter['kind'] = kind;
+            }
 
             localVarHeaderParameter['Accept'] = 'application/json';
 
@@ -19886,6 +21840,355 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             setSearchParams(localVarUrlObj, localVarQueryParameter);
             let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
             localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary Atomically claim the next queued message
+         * @param {string} conversationId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreConversationsConversationIdFollowUpsClaimNextPost: async (conversationId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'conversationId' is not null or undefined
+            assertParamExists('apiCoreConversationsConversationIdFollowUpsClaimNextPost', 'conversationId', conversationId)
+            const localVarPath = `/api/core/conversations/{conversation_id}/follow-ups:claim-next`
+                .replace(`{${"conversation_id"}}`, encodeURIComponent(String(conversationId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary Complete an ordinary queued-message dispatch
+         * @param {string} conversationId
+         * @param {string} followUpId
+         * @param {ConversationFollowUpCompleteRequest} conversationFollowUpCompleteRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreConversationsConversationIdFollowUpsFollowUpIdCompletePost: async (conversationId: string, followUpId: string, conversationFollowUpCompleteRequest: ConversationFollowUpCompleteRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'conversationId' is not null or undefined
+            assertParamExists('apiCoreConversationsConversationIdFollowUpsFollowUpIdCompletePost', 'conversationId', conversationId)
+            // verify required parameter 'followUpId' is not null or undefined
+            assertParamExists('apiCoreConversationsConversationIdFollowUpsFollowUpIdCompletePost', 'followUpId', followUpId)
+            // verify required parameter 'conversationFollowUpCompleteRequest' is not null or undefined
+            assertParamExists('apiCoreConversationsConversationIdFollowUpsFollowUpIdCompletePost', 'conversationFollowUpCompleteRequest', conversationFollowUpCompleteRequest)
+            const localVarPath = `/api/core/conversations/{conversation_id}/follow-ups/{follow_up_id}:complete`
+                .replace(`{${"conversation_id"}}`, encodeURIComponent(String(conversationId)))
+                .replace(`{${"follow_up_id"}}`, encodeURIComponent(String(followUpId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(conversationFollowUpCompleteRequest, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary Delete a pending queued message
+         * @param {string} conversationId
+         * @param {string} followUpId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreConversationsConversationIdFollowUpsFollowUpIdDelete: async (conversationId: string, followUpId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'conversationId' is not null or undefined
+            assertParamExists('apiCoreConversationsConversationIdFollowUpsFollowUpIdDelete', 'conversationId', conversationId)
+            // verify required parameter 'followUpId' is not null or undefined
+            assertParamExists('apiCoreConversationsConversationIdFollowUpsFollowUpIdDelete', 'followUpId', followUpId)
+            const localVarPath = `/api/core/conversations/{conversation_id}/follow-ups/{follow_up_id}`
+                .replace(`{${"conversation_id"}}`, encodeURIComponent(String(conversationId)))
+                .replace(`{${"follow_up_id"}}`, encodeURIComponent(String(followUpId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'DELETE', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary Edit a pending queued message
+         * @param {string} conversationId
+         * @param {string} followUpId
+         * @param {ConversationFollowUpUpdateRequest} conversationFollowUpUpdateRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreConversationsConversationIdFollowUpsFollowUpIdPatch: async (conversationId: string, followUpId: string, conversationFollowUpUpdateRequest: ConversationFollowUpUpdateRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'conversationId' is not null or undefined
+            assertParamExists('apiCoreConversationsConversationIdFollowUpsFollowUpIdPatch', 'conversationId', conversationId)
+            // verify required parameter 'followUpId' is not null or undefined
+            assertParamExists('apiCoreConversationsConversationIdFollowUpsFollowUpIdPatch', 'followUpId', followUpId)
+            // verify required parameter 'conversationFollowUpUpdateRequest' is not null or undefined
+            assertParamExists('apiCoreConversationsConversationIdFollowUpsFollowUpIdPatch', 'conversationFollowUpUpdateRequest', conversationFollowUpUpdateRequest)
+            const localVarPath = `/api/core/conversations/{conversation_id}/follow-ups/{follow_up_id}`
+                .replace(`{${"conversation_id"}}`, encodeURIComponent(String(conversationId)))
+                .replace(`{${"follow_up_id"}}`, encodeURIComponent(String(followUpId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'PATCH', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(conversationFollowUpUpdateRequest, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary Retry a failed queued or steering message
+         * @param {string} conversationId
+         * @param {string} followUpId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreConversationsConversationIdFollowUpsFollowUpIdRetryPost: async (conversationId: string, followUpId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'conversationId' is not null or undefined
+            assertParamExists('apiCoreConversationsConversationIdFollowUpsFollowUpIdRetryPost', 'conversationId', conversationId)
+            // verify required parameter 'followUpId' is not null or undefined
+            assertParamExists('apiCoreConversationsConversationIdFollowUpsFollowUpIdRetryPost', 'followUpId', followUpId)
+            const localVarPath = `/api/core/conversations/{conversation_id}/follow-ups/{follow_up_id}:retry`
+                .replace(`{${"conversation_id"}}`, encodeURIComponent(String(conversationId)))
+                .replace(`{${"follow_up_id"}}`, encodeURIComponent(String(followUpId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary Submit pending input as guidance for the active run
+         * @param {string} conversationId
+         * @param {string} followUpId
+         * @param {ConversationFollowUpSteerRequest} [conversationFollowUpSteerRequest]
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreConversationsConversationIdFollowUpsFollowUpIdSteerPost: async (conversationId: string, followUpId: string, conversationFollowUpSteerRequest?: ConversationFollowUpSteerRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'conversationId' is not null or undefined
+            assertParamExists('apiCoreConversationsConversationIdFollowUpsFollowUpIdSteerPost', 'conversationId', conversationId)
+            // verify required parameter 'followUpId' is not null or undefined
+            assertParamExists('apiCoreConversationsConversationIdFollowUpsFollowUpIdSteerPost', 'followUpId', followUpId)
+            const localVarPath = `/api/core/conversations/{conversation_id}/follow-ups/{follow_up_id}:steer`
+                .replace(`{${"conversation_id"}}`, encodeURIComponent(String(conversationId)))
+                .replace(`{${"follow_up_id"}}`, encodeURIComponent(String(followUpId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(conversationFollowUpSteerRequest, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary List queued and steering messages
+         * @param {string} conversationId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreConversationsConversationIdFollowUpsGet: async (conversationId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'conversationId' is not null or undefined
+            assertParamExists('apiCoreConversationsConversationIdFollowUpsGet', 'conversationId', conversationId)
+            const localVarPath = `/api/core/conversations/{conversation_id}/follow-ups`
+                .replace(`{${"conversation_id"}}`, encodeURIComponent(String(conversationId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary Queue a message while a task is running
+         * @param {string} conversationId
+         * @param {ConversationFollowUpCreateRequest} conversationFollowUpCreateRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreConversationsConversationIdFollowUpsPost: async (conversationId: string, conversationFollowUpCreateRequest: ConversationFollowUpCreateRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'conversationId' is not null or undefined
+            assertParamExists('apiCoreConversationsConversationIdFollowUpsPost', 'conversationId', conversationId)
+            // verify required parameter 'conversationFollowUpCreateRequest' is not null or undefined
+            assertParamExists('apiCoreConversationsConversationIdFollowUpsPost', 'conversationFollowUpCreateRequest', conversationFollowUpCreateRequest)
+            const localVarPath = `/api/core/conversations/{conversation_id}/follow-ups`
+                .replace(`{${"conversation_id"}}`, encodeURIComponent(String(conversationId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(conversationFollowUpCreateRequest, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary Reorder all pending queued messages
+         * @param {string} conversationId
+         * @param {ConversationFollowUpReorderRequest} conversationFollowUpReorderRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreConversationsConversationIdFollowUpsReorderPost: async (conversationId: string, conversationFollowUpReorderRequest: ConversationFollowUpReorderRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'conversationId' is not null or undefined
+            assertParamExists('apiCoreConversationsConversationIdFollowUpsReorderPost', 'conversationId', conversationId)
+            // verify required parameter 'conversationFollowUpReorderRequest' is not null or undefined
+            assertParamExists('apiCoreConversationsConversationIdFollowUpsReorderPost', 'conversationFollowUpReorderRequest', conversationFollowUpReorderRequest)
+            const localVarPath = `/api/core/conversations/{conversation_id}/follow-ups:reorder`
+                .replace(`{${"conversation_id"}}`, encodeURIComponent(String(conversationId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(conversationFollowUpReorderRequest, localVarRequestOptions, configuration)
 
             return {
                 url: toPathString(localVarUrlObj),
@@ -21814,6 +24117,44 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
         },
         /**
          *
+         * @summary Observe chat parsing without submitting new work
+         * @param {string} dataset
+         * @param {string} document
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreDatasetsDatasetDocumentsDocumentParseStatusGet: async (dataset: string, document: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'dataset' is not null or undefined
+            assertParamExists('apiCoreDatasetsDatasetDocumentsDocumentParseStatusGet', 'dataset', dataset)
+            // verify required parameter 'document' is not null or undefined
+            assertParamExists('apiCoreDatasetsDatasetDocumentsDocumentParseStatusGet', 'document', document)
+            const localVarPath = `/api/core/datasets/{dataset}/documents/{document}/parse-status`
+                .replace(`{${"dataset"}}`, encodeURIComponent(String(dataset)))
+                .replace(`{${"document"}}`, encodeURIComponent(String(document)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
          * @summary GET /datasets/{dataset}/documents/{document}/pdf-artifacts/{artifact}:content
          * @param {string} dataset
          * @param {string} document
@@ -22133,6 +24474,175 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             };
         },
         /**
+         * Requires document read permission and current source-matched PDF IR. Uses only the selected chat model, without retrieval. Optional source_sha256 binds the request to the displayed PDF and rejects stale sources with409; every response includes the authoritative source_sha256. Language defaults to zh; force refreshes the user/document/source/parser/model/language cache. Evidence quotes and zero-based page coordinates come only from the source IR. Figure/table explanations are contextual: no image pixels are supplied. Paragraph translation accepts only authoritative textual blocks up to 8000 Unicode characters.
+         * @summary Explain a figure or table using extracted text and cells
+         * @param {string} block
+         * @param {string} dataset
+         * @param {string} document
+         * @param {PDFPaperReadingRequest} [pDFPaperReadingRequest]
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreDatasetsDatasetDocumentsDocumentPdfIrBlocksBlockExplanationPost: async (block: string, dataset: string, document: string, pDFPaperReadingRequest?: PDFPaperReadingRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'block' is not null or undefined
+            assertParamExists('apiCoreDatasetsDatasetDocumentsDocumentPdfIrBlocksBlockExplanationPost', 'block', block)
+            // verify required parameter 'dataset' is not null or undefined
+            assertParamExists('apiCoreDatasetsDatasetDocumentsDocumentPdfIrBlocksBlockExplanationPost', 'dataset', dataset)
+            // verify required parameter 'document' is not null or undefined
+            assertParamExists('apiCoreDatasetsDatasetDocumentsDocumentPdfIrBlocksBlockExplanationPost', 'document', document)
+            const localVarPath = `/api/core/datasets/{dataset}/documents/{document}/pdf-ir/blocks/{block}/explanation`
+                .replace(`{${"block"}}`, encodeURIComponent(String(block)))
+                .replace(`{${"dataset"}}`, encodeURIComponent(String(dataset)))
+                .replace(`{${"document"}}`, encodeURIComponent(String(document)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(pDFPaperReadingRequest, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         * Requires document read permission and current PDF IR. One model response may include a suggested display_latex repair and all symbol definitions. The original PDF formula remains authoritative. Source pages are zero based and bounding boxes use normalized visible-page coordinates. The backend supplies verbatim evidence; model paraphrases and derivations are marked inferred. Language defaults to zh. focus_symbol is retained for older clients; it optionally requests the exact clicked symbol with a separate cache entry. force refreshes the source/model/language/focus-specific cache.
+         * @summary Explain a formula from original PDF evidence using the selected chat model without retrieval
+         * @param {string} block Formula block id from the current PDF IR
+         * @param {string} dataset
+         * @param {string} document
+         * @param {PDFFormulaExplanationRequest} [pDFFormulaExplanationRequest]
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreDatasetsDatasetDocumentsDocumentPdfIrFormulasBlockExplanationPost: async (block: string, dataset: string, document: string, pDFFormulaExplanationRequest?: PDFFormulaExplanationRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'block' is not null or undefined
+            assertParamExists('apiCoreDatasetsDatasetDocumentsDocumentPdfIrFormulasBlockExplanationPost', 'block', block)
+            // verify required parameter 'dataset' is not null or undefined
+            assertParamExists('apiCoreDatasetsDatasetDocumentsDocumentPdfIrFormulasBlockExplanationPost', 'dataset', dataset)
+            // verify required parameter 'document' is not null or undefined
+            assertParamExists('apiCoreDatasetsDatasetDocumentsDocumentPdfIrFormulasBlockExplanationPost', 'document', document)
+            const localVarPath = `/api/core/datasets/{dataset}/documents/{document}/pdf-ir/formulas/{block}/explanation`
+                .replace(`{${"block"}}`, encodeURIComponent(String(block)))
+                .replace(`{${"dataset"}}`, encodeURIComponent(String(dataset)))
+                .replace(`{${"document"}}`, encodeURIComponent(String(document)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(pDFFormulaExplanationRequest, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary Read PDF structure without triggering parsing or retrieval
+         * @param {string} dataset
+         * @param {string} document
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreDatasetsDatasetDocumentsDocumentPdfIrGet: async (dataset: string, document: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'dataset' is not null or undefined
+            assertParamExists('apiCoreDatasetsDatasetDocumentsDocumentPdfIrGet', 'dataset', dataset)
+            // verify required parameter 'document' is not null or undefined
+            assertParamExists('apiCoreDatasetsDatasetDocumentsDocumentPdfIrGet', 'document', document)
+            const localVarPath = `/api/core/datasets/{dataset}/documents/{document}/pdf-ir`
+                .replace(`{${"dataset"}}`, encodeURIComponent(String(dataset)))
+                .replace(`{${"document"}}`, encodeURIComponent(String(document)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary Parse the original PDF using the selected MinerU service independently of retrieval
+         * @param {string} dataset
+         * @param {string} document
+         * @param {PDFIRRequest} [pDFIRRequest]
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreDatasetsDatasetDocumentsDocumentPdfIrPost: async (dataset: string, document: string, pDFIRRequest?: PDFIRRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'dataset' is not null or undefined
+            assertParamExists('apiCoreDatasetsDatasetDocumentsDocumentPdfIrPost', 'dataset', dataset)
+            // verify required parameter 'document' is not null or undefined
+            assertParamExists('apiCoreDatasetsDatasetDocumentsDocumentPdfIrPost', 'document', document)
+            const localVarPath = `/api/core/datasets/{dataset}/documents/{document}/pdf-ir`
+                .replace(`{${"dataset"}}`, encodeURIComponent(String(dataset)))
+                .replace(`{${"document"}}`, encodeURIComponent(String(document)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(pDFIRRequest, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
          *
          * @summary POST /datasets/{dataset}/documents/{document}/pdf-render-jobs/{job}:complete
          * @param {string} dataset
@@ -22290,6 +24800,49 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
         },
         /**
          *
+         * @summary Explicitly prepare this document; scopes only; preserves existing outputs
+         * @param {string} dataset
+         * @param {string} document
+         * @param {ReadingPreparationRequest} readingPreparationRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreDatasetsDatasetDocumentsDocumentPrepareReadingPost: async (dataset: string, document: string, readingPreparationRequest: ReadingPreparationRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'dataset' is not null or undefined
+            assertParamExists('apiCoreDatasetsDatasetDocumentsDocumentPrepareReadingPost', 'dataset', dataset)
+            // verify required parameter 'document' is not null or undefined
+            assertParamExists('apiCoreDatasetsDatasetDocumentsDocumentPrepareReadingPost', 'document', document)
+            // verify required parameter 'readingPreparationRequest' is not null or undefined
+            assertParamExists('apiCoreDatasetsDatasetDocumentsDocumentPrepareReadingPost', 'readingPreparationRequest', readingPreparationRequest)
+            const localVarPath = `/api/core/datasets/{dataset}/documents/{document}:prepare-reading`
+                .replace(`{${"dataset"}}`, encodeURIComponent(String(dataset)))
+                .replace(`{${"document"}}`, encodeURIComponent(String(document)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(readingPreparationRequest, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
          * @summary GET /datasets/{dataset}/documents/{document}:read
          * @param {string} dataset
          * @param {string} document
@@ -22315,6 +24868,44 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             const localVarHeaderParameter = {} as any;
             const localVarQueryParameter = {} as any;
 
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary Read durable preparation progress and accounted model requests
+         * @param {string} dataset
+         * @param {string} document
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreDatasetsDatasetDocumentsDocumentReadingPreparationGet: async (dataset: string, document: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'dataset' is not null or undefined
+            assertParamExists('apiCoreDatasetsDatasetDocumentsDocumentReadingPreparationGet', 'dataset', dataset)
+            // verify required parameter 'document' is not null or undefined
+            assertParamExists('apiCoreDatasetsDatasetDocumentsDocumentReadingPreparationGet', 'document', document)
+            const localVarPath = `/api/core/datasets/{dataset}/documents/{document}/reading-preparation`
+                .replace(`{${"dataset"}}`, encodeURIComponent(String(dataset)))
+                .replace(`{${"document"}}`, encodeURIComponent(String(document)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Accept'] = 'application/json';
 
             setSearchParams(localVarUrlObj, localVarQueryParameter);
             let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
@@ -28167,6 +30758,71 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
         },
         /**
          *
+         * @summary Read personal AI reading preferences and capability registry
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreUserReadingPreferencesGet: async (options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            const localVarPath = `/api/core/user/reading-preferences`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary Replace personal preferences; never process historical documents
+         * @param {ReadingPreparationPolicy} readingPreparationPolicy
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreUserReadingPreferencesPut: async (readingPreparationPolicy: ReadingPreparationPolicy, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'readingPreparationPolicy' is not null or undefined
+            assertParamExists('apiCoreUserReadingPreferencesPut', 'readingPreparationPolicy', readingPreparationPolicy)
+            const localVarPath = `/api/core/user/reading-preferences`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'PUT', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(readingPreparationPolicy, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
          * @summary POST /v1/internal/provider-connections/{auth_connection_id}/access-token:report
          * @param {string} authConnectionId
          * @param {*} [options] Override http request option.
@@ -32270,15 +34926,14 @@ export const DefaultApiFp = function(configuration?: Configuration) {
         },
         /**
          *
-         * @summary POST /academic/imports/{batch_id}:retry
-         * @param {string} batchId
+         * @summary POST /academic/library/papers:delete
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        async apiCoreAcademicImportsBatchIdRetryPost(batchId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreAcademicImportsBatchIdRetryPost(batchId, options);
+        async apiCoreAcademicLibraryPapersDeletePost(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreAcademicLibraryPapersDeletePost(options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
-            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreAcademicImportsBatchIdRetryPost']?.[localVarOperationServerIndex]?.url;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreAcademicLibraryPapersDeletePost']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
@@ -32315,6 +34970,18 @@ export const DefaultApiFp = function(configuration?: Configuration) {
             const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreAcademicSourcesInspectPost(options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreAcademicSourcesInspectPost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary POST /academic/sources:lookup-pdfs
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreAcademicSourcesLookupPdfsPost(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreAcademicSourcesLookupPdfsPost(options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreAcademicSourcesLookupPdfsPost']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
@@ -32835,11 +35502,12 @@ export const DefaultApiFp = function(configuration?: Configuration) {
         /**
          *
          * @summary List conversation archive folders
+         * @param {ApiCoreConversationArchiveFoldersGetKindEnum} [kind]
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        async apiCoreConversationArchiveFoldersGet(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ConversationArchiveFolderListResponse>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreConversationArchiveFoldersGet(options);
+        async apiCoreConversationArchiveFoldersGet(kind?: ApiCoreConversationArchiveFoldersGetKindEnum, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ConversationArchiveFolderListResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreConversationArchiveFoldersGet(kind, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreConversationArchiveFoldersGet']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
@@ -33017,6 +35685,133 @@ export const DefaultApiFp = function(configuration?: Configuration) {
             const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreConversationsConversationIdEventsGet(conversationId, view, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreConversationsConversationIdEventsGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Atomically claim the next queued message
+         * @param {string} conversationId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreConversationsConversationIdFollowUpsClaimNextPost(conversationId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ConversationFollowUpClaimResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreConversationsConversationIdFollowUpsClaimNextPost(conversationId, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreConversationsConversationIdFollowUpsClaimNextPost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Complete an ordinary queued-message dispatch
+         * @param {string} conversationId
+         * @param {string} followUpId
+         * @param {ConversationFollowUpCompleteRequest} conversationFollowUpCompleteRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreConversationsConversationIdFollowUpsFollowUpIdCompletePost(conversationId: string, followUpId: string, conversationFollowUpCompleteRequest: ConversationFollowUpCompleteRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<CoreEmptyResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreConversationsConversationIdFollowUpsFollowUpIdCompletePost(conversationId, followUpId, conversationFollowUpCompleteRequest, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreConversationsConversationIdFollowUpsFollowUpIdCompletePost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Delete a pending queued message
+         * @param {string} conversationId
+         * @param {string} followUpId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreConversationsConversationIdFollowUpsFollowUpIdDelete(conversationId: string, followUpId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<CoreEmptyResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreConversationsConversationIdFollowUpsFollowUpIdDelete(conversationId, followUpId, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreConversationsConversationIdFollowUpsFollowUpIdDelete']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Edit a pending queued message
+         * @param {string} conversationId
+         * @param {string} followUpId
+         * @param {ConversationFollowUpUpdateRequest} conversationFollowUpUpdateRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreConversationsConversationIdFollowUpsFollowUpIdPatch(conversationId: string, followUpId: string, conversationFollowUpUpdateRequest: ConversationFollowUpUpdateRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ConversationFollowUpResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreConversationsConversationIdFollowUpsFollowUpIdPatch(conversationId, followUpId, conversationFollowUpUpdateRequest, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreConversationsConversationIdFollowUpsFollowUpIdPatch']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Retry a failed queued or steering message
+         * @param {string} conversationId
+         * @param {string} followUpId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreConversationsConversationIdFollowUpsFollowUpIdRetryPost(conversationId: string, followUpId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ConversationFollowUpResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreConversationsConversationIdFollowUpsFollowUpIdRetryPost(conversationId, followUpId, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreConversationsConversationIdFollowUpsFollowUpIdRetryPost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Submit pending input as guidance for the active run
+         * @param {string} conversationId
+         * @param {string} followUpId
+         * @param {ConversationFollowUpSteerRequest} [conversationFollowUpSteerRequest]
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreConversationsConversationIdFollowUpsFollowUpIdSteerPost(conversationId: string, followUpId: string, conversationFollowUpSteerRequest?: ConversationFollowUpSteerRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ConversationFollowUpSteerResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreConversationsConversationIdFollowUpsFollowUpIdSteerPost(conversationId, followUpId, conversationFollowUpSteerRequest, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreConversationsConversationIdFollowUpsFollowUpIdSteerPost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary List queued and steering messages
+         * @param {string} conversationId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreConversationsConversationIdFollowUpsGet(conversationId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ConversationFollowUpListResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreConversationsConversationIdFollowUpsGet(conversationId, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreConversationsConversationIdFollowUpsGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Queue a message while a task is running
+         * @param {string} conversationId
+         * @param {ConversationFollowUpCreateRequest} conversationFollowUpCreateRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreConversationsConversationIdFollowUpsPost(conversationId: string, conversationFollowUpCreateRequest: ConversationFollowUpCreateRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ConversationFollowUpResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreConversationsConversationIdFollowUpsPost(conversationId, conversationFollowUpCreateRequest, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreConversationsConversationIdFollowUpsPost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Reorder all pending queued messages
+         * @param {string} conversationId
+         * @param {ConversationFollowUpReorderRequest} conversationFollowUpReorderRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreConversationsConversationIdFollowUpsReorderPost(conversationId: string, conversationFollowUpReorderRequest: ConversationFollowUpReorderRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<CoreEmptyResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreConversationsConversationIdFollowUpsReorderPost(conversationId, conversationFollowUpReorderRequest, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreConversationsConversationIdFollowUpsReorderPost']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
@@ -33739,6 +36534,20 @@ export const DefaultApiFp = function(configuration?: Configuration) {
         },
         /**
          *
+         * @summary Observe chat parsing without submitting new work
+         * @param {string} dataset
+         * @param {string} document
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreDatasetsDatasetDocumentsDocumentParseStatusGet(dataset: string, document: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ApiCoreDatasetsDatasetDocumentsDocumentParseStatusGet200Response>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreDatasetsDatasetDocumentsDocumentParseStatusGet(dataset, document, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreDatasetsDatasetDocumentsDocumentParseStatusGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
          * @summary GET /datasets/{dataset}/documents/{document}/pdf-artifacts/{artifact}:content
          * @param {string} dataset
          * @param {string} document
@@ -33856,6 +36665,67 @@ export const DefaultApiFp = function(configuration?: Configuration) {
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
+         * Requires document read permission and current source-matched PDF IR. Uses only the selected chat model, without retrieval. Optional source_sha256 binds the request to the displayed PDF and rejects stale sources with409; every response includes the authoritative source_sha256. Language defaults to zh; force refreshes the user/document/source/parser/model/language cache. Evidence quotes and zero-based page coordinates come only from the source IR. Figure/table explanations are contextual: no image pixels are supplied. Paragraph translation accepts only authoritative textual blocks up to 8000 Unicode characters.
+         * @summary Explain a figure or table using extracted text and cells
+         * @param {string} block
+         * @param {string} dataset
+         * @param {string} document
+         * @param {PDFPaperReadingRequest} [pDFPaperReadingRequest]
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreDatasetsDatasetDocumentsDocumentPdfIrBlocksBlockExplanationPost(block: string, dataset: string, document: string, pDFPaperReadingRequest?: PDFPaperReadingRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<PDFVisualExplanationEnvelope>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreDatasetsDatasetDocumentsDocumentPdfIrBlocksBlockExplanationPost(block, dataset, document, pDFPaperReadingRequest, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreDatasetsDatasetDocumentsDocumentPdfIrBlocksBlockExplanationPost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         * Requires document read permission and current PDF IR. One model response may include a suggested display_latex repair and all symbol definitions. The original PDF formula remains authoritative. Source pages are zero based and bounding boxes use normalized visible-page coordinates. The backend supplies verbatim evidence; model paraphrases and derivations are marked inferred. Language defaults to zh. focus_symbol is retained for older clients; it optionally requests the exact clicked symbol with a separate cache entry. force refreshes the source/model/language/focus-specific cache.
+         * @summary Explain a formula from original PDF evidence using the selected chat model without retrieval
+         * @param {string} block Formula block id from the current PDF IR
+         * @param {string} dataset
+         * @param {string} document
+         * @param {PDFFormulaExplanationRequest} [pDFFormulaExplanationRequest]
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreDatasetsDatasetDocumentsDocumentPdfIrFormulasBlockExplanationPost(block: string, dataset: string, document: string, pDFFormulaExplanationRequest?: PDFFormulaExplanationRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<PDFFormulaExplanationEnvelope>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreDatasetsDatasetDocumentsDocumentPdfIrFormulasBlockExplanationPost(block, dataset, document, pDFFormulaExplanationRequest, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreDatasetsDatasetDocumentsDocumentPdfIrFormulasBlockExplanationPost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Read PDF structure without triggering parsing or retrieval
+         * @param {string} dataset
+         * @param {string} document
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreDatasetsDatasetDocumentsDocumentPdfIrGet(dataset: string, document: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<PDFIREnvelope>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreDatasetsDatasetDocumentsDocumentPdfIrGet(dataset, document, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreDatasetsDatasetDocumentsDocumentPdfIrGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Parse the original PDF using the selected MinerU service independently of retrieval
+         * @param {string} dataset
+         * @param {string} document
+         * @param {PDFIRRequest} [pDFIRRequest]
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreDatasetsDatasetDocumentsDocumentPdfIrPost(dataset: string, document: string, pDFIRRequest?: PDFIRRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<PDFIREnvelope>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreDatasetsDatasetDocumentsDocumentPdfIrPost(dataset, document, pDFIRRequest, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreDatasetsDatasetDocumentsDocumentPdfIrPost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
          *
          * @summary POST /datasets/{dataset}/documents/{document}/pdf-render-jobs/{job}:complete
          * @param {string} dataset
@@ -33915,6 +36785,21 @@ export const DefaultApiFp = function(configuration?: Configuration) {
         },
         /**
          *
+         * @summary Explicitly prepare this document; scopes only; preserves existing outputs
+         * @param {string} dataset
+         * @param {string} document
+         * @param {ReadingPreparationRequest} readingPreparationRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreDatasetsDatasetDocumentsDocumentPrepareReadingPost(dataset: string, document: string, readingPreparationRequest: ReadingPreparationRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ApiCoreDatasetsDatasetDocumentsDocumentReadingPreparationGet200Response>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreDatasetsDatasetDocumentsDocumentPrepareReadingPost(dataset, document, readingPreparationRequest, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreDatasetsDatasetDocumentsDocumentPrepareReadingPost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
          * @summary GET /datasets/{dataset}/documents/{document}:read
          * @param {string} dataset
          * @param {string} document
@@ -33925,6 +36810,20 @@ export const DefaultApiFp = function(configuration?: Configuration) {
             const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreDatasetsDatasetDocumentsDocumentReadGet(dataset, document, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreDatasetsDatasetDocumentsDocumentReadGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Read durable preparation progress and accounted model requests
+         * @param {string} dataset
+         * @param {string} document
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreDatasetsDatasetDocumentsDocumentReadingPreparationGet(dataset: string, document: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ApiCoreDatasetsDatasetDocumentsDocumentReadingPreparationGet200Response>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreDatasetsDatasetDocumentsDocumentReadingPreparationGet(dataset, document, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreDatasetsDatasetDocumentsDocumentReadingPreparationGet']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
@@ -36158,6 +39057,31 @@ export const DefaultApiFp = function(configuration?: Configuration) {
         },
         /**
          *
+         * @summary Read personal AI reading preferences and capability registry
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreUserReadingPreferencesGet(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ApiCoreUserReadingPreferencesGet200Response>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreUserReadingPreferencesGet(options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreUserReadingPreferencesGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Replace personal preferences; never process historical documents
+         * @param {ReadingPreparationPolicy} readingPreparationPolicy
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreUserReadingPreferencesPut(readingPreparationPolicy: ReadingPreparationPolicy, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ApiCoreUserReadingPreferencesGet200Response>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreUserReadingPreferencesPut(readingPreparationPolicy, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreUserReadingPreferencesPut']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
          * @summary POST /v1/internal/provider-connections/{auth_connection_id}/access-token:report
          * @param {string} authConnectionId
          * @param {*} [options] Override http request option.
@@ -37796,13 +40720,12 @@ export const DefaultApiFactory = function (configuration?: Configuration, basePa
         },
         /**
          *
-         * @summary POST /academic/imports/{batch_id}:retry
-         * @param {DefaultApiApiCoreAcademicImportsBatchIdRetryPostRequest} requestParameters Request parameters.
+         * @summary POST /academic/library/papers:delete
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        apiCoreAcademicImportsBatchIdRetryPost(requestParameters: DefaultApiApiCoreAcademicImportsBatchIdRetryPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
-            return localVarFp.apiCoreAcademicImportsBatchIdRetryPost(requestParameters.batchId, options).then((request) => request(axios, basePath));
+        apiCoreAcademicLibraryPapersDeletePost(options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreAcademicLibraryPapersDeletePost(options).then((request) => request(axios, basePath));
         },
         /**
          *
@@ -37830,6 +40753,15 @@ export const DefaultApiFactory = function (configuration?: Configuration, basePa
          */
         apiCoreAcademicSourcesInspectPost(options?: RawAxiosRequestConfig): AxiosPromise<void> {
             return localVarFp.apiCoreAcademicSourcesInspectPost(options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary POST /academic/sources:lookup-pdfs
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreAcademicSourcesLookupPdfsPost(options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreAcademicSourcesLookupPdfsPost(options).then((request) => request(axios, basePath));
         },
         /**
          *
@@ -38221,11 +41153,12 @@ export const DefaultApiFactory = function (configuration?: Configuration, basePa
         /**
          *
          * @summary List conversation archive folders
+         * @param {DefaultApiApiCoreConversationArchiveFoldersGetRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        apiCoreConversationArchiveFoldersGet(options?: RawAxiosRequestConfig): AxiosPromise<ConversationArchiveFolderListResponse> {
-            return localVarFp.apiCoreConversationArchiveFoldersGet(options).then((request) => request(axios, basePath));
+        apiCoreConversationArchiveFoldersGet(requestParameters: DefaultApiApiCoreConversationArchiveFoldersGetRequest = {}, options?: RawAxiosRequestConfig): AxiosPromise<ConversationArchiveFolderListResponse> {
+            return localVarFp.apiCoreConversationArchiveFoldersGet(requestParameters.kind, options).then((request) => request(axios, basePath));
         },
         /**
          *
@@ -38355,6 +41288,96 @@ export const DefaultApiFactory = function (configuration?: Configuration, basePa
          */
         apiCoreConversationsConversationIdEventsGet(requestParameters: DefaultApiApiCoreConversationsConversationIdEventsGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<ApiCoreConversationsConversationIdEventsGet200Response> {
             return localVarFp.apiCoreConversationsConversationIdEventsGet(requestParameters.conversationId, requestParameters.view, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Atomically claim the next queued message
+         * @param {DefaultApiApiCoreConversationsConversationIdFollowUpsClaimNextPostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreConversationsConversationIdFollowUpsClaimNextPost(requestParameters: DefaultApiApiCoreConversationsConversationIdFollowUpsClaimNextPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<ConversationFollowUpClaimResponse> {
+            return localVarFp.apiCoreConversationsConversationIdFollowUpsClaimNextPost(requestParameters.conversationId, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Complete an ordinary queued-message dispatch
+         * @param {DefaultApiApiCoreConversationsConversationIdFollowUpsFollowUpIdCompletePostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreConversationsConversationIdFollowUpsFollowUpIdCompletePost(requestParameters: DefaultApiApiCoreConversationsConversationIdFollowUpsFollowUpIdCompletePostRequest, options?: RawAxiosRequestConfig): AxiosPromise<CoreEmptyResponse> {
+            return localVarFp.apiCoreConversationsConversationIdFollowUpsFollowUpIdCompletePost(requestParameters.conversationId, requestParameters.followUpId, requestParameters.conversationFollowUpCompleteRequest, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Delete a pending queued message
+         * @param {DefaultApiApiCoreConversationsConversationIdFollowUpsFollowUpIdDeleteRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreConversationsConversationIdFollowUpsFollowUpIdDelete(requestParameters: DefaultApiApiCoreConversationsConversationIdFollowUpsFollowUpIdDeleteRequest, options?: RawAxiosRequestConfig): AxiosPromise<CoreEmptyResponse> {
+            return localVarFp.apiCoreConversationsConversationIdFollowUpsFollowUpIdDelete(requestParameters.conversationId, requestParameters.followUpId, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Edit a pending queued message
+         * @param {DefaultApiApiCoreConversationsConversationIdFollowUpsFollowUpIdPatchRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreConversationsConversationIdFollowUpsFollowUpIdPatch(requestParameters: DefaultApiApiCoreConversationsConversationIdFollowUpsFollowUpIdPatchRequest, options?: RawAxiosRequestConfig): AxiosPromise<ConversationFollowUpResponse> {
+            return localVarFp.apiCoreConversationsConversationIdFollowUpsFollowUpIdPatch(requestParameters.conversationId, requestParameters.followUpId, requestParameters.conversationFollowUpUpdateRequest, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Retry a failed queued or steering message
+         * @param {DefaultApiApiCoreConversationsConversationIdFollowUpsFollowUpIdRetryPostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreConversationsConversationIdFollowUpsFollowUpIdRetryPost(requestParameters: DefaultApiApiCoreConversationsConversationIdFollowUpsFollowUpIdRetryPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<ConversationFollowUpResponse> {
+            return localVarFp.apiCoreConversationsConversationIdFollowUpsFollowUpIdRetryPost(requestParameters.conversationId, requestParameters.followUpId, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Submit pending input as guidance for the active run
+         * @param {DefaultApiApiCoreConversationsConversationIdFollowUpsFollowUpIdSteerPostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreConversationsConversationIdFollowUpsFollowUpIdSteerPost(requestParameters: DefaultApiApiCoreConversationsConversationIdFollowUpsFollowUpIdSteerPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<ConversationFollowUpSteerResponse> {
+            return localVarFp.apiCoreConversationsConversationIdFollowUpsFollowUpIdSteerPost(requestParameters.conversationId, requestParameters.followUpId, requestParameters.conversationFollowUpSteerRequest, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary List queued and steering messages
+         * @param {DefaultApiApiCoreConversationsConversationIdFollowUpsGetRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreConversationsConversationIdFollowUpsGet(requestParameters: DefaultApiApiCoreConversationsConversationIdFollowUpsGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<ConversationFollowUpListResponse> {
+            return localVarFp.apiCoreConversationsConversationIdFollowUpsGet(requestParameters.conversationId, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Queue a message while a task is running
+         * @param {DefaultApiApiCoreConversationsConversationIdFollowUpsPostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreConversationsConversationIdFollowUpsPost(requestParameters: DefaultApiApiCoreConversationsConversationIdFollowUpsPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<ConversationFollowUpResponse> {
+            return localVarFp.apiCoreConversationsConversationIdFollowUpsPost(requestParameters.conversationId, requestParameters.conversationFollowUpCreateRequest, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Reorder all pending queued messages
+         * @param {DefaultApiApiCoreConversationsConversationIdFollowUpsReorderPostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreConversationsConversationIdFollowUpsReorderPost(requestParameters: DefaultApiApiCoreConversationsConversationIdFollowUpsReorderPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<CoreEmptyResponse> {
+            return localVarFp.apiCoreConversationsConversationIdFollowUpsReorderPost(requestParameters.conversationId, requestParameters.conversationFollowUpReorderRequest, options).then((request) => request(axios, basePath));
         },
         /**
          *
@@ -38888,6 +41911,16 @@ export const DefaultApiFactory = function (configuration?: Configuration, basePa
         },
         /**
          *
+         * @summary Observe chat parsing without submitting new work
+         * @param {DefaultApiApiCoreDatasetsDatasetDocumentsDocumentParseStatusGetRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreDatasetsDatasetDocumentsDocumentParseStatusGet(requestParameters: DefaultApiApiCoreDatasetsDatasetDocumentsDocumentParseStatusGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<ApiCoreDatasetsDatasetDocumentsDocumentParseStatusGet200Response> {
+            return localVarFp.apiCoreDatasetsDatasetDocumentsDocumentParseStatusGet(requestParameters.dataset, requestParameters.document, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
          * @summary GET /datasets/{dataset}/documents/{document}/pdf-artifacts/{artifact}:content
          * @param {DefaultApiApiCoreDatasetsDatasetDocumentsDocumentPdfArtifactsArtifactContentGetRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
@@ -38967,6 +42000,46 @@ export const DefaultApiFactory = function (configuration?: Configuration, basePa
             return localVarFp.apiCoreDatasetsDatasetDocumentsDocumentPdfCapabilitiesGet(requestParameters.dataset, requestParameters.document, options).then((request) => request(axios, basePath));
         },
         /**
+         * Requires document read permission and current source-matched PDF IR. Uses only the selected chat model, without retrieval. Optional source_sha256 binds the request to the displayed PDF and rejects stale sources with409; every response includes the authoritative source_sha256. Language defaults to zh; force refreshes the user/document/source/parser/model/language cache. Evidence quotes and zero-based page coordinates come only from the source IR. Figure/table explanations are contextual: no image pixels are supplied. Paragraph translation accepts only authoritative textual blocks up to 8000 Unicode characters.
+         * @summary Explain a figure or table using extracted text and cells
+         * @param {DefaultApiApiCoreDatasetsDatasetDocumentsDocumentPdfIrBlocksBlockExplanationPostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreDatasetsDatasetDocumentsDocumentPdfIrBlocksBlockExplanationPost(requestParameters: DefaultApiApiCoreDatasetsDatasetDocumentsDocumentPdfIrBlocksBlockExplanationPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<PDFVisualExplanationEnvelope> {
+            return localVarFp.apiCoreDatasetsDatasetDocumentsDocumentPdfIrBlocksBlockExplanationPost(requestParameters.block, requestParameters.dataset, requestParameters.document, requestParameters.pDFPaperReadingRequest, options).then((request) => request(axios, basePath));
+        },
+        /**
+         * Requires document read permission and current PDF IR. One model response may include a suggested display_latex repair and all symbol definitions. The original PDF formula remains authoritative. Source pages are zero based and bounding boxes use normalized visible-page coordinates. The backend supplies verbatim evidence; model paraphrases and derivations are marked inferred. Language defaults to zh. focus_symbol is retained for older clients; it optionally requests the exact clicked symbol with a separate cache entry. force refreshes the source/model/language/focus-specific cache.
+         * @summary Explain a formula from original PDF evidence using the selected chat model without retrieval
+         * @param {DefaultApiApiCoreDatasetsDatasetDocumentsDocumentPdfIrFormulasBlockExplanationPostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreDatasetsDatasetDocumentsDocumentPdfIrFormulasBlockExplanationPost(requestParameters: DefaultApiApiCoreDatasetsDatasetDocumentsDocumentPdfIrFormulasBlockExplanationPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<PDFFormulaExplanationEnvelope> {
+            return localVarFp.apiCoreDatasetsDatasetDocumentsDocumentPdfIrFormulasBlockExplanationPost(requestParameters.block, requestParameters.dataset, requestParameters.document, requestParameters.pDFFormulaExplanationRequest, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Read PDF structure without triggering parsing or retrieval
+         * @param {DefaultApiApiCoreDatasetsDatasetDocumentsDocumentPdfIrGetRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreDatasetsDatasetDocumentsDocumentPdfIrGet(requestParameters: DefaultApiApiCoreDatasetsDatasetDocumentsDocumentPdfIrGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<PDFIREnvelope> {
+            return localVarFp.apiCoreDatasetsDatasetDocumentsDocumentPdfIrGet(requestParameters.dataset, requestParameters.document, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Parse the original PDF using the selected MinerU service independently of retrieval
+         * @param {DefaultApiApiCoreDatasetsDatasetDocumentsDocumentPdfIrPostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreDatasetsDatasetDocumentsDocumentPdfIrPost(requestParameters: DefaultApiApiCoreDatasetsDatasetDocumentsDocumentPdfIrPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<PDFIREnvelope> {
+            return localVarFp.apiCoreDatasetsDatasetDocumentsDocumentPdfIrPost(requestParameters.dataset, requestParameters.document, requestParameters.pDFIRRequest, options).then((request) => request(axios, basePath));
+        },
+        /**
          *
          * @summary POST /datasets/{dataset}/documents/{document}/pdf-render-jobs/{job}:complete
          * @param {DefaultApiApiCoreDatasetsDatasetDocumentsDocumentPdfRenderJobsJobCompletePostRequest} requestParameters Request parameters.
@@ -39008,6 +42081,16 @@ export const DefaultApiFactory = function (configuration?: Configuration, basePa
         },
         /**
          *
+         * @summary Explicitly prepare this document; scopes only; preserves existing outputs
+         * @param {DefaultApiApiCoreDatasetsDatasetDocumentsDocumentPrepareReadingPostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreDatasetsDatasetDocumentsDocumentPrepareReadingPost(requestParameters: DefaultApiApiCoreDatasetsDatasetDocumentsDocumentPrepareReadingPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<ApiCoreDatasetsDatasetDocumentsDocumentReadingPreparationGet200Response> {
+            return localVarFp.apiCoreDatasetsDatasetDocumentsDocumentPrepareReadingPost(requestParameters.dataset, requestParameters.document, requestParameters.readingPreparationRequest, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
          * @summary GET /datasets/{dataset}/documents/{document}:read
          * @param {DefaultApiApiCoreDatasetsDatasetDocumentsDocumentReadGetRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
@@ -39015,6 +42098,16 @@ export const DefaultApiFactory = function (configuration?: Configuration, basePa
          */
         apiCoreDatasetsDatasetDocumentsDocumentReadGet(requestParameters: DefaultApiApiCoreDatasetsDatasetDocumentsDocumentReadGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
             return localVarFp.apiCoreDatasetsDatasetDocumentsDocumentReadGet(requestParameters.dataset, requestParameters.document, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Read durable preparation progress and accounted model requests
+         * @param {DefaultApiApiCoreDatasetsDatasetDocumentsDocumentReadingPreparationGetRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreDatasetsDatasetDocumentsDocumentReadingPreparationGet(requestParameters: DefaultApiApiCoreDatasetsDatasetDocumentsDocumentReadingPreparationGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<ApiCoreDatasetsDatasetDocumentsDocumentReadingPreparationGet200Response> {
+            return localVarFp.apiCoreDatasetsDatasetDocumentsDocumentReadingPreparationGet(requestParameters.dataset, requestParameters.document, options).then((request) => request(axios, basePath));
         },
         /**
          *
@@ -40667,6 +43760,25 @@ export const DefaultApiFactory = function (configuration?: Configuration, basePa
         },
         /**
          *
+         * @summary Read personal AI reading preferences and capability registry
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreUserReadingPreferencesGet(options?: RawAxiosRequestConfig): AxiosPromise<ApiCoreUserReadingPreferencesGet200Response> {
+            return localVarFp.apiCoreUserReadingPreferencesGet(options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Replace personal preferences; never process historical documents
+         * @param {DefaultApiApiCoreUserReadingPreferencesPutRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreUserReadingPreferencesPut(requestParameters: DefaultApiApiCoreUserReadingPreferencesPutRequest, options?: RawAxiosRequestConfig): AxiosPromise<ApiCoreUserReadingPreferencesGet200Response> {
+            return localVarFp.apiCoreUserReadingPreferencesPut(requestParameters.readingPreparationPolicy, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
          * @summary POST /v1/internal/provider-connections/{auth_connection_id}/access-token:report
          * @param {DefaultApiApiCoreV1InternalProviderConnectionsAuthConnectionIdAccessTokenReportPostRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
@@ -41890,13 +45002,6 @@ export interface DefaultApiApiCoreAcademicImportsBatchIdCancelPostRequest {
 }
 
 /**
- * Request parameters for apiCoreAcademicImportsBatchIdRetryPost operation in DefaultApi.
- */
-export interface DefaultApiApiCoreAcademicImportsBatchIdRetryPostRequest {
-    readonly batchId: string
-}
-
-/**
  * Request parameters for apiCoreAgentInvocationsInvocationIdFinishPost operation in DefaultApi.
  */
 export interface DefaultApiApiCoreAgentInvocationsInvocationIdFinishPostRequest {
@@ -42033,6 +45138,13 @@ export interface DefaultApiApiCoreConversationArchiveFoldersFolderIdPatchRequest
 }
 
 /**
+ * Request parameters for apiCoreConversationArchiveFoldersGet operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreConversationArchiveFoldersGetRequest {
+    readonly kind?: ApiCoreConversationArchiveFoldersGetKindEnum
+}
+
+/**
  * Request parameters for apiCoreConversationArchiveFoldersPost operation in DefaultApi.
  */
 export interface DefaultApiApiCoreConversationArchiveFoldersPostRequest {
@@ -42128,6 +45240,89 @@ export interface DefaultApiApiCoreConversationsConversationIdEventsGetRequest {
     readonly conversationId: string
 
     readonly view?: ApiCoreConversationsConversationIdEventsGetViewEnum
+}
+
+/**
+ * Request parameters for apiCoreConversationsConversationIdFollowUpsClaimNextPost operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreConversationsConversationIdFollowUpsClaimNextPostRequest {
+    readonly conversationId: string
+}
+
+/**
+ * Request parameters for apiCoreConversationsConversationIdFollowUpsFollowUpIdCompletePost operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreConversationsConversationIdFollowUpsFollowUpIdCompletePostRequest {
+    readonly conversationId: string
+
+    readonly followUpId: string
+
+    readonly conversationFollowUpCompleteRequest: ConversationFollowUpCompleteRequest
+}
+
+/**
+ * Request parameters for apiCoreConversationsConversationIdFollowUpsFollowUpIdDelete operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreConversationsConversationIdFollowUpsFollowUpIdDeleteRequest {
+    readonly conversationId: string
+
+    readonly followUpId: string
+}
+
+/**
+ * Request parameters for apiCoreConversationsConversationIdFollowUpsFollowUpIdPatch operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreConversationsConversationIdFollowUpsFollowUpIdPatchRequest {
+    readonly conversationId: string
+
+    readonly followUpId: string
+
+    readonly conversationFollowUpUpdateRequest: ConversationFollowUpUpdateRequest
+}
+
+/**
+ * Request parameters for apiCoreConversationsConversationIdFollowUpsFollowUpIdRetryPost operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreConversationsConversationIdFollowUpsFollowUpIdRetryPostRequest {
+    readonly conversationId: string
+
+    readonly followUpId: string
+}
+
+/**
+ * Request parameters for apiCoreConversationsConversationIdFollowUpsFollowUpIdSteerPost operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreConversationsConversationIdFollowUpsFollowUpIdSteerPostRequest {
+    readonly conversationId: string
+
+    readonly followUpId: string
+
+    readonly conversationFollowUpSteerRequest?: ConversationFollowUpSteerRequest
+}
+
+/**
+ * Request parameters for apiCoreConversationsConversationIdFollowUpsGet operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreConversationsConversationIdFollowUpsGetRequest {
+    readonly conversationId: string
+}
+
+/**
+ * Request parameters for apiCoreConversationsConversationIdFollowUpsPost operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreConversationsConversationIdFollowUpsPostRequest {
+    readonly conversationId: string
+
+    readonly conversationFollowUpCreateRequest: ConversationFollowUpCreateRequest
+}
+
+/**
+ * Request parameters for apiCoreConversationsConversationIdFollowUpsReorderPost operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreConversationsConversationIdFollowUpsReorderPostRequest {
+    readonly conversationId: string
+
+    readonly conversationFollowUpReorderRequest: ConversationFollowUpReorderRequest
 }
 
 /**
@@ -42491,6 +45686,15 @@ export interface DefaultApiApiCoreDatasetsDatasetDocumentsDocumentEnsureParsedPo
 }
 
 /**
+ * Request parameters for apiCoreDatasetsDatasetDocumentsDocumentParseStatusGet operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreDatasetsDatasetDocumentsDocumentParseStatusGetRequest {
+    readonly dataset: string
+
+    readonly document: string
+}
+
+/**
  * Request parameters for apiCoreDatasetsDatasetDocumentsDocumentPdfArtifactsArtifactContentGet operation in DefaultApi.
  */
 export interface DefaultApiApiCoreDatasetsDatasetDocumentsDocumentPdfArtifactsArtifactContentGetRequest {
@@ -42575,6 +45779,55 @@ export interface DefaultApiApiCoreDatasetsDatasetDocumentsDocumentPdfCapabilitie
 }
 
 /**
+ * Request parameters for apiCoreDatasetsDatasetDocumentsDocumentPdfIrBlocksBlockExplanationPost operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreDatasetsDatasetDocumentsDocumentPdfIrBlocksBlockExplanationPostRequest {
+    readonly block: string
+
+    readonly dataset: string
+
+    readonly document: string
+
+    readonly pDFPaperReadingRequest?: PDFPaperReadingRequest
+}
+
+/**
+ * Request parameters for apiCoreDatasetsDatasetDocumentsDocumentPdfIrFormulasBlockExplanationPost operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreDatasetsDatasetDocumentsDocumentPdfIrFormulasBlockExplanationPostRequest {
+    /**
+     * Formula block id from the current PDF IR
+     */
+    readonly block: string
+
+    readonly dataset: string
+
+    readonly document: string
+
+    readonly pDFFormulaExplanationRequest?: PDFFormulaExplanationRequest
+}
+
+/**
+ * Request parameters for apiCoreDatasetsDatasetDocumentsDocumentPdfIrGet operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreDatasetsDatasetDocumentsDocumentPdfIrGetRequest {
+    readonly dataset: string
+
+    readonly document: string
+}
+
+/**
+ * Request parameters for apiCoreDatasetsDatasetDocumentsDocumentPdfIrPost operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreDatasetsDatasetDocumentsDocumentPdfIrPostRequest {
+    readonly dataset: string
+
+    readonly document: string
+
+    readonly pDFIRRequest?: PDFIRRequest
+}
+
+/**
  * Request parameters for apiCoreDatasetsDatasetDocumentsDocumentPdfRenderJobsJobCompletePost operation in DefaultApi.
  */
 export interface DefaultApiApiCoreDatasetsDatasetDocumentsDocumentPdfRenderJobsJobCompletePostRequest {
@@ -42615,9 +45868,29 @@ export interface DefaultApiApiCoreDatasetsDatasetDocumentsDocumentPdfTranslation
 }
 
 /**
+ * Request parameters for apiCoreDatasetsDatasetDocumentsDocumentPrepareReadingPost operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreDatasetsDatasetDocumentsDocumentPrepareReadingPostRequest {
+    readonly dataset: string
+
+    readonly document: string
+
+    readonly readingPreparationRequest: ReadingPreparationRequest
+}
+
+/**
  * Request parameters for apiCoreDatasetsDatasetDocumentsDocumentReadGet operation in DefaultApi.
  */
 export interface DefaultApiApiCoreDatasetsDatasetDocumentsDocumentReadGetRequest {
+    readonly dataset: string
+
+    readonly document: string
+}
+
+/**
+ * Request parameters for apiCoreDatasetsDatasetDocumentsDocumentReadingPreparationGet operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreDatasetsDatasetDocumentsDocumentReadingPreparationGetRequest {
     readonly dataset: string
 
     readonly document: string
@@ -43528,6 +46801,13 @@ export interface DefaultApiApiCoreUserEnvVarsIdPatchRequest {
 }
 
 /**
+ * Request parameters for apiCoreUserReadingPreferencesPut operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreUserReadingPreferencesPutRequest {
+    readonly readingPreparationPolicy: ReadingPreparationPolicy
+}
+
+/**
  * Request parameters for apiCoreV1InternalProviderConnectionsAuthConnectionIdAccessTokenReportPost operation in DefaultApi.
  */
 export interface DefaultApiApiCoreV1InternalProviderConnectionsAuthConnectionIdAccessTokenReportPostRequest {
@@ -44208,13 +47488,12 @@ export class DefaultApi extends BaseAPI {
 
     /**
      *
-     * @summary POST /academic/imports/{batch_id}:retry
-     * @param {DefaultApiApiCoreAcademicImportsBatchIdRetryPostRequest} requestParameters Request parameters.
+     * @summary POST /academic/library/papers:delete
      * @param {*} [options] Override http request option.
      * @throws {RequiredError}
      */
-    public apiCoreAcademicImportsBatchIdRetryPost(requestParameters: DefaultApiApiCoreAcademicImportsBatchIdRetryPostRequest, options?: RawAxiosRequestConfig) {
-        return DefaultApiFp(this.configuration).apiCoreAcademicImportsBatchIdRetryPost(requestParameters.batchId, options).then((request) => request(this.axios, this.basePath));
+    public apiCoreAcademicLibraryPapersDeletePost(options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreAcademicLibraryPapersDeletePost(options).then((request) => request(this.axios, this.basePath));
     }
 
     /**
@@ -44245,6 +47524,16 @@ export class DefaultApi extends BaseAPI {
      */
     public apiCoreAcademicSourcesInspectPost(options?: RawAxiosRequestConfig) {
         return DefaultApiFp(this.configuration).apiCoreAcademicSourcesInspectPost(options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary POST /academic/sources:lookup-pdfs
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreAcademicSourcesLookupPdfsPost(options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreAcademicSourcesLookupPdfsPost(options).then((request) => request(this.axios, this.basePath));
     }
 
     /**
@@ -44678,11 +47967,12 @@ export class DefaultApi extends BaseAPI {
     /**
      *
      * @summary List conversation archive folders
+     * @param {DefaultApiApiCoreConversationArchiveFoldersGetRequest} requestParameters Request parameters.
      * @param {*} [options] Override http request option.
      * @throws {RequiredError}
      */
-    public apiCoreConversationArchiveFoldersGet(options?: RawAxiosRequestConfig) {
-        return DefaultApiFp(this.configuration).apiCoreConversationArchiveFoldersGet(options).then((request) => request(this.axios, this.basePath));
+    public apiCoreConversationArchiveFoldersGet(requestParameters: DefaultApiApiCoreConversationArchiveFoldersGetRequest = {}, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreConversationArchiveFoldersGet(requestParameters.kind, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**
@@ -44825,6 +48115,105 @@ export class DefaultApi extends BaseAPI {
      */
     public apiCoreConversationsConversationIdEventsGet(requestParameters: DefaultApiApiCoreConversationsConversationIdEventsGetRequest, options?: RawAxiosRequestConfig) {
         return DefaultApiFp(this.configuration).apiCoreConversationsConversationIdEventsGet(requestParameters.conversationId, requestParameters.view, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Atomically claim the next queued message
+     * @param {DefaultApiApiCoreConversationsConversationIdFollowUpsClaimNextPostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreConversationsConversationIdFollowUpsClaimNextPost(requestParameters: DefaultApiApiCoreConversationsConversationIdFollowUpsClaimNextPostRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreConversationsConversationIdFollowUpsClaimNextPost(requestParameters.conversationId, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Complete an ordinary queued-message dispatch
+     * @param {DefaultApiApiCoreConversationsConversationIdFollowUpsFollowUpIdCompletePostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreConversationsConversationIdFollowUpsFollowUpIdCompletePost(requestParameters: DefaultApiApiCoreConversationsConversationIdFollowUpsFollowUpIdCompletePostRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreConversationsConversationIdFollowUpsFollowUpIdCompletePost(requestParameters.conversationId, requestParameters.followUpId, requestParameters.conversationFollowUpCompleteRequest, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Delete a pending queued message
+     * @param {DefaultApiApiCoreConversationsConversationIdFollowUpsFollowUpIdDeleteRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreConversationsConversationIdFollowUpsFollowUpIdDelete(requestParameters: DefaultApiApiCoreConversationsConversationIdFollowUpsFollowUpIdDeleteRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreConversationsConversationIdFollowUpsFollowUpIdDelete(requestParameters.conversationId, requestParameters.followUpId, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Edit a pending queued message
+     * @param {DefaultApiApiCoreConversationsConversationIdFollowUpsFollowUpIdPatchRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreConversationsConversationIdFollowUpsFollowUpIdPatch(requestParameters: DefaultApiApiCoreConversationsConversationIdFollowUpsFollowUpIdPatchRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreConversationsConversationIdFollowUpsFollowUpIdPatch(requestParameters.conversationId, requestParameters.followUpId, requestParameters.conversationFollowUpUpdateRequest, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Retry a failed queued or steering message
+     * @param {DefaultApiApiCoreConversationsConversationIdFollowUpsFollowUpIdRetryPostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreConversationsConversationIdFollowUpsFollowUpIdRetryPost(requestParameters: DefaultApiApiCoreConversationsConversationIdFollowUpsFollowUpIdRetryPostRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreConversationsConversationIdFollowUpsFollowUpIdRetryPost(requestParameters.conversationId, requestParameters.followUpId, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Submit pending input as guidance for the active run
+     * @param {DefaultApiApiCoreConversationsConversationIdFollowUpsFollowUpIdSteerPostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreConversationsConversationIdFollowUpsFollowUpIdSteerPost(requestParameters: DefaultApiApiCoreConversationsConversationIdFollowUpsFollowUpIdSteerPostRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreConversationsConversationIdFollowUpsFollowUpIdSteerPost(requestParameters.conversationId, requestParameters.followUpId, requestParameters.conversationFollowUpSteerRequest, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary List queued and steering messages
+     * @param {DefaultApiApiCoreConversationsConversationIdFollowUpsGetRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreConversationsConversationIdFollowUpsGet(requestParameters: DefaultApiApiCoreConversationsConversationIdFollowUpsGetRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreConversationsConversationIdFollowUpsGet(requestParameters.conversationId, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Queue a message while a task is running
+     * @param {DefaultApiApiCoreConversationsConversationIdFollowUpsPostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreConversationsConversationIdFollowUpsPost(requestParameters: DefaultApiApiCoreConversationsConversationIdFollowUpsPostRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreConversationsConversationIdFollowUpsPost(requestParameters.conversationId, requestParameters.conversationFollowUpCreateRequest, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Reorder all pending queued messages
+     * @param {DefaultApiApiCoreConversationsConversationIdFollowUpsReorderPostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreConversationsConversationIdFollowUpsReorderPost(requestParameters: DefaultApiApiCoreConversationsConversationIdFollowUpsReorderPostRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreConversationsConversationIdFollowUpsReorderPost(requestParameters.conversationId, requestParameters.conversationFollowUpReorderRequest, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**
@@ -45413,6 +48802,17 @@ export class DefaultApi extends BaseAPI {
 
     /**
      *
+     * @summary Observe chat parsing without submitting new work
+     * @param {DefaultApiApiCoreDatasetsDatasetDocumentsDocumentParseStatusGetRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreDatasetsDatasetDocumentsDocumentParseStatusGet(requestParameters: DefaultApiApiCoreDatasetsDatasetDocumentsDocumentParseStatusGetRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreDatasetsDatasetDocumentsDocumentParseStatusGet(requestParameters.dataset, requestParameters.document, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
      * @summary GET /datasets/{dataset}/documents/{document}/pdf-artifacts/{artifact}:content
      * @param {DefaultApiApiCoreDatasetsDatasetDocumentsDocumentPdfArtifactsArtifactContentGetRequest} requestParameters Request parameters.
      * @param {*} [options] Override http request option.
@@ -45500,6 +48900,50 @@ export class DefaultApi extends BaseAPI {
     }
 
     /**
+     * Requires document read permission and current source-matched PDF IR. Uses only the selected chat model, without retrieval. Optional source_sha256 binds the request to the displayed PDF and rejects stale sources with409; every response includes the authoritative source_sha256. Language defaults to zh; force refreshes the user/document/source/parser/model/language cache. Evidence quotes and zero-based page coordinates come only from the source IR. Figure/table explanations are contextual: no image pixels are supplied. Paragraph translation accepts only authoritative textual blocks up to 8000 Unicode characters.
+     * @summary Explain a figure or table using extracted text and cells
+     * @param {DefaultApiApiCoreDatasetsDatasetDocumentsDocumentPdfIrBlocksBlockExplanationPostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreDatasetsDatasetDocumentsDocumentPdfIrBlocksBlockExplanationPost(requestParameters: DefaultApiApiCoreDatasetsDatasetDocumentsDocumentPdfIrBlocksBlockExplanationPostRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreDatasetsDatasetDocumentsDocumentPdfIrBlocksBlockExplanationPost(requestParameters.block, requestParameters.dataset, requestParameters.document, requestParameters.pDFPaperReadingRequest, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     * Requires document read permission and current PDF IR. One model response may include a suggested display_latex repair and all symbol definitions. The original PDF formula remains authoritative. Source pages are zero based and bounding boxes use normalized visible-page coordinates. The backend supplies verbatim evidence; model paraphrases and derivations are marked inferred. Language defaults to zh. focus_symbol is retained for older clients; it optionally requests the exact clicked symbol with a separate cache entry. force refreshes the source/model/language/focus-specific cache.
+     * @summary Explain a formula from original PDF evidence using the selected chat model without retrieval
+     * @param {DefaultApiApiCoreDatasetsDatasetDocumentsDocumentPdfIrFormulasBlockExplanationPostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreDatasetsDatasetDocumentsDocumentPdfIrFormulasBlockExplanationPost(requestParameters: DefaultApiApiCoreDatasetsDatasetDocumentsDocumentPdfIrFormulasBlockExplanationPostRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreDatasetsDatasetDocumentsDocumentPdfIrFormulasBlockExplanationPost(requestParameters.block, requestParameters.dataset, requestParameters.document, requestParameters.pDFFormulaExplanationRequest, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Read PDF structure without triggering parsing or retrieval
+     * @param {DefaultApiApiCoreDatasetsDatasetDocumentsDocumentPdfIrGetRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreDatasetsDatasetDocumentsDocumentPdfIrGet(requestParameters: DefaultApiApiCoreDatasetsDatasetDocumentsDocumentPdfIrGetRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreDatasetsDatasetDocumentsDocumentPdfIrGet(requestParameters.dataset, requestParameters.document, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Parse the original PDF using the selected MinerU service independently of retrieval
+     * @param {DefaultApiApiCoreDatasetsDatasetDocumentsDocumentPdfIrPostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreDatasetsDatasetDocumentsDocumentPdfIrPost(requestParameters: DefaultApiApiCoreDatasetsDatasetDocumentsDocumentPdfIrPostRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreDatasetsDatasetDocumentsDocumentPdfIrPost(requestParameters.dataset, requestParameters.document, requestParameters.pDFIRRequest, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
      *
      * @summary POST /datasets/{dataset}/documents/{document}/pdf-render-jobs/{job}:complete
      * @param {DefaultApiApiCoreDatasetsDatasetDocumentsDocumentPdfRenderJobsJobCompletePostRequest} requestParameters Request parameters.
@@ -45545,6 +48989,17 @@ export class DefaultApi extends BaseAPI {
 
     /**
      *
+     * @summary Explicitly prepare this document; scopes only; preserves existing outputs
+     * @param {DefaultApiApiCoreDatasetsDatasetDocumentsDocumentPrepareReadingPostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreDatasetsDatasetDocumentsDocumentPrepareReadingPost(requestParameters: DefaultApiApiCoreDatasetsDatasetDocumentsDocumentPrepareReadingPostRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreDatasetsDatasetDocumentsDocumentPrepareReadingPost(requestParameters.dataset, requestParameters.document, requestParameters.readingPreparationRequest, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
      * @summary GET /datasets/{dataset}/documents/{document}:read
      * @param {DefaultApiApiCoreDatasetsDatasetDocumentsDocumentReadGetRequest} requestParameters Request parameters.
      * @param {*} [options] Override http request option.
@@ -45552,6 +49007,17 @@ export class DefaultApi extends BaseAPI {
      */
     public apiCoreDatasetsDatasetDocumentsDocumentReadGet(requestParameters: DefaultApiApiCoreDatasetsDatasetDocumentsDocumentReadGetRequest, options?: RawAxiosRequestConfig) {
         return DefaultApiFp(this.configuration).apiCoreDatasetsDatasetDocumentsDocumentReadGet(requestParameters.dataset, requestParameters.document, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Read durable preparation progress and accounted model requests
+     * @param {DefaultApiApiCoreDatasetsDatasetDocumentsDocumentReadingPreparationGetRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreDatasetsDatasetDocumentsDocumentReadingPreparationGet(requestParameters: DefaultApiApiCoreDatasetsDatasetDocumentsDocumentReadingPreparationGetRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreDatasetsDatasetDocumentsDocumentReadingPreparationGet(requestParameters.dataset, requestParameters.document, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**
@@ -47376,6 +50842,27 @@ export class DefaultApi extends BaseAPI {
 
     /**
      *
+     * @summary Read personal AI reading preferences and capability registry
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreUserReadingPreferencesGet(options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreUserReadingPreferencesGet(options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Replace personal preferences; never process historical documents
+     * @param {DefaultApiApiCoreUserReadingPreferencesPutRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreUserReadingPreferencesPut(requestParameters: DefaultApiApiCoreUserReadingPreferencesPutRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreUserReadingPreferencesPut(requestParameters.readingPreparationPolicy, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
      * @summary POST /v1/internal/provider-connections/{auth_connection_id}/access-token:report
      * @param {DefaultApiApiCoreV1InternalProviderConnectionsAuthConnectionIdAccessTokenReportPostRequest} requestParameters Request parameters.
      * @param {*} [options] Override http request option.
@@ -48699,6 +52186,11 @@ export class DefaultApi extends BaseAPI {
     }
 }
 
+export const ApiCoreConversationArchiveFoldersGetKindEnum = {
+    Dialog: 'dialog',
+    Task: 'task'
+} as const;
+export type ApiCoreConversationArchiveFoldersGetKindEnum = typeof ApiCoreConversationArchiveFoldersGetKindEnum[keyof typeof ApiCoreConversationArchiveFoldersGetKindEnum];
 export const ApiCoreConversationsArchivedGetKindEnum = {
     Dialog: 'dialog',
     Task: 'task'
@@ -54728,6 +58220,71 @@ export class McpServersApi extends BaseAPI {
 export const ModelProvidersApiAxiosParamCreator = function (configuration?: Configuration) {
     return {
         /**
+         * Reports the persisted text embedding model identity and how many knowledge bases have indexed or pending document vectors. A legacy index without a recorded signature is reported as unknown, never inferred from the current model selection.
+         * @summary Get shared text-vector index state
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreModelProvidersEmbeddingIndexStateGet: async (options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            const localVarPath = `/api/core/model_providers/embedding/index-state`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         * Probes the saved candidate through the document embedding runtime and compares its passage and query signatures with the recorded deployment-wide text-vector identity. Legacy indexes without a recorded signature are unverified and require vector cleanup before a change. Preview never changes selections or knowledge bases; a later save rechecks the current state.
+         * @summary Check whether a text embedding model can replace the active model
+         * @param {EmbeddingSwitchPreviewRequest} embeddingSwitchPreviewRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreModelProvidersEmbeddingSwitchPreviewPost: async (embeddingSwitchPreviewRequest: EmbeddingSwitchPreviewRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'embeddingSwitchPreviewRequest' is not null or undefined
+            assertParamExists('apiCoreModelProvidersEmbeddingSwitchPreviewPost', 'embeddingSwitchPreviewRequest', embeddingSwitchPreviewRequest)
+            const localVarPath = `/api/core/model_providers/embedding/switch-preview`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(embeddingSwitchPreviewRequest, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
          * Returns feature flags derived from the algorithm service runtime_models.yaml. Result is permanently cached after the first successful fetch. image_embed_enabled is true when a cross_modal_embed role is configured.
          * @summary Get model feature flags
          * @param {*} [options] Override http request option.
@@ -55197,6 +58754,48 @@ export const ModelProvidersApiAxiosParamCreator = function (configuration?: Conf
             }
 
             const localVarRequestOptions = { method: 'DELETE', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         * Computes SHA-256 digests for fixed passage and query samples through the saved model\'s actual embedding runtime, including its configured prefixes. Returns only digests and dimension, never vectors, credentials or upstream text. A ready result can be compared with a previously recorded signature; unsupported and failed results cannot establish compatibility. The request body must be empty and no model settings are changed.
+         * @summary Fingerprint one saved text embedding model
+         * @param {string} modelProviderId
+         * @param {string} groupId
+         * @param {string} modelId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdEmbeddingSignaturePost: async (modelProviderId: string, groupId: string, modelId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'modelProviderId' is not null or undefined
+            assertParamExists('apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdEmbeddingSignaturePost', 'modelProviderId', modelProviderId)
+            // verify required parameter 'groupId' is not null or undefined
+            assertParamExists('apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdEmbeddingSignaturePost', 'groupId', groupId)
+            // verify required parameter 'modelId' is not null or undefined
+            assertParamExists('apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdEmbeddingSignaturePost', 'modelId', modelId)
+            const localVarPath = `/api/core/model_providers/{model_provider_id}/groups/{group_id}/models/{model_id}:embedding-signature`
+                .replace(`{${"model_provider_id"}}`, encodeURIComponent(String(modelProviderId)))
+                .replace(`{${"group_id"}}`, encodeURIComponent(String(groupId)))
+                .replace(`{${"model_id"}}`, encodeURIComponent(String(modelId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
             const localVarHeaderParameter = {} as any;
             const localVarQueryParameter = {} as any;
 
@@ -55997,6 +59596,31 @@ export const ModelProvidersApiFp = function(configuration?: Configuration) {
     const localVarAxiosParamCreator = ModelProvidersApiAxiosParamCreator(configuration)
     return {
         /**
+         * Reports the persisted text embedding model identity and how many knowledge bases have indexed or pending document vectors. A legacy index without a recorded signature is reported as unknown, never inferred from the current model selection.
+         * @summary Get shared text-vector index state
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreModelProvidersEmbeddingIndexStateGet(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<EmbeddingIndexStatusResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreModelProvidersEmbeddingIndexStateGet(options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['ModelProvidersApi.apiCoreModelProvidersEmbeddingIndexStateGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         * Probes the saved candidate through the document embedding runtime and compares its passage and query signatures with the recorded deployment-wide text-vector identity. Legacy indexes without a recorded signature are unverified and require vector cleanup before a change. Preview never changes selections or knowledge bases; a later save rechecks the current state.
+         * @summary Check whether a text embedding model can replace the active model
+         * @param {EmbeddingSwitchPreviewRequest} embeddingSwitchPreviewRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreModelProvidersEmbeddingSwitchPreviewPost(embeddingSwitchPreviewRequest: EmbeddingSwitchPreviewRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<EmbeddingSwitchPreviewResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreModelProvidersEmbeddingSwitchPreviewPost(embeddingSwitchPreviewRequest, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['ModelProvidersApi.apiCoreModelProvidersEmbeddingSwitchPreviewPost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
          * Returns feature flags derived from the algorithm service runtime_models.yaml. Result is permanently cached after the first successful fetch. image_embed_enabled is true when a cross_modal_embed role is configured.
          * @summary Get model feature flags
          * @param {*} [options] Override http request option.
@@ -56167,6 +59791,21 @@ export const ModelProvidersApiFp = function(configuration?: Configuration) {
             const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdDelete(modelProviderId, groupId, modelId, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['ModelProvidersApi.apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdDelete']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         * Computes SHA-256 digests for fixed passage and query samples through the saved model\'s actual embedding runtime, including its configured prefixes. Returns only digests and dimension, never vectors, credentials or upstream text. A ready result can be compared with a previously recorded signature; unsupported and failed results cannot establish compatibility. The request body must be empty and no model settings are changed.
+         * @summary Fingerprint one saved text embedding model
+         * @param {string} modelProviderId
+         * @param {string} groupId
+         * @param {string} modelId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdEmbeddingSignaturePost(modelProviderId: string, groupId: string, modelId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<EmbeddingSignatureResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdEmbeddingSignaturePost(modelProviderId, groupId, modelId, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['ModelProvidersApi.apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdEmbeddingSignaturePost']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
@@ -56464,6 +60103,25 @@ export const ModelProvidersApiFactory = function (configuration?: Configuration,
     const localVarFp = ModelProvidersApiFp(configuration)
     return {
         /**
+         * Reports the persisted text embedding model identity and how many knowledge bases have indexed or pending document vectors. A legacy index without a recorded signature is reported as unknown, never inferred from the current model selection.
+         * @summary Get shared text-vector index state
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreModelProvidersEmbeddingIndexStateGet(options?: RawAxiosRequestConfig): AxiosPromise<EmbeddingIndexStatusResponse> {
+            return localVarFp.apiCoreModelProvidersEmbeddingIndexStateGet(options).then((request) => request(axios, basePath));
+        },
+        /**
+         * Probes the saved candidate through the document embedding runtime and compares its passage and query signatures with the recorded deployment-wide text-vector identity. Legacy indexes without a recorded signature are unverified and require vector cleanup before a change. Preview never changes selections or knowledge bases; a later save rechecks the current state.
+         * @summary Check whether a text embedding model can replace the active model
+         * @param {ModelProvidersApiApiCoreModelProvidersEmbeddingSwitchPreviewPostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreModelProvidersEmbeddingSwitchPreviewPost(requestParameters: ModelProvidersApiApiCoreModelProvidersEmbeddingSwitchPreviewPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<EmbeddingSwitchPreviewResponse> {
+            return localVarFp.apiCoreModelProvidersEmbeddingSwitchPreviewPost(requestParameters.embeddingSwitchPreviewRequest, options).then((request) => request(axios, basePath));
+        },
+        /**
          * Returns feature flags derived from the algorithm service runtime_models.yaml. Result is permanently cached after the first successful fetch. image_embed_enabled is true when a cross_modal_embed role is configured.
          * @summary Get model feature flags
          * @param {*} [options] Override http request option.
@@ -56581,6 +60239,16 @@ export const ModelProvidersApiFactory = function (configuration?: Configuration,
          */
         apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdDelete(requestParameters: ModelProvidersApiApiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdDeleteRequest, options?: RawAxiosRequestConfig): AxiosPromise<DeleteModelProviderGroupModelOpenAPIResponse> {
             return localVarFp.apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdDelete(requestParameters.modelProviderId, requestParameters.groupId, requestParameters.modelId, options).then((request) => request(axios, basePath));
+        },
+        /**
+         * Computes SHA-256 digests for fixed passage and query samples through the saved model\'s actual embedding runtime, including its configured prefixes. Returns only digests and dimension, never vectors, credentials or upstream text. A ready result can be compared with a previously recorded signature; unsupported and failed results cannot establish compatibility. The request body must be empty and no model settings are changed.
+         * @summary Fingerprint one saved text embedding model
+         * @param {ModelProvidersApiApiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdEmbeddingSignaturePostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdEmbeddingSignaturePost(requestParameters: ModelProvidersApiApiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdEmbeddingSignaturePostRequest, options?: RawAxiosRequestConfig): AxiosPromise<EmbeddingSignatureResponse> {
+            return localVarFp.apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdEmbeddingSignaturePost(requestParameters.modelProviderId, requestParameters.groupId, requestParameters.modelId, options).then((request) => request(axios, basePath));
         },
         /**
          * Updates model metadata without replacing its UUID or default/conversation references. At least one metadata field must be supplied. Catalog models require customize=true for actual changes and become user overrides; unchanged saves do not convert them. Supported fields are the API model identifier, technical model type, chat vision support, and context window for unclassified or LLM/VLM models. Changing an unclassified model to LLM/VLM preserves an existing explicit context window unless overridden. Type/vision changes incompatible with existing references, or in-use embedding identity changes, return 409 without changing references or knowledge-base processing levels.
@@ -56794,6 +60462,13 @@ export const ModelProvidersApiFactory = function (configuration?: Configuration,
 };
 
 /**
+ * Request parameters for apiCoreModelProvidersEmbeddingSwitchPreviewPost operation in ModelProvidersApi.
+ */
+export interface ModelProvidersApiApiCoreModelProvidersEmbeddingSwitchPreviewPostRequest {
+    readonly embeddingSwitchPreviewRequest: EmbeddingSwitchPreviewRequest
+}
+
+/**
  * Request parameters for apiCoreModelProvidersGet operation in ModelProvidersApi.
  */
 export interface ModelProvidersApiApiCoreModelProvidersGetRequest {
@@ -56905,6 +60580,17 @@ export interface ModelProvidersApiApiCoreModelProvidersModelProviderIdGroupsGrou
  * Request parameters for apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdDelete operation in ModelProvidersApi.
  */
 export interface ModelProvidersApiApiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdDeleteRequest {
+    readonly modelProviderId: string
+
+    readonly groupId: string
+
+    readonly modelId: string
+}
+
+/**
+ * Request parameters for apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdEmbeddingSignaturePost operation in ModelProvidersApi.
+ */
+export interface ModelProvidersApiApiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdEmbeddingSignaturePostRequest {
     readonly modelProviderId: string
 
     readonly groupId: string
@@ -57081,6 +60767,27 @@ export interface ModelProvidersApiApiCoreModelProvidersWithGroupsGetRequest {
  */
 export class ModelProvidersApi extends BaseAPI {
     /**
+     * Reports the persisted text embedding model identity and how many knowledge bases have indexed or pending document vectors. A legacy index without a recorded signature is reported as unknown, never inferred from the current model selection.
+     * @summary Get shared text-vector index state
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreModelProvidersEmbeddingIndexStateGet(options?: RawAxiosRequestConfig) {
+        return ModelProvidersApiFp(this.configuration).apiCoreModelProvidersEmbeddingIndexStateGet(options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     * Probes the saved candidate through the document embedding runtime and compares its passage and query signatures with the recorded deployment-wide text-vector identity. Legacy indexes without a recorded signature are unverified and require vector cleanup before a change. Preview never changes selections or knowledge bases; a later save rechecks the current state.
+     * @summary Check whether a text embedding model can replace the active model
+     * @param {ModelProvidersApiApiCoreModelProvidersEmbeddingSwitchPreviewPostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreModelProvidersEmbeddingSwitchPreviewPost(requestParameters: ModelProvidersApiApiCoreModelProvidersEmbeddingSwitchPreviewPostRequest, options?: RawAxiosRequestConfig) {
+        return ModelProvidersApiFp(this.configuration).apiCoreModelProvidersEmbeddingSwitchPreviewPost(requestParameters.embeddingSwitchPreviewRequest, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
      * Returns feature flags derived from the algorithm service runtime_models.yaml. Result is permanently cached after the first successful fetch. image_embed_enabled is true when a cross_modal_embed role is configured.
      * @summary Get model feature flags
      * @param {*} [options] Override http request option.
@@ -57209,6 +60916,17 @@ export class ModelProvidersApi extends BaseAPI {
      */
     public apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdDelete(requestParameters: ModelProvidersApiApiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdDeleteRequest, options?: RawAxiosRequestConfig) {
         return ModelProvidersApiFp(this.configuration).apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdDelete(requestParameters.modelProviderId, requestParameters.groupId, requestParameters.modelId, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     * Computes SHA-256 digests for fixed passage and query samples through the saved model\'s actual embedding runtime, including its configured prefixes. Returns only digests and dimension, never vectors, credentials or upstream text. A ready result can be compared with a previously recorded signature; unsupported and failed results cannot establish compatibility. The request body must be empty and no model settings are changed.
+     * @summary Fingerprint one saved text embedding model
+     * @param {ModelProvidersApiApiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdEmbeddingSignaturePostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdEmbeddingSignaturePost(requestParameters: ModelProvidersApiApiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdEmbeddingSignaturePostRequest, options?: RawAxiosRequestConfig) {
+        return ModelProvidersApiFp(this.configuration).apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdEmbeddingSignaturePost(requestParameters.modelProviderId, requestParameters.groupId, requestParameters.modelId, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**
@@ -65354,8 +69072,8 @@ export const TaskNotificationsApiAxiosParamCreator = function (configuration?: C
             };
         },
         /**
-         * Compare revision; closing requires the exact current affected run IDs. Configuration bodies are limited to 16 KiB; errors include stable data.detail.reason and request_id.
-         * @summary Compare revision; closing requires the exact current affected run IDs
+         * Compare revision; closing requires confirmation of every currently affected run; completed confirmed runs do not require another confirmation. Configuration bodies are limited to 16 KiB; errors include stable data.detail.reason and request_id.
+         * @summary Compare revision; closing requires confirmation of every currently affected run; completed confirmed runs do not require another confirmation
          * @param {NotificationPreferencesPatch} notificationPreferencesPatch
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
@@ -65593,8 +69311,8 @@ export const TaskNotificationsApiFp = function(configuration?: Configuration) {
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
-         * Compare revision; closing requires the exact current affected run IDs. Configuration bodies are limited to 16 KiB; errors include stable data.detail.reason and request_id.
-         * @summary Compare revision; closing requires the exact current affected run IDs
+         * Compare revision; closing requires confirmation of every currently affected run; completed confirmed runs do not require another confirmation. Configuration bodies are limited to 16 KiB; errors include stable data.detail.reason and request_id.
+         * @summary Compare revision; closing requires confirmation of every currently affected run; completed confirmed runs do not require another confirmation
          * @param {NotificationPreferencesPatch} notificationPreferencesPatch
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
@@ -65746,8 +69464,8 @@ export const TaskNotificationsApiFactory = function (configuration?: Configurati
             return localVarFp.apiCoreUserNotificationPreferencesGet(options).then((request) => request(axios, basePath));
         },
         /**
-         * Compare revision; closing requires the exact current affected run IDs. Configuration bodies are limited to 16 KiB; errors include stable data.detail.reason and request_id.
-         * @summary Compare revision; closing requires the exact current affected run IDs
+         * Compare revision; closing requires confirmation of every currently affected run; completed confirmed runs do not require another confirmation. Configuration bodies are limited to 16 KiB; errors include stable data.detail.reason and request_id.
+         * @summary Compare revision; closing requires confirmation of every currently affected run; completed confirmed runs do not require another confirmation
          * @param {TaskNotificationsApiApiCoreUserNotificationPreferencesPatchRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
@@ -66007,8 +69725,8 @@ export class TaskNotificationsApi extends BaseAPI {
     }
 
     /**
-     * Compare revision; closing requires the exact current affected run IDs. Configuration bodies are limited to 16 KiB; errors include stable data.detail.reason and request_id.
-     * @summary Compare revision; closing requires the exact current affected run IDs
+     * Compare revision; closing requires confirmation of every currently affected run; completed confirmed runs do not require another confirmation. Configuration bodies are limited to 16 KiB; errors include stable data.detail.reason and request_id.
+     * @summary Compare revision; closing requires confirmation of every currently affected run; completed confirmed runs do not require another confirmation
      * @param {TaskNotificationsApiApiCoreUserNotificationPreferencesPatchRequest} requestParameters Request parameters.
      * @param {*} [options] Override http request option.
      * @throws {RequiredError}
@@ -68403,6 +72121,585 @@ export class UserApi extends BaseAPI {
     }
 }
 
+
+
+/**
+ * VocabularyCloudApi - axios parameter creator
+ */
+export const VocabularyCloudApiAxiosParamCreator = function (configuration?: Configuration) {
+    return {
+        /**
+         *
+         * @summary List the current user\'s vocabulary cloud connections and sync counts
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreVocabularyCloudConnectionsGet: async (options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            const localVarPath = `/api/core/vocabulary/cloud/connections`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary Disconnect vocabulary cloud sync and cancel queued operations
+         * @param {ApiCoreVocabularyCloudConnectionsProviderDeleteProviderEnum} provider
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreVocabularyCloudConnectionsProviderDelete: async (provider: ApiCoreVocabularyCloudConnectionsProviderDeleteProviderEnum, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'provider' is not null or undefined
+            assertParamExists('apiCoreVocabularyCloudConnectionsProviderDelete', 'provider', provider)
+            const localVarPath = `/api/core/vocabulary/cloud/connections/{provider}`
+                .replace(`{${"provider"}}`, encodeURIComponent(String(provider)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'DELETE', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary Save vocabulary cloud credentials and target settings
+         * @param {ApiCoreVocabularyCloudConnectionsProviderPutProviderEnum} provider
+         * @param {VocabularyCloudConnectionRequest} vocabularyCloudConnectionRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreVocabularyCloudConnectionsProviderPut: async (provider: ApiCoreVocabularyCloudConnectionsProviderPutProviderEnum, vocabularyCloudConnectionRequest: VocabularyCloudConnectionRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'provider' is not null or undefined
+            assertParamExists('apiCoreVocabularyCloudConnectionsProviderPut', 'provider', provider)
+            // verify required parameter 'vocabularyCloudConnectionRequest' is not null or undefined
+            assertParamExists('apiCoreVocabularyCloudConnectionsProviderPut', 'vocabularyCloudConnectionRequest', vocabularyCloudConnectionRequest)
+            const localVarPath = `/api/core/vocabulary/cloud/connections/{provider}`
+                .replace(`{${"provider"}}`, encodeURIComponent(String(provider)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'PUT', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(vocabularyCloudConnectionRequest, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary Queue historical local English words and retry unsuccessful sync operations
+         * @param {ApiCoreVocabularyCloudConnectionsProviderSyncPostProviderEnum} provider
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreVocabularyCloudConnectionsProviderSyncPost: async (provider: ApiCoreVocabularyCloudConnectionsProviderSyncPostProviderEnum, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'provider' is not null or undefined
+            assertParamExists('apiCoreVocabularyCloudConnectionsProviderSyncPost', 'provider', provider)
+            const localVarPath = `/api/core/vocabulary/cloud/connections/{provider}/sync`
+                .replace(`{${"provider"}}`, encodeURIComponent(String(provider)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary Test supplied or stored credentials and list wordbooks
+         * @param {ApiCoreVocabularyCloudConnectionsProviderTestPostProviderEnum} provider
+         * @param {VocabularyCloudTokenRequest} vocabularyCloudTokenRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreVocabularyCloudConnectionsProviderTestPost: async (provider: ApiCoreVocabularyCloudConnectionsProviderTestPostProviderEnum, vocabularyCloudTokenRequest: VocabularyCloudTokenRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'provider' is not null or undefined
+            assertParamExists('apiCoreVocabularyCloudConnectionsProviderTestPost', 'provider', provider)
+            // verify required parameter 'vocabularyCloudTokenRequest' is not null or undefined
+            assertParamExists('apiCoreVocabularyCloudConnectionsProviderTestPost', 'vocabularyCloudTokenRequest', vocabularyCloudTokenRequest)
+            const localVarPath = `/api/core/vocabulary/cloud/connections/{provider}/test`
+                .replace(`{${"provider"}}`, encodeURIComponent(String(provider)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(vocabularyCloudTokenRequest, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary Create a remote vocabulary wordbook
+         * @param {ApiCoreVocabularyCloudConnectionsProviderWordbooksPostProviderEnum} provider
+         * @param {VocabularyCloudWordbookRequest} vocabularyCloudWordbookRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreVocabularyCloudConnectionsProviderWordbooksPost: async (provider: ApiCoreVocabularyCloudConnectionsProviderWordbooksPostProviderEnum, vocabularyCloudWordbookRequest: VocabularyCloudWordbookRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'provider' is not null or undefined
+            assertParamExists('apiCoreVocabularyCloudConnectionsProviderWordbooksPost', 'provider', provider)
+            // verify required parameter 'vocabularyCloudWordbookRequest' is not null or undefined
+            assertParamExists('apiCoreVocabularyCloudConnectionsProviderWordbooksPost', 'vocabularyCloudWordbookRequest', vocabularyCloudWordbookRequest)
+            const localVarPath = `/api/core/vocabulary/cloud/connections/{provider}/wordbooks`
+                .replace(`{${"provider"}}`, encodeURIComponent(String(provider)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(vocabularyCloudWordbookRequest, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary List up to 50 recent vocabulary cloud sync operations for the current user
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreVocabularyCloudOperationsGet: async (options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            const localVarPath = `/api/core/vocabulary/cloud/operations`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+    }
+};
+
+/**
+ * VocabularyCloudApi - functional programming interface
+ */
+export const VocabularyCloudApiFp = function(configuration?: Configuration) {
+    const localVarAxiosParamCreator = VocabularyCloudApiAxiosParamCreator(configuration)
+    return {
+        /**
+         *
+         * @summary List the current user\'s vocabulary cloud connections and sync counts
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreVocabularyCloudConnectionsGet(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<VocabularyCloudConnectionsResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreVocabularyCloudConnectionsGet(options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['VocabularyCloudApi.apiCoreVocabularyCloudConnectionsGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Disconnect vocabulary cloud sync and cancel queued operations
+         * @param {ApiCoreVocabularyCloudConnectionsProviderDeleteProviderEnum} provider
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreVocabularyCloudConnectionsProviderDelete(provider: ApiCoreVocabularyCloudConnectionsProviderDeleteProviderEnum, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<VocabularyCloudDisconnectResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreVocabularyCloudConnectionsProviderDelete(provider, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['VocabularyCloudApi.apiCoreVocabularyCloudConnectionsProviderDelete']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Save vocabulary cloud credentials and target settings
+         * @param {ApiCoreVocabularyCloudConnectionsProviderPutProviderEnum} provider
+         * @param {VocabularyCloudConnectionRequest} vocabularyCloudConnectionRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreVocabularyCloudConnectionsProviderPut(provider: ApiCoreVocabularyCloudConnectionsProviderPutProviderEnum, vocabularyCloudConnectionRequest: VocabularyCloudConnectionRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<VocabularyCloudConnectionResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreVocabularyCloudConnectionsProviderPut(provider, vocabularyCloudConnectionRequest, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['VocabularyCloudApi.apiCoreVocabularyCloudConnectionsProviderPut']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Queue historical local English words and retry unsuccessful sync operations
+         * @param {ApiCoreVocabularyCloudConnectionsProviderSyncPostProviderEnum} provider
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreVocabularyCloudConnectionsProviderSyncPost(provider: ApiCoreVocabularyCloudConnectionsProviderSyncPostProviderEnum, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<VocabularyCloudSyncResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreVocabularyCloudConnectionsProviderSyncPost(provider, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['VocabularyCloudApi.apiCoreVocabularyCloudConnectionsProviderSyncPost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Test supplied or stored credentials and list wordbooks
+         * @param {ApiCoreVocabularyCloudConnectionsProviderTestPostProviderEnum} provider
+         * @param {VocabularyCloudTokenRequest} vocabularyCloudTokenRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreVocabularyCloudConnectionsProviderTestPost(provider: ApiCoreVocabularyCloudConnectionsProviderTestPostProviderEnum, vocabularyCloudTokenRequest: VocabularyCloudTokenRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<VocabularyCloudWordbooksResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreVocabularyCloudConnectionsProviderTestPost(provider, vocabularyCloudTokenRequest, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['VocabularyCloudApi.apiCoreVocabularyCloudConnectionsProviderTestPost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Create a remote vocabulary wordbook
+         * @param {ApiCoreVocabularyCloudConnectionsProviderWordbooksPostProviderEnum} provider
+         * @param {VocabularyCloudWordbookRequest} vocabularyCloudWordbookRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreVocabularyCloudConnectionsProviderWordbooksPost(provider: ApiCoreVocabularyCloudConnectionsProviderWordbooksPostProviderEnum, vocabularyCloudWordbookRequest: VocabularyCloudWordbookRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<VocabularyCloudWordbookResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreVocabularyCloudConnectionsProviderWordbooksPost(provider, vocabularyCloudWordbookRequest, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['VocabularyCloudApi.apiCoreVocabularyCloudConnectionsProviderWordbooksPost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary List up to 50 recent vocabulary cloud sync operations for the current user
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreVocabularyCloudOperationsGet(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<VocabularyCloudOperationsResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreVocabularyCloudOperationsGet(options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['VocabularyCloudApi.apiCoreVocabularyCloudOperationsGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+    }
+};
+
+/**
+ * VocabularyCloudApi - factory interface
+ */
+export const VocabularyCloudApiFactory = function (configuration?: Configuration, basePath?: string, axios?: AxiosInstance) {
+    const localVarFp = VocabularyCloudApiFp(configuration)
+    return {
+        /**
+         *
+         * @summary List the current user\'s vocabulary cloud connections and sync counts
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreVocabularyCloudConnectionsGet(options?: RawAxiosRequestConfig): AxiosPromise<VocabularyCloudConnectionsResponse> {
+            return localVarFp.apiCoreVocabularyCloudConnectionsGet(options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Disconnect vocabulary cloud sync and cancel queued operations
+         * @param {VocabularyCloudApiApiCoreVocabularyCloudConnectionsProviderDeleteRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreVocabularyCloudConnectionsProviderDelete(requestParameters: VocabularyCloudApiApiCoreVocabularyCloudConnectionsProviderDeleteRequest, options?: RawAxiosRequestConfig): AxiosPromise<VocabularyCloudDisconnectResponse> {
+            return localVarFp.apiCoreVocabularyCloudConnectionsProviderDelete(requestParameters.provider, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Save vocabulary cloud credentials and target settings
+         * @param {VocabularyCloudApiApiCoreVocabularyCloudConnectionsProviderPutRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreVocabularyCloudConnectionsProviderPut(requestParameters: VocabularyCloudApiApiCoreVocabularyCloudConnectionsProviderPutRequest, options?: RawAxiosRequestConfig): AxiosPromise<VocabularyCloudConnectionResponse> {
+            return localVarFp.apiCoreVocabularyCloudConnectionsProviderPut(requestParameters.provider, requestParameters.vocabularyCloudConnectionRequest, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Queue historical local English words and retry unsuccessful sync operations
+         * @param {VocabularyCloudApiApiCoreVocabularyCloudConnectionsProviderSyncPostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreVocabularyCloudConnectionsProviderSyncPost(requestParameters: VocabularyCloudApiApiCoreVocabularyCloudConnectionsProviderSyncPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<VocabularyCloudSyncResponse> {
+            return localVarFp.apiCoreVocabularyCloudConnectionsProviderSyncPost(requestParameters.provider, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Test supplied or stored credentials and list wordbooks
+         * @param {VocabularyCloudApiApiCoreVocabularyCloudConnectionsProviderTestPostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreVocabularyCloudConnectionsProviderTestPost(requestParameters: VocabularyCloudApiApiCoreVocabularyCloudConnectionsProviderTestPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<VocabularyCloudWordbooksResponse> {
+            return localVarFp.apiCoreVocabularyCloudConnectionsProviderTestPost(requestParameters.provider, requestParameters.vocabularyCloudTokenRequest, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Create a remote vocabulary wordbook
+         * @param {VocabularyCloudApiApiCoreVocabularyCloudConnectionsProviderWordbooksPostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreVocabularyCloudConnectionsProviderWordbooksPost(requestParameters: VocabularyCloudApiApiCoreVocabularyCloudConnectionsProviderWordbooksPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<VocabularyCloudWordbookResponse> {
+            return localVarFp.apiCoreVocabularyCloudConnectionsProviderWordbooksPost(requestParameters.provider, requestParameters.vocabularyCloudWordbookRequest, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary List up to 50 recent vocabulary cloud sync operations for the current user
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreVocabularyCloudOperationsGet(options?: RawAxiosRequestConfig): AxiosPromise<VocabularyCloudOperationsResponse> {
+            return localVarFp.apiCoreVocabularyCloudOperationsGet(options).then((request) => request(axios, basePath));
+        },
+    };
+};
+
+/**
+ * Request parameters for apiCoreVocabularyCloudConnectionsProviderDelete operation in VocabularyCloudApi.
+ */
+export interface VocabularyCloudApiApiCoreVocabularyCloudConnectionsProviderDeleteRequest {
+    readonly provider: ApiCoreVocabularyCloudConnectionsProviderDeleteProviderEnum
+}
+
+/**
+ * Request parameters for apiCoreVocabularyCloudConnectionsProviderPut operation in VocabularyCloudApi.
+ */
+export interface VocabularyCloudApiApiCoreVocabularyCloudConnectionsProviderPutRequest {
+    readonly provider: ApiCoreVocabularyCloudConnectionsProviderPutProviderEnum
+
+    readonly vocabularyCloudConnectionRequest: VocabularyCloudConnectionRequest
+}
+
+/**
+ * Request parameters for apiCoreVocabularyCloudConnectionsProviderSyncPost operation in VocabularyCloudApi.
+ */
+export interface VocabularyCloudApiApiCoreVocabularyCloudConnectionsProviderSyncPostRequest {
+    readonly provider: ApiCoreVocabularyCloudConnectionsProviderSyncPostProviderEnum
+}
+
+/**
+ * Request parameters for apiCoreVocabularyCloudConnectionsProviderTestPost operation in VocabularyCloudApi.
+ */
+export interface VocabularyCloudApiApiCoreVocabularyCloudConnectionsProviderTestPostRequest {
+    readonly provider: ApiCoreVocabularyCloudConnectionsProviderTestPostProviderEnum
+
+    readonly vocabularyCloudTokenRequest: VocabularyCloudTokenRequest
+}
+
+/**
+ * Request parameters for apiCoreVocabularyCloudConnectionsProviderWordbooksPost operation in VocabularyCloudApi.
+ */
+export interface VocabularyCloudApiApiCoreVocabularyCloudConnectionsProviderWordbooksPostRequest {
+    readonly provider: ApiCoreVocabularyCloudConnectionsProviderWordbooksPostProviderEnum
+
+    readonly vocabularyCloudWordbookRequest: VocabularyCloudWordbookRequest
+}
+
+/**
+ * VocabularyCloudApi - object-oriented interface
+ */
+export class VocabularyCloudApi extends BaseAPI {
+    /**
+     *
+     * @summary List the current user\'s vocabulary cloud connections and sync counts
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreVocabularyCloudConnectionsGet(options?: RawAxiosRequestConfig) {
+        return VocabularyCloudApiFp(this.configuration).apiCoreVocabularyCloudConnectionsGet(options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Disconnect vocabulary cloud sync and cancel queued operations
+     * @param {VocabularyCloudApiApiCoreVocabularyCloudConnectionsProviderDeleteRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreVocabularyCloudConnectionsProviderDelete(requestParameters: VocabularyCloudApiApiCoreVocabularyCloudConnectionsProviderDeleteRequest, options?: RawAxiosRequestConfig) {
+        return VocabularyCloudApiFp(this.configuration).apiCoreVocabularyCloudConnectionsProviderDelete(requestParameters.provider, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Save vocabulary cloud credentials and target settings
+     * @param {VocabularyCloudApiApiCoreVocabularyCloudConnectionsProviderPutRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreVocabularyCloudConnectionsProviderPut(requestParameters: VocabularyCloudApiApiCoreVocabularyCloudConnectionsProviderPutRequest, options?: RawAxiosRequestConfig) {
+        return VocabularyCloudApiFp(this.configuration).apiCoreVocabularyCloudConnectionsProviderPut(requestParameters.provider, requestParameters.vocabularyCloudConnectionRequest, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Queue historical local English words and retry unsuccessful sync operations
+     * @param {VocabularyCloudApiApiCoreVocabularyCloudConnectionsProviderSyncPostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreVocabularyCloudConnectionsProviderSyncPost(requestParameters: VocabularyCloudApiApiCoreVocabularyCloudConnectionsProviderSyncPostRequest, options?: RawAxiosRequestConfig) {
+        return VocabularyCloudApiFp(this.configuration).apiCoreVocabularyCloudConnectionsProviderSyncPost(requestParameters.provider, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Test supplied or stored credentials and list wordbooks
+     * @param {VocabularyCloudApiApiCoreVocabularyCloudConnectionsProviderTestPostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreVocabularyCloudConnectionsProviderTestPost(requestParameters: VocabularyCloudApiApiCoreVocabularyCloudConnectionsProviderTestPostRequest, options?: RawAxiosRequestConfig) {
+        return VocabularyCloudApiFp(this.configuration).apiCoreVocabularyCloudConnectionsProviderTestPost(requestParameters.provider, requestParameters.vocabularyCloudTokenRequest, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Create a remote vocabulary wordbook
+     * @param {VocabularyCloudApiApiCoreVocabularyCloudConnectionsProviderWordbooksPostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreVocabularyCloudConnectionsProviderWordbooksPost(requestParameters: VocabularyCloudApiApiCoreVocabularyCloudConnectionsProviderWordbooksPostRequest, options?: RawAxiosRequestConfig) {
+        return VocabularyCloudApiFp(this.configuration).apiCoreVocabularyCloudConnectionsProviderWordbooksPost(requestParameters.provider, requestParameters.vocabularyCloudWordbookRequest, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary List up to 50 recent vocabulary cloud sync operations for the current user
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreVocabularyCloudOperationsGet(options?: RawAxiosRequestConfig) {
+        return VocabularyCloudApiFp(this.configuration).apiCoreVocabularyCloudOperationsGet(options).then((request) => request(this.axios, this.basePath));
+    }
+}
+
+export const ApiCoreVocabularyCloudConnectionsProviderDeleteProviderEnum = {
+    Eudic: 'eudic',
+    Maimemo: 'maimemo'
+} as const;
+export type ApiCoreVocabularyCloudConnectionsProviderDeleteProviderEnum = typeof ApiCoreVocabularyCloudConnectionsProviderDeleteProviderEnum[keyof typeof ApiCoreVocabularyCloudConnectionsProviderDeleteProviderEnum];
+export const ApiCoreVocabularyCloudConnectionsProviderPutProviderEnum = {
+    Eudic: 'eudic',
+    Maimemo: 'maimemo'
+} as const;
+export type ApiCoreVocabularyCloudConnectionsProviderPutProviderEnum = typeof ApiCoreVocabularyCloudConnectionsProviderPutProviderEnum[keyof typeof ApiCoreVocabularyCloudConnectionsProviderPutProviderEnum];
+export const ApiCoreVocabularyCloudConnectionsProviderSyncPostProviderEnum = {
+    Eudic: 'eudic',
+    Maimemo: 'maimemo'
+} as const;
+export type ApiCoreVocabularyCloudConnectionsProviderSyncPostProviderEnum = typeof ApiCoreVocabularyCloudConnectionsProviderSyncPostProviderEnum[keyof typeof ApiCoreVocabularyCloudConnectionsProviderSyncPostProviderEnum];
+export const ApiCoreVocabularyCloudConnectionsProviderTestPostProviderEnum = {
+    Eudic: 'eudic',
+    Maimemo: 'maimemo'
+} as const;
+export type ApiCoreVocabularyCloudConnectionsProviderTestPostProviderEnum = typeof ApiCoreVocabularyCloudConnectionsProviderTestPostProviderEnum[keyof typeof ApiCoreVocabularyCloudConnectionsProviderTestPostProviderEnum];
+export const ApiCoreVocabularyCloudConnectionsProviderWordbooksPostProviderEnum = {
+    Eudic: 'eudic',
+    Maimemo: 'maimemo'
+} as const;
+export type ApiCoreVocabularyCloudConnectionsProviderWordbooksPostProviderEnum = typeof ApiCoreVocabularyCloudConnectionsProviderWordbooksPostProviderEnum[keyof typeof ApiCoreVocabularyCloudConnectionsProviderWordbooksPostProviderEnum];
 
 
 /**

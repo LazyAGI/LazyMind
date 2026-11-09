@@ -5,11 +5,24 @@ import pytest
 from lazyllm.tools.agent import ToolExecutionError
 
 from lazymind.chat.engine.tools.intent_writer import (
+    append_intentwrite_guidance,
     build_intentwrite_tool,
     enable_workflow_intent_scopes,
     normalize_intent_document,
     render_intent_section,
 )
+
+
+def test_consecutive_guidance_extends_user_evidence_without_trusting_model_output():
+    tool = build_intentwrite_tool(conversation_id='conv-1', current_query='比较周末旅行')
+    append_intentwrite_guidance(tool, ['只比较天津和济南'])
+    append_intentwrite_guidance(tool, ['两人预算1500以内'])
+    with patch('lazymind.chat.engine.tools.intent_writer._write_agent_data') as write:
+        for evidence in ['比较周末旅行', '只比较天津和济南', '两人预算1500以内']:
+            tool('conversation', [_operation(value=evidence, evidence=evidence)])
+        assert write.call_count == 3
+        with pytest.raises(ToolExecutionError, match='evidence'):
+            tool('conversation', [_operation(evidence='模型推测的需求')])
 
 
 def _operation(**overrides):
@@ -127,3 +140,19 @@ def test_subagent_receives_frozen_runtime_instruction():
 
     assert '执行到初稿后确认' in section
     assert '初稿不超过500字' in section
+
+
+def test_subagent_current_edit_has_priority_over_original_style():
+    from lazymind.chat.engine.subagent.runner import _build_intent_context_section
+
+    section = '\n'.join(_build_intent_context_section({
+        'launch_user_input': '生成8页深色科研PPT',
+        'current_user_input': '我不喜欢黑底ppt 给我换成 白底黑字',
+        'retry_hint': '只修改现有8页的配色，保留内容和讲稿',
+        'runtime_instruction': '使用当前工作区',
+    }))
+
+    assert '生成8页深色科研PPT' in section
+    assert '保留内容和讲稿' in section
+    assert section.endswith('我不喜欢黑底ppt 给我换成 白底黑字')
+    assert 'overrides conflicting original requirements' in section

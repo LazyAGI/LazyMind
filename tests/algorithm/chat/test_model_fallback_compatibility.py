@@ -423,3 +423,28 @@ def test_unknown_candidate_does_not_allow_unbounded_tool_initialization(provider
         AgentExecutor().create_agent(raw_model(a), plan)
     assert provider.requests == []
     assert {str(path): path.read_bytes() for path in tmp_path.rglob('*.json')} == before
+
+
+@pytest.mark.parametrize('as_fallback', [False, True])
+@pytest.mark.parametrize('summary', [False, True])
+def test_unconfigured_output_limit_keeps_provider_default(provider, as_fallback, summary):
+    target = candidate(provider, 'gpt-4o', window=131072)
+    current = candidate(provider, 'model-a') if as_fallback else target
+    fail(provider, 'model-a')
+
+    def respond(request):
+        if request['model'] == 'gpt-4o':
+            # This model accepts defaults but rejects the internal 32768 reserve.
+            if 'max_tokens' in request or 'max_completion_tokens' in request:
+                return {'error': 'invalid_value', 'status': 400}
+            return {'message': {'role': 'assistant', 'content': 'completed'}}
+
+    provider.on_request = respond
+    if summary:
+        assert _call_summarizer_llm(raw_model(target), 'Summarize.', 'Short history.',
+                                   candidate_budget=build_context_budget(131072)) == 'completed'
+    else:
+        assert wrapped(current, [target] if as_fallback else [])('Complete.') == 'completed'
+    assert provider.requests[-1]['model'] == 'gpt-4o'
+    assert 'max_tokens' not in provider.requests[-1]
+    assert 'max_completion_tokens' not in provider.requests[-1]

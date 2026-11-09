@@ -114,10 +114,24 @@ def _skill_filesystem(fs: Any, skills_dir: Optional[str]) -> Any:
     return fs
 
 
+AGENT_MODULE_TRACE = {
+    'by_class': {
+        'FunctionCall': False, 'ToolManager': False,
+        'Pipeline': False, 'Diverter': False,
+        'ReactAgent': False, 'FallbackLLM': False,
+    },
+    'by_name': {
+        '_build_history': False, '_post_action': False,
+        '_safe_call': False, '_indexed_call': False, '_stop': False,
+    },
+}
+
+
 class AgentInvocation:
     """LazyLLM-traceable boundary for one in-process agent invocation."""
 
-    __span_name__ = 'invoke_agent'
+    __span_name__ = 'ChatAgent'
+    __trace_exclude__ = {'plan'}
     _type = 'agent'
     _agent_name = 'ChatAgent'
 
@@ -129,6 +143,11 @@ class AgentInvocation:
 
     def __call__(self):
         return self._executor.stream_agent(self._agent, self._plan)
+
+    def stream(self, **trace_context):
+        if not lazyllm.config['trace_enabled']:
+            return self()
+        return lazyllm.enable_trace(self, **trace_context)
 
 
 class _ChatWithoutTools(_agent_mod.ReactAgent):
@@ -317,7 +336,7 @@ class AgentExecutor:
         agent._tools_manager = ToolExecutionMiddleware(
             CitationResultMiddleware(agent._tools_manager),
             failure_policy=FailureRetryPolicy(options.tool_failure_limits),
-            call_quota=ToolCallQuota(options.tool_call_limits),
+            call_quota=ToolCallQuota(options.tool_call_limits, observer=options.tool_call_budget_observer),
             argument_limits={name: DEFAULT_ARGUMENT_REPAIR_LIMIT for name in plan.stop_tools},
             expanded_round_limit=(options.expanded_round_limit if options.expanded_round_limit is not None
                                   else max(2, int(_cfg['agentic_expanded_max_rounds']))),
@@ -360,8 +379,20 @@ class AgentExecutor:
 
     @staticmethod
     def runtime_llm(agent: Any) -> Any:
-        """Return the module that actually issued the agent's model calls."""
+        """Return the configured module that actually issues model calls.
+
+        ReactAgent creates its FunctionCall model lazily.  Resolving the model
+        before ``build_agent`` returns the unconfigured source model instead of
+        the shared copy carrying the agent prompt, formatter, and history.  A
+        stream hook installed on that source model can therefore bypass the
+        complete model request context.
+        """
         function_call = getattr(agent, '_fc', None)
+        if function_call is None:
+            build_agent = getattr(agent, 'build_agent', None)
+            if callable(build_agent):
+                build_agent()
+                function_call = getattr(agent, '_fc', None)
         function_call_llm = getattr(function_call, '_llm', None)
         if function_call_llm is not None:
             return function_call_llm
@@ -430,6 +461,10 @@ class AgentExecutor:
                        for error in self._exception_chain(exc)):
                     yield 'event', {'tag': 'model_fallback_failed', 'fallback_code': 'runtime_failure'}
                 terminal = self._find_model_terminal(exc)
+                if terminal:
+                    terminal_summary = {key: terminal.get(key) for key in (
+                        'model_call_id', 'kind', 'finish', 'attempt_count', 'duration_ms', 'usage')}
+                    lazyllm.LOG.warning(f'[AgentExecutor] failed model call terminal: {terminal_summary}')
                 model_call_id = str((terminal or {}).get('model_call_id') or '')
                 if terminal and model_call_id not in finished_model_calls:
                     if getattr(agent, '_model_fallback_state', None) is None:

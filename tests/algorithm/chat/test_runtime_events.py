@@ -10,6 +10,28 @@ from lazymind.chat.runtime_events import RunAccumulator, RunOutcome
 from lazymind.chat.service.component.event_translator import AgentEventFrameTranslator
 
 
+@pytest.mark.parametrize(('outcome', 'fallback_code', 'expected_code', 'expected_call'), [
+    (RunOutcome.FAILED, 'model_failure', 'authentication_failed', 'primary'),
+    (RunOutcome.FAILED, 'runtime_failure', 'runtime_failure', 'latest'),
+    (RunOutcome.SUCCEEDED, 'model_failure', None, 'latest'),
+])
+def test_primary_failure_attribution_preserves_runtime_precedence(
+    outcome, fallback_code, expected_code, expected_call,
+):
+    primary = {'model_call_id': 'primary', 'kind': 'failure', 'has_semantic_output': False,
+               'failure': {'origin': 'http', 'code': 'authentication_failed', 'diagnostic_id': 'primary-diag',
+                           'provider_message': 'must-not-leak'}}
+    latest = {'model_call_id': 'latest', 'kind': 'failure', 'has_semantic_output': False,
+              'failure': {'origin': 'http', 'code': 'invalid_request', 'diagnostic_id': 'latest-diag'}}
+    run = RunAccumulator(run_id='cause', last_model_terminal=latest, failure_terminal=primary,
+                         fallback_code=fallback_code)
+    result = run.finish(outcome=outcome)['data']
+    assert result.get('code') == expected_code
+    assert result['model_call_id'] == expected_call
+    assert result['diagnostic_id'] == expected_call + '-diag'
+    assert 'must-not-leak' not in json.dumps(result)
+
+
 def test_translator_binds_model_event_to_run():
     translator = AgentEventFrameTranslator(query='test', run_id='run-1')
     frames = translator.feed({

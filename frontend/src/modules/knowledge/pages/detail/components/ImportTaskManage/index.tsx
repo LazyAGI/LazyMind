@@ -28,7 +28,6 @@ const ImportTaskManage = (props: IProps, ref: Ref<unknown> | undefined) => {
   };
 
   const handleClose = () => {
-    setData({});
     setVisible(false);
     onClose(hasSuspendedRef.current);
     hasSuspendedRef.current = false;
@@ -50,6 +49,7 @@ const ImportTaskManage = (props: IProps, ref: Ref<unknown> | undefined) => {
       <ImportTaskList
         key={`${data.dataset_id}:${data.initialTab ?? TaskTab.Running}`}
         datasetId={data.dataset_id ?? ""}
+        active={visible}
         initialTab={data.initialTab}
         onClose={handleClose}
         onRetrySuccess={props.onRetrySuccess}

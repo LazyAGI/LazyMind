@@ -1,3 +1,4 @@
+import { legacyKnowledgeConfirmation, type KnowledgeConfirmation } from "@/modules/chat/types/knowledgeConfirmation";
 import {
   ChatConversationsResponseFinishReasonEnum,
   type ChatHistory as BaseChatHistory,
@@ -14,12 +15,14 @@ import { splitModelOutputContent, splitThinkingContent } from "@/modules/chat/ut
 import type { ChatMention } from "@/modules/chat/components/ChatInput/MentionEditor";
 import type { ChatSourceCollection } from "@/modules/chat/utils/sourceAdapter";
 import { mailConfirmationMetadata, mailConfirmationTurnSignature, type MailConfirmationMetadata } from "./mailConfirmationReplay";
+import { assignSteeringIntent, type SteeringIntentUpdate } from "./steeringTimeline";
 
 const CITE_MESSAGE_PATTERN = /<cite_message>([\s\S]*?)<\/cite_message>\s*/i;
 const CITE_MESSAGE_GLOBAL_PATTERN =
   /<cite_message>([\s\S]*?)<\/cite_message>\s*/gi;
 const ASK_USER_RECEIPT_PATTERN =
   /^Question sent to user \(ask_id=[^)]+\)\.\s*Waiting for answer on next turn\.?$/i;
+const ASK_USER_PROTOCOL_TAG_PATTERN = /<\/?ask_user\b[^>]*>/gi;
 const CODEX_REQUEST_MARKER_PATTERN = /^#+\s*My request for Codex:\s*$/im;
 const CODEX_IMAGE_TAG_PATTERN = /<\/?image\b[^>]*>/gi;
 
@@ -37,7 +40,15 @@ export function stripAskUserReceipt(
   text: string | undefined,
   hasAskPending: boolean,
 ) {
-  const content = text || "";
+  // Some providers occasionally emit the ask_user protocol envelope as plain
+  // text instead of making the structured tool call. Keep its user-facing
+  // question, but never expose the internal XML-like tags. This also handles
+  // an unfinished opening/closing tag while the answer is still streaming.
+  const source = text || "";
+  const withoutProtocolTags = source.replace(ASK_USER_PROTOCOL_TAG_PATTERN, "");
+  const content = withoutProtocolTags === source
+    ? source
+    : withoutProtocolTags.trim();
   return hasAskPending && ASK_USER_RECEIPT_PATTERN.test(content.trim())
     ? ""
     : content;
@@ -191,6 +202,18 @@ export type ConversationHistoryRecord = Omit<
       model_switches?: ChatModelSwitchRecord[];
       create_time?: string;
     }>;
+    steering_messages?: Array<{
+      id?: string;
+      text?: string;
+      target_history_id?: string;
+      assistant_snapshot?: string;
+      assistant_segment?: string;
+      reasoning_content?: string;
+      accepted_at?: string;
+      intent_updated?: SteeringIntentUpdate;
+    }>;
+    assistant_remainder?: string;
+    knowledge_confirmations?: KnowledgeConfirmation[];
   };
 
 export interface ExternalExecutionProjection {
@@ -316,6 +339,7 @@ export function buildChatMessageListFromHistory(
   const list: any[] = [];
 
   records.forEach((rawRecord) => {
+    const recordStart = list.length;
     // The generated Core schema is intentionally permissive. Normalize it at
     // this boundary before constructing the stricter UI message shape.
     const record = rawRecord as ConversationHistoryRecord;
@@ -400,20 +424,125 @@ export function buildChatMessageListFromHistory(
 
     const isLastRecord = record === lastRecord;
     const isActuallyGenerating = isGenerating && isLastRecord;
+    const steeringMessages = Array.isArray(record.steering_messages)
+      ? record.steering_messages
+      : [];
     const splitResult = record.model_output
       ? splitModelOutputContent(record.result, record.reasoning_content)
       : splitThinkingContent(record.result, record.reasoning_content);
-    const hasAskPending = !!(record as any).ask_pending;
-    const displayAssistantContent = stripAskUserReceipt(
+    const askState = record as any;
+    const legacyConfirmation = legacyKnowledgeConfirmation(askState.ask_pending, askState.ask_answered, askState.ask_saved_answers);
+    const confirmations = [...(record.knowledge_confirmations ?? [])];
+    if (legacyConfirmation && !confirmations.some(card => card.confirmation_id === legacyConfirmation.confirmation_id)) {
+      confirmations.unshift(legacyConfirmation);
+    }
+    const hasAskPending = !!askState.ask_pending && !legacyConfirmation;
+    const fullAssistantContent = stripAskUserReceipt(
       splitResult.content,
       hasAskPending,
     );
+    const assistantSnapshots = steeringMessages.map((steeringMessage) =>
+      String(steeringMessage?.assistant_snapshot || ""),
+    );
+    let snapshotOffset = 0;
+    const snapshotsAreDurablePrefixes = assistantSnapshots.every((snapshot) => {
+      if (!snapshot) return true;
+      if (
+        snapshot.length < snapshotOffset ||
+        !fullAssistantContent.startsWith(snapshot)
+      ) {
+        return false;
+      }
+      snapshotOffset = snapshot.length;
+      return true;
+    });
+    let assistantOffset = 0;
+    steeringMessages.forEach((steeringMessage, steeringIndex) => {
+      const steeringID = String(steeringMessage?.id || "").trim();
+      const steeringText = String(steeringMessage?.text || "").trim();
+      if (!steeringID || !steeringText) {
+        return;
+      }
+      const snapshot = snapshotsAreDurablePrefixes
+        ? assistantSnapshots[steeringIndex]
+        : "";
+      const rawSegment = steeringMessage.assistant_segment ?? fullAssistantContent.slice(
+          assistantOffset,
+          snapshot.length,
+        );
+      const segmentResult = record.model_output
+        ? splitModelOutputContent(rawSegment, steeringMessage.reasoning_content)
+        : { content: rawSegment, reasoning_content: steeringMessage.reasoning_content || "" };
+      const segment = stripAskUserReceipt(segmentResult.content, hasAskPending);
+      // Reasoning without user-facing text is an interrupted pre-answer
+      // placeholder, not a completed assistant segment. Omitting it here keeps
+      // refreshed history identical to the live steering timeline without
+      // affecting ordinary (non-steering) reasoning messages.
+      const segmentConfirmations = confirmations.filter(card => card.steering_segment === steeringIndex);
+      if (segment.trim() || segmentConfirmations.length) {
+        list.push({
+          id: `steering-segment:${steeringID}`,
+          history_id: `steering-segment:${record.id || "history"}:${steeringID}`,
+          original_history_id: record.id,
+          seq: record.seq,
+          role: RoleTypes.ASSISTANT,
+          reasoning_content: segmentResult.reasoning_content,
+          intent_updated: steeringMessage.intent_updated,
+          delta: segment,
+          raw_delta: rawSegment,
+          finish_reason:
+            ChatConversationsResponseFinishReasonEnum.FinishReasonStop,
+          create_time: steeringMessage.accepted_at || record.create_time,
+          steering_segment: true,
+          knowledge_segment: steeringIndex,
+          ...(segmentConfirmations.length ? { knowledge_confirmations: segmentConfirmations } : {}),
+          steering_follow_up_id: steeringID,
+          model_route: record.model_route,
+          fork_read_only: (record as any).fork_read_only,
+        });
+        assistantOffset = snapshot.length;
+      }
+      list.push({
+        id: `steering:${steeringID}`,
+        history_id: steeringMessage.target_history_id || record.id,
+        seq: record.seq,
+        role: RoleTypes.USER,
+        delta: steeringText,
+        display_delta: steeringText,
+        inputs: [{ input_type: "text", text: steeringText }],
+        finish_reason:
+          ChatConversationsResponseFinishReasonEnum.FinishReasonStop,
+        create_time: steeringMessage.accepted_at || record.create_time,
+        is_resumed: true,
+        steering_message: true,
+        steering_follow_up_id: steeringID,
+      });
+    });
+
+    const rawRemainder = record.assistant_remainder ?? (snapshotsAreDurablePrefixes
+      ? fullAssistantContent.slice(assistantOffset)
+      : fullAssistantContent);
+    const remainderResult = record.model_output && record.assistant_remainder !== undefined
+      ? splitModelOutputContent(rawRemainder, record.reasoning_content)
+      : splitResult;
+    const displayAssistantContent = stripAskUserReceipt(record.model_output && record.assistant_remainder !== undefined
+      ? remainderResult.content : rawRemainder, hasAskPending);
+    const displayReasoningContent = steeringMessages.length > 0
+      && record.assistant_remainder !== undefined
+      ? record.model_output ? remainderResult.reasoning_content : record.reasoning_content || ""
+      : splitResult.reasoning_content;
     const assistantMessage: any = {
       role: RoleTypes.ASSISTANT,
-      reasoning_content: splitResult.reasoning_content,
+      knowledge_segment: steeringMessages.length,
+      ...(confirmations.length ? {
+        knowledge_confirmations: confirmations.filter(card => card.steering_segment >= steeringMessages.length),
+      } : {}),
+      reasoning_content: displayReasoningContent,
       delta: displayAssistantContent,
       exports: record.exports,
-      raw_delta: record.result || "",
+      raw_delta: assistantOffset > 0 || record.assistant_remainder !== undefined
+        ? rawRemainder
+        : record.result || "",
       ...(record.model_output ? { raw_reasoning_content: record.reasoning_content || "" } : {}),
       finish_reason: isActuallyGenerating
         ? ChatConversationsResponseFinishReasonEnum.FinishReasonUnspecified
@@ -434,7 +563,6 @@ export function buildChatMessageListFromHistory(
       model_switches: record.model_switches,
       model_output: record.model_output,
       fork_read_only: (record as any).fork_read_only,
-      knowledge_operations: (record as any).knowledge_operations,
     };
 
     // Restore ask_pending from persisted ext so the AskCard is visible after page reload.
@@ -459,6 +587,11 @@ export function buildChatMessageListFromHistory(
     }
 
     list.push(assistantMessage);
+    const intent = (record as any).intent_updated;
+    if (typeof intent?.steering_segment_id === "string") {
+      const attributed = assignSteeringIntent(list.slice(recordStart), record.id || "", intent);
+      list.splice(recordStart, list.length - recordStart, ...attributed);
+    }
   });
 
   const lastAssistant = list[list.length - 1];

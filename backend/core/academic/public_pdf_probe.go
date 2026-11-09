@@ -2,6 +2,7 @@ package academic
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"sync"
@@ -41,7 +42,9 @@ func probeOpenPDFCandidates(ctx context.Context, client *http.Client, candidates
 				candidate := candidates[i]
 				address, err := probePublicPDFCandidate(attempt, client, candidate, doi)
 				candidate.URL = address
-				if candidate.SourceType == "open_access_landing" {
+				if candidate.SourceType == "published_landing" {
+					candidate.SourceType = "published_pdf"
+				} else if candidate.SourceType == "open_access_landing" {
 					candidate.SourceType = "open_access_pdf"
 				}
 				if attempt.Err() != nil {
@@ -66,6 +69,8 @@ func probeOpenPDFCandidates(ctx context.Context, client *http.Client, candidates
 		case <-ctx.Done():
 			appendFailures()
 			result.Warnings = append(result.Warnings, "开放来源: "+ctx.Err().Error())
+			result.Err = errors.Join(result.Err, ctx.Err())
+			result.Retryable = result.Retryable || transientPDFError(ctx.Err())
 			return result
 		case out, ok := <-results:
 			if !ok {
@@ -79,6 +84,8 @@ func probeOpenPDFCandidates(ctx context.Context, client *http.Client, candidates
 			}
 			if out.err != nil {
 				failures[out.index] = fmt.Sprintf("%s 副本 %d: %v", candidates[out.index].SourceProvider, out.index+1, out.err)
+				result.Err = errors.Join(result.Err, out.err)
+				result.Retryable = result.Retryable || transientPDFError(out.err)
 			}
 		}
 	}

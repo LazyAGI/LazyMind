@@ -12,6 +12,8 @@ import (
 func TestDurableDisplayStates(t *testing.T) {
 	for _, sample := range []struct {
 		name, session, step, mode, want      string
+		workflowMode, host, reason           string
+		params                               string
 		stopped, skip, stale, runningSibling bool
 	}{
 		{name: "preparing", session: "waiting", want: "running"},
@@ -19,6 +21,15 @@ func TestDurableDisplayStates(t *testing.T) {
 		{name: "approval", session: "waiting", step: "succeeded", mode: "human", want: "waiting"},
 		{name: "skip approval", session: "waiting", step: "succeeded", mode: "human", skip: true, want: "failed"},
 		{name: "automatic no advance", session: "waiting", step: "succeeded", mode: "auto", want: "failed"},
+		{name: "dynamic next step", session: "waiting", workflowMode: "dynamic", host: "lazymind", params: `{"hand_off":true,"workflow_mode":"dynamic","session_id":"session","step_id":"step"}`, step: "succeeded", mode: "auto", want: "waiting", reason: "next_step_required"},
+		{name: "dynamic skips approval", session: "waiting", workflowMode: "dynamic", host: "lazymind", params: `{"hand_off":true,"workflow_mode":"dynamic","session_id":"session","step_id":"step"}`, step: "succeeded", mode: "human", skip: true, want: "waiting", reason: "next_step_required"},
+		{name: "dynamic real approval", session: "waiting", workflowMode: "dynamic", step: "succeeded", mode: "human", want: "waiting", reason: "approval_required"},
+		{name: "auto still must advance", session: "waiting", workflowMode: "auto", step: "succeeded", want: "failed"},
+		{name: "external host still must advance", session: "waiting", workflowMode: "dynamic", host: "external-agent", step: "succeeded", want: "failed"},
+		{name: "dynamic without handoff", session: "waiting", workflowMode: "dynamic", host: "lazymind", step: "succeeded", want: "failed"},
+		{name: "inline is not a handoff", session: "waiting", workflowMode: "dynamic", host: "lazymind", params: `{"hand_off":false,"workflow_mode":"dynamic","session_id":"session","step_id":"step"}`, step: "succeeded", want: "failed"},
+		{name: "wrong session handoff", session: "waiting", workflowMode: "dynamic", host: "lazymind", params: `{"hand_off":true,"workflow_mode":"dynamic","session_id":"other","step_id":"step"}`, step: "succeeded", want: "failed"},
+		{name: "dynamic failure", session: "waiting", workflowMode: "dynamic", step: "failed", want: "failed"},
 		{name: "interrupted", session: "waiting", step: "interrupted", mode: "human", want: "failed"},
 		{name: "failed", session: "failed", step: "failed", mode: "human", want: "failed"},
 		{name: "driver failure cannot discard pending review", session: "failed", step: "succeeded", mode: "human", want: "waiting"},
@@ -29,9 +40,10 @@ func TestDurableDisplayStates(t *testing.T) {
 		{name: "stale approval ignored", session: "waiting", step: "succeeded", mode: "human", stale: true, want: "running"},
 	} {
 		t.Run(sample.name, func(t *testing.T) {
-			db := orm.MigrateTestDB(t, &orm.WorkflowSessionStep{}, &orm.WorkflowRevision{}, &orm.WorkflowApprovalPreference{}, &orm.WorkflowReviewCheckpoint{})
+			db := orm.MigrateTestDB(t, &orm.WorkflowSessionStep{}, &orm.WorkflowRevision{}, &orm.WorkflowApprovalPreference{}, &orm.WorkflowReviewCheckpoint{}, &orm.SubAgentTask{})
 			now := time.Now().UTC()
 			session := orm.WorkflowSession{ID: "session", Status: sample.session, WorkflowID: "workflow", CreateUserID: "owner", WorkflowRevisionID: "revision"}
+			session.WorkflowMode, session.ControllerHost = sample.workflowMode, sample.host
 			if sample.stopped {
 				session.LastStoppedAt = &now
 			}
@@ -45,6 +57,11 @@ func TestDurableDisplayStates(t *testing.T) {
 					step.Validity = "stale"
 				}
 				if err := db.Create(&step).Error; err != nil {
+					t.Fatal(err)
+				}
+			}
+			if sample.params != "" {
+				if err := db.Create(&orm.SubAgentTask{InputSlots: json.RawMessage(`[]`), OutputSlots: json.RawMessage(`[]`), ID: "task", Params: json.RawMessage(sample.params)}).Error; err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -62,7 +79,10 @@ func TestDurableDisplayStates(t *testing.T) {
 			if err != nil || view.Status != sample.want {
 				t.Fatalf("view=%+v err=%v want=%s", view, err, sample.want)
 			}
-			if (view.ApprovalStepID != "") != (sample.want == "waiting") {
+			if sample.reason != "" && view.Reason != sample.reason {
+				t.Fatalf("wrong wait reason: %+v", view)
+			}
+			if (view.ApprovalStepID != "") != (sample.want == "waiting" && sample.reason != "next_step_required") {
 				t.Fatalf("unexpected approval: %+v", view)
 			}
 			payload, err := Enrich(db.DB, session, json.RawMessage(`{"display":{"status":"waiting","approval_step_id":"old"}}`))
@@ -166,6 +186,58 @@ func TestParallelReviewUsesEffectiveAttemptAndUnstartedSuccessor(t *testing.T) {
 			wantApproval := scenario == "pending" || scenario == "external-pending"
 			if (view.ApprovalStepID == "review") != wantApproval {
 				t.Fatalf("wrong review for %s: %+v", scenario, view)
+			}
+		})
+	}
+}
+
+func TestInputCheckpointDisplayLifecycle(t *testing.T) {
+	for _, sample := range []struct {
+		name, status, payload, want string
+		running, successor, stale   bool
+	}{
+		{"pending card", "active", `{"questions":[{"text":"date?"}],"checkpoint_token":"card"}`, "waiting_input", false, false, false},
+		{"answered", "active", `{"questions":[{}],"checkpoint_token":"card","answer_text":"November 30"}`, "running", false, false, false},
+		{"not emitted", "active", `{"questions":[{}]}`, "running", false, false, false},
+		{"no questions", "active", `{"questions":[],"checkpoint_token":"card"}`, "running", false, false, false},
+		{"parallel work", "active", `{"questions":[{}],"checkpoint_token":"card"}`, "running", true, false, false},
+		{"explicit pause", "stopped", `{"questions":[{}],"checkpoint_token":"card"}`, "paused", false, false, false},
+		{"completed", "completed", `{"questions":[{}],"checkpoint_token":"card"}`, "completed", false, false, false},
+		{"stale checklist", "active", `{"questions":[{}],"checkpoint_token":"card"}`, "running", false, false, true},
+		{"successor started", "active", `{"questions":[{}],"checkpoint_token":"card"}`, "running", false, true, false},
+	} {
+		t.Run(sample.name, func(t *testing.T) {
+			db := orm.MigrateTestDB(t, &orm.WorkflowSessionStep{}, &orm.WorkflowRevision{}, &orm.WorkflowApprovalPreference{}, &orm.WorkflowReviewCheckpoint{}, &orm.WorkflowSlotRevision{}, &orm.WorkflowHumanArtifact{})
+			now := time.Now().UTC()
+			session := orm.WorkflowSession{ID: "session", Status: sample.status, WorkflowRevisionID: "revision", ControllerHost: "lazymind"}
+			graph := graphengine.CompiledStateGraph{Nodes: map[string]graphengine.CompiledNode{"collect": {ID: "collect", Mode: "auto"}}, Runtime: graphengine.RuntimePolicy{InputCheckpoint: &graphengine.InputCheckpoint{AfterStep: "collect", Slot: "questions", BeforeSteps: []string{"outline"}}}}
+			must := func(err error) {
+				t.Helper()
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+			must(db.Create(&orm.WorkflowRevision{ID: "revision", WorkflowResourceID: "resource", RevisionNo: 1, CompiledGraph: graph.JSON()}).Error)
+			must(db.Create(&orm.WorkflowSessionStep{ID: "collect", SessionID: "session", StepID: "collect", Status: "succeeded", Validity: "effective", CreatedAt: now}).Error)
+			hid := "questions"
+			must(db.Create(&orm.WorkflowHumanArtifact{ID: hid, SessionID: "session", Slot: "questions", ContentType: "json", Value: json.RawMessage(`{"data":` + sample.payload + `}`)}).Error)
+			validity := "effective"
+			if sample.stale {
+				validity = "stale"
+			}
+			must(db.Create(&orm.WorkflowSlotRevision{ID: "slot", SessionID: "session", SlotID: "questions", Slot: "questions", Selected: true, Revision: 1, Validity: validity, HumanArtifactID: &hid}).Error)
+			if sample.running || sample.successor {
+				status := "running"
+				if sample.successor {
+					status = "succeeded"
+				}
+				must(db.Create(&orm.WorkflowSessionStep{ID: "outline", SessionID: "session", StepID: "outline", Status: status, Validity: "effective", CreatedAt: now.Add(time.Second)}).Error)
+			}
+			for i := 0; i < 2; i++ {
+				view, err := Read(db.DB, session)
+				if err != nil || view.Status != sample.want {
+					t.Fatalf("view=%+v err=%v want=%s", view, err, sample.want)
+				}
 			}
 		})
 	}

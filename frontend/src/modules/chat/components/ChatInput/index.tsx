@@ -427,7 +427,8 @@ interface ChatInputProps {
   draftWorkspace?: Pick<SendMessageParams, "workspace_id" | "workspace_permission_mode" | "project_name">;
   value: string;
   onChange: (value: string) => void;
-  onSend?: (params: SendMessageParams) => void;
+  onSend?: (params: SendMessageParams) => void | boolean | Promise<void | boolean>;
+  followUpQueue?: ReactNode;
   placeholder?: string;
   openHistory?: () => void;
   openNewChat?: () => void;
@@ -450,11 +451,14 @@ interface ChatInputProps {
   /** Bump to remount the chat config popover (e.g. when starting a fresh welcome-screen chat). */
   configResetKey?: number | string;
   sessionId?: string;
+  /** Optional persistence key for composers that do not have a conversation yet. */
+  draftKey?: string;
   isStreaming?: boolean;
   /** Stop availability can outlive the Chat stream during workflow hand-off. */
   canStopGeneration?: boolean;
   onStopGeneration?: () => void;
   embeddingReady?: boolean | null;
+  vlmReady?: boolean | null;
   /** Called when workflow settings change (e.g. from the chat config popover). */
   onConversationSettingsChange?: (settings: ConversationRuntimeSettings) => void;
   /** Initial workflow settings to pre-populate the config popover. */
@@ -489,6 +493,9 @@ interface ChatInputProps {
   showConversationConfig?: boolean;
   /** Hide the main-chat model picker in specialized composers that own a separate model contract. */
   showModelSelector?: boolean;
+  /** Minimal toolbar for document reading; resource invocation remains in the editor. */
+  composerVariant?: "default" | "paper";
+  modelSelectionDraft?: boolean;
   /** Locks model switching after a message was submitted but before the stream opens. */
   modelSelectorBusy?: boolean;
   /** Reports persisted model-selection saves so sibling retry actions can share the lock. */
@@ -507,7 +514,7 @@ interface ChatInputProps {
 interface ShowcaseSelectControl {
   value?: string;
   selectedLabel?: string;
-  options: Array<{ value: string; label: string; description?: string }>;
+  options: Array<{ value: string; label: string; description?: string; pageAction?: string }>;
   ariaLabel: string;
   placeholder?: string;
   heading: string;
@@ -532,6 +539,7 @@ export interface SkillDepositStats {
 
 interface SendButtonProps {
   canStopGeneration: boolean;
+  hasDraft: boolean;
   sendDisabled: boolean;
   disabled: boolean;
   sendLabel: string;
@@ -541,6 +549,7 @@ interface SendButtonProps {
 }
 const SendButton: React.FC<SendButtonProps> = ({
   canStopGeneration,
+  hasDraft,
   sendDisabled,
   disabled,
   sendLabel,
@@ -548,7 +557,10 @@ const SendButton: React.FC<SendButtonProps> = ({
   onSend,
   onStop,
 }) => {
-  const isStopMode = canStopGeneration && Boolean(onStop);
+  // While a response is running, an empty composer controls that response.
+  // As soon as the user types a valid follow-up, the same control submits the
+  // draft to the queue so it can subsequently be steered or sent normally.
+  const isStopMode = canStopGeneration && Boolean(onStop) && !hasDraft;
   // Send prerequisites (empty input, runtime/config readiness) must not block stop.
   const isDisabled = !isStopMode && (sendDisabled || disabled);
 
@@ -578,6 +590,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
       value,
       onChange,
       onSend,
+      followUpQueue,
       placeholder,
       openHistory,
       isChatContent,
@@ -595,9 +608,11 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
       allowLocalWorkspace = true,
       configResetKey,
       sessionId,
+      draftKey,
       isStreaming = false,
       onStopGeneration,
       embeddingReady,
+      vlmReady,
       multimodalEmbeddingReady,
       rerankReady,
       disabled = false,
@@ -624,6 +639,8 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
       showSkillDeposit = true,
       showConversationConfig = true,
       showModelSelector = true,
+      composerVariant = "default",
+      modelSelectionDraft = false,
       modelSelectorBusy = false,
       onModelSelectionSavingChange,
       onWorkspacePermissionSavingChange,
@@ -634,7 +651,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
       thinkingDepth: controlledThinkingDepth,
       onThinkingDepthChange,
     } = props;
-    const showWorkspaceEnvironment = runInBackground && allowLocalWorkspace && isLocalLikeRuntimeMode(getRuntimeMode());
+    const showWorkspaceEnvironment = composerVariant !== "paper" && runInBackground && allowLocalWorkspace && isLocalLikeRuntimeMode(getRuntimeMode());
     const [workspaceId, setWorkspaceId] = useState<string>();
     const [projectName, setProjectName] = useState<string>();
     const [projectValid, setProjectValid] = useState(true);
@@ -729,6 +746,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
       kb: boolean | null;
     }>({ kb: null });
     const disabledNoticeId = useId();
+    const inputDraftKey = sessionId ?? draftKey;
     const draftRef = useRef<{ sessionId?: string; content: string; mentions: ChatMention[] }>({ content: value, mentions: [] });
     const [initialModelSelection, setInitialModelSelection] =
       useState<ChatModelSelectionRequest>();
@@ -760,7 +778,6 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
       const session = state.sessionByConversation[sessionId];
       return (
         session?.status === "active" ||
-        session?.status === "waiting" ||
         Boolean(state.autoRunningByConversation[sessionId])
       );
     });
@@ -924,29 +941,29 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
     );
 
     useEffect(() => {
-      if (draftRef.current.sessionId === sessionId && draftRef.current.content !== value) {
-        draftRef.current = { sessionId, content: value, mentions: [] };
+      if (draftRef.current.sessionId === inputDraftKey && draftRef.current.content !== value) {
+        draftRef.current = { sessionId: inputDraftKey, content: value, mentions: [] };
       }
-    }, [sessionId, value]);
+    }, [inputDraftKey, value]);
 
     useEffect(() => {
-      if (sessionId === draftRef.current.sessionId) return;
+      if (inputDraftKey === draftRef.current.sessionId) return;
       debouncedSaveInput.cancel();
       const previous = draftRef.current;
       if (previous.sessionId !== undefined) {
         if (previous.content.trim()) saveInputContent(previous.sessionId, previous.content, previous.mentions);
         else clearInputContent(previous.sessionId);
-        if (previous.content.trim() && previous.sessionId.startsWith("temp_") && sessionId && !sessionId.startsWith("temp_")) {
-          saveInputContent(sessionId, previous.content, previous.mentions);
+        if (previous.content.trim() && previous.sessionId.startsWith("temp_") && inputDraftKey && !inputDraftKey.startsWith("temp_")) {
+          saveInputContent(inputDraftKey, previous.content, previous.mentions);
           clearInputContent(previous.sessionId);
         }
       }
-      const content = sessionId !== undefined ? getInputContent(sessionId) : value;
-      const savedMentions = sessionId !== undefined ? getInputMentions(sessionId) : [];
-      draftRef.current = { sessionId, content, mentions: savedMentions };
+      const content = inputDraftKey !== undefined ? getInputContent(inputDraftKey) : value;
+      const savedMentions = inputDraftKey !== undefined ? getInputMentions(inputDraftKey) : [];
+      draftRef.current = { sessionId: inputDraftKey, content, mentions: savedMentions };
       setMentions(savedMentions);
       if (content !== value) onChange(content);
-    }, [sessionId, value, onChange, saveInputContent, getInputContent, getInputMentions, clearInputContent, debouncedSaveInput]);
+    }, [inputDraftKey, value, onChange, saveInputContent, getInputContent, getInputMentions, clearInputContent, debouncedSaveInput]);
 
     useEffect(() => () => {
       debouncedSaveInput.cancel();
@@ -1045,6 +1062,14 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
         preprocessUpload(newFiles, currentFiles, hasKB, t),
       [hasKB, t],
     );
+    const onFilesAdded = useCallback(
+      (files: File[]) => {
+        if (vlmReady === false && files.some(isImage)) {
+          message.warning(t("chat.vlmNotReadyWarning"));
+        }
+      },
+      [t, vlmReady],
+    );
     const normalizedCiteMessages = useMemo(() => {
       if (citeMessages) {
         return citeMessages.map((item) => item.trim()).filter(Boolean);
@@ -1063,7 +1088,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
       !value?.trim() ||
       isUploading;
     const shouldShowPromptSuggestions =
-      showPromptSuggestions &&
+      composerVariant !== "paper" && showPromptSuggestions &&
       !disabled &&
       !isStreaming &&
       value.trim().length > 0;
@@ -1190,7 +1215,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
       if ((runInBackground && (!projectValid || workspacePermissionSavingRef.current)) || modelSelectionSaving) {
         return;
       }
-      if (isStreaming || isSendDisabled || resolvingSkillWorkflow || featuredBusy) {
+      if (isSendDisabled || resolvingSkillWorkflow || featuredBusy) {
         return;
       }
       const normalizedText = value.trim();
@@ -1203,10 +1228,10 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
       } finally {
         setResolvingSkillWorkflow(false);
       }
-      const storedInitialModelSelection = !sessionId
+      const storedInitialModelSelection = (!sessionId || modelSelectionDraft)
         ? toChatModelSelectionRequest(
             useModelSelectionStore.getState().selections[
-              NEW_CHAT_MODEL_SELECTION_KEY
+              modelSelectionDraft && sessionId ? sessionId : NEW_CHAT_MODEL_SELECTION_KEY
             ],
           )
         : undefined;
@@ -1247,7 +1272,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
         create_time: new Date().toISOString(),
         ...(runInBackground ? { run_in_background: true } : {}),
         ...(runInBackground && workspaceId ? { workspace_id: workspaceId, workspace_permission_mode: workspacePermissionMode, project_name: projectName } : {}),
-        ...(!sessionId && effectiveInitialModelSelection
+        ...((!sessionId || modelSelectionDraft) && effectiveInitialModelSelection
           ? { initial_model_selection: effectiveInitialModelSelection }
           : {}),
       };
@@ -1256,16 +1281,19 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
         setPendingMessage(sendParams);
         setIsChatContent?.(true);
       } else {
-        onSend?.(sendParams);
+        const submitted = await onSend?.(sendParams);
+        if (submitted === false) {
+          return;
+        }
         clearMultiData();
       }
 
-      draftRef.current = { sessionId, content: "", mentions: [] };
+      draftRef.current = { sessionId: inputDraftKey, content: "", mentions: [] };
       setContextUsageReset((current) => current + 1);
 
-      if (sessionId !== undefined) {
+      if (inputDraftKey !== undefined) {
         debouncedSaveInput.cancel();
-        clearInputContent(sessionId);
+        clearInputContent(inputDraftKey);
       }
       onChange("");
       setMentions([]);
@@ -1287,7 +1315,12 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
     };
 
     const handleInputChange = (text: string) => {
-      draftRef.current = { sessionId, content: text, mentions: [] };
+      const draftMentions = draftRef.current.mentions;
+      draftRef.current = { sessionId: inputDraftKey, content: text, mentions: draftMentions };
+      if (draftKey !== undefined && inputDraftKey !== undefined) {
+        if (text.trim()) saveInputContent(inputDraftKey, text, draftMentions);
+        else clearInputContent(inputDraftKey);
+      }
       onChange(text);
       setText(text);
     };
@@ -1295,10 +1328,10 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
     const handleMentionsChange = useCallback((nextMentions: ChatMention[]) => {
       setMentions(nextMentions);
       const draft = draftRef.current;
-      if (draft.sessionId !== sessionId) return;
+      if (draft.sessionId !== inputDraftKey) return;
       draft.mentions = nextMentions;
-      if (sessionId !== undefined) debouncedSaveInput(sessionId, draft.content, nextMentions);
-    }, [sessionId, debouncedSaveInput]);
+      if (inputDraftKey !== undefined) debouncedSaveInput(inputDraftKey, draft.content, nextMentions);
+    }, [inputDraftKey, debouncedSaveInput]);
 
     const handleApplyPromptSuggestion = async (
       suggestion: (typeof PROMPT_SUGGESTIONS)[number],
@@ -1321,12 +1354,12 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
           return;
         }
         textAreaRef.current?.setPlainText(nextPrompt);
-        draftRef.current = { sessionId, content: nextPrompt, mentions: [] };
+        draftRef.current = { sessionId: inputDraftKey, content: nextPrompt, mentions: [] };
         setMentions([]);
         onChange(nextPrompt);
         setText(nextPrompt);
-        if (sessionId !== undefined) {
-          debouncedSaveInput(sessionId, nextPrompt, []);
+        if (inputDraftKey !== undefined) {
+          debouncedSaveInput(inputDraftKey, nextPrompt, []);
         }
         setTimeout(() => onHeightChange?.(), 0);
       } catch {
@@ -1441,7 +1474,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
 
     return (
       <div
-        className={`input-wrapper${disabled ? " is-disabled" : ""}`}
+        className={`input-wrapper${disabled ? " is-disabled" : ""}${composerVariant === "paper" ? " paper-chat-composer" : ""}`}
         ref={innerRef}
       >
         <div ref={setApprovalContainer} className="workspace-approval-slot" />
@@ -1473,6 +1506,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
             ) : null}
           </div>
         ) : null}
+        {followUpQueue}
         <div className="input-container">
           <div className={`chat-input-surface${showWorkspaceEnvironment ? " has-environment" : ""}`}>
           <div className="input-top">
@@ -1526,13 +1560,13 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                 </div>
               )}
               <MentionEditor
-                key={sessionId}
+                key={inputDraftKey}
                 ref={textAreaRef}
                 runInBackground={runInBackground}
                 conversationId={sessionId}
                 fileCandidates={composerFiles}
                 onQueryOpen={() => setActiveMenu(null)}
-                initialMentions={sessionId !== undefined ? getInputMentions(sessionId) : props.transferredDraft?.mentions}
+                initialMentions={inputDraftKey !== undefined ? getInputMentions(inputDraftKey) : props.transferredDraft?.mentions}
                 placeholder={placeholder || t(allowMentions
                   ? "chat.inputPlaceholder"
                   : "chat.inputPlaceholderWithoutMentions")}
@@ -1555,8 +1589,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                     disabled ||
                     isPromptPolishing ||
                     modelSelectionSaving ||
-                    (runInBackground && (workspacePermissionSaving || !projectValid)) ||
-                    isStreaming
+                    (runInBackground && (workspacePermissionSaving || !projectValid))
                   ) return;
                   void handleSend();
                   setNewMessage(false);
@@ -1567,7 +1600,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
               <div className="input-bottom-actions">
                 <div className="input-bottom-actions-left chat-core-actions">
                   <div className="chat-add-resource">
-                    <Popover
+                    {composerVariant !== "paper" && <Popover
                       trigger="click"
                       open={addMenuOpen}
                       onOpenChange={(open: boolean) => {
@@ -1664,8 +1697,8 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                           <PlusOutlined className="chat-add-resource-icon" aria-hidden="true" />
                         </button>
                       </Tooltip>
-                    </Popover>
-                    {allowKnowledgeBaseSelection ? (
+                    </Popover>}
+                    {composerVariant !== "paper" && allowKnowledgeBaseSelection ? (
                       <div className="chat-add-resource-hidden-selector">
                         <ChatSelector
                           ref={knowledgeSelectorRef}
@@ -1687,6 +1720,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                         types={uploadTypes}
                         max={Math.max(0, MAX_UPLOAD_FILES - transferredUploads.length)}
                         onBeforeAddFiles={onBeforeAddFiles}
+                        onFilesAdded={onFilesAdded}
                         disabled={disabled || isPromptPolishing}
                         disabledReason={isPromptPolishing ? t("chat.promptPolishing") : disabledReason}
                         icon={<span />}
@@ -1695,12 +1729,14 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                   </div>
                   {showModelSelector ? (
                     <ChatModelSelector
+                      iconOnly={composerVariant === "paper"}
                       key={`${sessionId || "new"}:${configResetKey ?? ""}`}
-                      conversationId={sessionId}
+                      conversationId={modelSelectionDraft ? undefined : sessionId}
+                      draftSelectionKey={modelSelectionDraft ? sessionId : undefined}
                       menuHeight={menuHeight}
                       open={activeMenu === "model"}
                       onOpenChange={open => setActiveMenu(open ? "model" : null)}
-                      thinkingDepth={showThinkingDepth ? effectiveThinkingDepth : undefined}
+                      thinkingDepth={composerVariant !== "paper" && showThinkingDepth ? effectiveThinkingDepth : undefined}
                       thinkingDepthDisabled={disabled || isStreaming || Boolean(fixedThinkingDepth)}
                       onThinkingDepthChange={handleThinkingDepthChange}
                       disabled={
@@ -1724,13 +1760,13 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                       onSelectionChange={handleModelSelectionChange}
                     />
                   ) : null}
-                  {allowMentions && <FeaturedCapabilityMenu
+                  {composerVariant !== "paper" && allowMentions && <FeaturedCapabilityMenu
                     menuHeight={menuHeight} selectionKey={sessionId || "new"} controls={showcaseSelection} runInBackground={runInBackground}
                     open={activeMenu === 'featured'} onOpenChange={open => setActiveMenu(open ? 'featured' : null)}
                     disabled={disabled || isStreaming} onBindingChange={handleFeaturedBindingChange}
                     onPromptChange={prompt => textAreaRef.current?.setPlainText(prompt)}
                   />}
-                  {showHistoryButton && openHistory && (
+                  {composerVariant !== "paper" && showHistoryButton && openHistory && (
                     <div
                       className={`input-bottom-actions-left-item ${showHistoryList ? "selected" : ""}`}
                       onClick={openHistory}
@@ -1738,8 +1774,8 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                       {t("chat.chatHistory")}
                     </div>
                   )}
-                  {sideChatAction}
-                  {showConversationConfig && <ChatConfigModal
+                  {composerVariant !== "paper" && sideChatAction}
+                  {composerVariant !== "paper" && showConversationConfig && <ChatConfigModal
                     menuHeight={menuHeight}
                     open={activeMenu === "config"}
                     onOpenChange={open => setActiveMenu(open ? "config" : null)}
@@ -1754,13 +1790,13 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                       onConversationSettingsChange?.(settings);
                     }}
                   />}
-                  {showConversationConfig && sessionId && !sessionId.startsWith("temp_") && (
+                  {composerVariant !== "paper" && showConversationConfig && sessionId && !sessionId.startsWith("temp_") && (
                     <DismissedWorkflowRestoreButton conversationId={sessionId} />
                   )}
                 </div>
 
                 <div className="input-bottom-actions-right">
-                  {showThinkingDepth && !showModelSelector && (
+                  {composerVariant !== "paper" && showThinkingDepth && !showModelSelector && (
                     <Select
                       aria-label={t("chat.thinkingDepth")}
                       className="chat-thinking-depth-select"
@@ -1775,7 +1811,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                       }))}
                     />
                   )}
-                  <div className="input-bottom-actions-right-item">
+                  {composerVariant !== "paper" && <div className="input-bottom-actions-right-item">
                     <ContextUsageButton
                       disabled={disabled || isUploading || isStreaming || featuredBusy || prepareReferences().unavailable}
                       resetKey={`${sessionId ?? "new"}:${contextUsageReset}`}
@@ -1821,10 +1857,11 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                         };
                       }}
                     />
-                  </div>
+                  </div>}
                   <div className="input-bottom-actions-right-item">
                     <SendButton
                       canStopGeneration={props.canStopGeneration ?? isStreaming}
+                      hasDraft={Boolean(value.trim())}
                       sendDisabled={isSendDisabled || featuredBusy}
                       disabled={disabled}
                       sendLabel={t("chat.send")}
@@ -1894,7 +1931,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
             </div>
           ) : null}
         </div>
-        {showPerformanceStats ? (
+        {composerVariant !== "paper" && showPerformanceStats ? (
           <PerformanceStatsBar stats={performanceStats} running={isStreaming} />
         ) : null}
         <PromptModal

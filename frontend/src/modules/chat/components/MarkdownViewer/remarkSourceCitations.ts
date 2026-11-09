@@ -67,6 +67,29 @@ function appendCollectedLink(node: MarkdownNode, collected: CollectedCitation) {
   });
 }
 
+function linkKnownMarkers(node: MarkdownNode, ids: ReadonlySet<string>) {
+  if (!node.children || node.type === "link" || node.type === "linkReference") return;
+  node.children = node.children.flatMap(child => {
+    if (child.type !== "text" || !child.value) {
+      linkKnownMarkers(child, ids);
+      return [child];
+    }
+    const value = child.value;
+    const linked: MarkdownNode[] = [];
+    let end = 0;
+    for (const match of value.matchAll(/\[\[(\d+\.\d+)\]\]|\[(\d+\.\d+)\]/g)) {
+      const id = match[1] || match[2];
+      if (!ids.has(id)) continue;
+      if (match.index > end) linked.push({ type: "text", value: value.slice(end, match.index) });
+      linked.push({ type: "link", url: `#source-${id}`, children: [{ type: "text", value: id }] });
+      end = match.index + match[0].length;
+    }
+    if (!linked.length) return [child];
+    if (end < value.length) linked.push({ type: "text", value: value.slice(end) });
+    return linked;
+  });
+}
+
 function transformNode(node: MarkdownNode) {
   if (node.type === "paragraph" || node.type === "heading") {
     const collected: CollectedCitation = { ids: [] };
@@ -85,6 +108,9 @@ function transformNode(node: MarkdownNode) {
   node.children?.forEach(transformNode);
 }
 
-export default function remarkSourceCitations() {
-  return (tree: MarkdownNode) => transformNode(tree);
+export default function remarkSourceCitations(ids?: ReadonlySet<string>) {
+  return (tree: MarkdownNode) => {
+    if (ids?.size) linkKnownMarkers(tree, ids);
+    transformNode(tree);
+  };
 }

@@ -12,7 +12,9 @@ import (
 	"lazymind/core/common/orm"
 	"lazymind/core/paperlibrary"
 	"lazymind/core/store"
+	"math"
 	"net/http"
+	"reflect"
 	"sort"
 	"strings"
 	"time"
@@ -70,9 +72,11 @@ func resolveLibraryWork(ctx context.Context, tx *gorm.DB, dataset, id string, m 
 		if len(candidates) == 1 {
 			existing := candidates[0]
 			input.Title, input.Year, input.Venue, input.Abstract = existing.CanonicalTitle, existing.PublicationYear, existing.Venue, existing.Abstract
-			if e := json.Unmarshal(existing.AuthorsJSON, &input.Authors); e != nil {
+			var existingAuthors []string
+			if e := json.Unmarshal(existing.AuthorsJSON, &existingAuthors); e != nil {
 				return existing, e
 			}
+			input.Authors = existingAuthors
 		}
 		work, _, err := findOrCreateWork(ctx, tx, input)
 		if err != nil {
@@ -170,7 +174,7 @@ func applyLibraryMetadata(ctx context.Context, tx *gorm.DB, row *orm.PaperLibrar
 	return nil
 }
 func PatchLibraryPaper(w http.ResponseWriter, r *http.Request) {
-	dataset, _, ok := libraryAccess(w, r, true)
+	dataset, canWrite, ok := libraryAccess(w, r, false)
 	if !ok {
 		return
 	}
@@ -181,8 +185,17 @@ func PatchLibraryPaper(w http.ResponseWriter, r *http.Request) {
 		Tags                *[]string              `json:"tags,omitempty"`
 		PrimaryAttachmentID *string                `json:"primary_attachment_id,omitempty"`
 	}
-	if !parseJSON(r, &input) || input.Revision < 1 || input.Metadata == nil && input.Status == nil && input.Tags == nil && input.PrimaryAttachmentID == nil {
-		replyError(w, 400, "INVALID_REQUEST", "revision 和修改字段不能为空")
+	if !parseJSON(r, &input) || input.Metadata == nil && input.Status == nil && input.Tags == nil && input.PrimaryAttachmentID == nil {
+		replyError(w, 400, "INVALID_REQUEST", "修改字段不能为空")
+		return
+	}
+	shared := input.Metadata != nil || input.Tags != nil || input.PrimaryAttachmentID != nil
+	if shared && !canWrite {
+		replyError(w, 403, "TARGET_DATASET_FORBIDDEN", "没有目标论文库的编辑权限")
+		return
+	}
+	if shared && input.Revision < 1 {
+		replyError(w, 400, "INVALID_REQUEST", "共享字段修改需要 revision")
 		return
 	}
 	if input.PrimaryAttachmentID != nil && !paperlibrary.ValidID(*input.PrimaryAttachmentID) {
@@ -213,9 +226,12 @@ func PatchLibraryPaper(w http.ResponseWriter, r *http.Request) {
 	}
 	id := mux.Vars(r)["library_paper_id"]
 	err := store.DB().WithContext(r.Context()).Transaction(func(tx *gorm.DB) error {
-		row, err := paperlibrary.Entry(tx, dataset, id, input.Revision)
-		if err != nil {
+		var row orm.PaperLibraryEntry
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("dataset_id=? AND id=? AND removed_at IS NULL", dataset, id).Take(&row).Error; err != nil {
 			return err
+		}
+		if shared && row.Revision != input.Revision {
+			return paperlibrary.ErrConflict
 		}
 		if input.Metadata != nil {
 			if err := applyLibraryMetadata(r.Context(), tx, &row, *input.Metadata); err != nil {
@@ -223,7 +239,10 @@ func PatchLibraryPaper(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		if input.Status != nil {
-			row.Status = *input.Status
+			state := orm.AcademicUserPaperState{UserID: store.UserID(r), DatasetID: dataset, PaperID: row.AcademicWorkID, ReadingStatus: *input.Status, UpdatedAt: time.Now().UTC()}
+			if err := tx.Clauses(clause.OnConflict{Columns: []clause.Column{{Name: "user_id"}, {Name: "dataset_id"}, {Name: "paper_id"}}, DoUpdates: clause.AssignmentColumns([]string{"reading_status", "updated_at"})}).Create(&state).Error; err != nil {
+				return err
+			}
 		}
 		if input.Tags != nil {
 			row.TagsJSON = marshal(*input.Tags)
@@ -241,9 +260,27 @@ func PatchLibraryPaper(w http.ResponseWriter, r *http.Request) {
 				return err
 			}
 		}
-		return paperlibrary.SaveEntry(tx, &row)
+		if shared {
+			return paperlibrary.SaveEntry(tx, &row)
+		}
+		return nil
 	})
 	replyLibraryChanges(w, r, dataset, []string{id}, err)
+}
+
+// A note write only needs the local paper record and its notes. Do not make
+// its response depend on document processing status or the LazyLLM database.
+func replyLibraryNoteChanges(w http.ResponseWriter, r *http.Request, dataset, paperID string, err error) {
+	if err != nil {
+		replyLibraryError(w, err)
+		return
+	}
+	view, err := paperlibrary.Load(r.Context(), store.DB(), dataset, store.UserID(r), []string{paperID}, false)
+	if err != nil {
+		replyLibraryError(w, err)
+		return
+	}
+	common.ReplyJSON(w, libraryChanges{Data: view.Data})
 }
 
 type libraryTarget struct {
@@ -362,12 +399,22 @@ func AddLibraryNote(w http.ResponseWriter, r *http.Request) {
 	}
 	id := mux.Vars(r)["library_paper_id"]
 	var input struct {
-		ID      string `json:"id"`
-		Content string `json:"content"`
+		ID      string                   `json:"id"`
+		Content string                   `json:"content"`
+		Source  *paperlibrary.NoteSource `json:"source"`
 	}
-	if !parseJSON(r, &input) || !paperlibrary.ValidID(input.ID) || strings.TrimSpace(input.Content) == "" || len(input.Content) > 2<<20 {
+	if !parseJSON(r, &input) || !paperlibrary.ValidID(input.ID) || strings.TrimSpace(input.Content) == "" || len(input.Content) > 2<<20 || !validLibraryNoteSource(input.Source) {
 		replyError(w, 400, "INVALID_REQUEST", "笔记内容为空或过长")
 		return
+	}
+	sourceJSON := json.RawMessage(`{}`)
+	if input.Source != nil {
+		var err error
+		sourceJSON, err = json.Marshal(input.Source)
+		if err != nil {
+			replyError(w, 400, "INVALID_REQUEST", "笔记位置无效")
+			return
+		}
 	}
 	err := store.DB().WithContext(r.Context()).Transaction(func(tx *gorm.DB) error {
 		var entry orm.PaperLibraryEntry
@@ -376,17 +423,62 @@ func AddLibraryNote(w http.ResponseWriter, r *http.Request) {
 		}
 		var prior orm.PaperLibraryNote
 		if e := tx.Where("dataset_id=? AND id=?", dataset, input.ID).Take(&prior).Error; e == nil {
-			if prior.PaperID != id || prior.Content != input.Content {
+			if prior.PaperID != id || prior.Content != input.Content || !sameLibraryNoteSource(prior.SourceJSON, sourceJSON) {
 				return invalidLibraryMutation("INVALID_PAPER_LIBRARY", "笔记请求与原内容不同")
 			}
 			return nil
 		} else if !errors.Is(e, gorm.ErrRecordNotFound) {
 			return e
 		}
+		if input.Source != nil {
+			var attachment orm.PaperLibraryAttachment
+			if e := tx.Where("dataset_id=? AND paper_id=? AND id=? AND detached_at IS NULL AND kind=?", dataset, id, input.Source.AttachmentID, "pdf").Take(&attachment).Error; e != nil {
+				if errors.Is(e, gorm.ErrRecordNotFound) {
+					return &libraryMutationError{Status: 400, Code: "INVALID_REQUEST", Message: "笔记来源附件无效"}
+				}
+				return e
+			}
+		}
 		now := time.Now().UTC()
-		return tx.Create(&orm.PaperLibraryNote{DatasetID: dataset, ID: input.ID, PaperID: id, Title: "新笔记", Content: input.Content, Kind: "note", CreatedAt: now, UpdatedAt: now}).Error
+		return tx.Create(&orm.PaperLibraryNote{DatasetID: dataset, ID: input.ID, PaperID: id, Title: "新笔记", Content: input.Content, Kind: "note", SourceJSON: string(sourceJSON), CreatedAt: now, UpdatedAt: now}).Error
 	})
-	replyLibraryChanges(w, r, dataset, []string{id}, err)
+	replyLibraryNoteChanges(w, r, dataset, id, err)
+}
+
+func validLibraryNoteSource(source *paperlibrary.NoteSource) bool {
+	if source == nil {
+		return true
+	}
+	if !paperlibrary.ValidID(source.AttachmentID) || strings.TrimSpace(source.AttachmentID) != source.AttachmentID || source.Page < 1 || source.Page > 100000 || len(source.Quote) > 64<<10 || len(source.Rects) > 50 {
+		return false
+	}
+	switch source.Color {
+	case "", "red", "orange", "yellow", "green", "blue", "indigo", "purple", "rainbow":
+	default:
+		return false
+	}
+	validRect := func(rect [4]float64, maximum float64) bool {
+		for _, coordinate := range rect {
+			if math.IsNaN(coordinate) || math.IsInf(coordinate, 0) || coordinate < 0 || coordinate > maximum {
+				return false
+			}
+		}
+		return rect[0] < rect[2] && rect[1] < rect[3]
+	}
+	for _, rect := range source.Rects {
+		if !validRect(rect, 1) {
+			return false
+		}
+	}
+	return source.BBox == nil || validRect(*source.BBox, 100000)
+}
+
+func sameLibraryNoteSource(left string, right json.RawMessage) bool {
+	if len(left) == 0 || string(left) == "null" {
+		left = `{}`
+	}
+	var a, b any
+	return json.Unmarshal([]byte(left), &a) == nil && json.Unmarshal(right, &b) == nil && reflect.DeepEqual(a, b)
 }
 func CreateLibraryFolder(w http.ResponseWriter, r *http.Request) { saveLibraryFolder(w, r, false) }
 func RenameLibraryFolder(w http.ResponseWriter, r *http.Request) { saveLibraryFolder(w, r, true) }

@@ -172,6 +172,7 @@ export default function DataSourceManagementModals({
         <Paragraph className="data-source-create-provider-intro">
           {t(authSelectIntroKey)}
         </Paragraph>
+        {isNotionAuthSelect && <Alert showIcon type="info" message={t("modelProvider.cloudDocuments.notionSingleConnectionHint")} />}
         <Space direction="vertical" size={10} style={{ width: "100%" }}>
           {authAccounts.map((account) => (
             <button
@@ -216,7 +217,7 @@ export default function DataSourceManagementModals({
               </span>
             </button>
           ))}
-          <button
+          {(!isNotionAuthSelect || authAccounts.length === 0) && <button
             type="button"
             className="data-source-auth-option-card data-source-auth-option-card-other"
             onClick={handleAddAuthFromSelect}
@@ -240,7 +241,7 @@ export default function DataSourceManagementModals({
             >
               <ArrowRightOutlined />
             </span>
-          </button>
+          </button>}
         </Space>
       </Modal>
 

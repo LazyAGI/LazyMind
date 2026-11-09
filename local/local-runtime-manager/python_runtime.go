@@ -6,10 +6,89 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
+	"strconv"
 	"strings"
 )
 
+// Check resolved directories before uv can install through a stale link.
+func validateLocalPythonPaths(paths RuntimePaths, venvs ...string) error {
+	buildRoot, err := resolveExistingPathSymlinks(paths.BuildRoot)
+	if err != nil {
+		return err
+	}
+	platform := runtime.GOOS + "-" + runtime.GOARCH
+	entries := []struct{ path, root string }{
+		{paths.PythonRuntimeDir, filepath.Join(buildRoot, "runtimes", "python", platform)},
+	}
+	for _, venv := range venvs {
+		entries = append(entries, struct{ path, root string }{venv, filepath.Join(buildRoot, "deps", "python", platform)})
+	}
+	for _, entry := range entries {
+		resolved, err := resolveExistingPathSymlinks(entry.path)
+		if err != nil {
+			return err
+		}
+		rel, err := filepath.Rel(entry.root, resolved)
+		if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
+			return fmt.Errorf("Python directory %s resolves to %s outside %s; use a dedicated %s environment (existing files were preserved)", entry.path, resolved, entry.root, platform)
+		}
+	}
+	return nil
+}
+
+const pythonEnvironmentProbe = `import platform, ssl, struct, sys, sysconfig
+from pathlib import Path
+
+expected_os, expected_arch, venv, runtime_root, certificates = sys.argv[1:]
+actual_os = {'win32': 'windows', 'darwin': 'darwin', 'linux': 'linux'}.get(sys.platform, sys.platform)
+machine = platform.machine().lower()
+actual_arch = {'x86_64': 'amd64', 'amd64': 'amd64', 'aarch64': 'arm64', 'arm64': 'arm64'}.get(machine, machine)
+if actual_os == 'windows':
+    build = sysconfig.get_platform()
+    actual_arch = {'win-amd64': 'amd64', 'win-arm64': 'arm64', 'win32': '386'}.get(build, build)
+if (actual_os, actual_arch) != (expected_os, expected_arch):
+    raise RuntimeError(f'Python platform {actual_os}/{actual_arch} does not match {expected_os}/{expected_arch}')
+if expected_arch in ('amd64', 'arm64') and struct.calcsize('P') != 8:
+    raise RuntimeError('Python platform requires a 64-bit interpreter')
+prefix = Path(sys.prefix).resolve()
+if sys.prefix == sys.base_prefix:
+    raise RuntimeError(f'Python {sys.executable} is not running in a virtual environment')
+if prefix != Path(venv).resolve():
+    raise RuntimeError(f'Python prefix {prefix} does not match venv {venv}')
+if not Path(sys.base_prefix).resolve().is_relative_to(Path(runtime_root).resolve()):
+    raise RuntimeError(f'Python base {sys.base_prefix} is outside runtime {runtime_root}')
+if certificates == 'true':
+    import certifi
+    certificate = Path(certifi.where()).resolve()
+    if not certificate.is_relative_to(prefix):
+        raise RuntimeError(f'Certificate {certificate} is outside venv {prefix}')
+    ssl.create_default_context(cafile=str(certificate))
+    import httpx
+    with httpx.Client():
+        pass
+`
+
+func validatePythonEnvironment(ctx context.Context, runner CommandRunner, paths RuntimePaths, venv string, certificates bool) error {
+	if err := validateLocalPythonPaths(paths, venv); err != nil {
+		return err
+	}
+	python := venvExecutable(venv, "python")
+	result, err := runner.Run(ctx, Command{
+		Name: python,
+		Args: []string{"-I", "-c", pythonEnvironmentProbe, runtime.GOOS, runtime.GOARCH, venv, paths.PythonRuntimeDir, strconv.FormatBool(certificates)},
+		Dir:  paths.RepoRoot,
+	})
+	if err != nil {
+		return fmt.Errorf("Python environment check failed for %s; prepare a dedicated %s/%s environment (existing files were preserved): %w (%s)", python, runtime.GOOS, runtime.GOARCH, err, strings.TrimSpace(result.Stderr))
+	}
+	return nil
+}
+
 func ensureLocalPythonRuntime(ctx context.Context, runner CommandRunner, paths RuntimePaths, version string) (string, error) {
+	if err := validateLocalPythonPaths(paths); err != nil {
+		return "", err
+	}
 	uv, ok := uvCommand()
 	if !ok {
 		return "", fmt.Errorf("uv is required to provision local Python runtime; install uv or set %s", authServiceUVEnvVar)

@@ -145,9 +145,36 @@ runtime:
   clarification_fields:
     - id: product_goal
       label: 产品目标
-      question: 你想解决什么产品问题，主要给谁使用？
+      question: 这次要解决的核心产品问题是什么？
       type: text
+      required: true
+      reason: 产品目标决定要解决的问题和本次交付范围。
+      validation: {min_length: 1, max_length: 4000, example: '例如：为企业知识库增加支持引用来源的问答功能'}
       binding: request_context
+    - id: requested_stage
+      label: 执行范围
+      question: 本次需要完成哪个产品阶段？
+      reason: 未明确阶段时沿用当前路由选择最小合理入口。
+      type: single
+      choice_policy: fixed
+      allow_other: false
+      choices: [产品方向, 竞品分析, 产品方案, PRD, 交互原型, 方案评审, 研发交付]
+      value_aliases: {产品方向: direction, 竞品分析: competitive, 产品方案: design, PRD: prd, 交互原型: prototype, 方案评审: review, 研发交付: handoff}
+    - id: execution_depth
+      label: 执行深度
+      question: 希望采用哪种执行深度？
+      type: single
+      choice_policy: fixed
+      allow_other: false
+      default: auto
+      choices: [auto, light, minimum-fill, full]
+    - id: word_target
+      label: 目标篇幅
+      question: 希望正文达到多少字？
+      reason: 未指定时采用现有阶段默认篇幅。
+      type: text
+      patterns: ['(?:摘要|abstract)[^0-9，。；;\n]*[0-9]+\s*(?:字|词|words)|([0-9]+)\s*字']
+      validation: {format: positive_integer, min: 300, example: '例如：4500'}
 
 tool_scripts:
   - path: scripts/tools.py
@@ -248,7 +275,7 @@ slots:
 
   - {id: routing_record, user_visible: false, label: 父 Router 内部记录, type: json, cardinality: single, exposed: false}
   - {id: execution_plan, user_visible: false, label: 单阶段执行计划, type: json, cardinality: single, exposed: false}
-  - {id: routing_summary, user_visible: false, label: 本次计划, type: text, cardinality: single, exposed: false}
+  - {id: routing_summary, user_visible: true, label: 本次计划, type: text, cardinality: single, exposed: true}
   - {id: hide_direction, user_visible: false, label: 隐藏产品方向, type: text, cardinality: single, exposed: false}
   - {id: hide_competitive, user_visible: false, label: 隐藏竞品分析, type: text, cardinality: single, exposed: false}
   - {id: hide_design, user_visible: false, label: 隐藏产品方案, type: text, cardinality: single, exposed: false}
@@ -264,7 +291,7 @@ slots:
 
   - {id: direction_task, user_visible: false, label: 方向 Writer 任务, type: file, cardinality: single, exposed: false}
   - {id: direction_context, user_visible: false, label: 方向写作上下文, type: file, cardinality: single, exposed: false}
-  - {id: direction_outline, user_visible: false, label: 产品方向大纲, type: file, cardinality: single, exposed: true}
+  - {id: direction_outline, user_visible: true, label: 产品方向大纲, type: file, cardinality: single, exposed: true}
   - {id: direction_outline_report, user_visible: false, label: 产品方向大纲检查, type: text, cardinality: single, exposed: false}
   - {id: direction_context_approved, user_visible: false, label: 批准后方向上下文, type: file, cardinality: single, exposed: false}
   - {id: direction_section_plan, user_visible: false, label: 产品方向章节规划, type: file, cardinality: single, exposed: false}
@@ -278,13 +305,13 @@ slots:
 
   - {id: design_routing_record, user_visible: false, label: 方案内部 Router 记录, type: json, cardinality: single, exposed: false}
   - {id: design_effort_route, user_visible: false, label: 方案研究路径, type: text, cardinality: single, exposed: false}
-  - {id: design_routing_summary, user_visible: false, label: 方案范围与轻重摘要, type: text, cardinality: single, exposed: true}
-  - {id: design_light_evidence, user_visible: false, label: 方案轻量证据, type: text, cardinality: single, exposed: true}
-  - {id: design_heavy_evidence, user_visible: false, label: 方案重型证据, type: text, cardinality: single, exposed: true}
+  - {id: design_routing_summary, user_visible: true, label: 方案范围与轻重摘要, type: text, cardinality: single, exposed: true}
+  - {id: design_light_evidence, user_visible: true, label: 方案轻量证据, type: text, cardinality: single, exposed: true}
+  - {id: design_heavy_evidence, user_visible: true, label: 方案重型证据, type: text, cardinality: single, exposed: true}
 
   - {id: design_task, user_visible: false, label: 方案 Writer 任务, type: file, cardinality: single, exposed: false}
   - {id: design_context, user_visible: false, label: 方案写作上下文, type: file, cardinality: single, exposed: false}
-  - {id: design_outline, user_visible: false, label: 产品方案大纲, type: file, cardinality: single, exposed: false}
+  - {id: design_outline, user_visible: true, label: 产品方案大纲, type: file, cardinality: single, exposed: true}
   - {id: design_outline_report, user_visible: false, label: 产品方案大纲检查, type: text, cardinality: single, exposed: false}
   - {id: design_context_approved, user_visible: false, label: 批准后方案上下文, type: file, cardinality: single, exposed: false}
   - {id: design_section_plan, user_visible: false, label: 产品方案章节规划, type: file, cardinality: single, exposed: false}
@@ -309,7 +336,7 @@ slots:
 
   - {id: review_task, user_visible: false, label: 评审 Writer 任务, type: file, cardinality: single, exposed: false}
   - {id: review_context, user_visible: false, label: 评审写作上下文, type: file, cardinality: single, exposed: false}
-  - {id: review_outline, user_visible: false, label: 评审大纲, type: file, cardinality: single, exposed: true}
+  - {id: review_outline, user_visible: true, label: 评审大纲, type: file, cardinality: single, exposed: true}
   - {id: review_outline_report, user_visible: false, label: 评审大纲检查, type: text, cardinality: single, exposed: false}
   - {id: review_context_approved, user_visible: false, label: 批准后评审上下文, type: file, cardinality: single, exposed: false}
   - {id: review_section_plan, user_visible: false, label: 评审章节规划, type: file, cardinality: single, exposed: false}
@@ -320,7 +347,7 @@ slots:
 
   - {id: handoff_task, user_visible: false, label: 交付 Writer 任务, type: file, cardinality: single, exposed: false}
   - {id: handoff_context, user_visible: false, label: 交付写作上下文, type: file, cardinality: single, exposed: false}
-  - {id: handoff_outline, user_visible: false, label: 研发交付大纲, type: file, cardinality: single, exposed: true}
+  - {id: handoff_outline, user_visible: true, label: 研发交付大纲, type: file, cardinality: single, exposed: true}
   - {id: handoff_outline_report, user_visible: false, label: 研发交付大纲检查, type: text, cardinality: single, exposed: false}
   - {id: handoff_context_approved, user_visible: false, label: 批准后交付上下文, type: file, cardinality: single, exposed: false}
   - {id: handoff_section_plan, user_visible: false, label: 研发交付章节规划, type: file, cardinality: single, exposed: false}
@@ -329,7 +356,7 @@ slots:
   - {id: handoff_document_html, user_visible: true, label: 研发交付交互视图, type: file, cardinality: single, exposed: true}
   - {id: handoff_context_final, user_visible: false, label: 研发交付最终上下文, type: file, cardinality: single, exposed: false}
 
-  - {id: delivery_summary, user_visible: false, label: 产品交付摘要, type: text, cardinality: single, exposed: false}
+  - {id: delivery_summary, user_visible: true, label: 产品交付摘要, type: text, cardinality: single, exposed: true}
   - {id: stage_manifest, user_visible: false, label: 阶段产物内部登记, type: json, cardinality: single, exposed: false}
   - {id: workspace_state, user_visible: false, label: Product Workspace 内部状态, type: json, cardinality: single, exposed: false}
 
@@ -339,8 +366,7 @@ ui:
   task_presentation:
     grouped: true
     hide_final_artifacts: true
-    hidden_steps: [route_product_stage, build_design_outline, finalize_product_delivery]
-  # Hidden internal steps still execute; product business tabs display published outcomes.
+  # Wait for routing decisions before applying business-stage visibility.
   tab_visibility_ready_material: routing_record
   slots:
     routing_summary: {widgetType: text-markdown, readOnly: true}
@@ -381,6 +407,7 @@ ui:
     handoff_document_html: {widgetType: html-preview, readOnly: true}
     delivery_summary: {widgetType: text-markdown, readOnly: true}
   tabs:
+    - {id: routing, step_id: route_product_stage, label: 任务规划, layout: list, slots: [{id: routing_summary}]}
     - id: direction_outline
       step_id: build_direction_outline
       label: 方向大纲
@@ -400,6 +427,7 @@ ui:
         visible_when:
           - {slot: design_light_evidence, material: design_routing_record, path: data.overall_effort, equals: light}
           - {slot: design_heavy_evidence, material: design_routing_record, path: data.overall_effort, equals: heavy}
+    - {id: design_outline, step_id: build_design_outline, label: 方案大纲, hide_when_material: hide_design, layout: list, slots: [{id: design_outline}]}
     - {id: design_document, step_id: write_design_document, label: 产品方案, hide_when_material: hide_design, layout: list, slots: [{id: design_document_html}, {id: design_document}, {id: design_chapters}]}
     - id: prd_outline
       step_id: build_prd_outline
@@ -423,6 +451,7 @@ ui:
       layout: list
       slots: [{id: handoff_outline}]
     - {id: handoff_document, step_id: write_handoff_document, label: 研发交付, hide_when_material: hide_handoff, layout: list, slots: [{id: handoff_document_html}, {id: handoff_document}, {id: handoff_chapters}]}
+    - {id: delivery_summary, step_id: finalize_product_delivery, label: 交付总结, layout: list, slots: [{id: delivery_summary}]}
 
 i18n:
   zh-CN:

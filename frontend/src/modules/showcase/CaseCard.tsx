@@ -6,11 +6,14 @@ import {
   FireTwoTone,
   MessageOutlined,
   ScheduleOutlined,
+  ReadOutlined,
 } from "@ant-design/icons";
 import {
   buildShowcaseLaunchPath,
   showcaseEntryType,
   showcaseTechnologyType,
+  showcasePagePath,
+  type ShowcaseEntryType,
 } from "./classification";
 import type { ShowcaseCase } from "./api";
 
@@ -18,6 +21,7 @@ interface CaseCardProps {
   item: ShowcaseCase;
   onTry?: (item: ShowcaseCase) => void;
   primaryAction?: "try" | "details";
+  entryType?: ShowcaseEntryType;
 }
 
 const COVER_CLASS_BY_OUTPUT_TYPE: Record<string, string> = {
@@ -35,19 +39,21 @@ export default function CaseCard({
   item,
   onTry,
   primaryAction = "try",
+  entryType: preferredEntryType,
 }: CaseCardProps) {
   const { t } = useTranslation();
   const location = useLocation();
   const coverClass = COVER_CLASS_BY_OUTPUT_TYPE[item.output_type] || "report";
-  const entryType = showcaseEntryType(item.type);
+  const entryType = showcaseEntryType(item.type, preferredEntryType);
   const technologyType = showcaseTechnologyType(item.type);
   const entryTypeLabel = t(`showcase.filters.capability.${entryType}`);
   const technologyTypeLabel = t(`showcase.filters.technology.${technologyType}`);
   const detailPath = `/agent/chat/cases/${encodeURIComponent(item.id)}`;
-  const launchPath = buildShowcaseLaunchPath(item.id, item.type);
-  const isDetailPrimary = primaryAction === "details";
+  const pagePath = showcasePagePath(item.page_action, entryType);
+  const launchPath = pagePath || buildShowcaseLaunchPath(item.id, item.type, undefined, entryType);
+  const isDetailPrimary = !pagePath && primaryAction === "details";
   const primaryPath = isDetailPrimary ? detailPath : launchPath;
-  const secondaryPath = isDetailPrimary ? launchPath : detailPath;
+  const secondaryPath = pagePath || (isDetailPrimary ? launchPath : detailPath);
   const detailState = {
     showcaseReturnTo: `${location.pathname}${location.search}${location.hash}`,
   };
@@ -105,7 +111,7 @@ export default function CaseCard({
               role="img"
               aria-label={entryTypeLabel}
             >
-              {entryType === "chat"
+              {pagePath ? <ReadOutlined aria-hidden="true" /> : entryType === "chat"
                 ? <MessageOutlined aria-hidden="true" />
                 : <ScheduleOutlined aria-hidden="true" />}
             </span>
@@ -114,9 +120,9 @@ export default function CaseCard({
             className="showcase-detail-link"
             to={secondaryPath}
             state={isDetailPrimary ? undefined : detailState}
-            onClick={isDetailPrimary ? handleTry : undefined}
+            onClick={isDetailPrimary || pagePath ? handleTry : undefined}
           >
-            {t(isDetailPrimary ? "showcase.experienceNow" : "showcase.viewDetail")}
+            {t(pagePath ? "showcase.openPaperLibrary" : isDetailPrimary ? "showcase.experienceNow" : "showcase.viewDetail")}
             <ArrowRightOutlined aria-hidden="true" />
           </Link>
         </div>

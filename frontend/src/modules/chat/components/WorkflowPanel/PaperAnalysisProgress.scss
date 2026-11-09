@@ -1,0 +1,61 @@
+.paper-f4-progress {
+  margin: 16px 16px 20px; border: 1px solid var(--ant-color-border-secondary, #e5eaf2); border-radius: 9px;
+  color: var(--ant-color-text, #202732); background: var(--ant-color-bg-container, #fff); font-size: 13px;
+  &__overview { padding: 16px 18px 12px; }
+  &__heading, &__step-heading { display: flex; align-items: baseline; flex-wrap: wrap; gap: 8px;
+    > span:last-child { margin-left: auto; color: var(--ant-color-text-secondary, #657288); font-size: 12px; font-variant-numeric: tabular-nums; }
+    > .anticon:first-child { color: var(--ant-color-primary, #356dff); margin-left: 0; }
+  }
+  &__wait { margin: 7px 0 9px 22px; color: var(--ant-color-text-secondary, #657288); font-size: 12px; overflow-wrap: anywhere; }
+  &__confirmed { margin: 12px 0 0; padding-top: 11px; border-top: 1px solid var(--ant-color-border-secondary, #e5eaf2); color: var(--ant-color-text-secondary, #657288); font-size: 12px; }
+  &__notice { margin: 10px 0 0; padding: 8px 10px; display: flex; align-items: baseline; flex-wrap: wrap; gap: 7px; background: var(--ant-color-fill-quaternary, #f7f9fc); color: var(--ant-color-text-secondary, #657288); font-size: 12px; border-radius: 5px;
+    button { color: var(--ant-color-primary, #356dff); background: transparent; border: 0; padding: 0; }
+  }
+  &__toggle { display: flex; justify-content: space-between; align-items: center; list-style: none; border-top: 1px solid var(--ant-color-border-secondary, #e5eaf2); padding: 10px 18px; color: var(--ant-color-primary, #356dff); font-size: 12px; cursor: pointer; }
+  summary::-webkit-details-marker { display: none; }
+  &__timeline { list-style: none; margin: 0; padding: 4px 18px 16px;
+    > li { display: grid; grid-template-columns: 17px minmax(0, 1fr); gap: 9px; padding-bottom: 16px; position: relative;
+      &::before { content: ''; position: absolute; left: 7px; top: 22px; bottom: 4px; width: 1px; background: var(--ant-color-border-secondary, #e5eaf2); }
+      &:last-child { padding-bottom: 0; &::before { display: none; } }
+      p { margin: 3px 0 0; color: var(--ant-color-text-secondary, #657288); font-size: 12px; overflow-wrap: anywhere; }
+    }
+  }
+  &__marker { padding-top: 3px; color: var(--ant-color-primary, #356dff); }
+  .is-succeeded > &__marker { color: var(--ant-color-success, #248658); }
+  .is-failed > &__marker { color: var(--ant-color-warning, #b9650d); }
+  &__step-heading strong { font-weight: 500; overflow-wrap: anywhere; }
+  &__output { margin-top: 8px; border: 1px solid var(--ant-color-border-secondary, #e5eaf2); border-radius: 5px;
+    summary { padding: 7px 9px; font-size: 12px; display: flex; justify-content: space-between; flex-wrap: wrap; gap: 5px; cursor: pointer;
+      span { color: var(--ant-color-text-secondary, #657288); font-variant-numeric: tabular-nums; }
+    }
+    pre { margin: 0; padding: 10px; max-height: 280px; overflow: auto; border-top: 1px solid var(--ant-color-border-secondary, #e5eaf2); white-space: pre-wrap; overflow-wrap: anywhere; background: var(--ant-color-fill-quaternary, #f7f9fc); font-size: 12px; line-height: 1.6; }
+  }
+  &.is-succeeded > &__overview > &__heading > .anticon { color: var(--ant-color-success, #248658); }
+  &.is-failed > &__overview > &__heading > .anticon { color: var(--ant-color-warning, #b9650d); }
+  @media (max-width: 520px) { margin: 12px 8px 16px; &__overview { padding: 13px; } &__toggle { padding: 10px 13px; } &__timeline { padding-left: 13px; padding-right: 13px; } }
+}
+
+// F4's timeline and artifacts share one scroll owner. The panel chrome stays fixed.
+// Include the panel class so this also overrides the expanded workspace's clipping.
+.workflow-panel .workflow-panel__body > .workflow-panel__f4-tab[role='tabpanel']:not([hidden]) {
+  display: block;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
+  scrollbar-gutter: stable;
+  scroll-padding-block: 12px;
+
+  // The artifact list grows inside this scroll owner; it must not trap wheel
+  // gestures in a second, content-height scroll container.
+  > .workflow-panel__tab-content {
+    flex: none;
+    overflow: visible;
+    overscroll-behavior: auto;
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--ant-color-primary, #356dff);
+    outline-offset: -2px;
+  }
+}

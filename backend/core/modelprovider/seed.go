@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 
@@ -268,6 +269,50 @@ func syncDefaultModelToUserGroups(
 	providerIDs := tx.Model(&orm.UserModelProvider{}).
 		Select("id").
 		Where("default_model_provider_id = ? AND deleted_at IS NULL", providerID)
+	// A catalog refresh may reclassify a model. Keep an active text-embedding
+	// row's technical type intact until its vector space can be retired safely.
+	var copied []orm.UserModelProviderGroupModel
+	if err := tx.Where("is_default = ? AND name = ? AND user_model_provider_id IN (?) AND deleted_at IS NULL", true, modelName, providerIDs).
+		Find(&copied).Error; err != nil {
+		return err
+	}
+	providerOwners := make(map[string]string)
+	for _, model := range copied {
+		if model.ModelType != modelType && isTextEmbeddingModelType(model.ModelType) {
+			providerOwners[model.UserModelProviderID] = model.CreateUserID
+		}
+	}
+	lockedIDs := make([]string, 0, len(providerOwners))
+	for id := range providerOwners {
+		lockedIDs = append(lockedIDs, id)
+	}
+	sort.Strings(lockedIDs)
+	for _, id := range lockedIDs {
+		provider := orm.UserModelProvider{ID: id, BaseModel: orm.BaseModel{CreateUserID: providerOwners[id]}}
+		if err := lockProvider(tx, &provider); err != nil {
+			return errServiceSyncConflict
+		}
+	}
+	protectedIDs := make([]string, 0)
+	if len(lockedIDs) > 0 {
+		copied = nil
+		if err := tx.Where("is_default = ? AND name = ? AND user_model_provider_id IN (?) AND deleted_at IS NULL", true, modelName, providerIDs).
+			Find(&copied).Error; err != nil {
+			return err
+		}
+		for _, model := range copied {
+			if model.ModelType == modelType || !isTextEmbeddingModelType(model.ModelType) {
+				continue
+			}
+			if err := guardEmbeddingRuntimeMutation(tx, model.CreateUserID, model.UserModelProviderID, model.UserModelProviderGroupID, model.ID); err != nil {
+				if errors.Is(err, errEmbeddingIdentityInUse) {
+					protectedIDs = append(protectedIDs, model.ID)
+					continue
+				}
+				return err
+			}
+		}
+	}
 
 	updates := map[string]any{
 		"vision":                     vision,
@@ -281,9 +326,12 @@ func syncDefaultModelToUserGroups(
 		updates["input_token_limit"] = nil
 		updates["max_output_tokens"] = nil
 	}
-	if err := tx.Model(&orm.UserModelProviderGroupModel{}).
-		Where("is_default = ? AND name = ? AND user_model_provider_id IN (?) AND deleted_at IS NULL", true, modelName, providerIDs).
-		Updates(updates).Error; err != nil {
+	updateQuery := tx.Model(&orm.UserModelProviderGroupModel{}).
+		Where("is_default = ? AND name = ? AND user_model_provider_id IN (?) AND deleted_at IS NULL", true, modelName, providerIDs)
+	if len(protectedIDs) > 0 {
+		updateQuery = updateQuery.Where("id NOT IN ?", protectedIDs)
+	}
+	if err := updateQuery.Updates(updates).Error; err != nil {
 		return err
 	}
 	if isChatTechnicalType(modelType) {

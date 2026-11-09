@@ -42,6 +42,7 @@ export interface FulltextCandidate {
 }
 
 export interface ImportPreviewItem {
+	fulltext_error?: { stage: string; code: string; message: string; recovery: string };
   preview_token?: string;
   paper?: import("./paperWorkflows").PaperRef;
   work_id: string;
@@ -78,6 +79,8 @@ export interface AcademicImportQueueItem {
   document_id?: string;
   error_code?: string;
   error_message?: string;
+  error_detail?: string;
+  error_recovery?: string;
   created_at: string;
   updated_at: string;
 }
@@ -137,6 +140,24 @@ export async function previewReferenceImport(
   return previewItems(response.data);
 }
 
+/** Resolve one citation against a scholarly source and enqueue the ordinary PDF import. */
+export async function addCitationToPaperLibrary(targetDatasetId: string, referenceId: string): Promise<{ batch_id?: string; status?: string }> {
+  const response = await axiosInstance.post(`${core}/imports:preview`, {
+    reference_ids: [referenceId],
+    target_dataset_id: targetDatasetId,
+    resolve_external: true,
+    verify_reference: true,
+    lookup_fulltext: true,
+  }, { silentError: true, timeout: 20000 } as never);
+  const item = previewItems(response.data).find(candidate => candidate.reference_ids?.includes(referenceId));
+  if (!item?.work_id || !item.preview_token) throw new Error('这条参考文献暂时无法识别为论文，请稍后重试');
+  if (item.disposition === 'already_present') return { status: 'already_present' };
+  if (!item.fulltext_candidates.length) {
+    throw new Error('已找到论文信息，但没有可导入的 PDF 来源');
+  }
+  return importPaperLink(targetDatasetId, item, crypto.randomUUID(), null, true);
+}
+
 export async function previewDocumentReferencesImport(sourceDocumentIds: string[], targetDatasetId: string): Promise<ImportPreviewItem[]> {
   const response = await axiosInstance.post(`${core}/imports:preview`, {
     source_document_ids: sourceDocumentIds,
@@ -180,8 +201,8 @@ export async function listAcademicImportQueue(targetDatasetId: string, sourceDoc
   return unwrap<{ items: AcademicImportQueueItem[] }>(response.data).items || [];
 }
 
-export async function previewPaperImport(workIds: string[], targetDatasetId: string, expansionId?: string, silentError = false): Promise<ImportPreviewItem[]> {
-  const response = await axiosInstance.post(`${core}/imports:preview`, { work_ids: workIds, target_dataset_id: targetDatasetId, resolve_external: false, expansion_id: expansionId }, { silentError } as never);
+export async function previewPaperImport(workIds: string[], targetDatasetId: string, expansionId?: string, expansionVersion?: number, silentError = false): Promise<ImportPreviewItem[]> {
+  const response = await axiosInstance.post(`${core}/imports:preview`, { work_ids: workIds, target_dataset_id: targetDatasetId, resolve_external: false, expansion_id: expansionId, expansion_version: expansionVersion }, { silentError } as never);
   return previewItems(response.data);
 }
 
@@ -205,13 +226,18 @@ export async function previewPaperPDF(workId: string, targetDatasetId: string): 
 export async function importPaperLink(targetDatasetId: string, item: ImportPreviewItem, idempotencyKey: string, folderId?: string | null, silentError = false) {
   const response = await axiosInstance.post(`${core}/imports`, {
     entry_type: 'paper_link', target_dataset_id: targetDatasetId, idempotency_key: idempotencyKey, preview_token: item.preview_token, folder_id: folderId || '',
-    items: [{ work_id: item.work_id, candidate: item.fulltext_candidates[0] }],
+    items: [{ work_id: item.work_id, reference_ids: item.reference_ids || [], candidate: item.fulltext_candidates[0] }],
   }, { silentError } as never);
   return unwrap<{ batch_id?: string; status?: string }>(response.data);
 }
 
-export async function retryAcademicImport(batchId: string, silentError = false) {
-  await axiosInstance.post(`${core}/imports/${encodeURIComponent(batchId)}:retry`, {}, { silentError } as never);
+export async function retryAcademicImport(batchId: string, silentError = false, idempotencyKey: string = crypto.randomUUID()) {
+  try {
+    await axiosInstance.post(`${core}/imports/${encodeURIComponent(batchId)}:retry`, { idempotency_key: idempotencyKey }, { silentError } as never);
+  } catch (error) {
+    if (axios.isAxiosError(error) && ['IMPORT_ALREADY_PROCESSING', 'NO_FAILED_ITEMS'].includes(error.response?.data?.code)) return;
+    throw error;
+  }
 }
 
 export interface PaperUploadContext {
@@ -252,8 +278,9 @@ export interface ImportBatchDetail {
   next_cursor: string;
 }
 export const emptyImportBatchPage = (): ImportBatchPage => ({ items: [], next_cursor: '', notification: { active: 0, needs_action: 0 } });
-export async function listAcademicImportBatches(datasetId: string, cursor?: string): Promise<ImportBatchPage> {
-  const response = await axiosInstance.get(`${core}/imports`, { params: { target_dataset_id: datasetId, cursor, view: 'operations' }, silentError: true } as never);
+export type ImportOperationFilter = 'all' | 'current';
+export async function listAcademicImportBatches(datasetId: string, cursor?: string, filter: ImportOperationFilter = 'all'): Promise<ImportBatchPage> {
+  const response = await axiosInstance.get(`${core}/imports`, { params: { target_dataset_id: datasetId, cursor, view: 'operations', filter }, silentError: true } as never);
   return unwrap<ImportBatchPage>(response.data);
 }
 export async function getAcademicImportBatch(batchId: string, cursor?: string): Promise<ImportBatchDetail> {

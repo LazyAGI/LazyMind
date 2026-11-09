@@ -62,7 +62,7 @@ def _bbox_overlap(metadata: Dict[str, Any], bbox: Any) -> float:
     return intersection / selected_area if selected_area else 0.0
 
 
-def _find_positioned_segment(context: Dict[str, Any], selected_text: str) -> str:
+def _find_positioned_segment(context: Dict[str, Any], selected_text: str, user_id: str) -> str:
     dataset_id = _text(context.get('dataset_id'), 256)
     document_id = _text(context.get('document_id'), 256)
     if not dataset_id or not document_id or not selected_text:
@@ -75,7 +75,7 @@ def _find_positioned_segment(context: Dict[str, Any], selected_text: str) -> str
             kb_id=dataset_id, phrase=True, sort_by='score', size=20,
         )
         from lazymind.chat.engine.tools.infra.kb_ownership import filter_active_nodes
-        candidates = filter_active_nodes(candidates)
+        candidates = filter_active_nodes(candidates, user_id=user_id)
     except Exception as exc:
         LOG.info(f'[DocumentSelection] positioned segment lookup unavailable: {exc}')
         return ''
@@ -102,10 +102,17 @@ def _find_positioned_segment(context: Dict[str, Any], selected_text: str) -> str
 def resolve_document_selection_context(
     document_context: Dict[str, Any] | None,
     cited_text: str,
+    *,
+    user_id: str | None = None,
 ) -> str:
     context = document_context if isinstance(document_context, dict) else {}
     selected_text = _text(context.get('selected_text')) or _text(cited_text)
     paragraph_text = _text(context.get('paragraph_text'))
+    user_id = str(user_id or '').strip()
+    if not user_id:
+        # A visible selection is safe to use, but expanding it via the index
+        # requires the authenticated conversation owner for Core authorization.
+        return paragraph_text or selected_text or _text(cited_text)
     dataset_id = _text(context.get('dataset_id'), 256)
     document_id = _text(context.get('document_id'), 256)
     segment_id = _text(context.get('segment_id'), 256)
@@ -119,6 +126,7 @@ def resolve_document_selection_context(
                 f'/datasets/{quote(dataset_id, safe="")}/documents/'
                 f'{quote(document_id, safe="")}/segments/{quote(segment_id, safe="")}',
                 params=params,
+                user_id=user_id,
             )
             content = _segment_text(segment)
             if content and (not selected_text or selected_text in content):
@@ -126,7 +134,7 @@ def resolve_document_selection_context(
         except Exception as exc:
             LOG.info(f'[DocumentSelection] exact segment lookup unavailable: {exc}')
 
-    positioned = _find_positioned_segment(context, selected_text)
+    positioned = _find_positioned_segment(context, selected_text, user_id)
     return positioned or paragraph_text or selected_text or _text(cited_text)
 
 

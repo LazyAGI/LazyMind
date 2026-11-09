@@ -219,9 +219,9 @@ def test_writer_total_length_does_not_use_a_section_budget(query, expected):
 
 
 @pytest.mark.parametrize('response', [
-    '# Title\n\nRevised.',
-    '```markdown\n# Title\n\nRevised.\n```',
-    'Here is the revision:\n# Title\n\nRevised.',
+    '# Title\n\n## 1. Revised\n\nRevised.',
+    '```markdown\n# Title\n\n## 2. Revised\n\nRevised.\n```',
+    'Here is the revision:\n# Title\n\n## 1.1. Revised\n\nRevised.',
 ])
 def test_complete_markdown_revision_uses_shared_tool_once(monkeypatch, tmp_path, response):
     from lazymind.document_tools import revision
@@ -242,7 +242,7 @@ def test_complete_markdown_revision_uses_shared_tool_once(monkeypatch, tmp_path,
         '# Title\n\nOriginal.', 'Polish',
         constraints='Only use SRC-001.', artifact_store=str(tmp_path),
     )
-    assert result == '# Title\n\nRevised.'
+    assert result == '# Title\n\n## Revised\n\nRevised.'
     assert len(calls) == 1
     assert 'SRC-001' in calls[0]
     assert 'Original.' in calls[0]

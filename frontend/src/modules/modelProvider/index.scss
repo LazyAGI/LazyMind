@@ -2752,7 +2752,26 @@
 }
 
 .model-provider-cloud-doc-layout {
+  height: 100%;
+  min-height: 0;
   background: #fff;
+  overflow: hidden;
+
+  > .model-provider-layout-frame {
+    height: 100%;
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  .model-provider-cloud-doc-hub {
+    height: 100%;
+    min-height: 0;
+    overflow-x: hidden;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+
+    > * { flex-shrink: 0; }
+  }
 }
 
 .model-provider-cloud-doc-hub {
@@ -2943,6 +2962,7 @@
 }
 
 .model-provider-cloud-doc-grid {
+  flex-shrink: 0;
   overflow: hidden;
   border: 1px solid #e5e7eb;
   border-radius: 8px;
@@ -4644,6 +4664,11 @@
   .provider-workspace .ant-btn {
     min-height: 32px;
   }
+}
+.model-defaults-panel .ant-skeleton-active .ant-skeleton-title,
+.model-defaults-panel .ant-skeleton-active .ant-skeleton-paragraph > li,
+.model-defaults-panel .ant-skeleton-active .ant-skeleton-input {
+  animation: none !important;
 }
 @media (prefers-reduced-motion: reduce) {
   .provider-workspace *,

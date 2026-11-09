@@ -10,7 +10,10 @@ import (
 	"lazymind/core/store"
 )
 
-// SubmitOriginalTask is the context-only entry into the existing parser pipeline.
+// SubmitOriginalTask completes import-origin work after the original is saved.
+// Paper imports never inherit a dataset processing default: the bounded reading
+// scheduler owns automatic preparation, and explicit ensure/reparse use their
+// separate submission paths. Nonpaper imports retain the existing pipeline.
 // Resource creation has already committed, and failures never discard its IDs.
 func SubmitOriginalTask(ctx context.Context, caller DatasetCatalogCaller, datasetID, taskID string) (StartTaskResult, error) {
 	var dataset orm.Dataset
@@ -22,7 +25,7 @@ func SubmitOriginalTask(ctx context.Context, caller DatasetCatalogCaller, datase
 		return StartTaskResult{}, err
 	}
 	result := StartTaskResult{TaskID: task.ID, DocumentID: task.DocID, DisplayName: task.DisplayName, Status: "FAILED", SubmitStatus: "REJECTED"}
-	if effectiveProcessingLevel(dataset.ProcessingLevel) == ProcessingLevelStored {
+	if dataset.Scene == "academic_papers" || effectiveProcessingLevel(dataset.ProcessingLevel) == ProcessingLevelStored {
 		var ext taskExt
 		if err := json.Unmarshal(task.Ext, &ext); err != nil {
 			return result, err

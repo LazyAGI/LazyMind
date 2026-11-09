@@ -34,6 +34,7 @@ import (
 	"lazymind/core/taskcenter"
 	"lazymind/core/tasktiming"
 	"lazymind/core/workflow"
+	"lazymind/core/workflow/displaystate"
 )
 
 var (
@@ -253,6 +254,11 @@ func ChatConversations(w http.ResponseWriter, r *http.Request) {
 	// conversation should display only the user's task request. Keep those two
 	// representations separate: query remains the model input and display_query
 	// is used only for persisted/rendered chat history.
+	// Preserve the complete user text before any display/resource rewriting.
+	continueQuery := query
+	if len(fusionInput) > 1 || raw["artifact_refs"] != nil || raw["user_files"] != nil {
+		continueQuery = "" // New material needs the normal LLM interpretation path.
+	}
 	displayQuery := query
 	if v, ok := raw["display_query"].(string); ok && strings.TrimSpace(v) != "" {
 		displayQuery = strings.TrimSpace(v)
@@ -436,17 +442,10 @@ func ChatConversations(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "load conversation history failed", http.StatusInternalServerError)
 		return
 	}
-	var workspaceBindingCount int64
 	if _, submitted := raw["ask_answers_structured"]; submitted {
-		if err := db.Model(&orm.ConversationWorkspaceBinding{}).Where("conversation_id = ?", convID).Count(&workspaceBindingCount).Error; err != nil {
-			common.ReplyErr(w, "validate workspace question failed", http.StatusInternalServerError)
+		if err := validateWorkspaceAskSubmission(histories, raw); err != nil {
+			common.ReplyErr(w, "invalid request", http.StatusBadRequest)
 			return
-		}
-		if workspaceBindingCount > 0 {
-			if err := validateWorkspaceAskSubmission(histories, raw); err != nil {
-				common.ReplyErr(w, "invalid request", http.StatusBadRequest)
-				return
-			}
 		}
 	}
 	if isSidechat {
@@ -551,6 +550,11 @@ func ChatConversations(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	reqBody := buildChatRequestBody(r.Context(), db, convID, sessionID, query, upstreamHistories, raw, resourceContext, userID, target.Seq)
+	if !target.IsRegeneration {
+		if continuation := workflowAskContinuation(histories, askAnswersStructuredFromRaw(raw)); continuation != nil {
+			reqBody["workflow_clarification"] = continuation
+		}
+	}
 	executor, validExecutor := normalizeChatExecutor(conversationRecord.ChatExecutor)
 	if !validExecutor {
 		common.ReplyErr(w, "conversation has an unsupported chat executor", http.StatusConflict)
@@ -662,7 +666,7 @@ func ChatConversations(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, fmt.Sprintf("%s: %v", "load chat runtime config failed", err), http.StatusInternalServerError)
 		return
 	}
-	applyMCPRuntimeConfig(r.Context(), db, userID, r.Header.Get("Authorization"), reqBody)
+	applyMCPRuntimeConfig(r.Context(), db, userID, reqBody)
 	// Resolve persisted confirmation before loading credentials, so an unreadable
 	// variable can still be deleted and cannot be injected into this continuation.
 	if !target.IsRegeneration {
@@ -733,6 +737,16 @@ func ChatConversations(w http.ResponseWriter, r *http.Request) {
 
 		if activeSess, err := workflow.GetLatestSession(r.Context(), db, convID); err == nil &&
 			workflowSessionAvailableForRequest(activeSess, raw) {
+			// Exact plain-text consent uses the same admission/CAS path as the
+			// Continue button. All other text remains available to the Chat LLM.
+			if workflowControl == nil && workflowEnabled && stream && !dualReply && !basicChatOnly &&
+				!target.IsRegeneration && workflow.IsWorkflowUserControlRequest(r) &&
+				!isExternalChatProvider(conversationRecord.ChatExecutor) &&
+				activeSess.CreateUserID == userID && isExactWorkflowContinue(continueQuery) {
+				if view, viewErr := displaystate.Read(db, *activeSess); viewErr == nil {
+					workflowControl = exactWorkflowContinueCommand(continueQuery, *activeSess, view)
+				}
+			}
 			// A Workflow's execution mode is selected when its Session is created.
 			// Conversation settings may change later, but cannot mutate an existing run.
 			workflowMode = "dynamic"
@@ -1107,7 +1121,7 @@ func resumeChatStream(w http.ResponseWriter, r *http.Request) {
 func withHistoryAskState(payload map[string]any, ext json.RawMessage) map[string]any {
 	var fields map[string]json.RawMessage
 	if json.Unmarshal(ext, &fields) == nil {
-		for _, key := range []string{"ask_pending", "ask_answered", "ask_saved_answers"} {
+		for _, key := range []string{"ask_pending", "ask_answered", "ask_saved_answers", "knowledge_confirmations"} {
 			if value, ok := fields[key]; ok {
 				payload[key] = value
 			}
@@ -1137,6 +1151,7 @@ func resumeFromDBOnly(ctx context.Context, db *gorm.DB, userID, convID string, f
 		"thinking_duration_s": last.ThinkingDurationS,
 	}
 	addModelOutputSnapshot(snapshot, last)
+	addSteeringResumeSnapshot(snapshot, last)
 	writeSSEChunk(w, flusher, withHistoryAskState(snapshot, last.Ext))
 	writeSSEChunk(w, flusher, storedTerminalChunk(ctx, db, userID, convID, last.ID, last.RunID, last.RunTerminal))
 }
@@ -1159,6 +1174,7 @@ func resumeCompletedFromDB(ctx context.Context, db *gorm.DB, userID, convID stri
 			"thinking_duration_s": last.ThinkingDurationS,
 		}
 		addModelOutputSnapshot(snapshot, last)
+		addSteeringResumeSnapshot(snapshot, last)
 		writeSSEChunk(w, flusher, withHistoryAskState(snapshot, last.Ext))
 		writeSSEChunk(w, flusher, storedTerminalChunk(ctx, db, userID, convID, last.ID, last.RunID, last.RunTerminal))
 		return
@@ -1350,7 +1366,7 @@ func resumeSingleAnswerChat(ctx context.Context, stateStore state.Store, convID,
 		outputRunID = first.ModelOutput.RunID
 	}
 	if first != nil {
-		sendChunk(w, flusher, first)
+		sendChunk(w, flusher, steeringResumeChunk(chunks, first))
 	} else {
 		sendChunk(w, flusher, &ChatChunkResponse{
 			ConversationID: convID,
@@ -1850,6 +1866,7 @@ func chatHistoryToResponseItem(h orm.ChatHistory) map[string]any {
 	var mentions any
 	var mailConfirmation map[string]any
 	var askPending any
+	var knowledgeConfirmations json.RawMessage
 	var askAnswered bool
 	var askSavedAnswers any
 	var envInputResult any
@@ -1860,25 +1877,27 @@ func chatHistoryToResponseItem(h orm.ChatHistory) map[string]any {
 	var modelSwitches []ModelSwitchRecord
 	if len(h.Ext) > 0 {
 		var ext struct {
-			Input                 any                 `json:"input"`
-			Mentions              any                 `json:"mentions"`
-			KnowledgeOperations   []map[string]any    `json:"knowledge_operations"`
-			MailConfirmation      map[string]any      `json:"mail_confirmation"`
-			AskPending            any                 `json:"ask_pending"`
-			AskAnswered           bool                `json:"ask_answered"`
-			AskSavedAnswers       any                 `json:"ask_saved_answers"`
-			EnvInputResult        any                 `json:"env_input_result"`
-			IntentUpdated         any                 `json:"intent_updated"`
-			ExternalAgentActivity any                 `json:"external_agent_activity"`
-			ModelRoute            *chatModelRoute     `json:"model_route"`
-			ModelSwitches         []ModelSwitchRecord `json:"model_switches"`
-			FailedAttempts        []failedRunAttempt  `json:"failed_run_attempts"`
+			Input                  any                 `json:"input"`
+			Mentions               any                 `json:"mentions"`
+			KnowledgeOperations    []map[string]any    `json:"knowledge_operations"`
+			MailConfirmation       map[string]any      `json:"mail_confirmation"`
+			AskPending             any                 `json:"ask_pending"`
+			KnowledgeConfirmations json.RawMessage     `json:"knowledge_confirmations"`
+			AskAnswered            bool                `json:"ask_answered"`
+			AskSavedAnswers        any                 `json:"ask_saved_answers"`
+			EnvInputResult         any                 `json:"env_input_result"`
+			IntentUpdated          any                 `json:"intent_updated"`
+			ExternalAgentActivity  any                 `json:"external_agent_activity"`
+			ModelRoute             *chatModelRoute     `json:"model_route"`
+			ModelSwitches          []ModelSwitchRecord `json:"model_switches"`
+			FailedAttempts         []failedRunAttempt  `json:"failed_run_attempts"`
 		}
 		if err := json.Unmarshal(h.Ext, &ext); err == nil {
 			input = ext.Input
 			mentions = ext.Mentions
 			mailConfirmation = mailConfirmationHistoryMetadata(ext.MailConfirmation)
 			askPending = ext.AskPending
+			knowledgeConfirmations = ext.KnowledgeConfirmations
 			askAnswered = ext.AskAnswered
 			askSavedAnswers = ext.AskSavedAnswers
 			envInputResult = ext.EnvInputResult
@@ -1906,6 +1925,10 @@ func chatHistoryToResponseItem(h orm.ChatHistory) map[string]any {
 		"thinking_time_s":   h.ThinkingDurationS,
 		"run_id":            h.RunID,
 		"run_status":        h.RunStatus,
+	}
+	hydrateSteeringTimeline(h, item)
+	if len(knowledgeConfirmations) > 0 {
+		item["knowledge_confirmations"] = knowledgeConfirmations
 	}
 	var forkFlags struct {
 		ReadOnly bool `json:"fork_read_only"`
@@ -2254,6 +2277,10 @@ func GetConversationHistory(w http.ResponseWriter, r *http.Request) {
 		nextToken = encodeListPageToken(nextOffset, pageSize, total)
 	}
 	historyItems := conversationHistoryResponseItems(page)
+	if err := hydrateConversationSteeringHistory(r.Context(), store.DB(), convID, userID, historyItems); err != nil {
+		common.ReplyErr(w, fmt.Sprintf("load conversation steering history: %v", err), http.StatusInternalServerError)
+		return
+	}
 	if err := hydrateHistoryPerformance(r.Context(), store.DB(), userID, convID, historyItems); err != nil {
 		log.Logger.Warn().Err(err).Str("conversation_id", convID).
 			Msg("failed to hydrate chat performance history")

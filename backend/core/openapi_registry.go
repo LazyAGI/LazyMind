@@ -1204,6 +1204,7 @@ type datasetQueryParams struct {
 	Keyword   string   `query:"keyword"`
 	Tags      []string `query:"tags"`
 	Source    string   `query:"source" enum:"manual,cloud,official_installed" desc:"Filter datasets by creation source: manual (local upload), cloud (cloud document sync) or official_installed (installed from the knowledge plaza)."`
+	Scene     string   `query:"scene" desc:"Filter datasets by knowledge scene, for example academic_papers."`
 }
 
 type createDatasetQueryParams struct {
@@ -1261,14 +1262,14 @@ type providerRequestProtocolOpenAPIItem struct {
 
 type providerRequestConfigOpenAPIResponse struct {
 	Advanced        *credentialvault.ProviderRequestAdvanced `json:"advanced,omitempty" desc:"Owner-private custom headers, query parameters and extra JSON body. Omit on updates to preserve; an empty object clears. Authentication, model/input and streaming fields are managed by LazyMind."`
-	DefaultProtocol string                                   `json:"default_protocol" enum:"openai,anthropic"`
+	DefaultProtocol string                                   `json:"default_protocol" enum:"openai,openai-responses,anthropic"`
 	Protocols       []providerRequestProtocolOpenAPIItem     `json:"protocols"`
 }
 
 type updateProviderRequestConfigOpenAPIRequest struct {
 	Advanced        *credentialvault.ProviderRequestAdvanced `json:"advanced,omitempty" desc:"Owner-private custom headers, query parameters and extra JSON body. Omit on updates to preserve; an empty object clears. Authentication, model/input and streaming fields are managed by LazyMind."`
-	DefaultProtocol string                                   `json:"default_protocol" enum:"openai,anthropic"`
-	Endpoints       map[string]string                        `json:"endpoints,omitempty" desc:"Optional OpenAI/Anthropic API-root overrides keyed by openai or anthropic. Empty resets that protocol to its default root. Unsupported protocol keys are rejected."`
+	DefaultProtocol string                                   `json:"default_protocol" enum:"openai,openai-responses,anthropic"`
+	Endpoints       map[string]string                        `json:"endpoints,omitempty" desc:"Optional API-root overrides keyed by openai, openai-responses or anthropic. Empty resets that protocol to its default root. Unsupported protocol keys are rejected."`
 }
 
 type replaceModelProviderKeyOpenAPIRequest struct {
@@ -3261,7 +3262,11 @@ func registeredCoreOperations() []openAPIOperation {
 			Summary:    "Delete dataset",
 			Tags:       []string{"datasets"},
 			PathParams: datasetPathParams{},
-			Responses:  map[int]openAPIResponse{200: refResp("Deleted successfully", "EmptyObject")},
+			Responses:  map[int]openAPIResponse{200: resp("Cleanup submission", doc.ResourceOperationResult{})},
+		},
+		{
+			Method: "GET", Path: "/datasets/{dataset}/deletion", Summary: "Get dataset cleanup progress", Tags: []string{"datasets"}, PathParams: datasetPathParams{},
+			Responses: map[int]openAPIResponse{200: resp("Cleanup progress", doc.DatasetDeletionProgress{})},
 		},
 		{
 			Method:      "POST",
@@ -4638,6 +4643,23 @@ func registeredCoreOperations() []openAPIOperation {
 			Responses:   map[int]openAPIResponse{200: resp("Selected models", listSelectedModelsOpenAPIResponse{})},
 		},
 		{
+			Method:      "GET",
+			Path:        "/model_providers/embedding/index-state",
+			Summary:     "Get shared text-vector index state",
+			Description: "Reports the persisted text embedding model identity and how many knowledge bases have indexed or pending document vectors. A legacy index without a recorded signature is reported as unknown, never inferred from the current model selection.",
+			Tags:        []string{"model_providers"},
+			Responses:   map[int]openAPIResponse{200: resp("Text-vector index state", modelprovider.EmbeddingIndexStatusResponse{})},
+		},
+		{
+			Method:      "POST",
+			Path:        "/model_providers/embedding/switch-preview",
+			Summary:     "Check whether a text embedding model can replace the active model",
+			Description: "Probes the saved candidate through the document embedding runtime and compares its passage and query signatures with the recorded deployment-wide text-vector identity. Legacy indexes without a recorded signature are unverified and require vector cleanup before a change. Preview never changes selections or knowledge bases; a later save rechecks the current state.",
+			Tags:        []string{"model_providers"},
+			RequestBody: jsonBodyOf(modelprovider.EmbeddingSwitchPreviewRequest{}, true),
+			Responses:   map[int]openAPIResponse{200: resp("Embedding switch assessment", modelprovider.EmbeddingSwitchPreviewResponse{})},
+		},
+		{
 			Method:      "PUT",
 			Path:        "/model_providers/selected_models",
 			Summary:     "Save selected models by model_type",
@@ -4781,6 +4803,15 @@ func registeredCoreOperations() []openAPIOperation {
 			Tags:        []string{"model_providers"},
 			PathParams:  modelProviderGroupModelPathParams{},
 			Responses:   map[int]openAPIResponse{200: resp("Bounded model availability result without provider text or secrets", modelprovider.ModelProbeResponse{})},
+		},
+		{
+			Method:      "POST",
+			Path:        "/model_providers/{model_provider_id}/groups/{group_id}/models/{model_id}:embedding-signature",
+			Summary:     "Fingerprint one saved text embedding model",
+			Description: "Computes SHA-256 digests for fixed passage and query samples through the saved model's actual embedding runtime, including its configured prefixes. Returns only digests and dimension, never vectors, credentials or upstream text. A ready result can be compared with a previously recorded signature; unsupported and failed results cannot establish compatibility. The request body must be empty and no model settings are changed.",
+			Tags:        []string{"model_providers"},
+			PathParams:  modelProviderGroupModelPathParams{},
+			Responses:   map[int]openAPIResponse{200: resp("Candidate embedding signatures or an unverified result", modelprovider.EmbeddingSignatureResponse{})},
 		},
 		{
 			Method:      "PATCH",

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -66,6 +67,34 @@ func TestAttemptHistoryDurationIgnoresInvalidationTime(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestReadStepProgressKeepsHistoricalAttemptsAfterRevisionRemoval(t *testing.T) {
+	db, _ := setupBatchTransitionSession(t)
+	session, err := GetSession(t.Context(), db.DB, "batch-session")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Delete(&orm.WorkflowRevision{}, "id = ?", session.WorkflowRevisionID).Error; err != nil {
+		t.Fatal(err)
+	}
+	attempts := []orm.WorkflowSessionStep{
+		{ID: "search", SessionID: session.ID, StepID: "search", Attempt: 1, Status: "succeeded", Validity: "effective"},
+		{ID: "screen-1", SessionID: session.ID, StepID: "screen", Attempt: 1, Status: "failed", Validity: "stale"},
+		{ID: "screen-2", SessionID: session.ID, StepID: "screen", Attempt: 2, Status: "interrupted", Validity: "effective"},
+		{ID: "analysis", SessionID: session.ID, StepID: "analysis", Attempt: 1, Status: "succeeded", Validity: "stale"},
+	}
+	for i := range attempts {
+		attempts[i].CreatedAt = time.Unix(int64(i+1), 0).UTC()
+	}
+	if err := db.Create(&attempts).Error; err != nil {
+		t.Fatal(err)
+	}
+	steps, err := ReadStepProgress(t.Context(), db.DB, session)
+	want := []StepProgress{{StepID: "search", Status: "succeeded"}, {StepID: "screen", Status: "interrupted"}}
+	if err != nil || !reflect.DeepEqual(steps, want) {
+		t.Fatalf("progress=%#v, error=%v, want %#v", steps, err, want)
 	}
 }
 
@@ -164,6 +193,44 @@ func TestSuccessfulStepHandoffPreservesExecutionClock(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestProjectionPreservesInputRequiredQuestion(t *testing.T) {
+	db, session, now := ordinaryFixture(t)
+	for i, code := range []string{"WORKFLOW_INPUT_REQUIRED", "WORKFLOW_STOPPED"} {
+		row := orm.WorkflowSessionStep{
+			ID: code, SessionID: session.ID, StepID: "write", Attempt: i + 1,
+			Status: "cancelled", Validity: "effective", TerminalCode: code,
+			ResultJSON: `{"input_required":{"question":"请选择意见","request_sha256":"abc"}}`,
+			CreatedAt:  now.Add(time.Duration(i) * time.Second), UpdatedAt: now,
+		}
+		if err := db.Create(&row).Error; err != nil {
+			t.Fatal(err)
+		}
+		ordinary, err := projectOrdinarySession(t.Context(), db.DB, &session)
+		if err != nil {
+			t.Fatal(err)
+		}
+		question := ordinary.Tasks[0].InputRequired
+		if (code == "WORKFLOW_INPUT_REQUIRED" && question != "请选择意见") || (code != "WORKFLOW_INPUT_REQUIRED" && question != "") {
+			t.Fatalf("ordinary waiting state for %s: %q", code, question)
+		}
+	}
+	view, err := projectSession(t.Context(), db.DB, &session)
+	if err != nil {
+		t.Fatal(err)
+	}
+	attempts := view.AttemptHistory["write"]
+	if len(attempts) != 2 {
+		t.Fatalf("attempts: %#v", attempts)
+	}
+	var pending map[string]string
+	if err := json.Unmarshal(attempts[0].InputRequired, &pending); err != nil || pending["question"] != "请选择意见" {
+		t.Fatalf("pending question lost: %s (%v)", attempts[0].InputRequired, err)
+	}
+	if len(attempts[1].InputRequired) != 0 {
+		t.Fatalf("ordinary cancellation must not expose a pending question: %s", attempts[1].InputRequired)
 	}
 }
 

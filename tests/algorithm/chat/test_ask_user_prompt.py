@@ -4,6 +4,19 @@ from lazymind.chat.service.component.tool_rendering import _tool_result_frame_te
 from lazymind.chat.service.component.tool_registry import ASK_USER_TOOL_CONFIG, collect_query_appendices
 
 
+def test_ready_simple_answers_do_not_register_generic_questions():
+    from dataclasses import replace
+    from lazymind.chat.engine.prompts.task_profile import TaskProfile, RequestAssessment
+    from lazymind.chat.service.chat_service import _should_register_ask_user
+    ready = TaskProfile()
+    assert not _should_register_ask_user({}, task_profile=ready)
+    assert _should_register_ask_user({}, task_profile=ready, query='请先问我一个问题')
+    ambiguous = replace(ready, request_assessment=RequestAssessment(status='ambiguous', interaction_need='blocking'))
+    assert _should_register_ask_user({}, task_profile=ambiguous)
+    assert _should_register_ask_user({}, task_profile=replace(ready, primary_outcome='create'))
+    assert not _should_register_ask_user({}, {'ask_user'}, task_profile=ambiguous)
+
+
 def test_ask_user_query_appendix_follows_user_input_and_is_not_system_history():
     appendix = '\n'.join(collect_query_appendices([ASK_USER_TOOL_CONFIG]))
     bundle = (

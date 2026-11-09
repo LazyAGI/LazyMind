@@ -645,6 +645,11 @@ def _tool_result_count(value: Any) -> int | None:
 def _tool_result_preview(tool_name: str, result: Any, value: str = '', language: str = 'en') -> str:
     if _tool_name_is(tool_name, 'search_tools') or _tool_name_is(tool_name, 'load_tools'):
         result = _normalized_success_business_value(result)
+    business_value = _normalized_success_business_value(result)
+    if (isinstance(business_value, dict)
+            and business_value.get('outcome') in {'workflow_approval_required', 'workflow_input_required'}
+            and business_value.get('user_notice')):
+        return _ensure_trailing_newline(str(business_value['user_notice']))
     status = _tool_result_status(result)
     if _tool_name_starts(tool_name, 'MailToolkit_'):
         payload = _normalized_success_business_value(result)
@@ -699,6 +704,13 @@ def _tool_result_preview(tool_name: str, result: Any, value: str = '', language:
             result,
         )
     business_value = _normalized_success_business_value(result)
+    render_name, _ = _render_tool_context(tool_name)
+    if render_name == 'search_provider_meta_search' and isinstance(business_value, dict):
+        profile = TOOL_RENDER_PROFILES[render_name]
+        variant = 'empty' if _tool_result_count(business_value) == 0 else (
+            'with_total' if isinstance(business_value.get('total_count'), int) else 'success')
+        template = profile[variant]['zh' if language == 'zh' else 'en']
+        return _render_preview_template(tool_name, value, {render_name: template}, template, result)
     if _tool_name_is(tool_name, 'load_tools') and isinstance(business_value, dict):
         return _load_tools_preview(business_value, 'success', language)
     if _tool_name_is(tool_name, 'search_tools') and business_value == []:

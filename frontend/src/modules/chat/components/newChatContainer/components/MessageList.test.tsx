@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { RoleTypes } from "@/modules/chat/constants/common";
@@ -23,6 +23,16 @@ vi.mock("@/modules/chat/store/workflowPanel", () => ({
 
 vi.mock("@/modules/chat/components/WorkflowPanel", () => ({
   WorkflowPanel: (props: any) => { workflowFixture.props = props; return null; },
+}));
+
+// Configuration polling is covered by ToolConfigurationCard's own tests.
+vi.mock("@/modules/chat/components/ToolConfigurationCard", () => ({
+  default: () => null,
+}));
+
+vi.mock("@/modules/knowledge/api/translation", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@/modules/knowledge/api/translation")>(),
+  getTranslationStatus: vi.fn().mockResolvedValue(false),
 }));
 
 vi.mock("@/modules/identityAvatar", () => ({
@@ -59,6 +69,24 @@ function selectMessageText(text: string) {
 }
 
 describe("native workflow Chat control wiring", () => {
+  it("hides only the empty old placeholder while accepted steering awaits its stream boundary", () => {
+    const assistant = { role: RoleTypes.ASSISTANT, history_id: "h", delta: "", reasoning_content: "thinking" };
+    const guide = { role: RoleTypes.USER, history_id: "h", delta: "只比较天津", steering_pending: true };
+    const props = {
+      sendMessage: vi.fn(), regenerate: vi.fn(), stopGeneration: vi.fn(),
+      renderText: (item: any) => <span>{item.delta}</span>, updateAssistantMessage: vi.fn(),
+    };
+    const view = render(<MessageList {...props} messageList={[assistant, guide]} />);
+    expect(view.container.querySelectorAll('[data-chat-role="assistant"]')).toHaveLength(0);
+    expect(screen.getByText("只比较天津")).toBeInTheDocument();
+    view.rerender(<MessageList {...props} messageList={[{ ...assistant, delta: "已生成的内容" }, guide]} />);
+    expect(view.container.querySelectorAll('[data-chat-role="assistant"]')).toHaveLength(1);
+    view.rerender(<MessageList {...props} messageList={[assistant]} />);
+    expect(view.container.querySelectorAll('[data-chat-role="assistant"]')).toHaveLength(1);
+    view.rerender(<MessageList {...props} messageList={[{ ...assistant, ask_pending: { ask_id: "ask" } }, guide]} />);
+    expect(view.container.querySelectorAll('[data-chat-role="assistant"]')).toHaveLength(1);
+  });
+
   it.each([false, true])("keeps the Chat stop callback separate from workflow controls (multi-answer: %s)", (multiAnswer) => {
     workflowFixture.session = { session_id: 'workflow' };
     const stop = vi.fn();
@@ -257,7 +285,7 @@ describe("MessageList side chat selection", () => {
     expect(screen.getAllByText("chat.runStatus.failed")).toHaveLength(1);
   });
 
-  it("hides retried failures restored from history while preserving attachments and the latest reply", () => {
+  it("hides retried failures restored from history while preserving attachments and the latest reply", async () => {
     const onOpenSideChat = vi.fn();
     const onCiteMessage = vi.fn();
     const messageList = buildChatMessageListFromHistory([
@@ -311,7 +339,7 @@ describe("MessageList side chat selection", () => {
     expect(document.querySelector('[data-chat-history-id="history-1:failed:failed-run-1"]')).toBeNull();
     expect(onOpenSideChat).not.toHaveBeenCalled();
 
-    selectMessageText("latest answer");
+    await act(async () => { selectMessageText("latest answer"); });
     fireEvent.click(
       screen.getByRole("button", { name: "chat.sideChat.askFromSelection" }),
     );

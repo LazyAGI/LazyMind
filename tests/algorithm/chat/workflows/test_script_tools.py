@@ -1,5 +1,7 @@
 import base64
 
+import pytest
+
 
 from lazymind.workflow_toolkit import load_workflow_package_tools, workflow_package_input_types
 
@@ -52,9 +54,8 @@ tool_scripts:
         },
     }
 
-    assert load_workflow_package_tools(
-        package, ['unsafe'], 'workflow-1', 'revision-1',
-    ) == {}
+    with pytest.raises(RuntimeError, match='unsafe Workflow package path'):
+        load_workflow_package_tools(package, ['unsafe'], 'workflow-1', 'revision-1')
 
 
 def test_reads_external_input_types_from_compiled_contract():

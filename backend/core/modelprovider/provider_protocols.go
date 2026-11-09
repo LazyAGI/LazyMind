@@ -63,5 +63,5 @@ func providerDeclaresProtocol(provider orm.UserModelProvider, protocol string) b
 // Token Plan's documented Messages API requires Bearer authentication, whereas
 // the current Claude adapter sends x-api-key. Do not enable that route yet.
 func runtimeSupportsRequestProtocol(provider orm.UserModelProvider, protocol string) bool {
-	return protocol == "openai" || protocol == "anthropic" && (provider.IsCustom || provider.Name != "SenseNovaTokenPlan")
+	return protocol == "openai" || protocol == "openai-responses" || protocol == "anthropic" && (provider.IsCustom || provider.Name != "SenseNovaTokenPlan")
 }

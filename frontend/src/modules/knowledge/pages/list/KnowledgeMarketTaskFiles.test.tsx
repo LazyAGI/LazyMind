@@ -43,6 +43,41 @@ beforeEach(() => {
 afterEach(() => { cleanup(); vi.useRealTimers(); });
 
 describe("background task files", () => {
+  it("keeps the displayed page accurate when a page request fails and can retry that page", async () => {
+    const request = vi.mocked(api.listKnowledgeMarketTaskFiles).getMockImplementation()!;
+    let pageRequests = 0;
+    vi.mocked(api.listKnowledgeMarketTaskFiles).mockImplementation((id, status, page, options) => {
+      if (page === 2 && ++pageRequests === 1) return Promise.reject(new Error("page request failed"));
+      return request(id, status, page, options);
+    });
+    await mount(); await click(screen.getByRole("button", { name: /展开任务详情/ }));
+    await click(screen.getByRole("button", { name: "文件下一页" }));
+    expect(screen.getByText("文档0.md")).toBeInTheDocument();
+    expect(screen.getByRole("spinbutton", { name: "跳转至文件页码" })).toHaveValue(1);
+    expect(screen.getByText("暂时无法读取文件列表，请重试。")).toBeInTheDocument();
+    await click(screen.getByRole("button", { name: "文件下一页" }));
+    expect(pageRequests).toBe(2);
+    expect(screen.getByText("文档10.md")).toBeInTheDocument();
+    expect(screen.getByRole("spinbutton", { name: "跳转至文件页码" })).toHaveValue(2);
+  });
+  it("keeps the current file page visible while the next page is loading", async () => {
+    const request = vi.mocked(api.listKnowledgeMarketTaskFiles).getMockImplementation()!;
+    let finish!: (value: Awaited<ReturnType<typeof api.listKnowledgeMarketTaskFiles>>) => void;
+    vi.mocked(api.listKnowledgeMarketTaskFiles).mockImplementation((id, status, page, options) => page === 2
+      ? new Promise((resolve) => { finish = resolve; }) : request(id, status, page, options));
+    await mount(); await click(screen.getByRole("button", { name: /展开任务详情/ }));
+    const row = screen.getByRole("button", { name: /文档0.md/ });
+    await click(screen.getByRole("button", { name: "文件下一页" }));
+    try {
+      expect(row).toBeInTheDocument();
+      expect(screen.getByRole("tabpanel")).toHaveAttribute("aria-busy", "true");
+      expect(screen.getByRole("button", { name: "文件下一页" })).toBeDisabled();
+    } finally {
+      await act(async () => finish({ items: [files[10]], total: 11, counts: { failed: 11, success: 12, canceled: 0, unfinished: 0 }, page: 2, page_size: 10, file_details_available: true }));
+    }
+    expect(screen.getByText("文档10.md")).toBeInTheDocument();
+    expect(screen.queryByText("文档0.md")).toBeNull();
+  });
   it("loads only the current task page and the expanded file page; filters reset pagination", async () => {
     await mount();
     expect(api.listKnowledgeMarketTaskPage).toHaveBeenCalledTimes(1);

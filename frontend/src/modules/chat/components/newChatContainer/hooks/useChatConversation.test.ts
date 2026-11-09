@@ -162,6 +162,14 @@ function createPreparedStream(clientConversationId: string) {
 }
 
 describe("useChatConversation regeneration recovery", () => {
+  it('keeps the request-scoped paper selection when opening the chat stream', async () => {
+    const { stream } = createMockStream();
+    const onOpenSSE = vi.fn(() => stream);
+    const { result } = renderConversation({ onOpenSSE });
+    const selection = { dataset_id: 'paper-library', document_id: 'paper-1', selected_text: 'scaled attention', expand_paper_context: true };
+    await act(async () => { await result.current.sendMessage({ text: 'Explain this', document_context: selection }); });
+    expect(onOpenSSE).toHaveBeenCalledWith(expect.anything(), expect.anything(), expect.anything(), expect.objectContaining({ document_context: selection }));
+  });
   it('keeps terminal tool counts live and replaces them with zero on regeneration', async () => {
     const { stream, listeners } = createMockStream();
     const { result } = renderConversation({ onOpenSSE: vi.fn(() => stream) });
@@ -491,6 +499,58 @@ describe("useChatConversation regeneration recovery", () => {
     expect(screen.queryByRole("status")).not.toBeInTheDocument();
   });
 
+  it("shows HTTP-accepted guidance before its stream boundary without overwriting either prior reply", async () => {
+    const live = createMockStream();
+    const { result } = renderConversation({ onOpenSSE: vi.fn(() => live.stream) });
+    act(() => result.current.replaceMessageList("steering-output", []));
+    await act(async () => { await result.current.sendMessage({ text: "周末从北京出发" }); });
+    const emit = (frame: object) => live.listeners.get("message")?.({ data: JSON.stringify({ result: {
+      conversation_id: "steering-output", history_id: "steering-history", ...frame,
+    } }) });
+    const cursor = { run_id: "steering-run", call_index: 1 };
+    const intent = { scope: "conversation", steering_segment_id: "first", intent_context: { goal: "天津济南" } };
+    await act(async () => {
+      emit({ model_output: { ...cursor, phase: "begin" } });
+      emit({ model_output: cursor, delta: "原始回复" });
+    });
+    const guide = (id: string, text: string) => ({
+      id, text, conversation_id: "steering-output", target_history_id: "steering-history",
+      status: "accepted" as const, mode: "steer" as const, content: { text }, sort_order: 1, revision: 1,
+      created_at: "2026-10-29T00:00:00Z", updated_at: "2026-10-29T00:00:00Z",
+    });
+    act(() => result.current.showAcceptedSteering(guide("first", "只比较天津济南")));
+    expect(result.current.messageList.map(m => m.delta)).toEqual(["周末从北京出发", "原始回复", "只比较天津济南"]);
+    await act(async () => {
+      emit({ model_output: cursor, delta: "保留尾段" });
+      emit({ model_output: { ...cursor, phase: "commit" } });
+      emit({ steering_applied: [{ id: "first", text: "只比较天津济南" }] });
+      emit({ model_output: { ...cursor, call_index: 2, phase: "begin" } });
+      emit({ model_output: { ...cursor, call_index: 2 }, delta: "天津美食丰富" });
+      emit({ intent_updated: intent });
+    });
+    act(() => result.current.showAcceptedSteering(guide("second", "两人预算1500")));
+    await act(async () => {
+      emit({ model_output: { ...cursor, call_index: 2, phase: "commit" } });
+      emit({ steering_applied: [{ id: "second", text: "两人预算1500" }] });
+      emit({ model_output: { ...cursor, call_index: 3, phase: "begin" } });
+      emit({ model_output: { ...cursor, call_index: 3 }, delta: "失败的临时输出" });
+      emit({ model_output: { ...cursor, call_index: 3, phase: "rollback" }, delta_mode: "replace", delta: "", reasoning_content: "" });
+      emit({ model_output: { ...cursor, call_index: 4, phase: "begin" } });
+      emit({ model_output: { ...cursor, call_index: 4 }, delta: "最终推荐天津" });
+      emit({ model_output: { ...cursor, call_index: 4, phase: "commit" } });
+    });
+    expect(result.current.messageList.map(m => m.delta)).toEqual([
+      "周末从北京出发", "原始回复保留尾段", "只比较天津济南", "天津美食丰富", "两人预算1500", "最终推荐天津",
+    ]);
+    act(() => result.current.showAcceptedSteering(guide("second", "两人预算1500")));
+    expect(result.current.messageList.filter(m => m.steering_message)).toHaveLength(2);
+    expect(result.current.messageList.filter(m => m.intent_updated).map(m => m.delta)).toEqual(["天津美食丰富"]);
+    // A merged resume frame carries the latest intent alongside the final tail.
+    // Its ownership must still route it back to the first guided reply.
+    await act(async () => emit({ intent_updated: intent }));
+    expect(result.current.messageList.filter(m => m.intent_updated).map(m => m.delta)).toEqual(["天津美食丰富"]);
+  });
+
   it("keeps committed SDK thinking and tool previews consistent through rollback and export", async () => {
     const live = createMockStream();
     const cached = createMockStream();
@@ -516,7 +576,7 @@ describe("useChatConversation regeneration recovery", () => {
       emit({ model_output: { ...cursor, call_index: 2, phase: "rollback" }, delta_mode: "replace",
         delta: prefix + "\nKEPT BODY", reasoning_content: "COMMITTED SDK THINK", sources: [], exports: [] });
     });
-    expect(result.current.messageList[1].delta.trim()).toBe("KEPT BODY");
+    expect(result.current.messageList[1].delta.trim()).toBe("KEPT PREFIX\nKEPT BODY");
     expect(result.current.messageList[1].reasoning_content).toContain("COMMITTED SDK THINK");
     expect(result.current.messageList[1].reasoning_content).toContain("COMMITTED TOOL");
     await act(async () => {
@@ -528,7 +588,7 @@ describe("useChatConversation regeneration recovery", () => {
       emit({ delta_mode: "replace", delta: prefix + "FINAL BODY", exports: [] });
     });
     const finished = result.current.messageList[1];
-    expect(finished.delta).toBe("FINAL BODY");
+    expect(finished.delta).toBe("KEPT PREFIXFINAL BODY");
     expect(finished.reasoning_content).not.toContain("BAD");
     for (const marker of ["COMMITTED SDK THINK", "B SDK THINK", "FINAL THINK", "COMMITTED TOOL", "COMMITTED RESULT"]) {
       expect(finished.reasoning_content.split(marker)).toHaveLength(2);
@@ -1325,6 +1385,43 @@ describe("useChatConversation regeneration recovery", () => {
       "older question", "partial failed answer", "final answer", "current question", "current answer",
     ]);
     expect(result.current.messageList[1]).toMatchObject({ archived_failure: true, history_id: "h1:failed:run-1" });
+  });
+
+  it("keeps every steering message and partial answer segment when paging history", () => {
+    const initial = { id: "h2", seq: 2, query: "current question", result: "current answer" };
+    const steered = {
+      id: "h1",
+      seq: 1,
+      query: "compare cities",
+      result: "partial answerfinal answer",
+      steering_messages: [{
+        id: "steer-1",
+        text: "only compare two cities",
+        target_history_id: "h1",
+        assistant_snapshot: "partial answer",
+      }],
+    };
+    const { result } = renderConversation();
+    act(() => {
+      result.current.replaceMessageList(
+        "conversation-1",
+        buildChatMessageListFromHistory([initial]),
+      );
+      result.current.mergeHistoryPage("conversation-1", [steered]);
+      result.current.mergeHistoryPage("conversation-1", [steered]);
+    });
+
+    expect(result.current.messageList.map((item) => item.delta)).toEqual([
+      "compare cities",
+      "partial answer",
+      "only compare two cities",
+      "final answer",
+      "current question",
+      "current answer",
+    ]);
+    expect(result.current.messageList.filter(
+      (item) => item.steering_follow_up_id === "steer-1",
+    )).toHaveLength(2);
   });
 
   it("ignores a history page for a conversation that is no longer active", () => {
@@ -2330,6 +2427,94 @@ describe("useChatConversation regeneration recovery", () => {
     expect(result.current.messageList.map(item => item.delta)).toEqual(["question", "answer"]);
   });
 
+  it("moves an untouched assistant placeholder behind an early steering message", async () => {
+    const { stream, listeners } = createMockStream();
+    const { result } = renderConversation({ onOpenSSE: vi.fn(() => stream) });
+    await act(async () => { await result.current.sendMessage({ text: "original question" }); });
+    act(() => result.current.replaceMessageList("conversation-1", [
+      {
+        role: RoleTypes.USER,
+        delta: "original question",
+        history_id: "history-1",
+      },
+      {
+        role: RoleTypes.ASSISTANT,
+        history_id: "history-1",
+        delta: "",
+        raw_delta: "",
+        reasoning_content: "",
+        answers: [],
+        sources: [],
+        finish_reason:
+          ChatConversationsResponseFinishReasonEnum.FinishReasonUnspecified,
+      },
+    ]));
+
+    act(() => listeners.get("message")?.({ data: JSON.stringify({ result: {
+      conversation_id: "conversation-1", history_id: "history-1",
+      steering_applied: [{ id: "steer-1", text: "narrow the answer" }],
+    } }) }));
+
+    expect(result.current.messageList).toHaveLength(3);
+    expect(result.current.messageList.map((item) => item.role)).toEqual([
+      RoleTypes.USER,
+      RoleTypes.USER,
+      RoleTypes.ASSISTANT,
+    ]);
+    expect(result.current.messageList[1]).toMatchObject({
+      delta: "narrow the answer",
+      steering_message: true,
+      steering_follow_up_id: "steer-1",
+    });
+    expect(result.current.messageList[2]).toMatchObject({
+      delta: "",
+      steering_continuation: true,
+      steering_follow_up_id: "steer-1",
+    });
+  });
+
+  it("keeps partial assistant output before a later steering message", async () => {
+    const { stream, listeners } = createMockStream();
+    const { result } = renderConversation({ onOpenSSE: vi.fn(() => stream) });
+    await act(async () => { await result.current.sendMessage({ text: "original question" }); });
+    act(() => result.current.replaceMessageList("conversation-1", [
+      {
+        role: RoleTypes.USER,
+        delta: "original question",
+        history_id: "history-1",
+      },
+      {
+        role: RoleTypes.ASSISTANT,
+        history_id: "history-1",
+        delta: "partial answer",
+        raw_delta: "partial answer",
+        reasoning_content: "",
+        answers: [],
+        sources: [],
+        finish_reason:
+          ChatConversationsResponseFinishReasonEnum.FinishReasonUnspecified,
+      },
+    ]));
+
+    act(() => listeners.get("message")?.({ data: JSON.stringify({ result: {
+      conversation_id: "conversation-1", history_id: "history-1",
+      steering_applied: [{ id: "steer-2", text: "change direction" }],
+    } }) }));
+
+    expect(result.current.messageList).toHaveLength(4);
+    expect(result.current.messageList.map((item) => item.role)).toEqual([
+      RoleTypes.USER,
+      RoleTypes.ASSISTANT,
+      RoleTypes.USER,
+      RoleTypes.ASSISTANT,
+    ]);
+    expect(result.current.messageList[1].delta).toBe("partial answer");
+    expect(result.current.messageList[2]).toMatchObject({
+      delta: "change direction",
+      steering_message: true,
+    });
+  });
+
   it("ends generation when a model failure terminal also carries the final partial answer", async () => {
     const { stream, listeners } = createMockStream();
     const { result } = renderConversation({ onOpenSSE: vi.fn(() => stream) });
@@ -2401,9 +2586,9 @@ describe("useChatConversation regeneration recovery", () => {
     const onResume = vi.fn(() => stream);
     const { result, unmount } = renderConversation({ onOpenResumeSSE: onResume });
     const history = { id: "work-history", seq: 1, query: "Manage", result: "live text" };
-    const pending = { ask_id: "confirmation", questions: [{ text: "Delete?", type: "boolean" }],
-      knowledge_management: { confirmation_id: "confirmation", arguments_digest: "digest", snapshot: "snapshot" } };
-    getHistoryMock.mockResolvedValue({ data: { history: [{ ...history, result: "stale persisted text", ask_pending: pending }] } });
+    const pending = { confirmation_id: "confirmation", arguments_digest: "digest", snapshot: "snapshot",
+      action: "knowledge.resource.delete", status: "pending", steering_segment: 0, preview: {} };
+    getHistoryMock.mockResolvedValue({ data: { history: [{ ...history, result: "stale persisted text", knowledge_confirmations: [pending] }] } });
     act(() => result.current.replaceMessageList(conv, buildChatMessageListFromHistory([history])));
     if (active) {
       Object.assign(stream, { readyState: 1 });
@@ -2413,26 +2598,75 @@ describe("useChatConversation regeneration recovery", () => {
       detail: { conversationId: conv, historyId: history.id, confirmationId: "confirmation" },
     }));
     await act(async () => { notify(); });
-    await waitFor(() => expect(result.current.messageList[result.current.messageList.length - 1]?.ask_pending?.ask_id).toBe("confirmation"));
+    await waitFor(() => expect(result.current.messageList[result.current.messageList.length - 1]?.knowledge_confirmations?.[0]?.confirmation_id).toBe("confirmation"));
     expect(getHistoryMock).toHaveBeenCalledWith({ name: conv, anchorHistoryId: history.id });
     expect(result.current.messageList[result.current.messageList.length - 1]?.delta).toBe("live text");
     expect(onResume).not.toHaveBeenCalled();
-    act(() => result.current.updateAssistantMessage({ ask_answered: true }, undefined, result.current.messageList.length - 1));
+    getHistoryMock.mockResolvedValue({ data: { history: [{ ...history, knowledge_confirmations: [{ ...pending, status: "approved" }] }] } });
     await act(async () => { notify(); });
-    expect(result.current.messageList[result.current.messageList.length - 1]?.ask_answered).toBe(true);
+    expect(result.current.messageList.at(-1)?.knowledge_confirmations?.[0]?.status).toBe("approved");
     expect(result.current.messageList).toHaveLength(2);
     unmount();
     streamManager.removeStreamEntry(conv);
   });
 
+  it.each([
+    { historyFirst: true, hadCard: true },
+    { historyFirst: false, hadCard: true },
+    { historyFirst: false, hadCard: false },
+  ])("keeps one confirmation before steering (history first: $historyFirst, card already visible: $hadCard)", async ({ historyFirst, hadCard }) => {
+    const conversationId = "steer-work";
+    const historyId = "delete-turn";
+    const guidance = { id: "cancel-delete", text: "取消删除" };
+    const pending = { confirmation_id: "delete-confirmation", arguments_digest: "digest", snapshot: "snapshot",
+      action: "knowledge.resource.delete" as const, status: "pending" as const, steering_segment: 0, preview: {} };
+    const superseded = { ...pending, status: "superseded" as const };
+    const { stream, listeners } = createMockStream();
+    const { result } = renderConversation({ onOpenSSE: vi.fn(() => stream) });
+    act(() => result.current.replaceMessageList(conversationId, []));
+    await act(async () => { await result.current.sendMessage({ text: "删除测试库" }); });
+    const emit = (frame: object) => listeners.get("message")?.({ data: JSON.stringify({ result: {
+      conversation_id: conversationId, history_id: historyId, ...frame,
+    } }) });
+    act(() => emit({ delta: "" }));
+    const notify = () => window.dispatchEvent(new CustomEvent("lazymind:chat-knowledge-confirmation", {
+      detail: { conversationId, historyId, confirmationId: pending.confirmation_id },
+    }));
+    if (hadCard) {
+      getHistoryMock.mockResolvedValueOnce({ data: { history: [{
+        id: historyId, seq: 1, query: "删除测试库", result: "", knowledge_confirmations: [pending],
+      }] } });
+      await act(async () => { notify(); });
+      expect(result.current.messageList.at(-1)?.knowledge_confirmations).toEqual([pending]);
+    }
+    act(() => result.current.showAcceptedSteering({
+      ...guidance, conversation_id: conversationId, target_history_id: historyId,
+      status: "accepted", mode: "steer", content: { text: guidance.text }, sort_order: 1, revision: 1,
+      created_at: "2026-11-04T08:39:00Z", updated_at: "2026-11-04T08:39:00Z",
+    }));
+    getHistoryMock.mockResolvedValueOnce({ data: { history: [{
+      id: historyId, seq: 1, query: "删除测试库", result: "", assistant_remainder: "",
+      steering_messages: [{ ...guidance, assistant_segment: "" }], knowledge_confirmations: [superseded],
+    }] } });
+
+    if (historyFirst) await act(async () => { notify(); });
+    act(() => emit({ steering_applied: [guidance] }));
+    act(() => emit({ delta: "已取消删除" }));
+    if (!historyFirst) await act(async () => { notify(); });
+
+    expect(result.current.messageList.map(row => [row.delta, row.knowledge_confirmations ?? []])).toEqual([
+      ["删除测试库", []], ["", [superseded]], [guidance.text, []], ["已取消删除", []],
+    ]);
+  });
+
   it("loads an older Work confirmation without replacing the currently loaded turn", async () => {
     const { result, unmount } = renderConversation();
-    const pending = { ask_id: "old-confirm", questions: [{ text: "Create?", type: "boolean" }],
-      knowledge_management: { confirmation_id: "old-confirm", arguments_digest: "digest", snapshot: "snapshot" } };
+    const pending = { confirmation_id: "old-confirm", arguments_digest: "digest", snapshot: "snapshot",
+      action: "knowledge.create", status: "pending", steering_segment: 0, preview: {} };
     act(() => result.current.replaceMessageList("old-work", buildChatMessageListFromHistory([
       { id: "latest", seq: 8, query: "Latest", result: "latest live text" },
     ])));
-    getHistoryMock.mockResolvedValue({ data: { history: [{ id: "older", seq: 1, query: "Earlier", result: "earlier text", ask_pending: pending }] } });
+    getHistoryMock.mockResolvedValue({ data: { history: [{ id: "older", seq: 1, query: "Earlier", result: "earlier text", knowledge_confirmations: [pending] }] } });
     await act(async () => window.dispatchEvent(new CustomEvent("lazymind:chat-knowledge-confirmation", {
       detail: { conversationId: "old-work", historyId: "older", confirmationId: "old-confirm" },
     })));
@@ -2440,4 +2674,12 @@ describe("useChatConversation regeneration recovery", () => {
     expect(result.current.messageList[result.current.messageList.length - 1]?.delta).toBe("latest live text");
     unmount();
   });
+});
+
+it('forwards an explicit initial paper model binding to its stream request',async()=>{
+ const {stream}=createMockStream();
+ const onOpenSSE=vi.fn(()=>stream);const {result}=renderConversation({onOpenSSE});
+ const selection={mode:'fixed' as const,model_id:'paper-model',source:'own' as const};
+ await act(async()=>{await result.current.sendMessage({text:'Explain the paper',initial_model_selection:selection});});
+ expect(onOpenSSE).toHaveBeenCalledWith(expect.any(Array),expect.anything(),{},expect.objectContaining({initial_model_selection:selection}));
 });

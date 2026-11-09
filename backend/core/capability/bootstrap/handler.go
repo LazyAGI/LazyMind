@@ -14,11 +14,13 @@ import (
 
 	"gorm.io/gorm"
 
+	"lazymind/core/academic"
 	"lazymind/core/capability"
 	"lazymind/core/capability/internal/coreadapter"
 	"lazymind/core/capability/internal/scanadapter"
 	mcpadapter "lazymind/core/capability/mcp"
 	"lazymind/core/externalcapability"
+	"lazymind/core/vocabulary"
 )
 
 type Config struct {
@@ -42,6 +44,7 @@ type Config struct {
 
 type Runtime struct {
 	MCP               http.Handler
+	VocabularyMCP     http.Handler
 	KnowledgeInternal http.Handler
 	KnowledgeMCP      http.Handler
 	KnowledgeDecision http.HandlerFunc
@@ -134,6 +137,14 @@ func NewRuntime(config Config) (*Runtime, error) {
 		return nil, err
 	}
 	runtime := &Runtime{MCP: handler}
+	if vocabulary.Enabled() {
+		runtime.VocabularyMCP, err = mcpadapter.NewHandler(service, mcpadapter.HandlerConfig{
+			Verifier: vocabularyVerifier(config.InternalServiceToken), VocabularyOnly: true,
+		})
+		if err != nil {
+			return nil, err
+		}
+	}
 	if config.EnableKnowledgeManagement {
 		kr, e := knowledgeruntime.New(config.State, config.ValidateKnowledgeExecution, func(ctx context.Context, id knowledgeruntime.Identity, name string, args json.RawMessage) (doc.ResourceSnapshot, error) {
 			permissions := []string{}
@@ -226,20 +237,38 @@ func NewRuntime(config Config) (*Runtime, error) {
 			}
 			return &auth.TokenInfo{UserID: id.Principal.UserID, Scopes: scopes, Extra: map[string]any{"tenant_id": id.Principal.TenantID, "execution": execution, "knowledge_identity": id}}, nil
 		}
-		runtime.KnowledgeMCP, e = mcpadapter.NewHandler(service, mcpadapter.HandlerConfig{Verifier: internalVerifier, ManagementOnly: true, AuthorizeCall: func(ctx context.Context, req *mcp.CallToolRequest) (capability.InvocationContext, error) {
-			if req.Extra == nil || req.Extra.TokenInfo == nil || req.Params == nil {
-				return capability.InvocationContext{}, errors.New("authenticated execution missing")
-			}
-			execution, ok := req.Extra.TokenInfo.Extra["execution"].(knowledgeruntime.Execution)
-			if !ok {
-				return capability.InvocationContext{}, errors.New("execution missing")
-			}
-			identity, ok := req.Extra.TokenInfo.Extra["knowledge_identity"].(knowledgeruntime.Identity)
-			if !ok {
-				return capability.InvocationContext{}, errors.New("verified identity missing")
-			}
-			return kr.AuthorizeDispatch(ctx, execution, req.Params.Name, req.Params.Arguments, req.Params.GetMeta(), identity)
-		}})
+		runtime.KnowledgeMCP, e = mcpadapter.NewHandler(service, mcpadapter.HandlerConfig{
+			Verifier: internalVerifier, ManagementOnly: true,
+			PaperSources: academic.AgentPaperSources,
+			ImportPapers: func(ctx context.Context, call capability.InvocationContext, in capability.PaperImportInput) (capability.PaperImportResult, error) {
+				permissions := make([]string, 0, len(call.Principal.Permissions))
+				for permission := range call.Principal.Permissions {
+					permissions = append(permissions, permission)
+				}
+				op := doc.ResourceOperationContext{
+					Caller:               doc.DatasetCatalogCaller{UserID: call.Principal.UserID, TenantID: call.Principal.TenantID, Permissions: permissions},
+					OperationKey:         call.OperationKey,
+					ValidateBeforeCommit: func(ctx context.Context) error { return kr.ValidateCommitPreparation(ctx, call) },
+					ValidateExecution: func(ctx context.Context, tx *gorm.DB) error {
+						return kr.GuardCommit(ctx, tx, call.ExecutionKey, config.ValidateKnowledgeCommit)
+					},
+				}
+				return academic.AgentImportPapers(ctx, call, in, op)
+			},
+			AuthorizeCall: func(ctx context.Context, req *mcp.CallToolRequest) (capability.InvocationContext, error) {
+				if req.Extra == nil || req.Extra.TokenInfo == nil || req.Params == nil {
+					return capability.InvocationContext{}, errors.New("authenticated execution missing")
+				}
+				execution, ok := req.Extra.TokenInfo.Extra["execution"].(knowledgeruntime.Execution)
+				if !ok {
+					return capability.InvocationContext{}, errors.New("execution missing")
+				}
+				identity, ok := req.Extra.TokenInfo.Extra["knowledge_identity"].(knowledgeruntime.Identity)
+				if !ok {
+					return capability.InvocationContext{}, errors.New("verified identity missing")
+				}
+				return kr.AuthorizeDispatch(ctx, execution, req.Params.Name, req.Params.Arguments, req.Params.GetMeta(), identity)
+			}})
 		if e != nil {
 			return nil, e
 		}

@@ -53,6 +53,26 @@ when_to_use: >
   for text content, quizzes, reports, summaries, or any non-visual task.
 
 runtime:
+  clarification_fields:
+    - id: image_goal
+      label: 图片主体或修改要求
+      question: 想生成什么图片，或对原图做什么修改？
+      reason: 需要明确主体或修改要求才能生成符合预期的图片。
+      required: true
+      type: text
+      validation: {min_length: 1, max_length: 4000, example: '例如：一只在窗边晒太阳的橘猫，水彩风格'}
+    - id: image_count
+      label: 数量
+      question: 希望生成多少张？
+      type: text
+      reason: 未指定时沿用当前路由规则：单项通常为 1，表情包合集为 3。
+      patterns: ['([0-9]+)\s*(?:张|个)(?:图片|图|表情包|动图)']
+      validation: {format: positive_integer, min: 1, example: '例如：3'}
+    - id: caption
+      label: 文案
+      question: 图片上需要显示什么文字？
+      type: text
+      reason: 普通图片不额外添加文字，表情包沿用当前文案规划。
   post_step_checks:
     - step_id: analyze_subject
       tool: check_image_workflow_capabilities
@@ -89,7 +109,7 @@ steps:
 
 slots:
   - id: subject_analysis
-    user_visible: false
+    user_visible: true
     label: Subject Analysis
     type: text
     cardinality: single
@@ -116,14 +136,14 @@ slots:
     ordered: true
 
   - id: material_summary
-    user_visible: false
+    user_visible: true
     label: Material Summary
     type: text
     cardinality: single
     summary_max_chars: 400
 
   - id: prompt_used
-    user_visible: false
+    user_visible: true
     label: Optimized Prompt
     type: text
     cardinality: single
@@ -155,12 +175,12 @@ slots:
     ordered: true
 
   - id: generated_base_image
-    user_visible: false
+    user_visible: true
     label: Generated Base Image
     type: image
     cardinality: list
     ordered: true
-    exposed: false
+    exposed: true
 
   - id: generated_first_frame
     user_visible: false
@@ -184,11 +204,11 @@ slots:
     ordered: true
 
   - id: enhancement_status
-    user_visible: false
+    user_visible: true
     label: Enhancement Status
     type: json
     cardinality: single
-    exposed: false
+    exposed: true
 
   - id: meme_static_output
     user_visible: true
@@ -275,8 +295,8 @@ ui:
       slot_scope: selected
       composite_tab_position: left
       slots:
+        - {id: enhancement_status}
         - id: generated_first_frame
-        - id: generated_base_image
         - id: generated_last_frame
         - id: material_images
         - id: meme_static_output
@@ -286,10 +306,9 @@ ui:
       composite_layout:
         direction: row
         children:
+          - {slot: enhancement_status}
           - weight: 1
             slot: generated_first_frame
-          - weight: 1
-            slot: generated_base_image
           - weight: 1
             slot: generated_last_frame
           - weight: 1
@@ -307,18 +326,15 @@ ui:
         empty_column_scope: selected
         repeat_single_slots:
           - generated_first_frame
-          - generated_base_image
           - generated_last_frame
           - material_images
         mutually_exclusive:
           - slots:
               - generated_first_frame
-              - generated_base_image
               - generated_last_frame
               - material_images
             prefer:
               - generated_first_frame
-              - generated_base_image
               - material_images
               - generated_last_frame
           - slots:

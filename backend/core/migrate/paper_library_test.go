@@ -110,10 +110,10 @@ func TestPaperLibraryAggregateAndDevPathsMatch(t *testing.T) {
 				if err := db.QueryRow(`SELECT GROUP_CONCAT(sql, ';') FROM (SELECT sql FROM sqlite_master WHERE type='table' AND (name LIKE 'paper_library_%' OR name='academic_user_paper_states') ORDER BY name)`).Scan(&ddl); err != nil {
 					t.Fatal(err)
 				}
-				return ddl
+				return strings.Join(strings.Fields(ddl), " ")
 			}
 			if fingerprint(aggregate) != fingerprint(dev) {
-				t.Fatal("paper library schema differs between aggregate and dev paths")
+				t.Fatalf("paper library schema differs between aggregate and dev paths\nAGGREGATE:\n%s\nDEV:\n%s", fingerprint(aggregate), fingerprint(dev))
 			}
 			execMigrationFileForDriver(t, dev, "../migrations/dev_mode/v0_3/20261028022508_finalize_paper_library_archive.down.sql", driver)
 			execMigrationFileForDriver(t, dev, "../migrations/dev_mode/v0_3/20261027092144_preserve_legacy_paper_libraries.down.sql", driver)

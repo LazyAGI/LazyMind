@@ -309,6 +309,75 @@ func TestPrepareHTTPRejectsUnknownPublicWorkflow(t *testing.T) {
 	}
 }
 
+func TestPrepareHTTPBlocksMissingFieldsAndRealSourceResource(t *testing.T) {
+	h, db := testHandler(t)
+	if err := db.AutoMigrate(&orm.WorkflowResource{}, &orm.WorkflowRevision{}, &orm.WorkflowRevisionEntry{}, &orm.WorkflowBlob{}); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	if err := db.Create(&orm.WorkflowResource{
+		ID: "resource", WorkflowRef: "builtin:clarification-test", WorkflowID: "clarification-test",
+		OwnerUserID: "owner", OwnerScope: "owner", RelativeRoot: "clarification-test", HeadRevisionID: "r1",
+		Version: 1, Status: "active", CreatedAt: now, UpdatedAt: now,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	graph := json.RawMessage(`{"nodes":{},"runtime":{"clarification_fields":[
+		{"id":"goal","question":"What should the document cover?","reason":"Sets the scope.","type":"text","required":true},
+		{"id":"source","question":"Upload the source document.","reason":"Needed for source-grounded work.","type":"single",
+		 "choice_policy":"fixed","allow_other":false,"choices":["Upload"],
+		 "attachment":{"material_id":"source","when_choice":"Upload","accept":[".pdf"],"required":true,"max_files":1}},
+		{"id":"format","type":"single","choices":["docx","md"],"choice_policy":"fixed","default":"docx"}
+	]},"material_producers":{"source":{"kind":"external"}},"input_expressions":{"parse":{"material":"source"}}}`)
+	if err := db.Create(&orm.WorkflowRevision{ID: "r1", WorkflowResourceID: "resource", RevisionNo: 1,
+		TreeHash: "tree", GraphHash: "graph", GraphSchemaVersion: "3", CompiledGraph: graph, CreatedAt: now,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	call := func(key string, values, bindings map[string]any) map[string]any {
+		t.Helper()
+		body, _ := json.Marshal(map[string]any{"workflow_id": "clarification-test", "revision_id": "r1",
+			"idempotency_key": key, "clarification_values": values, "input_bindings": bindings})
+		w := httptest.NewRecorder()
+		h.Prepare(w, request(http.MethodPost, "/workflow-preparations", "owner", body))
+		if w.Code != http.StatusOK {
+			t.Fatalf("prepare=%d %s", w.Code, w.Body.String())
+		}
+		encoded, _ := json.Marshal(decodeEnvelope(t, w).Data)
+		var result map[string]any
+		if err := json.Unmarshal(encoded, &result); err != nil {
+			t.Fatal(err)
+		}
+		return result
+	}
+	missing := call("missing", map[string]any{"source": "Upload"}, nil)
+	questions, _ := missing["questions"].([]any)
+	if missing["status"] != "needs_input" || len(questions) != 2 {
+		t.Fatalf("missing inputs did not produce a card: %#v", missing)
+	}
+	if questions[1].(map[string]any)["attachment"] == nil {
+		t.Fatal("missing source has no upload control")
+	}
+	content := []byte("source contents")
+	sum := sha256.Sum256(content)
+	resource, _, err := h.Store.ImportInputResource(t.Context(), "owner", "source.pdf", "application/pdf",
+		"sha256:"+hex.EncodeToString(sum[:]), content)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ready := call("complete", map[string]any{"goal": "RAG"}, map[string]any{"source": map[string]any{
+		"resource_id": resource.ID, "revision": resource.Revision, "content_hash": resource.ContentHash,
+	}})
+	if ready["status"] != "ready" || ready["workflow_revision"] != "r1" ||
+		ready["clarification_values"].(map[string]any)["format"] != "docx" {
+		t.Fatalf("complete request blocked or lost defaults: %#v", ready)
+	}
+	var sessions int64
+	if err := db.Table("plugin_sessions").Count(&sessions).Error; err != nil || sessions != 0 {
+		t.Fatalf("prepare created a session: %d %v", sessions, err)
+	}
+}
+
 func TestMissingExternalInputsSkipsOptionalExternalMaterials(t *testing.T) {
 	graph := preparationGraph{MaterialProducers: map[string]struct {
 		Kind     string `json:"kind"`

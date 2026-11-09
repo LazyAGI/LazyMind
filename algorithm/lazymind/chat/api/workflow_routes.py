@@ -158,7 +158,7 @@ class WriterDocumentConvertRequest(BaseModel):
     target_format: Literal['markdown', 'lmd', 'latex']
     content: str
     document_id: str = 'writer-document'
-    language: Literal['zh-CN', 'en-US'] = 'zh-CN'
+    language: Literal['zh-CN', 'en-US'] | None = None
     materialized_numbering: bool = True
 
 
@@ -432,11 +432,15 @@ def invoke_workflow_action(request: WorkflowActionInvokeRequest) -> Dict[str, An
         ) from exc
     except ValueError as exc:
         code = str(getattr(exc, 'error_code', 'WORKFLOW_ACTION_INVALID'))
+        logger.warning('Workflow artifact action rejected: workflow=%s action=%s phase=%s code=%s reason=%s',
+                       request.workflow_id, request.action, request.phase, code, str(exc))
         detail: Dict[str, Any] = {'code': code, 'message': str(exc)}
         detail.update(getattr(exc, 'details', {}) or {})
         status = 409 if code in {'SELECTION_AMBIGUOUS', 'SELECTION_STALE'} else 422
         raise HTTPException(status_code=status, detail=detail) from exc
     except TypeError as exc:
+        logger.warning('Workflow artifact action arguments rejected: workflow=%s action=%s phase=%s reason=%s',
+                       request.workflow_id, request.action, request.phase, str(exc))
         raise HTTPException(
             status_code=422,
             detail={'code': 'WORKFLOW_ACTION_INVALID', 'message': str(exc)},
@@ -490,6 +494,7 @@ async def task_cancel(req: TaskCancelRequest) -> TaskCancelResponse:
     """
     from lazymind.chat.service.chat_service import _active_sessions, _active_turn_sessions
     from lazymind.chat.engine.agent_runtime.cancellation import request_cancel
+    from lazymind.chat.engine.agent_runtime.steering import steering_registry
     try:
         sid: Optional[str] = None
         if req.conversation_id:
@@ -499,8 +504,39 @@ async def task_cancel(req: TaskCancelRequest) -> TaskCancelResponse:
             sid = req.task_id
 
         if not sid:
+            # In router mode the parent process receives Core callbacks while
+            # the active chat session (and steering inbox) lives in exactly one
+            # child worker. Fan the cancellation out to the current workers;
+            # non-owners answer ``ok: false`` and the owner closes steering
+            # acceptance before interrupting its ReAct loop.
+            if (
+                req.conversation_id
+                and config['enable_router']
+                and not config['router_child_proxied_only']
+            ):
+                from lazymind.router.core.registry import get_global_registry
+
+                workers = await get_global_registry().list_active_instances()
+                urls = sorted({worker.url.rstrip('/') for worker in workers})
+                headers = {
+                    'X-LazyMind-Internal-Token': str(config['core_internal_token'] or ''),
+                }
+                async with httpx.AsyncClient(timeout=5.0, trust_env=False, headers=headers) as client:
+                    for url in urls:
+                        try:
+                            response = await client.post(
+                                f'{url}/api/workflow/task-cancel',
+                                json=req.model_dump(),
+                            )
+                            body = response.json()
+                        except (httpx.HTTPError, ValueError):
+                            continue
+                        if response.status_code == 200 and body.get('ok') is True:
+                            return TaskCancelResponse(ok=True)
             return TaskCancelResponse(ok=False)
 
+        if req.conversation_id:
+            steering_registry.stop_accepting_for_session(req.conversation_id, sid)
         request_cancel(sid)
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
@@ -575,6 +611,7 @@ async def export_ppt_from_html(req: PptExportRequest):
         if os.name == 'nt':
             options['creationflags'] = subprocess.CREATE_NO_WINDOW
         export_env = os.environ.copy()
+        export_env['LAZYMIND_FONT_SUBSET_PYTHON'] = sys.executable
         if export_env.get('LAZYMIND_NODE_RUN_AS_NODE', '').strip().lower() == 'true':
             export_env['ELECTRON_RUN_AS_NODE'] = '1'
         process = await asyncio.create_subprocess_exec(

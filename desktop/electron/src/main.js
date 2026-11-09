@@ -49,6 +49,7 @@ const {
   installExternalNavigationHandler,
   isTrustedCloudNavigation,
   isTrustedFeishuCLINavigation,
+  isTrustedGitHubCLINavigation,
 } = require("./external-navigation");
 const { loadDesktopCloudConfiguration } = require("./cloud-release-config");
 const { startCloudOAuthCallbackRelay } = require("./cloud-oauth-callback-relay");
@@ -179,6 +180,7 @@ const agentConnectorStatusTimeoutMs = 30 * 1000;
 const agentConnectorDisconnectTimeoutMs = 60 * 1000;
 const agentConnectorInstallTimeoutMs = 660 * 1000;
 const agentConnectorWorkBuddyInstallTimeoutMs = 120 * 1000;
+const agentConnectorCodexInstallTimeoutMs = 90 * 1000;
 const agentConnectorBindingTimeoutMs = 30 * 1000;
 const agentConnectorLoginTimeoutMs = 2 * 60 * 1000;
 const macInstallationWarmupMarker = macWarmupMarkerPath(app.getPath("userData"));
@@ -274,6 +276,15 @@ const desktopNotifications = createDesktopNotifications({
       if (!notificationSession.rotated(session, result.session)) return null;
       return result.session;
     }));
+  },
+  isTargetVisible: (target) => {
+    if (!mainWindow || mainWindow.isDestroyed() || !mainWindow.isFocused()) return false;
+    try {
+      const url = new URL(mainWindow.webContents.getURL());
+      return url.origin === notificationFrontendOrigin()
+        && url.pathname.endsWith(`/lib/knowledge/detail/${encodeURIComponent(target.dataset_id)}`)
+        && url.searchParams.get("expansion_id") === target.expansion_id;
+    } catch { return false; }
   },
   getRuntime: async () => {
     const status = await readStatus({ timeout: 10000 });
@@ -710,7 +721,7 @@ function runSidecar(command, extra = [], options = {}) {
   });
 }
 
-function runAgentConnector(agent, action) {
+function runAgentConnector(agent, action, refreshInstallations = false) {
   const allowedActions = {
     all: new Set(["status"]),
     codex: new Set(["connect", "status", "disconnect", "login"]),
@@ -728,8 +739,9 @@ function runAgentConnector(agent, action) {
   }
   const installWorkflow = ["deepseek-harness", "workbuddy", "codex"].includes(agent) && action === "connect";
   const run = () => runConnectorJSON(
-    ["internal", "agent", agent, action],
-    installWorkflow ? (agent === "workbuddy" ? agentConnectorWorkBuddyInstallTimeoutMs : agentConnectorInstallTimeoutMs)
+    ["internal", "agent", agent, action, ...(action === "status" && refreshInstallations === true ? ["--refresh-installations"] : [])],
+    installWorkflow ? (agent === "workbuddy" ? agentConnectorWorkBuddyInstallTimeoutMs
+      : agent === "codex" ? agentConnectorCodexInstallTimeoutMs : agentConnectorInstallTimeoutMs)
       : agent === "deepseek-harness" && action === "disconnect" ? agentConnectorDisconnectTimeoutMs
       : action === "status" ? agentConnectorStatusTimeoutMs : agentConnectorActionTimeoutMs,
   );
@@ -2096,6 +2108,14 @@ async function openTrustedFeishuCLINavigation(rawURL) {
   return { opened: true };
 }
 
+async function openTrustedGitHubCLINavigation(rawURL) {
+  if (!isTrustedGitHubCLINavigation(rawURL)) {
+    throw new Error("GitHub authorization navigation was rejected");
+  }
+  await shell.openExternal(rawURL);
+  return { opened: true };
+}
+
 function cloudRegisterURL() {
   const locale = /^(?:en|en-US)$/i.test(cloudRegisterLocale) ? "en" : "zh";
   return new URL(`/${locale}/register`, configuredCloudOrigin()).toString();
@@ -2451,7 +2471,7 @@ ipcMain.on("lazymind:renderer-ready", (event) => {
 });
 
 ipcMain.handle("lazymind:runtimeStatus", () => readStatus());
-ipcMain.handle("lazymind:agentIntegrationStatuses", () => runAgentConnector("all", "status"));
+ipcMain.handle("lazymind:agentIntegrationStatuses", (_event, refreshInstallations) => runAgentConnector("all", "status", refreshInstallations === true));
 ipcMain.handle("lazymind:agentIntegrationAction", (_event, agent, action) => runAgentConnector(agent, action));
 ipcMain.handle("lazymind:executorIntegrationPolicies", () => runExecutorConnector("all", "status"));
 ipcMain.handle("lazymind:executorIntegrationAction", (_event, provider, action) => runExecutorConnector(provider, action));
@@ -2636,19 +2656,34 @@ ipcMain.handle("lazymind:assistantSessionSet", async (event, value) => {
   }
   return result;
 });
-ipcMain.handle("lazymind:assistantSessionClear", async (event) => {
+ipcMain.handle("lazymind:assistantSessionClear", async (event, request) => {
   if (isQuitting || !isTrustedNotificationSender(event, mainWindow, notificationFrontendOrigin())) {
     throw new Error("DESKTOP_SESSION_UNAVAILABLE");
   }
-  notificationSessionRevision += 1;
-  await agentRecovery.stop();
-  recoverySessionIdentity = undefined;
-  notificationRenewalCandidate = undefined;
-  notificationSession.clear();
-  desktopNotifications.clearSession();
-  return (sessionWrites = sessionWrites.catch(() => {}).then(() =>
-    runConnectorJSON(["internal", "session", "clear"], agentConnectorActionTimeoutMs)));
+  if (!request?.expected_session?.server_url || !request.expected_session.access_token || !request.expected_session.refresh_token) {
+    throw new Error("DESKTOP_SESSION_INVALID");
+  }
+  const expected = request.expected_session;
+  const remembered = notificationSession.restore(expected);
+  const matches = remembered && (request.allow_renewed || remembered.access_token === expected.access_token && remembered.refresh_token === expected.refresh_token);
+  const revision = matches ? ++notificationSessionRevision : notificationSessionRevision;
+  const stopping = matches ? agentRecovery.stop() : Promise.resolve();
+  const result = await (sessionWrites = sessionWrites.catch(() => {}).then(() =>
+    runConnectorJSON(["internal", "session", "clear-if-current"], agentConnectorActionTimeoutMs, request)));
+  await stopping;
+  // Disk cleanup is conditional and idempotent. A parallel clear may already
+  // have removed the file; this matching memory session still needs to expire.
+  if (matches && revision === notificationSessionRevision) {
+    notificationSessionRevision += 1;
+    recoverySessionIdentity = undefined;
+    notificationRenewalCandidate = undefined;
+    notificationSession.clear();
+    desktopNotifications.clearSession();
+    await agentRecovery.stop();
+  }
+  return result;
 });
+
 ipcMain.on("lazymind:notificationSessionRestore", (event, value) => {
   // Synchronous, memory-only lookup runs in preload before application code.
   // It never waits for disk/network or exposes credentials to a different frame.
@@ -3029,6 +3064,9 @@ ipcMain.handle("lazymind:openManagedProviderAuthorization", async (_event, url) 
 });
 ipcMain.handle("lazymind:openFeishuCLIAuthorization", async (_event, url) => {
   return openTrustedFeishuCLINavigation(String(url || ""));
+});
+ipcMain.handle("lazymind:openGitHubCLIAuthorization", async (_event, url) => {
+  return openTrustedGitHubCLINavigation(String(url || ""));
 });
 ipcMain.handle("lazymind:openCloudRegister", async () => {
   const url = cloudRegisterURL();

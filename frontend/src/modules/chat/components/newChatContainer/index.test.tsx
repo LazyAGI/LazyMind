@@ -1,8 +1,8 @@
 import { act, fireEvent, render, screen } from "@testing-library/react";
-import { forwardRef } from "react";
+import { createRef, forwardRef, useState } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import ChatContainerComponent from "./index";
+import ChatContainerComponent, { type ChatImperativeProps } from "./index";
 
 const mocks = vi.hoisted(() => ({
   chatContentRef: { current: null as HTMLDivElement | null },
@@ -139,10 +139,11 @@ vi.mock("../CapabilityConfigCard", () => ({ default: () => null }));
 vi.mock("./hooks/useChatConversation", () => ({
   useChatConversation: (options: any) => {
     mocks.latestConversationOptions = options;
+    const [content, setContent] = useState("");
     return {
     activeStreamRef: { current: false },
     appendAutoAdvanceTurn: vi.fn(),
-    content: "",
+    content,
     conversationMessagesCache: { current: new Map() },
     createNewChat: vi.fn(),
     currentConversationIdRef: { current: "conversation-1" },
@@ -176,7 +177,7 @@ vi.mock("./hooks/useChatConversation", () => ({
       unreadCount: 0,
     },
     sendMessage: mocks.conversationSendMessage,
-    setContent: vi.fn(),
+    setContent,
     setMessageList: vi.fn(),
     stopGeneration: vi.fn(),
     streamRecovery: {},
@@ -275,6 +276,26 @@ describe("ChatContainerComponent wheel forwarding", () => {
     expect(mocks.latestChatInputProps.canStopGeneration).toBe(true);
     expect(mocks.latestChatInputProps.isStreaming).toBe(false);
     expect(mocks.latestChatInputProps.onStopGeneration).toEqual(expect.any(Function));
+  });
+
+  it('counts cumulative tool turns once across steering segments while keeping other histories independent', () => {
+    mocks.messageList = [
+      { role: "User", delta: "question", history_id: "h" },
+      { role: "Assistant", history_id: "steering-segment:h:a", original_history_id: "h", steering_segment: true, tool_call_turns: 2 },
+      { role: "User", delta: "guide", history_id: "h", is_resumed: true },
+      { role: "Assistant", history_id: "h", tool_call_turns: 5 },
+      { role: "User", delta: "next question", history_id: "other" },
+      { role: "Assistant", history_id: "other", tool_call_turns: 3 },
+      { role: "Assistant", original_history_id: "h", tool_call_turns: 10, archived_failure: true },
+    ];
+    const props = { sessionId: "chat", setIsChatContent: vi.fn(), onOpenSSE: vi.fn(),
+      parseErrorData: vi.fn(), setChatConfigFn: vi.fn() };
+    const view = render(<ChatContainerComponent {...props} />);
+    expect(mocks.latestChatInputProps.skillDepositStats).toEqual({ userTurns: 2, toolCallTurns: 8 });
+    // A continuation starts empty while the already observed count remains.
+    mocks.messageList = mocks.messageList.slice(0, 3).concat({ role: "Assistant", history_id: "h" });
+    view.rerender(<ChatContainerComponent {...props} />);
+    expect(mocks.latestChatInputProps.skillDepositStats).toEqual({ userTurns: 1, toolCallTurns: 2 });
   });
 
   it.each(['loading', 'isStreaming', 'runtimeWaiting'] as const)('guards workflow controls during %s without changing composer streaming', (phase) => {
@@ -433,4 +454,22 @@ describe("ChatContainerComponent wheel forwarding", () => {
     expect(mocks.regenerate).toHaveBeenCalledOnce();
     expect(mocks.conversationSendMessage).toHaveBeenCalledOnce();
   });
+});
+
+
+it("preserves a typed draft when clearing only citations imperatively", () => {
+  const ref = createRef<ChatImperativeProps>();
+  render(<ChatContainerComponent ref={ref} onOpenSSE={vi.fn()} parseErrorData={(data) => data} setIsChatContent={vi.fn()} setChatConfigFn={vi.fn()} />);
+  act(() => ref.current?.prepareMessage({ text: "My unfinished question" }));
+  expect(mocks.latestChatInputProps.value).toBe("My unfinished question");
+  act(() => ref.current?.prepareMessage({ citeMessages: [] }));
+  expect(mocks.latestChatInputProps.value).toBe("My unfinished question");
+});
+
+it("appends a failed quick explanation to an existing draft", () => {
+  const ref = createRef<ChatImperativeProps>();
+  render(<ChatContainerComponent ref={ref} onOpenSSE={vi.fn()} parseErrorData={(data) => data} setIsChatContent={vi.fn()} setChatConfigFn={vi.fn()} />);
+  act(() => ref.current?.prepareMessage({ text: "My unfinished question" }));
+  act(() => ref.current?.prepareMessage({ text: "Explain the selected text", citeMessage: "Selected text", appendCitations: true, appendText: true }));
+  expect(mocks.latestChatInputProps.value).toBe("My unfinished question\n\nExplain the selected text");
 });

@@ -31,6 +31,7 @@ import (
 var (
 	ErrNotFound             error = repositoryError("WORKFLOW_NOT_FOUND")
 	ErrPermissionDenied     error = repositoryError("PERMISSION_DENIED")
+	ErrPreparationNotReady  error = repositoryError("PREPARATION_NOT_READY")
 	ErrIdempotencyConflict  error = repositoryError("IDEMPOTENCY_CONFLICT")
 	ErrSessionConflict      error = repositoryError("WORKFLOW_SESSION_CONFLICT")
 	ErrArtifactInUse        error = artifactgraph.ErrArtifactInUse
@@ -568,27 +569,15 @@ type SessionLifecycleState struct {
 	Status       string `json:"status"`
 	StateVersion int64  `json:"state_version"`
 	CommandID    string `json:"command_id"`
+	ExecutionID  string `json:"execution_id,omitempty"`
+	ActionID     string `json:"action_id,omitempty"`
+	ResumeReason string `json:"resume_reason,omitempty"`
 }
 
-func (r *Repository) SetSessionStopped(ctx context.Context, owner, sessionID, commandID string, stop, userControl bool) (SessionLifecycleState, error) {
+func (r *Repository) SetSessionStopped(ctx context.Context, owner, sessionID, commandID string, stop bool) (SessionLifecycleState, error) {
 	var state SessionLifecycleState
 	if err := r.AuthorizeSession(ctx, sessionID, owner); err != nil {
 		return state, err
-	}
-	var current orm.WorkflowSession
-	if err := r.db.WithContext(ctx).Where("id = ?", sessionID).First(&current).Error; err != nil {
-		return state, err
-	}
-	if !controlstore.Controlled(current) {
-		version, err := r.setNativeSessionStopped(ctx, owner, sessionID, commandID, stop)
-		status := "active"
-		if stop {
-			status = "stopped"
-		}
-		return SessionLifecycleState{SessionID: sessionID, Status: status, StateVersion: version, CommandID: commandID}, err
-	}
-	if controlstore.Controlled(current) && !stop && !userControl {
-		return state, controlstore.Reject("USER_CONTROL_REQUIRED", "resume controlled workflows from the authenticated workflow page")
 	}
 	request, _ := json.Marshal(map[string]any{"session_id": sessionID, "stopped": stop})
 	// Lifecycle changes do not delegate writes to another handler, so even
@@ -659,6 +648,10 @@ func (r *Repository) CreateInitializedHostSessionWithTrigger(ctx context.Context
 	return r.createHostSession(ctx, owner, sessionID, conversationID, originHost, originRef, controllerHost,
 		workflow, workflowMode, triggerHistoryID, intentContext, bindings, control)
 }
+
+// InitializeHostSession lets an installed host seed authoritative external materials
+// in the creation transaction, before the first session snapshot is published.
+var InitializeHostSession func(context.Context, *gorm.DB, orm.WorkflowSession, WorkflowPackage) error
 
 func (r *Repository) createHostSession(ctx context.Context, owner, sessionID, conversationID, originHost,
 	originRef, controllerHost string, workflow WorkflowPackage, workflowMode, triggerHistoryID, intentContext string,
@@ -766,6 +759,11 @@ func (r *Repository) createHostSession(ctx context.Context, owner, sessionID, co
 		for _, binding := range bindings {
 			binding.WorkflowSessionID = created.ID
 			if err := r.bindInputTx(tx, owner, binding); err != nil {
+				return err
+			}
+		}
+		if createdNow && InitializeHostSession != nil {
+			if err := InitializeHostSession(ctx, tx, created, workflow); err != nil {
 				return err
 			}
 		}
@@ -1076,6 +1074,12 @@ func (r *Repository) Consume(ctx context.Context, id, owner, sessionID string) (
 		if result.OwnerUserID != owner {
 			return ErrPermissionDenied
 		}
+		var prepared struct {
+			Status string `json:"status"`
+		}
+		if json.Unmarshal(result.ResponseJSON, &prepared) != nil || (prepared.Status != "" && prepared.Status != "ready") {
+			return ErrPreparationNotReady
+		}
 		if result.ConsumedAt != nil {
 			return nil
 		}
@@ -1306,64 +1310,6 @@ func (r *Repository) Subscribe(sessionID string) (<-chan Event, func()) {
 // Database supplies the existing transaction connection to Core's shared
 // Artifact mutation service. It is never exposed through the HTTP contract.
 func (r *Repository) Database() *gorm.DB { return r.db }
-
-func (r *Repository) setNativeSessionStopped(ctx context.Context, owner, sessionID, commandID string, stop bool) (int64, error) {
-	if err := r.AuthorizeSession(ctx, sessionID, owner); err != nil {
-		return 0, err
-	}
-	request, _ := json.Marshal(map[string]any{"session_id": sessionID, "stopped": stop})
-	command, _, err := r.Command(ctx, owner, sessionID, commandID, "workflow.v1", request, func(tx *gorm.DB) (int, json.RawMessage, error) {
-		var session orm.WorkflowSession
-		if err := tx.Where("id = ?", sessionID).First(&session).Error; err != nil {
-			if errors.Is(err, gorm.ErrRecordNotFound) {
-				return 0, nil, ErrNotFound
-			}
-			return 0, nil, err
-		}
-		status := "active"
-		if stop {
-			status = "stopped"
-			if session.Status == "completed" || session.Status == "failed" {
-				return 0, nil, repositoryError("WORKFLOW_TERMINAL")
-			}
-			if session.Status == status {
-				response, _ := json.Marshal(map[string]any{"session_id": sessionID, "status": status, "state_version": session.StateVersion})
-				return http.StatusOK, response, nil
-			}
-			if err := tx.Model(&orm.WorkflowSessionStep{}).Where("session_id = ? AND status IN ?", sessionID,
-				[]string{"queued", "claimed", "running", "pending"}).Updates(map[string]any{
-				"status": "interrupted", "terminal_code": "WORKFLOW_STOPPED", "lease_expires_at": nil,
-				"updated_at": time.Now().UTC(),
-			}).Error; err != nil {
-				return 0, nil, err
-			}
-			if err := tx.Model(&orm.WorkflowOutbox{}).Where("session_id = ? AND status IN ?", sessionID,
-				[]string{"pending", "claimed"}).Updates(map[string]any{"status": "cancelled", "updated_at": time.Now().UTC()}).Error; err != nil {
-				return 0, nil, err
-			}
-		} else if session.Status != "stopped" {
-			return 0, nil, repositoryError("WORKFLOW_NOT_STOPPED")
-		}
-		version := session.StateVersion + 1
-		if err := tx.Model(&orm.WorkflowSession{}).Where("id = ?", sessionID).Updates(map[string]any{
-			"status": status, "state_version": version, "updated_at": time.Now().UTC(),
-		}).Error; err != nil {
-			return 0, nil, err
-		}
-		response, _ := json.Marshal(map[string]any{"session_id": sessionID, "status": status, "state_version": version})
-		return http.StatusOK, response, nil
-	})
-	if err != nil {
-		return 0, err
-	}
-	var response struct {
-		StateVersion int64 `json:"state_version"`
-	}
-	if json.Unmarshal(command.ResponseJSON, &response) != nil {
-		return 0, repositoryError("STORED_LIFECYCLE_RESPONSE_INVALID")
-	}
-	return response.StateVersion, nil
-}
 
 // AtomicCommand executes a trusted command using the supplied transaction on all DBs.
 // Unlike Command's delegated HTTP path, the callback must never write through another DB handle.

@@ -72,8 +72,8 @@ def test_build_context_budget_caps_reserved_on_small_windows() -> None:
 
 
 @pytest.mark.parametrize('window,reserved,effective', [
-    (131_072, 8_192, 122_880),
-    (32_768, 8_192, 24_576),
+    (131_072, 32_768, 98_304),
+    (32_768, 16_384, 16_384),
     (8_192, 4_096, 4_096),
 ])
 def test_default_output_reservation_preserves_input_budget(window, reserved, effective) -> None:
@@ -82,8 +82,8 @@ def test_default_output_reservation_preserves_input_budget(window, reserved, eff
     assert budget.effective_input_budget == effective
 
 
-def test_default_reservation_does_not_compress_128k_context_prematurely() -> None:
-    budget = build_context_budget(131_072)
+def test_explicit_8k_reservation_does_not_compress_128k_context_prematurely() -> None:
+    budget = build_context_budget(131_072, reserved_output_tokens=8_192)
     assert not needs_compression(100_000, budget)
     assert not needs_compression(110_591, budget)
     assert needs_compression(110_592, budget)

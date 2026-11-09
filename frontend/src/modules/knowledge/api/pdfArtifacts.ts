@@ -101,6 +101,10 @@ export interface DocumentParseResult {
   task_id?: string;
   error?: { code: string; message: string; recovery?: string };
 }
+export async function getDocumentParseStatus(datasetId: string, documentId: string): Promise<DocumentParseResult> {
+  const response = await axiosInstance.get<Envelope<DocumentParseResult>>(`${documentBase(datasetId, documentId)}/parse-status`, { silentError: true } as never);
+  return response.data.data || response.data as unknown as DocumentParseResult;
+}
 export async function ensureDocumentParsed(datasetId: string, documentId: string): Promise<DocumentParseResult> {
   const response = await axiosInstance.post<Envelope<DocumentParseResult>>(`${documentBase(datasetId, documentId)}:ensure-parsed`, {});
   return response.data.data || response.data as unknown as DocumentParseResult;

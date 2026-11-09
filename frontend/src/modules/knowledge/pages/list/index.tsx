@@ -1,3 +1,4 @@
+import { DatasetDeletionProgressList, useDatasetDeletions } from "./DatasetDeletionProgress";
 import { useRAGComponent } from "@/modules/modelProvider/contexts/RAGComponentContext";
 import {
   FC,
@@ -139,6 +140,8 @@ import {
   isCloudKnowledgeCreateRequest,
 } from "@/modules/modelProvider/utils/cloudDocumentKnowledge";
 import { useKnowledgeListNavigation } from "../../hooks/useKnowledgeListNavigation";
+import { parseShowcaseEntryType, SHOWCASE_ENTRY_QUERY_PARAM } from "@/modules/showcase/classification";
+import { getLearningCatalog, type CapabilityProfile } from "@/modules/learning/api";
 import {
   getKnowledgeListPage,
   readKnowledgeListState,
@@ -172,17 +175,37 @@ interface KnowledgePageProps {
   modelSettingsPath?: string;
 }
 
+type EmbeddingIndexStatus = "empty" | "indexed" | "rebuilding" | "clearing" | "cleared" | "unknown";
+
+interface EmbeddingIndexState {
+  status: EmbeddingIndexStatus;
+  model_name?: string;
+  provider_name?: string;
+  indexed_knowledge_bases: number;
+  pending_knowledge_bases: number;
+}
+
+const embeddingIndexStatuses = new Set<EmbeddingIndexStatus>([
+  "empty", "indexed", "rebuilding", "clearing", "cleared", "unknown",
+]);
+
 const KnowledgePage: FC<KnowledgePageProps> = ({
   modelSettingsPath = "/settings?section=model_defaults",
 }) => {
   const navigate = useNavigate();
   const location = useLocation();
+  const entryParams = new URLSearchParams(location.search);
+  const readingEntryType = parseShowcaseEntryType(entryParams.get(SHOWCASE_ENTRY_QUERY_PARAM));
+  const fromPaperReading = readingEntryType !== null;
   const listState = useMemo(() => readKnowledgeListState(location.search), [location.search]);
   const {
-    view: activeView, source: sourceCategory, keyword: mineSearch,
+    view: requestedView, source: requestedSource, scene: mineScene, keyword: mineSearch,
     tag: mineLocalTag, officialTag: mineOfficialTag, sort: mineSort,
     cloudSource: mineCloudSource, page, pageSize,
   } = listState;
+  const paperReading = isPaperLibrary(mineScene);
+  const activeView = fromPaperReading ? "mine" : requestedView;
+  const sourceCategory = fromPaperReading ? "local" : requestedSource;
   const updateListState = useCallback((patch: Partial<KnowledgeListState>, preserveScroll = false) => {
     const search = writeKnowledgeListState(location.search, patch);
     const savedScroll = location.state?.knowledgeListScroll;
@@ -202,6 +225,24 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
     });
   }, [location, navigate]);
   const { t } = useTranslation();
+  const [sceneCatalog, setSceneCatalog] = useState<CapabilityProfile[]>([]);
+  const [sceneStatus, setSceneStatus] = useState<"loading" | "ready" | "error">("loading");
+  const [sceneAttempt, setSceneAttempt] = useState(0);
+  useEffect(() => {
+    let active = true;
+    setSceneStatus("loading");
+    getLearningCatalog().then((catalog) => {
+      if (!active) return;
+      setSceneCatalog(catalog.profiles);
+      setSceneStatus("ready");
+    }).catch(() => { if (active) setSceneStatus("error"); });
+    return () => { active = false; };
+  }, [sceneAttempt]);
+  const sceneOptions = useMemo(() => [
+    { value: "", label: t("knowledge.mineAllTypes") },
+    ...sceneCatalog.map((scene) => ({ value: scene.key, label: t(scene.name_i18n_key) })),
+    { value: "custom", label: t("learning.customProfile") },
+  ], [sceneCatalog, t]);
   const [taskNotification, taskNotificationHolder] = notification.useNotification({
     placement: "bottomRight",
     duration: 5,
@@ -215,7 +256,7 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
   const [loading, setLoading] = useState(false);
   const [total, setTotal] = useState(0);
   const pagination = { current: page, pageSize, total };
-  const tableQueryKey = JSON.stringify([sourceCategory, mineSearch, mineLocalTag, mineSort, mineCloudSource, page, pageSize]);
+  const tableQueryKey = JSON.stringify([fromPaperReading, sourceCategory, mineScene, mineSearch, mineLocalTag, mineSort, mineCloudSource, page, pageSize]);
   const [loadedTableQuery, setLoadedTableQuery] = useState("");
   const [tableError, setTableError] = useState(false);
   const [dataSource, setDataSource] = useState<Dataset[]>([]);
@@ -256,10 +297,13 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
         : loadedTableQuery === tableQueryKey,
   );
   const [embeddingReady, setEmbeddingReady] = useState<boolean | null>(null);
+  const [embeddingIndexState, setEmbeddingIndexState] = useState<EmbeddingIndexState | null>(null);
+  const embeddingIndexRequestSeq = useRef(0);
   const [multimodalEmbeddingReady, setMultimodalEmbeddingReady] = useState<
     boolean | null
   >(null);
   const isAdmin = AgentAppsAuth.getUserInfo()?.role === "system-admin";
+  const { deletions, trackDeletion, dismissDeletion } = useDatasetDeletions();
   const syncCreateVm = useSyncKnowledgeBaseCreation({
     onSuccess: () => {
       getTableData();
@@ -415,7 +459,6 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
   }, [loadKnowledgeMarket]);
 
   useEffect(() => {
-    void getLocalTags();
     void checkEmbeddingReady();
 
     const onFeaturesChanged = () => {
@@ -429,7 +472,7 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
     };
     document.addEventListener("visibilitychange", onVisibilityChange);
     return () => {
-      localTagsRequestSeqRef.current += 1;
+      embeddingIndexRequestSeq.current += 1;
       window.removeEventListener(
         MODEL_FEATURES_CHANGED_EVENT,
         onFeaturesChanged,
@@ -438,7 +481,13 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
     };
   }, []);
 
+  useEffect(() => {
+    void getLocalTags();
+    return () => { localTagsRequestSeqRef.current += 1; };
+  }, [fromPaperReading, mineScene]);
+
   async function checkEmbeddingReady() {
+    void checkEmbeddingIndexState();
     try {
       const features = await fetchModelFeatures(true);
       const imageEmbedRequired = isImageEmbedRequired(features);
@@ -476,6 +525,27 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
     }
   }
 
+  async function checkEmbeddingIndexState() {
+    const request = ++embeddingIndexRequestSeq.current;
+    try {
+      const response = await axiosInstance.get<unknown>(
+        `${BASE_URL}/api/core/model_providers/embedding/index-state`,
+      );
+      const body = response.data;
+      const state = body && typeof body === "object" && "data" in body
+        ? body.data : body;
+      if (request !== embeddingIndexRequestSeq.current) return;
+      setEmbeddingIndexState(
+        state && typeof state === "object" && "status" in state
+          && typeof state.status === "string"
+          && embeddingIndexStatuses.has(state.status as EmbeddingIndexStatus)
+          ? state as EmbeddingIndexState : null,
+      );
+    } catch {
+      if (request === embeddingIndexRequestSeq.current) setEmbeddingIndexState(null);
+    }
+  }
+
   useEffect(() => {
     if (activeView === "mine" && sourceCategory !== "official") {
       getTableData(page, pageSize);
@@ -493,6 +563,8 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
     mineLocalTag,
     mineSort,
     mineCloudSource,
+    fromPaperReading,
+    mineScene,
     page,
     pageSize,
   ]);
@@ -1003,12 +1075,13 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
           await KnowledgeBaseServiceApi().datasetServiceDeleteDataset({
             dataset: item.datasetId,
           });
-          message.success(t("knowledge.uninstallSuccess", { name: item.name }));
+          trackDeletion(item.datasetId!, item.name);
+          message.info(t("knowledge.cleanupAccepted"));
           await loadKnowledgeMarket();
         },
       });
     },
-    [loadKnowledgeMarket, t],
+    [loadKnowledgeMarket, t, trackDeletion],
   );
 
   const loadOfficialDatasetOrder = useCallback(
@@ -1526,8 +1599,8 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
     try {
       do {
         const response = await KnowledgeBaseServiceApi().datasetServiceListDatasets(
-          { pageToken, pageSize: 100 },
-          { params: { source: "manual" } },
+          { pageToken, pageSize: 100, scene: mineScene || undefined },
+          { params: { source: fromPaperReading ? undefined : "manual" } },
         );
         if (localTagsRequestSeqRef.current !== requestSeq) return;
         (response.data.datasets || []).forEach((dataset) => {
@@ -1609,8 +1682,9 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
         orderBy: getKnowledgeMineOrderBy(mineSort),
         keyword: mineSearch.trim() || undefined,
         tags: mineLocalTag !== ALL_TAGS ? [mineLocalTag] : [],
+        scene: mineScene || undefined,
       }, {
-        params: { source: "manual" },
+        params: { source: fromPaperReading ? undefined : "manual" },
       })
       .then((res) => {
         if (mineTableRequestSeqRef.current !== requestSeq) return;
@@ -1636,8 +1710,11 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
   function onDelete(id: string) {
     KnowledgeBaseServiceApi()
       .datasetServiceDeleteDataset({ dataset: id })
-      .then(() => {
-        message.success(t("knowledge.deleteSuccess"));
+      .then((response) => {
+        trackDeletion(id, dataSource.find((item) => item.dataset_id === id)?.display_name || t("layout.knowledgeBase"));
+        const item = (response.data as { items?: { cleanup_status?: string; error?: unknown }[] })?.items?.[0];
+        if (item?.cleanup_status === "failed" || item?.error) message.error(t("knowledge.cleanupFailed"));
+        else message.info(t("knowledge.cleanupAccepted"));
         void getLocalTags();
         getTableData();
       });
@@ -1736,8 +1813,14 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
               {t("knowledge.backToKnowledgeSettings")}
             </Button>
           ) : null}
-          <h1>{t("layout.knowledgeBase")}</h1>
-          <p>{t("knowledge.pageDescription")}</p>
+          {fromPaperReading ? (
+            <Button className="knowledge-settings-return" icon={<ArrowLeftOutlined aria-hidden />} type="text"
+              onClick={() => navigate(`/agent/chat/home?showcase_entry=${readingEntryType}`)}>
+              {t("showcase.backToHome")}
+            </Button>
+          ) : null}
+          <h1>{t(fromPaperReading && paperReading ? "showcase.paperReadingTitle" : "layout.knowledgeBase")}</h1>
+          <p>{t(fromPaperReading && paperReading ? "showcase.paperReadingDescription" : "knowledge.pageDescription")}</p>
         </div>
         {activeView === "square" ? (
           <div className="knowledge-page-header-actions">
@@ -1746,6 +1829,34 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
         ) : null}
       </div>
 
+      {activeView === "mine" && embeddingIndexState ? (
+        <div role="status" aria-label={t("knowledge.embeddingIndexStateTitle")}>
+          <Alert
+            className="knowledge-embedding-warning"
+            showIcon
+            type={embeddingIndexState.status === "indexed" ? "success"
+              : embeddingIndexState.status === "empty" ? "info" : "warning"}
+            message={
+              <span>
+                <strong>{t("knowledge.embeddingIndexStateTitle")}</strong>
+                {embeddingIndexState.model_name ? ` · ${t("knowledge.embeddingIndexModel", {
+                  provider: embeddingIndexState.provider_name || t("knowledge.unknown"),
+                  model: embeddingIndexState.model_name,
+                })}` : null}
+              </span>
+            }
+            description={
+              embeddingIndexState.status === "indexed"
+                ? t("knowledge.embeddingIndexIndexed", { count: embeddingIndexState.indexed_knowledge_bases })
+                : embeddingIndexState.status === "rebuilding"
+                  ? t("knowledge.embeddingIndexRebuilding", { count: embeddingIndexState.pending_knowledge_bases })
+                  : t(`knowledge.embeddingIndex${embeddingIndexState.status === "empty" ? "Empty"
+                    : embeddingIndexState.status === "clearing" ? "Clearing"
+                      : embeddingIndexState.status === "cleared" ? "Cleared" : "Unknown"}`)
+            }
+          />
+        </div>
+      ) : null}
       {embeddingReady === false ? (
         <Alert
           banner
@@ -1801,7 +1912,8 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
         />
       ) : null}
 
-      <div className="knowledge-view-tabs" role="tablist" aria-label={t("knowledge.viewTabs")}>
+      <DatasetDeletionProgressList deletions={deletions} onDismiss={dismissDeletion} />
+      {!fromPaperReading ? <div className="knowledge-view-tabs" role="tablist" aria-label={t("knowledge.viewTabs")}>
         <button
           type="button"
           role="tab"
@@ -1828,7 +1940,7 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
           <span className="knowledge-view-tab-icon"><AppstoreOutlined /></span>
           <span><strong>{t("knowledge.knowledgeSquare")}</strong><small>{t("knowledge.knowledgeSquareDescription")}</small></span>
         </button>
-      </div>
+      </div> : null}
 
       {activeView === "square" ? (
         <>
@@ -1855,7 +1967,7 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
       ) : (
         <div className="knowledge-mine-view">
           <div className="knowledge-source-tabs-row">
-            <div className="knowledge-source-tabs" role="tablist" aria-label={t("knowledge.sourceCategory")}>
+            {!fromPaperReading ? <div className="knowledge-source-tabs" role="tablist" aria-label={t("knowledge.sourceCategory")}>
               {([
                 ["local", t("knowledge.localUpload")],
                 ["cloudArchive", t("knowledge.cloudArchiveCreated")],
@@ -1882,7 +1994,7 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
                   {label}
                 </button>
               ))}
-            </div>
+            </div> : <strong>{t(paperReading ? "showcase.choosePaperLibrary" : "chat.selectKnowledgeBase")}</strong>}
             <div className="knowledge-source-actions">
               {backgroundTasksButton}
               {createKnowledgeButton}
@@ -1933,6 +2045,11 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
               }
               selectedSort={mineSort}
               selectedCloudSource={mineCloudSource}
+              sceneOptions={!isCloudArchiveView && !isOfficialView ? sceneOptions : undefined}
+              selectedScene={mineScene}
+              sceneStatus={sceneStatus}
+              onSceneChange={(scene) => updateListState({ scene, page: 1 })}
+              onRetryScenes={() => setSceneAttempt((attempt) => attempt + 1)}
               onOpenChange={setMineFilterOpen}
               onTagChange={(tag) => {
                 updateListState(isOfficialView ? { officialTag: tag, page: 1 } : { tag, page: 1 });
@@ -1945,7 +2062,7 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
                 if (sourceCategory !== "local") initData();
                 updateListState({
                   keyword: "", tag: ALL_TAGS, officialTag: ALL_TAGS, sort: "all",
-                  cloudSource: "all", source: "local", page: 1,
+                  cloudSource: "all", source: "local", scene: "", page: 1,
                 });
                 setMineFilterOpen(false);
               }}
@@ -1973,6 +2090,7 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
                   : columns) as ColumnsType<any>
             }
             loading={isOfficialView ? officialLoading || officialSortLoading : loading}
+            locale={paperReading ? { emptyText: t(mineSearch.trim() || mineLocalTag !== ALL_TAGS ? "showcase.noMatchingPaperLibraries" : "showcase.noPaperLibraries") } : undefined}
             dataSource={
               isCloudArchiveView
                 ? cloudSources

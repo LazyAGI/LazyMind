@@ -1,6 +1,7 @@
-import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { useState } from "react";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { message } from "antd";
 
 import {
   ChatConversationsResponseFinishReasonEnum,
@@ -14,6 +15,13 @@ import zhCN from "@/i18n/locales/zh-CN";
 import { getTranslationServiceStatus, translateSelectionText } from "@/modules/knowledge/api/translation";
 import AssistantMessage, { ChatSourcePanel, externalProviderDisplayName } from "./index";
 import EnvInputCard, { type EnvironmentInputResult } from "../EnvInputCard";
+
+// AntD's static messages mount outside RTL's root. Flush their destruction while
+// jsdom still exists so delayed notice timers cannot update a disposed window.
+afterEach(async () => {
+  cleanup();
+  await act(async () => { message.destroy(); });
+});
 
 describe("mail draft lifecycle", () => {
   const draft = { draft_id: "mail-one", revision: 1, status: "draft", to: ["test@example.com"],
@@ -256,42 +264,42 @@ describe("AssistantMessage cancellation", () => {
     expect(screen.getByRole("dialog")).toBeVisible();
   });
 
-  it.each(["model_config_unavailable", "model_context_not_fit"])("keeps switch identities, reasons and outcomes in keyboard-accessible message details (%s)", (reasonCode) => {
-    const longName = "替代模型🌏".repeat(25);
+  it.each(["model_config_unavailable", "model_context_not_fit"])("does not expose model switch details in a live answer (%s)", (reasonCode) => {
     const item = { role: "assistant", delta: "answer", finish_reason: ChatConversationsResponseFinishReasonEnum.FinishReasonStop,
-      model_switches: [{ event_id: "initial-switch", switch_index: 1,
-        reason_code: reasonCode, context_compacted: false,
+      model_switches: [{ event_id: "initial-switch", switch_index: 1, reason_code: reasonCode, context_compacted: false,
         from_max_input_tokens: null, to_max_input_tokens: null,
-        from: { source: "own", candidate_id: "own:removed", model_id: "removed-model", provider_group_id: "" },
-        to: { source: "own", candidate_id: "own:b", model_id: "b", model_name: longName, provider_name: "Provider B", provider_group_id: "b" } }] };
+        from: { source: "own", candidate_id: "own:a", model_id: "a", model_name: "Old model", provider_group_id: "a" },
+        to: { source: "own", candidate_id: "own:b", model_id: "b", model_name: "New model", provider_group_id: "b" } }] };
     render(<AssistantMessage item={item} index={0} length={1} sendMessage={vi.fn()} regenerate={vi.fn()}
-      stopGeneration={vi.fn()} renderText={() => null} updateMessage={vi.fn()} />);
-    const summary = screen.getByText("chat.modelFallbackHistory");
-    summary.focus();
-    expect(summary).toHaveFocus();
-    fireEvent.click(summary);
-    expect(summary.closest("details")).toHaveAttribute("open");
-    expect(screen.getByText("removed-model (chat.modelFallbackWindowUnknown)")).toBeVisible();
-    expect(screen.getByText(`Provider B · ${longName} (chat.modelFallbackWindowUnknown)`)).toBeVisible();
-    expect(screen.getByText(`chat.modelFallbackReason.${reasonCode}`)).toBeVisible();
-    expect(screen.getByText("chat.modelFallbackSucceeded")).toBeVisible();
+      stopGeneration={vi.fn()} renderText={() => <span>answer</span>} updateMessage={vi.fn()} />);
+    expect(screen.getByText("answer")).toBeVisible();
+    expect(screen.queryByText("chat.modelFallbackHistory")).not.toBeInTheDocument();
+    expect(screen.queryByText(/Old model|New model/)).not.toBeInTheDocument();
   });
 
-  it.each([false, true])("restores declared windows and actual adaptation in history details (%s)", (compacted) => {
+  it.each([false, true])("keeps restored model switch data without showing it in the conversation (%s)", (compacted) => {
     const record: ChatModelSwitchRecord = { event_id: "short-window", switch_index: 1,
       reason_code: "rate_limited", context_compacted: compacted,
       from_max_input_tokens: 131072, to_max_input_tokens: 65536,
-      from: { source: "own", candidate_id: "own:a", model_id: "a", model_name: "Model A", provider_group_id: "a" },
-      to: { source: "own", candidate_id: "own:b", model_id: "b", model_name: "Model B", provider_group_id: "b" } };
+      from: { source: "own", candidate_id: "own:a", model_id: "a", model_name: "Old model", provider_group_id: "a" },
+      to: { source: "own", candidate_id: "own:b", model_id: "b", model_name: "New model", provider_group_id: "b" } };
     const history = buildChatMessageListFromHistory([{ id: "short-history", query: "task", result: "answer", model_switches: [record] }]);
+    expect(history[1].model_switches).toEqual([record]);
     render(<AssistantMessage item={history[1]} index={1} length={2} sendMessage={vi.fn()} regenerate={vi.fn()}
-      stopGeneration={vi.fn()} renderText={() => null} updateMessage={vi.fn()} />);
-    fireEvent.click(screen.getByText("chat.modelFallbackHistory"));
-    expect(screen.getByText("Model A (128K)")).toBeVisible();
-    expect(screen.getByText("Model B (64K)")).toBeVisible();
-    expect(screen.getByText("chat.runStatus.codes.rate_limited")).toBeVisible();
-    if (compacted) expect(screen.getByText("chat.modelFallbackContextAdapted")).toBeVisible();
-    else expect(screen.queryByText("chat.modelFallbackContextAdapted")).not.toBeInTheDocument();
+      stopGeneration={vi.fn()} renderText={() => <span>answer</span>} updateMessage={vi.fn()} />);
+    expect(screen.queryByText("chat.modelFallbackHistory")).not.toBeInTheDocument();
+    expect(screen.queryByText(/Old model|New model/)).not.toBeInTheDocument();
+  });
+
+  it.each(["", "保留下来的正文"])("reports retained content according to the visible answer after rollback (%s)", (body) => {
+    render(<AssistantMessage item={{ role: "assistant", delta: body, reasoning_content: "正在分析用户意图，请稍后",
+      history_id: "rolled-back", run_status: "failed", model_output: { run_id: "run", call_index: 1, phase: "rollback" },
+      run_terminal: { status: "failed", reason: "model_failure", code: "rate_limited", partial_output: true } }}
+      index={0} length={1} sendMessage={vi.fn()} regenerate={vi.fn()} stopGeneration={vi.fn()}
+      renderText={() => <span>{body}</span>} updateMessage={vi.fn()} />);
+    const alert = screen.getByRole("alert");
+    expect(alert).toHaveTextContent(body ? "chat.runStatus.partialOutput" : "chat.runStatus.noOutput");
+    if (!body) expect(alert).not.toHaveTextContent("chat.runStatus.partialOutput");
   });
 
   it.each([
@@ -929,77 +937,120 @@ describe("configuration continuation", () => {
 
 
 describe("knowledge confirmation parent state", () => {
-  it.each([
-    { turn: "latest", index: 0, length: 1, hasLaterUserMessage: false, choice: "no" },
-    { turn: "older approved", index: 1, length: 4, hasLaterUserMessage: true, choice: "yes" },
-    { turn: "older rejected", index: 1, length: 4, hasLaterUserMessage: true, choice: "no" },
-  ])("persists the $turn decision without sending a chat turn", async ({ index, length, hasLaterUserMessage, choice }) => {
+  const libraryCard = {
+    confirmation_id: "create-kb", arguments_digest: "digest", snapshot: "snapshot",
+    action: "knowledge.create" as const, status: "pending" as const, steering_segment: 0,
+    preview: { creation: { name: "Agent papers", description: "Reading list", scene: "academic_papers", processing_level: "chunked", tags: ["Agent"] } },
+  };
+
+  it.each(["approved", "rejected"] as const)("submits a library decision %s independently of Ask User", async (decision) => {
     const post = vi.spyOn(axiosInstance, "post").mockResolvedValue({ data: {} });
-    const updateMessage = vi.fn();
     const sendMessage = vi.fn();
-    const item = { role: "assistant", history_id: "knowledge-history", ask_pending: {
-      ask_id: "knowledge-card", knowledge_management: { confirmation_id: "knowledge-card", arguments_digest: "digest", snapshot: "snapshot" },
-      questions: [{ text: "Delete?", type: "boolean", choices: ["__ask_user_yes__", "__ask_user_no__"] }],
-    } };
-    const props = { index, length, hasLaterUserMessage, renderText: () => null, regenerate: vi.fn(), stopGeneration: vi.fn(), updateMessage, sendMessage };
+    const props = { index: 1, length: 4, hasLaterUserMessage: true, renderText: () => null,
+      regenerate: vi.fn(), stopGeneration: vi.fn(), updateMessage: vi.fn(), sendMessage };
     try {
-      const view = render(<AssistantMessage {...props} item={item} />);
-      expect(screen.getByRole("button", { name: `common.${choice}` })).toBeEnabled();
-      fireEvent.click(screen.getByRole("button", { name: `common.${choice}` }));
-      fireEvent.click(screen.getByRole("button", { name: "chat.askCardSubmit" }));
-      await waitFor(() => expect(updateMessage).toHaveBeenCalledWith(expect.objectContaining({ ask_answered: true })));
+      const view = render(<AssistantMessage {...props} item={{ role: "assistant", history_id: "create-history",
+        knowledge_confirmations: [libraryCard] }} />);
+      expect(screen.getByRole("heading", { name: "Agent papers" })).toBeVisible();
+      expect(screen.getByText("learning.profile.academicPapers.name")).toBeVisible();
+      expect(screen.getByText("knowledge.processingChunked")).toBeVisible();
+      fireEvent.click(screen.getByRole("button", { name: decision === "approved"
+        ? "chat.knowledgeConfirmation.confirm.create" : "common.cancel" }));
+      expect(await screen.findByRole("button", { name: "chat.knowledgeConfirmation.details" }))
+        .toHaveAttribute("aria-expanded", "false");
       expect(post).toHaveBeenCalledTimes(1);
       expect(post).toHaveBeenCalledWith(
-        expect.stringContaining("/knowledge-management/confirmations/knowledge-card/decision"),
-        { decision: choice === "yes" ? "approved" : "rejected", arguments_digest: "digest", snapshot: "snapshot" },
+        expect.stringContaining("/knowledge-management/confirmations/create-kb/decision"),
+        { decision, arguments_digest: "digest", snapshot: "snapshot" },
+        expect.anything(),
       );
-      const saved = updateMessage.mock.calls[updateMessage.mock.calls.length - 1][0];
-      expect(saved.ask_saved_answers[0].value).toBe(`__ask_user_${choice}__`);
       expect(sendMessage).not.toHaveBeenCalled();
-      expect(screen.queryByRole("button", { name: "chat.askCardSubmit" })).toBeNull();
       view.unmount();
       const restored = buildChatMessageListFromHistory([{
-        id: "knowledge-history", query: "Delete archive", result: "Decision recorded",
-        ask_pending: saved.ask_pending, ask_answered: saved.ask_answered,
-        ask_saved_answers: saved.ask_saved_answers,
+        id: "create-history", query: "Create a library", result: "Decision recorded",
+        knowledge_confirmations: [{ ...libraryCard, status: decision }],
       }])[1];
       render(<AssistantMessage {...props} item={restored} />);
-      const summary = screen.getByRole("button", { name: choice === "yes" ? /chat.askCardConfirmed/ : /chat.askCardCancelled/ });
-      expect(summary).toHaveAttribute("aria-expanded", "false");
-      expect(screen.queryByText("Delete?")).toBeNull();
-      fireEvent.click(summary);
-      expect(screen.getByRole("button", { name: `common.${choice}` })).toBeDisabled();
-      expect(screen.queryByRole("button", { name: "chat.askCardSubmit" })).toBeNull();
+      expect(screen.getByRole("status")).toHaveTextContent(`chat.knowledgeConfirmation.status.${decision}`);
+      expect(screen.queryByRole("heading", { name: "Agent papers" })).toBeNull();
+      fireEvent.click(screen.getByRole("button", { name: "chat.knowledgeConfirmation.details" }));
+      expect(screen.getByText("Reading list")).toBeVisible();
+      expect(screen.queryByRole("button", { name: "chat.knowledgeConfirmation.confirm.create" })).toBeNull();
     } finally {
       post.mockRestore();
     }
   });
 
-  it("keeps an older confirmation retryable when its decision request fails", async () => {
-    const post = vi.spyOn(axiosInstance, "post")
-      .mockRejectedValueOnce(new Error("network"))
-      .mockResolvedValueOnce({ data: {} });
-    const updateMessage = vi.fn();
-    const sendMessage = vi.fn();
+  it("restores a superseded card before the guide and a fresh pending card after it", () => {
+    const folderCard = { ...libraryCard, action: "knowledge.folder.create" as const, preview: {
+      destination: { name: "Papers", path: "Papers" }, creation: { paths: ["Papers/Archive", "Papers/Extra"] }, folder_count: 2,
+    } };
+    const restored = buildChatMessageListFromHistory([{
+      id: "history", query: "Create two folders", result: "",
+      steering_messages: [{ id: "guide", text: "Only Archive", assistant_segment: "" }],
+      knowledge_confirmations: [
+        { ...folderCard, confirmation_id: "old", status: "superseded" },
+        { ...folderCard, confirmation_id: "new", steering_segment: 1, preview: {
+          ...folderCard.preview, creation: { paths: ["Papers/Archive"] }, folder_count: 1,
+        } },
+      ],
+    }]);
+    const props = { index: 1, length: 4, renderText: () => null, regenerate: vi.fn(),
+      stopGeneration: vi.fn(), updateMessage: vi.fn(), sendMessage: vi.fn() };
+    expect(restored[2].delta).toBe("Only Archive");
+    const { rerender } = render(<AssistantMessage {...props} item={restored[1]} />);
+    expect(screen.getByRole("status")).toHaveTextContent("chat.knowledgeConfirmation.status.superseded");
+    expect(screen.getByRole("button", { name: "chat.knowledgeConfirmation.details" })).toHaveAttribute("aria-expanded", "false");
+    fireEvent.click(screen.getByRole("button", { name: "chat.knowledgeConfirmation.details" }));
+    expect(screen.getByText("Extra")).toBeVisible();
+    expect(screen.queryByRole("button", { name: "chat.knowledgeConfirmation.confirm.create" })).toBeNull();
+    rerender(<AssistantMessage {...props} item={restored[3]} />);
+    expect(screen.getByRole("button", { name: "chat.knowledgeConfirmation.confirm.create" })).toBeEnabled();
+    expect(screen.getByText("Archive")).toBeVisible();
+    expect(screen.queryByText("Extra")).toBeNull();
+  });
+
+  it("reveals only one level of the deletion scope at a time", () => {
+    const resources = [
+      { name: "report.pdf", path: "Papers/Projects/Drafts/report.pdf", resource_ref: { kind: "document", knowledge_base_id: "papers" } },
+      { name: "Standalone", path: "Papers/Standalone", resource_ref: { kind: "folder", knowledge_base_id: "other-library" } },
+      { name: "Drafts", path: "Papers/Projects/Drafts", resource_ref: { kind: "folder", knowledge_base_id: "papers" } },
+      { name: "Papers", path: "Papers", resource_ref: { kind: "knowledge_base", knowledge_base_id: "papers" } },
+      { name: "Projects", path: "Papers/Projects", resource_ref: { kind: "folder", knowledge_base_id: "papers" } },
+    ] as const;
+    render(<AssistantMessage index={0} length={1} renderText={() => null} regenerate={vi.fn()}
+      stopGeneration={vi.fn()} updateMessage={vi.fn()} sendMessage={vi.fn()}
+      item={{ role: "assistant", history_id: "history", knowledge_confirmations: [{
+        ...libraryCard, action: "knowledge.resource.delete", preview: { resources: [...resources] },
+      }] }} />);
+    const projects = screen.getByText("Projects");
+    const drafts = screen.getByText("Drafts");
+    const report = screen.getByText("report.pdf");
+    expect(screen.getByText("Papers/Standalone")).toBeVisible();
+    expect(projects).not.toBeVisible();
+    fireEvent.click(screen.getByText("Papers").closest("summary")!);
+    expect(projects).toBeVisible();
+    expect(drafts).not.toBeVisible();
+    fireEvent.click(projects.closest("summary")!);
+    expect(drafts).toBeVisible();
+    expect(report).not.toBeVisible();
+    fireEvent.click(drafts.closest("summary")!);
+    expect(report).toBeVisible();
+    expect(screen.getByRole("button", { name: "chat.knowledgeConfirmation.confirm.delete" })).toBeEnabled();
+  });
+
+  it("keeps an active confirmation retryable when the request fails", async () => {
+    const post = vi.spyOn(axiosInstance, "post").mockRejectedValueOnce(new Error("network")).mockResolvedValueOnce({ data: {} });
     try {
-      render(<AssistantMessage index={1} length={4} hasLaterUserMessage
-        renderText={() => null} regenerate={vi.fn()} stopGeneration={vi.fn()}
-        updateMessage={updateMessage} sendMessage={sendMessage}
-        item={{ role: "assistant", history_id: "older-work", ask_pending: {
-          ask_id: "pending-decision", knowledge_management: { confirmation_id: "pending-decision", arguments_digest: "digest", snapshot: "snapshot" },
-          questions: [{ text: "Create?", type: "boolean", choices: ["__ask_user_yes__", "__ask_user_no__"] }],
-        } }} />);
-      fireEvent.click(screen.getByRole("button", { name: "common.yes" }));
-      const submit = screen.getByRole("button", { name: "chat.askCardSubmit" });
+      render(<AssistantMessage index={0} length={1} renderText={() => null} regenerate={vi.fn()}
+        stopGeneration={vi.fn()} updateMessage={vi.fn()} sendMessage={vi.fn()}
+        item={{ role: "assistant", history_id: "history", knowledge_confirmations: [libraryCard] }} />);
+      const submit = screen.getByRole("button", { name: "chat.knowledgeConfirmation.confirm.create" });
       fireEvent.click(submit);
       await screen.findByText("chat.knowledgeConfirmationFailed");
-      expect(updateMessage.mock.calls.some(([item]) => item.ask_answered)).toBe(false);
-      expect(screen.getByRole("button", { name: "common.yes" })).toHaveClass("ant-btn-primary");
-      await waitFor(() => expect(submit).toBeEnabled());
       fireEvent.click(submit);
-      await waitFor(() => expect(updateMessage).toHaveBeenCalledWith(expect.objectContaining({ ask_answered: true })));
+      await screen.findByRole("button", { name: "chat.knowledgeConfirmation.details" });
       expect(post).toHaveBeenCalledTimes(2);
-      expect(sendMessage).not.toHaveBeenCalled();
     } finally {
       post.mockRestore();
     }

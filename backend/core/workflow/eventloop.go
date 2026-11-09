@@ -23,6 +23,7 @@ import (
 	"lazymind/core/store"
 	"lazymind/core/subagent"
 	"lazymind/core/taskcenter"
+	"lazymind/core/workflow/controlstore"
 	"lazymind/core/workflow/displaystate"
 	"lazymind/core/workflow/graphengine"
 )
@@ -43,7 +44,10 @@ type WorkflowStepParams struct {
 	StepID      string `json:"step_id"`
 	SessionID   string `json:"session_id"`
 	UserInput   string `json:"user_input"`
-	// LaunchUserInput remains fixed while UserInput carries the current turn.
+	// LaunchUserInput remains fixed. CurrentUserInput is the actual turn input
+	// (also the launch text on cold start); empty means no new turn requirement.
+	// UserInput may fall back to launch intent, including during recovery.
+	// Consumers must not treat cold-start current input as a material override.
 	LaunchUserInput  string `json:"launch_user_input,omitempty"`
 	CurrentUserInput string `json:"current_user_input,omitempty"`
 	IsColdStart      bool   `json:"is_cold_start"`
@@ -116,7 +120,7 @@ func (p WorkflowStepParams) asMap() map[string]any {
 	if p.LaunchUserInput != "" {
 		m["launch_user_input"] = p.LaunchUserInput
 	}
-	if p.CurrentUserInput != "" {
+	if p.CurrentUserInput != "" || p.LaunchUserInput != "" {
 		m["current_user_input"] = p.CurrentUserInput
 	}
 	if p.WorkflowMode != "" {
@@ -413,6 +417,10 @@ func HandleWorkflowStepCreated(
 // launchWorkflowAttempt persists and launches an attempt after its caller has
 // performed admission. New transitions pass legacyEvent=false so the legacy
 // single-current compatibility field is not mutated.
+// ConfigureHostStep lets installed host capabilities constrain an attempt using
+// server-owned task state. It runs inside the launch transaction.
+var ConfigureHostStep func(context.Context, *gorm.DB, string, string, *WorkflowStepParams) error
+
 func launchWorkflowAttempt(
 	ctx context.Context,
 	db *gorm.DB,
@@ -571,7 +579,7 @@ func launchWorkflowAttempt(
 	if params.LaunchUserInput != "" {
 		rawParamsMap["launch_user_input"] = params.LaunchUserInput
 	}
-	if params.CurrentUserInput != "" {
+	if params.CurrentUserInput != "" || params.LaunchUserInput != "" {
 		rawParamsMap["current_user_input"] = params.CurrentUserInput
 	}
 	refOrID := params.WorkflowRef
@@ -606,6 +614,11 @@ func launchWorkflowAttempt(
 	}
 	if params.TerminalToolsOnly {
 		rawParamsMap["terminal_tools_only"] = true
+	}
+	if ConfigureHostStep != nil {
+		if err := ConfigureHostStep(ctx, db, userID, convID, &params); err != nil {
+			return sessionID, taskID, false, err
+		}
 	}
 	if !params.Runtime.IsZero() {
 		rawParamsMap["workflow_runtime"] = params.Runtime
@@ -743,7 +756,14 @@ func OnSubAgentDone(
 	onSSE func(eventType string, payload map[string]any),
 	pctx *WorkflowChatContext,
 ) {
-	_ = UpdateStepStatus(ctx, db, taskID, status)
+	if observed, err := observeControlledTaskCompletion(ctx, db, taskID, status, summary, onSSE, pctx); err != nil {
+		// A failed notification read is not a failed execution. Recovery can
+		// replay it; never publish an unfenced workflow failure as a fallback.
+		fmt.Printf("[workflow] task completion notification deferred task=%s: %v\n", taskID, err)
+		return
+	} else if observed {
+		return
+	}
 	if step, err := GetStepByTaskID(ctx, db, taskID); err == nil && step != nil {
 		if step.TerminalCode == "WORKFLOW_STOP_REQUESTED" {
 			// Canonical workers acknowledge after executor cleanup through the
@@ -765,6 +785,23 @@ func OnSubAgentDone(
 		if step.Validity == "stale" {
 			return
 		}
+		if step.Status != status && (step.Status == "succeeded" || step.Status == "failed" || step.Status == "interrupted" || step.Status == "cancelled" || step.Status == "canceled") {
+			return
+		}
+	}
+	reportStatusWriteError := func(target string, err error) {
+		fmt.Printf("[plugin] persist workflow %s status failed task=%s err=%v\n", target, taskID, err)
+		if pctx != nil && onSSE != nil {
+			onSSE("workflow_error", map[string]any{
+				"session_id": pctx.SessionID,
+				"step_id":    pctx.StepID,
+				"message":    "Failed to save workflow status",
+			})
+		}
+	}
+	if err := UpdateStepStatus(ctx, db, taskID, status); err != nil {
+		reportStatusWriteError("step", err)
+		return
 	}
 	stepFailed := status != subagent.StatusSucceeded && status != subagent.StatusInterrupted
 	sessionCompleted := false
@@ -804,7 +841,10 @@ func OnSubAgentDone(
 		// and mark the session failed. Auto mode still asks DriverAgent to diagnose
 		// and recommend retry/rewind; dynamic mode leaves the failure for the user.
 		if pctx != nil && pctx.SessionID != "" {
-			_ = UpdateSessionStatus(ctx, db, pctx.SessionID, SessionStatusFailed)
+			if err := UpdateSessionStatus(ctx, db, pctx.SessionID, SessionStatusFailed); err != nil {
+				reportStatusWriteError("session", err)
+				return
+			}
 			_ = taskcenter.UpdateTaskStatusBySession(ctx, db, pctx.SessionID, "failed")
 			clearGeneratingChatStatus(ctx, stateStore, pctx.ConvID)
 			go OnSubAgentDoneSnapshot(context.Background(), db, pctx)
@@ -862,7 +902,11 @@ func OnSubAgentDone(
 	// native ChatAgent must not race that scheduler or restart a failed task.
 	if pctx.HostedTaskID != "" {
 		if !stepFailed {
-			_ = UpdateSessionStatus(ctx, db, pctx.SessionID, SessionStatusWaiting)
+			if status == subagent.StatusInterrupted {
+				_ = UpdateSessionStatus(ctx, db, pctx.SessionID, SessionStatusWaiting)
+			}
+			// Route finalization already decided whether this run is preparing,
+			// awaiting review or complete. Yielding to its scheduler is not a pause.
 			onSSE("step_waiting", map[string]any{"session_id": pctx.SessionID, "step_id": pctx.StepID, "reason": "hosted_task"})
 			go OnSubAgentDoneSnapshot(context.Background(), db, pctx)
 		}
@@ -881,7 +925,7 @@ func OnSubAgentDone(
 			onSSE("workflow_error", map[string]any{"session_id": pctx.SessionID, "message": err.Error()})
 			return
 		}
-		if display.Status == "waiting" {
+		if display.ApprovalRequired() {
 			if err := UpdateSessionStatus(ctx, db, pctx.SessionID, SessionStatusWaiting); err != nil {
 				onSSE("workflow_error", map[string]any{"session_id": pctx.SessionID, "message": err.Error()})
 				return
@@ -900,6 +944,12 @@ func OnSubAgentDone(
 	}
 	fmt.Printf("[plugin] sub_agent terminal conv=%s session=%s step=%s task=%s status=%s mode=%s summary_len=%d\n",
 		pctx.ConvID, pctx.SessionID, pctx.StepID, taskID, status, mode, len(summary))
+	if stepFailed && pctx.HandOff != nil && !*pctx.HandOff {
+		// The inline advance call returns the failure to its waiting ChatAgent.
+		// Starting another driver turn here races that agent's retry/rewind.
+		go OnSubAgentDoneSnapshot(context.Background(), db, pctx)
+		return
+	}
 	if stepFailed {
 		if mode == "auto" {
 			go advanceAutoMode(context.Background(), db, stateStore, status, summary, onSSE, pctx)
@@ -953,7 +1003,11 @@ func OnSubAgentDone(
 		}
 		go advanceAutoMode(context.Background(), db, stateStore, status, summary, onSSE, pctx)
 	} else {
-		_ = UpdateSessionStatus(ctx, db, pctx.SessionID, SessionStatusWaiting)
+		if status == subagent.StatusInterrupted {
+			_ = UpdateSessionStatus(ctx, db, pctx.SessionID, SessionStatusWaiting)
+		}
+		// The admitted Chat controller still owns the next-step handoff. Keep
+		// the shared projection's preparation state while it chooses that step.
 		onSSE("step_waiting", map[string]any{
 			"session_id": pctx.SessionID,
 			"step_id":    pctx.StepID,
@@ -1006,6 +1060,10 @@ func advanceAutoMode(
 			finishActivity()
 		}
 	}()
+	sessionBefore, sessionErr := GetSession(ctx, db, pctx.SessionID)
+	if sessionErr != nil || sessionBefore == nil {
+		return
+	}
 	step, _ := GetLatestStep(ctx, db, pctx.SessionID, pctx.StepID)
 	attempt := 0
 	if step != nil {
@@ -1023,21 +1081,32 @@ func advanceAutoMode(
 		return
 	}
 	acceptance, driverPrompt := loadWorkflowDriverPolicy(ctx, db, pctx.SessionID, pctx.StepID)
-	artifactsSummary, _ := buildWorkflowArtifactsSummary(ctx, db, pctx.SessionID, pctx.StepID)
+	artifactsSummary, artifactsErr := buildWorkflowArtifactsSummary(ctx, db, pctx.SessionID, pctx.StepID)
+	if artifactsErr != nil {
+		// An unreadable assessment context must never manufacture a content failure.
+		artifactsSummary = "Current artifacts could not be read. Do not infer missing evidence or rewind upstream from this unavailable context."
+		fmt.Printf("[Workflow] Driver artifact context unavailable session=%s err=%v\n", pctx.SessionID, artifactsErr)
+	}
 	driverInput := fmt.Sprintf("Terminal status: %s\nAttempt: %d\n%s", terminalStatus, attempt, summary)
 	driverMsg, fallback := callWorkflowDriverAgent(
 		pctx.WorkflowID, pctx.StepID, driverInput, acceptance, driverPrompt, pctx.SessionID,
 		pctx.HistoryFilesPerTurn, llmConfig, artifactsSummary,
 	)
+	// Model assessment can outlive a retry, downstream advance, or user stop.
+	// Never inject its stale recovery instructions into the newer session state.
+	sessionAfter, stateErr := GetSession(ctx, db, pctx.SessionID)
+	if stateErr != nil || sessionAfter == nil || sessionAfter.StateVersion != sessionBefore.StateVersion ||
+		sessionAfter.Dismissed || sessionAfter.Status == SessionStatusCompleted ||
+		(sessionAfter.LastStoppedAt != nil && (sessionBefore.LastStoppedAt == nil ||
+			sessionAfter.LastStoppedAt.After(*sessionBefore.LastStoppedAt))) {
+		return
+	}
 	if fallback {
 		onSSE("driver_fallback", map[string]any{
 			"session_id": pctx.SessionID, "step_id": pctx.StepID,
 			"reason": "driver_unavailable",
 		})
-		if err := failIdleSession(ctx, db, pctx.SessionID); err != nil {
-			onSSE("workflow_error", map[string]any{"session_id": pctx.SessionID, "message": err.Error()})
-		}
-		return
+		driverMsg = "质量检查暂不可用。请读取当前工作流状态；已成功的步骤继续下一可执行步骤，失败的步骤仅在运行时允许时重试，不要因检查器不可用而回退或判定内容失败。"
 	}
 	onSSE("driver_input", map[string]any{
 		"session_id": pctx.SessionID,
@@ -1148,7 +1217,7 @@ func checkAndFallbackIfStuck(
 	if err != nil || session == nil {
 		return
 	}
-	if session.Status != SessionStatusActive {
+	if controlstore.Controlled(*session) || session.Status != SessionStatusActive {
 		// Session was already advanced or completed — nothing to do.
 		return
 	}
@@ -1440,35 +1509,25 @@ func buildWorkflowArtifactsSummary(ctx context.Context, db *gorm.DB, sessionID, 
 	if db == nil || sessionID == "" {
 		return "", nil
 	}
-	// Gather all sub_agent_artifacts for completed steps in this session.
-	type artifactRow struct {
-		Slot   string `gorm:"column:slot"`
-		Value  []byte `gorm:"column:value"`
-		TaskID string `gorm:"column:task_id"`
-	}
-	var rows []artifactRow
-	err := db.WithContext(ctx).Raw(`
-		SELECT sa.slot, sa.value, sa.task_id
-		FROM sub_agent_artifacts sa
-		JOIN plugin_session_steps pss ON pss.task_id = sa.task_id
-		WHERE pss.session_id = ? AND pss.status = 'succeeded'
-		ORDER BY sa.task_id, sa.slot, sa.seq
-	`, sessionID).Scan(&rows).Error
-	if err != nil || len(rows) == 0 {
+	// Only selected, effective revisions are evidence. Successful old attempts
+	// may have been superseded by a retry and must not poison the assessment.
+	rows, err := LoadSelectedSlots(ctx, db, sessionID)
+	if err != nil {
 		return "", err
 	}
 	var sb strings.Builder
-	sb.WriteString("## Workflow session artifacts\n")
+	sb.WriteString("## Current effective Workflow artifacts\nHistorical failure assessments are not evidence about these revisions.\n")
 	for _, r := range rows {
-		var v map[string]any
-		if json.Unmarshal(r.Value, &v) == nil {
-			if val, ok := v["value"]; ok {
-				sb.WriteString(fmt.Sprintf("- %s: %v\n", r.Slot, val))
-				continue
-			}
+		if r.Validity != "effective" {
+			continue
 		}
-		sb.WriteString(fmt.Sprintf("- %s: %s\n", r.Slot, string(r.Value)))
+		value, err := controlstore.ResolveValue(db.WithContext(ctx), r)
+		if err != nil {
+			return "", fmt.Errorf("resolve current artifact %s: %w", r.ID, err)
+		}
+		sb.WriteString(fmt.Sprintf("- %s (revision %d, attempt %d): %s\n", r.SlotID, r.Revision, r.Attempt, string(value)))
 	}
+
 	return sb.String(), nil
 }
 

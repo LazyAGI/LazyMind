@@ -29,6 +29,8 @@ import (
 	"lazymind/core/common/readonlyorm"
 	applog "lazymind/core/log"
 	"lazymind/core/modelconfig"
+	"lazymind/core/modelprovider"
+	"lazymind/core/readingpolicy"
 	"lazymind/core/settings"
 	"lazymind/core/store"
 	"lazymind/core/systemdeps"
@@ -1427,6 +1429,9 @@ func startTasksInternal(r *http.Request, datasetID string, taskIDs []string) ([]
 	var dataset orm.Dataset
 	_ = store.DB().WithContext(r.Context()).Where("id = ? AND deleted_at IS NULL", datasetID).Take(&dataset).Error
 	storeOnly := effectiveProcessingLevel(dataset.ProcessingLevel) == ProcessingLevelStored
+	// Page uploads finish via tasks:start. Their initial parse task is import
+	// bookkeeping, not explicit paper preparation; the bounded scheduler owns it.
+	storeOriginalOnly := storeOnly || dataset.Scene == "academic_papers"
 
 	for _, rawTaskID := range taskIDs {
 		taskID := strings.TrimSpace(rawTaskID)
@@ -1454,7 +1459,7 @@ func startTasksInternal(r *http.Request, datasetID string, taskIDs []string) ([]
 
 		switch TaskType(strings.TrimSpace(taskRow.TaskType)) {
 		case TaskTypeParse, TaskTypeParseUploaded:
-			if !storeOnly && !systemdeps.PythonComponentActive("rag") {
+			if !storeOriginalOnly && !systemdeps.PythonComponentActive("rag") {
 				result := StartTaskResult{TaskID: taskID, DocumentID: taskRow.DocID, DisplayName: taskRow.DisplayName,
 					Status: "STARTED", SubmitStatus: "ACCEPTED", Message: "native parsing and chunks saved; vector indexing deferred"}
 				if err := prepareBaseDocument(r, datasetID, taskRow); err != nil {
@@ -1463,7 +1468,7 @@ func startTasksInternal(r *http.Request, datasetID string, taskIDs []string) ([]
 				resultsByTaskID[taskID] = result
 				continue
 			}
-			if storeOnly {
+			if storeOriginalOnly {
 				var ext taskExt
 				_ = json.Unmarshal(taskRow.Ext, &ext)
 				ext.TaskState = string(TaskStateSucceeded)
@@ -1595,6 +1600,9 @@ func parseSubmissionKey(datasetID string, tasks []orm.Task) string {
 }
 
 func startParseTasksAtLevel(ctx context.Context, userID, datasetID string, taskIDs []string, requestedLevel string) ([]StartTaskResult, error) {
+	if err := checkPaperChatPreparation(ctx, userID, datasetID); err != nil {
+		return nil, err
+	}
 	if ctx.Value(paperProcessingWorker{}) != true {
 		var ds orm.Dataset
 		if err := store.DB().WithContext(ctx).Select("id,scene,processing_level").Where("id=? AND deleted_at IS NULL", datasetID).Take(&ds).Error; err != nil {
@@ -1621,12 +1629,29 @@ func startParseTasksAtLevel(ctx context.Context, userID, datasetID string, taskI
 		processingLevel = effectiveProcessingLevel(requestedLevel)
 	}
 	llmConfig, err := modelconfig.LoadLLMConfig(ctx, store.DB(), userID)
+	if validationErr := validateParsingLLMConfig(ctx, store.DB(), userID, processingLevel, llmConfig, err); validationErr != nil {
+		return nil, validationErr
+	}
 	if err != nil {
 		log.Printf("[startParseTasksInternal] failed to load llm_config for user=%s: %v", userID, err)
 		llmConfig = nil
 	}
 	llmConfig = normalizeParsingLLMConfig(llmConfig)
 	ocrConfig, err := modelconfig.LoadOCRConfig(ctx, store.DB(), userID)
+	if dataset.Scene == "academic_papers" {
+		policy, policyErr := readingpolicy.Load(ctx, store.DB(), userID)
+		if policyErr != nil {
+			return nil, policyErr
+		}
+		// Inherited parsing retains the existing optional OCR fallback. An
+		// explicit reading override must never silently use that fallback.
+		if policy.ParserRef != "" {
+			ocrConfig, err = modelconfig.ResolveReadingParser(ctx, store.DB(), userID, policy.ParserRef)
+			if err != nil {
+				return nil, err
+			}
+		}
+	}
 	if err != nil {
 		log.Printf("[startParseTasksInternal] failed to load ocr_config for user=%s: %v", userID, err)
 		ocrConfig = nil
@@ -2695,7 +2720,13 @@ func createTaskFromUploadedFile(r *http.Request, datasetID, userID, userName str
 	}
 	caller := datasetCatalogCallerFromRequest(r)
 	caller.UserID, caller.UserName = userID, userName
-	bound, err := bindPageOriginal(r.Context(), caller, ImportOriginalRequest{FileRef: uploadFileID, DatasetID: datasetID, ParentID: documentPID, DisplayName: displayName, Tags: tags, DocumentID: documentID, TaskID: taskID, RelativePath: relativePath, DataSourceType: item.Task.DataSourceType})
+	conflictPolicy := ""
+	if _, isPaperUpload := r.Context().Value(paperUploadKey{}).(paperUploadScope); isPaperUpload {
+		// A removed paper may still retain an original with this filename. Keep
+		// that original intact and give the newly imported PDF its own name.
+		conflictPolicy = "rename"
+	}
+	bound, err := bindPageOriginal(r.Context(), caller, ImportOriginalRequest{FileRef: uploadFileID, DatasetID: datasetID, ParentID: documentPID, DisplayName: displayName, Tags: tags, DocumentID: documentID, TaskID: taskID, RelativePath: relativePath, DataSourceType: item.Task.DataSourceType, ConflictPolicy: conflictPolicy})
 	if err != nil {
 		if scope, ok := r.Context().Value(paperUploadKey{}).(paperUploadScope); ok {
 			if task, replayErr := existingPaperUpload(store.DB().WithContext(r.Context()), scope); replayErr == nil {
@@ -2888,6 +2919,9 @@ func startReparseTasksInternal(r *http.Request, datasetID string, taskIDs []stri
 }
 
 func startReparseTasksInternalAtLevel(r *http.Request, datasetID string, taskIDs []string, requestedLevel string) ([]StartTaskResult, error) {
+	if err := checkPaperChatPreparation(r.Context(), store.UserID(r), datasetID); err != nil {
+		return nil, err
+	}
 	kbID := datasetKbIDByID(datasetID)
 	var dataset orm.Dataset
 	if err := store.DB().WithContext(r.Context()).Where("id = ? AND deleted_at IS NULL", datasetID).Take(&dataset).Error; err != nil {
@@ -2907,12 +2941,29 @@ func startReparseTasksInternalAtLevel(r *http.Request, datasetID string, taskIDs
 		Strs("task_ids", taskIDs).
 		Msg("starting reparse tasks")
 	llmConfig, err := modelconfig.LoadLLMConfig(r.Context(), store.DB(), userID)
+	if validationErr := validateParsingLLMConfig(r.Context(), store.DB(), userID, processingLevel, llmConfig, err); validationErr != nil {
+		return nil, validationErr
+	}
 	if err != nil {
 		log.Printf("[startReparseTasksInternal] failed to load llm_config for user=%s: %v", userID, err)
 		llmConfig = nil
 	}
 	llmConfig = normalizeParsingLLMConfig(llmConfig)
 	ocrConfig, err := modelconfig.LoadOCRConfig(r.Context(), store.DB(), userID)
+	if dataset.Scene == "academic_papers" {
+		policy, policyErr := readingpolicy.Load(r.Context(), store.DB(), userID)
+		if policyErr != nil {
+			return nil, policyErr
+		}
+		// Inherited parsing retains the existing optional OCR fallback. An
+		// explicit reading override must never silently use that fallback.
+		if policy.ParserRef != "" {
+			ocrConfig, err = modelconfig.ResolveReadingParser(r.Context(), store.DB(), userID, policy.ParserRef)
+			if err != nil {
+				return nil, err
+			}
+		}
+	}
 	if err != nil {
 		log.Printf("[startReparseTasksInternal] failed to load ocr_config for user=%s: %v", userID, err)
 		ocrConfig = nil
@@ -2949,7 +3000,7 @@ func startReparseTasksInternalAtLevel(r *http.Request, datasetID string, taskIDs
 		if strings.TrimSpace(docRow.LazyllmDocID) == "" {
 			// A retained file has never been submitted to RAG. Its first
 			// reparse is an add, not a rebuild of a nonexistent remote doc.
-			items, err := startParseTasksInternal(r, datasetID, []string{taskID})
+			items, err := startParseTasksInternalAtLevel(r, datasetID, []string{taskID}, processingLevel)
 			results = append(results, items...)
 			if err != nil && len(items) == 0 {
 				markTaskStartFailed(r.Context(), datasetID, taskRow, err.Error())
@@ -3079,6 +3130,38 @@ func resolveReparseStrategy(processingLevel, reparseMode string) (string, error)
 		return "rebuild", nil
 	}
 	return mode, nil
+}
+
+func validateParsingLLMConfig(ctx context.Context, db *gorm.DB, userID, processingLevel string, cfg map[string]any, loadErr error) error {
+	if effectiveProcessingLevel(processingLevel) != ProcessingLevelIndexed {
+		return nil
+	}
+	if loadErr != nil {
+		return fmt.Errorf("cannot load model configuration for indexed processing: %w", loadErr)
+	}
+	role, ok := cfg["embed_main"].(map[string]any)
+	source, sourceOK := role["source"].(string)
+	model, modelOK := role["model"].(string)
+	if ok && sourceOK && modelOK && strings.TrimSpace(source) != "" && strings.TrimSpace(model) != "" {
+		return nil
+	}
+	// Static deployments have a built-in embedding role and no database choice.
+	// Once a global choice or state exists, an absent runtime config is a hard
+	// failure; a static fallback could encode vectors with a different model.
+	_, present, err := modelprovider.ResolveGlobalEmbeddingChoice(ctx, db)
+	if err != nil {
+		return fmt.Errorf("cannot resolve global embedding model: %w", err)
+	}
+	if !present {
+		ready, err := modelprovider.IsModelReady(ctx, db, userID, "embed_main")
+		if err != nil {
+			return fmt.Errorf("cannot check embedding model for indexed processing: %w", err)
+		}
+		if ready {
+			return nil
+		}
+	}
+	return fmt.Errorf("text embedding model is required for indexed processing")
 }
 
 func normalizeParsingLLMConfig(cfg map[string]any) map[string]any {
@@ -3772,4 +3855,15 @@ func existingDocumentTask(baseDoc orm.Document, datasetID, kbID, algoID, userID,
 	now := time.Now().UTC()
 	taskRow := orm.Task{ID: taskID, LazyllmTaskID: "", DocID: baseDoc.ID, KbID: kbID, AlgoID: algoID, DatasetID: datasetID, TaskType: tType, DocumentPID: documentPID, TargetPID: strings.TrimSpace(item.Task.TargetPID), TargetDatasetID: strings.TrimSpace(item.Task.TargetDatasetID), DisplayName: displayName, Ext: mustJSON(tExt), BaseModel: orm.BaseModel{CreateUserID: userID, CreateUserName: userName, CreatedAt: now, UpdatedAt: now}}
 	return taskRow
+}
+
+func checkPaperChatPreparation(ctx context.Context, user, dataset string) error {
+	var ds orm.Dataset
+	if err := store.DB().WithContext(ctx).Where("id=? AND deleted_at IS NULL", dataset).Take(&ds).Error; err != nil {
+		return err
+	}
+	if ds.Scene == "academic_papers" {
+		return readingpolicy.Check(ctx, store.DB(), user, readingpolicy.ChatPrepare)
+	}
+	return nil
 }

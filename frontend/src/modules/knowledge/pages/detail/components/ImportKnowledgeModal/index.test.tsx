@@ -45,6 +45,54 @@ vi.mock("../DragUpload", () => ({
 afterEach(() => { cleanup(); vi.clearAllMocks(); });
 
 describe("storage-only uploads", () => {
+  it.each(["create", "start"] as const)("clears upload activity when %s submission fails", async (phase) => {
+    mocks[phase].mockRejectedValueOnce(new Error("提交失败"));
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    const onUploadSettled = vi.fn();
+    const onOk = vi.fn();
+    const ref = createRef<IImportKnowledgeModalRef>();
+    try {
+      render(<ImportKnowledgeModal ref={ref} onOk={onOk} onUploadSettled={onUploadSettled} />);
+      await act(async () => ref.current!.handleOpen({ dataset_id: "papers" }));
+      fireEvent.click(screen.getByText("select PDF"));
+      fireEvent.click(screen.getByRole("button", { name: "上传并保存" }));
+      await waitFor(() => expect(onUploadSettled).toHaveBeenCalledTimes(1));
+      expect(onOk).not.toHaveBeenCalled();
+      expect((await screen.findAllByText("提交失败")).length).toBeGreaterThan(0);
+    } finally { log.mockRestore(); }
+  });
+  it.each(["create", "start"] as const)("keeps upload activity until %s submission finishes", async (phase) => {
+    let finishSubmission!: (response: { data: { tasks: { task_id: string }[] } }) => void;
+    mocks[phase].mockImplementationOnce(() => new Promise((resolve) => { finishSubmission = resolve; }));
+    const onUploadStart = vi.fn();
+    const onUploadSettled = vi.fn();
+    const ref = createRef<IImportKnowledgeModalRef>();
+    render(<ImportKnowledgeModal ref={ref} onOk={vi.fn()} onUploadStart={onUploadStart} onUploadSettled={onUploadSettled} />);
+    await act(async () => ref.current!.handleOpen({ dataset_id: "papers" }));
+    fireEvent.click(screen.getByText("select PDF"));
+    fireEvent.click(screen.getByRole("button", { name: "上传并保存" }));
+    await waitFor(() => expect(mocks[phase]).toHaveBeenCalled());
+    expect(onUploadStart).toHaveBeenCalledTimes(1);
+    expect(onUploadSettled).not.toHaveBeenCalled();
+    await act(async () => finishSubmission({ data: { tasks: [{ task_id: "task-1" }] } }));
+    await waitFor(() => expect(onUploadSettled).toHaveBeenCalledTimes(1));
+  });
+  it("reports browser upload activity before parsing is submitted", async () => {
+    let finishUpload!: (items: { upload_file_id: string }[]) => void;
+    mocks.build.mockImplementationOnce(() => new Promise((resolve) => { finishUpload = resolve; }));
+    const onUploadStart = vi.fn();
+    const onUploadSettled = vi.fn();
+    const ref = createRef<IImportKnowledgeModalRef>();
+    render(<ImportKnowledgeModal ref={ref} onOk={vi.fn()} onUploadStart={onUploadStart} onUploadSettled={onUploadSettled} />);
+    await act(async () => ref.current!.handleOpen({ dataset_id: "papers" }));
+    fireEvent.click(screen.getByText("select PDF"));
+    fireEvent.click(screen.getByRole("button", { name: "上传并保存" }));
+    await waitFor(() => expect(mocks.build).toHaveBeenCalled());
+    expect(onUploadStart).toHaveBeenCalledTimes(1);
+    expect(onUploadSettled).not.toHaveBeenCalled();
+    await act(async () => finishUpload([{ upload_file_id: "upload-1" }]));
+    await waitFor(() => expect(onUploadSettled).toHaveBeenCalledTimes(1));
+  });
   it.each([
     ["missing", false],
     ["ready", true],

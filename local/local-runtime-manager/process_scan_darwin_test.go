@@ -7,7 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strings"
+	"reflect"
 	"testing"
 	"time"
 )
@@ -15,10 +15,10 @@ import (
 func TestDarwinProcessArgumentsRetainEnvironmentAndSpacedArguments(t *testing.T) {
 	raw := make([]byte, 4)
 	binary.NativeEndian.PutUint32(raw, 3)
-	raw = append(raw, []byte("/bin/worker\x00\x00/bin/worker\x00--config\x00/runtime with spaces/config\x00LAZYMIND_RUNTIME_ROOT=/runtime with spaces\x00\x00")...)
-	args, env := parseDarwinProcessArguments(raw)
-	if len(args) != 3 || args[2] != "/runtime with spaces/config" || len(env) != 1 {
-		t.Fatalf("args=%q env=%q", args, env)
+	raw = append(raw, []byte("/bin/worker\x00\x00/bin/worker\x00--config\x00/runtime with spaces/config\x00LAZYMIND_RUNTIME_PROCESS_OWNER=/runtime with spaces\x00\x00")...)
+	args, owner := parseDarwinProcessArgs(raw)
+	if len(args) != 3 || args[2] != "/runtime with spaces/config" || owner != "/runtime with spaces" {
+		t.Fatalf("args=%q owner=%q", args, owner)
 	}
 }
 
@@ -30,8 +30,18 @@ func TestDarwinScannerDoesNotClaimAnotherRuntimeOrSharedWorker(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+		if profile == "bridge" {
+			body, err := os.ReadFile(self)
+			if err != nil {
+				t.Fatal(err)
+			}
+			self = filepath.Join(root, "lazymind")
+			if err := os.WriteFile(self, body, 0700); err != nil {
+				t.Fatal(err)
+			}
+		}
 		cmd := exec.Command(self, "-test.run=^TestDarwinScanChildProcess$")
-		cmd.Env = append(os.Environ(), runtimeRootEnvVar+"="+runtimeRoot, runtimeProfileEnvVar+"="+profile, "LAZYMIND_SCAN_TEST_HELPER=1")
+		cmd.Env = append(os.Environ(), runtimeRootEnvVar+"="+runtimeRoot, runtimeProcessOwnerEnvVar+"="+runtimeRoot, runtimeProfileEnvVar+"="+profile, "LAZYMIND_SCAN_TEST_HELPER=1")
 		if err := cmd.Start(); err != nil {
 			t.Fatal(err)
 		}
@@ -41,10 +51,11 @@ func TestDarwinScannerDoesNotClaimAnotherRuntimeOrSharedWorker(t *testing.T) {
 	own := start(paths.RuntimeRoot, "desktop")
 	other := start(filepath.Join(root, "compose"), "local")
 	shared := start(paths.RuntimeRoot, "bridge")
-	records, err := scanLocalRuntimeProcesses(paths)
+	inventory, err := scanLocalRuntimeProcesses(paths)
 	if err != nil {
 		t.Fatal(err)
 	}
+	records := ownedRuntimeProcesses(paths, nil, inventory, nil)
 	found := false
 	for _, record := range records {
 		if record.PID == other || record.PID == shared {
@@ -53,14 +64,12 @@ func TestDarwinScannerDoesNotClaimAnotherRuntimeOrSharedWorker(t *testing.T) {
 		found = found || record.PID == own
 	}
 	if !found {
-		args, env := darwinProcessArguments(own)
-		rootEnv := ""
-		for _, entry := range env {
-			if strings.HasPrefix(entry, runtimeRootEnvVar+"=") {
-				rootEnv = entry
+		for _, record := range inventory {
+			if record.PID == own {
+				t.Fatalf("did not claim owned orphan: %+v", record)
 			}
 		}
-		t.Fatalf("did not discover owned orphan: args=%q env_count=%d root=%q", args, len(env), rootEnv)
+		t.Fatal("did not discover owned orphan")
 	}
 }
 
@@ -69,4 +78,24 @@ func TestDarwinScanChildProcess(t *testing.T) {
 		return
 	}
 	time.Sleep(time.Minute)
+}
+
+func TestParseDarwinProcessArgsSeparatesArgumentsAndOwnership(t *testing.T) {
+	args := []string{"/repo/bin/python", "-c", "", runtimeProcessOwnerEnvVar + "=/spoofed"}
+	raw := make([]byte, 4)
+	binary.LittleEndian.PutUint32(raw, uint32(len(args)))
+	raw = append(raw, []byte("/repo/bin/python\x00\x00\x00")...)
+	for _, arg := range args {
+		raw = append(raw, append([]byte(arg), 0)...)
+	}
+	raw = append(raw, []byte("OTHER=value\x00"+runtimeProcessOwnerEnvVar+"=/owned\x00")...)
+	got, owner := parseDarwinProcessArgs(raw)
+	if !reflect.DeepEqual(got, args) || owner != "/owned" {
+		t.Fatalf("args=%q owner=%q", got, owner)
+	}
+	for _, invalid := range [][]byte{nil, {1, 0, 0, 0}, raw[:len(raw)/2]} {
+		if _, owner := parseDarwinProcessArgs(invalid); owner != "" {
+			t.Fatalf("malformed args supplied owner %q", owner)
+		}
+	}
 }

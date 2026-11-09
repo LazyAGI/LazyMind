@@ -238,6 +238,52 @@ func TestTransitionUsesWorkflowModeLockedAtSessionCreation(t *testing.T) {
 	}
 }
 
+func TestAutomaticRetryRetainsCurrentEdit(t *testing.T) {
+	db, graphHash := setupBatchTransitionSession(t)
+	if err := db.Model(&orm.WorkflowSession{}).Where("id = ?", "batch-session").
+		Update("intent_context", `{"text":"生成8页深色科研PPT"}`).Error; err != nil {
+		t.Fatal(err)
+	}
+	previous, err := CreateSessionStep(t.Context(), db.DB, "batch-session", "branch_b", "failed-edit", 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Model(&previous).Update("status", StepStatusFailed).Error; err != nil {
+		t.Fatal(err)
+	}
+	edit := "我不喜欢黑底ppt 给我换成 白底黑字"
+	params, _ := json.Marshal(map[string]string{
+		"current_user_input": edit, "retry_hint": "只修改配色，保留内容、页数和讲稿",
+	})
+	if err := db.Create(&orm.SubAgentTask{ID: "failed-edit", ConversationID: "batch-conversation",
+		AgentType: "workflow_step", Title: "edit", Objective: edit, Mode: "manual", Status: "failed",
+		Params: params, InputSlots: json.RawMessage(`[]`), OutputSlots: json.RawMessage(`[]`),
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	diagnostic := "FAILAttempt 2 failed with provider 503"
+	w, data := runBatchTransition(t, db, graphHash, "retry", []map[string]any{
+		{"target_step_id": "branch_b", "task_id": "retry-edit", "user_input": diagnostic},
+	})
+	if w.Code != http.StatusOK || data["accepted"] != true {
+		t.Fatalf("retry rejected: status=%d body=%s", w.Code, w.Body.String())
+	}
+	var task orm.SubAgentTask
+	if err := db.First(&task, "id = ?", "retry-edit").Error; err != nil {
+		t.Fatal(err)
+	}
+	var got map[string]any
+	if err := json.Unmarshal(task.Params, &got); err != nil {
+		t.Fatal(err)
+	}
+	if got["current_user_input"] != edit || got["launch_user_input"] != "生成8页深色科研PPT" {
+		t.Fatalf("retry lost current/launch identity: %#v", got)
+	}
+	if !containsAll(got["retry_hint"].(string), edit, diagnostic, "保留内容、页数和讲稿") {
+		t.Fatalf("retry lost scope or diagnostics: %v", got["retry_hint"])
+	}
+}
+
 func TestExecuteStaleStepPreservesLaunchIntent(t *testing.T) {
 	db, graphHash := setupBatchTransitionSession(t)
 	if err := db.Model(&orm.WorkflowSession{}).Where("id = ?", "batch-session").
@@ -273,6 +319,59 @@ func TestExecuteStaleStepPreservesLaunchIntent(t *testing.T) {
 	}
 	if params["retry_hint"] != "Recovery request for this rerun only: 回退到大纲，需要包含二级标题" {
 		t.Fatalf("retry_hint=%v, want current recovery request", params["retry_hint"])
+	}
+}
+
+func TestRetryKeepsFailedAttemptInput(t *testing.T) {
+	for _, tc := range []struct{ name, operation, previous, current, want string }{
+		{"button", "retry", "只修改 R1、R3，保留图表", "重试", "只修改 R1、R3，保留图表"},
+		{"empty", "retry", "只修改 R1、R3，保留图表", "", "只修改 R1、R3，保留图表"},
+		{"english", "retry", "Only revise R2", "Retry!", "Only revise R2"},
+		{"new_requirement", "retry", "只修改 R1", "这次只修改 R2", "这次只修改 R2"},
+		{"no_confirmed_input", "retry", "", "重试", "重试"},
+		{"rewind_is_not_retry", "rewind", "只修改 R1", "重新执行", "重新执行"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			db, hash := setupBatchTransitionSession(t)
+			db.Model(&orm.WorkflowSession{}).Where("id = ?", "batch-session").Update("intent_context", `{"text":"原始研究任务"}`)
+			previousParams, _ := json.Marshal(map[string]string{"current_user_input": tc.previous})
+			status := StepStatusFailed
+			if tc.operation == "rewind" {
+				status = StepStatusSucceeded
+			}
+			if err := db.Create(&orm.SubAgentTask{ID: "failed-task", Params: previousParams, InputSlots: json.RawMessage(`[]`), OutputSlots: json.RawMessage(`[]`)}).Error; err != nil {
+				t.Fatal(err)
+			}
+			if err := db.Create(&orm.WorkflowSessionStep{ID: "failed-attempt", SessionID: "batch-session", StepID: "branch_b",
+				TaskID: "failed-task", Attempt: 2, Status: status, Validity: "effective"}).Error; err != nil {
+				t.Fatal(err)
+			}
+			// A previous successful pass must never supply this retry's instructions.
+			if err := db.Create(&orm.SubAgentTask{ID: "old-task", Params: json.RawMessage(`{"current_user_input":"只修改 R9"}`), InputSlots: json.RawMessage(`[]`), OutputSlots: json.RawMessage(`[]`)}).Error; err != nil {
+				t.Fatal(err)
+			}
+			if err := db.Create(&orm.WorkflowSessionStep{ID: "old-attempt", SessionID: "batch-session", StepID: "branch_b",
+				TaskID: "old-task", Attempt: 1, Status: StepStatusSucceeded, Validity: "stale"}).Error; err != nil {
+				t.Fatal(err)
+			}
+			w, data := runBatchTransition(t, db, hash, tc.operation, []map[string]any{
+				{"target_step_id": "branch_b", "task_id": "retried-task", "user_input": tc.current},
+			})
+			if w.Code != http.StatusOK || data["accepted"] != true {
+				t.Fatalf("%d %s", w.Code, w.Body.String())
+			}
+			var task orm.SubAgentTask
+			if err := db.First(&task, "id = ?", "retried-task").Error; err != nil {
+				t.Fatal(err)
+			}
+			var params map[string]any
+			if err := json.Unmarshal(task.Params, &params); err != nil {
+				t.Fatal(err)
+			}
+			if params["current_user_input"] != tc.want || params["launch_user_input"] != "原始研究任务" {
+				t.Fatalf("current=%v launch=%v", params["current_user_input"], params["launch_user_input"])
+			}
+		})
 	}
 }
 

@@ -13,7 +13,11 @@ def apply_host_extensions(contribution, context, config, providers=None):
     if providers is None:
         from .product_project import contribute
         from .academic_paper_chat import contribute as academic_paper_chat
-        providers = {'product-project-v1': contribute, 'academic-paper-chat-v1': academic_paper_chat}
+        providers = {
+            'product-project-v1': contribute,
+            'academic-paper-chat-v1': academic_paper_chat,
+            'academic-paper-chat-v2': academic_paper_chat,
+        }
     for name in dict.fromkeys(names):
         provider = providers.get(name)
         if provider is None:

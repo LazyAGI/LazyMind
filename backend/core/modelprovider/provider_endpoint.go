@@ -85,6 +85,10 @@ func UpdateProviderEndpoint(w http.ResponseWriter, r *http.Request) {
 	}
 	baseURL = LazyLLMBaseURL(RuntimeProviderName(parent), baseURL)
 	if err := setProviderEndpoint(r.Context(), db, &parent, baseURL, time.Now()); err != nil {
+		if errors.Is(err, errEmbeddingIdentityInUse) {
+			common.ReplyErr(w, err.Error(), http.StatusConflict)
+			return
+		}
 		common.ReplyErr(w, "update model provider endpoint failed", http.StatusInternalServerError)
 		return
 	}
@@ -127,6 +131,11 @@ func setProviderEndpoint(ctx context.Context, db *gorm.DB, parent *orm.UserModel
 // encrypted backup revision even when the active endpoint has not changed.
 func updateProviderEndpointLocked(tx *gorm.DB, parent *orm.UserModelProvider, baseURL string, now time.Time, refresh, invalidate bool) error {
 	changed := normalizeBaseURLForCompare(parent.BaseURL) != normalizeBaseURLForCompare(baseURL)
+	if changed {
+		if err := guardEmbeddingRuntimeMutation(tx, parent.CreateUserID, parent.ID, "", ""); err != nil {
+			return err
+		}
+	}
 	var groups []orm.UserModelProviderGroup
 	if err := tx.Where("user_model_provider_id = ? AND create_user_id = ? AND deleted_at IS NULL", parent.ID, parent.CreateUserID).
 		Order("created_at ASC, id ASC").Find(&groups).Error; err != nil {

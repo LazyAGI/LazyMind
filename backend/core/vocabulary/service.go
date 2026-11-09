@@ -16,7 +16,10 @@ import (
 	"gorm.io/gorm/clause"
 )
 
-type Service struct{ db *gorm.DB }
+type Service struct {
+	db           *gorm.DB
+	remoteClient func(string, string) (cloudRemote, error)
+}
 
 type ChatWordbook struct {
 	ID       string `json:"id"`
@@ -299,7 +302,7 @@ func (s *Service) AddWord(ctx context.Context, owner string, req AddWordRequest)
 	if err != nil {
 		return AddWordResult{}, err
 	}
-	provider := setting.SelectedProvider
+	provider := defaultString(req.Provider, setting.SelectedProvider)
 	if err := validateProvider(provider); err != nil {
 		return AddWordResult{}, err
 	}

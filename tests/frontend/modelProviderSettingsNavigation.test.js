@@ -33,7 +33,7 @@ describe("model provider Settings navigation", () => {
     expect(staleFiles).toEqual([]);
   });
 
-  it("opens the default model Settings section from chat setup notices", () => {
+  it("opens the default model Settings section from the remaining chat setup notice", () => {
     const newChatSource = readFileSync(
       join(frontendSourceRoot, "modules/chat/pages/newChat/index.tsx"),
       "utf8",
@@ -42,7 +42,7 @@ describe("model provider Settings navigation", () => {
       /navigate\("\/settings\?section=model_defaults"\)/g,
     );
 
-    expect(settingsDestinations).toHaveLength(2);
+    expect(settingsDestinations).toHaveLength(1);
   });
 
   it("builds a provider deep link while retaining model setup and return context", () => {

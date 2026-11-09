@@ -101,8 +101,20 @@ export default function DefaultServicesPage({
   const checkSetupAvailability = useCallback(async () => {
     const requestId = ++latestRequest.current;
     setSetupAvailability(loadingSetupAvailability);
-    const [modelResult, parsingResult, searchResult, academicResult, translationResult] = await Promise.allSettled([
-      listAvailableModels(),
+    void listAvailableModels()
+      .then((response) => {
+        if (requestId !== latestRequest.current) return;
+        const models = unwrapModelProviderData<{ models?: unknown[] }>(response.data).models ?? [];
+        setSetupAvailability((current) => ({
+          ...current,
+          modelProvider: models.length > 0 ? "ready" : "empty",
+        }));
+      })
+      .catch(() => {
+        if (requestId !== latestRequest.current) return;
+        setSetupAvailability((current) => ({ ...current, modelProvider: "error" }));
+      });
+    const [parsingResult, searchResult, academicResult, translationResult] = await Promise.allSettled([
       modelProvidersApi.apiCoreModelProvidersProviderGroupsGet(
         { category: "ocr" },
         silentSetupCheckOptions,
@@ -116,9 +128,6 @@ export default function DefaultServicesPage({
     ]);
     if (requestId !== latestRequest.current) return;
 
-    const modelProvider = modelResult.status === "fulfilled"
-      ? (unwrapModelProviderData<{ models?: unknown[] }>(modelResult.value.data).models ?? []).length > 0 ? "ready" : "empty"
-      : "error";
     const cloudParsing = parsingResult.status === "fulfilled"
       ? (unwrapModelProviderData<{ groups?: unknown[] }>(parsingResult.value.data).groups ?? []).length > 0 ? "ready" : "empty"
       : "error";
@@ -126,7 +135,7 @@ export default function DefaultServicesPage({
       ? (unwrapModelProviderData<{ groups?: unknown[] }>(searchResult.value.data).groups ?? []).length > 0 ? "ready" : "empty"
       : "error";
 
-    setSetupAvailability({ cloudParsing, modelProvider, searchEngine });
+    setSetupAvailability((current) => ({ ...current, cloudParsing, searchEngine }));
     const summaries: Partial<Record<ServiceCategory, string>> = {};
     for (const [category, result] of [["parsing", parsingResult], ["search", searchResult], ["academic", academicResult], ["translation", translationResult]] as const) {
       if (result.status !== "fulfilled") continue;

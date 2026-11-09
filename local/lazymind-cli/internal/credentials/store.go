@@ -160,6 +160,45 @@ func (s *Store) Clear() error {
 	})
 }
 
+// ClearRequest identifies the login a renderer intends to clear. Automatic
+// expiry requires an exact credential match; explicit logout may also clear a
+// CLI renewal descended from that renderer's last desktop handoff.
+type ClearRequest struct {
+	ExpectedSession Credentials `json:"expected_session"`
+	AllowRenewed    bool        `json:"allow_renewed,omitempty"`
+}
+
+func (s *Store) ClearIfCurrent(request ClearRequest) (bool, error) {
+	expected := request.ExpectedSession
+	expected.ServerURL = normalizeServerURL(expected.ServerURL)
+	if expected.ServerURL == "" || expected.AccessToken == "" || expected.RefreshToken == "" {
+		return false, errors.New("expected LazyMind session is required")
+	}
+	cleared := false
+	err := s.withLock(func() error {
+		current, err := s.loadUnlocked()
+		if errors.Is(err, ErrAuthenticationRequired) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		if normalizeServerURL(current.ServerURL) != expected.ServerURL {
+			return nil
+		}
+		matches := current.AccessToken == expected.AccessToken && current.RefreshToken == expected.RefreshToken
+		if !matches && !(request.AllowRenewed && current.DesktopHandoff != "" && current.DesktopHandoff == desktopFingerprint(expected)) {
+			return nil
+		}
+		if err := os.Remove(s.path()); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+		cleared = true
+		return nil
+	})
+	return cleared, err
+}
+
 func (s *Store) AccessToken(ctx context.Context) (string, error) {
 	if err := s.validateConnection(); err != nil {
 		return "", err

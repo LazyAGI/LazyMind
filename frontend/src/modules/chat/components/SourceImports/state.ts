@@ -36,6 +36,12 @@ class SourceState {
     }).catch(() => this.emit({ inspectError: true })).finally(() => { this.inspection = undefined; });
     return this.inspection;
   };
+  recordFulltext = (rows: api.InspectedSource[]) => {
+    if (!rows.length) return;
+    const found = new Set(rows.map(row => row.source_id));
+    this.emit({ inspections: this.snapshot.inspections.map(row =>
+      row.needs_pdf_lookup && found.has(row.source_id) ? { ...row, needs_pdf_lookup: false } : row) });
+  };
   refresh = (): Promise<void> => {
     if (this.query) return this.query;
     this.query = api.listSourceImports(this.context).then(rows => {
@@ -51,7 +57,7 @@ class SourceState {
   schedule = () => {
     clearTimeout(this.timer);
     if (this.pollers.size && !document.hidden && this.snapshot.items.some(row =>
-      row.state_unavailable || ["pending", "running", "unknown"].includes(row.status))) {
+      row.state_unavailable || ["pending", "running", "waiting_retry", "unknown"].includes(row.status))) {
       this.timer = setTimeout(() => void this.refresh(), 3000);
     }
   };
@@ -90,5 +96,5 @@ export function useSourceImportState(context: api.SourceContext, opened: boolean
   }, [key]);
   const snapshot = useSyncExternalStore(entry.subscribe, entry.getSnapshot);
   useEffect(() => opened ? entry.poll() : undefined, [entry, opened]);
-  return { ...snapshot, refresh: entry.refresh, inspect: entry.inspect };
+  return { ...snapshot, refresh: entry.refresh, inspect: entry.inspect, recordFulltext: entry.recordFulltext };
 }

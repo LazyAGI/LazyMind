@@ -3,6 +3,7 @@ import { toPng } from 'html-to-image';
 import PptxGenJS from 'pptxgenjs';
 import { jsPDF } from 'jspdf';
 import { normalizePptxPackage } from './pptxPackage';
+import { measureSlideCanvas } from './slideCanvas';
 
 const SLIDE_W_PX = 1600;
 const SLIDE_H_PX = 900;
@@ -126,11 +127,6 @@ const RASTER_SAFE_STYLE =
   'animation:none!important;' +
   'transition:none!important;' +
   '}' +
-  'html,body,.wrapper{' +
-  "font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Noto Sans SC'," +
-  "'PingFang SC','Microsoft YaHei',sans-serif!important;" +
-  '}' +
-  'img{object-fit:cover;}' +
   '</style>';
 
 /** 1×1 transparent GIF — used when relative/remote images 404 during capture. */
@@ -199,6 +195,31 @@ export function applyHtmlPreviewCompatibilityFallbacks(doc: Document): number {
     });
   }
   return fallbackCount;
+}
+
+/** html-to-image deep-clones SVG without styling its children. Resolve their
+ * inherited/class/custom-property styles before the capture document is cloned. */
+export function inlineSvgStylesForRasterCapture(doc: Document): void {
+  const win = doc.defaultView;
+  if (!win) return;
+  const properties = [
+    'color', 'fill', 'fill-opacity', 'fill-rule', 'stroke', 'stroke-width',
+    'stroke-opacity', 'stroke-linecap', 'stroke-linejoin', 'stroke-dasharray',
+    'stroke-dashoffset', 'opacity', 'font-family', 'font-size', 'font-weight',
+    'font-style', 'letter-spacing', 'text-anchor', 'dominant-baseline',
+    'stop-color', 'stop-opacity', 'paint-order', 'visibility',
+  ];
+  // Snapshot every computed value first so inlining a parent cannot change a
+  // child's inherited opacity, units or custom properties during this walk.
+  const snapshots = Array.from(doc.querySelectorAll<SVGElement>('svg, svg *'), node => {
+    const computed = win.getComputedStyle(node);
+    return { node, values: properties.map(property => [property, computed.getPropertyValue(property)]) };
+  });
+  for (const { node, values } of snapshots) {
+    for (const [property, value] of values) {
+      if (value) node.style.setProperty(property, value);
+    }
+  }
 }
 
 /** Prepare slide HTML for html-to-image (static fonts/images; keep chart scripts). */
@@ -297,15 +318,14 @@ function loadHtmlIframe(
           return;
         }
         const wrapper = (doc.querySelector('.wrapper') || doc.body) as HTMLElement;
-        // Normalize canvas size so html-to-image has a stable box.
-        if (wrapper && wrapper !== doc.body) {
-          wrapper.style.width = `${SLIDE_W_PX}px`;
-          wrapper.style.height = `${SLIDE_H_PX}px`;
-          wrapper.style.overflow = 'hidden';
-        }
+        // Match the author's canvas instead of stretching a 1280×720 layout
+        // to 1600×900, which changes grid/flex layout and chart sizes.
+        const canvas = measureSlideCanvas(doc);
+        iframe.style.width = `${canvas.width}px`;
+        iframe.style.height = `${canvas.height}px`;
         doc.body.style.margin = '0';
-        doc.body.style.width = `${SLIDE_W_PX}px`;
-        doc.body.style.height = `${SLIDE_H_PX}px`;
+        doc.body.style.width = `${canvas.width}px`;
+        doc.body.style.height = `${canvas.height}px`;
         doc.body.style.overflow = 'hidden';
         window.clearTimeout(loadTimer);
         iframe.onload = null;
@@ -455,10 +475,10 @@ async function waitForSlideReady(
   }
 }
 
-function captureOptions(pixelRatio: number) {
+function captureOptions(pixelRatio: number, wrapper: HTMLElement) {
   return {
-    width: SLIDE_W_PX,
-    height: SLIDE_H_PX,
+    width: wrapper.offsetWidth || SLIDE_W_PX,
+    height: wrapper.offsetHeight || SLIDE_H_PX,
     cacheBust: true,
     skipFonts: true,
     // Transparent or suppressed unsupported regions should reveal a neutral
@@ -488,7 +508,7 @@ async function toPngSafe(
   options: { pixelRatio: number },
 ): Promise<string> {
   const run = (pixelRatio: number) =>
-    withTimeout(toPng(wrapper, captureOptions(pixelRatio)), 20000, 'slide capture');
+    withTimeout(toPng(wrapper, captureOptions(pixelRatio, wrapper)), 20000, 'slide capture');
 
   try {
     return await run(options.pixelRatio);
@@ -521,7 +541,7 @@ export async function captureHtmlSlidePng(
   const { htmlWithInlinedEcharts } = await import('./echartsInline');
   const withCharts = await htmlWithInlinedEcharts(await embedSlideAssetsForExport(html));
   const prepared = htmlForRasterCapture(withCharts);
-  const needsJs = /data-lazymind-echarts=|echarts\.init|id=["']chart_/i.test(prepared);
+  const needsJs = /data-lazymind-echarts=|data-lazymind-theme=|echarts\.init|id=["']chart_/i.test(prepared);
   const { iframe, doc, wrapper } = await loadHtmlIframe(prepared, { allowScripts: needsJs });
   try {
     await waitForSlideReady(doc, {
@@ -529,6 +549,7 @@ export async function captureHtmlSlidePng(
       settleMs: options?.waitMs ?? (needsJs ? 280 : 120),
     });
     applyHtmlPreviewCompatibilityFallbacks(doc);
+    inlineSvgStylesForRasterCapture(doc);
     await waitForAnimationFrames(doc.defaultView, 1);
     return await toPngSafe(wrapper, { pixelRatio });
   } finally {
@@ -648,6 +669,7 @@ export async function exportHtmlSlidesAsRasterPdf(
         orientation: 'landscape',
         unit: 'pt',
         format: [SLIDE_W_IN * 72, SLIDE_H_IN * 72],
+        compress: true,
       });
     } else {
       pdf.addPage([SLIDE_W_IN * 72, SLIDE_H_IN * 72], 'landscape');

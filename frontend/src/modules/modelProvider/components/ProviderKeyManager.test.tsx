@@ -200,6 +200,18 @@ describe("provider key controls", () => {
       screen.queryByText("secret-for-explicit-action"),
     ).not.toBeInTheDocument();
   });
+  it("shows a long revealed key in the expanded row and restores the compact masked row", async () => {
+    const longKey = "sk-" + "x".repeat(509);
+    mocks.reveal.mockResolvedValue(longKey);
+    render(<ProviderKeyManager {...props()} />);
+    const masked = screen.getByText("****1234");
+    expect(masked.closest(".provider-key-row")).not.toHaveClass("is-revealed");
+    fireEvent.click(screen.getByRole("button", { name: "modelProvider.keyManager.reveal" }));
+    const revealed = await screen.findByText(longKey);
+    expect(revealed.closest(".provider-key-row")).toHaveClass("is-revealed");
+    fireEvent.click(screen.getByRole("button", { name: "modelProvider.keyManager.hide" }));
+    expect(screen.getByText("****1234").closest(".provider-key-row")).not.toHaveClass("is-revealed");
+  });
   it("copies the actual key without displaying it", async () => {
     render(<ProviderKeyManager {...props()} />);
     fireEvent.click(

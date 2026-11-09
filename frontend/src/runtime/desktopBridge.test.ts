@@ -27,12 +27,19 @@ describe("browser Assistant Bridge session synchronization", () => {
   beforeEach(() => {
     // These tests cover session/action ordering; automatic discovery has its own suite.
     vi.stubEnv("VITE_LAZYMIND_ASSISTANT_BRIDGE_URL", "http://127.0.0.1:19091");
-    mocks.user.mockReset();
     vi.restoreAllMocks();
+    mocks.user.mockReset();
+    mocks.user.mockReturnValue({ token: "access", refreshToken: "refresh" });
     Reflect.deleteProperty(window, "lazymindDesktop");
   });
 
   afterEach(() => { vi.unstubAllEnvs(); });
+
+  it("passes an explicit refresh to the browser Assistant Bridge", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({ agents: {} }), { status: 200 }));
+    await agentIntegrationStatuses(true);
+    expect(fetchMock).toHaveBeenCalledWith("http://127.0.0.1:19091/v1/agents?refresh_installations=true", expect.anything());
+  });
 
   it.each([
     { name: "slow DSH status", request: () => agentIntegrationStatuses(), delay: 20_000, ok: true },
@@ -80,7 +87,8 @@ describe("browser Assistant Bridge session synchronization", () => {
     expect(authorize).toHaveBeenCalledWith("selection");
   });
 
-  it("clears a stale Assistant session before reading status through Desktop IPC", async () => {
+  it("does not clear an unidentified connector login before reading status through Desktop IPC", async () => {
+    mocks.user.mockReturnValue(null);
     const status = { agent: "codex", display_name: "Codex", state: "ready" };
     const desktopStatus = vi.fn().mockResolvedValue({ agents: { codex: status } });
     const sessionClear = vi.fn().mockResolvedValue({ ok: true });
@@ -93,12 +101,12 @@ describe("browser Assistant Bridge session synchronization", () => {
     const result = await agentIntegrationStatuses();
 
     expect(result).toEqual({ ok: true, data: { codex: status } });
-    expect(sessionClear).toHaveBeenCalledOnce();
+    expect(sessionClear).not.toHaveBeenCalled();
     expect(desktopStatus).toHaveBeenCalledOnce();
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("updates the Assistant session before reading status through Desktop IPC", async () => {
+  it.each([false, true])("syncs the current session before Desktop status (refresh=%s)", async refresh => {
     mocks.user.mockReturnValue({ token: "new-access", refreshToken: "new-refresh" });
     const desktopStatus = vi.fn().mockResolvedValue({ agents: {} });
     const sessionSet = vi.fn().mockResolvedValue({ ok: true });
@@ -108,12 +116,14 @@ describe("browser Assistant Bridge session synchronization", () => {
     });
     const fetchMock = vi.spyOn(globalThis, "fetch");
 
-    await agentIntegrationStatuses();
+    const result = await (refresh ? agentIntegrationStatuses(true) : agentIntegrationStatuses());
 
+    expect(result).toEqual({ ok: true, data: {} });
     expect(sessionSet).toHaveBeenCalledWith(expect.objectContaining({
       access_token: "new-access", refresh_token: "new-refresh",
     }));
-    expect(desktopStatus).toHaveBeenCalledOnce();
+    expect(desktopStatus.mock.calls).toEqual([[refresh]]);
+    expect(sessionSet.mock.invocationCallOrder[0]).toBeLessThan(desktopStatus.mock.invocationCallOrder[0]);
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
@@ -152,19 +162,13 @@ describe("browser Assistant Bridge session synchronization", () => {
     expect(fetchMock.mock.calls[1][0]).toBe("http://127.0.0.1:19091/v1/agents");
   });
 
-  it("clears the Bridge session when the web user is signed out", async () => {
+  it("does not delete connector credentials just because this browser has no user", async () => {
     mocks.user.mockReturnValue(null);
     const fetchMock = vi.spyOn(globalThis, "fetch")
-      .mockResolvedValueOnce(new Response(JSON.stringify({ ok: true }), { status: 200 }))
       .mockResolvedValueOnce(new Response(JSON.stringify({ agents: {} }), { status: 200 }));
-
     await agentIntegrationStatuses();
-
-    expect(fetchMock).toHaveBeenNthCalledWith(
-      1,
-      "http://127.0.0.1:19091/v1/session",
-      expect.objectContaining({ method: "DELETE" }),
-    );
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledWith("http://127.0.0.1:19091/v1/agents", expect.anything());
   });
 
   it("reads executor permissions from the local Bridge", async () => {
@@ -224,7 +228,6 @@ describe("browser Assistant Bridge session synchronization", () => {
   it("changes one executor permission through the local Bridge", async () => {
     mocks.user.mockReturnValue(null);
     const fetchMock = vi.spyOn(globalThis, "fetch")
-      .mockResolvedValueOnce(new Response(JSON.stringify({ ok: true }), { status: 200 }))
       .mockResolvedValueOnce(new Response(JSON.stringify({
         provider: "workbuddy", enabled: false,
       }), { status: 200 }));
@@ -236,7 +239,7 @@ describe("browser Assistant Bridge session synchronization", () => {
       data: { provider: "workbuddy", enabled: false },
     });
     expect(fetchMock).toHaveBeenNthCalledWith(
-      2,
+      1,
       "http://127.0.0.1:19091/v1/executors/workbuddy/disable",
       expect.objectContaining({ method: "POST" }),
     );

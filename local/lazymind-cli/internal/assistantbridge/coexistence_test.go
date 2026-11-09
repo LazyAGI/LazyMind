@@ -150,7 +150,11 @@ func TestBrowserSessionsRouteToIndependentStores(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, method := range []string{http.MethodPost, http.MethodDelete} {
-		r := httptest.NewRequest(method, "/v1/session", strings.NewReader(`{"server_url":"http://localhost:8090","access_token":"compose-token","refresh_token":"compose-refresh"}`))
+		requestBody := `{"server_url":"http://localhost:8090","access_token":"compose-token","refresh_token":"compose-refresh"}`
+		if method == http.MethodDelete {
+			requestBody = `{"expected_session":` + requestBody + `}`
+		}
+		r := httptest.NewRequest(method, "/v1/session", strings.NewReader(requestBody))
 		r.Header.Set("Origin", "http://localhost:8090")
 		w := httptest.NewRecorder()
 		s.routes().ServeHTTP(w, r)

@@ -245,8 +245,15 @@ class AgentEventFrameTranslator:
         event_type = str(event.get('tag', '') or '')
         if event_type == 'model_fallback_failed':
             code = event.get('fallback_code')
-            if code not in {'model_fallback_exhausted', 'model_context_not_fit', 'runtime_failure'}:
+            if code not in {'model_fallback_exhausted', 'model_context_not_fit', 'runtime_failure', 'model_failure'}:
                 raise ValueError('invalid model fallback terminal code')
+            if code == 'model_failure':
+                terminal = event.get('terminal')
+                if not isinstance(terminal, dict) or terminal.get('kind') != 'failure' or not isinstance(
+                    terminal.get('failure'), dict,
+                ) or not terminal.get('model_call_id'):
+                    raise ValueError('invalid primary model failure terminal')
+                self.run.failure_terminal = copy.deepcopy(terminal)
             self.run.fallback_code = code
             return frames
         if event_type == 'runtime_event':
@@ -507,6 +514,23 @@ class AgentEventFrameTranslator:
 
     def _collect_sources(self) -> Any:
         return self.citation_plugin.collect()
+
+    def begin_steering_segment(self) -> list[dict[str, Any]]:
+        """Settle buffered text before the durable boundary, then start a reply.
+
+        Export parsing is per reply, so a later final snapshot cannot rewrite
+        text belonging to an earlier (interrupted) reply.
+        """
+        frames = self.flush()
+        if self.export_stream is not None:
+            tail = self.export_stream.pending[self.export_stream.emitted:]
+            if tail:
+                frames.append(_stream_frame(text=tail))
+            self.export_stream = ChatExportStream()
+        self.streamed_text = False
+        self.ask_pending_emitted = False
+        self.capability_dependency_emitted = False
+        return frames
 
     def finish(self, final_result: Any) -> list[dict[str, Any]]:
         frames = self.flush()

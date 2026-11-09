@@ -22,6 +22,7 @@ from .message_fields import model_facing_history
 from lazyllm.module.llms.onlinemodule.base import ModelCallControl
 from .cancellation import UserCancelledError
 from .models import FallbackRunState, ModelCandidate
+from .steering import SteeringInterruptedError
 from lazymind.config import config
 from lazymind.chat.runtime_events import runtime_event
 
@@ -143,6 +144,7 @@ class FallbackLLM(ModuleBase, LLMBase):
                          type=getattr(state.raw_llm, 'type', 'LLM'))
         self.state = state
         self._cancel_check = cancel_check
+        self._steering_interrupt_check = None
         self._prompt = _copy_prompt(state.raw_llm._prompt)
         self._formatter = copy.copy(state.raw_llm._formatter)
 
@@ -164,6 +166,8 @@ class FallbackLLM(ModuleBase, LLMBase):
     def _check_cancel(self):
         if self._cancel_check is not None and self._cancel_check(None):
             raise UserCancelledError('stopped during a model request')
+        if self._steering_interrupt_check is not None:
+            self._steering_interrupt_check()
         return False
 
     def initialization_budget(self):
@@ -216,6 +220,7 @@ class FallbackLLM(ModuleBase, LLMBase):
                 raise
 
         attempted = set()
+        primary_model_error = None
         max_candidates = max(1, int(config['model_fallback_max_candidates']))
         sent_count = 0
 
@@ -228,7 +233,6 @@ class FallbackLLM(ModuleBase, LLMBase):
             control.check()
             attempted.add(current.candidate_id)
             local_failure = []
-            call_index = 0
             call_open = False
             output_metadata = {'call_index': 0}
 
@@ -242,6 +246,8 @@ class FallbackLLM(ModuleBase, LLMBase):
 
             def sink(event, output_metadata=output_metadata, local_failure=local_failure):
                 try:
+                    if event.get('tag') in {'text', 'think'} and self._steering_interrupt_check is not None:
+                        self._steering_interrupt_check()
                     if event.get('tag') in {'text', 'think'} or (
                         event.get('tag') == 'runtime_event' and (event.get('runtime_event') or {}).get('type')
                         in {'model_call_started', 'model_retry_scheduled', 'model_call_finished'}
@@ -264,14 +270,13 @@ class FallbackLLM(ModuleBase, LLMBase):
             call_kwargs['output_limit'] = configured_output_limit(view, kwargs)
 
             def begin_output(output_metadata=output_metadata):
-                nonlocal call_index, call_open
+                nonlocal call_open
                 if call_open:
                     return
                 state.model_output_index += 1
-                call_index = state.model_output_index
-                output_metadata['call_index'] = call_index
+                output_metadata['call_index'] = state.model_output_index
                 call_open = True
-                emit({'tag': 'model_output', 'model_output': {'call_index': call_index, 'phase': 'begin'}})
+                emit({'tag': 'model_output', 'model_output': {**output_metadata, 'phase': 'begin'}})
 
             def check_request(request, current=current, budget=budget, begin_output=begin_output):
                 nonlocal requires_vision, sent_count
@@ -288,6 +293,30 @@ class FallbackLLM(ModuleBase, LLMBase):
                 sent_count += 1
                 begin_output()
 
+            def commit_output(current=current, raw=raw, budget=budget, reason=reason, output_metadata=output_metadata):
+                nonlocal call_open
+                state.current, state.raw_llm, state.budget = current, raw, budget
+                initial = state.initial_model_switch
+                commit_event = {'tag': 'model_output',
+                                'model_output': {'call_index': output_metadata['call_index'], 'phase': 'commit'}}
+                if initial is not None or current.candidate_id != original.candidate_id:
+                    commit_event.update(tag='runtime_event', runtime_event=runtime_event('model_switched', '', {
+                        'switch_index': state.switch_index + 1,
+                        'from': {key: initial['from'].get(key, '') for key in _public(original)}
+                        if initial is not None else _public(original),
+                        'to': _public(current),
+                        'reason_code': initial['reason_code'] if initial is not None else reason,
+                        'from_max_input_tokens': parse_token_limit(initial.get('from_max_input_tokens'))
+                        if initial is not None else original.max_input_tokens,
+                        'to_max_input_tokens': current.max_input_tokens,
+                        'context_compacted': False,
+                    }))
+                emit(commit_event)
+                call_open = False
+                if initial is not None or current.candidate_id != original.candidate_id:
+                    state.switch_index += 1
+                    state.initial_model_switch = None
+
             try:
                 response = view(
                     input, llm_chat_history=history, lazyllm_files=files,
@@ -296,6 +325,13 @@ class FallbackLLM(ModuleBase, LLMBase):
                 # A cache hit has no transport or stream callbacks, but its returned
                 # value still belongs to a normal output commit boundary.
                 begin_output()
+            except SteeringInterruptedError:
+                # Guidance is neither a provider failure nor user cancellation.
+                # Keep emitted partial output and close its transaction before
+                # the continuation begins another model call.
+                if call_open:
+                    commit_output()
+                raise
             except CancelledError:
                 rollback()
                 raise
@@ -319,14 +355,21 @@ class FallbackLLM(ModuleBase, LLMBase):
                 capacity_rejection = isinstance(exc, ContextCapacityError)
                 input_rejection = capacity_rejection or isinstance(exc, UnsupportedModelInput)
                 failure = exc.terminal.failure if isinstance(exc, ModelCallError) else None
+                if failure is not None and primary_model_error is None:
+                    primary_model_error = exc
                 unsupported_call = isinstance(exc, UnsupportedModelInput) or failure is not None and str(
                     failure.provider_error_code or '',
                 ).lower() in _UNSUPPORTED_CALL_CODES
-                if failure is None and not input_rejection:
-                    if not isinstance(exc, ModelCallError):
-                        exc._model_fallback_local_failure = True
+                if failure is None and not input_rejection and not isinstance(exc, ModelCallError):
+                    exc._model_fallback_local_failure = True
                     raise
-                if not input_rejection and failure.code.value not in _RECOVERABLE and not unsupported_call:
+                if not input_rejection and not unsupported_call and (
+                    failure is None or failure.code.value not in _RECOVERABLE
+                ):
+                    if primary_model_error is not None and primary_model_error is not exc:
+                        # No replacement was committed; attribute the failed recovery to the selected model.
+                        emit({'tag': 'model_fallback_failed', 'fallback_code': 'model_failure',
+                              'terminal': primary_model_error.terminal.public_dict()})
                     raise
                 if not input_rejection:
                     state.failed_candidates.add(current.candidate_id)
@@ -368,27 +411,7 @@ class FallbackLLM(ModuleBase, LLMBase):
                 if local_failure:
                     raise local_failure[0]
                 result = self._formatter(response)
-                state.current, state.raw_llm, state.budget = current, raw, budget
-                initial = state.initial_model_switch
-                commit_event = {'tag': 'model_output',
-                                'model_output': {'call_index': call_index, 'phase': 'commit'}}
-                if initial is not None or current.candidate_id != original.candidate_id:
-                    commit_event.update(tag='runtime_event', runtime_event=runtime_event('model_switched', '', {
-                        'switch_index': state.switch_index + 1,
-                        'from': {key: initial['from'].get(key, '') for key in _public(original)}
-                        if initial is not None else _public(original),
-                        'to': _public(current),
-                        'reason_code': initial['reason_code'] if initial is not None else reason,
-                        'from_max_input_tokens': parse_token_limit(initial.get('from_max_input_tokens'))
-                        if initial is not None else original.max_input_tokens,
-                        'to_max_input_tokens': current.max_input_tokens,
-                        'context_compacted': False,
-                    }))
-                emit(commit_event)
-                call_open = False
-                if initial is not None or current.candidate_id != original.candidate_id:
-                    state.switch_index += 1
-                    state.initial_model_switch = None
+                commit_output()
             except UserCancelledError:
                 rollback()
                 raise

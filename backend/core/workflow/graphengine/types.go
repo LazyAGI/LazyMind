@@ -2,7 +2,11 @@
 // for plugin workflow graphs. It intentionally has no database dependencies.
 package graphengine
 
-import "encoding/json"
+import (
+	"encoding/json"
+
+	"lazymind/core/common/askuser"
+)
 
 const SchemaVersion = "3"
 
@@ -86,14 +90,31 @@ type CompiledBypass struct {
 // collect before it initializes a Workflow session. It is deliberately part of
 // the package contract: hosts must not branch on a particular workflow id.
 type ClarificationField struct {
-	ID           string                   `json:"id" yaml:"id"`
-	Label        string                   `json:"label,omitempty" yaml:"label,omitempty"`
-	Question     string                   `json:"question" yaml:"question"`
-	AskWhen      string                   `json:"ask_when,omitempty" yaml:"ask_when,omitempty"`
-	Type         string                   `json:"type,omitempty" yaml:"type,omitempty"`
-	Choices      []string                 `json:"choices,omitempty" yaml:"choices,omitempty"`
-	ChoicePolicy string                   `json:"choice_policy,omitempty" yaml:"choice_policy,omitempty"`
-	Attachment   *ClarificationAttachment `json:"attachment,omitempty" yaml:"attachment,omitempty"`
+	ID            string                   `json:"id" yaml:"id"`
+	Label         string                   `json:"label,omitempty" yaml:"label,omitempty"`
+	Question      string                   `json:"question" yaml:"question"`
+	AskWhen       string                   `json:"ask_when,omitempty" yaml:"ask_when,omitempty"`
+	Type          string                   `json:"type,omitempty" yaml:"type,omitempty"`
+	Choices       []string                 `json:"choices,omitempty" yaml:"choices,omitempty"`
+	ChoicePolicy  string                   `json:"choice_policy,omitempty" yaml:"choice_policy,omitempty"`
+	Attachment    *ClarificationAttachment `json:"attachment,omitempty" yaml:"attachment,omitempty"`
+	Reason        string                   `json:"reason,omitempty" yaml:"reason,omitempty"`
+	Required      bool                     `json:"required,omitempty" yaml:"required,omitempty"`
+	Resolution    string                   `json:"resolution,omitempty" yaml:"resolution,omitempty"`
+	Default       any                      `json:"default,omitempty" yaml:"default,omitempty"`
+	AllowOther    *bool                    `json:"allow_other,omitempty" yaml:"allow_other,omitempty"`
+	BooleanLabels *askuser.BooleanLabels   `json:"boolean_labels,omitempty" yaml:"boolean_labels,omitempty"`
+	Validation    *askuser.Validation      `json:"validation,omitempty" yaml:"validation,omitempty"`
+	AppliesWhen   *ClarificationCondition  `json:"applies_when,omitempty" yaml:"applies_when,omitempty"`
+	ValueAliases  map[string]string        `json:"value_aliases,omitempty" yaml:"value_aliases,omitempty"`
+	Patterns      []string                 `json:"patterns,omitempty" yaml:"patterns,omitempty"`
+}
+
+// Conditions refer to normalized semantic fields, not model-written prose.
+type ClarificationCondition struct {
+	Field     string `json:"field" yaml:"field"`
+	Equals    any    `json:"equals,omitempty" yaml:"equals,omitempty"`
+	NotEquals any    `json:"not_equals,omitempty" yaml:"not_equals,omitempty"`
 }
 
 // ClarificationAttachment reuses the Chat host's normal attachment transport
@@ -118,10 +139,43 @@ type PostStepCheck struct {
 	Arguments map[string]string `json:"arguments,omitempty" yaml:"arguments,omitempty"`
 }
 
+// AttachmentClarification permits one supplemental startup card after reading
+// the selected attachment, in addition to the basic requirements card.
+type AttachmentClarification struct {
+	FilenameSuffixes []string `json:"filename_suffixes" yaml:"filename_suffixes"`
+	QuestionIDPrefix string   `json:"question_id_prefix" yaml:"question_id_prefix"`
+	InspectionTools  []string `json:"inspection_tools" yaml:"inspection_tools"`
+	Instructions     string   `json:"instructions" yaml:"instructions"`
+}
+
+// InputCheckpoint declares a durable post-step question artifact consumed by Chat.
+type InputCheckpoint struct {
+	AfterStep   string   `json:"after_step" yaml:"after_step"`
+	Slot        string   `json:"slot" yaml:"slot"`
+	BeforeSteps []string `json:"before_steps" yaml:"before_steps"`
+	Title       string   `json:"title,omitempty" yaml:"title,omitempty"`
+}
+
+// CompletedAction binds a package-declared artifact editor after generation.
+// Session bindings are supplied by the host, never by model arguments.
+type CompletedAction struct {
+	Name          string         `json:"name" yaml:"name"`
+	RequiresSlot  string         `json:"requires_slot" yaml:"requires_slot"`
+	Description   string         `json:"description" yaml:"description"`
+	AgentType     string         `json:"agent_type" yaml:"agent_type"`
+	Title         string         `json:"title" yaml:"title"`
+	Routing       string         `json:"routing" yaml:"routing"`
+	SessionParams []string       `json:"session_params,omitempty" yaml:"session_params,omitempty"`
+	Params        map[string]any `json:"params,omitempty" yaml:"params,omitempty"`
+	Tools         []string       `json:"tools" yaml:"tools"`
+	OutputSlots   []string       `json:"output_slots" yaml:"output_slots"`
+}
+
 // RuntimePolicy contains host-neutral execution behavior declared by a
 // Workflow package. Hosts consume this policy instead of branching on a
 // particular workflow id.
 type RuntimePolicy struct {
+	CompletedActions []CompletedAction `json:"completed_actions,omitempty" yaml:"completed_actions,omitempty"`
 	// These contracts are pinned to the package revision, never inferred from its ID.
 	TriggerInputs             *[]string                 `json:"trigger_inputs,omitempty" yaml:"trigger_inputs,omitempty"`
 	ExecutionLimits           map[string]ExecutionLimit `json:"execution_limits,omitempty" yaml:"execution_limits,omitempty"`
@@ -136,13 +190,18 @@ type RuntimePolicy struct {
 	CompletedEditRouting      string                    `json:"completed_edit_routing,omitempty" yaml:"completed_edit_routing,omitempty"`
 	CompletedContinueSteps    []string                  `json:"completed_continue_steps,omitempty" yaml:"completed_continue_steps,omitempty"`
 	ClarificationFields       []ClarificationField      `json:"clarification_fields,omitempty" yaml:"clarification_fields,omitempty"`
+	AttachmentClarification   *AttachmentClarification  `json:"attachment_clarification,omitempty" yaml:"attachment_clarification,omitempty"`
+	InputCheckpoint           *InputCheckpoint          `json:"input_checkpoint,omitempty" yaml:"input_checkpoint,omitempty"`
 	PostStepChecks            []PostStepCheck           `json:"post_step_checks,omitempty" yaml:"post_step_checks,omitempty"`
+	// RecoveryInputs maps a rerun step's external inputs to feedback output slots.
+	// Core snapshots selected feedback before rewind invalidates its producer.
+	RecoveryInputs map[string]map[string]string `json:"recovery_inputs,omitempty" yaml:"recovery_inputs,omitempty"`
 }
 
 func (p RuntimePolicy) IsZero() bool {
-	return p.TriggerInputs == nil && len(p.ExecutionLimits) == 0 && !p.TransactionalOutputs && p.Publication == nil && len(p.PublishedInputAliases) == 0 && len(p.HostExtensions) == 0 && len(p.PublisherOwnedSlots) == 0 && len(p.ExclusiveToolCapabilities) == 0 && !p.CollectsKnowledge &&
+	return len(p.CompletedActions) == 0 && p.TriggerInputs == nil && len(p.ExecutionLimits) == 0 && !p.TransactionalOutputs && p.Publication == nil && len(p.PublishedInputAliases) == 0 && len(p.HostExtensions) == 0 && len(p.PublisherOwnedSlots) == 0 && len(p.ExclusiveToolCapabilities) == 0 && !p.CollectsKnowledge &&
 		p.CompletedEditStep == "" && p.CompletedEditRouting == "" && len(p.CompletedContinueSteps) == 0 && len(p.ClarificationFields) == 0 &&
-		len(p.PostStepChecks) == 0
+		p.AttachmentClarification == nil && p.InputCheckpoint == nil && len(p.PostStepChecks) == 0 && len(p.RecoveryInputs) == 0
 }
 
 type ExecutionLimit struct {

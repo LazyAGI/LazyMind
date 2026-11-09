@@ -29,6 +29,9 @@ type Config struct {
 	Profile     string `json:"profile,omitempty"`
 	PairingFile string `json:"pairing_file,omitempty"`
 	Controlled  bool   `json:"controlled"`
+	// WorkflowInputRoots optionally restricts local Workflow input reads. Empty
+	// means explicit absolute paths use the Connector account's file permissions.
+	WorkflowInputRoots []string `json:"workflow_input_roots,omitempty"`
 	// Overrides are an explicit manual configuration, never imported from the
 	// installing process's inherited environment.
 	Overrides map[string]string `json:"overrides,omitempty"`
@@ -95,6 +98,11 @@ func (c Config) Validate() error {
 	}
 	if c.PairingFile != "" && (!filepath.IsAbs(c.PairingFile) || filepath.Dir(c.PairingFile) != filepath.Join(c.Home, "workflow-hosts")) {
 		return errors.New("pairing must belong to this LazyMind home")
+	}
+	for _, root := range c.WorkflowInputRoots {
+		if !filepath.IsAbs(root) || filepath.Clean(root) != root {
+			return errors.New("workflow_input_roots must contain clean absolute directory paths")
+		}
 	}
 	for name, value := range c.Overrides {
 		if !overrideKeys[name] {
@@ -202,6 +210,7 @@ func Save(c Config) (string, error) {
 			return "", errors.New("connection ownership mismatch")
 		}
 		c.Overrides = previous.Overrides
+		c.WorkflowInputRoots = previous.WorkflowInputRoots
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return "", err
 	}

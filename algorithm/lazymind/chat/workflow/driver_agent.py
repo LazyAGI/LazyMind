@@ -22,6 +22,13 @@ _OUTPUT_CONSTRAINT = """
 Your response becomes the next simulated user message. Return only 1-2 concise natural-language
 sentences. Never claim success when the terminal status or required artifacts indicate failure.
 Never ask the user a question and never directly invoke a Workflow transition.
+Current selected effective artifacts supersede historical summaries and failure assessments.
+Do not reject them merely because a prior attempt lacked evidence. Optional images,
+subjective polish and omitted unsupported claims are advisory, not reasons to rewind.
+Prefer continuing a usable result. Recommend a scoped repair only for concrete unmet
+required outputs; do not invent retry limits from policy examples.
+This output contract overrides legacy verdict/XML formats and examples in the policy.
+Do not output PASS, RETRY, DONE or FAIL codes. Use the user's language when available.
 """
 
 
@@ -31,6 +38,10 @@ class DriverEvaluationError(Exception):
 
 def _clean_message(text: str) -> str:
     text = _THINK_RE.sub('', text)
+    # Older pinned workflow revisions still request XML verdicts. Remove the
+    # entire control element before stripping markup, otherwise RETRY and the
+    # explanation concatenate into a synthetic user message.
+    text = re.sub(r'<verdict\b[^>]*>.*?</verdict\s*>', '', text, flags=re.S | re.I)
     text = re.sub(r'<[^>]+>', '', text).strip()
     if len(text) > 300:
         text = text[:300].rstrip() + '...'

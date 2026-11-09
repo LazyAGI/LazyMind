@@ -34,6 +34,8 @@ const ownerProcessPollInterval = time.Second
 
 const maxInternalSessionBytes = 1 << 20
 
+var invalidateDesktopApplications = agentexec.InvalidateDesktopApplications
+
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -98,11 +100,20 @@ func runInternal(ctx context.Context, args []string, stdout, stderr io.Writer) e
 	flags := flag.NewFlagSet("internal agent "+agent+" "+action, flag.ContinueOnError)
 	flags.SetOutput(stderr)
 	agentBinary := flags.String("agent-bin", "", "external Agent CLI executable")
+	refreshInstallations := flags.Bool("refresh-installations", false, "refresh cached desktop installation discovery")
 	if err := flags.Parse(args[3:]); err != nil {
 		return err
 	}
 	if flags.NArg() != 0 {
 		return errors.New("unexpected internal command arguments")
+	}
+	if *refreshInstallations || action == "connect" {
+		if err := invalidateDesktopApplications(ctx); err != nil {
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
+			fmt.Fprintf(stderr, "Desktop discovery cache refresh: %v\n", err)
+		}
 	}
 	store, err := credentials.NewStore("", "")
 	if err != nil {
@@ -159,7 +170,7 @@ func runInternal(ctx context.Context, args []string, stdout, stderr io.Writer) e
 
 func runInternalSession(args []string, stdin io.Reader, stdout io.Writer) error {
 	if len(args) != 1 {
-		return errors.New("usage: internal session <set|clear|renew|snapshot>")
+		return errors.New("usage: internal session <set|clear|clear-if-current|renew|snapshot>")
 	}
 	store, err := credentials.NewStore("", "")
 	if err != nil {
@@ -215,6 +226,17 @@ func runInternalSession(args []string, stdin io.Reader, stdout io.Writer) error 
 		if err != nil {
 			return err
 		}
+	case "clear-if-current":
+		var request credentials.ClearRequest
+		body, err := io.ReadAll(io.LimitReader(stdin, maxInternalSessionBytes+1))
+		if err != nil || len(body) > maxInternalSessionBytes || json.Unmarshal(body, &request) != nil {
+			return errors.New("expected LazyMind session is required")
+		}
+		cleared, err := store.ClearIfCurrent(request)
+		if err != nil {
+			return err
+		}
+		return printJSON(stdout, map[string]bool{"ok": true, "cleared": cleared})
 	case "clear":
 		if err := store.Clear(); err != nil {
 			return err

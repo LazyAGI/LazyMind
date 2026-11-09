@@ -116,6 +116,7 @@ interface IChatLayoutProps {
   setChatConfigFn: (val: ChatConfig) => void;
   canChat: boolean;
   embeddingReady?: boolean | null;
+  vlmReady?: boolean | null;
   multimodalEmbeddingReady?: boolean | null;
   rerankReady?: boolean | null;
   chatDisabledReason?: string;
@@ -134,6 +135,7 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
     setChatConfigFn,
     canChat,
     embeddingReady,
+    vlmReady,
     multimodalEmbeddingReady,
     rerankReady,
     chatDisabledReason,
@@ -330,9 +332,11 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
       workflowUI.tabs,
       workflowSession?.slots ?? [],
       workflowUI.tab_visibility_ready_material,
+      { steps: workflowSession?.steps, projection: workflowSession?.projection },
+      workflowUI.hide_skipped_steps,
     ).length;
     return count > 0 ? count : undefined;
-  }, [workflowSession?.slots, workflowSession?.status, workflowUI]);
+  }, [workflowSession?.slots, workflowSession?.steps, workflowSession?.status, workflowSession?.projection, workflowUI]);
   const hasWorkflowSession = workflowSession !== null;
   const workflowDefinitionChanged = useWorkflowStore((s) =>
     sessionId
@@ -1083,6 +1087,7 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
           hasWorkflowSession={hasWorkflowSession}
           knowledgeRefreshKey={knowledgeRefreshKey}
           embeddingReady={embeddingReady}
+          vlmReady={vlmReady}
           multimodalEmbeddingReady={multimodalEmbeddingReady}
           rerankReady={rerankReady}
           disabledReason={
@@ -1194,6 +1199,7 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
               onRetained={handleSideChatRetained}
               canChat={canChat}
               embeddingReady={embeddingReady}
+              vlmReady={vlmReady}
               multimodalEmbeddingReady={multimodalEmbeddingReady}
               rerankReady={rerankReady}
               returnFocusRef={sideChatReturnFocusRef}
