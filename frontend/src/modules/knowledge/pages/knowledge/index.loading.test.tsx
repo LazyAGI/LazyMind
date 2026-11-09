@@ -324,3 +324,34 @@ it('keeps the chosen sidebar translation when switching the main searchable PDF'
   expect(screen.getByRole('combobox',{name:'选择缓存译本'}).closest('.ant-select')).toHaveTextContent('中文');
   expect(container.querySelector('.knowledge-full-translation-viewer [data-filename="older.pdf"]')).not.toBeNull();
 });
+
+it('previews a sidebar drag without rerendering the PDF or persisting each pointer movement', async () => {
+  useDatasetPermissionStore.getState().setCurrentDataset({dataset_id:'library',scene:'general'} as Dataset);
+  axiosInstance.defaults.adapter=config=>config.url?.endsWith('/documents/paper')
+    ? Promise.resolve({config,status:200,statusText:'OK',headers:{},data:{display_name:'manual.pdf'}})
+    : new Promise(()=>{});
+  const {container}=renderDocument();
+  fireEvent.click(await screen.findByRole('button',{name:/^Translation$|^翻译$/}));
+  await act(async()=>{});
+  const before=surfaces.viewerRenders;
+  const write=vi.spyOn(localStorage,'setItem');
+  vi.stubGlobal('PointerEvent',MouseEvent);
+  const frames=new Map<number,FrameRequestCallback>();let sequence=0;
+  vi.stubGlobal('requestAnimationFrame',(callback:FrameRequestCallback)=>{frames.set(++sequence,callback);return sequence;});
+  vi.stubGlobal('cancelAnimationFrame',(id:number)=>frames.delete(id));
+  const divider=screen.getByRole('separator',{name:/调整助手宽度|Resize assistant/});
+  divider.setPointerCapture=vi.fn();
+  fireEvent.pointerDown(divider,{button:0,clientX:600});
+  for(const x of [580,550,500])fireEvent.pointerMove(divider,{clientX:x});
+  act(()=>{for(const callback of frames.values())callback(0);frames.clear();});
+  const workspace=container.querySelector('.knowledge-paper-workspace') as HTMLElement;
+  expect(workspace.style.getPropertyValue('--paper-assistant-preview-width')).toBe('500px');
+  expect(surfaces.viewerRenders).toBe(before);
+  expect(write).not.toHaveBeenCalled();
+  fireEvent.pointerUp(divider,{clientX:480});
+  expect(workspace.style.getPropertyValue('--paper-assistant-preview-width')).toBe('');
+  expect(workspace.style.getPropertyValue('--paper-assistant-width')).toBe('520px');
+  expect(write).toHaveBeenCalledTimes(1);
+  expect(write).toHaveBeenLastCalledWith('paper-reader:assistant-width','520');
+  write.mockRestore();
+});

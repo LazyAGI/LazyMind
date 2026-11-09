@@ -34,7 +34,7 @@
   .paper-reader-pane { border: 1px solid var(--paper-border); border-radius: 12px; background: var(--paper-surface); gap: 0; }
   .paper-nav-pane { width: 236px; flex-basis: 236px; margin-right: 8px; border: 1px solid var(--paper-border); border-radius: 12px; overflow: hidden; }
   .paper-nav-pane.is-collapsed { display: none; }
-  .paper-chat-pane { width: var(--paper-assistant-width, 400px); flex-basis: var(--paper-assistant-width, 400px); border: 1px solid var(--paper-border); border-radius: 12px; }
+  .paper-chat-pane { width: var(--paper-assistant-preview-width, var(--paper-assistant-width, 400px)); flex-basis: var(--paper-assistant-preview-width, var(--paper-assistant-width, 400px)); border: 1px solid var(--paper-border); border-radius: 12px; }
   .paper-chat-pane.is-collapsed { display: none; }
   .paper-chat-open-content { background: var(--paper-surface); }
   .paper-chat-toolbar { min-height: 46px; padding: 6px 14px; border-bottom: 1px solid var(--paper-border); color: var(--paper-ink); box-sizing: border-box; }
@@ -99,9 +99,9 @@
   .paper-workspace-header-actions { display: flex; gap: 0; align-items: center; }
   .paper-workspace-header-actions .ant-btn { width: 30px; padding: 0; color: var(--paper-muted); }
   .paper-nav-pane:not(.is-collapsed) { position: absolute; z-index: 65; inset: 52px auto 8px 8px; width: min(300px, 85%); box-shadow: 0 8px 28px #26262615; }
-  .paper-chat-pane { overflow: hidden; transition: flex-basis 180ms ease, width 180ms ease, opacity 140ms ease; }
+  .paper-chat-pane { overflow: hidden; transition: opacity 140ms ease; }
   .paper-chat-pane.is-collapsed { display: flex; width: 0; flex-basis: 0; border-width: 0; opacity: 0; visibility: hidden; pointer-events: none; }
-  .paper-chat-open-content { width: var(--paper-assistant-width, 400px); flex: 1 1 0; }
+  .paper-chat-open-content { width: var(--paper-assistant-preview-width, var(--paper-assistant-width, 400px)); flex: 1 1 0; }
   .knowledge-paper-workspace[data-compact=true] > .paper-chat-pane { transition: transform 180ms ease, opacity 140ms ease; position: absolute; z-index: 64; inset: 4px 4px 4px auto; width: min(420px, calc(100% - 8px)); }
   .knowledge-paper-workspace[data-compact=true] > .paper-chat-pane.is-collapsed { transform: translateX(24px); }
   .knowledge-paper-workspace[data-compact=true] .paper-chat-open-content { width: 100%; }
@@ -127,8 +127,8 @@
     position: absolute; z-index: 70;
     inset: auto;
     top: clamp(8px, var(--paper-panel-y, 56px), max(8px, calc(100% - 628px)));
-    left: clamp(8px, var(--paper-panel-x, 32px), max(8px, calc(100% - var(--paper-assistant-width, 400px) - 8px)));
-    width: min(var(--paper-assistant-width, 400px), calc(100% - 16px));
+    left: clamp(8px, var(--paper-panel-x, 32px), max(8px, calc(100% - var(--paper-assistant-preview-width, var(--paper-assistant-width, 400px)) - 8px)));
+    width: min(var(--paper-assistant-preview-width, var(--paper-assistant-width, 400px)), calc(100% - 16px));
     height: min(620px, calc(100% - 16px));
     border: 1px solid var(--paper-border); border-radius: 16px;
     box-shadow: 0 12px 40px rgba(24, 39, 58, .14);

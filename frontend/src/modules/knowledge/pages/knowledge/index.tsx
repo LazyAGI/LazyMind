@@ -221,6 +221,12 @@ const KnowledgeDocumentContent = () => {
   },[isPaperDocument,knowledgeBaseId,knowledgeId,notesRevision]);
   const [nativePdfOutline,setNativePdfOutline]=useState<import('@/modules/knowledge/api/pdfOutline').PdfNativeOutlineItem[]>([]);
   const workspaceRef = useRef<HTMLDivElement>(null);
+  const previewPaperAssistantWidth = useCallback((width: number | undefined) => {
+    const element = workspaceRef.current;
+    if (!element) return;
+    if (width === undefined) element.style.removeProperty("--paper-assistant-preview-width");
+    else element.style.setProperty("--paper-assistant-preview-width", `${width}px`);
+  }, []);
   const navigationSequence = useRef(0);
   const [workspaceWidth, setWorkspaceWidth] = useState(1440);
   const [previewSideCollapsed, setPreviewSideCollapsed] = useState(false);
@@ -1275,7 +1281,7 @@ const KnowledgeDocumentContent = () => {
             />
 
         </div>
-        {!previewSideCollapsed && (panelLayout==="left" || panelLayout==="right") && workspaceWidth >= 900 && <PaperPaneDivider side={panelLayout==="left"?"left":"right"} width={Math.min(paperAssistantWidth, Math.max(320,workspaceWidth*.5))} maxWidth={Math.max(320,workspaceWidth*.5)} onChange={resizePaperAssistant} label={i18n.language.startsWith("zh") ? "调整助手宽度" : "Resize assistant"} />}
+        {!previewSideCollapsed && (panelLayout==="left" || panelLayout==="right") && workspaceWidth >= 900 && <PaperPaneDivider side={panelLayout==="left"?"left":"right"} width={Math.min(paperAssistantWidth, Math.max(320,workspaceWidth*.5))} maxWidth={Math.max(320,workspaceWidth*.5)} onChange={resizePaperAssistant} onPreview={previewPaperAssistantWidth} label={i18n.language.startsWith("zh") ? "调整助手宽度" : "Resize assistant"} />}
         <div ref={panelRef} style={panelLayout==="floating"?{"--paper-panel-x":`${floatingPosition.x}px`,"--paper-panel-y":`${floatingPosition.y}px`} as React.CSSProperties:undefined} className={`paper-chat-pane knowledge-preview-panel-column${previewSideCollapsed?" is-collapsed":""}`} aria-hidden={previewSideCollapsed}>
           {knowledgeDetail&&<>
             <div className="paper-chat-open-content">
