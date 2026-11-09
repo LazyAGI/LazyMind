@@ -135,49 +135,13 @@ func (a *Adapter) checkDSHOwnership() error {
 	for _, row := range yamlSequence(doc).Content {
 		if dshEntryID(row) == "mcp-lazymind" {
 			mcpCount++
-			if reference := decodeDSHStdio(row).Env[connectorconfig.EnvironmentKey]; reference != "" {
-				c, err := connectorconfig.Load(reference)
-				if err != nil {
-					return err
-				}
-				if c.Profile != filepath.Dir(path) {
-					return fmt.Errorf("MCP connection does not belong to %s", path)
-				}
-			}
-			if !stateForStdio(decodeDSHStdio(row), a.self, a.home, a.hostID, DeepSeekHarness).owned {
-				return fmt.Errorf("unmanaged LazyMind MCP entry in %s", path)
-			}
 		} else if scalarValue(row, "id") == dshWorkflowRow {
 			workflowCount++
-			file := scalarValue(mappingValue(row, "config"), "pairingFile")
-			if reference := scalarValue(mappingValue(row, "config"), "connectorConfig"); reference != "" {
-				connection, err := connectorconfig.Load(reference)
-				if err != nil {
-					return err
-				}
-				if connection.Home != a.home || connection.Provider != string(DeepSeekHarness) || connection.Profile != filepath.Dir(a.dshConfigPath()) {
-					return errors.New("DSH connection ownership mismatch")
-				}
-				file = connection.PairingFile
-			}
-			// A disabled row with no config is the tombstone left by disconnect.
-			if file == "" && scalarValue(row, "disabled") == "true" {
-				continue
-			}
-			if file == "" || filepath.Dir(filepath.Clean(file)) != filepath.Join(a.home, "workflow-hosts") {
-				return fmt.Errorf("unmanaged Workflow entry in %s", path)
-			}
-			body, err := os.ReadFile(file)
-			var pair struct {
-				Profile string `json:"profile"`
-			}
-			if err != nil || json.Unmarshal(body, &pair) != nil || pair.Profile != filepath.Dir(path) {
-				return fmt.Errorf("Workflow pairing does not belong to %s", path)
-			}
 		} else if hasLazyMindEntry(row) {
-			return fmt.Errorf("hand-written LazyMind entry in %s; reconcile it before connecting", path)
+			return fmt.Errorf("unsupported LazyMind entry in %s", path)
 		}
 	}
+
 	if mcpCount > 1 || workflowCount > 1 {
 		return fmt.Errorf("duplicate LazyMind entries in %s", path)
 	}
@@ -234,7 +198,7 @@ func (a *Adapter) dshDesktopStatusWithRuntime(runtime dshDesktopRuntime) (s agen
 	if conflict {
 		s.Message = "Hand-written LazyMind configuration conflicts with this connection: " + globalPath
 	}
-	complete, partial, failed := 0, false, false
+	complete, outdated, partial, failed := 0, 0, false, false
 	for _, name := range dshDesktopProfiles {
 		target := a.forDSHProfile(name, cli)
 		for _, inspected := range inspection.Profiles {
@@ -252,13 +216,18 @@ func (a *Adapter) dshDesktopStatusWithRuntime(runtime dshDesktopRuntime) (s agen
 				p.State, p.Message = agentintegration.Failed, err.Error()
 				failed = true
 			} else {
-				managed := state.configured && state.owned
+				managed := state.configured
 				_, recorded := record.Profiles[name]
 				s.CanDisconnect = s.CanDisconnect || managed || recorded
 				partial = partial || managed
-				if managed && state.current && target.dshWorkflowConfigured() {
+				if managed && !state.owned {
+					p.State = agentintegration.Conflict
+				}
+				if managed && state.current && target.dshWorkflowInstalled() {
 					p.State = agentintegration.Enabled
 					complete++
+				} else if managed && state.current && target.dshWorkflowNeedsUpdate() {
+					outdated++
 				}
 				if message := record.Profiles[name]; message != "" {
 					p.State, p.Message = agentintegration.Failed, message
@@ -286,6 +255,9 @@ func (a *Adapter) dshDesktopStatusWithRuntime(runtime dshDesktopRuntime) (s agen
 	case complete == len(dshDesktopProfiles) && !failed:
 		s.State = agentintegration.Enabled
 		s.Message = "Desktop and Web are configured. Restart DSH to activate plugins. This is installation status, not online status."
+	case outdated > 0 && complete+outdated == len(dshDesktopProfiles) && !failed:
+		s.State = agentintegration.Failed
+		s.Issue = dshIssue("plugin_update_required", "")
 	case cliErr != nil:
 		s.State = agentintegration.RequirementsMissing
 		s.Message = cliErr.Error()
@@ -417,15 +389,16 @@ func (a *Adapter) changeDSHProfile(ctx context.Context, connect bool) (err error
 			}
 			file := scalarValue(mappingValue(row, "config"), "pairingFile")
 			if reference := scalarValue(mappingValue(row, "config"), "connectorConfig"); reference != "" {
-				connection, err := connectorconfig.Load(reference)
-				if err != nil {
-					return err
+				connection, loadErr := connectorconfig.Load(reference)
+				file = ""
+				if loadErr == nil && connection.Home == a.home && connection.Provider == string(DeepSeekHarness) && connection.Profile == filepath.Dir(a.dshConfigPath()) {
+					file = connection.PairingFile
 				}
-				if connection.Home != a.home || connection.Provider != string(DeepSeekHarness) || connection.Profile != filepath.Dir(a.dshConfigPath()) {
-					return errors.New("DSH connection ownership mismatch")
-				}
-				file = connection.PairingFile
 			}
+			if file != "" && filepath.Dir(filepath.Clean(file)) != filepath.Join(a.home, "workflow-hosts") {
+				file = ""
+			}
+
 			if file != "" {
 				pair, e := snapshotDSHFile(file)
 				if e != nil {
@@ -470,7 +443,8 @@ func (a *Adapter) changeDSHDesktop(ctx context.Context, connect bool) agentinteg
 	defer cancel()
 	runtime := a.inspectDSHDesktop(ctx)
 	s := a.dshDesktopStatusWithRuntime(runtime)
-	if connect && (!s.CanConnect || s.State == agentintegration.Enabled) {
+	a.inspectConfiguration(&s)
+	if connect && (!s.CanConnect || s.State == agentintegration.Enabled && a.dshDesktopWorkflowConfigured(runtime)) {
 		return s
 	}
 	if !connect && !s.CanDisconnect {
@@ -492,7 +466,8 @@ func (a *Adapter) changeDSHDesktop(ctx context.Context, connect bool) agentinteg
 		runtime = a.inspectDSHDesktop(ctx)
 	}
 	s = a.dshDesktopStatusWithRuntime(runtime)
-	if connect && (!s.CanConnect || s.State == agentintegration.Enabled) {
+	a.inspectConfiguration(&s)
+	if connect && (!s.CanConnect || s.State == agentintegration.Enabled && a.dshDesktopWorkflowConfigured(runtime)) {
 		return s
 	}
 	r, err := a.dshRecord()
@@ -518,7 +493,25 @@ func (a *Adapter) changeDSHDesktop(ctx context.Context, connect bool) agentinteg
 	if running, err := agentexec.DSHDesktopRunning(ctx, cli); err != nil {
 		return dshFailure(s, fmt.Errorf("check running Desktop: %w", err))
 	} else if running {
-		return dshFailure(s, errors.New("fully quit DSH Desktop before changing the connection"))
+		return agentintegration.RequireQuit(s, r.Action)
+	}
+	if !connect {
+		globalPath := filepath.Join(dshHome(), "cordis.patch.yml")
+		global, readErr := readYAMLDocument(globalPath)
+		if readErr != nil {
+			return dshFailure(s, readErr)
+		}
+		if findDSHEntry(global) != nil {
+			unlock, lockErr := lockDSHPatch(ctx, globalPath)
+			if lockErr != nil {
+				return dshFailure(s, lockErr)
+			}
+			removeErr := removeDSHConfig(globalPath)
+			unlock()
+			if removeErr != nil {
+				return dshFailure(s, removeErr)
+			}
+		}
 	}
 	if connect {
 		if _, err := a.bridge.Probe(ctx); err != nil {
@@ -526,10 +519,15 @@ func (a *Adapter) changeDSHDesktop(ctx context.Context, connect bool) agentinteg
 		}
 	}
 	for _, p := range s.Profiles {
-		if connect && p.State == agentintegration.Enabled {
+		target := a.forDSHProfile(p.Name, cli)
+		for _, inspected := range runtime.inspection.Profiles {
+			if inspected.Name == p.Name {
+				target.dshMCPReady = inspected.Diagnostic == "" && inspected.MCPPath != "" && inspected.MCPVersion != ""
+			}
+		}
+		if connect && p.State == agentintegration.Enabled && target.dshWorkflowConfigured() {
 			continue
 		}
-		target := a.forDSHProfile(p.Name, cli)
 		if err := target.checkDSHOwnership(); err != nil {
 			r.Profiles[p.Name] = err.Error()
 			log.Printf("DSH %s integration: %v", p.Name, err)
@@ -552,4 +550,19 @@ func (a *Adapter) changeDSHDesktop(ctx context.Context, connect bool) agentinteg
 		return a.dshDesktopStatus(ctx)
 	}
 	return a.dshDesktopStatusWithRuntime(runtime)
+}
+
+func (a *Adapter) dshDesktopWorkflowConfigured(runtime dshDesktopRuntime) bool {
+	for _, name := range dshDesktopProfiles {
+		target := a.forDSHProfile(name, runtime.cli)
+		for _, inspected := range runtime.inspection.Profiles {
+			if inspected.Name == name {
+				target.dshMCPReady = inspected.Diagnostic == "" && inspected.MCPPath != "" && inspected.MCPVersion != ""
+			}
+		}
+		if !target.dshWorkflowConfigured() {
+			return false
+		}
+	}
+	return true
 }

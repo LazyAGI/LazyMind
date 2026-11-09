@@ -94,10 +94,8 @@ func configureLoginEnvironment(ctx context.Context, home string, port int, enabl
 	if _, err := os.Stat(path); err == nil && len(files.Entries) == 0 {
 		return fmt.Errorf("WorkBuddy login configuration already exists outside this installation")
 	}
-	// Independent of LazyMind/account startup. The persisted choice also prevents
-	// re-enabling after a partially failed disconnect. No desktop is launched here.
-	choice := filepath.Join(home, "workbuddy-workflow", "enabled.json")
-	script := "if [ -f " + desktopsetup.ShellQuote(choice) + " ]; then [ \"$(cat " + desktopsetup.ShellQuote(choice) + ")\" = true ] || exit 0; fi; exec /bin/launchctl setenv " + desktopDebugPortEnv + " " + strconv.Itoa(port)
+	// The login job is installed and removed with the actual integration settings.
+	script := "exec /bin/launchctl setenv " + desktopDebugPortEnv + " " + strconv.Itoa(port)
 	var escaped strings.Builder
 	_ = xml.EscapeText(&escaped, []byte(script))
 	body := `<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd"><plist version="1.0"><dict><key>Label</key><string>` + label + `</string><key>ProgramArguments</key><array><string>/bin/sh</string><string>-c</string><string>` + escaped.String() + `</string></array><key>RunAtLoad</key><true/></dict></plist>`

@@ -1,11 +1,10 @@
 package workflowhost
 
 import (
-	"lazymind/agentconnector/internal/integrationstate"
 	"testing"
 )
 
-func TestExplicitDisableRevokesEvenWhenComponentCleanupHasNotFinished(t *testing.T) {
+func TestPairingDisableRevokesUntilExplicitlyRepaired(t *testing.T) {
 	for _, provider := range []string{"codex", "workbuddy"} {
 		t.Run(provider, func(t *testing.T) {
 			home := t.TempDir()
@@ -13,20 +12,20 @@ func TestExplicitDisableRevokesEvenWhenComponentCleanupHasNotFinished(t *testing
 			if err != nil {
 				t.Fatal(err)
 			}
-			if err = integrationstate.Set(home, provider, false); err != nil {
+			if err = Disable(home, pair.ConnectorID); err != nil {
 				t.Fatal(err)
 			}
 			if _, err = Verify(home, pair.ConnectorID, pair.Token, "account"); err == nil {
-				t.Fatal("disabled preference still authorizes control")
+				t.Fatal("disabled pairing still authorizes control")
 			}
 			if Configured(home, pair.ConnectorID, "account") {
 				t.Fatal("disabled integration reported configured")
 			}
-			if err = integrationstate.Set(home, provider, true); err != nil {
+			if _, err = EnsureForProvider(home, provider, pair.Profile, "account"); err != nil {
 				t.Fatal(err)
 			}
 			if _, err = Verify(home, pair.ConnectorID, pair.Token, "other-account"); err == nil {
-				t.Fatal("enable preference bypassed account verification")
+				t.Fatal("pairing bypassed account verification")
 			}
 		})
 	}

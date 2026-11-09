@@ -2,9 +2,11 @@ package workflow
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/gorilla/mux"
@@ -15,6 +17,98 @@ import (
 	"lazymind/core/workflow/displaystate"
 	"lazymind/core/workflow/graphengine"
 )
+
+func TestNativePauseRetriesSQLiteContentionWithoutDuplicateCancellation(t *testing.T) {
+	db := orm.MigrateTestDB(t, &orm.SubAgentTask{}, &orm.WorkflowSession{}, &orm.WorkflowSessionStep{}, &orm.WorkflowEvent{})
+	if db.Dialector.Name() != orm.DriverSQLite {
+		t.Skip("SQLite snapshot contention regression")
+	}
+	for _, id := range []string{"pause", "other"} {
+		if err := db.Create(&orm.WorkflowSession{ID: id, ConversationID: "chat", WorkflowID: "test",
+			CreateUserID: "owner", ControllerHost: "lazymind", Status: "active", StateVersion: 1}).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := subagent.CreateTask(t.Context(), db.DB, subagent.CreateTaskInput{
+		TaskID: "task", ConversationID: "chat", AgentType: "workflow_step", CreateUserID: "owner",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&orm.WorkflowSessionStep{ID: "attempt", TaskID: "task", StepID: "write",
+		SessionID: "pause", Status: "running", LeaseToken: "lease"}).Error; err != nil {
+		t.Fatal(err)
+	}
+	session, err := GetSession(t.Context(), db.DB, "pause")
+	if err != nil {
+		t.Fatal(err)
+	}
+	wrote := false
+	if err := db.Callback().Query().After("gorm:query").Register("test:pause_snapshot_write", func(tx *gorm.DB) {
+		if wrote || tx.Statement.Table != "plugin_sessions" || tx.Error != nil {
+			return
+		}
+		wrote = true
+		if err := db.Model(&orm.WorkflowSession{}).Where("id = ?", "other").Update("state_version", 2).Error; err != nil {
+			t.Fatal(err)
+		}
+	}); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { db.Callback().Query().Remove("test:pause_snapshot_write") })
+	// Fail after the task cancellation has been staged, so retry must discard
+	// both its database writes and its pending external notification.
+	var eventAttempts int
+	if err := db.Callback().Create().Before("gorm:create").Register("test:pause_event_busy", func(tx *gorm.DB) {
+		if event, ok := tx.Statement.Dest.(*orm.WorkflowEvent); ok && event.EventType == "workflow.patch" {
+			eventAttempts++
+			if eventAttempts == 1 {
+				tx.AddError(errors.New("database is locked (5) (SQLITE_BUSY)"))
+			}
+		}
+	}); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { db.Callback().Create().Remove("test:pause_event_busy") })
+	var cancellations atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		cancellations.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(map[string]bool{"ok": true, "executor_stopped": false}); err != nil {
+			t.Error(err)
+		}
+	}))
+	defer srv.Close()
+	t.Setenv("LAZYMIND_CHAT_SERVICE_URL", srv.URL)
+	if err := stopWorkflowSession(t.Context(), db.DB, nil, session, ""); err != nil {
+		t.Fatal(err)
+	}
+	if !wrote || eventAttempts < 2 || cancellations.Load() != 1 {
+		t.Fatalf("wrote=%v event attempts=%d cancellations=%d", wrote, eventAttempts, cancellations.Load())
+	}
+	var events int64
+	if err := db.Model(&orm.WorkflowEvent{}).Where("session_id = ? AND event_type = ?", "pause", "workflow.patch").Count(&events).Error; err != nil || events != 1 {
+		t.Fatalf("pause must commit one event: count=%d error=%v", events, err)
+	}
+	var receiptAttempts int
+	if err := db.Callback().Update().Before("gorm:update").Register("test:pause_receipt_busy", func(tx *gorm.DB) {
+		if tx.Statement.Table == "plugin_session_steps" {
+			receiptAttempts++
+			if receiptAttempts == 1 {
+				tx.AddError(errors.New("database is locked (5) (SQLITE_BUSY)"))
+			}
+		}
+	}); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { db.Callback().Update().Remove("test:pause_receipt_busy") })
+	if err := ConfirmNativeStop(t.Context(), db.DB, "attempt", "lease"); err != nil {
+		t.Fatal(err)
+	}
+	current, err := GetSession(t.Context(), db.DB, "pause")
+	if err != nil || current.Status != SessionStatusWaiting || receiptAttempts < 2 || cancellations.Load() != 1 {
+		t.Fatalf("pause receipt: session=%+v attempts=%d cancellations=%d error=%v", current, receiptAttempts, cancellations.Load(), err)
+	}
+}
 
 func TestNativeResumeWithConcurrentSQLiteWrite(t *testing.T) {
 	for _, changedID := range []string{"other", "paused"} {

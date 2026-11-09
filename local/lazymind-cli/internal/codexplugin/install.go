@@ -73,12 +73,18 @@ func Read() (Installation, error) {
 }
 
 func Enabled(profile, marketplace string) (bool, error) {
+	_, enabled, err := Registration(profile, marketplace)
+	return enabled, err
+}
+
+// Registration distinguishes saved plugin settings from the native enable switch.
+func Registration(profile, marketplace string) (exists, enabled bool, err error) {
 	body, err := os.ReadFile(filepath.Join(profile, "config.toml"))
 	if errors.Is(err, os.ErrNotExist) {
-		return false, nil
+		return false, false, nil
 	}
 	if err != nil {
-		return false, err
+		return false, false, err
 	}
 	var config struct {
 		Plugins map[string]struct {
@@ -86,9 +92,10 @@ func Enabled(profile, marketplace string) (bool, error) {
 		} `toml:"plugins"`
 	}
 	if err := toml.Unmarshal(body, &config); err != nil {
-		return false, err
+		return false, false, err
 	}
-	return config.Plugins[Name+"@"+marketplace].Enabled, nil
+	entry, exists := config.Plugins[Name+"@"+marketplace]
+	return exists, entry.Enabled, nil
 }
 
 func FindNode(ctx context.Context) (string, error) { return findNode(ctx, "") }
@@ -124,8 +131,8 @@ func Install(ctx context.Context, home, self, binary, profile, hostID string) (I
 	}
 	defer unlock()
 	if _, err := os.Stat(root); err == nil {
-		previous, err := Read()
-		if err != nil || previous.Home != home || previous.Profile != profile {
+		_, err := Read()
+		if err != nil {
 			return Installation{}, errors.New("a different plugin already owns ~/plugins/lazymind-workflow")
 		}
 	} else if !errors.Is(err, os.ErrNotExist) {
@@ -292,4 +299,18 @@ func BuildID() string {
 		return nil
 	})
 	return hex.EncodeToString(hash.Sum(nil))
+}
+
+// Registered identifies the actual Agent-side installation used by this host.
+func Registered(home string) bool {
+	record, err := Read()
+	if err != nil || record.Home != home {
+		return false
+	}
+	self, err := os.Executable()
+	if err != nil || !agentexec.SameExecutable(self, record.Self) {
+		return false
+	}
+	enabled, err := Enabled(record.Profile, record.Marketplace)
+	return err == nil && enabled
 }

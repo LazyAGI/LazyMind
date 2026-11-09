@@ -5,6 +5,7 @@ import { installHost } from './host'
 import { dispatcherLock } from './runtime-lock'
 import { installPresentationConfig, type PresentationConfig } from './presentation-config'
 import { resolveConnection, watchConnection, type ConnectionConfig } from './connection'
+import { mcpReadiness } from './mcp-readiness'
 
 export type Config = ConnectionConfig
 export const inject = ['tools', 'agents', 'sessionController']
@@ -13,13 +14,18 @@ export const inject = ['tools', 'agents', 'sessionController']
 export async function apply(ctx: Context, config: Config): Promise<void> {
   let presentation: PresentationConfig | undefined
   let lastError = ""
+  const readiness = new Map<string, ReturnType<typeof mcpReadiness>>()
   installPresentationConfig(ctx, () => presentation)
   const stop = watchConnection(signal => resolveConnection(config, signal), async current => {
     const pairing = await loadPairing(current.pairingFile)
     const instance = randomUUID()
     const release = await dispatcherLock(current.pairingFile, instance)
     try {
-      const dispose = installHost(ctx, new HostBridge(current.bridgeUrl, pairing), current, instance)
+      let mcpReady = readiness.get(current.serverName)
+      if (!mcpReady) { mcpReady = mcpReadiness(ctx, current.serverName); readiness.set(current.serverName, mcpReady) }
+      const dispose = installHost(ctx, new HostBridge(current.bridgeUrl, pairing, async signal => ({
+        'X-LazyMind-MCP-Ready': await mcpReady(signal) ? '1' : '0',
+      })), current, instance)
       presentation = current
       lastError = ""
       return async () => { try { await dispose() } finally { await release() } }

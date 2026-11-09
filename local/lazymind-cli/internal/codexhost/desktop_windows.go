@@ -11,10 +11,13 @@ import (
 	"os"
 	"os/exec"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
 	"golang.org/x/sys/windows"
+
+	"lazymind/agentconnector/internal/desktopsetup"
 )
 
 // Include hidden/tray main processes when deciding whether startup is safe.
@@ -51,7 +54,9 @@ public static class LazyMindCodexNormalShutdown {
             try {
                 Check(RmRegisterResources(session, 0, null, 1, new UniqueProcess[] { target }, 0, null));
                 // No RmForceShutdown: respect application shutdown refusal.
-                Check(RmShutdown(session, 0, IntPtr.Zero));
+                uint result = RmShutdown(session, 0, IntPtr.Zero);
+                if (result == 351) throw new InvalidOperationException("LAZYMIND_AGENT_quit_required: Application refused normal shutdown");
+                Check(result);
             } finally { RmEndSession(session); }
         }
     }
@@ -101,13 +106,13 @@ function Start-CodexDesktop {
         if ($process.MainWindowHandle -eq 0) {
             Close-CodexBackgroundProcess $instance.ProcessId $exe
         } else {
-            if (-not $process.CloseMainWindow()) { throw 'Codex refused to close; finish its pending dialog and retry' }
+            if (-not $process.CloseMainWindow()) { throw 'LAZYMIND_AGENT_quit_required: Codex refused to close; finish its pending dialog and retry' }
             if (-not $process.WaitForExit(10000)) {
                 $process.Refresh()
                 if ($process.MainWindowHandle -eq 0) { Close-CodexBackgroundProcess $instance.ProcessId $exe }
             }
         }
-        if (-not $process.WaitForExit(10000)) { throw 'Codex did not exit; finish its pending dialog and retry' }
+        if (-not $process.WaitForExit(10000)) { throw 'LAZYMIND_AGENT_quit_required: Codex did not exit; finish its pending dialog and retry' }
     }
     }
     # Activate packaged apps through Windows so their package identity is retained.
@@ -186,6 +191,9 @@ func runDesktopCommand(ctx context.Context, application string, port int, link s
 		}
 	}
 	if err := command.Wait(); err != nil {
+		if strings.Contains(stderr.String(), "LAZYMIND_AGENT_quit_required:") {
+			return fmt.Errorf("%w: %v", desktopsetup.ErrQuitRequired, err)
+		}
 		return fmt.Errorf("start Codex: %s: %w", stderr.String(), err)
 	}
 	if err := scanner.Err(); err != nil {
