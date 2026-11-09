@@ -41,6 +41,7 @@ type Adapter struct {
 	dshMCPReady  bool
 	dshInspector func(context.Context, string) (dshRuntimeInspection, error)
 	dshRunner    func(context.Context, string, ...string) error
+	dshRunning   func(context.Context, string) (bool, error)
 	kind         Kind
 	self         string
 	bridge       interface {
@@ -92,6 +93,9 @@ var workBuddyAuthentication = workbuddyadapter.AuthenticationStatus
 func (a *Adapter) Status(ctx context.Context) (status agentintegration.Status) {
 	status = a.status(ctx)
 	details := a.inspectConfiguration(&status)
+	if a.kind == DeepSeekHarness {
+		a.inspectDSHConnection(ctx, &status)
+	}
 	defer func() { agentintegration.RecordInspection(a.home, a.self, details, &status) }()
 	if a.kind == WorkBuddy {
 		status.CanConnect = status.Enabled != nil && !agentintegration.MissingRequirement(status.Requirements) && len(status.Requirements) > 0
@@ -124,6 +128,9 @@ func (a *Adapter) Connect(ctx context.Context) (result agentintegration.Status) 
 			result.RetryAction = "connect"
 		}
 		operation.After = a.inspectConfiguration(&result)
+		if a.kind == DeepSeekHarness {
+			a.inspectDSHConnection(ctx, &result)
+		}
 		if result.State == agentintegration.Failed {
 			result.RetryAction = "connect"
 			if result.Issue == nil {
@@ -359,9 +366,13 @@ func (a *Adapter) status(ctx context.Context) agentintegration.Status {
 		status.CanDisconnect = state.configured
 	}
 	if a.kind == DeepSeekHarness && state.configured && state.owned && state.current {
-		if !a.dshWorkflowConfigured() {
+		if !a.dshWorkflowInstalled() {
 			state.current = false
 			status.Message = "MCP is configured; reconnect to install or update the Workflow panel and host adapter."
+			if a.dshWorkflowNeedsUpdate() {
+				status.Issue = &agentintegration.Issue{Code: "plugin_update_required"}
+				status.Message = "The installed LazyMind plugin needs an update. Reconnect to update its components."
+			}
 		} else {
 			status.Message = "MCP and the Workflow bundle are configured. Restart DSH to activate updated plugins."
 		}
