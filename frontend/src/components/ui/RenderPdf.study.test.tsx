@@ -4,7 +4,7 @@ import {useEffect,type ReactNode} from 'react';
 import type {PdfIRDocument} from '@/modules/knowledge/api/pdfIR';
 const state=vi.hoisted(()=>({nativeClick:undefined as undefined|((item:{pageNumber:number;dest?:unknown[]})=>void),pageLoads:new Map<number,(width:number,height:number)=>void>(),document:undefined as unknown,status:'ready',failLoad:false,deferLoad:false,load:undefined as undefined|(()=>void),pdfFile:undefined as unknown,text:undefined as undefined|((page:number)=>Promise<{items:Array<{str:string}>}>)}));
 vi.mock('react-i18next',async original=>({...await original<typeof import('react-i18next')>(),useTranslation:()=>({t:(key:string)=>key})}));
-vi.mock('react-pdf',()=>({pdfjs:{GlobalWorkerOptions:{}},Document:({children,onLoadSuccess,onLoadError,file,onItemClick}:{file:unknown;onItemClick?:typeof state.nativeClick;children:ReactNode;onLoadSuccess:(value:unknown)=>void;onLoadError:(error:Error)=>void})=>{state.pdfFile=file;state.nativeClick=onItemClick;useEffect(()=>{if(state.failLoad){onLoadError(new Error("Invalid PDF"));return;}state.load=()=>onLoadSuccess({numPages:3,getPage:async(page:number)=>({view:[0,0,600,800],getViewport:()=>({width:600,height:800,convertToViewportPoint:(x:number,y:number)=>[x,800-y]}),getTextContent:()=>state.text?state.text(page):Promise.resolve({items:[{str:page===3?'needle result':'ordinary text'}]})})});if(!state.deferLoad)state.load();},[file]);return <>{children}</>;},Page:({width,pageNumber,onLoadSuccess,devicePixelRatio}:{width:number;pageNumber:number;onLoadSuccess:(page:unknown)=>void;devicePixelRatio?:number})=> {state.pageLoads.set(pageNumber,(w,h)=>onLoadSuccess({getViewport:()=>({width:w,height:h})}));return <div data-testid="rendered-pdf-page" data-width={width} data-pixel-ratio={devicePixelRatio}/>;}}));
+vi.mock('react-pdf',()=>({pdfjs:{GlobalWorkerOptions:{}},Document:({children,onLoadSuccess,onLoadError,file,onItemClick}:{file:unknown;onItemClick?:typeof state.nativeClick;children:ReactNode;onLoadSuccess:(value:unknown)=>void;onLoadError:(error:Error)=>void})=>{state.pdfFile=file;state.nativeClick=onItemClick;useEffect(()=>{if(state.failLoad){onLoadError(new Error("Invalid PDF"));return;}state.load=()=>onLoadSuccess({numPages:3,getPage:async(page:number)=>({view:[0,0,600,800],getViewport:()=>({width:600,height:800,convertToViewportPoint:(x:number,y:number)=>[x,800-y]}),getTextContent:()=>state.text?state.text(page):Promise.resolve({items:[{str:page===3?'needle result':'ordinary text'}]})})});if(!state.deferLoad)state.load();},[file]);return <>{children}</>;},Page:({width,pageNumber,onLoadSuccess,devicePixelRatio,renderTextLayer}:{width:number;pageNumber:number;onLoadSuccess:(page:unknown)=>void;devicePixelRatio?:number;renderTextLayer?:boolean})=> {state.pageLoads.set(pageNumber,(w,h)=>onLoadSuccess({getViewport:()=>({width:w,height:h})}));return <div data-testid="rendered-pdf-page" data-width={width} data-pixel-ratio={devicePixelRatio}>{renderTextLayer&&<span data-testid="pdf-text-layer">Selectable PDF sentence</span>}</div>;}}));
 vi.mock('@/modules/knowledge/api/pdfIR',async original=>({...await original<typeof import('@/modules/knowledge/api/pdfIR')>(),usePdfIR:()=>({state,starting:false,start:vi.fn()})}));
 vi.mock('./pdfPinStore',async original=>({...await original<typeof import('./pdfPinStore')>(),readPdfPinBoard:vi.fn().mockResolvedValue([]),writePdfPinBoard:vi.fn().mockResolvedValue(true)}));
 vi.mock('./PdfVisualStudy',()=>({PdfVisualStudy:({autoExplain}:{autoExplain:boolean})=> <aside aria-label="visual-study" data-auto-explain={String(autoExplain)}/> }));
@@ -574,4 +574,40 @@ it('does not restore a stale parent position when zooming after an in-page scrol
  const scroll=vi.spyOn(viewport,'scrollTo');scroll.mockClear();
  fireEvent.click(screen.getByRole('button',{name:'pdfReader.zoomIn'}));
  expect(scroll.mock.calls.at(-1)?.[0]).toEqual({top:132,behavior:'auto'});
+});
+
+it('renders selectable translated text without restoring selection menus',async()=>{
+ const view=render(<RenderPdf fileData="selectable-translation.pdf" pdfToolbarMode="navigation" pdfSelectableText/>);
+ await act(async()=>{});
+ const text=screen.getAllByTestId('pdf-text-layer')[0];
+ const range=window.document.createRange();range.selectNodeContents(text);
+ window.getSelection()?.removeAllRanges();window.getSelection()?.addRange(range);
+ expect(window.getSelection()?.toString()).toBe('Selectable PDF sentence');
+ fireEvent.mouseUp(text);
+ expect(view.container.querySelector('.pdf-selection-composer')).toBeNull();
+ window.getSelection()?.removeAllRanges();
+});
+
+it('opens highlights through page hit testing without covering text or links',async()=>{
+ const open=vi.fn();
+ const view=render(<RenderPdf fileData="note-hit-testing.pdf" pdfSelectableText savedNoteHighlights={[{id:'note',page:1,color:'yellow',rects:[[.1,.2,.4,.24]]}]} onNoteHighlightClick={open}/>);
+ await act(async()=>{});
+ const text=screen.getAllByTestId('pdf-text-layer')[0];
+ const page=text.closest('[data-pdf-page-index]')!;
+ vi.spyOn(page,'getBoundingClientRect').mockReturnValue({left:0,top:0,right:600,bottom:800,width:600,height:800,x:0,y:0,toJSON:()=>({})});
+ const down=(x:number,y:number)=>fireEvent(text,new MouseEvent('pointerdown',{bubbles:true,clientX:x,clientY:y}));
+ down(100,170);fireEvent.click(text,{clientX:100,clientY:170,detail:1});
+ expect(open).toHaveBeenCalledWith('note');open.mockClear();
+ down(100,170);fireEvent.click(text,{clientX:140,clientY:170,detail:1});
+ expect(open).not.toHaveBeenCalled();
+ const range=window.document.createRange();range.selectNodeContents(text);
+ window.getSelection()?.removeAllRanges();window.getSelection()?.addRange(range);
+ down(100,170);fireEvent.click(text,{clientX:100,clientY:170,detail:1});
+ expect(open).not.toHaveBeenCalled();window.getSelection()?.removeAllRanges();
+ const link=window.document.createElement('a');link.href='#reference';link.textContent='reference';text.append(link);
+ down(100,170);fireEvent.click(link,{clientX:100,clientY:170,detail:1});
+ expect(open).not.toHaveBeenCalled();
+ expect(view.container.querySelector('.pdf-note-highlight-hit')).toBeNull();
+ const marker=screen.getByRole('button',{name:'打开笔记'});marker.focus();expect(marker).toHaveFocus();fireEvent.click(marker);
+ expect(open).toHaveBeenCalledWith('note');
 });

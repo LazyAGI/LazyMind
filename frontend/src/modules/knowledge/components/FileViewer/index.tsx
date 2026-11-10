@@ -54,6 +54,7 @@ interface FileViewerProps {
   paperMode?: boolean;
   pdfScrollSync?: PdfScrollSyncEndpoint;
   pdfToolbarMode?: "full" | "navigation";
+  pdfSelectableText?: boolean;
   onPdfNoteSelection?: (selection: PdfTextSelection, note: string, color: PdfNoteColor, id: string) => Promise<void>;
   pdfNoteHighlights?: PdfNoteHighlight[];
   onPdfNoteHighlightClick?: (id:string) => void;
@@ -417,6 +418,7 @@ const FileViewer = forwardRef<FileViewerRef, FileViewerProps>((props, ref) => {
             pdfScrollSync={props.pdfScrollSync}
             paperMode={props.paperMode}
             pdfToolbarMode={props.pdfToolbarMode}
+            pdfSelectableText={props.pdfSelectableText}
             pdfHeaderStart={props.pdfHeaderStart}
             pdfHeaderEnd={props.pdfHeaderEnd}
             key={`${props.pdfIRTarget?.dataset || ""}:${props.pdfIRTarget?.document || ""}:${props.file || ""}`}
@@ -546,6 +548,8 @@ const FileViewer = forwardRef<FileViewerRef, FileViewerProps>((props, ref) => {
     pdfFingerprint,
     props.pdfIRTarget,
     props.pdfScrollSync,
+    props.pdfToolbarMode,
+    props.pdfSelectableText,
     props.paperMode,
     props.onPdfIRDocumentChange,
     props.onPdfOutlineChange,

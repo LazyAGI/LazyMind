@@ -242,7 +242,8 @@ func RevisePDFTranslation(w http.ResponseWriter, r *http.Request) {
 	draftPath := prefix + ".draft.json"
 	outputPath := prefix + ".translated.pdf"
 	cleanup := func() {
-		for _, path := range []string{sourcePath, layoutPath, translationsPath, draftPath, outputPath} {
+		removeArtifactOutputFile(outputPath)
+		for _, path := range []string{sourcePath, layoutPath, translationsPath, draftPath} {
 			_ = os.Remove(path)
 		}
 	}
@@ -294,9 +295,8 @@ func RevisePDFTranslation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if renderResult.RequestedBlockCount == 0 || renderResult.RenderedBlockCount != renderResult.RequestedBlockCount {
-		cleanup()
-		common.ReplyErr(w, "PDF translation renderer did not render every block", http.StatusInternalServerError)
-		return
+		// Block accounting is advisory, just as it is for initial generation.
+		renderResult.WarningCount++
 	}
 	applyTranslationPageMap(&draft, renderResult.Supplements)
 	if err := writePDFTranslationDraft(draftPath, draft); err != nil {

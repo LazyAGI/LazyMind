@@ -7,10 +7,10 @@ from translation_layout import paint
 
 
 def lines(text, width, size, fonts):
-    text = unicodedata.normalize("NFKC", text.replace("\n", " "))
+    text = unicodedata.normalize('NFKC', text.replace('\n', ' '))
     cache = {}
     for ch in set(text):
-        if unicodedata.category(ch).startswith("C"):
+        if unicodedata.category(ch).startswith('C'):
             continue
         font = next((f for f in fonts if f.has_glyph(ord(ch))), None)
         if font is None:
@@ -18,7 +18,7 @@ def lines(text, width, size, fonts):
         cache[ch] = (font, font.text_length(ch, fontsize=size))
     row = []
     x = 0
-    for token in re.findall(r"[A-Za-z0-9_]+|.", text):
+    for token in re.findall('[A-Za-z0-9_]+|.', text):
         chars = [(ch, *cache[ch]) for ch in token if ch in cache]
         total = sum(c[2] for c in chars)
         if row and total <= width and x + total > width:
@@ -41,19 +41,22 @@ def continue_in_place(document, overflow, items, fonts, diagnostics=None):
     Later content follows the paragraph, even when it requires several pages.
     """
     diagnostics = diagnostics if diagnostics is not None else []
-    source = fitz.open(stream=document.tobytes(), filetype="pdf")
+    source = fitz.open(stream=document.tobytes(), filetype='pdf')
     output = fitz.open()
-    page_map = {item["id"]: set() for item in items}
+    page_map = {item['id']: set() for item in items}
+    source_regions = {pno: [] for pno in range(len(source))}
+    outline = source.get_toc(simple=False)
     try:
-        for pno, original in enumerate(source):
-            pending = [i for i in overflow if i["page"] == pno]
-            source_items = [i for i in items if i["page"] == pno]
+        def recompose_page(pno, original):
+            pending = [i for i in overflow if i['page'] == pno]
+            source_items = [i for i in items if i['page'] == pno]
             if not pending:
                 dest = len(output)
-                output.insert_pdf(source, from_page=pno, to_page=pno)
+                output.insert_pdf(source, from_page=pno, to_page=pno, links=False)
+                source_regions[pno].append((fitz.Rect(original.rect), dest, 0))
                 for item in source_items:
-                    page_map[item["id"]].add(dest + 1)
-                continue
+                    page_map[item['id']].add(dest + 1)
+                return
             width, height = original.rect.width, original.rect.height
             top, bottom = min(24, height * 0.1), height - min(24, height * 0.1)
             current = None
@@ -76,16 +79,16 @@ def continue_in_place(document, overflow, items, fonts, diagnostics=None):
             # Move a cut upwards until it no longer bisects any source glyph,
             # image or graphic. This also handles another column at the same y.
             obstacles = [
-                fitz.Rect(s["bbox"])
-                for b in original.get_text("dict")["blocks"]
-                for line in b.get("lines", [])
-                for s in line["spans"]
+                fitz.Rect(s['bbox'])
+                for b in original.get_text('dict')['blocks']
+                for line in b.get('lines', [])
+                for s in line['spans']
             ]
-            obstacles += [fitz.Rect(d["rect"]) for d in original.get_drawings()]
-            obstacles += [fitz.Rect(i["bbox"]) for i in original.get_image_info()]
+            obstacles += [fitz.Rect(d['rect']) for d in original.get_drawings()]
+            obstacles += [fitz.Rect(i['bbox']) for i in original.get_image_info()]
             cuts = []
             for item in pending:
-                cut = max(0, item["rect"].y0)
+                cut = max(0, item['rect'].y0)
                 while True:
                     crossing = [
                         r.y0
@@ -97,7 +100,7 @@ def continue_in_place(document, overflow, items, fonts, diagnostics=None):
                     cut = max(0, min(crossing))
                 cuts.append((cut, item))
             cuts.sort(
-                key=lambda pair: (pair[0], pair[1]["rect"].y0, pair[1]["rect"].x0)
+                key=lambda pair: (pair[0], pair[1]['rect'].y0, pair[1]['rect'].x0)
             )
 
             def band(y0, y1):
@@ -140,16 +143,9 @@ def continue_in_place(document, overflow, items, fonts, diagnostics=None):
                         clip=clip,
                     )
                 for item in source_items:
-                    if item not in pending and (item["rect"] & clip).get_area() > 0:
-                        page_map[item["id"]].add(current + 1)
-                # Preserve clickable external references without adding any
-                # artificial navigation for the translated paragraph.
-                for link in original.get_links():
-                    if link["kind"] == fitz.LINK_URI and clip.contains(link["from"]):
-                        r = fitz.Rect(link["from"]) + (0, cursor - y0, 0, cursor - y0)
-                        output[current].insert_link(
-                            {"kind": fitz.LINK_URI, "from": r, "uri": link["uri"]}
-                        )
+                    if item not in pending and (item['rect'] & clip).get_area() > 0:
+                        page_map[item['id']].add(current + 1)
+                source_regions[pno].append((clip, current, cursor - y0))
                 cursor += y1 - y0
 
             previous = 0
@@ -159,19 +155,19 @@ def continue_in_place(document, overflow, items, fonts, diagnostics=None):
                 if current is None:
                     new_page()
                 cursor += 4
-                size = max(9, min(12, item["size"]))
-                left = max(18, min(item["rect"].x0, width - 40))
+                size = max(9, min(12, item['size']))
+                left = max(18, min(item['rect'].x0, width - 40))
                 # Continuations use the whole body width for single-column
                 # papers, and both columns for genuinely two-column papers.
                 left_blocks = [
-                    i["rect"]
+                    i['rect']
                     for i in source_items
-                    if i["rect"].width > width * 0.2 and i["rect"].x1 < width * 0.55
+                    if i['rect'].width > width * 0.2 and i['rect'].x1 < width * 0.55
                 ]
                 right_blocks = [
-                    i["rect"]
+                    i['rect']
                     for i in source_items
-                    if i["rect"].width > width * 0.2 and i["rect"].x0 > width * 0.45
+                    if i['rect'].width > width * 0.2 and i['rect'].x0 > width * 0.45
                 ]
                 two_columns = len(left_blocks) >= 2 and len(right_blocks) >= 2
                 if two_columns:
@@ -188,9 +184,13 @@ def continue_in_place(document, overflow, items, fonts, diagnostics=None):
                 used_bottom = cursor
                 ascent = max(f.ascender for f in fonts) * size
                 descent = max(-f.descender for f in fonts) * size
-                for row in lines(item["text"], available, size, fonts):
+                for row in lines(item['text'], available, size, fonts):
                     if cursor + ascent + descent > bottom:
-                        if two_columns and column == 0:
+                        if (
+                            two_columns
+                            and column == 0
+                            and column_top + ascent + descent <= bottom
+                        ):
                             column = 1
                             cursor = column_top
                         else:
@@ -203,34 +203,75 @@ def continue_in_place(document, overflow, items, fonts, diagnostics=None):
                         (x + (right if column else left), baseline, ch, font, s)
                         for x, _, ch, font, s in row
                     )
-                    page_map[item["id"]].add(current + 1)
+                    page_map[item['id']].add(current + 1)
                     cursor += size * 1.5
                     used_bottom = max(used_bottom, cursor)
                 cursor = used_bottom + 6
             band(previous, height)
             flush()
 
+        for pno, original in enumerate(source):
+            recompose_page(pno, original)
+
+        def destination(pno, point):
+            regions = source_regions.get(pno, [])
+            if not regions:
+                return None
+            point = fitz.Point(point or (0, 0))
+            region = next((r for r in regions if r[0].contains(point)), None)
+            if region is None:
+                region = min(regions, key=lambda r: abs(r[0].y0 - point.y))
+                point.y = max(region[0].y0, min(region[0].y1, point.y))
+            return region[1], fitz.Point(point.x, point.y + region[2])
+
+        # Rebuild existing references after every destination has been mapped.
+        # Page-by-page insert_pdf otherwise drops cross-page internal links.
+        for pno, page in enumerate(source):
+            for link in page.get_links():
+                for clip, target_page, shift in source_regions[pno]:
+                    rect = fitz.Rect(link['from']) & clip
+                    if rect.is_empty:
+                        continue
+                    copied = {key: value for key, value in link.items() if key not in {'xref', 'id'}}
+                    copied['from'] = rect + (0, shift, 0, shift)
+                    if link['kind'] == fitz.LINK_GOTO:
+                        target = destination(link.get('page', -1), link.get('to'))
+                        if target is None:
+                            continue
+                        copied['page'], copied['to'] = target
+                    if link['kind'] in {fitz.LINK_URI, fitz.LINK_GOTO, fitz.LINK_GOTOR, fitz.LINK_LAUNCH}:
+                        output[target_page].insert_link(copied)
+
+        for entry in outline:
+            target = destination(entry[2] - 1, entry[3].get('to'))
+            if entry[3].get('kind') == fitz.LINK_GOTO and target is not None:
+                entry[2] = target[0] + 1
+                entry[3]['page'], entry[3]['to'] = target
+
         # Verify the complete paragraph across its consecutive pages before
         # publishing the recomposed document. No truncation at a page boundary.
         def compact(value):
-            return "".join(
+            return ''.join(
                 c
-                for c in unicodedata.normalize("NFKC", value)
-                if not c.isspace() and not unicodedata.category(c).startswith("C")
+                for c in unicodedata.normalize('NFKC', value)
+                if not c.isspace() and not unicodedata.category(c).startswith('C')
             )
 
         for item in overflow:
-            rendered = "".join(
-                output[p - 1].get_text() for p in sorted(page_map[item["id"]])
+            rendered = ''.join(
+                output[p - 1].get_text() for p in sorted(page_map[item['id']])
             )
-            if compact(item["text"]) not in compact(rendered):
-                diagnostics.append({"code": "continuation_text_mismatch", "block_id": item["id"], "pages": sorted(page_map[item["id"]])})
+            if compact(item['text']) not in compact(rendered):
+                diagnostics.append({'code': 'continuation_text_mismatch',
+                                   'block_id': item['id'], 'pages': sorted(page_map[item['id']])})
         # Source pages are only replaced once every band and paragraph exists.
         old_count = len(document)
         document.insert_pdf(output)
         document.delete_pages(0, old_count - 1)
+        if outline:
+            document.set_toc(outline)
         return [
-            {"block_id": key, "pages": sorted(pages)} for key, pages in page_map.items()
+            {'block_id': key, 'pages': sorted(pages)} for key, pages in page_map.items()
         ]
     finally:
         output.close()

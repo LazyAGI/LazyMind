@@ -58,7 +58,7 @@ export default function FullDocumentTranslationPanel(props: Props) {
     {props.progressNotice}
     {artifact && !/\.pdf$/i.test(artifact.filename) && <div className="knowledge-full-translation-toolbar">{actions}</div>}
     {artifact ? <div className="knowledge-full-translation-viewer">
-      <FileViewer pdfScrollSync={props.scrollSync} pdfToolbarMode="navigation" pdfHeaderEnd={actions} key={artifact.id} file={pdfArtifactContentUrl(props.datasetId, props.documentId, artifact.id)} fileName={artifact.filename} onPdfRetranslateSelection={props.onRetranslateSelection} />
+      <FileViewer pdfSelectableText pdfScrollSync={props.scrollSync} pdfToolbarMode="navigation" pdfHeaderEnd={actions} key={artifact.id} file={pdfArtifactContentUrl(props.datasetId, props.documentId, artifact.id)} fileName={artifact.filename} onPdfRetranslateSelection={props.onRetranslateSelection} />
     </div> : <div className="knowledge-full-translation-empty">
       <div className="knowledge-full-translation-intro">
         <h2>{props.supported ? "全文对照阅读" : "此格式暂不支持全文翻译"}</h2>

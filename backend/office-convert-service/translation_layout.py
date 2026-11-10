@@ -11,10 +11,10 @@ import fitz
 
 def geometry(page):
     """Use individual strokes, not a table/chart's enclosing bounding box."""
-    obstacles = [fitz.Rect(x["bbox"]) for x in page.get_image_info()]
+    obstacles = [fitz.Rect(x['bbox']) for x in page.get_image_info()]
     for drawing in page.get_drawings():
-        for part in drawing["items"]:
-            if part[0] == "l":
+        for part in drawing['items']:
+            if part[0] == 'l':
                 a, b = part[1:3]
                 obstacles.append(
                     fitz.Rect(
@@ -22,9 +22,9 @@ def geometry(page):
                     )
                     + (-0.4, -0.4, 0.4, 0.4)
                 )
-            elif part[0] == "re":
+            elif part[0] == 're':
                 r = fitz.Rect(part[1])
-                if drawing.get("fill") is not None:
+                if drawing.get('fill') is not None:
                     obstacles.append(r)
                 else:
                     obstacles.extend(
@@ -36,22 +36,22 @@ def geometry(page):
                         ]
                     )
             else:
-                obstacles.append(fitz.Rect(drawing["rect"]))
+                obstacles.append(fitz.Rect(drawing['rect']))
     return obstacles
+
+
+def protected_span(span):
+    return bool(re.search(r'(?i)(cmmi|cmsy|cmex|symbol|math|msam|msbm)', span['font']))
 
 
 def source_spans(page):
     spans = []
-    for block in page.get_text("dict")["blocks"]:
-        for line in block.get("lines", []):
-            rotated = tuple(line.get("dir", (1, 0))) != (1, 0)
-            for span in line["spans"]:
+    for block in page.get_text('dict')['blocks']:
+        for line in block.get('lines', []):
+            rotated = tuple(line.get('dir', (1, 0))) != (1, 0)
+            for span in line['spans']:
                 span = dict(span)
-                span["protected"] = rotated or bool(
-                    re.search(
-                        r"(?i)(cmmi|cmsy|cmex|symbol|math|msam|msbm)", span["font"]
-                    )
-                )
+                span['protected'] = rotated or protected_span(span)
                 spans.append(span)
     return spans
 
@@ -67,10 +67,10 @@ def expanded_boxes(rect, page_rect, blockers):
     )
     bounds |= rect  # preserve legitimate source margin text
     candidates = [fitz.Rect(rect)]
-    for order in [("bottom", "right"), ("right", "bottom")]:
+    for order in [('bottom', 'right'), ('right', 'bottom')]:
         r = fitz.Rect(rect)
         for side in order:
-            if side == "right":
+            if side == 'right':
                 limit = bounds.x1
                 for b in blockers:
                     if b.y1 > r.y0 and b.y0 < r.y1 and b.x0 >= r.x1 - 0.1:
@@ -109,20 +109,20 @@ def intervals(left, right, top, bottom, obstacles):
     return [(a, b) for a, b in result if b - a > 1]
 
 
-def layout_text(text, rect, size, spacing, fonts, obstacles, align="left"):
+def layout_text(text, rect, size, spacing, fonts, obstacles, align='left'):
     # Keep Latin words together; allow a long URL/identifier to wrap as a last resort.
-    tokens = re.findall(r"\n|[^\S\n]+|[A-Za-z0-9_]+(?:[\-\x27][A-Za-z0-9_]+)*|.", text)
+    tokens = re.findall('\\n|[^\\S\\n]+|[A-Za-z0-9_]+(?:[\\-\\x27][A-Za-z0-9_]+)*|.', text)
     glyphs = []
     for token in tokens:
         chars = []
         for ch in token:
             font = next((f for f in fonts if f.has_glyph(ord(ch))), None)
-            if ch == "\n":
+            if ch == '\n':
                 font = fonts[0]
             if font is None:
                 font = fonts[0]  # Keep rendering; the caller records missing glyphs.
             chars.append(
-                (ch, font, font.text_length(ch, fontsize=size) if ch != "\n" else 0)
+                (ch, font, font.text_length(ch, fontsize=size) if ch != '\n' else 0)
             )
         glyphs.append(chars)
     # Font metrics include blank ascender/descender space; actual ink is inside.
@@ -143,7 +143,7 @@ def layout_text(text, rect, size, spacing, fonts, obstacles, align="left"):
             line = []
             while ti < len(glyphs):
                 chars = glyphs[ti]
-                if chars[0][0] == "\n":
+                if chars[0][0] == '\n':
                     ti += 1
                     ci = 0
                     newline = True
@@ -160,7 +160,7 @@ def layout_text(text, rect, size, spacing, fonts, obstacles, align="left"):
                 if ci == len(chars):
                     ti += 1
                     ci = 0
-            if align == "center" and len(slots) == 1:
+            if align == 'center' and len(slots) == 1:
                 offset = (right - x) / 2
                 line = [
                     (x + offset, y, ch, font, size) for x, y, ch, font, size in line
@@ -175,12 +175,12 @@ def layout_text(text, rect, size, spacing, fonts, obstacles, align="left"):
 
 
 def fit_text(
-    text, rect, page_rect, blockers, obstacles, fonts, source_size, align="left"
+    text, rect, page_rect, blockers, obstacles, fonts, source_size, align='left'
 ):
-    text = "".join(
+    text = ''.join(
         c
-        for c in unicodedata.normalize("NFKC", text.replace("\n", " "))
-        if not unicodedata.category(c).startswith("C")
+        for c in unicodedata.normalize('NFKC', text.replace('\n', ' '))
+        if not unicodedata.category(c).startswith('C')
     )
     boxes = expanded_boxes(rect, page_rect, blockers)
     target = max(6, min(24, source_size))
@@ -212,7 +212,7 @@ def fit_text(
                             x + font.text_length(ch, fontsize=s),
                             y - font.descender * s,
                         )
-                    return {"runs": runs, "rect": ink, "size": size, "spacing": spacing}
+                    return {'runs': runs, 'rect': ink, 'size': size, 'spacing': spacing}
         scale = round(scale - 0.05, 2)
     return None
 
@@ -220,7 +220,7 @@ def fit_text(
 def paint(page, runs):
     writer = fitz.TextWriter(page.rect)
     # Group adjacent characters to keep word selection and PDF extraction sane.
-    group = ""
+    group = ''
     last = None
     start = None
     for run in runs + [None]:
@@ -232,7 +232,7 @@ def paint(page, runs):
             > 0.01
         ):
             writer.append(start, group, font=last[3], fontsize=last[4])
-            group = ""
+            group = ''
             start = None
         if run is not None:
             if start is None:
@@ -249,15 +249,15 @@ def visual_regions(page):
     would destroy cell alignment; preserve these regions until cell-level
     translation is available. Captions outside the region remain translatable.
     """
-    regions = [fitz.Rect(i["bbox"]) for i in page.get_image_info()]
+    regions = [fitz.Rect(i['bbox']) for i in page.get_image_info()]
     regions += [fitz.Rect(t.bbox) for t in page.find_tables().tables]
     regions += [
         fitz.Rect(r) for r in page.cluster_drawings() if r.width > 40 and r.height > 30
     ]
     rules = []
     for d in page.get_drawings():
-        for item in d["items"]:
-            if item[0] == "l":
+        for item in d['items']:
+            if item[0] == 'l':
                 a, b = item[1:3]
                 if abs(a.y - b.y) < 1 and abs(a.x - b.x) > 100:
                     rules.append(fitz.Rect(min(a.x, b.x), a.y, max(a.x, b.x), a.y))

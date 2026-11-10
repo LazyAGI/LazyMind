@@ -28,37 +28,57 @@ need separate evaluation; rendering all extracted blocks does not prove every
 source paragraph was extracted. Checkpoints currently follow source artifact
 storage retention and require cleanup together with those artifacts.
 
-When original text boxes cannot hold all translations, the renderer emits a
-complete reflowed translation, with source page labels. This deliberately trades
-original layout and embedded figures for readable, complete translated text;
-the original PDF remains available in the adjacent reader. Mathematical Unicode
-is compatibility-normalized and a secondary font handles missing symbols.
+## PDF rendering and diagnostics
+
+The renderer keeps source pages, images, vector artwork and protected mathematical
+content. It first tries the existing text region, available blank space, tighter
+line spacing and smaller type. Text that still does not fit continues at its
+position in the document, moving following content forward. There is no plain-text
+whole-document fallback, end-of-document supplement, or overflow navigation link.
+Continuation pages can make the translation longer than its source.
+New extraction separates prose runs around protected math spans. Older saved
+layouts need a fresh translation to adopt this segmentation; rerendering old
+translated blocks cannot reconstruct missing formula boundaries.
+
+Quality checks are advisory for both initial generation and draft revision:
+block counts, text extraction, images, vectors and continuation diagnostics are
+recorded without rejecting an otherwise generated PDF. Diagnostics are saved next
+to the output as `.diagnostics.json`; a failure to write that file does not prevent
+publication. Transport, authorization, malformed input and output-write failures
+remain real failures. Retiring an artifact also retires its diagnostics and source
+checkpoint directory, except where a current artifact still shares those paths.
+
+The translated PDF has a selectable text layer. The optional synchronized-scroll
+button links relative scroll progress in either direction, not semantic paragraph
+positions. Progress polling only updates the notice during an active job; terminal
+transitions update the selected artifact. One poll is in flight at a time, and late
+responses after cancellation or unmount cannot overwrite the active page.
 
 ## Real-paper verification (2026-11-10)
 
-| Paper | Web provider | Source characters sent through job | Translated blocks | Output pages | Missing printable translations |
-| --- | --- | ---: | ---: | ---: | ---: |
-| DeepSeek-V4.1-Flash | DeepL Web | 157613 | 980 | 71 | 0 |
-| Composed Image Retrieval using Contrastive Learning and Task-oriented CLIP-based Features | Google Web | 86781 | 287 | 31 | 0 |
-| Attention Is All You Need | DeepL Web | 38607 | 464 | 25 | 0 |
+Five papers were generated using DeepL Web on deployed revision `86a4ec611`.
+Each request was a cache miss, with one background-job attempt and no whole-job
+retry or manual cache copying. All resulting pages could be rendered; browser
+PDF downloads matched the generated files by SHA-256.
 
-All three used real web translation requests and completed the backend job.
-Saved results were re-rendered during the renderer fixes without repeating web
-requests. All three ultimately used the complete reflow fallback. Verification
-compares normalized printable translation text against the PDF's extracted text,
-not just block counts. It does not assert translation accuracy or that the source
-layout extractor found every possible text element. Original figures remain in
-the source reader, not in the reflow fallback.
+| Paper | Source pages | Translation pages |
+| --- | ---: | ---: |
+| Attention Is All You Need | 15 | 15 |
+| Rapid and Sensitive Chemical Analysis of Individual Picolitre Droplets by Mass Spectrometry | 8 | 9 |
+| AlphaFold | 12 | 16 |
+| Best Practices for Scientific Computing | 7 | 7 |
+| Teleportation of Quantum States | 5 | 5 |
 
-The long-paper trial initially exposed an actual 348/491 rendering failure.
-The retrieval-paper trial exposed mismatched text despite successful block
-counts. Both now pass text completeness verification. One deployment from a
-concurrent task interrupted the long-paper retry; the test job was explicitly
-requeued after restoring the intended core image. Automatic checkpoint reuse
-then completed without retranslating the full paper.
+These 52 pages establish first-attempt generation and readability of the output
+files, not translation accuracy or complete semantic layout preservation. That
+revision still showed partially translated formula/code content and sparse
+continuation pages. Later review fixes have synthetic regression coverage; the
+historical five-paper run must not be represented as a new full-paper visual
+acceptance of those later changes.
 
-Visual review found that broad first-page metadata detection discarded the
-Attention paper's title. Extraction now retains short titles, edge prose and
-text overlapping figures instead of using these broad exclusion rules. All
-three jobs were rerun after this change; the table reports the final results.
-The final runs also exercised service interruption and checkpoint recovery.
+Earlier experiments used a whole-document text-only fallback. Their page counts
+and text-completeness checks are obsolete for the current renderer and do not
+establish preservation of figures, formulas or columns.
+
+CI runs the office-convert-service regression suite with its pinned PyMuPDF
+version and CJK fonts, in addition to the Go and frontend test suites.

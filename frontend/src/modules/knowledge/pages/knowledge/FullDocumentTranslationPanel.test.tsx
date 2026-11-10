@@ -3,7 +3,7 @@ import {render,screen,fireEvent} from '@testing-library/react';
 import {expect,it,vi} from 'vitest';
 import type {PdfArtifact} from '../../api/pdfArtifacts';
 vi.mock('@/modules/knowledge/api/pdfArtifacts',()=>({pdfArtifactContentUrl:(_d:string,_p:string,id:string)=>id}));
-vi.mock('@/modules/knowledge/components/FileViewer',()=>({default:({file,pdfHeaderEnd}:{file:string;pdfHeaderEnd:ReactNode})=><div>{pdfHeaderEnd}<div data-testid="viewer">{file}</div></div>}));
+vi.mock('@/modules/knowledge/components/FileViewer',()=>({default:({file,pdfHeaderEnd,pdfSelectableText}:{file:string;pdfHeaderEnd:ReactNode;pdfSelectableText?:boolean})=><div>{pdfHeaderEnd}<div data-testid="viewer" data-selectable-text={pdfSelectableText}>{file}</div></div>}));
 vi.mock('../../paper/translationAttachment',()=>({createTranslationAttachmentSaver:()=>vi.fn(),fetchTranslationFile:vi.fn()}));
 import FullDocumentTranslationPanel from './FullDocumentTranslationPanel';
 const artifact={id:'old',filename:'paper.pdf',has_draft:true,layout_preserved:true,supplemental_block_count:2,warning_count:3} as PdfArtifact;
@@ -17,6 +17,7 @@ it('shows the translated document without advisory banners or a rerender action'
  expect(container.querySelector('.ant-alert')).toBeNull();
  expect(screen.queryByText(/重新排版|保留原文|旧版排版/)).not.toBeInTheDocument();
  expect(screen.getByTestId('viewer')).toHaveTextContent('old');
+ expect(screen.getByTestId('viewer')).toHaveAttribute('data-selectable-text','true');
  for(const name of ['重新翻译','下载译本','加入文献附件','半屏阅读']) expect(screen.getByRole('button',{name})).toBeInTheDocument();
 });
 it('changes the reading width only when clicked',()=>{

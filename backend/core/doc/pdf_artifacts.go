@@ -153,11 +153,21 @@ func removeArtifactCacheEntry(artifacts []pdfArtifactRecord, target pdfArtifactR
 	return kept, removed
 }
 
+// Output diagnostics belong to the rendered file and share its lifetime.
+func removeArtifactOutputFile(path string) {
+	if path == "" {
+		return
+	}
+	_ = os.Remove(path)
+	_ = os.Remove(path + ".diagnostics.json")
+}
+
 func removeArtifactFiles(artifacts []pdfArtifactRecord) {
 	for _, artifact := range artifacts {
-		_ = os.Remove(artifact.StoredPath)
+		removeArtifactOutputFile(artifact.StoredPath)
 		if artifact.SourcePath != "" {
 			_ = os.Remove(artifact.SourcePath)
+			_ = os.RemoveAll(artifact.SourcePath + ".translation-cache")
 		}
 		if artifact.LayoutPath != "" {
 			_ = os.Remove(artifact.LayoutPath)

@@ -60,6 +60,7 @@ interface RenderPdfProps {
   pdfScrollSync?: PdfScrollSyncEndpoint;
   paperMode?: boolean;
   pdfToolbarMode?: "full" | "navigation";
+  pdfSelectableText?: boolean;
   pdfHeaderStart?: React.ReactNode;
   pdfHeaderEnd?: React.ReactNode | ((tools: React.ReactNode) => React.ReactNode);
   onStudyOpenChange?: (open: boolean) => void;
@@ -151,6 +152,7 @@ export default function RenderPdf({
   onPreviewError,
   paperMode = false,
   pdfToolbarMode = "full",
+  pdfSelectableText = false,
   pdfScrollSync,
   pdfHeaderStart,
   pdfHeaderEnd,
@@ -1177,6 +1179,18 @@ export default function RenderPdf({
             navigateStudyEvidence({id:block.id,page:block.page,text:block.latex || "",bbox:block.bbox});
           }
         }}
+        onClick={event => {
+          if (!onNoteHighlightClick || event.button !== 0 || event.detail > 1 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+          if ((event.target as Element).closest('a,button,input,textarea,select,[role="link"]') || window.getSelection()?.isCollapsed === false) return;
+          const pointer = studyPointer.current;
+          if (!pointer || Math.hypot(event.clientX - pointer.x, event.clientY - pointer.y) > 4) return;
+          const bounds = event.currentTarget.getBoundingClientRect();
+          if (!bounds.width || !bounds.height) return;
+          const x = (event.clientX - bounds.left) / bounds.width;
+          const y = (event.clientY - bounds.top) / bounds.height;
+          const hit = pdfNoteHighlightHitAreas(savedNoteHighlights,index+1).find(({rect}) => x >= rect[0] && x <= rect[2] && y >= rect[1] && y <= rect[3]);
+          if (hit) onNoteHighlightClick(hit.id);
+        }}
         ref={(el) => (pageRefs.current[index] = el)}
         style={{
           position: "absolute",
@@ -1196,7 +1210,7 @@ export default function RenderPdf({
           pageNumber={index + 1}
           width={RASTER_WIDTH}
           devicePixelRatio={Math.min(2, Math.max(1.5, window.devicePixelRatio || 1))}
-          renderTextLayer={Boolean(pdfIRTarget || onNoteSelection || onAskSelection || onTranslateSelection || onImportReferenceSelection || citationTargets.length)}
+          renderTextLayer={Boolean(pdfSelectableText || pdfIRTarget || onNoteSelection || onAskSelection || onTranslateSelection || onImportReferenceSelection || citationTargets.length)}
           renderAnnotationLayer
           filterAnnotations={restorePdfLinkAnnotationBorders}
           onRenderSuccess={() => {
@@ -1214,7 +1228,7 @@ export default function RenderPdf({
         />
         </div>
         {pdfNoteHighlightPaths([...noteHighlights,...savedNoteHighlights],index+1).map(({color,path})=><svg key={color} data-pdf-note-highlight={color} aria-hidden="true" viewBox="0 0 1 1" preserveAspectRatio="none" style={{position:'absolute',inset:0,width:'100%',height:'100%',mixBlendMode:'multiply',pointerEvents:'none',zIndex:5}}><path d={path} fill={pdfNoteHighlightBackground(color)} fillRule="nonzero"/></svg>)}
-        {onNoteHighlightClick&&pdfNoteHighlightHitAreas(savedNoteHighlights,index+1).map(({id,rect},areaIndex)=><button key={`${id}:${areaIndex}`} type="button" className="pdf-note-highlight-hit" aria-label={readerLanguage==='zh'?'打开笔记':'Open note'} onClick={event=>{event.stopPropagation();onNoteHighlightClick(id);}} style={{left:`${rect[0]*100}%`,top:`${rect[1]*100}%`,width:`${(rect[2]-rect[0])*100}%`,height:`${(rect[3]-rect[1])*100}%`}}/>)}
+        {onNoteHighlightClick&&savedNoteHighlights.filter(note=>note.page===index+1&&note.rects.length>0).map(note=><button key={note.id} type="button" className="pdf-note-highlight-marker" aria-label={readerLanguage==='zh'?'打开笔记':'Open note'} onClick={event=>{event.stopPropagation();onNoteHighlightClick(note.id);}} style={{top:`${note.rects[0][1]*100}%`}}>✎</button>)}
         {studyHighlight?.page === index && <div className="pdf-study-highlight" style={(() => {
           const box = studyHighlight.bbox;
           const valid = box && box.length === 4 && box.every(value=>Number.isFinite(value)&&value>=0&&value<=1) && box[0]<box[2] && box[1]<box[3];

@@ -8,7 +8,7 @@ _SCALE = fitz.Matrix(2, 2)
 
 def image_signature(page):
     return [
-        (i["digest"], tuple(i["bbox"]), tuple(i["transform"]))
+        (i['digest'], tuple(i['bbox']), tuple(i['transform']))
         for i in page.get_image_info(hashes=True)
     ]
 
@@ -35,7 +35,7 @@ def assert_images_preserved(before, original, page):
             cursor += 1
         else:
             missing.append(item)
-    error = f"original images changed on page {page.number + 1}"
+    error = f'original images changed on page {page.number + 1}'
     if cursor != len(after):
         raise ValueError(error)
     if not missing:

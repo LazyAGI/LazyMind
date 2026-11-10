@@ -7,7 +7,6 @@ import threading
 import json
 import re
 import statistics
-import unicodedata
 from pathlib import Path
 from typing import Iterable
 
@@ -16,6 +15,7 @@ from pydantic import BaseModel
 import fitz
 from fontTools.ttLib import TTCollection
 from translation_pdf import render_preserving_pages
+from translation_layout import protected_span
 
 
 logging.basicConfig(level=logging.INFO, format='%(message)s', force=True)
@@ -666,7 +666,8 @@ def render_pdf_translation(req: PDFTranslationRenderRequest) -> dict[str, object
             logo_width, logo_height, gap = 24, 16, 5
             start_x = (page.rect.width - text_width - logo_width - gap) / 2
             logo_region = fitz.Rect(start_x, 3, start_x + logo_width, 3 + logo_height)
-            page.insert_image(logo_region, filename=str(Path(__file__).parent / 'assets' / 'lazymind-logo.png'), overlay=True)
+            page.insert_image(logo_region, filename=str(Path(__file__).parent
+                              / 'assets' / 'lazymind-logo.png'), overlay=True)
             region = fitz.Rect(start_x + logo_width + gap, 3, page.rect.width - 18, 20)
             page.insert_textbox(
                 region,
@@ -678,10 +679,11 @@ def render_pdf_translation(req: PDFTranslationRenderRequest) -> dict[str, object
                 overlay=True,
                 fill_opacity=0.96,
             )
-            page.insert_link({'kind': fitz.LINK_URI, 'from': fitz.Rect(start_x, 3, start_x + logo_width + gap + text_width, 20), 'uri': attribution_url})
+            page.insert_link({'kind': fitz.LINK_URI, 'from': fitz.Rect(start_x, 3, start_x
+                             + logo_width + gap + text_width, 20), 'uri': attribution_url})
         document.save(output, garbage=4, deflate=True)
         try:
-            Path(str(output) + ".diagnostics.json").write_text(json.dumps(result, ensure_ascii=False), encoding="utf-8")
+            Path(str(output) + '.diagnostics.json').write_text(json.dumps(result, ensure_ascii=False), encoding='utf-8')
         except OSError:
             pass  # Diagnostic storage must never prevent publishing the PDF.
     except ValueError as exc:
@@ -707,28 +709,6 @@ def extract_pdf_translation_layout(req: PDFTranslationLayoutRequest) -> dict[str
                 block for block in page.get_text('dict', sort=True).get('blocks', [])
                 if block.get('type') == 0
             ]
-            figure_regions: list[fitz.Rect] = []
-            for image in page.get_image_info():
-                bbox = image.get('bbox')
-                if bbox:
-                    image_rect = fitz.Rect(bbox)
-                    figure_regions.append(fitz.Rect(
-                        max(page.rect.x0, image_rect.x0 - 20),
-                        max(page.rect.y0, image_rect.y0 - 8),
-                        min(page.rect.x1, image_rect.x1 + 20),
-                        min(page.rect.y1, image_rect.y1 + 8),
-                    ))
-            for cluster in page.cluster_drawings():
-                # Ignore isolated rules and tiny glyph-like paths. Dense vector
-                # diagrams, charts and boxed figures must remain untouched,
-                # including any text labels drawn over them.
-                if cluster.width >= 25 and cluster.height >= 20 and cluster.width * cluster.height >= 1000:
-                    figure_regions.append(fitz.Rect(
-                        max(page.rect.x0, cluster.x0 - 60),
-                        max(page.rect.y0, cluster.y0 - 8),
-                        min(page.rect.x1, cluster.x1 + 60),
-                        min(page.rect.y1, cluster.y1 + 8),
-                    ))
             block_index = 0
             for raw_block in page.get_text('blocks', sort=True):
                 if len(raw_block) < 7 or int(raw_block[6]) != 0:
@@ -762,12 +742,39 @@ def extract_pdf_translation_layout(req: PDFTranslationLayoutRequest) -> dict[str
                 )
                 if is_code or is_formula:
                     continue
-                text_area = max(text_rect.width * text_rect.height, 1.0)
+                # Translate prose around inline math independently. Sending the
+                # complete sentence would duplicate the retained native symbols.
+                if any(protected_span(span) for span in spans):
+                    for line in lines:
+                        if tuple(line.get('dir', (1, 0))) != (1, 0):
+                            continue
+                        groups = [[]]
+                        for span in line.get('spans', []):
+                            if protected_span(span):
+                                groups.append([])
+                            else:
+                                groups[-1].append(span)
+                        for group in groups:
+                            prose = _normalize_pdf_block_text(''.join(span.get('text', '') for span in group))
+                            if not prose or not re.search(r'[A-Za-z]{2,}', prose):
+                                continue
+                            rect = fitz.Rect(group[0]['bbox'])
+                            for span in group[1:]:
+                                rect |= fitz.Rect(span['bbox'])
+                            blocks.append({
+                                'id': f'native-block-{page_index + 1}-{block_index}',
+                                'page': page_index + 1,
+                                'pageWidth': page.rect.width,
+                                'pageHeight': page.rect.height,
+                                'bbox': list(rect),
+                                'type': 'native_text_block',
+                                'text': prose,
+                                'fontSize': statistics.median(float(span.get('size', 10)) for span in group),
+                                'styleLevel': 'body',
+                            })
+                            block_index += 1
+                    continue
                 is_caption = re.match(r'^(figure|fig\.|table)\s*\d', text, re.IGNORECASE) is not None
-                overlaps_figure = any(
-                    (text_rect & region).get_area() / text_area >= 0.15
-                    for region in figure_regions
-                )
                 # Keep source geometry in the manifest. The renderer fits prose
                 # in-page and preserves native chart/table content in place.
                 # Preserve running headers, footers, narrow side metadata and the
@@ -779,19 +786,6 @@ def extract_pdf_translation_layout(req: PDFTranslationLayoutRequest) -> dict[str
                     or text_rect.y0 > page.rect.height * 0.88
                     or text_rect.x0 < page.rect.width * 0.07
                     or text_rect.x1 > page.rect.width * 0.93
-                )
-                is_first_page_author_block = (
-                    page_index == 0
-                    and page.rect.height * 0.18 <= text_rect.y0
-                    and text_rect.y1 < page.rect.height * 0.76
-                    and text_rect.height < 30
-                    and len(text) < 100
-                )
-                is_first_page_legal_notice = (
-                    page_index == 0
-                    and text_rect.y0 > page.rect.height * 0.72
-                    and text_rect.x1 < page.rect.width * 0.52
-                    and bool(re.search(r'copyright|permission|isbn|doi\.org|proceedings', text, re.IGNORECASE))
                 )
                 if is_page_furniture and re.fullmatch(r'\d+', text):
                     continue

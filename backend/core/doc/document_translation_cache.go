@@ -75,7 +75,13 @@ func cachedTranslation(path string, translate func() (string, error)) (string, e
 func removeReplacedTranslationFiles(replaced []pdfArtifactRecord, current pdfArtifactRecord) {
 	keep := map[string]bool{current.StoredPath: true, current.SourcePath: true, current.LayoutPath: true, current.DraftPath: true}
 	for _, old := range replaced {
-		for _, path := range []string{old.StoredPath, old.SourcePath, old.LayoutPath, old.DraftPath} {
+		if !keep[old.StoredPath] {
+			removeArtifactOutputFile(old.StoredPath)
+		}
+		if old.SourcePath != "" && !keep[old.SourcePath] {
+			_ = os.RemoveAll(old.SourcePath + ".translation-cache")
+		}
+		for _, path := range []string{old.SourcePath, old.LayoutPath, old.DraftPath} {
 			if path != "" && !keep[path] {
 				_ = os.Remove(path)
 			}
