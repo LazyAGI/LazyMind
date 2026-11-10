@@ -93,7 +93,7 @@ import { capabilityFamilies, capabilityFamily, capabilityFamilyI18nKey, chooseFa
 import { normalizePdfSelectionText } from "@/components/ui/pdfSelectionText";
 import FullDocumentTranslationPanel from "./FullDocumentTranslationPanel";
 import PaperTranslationPanel from "./PaperTranslationPanel";
-import PdfTranslationNotice from "./PdfTranslationNotice";
+import PdfTranslationNotice, { createPdfTranslationProgress } from "./PdfTranslationNotice";
 import {
   processingLevelSupportsSegments,
   type ProcessingLevel,
@@ -339,6 +339,7 @@ const KnowledgeDocumentContent = () => {
     ?? pdfCapabilities?.translations[pdfCapabilities.translations.length - 1];
   const [pdfViewPosition, setPdfViewPosition] = useState<PdfViewPosition>({ page: 1, progress: 0 });
   const [pdfTask, setPdfTask] = useState<PdfRenderJob>();
+  const [pdfProgress] = useState(createPdfTranslationProgress);
   const [pdfTaskDetail, setPdfTaskDetail] = useState("");
   const [translationPreparing, setTranslationPreparing] = useState(false);
   const [translationTarget, setTranslationTarget] = useState("zh");
@@ -872,12 +873,20 @@ const KnowledgeDocumentContent = () => {
     if (!activeJob) return;
     setPdfTask(activeJob);
     setPdfTaskDetail("后端正在执行，刷新或关闭页面不会中断");
+    let disposed = false;
+    let inFlight = false;
     const poll = async () => {
+      if (inFlight) return;
+      inFlight = true;
       try {
         const capabilities = await getPdfCapabilities(knowledgeBaseId, knowledgeId);
-        setPdfCapabilities(capabilities);
+        if (disposed || cancelledPdfJobsRef.current.has(activeJob.id)) return;
         const updated = capabilities.jobs.find((job) => job.id === activeJob.id);
         if (!updated) return;
+        pdfProgress.update(updated);
+        // Only terminal transitions change the workspace and selected artifact.
+        if (isActivePdfJob(updated)) return;
+        setPdfCapabilities(capabilities);
         setPdfTask(updated);
         if (updated.status === "READY") {
           const artifact = capabilities.translations.find((item) => item.id === updated.artifact_id);
@@ -890,10 +899,11 @@ const KnowledgeDocumentContent = () => {
           message.error(updated.error_message || "文档翻译失败");
         }
       } catch { /* Keep the persisted task running and retry on the next poll. */ }
+      finally { inFlight = false; }
     };
     const timer = window.setInterval(() => { void poll(); }, 1500);
-    return () => window.clearInterval(timer);
-  }, [knowledgeBaseId, knowledgeId, pdfCapabilities?.jobs, showFullTranslation, selectTranslationArtifact]);
+    return () => { disposed = true; window.clearInterval(timer); };
+  }, [knowledgeBaseId, knowledgeId, pdfCapabilities?.jobs, pdfProgress, showFullTranslation, selectTranslationArtifact]);
 
 
   useEffect(() => { setPaperNavTab(isPaperDocument?"outline":"references");  }, [isPaperDocument, knowledgeId]);
@@ -1121,7 +1131,7 @@ const KnowledgeDocumentContent = () => {
                   artifact={sidebarTranslation}
                   supported={canTranslateDocument} busy={translationInProgress}
                   canWrite={hasWritePermission}
-                  progressNotice={<PdfTranslationNotice documentId={knowledgeId} job={pdfTask} preparing={translationPreparing} detail={pdfTaskDetail} providerLabel={displayTranslationName(getTranslationProgressLabel(pdfTask, translationPreparing, translationMode, translationProvider))} onCancel={() => void cancelTranslationJob()} />}
+                  progressNotice={<PdfTranslationNotice progress={pdfProgress} documentId={knowledgeId} job={pdfTask} preparing={translationPreparing} detail={pdfTaskDetail} providerLabel={displayTranslationName(getTranslationProgressLabel(pdfTask, translationPreparing, translationMode, translationProvider))} onCancel={() => void cancelTranslationJob()} />}
                   onTranslate={openNewTranslation}
                   onRetranslateSelection={selection => void openTranslationRevision(selection, "translation")}
                   onRegenerate={openTranslationRegeneration}

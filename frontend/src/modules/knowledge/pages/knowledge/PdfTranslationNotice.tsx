@@ -1,9 +1,23 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 import { Button, Progress } from "antd";
 import { CloseOutlined } from "@ant-design/icons";
 import { isActivePdfJob, type PdfRenderJob } from "@/modules/knowledge/api/pdfArtifacts";
 
+// Progress ticks belong to the notice, not the document workspace. Keep the
+// latest snapshot while the notice is hidden so reopening it stays up to date.
+export function createPdfTranslationProgress() {
+  let snapshot: PdfRenderJob | undefined;
+  const listeners = new Set<() => void>();
+  return {
+    getSnapshot: () => snapshot,
+    subscribe: (listener: () => void) => { listeners.add(listener); return () => { listeners.delete(listener); }; },
+    update: (job: PdfRenderJob) => { snapshot = job; listeners.forEach(listener => listener()); },
+  };
+}
+const emptyProgress = createPdfTranslationProgress();
+
 interface Props {
+  progress?: ReturnType<typeof createPdfTranslationProgress>;
   documentId: string;
   job?: PdfRenderJob;
   preparing: boolean;
@@ -12,7 +26,9 @@ interface Props {
   onCancel: () => void;
 }
 
-export default function PdfTranslationNotice({ documentId, job, preparing, detail, providerLabel, onCancel }: Props) {
+export default function PdfTranslationNotice({ documentId, job: initialJob, preparing, detail, providerLabel, onCancel, progress = emptyProgress }: Props) {
+  const snapshot = useSyncExternalStore(progress.subscribe, progress.getSnapshot, progress.getSnapshot);
+  const job = snapshot?.id === initialJob?.id && isActivePdfJob(initialJob) ? snapshot : initialJob;
   const storageKey = `pdf-translation-dismissed:${documentId}`;
   const [dismissed, setDismissed] = useState("");
   useEffect(() => {

@@ -1,7 +1,7 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { PdfRenderJob } from "@/modules/knowledge/api/pdfArtifacts";
-import PdfTranslationNotice from "./PdfTranslationNotice";
+import PdfTranslationNotice, { createPdfTranslationProgress } from "./PdfTranslationNotice";
 
 afterEach(() => { cleanup(); sessionStorage.clear(); });
 
@@ -23,4 +23,22 @@ describe("PDF translation notice", () => {
     next.rerender(<PdfTranslationNotice {...props} job={{ ...job, id: "failed-2" }} />);
     expect(screen.getByText("翻译失败")).toBeInTheDocument();
   });
+});
+
+it("retains hidden progress while respecting cancellation and new jobs", () => {
+  const progress = createPdfTranslationProgress();
+  const job: PdfRenderJob = { id: "running", kind: "TRANSLATION_PDF", cache_key: "cache", status: "RUNNING", stage: "TRANSLATING", progress: 10 };
+  const props = { documentId: "paper", job, progress, preparing: false, detail: "", providerLabel: "DeepL", onCancel: vi.fn() };
+  const first = render(<PdfTranslationNotice {...props} />);
+  act(() => progress.update({...job, progress: 35}));
+  expect(screen.getByText("35%")).toBeInTheDocument();
+  first.unmount();
+  progress.update({...job, progress: 60});
+  const next = render(<PdfTranslationNotice {...props} />);
+  expect(screen.getByText("60%")).toBeInTheDocument();
+  next.rerender(<PdfTranslationNotice {...props} job={{...job, status: "CANCELLED"}} />);
+  expect(screen.getByText("翻译已取消")).toBeInTheDocument();
+  expect(screen.queryByText("60%")).not.toBeInTheDocument();
+  next.rerender(<PdfTranslationNotice {...props} job={{...job, id: "new", progress: 5}} />);
+  expect(screen.getByText("5%")).toBeInTheDocument();
 });
