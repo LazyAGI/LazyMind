@@ -4018,7 +4018,7 @@ const enUS = {
     featuredBack: "Back to capabilities",
     mentionConversation: "Past chats",
     mentionNoResults: "No matching items",
-    mentionShowMore: "Show all ({{count}})",
+    mentionShowMore: "Show all",
     mentionCollapse: "Collapse",
     mentionShortcutHint: "type to search this category",
     promptSuggestionsAria: "Prompt improvement suggestions",

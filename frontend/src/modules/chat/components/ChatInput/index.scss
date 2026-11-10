@@ -837,6 +837,11 @@
       backdrop-filter: blur(16px);
       transform: translateX(-50%);
 
+      &.is-slash {
+        height: auto;
+        overflow-y: auto;
+      }
+
       &.is-below {
         top: calc(100% + 8px);
         bottom: auto;
@@ -880,6 +885,22 @@
       flex-shrink: 0;
       color: #ff4d4f;
       font-size: 12px;
+    }
+
+    .chat-mention-skill-toggle {
+      padding: 2px 6px;
+      border: 0;
+      border-radius: 5px;
+      background: transparent;
+      color: #1769e0;
+      font: inherit;
+      white-space: nowrap;
+      cursor: pointer;
+
+      &:hover,
+      &:focus-visible {
+        background: #eef5ff;
+      }
     }
 
     .chat-mention-shortcut {
