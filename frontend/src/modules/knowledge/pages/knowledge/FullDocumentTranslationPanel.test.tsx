@@ -1,9 +1,10 @@
+import type {ReactNode} from 'react';
 import {render,screen,fireEvent,waitFor} from '@testing-library/react';
 import {beforeEach,expect,it,vi} from 'vitest';
 import type {PdfArtifact} from '../../api/pdfArtifacts';
 const calls=vi.hoisted(()=>({rerender:vi.fn()}));
 vi.mock('@/modules/knowledge/api/pdfArtifacts',()=>({pdfArtifactContentUrl:(_d:string,_p:string,id:string)=>id,rerenderPdfTranslation:calls.rerender}));
-vi.mock('@/modules/knowledge/components/FileViewer',()=>({default:({file}:{file:string})=><div data-testid="viewer">{file}</div>}));
+vi.mock('@/modules/knowledge/components/FileViewer',()=>({default:({file,pdfHeaderEnd}:{file:string;pdfHeaderEnd:ReactNode})=><div>{pdfHeaderEnd}<div data-testid="viewer">{file}</div></div>}));
 vi.mock('../../paper/translationAttachment',()=>({createTranslationAttachmentSaver:()=>vi.fn(),fetchTranslationFile:vi.fn()}));
 import FullDocumentTranslationPanel from './FullDocumentTranslationPanel';
 const artifact={id:'old',filename:'paper.pdf',has_draft:true} as PdfArtifact;

@@ -51,6 +51,7 @@ export interface FileViewerRef {
 
 interface FileViewerProps {
   paperMode?: boolean;
+  pdfToolbarMode?: "full" | "navigation";
   onPdfNoteSelection?: (selection: PdfTextSelection, note: string, color: PdfNoteColor, id: string) => Promise<void>;
   pdfNoteHighlights?: PdfNoteHighlight[];
   onPdfNoteHighlightClick?: (id:string) => void;
@@ -412,6 +413,7 @@ const FileViewer = forwardRef<FileViewerRef, FileViewerProps>((props, ref) => {
         return pdfPreviewData ? (
           <RenderPdf
             paperMode={props.paperMode}
+            pdfToolbarMode={props.pdfToolbarMode}
             pdfHeaderStart={props.pdfHeaderStart}
             pdfHeaderEnd={props.pdfHeaderEnd}
             key={`${props.pdfIRTarget?.dataset || ""}:${props.pdfIRTarget?.document || ""}:${props.file || ""}`}

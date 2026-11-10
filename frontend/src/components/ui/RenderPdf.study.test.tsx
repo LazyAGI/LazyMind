@@ -549,3 +549,16 @@ it('collects vocabulary from the original PDF selection with its page and senten
  expect(screen.queryByRole('dialog',{name:'选中文本操作'})).toBeNull();
  window.getSelection()?.removeAllRanges();
 });
+
+it('limits a translated PDF toolbar to pagination, zoom and supplied document actions',async()=>{
+ const view=render(<RenderPdf fileData="translation.pdf" pdfToolbarMode="navigation" pdfHeaderEnd={<button>下载译本</button>}/>);
+ await act(async()=>{});
+ expectPage(1);
+ expect(screen.getByRole('button',{name:'pdfReader.zoomIn'})).toBeInTheDocument();
+ expect(screen.getByRole('button',{name:'下载译本'}).closest('nav')).toBe(pageButton(1).closest('nav'));
+ expect(screen.queryByRole('button',{name:'阅读工具'})).toBeNull();
+ expect(view.container.querySelector('.pdf-reader-hand-trigger')).toBeNull();
+ expect(view.container.querySelector('.pdf-reader-pin-trigger')).toBeNull();
+ fireEvent.click(screen.getByRole('button',{name:'pdfReader.nextPage'}));
+ expectPage(2);
+});

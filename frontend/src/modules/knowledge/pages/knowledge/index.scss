@@ -514,3 +514,9 @@
 .knowledge-full-translation-toolbar .ant-select { min-width: 160px; flex: 1; }
 .knowledge-full-translation-viewer { display: flex; flex: 1; min-height: 0; min-width: 0; overflow: hidden; }
 .knowledge-full-translation-viewer > .file-viewer-container { flex: 1; min-width: 0; height: 100%; }
+
+.paper-chat-toolbar .knowledge-translation-modes--header { padding: 0; margin-left: 8px; flex: 1; min-width: 0; }
+.paper-chat-toolbar > strong { flex-shrink: 0; white-space: nowrap; }
+.paper-chat-toolbar-actions { display: flex; flex-shrink: 0; }
+.knowledge-full-translation-actions { display: flex; align-items: center; gap: 2px; flex: 0 0 auto; }
+.knowledge-full-translation-actions .ant-btn { min-width: 26px; width: 26px; height: 26px; padding: 0; }

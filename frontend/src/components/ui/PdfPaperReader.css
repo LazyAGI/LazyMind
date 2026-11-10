@@ -146,3 +146,8 @@
 .pdf-reader-hand-active .react-pdf__Document{pointer-events:none}
 .pdf-reader-workspace{container-type:inline-size;container-name:pdf-reader}
 @container pdf-reader (max-width:850px){.pdf-reader-header-end .pdf-study-ai-button span{display:none}.pdf-reader-header-end .pdf-study-ai-button{padding-inline:8px}}
+
+.pdf-reader-workspace .pdf-reader-header--compact { display: flex; padding: 4px 8px; min-height: 36px; overflow-x: auto; flex-wrap: nowrap; }
+.pdf-reader-header--compact .pdf-reader-header-start { display: none; }
+.pdf-reader-header--compact .pdf-reader-header-end { display: flex; flex: 1 0 auto; flex-wrap: nowrap; justify-content: space-between; gap: 8px; }
+.pdf-reader-header--compact .pdf-reader-tools { flex: 0 0 auto; flex-wrap: nowrap; }
