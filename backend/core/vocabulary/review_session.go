@@ -50,12 +50,9 @@ func (s *Service) ActiveReviewSession(ctx context.Context, owner string) (*Revie
 		return nil, err
 	}
 	bookID := setting.LocalDefaultWordbookID
-	if setting.SelectedProvider == ProviderAnki {
-		bookID = setting.AnkiDeckName
-	}
 	now := time.Now().UTC()
 	var session ReviewSession
-	err = s.db.WithContext(ctx).Where("owner_id = ? AND provider = ? AND wordbook_id = ? AND completed_at IS NULL", owner, setting.SelectedProvider, bookID).Order("started_at DESC").First(&session).Error
+	err = s.db.WithContext(ctx).Where("owner_id = ? AND provider = ? AND wordbook_id = ? AND completed_at IS NULL", owner, "local", bookID).Order("started_at DESC").First(&session).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, nil
 	}
@@ -77,9 +74,7 @@ func (s *Service) ensureActiveReviewSession(ctx context.Context, owner string) (
 		return ReviewSession{}, err
 	}
 	bookID, bookName := setting.LocalDefaultWordbookID, "当前单词本"
-	if setting.SelectedProvider == ProviderAnki {
-		bookID, bookName = setting.AnkiDeckName, setting.AnkiDeckName
-	} else if bookID != "" {
+	if bookID != "" {
 		var book Wordbook
 		if s.db.WithContext(ctx).Where("owner_id = ? AND id = ?", owner, bookID).First(&book).Error == nil {
 			bookName = book.Name
@@ -93,7 +88,7 @@ func (s *Service) ensureActiveReviewSession(ctx context.Context, owner string) (
 	now := time.Now().UTC()
 	var session ReviewSession
 	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		session = ReviewSession{ID: uuid.NewString(), OwnerID: owner, Provider: setting.SelectedProvider, WordbookID: bookID, WordbookName: bookName, Status: "active", StartedAt: now, ExpiresAt: now.Add(reviewSessionLifetime), CreatedAt: now}
+		session = ReviewSession{ID: uuid.NewString(), OwnerID: owner, Provider: "local", WordbookID: bookID, WordbookName: bookName, Status: "active", StartedAt: now, ExpiresAt: now.Add(reviewSessionLifetime), CreatedAt: now}
 		return tx.Create(&session).Error
 	})
 	return session, err
@@ -111,12 +106,7 @@ func (s *Service) previewReviewQuestions(ctx context.Context, owner string, limi
 		limit = 200
 	}
 	fetchLimit := min(2000, limit*10)
-	var questions []ReviewQuestion
-	if session.Provider == ProviderAnki {
-		questions, err = s.NextAnkiQuestions(ctx, owner, fetchLimit)
-	} else {
-		questions, err = s.NextQuestions(ctx, owner, fetchLimit)
-	}
+	questions, err := s.NextQuestions(ctx, owner, fetchLimit)
 	if err != nil {
 		return ReviewSession{}, nil, err
 	}
@@ -435,27 +425,22 @@ func (s *Service) RecordSessionAnswer(ctx context.Context, owner, sessionID, wor
 		key = uuid.NewString()
 	}
 	req.IdempotencyKey = key
-	var err error
-	if session.Provider == ProviderAnki {
-		err = s.ReviewAnki(ctx, owner, req)
-	} else {
-		err = s.Review(ctx, owner, item.WordID, req)
+	if session.Provider != "local" {
+		return errors.New("review session uses a legacy Anki provider")
 	}
-	if err != nil {
+	if err := s.Review(ctx, owner, item.WordID, req); err != nil {
 		return err
 	}
 	rating, _ := ratingValue(req.Rating)
 	before, after := int64(0), int64(0)
-	if session.Provider != "anki" {
-		var row ReviewLogRow
-		if s.db.WithContext(ctx).Where("owner_id = ? AND idempotency_key = ?", owner, key).First(&row).Error == nil {
-			var payload struct {
-				IntervalBefore uint64 `json:"interval_before_days"`
-				IntervalAfter  uint64 `json:"interval_after_days"`
-			}
-			if json.Unmarshal([]byte(row.FSRSLogJSON), &payload) == nil {
-				before, after = int64(payload.IntervalBefore), int64(payload.IntervalAfter)
-			}
+	var row ReviewLogRow
+	if s.db.WithContext(ctx).Where("owner_id = ? AND idempotency_key = ?", owner, key).First(&row).Error == nil {
+		var payload struct {
+			IntervalBefore uint64 `json:"interval_before_days"`
+			IntervalAfter  uint64 `json:"interval_after_days"`
+		}
+		if json.Unmarshal([]byte(row.FSRSLogJSON), &payload) == nil {
+			before, after = int64(payload.IntervalBefore), int64(payload.IntervalAfter)
 		}
 	}
 	now := time.Now().UTC()

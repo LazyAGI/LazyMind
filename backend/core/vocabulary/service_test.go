@@ -35,14 +35,23 @@ func selectLocal(t *testing.T, s *Service) {
 	}
 }
 
-func TestDisabledFeatureRejectsLocalProvider(t *testing.T) {
+func TestVocabularyPersistsInHostedModeWithoutAnki(t *testing.T) {
 	s := testService(t)
+	t.Setenv("LAZYMIND_RUNTIME_MODE", "cloud")
 	t.Setenv("LAZYMIND_VOCABULARY_ENABLED", "false")
-	if _, err := s.SaveSetting(context.Background(), "u", ProviderSetting{SelectedProvider: "local", AnkiEndpoint: defaultAnkiURL, AnkiDeckName: defaultAnkiDeck}); err == nil {
-		t.Fatal("expected provider rejection")
+	t.Setenv("LAZYMIND_VOCABULARY_ANKI_SYNC_ENABLED", "false")
+	ctx := context.Background()
+	result, err := s.AddWord(ctx, "u", AddWordRequest{Provider: ProviderAnki, WordbookIDs: []string{"Legacy Anki deck"}, Term: "context", Meaning: "surroundings"})
+	if err != nil || result.Word.Provider != "local" || result.Queued {
+		t.Fatalf("local save result=%+v, err=%v", result, err)
 	}
-	if _, err := s.NextQuestion(context.Background(), "u"); err == nil {
-		t.Fatal("expected review rejection")
+	_, items, err := s.ChatWords(ctx, "u", "", "")
+	if err != nil || len(items) != 1 || items[0].ID != result.Word.ID {
+		t.Fatalf("chat items=%+v, err=%v", items, err)
+	}
+	question, err := s.NextQuestion(ctx, "u")
+	if err != nil || question == nil || question.Word.ID != result.Word.ID {
+		t.Fatalf("question=%+v, err=%v", question, err)
 	}
 }
 
@@ -502,10 +511,11 @@ func TestLocalAddPersistsDefaultWordbookAndExampleTags(t *testing.T) {
 	}
 }
 
-func TestAnkiMutationIsQueuedWhenOffline(t *testing.T) {
+func TestAnkiWordUpdateQueuesMirrorWithoutRequiringConnection(t *testing.T) {
 	s := testService(t)
+	t.Setenv("LAZYMIND_VOCABULARY_ANKI_SYNC_ENABLED", "true")
 	ctx := context.Background()
-	setting := ProviderSetting{OwnerID: "u", SelectedProvider: ProviderAnki, AnkiEndpoint: "http://127.0.0.1:1", AnkiDeckName: defaultAnkiDeck, AnkiModelVersion: ankiModelVersion}
+	setting := ProviderSetting{OwnerID: "u", LegacySelectedProvider: ProviderAnki, AnkiEndpoint: "http://127.0.0.1:1", AnkiDeckName: defaultAnkiDeck, AnkiModelVersion: ankiModelVersion}
 	if err := s.db.Create(&setting).Error; err != nil {
 		t.Fatal(err)
 	}
@@ -518,7 +528,7 @@ func TestAnkiMutationIsQueuedWhenOffline(t *testing.T) {
 		t.Fatal(err)
 	}
 	var operation providerOperation
-	if err := s.db.Where("operation_type = ? AND status = ?", "update_word", "pending").First(&operation).Error; err != nil {
+	if err := s.db.Where("operation_type = ? AND status = ?", "mirror_word", "pending").First(&operation).Error; err != nil {
 		t.Fatal(err)
 	}
 	if operation.RetryCount != 0 {
@@ -623,5 +633,27 @@ func TestObjectiveReviewQuestionsAndServerGrading(t *testing.T) {
 	rating, err = s.gradeResponse(ctx, "u", ReviewRequest{CardID: choice.CardID, Response: "错误释义"})
 	if err != nil || rating != "again" {
 		t.Fatalf("incorrect response rating=%q err=%v", rating, err)
+	}
+}
+
+func TestLegacyAnkiQueueIsVisibleWithAnkiDisabled(t *testing.T) {
+	s := testService(t)
+	t.Setenv("LAZYMIND_VOCABULARY_ANKI_SYNC_ENABLED", "false")
+	ctx := context.Background()
+	req := AddWordRequest{Provider: ProviderAnki, Term: "legacy", Language: "en", Meaning: "existing", DocumentID: "doc", WordbookIDs: []string{"Old deck"}}
+	if err := createAnkiOperation(s.db, "u", "add_word", req); err != nil {
+		t.Fatal(err)
+	}
+	words, err := s.DocumentWords(ctx, "u", "doc")
+	if err != nil || len(words) != 1 || words[0].Term != req.Term || words[0].Provider != "local" {
+		t.Fatalf("words=%+v err=%v", words, err)
+	}
+	again, err := s.DocumentWords(ctx, "u", "doc")
+	if err != nil || len(again) != 1 || again[0].ID != words[0].ID {
+		t.Fatalf("words after repeat=%+v err=%v", again, err)
+	}
+	var op providerOperation
+	if err := s.db.First(&op).Error; err != nil || op.OperationType != "mirror_word" || op.Status != "pending" {
+		t.Fatalf("operation=%+v err=%v", op, err)
 	}
 }

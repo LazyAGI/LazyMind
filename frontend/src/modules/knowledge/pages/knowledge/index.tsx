@@ -1304,7 +1304,7 @@ const KnowledgeDocumentContent = () => {
         onClose={() => setVocabularySelection(null)}
         onAdded={handleVocabularyAdded}
       /> : null}
-      <AddLearningContentModal value={learningSelection} datasetId={knowledgeBaseId} documentId={knowledgeId} segmentId={segmentDetail?.segment_id} context={learningSelection?.selection.context||segmentDetail?.content} onClose={()=>setLearningSelection(null)} onAdded={handleVocabularyAdded} />
+      <AddLearningContentModal value={learningSelection} datasetId={knowledgeBaseId} documentId={knowledgeId} segmentId={segmentDetail?.segment_id} context={learningSelection?.selection.context||segmentDetail?.content} onClose={()=>setLearningSelection(null)} />
     </div>
   );
 };

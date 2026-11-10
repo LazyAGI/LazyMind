@@ -1,8 +1,8 @@
 import { axiosInstance, BASE_URL } from "@/components/request";
 interface Envelope<T>{data:T}
 const root=`${BASE_URL}/api/core/vocabulary`;
-export interface VocabularyProviderSetting{selected_provider:"anki"|"local";anki_endpoint:string;anki_deck_name:string;anki_model_version?:number;local_default_wordbook_id?:string;anki_last_sync_at?:string;anki_last_sync_error?:string}
-export interface AnkiProviderStatus{provider:"anki";connected:boolean;version?:number;initialized:boolean;deck_name:string;pending_operations:number;message?:string;permission?:string;review_capability?:"full"|"read_only"|"manage_only";last_sync_at?:string;last_sync_error?:string}
+export interface VocabularyProviderSetting{selected_provider:"anki"|"local";anki_sync_enabled?:boolean;anki_sync_available?:boolean;anki_endpoint:string;anki_deck_name:string;anki_model_version?:number;local_default_wordbook_id?:string;anki_last_sync_at?:string;anki_last_sync_error?:string}
+export interface AnkiProviderStatus{provider:"anki";available:boolean;enabled:boolean;connected:boolean;version?:number;initialized:boolean;deck_name:string;pending_operations:number;message?:string;permission?:string;review_capability?:"full"|"read_only"|"manage_only";last_sync_at?:string;last_sync_error?:string}
 export interface AnkiDeck{id:number;name:string;is_default:boolean}
 export interface Wordbook{id:string;name:string;description:string;capability_key:string;question_types:string[];archived_at?:string}
 export interface LearningCapability{key:string;name_i18n_key:string;description_i18n_key:string;local_only:boolean;allowed_question_types:string[];default_question_types:string[]}
@@ -20,10 +20,10 @@ export interface SelectionResolveResult{term:string;sentence:string;provider:"an
 export interface AddVocabularyWord{provider?:"anki"|"local";term:string;language?:string;phonetic?:string;part_of_speech?:string;meaning?:string;definition?:string;user_note?:string;tags?:string[];sentence?:string;translation?:string;example_tags?:string[];dataset_id?:string;document_id?:string;segment_id?:string;page?:number;bbox?:number[];selected_text?:string;context_sentence?:string;wordbook_ids?:string[];origin_type?:string;dictionary_entry_id?:string;document_revision?:string}
 export interface DocumentVocabularyItem extends VocabularyWord{example?:{sentence:string;translation:string};source:{page?:number;segment_id?:string;context_sentence?:string;created_at?:string};source_count:number;can_delete:boolean}
 export const getVocabularyProvider=async()=>(await axiosInstance.get<Envelope<VocabularyProviderSetting>>(`${root}/provider`)).data.data;
-export const saveVocabularyProvider=async(v:VocabularyProviderSetting)=>(await axiosInstance.put<Envelope<VocabularyProviderSetting>>(`${root}/provider`,v)).data.data;
+export const saveVocabularyProvider=async(v:Partial<Pick<VocabularyProviderSetting,"local_default_wordbook_id"|"anki_sync_enabled"|"anki_endpoint"|"anki_deck_name">>)=>(await axiosInstance.put<Envelope<VocabularyProviderSetting>>(`${root}/provider`,v)).data.data;
 export const getAnkiStatus=async()=>(await axiosInstance.get<Envelope<AnkiProviderStatus>>(`${root}/providers/anki/status`,{silentError:true} as never)).data.data;
 export const initializeAnki=async()=>{await axiosInstance.post(`${root}/providers/anki:initialize`,{})};
-export const requestAnkiPermission=async()=>{await axiosInstance.post(`${root}/providers/anki:request-permission`,{})};
+export const requestAnkiPermission=async()=>(await axiosInstance.post<Envelope<{permission:string}>>(`${root}/providers/anki:request-permission`,{})).data.data.permission;
 export const syncAnki=async()=>{await axiosInstance.post(`${root}/providers/anki:sync`,{})};
 export const listAnkiDecks=async()=>(await axiosInstance.get<Envelope<{items:AnkiDeck[]}>>(`${root}/providers/anki/decks`)).data.data.items||[];
 export const createAnkiDeck=async(name:string)=>{await axiosInstance.post(`${root}/providers/anki/decks`,{name})};

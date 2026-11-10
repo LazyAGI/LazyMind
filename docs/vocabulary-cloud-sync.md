@@ -1,6 +1,6 @@
 # 生词同步到欧路词典与墨墨背单词
 
-在「云文档」中找到与其他服务并列的「欧路词典」和「墨墨背单词」卡片，点击配置入口填写各自的个人 Token。可以只启用一家，也可以同时启用。
+在「设置 → 外部应用」中找到与 Anki 并列的「欧路词典」和「墨墨背单词」卡片，点击配置入口填写各自的个人 Token。可以只启用一家，也可以同时启用。
 
 1. 欧路：登录 https://my.eudic.net/OpenAPI/Authorization 获取个人授权信息。墨墨：App「我的 → 更多设置 → 实验功能 → 开放 API」获取 Token。
 2. 填写 Token 并验证连接，选择目标词本；只有一个词本时自动选中。需要新词本时再展开创建操作。
@@ -29,7 +29,9 @@
 
 ## 运行与验证
 
-Core 需要设置 `LAZYMIND_VOCABULARY_ENABLED=true` 才会注册生词及云同步接口；前端构建也需启用对应的 `VITE_VOCABULARY_ENABLED`。仓库 Compose 默认开启，但旧 `.env` 或旧容器可能仍为 `false`，修改后需重建相应服务；仅替换前端不能更新后端接口。
+LazyMind 生词本在所有部署方式下独立提供本地存储、词本管理和复习，不依赖 Anki。旧的 `LAZYMIND_VOCABULARY_ENABLED` / `VITE_VOCABULARY_ENABLED` 不再关闭生词功能。
+
+Anki 仅作为可选同步目标。`LAZYMIND_VOCABULARY_ANKI_SYNC_ENABLED` 控制部署是否允许连接 AnkiConnect：Docker/云部署默认关闭，本地运行管理器默认开启。用户还需要在「设置 → 外部应用 → Anki」启用同步。关闭或无法连接 Anki 时，本地收藏和欧路、墨墨同步仍可使用；该开关不控制欧路、墨墨。
 
 Linux Docker 部署需显式配置 `LAZYMIND_CREDENTIAL_KEY_DIR`，否则凭据库默认拒绝保存 Token。本地 8090 环境使用以下 Core override：
 
@@ -37,7 +39,6 @@ Linux Docker 部署需显式配置 `LAZYMIND_CREDENTIAL_KEY_DIR`，否则凭据�
 services:
   core:
     environment:
-      LAZYMIND_VOCABULARY_ENABLED: "true"
       LAZYMIND_CREDENTIAL_KEY_DIR: /var/lib/lazymind/credential-vault/keys
     volumes:
       - ./data/core/credential-vault:/var/lib/lazymind/credential-vault
@@ -47,7 +48,7 @@ services:
 
 已有数据库的升级应先做备份，保留已应用迁移文件，只补齐缺失的增量迁移；不要用仓库的新聚合 SQL 覆盖旧运行目录。更新 Core 后检查 `/api/core/vocabulary/cloud/connections` 返回连接列表而非 404，再在产品中输入个人 Token 完成远端授权验证。
 
-同步由 Core 的后台任务执行；关闭后台任务时本地收藏与队列仍保留，重新启动任务后继续。未配置外部服务时，知识库收藏仍能独立保存本地生词。现有 Anki 生词入口保持原有行为。
+同步由 Core 的后台任务执行；关闭后台任务时本地收藏与队列仍保留，重新启动任务后继续。未配置外部服务时，知识库收藏仍能独立保存本地生词。启用 Anki 不会切换生词本的数据来源。
 
 自动化测试使用模拟 HTTP 服务，覆盖认证、响应校验、限流、重复发送、追加保留、跨账号隔离、加密存储、断开与 Token 轮换、持久化任务及重试竞态。真实账号联调需要用户在产品配置页填写 Token；不要将 Token 提交到仓库。
 

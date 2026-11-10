@@ -199,7 +199,7 @@ it.each([false,true])('gates the notes and vocabulary reader tool by the existin
   expect(screen.queryByRole('button',{name:/Document details|文档详情/})).toBeNull();
 });
 
-it.each(['vocabularyModal','learningModal'] as const)('opens the vocabulary panel after collecting from %s before the reader details were opened',async(modal)=>{
+it('opens the vocabulary panel after collecting a word before the reader details were opened',async()=>{
   surfaces.vocabularyEnabled=true;
   useDatasetPermissionStore.getState().setCurrentDataset({dataset_id:'library',scene:'academic_papers'} as Dataset);
   axiosInstance.defaults.adapter=config=>config.url?.endsWith('/documents/paper')
@@ -208,7 +208,8 @@ it.each(['vocabularyModal','learningModal'] as const)('opens the vocabulary pane
   const {container}=renderDocument();
   await screen.findByRole('button',{name:/^Notes & vocabulary$|^笔记和生词$/});
   expect(screen.queryByTestId('document-vocabulary')).not.toBeInTheDocument();
-  act(()=>{(surfaces[modal].onAdded as ()=>void)();});
+  expect(surfaces.learningModal.onAdded).toBeUndefined();
+  act(()=>{(surfaces.vocabularyModal.onAdded as ()=>void)();});
   expect(await screen.findByRole('tab',{name:/^Vocabulary$|^生词$/})).toHaveAttribute('aria-selected','true');
   expect(screen.getByTestId('document-vocabulary')).toBeVisible();
   expect(surfaces.vocabulary.refreshToken).toBe(1);

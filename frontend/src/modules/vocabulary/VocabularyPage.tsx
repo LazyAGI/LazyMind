@@ -1,8 +1,6 @@
 import {
-  BookOutlined,
   CheckCircleFilled,
   CloseOutlined,
-  CloudSyncOutlined,
   MoreOutlined,
   PlusOutlined,
   SettingOutlined,
@@ -26,27 +24,21 @@ import {
   Table,
   Tabs,
   Tag,
-  Tooltip,
   Typography,
   message,
 } from "antd";
 import type { ChangeEvent, CSSProperties, MouseEvent, ReactNode } from "react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { isVocabularyEnabled } from "@/runtime/mode";
 import {
   addVocabularyWord,
   completeVocabularyReviewSession,
-  createAnkiDeck,
   createWordbook,
-  deleteAnkiDeck,
   deleteVocabulary,
   deleteWordbook,
   getActiveVocabularyReviewSession,
-  getAnkiStatus,
   getVocabularyProvider,
   getVocabularyStats,
-  listAnkiDecks,
   listReviewLogs,
   listVocabulary,
   listWordbooks,
@@ -59,14 +51,11 @@ import {
   startVocabularyReviewSession,
   submitVocabularySessionReview,
   updateVocabularyWord,
-  type AnkiDeck,
-  type AnkiProviderStatus,
   type ReviewLog,
   type ReviewQuestion,
   type ReviewSessionReport,
   type ReviewStats,
   type VocabularyListItem,
-  type VocabularyProviderSetting,
   type Wordbook,
 } from "./api";
 import "./VocabularyPage.scss";
@@ -126,22 +115,11 @@ export default function VocabularyPage() {
     if (ms < 86400000) return t("vocabularyPage.hours", { count: Math.round(ms / 3600000) });
     return t("vocabularyPage.days", { count: Math.round(ms / 86400000) });
   };
-  const desktop = isVocabularyEnabled();
   const [tab, setTab] = useState("words");
-  const [settingsOpen, setSettingsOpen] = useState(false);
   const [newWordOpen, setNewWordOpen] = useState(false);
-  const [provider, setProvider] = useState<"local" | "anki">("local");
-  const [providerSetting, setProviderSetting] =
-    useState<VocabularyProviderSetting>({
-      selected_provider: "local",
-      anki_endpoint: "http://127.0.0.1:8765",
-      anki_deck_name: "LazyMind Vocabulary",
-    });
   const [items, setItems] = useState<VocabularyListItem[]>([]);
-  const [anki, setAnki] = useState<AnkiProviderStatus | null>(null);
   const [stats, setStats] = useState<ReviewStats | null>(null);
   const [books, setBooks] = useState<Wordbook[]>([]);
-  const [ankiDecks, setAnkiDecks] = useState<AnkiDeck[]>([]);
   const [logs, setLogs] = useState<ReviewLog[]>([]);
   const [search, setSearch] = useState("");
   const [state, setState] = useState<string>();
@@ -161,46 +139,28 @@ export default function VocabularyPage() {
   const [form] = Form.useForm();
   const [newWordForm] = Form.useForm();
   const load = useCallback(async (preferredWordbookId?: string) => {
-    const setting = await getVocabularyProvider();
-    const active = setting.selected_provider;
-    const [allBooks, nextDecks] = await Promise.all([
-      desktop ? listWordbooks() : Promise.resolve([]),
-      active === "anki" ? listAnkiDecks().catch(() => []) : Promise.resolve([]),
+    const [setting, allBooks] = await Promise.all([
+      getVocabularyProvider(),
+      listWordbooks(),
     ]);
     const nextBooks = allBooks.filter((book) => !book.capability_key || book.capability_key === "english_definition");
     let selected = preferredWordbookId || wordbookId || setting.local_default_wordbook_id || "";
-    if (active === "local" && !nextBooks.some((book) => book.id === selected))
-      selected =
-        nextBooks.find((book) => book.name === "默认生词本")?.id ||
-        nextBooks[0]?.id ||
-        "";
-    const [words, status, nextStats, nextLogs, activeReview] =
-      await Promise.all([
-        listVocabulary(active, {
-          search,
-          state: state || "",
-          wordbook_id: active === "local" ? selected : "",
-        }),
-        getAnkiStatus().catch(() => null),
-        getVocabularyStats(active).catch(() => null),
-        listReviewLogs(active).catch(() => []),
-        getActiveVocabularyReviewSession().catch(() => ({ active: false })),
-      ]);
-    setProvider(active);
-    setProviderSetting(
-      active === "local" && selected !== setting.local_default_wordbook_id
-        ? { ...setting, local_default_wordbook_id: selected }
-        : setting,
-    );
-    if (active === "local" && selected) setWordbookId(selected);
+    if (!nextBooks.some((book) => book.id === selected)) {
+      selected = nextBooks.find((book) => book.name === "默认生词本")?.id || nextBooks[0]?.id || "";
+    }
+    const [words, nextStats, nextLogs, activeReview] = await Promise.all([
+      listVocabulary("local", { search, state: state || "", wordbook_id: selected }),
+      getVocabularyStats().catch(() => null),
+      listReviewLogs().catch(() => []),
+      getActiveVocabularyReviewSession().catch(() => ({ active: false })),
+    ]);
+    setWordbookId(selected || undefined);
     setItems(words);
-    setAnki(status);
     setBooks(nextBooks);
     setStats(nextStats);
-    setAnkiDecks(nextDecks);
     setLogs(nextLogs);
     setHasActiveReview(activeReview.active);
-  }, [desktop, search, state, wordbookId]);
+  }, [search, state, wordbookId]);
   useEffect(() => {
     void load();
   }, [load]);
@@ -263,7 +223,7 @@ export default function VocabularyPage() {
       word_to_meaning: t("vocabulary.cardTypes.wordToMeaning"),
       meaning_to_word: t("vocabulary.cardTypes.meaningToWord"),
       sentence_cloze: t("vocabulary.cardTypes.sentenceCloze"),
-    })[type || ""] || t("vocabulary.cardTypes.anki");
+    })[type || ""] || t("vocabularyPage.review");
   const batchReset = (scope: "today" | "wordbook") =>
     Modal.confirm({
       title: scope === "today" ? t("vocabularyPage.resetTodayTitle") : t("vocabularyPage.resetBookTitle"),
@@ -302,49 +262,23 @@ export default function VocabularyPage() {
     const capabilityKey = "english_definition";
     const questionTypes = ["single_choice", "text_input", "cloze"];
     Modal.confirm({
-      title: provider === "anki" ? t("vocabularyPage.newAnkiBook") : t("vocabularyPage.newBook"),
+      title: t("vocabularyPage.newBook"),
       content: (
-        <Space direction="vertical" style={{ width: "100%" }}>
-          <Input autoFocus placeholder={t("vocabularyPage.inputName")} onChange={(event: ChangeEvent<HTMLInputElement>) => { name = event.target.value; }} />
-          {provider === "anki" ? <Alert type="info" showIcon message={t("vocabulary.localOnlyDesktop")} /> : null}
-        </Space>
+        <Input autoFocus placeholder={t("vocabularyPage.inputName")} onChange={(event: ChangeEvent<HTMLInputElement>) => { name = event.target.value; }} />
       ),
       onOk: async () => {
         if (!name.trim()) throw new Error(t("vocabularyPage.nameRequired"));
-        if (provider === "anki") {
-          await createAnkiDeck(name);
-          setProviderSetting(
-            await saveVocabularyProvider({
-              ...providerSetting,
-              anki_deck_name: name,
-            }),
-          );
-        } else {
-          const book = await createWordbook({ name, capability_key: capabilityKey, question_types: questionTypes });
-          setProviderSetting(
-            await saveVocabularyProvider({
-              ...providerSetting,
-              local_default_wordbook_id: book.id,
-            }),
-          );
-          setWordbookId(book.id);
-          await load(book.id);
-          return;
-        }
-        await load();
+        const book = await createWordbook({ name, capability_key: capabilityKey, question_types: questionTypes });
+        await saveVocabularyProvider({ local_default_wordbook_id: book.id });
+        setWordbookId(book.id);
+        await load(book.id);
       },
     });
   };
   const removeBook = (id: string, name: string) => {
     let mode: "move" | "delete_words" = "move";
     const localTargets = books.filter((book) => book.id !== id);
-    const ankiTargets = ankiDecks.filter((deck) => String(deck.id) !== id);
-    let target =
-      provider === "anki"
-        ? ankiTargets.find((deck) => deck.is_default)?.name ||
-          ankiTargets[0]?.name
-        : localTargets.find((book) => book.name === "默认生词本")?.id ||
-          localTargets[0]?.id;
+    let target = localTargets.find((book) => book.name === "默认生词本")?.id || localTargets[0]?.id;
     Modal.confirm({
       title: t("vocabularyPage.deleteBookTitle", { name }),
       width: 520,
@@ -366,17 +300,7 @@ export default function VocabularyPage() {
           <Select
             defaultValue={target}
             style={{ width: "100%" }}
-            options={
-              provider === "anki"
-                ? ankiTargets.map((deck) => ({
-                    value: deck.name,
-                    label: deck.name,
-                  }))
-                : localTargets.map((book) => ({
-                    value: book.id,
-                    label: book.name,
-                  }))
-            }
+            options={localTargets.map((book) => ({ value: book.id, label: book.name }))}
             onChange={(value: string) => {
               target = value;
             }}
@@ -387,72 +311,28 @@ export default function VocabularyPage() {
       okButtonProps: { danger: true },
       onOk: async () => {
         if (mode === "move" && !target) throw new Error(t("vocabularyPage.selectTarget"));
-        if (provider === "anki") await deleteAnkiDeck(name, mode, target);
-        else await deleteWordbook(id, mode, target);
-        if (provider === "anki" && providerSetting.anki_deck_name === name)
-          setProviderSetting(
-            await saveVocabularyProvider({
-              ...providerSetting,
-              anki_deck_name: target || ankiTargets[0]?.name || "",
-            }),
-          );
-        if (
-          provider === "local" &&
-          (wordbookId || providerSetting.local_default_wordbook_id) === id
-        ) {
+        await deleteWordbook(id, mode, target);
+        if (wordbookId === id) {
+          await saveVocabularyProvider({ local_default_wordbook_id: target || "" });
           setWordbookId(target);
-          setProviderSetting(
-            await saveVocabularyProvider({
-              ...providerSetting,
-              local_default_wordbook_id: target,
-            }),
-          );
+          await load(target);
+        } else {
+          await load();
         }
-        await load();
         message.success(t("vocabularyPage.bookDeleted"));
       },
     });
   };
   const selectBook = async (value: string) => {
-    if (provider === "anki")
-      setProviderSetting(
-        await saveVocabularyProvider({
-          ...providerSetting,
-          anki_deck_name: value,
-        }),
-      );
-    else {
-      setWordbookId(value);
-      setProviderSetting(
-        await saveVocabularyProvider({
-          ...providerSetting,
-          local_default_wordbook_id: value,
-        }),
-      );
-    }
-  };
-  const selectBackend = async (next: "anki" | "local") => {
-    if (next === "anki" && !anki?.connected) return;
-    const saved = await saveVocabularyProvider({
-      ...providerSetting,
-      selected_provider: next,
-    });
-    setProviderSetting(saved);
-    setProvider(next);
-    setWordbookId(undefined);
-    void load();
+    setWordbookId(value);
+    await saveVocabularyProvider({ local_default_wordbook_id: value });
   };
   const createWord = async () => {
     const values = await newWordForm.validateFields();
     await addVocabularyWord({
       ...values,
-      provider,
-      wordbook_ids:
-        provider === "local"
-          ? [
-              wordbookId || providerSetting.local_default_wordbook_id || "",
-            ].filter(Boolean)
-          : undefined,
+      provider: "local",
+      wordbook_ids: wordbookId ? [wordbookId] : undefined,
       origin_type: "user",
     });
     setNewWordOpen(false);
@@ -531,14 +411,14 @@ export default function VocabularyPage() {
             {x.state === "mastered" ? (
               <Button
                 size="small"
-                onClick={() => void resumeVocabulary(x.word.id).then(load)}
+                onClick={() => void resumeVocabulary(x.word.id).then(() => load())}
               >
                 {t("vocabularyPage.resume")}
               </Button>
             ) : (
               <Button
                 size="small"
-                onClick={() => void masterVocabulary(x.word.id).then(load)}
+                onClick={() => void masterVocabulary(x.word.id).then(() => load())}
               >
                 {t("vocabularyPage.markMastered")}
               </Button>
@@ -547,16 +427,11 @@ export default function VocabularyPage() {
               trigger={["click"]}
               menu={{
                 items: [
-                  ...(provider === "local"
-                    ? [
-                        {
-                          key: "reset",
-                          label: t("vocabularyPage.resetState"),
-                          onClick: () =>
-                            void resetVocabulary(x.word.id).then(load),
-                        },
-                      ]
-                    : []),
+                  {
+                    key: "reset",
+                    label: t("vocabularyPage.resetState"),
+                    onClick: () => void resetVocabulary(x.word.id).then(() => load()),
+                  },
                   {
                     key: "delete",
                     danger: true,
@@ -565,7 +440,7 @@ export default function VocabularyPage() {
                       Modal.confirm({
                         title: t("vocabularyPage.deleteWordTitle", { term: x.word.term }),
                         content: t("vocabularyPage.deleteWordDescription"),
-                        onOk: () => deleteVocabulary(x.word.id).then(load),
+                        onOk: () => deleteVocabulary(x.word.id).then(() => load()),
                       }),
                   },
                 ],
@@ -581,7 +456,7 @@ export default function VocabularyPage() {
         ),
       },
     ],
-    [labels, load, provider, t],
+    [labels, load, t],
   );
   const visibleLogs = useMemo(() => {
     const now = Date.now(),
@@ -591,21 +466,12 @@ export default function VocabularyPage() {
     );
   }, [logs, logRange]);
   const correct = visibleLogs.filter((x) => x.rating > 1).length;
-  const bookOptions = (
-    provider === "anki"
-      ? ankiDecks.map((deck) => ({
-          value: deck.name,
-          id: String(deck.id),
-          name: deck.name,
-          locked: deck.is_default,
-        }))
-      : books.map((book) => ({
-          value: book.id,
-          id: book.id,
-          name: book.name,
-          locked: book.name === "默认生词本",
-        }))
-  ).map((option) => ({
+  const bookOptions = books.map((book) => ({
+    id: book.id,
+    value: book.id,
+    name: book.name,
+    locked: book.name === "默认生词本",
+  })).map((option) => ({
     value: option.value,
     label: (
       <span
@@ -631,10 +497,6 @@ export default function VocabularyPage() {
       </span>
     ),
   }));
-  const selectedBook =
-    provider === "anki"
-      ? providerSetting.anki_deck_name
-      : wordbookId || providerSetting.local_default_wordbook_id;
   const wordsView = (
     <Space direction="vertical" size={18} style={{ width: "100%" }}>
       <Panel>
@@ -645,7 +507,7 @@ export default function VocabularyPage() {
           <Space>
             <Typography.Text strong>{t("vocabularyPage.myBooks")}</Typography.Text>
             <Select
-              value={selectedBook}
+              value={wordbookId}
               placeholder={t("vocabularyPage.selectBook")}
               style={{ width: 260 }}
               onChange={selectBook}
@@ -662,39 +524,29 @@ export default function VocabularyPage() {
             <Button
               type="primary"
               onClick={() => void start()}
-              disabled={
-                provider === "anki" && anki?.review_capability !== "full"
-              }
             >
               {hasActiveReview ? t("vocabularyPage.resumeReview") : t("vocabularyPage.startReview")}
             </Button>
-            <Button onClick={createBook}>{provider === "anki" ? t("vocabularyPage.newAnkiBook") : t("vocabularyPage.newBook")}</Button>
-            {provider === "anki" ? (
-              <Tooltip title={t("vocabulary.localOnlyDesktop")}>
-                <span><Button disabled>{t("vocabularyPage.newLocalBook")}</Button></span>
-              </Tooltip>
-            ) : null}
-            {provider === "local" ? (
-              <Dropdown
-                menu={{
-                  items: [
-                    {
-                      key: "today",
-                      label: t("vocabularyPage.resetToday"),
-                      onClick: () => batchReset("today"),
-                    },
-                    {
-                      key: "book",
-                      label: t("vocabularyPage.resetBook"),
-                      danger: true,
-                      onClick: () => batchReset("wordbook"),
-                    },
-                  ],
-                }}
-              >
-                <Button icon={<MoreOutlined />}>{t("vocabularyPage.batchActions")}</Button>
-              </Dropdown>
-            ) : null}
+            <Button onClick={createBook}>{t("vocabularyPage.newBook")}</Button>
+            <Dropdown
+              menu={{
+                items: [
+                  {
+                    key: "today",
+                    label: t("vocabularyPage.resetToday"),
+                    onClick: () => batchReset("today"),
+                  },
+                  {
+                    key: "book",
+                    label: t("vocabularyPage.resetBook"),
+                    danger: true,
+                    onClick: () => batchReset("wordbook"),
+                  },
+                ],
+              }}
+            >
+              <Button icon={<MoreOutlined />}>{t("vocabularyPage.batchActions")}</Button>
+            </Dropdown>
           </Space>
         </Space>
         {stats ? (
@@ -738,14 +590,6 @@ export default function VocabularyPage() {
             }))}
           />
         </Space>
-        {provider === "anki" && anki?.review_capability !== "full" ? (
-          <Alert
-            style={{ marginTop: 16 }}
-            type="info"
-            showIcon
-            message={t("vocabularyPage.ankiReviewUnavailable")}
-          />
-        ) : null}
         <Table<VocabularyListItem>
           style={{ marginTop: 16 }}
           rowKey={(x: VocabularyListItem) => x.word.id}
@@ -807,7 +651,7 @@ export default function VocabularyPage() {
               { label: t("vocabularyPage.thisMonth"), value: "month" },
             ]}
           />
-          <Button href={reviewLogsExportUrl(provider)}>{t("vocabularyPage.export")}</Button>
+          <Button href={reviewLogsExportUrl()}>{t("vocabularyPage.export")}</Button>
         </Space>
         <div
           style={{
@@ -862,7 +706,7 @@ export default function VocabularyPage() {
           </div>
           <Button
             icon={<SettingOutlined />}
-            onClick={() => setSettingsOpen(true)}
+            href="/settings?section=external_apps"
           >
             {t("vocabularyPage.settings")}
           </Button>
@@ -876,87 +720,6 @@ export default function VocabularyPage() {
           ]}
         />
       </Space>
-      <Modal
-        open={settingsOpen}
-        title={t("vocabularyPage.settingsTitle")}
-        footer={null}
-        width={760}
-        onCancel={() => setSettingsOpen(false)}
-      >
-        <Typography.Title level={5}>{t("vocabularyPage.storageMode")}</Typography.Title>
-        <div
-          style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}
-        >
-          <Panel
-            onClick={() => void selectBackend("local")}
-            style={{
-              borderColor: provider === "local" ? "#1677ff" : undefined,
-              cursor: "pointer",
-            }}
-          >
-            <Space>
-              <Radio checked={provider === "local"} />
-              <BookOutlined style={{ fontSize: 24 }} />
-              <div>
-                <Typography.Text strong>{t("vocabularyPage.local")}</Typography.Text>
-                <div>
-                  <Typography.Text type="secondary">
-                    {t("vocabularyPage.localReview")}
-                  </Typography.Text>
-                </div>
-              </div>
-            </Space>
-          </Panel>
-          <Panel
-            onClick={() => void selectBackend("anki")}
-            style={{
-              borderColor: provider === "anki" ? "#1677ff" : undefined,
-              opacity: anki?.connected ? 1 : 0.75,
-              cursor: anki?.connected ? "pointer" : "default",
-            }}
-          >
-            <Space>
-              <Radio
-                checked={provider === "anki"}
-                disabled={!anki?.connected}
-              />
-              <CloudSyncOutlined style={{ fontSize: 24 }} />
-              <div>
-                <Typography.Text strong>Anki</Typography.Text>
-                <div>
-                  <Typography.Text
-                    type={anki?.connected ? "success" : "secondary"}
-                  >
-                    {anki?.connected ? t("vocabularyPage.connected") : t("vocabularyPage.notConfigured")}
-                  </Typography.Text>
-                </div>
-              </div>
-            </Space>
-          </Panel>
-        </div>
-        {!anki?.connected ? (
-          <Alert
-            style={{ marginTop: 16 }}
-            type="warning"
-            showIcon
-            message={t("vocabularyPage.ankiRequired")}
-            action={
-              <Button href="/settings?section=external_apps">
-                {t("vocabularyPage.externalApps")}
-              </Button>
-            }
-          />
-        ) : null}
-        {provider === "anki" ? (
-          <Alert
-            style={{ marginTop: 16 }}
-            type="info"
-            showIcon
-            message={t("vocabularyPage.ankiStorage")}
-            description={t("vocabularyPage.ankiStorageDescription")}
-          />
-        ) : null}
-      </Modal>
       <Modal
         open={newWordOpen}
         title={t("vocabularyPage.newWord")}
@@ -1027,7 +790,7 @@ export default function VocabularyPage() {
                   size="large"
                   value={objectiveAnswer}
                   placeholder={t("vocabularyPage.typeAnswer")}
-                  onChange={(event) => setObjectiveAnswer(event.target.value)}
+                  onChange={(event: ChangeEvent<HTMLInputElement>) => setObjectiveAnswer(event.target.value)}
                   onPressEnter={() =>
                     objectiveAnswer.trim() &&
                     void rate(undefined, objectiveAnswer)
@@ -1210,14 +973,12 @@ export default function VocabularyPage() {
           <Form.Item name="user_note" label={t("vocabularyPage.note")}>
             <Input.TextArea />
           </Form.Item>
-          {provider === "local" ? (
-            <Form.Item name="wordbook_ids" label={t("vocabularyPage.wordbook")}>
-              <Select
-                mode="multiple"
-                options={books.map((b) => ({ value: b.id, label: b.name }))}
-              />
-            </Form.Item>
-          ) : null}
+          <Form.Item name="wordbook_ids" label={t("vocabularyPage.wordbook")}>
+            <Select
+              mode="multiple"
+              options={books.map((b) => ({ value: b.id, label: b.name }))}
+            />
+          </Form.Item>
           <Form.Item name="tags" label={t("vocabularyPage.tags")}>
             <Select mode="tags" />
           </Form.Item>

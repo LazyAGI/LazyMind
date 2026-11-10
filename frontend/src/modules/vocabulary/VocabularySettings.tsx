@@ -21,11 +21,10 @@ import {
 } from "@/runtime/desktopBridge";
 import {
   getAnkiStatus,
-  getVocabularyProvider,
   requestAnkiPermission,
   saveVocabularyProvider,
+  syncAnki,
   type AnkiProviderStatus,
-  type VocabularyProviderSetting,
 } from "./api";
 import "@/modules/agentIntegration/index.scss";
 import CloudVocabularyConnections from "./CloudVocabularyConnections";
@@ -37,22 +36,17 @@ export default function VocabularySettings() {
   const { t } = useTranslation();
   const [desktop, setDesktop] = useState<DesktopAnkiStatus | null>(null);
   const [status, setStatus] = useState<AnkiProviderStatus | null>(null);
-  const [setting, setSetting] = useState<VocabularyProviderSetting | null>(
-    null,
-  );
   const [busy, setBusy] = useState(false);
   const [guide, setGuide] = useState<"anki" | "connect" | null>(null);
   const [configureOpen, setConfigureOpen] = useState(false);
 
   const refresh = useCallback(async () => {
-    const [nextDesktop, nextStatus, nextSetting] = await Promise.all([
-      ankiIntegrationStatus().catch(() => null),
-      getAnkiStatus().catch(() => null),
-      getVocabularyProvider(),
-    ]);
+    const nextStatus = await getAnkiStatus().catch(() => null);
+    const nextDesktop = nextStatus?.available
+      ? await ankiIntegrationStatus().catch(() => null)
+      : null;
     setDesktop(nextDesktop);
     setStatus(nextStatus);
-    setSetting(nextSetting);
   }, []);
   useEffect(() => {
     void refresh();
@@ -76,144 +70,183 @@ export default function VocabularySettings() {
     setGuide("connect");
   };
   const toggleConnection = async (enabled: boolean) => {
-    if (!setting) return;
     await run(
-      async () => {
-        if (enabled) await requestAnkiPermission();
-        await saveVocabularyProvider({
-          ...setting,
-          selected_provider: enabled ? "anki" : "local",
-        });
-      },
+      () => saveVocabularyProvider({ anki_sync_enabled: enabled }),
       enabled ? t("ankiSettings.linked") : t("ankiSettings.unlinked"),
     );
   };
+  const authorize = async () => {
+    await run(async () => {
+      if ((await requestAnkiPermission()) !== "granted") {
+        throw new Error(t("ankiSettings.permissionDenied"));
+      }
+    });
+  };
+  const available = status?.available === true;
   const installed = Boolean(desktop?.installed);
   const connectInstalled = Boolean(desktop?.connect_installed);
   const connectReady = Boolean(status?.connected);
-  const enabled = connectReady && setting?.selected_provider === "anki";
+  const enabled = available && status?.enabled === true;
+  const connectionStatus = !available
+    ? "unavailable"
+    : !connectReady
+      ? "incomplete"
+      : enabled
+        ? "connectedEnabled"
+        : "connectedPaused";
 
   return (
     <div className="external-apps-settings">
       <div className="external-apps-grid">
+        <CloudVocabularyConnections />
         <article className="external-app-card">
           <span className="external-app-icon"><img src={ankiLogo} alt="" aria-hidden="true" /></span>
           <div className="external-app-copy">
             <h3>Anki</h3>
             <p>{t("ankiSettings.appDescription")}</p>
           </div>
-          <Tag className="external-app-status" color={enabled ? "success" : "default"}>
-            {t(!setting || !status ? "vocabularyCloud.unavailable" : enabled ? "vocabularyCloud.connectedEnabled" : connectReady ? "vocabularyCloud.connectedPaused" : "vocabularyCloud.incomplete")}
+          <Tag className="external-app-status" color={enabled && connectReady ? "success" : "default"}>
+            {t(`vocabularyCloud.${connectionStatus}`)}
           </Tag>
           <Button aria-label={`Anki ${t("vocabularyCloud.manage")}`} onClick={() => setConfigureOpen(true)}>{t("vocabularyCloud.manage")}</Button>
         </article>
-        <CloudVocabularyConnections />
       </div>
       <Modal open={configureOpen} title="Anki" onCancel={() => setConfigureOpen(false)} footer={null} width={680} styles={{ body: { maxHeight: "75vh", overflowY: "auto" } }}>
-        <div className="agent-integration-page">
-          <div className="agent-integration-flow">
-            <ConnectionStage title={t("ankiSettings.clientSetup")} ready={installed}>
-              <StatusLine
-                ready={installed}
-                text={
-                  installed
-                    ? t("ankiSettings.clientInstalled")
-                    : t("ankiSettings.clientNotFound")
-                }
-              />
-              <Space style={{ marginTop: 14 }}>
-                {installed ? (
-                  <Button onClick={() => void run(openAnki)}>
-                    {t("ankiSettings.openAnki")}
-                  </Button>
-                ) : (
-                  <Button
-                    type="primary"
-                    onClick={() => setGuide("anki")}
-                  >
-                    {t("ankiSettings.viewGuide")}
-                  </Button>
-                )}
-              </Space>
-            </ConnectionStage>
-            <ConnectionStage
-              title={t("ankiSettings.connectSetup")}
-              ready={connectReady}
-            >
-              <StatusLine
-                ready={connectReady}
-                text={
-                  connectReady
-                    ? (status?.version ? t("ankiSettings.connectReadyVersion", { version: status.version }) : t("ankiSettings.connectReady"))
-                    : t("ankiSettings.connectMissing")
-                }
-              />
-              {!connectReady && installed ? (
-                <Space style={{ marginTop: 14 }}>
-                  {connectInstalled ? (
-                    <Button
-                      type="primary"
-                      onClick={() =>
-                        void run(
-                          openAnki,
-                          t("ankiSettings.ankiOpened"),
-                        )
-                      }
-                    >
-                      {t("ankiSettings.openAnki")}
-                    </Button>
-                  ) : (
-                    <Button
-                      type="primary"
-                      onClick={() => void installConnect()}
-                    >
-                      {t("ankiSettings.installConnect")}
-                    </Button>
-                  )}
-                  <Button
-                    loading={busy}
-                    onClick={() => void run(refresh)}
-                  >
-                    {t("ankiSettings.checkAgain")}
-                  </Button>
-                </Space>
+        {!available ? (
+          <Alert
+            type="info"
+            showIcon
+            message={t(status ? "ankiSettings.deploymentUnavailable" : "ankiSettings.statusUnavailable")}
+            action={status ? undefined : (
+              <Button loading={busy} onClick={() => void run(refresh)}>
+                {t("ankiSettings.checkAgain")}
+              </Button>
+            )}
+          />
+        ) : (
+          <div className="agent-integration-page">
+            <div className="agent-integration-flow">
+              {desktop ? (
+                <ConnectionStage title={t("ankiSettings.clientSetup")} ready={installed}>
+                  <StatusLine
+                    ready={installed}
+                    text={
+                      installed
+                        ? t("ankiSettings.clientInstalled")
+                        : t("ankiSettings.clientNotFound")
+                    }
+                  />
+                  <Space style={{ marginTop: 14 }}>
+                    {installed ? (
+                      <Button onClick={() => void run(openAnki)}>
+                        {t("ankiSettings.openAnki")}
+                      </Button>
+                    ) : (
+                      <Button
+                        type="primary"
+                        onClick={() => setGuide("anki")}
+                      >
+                        {t("ankiSettings.viewGuide")}
+                      </Button>
+                    )}
+                  </Space>
+                </ConnectionStage>
               ) : null}
-            </ConnectionStage>
-            <ConnectionStage title={t("ankiSettings.connection")} ready={enabled}>
-              <div
-                className={`agent-integration-compact-control${enabled ? " is-enabled" : ""}`}
+              <ConnectionStage
+                title={t("ankiSettings.connectSetup")}
+                ready={connectReady}
               >
-                <div>
-                  <strong>{t("ankiSettings.allow")}</strong>
-                  <Typography.Paragraph type="secondary">
-                    {t("ankiSettings.allowDescription")}
-                  </Typography.Paragraph>
-                </div>
-                <Switch
-                  checked={enabled}
-                  disabled={!connectReady || busy}
-                  loading={busy}
-                  onChange={(value) => void toggleConnection(value)}
+                <StatusLine
+                  ready={connectReady}
+                  text={
+                    connectReady
+                      ? (status?.version ? t("ankiSettings.connectReadyVersion", { version: status.version }) : t("ankiSettings.connectReady"))
+                      : t("ankiSettings.connectMissing")
+                  }
                 />
-              </div>
-            </ConnectionStage>
+                {!connectReady ? (
+                  <Space style={{ marginTop: 14 }}>
+                    {installed && (connectInstalled ? (
+                      <Button
+                        type="primary"
+                        onClick={() =>
+                          void run(
+                            openAnki,
+                            t("ankiSettings.ankiOpened"),
+                          )
+                        }
+                      >
+                        {t("ankiSettings.openAnki")}
+                      </Button>
+                    ) : (
+                      <Button
+                        type="primary"
+                        onClick={() => void installConnect()}
+                      >
+                        {t("ankiSettings.installConnect")}
+                      </Button>
+                    ))}
+                    {enabled ? (
+                      <Button loading={busy} onClick={() => void authorize()}>
+                        {t("ankiSettings.requestPermission")}
+                      </Button>
+                    ) : null}
+                    <Button
+                      loading={busy}
+                      onClick={() => void run(refresh)}
+                    >
+                      {t("ankiSettings.checkAgain")}
+                    </Button>
+                  </Space>
+                ) : null}
+              </ConnectionStage>
+              <ConnectionStage title={t("ankiSettings.connection")} ready={enabled}>
+                <div
+                  className={`agent-integration-compact-control${enabled ? " is-enabled" : ""}`}
+                >
+                  <div>
+                    <strong>{t("ankiSettings.allow")}</strong>
+                    <Typography.Paragraph type="secondary">
+                      {t("ankiSettings.allowDescription")}
+                    </Typography.Paragraph>
+                  </div>
+                  <Switch
+                    checked={enabled}
+                    aria-label={t("ankiSettings.allow")}
+                    disabled={busy}
+                    loading={busy}
+                    onChange={(value: boolean) => void toggleConnection(value)}
+                  />
+                </div>
+                {enabled ? (
+                  <Button
+                    style={{ marginTop: 14 }}
+                    disabled={!connectReady}
+                    loading={busy}
+                    onClick={() => void run(syncAnki, t("ankiSettings.syncComplete"))}
+                  >
+                    {t("ankiSettings.syncNow")}
+                  </Button>
+                ) : null}
+              </ConnectionStage>
+            </div>
+            {installed && connectInstalled && !connectReady ? (
+              <Alert
+                style={{ marginTop: 14 }}
+                type="info"
+                showIcon
+                message={t("ankiSettings.startAnki")}
+              />
+            ) : status?.message && installed && !connectReady ? (
+              <Alert
+                style={{ marginTop: 14 }}
+                type="info"
+                showIcon
+                message={status.message}
+              />
+            ) : null}
           </div>
-          {installed && connectInstalled && !connectReady ? (
-            <Alert
-              style={{ marginTop: 14 }}
-              type="info"
-              showIcon
-              message={t("ankiSettings.startAnki")}
-            />
-          ) : status?.message && installed && !connectReady ? (
-            <Alert
-              style={{ marginTop: 14 }}
-              type="info"
-              showIcon
-              message={status.message}
-            />
-          ) : null}
-        </div>
+        )}
       </Modal>
       <Modal
         open={guide === "anki"}
