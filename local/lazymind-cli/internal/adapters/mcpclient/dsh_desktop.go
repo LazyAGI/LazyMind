@@ -10,6 +10,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -106,6 +107,66 @@ func validDSHDesktopManifest() error {
 		}
 	}
 	return fmt.Errorf("Desktop manifest %s is incomplete; start DSH Desktop once", path)
+}
+
+// DSH's plugin add command selects newly added bundles, but leaves existing
+// dependencies unselected. An explicit LazyMind connection should enable its bundle.
+func enableDSHWorkflowBundle(ctx context.Context, profile string) error {
+	path := filepath.Join(profile, "package.json")
+	unlock, err := lockDSHPatch(ctx, path)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+
+	body, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	var manifest, dsh, settings map[string]json.RawMessage
+	var bundles []string
+	if err := json.Unmarshal(body, &manifest); err != nil {
+		return err
+	}
+	if err := json.Unmarshal(manifest["dsh"], &dsh); err != nil {
+		return err
+	}
+	if err := json.Unmarshal(dsh["profile"], &settings); err != nil {
+		return err
+	}
+	if err := json.Unmarshal(settings["bundles"], &bundles); err != nil {
+		return err
+	}
+	if slices.Contains(bundles, dshWorkflowPackage) {
+		return nil
+	}
+	var dependencies map[string]string
+	if err := json.Unmarshal(manifest["dependencies"], &dependencies); err != nil {
+		return err
+	}
+	if dependencies[dshWorkflowPackage] == "" {
+		return errors.New("DSH Workflow is not a profile dependency")
+	}
+	if _, err := dshModuleVersion(profile, dshWorkflowPackage); err != nil {
+		return fmt.Errorf("read installed DSH Workflow bundle: %w", err)
+	}
+	settings["bundles"], err = json.Marshal(append(bundles, dshWorkflowPackage))
+	if err != nil {
+		return err
+	}
+	dsh["profile"], err = json.Marshal(settings)
+	if err != nil {
+		return err
+	}
+	manifest["dsh"], err = json.Marshal(dsh)
+	if err != nil {
+		return err
+	}
+	body, err = json.MarshalIndent(manifest, "", "  ")
+	if err != nil {
+		return err
+	}
+	return writeConfigFile(path, append(body, '\n'))
 }
 
 // Catch hand-written entries, including entries in multi-row inserts. We only
@@ -419,7 +480,13 @@ func (a *Adapter) changeDSHProfile(ctx context.Context, connect bool) (err error
 		if _, err = a.installDSHWorkflow(ctx, lockPatch); err != nil {
 			return err
 		}
-		return writeManagedConfig(DeepSeekHarness, a.dshConfigPath(), a.self, a.home, a.hostID, true)
+		if err = writeManagedConfig(DeepSeekHarness, a.dshConfigPath(), a.self, a.home, a.hostID, true); err != nil {
+			return err
+		}
+		if err = enableDSHWorkflowBundle(ctx, filepath.Dir(a.dshConfigPath())); err != nil {
+			return fmt.Errorf("enable installed DSH Workflow bundle: %w", err)
+		}
+		return nil
 	}
 	if err = a.disconnectDSHWorkflow(); err != nil {
 		return err

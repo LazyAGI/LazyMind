@@ -213,6 +213,45 @@ func TestDesktopPartialInstallRetryAndDisconnect(t *testing.T) {
 	}
 }
 
+func TestDesktopConnectEnablesAlreadyInstalledBundle(t *testing.T) {
+	a := desktopAdapterFixture(t)
+	dir := filepath.Join(dshHome(), "profiles", "desktop")
+	manifest := filepath.Join(dir, "package.json")
+	// DSH leaves an existing dependency unselected even when plugin add succeeds.
+	const before = `{
+		"private": true,
+		"dependencies": {"@lazymind/dsh-workflow": "file:workflow.tgz"},
+		"dsh": {"profile": {
+			"patchReload": "startup",
+			"bundles": ["@deepseek-ai/dsh-base", "@deepseek-ai/dsh-web-app", "another-bundle"]
+		}}
+	}`
+	writeTestFile(t, manifest, before)
+	writeTestFile(t, filepath.Join(dir, "node_modules", dshWorkflowPackage, "package.json"), `{"version":"0.1.1"}`)
+	a.dshRunner = func(_ context.Context, name string, _ ...string) error {
+		if name == "web" {
+			installDSHFixture(t, name)
+		}
+		return nil
+	}
+	if s := a.Connect(context.Background()); s.State != agentintegration.Enabled {
+		t.Fatalf("connect with existing bundle: %+v", s)
+	}
+	body, err := os.ReadFile(manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, field := range []string{`"private": true`, `"@lazymind/dsh-workflow": "file:workflow.tgz"`,
+		`"patchReload": "startup"`, "\"another-bundle\",\n        \"@lazymind/dsh-workflow\""} {
+		if !strings.Contains(string(body), field) {
+			t.Fatalf("expected %q in updated manifest: %s", field, body)
+		}
+	}
+	if backup, err := os.ReadFile(manifest + ".lazymind-backup"); err != nil || string(backup) != before {
+		t.Fatalf("original manifest backup: %s (%v)", backup, err)
+	}
+}
+
 func TestDesktopConflictsPreventAllInstallation(t *testing.T) {
 	for _, where := range []string{"global", "web"} {
 		t.Run(where, func(t *testing.T) {
