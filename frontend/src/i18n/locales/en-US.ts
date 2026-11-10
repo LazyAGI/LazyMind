@@ -2452,6 +2452,8 @@ const enUS = {
       description: "Save your work, choose Quit or Exit from {{agent}}'s application or system tray menu, then retry. Closing its window may leave the app running in the background.",
       retryInstall: "Retry installation",
       retryDisconnect: "Retry disconnection",
+      pendingDisconnect: "Waiting to disconnect",
+      exitedDescription: "{{agent}} has quit. Click Retry disconnection to finish disconnecting.",
     },
     setupFeedback: {
       environmentMismatch: "An existing connection points to another LazyMind environment. Turn this switch off and on to switch.",

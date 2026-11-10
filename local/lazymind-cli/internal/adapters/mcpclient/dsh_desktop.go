@@ -10,6 +10,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -56,9 +57,10 @@ func (a *Adapter) forDSHProfile(name, cli string) *Adapter {
 
 // Records preserve retry intent and diagnostics. Readiness is checked against disk.
 type dshInstallRecord struct {
-	Action   string            `json:"action,omitempty"`
-	Root     string            `json:"root"`
-	Profiles map[string]string `json:"profiles"`
+	Action            string            `json:"action,omitempty"`
+	PendingDisconnect bool              `json:"pending_disconnect,omitempty"`
+	Root              string            `json:"root"`
+	Profiles          map[string]string `json:"profiles"`
 }
 
 func (a *Adapter) dshRecordPath() string {
@@ -106,6 +108,66 @@ func validDSHDesktopManifest() error {
 		}
 	}
 	return fmt.Errorf("Desktop manifest %s is incomplete; start DSH Desktop once", path)
+}
+
+// DSH's plugin add command selects newly added bundles, but leaves existing
+// dependencies unselected. An explicit LazyMind connection should enable its bundle.
+func enableDSHWorkflowBundle(ctx context.Context, profile string) error {
+	path := filepath.Join(profile, "package.json")
+	unlock, err := lockDSHPatch(ctx, path)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+
+	body, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	var manifest, dsh, settings map[string]json.RawMessage
+	var bundles []string
+	if err := json.Unmarshal(body, &manifest); err != nil {
+		return err
+	}
+	if err := json.Unmarshal(manifest["dsh"], &dsh); err != nil {
+		return err
+	}
+	if err := json.Unmarshal(dsh["profile"], &settings); err != nil {
+		return err
+	}
+	if err := json.Unmarshal(settings["bundles"], &bundles); err != nil {
+		return err
+	}
+	if slices.Contains(bundles, dshWorkflowPackage) {
+		return nil
+	}
+	var dependencies map[string]string
+	if err := json.Unmarshal(manifest["dependencies"], &dependencies); err != nil {
+		return err
+	}
+	if dependencies[dshWorkflowPackage] == "" {
+		return errors.New("DSH Workflow is not a profile dependency")
+	}
+	if _, err := dshModuleVersion(profile, dshWorkflowPackage); err != nil {
+		return fmt.Errorf("read installed DSH Workflow bundle: %w", err)
+	}
+	settings["bundles"], err = json.Marshal(append(bundles, dshWorkflowPackage))
+	if err != nil {
+		return err
+	}
+	dsh["profile"], err = json.Marshal(settings)
+	if err != nil {
+		return err
+	}
+	manifest["dsh"], err = json.Marshal(dsh)
+	if err != nil {
+		return err
+	}
+	body, err = json.MarshalIndent(manifest, "", "  ")
+	if err != nil {
+		return err
+	}
+	return writeConfigFile(path, append(body, '\n'))
 }
 
 // Catch hand-written entries, including entries in multi-row inserts. We only
@@ -172,6 +234,40 @@ func (a *Adapter) inspectDSHDesktop(ctx context.Context) dshDesktopRuntime {
 
 func (a *Adapter) dshDesktopStatus(ctx context.Context) agentintegration.Status {
 	return a.dshDesktopStatusWithRuntime(a.inspectDSHDesktop(ctx))
+}
+
+// Configuration stays enabled until disconnection succeeds. Keep the pending
+// user action separate so status reads and live heartbeats cannot complete it.
+func (a *Adapter) inspectDSHPendingDisconnect(ctx context.Context, s *agentintegration.Status) {
+	if !a.desktopDSHMode() {
+		return
+	}
+	r, err := a.dshRecord()
+	if err != nil || !r.PendingDisconnect || !s.CanDisconnect {
+		return
+	}
+	s.RetryAction = "disconnect"
+	// Preserve actionable configuration failures, including partially removed profiles.
+	if s.Issue != nil || s.State == agentintegration.Failed || s.State == agentintegration.Conflict {
+		return
+	}
+	cli, err := agentexec.FindDSHDesktopCLI()
+	var running bool
+	if err == nil {
+		running, err = a.isDSHDesktopRunning(ctx, cli)
+	}
+	if err != nil {
+		s.State, s.Issue = agentintegration.Failed, dshIssue("process_inspection_failed", "")
+		sanitizeDSHStatus(s)
+		return
+	}
+	if running {
+		*s = agentintegration.RequireQuit(*s, "disconnect")
+		return
+	}
+	s.State = agentintegration.ActionRequired
+	s.Issue = &agentintegration.Issue{Code: "disconnect_pending"}
+	s.Message = "DeepSeek Harness has quit. Retry disconnection to finish."
 }
 
 // Re-read managed files on every call. A disconnect never changes dependencies,
@@ -419,7 +515,13 @@ func (a *Adapter) changeDSHProfile(ctx context.Context, connect bool) (err error
 		if _, err = a.installDSHWorkflow(ctx, lockPatch); err != nil {
 			return err
 		}
-		return writeManagedConfig(DeepSeekHarness, a.dshConfigPath(), a.self, a.home, a.hostID, true)
+		if err = writeManagedConfig(DeepSeekHarness, a.dshConfigPath(), a.self, a.home, a.hostID, true); err != nil {
+			return err
+		}
+		if err = enableDSHWorkflowBundle(ctx, filepath.Dir(a.dshConfigPath())); err != nil {
+			return fmt.Errorf("enable installed DSH Workflow bundle: %w", err)
+		}
+		return nil
 	}
 	if err = a.disconnectDSHWorkflow(); err != nil {
 		return err
@@ -444,7 +546,7 @@ func (a *Adapter) changeDSHDesktop(ctx context.Context, connect bool) agentinteg
 	runtime := a.inspectDSHDesktop(ctx)
 	s := a.dshDesktopStatusWithRuntime(runtime)
 	a.inspectConfiguration(&s)
-	if connect && (!s.CanConnect || s.State == agentintegration.Enabled && a.dshDesktopWorkflowConfigured(runtime)) {
+	if connect && !s.CanConnect {
 		return s
 	}
 	if !connect && !s.CanDisconnect {
@@ -467,7 +569,7 @@ func (a *Adapter) changeDSHDesktop(ctx context.Context, connect bool) agentinteg
 	}
 	s = a.dshDesktopStatusWithRuntime(runtime)
 	a.inspectConfiguration(&s)
-	if connect && (!s.CanConnect || s.State == agentintegration.Enabled && a.dshDesktopWorkflowConfigured(runtime)) {
+	if connect && !s.CanConnect {
 		return s
 	}
 	r, err := a.dshRecord()
@@ -475,6 +577,7 @@ func (a *Adapter) changeDSHDesktop(ctx context.Context, connect bool) agentinteg
 		return dshFailure(s, err)
 	}
 	r.Action = "connect"
+	r.PendingDisconnect = !connect
 	s.RetryAction = ""
 	if !connect {
 		r.Action = "disconnect"
@@ -489,11 +592,17 @@ func (a *Adapter) changeDSHDesktop(ctx context.Context, connect bool) agentinteg
 	if err := writeConfigFile(a.dshRecordPath(), body); err != nil {
 		return dshFailure(s, err)
 	}
-	cli, _ := agentexec.FindDSHDesktopCLI()
-	if running, err := agentexec.DSHDesktopRunning(ctx, cli); err != nil {
-		return dshFailure(s, fmt.Errorf("check running Desktop: %w", err))
+	cli := runtime.cli
+	if running, err := a.isDSHDesktopRunning(ctx, cli); err != nil {
+		log.Printf("DSH process inspection: %v", err)
+		s.State, s.Issue = agentintegration.Failed, dshIssue("process_inspection_failed", "")
+		sanitizeDSHStatus(&s)
+		return s
 	} else if running {
 		return agentintegration.RequireQuit(s, r.Action)
+	}
+	if connect && s.State == agentintegration.Enabled && a.dshDesktopWorkflowConfigured(runtime) {
+		return s
 	}
 	if !connect {
 		globalPath := filepath.Join(dshHome(), "cordis.patch.yml")
@@ -549,7 +658,19 @@ func (a *Adapter) changeDSHDesktop(ctx context.Context, connect bool) agentinteg
 	if connect {
 		return a.dshDesktopStatus(ctx)
 	}
-	return a.dshDesktopStatusWithRuntime(runtime)
+	s = a.dshDesktopStatusWithRuntime(runtime)
+	a.inspectConfiguration(&s)
+	if s.State == agentintegration.Ready && s.Enabled != nil && !*s.Enabled && !s.CanDisconnect {
+		r.PendingDisconnect = false
+		body, err := json.Marshal(r)
+		if err != nil {
+			return dshFailure(s, err)
+		}
+		if err := writeConfigFile(a.dshRecordPath(), body); err != nil {
+			return dshFailure(s, fmt.Errorf("save DSH disconnection result: %w", err))
+		}
+	}
+	return s
 }
 
 func (a *Adapter) dshDesktopWorkflowConfigured(runtime dshDesktopRuntime) bool {

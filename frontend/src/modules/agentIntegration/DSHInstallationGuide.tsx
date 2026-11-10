@@ -95,7 +95,8 @@ export default function DSHInstallationGuide({ status, onConnect, onStatus, onCl
 
   const installing = stage === "installing";
   const checking = stage === "checking";
-  const current = stage === "prepare" ? 0 : ["enable", "checking", "notReady", "success"].includes(stage) ? 2 : 1;
+  const current = ["prepare", "quitRequired"].includes(stage) ? 0 : ["enable", "checking", "notReady", "success"].includes(stage) ? 2 : 1;
+  const showImage = stage === "enable" || stage === "notReady";
   return <>
     <Modal open centered width={720} className="agent-integration-installation-guide agent-integration-dsh-guide"
       title={text("title")} onCancel={onClose} closable={!installing && !checking}
@@ -134,7 +135,7 @@ export default function DSHInstallationGuide({ status, onConnect, onStatus, onCl
           message={text("installedTitle")} description={text("installedDescription")} />}
         {stage === "notReady" && <Alert type="warning" showIcon message={text("notReadyTitle")} description={error} />}
         {stage === "success" && <Alert type="success" showIcon message={text("successTitle")} description={text("successDescription")} />}
-        {!installing && !checking && stage !== "success" && <>
+        {showImage && <>
           <button type="button" className="agent-integration-installation-image" aria-label={text("enlargeImage")} onClick={() => setZoomed(true)}>
             <img src={imageURL} alt={text("imageAlt")} />
           </button>
@@ -142,8 +143,8 @@ export default function DSHInstallationGuide({ status, onConnect, onStatus, onCl
         </>}
       </div>
     </Modal>
-    <Modal open={zoomed} title={text("enableStep")} footer={null} width={1100} onCancel={() => setZoomed(false)}>
+    {showImage && <Modal open={zoomed} title={text("enableStep")} footer={null} width={1100} onCancel={() => setZoomed(false)}>
       <img src={imageURL} alt={text("imageAlt")} style={{ width: "100%" }} />
-    </Modal>
+    </Modal>}
   </>;
 }

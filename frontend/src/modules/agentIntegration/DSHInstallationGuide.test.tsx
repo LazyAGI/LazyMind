@@ -20,6 +20,29 @@ beforeEach(() => vi.clearAllMocks());
 afterEach(() => { cleanup(); vi.useRealTimers(); });
 
 describe("DeepSeek Harness connection verification", () => {
+  it("shows the plugin image only after installation reaches the third step", async () => {
+    let finish!: (status: DesktopAgentIntegrationStatus) => void;
+    const connect = vi.fn(() => new Promise<DesktopAgentIntegrationStatus>(resolve => { finish = resolve; }));
+    render(<DSHInstallationGuide onConnect={connect} onStatus={vi.fn()} onClose={vi.fn()} />);
+    expect(screen.queryByRole("img", { name: copy.imageAlt })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: copy.continue }));
+    expect(screen.queryByRole("img", { name: copy.imageAlt })).not.toBeInTheDocument();
+    await act(async () => finish(configured));
+    expect(screen.getByRole("img", { name: copy.imageAlt })).toBeInTheDocument();
+  });
+
+  it("keeps the first step active when installation detects a running DSH", async () => {
+    const quit: DesktopAgentIntegrationStatus = { ...configured, state: "action_required",
+      issue: { code: "quit_required" }, action: { kind: "quit_agent" } };
+    const connect = vi.fn().mockResolvedValue(quit);
+    render(<DSHInstallationGuide onConnect={connect} onStatus={vi.fn()} onClose={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: copy.continue }));
+    await screen.findByText(zhCN.agentIntegration.quitRequired.title.replace("{{agent}}", "DeepSeek Harness"));
+    expect(screen.getByText(copy.prepareStep).closest(".ant-steps-item")).toHaveClass("ant-steps-item-process");
+    expect(screen.queryByRole("img", { name: copy.imageAlt })).not.toBeInTheDocument();
+    expect(screen.queryByText(copy.installedTitle)).not.toBeInTheDocument();
+  });
+
   it.each([configured, { ...configured, connection: undefined }])("does not treat configuration as a live connection", async (status) => {
     mocks.statuses.mockResolvedValue({ ok: true, data: { "deepseek-harness": status } });
     const connect = vi.fn();

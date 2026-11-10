@@ -240,7 +240,7 @@ func (a *Adapter) dshWorkflowConfigurationVersion(requireEnabled, currentBundle 
 			}
 		}
 		c, configErr := connectorconfig.Load(decodeDSHStdio(findDSHEntry(document)).Env[connectorconfig.EnvironmentKey])
-		if !active || configErr != nil || !c.Controlled {
+		if requireEnabled && !active || configErr != nil || !c.Controlled {
 			return false
 		}
 	}

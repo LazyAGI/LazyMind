@@ -2420,6 +2420,8 @@ const zhCN = {
       description: "请保存工作，并从 {{agent}} 的应用菜单或系统托盘选择「退出」，然后点击重试。仅关闭窗口可能仍在后台运行。",
       retryInstall: "重试安装",
       retryDisconnect: "重试关闭接入",
+      pendingDisconnect: "等待关闭接入",
+      exitedDescription: "{{agent}} 已退出，请点击「重试关闭接入」完成关闭。",
     },
     setupFeedback: {
       environmentMismatch: "已有其他 LazyMind 的接入配置，请关闭后重新开启以切换。",
