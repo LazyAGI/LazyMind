@@ -2,8 +2,10 @@ package mcpclient
 
 import (
 	"context"
+	"encoding/json"
+	"os"
 	"path/filepath"
-	"runtime"
+	"slices"
 	"strings"
 	"time"
 
@@ -43,6 +45,25 @@ func (a *Adapter) inspectDSHConnection(ctx context.Context, status *agentintegra
 			break
 		}
 	}
+	if desktop {
+		body, readErr := os.ReadFile(filepath.Join(filepath.Dir(target.dshConfigPath()), "package.json"))
+		var manifest struct {
+			DSH struct {
+				Profile struct {
+					Bundles []string `json:"bundles"`
+				} `json:"profile"`
+			} `json:"dsh"`
+		}
+		if readErr != nil || json.Unmarshal(body, &manifest) != nil {
+			dshConnectionIssue(status, "configuration_unreadable")
+			return
+		}
+		status.Connection.MCPEnabled = status.Connection.MCPEnabled && slices.Contains(manifest.DSH.Profile.Bundles, dshWorkflowPackage)
+	}
+	if !status.Connection.MCPEnabled {
+		dshConnectionIssue(status, "mcp_enable_required")
+		return
+	}
 	config, err := connectorconfig.Load(reference)
 	if err != nil || !config.Controlled || config.Home != a.home || config.Provider != string(DeepSeekHarness) || config.Profile != filepath.Dir(target.dshConfigPath()) {
 		dshConnectionIssue(status, "configuration_unreadable")
@@ -79,10 +100,6 @@ func (a *Adapter) inspectDSHConnection(ctx context.Context, status *agentintegra
 	// DSH has no separate trust dialog. This field records the valid scoped
 	// pairing, so consumers still require both native enablement and live control.
 	status.Connection.MCPTrusted = true
-	if !status.Connection.MCPEnabled {
-		dshConnectionIssue(status, "mcp_enable_required")
-		return
-	}
 	if live, err := workflowhost.ReadRuntimeStatus(a.home, pair); err == nil {
 		if live.Issue != "" {
 			dshConnectionIssue(status, live.Issue)
@@ -99,22 +116,13 @@ func (a *Adapter) inspectDSHConnection(ctx context.Context, status *agentintegra
 		status.Message = "DeepSeek Harness is connected to LazyMind."
 		return
 	}
-	// Process inspection currently establishes absence only on macOS. On other
-	// platforms, lack of a dispatcher poll is unavailable rather than evidence
-	// that the application has exited.
-	if desktop && (runtime.GOOS == "darwin" || a.dshRunning != nil) {
+	if desktop {
 		cli, err := agentexec.FindDSHDesktopCLI()
 		if err != nil {
 			dshConnectionIssue(status, "process_inspection_failed")
 			return
 		}
-		inspect := a.dshRunning
-		if inspect == nil {
-			inspect = agentexec.DSHDesktopRunning
-		}
-		bounded, cancel := context.WithTimeout(ctx, 2*time.Second)
-		defer cancel()
-		running, err := inspect(bounded, cli)
+		running, err := a.isDSHDesktopRunning(ctx, cli)
 		if err != nil {
 			dshConnectionIssue(status, "process_inspection_failed")
 			return
@@ -126,6 +134,16 @@ func (a *Adapter) inspectDSHConnection(ctx context.Context, status *agentintegra
 		}
 	}
 	dshConnectionIssue(status, "host_unavailable")
+}
+
+func (a *Adapter) isDSHDesktopRunning(ctx context.Context, cli string) (bool, error) {
+	inspect := a.dshRunning
+	if inspect == nil {
+		inspect = agentexec.DSHDesktopRunning
+	}
+	bounded, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	return inspect(bounded, cli)
 }
 
 func dshConnectionIssue(status *agentintegration.Status, code string) {

@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -70,6 +71,7 @@ func desktopAdapterFixture(t *testing.T) *Adapter {
 	}
 	a.home = filepath.Join(root, "LazyMind home")
 	a.bridge = dshTestProbe{}
+	a.dshRunning = func(context.Context, string) (bool, error) { return false, nil }
 	a.dshInspector = func(context.Context, string) (dshRuntimeInspection, error) {
 		return dshRuntimeInspection{Version: "0.2.0-rc.2", Supported: true, Profiles: []dshRuntimeProfile{
 			{Name: "desktop", MCPVersion: "0.2.0-rc.2", MCPPath: "/bundled/mcp"},
@@ -116,6 +118,45 @@ func TestDesktopStatusIsReadOnlyAndRequiresValidInitialization(t *testing.T) {
 		writeTestFile(t, manifest, body)
 		if s := a.Status(context.Background()); s.State != agentintegration.Failed || s.CanConnect || s.Issue == nil || s.Issue.Code != "dependency_environment" {
 			t.Fatalf("bad manifest %q: %+v", body, s)
+		}
+	}
+}
+
+func TestDesktopInstallChecksExitBeforeChangingProfiles(t *testing.T) {
+	for _, configured := range []bool{false, true} {
+		for _, inspectionError := range []bool{false, true} {
+			t.Run(fmt.Sprintf("configured=%v/inspectionError=%v", configured, inspectionError), func(t *testing.T) {
+				a := desktopAdapterFixture(t)
+				a.dshRunning = func(context.Context, string) (bool, error) { return false, nil }
+				runs := 0
+				a.dshRunner = func(_ context.Context, profile string, _ ...string) error {
+					runs++
+					installDSHFixture(t, profile)
+					return nil
+				}
+				if configured {
+					if s := a.Connect(context.Background()); s.State != agentintegration.Enabled {
+						t.Fatalf("setup: %+v", s)
+					}
+				}
+				runs = 0
+				checks := 0
+				a.dshRunning = func(context.Context, string) (bool, error) {
+					checks++
+					if inspectionError {
+						return false, errors.New("process inspection unavailable")
+					}
+					return true, nil
+				}
+				status := a.Connect(context.Background())
+				want := "quit_required"
+				if inspectionError {
+					want = "process_inspection_failed"
+				}
+				if checks == 0 || runs != 0 || status.Issue == nil || status.Issue.Code != want {
+					t.Fatalf("want=%s checks=%d profile mutations=%d status=%+v", want, checks, runs, status)
+				}
+			})
 		}
 	}
 }

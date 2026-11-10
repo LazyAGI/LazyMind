@@ -511,7 +511,7 @@ func (a *Adapter) changeDSHDesktop(ctx context.Context, connect bool) agentinteg
 	runtime := a.inspectDSHDesktop(ctx)
 	s := a.dshDesktopStatusWithRuntime(runtime)
 	a.inspectConfiguration(&s)
-	if connect && (!s.CanConnect || s.State == agentintegration.Enabled && a.dshDesktopWorkflowConfigured(runtime)) {
+	if connect && !s.CanConnect {
 		return s
 	}
 	if !connect && !s.CanDisconnect {
@@ -534,7 +534,7 @@ func (a *Adapter) changeDSHDesktop(ctx context.Context, connect bool) agentinteg
 	}
 	s = a.dshDesktopStatusWithRuntime(runtime)
 	a.inspectConfiguration(&s)
-	if connect && (!s.CanConnect || s.State == agentintegration.Enabled && a.dshDesktopWorkflowConfigured(runtime)) {
+	if connect && !s.CanConnect {
 		return s
 	}
 	r, err := a.dshRecord()
@@ -556,11 +556,17 @@ func (a *Adapter) changeDSHDesktop(ctx context.Context, connect bool) agentinteg
 	if err := writeConfigFile(a.dshRecordPath(), body); err != nil {
 		return dshFailure(s, err)
 	}
-	cli, _ := agentexec.FindDSHDesktopCLI()
-	if running, err := agentexec.DSHDesktopRunning(ctx, cli); err != nil {
-		return dshFailure(s, fmt.Errorf("check running Desktop: %w", err))
+	cli := runtime.cli
+	if running, err := a.isDSHDesktopRunning(ctx, cli); err != nil {
+		log.Printf("DSH process inspection: %v", err)
+		s.State, s.Issue = agentintegration.Failed, dshIssue("process_inspection_failed", "")
+		sanitizeDSHStatus(&s)
+		return s
 	} else if running {
 		return agentintegration.RequireQuit(s, r.Action)
+	}
+	if connect && s.State == agentintegration.Enabled && a.dshDesktopWorkflowConfigured(runtime) {
+		return s
 	}
 	if !connect {
 		globalPath := filepath.Join(dshHome(), "cordis.patch.yml")
