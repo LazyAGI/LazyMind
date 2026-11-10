@@ -75,14 +75,30 @@ type pdfTranslationDraft struct {
 }
 
 type pdfTranslationDraftBlock struct {
-	ID             string    `json:"id"`
-	Page           int       `json:"page"`
-	PageWidth      float64   `json:"page_width,omitempty"`
-	PageHeight     float64   `json:"page_height,omitempty"`
-	BBox           []float64 `json:"bbox,omitempty"`
-	Type           string    `json:"type,omitempty"`
-	SourceText     string    `json:"source_text"`
-	TranslatedText string    `json:"translated_text"`
+	ID               string    `json:"id"`
+	Page             int       `json:"page"`
+	PageWidth        float64   `json:"page_width,omitempty"`
+	PageHeight       float64   `json:"page_height,omitempty"`
+	BBox             []float64 `json:"bbox,omitempty"`
+	Type             string    `json:"type,omitempty"`
+	SourceText       string    `json:"source_text"`
+	TranslatedText   string    `json:"translated_text"`
+	TranslationPages []int     `json:"translation_pages,omitempty"`
+}
+
+type pdfTranslationSupplement struct {
+	BlockID string `json:"block_id"`
+	Pages   []int  `json:"pages"`
+}
+
+func applyTranslationPageMap(draft *pdfTranslationDraft, supplements []pdfTranslationSupplement) {
+	pages := make(map[string][]int, len(supplements))
+	for _, item := range supplements {
+		pages[item.BlockID] = item.Pages
+	}
+	for i := range draft.Blocks {
+		draft.Blocks[i].TranslationPages = pages[draft.Blocks[i].ID]
+	}
 }
 
 func buildPDFTranslationDraft(artifactID, baseArtifactID, targetLanguage string, manifest translationLayoutManifest, translations map[string]string) pdfTranslationDraft {
@@ -652,10 +668,13 @@ func handlePDFTranslationJob(ctx context.Context, job asyncjob.Job, reporter asy
 		return fail(errors.New("PDF translation renderer is not configured"))
 	}
 	var renderResult struct {
-		OutputPath          string `json:"output_path"`
-		WarningCount        int    `json:"warning_count"`
-		RenderedBlockCount  int    `json:"rendered_block_count"`
-		RequestedBlockCount int    `json:"requested_block_count"`
+		OutputPath             string                     `json:"output_path"`
+		WarningCount           int                        `json:"warning_count"`
+		SupplementalBlockCount int                        `json:"supplemental_block_count"`
+		LayoutPreserved        bool                       `json:"layout_preserved"`
+		Supplements            []pdfTranslationSupplement `json:"supplements"`
+		RenderedBlockCount     int                        `json:"rendered_block_count"`
+		RequestedBlockCount    int                        `json:"requested_block_count"`
 	}
 	if err := common.ApiPost(ctx, serviceURL, map[string]string{"source_path": payload.SourcePath, "layout_path": payload.LayoutPath,
 		"translations_path": translationPath, "output_path": outputPath, "target_language": payload.TargetLanguage}, nil, &renderResult, 15*time.Minute); err != nil {
@@ -668,6 +687,7 @@ func handlePDFTranslationJob(ctx context.Context, job asyncjob.Job, reporter asy
 	artifactID := uuid.NewString()
 	draftPath := strings.TrimSuffix(payload.LayoutPath, ".json") + ".draft.json"
 	draft := buildPDFTranslationDraft(artifactID, "", payload.TargetLanguage, manifest, translations)
+	applyTranslationPageMap(&draft, renderResult.Supplements)
 	if err := writePDFTranslationDraft(draftPath, draft); err != nil {
 		return fail(err)
 	}
@@ -675,7 +695,7 @@ func handlePDFTranslationJob(ctx context.Context, job asyncjob.Job, reporter asy
 		artifact := pdfArtifactRecord{ID: artifactID, Kind: pdfArtifactTranslation, CacheKey: record.CacheKey, StoredPath: outputPath,
 			SourcePath: payload.SourcePath, LayoutPath: payload.LayoutPath, DraftPath: draftPath, HasLayout: true, HasDraft: true,
 			Filename: payload.OutputFilename, ContentType: "application/pdf", TargetLanguage: record.TargetLanguage,
-			ProviderType: record.ProviderType, Provider: record.Provider, Model: record.Model, WarningCount: renderResult.WarningCount,
+			ProviderType: record.ProviderType, Provider: record.Provider, Model: record.Model, WarningCount: renderResult.WarningCount, SupplementalBlockCount: renderResult.SupplementalBlockCount, LayoutPreserved: renderResult.LayoutPreserved,
 			CreatedAt: time.Now().UTC().Format(time.RFC3339)}
 		var replaced []pdfArtifactRecord
 		ext.PDFArtifacts, replaced = replaceArtifactWithSameCacheKey(ext.PDFArtifacts, artifact)

@@ -15,6 +15,7 @@ import (
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 
 	"lazymind/core/common"
 	"lazymind/core/modelconfig"
@@ -194,11 +195,12 @@ func RevisePDFTranslation(w http.ResponseWriter, r *http.Request) {
 	}
 	var req struct {
 		Overrides    map[string]string `json:"overrides"`
+		Rerender     bool              `json:"rerender,omitempty"`
 		ProviderType string            `json:"provider_type,omitempty"`
 		Provider     string            `json:"provider,omitempty"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || len(req.Overrides) == 0 {
-		common.ReplyErr(w, "at least one translation override is required", http.StatusBadRequest)
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || (len(req.Overrides) == 0 && !req.Rerender) || (req.Rerender && (len(req.Overrides) > 0 || req.ProviderType != "" || req.Provider != "")) {
+		common.ReplyErr(w, "supply translation overrides or request rerender without overrides or a provider", http.StatusBadRequest)
 		return
 	}
 	translations := make(map[string]string, len(draft.Blocks))
@@ -273,9 +275,12 @@ func RevisePDFTranslation(w http.ResponseWriter, r *http.Request) {
 	}
 	serviceURL := strings.Replace(strings.TrimSpace(os.Getenv("LAZYMIND_OFFICE_CONVERT_URL")), "/v1/office/to-pdf", "/v1/pdf/render-translation", 1)
 	var renderResult struct {
-		WarningCount        int `json:"warning_count"`
-		RenderedBlockCount  int `json:"rendered_block_count"`
-		RequestedBlockCount int `json:"requested_block_count"`
+		WarningCount           int                        `json:"warning_count"`
+		SupplementalBlockCount int                        `json:"supplemental_block_count"`
+		LayoutPreserved        bool                       `json:"layout_preserved"`
+		Supplements            []pdfTranslationSupplement `json:"supplements"`
+		RenderedBlockCount     int                        `json:"rendered_block_count"`
+		RequestedBlockCount    int                        `json:"requested_block_count"`
 	}
 	if serviceURL == "" {
 		cleanup()
@@ -293,18 +298,47 @@ func RevisePDFTranslation(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "PDF translation renderer did not render every block", http.StatusInternalServerError)
 		return
 	}
-	filename := strings.TrimSuffix(base.Filename, filepath.Ext(base.Filename)) + "-revised.pdf"
+	applyTranslationPageMap(&draft, renderResult.Supplements)
+	if err := writePDFTranslationDraft(draftPath, draft); err != nil {
+		cleanup()
+		common.ReplyErr(w, "save translation page map failed", http.StatusInternalServerError)
+		return
+	}
+	filename := base.Filename
 	artifact := pdfArtifactRecord{ID: artifactID, Kind: pdfArtifactTranslation, CacheKey: base.CacheKey + ":revision:" + artifactID,
 		StoredPath: outputPath, SourcePath: sourcePath, LayoutPath: layoutPath, DraftPath: draftPath, HasLayout: true, HasDraft: true,
 		Filename: filename, ContentType: mime.TypeByExtension(".pdf"), TargetLanguage: base.TargetLanguage,
-		ProviderType: provenance.ProviderType, Provider: provenance.Provider, Model: provenance.Model, WarningCount: renderResult.WarningCount,
+		ProviderType: provenance.ProviderType, Provider: provenance.Provider, Model: provenance.Model, WarningCount: renderResult.WarningCount, SupplementalBlockCount: renderResult.SupplementalBlockCount, LayoutPreserved: renderResult.LayoutPreserved,
 		CreatedAt: time.Now().UTC().Format(time.RFC3339)}
 	var replaced []pdfArtifactRecord
-	ext.PDFArtifacts, replaced = replaceArtifactWithSameCacheKey(ext.PDFArtifacts, artifact)
-	rawExt, err := json.Marshal(ext)
-	if err != nil || store.DB().WithContext(r.Context()).Model(&row).Update("ext", rawExt).Error != nil {
+	conflict := errors.New("translation changed while rendering; retry with the current translation")
+	err = store.DB().WithContext(r.Context()).Transaction(func(tx *gorm.DB) error {
+		current := row
+		if e := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id=? AND deleted_at IS NULL", row.ID).Take(&current).Error; e != nil {
+			return e
+		}
+		var latest documentExt
+		if e := json.Unmarshal(current.Ext, &latest); e != nil {
+			return e
+		}
+		active := latestArtifact(latest, pdfArtifactTranslation)
+		if active == nil || active.ID != base.ID {
+			return conflict
+		}
+		latest.PDFArtifacts, replaced = replaceArtifactWithSameCacheKey(latest.PDFArtifacts, artifact)
+		raw, e := json.Marshal(latest)
+		if e != nil {
+			return e
+		}
+		return tx.Model(&current).Update("ext", raw).Error
+	})
+	if err != nil {
 		cleanup()
-		common.ReplyErr(w, "register revised translation failed", http.StatusInternalServerError)
+		status := http.StatusInternalServerError
+		if errors.Is(err, conflict) {
+			status = http.StatusConflict
+		}
+		common.ReplyErr(w, err.Error(), status)
 		return
 	}
 	_ = os.Remove(translationsPath)

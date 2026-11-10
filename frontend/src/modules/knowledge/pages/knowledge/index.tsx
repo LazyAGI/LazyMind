@@ -949,7 +949,7 @@ const KnowledgeDocumentContent = () => {
       selectTranslationArtifact(artifact);
       showFullTranslation();
       setRevisionModalOpen(false);
-      message.success("已生成新的翻译版 PDF，原译本保持不变");
+      message.success("已更新当前译本");
     } catch (error) {
       message.error(error instanceof Error ? error.message : "生成新版译本失败");
     } finally {
@@ -1320,6 +1320,7 @@ const KnowledgeDocumentContent = () => {
                   onTranslate={openNewTranslation}
                   onRetranslateSelection={selection => void openTranslationRevision(selection, "translation")}
                   onRegenerate={openTranslationRegeneration}
+                  onArtifactUpdated={artifact=>{selectTranslationArtifact(artifact);void refreshPdfCapabilities();}}
                   onHalfWidth={workspaceWidth >= 900 && (panelLayout === "left" || panelLayout === "right") ? () => resizePaperAssistant(workspaceWidth * .5) : undefined}
                 />}
               </div>

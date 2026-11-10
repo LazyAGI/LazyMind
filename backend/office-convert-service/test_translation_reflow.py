@@ -20,7 +20,7 @@ class TranslationReflowTests(unittest.TestCase):
             blocks = json.loads((root / 'layout.json').read_text())['blocks']
             self.assertTrue(any('Attention Is All You Need' in block['text'] for block in blocks))
 
-    def test_unfittable_text_is_reflowed_without_losing_last_sentence(self):
+    def test_unfittable_text_is_supplemented_without_losing_last_sentence(self):
         with tempfile.TemporaryDirectory(dir='/var/lib/lazymind/uploads') as directory:
             root = Path(directory)
             source = fitz.open()
@@ -40,7 +40,9 @@ class TranslationReflowTests(unittest.TestCase):
             with fitz.open(root / 'output.pdf') as output:
                 text = ''.join(page.get_text() for page in output).replace('\n', '')
                 self.assertIn('最后一句也必须保留。', text)
-                self.assertIn('重排译文', text)
+                self.assertIn('补充译文', text)
+                self.assertGreater(len(output), 1)
+                self.assertEqual(result['supplemental_block_count'], 1)
 
 
 if __name__ == '__main__':
