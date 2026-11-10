@@ -43,7 +43,7 @@ when_to_use: >
   analyze_requirements owns template inspection; collect_materials owns source
   retrieval, doc read, factual analysis and evidence selection; later steps own generation.
   For an uploaded PPTX template, preserve the original file and let the Workflow
-  inspect it through the native template tools. Never invoke Office-to-PDF, HTML conversion
+  inspect it directly. Never invoke Office-to-PDF, HTML conversion
   or an OCR conversion tool merely to read or fill the template.
   After successful native PPTX publication, generation is complete. Do not
   launch additional parent-chat inspection, academic analysis or rendering.
