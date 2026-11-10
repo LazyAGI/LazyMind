@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { copyFileSync, existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
 import net from 'node:net';
@@ -26,7 +27,8 @@ function fixture(t, binary) {
     LAZYMIND_HOME: '/invalid/wsl/home', LAZYMIND_LOCAL_BUILD_ROOT: '/invalid/wsl/build',
     LAZYMIND_WSL_BRIDGE_SCRIPT: script, LAZYMIND_WSL_BRIDGE_SOURCE: source,
     BRIDGE_PROBE_LOG: path.join(root, 'calls.jsonl'), BRIDGE_PROBE_MODE: 'success' };
-  const installed = path.join(env.LOCALAPPDATA, 'LazyMind/assistant-bridge/lazymind.exe');
+  const digest = binary ? createHash('sha256').update(readFileSync(binary)).digest('hex') : '';
+  const installed = path.join(env.LOCALAPPDATA, 'LazyMind/assistant-bridge', digest, 'lazymind.exe');
   const run = (action) => spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', wrapper],
     { env: { ...env, LAZYMIND_WSL_BRIDGE_ACTION: action }, encoding: 'utf8', timeout: 30000 });
   const calls = () => readFileSync(env.BRIDGE_PROBE_LOG, 'utf8').trim().split('\n').map(JSON.parse);
@@ -51,7 +53,7 @@ test('Windows PowerShell preserves literal paths and normalizes native failures'
     success(f.run('start'), 'start');
     assert.ok(existsSync(f.installed));
     assert.deepEqual(f.calls().map(call => [call.executable, call.args]), [
-      [f.source, ['assistant', 'stop']], [f.installed, ['assistant', 'start']], [f.installed, ['assistant', 'status']],
+      [f.installed, ['assistant', 'start', '--client-id', `compose:${f.source}:8090`, '--server-url', 'http://localhost:8090']], [f.installed, ['assistant', 'status']],
     ]);
     assert.ok(f.calls().every(call => call.home === '' && call.buildRoot === ''));
     success(f.run('start'), 'start');
@@ -60,7 +62,13 @@ test('Windows PowerShell preserves literal paths and normalizes native failures'
     assert.equal(f.calls().at(-1).executable, f.installed);
   });
   await t.test('stop with no executable is idempotent', t => success(fixture(t).run('stop'), 'stop'));
-  for (const mode of ['missing-script', 'missing-source', 'fail-stop', 'fail-start', 'fail-status', 'invalid-json', 'not-running', 'wrong-platform', 'string-running']) {
+  await t.test('Local startup does not bind to a Compose origin', t => {
+    const f = fixture(t, binary);
+    f.env.LAZYMIND_WSL_BRIDGE_DEPLOYMENT = 'local';
+    success(f.run('start'), 'start');
+    assert.deepEqual(f.calls()[0].args, ['assistant', 'start', '--client-id', `local:${f.source}:8090`]);
+  });
+  for (const mode of ['missing-script', 'missing-source', 'fail-start', 'fail-status', 'invalid-json', 'not-running', 'wrong-platform', 'string-running']) {
     await t.test(`start fails truthfully for ${mode}`, t => {
       const f = fixture(t, binary);
       f.env.BRIDGE_PROBE_MODE = mode;
@@ -95,7 +103,7 @@ test('real Windows Bridge starts, reports native staged identity and stops', {
     const health = JSON.parse(result.stdout);
     assert.equal(health.running, true);
     assert.equal(health.platform, 'windows');
-    assert.equal(health.executable.toLowerCase(), f.installed.toLowerCase());
+    assert.ok(health.executable.toLowerCase().includes('bridge\\bin\\'), 'daemon uses immutable staging outside the launcher');
     success(f.run('stop'), 'stop');
     const stopped = spawnSync(f.installed, ['assistant', 'status'], { encoding: 'utf8', timeout: 10000 });
     assert.notEqual(stopped.status, 0, 'Bridge listener must be closed after stop');

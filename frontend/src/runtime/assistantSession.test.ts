@@ -1,7 +1,8 @@
-import { afterEach, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { clearLocalAssistantSession, syncLocalAssistantSession } from './assistantSession';
 
-afterEach(() => { vi.restoreAllMocks(); Reflect.deleteProperty(window, 'lazymindDesktop'); });
+beforeEach(() => { vi.stubEnv('VITE_LAZYMIND_ASSISTANT_BRIDGE_URL', 'http://127.0.0.1:19091'); });
+afterEach(() => { vi.unstubAllEnvs(); vi.restoreAllMocks(); Reflect.deleteProperty(window, 'lazymindDesktop'); });
 const expected = { server_url: 'http://localhost:8090', access_token: 'old', refresh_token: 'old-refresh' };
 
 it('does not infer permission to delete a connector login from an empty browser session', async () => {

@@ -46,7 +46,7 @@ var overrideKeys = map[string]bool{
 }
 
 func Managed() bool {
-	return strings.TrimSpace(os.Getenv(EnvironmentKey)) != "" || os.Getenv("LAZYMIND_RUNTIME_PROFILE") == "desktop"
+	return strings.TrimSpace(os.Getenv(EnvironmentKey)) != "" || (os.Getenv("LAZYMIND_RUNTIME_PROFILE") == "desktop" || os.Getenv("LAZYMIND_RUNTIME_PROFILE") == "bridge")
 }
 
 func Path(home, provider, profile string) string {
@@ -173,6 +173,16 @@ func URL(name, fallback string) (string, error) {
 	value := Value(name)
 	if value == "" {
 		value = fallback
+		if name == "LAZYMIND_ASSISTANT_BRIDGE_URL" {
+			home, err := Home()
+			if err != nil {
+				return "", err
+			}
+			value, err = bridgeFallback(home, fallback)
+			if err != nil {
+				return "", err
+			}
+		}
 	}
 	if err := ValidateURL(name, value); err != nil {
 		return "", err
@@ -274,6 +284,13 @@ func (c Config) URL(name, fallback string) (string, error) {
 	value := strings.TrimSpace(c.Overrides[name])
 	if value == "" {
 		value = fallback
+		if name == "LAZYMIND_ASSISTANT_BRIDGE_URL" {
+			var err error
+			value, err = bridgeFallback(c.Home, fallback)
+			if err != nil {
+				return "", err
+			}
+		}
 	}
 	if err := ValidateURL(name, value); err != nil {
 		return "", err

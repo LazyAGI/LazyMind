@@ -185,6 +185,37 @@ Desktop binds only to `127.0.0.1`. It retains the normal Local/Desktop auto-logi
 
 Local and Desktop share the platform LazyMind data directory so knowledge bases remain available when switching modes, but they cannot run concurrently. Stop Local before opening Desktop and close Desktop before starting Local. Electron also enforces a single Desktop instance.
 
+Desktop and Docker Compose can coexist. Their business services, databases,
+uploads and knowledge stores remain independent. Desktop prefers frontend port
+8091, leaving Compose's default 8090 available even when Desktop starts first;
+explicit port settings and Desktop's automatic port fallback remain supported.
+
+The local Assistant Bridge is reused when its protocol and platform are
+compatible. Each deployment keeps its own backend credentials, Agent pairings
+and requests. Existing connector state stays in its original directory; another
+deployment receives a private context beneath `~/.lazymind/environments/`.
+Signing out of one deployment does not clear the other's login. Business data
+is neither shared nor migrated.
+
+`make up` acquires a deployment reference to the shared bridge; `make down`
+releases that reference. Desktop's Agent Host similarly releases its reference
+when it exits. Closing a Desktop window still uses the existing background mode.
+`make local-up` / `make local-down` retain Local's existing automatic login and
+use the Local/Desktop connector context, with a separate Local client reference.
+The bridge survives while another deployment uses it, and its executable is
+staged outside the application installation so an upgrade does not replace a
+running shared binary. WSL uses the same protocol through the native Windows
+launcher. Direct `docker compose` commands leave the host bridge independent;
+use `make assistant-bridge-stop` from the matching checkout and frontend-port
+configuration to release that deployment's host integration.
+
+Unrelated occupied ports are skipped; browser clients discover compatible
+bridges on loopback ports 19091–19100. An explicitly configured bridge URL is
+preserved. An incompatible legacy bridge that uses the same credential directory
+is not stopped or silently replaced: stop its owning deployment before updating
+that bridge, then retry. Connection errors report the affected service instead
+of switching databases or terminating another deployment.
+
 Desktop stages the PPT export scripts into a content-addressed directory under
 the user runtime's `deps/editable-ppt/export-runtime` before linking Node
 dependencies. Startup and dependency preparation must not add links or files to

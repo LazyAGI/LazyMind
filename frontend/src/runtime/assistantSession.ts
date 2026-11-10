@@ -1,4 +1,6 @@
 export const LOCAL_ASSISTANT_BRIDGE = `${(import.meta.env.VITE_LAZYMIND_ASSISTANT_BRIDGE_URL || "http://127.0.0.1:19091").replace(/\/$/, "")}/v1`;
+let discoveredBridge: string | undefined;
+let bridgeDiscovery: Promise<string> | undefined;
 const CLIENT_PLATFORM_HEADER = "X-LazyMind-Client-Platform";
 export const ASSISTANT_BRIDGE_PLATFORM_MISMATCH = "platform_mismatch";
 
@@ -28,6 +30,36 @@ export function browserClientPlatform(): "windows" | "darwin" | "linux" | "" {
   if (/macintosh|macintel|mac os/i.test(value)) return "darwin";
   if (/linux/i.test(value)) return "linux";
   return "";
+}
+
+// Discover before sending a mutation. A failed POST is never automatically replayed.
+async function discoverAssistantBridge(): Promise<string> {
+  if (import.meta.env.VITE_LAZYMIND_ASSISTANT_BRIDGE_URL) return LOCAL_ASSISTANT_BRIDGE;
+  if (discoveredBridge) return discoveredBridge;
+  if (bridgeDiscovery) return bridgeDiscovery;
+  bridgeDiscovery = (async () => {
+    const platform = browserClientPlatform();
+    const candidates = Array.from({ length: 10 }, (_, index) => `http://127.0.0.1:${19091 + index}/v1`);
+    const results = await Promise.all(candidates.map(async (base) => {
+      const controller = new AbortController();
+      const timeout = window.setTimeout(() => controller.abort(), 1200);
+      try {
+        const response = await fetch(`${base}/health`, { signal: controller.signal });
+        if (!response.ok) return undefined;
+        const health = await response.json() as { service?: string; version?: string; platform?: string; isolated?: boolean };
+        if (health.service !== "lazymind-assistant-bridge" || health.version !== "v9" || health.isolated !== false) return undefined;
+        if (platform && health.platform !== platform) return undefined;
+        return base;
+      } catch { return undefined; }
+      finally { window.clearTimeout(timeout); }
+    }));
+    const base = results.find((value) => value !== undefined);
+    if (!base) throw new AssistantBridgeRequestError("未找到兼容的本机助理桥接服务。请启动当前版本的 Assistant Bridge 后重试；已有服务不会被停止。", "bridge_unavailable");
+    discoveredBridge = base;
+    return base;
+  })();
+  try { return await bridgeDiscovery; }
+  finally { bridgeDiscovery = undefined; }
 }
 
 interface SessionUser {
@@ -68,17 +100,21 @@ export async function assistantBridgeFetch(
   init: RequestInit | undefined,
   timeoutMs: number,
 ): Promise<Response> {
+  const bridge = await discoverAssistantBridge();
   const controller = new AbortController();
   const timeout = window.setTimeout(() => controller.abort(), timeoutMs);
   try {
     const headers = new Headers(init?.headers);
     const platform = browserClientPlatform();
     if (platform) headers.set(CLIENT_PLATFORM_HEADER, platform);
-    return await fetch(`${LOCAL_ASSISTANT_BRIDGE}${path}`, {
+    return await fetch(`${bridge}${path}`, {
       ...init,
       headers,
       signal: controller.signal,
     });
+  } catch (error) {
+    discoveredBridge = undefined;
+    throw error;
   } finally {
     window.clearTimeout(timeout);
   }

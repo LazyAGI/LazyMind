@@ -63,6 +63,9 @@ override LAZYMIND_CLI_BIN := $(LOCAL_BUILD_DIR)/bin/$(LAZYMIND_CLI_FILENAME)
 LOCAL_WIN_SCRIPT := $(CURDIR)/local/scripts/local-win.ps1
 DESKTOP_WIN_SCRIPT := $(CURDIR)/desktop/scripts/build-windows-x64.ps1
 LAZYMIND_LOCAL_DOWN_TIMEOUT ?= 150s
+LAZYMIND_ASSISTANT_DEPLOYMENT ?= compose
+_ASSISTANT_CLIENT_ARGS = --client-id "$(LAZYMIND_ASSISTANT_DEPLOYMENT):$(CURDIR):$(LAZYMIND_FRONTEND_PORT)" $(if $(filter compose,$(LAZYMIND_ASSISTANT_DEPLOYMENT)),--server-url "http://localhost:$(LAZYMIND_FRONTEND_PORT)")
+_ASSISTANT_PROFILE = $(if $(filter local,$(LAZYMIND_ASSISTANT_DEPLOYMENT)),desktop)
 comma := ,
 
 # ---------------------------------------------------------------------------
@@ -586,9 +589,8 @@ assistant-bridge-start: lazymind-cli-build
 ifeq ($(HOST_IS_WSL),1)
 	@sh local/scripts/assistant-bridge-wsl.sh start
 else
-	@"$(LAZYMIND_CLI_BIN)" assistant stop >/dev/null
 	@if [ "$(LAZYMIND_CLI_FILENAME)" = "lazymind.exe" ]; then rm -f "$(LOCAL_BUILD_DIR)/bin/lazymind"; fi
-	@"$(LAZYMIND_CLI_BIN)" assistant start >/dev/null
+	@LAZYMIND_RUNTIME_PROFILE="$(_ASSISTANT_PROFILE)" "$(LAZYMIND_CLI_BIN)" assistant start $(_ASSISTANT_CLIENT_ARGS) >/dev/null
 endif
 	@echo "✅ LazyMind 助理桥接器已启动；可在设置 → 外部 Agent 集成中启用本机能力"
 
@@ -597,7 +599,7 @@ ifeq ($(HOST_IS_WSL),1)
 	@sh local/scripts/assistant-bridge-wsl.sh stop
 else
 	@if [ -x "$(LAZYMIND_CLI_BIN)" ]; then \
-		"$(LAZYMIND_CLI_BIN)" assistant stop >/dev/null || true; \
+		LAZYMIND_RUNTIME_PROFILE="$(_ASSISTANT_PROFILE)" "$(LAZYMIND_CLI_BIN)" assistant stop $(_ASSISTANT_CLIENT_ARGS) >/dev/null || true; \
 	fi
 endif
 
@@ -690,14 +692,14 @@ localup: local-up
 
 local-up: skills-materialize local-pandoc local-runtime-manager-build lazymind-cli-build
 	@$(LOCAL_PANDOC_ENV) "$(LOCAL_RUNTIME_MANAGER_BIN)" up
-	@$(MAKE) --no-print-directory assistant-bridge-start
+	@$(MAKE) --no-print-directory assistant-bridge-start LAZYMIND_ASSISTANT_DEPLOYMENT=local
 
 local-up-lan: skills-materialize local-pandoc local-runtime-manager-build lazymind-cli-build
 	@$(LOCAL_PANDOC_ENV) LAZYMIND_LOCAL_NETWORK_PROFILE=lan LAZYMIND_LOCAL_AUTO_LOGIN_ALLOW_LAN=true "$(LOCAL_RUNTIME_MANAGER_BIN)" up
-	@$(MAKE) --no-print-directory assistant-bridge-start
+	@$(MAKE) --no-print-directory assistant-bridge-start LAZYMIND_ASSISTANT_DEPLOYMENT=local
 
 local-down:
-	@$(MAKE) --no-print-directory assistant-bridge-stop
+	@$(MAKE) --no-print-directory assistant-bridge-stop LAZYMIND_ASSISTANT_DEPLOYMENT=local
 	@if [ -x "$(LOCAL_RUNTIME_MANAGER_BIN)" ]; then \
 		"$(LOCAL_RUNTIME_MANAGER_BIN)" down; \
 	else \
