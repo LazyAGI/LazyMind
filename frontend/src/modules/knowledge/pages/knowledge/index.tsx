@@ -1138,7 +1138,7 @@ const KnowledgeDocumentContent = () => {
         </div>
         <PaperToolDock label={i18n.language.startsWith("zh")?"阅读工具":"Reading tools"} activeTool={previewSideCollapsed ? undefined : previewSideTab}
           tools={[
-            ...(isPaperDocument?[{id:"info",label:t("paperShell.documentDetails"),icon:<InfoCircleOutlined/>},{id:"notes",label:i18n.language.startsWith("zh")?"笔记":"Notes",icon:<EditOutlined/>}]:[]),
+            ...(isPaperDocument?[{id:"notes",label:i18n.language.startsWith("zh")?"笔记":"Notes",icon:<EditOutlined/>}]:[]),
             ...(!isPaperDocument?[{id:"navigation",label:t("paperShell.documentNavigation"),icon:<MenuOutlined/>}]:[]),
             {id:"translation",label:i18n.language.startsWith("zh")?"翻译":"Translation",icon:<TranslationOutlined/>},
             {id:"chat",label:t(isPaperDocument?"paperShell.assistant":"paperShell.documentAssistant"),icon:<MessageOutlined/>},
