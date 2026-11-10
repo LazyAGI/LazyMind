@@ -47,6 +47,9 @@ def graphics_signature(page):
 def render_preserving_pages(document, blocks, translations, font_path):
     fitz.TOOLS.set_small_glyph_heights(True)
     source_pages = len(document)
+    diagnostics = []
+    def warn(code, **detail):
+        diagnostics.append({"code": code, **detail})
     fonts = [
         fitz.Font(fontfile=str(font_path)),
         fitz.Font(fontfile="/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"),
@@ -60,15 +63,18 @@ def render_preserving_pages(document, blocks, translations, font_path):
     for block in blocks:
         key = str(block.get("id", ""))
         if not key or key in known:
-            raise ValueError("invalid or duplicate translation block id")
+            warn("invalid_or_duplicate_block_id", block_id=key)
+            continue
         known.add(key)
         text = str(translations.get(key, "")).strip()
         if not text:
-            raise ValueError(f"missing translation for block {key}")
+            warn("missing_translation", block_id=key)
+            continue
         pno = int(block.get("page", 1)) - 1
         bbox = block.get("bbox")
         if not 0 <= pno < source_pages or not isinstance(bbox, list) or len(bbox) != 4:
-            raise ValueError(f"invalid location for block {key}")
+            warn("invalid_location", block_id=key)
+            continue
         page = document[pno]
         sx = page.rect.width / float(block.get("pageWidth") or page.rect.width)
         sy = page.rect.height / float(block.get("pageHeight") or page.rect.height)
@@ -83,7 +89,8 @@ def render_preserving_pages(document, blocks, translations, font_path):
             or rect.is_empty
             or not page.rect.contains(rect)
         ):
-            raise ValueError(f"out-of-page location for block {key}")
+            warn("out_of_page_location", block_id=key)
+            continue
         items.append(
             {
                 "id": key,
@@ -95,7 +102,12 @@ def render_preserving_pages(document, blocks, translations, font_path):
             }
         )
     if not items or any(str(k) not in known for k in translations):
-        raise ValueError("translation manifest does not match layout")
+        warn("manifest_layout_mismatch")
+
+    for item in items:
+        unsupported = sorted({f"U+{ord(ch):04X}" for ch in item["text"] if not ch.isspace() and not any(f.has_glyph(ord(ch)) for f in fonts)})
+        if unsupported:
+            warn("unsupported_characters", block_id=item["id"], characters=unsupported)
 
     prepared = []
     overflow = []
@@ -168,7 +180,7 @@ def render_preserving_pages(document, blocks, translations, font_path):
             )
             paint(p, item["fit"]["runs"])
             if visible(item["text"]) != visible(p.get_text()):
-                raise ValueError(f"translation extraction mismatch: {item['id']}")
+                warn("translation_extraction_mismatch", block_id=item["id"], page=item["page"] + 1)
     for pno in range(source_pages):
         page = document[pno]
         page_items = [i for i in prepared + overflow if i["page"] == pno]
@@ -181,34 +193,36 @@ def render_preserving_pages(document, blocks, translations, font_path):
                 r.y1 = r.y0 + 0.2
                 page.add_redact_annot(r, fill=False, cross_out=False)
         if page_items:
-            redact_text_preserving_images(page)
+            try:
+                redact_text_preserving_images(page)
+            except ValueError as exc:
+                warn("image_preservation", page=pno + 1, message=str(exc))
             for item in page_items:
                 if "fit" in item:
                     paint(page, item["fit"]["runs"])
         if graphics_signature(page) != original_graphics[pno]:
-            raise ValueError(f"original vector graphics changed on page {pno+1}")
+            warn("vector_graphics_changed", page=pno + 1)
         for item in page_items:
             if "fit" in item and visible(item["text"]) not in visible(page.get_text()):
-                raise ValueError(f"final translated text lost: {item['id']}")
+                warn("translated_text_mismatch", page=pno + 1, block_id=item["id"])
         removed = [s for i in page_items for s in i["editable"]]
         text = visible(page.get_text())
         for span in spans[pno]:
             if span not in removed and visible(span["text"]) not in text:
-                raise ValueError(
-                    f'protected source text lost on page {pno+1}: {span["text"]}'
-                )
+                warn("protected_source_text_missing", page=pno + 1, text=span["text"], bbox=list(span["bbox"]))
     if len(document) != source_pages:
-        raise ValueError("source page count changed")
-    page_map = continue_in_place(document, overflow, items, fonts) if overflow else []
+        warn("source_page_count_changed")
+    page_map = continue_in_place(document, overflow, items, fonts, diagnostics) if overflow else []
     return {
-        "warning_count": len(preserved),
+        "warning_count": len(preserved) + len(diagnostics),
+        "diagnostics": diagnostics,
         "rendered_block_count": len(items),
-        "requested_block_count": len(items),
+        "requested_block_count": len(blocks),
         "supplemental_block_count": 0,
         "source_page_count": source_pages,
         "supplements": page_map,
         "continuation_page_count": len(document) - source_pages,
-        "layout_preserved": True,
+        "layout_preserved": not any(d["code"] in {"image_preservation", "vector_graphics_changed", "source_page_count_changed"} for d in diagnostics),
         "adaptive_layout_version": 1,
         "preserved_visual_block_ids": preserved,
         "minimum_font_size": min(

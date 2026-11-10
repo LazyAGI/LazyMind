@@ -120,7 +120,7 @@ def layout_text(text, rect, size, spacing, fonts, obstacles, align="left"):
             if ch == "\n":
                 font = fonts[0]
             if font is None:
-                raise ValueError(f"unsupported translated character U+{ord(ch):04X}")
+                font = fonts[0]  # Keep rendering; the caller records missing glyphs.
             chars.append(
                 (ch, font, font.text_length(ch, fontsize=size) if ch != "\n" else 0)
             )

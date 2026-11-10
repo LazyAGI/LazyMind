@@ -14,7 +14,7 @@ def lines(text, width, size, fonts):
             continue
         font = next((f for f in fonts if f.has_glyph(ord(ch))), None)
         if font is None:
-            raise ValueError(f"unsupported translated character U+{ord(ch):04X}")
+            font = fonts[0]  # Missing glyphs remain visible as font .notdef; diagnosed by caller.
         cache[ch] = (font, font.text_length(ch, fontsize=size))
     row = []
     x = 0
@@ -34,12 +34,13 @@ def lines(text, width, size, fonts):
         yield row
 
 
-def continue_in_place(document, overflow, items, fonts):
+def continue_in_place(document, overflow, items, fonts, diagnostics=None):
     """Split source pages into intact horizontal bands around overflowing prose.
 
     Source bands retain vector graphics and images at their original scale.
     Later content follows the paragraph, even when it requires several pages.
     """
+    diagnostics = diagnostics if diagnostics is not None else []
     source = fitz.open(stream=document.tobytes(), filetype="pdf")
     output = fitz.open()
     page_map = {item["id"]: set() for item in items}
@@ -223,7 +224,7 @@ def continue_in_place(document, overflow, items, fonts):
                 output[p - 1].get_text() for p in sorted(page_map[item["id"]])
             )
             if compact(item["text"]) not in compact(rendered):
-                raise ValueError(f"continuation text verification failed: {item['id']}")
+                diagnostics.append({"code": "continuation_text_mismatch", "block_id": item["id"], "pages": sorted(page_map[item["id"]])})
         # Source pages are only replaced once every band and paragraph exists.
         old_count = len(document)
         document.insert_pdf(output)
