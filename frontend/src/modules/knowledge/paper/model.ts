@@ -232,6 +232,13 @@ export function filterPapers(items: PaperRecord[], keyword = '') {
     const needle = keyword.trim().toLowerCase();
     return needle ? items.filter(paper => [paper.metadata.title, ...paper.metadata.authors, paper.metadata.venue, paper.metadata.identifiers.doi, paper.metadata.identifiers.arxiv, ...paper.tags].join(' ').toLowerCase().includes(needle)) : items;
 }
+export function isUserPaperTag(tag: string): boolean {
+    return !!tag.trim() && tag !== 'paper' && !tag.startsWith('arxiv:');
+}
+export function getPaperTags(tags: string[]): string[] {
+    return [...new Set(tags.filter(isUserPaperTag))];
+}
+export const paperTagOrder = new Intl.Collator('zh-CN', { numeric: true });
 export function venueName(item: PaperRecord) {
     const venue = (item.metadata.venue || "未标注").trim();
     return venue.replace(new RegExp(`[,\\s]*${item.metadata.year}$`), "").trim() || venue;

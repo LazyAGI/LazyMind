@@ -1589,8 +1589,8 @@ describe("AgentIntegrationPage", () => {
       connection: { ...installed.connection, control_ready: false }, issue: issue ? { code: issue } : undefined } } });
     fireEvent.click(within(dialog).getByRole("button", { name: zhCN.agentIntegration.codexInstallGuide.check }));
     expect(await within(dialog).findByText(zhCN.agentIntegration.codexInstallGuide.notReadyTitle)).toBeInTheDocument();
-    expect(within(dialog).getByText(issue === "capability_unavailable"
-      ? zhCN.agentIntegration.connectionErrors.capability_unavailable
+    expect(within(dialog).getByText(issue
+      ? zhCN.agentIntegration.connectionErrors[issue as "capability_unavailable" | "cdp_unavailable"]
       : zhCN.agentIntegration.codexInstallGuide.controlUnavailableDescription)).toBeInTheDocument();
     expect(within(dialog).queryByText(zhCN.agentIntegration.codexInstallGuide.successTitle)).not.toBeInTheDocument();
     expect(within(dialog).queryByRole("button", { name: zhCN.agentIntegration.codexInstallGuide.done })).not.toBeInTheDocument();

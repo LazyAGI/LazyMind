@@ -51,6 +51,9 @@ func reconcileDeferredIndexingWithReady(ctx context.Context, isReady func(contex
 		return
 	}
 	db := store.DB().WithContext(ctx)
+	if _, err := parsingEmbeddingGeneration(ctx, db); err != nil {
+		return
+	}
 	var states []orm.DocumentProcessingState
 	if db.Where("(parse_artifact_ref <> '' OR embedding_version = ?) AND embedding_version <> ? AND index_status <> ?",
 		embeddingVersionReembedPending, embeddingVersionReembedManual, "succeeded").
@@ -76,7 +79,7 @@ func reconcileDeferredIndexingWithReady(ctx context.Context, isReady func(contex
 		r.Header.Set("X-User-Id", dataset.CreateUserID)
 		syncProcessingTaskStates(r, dataset.ID)
 		db.Where("dataset_id = ? AND document_id = ?", dataset.ID, document.ID).Take(&state)
-		if state.IndexStatus == "succeeded" || state.IndexStatus == "running" {
+		if state.EmbeddingVersion == embeddingVersionReembedManual || state.IndexStatus == "succeeded" || state.IndexStatus == "running" {
 			continue
 		}
 		// Failed/abandoned submissions back off; successful remote submissions are

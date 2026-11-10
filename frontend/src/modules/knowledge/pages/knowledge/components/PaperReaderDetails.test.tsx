@@ -2,11 +2,11 @@ import {act,fireEvent,render,screen,waitFor,cleanup,within} from '@testing-libra
 import {afterEach,beforeEach,expect,it,vi} from 'vitest';
 import PaperReaderDetails from './PaperReaderDetails';
 vi.mock('react-i18next',()=>({useTranslation:()=>({i18n:{language:'en-US'}})}));
-const api=vi.hoisted(()=>({get:vi.fn(),add:vi.fn()}));
+const api=vi.hoisted(()=>({get:vi.fn(),add:vi.fn(),remove:vi.fn()}));
 vi.mock('@/components/request',()=>({BASE_URL:'',axiosInstance:{get:api.get}}));
-vi.mock('@/modules/knowledge/paper/store',async()=>{const original=await vi.importActual<any>('@/modules/knowledge/paper/store');return {...original,addLibraryNote:api.add};});
+vi.mock('@/modules/knowledge/paper/store',async()=>{const original=await vi.importActual<any>('@/modules/knowledge/paper/store');return {...original,addLibraryNote:api.add,deleteLibraryNote:api.remove};});
 const library=()=>({can_write:true,paper_count:1,pdf_attachment_count:1,active:true,data:{folders:[],papers:[{id:'paper',revision:1,metadata:{title:'Real {paper} & result',authors:['Ada Example'],year:2025,venue:'Test journal',abstract:'A real abstract.',identifiers:{doi:'10.1234/example'}},tags:[],attachmentIds:['a'],noteIds:['n']}],attachments:[{id:'a',paperId:'paper',contentRef:'doc'}],notes:[{id:'n',paperId:'paper',title:'Earlier note',content:'Read the evaluation.',createdAt:'2026-01-01'}]}});
-beforeEach(()=>{api.get.mockReset().mockResolvedValue({data:library()});api.add.mockReset();Object.defineProperty(navigator,'clipboard',{configurable:true,value:{writeText:vi.fn().mockResolvedValue(undefined)}});});
+beforeEach(()=>{api.get.mockReset().mockResolvedValue({data:library()});api.add.mockReset();api.remove.mockReset();vi.spyOn(window,'confirm').mockReturnValue(true);Object.defineProperty(navigator,'clipboard',{configurable:true,value:{writeText:vi.fn().mockResolvedValue(undefined)}});});
 afterEach(cleanup);
 const props={datasetId:'dataset',documentId:'doc',canWrite:true,fileName:'source.pdf'};
 it('reads server metadata without migration and copies escaped BibTeX',async()=>{
@@ -63,19 +63,45 @@ it('retains a captured note draft when retrying metadata after a network failure
  await screen.findByText('Read the evaluation.');expect(screen.getByRole('textbox',{name:'New note'})).toHaveValue('> Source quote\n\nDo not lose this note');
 });
 
-it('keeps document vocabulary accessible without a linked paper and retains it between info and notes',async()=>{
- const value=library();value.data.attachments=[];api.get.mockResolvedValue({data:value});
- const view=render(<PaperReaderDetails {...props} documentVocabulary={<input aria-label="Vocabulary filter" defaultValue="saved word"/>}/>);
- await screen.findByText(/not linked to a paper/);
- const section=screen.getByText('Vocabulary').closest('details')!;
- fireEvent.click(screen.getByText('Vocabulary'));section.open=true;
+it('switches accessible notes and vocabulary tabs without losing either draft',async()=>{
+ const view=render(<PaperReaderDetails {...props} initialTab="notes" documentVocabulary={<input aria-label="Vocabulary filter" defaultValue="saved word"/>}/>);
+ await screen.findByText('Read the evaluation.');
+ fireEvent.click(screen.getByText('Write a note'));
+ const draft=screen.getByRole('textbox',{name:'New note'});
+ fireEvent.change(draft,{target:{value:'Unfinished insight'}});
+ const notesTab=screen.getByRole('tab',{name:'Notes'});
+ const vocabularyTab=screen.getByRole('tab',{name:'Vocabulary'});
+ expect(notesTab).toHaveAttribute('aria-selected','true');
+ fireEvent.click(vocabularyTab);
+ expect(screen.getByRole('tabpanel',{name:'Vocabulary'})).toBeVisible();
+ expect(draft).not.toBeVisible();
  const filter=screen.getByRole('textbox',{name:'Vocabulary filter'});
- view.rerender(<PaperReaderDetails {...props} initialTab="notes" documentVocabulary={<input aria-label="Vocabulary filter" defaultValue="saved word"/>}/>);
- expect(filter).not.toBeVisible();
- view.rerender(<PaperReaderDetails {...props} documentVocabulary={<input aria-label="Vocabulary filter" defaultValue="saved word"/>}/>);
- expect(filter).toBeVisible();expect(filter).toHaveValue('saved word');
- view.rerender(<PaperReaderDetails {...props}/>);
- expect(screen.queryByText('Vocabulary')).not.toBeInTheDocument();
+ fireEvent.change(filter,{target:{value:'attention'}});
+ fireEvent.keyDown(vocabularyTab,{key:'ArrowLeft'});
+ expect(notesTab).toHaveFocus();
+ expect(screen.getByRole('tabpanel',{name:'Notes'})).toBeVisible();
+ expect(draft).toHaveValue('Unfinished insight');
+ expect(draft).toBeVisible();
+ fireEvent.click(vocabularyTab);
+ expect(filter).toHaveValue('attention');
+ view.rerender(<PaperReaderDetails {...props} initialTab="notes" documentVocabulary={<input aria-label="Vocabulary filter"/>} selectedNoteId="n"/>);
+ expect(notesTab).toHaveAttribute('aria-selected','true');
+ expect(screen.getByText('Read the evaluation.').closest('li')).toHaveFocus();
+});
+it.each(['unlinked','unavailable'])('shows vocabulary when paper metadata is %s',async(mode)=>{
+ const value=library();value.data.attachments=[];
+ if(mode==='unavailable')api.get.mockRejectedValue(new Error('Metadata unavailable'));else api.get.mockResolvedValue({data:value});
+ render(<PaperReaderDetails {...props} initialTab="notes" documentVocabulary={<input aria-label="Vocabulary filter"/>}/>);
+ await screen.findByText(mode==='unavailable'?'Metadata unavailable':/not linked to a paper/);
+ fireEvent.click(screen.getByRole('tab',{name:'Vocabulary'}));
+ expect(screen.getByRole('textbox',{name:'Vocabulary filter'})).toBeVisible();
+ expect(screen.queryByRole('alert')).toBeNull();
+});
+it('keeps Notes only when vocabulary is disabled',async()=>{
+ render(<PaperReaderDetails {...props} initialTab="notes"/>);
+ await screen.findByText('Read the evaluation.');
+ expect(screen.queryByRole('tab',{name:'Vocabulary'})).toBeNull();
+ expect(screen.getByRole('heading',{name:'Notes'})).toBeVisible();
 });
 it('labels damaged imported notes and keeps their original text available',async()=>{
  const data=library();data.data.notes[0].title='???????? PDF';data.data.notes[0].content='???????????????? PDF ?????????????';api.get.mockResolvedValue({data});
@@ -122,15 +148,31 @@ it('shows saved selection notes newest first, with their color and precise PDF j
  const source={attachmentId:'a',page:3,rects:[[0.12,0.23,0.64,0.26]],bbox:[24,48,128,56],quote:'Original PDF sentence',color:'blue'};
  data.data.notes=[data.data.notes[0],{id:'recent',paperId:'paper',title:'新笔记',content:'This design is the key insight.',kind:'note',createdAt:'2026-01-02T00:00:00Z',updatedAt:'2026-01-02T00:00:00Z',source}];
  data.data.papers[0].noteIds=['n','recent'];api.get.mockResolvedValue({data});
- const onNavigateNote=vi.fn();render(<PaperReaderDetails {...props} initialTab="notes" onNavigateNote={onNavigateNote}/>);
+ const onNavigateNote=vi.fn();render(<PaperReaderDetails {...props} initialTab="notes" onNavigateNote={onNavigateNote} documentVocabulary={<p>Vocabulary entries</p>}/>);
  const list=await screen.findByRole('list',{name:'Saved notes'});
  const entries=within(list).getAllByRole('listitem');
  expect(within(entries[0]).getByText('This design is the key insight.')).toBeInTheDocument();
  expect(within(entries[0]).getByText('Page 3')).toBeInTheDocument();
  expect(within(entries[0]).getByLabelText('Blue')).toBeInTheDocument();
  expect(screen.queryByText('Original PDF sentence')).not.toBeInTheDocument();
+ fireEvent.click(screen.getByRole('tab',{name:'Vocabulary'}));
+ fireEvent.click(screen.getByRole('tab',{name:'Notes'}));
  fireEvent.click(within(entries[0]).getByRole('button',{name:/This design is the key insight/}));
  expect(onNavigateNote).toHaveBeenCalledWith(source);
+});
+it('focuses a clicked highlight note and removes it from the saved list',async()=>{
+ const data=library() as any;
+ data.data.notes[0].source={attachmentId:'a',page:2,color:'yellow',rects:[[.1,.2,.3,.24]]};
+ const after=library() as any;after.data.notes=[];after.data.papers[0].noteIds=[];
+ api.get.mockResolvedValue({data});api.remove.mockResolvedValue({data:after.data});
+ render(<PaperReaderDetails {...props} initialTab="notes" selectedNoteId="n" documentVocabulary={<p>Vocabulary entries</p>}/>);
+ const entry=(await screen.findByText('Read the evaluation.')).closest('li')!;
+ expect(entry).toHaveClass('is-selected');
+ fireEvent.click(screen.getByRole('tab',{name:'Vocabulary'}));
+ fireEvent.click(screen.getByRole('tab',{name:'Notes'}));
+ fireEvent.click(within(entry).getByRole('button',{name:'Delete note'}));
+ await waitFor(()=>expect(api.remove).toHaveBeenCalledWith('dataset','paper','n'));
+ await waitFor(()=>expect(screen.queryByText('Read the evaluation.')).not.toBeInTheDocument());
 });
 it('refreshes the saved note list after an external popup save without replacing the panel',async()=>{
  const first=library() as any;const second=library() as any;
@@ -151,7 +193,7 @@ it('does not jump to the wrong PDF when a note belongs to another attachment of 
  render(<PaperReaderDetails {...props} initialTab="notes" onNavigateNote={onNavigateNote} onNavigatePage={onNavigatePage}/>);
  const entry=(await screen.findByText('Thought about the supplement')).closest('li')!;
  expect(within(entry).getByText('Another attachment')).toBeInTheDocument();
- expect(within(entry).queryByRole('button')).toBeNull();
+ expect(within(entry).queryByRole('button',{name:/Thought about the supplement/})).toBeNull();
  expect(onNavigateNote).not.toHaveBeenCalled();expect(onNavigatePage).not.toHaveBeenCalled();
 });
 it('keeps imported PDF annotations compact, color coded and clickable as a whole entry',async()=>{
@@ -181,7 +223,7 @@ it('shows a saved color even when the note has no usable page and avoids a broke
  const onNavigateNote=vi.fn();render(<PaperReaderDetails {...props} initialTab="notes" onNavigateNote={onNavigateNote}/>);
  const entry=(await screen.findByText('Read the evaluation.')).closest('li')!;
  expect(within(entry).getByLabelText('Purple')).toBeInTheDocument();
- expect(within(entry).queryByRole('button')).toBeNull();
+ expect(within(entry).queryByRole('button',{name:/Read the evaluation/})).toBeNull();
  const imported=(await screen.findByText('Imported mark without page')).closest('li')!;
  expect(within(imported).getByLabelText('Red')).toBeInTheDocument();
  expect(within(imported).queryByRole('button')).toBeNull();

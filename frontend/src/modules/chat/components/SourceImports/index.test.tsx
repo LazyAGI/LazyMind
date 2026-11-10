@@ -1,6 +1,7 @@
 import { fireEvent, render, screen, waitFor, cleanup, within, act } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter } from "react-router-dom";
+import MarkdownViewer from "../MarkdownViewer";
 import { SourceImportProvider, uniquePapers } from "./index";
 import { ChatSourcePanel, ReferenceSourcesButton } from "./ReferenceSources";
 import * as api from "./api";
@@ -21,6 +22,109 @@ beforeEach(() => {
 });
 afterEach(cleanup);
 describe("source imports", () => {
+  it("opens the currently selected citation and offers single import from a grouped inline card", async () => {
+    const open = vi.spyOn(window, "open").mockImplementation(() => null);
+    try {
+      const { container } = view(<MarkdownViewer sources={sources}>{"Compare [1](#source-a) and [2](#source-b)."}</MarkdownViewer>);
+      fireEvent.focus(container.querySelector(".md-source-chip")!);
+      fireEvent.click(await screen.findByRole("button", { name: "Next source" }));
+      fireEvent.click(screen.getByRole("button", { name: "打开原文" }));
+      expect(open).toHaveBeenCalledWith(sources[1].url, "_blank", "noopener,noreferrer");
+      expect(await screen.findByRole("button", { name: "加入知识库" })).toBeEnabled();
+    } finally {
+      open.mockRestore();
+    }
+  });
+  it("excludes a saved PDF from mixed selections in the chosen collection", async () => {
+    const rows = [inspected[0], { ...inspected[1], paper_key: "doi:10.1234/new" }];
+    vi.mocked(api.inspectSources).mockImplementation(async (_context, target) =>
+      target?.datasetID === "kb" ? [{ ...rows[0], target_presence: "already_present" }, rows[1]] : rows);
+    vi.mocked(api.submitSourceImport).mockResolvedValue({ batch_id: "batch", target_dataset_id: "kb" });
+    view(<ChatSourcePanel sources={sources.slice(0, 2)} onClose={() => {}} embedded />);
+    fireEvent.click(await screen.findByRole("button", { name: "加入知识库" }));
+    const dialog = within(await screen.findByRole("dialog", { name: "加入知识库" }));
+    fireEvent.mouseDown(dialog.getByRole("combobox", { name: "选择论文集" }));
+    fireEvent.click(await screen.findByText("My papers"));
+    await dialog.findByText("已在此论文集");
+    expect(dialog.getByRole("checkbox", { name: "Paper abstract" })).toBeDisabled();
+    expect(dialog.getByRole("checkbox", { name: "Paper abstract" })).not.toBeChecked();
+    expect(dialog.getByRole("checkbox", { name: "Paper PDF" })).toBeChecked();
+    fireEvent.click(dialog.getByRole("button", { name: "加入 1 篇" }));
+    await waitFor(() => expect(api.submitSourceImport).toHaveBeenCalledWith(expect.objectContaining({
+      target_dataset_id: "kb", source_ids: ["b"],
+    })));
+  });
+  it.each(["recheck", "submit"] as const)("lets the reader recover when the selected collection disappears during %s", async path => {
+    const rows = [inspected[0], { ...inspected[1], paper_key: "doi:10.1234/new" }];
+    const notFound = { isAxiosError: true, response: { status: 404, data: { code: "TARGET_NOT_FOUND" } } };
+    let deleted = false;
+    vi.mocked(api.sourceTargets).mockResolvedValue([
+      { dataset_id: "kb", display_name: "My papers" },
+      { dataset_id: "other", display_name: "Other papers" },
+    ]);
+    vi.mocked(api.inspectSources).mockImplementation(async (_context, target) => {
+      if (path === "recheck" && deleted && target?.datasetID === "kb") throw notFound;
+      return rows;
+    });
+    vi.mocked(api.submitSourceImport).mockImplementation(async request => {
+      if (path === "submit" && request.target_dataset_id === "kb") throw notFound;
+      return { batch_id: "batch", target_dataset_id: "other" };
+    });
+    view(<ChatSourcePanel sources={sources.slice(0, 2)} onClose={() => {}} embedded />);
+    fireEvent.click(await screen.findByRole("button", { name: "加入知识库" }));
+    const dialog = within(await screen.findByRole("dialog", { name: "加入知识库" }));
+    const target = dialog.getByRole("combobox", { name: "选择论文集" });
+    fireEvent.click(dialog.getByRole("checkbox", { name: "Paper abstract" }));
+    fireEvent.mouseDown(target);
+    fireEvent.click(await screen.findByText("My papers"));
+    const add = dialog.getByRole("button", { name: "加入 1 篇" });
+    await waitFor(() => expect(add).toBeEnabled());
+
+    deleted = true;
+    if (path === "recheck") fireEvent(document, new Event("visibilitychange"));
+    else fireEvent.click(add);
+    await dialog.findByText("「My papers」不存在，请重新选择或新建知识库。");
+    expect(target).toHaveAttribute("aria-invalid", "true");
+    expect(add).toBeDisabled();
+    expect(dialog.getByRole("checkbox", { name: "Paper abstract" })).not.toBeChecked();
+    expect(dialog.getByRole("checkbox", { name: "Paper PDF" })).toBeChecked();
+
+    fireEvent.mouseDown(target);
+    expect(screen.queryByText("My papers", { exact: true })).not.toBeInTheDocument();
+    fireEvent.click(await screen.findByText("Other papers"));
+    await waitFor(() => {
+      expect(add).toBeEnabled();
+      expect(target).not.toHaveAttribute("aria-invalid", "true");
+    });
+    fireEvent.click(add);
+    await waitFor(() => expect(api.submitSourceImport).toHaveBeenLastCalledWith(expect.objectContaining({
+      target_dataset_id: "other", source_ids: ["b"],
+    })));
+  });
+  it("keeps the chosen collection and can retry a temporary recheck failure", async () => {
+    let unavailable = false;
+    vi.mocked(api.inspectSources).mockImplementation(async (_context, target) => {
+      if (target && unavailable) throw new Error("Network Error");
+      return inspected;
+    });
+    view(<ChatSourcePanel sources={sources} onClose={() => {}} embedded />);
+    fireEvent.click(await screen.findByRole("button", { name: "加入知识库" }));
+    const dialog = within(await screen.findByRole("dialog", { name: "加入知识库" }));
+    fireEvent.mouseDown(dialog.getByRole("combobox", { name: "选择论文集" }));
+    fireEvent.click(await screen.findByText("My papers"));
+    const add = dialog.getByRole("button", { name: "加入 1 篇" });
+    await waitFor(() => expect(add).toBeEnabled());
+
+    unavailable = true;
+    fireEvent(window, new Event("focus"));
+    await dialog.findByText("暂时无法检查所选论文集。");
+    expect(dialog.getByText("My papers", { exact: true })).toBeInTheDocument();
+    expect(add).toBeDisabled();
+    unavailable = false;
+    fireEvent.click(dialog.getByRole("button", { name: "重试查询" }));
+    await waitFor(() => expect(add).toBeEnabled());
+    expect(dialog.getByText("My papers", { exact: true })).toBeInTheDocument();
+  });
   it("groups a confirmed paper and lets the reader open each source version", async () => {
     view(<ChatSourcePanel sources={sources} onClose={() => {}} embedded />);
     const versions = await screen.findByRole("button", { name: /2 个来源/ });

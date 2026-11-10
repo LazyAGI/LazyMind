@@ -1,3 +1,5 @@
+import type { PdfScrollSyncEndpoint } from "./pdfScrollSync";
+import { createPdfViewportScheduler } from "./pdfViewportScheduler";
 import ReadingPreparationAction from "@/modules/knowledge/paper/ReadingPreparationAction";
 import {PdfPageControl} from "./PdfPageControl";
 import {PdfZoomControl} from "./PdfZoomControl";
@@ -11,7 +13,6 @@ import {usePdfReaderPreferences} from "./usePdfReaderPreferences";
 import {AgentAppsAuth} from "@/components/auth";
 import {authServiceApiUrl} from "@/runtime/apiBase";
 import {usePaperReaderSession,type VisualExplanation} from "@/modules/knowledge/api/paperReader";
-import {PdfPaperOverview} from "./PdfPaperOverview";
 import {PdfVisualStudy} from "./PdfVisualStudy";
 import {PdfFigureLayer} from "./PdfFigureLayer";
 import {usePaperReaderLabels,paperVisualLabel} from "./paperReaderLabels";
@@ -27,7 +28,7 @@ import { createPdfCitationPreviewCache } from "./pdfCitationPreview";
 import { addCitationToPaperLibrary } from "@/modules/knowledge/api/academicReferences";
 import { getImportErrorMessage } from "@/modules/knowledge/utils/importError";
 import {PdfSelectionComposer, type PdfComposerAction} from "./PdfSelectionComposer";
-import {pdfNoteHighlightBackground,pdfNoteHighlightPaths,readPdfNoteHighlights,writePdfNoteHighlights,type PdfNoteColor,type PdfNoteHighlight} from "./pdfNoteHighlights";
+import {pdfNoteHighlightBackground,pdfNoteHighlightHitAreas,pdfNoteHighlightPaths,readPdfNoteHighlights,writePdfNoteHighlights,type PdfNoteColor,type PdfNoteHighlight} from "./pdfNoteHighlights";
 import {ControlOutlined, MinusOutlined, PlusOutlined, LeftOutlined, RightOutlined} from "@ant-design/icons";
 import "react-pdf/dist/Page/AnnotationLayer.css";
 import "react-pdf/dist/Page/TextLayer.css";
@@ -56,10 +57,12 @@ type LoadedPdfDocument = Parameters<NonNullable<React.ComponentProps<typeof Docu
 pdfjs.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
 
 interface RenderPdfProps {
+  pdfScrollSync?: PdfScrollSyncEndpoint;
   paperMode?: boolean;
+  pdfToolbarMode?: "full" | "navigation";
+  pdfSelectableText?: boolean;
   pdfHeaderStart?: React.ReactNode;
   pdfHeaderEnd?: React.ReactNode | ((tools: React.ReactNode) => React.ReactNode);
-  paperTitle?: string;
   onStudyOpenChange?: (open: boolean) => void;
   onPdfIRDocumentChange?: (document: PdfIRDocument | undefined) => void;
   onPdfOutlineChange?: (outline: PdfNativeOutlineItem[]) => void;
@@ -67,6 +70,7 @@ interface RenderPdfProps {
   pdfNavigateToPage?: {page:number;requestId:number};
   pdfNavigateToPosition?: {page:number;progress:number;requestId:number};
   savedNoteHighlights?: PdfNoteHighlight[];
+  onNoteHighlightClick?: (id:string) => void;
   pdfIRTarget?: PdfIRTarget;
   pdfSourceHash?: string;
   onPreviewError?: () => void;
@@ -90,8 +94,6 @@ interface RenderPdfProps {
   translateSelectionLabel?: string;
   translateSelectionDisabled?: boolean;
   translateSelectionDisabledTip?: string;
-  translateSelectionConfigureLabel?: string;
-  translateSelectionConfigureUrl?: string;
   learningSelectionActions?: LearningSelectionAction[];
   onLearningSelection?: (key:string, selection:PdfTextSelection)=>void;
   onPdfKindDetected?: (kind: "image_only" | "native_text" | "mixed") => void;
@@ -147,6 +149,9 @@ function hasUsablePdfText(value: string): boolean {
 export default function RenderPdf({
   onPreviewError,
   paperMode = false,
+  pdfToolbarMode = "full",
+  pdfSelectableText = false,
+  pdfScrollSync,
   pdfHeaderStart,
   pdfHeaderEnd,
   onStudyOpenChange,
@@ -156,9 +161,9 @@ export default function RenderPdf({
   pdfNavigateToPage,
   pdfNavigateToPosition,
   savedNoteHighlights = [],
+  onNoteHighlightClick,
   pdfIRTarget,
   pdfSourceHash,
-  paperTitle,
   fileData,
   metadata,
   defaultPageWidth,
@@ -169,14 +174,10 @@ export default function RenderPdf({
   onAskSelection,
   onNoteSelection,
   onTranslateSelection,
-  onRetranslateSelection,
-  retranslateSelectionLabel = "重译此段",
   onAddVocabularySelection,
   addVocabularySelectionLabel = "加入生词",
   translateSelectionDisabled = false,
   translateSelectionDisabledTip,
-  translateSelectionConfigureLabel = "去配置",
-  translateSelectionConfigureUrl,
   learningSelectionActions = [],
   onLearningSelection,
   onPdfKindDetected,
@@ -205,11 +206,9 @@ export default function RenderPdf({
   const [noteHighlightState,setNoteHighlightState] = useState<{key?:string;session:string;highlights:PdfNoteHighlight[]}>({session:readerSession,highlights:[]});
   const noteHighlights = noteHighlightState.key === noteHighlightKey && noteHighlightState.session === readerSession ? noteHighlightState.highlights : [];
   useEffect(()=>setNoteHighlightState({key:noteHighlightKey,session:readerSession,highlights:readPdfNoteHighlights(noteHighlightKey)}),[noteHighlightKey,readerSession,fileData]);
-  const [readerMode,setReaderMode] = useState<"overview" | "original">("original");
   const [noteReturn,setNoteReturn]=useState<PdfViewPosition>();
   const [pinCaptureActive,setPinCaptureActive] = useState(false);
   const pinStageRef=useRef<HTMLDivElement>(null);
-  useEffect(()=>setReaderMode("original"),[fileData]);
   useEffect(()=>setNoteReturn(undefined),[fileData]);
   useEffect(()=>setPinCaptureActive(false),[fileData]);
   // PDF.js may transfer its input buffer to a worker. Retain original bytes for download.
@@ -419,18 +418,25 @@ export default function RenderPdf({
       setContainerWidth(clientWidth);
     };
     updateViewport();
+    const viewportUpdates = createPdfViewportScheduler(updateViewport);
     const resizeObserver = typeof ResizeObserver === "undefined"
       ? undefined
-      : new ResizeObserver(updateViewport);
+      : new ResizeObserver(viewportUpdates.schedule);
     if (containerRef.current) resizeObserver?.observe(containerRef.current);
-    window.addEventListener("resize", updateViewport);
+    window.addEventListener("resize", viewportUpdates.schedule);
     return () => {
       resizeObserver?.disconnect();
-      window.removeEventListener("resize", updateViewport);
+      window.removeEventListener("resize", viewportUpdates.schedule);
+      viewportUpdates.cancel();
     };
   }, []);
 
+  useEffect(() => {
+    if (pdfLoaded && containerRef.current) return pdfScrollSync?.connect(containerRef.current);
+  }, [pdfScrollSync, pdfLoaded]);
+
   const onScroll = () => {
+    pdfScrollSync?.onScroll();
     if (!containerRef.current) {
       return;
     }
@@ -450,7 +456,7 @@ export default function RenderPdf({
       };
       pendingPosition.current=position;
       clearTimeout(positionIdleTimer.current);
-      const publish=()=>{const latest=pendingPosition.current;if(!latest)return;pendingPosition.current=undefined;appliedPositionRef.current=`${latest.page-1}:${latest.progress.toFixed(4)}`;reportPosition.current?.(latest);};
+      const publish=()=>{const latest=pendingPosition.current;if(!latest)return;pendingPosition.current=undefined;reportPosition.current?.(latest);};
       if(position.page!==reportedPage.current){reportedPage.current=position.page;publish();}
       else positionIdleTimer.current=setTimeout(publish,250);
     }
@@ -462,7 +468,7 @@ export default function RenderPdf({
     // during text selection. The explicit selection toolbar always wins.
     window.clearTimeout(referenceHoverTimer.current);
     window.clearTimeout(referenceHoverCloseTimer.current);
-    if ((!onAskSelection && !onNoteSelection && !onTranslateSelection && !onRetranslateSelection && !onImportReferenceSelection && !onAddVocabularySelection && !onLearningSelection) || !containerRef.current) {
+    if ((!onAskSelection && !onNoteSelection && !onTranslateSelection && !onImportReferenceSelection && !onAddVocabularySelection && !onLearningSelection) || !containerRef.current) {
       return;
     }
     const selection = window.getSelection();
@@ -663,7 +669,6 @@ export default function RenderPdf({
     const key = `${pdfNavigateToPage.requestId}:${pdfNavigateToPage.page}`;
     if (lastPageNavigation.current === key) return;
     lastPageNavigation.current = key;
-    setReaderMode("original");
     jumpPage(pdfNavigateToPage.page);
   }, [pdfNavigateToPage?.page,pdfNavigateToPage?.requestId,pdfLoaded,pageTops,numPages,fileData]);
   const lastNoteNavigation=useRef('');
@@ -679,7 +684,7 @@ export default function RenderPdf({
     setNoteReturn({page:originPage+1,progress:Math.max(0,Math.min(1,(scrollTop-(pageTops[originPage]||0))/(pageHeightsPx[originPage]||1)))});
     const page=request.page,progress=Math.max(0,Math.min(.999,request.progress));
     const top=(pageTops[page-1]||0)+(pageHeightsPx[page-1]||0)*progress;
-    setReaderMode('original');containerRef.current?.scrollTo({top,behavior:'auto'});setScrollTop(top);setSelectionAction(null);
+    containerRef.current?.scrollTo({top,behavior:'auto'});setScrollTop(top);setSelectionAction(null);
     onViewPositionChange?.({page,progress});
   },[pdfNavigateToPosition,pdfLoaded,fileData,numPages,pageTops,pageHeightsPx,scrollTop,onViewPositionChange]);
   const changeZoom = (value: number) => {
@@ -704,7 +709,6 @@ export default function RenderPdf({
     const top=(pageTops[page-1]||0)+(pageHeightsPx[page-1]||0)*progress;
     containerRef.current?.scrollTo({top,behavior:"auto"});
     setScrollTop(top);
-    setReaderMode("original");
     setSelectionAction(null);
     onViewPositionChange?.({page,progress});
     setResolvedDestination(undefined);
@@ -1108,7 +1112,6 @@ export default function RenderPdf({
 
   const navigateSourceBlock = (id:string) => {
     const block=formulaDocument?.blocks.find(item=>item.id===id);if(!block)return;
-    setReaderMode("original");
     navigateStudyEvidence({id:block.id,text:block.text || block.latex || "",page:block.page,bbox:block.bbox});
   };
   const openVisualStudy = (block:PdfIRBlock) => {
@@ -1143,7 +1146,6 @@ export default function RenderPdf({
     if(!pdfNavigateTo || !pdfLoaded || !formulaDocument)return;
     const request=`${pdfNavigateTo.requestId}:${pdfNavigateTo.id}`;
     if(lastRequestedNavigation.current===request || !formulaDocument.blocks.some(block=>block.id===pdfNavigateTo.id))return;
-    setReaderMode("original");
     lastRequestedNavigation.current=request;navigateSourceBlock(pdfNavigateTo.id);
   // Navigation events are keyed by request ID; source/readiness may arrive later.
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1173,6 +1175,18 @@ export default function RenderPdf({
             navigateStudyEvidence({id:block.id,page:block.page,text:block.latex || "",bbox:block.bbox});
           }
         }}
+        onClick={event => {
+          if (!onNoteHighlightClick || event.button !== 0 || event.detail > 1 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+          if ((event.target as Element).closest('a,button,input,textarea,select,[role="link"]') || window.getSelection()?.isCollapsed === false) return;
+          const pointer = studyPointer.current;
+          if (!pointer || Math.hypot(event.clientX - pointer.x, event.clientY - pointer.y) > 4) return;
+          const bounds = event.currentTarget.getBoundingClientRect();
+          if (!bounds.width || !bounds.height) return;
+          const x = (event.clientX - bounds.left) / bounds.width;
+          const y = (event.clientY - bounds.top) / bounds.height;
+          const hit = pdfNoteHighlightHitAreas(savedNoteHighlights,index+1).find(({rect}) => x >= rect[0] && x <= rect[2] && y >= rect[1] && y <= rect[3]);
+          if (hit) onNoteHighlightClick(hit.id);
+        }}
         ref={(el) => (pageRefs.current[index] = el)}
         style={{
           position: "absolute",
@@ -1192,7 +1206,7 @@ export default function RenderPdf({
           pageNumber={index + 1}
           width={RASTER_WIDTH}
           devicePixelRatio={Math.min(2, Math.max(1.5, window.devicePixelRatio || 1))}
-          renderTextLayer={Boolean(pdfIRTarget || onNoteSelection || onAskSelection || onTranslateSelection || onImportReferenceSelection || citationTargets.length)}
+          renderTextLayer={Boolean(pdfSelectableText || pdfIRTarget || onNoteSelection || onAskSelection || onTranslateSelection || onImportReferenceSelection || citationTargets.length)}
           renderAnnotationLayer
           filterAnnotations={restorePdfLinkAnnotationBorders}
           onRenderSuccess={() => {
@@ -1210,6 +1224,7 @@ export default function RenderPdf({
         />
         </div>
         {pdfNoteHighlightPaths([...noteHighlights,...savedNoteHighlights],index+1).map(({color,path})=><svg key={color} data-pdf-note-highlight={color} aria-hidden="true" viewBox="0 0 1 1" preserveAspectRatio="none" style={{position:'absolute',inset:0,width:'100%',height:'100%',mixBlendMode:'multiply',pointerEvents:'none',zIndex:5}}><path d={path} fill={pdfNoteHighlightBackground(color)} fillRule="nonzero"/></svg>)}
+        {onNoteHighlightClick&&savedNoteHighlights.filter(note=>note.page===index+1&&note.rects.length>0).map(note=><button key={note.id} type="button" className="pdf-note-highlight-marker" aria-label={readerLanguage==='zh'?'打开笔记':'Open note'} onClick={event=>{event.stopPropagation();onNoteHighlightClick(note.id);}} style={{top:`${note.rects[0][1]*100}%`}}>✎</button>)}
         {studyHighlight?.page === index && <div className="pdf-study-highlight" style={(() => {
           const box = studyHighlight.bbox;
           const valid = box && box.length === 4 && box.every(value=>Number.isFinite(value)&&value>=0&&value<=1) && box[0]<box[2] && box[1]<box[3];
@@ -1248,31 +1263,32 @@ export default function RenderPdf({
   );
 
   const readerHeader = (
-    <nav className={`pdf-reader-modebar pdf-reader-header${pdfIRTarget ? " has-overview" : ""}`} aria-label={paperMode ? readerLabel("reading") : t("paperShell.document",{defaultValue:"Document"})}>
+    <nav className={`pdf-reader-modebar pdf-reader-header${pdfToolbarMode === "navigation" ? " pdf-reader-header--compact" : ""}`} aria-label={paperMode ? readerLabel("reading") : t("paperShell.document",{defaultValue:"Document"})}>
       <div className="pdf-reader-header-start">{pdfHeaderStart}</div>
-      {pdfIRTarget && <div role="tablist" className="pdf-reader-view-toggle" aria-label={readerLabel("reading")}><button type="button" role="tab" aria-selected={readerMode==="overview"} onClick={()=>{setPinCaptureActive(false);handPan.disable();setReaderMode("overview");}}>{readerLabel("insight")}</button><button type="button" role="tab" aria-selected={readerMode==="original"} onClick={()=>setReaderMode("original")}>{readerLabel("reading")}</button></div>}
       <div className="pdf-reader-header-end">
-        {readerMode === "original" && pageControls}
-        {readerMode === "original" && <button type="button" className="pdf-reader-hand-trigger" aria-label={readerLabel("panPaper")} title={readerLabel("panPaper")} aria-pressed={handPan.active} disabled={!pdfLoaded} onClick={toggleHandPan}><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M8 13.5V7a1.5 1.5 0 0 1 3 0v4.5-7a1.5 1.5 0 0 1 3 0v7-5a1.5 1.5 0 0 1 3 0v5-3a1.5 1.5 0 0 1 3 0V16a6 6 0 0 1-6 6h-1.5a6 6 0 0 1-5-2.7l-3.3-4.8a1.6 1.6 0 0 1 2.6-1.8L8 13.5Z"/></svg></button>}
-        {readerMode === "original" && <button type="button" className="pdf-reader-pin-trigger" aria-label={readerLabel("captureRegion")} title={readerLabel("captureRegion")} aria-pressed={pinCaptureActive} disabled={!pdfLoaded||!pinBoardReady} onClick={()=>{handPan.disable();setPinCaptureActive(active=>!active);}}><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M6 3v12a3 3 0 0 0 3 3h12"/><path d="M18 21V9a3 3 0 0 0-3-3H3"/></svg></button>}
-        {readerMode === "original" && pdfIRTarget && <ReadingPreparationAction key={`${pdfIRTarget.dataset}/${pdfIRTarget.document}`} target={pdfIRTarget} onPrepared={pdfIR.refresh} />}
-        {readerMode === "original" && (typeof pdfHeaderEnd === "function" ? pdfHeaderEnd(pdfIRTarget ? readerTools : null) : <>
+        {pdfToolbarMode === "navigation" ? <>{typeof pdfHeaderEnd === "function" ? pdfHeaderEnd(null) : pdfHeaderEnd}{pageControls}</> : <>
+        {pageControls}
+        <button type="button" className="pdf-reader-hand-trigger" aria-label={readerLabel("panPaper")} title={readerLabel("panPaper")} aria-pressed={handPan.active} disabled={!pdfLoaded} onClick={toggleHandPan}><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M8 13.5V7a1.5 1.5 0 0 1 3 0v4.5-7a1.5 1.5 0 0 1 3 0v7-5a1.5 1.5 0 0 1 3 0v5-3a1.5 1.5 0 0 1 3 0V16a6 6 0 0 1-6 6h-1.5a6 6 0 0 1-5-2.7l-3.3-4.8a1.6 1.6 0 0 1 2.6-1.8L8 13.5Z"/></svg></button>
+        <button type="button" className="pdf-reader-pin-trigger" aria-label={readerLabel("captureRegion")} title={readerLabel("captureRegion")} aria-pressed={pinCaptureActive} disabled={!pdfLoaded||!pinBoardReady} onClick={()=>{handPan.disable();setPinCaptureActive(active=>!active);}}><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M6 3v12a3 3 0 0 0 3 3h12"/><path d="M18 21V9a3 3 0 0 0-3-3H3"/></svg></button>
+        {pdfIRTarget && <ReadingPreparationAction key={`${pdfIRTarget.dataset}/${pdfIRTarget.document}`} target={pdfIRTarget} onPrepared={pdfIR.refresh} />}
+        {typeof pdfHeaderEnd === "function" ? pdfHeaderEnd(pdfIRTarget ? readerTools : null) : <>
           <div ref={toolsRef} className="pdf-reader-tools-popover" onKeyDown={event=>{if(event.key==="Escape"){setToolsOpen(false);toolsRef.current?.querySelector<HTMLButtonElement>("button")?.focus();}}}>
             <button type="button" aria-label="阅读工具" title="阅读工具" aria-expanded={toolsOpen} onClick={()=>setToolsOpen(open=>!open)}><ControlOutlined/></button>
             {readerTools}
           </div>
           {pdfHeaderEnd}
-        </>)}
+        </>}
+        </>}
       </div>
     </nav>
   );
 
   if (error && errorSource.current === fileData) {
     return (
-      <div ref={readerFrame} className="pdf-reader-workspace" data-reader-mode={readerMode} style={{height:style?.height || "100%",width:"100%"}}>
+      <div ref={readerFrame} className="pdf-reader-workspace" data-reader-mode="original" style={{height:style?.height || "100%",width:"100%"}}>
         {studyPulse>0&&<PdfStudyActivation key={studyPulse} frame={readerFrame}/>}
     {readerHeader}
-        {readerMode === "overview" && pdfIRTarget ? <div className="pdf-reader-overview-scroll"><PdfPaperOverview onAddVocabularySelection={onAddVocabularySelection} document={formulaDocument} paperTitle={paperTitle} onOpenSource={()=>setReaderMode("original")}/></div> : <div role="alert" style={{padding:20,textAlign:"center",color:"#a6574c"}}>加载失败: {error}</div>}
+        <div role="alert" style={{padding:20,textAlign:"center",color:"#a6574c"}}>加载失败: {error}</div>
       </div>
     );
   }
@@ -1301,17 +1317,16 @@ export default function RenderPdf({
     handPan.toggle();
   }
   return (
-    <div ref={readerFrame} className="pdf-reader-workspace" data-reader-mode={readerMode} style={{height:style?.height || "calc(100vh - 220px)",width:"100%"}}>
+    <div ref={readerFrame} className="pdf-reader-workspace" data-reader-mode="original" style={{height:style?.height || "calc(100vh - 220px)",width:"100%"}}>
     {studyPulse>0&&<PdfStudyActivation key={studyPulse} frame={readerFrame}/>}
     {readerHeader}
     <div ref={pinStageRef} className="pdf-reader-stage">
-    {readerMode==='original'&&noteReturn&&<button type="button" className="pdf-reader-note-return" aria-label="返回阅读位置" onClick={()=>{
+    {noteReturn&&<button type="button" className="pdf-reader-note-return" aria-label="返回阅读位置" onClick={()=>{
       const page=Math.min(numPages,Math.max(1,noteReturn.page));
       const top=(pageTops[page-1]||0)+(pageHeightsPx[page-1]||0)*noteReturn.progress;
       containerRef.current?.scrollTo({top,behavior:'auto'});setScrollTop(top);onViewPositionChange?.(noteReturn);setNoteReturn(undefined);
     }}>← {t('pdfReader.returnPosition',{defaultValue:'返回阅读位置'})}</button>}
-    {pdfIRTarget && <div className="pdf-reader-overview-scroll" aria-hidden={readerMode!=="overview"} style={{visibility:readerMode==="overview"?"visible":"hidden",pointerEvents:readerMode==="overview"?"auto":"none"}}><PdfPaperOverview onAddVocabularySelection={onAddVocabularySelection} document={formulaDocument} paperTitle={paperTitle} onOpenSource={id=>{setReaderMode("original");if(id)requestAnimationFrame(()=>navigateSourceBlock(id));}}/></div>}
-    <div ref={studyReaderRef} data-study-layout={studyLayout} className="pdf-reader-with-study" aria-hidden={readerMode!=="original"} style={{height:"100%",width:"100%",display:"flex",visibility:readerMode==="original"?"visible":"hidden"}}>
+    <div ref={studyReaderRef} data-study-layout={studyLayout} className="pdf-reader-with-study" style={{height:"100%",width:"100%",display:"flex"}}>
     <div
       className={[className,handPan.active?'pdf-reader-hand-active':'',handPan.dragging?'is-dragging':''].filter(Boolean).join(' ')}
       ref={containerRef}
@@ -1374,10 +1389,8 @@ export default function RenderPdf({
             onTranslate={onTranslateSelection ? ()=>onTranslateSelection(selectionAction.selection) : undefined}
             translationDisabled={translationUnavailable}
             translationTitle={translationUnavailable ? translateSelectionDisabledTip : "翻译"}
-            translationHelp={translationUnavailable && translateSelectionConfigureUrl ? <a href={translateSelectionConfigureUrl}>{translateSelectionConfigureLabel}</a> : undefined}
             actions={(() => {
               const actions:PdfComposerAction[]=[];
-              if(onRetranslateSelection)actions.push({key:"retranslate",label:retranslateSelectionLabel,onClick:()=>onRetranslateSelection(selectionAction.selection)});
               if(onAddVocabularySelection && /[A-Za-z]/.test(selectionAction.selection.text))actions.push({key:"vocabulary",label:addVocabularySelectionLabel,onClick:()=>onAddVocabularySelection(selectionAction.selection)});
               for(const action of visibleLearningSelectionActions(learningSelectionActions,selectionAction.selection.text,Boolean(onTranslateSelection)))actions.push({key:action.key,label:action.label,disabled:action.disabled,title:action.disabledTip,onClick:()=>onLearningSelection?.(action.key,selectionAction.selection)});
               const reference=selectionAction.referenceAction;
@@ -1458,9 +1471,9 @@ export default function RenderPdf({
       {visualSelection&&pdfIRTarget&&<PdfVisualStudy key={`${studySourceKey}:${visualSelection.id}`} target={pdfIRTarget} document={formulaDocument} block={visualSelection} sourcePreview={visualPreview} autoExplain={!hasRestoredVisualSnapshot} initialExplanation={activeStoredStudyPin?.kind===visualSelection.type&&activeStoredStudyPin.blockId===visualSelection.id?activeStoredStudyPin.explanation as VisualExplanation:undefined} onExplanationChange={data=>rememberStudyExplanation(visualSelection.type==='table'?'table':'image',visualSelection.id,data)} onNavigate={id=>{navigateSourceBlock(id);if(!studyPinned)setVisualSelection(undefined);}} onInspectTable={openTableStudy} onClose={closeStudy} onReturn={returnFromStudy} canReturn={!!studyReturn}/>}
     </PdfStudyDialog>}
     </div>
-    {readerMode==="original" && <PdfPinnedRegion stageRef={pinStageRef} viewportRef={containerRef} pageRefs={pageRefs} sourceKey={fileData} active={pinCaptureActive} onActiveChange={setPinCaptureActive} language={readerLanguage === "zh" ? "zh" : "en"} pins={pinBoard.records.filter((item):item is PdfRegionPinRecord=>item.kind==='region')} onAddPin={pin=>!isPersistablePdfPin(pin)?(readerLanguage==='zh'?'截图过大，无法钉住并保存。':'The capture is too large to pin and save.'):pinBoard.add(pin)} onUpdatePin={record=>pinBoard.update(record.id,{geometry:record.geometry})} onRemovePin={pinBoard.remove} onMinimizePin={id=>{pinBoard.update(id,{minimized:true});}}/>}
+    <PdfPinnedRegion stageRef={pinStageRef} viewportRef={containerRef} pageRefs={pageRefs} sourceKey={fileData} active={pinCaptureActive} onActiveChange={setPinCaptureActive} language={readerLanguage === "zh" ? "zh" : "en"} pins={pinBoard.records.filter((item):item is PdfRegionPinRecord=>item.kind==='region')} onAddPin={pin=>!isPersistablePdfPin(pin)?(readerLanguage==='zh'?'截图过大，无法钉住并保存。':'The capture is too large to pin and save.'):pinBoard.add(pin)} onUpdatePin={record=>pinBoard.update(record.id,{geometry:record.geometry})} onRemovePin={pinBoard.remove} onMinimizePin={id=>{pinBoard.update(id,{minimized:true});}}/>
     </div>
-    {readerMode==='original'&&(!(studyOpen||tableStudyOpen||visualSelection)||studyPinned)&&<PdfPinDock items={pinBoard.records.filter(item=>item.minimized).map(item=>({id:item.id,title:item.title,kind:item.kind}))} onRestore={restorePin} storageKey={pinBoardKey} language={readerLanguage==='zh'?'zh':'en'}/>}
+    {(!(studyOpen||tableStudyOpen||visualSelection)||studyPinned)&&<PdfPinDock items={pinBoard.records.filter(item=>item.minimized).map(item=>({id:item.id,title:item.title,kind:item.kind}))} onRestore={restorePin} storageKey={pinBoardKey} language={readerLanguage==='zh'?'zh':'en'}/>}
     </div>
   );
 }

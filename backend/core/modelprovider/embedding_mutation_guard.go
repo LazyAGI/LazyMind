@@ -42,7 +42,7 @@ func guardEmbeddingRuntimeMutation(tx *gorm.DB, userID, providerID, groupID, mod
 		}
 		if err == nil {
 			for _, id := range ids {
-				if id == state.ActiveModelID {
+				if id == state.ActiveModelID || id == state.TargetModelID {
 					return errEmbeddingIdentityInUse
 				}
 			}

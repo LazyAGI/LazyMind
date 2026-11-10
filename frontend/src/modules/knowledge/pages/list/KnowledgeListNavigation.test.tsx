@@ -6,7 +6,7 @@ import { deferred, desktopTestTranslation as t, installDesktopTestDOM } from "@/
 
 const mocks = vi.hoisted(() => ({ list: vi.fn(), catalog: vi.fn(), scan: vi.fn(), cloudCreate: vi.fn(), scenes: vi.fn(), remove: vi.fn(), get: vi.fn() }));
 vi.mock("@/modules/learning/api", () => ({ getLearningCatalog: mocks.scenes }));
-vi.mock("react-i18next", () => ({ useTranslation: () => ({ t }) }));
+vi.mock("react-i18next", async (load) => ({ ...await load<typeof import("react-i18next")>(), useTranslation: () => ({ t }) }));
 vi.mock("@/modules/knowledge/api/knowledgeMarket", () => ({
   listKnowledgeMarket: mocks.catalog,
   listKnowledgeMarketDomains: vi.fn().mockResolvedValue({ domains: { industry: ["团队"], evaluation: [] } }),
@@ -99,7 +99,7 @@ describe("knowledge list URL and data restoration", () => {
     expect(status).toHaveTextContent("3 个知识库");
   });
 
-  it("explains that vector search waits for rebuilding while source documents remain", async () => {
+  it("explains that cleared indexes require manual reparsing of source files", async () => {
     mocks.get.mockImplementation((url: string) => Promise.resolve({ data: url.includes("/embedding/index-state")
       ? { data: {
         status: "rebuilding", model_name: "新向量模型", provider_name: "测试供应商",
@@ -111,7 +111,8 @@ describe("knowledge list URL and data restoration", () => {
 
     const status = await screen.findByRole("status", { name: t("knowledge.embeddingIndexStateTitle") });
     expect(status).toHaveTextContent("2 个知识库");
-    expect(status).toHaveTextContent("原文和切片");
+    expect(status).toHaveTextContent("若已清除切片和向量索引");
+    expect(status).toHaveTextContent("需手动重新解析原始文件");
     expect(status).toHaveTextContent("向量检索");
   });
 

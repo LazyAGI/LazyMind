@@ -60,7 +60,7 @@ type Candidate = {
   disabledReasonKey?: string;
 };
 
-type CandidatePage = { items: Candidate[]; nextPageToken?: string };
+type CandidatePage = { items: Candidate[]; nextPageToken?: string; nextSkillPage?: number };
 
 type QueryState = {
   trigger: "@" | "/";
@@ -102,6 +102,9 @@ const groups: Array<{
 const shortcutTypes = new Map(groups.map((group) => [group.shortcut, group.type]));
 const MENU_MAX_HEIGHT = 420;
 const MENU_MIN_UPWARD_HEIGHT = 160;
+const SKILL_PREVIEW_COUNT = 6;
+const SKILL_PAGE_SIZE = 100;
+const EMPTY_SKILL_PAGE = { nextPage: 0, loading: false, error: false };
 // Keep the existing 8px anchor gap plus an 8px viewport margin.
 const MENU_VIEWPORT_OFFSET = 16;
 
@@ -205,6 +208,28 @@ async function loadConversationCandidates(keyword: string, runInBackground: bool
   };
 }
 
+async function loadSkillCandidates(keyword: string, page = 1): Promise<CandidatePage> {
+  const response = await listSkillAssetsPage({ keyword, page, pageSize: SKILL_PAGE_SIZE });
+  return {
+    items: response.records.map(item => ({
+      id: item.id,
+      type: "skill",
+      name: item.name,
+      description: item.description,
+      originBuiltinSkillUid: item.originBuiltinSkillUid,
+    })),
+    nextSkillPage: response.records.length > 0 && page * response.pageSize < response.total
+      ? page + 1 : undefined,
+  };
+}
+
+function filterCandidates(items: Candidate[], keyword: string) {
+  const search = keyword.trim().toLocaleLowerCase();
+  return items.filter(item => item.id && item.name && (
+    item.type === "conversation" || `${item.name} ${item.description || ""}`.toLocaleLowerCase().includes(search)
+  ));
+}
+
 async function loadCandidates(type: CandidateType, keyword: string, runInBackground: boolean, signal?: AbortSignal): Promise<Candidate[]> {
   if (type === "knowledge_base") {
     const response = await KnowledgeBaseServiceApi().datasetServiceListDatasets({ keyword, pageSize: 100 });
@@ -215,8 +240,7 @@ async function loadCandidates(type: CandidateType, keyword: string, runInBackgro
     }));
   }
   if (type === "skill") {
-    const response = await listSkillAssetsPage({ keyword, page: 1, pageSize: 100 });
-    return response.records.map((item) => ({ id: item.id, type, name: item.name, description: item.description, originBuiltinSkillUid: item.originBuiltinSkillUid }));
+    return (await loadSkillCandidates(keyword)).items;
   }
   if (type === "workflow") {
     const response = await axiosInstance.get(`${BASE_URL}/api/core/chat/settings/workflows`, { params: { keyword } });
@@ -334,6 +358,8 @@ const MentionEditor = forwardRef<MentionEditorRef, {
   const [activeKey, setActiveKey] = useState<string>();
   const [loading, setLoading] = useState(false);
   const [conversationPage, setConversationPage] = useState({ token: "", loading: false, error: false });
+  const [skillsExpanded, setSkillsExpanded] = useState(false);
+  const [skillPage, setSkillPage] = useState(EMPTY_SKILL_PAGE);
   const pageRequestRef = useRef<AbortController | null>(null);
   const selectionRequestRef = useRef<AbortController | null>(null);
   const [selecting, setSelecting] = useState(false);
@@ -359,6 +385,7 @@ const MentionEditor = forwardRef<MentionEditorRef, {
     queryRef.current = null;
     setQuery(null);
     setActiveKey(undefined);
+    setSkillsExpanded(false);
   }, []);
 
   useEffect(() => {
@@ -495,6 +522,8 @@ const MentionEditor = forwardRef<MentionEditorRef, {
     setLoading(true);
     setLoadError(false);
     setConversationPage({ token: "", loading: false, error: false });
+    setSkillsExpanded(false);
+    setSkillPage(EMPTY_SKILL_PAGE);
     const timer = window.setTimeout(() => {
       let remaining = targetGroups.length;
       if (!remaining) setLoading(false);
@@ -503,17 +532,18 @@ const MentionEditor = forwardRef<MentionEditorRef, {
         const cached = candidateCache.current.get(key);
         const request: Promise<CandidatePage> = group.type === 'conversation'
           ? loadConversationCandidates(query.keyword, runInBackground, controller.signal)
+          : group.type === 'skill' ? loadSkillCandidates(query.keyword)
           : (group.type === 'file'
             ? Promise.resolve(fileCandidates.map<Candidate>(file => ({ ...file, type: 'file' as const, disabledReasonKey: file.disabled ? 'chat.mentionFileUploading' : undefined })))
             : cached && !bypassCandidateCache(group.type) ? Promise.resolve(cached)
             : loadCandidates(group.type, query.keyword, runInBackground, controller.signal)).then(items => ({ items }));
-        request.then(({ items, nextPageToken }) => {
+        request.then(({ items, nextPageToken, nextSkillPage }) => {
           if (requestRef.current !== requestId || controller.signal.aborted) return;
-          const filtered = items.filter(item => item.id && item.name && (group.type === 'conversation'
-            || `${item.name} ${item.description || ""}`.toLocaleLowerCase().includes(query.keyword.trim().toLocaleLowerCase())));
+          const filtered = filterCandidates(items, query.keyword);
           candidateCache.current.set(key, filtered);
           setCandidates(current => replaceCandidateGroup(current, group.type, filtered));
           if (group.type === 'conversation') setConversationPage({ token: nextPageToken || "", loading: false, error: false });
+          if (nextSkillPage) setSkillPage({ ...EMPTY_SKILL_PAGE, nextPage: nextSkillPage });
         }).catch(() => {
           if (requestRef.current === requestId && !controller.signal.aborted) setLoadError(true);
         }).finally(() => {
@@ -529,6 +559,35 @@ const MentionEditor = forwardRef<MentionEditorRef, {
       window.clearTimeout(timer);
     };
   }, [query?.keyword, query?.type, query?.trigger, availableGroups, runInBackground, fileCandidates, retryCount]);
+
+  const loadRemainingSkills = async () => {
+    if (!query || !skillPage.nextPage || pageRequestRef.current) return;
+    const controller = new AbortController();
+    pageRequestRef.current = controller;
+    const requestId = requestRef.current;
+    const isCurrent = () => !controller.signal.aborted && requestId === requestRef.current;
+    setSkillPage(current => ({ ...current, loading: true, error: false }));
+    try {
+      const items: Candidate[] = [];
+      let page = skillPage.nextPage;
+      while (page) {
+        const result = await loadSkillCandidates(query.keyword, page);
+        if (!isCurrent()) return;
+        items.push(...filterCandidates(result.items, query.keyword));
+        page = result.nextSkillPage || 0;
+      }
+      setCandidates(current => {
+        const byId = new Map(current.filter(item => item.type === "skill").map(item => [item.id, item]));
+        for (const item of items) byId.set(item.id, item);
+        return replaceCandidateGroup(current, "skill", [...byId.values()]);
+      });
+      setSkillPage(EMPTY_SKILL_PAGE);
+    } catch {
+      if (isCurrent()) setSkillPage(current => ({ ...current, loading: false, error: true }));
+    } finally {
+      if (pageRequestRef.current === controller) pageRequestRef.current = null;
+    }
+  };
 
   const loadMoreConversations = async () => {
     if (!query || !conversationPage.token || pageRequestRef.current) return;
@@ -706,19 +765,25 @@ const MentionEditor = forwardRef<MentionEditorRef, {
     emit();
   };
 
-  const activeIndex = candidates.findIndex(item => `${item.type}:${item.id}` === activeKey);
+  const skills = candidates.filter(item => item.type === "skill");
+  const canExpandSkills = skills.length > SKILL_PREVIEW_COUNT || Boolean(skillPage.nextPage);
+  const visibleCandidates = !skillsExpanded && skills.length > SKILL_PREVIEW_COUNT
+    ? replaceCandidateGroup(candidates, "skill", skills.slice(0, SKILL_PREVIEW_COUNT))
+    : candidates;
+  const activeIndex = visibleCandidates.findIndex(item => `${item.type}:${item.id}` === activeKey);
 
   const moveActiveCandidate = (direction: 1 | -1) => {
-    if (!candidates.some((candidate) => !isCandidateDisabled(candidate))) {
+    if (!visibleCandidates.some((candidate) => !isCandidateDisabled(candidate))) {
       setActiveKey(undefined);
       return;
     }
     setActiveKey((current) => {
-      const currentIndex = candidates.findIndex(item => `${item.type}:${item.id}` === current);
+      const currentIndex = visibleCandidates.findIndex(item => `${item.type}:${item.id}` === current);
       let index = currentIndex < 0 ? (direction > 0 ? -1 : 0) : currentIndex;
-      for (let step = 0; step < candidates.length; step += 1) {
-        index = (index + direction + candidates.length) % candidates.length;
-        if (!isCandidateDisabled(candidates[index])) return `${candidates[index].type}:${candidates[index].id}`;
+      for (let step = 0; step < visibleCandidates.length; step += 1) {
+        index = (index + direction + visibleCandidates.length) % visibleCandidates.length;
+        const candidate = visibleCandidates[index];
+        if (!isCandidateDisabled(candidate)) return `${candidate.type}:${candidate.id}`;
       }
       return undefined;
     });
@@ -769,9 +834,9 @@ const MentionEditor = forwardRef<MentionEditorRef, {
               moveActiveCandidate(event.key === "ArrowDown" ? 1 : -1);
               return;
             }
-            if ((event.key === "Enter" || event.key === "Tab") && activeIndex >= 0 && candidates[activeIndex]) {
+            if ((event.key === "Enter" || event.key === "Tab") && activeIndex >= 0) {
               event.preventDefault();
-              insertCandidate(candidates[activeIndex]);
+              insertCandidate(visibleCandidates[activeIndex]);
               return;
             }
             if (event.key === "Escape") {
@@ -790,10 +855,10 @@ const MentionEditor = forwardRef<MentionEditorRef, {
         <div
           ref={menuRef}
           id={menuId}
-          className={`chat-mention-menu${menuPlacement.direction === "below" ? " is-below" : ""}`}
+          className={`chat-mention-menu${menuPlacement.direction === "below" ? " is-below" : ""}${query.trigger === "/" ? " is-slash" : ""}`}
           role="listbox"
-          aria-busy={loading || selecting || conversationPage.loading}
-          style={{ height: menuPlacement.height }}
+          aria-busy={loading || selecting || conversationPage.loading || skillPage.loading}
+          style={query.trigger === "/" ? { maxHeight: menuPlacement.height } : { height: menuPlacement.height }}
           onMouseDown={(event) => event.preventDefault()}
           onScroll={(event) => {
             const menu = event.currentTarget;
@@ -804,24 +869,44 @@ const MentionEditor = forwardRef<MentionEditorRef, {
         >
           {loading && candidates.length === 0 ? <div className="chat-mention-empty">{t("common.loading")}</div> : null}
           {loadError ? <div className="chat-mention-empty" role="alert">{t("chat.mentionLoadFailed")} <button type="button" onClick={() => setRetryCount(count => count + 1)}>{t("common.retry")}</button></div> : null}
-          {!loading && !loadError && candidates.length === 0 ? <div className="chat-mention-empty">{t("chat.mentionNoResults")}</div> : null}
+          {!loading && !loadError && candidates.length === 0 && !canExpandSkills ? <div className="chat-mention-empty">{t("chat.mentionNoResults")}</div> : null}
           {availableGroups.filter((group) => group.trigger === query.trigger && (!query.type || group.type === query.type)).map((group) => {
-            const items = candidates.filter((item) => item.type === group.type);
-            if (!items.length) return null;
+            const items = visibleCandidates.filter((item) => item.type === group.type);
+            const isSkillGroup = group.type === "skill";
+            const showSkillToggle = isSkillGroup && canExpandSkills;
+            if (!items.length && !showSkillToggle) return null;
             return <div className={`chat-mention-group${group.type === "conversation" ? " is-conversation" : ""}`} key={group.type}>
               <div className="chat-mention-group-title">
-                <span>{group.icon}{t(group.labelKey)}
+                <span>
+                  {group.icon}{t(group.labelKey)}
                   {group.type === "workflow" && workflowDisabled && (
                     <Tooltip title={t("chat.workflowSelectionDisabledLabel")}>
                       <StopOutlined className="chat-mention-workflow-disabled" aria-label={t("chat.conversationConfigWorkflowDisabled")} />
                     </Tooltip>
                   )}
+                  {showSkillToggle && <button
+                    type="button"
+                    className="chat-mention-skill-toggle"
+                    aria-expanded={skillsExpanded}
+                    aria-controls={`${menuId}-skills`}
+                    onClick={() => {
+                      setSkillsExpanded(!skillsExpanded);
+                      setActiveKey(undefined);
+                      if (!skillsExpanded) void loadRemainingSkills();
+                    }}
+                    onKeyDown={(event) => {
+                      if (event.key !== "Escape") return;
+                      event.preventDefault();
+                      closeMenu();
+                      editorRef.current?.focus({ preventScroll: true });
+                    }}
+                  >{t(skillsExpanded ? "chat.mentionCollapse" : "chat.mentionShowMore")}</button>}
                 </span>
                 <span className="chat-mention-shortcut"><code>{group.trigger}{group.shortcut}:</code>{t("chat.mentionShortcutHint")}</span>
               </div>
-              <div className="chat-mention-options">
+              <div className="chat-mention-options" id={isSkillGroup ? `${menuId}-skills` : undefined}>
               {items.map((item) => {
-                const index = candidates.indexOf(item);
+                const index = visibleCandidates.indexOf(item);
                 const itemDisabled = isCandidateDisabled(item);
                 const itemDisabledReason = getDisabledReason(item);
                 const title = itemDisabled
@@ -834,6 +919,14 @@ const MentionEditor = forwardRef<MentionEditorRef, {
                 </button>;
               })}
               </div>
+              {isSkillGroup && skillsExpanded && skillPage.loading && (
+                <div className="chat-mention-empty" role="status">{t("common.loading")}</div>
+              )}
+              {isSkillGroup && skillsExpanded && skillPage.error && (
+                <div className="chat-mention-empty" role="alert">
+                  {t("chat.mentionLoadFailed")} <button type="button" onClick={() => void loadRemainingSkills()}>{t("common.retry")}</button>
+                </div>
+              )}
               {group.type === 'conversation' ? <>
                 {conversationPage.loading && <div className="chat-mention-empty" role="status">{t("common.loading")}</div>}
                 {conversationPage.error && <div className="chat-mention-empty" role="alert">

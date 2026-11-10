@@ -1,12 +1,99 @@
 .paper-authors {
   display: inline-flex;
-  align-items: baseline;
+  align-items: center;
   max-width: 100%;
   min-width: 0;
-  vertical-align: bottom;
+  vertical-align: middle;
+  gap: 6px;
+}
+
+.paper-authors-leading {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.paper-authors-adaptive {
+  position: relative;
+  display: flex;
+  flex-wrap: wrap;
+  width: 100%;
+  row-gap: 3px;
+}
+
+.paper-authors-adaptive .paper-authors-leading {
+  max-width: 100%;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.paper-authors-probes {
+  position: absolute;
+  inset: 0 auto auto 0;
+  width: 0;
+  height: 0;
+  overflow: hidden;
+  visibility: hidden;
+}
+
+.paper-authors-names-probe {
+  display: block;
+  width: max-content;
+  white-space: nowrap;
+}
+
+.paper-authors-probes .paper-authors-more { width: max-content; }
+
+.paper-authors .paper-authors-more.ant-btn {
+  flex: none;
+  height: 22px;
+  padding-inline: 6px;
   gap: 4px;
-  .paper-authors-leading, .paper-authors-last { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
-  .paper-authors-last { flex: 0 1 auto; max-width: 40%; }
-  .paper-authors-leading { flex: 0 1 auto; }
-  .paper-authors-omission { flex: none; color: inherit; line-height: inherit; }
+  background: var(--blue-soft, var(--color-primary-bg));
+  color: var(--blue, var(--color-primary-text));
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.paper-authors .paper-authors-more.ant-btn:hover,
+.paper-authors .paper-authors-more.ant-btn[aria-expanded="true"] {
+  background: var(--color-primary-bg-hover);
+  color: var(--blue, var(--color-primary-text));
+}
+
+.paper-authors-more .anticon { font-size: 10px; }
+
+.paper-authors-panel { width: min(352px, calc(100vw - 24px)); }
+.paper-authors-panel-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px 10px 14px;
+  border-bottom: 1px solid var(--color-border);
+}
+.paper-authors-panel-head > span { color: var(--color-text-secondary); font-size: 12px; }
+.paper-authors-panel-head > button { margin-left: auto; }
+.paper-authors-list {
+  max-height: min(246px, max(80px, calc(50dvh - 76px)));
+  margin: 0;
+  padding: 4px 12px 4px 49px;
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
+  scrollbar-width: thin;
+  scrollbar-gutter: stable;
+  font-size: 13px;
+  line-height: 1.5;
+  list-style: decimal;
+}
+.paper-authors-list > li {
+  padding: 5px 0;
+  border-bottom: 1px solid var(--color-border-secondary);
+  overflow-wrap: anywhere;
+}
+.paper-authors-list > li:last-child { border-bottom: 0; }
+.paper-authors-list > li::marker { color: var(--color-text-secondary); font-variant-numeric: tabular-nums; }
+.paper-authors-list:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: -2px;
 }

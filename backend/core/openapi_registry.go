@@ -2311,6 +2311,21 @@ type remoteFSDeleteQueryParams struct {
 	Confirm   bool   `query:"confirm,omitempty" desc:"Required true for package root physical purge."`
 }
 
+type remoteFSSkillInstallOpenAPIRequest struct {
+	URL              string `json:"url,omitempty" desc:"Skill source page or direct HTTP(S) ZIP URL. Mutually exclusive with package_zip_base64."`
+	PackageZIPBase64 string `json:"package_zip_base64,omitempty" desc:"Complete ZIP package, base64 encoded; maximum decoded size 100 MiB."`
+	ExpectedName     string `json:"expected_name,omitempty" desc:"Optional expected package frontmatter name for byte imports."`
+}
+
+type remoteFSSkillInstallOpenAPIResponse struct {
+	Status    string                                     `json:"status" enum:"installed,already_installed"`
+	SkillID   string                                     `json:"skill_id"`
+	SkillKey  string                                     `json:"skill_key"`
+	SourceURL string                                     `json:"source_url,omitempty"`
+	Enabled   bool                                       `json:"enabled"`
+	Warnings  []skillNormalizationWarningOpenAPIResponse `json:"warnings,omitempty"`
+}
+
 type remoteFSDirOpenAPIRequest struct {
 	Path      string `json:"path"`
 	Recursive bool   `json:"recursive"`
@@ -4509,6 +4524,16 @@ func registeredCoreOperations() []openAPIOperation {
 		},
 		{
 			Method:      "POST",
+			Path:        "/remote-fs/skills:install",
+			Summary:     "Atomically install a linked or uploaded skill",
+			Description: "Uses the same source adapters, package limits, and metadata validation as personal imports. New skills are disabled. An already installed source is returned unchanged, including its current enabled state. Requires internal service authentication and user_id/task_id.",
+			Tags:        []string{"remote-fs"},
+			QueryParams: remoteFSTaskQueryParams{},
+			RequestBody: jsonBodyOf(remoteFSSkillInstallOpenAPIRequest{}, true),
+			Responses:   map[int]openAPIResponse{200: resp("Complete skill installation", remoteFSSkillInstallOpenAPIResponse{})},
+		},
+		{
+			Method:      "POST",
 			Path:        "/remote-fs/dir",
 			Summary:     "Create remote skill filesystem directory or empty package",
 			Tags:        []string{"remote-fs"},
@@ -4658,6 +4683,15 @@ func registeredCoreOperations() []openAPIOperation {
 			Tags:        []string{"model_providers"},
 			RequestBody: jsonBodyOf(modelprovider.EmbeddingSwitchPreviewRequest{}, true),
 			Responses:   map[int]openAPIResponse{200: resp("Embedding switch assessment", modelprovider.EmbeddingSwitchPreviewResponse{})},
+		},
+		{
+			Method:      "POST",
+			Path:        "/model_providers/embedding/clear-chunks",
+			Summary:     "Clear knowledge chunks and activate the confirmed embedding model",
+			Description: "Requires a preview generation and explicit administrator confirmation for a server-verified candidate. Clears shared chunks and vectors, preserves source files and document records, and atomically activates the target model with its saved selection. The server completes the operation independently of browser cancellation. Retrying the same confirmed request resumes an interrupted cleanup or activation; replaying a completed request does not clear the new index. Success acknowledges both cleared and activated. Documents await manual parsing; no parsing tasks are enqueued.",
+			Tags:        []string{"model_providers"},
+			RequestBody: jsonBodyOf(modelprovider.EmbeddingClearRequest{}, true),
+			Responses:   map[int]openAPIResponse{200: resp("Chunks cleared and target model activated", modelprovider.EmbeddingClearResponse{})},
 		},
 		{
 			Method:      "PUT",

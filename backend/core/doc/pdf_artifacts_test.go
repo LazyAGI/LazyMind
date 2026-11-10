@@ -72,14 +72,39 @@ func TestReplaceArtifactWithSameCacheKey(t *testing.T) {
 	}
 }
 
-func TestRemoveArtifactCacheEntryRemovesRegeneratedRevisions(t *testing.T) {
+func TestRemoveArtifactCacheEntryRemovesAllTranslationVersions(t *testing.T) {
 	artifacts := []pdfArtifactRecord{
 		{ID: "revision-1", Kind: pdfArtifactTranslation, CacheKey: "same"},
 		{ID: "revision-2", Kind: pdfArtifactTranslation, CacheKey: "same"},
 		{ID: "another-config", Kind: pdfArtifactTranslation, CacheKey: "other"},
 	}
 	kept, removed := removeArtifactCacheEntry(artifacts, artifacts[1])
-	if len(kept) != 1 || kept[0].ID != "another-config" || len(removed) != 2 {
+	if len(kept) != 0 || len(removed) != 3 {
 		t.Fatalf("kept = %#v, removed = %#v", kept, removed)
+	}
+}
+
+func TestTranslationReplacesAllProvidersAndLanguages(t *testing.T) {
+	artifacts := []pdfArtifactRecord{
+		{ID: "google", Kind: pdfArtifactTranslation, CacheKey: "google-zh"},
+		{ID: "searchable", Kind: pdfArtifactSearchable, CacheKey: "ocr"},
+		{ID: "deepl", Kind: pdfArtifactTranslation, CacheKey: "deepl-en"},
+	}
+	got, replaced := replaceArtifactWithSameCacheKey(artifacts, pdfArtifactRecord{ID: "current", Kind: pdfArtifactTranslation, CacheKey: "llm-zh"})
+	if len(got) != 2 || got[0].ID != "searchable" || got[1].ID != "current" || len(replaced) != 2 {
+		t.Fatalf("replacement result = %#v, replaced = %#v", got, replaced)
+	}
+}
+
+func TestLegacyTranslationVersionsCannotBeSelectedOrReused(t *testing.T) {
+	ext := documentExt{PDFArtifacts: []pdfArtifactRecord{
+		{ID: "old", Kind: pdfArtifactTranslation, CacheKey: "google"},
+		{ID: "current", Kind: pdfArtifactTranslation, CacheKey: "deepl"},
+	}}
+	if findArtifact(ext, "old") != nil || latestArtifactWithCacheKey(ext, pdfArtifactTranslation, "google") != nil {
+		t.Fatal("superseded translation is still selectable or reusable")
+	}
+	if current := findArtifact(ext, "current"); current == nil || current.ID != "current" {
+		t.Fatalf("current translation unavailable: %#v", current)
 	}
 }

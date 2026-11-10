@@ -15,6 +15,8 @@ export interface PdfArtifact {
   provider?: string;
   model?: string;
   warning_count?: number;
+  supplemental_block_count?: number;
+  layout_preserved?: boolean;
   has_layout?: boolean;
   has_draft?: boolean;
   created_at: string;
@@ -29,6 +31,7 @@ export interface PdfTranslationDraftBlock {
   type?: string;
   source_text: string;
   translated_text: string;
+  translation_pages?: number[];
 }
 
 export interface PdfTranslationDraft {
@@ -232,22 +235,30 @@ export async function revisePdfTranslation(datasetId: string, documentId: string
   return response.data.data;
 }
 
+export async function rerenderPdfTranslation(datasetId: string, documentId: string, artifactId: string): Promise<PdfArtifact> {
+  const response = await axiosInstance.post<Envelope<PdfArtifact>>(
+    `${documentBase(datasetId, documentId)}/pdf-artifacts/${encodeURIComponent(artifactId)}:revise`,
+    { rerender: true }, { timeout: 20 * 60 * 1000 },
+  );
+  return response.data.data;
+}
+
 export function matchPdfTranslationDraftBlock(
   blocks: PdfTranslationDraftBlock[],
   selection: { text: string; page: number; bbox?: [number, number, number, number] },
   textKind: "source" | "translation" = "translation",
 ): PdfTranslationDraftBlock | undefined {
-  const pageBlocks = blocks.filter((block) => block.page === selection.page);
-  const selectedText = selection.text.replace(/\s+/g, " ").trim();
+  const pageBlocks = blocks.filter((block) => textKind === "translation" && block.translation_pages?.length ? block.translation_pages.includes(selection.page) : block.page === selection.page);
+  const selectedText = selection.text.normalize("NFKC").replace(/\s+/g, "").trim();
   const textMatch = pageBlocks.find((block) => {
-    const candidate = (textKind === "source" ? block.source_text : block.translated_text).replace(/\s+/g, " ").trim();
+    const candidate = (textKind === "source" ? block.source_text : block.translated_text).normalize("NFKC").replace(/\s+/g, "").trim();
     return candidate.includes(selectedText) || selectedText.includes(candidate);
   });
   if (textMatch) return textMatch;
   if (!selection.bbox) return undefined;
   const [sx0, sy0, sx1, sy1] = selection.bbox;
   return pageBlocks
-    .filter((block) => block.bbox?.length === 4)
+    .filter((block) => block.page === selection.page && block.bbox?.length === 4)
     .map((block) => {
       const [x0, y0, x1, y1] = block.bbox!;
       const overlap = Math.max(0, Math.min(sx1, x1) - Math.max(sx0, x0)) * Math.max(0, Math.min(sy1, y1) - Math.max(sy0, y0));

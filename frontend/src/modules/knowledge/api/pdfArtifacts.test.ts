@@ -159,6 +159,14 @@ describe("PDF artifacts API", () => {
     expect(matchPdfTranslationDraftBlock(blocks, { text: "未匹配", page: 1 })).toBeUndefined();
   });
 
+  it("matches supplementary translations across pages without using source-page coordinates", () => {
+    const blocks = [{id:"b1", page:2, translation_pages:[16,17], source_text:"Original paragraph", translated_text:"这是完整的译文段落。", bbox:[10,20,300,80] as [number,number,number,number]}];
+    expect(matchPdfTranslationDraftBlock(blocks,{text:"完整的\n译文",page:17})?.id).toBe("b1");
+    expect(matchPdfTranslationDraftBlock(blocks,{text:"这是完整的译文",page:2})).toBeUndefined();
+    expect(matchPdfTranslationDraftBlock(blocks,{text:"unmatched",page:16,bbox:[10,20,300,80]})).toBeUndefined();
+    expect(matchPdfTranslationDraftBlock(blocks,{text:"Original paragraph",page:2},"source")?.id).toBe("b1");
+  });
+
   it("matches a selected source passage to its persisted draft block", () => {
     const blocks = [{
       id: "b1", page: 2, source_text: "Original paragraph for translation.", translated_text: "待改进的译文。",

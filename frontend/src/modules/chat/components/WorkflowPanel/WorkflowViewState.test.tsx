@@ -39,6 +39,19 @@ describe('workflow run presentation preferences', () => {
     rerender({ ready: true, ui: { source_type: 'user' } });
     expect(result.current.view.expanded).toBe(false);
   });
+  it('upgrades implicit following for an existing custom run and restores its later browsing choice', () => {
+    localStorage.setItem('lazymind:workflow-view:user-a:run', JSON.stringify({
+      mode: 'free', tabId: 'plan', expanded: true,
+    }));
+    const ui = { source_type: 'user' };
+    const { result, unmount } = renderHook(() => useWorkflowViewState(session, ui, true));
+    expect(result.current.view).toMatchObject({ mode: 'following', expanded: true });
+    act(() => result.current.update({ mode: 'free', tabId: 'plan' }));
+    unmount();
+
+    const restored = renderHook(() => useWorkflowViewState(session, ui, true));
+    expect(restored.result.current.view).toMatchObject({ mode: 'free', tabId: 'plan' });
+  });
   it('separates users, workflow runs and layout from browsing mode', () => {
     const ui = { source_type: 'builtin', follow_mode: { default: 'following' as const } };
     const { result, rerender } = renderHook(({ run }) => useWorkflowViewState(run, ui, true), { initialProps: { run: session } });

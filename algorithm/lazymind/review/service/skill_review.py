@@ -20,6 +20,7 @@ from lazymind.common.skill.storage_key import (
 )
 from lazymind.config import config as _cfg
 from lazymind.model_config import inject_model_config, prefer_evolution_or_chat_llm
+from lazymind.review.cluster_component import cluster_requirement_summary
 from lazymind.review.skill_review.config import DEFAULT_REPORT_DIR_NAME
 from lazymind.review.skill_review.cluster import cluster_drafts
 from lazymind.review.skill_review.draft import build_skill_drafts
@@ -738,6 +739,7 @@ def _run_summary(
     return {
         'status': result.status,
         'error': result.error,
+        **cluster_requirement_summary(errors),
         'counts': {
             'session': result.session_count,
             'qualified_session': result.qualified_session_count,

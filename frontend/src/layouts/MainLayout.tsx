@@ -220,7 +220,7 @@ export default function MainLayout() {
   const isPaperPage = Boolean(
     knowledgeDatasetReady && isPaperLibrary(currentKnowledgeDataset?.scene),
   );
-  const startsWithCompactSidebar = isWorkflowDetail || isPaperPage;
+  const startsWithCompactSidebar = isWorkflowDetail || isPaperPage || Boolean(matchPath("/document-directories/:directoryId", pathname));
   const defaultSidebarWidth = startsWithCompactSidebar ? SIDEBAR_MIN_WIDTH : SIDEBAR_MAX_WIDTH;
   const [sidebarSize, setSidebarSize] = useState({
     pathname,

@@ -7,6 +7,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"lazymind/agentconnector/internal/agentintegration"
 	"lazymind/agentconnector/internal/codexhost"
@@ -22,11 +23,12 @@ func newPluginReconnectTestAdapter(t *testing.T) (*Adapter, *credentials.Store, 
 	if runtime.GOOS == "windows" {
 		t.Skip("POSIX executable fixtures")
 	}
-	oldPrepare, oldHealth := prepareCodexDesktop, startupHealth
+	oldPrepare, oldHealth, oldWait := prepareCodexDesktop, startupHealth, waitCodexReady
 	prepareCalls := 0
 	prepareCodexDesktop = func(context.Context, string) error { prepareCalls++; return nil }
 	startupHealth = func(context.Context, string) string { return "" }
-	t.Cleanup(func() { prepareCodexDesktop, startupHealth = oldPrepare, oldHealth })
+	waitCodexReady = func(context.Context, string, string, time.Time) error { return nil }
+	t.Cleanup(func() { prepareCodexDesktop, startupHealth, waitCodexReady = oldPrepare, oldHealth, oldWait })
 	root := t.TempDir()
 	home, profile := filepath.Join(root, "state"), filepath.Join(root, "profile")
 	t.Setenv("HOME", root)

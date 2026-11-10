@@ -8,14 +8,12 @@ import { tr } from "./translations";
 const processingLabels = (): Record<string, string> => ({
   submitted: tr("parsingSubmitted"),
   pending: tr("pending"),
-  running: tr("running"),
-  ready: tr("added"),
-  failed: tr("parseFailed"),
-  unknown: tr("unknown"),
-  not_requested: tr("addedOriginal"),
+  running: tr("processingBody"),
+  failed: tr("processingFailed"),
+  not_requested: tr("originalOnly"),
   not_submitted: tr("pending"),
 });
-export function importStatusLabel(item: ImportItem) {
+function currentImportStatus(item: ImportItem) {
   const stages: Record<string, string> = {
     download: tr("download"),
     processing: tr("parseIndexStage"),
@@ -25,21 +23,15 @@ export function importStatusLabel(item: ImportItem) {
     index: tr("index"),
   };
   const stage = stages[item.stage];
-  if (item.status === "exists") {
-    const suffixes: Record<string, string> = {
-      failed: tr("parseFailedSuffix"),
-      not_requested: tr("originalSuffix"),
-      ready: tr("readySuffix"),
-    };
-    const suffix =
-      suffixes[item.processing_status || ""] ??
-      ` · ${processingLabels()[item.processing_status || "unknown"] || tr("unknown")}`;
-    return tr("existsStatus", { v0: suffix });
+  if (item.status === "exists" || item.status === "added") {
+    const levels: Record<string, string> = { parsed: tr("parsed"), chunked: tr("chunked"), indexed: tr("indexed") };
+    const processing = item.processing_status === "ready"
+      ? levels[item.processing_level || ""] || tr("processingReady")
+      : processingLabels()[item.processing_status || ""];
+    const suffix = processing ? ` · ${processing}` : "";
+    return item.status === "exists" ? tr("existsStatus", { v0: suffix }) : tr("added") + suffix;
   }
-  if (item.status === "added")
-    return item.processing_status === "not_requested"
-      ? tr("addedOriginal")
-      : ["chunked", "indexed"].includes(item.processing_level || "") ? tr("addedReady") : tr("added");
+  if (item.status === "original_unavailable") return tr("originalUnavailable");
   if (item.status === "failed")
     return tr("failedStatus", { v0: stage ? ` · ${stage}` : "" });
   if (item.status === "running")
@@ -49,6 +41,11 @@ export function importStatusLabel(item: ImportItem) {
   if (item.status === "needs_confirmation") return tr("needsPaperConfirmation");
   if (item.status === "pending") return tr("pending");
   return tr("unknown");
+}
+
+export function importStatusLabel(item: ImportItem) {
+  const status = currentImportStatus(item);
+  return item.state_unavailable && status !== tr("unknown") ? status + tr("unavailableSuffix") : status;
 }
 
 export default function ImportHistoryCards({
@@ -135,7 +132,6 @@ export default function ImportHistoryCards({
                 <small>
                   {tr("currentStatusPrefix")}
                   {importStatusLabel(item)}
-                  {item.state_unavailable && tr("unavailableSuffix")}
                 </small>
                 {item.error_message && (
                   <small
@@ -165,7 +161,7 @@ export default function ImportHistoryCards({
                     loading={retrying}
                     onClick={() => onRetry([item])}
                   >
-                    {tr("retry")}
+                    {tr(item.document_id ? "retryProcessing" : "retry")}
                   </Button>
                 )}
               </div>
