@@ -208,6 +208,31 @@ test('local font catalog verifies content hashes and shares fonts with browser C
   }
 });
 
+test('local font CSS avoids duplicate versions and fallback aliases but keeps separately used aliases', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'ppt-font-aliases-'));
+  const previous = process.env.LAZYMIND_FONT_DIR;
+  process.env.LAZYMIND_FONT_DIR = root;
+  try {
+    for (const data of [makeTestTtf(), Buffer.concat([makeTestTtf(), Buffer.from('second version')])]) {
+      const id = createHash('sha256').update(data).digest('hex');
+      await writeFile(path.join(root, `${id}.ttf`), data);
+      await writeFile(path.join(root, `${id}.json`), JSON.stringify({
+        id, file: `${id}.ttf`, aliases: ['Test Serif', '测试宋体'],
+        weight: 400, style: 'normal', embeddable: true,
+      }));
+    }
+    const css = await localFontCss('body{font-family:"Test Serif","测试宋体",serif}');
+    assert.equal((css.match(/@font-face/g) || []).length, 1);
+    assert.match(css, /font-family:"Test Serif"/);
+    const separate = await localFontCss('body{font-family:"Test Serif"}h1{font-family:"测试宋体"}');
+    assert.equal((separate.match(/@font-face/g) || []).length, 2);
+  } finally {
+    if (previous === undefined) delete process.env.LAZYMIND_FONT_DIR;
+    else process.env.LAZYMIND_FONT_DIR = previous;
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test('Google Fonts CSS parser selects direct TrueType font sources', () => {
   const faces = parseGoogleFontsCss(`
     @font-face {
