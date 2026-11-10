@@ -16,7 +16,8 @@ export function RAGComponentProvider({ children }: { children: ReactNode }) {
   const phase = usePythonComponentTask(state => state.phase);
   const refresh = useCallback(async () => {
     const id = ++requestId.current;
-    if (pythonComponentTaskBusy(usePythonComponentTask.getState().phase)) {
+    const task = usePythonComponentTask.getState();
+    if (pythonComponentTaskBusy(task.phase) && (task.id === "rag" || task.phase !== "installing")) {
       setAvailability("checking");
       return;
     }

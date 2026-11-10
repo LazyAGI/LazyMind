@@ -6,10 +6,11 @@ import { Alert, Button, Checkbox, Dropdown, Input, Modal, Popover, Pagination, S
 import { DndContext, DragOverlay, PointerSensor, pointerWithin, useDraggable, useSensor, useSensors, type DragEndEvent, type DragStartEvent, type DragOverEvent } from "@dnd-kit/core";
 import { ArrowLeftOutlined, DownOutlined, FileTextOutlined, FolderOutlined, LinkOutlined, PlusOutlined, DeleteOutlined, StarOutlined, CloseOutlined, UploadOutlined, FilterOutlined, ExportOutlined, SettingOutlined, HolderOutlined, EllipsisOutlined } from "@ant-design/icons";
 import { v4 as uuidv4 } from "uuid";
-import { applyPaperEdits, citationLabel, descendantFolderIds, papersInView, paperBelongsToFolders, paperFolderPath, filterPapers, filterLibraryView, formatCitation, paperLink, venueName, safePaperUrl, statusLabel, type PaperEdits, type CitationStyle, type LibraryView, type PaperRecord, type PaperLibraryData, type ReadingStatus } from "./model";
+import { applyPaperEdits, citationLabel, descendantFolderIds, papersInView, paperBelongsToFolders, paperFolderPath, filterPapers, filterLibraryView, formatCitation, getPaperTags, paperLink, paperTagOrder, venueName, safePaperUrl, statusLabel, type PaperEdits, type CitationStyle, type LibraryView, type PaperRecord, type PaperLibraryData, type ReadingStatus } from "./model";
 import { loadPersistedPaperLibrary, mergeLibraryChanges, patchLibraryPaper, moveLibraryPapers, deleteLibraryPapers, detachLibraryAttachment, addLibraryNote, createLibraryFolder, deleteLibraryFolder, type LibraryChanges, type PersistedPaperLibrary } from "./store";
 import { emptyLibrary } from "./libraryModel";
 import PaperDetailDrawer, { type PaperDetailTab } from "./PaperDetailDrawer";
+import PaperAuthors from './PaperAuthors';
 import RestartKnowledgeModal, { type IRestartKnowledgeProps } from "../pages/detail/components/RestartKnowledgeModal";
 import type { ProcessingLevel } from "../utils/processingLevel";
 import type { ParserConfig } from "@/api/generated/knowledge-client";
@@ -19,7 +20,8 @@ import { retryAcademicImport, listAcademicImportBatches, emptyImportBatchPage, t
 import PaperBreadcrumb from "./PaperBreadcrumb";
 import PaperSearch from "./PaperSearch";
 import PaperFilterPanel from "./PaperFilterPanel";
-import { DEFAULT_PAPER_FILTERS, filterPaperRecords, hasPaperFilters, type PaperFilters } from "./paperFilters";
+import { DEFAULT_PAPER_FILTERS, filterPaperRecords, hasPaperFilters, PAPER_TAG_MATCH_LABELS, type PaperFilters } from "./paperFilters";
+import PaperTags, { type PaperTagChange } from "./PaperTags";
 import PaperTasks from '../components/PaperTasks';
 import PaperImportanceButton from '../components/PaperTasks/PaperImportanceButton';
 import { updatePaperIdentity, setPaperImportance } from '../api/paperWorkflows';
@@ -344,18 +346,23 @@ function PaperLibraryContent({ userId, datasetId, onUploadPdf, title = "论文�
     };
     const imports = usePaperImports({ datasetId, dataState, dataRef, disabled, saving, confirmingImport, busyRef, loadedRef, canWriteRef, syncGeneration, reloadPromiseRef, reload, isCurrentScope, mutate, applySnapshot, setConfirmingImport, setSyncRevision, libraryView, folderId, onUploadPdf, notify, resolve });
     const { openImport, resumeAssociation } = imports;
-    const updatePaper = async (id: string, changes: {
-        status?: ReadingStatus;
-        tags?: string[];
-    }) => {
+    const updatePaper = async (id: string, changes: { status: ReadingStatus }) => {
         const current = dataRef.current.papers.find(p => p.id === id);
         if (!current)
             return;
         try {
-            await mutate(() => patchLibraryPaper(datasetId, current, changes), { id: `paper-status:${id}`, title: `《${current.metadata.title}》阅读状态保存失败`, action: { label: "查看论文", onClick: () => openDetail(id) } }, changes.status !== undefined && changes.tags === undefined);
+            await mutate(() => patchLibraryPaper(datasetId, current, changes), { id: `paper-status:${id}`, title: `《${current.metadata.title}》阅读状态保存失败`, action: { label: "查看论文", onClick: () => openDetail(id) } }, true);
         }
         catch { /* Preserve the server state and visible error. */ }
     };
+    const updatePaperTags = (paper: PaperRecord, change: PaperTagChange) => mutate(() => {
+        const current = dataRef.current.papers.find(item => item.id === paper.id);
+        if (!current) throw new Error('此论文不存在，请刷新列表');
+        const tags = 'add' in change
+            ? [...current.tags, ...change.add.filter(tag => !current.tags.includes(tag))]
+            : current.tags.filter(tag => tag !== change.remove);
+        return patchLibraryPaper(datasetId, current, { tags });
+    }, { id: `paper-tags:${paper.id}`, title: `《${paper.metadata.title}》标签保存失败` });
     const updateReadingStatuses = async (papers: PaperRecord[], status: ReadingStatus) => {
         const failed: { paper: PaperRecord; message: string }[] = [];
         const succeeded = new Set<string>();
@@ -412,6 +419,7 @@ function PaperLibraryContent({ userId, datasetId, onUploadPdf, title = "论文�
     const libraryIndex = useMemo(() => indexLibrary(dataState), [dataState]);
     const materialByPaper = libraryIndex.materials;
     const scoped = useMemo(() => libraryView === 'directory' ? papersInView(data, folderId) : data.papers, [data, folderId, libraryView]);
+    const collectionTags = useMemo(() => getPaperTags(data.papers.flatMap(paper => paper.tags)).sort(paperTagOrder.compare), [data.papers]);
     const viewed = useMemo(() => filterLibraryView(scoped, libraryView), [scoped, libraryView]);
     const visible = useMemo(() => filterPaperRecords(filterPapers(viewed, keyword), libraryIndex.attachments, filters), [viewed, keyword, libraryIndex, filters]);
     const [listPage, setListPage] = useState(1);
@@ -636,7 +644,7 @@ function PaperLibraryContent({ userId, datasetId, onUploadPdf, title = "论文�
                 if (event.key === "Escape")
                     setActiveTool(null);
             }}>
-              <PaperFilterPanel papers={data.papers} value={filters} onChange={setFilters}/>
+              <PaperFilterPanel papers={data.papers} tags={collectionTags} value={filters} onChange={setFilters}/>
             </div>}>
             <Button type="text" className={`paper-library-tool ${hasFilters ? "is-active" : ""}`} icon={<FilterOutlined />} aria-label="筛选" aria-expanded={activeTool === "filter"}>筛选{hasFilters && <span className="paper-library-tool-dot" aria-hidden="true"/>}</Button>
           </Popover>
@@ -673,15 +681,17 @@ function PaperLibraryContent({ userId, datasetId, onUploadPdf, title = "论文�
             ] }}>
             <Button className="paper-library-import-button" disabled={disabled} type="primary" icon={<PlusOutlined />}>导入<DownOutlined /></Button>
           </Dropdown>
-          <div className="paper-library-folders">
-          <div className="paper-library-browse-head"><span className="paper-library-rail-label">浏览视图</span></div>
-          <FolderButton icon={<FileTextOutlined />} name="全部" count={data.papers.length} current={libraryView === "all"} onClick={() => selectView(null, 'all')}/>
-          <FolderButton icon={<StarOutlined />} name="收藏" count={stats.important} current={libraryView === "important"} onClick={() => selectView(null, "important")}/>
-          <div className="paper-library-directory-head paper-library-browse-head">
-            <span className="paper-library-rail-label">目录</span>
+          <div className="paper-library-browse">
+            <div className="paper-library-browse-head"><span className="paper-library-rail-label">浏览视图</span></div>
+            <FolderButton icon={<FileTextOutlined />} name="全部" count={data.papers.length} current={libraryView === "all"} onClick={() => selectView(null, 'all')}/>
+            <FolderButton icon={<StarOutlined />} name="收藏" count={stats.important} current={libraryView === "important"} onClick={() => selectView(null, "important")}/>
           </div>
-          <PaperDirectoryTree key={datasetId} data={data} title={title} active={libraryView === 'directory'} folderId={folderId} detailPaperId={detailPresentation === 'page' ? detailPaperId : null} onOpenPaper={id => openDetail(id, 'overview', 'page')} disabled={disabled} draggedIds={draggedIds} dropFolderId={dropFolderId} onSelectFolder={id => selectView(id, 'directory')} onCreateFolder={openFolderDialog} onDeleteFolder={deleteFolder}/>
-          {!!draggedIds.length && <p className="paper-library-drag-hint" role="status">移动 {draggedIds.length} 篇文献<br />拖到目标文件夹</p>}
+          <div className="paper-library-directory">
+            <div className="paper-library-browse-head"><span className="paper-library-rail-label">目录</span></div>
+            <div className="paper-library-directory-scroll">
+              <PaperDirectoryTree key={datasetId} data={data} title={title} active={libraryView === 'directory'} folderId={folderId} detailPaperId={detailPresentation === 'page' ? detailPaperId : null} onOpenPaper={id => openDetail(id, 'overview', 'page')} disabled={disabled} draggedIds={draggedIds} dropFolderId={dropFolderId} onSelectFolder={id => selectView(id, 'directory')} onCreateFolder={openFolderDialog} onDeleteFolder={deleteFolder}/>
+            </div>
+            {!!draggedIds.length && <p className="paper-library-drag-hint" role="status">移动 {draggedIds.length} 篇文献<br />拖到目标文件夹</p>}
           </div>
           <div ref={setTaskActionsContainer} className="paper-library-task-actions-slot"/>
         </nav>
@@ -691,7 +701,12 @@ function PaperLibraryContent({ userId, datasetId, onUploadPdf, title = "论文�
           <div className="paper-library-view-heading">
             <span className="paper-library-view-path">{libraryView === 'directory' ? currentFolder ? [title, paperFolderPath(data.folders, currentFolder.parentId)].filter(Boolean).join(' / ') : '目录' : '浏览视图'}</span>
             <h2>{libraryView === 'all' ? '全部论文' : libraryView === 'important' ? '重点论文' : currentFolder?.name || title}</h2>
-            <p>{libraryView === 'directory' ? `本层 ${scoped.length} 篇 · 含子目录 ${directoryPaperCount} 篇` : `${viewed.length} 篇论文`}</p>
+            <p>{filters.tags.length ? `筛选结果 ${visible.length} 篇` : libraryView === 'directory' ? `本层 ${scoped.length} 篇 · 含子目录 ${directoryPaperCount} 篇` : `${viewed.length} 篇论文`}</p>
+            {filters.tags.length > 0 && <div className="paper-library-active-tags" role="group" aria-label="已选标签筛选">
+              {filters.tags.length > 1 && <span className="paper-library-active-tag-mode">{PAPER_TAG_MATCH_LABELS[filters.tagMatch]}</span>}
+              {filters.tags.map(tag => <button type="button" key={tag} aria-label={`移除标签筛选 ${tag}`}
+                  onClick={() => setFilters(current => ({ ...current, tags: current.tags.filter(item => item !== tag) }))}><span>{tag}</span><CloseOutlined /></button>)}
+            </div>}
           </div>
           <PaperChildFolders key={`${datasetId}:${libraryView}:${folderId}`} data={data} parentId={folderId} onSelect={id => selectView(id, 'directory')}/>
           <PaperTasks key={datasetId} dataset={datasetId} actionsContainer={taskActionsContainer} selected={selectedDocuments} selectedTitles={selectedPapers.map(item => item.metadata.title)} selectionError={selectionError} canImport={canWrite} onImportSubmitted={() => setSyncRevision(value => value + 1)} onNotification={notify} onNotificationResolved={resolve}/>
@@ -732,7 +747,7 @@ function PaperLibraryContent({ userId, datasetId, onUploadPdf, title = "论文�
                     {display.importance && renderImportance(item)}
 
                   </div>
-                <Tooltip title={item.metadata.authors.length ? item.metadata.authors.join("、") : undefined}><p className="paper-library-cite">{item.metadata.authors.length ? item.metadata.authors.join("、") : "作者待补全"}</p></Tooltip>
+                <p className="paper-library-cite"><PaperAuthors authors={item.metadata.authors} empty="作者待补全" fitToWidth /></p>
                 {(() => {
                 const identity = libraryIndex.identities.get(item.id);
                 const status = identity?.state.status;
@@ -741,7 +756,6 @@ function PaperLibraryContent({ userId, datasetId, onUploadPdf, title = "论文�
                 <div className="paper-library-meta">
                   <span className="paper-library-year">{item.metadata.year || "—"}</span>
                   <span className="paper-library-venue" title={venueName(item)}>{item.metadata.venue?.trim() ? venueName(item) : "—"}</span>
-                  {item.tags.filter((tag) => tag !== "paper" && !tag.startsWith("arxiv:")).map((tag) => (<span key={tag} className="paper-library-tag">{tag}</span>))}
                   {item.incomplete && snapshotReady && <Tooltip title="论文题录信息不完整，点击补全"><button type="button" className="paper-library-state" disabled={disabled} onClick={() => {
                     openDetail(item.id);
                     setDetailEditing(true);
@@ -755,6 +769,7 @@ function PaperLibraryContent({ userId, datasetId, onUploadPdf, title = "论文�
                   <button type="button" className="paper-library-material" onClick={() => openDetail(item.id, "attachments")}>{materialByPaper.get(item.id)?.pdfs.length ? `PDF · ${materialByPaper.get(item.id)!.pdfs.length} 份` : materialByPaper.get(item.id)?.links.length ? '原文链接' : materialByPaper.get(item.id)?.supplements.length ? '无 PDF' : '暂无 PDF'}</button>
                   {!!materialByPaper.get(item.id)?.supplements.length && <button type="button" className="paper-library-material" onClick={() => openDetail(item.id, 'attachments')}>补充材料 · {materialByPaper.get(item.id)!.supplements.length} 份</button>}
                   {!!materialByPaper.get(item.id)?.notes && <button type="button" className="paper-library-material" onClick={() => openDetail(item.id, "notes")}>{materialByPaper.get(item.id)?.notes} 条笔记</button>}
+                  <PaperTags paper={item} collectionTags={collectionTags} canWrite={canWrite} disabled={disabled} onChange={change => updatePaperTags(item, change)} />
                 </div>
               </td>
               <td><div className="paper-library-row-actions">

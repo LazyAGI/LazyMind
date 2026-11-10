@@ -53,6 +53,7 @@ func libraryRequest(t *testing.T, method, path, dataset, user string, body any) 
 	router.HandleFunc("/library/papers:delete", DeleteLibraryPapers)
 	router.HandleFunc("/library/papers/{library_paper_id}/attachments/{attachment_id}:detach", DetachLibraryAttachment)
 	router.HandleFunc("/library/papers/{library_paper_id}/notes", AddLibraryNote)
+	router.HandleFunc("/library/papers/{library_paper_id}/notes/{note_id}:delete", DeleteLibraryNote)
 	router.HandleFunc("/library/folders", CreateLibraryFolder).Methods("POST")
 	router.HandleFunc("/library/folders/{folder_id}", RenameLibraryFolder).Methods("PATCH")
 	router.HandleFunc("/library/folders/{folder_id}:delete", DeleteLibraryFolder)
@@ -188,6 +189,25 @@ func TestLibraryNotesAndDirectoryDeletionRetainMaterials(t *testing.T) {
 	db.Model(&orm.PaperLibraryNote{}).Count(&view.PaperCount)
 	if view.PaperCount != 1 {
 		t.Fatal("notes were rewritten")
+	}
+}
+
+func TestDeleteLibraryNoteRemovesOnlyTheRequestedNote(t *testing.T) {
+	paperLibraryTestDB(t)
+	importDraft(t, "papers", "note-delete", libraryDraft("a", "A", "10.1234/a"))
+	for _, note := range []map[string]any{{"id": "keep", "content": "Keep this"}, {"id": "remove", "content": "Delete this"}} {
+		w := libraryRequest(t, "POST", "/library/papers/a/notes", "papers", "owner", note)
+		if w.Code != http.StatusOK {
+			t.Fatal(w.Code, w.Body.String())
+		}
+	}
+	w := libraryRequest(t, "POST", "/library/papers/a/notes/remove:delete", "papers", "owner", map[string]any{})
+	if w.Code != http.StatusOK {
+		t.Fatal(w.Code, w.Body.String())
+	}
+	view := readLibrary(t, "papers")
+	if len(view.Data.Notes) != 1 || view.Data.Notes[0].ID != "keep" || len(view.Data.Papers[0].NoteIDs) != 1 || view.Data.Papers[0].NoteIDs[0] != "keep" {
+		t.Fatal("note deletion removed the wrong data", view.Data)
 	}
 }
 func TestLibrarySinglePaperMutationHasBoundedReads(t *testing.T) {

@@ -13,6 +13,10 @@ class _RemoteFS:
         self.existing = set(existing)
         self.listings = dict(listings or {})
 
+    def install_skill(self, **kwargs):
+        self.calls.append(('install_skill', kwargs))
+        raise FileExistsError('Skill package external/example already exists.')
+
     def exists(self, path):
         self.calls.append(('exists', path))
         return path in self.existing
@@ -131,7 +135,8 @@ def test_install_package_rejects_existing_key_before_writing():
             'assets/logo.bin': b'logo',
         })
 
-    assert fs.calls == [('exists', 'remote://skills/external/example')]
+    assert len(fs.calls) == 1
+    assert fs.calls[0][0] == 'install_skill'
 
 
 def test_rename_stays_in_category_and_rejects_existing_target():

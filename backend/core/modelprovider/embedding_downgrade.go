@@ -35,6 +35,13 @@ func guardEmbeddingRemoval(tx *gorm.DB, userID string, modelIDs ...string) error
 		if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
 			return err
 		}
+		if err == nil && state.TargetModelID != "" {
+			for _, modelID := range modelIDs {
+				if modelID == state.TargetModelID {
+					return errEmbeddingInUse
+				}
+			}
+		}
 		if err == nil && state.Phase == "cleared" && state.ActiveModelID == "" && state.TargetModelID == "" {
 			// The offline maintenance handoff has already removed the shared
 			// text vectors. Indexed dataset rows now describe pending reindex

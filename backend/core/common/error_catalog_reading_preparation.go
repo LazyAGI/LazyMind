@@ -13,7 +13,7 @@ func init() {
 	}{
 		{2005400, http.StatusInternalServerError, "Unable to load AI reading preferences or progress", []string{"读取 AI 阅读准备设置失败", "读取准备状态失败", "读取准备设置失败"}},
 		{2005401, http.StatusBadRequest, "Invalid AI reading preparation settings", []string{"准备设置格式无效", "只能提交一份准备设置", "请选择有效的准备预设", "请提供所有阅读功能的准备方式", "%s 准备方式无效"}},
-		{2005402, http.StatusBadRequest, "Select a supported preparation scope", []string{"请选择本篇需要准备的功能", "准备请求格式无效", "本篇准备仅支持 PDF 解析、公式、图片和表格；论文速览尚不可用", "准备范围重复"}},
+		{2005402, http.StatusBadRequest, "Select a supported preparation scope", []string{"请选择本篇需要准备的功能", "准备请求格式无效", "本篇准备仅支持 PDF 解析、公式、图片和表格", "准备范围重复"}},
 		{2005403, http.StatusUnprocessableEntity, "Select an available document parser in AI reading preferences", []string{"文档解析服务不可用", "文档解析服务凭据不可用", "所选文档解析服务不可用，请在 AI 阅读准备中重新选择"}},
 		{2005404, http.StatusUnprocessableEntity, "Select an available study model in AI reading preferences", []string{"研读模型不可用", "所选研读模型不可用，请在 AI 阅读准备中重新选择", "所选研读模型不可用，请在 AI 阅读准备中重新选择或配置。"}},
 		{2005405, http.StatusForbidden, "The reading preparation account or permission is unavailable", []string{"阅读准备账户不可用", "阅读准备权限已撤销"}},

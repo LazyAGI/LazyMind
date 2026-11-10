@@ -65,22 +65,28 @@ func loadEmbeddingIndexStatus(ctx context.Context, db *gorm.DB) (EmbeddingIndexS
 	// but it does not mean that vectors are ready for display.
 	nonIndexedLevels := []string{"stored", "parsed", "chunked"}
 	if err := db.WithContext(ctx).Table("datasets d").
-		Joins("LEFT JOIN document_processing_states s ON s.dataset_id = d.id").
-		Where("d.deleted_at IS NULL AND (d.processing_level NOT IN ? OR s.index_status = ?)", nonIndexedLevels, "succeeded").
+		Joins("JOIN documents doc ON doc.dataset_id = d.id AND doc.deleted_at IS NULL").
+		Joins("LEFT JOIN document_processing_states s ON s.dataset_id = d.id AND s.document_id = doc.id").
+		Where("d.deleted_at IS NULL").
+		Where("doc.document_type IS NULL OR doc.document_type <> ?", "FOLDER").
 		Distinct("d.id").Count(&status.AffectedKnowledgeBases).Error; err != nil {
 		return EmbeddingIndexStatusResponse{}, err
 	}
 	// Treat a legacy indexed KB with no processing-state rows as potentially
 	// ready, while keeping known pending/failed KBs out of the ready count.
 	if err := db.WithContext(ctx).Table("datasets d").
-		Joins("LEFT JOIN document_processing_states s ON s.dataset_id = d.id").
+		Joins("JOIN documents doc ON doc.dataset_id = d.id AND doc.deleted_at IS NULL").
+		Joins("LEFT JOIN document_processing_states s ON s.dataset_id = d.id AND s.document_id = doc.id").
 		Where("d.deleted_at IS NULL AND (s.index_status = ? OR (s.dataset_id IS NULL AND d.processing_level NOT IN ?))", "succeeded", nonIndexedLevels).
+		Where("doc.document_type IS NULL OR doc.document_type <> ?", "FOLDER").
 		Distinct("d.id").Count(&status.IndexedKnowledgeBases).Error; err != nil {
 		return EmbeddingIndexStatusResponse{}, err
 	}
 	if err := db.WithContext(ctx).Table("datasets d").
 		Joins("JOIN document_processing_states s ON s.dataset_id = d.id").
-		Where("d.deleted_at IS NULL AND d.processing_level NOT IN ? AND s.index_status <> ?", nonIndexedLevels, "succeeded").
+		Joins("JOIN documents doc ON doc.id = s.document_id AND doc.dataset_id = d.id AND doc.deleted_at IS NULL").
+		Where("d.deleted_at IS NULL AND d.processing_level NOT IN ? AND s.index_status <> ? AND s.embedding_version <> ?", nonIndexedLevels, "succeeded", "reembed:manual").
+		Where("doc.document_type IS NULL OR doc.document_type <> ?", "FOLDER").
 		Distinct("d.id").Count(&status.PendingKnowledgeBases).Error; err != nil {
 		return EmbeddingIndexStatusResponse{}, err
 	}

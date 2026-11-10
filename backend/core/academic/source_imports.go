@@ -29,6 +29,18 @@ type sourceImportPolicy struct {
 	CreatedLibrary bool          `json:"created_library"`
 }
 
+const sourceAlreadyPresent = "already_present"
+
+var errSourceAlreadyPresent = errors.New("所选论文已在此论文集，请更新选择")
+
+const sourceTargetNotFoundCode = "TARGET_NOT_FOUND"
+const sourceTargetNotFoundMessage = "目标知识库不存在，请重新选择或新建知识库"
+
+func isSourceTargetNotFound(err error) bool {
+	var resource *doc.ResourceError
+	return errors.As(err, &resource) && resource.Code == "NOT_FOUND"
+}
+
 func sourcePolicy(b orm.PaperImportBatch) sourceImportPolicy {
 	var p sourceImportPolicy
 	_ = json.Unmarshal(b.PolicySnapshotJSON, &p)
@@ -54,7 +66,7 @@ func lockSourceTarget(ctx context.Context, tx *gorm.DB, c doc.DatasetCatalogCall
 		return orm.Dataset{}, result.Error
 	}
 	if result.RowsAffected != 1 {
-		return orm.Dataset{}, errors.New("target unavailable")
+		return orm.Dataset{}, &doc.ResourceError{Code: "NOT_FOUND", Message: sourceTargetNotFoundMessage}
 	}
 	return doc.ResolveResourceDataset(ctx, tx, c, id, acl.PermissionDatasetWrite)
 }
@@ -128,7 +140,7 @@ func createSourceImport(w http.ResponseWriter, r *http.Request, user string, req
 		return
 	}
 	batch := newSourceImportBatch(c, *req.SourceContext, target, batchID, req.IdempotencyKey, hash, len(unique), req.NewKnowledgeBase != nil)
-	if e = enqueueSourceImport(ctx, c, &batch, unique, nil); e != nil {
+	if e = enqueueSourceImport(ctx, c, &batch, unique, req.TargetDatasetID != "", nil); e != nil {
 		sourceSubmitError(w, target, e)
 		return
 	}
@@ -168,7 +180,7 @@ func newSourceImportBatch(c doc.DatasetCatalogCaller, source SourceContext, targ
 	return orm.PaperImportBatch{ID: batchID, EntryType: "conversation_sources", TargetDatasetID: target, SourceDocumentIDsJSON: json.RawMessage("[]"), PolicySnapshotJSON: policy, Status: "pending", TotalItems: count, IdempotencyKey: operationKey, CreatedBy: c.UserID, CreatedAt: now, UpdatedAt: now}
 }
 
-func enqueueSourceImport(ctx context.Context, c doc.DatasetCatalogCaller, batch *orm.PaperImportBatch, unique map[string]SourceInspection, guard func(context.Context, *gorm.DB) error) error {
+func enqueueSourceImport(ctx context.Context, c doc.DatasetCatalogCaller, batch *orm.PaperImportBatch, unique map[string]SourceInspection, checkPresence bool, guard func(context.Context, *gorm.DB) error) error {
 	now := batch.CreatedAt
 	return store.DB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if guard != nil {
@@ -192,6 +204,17 @@ func enqueueSourceImport(ctx context.Context, c doc.DatasetCatalogCaller, batch 
 			return nil
 		} else if !errors.Is(e, gorm.ErrRecordNotFound) {
 			return e
+		}
+		if checkPresence {
+			for _, source := range unique {
+				presence, err := sourceTargetPresence(ctx, tx, batch.TargetDatasetID, source)
+				if err != nil {
+					return err
+				}
+				if presence == sourceAlreadyPresent {
+					return errSourceAlreadyPresent
+				}
+			}
 		}
 		if e := tx.Create(batch).Error; e != nil {
 			return e
@@ -255,9 +278,16 @@ func enqueueSourceImport(ctx context.Context, c doc.DatasetCatalogCaller, batch 
 }
 
 func sourceSubmitError(w http.ResponseWriter, target string, e error) {
+	status, code, message := http.StatusConflict, "IMPORT_NOT_CREATED", e.Error()
+	switch {
+	case isSourceTargetNotFound(e):
+		status, code, message = http.StatusNotFound, sourceTargetNotFoundCode, sourceTargetNotFoundMessage
+	case errors.Is(e, errSourceAlreadyPresent):
+		code = "SOURCE_ALREADY_PRESENT"
+	}
 	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(409)
-	_ = json.NewEncoder(w).Encode(map[string]any{"code": "IMPORT_NOT_CREATED", "message": e.Error(), "target_dataset_id": target})
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(map[string]any{"code": code, "message": message, "target_dataset_id": target})
 }
 func mustSourceJSON(v any) json.RawMessage { b, _ := json.Marshal(v); return b }
 func sourceWork(ctx context.Context, tx *gorm.DB, s SourceInspection) (orm.AcademicWork, error) {
@@ -305,6 +335,7 @@ type SourceImportView struct {
 	Stage            string     `json:"stage"`
 	ProcessingStatus string     `json:"processing_status,omitempty"`
 	ProcessingLevel  string     `json:"processing_level,omitempty"`
+	StateUnavailable bool       `json:"state_unavailable,omitempty"`
 	DocumentID       string     `json:"document_id,omitempty"`
 	ErrorMessage     string     `json:"error_message,omitempty"`
 	ErrorCode        string     `json:"error_code,omitempty"`
@@ -366,11 +397,10 @@ func sourceItemView(ctx context.Context, b orm.PaperImportBatch, item orm.PaperI
 		v.Status = "needs_confirmation"
 	}
 	if item.DocumentID != "" {
-		var m doc.DocumentMetadata
+		var metadata map[string]doc.DocumentMetadata
 		if len(cached) > 0 {
-			var ok bool
-			m, ok = cached[0][b.TargetDatasetID][item.DocumentID]
-			if !ok {
+			metadata = cached[0][b.TargetDatasetID]
+			if metadata == nil {
 				return v, errors.New("document status unavailable")
 			}
 		} else {
@@ -378,50 +408,51 @@ func sourceItemView(ctx context.Context, b orm.PaperImportBatch, item orm.PaperI
 			if e != nil {
 				return v, e
 			}
-			m, e = svc.GetDocumentMetadata(ctx, doc.DocumentGetRequest{UserID: c.UserID, DatasetID: b.TargetDatasetID, DocumentID: item.DocumentID, Caller: c})
+			metadata, e = svc.GetProcessingMetadata(ctx, c, b.TargetDatasetID, []string{item.DocumentID})
 			if e != nil {
 				return v, e
 			}
 		}
-		v.ProcessingStatus = doc.DocumentProcessingStatus(m.ProcessingLevel, m.ProcessingState)
+		m, ok := metadata[item.DocumentID]
+		if !ok || b.EntryType == "conversation_sources" && !m.OriginalAvailable {
+			v.Status, v.DocumentID = "original_unavailable", ""
+			return v, nil
+		}
+		v.Status = "added"
+		if item.ErrorCode == sourceAlreadyPresent {
+			v.Status = "exists"
+		}
 		v.ProcessingLevel = m.ProcessingLevel
+		if b.EntryType == "conversation_sources" {
+			v.ProcessingLevel = m.ObservedProcessingLevel
+		}
+		v.ProcessingStatus = doc.DocumentProcessingStatus(v.ProcessingLevel, m.ProcessingState)
 		if m.ProcessingError != nil {
 			v.ProcessingStatus = "failed"
-		}
-		if m.ProcessingError != nil {
 			v.ErrorMessage = "PDF 已保存，正文处理失败"
 			v.ErrorCode, v.ErrorDetail, v.ErrorRecovery = m.ProcessingError.Code, m.ProcessingError.Message, m.ProcessingError.Recovery
 			v.Stage = m.ProcessingError.Stage
-		}
-		if item.ErrorCode == "already_present" {
-			v.Status = "exists"
-		} else {
-			switch v.ProcessingStatus {
-			case "ready", "not_requested":
-				v.Status = "added"
-			case "failed":
-				v.Status = "failed"
-			case "unknown":
-				v.Status = "unknown"
-			default:
-				v.Status = "running"
-			}
 		}
 		v.Retryable = v.ProcessingStatus == "failed"
 	} else if item.Status == "failed" && item.ErrorCode != "needs_confirmation" {
 		v.Retryable = detail.RetryAt == nil || !detail.RetryAt.After(time.Now())
 	}
-	if (item.Status == "running" || item.Status == "pending") && v.Status != "added" && v.Status != "exists" {
+	if item.Status == "running" || item.Status == "pending" {
+		saved := v.Status == "added" || v.Status == "exists"
 		var job orm.AsyncJob
 		if e := store.DB().Where("id = ?", b.AsyncJobID).Take(&job).Error; e == nil && (job.Status == "failed" || job.Status == "canceled") {
-			v.Status = "failed"
+			if saved {
+				v.ProcessingStatus = "failed"
+			} else {
+				v.Status = "failed"
+			}
 			v.Retryable = true
 			v.ErrorMessage = "后台任务已中断，请重试"
+		} else if item.Stage == "reparse" && saved {
+			v.ProcessingStatus, v.Stage, v.ErrorMessage, v.Retryable = item.Status, "processing", "", false
 		}
 	}
-	if item.Stage == "reparse" && (item.Status == "pending" || item.Status == "running") && v.ErrorMessage != "后台任务已中断，请重试" {
-		v.Status, v.Stage, v.ErrorMessage, v.Retryable = item.Status, "processing", "", false
-	}
+	v.StateUnavailable = v.ProcessingStatus == "unknown"
 	if v.Retryable {
 		v.RetryBatchID = b.ID
 		v.RetryItemID = item.ID
@@ -520,7 +551,7 @@ func ListSourceImports(w http.ResponseWriter, r *http.Request) {
 		v, err := sourceItemView(r.Context(), byBatch[item.BatchID], item, sourceCaller(r), metadata)
 		if err != nil {
 			v.Status = "unknown"
-			v.ErrorMessage = "状态暂时无法获取"
+			v.StateUnavailable = true
 		}
 		views = append(views, v)
 	}

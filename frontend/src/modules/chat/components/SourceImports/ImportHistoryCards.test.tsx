@@ -11,7 +11,7 @@ describe("paper import history", () => {
         status: "exists",
         processing_status: "failed",
       } as ImportItem),
-    ).toBe("已存在 · 解析失败");
+    ).toBe("已存在 · 处理失败");
     expect(
       importStatusLabel({
         status: "added",
@@ -32,6 +32,15 @@ describe("paper import history", () => {
     processing_status: "ready",
     retryable: false,
   };
+  it("keeps a saved original in the added count even when processing failed", () => {
+    render(<MemoryRouter><ImportHistoryCards
+      imports={[{ ...importedPaper, document_id: "pdf", processing_status: "failed", retryable: true }]}
+      onRetry={vi.fn()} retrying={false} /></MemoryRouter>);
+    expect(screen.getByText(/已加入 1 · 已存在 0 · 加入失败 0/)).toBeInTheDocument();
+    expect(screen.getByText("当前处理状态：已加入 · 处理失败")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "重试正文处理" })).toBeInTheDocument();
+    expect(importStatusLabel({ ...importedPaper, status: "unknown", state_unavailable: true })).toBe("状态暂时无法获取");
+  });
   it("does not invent a creation receipt or heading for imports into an existing target", async () => {
     const refreshImports = vi.fn().mockResolvedValue(undefined);
     render(

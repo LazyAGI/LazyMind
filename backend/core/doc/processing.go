@@ -336,15 +336,24 @@ func syncProcessingTaskStates(r *http.Request, datasetID string) {
 		var base orm.DocumentProcessingState
 		if store.DB().WithContext(r.Context()).Where("dataset_id = ? AND document_id = ?", datasetID, task.DocID).
 			Take(&base).Error == nil && (base.ParseArtifactRef != "" || base.EmbeddingVersion == embeddingVersionReembedPending || base.EmbeddingVersion == embeddingVersionReembedManual) {
-			if ext.ProcessingLevel == ProcessingLevelIndexed && base.IndexArtifactRef != "core-task:"+task.ID {
-				continue // A previous generation must not complete a newly prepared artifact.
+			if base.EmbeddingVersion == embeddingVersionReembedManual {
+				if base.IndexArtifactRef != "core-task:"+task.ID {
+					continue
+				}
+				if status == "succeeded" {
+					updates["embedding_version"] = ""
+				}
+			} else {
+				if ext.ProcessingLevel == ProcessingLevelIndexed && base.IndexArtifactRef != "core-task:"+task.ID {
+					continue // A previous generation must not complete a newly prepared artifact.
+				}
+				// A vector failure must not erase independently usable native artifacts.
+				delete(updates, "parse_status")
+				delete(updates, "chunk_status")
 			}
-			// A vector failure must not erase independently usable native artifacts.
-			delete(updates, "parse_status")
-			delete(updates, "chunk_status")
 		}
 		query := store.DB().WithContext(r.Context()).Model(&orm.DocumentProcessingState{}).
-			Where("dataset_id = ? AND document_id = ?", datasetID, task.DocID)
+			Where("dataset_id = ? AND document_id = ? AND revision = ?", datasetID, task.DocID, base.Revision)
 		if ext.ProcessingLevel == ProcessingLevelIndexed {
 			query = query.Where("index_status <> ?", status)
 		}

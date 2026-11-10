@@ -29,6 +29,7 @@ const (
 )
 
 var prepareCodexDesktop = codexhost.PrepareDesktopForInstallation
+var waitCodexReady = codexhost.WaitReady
 var cleanupCodexPresentation = codexhost.CleanupPresentation
 
 type Adapter struct {
@@ -143,11 +144,9 @@ func (a *Adapter) status(context.Context) agentintegration.Status {
 			scope, e := store.AccountScope()
 			if e == nil {
 				if current, statusErr := codexhost.ReadStatus(a.home, scope); statusErr == nil {
-					ready = current.Ready
+					issue = codexhost.StatusIssue(current)
+					ready = issue == ""
 					presentation = current.Presentation.Status
-					if current.Issue == "cdp_unavailable" || current.Issue == "capability_unavailable" {
-						issue = current.Issue
-					}
 				}
 			}
 		}
@@ -216,10 +215,7 @@ func (a *Adapter) Connect(ctx context.Context) (result agentintegration.Status) 
 			if e = codexhost.Configure(a.home, record.Node, record.PairingFile); e != nil {
 				return agentintegration.Fail(status, e.Error())
 			}
-			if e = prepareCodexDesktop(ctx, a.home); e != nil {
-				return agentintegration.FailError(status, e)
-			}
-			return a.Status(ctx)
+			return a.connectDesktop(ctx, account, status, operation)
 		}
 	}
 	// Installation is local and uses the saved account scope. A temporarily
@@ -235,10 +231,7 @@ func (a *Adapter) Connect(ctx context.Context) (result agentintegration.Status) 
 	if err := codexhost.Configure(a.home, record.Node, record.PairingFile); err != nil {
 		return agentintegration.FailError(status, err)
 	}
-	if err := prepareCodexDesktop(ctx, a.home); err != nil {
-		return agentintegration.FailError(status, err)
-	}
-	// Remove the product's old named entry after the replacement plugin is installed.
+	// Finish configuration before restarting so Codex loads the replacement only.
 	if _, exists, err := a.getConfig(); err != nil {
 		return agentintegration.FailError(status, err)
 	} else if exists {
@@ -247,7 +240,29 @@ func (a *Adapter) Connect(ctx context.Context) (result agentintegration.Status) 
 			return agentintegration.Fail(status, "remove legacy MCP entry: "+err.Error())
 		}
 	}
-	return a.Status(ctx)
+	return a.connectDesktop(ctx, account, status, operation)
+}
+
+func (a *Adapter) connectDesktop(ctx context.Context, account string, status agentintegration.Status, operation *agentintegration.Operation) agentintegration.Status {
+	setup, cancel := context.WithTimeout(ctx, 60*time.Second)
+	defer cancel()
+	operation.Enter("restart")
+	if err := prepareCodexDesktop(setup, a.home); err != nil {
+		return codexConnectionFailure(status, err)
+	}
+	since := time.Now()
+	current := a.Status(setup)
+	// A user-disabled plugin cannot produce a heartbeat until the enable step.
+	// Preserve that explicit choice and let the guide explain how to enable it.
+	if current.Connection != nil && current.Connection.MCPConfigured && !current.Connection.MCPEnabled {
+		return current
+	}
+	operation.Enter("control")
+	if err := waitCodexReady(setup, a.home, account, since); err != nil {
+		return codexConnectionFailure(current, err)
+	}
+	operation.Enter("verify")
+	return a.Status(setup)
 }
 
 // Refresh updates an already enabled, owned plugin without performing desktop

@@ -129,6 +129,7 @@ const DocumentStageEnum = {
   CANCELED: "knowledge.stageCanceled",
   DELETING: "knowledge.stageDeleting",
   DELETED: "knowledge.stageDeleted",
+  DOCUMENT_REPARSE_REQUIRED: "knowledge.stageReparseRequired",
 
   [DocDocumentStageEnum.DocumentUploaded]: "knowledge.pending",
   [DocDocumentStageEnum.DocumentQueued]: "knowledge.pending",
@@ -150,6 +151,7 @@ const DocumentStageTagColorMap = {
   CANCELED: "warning",
   DELETING: "processing",
   DELETED: "default",
+  DOCUMENT_REPARSE_REQUIRED: "warning",
 
   [DocDocumentStageEnum.DocumentUploaded]: "default",
   [DocDocumentStageEnum.DocumentQueued]: "default",

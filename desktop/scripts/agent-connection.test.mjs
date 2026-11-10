@@ -47,7 +47,7 @@ for (const platform of ['darwin', 'win32']) {
       [['assistant', 'start'], 15000],
       [['internal', 'agent', 'workbuddy', 'connect'], 120000],
       [['assistant', 'start'], 15000],
-      [['internal', 'agent', 'codex', 'connect'], 90000],
+      [['internal', 'agent', 'codex', 'connect'], 120000],
       [['internal', 'agent', 'all', 'status'], 30000],
       [['internal', 'agent', 'deepseek-harness', 'status'], 30000],
       [['internal', 'agent', 'deepseek-harness', 'disconnect'], 60000],
