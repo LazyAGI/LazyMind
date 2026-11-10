@@ -8,9 +8,11 @@ afterEach(() => { cleanup(); sessionStorage.clear(); });
 describe("PDF translation notice", () => {
   it("dismisses a failed job and keeps it closed when the status refreshes", () => {
     const job: PdfRenderJob = { id: "failed-1", kind: "TRANSLATION_PDF", cache_key: "cache", status: "FAILED", stage: "TRANSLATING", progress: 40, error_message: "provider failed" };
-    const props = { documentId: "paper-1", job, preparing: false, detail: "", providerLabel: "Baidu", onCancel: vi.fn() };
+    const props = { documentId: "paper-1", job, preparing: false, detail: "后端正在执行，刷新或关闭页面不会中断", providerLabel: "Baidu", onCancel: vi.fn() };
     const { rerender, unmount } = render(<PdfTranslationNotice {...props} />);
     expect(screen.getByText("翻译失败")).toBeInTheDocument();
+    expect(screen.queryByText(props.detail)).not.toBeInTheDocument();
+    expect(screen.getByText("任务已停止，可重试")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "关闭翻译提示" }));
     expect(screen.queryByText("翻译失败")).not.toBeInTheDocument();
     rerender(<PdfTranslationNotice {...props} job={{ ...job }} />);
