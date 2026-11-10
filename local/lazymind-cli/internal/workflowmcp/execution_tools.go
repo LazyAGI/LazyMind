@@ -28,13 +28,13 @@ type ExecutionToolCallInput struct {
 
 func registerExecutionTools(server *mcp.Server, client *Client) {
 	mcp.AddTool(server, &mcp.Tool{Name: "workflow.tool.list", Title: "List tools for a Workflow execution",
-		Description: "List tools explicitly allowed by this active execution's pinned external contract, including schemas and availability. The root controller holds the execution_handle and proxies worker requests; workers do not control Workflow state. Missing capabilities must be configured in LazyMind before retrying.", Annotations: annotations(true)},
+		Description: "List tools explicitly allowed by this active execution's pinned external contract, including schemas and availability. The bound controller holds the execution_handle and may execute directly or proxy optional worker requests; workers do not control Workflow state. Missing capabilities must be configured in LazyMind before retrying.", Annotations: annotations(true)},
 		func(ctx context.Context, _ *mcp.CallToolRequest, input ExecutionToolsInput) (*mcp.CallToolResult, map[string]any, error) {
 			value, err := client.ListExecutionTools(ctx, input)
 			return nil, value, err
 		})
 	mcp.AddTool(server, &mcp.Tool{Name: "workflow.tool.call", Title: "Call a tool for a Workflow execution",
-		Description: "The root controller executes one tool explicitly allowed by the pinned external contract on behalf of a worker. Use the listed name and schema, unchanged execution_handle, and a stable command_id for unchanged retries. This does not publish or complete a step. Do not send credentials or arbitrary host filesystem paths. If unavailable, show the LazyMind configuration guidance and yield; do not replace the workflow or silently use a different capability.", Annotations: annotations(false)},
+		Description: "The bound controller executes one tool explicitly allowed by the pinned external contract, directly or on behalf of an optional worker. Use the listed name and schema, unchanged execution_handle, and a stable command_id for unchanged retries. This does not publish or complete a step. Do not send credentials or arbitrary host filesystem paths. If unavailable, show the LazyMind configuration guidance and yield; do not replace the workflow or silently use a different capability.", Annotations: annotations(false)},
 		func(ctx context.Context, _ *mcp.CallToolRequest, input ExecutionToolCallInput) (*mcp.CallToolResult, map[string]any, error) {
 			value, err := client.CallExecutionTool(ctx, input)
 			return nil, value, err

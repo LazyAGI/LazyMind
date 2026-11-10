@@ -176,6 +176,7 @@ type StepContract struct {
 	AttemptNo               int               `json:"attempt_no"`
 	Operation               string            `json:"operation"`
 	Objective               string            `json:"objective,omitempty"`
+	ObjectiveRef            string            `json:"objective_ref,omitempty"`
 	Prompt                  string            `json:"prompt,omitempty"`
 	Acceptance              []string          `json:"acceptance_criteria,omitempty"`
 	Instruction             string            `json:"instruction,omitempty"`
@@ -226,7 +227,7 @@ type CompleteInput struct {
 	Outcome         string `json:"outcome" jsonschema:"required,One of succeeded failed or cancelled"`
 	Summary         string `json:"summary,omitempty"`
 	ErrorCode       string `json:"error_code,omitempty"`
-	ExecutorRef     string `json:"executor_ref,omitempty" jsonschema:"Optional external Agent task or trace reference"`
+	ExecutorRef     string `json:"executor_ref,omitempty" jsonschema:"Optional real external task conversation or trace reference; a subagent is not required and this does not imply independent validation"`
 }
 
 type CompleteResult struct {
@@ -277,9 +278,26 @@ func NewClient(api *coreapi.Client, origin StartOrigin) (*Client, error) {
 }
 
 func (c *Client) List(ctx context.Context) (map[string]any, error) {
-	var result map[string]any
-	err := c.api.DoJSON(ctx, http.MethodGet, "/workflow-runtime/v1/workflows", nil, &result)
-	return result, err
+	var result struct {
+		Workflows []map[string]any `json:"workflows"`
+	}
+	if err := c.api.DoJSON(ctx, http.MethodGet, "/workflow-runtime/v1/workflows", nil, &result); err != nil {
+		return nil, err
+	}
+	// Discovery needs routing and revision metadata, not every package's graph
+	// and implementation. Get supplies startup inputs; begin supplies full pinned
+	// instructions for the selected step. An allowlist also bounds future fields.
+	workflows := make([]map[string]any, 0, len(result.Workflows))
+	for _, pkg := range result.Workflows {
+		summary := map[string]any{}
+		for _, key := range []string{"resource_id", "workflow_ref", "workflow_id", "name", "description", "when_to_use", "source_type", "revision_id", "revision_no", "tree_hash", "graph_hash", "graph_schema_version", "contains_scripts"} {
+			if value, exists := pkg[key]; exists {
+				summary[key] = value
+			}
+		}
+		workflows = append(workflows, summary)
+	}
+	return map[string]any{"workflows": workflows}, nil
 }
 
 func (c *Client) Get(ctx context.Context, workflowID, revisionID string) (map[string]any, error) {

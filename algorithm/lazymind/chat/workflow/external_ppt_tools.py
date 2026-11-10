@@ -12,9 +12,11 @@ import io
 import json
 import os
 from pathlib import Path
+import posixpath
 import re
 import shutil
 import subprocess
+import sys
 import tempfile
 from typing import Any
 import xml.etree.ElementTree as ET
@@ -32,6 +34,136 @@ class ExternalToolError(ValueError):
 
 MAX_FILE_BYTES = 24 * 1024 * 1024
 MAX_HTML_BYTES = 16 * 1024 * 1024
+
+
+def ppt_compute_timing(total_minutes: float, pages: list[dict[str, Any]]) -> dict[str, Any]:
+    """Use native weighted timing for ordered {title, weight} pages; return exact seconds and notes prefixes."""
+    from .ppt_planning import plan_timing
+    try:
+        return plan_timing(total_minutes, json.dumps(pages, ensure_ascii=False))
+    except (TypeError, ValueError) as exc:
+        raise ExternalToolError('INVALID_ARGUMENT', str(exc)) from exc
+
+
+def ppt_order_papers(
+    papers: list[dict[str, Any]],
+    dependencies: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """Use native prerequisite ordering for {source_id,title} papers and {prerequisite,dependent,evidence} edges."""
+    from .ppt_planning import plan_paper_order
+    if not isinstance(papers, list) or not 1 <= len(papers) <= 200:
+        raise ExternalToolError('INVALID_ARGUMENT', 'Provide between 1 and 200 selected papers.')
+    if dependencies is not None and (not isinstance(dependencies, list) or len(dependencies) > 1000):
+        raise ExternalToolError('INVALID_ARGUMENT', 'Provide at most 1000 paper dependencies.')
+    try:
+        return plan_paper_order(json.dumps(papers, ensure_ascii=False),
+                                json.dumps(dependencies if dependencies is not None else [], ensure_ascii=False))
+    except (TypeError, ValueError) as exc:
+        raise ExternalToolError('INVALID_ARGUMENT', str(exc)) from exc
+
+
+def _package_page_prompt() -> str:
+    """Read the native prompt from the verified snapshot, never live package code."""
+    from .external_tool_context import get_external_package_files
+    files = get_external_package_files()
+    remaining = 1024 * 1024
+
+    def expand(name: str, stack: tuple[str, ...] = ()) -> str:
+        nonlocal remaining
+        if name in stack or len(stack) >= 16:
+            raise ExternalToolError('INVALID_PACKAGE', 'Page prompt includes are recursive or too deep.')
+        raw = files.get(name)
+        if not isinstance(raw, bytes) or len(raw) > 1024 * 1024:
+            raise ExternalToolError('INVALID_PACKAGE', 'The pinned package is missing its native page prompt.')
+        try:
+            prompt = raw.decode('utf-8')
+        except UnicodeDecodeError as exc:
+            raise ExternalToolError('INVALID_PACKAGE', 'The native page prompt must be UTF-8 text.') from exc
+        pattern = r'<<<INLINE:\s*([^>]+)>>>'
+        # Account for each repeated include before re.sub accumulates its
+        # replacement strings. Checking only the final joined string permits
+        # an otherwise small package to allocate an unbounded expanded prompt.
+        remaining -= len(prompt.encode()) - sum(
+            len(match.group(0).encode()) for match in re.finditer(pattern, prompt)
+        )
+        if remaining < 0:
+            raise ExternalToolError('INVALID_PACKAGE', 'The expanded page prompt exceeds the 1 MiB limit.')
+
+        def include(match: re.Match) -> str:
+            reference = match.group(1).strip()
+            name = posixpath.normpath('runtime/' + reference)
+            if (reference.startswith('/') or '\\' in reference or '\0' in reference
+                    or name == '..' or name.startswith('../')):
+                raise ExternalToolError('INVALID_PACKAGE', 'Page prompt includes must stay inside the package.')
+            return expand(name, (*stack, name_of_prompt))
+
+        name_of_prompt = name
+        prompt = re.sub(pattern, include, prompt)
+        if len(prompt.encode()) > 1024 * 1024:
+            raise ExternalToolError('INVALID_PACKAGE', 'The expanded page prompt exceeds the 1 MiB limit.')
+        return prompt
+
+    return expand('runtime/prompts/page_html.md')
+
+
+def ppt_prepare_page(
+    page_no: int,
+    brief: str,
+    generation_responses: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """Prepare or accept one page using the native PPT generation contract.
+
+    Pass the approved complete page brief, including its language, content,
+    shared style and inline material assets. The first call returns a
+    generation_request for the external agent's model. Call again with the
+    same inputs and generation_responses=[{request_hash, text}] to accept its
+    HTML; the result contains one HTML file for rendering and deck export.
+    This adapter never calls a model. The external agent owns content/visual
+    validation; LazyMind owns prompt assembly, HTML normalization and export.
+    """
+    from .action_generation import GenerationRequired, generate, generation_scope
+    from .ppt_generation import (
+        HTML_DOCUMENT, page_generation_query, page_generation_system, sanitize_page_html,
+    )
+    if type(page_no) is not int or not 1 <= page_no <= 100:
+        raise ExternalToolError('INVALID_ARGUMENT', 'page_no must be between 1 and 100.')
+    if not isinstance(brief, str) or not brief.strip() or len(brief.encode()) > MAX_HTML_BYTES:
+        raise ExternalToolError('INVALID_ARGUMENT', 'Provide a complete page brief within the 16 MiB limit.')
+    responses = generation_responses if generation_responses is not None else []
+    if (not isinstance(responses, list) or len(responses) > 1
+            or any(not isinstance(item, dict) or set(item) != {'request_hash', 'text'}
+                   or not isinstance(item['request_hash'], str) or not isinstance(item['text'], str)
+                   or len(item['text'].encode()) > MAX_HTML_BYTES for item in responses)):
+        raise ExternalToolError('INVALID_ARGUMENT', 'Provide at most one {request_hash, text} generation response.')
+    system_prompt = page_generation_system(_package_page_prompt()) + (
+        '\n\nOFFLINE TRANSFER CONTRACT: Return a standalone HTML page with all assets inline. '
+        'Use static HTML/CSS or self-contained SVG for charts. Scripts, ECharts initialization, '
+        'external URLs, local file paths, named asset placeholders and active elements are unavailable '
+        'in this transfer. If an approved image is supplied as a data URI, preserve it inline. '
+        'Do not invent or fetch missing assets. This transport rule takes priority over optional '
+        'script-based chart or named-asset examples in the package prompt.'
+    )
+    query = page_generation_query(brief, prompt_mode='complete-page-prompt', language='')
+    try:
+        with generation_scope(responses):
+            html = generate(system_prompt, query, request_name=f'page-html:{page_no}')
+    except GenerationRequired as pending:
+        return {'status': 'generation_required', 'page_no': page_no,
+                'generation_request': pending.request, 'validation_owner': 'external-agent'}
+    except ValueError as exc:
+        raise ExternalToolError('INVALID_ARGUMENT',
+                                'Generation response does not match this pinned page request.') from exc
+    html = sanitize_page_html(html)
+    if not HTML_DOCUMENT.fullmatch(html.strip()):
+        raise ExternalToolError('INVALID_ARGUMENT',
+                                'Regenerate a complete HTML document; the page is truncated or invalid.')
+    if re.search(r'\bdata-ppt-asset\s*=', html, re.I):
+        raise ExternalToolError('INVALID_ARGUMENT',
+                                'Inline actual assets instead of unresolved named asset placeholders.')
+    html = _html(html)
+    return {'status': 'ready', 'page_no': page_no,
+            'files': [_file(html.encode(), f'page_{page_no:03d}.html', 'text/html')],
+            'validation_owner': 'external-agent'}
 
 
 class _OfflineHTML(HTMLParser):
@@ -98,7 +230,9 @@ def _cli(render: bool = False) -> tuple[str, Path]:
 def _run(command: list[str], timeout: int) -> dict[str, Any]:
     try:
         result = subprocess.run(command, capture_output=True, text=True, timeout=timeout, check=False,
-                                env={**os.environ, 'LAZYMIND_PPT_EXTERNAL_OFFLINE': '1'})
+                                env={**os.environ, 'LAZYMIND_PPT_EXTERNAL_OFFLINE': '1',
+                                     'LAZYMIND_FONT_SUBSET_PYTHON':
+                                         os.environ.get('LAZYMIND_FONT_SUBSET_PYTHON') or sys.executable})
     except (OSError, subprocess.TimeoutExpired) as exc:
         raise ExternalToolError('TOOL_EXECUTION_FAILED', 'The configured PPT renderer could not finish.') from exc
     if result.returncode:

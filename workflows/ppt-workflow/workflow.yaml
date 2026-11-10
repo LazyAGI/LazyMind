@@ -71,6 +71,12 @@ runtime:
           source: package
       collect_materials:
         tools:
+        - name: pdf_read_text
+          source: package
+        - name: pdf_extract_images
+          source: package
+        - name: ppt_order_papers
+          source: package
         - name: academic_context
           source: package
         - name: academic_read_paper
@@ -82,7 +88,9 @@ runtime:
       build_outline:
         skills:
         - runtime/prompts/outline.md
-        tools: []
+        tools:
+        - name: ppt_compute_timing
+          source: package
       plan_page_prompts:
         skills:
         - runtime/prompts/style_spec.md
@@ -106,6 +114,8 @@ runtime:
         - runtime/prompts/refine_review.md
         - runtime/prompts/refine_apply.md
         tools:
+        - name: ppt_prepare_page
+          source: package
         - name: ppt_export_html
           source: package
         - name: ppt_render_html
@@ -495,6 +505,10 @@ runtime:
         - 不启用｜使用纯色、渐变和矢量装饰
 
 tool_scripts:
+  - path: scripts/external_pdf_tools.py
+    functions: [pdf_read_text, pdf_extract_images]
+  - path: scripts/external_generation_tools.py
+    functions: [ppt_prepare_page, ppt_compute_timing, ppt_order_papers]
   - path: scripts/external_tools.py
     functions: [ppt_export_html, ppt_inspect_pptx, ppt_render_html]
   - path: scripts/tools.py

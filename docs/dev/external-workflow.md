@@ -7,7 +7,7 @@
 | 参与方 | 职责 |
 | --- | --- |
 | 工作流包 | 声明步骤、Skill、约束、输入/输出和可选工具 |
-| 外部宿主 | 创建原生 subagent，完成生成、检索、语义/视觉验证和修复 |
+| 外部宿主 | 完成生成、检索、语义/视觉验证和修复；有 subagent 时可分派，没有时由当前 Agent 顺序执行 |
 | 根 Controller | 读取状态、领取授权，代理工具调用，发布产物、完成步骤，响应停止 |
 | LazyMind Core | 固定 revision，存储输入/产物/状态，检查归属、租约、类型、幂等与版本 |
 | LazyMind Chat 工具服务 | 提供明确开放的确定性工具或用户已配置的媒体能力 |
@@ -24,7 +24,7 @@ LazyMind 不根据模型评分决定外部产物是否合格，不要求语义�
 - 同一 revision 的原生和外部执行器收到相同的 `step_contract.prompt`、`execution.skill_files`、`execution.constraints`、验收和必需输出。Skill 按固定 revision 读取，包含 `path`、`content` 和 `sha256`；原生 runner 也实际加载这些内容。
 - 编译器拒绝在 `runtime.execution.steps` 覆盖 prompt、acceptance 或 required_outputs，避免形成第二套业务规则。
 - 原生工具包装、本地路径、tools-only 和自动保存方式属于执行适配。外部执行器按照公共 `external_execution.adapter_instructions`，用宿主能力或已声明的 MCP 工具完成相同业务要求。它不需要安装或调用原生模型包装。
-- `external_execution` 仍作为兼容的返回字段存在，但新包的值从共享契约推导；它不是第二份可编辑的业务定义。旧 revision 的独立 `runtime.external_execution` 及未声明外部能力的 executor 路由继续保持，运行中不能替换绑定 revision。
+- 共享契约在线上传输时仅保留一份 Skill 和业务指令。`external_execution` 返回版本、验证归属、适配说明和 `execution_ref: "#/execution"`，引用同一 `execution`；不再重复 Skill 正文、prompt、验收及工具清单。`objective_ref: "#/prompt"` 表示复用顶层 prompt；若另有 objective 文本，将其作为额外运行要求。旧 revision 的独立 `runtime.external_execution` 及未声明外部能力的 executor 路由继续保持，运行中不能替换绑定 revision。
 - `launch_request` 和 `user_request` 分别携带启动与本次执行/重试请求，必须连同输入传给 worker。
 - 外部验证由宿主执行；服务端继续检查类型、哈希、owner、当前 lease 和幂等。Native 与外部均遵守同一状态机、列表顺序、审核、暂停和条件输出。
 
@@ -36,13 +36,13 @@ LazyMind 不根据模型评分决定外部产物是否合格，不要求语义�
 2. `workflow.start` 使用唯一且稳定的 `idempotency_key`。缺少输入时按返回问题继续收集；不创建重复 run。宿主 Connector 提供真实会话身份，不能编造 `driver_session_id`。
 3. 读取 `workflow.state`。已有 execution 用 `workflow.step.claim`，仅在 admission 允许时 `workflow.step.begin`。
 4. 取得 `execution_handle` 与固定 `step_contract`。根代理保留 handle，不给 worker。
-5. 用宿主原生 subagent 执行该步骤；传入完整固定契约（包括共享 execution Skill、步骤业务说明、启动/补充请求、输入资源、必需/条件输出）与独立输出目录。需要 LazyMind 工具时由 worker 返回调用请求，根代理代为调用。
-6. 用宿主验证 worker 检查实际文件、源事实和预览；修复失败项。worker 返回真实 artifact manifest 和验证结论。
+5. 有 subagent 时可分派执行；没有时由当前外部 Agent 执行该步骤。执行方读取完整固定契约（包括共享 execution Skill、步骤业务说明、启动/补充请求、输入资源、必需/条件输出）与独立输出目录。需要 LazyMind 工具时由 worker 返回调用请求，根代理代为调用。
+6. 对实际文件、源事实和预览进行单独验证，修复失败项。可由独立 worker 验证，也可由同一 Agent 进行第二轮检查；后者须注明同 Agent 验证，不能声称独立复核。返回真实 artifact manifest 和验证结论。
 7. 根代理逐项 `workflow.artifact.publish`；每个槽使用稳定正整数 `seq`，重试不换序号。文件必须存在于 Connector 可读的机器上。
-8. 收到全部发布回执后，调用 `workflow.step.complete`，传原 handle、outcome 和实际 worker 的 `executor_ref`。最终文字不能代替产物保存。
+8. 收到全部发布回执后，调用 `workflow.step.complete`，传原 handle、outcome 和实际执行者的可选 `executor_ref`（真实任务、会话或 trace 引用）。最终文字不能代替产物保存。
 9. 按最新状态继续。待人工审核时交还用户；完成时交付 artifact 链接。停止/回退/重领后丢弃旧 worker 结果，不能使用旧 handle 提交。
 
-MCP 不负责替宿主启动原生 subagent。所有宿主遵守相同的 MCP 执行说明；Codex Skill 仅映射原生子代理和问答工具，不维护工作流业务规则。`executor_ref` 用于关联日志，不是服务端可验证的宿主运行证明。其他宿主需自行实现生成和验证 worker、取消及恢复适配。
+MCP 不负责替宿主启动原生 subagent。所有宿主遵守相同的 MCP 执行说明；Codex Skill 仅映射原生子代理和问答工具，不维护工作流业务规则。`executor_ref` 用于关联日志，不是服务端可验证的宿主运行证明。其他宿主需实现生成、验证、取消及恢复适配，子 Agent 不是协议前提。单 Agent 仍需遵守授权、暂停、ask 和版本检查。
 
 输入契约可能只含修订引用。根 Controller 用 `workflow.input.get` 读取输入资源、用 `workflow.artifact.get` 读取绑定的 `source_revision_id`，校验内容和版本后把实际文件或文本交给 worker；不能仅凭文件名或旧会话缓存重建内容。下载与发布都复用正常凭证机制，凭证不进入 worker 提示或产物。
 
@@ -123,7 +123,13 @@ HTTP body 对应 MCP 参数，路径中的 execution 使用 `attempt_id`；body 
 
 `package` 只运行服务明确注册的适配器，不动态执行来自 Workflow 包的 Python/JS。PPT 适配器通过固定 revision 的完整文件快照和 tree hash 调用内部 `/api/workflow/external-tools/list|call`；Core 校验 blob hash，Chat 再校验快照树与工具绑定。知识库和学术适配器在 Core 内复用已有数据服务，并校验固定 revision 中的审计标记文件。新增工具须增加适配器、严格参数 schema、资源限制和入口行为测试。
 
-PPT 的无模型工具是 `ppt_export_html`、`ppt_render_html`、`ppt_inspect_pptx`。分别导出可编辑 PPTX、渲染 HTML 预览、检查实际 PPTX 页数/文本/备注。渲染和检查提供事实，不代替外部 worker 的视觉与语义判断。一页 PPTX 是合法请求，不额外生成封面。
+PPT 的无模型工具包括 `ppt_prepare_page`、`ppt_compute_timing`、`ppt_order_papers`、`pdf_read_text`、`pdf_extract_images`，以及 `ppt_export_html`、`ppt_render_html`、`ppt_inspect_pptx`。后三项分别导出可编辑 PPTX、渲染 HTML 预览、检查实际 PPTX 页数/文本/备注。渲染和检查提供事实，不代替外部 worker 的视觉与语义判断。一页 PPTX 是合法请求，不额外生成封面。
+
+`ppt_prepare_page` 复用原生页面请求组装与 HTML 规范化，模板文字从当前固定 revision 读取。首次调用返回 `generation_request`；外部 Agent 按原样处理其中的 system/user prompt，再以相同页码、brief 和 `generation_responses: [{request_hash, text}]` 回传。返回 `ready` 后得到实际 HTML 文件；哈希不匹配会拒绝。它只完成确定性检查，视觉与语义检查由外部执行者完成。页面可并行生成，但通过检查的一页须立即发布，不能等待整套导出。计时与论文排序工具也复用原生实现。
+
+PDF 工具优先传 `resource_ref: "resource:<source_id>"`，其中 ID 来自当前步骤固定附件输入。Core 校验 owner、绑定、revision 和内容 hash 后内部传字节，避免外部上下文反复携带 base64；也支持显式 `content_base64`，两者不能混用。`pdf_read_text` 使用页范围与字符预算分页，按 `next_page`/`next_page_offset` 继续，不运行 OCR 或模型；扫描件无文本时应由外部能力处理并披露。`pdf_extract_images` 复用原生 PDF 图像/区域提取，返回 PDF 页码与边界，`include_content: true` 才返回图片字节供保存和视觉验证；只提取不调用本地视觉模型。
+
+`workflow.list` 只返回可路由的工作流元数据，不返回全部执行图和实现源码；选定后用 `workflow.get` 获取启动要求，用步骤执行接口获取完整业务契约。每步只读取一次完整契约，控制器保留资源引用和简短执行记录；产物文件、完整 HTML、图片 base64 和已检查的前一步全文不重复打印进模型上下文。按需要解析本步骤的固定输入；不能用裁剪业务 Skill 来换取速度。
 
 HTML 导出器会把表格转换为可编辑文本和线条；要求原生 PowerPoint 表格或图表时，宿主须补建对应原生对象，再检查最终 PPTX。HTML 预览正确也不能替代最终文件渲染：字体替换、表格结构和备注都应检查实际文件，渲染环境须具备相应语言的字体。
 
@@ -152,7 +158,7 @@ local/build/bin/lazymind internal agent codex refresh
 
 独立协议调试入口为 `local/build/bin/lazymind mcp codex-workflow`；需使用已安装插件声明的 provider、host control 和 pairing 配置，只有指定进程模式并不会自动启用会话绑定。仍沿用正常凭证机制。不要将 token、provider key 或测试身份写进文档与提交。
 
-其他宿主同事需要完成：真实会话身份注入；原生 subagent 调度与隔离；根代理工具代理；文件资源在宿主/Connector 之间传输；通知去重、取消与明确恢复；待审核时交还用户。连接控制协议见 [外部 Agent 与 Workflow 交互协议](../architecture/external-agent-workflow-protocol-draft.md)。不能通过新开顶层会话或第二个 Codex 进程替代本会话的 native worker。
+其他宿主同事需要完成：真实会话身份注入；可选的 subagent 调度与隔离、单 Agent 顺序执行；根代理工具代理；文件资源在宿主/Connector 之间传输；通知去重、取消与明确恢复；待审核时交还用户。连接控制协议见 [外部 Agent 与 Workflow 交互协议](../architecture/external-agent-workflow-protocol-draft.md)。不能通过新开顶层会话或第二个 Codex 进程替代本会话的 native worker。
 
 ## 本地开发与回归入口
 
@@ -179,8 +185,8 @@ local/build/bin/lazymind internal agent codex refresh
 ## Skill 来源与工具补齐
 
 原生与外部执行均以固定版本中的 `step_contract.prompt`、
-`execution.skill_files`、约束和验收标准为唯一业务依据。外部宿主必须将完整
-文件内容交给生成和验证子代理；不得用宿主自带的 PPT、写作或设计 Skill
+`execution.skill_files`、约束和验收标准为唯一业务依据。外部执行者必须读取完整
+文件内容；分派时须交给生成和验证子代理；不得用宿主自带的 PPT、写作或设计 Skill
 替换 LazyMind 的流程、风格、输出结构或质量标准。
 
 先发现该步骤已声明的 LazyMind 工具；适用且已配置时使用它们。缺少操作能力时，

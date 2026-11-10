@@ -93,6 +93,23 @@ is not a tool gap: obtain it from the pinned revision or stop, never replace it 
 a host Skill or a guessed procedure. Report the Skill paths/revisions used and any
 tool substitutions with the worker's validation evidence.
 
+When advertised, use pdf_read_text with the pinned input resource reference and
+bounded page ranges; pdf_extract_images shares the native PDF extraction logic
+without invoking a local visual model. Inspect actual returned image pixels before
+selecting them. Use ppt_compute_timing and ppt_order_papers for native deterministic
+planning. For page generation use ppt_prepare_page with the approved complete page
+brief; answer its exact generation_request externally and return the response with
+its request_hash. LazyMind assembles the native prompt from the pinned package and
+normalizes the HTML; the external executor still reviews content and rendered pixels.
+Render and export the accepted HTML with the declared tools instead of rebuilding
+another presentation engine. Host supplementation remains available for missing
+operations, including native chart objects when explicitly required.
+
+Keep one canonical step contract in working context. Avoid echoing full contracts,
+HTML, base64 assets or duplicated page copy. Separate page workers are optional;
+one external agent may execute sequentially with a separate verification pass.
+Disclose same-agent verification and never describe it as independent review.
+
 ## Native presentation references
 
 Use the supplied runtime/prompts and runtime/references files directly, as the

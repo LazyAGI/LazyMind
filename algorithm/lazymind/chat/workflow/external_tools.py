@@ -14,8 +14,9 @@ from typing import Any, get_type_hints
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, create_model
 import yaml
 
-from . import external_ppt_tools
+from . import external_pdf_tools, external_ppt_tools
 from .external_ppt_tools import ExternalToolError
+from .external_tool_context import external_package_scope
 
 
 PPT_BINDING = '''"""Audited external PPT primitives; this binding is not an agent executor."""
@@ -29,6 +30,20 @@ _REGISTRY = {
     name: ('scripts/external_tools.py', PPT_BINDING, getattr(external_ppt_tools, name))
     for name in ('ppt_export_html', 'ppt_inspect_pptx', 'ppt_render_html')
 }
+PDF_BINDING = '''"""Audited model-free PDF operations; source bytes come from pinned inputs."""
+from lazymind.chat.workflow.external_pdf_tools import pdf_extract_images, pdf_read_text
+'''
+GENERATION_BINDING = '''"""Shared native PPT preparation; the external host supplies model responses."""
+from lazymind.chat.workflow.external_ppt_tools import ppt_compute_timing, ppt_order_papers, ppt_prepare_page
+'''
+_REGISTRY.update({
+    name: ('scripts/external_pdf_tools.py', PDF_BINDING, getattr(external_pdf_tools, name))
+    for name in ('pdf_read_text', 'pdf_extract_images')
+})
+_REGISTRY.update({
+    name: ('scripts/external_generation_tools.py', GENERATION_BINDING, getattr(external_ppt_tools, name))
+    for name in ('ppt_prepare_page', 'ppt_compute_timing', 'ppt_order_papers')
+})
 MAX_PACKAGE_BYTES = 64 * 1024 * 1024
 
 
@@ -81,8 +96,8 @@ def _decode_package(request: ExternalToolRequest) -> dict[str, bytes]:
     return files
 
 
-def _selected(request: ExternalToolRequest, *, listing: bool = False) -> dict[str, Any]:
-    files = _decode_package(request)
+def _selected(request: ExternalToolRequest, *, listing: bool = False, files=None) -> dict[str, Any]:
+    files = _decode_package(request) if files is None else files
     try:
         workflow = yaml.safe_load(files['workflow.yaml'])
         runtime = workflow['runtime']
@@ -136,7 +151,8 @@ def _arguments_model(function):
     hints = get_type_hints(function)
     fields = {}
     for name, parameter in inspect.signature(function).parameters.items():
-        fields[name] = (hints.get(name, Any), ... if parameter.default is inspect.Parameter.empty else parameter.default)
+        default = ... if parameter.default is inspect.Parameter.empty else parameter.default
+        fields[name] = (hints.get(name, Any), default)
     return create_model(f'{function.__name__}_Arguments', __config__=ConfigDict(extra='forbid', strict=True), **fields)
 
 
@@ -149,11 +165,13 @@ def list_external_tools(request: ExternalToolRequest) -> dict[str, Any]:
 
 
 def call_external_tool(request: ExternalToolCallRequest) -> dict[str, Any]:
-    function = _selected(request).get(request.tool_name)
+    files = _decode_package(request)
+    function = _selected(request, files=files).get(request.tool_name)
     if function is None:
         raise ExternalToolError('TOOL_NOT_ALLOWED', 'This tool is not available to the pinned external step.')
     try:
         arguments = _arguments_model(function).model_validate(request.arguments).model_dump()
     except ValidationError as exc:
         raise ExternalToolError('INVALID_ARGUMENT', 'Arguments do not match the declared tool schema.') from exc
-    return {'result': function(**arguments)}
+    with external_package_scope(files):
+        return {'result': function(**arguments)}

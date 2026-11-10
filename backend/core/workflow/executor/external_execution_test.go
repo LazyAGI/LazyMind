@@ -69,6 +69,46 @@ func TestExternalSkillCorruptionFailsClosed(t *testing.T) {
 	}
 }
 
+func TestSharedContractCompactsOnlyExactPromptObjectives(t *testing.T) {
+	for _, test := range []struct {
+		name, prompt, objective, wireObjective, reference string
+	}{
+		{"same", "Pinned prompt", "Pinned prompt", "", "#/prompt"},
+		{"refinement", "Pinned prompt", "Pinned prompt\n\nRuntime objective:\nKeep all 4 pages", "Keep all 4 pages", "#/prompt"},
+		{"empty-refinement", "Pinned prompt", "Pinned prompt\n\nRuntime objective:\n", "Pinned prompt\n\nRuntime objective:\n", ""},
+		{"unrelated", "Pinned prompt", "Different objective", "Different objective", ""},
+		{"templated", "Read {{user_input}}", "Read the source", "Read the source", ""},
+		{"empty", "Pinned prompt", "", "", ""},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			original := AttemptContext{Prompt: test.prompt, Objective: test.objective,
+				Execution:         &ExecutionContract{StepExecution: graphengine.StepExecution{Version: "1"}},
+				ExternalExecution: &ExternalExecutionContract{ExternalStepExecution: graphengine.ExternalStepExecution{Version: "1", ValidationOwner: "external-agent", Prompt: test.prompt}}}
+			encoded, err := json.Marshal(original)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var wire map[string]any
+			if err := json.Unmarshal(encoded, &wire); err != nil {
+				t.Fatal(err)
+			}
+			objective, _ := wire["objective"].(string)
+			reference, _ := wire["objective_ref"].(string)
+			if objective != test.wireObjective || reference != test.reference {
+				t.Fatalf("objective/ref changed: %q %q", objective, reference)
+			}
+			var restored AttemptContext
+			if err := json.Unmarshal(encoded, &restored); err != nil || restored.Objective != original.Objective || restored.Prompt != original.Prompt {
+				t.Fatalf("objective failed to round trip: %q %v", restored.Objective, err)
+			}
+			again, err := json.Marshal(restored)
+			if err != nil || string(again) != string(encoded) {
+				t.Fatalf("repeated serialization changed the shared contract: %v", err)
+			}
+		})
+	}
+}
+
 func TestSharedExecutionLoadsIdenticalBusinessContractForBothExecutors(t *testing.T) {
 	db := externalExecutionDB(t)
 	compiled := graphengine.Compile(`
@@ -107,6 +147,16 @@ steps:
 	if err != nil || external.Execution == nil || external.ExternalExecution == nil || len(external.Execution.SkillFiles) != 1 || external.Execution.SkillFiles[0].Content != "Pinned instructions" {
 		t.Fatalf("external shared context: %+v %v", external, err)
 	}
+	// Frozen contexts are persisted too. A later native load must hydrate the
+	// objective and remove the external adapter before it is serialized again.
+	external.Objective = external.Prompt + "\n\nRuntime objective:\nKeep all four pages"
+	frozen, err := json.Marshal(external)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Model(&orm.WorkflowOutbox{}).Where("attempt_id = ?", "attempt").Update("payload_json", frozen).Error; err != nil {
+		t.Fatal(err)
+	}
 	if err := db.Model(&orm.WorkflowSessionStep{}).Where("id = ?", "attempt").Update("executor_host", "lazymind").Error; err != nil {
 		t.Fatal(err)
 	}
@@ -114,8 +164,41 @@ steps:
 	if err != nil || native.Execution == nil || native.ExternalExecution != nil || !native.ToolsOnly || external.ToolsOnly || len(external.LegacyTools) != 0 {
 		t.Fatalf("native adapter/shared context: %+v %v", native, err)
 	}
-	if native.Prompt != external.Prompt || !reflect.DeepEqual(native.Execution, external.Execution) || !reflect.DeepEqual(native.Acceptance, external.Acceptance) || !reflect.DeepEqual(native.RequiredOutputs, external.RequiredOutputs) {
+	if native.Prompt != external.Prompt || native.Objective != external.Objective || !reflect.DeepEqual(native.Execution, external.Execution) || !reflect.DeepEqual(native.Acceptance, external.Acceptance) || !reflect.DeepEqual(native.RequiredOutputs, external.RequiredOutputs) {
 		t.Fatal("executors received different business rules, Skills or outputs")
+	}
+	encoded, err := json.Marshal(external)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, instruction := range []string{"Pinned instructions", external.Prompt, "Keep exact requested scope"} {
+		if strings.Count(string(encoded), instruction) != 1 {
+			t.Fatalf("shared instruction must appear once on the wire: %q", instruction)
+		}
+	}
+	var wire map[string]json.RawMessage
+	if err := json.Unmarshal(encoded, &wire); err != nil {
+		t.Fatal(err)
+	}
+	var adapter map[string]any
+	if err := json.Unmarshal(wire["external_execution"], &adapter); err != nil || adapter["execution_ref"] != SharedExecutionRef {
+		t.Fatalf("missing canonical execution reference: %v %v", adapter, err)
+	}
+	for _, duplicate := range []string{"prompt", "task_specification", "skills", "skill_files", "constraints", "tools", "acceptance_criteria", "required_outputs"} {
+		if _, exists := adapter[duplicate]; exists {
+			t.Fatalf("adapter duplicated business field %s", duplicate)
+		}
+	}
+	var restored AttemptContext
+	if err := json.Unmarshal(encoded, &restored); err != nil || !restored.ExternalExecution.Supported() || !reflect.DeepEqual(restored.Execution, external.Execution) || !reflect.DeepEqual(restored.ExternalExecution.Tools, external.ExternalExecution.Tools) || !reflect.DeepEqual(restored.ExternalExecution.SkillFiles, external.Execution.SkillFiles) {
+		t.Fatalf("shared contract lost its internal execution view on round trip: %v", err)
+	}
+	if !reflect.DeepEqual(restored.Acceptance, external.Acceptance) || !reflect.DeepEqual(restored.RequiredOutputs, external.RequiredOutputs) {
+		t.Fatal("shared wire contract lost top-level acceptance criteria or required outputs")
+	}
+	nativeJSON, err := json.Marshal(native)
+	if err != nil || strings.Contains(string(nativeJSON), "external_execution") || strings.Contains(string(nativeJSON), "objective_ref") || strings.Count(string(nativeJSON), native.Prompt) != 2 || strings.Count(string(nativeJSON), "Pinned instructions") != 1 {
+		t.Fatalf("native wire contract changed: %v", err)
 	}
 	if err := db.Where("revision_id = ? AND path = ?", "pinned", "scenario/external.md").Delete(&orm.WorkflowRevisionEntry{}).Error; err != nil {
 		t.Fatal(err)
@@ -140,6 +223,14 @@ func TestExternalExecutionLoadsPinnedSkillsAndNativeKeepsOriginalContract(t *tes
 	}
 	if value.ExternalExecution.TaskSpecification != "Use the native generator" {
 		t.Fatal("fixed business specification was lost; it must remain separate from the active external prompt")
+	}
+	encoded, err := json.Marshal(value)
+	if err != nil || strings.Contains(string(encoded), "execution_ref") {
+		t.Fatalf("legacy contract unexpectedly uses shared instructions: %v", err)
+	}
+	var restored AttemptContext
+	if err := json.Unmarshal(encoded, &restored); err != nil || !reflect.DeepEqual(restored.ExternalExecution, value.ExternalExecution) {
+		t.Fatalf("legacy external contract changed on round trip: %v", err)
 	}
 	if err := db.Model(&orm.WorkflowSessionStep{}).Where("id = ?", "attempt").Update("executor_host", "lazymind").Error; err != nil {
 		t.Fatal(err)

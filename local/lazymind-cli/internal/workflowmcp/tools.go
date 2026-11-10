@@ -111,7 +111,7 @@ func Register(server *mcp.Server, client *Client) {
 	registerEditTools(server, client)
 	registerInputAnswer(server, client)
 	mcp.AddTool(server, &mcp.Tool{Name: "workflow.list", Title: "List LazyMind Workflows",
-		Description: "List published LazyMind Workflows available to this user.", Annotations: readOnly,
+		Description: "List published LazyMind Workflows using compact routing metadata: identifiers, names, descriptions, when_to_use and pinned revision metadata. Omits compiled graphs and implementation source. Select a workflow, then use workflow.get for startup inputs and workflow.step.begin for the complete pinned step instructions.", Annotations: readOnly,
 		InputSchema: map[string]any{"type": "object", "properties": map[string]any{}}},
 		func(ctx context.Context, _ *mcp.CallToolRequest, _ map[string]any) (*mcp.CallToolResult, map[string]any, error) {
 			value, err := client.List(ctx)
@@ -203,7 +203,7 @@ func Register(server *mcp.Server, client *Client) {
 			return nil, value, err
 		})
 	mcp.AddTool(server, &mcp.Tool{Name: "workflow.step.complete", Title: "Complete a LazyMind Workflow step",
-		Description: "Finish an external step after all workflow.artifact.publish calls have succeeded. Pass the outcome and unchanged execution_handle; do not resend outputs. LazyMind checks saved required outputs and settles state. If the step requires human review, stop this turn and wait for the user.", Annotations: write},
+		Description: "Finish an external step after all workflow.artifact.publish calls have succeeded. Pass the outcome and unchanged execution_handle; do not resend outputs. executor_ref is optional and may identify the current external agent; do not invent a worker or claim independent validation after same-agent verification. LazyMind checks saved required outputs and settles state. If the step requires human review, stop this turn and wait for the user.", Annotations: write},
 		func(ctx context.Context, _ *mcp.CallToolRequest, input CompleteInput) (*mcp.CallToolResult, CompleteResult, error) {
 			value, err := client.Complete(ctx, input)
 			if err != nil {

@@ -21,7 +21,7 @@ type ActionResponseInput struct {
 }
 
 func registerActionTools(server *mcp.Server, client *Client) {
-	mcp.AddTool(server, &mcp.Tool{Name: "workflow.action.get", Description: "Read a queued artifact edit. Delegate its exact LazyMind generation_request to a native worker. This is not a workflow step and does not grant permission to commit. Stop when ready or cancelled; the user confirms in LazyMind.", Annotations: annotations(true)}, func(ctx context.Context, _ *mcp.CallToolRequest, input ActionJobInput) (*mcp.CallToolResult, map[string]any, error) {
+	mcp.AddTool(server, &mcp.Tool{Name: "workflow.action.get", Description: "Read a queued artifact edit. Execute its exact LazyMind generation_request in the external agent, using a native worker when available. This is not a workflow step and does not grant permission to commit. Stop when ready or cancelled; the user confirms in LazyMind.", Annotations: annotations(true)}, func(ctx context.Context, _ *mcp.CallToolRequest, input ActionJobInput) (*mcp.CallToolResult, map[string]any, error) {
 		result, err := client.actionJob(ctx, input.SessionID, input.JobID, nil)
 		return nil, result, err
 	})
@@ -30,7 +30,7 @@ func registerActionTools(server *mcp.Server, client *Client) {
 		return nil, result, err
 	})
 
-	mcp.AddTool(server, &mcp.Tool{Name: "workflow.action.respond", Description: "Return a worker response to the shared LazyMind artifact-action planner. Preserve version and request_hash. Identical retries are idempotent. If another generation_request is returned, process it; when ready, end the turn and let the user confirm the preview. Never call step.begin for an artifact edit.", Annotations: annotations(false)}, func(ctx context.Context, _ *mcp.CallToolRequest, input ActionResponseInput) (*mcp.CallToolResult, map[string]any, error) {
+	mcp.AddTool(server, &mcp.Tool{Name: "workflow.action.respond", Description: "Return the external agent response to the shared LazyMind artifact-action planner. Preserve version and request_hash. Identical retries are idempotent. If another generation_request is returned, process it; when ready, end the turn and let the user confirm the preview. Never call step.begin for an artifact edit.", Annotations: annotations(false)}, func(ctx context.Context, _ *mcp.CallToolRequest, input ActionResponseInput) (*mcp.CallToolResult, map[string]any, error) {
 		result, err := client.actionJob(ctx, input.SessionID, input.JobID, input)
 		return nil, result, err
 	})

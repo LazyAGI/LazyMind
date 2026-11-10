@@ -43,6 +43,12 @@ import time
 from concurrent.futures import as_completed
 from pathlib import Path
 
+from lazymind.chat.workflow.ppt_generation import (
+    HTML_DOCUMENT as _HTML_DOC_RE,
+    page_generation_query, page_generation_system,
+    sanitize_page_html as _sanitize_page_html,
+)
+
 # Prefer LazyLLM's pool so worker threads inherit session sid / dynamic LLM config.
 # Fall back to stdlib for standalone CLI runs without lazyllm installed.
 try:
@@ -180,50 +186,6 @@ def _strip_code_fences(s: str) -> str:
         if s.endswith("```"):
             s = s[:-3]
     return s.strip()
-
-
-_THINK_BLOCK_RE = re.compile(r"<think\b[^>]*>[\s\S]*?</think>", re.IGNORECASE)
-_HTML_DOC_RE = re.compile(
-    r"(?is)(<!doctype\s+html\b[\s\S]*?</html>|<html\b[\s\S]*?</html>)"
-)
-
-
-def _sanitize_page_html(raw: str) -> str:
-    """Strip model think traces / markdown fences and keep the HTML document."""
-    s = (raw or "").strip()
-    if not s:
-        return s
-    s = _THINK_BLOCK_RE.sub("", s).strip()
-    # Drop orphan opening think tags that never closed.
-    s = re.sub(r"(?is)^<think\b[^>]*>[\s\S]*?(?=<!doctype|<html\b|```)", "", s).strip()
-    s = _strip_code_fences(s)
-    # If fences remain mid-content (think…```html…), take the fenced body.
-    fence = re.search(r"(?is)```(?:html|HTML)?\s*\n([\s\S]*?)```", s)
-    if fence:
-        s = fence.group(1).strip()
-    m = _HTML_DOC_RE.search(s)
-    if m:
-        return _restore_serialized_html(m.group(1).strip())
-    return s.strip()
-
-
-def _restore_serialized_html(html: str) -> str:
-    """Repair old str(response-dict) pages, not normal JS/CSS string escapes.
-
-    Those pages contain Python-repr escapes across the document, including
-    between root tags and every CSS line. Require that signature before
-    decoding one layer; preserve Unicode and intentionally doubled escapes.
-    """
-    start = re.search(r'(?i)<!doctype\s+html|<html\b', html)
-    if start is None:
-        return html
-    head = html[start.start():].split('</head>', 1)[0]
-    if not (re.search(r'(?i)<html\b[^>]*>\\n\s*<head>', head)
-            and re.search(r'(?i)<style[^>]*>\\n', head)
-            and '\n' not in head):
-        return html
-    escapes = {'n': '\n', 'r': '\r', 't': '\t', '\\': '\\', "'": "'", '"': '"'}
-    return re.sub(r'''\\([nrt\\'"])''', lambda match: escapes[match[1]], html)
 
 
 def _parse_json_loose(s: str) -> dict:
@@ -2189,51 +2151,18 @@ def _write_page_html_from_query(
     except (ValueError, OSError, KeyError) as exc:
         return _fail(f'page-html template p{page_no}: {exc}', page_no=page_no)
 
-    if (prompt_mode != 'complete-page-prompt'
-            and not (background_image or {}).get('local_path') and not edit_instruction and not template_context):
-        rewritten_query += (
-            '\n\nNO AI BACKGROUND IMAGE: No generated raster backdrop is supplied. '
-            'This does not disable visual design. Apply the deck art direction with editable '
-            'HTML/CSS or inline SVG: choose a content-led composition, clear type hierarchy, '
-            'and restrained structural shapes/lines rather than defaulting every page to equal cards. '
-            'One background layer per element still permits multiple explicit decorative elements. '
-            'Respect explicit plain/minimal backgrounds and whitespace; do not invent images, facts, '
-            'or filler cards. Treat these as design instructions, never visible slide copy.'
-        )
-
     current_path = deck / 'pages' / f'page_{page_no:03d}.html'
     current_html = current_path.read_text(encoding='utf-8') if edit_instruction and current_path.exists() else ''
     current_html = template_html.remove_legacy_narrative_override(current_html)
-    if edit_instruction:
-        if not current_html:
-            return _fail('Cannot revise a missing page; no original HTML to preserve', page_no=page_no)
-        rewritten_query += '\n\n' + json.dumps({
-            'current_edit_instruction': edit_instruction,
-            'current_html': current_html,
-            'revision_contract': 'Apply the current edit over older style/brief defaults only where they conflict. '
-                'Preserve text, facts, images and unaffected properties. For less whitespace, reduce '
-                'padding/gaps or increase content area without inventing content. For recoloring, change '
-                'the actual visible backgrounds/text/accents, not only unused CSS variables. '
-                'A white-background/black-text request applies to the canvas, content panels, tables, '
-                'formulas, diagram labels and chart axes/legends; remove conflicting dark fills and '
-                'light text in those regions. Preserve source image pixels, data values, series '
-                'distinctions and speaker notes. Return complete HTML.',
-        }, ensure_ascii=False)
-
-    if language == 'zh-Hant':
-        lang_hint = (
-            'Target language for all visible text: Traditional Chinese (zh-Hant). '
-            'Use traditional characters (繁體中文) throughout.'
+    try:
+        rewritten_query = page_generation_query(
+            rewritten_query, prompt_mode=prompt_mode, language=language,
+            has_background=bool((background_image or {}).get('local_path')),
+            has_template=bool(template_context), edit_instruction=edit_instruction,
+            current_html=current_html,
         )
-    elif language.startswith('zh'):
-        lang_hint = (
-            'Target language for all visible text: Simplified Chinese (zh-Hans). '
-            'Use simplified characters (简体中文) throughout.'
-        )
-    else:
-        lang_hint = 'Target language for all visible text: English (en).'
-    if prompt_mode != 'complete-page-prompt' and 'Target language for all visible text:' not in rewritten_query:
-        rewritten_query = f'{lang_hint}\n\n{rewritten_query}'
+    except ValueError as exc:
+        return _fail(str(exc), page_no=page_no)
 
     rewritten_query += prompt_catalog(rewritten_query)
     rewritten_query += template_html.prompt(template_context)
@@ -2241,15 +2170,7 @@ def _write_page_html_from_query(
     _write_text(query_path, rewritten_query)
 
     started_at = time.monotonic()
-    gen_system = _load_prompt('page_html.md')
-    gen_system += (
-        '\n\nVISUAL PRIORITY: current_edit_instruction overrides older instructions only for the '
-        'requested properties. Then visual_revision_instructions, then explicit_visual_constraints, '
-        'then the saved style contract, then catalog recipes/defaults. Preserve every user qualifier '
-        'and prohibition. A label like technology does not authorize dark backgrounds, cyan, HUD or '
-        'neon when the user requests something else. Never print these instructions on the slide. '
-        'For edits, use current_html as the baseline; do not recreate unrelated content.'
-    )
+    gen_system = page_generation_system(_load_prompt('page_html.md'))
     try:
         html = (llm_call or llm)(
             gen_system,

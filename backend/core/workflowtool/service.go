@@ -180,7 +180,7 @@ func (s *Service) List(ctx context.Context, owner, sessionID, attemptID, handle 
 				item.Reason = "Configure and enable this capability for the connected Agent in LazyMind, then retry"
 			}
 		}
-		result = append(result, item)
+		result = append(result, withFileResourceSchema(item))
 	}
 	if _, err = executor.AuthorizeExternalExecution(ctx, s.DB, owner, sessionID, attemptID, handle); err != nil {
 		return nil, err
@@ -257,7 +257,11 @@ func (s *Service) Call(ctx context.Context, owner, sessionID, attemptID string, 
 		} else if _, ok := knowledgeTool(input.ToolName); ok {
 			result, err = s.callKnowledge(callCtx, owner, contract, input.ToolName, input.Arguments)
 		} else {
-			err = s.packageRequest(callCtx, contract, "call", input.ToolName, input.Arguments, &result)
+			var arguments map[string]any
+			arguments, err = s.resolveFileArguments(callCtx, owner, contract, input.ToolName, input.Arguments)
+			if err == nil {
+				err = s.packageRequest(callCtx, contract, "call", input.ToolName, arguments, &result)
+			}
 		}
 	case "global":
 		var call capability.InvocationContext

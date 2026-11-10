@@ -3,6 +3,7 @@ package executor
 import (
 	"context"
 	"encoding/json"
+	"strings"
 )
 
 // AttemptContext is the immutable Host-neutral execution snapshot used by
@@ -23,6 +24,7 @@ type AttemptContext struct {
 	AttemptNo               int                        `json:"attempt_no"`
 	Operation               string                     `json:"operation"`
 	Objective               string                     `json:"objective,omitempty"`
+	ObjectiveRef            string                     `json:"objective_ref,omitempty"`
 	Prompt                  string                     `json:"prompt,omitempty"`
 	Acceptance              []string                   `json:"acceptance_criteria,omitempty"`
 	Instruction             string                     `json:"instruction,omitempty"`
@@ -41,6 +43,62 @@ type AttemptContext struct {
 	ToolsOnly               bool                       `json:"tools_only,omitempty"`
 	TerminalToolsOnly       bool                       `json:"terminal_tools_only,omitempty"`
 	Metadata                map[string]string          `json:"metadata,omitempty"`
+}
+
+// MarshalJSON keeps shared business instructions in one place on the wire.
+// The full in-memory projection remains available to internal authorization and
+// older Go consumers; pinned legacy profiles keep their original JSON shape.
+func (value AttemptContext) MarshalJSON() ([]byte, error) {
+	type plain AttemptContext
+	if value.Execution == nil || value.ExternalExecution == nil || !value.ExternalExecution.Supported() || value.Execution.Version != value.ExternalExecution.Version {
+		return json.Marshal(plain(value))
+	}
+	// Historical outboxes often embed the prompt in objective as well. Only
+	// remove an exact known prefix, retaining any runtime refinement verbatim.
+	if value.Prompt != "" && value.ObjectiveRef == "" {
+		if value.Objective == value.Prompt {
+			value.Objective, value.ObjectiveRef = "", "#/prompt"
+		} else if prefix := value.Prompt + "\n\nRuntime objective:\n"; len(value.Objective) > len(prefix) && strings.HasPrefix(value.Objective, prefix) {
+			value.Objective, value.ObjectiveRef = strings.TrimPrefix(value.Objective, prefix), "#/prompt"
+		}
+	}
+	adapter := struct {
+		Version             string `json:"version"`
+		ValidationOwner     string `json:"validation_owner"`
+		ExecutionRef        string `json:"execution_ref"`
+		AdapterInstructions string `json:"adapter_instructions,omitempty"`
+	}{value.ExternalExecution.Version, value.ExternalExecution.ValidationOwner,
+		SharedExecutionRef, value.ExternalExecution.AdapterInstructions}
+	return json.Marshal(struct {
+		plain
+		ExternalExecution any `json:"external_execution"`
+	}{plain(value), adapter})
+}
+
+// UnmarshalJSON accepts both historical expanded contracts and the shared
+// projection, restoring the internal view without dropping pinned instructions.
+func (value *AttemptContext) UnmarshalJSON(data []byte) error {
+	type plain AttemptContext
+	var decoded plain
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	*value = AttemptContext(decoded)
+	if value.ObjectiveRef == "#/prompt" {
+		if value.Objective == "" {
+			value.Objective = value.Prompt
+		} else {
+			value.Objective = value.Prompt + "\n\nRuntime objective:\n" + value.Objective
+		}
+		value.ObjectiveRef = ""
+	}
+	if value.Execution != nil && value.ExternalExecution != nil && value.ExternalExecution.ExecutionRef == SharedExecutionRef {
+		external := value.ExternalExecution
+		external.Prompt, external.TaskSpecification = value.Prompt, value.Prompt
+		external.Skills, external.Constraints, external.Tools = value.Execution.Skills, value.Execution.Constraints, value.Execution.Tools
+		external.SkillFiles = value.Execution.SkillFiles
+	}
+	return nil
 }
 
 type Artifact struct {

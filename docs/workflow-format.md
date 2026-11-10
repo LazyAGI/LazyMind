@@ -33,7 +33,7 @@ workflows/<workflow-id>/
 
 ### 外部 Agent 执行
 
-同一工作流由原生 LazyMind 和任意外部 Agent 共用一套业务契约：步骤提示词、输入、输出与验收标准只定义在 `state.yml`，`runtime.execution` 提供双方共用的 Skill、约束与可选工具。原生执行器保留本地工具绑定和已配置的模型；外部宿主创建自己的 subagent，负责生成和验证。LazyMind 保存步骤、输入、产物版本、状态和调用回执，不为外部执行启动文本/视觉模型，也不要求服务端语义验证回执。
+同一工作流由原生 LazyMind 和任意外部 Agent 共用一套业务契约：步骤提示词、输入、输出与验收标准只定义在 `state.yml`，`runtime.execution` 提供双方共用的 Skill、约束与可选工具。原生执行器保留本地工具绑定和已配置的模型；外部 Agent 负责生成和验证，可使用自己的 subagent，也可在同一 Agent 内顺序完成生成和独立的一轮检查（不声称独立执行者验证）。LazyMind 保存步骤、输入、产物版本、状态和调用回执，不为外部执行启动文本/视觉模型，也不要求服务端语义验证回执。
 
 ```yaml
 runtime:
@@ -50,9 +50,9 @@ runtime:
           - {name: 'builtin:image_generator', source: global}
 ```
 
-声明必须覆盖图中所有步骤；每一步的 `state.yml` 有非空 `prompt`。`execution.steps` 只接受 `skills`、`constraints` 和 `tools`，禁止重新定义 prompt、acceptance_criteria 或 required_outputs，避免执行器产生两套业务规则。全局与步骤级 Skill、约束合并；Skill 路径必须是包内相对路径。Core 从固定 revision 读取 UTF-8 Skill 正文，在两端同形的 `step_contract.execution.skill_files` 返回路径、内容和 SHA-256；单文件上限 256 KiB，总上限 512 KiB。原生执行器把这些正文传入 SubAgent，外部宿主也须原样传给 worker，不能替换为本机其他版本。
+声明必须覆盖图中所有步骤；每一步的 `state.yml` 有非空 `prompt`。`execution.steps` 只接受 `skills`、`constraints` 和 `tools`，禁止重新定义 prompt、acceptance_criteria 或 required_outputs，避免执行器产生两套业务规则。全局与步骤级 Skill、约束合并；Skill 路径必须是包内相对路径。Core 从固定 revision 读取 UTF-8 Skill 正文，在两端同形的 `step_contract.execution.skill_files` 返回路径、内容和 SHA-256；单文件上限 256 KiB，总上限 512 KiB。原生执行器把这些正文传入 SubAgent，外部执行者也须完整读取，分派时原样传给 worker，不能替换为本机其他版本。
 
-契约同时返回 `launch_request`、本次 `user_request` 和固定输入。兼容字段 `external_execution` 从共享契约投影，`prompt` 和 `task_specification` 与原生节点提示词相同。`adapter_instructions` 说明原生 wrapper、工具专用模式、模型选择和自动发布规则属于本地执行绑定；外部适配器用宿主能力或已声明工具实现相同业务目标，不能据此改变输出含义、页数、格式或证据要求。
+契约同时返回 `launch_request`、本次 `user_request` 和固定输入。共享契约的 `external_execution` 在线上仅保留适配元数据和 `execution_ref: "#/execution"`，完整 Skill 和工具只在 `execution` 传一份；顶层 `prompt` 是业务说明。`objective_ref: "#/prompt"` 表示复用 prompt，另有 objective 时作为额外运行要求。历史独立外部契约仍保留原形。`adapter_instructions` 说明原生 wrapper、工具专用模式、模型选择和自动发布规则属于本地执行绑定；外部适配器用宿主能力或已声明工具实现相同业务目标，不能据此改变输出含义、页数、格式或证据要求。
 
 `acceptance_criteria`、`required_outputs`、槽类型、单值/列表、控制边和输入版本均直接使用共同节点的数据契约，可选与条件输出不会因执行器不同变成强制输出。人工审核、提问和停止/重试规则不因使用外部执行器而改变。
 

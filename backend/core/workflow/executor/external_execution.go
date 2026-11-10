@@ -15,9 +15,14 @@ import (
 
 type ExternalExecutionContract struct {
 	graphengine.ExternalStepExecution
+	ExecutionRef      string              `json:"execution_ref,omitempty"`
 	SkillFiles        []ExternalSkillFile `json:"skill_files,omitempty"`
 	TaskSpecification string              `json:"task_specification,omitempty"`
 }
+
+// SharedExecutionRef points to the canonical business instructions in the
+// surrounding AttemptContext. Legacy external profiles have no reference.
+const SharedExecutionRef = "#/execution"
 
 // ExecutionContract is the same revision-owned instruction set for native and
 // external executors. The surrounding AttemptContext owns the single prompt,

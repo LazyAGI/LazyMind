@@ -124,9 +124,20 @@ func TestExternalExecutionContractRoundTripPreservesPinnedSkillsAndExtensions(t 
 // Core mutation succeeds. RawMessage is modeled as a byte array by that schema,
 // so a plain JSON roundtrip test cannot detect a lost handle on the MCP wire.
 func TestExternalExecutionContractPassesMCPOutputValidation(t *testing.T) {
-	external := map[string]any{"version": "1", "validation_owner": "external-agent",
-		"skill_files":   []any{map[string]any{"path": "skills/design.md", "content": "Pinned skill", "sha256": "abc"}},
-		"future_policy": map[string]any{"required": false}}
+	skillFiles := []any{map[string]any{"path": "skills/design.md", "content": "Pinned skill", "sha256": "abc"}}
+	for name, contract := range map[string]map[string]any{
+		"legacy": {"external_execution": map[string]any{"version": "1", "validation_owner": "external-agent",
+			"skill_files": skillFiles, "future_policy": map[string]any{"required": false}}},
+		"shared": {"prompt": "Pinned task", "objective_ref": "#/prompt", "objective": "Keep all 4 pages",
+			"execution":          map[string]any{"version": "1", "skill_files": skillFiles, "constraints": []any{"Exact page count"}},
+			"external_execution": map[string]any{"version": "1", "validation_owner": "external-agent", "execution_ref": "#/execution", "adapter_instructions": "Use host tools"}},
+	} {
+		t.Run(name, func(t *testing.T) { checkExecutionContractMCPOutput(t, contract) })
+	}
+}
+
+func checkExecutionContractMCPOutput(t *testing.T, expectedContract map[string]any) {
+	t.Helper()
 	apiServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var response any
 		switch {
@@ -136,7 +147,16 @@ func TestExternalExecutionContractPassesMCPOutputValidation(t *testing.T) {
 			response = map[string]any{"session_id": "run-1", "control": map[string]any{"protocol": ControlProtocol, "continuation": "awaiting_executor"}}
 		case strings.HasSuffix(r.URL.Path, "/hosted-attempts/attempt-1:begin"), strings.HasSuffix(r.URL.Path, "/hosted-attempts/attempt-1:resume"):
 			response = map[string]any{"execution_id": "attempt-1", "execution_handle": "unchanged-grant", "executor_host": "external-agent",
-				"step_contract": map[string]any{"external_execution": external}}
+				"step_contract": expectedContract}
+		case strings.HasSuffix(r.URL.Path, "/hosted-attempts/attempt-1:complete"):
+			var input map[string]any
+			if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+				t.Fatal(err)
+			}
+			if input["executor_ref"] != "" || input["execution_handle"] != "unchanged-grant" || input["summary"] != "Generated and verified in a separate same-agent pass" {
+				t.Errorf("single-agent completion changed: %v", input)
+			}
+			response = map[string]any{"execution_id": "attempt-1", "attempt_status": "succeeded"}
 		default:
 			t.Errorf("unexpected Core request: %s", r.URL.Path)
 			w.WriteHeader(http.StatusNotFound)
@@ -179,8 +199,28 @@ func TestExternalExecutionContractPassesMCPOutputValidation(t *testing.T) {
 		}
 		execution := decoded["execution"].(map[string]any)
 		contract := execution["step_contract"].(map[string]any)
-		if execution["execution_handle"] != "unchanged-grant" || !reflect.DeepEqual(contract["external_execution"], external) {
-			t.Fatalf("%s dropped the handle or extended contract", name)
+		if execution["execution_handle"] != "unchanged-grant" {
+			t.Fatalf("%s dropped the execution handle", name)
 		}
+		for key, expected := range expectedContract {
+			if !reflect.DeepEqual(contract[key], expected) {
+				t.Fatalf("%s dropped or expanded contract field %s", name, key)
+			}
+		}
+		// Keep the SDK's JSON text fallback for hosts without structured-content
+		// support. Each representation carries full pinned content exactly once.
+		for _, representation := range []any{result.Content, result.StructuredContent} {
+			encoded, err := json.Marshal(representation)
+			if err != nil || strings.Count(string(encoded), "Pinned skill") != 1 {
+				t.Fatalf("%s lost or duplicated pinned Skills in one representation: %v", name, err)
+			}
+		}
+	}
+	completed, err := cs.CallTool(t.Context(), &mcp.CallToolParams{Name: "workflow.step.complete", Arguments: map[string]any{
+		"session_id": "run-1", "execution_id": "attempt-1", "execution_handle": "unchanged-grant", "outcome": "succeeded",
+		"summary": "Generated and verified in a separate same-agent pass",
+	}})
+	if err != nil || completed.IsError {
+		t.Fatalf("completion without a worker reference failed: %+v %v", completed, err)
 	}
 }
