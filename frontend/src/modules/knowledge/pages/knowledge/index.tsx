@@ -227,20 +227,12 @@ const KnowledgeDocumentContent = () => {
     if (!element) return;
     if (width === undefined) {
       element.removeAttribute("data-pane-resizing");
-      for (const property of ["--paper-assistant-preview-width", "--paper-reader-drag-content-width", "--paper-assistant-drag-content-width"]) element.style.removeProperty(property);
+      element.style.removeProperty("--paper-assistant-preview-width");
       return;
     }
-    if (!element.hasAttribute("data-pane-resizing")) {
-      // Keep both reading surfaces at their current layout width during the drag.
-      // Only the clipping pane boundaries move; PDF/text reflow happens on release.
-      const reader = element.querySelector<HTMLElement>(".paper-reader-pane");
-      const assistant = element.querySelector<HTMLElement>(".paper-chat-pane");
-      const readerWidth = reader?.querySelector<HTMLElement>(".file-viewer-container")?.clientWidth || reader?.clientWidth;
-      const assistantWidth = assistant?.querySelector<HTMLElement>(".paper-chat-open-content")?.clientWidth || assistant?.clientWidth;
-      if (readerWidth) element.style.setProperty("--paper-reader-drag-content-width", `${readerWidth}px`);
-      if (assistantWidth) element.style.setProperty("--paper-assistant-drag-content-width", `${assistantWidth}px`);
-      element.setAttribute("data-pane-resizing", "true");
-    }
+    // Update layout through CSS without rerendering the whole workspace.
+    // PDF viewers reuse their canvas and throttle geometry updates separately.
+    element.setAttribute("data-pane-resizing", "true");
     element.style.setProperty("--paper-assistant-preview-width", `${width}px`);
   }, []);
   const navigationSequence = useRef(0);

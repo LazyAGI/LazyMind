@@ -156,13 +156,13 @@ it('retains rendered pages and source while resizing, hiding and restoring the r
  width.mockReturnValue(600);height.mockReturnValue(500);act(()=>callbacks.forEach(callback=>callback()));
  await waitFor(()=>expect(screen.getAllByTestId('rendered-pdf-page')[0]).toHaveAttribute('data-width','1200'));
  expect(screen.getAllByTestId('rendered-pdf-page')[0]).toBe(page);
- expect(page.closest('[data-pdf-page-index]')).toHaveStyle({width:'580px'});
+ await waitFor(()=>expect(page.closest('[data-pdf-page-index]')).toHaveStyle({width:'580px'}));
  expectPage(2);
  expect(state.pdfFile).toBe(source);
  width.mockReturnValue(390);act(()=>callbacks.forEach(callback=>callback()));
- expect(page.closest('[data-pdf-page-index]')).toHaveStyle({width:'370px'});
+ await waitFor(()=>expect(page.closest('[data-pdf-page-index]')).toHaveStyle({width:'370px'}));
  width.mockReturnValue(1600);act(()=>callbacks.forEach(callback=>callback()));
- expect(page.closest('[data-pdf-page-index]')).toHaveStyle({width:'1152px'});
+ await waitFor(()=>expect(page.closest('[data-pdf-page-index]')).toHaveStyle({width:'1152px'}));
  expectPage(2);
  fireEvent.click(screen.getByRole('button',{name:'pdfReader.zoomIn'}));
  expect(page.closest('[data-pdf-page-index]')).toHaveStyle({width:'1267px'});

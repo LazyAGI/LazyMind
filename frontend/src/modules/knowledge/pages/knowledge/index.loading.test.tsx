@@ -345,7 +345,7 @@ it('shows only the current translation and keeps it when switching the main sear
   expect(container.querySelector('.knowledge-full-translation-viewer [data-filename="newer.pdf"]')).not.toBeNull();
 });
 
-it('previews a sidebar drag without rerendering the PDF or persisting each pointer movement', async () => {
+it('resizes live without freezing content widths or rerendering the workspace', async () => {
   useDatasetPermissionStore.getState().setCurrentDataset({dataset_id:'library',scene:'general'} as Dataset);
   axiosInstance.defaults.adapter=config=>config.url?.endsWith('/documents/paper')
     ? Promise.resolve({config,status:200,statusText:'OK',headers:{},data:{display_name:'manual.pdf'}})
@@ -368,8 +368,8 @@ it('previews a sidebar drag without rerendering the PDF or persisting each point
   act(()=>{for(const callback of frames.values())callback(0);frames.clear();});
   const workspace=container.querySelector('.knowledge-paper-workspace') as HTMLElement;
   expect(workspace.style.getPropertyValue('--paper-assistant-preview-width')).toBe('500px');
-  expect(workspace.style.getPropertyValue('--paper-reader-drag-content-width')).toBe('900px');
-  expect(workspace.style.getPropertyValue('--paper-assistant-drag-content-width')).toBe('398px');
+  expect(workspace.style.getPropertyValue('--paper-reader-drag-content-width')).toBe('');
+  expect(workspace.style.getPropertyValue('--paper-assistant-drag-content-width')).toBe('');
   expect(workspace).toHaveAttribute('data-pane-resizing','true');
   expect(surfaces.viewerRenders).toBe(before);
   expect(write).not.toHaveBeenCalled();

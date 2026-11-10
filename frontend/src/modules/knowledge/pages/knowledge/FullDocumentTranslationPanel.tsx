@@ -73,7 +73,7 @@ export default function FullDocumentTranslationPanel(props: Props) {
       <div className="knowledge-full-translation-intro">
         <h2>{props.supported ? "全文对照阅读" : "此格式暂不支持全文翻译"}</h2>
         <p>{props.supported ? props.busy ? "译本正在生成，完成后即可在这里对照阅读。" : "生成全文译本，与原文并排阅读。" : "切换到划词翻译，即可翻译选中的文字。"}</p>
-        {props.supported && <Button className="knowledge-full-translation-start" icon={<TranslationOutlined />} disabled={props.busy} loading={props.busy} onClick={props.onTranslate}>{props.busy ? "翻译进行中" : "开始全文翻译"}</Button>}
+        {props.supported && <Button className="knowledge-full-translation-start" icon={<TranslationOutlined aria-hidden="true" />} disabled={props.busy} loading={props.busy} onClick={props.onTranslate}>{props.busy ? "翻译进行中" : "开始全文翻译"}</Button>}
       </div>
     </div>}
   </section>;

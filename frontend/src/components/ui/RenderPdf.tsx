@@ -1,3 +1,4 @@
+import { createPdfViewportScheduler } from "./pdfViewportScheduler";
 import ReadingPreparationAction from "@/modules/knowledge/paper/ReadingPreparationAction";
 import {PdfPageControl} from "./PdfPageControl";
 import {PdfZoomControl} from "./PdfZoomControl";
@@ -416,14 +417,16 @@ export default function RenderPdf({
       setContainerWidth(clientWidth);
     };
     updateViewport();
+    const viewportUpdates = createPdfViewportScheduler(updateViewport);
     const resizeObserver = typeof ResizeObserver === "undefined"
       ? undefined
-      : new ResizeObserver(updateViewport);
+      : new ResizeObserver(viewportUpdates.schedule);
     if (containerRef.current) resizeObserver?.observe(containerRef.current);
-    window.addEventListener("resize", updateViewport);
+    window.addEventListener("resize", viewportUpdates.schedule);
     return () => {
       resizeObserver?.disconnect();
-      window.removeEventListener("resize", updateViewport);
+      window.removeEventListener("resize", viewportUpdates.schedule);
+      viewportUpdates.cancel();
     };
   }, []);
 

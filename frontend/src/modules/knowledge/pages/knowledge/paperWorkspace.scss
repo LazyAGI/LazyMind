@@ -196,10 +196,8 @@
 .is-document-reader .paper-library-back > span {overflow:hidden;text-overflow:ellipsis;}
 .is-document-reader .document-reader-header .paper-library-back {max-width:40%;}
 
-// Resize the pane boundaries live without reflowing either reader on every frame.
+// Resize both panes live; PDF canvas rasterization stays independent of layout.
 .knowledge-container.is-document-reader .knowledge-paper-workspace[data-pane-resizing=true] {
   cursor: col-resize;
   user-select: none;
-  .paper-reader-pane > .file-viewer-container { width: var(--paper-reader-drag-content-width, 100%); }
-  .paper-chat-open-content { width: var(--paper-assistant-drag-content-width, 100%); }
 }
