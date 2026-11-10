@@ -8,6 +8,16 @@ and returned contracts. They define startup inputs, artifact publication, questi
 review, stop and recovery for every external host; this Skill only maps Codex
 capabilities to that protocol. Do not recreate business steps or output rules here.
 
+Execute quietly: normal progress belongs in saved artifacts and the Workflow panel,
+not conversational updates, repeated plans or stage summaries. Send brief text only
+for user-requested status, required input/review/configuration, a blocking failure
+or final delivery; keep host-required notices minimal. Pass this rule to workers.
+Return artifacts, manifests and concise validation evidence. The controller follows
+the returned state, proxies tools and saves results; avoid duplicating worker
+analysis, rederiving confirmed requirements or searching source during normal work.
+Wait for completion notifications; use bounded status polling only when necessary,
+never repeated directory checks. Preserve actual checks and human checkpoints.
+
 The root chat owns the execution_handle and all workflow state writes. For an
 external-agent execution, use native Codex subagents by default for generation and
 validation. Give each worker one complete canonical business contract: the pinned
