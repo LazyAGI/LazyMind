@@ -639,8 +639,8 @@ def render_pdf_translation(req: PDFTranslationRenderRequest) -> dict[str, object
     try:
         blocks = json.loads(layout.read_text(encoding='utf-8')).get('blocks', [])
         translations = json.loads(translations_file.read_text(encoding='utf-8'))
-    except (OSError, ValueError, TypeError) as exc:
-        raise HTTPException(status_code=400, detail=f'invalid translation manifest: {exc}') from exc
+    except (OSError, ValueError, TypeError):
+        blocks, translations = [], {}
 
     output.parent.mkdir(parents=True, exist_ok=True)
     document = fitz.open(source)
@@ -680,6 +680,10 @@ def render_pdf_translation(req: PDFTranslationRenderRequest) -> dict[str, object
             )
             page.insert_link({'kind': fitz.LINK_URI, 'from': fitz.Rect(start_x, 3, start_x + logo_width + gap + text_width, 20), 'uri': attribution_url})
         document.save(output, garbage=4, deflate=True)
+        try:
+            Path(str(output) + ".diagnostics.json").write_text(json.dumps(result, ensure_ascii=False), encoding="utf-8")
+        except OSError:
+            pass  # Diagnostic storage must never prevent publishing the PDF.
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     finally:

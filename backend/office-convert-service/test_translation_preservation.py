@@ -141,13 +141,12 @@ class PreservationTests(unittest.TestCase):
             self.assertEqual(content.count("Rightfollow"), 1)
             self.assertGreater(result["continuation_page_count"], 0)
 
-    def test_missing_translation_fails(self):
+    def test_missing_translation_preserves_source_and_reports_diagnostic(self):
         with fitz.open() as doc:
-            doc.new_page()
-            with self.assertRaisesRegex(ValueError, "missing translation"):
-                self.render(
-                    doc, [self.block("missing", [50, 50, 250, 100], "Source")], {}
-                )
+            doc.new_page().insert_text((50, 70), "Source")
+            result = self.render(doc, [self.block("missing", [50, 50, 250, 100], "Source")], {})
+            self.assertIn("Source", doc[0].get_text())
+            self.assertIn("missing_translation", [d["code"] for d in result["diagnostics"]])
 
     def test_expansion_does_not_cross_other_column(self):
         source = fitz.Rect(50, 50, 200, 70)
