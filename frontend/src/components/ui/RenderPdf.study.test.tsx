@@ -563,3 +563,15 @@ it('limits a translated PDF toolbar to pagination, zoom and supplied document ac
  fireEvent.click(screen.getByRole('button',{name:'pdfReader.nextPage'}));
  expectPage(2);
 });
+
+it('does not restore a stale parent position when zooming after an in-page scroll',async()=>{
+ const report=vi.fn();
+ const view=render(<RenderPdf fileData="zoom-scroll.pdf" defaultPageWidth={600} viewPosition={{page:1,progress:0}} onViewPositionChange={report}/>);
+ await act(async()=>{});
+ const viewport=view.container.querySelector('.pdf-reader-with-study')!.firstElementChild as HTMLElement;
+ viewport.scrollTop=120;fireEvent.scroll(viewport);
+ await waitFor(()=>expect(report).toHaveBeenCalled());
+ const scroll=vi.spyOn(viewport,'scrollTo');scroll.mockClear();
+ fireEvent.click(screen.getByRole('button',{name:'pdfReader.zoomIn'}));
+ expect(scroll.mock.calls.at(-1)?.[0]).toEqual({top:132,behavior:'auto'});
+});

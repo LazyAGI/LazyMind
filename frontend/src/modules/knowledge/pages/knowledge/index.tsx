@@ -1,3 +1,4 @@
+import { createPdfScrollSync } from "@/components/ui/pdfScrollSync";
 import FileUtils from "@/modules/knowledge/utils/file";
 import { TIME_FORMAT } from "@/modules/knowledge/constants/common";
 import { Button, Input, message, Modal, Popover, Segmented, Tag, Tooltip, Select, Switch, Spin } from "antd";
@@ -340,6 +341,12 @@ const KnowledgeDocumentContent = () => {
   const [pdfViewPosition, setPdfViewPosition] = useState<PdfViewPosition>({ page: 1, progress: 0 });
   const [pdfTask, setPdfTask] = useState<PdfRenderJob>();
   const [pdfProgress] = useState(createPdfTranslationProgress);
+  const [scrollSync] = useState(createPdfScrollSync);
+  const [syncScroll, setSyncScroll] = useState(false);
+  const toggleSyncScroll = useCallback((enabled: boolean) => {
+    scrollSync.setEnabled(enabled);
+    setSyncScroll(enabled);
+  }, [scrollSync]);
   const [pdfTaskDetail, setPdfTaskDetail] = useState("");
   const [translationPreparing, setTranslationPreparing] = useState(false);
   const [translationTarget, setTranslationTarget] = useState("zh");
@@ -1049,6 +1056,7 @@ const KnowledgeDocumentContent = () => {
           {isPdfDocument && <PaperOutlineRail document={paperIR} nativeOutline={nativePdfOutline} currentPage={pdfViewPosition.page} onNavigate={navigatePaperBlock} onNavigatePage={navigatePaperPage}/> }
             <FileViewer
               ref={fileViewerRef}
+              pdfScrollSync={scrollSync.source}
               paperMode={isPaperDocument}
               pdfHeaderStart={readerBackButton}
               pdfHeaderEnd={readerDocumentActions}
@@ -1129,6 +1137,7 @@ const KnowledgeDocumentContent = () => {
                 {translationPanelMode === "document" && <FullDocumentTranslationPanel
                   datasetId={knowledgeBaseId} documentId={knowledgeId}
                   artifact={sidebarTranslation}
+                  scrollSync={scrollSync.translation} syncScroll={syncScroll} onSyncScrollChange={toggleSyncScroll}
                   supported={canTranslateDocument} busy={translationInProgress}
                   canWrite={hasWritePermission}
                   progressNotice={<PdfTranslationNotice progress={pdfProgress} documentId={knowledgeId} job={pdfTask} preparing={translationPreparing} detail={pdfTaskDetail} providerLabel={displayTranslationName(getTranslationProgressLabel(pdfTask, translationPreparing, translationMode, translationProvider))} onCancel={() => void cancelTranslationJob()} />}
