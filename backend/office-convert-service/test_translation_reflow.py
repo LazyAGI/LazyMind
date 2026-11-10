@@ -25,11 +25,11 @@ class TranslationReflowTests(unittest.TestCase):
                 any("Attention Is All You Need" in block["text"] for block in blocks)
             )
 
-    def test_unfittable_translation_does_not_publish_an_appendix(self):
+    def test_extreme_translation_publishes_continuous_pdf(self):
         with tempfile.TemporaryDirectory(dir="/var/lib/lazymind/uploads") as directory:
             root = Path(directory)
             with fitz.open() as source:
-                source.new_page(width=150, height=150)
+                source.new_page(width=300, height=400)
                 source.save(root / "source.pdf")
             (root / "layout.json").write_text(
                 json.dumps(
@@ -47,19 +47,22 @@ class TranslationReflowTests(unittest.TestCase):
                 )
             )
             (root / "translations.json").write_text(
-                json.dumps({"a": "完整译文。" * 5000})
+                json.dumps({"a": "完整译文。" * 1000 + "最后一句。"})
             )
-            with self.assertRaises(main.HTTPException) as error:
-                main.render_pdf_translation(
-                    main.PDFTranslationRenderRequest(
-                        source_path=str(root / "source.pdf"),
-                        layout_path=str(root / "layout.json"),
-                        translations_path=str(root / "translations.json"),
-                        output_path=str(root / "output.pdf"),
-                    )
+            result = main.render_pdf_translation(
+                main.PDFTranslationRenderRequest(
+                    source_path=str(root / "source.pdf"),
+                    layout_path=str(root / "layout.json"),
+                    translations_path=str(root / "translations.json"),
+                    output_path=str(root / "output.pdf"),
                 )
-            self.assertEqual(error.exception.status_code, 422)
-            self.assertFalse((root / "output.pdf").exists())
+            )
+            self.assertEqual(result["supplemental_block_count"], 0)
+            with fitz.open(root / "output.pdf") as d:
+                self.assertIn(
+                    "最后一句。", "".join(p.get_text() for p in d).replace("\n", "")
+                )
+                self.assertGreater(len(d), 1)
 
 
 if __name__ == "__main__":

@@ -3,6 +3,7 @@
 import math
 import unicodedata
 import fitz
+from translation_continuation import continue_in_place
 from translation_layout import geometry, source_spans, fit_text, paint, visual_regions
 
 
@@ -100,6 +101,7 @@ def render_preserving_pages(document, blocks, translations, font_path):
         raise ValueError("translation manifest does not match layout")
 
     prepared = []
+    overflow = []
     unchanged = 0
     preserved = []
     for item in items:
@@ -154,9 +156,9 @@ def render_preserving_pages(document, blocks, translations, font_path):
             "center" if item["source"].get("styleLevel") == "title" else "left",
         )
         if fitting is None:
-            raise ValueError(
-                f"第 {item['page']+1} 页段落 {item['id']} 无法在可读字号下排入原页；译文已保留，请调整排版后重试"
-            )
+            item["editable"] = editable
+            overflow.append(item)
+            continue
         item["fit"] = fitting
         item["editable"] = editable
         prepared.append(item)
@@ -172,7 +174,7 @@ def render_preserving_pages(document, blocks, translations, font_path):
                 raise ValueError(f"translation extraction mismatch: {item['id']}")
     for pno in range(source_pages):
         page = document[pno]
-        page_items = [i for i in prepared if i["page"] == pno]
+        page_items = [i for i in prepared + overflow if i["page"] == pno]
         for item in page_items:
             for span in item["editable"]:
                 # Shrink to the centre of the glyph row; adjacent math glyphs
@@ -188,7 +190,8 @@ def render_preserving_pages(document, blocks, translations, font_path):
                 text=fitz.PDF_REDACT_TEXT_REMOVE,
             )
             for item in page_items:
-                paint(page, item["fit"]["runs"])
+                if "fit" in item:
+                    paint(page, item["fit"]["runs"])
         if graphics_signature(page) != original_graphics[pno]:
             raise ValueError(f"original vector graphics changed on page {pno+1}")
         if [
@@ -196,7 +199,7 @@ def render_preserving_pages(document, blocks, translations, font_path):
         ] != original_images[pno]:
             raise ValueError(f"original images changed on page {pno+1}")
         for item in page_items:
-            if visible(item["text"]) not in visible(page.get_text()):
+            if "fit" in item and visible(item["text"]) not in visible(page.get_text()):
                 raise ValueError(f"final translated text lost: {item['id']}")
         removed = [s for i in page_items for s in i["editable"]]
         text = visible(page.get_text())
@@ -207,17 +210,23 @@ def render_preserving_pages(document, blocks, translations, font_path):
                 )
     if len(document) != source_pages:
         raise ValueError("source page count changed")
+    page_map = continue_in_place(document, overflow, items, fonts) if overflow else []
     return {
         "warning_count": len(preserved),
         "rendered_block_count": len(items),
         "requested_block_count": len(items),
         "supplemental_block_count": 0,
         "source_page_count": source_pages,
-        "supplements": [],
+        "supplements": page_map,
+        "continuation_page_count": len(document) - source_pages,
         "layout_preserved": True,
         "adaptive_layout_version": 1,
         "preserved_visual_block_ids": preserved,
-        "minimum_font_size": min((i["fit"]["size"] for i in prepared), default=0),
+        "minimum_font_size": min(
+            [i["fit"]["size"] for i in prepared]
+            + [max(9, min(12, i["size"])) for i in overflow],
+            default=0,
+        ),
         "expanded_block_count": sum(
             not i["rect"].contains(i["fit"]["rect"]) for i in prepared
         ),

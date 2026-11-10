@@ -84,19 +84,62 @@ class PreservationTests(unittest.TestCase):
             self.assertEqual(result["preserved_visual_block_ids"], ["cell"])
             self.assertEqual(len(doc), 1)
 
-    def test_impossible_translation_fails_before_mutating_source(self):
+    def test_extreme_translation_continues_before_following_content(self):
         with fitz.open() as doc:
-            p = doc.new_page(width=150, height=150)
-            p.insert_text((30, 70), "Source")
-            before = p.get_pixmap().samples
-            with self.assertRaisesRegex(ValueError, "无法在可读字号下排入原页"):
-                self.render(
-                    doc,
-                    [self.block("huge", [30, 55, 100, 75], "Source")],
-                    {"huge": "完整译文。" * 5000},
-                )
-            self.assertEqual(len(doc), 1)
-            self.assertEqual(before, doc[0].get_pixmap().samples)
+            p = doc.new_page(width=300, height=400)
+            p.insert_text((30, 50), "BEFORE")
+            p.insert_text((30, 100), "Source")
+            p.insert_text((30, 200), "AFTER")
+            p.draw_rect(fitz.Rect(30, 230, 120, 280), color=(0, 0, 0))
+            doc.new_page(width=300, height=400).insert_text((30, 50), "NEXT PAGE")
+            translation = "完整译文。" * 5000 + "这是最后一句。"
+            result = self.render(
+                doc,
+                [self.block("huge", [30, 85, 150, 105], "Source")],
+                {"huge": translation},
+            )
+            text = "".join(p.get_text() for p in doc)
+            self.assertIn(visible(translation), visible(text))
+            self.assertLess(text.index("BEFORE"), text.index("完整译文"))
+            self.assertLess(text.index("这是最后一句"), text.index("AFTER"))
+            self.assertLess(text.index("AFTER"), text.index("NEXT PAGE"))
+            self.assertEqual(text.count("BEFORE"), 1)
+            self.assertEqual(text.count("AFTER"), 1)
+            self.assertNotIn("补充译文", text)
+            self.assertGreater(result["continuation_page_count"], 0)
+            self.assertEqual(result["supplemental_block_count"], 0)
+            self.assertTrue(all(not p.get_links() for p in doc))
+            self.assertTrue(any(p.get_drawings() for p in doc))
+
+    def test_continuation_uses_both_columns_and_preserves_following_paragraph(self):
+        with fitz.open() as doc:
+            p = doc.new_page(width=595, height=842)
+            entries = [
+                ("long", [30, 85, 250, 105], "Source"),
+                ("left2", [30, 200, 250, 220], "Left follow"),
+                ("right1", [320, 85, 550, 105], "Right first"),
+                ("right2", [320, 200, 550, 220], "Right follow"),
+            ]
+            blocks = []
+            translations = {}
+            for key, box, text in entries:
+                p.insert_text((box[0], box[1] + 12), text, fontsize=11)
+                blocks.append(self.block(key, box, text))
+                translations[key] = text
+            translations["long"] = "连续译文。" * 800 + "结束。"
+            result = self.render(doc, blocks, translations)
+            right_chinese = [
+                s
+                for b in doc[0].get_text("dict")["blocks"]
+                for l in b.get("lines", [])
+                for s in l["spans"]
+                if s["bbox"][0] > 300 and "译文" in s["text"]
+            ]
+            self.assertTrue(right_chinese)
+            content = visible("".join(p.get_text() for p in doc))
+            self.assertIn(visible(translations["long"]), content)
+            self.assertEqual(content.count("Rightfollow"), 1)
+            self.assertGreater(result["continuation_page_count"], 0)
 
     def test_missing_translation_fails(self):
         with fitz.open() as doc:
