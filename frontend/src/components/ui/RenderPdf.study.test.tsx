@@ -556,6 +556,7 @@ it('limits a translated PDF toolbar to pagination, zoom and supplied document ac
  expectPage(1);
  expect(screen.getByRole('button',{name:'pdfReader.zoomIn'})).toBeInTheDocument();
  expect(screen.getByRole('button',{name:'下载译本'}).closest('nav')).toBe(pageButton(1).closest('nav'));
+ expect(screen.getByRole('button',{name:'下载译本'}).compareDocumentPosition(pageButton(1)) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
  expect(screen.queryByRole('button',{name:'阅读工具'})).toBeNull();
  expect(view.container.querySelector('.pdf-reader-hand-trigger')).toBeNull();
  expect(view.container.querySelector('.pdf-reader-pin-trigger')).toBeNull();
