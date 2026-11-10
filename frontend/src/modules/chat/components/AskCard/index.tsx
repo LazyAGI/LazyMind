@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState } from "react";
-import { Button, Checkbox, Input, Progress, Radio, Select } from "antd";
+import { Button, Checkbox, Input, Progress, Radio, Select, message } from "antd";
 import { LeftOutlined, RightOutlined, UploadOutlined, CloseOutlined } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
 import type { RcFile } from "antd/es/upload";
-import ImageUpload, { type ImageUploadImperativeProps } from "../ImageUpload";
+import ImageUpload, { allowedImageTypes, type ImageUploadImperativeProps } from "../ImageUpload";
 import "./index.scss";
 
 export interface AskQuestion {
@@ -78,6 +78,7 @@ interface AskCardProps {
   askPending: AskPending;
   /** Called with a payload containing the formatted text and full structured answers. */
   onSubmit: (payload: AskSubmitPayload) => void | boolean | Promise<void | boolean>;
+  vlmReady?: boolean | null;
   disabled?: boolean;
   /** Persisted completion, distinct from a temporarily disabled or superseded card. */
   answered?: boolean;
@@ -266,6 +267,7 @@ export default function AskCard(props: AskCardProps) {
 function AskCardContent({
   askPending,
   onSubmit,
+  vlmReady,
   disabled = false,
   answered = false,
   savedAnswers,
@@ -592,6 +594,13 @@ function AskCardContent({
                       ...previous,
                       [currentIndex]: files as AskAttachmentFile[],
                     }))}
+                    onFilesAdded={(files) => {
+                      if (vlmReady === false && files.some((file) => allowedImageTypes.includes(
+                        file.name.substring(file.name.lastIndexOf(".")).toLowerCase(),
+                      ))) {
+                        message.warning(t("chat.vlmNotReadyWarning"));
+                      }
+                    }}
                     icon={(
                       <Button icon={<UploadOutlined />} disabled={isReadOnly}>
                         {t("chat.askCardUploadFile")}

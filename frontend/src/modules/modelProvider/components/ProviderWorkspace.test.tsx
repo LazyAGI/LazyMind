@@ -7,7 +7,7 @@ import {
   waitFor,
   within,
 } from "@testing-library/react";
-import { ConfigProvider } from "antd";
+import { ConfigProvider, message } from "antd";
 import { createMemoryRouter, RouterProvider } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { SettingsNavigationGuard } from "@/modules/settings/SettingsNavigationGuard";
@@ -686,6 +686,24 @@ describe("compact provider workspace", () => {
     expect(navigation.getByRole("button", { name: /Local models/ })).toBeInTheDocument();
   });
 
+  it("shows a verified keyless built-in supplier at a custom endpoint as connected", () => {
+    const keyless = { ...provider, groups: [{ ...provider.groups[0], keys: [], apiKeyConfigured: false, verified: true, models: [], modelCount: 0 }] };
+    setup({ providers: [keyless], configuredProviders: [keyless] });
+    expect(document.querySelector(".provider-workspace-status")).toHaveTextContent("modelProvider.workspace.connected");
+    const navigation = within(screen.getByRole("navigation", { name: "modelProvider.workspace.suppliers" }));
+    expect(navigation.getByRole("button", { name: "OpenAI" }).querySelector("i")).toHaveClass("is-ready");
+    fireEvent.click(screen.getByRole("button", { name: "modelProvider.workspace.configured" }));
+    expect(navigation.getByRole("button", { name: "OpenAI" })).toBeInTheDocument();
+  });
+
+  it("does not show a green dot for a saved but disabled key", () => {
+    const disabled = { ...provider, groups: [{ ...provider.groups[0], keys: [{ ...provider.groups[0].keys[0], enabled: false }], verified: true }] };
+    setup({ providers: [disabled], configuredProviders: [disabled] });
+    expect(document.querySelector(".provider-workspace-status")).not.toHaveTextContent("modelProvider.workspace.connected");
+    const navigation = within(screen.getByRole("navigation", { name: "modelProvider.workspace.suppliers" }));
+    expect(navigation.getByRole("button", { name: "OpenAI" }).querySelector("i")).not.toHaveClass("is-ready");
+  });
+
   it("does not mark an unverified keyless supplier as connected", () => {
     const custom = { ...provider, id: "custom", name: "Local models", isCustom: true, groups: [{ ...provider.groups[0], keys: [], apiKeyConfigured: false, verified: false }] };
     setup({ providers: [custom], configuredProviders: [custom] });
@@ -1158,7 +1176,7 @@ describe("compact provider workspace", () => {
     await waitFor(() =>
       expect(mocks.addKey).toHaveBeenCalledWith(
         { modelProviderId: "openai", groupId: "primary" },
-        { data: { api_key: "secret-new-5678" }, timeout: 180000 },
+        { data: { api_key: "secret-new-5678" }, timeout: 180000, silentError: true },
       ),
     );
     await waitFor(() =>
@@ -1172,6 +1190,26 @@ describe("compact provider workspace", () => {
       screen.queryByDisplayValue("secret-new-5678"),
     ).not.toBeInTheDocument();
   });
+  it("shows one error when an already saved key is submitted again", async () => {
+    const toast = vi.spyOn(message, "error").mockImplementation(() => null as never);
+    try {
+      mocks.addKey.mockRejectedValueOnce(new Error("api_key already exists"));
+      setup();
+      const dialog = await openAddKeyDialog();
+      fireEvent.change(dialog.getByLabelText("modelProvider.apiKeyLabel"), {
+        target: { value: "already-saved-key" },
+      });
+      fireEvent.click(dialog.getByRole("button", { name: "modelProvider.workspace.addAndCheckKey" }));
+      await waitFor(() => expect(mocks.addKey).toHaveBeenCalledWith(
+        { modelProviderId: "openai", groupId: "primary" },
+        { data: { api_key: "already-saved-key" }, timeout: 180000, silentError: true },
+      ));
+      await waitFor(() => expect(toast).toHaveBeenCalledOnce());
+      expect(screen.getByRole("dialog")).toBeInTheDocument();
+    } finally {
+      toast.mockRestore();
+    }
+  });
   it("creates the first private credential storage directly from the empty key field", async () => {
     const onKeySaved = vi.fn().mockResolvedValue(undefined);
     const callbacks = setup({ onKeySaved });
@@ -1184,7 +1222,7 @@ describe("compact provider workspace", () => {
     expect(mocks.createGroup).toHaveBeenCalledWith({
       modelProviderId: "openai",
       createModelProviderGroupOpenAPIRequest: { name: "OpenAI", api_key: "fixture-first-key", verify: false },
-    }, { timeout: 180000 });
+    }, { timeout: 180000, silentError: true });
     await waitFor(() => expect(input).toHaveValue(""));
     expect(mocks.addKey).not.toHaveBeenCalled();
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
@@ -1233,7 +1271,7 @@ describe("compact provider workspace", () => {
     await waitFor(() => expect(mocks.addKey).toHaveBeenCalledTimes(1));
     fireEvent.click(navigation.getByRole("button", { name: "Other supplier" }));
     await act(async () => finish({ data: { success: true } }));
-    expect(mocks.addKey).toHaveBeenCalledWith({ modelProviderId: "openai", groupId: "primary" }, { data: { api_key: "fixture-original-key" }, timeout: 180000 });
+    expect(mocks.addKey).toHaveBeenCalledWith({ modelProviderId: "openai", groupId: "primary" }, { data: { api_key: "fixture-original-key" }, timeout: 180000, silentError: true });
     expect(screen.getByLabelText("modelProvider.apiKeyLabel", { selector: "input" })).toHaveValue("");
     expect(mocks.createGroup).not.toHaveBeenCalled();
     expect(onKeySaved).not.toHaveBeenCalled();
@@ -1486,6 +1524,17 @@ describe("compact provider workspace", () => {
       expect(mocks.deleteProvider).toHaveBeenCalledWith("custom"),
     );
   });
+  it("keeps a supplier whose active embedding model needs vector cleanup", async () => {
+    const custom = { ...provider, id: "custom", name: "Private proxy", isCustom: true };
+    const callbacks = setup({ providers: [custom], configuredProviders: [custom] });
+    mocks.deleteProvider.mockRejectedValue({
+      response: { status: 409, data: { code: 2005089, message: "Clear the old text vectors before changing the embedding model" } },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "modelProvider.workspace.deleteSupplier" }));
+    fireEvent.click(within(await screen.findByRole("dialog")).getByRole("button", { name: "modelProvider.workspace.deleteSupplier" }));
+    expect(await screen.findByText("modelProvider.embeddingInUse")).toBeInTheDocument();
+    expect(callbacks.onReload).not.toHaveBeenCalled();
+  });
   it("resets a built-in supplier while keeping its entry", async () => {
     const callbacks = setup();
     fireEvent.click(screen.getByRole("button", { name: "modelProvider.workspace.resetSupplier" }));
@@ -1520,7 +1569,7 @@ describe("compact provider workspace", () => {
             verify: false,
           },
         },
-        { timeout: 180000 },
+        { timeout: 180000, silentError: true },
       ),
     );
     await waitFor(() => expect(callbacks.onReload).toHaveBeenCalled());

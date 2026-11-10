@@ -2,7 +2,8 @@
 from pathlib import Path
 
 
-def build_native_pptx(slides: list[dict], output: Path, template: Path | None = None) -> dict:
+def build_native_pptx(slides: list[dict], output: Path, template: Path | None = None,
+                      font_family: str | None = None) -> dict:
     from pptx import Presentation
     from pptx.util import Inches, Pt
     from pptx.enum.shapes import PP_PLACEHOLDER
@@ -14,6 +15,12 @@ def build_native_pptx(slides: list[dict], output: Path, template: Path | None = 
                 or not slide['title'].strip() or not isinstance(slide.get('bullets', []), list)
                 or any(not isinstance(item, str) for item in slide.get('bullets', []))):
             raise ValueError('Each slide requires a title and a list of plain-text bullets')
+    from lazymind.chat.engine.tools.file_resources.portable_fonts import portable_font_faces
+    from lazymind.chat.engine.tools.file_resources.pptx_font_embedding import embed_pptx_file
+    family = font_family or (None if template else 'Songti SC')
+    records = []
+    if family:
+        family, records = portable_font_faces(family)
     prs = Presentation(str(template)) if template else Presentation()
     if not template:
         prs.slide_width, prs.slide_height = Inches(13.333), Inches(7.5)
@@ -50,9 +57,20 @@ def build_native_pptx(slides: list[dict], output: Path, template: Path | None = 
             paragraph.text = text
             if not body.is_placeholder:
                 paragraph.font.size = Pt(22)
+        if family:
+            from pptx.oxml.xmlchemy import OxmlElement
+            for shape in (title, body):
+                for paragraph in shape.text_frame.paragraphs:
+                    for run in paragraph.runs:
+                        run.font.name = family
+                        properties = run._r.get_or_add_rPr()
+                        east_asian = OxmlElement('a:ea')
+                        east_asian.set('typeface', family)
+                        properties.append(east_asian)
         if spec.get('notes'):
             slide.notes_slide.notes_text_frame.text = str(spec['notes'])
     output.parent.mkdir(parents=True, exist_ok=True)
     prs.save(str(output))
-    return {'slide_count': len(slides), 'fallback_body_count': fallback_count,
+    embedded = embed_pptx_file(output, family, records) if family else []
+    return {'embedded_fonts': embedded, 'slide_count': len(slides), 'fallback_body_count': fallback_count,
             'template_mode': 'layout' if template else 'none'}

@@ -590,6 +590,41 @@ describe('shared workflow compact layout', () => {
     expect(screen.getByText('正文 notes')).toBeVisible();
   });
 
+  it.each(['preview', 'slide_outline'])('keeps stale %s content visible after an upstream edit', async slot => {
+    fixture.session.workflow_id = 'ppt-workflow';
+    fixture.ui.tabs = [{
+      id: 'slides', step_id: 'generate_ppt', label: '幻灯片', layout: 'composite',
+      composite_tab_position: 'left', composite_behavior: { empty_column_scope: 'selected' },
+      slots: [{ id: slot, label: '内容', type: 'text' }],
+      composite_layout: { direction: 'row', children: [{ slot }] },
+    }];
+    fixture.session.slots = [0, 1].map(sort_order => ({
+      ...fixture.session.slots![0], slot, slot_id: slot, step_id: 'generate_ppt',
+      list_index: sort_order, sort_order, selected: false,
+      artifact_value: { text: `saved-${sort_order}` },
+    }));
+    render(<WorkflowPanel conversationId='layout-test' />);
+    await screen.findByRole('listitem', { name: '第 1 行' });
+    expect(screen.getByText(`正文 ${slot}`)).toBeVisible();
+    expect(screen.getByText('上游内容已修改，当前显示旧版本；重新生成后才会反映最新修改。')).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: '下一张幻灯片' }));
+    expect(screen.getByText(`正文 ${slot}`)).toHaveAttribute('data-value', 'saved-1');
+  });
+
+  it('keeps non-PPT selected-only composite visibility unchanged', async () => {
+    fixture.ui.tabs = [{
+      id: 'draft', step_id: 'write_document', label: '成稿', layout: 'composite',
+      composite_tab_position: 'left', composite_behavior: { empty_column_scope: 'selected' },
+      slots: [{ id: 'document', label: '内容', type: 'text' }],
+      composite_layout: { direction: 'row', children: [{ slot: 'document' }] },
+    }];
+    fixture.session.slots = [{ ...fixture.session.slots![0], selected: false, sort_order: 0 }];
+    render(<WorkflowPanel conversationId='layout-test' />);
+    await screen.findByRole('tab', { name: '成稿' });
+    expect(screen.queryByText('正文 document')).toBeNull();
+    expect(screen.queryByText('上游内容已修改，当前显示旧版本；重新生成后才会反映最新修改。')).toBeNull();
+  });
+
   it('numbers ordinary workflow stages even with hidden control steps', async () => {
     fixture.ui.task_presentation = { hidden_steps: ['route'] };
     render(<WorkflowPanel conversationId='layout-test' />);

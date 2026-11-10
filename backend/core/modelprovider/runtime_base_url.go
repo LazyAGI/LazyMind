@@ -58,8 +58,8 @@ func ProviderModelsListURL(providerName, baseURL string) (string, error) {
 			rawRoot += "/openai"
 		}
 	case "sensenova":
-		// SenseNova's classic compatible-mode API has no model directory.
-		// Match its native adapter's read-only validation endpoint instead.
+		// The Classic compatible-mode host lists models at /v1/llm/models,
+		// while the Token Plan host uses /v1/models.
 		switch strings.ToLower(parsed.Hostname()) {
 		case "api.sensenova.cn":
 			rawRoot = "/v1/llm"

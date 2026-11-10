@@ -361,6 +361,13 @@ func (w *Worker) handleMemoryReview(ctx context.Context, task orm.ResourceUpdate
 	if conversationID == "" {
 		return permanentOutcome("missing_conversation_id", "conversation_id required")
 	}
+	workflow, err := isWorkflowConversation(ctx, w.db, conversationID)
+	if err != nil {
+		return retryableOutcome("workflow_isolation_check_failed", err)
+	}
+	if workflow {
+		return taskOutcome{Status: orm.ResourceUpdateTaskStatusSkipped, ErrorCode: conversationIdleSkipWorkflow}
+	}
 	llmConfig, err := w.loadLLMConfig(ctx, w.db, userID)
 	if err != nil {
 		return retryableOutcome("load_llm_config_failed", err)

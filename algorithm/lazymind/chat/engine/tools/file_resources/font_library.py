@@ -22,6 +22,11 @@ DOWNLOAD_FONTS = {
 }
 
 
+class FontUnavailableError(ValueError):
+    """A requested family is unavailable; never silently substitute another."""
+    error_code = 'FONT_UNAVAILABLE'
+
+
 def ensure_font(family: str, allow_download: bool = False) -> str:
     """Resolve an installed family, optionally acquire an allowlisted OFL font."""
     from .presentation_edit import available_font_families
@@ -29,10 +34,14 @@ def ensure_font(family: str, allow_download: bool = False) -> str:
     available = {name.casefold(): name for name in available_font_families()}
     if requested.casefold() in available:
         return available[requested.casefold()]
+    from lazymind.presentation_resources import font_families
+    cloud_family = next((name for name in font_families() if name.casefold() == requested.casefold()), None)
+    if allow_download and cloud_family:
+        return _acquire_cloud_family(cloud_family)
     canonical = next((name for name in DOWNLOAD_FONTS if name.casefold() == requested.casefold()), None)
     if not allow_download or canonical is None:
-        raise ValueError(f'字体 {requested!r} 不可用。请提供合法字体文件或选择已安装字体。'
-                         f'可按明确请求下载的开源字体：{", ".join(DOWNLOAD_FONTS)}。不会自动替换字体。')
+        raise FontUnavailableError(f'字体 {requested!r} 不可用。请提供合法字体文件或选择已安装字体。'
+                                   f'可按明确请求下载的开源字体：{", ".join(DOWNLOAD_FONTS)}。不会自动替换字体。')
     import tempfile
     import httpx
     relative = DOWNLOAD_FONTS[canonical]
@@ -59,19 +68,37 @@ def ensure_font(family: str, allow_download: bool = False) -> str:
             names = {n.toUnicode().casefold() for n in font['name'].names if n.nameID in {1, 16}}
             if canonical.casefold() not in names or int(getattr(font.get('OS/2'), 'fsType', 0)) & (2 | 512):
                 raise ValueError('Downloaded font family or embedding permission mismatch')
-        record = register_font(source)
-        (font_library_root() / (record['id'] + '.OFL.txt')).write_text(license_response.text, encoding='utf-8')
+        with TTFont(source) as font:
+            weights = (400, 700) if 'fvar' in font and any(a.axisTag == 'wght' for a in font['fvar'].axes) else (400,)
+        for weight in weights:
+            record = register_font(source, weight=weight)
+            (font_library_root() / (record['id'] + '.OFL.txt')).write_text(license_response.text, encoding='utf-8')
     return canonical
 
 
+def _acquire_cloud_family(family):
+    from lazymind.presentation_resources import ensure_resource
+    root = ensure_resource('fonts')
+    manifest = json.loads((root / 'manifest.json').read_text(encoding='utf-8'))
+    entry = next(item for item in manifest['families'] if item['family'] == family)
+    for item in entry['files']:
+        source = (root / item['file']).resolve()
+        if not source.is_relative_to(root) or hashlib.sha256(source.read_bytes()).hexdigest() != item['sha256']:
+            raise ValueError('Cloud font checksum/path mismatch')
+        weights = (400, 700) if item['variable'] else (item['weight'],)
+        for weight in weights:
+            record = register_font(source, weight=weight)
+            (font_library_root() / (record['id'] + '.OFL.txt')).write_bytes((source.parent / 'OFL.txt').read_bytes())
+    return family
+
+
 def font_library_root() -> Path:
-    # TODO: replace this local storage boundary with cloud object storage plus
-    # a local cache. Keep content-hash font IDs and catalog metadata unchanged.
+    # Derived static faces are runtime cache; original libraries live in cloud storage.
     return Path(os.environ.get('LAZYMIND_FONT_DIR')
                 or Path.home() / '.local/share/lazymind/fonts').expanduser().resolve()
 
 
-def register_font(source: str | Path) -> dict:
+def register_font(source: str | Path, *, weight=400) -> dict:
     from fontTools.ttLib import TTFont
 
     source = Path(source)
@@ -83,7 +110,7 @@ def register_font(source: str | Path) -> dict:
         if 'fvar' in font:
             from fontTools.varLib.instancer import instantiateVariableFont
             font = instantiateVariableFont(font, {
-                a.axisTag: min(a.maxValue, max(a.minValue, 400)) if a.axisTag == 'wght' else a.defaultValue
+                a.axisTag: min(a.maxValue, max(a.minValue, weight)) if a.axisTag == 'wght' else a.defaultValue
                 for a in font['fvar'].axes
             })
         names = font['name']
@@ -135,19 +162,32 @@ def local_fonts() -> list[dict]:
 
 def local_font_css(html: str) -> str:
     """Self-contained fonts for browser previews; no expiring cloud URLs."""
+    from .portable_fonts import _PageText, _html_font_bytes
+    page = _PageText()
+    page.feed(html)
+    text = ''.join(page.text)
     blocks = []
+    packaged = set()
+    packaged_families = set()
+    for token in re.findall(r'/\*lazymind-font:([A-Za-z0-9+/=]+)\*/', html):
+        try:
+            metadata = json.loads(base64.b64decode(token))
+            packaged.add(metadata['sha256'])
+            packaged_families.add(metadata['family'].casefold())
+        except (ValueError, KeyError, TypeError):
+            continue
     for record in local_fonts():
-        if not record['embeddable']:
+        if (not record['embeddable'] or record['id'] in packaged
+                or packaged_families.intersection(name.casefold() for name in record['aliases'])):
             continue
         aliases = [name for name in record['aliases'] if name.casefold() in html.casefold()]
         if not aliases:
             continue
-        data = (font_library_root() / record['file']).read_bytes()
-        encoded = base64.b64encode(data).decode()
+        encoded = base64.b64encode(_html_font_bytes(record, text)).decode()
         for family in aliases:
             quoted = json.dumps(family, ensure_ascii=False).replace('<', '\\3c ')
             blocks.append(f'@font-face{{font-family:{quoted};font-weight:{record["weight"]};'
-                          f'font-style:{record["style"]};src:url(data:font/ttf;base64,{encoded})}}')
+                          f'font-style:{record["style"]};src:url(data:font/woff;base64,{encoded})}}')
     return '\n'.join(blocks)
 
 

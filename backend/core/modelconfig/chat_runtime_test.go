@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/json"
-	"errors"
 	"strings"
 	"testing"
 
@@ -37,6 +36,9 @@ func TestChatRuntimeKeepsKeylessDefaultCandidate(t *testing.T) {
 	if err := db.Model(&orm.UserModelProviderGroup{}).Where("id = ?", "group-qwen").Update("api_key", "").Error; err != nil {
 		t.Fatal(err)
 	}
+	if err := db.Model(&orm.UserModelProvider{}).Where("id = ?", "provider-qwen").Update("is_custom", true).Error; err != nil {
+		t.Fatal(err)
+	}
 	if err := db.Create(&orm.UserSelectedModel{UserID: "user", ModelKey: "llm", UserModelProviderGroupModelID: "qwen"}).Error; err != nil {
 		t.Fatal(err)
 	}
@@ -50,6 +52,35 @@ func TestChatRuntimeKeepsKeylessDefaultCandidate(t *testing.T) {
 	config := result.Candidates[0].LLMConfig["llm"].(map[string]any)
 	if config["skip_auth"] != true || config["api_key"] != "" {
 		t.Fatal("keyless chat candidate did not preserve unauthenticated access")
+	}
+}
+
+func TestChatCandidatesUseTheSupplierActiveKeyBeforeInitialization(t *testing.T) {
+	db := orm.MigrateAllModelsForTest(t).DB
+	seedChatRuntimeModel(t, db, "user", "a", true, false)
+	if err := db.Model(&orm.UserModelProviderGroup{}).Where("id = ?", "group-a").Update("api_key", "key-a").Error; err != nil {
+		t.Fatal(err)
+	}
+	for _, row := range []any{
+		&orm.UserModelProviderGroup{ID: "group-z", UserModelProviderID: "provider-a", BaseURL: "https://fixture.invalid/v1", APIKey: "key-b", IsVerified: true, BaseModel: orm.BaseModel{CreateUserID: "user"}},
+		&orm.UserModelProviderGroupModel{ID: "b", UserModelProviderID: "provider-a", UserModelProviderGroupID: "group-z", ProviderName: "OpenAI", Name: "b", ModelType: "llm", BaseModel: orm.BaseModel{CreateUserID: "user"}},
+	} {
+		if err := db.Create(row).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	result, err := LoadChatModelCandidates(t.Context(), db, "user")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Candidates) != 2 {
+		t.Fatalf("expected both models, got %d", len(result.Candidates))
+	}
+	for _, candidate := range result.Candidates {
+		role := candidate.LLMConfig["llm"].(map[string]any)
+		if role["api_key"] != "key-a" {
+			t.Fatalf("model %s used an inactive group key: %#v", candidate.ModelID, role)
+		}
 	}
 }
 
@@ -202,8 +233,9 @@ func TestChatRuntimeDecryptsSharedGroupOnceAcrossRolesAndCandidates(t *testing.T
 	if err := db.Model(&orm.UserModelProvider{}).Where("id = ?", "provider-a").Update("active_key_initialized", true).Error; err != nil {
 		t.Fatal(err)
 	}
-	if _, err := LoadChatRuntimeConfig(t.Context(), db, "user"); !errors.Is(err, modelprovider.ErrProviderKeyDisabled) {
-		t.Fatalf("disabled supplier remained usable through the compatibility path: %v", err)
+	disabled, err := LoadChatRuntimeConfig(t.Context(), db, "user")
+	if err != nil || disabled.Config["embed_main"] != nil || len(disabled.Candidates) != 0 {
+		t.Fatalf("disabled supplier remained usable through the compatibility path: config=%#v candidates=%d err=%v", disabled.Config, len(disabled.Candidates), err)
 	}
 }
 func TestChatRuntimeCloudCandidatesRequireExplicitSelection(t *testing.T) {
@@ -239,9 +271,9 @@ func TestChatRuntimeCredentialHeaderSafety(t *testing.T) {
 		{name: "single", key: "fixture-single", want: "fixture-single", usable: true},
 		{name: "outer whitespace", key: " \tfixture-single \r\n", want: "fixture-single", usable: true},
 		{name: "access secret pair", key: "fixture-access:fixture-secret", want: "fixture-access:fixture-secret", usable: true},
-		{name: "line feed", key: "fixture-first\nfixture-second"},
+		{name: "line feed", key: "fixture-first\nfixture-second", want: "fixture-first", usable: true},
 		{name: "carriage return", key: "fixture-first\rfixture-second"},
-		{name: "CRLF", key: "fixture-first\r\nfixture-second"},
+		{name: "CRLF", key: "fixture-first\r\nfixture-second", want: "fixture-first", usable: true},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			db := orm.MigrateAllModelsForTest(t).DB
@@ -277,8 +309,9 @@ func TestChatRuntimeCredentialHeaderSafety(t *testing.T) {
 			if err := db.Where("id = ?", "group-a").Take(&group).Error; err != nil {
 				t.Fatal(err)
 			}
-			if !group.IsVerified || group.APIKey != test.key {
-				t.Fatal("request preparation changed stored credential validity or content")
+			stored, resolveErr := modelprovider.ResolveAPIKey(group.APIKey, group.APIKeyCiphertext)
+			if !group.IsVerified || resolveErr != nil || stored != strings.TrimSpace(test.key) {
+				t.Fatalf("request preparation changed stored credential content: %q err=%v", stored, resolveErr)
 			}
 		})
 	}

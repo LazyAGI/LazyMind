@@ -99,7 +99,8 @@ func bindNativeIndexTask(ctx context.Context, datasetID, documentID, taskID, lev
 		return
 	}
 	store.DB().WithContext(ctx).Model(&orm.DocumentProcessingState{}).
-		Where("dataset_id = ? AND document_id = ? AND parse_artifact_ref <> ''", datasetID, documentID).
+		Where("dataset_id = ? AND document_id = ? AND (parse_artifact_ref <> '' OR embedding_version IN ?)",
+			datasetID, documentID, []string{embeddingVersionReembedPending, embeddingVersionReembedManual}).
 		Update("index_artifact_ref", "core-task:"+taskID)
 }
 

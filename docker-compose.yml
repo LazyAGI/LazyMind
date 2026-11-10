@@ -522,6 +522,7 @@ services:
       LAZYMIND_DOCUMENT_SERVICE_URL: http://lazyllm-doc-server:8000
       LAZYMIND_DOCUMENT_WORKER_URL: http://processor-worker:8001
       LAZYMIND_PARSING_SERVICE_URL: http://lazyllm-parse-server:8000
+      LAZYMIND_CHAT_MODEL_FALLBACK_ENABLED: ${LAZYMIND_CHAT_MODEL_FALLBACK_ENABLED:-true}
       LAZYMIND_CHAT_SERVICE_URL: http://chat:8046
       LAZYMIND_EVO_SERVICE_URL: http://evo-api:8047
       LAZYMIND_BROWSER_ENABLED: ${LAZYMIND_BROWSER_ENABLED:-true}
@@ -925,6 +926,9 @@ services:
         if [[ ! -d node_modules/pptxgenjs || ! -d node_modules/playwright ]] \
           || ! node -e "const v=require('./node_modules/playwright/package.json').version; process.exit(v==='1.58.2'?0:1)"; then
           npm install --omit=dev
+        fi
+        if ! python3 -c 'import fontTools' 2>/dev/null; then
+          apt-get update && apt-get install -y --no-install-recommends python3-fonttools
         fi
         exec node ppt_export_http_server.mjs
     expose:

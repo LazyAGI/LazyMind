@@ -941,6 +941,12 @@ func OnSubAgentDone(
 	}
 	fmt.Printf("[plugin] sub_agent terminal conv=%s session=%s step=%s task=%s status=%s mode=%s summary_len=%d\n",
 		pctx.ConvID, pctx.SessionID, pctx.StepID, taskID, status, mode, len(summary))
+	if stepFailed && pctx.HandOff != nil && !*pctx.HandOff {
+		// The inline advance call returns the failure to its waiting ChatAgent.
+		// Starting another driver turn here races that agent's retry/rewind.
+		go OnSubAgentDoneSnapshot(context.Background(), db, pctx)
+		return
+	}
 	if stepFailed {
 		if mode == "auto" {
 			go advanceAutoMode(context.Background(), db, stateStore, status, summary, onSSE, pctx)
@@ -1051,6 +1057,10 @@ func advanceAutoMode(
 			finishActivity()
 		}
 	}()
+	sessionBefore, sessionErr := GetSession(ctx, db, pctx.SessionID)
+	if sessionErr != nil || sessionBefore == nil {
+		return
+	}
 	step, _ := GetLatestStep(ctx, db, pctx.SessionID, pctx.StepID)
 	attempt := 0
 	if step != nil {
@@ -1068,21 +1078,32 @@ func advanceAutoMode(
 		return
 	}
 	acceptance, driverPrompt := loadWorkflowDriverPolicy(ctx, db, pctx.SessionID, pctx.StepID)
-	artifactsSummary, _ := buildWorkflowArtifactsSummary(ctx, db, pctx.SessionID, pctx.StepID)
+	artifactsSummary, artifactsErr := buildWorkflowArtifactsSummary(ctx, db, pctx.SessionID, pctx.StepID)
+	if artifactsErr != nil {
+		// An unreadable assessment context must never manufacture a content failure.
+		artifactsSummary = "Current artifacts could not be read. Do not infer missing evidence or rewind upstream from this unavailable context."
+		fmt.Printf("[Workflow] Driver artifact context unavailable session=%s err=%v\n", pctx.SessionID, artifactsErr)
+	}
 	driverInput := fmt.Sprintf("Terminal status: %s\nAttempt: %d\n%s", terminalStatus, attempt, summary)
 	driverMsg, fallback := callWorkflowDriverAgent(
 		pctx.WorkflowID, pctx.StepID, driverInput, acceptance, driverPrompt, pctx.SessionID,
 		pctx.HistoryFilesPerTurn, llmConfig, artifactsSummary,
 	)
+	// Model assessment can outlive a retry, downstream advance, or user stop.
+	// Never inject its stale recovery instructions into the newer session state.
+	sessionAfter, stateErr := GetSession(ctx, db, pctx.SessionID)
+	if stateErr != nil || sessionAfter == nil || sessionAfter.StateVersion != sessionBefore.StateVersion ||
+		sessionAfter.Dismissed || sessionAfter.Status == SessionStatusCompleted ||
+		(sessionAfter.LastStoppedAt != nil && (sessionBefore.LastStoppedAt == nil ||
+			sessionAfter.LastStoppedAt.After(*sessionBefore.LastStoppedAt))) {
+		return
+	}
 	if fallback {
 		onSSE("driver_fallback", map[string]any{
 			"session_id": pctx.SessionID, "step_id": pctx.StepID,
 			"reason": "driver_unavailable",
 		})
-		if err := failIdleSession(ctx, db, pctx.SessionID); err != nil {
-			onSSE("workflow_error", map[string]any{"session_id": pctx.SessionID, "message": err.Error()})
-		}
-		return
+		driverMsg = "质量检查暂不可用。请读取当前工作流状态；已成功的步骤继续下一可执行步骤，失败的步骤仅在运行时允许时重试，不要因检查器不可用而回退或判定内容失败。"
 	}
 	onSSE("driver_input", map[string]any{
 		"session_id": pctx.SessionID,
@@ -1485,35 +1506,25 @@ func buildWorkflowArtifactsSummary(ctx context.Context, db *gorm.DB, sessionID, 
 	if db == nil || sessionID == "" {
 		return "", nil
 	}
-	// Gather all sub_agent_artifacts for completed steps in this session.
-	type artifactRow struct {
-		Slot   string `gorm:"column:slot"`
-		Value  []byte `gorm:"column:value"`
-		TaskID string `gorm:"column:task_id"`
-	}
-	var rows []artifactRow
-	err := db.WithContext(ctx).Raw(`
-		SELECT sa.slot, sa.value, sa.task_id
-		FROM sub_agent_artifacts sa
-		JOIN plugin_session_steps pss ON pss.task_id = sa.task_id
-		WHERE pss.session_id = ? AND pss.status = 'succeeded'
-		ORDER BY sa.task_id, sa.slot, sa.seq
-	`, sessionID).Scan(&rows).Error
-	if err != nil || len(rows) == 0 {
+	// Only selected, effective revisions are evidence. Successful old attempts
+	// may have been superseded by a retry and must not poison the assessment.
+	rows, err := LoadSelectedSlots(ctx, db, sessionID)
+	if err != nil {
 		return "", err
 	}
 	var sb strings.Builder
-	sb.WriteString("## Workflow session artifacts\n")
+	sb.WriteString("## Current effective Workflow artifacts\nHistorical failure assessments are not evidence about these revisions.\n")
 	for _, r := range rows {
-		var v map[string]any
-		if json.Unmarshal(r.Value, &v) == nil {
-			if val, ok := v["value"]; ok {
-				sb.WriteString(fmt.Sprintf("- %s: %v\n", r.Slot, val))
-				continue
-			}
+		if r.Validity != "effective" {
+			continue
 		}
-		sb.WriteString(fmt.Sprintf("- %s: %s\n", r.Slot, string(r.Value)))
+		value, err := controlstore.ResolveValue(db.WithContext(ctx), r)
+		if err != nil {
+			return "", fmt.Errorf("resolve current artifact %s: %w", r.ID, err)
+		}
+		sb.WriteString(fmt.Sprintf("- %s (revision %d, attempt %d): %s\n", r.SlotID, r.Revision, r.Attempt, string(value)))
 	}
+
 	return sb.String(), nil
 }
 

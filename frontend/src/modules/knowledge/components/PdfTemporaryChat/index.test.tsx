@@ -6,7 +6,9 @@ import { ChatConversationsRequestActionEnum } from "@/api/generated/chatbot-clie
 
 const requests = vi.hoisted(() => ({ options: [] as Array<{ payload: string }> }));
 const locale = vi.hoisted(() => ({ language: "en-US" }));
+const modelGuard = vi.hoisted(() => ({ vlmReady: false as boolean | null }));
 vi.mock("react-i18next", () => ({ useTranslation: () => ({ t: (key: string) => key, i18n: locale }) }));
+vi.mock("@/modules/chat/hooks/useChatModelProviderGuard", () => ({ useChatModelProviderGuard: () => modelGuard }));
 vi.mock("@/components/auth", () => ({ AgentAppsAuth: { getAuthHeaders: () => ({}) } }));
 vi.mock("@/components/request", () => ({
   BASE_URL: "",
@@ -52,6 +54,7 @@ vi.mock("@/modules/chat/components/newChatContainer", async () => {
 
 beforeEach(() => {
   locale.language = "en-US";
+  modelGuard.vlmReady = false;
   requests.options.length = 0;
   chatActions.createNewChat.mockClear();
   chatActions.sendMessage.mockReset().mockResolvedValue(true);
@@ -66,6 +69,15 @@ afterEach(() => {
 });
 
 describe("document question context", () => {
+  it("passes visual model readiness to the document chat composer", async () => {
+    const view = render(<PdfTemporaryChat datasetId="dataset-a" documentId="document-pdf" fileName="source.pdf" onClose={() => {}} />);
+    await act(async () => { await Promise.resolve(); });
+    expect(chatActions.composer.vlmReady).toBe(false);
+    modelGuard.vlmReady = true;
+    view.rerender(<PdfTemporaryChat datasetId="dataset-a" documentId="document-pdf" fileName="source.pdf" onClose={() => {}} />);
+    expect(chatActions.composer.vlmReady).toBe(true);
+  });
+
   it("prepares the same text again for a new selection action without duplicating unchanged selections", async () => {
     vi.useFakeTimers();
     getDocumentParseStatus.mockResolvedValueOnce({ status: "parsed" });

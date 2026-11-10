@@ -7,6 +7,12 @@ import sys
 class _FakeDocumentProcessorWorker:
     instances = []
 
+    class _Impl:
+        # The real worker serializes this inner class into its subprocess.
+        # These outer-worker tests never execute it, but import-time wrapping
+        # must see the same class boundary.
+        pass
+
     def __init__(
         self,
         db_config=None,
@@ -78,6 +84,7 @@ def test_worker_constructs_document_processor_worker_from_env(monkeypatch):
 
     assert module.db_config == {'service': 'DocumentProcessorWorker'}
     assert module.doc_processor_worker is _FakeDocumentProcessorWorker.instances[-1]
+    assert _FakeDocumentProcessorWorker._Impl._lazymind_isolated is True
     assert module.doc_processor_worker.kwargs == {
         'port': 8124,
         'db_config': {'service': 'DocumentProcessorWorker'},

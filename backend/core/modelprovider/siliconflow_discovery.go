@@ -63,6 +63,7 @@ func fetchRemoteModelEntries(req *http.Request) ([]openaiModelListEntry, error) 
 		return nil, remoteModelsRequestError{status: response.StatusCode, reason: "invalid_response"}
 	}
 	var shape map[string]json.RawMessage
+	hasCollectionEntries := false
 	if json.Unmarshal(body, &shape) == nil {
 		semanticFailure := false
 		if raw := bytes.TrimSpace(shape["error"]); len(raw) > 0 && string(raw) != "null" {
@@ -85,10 +86,11 @@ func fetchRemoteModelEntries(req *http.Request) ([]openaiModelListEntry, error) 
 			if !found || string(bytes.TrimSpace(raw)) == "null" {
 				continue
 			}
-			var entries []openaiModelListEntry
+			var entries []json.RawMessage
 			if json.Unmarshal(raw, &entries) != nil || !bytes.HasPrefix(bytes.TrimSpace(raw), []byte("[")) {
 				return nil, remoteModelsRequestError{status: response.StatusCode, reason: "invalid_response"}
 			}
+			hasCollectionEntries = hasCollectionEntries || len(entries) > 0
 			foundArray = true
 		}
 		if !foundArray {
@@ -100,7 +102,11 @@ func fetchRemoteModelEntries(req *http.Request) ([]openaiModelListEntry, error) 
 			return nil, remoteModelsRequestError{status: response.StatusCode, reason: "invalid_response"}
 		}
 	}
-	return parseRemoteModelEntries(body), nil
+	entries := parseRemoteModelEntries(body)
+	if hasCollectionEntries && len(entries) == 0 {
+		return nil, remoteModelsRequestError{status: response.StatusCode, reason: "invalid_response"}
+	}
+	return entries, nil
 }
 
 func isSiliconFlowSupplier(ctx context.Context, db *gorm.DB, parent orm.UserModelProvider) bool {

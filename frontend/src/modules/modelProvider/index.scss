@@ -4665,6 +4665,11 @@
     min-height: 32px;
   }
 }
+.model-defaults-panel .ant-skeleton-active .ant-skeleton-title,
+.model-defaults-panel .ant-skeleton-active .ant-skeleton-paragraph > li,
+.model-defaults-panel .ant-skeleton-active .ant-skeleton-input {
+  animation: none !important;
+}
 @media (prefers-reduced-motion: reduce) {
   .provider-workspace *,
   .provider-workspace *::before,

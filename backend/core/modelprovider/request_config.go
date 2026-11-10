@@ -282,7 +282,7 @@ func SetProviderRequestConfig(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	now := time.Now()
-	err := db.WithContext(r.Context()).Transaction(func(tx *gorm.DB) error {
+	err := common.TransactionWithSQLiteBusyRetry(r.Context(), db, func(tx *gorm.DB) error {
 		if err := lockProvider(tx, &parent); err != nil {
 			return err
 		}
@@ -372,6 +372,11 @@ func SetProviderRequestConfig(w http.ResponseWriter, r *http.Request) {
 		if unchanged {
 			return nil
 		}
+		if protocolChanged || advancedChanged {
+			if err := guardEmbeddingRuntimeMutation(tx, parent.CreateUserID, parent.ID, "", ""); err != nil {
+				return err
+			}
+		}
 		if err := initializeProviderActiveKey(tx, &parent); err != nil {
 			return err
 		}
@@ -400,6 +405,8 @@ func SetProviderRequestConfig(w http.ResponseWriter, r *http.Request) {
 			common.ReplyErr(w, "request configuration exceeds credential limits", 400)
 		} else if errors.Is(err, errUnsupportedRequestModels) {
 			common.ReplyErr(w, err.Error(), 400)
+		} else if errors.Is(err, errEmbeddingIdentityInUse) {
+			common.ReplyErr(w, err.Error(), http.StatusConflict)
 		} else {
 			common.ReplyErr(w, "save request configuration failed", 500)
 		}

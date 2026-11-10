@@ -235,7 +235,8 @@ def test_dynamic_trigger_loads_pinned_remote_package_without_listing(json_encode
     )
     assert result['status'] == 'prepared'
     assert result['outcome'] == 'ready'
-    assert result['request_context'] == 'original workflow request'
+    assert result['request_context'].startswith('original workflow request')
+    assert attachment.name in result['request_context']
     assert result['revision_id'] == 'revision-1'
     assert result['reachable_steps'] == ['prompt']
     assert result['ready_steps'] == ['prompt']
@@ -244,7 +245,7 @@ def test_dynamic_trigger_loads_pinned_remote_package_without_listing(json_encode
         'image-workflow', input_bindings={
             'source': {'resource_id': 'resource-1', 'revision': 1,
                        'content_hash': 'sha256:test'},
-        }, request_context='original workflow request', workflow_mode='dynamic',
+        }, request_context=result['request_context'], workflow_mode='dynamic',
     )
     toolkit.advance_step.assert_not_called()
 
@@ -948,6 +949,7 @@ def test_active_workflow_forwards_current_edit_request_and_focus_to_step():
         assert 'do not hand off early' in contribution.runtime_context
         assert 'explanation of the result in Chat' in contribution.runtime_context
         lazyllm.globals['agentic_config'].update(contribution.agentic_config_patch)
+        lazyllm.globals['agentic_config']['workflow_current_query'] = '过期的原始深色生成要求'
         result = _tool(contribution, 'advance_step')(['generate_ppt'])
 
     assert result == {'status': 'succeeded'}
@@ -1500,6 +1502,9 @@ def test_trigger_routes_ppt_clarification_answers_to_analysis_context(selected):
     import yaml
     workflow_path = Path(__file__).parents[3] / 'workflows/ppt-workflow/workflow.yaml'
     runtime = yaml.safe_load(workflow_path.read_text(encoding='utf-8'))['runtime']
+    # This fixture exposes an extra external topic input; declare it alongside
+    # the package's real hidden paper/attachment inputs.
+    runtime = {**runtime, 'trigger_inputs': [*runtime['trigger_inputs'], 'topic']}
     toolkit = MagicMock()
     toolkit.prepare_workflow.return_value = {'session_id': 'session-1', 'ready_steps': ['analyze_requirements']}
     with patch('lazymind.chat.workflow.workflow_manager._client') as factory, patch(
@@ -1576,6 +1581,88 @@ def test_parallel_workflow_triggers_keep_conversation_sessions_separate():
             results = list(executor.map(run, ['chat-a', 'chat-b']))
     assert results == [('session-chat-a', 'session-chat-a', 'chat-a'),
                        ('session-chat-b', 'session-chat-b', 'chat-b')]
+
+
+@pytest.mark.parametrize('policy', [None, '', 'invalid', [], 42])
+def test_startup_guidance_accepts_absent_or_invalid_policy(policy):
+    from lazymind.chat.workflow.workflow_manager import _startup_clarification_guidance
+    assert _startup_clarification_guidance(policy) == ''
+
+
+@pytest.mark.parametrize('paper_count', [1, 2])
+def test_direct_chat_papers_and_description_launch_without_library_handoff(tmp_path, paper_count):
+    runtime = {
+        'trigger_inputs': [],
+        'clarification_fields': [{'id': 'academic_materials', 'question': '请上传论文', 'type': 'single',
+                                  'choices': ['上传论文'], 'choice_policy': 'fixed',
+                                  'attachment': {'accept': ['.pdf'], 'material_id': 'uploaded_materials',
+                                                 'when_choice': '上传论文', 'max_files': -1}}],
+    }
+    files = []
+    for index in range(paper_count):
+        path = tmp_path / f'paper-{index}.pdf'
+        path.write_text(f'paper {index}')
+        files.append(str(path))
+    lazyllm.globals['agentic_config'] = {
+        'enable_workflow': True, 'files': files, 'history_files_per_turn': {'1': files},
+    }
+    toolkit = MagicMock()
+    toolkit.prepare_workflow.return_value = {'session_id': 's', 'ready_steps': ['analyze_requirements']}
+    request = '请把附件做成8页学生组会汇报，比较方法与实验局限'
+    with patch('lazymind.chat.workflow.workflow_manager._client') as factory, patch(
+        'lazymind.chat.workflow.workflow_manager.HostWorkflowToolkit', return_value=toolkit,
+    ):
+        client = factory.return_value
+        client.transport.request.return_value.status_code = 404
+        client.get_workflow.return_value.result = {
+            'workflow_id': 'ppt-workflow', 'runtime': runtime,
+            'compiled_graph': {'material_types': {}, 'material_producers': {}},
+        }
+        client.get_state.return_value = {'session_id': 's', 'projection': {'ready': ['analyze_requirements']}}
+        contribution = resolve_workflow_injection(
+            None, conversation_id='direct-upload-chat', current_query=request,
+            workflow_catalog=[{'workflow_ref': 'builtin:ppt-workflow', 'workflow_id': 'ppt-workflow',
+                               'runtime': runtime}],
+            allowed_workflow_refs=['builtin:ppt-workflow'],
+            workflow_activations=[{'workflow_ref': 'builtin:ppt-workflow', 'workflow_id': 'ppt-workflow',
+                                   'tool_name': 'trigger_ppt_workflow'}],
+        )
+        assert contribution.runtime_policy['_host_satisfied_fields'] == ['academic_materials']
+        question = {'id': 'academic_materials', 'text': '请上传论文', 'choices': ['上传论文']}
+        other = {'id': 'slide_count', 'text': '多少页？'}
+        assert enforce_startup_clarification_policy([question, other], contribution.runtime_policy) == [other]
+        with pytest.raises(WorkflowClientError, match='advertised'):
+            _tool(contribution, 'trigger_ppt_workflow')(input_bindings={'task_context': 'invented IDs'})
+        result = _tool(contribution, 'trigger_ppt_workflow')()
+        assert result['input_bindings'] == {}
+        assert request in result['request_context']
+        for index in range(paper_count):
+            assert f'paper-{index}.pdf' in result['request_context']
+        assert '"turn": 1' in result['request_context']
+        client.transport.request.assert_not_called()
+
+
+def test_paper_budget_ask_keeps_concrete_counts_and_merges_user_override():
+    from lazymind.chat.workflow.workflow_manager import (
+        enforce_startup_clarification_policy, _merge_startup_clarification_context,
+    )
+    runtime = _ppt_completed_action_policy()
+    questions = [{
+        'id': 'academic_page_budget', 'type': 'single',
+        'text': '选了 3 篇论文，建议 9 页；你要求 5 页，是否调整？',
+        'choices': ['采用建议的 9 页', '保留 5 页，压缩内容'],
+    }]
+    assert enforce_startup_clarification_policy(questions, runtime) == questions
+    history = [
+        {'role': 'user', 'content': '请把这三篇论文做成 5 页 PPT'},
+        {'role': 'assistant', 'content': '', 'tool_calls': [{
+            'id': 'budget-ask', 'type': 'function',
+            'function': {'name': 'ask_user', 'arguments': json.dumps({'questions': questions}, ensure_ascii=False)},
+        }]},
+    ]
+    merged = _merge_startup_clarification_context('保留 5 页，压缩内容', history, runtime)
+    assert '三篇论文' in merged
+    assert '保留 5 页，压缩内容' in merged
 
 
 @pytest.fixture

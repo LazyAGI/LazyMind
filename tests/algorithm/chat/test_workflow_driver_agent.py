@@ -1,5 +1,7 @@
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from lazymind.chat.workflow.driver_agent import _clean_message, evaluate_step
 
 
@@ -10,6 +12,18 @@ def test_driver_message_removes_reasoning():
 
 def test_driver_message_has_hard_length_cap():
     assert len(_clean_message('x' * 500)) <= 303
+
+
+@pytest.mark.parametrize('verdict', ['PASS', 'RETRY', 'DONE', 'FAIL'])
+def test_pinned_legacy_driver_returns_reason_without_control_code(verdict):
+    model = MagicMock()
+    model.share.return_value.return_value = (
+        f'<verdict>{verdict}</verdict><reason>模型服务失败，素材未完成。</reason>')
+    with patch('lazymind.chat.workflow.driver_agent.AutoModel', return_value=model):
+        result = evaluate_step('ppt', 'collect_materials', 'Terminal status: failed',
+                               driver_prompt='Return <verdict>RETRY</verdict><reason>why</reason>',
+                               llm_config={})
+    assert result == {'message': '模型服务失败，素材未完成。'}
 
 
 def test_driver_evaluates_pinned_policy_acceptance_and_artifacts():

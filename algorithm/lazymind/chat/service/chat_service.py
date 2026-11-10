@@ -668,7 +668,9 @@ def _build_user_attachment_tools(has_files: bool, disabled=()) -> list:
     return [config.tool for config in visible_attachment_configs(disabled)]
 
 
-def _build_ask_user_tool(runtime_policy: Any = None) -> list:
+def _build_ask_user_tool(
+    runtime_policy: Any = None, workflow_catalog: Any = None, *, discovery_mode: bool = False,
+) -> list:
     """Return the ask_user stop-tool for ChatAgent.
 
     Intentionally NOT added to DEFAULT_TOOLS so SubAgents never receive it.
@@ -678,13 +680,15 @@ def _build_ask_user_tool(runtime_policy: Any = None) -> list:
     from lazymind.chat.engine.tools.ask_user import ask_user
     from lazymind.chat.workflow.workflow_manager import enforce_startup_clarification_policy
 
-    if not runtime_policy:
+    if not runtime_policy and not (discovery_mode and workflow_catalog):
         return [ask_user]
 
     @wraps(ask_user)
     def governed_ask_user(questions, title=None, description=None):
         return ask_user(
-            enforce_startup_clarification_policy(questions, runtime_policy),
+            enforce_startup_clarification_policy(
+                questions, runtime_policy, workflow_catalog, discovery_mode=discovery_mode,
+            ),
             title=title,
             description=description,
         )
@@ -1726,7 +1730,10 @@ async def _handle_chat_impl(
             )
         )
         ask_user_tools = (
-            _build_ask_user_tool(workflow_contribution.runtime_policy)
+            _build_ask_user_tool(
+                workflow_contribution.runtime_policy, effective_workflow_catalog,
+                discovery_mode=not workflow_turn_is_bound,
+            )
             if allow_ask_user else []
         )
         ask_user_configs = [ASK_USER_TOOL_CONFIG] if ask_user_tools else []

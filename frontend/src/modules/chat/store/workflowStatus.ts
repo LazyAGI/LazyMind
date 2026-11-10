@@ -1,7 +1,7 @@
 export type WorkflowSessionStatus = 'active' | 'pausing' | 'completed' | 'failed' | 'waiting' | 'stopped';
 
 export interface WorkflowDisplayState {
-  status: 'running' | 'waiting' | 'paused' | 'failed' | 'completed';
+  status: 'running' | 'waiting' | 'waiting_input' | 'paused' | 'failed' | 'completed';
   reason: string;
   approval_step_id: string;
   /** Native Chat turn owning cancellation, including after workflow hand-off. */
@@ -12,6 +12,7 @@ const displayLabels: Record<WorkflowDisplayState['status'], string> = {
   running: 'chat.workflowStatusRunning', waiting: 'chat.workflowStatusWaiting',
   paused: 'chat.workflowStatusPaused', failed: 'chat.workflowStatusFailed',
   completed: 'chat.workflowStatusDone',
+  waiting_input: 'chat.workflowStatusWaitingInput',
 };
 export const workflowDisplayLabel = (status?: WorkflowDisplayState['status'], reason?: string): string =>
   status === 'waiting' && reason === 'inputs_changed' ? 'chat.workflowStatusInputsChanged'

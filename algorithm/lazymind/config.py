@@ -339,7 +339,7 @@ config.add('context_compression_trigger_ratio', float, 0.9, 'CONTEXT_COMPRESSION
            description='Compress when estimated tokens reach this fraction of the effective input budget.')
 config.add('context_compression_target_ratio', float, 0.45, 'CONTEXT_COMPRESSION_TARGET_RATIO',
            description='Target fraction of the effective input budget after compression.')
-config.add('context_compression_reserved_output_tokens', int, 8192,
+config.add('context_compression_reserved_output_tokens', int, 32768,
            'CONTEXT_COMPRESSION_RESERVED_OUTPUT_TOKENS',
            description='Tokens reserved when computing the effective input budget; not a model output limit.')
 config.add(
