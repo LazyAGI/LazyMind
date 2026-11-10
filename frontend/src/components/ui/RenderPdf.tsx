@@ -170,8 +170,6 @@ export default function RenderPdf({
   onAskSelection,
   onNoteSelection,
   onTranslateSelection,
-  onRetranslateSelection,
-  retranslateSelectionLabel = "重译此段",
   onAddVocabularySelection,
   addVocabularySelectionLabel = "加入生词",
   translateSelectionDisabled = false,
@@ -461,7 +459,7 @@ export default function RenderPdf({
     // during text selection. The explicit selection toolbar always wins.
     window.clearTimeout(referenceHoverTimer.current);
     window.clearTimeout(referenceHoverCloseTimer.current);
-    if ((!onAskSelection && !onNoteSelection && !onTranslateSelection && !onRetranslateSelection && !onImportReferenceSelection && !onAddVocabularySelection && !onLearningSelection) || !containerRef.current) {
+    if ((!onAskSelection && !onNoteSelection && !onTranslateSelection && !onImportReferenceSelection && !onAddVocabularySelection && !onLearningSelection) || !containerRef.current) {
       return;
     }
     const selection = window.getSelection();
@@ -1373,7 +1371,6 @@ export default function RenderPdf({
             translationHelp={translationUnavailable && translateSelectionConfigureUrl ? <a href={translateSelectionConfigureUrl}>{translateSelectionConfigureLabel}</a> : undefined}
             actions={(() => {
               const actions:PdfComposerAction[]=[];
-              if(onRetranslateSelection)actions.push({key:"retranslate",label:retranslateSelectionLabel,onClick:()=>onRetranslateSelection(selectionAction.selection)});
               if(onAddVocabularySelection && /[A-Za-z]/.test(selectionAction.selection.text))actions.push({key:"vocabulary",label:addVocabularySelectionLabel,onClick:()=>onAddVocabularySelection(selectionAction.selection)});
               for(const action of visibleLearningSelectionActions(learningSelectionActions,selectionAction.selection.text,Boolean(onTranslateSelection)))actions.push({key:action.key,label:action.label,disabled:action.disabled,title:action.disabledTip,onClick:()=>onLearningSelection?.(action.key,selectionAction.selection)});
               const reference=selectionAction.referenceAction;
