@@ -382,3 +382,27 @@ it('resizes live without freezing content widths or rerendering the workspace', 
   expect(write).toHaveBeenLastCalledWith('paper-reader:assistant-width','520');
   write.mockRestore();
 });
+
+
+it('does not rerender the document viewer on background translation progress ticks', async () => {
+  useDatasetPermissionStore.getState().setCurrentDataset({dataset_id:'library',scene:'general'} as Dataset);
+  let reads=0;
+  let finishPoll: (()=>void)|undefined;
+  axiosInstance.defaults.adapter=config=> {
+    if(config.url?.endsWith('/documents/paper')) return Promise.resolve({config,status:200,statusText:'OK',headers:{},data:{display_name:'original.pdf',file_url:'/original.pdf'}});
+    if(config.url?.endsWith('/pdf-capabilities')) {
+      const progress=++reads===1?10:35;
+      const response={config,status:200,statusText:'OK',headers:{},data:{data:{is_pdf:true,reader_ready:true,pdf_kind:'native_text',translations:[],jobs:[{id:'progress',kind:'TRANSLATION_PDF',status:'RUNNING',stage:'TRANSLATING',progress}]}}};
+      return reads===1?Promise.resolve(response):new Promise(resolve=>{finishPoll=()=>resolve(response);});
+    }
+    return new Promise(()=>{});
+  };
+  renderDocument();
+  fireEvent.click(await screen.findByRole('button',{name:/^Translation$|^翻译$/}));
+  fireEvent.click(screen.getByText('全文翻译'));
+  await waitFor(()=>expect(finishPoll).toBeTypeOf('function'),{timeout:3000});
+  const renders=surfaces.viewerRenders;
+  await act(async()=>{finishPoll!();});
+  expect(screen.getByText('35%')).toBeInTheDocument();
+  expect(surfaces.viewerRenders).toBe(renders);
+});
