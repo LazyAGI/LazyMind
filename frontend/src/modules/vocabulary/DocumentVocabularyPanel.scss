@@ -6,35 +6,41 @@
   &__state { padding: 32px 12px; text-align: center; }
 
   // Columns respond to the panel width, including inside a narrow reader sidebar.
-  &__masonry { columns: 280px; column-gap: 16px; }
+  &__masonry { columns: 280px; column-gap: 10px; }
 
   .document-vocabulary-card {
+    position: relative;
     display: inline-block;
     box-sizing: border-box;
     width: 100%;
-    margin: 0 0 16px;
-    padding: 18px;
+    margin: 0 0 10px;
+    padding: 12px 14px;
     break-inside: avoid;
     vertical-align: top;
     border: 1px solid var(--vocabulary-card-border);
-    border-radius: 10px;
+    border-radius: 8px;
     background: var(--vocabulary-card-bg);
     overflow-wrap: anywhere;
 
-    &__header { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; }
-    h3 { margin: 0; font-family: inherit; font-size: 21px; font-weight: 600; line-height: 1.4; }
-    &__phonetic { color: var(--vocabulary-secondary); font-size: 13px; }
-    &__meaning { display: flex; align-items: baseline; gap: 8px; margin-top: 10px; font-size: 14px; line-height: 1.65; white-space: pre-wrap; }
+    &__header { padding-right: 28px; display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; }
+    h3 { margin: 0; font-family: inherit; font-size: 17px; font-weight: 600; line-height: 1.4; }
+    &__phonetic { color: var(--vocabulary-secondary); font-size: 12px; }
+    &__meaning { display: flex; align-items: baseline; gap: 8px; margin-top: 4px; font-size: 13px; line-height: 1.5; white-space: pre-wrap; }
     &__pos { flex-shrink: 0; color: var(--vocabulary-secondary); font-size: 12px; }
-    &__source { margin: 16px 0 12px; padding: 12px; background: var(--vocabulary-source-bg); border-left: 2px solid var(--vocabulary-card-border); font-size: 13px; line-height: 1.75; white-space: pre-wrap; }
+    &__source { margin: 8px 0; padding: 8px 10px; background: var(--vocabulary-source-bg); border-left: 2px solid var(--vocabulary-card-border); font-size: 13px; line-height: 1.5; white-space: pre-wrap; }
     &__source p { margin: 0; }
     &__source &__translation { margin-top: 6px; color: var(--vocabulary-secondary); }
-    &__location { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 12px; color: var(--vocabulary-secondary); font-size: 12px; }
+    &__location { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 8px; color: var(--vocabulary-secondary); font-size: 12px; }
     &__location .ant-tag { margin: 0; white-space: normal; }
     &__identity { display: flex; flex: 1; min-width: 0; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; }
     &__more.ant-btn { flex: 0 0 auto; padding: 0; width: 28px; height: 28px; border: 0; background: transparent; color: var(--vocabulary-secondary); }
-    &__details { margin-top: 12px; }
-    &__details > summary { cursor: pointer; width: fit-content; color: var(--vocabulary-secondary); font-size: 12px; }
+    &__details { font-size: 13px; line-height: 1.5; }
+    &__details[open] { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--vocabulary-card-border); }
+    &__details > p { margin: 0 0 8px; }
+    &__details > summary { position: absolute; top: 12px; right: 10px; display: flex; align-items: center; justify-content: center; width: 28px; height: 28px; cursor: pointer; list-style: none; border-radius: 4px; color: var(--vocabulary-secondary); font-size: 12px; }
+    &__details > summary::-webkit-details-marker { display: none; }
+    &__details > summary:hover { background: var(--vocabulary-source-bg); color: var(--vocabulary-text); }
+    &__details[open] > summary .anticon { transform: rotate(180deg); }
     &__details > summary:focus-visible { outline: 2px solid currentColor; outline-offset: 3px; }
   }
 }

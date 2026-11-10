@@ -1,5 +1,5 @@
 import { Alert, Button, Dropdown, Empty, Modal, Spin, Tag, theme } from "antd";
-import { MoreOutlined } from "@ant-design/icons";
+import { DownOutlined, MoreOutlined } from "@ant-design/icons";
 import { useEffect, useState, type CSSProperties } from "react";
 import { useTranslation } from "react-i18next";
 import {
@@ -51,7 +51,7 @@ function DocumentVocabularyContent({ documentId, refreshToken = 0 }: PanelProps)
 
   const style = {
     "--vocabulary-card-bg": token.colorBgContainer,
-    "--vocabulary-card-border": token.colorBorderSecondary,
+    "--vocabulary-card-border": token.colorBorder,
     "--vocabulary-text": token.colorText,
     "--vocabulary-secondary": token.colorTextSecondary,
     "--vocabulary-source-bg": token.colorFillQuaternary,
@@ -93,7 +93,7 @@ function DocumentVocabularyContent({ documentId, refreshToken = 0 }: PanelProps)
                   <span>{item.meaning}</span>
                 </div>
                 <details className="document-vocabulary-card__details">
-                  <summary>{t("vocabulary.document.exampleDetails")}</summary>
+                  <summary aria-label={t("vocabulary.document.exampleDetails")} title={t("vocabulary.document.exampleDetails")}><DownOutlined aria-hidden="true" /></summary>
                   {item.definition && <p>{item.definition}</p>}
                 {sentence && (
                   <blockquote className="document-vocabulary-card__source">

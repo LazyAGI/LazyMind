@@ -22,7 +22,7 @@ describe("DocumentVocabularyPanel", () => {
     expect(within(card).getByText("Page 7")).toBeInTheDocument();
     expect(card.querySelector("details")).not.toHaveAttribute("open");
     expect(within(card).getByText("A varied workload.")).not.toBeVisible();
-    fireEvent.click(within(card).getByText("vocabulary.document.exampleDetails"));
+    fireEvent.click(within(card).getByLabelText("vocabulary.document.exampleDetails"));
     expect(card.querySelector("details")).toHaveAttribute("open");
     expect(within(card).getByText("A varied workload.")).toBeVisible();
   });
