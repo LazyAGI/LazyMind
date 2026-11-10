@@ -182,15 +182,16 @@ it.each([false,true])('gates paper information vocabulary by the existing featur
     ? Promise.resolve({config,status:200,statusText:'OK',headers:{},data:{display_name:'paper.pdf'}})
     : new Promise(()=>{});
   const {container}=renderDocument();
-  fireEvent.click(await screen.findByRole('button',{name:/Document details|文档详情/}));
+  fireEvent.click(await screen.findByRole('button',{name:/^Notes$|^笔记$/}));
   if(enabled){
     expect(await screen.findByTestId('document-vocabulary')).toBeInTheDocument();
     expect(surfaces.vocabulary).toEqual(expect.objectContaining({documentId:'paper',refreshToken:0}));
     act(()=>{(surfaces.vocabularyModal.onAdded as ()=>void)();});
     expect(surfaces.vocabulary).toEqual(expect.objectContaining({documentId:'paper',refreshToken:1}));
-    expect(container.querySelector('.paper-workspace-dock button[aria-pressed="true"]')).toHaveAccessibleName(/Document details|文档详情/);
+    expect(container.querySelector('.paper-workspace-dock button[aria-pressed="true"]')).toHaveAccessibleName(/^Notes$|^笔记$/);
   }else expect(screen.queryByTestId('document-vocabulary')).not.toBeInTheDocument();
-  expect(container.querySelectorAll('.paper-workspace-dock button')).toHaveLength(4);
+  expect(container.querySelectorAll('.paper-workspace-dock button')).toHaveLength(3);
+  expect(screen.queryByRole('button',{name:/Document details|文档详情/})).toBeNull();
 });
 
 it('opens vocabulary from the paper reader with the selected word and source evidence',async()=>{
@@ -200,7 +201,7 @@ it('opens vocabulary from the paper reader with the selected word and source evi
     ? Promise.resolve({config,status:200,statusText:'OK',headers:{},data:{display_name:'paper.pdf'}})
     : new Promise(()=>{});
   renderDocument();
-  await screen.findByRole('button',{name:/Document details|文档详情/});
+  await screen.findByRole('button',{name:/^Notes$|^笔记$/});
   const selection={text:'resilient',context:'A resilient approach improves accuracy.',contextTranslation:'一种有韧性的方法提高了准确性。',page:3};
   act(()=>{(surfaces.viewer.onAddVocabularySelection as (value:typeof selection)=>void)(selection);});
   expect(surfaces.vocabularyModal).toEqual(expect.objectContaining({selection,datasetId:'library',documentId:'paper',context:selection.context}));
@@ -215,7 +216,7 @@ it('lets the paper reader choose a word from a phrase while retaining source con
     ? Promise.resolve({config,status:200,statusText:'OK',headers:{},data:{display_name:'paper.pdf'}})
     : new Promise(()=>{});
   renderDocument();
-  await screen.findByRole('button',{name:/Document details|文档详情/});
+  await screen.findByRole('button',{name:/^Notes$|^笔记$/});
   const selection={text:'resilient approach',context:'A resilient approach improves accuracy.',page:3};
   act(()=>{(surfaces.viewer.onAddVocabularySelection as (value:typeof selection)=>void)(selection);});
   expect(surfaces.vocabularyModal.selection).toBeNull();
@@ -320,7 +321,7 @@ it('shows a completed background translation in the sidebar without replacing th
 });
 
 
-it('shows only the current translation and keeps it when switching the main searchable PDF', async () => {
+it('shows only the current translation while keeping the main PDF on the original', async () => {
   useDatasetPermissionStore.getState().setCurrentDataset({dataset_id:'library',scene:'general'} as Dataset);
   const older={id:'older',kind:'TRANSLATION_PDF',cache_key:'older',filename:'older.pdf',target_language:'zh',provider_type:'llm',created_at:'2026-11-08T00:00:00Z'};
   const newer={...older,id:'newer',filename:'newer.pdf',target_language:'en'};
@@ -337,10 +338,10 @@ it('shows only the current translation and keeps it when switching the main sear
   expect(screen.getByRole('button',{name:'下载译本'})).toBeVisible();
   expect(screen.getByRole('button',{name:'加入文献附件'})).toBeVisible();
   expect(container.querySelector('.knowledge-full-translation-viewer [data-filename="newer.pdf"]')).not.toBeNull();
-  fireEvent.click(screen.getByRole('button',{name:/Document actions and translation|文档操作与翻译/}));
-  fireEvent.click(await screen.findByRole('button',{name:'返回普通 PDF'}));
-  expect(container.querySelector('.paper-reader-pane [data-testid="file-viewer"]')?.getAttribute('data-file')).toContain('/searchable:content');
-  fireEvent.click(screen.getByText('翻译版'));
+  fireEvent.click(screen.getByRole('button',{name:/^Document actions$|^文档操作$/}));
+  expect(screen.queryByText('普通版')).not.toBeInTheDocument();
+  expect(screen.queryByText('翻译版')).not.toBeInTheDocument();
+  expect(container.querySelector('.paper-reader-pane [data-testid="file-viewer"]')?.getAttribute('data-file')).toContain('/original.pdf');
   expect(screen.queryByRole('combobox',{name:'选择缓存译本'})).not.toBeInTheDocument();
   expect(container.querySelector('.knowledge-full-translation-viewer [data-filename="newer.pdf"]')).not.toBeNull();
 });
