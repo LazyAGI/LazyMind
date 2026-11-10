@@ -45,9 +45,15 @@ class SourceState {
   refresh = (): Promise<void> => {
     if (this.query) return this.query;
     this.query = api.listSourceImports(this.context).then(rows => {
-      const previous = this.snapshot.items;
-      this.emit({ items: rows.map(row => row.status === "unknown"
-        ? { ...row, ...previous.find(old => old.item_id === row.item_id), state_unavailable: true } : row), queryError: false });
+      const previous = new Map(this.snapshot.items.map(row => [row.item_id, row]));
+      this.emit({ items: rows.map(row => {
+        const last = previous.get(row.item_id);
+        if (row.status === "unknown") return { ...row, ...last, state_unavailable: true };
+        if (row.state_unavailable && last && last.document_id === row.document_id) {
+          return { ...row, processing_status: last.processing_status, processing_level: last.processing_level };
+        }
+        return row;
+      }), queryError: false });
     }).catch(() => this.emit({ queryError: true })).finally(() => {
       this.query = undefined;
       this.schedule();
@@ -57,7 +63,8 @@ class SourceState {
   schedule = () => {
     clearTimeout(this.timer);
     if (this.pollers.size && !document.hidden && this.snapshot.items.some(row =>
-      row.state_unavailable || ["pending", "running", "waiting_retry", "unknown"].includes(row.status))) {
+      row.state_unavailable || ["pending", "running", "waiting_retry", "unknown"].includes(row.status) ||
+      row.processing_status === "pending" || row.processing_status === "running")) {
       this.timer = setTimeout(() => void this.refresh(), 3000);
     }
   };

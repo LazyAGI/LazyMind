@@ -446,7 +446,7 @@ func prepareConversationImportCandidate(ctx context.Context, job asyncjob.Job, b
 		if workID == "" {
 			return false, nil
 		}
-		present, d, err := findEquivalentPresentWork(ctx, workID, batch.TargetDatasetID, true, version, provider)
+		present, d, err := findEquivalentPresentWork(ctx, store.DB(), workID, batch.TargetDatasetID, true, version, provider)
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return false, nil
 		}
