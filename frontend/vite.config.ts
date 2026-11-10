@@ -31,6 +31,10 @@ export default defineConfig(({ mode }) => {
   return {
     plugins: [jsPreviewExcelShimPlugin(), react(), svgr()],
     base: "/",
+    optimizeDeps: {
+      // The PDF worker is loaded as an asset URL, not as a prebundled module.
+      exclude: ["@react-pdf-worker/pdf.worker.min.mjs?url"],
+    },
     resolve: {
       // Keep application imports independent of the current file location.
       alias: {

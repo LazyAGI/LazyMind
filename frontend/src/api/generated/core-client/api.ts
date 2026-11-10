@@ -9200,6 +9200,23 @@ export const TaskCenterTaskResponseConversationStateEnum = {
 
 export type TaskCenterTaskResponseConversationStateEnum = typeof TaskCenterTaskResponseConversationStateEnum[keyof typeof TaskCenterTaskResponseConversationStateEnum];
 
+export interface TaskCenterWorkbenchGroup {
+    'items': Array<TaskCenterTaskResponse>;
+    'page': number;
+    'total': number;
+}
+export interface TaskCenterWorkbenchResponse {
+    'groups': TaskCenterWorkbenchResponseGroups;
+    'page_size': number;
+}
+export interface TaskCenterWorkbenchResponseGroups {
+    'attention': TaskCenterWorkbenchGroup;
+    'canceled': TaskCenterWorkbenchGroup;
+    'failed': TaskCenterWorkbenchGroup;
+    'paused': TaskCenterWorkbenchGroup;
+    'recent': TaskCenterWorkbenchGroup;
+    'running': TaskCenterWorkbenchGroup;
+}
 export interface TaskDocumentInfo {
     'display_name'?: string;
     'document_id'?: string;
@@ -30389,6 +30406,56 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
         },
         /**
          *
+         * @summary Summarize task categories with four previews per page
+         * @param {string} [taskType]
+         * @param {string} [keyword]
+         * @param {ApiCoreTaskCenterWorkbenchGetCategoryEnum} [category]
+         * @param {number} [page]
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreTaskCenterWorkbenchGet: async (taskType?: string, keyword?: string, category?: ApiCoreTaskCenterWorkbenchGetCategoryEnum, page?: number, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            const localVarPath = `/api/core/task-center/workbench`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            if (taskType !== undefined) {
+                localVarQueryParameter['task_type'] = taskType;
+            }
+
+            if (keyword !== undefined) {
+                localVarQueryParameter['keyword'] = keyword;
+            }
+
+            if (category !== undefined) {
+                localVarQueryParameter['category'] = category;
+            }
+
+            if (page !== undefined) {
+                localVarQueryParameter['page'] = page;
+            }
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
          * @summary GET /task-center/workflow-events
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
@@ -38922,6 +38989,22 @@ export const DefaultApiFp = function(configuration?: Configuration) {
         },
         /**
          *
+         * @summary Summarize task categories with four previews per page
+         * @param {string} [taskType]
+         * @param {string} [keyword]
+         * @param {ApiCoreTaskCenterWorkbenchGetCategoryEnum} [category]
+         * @param {number} [page]
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreTaskCenterWorkbenchGet(taskType?: string, keyword?: string, category?: ApiCoreTaskCenterWorkbenchGetCategoryEnum, page?: number, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<TaskCenterWorkbenchResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreTaskCenterWorkbenchGet(taskType, keyword, category, page, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreTaskCenterWorkbenchGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
          * @summary GET /task-center/workflow-events
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
@@ -43664,6 +43747,16 @@ export const DefaultApiFactory = function (configuration?: Configuration, basePa
         },
         /**
          *
+         * @summary Summarize task categories with four previews per page
+         * @param {DefaultApiApiCoreTaskCenterWorkbenchGetRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreTaskCenterWorkbenchGet(requestParameters: DefaultApiApiCoreTaskCenterWorkbenchGetRequest = {}, options?: RawAxiosRequestConfig): AxiosPromise<TaskCenterWorkbenchResponse> {
+            return localVarFp.apiCoreTaskCenterWorkbenchGet(requestParameters.taskType, requestParameters.keyword, requestParameters.category, requestParameters.page, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
          * @summary GET /task-center/workflow-events
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
@@ -46738,6 +46831,19 @@ export interface DefaultApiApiCoreTaskCenterTasksTaskIdRemovePostRequest {
     readonly taskId: string
 
     readonly taskRemovalRequest?: TaskRemovalRequest
+}
+
+/**
+ * Request parameters for apiCoreTaskCenterWorkbenchGet operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreTaskCenterWorkbenchGetRequest {
+    readonly taskType?: string
+
+    readonly keyword?: string
+
+    readonly category?: ApiCoreTaskCenterWorkbenchGetCategoryEnum
+
+    readonly page?: number
 }
 
 /**
@@ -50736,6 +50842,17 @@ export class DefaultApi extends BaseAPI {
 
     /**
      *
+     * @summary Summarize task categories with four previews per page
+     * @param {DefaultApiApiCoreTaskCenterWorkbenchGetRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreTaskCenterWorkbenchGet(requestParameters: DefaultApiApiCoreTaskCenterWorkbenchGetRequest = {}, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreTaskCenterWorkbenchGet(requestParameters.taskType, requestParameters.keyword, requestParameters.category, requestParameters.page, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
      * @summary GET /task-center/workflow-events
      * @param {*} [options] Override http request option.
      * @throws {RequiredError}
@@ -52223,6 +52340,15 @@ export const ApiCoreConversationsTrashGetKindEnum = {
     Task: 'task'
 } as const;
 export type ApiCoreConversationsTrashGetKindEnum = typeof ApiCoreConversationsTrashGetKindEnum[keyof typeof ApiCoreConversationsTrashGetKindEnum];
+export const ApiCoreTaskCenterWorkbenchGetCategoryEnum = {
+    Attention: 'attention',
+    Running: 'running',
+    Paused: 'paused',
+    Failed: 'failed',
+    Recent: 'recent',
+    Canceled: 'canceled'
+} as const;
+export type ApiCoreTaskCenterWorkbenchGetCategoryEnum = typeof ApiCoreTaskCenterWorkbenchGetCategoryEnum[keyof typeof ApiCoreTaskCenterWorkbenchGetCategoryEnum];
 export const ApiCoreTasksTaskIdArtifactsGetViewEnum = {
     Ordinary: 'ordinary',
     Developer: 'developer'

@@ -50,8 +50,8 @@ describe('model provider settings layout', () => {
     const rule = styles.slice(ruleStart, ruleEnd);
 
     expect(ruleStart).toBeGreaterThan(-1);
-    expect(rule).toContain(
-      'grid-template-rows: minmax(0, 2fr) minmax(220px, 1fr);',
-    );
+    expect(rule).toContain('grid-template-rows: minmax(320px, 1fr);');
+    expect(rule).toContain('grid-auto-rows: max-content;');
+    expect(rule).toContain('overflow-y: auto;');
   });
 });

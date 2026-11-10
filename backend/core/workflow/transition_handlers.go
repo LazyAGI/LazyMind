@@ -859,6 +859,7 @@ func applyWorkflowTransition(ctx context.Context, tx *gorm.DB, sessionID string,
 				}
 				params := WorkflowStepParams{WorkflowID: session.WorkflowID, WorkflowRef: session.WorkflowRef, RevisionID: session.WorkflowRevisionID, RevisionNo: session.WorkflowRevisionNo, TreeHash: session.WorkflowTreeHash, RemoteRoot: session.WorkflowRemoteRoot, StepID: target.TargetStepID, SessionID: session.ID, UserInput: target.UserInput, LaunchUserInput: sessionIntentText(session.IntentContext), CurrentUserInput: currentInputs[target.TaskID], HandOff: &handOff, ChatSessionID: req.ChatSessionID, TraceID: req.TraceID, ParentSpanID: req.ParentSpanID, WorkflowMode: req.WorkflowMode, RetryHint: target.RuntimeInstruction, PartialIndices: target.PartialIndices, HistoryFilesPerTurn: req.HistoryFilesPerTurn, Filters: req.Filters, ParentAgenticConfig: req.ParentAgenticConfig, UserID: session.CreateUserID, RequiredOutputs: nodeDef.RequiredOutputs, Capabilities: nodeDef.Capabilities, LegacyTools: nodeDef.LegacyTools, TerminalTools: nodeDef.TerminalTools, ToolsOnly: nodeDef.ToolsOnly, TerminalToolsOnly: nodeDef.TerminalToolsOnly, StreamHeartbeat: nodeDef.StreamHeartbeat, Runtime: graph.Runtime}
 				params.HostedTaskID = req.HostedTaskID
+				params.RetryHint = workflowStepRuntimeInstruction(target.Objective, target.RuntimeInstruction)
 				var launchErr error
 				stepObjective := workflowStepObjectiveWithRuntimeBoundaries(nodeDef.Prompt, target.Objective, target.UserInput, nodeDef.Capabilities, nodeDef.LegacyTools, nodeDef.TerminalTools)
 				toolConfig, toolErr := workflowNodeToolConfig(ctx, tx, session.CreateUserID, req.ToolConfig, nodeDef.Capabilities, nodeDef.LegacyTools)
@@ -1034,7 +1035,7 @@ func queueHostAttempt(ctx context.Context, tx *gorm.DB, session orm.WorkflowSess
 		AttemptID: target.TaskID, StepID: target.TargetStepID, AttemptNo: int(count) + 1, Operation: "execute",
 		LaunchRequest: sessionIntentText(session.IntentContext), UserRequest: target.UserInput,
 		Objective: objective, Prompt: node.Prompt, Acceptance: node.Acceptance,
-		Instruction: target.RuntimeInstruction, PartialSelector: target.PartialIndices,
+		Instruction: workflowStepRuntimeInstruction(target.Objective, target.RuntimeInstruction), PartialSelector: target.PartialIndices,
 		WorkflowRevision: session.WorkflowRevisionID, DeclaredOutputs: node.Outputs, DeclaredOutputTypes: outputTypes, RequiredOutputs: node.RequiredOutputs,
 		Capabilities: node.Capabilities, LegacyTools: node.LegacyTools, TerminalTools: node.TerminalTools,
 		ToolsOnly: node.ToolsOnly, TerminalToolsOnly: node.TerminalToolsOnly}
@@ -1078,6 +1079,20 @@ func workflowNodeToolConfig(ctx context.Context, db *gorm.DB, userID string, bas
 
 func workflowConfigCapabilityNames(capabilities, legacyTools []string) []string {
 	return uniqueSortedStrings(append(append([]string{}, capabilities...), legacyTools...))
+}
+
+// Keep caller-supplied refinements separate from the expanded step objective.
+// Step execution consumes this existing instruction channel within the pinned
+// step contract; a launch with no refinement must not reinsert the global goal.
+func workflowStepRuntimeInstruction(objective, instruction string) string {
+	if strings.TrimSpace(objective) == "" {
+		return instruction
+	}
+	refinement := "Current step objective refinement (within the pinned step/output/tool boundaries):\n" + strings.TrimSpace(objective)
+	if strings.TrimSpace(instruction) != "" {
+		refinement += "\n\n" + instruction
+	}
+	return refinement
 }
 
 // workflowStepObjective makes the immutable workflow step prompt authoritative.

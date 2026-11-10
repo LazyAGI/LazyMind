@@ -7,6 +7,7 @@ import {
 import { SortableContext, sortableKeyboardCoordinates, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import SortableConversationRow from "./SortableConversationRow";
 import ScopedConversationList from "./ScopedConversationList";
+import { conversationMenuClassName, useConversationMenuDismissal } from "../useConversationMenuDismissal";
 import { conversationDropPlacement, moveConversationItems, type ConversationPlacement } from "./conversationReorder";
 import ConversationRunningIndicator from "./ConversationRunningIndicator";
 import { useConversationRunningStore } from "@/modules/chat/store/conversationRunning";
@@ -187,6 +188,7 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
     const [historyList, setHistoryList] = useState<SidebarConversation[]>([]);
     const [renamingId, setRenamingId] = useState<string | null>(null);
     const [openMenuId, setOpenMenuId] = useState<string | null>(null);
+    useConversationMenuDismissal(openMenuId, setOpenMenuId);
     const [movingConversation, setMovingConversation] = useState<SidebarConversation | null>(null);
     const statusWatcherId = useId();
     useEffect(() => {
@@ -1114,6 +1116,7 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
         <div
           aria-busy={item.metadata_pending || undefined}
           data-title-revision={item.title_revision}
+          data-conversation-actions={conversationId}
           className={classnames("record", {
             selected,
             "record-child": isChild,
@@ -1129,6 +1132,8 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
             setOpenMenuId(conversationId);
           }}
           onClick={(e) => {
+            // Portaled menu clicks bubble through React, outside the row's DOM.
+            if (!e.currentTarget.contains(e.target as Node)) return;
             e.preventDefault();
             activateConversation();
           }}
@@ -1198,10 +1203,12 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
           {!showBatchExport && !hideActions ? (
             <Dropdown
               destroyPopupOnHide
+              overlayClassName={conversationMenuClassName(conversationId)}
               trigger={["hover", "click", "contextMenu"]}
               open={!renamingId && openMenuId === conversationId}
               onOpenChange={open => setOpenMenuId(current => open && !renamingId ? conversationId : current === conversationId ? null : current)}
               menu={{
+                rootClassName: conversationMenuClassName(conversationId),
                 onClick: ({ domEvent }) => { domEvent.stopPropagation(); setOpenMenuId(null); },
                 items: [
                   { key: "rename", label: t("conversationOrganizer.renameConversation"), onClick: () => setRenamingId(conversationId) },

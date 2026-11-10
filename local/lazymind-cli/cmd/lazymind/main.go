@@ -138,11 +138,17 @@ func runInternal(ctx context.Context, args []string, stdout, stderr io.Writer) e
 		return runInternalCodex(ctx, action, *agentBinary, bridge, stdout)
 	case string(mcpclient.Cursor), string(mcpclient.WorkBuddy), string(mcpclient.Raccoon), string(mcpclient.TRAEWork), string(mcpclient.DeepSeekHarness):
 		if action == "login" {
-			if agent != string(mcpclient.Cursor) {
+			var loginErr error
+			switch mcpclient.Kind(agent) {
+			case mcpclient.Cursor:
+				loginErr = cursor.Login(ctx, *agentBinary)
+			case mcpclient.WorkBuddy:
+				loginErr = workbuddy.Login(ctx)
+			default:
 				return fmt.Errorf("unsupported %s action %q", agent, action)
 			}
-			if err := cursor.Login(ctx, *agentBinary); err != nil {
-				return err
+			if loginErr != nil {
+				return loginErr
 			}
 		}
 		adapter, err := mcpclient.New(mcpclient.Kind(agent), "", bridge)

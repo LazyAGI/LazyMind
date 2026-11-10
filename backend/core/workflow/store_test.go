@@ -2,6 +2,7 @@ package workflow
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"gorm.io/gorm"
 	"lazymind/core/localworkspace"
@@ -15,6 +16,66 @@ import (
 )
 
 var workflowTestDBSequence atomic.Uint64
+
+func TestUpdateSessionStatusRetriesSQLiteContentionWithoutDuplicateEvents(t *testing.T) {
+	db := orm.MigrateTestDB(t, &orm.WorkflowSession{}, &orm.WorkflowSessionStep{}, &orm.WorkflowEvent{})
+	if db.Dialector.Name() != orm.DriverSQLite {
+		t.Skip("SQLite snapshot contention regression")
+	}
+	for _, id := range []string{"status-update", "other"} {
+		if err := db.Create(&orm.WorkflowSession{ID: id, ConversationID: "chat", WorkflowID: "test",
+			CreateUserID: "owner", ControllerHost: "lazymind", Status: SessionStatusActive, StateVersion: 1}).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	wrote := false
+	if err := db.Callback().Query().After("gorm:query").Register("test:session_status_snapshot", func(tx *gorm.DB) {
+		if wrote || tx.Statement.Table != "plugin_sessions" || tx.Error != nil {
+			return
+		}
+		wrote = true
+		if err := db.Model(&orm.WorkflowSession{}).Where("id = ?", "other").Update("state_version", 2).Error; err != nil {
+			t.Fatal(err)
+		}
+	}); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { db.Callback().Query().Remove("test:session_status_snapshot") })
+	eventAttempts := 0
+	if err := db.Callback().Create().Before("gorm:create").Register("test:session_status_event_busy", func(tx *gorm.DB) {
+		if event, ok := tx.Statement.Dest.(*orm.WorkflowEvent); ok && event.SessionID == "status-update" {
+			eventAttempts++
+			if eventAttempts == 1 {
+				tx.AddError(errors.New("database is locked (5) (SQLITE_BUSY)"))
+			}
+		}
+	}); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { db.Callback().Create().Remove("test:session_status_event_busy") })
+	previous := OnAcademicRuntimeChanged
+	var notifications atomic.Int32
+	OnAcademicRuntimeChanged = func(_ context.Context, _ *gorm.DB, sessionID string) {
+		if sessionID == "status-update" {
+			notifications.Add(1)
+		}
+	}
+	t.Cleanup(func() { OnAcademicRuntimeChanged = previous })
+	if err := UpdateSessionStatus(t.Context(), db.DB, "status-update", SessionStatusFailed); err != nil {
+		t.Fatal(err)
+	}
+	current, err := GetSession(t.Context(), db.DB, "status-update")
+	if err != nil || current.Status != SessionStatusFailed || current.StateVersion != 2 {
+		t.Fatalf("session=%+v error=%v", current, err)
+	}
+	var events int64
+	if err := db.Model(&orm.WorkflowEvent{}).Where("session_id = ?", "status-update").Count(&events).Error; err != nil {
+		t.Fatal(err)
+	}
+	if !wrote || eventAttempts < 2 || events != 1 || notifications.Load() != 1 {
+		t.Fatalf("wrote=%v event attempts=%d events=%d notifications=%d", wrote, eventAttempts, events, notifications.Load())
+	}
+}
 
 // newTestDB creates an in-memory SQLite database and auto-migrates all plugin tables.
 func newTestDB(t *testing.T) *orm.DB {

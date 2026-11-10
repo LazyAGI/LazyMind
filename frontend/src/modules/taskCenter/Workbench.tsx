@@ -1,51 +1,49 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { Alert, Button, Empty, Input, Progress, Select, Spin, Tooltip } from 'antd';
-import { CheckCircleFilled, ClockCircleOutlined, CloseCircleOutlined, ReloadOutlined, RightOutlined, SearchOutlined, StopOutlined, SyncOutlined, UserOutlined } from '@ant-design/icons';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { Alert, Button, Empty, Input, Pagination, Progress, Select, Spin, Tooltip } from 'antd';
+import { CheckCircleFilled, ClockCircleOutlined, CloseCircleOutlined, PauseCircleOutlined, ReloadOutlined, RightOutlined, SearchOutlined, StopOutlined, SyncOutlined, UserOutlined } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import TaskRemovalDialog from './TaskRemovalDialog';
 import { TASKS_REMOVED_EVENT, type TasksRemovedDetail } from './events';
-import { listTasks } from './api';
-import type { Task } from './api';
-import TaskDetail, { StatusTag, formatDate } from './TaskDetail';
-import { isTaskFinishedWithinDays } from './recentResults';
+import { getWorkbench } from './api';
+import type { Task, WorkbenchCategory, WorkbenchResponse } from './api';
+import TaskDetail, { formatDate } from './TaskDetail';
+import { StatusTag } from './StatusTag';
 import { CONVERSATION_TITLE_CHANGED_EVENT, getChatConversationPath, selectChatConversationFilter } from '@/modules/chat/constants/chat';
 import StateGraphModal from '@/components/StateGraphModal';
 import { WORKFLOW_TASKS_CHANGED } from './events';
+import { taskStepProgress, useTaskSteps } from './useTaskSteps';
 
-const SECTION_LIMIT = 5;
-const ATTENTION_LIMIT = 3;
+const CATEGORIES: WorkbenchCategory[] = ['attention', 'running', 'paused', 'failed', 'recent', 'canceled'];
 
 interface WorkbenchProps {
   active: boolean;
-  onViewAllStatus: (status: 'failed' | 'canceled') => void;
 }
 
-export default function Workbench({ active, onViewAllStatus }: WorkbenchProps) {
+export default function Workbench({ active }: WorkbenchProps) {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const request = useRef(0);
-  const [tasks, setTasks] = useState<Task[]>([]);
+  const [data, setData] = useState<WorkbenchResponse | null>(null);
+  const [pagination, setPagination] = useState<{ category?: WorkbenchCategory; page: number }>({ page: 1 });
   const [loading, setLoading] = useState(false);
+  const [stepsRefreshVersion, setStepsRefreshVersion] = useState(0);
   const [loadFailed, setLoadFailed] = useState(false);
   const [keyword, setKeyword] = useState('');
   const [type, setType] = useState('');
-  const [statusCounts, setStatusCounts] = useState({ all: 0, pending: 0, waiting: 0, running: 0, succeeded: 0, failed: 0, canceled: 0 });
   const [removingTask, setRemovingTask] = useState<Task | null>(null);
   const [selected, setSelected] = useState<Task | null>(null);
   const [graphTask, setGraphTask] = useState<Task | null>(null);
-  const [attentionExpanded, setAttentionExpanded] = useState(false);
-  const [runningExpanded, setRunningExpanded] = useState(false);
-  const [recentExpanded, setRecentExpanded] = useState(false);
+  const [activeCategory, setActiveCategory] = useState<WorkbenchCategory>('attention');
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (refreshSteps = false) => {
     const current = ++request.current;
     setLoading(true);
     try {
-      const response = await listTasks({ keyword: keyword || undefined, task_type: type || undefined, page: 1, page_size: 60 });
+      const response = await getWorkbench({ keyword: keyword || undefined, task_type: type || undefined, ...pagination });
       if (current !== request.current) return;
-      setTasks(response.items ?? []);
-      if (response.status_counts) setStatusCounts(response.status_counts);
+      setData(response);
+      if (refreshSteps) setStepsRefreshVersion(version => version + 1);
       setLoadFailed(false);
     } catch {
       if (current !== request.current) return;
@@ -54,7 +52,7 @@ export default function Workbench({ active, onViewAllStatus }: WorkbenchProps) {
     } finally {
       if (current === request.current) setLoading(false);
     }
-  }, [keyword, type]);
+  }, [keyword, type, pagination]);
 
   useEffect(() => {
     if (!active) return;
@@ -78,8 +76,10 @@ export default function Workbench({ active, onViewAllStatus }: WorkbenchProps) {
     };
   }, [active, load]);
 
-  const { waiting, running, failed, canceled, recent } = groupWorkbenchTasks(tasks);
-  const hasVisibleTasks = waiting.length + running.length + failed.length + canceled.length + recent.length > 0;
+  const globalSearch = keyword.trim().length > 0;
+  const categoryVisible = (category: WorkbenchCategory) => globalSearch || activeCategory === category;
+  const visibleCategories = CATEGORIES.filter(category => categoryVisible(category) && (data?.groups[category].total ?? 0) > 0);
+  const count = (category: WorkbenchCategory) => data?.groups[category].total ?? 0;
   const openConversation = (id: string) => {
     selectChatConversationFilter('task');
     navigate(getChatConversationPath(id));
@@ -88,32 +88,30 @@ export default function Workbench({ active, onViewAllStatus }: WorkbenchProps) {
   return (
     <div className='workbench'>
       <div className='task-metrics'>
-        <Metric icon={<UserOutlined />} tone='orange' label={t('taskCenter.needsAttention')} value={waiting.length} />
-        <Metric icon={<ClockCircleOutlined />} tone='blue' label={t('taskCenter.helpingYou')} value={running.length} />
-        <Metric icon={<CheckCircleFilled />} tone='green' label={t('taskCenter.completedLastSevenDays')} value={recent.length} />
-        <Metric icon={<CloseCircleOutlined />} tone='red' label={t('taskCenter.statusFailed')} value={statusCounts.failed} />
-        <Metric icon={<StopOutlined />} tone='gray' label={t('taskCenter.statusCanceled')} value={statusCounts.canceled} />
-        <span className='task-metrics-note'>{t('taskCenter.summaryHint')}</span>
+        <Metric icon={<UserOutlined />} tone='orange' label={t('taskCenter.needsAttention')} value={count('attention')} active={activeCategory === 'attention'} onClick={() => setActiveCategory('attention')} />
+        <Metric icon={<ClockCircleOutlined />} tone='blue' label={t('taskCenter.helpingYou')} value={count('running')} active={activeCategory === 'running'} onClick={() => setActiveCategory('running')} />
+        <Metric icon={<PauseCircleOutlined />} tone='yellow' label={t('taskCenter.statusPaused')} value={count('paused')} active={activeCategory === 'paused'} onClick={() => setActiveCategory('paused')} />
+        <Metric icon={<CloseCircleOutlined />} tone='red' label={t('taskCenter.statusFailed')} value={count('failed')} active={activeCategory === 'failed'} onClick={() => setActiveCategory('failed')} />
+        <Metric icon={<CheckCircleFilled />} tone='green' label={t('taskCenter.completedLastSevenDays')} value={count('recent')} active={activeCategory === 'recent'} onClick={() => setActiveCategory('recent')} />
+        <Metric icon={<StopOutlined />} tone='gray' label={t('taskCenter.statusCanceled')} value={count('canceled')} active={activeCategory === 'canceled'} onClick={() => setActiveCategory('canceled')} />
       </div>
       <div className='task-toolbar'>
-        <Input prefix={<SearchOutlined />} allowClear placeholder={t('taskCenter.searchPlaceholder')} value={keyword} onChange={(event: React.ChangeEvent<HTMLInputElement>) => setKeyword(event.target.value)} />
-        <Select value={type} onChange={setType} options={[
+        <Input prefix={<SearchOutlined />} allowClear placeholder={t('taskCenter.searchPlaceholder')} value={keyword} onChange={(event: React.ChangeEvent<HTMLInputElement>) => { setKeyword(event.target.value); setPagination({ page: 1 }); }} />
+        <Select value={type} onChange={(value) => { setType(value); setPagination({ page: 1 }); }} options={[
           { value: '', label: t('taskCenter.triggerAll') },
           { value: 'workflow_run', label: t('taskCenter.typeWorkflowRun') },
           { value: 'background_chat', label: t('taskCenter.typeBackgroundChat') },
           { value: 'scheduled', label: t('taskCenter.typeScheduled') },
         ]} />
-        <Button icon={<ReloadOutlined />} onClick={() => void load()}>{t('taskCenter.refresh')}</Button>
+        <Button icon={<ReloadOutlined />} onClick={() => void load(true)}>{t('taskCenter.refresh')}</Button>
       </div>
 
       <Spin spinning={loading}>
         {loadFailed ? <Alert className='workbench-load-error' type='warning' showIcon message={t('taskCenter.loadError')} description={t('taskCenter.loadErrorDescription')} action={<Button size='small' onClick={() => void load()}>{t('common.retry')}</Button>} /> : null}
-        {waiting.length ? <AttentionSection tasks={waiting} expanded={attentionExpanded} onToggle={() => setAttentionExpanded((value) => !value)} onSelect={setSelected} onOpenGraph={setGraphTask} /> : null}
-        {running.length ? <RunningSection tasks={running} expanded={runningExpanded} onToggle={() => setRunningExpanded((value) => !value)} onSelect={setSelected} onOpenGraph={setGraphTask} /> : null}
-        {failed.length ? <StatusCardSection status='failed' tasks={failed} totalCount={statusCounts.failed} onViewAll={() => onViewAllStatus('failed')} onSelect={setSelected} onOpenGraph={setGraphTask} /> : null}
-        {canceled.length ? <StatusCardSection status='canceled' tasks={canceled} totalCount={statusCounts.canceled} onViewAll={() => onViewAllStatus('canceled')} onSelect={setSelected} onOpenGraph={setGraphTask} /> : null}
-        {recent.length ? <RecentSection tasks={recent} expanded={recentExpanded} onToggle={() => setRecentExpanded((value) => !value)} onSelect={setSelected} /> : null}
-        {!loading && !loadFailed && !hasVisibleTasks ? <WorkbenchEmpty /> : null}
+        {data && visibleCategories.map(category => <WorkbenchSection key={category} category={category} group={data.groups[category]}
+          pageSize={data.page_size} refreshVersion={stepsRefreshVersion} onPageChange={page => setPagination({ category, page })}
+          onSelect={setSelected} onOpenGraph={setGraphTask} />)}
+        {!loading && !loadFailed && !visibleCategories.length ? <WorkbenchEmpty /> : null}
       </Spin>
       <TaskRemovalDialog task={removingTask} onClose={() => setRemovingTask(null)} />
       <TaskDetail task={selected} onClose={() => setSelected(null)} onOpenConversation={openConversation} onOpenWorkflow={(sessionId) => navigate(`/workflow-runs/${encodeURIComponent(sessionId)}`)} onOpenGraph={(sessionId) => selected && setGraphTask({ ...selected, workflow_session_id: sessionId })} onDelete={setRemovingTask} />
@@ -122,125 +120,103 @@ export default function Workbench({ active, onViewAllStatus }: WorkbenchProps) {
   );
 }
 
-function Metric({ icon, tone, label, value }: { icon: React.ReactNode; tone: string; label: string; value: number }) {
-  return <div className='task-metric'><span className={`metric-icon ${tone}`}>{icon}</span><div><span>{label}</span><strong>{value}</strong></div></div>;
+function Metric({ icon, tone, label, value, active, onClick }: { icon: React.ReactNode; tone: string; label: string; value: number; active: boolean; onClick: () => void }) {
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const iconRef = useRef<HTMLSpanElement>(null);
+  const labelRef = useRef<HTMLSpanElement>(null);
+  const [iconOnly, setIconOnly] = useState(false);
+
+  useLayoutEffect(() => {
+    const button = buttonRef.current!;
+    const iconElement = iconRef.current!;
+    const labelElement = labelRef.current!;
+    const measure = () => {
+      const style = getComputedStyle(button);
+      const spacing = [style.paddingLeft, style.paddingRight, style.columnGap]
+        .reduce((total, part) => total + (parseFloat(part) || 0), 0);
+      // Hidden text keeps its intrinsic width so resizing can restore it without
+      // toggling between the expanded and compact layouts on each observation.
+      setIconOnly(iconElement.getBoundingClientRect().width + labelElement.scrollWidth + spacing > button.clientWidth);
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    [button, iconElement, labelElement].forEach(element => observer.observe(element));
+    return () => observer.disconnect();
+  }, [label, active]);
+
+  return <Tooltip title={iconOnly ? label : undefined}>
+    <button ref={buttonRef} type='button' className={`task-metric ${tone}${active ? ' is-active' : ''}${iconOnly ? ' is-icon-only' : ''}`}
+      aria-label={`${label} ${value}`} aria-pressed={active} onClick={onClick}>
+      <span ref={iconRef} className='metric-icon-wrap'><span className={`metric-icon ${tone}`}>{icon}</span><span className={`metric-count-badge ${tone}`}>{value}</span></span>
+      <span ref={labelRef} className='metric-label' aria-hidden={iconOnly}>{label}</span>
+    </button>
+  </Tooltip>;
 }
 
-function SectionHeading({ icon, tone, title, description, count, expanded, canExpand, onToggle }: { icon: React.ReactNode; tone: string; title: string; description: string; count: number; expanded: boolean; canExpand: boolean; onToggle: () => void }) {
+function WorkbenchSection({ category, group, pageSize, refreshVersion, onPageChange, onSelect, onOpenGraph }: {
+  category: WorkbenchCategory;
+  group: WorkbenchResponse['groups'][WorkbenchCategory];
+  pageSize: number;
+  refreshVersion: number;
+  onPageChange: (page: number) => void;
+  onSelect: (task: Task) => void;
+  onOpenGraph: (task: Task) => void;
+}) {
   const { t } = useTranslation();
-  return (
+  const config = {
+    attention: { icon: <UserOutlined />, title: 'needsAttention', description: 'needsAttentionDescription', action: 'taskCenter.confirmAction' },
+    running: { icon: <SyncOutlined spin />, title: 'helpingYou', description: 'helpingYouDescription', action: 'taskCenter.viewAction' },
+    paused: { icon: <PauseCircleOutlined />, title: 'statusPaused', description: 'pausedDescription', action: 'chat.workflowContinue' },
+    failed: { icon: <CloseCircleOutlined />, title: 'statusFailed', description: 'failedDescription', action: 'taskCenter.viewAction' },
+    recent: { icon: <CheckCircleFilled />, title: 'completedLastSevenDays', description: 'recentResultsDescription', action: 'taskCenter.viewAction' },
+    canceled: { icon: <StopOutlined />, title: 'statusCanceled', description: 'canceledDescription', action: 'taskCenter.viewAction' },
+  }[category];
+  return <section className={`workbench-section ${category}`}>
     <header className='workbench-section-heading'>
       <div className='workbench-section-title'>
-        <span className={`workbench-section-icon ${tone}`}>{icon}</span>
-        <div><h2>{title}<span>{count}</span></h2><p>{description}</p></div>
+        <span className='workbench-section-icon-wrap'><span className={`workbench-section-icon ${category}`}>{config.icon}</span><span className={`section-count-badge ${category}`}>{group.total}</span></span>
+        <div><h2>{t(`taskCenter.${config.title}`)}</h2><p>{t(`taskCenter.${config.description}`)}</p></div>
       </div>
-      {canExpand ? <Button type='link' size='small' onClick={onToggle}>{t(expanded ? 'taskCenter.collapse' : 'taskCenter.viewAll')} <RightOutlined /></Button> : null}
     </header>
-  );
-}
-
-function AttentionSection({ tasks, expanded, onToggle, onSelect, onOpenGraph }: { tasks: Task[]; expanded: boolean; onToggle: () => void; onSelect: (task: Task) => void; onOpenGraph: (task: Task) => void }) {
-  const { t } = useTranslation();
-  return <section className='workbench-section attention'>
-    <SectionHeading icon={<UserOutlined />} tone='attention' title={t('taskCenter.needsAttention')} description={t('taskCenter.needsAttentionDescription')} count={tasks.length} expanded={expanded} canExpand={tasks.length > ATTENTION_LIMIT} onToggle={onToggle} />
-    {tasks.length ? <div className='attention-task-grid'>{tasks.slice(0, expanded ? undefined : ATTENTION_LIMIT).map((task) => (
-      <article className='attention-task-card' key={task.id}>
-        <div className='attention-task-card-top'>
-          <span className={`task-type-icon task-type-${task.task_type}`}><ClockCircleOutlined /></span>
-          <StatusTag status={task.status} onClick={task.workflow_session_id ? () => onOpenGraph(task) : undefined} />
-        </div>
-        <div className='attention-task-card-title'>
-          <Tooltip title={taskTitle(task, t)}><strong>{taskTitle(task, t)}</strong></Tooltip>
-          <small>{taskMeta(task, t)}</small>
-        </div>
-        <p>{taskDescription(task, t)}</p>
-        <footer><time>{formatDate(task.updated_at)}</time><Button type='link' size='small' onClick={() => onSelect(task)}>{t(task.status === 'paused' ? 'chat.workflowContinue' : 'taskCenter.confirmAction')} <RightOutlined /></Button></footer>
-      </article>
-    ))}</div> : <WorkbenchEmpty />}
+    <div className='attention-task-grid'>{group.items.map(task => <WorkbenchTaskCard key={task.id} task={task} tone={category}
+      icon={config.icon} actionLabel={t(config.action)} onSelect={onSelect} onOpenGraph={onOpenGraph}
+      refreshVersion={refreshVersion} showProgress={category === 'running'} />)}</div>
+    {group.total > pageSize && <Pagination className='workbench-pagination' size='small' current={group.page} pageSize={pageSize}
+      total={group.total} showSizeChanger={false} onChange={onPageChange} />}
   </section>;
 }
 
-function RunningSection({ tasks, expanded, onToggle, onSelect, onOpenGraph }: { tasks: Task[]; expanded: boolean; onToggle: () => void; onSelect: (task: Task) => void; onOpenGraph: (task: Task) => void }) {
+function WorkbenchTaskCard({ task, tone, icon, actionLabel, onSelect, onOpenGraph, showProgress = false, refreshVersion = 0 }: {
+  task: Task;
+  tone: 'attention' | 'running' | 'paused' | 'failed' | 'recent' | 'canceled';
+  icon: React.ReactNode;
+  actionLabel: string;
+  onSelect: (task: Task) => void;
+  onOpenGraph?: (task: Task) => void;
+  showProgress?: boolean;
+  refreshVersion?: number;
+}) {
   const { t } = useTranslation();
-  return <section className='workbench-section running'>
-    <SectionHeading icon={<SyncOutlined spin />} tone='running' title={t('taskCenter.helpingYou')} description={t('taskCenter.helpingYouDescription')} count={tasks.length} expanded={expanded} canExpand={tasks.length > SECTION_LIMIT} onToggle={onToggle} />
-    {tasks.length ? <div className='running-task-list'>
-      <div className='running-task-head'><span>{t('taskCenter.tasks')}</span><span>{t('taskCenter.statusAndNext')}</span><span>{t('taskCenter.time')}</span><span /></div>
-      {tasks.slice(0, expanded ? undefined : SECTION_LIMIT).map((task) => {
-        const progress = taskProgress(task);
-        return <button type='button' className='running-task-row' key={task.id} onClick={() => onSelect(task)}>
-          <span className='task-leading-icon running'><SyncOutlined spin /></span>
-          <span className='workbench-task-main'><Tooltip title={taskTitle(task, t)}><strong>{taskTitle(task, t)}</strong></Tooltip><small>{taskMeta(task, t)}</small></span>
-          <span className='running-task-state'><span><StatusTag status={task.status} onClick={task.workflow_session_id ? () => onOpenGraph(task) : undefined} /><small>{taskDescription(task, t)}</small></span>{progress !== null ? <Progress percent={progress} size='small' /> : null}</span>
-          <time>{formatDate(task.updated_at)}</time>
-          <span className='workbench-row-action'>{t('taskCenter.viewAction')} <RightOutlined /></span>
-        </button>;
-      })}
-    </div> : <WorkbenchEmpty />}
-  </section>;
-}
-
-function StatusCardSection({ status, tasks, totalCount, onViewAll, onSelect, onOpenGraph }: { status: 'failed' | 'canceled'; tasks: Task[]; totalCount: number; onViewAll: () => void; onSelect: (task: Task) => void; onOpenGraph: (task: Task) => void }) {
-  const { t } = useTranslation();
-  const failed = status === 'failed';
-  return <section className={`workbench-section ${status}`}>
-    <SectionHeading
-      icon={failed ? <CloseCircleOutlined /> : <StopOutlined />}
-      tone={status}
-      title={t(failed ? 'taskCenter.statusFailed' : 'taskCenter.statusCanceled')}
-      description={t(failed ? 'taskCenter.failedDescription' : 'taskCenter.canceledDescription')}
-      count={totalCount}
-      expanded={false}
-      canExpand={totalCount > Math.min(tasks.length, ATTENTION_LIMIT)}
-      onToggle={onViewAll}
-    />
-    {tasks.length ? <div className='attention-task-grid'>{tasks.slice(0, ATTENTION_LIMIT).map((task) => (
-      <article className='attention-task-card' key={task.id}>
-        <div className='attention-task-card-top'>
-          <span className={`task-type-icon task-type-${task.task_type}`}>{failed ? <CloseCircleOutlined /> : <StopOutlined />}</span>
-          <StatusTag status={task.status} onClick={task.workflow_session_id ? () => onOpenGraph(task) : undefined} />
-        </div>
-        <div className='attention-task-card-title'>
-          <Tooltip title={taskTitle(task, t)}><strong>{taskTitle(task, t)}</strong></Tooltip>
-          <small>{taskMeta(task, t)}</small>
-        </div>
-        <p>{taskDescription(task, t)}</p>
-        <footer><time>{formatDate(task.finished_at || task.updated_at)}</time><Button type='link' size='small' onClick={() => onSelect(task)}>{t('taskCenter.viewAction')} <RightOutlined /></Button></footer>
-      </article>
-    ))}</div> : <WorkbenchEmpty />}
-  </section>;
-}
-
-function RecentSection({ tasks, expanded, onToggle, onSelect }: { tasks: Task[]; expanded: boolean; onToggle: () => void; onSelect: (task: Task) => void }) {
-  const { t } = useTranslation();
-  return <section className='workbench-section recent'>
-    <SectionHeading icon={<CheckCircleFilled />} tone='recent' title={t('taskCenter.recentResults')} description={t('taskCenter.recentResultsDescription')} count={tasks.length} expanded={expanded} canExpand={tasks.length > SECTION_LIMIT} onToggle={onToggle} />
-    {tasks.length ? <div className='recent-task-list'>{tasks.slice(0, expanded ? undefined : SECTION_LIMIT).map((task) => (
-      <button type='button' className='recent-task-row' key={task.id} onClick={() => onSelect(task)}>
-        <CheckCircleFilled className='recent-task-check' />
-        <span className='workbench-task-main'><Tooltip title={taskTitle(task, t)}><strong>{taskTitle(task, t)}</strong></Tooltip><small>{taskMeta(task, t)}</small></span>
-        <span className='recent-task-summary'>{taskDescription(task, t)}</span>
-        <time>{formatDate(task.finished_at || task.updated_at)}</time>
-        <RightOutlined className='recent-task-arrow' />
-      </button>
-    ))}</div> : <WorkbenchEmpty />}
-  </section>;
+  const { steps, loading, failed } = useTaskSteps(showProgress ? task : null, refreshVersion);
+  const progress = taskStepProgress(steps);
+  return <article className={`attention-task-card workbench-task-card ${tone}`}>
+    <div className='attention-task-card-top'>
+      <span className={`task-type-icon status-icon-${tone}`}>{icon}</span>
+      <StatusTag status={task.status} onClick={task.workflow_session_id && onOpenGraph ? () => onOpenGraph(task) : undefined} />
+    </div>
+    <div className='attention-task-card-title'>
+      <Tooltip title={taskTitle(task, t)}><strong>{taskTitle(task, t)}</strong></Tooltip>
+      <small>{taskMeta(task, t)}</small>
+    </div>
+    <p>{taskDescription(task, t)}</p>
+    {showProgress && (loading || failed) ? <small>{t(failed ? 'taskCenter.loadError' : 'common.loading')}</small> : progress.total ? <div className='workbench-task-card-progress'><Progress percent={progress.percent} showInfo={false} size='small' /><small>{t('taskCenter.stepsCompleted', { done: progress.done, total: progress.total })}</small></div> : null}
+    <footer><time>{formatDate(task.finished_at || task.updated_at)}</time><Button type='link' size='small' onClick={() => onSelect(task)}>{actionLabel} <RightOutlined /></Button></footer>
+  </article>;
 }
 
 function WorkbenchEmpty() {
   const { t } = useTranslation();
   return <div className='workbench-empty'><Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t('taskCenter.empty')} /></div>;
-}
-
-export function groupWorkbenchTasks(tasks: Task[], referenceTime = Date.now()) {
-  const completed = tasks.filter((task) => ['completed', 'succeeded'].includes(task.status));
-  return {
-    waiting: tasks.filter((task) => ['waiting', 'waiting_inputs', 'interrupted', 'pending', 'paused'].includes(task.status)),
-    running: tasks.filter((task) => task.status === 'running'),
-    failed: tasks.filter((task) => task.status === 'failed'),
-    canceled: tasks.filter((task) => task.status === 'canceled'),
-    recent: completed.filter((task) => isTaskFinishedWithinDays(task, 7, referenceTime)),
-  };
 }
 
 function taskTitle(task: Task, t: (key: string) => string) {
@@ -254,10 +230,4 @@ function taskDescription(task: Task, t: (key: string) => string) {
 function taskMeta(task: Task, t: (key: string) => string) {
   const labels: Record<string, string> = { workflow_run: t('taskCenter.typeWorkflowRun'), background_chat: t('taskCenter.typeBackgroundChat'), scheduled: t('taskCenter.typeScheduled') };
   return labels[task.task_type] ?? task.task_type;
-}
-
-function taskProgress(task: Task) {
-  if (!task.steps?.length) return null;
-  const done = task.steps.filter((step) => ['completed', 'succeeded'].includes(step.status)).length;
-  return Math.round((done / task.steps.length) * 100);
 }

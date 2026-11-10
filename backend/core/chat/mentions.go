@@ -445,6 +445,8 @@ const recentMentionResourceLimit = 10
 
 const conversationWorkflowBindingKey = "workflow_binding"
 
+var errConversationWorkflowsDisabled = errors.New("workflow is paused: enable workflows in conversation settings before selecting")
+
 func workflowSessionTerminal(session *orm.WorkflowSession) bool {
 	return session == nil || session.Dismissed || session.Status == workflow.SessionStatusCompleted ||
 		session.Status == workflow.SessionStatusFailed
@@ -457,13 +459,13 @@ func resolveConversationWorkflowBinding(
 	currentRefs, excludedRefs []string,
 	enabled, persist bool,
 ) ([]string, error) {
+	if !enabled && len(currentRefs) > 0 {
+		return nil, errConversationWorkflowsDisabled
+	}
 	if conversationID == "" {
 		return currentRefs, nil
 	}
-	// An explicit Workflow mention is an affirmative per-turn selection. It
-	// must take precedence over a persisted conversation toggle; otherwise the
-	// selection is discarded before applyWorkflowSelection can register its
-	// bound trigger tool.
+	// Only persist explicit selections after the conversation has enabled workflows.
 	if len(currentRefs) > 0 {
 		if persist {
 			return currentRefs, writeConversationWorkflowBinding(
@@ -476,16 +478,6 @@ func resolveConversationWorkflowBinding(
 	if err != nil {
 		return nil, err
 	}
-	// New user conversations intentionally start with general Workflow discovery
-	// disabled. An explicit @workflow mention is nevertheless an affirmative
-	// selection, and its exact binding must survive clarification turns before a
-	// Session exists. Otherwise an ask_user answer arrives without a mention, the
-	// bound trigger disappears, and ChatAgent falls back to unrelated tools/skills.
-	// Keep only the explicitly bound Workflow enabled here; applyWorkflowSelection
-	// will continue to restrict the request to this single ref.
-	if !enabled && boundRef == "" {
-		return nil, nil
-	}
 	for _, ref := range excludedRefs {
 		if ref == boundRef {
 			if persist {
@@ -493,6 +485,9 @@ func resolveConversationWorkflowBinding(
 			}
 			return nil, nil
 		}
+	}
+	if !enabled {
+		return nil, nil
 	}
 
 	var latest orm.WorkflowSession
@@ -830,7 +825,9 @@ func applyWorkflowSelection(
 		return fmt.Errorf("at most one workflow mention is allowed per turn")
 	}
 	if len(mentionedRefs) > 0 {
-		reqBody["enable_workflow"] = true
+		if enabled, _ := reqBody["enable_workflow"].(bool); !enabled {
+			return errConversationWorkflowsDisabled
+		}
 		reqBody["allowed_workflow_refs"] = mentionedRefs
 	}
 	delete(reqBody, "workflow_activations")

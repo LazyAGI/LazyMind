@@ -79,7 +79,7 @@ func TestDarwinLaunchRetriesAfterUserManuallyClosesCodex(t *testing.T) {
 				t.Fatal("lost exact application path")
 			}
 			if closeAttempts == 1 {
-				return []byte("Codex refused to close"), errors.New("pending quit confirmation")
+				return []byte("LAZYMIND_AGENT_quit_required: Codex refused to close"), errors.New("pending quit confirmation")
 			}
 			// The user closed Codex after the failed attempt: no PIDs remain.
 			return nil, nil

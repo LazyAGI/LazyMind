@@ -126,6 +126,17 @@ it('a failed draft save prevents publication and keeps the confirmation open', a
   expect(close).not.toHaveBeenCalled();
 });
 
+it('opens the platform results as soon as publication is accepted', async () => {
+  state.preferred_providers = ['github'];
+  const { rerender } = render(view());
+  const confirm = await screen.findByRole('button', { name: 'Publish to GitHub' });
+  await waitFor(() => expect(confirm).toBeEnabled());
+  fireEvent.click(confirm);
+  await waitFor(() => expect(close).toHaveBeenCalledOnce());
+  rerender(view({ open: false }));
+  await waitFor(() => expect(screen.getByRole('dialog', { name: 'Publication results by platform' })).toBeVisible());
+});
+
 it('lost acceptance is retried with the identical saved body and key despite new edits', async () => {
   api.createPublicationGroup.mockRejectedValueOnce(new Error('network disconnected'));
   const { rerender } = render(view()); await pickBoth();
