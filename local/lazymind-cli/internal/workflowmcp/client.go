@@ -149,6 +149,7 @@ type SessionLifecycleResult struct {
 }
 
 type BeginInput struct {
+	ContractDirectory  string `json:"contract_directory,omitempty" jsonschema:"Existing absolute Connector-local directory. Save full pinned step contract privately and return step_contract_file plus routing/output metadata; pass the file reference to workers without reading full Skills into the controller"`
 	RetryOrigin        string `json:"retry_origin,omitempty" jsonschema:"automatic by default; user only for recovery explicitly requested by the user"`
 	SessionID          string `json:"session_id" jsonschema:"required,Workflow session returned by workflow.start"`
 	StepID             string `json:"step_id" jsonschema:"required,One Runtime-returned ready, retryable or rewindable step"`
@@ -192,13 +193,14 @@ type StepContract struct {
 }
 
 type Execution struct {
-	ExecutorHost        string       `json:"executor_host,omitempty"`
-	AttemptStatus       string       `json:"attempt_status,omitempty"`
-	ReviewAfterComplete bool         `json:"review_after_complete"`
-	ExecutionHandle     string       `json:"execution_handle,omitempty"`
-	ExecutionID         string       `json:"execution_id"`
-	LeaseExpires        string       `json:"lease_expires_at"`
-	StepContract        StepContract `json:"step_contract"`
+	StepContractFile    map[string]any `json:"step_contract_file,omitempty"`
+	ExecutorHost        string         `json:"executor_host,omitempty"`
+	AttemptStatus       string         `json:"attempt_status,omitempty"`
+	ReviewAfterComplete bool           `json:"review_after_complete"`
+	ExecutionHandle     string         `json:"execution_handle,omitempty"`
+	ExecutionID         string         `json:"execution_id"`
+	LeaseExpires        string         `json:"lease_expires_at"`
+	StepContract        StepContract   `json:"step_contract"`
 }
 
 type BeginResult struct {
@@ -207,8 +209,9 @@ type BeginResult struct {
 }
 
 type ResumeInput struct {
-	SessionID   string `json:"session_id" jsonschema:"required,Workflow session identifier"`
-	ExecutionID string `json:"execution_id" jsonschema:"required,Execution identifier returned by workflow.step.begin"`
+	ContractDirectory string `json:"contract_directory,omitempty" jsonschema:"Existing absolute Connector-local directory for full pinned step contract file transport"`
+	SessionID         string `json:"session_id" jsonschema:"required,Workflow session identifier"`
+	ExecutionID       string `json:"execution_id" jsonschema:"required,Execution identifier returned by workflow.step.begin"`
 }
 
 type Output struct {
@@ -216,6 +219,7 @@ type Output struct {
 	ContentType string `json:"content_type,omitempty" jsonschema:"Slot type: text, json, image, file, or file_list"`
 	Value       any    `json:"value,omitempty" jsonschema:"Inline result: text, JSON, image URL, or file payload"`
 	LocalPath   string `json:"local_path,omitempty" jsonschema:"Local file path for a file slot; mutually exclusive with value"`
+	ValueFile   string `json:"value_file,omitempty" jsonschema:"Absolute Connector-local UTF-8 file for a text or JSON slot; reads and publishes its value without echoing full content into controller context. Mutually exclusive with value and local_path"`
 	Caption     string `json:"caption,omitempty"`
 	Seq         int    `json:"seq,omitempty" jsonschema:"One-based idempotency sequence for list items or repeated revisions of one slot"`
 }

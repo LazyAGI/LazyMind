@@ -50,6 +50,25 @@ MCP 不负责替宿主启动原生 subagent。所有宿主遵守相同的 MCP �
 
 输入契约可能只含修订引用。根 Controller 用 `workflow.input.get` 读取输入资源、用 `workflow.artifact.get` 读取绑定的 `source_revision_id`，校验内容和版本后把实际文件或文本交给 worker；不能仅凭文件名或旧会话缓存重建内容。下载与发布都复用正常凭证机制，凭证不进入 worker 提示或产物。
 
+## 文件交接与页面并行
+
+控制器保留运行授权、路由/输出元数据、文件引用和简短检查摘要。完整 Skill、论文内容、生成请求、HTML 和讲稿由实际执行方读取，不为转发或导出而反复打印到控制器上下文。
+
+支持共享文件系统的 Connector 提供向后兼容的可选字段，文件路径均指 Connector 所在机器，不传给 Core 作为服务端路径：
+
+| 入口 | 字段 | 行为 |
+| --- | --- | --- |
+| `workflow.step.begin/claim/resume` | `contract_directory` | 在已有绝对目录下创建私有子目录，保存完整固定契约；返回 `execution.step_contract_file.result_path` 和精简 `step_contract`。授权仍只返回给控制器，不写入 worker 契约文件。 |
+| `workflow.tool.call` | `arguments_file` | 读取一个 UTF-8 JSON 对象作为工具参数，与 `arguments` 互斥；沿用文件读取权限、大小限制和既有工具授权。 |
+| `workflow.tool.call` | `result_directory` | 在已有绝对目录下创建私有子目录，保存完整工具 JSON，解码并校验输出文件哈希；只返回 `result_path`、文件路径/哈希/大小及状态。错误仍可见。 |
+| `workflow.input.get/artifact.get` | `result_directory` | 保存完整已鉴权资源 JSON，返回 `resource_file` / `artifact_file` 中的文件引用，供执行方读取。 |
+| `workflow.artifact.list` | `metadata_only: true` | 仅返回 ID、版本、页身份等元数据，不将已保存正文重新带回控制器。 |
+| `workflow.artifact.publish` | `output.value_file` | 读取文件作为 text 或 JSON 槽的值，与 `value`、`local_path` 互斥；二进制继续使用 `local_path`。 |
+
+文件模式不改变 command_id、幂等、当前 execution_handle、固定 revision、服务端类型检查及状态机。重试保持 command 和参数内容不变；修改参数文件后不能复用旧 command。文件结果使用私有随机目录，拒绝路径穿越、同名覆盖和错误哈希；不提供在任意已有文件上写入的接口。传输成功不代表视觉/语义检查通过，也不自动发布产物。
+
+固定共享大纲、准确文案、讲稿与风格后，有 subagent 的宿主按可用容量创建独立页面 worker 并行执行，各自读取完整固定业务契约与本页输入；无 subagent 时顺序执行。不得把上一个 worker 的历史带给下一页。检查通过的一页立即按稳定页身份和 seq 发布，不能把完成顺序当页序，也不能为等待较早页面而阻塞其他页面的保存。最终导出参数由工具从已接受文件按视觉页序组装；控制器只交接参数文件路径。整套导出一次，检查实际文件，修复失败页。宿主不支持共享路径时用其等价资源接口或既有内联协议，完整 Skill 和检查要求仍保留。
+
 ## 用户追问、暂停与恢复
 
 启动缺少资料时，`workflow.start` 返回 `needs_input` 与精确问题 ID，此时尚未创建运行；宿主收集用户回答到 `clarification_values` 后重新提交。

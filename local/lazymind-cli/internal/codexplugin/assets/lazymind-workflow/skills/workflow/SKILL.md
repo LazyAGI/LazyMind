@@ -56,6 +56,28 @@ first; use applicable configured tools and supplement missing operations with Co
 tools. Missing Skill files are a blocking contract issue, not permission to improvise.
 Return used Skill paths and tool substitutions with validation evidence.
 
+## File handoff and page scheduling
+
+Use the shared protocol's file transport. On begin/claim/resume, set
+contract_directory and pass step_contract_file.result_path to the executing worker.
+The worker reads the full pinned contract and Skills; the controller retains only
+routing/output metadata, file paths and short check summaries. Do not cat full
+HTML, notes, source text or generated prompts into the controller for forwarding.
+Workers prepare tool argument JSON files: proxy arguments_file with result_directory
+and return result_path/decoded file paths to the worker. Publish text/JSON through
+output.value_file, binary files through output.local_path. Fetch input/artifact
+resources with result_directory and pass resource_file/artifact_file references to
+workers. Use metadata_only=true on artifact.list to avoid rereading saved bodies.
+
+After shared content, notes and style are frozen, create separate page workers and
+run them concurrently up to available capacity, each with the pinned contract and
+its page inputs in an isolated context. Without subagents, process pages in order
+using the same Skills and tools. Collect paths and concise verification summaries;
+publish each checked page immediately using stable page identity/seq. Assemble the
+export request directly from accepted files in visual order. Export once, verify
+the actual file with scoped tools/workers, and repair only failures. The controller
+does not repeat worker analysis. Host-required checks and human gates still apply.
+
 ## Artifact edits after generation
 
 An `artifact_edit` notification is a separate preview request, including on a completed run. Use `workflow.action.get` with its session and job IDs. Execute the exact returned `generation_request.system_prompt` and `user_prompt`, using a native subagent when available; these are the shared LazyMind planner's business instructions. Submit the external answer through `workflow.action.respond` with the unchanged version and request hash. Process another request only when returned. On `ready` or `cancelled`, end the turn; the user confirms the preview in LazyMind. Never rewind the workflow, regenerate the deck, or commit the preview on the user's behalf.
