@@ -369,7 +369,7 @@ func failIdleSession(ctx context.Context, db *gorm.DB, sessionID string) error {
 
 // UpdateSessionStatus transitions a session to a new status.
 func UpdateSessionStatus(ctx context.Context, db *gorm.DB, sessionID, status string) error {
-	err := db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	err := common.TransactionWithSQLiteBusyRetry(ctx, db, func(tx *gorm.DB) error {
 		var session orm.WorkflowSession
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&session, "id = ?", sessionID).Error; err != nil {
 			return err

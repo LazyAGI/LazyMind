@@ -513,10 +513,25 @@ const NewChatPage = () => {
         event as CustomEvent<{
           conversationId?: string;
           runInBackground?: boolean;
+          source?: string;
         }>
       ).detail;
       const conversationId = detail?.conversationId || "";
       const modeDraft = detail?.runInBackground !== undefined ? useChatInputStore.getState().modeDraft : undefined;
+      const manualModeSwitch = !conversationId && detail?.source === 'sidebar'
+        && detail.runInBackground !== undefined && detail.runInBackground !== entryModeRef.current;
+      if (manualModeSwitch) {
+        preservingModeDraft.current = false;
+        useChatInputStore.getState().setModeDraft();
+        useChatInputStore.getState().clearInputContent(NEW_CHAT_INPUT_DRAFT_KEY);
+        useFeaturedSelectionStore.getState().setSelection('new');
+        setTransferredDraft(undefined);
+        setInputValue('');
+        newChatInputRef.current?.clearFiles();
+        persistRunInBackgroundMode(detail.runInBackground);
+        handleSetIsChatContent(false);
+        return;
+      }
       const hasModeDraftContent = Boolean(
         modeDraft
         && (

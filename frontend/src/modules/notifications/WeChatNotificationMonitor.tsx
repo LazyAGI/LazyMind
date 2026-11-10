@@ -66,7 +66,7 @@ export default function WeChatNotificationMonitor({ userKey }: { userKey: string
       window.removeEventListener('focus', refresh);
     };
   }, [userKey]);
-  const issues = enabled ? visibleWeChatTargets().filter(value => !['connected', 'checking', 'unconfigured'].includes(value.status)) : [];
+  const issues = enabled ? visibleWeChatTargets().filter(value => !['connected', 'connecting', 'checking', 'unconfigured'].includes(value.status)) : [];
   if (!issues.length) return null;
   const kinds = [...new Set(issues.map(value => value.status))];
   const hint = (status: WeChatNotificationStatus) => status === 'unavailable' ? 'wechatConnectionCheckFailed' : wechatStatusHint(status);

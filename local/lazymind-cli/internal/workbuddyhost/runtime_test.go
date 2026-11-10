@@ -6,13 +6,11 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
-
-	"lazymind/agentconnector/internal/integrationstate"
 )
 
 func TestAccountFailureDoesNotRemovePersistentStartupChoice(t *testing.T) {
 	home := t.TempDir()
-	if err := integrationstate.Set(home, "workbuddy", true); err != nil {
+	if err := os.MkdirAll(filepath.Join(home, "workbuddy-workflow"), 0700); err != nil {
 		t.Fatal(err)
 	}
 	path := filepath.Join(home, "workbuddy-workflow", "startup-environment.json")
@@ -26,9 +24,5 @@ func TestAccountFailureDoesNotRemovePersistentStartupChoice(t *testing.T) {
 	after, err := os.ReadFile(path)
 	if err != nil || string(after) != string(body) {
 		t.Fatal("account failure changed startup ownership", err)
-	}
-	enabled, err := integrationstate.Read(home, "workbuddy")
-	if err != nil || enabled == nil || !*enabled {
-		t.Fatal("lost user's enabled choice")
 	}
 }

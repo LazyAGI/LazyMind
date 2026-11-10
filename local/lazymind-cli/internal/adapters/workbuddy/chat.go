@@ -61,19 +61,6 @@ func Probe(binary string) (bool, bool, string) {
 	return true, ready, reason
 }
 
-func availability(auth string) (bool, string) {
-	info, err := os.Stat(auth)
-	if err != nil || info.IsDir() || info.Size() == 0 {
-		return false, "WorkBuddy is not signed in; open WorkBuddy and complete sign-in"
-	}
-	return true, ""
-}
-
-func authFile() string {
-	root, _ := os.UserConfigDir()
-	return filepath.Join(root, "CodeBuddyExtension", "Data", "Public", "auth", "workbuddy-desktop.info")
-}
-
 func workBuddyConfigDir() string {
 	if configured := strings.TrimSpace(os.Getenv("WORKBUDDY_CONFIG_DIR")); configured != "" {
 		return filepath.Clean(configured)

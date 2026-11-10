@@ -95,6 +95,62 @@ function captureDownload() {
         return content;
     };
 }
+it('adds tags from the whole collection and removes only the current paper association', async () => {
+    const data = readLibrary(datasetId);
+    data.papers[0].tags = ['paper', 'arxiv:2302.04761', '方法'];
+    data.papers[1].tags = ['方法', '推理'];
+    writeLibrary(datasetId, data);
+    await renderLibrary();
+    const row = within(screen.getByRole('row', { name: /Folder paper/ }));
+    const openPicker = async () => {
+        fireEvent.click(row.getByRole('button', { name: '添加标签' }));
+        return within(await screen.findByRole('dialog', { name: '添加标签' }));
+    };
+    const picker = await openPicker();
+    const applied = within(picker.getByRole('group', { name: '已添加' })).getByRole('checkbox', { name: '方法' });
+    expect(applied).toBeChecked();
+    expect(applied).toBeDisabled();
+    expect(picker.queryByRole('checkbox', { name: 'paper' })).not.toBeInTheDocument();
+    fireEvent.click(within(picker.getByRole('group', { name: '可添加' })).getByRole('checkbox', { name: '推理' }));
+    fireEvent.change(picker.getByRole('textbox', { name: '搜索或新建标签' }), { target: { value: '工具调用' } });
+    fireEvent.click(picker.getByRole('button', { name: '＋ 新建「工具调用」' }));
+    fireEvent.click(picker.getByRole('button', { name: '添加' }));
+    expect(await row.findByRole('button', { name: '移除标签 工具调用' })).toBeInTheDocument();
+    expect(readLibrary(datasetId).papers[0].tags).toEqual(['paper', 'arxiv:2302.04761', '方法', '推理', '工具调用']);
+
+    fireEvent.click(row.getByRole('button', { name: '移除标签 方法' }));
+    await waitFor(() => expect(row.queryByRole('button', { name: '移除标签 方法' })).not.toBeInTheDocument());
+    fireEvent.click(row.getByRole('button', { name: '移除标签 工具调用' }));
+    await waitFor(() => expect(row.queryByRole('button', { name: '移除标签 工具调用' })).not.toBeInTheDocument());
+    const reopened = await openPicker();
+    expect(within(reopened.getByRole('group', { name: '可添加' })).getByRole('checkbox', { name: '方法' })).toBeEnabled();
+    expect(reopened.queryByRole('checkbox', { name: '工具调用' })).not.toBeInTheDocument();
+});
+
+it('combines any or all selected tags with the other paper filters', async () => {
+    const data = readLibrary(datasetId);
+    data.papers[0].tags = ['方法', '推理'];
+    data.papers[1].tags = ['方法'];
+    data.papers[2].tags = ['推理'];
+    writeLibrary(datasetId, data);
+    await renderLibrary();
+    fireEvent.click(libraryTools().getByRole('button', { name: '筛选' }));
+    const filter = within(await screen.findByRole('dialog', { name: '筛选文献' }));
+    const tags = within(filter.getByRole('group', { name: '标签' }));
+    fireEvent.click(tags.getByRole('button', { name: '方法' }));
+    fireEvent.click(tags.getByRole('button', { name: '推理' }));
+    expect(tags.getByRole('button', { name: '任一（OR）' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByText('筛选结果 3 篇')).toBeInTheDocument();
+    fireEvent.click(tags.getByRole('button', { name: '全部（AND）' }));
+    expect(screen.getByText('筛选结果 1 篇')).toBeInTheDocument();
+    expect(screen.getByRole('row', { name: /Folder paper/ })).toBeInTheDocument();
+    fireEvent.click(within(filter.getByRole('group', { name: '全文附件' })).getByRole('button', { name: '待补 PDF' }));
+    expect(screen.getByText('筛选结果 0 篇')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '移除标签筛选 方法' }));
+    expect(screen.getByText('筛选结果 1 篇')).toBeInTheDocument();
+    expect(screen.getByRole('row', { name: /Unfiled paper/ })).toBeInTheDocument();
+});
+
 it('shows paper import methods and sources only in detail', async () => {
     const data = readLibrary(datasetId);
     Object.assign(data.papers[0], { importMethod: 'bibliography', source: 'local' });

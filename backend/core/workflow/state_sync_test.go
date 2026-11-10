@@ -161,12 +161,24 @@ func TestHumanApprovalSurvivesPauseAndGraphCompletion(t *testing.T) {
 				t.Fatalf("native approval clock did not freeze: %+v %v", clock, err)
 			}
 			view, err := displaystate.Read(db.DB, *s)
-			if err != nil || view.Status != "waiting" {
+			if err != nil || view.Status != map[bool]string{false: "paused", true: "waiting"}[final] || view.ApprovalStepID != "branch_b" {
 				t.Fatalf("approval hidden: %+v %v", view, err)
 			}
 			cmd := NativeControlCommand{SessionID: s.ID, Kind: "resume", ExpectedStateVersion: s.StateVersion}
-			if _, err := BeginNativeControlTurn(t.Context(), db.DB, "batch-user", "batch-conversation", cmd); err == nil {
-				t.Fatal("resume implicitly approved")
+			_, err = BeginNativeControlTurn(t.Context(), db.DB, "batch-user", "batch-conversation", cmd)
+			if final && err == nil {
+				t.Fatal("unpaused review accepted resume")
+			}
+			if !final {
+				if err != nil {
+					t.Fatal(err)
+				}
+				s, _ = GetSession(t.Context(), db.DB, s.ID)
+				cmd.ExpectedStateVersion = s.StateVersion
+				view, err = displaystate.Read(db.DB, *s)
+				if err != nil || view.Status != "waiting" || view.ApprovalStepID != "branch_b" {
+					t.Fatalf("resume accepted review: %+v %v", view, err)
+				}
 			}
 			cmd.Kind = "approve"
 			cmd.StepID = "branch_b"
@@ -336,5 +348,41 @@ func TestPauseWaitsForEveryExecutorAndRejectsWrongReceipt(t *testing.T) {
 	view, err := displaystate.Read(db.DB, *s)
 	if err != nil || view.Status != "paused" {
 		t.Fatal(view, err)
+	}
+}
+
+func TestPausedFinalApprovalResumesWithoutCompletingOrAcceptingReview(t *testing.T) {
+	db, _ := humanCheckpoint(t, true)
+	if err := freezeRouteDecision(t.Context(), db.DB, "batch-session", "branch_b", "review-task"); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Model(&orm.WorkflowSession{}).Where("id = ?", "batch-session").Update("last_stopped_at", time.Now().UTC()).Error; err != nil {
+		t.Fatal(err)
+	}
+	s, err := GetSession(t.Context(), db.DB, "batch-session")
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, err := projectSession(t.Context(), db.DB, s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.Display.Status != "paused" || p.Display.ApprovalStepID != "branch_b" || p.Projection.Completed {
+		t.Fatalf("pause lost pending final approval: %+v", p)
+	}
+	if _, err := BeginNativeControlTurn(t.Context(), db.DB, "batch-user", "batch-conversation", NativeControlCommand{SessionID: s.ID, Kind: "resume", ExpectedStateVersion: s.StateVersion}); err != nil {
+		t.Fatal(err)
+	}
+	s, _ = GetSession(t.Context(), db.DB, s.ID)
+	p, err = projectSession(t.Context(), db.DB, s)
+	if err != nil || p.Display.Status != "waiting" || p.Display.ApprovalStepID != "branch_b" || p.Projection.Completed {
+		t.Fatalf("resume bypassed final approval: %+v %v", p.Display, err)
+	}
+	if _, err := BeginNativeControlTurn(t.Context(), db.DB, "batch-user", "batch-conversation", NativeControlCommand{SessionID: s.ID, Kind: "approve", StepID: "branch_b", ExpectedStateVersion: s.StateVersion}); err != nil {
+		t.Fatal(err)
+	}
+	s, _ = GetSession(t.Context(), db.DB, s.ID)
+	if s.Status != "completed" {
+		t.Fatalf("approved final checkpoint did not complete: %s", s.Status)
 	}
 }

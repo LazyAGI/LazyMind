@@ -876,6 +876,12 @@
 
     }
 
+    .chat-mention-workflow-disabled {
+      flex-shrink: 0;
+      color: #ff4d4f;
+      font-size: 12px;
+    }
+
     .chat-mention-shortcut {
       display: inline-flex;
       align-items: center;
@@ -963,17 +969,6 @@
       color: #9aa6b8;
       font-size: 13px;
       text-align: center;
-    }
-
-    .chat-mention-expand {
-      width: 100%;
-      padding: 4px 7px 2px;
-      border: 0;
-      background: transparent;
-      color: #216fff;
-      cursor: pointer;
-      font-size: 11px;
-      text-align: left;
     }
 
     .prompt-suggestion-panel {

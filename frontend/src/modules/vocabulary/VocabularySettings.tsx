@@ -34,10 +34,7 @@ import "@/modules/agentIntegration/index.scss";
 const ADDON_CODE = "2055492159";
 
 export default function VocabularySettings() {
-  const { i18n } = useTranslation();
-  const zh = String(
-    i18n.resolvedLanguage || i18n.language || "zh-CN",
-  ).startsWith("zh");
+  const { t } = useTranslation();
   const [desktop, setDesktop] = useState<DesktopAnkiStatus | null>(null);
   const [status, setStatus] = useState<AnkiProviderStatus | null>(null);
   const [setting, setSetting] = useState<VocabularyProviderSetting | null>(
@@ -88,7 +85,7 @@ export default function VocabularySettings() {
           selected_provider: enabled ? "anki" : "local",
         });
       },
-      enabled ? "LazyMind 已连接 Anki" : "LazyMind 已停止操作 Anki",
+      enabled ? t("ankiSettings.linked") : t("ankiSettings.unlinked"),
     );
   };
   const installed = Boolean(desktop?.installed);
@@ -121,7 +118,7 @@ export default function VocabularySettings() {
                       <div
                         className={`agent-integration-compact-control${enabled ? " is-enabled" : ""}`}
                       >
-                        <span>允许 LazyMind 操作 Anki</span>
+                        <span>{t("ankiSettings.allow")}</span>
                         <Switch
                           size="small"
                           checked={enabled}
@@ -141,8 +138,8 @@ export default function VocabularySettings() {
                         )}
                         <span>
                           {installed
-                            ? "Anki 客户端已安装"
-                            : "Anki 客户端未安装"}
+                            ? t("ankiSettings.clientInstalled")
+                            : t("ankiSettings.clientMissing")}
                         </span>
                       </span>
                       <span className={connectReady ? "is-ready" : ""}>
@@ -153,8 +150,8 @@ export default function VocabularySettings() {
                         )}
                         <span>
                           {connectReady
-                            ? "AnkiConnect 已就绪"
-                            : "AnkiConnect 未就绪"}
+                            ? t("ankiSettings.connectReady")
+                            : t("ankiSettings.connectNotReady")}
                         </span>
                       </span>
                     </div>
@@ -162,12 +159,12 @@ export default function VocabularySettings() {
                 <Tag
                   className={`agent-integration-install-tag ${installed ? "is-installed" : "is-missing"}`}
                 >
-                  {installed ? "已安装" : "未安装"}
+                  {installed ? t("ankiSettings.installed") : t("ankiSettings.missing")}
                 </Tag>
                 <button
                   type="button"
                   className="agent-integration-expand-button"
-                  aria-label={expanded ? "收起" : "展开"}
+                  aria-label={expanded ? t("common.collapse") : t("common.expand")}
                   aria-expanded={expanded}
                   onClick={() => setExpanded((value) => !value)}
                 >
@@ -180,40 +177,40 @@ export default function VocabularySettings() {
               {expanded ? (
                 <div className="agent-integration-card-detail">
                   <div className="agent-integration-flow">
-                    <ConnectionStage title="Anki 客户端准备" ready={installed}>
+                    <ConnectionStage title={t("ankiSettings.clientSetup")} ready={installed}>
                       <StatusLine
                         ready={installed}
                         text={
                           installed
-                            ? "Anki 客户端已安装"
-                            : "尚未找到 Anki 客户端"
+                            ? t("ankiSettings.clientInstalled")
+                            : t("ankiSettings.clientNotFound")
                         }
                       />
                       <Space style={{ marginTop: 14 }}>
                         {installed ? (
                           <Button onClick={() => void run(openAnki)}>
-                            打开 Anki
+                            {t("ankiSettings.openAnki")}
                           </Button>
                         ) : (
                           <Button
                             type="primary"
                             onClick={() => setGuide("anki")}
                           >
-                            查看安装教程
+                            {t("ankiSettings.viewGuide")}
                           </Button>
                         )}
                       </Space>
                     </ConnectionStage>
                     <ConnectionStage
-                      title="AnkiConnect 准备"
+                      title={t("ankiSettings.connectSetup")}
                       ready={connectReady}
                     >
                       <StatusLine
                         ready={connectReady}
                         text={
                           connectReady
-                            ? `AnkiConnect 已就绪${status?.version ? `（API v${status.version}）` : ""}`
-                            : "尚未连接 AnkiConnect"
+                            ? (status?.version ? t("ankiSettings.connectReadyVersion", { version: status.version }) : t("ankiSettings.connectReady"))
+                            : t("ankiSettings.connectMissing")
                         }
                       />
                       {!connectReady && installed ? (
@@ -224,37 +221,37 @@ export default function VocabularySettings() {
                               onClick={() =>
                                 void run(
                                   openAnki,
-                                  "Anki 已打开，请稍后重新检测",
+                                  t("ankiSettings.ankiOpened"),
                                 )
                               }
                             >
-                              打开 Anki
+                              {t("ankiSettings.openAnki")}
                             </Button>
                           ) : (
                             <Button
                               type="primary"
                               onClick={() => void installConnect()}
                             >
-                              安装 AnkiConnect
+                              {t("ankiSettings.installConnect")}
                             </Button>
                           )}
                           <Button
                             loading={busy}
                             onClick={() => void run(refresh)}
                           >
-                            重新检测
+                            {t("ankiSettings.checkAgain")}
                           </Button>
                         </Space>
                       ) : null}
                     </ConnectionStage>
-                    <ConnectionStage title="连接方式" ready={enabled}>
+                    <ConnectionStage title={t("ankiSettings.connection")} ready={enabled}>
                       <div
                         className={`agent-integration-compact-control${enabled ? " is-enabled" : ""}`}
                       >
                         <div>
-                          <strong>允许 LazyMind 操作 Anki</strong>
+                          <strong>{t("ankiSettings.allow")}</strong>
                           <Typography.Paragraph type="secondary">
-                            开启后，LazyMind 可以向 Anki 添加、更新和同步生词。
+                            {t("ankiSettings.allowDescription")}
                           </Typography.Paragraph>
                         </div>
                         <Switch
@@ -271,7 +268,7 @@ export default function VocabularySettings() {
                       style={{ marginTop: 14 }}
                       type="info"
                       showIcon
-                      message="AnkiConnect 已安装，但 Anki 尚未运行或仍在启动。请打开 Anki 后重新检测。"
+                      message={t("ankiSettings.startAnki")}
                     />
                   ) : status?.message && installed && !connectReady ? (
                     <Alert
@@ -289,7 +286,7 @@ export default function VocabularySettings() {
       </section>
       <Modal
         open={guide === "anki"}
-        title="安装 Anki 客户端"
+        title={t("ankiSettings.installClient")}
         onCancel={() => setGuide(null)}
         footer={
           <Button
@@ -297,19 +294,19 @@ export default function VocabularySettings() {
             href="https://apps.ankiweb.net/"
             target="_blank"
           >
-            前往下载 Anki
+            {t("ankiSettings.downloadAnki")}
           </Button>
         }
       >
         <ol>
-          <li>从 Anki 官方网站下载适合当前系统的客户端。</li>
-          <li>完成安装并至少启动一次 Anki。</li>
-          <li>返回此页点击“重新检测”。</li>
+          <li>{t("ankiSettings.downloadGuide")}</li>
+          <li>{t("ankiSettings.launchGuide")}</li>
+          <li>{t("ankiSettings.checkGuide")}</li>
         </ol>
       </Modal>
       <Modal
         open={guide === "connect"}
-        title={zh ? "安装 AnkiConnect" : "Install AnkiConnect"}
+        title={t("ankiSettings.installConnect")}
         onCancel={() => setGuide(null)}
         footer={
           <Button
@@ -319,20 +316,20 @@ export default function VocabularySettings() {
               void run(refresh);
             }}
           >
-            完成后重新检测
+            {t("ankiSettings.checkAfterInstall")}
           </Button>
         }
       >
         <Alert
           type="warning"
           showIcon
-          message="Anki 插件可以执行代码，安装必须由你在 Anki 中确认。LazyMind 不直接写入 Anki 的插件目录。"
+          message={t("ankiSettings.addonWarning")}
         />
         <ol>
-          <li>Anki 已打开，插件码已复制。</li>
-          <li>打开“工具 → 插件 → 获取插件”。</li>
-          <li>粘贴插件码 {ADDON_CODE} 并确认。</li>
-          <li>重启 Anki，然后返回重新检测。</li>
+          <li>{t("ankiSettings.codeCopied")}</li>
+          <li>{t("ankiSettings.openAddons")}</li>
+          <li>{t("ankiSettings.pasteCode", { code: ADDON_CODE })}</li>
+          <li>{t("ankiSettings.restartGuide")}</li>
         </ol>
         <Typography.Paragraph copyable={{ text: ADDON_CODE }}>
           <Typography.Text code>{ADDON_CODE}</Typography.Text>
@@ -351,6 +348,7 @@ function ConnectionStage({
   ready: boolean;
   children: React.ReactNode;
 }) {
+  const { t } = useTranslation();
   return (
     <section className={`agent-integration-stage${ready ? " is-ready" : ""}`}>
       <div className="agent-integration-stage-rail">
@@ -361,7 +359,7 @@ function ConnectionStage({
           <div>
             <strong>{title}</strong>
           </div>
-          <span>{ready ? "已完成" : "待完成"}</span>
+          <span>{ready ? t("ankiSettings.ready") : t("ankiSettings.pending")}</span>
         </div>
         <div className="agent-integration-stage-content">{children}</div>
       </div>

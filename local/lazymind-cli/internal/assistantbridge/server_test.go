@@ -147,7 +147,7 @@ func TestStatusesDoNotLaunchDesktopAgentCandidates(t *testing.T) {
 }
 
 func TestInteractiveLoginActionsReturnBeforeExternalLoginCompletes(t *testing.T) {
-	for _, agent := range []string{"cursor"} {
+	for _, agent := range []string{"cursor", "workbuddy"} {
 		t.Run(agent, func(t *testing.T) {
 			server := newTestServer(t, t.TempDir())
 			changes := server.policy.Changes()
@@ -533,7 +533,7 @@ func TestBrowserHealthReportsBridgeIdentityAcrossPlatforms(t *testing.T) {
 	if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
 		t.Fatal(err)
 	}
-	if payload["platform"] != runtime.GOOS || strings.TrimSpace(fmt.Sprint(payload["executable"])) == "" {
+	if payload["version"] != "v9" || payload["platform"] != runtime.GOOS || strings.TrimSpace(fmt.Sprint(payload["executable"])) == "" {
 		t.Fatalf("payload=%#v", payload)
 	}
 }

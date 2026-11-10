@@ -208,7 +208,8 @@
     }
 
     &:hover,
-    &:focus-within {
+    &:focus-visible,
+    &:has(:focus-visible) {
       background: var(--color-primary-bg);
       border-radius: 4px;
 

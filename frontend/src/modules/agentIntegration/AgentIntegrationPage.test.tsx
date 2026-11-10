@@ -50,9 +50,10 @@ vi.mock("./externalCapabilitiesApi", () => ({
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
     t: (key: string, options?: { defaultValue?: string; agent?: string; count?: number }) => {
-      if (key === "agentIntegration.retryDisconnection" || key.startsWith("agentIntegration.workbuddyInstallGuide.") || key.startsWith("agentIntegration.codexInstallGuide.") || key.startsWith("agentIntegration.workbuddyErrors.") || key.startsWith("agentIntegration.connectionErrors.") || key.startsWith("agentIntegration.waitingForApplication") || key.startsWith("agentIntegration.loginStates.") ||
+      if (key.startsWith("agentIntegration.quitRequired.") || key.startsWith("agentIntegration.dshErrors.")) return retryI18n.t(key, options);
+      if (key === "agentIntegration.retryDisconnection" || key.startsWith("agentIntegration.workbuddyInstallGuide.") || key.startsWith("agentIntegration.codexInstallGuide.") || key.startsWith("agentIntegration.dshInstallGuide.") || key.startsWith("agentIntegration.workbuddyErrors.") || key.startsWith("agentIntegration.connectionErrors.") || key.startsWith("agentIntegration.setupFeedback.") || key.startsWith("agentIntegration.waitingForApplication") || key.startsWith("agentIntegration.loginStates.") ||
         key.startsWith("agentIntegration.cliSources.") || ["agentIntegration.selectedCLI", "agentIntegration.reselectCLI"].includes(key)) {
-        return retryI18n.t(key);
+        return retryI18n.t(key, options);
       }
       const agent = options?.agent || "Agent";
       const values: Record<string, string> = {
@@ -264,6 +265,8 @@ describe("AgentIntegrationPage", () => {
     expect(within(panel).getByRole("switch")).toBeChecked();
     expect(within(panel).getByRole("switch")).toBeEnabled();
     fireEvent.click(retry);
+    expect(mocks.action).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: zhCN.agentIntegration.dshInstallGuide.continue }));
     expect(mocks.action).toHaveBeenCalledWith("deepseek-harness", "connect");
     expect(retry).toBeDisabled();
     const toggle = within(panel).getByRole("switch");
@@ -327,6 +330,7 @@ describe("AgentIntegrationPage", () => {
     const panel = screen.getByTestId("agent-panel-deepseek-harness");
     const compactSwitch = await within(panel).findByRole("switch");
     fireEvent.click(compactSwitch);
+    if (operation === "connect") fireEvent.click(screen.getByRole("button", { name: zhCN.agentIntegration.dshInstallGuide.continue }));
     expect(compactSwitch).toBeDisabled();
     fireEvent.click(compactSwitch);
     expandAgent("deepseek-harness");
@@ -337,27 +341,32 @@ describe("AgentIntegrationPage", () => {
     expect(mocks.action).toHaveBeenCalledWith("deepseek-harness", operation);
     await act(async () => finish({ ok: false, reason: "request_failed" }));
     expect(expandedSwitch).toBeEnabled();
-    fireEvent.click(expandedSwitch);
+    if (operation === "connect") fireEvent.click(screen.getByRole("button", { name: zhCN.agentIntegration.dshInstallGuide.retryInstall }));
+    else fireEvent.click(expandedSwitch);
     expect(mocks.action).toHaveBeenCalledTimes(2);
     await act(async () => finish({ ok: true, data: status }));
   });
 
-  it.each(["unsupported_version", "dependency_environment", "operation_failed"])("shows one concise DSH %s error and hides raw logs", async (code) => {
+  it.each([
+    "unsupported_version",
+    "dependency_environment",
+    "plugin_update_required", // workflow-naming: dsh-external
+    "operation_failed",
+  ])("shows one concise DSH %s error and hides raw logs", async (code) => {
     const status = { agent: "deepseek-harness", display_name: "DeepSeek Harness", state: "error",
       issue: { code, path: "/Users/example/DSH 中文/profiles/web" },
       message: "ERR_PNPM_UNEXPECTED_STORE raw stack output that must never appear",
       can_connect: false, requirements: [{ id: "dsh_desktop", satisfied: true }] };
     mocks.statuses.mockResolvedValue({ ok: true, data: { "deepseek-harness": status } });
     render(<AgentIntegrationPage />);
-    const key = `agentIntegration.dshErrors.${code}`;
+    const key = retryI18n.t(`agentIntegration.dshErrors.${code}`);
     expect(await screen.findAllByText(new RegExp(key))).toHaveLength(1);
     const panel = expandAgent("deepseek-harness");
     expect(within(panel).getAllByText(new RegExp(key))).toHaveLength(1);
     expect(within(panel).queryByText(/raw stack/)).not.toBeInTheDocument();
     expect(within(panel).queryByRole("button", { name: "agentIntegration.retryConnection" })).not.toBeInTheDocument();
     expect(within(panel).getByRole("switch")).toBeDisabled();
-    if (code === "dependency_environment") expect(within(panel).getByText(/DSH 中文/)).toBeInTheDocument();
-    else expect(within(panel).queryByText(/DSH 中文/)).not.toBeInTheDocument();
+    expect(within(panel).queryByText(/DSH 中文/)).not.toBeInTheDocument();
   });
 
   it("hides per-capability configuration while retaining invocation history", async () => {
@@ -547,7 +556,7 @@ describe("AgentIntegrationPage", () => {
     expect(within(cursor).queryByRole("button", { name: /登录/ })).not.toBeInTheDocument();
   });
 
-  it("shows the backend reason for an MCP configuration error", async () => {
+  it("shows concise configuration feedback and keeps raw errors out of the page", async () => {
     mocks.statuses.mockResolvedValue({
       ok: true,
       data: { codex: {
@@ -560,7 +569,8 @@ describe("AgentIntegrationPage", () => {
     render(<AgentIntegrationPage />);
 
     const codex = await screen.findByTestId("agent-panel-codex");
-    expect(within(codex).getByRole("alert")).toHaveTextContent("Codex runtime command is unavailable");
+    expect(within(codex).getByRole("alert")).toHaveTextContent(zhCN.agentIntegration.setupFeedback.enableFailed);
+    expect(codex).not.toHaveTextContent("Codex runtime command is unavailable");
   });
 
   it("keeps WorkBuddy unified and reuses the desktop installation without OAuth configuration", async () => {
@@ -596,9 +606,9 @@ describe("AgentIntegrationPage", () => {
     expect(within(workbuddy).queryByText(/CodeBuddy/)).not.toBeInTheDocument();
     expect(within(workbuddy).queryByText(/OAuth|Client ID|Client Secret/)).not.toBeInTheDocument();
     expect(within(workbuddy).getByText("已检测到 WorkBuddy 内置 CLI")).toBeInTheDocument();
-    const login = within(workbuddy).getByRole("link", { name: /打开 WorkBuddy 登录/ });
-    expect(login).toHaveAttribute("href", "workbuddy://home");
+    const login = within(workbuddy).getByRole("button", { name: /打开 WorkBuddy 登录/ });
     fireEvent.click(login);
+    await waitFor(() => expect(mocks.action).toHaveBeenCalledWith("workbuddy", "login"));
 
     mocks.executorPolicies.mockResolvedValue({
       ok: true,
@@ -663,7 +673,7 @@ describe("AgentIntegrationPage", () => {
     expect(card).not.toHaveTextContent(/待完成信任|继续设置/);
   });
 
-  it.each(["zh-CN", "en-US"])("checks WorkBuddy setup independently of live sessions (%s)", async (language) => {
+  it.each(["zh-CN", "en-US"])("requires healthy WorkBuddy control before completing setup (%s)", async (language) => {
     await retryI18n.changeLanguage(language);
     const tr = (key: string) => retryI18n.t(`agentIntegration.workbuddyInstallGuide.${key}`);
     const status = { agent: "workbuddy", display_name: "WorkBuddy", state: "enabled",
@@ -685,9 +695,11 @@ describe("AgentIntegrationPage", () => {
     await within(dialog).findByText(tr("enableRequiredDescription"));
     mocks.statuses.mockResolvedValue({ ok: true, data: { workbuddy: { ...status, connection: { ...status.connection, mcp_trusted: true, mcp_enabled: true } } } });
     fireEvent.click(within(dialog).getByRole("button", { name: tr("retryCheck") }));
+    await within(dialog).findByText(tr("notReadyTitle"));
+    expect(dialog).not.toHaveTextContent(tr("successTitle"));
+    mocks.statuses.mockResolvedValue({ ok: true, data: { workbuddy: { ...status, connection: { ...status.connection, mcp_trusted: true, mcp_enabled: true, control_ready: true } } } });
+    fireEvent.click(within(dialog).getByRole("button", { name: tr("retryCheck") }));
     await within(dialog).findByText(tr("successTitle"));
-    expect(dialog).toHaveTextContent(tr("controlUnavailableTitle"));
-    expect(dialog).not.toHaveTextContent(tr("notReadyTitle"));
     expect(mocks.action).not.toHaveBeenCalled();
   });
 
@@ -1345,6 +1357,60 @@ describe("AgentIntegrationPage", () => {
       expect(mocks.executors).toHaveBeenCalledTimes(2);
     });
   });
+  it.each(["zh-CN", "en-US"])("guides DSH installation without claiming runtime connectivity (%s)", async (language) => {
+    await retryI18n.changeLanguage(language);
+    const tr = (key: string) => retryI18n.t(`agentIntegration.dshInstallGuide.${key}`);
+    const ready = { agent: "deepseek-harness", display_name: "DeepSeek Harness", state: "ready",
+      can_connect: true, requirements: [{ id: "dsh_desktop", satisfied: true }] };
+    mocks.statuses.mockResolvedValue({ ok: true, data: { "deepseek-harness": ready } });
+    mocks.action.mockResolvedValueOnce({ ok: true, data: { ...ready, state: "action_required",
+      action: { kind: "quit_agent" }, issue: { code: "quit_required" } } })
+      .mockResolvedValue({ ok: true, data: { ...ready, state: "enabled", enabled: true } });
+    render(<AgentIntegrationPage />);
+    const card = expandAgent("deepseek-harness");
+    const toggle = await within(card).findByRole("switch");
+    expect(toggle).toHaveAccessibleName("DeepSeek Harness Web 使用 LazyMind MCP");
+    fireEvent.click(toggle);
+    let dialog = await screen.findByRole("dialog");
+    expect(dialog).toHaveTextContent(tr("prepareDescription"));
+    expect(mocks.action).not.toHaveBeenCalled();
+    fireEvent.click(within(dialog).getByRole("button", { name: language === "zh-CN" ? /取\s*消/ : tr("cancel") }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expect(mocks.action).not.toHaveBeenCalled();
+    fireEvent.click(toggle);
+    dialog = await screen.findByRole("dialog");
+    fireEvent.click(within(dialog).getByRole("button", { name: tr("continue") }));
+    await within(dialog).findByText(retryI18n.t("agentIntegration.quitRequired.title", { agent: "DeepSeek Harness" }));
+    expect(within(dialog).queryByText(tr("installedTitle"))).not.toBeInTheDocument();
+    fireEvent.click(within(dialog).getByRole("button", { name: tr("retryInstall") }));
+    await within(dialog).findByText(tr("installedTitle"));
+    expect(within(dialog).getByText(tr("installedDescription"))).toBeInTheDocument();
+    expect(mocks.action).toHaveBeenCalledTimes(2);
+    expect(mocks.action).toHaveBeenLastCalledWith("deepseek-harness", "connect");
+    expect(within(dialog).getByRole("img", { name: tr("imageAlt") })).toHaveAttribute("src", "/installation-guides/deepseek-harness/enable.png");
+    fireEvent.click(within(dialog).getByRole("button", { name: tr("enlargeImage") }));
+    const dialogs = await screen.findAllByRole("dialog");
+    expect(dialogs).toHaveLength(2);
+    expect(within(dialogs[1]).getByRole("img", { name: tr("imageAlt") })).toHaveAttribute("src", "/installation-guides/deepseek-harness/enable.png");
+  });
+
+  it("opens the DSH plugin instructions without reinstalling an existing configuration", async () => {
+    const copy = zhCN.agentIntegration.dshInstallGuide;
+    mocks.statuses.mockResolvedValue({ ok: true, data: { "deepseek-harness": {
+      agent: "deepseek-harness", display_name: "DeepSeek Harness", state: "enabled", enabled: true,
+      requirements: [{ id: "dsh_desktop", satisfied: true }],
+    } } });
+    render(<AgentIntegrationPage />);
+    const card = expandAgent("deepseek-harness");
+    fireEvent.click(await within(card).findByRole("button", { name: new RegExp(copy.entry) }));
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getByRole("img", { name: copy.imageAlt })).toBeInTheDocument();
+    fireEvent.click(within(dialog).getByRole("button", { name: /关\s*闭/ }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expect(mocks.action).not.toHaveBeenCalled();
+    expect(within(card).getByRole("switch")).toBeChecked();
+  });
+
   it("detects DSH from the Web profile and does not ask for a local path", async () => {
     mocks.statuses.mockResolvedValue({ ok: true, data: { "deepseek-harness": {
       agent: "deepseek-harness", display_name: "DeepSeek Harness", state: "ready",
@@ -1402,7 +1468,7 @@ describe("AgentIntegrationPage", () => {
     mocks.action.mockResolvedValue({ok:true,data:{...readyCodexStatus,state:"ready",enabled:false}});
     render(<AgentIntegrationPage />);
     const card=expandAgent("codex");
-    await within(card).findByText(zhCN.agentIntegration.connectionErrors.cdp_unavailable);
+    await within(card).findByText(zhCN.agentIntegration.setupFeedback.connectionUnavailable);
     expect(within(card).queryByRole("button",{name:"agentIntegration.retryConnection"})).not.toBeInTheDocument();
     const toggle=within(card).getByRole("switch",{name:"Codex 桌面端使用 LazyMind"});
     expect(toggle).toBeChecked();
@@ -1415,12 +1481,67 @@ describe("AgentIntegrationPage", () => {
     expect(mocks.action).toHaveBeenCalledTimes(1);
   });
 
-  it("keeps the explicit choice on when the installation is missing", async () => {
-    mocks.statuses.mockResolvedValue({ok:true,data:{codex:{...readyCodexStatus,state:"ready",enabled:true,can_disconnect:true,message:"Missing plugin",issue:{code:"installation_unavailable"}}}});
+  it.each(["codex", "cursor", "workbuddy", "raccoon", "traework", "deepseek-harness"])("lets %s clear another environment's configuration", async (agent) => {
+    const configured = { agent, display_name: agent, state: "conflict", enabled: true,
+      can_disconnect: true, message: "An MCP server named lazymind already exists",
+      diagnostic_id: "configuration-test", diagnostic_log: "~/logs/agent-setup.log",
+      issue: { code: "environment_mismatch" },
+      requirements: [{ id: `${agent}_desktop`, satisfied: true }] };
+    mocks.statuses.mockResolvedValue({ ok: true, data: { [agent]: configured } });
+    mocks.action.mockResolvedValue({ ok: true, data: { ...configured, state: "ready", enabled: false, can_disconnect: false, issue: undefined, message: "" } });
     render(<AgentIntegrationPage />);
-    const card=expandAgent("codex");
-    await within(card).findByText(zhCN.agentIntegration.connectionErrors.installation_unavailable);
-    expect(within(card).getByRole("switch",{name:"Codex 桌面端使用 LazyMind"})).toBeChecked();
+    const card = expandAgent(agent);
+    await within(card).findByText(agent === "deepseek-harness" ? zhCN.agentIntegration.dshErrors.environment_mismatch
+      : zhCN.agentIntegration.setupFeedback.environmentMismatch);
+    expect(within(card).queryByText(/MCP server named/)).not.toBeInTheDocument();
+    const toggle = within(card).getAllByRole("switch")[0];
+    expect(toggle).toBeChecked();
+    expect(toggle).toBeEnabled();
+    fireEvent.click(toggle);
+    await waitFor(() => expect(toggle).not.toBeChecked());
+    expect(mocks.action).toHaveBeenCalledWith(agent, "disconnect");
+  });
+
+  it("retries failed cleanup after the Agent entry has already been removed", async () => {
+    const status = { agent: "workbuddy", display_name: "WorkBuddy", state: "error", enabled: false,
+      retry_action: "disconnect", can_disconnect: false, can_connect: true,
+      issue: { code: "configuration_failed" }, message: "startup cleanup failed",
+      requirements: [{ id: "workbuddy_desktop", satisfied: true }, { id: "workbuddy_desktop_initialized", satisfied: true }] };
+    mocks.statuses.mockResolvedValue({ ok: true, data: { workbuddy: status } });
+    mocks.action.mockResolvedValue({ ok: true, data: { ...status, state: "ready", issue: undefined, retry_action: undefined, message: "" } });
+    render(<AgentIntegrationPage />);
+    const card = expandAgent("workbuddy");
+    await within(card).findByText(zhCN.agentIntegration.setupFeedback.disableFailed);
+    expect(within(card).getByRole("switch", { name: "WorkBuddy 使用 LazyMind" })).not.toBeChecked();
+    fireEvent.click(within(card).getByRole("button", { name: zhCN.agentIntegration.retryDisconnection }));
+    await waitFor(() => expect(mocks.action).toHaveBeenCalledWith("workbuddy", "disconnect"));
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
+  it("reports login request failures using the existing login feedback", async () => {
+    mocks.executorPolicies.mockResolvedValue({ ok: true, data: { codex: {
+      provider: "codex", enabled: false, installed: true, ready: false, unavailable_reason: "Codex CLI is not signed in",
+    } } });
+    mocks.action.mockResolvedValue({ ok: false, reason: "operation_failed", error: "private login error" });
+    render(<AgentIntegrationPage />);
+    const card = expandAgent("codex");
+    fireEvent.click(await within(card).findByRole("button", { name: /登录/ }));
+    await screen.findByText(zhCN.agentIntegration.loginStates.failed);
+    expect(screen.queryByText("private login error")).not.toBeInTheDocument();
+    expect(screen.queryByText(zhCN.agentIntegration.setupFeedback.enableFailed)).not.toBeInTheDocument();
+  });
+
+  it("keeps configuration status unknown when it cannot be read", async () => {
+    mocks.statuses.mockResolvedValue({ ok: true, data: { raccoon: {
+      agent: "raccoon", display_name: "Raccoon", state: "error", message: "private raw failure",
+      issue: { code: "configuration_unreadable" }, requirements: [{ id: "raccoon_desktop", satisfied: true }],
+    } } });
+    render(<AgentIntegrationPage />);
+    const card = expandAgent("raccoon");
+    await within(card).findByText(zhCN.agentIntegration.setupFeedback.readFailed);
+    expect(within(card).getByText(zhCN.agentIntegration.setupFeedback.unknown)).toBeInTheDocument();
+    expect(within(card).queryByRole("switch")).not.toBeInTheDocument();
+    expect(card).not.toHaveTextContent("private raw failure");
   });
 
   it("shows a closed app as waiting instead of a connection error", async () => {
@@ -1491,14 +1612,14 @@ describe("AgentIntegrationPage", () => {
     const dialog = await screen.findByRole("dialog");
     fireEvent.click(within(dialog).getByRole("button", { name: zhCN.agentIntegration.codexInstallGuide.saveAndContinue }));
     await within(dialog).findByText(zhCN.agentIntegration.codexInstallGuide.installFailedTitle);
-    expect(within(dialog).getByText("Codex refused to close")).toBeInTheDocument();
+    expect(within(dialog).getByText(zhCN.agentIntegration.setupFeedback.enableFailed)).toBeInTheDocument();
     expect(mocks.action).toHaveBeenCalledTimes(1);
     // After resolving Codex's quit dialog, an explicit retry must run Connect again.
     fireEvent.click(within(dialog).getByRole("button", { name: zhCN.agentIntegration.codexInstallGuide.retryInstall }));
     await within(dialog).findByText(zhCN.agentIntegration.codexInstallGuide.installedTitle);
     expect(mocks.action).toHaveBeenCalledTimes(2);
     expect(within(dialog).queryByText(zhCN.agentIntegration.codexInstallGuide.installFailedTitle)).not.toBeInTheDocument();
-    expect(screen.queryByText("Codex refused to close")).not.toBeInTheDocument();
+    expect(screen.queryByText(zhCN.agentIntegration.setupFeedback.enableFailed)).not.toBeInTheDocument();
   });
 
   it("detects a changed external connection when returning to settings without toggling it", async () => {
@@ -1512,13 +1633,68 @@ describe("AgentIntegrationPage", () => {
       connection:{...installed.connection,control_ready:false,runtime_state:"unavailable"}}}});
     await waitFor(() => {
       fireEvent.focus(window);
-      expect(within(card).getByText(zhCN.agentIntegration.connectionErrors.startup_unavailable)).toBeInTheDocument();
+      expect(within(card).getByText(zhCN.agentIntegration.setupFeedback.connectionUnavailable)).toBeInTheDocument();
     });
     expect(within(card).getByRole("switch",{name:"Codex 桌面端使用 LazyMind"})).toBeChecked();
     expect(mocks.action).not.toHaveBeenCalled();
   });
 
-  it.each(["waiting", "unavailable", "missing"])("preserves WorkBuddy enablement when health is %s", async (scenario) => {
+  it.each([
+    { language: "zh-CN", code: "mcp_trust_required", field: "mcp_trusted" },
+    { language: "en-US", code: "mcp_trust_required", field: "mcp_trusted" },
+    { language: "zh-CN", code: "mcp_enable_required", field: "mcp_enabled" },
+    { language: "en-US", code: "mcp_enable_required", field: "mcp_enabled" },
+  ] as const)("guides WorkBuddy connector setup and clears it after confirmation ($code, $language)", async ({ language, code, field }) => {
+    await retryI18n.changeLanguage(language);
+    const setupMessage = (language === "zh-CN" ? zhCN : enUS).agentIntegration.workbuddyErrors[code];
+    const installed = { agent: "workbuddy", display_name: "WorkBuddy", state: "enabled", enabled: true,
+      can_connect: true, can_disconnect: true,
+      requirements: [{ id: "workbuddy_desktop", satisfied: true }, { id: "workbuddy_desktop_initialized", satisfied: true }],
+      connection: { mcp_configured: true, mcp_trusted: true, mcp_enabled: true,
+        control_ready: true, presentation_status: "mounted", runtime_state: "connected" } };
+    const unconfirmed = { ...installed, issue: { code }, message: "Complete connector setup.",
+      connection: { ...installed.connection, [field]: false } };
+    mocks.statuses.mockResolvedValue({ ok: true, data: { workbuddy: unconfirmed } });
+    render(<AgentIntegrationPage />);
+    await screen.findByText("外部 Agent 集成");
+    const card = expandAgent("workbuddy");
+    const toggle = within(card).getByRole("switch", { name: "WorkBuddy 使用 LazyMind" });
+    const assertSetupRequired = async () => {
+      expect(await within(card).findByRole("alert")).toHaveTextContent(setupMessage);
+      expect(within(card).queryByText(retryI18n.t("agentIntegration.setupFeedback.connectionUnavailable"))).not.toBeInTheDocument();
+      expect(toggle).toBeChecked();
+    };
+    await assertSetupRequired();
+    fireEvent.click(within(card).getByRole("button", { name: new RegExp(retryI18n.t("agentIntegration.workbuddyInstallGuide.entry")) }));
+    const dialog = await screen.findByRole("dialog");
+    expect(dialog).toHaveTextContent(retryI18n.t("agentIntegration.workbuddyInstallGuide.entryDescription"));
+    fireEvent.click(within(dialog).getByRole("button", { name: retryI18n.t("agentIntegration.workbuddyInstallGuide.later") }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+
+    for (const status of [installed, unconfirmed, installed]) {
+      mocks.statuses.mockResolvedValue({ ok: true, data: { workbuddy: status } });
+      fireEvent.focus(window);
+      if (status === unconfirmed) await assertSetupRequired();
+      else await waitFor(() => expect(within(card).queryByRole("alert")).not.toBeInTheDocument());
+      expect(toggle).toBeChecked();
+    }
+    expect(mocks.action).not.toHaveBeenCalled();
+  });
+
+  it.each(["host_unavailable", "cdp_unavailable", "configuration_unreadable", "pairing_disabled"])("does not infer incomplete WorkBuddy setup from %s", async (code) => {
+    const status = { agent: "workbuddy", display_name: "WorkBuddy", state: "enabled", enabled: true,
+      message: "Connection check failed.", issue: { code },
+      connection: { mcp_configured: true, mcp_trusted: false, mcp_enabled: false, control_ready: false } };
+    mocks.statuses.mockResolvedValue({ ok: true, data: { workbuddy: status } });
+    render(<AgentIntegrationPage />);
+    await screen.findByText("外部 Agent 集成");
+    const card = expandAgent("workbuddy");
+    expect(await within(card).findByRole("alert")).toHaveTextContent(retryI18n.t(`agentIntegration.setupFeedback.${code === "configuration_unreadable" ? "readFailed" : "connectionUnavailable"}`));
+    expect(within(card).queryByText(zhCN.agentIntegration.workbuddyErrors.mcp_trust_required)).not.toBeInTheDocument();
+    expect(within(card).queryByText(zhCN.agentIntegration.workbuddyErrors.mcp_enable_required)).not.toBeInTheDocument();
+  });
+
+  it.each(["waiting", "unavailable", "missing"])("preserves configured WorkBuddy state when health is %s", async (scenario) => {
     const status = { agent: "workbuddy", display_name: "WorkBuddy", state: scenario === "missing" ? "ready" : "enabled", enabled: true,
       can_disconnect: true, message: scenario === "waiting" ? "" : "unavailable",
       requirements: [{ id: "workbuddy_desktop", satisfied: true }, { id: "workbuddy_desktop_initialized", satisfied: true }],
@@ -1534,8 +1710,81 @@ describe("AgentIntegrationPage", () => {
     if (scenario === "waiting") {
       expect(within(card).getByText(zhCN.agentIntegration.waitingForApplication)).toBeInTheDocument();
       expect(within(card).queryByRole("alert")).not.toBeInTheDocument();
-    } else expect(within(card).getByText(zhCN.agentIntegration.connectionErrors[scenario === "missing" ? "installation_unavailable" : "cdp_unavailable"])).toBeInTheDocument();
+    } else expect(within(card).getByText(zhCN.agentIntegration.setupFeedback.connectionUnavailable)).toBeInTheDocument();
     expect(mocks.action).not.toHaveBeenCalled();
+  });
+
+  it.each(["workbuddy", "codex", "deepseek-harness"])("shows a recoverable quit request for %s", async (agent) => {
+    const name = agent === "workbuddy" ? "WorkBuddy" : agent === "codex" ? "Codex" : "DeepSeek Harness";
+    const status = { agent, display_name: name, state: "action_required", enabled: true,
+      action: { kind: "quit_agent" }, issue: { code: "quit_required" }, message: "quit required",
+      can_connect: true, can_disconnect: true, requirements: [{ id: "installed", satisfied: true }] };
+    mocks.statuses.mockResolvedValue({ ok: true, data: { [agent]: status } });
+    render(<AgentIntegrationPage />);
+    const card = expandAgent(agent);
+    await within(card).findByText(retryI18n.t("agentIntegration.quitRequired.waiting", { agent: name }));
+    expect(within(card).getByRole("button", { name: zhCN.agentIntegration.quitRequired.retryInstall })).toBeEnabled();
+    expect(card.querySelector(".agent-integration-stage-hint.is-warning")).not.toBeNull();
+    expect(card.querySelector(".agent-integration-stage-hint.is-error")).toBeNull();
+    expect(mocks.action).not.toHaveBeenCalled();
+  });
+
+  it("keeps a pending DSH disconnect through polls, focus, remount and retry", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const agent = "deepseek-harness";
+    const connected = { agent, display_name: "DeepSeek Harness", state: "enabled", enabled: true,
+      can_connect: true, can_disconnect: true, requirements: [{ id: "dsh_desktop", satisfied: true }] };
+    const quit = { ...connected, state: "action_required", retry_action: "disconnect",
+      action: { kind: "quit_agent" }, issue: { code: "quit_required" } };
+    const exited = { ...quit, action: undefined, issue: { code: "disconnect_pending" } };
+    const disconnected = { ...connected, state: "ready", enabled: false, can_disconnect: false };
+    mocks.statuses.mockResolvedValue({ ok: true, data: { [agent]: connected } });
+    mocks.action.mockResolvedValue({ ok: true, data: quit });
+    const first = render(<AgentIntegrationPage />);
+    let card = expandAgent(agent);
+    const toggle = await within(card).findByRole("switch");
+    await waitFor(() => expect(toggle).toBeChecked());
+    fireEvent.click(toggle);
+    await within(card).findByRole("button", { name: zhCN.agentIntegration.quitRequired.retryDisconnect });
+    mocks.statuses.mockResolvedValue({ ok: true, data: { [agent]: quit } });
+    const polls = mocks.statuses.mock.calls.length;
+    await act(async () => { await vi.advanceTimersByTimeAsync(5100); });
+    expect(mocks.statuses.mock.calls.length).toBeGreaterThan(polls);
+    expect(card.querySelector(".agent-integration-stage-hint.is-warning")).not.toBeNull();
+    mocks.statuses.mockResolvedValue({ ok: true, data: { [agent]: exited } });
+    fireEvent.focus(window);
+    await within(card).findByText("DeepSeek Harness 已退出，请点击「重试关闭接入」完成关闭。");
+    expect(toggle).toBeChecked();
+    expect(mocks.action).toHaveBeenCalledTimes(1);
+    first.unmount();
+    render(<AgentIntegrationPage />);
+    card = expandAgent(agent);
+    await within(card).findByText("DeepSeek Harness 已退出，请点击「重试关闭接入」完成关闭。");
+    // A failed health refresh must not erase the user action either.
+    mocks.statuses.mockResolvedValue({ ok: false, reason: "unavailable" });
+    await act(async () => { await vi.advanceTimersByTimeAsync(5100); });
+    expect(card.querySelector(".agent-integration-stage-hint.is-warning")).not.toBeNull();
+    expect(within(card).getByText("DeepSeek Harness 已退出，请点击「重试关闭接入」完成关闭。")).toBeInTheDocument();
+    mocks.action.mockResolvedValue({ ok: true, data: disconnected });
+    mocks.statuses.mockResolvedValue({ ok: true, data: { [agent]: disconnected } });
+    fireEvent.click(within(card).getByRole("button", { name: zhCN.agentIntegration.quitRequired.retryDisconnect }));
+    await waitFor(() => expect(within(card).getByRole("switch")).not.toBeChecked());
+    expect(card.querySelector(".agent-integration-stage-hint.is-warning")).toBeNull();
+    expect(mocks.action).toHaveBeenLastCalledWith(agent, "disconnect");
+  });
+
+  it("preserves disconnect intent when retrying a manual quit request", async () => {
+    const agent = "deepseek-harness";
+    const status = { agent, display_name: "DeepSeek Harness", state: "action_required", enabled: true,
+      action: { kind: "quit_agent" }, issue: { code: "quit_required" }, message: "quit required", retry_action: "disconnect",
+      can_connect: true, can_disconnect: true, requirements: [{ id: "installed", satisfied: true }] };
+    mocks.statuses.mockResolvedValue({ ok: true, data: { [agent]: status } });
+    mocks.action.mockResolvedValue({ ok: true, data: { ...status, state: "ready", enabled: false, can_disconnect: false, action: undefined, issue: undefined, message: "" } });
+    render(<AgentIntegrationPage />);
+    const card = expandAgent(agent);
+    fireEvent.click(await within(card).findByRole("button", { name: zhCN.agentIntegration.quitRequired.retryDisconnect }));
+    await waitFor(() => expect(mocks.action).toHaveBeenCalledWith(agent, "disconnect"));
+    expect(mocks.action).not.toHaveBeenCalledWith(agent, "connect");
   });
 
   it("refreshes WorkBuddy health on focus without resetting its enabled choice", async () => {
@@ -1550,8 +1799,47 @@ describe("AgentIntegrationPage", () => {
     mocks.statuses.mockResolvedValue({ ok: true, data: { workbuddy: { ...installed, message: "startup missing", issue: { code: "startup_unavailable" },
       connection: { ...installed.connection, control_ready: false, runtime_state: "unavailable" } } } });
     fireEvent.focus(window);
-    await within(card).findByText(zhCN.agentIntegration.connectionErrors.startup_unavailable);
+    await within(card).findByText(zhCN.agentIntegration.setupFeedback.connectionUnavailable);
     expect(within(card).getByRole("switch", { name: "WorkBuddy 使用 LazyMind" })).toBeChecked();
+    expect(mocks.action).not.toHaveBeenCalled();
+  });
+
+  it("marks DSH unavailable after bridge loss and recovers on focus without changing the enabled choice", async () => {
+    const connected = { agent: "deepseek-harness", display_name: "DeepSeek Harness", state: "enabled", enabled: true,
+      can_connect: true, can_disconnect: true, requirements: [{ id: "dsh_desktop", satisfied: true }],
+      connection: { mcp_configured: true, mcp_trusted: true, mcp_enabled: true, control_ready: true,
+        presentation_status: "ready", runtime_state: "connected" } };
+    mocks.statuses.mockResolvedValue({ ok: true, data: { "deepseek-harness": connected } });
+    render(<AgentIntegrationPage />);
+    const card = expandAgent("deepseek-harness");
+    const toggle = await within(card).findByRole("switch", { name: "DeepSeek Harness Web 使用 LazyMind MCP" });
+    await within(card).findByText(zhCN.agentIntegration.dshInstallGuide.connected);
+    mocks.statuses.mockResolvedValue({ ok: false, reason: "unavailable" });
+    fireEvent.focus(window);
+    await within(card).findByText(zhCN.agentIntegration.dshErrors.host_unavailable);
+    expect(toggle).toBeChecked();
+    expect(within(card).queryByText(zhCN.agentIntegration.dshInstallGuide.connected)).not.toBeInTheDocument();
+    mocks.statuses.mockResolvedValue({ ok: true, data: { "deepseek-harness": connected } });
+    fireEvent.focus(window);
+    await within(card).findByText(zhCN.agentIntegration.dshInstallGuide.connected);
+    expect(toggle).toBeChecked();
+    expect(within(card).queryByRole("alert")).not.toBeInTheDocument();
+    expect(mocks.action).not.toHaveBeenCalled();
+  });
+
+  it("shows an actionable disabled DSH plugin issue without raw output or an account-expired claim", async () => {
+    const disabled = { agent: "deepseek-harness", display_name: "DeepSeek Harness", state: "enabled", enabled: true,
+      can_connect: true, can_disconnect: true, requirements: [{ id: "dsh_desktop", satisfied: true }],
+      issue: { code: "mcp_enable_required" }, message: "authentication_required private raw output",
+      connection: { mcp_configured: true, mcp_trusted: true, mcp_enabled: false, control_ready: false,
+        presentation_status: "host-offline", runtime_state: "unavailable" } };
+    mocks.statuses.mockResolvedValue({ ok: true, data: { "deepseek-harness": disabled } });
+    render(<AgentIntegrationPage />);
+    const card = expandAgent("deepseek-harness");
+    await within(card).findByText(zhCN.agentIntegration.dshErrors.mcp_enable_required);
+    expect(within(card).getByRole("switch", { name: "DeepSeek Harness Web 使用 LazyMind MCP" })).toBeChecked();
+    expect(card).not.toHaveTextContent("authentication_required");
+    expect(card).not.toHaveTextContent(zhCN.agentIntegration.dshErrors.lazymind_auth_required);
     expect(mocks.action).not.toHaveBeenCalled();
   });
 
