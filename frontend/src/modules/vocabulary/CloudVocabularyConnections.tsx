@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Alert, Button, Checkbox, Form, Input, Modal, Popconfirm, Select, Skeleton, Space, Switch, Tag, Typography } from "antd";
-import { BookOutlined } from "@ant-design/icons";
+import eudicLogo from "./assets/eudic.png";
+import maimemoLogo from "./assets/maimemo.ico";
 import { useTranslation } from "react-i18next";
 import { createCloudWordbook, disconnectCloudConnection, listCloudConnections, listCloudOperations, saveCloudConnection, syncCloudVocabulary, testCloudConnection, type CloudConnection, type CloudOperation, type CloudVocabularyProvider, type CloudWordbook } from "./cloudApi";
 import "./CloudVocabularyConnections.scss";
@@ -157,7 +158,7 @@ export default function CloudVocabularyConnections() {
       const connection=connections.find(item=>item.provider===provider);
       const status=error ? "unavailable" : !loaded ? "loading" : connection?.target_id ? connection.enabled ? "connectedEnabled" : "connectedPaused" : "incomplete";
       return <article key={provider} className="external-app-card">
-        <span className="external-app-icon"><BookOutlined/></span>
+        <span className="external-app-icon"><img src={provider === "eudic" ? eudicLogo : maimemoLogo} alt="" aria-hidden="true" /></span>
         <div className="external-app-copy">
           <h3>{t(`vocabularyCloud.${provider}`)}</h3>
           <p>{t("vocabularyCloud.providerDescription")}</p>

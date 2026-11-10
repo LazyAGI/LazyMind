@@ -1,6 +1,5 @@
 import {
   CheckCircleOutlined,
-  BookOutlined,
   ExclamationCircleOutlined,
 } from "@ant-design/icons";
 import {
@@ -30,6 +29,7 @@ import {
 } from "./api";
 import "@/modules/agentIntegration/index.scss";
 import CloudVocabularyConnections from "./CloudVocabularyConnections";
+import ankiLogo from "./assets/anki.png";
 
 const ADDON_CODE = "2055492159";
 
@@ -97,7 +97,7 @@ export default function VocabularySettings() {
     <div className="external-apps-settings">
       <div className="external-apps-grid">
         <article className="external-app-card">
-          <span className="external-app-icon"><BookOutlined /></span>
+          <span className="external-app-icon"><img src={ankiLogo} alt="" aria-hidden="true" /></span>
           <div className="external-app-copy">
             <h3>Anki</h3>
             <p>{t("ankiSettings.appDescription")}</p>
