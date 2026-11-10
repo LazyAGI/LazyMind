@@ -1,3 +1,4 @@
+import type { PdfScrollSyncEndpoint } from "@/components/ui/pdfScrollSync";
 import {
   forwardRef,
   useCallback,
@@ -51,6 +52,7 @@ export interface FileViewerRef {
 
 interface FileViewerProps {
   paperMode?: boolean;
+  pdfScrollSync?: PdfScrollSyncEndpoint;
   pdfToolbarMode?: "full" | "navigation";
   onPdfNoteSelection?: (selection: PdfTextSelection, note: string, color: PdfNoteColor, id: string) => Promise<void>;
   pdfNoteHighlights?: PdfNoteHighlight[];
@@ -412,6 +414,7 @@ const FileViewer = forwardRef<FileViewerRef, FileViewerProps>((props, ref) => {
       case "pdf":
         return pdfPreviewData ? (
           <RenderPdf
+            pdfScrollSync={props.pdfScrollSync}
             paperMode={props.paperMode}
             pdfToolbarMode={props.pdfToolbarMode}
             pdfHeaderStart={props.pdfHeaderStart}
@@ -542,6 +545,7 @@ const FileViewer = forwardRef<FileViewerRef, FileViewerProps>((props, ref) => {
     pdfPreviewData,
     pdfFingerprint,
     props.pdfIRTarget,
+    props.pdfScrollSync,
     props.paperMode,
     props.onPdfIRDocumentChange,
     props.onPdfOutlineChange,

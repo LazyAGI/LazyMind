@@ -1,3 +1,4 @@
+import type { PdfScrollSyncEndpoint } from "./pdfScrollSync";
 import { createPdfViewportScheduler } from "./pdfViewportScheduler";
 import ReadingPreparationAction from "@/modules/knowledge/paper/ReadingPreparationAction";
 import {PdfPageControl} from "./PdfPageControl";
@@ -56,6 +57,7 @@ type LoadedPdfDocument = Parameters<NonNullable<React.ComponentProps<typeof Docu
 pdfjs.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
 
 interface RenderPdfProps {
+  pdfScrollSync?: PdfScrollSyncEndpoint;
   paperMode?: boolean;
   pdfToolbarMode?: "full" | "navigation";
   pdfHeaderStart?: React.ReactNode;
@@ -149,6 +151,7 @@ export default function RenderPdf({
   onPreviewError,
   paperMode = false,
   pdfToolbarMode = "full",
+  pdfScrollSync,
   pdfHeaderStart,
   pdfHeaderEnd,
   onStudyOpenChange,
@@ -430,7 +433,12 @@ export default function RenderPdf({
     };
   }, []);
 
+  useEffect(() => {
+    if (pdfLoaded && containerRef.current) return pdfScrollSync?.connect(containerRef.current);
+  }, [pdfScrollSync, pdfLoaded]);
+
   const onScroll = () => {
+    pdfScrollSync?.onScroll();
     if (!containerRef.current) {
       return;
     }
@@ -450,7 +458,7 @@ export default function RenderPdf({
       };
       pendingPosition.current=position;
       clearTimeout(positionIdleTimer.current);
-      const publish=()=>{const latest=pendingPosition.current;if(!latest)return;pendingPosition.current=undefined;appliedPositionRef.current=`${latest.page-1}:${latest.progress.toFixed(4)}`;reportPosition.current?.(latest);};
+      const publish=()=>{const latest=pendingPosition.current;if(!latest)return;pendingPosition.current=undefined;reportPosition.current?.(latest);};
       if(position.page!==reportedPage.current){reportedPage.current=position.page;publish();}
       else positionIdleTimer.current=setTimeout(publish,250);
     }

@@ -551,3 +551,8 @@
   &:not(:disabled):hover { border-color: var(--ant-color-primary, #1677ff); background: var(--ant-color-primary-bg-hover, #e6efff); }
   &:focus-visible { outline: 2px solid var(--ant-color-primary, #1677ff); outline-offset: 3px; }
 }
+
+.knowledge-full-translation-actions .ant-btn[aria-pressed="true"] {
+  color: var(--ant-color-primary, #1677ff);
+  background: var(--ant-color-primary-bg, #e6f4ff);
+}
