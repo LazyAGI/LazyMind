@@ -70,14 +70,20 @@ output.value_file, binary files through output.local_path. Fetch input/artifact
 resources with result_directory and pass resource_file/artifact_file references to
 workers. Use metadata_only=true on artifact.list to avoid rereading saved bodies.
 
-After shared content, notes and style are frozen, create separate page workers and
-run them concurrently up to available capacity, each with the pinned contract and
-its page inputs in an isolated context. Without subagents, process pages in order
-using the same Skills and tools. Collect paths and concise verification summaries;
-publish each checked page immediately using stable page identity/seq. Assemble the
-export request directly from accepted files in visual order. Export once, verify
-the actual file with scoped tools/workers, and repair only failures. The controller
-does not repeat worker analysis. Host-required checks and human gates still apply.
+After shared content, notes and style are frozen, follow the host's scheduling
+policy and any stricter ordering constraint in the pinned step contract. Process
+pages sequentially by default. Parallel page workers require an explicit host
+policy with an enforced concurrency limit that respects user limits. Count all
+active workers, including coordinators and reviewers, toward that limit. Give each
+worker the pinned contract and its page inputs in an isolated context. Without
+subagents, process pages in order using the same Skills and tools. Collect paths
+and concise verification summaries. Publish each checked page and its notes
+immediately using stable page identity and matching sequence, preserving the
+approved presentation order regardless of completion order. Assemble the export
+request directly from accepted files in visual order. Export once all requested
+pages pass, verify the actual file with scoped tools/workers, and repair only
+failures. The controller does not repeat worker analysis. Host-required checks
+and human gates still apply.
 
 ## Artifact edits after generation
 

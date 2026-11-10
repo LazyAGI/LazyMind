@@ -1962,11 +1962,10 @@ steps:
       Do NOT call ppt_init_deck,
       stage=style, or stage=outline again.
 
-      Call ONE tool exactly once:
+      The native runner makes exactly one call to generate the full HTML deck.
         ppt_generate_pages(concurrency=1)
           — omit deck_dir to auto-find; or pass deck_dir from earlier results.
-          — Generate ALL requested pages sequentially, one page at a time.
-            Never run page-generation tools in parallel or reduce the deck to one page.
+          — The native tool generates ALL requested pages sequentially, one page at a time.
           — If complete per-page prompts were published, pass each current
             slide_outline directly to the HTML model, including user edits.
             Do not write, rewrite, expand or regenerate prompts in generate_ppt;
@@ -2114,7 +2113,8 @@ steps:
       already delivered a usable native_pptx; keep the last published version.
       For a full HTML run: the exact requested number of preview_html HTML pages must
       be saved (DOCTYPE/html documents), with matching preview_notes sort_order.
-      Generate pages sequentially; a two-page request still requires both pages.
+      Publish every requested page and its matching notes after page-level checks.
+      Preserve the approved page identities and order regardless of completion order.
       preview_notes must be aligned with preview_html; the auto-generated draft
       must be a natural spoken explanation, not copied formula source. For
       academic pages explain intuition, key quantities, measured comparisons and

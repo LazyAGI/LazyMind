@@ -45,9 +45,15 @@ when there are no gaps. Do not ask already answered questions again.
 
 Freeze one shared design specification and the approved page order. Each slide
 specification contains actual copy, evidence references, visual layout, assets and
-notes. Page work may run independently against these frozen inputs; publish by page
-identity, never completion order. Publish each page and its notes immediately after
-its page-level checks pass; do not wait for the remaining pages or final deck export.
+notes. Pages may be generated independently against these frozen inputs. Follow
+the host's scheduling policy and any stricter ordering constraint in the pinned
+step contract. Process pages sequentially by default. Parallel page workers require
+an explicit host policy with an enforced concurrency limit that respects user
+limits. Count all active workers, including coordinators and reviewers, toward
+that limit. Publish each page and its notes immediately after its page-level checks
+pass, using their approved page identity and matching sequence. Preserve the
+approved presentation order regardless of completion order, and deliver every
+requested page before completing the step.
 For direct publication, speaker_notes_source is a UTF-8 JSON file with
 `schema_version: 1` and ordered `pages` entries with `page` (one-based) and
 `text`. Resolve the bound file at generation time and attach its scripts by
