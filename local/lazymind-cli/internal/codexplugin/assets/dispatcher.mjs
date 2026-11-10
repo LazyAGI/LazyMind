@@ -788,7 +788,7 @@ async function prepareCodexBrowser(loadModule = (url) => import(
 	};
 	host[key] = state;
 	state.pending = (async () => {
-		const asset = /^app:\/\/-\/assets\/(?:index|app-main|app-initial)-[a-zA-Z0-9_-]+\.js$/;
+		const asset = /^app:\/\/-\/assets\/(?:(?:index|app-main|app-initial)-[a-zA-Z0-9_-]+|[0-9]+\.[a-zA-Z0-9_-]+)\.js$/;
 		const urls = Array.from(document.querySelectorAll("link[href],script[type=\"module\"][src]")).map((element) => "href" in element ? element.href : element.src).filter((url) => asset.test(url));
 		const queue = [...new Set(urls)].sort((a, b) => Number(!a.includes("/app-initial-")) - Number(!b.includes("/app-initial-")));
 		const seen = /* @__PURE__ */ new Set();
@@ -796,13 +796,23 @@ async function prepareCodexBrowser(loadModule = (url) => import(
 			const url = queue.shift();
 			if (seen.has(url)) continue;
 			seen.add(url);
-			if (url.includes("/app-initial-")) {
-				const exports = await loadModule(url);
-				const manager = Object.values(exports).find((value) => value && typeof value === "object" && typeof value.pages?.getWebview === "function" && typeof value.pages?.disposeHost === "function" && typeof value.getSnapshot === "function");
-				if (!manager) throw Error("Codex native browser interface is unavailable");
-				host.__lazymindCodexBrowser = manager;
-				return;
+			const exports = await loadModule(url);
+			const modules = [exports, ...Object.values(exports.__webpack_require__?.c ?? {}).map((module) => module?.exports)];
+			for (const module of modules) {
+				let candidates;
+				try {
+					candidates = [module, ...Object.values(module ?? {})];
+				} catch {
+					continue;
+				}
+				for (const value of candidates) try {
+					if (value && typeof value === "object" && typeof value.pages?.getWebview === "function" && typeof value.pages?.disposeHost === "function" && typeof value.getSnapshot === "function") {
+						host.__lazymindCodexBrowser = value;
+						return;
+					}
+				} catch {}
 			}
+			if (!/\/(?:index|app-main)-/.test(url)) continue;
 			const response = await fetch(url, {
 				signal: AbortSignal.timeout(2e3),
 				redirect: "error"

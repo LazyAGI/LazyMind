@@ -9,7 +9,7 @@ export async function prepareCodexBrowser(loadModule = (url: string): Promise<Re
   const state = {pending: undefined as Promise<void> | undefined, retryAfter: 0}
   host[key] = state
   state.pending = (async () => {
-    const asset = /^app:\/\/-\/assets\/(?:index|app-main|app-initial)-[a-zA-Z0-9_-]+\.js$/
+    const asset = /^app:\/\/-\/assets\/(?:(?:index|app-main|app-initial)-[a-zA-Z0-9_-]+|[0-9]+\.[a-zA-Z0-9_-]+)\.js$/
     const urls = Array.from(document.querySelectorAll<HTMLLinkElement | HTMLScriptElement>('link[href],script[type="module"][src]'))
       .map(element => 'href' in element ? element.href : element.src).filter(url => asset.test(url))
     const queue = [...new Set(urls)].sort((a, b) => Number(!a.includes('/app-initial-')) - Number(!b.includes('/app-initial-')))
@@ -19,15 +19,27 @@ export async function prepareCodexBrowser(loadModule = (url: string): Promise<Re
       const url = queue.shift()!
       if (seen.has(url)) continue
       seen.add(url)
-      if (url.includes('/app-initial-')) {
-        const exports = await loadModule(url)
-        const manager = Object.values(exports).find((value: any) => value && typeof value === 'object'
-          && typeof value.pages?.getWebview === 'function' && typeof value.pages?.disposeHost === 'function'
-          && typeof value.getSnapshot === 'function')
-        if (!manager) throw Error('Codex native browser interface is unavailable')
-        host.__lazymindCodexBrowser = manager
-        return
+      const exports = await loadModule(url)
+      // Rspack exposes the running application's module cache through its entry.
+      // Inspect loaded exports only, without executing uninitialized factories.
+      const modules = [exports, ...Object.values(exports.__webpack_require__?.c ?? {})
+        .map((module: any) => module?.exports)]
+      for (const module of modules) {
+        let candidates: any[]
+        try { candidates = [module, ...Object.values(module ?? {})] } catch { continue }
+        for (const value of candidates) {
+          try {
+            if (value && typeof value === 'object' && typeof value.pages?.getWebview === 'function'
+              && typeof value.pages?.disposeHost === 'function' && typeof value.getSnapshot === 'function') {
+              host.__lazymindCodexBrowser = value
+              return
+            }
+          } catch {
+            // Cached exports can include cross-origin windows or revoked proxies.
+          }
+        }
       }
+      if (!/\/(?:index|app-main)-/.test(url)) continue
       const response = await fetch(url, {signal: AbortSignal.timeout(2000), redirect: 'error'})
       if (!response.ok) throw Error('Codex browser entry module is unavailable')
       const reader = response.body?.getReader()
