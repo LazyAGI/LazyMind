@@ -46,7 +46,11 @@ func TestWorkBuddySetupReadsCurrentTrustAndEnableChoices(t *testing.T) {
 			if err := os.WriteFile(filepath.Join(dir, "mcp-approvals.json"), []byte(tc.approvals), 0600); err != nil {
 				t.Fatal(err)
 			}
-			trusted, enabled := workbuddySetup(path)
+			trusted, enabled, err := workbuddySetup(path)
+			wantError := tc.name == "malformed approvals" || tc.name == "invalid disabled value"
+			if (err != nil) != wantError {
+				t.Fatalf("error=%v; want error=%v", err, wantError)
+			}
 			if trusted != tc.trusted || enabled != tc.enabled {
 				t.Fatalf("trusted=%v enabled=%v; want %v %v", trusted, enabled, tc.trusted, tc.enabled)
 			}
@@ -62,7 +66,7 @@ func TestWorkBuddySetupMissingOrMalformedConfig(t *testing.T) {
 				t.Fatal(err)
 			}
 		}
-		if trusted, enabled := workbuddySetup(path); trusted || enabled {
+		if trusted, enabled, err := workbuddySetup(path); trusted || enabled || err == nil {
 			t.Fatalf("accepted missing or malformed connector: %s", body)
 		}
 	}

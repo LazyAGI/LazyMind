@@ -12,8 +12,8 @@ import (
 	"lazymind/agentconnector/internal/agentintegration"
 	"lazymind/agentconnector/internal/codexplugin"
 	"lazymind/agentconnector/internal/credentials"
-	"lazymind/agentconnector/internal/integrationstate"
 	"lazymind/agentconnector/internal/mcpbridge"
+	"lazymind/agentconnector/internal/workflowhost"
 )
 
 func TestPluginRefreshUpdatesFilesWithoutDesktopLifecycleOrPairingChange(t *testing.T) {
@@ -78,6 +78,10 @@ exit 1
 	pairBefore, _ := os.ReadFile(record.PairingFile)
 	pluginRoot, _, _ := codexplugin.Paths()
 	skillPath := filepath.Join(pluginRoot, "skills", "workflow", "SKILL.md")
+	expectedSkill, err := os.ReadFile(skillPath)
+	if err != nil || len(expectedSkill) == 0 {
+		t.Fatalf("read installed workflow skill: %v", err)
+	}
 	if err := os.WriteFile(skillPath, []byte("outdated instructions"), 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -86,23 +90,20 @@ exit 1
 	if err := os.WriteFile(filepath.Join(pluginRoot, ".lazymind-installation.json"), previous, 0600); err != nil {
 		t.Fatal(err)
 	}
-	if result := adapter.Refresh(t.Context()); result.State != agentintegration.Enabled || !strings.Contains(result.Message, "without restarting Codex") {
+	if result := adapter.Refresh(t.Context()); result.State != agentintegration.Enabled || result.Enabled == nil || !*result.Enabled || !strings.Contains(result.Message, "without restarting Codex") {
 		t.Fatalf("refresh failed: %+v", result)
 	}
 	updated, err := codexplugin.Read()
 	if err != nil || updated.BuildID != codexplugin.BuildID() || updated.ConnectorID != record.ConnectorID {
 		t.Fatalf("refresh lost installation identity: %+v %v", updated, err)
 	}
-	skill, _ := os.ReadFile(skillPath)
-	if !strings.Contains(string(skill), "external_execution") || strings.Contains(string(skill), "outdated instructions") {
+	skill, err := os.ReadFile(skillPath)
+	if err != nil || string(skill) != string(expectedSkill) {
 		t.Fatal("refresh did not update installed skill")
 	}
 	pairAfter, _ := os.ReadFile(record.PairingFile)
 	if string(pairAfter) != string(pairBefore) {
 		t.Fatal("refresh changed live pairing")
-	}
-	if preference, err := integrationstate.Read(home, "codex"); err != nil || preference != nil {
-		t.Fatal("refresh wrote a new enable preference")
 	}
 	configPath := filepath.Join(profile, "config.toml")
 	current, _ := os.ReadFile(configPath)
@@ -125,23 +126,44 @@ exit 1
 	if err := os.WriteFile(configPath, foreign, 0600); err != nil {
 		t.Fatal(err)
 	}
-	if result := adapter.Refresh(t.Context()); result.State != agentintegration.Failed {
-		t.Fatal("refresh replaced a foreign MCP entry")
+	if result := adapter.Refresh(t.Context()); result.State != agentintegration.Conflict {
+		t.Fatalf("refresh did not preserve the foreign MCP conflict: %+v", result)
 	}
 	afterConflict, _ := os.ReadFile(configPath)
 	afterConflictEvents, _ := os.ReadFile(filepath.Join(profile, "events"))
 	if string(afterConflict) != string(foreign) || string(beforeConflict) != string(afterConflictEvents) {
 		t.Fatal("conflicting refresh changed the configuration or ran installer")
 	}
-	eventsBefore, _ := os.ReadFile(filepath.Join(profile, "events"))
-	if err := integrationstate.Set(home, "codex", false); err != nil {
-		t.Fatal(err)
-	}
-	if result := adapter.Refresh(t.Context()); result.State != agentintegration.Failed {
-		t.Fatal("refresh enabled a disabled integration")
-	}
-	eventsAfter, _ := os.ReadFile(filepath.Join(profile, "events"))
-	if string(eventsBefore) != string(eventsAfter) {
-		t.Fatal("disabled refresh invoked the installer")
+	for _, scenario := range []string{"native_disabled", "registration_removed", "pairing_disabled"} {
+		t.Run(scenario, func(t *testing.T) {
+			config := string(current)
+			wantConfigured := true
+			switch scenario {
+			case "native_disabled":
+				config = strings.ReplaceAll(config, "enabled = true", "enabled = false")
+			case "registration_removed":
+				config = "[mcp_servers.other]\ncommand = \"other-server\"\n"
+				wantConfigured = false
+			case "pairing_disabled":
+				if err := workflowhost.Disable(home, record.ConnectorID); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := os.WriteFile(configPath, []byte(config), 0600); err != nil {
+				t.Fatal(err)
+			}
+			eventsBefore, _ := os.ReadFile(filepath.Join(profile, "events"))
+			pairBefore, _ := os.ReadFile(record.PairingFile)
+			result := adapter.Refresh(t.Context())
+			if result.State != agentintegration.Failed || result.Enabled == nil || *result.Enabled != wantConfigured {
+				t.Fatalf("refresh enabled a disabled integration or lost its configuration state: %+v", result)
+			}
+			eventsAfter, _ := os.ReadFile(filepath.Join(profile, "events"))
+			configAfter, _ := os.ReadFile(configPath)
+			pairAfter, _ := os.ReadFile(record.PairingFile)
+			if string(eventsBefore) != string(eventsAfter) || string(configAfter) != config || string(pairBefore) != string(pairAfter) {
+				t.Fatal("disabled refresh invoked the installer or changed configuration/pairing")
+			}
+		})
 	}
 }

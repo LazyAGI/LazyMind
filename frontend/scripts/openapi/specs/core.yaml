@@ -1,5 +1,50 @@
 components:
     schemas:
+        TaskCenterWorkbenchResponse:
+            properties:
+                groups:
+                    properties:
+                        attention:
+                            $ref: '#/components/schemas/TaskCenterWorkbenchGroup'
+                        canceled:
+                            $ref: '#/components/schemas/TaskCenterWorkbenchGroup'
+                        failed:
+                            $ref: '#/components/schemas/TaskCenterWorkbenchGroup'
+                        paused:
+                            $ref: '#/components/schemas/TaskCenterWorkbenchGroup'
+                        recent:
+                            $ref: '#/components/schemas/TaskCenterWorkbenchGroup'
+                        running:
+                            $ref: '#/components/schemas/TaskCenterWorkbenchGroup'
+                    required:
+                        - attention
+                        - running
+                        - paused
+                        - failed
+                        - recent
+                        - canceled
+                    type: object
+                page_size:
+                    type: integer
+            required:
+                - groups
+                - page_size
+            type: object
+        TaskCenterWorkbenchGroup:
+            properties:
+                items:
+                    items:
+                        $ref: '#/components/schemas/TaskCenterTaskResponse'
+                    type: array
+                page:
+                    type: integer
+                total:
+                    type: integer
+            required:
+                - items
+                - total
+                - page
+            type: object
         ACLApiResponse:
             properties:
                 code:
@@ -19808,6 +19853,44 @@ info:
     version: 0.1.0
 openapi: 3.0.3
 paths:
+    /api/core/task-center/workbench:
+        get:
+            parameters:
+                - in: query
+                  name: task_type
+                  required: false
+                  schema:
+                    type: string
+                - in: query
+                  name: keyword
+                  required: false
+                  schema:
+                    type: string
+                - in: query
+                  name: category
+                  required: false
+                  schema:
+                    enum:
+                        - attention
+                        - running
+                        - paused
+                        - failed
+                        - recent
+                        - canceled
+                    type: string
+                - in: query
+                  name: page
+                  required: false
+                  schema:
+                    type: integer
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/TaskCenterWorkbenchResponse'
+                    description: Task-center workbench
+            summary: Summarize task categories with four previews per page
     /api/core/academic/chat-context:
         get:
             parameters:

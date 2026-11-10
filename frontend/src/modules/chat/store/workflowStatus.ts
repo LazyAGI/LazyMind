@@ -4,6 +4,7 @@ export interface WorkflowDisplayState {
   status: 'running' | 'waiting' | 'waiting_input' | 'paused' | 'failed' | 'completed';
   reason: string;
   approval_step_id: string;
+  input_step_id?: string;
   /** Native Chat turn owning cancellation, including after workflow hand-off. */
   chat_history_id?: string;
 }

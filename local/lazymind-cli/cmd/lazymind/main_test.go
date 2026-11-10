@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -11,6 +12,20 @@ import (
 	"testing"
 	"time"
 )
+
+func TestInternalWorkBuddyLoginHonorsCancellation(t *testing.T) {
+	t.Setenv("LAZYMIND_HOME", t.TempDir())
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	var output, stderr bytes.Buffer
+	err := runInternal(ctx, []string{"agent", "workbuddy", "login"}, &output, &stderr)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("WorkBuddy login did not reach its cancellable adapter: %v", err)
+	}
+	if output.Len() != 0 {
+		t.Fatal("canceled login returned a success receipt")
+	}
+}
 
 func TestInternalSessionSetAndClear(t *testing.T) {
 	home := t.TempDir()

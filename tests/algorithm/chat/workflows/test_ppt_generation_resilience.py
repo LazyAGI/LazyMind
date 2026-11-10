@@ -88,6 +88,75 @@ def prepare_batch(monkeypatch, tmp_path, tools, pages, respond):
     return deck, model, saved
 
 
+@pytest.fixture
+def cancel_queue(monkeypatch):
+    from lazyllm.common import queue
+    signals = {}
+
+    class CancelQueue:
+        def __init__(self, *, klass):
+            assert klass == 'cancel'
+
+        def enqueue(self, value):
+            signals.setdefault(lazyllm.globals._sid, []).append(value)
+
+        def dequeue(self):
+            return signals.pop(lazyllm.globals._sid, [])
+
+    monkeypatch.setattr(queue, 'FileSystemQueue', CancelQueue)
+
+
+def test_pause_during_page_model_call_exits_without_retrying_or_starting_later_pages(
+    monkeypatch, tmp_path, tools, cancel_queue,
+):
+    from lazymind.chat.engine.agent_runtime.cancellation import UserCancelledError, request_cancel
+
+    def respond(prompt, control):
+        if prompt == '2':
+            request_cancel('ppt-task')
+            # Provider processing may run in a different context than the task.
+            with lazyllm.globals._bind_sid('provider-thread'):
+                control.check()
+            pytest.fail('the page model continued after pause')
+        return HTML
+
+    deck, model, saved = prepare_batch(monkeypatch, tmp_path, tools, 3, respond)
+    monkeypatch.setenv('LAZYMIND_PPT_PAGE_RETRIES', '3')
+    with lazyllm.globals._bind_sid('ppt-task'), pytest.raises(UserCancelledError):
+        tools._batch_page_html_publish_progressive(deck)
+    assert len(model.calls) == 2
+    assert (deck / 'pages/page_001.html').exists()
+    assert not (deck / 'pages/page_002.html').exists()
+    assert not (deck / 'pages/page_003.html').exists()
+    assert ('preview_html', 0) in saved
+    assert ('preview_html', 1) not in saved
+
+
+def test_pause_before_page_generation_does_not_start_model_requests(monkeypatch, tmp_path, tools, cancel_queue):
+    from lazymind.chat.engine.agent_runtime.cancellation import UserCancelledError, request_cancel
+    deck, model, saved = prepare_batch(monkeypatch, tmp_path, tools, 2, lambda *_: HTML)
+    request_cancel('ppt-task')
+    with lazyllm.globals._bind_sid('ppt-task'), pytest.raises(UserCancelledError):
+        tools._batch_page_html_publish_progressive(deck)
+    assert model.calls == []
+    assert saved == {}
+
+
+def test_ppt_model_calls_without_page_budget_also_honor_pause(monkeypatch, tools, cancel_queue):
+    from lazymind.chat.engine.agent_runtime.cancellation import UserCancelledError, request_cancel
+
+    def respond(_prompt, control):
+        request_cancel('ppt-task')
+        control.check()
+        pytest.fail('the model continued after pause')
+
+    model = AdapterModel(respond)
+    monkeypatch.setattr(lazyllm, 'AutoModel', lambda **_: model)
+    with lazyllm.globals._bind_sid('ppt-task'), pytest.raises(UserCancelledError):
+        tools._agent_llm_call('system', 'outline')
+    assert len(model.calls) == 1
+
+
 def publication_store(monkeypatch, tools):
     """Fake the public artifact transport, retaining stable indices across Attempts."""
     orders = {'preview_html': [], 'preview_notes': []}

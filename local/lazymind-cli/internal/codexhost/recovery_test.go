@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"lazymind/agentconnector/internal/credentials"
-	"lazymind/agentconnector/internal/integrationstate"
 	"lazymind/agentconnector/internal/workflowhost"
 )
 
@@ -66,7 +65,7 @@ func TestExecutionRequestsRecoveryButTransientAndDisabledConnectionsDoNot(t *tes
 				return scenario == "ready" || scenario == "transient" && checks > 1, nil
 			}
 			if scenario == "disabled" {
-				if err := integrationstate.Set(home, "codex", false); err != nil {
+				if err := workflowhost.Disable(home, pair.ConnectorID); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -87,7 +86,7 @@ func TestExecutionRequestsRecoveryButTransientAndDisabledConnectionsDoNot(t *tes
 func TestReconnectReusesInstallationAndStopsOnShutdownFailure(t *testing.T) {
 	for _, scenario := range []string{"ready", "restart", "refused", "foreign-port", "disabled"} {
 		t.Run(scenario, func(t *testing.T) {
-			home, _, _ := recoveryFixture(t)
+			home, _, pair := recoveryFixture(t)
 			before, _ := os.ReadFile(configPath(home))
 			launch := prepareDesktopLaunch
 			t.Cleanup(func() { prepareDesktopLaunch = launch })
@@ -109,7 +108,7 @@ func TestReconnectReusesInstallationAndStopsOnShutdownFailure(t *testing.T) {
 				return nil
 			}
 			if scenario == "disabled" {
-				if err := integrationstate.Set(home, "codex", false); err != nil {
+				if err := workflowhost.Disable(home, pair.ConnectorID); err != nil {
 					t.Fatal(err)
 				}
 			}

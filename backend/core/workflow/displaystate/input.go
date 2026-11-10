@@ -14,6 +14,8 @@ import (
 // InputRequest is a projection of the pinned workflow's selected question
 // artifact, not a second question definition owned by a host adapter.
 type InputRequest struct {
+	// StepID comes from the pinned checkpoint, including legacy artifacts without a step ID.
+	StepID       string                   `json:"-"`
 	ArtifactID   string                   `json:"artifact_id"`
 	Revision     int                      `json:"revision"`
 	Slot         string                   `json:"slot"`
@@ -147,7 +149,7 @@ func PendingInput(db *gorm.DB, session orm.WorkflowSession) (*InputRequest, erro
 		}
 		questions = append(questions, question)
 	}
-	return &InputRequest{ArtifactID: source.ID, Revision: source.Revision, Slot: checkpoint.Slot,
+	return &InputRequest{StepID: checkpoint.AfterStep, ArtifactID: source.ID, Revision: source.Revision, Slot: checkpoint.Slot,
 		Title: checkpoint.Title, Questions: questions, Source: source, Value: value, DraftVersion: draft}, nil
 }
 

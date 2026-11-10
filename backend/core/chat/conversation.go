@@ -724,6 +724,10 @@ func ChatConversations(w http.ResponseWriter, r *http.Request) {
 			mentionedResources.ExcludedWorkflowRefs, workflowEnabled, true,
 		)
 		if bindingErr != nil {
+			if errors.Is(bindingErr, errConversationWorkflowsDisabled) {
+				common.ReplyErr(w, bindingErr.Error(), http.StatusForbidden)
+				return
+			}
 			common.ReplyErr(w, "resolve conversation workflow binding failed", http.StatusInternalServerError)
 			return
 		}

@@ -48,6 +48,10 @@ func TestExternalInputAnswersShareAdmissionAcrossHosts(t *testing.T) {
 			if err != nil || state.Continuation != "awaiting_user" || state.Admission.CanBegin || state.InputRequest == nil {
 				t.Fatalf("state=%+v err=%v", state, err)
 			}
+			view, err := displaystate.Read(db.DB, session)
+			if err != nil || view.Status != "waiting_input" || view.InputStepID != "collect" {
+				t.Fatalf("input display lost the producing step: %+v %v", view, err)
+			}
 			_, err = svc.Execute(t.Context(), session.CreateUserID, session.ID, WorkflowControlCommand{CommandID: "blocked", Kind: "begin", StepID: "draft", StateVersion: session.StateVersion})
 			expectControlCode(t, err, "WORKFLOW_INPUT_REQUIRED")
 			cmd := WorkflowControlCommand{CommandID: "user-answer", Kind: "answer_input", StateVersion: state.StateVersion,

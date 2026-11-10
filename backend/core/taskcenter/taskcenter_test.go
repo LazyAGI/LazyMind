@@ -82,6 +82,31 @@ func TestListTasks_FilterByStatus(t *testing.T) {
 	}
 }
 
+func TestTaskMatchesCanonicalStatusFilter(t *testing.T) {
+	tests := []struct {
+		status string
+		filter string
+		want   bool
+	}{
+		{"pending", "attention", true},
+		{"waiting", "attention", true},
+		{"waiting_inputs", "attention", true},
+		{"paused", "attention", false},
+		{"paused", "paused", true},
+		{"interrupted", "failed", true},
+		{"interrupted", "interrupted", true},
+		{"failed", "failed", true},
+		{"completed", "succeeded", true},
+		{"succeeded", "succeeded", true},
+		{"canceled", "canceled", true},
+	}
+	for _, tt := range tests {
+		if got := taskMatchesStatusFilter(tt.status, tt.filter); got != tt.want {
+			t.Fatalf("status %q filter %q: got %v want %v", tt.status, tt.filter, got, tt.want)
+		}
+	}
+}
+
 func TestArchiveTaskRunHidesRunAndPreservesConversation(t *testing.T) {
 	db := newTestTaskDB(t)
 	if err := db.AutoMigrate(&orm.UserSchedule{}, &orm.Conversation{}, &orm.TaskRunInput{}); err != nil {
@@ -244,6 +269,19 @@ func TestResolveTaskStatusDoesNotTreatStreamingHistoryAsComplete(t *testing.T) {
 	}
 	if got := resolveTaskStatus(context.Background(), db.DB, task); got != "running" {
 		t.Fatalf("streaming progress must remain running, got %q", got)
+	}
+}
+
+func TestInterruptedTaskIsTerminalAndDoesNotBecomeRunningOrTimeoutFailure(t *testing.T) {
+	db := newTestTaskDB(t)
+	for _, age := range []time.Duration{time.Minute, 3 * time.Hour} {
+		task := orm.TaskCenterTask{ID: "interrupted", Status: "interrupted", TaskType: "background_chat", CreatedAt: time.Now().Add(-age)}
+		if got := resolveTaskStatus(t.Context(), db.DB, task); got != "interrupted" {
+			t.Fatalf("interrupted task became %s at age %s", got, age)
+		}
+	}
+	if !IsTerminalStatus("interrupted") {
+		t.Fatal("interrupted execution must be terminal")
 	}
 }
 

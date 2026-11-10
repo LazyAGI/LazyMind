@@ -28,7 +28,7 @@ it('repairs the original bot in place and refreshes recipients without changing 
   await waitFor(() => expect(onAuthorizationChange).toHaveBeenCalledWith(rule.account_id, true));
   mocks.targets.mockResolvedValue({ items: [{ recipient_id: rule.recipient_id, label: 'Original group', available: true }], next_cursor: '' });
   fireEvent.click(screen.getByRole('button', { name: 'Complete reauthorization' }));
-  await waitFor(() => expect(screen.queryByText('notifications.wecomAuthorizationExpired')).toBeNull());
+  await waitFor(() => expect(screen.queryByText('notifications.notAuthorized')).toBeNull());
   await waitFor(() => expect(onAuthorizationChange).toHaveBeenLastCalledWith(rule.account_id, false));
   expect(onAccountConnected).toHaveBeenCalledWith(expect.objectContaining({ id: rule.account_id }));
   expect(mocks.targets).toHaveBeenCalledWith(rule.account_id, '', rule.recipient_id);
@@ -43,7 +43,7 @@ it('rechecks capability after permission restoration without starting a connecti
   const refresh = await screen.findByRole('button', { name: 'notifications.wecomRefreshAuthorization' });
   mocks.targets.mockResolvedValue({ items: [{ recipient_id: 'original-group', label: 'Original group', available: true }], next_cursor: '' });
   fireEvent.click(refresh);
-  await waitFor(() => expect(screen.queryByText('notifications.wecomAuthorizationExpired')).toBeNull());
+  await waitFor(() => expect(screen.queryByText('notifications.notAuthorized')).toBeNull());
   expect(mocks.connection).not.toHaveBeenCalled();
   expect(onSave).not.toHaveBeenCalled();
 });
