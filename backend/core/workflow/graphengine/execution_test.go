@@ -96,7 +96,24 @@ func TestAllBuiltinWorkflowsShareBusinessContracts(t *testing.T) {
 			if !result.Valid || result.Graph.Runtime.Execution == nil || result.Graph.Runtime.ExternalExecution != nil {
 				t.Fatalf("shared package compilation: %+v", result.Diagnostics)
 			}
+			guide, err := os.ReadFile(filepath.Join(filepath.Dir(path), "scenario/execution.md"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(string(guide), "use the host's own capabilities first") {
+				t.Fatal("pinned guide does not prefer the external host's capabilities")
+			}
 			if filepath.Base(filepath.Dir(path)) == "ppt-workflow" {
+				analysis := result.Graph.Nodes["analyze_requirements"]
+				acceptance := strings.Join(analysis.Acceptance, "\n")
+				if strings.Contains(analysis.Prompt, "deterministic model capability check") ||
+					strings.Contains(acceptance, "deterministic check exactly once") {
+					t.Fatal("shared PPT contract requires a native post-step check")
+				}
+				if !strings.Contains(acceptance, "in generate_background_images") ||
+					!strings.Contains(acceptance, "exactly when backgrounds are disabled") {
+					t.Fatal("PPT acceptance lost the background routing checks")
+				}
 				for step, required := range map[string][]string{
 					"build_outline":     {"runtime/prompts/outline.md"},
 					"plan_page_prompts": {"runtime/prompts/style_spec.md", "runtime/references/style_catalog.md"},

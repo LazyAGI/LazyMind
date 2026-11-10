@@ -42,9 +42,9 @@ writing, design or other domain Skill for this workflow's method, style, sequenc
 output schemas or quality criteria. Host helpers may only implement tool operations
 within these instructions; they do not define a second workflow.
 
-Discover the declared LazyMind package/global tools first. Use an applicable,
-configured LazyMind tool when available; if it does not provide the needed
-operation, use the host's own tools without changing the Skill's business intent.
+For external execution, use the host's own capabilities first for each required
+operation. Discover and call a declared, authorized LazyMind package/global tool
+only when the host cannot meet the step contract.
 Do not call a LazyMind text/vision model in place of external generation or validation.
 If neither side can perform the required operation, report the missing capability
 and ask the user to configure it in LazyMind before retrying. Missing Skill content

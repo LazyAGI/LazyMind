@@ -19,7 +19,9 @@ otherwise ask the user to configure that capability in LazyMind and retry.
 Local wrapper names, model-provider selection, automatic-save behavior and tool-only
 rules in a prompt are execution bindings for the LazyMind adapter. Other adapters
 preserve the same business requirements through their own capabilities and the
-advertised tool interface. They never require an unused LazyMind model configuration.
+advertised tool interface. The external controller publishes the declared slots
+directly, including for steps where the native wrapper saves them automatically.
+External executors never require an unused LazyMind model configuration.
 No adapter may silently change output meanings, format, page count or evidence rules.
 A delivery method such as UI export does not waive an explicit request for a file.
 
@@ -43,9 +45,19 @@ when there are no gaps. Do not ask already answered questions again.
 
 Freeze one shared design specification and the approved page order. Each slide
 specification contains actual copy, evidence references, visual layout, assets and
-notes. Page work may run independently against these frozen inputs; publish by page
-identity, never completion order. Publish each page and its notes immediately after
-its page-level checks pass; do not wait for the remaining pages or final deck export.
+notes. Pages may be generated independently against these frozen inputs. Follow
+the host's scheduling policy and any stricter ordering constraint in the pinned
+step contract. Process pages sequentially by default. Parallel page workers require
+an explicit host policy with an enforced concurrency limit that respects user
+limits. Count all active workers, including coordinators and reviewers, toward
+that limit. Publish each page and its notes immediately after its page-level checks
+pass, using their approved page identity and matching sequence. Preserve the
+approved presentation order regardless of completion order, and deliver every
+requested page before completing the step.
+For direct publication, speaker_notes_source is a UTF-8 JSON file with
+`schema_version: 1` and ordered `pages` entries with `page` (one-based) and
+`text`. Resolve the bound file at generation time and attach its scripts by
+page without rewriting them.
 Keep shared style and internal validation data separate from user-editable page
 prompts; do not duplicate exact copy as JSON inside the Markdown prompt.
 Background prompts/images align with their pages;
@@ -83,9 +95,9 @@ writing, design or other domain Skill for this workflow's method, style, sequenc
 output schemas or quality criteria. Host helpers may only implement tool operations
 within these instructions; they do not define a second workflow.
 
-Discover the declared LazyMind package/global tools first. Use an applicable,
-configured LazyMind tool when available; if it does not provide the needed
-operation, use the host's own tools without changing the Skill's business intent.
+For external execution, use the host's own capabilities first for each required
+operation. Discover and call a declared, authorized LazyMind package/global tool
+only when the host cannot meet the step contract.
 Do not call a LazyMind text/vision model in place of external generation or validation.
 If neither side can perform the required operation, report the missing capability
 and ask the user to configure it in LazyMind before retrying. Missing Skill content
@@ -93,17 +105,17 @@ is not a tool gap: obtain it from the pinned revision or stop, never replace it 
 a host Skill or a guessed procedure. Report the Skill paths/revisions used and any
 tool substitutions with the worker's validation evidence.
 
-When advertised, use pdf_read_text with the pinned input resource reference and
-bounded page ranges; pdf_extract_images shares the native PDF extraction logic
-without invoking a local visual model. Inspect actual returned image pixels before
-selecting them. Use ppt_compute_timing and ppt_order_papers for native deterministic
-planning. For page generation use ppt_prepare_page with the approved complete page
-brief; answer its exact generation_request externally and return the response with
-its request_hash. LazyMind assembles the native prompt from the pinned package and
-normalizes the HTML; the external executor still reviews content and rendered pixels.
-Render and export the accepted HTML with the declared tools instead of rebuilding
-another presentation engine. Host supplementation remains available for missing
-operations, including native chart objects when explicitly required.
+When a source document is bound, inspect its actual pages or figures and retain
+their source references. Prepare each slide from its complete approved brief
+and the pinned prompt and format constraints. Render the accepted pages,
+inspect the actual pixels, and verify the exported file when requested.
+
+For capability gaps, the step's declared MCP tools can provide PPTX inspection,
+PDF text and image extraction, timing and paper ordering, page preparation,
+rendering, or editable export. Use pinned resource references and bounded page
+ranges for PDF fallbacks. If page preparation returns a generation_request,
+answer that request with the external Agent and return the response with its
+request_hash. The external executor still validates content and rendered pixels.
 
 Keep one canonical step contract in working context. Avoid echoing full contracts,
 HTML, base64 assets or duplicated page copy. Separate page workers are optional;
