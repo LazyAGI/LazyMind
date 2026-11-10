@@ -17,9 +17,14 @@ describe("DocumentVocabularyPanel", () => {
   it("renders readable word cards including phonetics, meaning and bilingual source", async () => {
     render(<DocumentVocabularyPanel documentId="doc-1" />);
     const card = await screen.findByRole("article");
-    for (const text of ["workload", "/ˈwɜːkləʊd/", "n.", "工作负载", "A varied workload.", "多样的工作负载。"])
+    for (const text of ["workload", "/ˈwɜːkləʊd/", "工作负载", "A varied workload.", "多样的工作负载。"])
       expect(within(card).getByText(text)).toBeInTheDocument();
     expect(within(card).getByText("Page 7")).toBeInTheDocument();
+    expect(card.querySelector("details")).not.toHaveAttribute("open");
+    expect(within(card).getByText("A varied workload.")).not.toBeVisible();
+    fireEvent.click(within(card).getByText("vocabulary.document.exampleDetails"));
+    expect(card.querySelector("details")).toHaveAttribute("open");
+    expect(within(card).getByText("A varied workload.")).toBeVisible();
   });
   it("uses document context without attaching an unrelated example translation", async () => {
     vi.mocked(listDocumentVocabulary).mockResolvedValue([word({ source: { page: 2, context_sentence: "This paper studies workload diversity." } })]);
@@ -34,16 +39,25 @@ describe("DocumentVocabularyPanel", () => {
     render(<DocumentVocabularyPanel documentId="doc-1" />);
     const cards = await screen.findAllByRole("article");
     expect(within(cards[1]).queryByRole("button", { name: "vocabulary.document.deleteWord" })).toBeNull();
-    fireEvent.click(within(cards[0]).getByRole("button", { name: "vocabulary.document.removeSource" }));
+    fireEvent.click(within(cards[0]).getByRole("button", { name: "vocabulary.document.moreActions" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "vocabulary.document.removeSource" }));
     expect(removeDocumentVocabulary).not.toHaveBeenCalled();
     await act(async () => { await confirm.mock.calls[0][0].onOk?.(); });
     expect(removeDocumentVocabulary).toHaveBeenCalledWith("doc-1", "word-1");
     const card = await screen.findByText("workload");
-    fireEvent.click(within(card.closest("article")!).getByRole("button", { name: "vocabulary.document.deleteWord" }));
+    fireEvent.click(within(card.closest("article")!).getByRole("button", { name: "vocabulary.document.moreActions" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "vocabulary.document.deleteWord" }));
     expect(deleteDocumentVocabulary).not.toHaveBeenCalled();
     await act(async () => { await confirm.mock.calls[1][0].onOk?.(); });
     expect(deleteDocumentVocabulary).toHaveBeenCalledWith("doc-1", "word-1");
     confirm.mockRestore();
+  });
+  it("does not offer whole-word deletion for a shared word", async () => {
+    vi.mocked(listDocumentVocabulary).mockResolvedValue([word({ can_delete: false })]);
+    render(<DocumentVocabularyPanel documentId="doc-1" />);
+    fireEvent.click(await screen.findByRole("button", { name: "vocabulary.document.moreActions" }));
+    expect(await screen.findByRole("menuitem", { name: "vocabulary.document.removeSource" })).toBeInTheDocument();
+    expect(screen.queryByRole("menuitem", { name: "vocabulary.document.deleteWord" })).toBeNull();
   });
   it("shows load failure with retry instead of an empty list", async () => {
     vi.mocked(listDocumentVocabulary).mockRejectedValueOnce(new Error("offline"));

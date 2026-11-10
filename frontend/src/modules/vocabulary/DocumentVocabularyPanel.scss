@@ -31,9 +31,10 @@
     &__source &__translation { margin-top: 6px; color: var(--vocabulary-secondary); }
     &__location { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 12px; color: var(--vocabulary-secondary); font-size: 12px; }
     &__location .ant-tag { margin: 0; white-space: normal; }
-    &__actions { display: flex; flex-wrap: wrap; gap: 4px 8px; margin-top: 12px; padding-top: 8px; border-top: 1px solid var(--vocabulary-card-border); }
-    &__actions .ant-btn { height: auto; min-height: 28px; padding: 2px 4px; font-size: 12px; white-space: normal; text-align: left; }
-    &__actions .ant-btn-dangerous { color: var(--vocabulary-danger); }
-    &__actions .ant-btn-dangerous:hover { color: var(--vocabulary-danger-hover); background: var(--vocabulary-danger-bg); }
+    &__identity { display: flex; flex: 1; min-width: 0; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; }
+    &__more.ant-btn { flex: 0 0 auto; padding: 0; width: 28px; height: 28px; border: 0; background: transparent; color: var(--vocabulary-secondary); }
+    &__details { margin-top: 12px; }
+    &__details > summary { cursor: pointer; width: fit-content; color: var(--vocabulary-secondary); font-size: 12px; }
+    &__details > summary:focus-visible { outline: 2px solid currentColor; outline-offset: 3px; }
   }
 }

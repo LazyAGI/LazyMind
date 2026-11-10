@@ -11138,6 +11138,8 @@ const zhCN = {
       empty: "本文档还没有添加生词",
       removeTitle: "从本文档移除 {{term}}？",
       removeDescription: "只移除当前文档来源；单词、其他来源和复习记录都会保留。",
+      moreActions: "{{term}} 的更多操作",
+      exampleDetails: "例句与详情",
       removeSource: "移除来源",
       deleteTitle: "彻底删除 {{term}}？",
       deleteDescription: "这是该单词的最后一个来源。删除后，相关例句和复习数据也会删除。",

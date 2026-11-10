@@ -1,4 +1,5 @@
-import { Alert, Button, Empty, Modal, Spin, Tag, theme } from "antd";
+import { Alert, Button, Dropdown, Empty, Modal, Spin, Tag, theme } from "antd";
+import { MoreOutlined } from "@ant-design/icons";
 import { useEffect, useState, type CSSProperties } from "react";
 import { useTranslation } from "react-i18next";
 import {
@@ -78,13 +79,22 @@ function DocumentVocabularyContent({ documentId, refreshToken = 0 }: PanelProps)
             return (
               <article className="document-vocabulary-card" key={item.id} aria-label={item.term}>
                 <header className="document-vocabulary-card__header">
-                  <h3>{item.term}</h3>
+                  <div className="document-vocabulary-card__identity"><h3>{item.term}</h3>
                   {item.phonetic && <span className="document-vocabulary-card__phonetic">{item.phonetic}</span>}
+                  </div>
+                  <Dropdown destroyOnHidden trigger={["click"]} menu={{ items: [
+                    { key: "remove", label: t("vocabulary.document.removeSource") },
+                    ...(item.can_delete ? [{ key: "delete", label: t("vocabulary.document.deleteWord"), danger: true }] : []),
+                  ], onClick: ({ key }) => confirmAction(item, key === "delete") }}>
+                    <Button className="document-vocabulary-card__more" type="text" size="small" icon={<MoreOutlined />} aria-label={t("vocabulary.document.moreActions", { term: item.term })} />
+                  </Dropdown>
                 </header>
                 <div className="document-vocabulary-card__meaning">
-                  {item.part_of_speech && <span className="document-vocabulary-card__pos">{item.part_of_speech}</span>}
-                  <span>{item.meaning || item.definition}</span>
+                  <span>{item.meaning}</span>
                 </div>
+                <details className="document-vocabulary-card__details">
+                  <summary>{t("vocabulary.document.exampleDetails")}</summary>
+                  {item.definition && <p>{item.definition}</p>}
                 {sentence && (
                   <blockquote className="document-vocabulary-card__source">
                     <p>{sentence}</p>
@@ -97,10 +107,7 @@ function DocumentVocabularyContent({ documentId, refreshToken = 0 }: PanelProps)
                     : item.source.segment_id || t("vocabulary.document.document") })}</span>
                   {item.source_count > 1 && <Tag>{t("vocabulary.document.sourceCount", { count: item.source_count })}</Tag>}
                 </div>
-                <footer className="document-vocabulary-card__actions">
-                  <Button size="small" type="text" onClick={() => confirmAction(item, false)}>{t("vocabulary.document.removeSource")}</Button>
-                  {item.can_delete && <Button size="small" type="text" danger onClick={() => confirmAction(item, true)}>{t("vocabulary.document.deleteWord")}</Button>}
-                </footer>
+                </details>
               </article>
             );
           })}

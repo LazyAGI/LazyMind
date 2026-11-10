@@ -11397,6 +11397,8 @@ const enUS = {
       empty: "No vocabulary has been added from this document",
       removeTitle: "Remove {{term}} from this document?",
       removeDescription: "Only this document source will be removed. The word, its other sources, and review history will be preserved.",
+      moreActions: "More actions for {{term}}",
+      exampleDetails: "Example and details",
       removeSource: "Remove source",
       deleteTitle: "Delete {{term}} permanently?",
       deleteDescription: "This is the word's last source. Its examples and review data will also be deleted.",
