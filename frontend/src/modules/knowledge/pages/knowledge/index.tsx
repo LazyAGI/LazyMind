@@ -1074,24 +1074,6 @@ const KnowledgeDocumentContent = () => {
             {pdfSourceView === "original" ? "返回普通 PDF" : "查看原始文件"}
           </Button>
         ) : null}
-        {pdfCapabilities?.translations.length ? (
-          <Select
-            size="small"
-            aria-label="选择缓存译本"
-            placeholder="缓存译本"
-            style={{ width: 150 }}
-            value={selectedPdfArtifact?.kind === "TRANSLATION_PDF" ? selectedPdfArtifact.id : undefined}
-            options={pdfCapabilities.translations.map((artifact) => ({
-              value: artifact.id,
-              label: `${artifact.target_language === "en" ? "英文" : "中文"} · ${artifact.provider_type === "llm" ? "大模型" : "翻译 API"}`,
-            }))}
-            onChange={(id: string) => {
-              const artifact = pdfCapabilities.translations.find((artifact) => artifact.id === id);
-              if (artifact) selectTranslationArtifact(artifact);
-              showFullTranslation();
-            }}
-          />
-        ) : null}
         {(isPdfDocument && pdfCapabilities?.searchable_artifact) || (selectedPdfArtifact?.kind === "TRANSLATION_PDF") ? (
           <Popover
             trigger="click"
@@ -1331,11 +1313,11 @@ const KnowledgeDocumentContent = () => {
                 </div>
                 {translationPanelMode === "document" && <FullDocumentTranslationPanel
                   datasetId={knowledgeBaseId} documentId={knowledgeId}
-                  artifacts={pdfCapabilities?.translations || []} artifact={sidebarTranslation}
+                  artifact={sidebarTranslation}
                   supported={canTranslateDocument} busy={translationInProgress}
+                  canWrite={hasWritePermission}
                   progressNotice={<PdfTranslationNotice documentId={knowledgeId} job={pdfTask} preparing={translationPreparing} detail={pdfTaskDetail} providerLabel={displayTranslationName(getTranslationProgressLabel(pdfTask, translationPreparing, translationMode, translationProvider))} onCancel={() => void cancelTranslationJob()} />}
                   onTranslate={openNewTranslation}
-                  onSelect={artifact => {selectTranslationArtifact(artifact); setPdfSourceView("original");}}
                   onRetranslateSelection={selection => void openTranslationRevision(selection, "translation")}
                   onRegenerate={openTranslationRegeneration}
                   onHalfWidth={workspaceWidth >= 900 && (panelLayout === "left" || panelLayout === "right") ? () => resizePaperAssistant(workspaceWidth * .5) : undefined}

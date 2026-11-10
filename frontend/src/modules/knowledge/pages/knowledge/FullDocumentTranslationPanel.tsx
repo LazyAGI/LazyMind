@@ -1,38 +1,55 @@
 import type { PdfTextSelection } from "@/components/ui";
-import { Button, Select } from "antd";
+import { Button, message } from "antd";
 import FileViewer from "@/modules/knowledge/components/FileViewer";
 import { pdfArtifactContentUrl, type PdfArtifact } from "@/modules/knowledge/api/pdfArtifacts";
-import type { ReactNode } from "react";
+import {useMemo,useState,type ReactNode} from "react";
+import {createTranslationAttachmentSaver,fetchTranslationFile} from '../../paper/translationAttachment';
 
 interface Props {
   datasetId: string;
   documentId: string;
-  artifacts: PdfArtifact[];
   artifact?: PdfArtifact;
   supported: boolean;
   busy: boolean;
   onTranslate: () => void;
-  onSelect: (artifact: PdfArtifact) => void;
   onRegenerate: (artifact: PdfArtifact) => void;
   onRetranslateSelection: (selection: PdfTextSelection) => void;
   onHalfWidth?: () => void;
   progressNotice?: ReactNode;
+  canWrite?: boolean;
 }
 
 export default function FullDocumentTranslationPanel(props: Props) {
   const { artifact } = props;
+  const [downloading,setDownloading]=useState(false);
+  const [attaching,setAttaching]=useState(false);
+  const [attachedId,setAttachedId]=useState('');
+  const saveAttachment=useMemo(()=>artifact?createTranslationAttachmentSaver(props.datasetId,props.documentId,artifact):undefined,[props.datasetId,props.documentId,artifact]);
+  const download=async()=>{
+    if(!artifact||downloading)return;
+    setDownloading(true);
+    try{
+      const file=await fetchTranslationFile(props.datasetId,props.documentId,artifact);
+      const url=URL.createObjectURL(file);const anchor=document.createElement('a');
+      anchor.href=url;anchor.download=file.name;anchor.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
+    }catch(error){message.error(error instanceof Error?error.message:'下载失败');}
+    finally{setDownloading(false);}
+  };
+  const attach=async()=>{
+    if(!artifact||!saveAttachment||attaching)return;
+    setAttaching(true);
+    try{await saveAttachment();setAttachedId(artifact.id);message.success('译本已加入该文献的附件');}
+    catch(error){message.error(error instanceof Error?error.message:'添加附件失败');}
+    finally{setAttaching(false);}
+  };
   return <section className="knowledge-full-translation" aria-label="全文翻译">
     {props.progressNotice}
     <div className="knowledge-full-translation-toolbar">
-      {props.artifacts.length > 0 && <Select
-        aria-label="全文翻译版本" value={artifact?.id}
-        options={props.artifacts.map((item, index) => ({value:item.id, label:`${item.target_language === "en" ? "英文" : "中文"} · ${item.provider_type === "llm" ? "大模型" : "翻译 API"} · ${index + 1}`}))}
-        onChange={(id: string) => {const selected = props.artifacts.find(item => item.id === id); if (selected) props.onSelect(selected);}}
-      />}
-      <Button type={artifact ? "default" : "primary"} disabled={!props.supported || props.busy} loading={props.busy} onClick={props.onTranslate}>
-        {props.busy ? "翻译进行中" : artifact ? "新建全文翻译" : "开始全文翻译"}
+      <Button type={artifact ? "default" : "primary"} disabled={!props.supported || props.busy} loading={props.busy} onClick={artifact?()=>props.onRegenerate(artifact):props.onTranslate}>
+        {props.busy ? "翻译进行中" : artifact ? "重新翻译" : "开始全文翻译"}
       </Button>
-      {artifact && <Button disabled={props.busy} onClick={() => props.onRegenerate(artifact)}>重新生成译本</Button>}
+      {artifact && <Button loading={downloading} onClick={()=>void download()}>下载译本</Button>}
+      {artifact && /\.pdf$/i.test(artifact.filename) && <Button loading={attaching} disabled={!props.canWrite||attachedId===artifact.id} onClick={()=>void attach()}>{attachedId===artifact.id?'已加入文献附件':'加入文献附件'}</Button>}
       {props.onHalfWidth && <Button onClick={props.onHalfWidth}>半屏阅读</Button>}
     </div>
     {artifact ? <div className="knowledge-full-translation-viewer">

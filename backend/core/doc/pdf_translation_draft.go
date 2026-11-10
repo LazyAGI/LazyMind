@@ -299,7 +299,8 @@ func RevisePDFTranslation(w http.ResponseWriter, r *http.Request) {
 		Filename: filename, ContentType: mime.TypeByExtension(".pdf"), TargetLanguage: base.TargetLanguage,
 		ProviderType: provenance.ProviderType, Provider: provenance.Provider, Model: provenance.Model, WarningCount: renderResult.WarningCount,
 		CreatedAt: time.Now().UTC().Format(time.RFC3339)}
-	ext.PDFArtifacts = append(ext.PDFArtifacts, artifact)
+	var replaced []pdfArtifactRecord
+	ext.PDFArtifacts, replaced = replaceArtifactWithSameCacheKey(ext.PDFArtifacts, artifact)
 	rawExt, err := json.Marshal(ext)
 	if err != nil || store.DB().WithContext(r.Context()).Model(&row).Update("ext", rawExt).Error != nil {
 		cleanup()
@@ -307,5 +308,6 @@ func RevisePDFTranslation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	_ = os.Remove(translationsPath)
+	removeReplacedTranslationFiles(replaced, artifact)
 	common.ReplyOK(w, artifact)
 }

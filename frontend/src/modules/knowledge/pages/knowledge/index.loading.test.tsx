@@ -320,7 +320,7 @@ it('shows a completed background translation in the sidebar without replacing th
 });
 
 
-it('keeps the chosen sidebar translation when switching the main searchable PDF', async () => {
+it('shows only the current translation and keeps it when switching the main searchable PDF', async () => {
   useDatasetPermissionStore.getState().setCurrentDataset({dataset_id:'library',scene:'general'} as Dataset);
   const older={id:'older',kind:'TRANSLATION_PDF',cache_key:'older',filename:'older.pdf',target_language:'zh',provider_type:'llm',created_at:'2026-11-08T00:00:00Z'};
   const newer={...older,id:'newer',filename:'newer.pdf',target_language:'en'};
@@ -333,15 +333,16 @@ it('keeps the chosen sidebar translation when switching the main searchable PDF'
   const {container}=renderDocument();
   fireEvent.click(await screen.findByRole('button',{name:/^Translation$|^翻译$/}));
   fireEvent.click(screen.getByText('全文翻译'));
-  fireEvent.mouseDown(await screen.findByRole('combobox',{name:'全文翻译版本'}));
-  fireEvent.click(await screen.findByText('中文 · 大模型 · 1'));
-  expect(container.querySelector('.knowledge-full-translation-viewer [data-filename="older.pdf"]')).not.toBeNull();
+  expect(screen.queryByRole('combobox',{name:'全文翻译版本'})).not.toBeInTheDocument();
+  expect(screen.getByRole('button',{name:'下载译本'})).toBeVisible();
+  expect(screen.getByRole('button',{name:'加入文献附件'})).toBeVisible();
+  expect(container.querySelector('.knowledge-full-translation-viewer [data-filename="newer.pdf"]')).not.toBeNull();
   fireEvent.click(screen.getByRole('button',{name:/Document actions and translation|文档操作与翻译/}));
   fireEvent.click(await screen.findByRole('button',{name:'返回普通 PDF'}));
   expect(container.querySelector('.paper-reader-pane [data-testid="file-viewer"]')?.getAttribute('data-file')).toContain('/searchable:content');
   fireEvent.click(screen.getByText('翻译版'));
-  expect(screen.getByRole('combobox',{name:'选择缓存译本'}).closest('.ant-select')).toHaveTextContent('中文');
-  expect(container.querySelector('.knowledge-full-translation-viewer [data-filename="older.pdf"]')).not.toBeNull();
+  expect(screen.queryByRole('combobox',{name:'选择缓存译本'})).not.toBeInTheDocument();
+  expect(container.querySelector('.knowledge-full-translation-viewer [data-filename="newer.pdf"]')).not.toBeNull();
 });
 
 it('previews a sidebar drag without rerendering the PDF or persisting each pointer movement', async () => {
