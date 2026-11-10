@@ -57,9 +57,10 @@ func (a *Adapter) forDSHProfile(name, cli string) *Adapter {
 
 // Records preserve retry intent and diagnostics. Readiness is checked against disk.
 type dshInstallRecord struct {
-	Action   string            `json:"action,omitempty"`
-	Root     string            `json:"root"`
-	Profiles map[string]string `json:"profiles"`
+	Action            string            `json:"action,omitempty"`
+	PendingDisconnect bool              `json:"pending_disconnect,omitempty"`
+	Root              string            `json:"root"`
+	Profiles          map[string]string `json:"profiles"`
 }
 
 func (a *Adapter) dshRecordPath() string {
@@ -233,6 +234,40 @@ func (a *Adapter) inspectDSHDesktop(ctx context.Context) dshDesktopRuntime {
 
 func (a *Adapter) dshDesktopStatus(ctx context.Context) agentintegration.Status {
 	return a.dshDesktopStatusWithRuntime(a.inspectDSHDesktop(ctx))
+}
+
+// Configuration stays enabled until disconnection succeeds. Keep the pending
+// user action separate so status reads and live heartbeats cannot complete it.
+func (a *Adapter) inspectDSHPendingDisconnect(ctx context.Context, s *agentintegration.Status) {
+	if !a.desktopDSHMode() {
+		return
+	}
+	r, err := a.dshRecord()
+	if err != nil || !r.PendingDisconnect || !s.CanDisconnect {
+		return
+	}
+	s.RetryAction = "disconnect"
+	// Preserve actionable configuration failures, including partially removed profiles.
+	if s.Issue != nil || s.State == agentintegration.Failed || s.State == agentintegration.Conflict {
+		return
+	}
+	cli, err := agentexec.FindDSHDesktopCLI()
+	var running bool
+	if err == nil {
+		running, err = a.isDSHDesktopRunning(ctx, cli)
+	}
+	if err != nil {
+		s.State, s.Issue = agentintegration.Failed, dshIssue("process_inspection_failed", "")
+		sanitizeDSHStatus(s)
+		return
+	}
+	if running {
+		*s = agentintegration.RequireQuit(*s, "disconnect")
+		return
+	}
+	s.State = agentintegration.ActionRequired
+	s.Issue = &agentintegration.Issue{Code: "disconnect_pending"}
+	s.Message = "DeepSeek Harness has quit. Retry disconnection to finish."
 }
 
 // Re-read managed files on every call. A disconnect never changes dependencies,
@@ -542,6 +577,7 @@ func (a *Adapter) changeDSHDesktop(ctx context.Context, connect bool) agentinteg
 		return dshFailure(s, err)
 	}
 	r.Action = "connect"
+	r.PendingDisconnect = !connect
 	s.RetryAction = ""
 	if !connect {
 		r.Action = "disconnect"
@@ -622,7 +658,19 @@ func (a *Adapter) changeDSHDesktop(ctx context.Context, connect bool) agentinteg
 	if connect {
 		return a.dshDesktopStatus(ctx)
 	}
-	return a.dshDesktopStatusWithRuntime(runtime)
+	s = a.dshDesktopStatusWithRuntime(runtime)
+	a.inspectConfiguration(&s)
+	if s.State == agentintegration.Ready && s.Enabled != nil && !*s.Enabled && !s.CanDisconnect {
+		r.PendingDisconnect = false
+		body, err := json.Marshal(r)
+		if err != nil {
+			return dshFailure(s, err)
+		}
+		if err := writeConfigFile(a.dshRecordPath(), body); err != nil {
+			return dshFailure(s, fmt.Errorf("save DSH disconnection result: %w", err))
+		}
+	}
+	return s
 }
 
 func (a *Adapter) dshDesktopWorkflowConfigured(runtime dshDesktopRuntime) bool {

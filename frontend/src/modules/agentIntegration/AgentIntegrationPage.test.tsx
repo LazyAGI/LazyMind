@@ -1729,6 +1729,50 @@ describe("AgentIntegrationPage", () => {
     expect(mocks.action).not.toHaveBeenCalled();
   });
 
+  it("keeps a pending DSH disconnect through polls, focus, remount and retry", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const agent = "deepseek-harness";
+    const connected = { agent, display_name: "DeepSeek Harness", state: "enabled", enabled: true,
+      can_connect: true, can_disconnect: true, requirements: [{ id: "dsh_desktop", satisfied: true }] };
+    const quit = { ...connected, state: "action_required", retry_action: "disconnect",
+      action: { kind: "quit_agent" }, issue: { code: "quit_required" } };
+    const exited = { ...quit, action: undefined, issue: { code: "disconnect_pending" } };
+    const disconnected = { ...connected, state: "ready", enabled: false, can_disconnect: false };
+    mocks.statuses.mockResolvedValue({ ok: true, data: { [agent]: connected } });
+    mocks.action.mockResolvedValue({ ok: true, data: quit });
+    const first = render(<AgentIntegrationPage />);
+    let card = expandAgent(agent);
+    const toggle = await within(card).findByRole("switch");
+    await waitFor(() => expect(toggle).toBeChecked());
+    fireEvent.click(toggle);
+    await within(card).findByRole("button", { name: zhCN.agentIntegration.quitRequired.retryDisconnect });
+    mocks.statuses.mockResolvedValue({ ok: true, data: { [agent]: quit } });
+    const polls = mocks.statuses.mock.calls.length;
+    await act(async () => { await vi.advanceTimersByTimeAsync(5100); });
+    expect(mocks.statuses.mock.calls.length).toBeGreaterThan(polls);
+    expect(card.querySelector(".agent-integration-stage-hint.is-warning")).not.toBeNull();
+    mocks.statuses.mockResolvedValue({ ok: true, data: { [agent]: exited } });
+    fireEvent.focus(window);
+    await within(card).findByText("DeepSeek Harness 已退出，请点击「重试关闭接入」完成关闭。");
+    expect(toggle).toBeChecked();
+    expect(mocks.action).toHaveBeenCalledTimes(1);
+    first.unmount();
+    render(<AgentIntegrationPage />);
+    card = expandAgent(agent);
+    await within(card).findByText("DeepSeek Harness 已退出，请点击「重试关闭接入」完成关闭。");
+    // A failed health refresh must not erase the user action either.
+    mocks.statuses.mockResolvedValue({ ok: false, reason: "unavailable" });
+    await act(async () => { await vi.advanceTimersByTimeAsync(5100); });
+    expect(card.querySelector(".agent-integration-stage-hint.is-warning")).not.toBeNull();
+    expect(within(card).getByText("DeepSeek Harness 已退出，请点击「重试关闭接入」完成关闭。")).toBeInTheDocument();
+    mocks.action.mockResolvedValue({ ok: true, data: disconnected });
+    mocks.statuses.mockResolvedValue({ ok: true, data: { [agent]: disconnected } });
+    fireEvent.click(within(card).getByRole("button", { name: zhCN.agentIntegration.quitRequired.retryDisconnect }));
+    await waitFor(() => expect(within(card).getByRole("switch")).not.toBeChecked());
+    expect(card.querySelector(".agent-integration-stage-hint.is-warning")).toBeNull();
+    expect(mocks.action).toHaveBeenLastCalledWith(agent, "disconnect");
+  });
+
   it("preserves disconnect intent when retrying a manual quit request", async () => {
     const agent = "deepseek-harness";
     const status = { agent, display_name: "DeepSeek Harness", state: "action_required", enabled: true,
