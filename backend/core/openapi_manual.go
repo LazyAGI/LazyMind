@@ -1218,10 +1218,11 @@ func manualPaths() map[string]any {
 			jsonBody(refSchema("ScheduleMoveRequest"), true), map[string]any{"description": "Schedule moved"},
 		)},
 		"/task-center/workbench": map[string]any{"get": op(
-			"Summarize task categories with four previews per page", queryParams(
+			"Summarize task categories with paginated previews", queryParams(
 				param("query", "task_type", false, strSchema()), param("query", "keyword", false, strSchema()),
 				param("query", "category", false, enumStringSchema("attention", "running", "paused", "failed", "recent", "canceled")),
 				param("query", "page", false, intSchema()),
+				param("query", "page_size", false, map[string]any{"type": "integer", "minimum": 1, "maximum": 100, "default": 4}),
 			), nil, response(200, "Task-center workbench", refSchema("TaskCenterWorkbenchResponse")),
 		)},
 		"/task-center/tasks": map[string]any{"get": op(

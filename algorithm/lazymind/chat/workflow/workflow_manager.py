@@ -13,6 +13,7 @@ import logging
 import re
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Literal, Optional, Union
+from urllib.parse import urlsplit
 
 import httpx
 import lazyllm
@@ -246,6 +247,9 @@ def _handoff_tool(
         state_refreshed = False
         for attempt in range(2):
             frontier = client.get_ready_steps(selected_session_id)
+            paused = _paused_workflow_result(frontier)
+            if paused:
+                return paused
             allowed = set(frontier.get('ready_steps') or [])
             allowed.update(frontier.get('retryable_steps') or [])
             rewindable = set(frontier.get('rewindable_steps') or [])
@@ -303,21 +307,22 @@ def _handoff_tool(
                     cfg.pop('user_authorized_workflow_retry', None)
                 if state_refreshed:
                     result.update(_state_refresh_notice())
+                if result.get('accepted') is True:
+                    # Core waits for execution and stop acknowledgements. Preserve
+                    # the confirmed pause/completion/approval boundary in Chat.
+                    result = _with_terminal_agent_control(result)
+                    result.setdefault('_agent_control', {
+                        'stop': True,
+                        'reason': 'workflow_handoff',
+                        'final_text': '本次工作流执行已结束，请在工作流中查看结果。',
+                    })
+                    return _compact_transition_result(result) if step_id in rewindable else result
                 if step_id in rewindable:
                     result = _compact_transition_result(result)
-                if result.get('accepted') is True:
-                    # Structured tool results are consumed by the executor before
-                    # another model call, including sessions created in this turn.
-                    return {
-                        **result,
-                        '_agent_control': {
-                            'stop': True,
-                            'reason': 'workflow_handoff',
-                            'final_text': '已交由工作流执行，请在工作流中查看进度和结果。',
-                        },
-                    }
                 return _result_text(result)
             except WorkflowClientError as exc:
+                if exc.code == 'WORKFLOW_PAUSED':
+                    return _paused_workflow_result({'outcome': 'workflow_paused', 'session_id': selected_session_id})
                 pending = _approval_blocked_result(exc)
                 if pending:
                     return pending
@@ -328,7 +333,7 @@ def _handoff_tool(
 
     advance_step_and_hand_off.__doc__ = (
         'Execute one exact Runtime-returned ready, retryable, rewindable, or continue target '
-        'and end this Chat turn after the Host accepts the post-execution checkpoint. '
+        'and wait for its execution result before ending this Chat turn at the post-execution checkpoint. '
         'Use for the LAST step the user asks to run before stopping or viewing results, '
         'including reruns and regardless of automatic approval defaults. Use advance_step '
         'for earlier steps in a requested multi-step path or when the user requests a Chat '
@@ -437,16 +442,33 @@ def _compact_transition_result(result: Dict[str, Any]) -> Dict[str, Any]:
     return compact
 
 
+def _paused_workflow_result(result: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    # State queries expose display directly; the SDK frontier wraps that state
+    # in projection, and execution receipts wrap it in workflow_state.
+    states = (result, result.get('projection'), result.get('workflow_state'))
+    paused = result.get('outcome') == 'workflow_paused' or any(
+        isinstance(value, dict) and isinstance(value.get('display'), dict)
+        and value['display'].get('status') == 'paused' for value in states
+    )
+    if not paused:
+        return None
+    return {
+        **result,
+        'status': 'paused', 'outcome': 'workflow_paused',
+        'ready_steps': [], 'retryable_steps': [],
+        'next_action': {'tool': None},
+        '_agent_control': {
+            'stop': True,
+            'reason': 'workflow_paused',
+            'final_text': '工作流已暂停，执行进度和已生成的结果已保留。你可以点击工作流中的「继续」恢复执行。',
+        },
+    }
+
+
 def _with_terminal_agent_control(result: Dict[str, Any], workflow_id: str = '') -> Dict[str, Any]:
-    if result.get('outcome') == 'workflow_paused':
-        return {
-            **result,
-            '_agent_control': {
-                'stop': True,
-                'reason': 'workflow_paused',
-                'final_text': '工作流已暂停，执行进度和已生成的结果已保留。你可以点击工作流中的「继续」恢复执行。',
-            },
-        }
+    paused = _paused_workflow_result(result)
+    if paused:
+        return paused
     pending = _input_required_result(result)
     if pending:
         return {**result, **pending}
@@ -564,12 +586,14 @@ def _safe_session_tools(
     @_register_host_file(capability)
     def get_workflow_state() -> Dict[str, Any]:
         """Read this conversation's authoritative Workflow state."""
-        return toolkit.get_workflow_state(session_id())
+        result = toolkit.get_workflow_state(session_id())
+        return _paused_workflow_result(result) or result
 
     @_register_host_file(capability)
     def get_ready_steps() -> Dict[str, Any]:
         """Read exact forward, retryable, and rewindable targets for this Session."""
-        return _compact_model_frontier(toolkit.get_ready_steps(session_id()))
+        result = toolkit.get_ready_steps(session_id())
+        return _compact_model_frontier(_paused_workflow_result(result) or result)
 
     @_register_host_file(capability)
     def advance_step(step_ids: List[str]) -> Dict[str, Any]:
@@ -583,6 +607,9 @@ def _safe_session_tools(
         state_refreshed = False
         for attempt in range(2):
             frontier = toolkit.get_ready_steps(selected_session_id)
+            paused = _paused_workflow_result(frontier)
+            if paused:
+                return paused
             allowed = set(frontier.get('ready_steps') or [])
             allowed.update(frontier.get('retryable_steps') or [])
             rewindable = set(frontier.get('rewindable_steps') or [])
@@ -663,6 +690,8 @@ def _safe_session_tools(
                     result = _compact_transition_result(result)
                 return _compact_model_frontier(result)
             except WorkflowClientError as exc:
+                if exc.code == 'WORKFLOW_PAUSED':
+                    return _paused_workflow_result({'outcome': 'workflow_paused', 'session_id': selected_session_id})
                 pending = _approval_blocked_result(exc)
                 if pending:
                     return pending
@@ -1816,8 +1845,35 @@ def _workflow_trigger_tools(
                     managed, resolve_fields, startup_card, startup_metadata,
                 )
                 semantic_values = {}
+                resolved_attachment_paths = {}
                 if managed(runtime):
-                    previous = (bound_clarification or {}).get('values') or {}
+                    previous = dict((bound_clarification or {}).get('values') or {})
+                    for field in _runtime_clarification_fields(runtime):
+                        attachment = field.get('attachment') or {}
+                        material_id = attachment.get('material_id')
+                        if not attachment.get('required') or 'default' not in field:
+                            continue
+                        if input_types.get(material_id) not in {'file', 'image'}:
+                            continue
+                        # A defaulted attachment selector describes an actual
+                        # binding, not a model guess or a previous card choice.
+                        previous[field['id']] = field['default']
+                        reference = input_bindings.get(material_id, '').strip()
+                        if not reference:
+                            continue
+                        path, error = _resolve_workflow_attachment(reference)
+                        if error or not path:
+                            raise WorkflowClientError(
+                                'ATTACHMENT_NOT_SELECTED',
+                                error or 'The referenced conversation attachment was not found.',
+                            )
+                        accepted = tuple(ext.lower() for ext in attachment.get('accept') or [])
+                        if accepted and not urlsplit(path).path.lower().endswith(accepted):
+                            raise WorkflowClientError(
+                                'WORKFLOW_INPUT_INVALID', 'The bound attachment does not match the declared file types.',
+                            )
+                        resolved_attachment_paths[material_id] = path
+                        previous[field['id']] = attachment['when_choice']
                     semantic_values, missing = resolve_fields(runtime, bound_query, input_bindings, previous)
                     if missing:
                         from lazyllm.tools.agent.base import _write_agent_data
@@ -1876,7 +1932,10 @@ def _workflow_trigger_tools(
                     # stack. Keep scalar-only Workflow launches independent of
                     # those optional dependencies and load it only for a file
                     # (or legacy untyped) material.
-                    path, error = _resolve_workflow_attachment(binding)
+                    if material_id in resolved_attachment_paths:
+                        path, error = resolved_attachment_paths[material_id], None
+                    else:
+                        path, error = _resolve_workflow_attachment(binding)
                     if material_type in {'file', 'image'} and (error or not path):
                         raise WorkflowClientError(
                             'ATTACHMENT_NOT_SELECTED',

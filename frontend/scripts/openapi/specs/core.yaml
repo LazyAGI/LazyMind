@@ -19883,6 +19883,14 @@ paths:
                   required: false
                   schema:
                     type: integer
+                - in: query
+                  name: page_size
+                  required: false
+                  schema:
+                    default: 4
+                    maximum: 100
+                    minimum: 1
+                    type: integer
             responses:
                 "200":
                     content:
@@ -19890,7 +19898,7 @@ paths:
                             schema:
                                 $ref: '#/components/schemas/TaskCenterWorkbenchResponse'
                     description: Task-center workbench
-            summary: Summarize task categories with four previews per page
+            summary: Summarize task categories with paginated previews
     /api/core/academic/chat-context:
         get:
             parameters:

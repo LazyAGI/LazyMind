@@ -118,7 +118,7 @@ AGENT_MODULE_TRACE = {
     'by_class': {
         'FunctionCall': False, 'ToolManager': False,
         'Pipeline': False, 'Diverter': False,
-        'ReactAgent': False, 'FallbackLLM': False,
+        'ReactAgent': False, 'FallbackLLM': False, 'CancellableLLM': False,
     },
     'by_name': {
         '_build_history': False, '_post_action': False,
@@ -175,6 +175,10 @@ class AgentExecutor:
             from .model_fallback import FallbackLLM, create_fallback_state
             fallback_state = create_fallback_state(llm, options)
             llm = FallbackLLM(fallback_state, cancel_check=options.extra_stop_condition)
+        elif (options.extra_stop_condition is not None and not options.context_preview
+              and isinstance(llm, lazyllm.OnlineChatModule)):
+            from .model_cancellation import CancellableLLM
+            llm = CancellableLLM(llm, cancel_check=options.extra_stop_condition)
         keep_full_turns = options.keep_full_turns
         if keep_full_turns is None:
             keep_full_turns = int(_cfg['agentic_keep_full_turns'])

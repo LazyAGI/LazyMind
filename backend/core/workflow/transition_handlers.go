@@ -866,6 +866,14 @@ func applyWorkflowTransition(ctx context.Context, tx *gorm.DB, sessionID string,
 				if toolErr != nil {
 					return toolErr
 				}
+				// Admit the controlled continuation before the native launcher reconciles
+				// status: a retry has invalidated the failed attempt, but its replacement
+				// does not exist yet. Activation and launch share this transaction.
+				if controlstore.Controlled(session) {
+					if err := acceptRunControl(ctx, tx, &session, "continue", nil, nil); err != nil {
+						return err
+					}
+				}
 				_, taskID, _, launchErr = launchWorkflowAttempt(ctx, tx, store.State(), session.ConversationID, session.TriggerHistoryID, session.CreateUserID, target.TaskID, session.WorkflowID+":"+target.TargetStepID, stepObjective, params, inputKeys, nodeDef.Outputs, req.LLMConfig, toolConfig, false, false)
 				if launchErr != nil {
 					return launchErr

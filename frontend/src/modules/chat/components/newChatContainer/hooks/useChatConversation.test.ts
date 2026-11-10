@@ -23,6 +23,7 @@ import enUS from "@/i18n/locales/en-US";
 const {
   listConversationsMock,
   getHistoryMock,
+  getChatStatusMock,
   listToolAssetsMock,
   waitForRuntimeCapabilityMock,
   scrollMock,
@@ -31,6 +32,7 @@ const {
   listConversationsMock: vi.fn(),
   stopGenerationMock: vi.fn(async () => ({})),
   getHistoryMock: vi.fn(),
+  getChatStatusMock: vi.fn(),
   listToolAssetsMock: vi.fn(),
   waitForRuntimeCapabilityMock: vi.fn(),
   scrollMock: {
@@ -81,6 +83,7 @@ vi.mock("@/modules/chat/utils/request", () => ({
   ChatServiceApi: () => ({
     conversationServiceListConversations: listConversationsMock,
     conversationServiceGetConversationHistory: getHistoryMock,
+    conversationServiceGetChatStatus: getChatStatusMock,
     conversationServiceStopChatGeneration: stopGenerationMock,
   }),
 }));
@@ -463,6 +466,8 @@ describe("useChatConversation regeneration recovery", () => {
     stopGenerationMock.mockClear();
     sessionStorage.clear();
     getHistoryMock.mockReset();
+    getChatStatusMock.mockReset();
+    getChatStatusMock.mockResolvedValue({ data: { is_generating: true } });
     scrollMock.isMouseScrollingRef.current = false;
     scrollMock.scrollToEnd.mockClear();
     scrollMock.scrollToEndImmediately.mockClear();
@@ -2578,6 +2583,57 @@ describe("useChatConversation regeneration recovery", () => {
     expect(result.current.messageList[1].run_terminal).toBeUndefined();
     unmount();
   });
+
+  it("keeps a generating cached reply recoverable after a stream failure", async () => {
+    vi.useFakeTimers();
+    const { stream, listeners } = createMockStream();
+    const resumed = createMockStream();
+    const onOpenResumeSSE = vi.fn(() => resumed.stream);
+    const { result, unmount } = renderConversation({ onOpenResumeSSE, onOpenSSE: vi.fn(() => stream) });
+    act(() => result.current.replaceMessageList("generating-cached", []));
+    await act(async () => { await result.current.sendMessage({ text: "question" }); });
+    act(() => result.current.replaceMessageList("generating-cached", [
+      { role: RoleTypes.ASSISTANT, delta: "partial", history_id: "h1", run_status: "generating" },
+    ]));
+    act(() => listeners.get("error")?.({ type: "error", status: 503 }));
+    expect(result.current.streamRecovery.status).toBe("resuming");
+    await act(async () => { await vi.advanceTimersByTimeAsync(1_000); });
+    expect(onOpenResumeSSE).toHaveBeenCalledTimes(1);
+    expect(result.current.isStreaming).toBe(true);
+    unmount();
+  });
+
+  it.each(["generating", "completed", "failed", "interrupted", "cancelled"])(
+    "reconciles persisted %s replies using their actual terminal state",
+    async (status) => {
+      vi.useFakeTimers();
+      const { stream } = createMockStream();
+      const resumed = createMockStream();
+      const onOpenResumeSSE = vi.fn(() => resumed.stream);
+      const { result, unmount } = renderConversation({ onOpenSSE: vi.fn(() => stream), onOpenResumeSSE });
+      act(() => result.current.replaceMessageList(`reconcile-${status}`, []));
+      await act(async () => { await result.current.sendMessage({ text: "question" }); });
+      getHistoryMock.mockResolvedValue({ data: { history: [{
+        id: "h1", seq: 1, query: "question", result: "partial", run_status: status,
+      }] } });
+      // A terminal history must take precedence over a stale generating cache.
+      await act(async () => { await result.current.retryStreamRecovery(); });
+      if (status === "generating") {
+        expect(result.current.streamRecovery.status).toBe("resuming");
+        expect(result.current.isStreaming).toBe(true);
+        expect(stream.close).not.toHaveBeenCalled();
+        await act(async () => { await vi.advanceTimersByTimeAsync(1_000); });
+        expect(onOpenResumeSSE).toHaveBeenCalledTimes(1);
+      } else {
+        expect(result.current.streamRecovery.status).toBe("idle");
+        expect(result.current.isStreaming).toBe(false);
+        expect(stream.close).toHaveBeenCalled();
+        await act(async () => { await vi.advanceTimersByTimeAsync(1_000); });
+        expect(onOpenResumeSSE).not.toHaveBeenCalled();
+      }
+      unmount();
+    },
+  );
 
   it("keeps temporary resume endpoint failures recoverable", async () => {
     const { stream, listeners } = createMockStream();
