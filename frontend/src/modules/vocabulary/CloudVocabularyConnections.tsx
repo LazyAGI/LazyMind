@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Alert, Button, Checkbox, Form, Input, Modal, Popconfirm, Select, Skeleton, Space, Switch, Tag, Typography } from "antd";
-import { ArrowRightOutlined, BookOutlined } from "@ant-design/icons";
+import { BookOutlined } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
 import { createCloudWordbook, disconnectCloudConnection, listCloudConnections, listCloudOperations, saveCloudConnection, syncCloudVocabulary, testCloudConnection, type CloudConnection, type CloudOperation, type CloudVocabularyProvider, type CloudWordbook } from "./cloudApi";
 import "./CloudVocabularyConnections.scss";
@@ -126,7 +126,7 @@ function ConnectionCard({ connection, operations, onSaved }: {connection: CloudC
     {operations.length>0 && <div className="vocabulary-cloud-operations"><Typography.Text type="secondary">{label("recent")}</Typography.Text><ul>{operations.slice(0,10).map(operation=><li key={operation.id}><Space wrap><strong>{operation.term}</strong><Tag>{t(`vocabularyCloud.status.${operation.status}`,{defaultValue:operation.status})}</Tag><small>{new Date(operation.updated_at).toLocaleString()}</small></Space>{operation.last_error && <div>{cloudErrorMessage(operation.last_error,t)}</div>}</li>)}</ul></div>}
   </section>;
 }
-export default function CloudVocabularyConnections({onReadyCountChange}: {onReadyCountChange?: (count:number)=>void}) {
+export default function CloudVocabularyConnections() {
   const {t}=useTranslation();
   const [connections,setConnections]=useState<CloudConnection[]>([]);
   const [operations,setOperations]=useState<CloudOperation[]>([]);
@@ -151,24 +151,21 @@ export default function CloudVocabularyConnections({onReadyCountChange}: {onRead
     };
     void poll();return()=>{disposed=true;clearTimeout(timer);};
   },[reload]);
-  useEffect(()=>{onReadyCountChange?.(connections.filter(item=>item.configured && item.enabled).length);},[connections,onReadyCountChange]);
   const selectedConnection=selected ? connections.find(item=>item.provider===selected)||emptyConnection(selected) : null;
   return <>
     {providers.map(provider=>{
       const connection=connections.find(item=>item.provider===provider);
       const status=error ? "unavailable" : !loaded ? "loading" : connection?.target_id ? connection.enabled ? "connectedEnabled" : "connectedPaused" : "incomplete";
-      return <article key={provider} className="model-provider-cloud-doc-resource-row">
-        <span className="model-provider-cloud-doc-resource-logo"><BookOutlined/></span>
-        <div className="model-provider-cloud-doc-resource-copy">
+      return <article key={provider} className="external-app-card">
+        <span className="external-app-icon"><BookOutlined/></span>
+        <div className="external-app-copy">
           <h3>{t(`vocabularyCloud.${provider}`)}</h3>
           <p>{t("vocabularyCloud.providerDescription")}</p>
         </div>
-        <Tag className="model-provider-cloud-doc-resource-status" color={error ? "warning" : connection?.enabled ? "success" : "default"}>{t(`vocabularyCloud.${status}`)}</Tag>
-        <div className="model-provider-cloud-doc-resource-controls">
-          <button type="button" className="model-provider-cloud-doc-resource-action" aria-label={`${t(`vocabularyCloud.${provider}`)} ${t("vocabularyCloud.manage")}`} onClick={()=>setSelected(provider)}>
-            {t("vocabularyCloud.manage")}<ArrowRightOutlined/>
-          </button>
-        </div>
+        <Tag className="external-app-status" color={error ? "warning" : connection?.enabled ? "success" : "default"}>{t(`vocabularyCloud.${status}`)}</Tag>
+        <Button aria-label={`${t(`vocabularyCloud.${provider}`)} ${t("vocabularyCloud.manage")}`} onClick={()=>setSelected(provider)}>
+          {t("vocabularyCloud.manage")}
+        </Button>
       </article>;
     })}
     <Modal open={Boolean(selected)} title={selected ? t(`vocabularyCloud.${selected}`) : ""} onCancel={()=>setSelected(null)} footer={null} width={680} destroyOnHidden styles={{body:{maxHeight:"75vh",overflowY:"auto"}}}>

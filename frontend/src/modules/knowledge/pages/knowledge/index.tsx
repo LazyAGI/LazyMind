@@ -191,6 +191,8 @@ const KnowledgeDocumentContent = () => {
   const panelDrag=useRef<{x:number;y:number;left:number;top:number}>();
   const [notesRevision,setNotesRevision]=useState(0);
   const [selectedNoteId,setSelectedNoteId]=useState<string>();
+  const [paperNotesTab,setPaperNotesTab]=useState<"notes"|"vocabulary">("notes");
+  const paperNotesLabel=isVocabularyEnabled()?(i18n.language.startsWith("zh")?"笔记和生词":"Notes & vocabulary"):(i18n.language.startsWith("zh")?"笔记":"Notes");
   const [savedNotes,setSavedNotes]=useState<{key:string;highlights:PdfNoteHighlight[]}>();
   const [paperAssistantWidth, setPaperAssistantWidth] = useState(() => {
     try { const saved = Number(localStorage.getItem("paper-reader:assistant-width")); return Number.isFinite(saved) && saved >= 320 ? saved : 400; } catch { return 400; }
@@ -312,6 +314,14 @@ const KnowledgeDocumentContent = () => {
   } = usePdfSelectionTranslation(onTranslationError);
   const [vocabularySelection, setVocabularySelection] = useState<PdfTextSelection | null>(null);
   const [vocabularyRefreshToken, setVocabularyRefreshToken] = useState(0);
+  const handleVocabularyAdded=()=>{
+    setVocabularyRefreshToken(value=>value+1);
+    if(isVocabularyEnabled()){
+      if(isPaperDocument){setPaperNotesTab("vocabulary");setPreviewSideTab("notes");}
+      else{setPaperNavTab("vocabulary");setPreviewSideTab("navigation");}
+    }
+    setPreviewSideCollapsed(false);
+  };
   const [referenceImportSelection, setReferenceImportSelection] = useState<{ text: string; referenceId?: string; requestId: number }>();
   const [referenceActions, setReferenceActions] = useState<PdfReferenceAction[]>([]);
   const [referenceCount, setReferenceCount] = useState<number>();
@@ -1074,7 +1084,7 @@ const KnowledgeDocumentContent = () => {
               pdfNavigateToPage={pdfNavigateToPage}
               pdfNavigateToPosition={pdfNavigateToPosition}
               pdfNoteHighlights={savedNotes?.key===`${knowledgeBaseId}/${knowledgeId}`?savedNotes.highlights:[]}
-              onPdfNoteHighlightClick={id=>{setSelectedNoteId(id);setPreviewSideTab('notes');setPreviewSideCollapsed(false);}}
+              onPdfNoteHighlightClick={id=>{setPaperNotesTab('notes');setSelectedNoteId(id);setPreviewSideTab('notes');setPreviewSideCollapsed(false);}}
               file={previewFile}
               fileName={knowledgeDetail?.display_name || ""}
               segment={segmentDetail}
@@ -1120,7 +1130,7 @@ const KnowledgeDocumentContent = () => {
                 onPointerMove={event=>{const start=panelDrag.current;if(start)moveFloatingPanel(start.left+event.clientX-start.x,start.top+event.clientY-start.y);}}
                 onPointerUp={()=>{panelDrag.current=undefined;}} onPointerCancel={()=>{panelDrag.current=undefined;}} onLostPointerCapture={()=>{panelDrag.current=undefined;}}
                 onKeyDown={event=>{if(panelLayout!=='floating'||event.target!==event.currentTarget)return;const offset=event.key==='ArrowLeft'?[-24,0]:event.key==='ArrowRight'?[24,0]:event.key==='ArrowUp'?[0,-24]:event.key==='ArrowDown'?[0,24]:undefined;if(offset){event.preventDefault();moveFloatingPanel(floatingPosition.x+offset[0],floatingPosition.y+offset[1]);}}}
-              ><strong>{previewSideTab==="navigation"?<MenuOutlined/>:previewSideTab==="translation"?<TranslationOutlined/>:previewSideTab==="info"?<InfoCircleOutlined/>:previewSideTab==="notes"?<EditOutlined/>:<MessageOutlined/>} {previewSideTab==="navigation" ? t("paperShell.documentNavigation") : previewSideTab==="translation" ? (i18n.language.startsWith("zh") ? "翻译" : "Translation") : previewSideTab==="info" ? (i18n.language.startsWith("zh") ? "论文信息" : "Paper information") : previewSideTab==="notes" ? (i18n.language.startsWith("zh") ? "笔记" : "Notes") : isPaperDocument?t("paperShell.assistant",{defaultValue:"Paper assistant"}):t("paperShell.documentAssistant",{defaultValue:"Document assistant"})}</strong>{previewSideTab === "translation" && (<div className="knowledge-translation-modes knowledge-translation-modes--header"><Segmented size="small" value={translationPanelMode} options={[{label:"划词翻译",value:"selection"},{label:"全文翻译",value:"document"}]} onChange={(value: string | number) => {
+              ><strong>{previewSideTab==="navigation"?<MenuOutlined/>:previewSideTab==="translation"?<TranslationOutlined/>:previewSideTab==="info"?<InfoCircleOutlined/>:previewSideTab==="notes"?<EditOutlined/>:<MessageOutlined/>} {previewSideTab==="navigation" ? t("paperShell.documentNavigation") : previewSideTab==="translation" ? (i18n.language.startsWith("zh") ? "翻译" : "Translation") : previewSideTab==="info" ? (i18n.language.startsWith("zh") ? "论文信息" : "Paper information") : previewSideTab==="notes" ? paperNotesLabel : isPaperDocument?t("paperShell.assistant",{defaultValue:"Paper assistant"}):t("paperShell.documentAssistant",{defaultValue:"Document assistant"})}</strong>{previewSideTab === "translation" && (<div className="knowledge-translation-modes knowledge-translation-modes--header"><Segmented size="small" value={translationPanelMode} options={[{label:"划词翻译",value:"selection"},{label:"全文翻译",value:"document"}]} onChange={(value: string | number) => {
                   if (value === "document") showFullTranslation();
                   else setTranslationPanelMode("selection");
                 }} /></div>)}<div className="paper-chat-toolbar-actions">
@@ -1154,7 +1164,7 @@ const KnowledgeDocumentContent = () => {
                   onHalfWidth={workspaceWidth >= 900 && (panelLayout === "left" || panelLayout === "right") ? () => resizePaperAssistant(workspaceWidth * .5) : undefined}
                 />}
               </div>
-              {paperDetailsOpened && <div className="paper-assistant-pane" hidden={previewSideTab !== "info" && previewSideTab !== "notes"}><PaperReaderDetails documentVocabulary={isVocabularyEnabled()?<DocumentVocabularyPanel documentId={knowledgeId} refreshToken={vocabularyRefreshToken}/>:undefined} datasetId={knowledgeBaseId} documentId={knowledgeId} fileName={knowledgeDetail.display_name||""} canWrite={hasWritePermission} refreshToken={notesRevision} selectedNoteId={selectedNoteId} initialTab={previewSideTab==="notes"?"notes":"info"} onNoteDeleted={id=>{setSelectedNoteId(current=>current===id?undefined:current);setSavedNotes(current=>current?{...current,highlights:current.highlights.filter(item=>item.id!==id)}:current);}} onNavigatePage={page=>{setPdfNavigateToPage({page,requestId:++navigationSequence.current});}} onNavigateNote={source=>{setPdfNavigateToPosition({page:source.page,progress:Math.max(0,(source.rects?.[0]?.[1]??0)-.12),requestId:++navigationSequence.current});}}/></div>}
+              {paperDetailsOpened && <div className="paper-assistant-pane" hidden={previewSideTab !== "info" && previewSideTab !== "notes"}><PaperReaderDetails documentVocabulary={isVocabularyEnabled()?<DocumentVocabularyPanel documentId={knowledgeId} refreshToken={vocabularyRefreshToken}/>:undefined} datasetId={knowledgeBaseId} documentId={knowledgeId} fileName={knowledgeDetail.display_name||""} canWrite={hasWritePermission} refreshToken={notesRevision} selectedNoteId={selectedNoteId} initialTab={previewSideTab==="notes"?paperNotesTab:"info"} onTabChange={setPaperNotesTab} onNoteDeleted={id=>{setSelectedNoteId(current=>current===id?undefined:current);setSavedNotes(current=>current?{...current,highlights:current.highlights.filter(item=>item.id!==id)}:current);}} onNavigatePage={page=>{setPdfNavigateToPage({page,requestId:++navigationSequence.current});}} onNavigateNote={source=>{setPdfNavigateToPosition({page:source.page,progress:Math.max(0,(source.rects?.[0]?.[1]??0)-.12),requestId:++navigationSequence.current});}}/></div>}
               <div className="paper-assistant-pane" hidden={previewSideTab !== "chat"}>
               {(isPaperDocument || activatedDocumentChatKey===documentKey) && <PdfTemporaryChat newConversationInToolbar ref={paperChatRef} key={`${knowledgeBaseId}:${knowledgeId}`} paperMode={isPaperDocument} onClearSelection={()=>setDocumentChatSelection(null)} onNavigateSelection={selection=>{if(selection.page){handlePdfViewPositionChange({page:selection.page,progress:0});setPdfNavigateToPage({page:selection.page,requestId:++navigationSequence.current});}}} datasetId={knowledgeBaseId} documentId={knowledgeId} fileName={knowledgeDetail.display_name||""} selection={documentChatSelection||undefined} conversationToLoad={selectedDocumentConversation} onConversationChange={setSelectedDocumentConversation} onHistoryChange={refreshDocumentChatHistory} onClose={()=>{setDocumentChatSelection(null);setPreviewSideCollapsed(true);}}/>}
               </div>
@@ -1164,7 +1174,7 @@ const KnowledgeDocumentContent = () => {
         </div>
         <PaperToolDock label={i18n.language.startsWith("zh")?"阅读工具":"Reading tools"} activeTool={previewSideCollapsed ? undefined : previewSideTab}
           tools={[
-            ...(isPaperDocument?[{id:"notes",label:i18n.language.startsWith("zh")?"笔记":"Notes",icon:<EditOutlined/>}]:[]),
+            ...(isPaperDocument?[{id:"notes",label:paperNotesLabel,icon:<EditOutlined/>}]:[]),
             ...(!isPaperDocument?[{id:"navigation",label:t("paperShell.documentNavigation"),icon:<MenuOutlined/>}]:[]),
             {id:"translation",label:i18n.language.startsWith("zh")?"翻译":"Translation",icon:<TranslationOutlined/>},
             {id:"chat",label:t(isPaperDocument?"paperShell.assistant":"paperShell.documentAssistant"),icon:<MessageOutlined/>},
@@ -1292,9 +1302,9 @@ const KnowledgeDocumentContent = () => {
         segmentId={segmentDetail?.segment_id}
         context={vocabularySelection?.context || segmentDetail?.content || vocabularySelection?.text || undefined}
         onClose={() => setVocabularySelection(null)}
-        onAdded={() => {  setVocabularyRefreshToken((value) => value + 1); if(!isPaperDocument){setPaperNavTab("vocabulary"); setPreviewSideTab("navigation"); setPreviewSideCollapsed(false);} }}
+        onAdded={handleVocabularyAdded}
       /> : null}
-      <AddLearningContentModal value={learningSelection} datasetId={knowledgeBaseId} documentId={knowledgeId} segmentId={segmentDetail?.segment_id} context={learningSelection?.selection.context||segmentDetail?.content} onClose={()=>setLearningSelection(null)} onAdded={()=>{setVocabularyRefreshToken(v=>v+1);setPreviewSideCollapsed(false)}} />
+      <AddLearningContentModal value={learningSelection} datasetId={knowledgeBaseId} documentId={knowledgeId} segmentId={segmentDetail?.segment_id} context={learningSelection?.selection.context||segmentDetail?.content} onClose={()=>setLearningSelection(null)} onAdded={handleVocabularyAdded} />
     </div>
   );
 };

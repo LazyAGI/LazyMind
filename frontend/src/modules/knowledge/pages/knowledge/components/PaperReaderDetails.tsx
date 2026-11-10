@@ -1,4 +1,4 @@
-import {useEffect,useRef,useState,type ReactNode} from 'react';
+import {useEffect,useId,useRef,useState,type ReactNode} from 'react';
 import {useTranslation} from 'react-i18next';
 import {axiosInstance,BASE_URL} from '@/components/request';
 import {addLibraryNote,decodePersistedLibrary,deleteLibraryNote,mergeLibraryChanges,type PersistedPaperLibrary} from '@/modules/knowledge/paper/store';
@@ -6,7 +6,7 @@ import type {NoteColor,PdfNoteSource} from '@/modules/knowledge/paper/libraryMod
 import {safePaperUrl,type PaperMetadata} from '@/modules/knowledge/paper/model';
 import {PDF_NOTE_COLORS} from '@/components/ui/pdfNoteHighlights';
 import './PaperReaderDetails.scss';
-export interface PaperReaderDetailsProps {documentVocabulary?:ReactNode;datasetId:string;documentId:string;fileName:string;canWrite:boolean;draftRequest?:{documentId:string;requestId:number;text:string;sourceQuote?:string};initialTab?:'info'|'notes';refreshToken?:number;selectedNoteId?:string;onNavigatePage?:(page:number)=>void;onNavigateNote?:(source:PdfNoteSource)=>void;onNoteDeleted?:(id:string)=>void}
+export interface PaperReaderDetailsProps {documentVocabulary?:ReactNode;datasetId:string;documentId:string;fileName:string;canWrite:boolean;draftRequest?:{documentId:string;requestId:number;text:string;sourceQuote?:string};initialTab?:'info'|'notes'|'vocabulary';onTabChange?:(tab:'notes'|'vocabulary')=>void;refreshToken?:number;selectedNoteId?:string;onNavigatePage?:(page:number)=>void;onNavigateNote?:(source:PdfNoteSource)=>void;onNoteDeleted?:(id:string)=>void}
 function readableNote(content:string){
  const lines=content.replace(/\r\n?/g,'\n').split('\n');let quoteLines=0;
  while(lines[quoteLines]?.startsWith('> '))quoteLines++;
@@ -25,9 +25,15 @@ function bibliography(metadata:PaperMetadata){
  if(metadata.identifiers.arxiv)fields.eprint=metadata.identifiers.arxiv;
  return `@article{paper,\n${Object.entries(fields).map(([key,value])=>`  ${key} = {${bibEscape(value)}}`).join(',\n')}\n}`;
 }
-export default function PaperReaderDetails({datasetId,documentId,fileName,canWrite,draftRequest,initialTab='info',refreshToken,selectedNoteId,onNavigatePage,onNavigateNote,onNoteDeleted,documentVocabulary}:PaperReaderDetailsProps){
+export default function PaperReaderDetails({datasetId,documentId,fileName,canWrite,draftRequest,initialTab='info',refreshToken,selectedNoteId,onNavigatePage,onNavigateNote,onNoteDeleted,documentVocabulary,onTabChange}:PaperReaderDetailsProps){
  const {i18n}=useTranslation();const zh=i18n.language.startsWith('zh');const label=(en:string,cn:string)=>zh?cn:en;
- const tab=initialTab;const [result,setResult]=useState<{key:string;library?:PersistedPaperLibrary;error?:string}>();
+ const [notesTab,setNotesTab]=useState<'notes'|'vocabulary'>(initialTab==='vocabulary'?'vocabulary':'notes');
+ const tab=initialTab==='info'?'info':documentVocabulary?notesTab:'notes';
+ const tabId=useId();
+ const selectTab=(next:'notes'|'vocabulary')=>{setNotesTab(next);onTabChange?.(next);};
+ useEffect(()=>{if(initialTab!=='info')setNotesTab(initialTab);},[initialTab]);
+ useEffect(()=>{if(selectedNoteId)setNotesTab('notes');},[selectedNoteId]);
+ const [result,setResult]=useState<{key:string;library?:PersistedPaperLibrary;error?:string}>();
  const [revision,setRevision]=useState(0);const [draft,setDraft]=useState('');const [saving,setSaving]=useState(false);const [saveError,setSaveError]=useState('');const [copyStatus,setCopyStatus]=useState('');const [deletingId,setDeletingId]=useState('');const [deleteError,setDeleteError]=useState<{id:string;message:string}>();
  const draftDocument=useRef<string>();const noteSources=useRef<string[]>([]);const editorRef=useRef<HTMLDetailsElement>(null);
  const generation=useRef(0);const noteId=useRef('');const key=`${datasetId}/${documentId}`;const currentKey=useRef(key);currentKey.current=key;const mounted=useRef(false);
@@ -46,7 +52,7 @@ export default function PaperReaderDetails({datasetId,documentId,fileName,canWri
   if(!draftRequest||draftRequest.documentId!==documentId||saving)return;
   const requestKey=`${key}:${draftRequest.requestId}`;
   if(appliedDraft.current===requestKey)return;
-  appliedDraft.current=requestKey;
+  appliedDraft.current=requestKey;setNotesTab('notes');
   if(editorRef.current)editorRef.current.open=true;
   if(draftRequest.sourceQuote)noteSources.current.push(draftRequest.sourceQuote);
   if(draftRequest.text.trim())setDraft(current=>current.trim()?`${current}\n\n${draftRequest.text}`:draftRequest.text);
@@ -60,7 +66,7 @@ export default function PaperReaderDetails({datasetId,documentId,fileName,canWri
  const annotations=paper?library!.data.annotations?.filter(item=>item.paperId===paper.id&&(!item.attachmentId||library!.data.attachments.some(a=>a.id===item.attachmentId&&a.contentRef===documentId)))||[]:[];
  const writable=canWrite&&library?.canWrite&&!!paper;
  const selectedNoteRef=useRef<HTMLLIElement>(null);
- useEffect(()=>{if(!selectedNoteId||!selectedNoteRef.current)return;selectedNoteRef.current.focus({preventScroll:true});selectedNoteRef.current.scrollIntoView?.({block:'nearest'});},[selectedNoteId,notes.length]);
+ useEffect(()=>{if(tab!=='notes'||!selectedNoteId||!selectedNoteRef.current)return;selectedNoteRef.current.focus({preventScroll:true});selectedNoteRef.current.scrollIntoView?.({block:'nearest'});},[selectedNoteId,notes.length,tab]);
  const copy=async(text:string)=>{try{await navigator.clipboard.writeText(text);if(mounted.current&&currentKey.current===key)setCopyStatus(label('Copied','已复制'));}catch{if(mounted.current&&currentKey.current===key)setCopyStatus(label('Could not copy. Please try again.','复制失败，请重试。'));}};
  const save=async()=>{
   if(!writable||!draft.trim()||saving||!paper||!library)return;
@@ -79,8 +85,15 @@ export default function PaperReaderDetails({datasetId,documentId,fileName,canWri
   finally{setDeletingId('');}
  };
  return <aside className="paper-reader-details" aria-label={label('Paper details','论文资料')}>
-  <header><h2>{tab==='info'?label('Paper information','论文信息'):label('Notes','笔记')}</h2></header>
+  <header><h2>{tab==='info'?label('Paper information','论文信息'):documentVocabulary?label('Notes & vocabulary','笔记和生词'):label('Notes','笔记')}</h2></header>
+   {tab!=='info'&&documentVocabulary&&<div role="tablist" aria-label={label('Notes & vocabulary','笔记和生词')}>
+    {(['notes','vocabulary'] as const).map(value=><button key={value} type="button" role="tab" id={`${tabId}-${value}-tab`} aria-controls={`${tabId}-${value}-panel`} aria-selected={tab===value} tabIndex={tab===value?0:-1} onClick={()=>selectTab(value)} onKeyDown={event=>{
+     if(!['ArrowLeft','ArrowRight','Home','End'].includes(event.key))return;
+     event.preventDefault();const next=event.key==='Home'?'notes':event.key==='End'?'vocabulary':value==='notes'?'vocabulary':'notes';selectTab(next);document.getElementById(`${tabId}-${next}-tab`)?.focus();
+    }}>{value==='notes'?label('Notes','笔记'):label('Vocabulary','生词')}</button>)}
+   </div>}
   <div className="paper-reader-details__content">
+   <div hidden={tab==='vocabulary'} role={tab!=='info'&&documentVocabulary?'tabpanel':undefined} id={`${tabId}-notes-panel`} aria-labelledby={tab!=='info'&&documentVocabulary?`${tabId}-notes-tab`:undefined}>
    {result?.key===key&&result.error?<div role="alert"><p>{result.error}</p><button onClick={()=>{setResult(undefined);setRevision(value=>value+1);}}>{label('Retry','重试')}</button></div>:!library?<p role="status">{label('Loading paper details…','正在加载论文资料…')}</p>:tab==='info'?<>
     <p className="paper-reader-details__eyebrow">{label('DOCUMENT INFORMATION','文档信息')}</p><h3>{metadata?.title||fileName}</h3>
     {metadata&&<><dl>{!!metadata.authors.length&&<><dt>{label('Authors','作者')}</dt><dd>{metadata.authors.join(', ')}</dd></>}{metadata.year>0&&<><dt>{label('Year','年份')}</dt><dd>{metadata.year}</dd></>}{metadata.venue&&<><dt>{label('Publication','刊物')}</dt><dd>{metadata.venue}</dd></>}{Object.entries(metadata.identifiers).filter(([,value])=>!!value).map(([name,value])=>{const url=safePaperUrl(name==='doi'?`https://doi.org/${value}`:name==='arxiv'?`https://arxiv.org/abs/${value}`:undefined);return <div key={name}><dt>{name.toUpperCase()}</dt><dd>{url?<a href={url} target="_blank" rel="noopener noreferrer">{value}</a>:value}</dd></div>;})}</dl>
@@ -125,7 +138,8 @@ export default function PaperReaderDetails({datasetId,documentId,fileName,canWri
      {writable?<details className="paper-reader-details__new-note" ref={editorRef}><summary>{label('Write a note','写笔记')}</summary><form onSubmit={event=>{event.preventDefault();void save();}}><label htmlFor="paper-reader-new-note">{label('New note','新笔记')}</label><textarea id="paper-reader-new-note" value={draft} disabled={saving} onChange={event=>{setDraft(event.target.value);noteId.current='';}} rows={5} placeholder={label('What would you like to remember?','想记住什么？')}/>{saveError&&<p role="alert">{saveError}</p>}<button type="submit" disabled={saving||!draft.trim()}>{saving?label('Saving…','正在保存…'):label('Save note','保存笔记')}</button></form></details>:<p className="paper-reader-details__muted">{label('You have read-only access to these notes.','你可以查看这些笔记，当前没有编辑权限。')}</p>}
     </>}
    </>}
-   {documentVocabulary&&<details hidden={tab!=='info'}><summary>{label('Vocabulary','生词')}</summary>{documentVocabulary}</details>}
+   </div>
+   {documentVocabulary&&<div hidden={tab!=='vocabulary'} role="tabpanel" id={`${tabId}-vocabulary-panel`} aria-labelledby={`${tabId}-vocabulary-tab`}>{documentVocabulary}</div>}
   </div>
  </aside>;
 }

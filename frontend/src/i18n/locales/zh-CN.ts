@@ -241,7 +241,7 @@ const zhCN = {
     noBooks: "未找到词本，请创建词本后保存并启用。",
     advanced: "高级设置",
     autoSync: "自动同步新生词",
-    manage: "管理连接",
+    manage: "配置",
     providerDescription: "同步阅读时保存的英文生词，释义与例句保留在本地",
     unavailable: "状态不可用",
     loading: "加载中",
@@ -11113,6 +11113,7 @@ const zhCN = {
     connectReadyVersion: "AnkiConnect 已就绪（API v{{version}}）",
     pasteCode: "粘贴插件码 {{code}} 并确认。",
     externalApps: "外部应用",
+    appDescription: "使用 Anki 卡片与间隔重复复习收藏的生词。",
     externalAppsDescription: "查看并连接 LazyMind 可以配合使用的外部应用。",
   },
   vocabulary: {
@@ -11131,6 +11132,9 @@ const zhCN = {
     questionTypes: { single_choice: "选择题", text_input: "填空题", cloze: "完形填空" },
     cardTypes: { wordToMeaning: "看词选义", meaningToWord: "看义回忆单词", sentenceCloze: "例句填空", anki: "Anki 卡片" },
     document: {
+      loading: "正在加载本文档生词…",
+      loadFailed: "无法加载本文档生词，请重试。",
+      retry: "重试",
       empty: "本文档还没有添加生词",
       removeTitle: "从本文档移除 {{term}}？",
       removeDescription: "只移除当前文档来源；单词、其他来源和复习记录都会保留。",

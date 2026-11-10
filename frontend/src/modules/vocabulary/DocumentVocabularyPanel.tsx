@@ -1,5 +1,5 @@
-import { Button, Empty, List, Modal, Space, Spin, Tag } from "antd";
-import { useCallback, useEffect, useState } from "react";
+import { Alert, Button, Empty, Modal, Spin, Tag, theme } from "antd";
+import { useEffect, useState, type CSSProperties } from "react";
 import { useTranslation } from "react-i18next";
 import {
   deleteDocumentVocabulary,
@@ -7,117 +7,105 @@ import {
   removeDocumentVocabulary,
   type DocumentVocabularyItem,
 } from "./api";
+import "./DocumentVocabularyPanel.scss";
 
-export default function DocumentVocabularyPanel({
-  documentId,
-  refreshToken = 0,
-}: {
-  documentId: string;
-  refreshToken?: number;
-}) {
+type PanelProps = { documentId: string; refreshToken?: number };
+
+// A document change also resets pending confirmations' refresh callbacks and data.
+export default function DocumentVocabularyPanel(props: PanelProps) {
+  return <DocumentVocabularyContent key={props.documentId} {...props} />;
+}
+
+function DocumentVocabularyContent({ documentId, refreshToken = 0 }: PanelProps) {
   const { t } = useTranslation();
+  const { token } = theme.useToken();
   const [items, setItems] = useState<DocumentVocabularyItem[]>([]);
   const [loading, setLoading] = useState(true);
-  const refresh = useCallback(async () => {
-    setLoading(true);
-    try {
-      setItems(await listDocumentVocabulary(documentId));
-    } finally {
-      setLoading(false);
-    }
-  }, [documentId]);
+  const [error, setError] = useState(false);
+  const [reload, setReload] = useState(0);
+  const refresh = () => setReload((value) => value + 1);
+
   useEffect(() => {
-    void refresh();
-  }, [refresh, refreshToken]);
-  if (loading) return <Spin />;
-  if (!items.length)
-    return <Empty description={t("vocabulary.document.empty")} />;
+    let active = true;
+    setLoading(true);
+    setError(false);
+    listDocumentVocabulary(documentId)
+      .then((result) => { if (active) setItems(result); })
+      .catch(() => { if (active) setError(true); })
+      .finally(() => { if (active) setLoading(false); });
+    return () => { active = false; };
+  }, [documentId, refreshToken, reload]);
+
+  const confirmAction = (item: DocumentVocabularyItem, deleteWord: boolean) => {
+    Modal.confirm({
+      title: t(`vocabulary.document.${deleteWord ? "deleteTitle" : "removeTitle"}`, { term: item.term }),
+      content: t(`vocabulary.document.${deleteWord ? "deleteDescription" : "removeDescription"}`),
+      okButtonProps: { danger: deleteWord },
+      onOk: async () => {
+        await (deleteWord ? deleteDocumentVocabulary : removeDocumentVocabulary)(documentId, item.id);
+        refresh();
+      },
+    });
+  };
+
+  const style = {
+    "--vocabulary-card-bg": token.colorBgContainer,
+    "--vocabulary-card-border": token.colorBorderSecondary,
+    "--vocabulary-text": token.colorText,
+    "--vocabulary-secondary": token.colorTextSecondary,
+    "--vocabulary-source-bg": token.colorFillQuaternary,
+    "--vocabulary-danger": token.colorError,
+    "--vocabulary-danger-hover": token.colorErrorHover,
+    "--vocabulary-danger-bg": token.colorErrorBg,
+  } as CSSProperties;
+
   return (
-    <List
-      dataSource={items}
-      renderItem={(item) => {
-        const actions = [
-          <Button
-            key="remove"
-            size="small"
-            onClick={() =>
-              Modal.confirm({
-                title: t("vocabulary.document.removeTitle", {
-                  term: item.term,
-                }),
-                content: t("vocabulary.document.removeDescription"),
-                onOk: () =>
-                  removeDocumentVocabulary(documentId, item.id).then(refresh),
-              })
-            }
-          >
-            {t("vocabulary.document.removeSource")}
-          </Button>,
-        ];
-        if (item.can_delete)
-          actions.push(
-            <Button
-              key="delete"
-              size="small"
-              danger
-              onClick={() =>
-                Modal.confirm({
-                  title: t("vocabulary.document.deleteTitle", {
-                    term: item.term,
-                  }),
-                  content: t("vocabulary.document.deleteDescription"),
-                  okButtonProps: { danger: true },
-                  onOk: () =>
-                    deleteDocumentVocabulary(documentId, item.id).then(refresh),
-                })
-              }
-            >
-              {t("vocabulary.document.deleteWord")}
-            </Button>,
-          );
-        return (
-          <List.Item actions={actions}>
-            <List.Item.Meta
-              title={
-                <span>
-                  {item.term} <Tag>{item.provider}</Tag>
-                  {item.source_count > 1 ? (
-                    <Tag color="blue">
-                      {t("vocabulary.document.sourceCount", {
-                        count: item.source_count,
-                      })}
-                    </Tag>
-                  ) : null}
-                </span>
-              }
-              description={
-                <Space direction="vertical" size={2}>
-                  <span>
-                    {item.part_of_speech} {item.meaning}
-                  </span>
-                  {item.example ? (
-                    <span>
-                      {item.example.sentence}
-                      <br />
-                      {item.example.translation}
-                    </span>
-                  ) : null}
-                  <span>
-                    {t("vocabulary.document.sourceLocation", {
-                      location: item.source.page
-                        ? t("vocabulary.document.page", {
-                            page: item.source.page,
-                          })
-                        : item.source.segment_id ||
-                          t("vocabulary.document.document"),
-                    })}
-                  </span>
-                </Space>
-              }
-            />
-          </List.Item>
-        );
-      }}
-    />
+    <section className="document-vocabulary-panel" style={style}>
+      {loading ? (
+        <div className="document-vocabulary-panel__state" role="status" aria-label={t("vocabulary.document.loading", { defaultValue: "Loading vocabulary…" })}><Spin /></div>
+      ) : error ? (
+        <Alert type="error" showIcon message={t("vocabulary.document.loadFailed", { defaultValue: "Unable to load document vocabulary." })}
+          action={<Button size="small" onClick={refresh}>{t("vocabulary.document.retry", { defaultValue: "Retry" })}</Button>} />
+      ) : !items.length ? (
+        <Empty className="document-vocabulary-panel__state" description={t("vocabulary.document.empty")} />
+      ) : (
+        <div className="document-vocabulary-panel__masonry">
+          {items.map((item) => {
+            const sentence = item.source.context_sentence || item.example?.sentence;
+            // An example translation belongs only to its matching source sentence.
+            const translation = !item.source.context_sentence || item.source.context_sentence === item.example?.sentence
+              ? item.example?.translation : undefined;
+            return (
+              <article className="document-vocabulary-card" key={item.id} aria-label={item.term}>
+                <header className="document-vocabulary-card__header">
+                  <h3>{item.term}</h3>
+                  {item.phonetic && <span className="document-vocabulary-card__phonetic">{item.phonetic}</span>}
+                </header>
+                <div className="document-vocabulary-card__meaning">
+                  {item.part_of_speech && <span className="document-vocabulary-card__pos">{item.part_of_speech}</span>}
+                  <span>{item.meaning || item.definition}</span>
+                </div>
+                {sentence && (
+                  <blockquote className="document-vocabulary-card__source">
+                    <p>{sentence}</p>
+                    {translation && <p className="document-vocabulary-card__translation">{translation}</p>}
+                  </blockquote>
+                )}
+                <div className="document-vocabulary-card__location">
+                  <span>{t("vocabulary.document.sourceLocation", { location: item.source.page != null
+                    ? t("vocabulary.document.page", { page: item.source.page })
+                    : item.source.segment_id || t("vocabulary.document.document") })}</span>
+                  {item.source_count > 1 && <Tag>{t("vocabulary.document.sourceCount", { count: item.source_count })}</Tag>}
+                </div>
+                <footer className="document-vocabulary-card__actions">
+                  <Button size="small" type="text" onClick={() => confirmAction(item, false)}>{t("vocabulary.document.removeSource")}</Button>
+                  {item.can_delete && <Button size="small" type="text" danger onClick={() => confirmAction(item, true)}>{t("vocabulary.document.deleteWord")}</Button>}
+                </footer>
+              </article>
+            );
+          })}
+        </div>
+      )}
+    </section>
   );
 }

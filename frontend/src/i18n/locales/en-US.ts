@@ -241,7 +241,7 @@ const enUS = {
     noBooks: "No wordbooks found. Create one before saving and enabling sync.",
     advanced: "Advanced settings",
     autoSync: "Automatically sync new words",
-    manage: "Manage connection",
+    manage: "Configure",
     providerDescription: "Sync English words saved while reading; meanings and examples stay local",
     unavailable: "Status unavailable",
     loading: "Loading",
@@ -11372,6 +11372,7 @@ const enUS = {
     connectReadyVersion: "AnkiConnect is ready (API v{{version}})",
     pasteCode: "Paste add-on code {{code}} and confirm.",
     externalApps: "External apps",
+    appDescription: "Review saved words with Anki flashcards and spaced repetition.",
     externalAppsDescription: "View and connect external apps that work with LazyMind.",
   },
   vocabulary: {
@@ -11390,6 +11391,9 @@ const enUS = {
     questionTypes: { single_choice: "Multiple choice", text_input: "Fill in the blank", cloze: "Cloze" },
     cardTypes: { wordToMeaning: "Word to meaning", meaningToWord: "Meaning to word", sentenceCloze: "Sentence cloze", anki: "Anki card" },
     document: {
+      loading: "Loading document vocabulary…",
+      loadFailed: "Unable to load document vocabulary. Please try again.",
+      retry: "Retry",
       empty: "No vocabulary has been added from this document",
       removeTitle: "Remove {{term}} from this document?",
       removeDescription: "Only this document source will be removed. The word, its other sources, and review history will be preserved.",

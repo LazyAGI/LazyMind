@@ -1,0 +1,39 @@
+.document-vocabulary-panel {
+  width: 100%;
+  min-width: 0;
+  color: var(--vocabulary-text);
+
+  &__state { padding: 32px 12px; text-align: center; }
+
+  // Columns respond to the panel width, including inside a narrow reader sidebar.
+  &__masonry { columns: 280px; column-gap: 16px; }
+
+  .document-vocabulary-card {
+    display: inline-block;
+    box-sizing: border-box;
+    width: 100%;
+    margin: 0 0 16px;
+    padding: 18px;
+    break-inside: avoid;
+    vertical-align: top;
+    border: 1px solid var(--vocabulary-card-border);
+    border-radius: 10px;
+    background: var(--vocabulary-card-bg);
+    overflow-wrap: anywhere;
+
+    &__header { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; }
+    h3 { margin: 0; font-family: inherit; font-size: 21px; font-weight: 600; line-height: 1.4; }
+    &__phonetic { color: var(--vocabulary-secondary); font-size: 13px; }
+    &__meaning { display: flex; align-items: baseline; gap: 8px; margin-top: 10px; font-size: 14px; line-height: 1.65; white-space: pre-wrap; }
+    &__pos { flex-shrink: 0; color: var(--vocabulary-secondary); font-size: 12px; }
+    &__source { margin: 16px 0 12px; padding: 12px; background: var(--vocabulary-source-bg); border-left: 2px solid var(--vocabulary-card-border); font-size: 13px; line-height: 1.75; white-space: pre-wrap; }
+    &__source p { margin: 0; }
+    &__source &__translation { margin-top: 6px; color: var(--vocabulary-secondary); }
+    &__location { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 12px; color: var(--vocabulary-secondary); font-size: 12px; }
+    &__location .ant-tag { margin: 0; white-space: normal; }
+    &__actions { display: flex; flex-wrap: wrap; gap: 4px 8px; margin-top: 12px; padding-top: 8px; border-top: 1px solid var(--vocabulary-card-border); }
+    &__actions .ant-btn { height: auto; min-height: 28px; padding: 2px 4px; font-size: 12px; white-space: normal; text-align: left; }
+    &__actions .ant-btn-dangerous { color: var(--vocabulary-danger); }
+    &__actions .ant-btn-dangerous:hover { color: var(--vocabulary-danger-hover); background: var(--vocabulary-danger-bg); }
+  }
+}
