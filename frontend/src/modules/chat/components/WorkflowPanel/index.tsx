@@ -1736,8 +1736,6 @@ export function WorkflowPanel({
   const fetchWorkflowUI = useWorkflowStore((s) => s.fetchWorkflowUI);
   const setFocusedTab = useWorkflowStore((s) => s.setFocusedTab);
   const setFocusedSortOrder = useWorkflowStore((s) => s.setFocusedSortOrder);
-  const focusedTabByConversation = useWorkflowStore((s) => s.focusedTabByConversation);
-  const persistedFocusedTab = conversationId ? focusedTabByConversation[conversationId] : undefined;
   const uiCacheKey = session ? workflowUICacheKey(session.workflow_id, session.pinned_revision_id, i18n.language || '') : '';
   const uiRequestKey = JSON.stringify([session?.session_id, uiCacheKey]);
   const [uiResponse, setUIResponse] = useState<{ requestKey: string; ui: WorkflowUI } | null>(null);
@@ -1758,13 +1756,12 @@ export function WorkflowPanel({
   const toggleCollapsed = externalPresentation?.onToggleCollapse ?? (() => setCollapsed(!collapsed));
   const panelExpanded = embedded ? Boolean(externalPresentation?.expanded) : expanded;
   const activeTabId = view.tabId;
-  const followingEnabled = Boolean(ui.follow_mode?.default);
   const tabs = useMemo(() => workflowTabsForAudience(rawUI ?? EMPTY_WORKFLOW_UI,
     { slots: session?.slots, steps: session?.steps, projection: session?.projection, workflow_mode: session?.workflow_mode }, developerMode),
   [rawUI, developerMode, session?.slots, session?.steps, session?.projection, session?.workflow_mode]);
   const runtimeTabIdx = session ? resolveWorkflowRealTabIndex(session, tabs, activeTabId) : -1;
   const runtimeTabId = tabs[runtimeTabIdx]?.id;
-  const visibleActiveTabIdx = followingEnabled && view.mode === 'following' && !previewTarget && runtimeTabIdx !== -1
+  const visibleActiveTabIdx = view.mode === 'following' && !previewTarget && runtimeTabIdx !== -1
     ? runtimeTabIdx
     : resolveWorkflowActiveTabIndex(tabs, activeTabId);
   const navigation = useRef(0);
@@ -1772,9 +1769,8 @@ export function WorkflowPanel({
   currentView.current = { key: viewKey, runtimeTabId };
   const enterBrowse = useCallback((tabId?: string) => {
     navigation.current++;
-    if (!followingEnabled) return;
     updateView({ mode: 'free', tabId: tabId ?? tabs[visibleActiveTabIdx]?.id ?? '' });
-  }, [followingEnabled, updateView, tabs, visibleActiveTabIdx]);
+  }, [updateView, tabs, visibleActiveTabIdx]);
   const [resumingFollow, setResumingFollow] = useState(false);
   const resumePending = useRef<number | null>(null);
   useEffect(() => {
@@ -1927,22 +1923,13 @@ export function WorkflowPanel({
 
   useEffect(() => {
     if (!uiReady || !session || !tabs.length || previewTarget) return;
-    if (followingEnabled) {
-      if (view.mode === 'following') {
-        if (runtimeTabId) updateView({ tabId: runtimeTabId });
-      } else if (!tabs.some(tab => tab.id === activeTabId)) {
-        // Fall back to the first visible tab; never follow runtime in free mode.
-        updateView({ tabId: tabs[0].id });
-      }
-      return;
+    if (view.mode === 'following') {
+      if (runtimeTabId) updateView({ tabId: runtimeTabId });
+    } else if (!tabs.some(tab => tab.id === activeTabId)) {
+      // Fall back to the first visible tab; never follow runtime in free mode.
+      updateView({ tabId: tabs[0].id });
     }
-    // Unconfigured workflows retain their existing implicit navigation behavior.
-    const focused = tabs.find(tab => tab.id === persistedFocusedTab);
-    if (focused) { updateView({ tabId: focused.id }); return; }
-    // Page order is presentation, not execution. The runtime resolver also
-    // handles cleared terminal pointers, stale attempts and grouped result tabs.
-    if (runtimeTabId) updateView({ tabId: runtimeTabId });
-  }, [uiReady, session, tabs, previewTarget, followingEnabled, view.mode, runtimeTabId, activeTabId, persistedFocusedTab, updateView]);
+  }, [uiReady, session, tabs, previewTarget, view.mode, runtimeTabId, activeTabId, updateView]);
 
   const resumeFollowing = async () => {
     if (resumePending.current !== null) return;
@@ -2011,12 +1998,12 @@ export function WorkflowPanel({
 
   const handleTabChange = useCallback((idx: number, tabId: string) => {
     if (previewTarget) artifactPreview?.close();
-    if (!followingEnabled || view.mode === 'free' || idx !== runtimeTabIdx) enterBrowse(tabId);
+    if (view.mode === 'free' || idx !== runtimeTabIdx) enterBrowse(tabId);
     updateView({ tabId });
     setFocusedTab(conversationId, tabId);
     const group = ui.tabs?.find(tab => tab.id === tabId)?.page_group;
     setFocusedSortOrder(conversationId, group ? groupPages[group] : undefined);
-  }, [conversationId, setFocusedTab, setFocusedSortOrder, ui.tabs, groupPages, previewTarget, artifactPreview?.close, followingEnabled, view.mode, runtimeTabIdx, enterBrowse, updateView]);
+  }, [conversationId, setFocusedTab, setFocusedSortOrder, ui.tabs, groupPages, previewTarget, artifactPreview?.close, view.mode, runtimeTabIdx, enterBrowse, updateView]);
 
   const handleFocusSortOrder = useCallback((sortOrder: number | undefined) => {
     setFocusedSortOrder(conversationId, sortOrder);
@@ -2314,7 +2301,7 @@ export function WorkflowPanel({
               moreButtonRef.current?.focus();
             }} />}
           </div>
-          {followingEnabled && <div className='workflow-panel__follow-mode' role='group' aria-label={t('chat.workflowFollowModeLabel')}>
+          {uiReady && <div className='workflow-panel__follow-mode' role='group' aria-label={t('chat.workflowFollowModeLabel')}>
             <button type='button' aria-pressed={view.mode === 'following'} disabled={resumingFollow}
               onClick={() => void resumeFollowing()}>{t('chat.workflowFollowProgress')}</button>
             <button type='button' aria-pressed={view.mode === 'free'}
@@ -2431,6 +2418,7 @@ export function WorkflowPanel({
           {tabs.map((tab, idx) => {
             const stepStatus = workflowTaskDisplayStatus(workflowTabStatus(tab, session), display?.status);
             const stepStatusLabel = stepStatus ? t(stepStatus === 'waiting_input' ? 'taskCenter.statusWaitingInput' : `taskCenter.status${stepStatus.charAt(0).toUpperCase()}${stepStatus.slice(1)}`, { defaultValue: stepStatus }) : undefined;
+            const isCurrentUnselectedTab = idx === runtimeTabIdx && idx !== visibleActiveTabIdx;
             return (
               <React.Fragment key={tab.id}>
                 {idx > 0 && (
@@ -2453,12 +2441,12 @@ export function WorkflowPanel({
                   )}
                   <span className='workflow-panel__tab-text'>
                     <span className='workflow-panel__tab-label'>{tab.label}</span>
-                    {followingEnabled && idx === runtimeTabIdx && idx !== visibleActiveTabIdx && (
+                    {isCurrentUnselectedTab && (
                       <span className='workflow-panel__tab-current' role='img'
                         aria-label={t('chat.workflowCurrentStep')} title={t('chat.workflowCurrentStep')} />
                     )}
                   </span>
-                  {!['pending', 'succeeded', 'skipped'].includes(stepStatus) && !(followingEnabled && idx === runtimeTabIdx && idx !== visibleActiveTabIdx) && (
+                  {!['pending', 'succeeded', 'skipped'].includes(stepStatus) && !isCurrentUnselectedTab && (
                     <span
                       className={`workflow-panel__step-status workflow-panel__step-status--${stepStatus}`}
                       aria-label={stepStatusLabel}
