@@ -94,6 +94,7 @@ func (a *Adapter) Status(ctx context.Context) (status agentintegration.Status) {
 	status = a.status(ctx)
 	details := a.inspectConfiguration(&status)
 	if a.kind == DeepSeekHarness {
+		a.inspectDSHPendingDisconnect(ctx, &status)
 		a.inspectDSHConnection(ctx, &status)
 	}
 	defer func() { agentintegration.RecordInspection(a.home, a.self, details, &status) }()

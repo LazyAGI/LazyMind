@@ -139,7 +139,7 @@ func TestDSHBundleUpdatePreservesConfigurationAndRetryIntent(t *testing.T) {
 }
 
 func TestDSHNativeEnablementAndPairingOverrideLiveRuntime(t *testing.T) {
-	for _, scenario := range []string{"disabled plugin", "disabled pairing", "account changed", "signed out"} {
+	for _, scenario := range []string{"disabled plugin", "unselected bundle", "disabled pairing", "account changed", "signed out"} {
 		t.Run(scenario, func(t *testing.T) {
 			a, pair, _ := connectedDSHFixture(t)
 			if err := workflowhost.RecordRuntimeStatus(a.home, pair, "", true); err != nil {
@@ -147,6 +147,14 @@ func TestDSHNativeEnablementAndPairingOverrideLiveRuntime(t *testing.T) {
 			}
 			want := ""
 			switch scenario {
+			case "unselected bundle":
+				path := filepath.Join(dshHome(), "profiles", "desktop", "package.json")
+				body, err := os.ReadFile(path)
+				if err != nil {
+					t.Fatal(err)
+				}
+				writeTestFile(t, path, strings.Replace(string(body), `,"@lazymind/dsh-workflow"`, "", 1))
+				want = "mcp_enable_required"
 			case "disabled plugin":
 				path := a.forDSHProfile("desktop", "").dshConfigPath()
 				doc, _ := readYAMLDocument(path)
