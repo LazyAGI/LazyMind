@@ -86,6 +86,9 @@ def continue_in_place(document, overflow, items, fonts, diagnostics=None):
             ]
             obstacles += [fitz.Rect(d['rect']) for d in original.get_drawings()]
             obstacles += [fitz.Rect(i['bbox']) for i in original.get_image_info()]
+            # Keep fitted paragraphs atomic, including expansion beyond their
+            # source boxes; a glyph-row gap is not an inter-paragraph gap.
+            obstacles += [i['fit']['rect'] for i in source_items if 'fit' in i]
             cuts = []
             for item in pending:
                 cut = max(0, item['rect'].y0)
@@ -162,7 +165,8 @@ def continue_in_place(document, overflow, items, fonts, diagnostics=None):
                         clip=clip,
                     )
                 for item in source_items:
-                    if item not in pending and (item['rect'] & clip).get_area() > 0:
+                    bounds = item['fit']['rect'] if 'fit' in item else item['rect']
+                    if item not in pending and (bounds & clip).get_area() > 0:
                         page_map[item['id']].add(current + 1)
                 source_regions[pno].append((clip, current, cursor - y0))
                 cursor += y1 - y0

@@ -231,6 +231,24 @@ class PreservationTests(unittest.TestCase):
             for before, after in zip(moved, retained['bbox']):
                 self.assertAlmostEqual(before, after, places=4)
 
+    def test_continuation_keeps_fitted_paragraph_atomic_and_maps_actual_bounds(self):
+        with fitz.open() as doc:
+            page = doc.new_page(width=300, height=400)
+            page.insert_text((30, 50), 'BEFORE')
+            page.insert_text((30, 150), 'REFERENCE START')
+            page.insert_text((30, 350), 'REFERENCE TAIL')
+            overflow = dict(id='a', page=0, rect=fitz.Rect(30, 80, 200, 100),
+                            size=11, text='word ' * 100)
+            fitted = dict(id='reference', page=0, rect=fitz.Rect(30, 130, 200, 155),
+                          fit={'rect': fitz.Rect(30, 138, 200, 354)})
+            mapping = continue_in_place(doc, [overflow], [overflow, fitted], [fitz.Font('helv')])
+            self.assertEqual(len(doc), 2)
+            pages = next(item['pages'] for item in mapping if item['block_id'] == 'reference')
+            self.assertEqual(pages, [2])
+            self.assertNotIn('REFERENCE', doc[0].get_text())
+            self.assertIn('REFERENCE START', doc[1].get_text())
+            self.assertIn('REFERENCE TAIL', doc[1].get_text())
+
     def test_missing_translation_preserves_source_and_reports_diagnostic(self):
         with fitz.open() as doc:
             doc.new_page().insert_text((50, 70), 'Source')

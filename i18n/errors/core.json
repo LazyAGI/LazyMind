@@ -2074,6 +2074,7 @@
   "2005203": {"en-US": "Translation provider request failed", "zh-CN": "翻译服务请求失败"},
   "2005204": {"en-US": "Translation service initialization failed", "zh-CN": "翻译服务初始化失败"},
   "2005205": {"en-US": "The selected translation provider does not support documents", "zh-CN": "所选翻译服务不支持文档翻译"},
+  "2005206": {"en-US": "Translation changed while rendering; retry with the current translation", "zh-CN": "排版期间译文已更新，请使用当前译文重试"},
   "2005140": {"en-US": "Processing submission is unconfirmed; verify the existing task before retrying", "zh-CN": "处理任务提交状态未确认，请先核对已有任务再重试"},
   "2005141": {"en-US": "The target is not a paper library", "zh-CN": "目标不是论文知识库"},
   "2005142": {"en-US": "An imported note or attachment ID already belongs to another paper", "zh-CN": "导入的笔记或附件标识已属于另一篇论文"},
