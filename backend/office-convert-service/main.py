@@ -1020,22 +1020,26 @@ def render_pdf_translation(req: PDFTranslationRenderRequest) -> dict[str, object
             attribution_font = 'NotoSansCJK' if is_chinese_translation else 'helv'
             if is_chinese_translation:
                 page.insert_font(fontname=attribution_font, fontfile=str(TRANSLATION_FONT_PATH))
-            attribution_regions = (
-                fitz.Rect(18, 3, page.rect.width - 18, 20),
-                fitz.Rect(18, page.rect.height - 20, page.rect.width - 18, page.rect.height - 3),
+            # Keep branding in the header only; never add a footer watermark.
+            font = translation_font if is_chinese_translation else fitz.Font('helv')
+            fontsize = min(10.5, (page.rect.width - 70) / max(font.text_length(attribution_text, fontsize=1), 1))
+            text_width = font.text_length(attribution_text, fontsize=fontsize)
+            logo_width, logo_height, gap = 24, 16, 5
+            start_x = (page.rect.width - text_width - logo_width - gap) / 2
+            logo_region = fitz.Rect(start_x, 3, start_x + logo_width, 3 + logo_height)
+            page.insert_image(logo_region, filename=str(Path(__file__).parent / 'assets' / 'lazymind-logo.png'), overlay=True)
+            region = fitz.Rect(start_x + logo_width + gap, 3, page.rect.width - 18, 20)
+            page.insert_textbox(
+                region,
+                attribution_text,
+                fontsize=fontsize,
+                fontname=attribution_font,
+                color=(0.18, 0.18, 0.18),
+                align=fitz.TEXT_ALIGN_LEFT,
+                overlay=True,
+                fill_opacity=0.96,
             )
-            for region in attribution_regions:
-                page.insert_textbox(
-                    region,
-                    attribution_text,
-                    fontsize=10.5,
-                    fontname=attribution_font,
-                    color=(0.18, 0.18, 0.18),
-                    align=fitz.TEXT_ALIGN_CENTER,
-                    overlay=True,
-                    fill_opacity=0.96,
-                )
-                page.insert_link({'kind': fitz.LINK_URI, 'from': region, 'uri': attribution_url})
+            page.insert_link({'kind': fitz.LINK_URI, 'from': fitz.Rect(start_x, 3, start_x + logo_width + gap + text_width, 20), 'uri': attribution_url})
         document.save(output, garbage=4, deflate=True)
     finally:
         probe_document.close()
