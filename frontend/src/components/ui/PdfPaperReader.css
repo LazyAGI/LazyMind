@@ -68,7 +68,6 @@
 .pdf-visual-body blockquote{background:#f7f7f6;border-color:var(--color-primary-border,#a9d2ff);color:#737373;}
 @media(max-width:900px){.pdf-reader-workspace .pdf-reader-modebar{padding:0 10px;gap:4px;}.pdf-reader-modebar .pdf-formula-controls{flex-basis:100%;justify-content:flex-end;padding-bottom:5px;}.pdf-reader-modebar .pdf-reader-toolbar-end{margin-left:auto;}}
 @media(max-width:550px){.pdf-reader-modebar .pdf-reader-tools{order:3;flex-basis:100%;border-top:1px solid #e5e5e3;padding:4px 0;}.pdf-reader-modebar .pdf-formula-controls{order:4;justify-content:flex-start;}}
-/* Editorial overview sections use their own separators, without the legacy timeline. */
 /* The library action and workspace actions share the centered reading tabs row. */
 .pdf-reader-workspace .pdf-reader-header{display:grid;grid-template-columns:minmax(0,1fr) auto minmax(0,1fr);flex-wrap:nowrap;min-height:40px;gap:8px;border-bottom:0;}
 .pdf-reader-header .pdf-reader-header-start{justify-content:flex-start;min-width:0;overflow:hidden;}
@@ -101,12 +100,10 @@
 .pdf-reader-header > .pdf-reader-tools button{padding:5px 4px;}
 @media(max-width:600px){.pdf-reader-workspace .pdf-reader-header{grid-template-columns:minmax(0,1fr) auto;}.pdf-reader-header > .pdf-reader-tools{grid-column:1 / -1;grid-row:2;justify-self:center;padding-bottom:5px;}.pdf-reader-header-end{grid-column:2;grid-row:1;}}
 
-/* The overview remains available while the separate quick-read feature is paused. */
-.pdf-reader-overview-scroll{position:absolute;inset:0;z-index:2;overflow:auto;overscroll-behavior:contain;background:#fff}
-.pdf-reader-workspace .pdf-reader-header:not(.has-overview){grid-template-columns:minmax(0,1fr) auto}
-.pdf-reader-workspace .pdf-reader-header.has-overview>.pdf-reader-view-toggle{justify-self:center;margin:0;padding:2px 3px;border-radius:999px;gap:0}
-.pdf-reader-header.has-overview>.pdf-reader-view-toggle button{border:0;border-radius:999px;padding:4px 12px;font-size:14px;line-height:20px}
-.pdf-reader-header.has-overview>.pdf-reader-view-toggle button[aria-selected=true]{border:0;background:#fff;box-shadow:0 1px 4px #26262612}
+.pdf-reader-workspace .pdf-reader-header{grid-template-columns:minmax(0,1fr) auto}
+.pdf-note-highlight-hit{position:absolute;z-index:6;margin:0;padding:0;border:0;border-radius:2px;background:transparent;cursor:pointer;color:transparent}
+.pdf-note-highlight-hit:hover{background:color-mix(in srgb,var(--color-primary,#006ae6) 9%,transparent)}
+.pdf-note-highlight-hit:focus-visible{outline:2px solid var(--color-primary,#006ae6);outline-offset:2px}
 .pdf-reader-header .pdf-reader-header-end>.pdf-reader-tools{display:flex;align-items:center;gap:1px;white-space:nowrap;flex-wrap:nowrap}
 .pdf-reader-workspace .pdf-reader-header button{font-size:14px}
 .pdf-reader-page-input{font-size:14px}
@@ -119,10 +116,6 @@
 .pdf-visual-body h3{font-size:15px}
 .pdf-visual-body blockquote{font-size:13px}
 @media(max-width:600px){
- .pdf-reader-workspace .pdf-reader-header.has-overview{grid-template-columns:auto minmax(0,1fr);row-gap:2px;padding-block:3px}
- .pdf-reader-header.has-overview .pdf-reader-header-start{grid-column:1;grid-row:1}
- .pdf-reader-header.has-overview>.pdf-reader-view-toggle{grid-column:2;grid-row:1}
- .pdf-reader-header.has-overview .pdf-reader-header-end{grid-column:1 / -1;grid-row:2;justify-self:end}
 }
 
 /* Compact page and zoom controls, with editing only when the value is clicked. */
@@ -153,5 +146,3 @@
 .pdf-reader-hand-active .react-pdf__Document{pointer-events:none}
 .pdf-reader-workspace{container-type:inline-size;container-name:pdf-reader}
 @container pdf-reader (max-width:850px){.pdf-reader-header-end .pdf-study-ai-button span{display:none}.pdf-reader-header-end .pdf-study-ai-button{padding-inline:8px}}
-@container pdf-reader (max-width:780px){.pdf-reader-workspace .pdf-reader-header.has-overview{grid-template-columns:auto minmax(0,1fr);row-gap:4px;padding-block:4px}.pdf-reader-header.has-overview .pdf-reader-header-start{grid-column:1;grid-row:1}.pdf-reader-header.has-overview>.pdf-reader-view-toggle{grid-column:2;grid-row:1;justify-self:end}.pdf-reader-header.has-overview .pdf-reader-header-end{grid-column:1 / -1;grid-row:2;justify-self:end}}
-@container pdf-reader (max-width:500px){.pdf-reader-header.has-overview .pdf-reader-header-end{flex-wrap:wrap;row-gap:4px}.pdf-reader-header-end>.pdf-reader-tools{margin-right:auto}}

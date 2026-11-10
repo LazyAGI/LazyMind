@@ -241,6 +241,25 @@ it('opens full-document translation from the sidebar and preserves the selection
   expect(screen.getByRole('textbox',{name:'输入要翻译的文字'})).toHaveValue('Keep my draft');
 });
 
+it('shows document translation progress only inside the full-translation view',async()=>{
+ useDatasetPermissionStore.getState().setCurrentDataset({dataset_id:'library',scene:'general'} as Dataset);
+ axiosInstance.defaults.adapter=config=>{
+  const data=config.url?.endsWith('/documents/paper')?{display_name:'manual.pdf'}
+   :config.url?.endsWith('/pdf-capabilities')?{data:{is_pdf:true,reader_ready:true,pdf_kind:'native_text',translations:[],jobs:[{id:'job',kind:'TRANSLATION_PDF',status:'RUNNING',stage:'TRANSLATING',progress:17}]}}
+   :undefined;
+  return data?Promise.resolve({config,status:200,statusText:'OK',headers:{},data}):new Promise(()=>{});
+ };
+ renderDocument();
+ await screen.findByRole('button',{name:/^Translation$|^翻译$/});
+ await waitFor(()=>expect(screen.queryByText('正在翻译文档')).not.toBeInTheDocument());
+ fireEvent.click(screen.getByRole('button',{name:/^Translation$|^翻译$/}));
+ expect(screen.queryByText('正在翻译文档')).not.toBeInTheDocument();
+ fireEvent.click(screen.getByText('全文翻译'));
+ expect(await screen.findByText('正在翻译文档')).toBeVisible();
+ fireEvent.click(screen.getByText('划词翻译'));
+ expect(screen.queryByText('正在翻译文档')).not.toBeInTheDocument();
+});
+
 it('resizes the sidebar to half the workspace and restores widths above 640px', async () => {
   localStorage.setItem('paper-reader:assistant-width','750');
   vi.stubGlobal('ResizeObserver',class { constructor(private callback:ResizeObserverCallback) {} observe(element:Element){this.callback([{contentRect:{width:1600,height:1000},target:element} as ResizeObserverEntry],this as unknown as ResizeObserver);} disconnect(){} unobserve(){} });

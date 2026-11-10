@@ -53,6 +53,7 @@ interface FileViewerProps {
   paperMode?: boolean;
   onPdfNoteSelection?: (selection: PdfTextSelection, note: string, color: PdfNoteColor, id: string) => Promise<void>;
   pdfNoteHighlights?: PdfNoteHighlight[];
+  onPdfNoteHighlightClick?: (id:string) => void;
   pdfHeaderStart?: ReactNode;
   pdfHeaderEnd?: ReactNode | ((tools: ReactNode) => ReactNode);
   onPdfStudyOpenChange?: (open: boolean) => void;
@@ -414,7 +415,6 @@ const FileViewer = forwardRef<FileViewerRef, FileViewerProps>((props, ref) => {
             pdfHeaderStart={props.pdfHeaderStart}
             pdfHeaderEnd={props.pdfHeaderEnd}
             key={`${props.pdfIRTarget?.dataset || ""}:${props.pdfIRTarget?.document || ""}:${props.file || ""}`}
-            paperTitle={props.fileName.replace(/\.pdf$/i, "")}
             onStudyOpenChange={props.onPdfStudyOpenChange}
             pdfIRTarget={props.pdfIRTarget}
             onPdfIRDocumentChange={props.onPdfIRDocumentChange}
@@ -423,6 +423,7 @@ const FileViewer = forwardRef<FileViewerRef, FileViewerProps>((props, ref) => {
             pdfNavigateToPage={props.pdfNavigateToPage}
             pdfNavigateToPosition={props.pdfNavigateToPosition}
             savedNoteHighlights={props.pdfNoteHighlights}
+            onNoteHighlightClick={props.onPdfNoteHighlightClick}
             pdfSourceHash={pdfFingerprint?.data === fileData ? pdfFingerprint?.hash : undefined}
             className="scroll-container"
             style={{
@@ -546,6 +547,7 @@ const FileViewer = forwardRef<FileViewerRef, FileViewerProps>((props, ref) => {
     props.pdfNavigateToPage,
     props.pdfNavigateToPosition,
     props.pdfNoteHighlights,
+    props.onPdfNoteHighlightClick,
     props.pdfHeaderStart,
     props.pdfHeaderEnd,
     props.file,

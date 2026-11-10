@@ -2,6 +2,7 @@ import type { PdfTextSelection } from "@/components/ui";
 import { Button, Select } from "antd";
 import FileViewer from "@/modules/knowledge/components/FileViewer";
 import { pdfArtifactContentUrl, type PdfArtifact } from "@/modules/knowledge/api/pdfArtifacts";
+import type { ReactNode } from "react";
 
 interface Props {
   datasetId: string;
@@ -15,11 +16,13 @@ interface Props {
   onRegenerate: (artifact: PdfArtifact) => void;
   onRetranslateSelection: (selection: PdfTextSelection) => void;
   onHalfWidth?: () => void;
+  progressNotice?: ReactNode;
 }
 
 export default function FullDocumentTranslationPanel(props: Props) {
   const { artifact } = props;
   return <section className="knowledge-full-translation" aria-label="全文翻译">
+    {props.progressNotice}
     <div className="knowledge-full-translation-toolbar">
       {props.artifacts.length > 0 && <Select
         aria-label="全文翻译版本" value={artifact?.id}

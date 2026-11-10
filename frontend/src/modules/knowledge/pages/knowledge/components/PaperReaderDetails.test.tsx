@@ -2,11 +2,11 @@ import {act,fireEvent,render,screen,waitFor,cleanup,within} from '@testing-libra
 import {afterEach,beforeEach,expect,it,vi} from 'vitest';
 import PaperReaderDetails from './PaperReaderDetails';
 vi.mock('react-i18next',()=>({useTranslation:()=>({i18n:{language:'en-US'}})}));
-const api=vi.hoisted(()=>({get:vi.fn(),add:vi.fn()}));
+const api=vi.hoisted(()=>({get:vi.fn(),add:vi.fn(),remove:vi.fn()}));
 vi.mock('@/components/request',()=>({BASE_URL:'',axiosInstance:{get:api.get}}));
-vi.mock('@/modules/knowledge/paper/store',async()=>{const original=await vi.importActual<any>('@/modules/knowledge/paper/store');return {...original,addLibraryNote:api.add};});
+vi.mock('@/modules/knowledge/paper/store',async()=>{const original=await vi.importActual<any>('@/modules/knowledge/paper/store');return {...original,addLibraryNote:api.add,deleteLibraryNote:api.remove};});
 const library=()=>({can_write:true,paper_count:1,pdf_attachment_count:1,active:true,data:{folders:[],papers:[{id:'paper',revision:1,metadata:{title:'Real {paper} & result',authors:['Ada Example'],year:2025,venue:'Test journal',abstract:'A real abstract.',identifiers:{doi:'10.1234/example'}},tags:[],attachmentIds:['a'],noteIds:['n']}],attachments:[{id:'a',paperId:'paper',contentRef:'doc'}],notes:[{id:'n',paperId:'paper',title:'Earlier note',content:'Read the evaluation.',createdAt:'2026-01-01'}]}});
-beforeEach(()=>{api.get.mockReset().mockResolvedValue({data:library()});api.add.mockReset();Object.defineProperty(navigator,'clipboard',{configurable:true,value:{writeText:vi.fn().mockResolvedValue(undefined)}});});
+beforeEach(()=>{api.get.mockReset().mockResolvedValue({data:library()});api.add.mockReset();api.remove.mockReset();vi.spyOn(window,'confirm').mockReturnValue(true);Object.defineProperty(navigator,'clipboard',{configurable:true,value:{writeText:vi.fn().mockResolvedValue(undefined)}});});
 afterEach(cleanup);
 const props={datasetId:'dataset',documentId:'doc',canWrite:true,fileName:'source.pdf'};
 it('reads server metadata without migration and copies escaped BibTeX',async()=>{
@@ -132,6 +132,18 @@ it('shows saved selection notes newest first, with their color and precise PDF j
  fireEvent.click(within(entries[0]).getByRole('button',{name:/This design is the key insight/}));
  expect(onNavigateNote).toHaveBeenCalledWith(source);
 });
+it('focuses a clicked highlight note and removes it from the saved list',async()=>{
+ const data=library() as any;
+ data.data.notes[0].source={attachmentId:'a',page:2,color:'yellow',rects:[[.1,.2,.3,.24]]};
+ const after=library() as any;after.data.notes=[];after.data.papers[0].noteIds=[];
+ api.get.mockResolvedValue({data});api.remove.mockResolvedValue({data:after.data});
+ render(<PaperReaderDetails {...props} initialTab="notes" selectedNoteId="n"/>);
+ const entry=(await screen.findByText('Read the evaluation.')).closest('li')!;
+ expect(entry).toHaveClass('is-selected');
+ fireEvent.click(within(entry).getByRole('button',{name:'Delete note'}));
+ await waitFor(()=>expect(api.remove).toHaveBeenCalledWith('dataset','paper','n'));
+ await waitFor(()=>expect(screen.queryByText('Read the evaluation.')).not.toBeInTheDocument());
+});
 it('refreshes the saved note list after an external popup save without replacing the panel',async()=>{
  const first=library() as any;const second=library() as any;
  second.data.notes.push({id:'new',paperId:'paper',title:'新笔记',content:'Saved in the selection popup',kind:'note',createdAt:'2026-01-02',updatedAt:'2026-01-02'});
@@ -151,7 +163,7 @@ it('does not jump to the wrong PDF when a note belongs to another attachment of 
  render(<PaperReaderDetails {...props} initialTab="notes" onNavigateNote={onNavigateNote} onNavigatePage={onNavigatePage}/>);
  const entry=(await screen.findByText('Thought about the supplement')).closest('li')!;
  expect(within(entry).getByText('Another attachment')).toBeInTheDocument();
- expect(within(entry).queryByRole('button')).toBeNull();
+ expect(within(entry).queryByRole('button',{name:/Thought about the supplement/})).toBeNull();
  expect(onNavigateNote).not.toHaveBeenCalled();expect(onNavigatePage).not.toHaveBeenCalled();
 });
 it('keeps imported PDF annotations compact, color coded and clickable as a whole entry',async()=>{
@@ -181,7 +193,7 @@ it('shows a saved color even when the note has no usable page and avoids a broke
  const onNavigateNote=vi.fn();render(<PaperReaderDetails {...props} initialTab="notes" onNavigateNote={onNavigateNote}/>);
  const entry=(await screen.findByText('Read the evaluation.')).closest('li')!;
  expect(within(entry).getByLabelText('Purple')).toBeInTheDocument();
- expect(within(entry).queryByRole('button')).toBeNull();
+ expect(within(entry).queryByRole('button',{name:/Read the evaluation/})).toBeNull();
  const imported=(await screen.findByText('Imported mark without page')).closest('li')!;
  expect(within(imported).getByLabelText('Red')).toBeInTheDocument();
  expect(within(imported).queryByRole('button')).toBeNull();
