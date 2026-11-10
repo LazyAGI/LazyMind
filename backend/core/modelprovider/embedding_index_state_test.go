@@ -12,11 +12,11 @@ import (
 )
 
 func TestEmbeddingIndexStatusReportsLegacyIndexesAsUnknown(t *testing.T) {
-	db, _, _, _ := setupProbeTest(t, &orm.EmbeddingIndexState{}, &orm.Dataset{}, &orm.DocumentProcessingState{})
+	db, _, _, _ := setupProbeTest(t, &orm.EmbeddingIndexState{}, &orm.Dataset{}, &orm.Document{}, &orm.DocumentProcessingState{})
 	now := time.Now().UTC()
 	dataset := orm.Dataset{ID: "kb-old", KbID: "kb-old", ProcessingLevel: "indexed", BaseModel: orm.BaseModel{CreateUserID: "owner", CreatedAt: now, UpdatedAt: now}}
 	state := orm.DocumentProcessingState{DatasetID: dataset.ID, DocumentID: "doc", IndexStatus: "succeeded", UpdatedAt: now}
-	for _, row := range []any{&dataset, &state} {
+	for _, row := range []any{&dataset, &orm.Document{ID: "doc", DatasetID: dataset.ID}, &state} {
 		if err := db.Create(row).Error; err != nil {
 			t.Fatal(err)
 		}
@@ -29,9 +29,12 @@ func TestEmbeddingIndexStatusReportsLegacyIndexesAsUnknown(t *testing.T) {
 }
 
 func TestEmbeddingIndexStatusCountsLegacyIndexedDatasetWithoutDocumentState(t *testing.T) {
-	db, _, _, _ := setupProbeTest(t, &orm.EmbeddingIndexState{}, &orm.Dataset{}, &orm.DocumentProcessingState{})
+	db, _, _, _ := setupProbeTest(t, &orm.EmbeddingIndexState{}, &orm.Dataset{}, &orm.Document{}, &orm.DocumentProcessingState{})
 	now := time.Now().UTC()
 	if err := db.Create(&orm.Dataset{ID: "kb-legacy", KbID: "kb-legacy", ProcessingLevel: "indexed", BaseModel: orm.BaseModel{CreateUserID: "owner", CreatedAt: now, UpdatedAt: now}}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&orm.Document{ID: "doc", DatasetID: "kb-legacy"}).Error; err != nil {
 		t.Fatal(err)
 	}
 	result := getEmbeddingIndexStatus(t)
@@ -41,12 +44,15 @@ func TestEmbeddingIndexStatusCountsLegacyIndexedDatasetWithoutDocumentState(t *t
 }
 
 func TestEmbeddingIndexStatusTreatsBlankLegacyLevelAsIndexed(t *testing.T) {
-	db, _, _, _ := setupProbeTest(t, &orm.EmbeddingIndexState{}, &orm.Dataset{}, &orm.DocumentProcessingState{})
+	db, _, _, _ := setupProbeTest(t, &orm.EmbeddingIndexState{}, &orm.Dataset{}, &orm.Document{}, &orm.DocumentProcessingState{})
 	now := time.Now().UTC()
 	if err := db.Create(&orm.Dataset{ID: "kb-blank", KbID: "kb-blank", ProcessingLevel: "", BaseModel: orm.BaseModel{CreateUserID: "owner", CreatedAt: now, UpdatedAt: now}}).Error; err != nil {
 		t.Fatal(err)
 	}
 	if err := db.Model(&orm.Dataset{}).Where("id = ?", "kb-blank").Update("processing_level", "").Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&orm.Document{ID: "doc", DatasetID: "kb-blank"}).Error; err != nil {
 		t.Fatal(err)
 	}
 	result := getEmbeddingIndexStatus(t)
@@ -56,7 +62,7 @@ func TestEmbeddingIndexStatusTreatsBlankLegacyLevelAsIndexed(t *testing.T) {
 }
 
 func TestEmbeddingIndexStatusReportsActiveModelAndRebuildProgress(t *testing.T) {
-	db, _, _, _ := setupProbeTest(t, &orm.EmbeddingIndexState{}, &orm.Dataset{}, &orm.DocumentProcessingState{})
+	db, _, _, _ := setupProbeTest(t, &orm.EmbeddingIndexState{}, &orm.Dataset{}, &orm.Document{}, &orm.DocumentProcessingState{})
 	now := time.Now().UTC()
 	if err := db.Create(&orm.EmbeddingIndexState{Scope: "global", ActiveModelID: "model-new", ActiveSource: "own", ActiveModelName: "Embed New", ActiveProviderName: "Supplier", Signature: "v1:1:" + strings.Repeat("a", 64) + ":" + strings.Repeat("b", 64), Phase: "ready", Generation: 2, UpdatedAt: now}).Error; err != nil {
 		t.Fatal(err)
@@ -67,6 +73,9 @@ func TestEmbeddingIndexStatusReportsActiveModelAndRebuildProgress(t *testing.T) 
 		}
 	}
 	for _, item := range []struct{ kb, status string }{{"kb-a", "succeeded"}, {"kb-b", "pending"}} {
+		if err := db.Create(&orm.Document{ID: item.kb + "-doc", DatasetID: item.kb}).Error; err != nil {
+			t.Fatal(err)
+		}
 		if err := db.Create(&orm.DocumentProcessingState{DatasetID: item.kb, DocumentID: item.kb + "-doc", IndexStatus: item.status, UpdatedAt: now}).Error; err != nil {
 			t.Fatal(err)
 		}
@@ -80,7 +89,7 @@ func TestEmbeddingIndexStatusReportsActiveModelAndRebuildProgress(t *testing.T) 
 }
 
 func TestEmbeddingIndexStatusReportsCompletedOfflineClear(t *testing.T) {
-	db, _, _, _ := setupProbeTest(t, &orm.EmbeddingIndexState{}, &orm.Dataset{}, &orm.DocumentProcessingState{})
+	db, _, _, _ := setupProbeTest(t, &orm.EmbeddingIndexState{}, &orm.Dataset{}, &orm.Document{}, &orm.DocumentProcessingState{})
 	now := time.Now().UTC()
 	if err := db.Create(&orm.EmbeddingIndexState{Scope: "global", Phase: "cleared", Generation: 3, UpdatedAt: now}).Error; err != nil {
 		t.Fatal(err)
@@ -92,6 +101,9 @@ func TestEmbeddingIndexStatusReportsCompletedOfflineClear(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	if err := db.Create(&orm.Document{ID: "doc", DatasetID: "kb-cleared"}).Error; err != nil {
+		t.Fatal(err)
+	}
 	result := getEmbeddingIndexStatus(t)
 	if result.Status != "cleared" || result.IndexedKnowledgeBases != 0 || result.AffectedKnowledgeBases != 1 || result.PendingKnowledgeBases != 1 {
 		t.Fatalf("cleared vector space must remain visible while documents await reindex: %+v", result)

@@ -1,6 +1,6 @@
 import { axiosInstance } from "@/components/request";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { previewEmbeddingSwitch } from "./api";
+import { previewEmbeddingSwitch, clearEmbeddingChunks } from "./api";
 
 afterEach(() => vi.restoreAllMocks());
 
@@ -26,4 +26,12 @@ describe("embedding switch preview API", () => {
     );
     expect(post.mock.calls[0]?.[2]?.timeout).toBeGreaterThan(90000);
   });
+});
+
+it("sends explicit confirmation and preview generation for chunk cleanup", async () => {
+  const post = vi.spyOn(axiosInstance, "post").mockResolvedValue({ data: { data: { cleared: true } } });
+  const request = { model_id: "new-model", source: "own" as const, generation: 8, confirm_clear_chunks: true as const };
+  await expect(clearEmbeddingChunks(request)).resolves.toEqual({ cleared: true });
+  expect(post).toHaveBeenCalledWith(expect.stringContaining("/embedding/clear-chunks"), request,
+    expect.objectContaining({ silentError: true, timeout: expect.any(Number) }));
 });

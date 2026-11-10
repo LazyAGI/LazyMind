@@ -120,7 +120,31 @@ if not getattr(DocumentProcessorWorker._Impl, '_lazymind_isolated', False):
         _lazymind_isolated = True
 
         def _get_processor(self):
-            return _install_text_reembed_guard(_BaseDocumentWorkerImpl._get_processor(self))
+            from lazymind.parsing.service.embedding_reset import index_state, IndexBusy
+            state = index_state()
+            expected = getattr(self, '_lazymind_task_generation', None)
+            if (state['phase'] in ('clearing', 'cleanup_failed', 'cleared')
+                    or (expected is not None and expected != state['generation'])):
+                raise IndexBusy('document task belongs to an unavailable index generation')
+            if getattr(self, '_lazymind_store_generation', None) != state['generation']:
+                self._processor = None
+                self._lazymind_store_generation = state['generation']
+            processor = _BaseDocumentWorkerImpl._get_processor(self)
+            if state['generation'] > 0 and not getattr(processor, '_lazymind_generation_initialized', False):
+                # Registered algorithms can contain a pickled store from the old
+                # generation. Recreate connections and infer the new dimensions.
+                from lazymind.parsing.service.build_document import _build_store_config
+                from lazymind.config import EMBED_INDEX_KWARGS
+                from lazyllm.tools.rag.store.document_store import _DocumentStore
+                old = processor._store
+                fresh = _DocumentStore(_build_store_config(EMBED_INDEX_KWARGS),
+                                       group_embed_keys=old._group_embed_keys, embed=old._embed,
+                                       embed_dims={}, embed_datatypes={},
+                                       global_metadata_desc=old._global_metadata_desc)
+                fresh.activate_group(old.activated_groups())
+                processor._store = fresh
+                processor._lazymind_generation_initialized = True
+            return _install_text_reembed_guard(processor)
 
         def _exec_reparse_task(self, processor, task_id, payload, node_groups, name_to_id, reader):
             _rebuild_empty_text_documents(processor, payload, node_groups, reader)
@@ -130,7 +154,10 @@ if not getattr(DocumentProcessorWorker._Impl, '_lazymind_isolated', False):
         def _run_task(self, task_id, task_type, payload, from_queue):
             lazyllm.globals['config'].clear()
             lazyllm.inject_model_config = inject_model_config
-            return _BaseDocumentWorkerImpl._run_task(self, task_id, task_type, payload, from_queue)
+            from lazymind.parsing.service.embedding_reset import index_lock
+            self._lazymind_task_generation = (payload.get('llm_config') or {}).get('_embedding_generation')
+            with index_lock():
+                return _BaseDocumentWorkerImpl._run_task(self, task_id, task_type, payload, from_queue)
 
     DocumentProcessorWorker._Impl = _IsolatedDocumentWorkerImpl
 

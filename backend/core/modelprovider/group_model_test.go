@@ -7,6 +7,7 @@ import (
 	"reflect"
 	"sort"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -420,6 +421,117 @@ func TestDeleteUnusedEmbeddingModelKeepsIndexedKnowledge(t *testing.T) {
 	DeleteGroupModel(rec, req)
 	if rec.Code != http.StatusConflict {
 		t.Fatalf("active model removal must wait for physical-vector cleanup even after KB rows disappear: %d %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestDeleteActiveEmbeddingModelWithEmptyKnowledge(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		role        string
+		legacy      bool
+		hasDocument bool
+		cleanup     int
+		want        int
+	}{
+		{name: "recorded default", role: "admin", cleanup: 200, want: 200},
+		{name: "legacy default", role: "admin", legacy: true, cleanup: 200, want: 200},
+		{name: "another user's parsed document", role: "admin", hasDocument: true, want: 409},
+		{name: "new documents or active jobs", role: "admin", cleanup: 409, want: 409},
+		{name: "cleanup unavailable", role: "admin", cleanup: 503, want: 409},
+		{name: "non-admin", role: "member", want: 409},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			db, parent, group, model := setupProbeTest(t, &orm.EmbeddingIndexState{}, &orm.UserSelectedModel{}, &orm.Dataset{}, &orm.Document{}, &orm.DocumentProcessingState{})
+			if err := db.Model(&parent).Update("capabilities", "has_models").Error; err != nil {
+				t.Fatal(err)
+			}
+			if err := db.Model(&model).Updates(map[string]any{"model_type": "embed", "enabled": true}).Error; err != nil {
+				t.Fatal(err)
+			}
+			selected := orm.UserSelectedModel{UserID: model.CreateUserID, ModelKey: "embed_main", UserModelProviderGroupModelID: model.ID}
+			if err := db.Create(&selected).Error; err != nil {
+				t.Fatal(err)
+			}
+			var generation int64
+			if !tc.legacy {
+				generation = 7
+				state := orm.EmbeddingIndexState{Scope: globalEmbeddingScope, ActiveModelID: model.ID, ActiveSource: "own", Phase: "ready", Generation: generation}
+				if err := db.Create(&state).Error; err != nil {
+					t.Fatal(err)
+				}
+			}
+			if tc.hasDocument {
+				kb := orm.Dataset{ID: "kb", KbID: "kb", ProcessingLevel: "parsed", BaseModel: orm.BaseModel{CreateUserID: "another-user"}}
+				if err := db.Create(&kb).Error; err != nil {
+					t.Fatal(err)
+				}
+				if err := db.Create(&orm.Document{ID: "doc", DatasetID: kb.ID}).Error; err != nil {
+					t.Fatal(err)
+				}
+			}
+
+			var calls atomic.Int32
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				calls.Add(1)
+				if tc.cleanup == 0 {
+					t.Error("cleanup should not have been called")
+					w.WriteHeader(http.StatusConflict)
+					return
+				}
+				var payload struct {
+					Generation int64 `json:"generation"`
+					EmptyOnly  bool  `json:"empty_only"`
+				}
+				if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+					t.Error(err)
+				}
+				if r.Method != http.MethodPost || r.URL.Path != "/internal/knowledge:clear-chunks" || !payload.EmptyOnly || payload.Generation != generation+1 {
+					t.Errorf("unexpected cleanup request: %s %s %+v", r.Method, r.URL.Path, payload)
+				}
+				w.WriteHeader(tc.cleanup)
+				if tc.cleanup == http.StatusOK {
+					_ = json.NewEncoder(w).Encode(map[string]any{"cleared": true, "generation": payload.Generation})
+				}
+			}))
+			defer server.Close()
+			t.Setenv("LAZYMIND_CHAT_SERVICE_URL", server.URL)
+			t.Setenv("LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN", "")
+
+			req := httptest.NewRequest(http.MethodDelete, "/models/"+model.ID, nil)
+			req.Header.Set("X-User-Id", model.CreateUserID)
+			req.Header.Set("X-User-Role", tc.role)
+			req = mux.SetURLVars(req, map[string]string{"model_provider_id": parent.ID, "group_id": group.ID, "model_id": model.ID})
+			rec := httptest.NewRecorder()
+			DeleteGroupModel(rec, req)
+			if rec.Code != tc.want {
+				t.Fatalf("delete status = %d, want %d: %s", rec.Code, tc.want, rec.Body.String())
+			}
+			if got := calls.Load(); (tc.cleanup == 0 && got != 0) || (tc.cleanup != 0 && got != 1) {
+				t.Fatalf("unexpected cleanup call count: %d", got)
+			}
+
+			var remainingModel, remainingSelection int64
+			if err := db.Model(&orm.UserModelProviderGroupModel{}).Where("id = ? AND deleted_at IS NULL", model.ID).Count(&remainingModel).Error; err != nil {
+				t.Fatal(err)
+			}
+			if err := db.Model(&orm.UserSelectedModel{}).Where("user_model_provider_group_model_id = ?", model.ID).Count(&remainingSelection).Error; err != nil {
+				t.Fatal(err)
+			}
+			wantRemaining := int64(1)
+			if tc.want == http.StatusOK {
+				wantRemaining = 0
+				var state orm.EmbeddingIndexState
+				if err := db.Take(&state, "scope = ?", globalEmbeddingScope).Error; err != nil {
+					t.Fatal(err)
+				}
+				if state.Phase != "cleared" || state.ActiveModelID != "" || state.Generation != generation+1 {
+					t.Fatalf("active index state was not cleared: %+v", state)
+				}
+			}
+			if remainingModel != wantRemaining || remainingSelection != wantRemaining {
+				t.Fatalf("remaining model=%d, selection=%d, want %d", remainingModel, remainingSelection, wantRemaining)
+			}
+		})
 	}
 }
 

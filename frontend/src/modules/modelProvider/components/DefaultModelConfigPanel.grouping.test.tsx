@@ -13,6 +13,7 @@ const mocks = vi.hoisted(() => ({
   models: vi.fn(),
   saveModel: vi.fn(),
   previewEmbeddingSwitch: vi.fn(),
+  clearEmbeddingChunks: vi.fn(),
   saveService: vi.fn(),
   ready: vi.fn(),
   verified: vi.fn(),
@@ -43,6 +44,7 @@ vi.mock("@/runtime/cloud/session", () => ({
 }));
 vi.mock("../api", () => ({
   previewEmbeddingSwitch: mocks.previewEmbeddingSwitch,
+  clearEmbeddingChunks: mocks.clearEmbeddingChunks,
   modelProvidersApi: {
     apiCoreModelProvidersGet: mocks.providers,
     apiCoreModelProvidersSelectedModelsGet: mocks.selections,
@@ -186,8 +188,8 @@ describe("default capability configuration groups", () => {
     await waitFor(() => expect(mocks.saveModel).toHaveBeenCalledOnce());
   });
 
-  it("does not switch to an incompatible embedding while index cleanup is unavailable", async () => {
-    const warning = vi.spyOn(Modal, "warning").mockImplementation(() => ({ destroy: vi.fn(), update: vi.fn() }));
+  it.each(["cancel", "confirm", "failure"])("requires explicit confirmation before clearing chunks: %s", async (action) => {
+    const confirm = vi.spyOn(Modal, "confirm").mockImplementation(() => ({ destroy: vi.fn(), update: vi.fn() }));
     mocks.selections.mockResolvedValue({ data: { selections: [selectedEmbedding] } });
     mocks.models.mockResolvedValue({ data: { models: [candidateEmbedding] } });
     mocks.previewEmbeddingSwitch.mockResolvedValue({
@@ -195,15 +197,37 @@ describe("default capability configuration groups", () => {
       active_model_name: "Old embedding", candidate_model_name: "New embedding",
       signature_status: "verified", generation: 2,
     });
+    if (action === "failure") mocks.clearEmbeddingChunks.mockRejectedValue(new Error("cleanup unavailable"));
+    else mocks.clearEmbeddingChunks.mockResolvedValue({ cleared: true });
+    mocks.saveModel.mockResolvedValue({ data: { selections: [{ ...selectedEmbedding, model_id: "new-embedding", name: "New embedding" }] } });
     renderPanel();
-
     await chooseCandidateEmbedding();
-
-    await waitFor(() => expect(warning).toHaveBeenCalledWith(expect.objectContaining({
+    await waitFor(() => expect(confirm).toHaveBeenCalledWith(expect.objectContaining({
       content: "modelProvider.embeddingIndexResetRequired",
+      okText: "modelProvider.embeddingClearAndSwitch",
+      okButtonProps: { danger: true },
     })));
+    expect(mocks.clearEmbeddingChunks).not.toHaveBeenCalled();
     expect(mocks.saveModel).not.toHaveBeenCalled();
-    expect(group("modelProvider.module.embeddingTitle")).toHaveTextContent("Old embedding");
+    const options = confirm.mock.calls[0][0];
+    if (action === "cancel") {
+      await act(async () => { (options.onCancel as () => void)(); });
+      expect(mocks.clearEmbeddingChunks).not.toHaveBeenCalled();
+      expect(mocks.saveModel).not.toHaveBeenCalled();
+      expect(group("modelProvider.module.embeddingTitle")).toHaveTextContent("Old embedding");
+    } else {
+      await act(async () => { await (options.onOk as () => Promise<void>)(); });
+      expect(mocks.clearEmbeddingChunks).toHaveBeenCalledTimes(1);
+      expect(mocks.clearEmbeddingChunks).toHaveBeenCalledWith({
+        model_id: "new-embedding", source: "own", generation: 2, confirm_clear_chunks: true,
+      });
+      if (action === "confirm") {
+        expect(mocks.saveModel).toHaveBeenCalledOnce();
+        expect(mocks.clearEmbeddingChunks.mock.invocationCallOrder[0]).toBeLessThan(mocks.saveModel.mock.invocationCallOrder[0]);
+      } else {
+        expect(mocks.saveModel).not.toHaveBeenCalled();
+      }
+    }
   });
 
   it("keeps the old embedding when the candidate signature cannot be checked", async () => {
@@ -268,6 +292,7 @@ describe("default capability configuration groups", () => {
 
     await waitFor(() => expect(warning).toHaveBeenCalledWith(expect.objectContaining({
       content: "modelProvider.embeddingSignatureCheckFailed",
+      okText: "common.confirm",
     })));
     expect(mocks.saveModel).not.toHaveBeenCalled();
     await waitFor(() => expect(within(group("modelProvider.module.embeddingTitle")).getByRole("combobox")).toBeEnabled());

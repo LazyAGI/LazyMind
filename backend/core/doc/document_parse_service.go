@@ -102,6 +102,9 @@ func (s *DocumentService) EnsureDocumentParsed(r *http.Request, req EnsureDocume
 	if err != nil {
 		return EnsureDocumentParsedResult{}, err
 	}
+	if rec.processing.EmbeddingVersion == embeddingVersionReembedManual {
+		return EnsureDocumentParsedResult{}, &DocumentServiceError{Code: DocumentServiceUnavailable, Message: "Document chunks were cleared. Reparse this document manually in the knowledge base."}
+	}
 	// Native reader artifacts remain usable while deferred indexing runs or fails.
 	if artifact, err := readBaseArtifact(r.Context(), rec); err != nil {
 		return EnsureDocumentParsedResult{}, err

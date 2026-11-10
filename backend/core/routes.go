@@ -1045,6 +1045,7 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "GET", "/model_providers/models/ready", []string{"model.read"}, modelprovider.GetModelReady)
 	handleAPI(r, "GET", "/model_providers/embedding/index-state", []string{"model.read"}, modelprovider.GetEmbeddingIndexState)
 	handleAPI(r, "POST", "/model_providers/embedding/switch-preview", []string{"model.write"}, modelprovider.PreviewEmbeddingModelSwitch)
+	handleAPI(r, "POST", "/model_providers/embedding/clear-chunks", []string{"model.write"}, modelprovider.ClearEmbeddingChunks)
 	handleAPI(r, "GET", "/model_providers/selected_models", []string{"model.read"}, modelprovider.GetSelectedModels)
 	handleAPI(r, "PUT", "/model_providers/selected_models", []string{"model.write"}, modelprovider.SetSelectedModels)
 	handleAPI(r, "PUT", "/model_providers/selected_models/share", []string{"model.write"}, modelprovider.SetSharedModel)

@@ -414,6 +414,25 @@ func SetSelectedModels(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	if hasEmbeddingSelection && embeddingSignature != "" && db.Migrator().HasTable(&orm.EmbeddingIndexState{}) {
+		state, err := loadGlobalEmbeddingState(r.Context(), db)
+		if err != nil {
+			common.ReplyErr(w, "embedding state unavailable", 503)
+			return
+		}
+		status, err := loadEmbeddingIndexStatus(r.Context(), db)
+		if err != nil {
+			common.ReplyErr(w, "embedding state unavailable", 503)
+			return
+		}
+		if status.AffectedKnowledgeBases == 0 && state.ActiveModelID != "" && state.Signature != embeddingSignature {
+			if err := clearEmbeddingChunks(r.Context(), db, state, embeddingModelID, embeddingSource, embeddingSignature, true); err != nil {
+				common.ReplyErr(w, err.Error(), 409)
+				return
+			}
+		}
+	}
+
 	// When embed_image is configured for the first time, clear lazy_mode so
 	// image embedding runs immediately. When it is cleared, reset lazy_mode to embed.
 	multimodalModelID, hasMultimodalSelection := selectionByType["embed_image"]
@@ -534,13 +553,14 @@ func SetSelectedModels(w http.ResponseWriter, r *http.Request) {
 			if stateMissing ||
 				(state.ActiveModelID != embeddingModelID || state.ActiveSource != embeddingSource || state.Signature != embeddingSignature ||
 					state.ActiveModelName != embeddingModelName || state.ActiveProviderName != providerName) {
+				changedSpace := state.Signature != embeddingSignature
 				state.ActiveModelID, state.ActiveSource = embeddingModelID, embeddingSource
 				state.ActiveModelName, state.ActiveProviderName = embeddingModelName, providerName
 				state.Signature, state.Phase = embeddingSignature, "ready"
 				state.TargetModelID, state.TargetSource, state.TargetSignature = "", "", ""
 				if state.Generation < 1 {
 					state.Generation = 1
-				} else {
+				} else if changedSpace {
 					state.Generation++
 				}
 				state.UpdatedAt = now
