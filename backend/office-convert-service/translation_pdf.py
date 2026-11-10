@@ -26,6 +26,9 @@ def protected_regions(page):
     regions.extend(fitz.Rect(item['rect']) for item in page.get_drawings())
     for block in page.get_text('dict')['blocks']:
         for line in block.get('lines', []):
+            direction = line.get('dir', (1, 0))
+            if abs(direction[0] - 1) > 0.01 or abs(direction[1]) > 0.01:
+                regions.append(fitz.Rect(line['bbox']))
             for span in line.get('spans', []):
                 text = span.get('text', '')
                 if (re.search(r'(?i)(cmmi|cmsy|cmex|symbol|math|msam|msbm)', span.get('font', ''))

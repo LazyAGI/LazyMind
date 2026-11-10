@@ -64,6 +64,21 @@ class PreservationTests(unittest.TestCase):
                 self.assertEqual(result['supplemental_block_count'],2)
                 self.assertTrue(all(item['pages'] for item in result['supplements']))
 
+    def test_rotated_margin_text_keeps_its_orientation(self):
+        with tempfile.TemporaryDirectory(dir='/var/lib/lazymind/uploads') as directory:
+            root=Path(directory)
+            with fitz.open() as doc:
+                page=doc.new_page()
+                page.insert_text((25,400),'arXiv:1706.03762',fontsize=10,rotate=90)
+                bbox=list(page.get_text('blocks')[0][:4])
+                doc.save(root/'source.pdf')
+            self.render(root,[{'id':'rotated','page':1,'bbox':bbox,'text':'arXiv:1706.03762','fontSize':10}],{'rotated':'预印本编号 1706.03762'})
+            with fitz.open(root/'output.pdf') as output:
+                lines=[line for block in output[0].get_text('dict')['blocks'] for line in block.get('lines',[])]
+                rotated=[line for line in lines if any('arXiv' in span['text'] for span in line['spans'])]
+                self.assertTrue(rotated)
+                self.assertEqual(tuple(rotated[0]['dir']),(0.0,-1.0))
+
     def test_missing_translation_is_failure_not_silent_success(self):
         with tempfile.TemporaryDirectory(dir='/var/lib/lazymind/uploads') as directory:
             root=Path(directory)
