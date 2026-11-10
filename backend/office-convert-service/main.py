@@ -764,8 +764,8 @@ def extract_pdf_translation_layout(req: PDFTranslationLayoutRequest) -> dict[str
                     (text_rect & region).get_area() / text_area >= 0.15
                     for region in figure_regions
                 )
-                # Keep text labels in the manifest. The renderer preserves any
-                # unsafe source region and links its translation in a supplement.
+                # Keep source geometry in the manifest. The renderer fits prose
+                # in-page and preserves native chart/table content in place.
                 # Preserve running headers, footers, narrow side metadata and the
                 # author line. They are page furniture rather than translatable
                 # content, and fitting translated prose into these narrow regions

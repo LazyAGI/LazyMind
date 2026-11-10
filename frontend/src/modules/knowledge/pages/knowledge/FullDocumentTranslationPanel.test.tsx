@@ -32,3 +32,8 @@ it('keeps the current artifact when rerender fails',async()=>{
  expect(callbacks.onArtifactUpdated).not.toHaveBeenCalled();
  expect(screen.getByTestId('viewer')).toHaveTextContent('old');
 });
+it('asks old appendix artifacts to rerender instead of offering appendix navigation',()=>{
+ render(<FullDocumentTranslationPanel datasetId="library" documentId="paper" artifact={{...artifact,layout_preserved:true,supplemental_block_count:2}} canWrite supported busy={false} onTranslate={vi.fn()} onRegenerate={vi.fn()} onArtifactUpdated={vi.fn()}/>);
+ expect(screen.getByText('这是旧版排版结果，请点击“重新排版”生成页内译文。')).toBeInTheDocument();
+ expect(screen.queryByText(/点击原页蓝框/)).not.toBeInTheDocument();
+});
