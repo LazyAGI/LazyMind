@@ -173,6 +173,9 @@ func (b *Bridge) RunStdio(ctx context.Context) error {
 		return err
 	}
 	workflowClient.HostProvider = b.sourceProvider
+	leaseCtx, cancelLeases := context.WithCancel(ctx)
+	defer cancelLeases()
+	workflowClient.EnableStepLeaseRenewal(leaseCtx, scope)
 	workflowClient.RequireHostBinding = (b.sourceProvider == "deepseek-harness" || b.sourceProvider == "codex" || b.sourceProvider == "workbuddy") && connectorconfig.Value("LAZYMIND_WORKFLOW_HOST_CONTROL") == "1"
 	if b.sourceProvider == "codex" && workflowClient.RequireHostBinding {
 		workflowClient.BindController = b.bindCodexController

@@ -50,10 +50,10 @@ the host's scheduling policy and any stricter ordering constraint in the pinned
 step contract. Process pages sequentially by default. Parallel page workers require
 an explicit host policy with an enforced concurrency limit that respects user
 limits. Count all active workers, including coordinators and reviewers, toward
-that limit. Publish each page and its notes immediately after its page-level checks
-pass, using their approved page identity and matching sequence. Preserve the
-approved presentation order regardless of completion order, and deliver every
-requested page before completing the step.
+that limit. The controller buffers checked pages and notes that finish out of
+order. Publish each page and its matching notes in approved page order, as soon
+as all earlier pages have been acknowledged. Use the approved page identity and
+matching sequence, and deliver every requested page before completing the step.
 For direct publication, speaker_notes_source is a UTF-8 JSON file with
 `schema_version: 1` and ordered `pages` entries with `page` (one-based) and
 `text`. Resolve the bound file at generation time and attach its scripts by

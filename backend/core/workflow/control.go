@@ -91,8 +91,32 @@ func (s WorkflowControlService) execute(ctx context.Context, owner, sessionID st
 		}
 		var saved orm.WorkflowCommand
 		if err := tx.Where("command_id = ?", command.CommandID).First(&saved).Error; err == nil {
-			if saved.OwnerUserID != owner || saved.SessionID != sessionID || saved.RequestHash != digest {
+			if saved.OwnerUserID != owner || saved.SessionID != sessionID {
 				return controlstore.Reject("COMMAND_CONFLICT", "command_id was already used for another operation")
+			}
+			if saved.RequestHash != digest {
+				// MCP reads a fresh state version on retry. Recover the version
+				// used by the committed begin and compare the entire request.
+				if command.Kind != "begin" || saved.ContractVersion != controlpolicy.Protocol {
+					return controlstore.Reject("COMMAND_CONFLICT", "command_id was already used for another operation")
+				}
+				var transition orm.WorkflowTransitionCommand
+				err := tx.Select("expected_state_version").First(&transition, "command_id = ? AND session_id = ? AND status = ?", command.CommandID, sessionID, "accepted").Error
+				if errors.Is(err, gorm.ErrRecordNotFound) {
+					return controlstore.Reject("COMMAND_CONFLICT", "command_id was already used for another operation")
+				}
+				if err != nil {
+					return err
+				}
+				original := command
+				original.StateVersion = transition.ExpectedStateVersion
+				body, err := json.Marshal(original)
+				if err != nil {
+					return err
+				}
+				if saved.RequestHash != controlstore.Hash(body) {
+					return controlstore.Reject("COMMAND_CONFLICT", "command_id was already used for another operation")
+				}
 			}
 			if err := json.Unmarshal(saved.ResponseJSON, &result.Receipt); err != nil {
 				return err

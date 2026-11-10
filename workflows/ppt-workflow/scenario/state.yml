@@ -2113,8 +2113,9 @@ steps:
       already delivered a usable native_pptx; keep the last published version.
       For a full HTML run: the exact requested number of preview_html HTML pages must
       be saved (DOCTYPE/html documents), with matching preview_notes sort_order.
-      Publish every requested page and its matching notes after page-level checks.
-      Preserve the approved page identities and order regardless of completion order.
+      After page-level checks, publish each page and its matching notes in approved
+      page order. Buffer any page that finishes early until all earlier pages and
+      notes have been acknowledged. Preserve the approved page identities.
       preview_notes must be aligned with preview_html; the auto-generated draft
       must be a natural spoken explanation, not copied formula source. For
       academic pages explain intuition, key quantities, measured comparisons and

@@ -24,9 +24,10 @@ import zipfile
 
 
 class ExternalToolError(ValueError):
-    def __init__(self, code: str, message: str):
+    def __init__(self, code: str, message: str, *, public: bool = False):
         super().__init__(code, message)
         self.code = code
+        self.public_message = message if public else None
 
     def __str__(self):
         return self.args[1]
@@ -52,9 +53,9 @@ def ppt_order_papers(
     """Use native prerequisite ordering for {source_id,title} papers and {prerequisite,dependent,evidence} edges."""
     from .ppt_planning import plan_paper_order
     if not isinstance(papers, list) or not 1 <= len(papers) <= 200:
-        raise ExternalToolError('INVALID_ARGUMENT', 'Provide between 1 and 200 selected papers.')
+        raise ExternalToolError('INVALID_ARGUMENT', 'papers must contain between 1 and 200 selected papers.', public=True)
     if dependencies is not None and (not isinstance(dependencies, list) or len(dependencies) > 1000):
-        raise ExternalToolError('INVALID_ARGUMENT', 'Provide at most 1000 paper dependencies.')
+        raise ExternalToolError('INVALID_ARGUMENT', 'dependencies may contain at most 1000 paper dependencies.', public=True)
     try:
         return plan_paper_order(json.dumps(papers, ensure_ascii=False),
                                 json.dumps(dependencies if dependencies is not None else [], ensure_ascii=False))
@@ -126,15 +127,16 @@ def ppt_prepare_page(
         HTML_DOCUMENT, page_generation_query, page_generation_system, sanitize_page_html,
     )
     if type(page_no) is not int or not 1 <= page_no <= 100:
-        raise ExternalToolError('INVALID_ARGUMENT', 'page_no must be between 1 and 100.')
+        raise ExternalToolError('INVALID_ARGUMENT', 'page_no must be between 1 and 100.', public=True)
     if not isinstance(brief, str) or not brief.strip() or len(brief.encode()) > MAX_HTML_BYTES:
-        raise ExternalToolError('INVALID_ARGUMENT', 'Provide a complete page brief within the 16 MiB limit.')
+        raise ExternalToolError('INVALID_ARGUMENT', 'Provide a complete page brief within the 16 MiB limit.', public=True)
     responses = generation_responses if generation_responses is not None else []
     if (not isinstance(responses, list) or len(responses) > 1
             or any(not isinstance(item, dict) or set(item) != {'request_hash', 'text'}
                    or not isinstance(item['request_hash'], str) or not isinstance(item['text'], str)
                    or len(item['text'].encode()) > MAX_HTML_BYTES for item in responses)):
-        raise ExternalToolError('INVALID_ARGUMENT', 'Provide at most one {request_hash, text} generation response.')
+        raise ExternalToolError('INVALID_ARGUMENT', 'Provide at most one {request_hash, text} generation response.',
+                                public=True)
     system_prompt = page_generation_system(_package_page_prompt()) + (
         '\n\nOFFLINE TRANSFER CONTRACT: Return a standalone HTML page with all assets inline. '
         'Use static HTML/CSS or self-contained SVG for charts. Scripts, ECharts initialization, '
@@ -152,14 +154,14 @@ def ppt_prepare_page(
                 'generation_request': pending.request, 'validation_owner': 'external-agent'}
     except ValueError as exc:
         raise ExternalToolError('INVALID_ARGUMENT',
-                                'Generation response does not match this pinned page request.') from exc
+                                'Generation response does not match this pinned page request.', public=True) from exc
     html = sanitize_page_html(html)
     if not HTML_DOCUMENT.fullmatch(html.strip()):
         raise ExternalToolError('INVALID_ARGUMENT',
-                                'Regenerate a complete HTML document; the page is truncated or invalid.')
+                                'Regenerate a complete HTML document; the page is truncated or invalid.', public=True)
     if re.search(r'\bdata-ppt-asset\s*=', html, re.I):
         raise ExternalToolError('INVALID_ARGUMENT',
-                                'Inline actual assets instead of unresolved named asset placeholders.')
+                                'Inline actual assets instead of unresolved named asset placeholders.', public=True)
     html = _html(html)
     return {'status': 'ready', 'page_no': page_no,
             'files': [_file(html.encode(), f'page_{page_no:03d}.html', 'text/html')],
@@ -169,35 +171,38 @@ def ppt_prepare_page(
 class _OfflineHTML(HTMLParser):
     def handle_starttag(self, tag, attrs):
         if tag.lower() in {'script', 'iframe', 'object', 'embed', 'link', 'base'}:
-            raise ExternalToolError('INVALID_ARGUMENT', f'Offline rendering does not accept {tag} elements.')
+            raise ExternalToolError('INVALID_ARGUMENT', f'Remove the <{tag.lower()}> element from the HTML.',
+                                    public=True)
         if tag.lower() == 'meta' and set(dict(attrs)) != {'charset'}:
-            raise ExternalToolError('INVALID_ARGUMENT', 'Only charset metadata is accepted.')
+            raise ExternalToolError('INVALID_ARGUMENT', 'Use only charset metadata in HTML meta tags.', public=True)
         for name, value in attrs:
             key, value = name.lower(), (value or '').strip()
             if key.startswith('on') or key in {'srcdoc', 'srcset'}:
-                raise ExternalToolError('INVALID_ARGUMENT', 'Active HTML is not accepted by the renderer.')
+                raise ExternalToolError('INVALID_ARGUMENT', 'Remove event handler, srcdoc and srcset attributes.',
+                                        public=True)
             if key in {'src', 'href', 'xlink:href', 'action', 'formaction', 'poster'}:
                 if value and not value.startswith(('data:', '#')):
                     raise ExternalToolError('INVALID_ARGUMENT',
-                                            'Embed assets inline; server paths and URLs are not accepted.')
+                                            'Embed HTML assets inline as data URLs.', public=True)
         if tag.lower() == 'form':
-            raise ExternalToolError('INVALID_ARGUMENT', 'Forms are not supported in slide rendering.')
+            raise ExternalToolError('INVALID_ARGUMENT', 'Remove forms from the slide HTML.', public=True)
 
     handle_startendtag = handle_starttag
 
 
 def _html(value: str) -> str:
     if not isinstance(value, str) or not value.strip() or len(value.encode()) > MAX_HTML_BYTES:
-        raise ExternalToolError('INVALID_ARGUMENT', 'Provide a nonempty HTML slide within the 16 MiB limit.')
+        raise ExternalToolError('INVALID_ARGUMENT', 'html must be a nonempty HTML slide within 16 MiB.', public=True)
     if not re.search(r'<html\b', value, re.I):
-        raise ExternalToolError('INVALID_ARGUMENT', 'A complete HTML document is required.')
+        raise ExternalToolError('INVALID_ARGUMENT', 'Provide a complete html document with an <html> element.',
+                                public=True)
     # CSS escapes can disguise URL schemes; this conservative offline profile
     # accepts plain CSS and inline assets, not arbitrary browser applications.
     if re.search(r'@import|expression\s*\(|javascript\s*:|\\[0-9a-f]{1,6}', value, re.I):
-        raise ExternalToolError('INVALID_ARGUMENT', 'Active or escaped external CSS is not supported.')
+        raise ExternalToolError('INVALID_ARGUMENT', 'Remove active and escaped external CSS from html.', public=True)
     for url in re.findall(r'url\s*\(\s*[\'\"]?([^\)\'\"]+)', value, re.I):
         if not url.strip().startswith(('data:', '#')):
-            raise ExternalToolError('INVALID_ARGUMENT', 'CSS assets must be embedded inline.')
+            raise ExternalToolError('INVALID_ARGUMENT', 'Embed CSS assets inline as data URLs.', public=True)
     parser = _OfflineHTML(convert_charrefs=True)
     parser.feed(value)
     parser.close()
@@ -256,24 +261,24 @@ def _run(command: list[str], timeout: int) -> dict[str, Any]:
 def ppt_export_html(pages: list[dict[str, Any]], filename: str = 'presentation.pptx') -> dict[str, Any]:
     """Convert 1–100 supplied offline HTML slides and notes into an editable PPTX file."""
     if not isinstance(pages, list) or not 1 <= len(pages) <= 100:
-        raise ExternalToolError('INVALID_ARGUMENT', 'Provide between 1 and 100 slides, including one-slide summaries.')
+        raise ExternalToolError('INVALID_ARGUMENT', 'pages must contain between 1 and 100 slides.', public=True)
     prepared = []
     total = 0
     for page in pages:
         if not isinstance(page, dict) or set(page) - {'html', 'notes'}:
-            raise ExternalToolError('INVALID_ARGUMENT', 'Each page accepts only html and notes.')
+            raise ExternalToolError('INVALID_ARGUMENT', 'Each item in pages accepts only html and notes.', public=True)
         html = _html(page.get('html'))
         notes = page.get('notes', '')
         if not isinstance(notes, str) or len(notes.encode()) > 1024 * 1024:
-            raise ExternalToolError('INVALID_ARGUMENT', 'Speaker notes must be text within the 1 MiB limit.')
+            raise ExternalToolError('INVALID_ARGUMENT', 'notes must be text within 1 MiB per slide.', public=True)
         total += len(html.encode()) + len(notes.encode())
         prepared.append((html, notes))
     if total > MAX_FILE_BYTES:
-        raise ExternalToolError('INVALID_ARGUMENT', 'The deck exceeds the 24 MiB input limit.')
+        raise ExternalToolError('INVALID_ARGUMENT', 'Reduce the deck input to within 24 MiB.', public=True)
     name = Path(filename).name
     if (name != filename or not name.lower().endswith('.pptx') or not Path(name).stem
             or len(name) > 200 or any(char in name for char in '\\\0\r\n')):
-        raise ExternalToolError('INVALID_ARGUMENT', 'filename must be a plain .pptx filename.')
+        raise ExternalToolError('INVALID_ARGUMENT', 'filename must be a plain .pptx filename.', public=True)
     node, cli = _cli()
     with tempfile.TemporaryDirectory(prefix='external-ppt-') as directory:
         root = Path(directory)

@@ -77,9 +77,10 @@ policy with an enforced concurrency limit that respects user limits. Count all
 active workers, including coordinators and reviewers, toward that limit. Give each
 worker the pinned contract and its page inputs in an isolated context. Without
 subagents, process pages in order using the same Skills and tools. Collect paths
-and concise verification summaries. Publish each checked page and its notes
-immediately using stable page identity and matching sequence, preserving the
-approved presentation order regardless of completion order. Assemble the export
+and concise verification summaries. Buffer checked pages and notes that finish
+out of order. Publish each page and its notes in approved page order after all
+earlier pages and notes are acknowledged, using stable page identity and matching
+sequence. Assemble the export
 request directly from accepted files in visual order. Export once all requested
 pages pass, verify the actual file with scoped tools/workers, and repair only
 failures. The controller does not repeat worker analysis. Host-required checks

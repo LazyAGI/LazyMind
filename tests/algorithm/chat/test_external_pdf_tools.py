@@ -138,6 +138,8 @@ def test_text_invalid_arguments_are_rejected(source, arguments):
     with pytest.raises(ExternalToolError) as error:
         pdf.pdf_read_text(encoded(source), **arguments)
     assert error.value.code == 'INVALID_ARGUMENT'
+    if arguments == {'start_page': 4}:
+        assert error.value.public_message == 'start_page must be between 1 and 3.'
 
 
 @pytest.mark.parametrize('arguments', [
@@ -177,6 +179,7 @@ def test_decoder_errors_do_not_expose_server_paths(source, monkeypatch):
         pdf.pdf_extract_images(encoded(source))
     assert '/private/' not in str(error.value)
     assert 'private source text' not in str(error.value)
+    assert error.value.public_message is None
 
 
 def test_aggregate_image_transfer_limit_is_enforced(source, monkeypatch):

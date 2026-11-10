@@ -35,6 +35,7 @@ type Client struct {
 	BindController     func(context.Context, string, string) error
 	ResolveDriver      func(context.Context, *mcp.CallToolRequest, string) (string, error)
 	EnsureHostReady    func(context.Context) error
+	leaseRenewal       *stepLeaseRenewal
 }
 
 type executionReadinessKey struct{}
@@ -365,7 +366,11 @@ func (c *Client) State(ctx context.Context, sessionID string) (Projection, error
 	continuation, _ := state.Control["continuation"].(string)
 	admission, _ := state.Control["admission"].(map[string]any)
 	retries, _ := state.Control["automatic_retry_steps"].([]any)
-	if continuation == "continue" && admission["can_begin"] == true && len(retries) > 0 {
+	expired, _ := state.Control["expired_execution_ids"].([]any)
+	if (continuation == "continue" || continuation == "draining") && len(expired) > 0 {
+		ids, _ := json.Marshal(expired)
+		state.AgentInstruction = "An external step lease expired. To continue that work, call workflow.step.resume with an execution_id from control.expired_execution_ids=" + string(ids) + " and use the new handle. Reuse this run and any outputs already published."
+	} else if continuation == "continue" && admission["can_begin"] == true && len(retries) > 0 {
 		steps, _ := json.Marshal(retries)
 		state.AgentInstruction = "A step failed but automatic retry budget remains. Call workflow.step.begin for one step in control.automatic_retry_steps=" + string(steps) + " using the current state version. Keep this run; do not stop it or start a replacement run. Inspect the failure and adjust the retry instruction if needed."
 	} else if state.Control["input_request"] != nil && continuation == "awaiting_user" {
@@ -652,7 +657,7 @@ func (c *Client) Begin(ctx context.Context, input BeginInput) (BeginResult, erro
 		}, &grant); err != nil {
 			return BeginResult{}, err
 		}
-		return c.Claim(ctx, ResumeInput{SessionID: input.SessionID, ExecutionID: grant.Receipt.ExecutionID})
+		return c.begin(ctx, input.SessionID, grant.Receipt.ExecutionID, false, input.CommandID)
 	}
 	command := map[string]any{
 		"contract_version": contractVersion, "command_id": input.CommandID,
@@ -680,19 +685,19 @@ func (c *Client) Begin(ctx context.Context, input BeginInput) (BeginResult, erro
 	if executionID == "" {
 		return BeginResult{}, errors.New("LazyMind accepted the step but returned no execution_id")
 	}
-	return c.begin(ctx, input.SessionID, executionID, false)
+	return c.begin(ctx, input.SessionID, executionID, false, input.CommandID)
 }
 
 // Claim acquires a previously created recovery grant without advancing the graph again.
 func (c *Client) Claim(ctx context.Context, input ResumeInput) (BeginResult, error) {
-	return c.begin(ctx, input.SessionID, input.ExecutionID, false)
+	return c.begin(ctx, input.SessionID, input.ExecutionID, false, "")
 }
 
 func (c *Client) Resume(ctx context.Context, input ResumeInput) (BeginResult, error) {
-	return c.begin(ctx, input.SessionID, input.ExecutionID, true)
+	return c.begin(ctx, input.SessionID, input.ExecutionID, true, "")
 }
 
-func (c *Client) begin(ctx context.Context, sessionID, executionID string, resume bool) (BeginResult, error) {
+func (c *Client) begin(ctx context.Context, sessionID, executionID string, resume bool, claimID string) (BeginResult, error) {
 	if strings.TrimSpace(sessionID) == "" || strings.TrimSpace(executionID) == "" {
 		return BeginResult{}, errors.New("session_id and execution_id are required")
 	}
@@ -705,12 +710,19 @@ func (c *Client) begin(ctx context.Context, sessionID, executionID string, resum
 	if resume {
 		action = ":resume"
 	}
+	payload := map[string]any{}
+	if claimID != "" {
+		payload["claim_id"] = claimID
+	}
 	var execution Execution
 	if err := c.api.DoJSON(ctx, http.MethodPost, "/workflow-sessions/"+url.PathEscape(sessionID)+
-		"/hosted-attempts/"+url.PathEscape(executionID)+action, map[string]any{}, &execution); err != nil {
+		"/hosted-attempts/"+url.PathEscape(executionID)+action, payload, &execution); err != nil {
 		return BeginResult{}, err
 	}
 	state, err := c.State(ctx, sessionID)
+	if err == nil {
+		c.trackStepLease(sessionID, execution)
+	}
 	return BeginResult{Execution: execution, State: state}, err
 }
 
@@ -728,6 +740,7 @@ func (c *Client) Complete(ctx context.Context, input CompleteInput) (CompleteRes
 	if err != nil {
 		return CompleteResult{}, err
 	}
+	c.stopStepLease(input.SessionID, input.ExecutionID, input.ExecutionHandle)
 	result.State, err = c.State(ctx, input.SessionID)
 	if err != nil && result.Control != nil {
 		// The terminal transaction succeeded. A read outage must not turn it into a failed tool.
@@ -790,7 +803,7 @@ type PublishInput struct {
 	SessionID       string `json:"session_id" jsonschema:"required,Workflow session identifier"`
 	ExecutionID     string `json:"execution_id" jsonschema:"required,Execution identifier"`
 	ExecutionHandle string `json:"execution_handle" jsonschema:"required,Unchanged execution handle from begin claim or resume"`
-	Output          Output `json:"output" jsonschema:"required,One artifact to publish immediately; use a stable positive seq per slot across calls"`
+	Output          Output `json:"output" jsonschema:"required,One artifact to publish in the step contract's required order; use a stable positive seq per slot across calls"`
 }
 
 func (c *Client) Publish(ctx context.Context, input PublishInput, artifact map[string]any) (map[string]any, error) {

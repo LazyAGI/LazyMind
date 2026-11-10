@@ -734,6 +734,7 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "POST", "/workflow-sessions/{session_id}:advance-step-and-hand-off", []string{"qa.write"}, workflowFacade.Command(http.HandlerFunc(workflow.TransitionWorkflowSession)))
 	handleAPI(r, "POST", "/workflow-sessions/{session_id}/hosted-attempts/{attempt_id}:begin", []string{"qa.write"}, hostedHandler.Begin)
 	handleAPI(r, "POST", "/workflow-sessions/{session_id}/hosted-attempts/{attempt_id}:resume", []string{"qa.write"}, hostedHandler.Resume)
+	handleAPI(r, "POST", "/workflow-sessions/{session_id}/hosted-attempts/{attempt_id}:heartbeat", []string{"qa.write"}, hostedHandler.Heartbeat)
 	handleAPI(r, "POST", "/workflow-sessions/{session_id}/hosted-attempts/{attempt_id}:submit", []string{"qa.write"}, hostedHandler.Submit)
 	handleAPI(r, "POST", "/workflow-sessions/{session_id}/hosted-attempts/{attempt_id}:complete", []string{"qa.write"}, hostedHandler.Complete)
 	handleAPI(r, "POST", "/workflow-sessions/{session_id}/hosted-attempts/{attempt_id}/artifacts", []string{"qa.write"}, hostedHandler.Publish)

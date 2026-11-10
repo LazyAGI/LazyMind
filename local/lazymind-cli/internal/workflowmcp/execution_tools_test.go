@@ -29,6 +29,11 @@ func TestExecutionToolsMCPPreservesAuthorizationAndIdempotency(t *testing.T) {
 			_, _ = w.Write([]byte(`{"tools":[{"name":"render","source":"package","input_schema":{"type":"object"}}]}`))
 			return
 		}
+		if input["command_id"] == "invalid-input" {
+			w.WriteHeader(http.StatusConflict)
+			_, _ = w.Write([]byte(`{"ok":false,"error":{"code":"INVALID_ARGUMENT","message":"start_page must be between 1 and 5."}}`))
+			return
+		}
 		_, _ = w.Write([]byte(`{"result":{"resource_id":"output-1"},"receipt":{"command_id":"command-1"}}`))
 	}))
 	defer apiServer.Close()
@@ -80,6 +85,15 @@ func TestExecutionToolsMCPPreservesAuthorizationAndIdempotency(t *testing.T) {
 	}
 	if requests[1]["command_id"] != "command-1" || requests[1]["source"] != "package" || requests[1]["tool_name"] != "render" {
 		t.Fatalf("lost call scope: %#v", requests[1])
+	}
+	base["command_id"] = "invalid-input"
+	rejected, err := cs.CallTool(ctx, &mcp.CallToolParams{Name: "workflow.tool.call", Arguments: base})
+	if err != nil || !rejected.IsError {
+		t.Fatalf("expected MCP tool error: %+v %v", rejected, err)
+	}
+	body, _ := json.Marshal(rejected.Content)
+	if !strings.Contains(string(body), "INVALID_ARGUMENT: start_page must be between 1 and 5.") {
+		t.Fatalf("lost remediation in MCP response: %s", body)
 	}
 }
 

@@ -194,7 +194,7 @@ func Register(server *mcp.Server, client *Client) {
 			return nil, value, err
 		})
 	mcp.AddTool(server, &mcp.Tool{Name: "workflow.step.begin", Title: "Begin a LazyMind Workflow step",
-		Description: "Advance one Runtime-returned ready, retryable or rewindable step using the same rules as the internal controller, and return its contract and execution_handle. Set retry_origin=user only for recovery explicitly requested by the user. Human review occurs after a successful completion. If executor_host is lazymind, no handle is issued: only observe.", Annotations: write},
+		Description: "Advance one Runtime-returned ready, retryable or rewindable step using the same rules as the internal controller, and return its contract and execution_handle. Supply a stable command_id and reuse it with unchanged arguments after an uncertain response. Set retry_origin=user only for recovery explicitly requested by the user. Human review occurs after a successful completion. If executor_host is lazymind, no handle is issued: only observe.", Annotations: write},
 		func(ctx context.Context, _ *mcp.CallToolRequest, input BeginInput) (*mcp.CallToolResult, BeginResult, error) {
 			value, err := withContractFile(input.ContractDirectory, func() (BeginResult, error) { return client.Begin(ctx, input) })
 			return nil, value, err
@@ -229,7 +229,7 @@ func Register(server *mcp.Server, client *Client) {
 			return nil, value, nil
 		})
 	mcp.AddTool(server, &mcp.Tool{Name: "workflow.artifact.publish", Title: "Publish a Workflow artifact",
-		Description: "Publish each save_artifact/save_artifacts result immediately (key becomes slot), while the step is running. Types: text, json, image, file, or file_list. Use local_path for binary files, value_file for a text/JSON file whose value is read by the Connector, or value for inline results. Supply a positive seq unique per slot and reuse it unchanged on retry. Wait for publication acknowledgements before workflow.step.complete. Publication does not finish the step or trigger review.", Annotations: write},
+		Description: "Publish each save_artifact/save_artifacts result (key becomes slot) immediately once the step contract's publication order permits. Types: text, json, image, file, or file_list. Use local_path for binary files, value_file for a text/JSON file whose value is read by the Connector, or value for inline results. Supply a positive seq unique per slot and reuse it unchanged on retry. Wait for publication acknowledgements before workflow.step.complete. Publication does not finish the step or trigger review.", Annotations: write},
 		func(ctx context.Context, _ *mcp.CallToolRequest, input PublishInput) (*mcp.CallToolResult, map[string]any, error) {
 			artifact, err := encodeOutput(input.Output)
 			if err != nil {

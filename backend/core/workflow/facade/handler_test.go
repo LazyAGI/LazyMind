@@ -729,6 +729,75 @@ func TestCommandHTTPReportsMissingSessionInsteadOfPermissionDenied(t *testing.T)
 	}
 }
 
+func TestLegacyHandOffReplaysWithRefreshedStateVersion(t *testing.T) {
+	h, db := testHandler(t)
+	if err := db.AutoMigrate(&orm.WorkflowTransitionCommand{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Exec(`INSERT INTO plugin_sessions(id, create_user_id) VALUES ('s1','owner')`).Error; err != nil {
+		t.Fatal(err)
+	}
+	var calls int
+	handler := h.Command(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		calls++
+		_, _ = w.Write([]byte(`{"accepted":true,"task_id":"original","state_version":2}`))
+	}))
+	call := func(version int, objective string) *httptest.ResponseRecorder {
+		t.Helper()
+		payload, err := json.Marshal(map[string]any{
+			"command_id": "hand-off", "contract_version": "workflow.v1", "session_id": "s1",
+			"tool": "advance_step_and_hand_off", "expected_state_version": version,
+			"steps": []map[string]string{{"step_id": "draft", "objective": objective}},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		r := request(http.MethodPost, "/workflow-sessions/s1:advance-step-and-hand-off", "owner", payload)
+		r = mux.SetURLVars(r, map[string]string{"session_id": "s1"})
+		w := httptest.NewRecorder()
+		handler(w, r)
+		return w
+	}
+	if first := call(1, "write"); first.Code != http.StatusOK {
+		t.Fatalf("first begin: %d %s", first.Code, first.Body)
+	}
+	if err := db.Create(&orm.WorkflowTransitionCommand{CommandID: "hand-off", SessionID: "s1", Status: "accepted",
+		ExpectedStateVersion: 1, ResponseJSON: json.RawMessage(`{}`)}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if replay := call(2, "write"); replay.Code != http.StatusOK || !bytes.Contains(replay.Body.Bytes(), []byte(`"task_id":"original"`)) || calls != 1 {
+		t.Fatalf("legacy begin did not replay: %d %s calls=%d", replay.Code, replay.Body, calls)
+	}
+	if changed := call(2, "different objective"); changed.Code != http.StatusConflict || calls != 1 {
+		t.Fatalf("changed request did not conflict: %d %s", changed.Code, changed.Body)
+	}
+}
+
+func TestGetCommandKeepsExecutionReceiptsPrivate(t *testing.T) {
+	h, db := testHandler(t)
+	for _, test := range []struct {
+		version string
+		status  int
+	}{
+		{"workflow.v1", http.StatusOK},
+		{"workflow.control.v1", http.StatusOK},
+		{"workflow.tool.v1", http.StatusNotFound},
+		{"workflow.claim.v1", http.StatusNotFound},
+	} {
+		if err := db.Create(&orm.WorkflowCommand{CommandID: test.version, OwnerUserID: "owner", SessionID: "run",
+			ContractVersion: test.version, HTTPStatus: http.StatusOK, ResponseJSON: json.RawMessage(`{"result":"receipt"}`)}).Error; err != nil {
+			t.Fatal(err)
+		}
+		r := request(http.MethodGet, "/workflow-commands/"+test.version, "owner", nil)
+		r = mux.SetURLVars(r, map[string]string{"command_id": test.version})
+		w := httptest.NewRecorder()
+		h.GetCommand(w, r)
+		if w.Code != test.status {
+			t.Fatalf("receipt type %q got HTTP %d, want %d", test.version, w.Code, test.status)
+		}
+	}
+}
+
 func TestSessionFacadeEndpointsReportMissingSessionConsistently(t *testing.T) {
 	h, _ := testHandler(t)
 	tests := []struct {

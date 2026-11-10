@@ -153,6 +153,12 @@ def test_authenticated_route_uses_same_pinned_validation(monkeypatch):
     response = client.post('/api/workflow/external-tools/call', json=payload, headers=headers)
     assert response.status_code == 400
     assert response.json()['detail']['code'] == 'TOOL_NOT_ALLOWED'
+    assert 'public_message' not in response.json()['detail']
+
+    render = request(tools=['ppt_render_html'], tool_name='ppt_render_html', arguments={'html': '<div>fragment</div>'})
+    response = client.post('/api/workflow/external-tools/call', json=render, headers=headers)
+    assert response.status_code == 400
+    assert response.json()['detail']['public_message'] == 'Provide a complete html document with an <html> element.'
 
 
 def test_every_builtin_has_one_shared_business_specification():
