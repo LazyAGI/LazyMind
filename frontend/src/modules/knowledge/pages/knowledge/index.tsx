@@ -1395,7 +1395,7 @@ const KnowledgeDocumentContent = () => {
             暂无可用于文档翻译的 API，可在 <a href="/settings?section=model_defaults&service=translation">默认模型</a> 中启用。
           </p> : null}
           <div className="pdf-translation-config-row"><label>目标语言</label><Select disabled={Boolean(regenerationArtifact)} value={translationTarget} onChange={setTranslationTarget} options={[{ label: "简体中文", value: "zh" }, { label: "英文", value: "en" }]} /></div>
-          <p>翻译会保留支持格式的文档结构、表格和图片，仅替换可翻译文字。若原件是图片 PDF，会先生成并缓存文本 PDF。</p>
+          <p>优先保留文档版式；PDF 原文字框容纳不下译文时，将生成标明原文页码的重排译文，图表请对照原文阅读。若原件是图片 PDF，会先生成并缓存文本 PDF。</p>
         </div>
       </Modal>
       <Modal

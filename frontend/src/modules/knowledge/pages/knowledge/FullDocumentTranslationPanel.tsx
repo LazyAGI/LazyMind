@@ -39,7 +39,7 @@ export default function FullDocumentTranslationPanel(props: Props) {
       <FileViewer key={artifact.id} file={pdfArtifactContentUrl(props.datasetId, props.documentId, artifact.id)} fileName={artifact.filename} onPdfRetranslateSelection={props.onRetranslateSelection} />
     </div> : <div className="paper-assistant-welcome">
       <h2>{props.supported ? "全文对照阅读" : "此格式暂不支持全文翻译"}</h2>
-      <p>{props.supported ? props.busy ? "译本生成后会显示在这里，可在上方查看进度或取消任务。" : "选择翻译引擎和目标语言，生成保留版式的全文译本。原文留在主阅读区，译文在此侧栏显示。" : "仍可切换到划词翻译，翻译选中的文字。"}</p>
+      <p>{props.supported ? props.busy ? "译本生成后会显示在这里，可在上方查看进度或取消任务。" : "选择翻译引擎和目标语言，生成全文译本。优先保留原版式，文字放不下时自动重排，确保译文完整。原文留在主阅读区，译文在此侧栏显示。" : "仍可切换到划词翻译，翻译选中的文字。"}</p>
     </div>}
   </section>;
 }

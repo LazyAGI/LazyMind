@@ -32,10 +32,10 @@ const pdfTranslationJobType = "document_pdf_translation"
 
 const (
 	defaultTranslationConcurrency = 4
-	translationChunkAttempts      = 3
+	translationChunkAttempts      = 5
 )
 
-var translationRetryBaseDelay = 500 * time.Millisecond
+var translationRetryBaseDelay = 2 * time.Second
 
 type pdfTranslationPayload struct {
 	DatasetID         string                                 `json:"dataset_id"`
@@ -352,6 +352,9 @@ func translateChunkWithRetry(ctx context.Context, attempts int, translate func(c
 	var lastErr error
 	for attempt := 1; attempt <= attempts; attempt++ {
 		value, err := translate(ctx)
+		if err == nil && strings.TrimSpace(value) == "" {
+			err = errors.New("translation returned empty text")
+		}
 		if err == nil {
 			return value, nil
 		}
@@ -360,6 +363,9 @@ func translateChunkWithRetry(ctx context.Context, attempts int, translate func(c
 			break
 		}
 		delay := time.Duration(1<<(attempt-1)) * translationRetryBaseDelay
+		if remoteDelay := translation.RetryDelay(err); remoteDelay > delay {
+			delay = remoteDelay
+		}
 		timer := time.NewTimer(delay)
 		select {
 		case <-ctx.Done():
@@ -451,6 +457,14 @@ func translateUnitsParallel(
 		}
 	}()
 	wg.Wait()
+	if ctx.Err() != nil {
+		select {
+		case err := <-errCh:
+			return nil, err
+		default:
+			return nil, ctx.Err()
+		}
+	}
 	select {
 	case err := <-errCh:
 		return nil, err
@@ -527,7 +541,9 @@ func handlePDFTranslationJob(ctx context.Context, job asyncjob.Job, reporter asy
 	}
 	fail := func(err error) (asyncjob.Result, error) {
 		if errors.Is(err, context.Canceled) || errors.Is(ctx.Err(), context.Canceled) {
-			return asyncjob.Result{Permanent: true, ErrorCode: asyncjob.ErrorCodeCanceled}, err
+			// The runner preserves an explicitly canceled database status. A
+			// service shutdown must instead resume from checkpoints on restart.
+			return asyncjob.Result{DeferAttempt: true, RetryAt: time.Now().Add(5 * time.Second), ErrorCode: asyncjob.ErrorCodeCanceled}, err
 		}
 		permanent := errors.Is(err, modelconfig.ErrTranslationProviderReferenceChanged)
 		willRetry := !permanent && job.AttemptCount < job.MaxAttempts
@@ -606,7 +622,7 @@ func handlePDFTranslationJob(ctx context.Context, job asyncjob.Job, reporter asy
 	}
 	translations, err := translateUnitsParallel(ctx, units, chunkSize, documentTranslationConcurrency(),
 		func(callCtx context.Context, text string) (string, error) {
-			return translateDocumentChunk(callCtx, job.CreateUserID, payload.ProviderType, text, payload.TargetLanguage, payload.TranslationConfig)
+			return translateDocumentChunkCached(callCtx, job.CreateUserID, payload, text, payload.TranslationConfig)
 		}, func(completed, total int64) error {
 			if err := reporter.Heartbeat(ctx); err != nil {
 				return err
@@ -663,7 +679,7 @@ func handlePDFTranslationJob(ctx context.Context, job asyncjob.Job, reporter asy
 			CreatedAt: time.Now().UTC().Format(time.RFC3339)}
 		var replaced []pdfArtifactRecord
 		ext.PDFArtifacts, replaced = replaceArtifactWithSameCacheKey(ext.PDFArtifacts, artifact)
-		removeArtifactFiles(replaced)
+		removeReplacedTranslationFiles(replaced, artifact)
 		record.Status, record.Stage, record.Progress, record.ArtifactID = "READY", "READY", 100, artifactID
 		record.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
 		return nil
@@ -698,7 +714,7 @@ func executeBackendDocumentTranslation(ctx context.Context, job asyncjob.Job, re
 	}
 	translations, err := translateUnitsParallel(ctx, workUnits, chunkSize, documentTranslationConcurrency(),
 		func(callCtx context.Context, text string) (string, error) {
-			return translateDocumentChunk(callCtx, job.CreateUserID, payload.ProviderType, text, payload.TargetLanguage, apiSnapshot)
+			return translateDocumentChunkCached(callCtx, job.CreateUserID, payload, text, apiSnapshot)
 		}, func(completed, total int64) error {
 			if err := reporter.Heartbeat(ctx); err != nil {
 				return err
@@ -735,7 +751,7 @@ func executeBackendDocumentTranslation(ctx context.Context, job asyncjob.Job, re
 			CreatedAt: time.Now().UTC().Format(time.RFC3339)}
 		var replaced []pdfArtifactRecord
 		ext.PDFArtifacts, replaced = replaceArtifactWithSameCacheKey(ext.PDFArtifacts, artifact)
-		removeArtifactFiles(replaced)
+		removeReplacedTranslationFiles(replaced, artifact)
 		record.Status, record.Stage, record.Progress, record.ArtifactID = "READY", "READY", 100, artifactID
 		record.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
 		return nil

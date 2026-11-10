@@ -7,6 +7,7 @@ import threading
 import json
 import re
 import statistics
+import unicodedata
 from pathlib import Path
 from typing import Iterable
 
@@ -942,11 +943,71 @@ def render_pdf_translation(req: PDFTranslationRenderRequest) -> dict[str, object
             rendered_blocks += 1
         if requested_blocks == 0:
             raise HTTPException(status_code=422, detail='translation manifest contains no renderable text blocks')
-        if rendered_blocks != len(prepared_blocks):
-            raise HTTPException(
-                status_code=500,
-                detail=f'translation renderer produced {rendered_blocks} of {len(prepared_blocks)} prepared text blocks',
-            )
+        def normalized_visible_text(value):
+            value = unicodedata.normalize('NFKC', value)
+            return ''.join(c for c in value if not c.isspace() and not unicodedata.category(c).startswith('C'))
+        rendered_text = normalized_visible_text(''.join(page.get_text() for page in document))
+        text_complete = all(
+            normalized_visible_text(str(value)) in rendered_text
+            for value in translations.values() if str(value).strip()
+        )
+        if rendered_blocks != requested_blocks or not text_complete:
+            # Reliability first: never discard a semantic level because one box
+            # cannot fit. Reflow every translated block into a readable document.
+            document.close()
+            document = fitz.open()
+            page = None
+            cursor_y = 0.0
+            source_page = None
+            fallback_path = '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf'
+            fallback_font = fitz.Font(fontfile=fallback_path)
+            def text_font(char):
+                return translation_font if translation_font.has_glyph(ord(char)) else fallback_font
+            rendered_blocks = 0
+            requested_blocks = 0
+            for block in blocks:
+                text = unicodedata.normalize('NFKC', str(translations.get(str(block.get('id', '')), '')).strip())
+                if not text:
+                    continue
+                requested_blocks += 1
+                current_source_page = int(block.get('page', 1))
+                if current_source_page != source_page:
+                    page = None
+                    source_page = current_source_page
+                lines = []
+                for paragraph in text.splitlines():
+                    line = ''
+                    width = 0.0
+                    for char in paragraph:
+                        char_width = text_font(char).text_length(char, fontsize=11)
+                        if line and width + char_width > 499:
+                            lines.append(line)
+                            line, width = '', 0.0
+                        line += char
+                        width += char_width
+                    lines.append(line)
+                for line in lines:
+                    if page is None or cursor_y > 790:
+                        page = document.new_page(width=595, height=842)
+                        page.insert_font(fontname='NotoSansCJK', fontfile=str(TRANSLATION_FONT_PATH))
+                        page.insert_font(fontname='TranslationFallback', fontfile=fallback_path)
+                        page.insert_text((48, 42), f'重排译文 · 原文第 {source_page} 页', fontname='NotoSansCJK', fontsize=10)
+                        cursor_y = 70
+                    x = 48.0
+                    run = ''
+                    run_font = translation_font
+                    for char in line + '\0':
+                        font = text_font(char) if char != '\0' else None
+                        if font is not run_font and run:
+                            page.insert_text((x, cursor_y), run, fontname='NotoSansCJK' if run_font is translation_font else 'TranslationFallback', fontsize=11)
+                            x += run_font.text_length(run, fontsize=11)
+                            run = ''
+                        run_font = font
+                        run += char
+                    cursor_y += 17
+                cursor_y += 8
+                rendered_blocks += 1
+            warnings += 1
         target_language = req.target_language.strip().lower()
         is_chinese_translation = target_language.startswith('zh')
         attribution_text = (
@@ -1064,8 +1125,9 @@ def extract_pdf_translation_layout(req: PDFTranslationLayoutRequest) -> dict[str
                     (text_rect & region).get_area() / text_area >= 0.15
                     for region in figure_regions
                 )
-                if not is_caption and overlaps_figure:
-                    continue
+                # Text overlapping a figure may still be body prose or labels.
+                # Keep it in the translation manifest; the complete reflow
+                # fallback is preferable to silently dropping readable text.
                 # Preserve running headers, footers, narrow side metadata and the
                 # author line. They are page furniture rather than translatable
                 # content, and fitting translated prose into these narrow regions
@@ -1089,7 +1151,7 @@ def extract_pdf_translation_layout(req: PDFTranslationLayoutRequest) -> dict[str
                     and text_rect.x1 < page.rect.width * 0.52
                     and bool(re.search(r'copyright|permission|isbn|doi\.org|proceedings', text, re.IGNORECASE))
                 )
-                if is_page_furniture or is_first_page_author_block or is_first_page_legal_notice:
+                if is_page_furniture and re.fullmatch(r'\d+', text):
                     continue
                 visible_rich_lines = [
                     line for line in lines
