@@ -32,12 +32,13 @@ including source identities/versions, facts, methods, data, citations, current
 manuscript and completed work. Preserve unknown prior pool fields and prior facts.
 Publish each *_pool as an actual JSON file, plus the corresponding readable document.
 
-Existing user data may be organized directly. Reference-paper tables are not user
-measurements. If usable data is absent, reuse the user's explicit simulation choice
-or ask how to proceed. Refusal to execute code does not authorize synthetic data.
-Only execute a new experiment with the required user permission; honor bounded CPU,
-no network/dependency installation/GPU and 30-second constraints of this workflow.
-Failed computations on real data remain failed; never replace them with simulation.
+Use the workflow's declared ask_user execution preference before startup. Keep its two fixed
+choices and reuse the answer for this task through experiment_execution and request_context.
+Existing user data may be organized directly. Reference-paper tables are not user measurements.
+An explicit choice to generate code and simulation, or to use simulation when conditions are
+insufficient, permits labeled synthetic previews when no user data exists. Only execute a new
+experiment with explicit user permission; honor bounded CPU, no network/dependency installation/GPU
+and 30-second constraints. Failed computations on real user data report the missing results.
 Label every simulated value and record code, inputs, provenance and actual execution.
 
 Data analysis uses complete real tables, preserves units and produces reproducible

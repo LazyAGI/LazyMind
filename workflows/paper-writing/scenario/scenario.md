@@ -20,20 +20,14 @@ Never treat filenames, paths, or summaries as manuscript text. If multiple attac
 ask which manuscript to review.
 Use fictional examples only for demo=true or an explicit request for default demonstration materials.
 Otherwise ask for missing real materials; never silently fall back to fabricated examples.
-When reaching experiment (F3), inspect the current request, attachments and material pool for usable
-user experiment data/results. Reference-paper tables and filenames alone do not establish user measurements.
-With usable user data, directly use it in F3 without asking the user to choose or confirm again.
-Only when usable data is absent and the user has not already specified how to proceed, use framework
-ask_user to ask whether they will supply real data or want labeled simulation, and wait for the answer.
-Tailor the question to the research goal and missing data; reuse explicit answers, and wait for uploads
-when the user chooses to supply data. Preserve the answer and original goal through request_context/user_input.
-Do not ask these questions before unrelated stages, or add required fields, bindings or preparation nodes.
-Organizing existing data needs neither a new experimental question nor execution permission.
-Only for a requested new computation needing execution, ask about unresolved bounded CPU permission
-in the current LazyMind deployment: no network, dependency installation or GPU, at most 30 seconds.
-Only explicit consent may bind the existing experiment_execution=allow_local; otherwise use simulate_only.
-Refusing execution does not choose simulation. Failed computations on real data must not produce synthetic replacements.
-The experiment tool owns execution and status; never run its code separately through Chat tools.
+Use the package's framework ask_user execution preference before startup unless the user has
+already answered it for this task. Reuse the declared experiment_execution field with its two
+fixed choices, preserve the original research goal after the answer, and bind simulate_only or
+allow_local through the existing trigger. Honor the explicit choice to generate labeled simulation
+when real user data is absent. Only explicit consent permits bounded CPU execution, with no
+network, dependency installation or GPU and at most 30 seconds. Existing user observations remain
+the data source; failed computations on real data report missing results rather than fabricated
+replacements. The experiment tool owns execution and status; never run its code through Chat tools.
 For direct new experiments, bind experiment_question from the user's goal; ask if it is missing.
 After F3, the adapter converts final experiment.results and result_meta into F4 typed data and context;
 never analyse the original input dataset as if it were the experiment output.
