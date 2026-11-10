@@ -147,13 +147,14 @@ func NextReview(w http.ResponseWriter, r *http.Request) {
 }
 func StartReviewSession(w http.ResponseWriter, r *http.Request) {
 	var in struct {
-		Count int `json:"count"`
+		Count      int    `json:"count"`
+		WordbookID string `json:"wordbook_id"`
 	}
 	_ = json.NewDecoder(r.Body).Decode(&in)
 	if in.Count == 0 {
 		in.Count = 5
 	}
-	batch, err := service().StartReviewSession(r.Context(), store.UserID(r), in.Count)
+	batch, err := service().startReviewSessionForWordbook(r.Context(), store.UserID(r), in.Count, in.WordbookID)
 	if err != nil {
 		common.ReplyErr(w, err.Error(), 400)
 		return
@@ -173,7 +174,7 @@ func PreviewReviewSession(w http.ResponseWriter, r *http.Request) {
 	common.ReplyOK(w, batch)
 }
 func GetActiveReviewSession(w http.ResponseWriter, r *http.Request) {
-	session, err := service().ActiveReviewSession(r.Context(), store.UserID(r))
+	session, err := service().activeReviewSessionForWordbook(r.Context(), store.UserID(r), r.URL.Query().Get("wordbook_id"))
 	if err != nil {
 		common.ReplyErr(w, err.Error(), 400)
 		return

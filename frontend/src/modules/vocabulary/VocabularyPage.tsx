@@ -1,4 +1,6 @@
 import {
+  BookOutlined,
+  DownOutlined,
   CheckCircleFilled,
   CloseOutlined,
   MoreOutlined,
@@ -16,6 +18,9 @@ import {
   Form,
   Input,
   Modal,
+  Pagination,
+  Skeleton,
+  theme,
   Progress,
   Radio,
   Select,
@@ -28,7 +33,7 @@ import {
   message,
 } from "antd";
 import type { ChangeEvent, CSSProperties, MouseEvent, ReactNode } from "react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
   addVocabularyWord,
@@ -94,6 +99,14 @@ const Panel = ({
 
 export default function VocabularyPage() {
   const { t } = useTranslation();
+  const { token } = theme.useToken();
+  const [page, setPage] = useState(1);
+  const [startingReview, setStartingReview] = useState(false);
+  const reviewStartingRef = useRef(false);
+  const reviewBookRef = useRef<string>();
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
+  const loadSequence = useRef(0);
   const labels = useMemo<Record<string, string>>(() => ({
     new: t("vocabularyPage.new"),
     learning: t("vocabularyPage.learning"),
@@ -139,6 +152,10 @@ export default function VocabularyPage() {
   const [form] = Form.useForm();
   const [newWordForm] = Form.useForm();
   const load = useCallback(async (preferredWordbookId?: string) => {
+    const sequence = ++loadSequence.current;
+    setLoading(true);
+    setLoadError(false);
+    try {
     const [setting, allBooks] = await Promise.all([
       getVocabularyProvider(),
       listWordbooks(),
@@ -152,30 +169,47 @@ export default function VocabularyPage() {
       listVocabulary("local", { search, state: state || "", wordbook_id: selected }),
       getVocabularyStats().catch(() => null),
       listReviewLogs().catch(() => []),
-      getActiveVocabularyReviewSession().catch(() => ({ active: false })),
+      getActiveVocabularyReviewSession(selected).catch(() => ({ active: false })),
     ]);
+    if (sequence !== loadSequence.current) return;
     setWordbookId(selected || undefined);
     setItems(words);
     setBooks(nextBooks);
     setStats(nextStats);
     setLogs(nextLogs);
     setHasActiveReview(activeReview.active);
+    } catch { if (sequence === loadSequence.current) setLoadError(true); }
+    finally { if (sequence === loadSequence.current) setLoading(false); }
   }, [search, state, wordbookId]);
   useEffect(() => {
     void load();
+    return () => { loadSequence.current += 1; };
   }, [load]);
+  useEffect(() => { setPage(1); }, [search, state, wordbookId]);
   const start = async () => {
+    if (reviewStartingRef.current) return;
+    reviewStartingRef.current = true;
+    setStartingReview(true);
+    reviewBookRef.current = wordbookId;
     try {
       setReviewReport(null);
-      const batch = await startVocabularyReviewSession(5);
+      const batch = await startVocabularyReviewSession(5, reviewBookRef.current);
       setReviewSessionId(batch.session.id);
       setReviewQueue(batch.questions || []);
+      setHasActiveReview(Boolean(batch.questions?.length));
       setQuestion(batch.questions?.[0] || null);
       setRevealed(false);
-      if (!batch.questions?.length) message.info(t("vocabularyPage.noDueWords"));
+      if (!batch.questions?.length) {
+        const report = await completeVocabularyReviewSession(batch.session.id);
+        setReviewSessionId("");
+        setHasActiveReview(false);
+        if (hasActiveReview) setReviewReport(report);
+        else message.info(t("vocabularyPage.noDueWords"));
+        void load();
+      }
     } catch (error) {
       message.error(error instanceof Error ? error.message : t("vocabularyPage.reviewStartFailed"));
-    }
+    } finally { reviewStartingRef.current = false; setStartingReview(false); }
   };
   const rate = async (rating?: string, response?: string) => {
     if (!question || !reviewSessionId) return;
@@ -197,7 +231,7 @@ export default function VocabularyPage() {
         setReviewQueue(remaining);
         setQuestion(remaining[0]);
       } else {
-        const next = await startVocabularyReviewSession(5);
+        const next = await startVocabularyReviewSession(5, reviewBookRef.current);
         if (next.questions?.length) {
           setReviewQueue(next.questions);
           setQuestion(next.questions[0]);
@@ -340,124 +374,16 @@ export default function VocabularyPage() {
     message.success(t("vocabularyPage.wordAdded"));
     void load();
   };
-  const columns = useMemo(
-    () => [
-      {
-        title: t("vocabularyPage.word"),
-        render: (_: unknown, x: VocabularyListItem) => (
-          <Button type="link" onClick={() => setDetail(x)}>
-            {x.word.term}
-          </Button>
-        ),
-      },
-      {
-        title: t("vocabularyPage.meaningAndPartOfSpeech"),
-        render: (_: unknown, x: VocabularyListItem) => (
-          <div>
-            {x.word.meaning || x.example?.translation || "—"}
-            <Typography.Text type="secondary">
-              　{x.word.part_of_speech}
-            </Typography.Text>
-            {x.example?.sentence ? (
-              <div>
-                <Typography.Text type="secondary">
-                  {x.example.sentence}
-                </Typography.Text>
-              </div>
-            ) : null}
-          </div>
-        ),
-      },
-      {
-        title: t("vocabularyPage.sourceAndTags"),
-        render: (_: unknown, x: VocabularyListItem) => (
-          <Space wrap>
-            {x.word.source_name || x.word.origin_type}
-            {x.tags?.map((t) => (
-              <Tag key={t}>{t}</Tag>
-            ))}
-          </Space>
-        ),
-      },
-      {
-        title: t("vocabularyPage.status"),
-        render: (_: unknown, x: VocabularyListItem) => (
-          <Tag
-            color={
-              x.state === "mastered" ? "green" : x.lapses > 2 ? "red" : "blue"
-            }
-          >
-            {labels[x.state] || x.state}
-          </Tag>
-        ),
-      },
-      {
-        title: t("vocabularyPage.review"),
-        render: (_: unknown, x: VocabularyListItem) => (
-          <span>
-            {t("vocabularyPage.reviewCounts", { reps: x.reps, lapses: x.lapses })}
-          </span>
-        ),
-      },
-      {
-        title: t("vocabularyPage.nextReview"),
-        render: (_: unknown, x: VocabularyListItem) =>
-          x.due_at ? new Date(x.due_at).toLocaleString() : "—",
-      },
-      {
-        title: t("vocabularyPage.actions"),
-        render: (_: unknown, x: VocabularyListItem) => (
-          <Space>
-            {x.state === "mastered" ? (
-              <Button
-                size="small"
-                onClick={() => void resumeVocabulary(x.word.id).then(() => load())}
-              >
-                {t("vocabularyPage.resume")}
-              </Button>
-            ) : (
-              <Button
-                size="small"
-                onClick={() => void masterVocabulary(x.word.id).then(() => load())}
-              >
-                {t("vocabularyPage.markMastered")}
-              </Button>
-            )}
-            <Dropdown
-              trigger={["click"]}
-              menu={{
-                items: [
-                  {
-                    key: "reset",
-                    label: t("vocabularyPage.resetState"),
-                    onClick: () => void resetVocabulary(x.word.id).then(() => load()),
-                  },
-                  {
-                    key: "delete",
-                    danger: true,
-                    label: t("vocabularyPage.deleteWord"),
-                    onClick: () =>
-                      Modal.confirm({
-                        title: t("vocabularyPage.deleteWordTitle", { term: x.word.term }),
-                        content: t("vocabularyPage.deleteWordDescription"),
-                        onOk: () => deleteVocabulary(x.word.id).then(() => load()),
-                      }),
-                  },
-                ],
-              }}
-            >
-              <Button
-                size="small"
-                icon={<MoreOutlined />}
-                aria-label={t("vocabularyPage.moreActions")}
-              />
-            </Dropdown>
-          </Space>
-        ),
-      },
-    ],
-    [labels, load, t],
-  );
+  const wordActions = (item: VocabularyListItem) => [
+    { key: "detail", label: t("vocabularyPage.viewDetails"), onClick: () => setDetail(item) },
+    { key: "master", label: t(item.state === "mastered" ? "vocabularyPage.resume" : "vocabularyPage.markMastered"),
+      onClick: () => void (item.state === "mastered" ? resumeVocabulary(item.word.id) : masterVocabulary(item.word.id)).then(() => load()).catch(() => message.error(t("vocabularyPage.actionFailed"))) },
+    { key: "reset", label: t("vocabularyPage.resetState"), onClick: () => void resetVocabulary(item.word.id).then(() => load()).catch(() => message.error(t("vocabularyPage.actionFailed"))) },
+    { key: "delete", danger: true, label: t("vocabularyPage.deleteWord"), onClick: () => Modal.confirm({
+      title: t("vocabularyPage.deleteWordTitle", { term: item.word.term }), content: t("vocabularyPage.deleteWordDescription"),
+      okButtonProps: { danger: true }, onOk: () => deleteVocabulary(item.word.id).then(() => load()),
+    }) },
+  ];
   const visibleLogs = useMemo(() => {
     const now = Date.now(),
       days = logRange === "today" ? 1 : logRange === "week" ? 7 : 30;
@@ -497,108 +423,65 @@ export default function VocabularyPage() {
       </span>
     ),
   }));
+  const currentPage = Math.min(page, Math.max(1, Math.ceil(items.length / 12)));
   const wordsView = (
-    <Space direction="vertical" size={18} style={{ width: "100%" }}>
-      <Panel>
-        <Space
-          wrap
-          style={{ display: "flex", justifyContent: "space-between" }}
-        >
-          <Space>
-            <Typography.Text strong>{t("vocabularyPage.myBooks")}</Typography.Text>
-            <Select
-              value={wordbookId}
-              placeholder={t("vocabularyPage.selectBook")}
-              style={{ width: 260 }}
-              onChange={selectBook}
-              options={bookOptions}
-            />
-          </Space>
-          <Space>
-            <Button
-              icon={<PlusOutlined />}
-              onClick={() => setNewWordOpen(true)}
-            >
-              {t("vocabularyPage.newWord")}
-            </Button>
-            <Button
-              type="primary"
-              onClick={() => void start()}
-            >
-              {hasActiveReview ? t("vocabularyPage.resumeReview") : t("vocabularyPage.startReview")}
-            </Button>
-            <Button onClick={createBook}>{t("vocabularyPage.newBook")}</Button>
-            <Dropdown
-              menu={{
-                items: [
-                  {
-                    key: "today",
-                    label: t("vocabularyPage.resetToday"),
-                    onClick: () => batchReset("today"),
-                  },
-                  {
-                    key: "book",
-                    label: t("vocabularyPage.resetBook"),
-                    danger: true,
-                    onClick: () => batchReset("wordbook"),
-                  },
-                ],
-              }}
-            >
-              <Button icon={<MoreOutlined />}>{t("vocabularyPage.batchActions")}</Button>
-            </Dropdown>
-          </Space>
-        </Space>
-        {stats ? (
-          <div
-            style={{
-              display: "flex",
-              justifyContent: "space-around",
-              marginTop: 20,
-              padding: 16,
-              background: "#f7f9fc",
-              borderRadius: 8,
-            }}
-          >
-            {[
-              [t("vocabularyPage.all"), stats.total],
-              [t("vocabularyPage.dueToday"), stats.due],
-              [t("vocabularyPage.new"), stats.new],
-              [t("vocabularyPage.reviewedToday"), stats.reviewed_today],
-              [t("vocabularyPage.weak"), stats.weak],
-            ].map(([title, value]) => (
-              <Statistic key={String(title)} title={title} value={value} />
-            ))}
+    <div className="vocabulary-library">
+      <section className="vocabulary-library__overview" aria-label={t("vocabularyPage.overview")}>
+        <div className="vocabulary-library__overview-label"><BookOutlined aria-hidden="true" /><span>{t("vocabularyPage.overview")}</span></div>
+        <div className="vocabulary-library__stats">
+          {[
+            [t("vocabularyPage.totalWords"), stats?.total],
+            [t("vocabularyPage.dueCards"), stats?.due],
+            [t("vocabularyPage.newCards"), stats?.new],
+            [t("vocabularyPage.answersToday"), stats?.reviewed_today],
+          ].map(([title, value]) => <div className="vocabulary-library__stat" key={String(title)}><span>{title}</span><strong>{value ?? "—"}</strong></div>)}
+        </div>
+        <p className="vocabulary-library__scope">{t("vocabularyPage.statsExplanation")}</p>
+      </section>
+      <section className="vocabulary-library__collection">
+        <div className="vocabulary-library__toolbar">
+          <div className="vocabulary-library__book">
+            <label htmlFor="vocabulary-wordbook">{t("vocabularyPage.myBooks")}</label>
+            <Select id="vocabulary-wordbook" disabled={startingReview} value={wordbookId} placeholder={t("vocabularyPage.selectBook")} onChange={selectBook} options={bookOptions} />
+            <Button type="text" icon={<PlusOutlined />} disabled={startingReview} onClick={createBook} aria-label={t("vocabularyPage.newBook")} title={t("vocabularyPage.newBook")} />
           </div>
-        ) : null}
-        <Space wrap style={{ marginTop: 20 }}>
-          <Input.Search
-            allowClear
-            placeholder={t("vocabularyPage.search")}
-            onSearch={setSearch}
-            style={{ width: 320 }}
-          />
-          <Select
-            allowClear
-            placeholder={t("vocabularyPage.memoryState")}
-            value={state}
-            onChange={setState}
-            style={{ width: 150 }}
-            options={Object.entries(labels).map(([value, label]) => ({
-              value,
-              label,
-            }))}
-          />
-        </Space>
-        <Table<VocabularyListItem>
-          style={{ marginTop: 16 }}
-          rowKey={(x: VocabularyListItem) => x.word.id}
-          dataSource={items}
-          locale={{ emptyText: <Empty description={t("vocabularyPage.empty")} /> }}
-          columns={columns}
-        />
-      </Panel>
-    </Space>
+          <div className="vocabulary-library__actions">
+            <Button icon={<PlusOutlined />} onClick={() => setNewWordOpen(true)}>{t("vocabularyPage.newWord")}</Button>
+            <Button type="primary" loading={startingReview} disabled={loading || loadError} onClick={() => void start()}>{hasActiveReview ? t("vocabularyPage.resumeReview") : t("vocabularyPage.startReview")}</Button>
+            <Dropdown trigger={["click"]} menu={{ items: [
+              { key: "today", label: t("vocabularyPage.resetToday"), onClick: () => batchReset("today") },
+              { key: "book", label: t("vocabularyPage.resetBook"), danger: true, onClick: () => batchReset("wordbook") },
+            ] }}><Button type="text" icon={<MoreOutlined />} aria-label={t("vocabularyPage.batchActions")} /></Dropdown>
+          </div>
+        </div>
+        <div className="vocabulary-library__filters">
+          <Input.Search allowClear aria-label={t("vocabularyPage.search")} placeholder={t("vocabularyPage.search")} onSearch={setSearch} />
+          <Select allowClear aria-label={t("vocabularyPage.memoryState")} placeholder={t("vocabularyPage.memoryState")} value={state} onChange={setState} options={Object.entries(labels).map(([value, label]) => ({ value, label }))} />
+          <span className="vocabulary-library__result-count" aria-live="polite">{!loading && !loadError && t("vocabularyPage.resultCount", { count: items.length })}</span>
+        </div>
+        <p className="vocabulary-library__scope">{t("vocabularyPage.reviewScope")}</p>
+        {loadError ? <Alert type="error" showIcon message={t("vocabularyPage.loadFailed")} action={<Button onClick={() => void load()}>{t("vocabulary.document.retry")}</Button>} />
+          : loading ? <Skeleton active paragraph={{ rows: 4 }} />
+          : !items.length ? <Empty description={t(search || state ? "vocabularyPage.noMatches" : "vocabularyPage.empty")} />
+          : <div className="vocabulary-library__grid">
+            {items.slice((currentPage - 1) * 12, currentPage * 12).map(item => <article className="vocabulary-word-card" aria-label={item.word.term} key={item.word.id}>
+              <header>
+                <div className="vocabulary-word-card__identity"><button className="vocabulary-word-card__term" onClick={() => setDetail(item)}>{item.word.term}</button>{item.word.phonetic && <span>{item.word.phonetic}</span>}</div>
+                <Dropdown trigger={["click"]} menu={{ items: wordActions(item) }}><Button type="text" icon={<MoreOutlined />} aria-label={t("vocabulary.document.moreActions", { term: item.word.term })} /></Dropdown>
+              </header>
+              <p className="vocabulary-word-card__meaning">{item.word.meaning || item.example?.translation || "—"}</p>
+              <div className="vocabulary-word-card__status"><Tag color={item.state === "mastered" ? "green" : "blue"}>{labels[item.state] || item.state}</Tag><span>{t("vocabularyPage.reviewCounts", { reps: item.reps, lapses: item.lapses })}</span></div>
+              <details className="vocabulary-word-card__details"><summary aria-label={t("vocabulary.document.exampleDetails")} title={t("vocabulary.document.exampleDetails")}><DownOutlined aria-hidden="true" /></summary>
+                {item.example?.sentence && <blockquote>{item.example.sentence}{item.example.translation && <p>{item.example.translation}</p>}</blockquote>}
+                <p>{t("vocabularyPage.contentSource")}: {item.word.source_name || item.word.origin_type || "—"}</p>
+                <p>{t("vocabularyPage.nextReview")}: {item.due_at ? new Date(item.due_at).toLocaleString() : "—"}</p>
+                {item.tags?.map(tag => <Tag key={tag}>{tag}</Tag>)}
+              </details>
+            </article>)}
+          </div>}
+        {items.length > 12 && !loading && !loadError && <Pagination current={currentPage} total={items.length} pageSize={12} onChange={setPage} showSizeChanger={false} />}
+      </section>
+    </div>
   );
   const historyColumns = [
     {
@@ -685,7 +568,11 @@ export default function VocabularyPage() {
     </Panel>
   );
   return (
-    <div style={{ padding: 24, maxWidth: 1500, margin: "0 auto" }}>
+    <div className="vocabulary-page" style={{
+      "--vocab-bg": token.colorBgContainer, "--vocab-subtle": token.colorFillQuaternary,
+      "--vocab-border": token.colorBorder, "--vocab-text": token.colorText,
+      "--vocab-secondary": token.colorTextSecondary, "--vocab-primary": token.colorPrimary,
+    } as CSSProperties}>
       <Space direction="vertical" size={18} style={{ width: "100%" }}>
         <div
           style={{

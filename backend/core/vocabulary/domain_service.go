@@ -211,6 +211,10 @@ func deleteLocalWordData(tx *gorm.DB, owner, wordID string) error {
 	return tx.Where("owner_id = ? AND id = ?", owner, wordID).Delete(&Word{}).Error
 }
 
+func wordbookMembers(db *gorm.DB, owner, wordbookID string) *gorm.DB {
+	return db.Model(&WordbookEntry{}).Select("word_id").Where("owner_id = ? AND wordbook_id = ?", owner, wordbookID)
+}
+
 func (s *Service) attachWordbooks(tx *gorm.DB, owner, wordID string, ids []string) error {
 	if len(ids) == 0 {
 		book, err := ensureDefaultWordbook(tx, owner)

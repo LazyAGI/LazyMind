@@ -225,6 +225,10 @@ const enUS = {
     "startError": "Could not start parsing. Check the parser configuration and retry."
 },
   vocabularyCloud: {
+    setupGuide: "Connection guide",
+    guideVerify: "Paste the token below and select “Verify connection” to load wordbooks. If a token is already saved, use “Refresh wordbooks / retry”.",
+    guideTarget: "Choose an existing wordbook or create one. Select “Save and enable” the first time. Use “Automatically sync new words” to pause or resume later.",
+    guideLocal: "Words are saved in LazyMind first and remain there when sync is paused or unavailable.",
     eudicTokenHelp: "Paste the complete personal authorization value from Eudic, including any prefix.",
     eudicEnglishHelp: "Only English wordbooks are listed. Choose where to save English words, or search by name.",
     refreshBooks: "Refresh wordbooks / retry",
@@ -11336,6 +11340,9 @@ const enUS = {
     downloadSize: "Download approximately {{size}} MiB",
   },
   ankiSettings: {
+    guideAvailability: "Anki sync is optional. On a remote server or in a container, localhost refers to the environment running LazyMind. Ask your administrator to configure an AnkiConnect endpoint that LazyMind can reach.",
+    guideAddon: "In Anki, choose Tools → Add-ons → Get Add-ons, enter {{code}}, then restart Anki and keep it open.",
+    guideEnable: "Enable “Sync vocabulary to Anki”. If prompted, request and grant AnkiConnect access, then check again. Use “Sync now” to retry queued changes to your LazyMind deck.",
     linked: "Anki sync enabled",
     unlinked: "Anki sync paused",
     allow: "Sync vocabulary to Anki",
@@ -11416,6 +11423,19 @@ const enUS = {
     },
   },
   vocabularyPage: {
+    overview: "All vocabulary books",
+    totalWords: "Total words",
+    dueCards: "Due cards",
+    newCards: "New cards",
+    answersToday: "Answers today",
+    statsExplanation: "A word can have multiple review cards; due cards include new cards. Answers today use the UTC date.",
+    reviewScope: "The list shows the selected book. Review uses its due cards.",
+    resultCount: "Current filter · {{count}} words",
+    viewDetails: "View and edit",
+    actionFailed: "Action failed. Please retry.",
+    loadFailed: "Unable to load words. Please retry.",
+    noMatches: "No matching words. Try another search or status.",
+
     title: "Vocabulary",
     history: "Review history",
     titleDescription: "Manage vocabulary and start a review.",

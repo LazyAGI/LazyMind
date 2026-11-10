@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 type ReviewBatch struct {
@@ -44,15 +45,59 @@ type SessionIssuedWord struct {
 
 const reviewSessionLifetime = 12 * time.Hour
 
+func (s *Service) reviewWordbook(ctx context.Context, owner, wordbookID string) (Wordbook, error) {
+	wordbookID = strings.TrimSpace(wordbookID)
+	explicit := wordbookID != ""
+	if !explicit {
+		setting, err := s.Setting(ctx, owner)
+		if err != nil {
+			return Wordbook{}, err
+		}
+		wordbookID = setting.LocalDefaultWordbookID
+		if wordbookID == "" {
+			return s.EnsureDefaultWordbook(ctx, owner)
+		}
+	}
+	var book Wordbook
+	err := s.db.WithContext(ctx).Where("owner_id = ? AND id = ?", owner, wordbookID).First(&book).Error
+	if !explicit && errors.Is(err, gorm.ErrRecordNotFound) {
+		return s.EnsureDefaultWordbook(ctx, owner)
+	}
+	if err != nil {
+		return Wordbook{}, err
+	}
+	if book.CapabilityKey != "" && book.CapabilityKey != "english_definition" {
+		if !explicit {
+			return s.EnsureDefaultWordbook(ctx, owner)
+		}
+		return Wordbook{}, errors.New("wordbook does not support vocabulary review")
+	}
+	return book, nil
+}
+
 func (s *Service) ActiveReviewSession(ctx context.Context, owner string) (*ReviewSession, error) {
-	setting, err := s.Setting(ctx, owner)
+	return s.activeReviewSessionForWordbook(ctx, owner, "")
+}
+
+func (s *Service) activeReviewSessionForWordbook(ctx context.Context, owner, wordbookID string) (*ReviewSession, error) {
+	book, err := s.reviewWordbook(ctx, owner, wordbookID)
 	if err != nil {
 		return nil, err
 	}
-	bookID := setting.LocalDefaultWordbookID
+	return s.activeReviewSession(ctx, owner, book)
+}
+
+func (s *Service) activeReviewSession(ctx context.Context, owner string, book Wordbook) (*ReviewSession, error) {
 	now := time.Now().UTC()
 	var session ReviewSession
-	err = s.db.WithContext(ctx).Where("owner_id = ? AND provider = ? AND wordbook_id = ? AND completed_at IS NULL", owner, "local", bookID).Order("started_at DESC").First(&session).Error
+	query := s.db.WithContext(ctx).Where("owner_id = ? AND provider = ? AND completed_at IS NULL", owner, "local")
+	if book.Name == defaultWordbookName {
+		// Sessions created before the default book was resolved used an empty ID.
+		query = query.Where("wordbook_id IN ?", []string{book.ID, ""})
+	} else {
+		query = query.Where("wordbook_id = ?", book.ID)
+	}
+	err := query.Order("started_at DESC").First(&session).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, nil
 	}
@@ -68,34 +113,27 @@ func (s *Service) ActiveReviewSession(ctx context.Context, owner string) (*Revie
 	return &session, nil
 }
 
-func (s *Service) ensureActiveReviewSession(ctx context.Context, owner string) (ReviewSession, error) {
-	setting, err := s.Setting(ctx, owner)
-	if err != nil {
+func (s *Service) ensureActiveReviewSession(ctx context.Context, owner string, book Wordbook) (ReviewSession, error) {
+	if active, err := s.activeReviewSession(ctx, owner, book); err != nil {
 		return ReviewSession{}, err
-	}
-	bookID, bookName := setting.LocalDefaultWordbookID, "当前单词本"
-	if bookID != "" {
-		var book Wordbook
-		if s.db.WithContext(ctx).Where("owner_id = ? AND id = ?", owner, bookID).First(&book).Error == nil {
-			bookName = book.Name
-		}
-	}
-	if active, activeErr := s.ActiveReviewSession(ctx, owner); activeErr != nil {
-		return ReviewSession{}, activeErr
 	} else if active != nil {
 		return *active, nil
 	}
 	now := time.Now().UTC()
 	var session ReviewSession
-	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		session = ReviewSession{ID: uuid.NewString(), OwnerID: owner, Provider: "local", WordbookID: bookID, WordbookName: bookName, Status: "active", StartedAt: now, ExpiresAt: now.Add(reviewSessionLifetime), CreatedAt: now}
+	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		session = ReviewSession{ID: uuid.NewString(), OwnerID: owner, Provider: "local", WordbookID: book.ID, WordbookName: book.Name, Status: "active", StartedAt: now, ExpiresAt: now.Add(reviewSessionLifetime), CreatedAt: now}
 		return tx.Create(&session).Error
 	})
 	return session, err
 }
 
-func (s *Service) previewReviewQuestions(ctx context.Context, owner string, limit int) (ReviewSession, []ReviewQuestion, error) {
-	session, err := s.ensureActiveReviewSession(ctx, owner)
+func (s *Service) previewReviewQuestions(ctx context.Context, owner string, limit int, wordbookID string) (ReviewSession, []ReviewQuestion, error) {
+	book, err := s.reviewWordbook(ctx, owner, wordbookID)
+	if err != nil {
+		return ReviewSession{}, nil, err
+	}
+	session, err := s.ensureActiveReviewSession(ctx, owner, book)
 	if err != nil {
 		return ReviewSession{}, nil, err
 	}
@@ -106,7 +144,7 @@ func (s *Service) previewReviewQuestions(ctx context.Context, owner string, limi
 		limit = 200
 	}
 	fetchLimit := min(2000, limit*10)
-	questions, err := s.NextQuestions(ctx, owner, fetchLimit)
+	questions, err := s.nextQuestions(ctx, owner, fetchLimit, book.ID, session.ID)
 	if err != nil {
 		return ReviewSession{}, nil, err
 	}
@@ -128,14 +166,40 @@ func (s *Service) previewReviewQuestions(ctx context.Context, owner string, limi
 	return session, result, nil
 }
 
+func pendingSessionItems(db *gorm.DB, owner, sessionID string) *gorm.DB {
+	return db.Model(&ReviewSessionItem{}).Where("owner_id = ? AND session_id = ? AND status IN ?", owner, sessionID, []string{"queued", "issued"})
+}
+
+// Unreviewed items may become unavailable after a review in another session
+// or after a word is moved, mastered, or deleted. Keep all recorded answers.
+func releaseIneligibleSessionItems(db *gorm.DB, owner, sessionID string, pending []ReviewSessionItem, eligible map[string]bool) error {
+	var obsolete []string
+	for _, item := range pending {
+		if !eligible[item.CardID] {
+			obsolete = append(obsolete, item.ID)
+		}
+	}
+	if len(obsolete) == 0 {
+		return nil
+	}
+	return pendingSessionItems(db, owner, sessionID).Where("id IN ?", obsolete).Delete(&ReviewSessionItem{}).Error
+}
+
 func (s *Service) StartReviewSession(ctx context.Context, owner string, limit int) (ReviewBatch, error) {
-	session, questions, err := s.previewReviewQuestions(ctx, owner, limit)
+	return s.startReviewSessionForWordbook(ctx, owner, limit, "")
+}
+
+func (s *Service) startReviewSessionForWordbook(ctx context.Context, owner string, limit int, wordbookID string) (ReviewBatch, error) {
+	session, questions, err := s.previewReviewQuestions(ctx, owner, limit, wordbookID)
 	if err != nil {
 		return ReviewBatch{}, err
 	}
+	issued := make([]ReviewQuestion, 0, len(questions))
 	if err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var sequence int64
-		tx.Model(&ReviewSessionItem{}).Where("session_id = ?", session.ID).Count(&sequence)
+		if err := tx.Model(&ReviewSessionItem{}).Where("session_id = ?", session.ID).Count(&sequence).Error; err != nil {
+			return err
+		}
 		for index, question := range questions {
 			expected := strings.TrimSpace(question.Answer)
 			if expected == "" {
@@ -145,19 +209,28 @@ func (s *Service) StartReviewSession(ctx context.Context, owner string, limit in
 				}
 			}
 			item := ReviewSessionItem{ID: uuid.NewString(), SessionID: session.ID, OwnerID: owner, CardID: question.CardID, WordID: question.Word.ID, Term: question.Word.Term, Meaning: question.Word.Meaning, Prompt: question.Prompt, Expected: expected, CardType: question.CardType, Status: "issued", Sequence: int(sequence) + index + 1, RowVersion: question.RowVersion, PreviewedAt: question.PreviewedAt, CreatedAt: time.Now().UTC()}
-			if err := tx.Where("session_id = ? AND word_id = ?", session.ID, question.Word.ID).FirstOrCreate(&item).Error; err != nil {
-				return err
+			var stored ReviewSessionItem
+			result := tx.Where("session_id = ? AND word_id = ?", session.ID, question.Word.ID).
+				Attrs(item).Clauses(clause.OnConflict{DoNothing: true}).FirstOrCreate(&stored)
+			if result.Error != nil {
+				return result.Error
+			}
+			if stored.ID == item.ID && result.RowsAffected == 0 {
+				continue
+			}
+			if stored.CardID == question.CardID && (stored.Status == "issued" || stored.Status == "queued") {
+				issued = append(issued, question)
 			}
 		}
 		return nil
 	}); err != nil {
 		return ReviewBatch{}, err
 	}
-	return ReviewBatch{Session: session, Questions: questions}, nil
+	return ReviewBatch{Session: session, Questions: issued}, nil
 }
 
 func (s *Service) PreviewReviewSession(ctx context.Context, owner string, limit int) (ReviewBatch, error) {
-	session, questions, err := s.previewReviewQuestions(ctx, owner, limit)
+	session, questions, err := s.previewReviewQuestions(ctx, owner, limit, "")
 	return ReviewBatch{Session: session, Questions: questions}, err
 }
 
@@ -173,7 +246,7 @@ func (s *Service) IssueReviewSessionWords(ctx context.Context, owner string, ter
 		}
 		wanted[key] = true
 	}
-	session, candidates, err := s.previewReviewQuestions(ctx, owner, 200)
+	session, candidates, err := s.previewReviewQuestions(ctx, owner, 200, "")
 	if err != nil {
 		return ReviewSession{}, nil, err
 	}
@@ -212,7 +285,11 @@ func (s *Service) IssueReviewSessionWords(ctx context.Context, owner string, ter
 }
 
 func (s *Service) ActiveSessionItemByWord(ctx context.Context, owner, wordID string) (ReviewSession, ReviewSessionItem, error) {
-	session, err := s.ensureActiveReviewSession(ctx, owner)
+	book, err := s.reviewWordbook(ctx, owner, "")
+	if err != nil {
+		return ReviewSession{}, ReviewSessionItem{}, err
+	}
+	session, err := s.ensureActiveReviewSession(ctx, owner, book)
 	if err != nil {
 		return ReviewSession{}, ReviewSessionItem{}, err
 	}

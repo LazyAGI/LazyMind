@@ -225,6 +225,10 @@ const zhCN = {
     "startError": "无法启动公式解析，请检查解析服务配置后重试。"
 },
   vocabularyCloud: {
+    setupGuide: "连接指南",
+    guideVerify: "在下方粘贴 Token，点击「验证连接」加载词本。已保存 Token 时，可以点击「刷新词本 / 重试」。",
+    guideTarget: "选择已有词本或新建词本。首次配置点击「保存并启用」，之后可用「自动同步新生词」开关暂停或恢复。",
+    guideLocal: "生词会先保存在 LazyMind 中，同步暂停或不可用时仍可使用。",
     eudicTokenHelp: "请粘贴欧路个人授权页面提供的完整授权信息（含前缀，如有）。",
     eudicEnglishHelp: "这里仅列出英语词本，请选择保存英文生词的目标；可输入名称搜索。",
     refreshBooks: "刷新词本 / 重试",
@@ -11077,6 +11081,9 @@ const zhCN = {
     downloadSize: "下载约 {{size}} MiB",
   },
   ankiSettings: {
+    guideAvailability: "Anki 同步是可选功能。在远程服务器或容器中，localhost 指向运行 LazyMind 的环境。请让管理员配置一个 LazyMind 能够访问的 AnkiConnect 地址。",
+    guideAddon: "在 Anki 中选择「工具 → 插件 → 获取插件」，输入 {{code}}，然后重启 Anki 并保持打开。",
+    guideEnable: "开启「同步生词到 Anki」。如需授权，请发起访问请求，在 Anki 中确认，再点击「重新检测」。点击「立即同步」可重试发送队列中的变更。",
     linked: "已开启 Anki 同步",
     unlinked: "已暂停 Anki 同步",
     allow: "同步生词到 Anki",
@@ -11157,6 +11164,19 @@ const zhCN = {
     },
   },
   vocabularyPage: {
+    overview: "全部生词本概览",
+    totalWords: "单词总数",
+    dueCards: "到期卡片",
+    newCards: "新卡片",
+    answersToday: "今日作答次数",
+    statsExplanation: "一个单词可生成多张复习卡片；到期包含新卡片。今日作答按 UTC 日期统计。",
+    reviewScope: "列表展示当前词本；开始复习将使用当前词本的到期卡片。",
+    resultCount: "当前筛选 · {{count}} 个单词",
+    viewDetails: "查看与编辑",
+    actionFailed: "操作失败，请重试。",
+    loadFailed: "生词加载失败，请重试。",
+    noMatches: "没有匹配的生词，试试其他搜索词或状态。",
+
     title: "生词表",
     history: "学习记录",
     titleDescription: "管理生词并开始复习。",

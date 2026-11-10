@@ -45,6 +45,10 @@ describe("VocabularySettings", () => {
     render(<ConfigProvider theme={{ token: { motion: false } }}><VocabularySettings /></ConfigProvider>);
     fireEvent.click(await screen.findByRole("button", { name: "Anki 配置" }));
     await waitFor(() => expect(screen.getByText("当前部署未提供 Anki 同步。")).toBeVisible());
+    const setupGuide = screen.getByText("连接指南");
+    expect(setupGuide).toBeVisible();
+    expect(setupGuide.closest("details")).not.toHaveAttribute("open");
+    expect(screen.getByText(/2055492159/)).toBeInTheDocument();
     expect(screen.queryByRole("switch")).toBeNull();
     expect(mocks.desktop).not.toHaveBeenCalled();
     expect(screen.getByRole("button", { name: "欧路词典 配置" })).toBeEnabled();

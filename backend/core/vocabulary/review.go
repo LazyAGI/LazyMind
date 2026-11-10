@@ -51,7 +51,12 @@ func (s *Service) addLocalWord(ctx context.Context, owner string, req AddWordReq
 	}
 	var result AddWordResult
 	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		word, err := findStoredWord(tx, owner, req.Language, normalized)
+		// Serialize repeated saves for the same word because example identity
+		// is enforced by the lookup, without a unique database constraint.
+		lockWord := func() (Word, error) {
+			return findStoredWord(tx.Clauses(clause.Locking{Strength: "UPDATE"}), owner, req.Language, normalized)
+		}
+		word, err := lockWord()
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			word = Word{ID: uuid.NewString(), OwnerID: owner, Provider: "local", NormalizedTerm: normalized, Term: req.Term, Language: req.Language, Phonetic: req.Phonetic, PartOfSpeech: req.PartOfSpeech, Meaning: req.Meaning, Definition: req.Definition, UserNote: req.UserNote, OriginType: defaultString(req.OriginType, "user"), CreatedAt: now, UpdatedAt: now}
 			if req.DictionaryEntryID != "" {
@@ -75,7 +80,7 @@ func (s *Service) addLocalWord(ctx context.Context, owner string, req AddWordReq
 				return insert.Error
 			}
 			if insert.RowsAffected == 0 {
-				word, err = findStoredWord(tx, owner, req.Language, normalized)
+				word, err = lockWord()
 				if err != nil {
 					return err
 				}
@@ -95,8 +100,10 @@ func (s *Service) addLocalWord(ctx context.Context, owner string, req AddWordReq
 			sentence = strings.TrimSpace(req.ContextSentence)
 		}
 		if sentence != "" {
-			ex := Example{ID: uuid.NewString(), OwnerID: owner, WordID: word.ID, Sentence: sentence, Translation: req.Translation, ContentOrigin: defaultString(req.OriginType, "document"), CreatedAt: now, UpdatedAt: now}
-			if err := tx.Where("owner_id = ? AND word_id = ? AND sentence = ?", owner, word.ID, sentence).FirstOrCreate(&ex).Error; err != nil {
+			attrs := Example{ID: uuid.NewString(), OwnerID: owner, WordID: word.ID, Sentence: sentence, Translation: req.Translation, ContentOrigin: defaultString(req.OriginType, "document"), CreatedAt: now, UpdatedAt: now}
+			var ex Example
+			if err := tx.Where("owner_id = ? AND word_id = ? AND sentence = ?", owner, word.ID, sentence).
+				Order("created_at ASC").Attrs(attrs).FirstOrCreate(&ex).Error; err != nil {
 				return err
 			}
 			if err := s.setExampleTags(tx, owner, ex.ID, req.ExampleTags); err != nil {
@@ -248,6 +255,10 @@ func (s *Service) NextQuestion(ctx context.Context, owner string) (*ReviewQuesti
 }
 
 func (s *Service) NextQuestions(ctx context.Context, owner string, limit int) ([]ReviewQuestion, error) {
+	return s.nextQuestions(ctx, owner, limit, "", "")
+}
+
+func (s *Service) nextQuestions(ctx context.Context, owner string, limit int, wordbookID, sessionID string) ([]ReviewQuestion, error) {
 	if err := s.recoverLegacyAnkiAdds(ctx, owner); err != nil {
 		return nil, err
 	}
@@ -259,8 +270,28 @@ func (s *Service) NextQuestions(ctx context.Context, owner string, limit int) ([
 		return nil, err
 	}
 	parameters := s.schedulerParameters(ctx, owner)
+	db := s.db.WithContext(ctx)
+	query := db.Where("owner_id = ? AND suspended_at IS NULL", owner)
+	if wordbookID != "" {
+		query = query.Where("word_id IN (?)", wordbookMembers(db, owner, wordbookID))
+	}
+	var pendingItems []ReviewSessionItem
+	if sessionID != "" {
+		activeWords := db.Model(&Word{}).Select("id").Where("owner_id = ? AND mastered_at IS NULL AND archived_at IS NULL", owner)
+		query = query.Where("word_id IN (?)", activeWords)
+		sessionItems := func() *gorm.DB {
+			return db.Model(&ReviewSessionItem{}).Where("owner_id = ? AND session_id = ?", owner, sessionID)
+		}
+		seenWords := sessionItems().Select("word_id")
+		pending := pendingSessionItems(db, owner, sessionID)
+		if err := pending.Select("id", "card_id").Find(&pendingItems).Error; err != nil {
+			return nil, err
+		}
+		pendingCards := pendingSessionItems(db, owner, sessionID).Select("card_id")
+		query = query.Where("(word_id NOT IN (?) OR id IN (?))", seenWords, pendingCards)
+	}
 	var rows []ReviewCard
-	if err := s.db.WithContext(ctx).Where("owner_id = ? AND suspended_at IS NULL", owner).Find(&rows).Error; err != nil {
+	if err := query.Find(&rows).Error; err != nil {
 		return nil, err
 	}
 	type candidate struct {
@@ -276,6 +307,15 @@ func (s *Service) NextQuestions(ctx context.Context, owner string, limit int) ([
 		}
 		rank := map[fsrs.State]int{fsrs.Relearning: 0, fsrs.Review: 1, fsrs.Learning: 2, fsrs.New: 3}[card.State]
 		due = append(due, candidate{row, card, rank})
+	}
+	if len(pendingItems) > 0 {
+		eligible := make(map[string]bool, len(due))
+		for _, candidate := range due {
+			eligible[candidate.row.ID] = true
+		}
+		if err := releaseIneligibleSessionItems(db, owner, sessionID, pendingItems, eligible); err != nil {
+			return nil, err
+		}
 	}
 	sort.SliceStable(due, func(i, j int) bool {
 		if due[i].rank != due[j].rank {

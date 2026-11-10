@@ -2,7 +2,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import i18n from "@/i18n";
 import VocabularyPage from "./VocabularyPage";
-import { createWordbook, getActiveVocabularyReviewSession, getAnkiStatus, getVocabularyProvider, listAnkiDecks, listVocabulary, listWordbooks, saveVocabularyProvider, startVocabularyReviewSession, submitVocabularySessionReview } from "./api";
+import { completeVocabularyReviewSession, createWordbook, getActiveVocabularyReviewSession, getAnkiStatus, getVocabularyProvider, listAnkiDecks, listVocabulary, listWordbooks, saveVocabularyProvider, startVocabularyReviewSession, submitVocabularySessionReview } from "./api";
 
 const vocabularyWord = vi.hoisted(() => ({
   id: "w1",
@@ -48,7 +48,7 @@ describe("VocabularyPage", () => {
     await i18n.changeLanguage("en-US");
     const page = render(<VocabularyPage />);
     try {
-      expect(await screen.findByRole("columnheader", { name: "Meaning / part of speech" })).toBeVisible();
+      expect(await screen.findByRole("article", { name: "evidence" })).toBeVisible();
       expect(screen.getByRole("tab", { name: "Vocabulary" })).toBeVisible();
       expect(screen.getByRole("button", { name: /Add word/ })).toBeVisible();
       expect(await screen.findByText("证据")).toBeVisible();
@@ -66,11 +66,23 @@ describe("VocabularyPage", () => {
     expect(screen.queryByText("单词本管理")).toBeNull();
     expect(screen.queryByRole("tab", { name: "学习集" })).toBeNull();
   });
+  it("distinguishes global card statistics from the selected book's words", async () => {
+    render(<VocabularyPage />);
+    await screen.findByRole("article", { name: "evidence" });
+    expect(screen.getByText("全部生词本概览")).toBeVisible();
+    expect(screen.getByText("单词总数")).toBeVisible();
+    expect(screen.getByText("到期卡片")).toBeVisible();
+    expect(screen.getByText("新卡片")).toBeVisible();
+    expect(screen.getByText("当前筛选 · 1 个单词")).toBeVisible();
+    expect(getActiveVocabularyReviewSession).toHaveBeenCalledWith("default");
+    expect(screen.queryByRole("table")).not.toBeInTheDocument();
+  });
   it("creates a review question and reveals its answer", async () => {
     vi.mocked(startVocabularyReviewSession).mockResolvedValueOnce({ session: { id: "s1" }, questions: [{ card_id: "c1", row_version: 1, previewed_at: new Date().toISOString(), remaining: 1, prompt: "evidence", answer: "证据", options: {}, word: vocabularyWord, state: "learning", tags: [], wordbooks: [], reps: 0, lapses: 0 }] }).mockResolvedValueOnce({session:{id:"s1"},questions:[]});
     render(<VocabularyPage />);
     fireEvent.click(await screen.findByRole("button", { name: "开始复习" }));
     expect(await screen.findByRole("heading", { name: "evidence" })).toBeTruthy();
+    expect(startVocabularyReviewSession).toHaveBeenLastCalledWith(5, "default");
     fireEvent.click(screen.getByRole("button", { name: "显示答案" }));
     await waitFor(() => expect(screen.getAllByText("证据").length).toBeGreaterThan(0));
     fireEvent.click(screen.getByRole("button", { name: /记得/ }));
@@ -102,6 +114,16 @@ describe("VocabularyPage", () => {
     vi.mocked(getActiveVocabularyReviewSession).mockResolvedValueOnce({active:true,session:{id:"shared",provider:"local",wordbook_id:"default",wordbook_name:"默认生词本",status:"active",expires_at:new Date(Date.now()+3600000).toISOString()}});
     render(<VocabularyPage/>);
     expect(await screen.findByRole("button",{name:"继续复习"})).toBeTruthy();
+  });
+  it("finishes a resumed session whose pending cards are no longer due", async () => {
+    const active = {active:true,session:{id:"shared",provider:"local",wordbook_id:"default",wordbook_name:"默认生词本",status:"active",expires_at:new Date(Date.now()+3600000).toISOString()}};
+    vi.mocked(getActiveVocabularyReviewSession).mockResolvedValueOnce(active).mockResolvedValueOnce(active);
+    vi.mocked(startVocabularyReviewSession).mockResolvedValueOnce({session:{id:"shared"},questions:[]});
+    render(<VocabularyPage/>);
+    await waitFor(() => expect(screen.getByRole("button",{name:"继续复习"})).toBeEnabled());
+    fireEvent.click(screen.getByRole("button",{name:"继续复习"}));
+    expect(await screen.findByText("本轮复习完成")).toBeInTheDocument();
+    expect(completeVocabularyReviewSession).toHaveBeenLastCalledWith("shared");
   });
   it("keeps a newly created local wordbook selected while reloading", async () => {
     vi.mocked(listWordbooks)

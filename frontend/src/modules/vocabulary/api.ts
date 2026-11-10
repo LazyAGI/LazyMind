@@ -32,8 +32,8 @@ export const listVocabulary=async(provider:string,params:Record<string,string>={
 export const getVocabularyWord=async(id:string)=>(await axiosInstance.get<Envelope<VocabularyListItem>>(`${root}/words/${id}`)).data.data;
 export const updateVocabularyWord=async(id:string,v:Record<string,unknown>)=>(await axiosInstance.patch<Envelope<VocabularyWord>>(`${root}/words/${id}`,v)).data.data;
 export const nextVocabularyReview=async(provider:string)=>(await axiosInstance.get<Envelope<ReviewQuestion|null>>(`${root}/review/next`,{params:{provider}})).data.data;
-export const startVocabularyReviewSession=async(count=5)=>(await axiosInstance.post<Envelope<{session:{id:string};questions:ReviewQuestion[]}>>(`${root}/review/sessions`,{count})).data.data;
-export const getActiveVocabularyReviewSession=async()=>(await axiosInstance.get<Envelope<ActiveReviewSession>>(`${root}/review/sessions/active`)).data.data;
+export const startVocabularyReviewSession=async(count=5,wordbookId?:string)=>(await axiosInstance.post<Envelope<{session:{id:string};questions:ReviewQuestion[]}>>(`${root}/review/sessions`,{count,...(wordbookId ? {wordbook_id:wordbookId} : {})})).data.data;
+export const getActiveVocabularyReviewSession=async(wordbookId?:string)=>(await axiosInstance.get<Envelope<ActiveReviewSession>>(`${root}/review/sessions/active`,{params:wordbookId ? {wordbook_id:wordbookId} : undefined})).data.data;
 export const submitVocabularySessionReview=async(sessionId:string,v:{word_id?:string;term?:string;card_id:string;rating?:string;response?:string;row_version:number;idempotency_key:string;previewed_at:string})=>{await axiosInstance.post(`${root}/review/sessions/${sessionId}/answers`,v)};
 export const completeVocabularyReviewSession=async(sessionId:string)=>(await axiosInstance.post<Envelope<ReviewSessionReport>>(`${root}/review/sessions/${sessionId}:complete`,{})).data.data;
 export const reviewVocabulary=async(id:string,provider:string,v:{card_id:string;rating:string;row_version:number;idempotency_key:string;previewed_at:string})=>{await axiosInstance.post(`${root}/words/${id||"anki"}:review`,v,{params:{provider}})};

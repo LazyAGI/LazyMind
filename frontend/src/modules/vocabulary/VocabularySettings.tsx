@@ -28,6 +28,7 @@ import {
 } from "./api";
 import "@/modules/agentIntegration/index.scss";
 import CloudVocabularyConnections from "./CloudVocabularyConnections";
+import VocabularyConnectionGuide from "./VocabularyConnectionGuide";
 import ankiLogo from "./assets/anki.png";
 
 const ADDON_CODE = "2055492159";
@@ -112,6 +113,7 @@ export default function VocabularySettings() {
         </article>
       </div>
       <Modal open={configureOpen} title="Anki" onCancel={() => setConfigureOpen(false)} footer={null} width={680} styles={{ body: { maxHeight: "75vh", overflowY: "auto" } }}>
+        <VocabularyConnectionGuide provider="anki" addonCode={ADDON_CODE} />
         {!available ? (
           <Alert
             type="info"
