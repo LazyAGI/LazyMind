@@ -520,3 +520,34 @@
 .paper-chat-toolbar-actions { display: flex; flex-shrink: 0; }
 .knowledge-full-translation-actions { display: flex; align-items: center; gap: 2px; flex: 0 0 auto; }
 .knowledge-full-translation-actions .ant-btn { min-width: 26px; width: 26px; height: 26px; padding: 0; }
+
+.knowledge-full-translation-empty {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 28px 24px;
+}
+.knowledge-full-translation-intro {
+  width: 100%;
+  max-width: 340px;
+  margin: auto;
+  text-align: center;
+  h2 { margin: 0 0 10px; font-size: 22px; line-height: 1.4; font-weight: 600; color: var(--ant-color-text, #262626); }
+  p { margin: 0; font-size: 14px; line-height: 1.7; color: var(--ant-color-text-secondary, #737373); }
+}
+.knowledge-full-translation-start.ant-btn {
+  height: 44px;
+  margin-top: 24px;
+  padding: 0 24px;
+  border-radius: 10px;
+  border-color: var(--ant-color-primary-border, #adc6ff);
+  background: var(--ant-color-primary-bg, #f0f5ff);
+  color: var(--ant-color-primary, #1677ff);
+  font-size: 14px;
+  font-weight: 500;
+  box-shadow: none;
+  .anticon { font-size: 18px; }
+  &:not(:disabled):hover { border-color: var(--ant-color-primary, #1677ff); background: var(--ant-color-primary-bg-hover, #e6efff); }
+  &:focus-visible { outline: 2px solid var(--ant-color-primary, #1677ff); outline-offset: 3px; }
+}
