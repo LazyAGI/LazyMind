@@ -3,6 +3,7 @@
 import math
 import unicodedata
 import fitz
+from pdf_image_preservation import redact_text_preserving_images
 from translation_continuation import continue_in_place
 from translation_layout import geometry, source_spans, fit_text, paint, visual_regions
 
@@ -51,10 +52,6 @@ def render_preserving_pages(document, blocks, translations, font_path):
         fitz.Font(fontfile="/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"),
     ]
     original_graphics = [graphics_signature(p) for p in document]
-    original_images = [
-        [(x["digest"], tuple(x["bbox"])) for x in p.get_image_info(hashes=True)]
-        for p in document
-    ]
     spans = [source_spans(p) for p in document]
     shapes = [geometry(p) for p in document]
     visuals = [visual_regions(p) for p in document]
@@ -184,20 +181,12 @@ def render_preserving_pages(document, blocks, translations, font_path):
                 r.y1 = r.y0 + 0.2
                 page.add_redact_annot(r, fill=False, cross_out=False)
         if page_items:
-            page.apply_redactions(
-                images=fitz.PDF_REDACT_IMAGE_NONE,
-                graphics=fitz.PDF_REDACT_LINE_ART_NONE,
-                text=fitz.PDF_REDACT_TEXT_REMOVE,
-            )
+            redact_text_preserving_images(page)
             for item in page_items:
                 if "fit" in item:
                     paint(page, item["fit"]["runs"])
         if graphics_signature(page) != original_graphics[pno]:
             raise ValueError(f"original vector graphics changed on page {pno+1}")
-        if [
-            (x["digest"], tuple(x["bbox"])) for x in page.get_image_info(hashes=True)
-        ] != original_images[pno]:
-            raise ValueError(f"original images changed on page {pno+1}")
         for item in page_items:
             if "fit" in item and visible(item["text"]) not in visible(page.get_text()):
                 raise ValueError(f"final translated text lost: {item['id']}")

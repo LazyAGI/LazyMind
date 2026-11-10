@@ -24,7 +24,7 @@ export default function PdfTranslationNotice({ documentId, job, preparing, detai
   return <div role="status" className={`pdf-processing-card pdf-processing-card--translation is-${preparing ? "waiting_dependency" : job?.status.toLowerCase()}`}>
     <div>
       <strong>{preparing ? "正在准备翻译" : job?.status === "FAILED" ? "翻译失败" : job?.status === "CANCELLED" ? "翻译已取消" : "正在翻译文档"}</strong>
-      <span>{detail}</span>
+      <span>{terminal && !preparing ? (job?.status === "FAILED" ? "任务已停止，可重试" : "任务已停止") : detail}</span>
       {!preparing && isActivePdfJob(job) ? <Button type="link" danger size="small" onClick={onCancel}>取消</Button> : null}
       {!preparing && terminal ? <Button type="text" size="small" icon={<CloseOutlined />} aria-label="关闭翻译提示" onClick={() => {
         setDismissed(noticeId);
