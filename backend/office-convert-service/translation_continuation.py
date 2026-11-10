@@ -114,6 +114,25 @@ def continue_in_place(document, overflow, items, fonts, diagnostics=None):
                 if y0 > 0:
                     y0 = max(y0, min(r.y0 for r in occupied) - 2)
                 y1 = min(y1, max(r.y1 for r in occupied) + 2)
+                if current is not None and cursor + y1 - y0 > height + 0.01:
+                    # Only cut across whitespace spanning the entire page.
+                    # Project all columns, images and vector bounds onto y;
+                    # connected occupied intervals must move as one piece.
+                    padding = max(
+                        [2] + [float(d.get('width') or 0) / 2 + 0.5 for d in original.get_drawings()]
+                    )
+                    intervals = sorted((r.y0 - padding, r.y1 + padding) for r in occupied)
+                    end = intervals[0][1]
+                    split = None
+                    available_end = y0 + height - cursor
+                    for start, stop in intervals[1:]:
+                        if start > end and y0 + 0.01 < end <= available_end and end < y1:
+                            split = end
+                        end = max(end, stop)
+                    if split is not None:
+                        band(y0, split)
+                        band(split, y1)
+                        return
                 if current is None or cursor + y1 - y0 > height + 0.01:
                     new_page()
                     # An original full-height band must retain its scale.

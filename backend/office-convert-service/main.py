@@ -756,7 +756,7 @@ def extract_pdf_translation_layout(req: PDFTranslationLayoutRequest) -> dict[str
                                 groups[-1].append(span)
                         for group in groups:
                             prose = _normalize_pdf_block_text(''.join(span.get('text', '') for span in group))
-                            if not prose or not re.search(r'[A-Za-z]{2,}', prose):
+                            if sum(character.isalpha() for character in prose) < 2:
                                 continue
                             rect = fitz.Rect(group[0]['bbox'])
                             for span in group[1:]:

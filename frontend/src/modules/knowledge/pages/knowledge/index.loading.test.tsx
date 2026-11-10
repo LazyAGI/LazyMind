@@ -406,3 +406,36 @@ it('does not rerender the document viewer on background translation progress tic
   expect(screen.getByText('35%')).toBeInTheDocument();
   expect(surfaces.viewerRenders).toBe(renders);
 });
+
+it('resumes translation polling after cancellation fails and allows retry without duplicate requests',async()=>{
+ useDatasetPermissionStore.getState().setCurrentDataset({dataset_id:'library',scene:'general'} as Dataset);
+ let cancellationRequests=0;
+ let rejectCancellation: ((reason:Error)=>void)|undefined;
+ let progress=10;
+ axiosInstance.defaults.adapter=config=>{
+  if(config.url?.endsWith('/documents/paper'))return Promise.resolve({config,status:200,statusText:'OK',headers:{},data:{display_name:'original.pdf',file_url:'/original.pdf'}});
+  if(config.url?.includes('/pdf-render-jobs/progress')){
+   cancellationRequests++;
+   return new Promise((_resolve,reject)=>{rejectCancellation=reject;});
+  }
+  if(config.url?.endsWith('/pdf-capabilities'))return Promise.resolve({config,status:200,statusText:'OK',headers:{},data:{data:{is_pdf:true,reader_ready:true,pdf_kind:'native_text',translations:[],jobs:[{id:'progress',kind:'TRANSLATION_PDF',status:'RUNNING',stage:'TRANSLATING',progress}]}}});
+  return new Promise(()=>{});
+ };
+ renderDocument();
+ fireEvent.click(await screen.findByRole('button',{name:/^Translation$|^翻译$/}));
+ fireEvent.click(screen.getByText('全文翻译'));
+ const cancel=await screen.findByRole('button',{name:'取消'});
+ fireEvent.click(cancel);
+ await waitFor(()=>expect(cancellationRequests).toBe(1));
+ const renders=surfaces.viewerRenders;
+ fireEvent.click(cancel);
+ await act(async()=>{await Promise.resolve();});
+ expect(cancellationRequests).toBe(1);
+ await act(async()=>{rejectCancellation!(new Error('Cancellation service unavailable'));});
+ expect(await screen.findByText('Cancellation service unavailable')).toBeInTheDocument();
+ progress=47;
+ await waitFor(()=>expect(screen.getByText('47%')).toBeInTheDocument(),{timeout:3000});
+ expect(surfaces.viewerRenders).toBe(renders);
+ fireEvent.click(cancel);
+ await waitFor(()=>expect(cancellationRequests).toBe(2));
+});

@@ -49,6 +49,39 @@ class TranslationReflowTests(unittest.TestCase):
                 self.assertIn('为正', source[0].get_text())
                 self.assertEqual(pixels, source[0].get_pixmap(clip=symbol_box).samples)
 
+    def test_non_latin_inline_math_prose_remains_translatable(self):
+        for prefix, suffix in [('系数', '为正数'), ('係数', 'は正です')]:
+            with self.subTest(prefix=prefix), tempfile.TemporaryDirectory(
+                dir='/var/lib/lazymind/uploads'
+            ) as directory, fitz.open() as source:
+                root = Path(directory)
+                page = source.new_page()
+                page.insert_text((50, 100), prefix, fontname='china-s', fontsize=11)
+                page.insert_text((74, 100), 'a', fontname='symb', fontsize=11)
+                page.insert_text((84, 100), suffix, fontname='china-s', fontsize=11)
+                page.insert_text((132, 100), 'b', fontname='symb', fontsize=11)
+                page.insert_text((142, 100), 'x', fontsize=11)
+                page.insert_text((151, 100), 'c', fontname='symb', fontsize=11)
+                page.insert_text((161, 100), '42', fontsize=11)
+                source.save(root / 'source.pdf')
+                main.extract_pdf_translation_layout(main.PDFTranslationLayoutRequest(
+                    source_path=str(root / 'source.pdf'), output_path=str(root / 'layout.json'),
+                ))
+                blocks = json.loads((root / 'layout.json').read_text())['blocks']
+                self.assertEqual([block['text'] for block in blocks], [prefix, suffix])
+                translations = {block['id']: value for block, value in zip(blocks, ['Coefficient', 'is positive'])}
+                render_preserving_pages(source, blocks, translations, main.TRANSLATION_FONT_PATH)
+                text = source[0].get_text()
+                compact = ''.join(text.split())
+                self.assertIn('Coefficient', compact)
+                self.assertIn('ispositive', compact)
+                self.assertIn('x', text)
+                self.assertIn('42', text)
+                native_symbols = [span['text'].strip() for block in source[0].get_text('dict')['blocks']
+                                  for line in block.get('lines', []) for span in line['spans']
+                                  if span['font'] == 'Symbol']
+                self.assertEqual(native_symbols, ['a', 'b', 'c'])
+
     def test_extreme_translation_publishes_continuous_pdf(self):
         with tempfile.TemporaryDirectory(dir='/var/lib/lazymind/uploads') as directory:
             root = Path(directory)

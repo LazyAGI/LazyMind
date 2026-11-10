@@ -801,14 +801,21 @@ const KnowledgeDocumentContent = () => {
     const job = pdfTask?.kind === "TRANSLATION_PDF" && isActivePdfJob(pdfTask)
       ? pdfTask
       : latestActiveTranslationJob(pdfCapabilities?.jobs || []);
-    if (!job) return;
+    if (!job || cancelledPdfJobsRef.current.has(job.id)) return;
     cancelledPdfJobsRef.current.add(job.id);
-    await updatePdfRenderJob(knowledgeBaseId, knowledgeId, job.id, {
-      status: "CANCELLED",
-      stage: "CANCELLED",
-      progress: job.progress,
-      error_message: "用户已取消翻译",
-    });
+    try {
+      await updatePdfRenderJob(knowledgeBaseId, knowledgeId, job.id, {
+        status: "CANCELLED",
+        stage: "CANCELLED",
+        progress: job.progress,
+        error_message: "用户已取消翻译",
+      });
+    } catch (error) {
+      // A rejected cancellation must not suppress subsequent backend progress.
+      cancelledPdfJobsRef.current.delete(job.id);
+      message.error(error instanceof Error ? error.message : "取消翻译失败，请重试");
+      return;
+    }
     setPdfTask({ ...job, status: "CANCELLED", stage: "CANCELLED", error_message: "用户已取消翻译" });
     await refreshPdfCapabilities();
     message.success("翻译任务已取消");

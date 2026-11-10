@@ -183,6 +183,54 @@ class PreservationTests(unittest.TestCase):
             self.assertIn('TARGET', doc[link['page']].get_text())
             self.assertEqual(doc.get_toc(), [[1, 'Target', len(doc)]])
 
+    def test_continuation_packs_source_fragments_across_safe_whitespace(self):
+        with fitz.open() as doc:
+            page = doc.new_page(width=300, height=400)
+            for y, text in [(50, 'BEFORE'), (150, 'FIRST'), (350, 'LAST')]:
+                page.insert_text((30, y), text)
+            page.insert_link({'kind': fitz.LINK_GOTO, 'from': fitz.Rect(30, 138, 80, 154),
+                              'page': 0, 'to': fitz.Point(30, 350)})
+            doc.set_toc([[1, 'Last', 1, {'kind': fitz.LINK_GOTO, 'page': 0, 'to': fitz.Point(30, 350)}]])
+            item = dict(id='a', page=0, rect=fitz.Rect(30, 80, 200, 100),
+                        size=11, text='word ' * 100)
+            continue_in_place(doc, [item], [item], [fitz.Font('helv')])
+            self.assertEqual(len(doc), 1)
+            text = doc[0].get_text()
+            self.assertEqual(text.count('FIRST'), 1)
+            self.assertEqual(text.count('LAST'), 1)
+            self.assertLess(text.index('FIRST'), text.index('LAST'))
+            last_box = doc[0].search_for('LAST')[0]
+            link = doc[0].get_links()[0]
+            self.assertEqual(link['page'], 0)
+            self.assertTrue(last_box.contains(link['to']))
+            self.assertTrue(last_box.contains(doc.get_toc(simple=False)[0][3]['to']))
+
+    def test_continuation_does_not_split_whitespace_crossed_by_an_image(self):
+        with fitz.open() as doc:
+            page = doc.new_page(width=300, height=400)
+            for y, text in [(50, 'BEFORE'), (150, 'FIRST'), (350, 'LAST')]:
+                page.insert_text((30, y), text)
+            region = fitz.Rect(150, 120, 180, 370)
+            page.insert_image(region, filename=str(Path(__file__).parent / 'assets' / 'lazymind-logo.png'),
+                              keep_proportion=False)
+            image = page.get_image_info(hashes=True)[0]
+            first_top = page.search_for('FIRST')[0].y0
+            item = dict(id='a', page=0, rect=fitz.Rect(30, 80, 200, 100),
+                        size=11, text='word ' * 100)
+            continue_in_place(doc, [item], [item], [fitz.Font('helv')])
+            self.assertEqual(len(doc), 2)
+            self.assertNotIn('FIRST', doc[0].get_text())
+            shift = doc[1].search_for('FIRST')[0].y0 - first_top
+            moved = region + (0, shift, 0, shift)
+            self.assertTrue(doc[1].rect.contains(moved))
+            retained = next(info for info in doc[1].get_image_info(hashes=True)
+                            if fitz.Rect(info['bbox']).intersects(moved))
+            self.assertEqual(image['digest'], retained['digest'])
+            for before, after in zip(image['transform'][:4], retained['transform'][:4]):
+                self.assertAlmostEqual(before, after, places=4)
+            for before, after in zip(moved, retained['bbox']):
+                self.assertAlmostEqual(before, after, places=4)
+
     def test_missing_translation_preserves_source_and_reports_diagnostic(self):
         with fitz.open() as doc:
             doc.new_page().insert_text((50, 70), 'Source')
