@@ -601,6 +601,11 @@
       background: #fff2f0;
       color: #c53b32;
     }
+
+    &.is-warning {
+      background: #fffbe6;
+      color: #916900;
+    }
   }
 
   .agent-integration-methods {
@@ -702,6 +707,24 @@
   .agent-integration-installation-footer { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 12px; }
   .agent-integration-installation-image { display: block; width: 100%; padding: 0; border: 0; background: transparent; cursor: zoom-in; img { display: block; width: 100%; border-radius: 8px; } }
   .agent-integration-installation-note { margin: 10px 0 0; font-size: 12px; }
+}
+
+.agent-integration-dsh-guide .agent-integration-installation-image {
+  margin-top: 16px;
+}
+
+.agent-integration-dsh-guide .ant-steps .ant-steps-item-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+
+  .ant-steps-icon {
+    position: static;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    line-height: 1;
+  }
 }
 
 .external-capability-result-modal {

@@ -205,6 +205,8 @@ export function DocumentPublicationDialog({ artifactId, sourceSignature, provide
       const attempt = pending.current;
       const response = await WorkflowSessionApi().createPublicationGroup(attempt.id, attempt.body, { silentError: true });
       setState(response.data.data); pending.current = undefined; setUncertain(false);
+      focusResults.current = true;
+      setResultsOpen(true);
       onClose();
     } catch (failure) {
       const code = (failure as { response?: { data?: { data?: { code?: string } } } })?.response?.data?.data?.code;

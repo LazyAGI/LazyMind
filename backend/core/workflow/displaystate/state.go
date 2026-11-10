@@ -14,7 +14,10 @@ import (
 	"lazymind/core/workflow/graphengine"
 )
 
+const legacyUserStopSummary = "stopped by user"
+
 type View struct {
+	InputStepID    string `json:"input_step_id,omitempty"`
 	Status         string `json:"status"`
 	Reason         string `json:"reason"`
 	ApprovalStepID string `json:"approval_step_id"`
@@ -83,18 +86,15 @@ func readState(db *gorm.DB, session orm.WorkflowSession) (View, error) {
 		return current[i].CreatedAt.After(current[j].CreatedAt)
 	})
 	running := false
-	stoppedAt := time.Time{}
-	if session.LastStoppedAt != nil {
-		stoppedAt = *session.LastStoppedAt
-	}
 	for _, step := range current {
 		switch step.Status {
 		case "pending", "queued", "claimed", "running":
 			running = true
 		}
-		if step.TerminalCode == "WORKFLOW_STOPPED" && step.UpdatedAt.After(stoppedAt) {
-			stoppedAt = step.UpdatedAt
-		}
+	}
+	stoppedAt, err := UserStoppedAt(db, session.LastStoppedAt, current)
+	if err != nil {
+		return View{}, err
 	}
 	if session.Status == "pausing" {
 		return View{Status: "running", Reason: "pausing"}, nil
@@ -102,11 +102,19 @@ func readState(db *gorm.DB, session orm.WorkflowSession) (View, error) {
 	if running {
 		return View{Status: "running", Reason: "executing"}, nil
 	}
-	// A completed graph is not a completed workflow until its final review is
-	// accepted. A pause must not implicitly approve a successful human step.
+	paused := session.Status == "stopped" || (session.Status == "waiting" && !stoppedAt.IsZero())
+	for _, step := range current {
+		if step.CreatedAt.After(stoppedAt) && session.Status != "stopped" {
+			paused = false
+		}
+	}
+	// Pausing suspends a checkpoint; it never accepts or discards its review.
 	approval, err := pendingApproval(db, session, current)
 	if err != nil {
 		return View{}, err
+	}
+	if paused {
+		return View{Status: "paused", Reason: "user_stopped", ApprovalStepID: approval}, nil
 	}
 	if approval != "" {
 		return View{Status: "waiting", Reason: "approval_required", ApprovalStepID: approval}, nil
@@ -116,8 +124,8 @@ func readState(db *gorm.DB, session orm.WorkflowSession) (View, error) {
 		if err != nil {
 			return View{}, err
 		}
-		if pending {
-			return View{Status: "waiting_input", Reason: "user_input_required"}, nil
+		if pending != "" {
+			return View{Status: "waiting_input", Reason: "user_input_required", InputStepID: pending}, nil
 		}
 	}
 	if session.Status == "completed" {
@@ -130,15 +138,6 @@ func readState(db *gorm.DB, session orm.WorkflowSession) (View, error) {
 	}
 	if session.Status == "failed" {
 		return View{Status: "failed", Reason: "execution_failed"}, nil
-	}
-	paused := session.Status == "stopped" || !stoppedAt.IsZero()
-	for _, step := range current {
-		if step.CreatedAt.After(stoppedAt) && session.Status != "stopped" {
-			paused = false
-		}
-	}
-	if paused {
-		return View{Status: "paused", Reason: "user_stopped"}, nil
 	}
 	changed, err := inputsChanged(db, session, steps, current)
 	if err != nil {
@@ -183,52 +182,103 @@ func readState(db *gorm.DB, session orm.WorkflowSession) (View, error) {
 	return View{Status: "failed", Reason: "no_advance"}, nil
 }
 
+// UserStoppedAt reads current and historical user-stop evidence for both the
+// display projection and Task Center's conversation lifecycle checks.
+func UserStoppedAt(db *gorm.DB, lastStoppedAt *time.Time, current []orm.WorkflowSessionStep) (time.Time, error) {
+	stoppedAt := time.Time{}
+	if lastStoppedAt != nil {
+		stoppedAt = *lastStoppedAt
+	}
+	for _, step := range current {
+		if step.TerminalCode == "WORKFLOW_STOPPED" && step.UpdatedAt.After(stoppedAt) {
+			stoppedAt = step.UpdatedAt
+		}
+	}
+	legacy, err := legacyUserStoppedAt(db, current)
+	if legacy.After(stoppedAt) {
+		stoppedAt = legacy
+	}
+	return stoppedAt, err
+}
+
+// Older native executions recorded a user stop on the linked subtask before
+// WorkflowSessionStep.TerminalCode and WorkflowSession.LastStoppedAt existed.
+// Recover only that exact durable stop reason; other interruptions never
+// establish a user pause.
+func legacyUserStoppedAt(db *gorm.DB, current []orm.WorkflowSessionStep) (time.Time, error) {
+	stepByTask := map[string]orm.WorkflowSessionStep{}
+	ids := make([]string, 0)
+	for _, step := range current {
+		if step.Status != "interrupted" || step.TerminalCode != "" || step.TaskID == "" {
+			continue
+		}
+		stepByTask[step.TaskID] = step
+		ids = append(ids, step.TaskID)
+	}
+	if len(ids) == 0 {
+		return time.Time{}, nil
+	}
+	var tasks []struct{ ID string }
+	if err := db.Model(&orm.SubAgentTask{}).Select("id").
+		Where("id IN ? AND status = ? AND summary = ?", ids, "interrupted", legacyUserStopSummary).
+		Find(&tasks).Error; err != nil {
+		return time.Time{}, err
+	}
+	stoppedAt := time.Time{}
+	for _, task := range tasks {
+		if step := stepByTask[task.ID]; step.UpdatedAt.After(stoppedAt) {
+			stoppedAt = step.UpdatedAt
+		}
+	}
+	return stoppedAt, nil
+}
+
 // A checkpoint is waiting only after its producer finished and the host persisted
 // a question-card token. Answers clear this state without reopening the producer.
-func pendingInput(db *gorm.DB, session orm.WorkflowSession, latest map[string]orm.WorkflowSessionStep) (bool, error) {
+func pendingInput(db *gorm.DB, session orm.WorkflowSession, latest map[string]orm.WorkflowSessionStep) (string, error) {
 	if session.WorkflowRevisionID == "" || session.ControllerHost != "lazymind" {
-		return false, nil
+		return "", nil
 	}
 	var revision orm.WorkflowRevision
 	if err := db.Where("id = ?", session.WorkflowRevisionID).First(&revision).Error; err != nil {
-		return false, err
+		return "", err
 	}
 	var graph graphengine.CompiledStateGraph
 	if err := json.Unmarshal(revision.CompiledGraph, &graph); err != nil {
-		return false, err
+		return "", err
 	}
 	checkpoint := graph.Runtime.InputCheckpoint
 	if checkpoint == nil || latest[checkpoint.AfterStep].Status != "succeeded" {
-		return false, nil
+		return "", nil
 	}
 	for _, id := range checkpoint.BeforeSteps {
 		if step, ok := latest[id]; ok && !step.CreatedAt.Before(latest[checkpoint.AfterStep].CreatedAt) {
-			return false, nil
+			return "", nil
 		}
 	}
 	var rows []orm.WorkflowSlotRevision
 	if err := db.Where("session_id = ? AND slot_id = ? AND selected = ? AND validity <> ?", session.ID, checkpoint.Slot, true, "stale").Order("revision DESC").Limit(1).Find(&rows).Error; err != nil {
-		return false, err
+		return "", err
 	}
 	if len(rows) == 0 {
-		return false, nil
+		return "", nil
 	}
 	raw := rows[0].ContentSnapshot
 	if rows[0].HumanArtifactID != nil {
 		var artifact orm.WorkflowHumanArtifact
 		if err := db.Where("id = ?", *rows[0].HumanArtifactID).First(&artifact).Error; err != nil {
-			return false, err
+			return "", err
 		}
 		raw = artifact.Value
 	}
 	if len(raw) == 0 {
-		return false, nil
+		return "", nil
 	}
 	var envelope struct {
 		Data json.RawMessage `json:"data"`
 	}
 	if err := json.Unmarshal(raw, &envelope); err != nil {
-		return false, err
+		return "", err
 	}
 	if len(envelope.Data) > 0 {
 		raw = envelope.Data
@@ -239,9 +289,12 @@ func pendingInput(db *gorm.DB, session orm.WorkflowSession, latest map[string]or
 		Questions []json.RawMessage `json:"questions"`
 	}
 	if err := json.Unmarshal(raw, &value); err != nil {
-		return false, err
+		return "", err
 	}
-	return value.Token != "" && strings.TrimSpace(value.Answer) == "" && len(value.Questions) > 0, nil
+	if value.Token != "" && strings.TrimSpace(value.Answer) == "" && len(value.Questions) > 0 {
+		return checkpoint.AfterStep, nil
+	}
+	return "", nil
 }
 
 func pendingApproval(db *gorm.DB, session orm.WorkflowSession, current []orm.WorkflowSessionStep) (string, error) {

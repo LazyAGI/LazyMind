@@ -279,6 +279,21 @@ class _PPTGenerationLimit(TimeoutError):
         self.code = code
 
 
+def _ppt_cancel_check():
+    """Keep nested page/model workers on the originating task's cancel queue."""
+    import lazyllm
+    from lazymind.chat.engine.agent_runtime.cancellation import make_cancel_stop_condition
+
+    sid = lazyllm.globals._sid
+    check = make_cancel_stop_condition()
+
+    def check_cancel():
+        with lazyllm.globals._bind_sid(sid):
+            check(None)
+
+    return check_cancel
+
+
 class _PPTGenerationBudget:
     """One batch budget shared by initial requests, repairs and page retries."""
     def __init__(self, pages: int):
@@ -290,8 +305,10 @@ class _PPTGenerationBudget:
         self.calls = 0
         self.failures = 0
         self.stopped: str | None = None
+        self._check_cancel = _ppt_cancel_check()
 
     def check(self, page_deadline: float | None = None) -> None:
+        self._check_cancel()
         if self.stopped:
             raise _PPTGenerationLimit(self.stopped)
         now = time.monotonic()
@@ -5260,6 +5277,7 @@ def _batch_page_html_publish_progressive(
     }
 
     def _run_one(pno: int) -> tuple[int, dict]:
+        budget._check_cancel()
         brief = briefs.get(pno)
         output = deck / 'pages' / f'page_{pno:03d}.html'
         input_hash = _page_generation_input_hash(deck, brief)
@@ -5533,9 +5551,11 @@ def _agent_llm_call(
     # adapter. The adapter previously discarded it, so AutoModel fell back to
     # the provider configuration's 120-second timeout. Page HTML commonly
     # needs longer than that; pass the effective timeout into the actual call.
-    call_options: dict[str, Any] = {}
+    from lazyllm.module.llms.onlinemodule.base import ModelCallControl
+    call_options: dict[str, Any] = {
+        'call_control': ModelCallControl(cancel_check=_ppt_cancel_check()),
+    }
     if _budget is not None:
-        from lazyllm.module.llms.onlinemodule.base import ModelCallControl
         deadline = min(_page_deadline or time.monotonic() + _budget.page_seconds,
                        _budget.started + _budget.seconds)
         _budget.check(deadline)

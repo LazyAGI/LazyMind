@@ -3,15 +3,26 @@ package assistantbridge
 import (
 	"encoding/json"
 	"errors"
+	"log"
 	"net/http"
 	"net/url"
 	"strings"
 
 	"lazymind/agentconnector/internal/coreapi"
+	"lazymind/agentconnector/internal/credentials"
 	"lazymind/agentconnector/internal/workflowhost"
 )
 
 func workflowHostError(w http.ResponseWriter, err error) {
+	if credentials.IsAuthenticationRequired(err) {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"code": "HOST_AUTH_REQUIRED", "error": "Sign in to LazyMind to restore the workflow connection"})
+		return
+	}
+	var pairingError *workflowhost.PairingError
+	if errors.As(err, &pairingError) {
+		writeJSON(w, http.StatusForbidden, map[string]string{"code": pairingError.Code, "error": pairingError.Error()})
+		return
+	}
 	var apiError *coreapi.Error
 	if errors.As(err, &apiError) {
 		writeJSON(w, apiError.StatusCode, map[string]string{"code": apiError.Code, "error": apiError.Message})
@@ -38,7 +49,7 @@ func (s *Server) workflowHost(w http.ResponseWriter, r *http.Request) (workflowh
 	token := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
 	pair, err := workflowhost.Verify(s.store.Directory(), r.Header.Get("X-LazyMind-Connector-Id"), token, scope)
 	if err != nil {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": err.Error()})
+		workflowHostError(w, err)
 		return pair, nil, false
 	}
 	api, err := coreapi.New(s.store)
@@ -89,8 +100,32 @@ func (s *Server) handleWorkflowHostActions(w http.ResponseWriter, r *http.Reques
 	if after := r.URL.Query().Get("after"); after != "" {
 		query.Set("after", after)
 	}
-	relayWorkflowHost(w, r, api, http.MethodGet, "/workflow-host-actions?"+query.Encode(), nil,
+	var result map[string]any
+	err := api.DoJSONHeaders(r.Context(), http.MethodGet, "/workflow-host-actions?"+query.Encode(), nil, &result,
 		http.Header{"X-Workflow-Host-Credential": {pair.Token}})
+	issue := ""
+	if err != nil {
+		issue = "lazymind_unavailable"
+		var apiError *coreapi.Error
+		if credentials.IsAuthenticationRequired(err) || errors.As(err, &apiError) && apiError.StatusCode == http.StatusUnauthorized {
+			issue = "lazymind_auth_required"
+		}
+	}
+	if _, valid := result["actions"].([]any); err == nil && !valid {
+		issue = "lazymind_unavailable"
+	}
+	// A dispatcher may run before its MCP client has registered any tools.
+	// Only the current plugin's explicit runtime observation establishes MCP
+	// readiness; older plugins without the header remain visibly unavailable.
+	mcpReady := r.Header.Get("X-LazyMind-MCP-Ready") == "1"
+	if recordErr := workflowhost.RecordRuntimeStatus(s.store.Directory(), pair, issue, mcpReady); recordErr != nil {
+		log.Printf("DSH dispatcher status could not be recorded")
+	}
+	if err != nil {
+		workflowHostError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
 }
 
 func (s *Server) handleWorkflowHostAction(w http.ResponseWriter, r *http.Request) {

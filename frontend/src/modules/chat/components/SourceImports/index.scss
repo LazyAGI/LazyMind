@@ -1,4 +1,10 @@
 .source-import-actions { display: flex; justify-content: flex-end; gap: 8px; padding-top: 12px; }
+.source-import-actions--inline {
+  justify-content: space-between;
+  flex-wrap: wrap;
+  margin-top: 12px;
+  border-top: 1px solid var(--border-color, #edf0f5);
+}
 .source-import-current-state { display: block; margin-top: 12px; color: #64748b; }
 .source-selection-bar, .source-selection-footer { display: flex; flex-shrink: 0; align-items: center; justify-content: space-between; gap: 8px; padding: 10px 16px; border-bottom: 1px solid var(--border-color, #edf0f5); }
 .source-selection-footer { border-top: 1px solid var(--border-color, #edf0f5); border-bottom: 0; flex-wrap: wrap; padding: 8px 12px; }

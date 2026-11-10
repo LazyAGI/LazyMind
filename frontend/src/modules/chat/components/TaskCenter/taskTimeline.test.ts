@@ -69,6 +69,26 @@ function step(
 }
 
 describe("buildOrdinaryTaskTimeline", () => {
+  it("projects paused workflow attempts without counting pauses as failures or changing another session", () => {
+    const stopped = { ...step("stopped", "search", 1, "effective", 0, 10), status: "interrupted" };
+    const paused = buildOrdinaryTaskTimeline([], [stopped], BASE_TIME, undefined, "session-1");
+    expect(paused.items[0].state).toBe("paused");
+    expect(paused.failedCount).toBe(0);
+
+    const unrelated = buildOrdinaryTaskTimeline([], [stopped], BASE_TIME, undefined, "another-session");
+    expect(unrelated.items[0].state).toBe("failed");
+    expect(unrelated.failedCount).toBe(1);
+  });
+
+  it.each(["effective", "stale"] as const)("excludes an interrupted %s old attempt from the current state and failure count", validity => {
+    const previous = { ...step("previous", "search", 1, validity, 0, 10), status: "interrupted" };
+    const current = { ...step("current", "search", 2, "effective", 11, 20), status: "running" };
+    const timeline = buildOrdinaryTaskTimeline([], [previous, current], BASE_TIME);
+    expect(timeline.items).toHaveLength(1);
+    expect(timeline.items[0].state).toBe("running");
+    expect(timeline.failedCount).toBe(0);
+  });
+
   it("collapses workflow retries into one effective step", () => {
     const tasks = [
       task("analyze", 1, "succeeded", 0, 10),

@@ -14,31 +14,13 @@ import (
 // Desktop owns its profile while the application is open. The bundled CLI
 // checks package-writer locks, but does not itself reject a running Desktop.
 func DSHDesktopRunning(ctx context.Context, cli string) (bool, error) {
-	if runtime.GOOS != "darwin" || cli == "" {
-		return false, nil
-	}
-	contents := filepath.Dir(filepath.Dir(filepath.Dir(filepath.Dir(filepath.Dir(cli)))))
-	entries, err := os.ReadDir(filepath.Join(contents, "MacOS"))
-	if errors.Is(err, os.ErrNotExist) {
-		return false, nil
-	}
-	if err != nil {
+	if err := ctx.Err(); err != nil {
 		return false, err
 	}
-	output, err := Run(ctx, "/bin/ps", "-axo", "command=")
-	if err != nil {
-		return false, err
+	if cli == "" {
+		return false, errors.New("DSH Desktop bundled CLI is unavailable")
 	}
-	for _, entry := range entries {
-		binary := filepath.Join(contents, "MacOS", entry.Name())
-		for _, line := range strings.Split(output, "\n") {
-			line = strings.TrimSpace(line)
-			if (line == binary || strings.HasPrefix(line, binary+" ")) && !strings.Contains(line, "--expose-internals") {
-				return true, nil
-			}
-		}
-	}
-	return false, nil
+	return platformDSHDesktopRunning(ctx, cli)
 }
 
 // FindDSHDesktopCLI resolves the launcher shipped by Desktop, never a similarly

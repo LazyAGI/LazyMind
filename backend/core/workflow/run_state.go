@@ -14,7 +14,12 @@ import (
 func acceptRunControl(ctx context.Context, tx *gorm.DB, session *orm.WorkflowSession, kind string, fields map[string]any, expectedVersion *int64) error {
 	approvalPending, completed := false, false
 	if kind == "approve" {
-		projected, err := projectSession(ctx, tx, session)
+		// The approval was admitted and its checkpoint persisted by the adapter.
+		// Re-project the released run, so a stale waiting hand-off cannot mask
+		// graph completion after the final review is accepted.
+		admitted := *session
+		admitted.Status = runstate.Active
+		projected, err := projectSession(ctx, tx, &admitted)
 		if err != nil {
 			return err
 		}

@@ -13,7 +13,6 @@ import (
 
 	"lazymind/agentconnector/internal/agentexec"
 	"lazymind/agentconnector/internal/codexplugin"
-	"lazymind/agentconnector/internal/integrationstate"
 	"lazymind/agentconnector/internal/localfile"
 )
 
@@ -37,9 +36,6 @@ var controlProbe = probeControl
 // CheckConnection is an execution admission check, not a startup action. It never
 // launches or restarts an application and does not trust an old heartbeat file.
 func CheckConnection(ctx context.Context, home string) error {
-	if !integrationstate.Allowed(home, "codex") {
-		return connectionIssue("CODEX_INTEGRATION_DISABLED", "enable the Codex connection in LazyMind before executing a Workflow", false)
-	}
 	bounded, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 	switch StartupHealth(bounded, home) {

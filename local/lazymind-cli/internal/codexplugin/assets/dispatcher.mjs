@@ -17,6 +17,16 @@ var BridgeError = class extends Error {
 		this.status = status;
 	}
 };
+function isHostAuthorizationError(error) {
+	return error instanceof BridgeError && (error.status === 401 || [
+		"HOST_PAIRING_MISSING",
+		"HOST_PAIRING_DISABLED",
+		"HOST_ACCOUNT_MISMATCH",
+		"HOST_CREDENTIAL_MISMATCH",
+		"HOST_PAIRING_INVALID",
+		"HOST_PAIRING_UNREADABLE"
+	].includes(error.code));
+}
 var HostBridge = class {
 	base;
 	constructor(url, pairing) {
@@ -40,7 +50,11 @@ var HostBridge = class {
 			},
 			...body === void 0 ? {} : { body: JSON.stringify(body) }
 		});
-		const value = await response.json();
+		const decoded = await response.json().catch(() => {
+			if (!response.ok) return {};
+			throw new Error("Invalid Workflow Bridge response");
+		});
+		const value = decoded && typeof decoded === "object" && !Array.isArray(decoded) ? decoded : {};
 		if (!response.ok) throw new BridgeError(typeof value.code === "string" ? value.code : "BRIDGE_ERROR", typeof value.error === "string" ? value.error : "Workflow Bridge request failed", response.status);
 		return value;
 	}
@@ -124,7 +138,9 @@ function createDispatcher(runtime, host, bridge, instanceId, signal) {
 		await bridge.settle(action.id, instanceId, claim.dispatch_token, "accepted", seq, "", signal);
 	}
 	async function poll() {
+		let failures = 0, lastWarning = "";
 		while (!signal.aborted) {
+			let retryMs = 1e3;
 			try {
 				let after = "";
 				do {
@@ -132,15 +148,25 @@ function createDispatcher(runtime, host, bridge, instanceId, signal) {
 					for (const action of [...page.actions].sort((a, b) => Number(b.kind === "cancel") - Number(a.kind === "cancel"))) try {
 						await deliver(action);
 					} catch (error) {
-						if (!(error instanceof BridgeError && ["DELIVERY_PENDING", "ACTION_CONSUMED"].includes(error.code)) && !signal.aborted) runtime.warn(`lazymind-workflow: delivery pending: ${String(error)}`);
+						if (isHostAuthorizationError(error)) throw error;
+						if (!(error instanceof BridgeError && ["DELIVERY_PENDING", "ACTION_CONSUMED"].includes(error.code)) && !signal.aborted) runtime.warn("lazymind-workflow: delivery pending; checking the previous receipt before retrying");
 					}
 					after = page.next_page_token ?? "";
 				} while (after && !signal.aborted);
+				failures = 0;
+				lastWarning = "";
 			} catch (error) {
-				if (!signal.aborted) runtime.warn(`lazymind-workflow: reconnecting Bridge: ${String(error)}`);
+				if (signal.aborted) break;
+				const needsAuthorization = isHostAuthorizationError(error);
+				retryMs = needsAuthorization ? 3e4 : Math.min(3e4, 1e3 * 2 ** Math.min(failures, 5));
+				failures++;
+				const code = error instanceof BridgeError && /^[A-Z][A-Z0-9_]{0,63}$/.test(error.code) ? error.code : "BRIDGE_UNAVAILABLE";
+				const warning = needsAuthorization ? `lazymind-workflow: authorization required (${code}); sign in or repair the connection in LazyMind` : `lazymind-workflow: reconnecting Bridge (${code})`;
+				if (warning !== lastWarning) runtime.warn(warning);
+				lastWarning = warning;
 			}
 			try {
-				await delay(1e3, signal);
+				await delay(retryMs, signal);
 			} catch {
 				break;
 			}

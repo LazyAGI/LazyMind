@@ -454,12 +454,13 @@ func handlePaperImportJob(ctx context.Context, job asyncjob.Job, reporter asyncj
 	return handleImportBatchJob(ctx, job, reporter, batch, payload.ItemIDs)
 }
 
-func findEquivalentPresentWork(ctx context.Context, workID, datasetID string, pdfOnly bool, version ...string) (orm.AcademicWork, orm.AcademicWorkDocument, error) {
+func findEquivalentPresentWork(ctx context.Context, db *gorm.DB, workID, datasetID string, pdfOnly bool, version ...string) (orm.AcademicWork, orm.AcademicWorkDocument, error) {
+	db = db.WithContext(ctx)
 	var source orm.AcademicWork
 	if workID == "" {
 		return orm.AcademicWork{}, orm.AcademicWorkDocument{}, gorm.ErrRecordNotFound
 	}
-	if err := store.DB().WithContext(ctx).Where("id = ?", workID).Take(&source).Error; err != nil {
+	if err := db.Where("id = ?", workID).Take(&source).Error; err != nil {
 		return orm.AcademicWork{}, orm.AcademicWorkDocument{}, err
 	}
 	conditions := []string{"aw.id = ?"}
@@ -478,7 +479,7 @@ func findEquivalentPresentWork(ctx context.Context, workID, datasetID string, pd
 		DocumentID string
 		Ext        json.RawMessage
 	}
-	query := activeSourceDocuments(store.DB().WithContext(ctx), datasetID).
+	query := activeSourceDocuments(db, datasetID).
 		Select("aw.id AS work_id, awd.document_id, d.ext").
 		Joins("JOIN academic_work_documents awd ON awd.document_id = d.id AND awd.dataset_id = d.dataset_id").
 		Joins("JOIN academic_works aw ON aw.id = awd.academic_work_id").
@@ -519,10 +520,10 @@ func findEquivalentPresentWork(ctx context.Context, workID, datasetID string, pd
 	}
 	var work orm.AcademicWork
 	var document orm.AcademicWorkDocument
-	if err := store.DB().WithContext(ctx).Where("id = ?", workIDFound).Take(&work).Error; err != nil {
+	if err := db.Where("id = ?", workIDFound).Take(&work).Error; err != nil {
 		return orm.AcademicWork{}, orm.AcademicWorkDocument{}, err
 	}
-	if err := store.DB().WithContext(ctx).Where("academic_work_id = ? AND dataset_id = ? AND document_id = ?", workIDFound, datasetID, documentIDFound).Take(&document).Error; err != nil {
+	if err := db.Where("academic_work_id = ? AND dataset_id = ? AND document_id = ?", workIDFound, datasetID, documentIDFound).Take(&document).Error; err != nil {
 		return orm.AcademicWork{}, orm.AcademicWorkDocument{}, err
 	}
 	return work, document, nil

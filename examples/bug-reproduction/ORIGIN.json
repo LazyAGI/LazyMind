@@ -1,0 +1,19 @@
+{
+  "license": "MIT",
+  "variant": "original Skill with repository and original-author licenses",
+  "endorsement": "No upstream endorsement implied.",
+  "files": {
+    "SKILL.md": {
+      "url": "https://raw.githubusercontent.com/github/awesome-copilot/61fa1fa8fcc63d6dbd2f07a75aeb8e214df5acfb/skills/bug-reproduction-brief/SKILL.md",
+      "sha256": "522ad2948c498f6dcee6d48773387058d2cba3c45ba9e093ed35210601d141b6"
+    },
+    "LICENSE": {
+      "url": "https://raw.githubusercontent.com/github/awesome-copilot/61fa1fa8fcc63d6dbd2f07a75aeb8e214df5acfb/LICENSE",
+      "sha256": "e32449d23085399adc1222f7a17408b730550258e51627c153cb108ca9955823"
+    },
+    "UPSTREAM-LICENSE": {
+      "url": "https://raw.githubusercontent.com/skyestrela/ai-agent-skill-preview/c8074b416a216ec6e47a2f34135ae3827c32b02b/LICENSE",
+      "sha256": "4208c0d7aa4c14bf2566046f81d36262610f8bd1f482c74fff4d106bad075e87"
+    }
+  }
+}

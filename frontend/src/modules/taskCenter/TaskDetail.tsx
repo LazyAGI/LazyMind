@@ -2,17 +2,19 @@ import NotificationHistory from '@/modules/notifications/NotificationHistory';
 import ScheduleNotificationPanel from '@/modules/notifications/ScheduleNotificationPanel';
 import '@/modules/notifications/index.scss';
 import ScheduleRunHistory from './ScheduleRunHistory';
+import { StatusTag } from './StatusTag';
 import { describeCron } from './scheduleTime';
 import { useEffect, useMemo, useState } from 'react';
 import { WORKFLOW_TASKS_CHANGED } from './events';
-import { Alert, Button, Drawer, Dropdown, Empty, Tag, Tooltip } from 'antd';
+import { Alert, Button, Drawer, Dropdown, Empty, Spin, Tooltip } from 'antd';
 import type { MenuProps } from 'antd';
-import { CheckCircleFilled, CloseCircleFilled, CloseOutlined, DeleteOutlined, EllipsisOutlined, FolderOutlined, SyncOutlined } from '@ant-design/icons';
+import { CheckOutlined, CloseCircleFilled, CloseOutlined, DeleteOutlined, EllipsisOutlined, FolderOutlined, PauseOutlined, SyncOutlined } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 import type { Task } from './api';
 import { getTask, getTaskGoal } from './api';
 import { CONVERSATION_TITLE_CHANGED_EVENT, type ConversationTitleChangedDetail } from '@/modules/chat/constants/chat';
-import { axiosInstance, BASE_URL } from '@/components/request';
+import { isTaskStepDone as isDone, useTaskSteps, type TaskStep as PlannedStep } from './useTaskSteps';
+import { workflowTaskDisplayStatus } from '@/modules/chat/utils/workflowTaskStatus';
 
 interface TaskDetailProps {
   task: Task | null;
@@ -23,10 +25,7 @@ interface TaskDetailProps {
   onDelete?: (task: Task) => Promise<void> | void;
 }
 
-const isDone = (status: string) => ['completed', 'succeeded'].includes(status);
 const containsChinese = (value: string) => /[\u3400-\u4dbf\u4e00-\u9fff]/.test(value);
-
-type PlannedStep = { step_id: string; title?: string; status: string };
 
 export default function TaskDetail({ task: initialTask, onClose, onOpenConversation, onOpenGraph, onArchive, onDelete }: TaskDetailProps) {
   const { t } = useTranslation();
@@ -83,9 +82,9 @@ export default function TaskDetail({ task: initialTask, onClose, onOpenConversat
       try {
         const current = await getTask(selectedID!);
         if (!active) return;
-        setDetail(current);
+        setDetail(previous => sameTaskSnapshot(previous, current) ? previous : current);
         setLoadFailed(false);
-        terminal = ['succeeded', 'completed', 'failed', 'canceled', 'skipped'].includes(current.status);
+        terminal = ['succeeded', 'completed', 'failed', 'interrupted', 'canceled', 'skipped'].includes(current.status);
       } catch {
         if (!active) return;
         setLoadFailed(true);
@@ -95,29 +94,9 @@ export default function TaskDetail({ task: initialTask, onClose, onOpenConversat
     void refresh();
     return () => { active = false; clearTimeout(timer); };
   }, [selectedID, retryVersion]);
-  const [plannedSteps, setPlannedSteps] = useState<PlannedStep[] | null>(null);
-  useEffect(() => {
-    setPlannedSteps(null);
-    if (!task?.workflow_session_id) return;
-    let active = true;
-    axiosInstance.get(`${BASE_URL}/api/core/workflow-sessions/${encodeURIComponent(task.workflow_session_id)}/projection`, { silentError: true } as never)
-      .then((response) => {
-        if (!active) return;
-        const payload = response.data?.data ?? response.data;
-        const order: string[] = payload?.graph?.static_order ?? Object.keys(payload?.graph?.nodes ?? {});
-        const nodes = payload?.projection?.nodes ?? {};
-        setPlannedSteps(order.filter((id) => id !== '__start__' && id !== '__end__').map((id) => ({
-          step_id: payload?.graph?.nodes?.[id]?.label || id,
-          // Branch selection explains an unexecuted node; preserve actual execution results.
-          status: nodes[id]?.execution === 'none' && ['pruned', 'bypassed'].includes(nodes[id]?.branch)
-            ? nodes[id].branch
-            : nodes[id]?.execution || 'pending',
-        })));
-      })
-      .catch(() => { if (active) setPlannedSteps(null); });
-    return () => { active = false; };
-  }, [task]);
-  const steps = useMemo(() => plannedSteps?.length ? plannedSteps : task?.steps ?? [], [plannedSteps, task]);
+  const { steps, loading: stepsLoading, failed: stepsFailed } = useTaskSteps(task, retryVersion);
+  const stepTone = taskStepTone(task?.status);
+  const focusedStepIndex = useMemo(() => resolveFocusedStepIndex(steps, stepTone), [steps, stepTone]);
   const taskName = task?.conversation_title || task?.title || t('taskCenter.noTitle');
   const queuedSchedule = Boolean(task?.schedule_id && task.status === 'pending');
   const actions: NonNullable<MenuProps['items']> = task ? [
@@ -161,7 +140,7 @@ export default function TaskDetail({ task: initialTask, onClose, onOpenConversat
     >
       {task ? (
         <div className='task-detail-content'>
-          {loadFailed ? <Alert type='warning' showIcon message={t('taskCenter.loadError')} action={<Button size='small' onClick={() => setRetryVersion((value) => value + 1)}>{t('common.retry')}</Button>} /> : null}
+          {loadFailed || stepsFailed ? <Alert type='warning' showIcon message={t('taskCenter.loadError')} action={<Button size='small' onClick={() => setRetryVersion((value) => value + 1)}>{t('common.retry')}</Button>} /> : null}
           {!task.schedule_id && <div className='task-detail-status' aria-live='polite'>
             <StatusTag status={task.status} onClick={task.workflow_session_id && onOpenGraph ? () => onOpenGraph(task.workflow_session_id!) : undefined} />
           </div>}
@@ -196,14 +175,18 @@ export default function TaskDetail({ task: initialTask, onClose, onOpenConversat
             <h3>{t('taskCenter.executionSteps')}</h3>
             {steps.length ? (
               <div className='task-step-list'>
-                {steps.map((step, index) => (
-                  <div className={`task-step ${isDone(step.status) ? 'is-done' : step.status === 'running' ? 'is-running' : step.status === 'failed' ? 'is-failed' : ''}`} key={`${step.step_id}-${index}`}>
-                    <span className='task-step-dot'>{isDone(step.status) ? <CheckCircleFilled /> : step.status === 'running' ? <SyncOutlined spin /> : index + 1}</span>
-                    <div><strong>{taskStepLabel(step.title || step.step_id, index, t)}</strong><small>{taskStatusLabel(step.status, t)}</small></div>
-                  </div>
-                ))}
+                {steps.map((step, index) => {
+                  const focused = index === focusedStepIndex;
+                  const status = workflowTaskDisplayStatus(step.status, task.status);
+                  const focusTone = status === 'waiting_input' ? 'input' : status === 'failed' ? 'failed' : stepTone;
+                  const current = focused && !['completed', 'neutral'].includes(stepTone);
+                  return <div className={`task-step${isDone(status) ? ' is-done' : status === 'running' ? ' is-running' : status === 'failed' ? ' is-failed' : status === 'waiting_input' ? ' step-tone-input' : ['skipped', 'pruned', 'bypassed'].includes(status) ? ' step-tone-skipped' : ['canceled', 'cancelled'].includes(status) ? ' step-tone-canceled' : ''}${focused ? ` is-focus step-tone-${focusTone}` : ''}${current ? ' is-current' : ''}`} key={`${step.step_id}-${index}`}>
+                    <span className='task-step-dot'>{isDone(status) ? <CheckOutlined /> : focused && focusTone === 'paused' ? <PauseOutlined /> : status === 'running' ? <SyncOutlined spin /> : index + 1}</span>
+                    <div className='task-step-copy'><span className='task-step-title'><strong>{taskStepLabel(step.title, step.step_id, index, t)}</strong>{current ? <span className='task-step-current-badge'>{t('taskCenter.currentStep')}</span> : null}</span><small>{taskStatusLabel(step.status, t, stepTone)}</small></div>
+                  </div>;
+                })}
               </div>
-            ) : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={task.waiting_reason || t('taskCenter.noSteps')} />}
+            ) : stepsLoading ? <Spin size='small' /> : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={task.waiting_reason || t('taskCenter.noSteps')} />}
           </section>}
         </div>
       ) : null}
@@ -211,15 +194,50 @@ export default function TaskDetail({ task: initialTask, onClose, onOpenConversat
   );
 }
 
-export function StatusTag({ status, onClick }: { status: string; onClick?: () => void }) {
-  const { t } = useTranslation();
-  const color = isDone(status) ? 'success' : status === 'failed' ? 'error' : status === 'running' ? 'processing' : 'warning';
-  const key = status === 'succeeded' ? 'Completed' : status === 'waiting_inputs' ? 'WaitingInputs' : `${status.charAt(0).toUpperCase()}${status.slice(1)}`;
-  return <Tag className={onClick ? 'clickable-status' : undefined} color={color} onClick={(event: React.MouseEvent<HTMLElement>) => { event.stopPropagation(); onClick?.(); }}>{t(`taskCenter.status${key}`, { defaultValue: status })}</Tag>;
-}
-
 export function formatDate(value?: string) {
   return value ? new Date(value).toLocaleString() : '—';
+}
+
+function sameTaskSnapshot(previous: Task | null, current: Task) {
+  return previous?.id === current.id
+    && previous.updated_at === current.updated_at
+    && previous.status === current.status
+    && previous.conversation_title === current.conversation_title
+    && previous.title === current.title
+    && previous.waiting_reason === current.waiting_reason
+    && previous.workflow_session_id === current.workflow_session_id;
+}
+
+type TaskStepTone = 'attention' | 'running' | 'paused' | 'failed' | 'completed' | 'canceled' | 'neutral';
+
+function taskStepTone(taskStatus?: string): TaskStepTone {
+  if (['pending', 'waiting', 'waiting_inputs'].includes(taskStatus ?? '')) return 'attention';
+  if (taskStatus === 'running') return 'running';
+  if (taskStatus === 'paused') return 'paused';
+  if (['failed', 'interrupted'].includes(taskStatus ?? '')) return 'failed';
+  if (['completed', 'succeeded'].includes(taskStatus ?? '')) return 'completed';
+  if (taskStatus === 'canceled') return 'canceled';
+  return 'neutral';
+}
+
+function resolveFocusedStepIndex(steps: PlannedStep[], tone: TaskStepTone) {
+  const statuses: Partial<Record<TaskStepTone, string[]>> = {
+    attention: ['waiting_input', 'waiting', 'waiting_inputs', 'pending', 'blocked', 'ready'],
+    running: ['running', 'waiting', 'waiting_inputs', 'pending'],
+    paused: ['interrupted', 'paused', 'running'],
+    failed: ['failed', 'interrupted'],
+    canceled: ['canceled', 'interrupted', 'running'],
+  };
+  const expected = statuses[tone];
+  if (!expected) return -1;
+  const current = steps.findIndex(step => step.current && !isDone(step.status));
+  if (current >= 0) return current;
+  for (const status of expected) {
+    const focused = steps.findIndex(step => step.status === status);
+    if (focused >= 0) return focused;
+  }
+  if (!['attention', 'running', 'paused'].includes(tone)) return -1;
+  return steps.findIndex(step => !isDone(step.status) && !['failed', 'canceled', 'skipped', 'pruned', 'bypassed'].includes(step.status));
 }
 
 function formatScheduleDate(value: string, timeZone: string) {
@@ -235,7 +253,9 @@ function taskTypeLabel(taskType: string, t: (key: string, options?: Record<strin
   return labels[taskType] ?? t('taskCenter.typeOther');
 }
 
-function taskStepLabel(value: string, index: number, t: (key: string, options?: Record<string, unknown>) => string) {
+function taskStepLabel(title: string | undefined, stepID: string, index: number, t: (key: string, options?: Record<string, unknown>) => string) {
+  if (title?.trim()) return title.trim();
+  const value = stepID;
   const normalized = value.trim().toLowerCase().replace(/[\s-]+/g, '_');
   const labels: Record<string, string> = {
     prepare: t('taskCenter.stepPrepare'),
@@ -259,15 +279,16 @@ function taskStepLabel(value: string, index: number, t: (key: string, options?: 
   return t('taskCenter.stepFallback', { index: index + 1 });
 }
 
-function taskStatusLabel(status: string, t: (key: string, options?: Record<string, unknown>) => string) {
+function taskStatusLabel(status: string, t: (key: string, options?: Record<string, unknown>) => string, taskTone?: TaskStepTone) {
+  const displayStatus = workflowTaskDisplayStatus(status, taskTone);
   const labels: Record<string, string> = {
     completed: t('taskCenter.statusCompleted'),
     succeeded: t('taskCenter.statusSucceeded'),
     failed: t('taskCenter.statusFailed'),
     running: t('taskCenter.statusRunning'),
     pending: t('taskCenter.statusPending'),
-    interrupted: t('taskCenter.statusInterrupted'),
     waiting: t('taskCenter.statusWaiting'),
+    waiting_input: t('taskCenter.statusWaitingInput'),
     paused: t('taskCenter.statusPaused'),
     waiting_inputs: t('taskCenter.statusWaitingInputs'),
     canceled: t('taskCenter.statusCanceled'),
@@ -279,5 +300,5 @@ function taskStatusLabel(status: string, t: (key: string, options?: Record<strin
     bypassed: t('taskCenter.statusSkipped'),
     none: t('taskCenter.statusPending'),
   };
-  return labels[status] ?? t('taskCenter.statusUnknown');
+  return labels[displayStatus] ?? t('taskCenter.statusUnknown');
 }
