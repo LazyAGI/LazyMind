@@ -73,15 +73,32 @@ export async function previewEmbeddingSwitch(input: {
   return unwrapModelProviderData<EmbeddingSwitchPreview>(response.data);
 }
 
+export async function clearEmbeddingChunks(input: {
+  model_id: string;
+  source: "own" | "cloud";
+  generation: number;
+  confirm_clear_chunks: true;
+}): Promise<{ cleared: boolean }> {
+  const response = await axiosInstance.post(
+    `${BASE_URL}/api/core/model_providers/embedding/clear-chunks`,
+    input,
+    { silentError: true, timeout: 225000 } as never,
+  );
+  return unwrapModelProviderData<{ cleared: boolean }>(response.data);
+}
+
 export async function updateProviderEndpoint(
   providerId: string,
   baseUrl: string,
 ): Promise<{ id: string; base_url: string }> {
   const response =
-    await modelProvidersApi.apiCoreModelProvidersModelProviderIdEndpointPut({
-      modelProviderId: providerId,
-      updateModelProviderEndpointOpenAPIRequest: { base_url: baseUrl },
-    });
+    await modelProvidersApi.apiCoreModelProvidersModelProviderIdEndpointPut(
+      {
+        modelProviderId: providerId,
+        updateModelProviderEndpointOpenAPIRequest: { base_url: baseUrl },
+      },
+      withModelProviderJsonOptions({ silentError: true }),
+    );
   return unwrapModelProviderData(response.data);
 }
 

@@ -14,6 +14,7 @@ import {
   modelProvidersApi,
   modelProvidersDefaultApi,
   previewEmbeddingSwitch,
+  clearEmbeddingChunks,
   unwrapModelProviderData,
   withModelProviderJsonOptions,
 } from "../api";
@@ -1085,12 +1086,12 @@ export function useDefaultModelConfig({
     setSavingCapabilities(new Set(savingCapabilitiesRef.current));
   };
 
-  const applyModelSelection = (capability: ModelCapability, value?: string) => {
+  const applyModelSelection = (capability: ModelCapability, value?: string, afterClear = false) => {
     if (savingCapabilitiesRef.current.has(capability)) return;
     const chosenOption = moduleModelOptions[capability]?.find((option) => option.value === value);
     const identity = value ? parseModelValue(value) : undefined;
     setCapabilitySaving(capability, true);
-    void saveSelectedModel(capability, value)
+    return saveSelectedModel(capability, value)
       .then((response) => {
         const matches = identity ? response.selections?.filter((selection) =>
           getSelectedCapability(selection) === capability && selection.model_id === identity.modelId &&
@@ -1117,9 +1118,12 @@ export function useDefaultModelConfig({
           window.dispatchEvent(new CustomEvent(CHAT_MODEL_SELECTION_CHANGED_EVENT));
         }
         void onModelSelectionChanged();
-        if (!isAdmin) void retryCapabilityReadiness(capability, true);
+        if (afterClear) message.success(t("modelProvider.embeddingSwitchManualParse"));
+        if (!isAdmin) return retryCapabilityReadiness(capability, true);
       })
-      .catch(() => {})
+      .catch(() => {
+        if (afterClear) message.warning(t("modelProvider.embeddingClearedSaveFailed"));
+      })
       .finally(() => setCapabilitySaving(capability, false));
   };
 
@@ -1159,6 +1163,36 @@ export function useDefaultModelConfig({
           onCancel: () => {
             if (request === embeddingSwitchRevision.current) setPreviewingEmbedding(false);
           },
+        });
+        return;
+      }
+      if (preview.outcome === "clear_required" && candidate.modelId && candidate.source === "own") {
+        const dialog = Modal.confirm({
+          title: t("modelProvider.embeddingIndexResetTitle"),
+          content: t("modelProvider.embeddingIndexResetRequired"),
+          okText: t("modelProvider.embeddingClearAndSwitch"),
+          okButtonProps: { danger: true },
+          cancelText: t("modelProvider.cancelSwitch"),
+          onOk: async () => {
+            if (request !== embeddingSwitchRevision.current) return;
+            dialog.update({ cancelButtonProps: { disabled: true } });
+            try {
+              const result = await clearEmbeddingChunks({
+                model_id: candidate.modelId,
+                source: candidate.source,
+                generation: preview.generation,
+                confirm_clear_chunks: true,
+              });
+              if (!result.cleared) throw new Error("cleanup incomplete");
+              await applyModelSelection(capability, value, true);
+            } catch {
+              message.error(t("modelProvider.embeddingCleanupFailed"));
+            } finally {
+              setPreviewingEmbedding(false);
+              void onModelSelectionChanged();
+            }
+          },
+          onCancel: () => setPreviewingEmbedding(false),
         });
         return;
       }

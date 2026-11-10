@@ -36,7 +36,7 @@ func TestAssessEmbeddingSwitchRequiresMatchingRuntimeFingerprint(t *testing.T) {
 		{"different runtime", "new", "own", "v1:2:other:query", "clear_required", 2},
 		{"unknown candidate", "new", "own", "", "clear_required", 2},
 		{"old vectors have no verified identity", "new", "own", "v1:2:passage:query", "clear_required", 2},
-		{"orphaned old vector collection is possible", "new", "own", "v1:2:other:query", "clear_required", 0},
+		{"no live documents permits orphan cleanup", "new", "own", "v1:2:other:query", "empty", 0},
 		{"changed config of same model", "old", "own", "v1:2:other:query", "clear_required", 2},
 		{"same model and runtime", "old", "own", active.Signature, "unchanged", 2},
 	}
@@ -56,8 +56,8 @@ func TestAssessEmbeddingSwitchRequiresMatchingRuntimeFingerprint(t *testing.T) {
 		t.Fatalf("fresh selection = %q, want empty", got)
 	}
 	legacy := orm.EmbeddingIndexState{ActiveModelID: "old", ActiveSource: "own"}
-	if got := assessEmbeddingSwitch(legacy, 0, "old", "own", "v1:2:passage:query"); got != "clear_required" {
-		t.Fatalf("unsigned legacy selection with no Core rows = %q, want clear_required", got)
+	if got := assessEmbeddingSwitch(legacy, 0, "old", "own", "v1:2:passage:query"); got != "empty" {
+		t.Fatalf("unsigned legacy selection with no Core rows = %q, want empty", got)
 	}
 }
 
@@ -89,13 +89,18 @@ func TestAssessEmbeddingSwitchAfterVerifiedOfflineClear(t *testing.T) {
 func TestLegacyEmbeddingChoiceBlocksFirstSignedSelectionWithoutVectorCleanup(t *testing.T) {
 	db, _, _, first := setupProbeTest(t,
 		&orm.UserSelectedModel{}, &orm.UserSelectedCloudModel{},
-		&orm.EmbeddingIndexState{}, &orm.Dataset{}, &orm.DocumentProcessingState{})
+		&orm.EmbeddingIndexState{}, &orm.Dataset{}, &orm.Document{}, &orm.DocumentProcessingState{})
 	if err := db.Model(&first).Updates(map[string]any{"model_type": "embed", "provider_name": "OpenAI"}).Error; err != nil {
 		t.Fatal(err)
 	}
 	now := time.Now().UTC()
 	if err := db.Create(&orm.UserSelectedModel{UserID: first.CreateUserID, ModelKey: "embed_main", UserModelProviderGroupModelID: first.ID, Share: true, CreatedAt: now, UpdatedAt: now}).Error; err != nil {
 		t.Fatal(err)
+	}
+	for _, row := range []any{&orm.Dataset{ID: "legacy-kb", KbID: "legacy-kb", ProcessingLevel: "indexed"}, &orm.Document{ID: "legacy-doc", DatasetID: "legacy-kb"}} {
+		if err := db.Create(row).Error; err != nil {
+			t.Fatal(err)
+		}
 	}
 	algorithm := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(`{"status":"ready","code":"ok","dimensions":2,"passage_signature":"` + strings.Repeat("a", 64) + `","query_signature":"` + strings.Repeat("b", 64) + `"}`))
@@ -128,7 +133,7 @@ func TestLegacyEmbeddingChoiceBlocksFirstSignedSelectionWithoutVectorCleanup(t *
 }
 
 func TestLegacyEmbeddingChoiceIsUnavailableWhenOldVectorsHaveUnknownIdentity(t *testing.T) {
-	db, _, _, first := setupProbeTest(t, &orm.UserSelectedModel{}, &orm.EmbeddingIndexState{}, &orm.Dataset{}, &orm.DocumentProcessingState{})
+	db, _, _, first := setupProbeTest(t, &orm.UserSelectedModel{}, &orm.EmbeddingIndexState{}, &orm.Dataset{}, &orm.Document{}, &orm.DocumentProcessingState{})
 	if err := db.Model(&first).Updates(map[string]any{"model_type": "embed", "provider_name": "OpenAI"}).Error; err != nil {
 		t.Fatal(err)
 	}
@@ -465,7 +470,7 @@ func TestClearedCloudSelectionSurvivesUnavailableCatalog(t *testing.T) {
 func TestGlobalEmbeddingSelectionOnlySwitchesWithVerifiedCompatibleVectors(t *testing.T) {
 	db, parent, group, first := setupProbeTest(t,
 		&orm.UserSelectedModel{}, &orm.UserSelectedCloudModel{},
-		&orm.EmbeddingIndexState{}, &orm.Dataset{}, &orm.DocumentProcessingState{})
+		&orm.EmbeddingIndexState{}, &orm.Dataset{}, &orm.Document{}, &orm.DocumentProcessingState{})
 	if err := db.Model(&first).Updates(map[string]any{"model_type": "embed", "provider_name": "OpenAI"}).Error; err != nil {
 		t.Fatal(err)
 	}
@@ -523,10 +528,13 @@ func TestGlobalEmbeddingSelectionOnlySwitchesWithVerifiedCompatibleVectors(t *te
 	if err := db.Create(&orm.Dataset{ID: "kb", KbID: "kb", ProcessingLevel: "indexed", BaseModel: orm.BaseModel{CreateUserID: first.CreateUserID, CreatedAt: now, UpdatedAt: now}}).Error; err != nil {
 		t.Fatal(err)
 	}
+	if err := db.Create(&orm.Document{ID: "kb-doc", DatasetID: "kb"}).Error; err != nil {
+		t.Fatal(err)
+	}
 	if rec := selectModel(second.ID); rec.Code != http.StatusOK {
 		t.Fatalf("compatible selection = %d: %s", rec.Code, rec.Body.String())
 	}
-	if err := db.Take(&state, "scope = ?", globalEmbeddingScope).Error; err != nil || state.ActiveModelID != second.ID || state.Generation < 2 {
+	if err := db.Take(&state, "scope = ?", globalEmbeddingScope).Error; err != nil || state.ActiveModelID != second.ID || state.Generation != 1 {
 		t.Fatalf("compatible switch not active: %+v %v", state, err)
 	}
 	if rec := selectModel(third.ID); rec.Code != http.StatusConflict || !strings.Contains(rec.Body.String(), `"code":2005089`) {

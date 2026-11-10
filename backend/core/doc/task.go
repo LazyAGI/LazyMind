@@ -1628,13 +1628,15 @@ func startParseTasksAtLevel(ctx context.Context, userID, datasetID string, taskI
 	if strings.TrimSpace(requestedLevel) != "" {
 		processingLevel = effectiveProcessingLevel(requestedLevel)
 	}
-	llmConfig, err := modelconfig.LoadLLMConfig(ctx, store.DB(), userID)
+	llmConfig, err := loadParsingLLMConfig(ctx, store.DB(), userID)
+	if errors.Is(err, errEmbeddingStateChanged) {
+		return nil, err
+	}
 	if validationErr := validateParsingLLMConfig(ctx, store.DB(), userID, processingLevel, llmConfig, err); validationErr != nil {
 		return nil, validationErr
 	}
 	if err != nil {
 		log.Printf("[startParseTasksInternal] failed to load llm_config for user=%s: %v", userID, err)
-		llmConfig = nil
 	}
 	llmConfig = normalizeParsingLLMConfig(llmConfig)
 	ocrConfig, err := modelconfig.LoadOCRConfig(ctx, store.DB(), userID)
@@ -1697,7 +1699,7 @@ func startParseTasksAtLevel(ctx context.Context, userID, datasetID string, taskI
 		submittedExt.ProcessingLevel = processingLevel
 		submittedExt.ProcessingRevision = dataset.ProcessingRevision
 		taskRow.Ext = mustJSON(submittedExt)
-		bindNativeIndexTask(ctx, datasetID, docRow.ID, taskRow.ID, processingLevel)
+		bindNativeIndexTask(ctx, datasetID, docRow.ID, taskRow.ID, processingLevel, llmConfig["_embedding_generation"].(int64))
 		if normalizeSpreadsheetDirectParse(&dExt) || normalizeLocalOfficeDirectParse(&dExt, parseProfile) {
 			persistDocumentConvertState(ctx, datasetID, docRow.ID, dExt)
 		}
@@ -2940,13 +2942,15 @@ func startReparseTasksInternalAtLevel(r *http.Request, datasetID string, taskIDs
 		Int("task_count", len(taskIDs)).
 		Strs("task_ids", taskIDs).
 		Msg("starting reparse tasks")
-	llmConfig, err := modelconfig.LoadLLMConfig(r.Context(), store.DB(), userID)
+	llmConfig, err := loadParsingLLMConfig(r.Context(), store.DB(), userID)
+	if errors.Is(err, errEmbeddingStateChanged) {
+		return nil, err
+	}
 	if validationErr := validateParsingLLMConfig(r.Context(), store.DB(), userID, processingLevel, llmConfig, err); validationErr != nil {
 		return nil, validationErr
 	}
 	if err != nil {
 		log.Printf("[startReparseTasksInternal] failed to load llm_config for user=%s: %v", userID, err)
-		llmConfig = nil
 	}
 	llmConfig = normalizeParsingLLMConfig(llmConfig)
 	ocrConfig, err := modelconfig.LoadOCRConfig(r.Context(), store.DB(), userID)
@@ -3051,6 +3055,9 @@ func startReparseTasksInternalAtLevel(r *http.Request, datasetID string, taskIDs
 		Str("reparse_mode", reparseMode).
 		Str("strategy", strategy).
 		Msg("submitting reparse batch to doc service")
+	for _, task := range taskRows {
+		bindNativeIndexTask(r.Context(), datasetID, task.DocID, task.ID, processingLevel, llmConfig["_embedding_generation"].(int64))
+	}
 	lazyllmTaskIDs, err := callExternalReparseDocs(r, reparseRequest{DocIDs: docIDs, KbID: kbID, NgNames: ngNames, Strategy: strategy, IdempotencyKey: parseSubmissionKey(datasetID, taskRows), ModelConfig: llmConfig, OCRConfig: ocrConfig, ProcessingLevel: processingLevel})
 	if err != nil {
 		errMsg := common.ResolveAppError(err.Error(), http.StatusBadGateway).Message
@@ -3075,7 +3082,6 @@ func startReparseTasksInternalAtLevel(r *http.Request, datasetID string, taskIDs
 		ext.ErrorMessage = ""
 		lazyllmTaskID := ""
 		ext.ProcessingLevel = processingLevel
-		bindNativeIndexTask(r.Context(), datasetID, taskRow.DocID, taskRow.ID, processingLevel)
 		if i < len(lazyllmTaskIDs) {
 			lazyllmTaskID = strings.TrimSpace(lazyllmTaskIDs[i])
 		}

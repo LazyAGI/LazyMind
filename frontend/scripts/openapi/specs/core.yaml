@@ -8165,6 +8165,30 @@ components:
                         type: string
                     type: array
             type: object
+        EmbeddingClearRequest:
+            properties:
+                confirm_clear_chunks:
+                    type: boolean
+                generation:
+                    format: int64
+                    type: integer
+                model_id:
+                    type: string
+                source:
+                    type: string
+            required:
+                - confirm_clear_chunks
+                - generation
+                - model_id
+                - source
+            type: object
+        EmbeddingClearResponse:
+            properties:
+                cleared:
+                    type: boolean
+            required:
+                - cleared
+            type: object
         EmbeddingIndexStatusResponse:
             properties:
                 affected_knowledge_bases:
@@ -32882,6 +32906,25 @@ paths:
                                 $ref: '#/components/schemas/deleteCustomModelProviderOpenAPIResponse'
                     description: Reset supplier
             summary: Reset a built-in model supplier
+            tags:
+                - model_providers
+    /api/core/model_providers/embedding/clear-chunks:
+        post:
+            description: Requires the current preview generation and a server-verified candidate. Clears all shared knowledge chunks and vectors, preserves source files and document records, and leaves documents awaiting manual parsing. Does not enqueue parsing or select a model.
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/EmbeddingClearRequest'
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/EmbeddingClearResponse'
+                    description: Chunks cleared
+            summary: Clear knowledge chunks after explicit administrator confirmation
             tags:
                 - model_providers
     /api/core/model_providers/embedding/index-state:

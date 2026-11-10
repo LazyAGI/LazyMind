@@ -907,6 +907,7 @@ export function ProviderWorkspace(props: Props) {
                       label={t("modelProvider.apiAddressLabel")}
                       name="baseUrl"
                       normalize={(value: string) => value.trim()}
+                      validateFirst
                       rules={[
                         {
                           required: true,
