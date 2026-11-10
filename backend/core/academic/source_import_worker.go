@@ -453,7 +453,7 @@ func processImportItem(ctx context.Context, job asyncjob.Job, b orm.PaperImportB
 		}
 	}
 	if item.DocumentID == "" {
-		presentWork, presentDocument, err := findEquivalentPresentWork(ctx, item.AcademicWorkID, b.TargetDatasetID, pdfOnly, selected.Version, selected.SourceProvider)
+		presentWork, presentDocument, err := findEquivalentPresentWork(ctx, store.DB(), item.AcademicWorkID, b.TargetDatasetID, pdfOnly, selected.Version, selected.SourceProvider)
 		if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
 			return err
 		}
