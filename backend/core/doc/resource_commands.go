@@ -56,6 +56,7 @@ func (s *ResourceService) prepareKnowledgeCreate(ctx context.Context, op Resourc
 	if len(tags) == 0 {
 		return orm.Dataset{}, nil, resourceErr("INVALID_ARGUMENT", "at least one knowledge base tag is required")
 	}
+	ds.DatasetInfo = createdDatasetSourceInfo(req.scanCreated)
 	if err := validateKnowledgeDescription(req.Description); err != nil {
 		return orm.Dataset{}, nil, err
 	}

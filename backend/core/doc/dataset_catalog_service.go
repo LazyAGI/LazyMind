@@ -268,10 +268,13 @@ func (s *DatasetCatalogService) accessibleDataset(ctx context.Context, req Datas
 	if len(datasetACL) == 0 {
 		return orm.Dataset{}, nil, DatasetCatalogCaller{}, &DatasetServiceError{Code: DatasetServiceForbidden, Message: "dataset forbidden"}
 	}
-	if !datasetAllowedByScanSourceForCaller(ctx, caller, ds.ID, acl.PermissionDatasetRead) {
-		return orm.Dataset{}, nil, DatasetCatalogCaller{}, &DatasetServiceError{Code: DatasetServiceForbidden, Message: "dataset forbidden"}
+	decisions, checked := scanSourceAccessByDatasetForCaller(ctx, caller, []string{ds.ID}, acl.PermissionDatasetRead)
+	if item, found := decisions[ds.ID]; checked && found {
+		learnDatasetSourceOrigin(ctx, s.db, &ds, item)
+		if item.Exists && !item.Allowed {
+			return orm.Dataset{}, nil, DatasetCatalogCaller{}, &DatasetServiceError{Code: DatasetServiceForbidden, Message: "dataset forbidden"}
+		}
 	}
-
 	return ds, datasetACL, caller, nil
 }
 

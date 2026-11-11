@@ -16,10 +16,7 @@ func (s *DatasetCatalogService) addAllowedActions(ctx context.Context, c Dataset
 		return
 	}
 	for _, action := range []struct{ name, permission string }{{"upload", acl.PermissionDatasetUpload}, {"write", acl.PermissionDatasetWrite}} {
-		decisions, ok := scanSourceAccessByDatasetForCaller(ctx, c, ids, action.permission)
-		if !ok {
-			continue
-		}
+		decisions, _ := scanSourceAccessByDatasetForCaller(ctx, c, ids, action.permission)
 		for i, ds := range datasets {
 			d, found := decisions[ds.DatasetID]
 			if found && (!d.Exists || d.Allowed) && (ds.IsOwner || catalogAllowsAction(ds.Acl, action.permission)) {

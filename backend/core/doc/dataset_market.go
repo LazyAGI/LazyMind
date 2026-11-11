@@ -279,17 +279,7 @@ func DeleteMarketDataset(ctx context.Context, userID, datasetID string) error {
 	// Soft-delete the dataset row and clean references.
 	now := time.Now().UTC()
 	if err := db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		ds.DeletedAt = &now
-		ds.UpdatedAt = now
-		if err := tx.Save(&ds).Error; err != nil {
-			return err
-		}
-		if err := cleanupEvalSetDatasetReferences(ctx, tx, datasetID, now); err != nil {
-			return err
-		}
-		return tx.
-			Where("create_user_id = ? AND dataset_id = ?", userID, datasetID).
-			Delete(&orm.DefaultDataset{}).Error
+		return softDeleteDataset(ctx, tx, &ds, userID, now)
 	}); err != nil {
 		return fmt.Errorf("delete dataset failed: %w", err)
 	}
@@ -402,7 +392,7 @@ func CreateMarketDataset(ctx context.Context, userID, userName, datasetID, displ
 		DisplayName:            displayName,
 		Desc:                   description,
 		ResourceUID:            datasetID,
-		DatasetInfo:            json.RawMessage(`{}`),
+		DatasetInfo:            createdDatasetSourceInfo(false),
 		EmbeddingModel:         "default",
 		EmbeddingModelProvider: "default",
 		Type:                   uint8(1),

@@ -40,6 +40,7 @@ type ResourceOperationContext struct {
 	AllowedDatasetIDs []string
 }
 type CreateKnowledgeRequest struct {
+	scanCreated     bool
 	PageOptions     *Dataset                 `json:"-"`
 	PreferredID     string                   `json:"-"`
 	Name            string                   `json:"name"`

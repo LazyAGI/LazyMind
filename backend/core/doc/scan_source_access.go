@@ -22,7 +22,12 @@ type scanSourceAccessByDatasetBatchRequest struct {
 }
 
 type scanSourceAccessByDatasetBatchResponse struct {
-	Items []scanSourceAccessByDatasetItem `json:"items"`
+	Items []struct {
+		DatasetID string `json:"dataset_id"`
+		SourceID  string `json:"source_id"`
+		Exists    *bool  `json:"exists"`
+		Allowed   *bool  `json:"allowed"`
+	} `json:"items"`
 }
 
 type scanSourceAccessByDatasetItem struct {
@@ -30,6 +35,7 @@ type scanSourceAccessByDatasetItem struct {
 	SourceID  string `json:"source_id,omitempty"`
 	Exists    bool   `json:"exists"`
 	Allowed   bool   `json:"allowed"`
+	learnable bool
 }
 
 func datasetAllowedByScanSource(r *http.Request, datasetID string, action string) bool {
@@ -86,12 +92,22 @@ func scanSourceAccessByDatasetForCaller(ctx context.Context, caller DatasetCatal
 		return nil, false
 	}
 	datasetIDs = uniqueNonEmptyStrings(datasetIDs)
-	if len(datasetIDs) == 0 {
-		return map[string]scanSourceAccessByDatasetItem{}, true
+	items := map[string]scanSourceAccessByDatasetItem{}
+	ordinary := ordinarySourceDatasetIDs(ctx, datasetIDs)
+	remoteIDs := make([]string, 0, len(datasetIDs))
+	for _, id := range datasetIDs {
+		if ordinary[id] {
+			items[id] = scanSourceAccessByDatasetItem{DatasetID: id, Allowed: true}
+		} else {
+			remoteIDs = append(remoteIDs, id)
+		}
+	}
+	if len(remoteIDs) == 0 {
+		return items, true
 	}
 	scanURL := common.JoinURL(common.ScanControlPlaneEndpoint(), "/api/scan/internal/source-access/by-dataset:batch")
 	req := scanSourceAccessByDatasetBatchRequest{
-		DatasetIDs: datasetIDs,
+		DatasetIDs: remoteIDs,
 		Action:     scanSourceAccessAction(action),
 	}
 	var resp scanSourceAccessByDatasetBatchResponse
@@ -102,13 +118,16 @@ func scanSourceAccessByDatasetForCaller(ctx context.Context, caller DatasetCatal
 			Str("action", req.Action).
 			Int("dataset_count", len(datasetIDs)).
 			Msg("scan source access check failed")
-		return nil, false
+		return items, false
 	}
-	items := make(map[string]scanSourceAccessByDatasetItem, len(resp.Items))
-	for _, item := range resp.Items {
-		if id := strings.TrimSpace(item.DatasetID); id != "" {
-			item.DatasetID = id
-			items[id] = item
+	for _, wire := range resp.Items {
+		if id := strings.TrimSpace(wire.DatasetID); id != "" && !ordinary[id] {
+			_, duplicate := items[id]
+			items[id] = scanSourceAccessByDatasetItem{
+				DatasetID: id, SourceID: wire.SourceID,
+				Exists: wire.Exists != nil && *wire.Exists, Allowed: wire.Allowed != nil && *wire.Allowed,
+				learnable: wire.Exists != nil && wire.Allowed != nil && !duplicate && containsAll(remoteIDs, []string{id}),
+			}
 		}
 	}
 	return items, true

@@ -845,6 +845,9 @@ func isDatasetCreatedByDataSource(ctx context.Context, datasetID string) bool {
 	if datasetID == "" {
 		return false
 	}
+	if ordinarySourceDatasetIDs(ctx, []string{datasetID})[datasetID] {
+		return false
+	}
 	scanURL := common.JoinURL(common.ScanControlPlaneEndpoint(), "/api/scan/internal/sources/by-dataset/"+url.PathEscape(datasetID))
 	var resp struct {
 		Source struct {
@@ -860,16 +863,29 @@ func batchCheckDatasetsHaveSource(ctx context.Context, datasetIDs []string) map[
 	if len(datasetIDs) == 0 {
 		return nil
 	}
+	ordinary := ordinarySourceDatasetIDs(ctx, datasetIDs)
+	remoteIDs := make([]string, 0, len(datasetIDs))
+	for _, id := range datasetIDs {
+		if !ordinary[id] {
+			remoteIDs = append(remoteIDs, id)
+		}
+	}
+	if len(remoteIDs) == 0 {
+		return map[string]bool{}
+	}
 	scanURL := common.JoinURL(common.ScanControlPlaneEndpoint(), "/api/scan/internal/sources/by-datasets")
 	var resp struct {
 		SourceMap map[string]bool `json:"source_map"`
 	}
-	if err := common.ApiPost(ctx, scanURL, map[string]any{"dataset_ids": datasetIDs}, nil, &resp, 5*time.Second); err != nil {
+	if err := common.ApiPost(ctx, scanURL, map[string]any{"dataset_ids": remoteIDs}, nil, &resp, 5*time.Second); err != nil {
 		result := make(map[string]bool, len(datasetIDs))
 		for _, id := range datasetIDs {
 			result[id] = false
 		}
 		return result
+	}
+	for id := range ordinary {
+		delete(resp.SourceMap, id)
 	}
 	return resp.SourceMap
 }
@@ -908,9 +924,17 @@ type kbUpdateRequest struct {
 }
 
 func CreateDataset(w http.ResponseWriter, r *http.Request) {
-	var body Dataset
+	var body struct {
+		Dataset
+		IdempotencyKey string `json:"idempotency_key"`
+	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		common.ReplyErr(w, "invalid body", http.StatusBadRequest)
+		return
+	}
+	scanCreated, err := scanDatasetCreation(r, body.Tags, body.IdempotencyKey)
+	if err != nil {
+		replyResourceError(w, err)
 		return
 	}
 	if systemdeps.PythonComponentActive("rag") && body.ProcessingLevel == ProcessingLevelIndexed && replyEmbedNotReady(w, r, corestore.UserID(r)) {
@@ -921,7 +945,7 @@ func CreateDataset(w http.ResponseWriter, r *http.Request) {
 		replyResourceError(w, err)
 		return
 	}
-	result, err := service.CreateKnowledge(r.Context(), op, CreateKnowledgeRequest{Name: body.DisplayName, Description: body.Desc, Scene: body.Scene, ProcessingLevel: body.ProcessingLevel, PreferredID: strings.TrimSpace(r.URL.Query().Get("dataset_id")), PageOptions: &body, Tags: body.Tags, AlgoID: body.AlgoID, ProfileID: body.ProfileID, Capabilities: body.ReadingCapabilities})
+	result, err := service.CreateKnowledge(r.Context(), op, CreateKnowledgeRequest{scanCreated: scanCreated, Name: body.DisplayName, Description: body.Desc, Scene: body.Scene, ProcessingLevel: body.ProcessingLevel, PreferredID: strings.TrimSpace(r.URL.Query().Get("dataset_id")), PageOptions: &body.Dataset, Tags: body.Tags, AlgoID: body.AlgoID, ProfileID: body.ProfileID, Capabilities: body.ReadingCapabilities})
 	if err != nil {
 		replyResourceError(w, err)
 		return
@@ -1174,11 +1198,15 @@ func deleteDatasetAlgoKB(ctx context.Context, ds *orm.Dataset, userID string) er
 // softDeleteDataset soft-deletes the dataset row and cleans up its eval set
 // and default dataset references inside the caller's transaction.
 func softDeleteDataset(ctx context.Context, tx *gorm.DB, ds *orm.Dataset, userID string, now time.Time) error {
-	ds.DeletedAt = &now
-	ds.UpdatedAt = now
-	if err := tx.Save(ds).Error; err != nil {
-		return err
+	// The external KB may already be deleted. Preserve concurrent metadata without
+	// rejecting its newer version and leaving the Core dataset visible.
+	result := tx.WithContext(ctx).Model(&orm.Dataset{}).
+		Where("id = ? AND deleted_at IS NULL", ds.ID).
+		Updates(map[string]any{"deleted_at": now, "updated_at": now, "resource_version": gorm.Expr("resource_version + 1")})
+	if result.Error != nil {
+		return result.Error
 	}
+	ds.DeletedAt, ds.UpdatedAt = &now, now
 	if err := cleanupEvalSetDatasetReferences(ctx, tx, ds.ID, now); err != nil {
 		return err
 	}
