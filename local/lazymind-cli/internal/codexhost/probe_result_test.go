@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -95,7 +96,7 @@ func TestConnectionCheckPreservesProbeCancellationAndStartupIssue(t *testing.T) 
 func TestRunProbePreservesMissingRuntimeAndCancellation(t *testing.T) {
 	home := t.TempDir()
 	config := Config{Node: filepath.Join(home, "missing-node"), Port: 9334}
-	if ready, err := runProbe(context.Background(), home, config, "--probe-only"); ready || SetupIssue(err) != "runtime_unavailable" || !errors.Is(err, os.ErrNotExist) {
+	if ready, err := runProbe(context.Background(), home, config, "--probe-only"); ready || SetupIssue(err) != "runtime_unavailable" || !(errors.Is(err, os.ErrNotExist) || errors.Is(err, exec.ErrNotFound)) {
 		t.Fatalf("missing runtime lost its category/cause: ready=%v err=%v", ready, err)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
