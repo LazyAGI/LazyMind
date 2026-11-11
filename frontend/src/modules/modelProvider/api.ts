@@ -4,6 +4,7 @@ import {
   ModelProvidersApiFactory,
   type AddModelProviderGroupModelOpenAPIRequest,
   type AddModelProviderGroupModelsOpenAPIResponse,
+  type EmbeddingClearResponse,
   type UpdateModelProviderGroupModelOpenAPIRequest,
 } from "@/api/generated/core-client";
 import { BASE_URL, axiosInstance } from "@/components/request";
@@ -78,13 +79,13 @@ export async function clearEmbeddingChunks(input: {
   source: "own" | "cloud";
   generation: number;
   confirm_clear_chunks: true;
-}): Promise<{ cleared: boolean }> {
+}): Promise<EmbeddingClearResponse> {
   const response = await axiosInstance.post(
     `${BASE_URL}/api/core/model_providers/embedding/clear-chunks`,
     input,
     { silentError: true, timeout: 225000 } as never,
   );
-  return unwrapModelProviderData<{ cleared: boolean }>(response.data);
+  return unwrapModelProviderData<EmbeddingClearResponse>(response.data);
 }
 
 export async function updateProviderEndpoint(

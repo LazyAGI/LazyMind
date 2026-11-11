@@ -1086,7 +1086,7 @@ export function useDefaultModelConfig({
     setSavingCapabilities(new Set(savingCapabilitiesRef.current));
   };
 
-  const applyModelSelection = (capability: ModelCapability, value?: string, afterClear = false) => {
+  const applyModelSelection = (capability: ModelCapability, value?: string) => {
     if (savingCapabilitiesRef.current.has(capability)) return;
     const chosenOption = moduleModelOptions[capability]?.find((option) => option.value === value);
     const identity = value ? parseModelValue(value) : undefined;
@@ -1118,12 +1118,9 @@ export function useDefaultModelConfig({
           window.dispatchEvent(new CustomEvent(CHAT_MODEL_SELECTION_CHANGED_EVENT));
         }
         void onModelSelectionChanged();
-        if (afterClear) message.success(t("modelProvider.embeddingSwitchManualParse"));
         if (!isAdmin) return retryCapabilityReadiness(capability, true);
       })
-      .catch(() => {
-        if (afterClear) message.warning(t("modelProvider.embeddingClearedSaveFailed"));
-      })
+      .catch(() => {})
       .finally(() => setCapabilitySaving(capability, false));
   };
 
@@ -1167,6 +1164,7 @@ export function useDefaultModelConfig({
         return;
       }
       if (preview.outcome === "clear_required" && candidate.modelId && candidate.source === "own") {
+        let completed = false;
         const dialog = Modal.confirm({
           title: t("modelProvider.embeddingIndexResetTitle"),
           content: t("modelProvider.embeddingIndexResetRequired"),
@@ -1174,25 +1172,50 @@ export function useDefaultModelConfig({
           okButtonProps: { danger: true },
           cancelText: t("modelProvider.cancelSwitch"),
           onOk: async () => {
-            if (request !== embeddingSwitchRevision.current) return;
+            if (request !== embeddingSwitchRevision.current || completed || savingCapabilitiesRef.current.has(capability)) return;
+            setCapabilitySaving(capability, true);
             dialog.update({ cancelButtonProps: { disabled: true } });
             try {
-              const result = await clearEmbeddingChunks({
-                model_id: candidate.modelId,
-                source: candidate.source,
-                generation: preview.generation,
-                confirm_clear_chunks: true,
-              });
-              if (!result.cleared) throw new Error("cleanup incomplete");
-              await applyModelSelection(capability, value, true);
-            } catch {
-              message.error(t("modelProvider.embeddingCleanupFailed"));
-            } finally {
-              setPreviewingEmbedding(false);
+              let activated = false;
+              try {
+                const result = await clearEmbeddingChunks({
+                  model_id: candidate.modelId,
+                  source: candidate.source,
+                  generation: preview.generation,
+                  confirm_clear_chunks: true,
+                });
+                activated = result.cleared === true && result.activated === true;
+              } catch {
+                // A lost response may still have activated the target on the server.
+              }
+              if (request !== embeddingSwitchRevision.current) return;
+              // The server owns both cleanup and activation. Reconcile while the
+              // save lock is held; never send a separate selection PUT here.
+              const refreshed = await loadDefaultModelState(true);
+              if (request !== embeddingSwitchRevision.current) return;
               void onModelSelectionChanged();
+              if (!activated || !refreshed) {
+                message.error(t("modelProvider.embeddingCleanupFailed"));
+                // Reject to keep the dialog open so retry reuses this confirmation
+                // and generation, including after partially completed activation.
+                throw new Error("embedding activation incomplete");
+              }
+              completed = true;
+              setPreviewingEmbedding(false);
+              if (capability === highlightTarget) onHighlightResolved?.();
+              message.success(t("modelProvider.embeddingSwitchManualParse"));
+            } finally {
+              if (request === embeddingSwitchRevision.current) {
+                setCapabilitySaving(capability, false);
+                if (!completed) dialog.update({ cancelButtonProps: { disabled: false } });
+              }
             }
           },
-          onCancel: () => setPreviewingEmbedding(false),
+          onCancel: () => {
+            if (request !== embeddingSwitchRevision.current || savingCapabilitiesRef.current.has(capability)) return;
+            embeddingSwitchRevision.current += 1;
+            setPreviewingEmbedding(false);
+          },
         });
         return;
       }

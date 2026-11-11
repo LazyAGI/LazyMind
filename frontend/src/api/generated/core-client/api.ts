@@ -5381,6 +5381,7 @@ export interface EmbeddingClearRequest {
     'source': string;
 }
 export interface EmbeddingClearResponse {
+    'activated': boolean;
     'cleared': boolean;
 }
 export interface EmbeddingIndexStatusResponse {
@@ -58373,8 +58374,8 @@ export class McpServersApi extends BaseAPI {
 export const ModelProvidersApiAxiosParamCreator = function (configuration?: Configuration) {
     return {
         /**
-         * Requires the current preview generation and a server-verified candidate. Clears all shared knowledge chunks and vectors, preserves source files and document records, and leaves documents awaiting manual parsing. Does not enqueue parsing or select a model.
-         * @summary Clear knowledge chunks after explicit administrator confirmation
+         * Requires a preview generation and explicit administrator confirmation for a server-verified candidate. Clears shared chunks and vectors, preserves source files and document records, and atomically activates the target model with its saved selection. The server completes the operation independently of browser cancellation. Retrying the same confirmed request resumes an interrupted cleanup or activation; replaying a completed request does not clear the new index. Success acknowledges both cleared and activated. Documents await manual parsing; no parsing tasks are enqueued.
+         * @summary Clear knowledge chunks and activate the confirmed embedding model
          * @param {EmbeddingClearRequest} embeddingClearRequest
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
@@ -59784,8 +59785,8 @@ export const ModelProvidersApiFp = function(configuration?: Configuration) {
     const localVarAxiosParamCreator = ModelProvidersApiAxiosParamCreator(configuration)
     return {
         /**
-         * Requires the current preview generation and a server-verified candidate. Clears all shared knowledge chunks and vectors, preserves source files and document records, and leaves documents awaiting manual parsing. Does not enqueue parsing or select a model.
-         * @summary Clear knowledge chunks after explicit administrator confirmation
+         * Requires a preview generation and explicit administrator confirmation for a server-verified candidate. Clears shared chunks and vectors, preserves source files and document records, and atomically activates the target model with its saved selection. The server completes the operation independently of browser cancellation. Retrying the same confirmed request resumes an interrupted cleanup or activation; replaying a completed request does not clear the new index. Success acknowledges both cleared and activated. Documents await manual parsing; no parsing tasks are enqueued.
+         * @summary Clear knowledge chunks and activate the confirmed embedding model
          * @param {EmbeddingClearRequest} embeddingClearRequest
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
@@ -60304,8 +60305,8 @@ export const ModelProvidersApiFactory = function (configuration?: Configuration,
     const localVarFp = ModelProvidersApiFp(configuration)
     return {
         /**
-         * Requires the current preview generation and a server-verified candidate. Clears all shared knowledge chunks and vectors, preserves source files and document records, and leaves documents awaiting manual parsing. Does not enqueue parsing or select a model.
-         * @summary Clear knowledge chunks after explicit administrator confirmation
+         * Requires a preview generation and explicit administrator confirmation for a server-verified candidate. Clears shared chunks and vectors, preserves source files and document records, and atomically activates the target model with its saved selection. The server completes the operation independently of browser cancellation. Retrying the same confirmed request resumes an interrupted cleanup or activation; replaying a completed request does not clear the new index. Success acknowledges both cleared and activated. Documents await manual parsing; no parsing tasks are enqueued.
+         * @summary Clear knowledge chunks and activate the confirmed embedding model
          * @param {ModelProvidersApiApiCoreModelProvidersEmbeddingClearChunksPostRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
@@ -60985,8 +60986,8 @@ export interface ModelProvidersApiApiCoreModelProvidersWithGroupsGetRequest {
  */
 export class ModelProvidersApi extends BaseAPI {
     /**
-     * Requires the current preview generation and a server-verified candidate. Clears all shared knowledge chunks and vectors, preserves source files and document records, and leaves documents awaiting manual parsing. Does not enqueue parsing or select a model.
-     * @summary Clear knowledge chunks after explicit administrator confirmation
+     * Requires a preview generation and explicit administrator confirmation for a server-verified candidate. Clears shared chunks and vectors, preserves source files and document records, and atomically activates the target model with its saved selection. The server completes the operation independently of browser cancellation. Retrying the same confirmed request resumes an interrupted cleanup or activation; replaying a completed request does not clear the new index. Success acknowledges both cleared and activated. Documents await manual parsing; no parsing tasks are enqueued.
+     * @summary Clear knowledge chunks and activate the confirmed embedding model
      * @param {ModelProvidersApiApiCoreModelProvidersEmbeddingClearChunksPostRequest} requestParameters Request parameters.
      * @param {*} [options] Override http request option.
      * @throws {RequiredError}

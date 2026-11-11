@@ -198,7 +198,7 @@ func invalidateEmptyEmbeddingEndpoint(tx *gorm.DB, providerID string, now time.T
 	if err != nil {
 		return err
 	}
-	if state.Phase == "clearing" || state.Phase == "cleanup_failed" {
+	if state.Phase == "clearing" || state.Phase == "cleanup_failed" || state.TargetModelID != "" {
 		return errEmbeddingIdentityInUse
 	}
 	status, err := loadEmbeddingIndexStatus(tx.Statement.Context, tx)

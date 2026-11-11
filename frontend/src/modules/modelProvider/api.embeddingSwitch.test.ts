@@ -28,10 +28,24 @@ describe("embedding switch preview API", () => {
   });
 });
 
-it("sends explicit confirmation and preview generation for chunk cleanup", async () => {
-  const post = vi.spyOn(axiosInstance, "post").mockResolvedValue({ data: { data: { cleared: true } } });
+describe("embedding clear and activation API", () => {
   const request = { model_id: "new-model", source: "own" as const, generation: 8, confirm_clear_chunks: true as const };
-  await expect(clearEmbeddingChunks(request)).resolves.toEqual({ cleared: true });
-  expect(post).toHaveBeenCalledWith(expect.stringContaining("/embedding/clear-chunks"), request,
-    expect.objectContaining({ silentError: true, timeout: expect.any(Number) }));
+
+  it.each([true, false])("sends confirmation and unwraps the activation acknowledgement (enveloped=%s)", async (enveloped) => {
+    const result = { cleared: true, activated: true };
+    const post = vi.spyOn(axiosInstance, "post").mockResolvedValue({ data: enveloped ? { data: result } : result });
+    await expect(clearEmbeddingChunks(request)).resolves.toEqual(result);
+    expect(post).toHaveBeenCalledWith(expect.stringContaining("/embedding/clear-chunks"), request,
+      expect.objectContaining({ silentError: true, timeout: expect.any(Number) }));
+  });
+
+  it("propagates activation failure and replays the same confirmed request on retry", async () => {
+    const failure = new Error("activation unavailable");
+    const post = vi.spyOn(axiosInstance, "post")
+      .mockRejectedValueOnce(failure)
+      .mockResolvedValueOnce({ data: { data: { cleared: true, activated: true } } });
+    await expect(clearEmbeddingChunks(request)).rejects.toBe(failure);
+    await expect(clearEmbeddingChunks(request)).resolves.toEqual({ cleared: true, activated: true });
+    expect(post.mock.calls.map(([, input]) => input)).toEqual([request, request]);
+  });
 });
