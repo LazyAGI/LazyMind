@@ -3,7 +3,7 @@ import {
   realmPlugin, rootEditor$, useCellValues, ImageNode,
 } from '@mdxeditor/editor';
 import {
-  $applyNodeReplacement, $createParagraphNode, $getRoot, $isElementNode, $isParagraphNode, $getNodeByKey, $getNearestNodeFromDOMNode, $isLineBreakNode, $isTextNode,
+  $applyNodeReplacement, $copyNode, $createParagraphNode, $getRoot, $isElementNode, $isParagraphNode, $getNodeByKey, $getNearestNodeFromDOMNode, $isLineBreakNode, $isTextNode,
   ElementNode, HISTORY_PUSH_TAG, RootNode, setDOMUnmanaged, type LexicalNode, type NodeKey, type SerializedElementNode,
 } from 'lexical';
 import { createContext, useContext, useEffect, useLayoutEffect, useState } from 'react';
@@ -151,7 +151,14 @@ function GroupControls() {
             normalizeImageParagraphs(group);
           }
           const parent = image.getParentOrThrow();
-          const paragraph = imageParagraph(parent) ? parent : $createParagraphNode().append(image);
+          const linked = parent.getType() === 'link';
+          const content = linked ? $copyNode(parent).append(image) : image;
+          if (linked && parent.isEmpty()) {
+            const container = parent.getParent();
+            parent.remove();
+            if ($isParagraphNode(container) && container.isEmpty()) container.remove();
+          }
+          const paragraph = imageParagraph(parent) ? parent : $createParagraphNode().append(content);
           const targetNode = sourceGroup ? destination.getParentOrThrow() : destination;
           if (target.position === 'before') targetNode.insertBefore(paragraph); else targetNode.insertAfter(paragraph);
         }, { tag: HISTORY_PUSH_TAG });

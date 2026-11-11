@@ -2,7 +2,7 @@ import { act, fireEvent, render, waitFor } from '@testing-library/react';
 import { createRef } from 'react';
 import { afterEach, expect, it, vi } from 'vitest';
 import {
-  createRootEditorSubscription$, headingsPlugin, imagePlugin, MDXEditor,
+  createRootEditorSubscription$, headingsPlugin, imagePlugin, linkPlugin, MDXEditor,
   realmPlugin, type MDXEditorMethods,
 } from '@mdxeditor/editor';
 import { REDO_COMMAND, UNDO_COMMAND, type LexicalEditor } from 'lexical';
@@ -16,7 +16,7 @@ afterEach(() => {
   else Reflect.deleteProperty(document, 'elementFromPoint');
 });
 
-it('reorders gallery and standalone images, retaining dimensions and undo history', async () => {
+it.each([null, '', 'Original text '])('reorders images, retaining links, dimensions and undo history (%s)', async prefix => {
   await i18n.changeLanguage('en-US');
   vi.stubGlobal('Image', function () {
     const image = document.createElement('img');
@@ -31,11 +31,15 @@ it('reorders gallery and standalone images, retaining dimensions and undo histor
     realm.pub(createRootEditorSubscription$, value => { editor = value; return () => {}; });
   } });
   const methods = createRef<MDXEditorMethods>();
-  const source = '# Heading\n\n![A](https://example.com/a.png)\n<img src="https://example.com/b.png" width="96" alt="B" />\n\nBody\n\n![Single](https://example.com/c.png)';
+  const single = '![Single](https://example.com/c.png)';
+  const link = '(https://example.com/article "Article")';
+  const original = prefix === null ? single : `[${prefix}${single}]${link}`;
+  const moved = prefix === null ? single : `[${single}]${link}`;
+  const source = `# Heading\n\n![A](https://example.com/a.png)\n<img src="https://example.com/b.png" width="96" alt="B" />\n\nBody\n\n${original}`;
   const view = render(<WriterImageGroupContext.Provider value={{ groups: [{ layout: 'sliding', images: [
     { source: 'https://example.com/a.png', occurrence: 0 }, { source: 'https://example.com/b.png', occurrence: 0 },
   ] }], onChange: () => {} }}>
-    <MDXEditor ref={methods} markdown={source} suppressHtmlProcessing plugins={[headingsPlugin(), imagePlugin(), writerImageGroupPlugin(), captureEditor()]} />
+    <MDXEditor ref={methods} markdown={source} suppressHtmlProcessing plugins={[headingsPlugin(), imagePlugin(), linkPlugin(), writerImageGroupPlugin(), captureEditor()]} />
   </WriterImageGroupContext.Provider>);
   await waitFor(() => expect(view.container.querySelectorAll('img')).toHaveLength(3));
   const images = () => Array.from(view.container.querySelectorAll('img')).map(image => image.alt);
@@ -63,7 +67,9 @@ it('reorders gallery and standalone images, retaining dimensions and undo histor
   vi.spyOn(heading, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 100, 300, 30));
   drag(view.getByAltText('Single') as HTMLImageElement, heading.parentElement!, 100, 95);
   await act(async () => fireEvent.mouseUp(window, { clientX: 100, clientY: 95 }));
-  await waitFor(() => expect(methods.current!.getMarkdown().startsWith('![Single]')).toBe(true));
+  await waitFor(() => expect(methods.current!.getMarkdown().startsWith(moved)).toBe(true));
+  if (prefix) expect(view.getByRole('link', { name: prefix.trim() })).toHaveAttribute('href', 'https://example.com/article');
+  expect(methods.current!.getMarkdown()).not.toContain(`[]${link}`);
   expect(view.getByText('Body')).toBeInTheDocument();
   expect(view.getByAltText('B')).toHaveAttribute('width', '96');
   await act(async () => { editor.dispatchCommand(UNDO_COMMAND, undefined); });
