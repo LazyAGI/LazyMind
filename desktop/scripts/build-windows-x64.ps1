@@ -279,6 +279,9 @@ function Copy-RuntimeApp {
         (Join-Path $repoRoot '.github'),
         (Join-Path $repoRoot 'docs'),
         (Join-Path $repoRoot 'algorithm\lazyllm\docs'),
+        (Join-Path $repoRoot 'algorithm\lazyllm\Tutorial'),
+        (Join-Path $repoRoot 'output'),
+        (Join-Path $repoRoot 'outputs'),
         (Join-Path $repoRoot 'tests'),
         (Join-Path $repoRoot 'local\build'),
         (Join-Path $repoRoot 'local\runtime'),
@@ -310,8 +313,12 @@ function Copy-RuntimeApp {
     foreach ($relativePath in @('skills\research', 'skills\review', 'skills\search')) {
         Remove-GeneratedPath (Join-Path $appRoot $relativePath)
     }
-    foreach ($relativePath in @('backend\core\core', 'backend\core\core.exe', 'algorithm\lazyllm\docs')) {
+    foreach ($relativePath in @('backend\core\core', 'backend\core\core.exe', 'algorithm\lazyllm\docs', 'algorithm\lazyllm\Tutorial', 'output', 'outputs')) {
         Remove-GeneratedPath (Join-Path $appRoot $relativePath)
+    }
+    # The packaged Core binary embeds these dictionaries. Keep their notices.
+    foreach ($filename in @('ecdict-common.json.gz', 'freedict-eng-zho.json.gz')) {
+        Remove-GeneratedPath (Join-Path $appRoot "backend\core\vocabulary\dictionary_data\$filename")
     }
     if (-not (Test-Path -LiteralPath (Join-Path $appRoot 'frontend\dist\index.html') -PathType Leaf)) {
         throw 'Desktop frontend dist is missing from staged runtime app.'
@@ -590,10 +597,12 @@ function Build-Desktop([ValidateSet('zip', 'installer')][string]$PackageKind = '
     Invoke-Native $algorithmPython $pythonPruneArgs
     $components = Join-Path $repoRoot 'desktop\dist\python-components\windows-amd64'
     Remove-GeneratedPath $components
-    Invoke-Native $algorithmPython @(
+    $splitArgs = @(
         (Join-Path $repoRoot 'desktop\scripts\build-python-components.py'),
         $runtimeRoot, '--output', $components, '--slim-providers'
     )
+    if ($env:LAZYMIND_DESKTOP_DEFER_CLUSTER -eq 'true') { $splitArgs += '--defer-cluster' }
+    Invoke-Native $algorithmPython $splitArgs
     Copy-Item -LiteralPath (Join-Path $runtimeRoot 'config\milvus-windows-patch.json') -Destination $components
 
     Finalize-Desktop $PackageKind

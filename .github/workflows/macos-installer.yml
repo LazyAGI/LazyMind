@@ -35,6 +35,11 @@ on:
         description: "Branch, tag, or commit SHA to build; leave empty to build the selected workflow branch"
         required: false
         type: string
+      defer_cluster:
+        description: "Build a separate on-demand Python clustering component"
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -54,6 +59,7 @@ env:
   LAZYMIND_DESKTOP_DEFER_HISTORY: "true"
   LAZYMIND_DESKTOP_DEFER_PYTHON: "true"
   LAZYMIND_DESKTOP_REBUILD_PYTHON_COMPONENTS: "true"
+  LAZYMIND_DESKTOP_DEFER_CLUSTER: ${{ (inputs.defer_cluster || vars.LAZYMIND_DESKTOP_DEFER_CLUSTER == 'true') && 'true' || 'false' }}
   LAZYMIND_PYTHON_COMPONENT_BASE_URL: ${{ format('https://modelscope.cn/datasets/{0}/resolve/master/RAG/', vars.LAZYMIND_MS_COMPONENT_REPO || 'CarlosShaoting/lazymind-cst') }}
   LAZYMIND_MS_COMPONENT_REPO: ${{ vars.LAZYMIND_MS_COMPONENT_REPO || 'CarlosShaoting/lazymind-cst' }}
   LAZYMIND_DESKTOP_SHARE_PYTHON: "false"

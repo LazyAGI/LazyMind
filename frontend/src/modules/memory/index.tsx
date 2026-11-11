@@ -784,12 +784,24 @@ export default function MemoryManagement({ embeddedTab }: MemoryManagementProps 
           clearManualSkillReviewPollTimer();
 
           if (task?.status === "failed") {
-            message.error(
-              localizeErrorCode(
-                task.task?.errorCode,
-                localizeErrorCode("2000509"),
-              ),
-            );
+            if (task.errorCode === "skill_review_cluster_required" && isDesktopRuntime()) {
+              message.warning({
+                content: <>
+                  {t("clusterComponent.required")}
+                  <Button type="link" onClick={() => navigate("/settings?section=system_tools#python-cluster-dependency")}>
+                    {t("ragComponent.install")}
+                  </Button>
+                </>,
+                duration: 12,
+              });
+            } else {
+              message.error(
+                localizeErrorCode(
+                  task.task?.errorCode,
+                  localizeErrorCode("2000509"),
+                ),
+              );
+            }
             setManualSkillReviewRunning(false);
             await refreshManualSkillReviewSummary({ silent: true });
             return;
@@ -825,6 +837,7 @@ export default function MemoryManagement({ embeddedTab }: MemoryManagementProps 
     },
     [
       clearManualSkillReviewPollTimer,
+      navigate,
       refreshManualSkillReviewSummary,
       refreshSkillAssets,
       t,

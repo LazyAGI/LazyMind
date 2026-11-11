@@ -32,6 +32,7 @@ type pythonComponentCatalog struct {
 }
 
 var componentDigestPattern = regexp.MustCompile(`^[a-f0-9]{64}$`)
+var pythonComponentIDs = []string{"rag", "cluster"}
 
 func sourceRAGInstalled(paths RuntimePaths) bool {
 	data, err := os.ReadFile(filepath.Join(paths.RuntimeRoot, "deps", "python-components", "rag", "source.ready"))
@@ -53,8 +54,11 @@ func loadPythonComponentCatalog(paths RuntimePaths) (*pythonComponentCatalog, er
 	if catalog.SchemaVersion != 1 || catalog.Platform != runtime.GOOS || catalog.Arch != runtime.GOARCH {
 		return nil, fmt.Errorf("Python component catalog does not match %s/%s", runtime.GOOS, runtime.GOARCH)
 	}
-	for _, id := range []string{"rag"} {
+	for _, id := range pythonComponentIDs {
 		entry, ok := catalog.Components[id]
+		if !ok && id != "rag" {
+			continue // Older installers and full builds include clustering in base Python.
+		}
 		if !ok || entry.ID != id || !componentDigestPattern.MatchString(entry.Revision) ||
 			!componentDigestPattern.MatchString(entry.SHA256) || !componentDigestPattern.MatchString(entry.BaseFingerprint) {
 			return nil, fmt.Errorf("invalid Python component descriptor: %s", id)
@@ -118,9 +122,13 @@ func pythonComponentEnvironment(paths RuntimePaths, ragDisabled bool) []string {
 		return values
 	}
 	var sites []string
-	for _, id := range []string{"rag"} {
+	for _, id := range pythonComponentIDs {
+		entry, deferred := catalog.Components[id]
+		if !deferred {
+			continue
+		}
 		enabled := "0"
-		if site := installedPythonComponentPath(paths, catalog.Components[id]); site != "" && !ragDisabled {
+		if site := installedPythonComponentPath(paths, entry); site != "" && (id != "rag" || !ragDisabled) {
 			sites = append(sites, site)
 			enabled = "1"
 		}
@@ -135,9 +143,11 @@ func pythonComponentSites(paths RuntimePaths) []string {
 		return nil
 	}
 	var sites []string
-	for _, id := range []string{"rag"} {
-		if site := installedPythonComponentPath(paths, catalog.Components[id]); site != "" {
-			sites = append(sites, site)
+	for _, id := range pythonComponentIDs {
+		if entry, deferred := catalog.Components[id]; deferred {
+			if site := installedPythonComponentPath(paths, entry); site != "" {
+				sites = append(sites, site)
+			}
 		}
 	}
 	return sites

@@ -204,7 +204,10 @@ async function splitPythonComponents(runtimeRoot) {
     if (process.env.LAZYMIND_DESKTOP_DEFER_PYTHON !== "false") {
       // A fixed published bundle may have been signed by another team (or ad-hoc).
       // Developer ID builds must split the binaries signed above in this build.
-      const rebuild = macSigningMode === "developer-id" || process.env.LAZYMIND_DESKTOP_REBUILD_PYTHON_COMPONENTS === "true";
+      const deferCluster = process.env.LAZYMIND_DESKTOP_DEFER_CLUSTER === "true";
+      const rebuild = macSigningMode === "developer-id"
+        || process.env.LAZYMIND_DESKTOP_REBUILD_PYTHON_COMPONENTS === "true"
+        || deferCluster;
       const published = componentArch === "arm64" && !rebuild;
       const componentArgs = [
         path.resolve(__dirname, published ? "../scripts/stage-published-python-components.py" : "../scripts/build-python-components.py"),
@@ -216,6 +219,7 @@ async function splitPythonComponents(runtimeRoot) {
         "--cache", path.resolve(__dirname, "../cache/published-python/darwin-arm64"),
       );
       if (rebuild) componentArgs.push("--slim-providers");
+      if (deferCluster) componentArgs.push("--defer-cluster");
       const { stdout } = await execFile(python, componentArgs, { maxBuffer: 4 * 1024 * 1024 });
       console.log(stdout);
       if (rebuild) {
