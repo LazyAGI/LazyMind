@@ -41,6 +41,9 @@ describe("browser Assistant Bridge session synchronization", () => {
     { name: "slow DSH status", request: () => agentIntegrationStatuses(), delay: 20_000, ok: true },
     { name: "slow DSH disconnect", request: () => agentIntegrationAction("deepseek-harness", "disconnect"), delay: 20_000, ok: true },
     { name: "stalled DSH disconnect", request: () => agentIntegrationAction("deepseek-harness", "disconnect"), delay: 65_000, ok: false },
+    { name: "slow Codex connect", request: () => agentIntegrationAction("codex", "connect"), delay: 119_999, ok: true },
+    { name: "stalled Codex connect", request: () => agentIntegrationAction("codex", "connect"), delay: 120_001, ok: false },
+    { name: "slow WorkBuddy connect", request: () => agentIntegrationAction("workbuddy", "connect"), delay: 100_000, ok: true },
   ])("handles $name within a bounded request budget", async ({ request, delay, ok }) => {
     vi.useFakeTimers();
     try {

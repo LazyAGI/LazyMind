@@ -214,7 +214,13 @@ export class CodexNative {
   async probe(signal:AbortSignal) {
     const windows=await codexTargets(this.port,signal)
     const results=await Promise.allSettled(windows.map(window=>this.evaluate(window.id,{kind:'probe'},signal)))
-    return {ready:results.some(result=>result.status==='fulfilled'&&result.value?.ready===true),window_count:windows.length}
+    const ready=results.some(result=>result.status==='fulfilled'&&result.value?.ready===true)
+    // A failed CDP evaluation says nothing about native interface compatibility.
+    // Preserve valid capability evidence from any reachable chat window without
+    // exposing transport errors or letting a closed detached window hide a healthy one.
+    const reachable=results.some(result=>result.status==='fulfilled'&&result.value?.ready===false)
+    const issue=ready?'':!windows.length?'control_window_unavailable':reachable?'capability_unavailable':'cdp_unavailable'
+    return {ready,window_count:windows.length,issue}
   }
   private async locate(threadId:string,signal:AbortSignal) {
     const windows=await codexTargets(this.port,signal)
