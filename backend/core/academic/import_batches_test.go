@@ -6,6 +6,7 @@ import (
 	"gorm.io/gorm"
 	"lazymind/core/common/orm"
 	"lazymind/core/common/readonlyorm"
+	"lazymind/core/doc"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -325,14 +326,33 @@ func TestLibraryAndImportViewsObserveCurrentProcessingTask(t *testing.T) {
 				t.Fatal(err)
 			}
 			check("failed", 0, "processing_failed", "failed", "could not parse PDF [URL omitted]")
-			// Resuming the same task must also supersede a persisted failure.
-			if err := db.Model(&orm.DocumentProcessingState{}).Where("document_id='pdf'").Updates(map[string]any{"parse_status": "failed", "updated_at": now.Add(2 * time.Minute)}).Error; err != nil {
+			// An older parsed task without an exactly bound callback cannot invalidate terminal persisted stages.
+			if err := db.Model(&orm.DocumentProcessingState{}).Where("document_id='pdf'").Updates(map[string]any{
+				"index_status": "succeeded", "index_error_code": "", "index_error_message": "", "updated_at": now.Add(2 * time.Minute),
+			}).Error; err != nil {
 				t.Fatal(err)
+			}
+			if err := db.Model(&readonlyorm.LazyLLMDocServiceTaskRow{}).Where("task_id='retry-remote'").Updates(map[string]any{
+				"doc_id": "foreign-pdf", "status": "WORKING", "error_code": nil, "error_msg": nil,
+			}).Error; err != nil {
+				t.Fatal(err)
+			}
+			check("ready", 0, "ready", "ready", "")
+			before = readState()
+			_, raw, _, err := doc.ObserveDocumentProcessingDetails(t.Context(), db, db, document)
+			assertPersisted("unbound remote task status", before)
+			if err != nil || raw != "UNKNOWN" {
+				t.Errorf("unbound remote task status=%q err=%v, want UNKNOWN", raw, err)
 			}
 			if err := db.Model(&orm.Task{}).Where("id='retry'").Update("updated_at", now.Add(3*time.Minute)).Error; err != nil {
 				t.Fatal(err)
 			}
-			if err := db.Model(&readonlyorm.LazyLLMDocServiceTaskRow{}).Where("task_id='retry-remote'").Updates(map[string]any{"status": "WORKING", "error_code": nil, "error_msg": nil}).Error; err != nil {
+			check("parsing", 1, "processing", "unknown", "")
+			// Resuming the same task must also supersede a persisted failure.
+			if err := db.Model(&orm.DocumentProcessingState{}).Where("document_id='pdf'").Updates(map[string]any{"parse_status": "failed", "updated_at": now.Add(2 * time.Minute)}).Error; err != nil {
+				t.Fatal(err)
+			}
+			if err := db.Model(&readonlyorm.LazyLLMDocServiceTaskRow{}).Where("task_id='retry-remote'").Update("doc_id", "remote-pdf").Error; err != nil {
 				t.Fatal(err)
 			}
 			check("parsing", 1, "processing", "running", "")
