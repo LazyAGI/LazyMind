@@ -458,6 +458,29 @@ def test_external_search_remains_real_evidence_when_embedding_is_unavailable(
     construct.assert_not_called()
 
 
+def test_unavailable_embedding_cannot_spend_external_retrieval_budget(
+        sciverse, monkeypatch, selection):
+    from lazymind.chat.engine.tools.lazy_kb import KBToolkit
+    selection({'material_roles': {}, 'requested_paper_count': 1,
+               'queries': {'KB A': 1, 'KB B': 1, 'KB C': 1},
+               'external_queries': {'external evidence': 1}},
+              {'material_roles': {'M1': 'paper'}, 'queries': {}})
+    monkeypatch.setattr(review_materials, 'is_model_role_available', lambda _role: False)
+    construct = Mock(side_effect=AssertionError('KBToolkit must not be constructed'))
+    monkeypatch.setattr(KBToolkit, '__init__', construct)
+
+    result = review_materials.prepare({'topic': 'Learning'}, ['library'])
+
+    assert [(item['title'], item['text'], item['source']) for item in result] == [
+        ('Related research', 'Complete Sciverse paper', 'sciverse'),
+    ]
+    assert any('文本向量模型' in warning and '模型默认服务' in warning
+               for warning in result[0]['retrieval_warnings'])
+    sciverse.meta_search.assert_called_once_with(
+        query='external evidence', page_size=3, include_content=False, year_from=None, year_to=None)
+    construct.assert_not_called()
+
+
 def test_unexpected_kb_key_error_is_not_treated_as_retrieval_degradation(
         monkeypatch, selection, embedding_ready):
     from lazymind.chat.engine.tools.lazy_kb import KBToolkit
