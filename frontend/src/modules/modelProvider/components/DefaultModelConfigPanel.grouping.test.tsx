@@ -23,7 +23,7 @@ const mocks = vi.hoisted(() => ({
   translate: (key: string, options?: { configured?: number; total?: number }) =>
     key === "modelProvider.defaults.configuredCount"
       ? `${options?.configured}/${options?.total}`
-      : key,
+      : key === "common.confirm" ? "确认" : key,
 }));
 
 vi.mock("react-i18next", () => ({
@@ -135,6 +135,17 @@ const chooseCandidateEmbedding = async () => {
   const select = await readyToSelect("modelProvider.module.embeddingTitle");
   fireEvent.mouseDown(select);
   fireEvent.click(await screen.findByText("New embedding", { selector: "strong" }));
+};
+
+const expectLocalizedWarning = async (content: string) => {
+  const warning = await screen.findByText(content);
+  const dialog = within(warning.closest<HTMLElement>('[role="dialog"]')!);
+  try {
+    expect.soft(dialog.getByRole("button", { hidden: true })).toHaveTextContent(/^确\s*认$/);
+    expect.soft(dialog.queryByText("common.ok")).not.toBeInTheDocument();
+  } finally {
+    await act(async () => { Modal.destroyAll(); });
+  }
 };
 
 describe("default capability configuration groups", () => {
@@ -299,7 +310,6 @@ describe("default capability configuration groups", () => {
   });
 
   it("does not switch to an incompatible embedding while index cleanup is unavailable", async () => {
-    const warning = vi.spyOn(Modal, "warning").mockImplementation(() => ({ destroy: vi.fn(), update: vi.fn() }));
     mocks.selections.mockResolvedValue({ data: { selections: [selectedEmbedding] } });
     mocks.models.mockResolvedValue({ data: { models: [candidateEmbedding] } });
     mocks.previewEmbeddingSwitch.mockResolvedValue({
@@ -311,9 +321,7 @@ describe("default capability configuration groups", () => {
 
     await chooseCandidateEmbedding();
 
-    await waitFor(() => expect(warning).toHaveBeenCalledWith(expect.objectContaining({
-      content: "modelProvider.embeddingIndexResetRequired",
-    })));
+    await expectLocalizedWarning("modelProvider.embeddingIndexResetRequired");
     expect(mocks.saveModel).not.toHaveBeenCalled();
     expect(group("modelProvider.module.embeddingTitle")).toHaveTextContent("Old embedding");
   });
@@ -370,7 +378,6 @@ describe("default capability configuration groups", () => {
   });
 
   it("fails closed when the embedding switch preview request fails", async () => {
-    const warning = vi.spyOn(Modal, "warning").mockImplementation(() => ({ destroy: vi.fn(), update: vi.fn() }));
     mocks.selections.mockResolvedValue({ data: { selections: [selectedEmbedding] } });
     mocks.models.mockResolvedValue({ data: { models: [candidateEmbedding] } });
     mocks.previewEmbeddingSwitch.mockRejectedValue(new Error("probe unavailable"));
@@ -378,9 +385,7 @@ describe("default capability configuration groups", () => {
 
     await chooseCandidateEmbedding();
 
-    await waitFor(() => expect(warning).toHaveBeenCalledWith(expect.objectContaining({
-      content: "modelProvider.embeddingSignatureCheckFailed",
-    })));
+    await expectLocalizedWarning("modelProvider.embeddingSignatureCheckFailed");
     expect(mocks.saveModel).not.toHaveBeenCalled();
     await waitFor(() => expect(within(group("modelProvider.module.embeddingTitle")).getByRole("combobox")).toBeEnabled());
   });

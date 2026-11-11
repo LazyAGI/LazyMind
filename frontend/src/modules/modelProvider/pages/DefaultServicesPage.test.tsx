@@ -1,6 +1,6 @@
-import { fireEvent, render as renderComponent, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render as renderComponent, screen, waitFor, within } from "@testing-library/react";
 import { ConfigProvider } from "antd";
-import { useEffect, type ReactNode } from "react";
+import { useEffect, useState, type ComponentProps, type ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import DefaultServicesPage from "./DefaultServicesPage";
@@ -10,39 +10,62 @@ const render = (children: ReactNode) => renderComponent(<ConfigProvider theme={{
 const mocks = vi.hoisted(() => ({
   listModels: vi.fn(),
   listProviderGroups: vi.fn(),
+  getProviders: vi.fn(),
+  getSelections: vi.fn(),
+  getSelectedProviders: vi.fn(),
   panelMounts: vi.fn(),
+  actualPanel: false,
+  translate: (key: string) => key,
 }));
 
 vi.mock("react-i18next", () => ({
-  useTranslation: () => ({ t: (key: string) => key }),
+  useTranslation: () => ({ t: mocks.translate, i18n: { language: "zh-CN" } }),
+}));
+
+vi.mock("@/components/auth", () => ({ AgentAppsAuth: { getUserInfo: () => ({ role: "system-admin" }) } }));
+vi.mock("@/hooks/useModelFeatures", () => ({
+  useModelFeatures: () => ({ status: "ready", features: { image_embed_enabled: true } }),
+}));
+vi.mock("@/runtime/cloud/session", () => ({
+  LAZYMIND_CLOUD_SESSION_CHANGED_EVENT: "cloud-session-changed",
+  getCloudSession: async () => ({}),
+  isCloudBusinessAvailable: () => false,
 }));
 
 vi.mock("../api", () => ({
   modelProvidersApi: {
     apiCoreModelProvidersModelsGet: mocks.listModels,
     apiCoreModelProvidersProviderGroupsGet: mocks.listProviderGroups,
+    apiCoreModelProvidersGet: mocks.getProviders,
+    apiCoreModelProvidersSelectedModelsGet: mocks.getSelections,
+    apiCoreModelProvidersSelectedProvidersGet: mocks.getSelectedProviders,
   },
+  modelProvidersDefaultApi: {},
   unwrapModelProviderData: (data: unknown) => data,
 }));
 
-vi.mock("../components/DefaultModelConfigPanel", () => ({
-  default: function MockDefaultModelConfigPanel({ modelProviderSetupState, onConfigureCloudService, onConfigureToolService }: {
-    modelProviderSetupState: string;
-    onConfigureCloudService: (service: "cloudParsing" | "searchEngine") => void;
-    onConfigureToolService: (category: "academic" | "translation") => void;
-  }) {
-    useEffect(() => { mocks.panelMounts(); }, []);
-    return (
-      <div>
-        <div data-testid="model-provider-setup-state">{modelProviderSetupState}</div>
-        <button onClick={() => onConfigureCloudService("cloudParsing")}>configure parsing</button>
-        <button onClick={() => onConfigureCloudService("searchEngine")}>configure search</button>
-        <button onClick={() => onConfigureToolService("academic")}>configure academic</button>
-        <button onClick={() => onConfigureToolService("translation")}>configure translation</button>
-      </div>
-    );
-  },
-}));
+vi.mock("../components/DefaultModelConfigPanel", async (importOriginal) => {
+  const { default: ActualPanel } = await importOriginal<typeof import("../components/DefaultModelConfigPanel")>();
+  return {
+    default: function MountedPanel(props: ComponentProps<typeof ActualPanel>) {
+      const [search, setSearch] = useState("");
+      const [expanded, setExpanded] = useState(true);
+      useEffect(() => { mocks.panelMounts(); }, []);
+      if (mocks.actualPanel) return <ActualPanel {...props} />;
+      return (
+        <div>
+          <div data-testid="model-provider-setup-state">{props.modelProviderSetupState}</div>
+          <input aria-label="search models" value={search} onChange={(event) => setSearch(event.target.value)} />
+          <button aria-expanded={expanded} onClick={() => setExpanded(!expanded)}>voice models</button>
+          <button onClick={() => props.onConfigureCloudService("cloudParsing")}>configure parsing</button>
+          <button onClick={() => props.onConfigureCloudService("searchEngine")}>configure search</button>
+          <button onClick={() => props.onConfigureToolService?.("academic")}>configure academic</button>
+          <button onClick={() => props.onConfigureToolService?.("translation")}>configure translation</button>
+        </div>
+      );
+    },
+  };
+});
 
 vi.mock("./ExternalServicesPage", () => ({
   default: ({ variant, visibleCategories, focusCategory, parsingControl, onConfigurationChanged }: {
@@ -72,8 +95,12 @@ describe("DefaultServicesPage", () => {
   };
 
   beforeEach(() => {
+    mocks.actualPanel = false;
     mocks.listModels.mockReset();
     mocks.listProviderGroups.mockReset();
+    mocks.getProviders.mockReset().mockResolvedValue({ data: { providers: [] } });
+    mocks.getSelections.mockReset().mockResolvedValue({ data: { selections: [] } });
+    mocks.getSelectedProviders.mockReset().mockResolvedValue({ data: { selections: [] } });
     mocks.panelMounts.mockReset();
     mocks.listProviderGroups.mockResolvedValue({ data: { groups: [] } });
     Element.prototype.scrollIntoView = vi.fn();
@@ -214,7 +241,7 @@ describe("DefaultServicesPage", () => {
     await waitFor(() => expect(screen.getByTestId("model-provider-setup-state")).toHaveTextContent("empty"));
   });
 
-  it("refreshes setup availability after a service is saved", async () => {
+  it("refreshes setup after a service is saved while preserving the mounted panel's search and collapse state", async () => {
     mocks.listModels.mockResolvedValue({ data: { models: [] } });
     const onModelSelectionChanged = vi.fn();
     render(<DefaultServicesPage
@@ -227,13 +254,92 @@ describe("DefaultServicesPage", () => {
       onDocumentParsingChange={vi.fn()}
     />);
     await waitFor(() => expect(mocks.listProviderGroups).toHaveBeenCalledTimes(4));
+    fireEvent.change(screen.getByRole("textbox", { name: "search models" }), { target: { value: "embedding" } });
+    fireEvent.click(screen.getByRole("button", { name: "voice models" }));
 
     fireEvent.click(screen.getByRole("button", { name: "configure search" }));
     fireEvent.click(screen.getByRole("button", { name: "save service" }));
     await waitFor(() => expect(mocks.listProviderGroups).toHaveBeenCalledTimes(8));
     expect(mocks.listModels).toHaveBeenCalledTimes(2);
     expect(onModelSelectionChanged).toHaveBeenCalledTimes(1);
-    await waitFor(() => expect(mocks.panelMounts).toHaveBeenCalledTimes(2));
+    expect.soft(mocks.panelMounts).toHaveBeenCalledOnce();
+    expect.soft(screen.getByRole("textbox", { name: "search models" })).toHaveValue("embedding");
+    expect.soft(screen.getByRole("button", { name: "voice models" })).toHaveAttribute("aria-expanded", "false");
+  });
+
+  const selection = (id: string, name: string) => ({
+    model_id: id, model_key: "llm", model_type: "llm", name, provider_name: "OpenAI",
+    provider_id: "provider", provider_group_id: "group", group_name: "OpenAI", availability: "available",
+  });
+
+  const candidate = (id: string, name: string) => ({ ...selection(id, name), id });
+  const selected = (id: string, name: string) => ({ data: { selections: [selection(id, name)] } });
+  const modelRow = () => screen.getByRole("group", { name: "modelProvider.module.llmChatTitle" });
+  const openSearchService = () => fireEvent.click(within(screen.getByRole("group", { name: "搜索引擎" }))
+    .getByRole("button", { name: "modelProvider.configureCapability" }));
+
+  it("refreshes persisted models after a service save and ignores a slower earlier selection response", async () => {
+    mocks.actualPanel = true;
+    mocks.listModels.mockResolvedValue({ data: { models: [candidate("old", "Current model")] } });
+    let resolveOlder!: (data: unknown) => void;
+    let resolveLatest!: (data: unknown) => void;
+    mocks.getSelections.mockResolvedValueOnce(selected("old", "Current model"))
+      .mockImplementationOnce(() => new Promise((resolve) => { resolveOlder = resolve; }))
+      .mockImplementationOnce(() => new Promise((resolve) => { resolveLatest = resolve; }));
+    render(<DefaultServicesPage {...defaultOcrProps} onConfigureCloudService={vi.fn()} onConfigureProviders={vi.fn()} onModelSelectionChanged={vi.fn()} />);
+    expect(await screen.findByText("Current model · OpenAI")).toBeInTheDocument();
+    const modelSelect = within(modelRow()).getByRole("combobox");
+    await waitFor(() => expect(modelSelect).toBeEnabled());
+    const voice = screen.getByRole("button", { name: /modelProvider\.defaults\.voiceTitle/ });
+    fireEvent.click(voice);
+    openSearchService();
+    const save = await screen.findByRole("button", { name: "save service" });
+    mocks.listModels.mockImplementationOnce(() => new Promise(() => {}));
+
+    fireEvent.click(save);
+    await waitFor(() => expect(resolveOlder).toBeTypeOf("function"));
+    expect(screen.getByText("Current model · OpenAI")).toBeInTheDocument();
+    expect(modelSelect).toBeEnabled();
+    expect(voice).toHaveAttribute("aria-expanded", "false");
+
+    fireEvent.click(save);
+    await waitFor(() => expect(resolveLatest).toBeTypeOf("function"));
+    await act(async () => { resolveLatest(selected("latest", "Latest model")); });
+    expect(await screen.findByText("Latest model · OpenAI")).toBeInTheDocument();
+    await act(async () => { resolveOlder(selected("stale", "Stale model")); });
+    expect(screen.getByText("Latest model · OpenAI")).toBeInTheDocument();
+    expect(screen.queryByText("Stale model · OpenAI")).not.toBeInTheDocument();
+    expect(mocks.panelMounts).toHaveBeenCalledOnce();
+    expect(voice).toHaveAttribute("aria-expanded", "false");
+  });
+
+  it("keeps existing model options visible until the replacement catalog arrives", async () => {
+    mocks.actualPanel = true;
+    mocks.getSelections.mockResolvedValueOnce(selected("old", "Current model"))
+      .mockImplementationOnce(() => new Promise(() => {}));
+    let resolveCatalog!: (data: unknown) => void;
+    let llmCalls = 0;
+    mocks.listModels.mockImplementation(({ modelType }: { modelType?: string }) => {
+      if (!modelType) return Promise.resolve({ data: { models: [candidate("old", "Current model")] } });
+      if (modelType !== "llm") return Promise.resolve({ data: { models: [] } });
+      if (llmCalls++ === 0) return Promise.resolve({ data: { models: [candidate("candidate-old", "Existing option")] } });
+      return new Promise((resolve) => { resolveCatalog = resolve; });
+    });
+    render(<DefaultServicesPage {...defaultOcrProps} onConfigureCloudService={vi.fn()} onConfigureProviders={vi.fn()} onModelSelectionChanged={vi.fn()} />);
+    expect(await screen.findByText("Current model · OpenAI")).toBeInTheDocument();
+    const select = within(modelRow()).getByRole("combobox");
+    await waitFor(() => expect(select).toBeEnabled());
+    fireEvent.mouseDown(select);
+    expect(await screen.findByText("Existing option", { selector: "strong" })).toBeInTheDocument();
+
+    openSearchService();
+    fireEvent.click(await screen.findByRole("button", { name: "save service" }));
+    await waitFor(() => expect(resolveCatalog).toBeTypeOf("function"));
+    expect(screen.getByText("Current model · OpenAI")).toBeInTheDocument();
+    expect(screen.getByText("Existing option", { selector: "strong" })).toBeInTheDocument();
+    await act(async () => { resolveCatalog({ data: { models: [candidate("candidate-new", "Fresh option")] } }); });
+    expect(await screen.findByText("Fresh option", { selector: "strong" })).toBeInTheDocument();
+    expect(screen.queryByText("Existing option", { selector: "strong" })).not.toBeInTheDocument();
   });
 
   it("opens a deep-linked category and allows reopening it after closing", async () => {

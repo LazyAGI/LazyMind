@@ -1,6 +1,6 @@
 import { useModelSelectionStore } from "@/modules/chat/store/modelSelection";
 import { CHAT_MODEL_SELECTION_CHANGED_EVENT } from "@/modules/chat/constants/chat";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { Modal, message } from "antd";
 import { useTranslation } from "react-i18next";
 import { AgentAppsAuth } from "@/components/auth";
@@ -22,6 +22,8 @@ import { isModelTypeSupportedByProtocol } from "../modelCapabilities";
 import type { ModelSettings } from "../modelSettings";
 
 export type SetupAvailabilityState = "loading" | "ready" | "empty" | "error";
+
+export const DefaultModelConfigRefreshContext = createContext(0);
 
 export interface UseDefaultModelConfigOptions {
   cloudServiceSetupStates: Record<CloudServiceSlotKey, SetupAvailabilityState>;
@@ -626,6 +628,8 @@ export function useDefaultModelConfig({
   onHighlightResolved,
 }: UseDefaultModelConfigOptions) {
   const { t, i18n } = useTranslation();
+  const refreshRevision = useContext(DefaultModelConfigRefreshContext);
+  const appliedRefreshRevision = useRef(refreshRevision);
   const currentLanguage = i18n.resolvedLanguage || i18n.language || "zh-CN";
   const [providerOptions, setProviderOptions] = useState<ProviderOption[]>([]);
   const [selectedModelRows, setSelectedModelRows] = useState<SelectedModelRows>();
@@ -669,6 +673,7 @@ export function useDefaultModelConfig({
   const loadRevision = useRef(0);
   const selectionRevisions = useRef({ providers: 0, models: 0, services: 0 });
   const optionRevisions = useRef({ models: 0, services: 0 });
+  const requestedModelCatalogs = useRef(new Set<ModelCapability>());
   const isAdmin = AgentAppsAuth.getUserInfo()?.role === "system-admin";
   const modelFeaturesState = useModelFeatures();
   const imageEmbedEnabled =
@@ -784,9 +789,14 @@ export function useDefaultModelConfig({
     }
   }, []);
 
-  const loadDefaultModelState = useCallback(() => {
+  const loadDefaultModelState = useCallback((retainCatalog = false) => {
     if (savingCapabilitiesRef.current.size) return;
     const revision = ++loadRevision.current;
+    if (retainCatalog) {
+      // Revalidate catalogs alongside the selection while their current choices stay visible.
+      optionRevisions.current.models += 1;
+      setModuleModelOptionStates({});
+    }
     const refreshReadiness = (capabilities: CapabilityKey[]) => {
       if (isAdmin) return;
       for (const capability of capabilities) {
@@ -826,11 +836,13 @@ export function useDefaultModelConfig({
         rows[capability] = selection;
         shares[capability] = selection.source !== "cloud" && !!selection.share;
       }
-      optionRevisions.current.models += 1;
+      if (!retainCatalog) {
+        optionRevisions.current.models += 1;
+        setModelCatalog({});
+        setModuleModelOptionStates({});
+      }
       setSelectedModelRows(rows);
       setShareStatus(shares);
-      setModelCatalog({});
-      setModuleModelOptionStates({});
       if (isAdmin) setModelReadyStatus({});
       refreshReadiness(visibleModuleConfigs.map((module) => module.key));
     });
@@ -872,6 +884,12 @@ export function useDefaultModelConfig({
     };
   }, [loadDefaultModelState]);
 
+  useEffect(() => {
+    if (refreshRevision === appliedRefreshRevision.current || savingCapabilities.size) return;
+    appliedRefreshRevision.current = refreshRevision;
+    loadDefaultModelState(true);
+  }, [loadDefaultModelState, refreshRevision, savingCapabilities]);
+
   useEffect(() => () => { embeddingSwitchRevision.current += 1; }, []);
 
   useEffect(() => {
@@ -901,6 +919,7 @@ export function useDefaultModelConfig({
     }
 
     const revision = optionRevisions.current.models;
+    requestedModelCatalogs.current.add(capability);
     setModuleModelOptionStates((current) => ({ ...current, [capability]: "loading" }));
     try {
       const modelTypes = capability === "image_generator"
@@ -1108,7 +1127,7 @@ export function useDefaultModelConfig({
         content: t(preview.outcome === "clear_required"
           ? "modelProvider.embeddingIndexResetRequired"
           : "modelProvider.embeddingSignatureCheckFailed"),
-        okText: t("common.ok"),
+        okText: t("common.confirm"),
       });
     }).catch(() => {
       if (request !== embeddingSwitchRevision.current) return;
@@ -1116,7 +1135,7 @@ export function useDefaultModelConfig({
       Modal.warning({
         title: t("modelProvider.embeddingSignatureCheckFailedTitle"),
         content: t("modelProvider.embeddingSignatureCheckFailed"),
-        okText: t("common.ok"),
+        okText: t("common.confirm"),
       });
     });
   };
@@ -1242,7 +1261,8 @@ export function useDefaultModelConfig({
     if (loadStates.models === "ready" && modelProviderSetupState === "ready") {
       for (const { key } of visibleModuleConfigs) {
         const hasRuntimeFallback = !hasPersistedSelection(key) && !isAdmin && modelReadyStatus[key]?.ready;
-        if (!isUsable(key) && !hasRuntimeFallback && !moduleModelOptionStates[key]) {
+        const needsOptions = requestedModelCatalogs.current.has(key) || (!isUsable(key) && !hasRuntimeFallback);
+        if (needsOptions && !moduleModelOptionStates[key]) {
           void loadModuleModels(key);
         }
       }
