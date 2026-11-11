@@ -1284,7 +1284,7 @@ func checkSearchConfig(raw map[string]any) bool {
 }
 
 func upstreamSessionID(convID string) string {
-	return fmt.Sprintf("%s_%d", convID, time.Now().UnixMilli())
+	return convID + "_" + uuid.NewString()
 }
 
 // filePathsForUpstreamChat merges top-level `files` with local filesystem paths taken from

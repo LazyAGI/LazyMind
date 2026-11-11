@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/gorilla/mux"
 
 	"lazymind/core/common/orm"
@@ -137,20 +138,25 @@ func TestResolveMailDraftConfirmIDFromDraftCard(t *testing.T) {
 }
 
 func TestBuildChatRequestBodyUsesConversationIDDerivedSessionID(t *testing.T) {
-	body := buildChatRequestBody(context.TODO(), nil, "conv-1", "", "hello", nil, map[string]any{}, nil, "", 1)
-	sessionID, ok := body["session_id"].(string)
-	if !ok {
-		t.Fatalf("expected session_id string, got %T", body["session_id"])
-	}
-	if !strings.HasPrefix(sessionID, "conv-1_") {
-		t.Fatalf("expected session_id to start with conversation id, got %q", sessionID)
-	}
-	suffix := strings.TrimPrefix(sessionID, "conv-1_")
-	if suffix == "" {
-		t.Fatalf("expected timestamp suffix in session_id, got %q", sessionID)
-	}
-	if _, err := strconv.ParseInt(suffix, 10, 64); err != nil {
-		t.Fatalf("expected millisecond timestamp suffix, got %q: %v", suffix, err)
+	const executions = 100
+	seen := make(map[string]struct{}, executions)
+	for range executions {
+		body := buildChatRequestBody(context.TODO(), nil, "conv-1", "", "hello", nil, map[string]any{}, nil, "", 1)
+		sessionID, ok := body["session_id"].(string)
+		if !ok {
+			t.Fatalf("expected session_id string, got %T", body["session_id"])
+		}
+		suffix, ok := strings.CutPrefix(sessionID, "conv-1_")
+		if !ok {
+			t.Fatalf("expected session_id to start with conversation id, got %q", sessionID)
+		}
+		if _, err := uuid.Parse(suffix); err != nil {
+			t.Fatalf("expected UUID suffix, got %q: %v", suffix, err)
+		}
+		if _, duplicate := seen[sessionID]; duplicate {
+			t.Fatalf("duplicate session_id %q", sessionID)
+		}
+		seen[sessionID] = struct{}{}
 	}
 }
 
