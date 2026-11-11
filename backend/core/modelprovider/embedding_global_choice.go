@@ -94,6 +94,12 @@ func ResolveGlobalEmbeddingChoice(ctx context.Context, db *gorm.DB) (GlobalEmbed
 			return GlobalEmbeddingChoice{}, false, err
 		}
 	}
+	// Index evidence is authoritative even when there is no model selection to
+	// display. Preserve an abnormal classification so readiness cannot fall
+	// through to a static runtime and bypass an unverified historical index.
+	if indexState.ReadinessReason != "" {
+		return GlobalEmbeddingChoice{Phase: phase, indexState: indexState}, true, nil
+	}
 	return GlobalEmbeddingChoice{}, false, nil
 }
 

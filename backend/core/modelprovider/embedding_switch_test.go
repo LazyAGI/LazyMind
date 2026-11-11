@@ -2,7 +2,9 @@ package modelprovider
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -11,6 +13,15 @@ import (
 
 	"lazymind/core/common/orm"
 )
+
+type embeddingCatalogTestProvider struct {
+	catalog CloudModelCatalog
+	err     error
+}
+
+func (provider embeddingCatalogTestProvider) CloudModelCatalog(context.Context) (CloudModelCatalog, error) {
+	return provider.catalog, provider.err
+}
 
 func TestAssessEmbeddingSwitchRequiresMatchingRuntimeFingerprint(t *testing.T) {
 	active := orm.EmbeddingIndexState{
@@ -313,6 +324,126 @@ func TestEmbeddingReadinessPreservesRuntimeFailureReasonsForVerifiedIndex(t *tes
 			t.Fatalf("verified index changed credential reason: %+v present=%t err=%v", ready, present, err)
 		}
 	})
+}
+
+func TestLegacyUnknownWithoutDisplaySelectionBlocksStaticReadiness(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		historical bool
+		wantReady  bool
+		wantReason string
+	}{
+		{name: "historical vectors", historical: true, wantReason: "index_identity_unverified"},
+		{name: "empty index", wantReady: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			db, _, _, model := setupProbeTest(t,
+				&orm.UserSelectedModel{}, &orm.UserSelectedCloudModel{},
+				&orm.EmbeddingIndexState{}, &orm.Dataset{}, &orm.DocumentProcessingState{})
+			if tc.historical {
+				now := time.Now().UTC()
+				if err := db.Create(&orm.Dataset{
+					ID: "legacy-kb", KbID: "legacy-kb", ProcessingLevel: "indexed",
+					BaseModel: orm.BaseModel{CreateUserID: model.CreateUserID, CreatedAt: now, UpdatedAt: now},
+				}).Error; err != nil {
+					t.Fatal(err)
+				}
+				if err := db.Create(&orm.DocumentProcessingState{
+					DatasetID: "legacy-kb", DocumentID: "legacy-doc", IndexStatus: "succeeded", UpdatedAt: now,
+				}).Error; err != nil {
+					t.Fatal(err)
+				}
+			}
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path != "/api/model/role_type" || r.URL.Query().Get("role") != "embed_main" {
+					t.Errorf("unexpected role request: %s", r.URL)
+				}
+				_, _ = w.Write([]byte(`{"type":"embed_main","is_dynamic":false}`))
+			}))
+			defer server.Close()
+			t.Setenv("LAZYMIND_CHAT_SERVICE_URL", server.URL)
+			roleTypeCache.Delete("embed_main")
+			t.Cleanup(func() { roleTypeCache.Delete("embed_main") })
+
+			index := getEmbeddingIndexStatus(t)
+			readyReq := httptest.NewRequest(http.MethodGet, "/model_providers/model-ready?model_type=embed_main", nil)
+			readyReq.Header.Set("X-User-Id", model.CreateUserID)
+			readyRec := httptest.NewRecorder()
+			GetModelReady(readyRec, readyReq)
+			var readyBody struct {
+				Data modelReadyResponse `json:"data"`
+			}
+			if err := json.Unmarshal(readyRec.Body.Bytes(), &readyBody); err != nil {
+				t.Fatal(err)
+			}
+			ready, err := IsModelReady(t.Context(), db, model.CreateUserID, "embed_main")
+			if err != nil {
+				t.Fatal(err)
+			}
+			choice, present, err := ResolveGlobalEmbeddingChoice(t.Context(), db)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if readyRec.Code != http.StatusOK || readyBody.Data.Ready != tc.wantReady || readyBody.Data.Reason != tc.wantReason || ready != tc.wantReady {
+				t.Fatalf("readiness bypassed index evidence: index=%+v http=%d %+v direct=%t", index, readyRec.Code, readyBody.Data, ready)
+			}
+			if tc.historical {
+				if index.IndexIdentity != "legacy_unknown" || !present || choice.ModelID != "" || choice.indexState.ReadinessReason != tc.wantReason {
+					t.Fatalf("legacy evidence was dropped without a display choice: index=%+v choice=%+v present=%t", index, choice, present)
+				}
+			} else if index.IndexIdentity != "empty" || present {
+				t.Fatalf("empty index fabricated a placeholder choice: index=%+v choice=%+v present=%t", index, choice, present)
+			}
+		})
+	}
+}
+
+func TestClearedCloudSelectionSurvivesUnavailableCatalog(t *testing.T) {
+	tests := []struct {
+		name     string
+		provider CloudCatalogProvider
+	}{
+		{name: "unknown catalog"},
+		{name: "network failure", provider: embeddingCatalogTestProvider{err: errors.New("offline")}},
+		{name: "known unavailable catalog", provider: embeddingCatalogTestProvider{catalog: CloudModelCatalog{Known: true, Reason: "cloud_session_unavailable"}}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			SetCloudCatalogProvider(tc.provider)
+			t.Cleanup(func() { SetCloudCatalogProvider(nil) })
+			db, _, _, model := setupProbeTest(t, &orm.UserSelectedModel{}, &orm.UserSelectedCloudModel{}, &orm.EmbeddingIndexState{})
+			now := time.Now().UTC()
+			if err := db.Create(&orm.EmbeddingIndexState{
+				Scope: globalEmbeddingScope, Phase: "cleared", Generation: 2, UpdatedAt: now,
+			}).Error; err != nil {
+				t.Fatal(err)
+			}
+			if err := db.Create(&orm.UserSelectedCloudModel{
+				UserID: model.CreateUserID, ModelType: "embed_main", PublicModelKey: "cloud-embed-saved",
+				DisplayNameSnapshot: "Saved Cloud Embed", CreatedAt: now, UpdatedAt: now,
+			}).Error; err != nil {
+				t.Fatal(err)
+			}
+
+			req := httptest.NewRequest(http.MethodGet, "/model_providers/selected", nil)
+			req.Header.Set("X-User-Id", model.CreateUserID)
+			rec := httptest.NewRecorder()
+			GetSelectedModels(rec, req)
+			var body struct {
+				Data selectedModelsResponse `json:"data"`
+			}
+			if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+				t.Fatal(err)
+			}
+			if rec.Code != http.StatusOK || len(body.Data.Selections) != 1 {
+				t.Fatalf("persisted Cloud selection disappeared: status=%d selections=%+v", rec.Code, body.Data.Selections)
+			}
+			selected := body.Data.Selections[0]
+			if selected.ModelKey != "embed_main" || selected.ModelID != "cloud-embed-saved" || selected.Name != "Saved Cloud Embed" || selected.Source != "cloud" || selected.ProviderID != CloudSystemProviderID || selected.ProviderName != CloudSystemProviderName || !selected.ReadOnly || selected.Availability != "unavailable" || selected.UnavailableReason != "index_cleared" {
+				t.Fatalf("persisted Cloud selection lost its snapshot or index reason: %+v", selected)
+			}
+		})
+	}
 }
 
 func TestGlobalEmbeddingSelectionOnlySwitchesWithVerifiedCompatibleVectors(t *testing.T) {

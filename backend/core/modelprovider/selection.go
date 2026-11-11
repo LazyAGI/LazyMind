@@ -775,13 +775,6 @@ func loadSelectedModelsInternal(ctx context.Context, db *gorm.DB, userID string,
 		return nil, err
 	}
 	catalog, _ := ResolveCloudModelCatalog(ctx)
-	if !catalog.Known {
-		sort.Slice(out, func(i, j int) bool { return out[i].ModelKey < out[j].ModelKey })
-		if projectGlobalEmbedding {
-			return projectGlobalSelectedEmbedding(ctx, db, userID, out)
-		}
-		return out, nil
-	}
 	byType := make(map[string]int, len(out))
 	for index := range out {
 		byType[out[index].ModelKey] = index
