@@ -66,6 +66,8 @@ try {
   const page = await ctx.newPage();
   if (externalOfflineMode()) await loadOfflineSlide(page, htmlPath);
   else await page.goto(url, { waitUntil: 'networkidle', timeout: 30000 });
+  const { loadManagedFontResources } = await import('./lib/local_fonts.mjs');
+  await loadManagedFontResources(page);
   if (waitMs > 0) await page.waitForTimeout(waitMs);
 
   let chosen = null;

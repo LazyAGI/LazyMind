@@ -169,15 +169,18 @@ def available_font_families() -> set[str]:
         try:
             result = subprocess.run(
                 [fc_list, '--format=%{family}\n'], check=True,
-                capture_output=True, text=True, timeout=15,
+                # Fontconfig emits UTF-8, independently of the Windows locale.
+                capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=15,
             )
-            return managed | {
+            discovered = {
                 family.strip()
-                for line in result.stdout.splitlines()
+                for line in (result.stdout or '').splitlines()
                 for family in line.split(',')
-                if family.strip()
+                if family.strip() and '\ufffd' not in family
             }
-        except (OSError, subprocess.SubprocessError):
+            if discovered:
+                return managed | discovered
+        except (OSError, subprocess.SubprocessError, UnicodeError):
             pass
 
     roots = [
