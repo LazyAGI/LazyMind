@@ -88,3 +88,27 @@ func DocumentProcessingStatus(level string, state orm.DocumentProcessingState) s
 		return "unknown"
 	}
 }
+
+// DocumentBodyProcessingStatus reports the readiness of the parsed body.
+func DocumentBodyProcessingStatus(observedLevel string, state orm.DocumentProcessingState) string {
+	if observedLevel == ProcessingLevelStored {
+		return "not_requested"
+	}
+	switch state.ParseStatus {
+	case "succeeded":
+		return "ready"
+	case "pending", "running", "failed":
+		return state.ParseStatus
+	default:
+		return "unknown"
+	}
+}
+
+// ObservedDocumentProcessingStatus reports status at the submitted level when available.
+func ObservedDocumentProcessingStatus(observedLevel, configuredLevel string, state orm.DocumentProcessingState) string {
+	level := strings.TrimSpace(observedLevel)
+	if level == "" {
+		level = configuredLevel
+	}
+	return DocumentProcessingStatus(level, state)
+}
