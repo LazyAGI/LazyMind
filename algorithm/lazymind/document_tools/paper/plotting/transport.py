@@ -4,7 +4,7 @@ from functools import partial
 import os
 import time
 
-from .code_response import _reasoning_text
+from ..model_response import _reasoning_text
 from ..analysis import trace as diagnostics
 
 

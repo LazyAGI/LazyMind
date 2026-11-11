@@ -127,12 +127,14 @@ def extract_paper(paper, request):
                                       'columns': t['table']['columns']} for t in tables]}, ensure_ascii=False)
         )
         from .research_topic import _prompt_token_limit
+        from .model_response import normalize_response
         from lazymind.common.token_estimation import estimate_tokens
         if estimate_tokens(prompt) > _prompt_token_limit():
             raise MissingMaterials('附件超过当前提取预算，请拆分材料；未截断或导入全文。')
         writer = WriterToolBase(llm=AutoModel(model='llm'))
         model = writer._build_structured_llm(writer._structured_output_prompt(EvidenceSelection), apply_formatter=False)
-        selection = EvidenceSelection.model_validate(writer._parse_structured_response(model(prompt), EvidenceSelection))
+        response = normalize_response(model(prompt)).body
+        selection = EvidenceSelection.model_validate(writer._parse_structured_response(response, EvidenceSelection))
         if review_role != 'background' and selection.review_role is not None:
             review_role = selection.review_role
         invalid = any(i < 0 or i >= len(blocks) for i in selection.blocks)
