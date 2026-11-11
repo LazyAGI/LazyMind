@@ -184,6 +184,13 @@ interface EmbeddingReadiness {
   reason?: string;
 }
 
+interface EmbeddingStatusSnapshot {
+  generation: number;
+  index: EmbeddingIndexState | null;
+  readiness: EmbeddingReadiness | null;
+  multimodalReady: boolean | null;
+}
+
 const embeddingIndexStatuses = new Set<EmbeddingIndexStatus>([
   "empty", "indexed", "rebuilding", "clearing", "cleared", "unknown",
 ]);
@@ -343,9 +350,11 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
         ? officialLoaded && loadedOfficialSort === mineSort
         : loadedTableQuery === tableQueryKey,
   );
-  const [embeddingReadiness, setEmbeddingReadiness] = useState<EmbeddingReadiness | null>(null);
+  const [embeddingStatus, setEmbeddingStatus] = useState<EmbeddingStatusSnapshot | null>(null);
+  const embeddingReadiness = embeddingStatus?.readiness ?? null;
   const embeddingReady = embeddingReadiness?.ready ?? null;
-  const [embeddingIndexState, setEmbeddingIndexState] = useState<EmbeddingIndexState | null>(null);
+  const embeddingIndexState = embeddingStatus?.index ?? null;
+  const multimodalEmbeddingReady = embeddingStatus?.multimodalReady ?? null;
   const embeddingStatusRequestSeq = useRef(0);
   const [dismissedIndexNotice, setDismissedIndexNotice] = useState<string | null>(null);
   const embeddingNotice = getEmbeddingNotice(embeddingIndexState, embeddingReadiness);
@@ -354,9 +363,6 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
   useEffect(() => {
     setDismissedIndexNotice((dismissed) => dismissed === indexNoticeKey ? dismissed : null);
   }, [indexNoticeKey]);
-  const [multimodalEmbeddingReady, setMultimodalEmbeddingReady] = useState<
-    boolean | null
-  >(null);
   const isAdmin = AgentAppsAuth.getUserInfo()?.role === "system-admin";
   const { deletions, trackDeletion, dismissDeletion } = useDatasetDeletions();
   const syncCreateVm = useSyncKnowledgeBaseCreation({
@@ -543,62 +549,56 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
 
   async function checkEmbeddingReady() {
     const request = ++embeddingStatusRequestSeq.current;
-    void checkEmbeddingIndexState(request);
-    try {
-      const features = await fetchModelFeatures(true);
-      const imageEmbedRequired = isImageEmbedRequired(features);
-
-      const [embResp, multiResp] = await Promise.all([
-        axiosInstance
-          .get<
-            { data?: EmbeddingReadiness } | EmbeddingReadiness
-          >(`${BASE_URL}/api/core/model_providers/models/ready?model_type=embed_main`)
-          .catch(() => null),
-        imageEmbedRequired
-          ? axiosInstance
-              .get<
-                { data?: EmbeddingReadiness } | EmbeddingReadiness
-              >(`${BASE_URL}/api/core/model_providers/models/ready?model_type=embed_image`)
-              .catch(() => null)
-          : Promise.resolve(null),
-      ]);
-      if (request !== embeddingStatusRequestSeq.current) return;
-      const unwrap = (resp: typeof embResp): EmbeddingReadiness | null => {
-        if (!resp) return null;
-        const d =
-          resp.data && typeof resp.data === "object" && "data" in resp.data
-            ? (resp.data as { data?: EmbeddingReadiness }).data
-            : (resp.data as EmbeddingReadiness);
-        return typeof d?.ready === "boolean" ? d : null;
-      };
-      const readiness = unwrap(embResp);
-      if (readiness) setEmbeddingReadiness(readiness);
-      // null means "not applicable" — does not trigger disabled state.
-      setMultimodalEmbeddingReady(
-        imageEmbedRequired ? unwrap(multiResp)?.ready ?? null : null,
-      );
-    } catch {
-      if (request !== embeddingStatusRequestSeq.current) return;
-      setMultimodalEmbeddingReady(null);
-    }
-  }
-
-  async function checkEmbeddingIndexState(request: number) {
-    try {
-      const response = await axiosInstance.get<unknown>(
-        `${BASE_URL}/api/core/model_providers/embedding/index-state`,
-      );
-      const body = response.data;
-      const state = body && typeof body === "object" && "data" in body
-        ? body.data : body;
-      if (request !== embeddingStatusRequestSeq.current) return;
-      if (state && typeof state === "object" && "status" in state &&
-          typeof state.status === "string" && embeddingIndexStatuses.has(state.status as EmbeddingIndexStatus)) {
-        setEmbeddingIndexState(state as EmbeddingIndexState);
-      }
-    } catch {
-      // A failed refresh does not change the last observed index identity or phase.
-    }
+    const indexPromise = axiosInstance
+      .get<unknown>(`${BASE_URL}/api/core/model_providers/embedding/index-state`)
+      .then((response): EmbeddingIndexState | null => {
+        const body = response.data;
+        const state = body && typeof body === "object" && "data" in body ? body.data : body;
+        return state && typeof state === "object" && "status" in state &&
+          typeof state.status === "string" && embeddingIndexStatuses.has(state.status as EmbeddingIndexStatus)
+          ? state as EmbeddingIndexState
+          : null;
+      })
+      .catch(() => null);
+    const readinessPromise = axiosInstance
+      .get<{ data?: EmbeddingReadiness } | EmbeddingReadiness>(
+        `${BASE_URL}/api/core/model_providers/models/ready?model_type=embed_main`,
+      )
+      .catch(() => null);
+    const features = await fetchModelFeatures(true).catch(() => null);
+    const imageEmbedRequired = features !== null && isImageEmbedRequired(features);
+    const multimodalPromise = imageEmbedRequired
+      ? axiosInstance
+          .get<{ data?: EmbeddingReadiness } | EmbeddingReadiness>(
+            `${BASE_URL}/api/core/model_providers/models/ready?model_type=embed_image`,
+          )
+          .catch(() => null)
+      : Promise.resolve(null);
+    const [index, readinessResponse, multimodalResponse] = await Promise.all([
+      indexPromise,
+      readinessPromise,
+      multimodalPromise,
+    ]);
+    if (request !== embeddingStatusRequestSeq.current) return;
+    const unwrap = (response: typeof readinessResponse): EmbeddingReadiness | null => {
+      if (!response) return null;
+      const data = response.data && typeof response.data === "object" && "data" in response.data
+        ? (response.data as { data?: EmbeddingReadiness }).data
+        : response.data as EmbeddingReadiness;
+      return typeof data?.ready === "boolean" ? data : null;
+    };
+    const readiness = unwrap(readinessResponse);
+    const multimodalReadiness = unwrap(multimodalResponse);
+    const next: EmbeddingStatusSnapshot = {
+      generation: request,
+      index,
+      readiness,
+      // null means unavailable/not applicable and never disables creation by itself.
+      multimodalReady: imageEmbedRequired ? multimodalReadiness?.ready ?? null : null,
+    };
+    const complete = index !== null && readiness !== null &&
+      (!imageEmbedRequired || multimodalReadiness !== null);
+    setEmbeddingStatus((current) => complete || current === null ? next : current);
   }
 
   useEffect(() => {

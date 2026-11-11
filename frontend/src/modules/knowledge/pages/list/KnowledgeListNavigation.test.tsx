@@ -6,7 +6,7 @@ import { deferred, desktopTestTranslation as t, installDesktopTestDOM } from "@/
 
 const mocks = vi.hoisted(() => ({
   list: vi.fn(), catalog: vi.fn(), scan: vi.fn(), cloudCreate: vi.fn(), scenes: vi.fn(), remove: vi.fn(), get: vi.fn(),
-  post: vi.fn(), put: vi.fn(), patch: vi.fn(), delete: vi.fn(), role: "user",
+  post: vi.fn(), put: vi.fn(), patch: vi.fn(), delete: vi.fn(), features: vi.fn(), imageEmbedRequired: false, role: "user",
 }));
 vi.mock("@/modules/learning/api", () => ({ getLearningCatalog: mocks.scenes }));
 vi.mock("react-i18next", async (load) => ({ ...await load<typeof import("react-i18next")>(), useTranslation: () => ({ t }) }));
@@ -31,7 +31,7 @@ vi.mock("@/components/request", () => ({ BASE_URL: "", localizeErrorCode: (_code
   axiosInstance: { get: mocks.get, post: mocks.post, put: mocks.put, patch: mocks.patch, delete: mocks.delete } }));
 vi.mock("@/modules/knowledge/utils/request", () => ({ KnowledgeBaseServiceApi: () => ({ datasetServiceListDatasets: mocks.list, datasetServiceDeleteDataset: mocks.remove }) }));
 vi.mock("@/modules/dataSource/api/clients", () => ({ dataSourceScanApi: { listSources: mocks.scan } }));
-vi.mock("@/hooks/useModelFeatures", () => ({ fetchModelFeatures: vi.fn().mockResolvedValue({}), isImageEmbedRequired: () => false, MODEL_FEATURES_CHANGED_EVENT: "features-changed" }));
+vi.mock("@/hooks/useModelFeatures", () => ({ fetchModelFeatures: mocks.features, isImageEmbedRequired: () => mocks.imageEmbedRequired, MODEL_FEATURES_CHANGED_EVENT: "features-changed" }));
 vi.mock("@/runtime/mode", async (load) => ({ ...await load<object>(), isDesktopRuntime: () => false }));
 vi.mock("@/components/ui", () => ({
   ListPageTable: (props: any) => <div className="list-page-table-scroll">
@@ -70,6 +70,8 @@ beforeAll(installDesktopTestDOM);
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.role = "user";
+  mocks.imageEmbedRequired = false;
+  mocks.features.mockResolvedValue({});
   mocks.get.mockImplementation((url: string) => Promise.resolve({ data: url.endsWith("/deletion")
     ? { dataset_id: "local-id", display_name: "本地手册", status: "cleaning", total: 5, completed: 2, failed: 0 }
     : { ready: true } }));
@@ -160,6 +162,256 @@ describe("knowledge list URL and data restoration", () => {
     const notice = await screen.findByRole("status", { name: noticeName });
     expect(notice).toHaveTextContent(t("knowledge.embeddingIndexRebuilding", { count: 2 }));
     expect(notice).toHaveTextContent(t("knowledge.embeddingNotReadyBanner"));
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("publishes a healthy index and text readiness as one snapshot when index finishes first", async () => {
+    const nextIndex = deferred<{ data: { data: object } }>();
+    const nextReadiness = deferred<{ data: { ready: boolean } }>();
+    let indexCalls = 0;
+    let readinessCalls = 0;
+    mocks.get.mockImplementation((url: string) => {
+      if (url.endsWith("/embedding/index-state")) {
+        indexCalls += 1;
+        return indexCalls === 1
+          ? Promise.resolve({ data: { data: { ...indexFixture, status: "clearing", index_identity: "verified", operation_phase: "cleanup_failed" } } })
+          : nextIndex.promise;
+      }
+      if (url.includes("models/ready?model_type=embed_main")) {
+        readinessCalls += 1;
+        return readinessCalls === 1
+          ? Promise.resolve({ data: { ready: false, reason: "index_cleanup_incomplete" } })
+          : nextReadiness.promise;
+      }
+      return Promise.resolve({ data: { ready: true } });
+    });
+    await mount("");
+    expect(await screen.findByRole("status", { name: noticeName })).toHaveTextContent(t("knowledge.embeddingIndexCleanupFailed"));
+
+    await refreshEmbedding();
+    await waitFor(() => expect([indexCalls, readinessCalls]).toEqual([2, 2]));
+    await act(async () => {
+      nextIndex.resolve({ data: { data: { ...indexFixture, status: "indexed", index_identity: "verified", operation_phase: "idle" } } });
+    });
+
+    expect(screen.getByRole("status", { name: noticeName })).toHaveTextContent(t("knowledge.embeddingIndexCleanupFailed"));
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+
+    await act(async () => { nextReadiness.resolve({ data: { ready: true } }); });
+    await waitFor(() => expect(screen.queryByRole("status", { name: noticeName })).not.toBeInTheDocument());
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("publishes a healthy index and text readiness as one snapshot when readiness finishes first", async () => {
+    const nextIndex = deferred<{ data: { data: object } }>();
+    const nextReadiness = deferred<{ data: { ready: boolean } }>();
+    let indexCalls = 0;
+    let readinessCalls = 0;
+    mocks.get.mockImplementation((url: string) => {
+      if (url.endsWith("/embedding/index-state")) {
+        indexCalls += 1;
+        return indexCalls === 1
+          ? Promise.resolve({ data: { data: { ...indexFixture, status: "clearing", index_identity: "verified", operation_phase: "cleanup_failed" } } })
+          : nextIndex.promise;
+      }
+      if (url.includes("models/ready?model_type=embed_main")) {
+        readinessCalls += 1;
+        return readinessCalls === 1
+          ? Promise.resolve({ data: { ready: false, reason: "index_cleanup_incomplete" } })
+          : nextReadiness.promise;
+      }
+      return Promise.resolve({ data: { ready: true } });
+    });
+    await mount("");
+    expect(await screen.findByRole("status", { name: noticeName })).toHaveTextContent(t("knowledge.embeddingIndexCleanupFailed"));
+
+    await refreshEmbedding();
+    await waitFor(() => expect([indexCalls, readinessCalls]).toEqual([2, 2]));
+    await act(async () => { nextReadiness.resolve({ data: { ready: true } }); });
+
+    expect(screen.getByRole("status", { name: noticeName })).toHaveTextContent(t("knowledge.embeddingIndexCleanupFailed"));
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+
+    await act(async () => {
+      nextIndex.resolve({ data: { data: { ...indexFixture, status: "indexed", index_identity: "verified", operation_phase: "idle" } } });
+    });
+    await waitFor(() => expect(screen.queryByRole("status", { name: noticeName })).not.toBeInTheDocument());
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it.each(["failed", "invalid"])("retains a dismissed complete snapshot when the next readiness half is %s", async (outcome) => {
+    const nextIndex = deferred<{ data: { data: object } }>();
+    const nextReadiness = deferred<{ data: object }>();
+    let indexCalls = 0;
+    let readinessCalls = 0;
+    mocks.get.mockImplementation((url: string) => {
+      if (url.endsWith("/embedding/index-state")) {
+        indexCalls += 1;
+        if (indexCalls === 1) return Promise.resolve({ data: { data: { ...indexFixture, status: "clearing", index_identity: "verified", operation_phase: "cleanup_failed" } } });
+        if (indexCalls === 2) return nextIndex.promise;
+        return Promise.resolve({ data: { data: { ...indexFixture, status: "indexed", index_identity: "verified", operation_phase: "idle" } } });
+      }
+      if (url.includes("models/ready?model_type=embed_main")) {
+        readinessCalls += 1;
+        if (readinessCalls === 1) return Promise.resolve({ data: { ready: false, reason: "index_cleanup_incomplete" } });
+        if (readinessCalls === 2) return nextReadiness.promise;
+        return Promise.resolve({ data: { ready: true } });
+      }
+      return Promise.resolve({ data: { ready: true } });
+    });
+    await mount("");
+    await dismissIndexNotice();
+
+    await refreshEmbedding();
+    await waitFor(() => expect([indexCalls, readinessCalls]).toEqual([2, 2]));
+    await act(async () => {
+      nextIndex.resolve({ data: { data: { ...indexFixture, status: "indexed", index_identity: "verified", operation_phase: "idle" } } });
+      if (outcome === "failed") nextReadiness.reject(new Error("readiness unavailable"));
+      else nextReadiness.resolve({ data: { reason: "missing ready" } });
+    });
+
+    expect(screen.queryByRole("status", { name: noticeName })).not.toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+
+    await refreshEmbedding();
+    await waitFor(() => expect([indexCalls, readinessCalls]).toEqual([3, 3]));
+    expect(screen.queryByRole("status", { name: noticeName })).not.toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it.each(["failed", "invalid"])("retains a complete model-warning snapshot when the next index half is %s", async (outcome) => {
+    let indexCalls = 0;
+    let readinessCalls = 0;
+    mocks.get.mockImplementation((url: string) => {
+      if (url.endsWith("/embedding/index-state")) {
+        indexCalls += 1;
+        if (indexCalls === 1) return Promise.resolve({ data: { data: { ...indexFixture, status: "indexed", index_identity: "verified", operation_phase: "idle" } } });
+        return outcome === "failed"
+          ? Promise.reject(new Error("index unavailable"))
+          : Promise.resolve({ data: { data: { status: "not-a-real-status" } } });
+      }
+      if (url.includes("models/ready?model_type=embed_main")) {
+        readinessCalls += 1;
+        return Promise.resolve({ data: readinessCalls === 1
+          ? { ready: false, reason: "credentials_unavailable" }
+          : { ready: true } });
+      }
+      return Promise.resolve({ data: { ready: true } });
+    });
+    await mount("");
+    expect(await screen.findByRole("alert")).toHaveTextContent(t("knowledge.embeddingNotReadyBanner"));
+
+    await refreshEmbedding();
+    await waitFor(() => expect([indexCalls, readinessCalls]).toEqual([2, 2]));
+
+    expect(screen.getByRole("alert")).toHaveTextContent(t("knowledge.embeddingNotReadyBanner"));
+    expect(screen.queryByRole("status", { name: noticeName })).not.toBeInTheDocument();
+  });
+
+  it("waits for multimodal readiness before publishing the next embedding generation", async () => {
+    mocks.imageEmbedRequired = true;
+    const nextIndex = deferred<{ data: { data: object } }>();
+    const nextReadiness = deferred<{ data: { ready: boolean } }>();
+    const nextMultimodal = deferred<{ data: { ready: boolean } }>();
+    let indexCalls = 0;
+    let readinessCalls = 0;
+    let multimodalCalls = 0;
+    mocks.get.mockImplementation((url: string) => {
+      if (url.endsWith("/embedding/index-state")) {
+        indexCalls += 1;
+        return indexCalls === 1
+          ? Promise.resolve({ data: { data: { ...indexFixture, status: "clearing", index_identity: "verified", operation_phase: "cleanup_failed" } } })
+          : nextIndex.promise;
+      }
+      if (url.includes("model_type=embed_main")) {
+        readinessCalls += 1;
+        return readinessCalls === 1
+          ? Promise.resolve({ data: { ready: false, reason: "index_cleanup_incomplete" } })
+          : nextReadiness.promise;
+      }
+      if (url.includes("model_type=embed_image")) {
+        multimodalCalls += 1;
+        return multimodalCalls === 1
+          ? Promise.resolve({ data: { ready: false, reason: "model_unavailable" } })
+          : nextMultimodal.promise;
+      }
+      return Promise.resolve({ data: { ready: true } });
+    });
+    await mount("");
+    expect(await screen.findByRole("status", { name: noticeName })).toHaveTextContent(t("knowledge.embeddingIndexCleanupFailed"));
+    expect(screen.getByRole("alert")).toHaveTextContent(t("knowledge.multimodalEmbeddingNotReadyBanner"));
+
+    await refreshEmbedding();
+    await waitFor(() => expect([indexCalls, readinessCalls, multimodalCalls]).toEqual([2, 2, 2]));
+    await act(async () => {
+      nextIndex.resolve({ data: { data: { ...indexFixture, status: "indexed", index_identity: "verified", operation_phase: "idle" } } });
+      nextReadiness.resolve({ data: { ready: true } });
+    });
+
+    expect(screen.getByRole("status", { name: noticeName })).toHaveTextContent(t("knowledge.embeddingIndexCleanupFailed"));
+    expect(screen.getByRole("alert")).toHaveTextContent(t("knowledge.multimodalEmbeddingNotReadyBanner"));
+
+    await act(async () => { nextMultimodal.resolve({ data: { ready: true } }); });
+    await waitFor(() => expect(screen.queryByRole("status", { name: noticeName })).not.toBeInTheDocument());
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("ignores an older complete embedding generation after a newer refresh", async () => {
+    const staleIndex = deferred<{ data: { data: object } }>();
+    const staleReadiness = deferred<{ data: { ready: boolean; reason: string } }>();
+    let indexCalls = 0;
+    let readinessCalls = 0;
+    mocks.get.mockImplementation((url: string) => {
+      if (url.endsWith("/embedding/index-state")) {
+        indexCalls += 1;
+        return indexCalls === 2 ? staleIndex.promise : Promise.resolve({ data: { data: {
+          ...indexFixture, status: "indexed", index_identity: "verified", operation_phase: "idle",
+        } } });
+      }
+      if (url.includes("models/ready?model_type=embed_main")) {
+        readinessCalls += 1;
+        return readinessCalls === 2 ? staleReadiness.promise : Promise.resolve({ data: { ready: true } });
+      }
+      return Promise.resolve({ data: { ready: true } });
+    });
+    await mount("");
+    expect(screen.queryByRole("status", { name: noticeName })).not.toBeInTheDocument();
+
+    await refreshEmbedding();
+    await waitFor(() => expect([indexCalls, readinessCalls]).toEqual([2, 2]));
+    await refreshEmbedding();
+    await waitFor(() => expect([indexCalls, readinessCalls]).toEqual([3, 3]));
+
+    await act(async () => {
+      staleIndex.resolve({ data: { data: { ...indexFixture, status: "clearing", index_identity: "verified", operation_phase: "cleanup_failed" } } });
+      staleReadiness.resolve({ data: { ready: false, reason: "index_cleanup_incomplete" } });
+    });
+    expect(screen.queryByRole("status", { name: noticeName })).not.toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("does not publish an embedding generation that completes after unmount", async () => {
+    const staleIndex = deferred<{ data: { data: object } }>();
+    const staleReadiness = deferred<{ data: { ready: boolean; reason: string } }>();
+    mocks.get.mockImplementation((url: string) => url.endsWith("/embedding/index-state")
+      ? staleIndex.promise
+      : url.includes("models/ready?model_type=embed_main")
+        ? staleReadiness.promise
+        : Promise.resolve({ data: { ready: true } }));
+    await mount("");
+    await waitFor(() => expect(mocks.get.mock.calls.some(([url]) => url.endsWith("/embedding/index-state"))).toBe(true));
+    await act(async () => { cleanup(); });
+
+    mocks.get.mockImplementation((url: string) => Promise.resolve({ data: url.endsWith("/embedding/index-state")
+      ? { data: { ...indexFixture, status: "indexed", index_identity: "verified", operation_phase: "idle" } }
+      : { ready: true } }));
+    await mount("");
+    await act(async () => {
+      staleIndex.resolve({ data: { data: { ...indexFixture, status: "clearing", index_identity: "verified", operation_phase: "cleanup_failed" } } });
+      staleReadiness.resolve({ data: { ready: false, reason: "index_cleanup_incomplete" } });
+    });
+
+    expect(screen.queryByRole("status", { name: noticeName })).not.toBeInTheDocument();
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
