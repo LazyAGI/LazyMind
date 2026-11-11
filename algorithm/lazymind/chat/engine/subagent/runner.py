@@ -1218,6 +1218,56 @@ def _terminal_tool_failure(event: Dict[str, Any], terminal_tool_names: set[str])
     return ''
 
 
+def _track_ppt_generation_results(
+    step: Dict[str, Any], pending: dict[str, tuple[str, ...]], failures: dict[tuple[str, ...], str],
+) -> None:
+    """Track failed render targets without treating their published placeholders as success."""
+    for call in step.get('tool_calls') or []:
+        if not isinstance(call, dict):
+            continue
+        name = call.get('name')
+        if name == 'ppt_run_stage':
+            args = _coerce_dict(call.get('args'))
+            stage = str(args.get('stage') or '').strip().lower()
+            if stage == 'page-html':
+                target = (name, stage, str(args.get('page') or ''))
+            elif stage == 'batch-page-html':
+                target = (name, stage, str(args.get('start_page') or 0), str(args.get('end_page') or 0))
+            else:
+                continue
+        elif name == 'ppt_generate_pages':
+            target = (name,)
+        else:
+            continue
+        pending[str(call.get('id') or '')] = target
+
+    for result in step.get('tool_results') or []:
+        if not isinstance(result, dict):
+            continue
+        name = result.get('name')
+        if name not in ('ppt_generate_pages', 'ppt_run_stage'):
+            continue
+        call_id = str(result.get('tool_call_id') or result.get('id') or '')
+        target = pending.pop(call_id, None)
+        if target is None and name == 'ppt_generate_pages':
+            target = (name,)
+        if target is None or target[0] != name:
+            continue
+        payload = _coerce_dict(result.get('result', result.get('content')))
+        if payload.get('ok') is False:
+            reason = payload.get('value') or payload.get('error') or 'generation failed'
+        else:
+            if payload.get('ok') is True:
+                payload = _coerce_dict(payload.get('value'))
+            if payload.get('status') == 'ok' and not payload.get('failed'):
+                failures.pop(target, None)
+                continue
+            if payload.get('status') not in ('failed', 'partial', 'skipped') and not payload.get('failed'):
+                continue
+            reason = payload.get('error') or payload.get('failed_detail') or payload.get('reason') or payload
+        failures[target] = f'{name}: {reason}'[:2000]
+
+
 def _signal_task_cancel(task_id: str) -> bool:
     """Signal the sid-scoped worker Agent without masking the original failure."""
     try:
@@ -1614,6 +1664,16 @@ async def run_subagent_stream(
         declared_workflow_tools = set(_coerce_str_list(ctx.params.get('legacy_tools')))
         terminal_workflow_tools = set(_coerce_str_list(ctx.params.get('terminal_tools')))
         workflow_terminal_completed = False
+        ppt_generation_step = (
+            effective_agent_type == 'workflow_step' and ctx.params.get('step_id') == 'generate_ppt'
+            and (ctx.params.get('workflow_id') == 'ppt-workflow'
+                 or ctx.params.get('workflow_ref') == 'builtin:ppt-workflow')
+        )
+        ppt_render_pending: dict[str, tuple[str, ...]] = {}
+        ppt_render_failures: dict[tuple[str, ...], str] = {}
+        if ppt_generation_step and resume:
+            for step in db.load_steps(task_id):
+                _track_ppt_generation_results(step.get('content') or {}, ppt_render_pending, ppt_render_failures)
         # Accumulate streaming text/think chunks; flush to DB when a tool step follows or at end.
         workflow_tool_in_flight = False
 
@@ -1696,6 +1756,13 @@ async def run_subagent_stream(
                             _pending_text = ''
                         durable_step = _persist_step(ctx, step_seq, item)
                         step_seq += 1
+                        if ppt_generation_step:
+                            # Live results retain the original tool envelope, even when the
+                            # durable copy had its body offloaded to the workspace.
+                            _track_ppt_generation_results(
+                                (durable_step or {}) if tag == 'tool_calls' else item,
+                                ppt_render_pending, ppt_render_failures,
+                            )
                         if tag == 'tool_calls':
                             workflow_terminal_completed = False
                         if tag == 'tool_results' and extension.on_tool_results is not None:
@@ -1824,6 +1891,15 @@ async def run_subagent_stream(
             yield _sse({'type': 'done', 'task_id': task_id, 'status': 'interrupted',
                         'current_phase': 'awaiting_input', 'summary': pending['question'],
                         'control': workflow_control, 'cost': round(time.time() - start_time, 3)})
+            yield 'data: [DONE]\n\n'
+            return
+
+        if ppt_render_failures:
+            message = '\n'.join(ppt_render_failures.values())
+            yield _sse({'type': 'error', 'task_id': task_id, 'status': 'failed',
+                        'current_phase': 'ppt_generation_incomplete',
+                        'summary': message, 'message': message,
+                        'cost': round(time.time() - start_time, 3)})
             yield 'data: [DONE]\n\n'
             return
 

@@ -2260,11 +2260,15 @@ def _write_page_html_from_query(
         return _fail(f'page-html p{page_no}: {e}', page_no=page_no)
 
     html = _sanitize_page_html(html)
+    named_asset_error = ''
+    named_assets = []
     try:
         html, named_assets = resolve_asset_html(html, deck)
-    except (ValueError, OSError) as exc:
+    except ValueError as exc:
+        named_asset_error = str(exc)
+    except OSError as exc:
         return _fail(f'page-html p{page_no}: {exc}', page_no=page_no)
-    if edit_instruction and html.strip() == current_html.strip():
+    if not named_asset_error and edit_instruction and html.strip() == current_html.strip():
         return _fail('Revision returned unchanged HTML; requested change was not applied', page_no=page_no)
 
     extra_paths: list[str] = []
@@ -2293,8 +2297,15 @@ def _write_page_html_from_query(
         and not _html_has_background_image(html, required_background_path)
     )
     invalid_document = not bool(_HTML_DOC_RE.fullmatch(html.strip()))
-    if missing_foreground or missing_background or missing_materials or image_error or invalid_document:
+    if (missing_foreground or missing_background or missing_materials or image_error
+            or invalid_document or named_asset_error):
         corrections: list[str] = []
+        if named_asset_error:
+            corrections.append(
+                f'Named icon validation failed: {named_asset_error[:300]}. '
+                'Copy an exact identifier from NAMED PRESENTATION ASSETS above. '
+                'If none fits, omit the optional decorative icon. Preserve required images and slide content.'
+            )
         if image_error:
             corrections.append('Use only valid, approved image paths: ' + image_error)
         if invalid_document:
@@ -2332,7 +2343,10 @@ def _write_page_html_from_query(
         html = _sanitize_page_html(html)
         try:
             html, named_assets = resolve_asset_html(html, deck)
-        except (ValueError, OSError) as exc:
+        except ValueError as exc:
+            return _fail(f'page-html p{page_no}: {exc} after one repair attempt',
+                         page_no=page_no, failure_kind='named_asset_repair_failed')
+        except OSError as exc:
             return _fail(f'page-html p{page_no}: {exc}', page_no=page_no)
         if not _HTML_DOC_RE.fullmatch(html.strip()):
             return _fail(f'page-html p{page_no}: incomplete HTML document after one repair attempt', page_no=page_no)

@@ -5418,6 +5418,9 @@ def _batch_page_html_publish_progressive(
                 pno for pno in page_nos
                 if not ready_ok.get(pno, False)
                 and not _page_result_timed_out(results.get(pno))
+                # The renderer already regenerated the full page with the asset
+                # validation feedback. A blind batch retry loses that feedback.
+                and (results.get(pno, {}).get('payload') or {}).get('failure_kind') != 'named_asset_repair_failed'
                 and ((results.get(pno, {}).get('payload') or {}).get('diagnostics') or {}).get('code') in {
                     None, 'transport_error', 'rate_limited', 'concurrency_limited',
                     'provider_overloaded', 'service_unavailable', 'provider_internal_error',

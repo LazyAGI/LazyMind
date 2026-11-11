@@ -7,6 +7,7 @@ from types import SimpleNamespace
 import lazyllm
 import pytest
 from PIL import Image
+from lazyllm.tools.agent import ToolExecutionError
 
 from lazyllm.module.llms.onlinemodule.base.model_outcome import (
     ModelCallError, ModelCallTerminal, ModelFailure, ModelFailureCode, ModelFailureOrigin,
@@ -157,7 +158,7 @@ def test_ppt_model_calls_without_page_budget_also_honor_pause(monkeypatch, tools
     assert len(model.calls) == 1
 
 
-def publication_store(monkeypatch, tools):
+def publication_store(monkeypatch, tools, *, inputs=()):
     """Fake the public artifact transport, retaining stable indices across Attempts."""
     orders = {'preview_html': [], 'preview_notes': []}
     selected = {}
@@ -175,7 +176,7 @@ def publication_store(monkeypatch, tools):
         return {'ok': True}
 
     def artifacts(_session):
-        rows = []
+        rows = list(inputs)
         for item in [*history, *selected.values()]:
             order = orders[item['slot']]
             position = order.index(item['list_index']) + 1 if item['list_index'] in order else None
@@ -193,6 +194,81 @@ def publication_store(monkeypatch, tools):
     monkeypatch.setattr(tools, '_workflow_client', lambda: SimpleNamespace(list_artifacts=artifacts))
     monkeypatch.setattr(tools, '_load_saved_notes', lambda: None)
     return SimpleNamespace(orders=orders, selected=selected, invalidate=invalidate)
+
+
+@pytest.mark.parametrize('repair_succeeds', [True, False])
+def test_generate_pages_repairs_only_page_with_unknown_icon(
+    monkeypatch, tmp_path, tools, ppt_asset_library, repair_succeeds,
+):
+    deck = tmp_path / 'deck'
+    (deck / 'pages').mkdir(parents=True)
+    (deck / 'task_pack.json').write_text(json.dumps({'params': {'page_count': 3}}))
+    (deck / 'info_pack.json').write_text('{}')
+    (deck / 'outline_draft.md').write_text('## Page 1\nA\n## Page 2\nB\n## Page 3\nC')
+    (deck / 'complete_page_prompts.json').write_text('{"version":1,"mode":"direct"}')
+    briefs = {number: f'{tools._PAGE_PROMPT_MARKER}\nPage {number} 立体需求分析' for number in (1, 2, 3)}
+    store = publication_store(monkeypatch, tools, inputs=[
+        {'slot': 'template_mode', 'value': {'text': 'none'}},
+        *[{'slot': 'slide_outline', 'list_index': number - 1, 'value': {'text': brief}}
+          for number, brief in briefs.items()],
+    ])
+    monkeypatch.setattr(tools, '_ui_slot_order_list',
+                        lambda slot: [0, 1, 2] if slot == 'slide_outline' else list(store.orders[slot]))
+
+    def artifact_text(_ctx, slot, sort_order=None):
+        return (briefs.get(sort_order) if slot == 'slide_outline' else None), 'text'
+
+    monkeypatch.setattr(tools, '_resolve_artifact_text', artifact_text)
+    context = SimpleNamespace(params={}, task_id='ppt-repair', emit=lambda _event: None)
+    monkeypatch.setattr(tools, 'require_context', lambda: context)
+    monkeypatch.setenv('LAZYMIND_PPT_PAGE_RETRIES', '1')
+
+    calls = []
+
+    def respond(prompt, _control):
+        number = int(prompt.splitlines()[1].split()[1])
+        correction = 'MANDATORY CORRECTION' in prompt
+        calls.append((number, correction))
+        icon = ''
+        if number == 2:
+            if correction:
+                assert 'Unknown presentation asset' in prompt and 'fluent-3d:clock' in prompt
+                assert 'Copy an exact identifier' in prompt
+                name = 'fluent-3d:clipboard' if repair_succeeds else 'fluent-3d:clock-24'
+            else:
+                name = 'fluent-3d:clock'
+            icon = f'<img data-ppt-asset="{name}" alt="需求分析">'
+        return HTML.replace('Generated page', f'Generated page {number}{icon}')
+
+    monkeypatch.setattr(lazyllm, 'AutoModel', lambda **_kwargs: AdapterModel(respond))
+    if repair_succeeds:
+        result = tools.ppt_generate_pages(str(deck))
+    else:
+        with pytest.raises(ToolExecutionError, match=r'batch-page-html failed.*fluent-3d:clock-24'):
+            tools.ppt_generate_pages(str(deck))
+        partial = tools.ppt_list_pages(str(deck))
+        assert partial['fully_published'] is False
+        assert partial['missing_pages'] == partial['placeholder_pages'] == [2]
+        assert not (deck / 'pages/page_002.html').exists()
+
+    assert calls == [(1, False), (2, False), (2, True), (3, False)]
+    if not repair_succeeds:
+        unaffected = {number: (deck / f'pages/page_{number:03d}.html').read_bytes() for number in (1, 3)}
+        store.invalidate()
+        context = SimpleNamespace(params={}, task_id='ppt-repair-2', emit=lambda _event: None)
+        repair_succeeds = True
+        calls.clear()
+        result = tools.ppt_generate_pages(str(deck))
+        assert calls == [(2, False), (2, True)]
+        for number, original in unaffected.items():
+            assert (deck / f'pages/page_{number:03d}.html').read_bytes() == original
+
+    assert result['status'] == 'ok'
+    assert [item['page'] for item in result['published']] == [1, 2, 3]
+    assert tools.ppt_list_pages(str(deck))['fully_published'] is True
+    page = (deck / 'pages/page_002.html').read_text()
+    assert 'asset-fluent-3d--clipboard.png' in page
+    assert 'fluent-3d:clock' not in page
 
 
 def test_retry_republishes_cached_successes_in_new_attempt_before_model_calls(monkeypatch, tmp_path, tools):

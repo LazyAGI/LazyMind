@@ -2721,6 +2721,65 @@ async def test_workflow_terminal_delivery_uses_saved_result_summary(
     model.share.assert_not_called()
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(('tool_name', 'args', 'failure', 'retry_args', 'expected_status'), [
+    ('ppt_generate_pages', {},
+     {'ok': False, 'value': '第 2 页失败：fluent-3d:clock 不存在'}, None, 'failed'),
+    ('ppt_generate_pages', {},
+     {'ok': True, 'value': {'status': 'partial', 'failed': 1, 'failed_detail': '第 2 页失败'}}, None, 'failed'),
+    ('ppt_generate_pages', {},
+     {'ok': False, 'value': '第 2 页失败'}, {}, 'succeeded'),
+    ('ppt_run_stage', {'stage': 'page-html', 'page': 2},
+     {'ok': False, 'value': '第 2 页失败'}, None, 'failed'),
+    ('ppt_run_stage', {'stage': 'page-html', 'page': 2},
+     {'ok': False, 'value': '第 2 页失败'}, {'stage': 'page-html', 'page': 3}, 'failed'),
+    ('ppt_run_stage', {'stage': 'page-html', 'page': 2},
+     {'ok': False, 'value': '第 2 页失败'}, {'stage': 'page-html', 'page': 2}, 'succeeded'),
+    ('ppt_run_stage', {'stage': 'asset-plan'},
+     {'ok': False, 'value': 'Optional asset plan unavailable'}, None, 'succeeded'),
+])
+async def test_ppt_completion_preserves_page_generation_failure(
+    monkeypatch, tmp_path, tool_name, args, failure, retry_args, expected_status,
+):
+    def tool_events(call_id, name, arguments, result):
+        return [
+            {'tag': 'tool_calls', 'tool_calls': [{'id': call_id, 'name': name, 'args': arguments}]},
+            {'tag': 'tool_results', 'tool_results': [
+                {'id': call_id, 'name': name, 'result': json.dumps(result, ensure_ascii=False)},
+            ]},
+        ]
+
+    events = tool_events('initial', tool_name, json.dumps(args), failure)
+    if retry_args is not None:
+        events += tool_events('retry', tool_name, retry_args, {
+            'ok': True, 'value': {'status': 'ok', 'failed': 0},
+        })
+    # Successful reads and a confident final summary do not repair a failed render.
+    events += tool_events('find', 'ppt_find_deck', {}, {'ok': True, 'value': {'found': True}})
+    artifacts = [
+        {'slot': slot, 'content_type': 'text', 'seq': page,
+         'value': {'text': '<!-- lazymind-ppt-placeholder -->第 2 页尚未生成或发布成功'
+                   if page == 2 else f'Page {page}'}}
+        for slot in ('preview_html', 'preview_notes') for page in (1, 2, 3)
+    ]
+    model = MagicMock()
+    required_slots = [] if tool_name == 'ppt_generate_pages' else ['preview_html', 'preview_notes']
+    _, output = await _run_completion_review_scenario(
+        monkeypatch, tmp_path, model, agent_type='workflow_step',
+        params={'workflow_id': 'ppt-workflow', 'step_id': 'generate_ppt',
+                'required_output_artifact_keys': required_slots,
+                'output_slot_types': {'preview_html': 'text', 'preview_notes': 'text'}},
+        output_slots=['preview_html', 'preview_notes'],
+        artifacts=artifacts, tool_events=events, final='所有页面都已生成。',
+    )
+    terminal = _terminal(output)
+    assert terminal['status'] == expected_status
+    if expected_status == 'failed':
+        assert terminal['current_phase'] == 'ppt_generation_incomplete'
+        assert '第 2 页失败' in terminal['summary']
+    model.share.assert_not_called()
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize('saved', [True, False])
 async def test_workflow_refinements_preserve_record_acceptance(monkeypatch, tmp_path, saved):
     """A current-step amendment changes execution intent, not main's acceptance gate."""
