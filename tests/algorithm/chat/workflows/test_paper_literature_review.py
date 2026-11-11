@@ -437,6 +437,21 @@ def test_supplied_paper_survives_when_embedding_is_unavailable(paper, monkeypatc
     construct.assert_not_called()
 
 
+def test_satisfied_target_does_not_warn_about_unused_embedding(paper, monkeypatch, selection):
+    from lazymind.chat.engine.tools.lazy_kb import KBToolkit
+    selection({'material_roles': {'M1': 'paper'}, 'requested_paper_count': 1,
+               'queries': {'unused expansion': 1}})
+    monkeypatch.setattr(review_materials, 'is_model_role_available', lambda _role: False)
+    construct = Mock(side_effect=AssertionError('KBToolkit must not be constructed'))
+    monkeypatch.setattr(KBToolkit, '__init__', construct)
+
+    result = review_materials.prepare({'papers': [paper]}, ['library'])
+
+    assert result == [paper]
+    assert 'retrieval_warnings' not in result[0]
+    construct.assert_not_called()
+
+
 def test_external_search_remains_real_evidence_when_embedding_is_unavailable(
         sciverse, monkeypatch, selection):
     from lazymind.chat.engine.tools.lazy_kb import KBToolkit

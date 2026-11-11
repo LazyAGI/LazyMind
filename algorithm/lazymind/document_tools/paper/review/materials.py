@@ -219,13 +219,14 @@ def prepare(inputs: dict, knowledge_bases: list[str], *, fixed_scope: bool = Fal
         selected = supplied + retrieved[:max(0, target_count - _paper_count(supplied))]
     warnings = []
     expanding = bool(plan.queries or plan.external_queries)
-    if plan.queries and not is_model_role_available(EMBED_MAIN):
+    remaining = (max(0, target_count - _paper_count(selected))
+                 if _paper_count(selected) < minimum_count else 0)
+    if remaining and plan.queries and not is_model_role_available(EMBED_MAIN):
         plan.queries = {}
         warnings.append('文本向量模型未就绪，已跳过知识库检索；请在模型默认服务中配置文本向量模型后重试。')
         if not _has_readable_review_paper(selected) and not plan.external_queries:
             raise EmbeddingNotReady('知识库检索需要可用的文本向量模型；请先在模型默认服务中配置文本向量模型后重试。')
-    _limit_queries(plan, max(0, target_count - _paper_count(selected))
-                   if _paper_count(selected) < minimum_count else 0)
+    _limit_queries(plan, remaining)
     seen = list(selected)
     toolkit, provider = None, None
     if plan.queries:
