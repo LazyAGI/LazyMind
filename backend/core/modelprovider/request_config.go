@@ -401,12 +401,12 @@ func SetProviderRequestConfig(w http.ResponseWriter, r *http.Request) {
 		return updateProviderEndpointLocked(tx, &parent, effective, now, true, protocolChanged || advancedChanged)
 	})
 	if err != nil {
-		if errors.Is(err, credentialvault.ErrInvalidContract) {
+		if replyEmbeddingMutationConflict(w, err) {
+			return
+		} else if errors.Is(err, credentialvault.ErrInvalidContract) {
 			common.ReplyErr(w, "request configuration exceeds credential limits", 400)
 		} else if errors.Is(err, errUnsupportedRequestModels) {
 			common.ReplyErr(w, err.Error(), 400)
-		} else if errors.Is(err, errEmbeddingIdentityInUse) {
-			common.ReplyErr(w, err.Error(), http.StatusConflict)
 		} else {
 			common.ReplyErr(w, "save request configuration failed", 500)
 		}

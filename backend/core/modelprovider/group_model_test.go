@@ -392,7 +392,7 @@ func TestDeleteUnusedEmbeddingModelKeepsIndexedKnowledge(t *testing.T) {
 	active := orm.UserModelProviderGroupModel{ID: "embed-active", UserModelProviderID: provider.ID, UserModelProviderGroupID: group.ID, Name: "active-embed", ModelType: "embed", BaseModel: orm.BaseModel{CreateUserID: "user-1", CreatedAt: now, UpdatedAt: now}}
 	unused := orm.UserModelProviderGroupModel{ID: "embed-unused", UserModelProviderID: provider.ID, UserModelProviderGroupID: group.ID, Name: "unused-embed", ModelType: "embed", BaseModel: orm.BaseModel{CreateUserID: "user-1", CreatedAt: now, UpdatedAt: now}}
 	indexed := orm.Dataset{ID: "kb-indexed", KbID: "kb-indexed", ProcessingLevel: "indexed", BaseModel: orm.BaseModel{CreateUserID: "user-1", CreatedAt: now, UpdatedAt: now}}
-	state := orm.EmbeddingIndexState{Scope: "global", ActiveModelID: active.ID, ActiveSource: "own", Phase: "ready", Generation: 1, UpdatedAt: now}
+	state := orm.EmbeddingIndexState{Scope: "global", ActiveModelID: active.ID, ActiveSource: "own", Signature: validTestEmbeddingFingerprint, Phase: "ready", Generation: 1, UpdatedAt: now}
 	for _, row := range []any{&provider, &group, &active, &unused, &indexed, &state} {
 		if err := db.Create(row).Error; err != nil {
 			t.Fatal(err)

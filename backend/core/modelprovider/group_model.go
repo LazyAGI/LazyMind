@@ -473,8 +473,11 @@ func UpdateGroupModel(w http.ResponseWriter, r *http.Request) {
 		return nil
 	})
 	if err != nil {
+		if replyEmbeddingMutationConflict(w, err) {
+			return
+		}
 		switch {
-		case errors.Is(err, errModelAlreadyExists), errors.Is(err, errConnectionChanged), errors.Is(err, errModelDefaultReference), errors.Is(err, errModelConversationReference), errors.Is(err, errEmbeddingIdentityInUse):
+		case errors.Is(err, errModelAlreadyExists), errors.Is(err, errConnectionChanged), errors.Is(err, errModelDefaultReference), errors.Is(err, errModelConversationReference):
 			common.ReplyErr(w, err.Error(), http.StatusConflict)
 		case errors.Is(err, errUnsupportedModelType), errors.Is(err, errSupplierModelType), errors.Is(err, errInvalidModelName):
 			common.ReplyErr(w, err.Error(), http.StatusBadRequest)
@@ -852,7 +855,6 @@ func DeleteGroupModel(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var clearMultimodalSelection bool
-	confirmationRequired := errEmbeddingInUse
 	now := time.Now().UTC()
 	var downgradedKnowledgeBases int64
 	if err := db.WithContext(r.Context()).Transaction(func(tx *gorm.DB) error {
@@ -900,7 +902,10 @@ func DeleteGroupModel(w http.ResponseWriter, r *http.Request) {
 		}
 		return nil
 	}); err != nil {
-		if errors.Is(err, confirmationRequired) || errors.Is(err, errConnectionChanged) {
+		if replyEmbeddingMutationConflict(w, err) {
+			return
+		}
+		if errors.Is(err, errConnectionChanged) {
 			common.ReplyErr(w, err.Error(), http.StatusConflict)
 		} else {
 			common.ReplyErr(w, "delete model failed", http.StatusInternalServerError)

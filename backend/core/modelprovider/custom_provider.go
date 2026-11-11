@@ -342,8 +342,7 @@ func clearProviderConfiguration(w http.ResponseWriter, r *http.Request, reset bo
 		return clearEmbeddingStateAfterRemoval(tx, embeddingModelIDs...)
 	})
 	if err != nil {
-		if errors.Is(err, errEmbeddingInUse) {
-			common.ReplyErr(w, err.Error(), http.StatusConflict)
+		if replyEmbeddingMutationConflict(w, err) {
 			return
 		}
 		common.ReplyErr(w, "delete custom provider failed", 500)
