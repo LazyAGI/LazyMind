@@ -9,7 +9,7 @@ class ComponentRequiredError(RuntimeError):
     def __init__(self, component):
         self.component = component
         self.settings_url = f'/settings?section=system_tools#python-{component}-dependency'
-        title = '本地知识库与文档解析'
+        title = '技能聚类' if component == 'cluster' else '本地知识库与文档解析'
         super().__init__(f'请先在设置 → 系统工具 → 依赖中安装“{title}”，然后重启本地服务。'
                          f' {self.settings_url}')
 

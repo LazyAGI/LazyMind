@@ -51,6 +51,24 @@ class DependencyGroupsTests(unittest.TestCase):
         self.assertIn(components.DEFAULT_BASE_URL.removesuffix('RAG/'), (ROOT / 'backend/core/systemdeps/ffmpeg.go').read_text())
         self.assertTrue(components.DEFAULT_BASE_URL.endswith('/resolve/master/RAG/'))
 
+    def test_cluster_is_separate_and_shared_scientific_packages_stay_in_base(self):
+        deps = {name: Distribution(name) for name in set.union(*components.SEEDS.values()) | components.CLUSTER_SEEDS}
+        deps['numpy'] = Distribution('numpy')
+        deps['scipy'] = Distribution('scipy', ['numpy'])
+        deps['scikit-learn'] = Distribution('scikit-learn', ['numpy', 'scipy'])
+        deps['umap-learn'].requires = ['numpy', 'scipy', 'scikit-learn', 'numba', 'pynndescent']
+        deps['pynndescent'].requires = ['numba', 'numpy', 'scikit-learn']
+        deps['numba'].requires = ['llvmlite', 'numpy']
+        deps['spacy'].requires = ['numpy']
+        protected = {'numpy', 'scipy', 'scikit-learn'}
+        base = components.dependency_groups(deps, protected)
+        groups = components.dependency_groups(deps, protected, defer_cluster=True)
+        self.assertEqual(groups['rag'], base['rag'])
+        self.assertEqual(groups['cluster'], components.CLUSTER_SEEDS)
+        deps['core'] = Distribution('core', ['numba'])
+        with self.assertRaisesRegex(RuntimeError, 'cluster is required by core'):
+            components.dependency_groups(deps, protected, defer_cluster=True)
+
     def test_refuses_removing_a_core_requirement(self):
         deps = {name: Distribution(name) for name in set.union(*components.SEEDS.values())}
         deps['core'] = Distribution('core', ['spacy'])
