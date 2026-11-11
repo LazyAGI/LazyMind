@@ -47,9 +47,8 @@ export default function ReadingPreferencesModal({ open, onClose }: { open: boole
             <Select aria-label={name} value={draft.modes[id]} disabled={saving} options={[{ value: 'on_demand', label: '按需' }, { value: 'automatic', label: '自动' }, { value: 'disabled', label: '禁用生成' }]} onChange={mode => setDraft({ ...draft, preset: 'custom', modes: { ...draft.modes, [id]: mode } })} />
           </div>;
         })}
-        <div className="reading-unavailable">论文速览 <span>暂不可用</span></div>
       </div>}
-      {!(detailsOpen) && draft.capabilities.filter(c => c.id !== 'overview' && c.unavailable_reason).map(c => <Alert key={c.id} type="warning" showIcon message={c.unavailable_reason} />)}
+      {!(detailsOpen) && draft.capabilities.filter(c => c.unavailable_reason).map(c => <Alert key={c.id} type="warning" showIcon message={c.unavailable_reason} />)}
       <div className="reading-section-heading reading-model-heading"><span>服务与模型</span><span className="reading-section-hint">仅用于论文阅读</span></div>
       <div className="reading-provider-selections">
         {([['parser', 'parser_ref', '文档解析服务', '/settings?section=model_defaults&service=parsing'], ['study', 'study_model_ref', '研读模型', '/settings?section=models']] as const).map(([kind, field, label, href]) => {

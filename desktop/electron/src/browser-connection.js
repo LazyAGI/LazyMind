@@ -1,3 +1,6 @@
+const initialRetryDelayMs = 2000;
+const maxRetryDelayMs = 60000;
+
 // Credentials stay in the main process. Pairing uses the existing authenticated
 // Core endpoint; no public auto-pair endpoint or shared secret is introduced.
 class BrowserConnection {
@@ -6,6 +9,7 @@ class BrowserConnection {
     this.generation = 0;
     this.state = 'signed_out';
     this.queue = Promise.resolve();
+    this.retryDelayMs = initialRetryDelayMs;
   }
 
   status() { return { state: this.state, error: this.error || '', deviceId: this.device?.device_id || '' }; }
@@ -19,8 +23,10 @@ class BrowserConnection {
     const serverURL = server.href.replace(/\/$/, '');
     const identity = `${serverURL}\n${value.user_id}`;
     if (identity === this.identity) {
+      const tokenChanged = value.access_token !== this.auth.access_token;
       this.auth = { ...value, server_url: serverURL };
-      if (!this.socket && !this.connecting) this.schedule(0);
+      if (tokenChanged) this.retryDelayMs = initialRetryDelayMs;
+      if (!this.socket && !this.connecting && (tokenChanged || !this.timer)) this.schedule(0);
       return this.status();
     }
     await this.clear();
@@ -47,6 +53,7 @@ class BrowserConnection {
   async clear() {
     this.generation++;
     clearTimeout(this.timer);
+    this.timer = undefined;
     clearTimeout(this.handshakeTimer);
     this.socket?.close();
     this.socket = null;
@@ -56,16 +63,26 @@ class BrowserConnection {
     this.device = null;
     this.state = 'signed_out';
     this.error = '';
+    this.retryDelayMs = initialRetryDelayMs;
     const controller = this.controller;
     this.controller = null;
     if (controller) await controller.dispose();
   }
 
-  schedule(delay = 2000) {
+  schedule(delay) {
     clearTimeout(this.timer);
+    this.timer = undefined;
     if (!this.auth || !this.controller) return;
-    this.timer = setTimeout(() => void this.connect(), delay);
+    this.timer = setTimeout(() => {
+      this.timer = undefined;
+      void this.connect();
+    }, delay);
     this.timer.unref?.();
+  }
+
+  scheduleRetry() {
+    this.schedule(this.retryDelayMs);
+    this.retryDelayMs = Math.min(this.retryDelayMs * 2, maxRetryDelayMs);
   }
 
   async json(path, body, authenticated, auth) {
@@ -118,6 +135,7 @@ class BrowserConnection {
         try { message = JSON.parse(String(raw)); } catch { return; }
         if (message.type === 'hello_ack') {
           clearTimeout(this.handshakeTimer);
+          this.retryDelayMs = initialRetryDelayMs;
           this.state = 'connected'; this.error = '';
         } else if (message.type === 'hello_error') {
           // Core currently stores devices in memory. Re-pair automatically after restart.
@@ -148,13 +166,13 @@ class BrowserConnection {
         clearTimeout(this.handshakeTimer);
         this.socket = null;
         this.state = 'disconnected';
-        this.schedule();
+        this.scheduleRetry();
       });
     } catch (error) {
       if (generation !== this.generation) return;
       this.state = 'error'; this.error = error.message;
       this.onError(error);
-      this.schedule(5000);
+      this.scheduleRetry();
     } finally {
       if (generation === this.generation) this.connecting = false;
     }

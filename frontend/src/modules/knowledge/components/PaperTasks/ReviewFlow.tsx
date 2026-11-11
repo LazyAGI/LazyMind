@@ -1,8 +1,8 @@
 import type { ReactNode } from 'react';
-import { Alert, Steps } from 'antd';
+import { Alert } from 'antd';
 import { useTranslation } from 'react-i18next';
 import PaperFlow from './PaperFlow';
-import { paperFlowSteps } from './paperFlowModel';
+import { paperFlowSteps, type PaperFlowStep } from './paperFlowModel';
 import './ReviewFlow.scss';
 
 interface Props {
@@ -25,15 +25,14 @@ export default function ReviewFlow({ status, reviewStarted = false, readyCount =
     const completed = status === 'completed';
     const message = failed ? 'failed' : stopped ? 'stopped' : !completed ? 'preparing'
         : researchIncomplete ? 'incompleteResearch' : processingCount > 0 ? 'processingFulltext' : readyCount < 2 ? 'needFulltext' : 'ready';
-    const current = message === 'ready' ? 2 : completed && !researchIncomplete ? 1 : 0;
+    const expansionStatus: PaperFlowStep['status'] = message === 'ready' ? 'done' : failed ? 'failed' : stopped ? 'paused'
+        : message === 'needFulltext' ? 'needFulltext' : researchIncomplete ? 'incompleteResearch' : 'running';
+    const steps = paperFlowSteps('review', 'balanced').map<PaperFlowStep>(step => ({ ...step,
+        status: step.id === 'inputs' ? 'done' : step.id === 'generateReview' ? message === 'ready' ? 'queued' : 'pending' : expansionStatus,
+    }));
 
-    return <section className="paper-review-flow" aria-label={t('paperTasks.reviewFlow.label')}>
-        <Steps size="small" current={current} status={failed ? 'error' : stopped || researchIncomplete || message === 'needFulltext' ? 'wait' : 'process'}
-            items={[
-                { title: t('paperTasks.reviewFlow.stage.expand') },
-                { title: t('paperTasks.expansionDepth.steps.prepareFulltext') },
-                { title: t('paperTasks.reviewFlow.stage.handoff') },
-            ]} />
+    return <section className="paper-review-flow">
+        <PaperFlow title={t('paperTasks.reviewFlow.label')} steps={steps} />
         <Alert type={failed ? 'error' : stopped || researchIncomplete || message === 'needFulltext' ? 'warning' : 'info'} showIcon
             message={t(`paperTasks.reviewFlow.${message}`)}
             description={t(`paperTasks.reviewFlow.${message}Hint`, { count: readyCount, processing: processingCount })} />
@@ -43,6 +42,5 @@ export default function ReviewFlow({ status, reviewStarted = false, readyCount =
 
 export function ReviewEntryFlow({ mode, directionOnly = false }: { mode: 'direct' | 'fast' | 'balanced'; directionOnly?: boolean }) {
     const { t } = useTranslation();
-    return <PaperFlow title={t('paperTasks.reviewFlow.label')} steps={paperFlowSteps('review', mode, directionOnly)} preview
-        hint={mode !== 'direct' ? t('paperTasks.reviewFlow.entry.fulltextBatchHint') : undefined} />;
+    return <PaperFlow title={t('paperTasks.reviewFlow.label')} steps={paperFlowSteps('review', mode, directionOnly)} preview />;
 }

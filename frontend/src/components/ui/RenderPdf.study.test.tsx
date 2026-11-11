@@ -4,7 +4,7 @@ import {useEffect,type ReactNode} from 'react';
 import type {PdfIRDocument} from '@/modules/knowledge/api/pdfIR';
 const state=vi.hoisted(()=>({nativeClick:undefined as undefined|((item:{pageNumber:number;dest?:unknown[]})=>void),pageLoads:new Map<number,(width:number,height:number)=>void>(),document:undefined as unknown,status:'ready',failLoad:false,deferLoad:false,load:undefined as undefined|(()=>void),pdfFile:undefined as unknown,text:undefined as undefined|((page:number)=>Promise<{items:Array<{str:string}>}>)}));
 vi.mock('react-i18next',async original=>({...await original<typeof import('react-i18next')>(),useTranslation:()=>({t:(key:string)=>key})}));
-vi.mock('react-pdf',()=>({pdfjs:{GlobalWorkerOptions:{}},Document:({children,onLoadSuccess,onLoadError,file,onItemClick}:{file:unknown;onItemClick?:typeof state.nativeClick;children:ReactNode;onLoadSuccess:(value:unknown)=>void;onLoadError:(error:Error)=>void})=>{state.pdfFile=file;state.nativeClick=onItemClick;useEffect(()=>{if(state.failLoad){onLoadError(new Error("Invalid PDF"));return;}state.load=()=>onLoadSuccess({numPages:3,getPage:async(page:number)=>({view:[0,0,600,800],getViewport:()=>({width:600,height:800,convertToViewportPoint:(x:number,y:number)=>[x,800-y]}),getTextContent:()=>state.text?state.text(page):Promise.resolve({items:[{str:page===3?'needle result':'ordinary text'}]})})});if(!state.deferLoad)state.load();},[file]);return <>{children}</>;},Page:({width,pageNumber,onLoadSuccess,devicePixelRatio}:{width:number;pageNumber:number;onLoadSuccess:(page:unknown)=>void;devicePixelRatio?:number})=> {state.pageLoads.set(pageNumber,(w,h)=>onLoadSuccess({getViewport:()=>({width:w,height:h})}));return <div data-testid="rendered-pdf-page" data-width={width} data-pixel-ratio={devicePixelRatio}/>;}}));
+vi.mock('react-pdf',()=>({pdfjs:{GlobalWorkerOptions:{}},Document:({children,onLoadSuccess,onLoadError,file,onItemClick}:{file:unknown;onItemClick?:typeof state.nativeClick;children:ReactNode;onLoadSuccess:(value:unknown)=>void;onLoadError:(error:Error)=>void})=>{state.pdfFile=file;state.nativeClick=onItemClick;useEffect(()=>{if(state.failLoad){onLoadError(new Error("Invalid PDF"));return;}state.load=()=>onLoadSuccess({numPages:3,getPage:async(page:number)=>({view:[0,0,600,800],getViewport:()=>({width:600,height:800,convertToViewportPoint:(x:number,y:number)=>[x,800-y]}),getTextContent:()=>state.text?state.text(page):Promise.resolve({items:[{str:page===3?'needle result':'ordinary text'}]})})});if(!state.deferLoad)state.load();},[file]);return <>{children}</>;},Page:({width,pageNumber,onLoadSuccess,devicePixelRatio,renderTextLayer}:{width:number;pageNumber:number;onLoadSuccess:(page:unknown)=>void;devicePixelRatio?:number;renderTextLayer?:boolean})=> {state.pageLoads.set(pageNumber,(w,h)=>onLoadSuccess({getViewport:()=>({width:w,height:h})}));return <div data-testid="rendered-pdf-page" data-width={width} data-pixel-ratio={devicePixelRatio}>{renderTextLayer&&<span data-testid="pdf-text-layer">Selectable PDF sentence</span>}</div>;}}));
 vi.mock('@/modules/knowledge/api/pdfIR',async original=>({...await original<typeof import('@/modules/knowledge/api/pdfIR')>(),usePdfIR:()=>({state,starting:false,start:vi.fn()})}));
 vi.mock('./pdfPinStore',async original=>({...await original<typeof import('./pdfPinStore')>(),readPdfPinBoard:vi.fn().mockResolvedValue([]),writePdfPinBoard:vi.fn().mockResolvedValue(true)}));
 vi.mock('./PdfVisualStudy',()=>({PdfVisualStudy:({autoExplain}:{autoExplain:boolean})=> <aside aria-label="visual-study" data-auto-explain={String(autoExplain)}/> }));
@@ -20,23 +20,13 @@ function expectPage(page:number){expect(pageButton(page)).toBeInTheDocument();}
 
 beforeEach(()=>{vi.mocked(readPdfPinBoard).mockClear().mockResolvedValue([]);vi.mocked(writePdfPinBoard).mockClear().mockResolvedValue(true);state.pageLoads.clear();state.failLoad=false;state.text=undefined;state.deferLoad=false;sessionStorage.clear();state.document=document();state.status='ready';});
 
-it('keeps overview selected when geometry changes after a consumed page navigation',async()=>{
- const props={fileData:'outline-resize.pdf',pdfIRTarget:target,pdfSourceHash:'hash',pdfNavigateToPage:{page:2,requestId:1}};
- const view=render(<RenderPdf {...props} defaultPageWidth={600}/>);
+it('keeps the paper reader on the original document without an overview mode',async()=>{
+ const view=render(<RenderPdf fileData="paper.pdf" pdfIRTarget={target} pdfSourceHash="hash"/>);
  await act(async()=>{});
- fireEvent.click(screen.getByRole('tab',{name:'pdfReader.insight'}));
- view.rerender(<RenderPdf {...props} defaultPageWidth={700}/>);
- expect(screen.getByRole('tab',{name:'pdfReader.insight'})).toHaveAttribute('aria-selected','true');
-});
-
-it('keeps overview selected when IR refreshes after a consumed block navigation',async()=>{
- const props={fileData:'outline-refresh.pdf',pdfIRTarget:target,pdfSourceHash:'hash',pdfNavigateTo:{id:'table',requestId:1}};
- const view=render(<RenderPdf {...props}/>);
- await act(async()=>{});
- fireEvent.click(screen.getByRole('tab',{name:'pdfReader.insight'}));
- state.document={...document()};
- view.rerender(<RenderPdf {...props}/>);
- expect(screen.getByRole('tab',{name:'pdfReader.insight'})).toHaveAttribute('aria-selected','true');
+ expect(screen.queryByRole('tab',{name:'pdfReader.insight'})).toBeNull();
+ expect(screen.queryByRole('tablist',{name:'pdfReader.reading'})).toBeNull();
+ expect(view.container.querySelector('.pdf-reader-overview-scroll')).toBeNull();
+ expect(view.container.querySelector('.pdf-reader-workspace')).toHaveAttribute('data-reader-mode','original');
 });
 
 it('does not restore legacy highlights with an unknown account owner',async()=>{
@@ -50,6 +40,14 @@ it('paints notes restored from the library without depending on browser session 
  const view=render(<RenderPdf fileData="persisted-note.pdf" pdfIRTarget={target} pdfSourceHash="hash" savedNoteHighlights={[{id:'server-note',page:1,color:'blue',rects:[[.1,.2,.4,.24]]}]}/>);
  await act(async()=>{});
  expect(view.container.querySelector('[data-pdf-note-highlight="blue"]')).not.toBeNull();
+});
+
+it('opens the saved note represented by a clicked PDF highlight',async()=>{
+ const open=vi.fn();
+ render(<RenderPdf fileData="click-note.pdf" pdfIRTarget={target} pdfSourceHash="hash" savedNoteHighlights={[{id:'server-note',page:1,color:'yellow',rects:[[.1,.2,.4,.24]]}]} onNoteHighlightClick={open}/>);
+ await act(async()=>{});
+ fireEvent.click(screen.getByRole('button',{name:'打开笔记'}));
+ expect(open).toHaveBeenCalledWith('server-note');
 });
 
 it('opens a saved note at its anchored position and offers return to the reading position',async()=>{
@@ -97,31 +95,6 @@ it('isolates saved and mounted note highlights when the account changes',async()
  }
 });
 
-it('keeps a paper overview with the source abstract and an unavailable quick-read state',async()=>{
- state.document={...document(),blocks:[
-  {id:'title',type:'title',page:0,text:'A useful paper',bbox:[.1,.1,.9,.2]},
-  {id:'abstract',type:'abstract',page:0,text:'Abstract: The method predicts a useful result.',bbox:[.1,.2,.9,.4]},
-  ...document().blocks,
- ]};
- const view=render(<RenderPdf fileData="overview.pdf" pdfIRTarget={target} pdfSourceHash="hash" paperTitle="Fallback title"/>);
- fireEvent.click(screen.getByRole('button',{name:'pdfReader.nextPage'}));
- fireEvent.click(screen.getByRole('tab',{name:'pdfReader.insight'}));
- expect(screen.getByRole('heading',{name:'A useful paper'})).toBeInTheDocument();
- expect(screen.getByText('The method predicts a useful result.')).toBeInTheDocument();
- expect(screen.getByText('论文速读暂时不可用')).toBeInTheDocument();
- expect(view.container.querySelector('.pdf-reader-with-study')).toHaveStyle({visibility:'hidden'});
- fireEvent.click(screen.getByRole('tab',{name:'pdfReader.reading'}));
- expectPage(2);
- expect(view.container.querySelector('.pdf-reader-with-study')).toHaveStyle({visibility:'visible'});
-});
-
-it('opens the overview before document parsing is ready',()=>{
- state.document=undefined;
- render(<RenderPdf fileData="unparsed.pdf" pdfIRTarget={target} paperTitle="Unparsed paper"/>);
- fireEvent.click(screen.getByRole('tab',{name:'pdfReader.insight'}));
- expect(screen.getByRole('heading',{name:'Unparsed paper'})).toBeInTheDocument();
- expect(screen.getByText('论文速读暂时不可用')).toBeInTheDocument();
-});
 describe('reader study integration',()=>{
  it('explains the parser requirement and links to its settings before full reading tools are available',async()=>{
   state.document=undefined;state.status='not_requested';
@@ -158,7 +131,7 @@ it('publishes only source-verified IR and returns to original for an external bl
  const view=render(<RenderPdf {...props}/>);
  expect(notify).toHaveBeenLastCalledWith(state.document);
 
- expect(screen.getByRole('tablist')).toBeInTheDocument();
+ expect(screen.getByRole('button',{name:/pdfReader.page/})).toBeInTheDocument();
  view.rerender(<RenderPdf {...props} pdfNavigateTo={{id:'table',requestId:1}}/>);
  await waitFor(()=>expect(screen.getByRole('button',{name:/pdfReader.page/})).toBeInTheDocument());
  expect(view.container.querySelector('.pdf-study-highlight')).toBeInTheDocument();
@@ -183,13 +156,13 @@ it('retains rendered pages and source while resizing, hiding and restoring the r
  width.mockReturnValue(600);height.mockReturnValue(500);act(()=>callbacks.forEach(callback=>callback()));
  await waitFor(()=>expect(screen.getAllByTestId('rendered-pdf-page')[0]).toHaveAttribute('data-width','1200'));
  expect(screen.getAllByTestId('rendered-pdf-page')[0]).toBe(page);
- expect(page.closest('[data-pdf-page-index]')).toHaveStyle({width:'580px'});
+ await waitFor(()=>expect(page.closest('[data-pdf-page-index]')).toHaveStyle({width:'580px'}));
  expectPage(2);
  expect(state.pdfFile).toBe(source);
  width.mockReturnValue(390);act(()=>callbacks.forEach(callback=>callback()));
- expect(page.closest('[data-pdf-page-index]')).toHaveStyle({width:'370px'});
+ await waitFor(()=>expect(page.closest('[data-pdf-page-index]')).toHaveStyle({width:'370px'}));
  width.mockReturnValue(1600);act(()=>callbacks.forEach(callback=>callback()));
- expect(page.closest('[data-pdf-page-index]')).toHaveStyle({width:'1152px'});
+ await waitFor(()=>expect(page.closest('[data-pdf-page-index]')).toHaveStyle({width:'1152px'}));
  expectPage(2);
  fireEvent.click(screen.getByRole('button',{name:'pdfReader.zoomIn'}));
  expect(page.closest('[data-pdf-page-index]')).toHaveStyle({width:'1267px'});
@@ -338,10 +311,10 @@ it('keeps zoom when verified parsing arrives and restores source-scoped reading 
 
  state.document=document("preferences");
  view.rerender(<RenderPdf {...props}/>);
- expect(screen.getByRole('tablist')).toBeInTheDocument();
+ expect(screen.getByRole('button',{name:/pdfReader.page/})).toBeInTheDocument();
  view.unmount();
  render(<RenderPdf {...props}/>);
- expect(screen.getByRole('tablist')).toBeInTheDocument();
+ expect(screen.getByRole('button',{name:/pdfReader.page/})).toBeInTheDocument();
 
  expect(screen.getByRole('button',{name:'110%'})).toBeInTheDocument();
  await act(async()=>{});
@@ -365,7 +338,7 @@ it('opens an external page request in the original PDF without requiring parsed 
  await act(async()=>{});
 
  view.rerender(<RenderPdf {...props} pdfNavigateToPage={{page:2,requestId:1}}/>);
- expect(screen.getByRole('tablist')).toBeInTheDocument();
+ expect(screen.queryByRole('tablist')).toBeNull();
  expectPage(2);
  await act(async()=>{});
 });
@@ -396,10 +369,11 @@ it('preserves the current page on zoom despite an unchanged controlled position'
  expectPage(2);
 });
 
-it('does not restore overview for a PDF without structured-reading support',async()=>{
+it('ignores removed legacy reader modes for an ordinary PDF',async()=>{
  sessionStorage.setItem('pdf-reader:::plain',JSON.stringify({mode:'insight',zoom:1}));
  render(<RenderPdf fileData="plain.pdf" pdfSourceHash="plain"/>);
  expect(screen.getByRole('button',{name:/pdfReader.page/})).toBeInTheDocument();
+ expect(screen.queryByRole('tablist')).toBeNull();
  await act(async()=>{});
 });
 
@@ -409,15 +383,14 @@ it('keeps PDF reading visible when source hashing replaces the loaded buffer',as
  const view=render(<RenderPdf fileData={new ArrayBuffer(4)} pdfIRTarget={target}/>);
 
  view.rerender(<RenderPdf fileData={new ArrayBuffer(4)} pdfIRTarget={target} pdfSourceHash="newly-hashed"/>);
- expect(screen.getByRole('tablist')).toBeInTheDocument();
+ expect(screen.getByRole('button',{name:/pdfReader.page/})).toBeInTheDocument();
  await act(async()=>{});
 });
 
- it('retains header slots and overview without bilingual reflow',async()=>{
+ it('retains header slots without legacy reader modes',async()=>{
  sessionStorage.setItem('pdf-reader:d:one:hash',JSON.stringify({mode:'insight',zoom:1}));
  const view=render(<RenderPdf fileData="test.pdf" pdfIRTarget={target} pdfSourceHash="hash" pdfHeaderStart={<button>Library</button>} pdfHeaderEnd={<button>Workspace</button>}/>);
- expect(screen.getAllByRole('tab')).toHaveLength(2);
- expect(screen.getByRole('tablist')).toBeInTheDocument();
+ expect(screen.queryByRole('tablist')).toBeNull();
  expect(screen.queryByRole('button',{name:'pdfReader.bilingual'})).toBeNull();
  expect(view.container.querySelector('.pdf-bilingual-reader')).toBeNull();
  expect(view.container.querySelector('.pdf-reader-header-start')).toContainElement(screen.getByRole('button',{name:'Library'}));
@@ -577,17 +550,64 @@ it('collects vocabulary from the original PDF selection with its page and senten
  window.getSelection()?.removeAllRanges();
 });
 
-it('connects vocabulary collection in the mounted overview to the paper reader action',async()=>{
- state.document={...document(),blocks:[{id:'abstract',type:'abstract',page:0,text:'Abstract: A resilient approach improves accuracy.'}]};
- const add=vi.fn();
- render(<RenderPdf fileData="overview-vocabulary.pdf" pdfIRTarget={target} pdfSourceHash="hash" onAddVocabularySelection={add}/>);
+it('limits a translated PDF toolbar to pagination, zoom and supplied document actions',async()=>{
+ const view=render(<RenderPdf fileData="translation.pdf" pdfToolbarMode="navigation" pdfHeaderEnd={<button>下载译本</button>}/>);
  await act(async()=>{});
- fireEvent.click(screen.getByRole('tab',{name:'pdfReader.insight'}));
- const text=screen.getByText('A resilient approach improves accuracy.');
+ expectPage(1);
+ expect(screen.getByRole('button',{name:'pdfReader.zoomIn'})).toBeInTheDocument();
+ expect(screen.getByRole('button',{name:'下载译本'}).closest('nav')).toBe(pageButton(1).closest('nav'));
+ expect(screen.getByRole('button',{name:'下载译本'}).compareDocumentPosition(pageButton(1)) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+ expect(screen.queryByRole('button',{name:'阅读工具'})).toBeNull();
+ expect(view.container.querySelector('.pdf-reader-hand-trigger')).toBeNull();
+ expect(view.container.querySelector('.pdf-reader-pin-trigger')).toBeNull();
+ fireEvent.click(screen.getByRole('button',{name:'pdfReader.nextPage'}));
+ expectPage(2);
+});
+
+it('does not restore a stale parent position when zooming after an in-page scroll',async()=>{
+ const report=vi.fn();
+ const view=render(<RenderPdf fileData="zoom-scroll.pdf" defaultPageWidth={600} viewPosition={{page:1,progress:0}} onViewPositionChange={report}/>);
+ await act(async()=>{});
+ const viewport=view.container.querySelector('.pdf-reader-with-study')!.firstElementChild as HTMLElement;
+ viewport.scrollTop=120;fireEvent.scroll(viewport);
+ await waitFor(()=>expect(report).toHaveBeenCalled());
+ const scroll=vi.spyOn(viewport,'scrollTo');scroll.mockClear();
+ fireEvent.click(screen.getByRole('button',{name:'pdfReader.zoomIn'}));
+ expect(scroll.mock.calls.at(-1)?.[0]).toEqual({top:132,behavior:'auto'});
+});
+
+it('renders selectable translated text without restoring selection menus',async()=>{
+ const view=render(<RenderPdf fileData="selectable-translation.pdf" pdfToolbarMode="navigation" pdfSelectableText/>);
+ await act(async()=>{});
+ const text=screen.getAllByTestId('pdf-text-layer')[0];
  const range=window.document.createRange();range.selectNodeContents(text);
  window.getSelection()?.removeAllRanges();window.getSelection()?.addRange(range);
+ expect(window.getSelection()?.toString()).toBe('Selectable PDF sentence');
  fireEvent.mouseUp(text);
- fireEvent.click(screen.getByRole('button',{name:'加入生词'}));
- expect(add).toHaveBeenCalledWith({text:'A resilient approach improves accuracy.',context:'A resilient approach improves accuracy.',page:1});
+ expect(view.container.querySelector('.pdf-selection-composer')).toBeNull();
  window.getSelection()?.removeAllRanges();
+});
+
+it('opens highlights through page hit testing without covering text or links',async()=>{
+ const open=vi.fn();
+ const view=render(<RenderPdf fileData="note-hit-testing.pdf" pdfSelectableText savedNoteHighlights={[{id:'note',page:1,color:'yellow',rects:[[.1,.2,.4,.24]]}]} onNoteHighlightClick={open}/>);
+ await act(async()=>{});
+ const text=screen.getAllByTestId('pdf-text-layer')[0];
+ const page=text.closest('[data-pdf-page-index]')!;
+ vi.spyOn(page,'getBoundingClientRect').mockReturnValue({left:0,top:0,right:600,bottom:800,width:600,height:800,x:0,y:0,toJSON:()=>({})});
+ const down=(x:number,y:number)=>fireEvent(text,new MouseEvent('pointerdown',{bubbles:true,clientX:x,clientY:y}));
+ down(100,170);fireEvent.click(text,{clientX:100,clientY:170,detail:1});
+ expect(open).toHaveBeenCalledWith('note');open.mockClear();
+ down(100,170);fireEvent.click(text,{clientX:140,clientY:170,detail:1});
+ expect(open).not.toHaveBeenCalled();
+ const range=window.document.createRange();range.selectNodeContents(text);
+ window.getSelection()?.removeAllRanges();window.getSelection()?.addRange(range);
+ down(100,170);fireEvent.click(text,{clientX:100,clientY:170,detail:1});
+ expect(open).not.toHaveBeenCalled();window.getSelection()?.removeAllRanges();
+ const link=window.document.createElement('a');link.href='#reference';link.textContent='reference';text.append(link);
+ down(100,170);fireEvent.click(link,{clientX:100,clientY:170,detail:1});
+ expect(open).not.toHaveBeenCalled();
+ expect(view.container.querySelector('.pdf-note-highlight-hit')).toBeNull();
+ const marker=screen.getByRole('button',{name:'打开笔记'});marker.focus();expect(marker).toHaveFocus();fireEvent.click(marker);
+ expect(open).toHaveBeenCalledWith('note');
 });

@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"lazymind/agentconnector/internal/desktopsetup"
 )
 
 // Exercise the actual AppleScript with fake application objects. No real
@@ -129,5 +131,80 @@ func TestDarwinCancelledLaunchDoesNotCloseOrStartCodex(t *testing.T) {
 	cancel()
 	if err := launchDesktop(ctx, "/Applications/Codex.app", 9334); !errors.Is(err, context.Canceled) {
 		t.Fatalf("error=%v", err)
+	}
+}
+
+func TestDarwinLaunchPreservesShutdownFailureCause(t *testing.T) {
+	original := runDarwinDesktopCommand
+	t.Cleanup(func() { runDarwinDesktopCommand = original })
+	cause := errors.New("pending quit confirmation")
+	runDarwinDesktopCommand = func(context.Context, string, ...string) ([]byte, error) {
+		return []byte("LAZYMIND_AGENT_quit_required: Codex refused to close"), cause
+	}
+	err := launchDesktop(context.Background(), "/Applications/Codex.app", 9334)
+	if !errors.Is(err, desktopsetup.ErrQuitRequired) || !errors.Is(err, cause) {
+		t.Fatalf("shutdown error lost its category or cause: %v", err)
+	}
+}
+
+func TestDarwinLaunchPreservesCancellationDuringCommand(t *testing.T) {
+	for _, phase := range []string{"shutdown", "start"} {
+		t.Run(phase, func(t *testing.T) {
+			original := runDarwinDesktopCommand
+			t.Cleanup(func() { runDarwinDesktopCommand = original })
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			cause := errors.New("subprocess interrupted")
+			runDarwinDesktopCommand = func(_ context.Context, command string, _ ...string) ([]byte, error) {
+				if phase == "start" && command == "/usr/bin/osascript" {
+					return nil, nil
+				}
+				cancel()
+				return nil, cause
+			}
+			err := launchDesktop(ctx, "/Applications/Codex.app", 9334)
+			if !errors.Is(err, context.Canceled) || !errors.Is(err, cause) {
+				t.Fatalf("command error lost cancellation or cause: %v", err)
+			}
+		})
+	}
+}
+
+func TestDarwinLaunchClassifiesFailuresAtTheirActualStage(t *testing.T) {
+	for _, scenario := range []struct {
+		name, output, want string
+	}{
+		{"inspection", "private-profile-path", "process_inspection_failed"},
+		{"refused", "private-profile-path\nLAZYMIND_AGENT_quit_required: pending dialog", "quit_required"},
+		{"invalid-pid", "private-profile-path", "process_inspection_failed"},
+		{"launch", "private-profile-path", "launch_failed"},
+	} {
+		t.Run(scenario.name, func(t *testing.T) {
+			original := runDarwinDesktopCommand
+			t.Cleanup(func() { runDarwinDesktopCommand = original })
+			cause := errors.New("exit status 1")
+			runDarwinDesktopCommand = func(_ context.Context, command string, _ ...string) ([]byte, error) {
+				if command == "/usr/bin/open" && scenario.name != "launch" {
+					t.Fatal("launched despite shutdown inspection failure")
+				}
+				if command == "/usr/bin/osascript" && scenario.name == "launch" {
+					return nil, nil
+				}
+				if scenario.name == "invalid-pid" {
+					return []byte(scenario.output), nil
+				}
+				return []byte(scenario.output), cause
+			}
+			err := launchDesktop(context.Background(), "/Applications/Codex.app", 9334)
+			if SetupIssue(err) != scenario.want {
+				t.Fatalf("issue=%q err=%v", SetupIssue(err), err)
+			}
+			if scenario.name != "invalid-pid" && !errors.Is(err, cause) {
+				t.Fatalf("lost subprocess cause: %v", err)
+			}
+			if strings.Contains(err.Error(), "private-profile-path") {
+				t.Fatalf("raw subprocess output leaked: %v", err)
+			}
+		})
 	}
 }

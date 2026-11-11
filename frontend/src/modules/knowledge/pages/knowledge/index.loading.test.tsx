@@ -7,13 +7,13 @@ import {useDatasetPermissionStore} from '@/modules/knowledge/store/dataset_permi
 import Detail from './index';
 vi.mock('react-pdf', () => ({pdfjs: {GlobalWorkerOptions: {}}, Document: () => null, Page: () => null}));
 const surfaces=vi.hoisted(()=>({viewer:{} as Record<string,unknown>,viewerRenders:0,chat:{} as Record<string,unknown>,vocabularyEnabled:false,vocabulary:{} as Record<string,unknown>,vocabularyModal:{} as Record<string,unknown>}));
-vi.mock('@/modules/knowledge/components/FileViewer', () => ({default: (props:Record<string,unknown>) => {surfaces.viewer=props;surfaces.viewerRenders++;return null;}}));
+vi.mock('@/modules/knowledge/components/FileViewer', () => ({default: (props:Record<string,unknown>) => {surfaces.viewer=props;surfaces.viewerRenders++;return <div>{typeof props.pdfHeaderEnd === "function" ? (props.pdfHeaderEnd as (tools:null)=>React.ReactNode)(null) : props.pdfHeaderEnd as React.ReactNode}<div data-testid="file-viewer" data-file={String(props.file || "")} data-filename={String(props.fileName || "")}/></div>;}}));
 vi.mock('@/modules/knowledge/components/PdfTemporaryChat', () => ({default: (props:Record<string,unknown>) => {surfaces.chat=props;return null;}}));
 vi.mock('@/runtime/mode', async()=>({...await vi.importActual<any>('@/runtime/mode'),isVocabularyEnabled:()=>surfaces.vocabularyEnabled}));
 vi.mock('@/modules/vocabulary/DocumentVocabularyPanel',()=>({default:(props:Record<string,unknown>)=>{surfaces.vocabulary=props;return <div data-testid="document-vocabulary">Document vocabulary</div>;}}));
 vi.mock('@/modules/vocabulary/AddVocabularyModal',()=>({default:(props:Record<string,unknown>)=>{surfaces.vocabularyModal=props;return null;}}));
 const originalAdapter = axiosInstance.defaults.adapter;
-afterEach(() => {surfaces.vocabularyEnabled=false;surfaces.viewerRenders=0;sessionStorage.clear();axiosInstance.defaults.adapter = originalAdapter;useDatasetPermissionStore.getState().clearDataset();vi.unstubAllGlobals();});
+afterEach(() => {surfaces.vocabularyEnabled=false;surfaces.viewerRenders=0;sessionStorage.clear();localStorage.removeItem('paper-reader:assistant-width');axiosInstance.defaults.adapter = originalAdapter;useDatasetPermissionStore.getState().clearDataset();vi.unstubAllGlobals();});
 it('does not render the legacy document layout while file metadata is unresolved', () => {
   axiosInstance.defaults.adapter = () => new Promise(() => {});
   const {container} = render(<MemoryRouter initialEntries={['/doc/library/paper']}><Routes><Route path="/doc/:knowledgeBaseId/:knowledgeId" element={<Detail/>}/></Routes></MemoryRouter>);
@@ -182,15 +182,16 @@ it.each([false,true])('gates paper information vocabulary by the existing featur
     ? Promise.resolve({config,status:200,statusText:'OK',headers:{},data:{display_name:'paper.pdf'}})
     : new Promise(()=>{});
   const {container}=renderDocument();
-  fireEvent.click(await screen.findByRole('button',{name:/Document details|文档详情/}));
+  fireEvent.click(await screen.findByRole('button',{name:/^Notes$|^笔记$/}));
   if(enabled){
     expect(await screen.findByTestId('document-vocabulary')).toBeInTheDocument();
     expect(surfaces.vocabulary).toEqual(expect.objectContaining({documentId:'paper',refreshToken:0}));
     act(()=>{(surfaces.vocabularyModal.onAdded as ()=>void)();});
     expect(surfaces.vocabulary).toEqual(expect.objectContaining({documentId:'paper',refreshToken:1}));
-    expect(container.querySelector('.paper-workspace-dock button[aria-pressed="true"]')).toHaveAccessibleName(/Document details|文档详情/);
+    expect(container.querySelector('.paper-workspace-dock button[aria-pressed="true"]')).toHaveAccessibleName(/^Notes$|^笔记$/);
   }else expect(screen.queryByTestId('document-vocabulary')).not.toBeInTheDocument();
-  expect(container.querySelectorAll('.paper-workspace-dock button')).toHaveLength(4);
+  expect(container.querySelectorAll('.paper-workspace-dock button')).toHaveLength(3);
+  expect(screen.queryByRole('button',{name:/Document details|文档详情/})).toBeNull();
 });
 
 it('opens vocabulary from the paper reader with the selected word and source evidence',async()=>{
@@ -200,7 +201,7 @@ it('opens vocabulary from the paper reader with the selected word and source evi
     ? Promise.resolve({config,status:200,statusText:'OK',headers:{},data:{display_name:'paper.pdf'}})
     : new Promise(()=>{});
   renderDocument();
-  await screen.findByRole('button',{name:/Document details|文档详情/});
+  await screen.findByRole('button',{name:/^Notes$|^笔记$/});
   const selection={text:'resilient',context:'A resilient approach improves accuracy.',contextTranslation:'一种有韧性的方法提高了准确性。',page:3};
   act(()=>{(surfaces.viewer.onAddVocabularySelection as (value:typeof selection)=>void)(selection);});
   expect(surfaces.vocabularyModal).toEqual(expect.objectContaining({selection,datasetId:'library',documentId:'paper',context:selection.context}));
@@ -215,11 +216,226 @@ it('lets the paper reader choose a word from a phrase while retaining source con
     ? Promise.resolve({config,status:200,statusText:'OK',headers:{},data:{display_name:'paper.pdf'}})
     : new Promise(()=>{});
   renderDocument();
-  await screen.findByRole('button',{name:/Document details|文档详情/});
+  await screen.findByRole('button',{name:/^Notes$|^笔记$/});
   const selection={text:'resilient approach',context:'A resilient approach improves accuracy.',page:3};
   act(()=>{(surfaces.viewer.onAddVocabularySelection as (value:typeof selection)=>void)(selection);});
   expect(surfaces.vocabularyModal.selection).toBeNull();
   fireEvent.click(await screen.findByRole('button',{name:'加入生词'}));
   await waitFor(()=>expect(surfaces.vocabularyModal.selection).toEqual({...selection,text:'resilient'}));
   expect(surfaces.vocabularyModal).toEqual(expect.objectContaining({datasetId:'library',documentId:'paper',context:selection.context}));
+});
+
+it('opens full-document translation from the sidebar and preserves the selection draft', async () => {
+  useDatasetPermissionStore.getState().setCurrentDataset({dataset_id:'library',scene:'general'} as Dataset);
+  axiosInstance.defaults.adapter=config=>config.url?.endsWith('/documents/paper')
+    ? Promise.resolve({config,status:200,statusText:'OK',headers:{},data:{display_name:'manual.pdf'}})
+    : new Promise(()=>{});
+  renderDocument();
+  fireEvent.click(await screen.findByRole('button',{name:/^Translation$|^翻译$/}));
+  fireEvent.change(screen.getByRole('textbox',{name:'输入要翻译的文字'}),{target:{value:'Keep my draft'}});
+  fireEvent.click(screen.getByText('全文翻译'));
+  expect(screen.queryByRole('textbox',{name:'输入要翻译的文字'})).toBeNull();
+  fireEvent.click(screen.getByRole('button',{name:'开始全文翻译'}));
+  expect(await screen.findByRole('dialog',{name:'翻译文档'})).toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button',{name:'取 消'}));
+  fireEvent.click(screen.getByText('划词翻译'));
+  expect(screen.getByRole('textbox',{name:'输入要翻译的文字'})).toHaveValue('Keep my draft');
+});
+
+it('shows document translation progress only inside the full-translation view',async()=>{
+ useDatasetPermissionStore.getState().setCurrentDataset({dataset_id:'library',scene:'general'} as Dataset);
+ axiosInstance.defaults.adapter=config=>{
+  const data=config.url?.endsWith('/documents/paper')?{display_name:'manual.pdf'}
+   :config.url?.endsWith('/pdf-capabilities')?{data:{is_pdf:true,reader_ready:true,pdf_kind:'native_text',translations:[],jobs:[{id:'job',kind:'TRANSLATION_PDF',status:'RUNNING',stage:'TRANSLATING',progress:17}]}}
+   :undefined;
+  return data?Promise.resolve({config,status:200,statusText:'OK',headers:{},data}):new Promise(()=>{});
+ };
+ renderDocument();
+ await screen.findByRole('button',{name:/^Translation$|^翻译$/});
+ await waitFor(()=>expect(screen.queryByText('正在翻译文档')).not.toBeInTheDocument());
+ fireEvent.click(screen.getByRole('button',{name:/^Translation$|^翻译$/}));
+ expect(screen.queryByText('正在翻译文档')).not.toBeInTheDocument();
+ fireEvent.click(screen.getByText('全文翻译'));
+ expect(await screen.findByText('正在翻译文档')).toBeVisible();
+ fireEvent.click(screen.getByText('划词翻译'));
+ expect(screen.queryByText('正在翻译文档')).not.toBeInTheDocument();
+});
+
+it('resizes the sidebar to half the workspace and restores widths above 640px', async () => {
+  localStorage.setItem('paper-reader:assistant-width','750');
+  vi.stubGlobal('ResizeObserver',class { constructor(private callback:ResizeObserverCallback) {} observe(element:Element){this.callback([{contentRect:{width:1600,height:1000},target:element} as ResizeObserverEntry],this as unknown as ResizeObserver);} disconnect(){} unobserve(){} });
+  useDatasetPermissionStore.getState().setCurrentDataset({dataset_id:'library',scene:'general'} as Dataset);
+  axiosInstance.defaults.adapter=config=>config.url?.endsWith('/documents/paper')
+    ? Promise.resolve({config,status:200,statusText:'OK',headers:{},data:{display_name:'manual.pdf'}})
+    : new Promise(()=>{});
+  const {container}=renderDocument();
+  fireEvent.click(await screen.findByRole('button',{name:/^Translation$|^翻译$/}));
+  const divider=screen.getByRole('separator',{name:/调整助手宽度|Resize assistant/});
+  expect(divider).toHaveAttribute('aria-valuenow','750');
+  fireEvent.keyDown(divider,{key:'End'});
+  expect(divider).toHaveAttribute('aria-valuenow','800');
+  expect((container.querySelector('.knowledge-paper-workspace') as HTMLElement).style.getPropertyValue('--paper-assistant-width')).toBe('800px');
+  localStorage.removeItem('paper-reader:assistant-width');
+});
+
+
+it('reads a cached full translation in the sidebar while retaining the original document', async () => {
+  useDatasetPermissionStore.getState().setCurrentDataset({dataset_id:'library',scene:'general'} as Dataset);
+  axiosInstance.defaults.adapter=config=> {
+    const data=config.url?.endsWith('/documents/paper') ? {display_name:'original.pdf',file_url:'/original.pdf'}
+      : config.url?.endsWith('/pdf-capabilities') ? {data:{is_pdf:true,reader_ready:true,pdf_kind:'native_text',jobs:[],translations:[{id:'translated',kind:'TRANSLATION_PDF',cache_key:'cache',filename:'translated.pdf',target_language:'zh',provider_type:'llm',created_at:'2026-11-09T00:00:00Z'}]}}
+      : undefined;
+    return data ? Promise.resolve({config,status:200,statusText:'OK',headers:{},data}) : new Promise(()=>{});
+  };
+  const {container}=renderDocument();
+  fireEvent.click(await screen.findByRole('button',{name:/^Translation$|^翻译$/}));
+  fireEvent.click(screen.getByText('全文翻译'));
+  await waitFor(()=>expect(container.querySelector('.knowledge-full-translation-viewer [data-filename="translated.pdf"]')).not.toBeNull());
+  expect(container.querySelector('.paper-reader-pane [data-testid="file-viewer"]')?.getAttribute('data-file')).toContain('/original.pdf');
+  expect(container.querySelector('.knowledge-full-translation-viewer [data-testid="file-viewer"]')?.getAttribute('data-file')).toContain('/pdf-artifacts/translated:content');
+  fireEvent.click(screen.getByRole('button',{name:'半屏阅读'}));
+  expect(screen.getByRole('separator')).toHaveAttribute('aria-valuenow','720');
+  fireEvent.click(screen.getByText('划词翻译'));
+  expect(container.querySelector('.knowledge-full-translation-viewer')).toBeNull();
+  fireEvent.click(screen.getByText('全文翻译'));
+  expect(container.querySelector('.knowledge-full-translation-viewer [data-filename="translated.pdf"]')).not.toBeNull();
+});
+
+it('shows a completed background translation in the sidebar without replacing the source', async () => {
+  useDatasetPermissionStore.getState().setCurrentDataset({dataset_id:'library',scene:'general'} as Dataset);
+  let capabilityReads=0;
+  const artifact={id:'completed',kind:'TRANSLATION_PDF',cache_key:'cache',filename:'completed.pdf',target_language:'zh',provider_type:'llm',created_at:'2026-11-09T00:00:00Z'};
+  axiosInstance.defaults.adapter=config=> {
+    let data:unknown;
+    if(config.url?.endsWith('/documents/paper')) data={display_name:'original.pdf',file_url:'/original.pdf'};
+    if(config.url?.endsWith('/pdf-capabilities')) {
+      const ready=++capabilityReads>1;
+      data={data:{is_pdf:true,reader_ready:true,pdf_kind:'native_text',translations:ready?[artifact]:[],jobs:[{id:'job',kind:'TRANSLATION_PDF',status:ready?'READY':'RUNNING',stage:ready?'READY':'TRANSLATING',progress:ready?100:30,artifact_id:ready?'completed':undefined}]}};
+    }
+    return data ? Promise.resolve({config,status:200,statusText:'OK',headers:{},data}) : new Promise(()=>{});
+  };
+  const {container}=renderDocument();
+  await waitFor(()=>expect(container.querySelector('.knowledge-full-translation-viewer [data-filename="completed.pdf"]')).not.toBeNull(),{timeout:4000});
+  expect(container.querySelector('.paper-reader-pane [data-testid="file-viewer"]')?.getAttribute('data-file')).toContain('/original.pdf');
+  expect(screen.getByRole('region',{name:'全文翻译'})).toBeVisible();
+});
+
+
+it('shows only the current translation while keeping the main PDF on the original', async () => {
+  useDatasetPermissionStore.getState().setCurrentDataset({dataset_id:'library',scene:'general'} as Dataset);
+  const older={id:'older',kind:'TRANSLATION_PDF',cache_key:'older',filename:'older.pdf',target_language:'zh',provider_type:'llm',created_at:'2026-11-08T00:00:00Z'};
+  const newer={...older,id:'newer',filename:'newer.pdf',target_language:'en'};
+  axiosInstance.defaults.adapter=config=> {
+    const data=config.url?.endsWith('/documents/paper') ? {display_name:'original.pdf',file_url:'/original.pdf'}
+      : config.url?.endsWith('/pdf-capabilities') ? {data:{is_pdf:true,reader_ready:true,pdf_kind:'image_only',jobs:[],translations:[older,newer],searchable_artifact:{...older,id:'searchable',kind:'SEARCHABLE_PDF',filename:'searchable.pdf'}}}
+      : undefined;
+    return data ? Promise.resolve({config,status:200,statusText:'OK',headers:{},data}) : new Promise(()=>{});
+  };
+  const {container}=renderDocument();
+  fireEvent.click(await screen.findByRole('button',{name:/^Translation$|^翻译$/}));
+  fireEvent.click(screen.getByText('全文翻译'));
+  expect(screen.queryByRole('combobox',{name:'全文翻译版本'})).not.toBeInTheDocument();
+  expect(screen.getByRole('button',{name:'下载译本'})).toBeVisible();
+  expect(screen.getByRole('button',{name:'加入文献附件'})).toBeVisible();
+  expect(container.querySelector('.knowledge-full-translation-viewer [data-filename="newer.pdf"]')).not.toBeNull();
+  fireEvent.click(screen.getByRole('button',{name:/^Document actions$|^文档操作$/}));
+  expect(screen.queryByText('普通版')).not.toBeInTheDocument();
+  expect(screen.queryByText('翻译版')).not.toBeInTheDocument();
+  expect(container.querySelector('.paper-reader-pane [data-testid="file-viewer"]')?.getAttribute('data-file')).toContain('/original.pdf');
+  expect(screen.queryByRole('combobox',{name:'选择缓存译本'})).not.toBeInTheDocument();
+  expect(container.querySelector('.knowledge-full-translation-viewer [data-filename="newer.pdf"]')).not.toBeNull();
+});
+
+it('resizes live without freezing content widths or rerendering the workspace', async () => {
+  useDatasetPermissionStore.getState().setCurrentDataset({dataset_id:'library',scene:'general'} as Dataset);
+  axiosInstance.defaults.adapter=config=>config.url?.endsWith('/documents/paper')
+    ? Promise.resolve({config,status:200,statusText:'OK',headers:{},data:{display_name:'manual.pdf'}})
+    : new Promise(()=>{});
+  const {container}=renderDocument();
+  fireEvent.click(await screen.findByRole('button',{name:/^Translation$|^翻译$/}));
+  await act(async()=>{});
+  const before=surfaces.viewerRenders;
+  const write=vi.spyOn(localStorage,'setItem');
+  vi.stubGlobal('PointerEvent',MouseEvent);
+  const frames=new Map<number,FrameRequestCallback>();let sequence=0;
+  vi.stubGlobal('requestAnimationFrame',(callback:FrameRequestCallback)=>{frames.set(++sequence,callback);return sequence;});
+  vi.stubGlobal('cancelAnimationFrame',(id:number)=>frames.delete(id));
+  const divider=screen.getByRole('separator',{name:/调整助手宽度|Resize assistant/});
+  divider.setPointerCapture=vi.fn();
+  Object.defineProperty(container.querySelector('.paper-reader-pane'),'clientWidth',{value:900});
+  Object.defineProperty(container.querySelector('.paper-chat-pane'),'clientWidth',{value:398});
+  fireEvent.pointerDown(divider,{button:0,clientX:600});
+  for(const x of [580,550,500])fireEvent.pointerMove(divider,{clientX:x});
+  act(()=>{for(const callback of frames.values())callback(0);frames.clear();});
+  const workspace=container.querySelector('.knowledge-paper-workspace') as HTMLElement;
+  expect(workspace.style.getPropertyValue('--paper-assistant-preview-width')).toBe('500px');
+  expect(workspace.style.getPropertyValue('--paper-reader-drag-content-width')).toBe('');
+  expect(workspace.style.getPropertyValue('--paper-assistant-drag-content-width')).toBe('');
+  expect(workspace).toHaveAttribute('data-pane-resizing','true');
+  expect(surfaces.viewerRenders).toBe(before);
+  expect(write).not.toHaveBeenCalled();
+  fireEvent.pointerUp(divider,{clientX:480});
+  expect(workspace.style.getPropertyValue('--paper-assistant-preview-width')).toBe('');
+  expect(workspace).not.toHaveAttribute('data-pane-resizing');
+  expect(workspace.style.getPropertyValue('--paper-assistant-width')).toBe('520px');
+  expect(write).toHaveBeenCalledTimes(1);
+  expect(write).toHaveBeenLastCalledWith('paper-reader:assistant-width','520');
+  write.mockRestore();
+});
+
+
+it('does not rerender the document viewer on background translation progress ticks', async () => {
+  useDatasetPermissionStore.getState().setCurrentDataset({dataset_id:'library',scene:'general'} as Dataset);
+  let reads=0;
+  let finishPoll: (()=>void)|undefined;
+  axiosInstance.defaults.adapter=config=> {
+    if(config.url?.endsWith('/documents/paper')) return Promise.resolve({config,status:200,statusText:'OK',headers:{},data:{display_name:'original.pdf',file_url:'/original.pdf'}});
+    if(config.url?.endsWith('/pdf-capabilities')) {
+      const progress=++reads===1?10:35;
+      const response={config,status:200,statusText:'OK',headers:{},data:{data:{is_pdf:true,reader_ready:true,pdf_kind:'native_text',translations:[],jobs:[{id:'progress',kind:'TRANSLATION_PDF',status:'RUNNING',stage:'TRANSLATING',progress}]}}};
+      return reads===1?Promise.resolve(response):new Promise(resolve=>{finishPoll=()=>resolve(response);});
+    }
+    return new Promise(()=>{});
+  };
+  renderDocument();
+  fireEvent.click(await screen.findByRole('button',{name:/^Translation$|^翻译$/}));
+  fireEvent.click(screen.getByText('全文翻译'));
+  await waitFor(()=>expect(finishPoll).toBeTypeOf('function'),{timeout:3000});
+  const renders=surfaces.viewerRenders;
+  await act(async()=>{finishPoll!();});
+  expect(screen.getByText('35%')).toBeInTheDocument();
+  expect(surfaces.viewerRenders).toBe(renders);
+});
+
+it('resumes translation polling after cancellation fails and allows retry without duplicate requests',async()=>{
+ useDatasetPermissionStore.getState().setCurrentDataset({dataset_id:'library',scene:'general'} as Dataset);
+ let cancellationRequests=0;
+ let rejectCancellation: ((reason:Error)=>void)|undefined;
+ let progress=10;
+ axiosInstance.defaults.adapter=config=>{
+  if(config.url?.endsWith('/documents/paper'))return Promise.resolve({config,status:200,statusText:'OK',headers:{},data:{display_name:'original.pdf',file_url:'/original.pdf'}});
+  if(config.url?.includes('/pdf-render-jobs/progress')){
+   cancellationRequests++;
+   return new Promise((_resolve,reject)=>{rejectCancellation=reject;});
+  }
+  if(config.url?.endsWith('/pdf-capabilities'))return Promise.resolve({config,status:200,statusText:'OK',headers:{},data:{data:{is_pdf:true,reader_ready:true,pdf_kind:'native_text',translations:[],jobs:[{id:'progress',kind:'TRANSLATION_PDF',status:'RUNNING',stage:'TRANSLATING',progress}]}}});
+  return new Promise(()=>{});
+ };
+ renderDocument();
+ fireEvent.click(await screen.findByRole('button',{name:/^Translation$|^翻译$/}));
+ fireEvent.click(screen.getByText('全文翻译'));
+ const cancel=await screen.findByRole('button',{name:'取消'});
+ fireEvent.click(cancel);
+ await waitFor(()=>expect(cancellationRequests).toBe(1));
+ const renders=surfaces.viewerRenders;
+ fireEvent.click(cancel);
+ await act(async()=>{await Promise.resolve();});
+ expect(cancellationRequests).toBe(1);
+ await act(async()=>{rejectCancellation!(new Error('Cancellation service unavailable'));});
+ expect(await screen.findByText('Cancellation service unavailable')).toBeInTheDocument();
+ progress=47;
+ await waitFor(()=>expect(screen.getByText('47%')).toBeInTheDocument(),{timeout:3000});
+ expect(surfaces.viewerRenders).toBe(renders);
+ fireEvent.click(cancel);
+ await waitFor(()=>expect(cancellationRequests).toBe(2));
 });

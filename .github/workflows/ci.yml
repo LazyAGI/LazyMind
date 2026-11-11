@@ -158,6 +158,27 @@ jobs:
       - name: Doc check
         run: pip install pytest && python -m pytest tests/doc_check/ -v
 
+  test-office-convert:
+    needs: [lint, doc_check]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install PDF renderer and CJK font dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y fonts-wqy-zenhei fonts-dejavu-core
+          python -m pip install -r backend/office-convert-service/requirements.txt
+          sudo mkdir -p /var/lib/lazymind/uploads
+          sudo chown "$USER" /var/lib/lazymind/uploads
+      - name: Test PDF preservation, continuation, and advisory diagnostics
+        run: python -m unittest discover -s backend/office-convert-service -p 'test_*.py' -v
+
   test-frontend:
     needs: [lint, doc_check]
     runs-on: ubuntu-latest

@@ -1,3 +1,4 @@
+import type { PdfScrollSyncEndpoint } from "@/components/ui/pdfScrollSync";
 import {
   forwardRef,
   useCallback,
@@ -51,8 +52,12 @@ export interface FileViewerRef {
 
 interface FileViewerProps {
   paperMode?: boolean;
+  pdfScrollSync?: PdfScrollSyncEndpoint;
+  pdfToolbarMode?: "full" | "navigation";
+  pdfSelectableText?: boolean;
   onPdfNoteSelection?: (selection: PdfTextSelection, note: string, color: PdfNoteColor, id: string) => Promise<void>;
   pdfNoteHighlights?: PdfNoteHighlight[];
+  onPdfNoteHighlightClick?: (id:string) => void;
   pdfHeaderStart?: ReactNode;
   pdfHeaderEnd?: ReactNode | ((tools: ReactNode) => ReactNode);
   onPdfStudyOpenChange?: (open: boolean) => void;
@@ -410,11 +415,13 @@ const FileViewer = forwardRef<FileViewerRef, FileViewerProps>((props, ref) => {
       case "pdf":
         return pdfPreviewData ? (
           <RenderPdf
+            pdfScrollSync={props.pdfScrollSync}
             paperMode={props.paperMode}
+            pdfToolbarMode={props.pdfToolbarMode}
+            pdfSelectableText={props.pdfSelectableText}
             pdfHeaderStart={props.pdfHeaderStart}
             pdfHeaderEnd={props.pdfHeaderEnd}
             key={`${props.pdfIRTarget?.dataset || ""}:${props.pdfIRTarget?.document || ""}:${props.file || ""}`}
-            paperTitle={props.fileName.replace(/\.pdf$/i, "")}
             onStudyOpenChange={props.onPdfStudyOpenChange}
             pdfIRTarget={props.pdfIRTarget}
             onPdfIRDocumentChange={props.onPdfIRDocumentChange}
@@ -423,6 +430,7 @@ const FileViewer = forwardRef<FileViewerRef, FileViewerProps>((props, ref) => {
             pdfNavigateToPage={props.pdfNavigateToPage}
             pdfNavigateToPosition={props.pdfNavigateToPosition}
             savedNoteHighlights={props.pdfNoteHighlights}
+            onNoteHighlightClick={props.onPdfNoteHighlightClick}
             pdfSourceHash={pdfFingerprint?.data === fileData ? pdfFingerprint?.hash : undefined}
             className="scroll-container"
             style={{
@@ -539,6 +547,9 @@ const FileViewer = forwardRef<FileViewerRef, FileViewerProps>((props, ref) => {
     pdfPreviewData,
     pdfFingerprint,
     props.pdfIRTarget,
+    props.pdfScrollSync,
+    props.pdfToolbarMode,
+    props.pdfSelectableText,
     props.paperMode,
     props.onPdfIRDocumentChange,
     props.onPdfOutlineChange,
@@ -546,6 +557,7 @@ const FileViewer = forwardRef<FileViewerRef, FileViewerProps>((props, ref) => {
     props.pdfNavigateToPage,
     props.pdfNavigateToPosition,
     props.pdfNoteHighlights,
+    props.onPdfNoteHighlightClick,
     props.pdfHeaderStart,
     props.pdfHeaderEnd,
     props.file,
