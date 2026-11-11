@@ -211,10 +211,19 @@ func TestEmbeddingReadinessAndSelectionExposeExactIndexReasons(t *testing.T) {
 	verifiedSignature := "v1:1:" + strings.Repeat("a", 64) + ":" + strings.Repeat("b", 64)
 	tests := []struct {
 		name, phase, signature, activeModelID, activeSource, wantReason string
+		skipSelected                                                    bool
 	}{
 		{
 			name: "unverified identity", phase: "ready", signature: "malformed",
 			activeModelID: "selected", activeSource: "own", wantReason: "index_identity_unverified",
+		},
+		{
+			name: "blank index source", phase: "ready", signature: verifiedSignature,
+			activeModelID: "selected", wantReason: "index_identity_unverified", skipSelected: true,
+		},
+		{
+			name: "unknown index source", phase: "ready", signature: verifiedSignature,
+			activeModelID: "selected", activeSource: "future_source", wantReason: "index_identity_unverified", skipSelected: true,
 		},
 		{
 			name: "cleanup in progress", phase: "clearing", signature: verifiedSignature,
@@ -268,6 +277,13 @@ func TestEmbeddingReadinessAndSelectionExposeExactIndexReasons(t *testing.T) {
 			}
 			if readyRec.Code != http.StatusOK || readyBody.Data.Ready || readyBody.Data.Reason != tc.wantReason {
 				t.Fatalf("model-ready reason = %d %+v, want %q", readyRec.Code, readyBody.Data, tc.wantReason)
+			}
+			if tc.skipSelected {
+				status, err := loadEmbeddingIndexStatus(t.Context(), db)
+				if err != nil || status.Status != "unknown" || status.IndexIdentity != "legacy_unknown" {
+					t.Fatalf("unsupported source status = %+v err=%v", status, err)
+				}
+				return
 			}
 
 			selectedReq := httptest.NewRequest(http.MethodGet, "/model_providers/selected", nil)

@@ -460,7 +460,7 @@ func UpdateGroupModel(w http.ResponseWriter, r *http.Request) {
 		}
 		if metadataChanged && next.Name != before.Name && isTextEmbeddingModelType(next.ModelType) && tx.Migrator().HasTable(&orm.EmbeddingIndexState{}) {
 			if err := tx.Model(&orm.EmbeddingIndexState{}).
-				Where("scope = ? AND active_model_id = ?", globalEmbeddingScope, before.ID).
+				Where("scope = ? AND active_source = ? AND active_model_id = ?", globalEmbeddingScope, "own", before.ID).
 				Updates(map[string]any{"active_model_name": next.Name, "updated_at": now}).Error; err != nil {
 				return err
 			}

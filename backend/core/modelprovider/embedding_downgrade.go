@@ -98,12 +98,8 @@ func classifyEmbeddingDestructiveState(tx *gorm.DB) (embeddingDestructiveClassif
 		targetResidue := strings.TrimSpace(state.TargetModelID) != "" ||
 			strings.TrimSpace(state.TargetSource) != "" || strings.TrimSpace(state.TargetSignature) != ""
 		if phase == "ready" && indexState.IndexIdentity == "verified" && !targetResidue {
-			ownerSource := strings.TrimSpace(state.ActiveSource)
-			if ownerSource == "" {
-				ownerSource = "own"
-			}
 			return embeddingDestructiveClassification{
-				OwnerSource: ownerSource, OwnerModelID: strings.TrimSpace(state.ActiveModelID),
+				OwnerSource: strings.TrimSpace(state.ActiveSource), OwnerModelID: strings.TrimSpace(state.ActiveModelID),
 				OwnerReason: embeddingConflictActiveIndexOwner,
 			}, nil
 		}
@@ -215,7 +211,7 @@ func clearEmbeddingStateAfterRemoval(tx *gorm.DB, modelIDs ...string) error {
 		return nil
 	}
 	return tx.Model(&orm.EmbeddingIndexState{}).
-		Where("scope = ? AND active_model_id IN ?", globalEmbeddingScope, modelIDs).
+		Where("scope = ? AND active_source = ? AND active_model_id IN ?", globalEmbeddingScope, "own", modelIDs).
 		Updates(map[string]any{
 			"active_model_id": "", "active_source": "", "active_model_name": "", "active_provider_name": "",
 			"signature": "", "phase": "ready", "generation": gorm.Expr("generation + 1"), "updated_at": time.Now().UTC(),

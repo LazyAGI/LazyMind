@@ -125,6 +125,21 @@ func TestClassifyEmbeddingIndexState(t *testing.T) {
 			wantIdentity: "verified", wantPhase: "rebuilding",
 		},
 		{
+			name: "verified cloud source", statePresent: true,
+			state:        orm.EmbeddingIndexState{ActiveModelID: "model", ActiveSource: "cloud", Signature: verifiedSignature, Phase: "ready"},
+			wantIdentity: "verified", wantPhase: "idle",
+		},
+		{
+			name: "blank active source", statePresent: true,
+			state:        orm.EmbeddingIndexState{ActiveModelID: "model", Signature: verifiedSignature, Phase: "ready"},
+			wantIdentity: "legacy_unknown", wantPhase: "idle", wantReason: "index_identity_unverified",
+		},
+		{
+			name: "unknown active source", statePresent: true,
+			state:        orm.EmbeddingIndexState{ActiveModelID: "model", ActiveSource: "future_source", Signature: verifiedSignature, Phase: "ready"},
+			wantIdentity: "legacy_unknown", wantPhase: "idle", wantReason: "index_identity_unverified",
+		},
+		{
 			name: "legacy unknown", affectedKnowledgeBases: 1,
 			wantIdentity: "legacy_unknown", wantPhase: "idle", wantReason: "index_identity_unverified",
 		},

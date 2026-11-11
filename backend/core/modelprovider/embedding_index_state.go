@@ -28,7 +28,8 @@ func classifyEmbeddingIndexState(state orm.EmbeddingIndexState, statePresent boo
 	phase := strings.TrimSpace(state.Phase)
 	identityResidue := statePresent && embeddingIndexStateHasIdentityResidue(state)
 	strictlyCleared := statePresent && phase == "cleared" && !identityResidue
-	validIdentity := statePresent && strings.TrimSpace(state.ActiveModelID) != "" && validEmbeddingFingerprint(strings.TrimSpace(state.Signature))
+	validIdentity := statePresent && strings.TrimSpace(state.ActiveModelID) != "" &&
+		validEmbeddingIndexSource(state.ActiveSource) && validEmbeddingFingerprint(strings.TrimSpace(state.Signature))
 
 	classification := embeddingIndexClassification{
 		IndexIdentity: "empty", OperationPhase: "idle", StrictlyCleared: strictlyCleared,
@@ -73,6 +74,15 @@ func classifyEmbeddingIndexState(state orm.EmbeddingIndexState, statePresent boo
 		classification.ReadinessReason = "index_identity_unverified"
 	}
 	return classification
+}
+
+func validEmbeddingIndexSource(source string) bool {
+	switch strings.TrimSpace(source) {
+	case "own", "cloud":
+		return true
+	default:
+		return false
+	}
 }
 
 func embeddingIndexStateHasIdentityResidue(state orm.EmbeddingIndexState) bool {
@@ -155,9 +165,7 @@ func loadEmbeddingIndexStatus(ctx context.Context, db *gorm.DB) (EmbeddingIndexS
 		status.Status = "clearing"
 	case state.Phase == "cleared":
 		status.Status = "cleared"
-	case state.ActiveModelID != "" && !validEmbeddingFingerprint(state.Signature):
-		status.Status = "unknown"
-	case status.AffectedKnowledgeBases > 0 && !validEmbeddingFingerprint(state.Signature):
+	case classification.IndexIdentity == "legacy_unknown":
 		status.Status = "unknown"
 	case status.PendingKnowledgeBases > 0 && state.ActiveModelID != "":
 		status.Status = "rebuilding"

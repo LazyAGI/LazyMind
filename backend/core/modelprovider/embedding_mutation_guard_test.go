@@ -40,6 +40,17 @@ func requireEmbeddingConflictResponse(t *testing.T, rec *httptest.ResponseRecord
 	}
 }
 
+func requireEmbeddingIndexStateUnchanged(t *testing.T, before, after orm.EmbeddingIndexState) {
+	t.Helper()
+	if before.Scope != after.Scope || before.ActiveModelID != after.ActiveModelID || before.ActiveSource != after.ActiveSource ||
+		before.ActiveModelName != after.ActiveModelName || before.ActiveProviderName != after.ActiveProviderName ||
+		before.Signature != after.Signature || before.Phase != after.Phase || before.Generation != after.Generation ||
+		before.TargetModelID != after.TargetModelID || before.TargetSource != after.TargetSource ||
+		before.TargetSignature != after.TargetSignature || !before.UpdatedAt.Equal(after.UpdatedAt) {
+		t.Fatalf("embedding index state changed:\nbefore=%+v\nafter=%+v", before, after)
+	}
+}
+
 func TestEmbeddingRuntimeMutationProtectsOnlyActiveModel(t *testing.T) {
 	db := setupListProviderTestDB(t)
 	if err := db.AutoMigrate(&orm.Dataset{}, &orm.EmbeddingIndexState{}, &orm.UserSelectedModel{}); err != nil {
@@ -49,7 +60,7 @@ func TestEmbeddingRuntimeMutationProtectsOnlyActiveModel(t *testing.T) {
 	active := orm.UserModelProviderGroupModel{ID: "active", UserModelProviderID: "provider-a", UserModelProviderGroupID: "group-a", ModelType: "embed", BaseModel: orm.BaseModel{CreateUserID: "owner", CreatedAt: now, UpdatedAt: now}}
 	unused := orm.UserModelProviderGroupModel{ID: "unused", UserModelProviderID: "provider-b", UserModelProviderGroupID: "group-b", ModelType: "embed", BaseModel: orm.BaseModel{CreateUserID: "owner", CreatedAt: now, UpdatedAt: now}}
 	indexed := orm.Dataset{ID: "kb", KbID: "kb", ProcessingLevel: "indexed", BaseModel: orm.BaseModel{CreateUserID: "other-user", CreatedAt: now, UpdatedAt: now}}
-	state := orm.EmbeddingIndexState{Scope: globalEmbeddingScope, ActiveModelID: active.ID, Signature: validTestEmbeddingFingerprint, Phase: "ready", Generation: 5, UpdatedAt: now}
+	state := orm.EmbeddingIndexState{Scope: globalEmbeddingScope, ActiveModelID: active.ID, ActiveSource: "own", Signature: validTestEmbeddingFingerprint, Phase: "ready", Generation: 5, UpdatedAt: now}
 	stalePersonal := orm.UserSelectedModel{UserID: "other-user", ModelKey: "embed_main", UserModelProviderGroupModelID: unused.ID, CreatedAt: now, UpdatedAt: now}
 	for _, row := range []any{&active, &unused, &indexed, &state, &stalePersonal} {
 		if err := db.Create(row).Error; err != nil {
@@ -85,7 +96,7 @@ func TestActiveEmbeddingSupplierEndpointAndKeyCannotChangeWithIndex(t *testing.T
 	for _, row := range []any{
 		&model,
 		&orm.Dataset{ID: "other-kb", KbID: "other-kb", ProcessingLevel: "indexed", BaseModel: orm.BaseModel{CreateUserID: "another-user", CreatedAt: now, UpdatedAt: now}},
-		&orm.EmbeddingIndexState{Scope: globalEmbeddingScope, ActiveModelID: model.ID, Signature: validTestEmbeddingFingerprint, Phase: "ready", Generation: 1, UpdatedAt: now},
+		&orm.EmbeddingIndexState{Scope: globalEmbeddingScope, ActiveModelID: model.ID, ActiveSource: "own", Signature: validTestEmbeddingFingerprint, Phase: "ready", Generation: 1, UpdatedAt: now},
 	} {
 		if err := db.Create(row).Error; err != nil {
 			t.Fatal(err)
@@ -127,7 +138,7 @@ func TestUnusedEmbeddingSupplierEndpointCanChangeWithIndex(t *testing.T) {
 	for _, row := range []any{
 		&active, &candidate,
 		&orm.Dataset{ID: "indexed", KbID: "indexed", ProcessingLevel: "indexed", BaseModel: orm.BaseModel{CreateUserID: "other-user", CreatedAt: now, UpdatedAt: now}},
-		&orm.EmbeddingIndexState{Scope: globalEmbeddingScope, ActiveModelID: active.ID, Signature: validTestEmbeddingFingerprint, Phase: "ready", Generation: 1, UpdatedAt: now},
+		&orm.EmbeddingIndexState{Scope: globalEmbeddingScope, ActiveModelID: active.ID, ActiveSource: "own", Signature: validTestEmbeddingFingerprint, Phase: "ready", Generation: 1, UpdatedAt: now},
 	} {
 		if err := db.Create(row).Error; err != nil {
 			t.Fatal(err)
@@ -154,7 +165,7 @@ func TestLegacyImplicitFirstKeyInitializationDoesNotChangeEmbeddingIdentity(t *t
 	for _, row := range []any{
 		&model,
 		&orm.Dataset{ID: "indexed", KbID: "indexed", ProcessingLevel: "indexed", BaseModel: orm.BaseModel{CreateUserID: parent.CreateUserID, CreatedAt: now, UpdatedAt: now}},
-		&orm.EmbeddingIndexState{Scope: globalEmbeddingScope, ActiveModelID: model.ID, Signature: validTestEmbeddingFingerprint, Phase: "ready", Generation: 7, UpdatedAt: now},
+		&orm.EmbeddingIndexState{Scope: globalEmbeddingScope, ActiveModelID: model.ID, ActiveSource: "own", Signature: validTestEmbeddingFingerprint, Phase: "ready", Generation: 7, UpdatedAt: now},
 	} {
 		if err := db.Create(row).Error; err != nil {
 			t.Fatal(err)
@@ -186,7 +197,7 @@ func TestAddingFirstKeyToActiveEmbeddingSupplierRequiresVectorCleanup(t *testing
 	for _, row := range []any{
 		&model,
 		&orm.Dataset{ID: "indexed", KbID: "indexed", ProcessingLevel: "indexed", BaseModel: orm.BaseModel{CreateUserID: parent.CreateUserID, CreatedAt: now, UpdatedAt: now}},
-		&orm.EmbeddingIndexState{Scope: globalEmbeddingScope, ActiveModelID: model.ID, Signature: validTestEmbeddingFingerprint, Phase: "ready", Generation: 7, UpdatedAt: now},
+		&orm.EmbeddingIndexState{Scope: globalEmbeddingScope, ActiveModelID: model.ID, ActiveSource: "own", Signature: validTestEmbeddingFingerprint, Phase: "ready", Generation: 7, UpdatedAt: now},
 	} {
 		if err := db.Create(row).Error; err != nil {
 			t.Fatal(err)
@@ -216,7 +227,7 @@ func TestCatalogServiceRebindKeepsActiveEmbeddingAdapter(t *testing.T) {
 	for _, row := range []any{
 		&provider, &model,
 		&orm.Dataset{ID: "kb", KbID: "kb", ProcessingLevel: "indexed", BaseModel: base},
-		&orm.EmbeddingIndexState{Scope: globalEmbeddingScope, ActiveModelID: model.ID, Signature: validTestEmbeddingFingerprint, Phase: "ready", Generation: 1, UpdatedAt: now},
+		&orm.EmbeddingIndexState{Scope: globalEmbeddingScope, ActiveModelID: model.ID, ActiveSource: "own", Signature: validTestEmbeddingFingerprint, Phase: "ready", Generation: 1, UpdatedAt: now},
 	} {
 		if err := db.Create(row).Error; err != nil {
 			t.Fatal(err)
@@ -250,7 +261,7 @@ func TestCatalogRefreshPreservesActiveEmbeddingTechnicalType(t *testing.T) {
 	for _, row := range []any{
 		&catalog, &provider, &group, &model,
 		&orm.Dataset{ID: "kb", KbID: "kb", ProcessingLevel: "indexed", BaseModel: base},
-		&orm.EmbeddingIndexState{Scope: globalEmbeddingScope, ActiveModelID: model.ID, Signature: validTestEmbeddingFingerprint, Phase: "ready", Generation: 1, UpdatedAt: now},
+		&orm.EmbeddingIndexState{Scope: globalEmbeddingScope, ActiveModelID: model.ID, ActiveSource: "own", Signature: validTestEmbeddingFingerprint, Phase: "ready", Generation: 1, UpdatedAt: now},
 	} {
 		if err := db.Create(row).Error; err != nil {
 			t.Fatal(err)
@@ -292,7 +303,7 @@ func TestCredentialRestoreCannotReplaceActiveEmbeddingKeyPool(t *testing.T) {
 	for _, row := range []any{
 		&model,
 		&orm.Dataset{ID: "kb", KbID: "kb", ProcessingLevel: "indexed", BaseModel: orm.BaseModel{CreateUserID: provider.CreateUserID, CreatedAt: now, UpdatedAt: now}},
-		&orm.EmbeddingIndexState{Scope: globalEmbeddingScope, ActiveModelID: model.ID, Signature: validTestEmbeddingFingerprint, Phase: "ready", Generation: 1, UpdatedAt: now},
+		&orm.EmbeddingIndexState{Scope: globalEmbeddingScope, ActiveModelID: model.ID, ActiveSource: "own", Signature: validTestEmbeddingFingerprint, Phase: "ready", Generation: 1, UpdatedAt: now},
 	} {
 		if err := db.Create(row).Error; err != nil {
 			t.Fatal(err)
@@ -319,7 +330,7 @@ func TestEmbeddingRuntimeMutationProtectsRecordedIdentityEvenWhenCoreIndexEmpty(
 	}
 	now := time.Now().UTC()
 	model := orm.UserModelProviderGroupModel{ID: "active", UserModelProviderID: "provider-a", UserModelProviderGroupID: "group-a", ModelType: "embed", BaseModel: orm.BaseModel{CreateUserID: "owner", CreatedAt: now, UpdatedAt: now}}
-	state := orm.EmbeddingIndexState{Scope: globalEmbeddingScope, ActiveModelID: model.ID, Signature: validTestEmbeddingFingerprint, Phase: "ready", Generation: 5, UpdatedAt: now}
+	state := orm.EmbeddingIndexState{Scope: globalEmbeddingScope, ActiveModelID: model.ID, ActiveSource: "own", Signature: validTestEmbeddingFingerprint, Phase: "ready", Generation: 5, UpdatedAt: now}
 	for _, row := range []any{&model, &state} {
 		if err := db.Create(row).Error; err != nil {
 			t.Fatal(err)
@@ -340,7 +351,7 @@ func TestEmbeddingRuntimeMutationProtectsRecordedIdentityEvenWhenCoreIndexEmpty(
 func TestEmbeddingRuntimeMutationReturnsEvidenceReason(t *testing.T) {
 	t.Run("signed active owner", func(t *testing.T) {
 		db, target, other := setupEmbeddingDestructiveGuardTest(t)
-		if err := db.Create(&orm.EmbeddingIndexState{Scope: globalEmbeddingScope, ActiveModelID: target.ID, Signature: validTestEmbeddingFingerprint, Phase: "ready", Generation: 1, UpdatedAt: time.Now().UTC()}).Error; err != nil {
+		if err := db.Create(&orm.EmbeddingIndexState{Scope: globalEmbeddingScope, ActiveModelID: target.ID, ActiveSource: "own", Signature: validTestEmbeddingFingerprint, Phase: "ready", Generation: 1, UpdatedAt: time.Now().UTC()}).Error; err != nil {
 			t.Fatal(err)
 		}
 		if err := guardEmbeddingRuntimeMutation(db, "other-owner", other.UserModelProviderID, "", ""); err != nil {
@@ -438,6 +449,132 @@ func TestEmbeddingDeletionEndpointsReturnRecoveryData(t *testing.T) {
 	})
 }
 
+func TestLocalEmbeddingMutationsPreserveSameIDCloudOwner(t *testing.T) {
+	for _, route := range []string{
+		"model delete", "group delete", "custom provider delete", "built in reset",
+		"model rename", "model reclassify", "custom provider rename",
+	} {
+		t.Run(route, func(t *testing.T) {
+			db, model := modelEditFixture(t, "embed", false)
+			if err := db.AutoMigrate(&orm.EmbeddingIndexState{}, &orm.UserSelectedModel{}, &orm.UserSelectedCloudModel{}); err != nil {
+				t.Fatal(err)
+			}
+			now := time.Now().UTC()
+			state := orm.EmbeddingIndexState{
+				Scope: globalEmbeddingScope, ActiveModelID: model.ID, ActiveSource: "cloud",
+				ActiveModelName: "Cloud Model", ActiveProviderName: "Cloud Provider",
+				Signature: validTestEmbeddingFingerprint, Phase: "ready", Generation: 4, UpdatedAt: now,
+			}
+			if err := db.Create(&state).Error; err != nil {
+				t.Fatal(err)
+			}
+			var before orm.EmbeddingIndexState
+			if err := db.Take(&before, "scope = ?", globalEmbeddingScope).Error; err != nil {
+				t.Fatal(err)
+			}
+
+			rec := httptest.NewRecorder()
+			switch route {
+			case "model delete":
+				req := httptest.NewRequest(http.MethodDelete, "/model", nil)
+				req.Header.Set("X-User-Id", model.CreateUserID)
+				req = mux.SetURLVars(req, map[string]string{"model_provider_id": model.UserModelProviderID, "group_id": model.UserModelProviderGroupID, "model_id": model.ID})
+				DeleteGroupModel(rec, req)
+			case "group delete":
+				DeleteGroup(rec, savedKeyRequest(http.MethodDelete, model.CreateUserID, model.UserModelProviderID, model.UserModelProviderGroupID, "", ""))
+			case "custom provider delete":
+				if err := db.Model(&orm.UserModelProvider{}).Where("id = ?", model.UserModelProviderID).Update("is_custom", true).Error; err != nil {
+					t.Fatal(err)
+				}
+				DeleteCustomProvider(rec, customProviderRequest(http.MethodDelete, model.UserModelProviderID, ""))
+			case "built in reset":
+				if err := db.Create(&orm.DefaultModelProvider{ID: "default-openai", Name: "OpenAI", Category: "model", BaseURL: "https://api.openai.com/v1", CreatedAt: now, UpdatedAt: now}).Error; err != nil {
+					t.Fatal(err)
+				}
+				ResetProvider(rec, customProviderRequest(http.MethodPost, model.UserModelProviderID, ""))
+			case "model rename":
+				rec = modelEditCall(t, model.ID, model.CreateUserID, `{"name":"new-local-name"}`)
+			case "model reclassify":
+				rec = modelEditCall(t, model.ID, model.CreateUserID, `{"model_type":"llm","max_input_tokens":"128K"}`)
+			case "custom provider rename":
+				if err := db.Model(&orm.UserModelProvider{}).Where("id = ?", model.UserModelProviderID).Update("is_custom", true).Error; err != nil {
+					t.Fatal(err)
+				}
+				UpdateCustomProvider(rec, customProviderRequest(http.MethodPatch, model.UserModelProviderID, `{"name":"New Local Provider"}`))
+			}
+			if rec.Code != http.StatusOK {
+				t.Fatalf("source-distinct local mutation status = %d: %s", rec.Code, rec.Body.String())
+			}
+
+			var after orm.EmbeddingIndexState
+			if err := db.Take(&after, "scope = ?", globalEmbeddingScope).Error; err != nil {
+				t.Fatal(err)
+			}
+			requireEmbeddingIndexStateUnchanged(t, before, after)
+			switch route {
+			case "model delete", "group delete", "custom provider delete", "built in reset":
+				var saved orm.UserModelProviderGroupModel
+				if err := db.Take(&saved, "id = ?", model.ID).Error; err != nil {
+					t.Fatal(err)
+				}
+				if saved.DeletedAt == nil {
+					t.Fatalf("%s did not mutate the source-distinct local model", route)
+				}
+			case "model rename":
+				if saved := loadEditedModel(t, db, model.ID); saved.Name != "new-local-name" {
+					t.Fatalf("local rename was skipped: %+v", saved)
+				}
+			case "model reclassify":
+				if saved := loadEditedModel(t, db, model.ID); saved.ModelType != "llm" {
+					t.Fatalf("local reclassification was skipped: %+v", saved)
+				}
+			case "custom provider rename":
+				var saved orm.UserModelProvider
+				if err := db.Take(&saved, "id = ?", model.UserModelProviderID).Error; err != nil {
+					t.Fatal(err)
+				}
+				if saved.Name != "New Local Provider" {
+					t.Fatalf("local provider rename was skipped: %+v", saved)
+				}
+			}
+		})
+	}
+}
+
+func TestModelEditFailsClosedForUnsupportedSignedIndexSource(t *testing.T) {
+	for name, source := range map[string]string{"blank": "", "unknown": "future_source"} {
+		t.Run(name, func(t *testing.T) {
+			db, model := modelEditFixture(t, "embed", false)
+			if err := db.AutoMigrate(&orm.EmbeddingIndexState{}, &orm.UserSelectedModel{}, &orm.UserSelectedCloudModel{}); err != nil {
+				t.Fatal(err)
+			}
+			state := orm.EmbeddingIndexState{
+				Scope: globalEmbeddingScope, ActiveModelID: model.ID, ActiveSource: source,
+				ActiveModelName: "Persisted Model", ActiveProviderName: "Persisted Provider",
+				Signature: validTestEmbeddingFingerprint, Phase: "ready", Generation: 4, UpdatedAt: time.Now().UTC(),
+			}
+			if err := db.Create(&state).Error; err != nil {
+				t.Fatal(err)
+			}
+			var before orm.EmbeddingIndexState
+			if err := db.Take(&before, "scope = ?", globalEmbeddingScope).Error; err != nil {
+				t.Fatal(err)
+			}
+
+			rec := modelEditCall(t, model.ID, model.CreateUserID, `{"name":"new-runtime"}`)
+			requireEmbeddingConflictResponse(t, rec, "index_identity_unverified")
+			if saved := loadEditedModel(t, db, model.ID); saved.Name != model.Name {
+				t.Fatalf("unsupported source allowed local rename: %+v", saved)
+			}
+			var after orm.EmbeddingIndexState
+			if err := db.Take(&after, "scope = ?", globalEmbeddingScope).Error; err != nil {
+				t.Fatal(err)
+			}
+			requireEmbeddingIndexStateUnchanged(t, before, after)
+		})
+	}
+}
+
 func TestModelEditorAllowsUnusedEmbeddingCandidateWithGlobalIndex(t *testing.T) {
 	db, active := modelEditFixture(t, "embed", false)
 	if err := db.AutoMigrate(&orm.Dataset{}, &orm.EmbeddingIndexState{}); err != nil {
@@ -452,7 +589,7 @@ func TestModelEditorAllowsUnusedEmbeddingCandidateWithGlobalIndex(t *testing.T) 
 	}
 	for _, row := range []any{
 		&orm.Dataset{ID: "other-user-kb", KbID: "other-user-kb", ProcessingLevel: "indexed", BaseModel: orm.BaseModel{CreateUserID: "other-user", CreatedAt: now, UpdatedAt: now}},
-		&orm.EmbeddingIndexState{Scope: globalEmbeddingScope, ActiveModelID: active.ID, Signature: validTestEmbeddingFingerprint, Phase: "ready", Generation: 1, UpdatedAt: now},
+		&orm.EmbeddingIndexState{Scope: globalEmbeddingScope, ActiveModelID: active.ID, ActiveSource: "own", Signature: validTestEmbeddingFingerprint, Phase: "ready", Generation: 1, UpdatedAt: now},
 	} {
 		if err := db.Create(row).Error; err != nil {
 			t.Fatal(err)
