@@ -446,6 +446,22 @@ func executeDocumentPublication(ctx context.Context, db *gorm.DB, owner string, 
 	clean, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
 	defer cancel()
 	if err != nil {
+		var upstream *common.HTTPError
+		var rejected struct {
+			Detail struct {
+				Code string `json:"code"`
+			} `json:"detail"`
+		}
+		if op.Provider == "wechat" && errors.As(err, &upstream) && json.Unmarshal(upstream.Body, &rejected) == nil {
+			switch code := rejected.Detail.Code; code {
+			case "WECHAT_BODY_IMAGE_TOO_LARGE", "WECHAT_IMAGE_FORMAT_UNSUPPORTED", "WECHAT_HTML_TOO_LARGE":
+				if err := finishPublicationBeforeWrite(clean, db, owner, op.ID, "failed_no_write", code, "write_started"); err != nil {
+					return publicationFailureState(clean, db, owner, op, err)
+				}
+				op.Status, op.ErrorCode = "failed_no_write", code
+				return nil, op, documentFailure(code, 422)
+			}
+		}
 		_ = MarkDocumentPublicationUnknown(clean, db, owner, op.ID)
 		return publicationFailureState(clean, db, owner, op, documentFailure("PUBLICATION_OUTCOME_UNKNOWN", 502))
 	}

@@ -3388,6 +3388,9 @@ const zhCN = {
       notePathPlaceholder: '例如：文章/潮痕.md',
       githubDestination: 'GitHub 目标仓库、分支或目录',
       targetErrors: {
+        WECHAT_BODY_IMAGE_TOO_LARGE: '正文图片超过 1 MB，请压缩图片后重新发布。',
+        WECHAT_IMAGE_FORMAT_UNSUPPORTED: '公众号不支持此图片格式，请转换为 JPG 或 PNG 后重新发布。',
+        WECHAT_HTML_TOO_LARGE: '公众号正文 HTML 超过大小限制，请精简内容或排版后重新发布。',
         PUBLICATION_TARGET_EXISTS: '目标位置已存在同名文档，请调整目标后再发布。', PUBLICATION_PERMISSION_REQUIRED: '当前账号没有目标仓库的写入权限，请授权后重试。',
         OBSIDIAN_NOT_CONFIGURED: '尚未连接可访问的 Obsidian 笔记库，请先完成接入配置。',
         OBSIDIAN_VAULT_REQUIRED: '有多个或无法识别的笔记库，请明确选择目标库。',

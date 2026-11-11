@@ -3440,6 +3440,9 @@ const enUS = {
       notePathPlaceholder: 'For example: Articles/Note.md',
       githubDestination: 'GitHub repository, branch or directory',
       targetErrors: {
+        WECHAT_BODY_IMAGE_TOO_LARGE: 'An article image exceeds 1 MB. Compress the image and publish again.',
+        WECHAT_IMAGE_FORMAT_UNSUPPORTED: 'WeChat does not support this image format. Convert it to JPG or PNG and publish again.',
+        WECHAT_HTML_TOO_LARGE: 'The article HTML exceeds WeChat’s size limit. Reduce the content or formatting and publish again.',
         PUBLICATION_TARGET_EXISTS: 'A document already exists at this destination. Choose another destination.', PUBLICATION_PERMISSION_REQUIRED: 'This account lacks write access to the target repository. Grant access and retry.',
         OBSIDIAN_NOT_CONFIGURED: 'Connect an accessible Obsidian vault first.',
         OBSIDIAN_VAULT_REQUIRED: 'Select an unambiguous destination vault.',
