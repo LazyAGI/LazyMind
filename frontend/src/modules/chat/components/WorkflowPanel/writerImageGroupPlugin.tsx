@@ -4,12 +4,13 @@ import {
 } from '@mdxeditor/editor';
 import {
   $applyNodeReplacement, $createParagraphNode, $getRoot, $isElementNode, $isParagraphNode, $getNodeByKey, $getNearestNodeFromDOMNode, $isLineBreakNode, $isTextNode,
-  ElementNode, RootNode, setDOMUnmanaged, type LexicalNode, type NodeKey, type SerializedElementNode,
+  ElementNode, HISTORY_PUSH_TAG, RootNode, setDOMUnmanaged, type LexicalNode, type NodeKey, type SerializedElementNode,
 } from 'lexical';
 import { createContext, useContext, useEffect, useLayoutEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { createPortal } from 'react-dom';
 import { WriterImageGroupControls } from './WriterImageGroupControls';
+import { startWriterImageDrag } from './writerImageDrag';
 import { imageGroupKey, imageGroupLayout, normalizeImageSource, setImageGroup, type WriterImageGroup, type WriterImageRef } from './writerImageGroups';
 import './writerImageGroups.scss';
 
@@ -60,6 +61,18 @@ function normalizeImageParagraphs(node: WriterImageGroupNode) {
   }
 }
 
+function nearestDropElement(elements: HTMLElement[], point: number, horizontal: boolean) {
+  let nearest: HTMLElement | null = null, distance = Infinity;
+  for (const element of elements) {
+    const rect = element.getBoundingClientRect();
+    if (!rect.width || !rect.height) continue;
+    const start = horizontal ? rect.left : rect.top, end = horizontal ? rect.right : rect.bottom;
+    const next = Math.max(start - point, point - end, 0);
+    if (next < distance) { nearest = element; distance = next; }
+  }
+  return nearest;
+}
+
 function groupState() {
   const counts = new Map<string, number>();
   const result: Array<{ key: string; images: WriterImageRef[] }> = [];
@@ -98,38 +111,59 @@ function GroupControls() {
     const refresh = () => setGroups(editor.getEditorState().read(groupState));
     refresh(); setEditable(editor.isEditable());
     const unsubscribe = editor.registerUpdateListener(refresh);
-    const unsubscribeEditable = editor.registerEditableListener(setEditable);
-    let draggedImage: HTMLImageElement | null = null;
+    let cancelDrag: (() => void) | undefined;
+    const unsubscribeEditable = editor.registerEditableListener(value => { setEditable(value); if (!value) cancelDrag?.(); });
     const startDrag = (event: MouseEvent) => {
       if (event.button !== 0 || !editor.isEditable() || !(event.target instanceof Element)) return;
-      draggedImage = event.target.closest<HTMLImageElement>('.writer-image-group-images img');
-      if (draggedImage) event.preventDefault();
-    };
-    const finishDrag = (event: MouseEvent) => {
-      const source = draggedImage; draggedImage = null;
-      const target = event.target instanceof Element ? event.target.closest<HTMLImageElement>('.writer-image-group-images img') : null;
-      if (!editor.isEditable() || !source || !target || source === target
-        || source.closest('.writer-image-group') !== target.closest('.writer-image-group')) return;
-      const rect = target.getBoundingClientRect();
-      const before = target.closest('.writer-image-group')?.getAttribute('data-layout') === 'sliding'
-        ? event.clientX < rect.left + rect.width / 2 : event.clientY < rect.top + rect.height / 2;
-      editor.update(() => {
-        const image = $getNearestNodeFromDOMNode(source), destination = $getNearestNodeFromDOMNode(target);
-        if (!(image instanceof ImageNode) || !(destination instanceof ImageNode)) throw new Error('The image group has changed.');
-        const group = image.getParentOrThrow().getParentOrThrow();
-        if (!(group instanceof WriterImageGroupNode)) throw new Error('The image group has changed.');
-        normalizeImageParagraphs(group);
-        const paragraph = image.getParentOrThrow(), targetParagraph = destination.getParentOrThrow();
-        if (before) targetParagraph.insertBefore(paragraph); else targetParagraph.insertAfter(paragraph);
+      const source = event.target.closest<HTMLImageElement>('[data-editor-block-type="image"] img');
+      const root = editor.getRootElement();
+      if (!source || !root || !editor.read(() => $getNearestNodeFromDOMNode(source) instanceof ImageNode)) return;
+      const sourceGroup = source.closest('.writer-image-group');
+      cancelDrag?.();
+      cancelDrag = startWriterImageDrag(event, source, root, (x, y) => {
+        const hovered = document.elementFromPoint(x, y);
+        if (!(hovered instanceof HTMLElement) || !root.contains(hovered) || hovered.closest('.writer-image-group-host')) return null;
+        let target: HTMLElement | null = hovered;
+        const horizontal = sourceGroup?.getAttribute('data-layout') === 'sliding';
+        if (sourceGroup) {
+          target = hovered.closest('[data-editor-block-type="image"]')?.querySelector('img') ?? null;
+          if (!target && sourceGroup.contains(hovered)) target = nearestDropElement(
+            Array.from(sourceGroup.querySelectorAll('img')).filter(image => image !== source), horizontal ? x : y, horizontal);
+          if (!target || target.closest('.writer-image-group') !== sourceGroup) return null;
+        } else if (hovered === root) {
+          target = nearestDropElement(Array.from(root.children).filter((element): element is HTMLElement =>
+            element instanceof HTMLElement && !element.contains(source)), y, false);
+        } else {
+          while (target && target.parentElement !== root) target = target.parentElement;
+        }
+        if (!target || target === source || target.contains(source)) return null;
+        const rect = target.getBoundingClientRect();
+        const before = horizontal ? x < rect.left + rect.width / 2 : y < rect.top + rect.height / 2;
+        return { element: target, position: before ? 'before' : 'after' };
+      }, target => {
+        if (!editor.isEditable()) return;
+        editor.update(() => {
+          const image = $getNearestNodeFromDOMNode(source), destination = $getNearestNodeFromDOMNode(target.element);
+          if (!(image instanceof ImageNode) || !destination) throw new Error('The image has changed.');
+          if (sourceGroup) {
+            const group = image.getParentOrThrow().getParentOrThrow();
+            if (!(group instanceof WriterImageGroupNode) || !(destination instanceof ImageNode)) throw new Error('The image group has changed.');
+            normalizeImageParagraphs(group);
+          }
+          const parent = image.getParentOrThrow();
+          const paragraph = imageParagraph(parent) ? parent : $createParagraphNode().append(image);
+          const targetNode = sourceGroup ? destination.getParentOrThrow() : destination;
+          if (target.position === 'before') targetNode.insertBefore(paragraph); else targetNode.insertAfter(paragraph);
+        }, { tag: HISTORY_PUSH_TAG });
       });
     };
     const unsubscribeRoot = editor.registerRootListener((root, previous) => {
+      cancelDrag?.();
       previous?.removeEventListener('mousedown', startDrag);
       root?.addEventListener('mousedown', startDrag);
     });
-    window.addEventListener('mouseup', finishDrag);
     editor.update(() => $getRoot().markDirty());
-    return () => { unsubscribe(); unsubscribeEditable(); unsubscribeRoot(); window.removeEventListener('mouseup', finishDrag); };
+    return () => { cancelDrag?.(); unsubscribe(); unsubscribeEditable(); unsubscribeRoot(); };
   }, [editor]);
   if (!editor) return null;
   return <>{groups.map(group => {
