@@ -326,18 +326,29 @@ func TestLibraryAndImportViewsObserveCurrentProcessingTask(t *testing.T) {
 				t.Fatal(err)
 			}
 			check("failed", 0, "processing_failed", "failed", "could not parse PDF [URL omitted]")
-			// An older parsed task without an exactly bound callback cannot invalidate terminal persisted stages.
-			if err := db.Model(&orm.DocumentProcessingState{}).Where("document_id='pdf'").Updates(map[string]any{
-				"index_status": "succeeded", "index_error_code": "", "index_error_message": "", "updated_at": now.Add(2 * time.Minute),
-			}).Error; err != nil {
-				t.Fatal(err)
-			}
+			// An older parsed task without an exactly bound callback cannot invalidate newer persisted parsing.
 			if err := db.Model(&readonlyorm.LazyLLMDocServiceTaskRow{}).Where("task_id='retry-remote'").Updates(map[string]any{
 				"doc_id": "foreign-pdf", "status": "WORKING", "error_code": nil, "error_msg": nil,
 			}).Error; err != nil {
 				t.Fatal(err)
 			}
-			check("ready", 0, "ready", "ready", "")
+			for _, tc := range []struct{ level, laterStatus string }{
+				{"indexed", "pending"},
+				{"indexed", "failed"},
+				{"parsed", "pending"},
+				{"indexed", "succeeded"},
+			} {
+				t.Logf("unbound parsed task with target %s and later stages %s", tc.level, tc.laterStatus)
+				if err := db.Model(&orm.Dataset{}).Where("id='papers'").Update("processing_level", tc.level).Error; err != nil {
+					t.Fatal(err)
+				}
+				if err := db.Model(&orm.DocumentProcessingState{}).Where("document_id='pdf'").Updates(map[string]any{
+					"chunk_status": tc.laterStatus, "index_status": tc.laterStatus, "index_error_code": "", "index_error_message": "", "updated_at": now.Add(2 * time.Minute),
+				}).Error; err != nil {
+					t.Fatal(err)
+				}
+				check("ready", 0, "ready", "ready", "")
+			}
 			before = readState()
 			_, raw, _, err := doc.ObserveDocumentProcessingDetails(t.Context(), db, db, document)
 			assertPersisted("unbound remote task status", before)

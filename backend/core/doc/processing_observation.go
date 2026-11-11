@@ -171,12 +171,9 @@ func (snapshot processingSnapshot) observe(document orm.Document) (orm.DocumentP
 		raw = snapshot.external[[2]string{task.LazyllmTaskID, document.LazyllmDocID}]
 		if raw == "" {
 			raw = "UNKNOWN"
-			// An unobserved parse-only task cannot invalidate newer persisted readiness at the configured level.
-			level := snapshot.dataset.ProcessingLevel
-			persistedReady := state.ParseStatus == "succeeded" && state.ChunkStatus == "succeeded" &&
-				(level == ProcessingLevelChunked || (level == ProcessingLevelIndexed && state.IndexStatus == "succeeded"))
+			// An unobserved parse-only task cannot invalidate a newer persisted parse success.
 			if ext.ProcessingLevel == ProcessingLevelParsed && ext.ProcessingRevision == snapshot.dataset.ProcessingRevision &&
-				persistedReady && state.UpdatedAt.After(task.CreatedAt) && state.UpdatedAt.After(task.UpdatedAt) {
+				state.ParseStatus == "succeeded" && state.UpdatedAt.After(task.CreatedAt) && state.UpdatedAt.After(task.UpdatedAt) {
 				return state, raw
 			}
 		}
