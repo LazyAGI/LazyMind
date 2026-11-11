@@ -59,7 +59,7 @@ import { ALL_TAGS } from "@/modules/knowledge/constants/common";
 import {
   Dataset as LegacyDataset,
 } from "@/api/generated/knowledge-client";
-import type { Dataset as CoreDataset } from "@/api/generated/core-client";
+import type { Dataset as CoreDataset, EmbeddingIndexStatusResponse } from "@/api/generated/core-client";
 type Dataset = LegacyDataset & Pick<CoreDataset, "paper_count" | "pdf_attachment_count">;
 import KnowledgeTag from "@/modules/knowledge/components/KnowledgeTag";
 import FileUtils from "@/modules/knowledge/utils/file";
@@ -140,6 +140,7 @@ import {
   isCloudKnowledgeCreateRequest,
 } from "@/modules/modelProvider/utils/cloudDocumentKnowledge";
 import { useKnowledgeListNavigation } from "../../hooks/useKnowledgeListNavigation";
+import { embeddingOfflineMaintenanceInstructions } from "@/modules/modelProvider/embeddingRecovery";
 import { parseShowcaseEntryType, SHOWCASE_ENTRY_QUERY_PARAM } from "@/modules/showcase/classification";
 import { getLearningCatalog, type CapabilityProfile } from "@/modules/learning/api";
 import {
@@ -175,19 +176,65 @@ interface KnowledgePageProps {
   modelSettingsPath?: string;
 }
 
-type EmbeddingIndexStatus = "empty" | "indexed" | "rebuilding" | "clearing" | "cleared" | "unknown";
+type EmbeddingIndexState = Pick<EmbeddingIndexStatusResponse, "status"> & Partial<EmbeddingIndexStatusResponse>;
+type EmbeddingIndexStatus = EmbeddingIndexState["status"];
 
-interface EmbeddingIndexState {
-  status: EmbeddingIndexStatus;
-  model_name?: string;
-  provider_name?: string;
-  indexed_knowledge_bases: number;
-  pending_knowledge_bases: number;
+interface EmbeddingReadiness {
+  ready: boolean;
+  reason?: string;
 }
 
 const embeddingIndexStatuses = new Set<EmbeddingIndexStatus>([
   "empty", "indexed", "rebuilding", "clearing", "cleared", "unknown",
 ]);
+
+const indexNoticeDescriptions = {
+  rebuilding: "knowledge.embeddingIndexRebuilding",
+  clearing: "knowledge.embeddingIndexClearing",
+  cleanup_failed: "knowledge.embeddingIndexCleanupFailed",
+  cleared: "knowledge.embeddingIndexCleared",
+  legacy_unknown: "knowledge.embeddingIndexUnknown",
+} as const;
+type IndexNoticePhase = keyof typeof indexNoticeDescriptions;
+
+const legacyIndexNotices: Partial<Record<EmbeddingIndexStatus, IndexNoticePhase>> = {
+  rebuilding: "rebuilding",
+  clearing: "clearing",
+  cleared: "cleared",
+  unknown: "legacy_unknown",
+};
+
+const readinessIndexNotices = new Map<string, IndexNoticePhase>([
+  ["index_identity_unverified", "legacy_unknown"],
+  ["index_cleanup_in_progress", "clearing"],
+  ["index_cleanup_incomplete", "cleanup_failed"],
+  ["index_cleared", "cleared"],
+]);
+
+type EmbeddingNotice = { kind: "model_unavailable" } | {
+  kind: "index";
+  phase: IndexNoticePhase;
+  key: string;
+  showModelWarning: boolean;
+};
+
+function getEmbeddingNotice(index: EmbeddingIndexState | null, readiness: EmbeddingReadiness | null): EmbeddingNotice | null {
+  const operation = index?.operation_phase;
+  const knownOperation = operation && Object.prototype.hasOwnProperty.call(indexNoticeDescriptions, operation)
+    ? operation as IndexNoticePhase : undefined;
+  const phase = knownOperation
+    ?? (index?.index_identity === "legacy_unknown" ? "legacy_unknown" : undefined)
+    ?? (!operation && readiness?.ready === false ? readinessIndexNotices.get(readiness.reason || "") : undefined)
+    ?? (index ? legacyIndexNotices[index.status] : undefined);
+  if (phase) {
+    const identity = index?.index_identity ?? (phase === "legacy_unknown" ? "legacy_unknown" : phase === "cleared" ? "empty" : "");
+    // Rebuilding can coincide with a separate provider or credentials failure.
+    const showModelWarning = phase === "rebuilding" && readiness?.ready === false &&
+      Boolean(readiness.reason && !readinessIndexNotices.has(readiness.reason));
+    return { kind: "index", phase, key: `${identity}:${phase}`, showModelWarning };
+  }
+  return readiness?.ready === false ? { kind: "model_unavailable" } : null;
+}
 
 const KnowledgePage: FC<KnowledgePageProps> = ({
   modelSettingsPath = "/settings?section=model_defaults",
@@ -296,9 +343,17 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
         ? officialLoaded && loadedOfficialSort === mineSort
         : loadedTableQuery === tableQueryKey,
   );
-  const [embeddingReady, setEmbeddingReady] = useState<boolean | null>(null);
+  const [embeddingReadiness, setEmbeddingReadiness] = useState<EmbeddingReadiness | null>(null);
+  const embeddingReady = embeddingReadiness?.ready ?? null;
   const [embeddingIndexState, setEmbeddingIndexState] = useState<EmbeddingIndexState | null>(null);
-  const embeddingIndexRequestSeq = useRef(0);
+  const embeddingStatusRequestSeq = useRef(0);
+  const [dismissedIndexNotice, setDismissedIndexNotice] = useState<string | null>(null);
+  const embeddingNotice = getEmbeddingNotice(embeddingIndexState, embeddingReadiness);
+  const indexNotice = embeddingNotice?.kind === "index" ? embeddingNotice : null;
+  const indexNoticeKey = indexNotice?.key ?? null;
+  useEffect(() => {
+    setDismissedIndexNotice((dismissed) => dismissed === indexNoticeKey ? dismissed : null);
+  }, [indexNoticeKey]);
   const [multimodalEmbeddingReady, setMultimodalEmbeddingReady] = useState<
     boolean | null
   >(null);
@@ -472,7 +527,7 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
     };
     document.addEventListener("visibilitychange", onVisibilityChange);
     return () => {
-      embeddingIndexRequestSeq.current += 1;
+      embeddingStatusRequestSeq.current += 1;
       window.removeEventListener(
         MODEL_FEATURES_CHANGED_EVENT,
         onFeaturesChanged,
@@ -487,7 +542,8 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
   }, [fromPaperReading, mineScene]);
 
   async function checkEmbeddingReady() {
-    void checkEmbeddingIndexState();
+    const request = ++embeddingStatusRequestSeq.current;
+    void checkEmbeddingIndexState(request);
     try {
       const features = await fetchModelFeatures(true);
       const imageEmbedRequired = isImageEmbedRequired(features);
@@ -495,38 +551,39 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
       const [embResp, multiResp] = await Promise.all([
         axiosInstance
           .get<
-            { data?: { ready: boolean } } | { ready: boolean }
+            { data?: EmbeddingReadiness } | EmbeddingReadiness
           >(`${BASE_URL}/api/core/model_providers/models/ready?model_type=embed_main`)
           .catch(() => null),
         imageEmbedRequired
           ? axiosInstance
               .get<
-                { data?: { ready: boolean } } | { ready: boolean }
+                { data?: EmbeddingReadiness } | EmbeddingReadiness
               >(`${BASE_URL}/api/core/model_providers/models/ready?model_type=embed_image`)
               .catch(() => null)
           : Promise.resolve(null),
       ]);
-      const unwrap = (resp: typeof embResp): boolean | null => {
+      if (request !== embeddingStatusRequestSeq.current) return;
+      const unwrap = (resp: typeof embResp): EmbeddingReadiness | null => {
         if (!resp) return null;
         const d =
           resp.data && typeof resp.data === "object" && "data" in resp.data
-            ? (resp.data as { data?: { ready: boolean } }).data
-            : (resp.data as { ready: boolean });
-        return d?.ready ?? null;
+            ? (resp.data as { data?: EmbeddingReadiness }).data
+            : (resp.data as EmbeddingReadiness);
+        return typeof d?.ready === "boolean" ? d : null;
       };
-      setEmbeddingReady(unwrap(embResp));
+      const readiness = unwrap(embResp);
+      if (readiness) setEmbeddingReadiness(readiness);
       // null means "not applicable" — does not trigger disabled state.
       setMultimodalEmbeddingReady(
-        imageEmbedRequired ? unwrap(multiResp) : null,
+        imageEmbedRequired ? unwrap(multiResp)?.ready ?? null : null,
       );
     } catch {
-      setEmbeddingReady(null);
+      if (request !== embeddingStatusRequestSeq.current) return;
       setMultimodalEmbeddingReady(null);
     }
   }
 
-  async function checkEmbeddingIndexState() {
-    const request = ++embeddingIndexRequestSeq.current;
+  async function checkEmbeddingIndexState(request: number) {
     try {
       const response = await axiosInstance.get<unknown>(
         `${BASE_URL}/api/core/model_providers/embedding/index-state`,
@@ -534,15 +591,13 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
       const body = response.data;
       const state = body && typeof body === "object" && "data" in body
         ? body.data : body;
-      if (request !== embeddingIndexRequestSeq.current) return;
-      setEmbeddingIndexState(
-        state && typeof state === "object" && "status" in state
-          && typeof state.status === "string"
-          && embeddingIndexStatuses.has(state.status as EmbeddingIndexStatus)
-          ? state as EmbeddingIndexState : null,
-      );
+      if (request !== embeddingStatusRequestSeq.current) return;
+      if (state && typeof state === "object" && "status" in state &&
+          typeof state.status === "string" && embeddingIndexStatuses.has(state.status as EmbeddingIndexStatus)) {
+        setEmbeddingIndexState(state as EmbeddingIndexState);
+      }
     } catch {
-      if (request === embeddingIndexRequestSeq.current) setEmbeddingIndexState(null);
+      // A failed refresh does not change the last observed index identity or phase.
     }
   }
 
@@ -1798,6 +1853,19 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
     </Tooltip>
   );
 
+  const modelSettingsLink = isAdmin ? (
+    <a href={modelSettingsPath} style={{ marginLeft: 8, fontWeight: 500 }} onClick={(event) => {
+      event.preventDefault();
+      navigate(modelSettingsPath);
+    }}>
+      {t("knowledge.goToConfig")}
+    </a>
+  ) : null;
+  const showEmbeddingNotice = indexNotice
+    ? activeView === "mine" && indexNotice.key !== dismissedIndexNotice
+    : embeddingNotice?.kind === "model_unavailable";
+  const embeddingReadinessMessage = t(isAdmin ? "knowledge.embeddingNotReadyBannerAdmin" : "knowledge.embeddingNotReadyBanner");
+
   return (
     <div className="knowledge-list-page" ref={rootRef}>
       {taskNotificationHolder}
@@ -1829,59 +1897,41 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
         ) : null}
       </div>
 
-      {activeView === "mine" && embeddingIndexState ? (
-        <div role="status" aria-label={t("knowledge.embeddingIndexStateTitle")}>
-          <Alert
-            className="knowledge-embedding-warning"
-            showIcon
-            type={embeddingIndexState.status === "indexed" ? "success"
-              : embeddingIndexState.status === "empty" ? "info" : "warning"}
-            message={
-              <span>
-                <strong>{t("knowledge.embeddingIndexStateTitle")}</strong>
-                {embeddingIndexState.model_name ? ` · ${t("knowledge.embeddingIndexModel", {
-                  provider: embeddingIndexState.provider_name || t("knowledge.unknown"),
-                  model: embeddingIndexState.model_name,
-                })}` : null}
-              </span>
-            }
-            description={
-              embeddingIndexState.status === "indexed"
-                ? t("knowledge.embeddingIndexIndexed", { count: embeddingIndexState.indexed_knowledge_bases })
-                : embeddingIndexState.status === "rebuilding"
-                  ? t("knowledge.embeddingIndexRebuilding", { count: embeddingIndexState.pending_knowledge_bases })
-                  : t(`knowledge.embeddingIndex${embeddingIndexState.status === "empty" ? "Empty"
-                    : embeddingIndexState.status === "clearing" ? "Clearing"
-                      : embeddingIndexState.status === "cleared" ? "Cleared" : "Unknown"}`)
-            }
-          />
-        </div>
-      ) : null}
-      {embeddingReady === false ? (
+      {showEmbeddingNotice ? (
         <Alert
-          banner
+          key={indexNotice?.key ?? "model_unavailable"}
+          role={indexNotice ? "status" : "alert"}
+          aria-label={indexNotice ? t("knowledge.embeddingIndexStateTitle") : undefined}
+          banner={!indexNotice}
           className="knowledge-embedding-warning"
-          message={
-            isAdmin ? (
-              <span>
-                {t("knowledge.embeddingNotReadyBannerAdmin")}
-                <a
-                  href={modelSettingsPath}
-                  style={{ marginLeft: 8, fontWeight: 500 }}
-                  onClick={(e: MouseEvent<HTMLAnchorElement>) => {
-                    e.preventDefault();
-                    navigate(modelSettingsPath);
-                  }}
-                >
-                  {t("knowledge.goToConfig")}
-                </a>
-              </span>
-            ) : (
-              t("knowledge.embeddingNotReadyBanner")
-            )
-          }
           showIcon
-          type="warning"
+          type={!indexNotice?.showModelWarning && (indexNotice?.phase === "rebuilding" || indexNotice?.phase === "clearing") ? "info" : "warning"}
+          closable={indexNotice ? { closeIcon: true, "aria-label": t("common.close") } : false}
+          onClose={indexNotice ? () => setDismissedIndexNotice(indexNotice.key) : undefined}
+          message={indexNotice ? (
+            <span>
+              <strong>{t("knowledge.embeddingIndexStateTitle")}</strong>
+              {embeddingIndexState?.model_name ? ` · ${t("knowledge.embeddingIndexModel", {
+                provider: embeddingIndexState.provider_name || t("knowledge.unknown"),
+                model: embeddingIndexState.model_name,
+              })}` : null}
+            </span>
+          ) : (
+            <span>
+              {embeddingReadinessMessage}
+              {modelSettingsLink}
+            </span>
+          )}
+          description={indexNotice ? (
+            <>
+              <div>{t(indexNoticeDescriptions[indexNotice.phase], { count: embeddingIndexState?.pending_knowledge_bases ?? 0 })}</div>
+              {indexNotice.showModelWarning ? <div>{embeddingReadinessMessage}</div> : null}
+              {isAdmin && (indexNotice.phase === "legacy_unknown" || indexNotice.phase === "cleanup_failed") ? (
+                <div>{embeddingOfflineMaintenanceInstructions(t)}</div>
+              ) : null}
+            </>
+          ) : undefined}
+          action={indexNotice ? modelSettingsLink : undefined}
         />
       ) : null}
       {multimodalEmbeddingReady === false ? (

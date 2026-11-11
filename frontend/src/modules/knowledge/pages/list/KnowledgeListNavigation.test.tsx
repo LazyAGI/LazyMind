@@ -4,7 +4,10 @@ import { createMemoryRouter, RouterProvider } from "react-router-dom";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { deferred, desktopTestTranslation as t, installDesktopTestDOM } from "@/test/desktopResourceFixtures";
 
-const mocks = vi.hoisted(() => ({ list: vi.fn(), catalog: vi.fn(), scan: vi.fn(), cloudCreate: vi.fn(), scenes: vi.fn(), remove: vi.fn(), get: vi.fn() }));
+const mocks = vi.hoisted(() => ({
+  list: vi.fn(), catalog: vi.fn(), scan: vi.fn(), cloudCreate: vi.fn(), scenes: vi.fn(), remove: vi.fn(), get: vi.fn(),
+  post: vi.fn(), put: vi.fn(), patch: vi.fn(), delete: vi.fn(), role: "user",
+}));
 vi.mock("@/modules/learning/api", () => ({ getLearningCatalog: mocks.scenes }));
 vi.mock("react-i18next", async (load) => ({ ...await load<typeof import("react-i18next")>(), useTranslation: () => ({ t }) }));
 vi.mock("@/modules/knowledge/api/knowledgeMarket", () => ({
@@ -23,9 +26,9 @@ vi.mock("@/modules/knowledge/components/UpdateModal", async () => ({ default: (a
 vi.mock("@/modules/knowledge/components/CreateKnowledgeBaseModal", async () => ({ default: (await import("react")).forwardRef(() => null) }));
 vi.mock("@/modules/knowledge/components/KnowledgeTag", () => ({ default: () => null }));
 vi.mock("@/modules/knowledge/components/KnowledgeBaseSyncNow", () => ({ default: () => null }));
-vi.mock("@/components/auth", () => ({ AgentAppsAuth: { getUserInfo: () => ({}) } }));
+vi.mock("@/components/auth", () => ({ AgentAppsAuth: { getUserInfo: () => ({ role: mocks.role }) } }));
 vi.mock("@/components/request", () => ({ BASE_URL: "", localizeErrorCode: (_code: string, fallback: string) => fallback,
-  axiosInstance: { get: mocks.get } }));
+  axiosInstance: { get: mocks.get, post: mocks.post, put: mocks.put, patch: mocks.patch, delete: mocks.delete } }));
 vi.mock("@/modules/knowledge/utils/request", () => ({ KnowledgeBaseServiceApi: () => ({ datasetServiceListDatasets: mocks.list, datasetServiceDeleteDataset: mocks.remove }) }));
 vi.mock("@/modules/dataSource/api/clients", () => ({ dataSourceScanApi: { listSources: mocks.scan } }));
 vi.mock("@/hooks/useModelFeatures", () => ({ fetchModelFeatures: vi.fn().mockResolvedValue({}), isImageEmbedRequired: () => false, MODEL_FEATURES_CHANGED_EVENT: "features-changed" }));
@@ -57,6 +60,7 @@ async function mount(search: string) {
     { path: "/lib/knowledge/list", element: <KnowledgePage /> },
     { path: "/lib/knowledge/detail/:id", element: <span>知识库详情</span> },
     { path: "/agent/chat/home", element: <span>聊天首页</span> },
+    { path: "/settings", element: <span>默认模型设置</span> },
   ], { initialEntries: [`/lib/knowledge/list${search}`] });
   await act(async () => { render(<ConfigProvider button={{ autoInsertSpace: false }} theme={{ token: { motion: false } }}><RouterProvider router={router} /></ConfigProvider>); });
   return router;
@@ -65,6 +69,7 @@ async function mount(search: string) {
 beforeAll(installDesktopTestDOM);
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.role = "user";
   mocks.get.mockImplementation((url: string) => Promise.resolve({ data: url.endsWith("/deletion")
     ? { dataset_id: "local-id", display_name: "本地手册", status: "cleaning", total: 5, completed: 2, failed: 0 }
     : { ready: true } }));
@@ -83,20 +88,170 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe("knowledge list URL and data restoration", () => {
-  it("shows the current text embedding model and indexed knowledge-base count", async () => {
-    mocks.get.mockImplementation((url: string) => Promise.resolve({ data: url.includes("/embedding/index-state")
-      ? { data: {
-        status: "indexed", model_name: "Qwen3-Embedding-8B", provider_name: "硅基流动",
-        indexed_knowledge_bases: 3, pending_knowledge_bases: 0,
-      } }
-      : { ready: true } }));
+  const noticeName = t("knowledge.embeddingIndexStateTitle");
+  const indexFixture = {
+    model_name: "Qwen3-Embedding-8B", provider_name: "硅基流动",
+    indexed_knowledge_bases: 3, pending_knowledge_bases: 2,
+  };
+  const configureEmbedding = (index: () => object, readiness: { ready: boolean; reason?: string }) => {
+    mocks.get.mockImplementation(async (url: string) => ({ data: url.endsWith("/embedding/index-state")
+      ? { data: index() } : { data: readiness } }));
+  };
+  const refreshEmbedding = () => act(async () => { window.dispatchEvent(new Event("features-changed")); });
+  const dismissIndexNotice = async () => {
+    const notice = await screen.findByRole("status", { name: noticeName });
+    fireEvent.click(within(notice).getByRole("button", { name: t("common.close") }));
+    expect(screen.queryByRole("status", { name: noticeName })).not.toBeInTheDocument();
+  };
+  const expectNoOnlineCleanup = () => {
+    expect(mocks.post).not.toHaveBeenCalled();
+    expect(mocks.put).not.toHaveBeenCalled();
+    expect(mocks.patch).not.toHaveBeenCalled();
+    expect(mocks.delete).not.toHaveBeenCalled();
+    expect(mocks.get.mock.calls.map(([url]) => url)).toEqual(expect.arrayContaining([
+      "/api/core/model_providers/embedding/index-state", "/api/core/model_providers/models/ready?model_type=embed_main",
+    ]));
+    expect(mocks.get.mock.calls.every(([url]) => !/cleanup|\/clear(?:[/?]|$)/.test(url))).toBe(true);
+  };
+
+  it.each([["empty", "empty"], ["indexed", "verified"]])("hides the healthy %s idle index banner", async (status, index_identity) => {
+    configureEmbedding(() => ({ ...indexFixture, status, index_identity, operation_phase: "idle" }), { ready: true });
 
     await mount("");
 
-    const status = await screen.findByRole("status", { name: t("knowledge.embeddingIndexStateTitle") });
-    expect(status).toHaveTextContent("硅基流动");
-    expect(status).toHaveTextContent("Qwen3-Embedding-8B");
-    expect(status).toHaveTextContent("3 个知识库");
+    expect(screen.queryByRole("status", { name: noticeName })).not.toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it.each([
+    ["rebuilding", "verified", "rebuilding", undefined, "Rebuilding"],
+    ["clearing", "verified", "clearing", "index_cleanup_in_progress", "Clearing"],
+    ["clearing", "verified", "cleanup_failed", "index_cleanup_incomplete", "CleanupFailed"],
+    ["unknown", "legacy_unknown", "idle", "index_identity_unverified", "Unknown"],
+    ["cleared", "empty", "cleared", "index_cleared", "Cleared"],
+  ])("renders one %s index notice for %s/%s when readiness is false", async (status, index_identity, operation_phase, reason, message) => {
+    configureEmbedding(() => ({ ...indexFixture, status, index_identity, operation_phase }), { ready: false, reason });
+
+    await mount("");
+
+    const notice = await screen.findByRole("status", { name: noticeName });
+    expect(notice).toHaveTextContent(t(`knowledge.embeddingIndex${message}`, { count: 2 }));
+    expect(screen.getAllByRole("status", { name: noticeName })).toEqual([notice]);
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(screen.queryByText(t("knowledge.embeddingNotReadyBanner"))).not.toBeInTheDocument();
+  });
+
+  it("keeps the ordinary model-readiness warning for a healthy index with unavailable credentials", async () => {
+    configureEmbedding(() => ({ ...indexFixture, status: "indexed", index_identity: "verified", operation_phase: "idle" }),
+      { ready: false, reason: "credentials_unavailable" });
+
+    await mount("");
+
+    expect(screen.getByRole("alert")).toHaveTextContent(t("knowledge.embeddingNotReadyBanner"));
+    expect(screen.queryByRole("status", { name: noticeName })).not.toBeInTheDocument();
+  });
+
+  it("reports an independent credential problem inside the rebuilding notice", async () => {
+    configureEmbedding(() => ({ ...indexFixture, status: "rebuilding", index_identity: "verified", operation_phase: "rebuilding" }),
+      { ready: false, reason: "credentials_unavailable" });
+
+    await mount("");
+
+    const notice = await screen.findByRole("status", { name: noticeName });
+    expect(notice).toHaveTextContent(t("knowledge.embeddingIndexRebuilding", { count: 2 }));
+    expect(notice).toHaveTextContent(t("knowledge.embeddingNotReadyBanner"));
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it.each([["unknown", "Unknown"], ["clearing", "Clearing"], ["cleared", "Cleared"]])(
+    "uses the legacy %s status when the server has no identity or phase fields",
+    async (status, message) => {
+      configureEmbedding(() => ({ ...indexFixture, status }), { ready: false });
+
+      await mount("");
+
+      const notice = await screen.findByRole("status", { name: noticeName });
+      expect(notice).toHaveTextContent(t(`knowledge.embeddingIndex${message}`));
+      expect(screen.getAllByRole("status", { name: noticeName })).toEqual([notice]);
+      expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    },
+  );
+
+  it("dismisses the index notice locally until a different identity or phase arrives", async () => {
+    let index = { ...indexFixture, status: "clearing", index_identity: "verified", operation_phase: "clearing" };
+    let unavailable = false;
+    configureEmbedding(() => {
+      if (unavailable) throw new Error("index status temporarily unavailable");
+      return index;
+    }, { ready: false, reason: "index_cleanup_in_progress" });
+    await mount("");
+
+    const readsBeforeClose = mocks.get.mock.calls.length;
+    await dismissIndexNotice();
+    expect(mocks.get).toHaveBeenCalledTimes(readsBeforeClose);
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    unavailable = true;
+    await refreshEmbedding();
+    unavailable = false;
+    index = { ...index, pending_knowledge_bases: 1, model_name: "Updated display label" };
+    await refreshEmbedding();
+    expect(screen.queryByRole("status", { name: noticeName })).not.toBeInTheDocument();
+
+    index = { ...index, index_identity: "legacy_unknown" };
+    await refreshEmbedding();
+    await dismissIndexNotice();
+    index = { ...index, operation_phase: "cleanup_failed" };
+    await refreshEmbedding();
+    expect(await screen.findByRole("status", { name: noticeName })).toHaveTextContent(t("knowledge.embeddingIndexCleanupFailed"));
+    expectNoOnlineCleanup();
+  });
+
+  it("shows a dismissed abnormal notice again when the knowledge page is reopened", async () => {
+    configureEmbedding(() => ({ status: "unknown", index_identity: "legacy_unknown", operation_phase: "idle" }),
+      { ready: false, reason: "index_identity_unverified" });
+    const router = await mount("");
+    await dismissIndexNotice();
+
+    fireEvent.click(screen.getByRole("button", { name: "本地手册" }));
+    await screen.findByText("知识库详情");
+    await act(async () => { await router.navigate(-1); });
+
+    expect(await screen.findByRole("status", { name: noticeName })).toHaveTextContent(t("knowledge.embeddingIndexUnknown"));
+  });
+
+  it("does not reopen a dismissed readiness-derived notice after a failed status check", async () => {
+    let readyCheckFails = false;
+    mocks.get.mockImplementation(async (url: string) => {
+      if (url.endsWith("/embedding/index-state") || readyCheckFails) throw new Error("status temporarily unavailable");
+      return { data: { ready: false, reason: "index_identity_unverified" } };
+    });
+    await mount("");
+    await dismissIndexNotice();
+
+    readyCheckFails = true;
+    await refreshEmbedding();
+    readyCheckFails = false;
+    await refreshEmbedding();
+
+    expect(screen.queryByRole("status", { name: noticeName })).not.toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("shows complete offline cleanup instructions and opens default-model settings without a cleanup request", async () => {
+    mocks.role = "system-admin";
+    configureEmbedding(() => ({ status: "unknown", index_identity: "legacy_unknown", operation_phase: "idle" }),
+      { ready: false, reason: "index_identity_unverified" });
+    const router = await mount("");
+
+    const notice = await screen.findByRole("status", { name: noticeName });
+    expect(notice).toHaveTextContent(/停止所有.*读写向量/);
+    expect(notice).toHaveTextContent("LAZYMIND_EMBEDDING_MAINTENANCE_MODE=true");
+    expect(notice).toHaveTextContent(/LAZYMIND_CORE_DATABASE_URL.*正确.*Core/);
+    expect(notice).toHaveTextContent("python -m lazymind.parsing.service.embedding_maintenance --apply --writers-stopped --confirm 'CLEAR TEXT VECTORS'");
+    fireEvent.click(within(notice).getByRole("link", { name: t("knowledge.goToConfig") }));
+    expect(await screen.findByText("默认模型设置")).toBeInTheDocument();
+    expect(router.state.location.search).toBe("?section=model_defaults");
+    expectNoOnlineCleanup();
   });
 
   it("explains that vector search waits for rebuilding while source documents remain", async () => {

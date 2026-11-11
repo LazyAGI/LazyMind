@@ -1535,6 +1535,35 @@ describe("compact provider workspace", () => {
     expect(await screen.findByText("modelProvider.embeddingInUse")).toBeInTheDocument();
     expect(callbacks.onReload).not.toHaveBeenCalled();
   });
+  describe.each(["deleteSupplier", "resetSupplier"] as const)("%s embedding recovery", (action) => {
+    afterEach(() => message.destroy());
+
+    it.each([
+      ["active_index_owner", "modelProvider.embeddingInUse"],
+      ["legacy_selected_owner", "modelProvider.embeddingDeletionLegacyOwner"],
+      ["index_identity_unverified", "modelProvider.embeddingDeletionUnverified"],
+    ])("explains %s without removing the supplier", async (reason, label) => {
+      const target = action === "deleteSupplier"
+        ? { ...provider, id: "custom", name: "Private proxy", isCustom: true }
+        : provider;
+      const callbacks = setup({ providers: [target], configuredProviders: [target] });
+      const request = action === "deleteSupplier" ? mocks.deleteProvider : mocks.resetProvider;
+      request.mockRejectedValueOnce({ response: { status: 409, data: {
+        code: 2005089, message: "raw diagnostic canary",
+        data: { reason, recovery: "offline_vector_cleanup", credential: "secret-canary" },
+      } } });
+      const actionLabel = `modelProvider.workspace.${action}`;
+      fireEvent.click(screen.getByRole("button", { name: actionLabel }));
+      fireEvent.click(within(await screen.findByRole("dialog")).getByRole("button", { name: actionLabel }));
+
+      const warning = await screen.findByText((text) => text.startsWith(label) && text.includes("modelProvider.embeddingOfflineMaintenance"));
+      expect(warning).not.toHaveTextContent(/raw diagnostic canary|secret-canary/);
+      expect(request).toHaveBeenCalledOnce();
+      expect(request).toHaveBeenCalledWith(target.id);
+      expect(callbacks.onReload).not.toHaveBeenCalled();
+      expect(screen.getByRole("button", { name: actionLabel })).toBeEnabled();
+    });
+  });
   it("resets a built-in supplier while keeping its entry", async () => {
     const callbacks = setup();
     fireEvent.click(screen.getByRole("button", { name: "modelProvider.workspace.resetSupplier" }));
