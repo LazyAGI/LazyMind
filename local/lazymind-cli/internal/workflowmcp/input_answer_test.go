@@ -80,7 +80,7 @@ func TestMCPInputAnswerPreservesUserReplyAndQuestionVersion(t *testing.T) {
 
 func TestSharedExecutionContractSurvivesMCP(t *testing.T) {
 	var contract StepContract
-	if err := json.Unmarshal([]byte(`{"prompt":"one task","execution":{"version":"1","skill_files":[{"path":"scenario/execution.md","content":"shared"}],"constraints":["exact count"]},"external_execution":{"version":"1","adapter_instructions":"host tools"}}`), &contract); err != nil {
+	if err := json.Unmarshal([]byte(`{"prompt":"one task","execution":{"version":"1","skill_files":[{"path":"scenario/execution.md","content":"shared"}],"constraints":["exact count"]}}`), &contract); err != nil {
 		t.Fatal(err)
 	}
 	encoded, err := json.Marshal(contract)

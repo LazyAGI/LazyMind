@@ -37,7 +37,7 @@ func knowledgeFixture(t *testing.T, scope *executor.KnowledgeScope) *Service {
 		t.Fatal(err)
 	}
 	node := graph.Nodes["write"]
-	node.ExternalExecution.Tools = []graphengine.ExternalTool{{Name: "knowledge_list_documents", Source: "package"}, {Name: "knowledge_read_document", Source: "package"}}
+	node.Execution.Tools = []graphengine.ExecutionTool{{Name: "knowledge_list_documents", Source: "package"}, {Name: "knowledge_read_document", Source: "package"}}
 	graph.Nodes["write"] = node
 	if err := service.DB.Model(&revision).Update("compiled_graph", graph.JSON()).Error; err != nil {
 		t.Fatal(err)

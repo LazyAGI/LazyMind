@@ -47,7 +47,7 @@ func TestWorkflowPDFPublicResourceScopeAndReplay(t *testing.T) {
 		t.Fatal(err)
 	}
 	node := graph.Nodes["write"]
-	node.ExternalExecution.Tools = []graphengine.ExternalTool{{Name: "pdf_read_text", Source: "package"}}
+	node.Execution.Tools = []graphengine.ExecutionTool{{Name: "pdf_read_text", Source: "package"}}
 	graph.Nodes["write"] = node
 	graph.MaterialCardinalities = map[string]string{"brief": "list"}
 	if err := service.DB.Model(&revision).Update("compiled_graph", graph.JSON()).Error; err != nil {

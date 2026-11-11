@@ -114,8 +114,8 @@ func TestExecutionToolRejectsIncompleteAuthorityBeforeHTTP(t *testing.T) {
 	}
 }
 
-func TestExternalExecutionContractRoundTripPreservesPinnedSkillsAndExtensions(t *testing.T) {
-	raw := `{"external_execution":{"version":"1","validation_owner":"external-agent","skill_files":[{"path":"skills/design.md","content":"Pinned skill","sha256":"abc"}],"tools":[{"name":"builtin:image_generator","source":"global"}],"future_policy":{"required":false}},"declared_input_transports":{"source":"path"},"declared_output_types":{"deck":"file"}}`
+func TestSharedExecutionContractPreservesPinnedSkillsAndExtensions(t *testing.T) {
+	raw := `{"execution":{"version":"1","skill_files":[{"path":"skills/design.md","content":"Pinned skill","sha256":"abc"}],"tools":[{"name":"builtin:image_generator","source":"global"}],"future_policy":{"required":false}},"declared_input_transports":{"source":"path"},"declared_output_types":{"deck":"file"}}`
 	var contract StepContract
 	if err := json.Unmarshal([]byte(raw), &contract); err != nil {
 		t.Fatal(err)
@@ -127,7 +127,7 @@ func TestExternalExecutionContractRoundTripPreservesPinnedSkillsAndExtensions(t 
 	var before, after map[string]any
 	_ = json.Unmarshal([]byte(raw), &before)
 	_ = json.Unmarshal(encoded, &after)
-	for _, key := range []string{"external_execution", "declared_input_transports", "declared_output_types"} {
+	for _, key := range []string{"execution", "declared_input_transports", "declared_output_types"} {
 		if !reflect.DeepEqual(before[key], after[key]) {
 			t.Fatalf("contract field %s changed: %s", key, encoded)
 		}
@@ -139,15 +139,10 @@ func TestExternalExecutionContractRoundTripPreservesPinnedSkillsAndExtensions(t 
 // so a plain JSON roundtrip test cannot detect a lost handle on the MCP wire.
 func TestExternalExecutionContractPassesMCPOutputValidation(t *testing.T) {
 	skillFiles := []any{map[string]any{"path": "skills/design.md", "content": "Pinned skill", "sha256": "abc"}}
-	for name, contract := range map[string]map[string]any{
-		"legacy": {"external_execution": map[string]any{"version": "1", "validation_owner": "external-agent",
-			"skill_files": skillFiles, "future_policy": map[string]any{"required": false}}},
-		"shared": {"prompt": "Pinned task", "objective_ref": "#/prompt", "objective": "Keep all 4 pages",
-			"execution":          map[string]any{"version": "1", "skill_files": skillFiles, "constraints": []any{"Exact page count"}},
-			"external_execution": map[string]any{"version": "1", "validation_owner": "external-agent", "execution_ref": "#/execution", "adapter_instructions": "Use host tools"}},
-	} {
-		t.Run(name, func(t *testing.T) { checkExecutionContractMCPOutput(t, contract) })
-	}
+	checkExecutionContractMCPOutput(t, map[string]any{
+		"prompt": "Pinned task", "objective_ref": "#/prompt", "objective": "Keep all 4 pages",
+		"execution": map[string]any{"version": "1", "skill_files": skillFiles, "constraints": []any{"Exact page count"}},
+	})
 }
 
 func checkExecutionContractMCPOutput(t *testing.T, expectedContract map[string]any) {
@@ -215,6 +210,9 @@ func checkExecutionContractMCPOutput(t *testing.T, expectedContract map[string]a
 		contract := execution["step_contract"].(map[string]any)
 		if execution["execution_handle"] != "unchanged-grant" {
 			t.Fatalf("%s dropped the execution handle", name)
+		}
+		if _, exists := contract["external_execution"]; exists {
+			t.Fatal("external profile reached the model")
 		}
 		for key, expected := range expectedContract {
 			if !reflect.DeepEqual(contract[key], expected) {

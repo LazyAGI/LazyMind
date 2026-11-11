@@ -51,7 +51,7 @@ func TestGlobalToolGatewayUsesPersistedAgentAndNoModelConfiguration(t *testing.T
 		t.Fatal(err)
 	}
 	node := graph.Nodes["write"]
-	node.ExternalExecution.Tools = []graphengine.ExternalTool{{Name: "builtin:url_fetch", Source: "global"}}
+	node.Execution.Tools = []graphengine.ExecutionTool{{Name: "builtin:url_fetch", Source: "global"}}
 	graph.Nodes["write"] = node
 	if err := service.DB.Model(&revision).Update("compiled_graph", graph.JSON()).Error; err != nil {
 		t.Fatal(err)

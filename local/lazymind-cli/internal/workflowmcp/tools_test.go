@@ -116,11 +116,11 @@ func testWorkflowToolDescriptions(t *testing.T, provider string) {
 	for _, tool := range listed.Tools {
 		got[tool.Name] = tool.Description
 	}
-	if !containsAll(got["workflow.start"], "workflow.step.begin", "workflow_id", "revision_id") {
+	if !containsAll(got["workflow.start"], "revision-bound", "workflow.get", "needs_input", "idempotency_key") {
 		t.Fatalf("workflow.start description=%q", got["workflow.start"])
 	}
-	if !containsAll(got["workflow.start"], "inputs", "imported and bound", "absolute", "input_bindings") ||
-		!containsAll(got["workflow.input.import"], "absolute", "does not attach", "prefer workflow.start inputs") {
+	if !containsAll(got["workflow.start"], "inputs", "bound before creation", "absolute", "resource references") ||
+		!containsAll(got["workflow.input.import"], "absolute", "does not attach", "workflow.start") {
 		t.Fatalf("missing file handoff guidance: start=%q import=%q", got["workflow.start"], got["workflow.input.import"])
 	}
 	for _, hint := range []string{"interaction_url", "open_in_codex", "placement=bottom", "Do not open a duplicate browser panel"} {
@@ -128,21 +128,21 @@ func testWorkflowToolDescriptions(t *testing.T, provider string) {
 			t.Fatalf("incorrect Codex presentation scope for %q: %q", provider, got["workflow.start"])
 		}
 	}
-	if !containsAll(got["workflow.get"], "startup_contract", "Omits implementation source", "workflow.step.begin") {
+	if !containsAll(got["workflow.get"], "startup_contract", "workflow.step.begin") {
 		t.Fatalf("workflow.get description=%q", got["workflow.get"])
 	}
-	if !containsAll(got["workflow.step.begin"], "execution_handle", "executor_host is lazymind", "no handle is issued") {
+	if !containsAll(got["workflow.step.begin"], "execution_handle", "admission.can_begin", "command_id", "without a handle") {
 		t.Fatalf("workflow.step.begin description=%q", got["workflow.step.begin"])
 	}
 	for _, name := range []string{"workflow.start", "workflow.step.begin"} {
-		if containsAny(got[name], "workflow.get", "legacy_tools") {
+		if containsAny(got[name], "legacy_tools", "external_execution", "hidden LazyMind") {
 			t.Errorf("%s retains obsolete script guidance: %q", name, got[name])
 		}
 	}
-	if !containsAll(got["workflow.artifact.get"], "artifact_id", "slot key", "get_artifact/read_artifact") {
+	if !containsAll(got["workflow.artifact.get"], "artifact_id", "slot key", "workflow.artifact.list", "result_directory") {
 		t.Fatalf("workflow.artifact.get description=%q", got["workflow.artifact.get"])
 	}
-	if !containsAll(got["workflow.artifact.publish"], "text, json, image, file, or file_list", "local_path", "value", "save_artifact/save_artifacts", "key becomes slot", "immediately") {
+	if !containsAll(got["workflow.artifact.publish"], "local_path", "value_file", "save_artifact/save_artifacts", "key maps to slot", "stable positive seq", "acknowledgements") {
 		t.Fatalf("workflow.artifact.publish description=%q", got["workflow.artifact.publish"])
 	}
 }

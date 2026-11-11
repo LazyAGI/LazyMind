@@ -10,51 +10,48 @@ import (
 // trusted Executor boundaries. It never contains a model configuration, API
 // credential or Host-local path. Public adapters must redact Metadata.
 type AttemptContext struct {
-	Execution               *ExecutionContract         `json:"execution,omitempty"`
-	ExternalExecution       *ExternalExecutionContract `json:"external_execution,omitempty"`
-	KnowledgeScope          *KnowledgeScope            `json:"knowledge_scope,omitempty"`
-	LaunchRequest           string                     `json:"launch_request,omitempty"`
-	UserRequest             string                     `json:"user_request,omitempty"`
-	ExecutionHandle         string                     `json:"-"`
-	PostStepCheckpoint      *PostStepCheckpoint        `json:"post_step_checkpoint,omitempty"`
-	ContractVersion         string                     `json:"contract_version"`
-	SessionID               string                     `json:"session_id"`
-	AttemptID               string                     `json:"attempt_id"`
-	StepID                  string                     `json:"step_id"`
-	AttemptNo               int                        `json:"attempt_no"`
-	Operation               string                     `json:"operation"`
-	Objective               string                     `json:"objective,omitempty"`
-	ObjectiveRef            string                     `json:"objective_ref,omitempty"`
-	Prompt                  string                     `json:"prompt,omitempty"`
-	Acceptance              []string                   `json:"acceptance_criteria,omitempty"`
-	Instruction             string                     `json:"instruction,omitempty"`
-	PartialSelector         map[string][]int           `json:"partial_selector,omitempty"`
-	WorkflowRevision        string                     `json:"workflow_revision"`
-	Inputs                  map[string]any             `json:"inputs,omitempty"`
-	DeclaredInputTypes      map[string]string          `json:"declared_input_types,omitempty"`
-	DeclaredInputTransports map[string]string          `json:"declared_input_transports,omitempty"`
-	DeclaredOutputs         []string                   `json:"declared_outputs,omitempty"`
-	DeclaredOutputTypes     map[string]string          `json:"declared_output_types,omitempty"`
-	RequiredOutputs         []string                   `json:"required_outputs,omitempty"`
-	OutputCardinality       map[string]string          `json:"output_cardinality,omitempty"`
-	Capabilities            []string                   `json:"capabilities,omitempty"`
-	LegacyTools             []string                   `json:"legacy_tools,omitempty"`
-	TerminalTools           []string                   `json:"terminal_tools,omitempty"`
-	ToolsOnly               bool                       `json:"tools_only,omitempty"`
-	TerminalToolsOnly       bool                       `json:"terminal_tools_only,omitempty"`
-	Metadata                map[string]string          `json:"metadata,omitempty"`
+	Execution               *ExecutionContract  `json:"execution,omitempty"`
+	KnowledgeScope          *KnowledgeScope     `json:"knowledge_scope,omitempty"`
+	LaunchRequest           string              `json:"launch_request,omitempty"`
+	UserRequest             string              `json:"user_request,omitempty"`
+	ExecutionHandle         string              `json:"-"`
+	PostStepCheckpoint      *PostStepCheckpoint `json:"post_step_checkpoint,omitempty"`
+	ContractVersion         string              `json:"contract_version"`
+	SessionID               string              `json:"session_id"`
+	AttemptID               string              `json:"attempt_id"`
+	StepID                  string              `json:"step_id"`
+	AttemptNo               int                 `json:"attempt_no"`
+	Operation               string              `json:"operation"`
+	Objective               string              `json:"objective,omitempty"`
+	ObjectiveRef            string              `json:"objective_ref,omitempty"`
+	Prompt                  string              `json:"prompt,omitempty"`
+	Acceptance              []string            `json:"acceptance_criteria,omitempty"`
+	Instruction             string              `json:"instruction,omitempty"`
+	PartialSelector         map[string][]int    `json:"partial_selector,omitempty"`
+	WorkflowRevision        string              `json:"workflow_revision"`
+	Inputs                  map[string]any      `json:"inputs,omitempty"`
+	DeclaredInputTypes      map[string]string   `json:"declared_input_types,omitempty"`
+	DeclaredInputTransports map[string]string   `json:"declared_input_transports,omitempty"`
+	DeclaredOutputs         []string            `json:"declared_outputs,omitempty"`
+	DeclaredOutputTypes     map[string]string   `json:"declared_output_types,omitempty"`
+	RequiredOutputs         []string            `json:"required_outputs,omitempty"`
+	OutputCardinality       map[string]string   `json:"output_cardinality,omitempty"`
+	Capabilities            []string            `json:"capabilities,omitempty"`
+	LegacyTools             []string            `json:"legacy_tools,omitempty"`
+	TerminalTools           []string            `json:"terminal_tools,omitempty"`
+	ToolsOnly               bool                `json:"tools_only,omitempty"`
+	TerminalToolsOnly       bool                `json:"terminal_tools_only,omitempty"`
+	Metadata                map[string]string   `json:"metadata,omitempty"`
 }
 
 // MarshalJSON keeps shared business instructions in one place on the wire.
-// The full in-memory projection remains available to internal authorization and
-// older Go consumers; pinned legacy profiles keep their original JSON shape.
+// Readers restore the complete objective before passing it to an executor.
 func (value AttemptContext) MarshalJSON() ([]byte, error) {
 	type plain AttemptContext
-	if value.Execution == nil || value.ExternalExecution == nil || !value.ExternalExecution.Supported() || value.Execution.Version != value.ExternalExecution.Version {
+	if value.Execution == nil || !value.Execution.Supported() {
 		return json.Marshal(plain(value))
 	}
-	// Historical outboxes often embed the prompt in objective as well. Only
-	// remove an exact known prefix, retaining any runtime refinement verbatim.
+	// Remove only an exact prompt prefix, retaining runtime refinements verbatim.
 	if value.Prompt != "" && value.ObjectiveRef == "" {
 		if value.Objective == value.Prompt {
 			value.Objective, value.ObjectiveRef = "", "#/prompt"
@@ -62,21 +59,10 @@ func (value AttemptContext) MarshalJSON() ([]byte, error) {
 			value.Objective, value.ObjectiveRef = strings.TrimPrefix(value.Objective, prefix), "#/prompt"
 		}
 	}
-	adapter := struct {
-		Version             string `json:"version"`
-		ValidationOwner     string `json:"validation_owner"`
-		ExecutionRef        string `json:"execution_ref"`
-		AdapterInstructions string `json:"adapter_instructions,omitempty"`
-	}{value.ExternalExecution.Version, value.ExternalExecution.ValidationOwner,
-		SharedExecutionRef, value.ExternalExecution.AdapterInstructions}
-	return json.Marshal(struct {
-		plain
-		ExternalExecution any `json:"external_execution"`
-	}{plain(value), adapter})
+	return json.Marshal(plain(value))
 }
 
-// UnmarshalJSON accepts both historical expanded contracts and the shared
-// projection, restoring the internal view without dropping pinned instructions.
+// UnmarshalJSON restores the objective referenced by the shared wire contract.
 func (value *AttemptContext) UnmarshalJSON(data []byte) error {
 	type plain AttemptContext
 	var decoded plain
@@ -91,12 +77,6 @@ func (value *AttemptContext) UnmarshalJSON(data []byte) error {
 			value.Objective = value.Prompt + "\n\nRuntime objective:\n" + value.Objective
 		}
 		value.ObjectiveRef = ""
-	}
-	if value.Execution != nil && value.ExternalExecution != nil && value.ExternalExecution.ExecutionRef == SharedExecutionRef {
-		external := value.ExternalExecution
-		external.Prompt, external.TaskSpecification = value.Prompt, value.Prompt
-		external.Skills, external.Constraints, external.Tools = value.Execution.Skills, value.Execution.Constraints, value.Execution.Tools
-		external.SkillFiles = value.Execution.SkillFiles
 	}
 	return nil
 }

@@ -550,7 +550,7 @@ func TestResolveAdvanceOperationFromEffectiveAttempt(t *testing.T) {
 
 func TestControlledStepExecutorRouting(t *testing.T) {
 	packageYAML := "tool_scripts:\n  - path: scripts/tools.py\n    functions: [package_tool]\n"
-	for _, requirement := range []string{"prompt_only", "declared_tools", "terminal_tools", "tools_only", "post_step_check", "external_policy"} {
+	for _, requirement := range []string{"prompt_only", "declared_tools", "terminal_tools", "tools_only", "post_step_check", "shared_contract"} {
 		t.Run(requirement, func(t *testing.T) {
 			db, _ := setupBatchTransitionSession(t)
 			if err := db.AutoMigrate(&orm.WorkflowReviewCheckpoint{}, &orm.WorkflowHostAction{}, &orm.WorkflowCommand{}, &orm.WorkflowRevisionEntry{}, &orm.WorkflowBlob{}); err != nil {
@@ -573,12 +573,12 @@ func TestControlledStepExecutorRouting(t *testing.T) {
 				node.ToolsOnly = true
 			case "post_step_check":
 				graph.Runtime.PostStepChecks = []graphengine.PostStepCheck{{StepID: "branch_b", Tool: "check_ready"}}
-			case "external_policy":
-				node.Prompt = "Call the native generator"
+			case "shared_contract":
+				node.Prompt = "Create and validate the result"
 				node.LegacyTools = []string{"package_tool"}
 				node.TerminalTools = []string{"package_tool"}
 				node.ToolsOnly = true
-				node.ExternalExecution = &graphengine.ExternalStepExecution{Version: "1", ValidationOwner: "external-agent", Prompt: "Create and validate the result externally"}
+				node.Execution = &graphengine.StepExecution{Version: "1"}
 				graph.Runtime.PostStepChecks = []graphengine.PostStepCheck{{StepID: "branch_b", Tool: "check_ready"}}
 			}
 			graph.Nodes["branch_b"] = node
@@ -618,9 +618,9 @@ func TestControlledStepExecutorRouting(t *testing.T) {
 			} else if execution.ExecutorHost != "external-agent" || execution.Status != "queued" || result.Control.Continuation == "awaiting_executor" || taskCount != 0 {
 				t.Fatalf("wrong dispatch: %+v %+v tasks=%d", execution, result.Control, taskCount)
 			}
-			if requirement == "external_policy" {
+			if requirement == "shared_contract" {
 				contract, err := (executor.DBContextLoader{DB: db.DB}).LoadAttemptContext(t.Context(), execution.ID)
-				if err != nil || contract.ExternalExecution == nil || contract.ToolsOnly || len(contract.LegacyTools) != 0 || strings.Contains(contract.Objective, "native generator") {
+				if err != nil || contract.Execution == nil || contract.ToolsOnly || len(contract.LegacyTools) != 0 || strings.Contains(contract.Objective, "native generator") {
 					t.Fatalf("external queue inherited native instructions: %+v %v", contract, err)
 				}
 			}

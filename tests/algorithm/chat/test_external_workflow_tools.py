@@ -44,7 +44,7 @@ def pptx_bytes(order=(2, 1), absolute_targets=False):
     return output.getvalue()
 
 
-def request(files=None, tools=None, policy='external_execution', **extra):
+def request(files=None, tools=None, policy='execution', **extra):
     tools = tools if tools is not None else ['ppt_inspect_pptx']
     workflow = {'runtime': {policy: {'version': '1', 'steps': {
         'inspect': {'tools': [{'name': name, 'source': 'package'} for name in tools]}}}},
@@ -62,9 +62,8 @@ def call(payload, name='ppt_inspect_pptx', arguments=None):
 
 
 @pytest.mark.parametrize('absolute_targets', [False, True])
-@pytest.mark.parametrize('policy', ['external_execution', 'execution'])
-def test_pinned_tool_catalog_and_real_inspection_preserve_slide_order(absolute_targets, policy):
-    payload = request(policy=policy)
+def test_pinned_tool_catalog_and_real_inspection_preserve_slide_order(absolute_targets):
+    payload = request()
     catalog = list_external_tools(ExternalToolRequest(**payload))['tools']
     assert catalog[0]['available'] is True
     assert catalog[0]['name'] == 'ppt_inspect_pptx'
@@ -80,6 +79,7 @@ def test_pinned_tool_catalog_and_real_inspection_preserve_slide_order(absolute_t
     ({'files': {'../secret': b'no'}}, 'INVALID_PACKAGE'),
     ({'step_id': 'other-step'}, 'INVALID_PACKAGE'),
     ({'tree_hash': '0' * 64}, 'INVALID_PACKAGE'),
+    ({'policy': 'external_execution'}, 'INVALID_PACKAGE'),
 ])
 def test_snapshot_and_adapter_boundary(change, code):
     with pytest.raises(ppt.ExternalToolError) as raised:
@@ -179,7 +179,7 @@ def test_every_builtin_has_one_shared_business_specification():
             for skill in shared['skills'] + contract.get('skills', []):
                 assert (path.parent / skill).is_file()
             count += 1
-    assert count == 107
+    assert count == 104
 
 
 @pytest.mark.skipif(not os.environ.get('LAZYMIND_PPT_EXPORT_CLI'), reason='requires installed PPT exporter and Chromium')

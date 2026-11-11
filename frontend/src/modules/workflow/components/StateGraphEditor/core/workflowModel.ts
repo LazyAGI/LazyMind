@@ -210,18 +210,15 @@ export interface WorkflowToolScript {
 }
 
 export interface WorkflowRuntimePolicy {
-  /** Pinned host instructions; editing preserves these alongside native runtime policy. */
-  external_execution?: {
+  /** Shared step capabilities; business instructions belong to state.yml. */
+  execution?: {
     version: '1';
     skills?: string[];
     constraints?: string[];
     steps: Record<string, {
-      prompt: string;
       skills?: string[];
       constraints?: string[];
       tools?: Array<{ name: string; source: 'package' | 'global' }>;
-      acceptance_criteria?: string[];
-      required_outputs?: string[];
     }>;
   };
   publisher_owned_slots?: string[];

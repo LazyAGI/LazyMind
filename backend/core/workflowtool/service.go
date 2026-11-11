@@ -123,13 +123,13 @@ func (s *Service) List(ctx context.Context, owner, sessionID, attemptID, handle 
 		return nil, err
 	}
 	result := []Tool{}
-	if contract.ExternalExecution == nil {
+	if contract.Execution == nil {
 		return result, nil
 	}
 	var packageTools map[string]Tool
 	var globalTools map[string]capability.ExternalToolSummary
 	var packageErr, globalErr error
-	for _, declared := range contract.ExternalExecution.Tools {
+	for _, declared := range contract.Execution.Tools {
 		item := Tool{Name: declared.Name, Source: declared.Source}
 		switch declared.Source {
 		case "package":

@@ -40,9 +40,9 @@ func workflowToolFixture(t *testing.T, transport transportFunc) (*Service, CallI
 	}
 	now, expires := time.Now().UTC(), time.Now().UTC().Add(time.Hour)
 	graph := graphengine.CompiledStateGraph{Nodes: map[string]graphengine.CompiledNode{"write": {
-		ID: "write", Prompt: "native", ExternalExecution: &graphengine.ExternalStepExecution{
-			Version: "1", ValidationOwner: "external-agent", Prompt: "Generate externally",
-			Skills: []string{"scenario/external.md"}, Tools: []graphengine.ExternalTool{{Name: "inspect_output", Source: "package"}},
+		ID: "write", Prompt: "Generate report", Execution: &graphengine.StepExecution{
+			Version: "1",
+			Skills:  []string{"scenario/external.md"}, Tools: []graphengine.ExecutionTool{{Name: "inspect_output", Source: "package"}},
 		},
 	}}}
 	for _, row := range []any{

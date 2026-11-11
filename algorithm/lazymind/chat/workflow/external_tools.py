@@ -14,7 +14,7 @@ from typing import Any, get_type_hints
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, create_model
 import yaml
 
-from . import external_pdf_tools, external_ppt_tools
+from . import external_pdf_tools, external_ppt_tools, smoke_tools
 from .external_ppt_tools import ExternalToolError
 from .external_tool_context import external_package_scope
 
@@ -45,6 +45,15 @@ _REGISTRY.update({
     for name in ('ppt_prepare_page', 'ppt_compute_timing', 'ppt_order_papers')
 })
 MAX_PACKAGE_BYTES = 64 * 1024 * 1024
+
+SMOKE_BINDING = '''"""Shared deterministic tools for the Workflow smoke test."""
+from lazymind.chat.workflow.smoke_tools import smoke_generate, smoke_update, smoke_verify
+'''
+_REGISTRY.update({
+    'smoke_generate': ('scripts/tools.py', SMOKE_BINDING, smoke_tools.portable_smoke_generate),
+    'smoke_update': ('scripts/tools.py', SMOKE_BINDING, smoke_tools.portable_smoke_update),
+    'smoke_verify': ('scripts/tools.py', SMOKE_BINDING, smoke_tools.smoke_verify),
+})
 
 
 class ExternalToolRequest(BaseModel):
@@ -101,16 +110,16 @@ def _selected(request: ExternalToolRequest, *, listing: bool = False, files=None
     try:
         workflow = yaml.safe_load(files['workflow.yaml'])
         runtime = workflow['runtime']
-        if 'execution' in runtime and 'external_execution' in runtime:
-            raise ValueError('ambiguous execution policy')
-        external = runtime.get('execution', runtime.get('external_execution'))
-        if str(external['version']) != '1':
+        if 'external_execution' in runtime:
+            raise ValueError('unsupported execution policy')
+        execution = runtime['execution']
+        if str(execution['version']) != '1':
             raise ValueError('unsupported version')
-        step = external['steps'][request.step_id]
+        step = execution['steps'][request.step_id]
         tools = step.get('tools') or []
         declarations = workflow.get('tool_scripts') or []
     except (AttributeError, KeyError, TypeError, ValueError, yaml.YAMLError) as exc:
-        raise ExternalToolError('INVALID_PACKAGE', 'The pinned step has no supported external tool contract.') from exc
+        raise ExternalToolError('INVALID_PACKAGE', 'The pinned step has no supported execution tool contract.') from exc
     if not isinstance(tools, list) or not isinstance(declarations, list):
         raise ExternalToolError('INVALID_PACKAGE', 'Tool declarations must be lists.')
     owners: dict[str, str] = {}
@@ -174,4 +183,7 @@ def call_external_tool(request: ExternalToolCallRequest) -> dict[str, Any]:
     except ValidationError as exc:
         raise ExternalToolError('INVALID_ARGUMENT', 'Arguments do not match the declared tool schema.') from exc
     with external_package_scope(files):
-        return {'result': function(**arguments)}
+        try:
+            return {'result': function(**arguments)}
+        except smoke_tools.SmokeValidationError as exc:
+            raise ExternalToolError('INVALID_ARGUMENT', str(exc), public=True) from exc

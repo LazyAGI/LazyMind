@@ -1018,9 +1018,10 @@ func isBareRetryInput(input string) bool {
 
 func queueHostAttempt(ctx context.Context, tx *gorm.DB, session orm.WorkflowSession, target transitionTarget,
 	node graphengine.CompiledNode, now time.Time) error {
+	node = node.ForExecutor("external-agent")
 	objective := workflowStepObjectiveWithRuntimeBoundaries(node.Prompt, target.Objective, target.UserInput, node.Capabilities, node.LegacyTools, node.TerminalTools)
-	if node.ExternalExecution.Supported() {
-		objective = workflowStepObjective(node.ExternalExecution.Prompt, target.Objective, target.UserInput)
+	if node.Execution.Supported() {
+		objective = workflowStepObjective(node.Prompt, target.Objective, target.UserInput)
 	}
 	refOrID := session.WorkflowRef
 	if refOrID == "" {
@@ -1039,7 +1040,9 @@ func queueHostAttempt(ctx context.Context, tx *gorm.DB, session orm.WorkflowSess
 		WorkflowRevision: session.WorkflowRevisionID, DeclaredOutputs: node.Outputs, DeclaredOutputTypes: outputTypes, RequiredOutputs: node.RequiredOutputs,
 		Capabilities: node.Capabilities, LegacyTools: node.LegacyTools, TerminalTools: node.TerminalTools,
 		ToolsOnly: node.ToolsOnly, TerminalToolsOnly: node.TerminalToolsOnly}
-	executor.ApplyExternalExecution(&value, node)
+	if node.Execution != nil {
+		value.Execution = &executor.ExecutionContract{StepExecution: *node.Execution}
+	}
 	payload, err := json.Marshal(value)
 	if err != nil {
 		return err
@@ -1134,11 +1137,12 @@ func attemptInputBindingFromWitness(tx *gorm.DB, sessionID, attemptID string,
 	}
 	var revision orm.WorkflowSlotRevision
 	if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
-		Select("id", "human_artifact_id", "content_snapshot").
+		Select("id", "revision", "human_artifact_id", "content_snapshot").
 		Where("id = ? AND session_id = ?", witness.RevisionID, sessionID).
 		First(&revision).Error; err != nil {
 		return value
 	}
+	value.SourceRevision = fmt.Sprintf("%d", revision.Revision)
 	if revision.HumanArtifactID == nil || *revision.HumanArtifactID == "" {
 		if len(revision.ContentSnapshot) > 0 {
 			value.ContentHash = fmt.Sprintf("sha256:%x", sha256.Sum256(revision.ContentSnapshot))

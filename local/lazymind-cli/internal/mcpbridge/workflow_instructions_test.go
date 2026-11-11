@@ -6,7 +6,7 @@ import (
 )
 
 func TestSharedWorkflowInstructions(t *testing.T) {
-	for _, part := range []string{"workflow.start", "clarification_values", "needs_input", "exact IDs", "revision_id", "new idempotency_key", "unchanged-payload", "start.inputs", "absolute regular-file paths", "imports and binds every supplied file", "do not retry without that source", "idempotency_key", "16–256", "workflow.state", "awaiting_user", "END this turn", "The host displays the Workflow panel automatically", "Native conversation identity belongs to the host connector"} {
+	for _, part := range []string{"workflow.list", "workflow.get", "workflow.start", "workflow.state", "agent_instruction", "execution_handle", "admission"} {
 		if !strings.Contains(workflowInstructions, part) {
 			t.Fatalf("missing shared guidance %q", part)
 		}
@@ -19,7 +19,7 @@ func TestSharedWorkflowInstructions(t *testing.T) {
 }
 
 func TestExternalExecutionSupportsHostsWithoutSubagents(t *testing.T) {
-	for _, part := range []string{"execution_ref=#/execution", "Read every pinned Skill in full", "Subagents are optional", "current external agent generates", "separate verification pass", "same-agent validation", "never claim independent review", "executor_ref is an optional real", "no execution_handle"} {
+	for _, part := range []string{"Read the supplied Skills in full", "Subagents are optional", "execute directly", "same-agent validation", "no execution_handle", "workflow.tool.list", "workflow.tool.call"} {
 		if !strings.Contains(workflowInstructions, part) {
 			t.Fatalf("missing portable execution guidance %q", part)
 		}

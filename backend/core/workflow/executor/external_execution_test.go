@@ -23,14 +23,13 @@ func externalExecutionDB(t *testing.T) *gorm.DB {
 		&orm.WorkflowRevision{}, &orm.WorkflowRevisionEntry{}, &orm.WorkflowBlob{}, &orm.WorkflowSlotRevision{})
 	now := time.Now().UTC()
 	expires := now.Add(time.Hour)
-	policy := &graphengine.ExternalStepExecution{Version: "1", ValidationOwner: "external-agent", Prompt: "Generate and validate with the external agent",
-		Skills: []string{"scenario/external.md"}, Constraints: []string{"Check rendered output"},
-		Acceptance: []string{"One page allowed"}, RequiredOutputs: []string{"result"},
-		Tools: []graphengine.ExternalTool{{Name: "inspect_output", Source: "package"}, {Name: "builtin:image_generator", Source: "global"}}}
+	policy := &graphengine.StepExecution{Version: "1",
+		Skills: []string{"scenario/shared.md"}, Constraints: []string{"Check rendered output"},
+		Tools: []graphengine.ExecutionTool{{Name: "inspect_output", Source: "package"}, {Name: "builtin:image_generator", Source: "global"}}}
 	graph := graphengine.CompiledStateGraph{Nodes: map[string]graphengine.CompiledNode{"write": {
-		ID: "write", Prompt: "Use the native generator", ToolsOnly: true, TerminalToolsOnly: true,
+		ID: "write", Prompt: "Generate and validate the result", ToolsOnly: true, TerminalToolsOnly: true,
 		LegacyTools: []string{"native_generator"}, TerminalTools: []string{"native_generator"},
-		Acceptance: []string{"At least two pages"}, Outputs: []string{"result", "native_only"}, RequiredOutputs: []string{"native_only"}, ExternalExecution: policy,
+		Acceptance: []string{"Preserve source facts"}, Outputs: []string{"result"}, RequiredOutputs: []string{"result"}, Execution: policy,
 	}}}
 	for _, model := range []any{
 		&orm.WorkflowRevision{ID: "pinned", WorkflowResourceID: "resource", RevisionNo: 1, CompiledGraph: graph.JSON(), CreatedAt: now},
@@ -43,9 +42,9 @@ func externalExecutionDB(t *testing.T) *gorm.DB {
 		}
 	}
 	for _, file := range []struct{ revision, path, hash, content string }{
-		{"pinned", "scenario/external.md", "pinned-skill", "Pinned instructions"},
-		{"new-head", "scenario/external.md", "new-skill", "New head must not replace pinned instructions"},
-		{"pinned", "workflow.yaml", "manifest", "slots:\n  - {id: result, cardinality: single}\n  - {id: native_only, cardinality: single}\n"},
+		{"pinned", "scenario/shared.md", "pinned-skill", "Pinned instructions"},
+		{"new-head", "scenario/shared.md", "new-skill", "New head must not replace pinned instructions"},
+		{"pinned", "workflow.yaml", "manifest", "slots:\n  - {id: result, cardinality: single}\n"},
 	} {
 		file.hash = fmt.Sprintf("%x", sha256.Sum256([]byte(file.content)))
 		if err := db.Create(&orm.WorkflowBlob{Hash: file.hash, Content: []byte(file.content), Size: int64(len(file.content))}).Error; err != nil {
@@ -82,8 +81,7 @@ func TestSharedContractCompactsOnlyExactPromptObjectives(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			original := AttemptContext{Prompt: test.prompt, Objective: test.objective,
-				Execution:         &ExecutionContract{StepExecution: graphengine.StepExecution{Version: "1"}},
-				ExternalExecution: &ExternalExecutionContract{ExternalStepExecution: graphengine.ExternalStepExecution{Version: "1", ValidationOwner: "external-agent", Prompt: test.prompt}}}
+				Execution: &ExecutionContract{StepExecution: graphengine.StepExecution{Version: "1"}}}
 			encoded, err := json.Marshal(original)
 			if err != nil {
 				t.Fatal(err)
@@ -116,7 +114,7 @@ id: shared
 runtime:
   execution:
     version: '1'
-    skills: [scenario/external.md]
+    skills: [scenario/shared.md]
     constraints: [Keep exact requested scope]
     steps:
       write:
@@ -144,11 +142,11 @@ steps:
 	}
 	loader := DBContextLoader{DB: db}
 	external, err := loader.LoadAttemptContext(t.Context(), "attempt")
-	if err != nil || external.Execution == nil || external.ExternalExecution == nil || len(external.Execution.SkillFiles) != 1 || external.Execution.SkillFiles[0].Content != "Pinned instructions" {
+	if err != nil || external.Execution == nil || len(external.Execution.SkillFiles) != 1 || external.Execution.SkillFiles[0].Content != "Pinned instructions" {
 		t.Fatalf("external shared context: %+v %v", external, err)
 	}
 	// Frozen contexts are persisted too. A later native load must hydrate the
-	// objective and remove the external adapter before it is serialized again.
+	// objective while preserving the same shared contract for native execution.
 	external.Objective = external.Prompt + "\n\nRuntime objective:\nKeep all four pages"
 	frozen, err := json.Marshal(external)
 	if err != nil {
@@ -161,7 +159,7 @@ steps:
 		t.Fatal(err)
 	}
 	native, err := loader.LoadAttemptContext(t.Context(), "attempt")
-	if err != nil || native.Execution == nil || native.ExternalExecution != nil || !native.ToolsOnly || external.ToolsOnly || len(external.LegacyTools) != 0 {
+	if err != nil || native.Execution == nil || !native.ToolsOnly || external.ToolsOnly || len(external.LegacyTools) != 0 {
 		t.Fatalf("native adapter/shared context: %+v %v", native, err)
 	}
 	if native.Prompt != external.Prompt || native.Objective != external.Objective || !reflect.DeepEqual(native.Execution, external.Execution) || !reflect.DeepEqual(native.Acceptance, external.Acceptance) || !reflect.DeepEqual(native.RequiredOutputs, external.RequiredOutputs) {
@@ -180,27 +178,21 @@ steps:
 	if err := json.Unmarshal(encoded, &wire); err != nil {
 		t.Fatal(err)
 	}
-	var adapter map[string]any
-	if err := json.Unmarshal(wire["external_execution"], &adapter); err != nil || adapter["execution_ref"] != SharedExecutionRef {
-		t.Fatalf("missing canonical execution reference: %v %v", adapter, err)
-	}
-	for _, duplicate := range []string{"prompt", "task_specification", "skills", "skill_files", "constraints", "tools", "acceptance_criteria", "required_outputs"} {
-		if _, exists := adapter[duplicate]; exists {
-			t.Fatalf("adapter duplicated business field %s", duplicate)
-		}
+	if _, exists := wire["external_execution"]; exists {
+		t.Fatal("shared contract emitted a separate external execution profile")
 	}
 	var restored AttemptContext
-	if err := json.Unmarshal(encoded, &restored); err != nil || !restored.ExternalExecution.Supported() || !reflect.DeepEqual(restored.Execution, external.Execution) || !reflect.DeepEqual(restored.ExternalExecution.Tools, external.ExternalExecution.Tools) || !reflect.DeepEqual(restored.ExternalExecution.SkillFiles, external.Execution.SkillFiles) {
-		t.Fatalf("shared contract lost its internal execution view on round trip: %v", err)
+	if err := json.Unmarshal(encoded, &restored); err != nil || !reflect.DeepEqual(restored.Execution, external.Execution) {
+		t.Fatalf("shared contract failed to round trip: %v", err)
 	}
 	if !reflect.DeepEqual(restored.Acceptance, external.Acceptance) || !reflect.DeepEqual(restored.RequiredOutputs, external.RequiredOutputs) {
 		t.Fatal("shared wire contract lost top-level acceptance criteria or required outputs")
 	}
 	nativeJSON, err := json.Marshal(native)
-	if err != nil || strings.Contains(string(nativeJSON), "external_execution") || strings.Contains(string(nativeJSON), "objective_ref") || strings.Count(string(nativeJSON), native.Prompt) != 2 || strings.Count(string(nativeJSON), "Pinned instructions") != 1 {
+	if err != nil || strings.Contains(string(nativeJSON), "external_execution") || !strings.Contains(string(nativeJSON), "objective_ref") || strings.Count(string(nativeJSON), native.Prompt) != 1 || strings.Count(string(nativeJSON), "Pinned instructions") != 1 {
 		t.Fatalf("native wire contract changed: %v", err)
 	}
-	if err := db.Where("revision_id = ? AND path = ?", "pinned", "scenario/external.md").Delete(&orm.WorkflowRevisionEntry{}).Error; err != nil {
+	if err := db.Where("revision_id = ? AND path = ?", "pinned", "scenario/shared.md").Delete(&orm.WorkflowRevisionEntry{}).Error; err != nil {
 		t.Fatal(err)
 	}
 	if _, err := loader.LoadAttemptContext(t.Context(), "attempt"); err == nil {
@@ -208,43 +200,10 @@ steps:
 	}
 }
 
-func TestExternalExecutionLoadsPinnedSkillsAndNativeKeepsOriginalContract(t *testing.T) {
-	db := externalExecutionDB(t)
-	loader := DBContextLoader{DB: db}
-	value, err := loader.LoadAttemptContext(t.Context(), "attempt")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if value.ExternalExecution == nil || len(value.ExternalExecution.SkillFiles) != 1 || value.ExternalExecution.SkillFiles[0].Content != "Pinned instructions" || !strings.HasPrefix(value.ExternalExecution.SkillFiles[0].SHA256, "sha256:") {
-		t.Fatalf("skill snapshot missing: %+v", value.ExternalExecution)
-	}
-	if value.Prompt != value.ExternalExecution.Prompt || value.ToolsOnly || value.TerminalToolsOnly || len(value.LegacyTools) != 0 || len(value.TerminalTools) != 0 || value.RequiredOutputs[0] != "result" || value.Acceptance[0] != "One page allowed" || value.Objective != "User objective" {
-		t.Fatalf("external contract retained native execution instructions: %+v", value)
-	}
-	if value.ExternalExecution.TaskSpecification != "Use the native generator" {
-		t.Fatal("fixed business specification was lost; it must remain separate from the active external prompt")
-	}
-	encoded, err := json.Marshal(value)
-	if err != nil || strings.Contains(string(encoded), "execution_ref") {
-		t.Fatalf("legacy contract unexpectedly uses shared instructions: %v", err)
-	}
-	var restored AttemptContext
-	if err := json.Unmarshal(encoded, &restored); err != nil || !reflect.DeepEqual(restored.ExternalExecution, value.ExternalExecution) {
-		t.Fatalf("legacy external contract changed on round trip: %v", err)
-	}
-	if err := db.Model(&orm.WorkflowSessionStep{}).Where("id = ?", "attempt").Update("executor_host", "lazymind").Error; err != nil {
-		t.Fatal(err)
-	}
-	native, err := loader.LoadAttemptContext(t.Context(), "attempt")
-	if err != nil || native.ExternalExecution != nil || !native.ToolsOnly || native.Prompt != "Use the native generator" || native.RequiredOutputs[0] != "native_only" || native.Acceptance[0] != "At least two pages" {
-		t.Fatalf("native contract changed: %+v %v", native, err)
-	}
-}
-
 func TestExternalToolAuthorizationUsesPinnedAllowlistAndFences(t *testing.T) {
 	db := externalExecutionDB(t)
 	value, tool, err := AuthorizeExternalToolCall(t.Context(), db, "owner", "run", "attempt", "valid-handle", "inspect_output")
-	if err != nil || tool.Source != "package" || value.Metadata != nil || value.ExternalExecution == nil {
+	if err != nil || tool.Source != "package" || value.Metadata != nil || value.Execution == nil {
 		t.Fatalf("authorized tool: %+v %+v %v", value, tool, err)
 	}
 	for _, test := range []struct {
@@ -277,9 +236,9 @@ func TestExternalToolAuthorizationUsesPinnedAllowlistAndFences(t *testing.T) {
 	}
 }
 
-func TestExternalSkillMissingFailsClosedWithoutAffectingNative(t *testing.T) {
+func TestSharedSkillMissingFailsClosedForBothExecutors(t *testing.T) {
 	db := externalExecutionDB(t)
-	if err := db.Where("revision_id = ? AND path = ?", "pinned", "scenario/external.md").Delete(&orm.WorkflowRevisionEntry{}).Error; err != nil {
+	if err := db.Where("revision_id = ? AND path = ?", "pinned", "scenario/shared.md").Delete(&orm.WorkflowRevisionEntry{}).Error; err != nil {
 		t.Fatal(err)
 	}
 	if _, err := (DBContextLoader{DB: db}).LoadAttemptContext(t.Context(), "attempt"); err == nil {
@@ -288,7 +247,7 @@ func TestExternalSkillMissingFailsClosedWithoutAffectingNative(t *testing.T) {
 	if err := db.Model(&orm.WorkflowSessionStep{}).Where("id = ?", "attempt").Update("executor_host", "lazymind").Error; err != nil {
 		t.Fatal(err)
 	}
-	if _, err := (DBContextLoader{DB: db}).LoadAttemptContext(t.Context(), "attempt"); err != nil {
-		t.Fatal("native execution depended on an external skill", err)
+	if _, err := (DBContextLoader{DB: db}).LoadAttemptContext(t.Context(), "attempt"); err == nil {
+		t.Fatal("native execution accepted missing pinned skill")
 	}
 }

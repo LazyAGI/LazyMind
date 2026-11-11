@@ -23,12 +23,20 @@ LazyMind 不根据模型评分决定外部产物是否合格，不要求语义�
 
 - 同一 revision 的原生和外部执行器收到相同的 `step_contract.prompt`、`execution.skill_files`、`execution.constraints`、验收和必需输出。Skill 按固定 revision 读取，包含 `path`、`content` 和 `sha256`；原生 runner 也实际加载这些内容。
 - 编译器拒绝在 `runtime.execution.steps` 覆盖 prompt、acceptance 或 required_outputs，避免形成第二套业务规则。
-- 原生工具包装、本地路径、tools-only 和自动保存方式属于执行适配。外部执行器按照公共 `external_execution.adapter_instructions`，用宿主能力或已声明的 MCP 工具完成相同业务要求。它不需要安装或调用原生模型包装。
-- 共享契约在线上传输时仅保留一份 Skill 和业务指令。`external_execution` 返回版本、验证归属、适配说明和 `execution_ref: "#/execution"`，引用同一 `execution`；不再重复 Skill 正文、prompt、验收及工具清单。`objective_ref: "#/prompt"` 表示复用顶层 prompt；若另有 objective 文本，将其作为额外运行要求。旧 revision 的独立 `runtime.external_execution` 及未声明外部能力的 executor 路由继续保持，运行中不能替换绑定 revision。
+- 原生工具包装、本地路径、tools-only 和自动保存方式属于执行适配。外部执行器优先用宿主能力，不足时调用已声明并获授权的 MCP 工具。业务目标与验收仍来自同一步骤契约。
+- 共享契约仅传输一份 `prompt` 与 `execution`，不再输出 `external_execution` 或 `adapter_instructions`。`objective_ref: "#/prompt"` 表示复用顶层 prompt；若另有 objective 文本，将其作为额外运行要求。Core 与 Connector 使用同一协议，不提供旧格式转换。运行中不能替换绑定 revision。
 - `launch_request` 和 `user_request` 分别携带启动与本次执行/重试请求，必须连同输入传给 worker。
 - 外部验证由宿主执行；服务端继续检查类型、哈希、owner、当前 lease 和幂等。Native 与外部均遵守同一状态机、列表顺序、审核、暂停和条件输出。
 
 更新工作流时应重新发布，再启动新运行测试共享契约。已有运行和已有 PPT 产物仍使用原来固定的 revision；打开历史结果不会触发重跑。
+
+## MCP 说明分层
+
+- 连接级 instructions：发现工作流、读取状态、执行共享契约、Controller 与可选 worker 的职责、宿主能力优先与工具回退原则。
+- 工具 description / schema：该操作的用途、参数、文件交接、幂等与回执语义。文档读取和授权说明放在对应文档工具上。
+- 运行返回：`agent_instruction` 根据当前 continuation/admission 给出操作指引；`step_contract` 提供固定 revision 的业务要求。人工审核、提问、恢复和重试指引在相关状态出现时返回。
+
+连接说明和宿主 Skill 不包含某个具体工作流的页面调度、导出流程或第二套验收规则。
 
 ## 根 Controller 的执行循环
 

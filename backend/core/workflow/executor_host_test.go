@@ -21,12 +21,12 @@ func TestExecutorHostForStep(t *testing.T) {
 		{name: "post-step check", checks: []graphengine.PostStepCheck{{StepID: "step", Tool: "check_ready"}}},
 		{name: "other step check", checks: []graphengine.PostStepCheck{{StepID: "other", Tool: "check_ready"}}, wantExternal: true},
 		{name: "mode flags only", node: graphengine.CompiledNode{ToolsOnly: true, TerminalToolsOnly: true}, wantExternal: true},
-		{name: "external policy with native tools and checks", node: graphengine.CompiledNode{
-			LegacyTools: []string{"native_generator"}, TerminalTools: []string{"native_generator"}, ToolsOnly: true,
-			ExternalExecution: &graphengine.ExternalStepExecution{Version: "1", ValidationOwner: "external-agent", Prompt: "Use external generation"},
+		{name: "shared contract with native tools and checks", node: graphengine.CompiledNode{
+			LegacyTools: []string{"native_generator"}, ToolsOnly: true,
+			Execution: &graphengine.StepExecution{Version: "1"},
 		}, checks: []graphengine.PostStepCheck{{StepID: "step", Tool: "native_check"}}, wantExternal: true},
-		{name: "unknown external version retains native routing", node: graphengine.CompiledNode{
-			LegacyTools: []string{"native_generator"}, ExternalExecution: &graphengine.ExternalStepExecution{Version: "2", ValidationOwner: "external-agent", Prompt: "Generate"},
+		{name: "unsupported execution version", node: graphengine.CompiledNode{
+			LegacyTools: []string{"native_generator"}, Execution: &graphengine.StepExecution{Version: "2"},
 		}},
 	}
 	for _, tc := range cases {

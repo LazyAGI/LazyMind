@@ -5,7 +5,6 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -161,7 +160,6 @@ type BeginInput struct {
 
 type StepContract struct {
 	Execution               map[string]any    `json:"execution,omitempty"`
-	ExternalExecution       map[string]any    `json:"external_execution,omitempty"`
 	KnowledgeScope          map[string]any    `json:"knowledge_scope,omitempty"`
 	LaunchRequest           string            `json:"launch_request,omitempty"`
 	UserRequest             string            `json:"user_request,omitempty"`
@@ -363,29 +361,8 @@ func (c *Client) State(ctx context.Context, sessionID string) (Projection, error
 	if err != nil {
 		return Projection{}, err
 	}
-	continuation, _ := state.Control["continuation"].(string)
-	admission, _ := state.Control["admission"].(map[string]any)
-	retries, _ := state.Control["automatic_retry_steps"].([]any)
-	expired, _ := state.Control["expired_execution_ids"].([]any)
-	if (continuation == "continue" || continuation == "draining") && len(expired) > 0 {
-		ids, _ := json.Marshal(expired)
-		state.AgentInstruction = "An external step lease expired. To continue that work, call workflow.step.resume with an execution_id from control.expired_execution_ids=" + string(ids) + " and use the new handle. Reuse this run and any outputs already published."
-	} else if continuation == "continue" && admission["can_begin"] == true && len(retries) > 0 {
-		steps, _ := json.Marshal(retries)
-		state.AgentInstruction = "A step failed but automatic retry budget remains. Call workflow.step.begin for one step in control.automatic_retry_steps=" + string(steps) + " using the current state version. Keep this run; do not stop it or start a replacement run. Inspect the failure and adjust the retry instruction if needed."
-	} else if state.Control["input_request"] != nil && continuation == "awaiting_user" {
-		state.AgentInstruction = "Ask the exact questions in control.input_request using the host's question UI or ordinary conversation, then wait for the user's actual reply. Save only that reply with workflow.input.answer using the returned artifact_id, revision and state_version. Never infer answers or mark a review approved. Read workflow.state after saving; stopped runs still require an explicit user resume."
-	} else if continuation == "stopped" {
-		state.AgentInstruction = "The Workflow is stopped. If the user explicitly asks to continue, call workflow.session.resume on this run. Inspect or claim any returned execution_id with workflow.step.claim instead of beginning a duplicate; otherwise read workflow.state again. Without a new user request, END this turn."
-	} else if continuation == "completed" || continuation == "failed" {
-		state.AgentInstruction = "END this turn unless the user explicitly requested recovery. For an explicit edit to completed artifacts, read workflow.edit.context and follow the shared package Skills; use workflow.edit.commit for local changes, page insertion/deletion or scoped regeneration without rewinding. Only a request to rerun the workflow uses an exact projection.rewindable target with workflow.step.begin; for a requested retry, use an exact projection.retryable target and retry_origin=user. Core applies the same rules as the internal controller. Do not create a replacement Workflow."
-	} else {
-		if continuation, _ := state.Control["continuation"].(string); continuation == "awaiting_user" {
-			state.AgentInstruction = "Human review is required. Tell the user to review in the Workflow panel, then END this turn. Do not approve the review yourself, begin another step, or poll while waiting. Resume only on a new notification or explicit user input, and read workflow.state first."
-		} else if continuation == "awaiting_executor" || continuation == "draining" || continuation == "binding_required" {
-			state.AgentInstruction = "END this turn. Do not continue Workflow execution or poll while waiting. Resume only on a new notification or explicit user input, and read workflow.state first."
-		}
-	}
+	state.AgentInstruction = stateInstruction(state)
+
 	return state, nil
 }
 
@@ -746,6 +723,7 @@ func (c *Client) Complete(ctx context.Context, input CompleteInput) (CompleteRes
 		// The terminal transaction succeeded. A read outage must not turn it into a failed tool.
 		result.StateUnavailable = true
 		result.State = Projection{SessionID: input.SessionID, Control: result.Control}
+		result.State.AgentInstruction = "Completion was accepted. Read workflow.state to refresh the projection before further execution."
 		return result, nil
 	}
 	if result.State.Control != nil {

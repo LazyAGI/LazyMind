@@ -62,9 +62,9 @@ func academicToolFixture(t *testing.T) *Service {
 		t.Fatal(err)
 	}
 	node := graph.Nodes["write"]
-	node.ExternalExecution.Tools = nil
+	node.Execution.Tools = nil
 	for _, name := range []string{"academic_context", "academic_expansion", "academic_search_papers", "academic_read_paper", "academic_resolve_papers"} {
-		node.ExternalExecution.Tools = append(node.ExternalExecution.Tools, graphengine.ExternalTool{Name: name, Source: "package"})
+		node.Execution.Tools = append(node.Execution.Tools, graphengine.ExecutionTool{Name: name, Source: "package"})
 	}
 	graph.Nodes["write"] = node
 	if err := service.DB.Model(&revision).Update("compiled_graph", graph.JSON()).Error; err != nil {
