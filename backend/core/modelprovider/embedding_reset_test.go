@@ -125,6 +125,17 @@ func TestEmptyDirectoriesAndDeletedDocumentsDoNotBlockEmbeddingSwitch(t *testing
 	if err := db.Delete(&orm.Document{}, "id = ?", "removed-doc").Error; err != nil {
 		t.Fatal(err)
 	}
+	for _, row := range []any{
+		&orm.Dataset{ID: "folders", KbID: "folders", ProcessingLevel: "indexed"},
+		&orm.Document{ID: "folder", DatasetID: "folders", DocumentType: "FOLDER"},
+		&orm.Document{ID: "nested-folder", DatasetID: "folders", DocumentType: "FOLDER", PID: "folder"},
+		&orm.DocumentProcessingState{DatasetID: "folders", DocumentID: "folder", IndexStatus: "succeeded"},
+		&orm.DocumentProcessingState{DatasetID: "folders", DocumentID: "nested-folder", IndexStatus: "pending"},
+	} {
+		if err := db.Create(row).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
 	status, err := loadEmbeddingIndexStatus(context.Background(), db)
 	if err != nil {
 		t.Fatal(err)

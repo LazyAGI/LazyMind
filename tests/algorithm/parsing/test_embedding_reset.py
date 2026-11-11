@@ -15,6 +15,8 @@ from test_embedding_vector_maintenance import _core_engine
 def reset_index(monkeypatch, tmp_path):
     core = _core_engine()
     with core.begin() as conn:
+        conn.execute(text('ALTER TABLE documents ADD COLUMN document_type TEXT'))
+        conn.execute(text("ALTER TABLE documents ADD COLUMN p_id TEXT DEFAULT ''"))
         for column in ('parse_error_code', 'parse_error_message', 'chunk_error_code',
                        'chunk_error_message', 'parse_fingerprint', 'chunk_fingerprint'):
             conn.execute(text(f"ALTER TABLE document_processing_states ADD COLUMN {column} TEXT DEFAULT ''"))
@@ -91,6 +93,25 @@ def test_clear_keeps_originals_and_marks_every_document_for_manual_parsing(reset
         assert conn.execute(text('SELECT COUNT(*) FROM lazyllm_waiting_task_queue')).scalar_one() == 0
     # Retrying the same cleanup does not touch the original or schedule work.
     assert embedding_reset.clear_chunks(7)['cleared']
+    assert f.original.exists()
+
+
+@pytest.mark.parametrize('document_type', ['FOLDER', 'PDF', '', None])
+def test_empty_only_ignores_folders_but_protects_documents(reset_index, document_type):
+    f = reset_index
+    with f.core.begin() as conn:
+        conn.execute(text('UPDATE documents SET deleted_at=CURRENT_TIMESTAMP'))
+        conn.execute(text("""INSERT INTO documents (id, dataset_id, document_type)
+            VALUES ('folder', 'indexed', 'FOLDER')"""))
+        conn.execute(text("""INSERT INTO documents (id, dataset_id, document_type, p_id)
+            VALUES ('nested', 'indexed', :document_type, 'folder')"""), {'document_type': document_type})
+    if document_type == 'FOLDER':
+        assert embedding_reset.clear_chunks(7, empty_only=True)['cleared']
+    else:
+        with pytest.raises(embedding_reset.IndexBusy):
+            embedding_reset.clear_chunks(7, empty_only=True)
+        assert not f.deleted
+        assert f.artifact.exists()
     assert f.original.exists()
 
 

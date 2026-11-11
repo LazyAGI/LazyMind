@@ -430,10 +430,12 @@ func TestDeleteActiveEmbeddingModelWithEmptyKnowledge(t *testing.T) {
 		role        string
 		legacy      bool
 		hasDocument bool
+		foldersOnly bool
 		cleanup     int
 		want        int
 	}{
 		{name: "recorded default", role: "admin", cleanup: 200, want: 200},
+		{name: "nested empty folders", role: "admin", foldersOnly: true, cleanup: 200, want: 200},
 		{name: "legacy default", role: "admin", legacy: true, cleanup: 200, want: 200},
 		{name: "another user's parsed document", role: "admin", hasDocument: true, want: 409},
 		{name: "new documents or active jobs", role: "admin", cleanup: 409, want: 409},
@@ -460,12 +462,19 @@ func TestDeleteActiveEmbeddingModelWithEmptyKnowledge(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			if tc.hasDocument {
+			if tc.hasDocument || tc.foldersOnly {
 				kb := orm.Dataset{ID: "kb", KbID: "kb", ProcessingLevel: "parsed", BaseModel: orm.BaseModel{CreateUserID: "another-user"}}
 				if err := db.Create(&kb).Error; err != nil {
 					t.Fatal(err)
 				}
-				if err := db.Create(&orm.Document{ID: "doc", DatasetID: kb.ID}).Error; err != nil {
+				doc := orm.Document{ID: "doc", DatasetID: kb.ID}
+				if tc.foldersOnly {
+					doc.DocumentType = "FOLDER"
+					if err := db.Create(&orm.Document{ID: "nested-folder", DatasetID: kb.ID, DocumentType: "FOLDER", PID: doc.ID}).Error; err != nil {
+						t.Fatal(err)
+					}
+				}
+				if err := db.Create(&doc).Error; err != nil {
 					t.Fatal(err)
 				}
 			}

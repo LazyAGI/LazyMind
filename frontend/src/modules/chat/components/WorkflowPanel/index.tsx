@@ -1923,12 +1923,12 @@ export function WorkflowPanel({
 
   useEffect(() => {
     if (!uiReady || !session || !tabs.length || previewTarget) return;
-    if (view.mode === 'following') {
-      if (runtimeTabId) updateView({ tabId: runtimeTabId });
-    } else if (!tabs.some(tab => tab.id === activeTabId)) {
+    updateView(current => {
+      // Navigation may have switched modes before this passive effect runs.
+      if (current.mode === 'following') return runtimeTabId ? { tabId: runtimeTabId } : {};
       // Fall back to the first visible tab; never follow runtime in free mode.
-      updateView({ tabId: tabs[0].id });
-    }
+      return tabs.some(tab => tab.id === current.tabId) ? {} : { tabId: tabs[0].id };
+    });
   }, [uiReady, session, tabs, previewTarget, view.mode, runtimeTabId, activeTabId, updateView]);
 
   const resumeFollowing = async () => {

@@ -63,12 +63,16 @@ export function useWorkflowViewState(session: WorkflowSession | null | undefined
 
   useEffect(() => {
     if (!key || !ready || saved?.key === key) return;
-    setSaved({ key, value: initial });
-    persistView(key, initial);
+    // Preserve navigation made after the UI mounted but before this effect ran.
+    const current = latest.current;
+    if (current.key !== key) return;
+    setSaved(current);
+    persistView(key, current.value);
   }, [key, ready, saved?.key, initial]);
 
-  const update = useCallback((patch: Partial<WorkflowViewState>) => {
+  const update = useCallback((change: Partial<WorkflowViewState> | ((current: WorkflowViewState) => Partial<WorkflowViewState>)) => {
     if (!key || latest.current.key !== key) return;
+    const patch = typeof change === 'function' ? change(latest.current.value) : change;
     const next = { ...latest.current.value, ...patch };
     if (Object.keys(patch).every(field => next[field as keyof WorkflowViewState] === latest.current.value[field as keyof WorkflowViewState])) return;
     latest.current = { key, value: next };

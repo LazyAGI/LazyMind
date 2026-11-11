@@ -24,6 +24,7 @@ func TestEmbeddingEndpointChangeWithEmptyKnowledge(t *testing.T) {
 		{"legacy selection without knowledge", "", "", 200},
 		{"recorded identity without knowledge", "ready", "", 200},
 		{"empty knowledge directory", "ready", "empty-directory", 200},
+		{"nested empty folders", "ready", "folders", 200},
 		{"deleted document", "ready", "deleted", 200},
 		{"parsed document", "ready", "parsed", 409},
 		{"indexed document", "ready", "indexed", 409},
@@ -47,7 +48,16 @@ func TestEmbeddingEndpointChangeWithEmptyKnowledge(t *testing.T) {
 				if err := db.Create(&kb).Error; err != nil {
 					t.Fatal(err)
 				}
-				if tc.document != "empty-directory" {
+				if tc.document == "folders" {
+					for _, folder := range []orm.Document{
+						{ID: "folder", DatasetID: kb.ID, DocumentType: "FOLDER"},
+						{ID: "nested-folder", DatasetID: kb.ID, DocumentType: "FOLDER", PID: "folder"},
+					} {
+						if err := db.Create(&folder).Error; err != nil {
+							t.Fatal(err)
+						}
+					}
+				} else if tc.document != "empty-directory" {
 					if err := db.Create(&orm.Document{ID: "doc", DatasetID: kb.ID}).Error; err != nil {
 						t.Fatal(err)
 					}

@@ -114,7 +114,8 @@ def clear_chunks(generation, empty_only=False):
         if empty_only:
             with _engine(config['core_database_url']).connect() as conn:
                 count = conn.execute(text("""SELECT COUNT(*) FROM documents d JOIN datasets ds ON ds.id=d.dataset_id
-                    WHERE d.deleted_at IS NULL AND ds.deleted_at IS NULL""")).scalar_one()
+                    WHERE d.deleted_at IS NULL AND ds.deleted_at IS NULL
+                    AND (d.document_type IS NULL OR d.document_type <> 'FOLDER')""")).scalar_one()
                 if count:
                     raise IndexBusy('knowledge documents changed; confirmation is required')
         from lazyllm.tools.rag.store import MilvusStore, OpenSearchStore, SQLiteStore

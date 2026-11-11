@@ -38,6 +38,7 @@ const fixture = vi.hoisted(() => ({
   setFocusedTab: vi.fn(),
   focusedTab: undefined as string | undefined,
   documentAction: vi.fn(),
+  onSlotMount: vi.fn(),
   registerFooterAction: undefined as SlotEditingContextValue['registerFooterAction'] | undefined,
   getPaperProgress: vi.fn(),
   openPaperProgress: vi.fn(),
@@ -84,6 +85,7 @@ vi.mock('./SlotComponents', () => ({
   SlotDownloadContext: React.createContext(true),
   SlotMarkdownStream: ({ stream }: { stream: TaskArtifactStream }) => <div data-testid='live-preview'>{stream.content}</div>,
   SlotRenderer: ({ slotId, slot, readOnly, widget }: { widget?: { widgetType?: string }; slotId: string; slot: SlotRevision; readOnly?: boolean }) => {
+    useLayoutEffect(() => { fixture.onSlotMount(); }, []);
     const context = useContext(SlotEditingContext);
     fixture.registerFooterAction = context.registerFooterAction;
     const active = useContext(WorkflowPanelTabActiveContext);
@@ -118,6 +120,7 @@ beforeEach(async () => {
   fixture.fetchWorkflowUI.mockReset().mockImplementation(async () => fixture.ui);
   fixture.flush.mockReset().mockResolvedValue(true);
   fixture.pause.mockReset().mockResolvedValue(undefined);
+  fixture.onSlotMount.mockReset();
   fixture.getPaperProgress.mockReset().mockResolvedValue({ data: {
     task_id: 'owner', execution_id: 'current-attempt', revision: 1, status: 'running',
     process_steps: [{ step_id: 'f4-analysis', order: 1, title: '正在分析数据', status: 'running',
@@ -157,6 +160,22 @@ async function waitForCompletedContinueButton() {
 }
 
 describe('shared workflow compact layout', () => {
+  it('preserves a tab selected before the initial follow effect runs', async () => {
+    fixture.ui.tabs!.push({ id: 'optional', label: '可选步骤', slots: [] });
+    fixture.session.projection!.nodes = { optional: {
+      execution: 'none', branch: 'pruned', validity: 'effective', requires_approval: false, reachability: 'unreachable', readiness: 'not_applicable',
+    } };
+    // Select the newly mounted tab before passive effects synchronize runtime progress.
+    fixture.onSlotMount.mockImplementationOnce(() => {
+      screen.getByRole('tab', { name: /可选步骤/ }).click();
+    });
+    render(<WorkflowPanel conversationId='layout-test' />);
+
+    const panel = await screen.findByRole('tabpanel', { name: /可选步骤/ });
+    expect(within(panel).getByText('本次流程的分支决策跳过了此步骤，无需等待执行结果。')).toBeVisible();
+    expect(screen.getByRole('button', { name: '自由浏览' })).toHaveAttribute('aria-pressed', 'true');
+  });
+
   it.each(['pruned', 'bypassed'])('explains a %s step in native Chat without waiting for nonexistent output', async branch => {
     fixture.ui.tabs!.push({ id: 'prompts', step_id: 'plan_prompts', label: '每页提示词', layout: 'composite', slots: [{ id: 'prompts', label: '每页提示词', type: 'text' }],
       skip_reason: '本次选择了快速生成，因此跳过提示词规划，直接生成幻灯片。' });
