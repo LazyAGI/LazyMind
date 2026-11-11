@@ -536,10 +536,9 @@ function findSlotRevision(
   artifactKey: string,
   sortOrder: number,
 ): SlotRevision | undefined {
-  const revisions = getTabSlotRevisions(session, tab, artifactKey).filter(
-    (slot) => slot.slot === artifactKey,
-  );
-  return findAlignedCompositeRevision(
+  const revisions = getTabSlotRevisions(session, tab, artifactKey);
+  const selected = revisions.find(slot => slot.selected && slot.sort_order === sortOrder);
+  return selected ?? findAlignedCompositeRevision(
     revisions,
     sortOrder,
     tab.composite_behavior?.repeat_single_slots?.includes(artifactKey) ?? false,
@@ -846,9 +845,43 @@ function CompositeThumbnailRail({
   );
 }
 
+function isPptPreviewRevision(slot: SlotRevision): boolean {
+  return slot.step_id === 'generate_ppt' && slot.sort_order !== undefined
+    && (slot.slot === 'preview_html' || slot.slot === 'preview_notes');
+}
+
+function pptPreviewPosition(slot: SlotRevision): string {
+  return `${slot.slot}:${slot.sort_order}`;
+}
+
+function usePptPreviewDuringRetry(session: WorkflowSession, tab: TabDef, provisional = false): WorkflowSession {
+  const saved = useRef<{ sessionId: string; slots: Map<string, SlotRevision> } | null>(null);
+  const enabled = session.workflow_id === 'ppt-workflow' && tab.step_id === 'generate_ppt'
+    && tab.slots.some(slot => slot.id === 'preview_html');
+  const succeeded = enabled && workflowTabStatus(tab, session) === 'succeeded';
+  useEffect(() => {
+    if (!enabled || provisional) return;
+    const latest = (session.slots ?? []).filter(slot => slot.selected && isPptPreviewRevision(slot));
+    const slots = succeeded || saved.current?.sessionId !== session.session_id
+      ? new Map<string, SlotRevision>() : new Map(saved.current.slots);
+    for (const slot of latest) slots.set(pptPreviewPosition(slot), slot);
+    saved.current = { sessionId: session.session_id, slots };
+  }, [enabled, succeeded, provisional, session.session_id, session.slots]);
+
+  if (!enabled || succeeded || saved.current?.sessionId !== session.session_id) return session;
+  const slots = session.slots ?? [];
+  const current = new Set(slots.filter(isPptPreviewRevision).map(pptPreviewPosition));
+  // Rewinds can temporarily clear the selected outputs. Keep the last saved
+  // previews for display while the replacement attempt publishes its pages.
+  const previous = [...saved.current.slots.entries()]
+    .filter(([position]) => !current.has(position))
+    .map(([, slot]) => ({ ...slot, selected: false }));
+  return previous.length ? { ...session, slots: [...slots, ...previous] } : session;
+}
+
 function CompositeSlotGrid({
   tab,
-  session,
+  session: activeSession,
   onRefresh,
   onReference,
   onFocusSortOrder,
@@ -866,6 +899,8 @@ function CompositeSlotGrid({
   const tabActive = React.useContext(WorkflowPanelTabActiveContext);
   const compactEmptyStates = React.useContext(CompactWorkflowEmptyStatesContext);
   const reorderSlotItems = useWorkflowStore((state) => state.reorderSlotItems);
+  const session = usePptPreviewDuringRetry(activeSession, tab, readOnly);
+  const showingPreviousPreviews = session !== activeSession;
   const rows = getCompositeRows(tab, session);
   const columns = filterColumnsByVisibleSlots(
     buildColumns(tab),
@@ -916,7 +951,8 @@ function CompositeSlotGrid({
   const canReorderPages = paged
     && rows.length > 1
     && reorderableCompositeSlotIds.length > 0
-    && !readOnly;
+    && !readOnly
+    && !showingPreviousPreviews;
 
   const handlePageReorder = useCallback(async (nextPages: number[]) => {
     if (!canReorderPages || reordering || nextPages.length !== rows.length) return;
@@ -995,7 +1031,7 @@ function CompositeSlotGrid({
               onRefresh={onRefresh}
               onReference={onReference}
               hideImageMutationActions={hideImageMutationActions}
-              readOnly={readOnly}
+              readOnly={readOnly || (session.workflow_id === 'ppt-workflow' && isPptPreviewRevision(rev) && !rev.selected)}
             />
           </DocumentActionScope>
         ) : (

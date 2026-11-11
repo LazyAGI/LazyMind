@@ -1072,17 +1072,17 @@ steps:
       from requirement_analysis into style_hint. The PPT runtime selects one
       deck-wide style and applies that same contract to every page.
 
-      This call reuses the prepared deck, locks one authoritative deck-wide style,
-      and saves your Markdown. Internal structure, schema validation, image
-      bindings and rendering are deferred to generate_ppt. This step only plans
-      user-visible content; keep page headings clear and content concise.
+      This call reuses the prepared deck and saves your Markdown. Keep page headings
+      clear and use ### for subsections. Internal structure, schema validation,
+      image bindings and rendering are deferred to generate_ppt.
       This step never generates AI backgrounds; the dedicated stages before it
       already published prompts and images. When AI backgrounds were
       disabled and those steps were skipped, call ppt_build_outline without
-      deck_dir so it initializes the deck and creates one unique style first.
-
-      This is an atomic step. If ppt_build_outline fails, report that exact tool
-      error and stop so only this Workflow step fails and can be retried.
+      deck_dir so it initializes the deck.
+      If tool arguments or the Markdown page count are invalid, correct those
+      arguments and call ppt_build_outline once more with the same authored
+      content. For other failures, or if that correction fails, report the exact
+      tool error so only this Workflow step fails and can be retried.
       On retry call ppt_build_outline with the same arguments and the returned
       deck_dir when available. It resumes the failed stage, preserving completed
       style/outline work and all existing materials/backgrounds. Never restart

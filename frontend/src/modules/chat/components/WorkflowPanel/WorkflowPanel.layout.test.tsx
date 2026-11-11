@@ -663,6 +663,54 @@ describe('shared workflow compact layout', () => {
     expect(screen.getByText(`正文 ${slot}`)).toHaveAttribute('data-value', 'saved-1');
   });
 
+  it.each(['succeeded', 'failed'])('keeps saved slides visible while retrying a %s slide step', async status => {
+    const generateStep = { ...fixture.session.steps![0], step_id: 'generate_ppt', status };
+    const slots = [1, 2, 3].flatMap(sort_order => ['preview_html', 'preview_notes'].map(slot => ({
+      slot, slot_id: slot, list_index: sort_order - 1, sort_order, step_id: 'generate_ppt',
+      selected: true, revision: 1, created_at: '', artifact_value: { text: `${slot}-${sort_order}` },
+    })));
+    fixture.session = {
+      ...fixture.session, workflow_id: 'ppt-workflow', status: status === 'succeeded' ? 'completed' : 'failed',
+      current_step_id: 'generate_ppt', steps: [generateStep], slots,
+    };
+    fixture.ui.tabs = [{
+      id: 'composite_preview', step_id: 'generate_ppt', label: '幻灯片', layout: 'composite',
+      composite_tab_position: 'left', composite_behavior: { empty_column_scope: 'selected' },
+      slots: [{ id: 'preview_html', label: '幻灯片', type: 'text' }, { id: 'preview_notes', label: '讲稿', type: 'text' }],
+      composite_layout: { direction: 'column', children: [{ slot: 'preview_html' }, { slot: 'preview_notes' }] },
+    }];
+    const view = render(<WorkflowPanel conversationId='layout-test' />);
+    await screen.findByRole('listitem', { name: '第 3 行' });
+    fireEvent.click(screen.getByRole('button', { name: '下一张幻灯片' }));
+    expect(screen.getByText('正文 preview_html')).toHaveAttribute('data-value', 'preview_html-2');
+
+    const retry = { ...generateStep, attempt: 2, status: 'running' };
+    fixture.session = {
+      ...fixture.session, status: 'active',
+      steps: [retry, { ...generateStep, validity: 'stale' }], slots: [],
+    };
+    view.rerender(<WorkflowPanel conversationId='layout-test' />);
+    expect(screen.getByRole('listitem', { name: '第 2 行' })).toHaveAttribute('aria-current', 'true');
+    expect(screen.getByRole('listitem', { name: '第 3 行' })).toBeVisible();
+    expect(screen.getByText('正文 preview_html')).toHaveAttribute('data-readonly', 'true');
+    expect(screen.getByText('正文 preview_notes')).toHaveAttribute('data-value', 'preview_notes-2');
+
+    const updated = slots.map(slot => slot.sort_order === 2
+      ? { ...slot, revision: 2, artifact_value: { text: `updated-${slot.slot}` } } : slot);
+    fixture.session = { ...fixture.session, slots: updated.filter(slot => slot.sort_order === 2) };
+    view.rerender(<WorkflowPanel conversationId='layout-test' />);
+    expect(screen.getByText('正文 preview_html')).toHaveAttribute('data-value', 'updated-preview_html');
+    expect(screen.getByRole('listitem', { name: '第 3 行' })).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: '下一张幻灯片' }));
+    expect(screen.getByText('正文 preview_html')).toHaveAttribute('data-value', 'preview_html-3');
+
+    fixture.session = {
+      ...fixture.session, status: 'completed', steps: [{ ...retry, status: 'succeeded' }], slots: updated,
+    };
+    view.rerender(<WorkflowPanel conversationId='layout-test' />);
+    expect(screen.getByText('正文 preview_html')).toHaveAttribute('data-readonly', 'false');
+  });
+
   it('keeps non-PPT selected-only composite visibility unchanged', async () => {
     fixture.ui.tabs = [{
       id: 'draft', step_id: 'write_document', label: '成稿', layout: 'composite',

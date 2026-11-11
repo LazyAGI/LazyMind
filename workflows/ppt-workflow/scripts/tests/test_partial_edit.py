@@ -1816,39 +1816,40 @@ class CompletionGateTests(unittest.TestCase):
 
 
 class DeferredTextOutlineTest(unittest.TestCase):
-    def test_text_outline_build_does_not_run_internal_stages(self):
+    def test_text_outline_publishes_without_generating_style_json(self):
         with tempfile.TemporaryDirectory() as tmp:
             deck = Path(tmp)
-            (deck / 'task_pack.json').write_text(json.dumps({'params': {'page_count': 1}}))
+            (deck / 'task_pack.json').write_text(json.dumps({'params': {'page_count': 2}}))
             with (
                 mock.patch.object(TOOLS, '_resolve_deck_dir', return_value=deck),
                 mock.patch.object(TOOLS, '_conversation_root', return_value=deck),
                 mock.patch.object(TOOLS, '_bind_workflow_deck'),
                 mock.patch.object(TOOLS, '_attach_material_images_to_deck', return_value={'attached': 0}),
-                mock.patch.object(TOOLS, '_save_artifact', return_value={'ok': True}),
-                mock.patch.object(TOOLS, 'ppt_run_stage') as stages,
-                mock.patch.object(TOOLS, '_agent_llm_call') as model,
+                mock.patch.object(TOOLS, '_save_artifact', return_value={'ok': True}) as save,
+                mock.patch.object(TOOLS, 'ppt_run_stage', return_value={'status': 'ok'}) as stages,
+                mock.patch.object(TOOLS, 'ppt_prepare_style', side_effect=ValueError('invalid style JSON')) as style,
             ):
-                def run_stage(deck_dir, *, stage, sample=None):
-                    if stage == 'style':
-                        (Path(deck_dir) / 'style_spec.json').write_text(json.dumps({
-                            'design_style': {'id': 1},
-                            'palette': {'primary': '#2563EB'},
-                            'typography': {'heading_font': 'Inter'},
-                        }))
-                    return {'status': 'ok'}
-
-                stages.side_effect = run_stage
                 result = TOOLS.ppt_build_outline(
-                    '一页总结', page_count=1, deck_dir=str(deck),
-                    outline_markdown='## 总结\n用户确认的三个结论。',
+                    '两页总结', page_count=2, deck_dir=str(deck),
+                    outline_markdown=('```markdown\n# 汇报\n## 第一页\n已确认的结论。\n'
+                                      '```text\n## 代码示例，不是页面\n```\n'
+                                      '##\t第二页\n补充信息。\n```'),
                 )
+                with self.assertRaisesRegex(ToolExecutionError, 'contains 1 slide headings; expected 2'):
+                    TOOLS.ppt_build_outline(
+                        '两页总结', page_count=2, deck_dir=str(deck),
+                        outline_markdown='## 第一页\n只有一页。',
+                    )
+
             self.assertTrue(result['structure_deferred'])
-            self.assertEqual(
-                [call.kwargs['stage'] for call in stages.call_args_list],
-                ['preflight', 'style'],
-            )
-            model.assert_not_called()
+            self.assertTrue(result['deck_outline_published'])
+            self.assertFalse(result['style_spec_ready'])
+            self.assertEqual(result['page_count'], 2)
+            self.assertTrue(save.call_args.kwargs['value'].startswith('# 汇报'))
+            self.assertEqual(save.call_args.kwargs['key'], 'deck_outline')
+            self.assertEqual(save.call_count, 1)
+            self.assertEqual([call.kwargs['stage'] for call in stages.call_args_list], ['preflight', 'preflight'])
+            style.assert_not_called()
             self.assertFalse((deck / 'outline.json').exists())
 
     def test_page_document_publication_and_generation_reads_latest_edits(self):

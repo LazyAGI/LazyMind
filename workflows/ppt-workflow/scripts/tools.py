@@ -62,7 +62,7 @@ from lazyllm import ThreadPoolExecutor
 from lazyllm.tools.agent import ToolExecutionError
 
 from lazymind.chat.engine.subagent.context import require_context
-from lazymind.document_tools.artifacts import normalize_generated_markdown
+from lazymind.document_tools.artifacts import _markdown_heading_rows, normalize_generated_markdown
 from lazymind.chat.engine.subagent.tools import (
     _resolve_artifact_text,
     _save_artifact,
@@ -3389,16 +3389,30 @@ def _format_deck_outline_markdown(outline: dict) -> str:
 
 def _split_text_outline(markdown: str) -> list[str]:
     """Split user-facing Markdown without imposing the internal page schema."""
-    sections = re.split(r'(?m)(?=^##\s+)', markdown.strip())
-    pages = [section.strip() for section in sections if section.startswith('## ')]
-    if not pages or any(not page.split('\n', 1)[0][3:].strip() for page in pages):
+    lines = markdown.splitlines()
+    headings = [(index, title) for index, level, title in _markdown_heading_rows(lines) if level == 2]
+    if not headings or any(not title for _, title in headings):
         raise ValueError('Use one non-empty ## heading per slide in outline_markdown')
-    return pages
+    starts = [index for index, _ in headings]
+    return ['\n'.join(lines[start:end]).strip()
+            for start, end in zip(starts, starts[1:] + [len(lines)])]
 
 
-def _publish_text_outline(deck: Path, markdown: str) -> dict[str, Any]:
+def _publish_text_outline(deck: Path, markdown: str, *, expected_pages: int | None = None) -> dict[str, Any]:
+    # A Markdown fence around the whole outline is a common model wrapper.
+    wrapped = re.fullmatch(
+        r'[ \t]*(?P<fence>`{3,}|~{3,})(?:markdown|md)?[ \t]*\r?\n'
+        r'(?P<body>[\s\S]*?)\r?\n(?P=fence)[ \t]*', markdown, re.IGNORECASE,
+    )
+    if wrapped:
+        markdown = wrapped['body']
     markdown = normalize_generated_markdown(markdown)
     pages = _split_text_outline(markdown)
+    if expected_pages is not None and len(pages) != expected_pages:
+        raise ValueError(
+            f'outline_markdown contains {len(pages)} slide headings; expected {expected_pages}. '
+            'Use one ## heading per slide and ### for subsections.'
+        )
     # Durable source only: internal outline.json is built by generate_ppt.
     (deck / 'outline_draft.md').write_text(markdown, encoding='utf-8')
     saved = _save_artifact(
@@ -8028,8 +8042,8 @@ def ppt_build_outline(
     that is ppt_generate_pages / generate_ppt.
 
     Args:
-        outline_markdown (str): User-facing content outline, one ## heading per page.
-            Required for new workflow runs; no internal JSON or visual schema.
+        outline_markdown (str): User-facing Markdown with exactly page_count ## headings,
+            one per slide. Required for new workflow runs.
         deck_dir (str): Optional prepared deck from ppt_init_deck. When supplied,
             reuse it so approved background prompts/images remain attached.
         user_query (str): Full presentation request (required).
@@ -8128,40 +8142,55 @@ def ppt_build_outline(
         if generate_background_images is None
         else _coerce_bool(generate_background_images)
     )
-    style_res = ppt_prepare_style(
-        user_query=user_query,
-        page_count=page_count,
-        topic=topic,
-        role=role,
-        audience=audience,
-        scene=scene,
-        style_hint=style_hint,
-        style_flow=style_flow or init_payload.get('style_flow'),
-        style_selection=style_selection,
-        key_points_json=key_points_json,
-        generate_background_images=effective_backgrounds_enabled,
-        deck_dir=resolved_deck,
-    )
-    if _tool_failed(style_res):
-        return _tool_error(
-            'ppt_build_outline',
-            f'style preparation failed: {_tool_fail_reason(style_res)}',
-            meta={'deck_dir': resolved_deck, 'failed_stage': 'style'},
+    flow = init_payload.get('style_flow')
+    if outline_markdown is not None and flow != 'preview_choice':
+        # The text outline does not depend on model-generated style JSON.
+        # Generation prepares style if the selected page prompts still need it.
+        preflight = ppt_run_stage(resolved_deck, stage='preflight')
+        if _tool_failed(preflight):
+            return _tool_error('ppt_build_outline', f'preflight failed: {_tool_fail_reason(preflight)}',
+                               meta={'deck_dir': resolved_deck, 'failed_stage': 'preflight'})
+        style_payload = {'style_flow': flow or 'auto', 'style_selection': None}
+    else:
+        style_res = ppt_prepare_style(
+            user_query=user_query,
+            page_count=page_count,
+            topic=topic,
+            role=role,
+            audience=audience,
+            scene=scene,
+            style_hint=style_hint,
+            style_flow=style_flow or flow,
+            style_selection=style_selection,
+            key_points_json=key_points_json,
+            generate_background_images=effective_backgrounds_enabled,
+            deck_dir=resolved_deck,
         )
-    style_payload = _tool_payload(style_res)
+        if _tool_failed(style_res):
+            return _tool_error(
+                'ppt_build_outline',
+                f'style preparation failed: {_tool_fail_reason(style_res)}',
+                meta={'deck_dir': resolved_deck, 'failed_stage': 'style'},
+            )
+        style_payload = _tool_payload(style_res)
     if outline_markdown is not None:
         try:
-            published = _publish_text_outline(build_deck, str(outline_markdown).strip())
+            published = _publish_text_outline(
+                build_deck, outline_markdown.strip(),
+                expected_pages=_coerce_int(page_count, 4, lo=1),
+            )
         except ValueError as exc:
-            return _tool_error('ppt_build_outline', str(exc))
+            return _tool_error('ppt_build_outline', str(exc),
+                               meta={'deck_dir': resolved_deck, 'failed_stage': 'outline_markdown'})
         if not published['ok']:
-            return _tool_error('ppt_build_outline', published.get('error') or 'Publish failed')
+            return _tool_error('ppt_build_outline', published.get('error') or 'Publish failed',
+                               meta={'deck_dir': resolved_deck, 'failed_stage': 'publish_deck_outline'})
         resume_path.unlink(missing_ok=True)
         return _tool_success('ppt_build_outline', {
             **init_payload, 'deck_outline_published': True,
             'style_flow': style_payload.get('style_flow'),
             'style_selection': style_payload.get('style_selection'),
-            'style_spec_ready': True,
+            'style_spec_ready': _style_spec_is_ready(build_deck, style_payload.get('style_selection') or ''),
             'page_count': published['page_count'], 'structure_deferred': True,
             'next_step': 'plan_page_prompts',
             'note': 'Text outline published. Internal page structure is deferred to generate_ppt.',
