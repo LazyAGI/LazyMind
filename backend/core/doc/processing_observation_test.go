@@ -92,6 +92,103 @@ func TestStoredOriginalBindingIsTerminalWithoutSubmission(t *testing.T) {
 	if ext.TaskState != string(TaskStateSucceeded) {
 		t.Fatalf("stored binding incorrectly appears uploading: %q", ext.TaskState)
 	}
+	metadata, err := ObserveDocumentProcessingMetadata(context.Background(), db.DB, db.DB, result.Document)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if metadata.ObservedProcessingLevel != ProcessingLevelStored {
+		t.Fatalf("stored binding reported observed level %q", metadata.ObservedProcessingLevel)
+	}
+	if got := DocumentBodyProcessingStatus(metadata.ObservedProcessingLevel, metadata.ProcessingState); got != "not_requested" {
+		t.Fatalf("stored binding status=%q, want not_requested: %+v", got, metadata)
+	}
+}
+
+func TestNonStoredOriginalBindingRemainsPendingBeforeSubmission(t *testing.T) {
+	db := newDocumentTestDB(t)
+	installOriginalSourceTransport(t)
+	t.Setenv("LAZYMIND_UPLOAD_ROOT", t.TempDir())
+	seedDocumentServiceDatasetWithKBAndAlgo(t, db, "parsed", "kb", "general_algo", "user-1", time.Now())
+	if err := db.Model(&orm.Dataset{}).Where("id = ?", "parsed").Updates(map[string]any{
+		"scene":            "academic_papers",
+		"processing_level": ProcessingLevelParsed,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	svc, err := NewOriginalService(OriginalServiceDeps{DB: db.DB})
+	if err != nil {
+		t.Fatal(err)
+	}
+	caller := DatasetCatalogCaller{UserID: "user-1"}
+	ref, err := svc.AcquireOriginal(context.Background(), caller, AcquireOriginalRequest{Filename: "paper.txt", Reader: strings.NewReader("fixture")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	prepared, err := svc.PrepareOriginalBinding(context.Background(), caller, ImportOriginalRequest{FileRef: ref.FileRef, DatasetID: "parsed"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, err := PrepareResourceAuthorization(context.Background(), caller, prepared.AuthorizationRequests())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var result OriginalImportResult
+	if err := db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var bindErr error
+		result, bindErr = svc.BindOriginalTx(ctx, tx, caller, prepared)
+		return bindErr
+	}); err != nil {
+		t.Fatal(err)
+	}
+	metadata, err := ObserveDocumentProcessingMetadata(context.Background(), db.DB, db.DB, result.Document)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if metadata.ObservedProcessingLevel != "" {
+		t.Fatalf("unsubmitted parsed binding reported observed level %q", metadata.ObservedProcessingLevel)
+	}
+	if got := DocumentBodyProcessingStatus(metadata.ObservedProcessingLevel, metadata.ProcessingState); got != "pending" {
+		t.Fatalf("unsubmitted parsed binding status=%q, want pending: %+v", got, metadata)
+	}
+}
+
+func TestLegacyOriginalOnlyPaperReceiptRemainsStored(t *testing.T) {
+	db := newDocumentTestDB(t)
+	now := time.Now().UTC()
+	seedDocumentServiceDatasetWithKBAndAlgo(t, db, "papers", "kb", "general_algo", "user-1", now)
+	if err := db.Model(&orm.Dataset{}).Where("id = ?", "papers").Updates(map[string]any{
+		"scene":            "academic_papers",
+		"processing_level": ProcessingLevelParsed,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	document := orm.Document{ID: "paper", DatasetID: "papers", ResourceVersion: 1, BaseModel: orm.BaseModel{CreatedAt: now, UpdatedAt: now}}
+	task := orm.Task{
+		ID:        "receipt",
+		DatasetID: "papers",
+		DocID:     "paper",
+		TaskType:  string(TaskTypeParseUploaded),
+		Ext:       mustJSON(taskExt{TaskState: string(TaskStateSucceeded)}),
+		BaseModel: orm.BaseModel{CreatedAt: now, UpdatedAt: now},
+	}
+	for _, row := range []any{&document, &task} {
+		if err := db.Create(row).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := createDocumentProcessingState(db.DB, "papers", "paper", now); err != nil {
+		t.Fatal(err)
+	}
+	metadata, err := ObserveDocumentProcessingMetadata(context.Background(), db.DB, db.DB, document)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if metadata.ObservedProcessingLevel != ProcessingLevelStored {
+		t.Fatalf("legacy original-only receipt reported observed level %q", metadata.ObservedProcessingLevel)
+	}
+	if got := DocumentBodyProcessingStatus(metadata.ObservedProcessingLevel, metadata.ProcessingState); got != "not_requested" {
+		t.Fatalf("legacy original-only receipt status=%q, want not_requested: %+v", got, metadata)
+	}
 }
 
 func TestProcessingObservationUsesExactBindingAndSubmittedRevision(t *testing.T) {

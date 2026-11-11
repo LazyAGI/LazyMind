@@ -229,6 +229,11 @@ func (snapshot processingSnapshot) observe(document orm.Document) (orm.DocumentP
 func (snapshot processingSnapshot) observedProcessingLevel(task orm.Task, state orm.DocumentProcessingState) string {
 	var ext taskExt
 	_ = json.Unmarshal(task.Ext, &ext)
+	// Stored is an explicit terminal choice and does not require a parser
+	// submission revision.
+	if ext.ProcessingLevel == ProcessingLevelStored {
+		return ProcessingLevelStored
+	}
 	if ext.ProcessingRevision == snapshot.dataset.ProcessingRevision {
 		switch ext.ProcessingLevel {
 		case ProcessingLevelParsed, ProcessingLevelChunked, ProcessingLevelIndexed:
@@ -245,8 +250,17 @@ func (snapshot processingSnapshot) observedProcessingLevel(task orm.Task, state 
 	case state.ParseStatus == "succeeded" || state.ParseStatus == "failed" || state.ParseStatus == "running",
 		task.LazyllmTaskID != "", ext.MarketSubmission == "submitting":
 		return ProcessingLevelParsed
-	default:
+	case snapshot.dataset.Scene == "academic_papers" && task.TaskType == string(TaskTypeParseUploaded) &&
+		task.LazyllmTaskID == "" && ext.ProcessingLevel == "" && ext.TaskState == string(TaskStateSucceeded):
+		// Older original-only paper receipts intentionally completed without
+		// submitting a parser task.
 		return ProcessingLevelStored
+	case effectiveProcessingLevel(snapshot.dataset.ProcessingLevel) == ProcessingLevelStored:
+		return ProcessingLevelStored
+	default:
+		// No submitted level has been observed yet. Callers fall back to the
+		// configured level, keeping a freshly bound non-stored document pending.
+		return ""
 	}
 }
 
