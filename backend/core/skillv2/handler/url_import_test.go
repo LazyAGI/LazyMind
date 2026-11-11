@@ -14,10 +14,11 @@ import (
 
 	"lazymind/core/common"
 	skillservice "lazymind/core/skillv2/service"
+	skillurl "lazymind/core/skillv2/sourceurl"
 	"lazymind/core/skillv2/testutil"
 )
 
-func TestNormalizeSkillImportURL(t *testing.T) {
+func TestResolveSkillImportURL(t *testing.T) {
 	const mainCommit = "1111111111111111111111111111111111111111"
 	const featureCommit = "2222222222222222222222222222222222222222"
 	const tagCommit = "3333333333333333333333333333333333333333"
@@ -125,14 +126,26 @@ func TestNormalizeSkillImportURL(t *testing.T) {
 			wantErr: true,
 		},
 		{
-			name:    "GitHub tree missing path",
+			name:    "GitHub tree branch root",
 			rawURL:  "https://github.com/example/skills/tree/main",
-			wantErr: true,
+			wantURL: "https://github.com/example/skills/archive/" + mainCommit + ".zip",
 		},
 		{
 			name:    "GitHub URL with query",
 			rawURL:  "https://github.com/example/skills?download=1",
-			wantErr: true,
+			wantURL: "https://github.com/example/skills/archive/" + mainCommit + ".zip",
+		},
+		{
+			name:       "GitHub document page with query and fragment",
+			rawURL:     "https://github.com/example/skills/blob/main/skills/target/SKILL.md?plain=1#usage",
+			wantURL:    "https://github.com/example/skills/archive/" + mainCommit + ".zip",
+			wantPrefix: "skills/target",
+		},
+		{
+			name:       "GitHub raw document",
+			rawURL:     "https://raw.githubusercontent.com/example/skills/main/skills/target/SKILL.md",
+			wantURL:    "https://github.com/example/skills/archive/" + mainCommit + ".zip",
+			wantPrefix: "skills/target",
 		},
 		{
 			name:    "SkillHub URL missing slug",
@@ -143,7 +156,8 @@ func TestNormalizeSkillImportURL(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			gotURL, gotPrefix, err := normalizeSkillImportURLWithResolver(context.Background(), tt.rawURL, apiServer.Client(), apiServer.URL)
+			resolved, err := skillurl.ResolveImportURL(context.Background(), tt.rawURL, apiServer.Client(), apiServer.URL)
+			gotURL, gotPrefix := resolved.DownloadURL, resolved.PathPrefix
 			if tt.wantErr {
 				if err == nil {
 					t.Fatal("normalizeSkillImportURL returned nil error")

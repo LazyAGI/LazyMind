@@ -73,6 +73,14 @@ func Move(w http.ResponseWriter, r *http.Request) {
 	dispatch(w, r, (*Handler).Move)
 }
 
+func InstallSkill(w http.ResponseWriter, r *http.Request) {
+	dispatch(w, r, (*Handler).InstallSkill)
+}
+
+func (h *Handler) InstallSkill(w http.ResponseWriter, r *http.Request) {
+	h.skill.InstallSkill(w, requestWithUser(r))
+}
+
 func Trash(w http.ResponseWriter, r *http.Request) {
 	dispatch(w, r, (*Handler).Trash)
 }
