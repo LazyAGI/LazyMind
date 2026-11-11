@@ -9,14 +9,22 @@ from lazyllm import AutoModel
 from lazyllm.tools.writer.tools.base import WriterToolBase
 from pydantic import BaseModel, ConfigDict, Field, create_model, field_validator, model_validator
 
-from lazymind.config import config
+from lazymind.config import EMBED_MAIN, config
+from lazymind.model_config import is_model_role_available
 
 from ..contracts import MissingMaterials
 from ..literature_review import _prompt
 from ..material_bindings import MaterialBindings
 from ..prompts.literature_review_prompt import MATERIAL_SELECTION_PROMPT
 from ..runtime_events import report_progress
-from .retrieval import RETRIEVAL_ERRORS, read_sciverse, sciverse_provider, search_sciverse, unique_candidates
+from .retrieval import (
+    RETRIEVAL_ERRORS,
+    EmbeddingNotReady,
+    read_sciverse,
+    sciverse_provider,
+    search_sciverse,
+    unique_candidates,
+)
 
 
 class SearchPlan(BaseModel):
@@ -154,6 +162,14 @@ def _paper_count(papers):
     return sum(paper.get('review_role') != 'background' for paper in papers)
 
 
+def _has_readable_review_paper(papers):
+    return any(
+        paper.get('review_role') != 'background'
+        and any(isinstance(paper.get(field), str) and paper[field].strip() for field in ('text', 'abstract'))
+        for paper in papers
+    )
+
+
 def _search_kb(toolkit, queries, knowledge_bases, warnings):
     documents, more_queries = {}, {}
     for query, count in queries.items():
@@ -206,6 +222,11 @@ def prepare(inputs: dict, knowledge_bases: list[str], *, fixed_scope: bool = Fal
     warnings, seen = [], list(selected)
     expanding = bool(plan.queries or plan.external_queries)
     toolkit, provider = None, None
+    if plan.queries and not is_model_role_available(EMBED_MAIN):
+        plan.queries = {}
+        warnings.append('文本向量模型未就绪，已跳过知识库检索；请在模型默认服务中配置文本向量模型后重试。')
+        if not _has_readable_review_paper(selected) and not plan.external_queries:
+            raise EmbeddingNotReady('知识库检索需要可用的文本向量模型；请先在模型默认服务中配置文本向量模型后重试。')
     if plan.queries:
         from lazymind.chat.engine.tools.lazy_kb import KBToolkit
 
