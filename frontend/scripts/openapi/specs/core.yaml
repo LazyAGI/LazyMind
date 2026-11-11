@@ -8170,10 +8170,24 @@ components:
                 affected_knowledge_bases:
                     format: int64
                     type: integer
+                index_identity:
+                    enum:
+                        - empty
+                        - verified
+                        - legacy_unknown
+                    type: string
                 indexed_knowledge_bases:
                     format: int64
                     type: integer
                 model_name:
+                    type: string
+                operation_phase:
+                    enum:
+                        - idle
+                        - rebuilding
+                        - clearing
+                        - cleanup_failed
+                        - cleared
                     type: string
                 pending_knowledge_bases:
                     format: int64
@@ -8191,7 +8205,9 @@ components:
                     type: string
             required:
                 - affected_knowledge_bases
+                - index_identity
                 - indexed_knowledge_bases
+                - operation_phase
                 - pending_knowledge_bases
                 - status
             type: object

@@ -5376,13 +5376,31 @@ export interface DocumentTagsResponse {
 }
 export interface EmbeddingIndexStatusResponse {
     'affected_knowledge_bases': number;
+    'index_identity': EmbeddingIndexStatusResponseIndexIdentityEnum;
     'indexed_knowledge_bases': number;
     'model_name'?: string;
+    'operation_phase': EmbeddingIndexStatusResponseOperationPhaseEnum;
     'pending_knowledge_bases': number;
     'provider_name'?: string;
     'status': EmbeddingIndexStatusResponseStatusEnum;
 }
 
+export const EmbeddingIndexStatusResponseIndexIdentityEnum = {
+    Empty: 'empty',
+    Verified: 'verified',
+    LegacyUnknown: 'legacy_unknown'
+} as const;
+
+export type EmbeddingIndexStatusResponseIndexIdentityEnum = typeof EmbeddingIndexStatusResponseIndexIdentityEnum[keyof typeof EmbeddingIndexStatusResponseIndexIdentityEnum];
+export const EmbeddingIndexStatusResponseOperationPhaseEnum = {
+    Idle: 'idle',
+    Rebuilding: 'rebuilding',
+    Clearing: 'clearing',
+    CleanupFailed: 'cleanup_failed',
+    Cleared: 'cleared'
+} as const;
+
+export type EmbeddingIndexStatusResponseOperationPhaseEnum = typeof EmbeddingIndexStatusResponseOperationPhaseEnum[keyof typeof EmbeddingIndexStatusResponseOperationPhaseEnum];
 export const EmbeddingIndexStatusResponseStatusEnum = {
     Empty: 'empty',
     Indexed: 'indexed',

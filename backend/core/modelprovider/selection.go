@@ -820,19 +820,32 @@ func loadSelectedModelsInternal(ctx context.Context, db *gorm.DB, userID string,
 
 func projectGlobalSelectedEmbedding(ctx context.Context, db *gorm.DB, userID string, selected []selectedModelItem) ([]selectedModelItem, error) {
 	choice, present, err := ResolveGlobalEmbeddingChoice(ctx, db)
-	if !present {
-		return selected, nil
-	}
 	if err != nil {
 		return nil, err
 	}
+	if !present {
+		return selected, nil
+	}
 	filtered := make([]selectedModelItem, 0, len(selected))
+	persistedEmbedding := make([]selectedModelItem, 0, 1)
 	for _, item := range selected {
-		if item.ModelKey != "embed_main" {
-			filtered = append(filtered, item)
+		if item.ModelKey == "embed_main" {
+			persistedEmbedding = append(persistedEmbedding, item)
+			continue
 		}
+		filtered = append(filtered, item)
 	}
 	if choice.ModelID == "" {
+		reason := choice.indexState.ReadinessReason
+		if reason == "" {
+			reason = "model_unavailable"
+		}
+		for _, item := range persistedEmbedding {
+			item.Availability = "unavailable"
+			item.UnavailableReason = reason
+			filtered = append(filtered, item)
+		}
+		sort.Slice(filtered, func(i, j int) bool { return filtered[i].ModelKey < filtered[j].ModelKey })
 		return filtered, nil
 	}
 	if choice.Source == "cloud" {
@@ -874,15 +887,11 @@ func projectGlobalSelectedEmbedding(ctx context.Context, db *gorm.DB, userID str
 		}
 		filtered = append(filtered, active)
 	}
-	if choice.Phase == "unverified" || choice.Phase == "clearing" || choice.Phase == "cleanup_failed" {
+	if choice.indexState.ReadinessReason != "" {
 		for i := range filtered {
 			if filtered[i].ModelKey == "embed_main" {
 				filtered[i].Availability = "unavailable"
-				if choice.Phase == "unverified" {
-					filtered[i].UnavailableReason = "index_identity_unverified"
-				} else {
-					filtered[i].UnavailableReason = "index_cleanup_incomplete"
-				}
+				filtered[i].UnavailableReason = choice.indexState.ReadinessReason
 			}
 		}
 	}
