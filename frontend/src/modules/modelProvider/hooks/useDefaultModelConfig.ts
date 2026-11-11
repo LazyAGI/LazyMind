@@ -585,11 +585,11 @@ function mapModelOption(
   };
 }
 
-function mapVerifiedCloudServiceGroup(
-  group: VerifiedCloudServiceGroup,
+function mapCloudServiceGroup(
+  group: VerifiedCloudServiceGroup | SelectedCloudServiceApiItem,
 ): CloudServiceOption {
   return {
-    baseUrl: group.base_url,
+    baseUrl: group.base_url || "",
     groupId: group.group_id,
     groupName: group.group_name,
     providerName: group.provider_name,
@@ -638,8 +638,11 @@ export function useDefaultModelConfig({
   const [cloudServiceShareStatus, setCloudServiceShareStatus] = useState<
     Partial<Record<CloudServiceSlotKey, boolean>>
   >({});
-  const [cloudServiceOptions, setCloudServiceOptions] = useState<
+  const [cloudServiceCatalogs, setCloudServiceCatalogs] = useState<
     Partial<Record<CloudServiceSlotKey, CloudServiceOption[]>>
+  >({});
+  const [selectedCloudServiceOptions, setSelectedCloudServiceOptions] = useState<
+    Partial<Record<CloudServiceSlotKey, CloudServiceOption>>
   >({});
   const [cloudServiceOptionStates, setCloudServiceOptionStates] = useState<
     Partial<Record<CloudServiceSlotKey, SetupAvailabilityState>>
@@ -674,6 +677,7 @@ export function useDefaultModelConfig({
   const selectionRevisions = useRef({ providers: 0, models: 0, services: 0 });
   const optionRevisions = useRef({ models: 0, services: 0 });
   const requestedModelCatalogs = useRef(new Set<ModelCapability>());
+  const requestedCloudServiceCatalogs = useRef(new Set<CloudServiceSlotKey>());
   const isAdmin = AgentAppsAuth.getUserInfo()?.role === "system-admin";
   const modelFeaturesState = useModelFeatures();
   const imageEmbedEnabled =
@@ -691,6 +695,15 @@ export function useDefaultModelConfig({
     () => createModelProviderFallbacks(t),
     [currentLanguage, t],
   );
+
+  const cloudServiceOptions = useMemo(() => {
+    const options = { ...cloudServiceCatalogs };
+    for (const { key } of cloudServiceConfigs) {
+      const selected = selectedCloudServiceOptions[key];
+      if (selected) options[key] = mergeCloudServiceOptions(options[key] || [], selected);
+    }
+    return options;
+  }, [cloudServiceCatalogs, selectedCloudServiceOptions]);
 
   const { selectedModels, selectedModelMaxInputTokens, moduleModelOptions } = useMemo(() => {
     const values: SelectedModels = {};
@@ -790,13 +803,10 @@ export function useDefaultModelConfig({
   }, []);
 
   const loadDefaultModelState = useCallback((retainCatalog = false) => {
-    if (savingCapabilitiesRef.current.size) return;
+    if (savingCapabilitiesRef.current.size) return false;
     const revision = ++loadRevision.current;
-    if (retainCatalog) {
-      // Revalidate catalogs alongside the selection while their current choices stay visible.
-      optionRevisions.current.models += 1;
-      setModuleModelOptionStates({});
-    }
+    const modelCapabilities = visibleModuleConfigs.map((module) => module.key);
+    const serviceCapabilities = cloudServiceConfigs.map((service) => service.key);
     const refreshReadiness = (capabilities: CapabilityKey[]) => {
       if (isAdmin) return;
       for (const capability of capabilities) {
@@ -806,6 +816,14 @@ export function useDefaultModelConfig({
         }
       }
     };
+    if (retainCatalog) {
+      // Start new catalog and readiness checks while the previous display data stays visible.
+      optionRevisions.current.models += 1;
+      optionRevisions.current.services += 1;
+      setModuleModelOptionStates({});
+      setCloudServiceOptionStates({});
+      refreshReadiness([...modelCapabilities, ...serviceCapabilities]);
+    }
     const loadPart = async <T,>(part: DefaultConfigPart, request: () => Promise<T>, apply: (response: T) => void) => {
       const selectionRevision = selectionRevisions.current[part];
       const isCurrent = () => revision === loadRevision.current && selectionRevision === selectionRevisions.current[part];
@@ -844,34 +862,33 @@ export function useDefaultModelConfig({
       setSelectedModelRows(rows);
       setShareStatus(shares);
       if (isAdmin) setModelReadyStatus({});
-      refreshReadiness(visibleModuleConfigs.map((module) => module.key));
+      if (!retainCatalog) refreshReadiness(modelCapabilities);
     });
 
     void loadPart("services", () => modelProvidersApi.apiCoreModelProvidersSelectedProvidersGet(), (response) => {
       const data = unwrapModelProviderData<{ selections?: SelectedCloudServiceApiItem[] }>(response.data);
       const selections: SelectedCloudServices = {};
       const shares: typeof cloudServiceShareStatus = {};
-      const options: typeof cloudServiceOptions = {};
+      const options: typeof selectedCloudServiceOptions = {};
       for (const selection of data.selections || []) {
         const service = cloudServiceConfigs.find((item) => item.category === selection.category);
         if (!service) continue;
         selections[service.key] = selection.group_id;
         shares[service.key] = !!selection.share;
-        options[service.key] = mergeCloudServiceOptions(options[service.key] || [], {
-          baseUrl: selection.base_url || "",
-          groupId: selection.group_id,
-          groupName: selection.group_name,
-          providerName: selection.provider_name,
-        });
+        options[service.key] = mapCloudServiceGroup(selection);
       }
-      optionRevisions.current.services += 1;
       setSelectedCloudServices(selections);
       setCloudServiceShareStatus(shares);
-      setCloudServiceOptions(options);
-      setCloudServiceOptionStates({});
+      setSelectedCloudServiceOptions(options);
       if (isAdmin) setCloudServiceReadyStatus({});
-      refreshReadiness(cloudServiceConfigs.map((service) => service.key));
+      if (!retainCatalog) {
+        optionRevisions.current.services += 1;
+        setCloudServiceCatalogs({});
+        setCloudServiceOptionStates({});
+        refreshReadiness(serviceCapabilities);
+      }
     });
+    return true;
   }, [isAdmin, loadCapabilityReadiness, localizedFallbacks, visibleModuleConfigs]);
 
   useEffect(() => {
@@ -886,8 +903,7 @@ export function useDefaultModelConfig({
 
   useEffect(() => {
     if (refreshRevision === appliedRefreshRevision.current || savingCapabilities.size) return;
-    appliedRefreshRevision.current = refreshRevision;
-    loadDefaultModelState(true);
+    if (loadDefaultModelState(true)) appliedRefreshRevision.current = refreshRevision;
   }, [loadDefaultModelState, refreshRevision, savingCapabilities]);
 
   useEffect(() => () => { embeddingSwitchRevision.current += 1; }, []);
@@ -1167,31 +1183,16 @@ export function useDefaultModelConfig({
     }
 
     const revision = optionRevisions.current.services;
+    requestedCloudServiceCatalogs.current.add(service.key);
     setCloudServiceOptionStates((current) => ({ ...current, [service.key]: "loading" }));
     try {
       const response = await modelProvidersApi.apiCoreModelProvidersProviderGroupsGet({
         category: service.category,
       });
       const data = unwrapModelProviderData<CloudServiceGroupListResponse>(response.data);
-      const groups = data.groups || [];
-      const fetchedOptions = groups.map((group) =>
-        mapVerifiedCloudServiceGroup(group),
-      );
-      const currentSelectedGroupId = selectedCloudServices[service.key];
-      const selectedOption =
-        currentSelectedGroupId &&
-        (cloudServiceOptions[service.key] || []).find(
-          (option) => option.groupId === currentSelectedGroupId,
-        );
-      const options =
-        selectedOption &&
-        !fetchedOptions.some(
-          (option) => option.groupId === selectedOption.groupId,
-        )
-          ? [selectedOption, ...fetchedOptions]
-          : fetchedOptions;
       if (revision !== optionRevisions.current.services) return;
-      setCloudServiceOptions((current) => ({ ...current, [service.key]: options }));
+      const options = (data.groups || []).map(mapCloudServiceGroup);
+      setCloudServiceCatalogs((current) => ({ ...current, [service.key]: options }));
       setCloudServiceOptionStates((current) => ({ ...current, [service.key]: "ready" }));
     } catch {
       if (revision === optionRevisions.current.services) {
@@ -1210,6 +1211,10 @@ export function useDefaultModelConfig({
       .then((response) => {
         const selection = response.selections?.find((item) => item.category === cloudServiceCategoryBySlot[service]);
         setSelectedCloudServices((current) => ({ ...current, [service]: selection?.group_id }));
+        setSelectedCloudServiceOptions((current) => ({
+          ...current,
+          [service]: selection?.group_id ? mapCloudServiceGroup(selection) : undefined,
+        }));
         setCloudServiceShareStatus((current) => ({ ...current, [service]: !!selection?.share }));
         void onModelSelectionChanged();
         if (!isAdmin) void retryCapabilityReadiness(service, true);
@@ -1267,12 +1272,11 @@ export function useDefaultModelConfig({
         }
       }
     }
-    if (loadStates.services === "ready") {
-      for (const service of cloudServiceConfigs) {
-        if (cloudServiceSetupStates[service.key] === "ready" &&
-            !isCloudServiceConfigured(service.key) && !cloudServiceOptionStates[service.key]) {
-          void loadVerifiedCloudService(service);
-        }
+    for (const service of cloudServiceConfigs) {
+      const needsOptions = requestedCloudServiceCatalogs.current.has(service.key) ||
+        (loadStates.services === "ready" && !isCloudServiceConfigured(service.key));
+      if (cloudServiceSetupStates[service.key] === "ready" && needsOptions && !cloudServiceOptionStates[service.key]) {
+        void loadVerifiedCloudService(service);
       }
     }
   }, [loadStates, modelProviderSetupState, cloudServiceSetupStates, visibleModuleConfigs,

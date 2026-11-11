@@ -1,7 +1,9 @@
-import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, renderHook, screen, waitFor, within } from "@testing-library/react";
 import { Modal } from "antd";
+import { useLayoutEffect, type ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import DefaultModelConfigPanel from "./DefaultModelConfigPanel";
+import { cloudServiceConfigs, DefaultModelConfigRefreshContext, useDefaultModelConfig } from "../hooks/useDefaultModelConfig";
 
 const mocks = vi.hoisted(() => ({
   role: "system-admin",
@@ -148,6 +150,12 @@ const expectLocalizedWarning = async (content: string) => {
   }
 };
 
+function deferredResponse() {
+  let resolve!: (value: unknown) => void;
+  const promise = new Promise((complete) => { resolve = complete; });
+  return { promise, resolve };
+}
+
 describe("default capability configuration groups", () => {
   afterEach(() => vi.restoreAllMocks());
   beforeEach(() => {
@@ -170,6 +178,100 @@ describe("default capability configuration groups", () => {
     mocks.verified.mockResolvedValue({ data: { ready: false } });
     mocks.groups.mockResolvedValue({ data: { groups: [] } });
     Element.prototype.scrollIntoView = vi.fn();
+  });
+
+  it.each([
+    ["cloudParsing", "pending"], ["cloudParsing", "failed"],
+    ["searchEngine", "pending"], ["searchEngine", "failed"],
+    ["cloudParsing", "completed"],
+  ] as const)("refreshes %s options and readiness independently of a %s selected-provider request", async (slot, selectionRequest) => {
+    mocks.role = "user";
+    const service = cloudServiceConfigs.find(({ key }) => key === slot)!;
+    const serviceGroup = (id: string) => ({
+      ...selectedParsing, category: service.category, group_id: id, group_name: id,
+      base_url: "https://example.test", user_model_provider_id: "provider",
+    });
+    const groups = (id: string) => ({ data: { groups: [serviceGroup(id)] } });
+    const readiness = (name: string) => ({ data: { ready: true, group_name: name, source: "own" } });
+    const oldGroups = deferredResponse();
+    const freshGroups = deferredResponse();
+    const oldReadiness = deferredResponse();
+    const freshReadiness = deferredResponse();
+    const freshSelections = deferredResponse();
+    mocks.services.mockResolvedValueOnce({ data: { selections: [serviceGroup("saved")] } });
+    if (selectionRequest === "failed") mocks.services.mockRejectedValueOnce(new Error("selection service unavailable"));
+    else mocks.services.mockImplementationOnce(() => freshSelections.promise);
+    mocks.groups.mockResolvedValueOnce(groups("cached-option"))
+      .mockImplementationOnce(() => oldGroups.promise)
+      .mockImplementationOnce(() => freshGroups.promise);
+    const checks = [Promise.resolve(readiness("cached-runtime")), oldReadiness.promise, freshReadiness.promise];
+    mocks.verified.mockImplementation(({ category }: { category: string }) => category === service.category
+      ? checks.shift()
+      : Promise.resolve({ data: { ready: false } }));
+    let revision = 0;
+    const { result, rerender } = renderHook(() => useDefaultModelConfig({
+      cloudServiceSetupStates: {
+        cloudParsing: slot === "cloudParsing" ? "ready" : "empty",
+        searchEngine: slot === "searchEngine" ? "ready" : "empty",
+      },
+      modelProviderSetupState: "empty",
+      onModelSelectionChanged: mocks.changed,
+    }), { wrapper: ({ children }) => <DefaultModelConfigRefreshContext.Provider value={revision}>{children}</DefaultModelConfigRefreshContext.Provider> });
+    const optionIds = () => result.current.cloudServiceOptions[slot]?.map((option) => option.groupId);
+    await waitFor(() => expect(result.current.cloudServiceReadyStatus[slot]?.group_name).toBe("cached-runtime"));
+    await act(async () => { await result.current.loadVerifiedCloudService(service); });
+    expect(optionIds()).toEqual(["saved", "cached-option"]);
+    act(() => {
+      void result.current.loadVerifiedCloudService(service);
+      void result.current.retryCapabilityReadiness(slot);
+    });
+
+    revision += 1;
+    rerender();
+    await waitFor(() => expect(mocks.services).toHaveBeenCalledTimes(2));
+    await act(async () => {
+      oldGroups.resolve(groups("obsolete-option"));
+      oldReadiness.resolve(readiness("obsolete-runtime"));
+    });
+    expect.soft(optionIds()).toEqual(["saved", "cached-option"]);
+    expect.soft(result.current.cloudServiceReadyStatus[slot]?.group_name).toBe("cached-runtime");
+    expect.soft(result.current.cloudServiceOptionStates[slot]).toBe("loading");
+    expect.soft(result.current.capabilityReadyStates[slot]).toBe("loading");
+
+    await act(async () => {
+      freshGroups.resolve(groups("current-option"));
+      freshReadiness.resolve(readiness("current-runtime"));
+    });
+    expect(optionIds()).toEqual(["saved", "current-option"]);
+    expect(result.current.cloudServiceReadyStatus[slot]?.group_name).toBe("current-runtime");
+    if (selectionRequest === "completed") {
+      await act(async () => { freshSelections.resolve({ data: { selections: [serviceGroup("newly-saved")] } }); });
+      expect(optionIds()).toEqual(["newly-saved", "current-option"]);
+      expect(result.current.cloudServiceReadyStatus[slot]?.group_name).toBe("current-runtime");
+    }
+  });
+
+  it("applies a refresh revision after a model save starts before its effect", async () => {
+    let revision = 0;
+    let saveModel: () => void;
+    const saving = deferredResponse();
+    mocks.saveModel.mockImplementationOnce(() => saving.promise);
+    const { result, rerender } = renderHook(() => useDefaultModelConfig({
+      cloudServiceSetupStates: { cloudParsing: "empty", searchEngine: "empty" },
+      modelProviderSetupState: "empty",
+      onModelSelectionChanged: mocks.changed,
+    }), { wrapper: function RevisionProvider({ children }: { children: ReactNode }) {
+      useLayoutEffect(() => { if (revision > 0) saveModel(); }, [revision]);
+      return <DefaultModelConfigRefreshContext.Provider value={revision}>{children}</DefaultModelConfigRefreshContext.Provider>;
+    } });
+    await waitFor(() => expect(result.current.hasLoadedModelSelections).toBe(true));
+    saveModel = () => result.current.handleModelSelection("tts", "own:provider:group:tts-model");
+
+    revision += 1;
+    rerender();
+    expect(mocks.selections).toHaveBeenCalledOnce();
+    await act(async () => { saving.resolve({ data: { selections: [] } }); });
+    await waitFor(() => expect(mocks.selections).toHaveBeenCalledTimes(2));
   });
 
   it.each([true, false])("keeps the unavailable saved embedding when the catalog contains the same model (saved provider IDs: %s)", async (hasProviderIds) => {
