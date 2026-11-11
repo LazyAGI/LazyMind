@@ -472,6 +472,46 @@ describe("ChatLayout conversation loading", () => {
   });
 
   it.each([
+    { name: "empty", currentConfig: {} },
+    {
+      name: "stale",
+      currentConfig: {
+        knowledgeBaseId: ["old-kb"],
+        databaseBaseId: "old-db",
+        creators: ["old-creator"],
+        tags: ["old-tag"],
+      },
+    },
+  ])("uses the send-time resource snapshot when the current config is $name", async ({ currentConfig }) => {
+    render(<ChatLayout setIsChatContent={vi.fn()} initchatConfig={currentConfig} setChatConfigFn={vi.fn()} canChat />);
+
+    await act(async () => {
+      await mocks.latestChatContainerProps.onOpenSSE(
+        [{ input_type: "text", text: "Search resources" }],
+        "chat_action_next",
+        {},
+        {
+          chat_config_snapshot: {
+            knowledgeBaseId: ["selected-kb"],
+            databaseBaseId: "selected-db",
+            creators: ["selected-creator"],
+            tags: ["selected-tag"],
+          },
+        },
+      );
+    });
+
+    const payload = JSON.parse(mocks.sseConstructor.mock.calls[0][1].payload);
+    expect(payload.conversation.search_config).toEqual({
+      dataset_list: [{ id: "selected-kb" }],
+      database_ids: ["selected-db"],
+      creators: ["selected-creator"],
+      tags: ["selected-tag"],
+    });
+    expect(payload).not.toHaveProperty("chat_config_snapshot");
+  });
+
+  it.each([
     { session_id: "workflow", kind: "resume", expected_state_version: 4 },
     { session_id: "workflow", kind: "approve", step_id: "review", expected_state_version: 5 },
     { session_id: "workflow", kind: "approve", step_id: "review", expected_state_version: 5, preference_scope: "step" },
