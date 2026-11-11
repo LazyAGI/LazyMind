@@ -72,16 +72,14 @@ async def list_chat_tools(
         ),
     ] = None,
 ):
+    from lazymind.chat.request_scope import request_configuration_scope
     from lazymind.chat.service.component import get_all_tool_groups, normalize_tool_locale
-    from lazymind.model_config import inject_model_config
-    from lazymind.chat.engine.tool_auth import inject_tool_config
 
-    inject_model_config(llm_config)
-    inject_tool_config(tool_config)
-    locale = normalize_tool_locale(accept_language)
-    response.headers['Content-Language'] = locale
-    response.headers['Vary'] = 'Accept-Language'
-    return {'tool_groups': get_all_tool_groups(locale, system_mcp_config=system_mcp_config or [])}
+    with request_configuration_scope(model_config=llm_config, tool_config=tool_config):
+        locale = normalize_tool_locale(accept_language)
+        response.headers['Content-Language'] = locale
+        response.headers['Vary'] = 'Accept-Language'
+        return {'tool_groups': get_all_tool_groups(locale, system_mcp_config=system_mcp_config or [])}
 
 
 async def _external_tool_request(payload, token, *, execute=False):
