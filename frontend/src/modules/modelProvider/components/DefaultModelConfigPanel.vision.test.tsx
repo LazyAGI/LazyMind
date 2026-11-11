@@ -7,6 +7,8 @@ const mocks = vi.hoisted(() => ({
   providers: vi.fn(), selections: vi.fn(), services: vi.fn(), models: vi.fn(), save: vi.fn(),
   translate: (key: string) => key,
 }));
+vi.mock("@/modules/knowledge/components/TextIndexManager", () => ({ default: () => null }));
+
 vi.mock("react-i18next", () => ({ useTranslation: () => ({ t: mocks.translate, i18n: { language: "en-US" } }) }));
 vi.mock("@/components/auth", () => ({ AgentAppsAuth: { getUserInfo: () => ({ role: "system-admin" }) } }));
 vi.mock("@/hooks/useModelFeatures", () => ({ useModelFeatures: () => ({ status: "ready", features: { image_embed_enabled: true } }) }));

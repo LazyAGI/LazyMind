@@ -25,3 +25,17 @@ func init() {
 		}
 	}
 }
+
+func init() {
+	registerAdditionalErrorAlias("query processing details failed", "Failed to read document processing details", http.StatusInternalServerError, 2004970)
+	registerAdditionalErrorAlias("select one to twenty documents", "Select between one and twenty documents", http.StatusBadRequest, 2004971)
+	registerAdditionalErrorAlias("rag component is required for indexing", "Enable the RAG component before indexing", http.StatusConflict, 2004972)
+	registerAdditionalErrorAlias("document not found or duplicate selection", "A selected document is missing or selected more than once", http.StatusBadRequest, 2004973)
+	registerAdditionalErrorAlias("admin role required", "Administrator permission is required", http.StatusForbidden, 2004974)
+	registerAdditionalErrorAlias("explicit chunk clearing confirmation is required", "Explicit confirmation is required to clear text vectors", http.StatusBadRequest, 2004975)
+	registerAdditionalErrorAlias("embedding state unavailable", "Embedding state is unavailable; retry shortly", http.StatusServiceUnavailable, 2004976)
+	registerAdditionalErrorAlias("document changed during parsing; retry manually", "The document changed during parsing; retry manually", http.StatusConflict, 2004977)
+	registerAdditionalErrorAlias("knowledge index changed; retry after model switching finishes", "The index changed; retry after the model switch completes", http.StatusConflict, 2004978)
+	registerAdditionalErrorAlias("embedding_index_busy", "Text vector indexing or cleanup is in progress; retry after it finishes", http.StatusConflict, 2004979)
+	registerAdditionalErrorAlias("embedding_cleanup_failed", "Text vector cleanup failed; retry in Index management", http.StatusConflict, 2004980)
+}

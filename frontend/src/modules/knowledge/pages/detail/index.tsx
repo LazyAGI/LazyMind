@@ -780,7 +780,6 @@ const Detail = () => {
                     {
                       key: "batchReparse",
                       label: t("knowledge.batchReparse"),
-                      disabled: !ragReady || isDocumentParsingUnavailable,
                       onClick: () => {
                         knowledgeListRef.current?.restartCheckedKnowledge();
                       },

@@ -18,6 +18,8 @@ const mocks = vi.hoisted(() => ({
   translate: (key: string) => key,
 }));
 
+vi.mock("@/modules/knowledge/components/TextIndexManager", () => ({ default: () => null }));
+
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({ t: mocks.translate, i18n: { language: "zh-CN" } }),
 }));

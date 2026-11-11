@@ -2132,5 +2132,16 @@
   "2005410": {"en-US": "Reading preparation failed; existing results are preserved", "zh-CN": "阅读准备失败，已有结果仍保留"},
   "2005411": {"en-US": "The PDF structure is not ready", "zh-CN": "PDF 结构尚未就绪"},
   "2005412": {"en-US": "Automatic study requires automatic PDF structure parsing", "zh-CN": "提前研读需要先自动解析 PDF 结构"},
-  "2005413": {"en-US": "New generation is disabled in AI reading preferences; existing results remain available", "zh-CN": "AI 阅读准备已禁止新生成，已有结果仍可查看"}
+  "2005413": {"en-US": "New generation is disabled in AI reading preferences; existing results remain available", "zh-CN": "AI 阅读准备已禁止新生成，已有结果仍可查看"},
+  "2004970": {"en-US": "Failed to read document processing details", "zh-CN": "读取文档处理详情失败"},
+  "2004971": {"en-US": "Select between one and twenty documents", "zh-CN": "请选择 1 至 20 份文档"},
+  "2004972": {"en-US": "Enable the RAG component before indexing", "zh-CN": "建立索引前请启用 RAG 组件"},
+  "2004973": {"en-US": "A selected document is missing or selected more than once", "zh-CN": "所选文档不存在或被重复选择"},
+  "2004974": {"en-US": "Administrator permission is required", "zh-CN": "此操作需要管理员权限"},
+  "2004975": {"en-US": "Explicit confirmation is required to clear text vectors", "zh-CN": "清理文本向量需要明确确认"},
+  "2004976": {"en-US": "Embedding state is unavailable; retry shortly", "zh-CN": "向量模型状态暂不可用，请稍后重试"},
+  "2004977": {"en-US": "The document changed during parsing; retry manually", "zh-CN": "文档在解析期间发生变化，请手动重试"},
+  "2004978": {"en-US": "The index changed; retry after the model switch completes", "zh-CN": "索引已变化，请在模型切换完成后重试"},
+  "2004979": {"en-US": "Text vector indexing or cleanup is in progress; retry after it finishes", "zh-CN": "文本向量正在索引或清理，请完成后重试"},
+  "2004980": {"en-US": "Text vector cleanup failed; retry in Index management", "zh-CN": "文本向量清理失败，请在索引管理中重试"}
 }
