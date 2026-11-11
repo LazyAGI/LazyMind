@@ -204,7 +204,7 @@ async function splitPythonComponents(runtimeRoot) {
     if (process.env.LAZYMIND_DESKTOP_DEFER_PYTHON !== "false") {
       // A fixed published bundle may have been signed by another team (or ad-hoc).
       // Developer ID builds must split the binaries signed above in this build.
-      const deferCluster = process.env.LAZYMIND_DESKTOP_DEFER_CLUSTER === "true";
+      const deferCluster = process.env.LAZYMIND_DESKTOP_DEFER_CLUSTER !== "false";
       const rebuild = macSigningMode === "developer-id"
         || process.env.LAZYMIND_DESKTOP_REBUILD_PYTHON_COMPONENTS === "true"
         || deferCluster;

@@ -601,7 +601,7 @@ function Build-Desktop([ValidateSet('zip', 'installer')][string]$PackageKind = '
         (Join-Path $repoRoot 'desktop\scripts\build-python-components.py'),
         $runtimeRoot, '--output', $components, '--slim-providers'
     )
-    if ($env:LAZYMIND_DESKTOP_DEFER_CLUSTER -eq 'true') { $splitArgs += '--defer-cluster' }
+    if ($env:LAZYMIND_DESKTOP_DEFER_CLUSTER -ne 'false') { $splitArgs += '--defer-cluster' }
     Invoke-Native $algorithmPython $splitArgs
     Copy-Item -LiteralPath (Join-Path $runtimeRoot 'config\milvus-windows-patch.json') -Destination $components
 
