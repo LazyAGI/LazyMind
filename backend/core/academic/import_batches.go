@@ -165,7 +165,7 @@ func observeOperationProcessing(r *http.Request, db *gorm.DB, dataset string, ba
 	out.Metadata = metadata
 	result := make([]operationProcessing, 0, len(metadata))
 	for id, current := range metadata {
-		status := doc.DocumentProcessingStatus(current.ProcessingLevel, current.ProcessingState)
+		status := doc.ObservedDocumentProcessingStatus(current.ObservedProcessingLevel, current.ProcessingLevel, current.ProcessingState)
 		if status == "not_requested" {
 			status = "ready"
 		}

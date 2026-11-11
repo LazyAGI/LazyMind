@@ -8,6 +8,7 @@ import (
 	"lazymind/core/common/readonlyorm"
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 	"time"
 )
@@ -189,7 +190,7 @@ func TestLibraryAndImportViewsObserveCurrentProcessingTask(t *testing.T) {
 				t.Fatal(err)
 			}
 			now := time.Now().UTC()
-			if err := db.Model(&orm.Dataset{}).Where("id='papers'").Updates(map[string]any{"kb_id": "remote-papers", "processing_level": "chunked", "processing_revision": 1}).Error; err != nil {
+			if err := db.Model(&orm.Dataset{}).Where("id='papers'").Updates(map[string]any{"kb_id": "remote-papers", "processing_level": "indexed", "processing_revision": 1}).Error; err != nil {
 				t.Fatal(err)
 			}
 			paper := importDraft(t, "papers", "bibliography", libraryDraft("paper", "Paper", "10.1234/current")).Data.Papers[0]
@@ -199,11 +200,12 @@ func TestLibraryAndImportViewsObserveCurrentProcessingTask(t *testing.T) {
 			if err := os.WriteFile(path, []byte("%PDF fixture"), 0600); err != nil {
 				t.Fatal(err)
 			}
+			document := orm.Document{ID: "pdf", DatasetID: "papers", LazyllmDocID: "remote-pdf", DisplayName: "paper.pdf", Ext: marshal(map[string]string{"stored_path": path})}
 			for _, row := range []any{
-				&orm.Document{ID: "pdf", DatasetID: "papers", LazyllmDocID: "remote-pdf", DisplayName: "paper.pdf", Ext: marshal(map[string]string{"stored_path": path})},
+				&document,
 				&orm.PaperLibraryAttachment{DatasetID: "papers", PaperID: paper.ID, ID: "attachment", DocumentID: "pdf", Name: "paper.pdf", Kind: "pdf", IsPrimary: true},
 				&orm.DocumentProcessingState{DatasetID: "papers", DocumentID: "pdf", ParseStatus: "pending", ChunkStatus: "pending", IndexStatus: "pending", UpdatedAt: now},
-				&orm.Task{ID: "task", DatasetID: "papers", DocID: "pdf", LazyllmTaskID: "remote-task", Ext: marshal(map[string]any{"processing_level": "chunked", "processing_revision": 1}), BaseModel: orm.BaseModel{CreatedAt: now}},
+				&orm.Task{ID: "task", DatasetID: "papers", DocID: "pdf", LazyllmTaskID: "remote-task", Ext: marshal(map[string]any{"processing_level": "parsed", "processing_revision": 1}), BaseModel: orm.BaseModel{CreatedAt: now}},
 				&readonlyorm.LazyLLMDocServiceTaskRow{TaskID: "remote-task", DocID: "remote-pdf", KbID: "remote-papers", Status: "SUCCESS", CreatedAt: now, UpdatedAt: now},
 				&orm.PaperImportBatch{ID: "upload", EntryType: "pdf_upload", TargetDatasetID: "papers", CreatedBy: "owner", Status: "succeeded", SourceContextJSON: marshal(map[string]any{}), SourceDocumentIDsJSON: marshal([]string{}), PolicySnapshotJSON: marshal(map[string]any{}), CreatedAt: now},
 				&orm.PaperImportItem{ID: "upload-item", BatchID: "upload", LibraryPaperID: paper.ID, AcademicWorkID: paper.AcademicWorkID, DocumentID: "pdf", Status: "succeeded", Stage: "done", ResultKind: "imported", ReferenceIDsJSON: marshal([]string{}), PresenceSnapshotJSON: marshal(map[string]any{}), SelectedCandidateJSON: marshal(map[string]any{}), ErrorDetailsJSON: marshal(map[string]any{})},
@@ -212,57 +214,90 @@ func TestLibraryAndImportViewsObserveCurrentProcessingTask(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			check := func(parse string, active int) {
+			readState := func() orm.DocumentProcessingState {
 				t.Helper()
+				var state orm.DocumentProcessingState
+				if err := db.Where("dataset_id='papers' AND document_id='pdf'").Take(&state).Error; err != nil {
+					t.Fatal(err)
+				}
+				return state
+			}
+			assertPersisted := func(read string, before orm.DocumentProcessingState) {
+				t.Helper()
+				if after := readState(); !reflect.DeepEqual(before, after) {
+					t.Fatalf("%s changed persisted processing state: before %+v, after %+v", read, before, after)
+				}
+			}
+			check := func(parse string, active int, operationState, documentState string) {
+				t.Helper()
+				before := readState()
+				wantError := parse == "failed"
 				view := readLibrary(t, "papers")
-				if view.Data.Papers[0].Parse != parse || view.Active != (active > 0) {
-					t.Fatalf("library missed latest task: %+v", view)
+				assertPersisted("library", before)
+				paper := view.Data.Papers[0]
+				if paper.Parse != parse || view.Active != (active > 0) || (paper.ProcessingError != "") != wantError {
+					t.Errorf("library parse=%q active=%t error=%q, want parse=%q active=%t has error=%t", paper.Parse, view.Active, paper.ProcessingError, parse, active > 0, wantError)
+				}
+				status, reason, err := paperProcessingStatus(t.Context(), db, document)
+				assertPersisted("paper processing status", before)
+				if err != nil || status != documentState || (reason != "") != wantError {
+					t.Errorf("paper processing status=%q reason=%q err=%v, want status=%q has reason=%t", status, reason, err, documentState, wantError)
 				}
 				w := libraryRequest(t, "GET", "/imports?view=operations", "papers", "owner", nil)
+				assertPersisted("import operations list", before)
 				var list struct {
 					Notification struct{ Active int } `json:"notification"`
 				}
 				if err := json.Unmarshal(w.Body.Bytes(), &list); err != nil || w.Code != 200 || list.Notification.Active != active {
-					t.Fatalf("notification disagrees with document task: %d %s", w.Code, w.Body.String())
+					t.Errorf("want %d active import operations, got %d %s", active, w.Code, w.Body.String())
 				}
 				w = libraryRequest(t, "GET", "/imports/upload?view=operations", "papers", "owner", nil)
+				assertPersisted("import operation detail", before)
 				var detail struct {
 					Items []ImportOperationItem `json:"items"`
 				}
 				if err := json.Unmarshal(w.Body.Bytes(), &detail); err != nil || w.Code != 200 || len(detail.Items) != 1 {
 					t.Fatal(w.Code, w.Body.String())
 				}
-				state, documentState := "ready", "ready"
-				if active > 0 {
-					state = "processing"
-					documentState = "running"
-				}
-				if parse == "failed" {
-					state, documentState = "processing_failed", "failed"
-				}
-				if detail.Items[0].CurrentState != state || detail.Items[0].CurrentDocument.ProcessingStatus != documentState {
-					t.Fatalf("operation disagrees with latest task: %+v", detail.Items[0])
+				item := detail.Items[0]
+				current := item.CurrentDocument
+				if item.CurrentState != operationState || current == nil || current.ProcessingStatus != documentState || (current.ProcessingError != "") != wantError {
+					t.Errorf("operation state=%q current document=%+v, want state=%q document status=%q has error=%t", item.CurrentState, current, operationState, documentState, wantError)
 				}
 			}
-			check("ready", 0)
+			check("ready", 0, "ready", "ready")
+			before := readState()
+			staleVersion, staleRemoteID := document, document
+			staleVersion.ResourceVersion++
+			staleRemoteID.LazyllmDocID = "old-remote-pdf"
+			for _, stale := range []orm.Document{staleVersion, staleRemoteID} {
+				status, reason, err := paperProcessingStatus(t.Context(), db, stale)
+				assertPersisted("stale paper processing status", before)
+				if err != nil || status != "unknown" || reason != "" {
+					t.Errorf("paper processing accepted stale document version %d or remote ID %q: %q %q %v", stale.ResourceVersion, stale.LazyllmDocID, status, reason, err)
+				}
+			}
 			// A newer attempt wins even when an older successful callback arrives late.
-			if err := db.Create(&orm.Task{ID: "retry", DatasetID: "papers", DocID: "pdf", LazyllmTaskID: "retry-remote", Ext: marshal(map[string]any{"processing_level": "chunked", "processing_revision": 1}), BaseModel: orm.BaseModel{CreatedAt: now.Add(time.Minute)}}).Error; err != nil {
+			if err := db.Create(&orm.Task{ID: "retry", DatasetID: "papers", DocID: "pdf", LazyllmTaskID: "retry-remote", Ext: marshal(map[string]any{"processing_level": "parsed", "processing_revision": 1}), BaseModel: orm.BaseModel{CreatedAt: now.Add(time.Minute)}}).Error; err != nil {
 				t.Fatal(err)
 			}
 			if err := db.Create(&readonlyorm.LazyLLMDocServiceTaskRow{TaskID: "retry-remote", DocID: "remote-pdf", KbID: "remote-papers", Status: "WORKING", CreatedAt: now.Add(time.Minute), UpdatedAt: now.Add(time.Minute)}).Error; err != nil {
 				t.Fatal(err)
 			}
-			check("parsing", 1)
+			check("parsing", 1, "processing", "running")
 			if err := db.Model(&readonlyorm.LazyLLMDocServiceTaskRow{}).Where("task_id='retry-remote'").Update("status", "FAILED").Error; err != nil {
 				t.Fatal(err)
 			}
-			check("failed", 0)
+			check("failed", 0, "processing_failed", "failed")
 			if err := db.Model(&readonlyorm.LazyLLMDocServiceTaskRow{}).Where("task_id='retry-remote'").Update("status", "SUCCESS").Error; err != nil {
 				t.Fatal(err)
 			}
-			check("ready", 0)
+			if err := db.Model(&orm.DocumentProcessingState{}).Where("document_id='pdf'").Updates(map[string]any{"index_status": "failed", "index_error_code": "EMBEDDING_FAILED", "index_error_message": "embedding failed"}).Error; err != nil {
+				t.Fatal(err)
+			}
+			check("ready", 0, "ready", "ready")
 			// Resuming the same task must also supersede a persisted failure.
-			if err := db.Model(&orm.DocumentProcessingState{}).Where("document_id='pdf'").Updates(map[string]any{"parse_status": "failed", "chunk_status": "failed", "updated_at": now.Add(2 * time.Minute)}).Error; err != nil {
+			if err := db.Model(&orm.DocumentProcessingState{}).Where("document_id='pdf'").Updates(map[string]any{"parse_status": "failed", "updated_at": now.Add(2 * time.Minute)}).Error; err != nil {
 				t.Fatal(err)
 			}
 			if err := db.Model(&orm.Task{}).Where("id='retry'").Update("updated_at", now.Add(3*time.Minute)).Error; err != nil {
@@ -271,11 +306,7 @@ func TestLibraryAndImportViewsObserveCurrentProcessingTask(t *testing.T) {
 			if err := db.Model(&readonlyorm.LazyLLMDocServiceTaskRow{}).Where("task_id='retry-remote'").Update("status", "WORKING").Error; err != nil {
 				t.Fatal(err)
 			}
-			check("parsing", 1)
-			var state orm.DocumentProcessingState
-			if err := db.Where("document_id='pdf'").Take(&state).Error; err != nil || state.ParseStatus != "failed" {
-				t.Fatal("read projection changed persisted stage facts", state, err)
-			}
+			check("parsing", 1, "processing", "running")
 		})
 	}
 }

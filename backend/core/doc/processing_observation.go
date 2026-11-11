@@ -246,16 +246,28 @@ func (snapshot processingSnapshot) observedProcessingLevel(task orm.Task, state 
 }
 
 func ObserveDocumentProcessingDetails(ctx context.Context, db, lazyDB *gorm.DB, document orm.Document) (orm.DocumentProcessingState, string, *ProcessingDiagnostic, error) {
+	metadata, raw, err := observeDocumentProcessingDetails(ctx, db, lazyDB, document)
+	return metadata.ProcessingState, raw, metadata.ProcessingError, err
+}
+
+// ObserveDocumentProcessingMetadata reads processing metadata for an already authorized document.
+func ObserveDocumentProcessingMetadata(ctx context.Context, db, lazyDB *gorm.DB, document orm.Document) (DocumentMetadata, error) {
+	metadata, _, err := observeDocumentProcessingDetails(ctx, db, lazyDB, document)
+	return metadata, err
+}
+
+func observeDocumentProcessingDetails(ctx context.Context, db, lazyDB *gorm.DB, document orm.Document) (DocumentMetadata, string, error) {
+	metadata := DocumentMetadata{ID: document.ID, DatasetID: document.DatasetID, ProcessingState: unknownProcessingState(document)}
 	snapshot, err := loadProcessingSnapshot(ctx, db, lazyDB, document.DatasetID, document.ID)
 	if err != nil {
-		return unknownProcessingState(document), "UNKNOWN", nil, err
+		return metadata, "UNKNOWN", err
 	}
 	if len(snapshot.documents) == 0 {
-		return unknownProcessingState(document), "UNKNOWN", nil, gorm.ErrRecordNotFound
+		return metadata, "UNKNOWN", gorm.ErrRecordNotFound
 	}
 	current := snapshot.documents[0]
 	if current.ResourceVersion != document.ResourceVersion || current.LazyllmDocID != document.LazyllmDocID {
-		return unknownProcessingState(document), "UNKNOWN", nil, nil
+		return metadata, "UNKNOWN", nil
 	}
 	state, raw := snapshot.observe(current)
 	task := snapshot.tasks[current.ID]
@@ -265,7 +277,11 @@ func ObserveDocumentProcessingDetails(ctx context.Context, db, lazyDB *gorm.DB, 
 		_ = json.Unmarshal(task.Ext, &ext)
 		detail[1] = ext.ErrorMessage
 	}
-	return state, raw, processingDiagnostic(state, task, raw, detail[0], detail[1]), nil
+	metadata.ProcessingLevel = snapshot.dataset.ProcessingLevel
+	metadata.ObservedProcessingLevel = snapshot.observedProcessingLevel(task, state)
+	metadata.ProcessingState = state
+	metadata.ProcessingError = processingDiagnostic(state, task, raw, detail[0], detail[1])
+	return metadata, raw, nil
 }
 
 func datasetProcessingCoverage(ctx context.Context, db, lazyDB *gorm.DB, dataset orm.Dataset) (ProcessingCoverage, error) {

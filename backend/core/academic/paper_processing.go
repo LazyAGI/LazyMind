@@ -43,19 +43,24 @@ func loadLibraryView(r *http.Request, db *gorm.DB, dataset string, ids []string,
 			continue
 		}
 		current, exists := metadata[id]
-		status := doc.DocumentProcessingStatus(current.ProcessingLevel, current.ProcessingState)
+		status := doc.DocumentBodyProcessingStatus(current.ObservedProcessingLevel, current.ProcessingState)
 		switch {
 		case exists && (status == "ready" || status == "not_requested"):
 			paper.Parse = "ready"
 		case exists && status == "failed":
 			paper.Parse = "failed"
-			if current.ProcessingError != nil {
-				paper.ProcessingError = current.ProcessingError.Message
-			}
+			paper.ProcessingError = paperBodyProcessingError(current.ProcessingError)
 		default:
 			paper.Parse = "parsing"
 			view.Active = true
 		}
 	}
 	return view, nil
+}
+
+func paperBodyProcessingError(diagnostic *doc.ProcessingDiagnostic) string {
+	if diagnostic != nil && (diagnostic.Stage == "parse" || diagnostic.Stage == "processing") {
+		return diagnostic.Message
+	}
+	return ""
 }
