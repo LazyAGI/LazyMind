@@ -2,8 +2,16 @@ import { useEffect, useRef, useState, type CSSProperties, type ReactElement } fr
 import { Popover, Select, type TooltipRef } from 'antd';
 import { useTranslation } from 'react-i18next';
 import type { DocumentProviderTemplate } from '@/api/generated/core-client';
-import samples from './wechatTemplateSamples.json';
+import cleanHtml from '@/modules/chat/assets/wechat-templates/clean.html?raw';
+import editorialContrastHtml from '@/modules/chat/assets/wechat-templates/editorial_contrast.html?raw';
+import warmHumanistHtml from '@/modules/chat/assets/wechat-templates/warm_humanist.html?raw';
 import './WeChatTemplateSelect.scss';
+
+const samples = [
+  { id: 'clean', accent: '#52766f', paper: '#f1f7f5', html: cleanHtml },
+  { id: 'editorial_contrast', accent: '#202b33', paper: '#eef2f3', html: editorialContrastHtml },
+  { id: 'warm_humanist', accent: '#b97545', paper: '#fff9ef', html: warmHumanistHtml },
+];
 
 function TemplatePreview({ html, title, disabled, children }: {
   html: string; title: string; disabled: boolean; children: ReactElement;
