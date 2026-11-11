@@ -48,6 +48,8 @@ const skillDiffApi = SkillDiffApiFactory(coreConfig, BASE_URL, axiosInstance);
 const coreBasePath = `${BASE_URL}/api/core`;
 
 const SKILL_MD_PATH = "SKILL.md";
+// Allow the five-minute backend download plus package verification and installation.
+const SKILL_PACKAGE_PREPARE_TIMEOUT_MS = 6 * 60_000;
 
 const createSkillOrganizeRequestId = () => {
   if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
@@ -1330,7 +1332,7 @@ export async function enableBuiltinSkill(
 ): Promise<SkillAssetRecord | null> {
   const response = await skillsApi.apiCoreBuiltinSkillsBuiltinSkillUidEnablePost(
     { builtinSkillUid },
-    { timeout: 120_000, silentError: options?.silentError } as never,
+    { timeout: SKILL_PACKAGE_PREPARE_TIMEOUT_MS, silentError: options?.silentError } as never,
   );
   const payload = unwrapEnvelope<SkillDetailOpenAPIResponse>(response.data);
   if (!payload?.id && !payload?.skill_id) {
@@ -1615,7 +1617,7 @@ export async function prepareSkillDistributionUpgrade(
 ): Promise<SkillDistributionUpgradePrepareRecord> {
   const response = await skillsApi.apiCoreSkillsSkillIdDistributionUpgradePreparePost(
     { skillId },
-    { timeout: 120_000 },
+    { timeout: SKILL_PACKAGE_PREPARE_TIMEOUT_MS },
   );
   const raw = toRawObject(
     unwrapEnvelope<SkillDistributionUpgradePrepareOpenAPIResponse>(response.data),

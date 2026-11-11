@@ -1,10 +1,11 @@
 import { useTranslation } from 'react-i18next';
 import { useEffect, useId, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 import { Popover } from 'antd';
+import type { WriterPageWidth } from './useWriterPageWidth';
 
 export function WriterDocumentOptions({ sourceMode, onSourceMode, width, onWidth, children }: {
   sourceMode?: boolean; onSourceMode?: () => void;
-  width: string; onWidth: (width: 'default' | 'wide' | 'reading') => void; children?: ReactNode;
+  width: WriterPageWidth; onWidth: (width: WriterPageWidth) => void; children?: ReactNode;
 }) {
   const { t } = useTranslation();
   const name = useId();
@@ -52,7 +53,8 @@ export function WriterDocumentOptions({ sourceMode, onSourceMode, width, onWidth
     content={<div className='writer-document-options__menu' ref={popup} onKeyDown={handleKeyDown}>
       {onSourceMode && <button type='button' onClick={() => { onSourceMode(); close(); }}>{t(sourceMode ? 'chat.writerLocal.backToDocument' : 'chat.writerSource.source')}</button>}
       <fieldset><legend>{t('chat.writerIR.pageWidth')}</legend>
-        {(['default', 'wide', 'reading'] as const).map(value => <label key={value}>
+        {(['default', 'wide', 'reading'] as const).map(value => <label key={value}
+          title={value === 'reading' ? t('chat.writerSource.readingWidthHint') : undefined}>
           <input type='radio' name={name} checked={width === value} onChange={() => onWidth(value)} />
           {t(value === 'reading' ? 'chat.writerSource.readingWidth' : `chat.writerIR.pageWidths.${value}`)}
         </label>)}

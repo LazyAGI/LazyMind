@@ -4,7 +4,7 @@ import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
 import classnames from "classnames";
 import "katex/dist/katex.min.css";
-import { Dropdown, Image, Popover, message } from "antd";
+import { Dropdown, Image, Popover, Tooltip, message } from "antd";
 import type { MenuProps } from "antd";
 import rehypeSanitize from "rehype-sanitize";
 import { useTranslation } from "react-i18next";
@@ -328,7 +328,6 @@ const ImageComponent = (props: any) => {
         onError={() => setImageLoadError(true)}
         onLoad={() => setImageLoadError(false)}
       />
-      {props.alt ? <figcaption>{props.alt}</figcaption> : null}
     </figure>
   );
 };
@@ -440,12 +439,14 @@ function ArtifactFileLink({
   children,
   href,
   filename,
+  source,
   pending,
   target,
 }: {
   children: ReactNode;
   href: string;
   filename: string;
+  source?: string;
   pending?: boolean;
   target?: ArtifactPreviewTarget;
 }) {
@@ -538,6 +539,7 @@ function ArtifactFileLink({
   );
 
   return (
+    <Tooltip title={source || href || undefined} mouseEnterDelay={1.5}>
     <span className="md-file-actions">
     <Dropdown
       trigger={["contextMenu"]}
@@ -552,6 +554,7 @@ function ArtifactFileLink({
       {t('chat.fileDownload')}
     </button>}
     </span>
+    </Tooltip>
   );
 }
 
@@ -706,6 +709,9 @@ const LinkComponent = (props: any) => {
       <ArtifactFileLink
         href={resolvedHref}
         filename={artifactFilename}
+        source={typeof linkedArtifact?.value?.path === 'string'
+          ? linkedArtifact.value.path.trim() || artifactSignSource
+          : artifactSignSource}
         target={linkedArtifact && toArtifactFiles([linkedArtifact])[0]
           ? filePreviewTarget(toArtifactFiles([linkedArtifact])[0])
           : urlPreviewTarget(resolvedHref, artifactFilename || String(props.children || 'file'), conversationId)}
@@ -721,6 +727,7 @@ const LinkComponent = (props: any) => {
       <ArtifactFileLink
         href={resolvedHref}
         filename={basenameFromPath(href)}
+        source={href}
         target={urlPreviewTarget(resolvedHref || href, basenameFromPath(href), conversationId)}
         pending={!resolvedHref}
       >

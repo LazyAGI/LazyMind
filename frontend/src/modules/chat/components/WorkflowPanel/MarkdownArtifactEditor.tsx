@@ -98,6 +98,7 @@ import type { DocumentRenderContext } from '@/api/generated/core-client';
 import { writerLocalCodeEditor, writerLocalSourcePlugin } from './writerLocalSourcePlugin';
 import { WriterCodeDisplayContext, useWriterLocalDisplayHints } from './writerLocalDisplayHints';
 import { WriterDocumentOptions } from './WriterDocumentOptions';
+import { useWriterPageWidth } from './useWriterPageWidth';
 
 /** Idle debounce after the latest edit before a silent draft save. */
 const MARKDOWN_AUTOSAVE_IDLE_MS = 1_000;
@@ -545,7 +546,7 @@ export function MarkdownArtifactEditor({
   const [renderErrorSource, setRenderErrorSource] = useState<string>();
   const [conflict, setConflict] = useState(false);
   const [outlineOpen, setOutlineOpen] = useState(false);
-  const [pageWidth, setPageWidth] = useState<'default' | 'wide' | 'reading'>('default');
+  const [pageWidth, setPageWidth] = useWriterPageWidth();
   const [selection, setSelection] = useState<MarkdownSelection | null>(null);
   const [selectionToolbar, setSelectionToolbar] = useState<FloatingToolbarAnchor | null>(null);
   const [emptyHeadingLevel, setEmptyHeadingLevel] = useState<string | null>(null);

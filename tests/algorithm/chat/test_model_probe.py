@@ -313,13 +313,28 @@ def test_missing_runtime_adapters_never_produce_false_positive_probes(source, ki
     assert requests == []
 
 
-@pytest.mark.parametrize('source', ['OpenAI', 'VLLM', 'LMDeploy'])
-@pytest.mark.parametrize('kind', ['text2image', 'text2video', 'image_editing', 'tts', 'stt'])
+@pytest.mark.parametrize(('source', 'kind'), [
+    (source, kind)
+    for source in ('OpenAI', 'VLLM', 'LMDeploy')
+    for kind in ('text2image', 'text2video', 'image_editing', 'tts', 'stt')
+    if (source, kind) != ('OpenAI', 'text2image')
+])
 def test_compatible_protocol_does_not_imply_missing_runtime_media_support(source, kind):
     result, requests = run_probe(kind, source, response={'id': 'task-id'})
     assert result['status'] == 'unsupported'
     assert result['code'] == 'unsupported_provider'
     assert requests == []
+
+
+def test_openai_image_probe_accepts_base64_image_response():
+    result, requests = run_probe('text2image', model='gpt-image-2.5-flare',
+                                 response={'data': [{'b64_json': 'iVBORw0KGgo='}]})
+    assert result['status'] == 'passed'
+    assert len(requests) == 1
+    assert requests[0].url.path == '/v1/images/generations'
+    assert json.loads(requests[0].content) == {
+        'model': 'gpt-image-2.5-flare', 'prompt': 'A blue square.', 'n': 1,
+    }
 
 
 @pytest.mark.parametrize(('status', 'body', 'code'), [

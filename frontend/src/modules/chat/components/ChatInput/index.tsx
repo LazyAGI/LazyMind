@@ -19,6 +19,7 @@ import {
   CloseOutlined,
   CommentOutlined,
   EditOutlined,
+  LoadingOutlined,
   PaperClipOutlined,
   PlusOutlined,
   SettingOutlined,
@@ -476,6 +477,7 @@ interface ChatInputProps {
   multimodalEmbeddingReady?: boolean | null;
   rerankReady?: boolean | null;
   disabled?: boolean;
+  disabledLoading?: boolean;
   disabledReason?: string;
   disabledDescription?: ReactNode;
   disabledAction?: ReactNode;
@@ -619,6 +621,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
       rerankReady,
       disabled = false,
       disabledReason,
+      disabledLoading = false,
       disabledDescription,
       disabledAction,
       citeMessage,
@@ -1529,8 +1532,8 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
             role="status"
             aria-live="polite"
           >
-            <span className="chat-input-disabled-icon" aria-hidden="true">
-              <SettingOutlined />
+            <span className={`chat-input-disabled-icon${disabledLoading ? " is-loading" : ""}`} aria-hidden="true">
+              {disabledLoading ? <LoadingOutlined spin /> : <SettingOutlined />}
             </span>
             <div className="chat-input-disabled-copy">
               {disabledReason ? (

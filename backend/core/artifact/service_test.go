@@ -755,3 +755,44 @@ func TestDualWriteMainChatSkipsOversizedFile(t *testing.T) {
 		t.Fatalf("oversized shadow write should skip, got %#v", proj)
 	}
 }
+
+func TestPreviewGroupSurvivesFileSnapshotsHistoryAndFork(t *testing.T) {
+	t.Setenv("LAZYMIND_ARTIFACT_V2_ENABLED", "true")
+	svc := New(v2TestDB(t).DB)
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "diagram.svg")
+	if err := os.WriteFile(path, []byte("<svg />"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	value, _ := json.Marshal(map[string]any{"path": path, "filename": "diagram.svg", "preview_group": "work-a"})
+	if err := DualWriteMainChat(ctx, svc, "c1", "h1", "u1", MainChatWrite{}, orm.ConversationArtifact{
+		ID: "diagram", Filename: "diagram.svg", ContentType: "file", Value: value,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	assertGroup := func(raw json.RawMessage) {
+		t.Helper()
+		var value map[string]any
+		if err := json.Unmarshal(raw, &value); err != nil {
+			t.Fatal(err)
+		}
+		if value["preview_group"] != "work-a" || value["url"] == "" || value["path"] != nil {
+			t.Fatalf("invalid file preview projection: %s", raw)
+		}
+	}
+	current := EnrichLegacyDTO(ctx, svc, "u1", "diagram")
+	assertGroup(current.OverlayValue)
+	deliveries, err := svc.ConversationDeliveries(ctx, "u1", "c1")
+	if err != nil || len(deliveries) != 1 {
+		t.Fatalf("deliveries: %#v %v", deliveries, err)
+	}
+	assertGroup(deliveries[0].OverlayValue)
+	if err := BindForkRevision(ctx, svc, "u1", current.RevisionID, "c2", "child-diagram", "h2"); err != nil {
+		t.Fatal(err)
+	}
+	fork, err := svc.ConversationDeliveries(ctx, "u1", "c2")
+	if err != nil || len(fork) != 1 {
+		t.Fatalf("fork deliveries: %#v %v", fork, err)
+	}
+	assertGroup(fork[0].OverlayValue)
+}

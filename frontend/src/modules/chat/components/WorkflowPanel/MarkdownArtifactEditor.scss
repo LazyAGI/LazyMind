@@ -16,6 +16,10 @@
   --writer-markdown-page-max-width: 1080px;
 }
 
+.writer-markdown-editor--width-reading {
+  --writer-markdown-page-max-width: 640px;
+}
+
 .writer-markdown-editor--chat {
   width: 100%;
   max-height: none;
@@ -37,9 +41,7 @@
 }
 
 .writer-markdown-editor--chat .writer-markdown-editor__surface .mdxeditor-root-contenteditable {
-  width: 100%;
   min-height: 0;
-  margin: 0;
   padding: 14px 16px;
   text-align: left;
 }
