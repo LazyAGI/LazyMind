@@ -2583,7 +2583,9 @@ def _inline_preview_images(html: str, deck: Path, html_path: Path) -> tuple[str,
     if 'id="lazymind-local-fonts"' not in html:
         font_css = local_font_css(html)
         if font_css:
-            html = re.sub(r'</head\s*>', lambda _: '<style id="lazymind-local-fonts">' + font_css + '</style></head>', html, count=1, flags=re.I)
+            html = re.sub(r'</head\s*>', lambda _: '<style id="lazymind-local-fonts" '
+                          'data-lazymind-font-required="true">' + font_css + '</style></head>',
+                          html, count=1, flags=re.I)
     deck_root = deck.resolve()
     page_root = html_path.parent.resolve()
     inlined = 0
@@ -4162,8 +4164,13 @@ class _HtmlTree(HTMLParser):
         ]
 
 
+def _normalize_html_newlines(html: str) -> str:
+    """Match universal-newline reads before hashing or writing HTML."""
+    return html.replace('\r\n', '\n').replace('\r', '\n')
+
+
 def _html_sha256(html: str) -> str:
-    return hashlib.sha256(html.encode('utf-8')).hexdigest()
+    return hashlib.sha256(_normalize_html_newlines(html).encode('utf-8')).hexdigest()
 
 
 def _protected_structure_signature(tree: _HtmlTree) -> dict[str, int]:
@@ -5059,6 +5066,9 @@ def _apply_html_ops(html: str, ops: list[dict]) -> tuple[str, list[str], list[st
                 for op in ops if op.get('op') == 'set_style' and op.get('styles', {}).get('font-family')]
     if families:
         html = _package_edited_html_fonts(html, families)
+    if '/*lazymind-font:' in html and 'data:font/' in html:
+        from lazymind.chat.engine.tools.file_resources.font_library import upgrade_legacy_html_fonts
+        html = upgrade_legacy_html_fonts(html)
     return html, applied, notes, removed_texts
 
 
@@ -9188,7 +9198,7 @@ def ppt_replace_deck_fonts(
         'layout_notice': 'Typography changed without moving boxes; inspect the preview for overflow before export.',
         'published_count': published['published_count'],
         'edit_mode': 'sparse_patch', 'regenerated_pages': [],
-        'font_portability': 'embedded_html_and_required_for_pptx' if target else 'unchanged',
+        'font_portability': 'resource_url_html_and_required_for_pptx' if target else 'unchanged',
     })
 
 
@@ -9717,11 +9727,11 @@ def ppt_edit_page_html(
 
 def _artifact_html_text(artifact: Any, artifact_store: str) -> str:
     if isinstance(artifact, str):
-        return artifact
+        return _normalize_html_newlines(artifact)
     if not isinstance(artifact, dict):
         raise ValueError('preview_html artifact is not text')
     if isinstance(artifact.get('text'), str):
-        return artifact['text']
+        return _normalize_html_newlines(artifact['text'])
     raw_path = _coerce_str(artifact.get('path'))
     if not raw_path:
         raise ValueError('preview_html artifact has no text or path')
@@ -9739,7 +9749,7 @@ def _artifact_html_text(artifact: Any, artifact_store: str) -> str:
         if len(decoded) > 64 * 1024 * 1024:
             raise ValueError('preview_html data URI is too large')
         try:
-            return decoded.decode('utf-8')
+            return _normalize_html_newlines(decoded.decode('utf-8'))
         except UnicodeDecodeError as exc:
             raise ValueError('preview_html data URI is not UTF-8') from exc
     path = _runtime_ppt_path(raw_path)
@@ -9749,6 +9759,28 @@ def _artifact_html_text(artifact: Any, artifact_store: str) -> str:
     if not path.is_file():
         raise ValueError('preview_html artifact file no longer exists')
     return path.read_text(encoding='utf-8')
+
+
+def _matches_legacy_local_font_preview(artifact_html: str, public_html: str, source_html: str) -> bool:
+    """Allow only the former generated WOFF block to change representation."""
+    generated = re.compile(
+        r'<style\b(?=[^>]*\bid\s*=\s*(["\'])lazymind-local-fonts\1)[^>]*>[\s\S]*?</style\s*>',
+        re.I,
+    )
+    if generated.search(source_html):
+        return False  # Authored source CSS must still match exactly.
+    old_blocks = list(generated.finditer(artifact_html))
+    new_blocks = list(generated.finditer(public_html))
+    if len(old_blocks) != 1 or len(new_blocks) != 1:
+        return False
+    legacy = (
+        r'<style id="lazymind-local-fonts">'
+        r'(?:@font-face\{font-family:"(?:[^"\\]|\\.)*";font-weight:\d+;font-style:(?:normal|italic);'
+        r'src:url\(data:font/woff;base64,[A-Za-z0-9+/=]+\)\}\s*)+</style>'
+    )
+    if not re.fullmatch(legacy, old_blocks[0].group()):
+        return False
+    return generated.sub('', artifact_html).strip() == generated.sub('', public_html).strip()
 
 
 def _validated_action_source(
@@ -9773,7 +9805,8 @@ def _validated_action_source(
     original = source.read_text(encoding='utf-8')
     current_sha = _html_sha256(original)
     public, _ = _inline_preview_images(_sanitize_page_html(original), deck, source)
-    artifact_matches_source = _strip_ppt_source_meta(artifact_html).strip() == public.strip()
+    artifact_body = _strip_ppt_source_meta(artifact_html)
+    artifact_matches_source = artifact_body.strip() == public.strip()
     # An injected bundle may have been renamed after its source metadata was
     # produced. Exact public/source equality is a stronger freshness proof
     # than the cached hash, so accept that safe case and let the next revision
@@ -9783,6 +9816,11 @@ def _validated_action_source(
         error = ValueError('The slide changed after this preview was loaded. Refresh and retry.')
         error.error_code = 'SELECTION_STALE'
         raise error
+    if not artifact_matches_source and current_sha == meta['sha256']:
+        # Historical previews injected WOFF bytes into a source-independent
+        # block. Migrate that block only while the exact source hash is fresh;
+        # never use stripped equality for the safe-rename exception above.
+        artifact_matches_source = _matches_legacy_local_font_preview(artifact_body, public, original)
     if not artifact_matches_source:
         error = ValueError('The selected artifact does not match its source slide. Refresh and retry.')
         error.error_code = 'SELECTION_STALE'
@@ -10564,6 +10602,7 @@ def ppt_preview_selection_edit(
     edit_selection = {**selection, '_deck_dir': str(deck) if deck is not None else ''}
     ops, old_text, new_text = _selection_edit_ops(instruction, edit_selection, tree)
     edited, applied, notes, removed = _apply_html_ops(original, ops)
+    edited = _normalize_html_newlines(edited)
     _validate_local_html_edit(base_original, edited)
 
     if source is not None and deck is not None:
@@ -10588,7 +10627,7 @@ def ppt_preview_selection_edit(
                       'size': candidate_pptx.stat().st_size, 'mime_type': 'application/vnd.openxmlformats-officedocument.presentationml.presentation'},
             'sha256': hashlib.sha256(candidate_pptx.read_bytes()).hexdigest(),
         }
-    raw_candidate.write_text(edited, encoding='utf-8')
+    raw_candidate.write_text(edited, encoding='utf-8', newline='\n')
     manifest.write_text(json.dumps({
         'native_companion': companion_result,
         'mode': 'source_page' if source is not None else 'artifact_only',
@@ -10695,7 +10734,7 @@ def ppt_apply_selection_edit(
     _validate_local_html_edit(original, revised)
     if mode == 'source_page':
         tmp = source.with_name(source.name + f'.{token}.tmp')
-        tmp.write_text(revised, encoding='utf-8')
+        tmp.write_text(revised, encoding='utf-8', newline='\n')
         os.replace(tmp, source)
     return {
         'native_companion': companion,

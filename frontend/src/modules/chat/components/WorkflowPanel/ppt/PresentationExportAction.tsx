@@ -224,7 +224,7 @@ export function PresentationExportAction({
           throw new Error(t('chat.editablePptRequiredDesc'));
         }
         const exportPages = await Promise.all(pages.map(async page => ({
-          ...page, html: await embedSlideAssetsForExport(page.html),
+          ...page, html: await embedSlideAssetsForExport(page.html, { embedFonts: false }),
         })));
         const response = await axiosInstance.post(
           `${BASE_URL}/api/core/exporters/${encodeURIComponent(action.provider)}:export`,

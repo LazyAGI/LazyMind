@@ -2297,8 +2297,8 @@ def _write_page_html_from_query(
     html = template_html.remove_legacy_narrative_override(html)
     if edit_instruction and html.strip() == current_html.strip():
         return _fail('Revision remained unchanged after repair; not publishing', page_no=page_no)
-    # Package the default face before saving, so preview, PDF and editable PPTX
-    # all use the same glyphs. Full font identity remains available to export.
+    # Reference the default font resource before saving. Preview loads its URL;
+    # PDF and editable PPTX resolve the same verified bytes during export.
     if re.search(r'font-family\s*:[^;}<]*(?:Songti SC|宋体-简)', html, re.I):
         from lazymind.chat.engine.tools.file_resources.portable_fonts import (
             portable_font_faces, package_html_fonts,
