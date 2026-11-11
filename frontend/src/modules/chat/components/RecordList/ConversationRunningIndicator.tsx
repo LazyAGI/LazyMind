@@ -5,8 +5,10 @@ import { useConversationRunningStore } from "@/modules/chat/store/conversationRu
 
 export default function ConversationRunningIndicator({ conversationId }: { conversationId: string }) {
   const { t } = useTranslation();
-  const entry = useConversationRunningStore((state) => state.entries[conversationId]);
-  const status = entry?.status === "idle" ? (entry.terminalRead ? undefined : entry.terminalStatus) : entry?.status;
+  const status = useConversationRunningStore((state) => {
+    const entry = state.entries[conversationId];
+    return entry?.status === "idle" ? (entry.terminalRead ? undefined : entry.terminalStatus) : entry?.status;
+  });
   if (!status) return null;
   const labels = {
     running: "chat.conversationRunning",

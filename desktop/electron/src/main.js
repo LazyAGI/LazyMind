@@ -56,6 +56,7 @@ const { startCloudOAuthCallbackRelay } = require("./cloud-oauth-callback-relay")
 const { clearTemporaryCredentials: clearRuntimeTemporaryCredentials } = require("./temporary-credential-cleanup");
 const { waitForRendererWithRuntimeRecovery } = require("./renderer-recovery");
 const { createDesktopNotifications, isTrustedNotificationSender } = require("./native-notifications.js");
+const { createNotificationRuntimeReader } = require("./notification-runtime.js");
 const { createNotificationSession } = require("./notification-session.js");
 const { createAgentRecovery, runRecoveryCommand } = require("./agent-recovery.js");
 const { registerNotificationSettingsIPC } = require("./notification-settings.js");
@@ -248,6 +249,22 @@ let notificationSessionRevision = 0;
 let sessionWrites = Promise.resolve();
 let notificationRenewalCandidate;
 const notificationSession = createNotificationSession();
+async function readNotificationRuntime() {
+  const status = await readStatus({ timeout: 10000 });
+  return {
+    ready: desktopNotificationRuntimeReady(status, isExternalRuntimeDev),
+    apiOrigin: desktopNotificationAPIOrigin(status, isExternalRuntimeDev),
+    frontendOrigin: notificationFrontendOrigin(),
+    instanceId: desktopNotificationInstanceID(status, isExternalRuntimeDev),
+  };
+}
+
+const readResidentNotificationRuntime = createNotificationRuntimeReader({
+  readRuntime: readNotificationRuntime,
+  getMonitor: () => runtimeStopping || isQuitting ? null : runtimeProcess,
+  getRuntimeRoot: currentRuntimeRoot,
+});
+
 const desktopNotifications = createDesktopNotifications({
   Notification,
   statePath: path.join(app.getPath("userData"), "native-notifications.json"),
@@ -287,14 +304,9 @@ const desktopNotifications = createDesktopNotifications({
     } catch { return false; }
   },
   getRuntime: async () => {
-    const status = await readStatus({ timeout: 10000 });
-    return {
-      ready: !isQuitting && !isInstallerWarmup && app.isReady()
-        && desktopNotificationRuntimeReady(status, isExternalRuntimeDev),
-      apiOrigin: desktopNotificationAPIOrigin(status, isExternalRuntimeDev),
-      frontendOrigin: notificationFrontendOrigin(),
-      instanceId: desktopNotificationInstanceID(status, isExternalRuntimeDev),
-    };
+    if (isQuitting || runtimeStopping || isInstallerWarmup || !app.isReady()) return null;
+    const runtime = await (isExternalRuntimeDev ? readNotificationRuntime() : readResidentNotificationRuntime());
+    return isQuitting || runtimeStopping ? null : runtime;
   },
   openPath: async (url, stillCurrent) => {
     await showActiveWindow();
@@ -2047,7 +2059,8 @@ function browserWindowOptions(show = true) {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: false,
-      backgroundThrottling: false,
+      // Hidden chat renderers must complete startup before Chromium throttles them.
+      backgroundThrottling: show,
     },
   };
 }
@@ -2359,6 +2372,7 @@ async function createDesktopDevWindow() {
     currentStatus = desktopDevRuntimeStatus(externalRuntimeURL);
     updateStartupState({ status: "ready", phase: "Ready", message: "Desktop development mode is ready." });
     window.show();
+    window.webContents.setBackgroundThrottling(true);
     window.focus();
     appendStartupLog("desktop", "Desktop development renderer ready");
     finishStartupMetrics("success");
@@ -2444,6 +2458,7 @@ async function createWindow() {
     nextStartupWindow.removeAllListeners("close");
     nextStartupWindow.hide();
     readyRendererAttempt.window.show();
+    readyRendererAttempt.window.webContents.setBackgroundThrottling(true);
     startupMetricsRecorder.mark("mainWindowVisible");
     readyRendererAttempt.window.focus();
     appendStartupLog("desktop", "frontend window ready");
