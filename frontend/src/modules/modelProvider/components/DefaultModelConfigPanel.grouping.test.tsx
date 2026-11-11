@@ -274,6 +274,57 @@ describe("default capability configuration groups", () => {
     await waitFor(() => expect(mocks.selections).toHaveBeenCalledTimes(2));
   });
 
+  it.each(["failed", "late"] as const)("shows updated selected-service metadata with a %s catalog refresh", async (catalogRefresh) => {
+    const before = { ...selectedParsing, group_id: "before", group_name: "First candidate" };
+    const cached = { ...selectedParsing, group_name: "Previous parser", base_url: "https://previous.example.test" };
+    const after = { ...selectedParsing, group_id: "after", group_name: "Last candidate" };
+    const updated = {
+      ...cached, group_name: "Updated parser", base_url: "https://updated.example.test",
+      provider_name: catalogRefresh === "late" ? "" : "MinerU Updated",
+    };
+    const updatedProvider = updated.provider_name || cached.provider_name;
+    const catalog = deferredResponse();
+    mocks.services.mockResolvedValueOnce({ data: { selections: [cached] } })
+      .mockResolvedValueOnce({ data: { selections: [updated] } });
+    mocks.groups.mockResolvedValueOnce({ data: { groups: [before, cached, after] } });
+    if (catalogRefresh === "failed") mocks.groups.mockRejectedValueOnce(new Error("catalog unavailable"));
+    else mocks.groups.mockImplementationOnce(() => catalog.promise);
+    const panel = (revision: number) => (
+      <DefaultModelConfigRefreshContext.Provider value={revision}>
+        <DefaultModelConfigPanel
+          cloudServiceSetupStates={{ cloudParsing: "ready", searchEngine: "empty" }}
+          modelProviderSetupState="empty"
+          onConfigureCloudService={mocks.configureService}
+          onConfigureProviders={mocks.configureProviders}
+          onModelSelectionChanged={mocks.changed}
+          onRetrySetup={vi.fn()}
+        />
+      </DefaultModelConfigRefreshContext.Provider>
+    );
+    const { rerender } = render(panel(0));
+    expect(await screen.findByText("MinerU · Previous parser")).toBeInTheDocument();
+    const row = group("modelProvider.module.cloudParsingServiceTitle");
+    fireEvent.mouseDown(within(row).getByRole("combobox"));
+    expect(await screen.findByText("Previous parser · https://previous.example.test", { selector: "small" })).toBeInTheDocument();
+    expect(await screen.findByText("First candidate", { selector: "small" })).toBeInTheDocument();
+
+    rerender(panel(1));
+
+    expect(await within(row).findByText(`${updatedProvider} · Updated parser`)).toBeInTheDocument();
+    const dropdownLabels = () => screen.getAllByText(/First candidate|Updated parser|Last candidate/, { selector: "small" })
+      .map((option) => option.textContent);
+    expect(dropdownLabels()).toEqual(["First candidate", "Updated parser · https://updated.example.test", "Last candidate"]);
+    expect(screen.queryByText(/Previous parser/)).not.toBeInTheDocument();
+
+    if (catalogRefresh === "late") {
+      await act(async () => { catalog.resolve({ data: { groups: [before, cached, { ...after, group_name: "Last candidate refreshed" }] } }); });
+      expect(await screen.findByText("Last candidate refreshed", { selector: "small" })).toBeInTheDocument();
+      expect(within(row).getByText(`${updatedProvider} · Updated parser`)).toBeInTheDocument();
+      expect(dropdownLabels()).toEqual(["First candidate", "Updated parser · https://updated.example.test", "Last candidate refreshed"]);
+      expect(screen.queryByText(/Previous parser/)).not.toBeInTheDocument();
+    }
+  });
+
   it.each([true, false])("keeps the unavailable saved embedding when the catalog contains the same model (saved provider IDs: %s)", async (hasProviderIds) => {
     mocks.selections.mockResolvedValue({ data: { selections: [{
       ...selectedEmbedding, availability: "unavailable", unavailable_reason: "index_identity_unverified",

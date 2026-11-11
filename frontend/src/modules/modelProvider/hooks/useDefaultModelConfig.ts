@@ -598,12 +598,20 @@ function mapCloudServiceGroup(
 
 function mergeCloudServiceOptions(
   options: CloudServiceOption[],
-  nextOption: CloudServiceOption,
+  selected: CloudServiceOption,
 ) {
-  if (options.some((option) => option.groupId === nextOption.groupId)) {
-    return options;
-  }
-  return [nextOption, ...options];
+  const index = options.findIndex((option) => option.groupId === selected.groupId);
+  if (index === -1) return [selected, ...options];
+
+  const catalogOption = options[index];
+  const merged = [...options];
+  merged[index] = {
+    groupId: selected.groupId,
+    groupName: selected.groupName || catalogOption.groupName,
+    providerName: selected.providerName || catalogOption.providerName,
+    baseUrl: selected.baseUrl || catalogOption.baseUrl,
+  };
+  return merged;
 }
 
 async function fetchCapabilityReadiness(capability: CapabilityKey) {
