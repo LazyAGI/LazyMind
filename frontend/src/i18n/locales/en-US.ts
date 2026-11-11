@@ -3424,6 +3424,16 @@ const enUS = {
       reason: { approval_capacity: "Too many workspace requests are waiting. Finish an existing request before trying again.", operation_uncertain: "The result is unknown. Check the file before trying again.", execution_inactive: "This execution has ended or is no longer current.", unsupported_file: "This file type cannot be read by this tool.", search_limit: "The search reached its limit. Narrow the folder or search pattern.", mode_forbidden: "Local workspaces are unavailable in this mode", selection_forbidden: "Workspace selection is unavailable", selection_expired: "The workspace selection expired. Select the folder again.", invalid_selection: "The workspace selection is invalid", workspace_not_found: "The workspace was not found", binding_conflict: "The state changed. Try again.", binding_locked: "This Work folder is locked", revoked: "Access was revoked", path_unavailable: "The folder is unavailable", path_invalid: "The folder path is invalid", unknown: "An unknown error occurred" },
     },
     publication: {
+      wechatTemplate: 'WeChat article template',
+      wechatTemplatePreview: 'Preview template style',
+      wechatTemplateDescriptions: {
+        clean: 'Soft greens · A little room to breathe',
+        editorial_contrast: 'Bold contrast · A clear point of view',
+        warm_humanist: 'Warm paper · A personal touch',
+      },
+      wechatTemplates: {
+        clean: 'Clean Reading', editorial_contrast: 'Editorial Contrast', warm_humanist: 'Warm Humanist',
+      },
       chooseVault: 'Select an Obsidian vault',
       configureVault: 'Vault configuration or write permission required',
       notePath: 'File location within the vault',

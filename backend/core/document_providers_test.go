@@ -133,8 +133,11 @@ func requireProviderError(t *testing.T, w *httptest.ResponseRecorder, status int
 }
 
 func TestDocumentProvidersDynamicCatalog(t *testing.T) {
+	wechat := providerItem("wechat", "create", "replace")
+	wechat["templates"] = []any{map[string]any{"id": "clean", "name": "Clean Reading"}}
 	cases := []map[string]any{
 		providerCatalog(providerItem("feishu", "load", "create", "replace"), providerItem("github", "append", "revision_check"), providerItem("notion", "patch"), providerItem("obsidian", "create", "media"), providerItem("wechat", "create")),
+		providerCatalog(wechat),
 		providerCatalog(providerItem("custom.writer-v2", "future_capability", "load"), providerItem("lark")),
 		providerCatalog(),
 	}
@@ -229,12 +232,15 @@ func TestDocumentProvidersProjectsOnlyPublicFields(t *testing.T) {
 	item["credential_required"] = false
 	item["account_connected"] = true
 	item["token"] = "provider-fixture-secret"
+	item["templates"] = []any{map[string]any{"id": "clean", "name": "Clean Reading", "token": "provider-fixture-secret"}}
 	result := providerCatalog(item)
 	result["internal_config"] = map[string]any{"path": "private-provider-path"}
 	spy := newProviderCatalogServer(t, result)
 	w := providerCatalogRequest(t.Context(), f, "descriptor-owner", "", "", nil)
 	data := rewriteData(t, w)
-	if !reflect.DeepEqual(data, providerCatalog(providerItem("custom", "load"))) || spy.count() != 1 {
+	expected := providerItem("custom", "load")
+	expected["templates"] = []any{map[string]any{"id": "clean", "name": "Clean Reading"}}
+	if !reflect.DeepEqual(data, providerCatalog(expected)) || spy.count() != 1 {
 		t.Errorf("public projection=%#v", data)
 	}
 	for _, private := range []string{"provider-fixture-secret", "private-provider-path", "credential_required", "account_connected"} {
@@ -448,8 +454,19 @@ func TestDocumentProvidersOpenAPI(t *testing.T) {
 	props := item["properties"].(map[string]any)
 	id := resolve(props["id"])
 	caps := resolve(props["capabilities"])
-	if len(props) != 2 || id["type"] != "string" || id["enum"] != nil || caps["type"] != "array" || resolve(caps["items"])["type"] != "string" || resolve(caps["items"])["enum"] != nil {
+	if len(props) != 3 || id["type"] != "string" || id["enum"] != nil || caps["type"] != "array" || resolve(caps["items"])["type"] != "string" || resolve(caps["items"])["enum"] != nil {
 		t.Errorf("dynamic provider schema=%#v", item)
+	}
+	templates := resolve(props["templates"])
+	template := resolve(templates["items"])
+	fields := template["properties"].(map[string]any)
+	if templates["type"] != "array" || containsPortable(schemaStringList(item["required"]), "templates") || len(fields) != 2 {
+		t.Errorf("optional template schema=%#v", templates)
+	}
+	for _, field := range []string{"id", "name"} {
+		if resolve(fields[field])["type"] != "string" || !containsPortable(schemaStringList(template["required"]), field) {
+			t.Errorf("template %s must be a required string", field)
+		}
 	}
 	for _, field := range []string{"id", "capabilities"} {
 		if !containsPortable(schemaStringList(item["required"]), field) {

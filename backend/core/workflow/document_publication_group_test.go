@@ -243,3 +243,40 @@ func TestPublicationWorkerNeverRepeatsStartedWrite(t *testing.T) {
 	mustPublicationErrorNil(t, err)
 	requirePublicationStatus(t, f, op.ID, "outcome_unknown")
 }
+
+func TestPublicationGroupRestylesUnchangedWeChatArticle(t *testing.T) {
+	f, input := publicationFixture(t, false)
+	mustPublicationErrorNil(t, f.db.AutoMigrate(&orm.AsyncJob{}))
+	for _, attempt := range []struct {
+		key, template string
+		write         bool
+	}{{"initial", "clean", true}, {"restyle", "warm_humanist", true}, {"unchanged", "warm_humanist", false}} {
+		request := DocumentPublicationGroupRequest{BaseRevision: input.BaseRevision, BaseDraftVersion: input.BaseDraftVersion,
+			IdempotencyKey: attempt.key, Targets: []DocumentPublicationTargetInput{{Provider: "wechat", ConnectionID: "fixture-wechat", Template: attempt.template}}}
+		id, err := CreateDocumentPublicationGroup(t.Context(), f.db.DB, "owner", f.currentRevisionID, request)
+		mustPublicationErrorNil(t, err)
+		var op DocumentPublicationOperation
+		mustPublicationErrorNil(t, f.db.First(&op, "publication_id = ?", id).Error)
+		if op.Template != attempt.template {
+			t.Fatalf("lost template: %q", op.Template)
+		}
+		var jobs int64
+		mustPublicationErrorNil(t, f.db.Model(&orm.AsyncJob{}).Where("resource_id = ?", op.ID).Count(&jobs).Error)
+		if !attempt.write {
+			if op.Status != "succeeded" || jobs != 0 {
+				t.Fatal("same content and template scheduled a provider write")
+			}
+			continue
+		}
+		if op.Status != "preparing" || jobs != 1 {
+			t.Fatal("new template did not schedule a provider write")
+		}
+		mustPublicationErrorNil(t, ClaimDocumentPublicationWrite(t.Context(), f.db.DB, "owner", op.ID))
+		receipt := publicationReceipt()
+		receipt.Provider = "wechat"
+		receipt.TargetDocument = json.RawMessage(`{"adapter":"wechat","doc_id":"fixture-draft"}`)
+		mustPublicationErrorNil(t, ConfirmDocumentPublication(t.Context(), f.db.DB, "owner", op.ID, receipt))
+		_, err = FinalizeDocumentPublication(t.Context(), f.db.DB, "owner", op.ID)
+		mustPublicationErrorNil(t, err)
+	}
+}

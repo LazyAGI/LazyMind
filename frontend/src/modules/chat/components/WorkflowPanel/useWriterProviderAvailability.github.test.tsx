@@ -12,12 +12,12 @@ it('distinguishes a connected GitHub account with chat disabled from missing aut
   await waitFor(() => expect(result.current.states.github).toBe('chat-disabled'));
 });
 
-it('refreshes GitHub eligibility after the user enables chat in settings', async () => {
+it('refreshes GitHub eligibility on explicit refresh after the user enables chat in settings', async () => {
   list.mockResolvedValue({ data: { items: [{ status: 'ACTIVE', can_use_chat: false, provider_options: { chat_enabled: false } }] } });
   const { result } = renderHook(() => useWriterProviderAvailability(['github']));
   await waitFor(() => expect(result.current.states.github).toBe('chat-disabled'));
   list.mockResolvedValue({ data: { items: [{ status: 'ACTIVE', can_use_chat: true, provider_options: { chat_enabled: true } }] } });
-  act(() => window.dispatchEvent(new Event('focus')));
+  await act(async () => result.current.refresh());
   await waitFor(() => expect(result.current.states.github).toBe('ready'));
 });
 

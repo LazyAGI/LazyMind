@@ -165,8 +165,8 @@ def test_document_inspection_distinguishes_supported_representations():
 
 
 def test_document_provider_projection_matches_registered_adapters():
-    providers = {provider['id']: provider['capabilities']
-                 for provider in list_document_providers()}
+    catalog = list_document_providers()
+    providers = {provider['id']: provider['capabilities'] for provider in catalog}
 
     assert set(providers) == {
         'feishu', 'github', 'googledrive', 'notion', 'obsidian', 'wechat',
@@ -174,6 +174,8 @@ def test_document_provider_projection_matches_registered_adapters():
     assert providers['googledrive'] == ['load']
     assert 'append' in providers['github']
     assert 'append' not in providers['wechat']
+    templates = next(provider['templates'] for provider in catalog if provider['id'] == 'wechat')
+    assert [item['id'] for item in templates] == ['clean', 'editorial_contrast', 'warm_humanist']
 
 
 def test_chat_tool_calls_work_without_a_workflow_context():

@@ -26,6 +26,7 @@ from lazyllm.tools.writer.provider import (
 )
 from lazyllm.tools.writer.tools import WriterResourceTools, WriterRevisionTools
 from lazyllm.tools.writer.tools.revision_tools import apply_patch_to_ir
+from lazyllm.tools.writer.templates.wechat import list_wechat_templates
 from .obsidian import LazyMindObsidianProvider
 from .artifacts import (
     WRITER_BLOCK_SCHEMA,
@@ -50,7 +51,11 @@ def get_writer_provider(provider: str):
 
 
 def list_document_providers() -> list[dict[str, Any]]:
-    return list_writer_providers()
+    providers = list_writer_providers()
+    for provider in providers:
+        if provider['id'] == 'wechat':
+            provider['templates'] = list_wechat_templates()
+    return providers
 
 
 def _provider_name_from_document(document: WriterDocument) -> str:
