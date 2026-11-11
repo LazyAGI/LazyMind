@@ -638,6 +638,7 @@ export function useDefaultModelConfig({
   const { t, i18n } = useTranslation();
   const refreshRevision = useContext(DefaultModelConfigRefreshContext);
   const appliedRefreshRevision = useRef(refreshRevision);
+  const [refreshRetryRevision, setRefreshRetryRevision] = useState(0);
   const currentLanguage = i18n.resolvedLanguage || i18n.language || "zh-CN";
   const [providerOptions, setProviderOptions] = useState<ProviderOption[]>([]);
   const [selectedModelRows, setSelectedModelRows] = useState<SelectedModelRows>();
@@ -837,20 +838,23 @@ export function useDefaultModelConfig({
       const isCurrent = () => revision === loadRevision.current && selectionRevision === selectionRevisions.current[part];
       try {
         const response = await request();
-        if (!isCurrent()) return;
+        if (!isCurrent()) return false;
         apply(response);
         setLoadStates((current) => ({ ...current, [part]: "ready" }));
+        return true;
       } catch {
-        if (isCurrent()) setLoadStates((current) => ({ ...current, [part]: "error" }));
+        if (!isCurrent()) return false;
+        setLoadStates((current) => ({ ...current, [part]: "error" }));
+        return true;
       }
     };
 
-    void loadPart("providers", () => modelProvidersApi.apiCoreModelProvidersGet(), (response) => {
+    const providersLoad = loadPart("providers", () => modelProvidersApi.apiCoreModelProvidersGet(), (response) => {
       const data = unwrapModelProviderData<{ providers?: ApiProvider[] }>(response.data);
       setProviderOptions((data.providers || []).map((provider) => mapApiProvider(provider, localizedFallbacks)));
     });
 
-    void loadPart("models", () => modelProvidersApi.apiCoreModelProvidersSelectedModelsGet(), (response) => {
+    const modelsLoad = loadPart("models", () => modelProvidersApi.apiCoreModelProvidersSelectedModelsGet(), (response) => {
       const data = unwrapModelProviderData<{ selections?: SelectedModelApiItem[] }>(response.data);
       const rows: SelectedModelRows = {};
       const shares: typeof shareStatus = {};
@@ -873,7 +877,7 @@ export function useDefaultModelConfig({
       if (!retainCatalog) refreshReadiness(modelCapabilities);
     });
 
-    void loadPart("services", () => modelProvidersApi.apiCoreModelProvidersSelectedProvidersGet(), (response) => {
+    const servicesLoad = loadPart("services", () => modelProvidersApi.apiCoreModelProvidersSelectedProvidersGet(), (response) => {
       const data = unwrapModelProviderData<{ selections?: SelectedCloudServiceApiItem[] }>(response.data);
       const selections: SelectedCloudServices = {};
       const shares: typeof cloudServiceShareStatus = {};
@@ -896,7 +900,8 @@ export function useDefaultModelConfig({
         refreshReadiness(serviceCapabilities);
       }
     });
-    return true;
+    return Promise.all([providersLoad, modelsLoad, servicesLoad])
+      .then((accepted) => accepted.every(Boolean));
   }, [isAdmin, loadCapabilityReadiness, localizedFallbacks, visibleModuleConfigs]);
 
   useEffect(() => {
@@ -911,8 +916,22 @@ export function useDefaultModelConfig({
 
   useEffect(() => {
     if (refreshRevision === appliedRefreshRevision.current || savingCapabilities.size) return;
-    if (loadDefaultModelState(true)) appliedRefreshRevision.current = refreshRevision;
-  }, [loadDefaultModelState, refreshRevision, savingCapabilities]);
+    const targetRevision = refreshRevision;
+    const refresh = loadDefaultModelState(true);
+    if (!refresh) return;
+    let active = true;
+    void refresh.then((accepted) => {
+      if (!active) return;
+      if (accepted) {
+        appliedRefreshRevision.current = targetRevision;
+      } else if (!savingCapabilitiesRef.current.size) {
+        // Another load invalidated this request without changing the external
+        // revision. Queue one current replacement instead of consuming it.
+        setRefreshRetryRevision((current) => current + 1);
+      }
+    });
+    return () => { active = false; };
+  }, [loadDefaultModelState, refreshRevision, refreshRetryRevision, savingCapabilities]);
 
   useEffect(() => () => { embeddingSwitchRevision.current += 1; }, []);
 

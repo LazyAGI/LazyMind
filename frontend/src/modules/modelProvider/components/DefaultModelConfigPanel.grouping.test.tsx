@@ -152,8 +152,9 @@ const expectLocalizedWarning = async (content: string) => {
 
 function deferredResponse() {
   let resolve!: (value: unknown) => void;
-  const promise = new Promise((complete) => { resolve = complete; });
-  return { promise, resolve };
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise((complete, fail) => { resolve = complete; reject = fail; });
+  return { promise, resolve, reject };
 }
 
 describe("default capability configuration groups", () => {
@@ -253,7 +254,7 @@ describe("default capability configuration groups", () => {
 
   it("applies a refresh revision after a model save starts before its effect", async () => {
     let revision = 0;
-    let saveModel: () => void;
+    const saveModel = vi.fn();
     const saving = deferredResponse();
     mocks.saveModel.mockImplementationOnce(() => saving.promise);
     const { result, rerender } = renderHook(() => useDefaultModelConfig({
@@ -265,13 +266,141 @@ describe("default capability configuration groups", () => {
       return <DefaultModelConfigRefreshContext.Provider value={revision}>{children}</DefaultModelConfigRefreshContext.Provider>;
     } });
     await waitFor(() => expect(result.current.hasLoadedModelSelections).toBe(true));
-    saveModel = () => result.current.handleModelSelection("tts", "own:provider:group:tts-model");
+    saveModel.mockImplementation(() => result.current.handleModelSelection("tts", "own:provider:group:tts-model"));
 
     revision += 1;
     rerender();
     expect(mocks.selections).toHaveBeenCalledOnce();
     await act(async () => { saving.resolve({ data: { selections: [] } }); });
     await waitFor(() => expect(mocks.selections).toHaveBeenCalledTimes(2));
+  });
+
+  it.each([
+    ["clear", "success", "save-first"],
+    ["save", "success", "refresh-first"],
+    ["save", "failure", "save-first"],
+    ["clear", "failure", "refresh-first"],
+  ] as const)("retries an invalidated service refresh after a %s %s completes %s", async (action, outcome, completion) => {
+    const initialSearch = {
+      category: "search", group_id: "search", group_name: "Search",
+      provider_name: "Search Provider", share: false,
+    };
+    const savedSearch = {
+      ...initialSearch, group_id: "saved-search", group_name: "Saved search",
+    };
+    const updatedParser = { ...selectedParsing, group_name: "Updated parser" };
+    const expectedSearch = outcome === "success"
+      ? action === "clear" ? undefined : savedSearch
+      : initialSearch;
+    const staleRefresh = deferredResponse();
+    const save = deferredResponse();
+    mocks.services
+      .mockResolvedValueOnce({ data: { selections: [selectedParsing, initialSearch] } })
+      .mockImplementationOnce(() => staleRefresh.promise)
+      .mockResolvedValueOnce({ data: { selections: [updatedParser, ...(expectedSearch ? [expectedSearch] : [])] } });
+    mocks.saveService.mockImplementationOnce(() => save.promise);
+    let revision = 0;
+    const { result, rerender } = renderHook(() => useDefaultModelConfig({
+      cloudServiceSetupStates: { cloudParsing: "ready", searchEngine: "ready" },
+      modelProviderSetupState: "empty",
+      onModelSelectionChanged: mocks.changed,
+    }), { wrapper: ({ children }) => (
+      <DefaultModelConfigRefreshContext.Provider value={revision}>{children}</DefaultModelConfigRefreshContext.Provider>
+    ) });
+    const selectedName = (slot: "cloudParsing" | "searchEngine") =>
+      result.current.cloudServiceOptions[slot]?.find((option) =>
+        option.groupId === result.current.selectedCloudServices[slot])?.groupName;
+    await waitFor(() => expect(selectedName("cloudParsing")).toBe("Parser"));
+    expect(selectedName("searchEngine")).toBe("Search");
+
+    revision += 1;
+    rerender();
+    await waitFor(() => expect(mocks.services).toHaveBeenCalledTimes(2));
+    act(() => {
+      result.current.handleCloudServiceSelection("searchEngine", action === "clear" ? undefined : savedSearch.group_id);
+    });
+    expect(mocks.saveService).toHaveBeenCalledOnce();
+
+    const settleSave = async () => {
+      if (outcome === "success") {
+        save.resolve({ data: { selections: action === "clear" ? [] : [savedSearch] } });
+      } else {
+        save.reject(new Error("save failed"));
+      }
+    };
+    if (completion === "refresh-first") {
+      await act(async () => { staleRefresh.resolve({ data: { selections: [updatedParser, initialSearch] } }); });
+      await act(settleSave);
+    } else {
+      await act(settleSave);
+      await act(async () => { staleRefresh.resolve({ data: { selections: [updatedParser, initialSearch] } }); });
+    }
+
+    await waitFor(() => expect(mocks.services).toHaveBeenCalledTimes(3));
+    await waitFor(() => expect(selectedName("cloudParsing")).toBe("Updated parser"));
+    expect(result.current.selectedCloudServices.searchEngine).toBe(expectedSearch?.group_id);
+    expect(selectedName("searchEngine")).toBe(expectedSearch?.group_name);
+    expect(mocks.saveService).toHaveBeenCalledOnce();
+    await act(async () => {});
+    expect(mocks.services).toHaveBeenCalledTimes(3);
+  });
+
+  it("applies only the newest consecutive external service refresh", async () => {
+    const staleRefresh = deferredResponse();
+    const newestParser = { ...selectedParsing, group_name: "Newest parser" };
+    mocks.services
+      .mockResolvedValueOnce({ data: { selections: [selectedParsing] } })
+      .mockImplementationOnce(() => staleRefresh.promise)
+      .mockResolvedValueOnce({ data: { selections: [newestParser] } });
+    let revision = 0;
+    const { result, rerender } = renderHook(() => useDefaultModelConfig({
+      cloudServiceSetupStates: { cloudParsing: "ready", searchEngine: "empty" },
+      modelProviderSetupState: "empty",
+      onModelSelectionChanged: mocks.changed,
+    }), { wrapper: ({ children }) => (
+      <DefaultModelConfigRefreshContext.Provider value={revision}>{children}</DefaultModelConfigRefreshContext.Provider>
+    ) });
+    const parserName = () => result.current.cloudServiceOptions.cloudParsing?.[0]?.groupName;
+    await waitFor(() => expect(parserName()).toBe("Parser"));
+
+    revision = 1;
+    rerender();
+    await waitFor(() => expect(mocks.services).toHaveBeenCalledTimes(2));
+    revision = 2;
+    rerender();
+    await waitFor(() => expect(parserName()).toBe("Newest parser"));
+    await act(async () => { staleRefresh.resolve({ data: { selections: [{ ...selectedParsing, group_name: "Stale parser" }] } }); });
+
+    expect(parserName()).toBe("Newest parser");
+    expect(mocks.services).toHaveBeenCalledTimes(3);
+    rerender();
+    await act(async () => {});
+    expect(mocks.services).toHaveBeenCalledTimes(3);
+  });
+
+  it("does not retry a pending external refresh after unmount", async () => {
+    const pendingRefresh = deferredResponse();
+    mocks.services
+      .mockResolvedValueOnce({ data: { selections: [selectedParsing] } })
+      .mockImplementationOnce(() => pendingRefresh.promise);
+    let revision = 0;
+    const { rerender, unmount } = renderHook(() => useDefaultModelConfig({
+      cloudServiceSetupStates: { cloudParsing: "ready", searchEngine: "empty" },
+      modelProviderSetupState: "empty",
+      onModelSelectionChanged: mocks.changed,
+    }), { wrapper: ({ children }) => (
+      <DefaultModelConfigRefreshContext.Provider value={revision}>{children}</DefaultModelConfigRefreshContext.Provider>
+    ) });
+    await waitFor(() => expect(mocks.services).toHaveBeenCalledOnce());
+    revision = 1;
+    rerender();
+    await waitFor(() => expect(mocks.services).toHaveBeenCalledTimes(2));
+
+    unmount();
+    await act(async () => { pendingRefresh.resolve({ data: { selections: [{ ...selectedParsing, group_name: "Late parser" }] } }); });
+
+    expect(mocks.services).toHaveBeenCalledTimes(2);
+    expect(mocks.saveService).not.toHaveBeenCalled();
   });
 
   it.each(["failed", "late"] as const)("shows updated selected-service metadata with a %s catalog refresh", async (catalogRefresh) => {
