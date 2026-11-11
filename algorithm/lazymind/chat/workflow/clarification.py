@@ -114,8 +114,33 @@ def _extract(field: dict, request: str) -> Any:
     return _UNRESOLVED if candidates or excluded else None
 
 
+def _grounded_counts(field: dict, request: str, candidates: Any) -> Any:
+    """Validate model-extracted totals; semantic scope is owned by the model.
+
+    Exact quotes establish provenance, not semantic correctness. Never scan the
+    request again for numbers: ordinals and section lengths are not deck totals.
+    """
+    if not isinstance(candidates, list) or not candidates:
+        return []
+    matches = []
+    for candidate in candidates:
+        if not isinstance(candidate, dict):
+            return _UNRESOLVED
+        value, evidence = candidate.get('value'), candidate.get('evidence')
+        if not isinstance(value, str) or not isinstance(evidence, str) or not evidence.strip():
+            return _UNRESOLVED
+        if evidence not in request:
+            return _UNRESOLVED
+        value = value.strip()
+        if not re.fullmatch(r'[1-9][0-9]*', value) and value not in (field.get('value_aliases') or {}).values():
+            return _UNRESOLVED
+        matches.append((request.index(evidence), value))
+    # Keep validated alternatives in original-request order for the question card.
+    return list(dict.fromkeys(value for _, value in sorted(matches, key=lambda item: item[0])))
+
+
 def resolve_fields(runtime: Any, request: str, supplied: dict | None = None,
-                   previous: dict | None = None) -> tuple[dict, list[dict]]:
+                   previous: dict | None = None, extractions: dict | None = None) -> tuple[dict, list[dict]]:
     values: dict[str, Any] = {}
     missing = []
     previous = previous or {}
@@ -133,6 +158,27 @@ def resolve_fields(runtime: Any, request: str, supplied: dict | None = None,
             if 'not_equals' in condition and parent == condition['not_equals']:
                 continue
         value = previous.get(field['id'])
+        if field.get('resolution') == 'grounded_count':
+            if not _present(value):
+                counts = _grounded_counts(field, request, (extractions or {}).get(field['id']))
+                if counts is _UNRESOLVED:
+                    value = _UNRESOLVED
+                elif len(counts) == 1:
+                    value = counts[0]
+                else:
+                    value = _UNRESOLVED if counts else None
+                    if counts and field.get('choice_policy') != 'fixed':
+                        labels = {value: label for label, value in (field.get('value_aliases') or {}).items()}
+                        field = {**field, 'choices': [labels.get(count, count) for count in counts]}
+                scalar = (supplied or {}).get(field['id'])
+                if _present(scalar) and scalar != value:
+                    value = _UNRESOLVED
+            if value is _UNRESOLVED or not _present(value):
+                if field.get('required') or value is _UNRESOLVED:
+                    missing.append(field)
+            else:
+                values[field['id']] = _canonical(field, value)
+            continue
         extracted = _extract(field, request)
         if not _present(value) and extracted is _UNRESOLVED:
             # An explicit conflict cannot be replaced with a model guess or

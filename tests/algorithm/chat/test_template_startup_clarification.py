@@ -66,10 +66,16 @@ def test_template_mode_requires_resolved_template_binding(
         bindings['template_pptx'] = binding
     if expected.startswith(('ATTACHMENT_', 'WORKFLOW_')):
         with pytest.raises(WorkflowClientError) as exc:
-            registered['trigger_ppt_workflow'](input_bindings=bindings)
+            registered['trigger_ppt_workflow'](
+                input_bindings=bindings,
+                clarification_extractions={'slide_count': [{'value': '8', 'evidence': '8页'}]},
+            )
         assert exc.value.code == expected
     else:
-        result = registered['trigger_ppt_workflow'](input_bindings=bindings)
+        result = registered['trigger_ppt_workflow'](
+            input_bindings=bindings,
+            clarification_extractions={'slide_count': [{'value': '8', 'evidence': '8页'}]},
+        )
         assert result['status'] == expected
         if expected == 'needs_input':
             assert result['missing_clarification_fields'] == ['generate_background_images']
@@ -135,13 +141,14 @@ def test_academic_prompt_defaults_preserve_explicit_visual_requirements():
     package = Path(__file__).resolve().parents[3] / 'workflows/ppt-workflow/workflow.yaml'
     policy = yaml.safe_load(package.read_text(encoding='utf-8'))['runtime']
     request = '请根据附件生成科研汇报 PPT，主题：方法比较，8页。科研风格，不生成 AI 底图。'
-    values, missing = resolve_fields(policy, request, {'topic': '方法比较', 'slide_count': '8', 'visual_style': '科研风格'})
+    values, missing = resolve_fields(policy, request, {'topic': '方法比较', 'visual_style': '科研风格'},
+                                     extractions={'slide_count': [{'value': '8', 'evidence': '8页'}]})
     assert values['visual_style'] == '科研风格'
     assert values['generate_background_images'] == 'disabled'
     assert not missing
     explicit = '请根据附件生成科研汇报 PPT，主题：方法比较，8页。使用深色风格，启用AI底图'
-    values, missing = resolve_fields(policy, explicit, {'topic': '方法比较', 'slide_count': '8',
-                                                      'visual_style': '深色风格'})
+    values, missing = resolve_fields(policy, explicit, {'topic': '方法比较', 'visual_style': '深色风格'},
+                                     extractions={'slide_count': [{'value': '8', 'evidence': '8页'}]})
     assert values['visual_style'] == '深色风格'
     assert values['generate_background_images'] == 'enabled'
     assert not missing

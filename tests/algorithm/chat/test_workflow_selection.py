@@ -166,7 +166,7 @@ def test_mentioned_workflow_is_injected_as_authoritative_selection():
     assert 'LAST step' in _tool(contribution, 'advance_step_and_hand_off').__doc__
     assert list(inspect.signature(
         _tool(contribution, 'trigger_image_workflow'),
-    ).parameters) == ['request_context']
+    ).parameters) == ['request_context', 'clarification_extractions']
     assert 'prepare_workflow' not in _tool_names(contribution)
     assert 'list_workflow_attachments' not in _tool_names(contribution)
     assert 'bind_workflow_input' not in _tool_names(contribution)
@@ -1529,6 +1529,7 @@ def test_trigger_routes_ppt_clarification_answers_to_analysis_context(selected):
         assert error.value.code == 'WORKFLOW_INPUT_NOT_EXPOSED'
         result = _tool(contribution, 'trigger_ppt_workflow')(
             input_bindings={'topic': '中国新年', 'target_customer': '小孩子', 'visual_style': '喜庆'},
+            clarification_extractions={'slide_count': [{'value': '13', 'evidence': '制作13页中国新年PPT'}]},
         )
         assert result['session_id'] == 'session-1'
         importer.assert_called_once_with('topic', '中国新年')
@@ -1710,7 +1711,7 @@ def test_minimax_wire_schema_and_correction_preserve_input(workflow_input_runtim
             'Write the paper', tools=manager.tools_description,
         )
     schema = captured['tools'][0]['function']['parameters']
-    assert set(schema['properties']) == {'input_bindings', 'request_context'}
+    assert set(schema['properties']) == {'input_bindings', 'request_context', 'clarification_extractions'}
     assert schema['additionalProperties'] is False
     bindings = {'paper_input': json.dumps({'topic': 'Synthetic', 'request': 'Write', 'charts': []})}
     _, failure = manager._validate_tool(trigger.__name__, {'inputBindings': bindings})

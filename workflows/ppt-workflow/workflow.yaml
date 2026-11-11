@@ -283,18 +283,28 @@ runtime:
       label: 主题
       required: true
       reason: 主题决定内容范围，未明确主题时无法组织幻灯片。
-      patterns: ['(?:主题|题目)[是为：:\s]+([^\n，。；]+)', '(?:关于|围绕)([^\n，。；]+?)(?:的?PPT|的?演示|的?汇报)']
-      ask_when: Only when the presentation purpose/topic is not already clear from the request. A probation defense is a supplied topic.
+      ask_when: >
+        Extract only the presentation topic semantically from the current request into input_bindings.topic.
+        Preserve the topic's wording, including meaningful numbers in the title, in any language.
+        Exclude surrounding instructions, page-count discussion, uncertainty, audience and style preferences.
+        Ask only when the presentation purpose/topic is not already clear. A probation defense is a supplied topic.
       question: 这份 PPT 的主题是什么？
       type: text
     - id: slide_count
       label: 页数
       required: true
-      resolution: explicit
+      resolution: grounded_count
       reason: 页数会影响内容颗粒度和生成时间。
-      patterns: ['([0-9一二三四五六七八九十百两]+)\s*页']
       value_aliases: {沿用模板全部页面: preserve_all, 填满模板全部页面: preserve_all, 保留模板页数: preserve_all}
       ask_when: >
+        Extract the requested TOTAL slide count semantically in any language.
+        Normalize digits or number words (3, 三, three) to a positive integer string.
+        Page 3 / Slide 3 / 第三页 are page ordinals, not total counts; a section's
+        length is not the deck total. Do not infer the total from enumerated pages.
+        Quote the exact original phrase establishing each active total in
+        clarification_extractions.slide_count. Include all conflicting totals;
+        do not select one arbitrarily. Exclude a total explicitly superseded by a correction.
+        For an explicit request to keep all template pages, use preserve_all with its exact quote.
         For paper presentations with N known papers and no requested count, default
         to 3*N content pages plus explicitly requested shared pages; do not ask this
         field. Otherwise only when the desired page count is unknown, the user has not delegated

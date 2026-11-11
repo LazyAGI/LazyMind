@@ -711,6 +711,10 @@ def _tool_result_preview(tool_name: str, result: Any, value: str = '', language:
             'with_total' if isinstance(business_value.get('total_count'), int) else 'success')
         template = profile[variant]['zh' if language == 'zh' else 'en']
         return _render_preview_template(tool_name, value, {render_name: template}, template, result)
+    if re.fullmatch(r'trigger_(.+)_workflow', tool_name) and isinstance(business_value, dict):
+        profile = TOOL_RENDER_PROFILES['regex:trigger_(.+)_workflow']
+        templates = profile['outcomes'].get(business_value.get('outcome'), profile['success'])
+        return _ensure_trailing_newline(templates['zh' if language == 'zh' else 'en'])
     if _tool_name_is(tool_name, 'load_tools') and isinstance(business_value, dict):
         return _load_tools_preview(business_value, 'success', language)
     if _tool_name_is(tool_name, 'search_tools') and business_value == []:

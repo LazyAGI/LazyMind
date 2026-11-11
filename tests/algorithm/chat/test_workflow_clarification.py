@@ -100,14 +100,105 @@ def test_suggestion_limit_does_not_truncate_fixed_choices():
     assert card['questions'][0]['allow_other'] is False
 
 
+def count_extraction(value, evidence):
+    return {'slide_count': [{'value': value, 'evidence': evidence}]}
+
+
+@pytest.mark.parametrize('brief,expected,evidence', [
+    ('制作份3页PPT，第1页是封面，第2页讲三种回血方式，第3页是行动清单', '3', '制作份3页PPT'),
+    ('制作三页PPT，第一页是封面，第二页讲三种回血方式，第三页是行动清单', '3', '制作三页PPT'),
+    ('制作12页PPT，第 1 页是封面，第 12 页是总结', '12', '制作12页PPT'),
+    ('第3页是行动清单；总共3页', '3', '总共3页'),
+    ('Create a 3-page PPT. Page 1 is the cover, page 2 is content, page 3 is the summary.', '3', 'a 3-page PPT'),
+    ('Create a presentation with 3 slides. Slide 1 is the cover.', '3', 'a presentation with 3 slides'),
+    ('Create a three-slide presentation. Use one slide for the cover.', '3', 'a three-slide presentation'),
+    ('Create a PPT with 3 pages.', '3', 'a PPT with 3 pages'),
+    ('Fais une présentation de trois diapositives.', '3', 'une présentation de trois diapositives'),
+    ('Keep all template pages.', 'preserve_all', 'Keep all template pages'),
+])
+def test_ppt_accepts_grounded_semantic_totals_without_rescanning_ordinals(brief, expected, evidence):
+    values, missing = resolve_fields(policy('ppt-workflow'), brief, extractions=count_extraction(expected, evidence))
+    assert values['slide_count'] == expected
+    assert 'slide_count' not in [field['id'] for field in missing]
+
+
+@pytest.mark.parametrize('brief', [
+    '第1页是封面，第2页介绍背景，第3页讲方案',
+    '第 3 页讲方案',
+    '第 13 页讲方案',
+    '第十三页讲方案',
+    '做3页或5页PPT，第1页是封面',
+    'Page 1 is the cover, slide 2 is content.',
+    'Use 3 slides for the introduction; decide the deck length yourself.',
+])
+def test_ppt_missing_or_conflicting_total_still_requires_confirmation(brief):
+    values, missing = resolve_fields(policy('ppt-workflow'), brief, {'slide_count': '3'})
+    assert 'slide_count' not in values
+    assert 'slide_count' in [field['id'] for field in missing]
+
+
+@pytest.mark.parametrize('candidates', [
+    [{'value': '0', 'evidence': '3页'}],
+    [{'value': '-3', 'evidence': '3页'}],
+    [{'value': '3.5', 'evidence': '3页'}],
+    [{'value': 'three', 'evidence': '3页'}],
+    [{'value': True, 'evidence': '3页'}],
+    [{'value': '3', 'evidence': '不存在的原文'}],
+    [{'value': '3', 'evidence': ''}],
+    [{'value': '3'}],
+    [{'value': '3', 'evidence': '3页'}, {'value': '5', 'evidence': '5页'}],
+    [{'value': '3', 'evidence': '3页'}, {'value': '5', 'evidence': '伪造'}],
+])
+def test_grounded_totals_reject_invalid_evidence_values_and_conflicts(candidates):
+    values, missing = resolve_fields(policy('ppt-workflow'), '制作3页或5页PPT',
+                                     extractions={'slide_count': candidates})
+    assert 'slide_count' not in values
+    assert 'slide_count' in [field['id'] for field in missing]
+
+
+def test_equivalent_totals_and_confirmed_answers_remain_resolved():
+    runtime = policy('ppt-workflow')
+    candidates = {'slide_count': [{'value': '3', 'evidence': '三页'}, {'value': '3', 'evidence': '3页'}]}
+    values, missing = resolve_fields(runtime, '制作三页PPT（共3页）', extractions=candidates)
+    assert values['slide_count'] == '3'
+    assert 'slide_count' not in [field['id'] for field in missing]
+    values, missing = resolve_fields(runtime, '制作3页或5页PPT', previous={'slide_count': '5 页'},
+                                     extractions=count_extraction('3', '3页'))
+    assert values['slide_count'] == '5 页'
+    assert 'slide_count' not in [field['id'] for field in missing]
+
+
+def test_grounded_total_cannot_contradict_a_duplicate_scalar_binding():
+    values, missing = resolve_fields(policy('ppt-workflow'), '制作3页PPT', {'slide_count': '5'},
+                                     extractions=count_extraction('3', '3页'))
+    assert 'slide_count' not in values
+    assert 'slide_count' in [field['id'] for field in missing]
+
+
+def test_count_extractions_do_not_bypass_explicit_background_confirmation():
+    values, missing = resolve_fields(
+        policy('ppt-workflow'), '制作3页PPT，主题：周末回血',
+        {'topic': '周末回血', 'generate_background_images': 'enabled'},
+        extractions={
+            **count_extraction('3', '制作3页PPT'),
+            'generate_background_images': [{'value': 'enabled', 'evidence': '周末回血'}],
+        },
+    )
+    assert values['slide_count'] == '3'
+    assert 'generate_background_images' not in values
+    assert [field['id'] for field in missing] == ['generate_background_images']
+
+
 def test_ppt_explicit_background_cannot_be_invented_by_model():
     runtime = policy('ppt-workflow')
     values, missing = resolve_fields(runtime, '做一个关于气候变化的PPT，8页',
-                                     {'topic': '气候变化', 'generate_background_images': 'enabled'})
+                                     {'topic': '气候变化', 'generate_background_images': 'enabled'},
+                                     extractions=count_extraction('8', '8页'))
     assert values['slide_count'] == '8'
     assert [item['id'] for item in missing] == ['generate_background_images']
     values, missing = resolve_fields(runtime, '做一个关于气候变化的PPT，8页',
-                                     {'topic': '气候变化'}, {'generate_background_images': '__ask_user_no__'})
+                                     {'topic': '气候变化'}, {'generate_background_images': '__ask_user_no__'},
+                                     extractions=count_extraction('8', '8页'))
     assert not missing
     assert values['generate_background_images'] == 'disabled'
 
@@ -122,7 +213,9 @@ def test_ppt_explicit_background_cannot_be_invented_by_model():
     ('不要关闭AI底图', 'enabled'),
 ])
 def test_ppt_background_aliases_respect_negation(instruction, expected):
-    values, missing = resolve_fields(policy('ppt-workflow'), f'做8页关于垃圾分类的PPT，{instruction}')
+    values, missing = resolve_fields(policy('ppt-workflow'), f'做8页关于垃圾分类的PPT，{instruction}',
+                                     {'topic': '垃圾分类'},
+                                     extractions=count_extraction('8', '8页'))
     assert not missing
     assert values['generate_background_images'] == expected
 
@@ -204,7 +297,7 @@ def test_ambiguous_lengths_require_confirmation_and_equal_normalized_lengths_do_
 def test_typed_template_binding_skips_style_and_background_questions():
     values, missing = resolve_fields(policy('ppt-workflow'), '用上传模板做8页关于气候变化的PPT', {
         'topic': '气候变化', 'template_pptx': 'template.pptx',
-    })
+    }, extractions=count_extraction('8', '8页'))
     assert [field['id'] for field in missing] == ['presentation_output_format']
     assert values['template_mode'] == 'upload'
     assert 'generate_background_images' not in values
@@ -313,7 +406,7 @@ def test_discovered_startup_answer_restores_only_authorized_trigger(monkeypatch,
     values, _ = resolve_fields(runtime, '制作个人答辩PPT，12页，15分钟，不生成AI底图', {
         'topic': '个人答辩', 'slide_count': '12', 'template_pptx': 'template.pptx',
         'presentation_output_format': 'html',
-    })
+    }, extractions=count_extraction('12', '12页'))
     values['presentation_output_format'] = 'html'
     client = MagicMock()
     client.get_workflow.return_value.result = {'revision_id': 'r1', 'runtime': runtime}
@@ -433,6 +526,100 @@ def run_startup_agent(tmp_path):
         lazyllm.globals['agentic_config'] = previous
 
 
+@pytest.mark.parametrize('brief,evidence', [
+    ('制作3页PPT，第1页是封面，第2页讲方法，第3页总结', '制作3页PPT'),
+    ('Create a three-slide presentation. Slide 1 is the cover.', 'a three-slide presentation'),
+])
+def test_trigger_transports_grounded_count_without_an_extra_model_call(
+    startup_tools, run_startup_agent, brief, evidence,
+):
+    import json
+    build, _client, toolkit, events = startup_tools
+    trigger = build(policy('ppt-workflow'), brief + '，主题：周末回血，生成AI底图')
+    _, calls = run_startup_agent([trigger], trigger.__name__, json.dumps({
+        'input_bindings': {'topic': '周末回血'},
+        'clarification_extractions': count_extraction('3', evidence),
+    }), stop_tools=[trigger.__name__])
+    assert calls == 1
+    assert events == []
+    toolkit.prepare_workflow.assert_called_once()
+    assert toolkit.prepare_workflow.call_args.kwargs['clarification_values']['slide_count'] == '3'
+
+
+def test_trigger_keeps_conflicting_totals_in_one_question_card(startup_tools):
+    build, _client, toolkit, events = startup_tools
+    trigger = build(policy('ppt-workflow'), '制作3页或5页PPT，主题：周末回血，生成AI底图')
+    result = trigger(input_bindings={'topic': '周末回血'}, clarification_extractions={'slide_count': [
+        {'value': '3', 'evidence': '3页'}, {'value': '5', 'evidence': '5页'},
+    ]})
+    assert result['missing_clarification_fields'] == ['slide_count']
+    assert result['_agent_control']['stop'] is True
+    toolkit.prepare_workflow.assert_not_called()
+    assert len(events) == 1
+    assert [q['id'] for q in events[0][1]['questions']] == ['slide_count']
+    assert events[0][1]['questions'][0]['choices'] == ['3', '5', '__ask_user_other__']
+
+
+def test_ppt_conflict_card_preserves_user_candidates_and_clean_topic(startup_tools):
+    import json
+    build, _client, toolkit, events = startup_tools
+    request = '请使用AIPPT规划与生成工作流、制作份3页PPT,主题为《打工人的周末回血指南》 要不还是4页吧 我也不确定'
+    runtime = policy('ppt-workflow')
+    trigger = build(runtime, request)
+    result = trigger(input_bindings={'topic': '打工人的周末回血指南'}, clarification_extractions={'slide_count': [
+        {'value': '4', 'evidence': '要不还是4页吧 我也不确定'},
+        {'value': '3', 'evidence': '制作份3页PPT'},
+        {'value': '3', 'evidence': '制作份3页PPT'},
+    ]})
+    assert result['missing_clarification_fields'] == ['slide_count', 'generate_background_images']
+    toolkit.prepare_workflow.assert_not_called()
+    assert len(events) == 1
+    card = events[0][1]
+    assert card['questions'][0]['choices'] == ['3', '4', '__ask_user_other__']
+    assert card['questions'][1]['choices'] == [
+        '启用｜为每页生成独立 AI 底图', '不启用｜使用纯色、渐变和矢量装饰',
+    ]
+    saved = json.loads(card['workflow']['values_json'])
+    assert saved['topic'] == '打工人的周末回血指南'
+    assert 'slide_count' not in saved
+    values, missing = resolve_fields(runtime, request, previous={
+        **saved, 'slide_count': '4', 'generate_background_images': '不启用｜使用纯色、渐变和矢量装饰',
+    })
+    assert values['topic'] == '打工人的周末回血指南'
+    assert values['slide_count'] == '4'
+    assert not missing
+    assert next(f for f in runtime['clarification_fields'] if f['id'] == 'slide_count')['choices'][:3] == [
+        '3 页', '5 页', '8 页',
+    ]
+
+
+@pytest.mark.parametrize('brief,topic', [
+    ('主题为《打工人的周末回血指南》 要不还是4页吧 我也不确定', '打工人的周末回血指南'),
+    ('主题为打工人的周末回血指南 做3页还是4页呢', '打工人的周末回血指南'),
+    ('Title: Weekend Recovery. Maybe 3 or 4 slides?', 'Weekend Recovery'),
+    ('主题为《2026 年三种低成本回血方式》 做3页PPT', '2026 年三种低成本回血方式'),
+])
+def test_ppt_topic_keeps_model_semantics_without_regex_overwrite(brief, topic):
+    values, _ = resolve_fields(policy('ppt-workflow'), brief, {'topic': topic})
+    assert values['topic'] == topic
+    values, _ = resolve_fields(policy('ppt-workflow'), brief, {'topic': '另一个主题'}, previous={'topic': topic})
+    assert values['topic'] == topic
+
+
+def test_unknown_ppt_topic_still_requires_confirmation():
+    values, missing = resolve_fields(policy('ppt-workflow'), '做3页或4页PPT')
+    assert 'topic' not in values
+    assert 'topic' in [field['id'] for field in missing]
+
+
+def test_invalid_evidence_does_not_become_a_suggested_count():
+    _, missing = resolve_fields(policy('ppt-workflow'), '制作3页PPT', {'topic': '周末回血'}, extractions={
+        'slide_count': [{'value': '3', 'evidence': '3页'}, {'value': '999', 'evidence': '伪造原文'}],
+    })
+    card = startup_card(missing, {})
+    assert card['questions'][0]['choices'] == ['3 页', '5 页', '8 页', '__ask_user_other__']
+
+
 @pytest.mark.parametrize('answered', [False, True])
 def test_writer_starts_without_requiring_duplicate_goal_binding(startup_tools, answered):
     build, _client, toolkit, events = startup_tools
@@ -476,6 +663,41 @@ def test_writer_can_still_ask_for_an_unknown_topic(startup_tools, run_startup_ag
     assert len(events) == 1
     assert events[0][1]['questions'][0]['id'] == 'writing_goal'
     toolkit.prepare_workflow.assert_not_called()
+
+
+@pytest.mark.parametrize('source', ['host', 'core'])
+@pytest.mark.parametrize('language', ['zh', 'en'])
+@pytest.mark.parametrize('wrapped', [False, True])
+def test_startup_question_receipt_renders_without_unresolved_placeholders(startup_tools, source, language, wrapped):
+    import json
+    import re
+    from lazymind.chat.service.component.tool_rendering import _tool_result_frame_text
+
+    build, _client, toolkit, events = startup_tools
+    question = {'id': 'topic', 'question': '主题是什么？', 'type': 'text',
+                'reason': '主题决定本次交付内容。', 'required': True}
+    runtime = {'clarification_fields': [question]} if source == 'host' else {}
+    if source == 'core':
+        toolkit.prepare_workflow.return_value = {'status': 'needs_input', 'questions': [{
+            **question, 'text': question['question'],
+        }]}
+    trigger = build(runtime, '开始工作流')
+    result = trigger()
+    assert result['status'] == 'needs_input'
+    assert result['outcome'] == 'waiting_for_input'
+    assert result['reason']
+    assert result['_agent_control']['stop'] is True
+    assert events[0][0] == 'ask_pending'
+    frame = _tool_result_frame_text({
+        'id': 'startup-question', 'name': trigger.__name__,
+        'result': {'ok': True, 'value': json.dumps(result)} if wrapped else result,
+    }, language)
+    preview = re.search(r'<trp id="startup-question">(.*?)</trp>', frame, re.S).group(1)
+    assert preview.strip() == ('请补充必要信息后继续。' if language == 'zh'
+                               else 'Please provide the required information to continue.')
+    assert result['reason'] not in preview
+    assert result['outcome'] not in preview
+    assert not re.search(r'\{[^{}]+\}', preview)
 
 
 @pytest.mark.parametrize('source', ['host', 'core'])

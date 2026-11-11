@@ -988,7 +988,7 @@ def test_kb_total_normalizes_json_string_and_nested_result_value():
     assert 'completed with **4** relevant items' in result_text
 
 
-def test_plugin_preflight_result_renders_outcome_and_reason_in_chinese():
+def test_plugin_preflight_result_renders_user_facing_outcome_in_chinese():
     reason = 'The request can be answered directly without a multi-stage workflow.'
     result_text = _tool_result_frame_text(
         {
@@ -1002,8 +1002,7 @@ def test_plugin_preflight_result_renders_outcome_and_reason_in_chinese():
         'zh',
     )
 
-    assert '工作流初始化已完成，结果是 **not_applicable**' in result_text
-    assert f'原因是 **{reason}**' in result_text
+    assert '当前请求可以直接处理，无需启动工作流。' in result_text
 
 
 def test_result_template_supports_generic_dotted_paths_for_nested_json_fields():
@@ -1047,8 +1046,7 @@ def test_plugin_preflight_result_supports_ready_status_payload():
         'en',
     )
 
-    assert 'Workflow initialization completed. Result: **ready**.' in result_text
-    assert 'Reason: **The user explicitly requested this plugin.**' in result_text
+    assert 'The workflow is ready and will start shortly.' in result_text
 
 
 def test_workflow_failure_template_handles_canonical_failure():
@@ -1064,7 +1062,7 @@ def test_workflow_failure_template_handles_canonical_failure():
         'zh',
     )
 
-    assert '工作流初始化失败，结果是 **failed**' in result_text
+    assert '工作流未能启动，请查看错误详情。' in result_text
     assert 'workflow or revision was not found' in result_text
 
 
@@ -1081,7 +1079,7 @@ def test_workflow_success_template_normalizes_json_string_value():
         'en',
     )
 
-    assert 'Result: **queued**. Reason: **accepted**.' in result_text
+    assert 'The workflow is queued and waiting to run.' in result_text
 
 
 def test_workflow_success_template_normalizes_nested_result_value():
@@ -1099,7 +1097,7 @@ def test_workflow_success_template_normalizes_nested_result_value():
         'en',
     )
 
-    assert 'Result: **queued**. Reason: **accepted**.' in result_text
+    assert 'The workflow is queued and waiting to run.' in result_text
 
 
 def test_permission_failure_uses_canonical_failure_rendering():

@@ -1516,6 +1516,13 @@ def _startup_clarification_guidance(runtime_policy: Any) -> str:
             'ask optional preferences or invent missing values. Reuse submitted answers; later batches '
             'ask only unresolved fields. Defaults and conditional applicability are package-owned. '
             'Do not call generic ask_user for startup fields; use the trigger. '
+            'For resolution=grounded_count, use clarification_extractions to provide a list of '
+            '{"value": "3", "evidence": "exact original phrase"} for each field ID. '
+            'Extract the requested total semantically in any language and normalize number words to '
+            'positive integer strings. Distinguish total counts from page ordinals and section lengths. '
+            'Include all active conflicting totals, but not an explicitly superseded value; omit '
+            'unknown or delegated totals rather than inventing them. A declared canonical alias such as '
+            'preserve_all is allowed with an exact quote. Do not duplicate these fields in input_bindings. '
             'Preserve the original request and exact URLs and attachment names. Declared fields: '
             + json.dumps(fields, ensure_ascii=False, default=str)
         )
@@ -1773,6 +1780,7 @@ def _workflow_trigger_tools(
             def run_trigger(
                 input_bindings: Optional[Union[Dict[str, str], str]] = None,
                 request_context: Optional[str] = None,
+                clarification_extractions: Optional[Dict[str, List[Dict[str, str]]]] = None,
             ) -> Dict[str, Any]:
                 input_bindings = _normalize_trigger_input_bindings(input_bindings)
                 # The Host-composed query is authoritative. A clearly marked
@@ -1874,7 +1882,9 @@ def _workflow_trigger_tools(
                             )
                         resolved_attachment_paths[material_id] = path
                         previous[field['id']] = attachment['when_choice']
-                    semantic_values, missing = resolve_fields(runtime, bound_query, input_bindings, previous)
+                    semantic_values, missing = resolve_fields(
+                        runtime, bound_query, input_bindings, previous, clarification_extractions,
+                    )
                     if missing:
                         from lazyllm.tools.agent.base import _write_agent_data
                         card = startup_card(missing, startup_metadata(
@@ -1884,7 +1894,9 @@ def _workflow_trigger_tools(
                         _write_agent_data('ask_pending', **card)
                         # Use the framework's non-empty stop receipt; the chat
                         # translator hides it after displaying ask_pending.
-                        return {'status': 'needs_input', 'missing_clarification_fields': [f['id'] for f in missing],
+                        return {'status': 'needs_input', 'outcome': 'waiting_for_input',
+                                'reason': 'Required workflow information must be confirmed in the question card.',
+                                'missing_clarification_fields': [f['id'] for f in missing],
                                 '_agent_control': {'stop': True, 'reason': 'awaiting_user',
                                                    'final_text': '请补充问题卡片中的必要信息后继续。'}}
                     # Never append a second, model-guessed copy of fields after
@@ -1995,9 +2007,12 @@ def _workflow_trigger_tools(
                             prepared.get('clarification_values') or semantic_values, bound_clarification,
                         ))
                         _write_agent_data('ask_pending', **card)
-                        return {**prepared, '_agent_control': {
-                            'stop': True, 'reason': 'awaiting_user', 'final_text': '请补充问题卡片中的必要信息后继续。',
-                        }}
+                        return {**prepared, 'outcome': 'waiting_for_input',
+                                'reason': 'Required workflow information must be confirmed in the question card.',
+                                '_agent_control': {
+                                    'stop': True, 'reason': 'awaiting_user',
+                                    'final_text': '请补充问题卡片中的必要信息后继续。',
+                                }}
                     return {
                         **prepared,
                         'status': 'waiting',
@@ -2084,22 +2099,28 @@ def _workflow_trigger_tools(
                 def bound_trigger(
                     input_bindings: Optional[Union[Dict[str, str], str]] = None,
                     request_context: Optional[str] = None,
+                    clarification_extractions: Optional[Dict[str, List[Dict[str, str]]]] = None,
                 ) -> Dict[str, Any]:
                     """Initialize with optional attachments and a merged clarified request."""
-                    return run_trigger(input_bindings, request_context)
+                    return run_trigger(input_bindings, request_context, clarification_extractions)
             elif supports_scalar_bindings:
                 @fc_register(host_file='NONE')
                 def bound_trigger(
                     input_bindings: Optional[Union[Dict[str, str], str]] = None,
                     request_context: Optional[str] = None,
+                    clarification_extractions: Optional[Dict[str, List[Dict[str, str]]]] = None,
                 ) -> Dict[str, Any]:
                     """Initialize with scalar bindings and a merged clarified request."""
-                    return run_trigger(input_bindings, request_context)
+                    return run_trigger(input_bindings, request_context, clarification_extractions)
             else:
                 @fc_register(host_file='NONE')
-                def bound_trigger(request_context: Optional[str] = None) -> Dict[str, Any]:
+                def bound_trigger(
+                    request_context: Optional[str] = None,
+                    clarification_extractions: Optional[Dict[str, List[Dict[str, str]]]] = None,
+                ) -> Dict[str, Any]:
                     """Initialize with the current or merged clarified request context."""
-                    return run_trigger(request_context=request_context)
+                    return run_trigger(request_context=request_context,
+                                       clarification_extractions=clarification_extractions)
             return bound_trigger
 
         trigger_query = _merge_startup_clarification_context(
@@ -2151,7 +2172,7 @@ def _workflow_trigger_tools(
                     'Do not read or transcribe them before launching the research-topic step.'
                 )
         trigger_workflow.__doc__ = (
-            'Initialize this Workflow. The only argument names are input_bindings and request_context. '
+            'Initialize this Workflow. Arguments are input_bindings, request_context and clarification_extractions. '
             'Never pass input_type, inputBindings, step_id, or session_id. '
             + description + input_contract + attachment_guidance
             + ' Omit inputs whose values were not supplied; do not invent values or '
@@ -2170,6 +2191,11 @@ def _workflow_trigger_tools(
             + 'Example call: {"input_bindings": {"material_id": "complete value"}}. '
             'On argument validation errors, correct the field name and retain the input content; do not drop bindings.\n'
             '    request_context: Optional merged original request and clarification answers.\n'
+            '    clarification_extractions: For grounded_count fields only, map each field ID to '
+            'a list of {"value": "3", "evidence": "exact phrase from the user request"}. '
+            'Extract total counts in any language, not page ordinals or section lengths. '
+            'Include every active conflicting total, omit unknown totals, and use normalized positive '
+            'integer strings or a declared canonical alias. Do not duplicate these in input_bindings.\n'
         )
         tools.append(trigger_workflow)
     return tools

@@ -214,6 +214,37 @@ runtime:
 	}
 }
 
+func TestCompileGroundedCountResolution(t *testing.T) {
+	workflowYAML := strings.Replace(validWorkflow, "id: graph-test", `id: graph-test
+runtime:
+  clarification_fields:
+    - id: slide_count
+      question: How many slides?
+      required: true
+      reason: Determines the deck length.
+      resolution: grounded_count
+      type: text
+`, 1)
+	result := Compile(workflowYAML, validState, "", ProfilePublish)
+	if !result.Valid {
+		t.Fatalf("grounded count failed to compile: %#v", result.Diagnostics)
+	}
+	encoded, err := json.Marshal(result.Graph)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded CompiledStateGraph
+	if err := json.Unmarshal(encoded, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if decoded.Runtime.ClarificationFields[0].Resolution != "grounded_count" {
+		t.Fatal("grounded resolution lost on publication")
+	}
+	if Compile(strings.Replace(workflowYAML, "grounded_count", "unknown", 1), validState, "", ProfilePublish).Valid {
+		t.Fatal("unknown resolution accepted")
+	}
+}
+
 func TestCompileRejectsInvalidRuntimeClarificationFields(t *testing.T) {
 	workflowYAML := strings.Replace(validWorkflow, "id: graph-test", `id: graph-test
 runtime:
