@@ -834,13 +834,12 @@ def _resolve_task_profile_with_model(
     )
 
 
-async def _resolve_task_profile_in_request_scope(
+def _resolve_task_profile_in_request_scope_sync(
     request: ChatRequest,
     inputs: dict[str, Any],
 ) -> Any:
     with request_configuration_scope(model_config=request.runtime.llm_config):
-        return await asyncio.to_thread(
-            _resolve_task_profile_with_model,
+        return _resolve_task_profile_with_model(
             inputs,
             trace_id=(
                 request.conversation.conversation_id
@@ -849,6 +848,17 @@ async def _resolve_task_profile_in_request_scope(
             ).strip(),
             session_id=request.conversation.session_id,
         )
+
+
+async def _resolve_task_profile_in_request_scope(
+    request: ChatRequest,
+    inputs: dict[str, Any],
+) -> Any:
+    return await asyncio.to_thread(
+        _resolve_task_profile_in_request_scope_sync,
+        request,
+        inputs,
+    )
 
 
 def _context_preview_status(
@@ -1070,6 +1080,7 @@ async def handle_chat(request: ChatRequest) -> Union[Dict[str, Any], StreamingRe
     early_run_id = _register_steering_before_stream(request)
 
     async def resolve_and_continue():
+        routing_task = None
         try:
             started = time.time()
             routing_task = asyncio.create_task(
@@ -1097,6 +1108,17 @@ async def handle_chat(request: ChatRequest) -> Union[Dict[str, Any], StreamingRe
                 return
             yield sse_line(response_payload(200, 'success', response, time.time() - started))
         finally:
+            if routing_task is not None:
+                if not routing_task.done():
+                    routing_task.cancel()
+                    try:
+                        await routing_task
+                    except asyncio.CancelledError:
+                        pass
+                elif not routing_task.cancelled():
+                    # Retrieve a failure when the client closes before this
+                    # generator reaches the normal await above.
+                    routing_task.exception()
             if early_run_id:
                 steering_registry.unregister(early_run_id)
 

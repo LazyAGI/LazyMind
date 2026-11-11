@@ -1,6 +1,6 @@
 import asyncio
 import json
-from threading import Barrier
+from threading import Barrier, Event
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 from uuid import uuid4
@@ -514,6 +514,133 @@ def test_dynamic_intent_classification_isolates_concurrent_request_model_configs
         finally:
             chat_service.lazyllm.locals._clear_sid(caller_local_sid)
             chat_service.lazyllm.globals._clear_sid(caller_global_sid)
+
+
+def test_cancelled_intent_routing_keeps_worker_scope_until_thread_exits(monkeypatch):
+    started, release, finished = Event(), Event(), Event()
+    observation = {}
+
+    def current_model():
+        config = chat_service.lazyllm.globals['config']
+        return (
+            config.get('dynamic_model_configs', {})
+            .get('llm', {})
+            .get('chat', {})
+            .get('model')
+        )
+
+    def blocking_model_resolve(inputs, **_kwargs):
+        try:
+            observation['sid'] = chat_service.lazyllm.globals._sid
+            observation['before_cancel'] = current_model()
+            started.set()
+            assert release.wait(timeout=5)
+            observation['after_cancel'] = current_model()
+            return chat_service.resolve_task_profile(
+                inputs['query'], enable_llm_fallback=False,
+            )
+        finally:
+            finished.set()
+
+    monkeypatch.setattr(
+        chat_service, '_resolve_task_profile_with_model', blocking_model_resolve,
+    )
+    request = ChatRequest(
+        message={'query': '推荐一款适合我的相机', 'history': []},
+        conversation={'session_id': 'sid-cancelled-preview'},
+        runtime={'llm_config': {
+            'llm': {
+                'source': 'openai',
+                'model': 'model-cancelled-preview',
+                'api_key': 'key-cancelled-preview',
+            },
+        }},
+        personalization={'use_memory': False},
+        agent={'enable_subagent': False},
+        workflow={'enable_workflow': False},
+    )
+
+    async def drive():
+        task = asyncio.create_task(
+            chat_service._resolve_task_profile_in_request_scope(
+                request, {'query': request.message.query},
+            ),
+        )
+        try:
+            assert await asyncio.to_thread(started.wait, 5)
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+        finally:
+            release.set()
+        assert await asyncio.to_thread(finished.wait, 5)
+
+    asyncio.run(drive())
+
+    worker_sid = observation['sid']
+    with (
+        chat_service.lazyllm.globals._bind_sid(worker_sid),
+        chat_service.lazyllm.locals._bind_sid(worker_sid),
+    ):
+        try:
+            cleared_model = current_model()
+        finally:
+            chat_service.lazyllm.locals._clear_sid(worker_sid)
+            chat_service.lazyllm.globals._clear_sid(worker_sid)
+
+    assert observation == {
+        'sid': worker_sid,
+        'before_cancel': 'model-cancelled-preview',
+        'after_cancel': 'model-cancelled-preview',
+    }
+    assert cleared_model is None
+
+
+def test_closing_intent_routing_stream_cancels_background_task(monkeypatch):
+    async def drive():
+        started, release, finished = asyncio.Event(), asyncio.Event(), asyncio.Event()
+        observation = {'cancelled': False}
+
+        async def blocking_resolve(_request, _inputs):
+            started.set()
+            try:
+                await release.wait()
+                return chat_service.resolve_task_profile(
+                    '推荐一款适合我的相机', enable_llm_fallback=False,
+                )
+            except asyncio.CancelledError:
+                observation['cancelled'] = True
+                raise
+            finally:
+                finished.set()
+
+        async def fake_impl(_request, **_kwargs):
+            return {'ok': True}
+
+        monkeypatch.setattr(
+            chat_service, '_resolve_task_profile_in_request_scope', blocking_resolve,
+        )
+        monkeypatch.setattr(chat_service, '_handle_chat_impl', fake_impl)
+        request = ChatRequest(
+            message={'query': '推荐一款适合我的相机', 'history': []},
+            conversation={'session_id': 'sid-closed-stream'},
+            runtime={'llm_config': {}},
+            personalization={'use_memory': False},
+            agent={'enable_subagent': False},
+            workflow={'enable_workflow': False},
+        )
+        response = await chat_service.handle_chat(request)
+        iterator = response.body_iterator
+        await anext(iterator)
+        await asyncio.wait_for(started.wait(), timeout=1)
+        await iterator.aclose()
+        await asyncio.sleep(0)
+        cancelled_on_close = observation['cancelled']
+        release.set()
+        await asyncio.wait_for(finished.wait(), timeout=1)
+        return cancelled_on_close
+
+    assert asyncio.run(drive()) is True
 
 
 def test_context_usage_preview_only_uses_model_when_explicitly_requested(monkeypatch):
