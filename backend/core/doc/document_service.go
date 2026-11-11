@@ -843,9 +843,10 @@ func (s *DocumentService) GetProcessingMetadata(ctx context.Context, caller Data
 			_ = json.Unmarshal(task.Ext, &ext)
 			detail[1] = ext.ErrorMessage
 		}
+		observedLevel := snapshot.observedProcessingLevel(task, state)
 		out[row.ID] = DocumentMetadata{ID: row.ID, DatasetID: datasetID, ProcessingLevel: ds.ProcessingLevel, ProcessingState: state,
-			ObservedProcessingLevel: snapshot.observedProcessingLevel(task, state), OriginalAvailable: paperlibrary.OriginalAvailable(row),
-			ProcessingError: processingDiagnostic(state, task, raw, detail[0], detail[1])}
+			ObservedProcessingLevel: observedLevel, OriginalAvailable: paperlibrary.OriginalAvailable(row),
+			ProcessingError: processingDiagnostic(state, task, observedLevel, raw, detail[0], detail[1])}
 	}
 	return out, nil
 }

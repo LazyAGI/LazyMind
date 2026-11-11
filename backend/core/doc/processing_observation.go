@@ -280,7 +280,7 @@ func observeDocumentProcessingDetails(ctx context.Context, db, lazyDB *gorm.DB, 
 	metadata.ProcessingLevel = snapshot.dataset.ProcessingLevel
 	metadata.ObservedProcessingLevel = snapshot.observedProcessingLevel(task, state)
 	metadata.ProcessingState = state
-	metadata.ProcessingError = processingDiagnostic(state, task, raw, detail[0], detail[1])
+	metadata.ProcessingError = processingDiagnostic(state, task, metadata.ObservedProcessingLevel, raw, detail[0], detail[1])
 	return metadata, raw, nil
 }
 
