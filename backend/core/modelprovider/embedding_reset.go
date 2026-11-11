@@ -24,15 +24,17 @@ type EmbeddingClearRequest struct {
 }
 
 type EmbeddingClearResponse struct {
-	Cleared bool `json:"cleared"`
+	Cleared   bool `json:"cleared"`
+	Activated bool `json:"activated"`
 }
 
 var errEmbeddingIndexBusy = errors.New("embedding_index_busy")
 var errEmbeddingCleanupFailed = errors.New("embedding_cleanup_failed")
 
-// ClearEmbeddingChunks requires a fresh preview and explicit confirmation.
-// It does not enqueue parsing tasks. Selection still goes through the normal
-// signed-model validation after this irreversible operation succeeds.
+// ClearEmbeddingChunks owns the confirmed cleanup and target activation. Once
+// accepted, both steps finish independently of the browser connection. A retry
+// resumes the persisted target without purging an already-cleared index again.
+// Parsing remains an explicit, separate user action.
 func ClearEmbeddingChunks(w http.ResponseWriter, r *http.Request) {
 	db := store.DB()
 	if db == nil {
@@ -51,34 +53,57 @@ func ClearEmbeddingChunks(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "explicit chunk clearing confirmation is required", 400)
 		return
 	}
-	_, signature, _, snapshot, err := probeSelectedEmbedding(r.Context(), db, userID, req.ModelID, req.Source)
-	if err != nil || signature == "" || snapshot == nil {
-		common.ReplyErr(w, errEmbeddingSignatureFailed.Error(), 409)
-		return
-	}
+	// A completed response-loss retry needs no upstream call. The committed
+	// generation and owned active identity are authoritative, even if the
+	// provider has since become temporarily unavailable.
 	state, err := loadGlobalEmbeddingState(r.Context(), db)
 	if err != nil {
 		common.ReplyErr(w, "embedding state unavailable", 503)
 		return
 	}
-	if state.Generation != req.Generation || state.Phase == "clearing" {
-		common.ReplyErr(w, errEmbeddingIndexBusy.Error(), 409)
+	if state.Phase == "ready" && state.Generation == req.Generation+1 && state.ActiveModelID == req.ModelID && state.ActiveSource == req.Source && validEmbeddingFingerprint(state.Signature) {
+		var owned int64
+		if err := db.WithContext(r.Context()).Model(&orm.UserModelProviderGroupModel{}).Where("id = ? AND create_user_id = ? AND deleted_at IS NULL", req.ModelID, userID).Count(&owned).Error; err != nil || owned != 1 {
+			common.ReplyErr(w, errEmbeddingIndexBusy.Error(), 409)
+			return
+		}
+		common.ReplyOK(w, EmbeddingClearResponse{Cleared: true, Activated: true})
 		return
 	}
-	if err = clearEmbeddingChunks(r.Context(), db, state, req.ModelID, req.Source, signature, false); err != nil {
+	_, signature, _, snapshot, err := probeSelectedEmbedding(r.Context(), db, userID, req.ModelID, req.Source)
+	if err != nil || signature == "" || snapshot == nil {
+		common.ReplyErr(w, errEmbeddingSignatureFailed.Error(), 409)
+		return
+	}
+	target := embeddingSwitchActivation{UserID: userID, UserName: store.UserName(r), ModelID: req.ModelID, Snapshot: *snapshot}
+	if err = target.run(r.Context(), db, req, signature); err != nil {
 		common.ReplyErr(w, err.Error(), 409)
 		return
 	}
-	common.ReplyOK(w, EmbeddingClearResponse{Cleared: true})
+	common.ReplyOK(w, EmbeddingClearResponse{Cleared: true, Activated: true})
 }
 
 func clearEmbeddingChunks(ctx context.Context, db *gorm.DB, previous orm.EmbeddingIndexState, modelID, source, signature string, emptyOnly bool) error {
+	return resetEmbeddingChunks(ctx, db, previous, modelID, source, signature, emptyOnly, nil)
+}
+
+func resetEmbeddingChunks(ctx context.Context, db *gorm.DB, previous orm.EmbeddingIndexState, modelID, source, signature string, emptyOnly bool, activation *embeddingSwitchActivation) error {
 	// A generation fences late submissions/callbacks even after a process restart.
 	next := previous
 	next.Scope, next.Phase, next.Generation = globalEmbeddingScope, "clearing", previous.Generation+1
+	resuming := activation != nil && (previous.Phase == "clearing" || previous.Phase == "cleanup_failed") && previous.TargetModelID == modelID && previous.TargetSource == source && previous.TargetSignature == signature
+	if resuming {
+		// Retrying an interrupted purge is idempotent under the algorithm lock.
+		next.Generation = previous.Generation
+	}
 	next.TargetModelID, next.TargetSource, next.TargetSignature = modelID, source, signature
 	next.UpdatedAt = time.Now().UTC()
 	if err := db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if activation != nil {
+			if _, _, err := activation.validate(ctx, tx); err != nil {
+				return err
+			}
+		}
 		var count int64
 		if err := tx.Model(&orm.EmbeddingIndexState{}).Where("scope = ?", globalEmbeddingScope).Count(&count).Error; err != nil {
 			return err
@@ -86,7 +111,11 @@ func clearEmbeddingChunks(ctx context.Context, db *gorm.DB, previous orm.Embeddi
 		if count == 0 {
 			return tx.Create(&next).Error
 		}
-		result := tx.Model(&orm.EmbeddingIndexState{}).Where("scope = ? AND generation = ? AND phase <> ?", globalEmbeddingScope, previous.Generation, "clearing").Select("*").Updates(&next)
+		query := tx.Model(&orm.EmbeddingIndexState{}).Where("scope = ? AND generation = ? AND phase = ?", globalEmbeddingScope, previous.Generation, previous.Phase)
+		if previous.Phase == "clearing" && !resuming {
+			return errEmbeddingIndexBusy
+		}
+		result := query.Select("*").Updates(&next)
 		if result.Error != nil {
 			return result.Error
 		}
@@ -123,9 +152,13 @@ func clearEmbeddingChunks(ctx context.Context, db *gorm.DB, previous orm.Embeddi
 					Generation int64 `json:"generation"`
 				}
 				if json.NewDecoder(resp.Body).Decode(&result) == nil && result.Cleared && result.Generation == next.Generation {
-					finish := db.WithContext(cleanupCtx).Model(&orm.EmbeddingIndexState{}).Where("scope = ? AND generation = ? AND phase = ?", globalEmbeddingScope, next.Generation, "clearing").Updates(map[string]any{
-						"active_model_id": "", "active_source": "", "active_model_name": "", "active_provider_name": "", "signature": "", "target_model_id": "", "target_source": "", "target_signature": "", "phase": "cleared", "updated_at": time.Now().UTC(),
-					})
+					fields := map[string]any{
+						"active_model_id": "", "active_source": "", "active_model_name": "", "active_provider_name": "", "signature": "", "phase": "cleared", "updated_at": time.Now().UTC(),
+					}
+					if activation == nil {
+						fields["target_model_id"], fields["target_source"], fields["target_signature"] = "", "", ""
+					}
+					finish := db.WithContext(cleanupCtx).Model(&orm.EmbeddingIndexState{}).Where("scope = ? AND generation = ? AND phase = ?", globalEmbeddingScope, next.Generation, "clearing").Updates(fields)
 					if finish.Error == nil && finish.RowsAffected == 1 {
 						return nil
 					}

@@ -8184,9 +8184,12 @@ components:
             type: object
         EmbeddingClearResponse:
             properties:
+                activated:
+                    type: boolean
                 cleared:
                     type: boolean
             required:
+                - activated
                 - cleared
             type: object
         EmbeddingIndexStatusResponse:
@@ -32894,7 +32897,7 @@ paths:
                 - model_providers
     /api/core/model_providers/embedding/clear-chunks:
         post:
-            description: Requires the current preview generation and a server-verified candidate. Clears all shared knowledge chunks and vectors, preserves source files and document records, and leaves documents awaiting manual parsing. Does not enqueue parsing or select a model.
+            description: Requires a preview generation and explicit administrator confirmation for a server-verified candidate. Clears shared chunks and vectors, preserves source files and document records, and atomically activates the target model with its saved selection. The server completes the operation independently of browser cancellation. Retrying the same confirmed request resumes an interrupted cleanup or activation; replaying a completed request does not clear the new index. Success acknowledges both cleared and activated. Documents await manual parsing; no parsing tasks are enqueued.
             requestBody:
                 content:
                     application/json:
@@ -32907,8 +32910,8 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/EmbeddingClearResponse'
-                    description: Chunks cleared
-            summary: Clear knowledge chunks after explicit administrator confirmation
+                    description: Chunks cleared and target model activated
+            summary: Clear knowledge chunks and activate the confirmed embedding model
             tags:
                 - model_providers
     /api/core/model_providers/embedding/index-state:

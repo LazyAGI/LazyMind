@@ -14,6 +14,13 @@ from test_embedding_vector_maintenance import _core_engine
 @pytest.fixture
 def reset_index(monkeypatch, tmp_path):
     core = _core_engine()
+    # Use the shared fixture schema on disk so the real HTTP worker thread can
+    # access the same Core database without replacing the handler or service.
+    core_path = tmp_path / 'core.db'
+    with core.connect() as conn, sqlite3.connect(core_path) as snapshot:
+        conn.connection.driver_connection.backup(snapshot)
+    core.dispose()
+    core = create_engine(f'sqlite:///{core_path}')
     with core.begin() as conn:
         conn.execute(text('ALTER TABLE documents ADD COLUMN document_type TEXT'))
         conn.execute(text("ALTER TABLE documents ADD COLUMN p_id TEXT DEFAULT ''"))
@@ -34,7 +41,7 @@ def reset_index(monkeypatch, tmp_path):
     artifact = tmp_path / 'original.txt.lazymind-base.json'
     artifact.write_text('{"chunks": ["old chunk"]}', encoding='utf-8')
     with core.begin() as conn:
-        conn.execute(text("UPDATE document_processing_states SET chunk_artifact_ref=:ref"), {'ref': str(artifact)})
+        conn.execute(text('UPDATE document_processing_states SET chunk_artifact_ref=:ref'), {'ref': str(artifact)})
 
     # Real SQLite segment storage; the vector service is isolated at its boundary.
     import lazyllm.tools.rag.store as stores
@@ -96,8 +103,16 @@ def test_clear_keeps_originals_and_marks_every_document_for_manual_parsing(reset
     assert f.original.exists()
 
 
-@pytest.mark.parametrize('document_type', ['FOLDER', 'PDF', '', None])
-def test_empty_only_ignores_folders_but_protects_documents(reset_index, document_type):
+@pytest.mark.parametrize(('document_type', 'empty_only', 'expected_status'), [
+    ('FOLDER', True, 200), ('PDF', True, 409), ('', True, 409), (None, True, 409),
+    ('PDF', False, 200),
+])
+def test_empty_only_endpoint_ignores_folders_but_protects_documents(
+        reset_index, monkeypatch, document_type, empty_only, expected_status):
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from lazymind.chat.api.base_ingestion_routes import router
+
     f = reset_index
     with f.core.begin() as conn:
         conn.execute(text('UPDATE documents SET deleted_at=CURRENT_TIMESTAMP'))
@@ -105,14 +120,37 @@ def test_empty_only_ignores_folders_but_protects_documents(reset_index, document
             VALUES ('folder', 'indexed', 'FOLDER')"""))
         conn.execute(text("""INSERT INTO documents (id, dataset_id, document_type, p_id)
             VALUES ('nested', 'indexed', :document_type, 'folder')"""), {'document_type': document_type})
-    if document_type == 'FOLDER':
-        assert embedding_reset.clear_chunks(7, empty_only=True)['cleared']
+    with f.core.connect() as conn:
+        documents_before = conn.execute(text('SELECT * FROM documents ORDER BY id')).mappings().all()
+        states_before = conn.execute(text(
+            'SELECT * FROM document_processing_states ORDER BY document_id')).mappings().all()
+    monkeypatch.setitem(config._impl, 'core_internal_token', 'internal-test-token')
+    app = FastAPI()
+    app.include_router(router)
+    with TestClient(app) as client:
+        response = client.post('/internal/knowledge:clear-chunks',
+                               headers={'X-LazyMind-Internal-Token': 'internal-test-token'},
+                               json={'generation': 7, 'empty_only': empty_only})
+    assert response.status_code == expected_status, response.text
+    with f.core.connect() as conn:
+        assert conn.execute(text('SELECT * FROM documents ORDER BY id')).mappings().all() == documents_before
+        states_after = conn.execute(text(
+            'SELECT * FROM document_processing_states ORDER BY document_id')).mappings().all()
+    if expected_status == 200:
+        assert response.json() == {'cleared': True, 'generation': 7}
+        assert 'col_block' in f.deleted
+        assert not f.artifact.exists()
+        assert all(state['embedding_version'] == 'reembed:manual' for state in states_after)
+        with f.tasks.connect() as conn:
+            assert conn.execute(text('SELECT COUNT(*) FROM lazyllm_waiting_task_queue')).scalar_one() == 0
     else:
-        with pytest.raises(embedding_reset.IndexBusy):
-            embedding_reset.clear_chunks(7, empty_only=True)
+        assert response.json() == {'detail': {'code': 'INDEX_BUSY'}}
         assert not f.deleted
         assert f.artifact.exists()
-    assert f.original.exists()
+        assert states_after == states_before
+        with sqlite3.connect(f.segment_path) as conn:
+            assert conn.execute('SELECT uid FROM col_block').fetchall() == [('old-segment',)]
+    assert f.original.read_text(encoding='utf-8') == 'keep the source'
 
 
 @pytest.mark.parametrize('reason', ['stale_generation', 'queued_task', 'callback_pending', 'new_document'])
@@ -136,7 +174,7 @@ def test_failed_store_cleanup_never_marks_documents_ready(reset_index):
     assert reset_index.artifact.exists()
     assert reset_index.original.exists()
     with reset_index.core.connect() as conn:
-        assert conn.execute(text("SELECT phase FROM embedding_index_states")).scalar_one() == 'clearing'
+        assert conn.execute(text('SELECT phase FROM embedding_index_states')).scalar_one() == 'clearing'
     with pytest.raises(embedding_reset.IndexBusy):
         with embedding_reset.index_operation():
             pytest.fail('partial cleanup allowed access')
