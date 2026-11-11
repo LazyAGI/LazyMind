@@ -4,10 +4,7 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 from urllib.parse import urlparse
 
-import lazyllm
-from lazyllm.common.globals import init_session
-
-from lazymind.model_config import inject_model_config
+from lazymind.chat.request_scope import request_configuration_scope
 from lazymind.common.optional_components import ComponentRequiredError, require_component
 
 _DEFAULT_RETRIEVER_TOPK = 20
@@ -72,35 +69,32 @@ def search(user_id: str, query: str, kb_ids: List[str], top_k: int,
     if top_k > 50:
         top_k = 50
 
-    init_session()
     try:
         require_component('rag')
-        inject_model_config(llm_config)
-        retrievers, reranker, image_retriever = _ensure_kb_search_runtime()
-        raw = search_kb(
-            {
-                'query': query,
-                'filters': {'kb_id': kb_ids},
-                'user_id': user_id,
-                'llm_config': llm_config or {},
-            },
-            retrievers=retrievers,
-            reranker=reranker,
-            image_retriever=image_retriever,
-            retriever_topk=max(_DEFAULT_RETRIEVER_TOPK, top_k),
-            rerank_topk=max(_DEFAULT_RERANK_TOPK, top_k),
-            k_max=top_k,
-            image_topk=_DEFAULT_IMAGE_TOPK,
-        )
-        return _hits_from_serialized(_serialize_kb_result(raw), kb_ids, top_k)
+        with request_configuration_scope(model_config=llm_config):
+            retrievers, reranker, image_retriever = _ensure_kb_search_runtime()
+            raw = search_kb(
+                {
+                    'query': query,
+                    'filters': {'kb_id': kb_ids},
+                    'user_id': user_id,
+                    'llm_config': llm_config or {},
+                },
+                retrievers=retrievers,
+                reranker=reranker,
+                image_retriever=image_retriever,
+                retriever_topk=max(_DEFAULT_RETRIEVER_TOPK, top_k),
+                rerank_topk=max(_DEFAULT_RERANK_TOPK, top_k),
+                k_max=top_k,
+                image_topk=_DEFAULT_IMAGE_TOPK,
+            )
+            return _hits_from_serialized(_serialize_kb_result(raw), kb_ids, top_k)
     except ComponentRequiredError as exc:
         raise KnowledgeSearchError(exc.code, str(exc), exc) from exc
     except KnowledgeSearchError:
         raise
     except Exception as exc:
         raise KnowledgeSearchError('BACKEND_UNAVAILABLE', 'knowledge search backend unavailable', exc) from exc
-    finally:
-        lazyllm.globals.clear()
 
 
 def _hits_from_serialized(serialized: Any, allowed_kb_ids: List[str], limit: int) -> List[KnowledgeSearchHit]:

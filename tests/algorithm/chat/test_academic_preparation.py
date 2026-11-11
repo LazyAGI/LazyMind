@@ -3,10 +3,12 @@ import json
 from types import SimpleNamespace
 
 import httpx
+import lazyllm
 import pytest
 
 from lazyllm.tools.agent import ToolExecutionError, ToolManager
 from lazymind.chat.engine.agent_runtime.compactors import is_oversized_tool_result
+from lazymind.chat.request_scope import request_configuration_scope
 from lazymind.chat.service import academic_preparation as preparation
 
 
@@ -62,7 +64,6 @@ def preparation_session(monkeypatch):
             return {'X-User-Id': 'owner'}
 
     monkeypatch.setattr(preparation, 'WorkflowClient', Client)
-    monkeypatch.setattr(preparation, 'inject_model_config', lambda _: None)
     monkeypatch.setattr(preparation, 'AutoModel', lambda **_: object())
     payload = {
         'llm_config': {}, 'depth': {'guidance': 'Standard research', 'preparation': {
@@ -90,6 +91,36 @@ def grounded_result():
                          'question_ids': ['origin'], 'paper_id': 'predecessor'}],
         'selected_directions': ['design origins and comparisons'],
     }
+
+
+def test_preparation_isolates_model_config_after_an_incomplete_run(monkeypatch, preparation_session):
+    payload, _ = preparation_session
+    observed = []
+
+    def execute(_self, _llm, plan):
+        config = lazyllm.globals['config']
+        model = config.get('dynamic_model_configs', {}).get('llm', {}).get('chat', {}).get('model')
+        observed.append((model, dict(lazyllm.locals.curr_key)))
+        if model:
+            lazyllm.locals.curr_key['llm'] = 'preparation-key'
+            return
+        plan.tools[1]('seed')
+        plan.tools[-1]('Preparation completed', [])
+
+    monkeypatch.setattr(preparation.AgentExecutor, 'run', execute)
+    configured = {**payload, 'llm_config': {
+        'llm': {'source': 'openai', 'model': 'preparation-model', 'api_key': 'preparation-key'},
+    }}
+    with request_configuration_scope() as caller_sid:
+        lazyllm.locals.curr_key['caller'] = 'caller-key'
+        with pytest.raises(ValueError, match='Preparation did not publish a structured result'):
+            preparation.run_preparation(configured)
+        assert preparation.run_preparation(payload)['summary'] == 'Preparation completed'
+        assert lazyllm.globals._sid == lazyllm.locals._sid == caller_sid
+        assert lazyllm.locals.curr_key == {'caller': 'caller-key'}
+        assert 'dynamic_model_configs' not in lazyllm.globals['config']
+
+    assert observed == [('preparation-model', {}), (None, {})]
 
 
 @pytest.mark.parametrize('status', [422, 503])

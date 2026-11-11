@@ -1,5 +1,6 @@
 import importlib
 
+import lazyllm
 import pytest
 import httpx
 from fastapi import FastAPI
@@ -7,6 +8,7 @@ from fastapi.testclient import TestClient
 
 from lazymind.chat.api import knowledge_search_routes as routes
 from lazymind.chat.api.knowledge_search_routes import router
+from lazymind.chat.request_scope import request_configuration_scope
 from lazymind.chat.service import knowledge_search_service as svc
 from lazymind.router.api import proxy_routes
 
@@ -25,15 +27,12 @@ def create_search_app():
 def test_search_calls_search_kb_without_chat_agent(monkeypatch):
     calls = {}
 
-    monkeypatch.setattr(svc, 'init_session', lambda: calls.setdefault('session_initialized', True))
-    monkeypatch.setattr(svc.lazyllm.globals, 'clear', lambda: calls.setdefault('session_cleared', True))
-    monkeypatch.setattr(svc, 'inject_model_config', lambda config: calls.setdefault('injected', config))
-
     monkeypatch.setattr(svc, '_ensure_kb_search_runtime', lambda: (['retriever'], None, 'image'))
 
     def fake_search_kb(payload, **kwargs):
         calls['payload'] = payload
         calls['kwargs'] = kwargs
+        calls['models'] = lazyllm.globals['config']['dynamic_model_configs']
         return [
             Node(
                 uid='chunk-1',
@@ -51,9 +50,8 @@ def test_search_calls_search_kb_without_chat_agent(monkeypatch):
     }
     hits = svc.search('user-1', ' query ', ['kb_backend_901'], 3, llm_config=model_config)
 
-    assert calls['session_initialized'] is True
-    assert calls['session_cleared'] is True
-    assert calls['injected'] == model_config
+    assert calls['models']['llm']['chat']['model'] == 'llm'
+    assert calls['models']['embed_main']['embed']['model'] == 'embed'
     assert calls['payload']['user_id'] == 'user-1'
     assert calls['payload']['filters']['kb_id'] == ['kb_backend_901']
     assert calls['payload']['query'] == 'query'
@@ -140,6 +138,36 @@ def test_search_validation_and_backend_error(monkeypatch):
         svc.search('user-1', 'q', ['kb'], 10)
     assert unavailable.value.code == 'BACKEND_UNAVAILABLE'
     assert isinstance(unavailable.value.cause, RuntimeError)
+
+
+def test_search_isolates_embedding_config_after_backend_failure(monkeypatch):
+    observed = []
+
+    def runtime():
+        config = lazyllm.globals['config']
+        model = config.get('dynamic_model_configs', {}).get('embed_main', {}).get('embed', {}).get('model')
+        observed.append((model, dict(lazyllm.locals.curr_key)))
+        if model:
+            lazyllm.locals.curr_key['embed_main'] = 'embedding-key'
+            raise RuntimeError('backend failure with private provider details')
+        return [], None, None
+
+    monkeypatch.setattr(svc, '_ensure_kb_search_runtime', runtime)
+    monkeypatch.setattr(svc, 'search_kb', lambda *_args, **_kwargs: [])
+    model_config = {'embed_main': {'source': 'openai', 'model': 'request-embed', 'api_key': 'embedding-key'}}
+
+    with request_configuration_scope() as caller_sid:
+        lazyllm.locals.curr_key['caller'] = 'caller-key'
+        with pytest.raises(svc.KnowledgeSearchError) as unavailable:
+            svc.search('user-a', 'q', ['kb'], 10, llm_config=model_config)
+        assert unavailable.value.code == 'BACKEND_UNAVAILABLE'
+        assert str(unavailable.value) == 'knowledge search backend unavailable'
+        assert svc.search('user-b', 'q', ['kb'], 10) == []
+        assert lazyllm.globals._sid == lazyllm.locals._sid == caller_sid
+        assert lazyllm.locals.curr_key == {'caller': 'caller-key'}
+        assert 'dynamic_model_configs' not in lazyllm.globals['config']
+
+    assert observed == [('request-embed', {}), (None, {})]
 
 
 def test_search_does_not_share_default_user_context(monkeypatch):
