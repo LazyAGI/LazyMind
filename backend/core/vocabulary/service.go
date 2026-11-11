@@ -41,7 +41,11 @@ type ChatWord struct {
 func New(db *gorm.DB) *Service { return &Service{db: db} }
 
 func defaults(owner string) ProviderSetting {
-	return ProviderSetting{OwnerID: owner, SelectedProvider: ProviderAnki, AnkiEndpoint: defaultAnkiURL, AnkiDeckName: defaultAnkiDeck, AnkiModelVersion: ankiModelVersion}
+	provider := ProviderAnki
+	if Enabled() {
+		provider = "local"
+	}
+	return ProviderSetting{OwnerID: owner, SelectedProvider: provider, AnkiEndpoint: defaultAnkiURL, AnkiDeckName: defaultAnkiDeck, AnkiModelVersion: ankiModelVersion}
 }
 
 func (s *Service) Setting(ctx context.Context, owner string) (ProviderSetting, error) {

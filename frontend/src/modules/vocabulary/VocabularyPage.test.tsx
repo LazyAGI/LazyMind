@@ -2,7 +2,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import i18n from "@/i18n";
 import VocabularyPage from "./VocabularyPage";
-import { createWordbook, getActiveVocabularyReviewSession, listVocabulary, listWordbooks, saveVocabularyProvider, startVocabularyReviewSession, submitVocabularySessionReview } from "./api";
+import { createWordbook, getActiveVocabularyReviewSession, getAnkiStatus, getVocabularyProvider, getVocabularyStats, listAnkiDecks, listVocabulary, listWordbooks, saveVocabularyProvider, startVocabularyReviewSession, submitVocabularySessionReview } from "./api";
 
 vi.mock("@/runtime/mode", async (importOriginal) => ({ ...(await importOriginal<typeof import("@/runtime/mode")>()), isVocabularyEnabled: () => true }));
 vi.mock("./api", () => ({
@@ -94,5 +94,25 @@ describe("VocabularyPage", () => {
     await waitFor(()=>expect(saveVocabularyProvider).toHaveBeenCalledWith(expect.objectContaining({local_default_wordbook_id:"new-book"})));
     await waitFor(()=>expect(listVocabulary).toHaveBeenLastCalledWith("local",expect.objectContaining({wordbook_id:"new-book"})));
     expect(saveVocabularyProvider).not.toHaveBeenCalledWith(expect.objectContaining({local_default_wordbook_id:"default"}));
+  });
+
+  it("does not request Anki decks or claim management is available while disconnected", async () => {
+    vi.mocked(getVocabularyProvider).mockResolvedValueOnce({ selected_provider: "anki", anki_endpoint: "http://127.0.0.1:8765", anki_deck_name: "Saved deck" });
+    vi.mocked(getAnkiStatus).mockResolvedValueOnce({ provider: "anki", connected: false, initialized: false, deck_name: "Saved deck", pending_operations: 0 });
+    render(<VocabularyPage />);
+    await screen.findByText("evidence");
+    expect(listAnkiDecks).not.toHaveBeenCalled();
+    expect(getVocabularyStats).not.toHaveBeenCalled();
+    expect(screen.queryByText(i18n.t("vocabularyPage.ankiReviewUnavailable"))).toBeNull();
+    expect(screen.getByText(i18n.t("vocabularyPage.ankiRequired"))).toBeVisible();
+    expect(saveVocabularyProvider).not.toHaveBeenCalled();
+  });
+
+  it("keeps the review capability explanation for a connected Anki without grading", async () => {
+    vi.mocked(getVocabularyProvider).mockResolvedValueOnce({ selected_provider: "anki", anki_endpoint: "http://127.0.0.1:8765", anki_deck_name: "Saved deck" });
+    vi.mocked(getAnkiStatus).mockResolvedValueOnce({ provider: "anki", connected: true, initialized: true, deck_name: "Saved deck", pending_operations: 0, review_capability: "manage_only" });
+    render(<VocabularyPage />);
+    expect(await screen.findByText(i18n.t("vocabularyPage.ankiReviewUnavailable"))).toBeVisible();
+    expect(listAnkiDecks).toHaveBeenCalledTimes(1);
   });
 });

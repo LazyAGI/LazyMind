@@ -163,10 +163,14 @@ export default function VocabularyPage() {
   const load = useCallback(async (preferredWordbookId?: string) => {
     const setting = await getVocabularyProvider();
     const active = setting.selected_provider;
-    const [allBooks, nextDecks] = await Promise.all([
+    const [allBooks, status] = await Promise.all([
       desktop ? listWordbooks() : Promise.resolve([]),
-      active === "anki" ? listAnkiDecks().catch(() => []) : Promise.resolve([]),
+      getAnkiStatus().catch(() => null),
     ]);
+    const ankiDisconnected = active === "anki" && !status?.connected;
+    const nextDecks = active === "anki" && status?.connected
+      ? await listAnkiDecks().catch(() => [])
+      : [];
     const nextBooks = allBooks.filter((book) => !book.capability_key || book.capability_key === "english_definition");
     let selected = preferredWordbookId || wordbookId || setting.local_default_wordbook_id || "";
     if (active === "local" && !nextBooks.some((book) => book.id === selected))
@@ -174,16 +178,15 @@ export default function VocabularyPage() {
         nextBooks.find((book) => book.name === "默认生词本")?.id ||
         nextBooks[0]?.id ||
         "";
-    const [words, status, nextStats, nextLogs, activeReview] =
+    const [words, nextStats, nextLogs, activeReview] =
       await Promise.all([
         listVocabulary(active, {
           search,
           state: state || "",
           wordbook_id: active === "local" ? selected : "",
         }),
-        getAnkiStatus().catch(() => null),
-        getVocabularyStats(active).catch(() => null),
-        listReviewLogs(active).catch(() => []),
+        ankiDisconnected ? Promise.resolve(null) : getVocabularyStats(active).catch(() => null),
+        ankiDisconnected ? Promise.resolve([]) : listReviewLogs(active).catch(() => []),
         getActiveVocabularyReviewSession().catch(() => ({ active: false })),
       ]);
     setProvider(active);
@@ -738,7 +741,15 @@ export default function VocabularyPage() {
             }))}
           />
         </Space>
-        {provider === "anki" && anki?.review_capability !== "full" ? (
+        {provider === "anki" && !anki?.connected ? (
+          <Alert
+            style={{ marginTop: 16 }}
+            type="warning"
+            showIcon
+            message={t("vocabularyPage.ankiRequired")}
+            action={<Button onClick={() => setSettingsOpen(true)}>{t("vocabularyPage.settings")}</Button>}
+          />
+        ) : provider === "anki" && anki?.review_capability !== "full" ? (
           <Alert
             style={{ marginTop: 16 }}
             type="info"
