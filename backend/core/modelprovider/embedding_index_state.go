@@ -106,6 +106,7 @@ func embeddingIndexStateHasIdentityResidue(state orm.EmbeddingIndexState) bool {
 // EmbeddingIndexStatusResponse describes the text-vector space, not merely
 // whether a supplier can currently answer embedding requests.
 type EmbeddingIndexStatusResponse struct {
+	Generation             int64  `json:"generation"`
 	Status                 string `json:"status" enum:"empty,indexed,rebuilding,clearing,cleared,unknown"`
 	IndexIdentity          string `json:"index_identity" enum:"empty,verified,legacy_unknown"`
 	OperationPhase         string `json:"operation_phase" enum:"idle,rebuilding,clearing,cleanup_failed,cleared"`
@@ -147,6 +148,7 @@ func loadEmbeddingIndexStatus(ctx context.Context, db *gorm.DB) (EmbeddingIndexS
 	}
 	classification := classifyEmbeddingIndexState(state, statePresent, counts.Affected, counts.Pending)
 	status := EmbeddingIndexStatusResponse{
+		Generation:    state.Generation,
 		IndexIdentity: classification.IndexIdentity, OperationPhase: classification.OperationPhase,
 		ModelName: state.ActiveModelName, ProviderName: state.ActiveProviderName,
 		IndexedKnowledgeBases: counts.Indexed, PendingKnowledgeBases: counts.Pending, AffectedKnowledgeBases: counts.Affected,
@@ -189,8 +191,19 @@ func loadEmbeddingIndexKnowledgeBaseCounts(ctx context.Context, db *gorm.DB) (em
 		return counts, nil
 	}
 	nonIndexedLevels := []string{"stored", "parsed", "chunked"}
+	if !db.Migrator().HasTable(&orm.Document{}) {
+		// Partial legacy schemas cannot prove an empty inventory. Retain their
+		// dataset-level evidence until document inventory becomes available.
+		err := db.WithContext(ctx).Table("datasets d").
+			Where("d.deleted_at IS NULL AND d.processing_level NOT IN ?", nonIndexedLevels).
+			Distinct("d.id").Count(&counts.Affected).Error
+		counts.Indexed = counts.Affected
+		return counts, err
+	}
 	if !db.Migrator().HasTable(&orm.DocumentProcessingState{}) {
 		query := db.WithContext(ctx).Table("datasets d").
+			Joins("JOIN documents doc ON doc.dataset_id = d.id AND doc.deleted_at IS NULL").
+			Where("doc.document_type IS NULL OR doc.document_type <> ?", "FOLDER").
 			Where("d.deleted_at IS NULL AND d.processing_level NOT IN ?", nonIndexedLevels).
 			Distinct("d.id")
 		if err := query.Count(&counts.Affected).Error; err != nil {
@@ -202,7 +215,9 @@ func loadEmbeddingIndexKnowledgeBaseCounts(ctx context.Context, db *gorm.DB) (em
 	// A target indexed level is enough to require a conservative safety check,
 	// but it does not mean that vectors are ready for display.
 	if err := db.WithContext(ctx).Table("datasets d").
-		Joins("LEFT JOIN document_processing_states s ON s.dataset_id = d.id").
+		Joins("JOIN documents doc ON doc.dataset_id = d.id AND doc.deleted_at IS NULL").
+		Joins("LEFT JOIN document_processing_states s ON s.dataset_id = d.id AND s.document_id = doc.id").
+		Where("doc.document_type IS NULL OR doc.document_type <> ?", "FOLDER").
 		Where("d.deleted_at IS NULL AND (d.processing_level NOT IN ? OR s.index_status = ?)", nonIndexedLevels, "succeeded").
 		Distinct("d.id").Count(&counts.Affected).Error; err != nil {
 		return embeddingIndexKnowledgeBaseCounts{}, err
@@ -210,14 +225,18 @@ func loadEmbeddingIndexKnowledgeBaseCounts(ctx context.Context, db *gorm.DB) (em
 	// Treat a legacy indexed KB with no processing-state rows as potentially
 	// ready, while keeping known pending/failed KBs out of the ready count.
 	if err := db.WithContext(ctx).Table("datasets d").
-		Joins("LEFT JOIN document_processing_states s ON s.dataset_id = d.id").
+		Joins("JOIN documents doc ON doc.dataset_id = d.id AND doc.deleted_at IS NULL").
+		Joins("LEFT JOIN document_processing_states s ON s.dataset_id = d.id AND s.document_id = doc.id").
+		Where("doc.document_type IS NULL OR doc.document_type <> ?", "FOLDER").
 		Where("d.deleted_at IS NULL AND (s.index_status = ? OR (s.dataset_id IS NULL AND d.processing_level NOT IN ?))", "succeeded", nonIndexedLevels).
 		Distinct("d.id").Count(&counts.Indexed).Error; err != nil {
 		return embeddingIndexKnowledgeBaseCounts{}, err
 	}
 	if err := db.WithContext(ctx).Table("datasets d").
 		Joins("JOIN document_processing_states s ON s.dataset_id = d.id").
-		Where("d.deleted_at IS NULL AND d.processing_level NOT IN ? AND s.index_status <> ?", nonIndexedLevels, "succeeded").
+		Joins("JOIN documents doc ON doc.dataset_id = d.id AND doc.id = s.document_id AND doc.deleted_at IS NULL").
+		Where("doc.document_type IS NULL OR doc.document_type <> ?", "FOLDER").
+		Where("d.deleted_at IS NULL AND d.processing_level NOT IN ? AND s.index_status <> ? AND s.embedding_version <> ?", nonIndexedLevels, "succeeded", "reembed:manual").
 		Distinct("d.id").Count(&counts.Pending).Error; err != nil {
 		return embeddingIndexKnowledgeBaseCounts{}, err
 	}

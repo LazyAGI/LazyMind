@@ -62,6 +62,7 @@ import {
 import type { Dataset as CoreDataset, EmbeddingIndexStatusResponse } from "@/api/generated/core-client";
 type Dataset = LegacyDataset & Pick<CoreDataset, "paper_count" | "pdf_attachment_count">;
 import KnowledgeTag from "@/modules/knowledge/components/KnowledgeTag";
+import TextIndexManager from "@/modules/knowledge/components/TextIndexManager";
 import FileUtils from "@/modules/knowledge/utils/file";
 import {
   effectiveProcessingLevel,
@@ -1870,6 +1871,7 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
     <div className="knowledge-list-page" ref={rootRef}>
       {taskNotificationHolder}
       <div className="knowledge-page-header">
+        <TextIndexManager />
         <div>
           {new URLSearchParams(location.search).get("from") === "settings-knowledge" ? (
             <Button

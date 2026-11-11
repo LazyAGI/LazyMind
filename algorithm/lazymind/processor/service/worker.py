@@ -4,7 +4,9 @@ import inspect
 import os
 
 import lazyllm
+from lazymind.parsing.service.opensearch_compat import install as install_opensearch_compat
 from lazymind.model_config import inject_model_config
+install_opensearch_compat()
 lazyllm.inject_model_config = inject_model_config
 
 from lazyllm.tools.rag.parsing_service import DocumentProcessorWorker  # noqa: E402
@@ -123,8 +125,9 @@ if not getattr(DocumentProcessorWorker._Impl, '_lazymind_isolated', False):
             from lazymind.parsing.service.embedding_reset import index_state, IndexBusy
             state = index_state()
             expected = getattr(self, '_lazymind_task_generation', None)
-            if (state['phase'] in ('clearing', 'cleanup_failed', 'cleared')
-                    or (expected is not None and expected != state['generation'])):
+            if (getattr(self, '_lazymind_task_indexes', True)
+                    and (state['phase'] in ('clearing', 'cleanup_failed', 'cleared')
+                         or (expected is not None and expected != state['generation']))):
                 raise IndexBusy('document task belongs to an unavailable index generation')
             if getattr(self, '_lazymind_store_generation', None) != state['generation']:
                 self._processor = None
@@ -155,6 +158,7 @@ if not getattr(DocumentProcessorWorker._Impl, '_lazymind_isolated', False):
             lazyllm.globals['config'].clear()
             lazyllm.inject_model_config = inject_model_config
             from lazymind.parsing.service.embedding_reset import index_lock
+            self._lazymind_task_indexes = payload.get('processing_level', 'indexed') == 'indexed'
             self._lazymind_task_generation = (payload.get('llm_config') or {}).get('_embedding_generation')
             with index_lock():
                 return _BaseDocumentWorkerImpl._run_task(self, task_id, task_type, payload, from_queue)

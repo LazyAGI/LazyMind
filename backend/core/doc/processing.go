@@ -340,6 +340,10 @@ func syncProcessingTaskStates(r *http.Request, datasetID string) {
 				if base.IndexArtifactRef != "core-task:"+task.ID {
 					continue
 				}
+				if base.ParseStatus == "succeeded" && ext.ProcessingLevel == ProcessingLevelIndexed {
+					delete(updates, "parse_status")
+					delete(updates, "chunk_status")
+				}
 				if status == "succeeded" {
 					updates["embedding_version"] = ""
 				}

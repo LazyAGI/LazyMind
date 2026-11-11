@@ -22,6 +22,8 @@ def reset_index(monkeypatch, tmp_path):
     core.dispose()
     core = create_engine(f'sqlite:///{core_path}')
     with core.begin() as conn:
+        conn.execute(text("ALTER TABLE documents ADD COLUMN document_type TEXT DEFAULT ''"))
+        conn.execute(text("ALTER TABLE documents ADD COLUMN p_id TEXT DEFAULT ''"))
         for column in ('parse_error_code', 'parse_error_message', 'chunk_error_code',
                        'chunk_error_message', 'parse_fingerprint', 'chunk_fingerprint'):
             conn.execute(text(f"ALTER TABLE document_processing_states ADD COLUMN {column} TEXT DEFAULT ''"))
@@ -76,24 +78,34 @@ def reset_index(monkeypatch, tmp_path):
     tasks.dispose()
 
 
-def test_clear_keeps_originals_and_marks_every_document_for_manual_parsing(reset_index):
+def test_clear_preserves_parsing_segments_and_image_vectors(reset_index):
     f = reset_index
     assert embedding_reset.clear_chunks(7) == {'cleared': True, 'generation': 7}
     assert f.original.read_text(encoding='utf-8') == 'keep the source'
-    assert not f.artifact.exists()
+    assert f.artifact.exists()
     assert 'col_block' in f.deleted
-    assert 'col_image' in f.deleted
+    assert 'col_image' not in f.deleted
+    assert '__lazyllm_root__' not in f.deleted
     with sqlite3.connect(f.segment_path) as conn:
         tables = conn.execute("SELECT name FROM sqlite_master WHERE name IN ('col_block', 'col_block_fts')").fetchall()
-        assert tables == []
+        assert ('col_block',) in tables
+        assert conn.execute('SELECT uid FROM col_block').fetchall() == [('old-segment',)]
     with f.core.connect() as conn:
         documents = conn.execute(text('SELECT COUNT(*) FROM documents')).scalar_one()
         states = conn.execute(text('SELECT * FROM document_processing_states')).mappings().all()
-    assert len(states) == documents == 5
+    assert documents == 5
+    assert len(states) == 4  # Deleted documents are not recreated as pending work.
     for state in states:
-        assert state['parse_status'] == state['chunk_status'] == state['index_status'] == 'pending'
+        if state['document_id'] == 'doc-deleted':
+            assert state['embedding_version'] == 'old-version'
+            continue
+        assert state['index_status'] == 'pending'
         assert state['embedding_version'] == 'reembed:manual'
-        assert state['chunk_artifact_ref'] == state['index_artifact_ref'] == ''
+        assert state['index_artifact_ref'] == ''
+        if state['document_id'] != 'legacy-doc':
+            assert state['parse_status'] == state['chunk_status'] == 'succeeded'
+            assert state['parse_artifact_ref'] == 'parse-ref'
+            assert state['chunk_artifact_ref'] == str(f.artifact)
     with f.tasks.connect() as conn:
         assert conn.execute(text('SELECT COUNT(*) FROM lazyllm_waiting_task_queue')).scalar_one() == 0
     # Retrying the same cleanup does not touch the original or schedule work.
@@ -137,8 +149,10 @@ def test_empty_only_endpoint_ignores_folders_but_protects_documents(
     if expected_status == 200:
         assert response.json() == {'cleared': True, 'generation': 7}
         assert 'col_block' in f.deleted
-        assert not f.artifact.exists()
-        assert all(state['embedding_version'] == 'reembed:manual' for state in states_after)
+        assert f.artifact.exists()
+        for state in states_after:
+            if state['document_id'] == 'nested':
+                assert state['embedding_version'] == 'reembed:manual'
         with f.tasks.connect() as conn:
             assert conn.execute(text('SELECT COUNT(*) FROM lazyllm_waiting_task_queue')).scalar_one() == 0
     else:
@@ -188,3 +202,18 @@ def test_worker_rejects_late_submission_using_queued_llm_config(monkeypatch):
     worker = object.__new__(module.DocumentProcessorWorker._Impl)
     with pytest.raises(embedding_reset.IndexBusy):
         worker._run_task('old-task', 'doc_add', {'llm_config': {'_embedding_generation': 7}}, True)
+
+
+@pytest.mark.parametrize('phase', ['cleared', 'cleanup_failed', 'clearing'])
+def test_parse_only_worker_does_not_require_vector_identity(monkeypatch, phase):
+    monkeypatch.setitem(config._impl, 'database_url', 'sqlite:///:memory:')
+    module = importlib.import_module('lazymind.processor.service.worker')
+    monkeypatch.setattr(embedding_reset, 'index_lock', nullcontext)
+    monkeypatch.setattr(embedding_reset, 'index_state', lambda: {'generation': 0, 'phase': phase})
+    base = module.DocumentProcessorWorker._Impl.__mro__[1]
+    processor = object()
+    monkeypatch.setattr(base, '_run_task', lambda self, *args: self._get_processor())
+    monkeypatch.setattr(base, '_get_processor', lambda self: processor)
+    monkeypatch.setattr(module, '_install_text_reembed_guard', lambda value: value)
+    worker = object.__new__(module.DocumentProcessorWorker._Impl)
+    assert worker._run_task('parse', 'doc_add', {'processing_level': 'parsed'}, True) is processor

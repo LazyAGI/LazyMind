@@ -135,8 +135,11 @@ func updateProviderEndpointLocked(tx *gorm.DB, parent *orm.UserModelProvider, ba
 			if !errors.Is(err, errEmbeddingIdentityInUse) {
 				return err
 			}
-			if err := invalidateEmptyEmbeddingEndpoint(tx, parent.ID, now); err != nil {
-				return err
+			if emptyErr := invalidateEmptyEmbeddingEndpoint(tx, parent.ID, now); emptyErr != nil {
+				if errors.Is(emptyErr, errEmbeddingIdentityInUse) {
+					return err
+				}
+				return emptyErr
 			}
 		}
 	}

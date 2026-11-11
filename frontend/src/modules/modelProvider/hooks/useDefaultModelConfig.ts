@@ -812,8 +812,8 @@ export function useDefaultModelConfig({
     }
   }, []);
 
-  const loadDefaultModelState = useCallback((retainCatalog = false) => {
-    if (savingCapabilitiesRef.current.size) return false;
+  const loadDefaultModelState = useCallback((retainCatalog = false, refreshWhileSaving = false) => {
+    if (savingCapabilitiesRef.current.size && !refreshWhileSaving) return false;
     const revision = ++loadRevision.current;
     const modelCapabilities = visibleModuleConfigs.map((module) => module.key);
     const serviceCapabilities = cloudServiceConfigs.map((service) => service.key);
@@ -846,7 +846,7 @@ export function useDefaultModelConfig({
       } catch {
         if (!isCurrent()) return false;
         setLoadStates((current) => ({ ...current, [part]: "error" }));
-        return true;
+        return !refreshWhileSaving;
       }
     };
 
@@ -1118,7 +1118,7 @@ export function useDefaultModelConfig({
           window.dispatchEvent(new CustomEvent(CHAT_MODEL_SELECTION_CHANGED_EVENT));
         }
         void onModelSelectionChanged();
-        if (!isAdmin) return retryCapabilityReadiness(capability, true);
+        if (!isAdmin) void retryCapabilityReadiness(capability, true);
       })
       .catch(() => {})
       .finally(() => setCapabilitySaving(capability, false));
@@ -1191,7 +1191,7 @@ export function useDefaultModelConfig({
               if (request !== embeddingSwitchRevision.current) return;
               // The server owns both cleanup and activation. Reconcile while the
               // save lock is held; never send a separate selection PUT here.
-              const refreshed = await loadDefaultModelState(true);
+              const refreshed = await loadDefaultModelState(true, true);
               if (request !== embeddingSwitchRevision.current) return;
               void onModelSelectionChanged();
               if (!activated || !refreshed) {

@@ -1,4 +1,4 @@
-"""Online chunk reset. Original files and document metadata are never deleted."""
+"""Online text-vector reset; originals, parsed chunks and image vectors survive."""
 from contextlib import contextmanager
 from functools import lru_cache
 from pathlib import Path
@@ -114,46 +114,48 @@ def clear_chunks(generation, empty_only=False):
         if empty_only:
             with _engine(config['core_database_url']).connect() as conn:
                 count = conn.execute(text("""SELECT COUNT(*) FROM documents d JOIN datasets ds ON ds.id=d.dataset_id
-                    WHERE d.deleted_at IS NULL AND ds.deleted_at IS NULL""")).scalar_one()
+                    LEFT JOIN document_processing_states s ON s.dataset_id=d.dataset_id AND s.document_id=d.id
+                    WHERE d.deleted_at IS NULL AND ds.deleted_at IS NULL
+                      AND (d.document_type IS NULL OR d.document_type <> 'FOLDER')
+                      AND (ds.processing_level NOT IN ('stored','parsed','chunked') OR s.index_status='succeeded')
+                    """)).scalar_one()
                 if count:
                     raise IndexBusy('knowledge documents changed; confirmation is required')
-        from lazyllm.tools.rag.store import MilvusStore, OpenSearchStore, SQLiteStore
+        from lazyllm.tools.rag.store import MilvusStore
         from lazyllm.tools.rag.store.document_store import _DocumentStore
         from lazymind.parsing.service.build_document import _build_store_config
         from lazymind.config import EMBED_INDEX_KWARGS
         conf = _build_store_config(EMBED_INDEX_KWARGS)
         vector = dict(conf['vector_store']['kwargs'])
         vector.pop('index_kwargs', None)
-        segment = conf['segment_store']
-        factories = {'SQLiteStore': SQLiteStore, 'opensearch': OpenSearchStore, 'OpenSearchStore': OpenSearchStore}
-        if segment['type'] not in factories:
-            raise RuntimeError('unsupported segment store')
-        stores = [MilvusStore(**vector), factories[segment['type']](**segment['kwargs'])]
+        stores = [MilvusStore(**vector)]
         for store in stores:
             store.connect()
-        groups = ('block', 'line', 'code', 'doc-summary', 'image', '__lazyllm_root__', '__lazyllm_image__')
+        groups = ('block', 'line', 'code', 'doc-summary')
         for store in stores:
             for group in groups:
                 name = _DocumentStore._normalize_collection_raw_name(f'col_{group}'.lower())
                 if not store.delete(name):
                     raise RuntimeError('chunk cleanup failed')
-        # Invalidate native-reader chunk artifacts, but retain every original.
+        # Chunk and parse artifacts do not depend on the embedding identity.
+        # Retain them so manual reindex can reuse content without OCR again.
         engine = _engine(config['core_database_url'])
         with engine.begin() as conn:
-            refs = conn.execute(text("""SELECT DISTINCT chunk_artifact_ref FROM document_processing_states
-                WHERE chunk_artifact_ref <> ''""")).scalars().all()
-            root = Path(config['shared_upload_dir']).resolve()
-            for ref in refs:
-                path = Path(ref).resolve()
-                if path.is_relative_to(root) and path.name.endswith('.lazymind-base.json'):
-                    path.unlink(missing_ok=True)
             conn.execute(text("""INSERT INTO document_processing_states (dataset_id, document_id, updated_at)
-                SELECT dataset_id, id, CURRENT_TIMESTAMP FROM documents d WHERE NOT EXISTS (
+                SELECT d.dataset_id, d.id, CURRENT_TIMESTAMP FROM documents d JOIN datasets ds ON ds.id=d.dataset_id
+                WHERE d.deleted_at IS NULL AND ds.deleted_at IS NULL
+                AND (d.document_type IS NULL OR d.document_type <> 'FOLDER')
+                AND ds.processing_level NOT IN ('stored','parsed','chunked') AND NOT EXISTS (
                 SELECT 1 FROM document_processing_states s WHERE s.document_id=d.id AND s.dataset_id=d.dataset_id)"""))
             conn.execute(text("""UPDATE document_processing_states SET
-                parse_status='pending', chunk_status='pending', index_status='pending',
-                parse_error_code='', parse_error_message='', chunk_error_code='', chunk_error_message='',
-                index_error_code='', index_error_message='', parse_artifact_ref='', chunk_artifact_ref='',
-                index_artifact_ref='', parse_fingerprint='', chunk_fingerprint='', index_fingerprint='',
-                embedding_version='reembed:manual', revision=revision+1, updated_at=CURRENT_TIMESTAMP"""))
+                index_status='pending', index_error_code='', index_error_message='',
+                index_artifact_ref='', index_fingerprint='',
+                embedding_version='reembed:manual', revision=revision+1, updated_at=CURRENT_TIMESTAMP
+                WHERE EXISTS (SELECT 1 FROM documents d JOIN datasets ds ON ds.id=d.dataset_id
+                    WHERE d.id=document_processing_states.document_id
+                      AND d.dataset_id=document_processing_states.dataset_id
+                      AND d.deleted_at IS NULL AND ds.deleted_at IS NULL
+                      AND (d.document_type IS NULL OR d.document_type <> 'FOLDER')
+                      AND (ds.processing_level NOT IN ('stored','parsed','chunked')
+                           OR document_processing_states.index_status='succeeded'))"""))
         return {'cleared': True, 'generation': generation}

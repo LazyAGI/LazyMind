@@ -6,7 +6,6 @@ import {
   Ref,
   useEffect,
   useImperativeHandle,
-  useRef,
   useState,
 } from "react";
 
@@ -18,10 +17,6 @@ import { getImportErrorMessage } from "@/modules/knowledge/utils/importError";
 import TagSelect from "@/modules/knowledge/components/TagSelect";
 import { useDatasetPermissionStore } from "@/modules/knowledge/store/dataset_permission";
 import { localizeErrorCode } from "@/components/request";
-import {
-  RuntimeReadinessError,
-  waitForRuntimeCapability,
-} from "@/runtime/readiness";
 
 const SINGLE_FILE_MAX_SIZE = 500 * 1024 * 1024;
 const TOTAL_FILE_MAX_SIZE = 1 * 1024 * 1024 * 1024;
@@ -72,11 +67,9 @@ const ImportKnowledgeModal = (props: IProps, ref: Ref<unknown> | undefined) => {
   const [uploadOptions, setUploadOptions] = useState<KnowledgeOptions["upload"]>();
   const [visible, setVisible] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [runtimeWaiting, setRuntimeWaiting] = useState(false);
   const [importError, setImportError] = useState("");
   const [tags, setTags] = useState<string[]>([]);
   const [hasZipError, setHasZipError] = useState(false);
-  const runtimeWaitAbortRef = useRef<AbortController | null>(null);
   const hasOnlyReadPermission = useDatasetPermissionStore((state) =>
     state.hasOnlyReadPermission(),
   );
@@ -99,7 +92,6 @@ const ImportKnowledgeModal = (props: IProps, ref: Ref<unknown> | undefined) => {
 
   useEffect(() => {
     getTags();
-    return () => runtimeWaitAbortRef.current?.abort();
   }, []);
 
   function getTags() {
@@ -126,13 +118,10 @@ const ImportKnowledgeModal = (props: IProps, ref: Ref<unknown> | undefined) => {
   const isZipMode = importMode === "zip";
 
   function handleClose() {
-    runtimeWaitAbortRef.current?.abort();
-    runtimeWaitAbortRef.current = null;
     form.resetFields();
     setData(InitData);
     setVisible(false);
     setLoading(false);
-    setRuntimeWaiting(false);
     setHasZipError(false);
     setImportError("");
   }
@@ -156,18 +145,9 @@ const ImportKnowledgeModal = (props: IProps, ref: Ref<unknown> | undefined) => {
         : undefined;
 
     try {
-      const controller = new AbortController();
-      runtimeWaitAbortRef.current = controller;
-      if (!storageOnly) await waitForRuntimeCapability("parser", {
-        signal: controller.signal,
-        onWaiting: () => setRuntimeWaiting(true),
-      });
-      setRuntimeWaiting(false);
-
       const tasks = await submitWithHashReuse(fileItems, values.tags, startMode);
       message.success(props.storageOnly ? "文件已保留在知识库内，未解析、未建立索引"
-        : availability !== "ready" ? "原文件、解析文本和基础切片已保存；组件及模型就绪后将自动建立索引"
-        : t("knowledge.uploadCompleteParsingStarted"));
+        : "原文件已保存，可在知识库中查看解析和索引状态");
       handleClose();
       onOk({ pId: data.p_id, tasks });
     } catch (err) {
@@ -175,14 +155,10 @@ const ImportKnowledgeModal = (props: IProps, ref: Ref<unknown> | undefined) => {
         return;
       }
       console.error(err);
-      const errorMessage = getImportErrorMessage(err, err instanceof RuntimeReadinessError
-        ? t("runtime.initializationFailed")
-        : localizeErrorCode("2000509"));
+      const errorMessage = getImportErrorMessage(err, localizeErrorCode("2000509"));
       setImportError(errorMessage);
       message.error(errorMessage);
     } finally {
-      runtimeWaitAbortRef.current = null;
-      setRuntimeWaiting(false);
       setLoading(false);
     }
   }
@@ -232,8 +208,17 @@ const ImportKnowledgeModal = (props: IProps, ref: Ref<unknown> | undefined) => {
         throw new Error(localizeErrorCode("2000509"));
       }
 
-      const started = await startTasksAfterUpload(taskIds, startMode);
-      return (started.data.tasks || []).map((task): ImportTaskRef => {
+      let startedTasks;
+      try {
+        const started = await startTasksAfterUpload(taskIds, startMode);
+        startedTasks = started.data.tasks || [];
+      } catch {
+        // Creation already committed the originals. A processing outage must
+        // not ask the user to upload the same files again.
+        message.warning("原文件已保存，处理暂未启动；服务就绪后可在知识库中重试");
+        startedTasks = createRes.data.tasks || [];
+      }
+      return startedTasks.map((task): ImportTaskRef => {
         const created = createRes.data.tasks?.find((item) => item.task_id === task.task_id || (task.document_id && item.document_id === task.document_id));
         return {
           task_id: task.task_id,
@@ -276,17 +261,13 @@ const ImportKnowledgeModal = (props: IProps, ref: Ref<unknown> | undefined) => {
       {storageOnly && (
         <Alert type="info" showIcon style={{ marginBottom: 16 }}
           message={props.storageOnly ? "文件将保留在知识库内，仅保存原文件，不解析、不建立索引。"
-            : "无需安装 RAG 即可保存解析文本和基础切片。安装组件并配置 embedding 后自动建立索引；扫描件需要 OCR。"} />
+            : "原文件可以正常上传。解析和索引进度可在知识库中查看，服务未就绪时可稍后重试。"} />
       )}
       {importError && <Alert type="error" showIcon message={importError} style={{ marginBottom: 16, whiteSpace: "pre-wrap" }} />}
       {loading && (
         <Alert
-          message={
-            storageOnly ? "正在上传并保存文件，请勿关闭页面" : runtimeWaiting
-              ? t("runtime.aiServiceInitializingDocument")
-              : t("knowledge.documentParsingKeepTabOpen")
-          }
-          type={runtimeWaiting ? "info" : "warning"}
+          message="正在上传并保存文件，请勿关闭页面"
+          type="info"
           showIcon
           style={{ marginBottom: 16 }}
         />

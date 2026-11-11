@@ -139,7 +139,7 @@ func TestEmptyDirectoriesAndDeletedDocumentsDoNotBlockEmbeddingSwitch(t *testing
 
 func TestManuallyClearedDocumentsAreNotReportedAsRebuilding(t *testing.T) {
 	db, _, _, _ := setupProbeTest(t, &orm.EmbeddingIndexState{}, &orm.Dataset{}, &orm.Document{}, &orm.DocumentProcessingState{})
-	state := orm.EmbeddingIndexState{Scope: "global", ActiveModelID: "new-model", Phase: "ready", Generation: 3, Signature: "v1:1:" + strings.Repeat("a", 64) + ":" + strings.Repeat("b", 64), UpdatedAt: time.Now()}
+	state := orm.EmbeddingIndexState{Scope: "global", ActiveModelID: "new-model", ActiveSource: "own", Phase: "ready", Generation: 3, Signature: "v1:1:" + strings.Repeat("a", 64) + ":" + strings.Repeat("b", 64), UpdatedAt: time.Now()}
 	for _, row := range []any{&state, &orm.Dataset{ID: "kb", KbID: "kb", ProcessingLevel: "indexed"}, &orm.Document{ID: "doc", DatasetID: "kb"}, &orm.DocumentProcessingState{DatasetID: "kb", DocumentID: "doc", EmbeddingVersion: "reembed:manual", UpdatedAt: time.Now()}} {
 		if err := db.Create(row).Error; err != nil {
 			t.Fatal(err)
@@ -148,5 +148,45 @@ func TestManuallyClearedDocumentsAreNotReportedAsRebuilding(t *testing.T) {
 	status, err := loadEmbeddingIndexStatus(context.Background(), db)
 	if err != nil || status.Status != "empty" || status.PendingKnowledgeBases != 0 {
 		t.Fatalf("manual parsing was presented as auto rebuilding: %+v %v", status, err)
+	}
+}
+
+func TestClearTextVectorsWithoutAnyUsableModelAndRetry(t *testing.T) {
+	for _, phase := range []string{"ready", "cleanup_failed", "cleared"} {
+		t.Run(phase, func(t *testing.T) {
+			db, _, _, _ := setupProbeTest(t, &orm.EmbeddingIndexState{})
+			before := orm.EmbeddingIndexState{Scope: "global", ActiveModelID: "missing-old-model", Phase: phase, Generation: 3, UpdatedAt: time.Now()}
+			if phase != "ready" {
+				before.TargetModelID = "target-no-longer-usable"
+			}
+			if err := db.Create(&before).Error; err != nil {
+				t.Fatal(err)
+			}
+			calls := 0
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path != "/internal/knowledge:clear-chunks" {
+					t.Errorf("cleanup must not probe old credentials: %s", r.URL.Path)
+					w.WriteHeader(500)
+					return
+				}
+				calls++
+				_, _ = w.Write([]byte(`{"cleared":true,"generation":4}`))
+			}))
+			defer server.Close()
+			t.Setenv("LAZYMIND_CHAT_SERVICE_URL", server.URL)
+			for range 2 {
+				r := httptest.NewRequest("POST", "/embedding/clear-chunks", strings.NewReader(`{"model_id":"","source":"own","generation":3,"confirm_clear_chunks":true}`))
+				r.Header.Set("X-User-Id", "admin")
+				r.Header.Set("X-User-Role", "admin")
+				w := httptest.NewRecorder()
+				ClearEmbeddingChunks(w, r)
+				if w.Code != 200 || !strings.Contains(w.Body.String(), `"cleared":true`) {
+					t.Fatalf("cleanup: %d %s", w.Code, w.Body.String())
+				}
+			}
+			if calls != 1 {
+				t.Fatalf("response-loss retry purged twice: %d", calls)
+			}
+		})
 	}
 }

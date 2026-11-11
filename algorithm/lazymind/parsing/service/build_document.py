@@ -1,5 +1,6 @@
 import os
 import lazyllm
+from lazymind.parsing.service.opensearch_compat import install as install_opensearch_compat
 from copy import deepcopy
 from typing import NamedTuple, Optional
 from lazyllm.tracing import set_trace_context
@@ -27,6 +28,7 @@ from lazymind.common.database.postgres import create_database_engine
 from lazymind.common.database.sqlite_proxy import install_lazyllm_sqlite_proxy
 
 install_lazyllm_sqlite_proxy()
+install_opensearch_compat()
 
 ALGO_ID = 'general_algo'
 _CODE_CHUNK_SIZE = 512

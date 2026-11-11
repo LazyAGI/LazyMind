@@ -435,7 +435,7 @@ func TestDeleteActiveEmbeddingModelWithEmptyKnowledge(t *testing.T) {
 	}{
 		{name: "recorded default", role: "admin", cleanup: 200, want: 200},
 		{name: "legacy default", role: "admin", legacy: true, cleanup: 200, want: 200},
-		{name: "another user's parsed document", role: "admin", hasDocument: true, want: 409},
+		{name: "another user's parsed document", role: "admin", hasDocument: true, cleanup: 200, want: 200},
 		{name: "new documents or active jobs", role: "admin", cleanup: 409, want: 409},
 		{name: "cleanup unavailable", role: "admin", cleanup: 503, want: 409},
 		{name: "non-admin", role: "member", want: 409},

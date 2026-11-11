@@ -27,7 +27,16 @@ func parsingEmbeddingGeneration(ctx context.Context, db *gorm.DB) (int64, error)
 }
 
 // The worker rejects a late queue submission that carries an old model config.
-func loadParsingLLMConfig(ctx context.Context, db *gorm.DB, userID string) (map[string]any, error) {
+func loadParsingLLMConfig(ctx context.Context, db *gorm.DB, userID string, levels ...string) (map[string]any, error) {
+	// Parsing and chunking do not consume or write text vectors.
+	if len(levels) > 0 && levels[0] != ProcessingLevelIndexed {
+		config, err := modelconfig.LoadLLMConfig(ctx, db, userID)
+		if config == nil {
+			config = make(map[string]any)
+		}
+		config["_embedding_generation"] = int64(0)
+		return config, err
+	}
 	generation, err := parsingEmbeddingGeneration(ctx, db)
 	if err != nil {
 		return nil, err

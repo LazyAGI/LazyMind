@@ -144,6 +144,9 @@ func TestLegacyEmbeddingChoiceIsUnavailableWhenOldVectorsHaveUnknownIdentity(t *
 	if err := db.Create(&orm.Dataset{ID: "old-kb", KbID: "old-kb", ProcessingLevel: "indexed", BaseModel: orm.BaseModel{CreateUserID: first.CreateUserID, CreatedAt: now, UpdatedAt: now}}).Error; err != nil {
 		t.Fatal(err)
 	}
+	if err := db.Create(&orm.Document{ID: "legacy-doc", DatasetID: "old-kb"}).Error; err != nil {
+		t.Fatal(err)
+	}
 	choice, present, err := ResolveGlobalEmbeddingChoice(t.Context(), db)
 	if err != nil || !present || choice.Phase != "unverified" {
 		t.Fatalf("legacy choice must expose unsigned vector status: %+v present=%t err=%v", choice, present, err)

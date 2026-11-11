@@ -13,7 +13,6 @@ import (
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
 	"lazymind/core/learning"
-	"lazymind/core/modelprovider"
 	"lazymind/core/settings"
 	"lazymind/core/store"
 	"lazymind/core/systemdeps"
@@ -64,21 +63,8 @@ func knowledgeProcessingLevel(ctx context.Context, db *gorm.DB, user, requested 
 	if err != nil {
 		return "", resourceErr("INVALID_ARGUMENT", err.Error())
 	}
-	if level != ProcessingLevelStored && !controls.DocumentParsingEnabled {
-		return "", resourceErr("UNAVAILABLE", "document parsing is disabled")
-	}
-	if level == ProcessingLevelIndexed && systemdeps.PythonComponentActive("rag") {
-		ready, checkErr := modelprovider.IsModelReady(ctx, db, user, "embed_main")
-		if ready && checkErr == nil && modelprovider.GetCachedModelFeatures().ImageEmbedRequired {
-			ready, checkErr = modelprovider.IsModelReady(ctx, db, user, "embed_image")
-		}
-		if requested == "" && (checkErr != nil || !ready) {
-			return ProcessingLevelChunked, nil
-		}
-		if checkErr != nil || !ready {
-			return "", resourceErr("UNAVAILABLE", "embedding model is not ready")
-		}
-	}
+	// This is the desired processing level, not a readiness check. Originals
+	// must remain writable while parsing or embedding services are unavailable.
 	return level, nil
 }
 
@@ -262,19 +248,14 @@ func KnowledgeOptions(ctx context.Context, db *gorm.DB, user string) (map[string
 	}
 	algorithms, err := knowledgeAlgorithms(ctx)
 	if err != nil {
-		return nil, resourceErr("UNAVAILABLE", err.Error())
+		// The optional processing catalog must not take the upload UI offline.
+		algorithms = []Algo{}
 	}
 	level, err := knowledgeProcessingLevel(ctx, db, user, "")
 	if err != nil {
 		return nil, err
 	}
-	levels := []string{ProcessingLevelStored}
-	if level != ProcessingLevelStored {
-		levels = append(levels, ProcessingLevelParsed, ProcessingLevelChunked)
-	}
-	if level == ProcessingLevelIndexed {
-		levels = append(levels, ProcessingLevelIndexed)
-	}
+	levels := []string{ProcessingLevelStored, ProcessingLevelParsed, ProcessingLevelChunked, ProcessingLevelIndexed}
 	parsers := map[string][]ParserConfig{}
 	for _, algorithm := range algorithms {
 		parsers[algorithm.AlgoID] = fetchParsersByAlgoID(ctx, algorithm.AlgoID)

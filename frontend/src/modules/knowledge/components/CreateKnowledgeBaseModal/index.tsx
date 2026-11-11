@@ -164,8 +164,8 @@ const CreateKnowledgeBaseModal = forwardRef<
 
   const selectedScene = Form.useWatch("learning_profile_key", form);
   function onSceneChange(key: string) {
-    if (key === "academic_papers" && form.getFieldValue("processing_level") === "stored") {
-      form.setFieldValue("processing_level", processingLevels.find(level => level !== "stored") || "parsed");
+    if (key === "academic_papers") {
+      form.setFieldValue("processing_level", "parsed");
     }
     const builtin = learningCatalog?.profiles.find(item => item.key === key);
     if (builtin) {

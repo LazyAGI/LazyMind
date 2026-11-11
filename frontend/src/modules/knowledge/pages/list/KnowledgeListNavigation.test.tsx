@@ -489,17 +489,15 @@ describe("knowledge list URL and data restoration", () => {
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
-  it("shows complete offline cleanup instructions and opens default-model settings without a cleanup request", async () => {
+  it("explains index management recovery and opens settings without silently clearing vectors", async () => {
     mocks.role = "system-admin";
     configureEmbedding(() => ({ status: "unknown", index_identity: "legacy_unknown", operation_phase: "idle" }),
       { ready: false, reason: "index_identity_unverified" });
     const router = await mount("");
 
     const notice = await screen.findByRole("status", { name: noticeName });
-    expect(notice).toHaveTextContent(/停止所有.*读写向量/);
-    expect(notice).toHaveTextContent("LAZYMIND_EMBEDDING_MAINTENANCE_MODE=true");
-    expect(notice).toHaveTextContent(/LAZYMIND_CORE_DATABASE_URL.*正确.*Core/);
-    expect(notice).toHaveTextContent("python -m lazymind.parsing.service.embedding_maintenance --apply --writers-stopped --confirm 'CLEAR TEXT VECTORS'");
+    expect(notice).toHaveTextContent("索引管理");
+    expect(notice).toHaveTextContent("原文件、解析结果和切片会保留");
     fireEvent.click(within(notice).getByRole("link", { name: t("knowledge.goToConfig") }));
     expect(await screen.findByText("默认模型设置")).toBeInTheDocument();
     expect(router.state.location.search).toBe("?section=model_defaults");

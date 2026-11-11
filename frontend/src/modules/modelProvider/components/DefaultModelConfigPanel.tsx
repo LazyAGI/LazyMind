@@ -39,6 +39,7 @@ import {
 import { formatContextWindow } from "../maxInputTokens";
 import { probeHealthVersion, readModelProbeHealth, subscribeProbeHealth } from "../modelProbeHealth";
 import "./DefaultModelConfigPanel.scss";
+import TextIndexManager from "@/modules/knowledge/components/TextIndexManager";
 
 export type {
   CloudServiceSlotKey,
@@ -427,7 +428,13 @@ export default function DefaultModelConfigPanel({
         <div className="model-provider-default-input">
         {!configured && <p className="model-provider-pending-description">{moduleSubtitle}</p>}
         {selectedUnavailable ? (
-          <Alert type="warning" showIcon message={t("modelProvider.modelNotReadyTip")} description={selectedOption.model.unavailableReason} />
+          <Alert type="warning" showIcon message={t("modelProvider.modelNotReadyTip")} description={
+            selectedOption.model.unavailableReason === "index_identity_unverified" ? t("knowledge.embeddingIndexUnknown")
+              : selectedOption.model.unavailableReason === "index_cleanup_in_progress" ? t("knowledge.embeddingIndexClearing")
+              : selectedOption.model.unavailableReason === "index_cleanup_incomplete" ? t("knowledge.embeddingIndexCleanupFailed")
+              : selectedOption.model.unavailableReason === "index_cleared" ? t("knowledge.embeddingIndexCleared")
+              : selectedOption.model.unavailableReason
+          } />
         ) : null}
         {!isAdmin && capabilityReadyStates[module.key] === "error" ? (
           <Alert type="warning" showIcon message={t("modelProvider.capabilityStatusLoadFailed")}
@@ -820,6 +827,7 @@ export default function DefaultModelConfigPanel({
       aria-label={t("modelProvider.defaultConfigAria")}
     >
       <div className="model-provider-panel-title-row">
+        <TextIndexManager />
         <div>
           <h2 className="model-provider-section-title">
             {t("modelProvider.defaultTitle")}

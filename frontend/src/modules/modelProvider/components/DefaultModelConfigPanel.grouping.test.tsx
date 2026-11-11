@@ -4,6 +4,7 @@ import { useLayoutEffect, type ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from "vitest";
 import DefaultModelConfigPanel from "./DefaultModelConfigPanel";
 import { cloudServiceConfigs, DefaultModelConfigRefreshContext, useDefaultModelConfig } from "../hooks/useDefaultModelConfig";
+vi.mock("@/modules/knowledge/components/TextIndexManager", () => ({ default: () => <button>索引管理</button> }));
 
 const mocks = vi.hoisted(() => ({
   role: "system-admin",
@@ -469,7 +470,7 @@ describe("default capability configuration groups", () => {
     const row = await screen.findByRole("group", { name: "modelProvider.module.embeddingTitle" });
     const select = await within(row).findByRole("combobox");
     expect(within(row).getByText("Old embedding · Demo")).toBeInTheDocument();
-    expect(within(row).getByRole("alert")).toHaveTextContent("index_identity_unverified");
+    expect(within(row).getByRole("alert")).toHaveTextContent("knowledge.embeddingIndexUnknown");
     expect(row).not.toHaveClass("is-pending");
     fireEvent.mouseDown(select);
     await waitFor(() => expect(screen.getByText("Old embedding", { selector: "strong" })
@@ -491,7 +492,7 @@ describe("default capability configuration groups", () => {
 
     const row = group("modelProvider.module.embeddingTitle");
     expect(await within(row).findByText("Saved embedding · Demo")).toBeInTheDocument();
-    expect(within(row).getByRole("alert")).toHaveTextContent("index_cleanup_incomplete");
+    expect(within(row).getByRole("alert")).toHaveTextContent("knowledge.embeddingIndexCleanupFailed");
     expect(row).not.toHaveClass("is-pending");
     expect(within(row).queryByText("Old embedding · Demo")).not.toBeInTheDocument();
   });
@@ -520,7 +521,7 @@ describe("default capability configuration groups", () => {
     const supplier = part === "providers" ? "Saved supplier" : "Demo";
     expect(await screen.findByText(`Old embedding · ${supplier}`)).toBeInTheDocument();
     const row = group("modelProvider.module.embeddingTitle");
-    expect(within(row).getByText("index_cleared")).toBeInTheDocument();
+    expect(within(row).getByText("knowledge.embeddingIndexCleared")).toBeInTheDocument();
     expect(screen.queryByText("modelProvider.defaultConfigLoadFailed")).not.toBeInTheDocument();
   });
 

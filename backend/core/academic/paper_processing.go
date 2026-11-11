@@ -43,7 +43,7 @@ func loadLibraryView(r *http.Request, db *gorm.DB, dataset string, ids []string,
 			continue
 		}
 		current, exists := metadata[id]
-		status := doc.DocumentProcessingStatus(current.ProcessingLevel, current.ProcessingState)
+		status := doc.DocumentProcessingStatus(doc.ProcessingLevelParsed, current.ProcessingState)
 		switch {
 		case exists && (status == "ready" || status == "not_requested"):
 			paper.Parse = "ready"

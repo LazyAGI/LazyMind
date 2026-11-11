@@ -26,7 +26,11 @@ func (s *ResourceService) prepareKnowledgeCreate(ctx context.Context, op Resourc
 	if err != nil {
 		return orm.Dataset{}, nil, err
 	}
-	level, err := knowledgeProcessingLevel(ctx, s.db, op.Caller.UserID, req.ProcessingLevel)
+	requestedLevel := req.ProcessingLevel
+	if scene == "academic_papers" && strings.TrimSpace(requestedLevel) == "" {
+		requestedLevel = ProcessingLevelParsed
+	}
+	level, err := knowledgeProcessingLevel(ctx, s.db, op.Caller.UserID, requestedLevel)
 	if err != nil {
 		return orm.Dataset{}, nil, err
 	}

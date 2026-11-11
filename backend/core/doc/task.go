@@ -325,9 +325,6 @@ func BatchUploadTasks(w http.ResponseWriter, r *http.Request) {
 		replyDatasetForbidden(w)
 		return
 	}
-	if datasetRequiresEmbedding(ds) && replyEmbedNotReady(w, r, userID) {
-		return
-	}
 	r.Body = http.MaxBytesReader(w, r.Body, OriginalBatchMaxBytes+(1<<20))
 	if err := r.ParseMultipartForm(8 << 20); err != nil {
 		common.ReplyErr(w, fmt.Sprintf("%s: %v", "invalid multipart form", err), http.StatusBadRequest)
@@ -383,9 +380,6 @@ func UploadFile(w http.ResponseWriter, r *http.Request) {
 	ds, _, ok := requireDatasetPermission(r, datasetID, acl.PermissionDatasetUpload)
 	if !ok {
 		replyDatasetForbidden(w)
-		return
-	}
-	if datasetRequiresEmbedding(ds) && replyEmbedNotReady(w, r, userID) {
 		return
 	}
 	r.Body = http.MaxBytesReader(w, r.Body, OriginalBatchMaxBytes+(1<<20))
@@ -680,10 +674,6 @@ func CreateTask(w http.ResponseWriter, r *http.Request) {
 		replyDatasetForbidden(w)
 		return
 	}
-	if datasetRequiresEmbedding(ds) && replyEmbedNotReady(w, r, userID) {
-		return
-	}
-
 	var req CreateTaskRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		common.ReplyErr(w, fmt.Sprintf("%s: %v", "invalid body", err), http.StatusBadRequest)
@@ -1628,7 +1618,7 @@ func startParseTasksAtLevel(ctx context.Context, userID, datasetID string, taskI
 	if strings.TrimSpace(requestedLevel) != "" {
 		processingLevel = effectiveProcessingLevel(requestedLevel)
 	}
-	llmConfig, err := loadParsingLLMConfig(ctx, store.DB(), userID)
+	llmConfig, err := loadParsingLLMConfig(ctx, store.DB(), userID, processingLevel)
 	if errors.Is(err, errEmbeddingStateChanged) {
 		return nil, err
 	}
@@ -2942,7 +2932,7 @@ func startReparseTasksInternalAtLevel(r *http.Request, datasetID string, taskIDs
 		Int("task_count", len(taskIDs)).
 		Strs("task_ids", taskIDs).
 		Msg("starting reparse tasks")
-	llmConfig, err := loadParsingLLMConfig(r.Context(), store.DB(), userID)
+	llmConfig, err := loadParsingLLMConfig(r.Context(), store.DB(), userID, processingLevel)
 	if errors.Is(err, errEmbeddingStateChanged) {
 		return nil, err
 	}

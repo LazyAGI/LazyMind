@@ -60,10 +60,6 @@ func prepareBaseDocument(r *http.Request, datasetID string, task orm.Task) error
 	if before.EmbeddingVersion == embeddingVersionReembedManual && task.TaskType != string(TaskTypeReparse) {
 		return errEmbeddingStateChanged
 	}
-	generation, err := parsingEmbeddingGeneration(r.Context(), db)
-	if err != nil {
-		return err
-	}
 	var ext documentExt
 	if err := json.Unmarshal(document.Ext, &ext); err != nil {
 		return err
@@ -76,7 +72,7 @@ func prepareBaseDocument(r *http.Request, datasetID string, task orm.Task) error
 	}
 	headers := map[string]string{"X-LazyMind-Internal-Token": strings.TrimSpace(os.Getenv("LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN"))}
 	err = common.ApiPost(r.Context(), common.ChatServiceEndpoint()+"/internal/documents:prepare",
-		map[string]any{"source_path": ext.StoredPath, "embedding_generation": generation}, headers, &result, 2*time.Minute)
+		map[string]any{"source_path": ext.StoredPath}, headers, &result, 2*time.Minute)
 	if err == nil && (result.ArtifactRef != ext.StoredPath+baseArtifactSuffix || result.SourceSHA == "") {
 		err = fmt.Errorf("invalid native reader artifact")
 	}
@@ -113,7 +109,7 @@ func prepareBaseDocument(r *http.Request, datasetID string, task orm.Task) error
 func bindNativeIndexTask(ctx context.Context, datasetID, documentID, taskID, level string, generation int64) {
 	db := store.DB().WithContext(ctx)
 	query := db.Model(&orm.DocumentProcessingState{}).Where("dataset_id = ? AND document_id = ?", datasetID, documentID)
-	if db.Migrator().HasTable(&orm.EmbeddingIndexState{}) {
+	if level == ProcessingLevelIndexed && db.Migrator().HasTable(&orm.EmbeddingIndexState{}) {
 		query = query.Where("NOT EXISTS (SELECT 1 FROM embedding_index_states WHERE scope = 'global' AND (generation <> ? OR phase IN ?))", generation, []string{"clearing", "cleanup_failed", "cleared"})
 	}
 	if level == ProcessingLevelIndexed {

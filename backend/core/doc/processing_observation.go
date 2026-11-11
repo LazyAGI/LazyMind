@@ -185,7 +185,7 @@ func (snapshot processingSnapshot) observe(document orm.Document) (orm.DocumentP
 	}
 	task, hasTask := snapshot.tasks[document.ID]
 	if state.EmbeddingVersion == embeddingVersionReembedManual && (!hasTask || state.IndexArtifactRef != "core-task:"+task.ID) {
-		state.ParseStatus, state.ChunkStatus, state.IndexStatus = "pending", "pending", "pending"
+		state.IndexStatus = "pending"
 		return state, ""
 	}
 	// Pending defaults are not evidence that an unrequested stage is queued.
@@ -209,7 +209,7 @@ func (snapshot processingSnapshot) observe(document orm.Document) (orm.DocumentP
 		task.LazyllmTaskID == "" && ext.ProcessingLevel == "" && ext.TaskState == string(TaskStateSucceeded) {
 		return state, ""
 	}
-	nativeIndexing := (state.ParseArtifactRef != "" || state.EmbeddingVersion == embeddingVersionReembedPending) && ext.ProcessingLevel == ProcessingLevelIndexed
+	nativeIndexing := (state.ParseArtifactRef != "" || state.EmbeddingVersion == embeddingVersionReembedPending || (state.EmbeddingVersion == embeddingVersionReembedManual && state.ParseStatus == "succeeded")) && ext.ProcessingLevel == ProcessingLevelIndexed
 	if nativeIndexing && (state.IndexArtifactRef != "core-task:"+task.ID || ext.ProcessingRevision != snapshot.dataset.ProcessingRevision) {
 		return state, ""
 	}

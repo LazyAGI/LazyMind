@@ -5386,6 +5386,7 @@ export interface EmbeddingClearResponse {
 }
 export interface EmbeddingIndexStatusResponse {
     'affected_knowledge_bases': number;
+    'generation': number;
     'index_identity': EmbeddingIndexStatusResponseIndexIdentityEnum;
     'indexed_knowledge_bases': number;
     'model_name'?: string;
@@ -10016,6 +10017,7 @@ export interface WorkflowControlCommand {
     'manifest_hash'?: string;
     'objective'?: string;
     'preference_scope'?: string;
+    'retry_origin'?: string;
     'review_id'?: string;
     'review_version'?: number;
     'runtime_instruction'?: string;
@@ -11168,6 +11170,54 @@ export const AcademicWorkflowsApiAxiosParamCreator = function (configuration?: C
         },
         /**
          *
+         * @summary Delete one saved paper note
+         * @param {string} targetDatasetId
+         * @param {string} libraryPaperId
+         * @param {string} noteId
+         * @param {object} [body]
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreAcademicLibraryPapersLibraryPaperIdNotesNoteIdDeletePost: async (targetDatasetId: string, libraryPaperId: string, noteId: string, body?: object, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'targetDatasetId' is not null or undefined
+            assertParamExists('apiCoreAcademicLibraryPapersLibraryPaperIdNotesNoteIdDeletePost', 'targetDatasetId', targetDatasetId)
+            // verify required parameter 'libraryPaperId' is not null or undefined
+            assertParamExists('apiCoreAcademicLibraryPapersLibraryPaperIdNotesNoteIdDeletePost', 'libraryPaperId', libraryPaperId)
+            // verify required parameter 'noteId' is not null or undefined
+            assertParamExists('apiCoreAcademicLibraryPapersLibraryPaperIdNotesNoteIdDeletePost', 'noteId', noteId)
+            const localVarPath = `/api/core/academic/library/papers/{library_paper_id}/notes/{note_id}:delete`
+                .replace(`{${"library_paper_id"}}`, encodeURIComponent(String(libraryPaperId)))
+                .replace(`{${"note_id"}}`, encodeURIComponent(String(noteId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            if (targetDatasetId !== undefined) {
+                localVarQueryParameter['target_dataset_id'] = targetDatasetId;
+            }
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(body, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
          * @summary Add a note idempotently by stable note ID
          * @param {string} targetDatasetId
          * @param {string} libraryPaperId
@@ -12023,6 +12073,22 @@ export const AcademicWorkflowsApiFp = function(configuration?: Configuration) {
         },
         /**
          *
+         * @summary Delete one saved paper note
+         * @param {string} targetDatasetId
+         * @param {string} libraryPaperId
+         * @param {string} noteId
+         * @param {object} [body]
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreAcademicLibraryPapersLibraryPaperIdNotesNoteIdDeletePost(targetDatasetId: string, libraryPaperId: string, noteId: string, body?: object, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<PaperLibraryChanges>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreAcademicLibraryPapersLibraryPaperIdNotesNoteIdDeletePost(targetDatasetId, libraryPaperId, noteId, body, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['AcademicWorkflowsApi.apiCoreAcademicLibraryPapersLibraryPaperIdNotesNoteIdDeletePost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
          * @summary Add a note idempotently by stable note ID
          * @param {string} targetDatasetId
          * @param {string} libraryPaperId
@@ -12424,6 +12490,16 @@ export const AcademicWorkflowsApiFactory = function (configuration?: Configurati
         },
         /**
          *
+         * @summary Delete one saved paper note
+         * @param {AcademicWorkflowsApiApiCoreAcademicLibraryPapersLibraryPaperIdNotesNoteIdDeletePostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreAcademicLibraryPapersLibraryPaperIdNotesNoteIdDeletePost(requestParameters: AcademicWorkflowsApiApiCoreAcademicLibraryPapersLibraryPaperIdNotesNoteIdDeletePostRequest, options?: RawAxiosRequestConfig): AxiosPromise<PaperLibraryChanges> {
+            return localVarFp.apiCoreAcademicLibraryPapersLibraryPaperIdNotesNoteIdDeletePost(requestParameters.targetDatasetId, requestParameters.libraryPaperId, requestParameters.noteId, requestParameters.body, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
          * @summary Add a note idempotently by stable note ID
          * @param {AcademicWorkflowsApiApiCoreAcademicLibraryPapersLibraryPaperIdNotesPostRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
@@ -12761,6 +12837,19 @@ export interface AcademicWorkflowsApiApiCoreAcademicLibraryPapersLibraryPaperIdA
 }
 
 /**
+ * Request parameters for apiCoreAcademicLibraryPapersLibraryPaperIdNotesNoteIdDeletePost operation in AcademicWorkflowsApi.
+ */
+export interface AcademicWorkflowsApiApiCoreAcademicLibraryPapersLibraryPaperIdNotesNoteIdDeletePostRequest {
+    readonly targetDatasetId: string
+
+    readonly libraryPaperId: string
+
+    readonly noteId: string
+
+    readonly body?: object
+}
+
+/**
  * Request parameters for apiCoreAcademicLibraryPapersLibraryPaperIdNotesPost operation in AcademicWorkflowsApi.
  */
 export interface AcademicWorkflowsApiApiCoreAcademicLibraryPapersLibraryPaperIdNotesPostRequest {
@@ -13086,6 +13175,17 @@ export class AcademicWorkflowsApi extends BaseAPI {
      */
     public apiCoreAcademicLibraryPapersLibraryPaperIdAttachmentsAttachmentIdDetachPost(requestParameters: AcademicWorkflowsApiApiCoreAcademicLibraryPapersLibraryPaperIdAttachmentsAttachmentIdDetachPostRequest, options?: RawAxiosRequestConfig) {
         return AcademicWorkflowsApiFp(this.configuration).apiCoreAcademicLibraryPapersLibraryPaperIdAttachmentsAttachmentIdDetachPost(requestParameters.targetDatasetId, requestParameters.libraryPaperId, requestParameters.attachmentId, requestParameters.apiCoreAcademicLibraryFoldersFolderIdDeletePostRequest, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Delete one saved paper note
+     * @param {AcademicWorkflowsApiApiCoreAcademicLibraryPapersLibraryPaperIdNotesNoteIdDeletePostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreAcademicLibraryPapersLibraryPaperIdNotesNoteIdDeletePost(requestParameters: AcademicWorkflowsApiApiCoreAcademicLibraryPapersLibraryPaperIdNotesNoteIdDeletePostRequest, options?: RawAxiosRequestConfig) {
+        return AcademicWorkflowsApiFp(this.configuration).apiCoreAcademicLibraryPapersLibraryPaperIdNotesNoteIdDeletePost(requestParameters.targetDatasetId, requestParameters.libraryPaperId, requestParameters.noteId, requestParameters.body, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**
@@ -25516,6 +25616,72 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
         },
         /**
          *
+         * @summary GET /datasets/{dataset}/text-index
+         * @param {string} dataset
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreDatasetsDatasetTextIndexGet: async (dataset: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'dataset' is not null or undefined
+            assertParamExists('apiCoreDatasetsDatasetTextIndexGet', 'dataset', dataset)
+            const localVarPath = `/api/core/datasets/{dataset}/text-index`
+                .replace(`{${"dataset"}}`, encodeURIComponent(String(dataset)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary POST /datasets/{dataset}/text-index
+         * @param {string} dataset
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreDatasetsDatasetTextIndexPost: async (dataset: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'dataset' is not null or undefined
+            assertParamExists('apiCoreDatasetsDatasetTextIndexPost', 'dataset', dataset)
+            const localVarPath = `/api/core/datasets/{dataset}/text-index`
+                .replace(`{${"dataset"}}`, encodeURIComponent(String(dataset)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
          * @summary Upload file
          * @param {string} dataset
          * @param {string} [documentPid]
@@ -37123,6 +37289,32 @@ export const DefaultApiFp = function(configuration?: Configuration) {
         },
         /**
          *
+         * @summary GET /datasets/{dataset}/text-index
+         * @param {string} dataset
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreDatasetsDatasetTextIndexGet(dataset: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreDatasetsDatasetTextIndexGet(dataset, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreDatasetsDatasetTextIndexGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary POST /datasets/{dataset}/text-index
+         * @param {string} dataset
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreDatasetsDatasetTextIndexPost(dataset: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreDatasetsDatasetTextIndexPost(dataset, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreDatasetsDatasetTextIndexPost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
          * @summary Upload file
          * @param {string} dataset
          * @param {string} [documentPid]
@@ -42362,6 +42554,26 @@ export const DefaultApiFactory = function (configuration?: Configuration, basePa
         },
         /**
          *
+         * @summary GET /datasets/{dataset}/text-index
+         * @param {DefaultApiApiCoreDatasetsDatasetTextIndexGetRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreDatasetsDatasetTextIndexGet(requestParameters: DefaultApiApiCoreDatasetsDatasetTextIndexGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreDatasetsDatasetTextIndexGet(requestParameters.dataset, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary POST /datasets/{dataset}/text-index
+         * @param {DefaultApiApiCoreDatasetsDatasetTextIndexPostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreDatasetsDatasetTextIndexPost(requestParameters: DefaultApiApiCoreDatasetsDatasetTextIndexPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreDatasetsDatasetTextIndexPost(requestParameters.dataset, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
          * @summary Upload file
          * @param {DefaultApiApiCoreDatasetsDatasetUploadsPostRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
@@ -46152,6 +46364,20 @@ export interface DefaultApiApiCoreDatasetsDatasetTasksBatchUploadPostRequest {
 }
 
 /**
+ * Request parameters for apiCoreDatasetsDatasetTextIndexGet operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreDatasetsDatasetTextIndexGetRequest {
+    readonly dataset: string
+}
+
+/**
+ * Request parameters for apiCoreDatasetsDatasetTextIndexPost operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreDatasetsDatasetTextIndexPostRequest {
+    readonly dataset: string
+}
+
+/**
  * Request parameters for apiCoreDatasetsDatasetUploadsPost operation in DefaultApi.
  */
 export interface DefaultApiApiCoreDatasetsDatasetUploadsPostRequest {
@@ -49306,6 +49532,28 @@ export class DefaultApi extends BaseAPI {
      */
     public apiCoreDatasetsDatasetTasksBatchUploadPost(requestParameters: DefaultApiApiCoreDatasetsDatasetTasksBatchUploadPostRequest, options?: RawAxiosRequestConfig) {
         return DefaultApiFp(this.configuration).apiCoreDatasetsDatasetTasksBatchUploadPost(requestParameters.dataset, requestParameters.documentPid, requestParameters.documentTags, requestParameters.files, requestParameters.relativePath, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary GET /datasets/{dataset}/text-index
+     * @param {DefaultApiApiCoreDatasetsDatasetTextIndexGetRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreDatasetsDatasetTextIndexGet(requestParameters: DefaultApiApiCoreDatasetsDatasetTextIndexGetRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreDatasetsDatasetTextIndexGet(requestParameters.dataset, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary POST /datasets/{dataset}/text-index
+     * @param {DefaultApiApiCoreDatasetsDatasetTextIndexPostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreDatasetsDatasetTextIndexPost(requestParameters: DefaultApiApiCoreDatasetsDatasetTextIndexPostRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreDatasetsDatasetTextIndexPost(requestParameters.dataset, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**
@@ -58374,8 +58622,8 @@ export class McpServersApi extends BaseAPI {
 export const ModelProvidersApiAxiosParamCreator = function (configuration?: Configuration) {
     return {
         /**
-         * Requires a preview generation and explicit administrator confirmation for a server-verified candidate. Clears shared chunks and vectors, preserves source files and document records, and atomically activates the target model with its saved selection. The server completes the operation independently of browser cancellation. Retrying the same confirmed request resumes an interrupted cleanup or activation; replaying a completed request does not clear the new index. Success acknowledges both cleared and activated. Documents await manual parsing; no parsing tasks are enqueued.
-         * @summary Clear knowledge chunks and activate the confirmed embedding model
+         * Requires the current generation and explicit administrator confirmation. Clears text vectors while preserving originals, parsed content, chunks and image vectors. An empty model_id performs credential-independent recovery without activating a model. Otherwise the server verifies and activates the replacement independently of browser cancellation. Replaying a completed request does not clear the new index. Documents await explicit reindexing.
+         * @summary Clear text vectors and optionally activate a replacement embedding model
          * @param {EmbeddingClearRequest} embeddingClearRequest
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
@@ -59785,8 +60033,8 @@ export const ModelProvidersApiFp = function(configuration?: Configuration) {
     const localVarAxiosParamCreator = ModelProvidersApiAxiosParamCreator(configuration)
     return {
         /**
-         * Requires a preview generation and explicit administrator confirmation for a server-verified candidate. Clears shared chunks and vectors, preserves source files and document records, and atomically activates the target model with its saved selection. The server completes the operation independently of browser cancellation. Retrying the same confirmed request resumes an interrupted cleanup or activation; replaying a completed request does not clear the new index. Success acknowledges both cleared and activated. Documents await manual parsing; no parsing tasks are enqueued.
-         * @summary Clear knowledge chunks and activate the confirmed embedding model
+         * Requires the current generation and explicit administrator confirmation. Clears text vectors while preserving originals, parsed content, chunks and image vectors. An empty model_id performs credential-independent recovery without activating a model. Otherwise the server verifies and activates the replacement independently of browser cancellation. Replaying a completed request does not clear the new index. Documents await explicit reindexing.
+         * @summary Clear text vectors and optionally activate a replacement embedding model
          * @param {EmbeddingClearRequest} embeddingClearRequest
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
@@ -60305,8 +60553,8 @@ export const ModelProvidersApiFactory = function (configuration?: Configuration,
     const localVarFp = ModelProvidersApiFp(configuration)
     return {
         /**
-         * Requires a preview generation and explicit administrator confirmation for a server-verified candidate. Clears shared chunks and vectors, preserves source files and document records, and atomically activates the target model with its saved selection. The server completes the operation independently of browser cancellation. Retrying the same confirmed request resumes an interrupted cleanup or activation; replaying a completed request does not clear the new index. Success acknowledges both cleared and activated. Documents await manual parsing; no parsing tasks are enqueued.
-         * @summary Clear knowledge chunks and activate the confirmed embedding model
+         * Requires the current generation and explicit administrator confirmation. Clears text vectors while preserving originals, parsed content, chunks and image vectors. An empty model_id performs credential-independent recovery without activating a model. Otherwise the server verifies and activates the replacement independently of browser cancellation. Replaying a completed request does not clear the new index. Documents await explicit reindexing.
+         * @summary Clear text vectors and optionally activate a replacement embedding model
          * @param {ModelProvidersApiApiCoreModelProvidersEmbeddingClearChunksPostRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
@@ -60986,8 +61234,8 @@ export interface ModelProvidersApiApiCoreModelProvidersWithGroupsGetRequest {
  */
 export class ModelProvidersApi extends BaseAPI {
     /**
-     * Requires a preview generation and explicit administrator confirmation for a server-verified candidate. Clears shared chunks and vectors, preserves source files and document records, and atomically activates the target model with its saved selection. The server completes the operation independently of browser cancellation. Retrying the same confirmed request resumes an interrupted cleanup or activation; replaying a completed request does not clear the new index. Success acknowledges both cleared and activated. Documents await manual parsing; no parsing tasks are enqueued.
-     * @summary Clear knowledge chunks and activate the confirmed embedding model
+     * Requires the current generation and explicit administrator confirmation. Clears text vectors while preserving originals, parsed content, chunks and image vectors. An empty model_id performs credential-independent recovery without activating a model. Otherwise the server verifies and activates the replacement independently of browser cancellation. Replaying a completed request does not clear the new index. Documents await explicit reindexing.
+     * @summary Clear text vectors and optionally activate a replacement embedding model
      * @param {ModelProvidersApiApiCoreModelProvidersEmbeddingClearChunksPostRequest} requestParameters Request parameters.
      * @param {*} [options] Override http request option.
      * @throws {RequiredError}
