@@ -323,23 +323,25 @@ type documentExt struct {
 }
 
 type pdfArtifactRecord struct {
-	ID             string `json:"id"`
-	Kind           string `json:"kind"`
-	CacheKey       string `json:"cache_key"`
-	StoredPath     string `json:"stored_path"`
-	SourcePath     string `json:"source_path,omitempty"`
-	LayoutPath     string `json:"layout_path,omitempty"`
-	DraftPath      string `json:"draft_path,omitempty"`
-	HasLayout      bool   `json:"has_layout,omitempty"`
-	HasDraft       bool   `json:"has_draft,omitempty"`
-	Filename       string `json:"filename"`
-	ContentType    string `json:"content_type"`
-	TargetLanguage string `json:"target_language,omitempty"`
-	ProviderType   string `json:"provider_type,omitempty"`
-	Provider       string `json:"provider,omitempty"`
-	Model          string `json:"model,omitempty"`
-	WarningCount   int    `json:"warning_count,omitempty"`
-	CreatedAt      string `json:"created_at"`
+	ID                     string `json:"id"`
+	Kind                   string `json:"kind"`
+	CacheKey               string `json:"cache_key"`
+	StoredPath             string `json:"stored_path"`
+	SourcePath             string `json:"source_path,omitempty"`
+	LayoutPath             string `json:"layout_path,omitempty"`
+	DraftPath              string `json:"draft_path,omitempty"`
+	HasLayout              bool   `json:"has_layout,omitempty"`
+	HasDraft               bool   `json:"has_draft,omitempty"`
+	Filename               string `json:"filename"`
+	ContentType            string `json:"content_type"`
+	TargetLanguage         string `json:"target_language,omitempty"`
+	ProviderType           string `json:"provider_type,omitempty"`
+	Provider               string `json:"provider,omitempty"`
+	Model                  string `json:"model,omitempty"`
+	WarningCount           int    `json:"warning_count,omitempty"`
+	SupplementalBlockCount int    `json:"supplemental_block_count,omitempty"`
+	LayoutPreserved        bool   `json:"layout_preserved,omitempty"`
+	CreatedAt              string `json:"created_at"`
 }
 
 type pdfRenderJobRecord struct {

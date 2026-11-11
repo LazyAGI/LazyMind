@@ -1,12 +1,12 @@
 import {useEffect,useRef,useState,type ReactNode} from 'react';
 import {useTranslation} from 'react-i18next';
 import {axiosInstance,BASE_URL} from '@/components/request';
-import {addLibraryNote,decodePersistedLibrary,mergeLibraryChanges,type PersistedPaperLibrary} from '@/modules/knowledge/paper/store';
+import {addLibraryNote,decodePersistedLibrary,deleteLibraryNote,mergeLibraryChanges,type PersistedPaperLibrary} from '@/modules/knowledge/paper/store';
 import type {NoteColor,PdfNoteSource} from '@/modules/knowledge/paper/libraryModel';
 import {safePaperUrl,type PaperMetadata} from '@/modules/knowledge/paper/model';
 import {PDF_NOTE_COLORS} from '@/components/ui/pdfNoteHighlights';
 import './PaperReaderDetails.scss';
-export interface PaperReaderDetailsProps {documentVocabulary?:ReactNode;datasetId:string;documentId:string;fileName:string;canWrite:boolean;draftRequest?:{documentId:string;requestId:number;text:string;sourceQuote?:string};initialTab?:'info'|'notes';refreshToken?:number;onNavigatePage?:(page:number)=>void;onNavigateNote?:(source:PdfNoteSource)=>void}
+export interface PaperReaderDetailsProps {documentVocabulary?:ReactNode;datasetId:string;documentId:string;fileName:string;canWrite:boolean;draftRequest?:{documentId:string;requestId:number;text:string;sourceQuote?:string};initialTab?:'info'|'notes';refreshToken?:number;selectedNoteId?:string;onNavigatePage?:(page:number)=>void;onNavigateNote?:(source:PdfNoteSource)=>void;onNoteDeleted?:(id:string)=>void}
 function readableNote(content:string){
  const lines=content.replace(/\r\n?/g,'\n').split('\n');let quoteLines=0;
  while(lines[quoteLines]?.startsWith('> '))quoteLines++;
@@ -25,10 +25,10 @@ function bibliography(metadata:PaperMetadata){
  if(metadata.identifiers.arxiv)fields.eprint=metadata.identifiers.arxiv;
  return `@article{paper,\n${Object.entries(fields).map(([key,value])=>`  ${key} = {${bibEscape(value)}}`).join(',\n')}\n}`;
 }
-export default function PaperReaderDetails({datasetId,documentId,fileName,canWrite,draftRequest,initialTab='info',refreshToken,onNavigatePage,onNavigateNote,documentVocabulary}:PaperReaderDetailsProps){
+export default function PaperReaderDetails({datasetId,documentId,fileName,canWrite,draftRequest,initialTab='info',refreshToken,selectedNoteId,onNavigatePage,onNavigateNote,onNoteDeleted,documentVocabulary}:PaperReaderDetailsProps){
  const {i18n}=useTranslation();const zh=i18n.language.startsWith('zh');const label=(en:string,cn:string)=>zh?cn:en;
  const tab=initialTab;const [result,setResult]=useState<{key:string;library?:PersistedPaperLibrary;error?:string}>();
- const [revision,setRevision]=useState(0);const [draft,setDraft]=useState('');const [saving,setSaving]=useState(false);const [saveError,setSaveError]=useState('');const [copyStatus,setCopyStatus]=useState('');
+ const [revision,setRevision]=useState(0);const [draft,setDraft]=useState('');const [saving,setSaving]=useState(false);const [saveError,setSaveError]=useState('');const [copyStatus,setCopyStatus]=useState('');const [deletingId,setDeletingId]=useState('');const [deleteError,setDeleteError]=useState<{id:string;message:string}>();
  const draftDocument=useRef<string>();const noteSources=useRef<string[]>([]);const editorRef=useRef<HTMLDetailsElement>(null);
  const generation=useRef(0);const noteId=useRef('');const key=`${datasetId}/${documentId}`;const currentKey=useRef(key);currentKey.current=key;const mounted=useRef(false);
  useEffect(()=>{mounted.current=true;return()=>{mounted.current=false;};},[]);
@@ -59,6 +59,8 @@ export default function PaperReaderDetails({datasetId,documentId,fileName,canWri
  const metadata=paper?.metadata;const notes=paper?library!.data.notes.filter(note=>note.paperId===paper.id&&paper.noteIds.includes(note.id)).sort((left,right)=>String(right.createdAt||'').localeCompare(String(left.createdAt||''))):[];
  const annotations=paper?library!.data.annotations?.filter(item=>item.paperId===paper.id&&(!item.attachmentId||library!.data.attachments.some(a=>a.id===item.attachmentId&&a.contentRef===documentId)))||[]:[];
  const writable=canWrite&&library?.canWrite&&!!paper;
+ const selectedNoteRef=useRef<HTMLLIElement>(null);
+ useEffect(()=>{if(!selectedNoteId||!selectedNoteRef.current)return;selectedNoteRef.current.focus({preventScroll:true});selectedNoteRef.current.scrollIntoView?.({block:'nearest'});},[selectedNoteId,notes.length]);
  const copy=async(text:string)=>{try{await navigator.clipboard.writeText(text);if(mounted.current&&currentKey.current===key)setCopyStatus(label('Copied','已复制'));}catch{if(mounted.current&&currentKey.current===key)setCopyStatus(label('Could not copy. Please try again.','复制失败，请重试。'));}};
  const save=async()=>{
   if(!writable||!draft.trim()||saving||!paper||!library)return;
@@ -67,6 +69,14 @@ export default function PaperReaderDetails({datasetId,documentId,fileName,canWri
    setResult({key,library:{...library,data:mergeLibraryChanges(library.data,change)}});setDraft('');noteId.current='';noteSources.current=[];
   }catch(error){if(mounted.current&&currentKey.current===key&&generation.current===saveGeneration)setSaveError(error instanceof Error?error.message:label('Could not save note.','无法保存笔记。'));}
   finally{if(mounted.current&&currentKey.current===key&&generation.current===saveGeneration)setSaving(false);}
+ };
+ const removeNote=async(id:string)=>{
+  if(!writable||!paper||!library||deletingId)return;
+  if(!window.confirm(label('Delete this note? This cannot be undone.','删除这条笔记？此操作无法撤销。')))return;
+  setDeletingId(id);setDeleteError(undefined);
+  try{const change=await deleteLibraryNote(datasetId,paper.id,id);setResult({key,library:{...library,data:mergeLibraryChanges(library.data,change)}});onNoteDeleted?.(id);}
+  catch(error){setDeleteError({id,message:error instanceof Error?error.message:label('Could not delete note.','无法删除笔记。')});}
+  finally{setDeletingId('');}
  };
  return <aside className="paper-reader-details" aria-label={label('Paper details','论文资料')}>
   <header><h2>{tab==='info'?label('Paper information','论文信息'):label('Notes','笔记')}</h2></header>
@@ -104,7 +114,8 @@ export default function PaperReaderDetails({datasetId,documentId,fileName,canWri
            {foreignAttachment&&<span>{label('Another attachment','其他附件')}</span>}
          </span>}
        </>;
-       return <li className="paper-reader-details__note" key={note.id}>{navigate&&!damaged?<button type="button" className="paper-reader-details__note-source" onClick={navigate}>{content}</button>:<div className="paper-reader-details__note-static">{content}</div>}</li>;
+       const selected=note.id===selectedNoteId;
+       return <li ref={selected?selectedNoteRef:undefined} tabIndex={selected?-1:undefined} aria-current={selected?'true':undefined} className={`paper-reader-details__note${selected?' is-selected':''}`} key={note.id}><div className="paper-reader-details__note-row">{navigate&&!damaged?<button type="button" className="paper-reader-details__note-source" onClick={navigate}>{content}</button>:<div className="paper-reader-details__note-static">{content}</div>}{writable&&<button type="button" className="paper-reader-details__note-delete" aria-label={label('Delete note','删除笔记')} disabled={!!deletingId} onClick={()=>void removeNote(note.id)}>{deletingId===note.id?label('Deleting…','正在删除…'):label('Delete','删除')}</button>}</div>{deleteError?.id===note.id&&<p role="alert">{deleteError.message}</p>}</li>;
      })}</ol>}
      {!!annotations.length&&<section className="paper-reader-details__annotations"><h4>{label('Saved annotations','已保存的批注')}</h4><ol className="paper-reader-details__notes" aria-label={label('Saved annotations','已保存的批注')}>{annotations.map(item=>{
        const color=PDF_NOTE_COLORS.find(candidate=>candidate.key===item.color);

@@ -20,7 +20,6 @@ func Registry() []Capability {
 		{Formula, "公式研读", []string{PDFParse}, []string{OnDemand, Automatic, Disabled}, []string{"explicit", "future_document"}, "block", "model_request", "formula-explanation-v7-low-latency"},
 		{Figure, "图片研读", []string{PDFParse}, []string{OnDemand, Automatic, Disabled}, []string{"explicit", "future_document"}, "block", "model_request", "paper-reading-v2-grounded-findings"},
 		{Table, "表格研读", []string{PDFParse}, []string{OnDemand, Automatic, Disabled}, []string{"explicit", "future_document"}, "block", "model_request", "paper-reading-v2-grounded-findings"},
-		{"overview", "论文速览", []string{PDFParse}, []string{}, []string{}, "document", "unavailable", "unavailable"},
 	}
 }
 func configurableKeys() []string {
