@@ -210,3 +210,55 @@ def test_registered_media_tools_use_only_materialized_authorized_inputs(monkeypa
     }, execute=True)
     assert result['result'] == {'media_url': 'https://example.com/generated-output'}
     assert len(observed) == 1 and not observed[0].exists()
+
+
+@pytest.mark.parametrize('vision_role', ['vlm', 'llm'])
+def test_external_vision_uses_configured_model_and_returns_only_description(monkeypatch, vision_role):
+    import base64
+    import io
+    from pathlib import Path
+
+    from PIL import Image
+    from lazyllm.components.formatter import decode_query_with_filepaths
+    from lazymind.chat.engine import attachment_reader
+
+    config = next(item for item in external_tools.DEFAULT_TOOLS if item.name == 'multimodal')
+    monkeypatch.setattr(external_tools, 'DEFAULT_TOOLS', [config])
+    content = io.BytesIO()
+    Image.new('RGB', (2, 2), 'red').save(content, format='PNG')
+    image = content.getvalue()
+    observed = []
+
+    def provider_boundary(model, type):
+        assert (model, type) == (vision_role, 'vlm')
+
+        def describe(encoded_query, **kwargs):
+            query = decode_query_with_filepaths(encoded_query)
+            assert query['query'] == 'Describe the visible colors'
+            path = Path(query['files'][0])
+            assert path.read_bytes() == image
+            observed.append(path)
+            return 'A red square.'
+
+        return describe
+
+    monkeypatch.setattr(attachment_reader, 'AutoModel', provider_boundary)
+    request = {'tool_name': 'multimodal'}
+    assert not external_tools.run_external_tools(request)['items'][0]['available']
+    vision_model = {'source': 'openai', 'model': 'configured-vision', 'api_key': 'test', 'vision': True}
+    request['llm_config'] = {vision_role: {**vision_model, 'features': {'vision': False}}}
+    assert not external_tools.run_external_tools(request)['items'][0]['available']
+    request['llm_config'] = {vision_role: vision_model}
+    catalog = external_tools.run_external_tools(request)['items'][0]
+    assert catalog['available']
+    assert 'resource:<id>' in catalog['input_schema']['properties']['url']['description']
+
+    with pytest.raises(ValueError, match='authorized image bytes'):
+        external_tools.run_external_tools({**request, 'arguments': {'url': '/private/image.png'}}, execute=True)
+    result = external_tools.run_external_tools({**request, 'arguments': {
+        'url': 'data:image/png;base64,' + base64.b64encode(image).decode(),
+        'instruction': 'Describe the visible colors',
+    }}, execute=True)
+
+    assert result['result'] == {'description': 'A red square.'}
+    assert len(observed) == 1 and not observed[0].exists()

@@ -17,6 +17,7 @@ from lazyllm.tools import ToolManager
 from lazymind.chat.engine.tool_auth import inject_tool_config
 from lazymind.chat.service.component.tool_registry import DEFAULT_TOOLS, _instance_is_active, tool_is_active
 from lazymind.model_config import inject_model_config
+from lazymind.vision_model import VisionModelUnavailable, select_vision_model_role
 
 
 LOG = logging.getLogger(__name__)
@@ -29,11 +30,17 @@ _CONTEXT_REQUIREMENTS = {
     'kb': 'knowledge base access context', 'temp_kb': 'conversation attachments',
     'data_sources': 'user data-source context', 'external_db': 'user database context',
     'writer_create': 'artifact workspace', 'writer_revision': 'artifact workspace',
-    'multimodal': 'authorized input files',
     'video_to_gif': 'authorized input files', 'vocab_learn': 'user vocabulary context',
     'memory': 'user memory context', 'skill_editor': 'skill workspace',
     'local_fs': 'authorized filesystem workspace', 'cloud_files': 'cloud account context',
     'mail': 'mail account and approval context', 'schedule': 'user scheduling context',
+}
+
+_CONDITIONING_IMAGE_FIELDS = ('urls', 'reference_urls', 'first_frame_url', 'last_frame_url')
+_EXTERNAL_MEDIA_FIELDS = {
+    'image_editor': _CONDITIONING_IMAGE_FIELDS,
+    'video_generator': _CONDITIONING_IMAGE_FIELDS,
+    'multimodal': ('url',),
 }
 
 
@@ -66,7 +73,16 @@ def _resolve(config):
     if reason:
         return None, [], f'Requires {reason}; not available for stateless external calls'
     role = getattr(config, 'model_role', None)
-    if role and not (lazyllm.globals['config'].get('dynamic_model_configs') or {}).get(role):
+    configured_models = lazyllm.globals['config'].get('dynamic_model_configs') or {}
+    if config.name == 'multimodal':
+        try:
+            role = select_vision_model_role()
+        except VisionModelUnavailable:
+            role = None
+        # A local runtime default is not an authorized external model selection.
+        if not configured_models.get(role):
+            return None, [], 'Configure a verified VLM or vision-enabled main model in LazyMind Settings and retry'
+    elif role and not configured_models.get(role):
         return None, [], 'Required model is not configured in LazyMind; configure this capability in Settings and retry'
     if not tool_is_active(config):
         return None, [], 'Required connection/model is not configured or verified'
@@ -119,14 +135,13 @@ def run_external_tools(payload: dict, *, execute: bool = False) -> dict:
                 continue
             _, methods, reason = _resolve(config)
             schema = _schema(methods)
-            if config.name in {'image_editor', 'video_generator'}:
-                for key in ('urls', 'reference_urls', 'first_frame_url', 'last_frame_url'):
-                    prop = schema.get('properties', {}).get(key)
-                    if prop is not None:
-                        prop['description'] = (
-                            'Use resource:<id> from workflow.input.import for each image. '
-                            'Local paths, remote URLs and credentials are not accepted.'
-                        )
+            for key in _EXTERNAL_MEDIA_FIELDS.get(config.name, ()):
+                prop = schema.get('properties', {}).get(key)
+                if prop is not None:
+                    prop['description'] = (
+                        'Use resource:<id> from workflow.input.import for each image. '
+                        'Local paths, remote URLs and credentials are not accepted.'
+                    )
             items.append({
                 'name': config.name, 'description': config.description,
                 'input_schema': schema, 'available': not reason, 'reason': reason,
@@ -176,13 +191,19 @@ def _execute(payload):
     if isinstance(result, dict) and (result.get('ok') is False or result.get('isError') is True):
         LOG.error('External tool failed tool=%s stage=execution', config.name)
         raise RuntimeError('Tool execution failed; check its connection and arguments')
+    if name == 'multimodal':
+        description = result.get('description') if isinstance(result, dict) else None
+        if not isinstance(description, str) or not description.strip():
+            raise RuntimeError('The vision model did not return an image description')
+        result = {'description': description}
     return {'tool_name': name, 'result': _public_result(result)}
 
 
 @contextmanager
 def _media_arguments(name, arguments):
     """Materialize only Core-authorized bytes for this call, never caller paths."""
-    if name not in {'image_editor', 'video_generator'}:
+    fields = _EXTERNAL_MEDIA_FIELDS.get(name)
+    if not fields:
         yield arguments
         return
     from PIL import Image
@@ -219,7 +240,7 @@ def _media_arguments(name, arguments):
             return str(path)
 
         result = dict(arguments)
-        for key in ('urls', 'reference_urls', 'first_frame_url', 'last_frame_url'):
+        for key in fields:
             value = result.get(key)
             if value is None or value == '':
                 continue

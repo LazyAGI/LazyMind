@@ -5773,6 +5773,7 @@ def _stage_tool_result(stage_name: str, payload: dict) -> dict:
 
 _MATERIAL_DIR_NAME = 'material_images'
 _MATERIAL_MANIFEST = 'manifest.json'
+_MAX_MATERIAL_IMAGES = 12
 _IMAGE_EXTS = ('.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp')
 _PPT_BACKGROUND_PIXEL_SIZE = (1280, 720)
 _DOWNLOAD_TIMEOUT = 25
@@ -6026,19 +6027,28 @@ def _stage_one_material_image(item: dict, index: int) -> dict:
         if local is not None:
             data = local.read_bytes()
             metadata = _validate_material_image(data)
-            ext = local.suffix.lower() or '.png'
-            dest = dest_dir / f'{stem}{ext}'
-            dest.write_bytes(data)
+            digest = hashlib.sha256(data).hexdigest()
+            prepared_hash = _coerce_str(item.get('sha256')) if local.parent == dest_dir.resolve() else ''
+            origin = str(local)
+            if prepared_hash:
+                if prepared_hash != digest:
+                    raise ValueError('Prepared image changed; inspect it again before registering')
+                dest = local
+                origin = _coerce_str(item.get('origin')) or origin
+            else:
+                ext = local.suffix.lower() or '.png'
+                dest = dest_dir / f'{stem}{ext}'
+                dest.write_bytes(data)
             return {
                 **metadata,
                 'pdf_provenance': item.get('pdf_provenance'),
                 'kb_provenance': item.get('kb_provenance'),
-                'sha256': hashlib.sha256(data).hexdigest(),
+                'sha256': digest,
                 'path': str(dest.resolve()),
                 'alt': alt,
                 'caption': caption or alt,
                 'source': source or 'kb',
-                'origin': str(local),
+                'origin': origin,
             }
         if local_hint.startswith(('http://', 'https://')):
             url = local_hint
@@ -6065,6 +6075,25 @@ def _stage_one_material_image(item: dict, index: int) -> dict:
         'source': source or 'web',
         'origin': url,
     }
+
+
+def _prepare_material_images(items: list[dict], role: str, first_index: int = 0) -> tuple[list[dict], list[str], int]:
+    prepared: list[dict] = []
+    errors: list[str] = []
+    visual_failures = 0
+    for i, item in enumerate(items):
+        try:
+            entry = _stage_one_material_image(item, first_index + len(prepared))
+            inspection = _inspect_material_image(entry['path'], role)
+            if inspection['status'] != 'inspected':
+                visual_failures += 1
+                errors.append(f'item[{i}]: visual inspection failed; image skipped')
+                continue
+            entry['visual_inspection'] = inspection
+            prepared.append(entry)
+        except Exception as exc:
+            errors.append(f'item[{i}]: {exc}')
+    return prepared, errors, visual_failures
 
 
 def _attach_material_images_to_deck(deck: Path) -> dict:
@@ -6097,7 +6126,7 @@ def _attach_material_images_to_deck(deck: Path) -> dict:
     images_dir.mkdir(parents=True, exist_ok=True)
 
     attached = 0
-    for i, entry in enumerate(images[:12]):
+    for i, entry in enumerate(images[:_MAX_MATERIAL_IMAGES]):
         src = Path(str(entry['path']))
         if not src.is_file():
             continue
@@ -6138,9 +6167,8 @@ def ppt_search_web_images(query: str, count: Union[int, str, None] = 3) -> dict:
     """Search the open web for candidate image URLs for PPT slides.
 
     Use during collect_materials when the deck needs real photos / diagrams
-    from the internet. Returns URLs only — then call ppt_register_material_images
-    with the chosen URLs (and captions) so they land in the final HTML via
-    outline use_image / Pool B.
+    from the internet. Returns candidate URLs for ppt_inspect_material_images.
+    Select relevant candidates from the descriptions and register only those.
 
     Tries Tavily (include_images) and Bocha image fields first, then a scoped
     web search fallback.
@@ -6213,15 +6241,15 @@ def ppt_search_web_images(query: str, count: Union[int, str, None] = 3) -> dict:
         return _tool_error(
             'ppt_search_web_images',
             f'No image URLs for "{q}". Configure Tavily/Bocha, or pass KB '
-            'local_path/image_url into ppt_register_material_images instead.',
+            'local_path/image_url into ppt_inspect_material_images instead.',
         )
     return _tool_success('ppt_search_web_images', {
         'query': q,
         'urls': urls[:n],
         'count': min(len(urls), n),
         'next': (
-            'Call ppt_register_material_images with '
-            '[{"url":..., "caption":..., "source":"web"}, ...] for chosen URLs.'
+            'When this step offers ppt_inspect_material_images, inspect candidate URLs first. '
+            'Pass only the chosen images and their captions to ppt_register_material_images.'
         ),
     })
 
@@ -6234,8 +6262,8 @@ def ppt_collect_kb_images(
     No RAG, embedding, reranker or image-vector index is required. Discover IDs
     with knowledge_management document listing, then read stored chunks here.
     Follow next_page_token even when count is zero until has_more is false.
-    Pass relevant returned images to ppt_register_material_images for visual
-    inspection and staging; preserve kb_provenance. Does not parse PDFs again.
+    Pass candidate images to ppt_inspect_material_images and preserve
+    kb_provenance when registering selected results. Does not parse PDFs again.
 
     Args:
         knowledge_base_id: Selected knowledge base's dataset ID.
@@ -6247,13 +6275,48 @@ def ppt_collect_kb_images(
     return collect_document_images(knowledge_base_id, document_id, page_token, page_size)
 
 
+def ppt_inspect_material_images(images_json: Union[str, list, None] = None) -> dict:
+    """Stage and inspect up to 12 PPT image candidates before selecting them.
+
+    Returns prepared files, original sources and visual descriptions for
+    the current step to evaluate. Pass only selected returned image records
+    to ppt_register_material_images to publish them.
+
+    Args:
+        images_json: List of candidate URLs or objects with url or local_path
+            and optional caption, source and PDF/KB provenance.
+    """
+    tool_name = 'ppt_inspect_material_images'
+    role = _material_vision_role()
+    if not role:
+        return _tool_success(tool_name, {
+            'count': 0, 'images': [], 'reason': 'vision_unavailable',
+            'message': '无可用视觉模型，可配置 VLM 或声明主模型支持多模态。',
+        })
+    try:
+        items = _parse_images_payload(images_json)
+    except ValueError as exc:
+        return _tool_error(tool_name, str(exc))
+    if not items:
+        return _tool_error(tool_name, 'images_json is empty — supply image URLs or local paths')
+
+    images, errors, visual_failures = _prepare_material_images(items[:_MAX_MATERIAL_IMAGES], role)
+    if not images and not visual_failures:
+        return _tool_error(tool_name, 'failed to prepare any image: ' + '; '.join(errors[:3]))
+    result = {'count': len(images), 'images': images, 'errors': errors or None}
+    if not images:
+        result['reason'] = 'visual_inspection_failed'
+    return _tool_success(tool_name, result)
+
+
 def ppt_register_material_images(
     images_json: Union[str, list, None] = None,
     replace: Union[bool, str, None] = False,
 ) -> dict:
     """Stage KB, PDF or web images for both HTML and native PPTX embedding.
 
-    Call this in collect_materials after kb / web_search / ppt_search_web_images.
+    In collect_materials, pass only selected records from ppt_inspect_material_images
+    or selected PDF images with a successful visual_inspection.
     Registered images are auto-attached by ppt_init_deck into
     info_pack.user_assets.reference_images (Pool B). The outline stage assigns
     them via use_image.reference_image_index; page-html copies each into
@@ -6269,8 +6332,8 @@ def ppt_register_material_images(
     Each registered image is also published as its own ``image`` artifact in
     the ordered ``material_images`` list.  The Materials tab therefore renders
     actual preview cards instead of one text inventory containing local paths.
-    Inspects actual pixels using the configured VLM or a vision-enabled main
-    LLM. Successful PDF inspections are reused; failures skip only that image.
+    Reuses successful inspections of the same bytes and model. For callers
+    supplying raw images, inspects the actual pixels before registration.
 
     Returns:
         On success: count, images (path/caption/source), manifest_path, and UI
@@ -6295,30 +6358,15 @@ def ppt_register_material_images(
     do_replace = str(replace).strip().lower() in ('1', 'true', 'yes', 'y')
     manifest = {'images': []} if do_replace else _load_material_manifest()
     existing = [x for x in (manifest.get('images') or []) if isinstance(x, dict)]
-    room = max(0, 12 - len(existing))
+    room = max(0, _MAX_MATERIAL_IMAGES - len(existing))
     if room <= 0:
         return _tool_error(
             'ppt_register_material_images',
             'already have 12 material images; call with replace=true to reset',
         )
 
-    registered: list[dict] = []
-    errors: list[str] = []
-    visual_failures = 0
     first_new_index = len(existing)
-    for i, item in enumerate(items[:room]):
-        try:
-            entry = _stage_one_material_image(item, len(existing))
-            inspection = _inspect_material_image(entry['path'], role)
-            if inspection['status'] != 'inspected':
-                visual_failures += 1
-                errors.append(f'item[{i}]: visual inspection failed; image skipped')
-                continue
-            entry['visual_inspection'] = inspection
-            existing.append(entry)
-            registered.append(entry)
-        except Exception as exc:
-            errors.append(f'item[{i}]: {exc}')
+    registered, errors, visual_failures = _prepare_material_images(items[:room], role, first_new_index)
 
     if not registered:
         if visual_failures:
@@ -6332,6 +6380,7 @@ def ppt_register_material_images(
             'failed to register any image: ' + '; '.join(errors[:3]),
         )
 
+    existing.extend(registered)
     manifest['images'] = existing
     manifest['updated_at'] = datetime.now(timezone(timedelta(hours=8))).isoformat(
         timespec='seconds',

@@ -42,11 +42,10 @@ template prompts for HTML/PPTX; never ask whether to upload/use a template.
    and the user's explicit AI-background choice. A deterministic post-step gate
    checks the configured `image_generator` only when that choice is enabled.
 2. `collect_materials` — runs when source material or research is needed; uses supplied KB first and
-   calls web tools only for a concrete remaining gap; collects facts and may
-   optionally register images (`ppt_search_web_images` +
-   `ppt_register_material_images`, or `ppt_generate_material_images` only when
-   the user explicitly asks for AI material images) so later HTML can embed them.
-   Missing images never block the workflow; slides can use CSS/SVG/ECharts.
+   calls web tools only for a concrete remaining gap. Inspect candidate images,
+   select relevant ones and publish them for later steps. Generate material
+   images only when explicitly requested. Record any missing requested images
+   in the summary. Optional images may be omitted or replaced by CSS/SVG/ECharts.
 3. `plan_background_prompts` — when AI backgrounds are enabled, create N
    connected but page-specific prompts automatically.
 4. `generate_backgrounds` — generate N images strictly from the approved

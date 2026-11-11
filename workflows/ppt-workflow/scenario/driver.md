@@ -32,10 +32,10 @@ that an unrelated upstream stage needs to run again.
 
 - `material_summary` is present and summarizes sources,
   assumptions, references, and gaps -> PASS
-- When the brief needed real photos/diagrams, prefer that
-  `ppt_register_material_images` ran (one previewable `material_images` image
-  list item per registered visual, rather than a text/path inventory) so
-  later steps can embed them in HTML
+- When the brief needed real photos/diagrams, check that selected visuals are
+  available as individual `material_images` image-list items with sources and
+  intended uses in `material_summary`. The summary identifies any requested
+  images that could not be supplied.
 - `material_images` is optional. Zero images is valid even when image search was
   unavailable or returned no result; never RETRY or FAIL for missing images
 - Missing material_summary -> RETRY

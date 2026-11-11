@@ -177,6 +177,8 @@ func (s *Service) List(ctx context.Context, owner, sessionID, attemptID, handle 
 			}
 			if tool, ok := globalTools[globalID(declared.Name)]; ok && globalErr == nil {
 				item.Description, item.InputSchema, item.Available = tool.Description, tool.InputSchema, true
+			} else if declared.Name == "builtin:multimodal" && globalErr == nil {
+				item.Reason = "Configure a verified VLM or vision-enabled main model in LazyMind, enable multimodal for the connected Agent, then retry"
 			} else {
 				item.Reason = "Configure and enable this capability for the connected Agent in LazyMind, then retry"
 			}

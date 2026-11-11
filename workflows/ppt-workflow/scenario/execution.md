@@ -98,7 +98,10 @@ within these instructions; they do not define a second workflow.
 For external execution, use the host's own capabilities first for each required
 operation. Discover and call a declared, authorized LazyMind package/global tool
 only when the host cannot meet the step contract.
-Do not call a LazyMind text/vision model in place of external generation or validation.
+In material collection and background generation, a declared visual-understanding
+tool may supply observations about the pixels of an imported image. The external
+executor uses them to select relevant material or to verify the final background
+before publication.
 If neither side can perform the required operation, report the missing capability
 and ask the user to configure it in LazyMind before retrying. Missing Skill content
 is not a tool gap: obtain it from the pinned revision or stop, never replace it with

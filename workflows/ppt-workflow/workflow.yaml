@@ -71,6 +71,8 @@ runtime:
           source: package
       collect_materials:
         tools:
+        - name: builtin:multimodal
+          source: global
         - name: pdf_read_text
           source: package
         - name: pdf_extract_images
@@ -102,6 +104,8 @@ runtime:
       generate_backgrounds:
         tools:
         - name: image_generator
+          source: global
+        - name: builtin:multimodal
           source: global
       generate_ppt:
         skills:
@@ -519,6 +523,7 @@ tool_scripts:
       - ppt_search_web_images
       - ppt_search_assets
       - ppt_get_asset
+      - ppt_inspect_material_images
       - ppt_register_material_images
       - ppt_collect_kb_images
       - ppt_extract_pdf_images

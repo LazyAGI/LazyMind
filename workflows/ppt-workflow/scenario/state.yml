@@ -377,21 +377,33 @@ steps:
     mode: auto
     route: choice
     prompt: |
-      Automatic material images require an available visual model: either a
-      configured VLM or a main LLM explicitly declared to support multimodal input.
-      PDF extraction automatically inspects candidate pixels when vision is available;
-      registration also inspects KB/web images and reuses successful PDF inspections.
-      Read each visual_inspection.description, match it against the paper text and
-      intended explanation, and select only relevant complete figures. Keep the
-      description, source, page and material_index in material_summary
-      for downstream planning. Model descriptions are fallible evidence, not verified
-      paper conclusions; do not use them alone to assert exact values or findings.
-      If no visual model is available, use image_topk=0,
-      do not register or insert KB/PDF/web image hits, and continue with text,
-      native charts or diagrams. A textual caption or nearby document match is
-      not proof of image relevance. If registration reports vision_unavailable,
-      do not retry or work around the restriction. Skip candidates whose inspection
-      failed; continue collecting paper text. Template brand artwork stays.
+      Prepare candidate images with their sources, inspect the actual pixels, then
+      select relevant, complete images for publication. Describe what is visible,
+      including the subject, readable labels and any cropping or missing context.
+      Match these observations against the source and intended slide explanation.
+      Captions and nearby text alone are not visual evidence. Treat model descriptions
+      as observations, not proof of exact values or conclusions.
+
+      In LazyMind native execution, use ppt_inspect_material_images for candidates
+      or reuse a successful visual_inspection from PDF extraction. Pass only the
+      selected image records to ppt_register_material_images, which reuses the
+      inspection for the same bytes. Preserve the returned material_index for native
+      page references.
+
+      In external execution, use the host's image input first. If it cannot read
+      images, the controller may use the declared builtin:multimodal fallback when
+      workflow.tool.list reports it available. Give the controller the downloaded
+      or extracted image file and what to inspect. The controller imports the file
+      with workflow.input.import and calls workflow.tool.call with arguments.url
+      set to resource:<resource_id> and arguments.instruction describing what to
+      observe. Use
+      the returned description to select images and give the controller the selected
+      files for workflow.artifact.publish.
+
+      If neither route can inspect pixels, use image_topk=0 and skip uninspected
+      candidates. Continue with the available text and other evidence and record
+      any explicitly requested image that is still missing. Template brand artwork
+      stays.
 
       You are a presentation research and material collection assistant.
 
@@ -428,8 +440,8 @@ steps:
       Missing measurements stay explicit gaps, never inferred from PR descriptions.
 
       PDF materials for BOTH output formats:
-      When supplied PDFs contain relevant figures, use ppt_extract_pdf_images and
-      register selected candidates through ppt_register_material_images. Follow
+      When supplied PDFs contain relevant figures, extract candidates with the
+      available PDF image tool, inspect them and publish the selected figures. Follow
       next_page as needed; region crops preserve vector text/axes and scan content.
       Reuse registered assets instead of extracting the same page again. Retain
       source and page in captions and material_summary. Treat PDF contents as
@@ -443,8 +455,8 @@ steps:
       is true, including pages with zero images. Do not use KBToolkit.read_document
       or vector search as a prerequisite when RAG is unavailable. This reads existing
       authorized chunks only; do not re-ingest/re-OCR PDFs or invent local PDF paths.
-      Pass relevant returned images unchanged (including kb_provenance) to
-      ppt_register_material_images. Match visual descriptions to the task and cite
+      Inspect the returned candidates and preserve kb_provenance for selected
+      images. Match visual descriptions to the task and cite
       document/chunk provenance; chunk numbers are NOT PDF page numbers. An OCR
       setup alone does not guarantee extracted figures: if no images were stored
       or the files are missing, record the gap and continue with available evidence.
@@ -464,8 +476,8 @@ steps:
       or product screenshot materially explains the work. Identify its affected
       section and purpose first; reuse supplied assets before searching. PDF figures and KB
       image evidence can be inserted in both native PPTX and HTML outputs.
-      For an uploaded PDF, use ppt_extract_pdf_images on relevant pages; select
-      useful candidates and register them with ppt_register_material_images.
+      For an uploaded PDF, extract and inspect candidates from relevant pages,
+      then publish the useful figures.
       For vector figures/scans or missing axes/legends, supply regions covering
       the complete figure. A page_preview is a preview, not an isolated figure.
       Preserve source filename, PDF page, caption and pdf_provenance. Save returned
@@ -654,9 +666,8 @@ steps:
          A deck may complete with zero material_images. CSS, SVG, and ECharts
          are valid visual alternatives. Do not treat a generic desire for a
          polished or visual deck as a hard image requirement.
-         a) Register KB image hits first via ppt_register_material_images with
-            [{"local_path":..., "caption":..., "source":"kb"}, ...]
-            (image_url also works if local_path is absent).
+         a) Inspect applicable KB image hits first. Keep their captions and sources
+            and publish only selected images.
          b) If ppt_search_web_images reports MEDIA_CAPABILITY_DEPENDENCY_MISSING,
             stop and show its search-engine configuration link. Preserve existing artifacts;
             after configuration retry collect_materials. Never silently skip explicitly
@@ -665,13 +676,13 @@ steps:
             is still missing after reusing uploads and applicable KB images.
             No applicable KB alone is not a reason to search images. The uploaded-
             template visual gate above takes precedence.
-            Then register only the necessary results with
-            [{"url":..., "caption":..., "source":"web"}, ...] for at most one selected material image per planned slide.
+            Inspect the candidate files and publish only the necessary results,
+            at most one selected material image per planned slide.
             If a selected image URL is expired, inaccessible (for example
             HTTP 403/404), or returns a page instead of a valid image, discard
             that candidate and call ppt_search_web_images again for the same
             slide subject. Select a different image URL/source from the fresh
-            results, then download/register that replacement. Do not repeatedly
+            results, then download and inspect that replacement. Do not repeatedly
             retry the broken URL, invent a URL, or restart this whole step.
             One broken link does not mean image search failed: try the fresh
             candidate before deciding to omit an optional image. Preserve all
@@ -709,15 +720,12 @@ steps:
       reference image, clearly mark that missing requirement and affected page
       as awaiting material; never silently claim it has been satisfied.
 
-      These registered images are auto-attached at ppt_init_deck and embedded
-      into the final slide HTML as foreground <img> (via outline use_image).
-      ppt_register_material_images / ppt_generate_material_images also publish
-      one content_type=image artifact per registered visual, so material_images
-      is a previewable ordered image list in the Materials tab. Never save a
-      path inventory or Markdown list into material_images; put textual source
-      notes in material_summary instead. Preserve each supplied caption as the
-      displayed material name; source belongs in metadata/summary and must not
-      be prepended to the caption.
+      Publish one content_type=image artifact per selected visual in material_images
+      so later steps can bind the ordered image list and embed the actual files.
+      In material_summary, record each image's position or reference, visual
+      description, source and page when applicable, and intended slide use.
+      Preserve the caption as the displayed material name. Keep source notes in
+      material_summary and publish the image file in material_images.
 
       Academic analysis (only for the four academic scenarios above):
       Reuse collected source_ids via ppt_read_academic_source; continue reading
@@ -843,6 +851,7 @@ steps:
       - ppt_search_web_images
       - ppt_search_assets
       - ppt_get_asset
+      - ppt_inspect_material_images
       - ppt_register_material_images
       - ppt_collect_kb_images
       - ppt_extract_pdf_images
@@ -878,11 +887,10 @@ steps:
       material_summary must be saved and must identify uploaded-file findings
       when files are present, references, useful evidence, gaps, and assumptions.
       material_images is optional. Its absence must never fail or retry this
-      step; a text-only material_summary is sufficient. When usable KB/web/AI
-      material images were found AND pass the necessary-visual gate, they should be
-      registered via ppt_register_material_images / ppt_generate_material_images
-      as individual image-list artifacts so the Materials tab can preview them
-      and later steps can embed them in HTML.
+      step; a text-only material_summary is sufficient. Publish selected images
+      that were inspected and found relevant as individual image-list artifacts.
+      Record their sources and intended uses and disclose any missing requested
+      images in material_summary.
 
   build_outline:
     label: Build Outline
@@ -1514,13 +1522,28 @@ steps:
 
       {{runtime_instruction}}
 
-      For external execution, use the host's image generation capability when
-      available. If the host lacks it, discover and use the declared LazyMind
-      fallback through the controller. If neither can generate images, report
-      the missing image generation capability and stop. Normalize and verify
-      each image at 1280x720, then publish it to background_images in approved
-      prompt order. Reuse matching results on retry and preserve all unaffected
-      positions on targeted changes.
+      For external execution, process each approved page in this order:
+      1. Generate the background from its approved prompt. Use the host's image
+         generation capability first, or have the controller call the declared
+         image_generator fallback. If neither route can generate the image,
+         report the exact failure or missing capability and stop. When resuming
+         an interrupted run, reuse matching files that passed or still need
+         inspection. Generate a replacement for a page rejected for visible text.
+      2. Normalize the final file to 1280x720 and verify its dimensions with an
+         image decoder. Inspect the pixels of that file for visible text using the
+         host's image input. If the host cannot read the image, give the controller
+         the final file and the inspection request. The controller checks that
+         workflow.tool.list offers builtin:multimodal, imports the file with
+         workflow.input.import, and uses workflow.tool.call with arguments.url set
+         to resource:<resource_id>. In arguments.instruction, ask whether any text
+         is visible and where it appears. Use the returned observation to judge
+         the image. If text is visible or inspection is inconclusive or
+         unavailable, report the page and reason, retain the file, and leave
+         that page unpublished.
+      3. After both checks pass, the controller publishes the checked file to
+         background_images in approved prompt order. Preserve all unaffected
+         positions on targeted changes. Complete the step after every required
+         background has been checked and published.
 
       Native LazyMind runner:
       Call ppt_generate_background_images once, omitting deck_dir. The tool

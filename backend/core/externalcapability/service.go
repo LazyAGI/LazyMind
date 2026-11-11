@@ -618,6 +618,14 @@ func (s *Service) callBuiltinTool(ctx context.Context, userID, name string, argu
 
 func (s *Service) requestBuiltinTools(ctx context.Context, userID, endpoint, name string, arguments map[string]any) (json.RawMessage, error) {
 	llmConfig, err := modelconfig.LoadOwnedToolModels(ctx, s.db, userID, builtinModelRoles(name))
+	if name == "multimodal" && len(llmConfig) == 0 {
+		// A configured VLM does not need the main chat model or its credentials.
+		llmConfig, err = modelconfig.LoadOwnedToolModels(ctx, s.db, userID, []string{"llm"})
+		mainModel, _ := llmConfig["llm"].(map[string]any)
+		if mainModel["vision"] != true {
+			delete(llmConfig, "llm")
+		}
+	}
 	if err != nil {
 		return nil, fmt.Errorf("load built-in tool model: %w", err)
 	}
@@ -682,6 +690,8 @@ func (s *Service) requestBuiltinTools(ctx context.Context, userID, endpoint, nam
 
 func builtinModelRoles(name string) []string {
 	switch name {
+	case "multimodal":
+		return []string{"vlm"}
 	case "image_generator":
 		// An editable image model can also serve text-to-image, matching the
 		// Python runtime's existing one-way image-role mirroring.
