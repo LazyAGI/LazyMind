@@ -342,6 +342,28 @@ func installPythonComponent(ctx context.Context, root string, entry PythonCompon
 	return nil
 }
 
+// PrepareClusterComponent runs before the Desktop supervisor starts. The
+// runtime manager serializes startup and activates the verified overlay when
+// it constructs the service environments.
+func PrepareClusterComponent(ctx context.Context) error {
+	if !IsLocalRuntime() {
+		return errors.New("clustering preparation requires a local runtime")
+	}
+	catalog, err := loadPythonCatalog()
+	if err != nil || catalog == nil {
+		return err
+	}
+	entry, ok := catalog.Components["cluster"]
+	if !ok {
+		return nil
+	}
+	root, err := RuntimeRootFromEnv()
+	if err != nil {
+		return err
+	}
+	return installPythonComponent(ctx, root, entry, entry.URL)
+}
+
 func GetPythonComponents(w http.ResponseWriter, r *http.Request) {
 	catalog, err := loadPythonCatalog()
 	if err != nil {

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -9,6 +10,7 @@ import (
 	"regexp"
 	"runtime"
 	"strings"
+	"time"
 )
 
 type pythonComponent struct {
@@ -101,6 +103,43 @@ func installedPythonComponentPath(paths RuntimePaths, entry pythonComponent) str
 		return ""
 	}
 	return site
+}
+
+func (m *RuntimeManager) prepareDesktopCluster(ctx context.Context, cfg RuntimeConfig, paths RuntimePaths) {
+	if cfg.Profile != "desktop" {
+		return
+	}
+	catalog, err := loadPythonComponentCatalog(paths)
+	if err != nil {
+		m.progressf("could not read desktop Python component catalog: %v", err)
+		return
+	}
+	if catalog == nil {
+		return
+	}
+	cluster, deferred := catalog.Components["cluster"]
+	if !deferred || installedPythonComponentPath(paths, cluster) != "" {
+		return
+	}
+
+	started := m.now()
+	m.startupEvent("phase.started", "python-cluster", started, nil)
+	prepareCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	defer cancel()
+	result, err := m.runner.Run(prepareCtx, Command{
+		Name: paths.CoreBin,
+		Args: []string{"--prepare-cluster-component"},
+		Dir:  filepath.Join(paths.RepoRoot, coreSourceDirName),
+		Env: append(pythonComponentEnvironment(paths, cfg.Algorithm.RAGDisabled),
+			"LAZYMIND_RUNTIME_MODE=local",
+			"LAZYMIND_RUNTIME_ROOT="+paths.RuntimeRoot),
+	})
+	if err != nil {
+		m.progressf("desktop clustering preparation unavailable; will retry on the next start: %v %s", err, commandResultDetail(result))
+		m.startupEvent("phase.skipped", "python-cluster", started, nil)
+		return
+	}
+	m.startupEvent("phase.completed", "python-cluster", started, nil)
 }
 
 func pythonComponentEnvironment(paths RuntimePaths, ragDisabled bool) []string {

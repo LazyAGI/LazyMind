@@ -564,9 +564,9 @@ function waitForHomeReadySignal() {
   return new Promise((resolve) => homeReadyWaiters.push(resolve));
 }
 
-function captureSidecarChunk(source, chunk) {
+function captureSidecarChunk(source, chunk, { warmup = false } = {}) {
   const text = String(chunk);
-  appendStartupChunk(source, text);
+  if (!warmup) appendStartupChunk(source, text);
   if (source === "sidecar.stderr") {
     sidecarStderrTail = `${sidecarStderrTail}${text}`.slice(-maxSidecarFailureBytes);
   }
@@ -584,6 +584,7 @@ function captureSidecarChunk(source, chunk) {
     }
     try {
       const event = JSON.parse(line.slice(markerIndex + marker.length));
+      if (warmup && event?.phase !== "python-cluster") continue;
       if (event?.event === "capability.ready" && event?.capability === "home") {
         publishHomeReady(Number(event.frontendPort));
       }
@@ -643,6 +644,26 @@ function captureSidecarChunk(source, chunk) {
           status: "starting",
           phase: "Sample conversations ready",
           message: "Starting the local services and importing sample conversations...",
+          progress: null,
+        });
+      }
+      if (event?.phase === "python-cluster" && event?.event === "phase.started") {
+        const isChinese = app.getLocale().toLowerCase().startsWith("zh");
+        updateStartupState({
+          status: "starting",
+          phase: isChinese ? "准备技能聚类" : "Preparing skill clustering",
+          message: isChinese
+            ? "正在下载并校验技能聚类组件…"
+            : "Downloading and verifying the skill clustering component...",
+          progress: null,
+        });
+      }
+      if (event?.phase === "python-cluster" && ["phase.completed", "phase.skipped"].includes(event.event)) {
+        const isChinese = app.getLocale().toLowerCase().startsWith("zh");
+        updateStartupState({
+          status: "starting",
+          phase: isChinese ? "启动本地服务" : "Starting local services",
+          message: isChinese ? "正在启动本地服务…" : "Starting the local services...",
           progress: null,
         });
       }
@@ -718,7 +739,7 @@ function broadcastStartupDiagnostics(extra = {}) {
 
 function runSidecar(command, extra = [], options = {}) {
   return new Promise((resolve, reject) => {
-    execFile(sidecarPath, sidecarArgs(command, extra), {
+    const child = execFile(sidecarPath, sidecarArgs(command, extra), {
       env: options.env || sidecarEnv(),
       timeout: options.timeout,
       windowsHide: isWindows,
@@ -730,6 +751,7 @@ function runSidecar(command, extra = [], options = {}) {
       }
       resolve(stdout);
     });
+    if (options.onStdout) child.stdout?.on("data", options.onStdout);
   });
 }
 
@@ -1024,6 +1046,7 @@ async function runInstallerWarmup() {
   await runInstallerWarmupLifecycle({
     startRuntime: () => runSidecar("up", maintenanceArgs, {
       timeout: timeoutSeconds * 1000,
+      onStdout: (chunk) => captureSidecarChunk("sidecar.stdout", chunk, { warmup: true }),
     }),
     readStatus,
     createRenderer: () => new BrowserWindow({

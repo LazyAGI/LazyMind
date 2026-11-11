@@ -1,7 +1,9 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -71,8 +73,19 @@ func TestPythonComponentEnvironmentRequiresAtomicCompatibleInstallation(t *testi
 }
 
 func TestPythonClusterComponentActivatesIndependentlyOfRAG(t *testing.T) {
-	paths := RuntimePaths{ResourcesRoot: t.TempDir(), RuntimeRoot: t.TempDir(), RepoRoot: t.TempDir()}
+	paths := RuntimePaths{ResourcesRoot: t.TempDir(), RuntimeRoot: t.TempDir(), RepoRoot: t.TempDir(), CoreBin: "bundled-core"}
 	cfg := RuntimeConfig{Profile: "desktop", Algorithm: AlgorithmConfig{RAGDisabled: true}}
+	runner := &fakeRunner{handlers: []func(Command) (CommandResult, error){
+		func(cmd Command) (CommandResult, error) {
+			if cmd.Name != paths.CoreBin || !slices.Equal(cmd.Args, []string{"--prepare-cluster-component"}) ||
+				!slices.Contains(cmd.Env, "LAZYMIND_RUNTIME_ROOT="+paths.RuntimeRoot) ||
+				!slices.Contains(cmd.Env, "LAZYMIND_PYTHON_COMPONENT_CATALOG="+filepath.Join(paths.ResourcesRoot, "config", "python-components.json")) {
+				t.Fatalf("unexpected clustering preparation command: %+v", cmd)
+			}
+			return CommandResult{}, errors.New("offline")
+		},
+	}}
+	manager := NewRuntimeManager(runner, "manager")
 	writeJSON := func(path string, value any) {
 		t.Helper()
 		data, err := json.Marshal(value)
@@ -94,11 +107,19 @@ func TestPythonClusterComponentActivatesIndependentlyOfRAG(t *testing.T) {
 	catalog := pythonComponentCatalog{SchemaVersion: 1, Platform: runtime.GOOS, Arch: runtime.GOARCH, Components: map[string]pythonComponent{"rag": rag}}
 	catalogPath := filepath.Join(paths.ResourcesRoot, "config", "python-components.json")
 	writeJSON(catalogPath, catalog)
+	manager.prepareDesktopCluster(context.Background(), cfg, paths)
+	if len(runner.calls) != 0 {
+		t.Fatal("older installers must not attempt to download clustering")
+	}
 	if env := strings.Join(pythonComponentEnvironment(paths, true), "\n"); strings.Contains(env, "LAZYMIND_CLUSTER_ENABLED=") {
 		t.Fatalf("older catalog unexpectedly set the cluster gate: %s", env)
 	}
 	catalog.Components[cluster.ID] = cluster
 	writeJSON(catalogPath, catalog)
+	manager.prepareDesktopCluster(context.Background(), cfg, paths)
+	if len(runner.calls) != 1 {
+		t.Fatal("missing clustering must be prepared at Desktop startup")
+	}
 	if !slices.Contains(coreServiceEnv(cfg, paths), "LAZYMIND_CLUSTER_ENABLED=0") ||
 		!slices.Contains(algorithmServiceEnv(cfg, paths, chatProcessName), "LAZYMIND_CLUSTER_ENABLED=0") {
 		t.Fatal("Core and Chat must both gate an uninstalled clustering component")
@@ -117,6 +138,10 @@ func TestPythonClusterComponentActivatesIndependentlyOfRAG(t *testing.T) {
 	}
 	if err := os.WriteFile(filepath.Join(root, ".ready"), []byte(selected.SHA256), 0o644); err != nil {
 		t.Fatal(err)
+	}
+	manager.prepareDesktopCluster(context.Background(), cfg, paths)
+	if len(runner.calls) != 1 {
+		t.Fatal("installed clustering must be reused on restart")
 	}
 	for service, env := range map[string][]string{"Core": coreServiceEnv(cfg, paths), "Chat": algorithmServiceEnv(cfg, paths, chatProcessName)} {
 		if !slices.Contains(env, "LAZYMIND_CLUSTER_ENABLED=1") || !slices.Contains(env, "LAZYMIND_RAG_ENABLED=0") ||
