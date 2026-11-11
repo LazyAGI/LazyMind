@@ -161,6 +161,118 @@ describe("default capability configuration groups", () => {
     Element.prototype.scrollIntoView = vi.fn();
   });
 
+  it.each([true, false])("keeps the unavailable saved embedding when the catalog contains the same model (saved provider IDs: %s)", async (hasProviderIds) => {
+    mocks.selections.mockResolvedValue({ data: { selections: [{
+      ...selectedEmbedding, availability: "unavailable", unavailable_reason: "index_identity_unverified",
+      group_name: "Demo",
+      user_model_provider_id: hasProviderIds ? "provider" : undefined,
+      user_model_provider_group_id: hasProviderIds ? "group" : undefined,
+    }] } });
+    mocks.models.mockResolvedValue({ data: { models: [{ ...candidateEmbedding, id: "old-embedding", name: "Catalog embedding" }] } });
+    renderPanel();
+
+    const row = await screen.findByRole("group", { name: "modelProvider.module.embeddingTitle" });
+    const select = await within(row).findByRole("combobox");
+    expect(within(row).getByText("Old embedding · Demo")).toBeInTheDocument();
+    expect(within(row).getByRole("alert")).toHaveTextContent("index_identity_unverified");
+    expect(row).not.toHaveClass("is-pending");
+    fireEvent.mouseDown(select);
+    await waitFor(() => expect(screen.getByText("Old embedding", { selector: "strong" })
+      .closest(".ant-select-item-option")).toHaveClass("ant-select-item-option-disabled"));
+    expect(screen.queryByText("Catalog embedding")).not.toBeInTheDocument();
+    expect(within(row).getByText("Old embedding · Demo")).toBeInTheDocument();
+  });
+
+  it("keeps an embedding confirmed by the save response when the index makes it unavailable", async () => {
+    mocks.selections.mockResolvedValue({ data: { selections: [selectedEmbedding] } });
+    mocks.models.mockResolvedValue({ data: { models: [candidateEmbedding] } });
+    mocks.saveModel.mockResolvedValue({ data: { selections: [{
+      ...selectedEmbedding, model_id: "new-embedding", name: "Saved embedding", availability: "unavailable",
+      unavailable_reason: "index_cleanup_incomplete",
+    }] } });
+    renderPanel();
+
+    await chooseCandidateEmbedding();
+
+    const row = group("modelProvider.module.embeddingTitle");
+    expect(await within(row).findByText("Saved embedding · Demo")).toBeInTheDocument();
+    expect(within(row).getByRole("alert")).toHaveTextContent("index_cleanup_incomplete");
+    expect(row).not.toHaveClass("is-pending");
+    expect(within(row).queryByText("Old embedding · Demo")).not.toBeInTheDocument();
+  });
+
+  it.each(["empty", "error"] as const)("retains a saved embedding when provider setup is %s", async (setupState) => {
+    mocks.selections.mockResolvedValue({ data: { selections: [{
+      ...selectedEmbedding, availability: "unavailable", unavailable_reason: "credentials_unavailable",
+    }] } });
+    mocks.models.mockResolvedValue({ data: { models: [] } });
+    renderPanel(setupState);
+
+    const row = await screen.findByRole("group", { name: "modelProvider.module.embeddingTitle" });
+    expect(within(row).getByRole("combobox")).toBeDisabled();
+    expect(within(row).getByText("Old embedding · Demo")).toBeInTheDocument();
+    expect(within(row).getByText("credentials_unavailable")).toBeInTheDocument();
+    expect(row).not.toHaveClass("is-pending");
+  });
+
+  it.each(["providers", "services"] as const)("shows the saved embedding while %s never resolves", async (part) => {
+    mocks[part].mockImplementation(() => new Promise(() => {}));
+    mocks.selections.mockResolvedValue({ data: { selections: [{
+      ...selectedEmbedding, group_name: "Saved supplier", availability: "unavailable", unavailable_reason: "index_cleared",
+    }] } });
+    renderPanel();
+
+    const supplier = part === "providers" ? "Saved supplier" : "Demo";
+    expect(await screen.findByText(`Old embedding · ${supplier}`)).toBeInTheDocument();
+    const row = group("modelProvider.module.embeddingTitle");
+    expect(within(row).getByText("index_cleared")).toBeInTheDocument();
+    expect(screen.queryByText("modelProvider.defaultConfigLoadFailed")).not.toBeInTheDocument();
+  });
+
+  it("keeps initial selection loading when the provider catalog arrives first", async () => {
+    let resolveSelections!: (value: unknown) => void;
+    mocks.selections.mockImplementation(() => new Promise((resolve) => { resolveSelections = resolve; }));
+    renderPanel();
+
+    await waitFor(() => expect(resolveSelections).toBeTypeOf("function"));
+    expect(screen.getByText("common.loading")).toBeInTheDocument();
+    expect(screen.queryByText("modelProvider.defaultConfigLoadFailed")).not.toBeInTheDocument();
+    await act(async () => { resolveSelections({ data: { selections: [selectedEmbedding] } }); });
+    expect(await screen.findByText("Old embedding · Demo")).toBeInTheDocument();
+  });
+
+  it("preserves the server's available selection while its catalog metadata is pending", async () => {
+    mocks.providers.mockImplementation(() => new Promise(() => {}));
+    mocks.selections.mockResolvedValue({ data: { selections: [{
+      ...selectedEmbedding, provider_name: "Unlisted gateway", group_name: "Saved supplier",
+    }] } });
+    renderPanel();
+
+    expect(await screen.findByText("Old embedding · Saved supplier")).toBeInTheDocument();
+    expect(within(group("modelProvider.module.embeddingTitle")).queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it.each(["providers", "services"] as const)("retains a successful selection when %s fails", async (part) => {
+    mocks[part].mockRejectedValue(new Error("initial request failed"));
+    mocks.selections.mockResolvedValue({ data: { selections: [selectedEmbedding] } });
+    renderPanel();
+
+    const supplier = part === "providers" ? "Demo group" : "Demo";
+    expect(await screen.findByText(`Old embedding · ${supplier}`)).toBeInTheDocument();
+    expect(screen.getByText("modelProvider.defaultConfigLoadFailed")).toBeInTheDocument();
+  });
+
+  it("shows the selection and options without a failure warning during readiness checks", async () => {
+    mocks.role = "user";
+    mocks.ready.mockImplementation(() => new Promise(() => {}));
+    mocks.verified.mockImplementation(() => new Promise(() => {}));
+    renderPanel();
+
+    expect(await screen.findByText("Demo model · Demo")).toBeInTheDocument();
+    await readyToSelect("modelProvider.module.ttsTitle");
+    expect(screen.queryByText("modelProvider.capabilityStatusLoadFailed")).not.toBeInTheDocument();
+  });
+
   it("checks the embedding signature and asks for confirmation before a compatible switch", async () => {
     const confirm = vi.spyOn(Modal, "confirm").mockImplementation(() => ({ destroy: vi.fn(), update: vi.fn() }));
     mocks.selections.mockResolvedValue({ data: { selections: [selectedEmbedding] } });
@@ -634,7 +746,7 @@ describe("default capability configuration groups", () => {
       readiness().mockImplementationOnce(() => new Promise(resolve => { resolveReadiness = resolve; }));
       fireEvent.mouseDown(within(group(title)).getByLabelText("close-circle"));
       await waitFor(() => expect(readiness()).toHaveBeenCalledTimes(calls + 1));
-      expect(within(group(title)).getByRole("combobox")).toBeDisabled();
+      await readyToSelect(title);
       expect(within(group(title)).queryByLabelText("modelProvider.readyStatusAria")).not.toBeInTheDocument();
       expect(within(group(title)).queryByText(oldName)).not.toBeInTheDocument();
       await act(async () => {
@@ -791,10 +903,14 @@ describe("default capability configuration groups", () => {
     mocks.models.mockResolvedValue({ data: { models: [{ ...availableModel, availability: "unavailable" }] } });
     mocks.services.mockResolvedValue({ data: { selections: [] } });
     act(() => window.dispatchEvent(new Event("focus")));
-    await waitFor(() => expect(group("modelProvider.module.llmChatTitle")).toHaveClass("is-pending"));
+    await waitFor(() => expect(within(group("modelProvider.module.llmChatTitle")).getByRole("alert"))
+      .toHaveTextContent("modelProvider.modelNotReadyTip"));
+    expect(group("modelProvider.module.llmChatTitle")).not.toHaveClass("is-pending");
+    expect(within(group("modelProvider.module.llmChatTitle")).getByText("Demo model · Demo")).toBeInTheDocument();
     revealAllCategories();
     expect(screen.getAllByRole("group")).toHaveLength(12);
-    expect(screen.getAllByRole("group").every((row) => row.classList.contains("is-pending"))).toBe(true);
+    expect(screen.getAllByRole("group").filter((row) => !row.classList.contains("is-pending")))
+      .toEqual([group("modelProvider.module.llmChatTitle")]);
   });
 
   it("preserves shared capability readiness and administrator-only configuration", async () => {
@@ -832,6 +948,7 @@ describe("default capability configuration groups", () => {
     renderPanel();
     expect(await screen.findByRole("alert")).toHaveTextContent("modelProvider.defaultConfigLoadFailed");
     expect(screen.queryByRole("region", { name: "modelProvider.defaults.basicTitle" })).not.toBeInTheDocument();
+    expect(within(group("modelProvider.module.cloudParsingServiceTitle")).getByText(/MinerU/)).toBeInTheDocument();
     mocks.selections.mockResolvedValue({ data: { selections: [selectedLlm] } });
     fireEvent.click(screen.getByRole("button", { name: "common.retry" }));
     expect(await screen.findByRole("region", { name: "modelProvider.defaults.basicTitle" })).toBeInTheDocument();
@@ -855,7 +972,7 @@ describe("default capability configuration groups", () => {
     const retry = within(card).getByRole("button", { name: "common.retry" });
     fireEvent.click(retry);
     fireEvent.click(retry);
-    expect(retry).toBeDisabled();
+    expect(within(card).queryByRole("alert")).not.toBeInTheDocument();
     expect(mocks.ready).toHaveBeenCalledTimes(calls + 1);
     expect(mocks.ready).toHaveBeenLastCalledWith(expect.objectContaining({ params: { model_type: "tts" } }));
     await act(async () => { resolveRetry({ data: { ready: true, source: "shared", model_name: "Shared speech" } }); });

@@ -56,6 +56,7 @@ interface ProviderModel {
   enabled: boolean;
   maxInputTokens?: string;
   availability?: "available" | "degraded" | "unavailable";
+  unavailableReason?: string;
   lifecycle?: "active" | "deprecated" | "retired";
   readOnly?: boolean;
 }
@@ -132,6 +133,7 @@ interface ApiModel {
   group_name?: string;
   base_url?: string;
   availability?: "available" | "degraded" | "unavailable";
+  unavailable_reason?: string;
   lifecycle?: "active" | "deprecated" | "retired";
   read_only?: boolean;
   capabilities?: string[];
@@ -170,6 +172,10 @@ type SelectedModels = Partial<Record<ModelCapability, string>>;
 type SelectedModelMaxInputTokens = Partial<
   Record<ModelCapability, string>
 >;
+type SelectedModelRows = Partial<Record<ModelCapability, SelectedModelApiItem>>;
+type ModelCatalog = Partial<Record<ModelCapability, ApiModel[]>>;
+type DefaultConfigPart = "providers" | "models" | "services";
+type DefaultConfigLoadStates = Record<DefaultConfigPart, "loading" | "ready" | "error">;
 
 export type CloudServiceSlotKey = "cloudParsing" | "searchEngine";
 export type CloudServiceCategory = "ocr" | "search";
@@ -189,6 +195,14 @@ type ModelOptionItem = {
   /** True when the option comes from an image_editing catalog model. */
   isEditable?: boolean;
 };
+
+type ModuleModelOptions = Partial<Record<ModelCapability, ModelOptionItem[]>>;
+
+export function isSelectableModelOption(option: ModelOptionItem, cloudAvailable: boolean) {
+  const { model, source } = option;
+  return (source !== "cloud" || cloudAvailable) && model.enabled &&
+    model.availability !== "unavailable" && model.lifecycle !== "deprecated" && model.lifecycle !== "retired";
+}
 
 interface CloudServiceConfig {
   setupActionKey: string;
@@ -509,6 +523,66 @@ function mapApiProvider(
   };
 }
 
+function getSelectedCapability(selection: SelectedModelApiItem) {
+  const capability = getCapabilityByModelType(selection.model_key);
+  return capability === "image_editor" ? "image_generator" : capability;
+}
+
+function mapModelOption(
+  model: ApiModel,
+  capability: ModelCapability,
+  providers: ProviderOption[],
+  fallbacks: ModelProviderFallbacks,
+): ModelOptionItem {
+  const source = model.source === "cloud" ? "cloud" : "own";
+  const providerId = model.provider_id || model.user_model_provider_id || (source === "cloud" ? "lazymind-cloud" : "");
+  const groupId = model.provider_group_id || model.user_model_provider_group_id || (source === "cloud" ? "cloud-system" : "");
+  const provider = (source === "own" && providers.find((item) => item.id === providerId)) || mapApiProvider({
+    id: providerId,
+    brand_key: model.brand_key,
+    service_key: model.service_key,
+    name: source === "cloud" ? model.provider_name || "LazyMind Cloud" : model.group_name || model.provider_name || "",
+    protocol_name: model.provider_name,
+    is_custom: source === "own" && (model.is_custom ?? (!model.brand_key && !!model.group_name && model.group_name !== model.provider_name)),
+    base_url: model.base_url,
+  }, fallbacks);
+  const group = createConnectionGroup(provider, {
+    id: groupId,
+    name: model.group_name || (source === "cloud" ? "" : provider.name),
+    baseUrl: model.base_url || provider.baseUrl,
+    verified: true,
+  });
+  // Cloud availability comes from the gateway, independently of the local adapter registry.
+  const supported = source === "cloud" || isModelTypeSupportedByProtocol(
+    model.model_type || getModelTypeByCapability(capability),
+    provider.protocolName || provider.source,
+    provider.runtimeIdentity || provider.name,
+  );
+  return {
+    provider,
+    group,
+    source,
+    value: getModelValue(source, provider.id, group.id, model.id),
+    isEditable: !!model.is_editable,
+    model: {
+      id: model.id,
+      name: model.name || model.id,
+      logoDataUrl: model.logo_data_url,
+      modelType: model.model_type,
+      vision: model.vision,
+      modelSettings: model.model_settings,
+      capability,
+      builtIn: Boolean(model.is_default),
+      enabled: model.enabled !== false,
+      maxInputTokens: model.max_input_tokens,
+      availability: supported ? model.availability : "unavailable",
+      unavailableReason: model.unavailable_reason,
+      lifecycle: model.lifecycle,
+      readOnly: model.read_only,
+    },
+  };
+}
+
 function mapVerifiedCloudServiceGroup(
   group: VerifiedCloudServiceGroup,
 ): CloudServiceOption {
@@ -554,9 +628,7 @@ export function useDefaultModelConfig({
   const { t, i18n } = useTranslation();
   const currentLanguage = i18n.resolvedLanguage || i18n.language || "zh-CN";
   const [providerOptions, setProviderOptions] = useState<ProviderOption[]>([]);
-  const [selectedModels, setSelectedModels] = useState<SelectedModels>({});
-  const [selectedModelMaxInputTokens, setSelectedModelMaxInputTokens] =
-    useState<SelectedModelMaxInputTokens>({});
+  const [selectedModelRows, setSelectedModelRows] = useState<SelectedModelRows>();
   const [selectedCloudServices, setSelectedCloudServices] =
     useState<SelectedCloudServices>({});
   const [cloudServiceShareStatus, setCloudServiceShareStatus] = useState<
@@ -570,9 +642,7 @@ export function useDefaultModelConfig({
   >({});
   const [cloudServiceReadyStatus, setCloudServiceReadyStatus] =
     useState<CloudServiceReadyStatus>({});
-  const [moduleModelOptions, setModuleModelOptions] = useState<
-    Partial<Record<ModelCapability, ModelOptionItem[]>>
-  >({});
+  const [modelCatalog, setModelCatalog] = useState<ModelCatalog>({});
   const [moduleModelOptionStates, setModuleModelOptionStates] = useState<
     Partial<Record<ModelCapability, SetupAvailabilityState>>
   >({});
@@ -582,16 +652,23 @@ export function useDefaultModelConfig({
   const [modelReadyStatus, setModelReadyStatus] = useState<ModelReadyStatus>(
     {},
   );
-  const [lazyMindCloudAvailable, setLazyMindCloudAvailable] = useState(false);
-  const [defaultLoadState, setDefaultLoadState] = useState<"loading" | "ready" | "error">("loading");
+  const [cloudSessionAvailable, setCloudSessionAvailable] = useState<boolean>();
+  const lazyMindCloudAvailable = cloudSessionAvailable === true;
+  const [loadStates, setLoadStates] = useState<DefaultConfigLoadStates>({
+    providers: "loading",
+    models: "loading",
+    services: "loading",
+  });
   const [savingCapabilities, setSavingCapabilities] = useState<Set<ModelCapability | CloudServiceSlotKey>>(new Set());
   const [previewingEmbedding, setPreviewingEmbedding] = useState(false);
   const savingCapabilitiesRef = useRef(new Set<ModelCapability | CloudServiceSlotKey>());
   const embeddingSwitchRevision = useRef(0);
   const [capabilityReadyStates, setCapabilityReadyStates] = useState<CapabilityReadyStates>({});
   const readinessRequests = useRef(new Map<CapabilityKey, symbol>());
+  const manualReadinessRevisions = useRef(new Map<CapabilityKey, number>());
   const loadRevision = useRef(0);
-  const optionRevision = useRef(0);
+  const selectionRevisions = useRef({ providers: 0, models: 0, services: 0 });
+  const optionRevisions = useRef({ models: 0, services: 0 });
   const isAdmin = AgentAppsAuth.getUserInfo()?.role === "system-admin";
   const modelFeaturesState = useModelFeatures();
   const imageEmbedEnabled =
@@ -610,254 +687,189 @@ export function useDefaultModelConfig({
     [currentLanguage, t],
   );
 
+  const { selectedModels, selectedModelMaxInputTokens, moduleModelOptions } = useMemo(() => {
+    const values: SelectedModels = {};
+    const tokens: SelectedModelMaxInputTokens = {};
+    const options: ModuleModelOptions = {};
+    for (const { key } of moduleConfigs) {
+      const catalog = modelCatalog[key];
+      const selection = selectedModelRows?.[key];
+      if (!catalog && !selection) continue;
+      const candidates = new Map<string, ModelOptionItem>();
+      for (const model of catalog || []) {
+        const option = mapModelOption(model, key, providerOptions, localizedFallbacks);
+        const existing = candidates.get(option.value);
+        if (!existing) candidates.set(option.value, option);
+        else if (option.isEditable) existing.isEditable = true;
+      }
+      if (selection) {
+        const saved = mapModelOption({
+          ...selection,
+          id: selection.model_id,
+          // The Cloud selection projection has no local enabled flag.
+          enabled: selection.source === "cloud" ? true : selection.enabled,
+        }, key, providerOptions, localizedFallbacks);
+        // The API evaluated the saved model even when its provider metadata is still pending.
+        saved.model.availability = selection.availability ?? saved.model.availability;
+        const candidate = [...candidates.values()].find((option) =>
+          option.source === saved.source && option.model.id === saved.model.id,
+        );
+        if (candidate) {
+          saved.model.lifecycle = candidate.model.lifecycle;
+          saved.model.enabled = saved.model.enabled && candidate.model.enabled;
+          if (candidate.model.availability === "unavailable") saved.model.availability = "unavailable";
+          saved.isEditable ||= candidate.isEditable;
+          candidates.delete(candidate.value);
+        }
+        values[key] = saved.value;
+        tokens[key] = selection.max_input_tokens?.trim();
+        options[key] = [saved, ...candidates.values()];
+      } else {
+        options[key] = [...candidates.values()];
+      }
+    }
+    return { selectedModels: values, selectedModelMaxInputTokens: tokens, moduleModelOptions: options };
+  }, [modelCatalog, selectedModelRows, providerOptions, localizedFallbacks]);
+
   useEffect(() => {
-    let cancelled = false;
+    let revision = 0;
     const refreshSession = () => {
+      const request = ++revision;
       void getCloudSession()
         .then((session) => {
-		  if (!cancelled) setLazyMindCloudAvailable(isCloudBusinessAvailable(session));
+          if (request === revision) setCloudSessionAvailable(isCloudBusinessAvailable(session));
         })
         .catch(() => {
-          if (!cancelled) setLazyMindCloudAvailable(false);
+          if (request === revision) setCloudSessionAvailable(false);
         });
     };
     const refreshWhenVisible = () => {
       if (document.visibilityState === "visible") refreshSession();
     };
-	const refreshCloudSession = () => {
-	  setLazyMindCloudAvailable(false);
-	  refreshSession();
-	};
+    const refreshCloudSession = () => {
+      setCloudSessionAvailable(undefined);
+      refreshSession();
+    };
     refreshSession();
     window.addEventListener(LAZYMIND_CLOUD_SESSION_CHANGED_EVENT, refreshCloudSession);
     window.addEventListener("focus", refreshSession);
     document.addEventListener("visibilitychange", refreshWhenVisible);
     return () => {
-      cancelled = true;
+      revision += 1;
       window.removeEventListener(LAZYMIND_CLOUD_SESSION_CHANGED_EVENT, refreshCloudSession);
       window.removeEventListener("focus", refreshSession);
       document.removeEventListener("visibilitychange", refreshWhenVisible);
     };
   }, []);
 
-  const loadDefaultModelState = useCallback(async () => {
+  const loadCapabilityReadiness = useCallback(async (capability: CapabilityKey) => {
+    const request = Symbol();
+    readinessRequests.current.set(capability, request);
+    setCapabilityReadyStates((current) => ({ ...current, [capability]: "loading" }));
+    try {
+      const response = await fetchCapabilityReadiness(capability);
+      if (readinessRequests.current.get(capability) !== request) return;
+      if (capability === "cloudParsing" || capability === "searchEngine") {
+        setCloudServiceReadyStatus((current) => ({ ...current, [capability]: response }));
+      } else {
+        setModelReadyStatus((current) => ({ ...current, [capability]: response }));
+      }
+      setCapabilityReadyStates((current) => ({ ...current, [capability]: "ready" }));
+    } catch {
+      if (readinessRequests.current.get(capability) === request) {
+        setCapabilityReadyStates((current) => ({ ...current, [capability]: "error" }));
+      }
+    } finally {
+      if (readinessRequests.current.get(capability) === request) readinessRequests.current.delete(capability);
+    }
+  }, []);
+
+  const loadDefaultModelState = useCallback(() => {
     if (savingCapabilitiesRef.current.size) return;
     const revision = ++loadRevision.current;
-    try {
-      const [providerResponse, selectedResponse, selectedProviderResponse] = await Promise.all([
-        modelProvidersApi.apiCoreModelProvidersGet(),
-        modelProvidersApi.apiCoreModelProvidersSelectedModelsGet(),
-        modelProvidersApi.apiCoreModelProvidersSelectedProvidersGet(),
-      ]);
-      const providerData = unwrapModelProviderData<{ providers?: ApiProvider[] }>(providerResponse.data);
-      const providers = (providerData.providers || []).map((provider) =>
-        mapApiProvider(provider, localizedFallbacks),
-      );
-
-      const selectedData = unwrapModelProviderData<{ selections?: SelectedModelApiItem[] }>(selectedResponse.data);
-      const nextSelectedModels: SelectedModels = {};
-      const nextSelectedModelMaxInputTokens: SelectedModelMaxInputTokens = {};
-      const selectedOptions: Partial<
-        Record<ModelCapability, ModelOptionItem[]>
-      > = {};
-
-      (selectedData.selections || []).forEach((selection) => {
-        const rawCapability = getCapabilityByModelType(selection.model_key);
-        if (!rawCapability) {
-          return;
+    const refreshReadiness = (capabilities: CapabilityKey[]) => {
+      if (isAdmin) return;
+      for (const capability of capabilities) {
+        // A manual check that started during this refresh is newer than its snapshot.
+        if ((manualReadinessRevisions.current.get(capability) ?? 0) < revision) {
+          void loadCapabilityReadiness(capability);
         }
-        // Unify image_editing into the 文生图 slot; prefer editable when both exist.
-        const capability: ModelCapability =
-          rawCapability === "image_editor" ? "image_generator" : rawCapability;
-        const isEditable = !!selection.is_editable;
-        if (
-          capability === "image_generator" &&
-          !isEditable &&
-          nextSelectedModels.image_generator &&
-          selectedOptions.image_generator?.some((item) => item.isEditable)
-        ) {
-          return;
-        }
-        const source = selection.source === "cloud" ? "cloud" : "own";
-        const providerId =
-          selection.provider_id ||
-          selection.user_model_provider_id ||
-          (source === "cloud" ? "lazymind-cloud" : "");
-        const groupId =
-          selection.provider_group_id ||
-          selection.user_model_provider_group_id ||
-          (source === "cloud" ? "cloud-system" : "");
-        const provider =
-          providers.find(
-            (item) => item.id === providerId,
-          ) ||
-          mapApiProvider(
-            {
-              id: providerId,
-              brand_key: selection.brand_key,
-              service_key: selection.service_key,
-              name: source === "cloud" ? selection.provider_name : selection.group_name || selection.provider_name,
-              protocol_name: selection.provider_name,
-              is_custom: source !== "cloud" && (selection.is_custom ?? (selection.brand_key ? false : !!selection.group_name && selection.group_name !== selection.provider_name)),
-              base_url: selection.base_url,
-            },
-            localizedFallbacks,
-          );
-        const group = createConnectionGroup(provider, {
-          id: groupId,
-          name: selection.group_name || (source === "cloud" ? "" : provider.name),
-          baseUrl: selection.base_url || provider.baseUrl,
-          apiKeyConfigured: true,
-          verified: true,
-        });
-        const model: ProviderModel = {
-          id: selection.model_id,
-          logoDataUrl: selection.logo_data_url,
-          name: selection.name,
-          modelType: selection.model_type,
-          vision: selection.vision,
-          modelSettings: selection.model_settings,
-          capability,
-          builtIn: Boolean(selection.is_default),
-          enabled: selection.enabled !== false,
-          maxInputTokens: selection.max_input_tokens,
-          // Cloud availability comes from the gateway, whose provider label is
-          // independent of the host's local LazyLLM adapter registry.
-          availability: source === "cloud" || isModelTypeSupportedByProtocol(selection.model_type || getModelTypeByCapability(capability), provider.protocolName || provider.source, provider.runtimeIdentity || provider.name)
-            ? selection.availability : "unavailable",
-          readOnly: selection.read_only,
-        };
-        const option: ModelOptionItem = {
-          provider,
-          group,
-          model,
-          source,
-          value: getModelValue(source, provider.id, group.id, model.id),
-          isEditable,
-        };
-        nextSelectedModels[capability] = option.value;
-        if (selection.max_input_tokens?.trim()) {
-          nextSelectedModelMaxInputTokens[capability] =
-            selection.max_input_tokens;
-        }
-        selectedOptions[capability] = [
-          option,
-          ...(selectedOptions[capability] || []).filter(
-            (item) => item.value !== option.value,
-          ),
-        ];
-      });
-
-      const nextShareStatus: Partial<Record<ModelCapability, boolean>> = {};
-      (selectedData.selections || []).forEach((selection) => {
-        const rawCapability = getCapabilityByModelType(selection.model_key);
-        if (!rawCapability) {
-          return;
-        }
-        const capability: ModelCapability =
-          rawCapability === "image_editor" ? "image_generator" : rawCapability;
-        // Prefer share status from image_editing when both image roles are set.
-        if (
-          capability === "image_generator" &&
-          selection.model_key === "text2image" &&
-          nextShareStatus.image_generator !== undefined
-        ) {
-          return;
-        }
-        nextShareStatus[capability] =
-          selection.source === "cloud" ? false : !!selection.share;
-      });
-
-      const selectedProviderData = unwrapModelProviderData<{ selections?: SelectedCloudServiceApiItem[] }>(
-        selectedProviderResponse.data as unknown,
-      );
-      const nextSelectedCloudServices: SelectedCloudServices = {};
-      const nextCloudShareStatus: Partial<
-        Record<CloudServiceSlotKey, boolean>
-      > = {};
-      const selectedCloudOptions: Partial<
-        Record<CloudServiceSlotKey, CloudServiceOption[]>
-      > = {};
-      (selectedProviderData.selections || []).forEach((selection) => {
-        const service = cloudServiceConfigs.find(
-          (item) => item.category === selection.category,
-        );
-        if (!service) {
-          return;
-        }
-        nextSelectedCloudServices[service.key] = selection.group_id;
-        nextCloudShareStatus[service.key] = !!selection.share;
-        selectedCloudOptions[service.key] = mergeCloudServiceOptions(
-          selectedCloudOptions[service.key] || [],
-          {
-            baseUrl: selection.base_url || "",
-            groupId: selection.group_id,
-            groupName: selection.group_name,
-            providerName: selection.provider_name,
-          },
-        );
-      });
-      const nextReadyStates: CapabilityReadyStates = {};
-      const capabilities = isAdmin
-        ? []
-        : [...visibleModuleConfigs, ...cloudServiceConfigs].map((item) => item.key);
-      capabilities.forEach((capability) => {
-        nextReadyStates[capability] = "loading";
-      });
-      if (revision !== loadRevision.current) return;
-      readinessRequests.current.clear();
-      setProviderOptions(providers);
-      setSelectedModels(nextSelectedModels);
-      setSelectedModelMaxInputTokens(nextSelectedModelMaxInputTokens);
-      optionRevision.current += 1;
-      setModuleModelOptions(selectedOptions);
-      setModuleModelOptionStates({});
-      setShareStatus(nextShareStatus);
-      setSelectedCloudServices(nextSelectedCloudServices);
-      setCloudServiceShareStatus(nextCloudShareStatus);
-      setCloudServiceOptions(selectedCloudOptions);
-      setCloudServiceOptionStates({});
-      // Keep the last known shared configuration while its new check is pending.
-      if (isAdmin) {
-        setModelReadyStatus({});
-        setCloudServiceReadyStatus({});
       }
-      setCapabilityReadyStates(nextReadyStates);
-      setDefaultLoadState("ready");
-      // Each capability becomes usable as soon as its own readiness check
-      // finishes. A slow or failed check must not hold the entire panel open.
-      capabilities.forEach((capability) => {
-        const request = Symbol();
-        readinessRequests.current.set(capability, request);
-        void fetchCapabilityReadiness(capability)
-          .then((response) => {
-            if (readinessRequests.current.get(capability) !== request) return;
-            if (capability === "cloudParsing" || capability === "searchEngine") {
-              setCloudServiceReadyStatus((current) => ({ ...current, [capability]: response }));
-            } else {
-              setModelReadyStatus((current) => ({ ...current, [capability]: response }));
-            }
-            setCapabilityReadyStates((current) => ({ ...current, [capability]: "ready" }));
-          })
-          .catch(() => {
-            if (readinessRequests.current.get(capability) === request) {
-              setCapabilityReadyStates((current) => ({ ...current, [capability]: "error" }));
-            }
-          })
-          .finally(() => {
-            if (readinessRequests.current.get(capability) === request) {
-              readinessRequests.current.delete(capability);
-            }
-          });
-      });
-    } catch {
-      if (revision === loadRevision.current) setDefaultLoadState("error");
-    }
-  }, [currentLanguage, isAdmin, localizedFallbacks, t, visibleModuleConfigs]);
+    };
+    const loadPart = async <T,>(part: DefaultConfigPart, request: () => Promise<T>, apply: (response: T) => void) => {
+      const selectionRevision = selectionRevisions.current[part];
+      const isCurrent = () => revision === loadRevision.current && selectionRevision === selectionRevisions.current[part];
+      try {
+        const response = await request();
+        if (!isCurrent()) return;
+        apply(response);
+        setLoadStates((current) => ({ ...current, [part]: "ready" }));
+      } catch {
+        if (isCurrent()) setLoadStates((current) => ({ ...current, [part]: "error" }));
+      }
+    };
+
+    void loadPart("providers", () => modelProvidersApi.apiCoreModelProvidersGet(), (response) => {
+      const data = unwrapModelProviderData<{ providers?: ApiProvider[] }>(response.data);
+      setProviderOptions((data.providers || []).map((provider) => mapApiProvider(provider, localizedFallbacks)));
+    });
+
+    void loadPart("models", () => modelProvidersApi.apiCoreModelProvidersSelectedModelsGet(), (response) => {
+      const data = unwrapModelProviderData<{ selections?: SelectedModelApiItem[] }>(response.data);
+      const rows: SelectedModelRows = {};
+      const shares: typeof shareStatus = {};
+      for (const selection of data.selections || []) {
+        const capability = getSelectedCapability(selection);
+        if (!capability || !selection.model_id) continue;
+        // Both image roles share one control. Prefer the editable selection.
+        if (capability === "image_generator" && rows.image_generator?.is_editable && !selection.is_editable) continue;
+        rows[capability] = selection;
+        shares[capability] = selection.source !== "cloud" && !!selection.share;
+      }
+      optionRevisions.current.models += 1;
+      setSelectedModelRows(rows);
+      setShareStatus(shares);
+      setModelCatalog({});
+      setModuleModelOptionStates({});
+      if (isAdmin) setModelReadyStatus({});
+      refreshReadiness(visibleModuleConfigs.map((module) => module.key));
+    });
+
+    void loadPart("services", () => modelProvidersApi.apiCoreModelProvidersSelectedProvidersGet(), (response) => {
+      const data = unwrapModelProviderData<{ selections?: SelectedCloudServiceApiItem[] }>(response.data);
+      const selections: SelectedCloudServices = {};
+      const shares: typeof cloudServiceShareStatus = {};
+      const options: typeof cloudServiceOptions = {};
+      for (const selection of data.selections || []) {
+        const service = cloudServiceConfigs.find((item) => item.category === selection.category);
+        if (!service) continue;
+        selections[service.key] = selection.group_id;
+        shares[service.key] = !!selection.share;
+        options[service.key] = mergeCloudServiceOptions(options[service.key] || [], {
+          baseUrl: selection.base_url || "",
+          groupId: selection.group_id,
+          groupName: selection.group_name,
+          providerName: selection.provider_name,
+        });
+      }
+      optionRevisions.current.services += 1;
+      setSelectedCloudServices(selections);
+      setCloudServiceShareStatus(shares);
+      setCloudServiceOptions(options);
+      setCloudServiceOptionStates({});
+      if (isAdmin) setCloudServiceReadyStatus({});
+      refreshReadiness(cloudServiceConfigs.map((service) => service.key));
+    });
+  }, [isAdmin, loadCapabilityReadiness, localizedFallbacks, visibleModuleConfigs]);
 
   useEffect(() => {
     void loadDefaultModelState();
-    return () => { loadRevision.current += 1; optionRevision.current += 1; readinessRequests.current.clear(); };
+    return () => {
+      loadRevision.current += 1;
+      optionRevisions.current.models += 1;
+      optionRevisions.current.services += 1;
+      readinessRequests.current.clear();
+    };
   }, [loadDefaultModelState]);
 
   useEffect(() => () => { embeddingSwitchRevision.current += 1; }, []);
@@ -888,128 +900,22 @@ export function useDefaultModelConfig({
       return;
     }
 
-    const revision = optionRevision.current;
+    const revision = optionRevisions.current.models;
     setModuleModelOptionStates((current) => ({ ...current, [capability]: "loading" }));
     try {
-      const modelTypes =
-        capability === "image_generator"
-          ? ["text2image", "image_editing"]
-          : [getModelTypeByCapability(capability)];
-
-      const fetchedLists = await Promise.all(
-        modelTypes.map(async (modelType) => {
-          const response = await modelProvidersApi.apiCoreModelProvidersModelsGet({
-            modelType,
-          });
-          const data = unwrapModelProviderData<{ models?: ApiModel[] }>(
-            response.data,
-          );
-          return data.models || [];
-        }),
-      );
-
-      const fetchedOptions: ModelOptionItem[] = [];
-      const seenValues = new Set<string>();
-      fetchedLists.forEach((models) => {
-        models
-          .forEach((model) => {
-            const source = model.source === "cloud" ? "cloud" : "own";
-            const providerId =
-              model.provider_id ||
-              model.user_model_provider_id ||
-              (source === "cloud" ? "lazymind-cloud" : "");
-            const groupId =
-              model.provider_group_id ||
-              model.user_model_provider_group_id ||
-              (source === "cloud" ? "cloud-system" : "");
-            const provider =
-              providerOptions.find(
-                (item) => item.id === providerId,
-              ) ||
-              mapApiProvider(
-                {
-                  id: providerId,
-                  brand_key: model.brand_key,
-                  service_key: model.service_key,
-                  name: source === "cloud" ? model.provider_name || "LazyMind Cloud" : model.group_name || model.provider_name || "",
-                  protocol_name: model.provider_name,
-                  is_custom: source !== "cloud" && (model.is_custom ?? (model.brand_key ? false : !!model.group_name && model.group_name !== model.provider_name)),
-                  base_url: model.base_url,
-                },
-                localizedFallbacks,
-              );
-            const group = createConnectionGroup(provider, {
-              id: groupId,
-              name: model.group_name || (source === "cloud" ? "" : provider.name),
-              baseUrl: model.base_url || provider.baseUrl,
-              verified: true,
-            });
-            const providerModel: ProviderModel = {
-              id: model.id,
-              logoDataUrl: model.logo_data_url,
-              name: model.name,
-              modelType: model.model_type,
-              vision: model.vision,
-              modelSettings: model.model_settings,
-              capability,
-              builtIn: Boolean(model.is_default),
-              enabled: model.enabled !== false,
-              maxInputTokens: model.max_input_tokens,
-              availability: source === "cloud" || isModelTypeSupportedByProtocol(model.model_type || getModelTypeByCapability(capability), provider.protocolName || provider.source, provider.runtimeIdentity || provider.name)
-                ? model.availability : "unavailable",
-              lifecycle: model.lifecycle,
-              readOnly: model.read_only,
-            };
-            const value = getModelValue(
-              source,
-              provider.id,
-              group.id,
-              providerModel.id,
-            );
-            if (seenValues.has(value)) {
-              // Prefer the editable entry when the same model id appears twice.
-              if (model.is_editable) {
-                const index = fetchedOptions.findIndex(
-                  (item) => item.value === value,
-                );
-                if (index >= 0) {
-                  fetchedOptions[index] = {
-                    ...fetchedOptions[index],
-                    isEditable: true,
-                  };
-                }
-              }
-              return;
-            }
-            seenValues.add(value);
-            fetchedOptions.push({
-              provider,
-              group,
-              model: providerModel,
-              value,
-              source,
-              isEditable: !!model.is_editable,
-            });
-          });
-      });
-
-      const selectedValue = selectedModels[capability];
-      const selectedOption =
-        selectedValue &&
-        (moduleModelOptions[capability] || []).find(
-          (option) => option.value === selectedValue,
-        );
-      const options =
-        selectedOption &&
-        !fetchedOptions.some((option) => option.value === selectedOption.value)
-          ? [selectedOption, ...fetchedOptions]
-          : fetchedOptions;
-
-      if (revision !== optionRevision.current) return;
-      setModuleModelOptions((current) => ({ ...current, [capability]: options }));
+      const modelTypes = capability === "image_generator"
+        ? ["text2image", "image_editing"]
+        : [getModelTypeByCapability(capability)];
+      const fetchedLists = await Promise.all(modelTypes.map(async (modelType) => {
+        const response = await modelProvidersApi.apiCoreModelProvidersModelsGet({ modelType });
+        const data = unwrapModelProviderData<{ models?: ApiModel[] }>(response.data);
+        return data.models || [];
+      }));
+      if (revision !== optionRevisions.current.models) return;
+      setModelCatalog((current) => ({ ...current, [capability]: fetchedLists.flat() }));
       setModuleModelOptionStates((current) => ({ ...current, [capability]: "ready" }));
     } catch {
-      if (revision === optionRevision.current) {
+      if (revision === optionRevisions.current.models) {
         setModuleModelOptionStates((current) => ({ ...current, [capability]: "error" }));
       }
     }
@@ -1110,7 +1016,8 @@ export function useDefaultModelConfig({
   };
 
   const setCapabilitySaving = (capability: ModelCapability | CloudServiceSlotKey, saving: boolean) => {
-    loadRevision.current += 1;
+    const part = capability === "cloudParsing" || capability === "searchEngine" ? "services" : "models";
+    selectionRevisions.current[part] += 1;
     if (saving) savingCapabilitiesRef.current.add(capability);
     else savingCapabilitiesRef.current.delete(capability);
     setSavingCapabilities(new Set(savingCapabilitiesRef.current));
@@ -1118,36 +1025,37 @@ export function useDefaultModelConfig({
 
   const applyModelSelection = (capability: ModelCapability, value?: string) => {
     if (savingCapabilitiesRef.current.has(capability)) return;
-    const maxInputTokens = value
-      ? moduleModelOptions[capability]?.find(
-          (option) => option.value === value,
-        )?.model.maxInputTokens
-      : undefined;
+    const chosenOption = moduleModelOptions[capability]?.find((option) => option.value === value);
+    const identity = value ? parseModelValue(value) : undefined;
     setCapabilitySaving(capability, true);
     void saveSelectedModel(capability, value)
       .then((response) => {
-        const savedSelection = value ? response.selections?.find((selection) => {
-          const rawCapability = getCapabilityByModelType(selection.model_key);
-          const selectedCapability = rawCapability === "image_editor" ? "image_generator" : rawCapability;
-          return selectedCapability === capability && selection.model_id === parseModelValue(value).modelId;
-        }) : undefined;
-        const savedValue = savedSelection && savedSelection.availability !== "unavailable" ? value : undefined;
-        setSelectedModels((current) => ({ ...current, [capability]: savedValue }));
-        setSelectedModelMaxInputTokens((current) => ({
-          ...current,
-          [capability]: savedValue ? (savedSelection?.max_input_tokens || maxInputTokens)?.trim() : undefined,
-        }));
+        const matches = identity ? response.selections?.filter((selection) =>
+          getSelectedCapability(selection) === capability && selection.model_id === identity.modelId &&
+          (selection.source || "own") === identity.source,
+        ) : undefined;
+        const savedSelection = matches?.find((selection) => selection.is_editable) || matches?.[0];
+        const row = savedSelection && identity ? {
+          ...savedSelection,
+          provider_id: savedSelection.provider_id || savedSelection.user_model_provider_id || identity.providerId,
+          provider_group_id: savedSelection.provider_group_id || savedSelection.user_model_provider_group_id || identity.groupId,
+          provider_name: savedSelection.provider_name || chosenOption?.provider.protocolName || "",
+          group_name: savedSelection.group_name || chosenOption?.group.name || "",
+          name: savedSelection.name || chosenOption?.model.name || savedSelection.model_id,
+          max_input_tokens: savedSelection.max_input_tokens || chosenOption?.model.maxInputTokens,
+        } : undefined;
+        setSelectedModelRows((current) => ({ ...current, [capability]: row }));
         setShareStatus((current) => ({
           ...current,
-          [capability]: Boolean(savedValue && savedSelection?.source !== "cloud" && savedSelection?.share),
+          [capability]: Boolean(row && row.source !== "cloud" && row.share),
         }));
-        if (savedValue && capability === highlightTarget) onHighlightResolved?.();
+        if (row && capability === highlightTarget) onHighlightResolved?.();
         if (capability === "llm") {
           useModelSelectionStore.getState().resetForNewChat();
           window.dispatchEvent(new CustomEvent(CHAT_MODEL_SELECTION_CHANGED_EVENT));
         }
         void onModelSelectionChanged();
-        if (!isAdmin) return retryCapabilityReadiness(capability, true);
+        if (!isAdmin) void retryCapabilityReadiness(capability, true);
       })
       .catch(() => {})
       .finally(() => setCapabilitySaving(capability, false));
@@ -1239,7 +1147,7 @@ export function useDefaultModelConfig({
       return;
     }
 
-    const revision = optionRevision.current;
+    const revision = optionRevisions.current.services;
     setCloudServiceOptionStates((current) => ({ ...current, [service.key]: "loading" }));
     try {
       const response = await modelProvidersApi.apiCoreModelProvidersProviderGroupsGet({
@@ -1263,11 +1171,11 @@ export function useDefaultModelConfig({
         )
           ? [selectedOption, ...fetchedOptions]
           : fetchedOptions;
-      if (revision !== optionRevision.current) return;
+      if (revision !== optionRevisions.current.services) return;
       setCloudServiceOptions((current) => ({ ...current, [service.key]: options }));
       setCloudServiceOptionStates((current) => ({ ...current, [service.key]: "ready" }));
     } catch {
-      if (revision === optionRevision.current) {
+      if (revision === optionRevisions.current.services) {
         setCloudServiceOptionStates((current) => ({ ...current, [service.key]: "error" }));
       }
     }
@@ -1285,7 +1193,7 @@ export function useDefaultModelConfig({
         setSelectedCloudServices((current) => ({ ...current, [service]: selection?.group_id }));
         setCloudServiceShareStatus((current) => ({ ...current, [service]: !!selection?.share }));
         void onModelSelectionChanged();
-        if (!isAdmin) return retryCapabilityReadiness(service, true);
+        if (!isAdmin) void retryCapabilityReadiness(service, true);
       })
       .catch(() => {})
       .finally(() => setCapabilitySaving(service, false));
@@ -1322,39 +1230,36 @@ export function useDefaultModelConfig({
       .catch(() => {});
   };
 
-  const isModelConfigured = (capability: ModelCapability) => {
+  const hasPersistedSelection = (capability: ModelCapability) => Boolean(selectedModels[capability]);
+  const isUsable = (capability: ModelCapability) => {
     const selected = moduleModelOptions[capability]?.find((option) => option.value === selectedModels[capability]);
-    const selectedAvailable = selected &&
-      (selected.source !== "cloud" || lazyMindCloudAvailable) &&
-      selected.model.availability !== "unavailable" &&
-      selected.model.lifecycle !== "deprecated" && selected.model.lifecycle !== "retired";
-    return Boolean(selectedAvailable || (!isAdmin && modelReadyStatus[capability]?.ready));
+    return Boolean(selected && isSelectableModelOption(selected, lazyMindCloudAvailable));
   };
   const isCloudServiceConfigured = (service: CloudServiceSlotKey) => Boolean(
     selectedCloudServices[service] || (!isAdmin && cloudServiceReadyStatus[service]?.ready),
   );
   useEffect(() => {
-    if (defaultLoadState !== "ready") return;
-    if (modelProviderSetupState === "ready") {
-      visibleModuleConfigs.forEach((module) => {
-        if ((!isAdmin && capabilityReadyStates[module.key] === "loading")) return;
-        if (!isModelConfigured(module.key) && !moduleModelOptionStates[module.key]) {
-          void loadModuleModels(module.key);
+    if (loadStates.models === "ready" && modelProviderSetupState === "ready") {
+      for (const { key } of visibleModuleConfigs) {
+        const hasRuntimeFallback = !hasPersistedSelection(key) && !isAdmin && modelReadyStatus[key]?.ready;
+        if (!isUsable(key) && !hasRuntimeFallback && !moduleModelOptionStates[key]) {
+          void loadModuleModels(key);
         }
-      });
-    }
-    cloudServiceConfigs.forEach((service) => {
-      if (!isAdmin && capabilityReadyStates[service.key] === "loading") return;
-      if (cloudServiceSetupStates[service.key] === "ready" &&
-          !isCloudServiceConfigured(service.key) && !cloudServiceOptionStates[service.key]) {
-        void loadVerifiedCloudService(service);
       }
-    });
-  }, [defaultLoadState, modelProviderSetupState, cloudServiceSetupStates, visibleModuleConfigs,
+    }
+    if (loadStates.services === "ready") {
+      for (const service of cloudServiceConfigs) {
+        if (cloudServiceSetupStates[service.key] === "ready" &&
+            !isCloudServiceConfigured(service.key) && !cloudServiceOptionStates[service.key]) {
+          void loadVerifiedCloudService(service);
+        }
+      }
+    }
+  }, [loadStates, modelProviderSetupState, cloudServiceSetupStates, visibleModuleConfigs,
     selectedModels, selectedCloudServices, moduleModelOptionStates, cloudServiceOptionStates,
-    lazyMindCloudAvailable, capabilityReadyStates, modelReadyStatus, cloudServiceReadyStatus]);
+    lazyMindCloudAvailable, moduleModelOptions, modelReadyStatus, cloudServiceReadyStatus]);
 
-  const retryCapabilityReadiness = async (capability: CapabilityKey, invalidate = false) => {
+  const retryCapabilityReadiness = (capability: CapabilityKey, invalidate = false) => {
     if (invalidate) {
       // A saved selection invalidates both cached readiness and any pre-save retry.
       readinessRequests.current.delete(capability);
@@ -1365,39 +1270,29 @@ export function useDefaultModelConfig({
       }
     }
     if (readinessRequests.current.has(capability)) return;
-    // A manual retry takes precedence over an older background refresh.
-    loadRevision.current += 1;
-    const request = Symbol();
-    readinessRequests.current.set(capability, request);
-    setCapabilityReadyStates((current) => ({ ...current, [capability]: "loading" }));
-    try {
-      const response = await fetchCapabilityReadiness(capability);
-      if (readinessRequests.current.get(capability) !== request) return;
-      if (capability === "cloudParsing" || capability === "searchEngine") {
-        setCloudServiceReadyStatus((current) => ({ ...current, [capability]: response }));
-      } else {
-        setModelReadyStatus((current) => ({ ...current, [capability]: response }));
-      }
-      setCapabilityReadyStates((current) => ({ ...current, [capability]: "ready" }));
-    } catch {
-      if (readinessRequests.current.get(capability) === request) {
-        setCapabilityReadyStates((current) => ({ ...current, [capability]: "error" }));
-      }
-    } finally {
-      if (readinessRequests.current.get(capability) === request) readinessRequests.current.delete(capability);
-    }
+    manualReadinessRevisions.current.set(capability, loadRevision.current);
+    return loadCapabilityReadiness(capability);
   };
 
   const retryDefaultModelState = () => {
-    setDefaultLoadState("loading");
-    void loadDefaultModelState();
+    if (savingCapabilitiesRef.current.size) return;
+    setLoadStates((current) => ({
+      providers: current.providers === "error" ? "loading" : current.providers,
+      models: current.models === "error" ? "loading" : current.models,
+      services: current.services === "error" ? "loading" : current.services,
+    }));
+    loadDefaultModelState();
   };
 
   return {
     visibleModuleConfigs,
     isAdmin,
     lazyMindCloudAvailable,
-    defaultLoadState,
+    cloudSessionKnown: cloudSessionAvailable !== undefined,
+    defaultLoadState: loadStates.models,
+    hasLoadedModelSelections: selectedModelRows !== undefined,
+    defaultLoadFailed: Object.values(loadStates).includes("error"),
+    selectedServicesLoadState: loadStates.services,
     savingCapabilities,
     previewingEmbedding,
     selectedModels,
@@ -1411,7 +1306,8 @@ export function useDefaultModelConfig({
     cloudServiceOptionStates,
     cloudServiceReadyStatus,
     cloudServiceShareStatus,
-    isModelConfigured,
+    hasPersistedSelection,
+    isUsable,
     isCloudServiceConfigured,
     loadModuleModels,
     loadVerifiedCloudService,

@@ -157,21 +157,18 @@ describe("Default model services with the LazyMind Cloud system provider", () =>
       mocks.getSelectedModels.mockResolvedValue({ data: { selections: [{
         model_key: "llm", model_type: "llm", model_id: "lazymind-text-default",
         name: "LazyMind Text", source: "cloud", provider_id: "lazymind-cloud",
-        provider_name: "LazyMind Cloud", availability,
+        provider_name: "LazyMind Cloud", availability, enabled: false,
       }] } });
       mocks.listModels.mockResolvedValue({ data: { models: [] } });
       renderPanel();
 
       const basic = await screen.findByRole("region", { name: "modelProvider.defaults.basicTitle" });
       const llmRow = within(basic).getByRole("group", { name: "modelProvider.module.llmChatTitle" });
+      await within(llmRow).findByRole("combobox");
+      expect(llmRow).not.toHaveClass("is-pending");
+      expect(within(llmRow).getByText("LazyMind Text · LazyMind Cloud")).toBeInTheDocument();
       if (availability === "unavailable") {
-        await within(llmRow).findByRole("button", { name: "modelProvider.configureCapability" });
-        expect(llmRow).toHaveClass("is-pending");
-        expect(within(llmRow).queryByRole("combobox")).not.toBeInTheDocument();
-      } else {
-        await within(llmRow).findByRole("combobox");
-        expect(llmRow).not.toHaveClass("is-pending");
-        expect(within(llmRow).getByText("LazyMind Text · LazyMind Cloud")).toBeInTheDocument();
+        expect(within(llmRow).getByRole("alert")).toHaveTextContent("modelProvider.modelNotReadyTip");
       }
       expect(mocks.saveSelectedModels).not.toHaveBeenCalled();
     },
@@ -207,7 +204,36 @@ describe("Default model services with the LazyMind Cloud system provider", () =>
     await waitFor(() => expect(mocks.getSelectedModels).toHaveBeenCalledTimes(2));
   });
 
-  it("hides every Cloud model surface while the Cloud account is signed out", async () => {
+  it("keeps the saved Cloud selection visible but disables it after sign-out", async () => {
+    const selection = {
+      model_key: "llm", model_type: "llm", model_id: "lazymind-text-default",
+      name: "LazyMind Text", source: "cloud", provider_id: "lazymind-cloud",
+      provider_name: "LazyMind Cloud", availability: "available", read_only: true,
+    };
+    mocks.getSelectedModels.mockResolvedValue({ data: { selections: [selection] } });
+    const { container } = renderPanel();
+    expect(await screen.findByText("LazyMind Text · LazyMind Cloud")).toBeInTheDocument();
+    await screen.findByText("modelProvider.lazyMindCloudTitle");
+    mocks.getCloudSession.mockResolvedValue({ configured: true, reachability: "reachable", state: "signed_out" });
+    mocks.getSelectedModels.mockResolvedValue({ data: { selections: [{
+      ...selection, availability: "unavailable", unavailable_reason: "cloud_signed_out",
+    }] } });
+
+    act(() => window.dispatchEvent(new Event(LAZYMIND_CLOUD_SESSION_CHANGED_EVENT)));
+
+    const row = screen.getByRole("group", { name: "modelProvider.module.llmChatTitle" });
+    expect(await within(row).findByText("cloud_signed_out")).toBeInTheDocument();
+    expect(within(row).getByText("LazyMind Text · LazyMind Cloud")).toBeInTheDocument();
+    expect(row).not.toHaveClass("is-pending");
+    expect(within(row).queryByRole("switch")).not.toBeInTheDocument();
+    expect(container.querySelector('[data-provider-key="lazymind_cloud"]')).toBeNull();
+    fireEvent.mouseDown(within(row).getByRole("combobox"));
+    expect((await screen.findByText("LazyMind Text", { selector: "strong" }))
+      .closest(".ant-select-item-option")).toHaveClass("ant-select-item-option-disabled");
+    expect(mocks.saveSelectedModels).not.toHaveBeenCalled();
+  });
+
+  it("hides unselected Cloud catalog models while the Cloud account is signed out", async () => {
 	mocks.getCloudSession.mockResolvedValue({
 	  configured: true,
 	  reachability: "reachable",
@@ -216,7 +242,7 @@ describe("Default model services with the LazyMind Cloud system provider", () =>
 	const { container } = renderPanel();
 	await waitFor(() => expect(mocks.getSelectedModels).toHaveBeenCalled());
 
-	expect(container.querySelector('[data-provider-key="lazymind-cloud"]')).toBeNull();
+	expect(container.querySelector('[data-provider-key="lazymind_cloud"]')).toBeNull();
 	expect(screen.queryByText("LazyMind Text")).not.toBeInTheDocument();
   });
 });
