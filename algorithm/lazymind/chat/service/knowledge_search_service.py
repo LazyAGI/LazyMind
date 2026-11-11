@@ -6,7 +6,10 @@ from urllib.parse import urlparse
 
 from lazymind.chat.request_scope import request_configuration_scope
 from lazymind.common.optional_components import ComponentRequiredError, require_component
+from lazymind.config import EMBED_MAIN
+from lazymind.model_config import is_model_role_available
 
+EMBEDDING_NOT_READY = 'EMBEDDING_NOT_READY'
 _DEFAULT_RETRIEVER_TOPK = 20
 _DEFAULT_RERANK_TOPK = 20
 _DEFAULT_IMAGE_TOPK = 0
@@ -36,7 +39,7 @@ class KnowledgeSearchHit:
 
 def _ensure_kb_search_runtime():
     from lazymind.chat.engine.tools.kb import _ensure_kb_search_runtime as impl
-    return impl()
+    return impl(include_images=False)
 
 
 def _serialize_kb_result(raw):
@@ -72,6 +75,10 @@ def search(user_id: str, query: str, kb_ids: List[str], top_k: int,
     try:
         require_component('rag')
         with request_configuration_scope(model_config=llm_config):
+            if not is_model_role_available(EMBED_MAIN):
+                raise KnowledgeSearchError(
+                    EMBEDDING_NOT_READY, 'configure a text embedding model in model defaults to search knowledge',
+                )
             retrievers, reranker, image_retriever = _ensure_kb_search_runtime()
             raw = search_kb(
                 {

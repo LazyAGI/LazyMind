@@ -8,6 +8,7 @@ import lazyllm
 import pytest
 
 from lazymind.chat.engine.tools import kb
+from lazymind.chat.request_scope import request_configuration_scope
 from lazymind.model_config import inject_model_config
 
 
@@ -77,6 +78,42 @@ def test_static_reranker_does_not_require_request_config(runtime, monkeypatch):
     monkeypatch.setattr(kb, 'AutoModel', Mock(return_value=model))
     configure(None)
     assert kb._ensure_kb_search_runtime()[1] is model
+
+
+def test_image_retriever_is_only_available_in_configured_requests(runtime):
+    runtime.write_text('embed_image:\n  source: dynamic\n  type: cross_modal_embed\n', encoding='utf-8')
+    model_config = {'embed_image': {'source': 'openai', 'model': 'image-embedding'}}
+
+    with request_configuration_scope():
+        text, _, image = kb._ensure_kb_search_runtime()
+        assert image is None
+        assert [call.kwargs['group_name'] for call in kb.Retriever.call_args_list] == ['line', 'block']
+    with request_configuration_scope(model_config=model_config):
+        configured_text, _, configured_image = kb._ensure_kb_search_runtime()
+        assert configured_text is text
+        assert configured_image is not None
+        assert kb.Retriever.call_args.kwargs['group_name'] == 'image'
+    with request_configuration_scope():
+        assert kb._ensure_kb_search_runtime()[2] is None
+    with request_configuration_scope(model_config=model_config):
+        assert kb._ensure_kb_search_runtime()[2] is configured_image
+        assert kb.Retriever.call_count == 3
+
+
+def test_kb_toolkit_respects_explicit_zero_image_topk(runtime, monkeypatch):
+    runtime.write_text(
+        'embed_image:\n  source: openai\n  type: cross_modal_embed\n  name: static-image\n', encoding='utf-8',
+    )
+    search = Mock(return_value=[])
+    monkeypatch.setattr(kb, 'search_kb', search)
+
+    with request_configuration_scope():
+        lazyllm.globals['agentic_config'] = {'user_id': 'user', 'filters': {'kb_id': ['kb']}}
+        kb.KBToolkit().kb_search('evidence', image_topk=0)
+
+    assert search.call_args.kwargs['image_topk'] == 0
+    assert search.call_args.kwargs['image_retriever'] is None
+    assert [call.kwargs['group_name'] for call in kb.Retriever.call_args_list] == ['line', 'block']
 
 
 def test_search_returns_evidence_without_reranking(monkeypatch):

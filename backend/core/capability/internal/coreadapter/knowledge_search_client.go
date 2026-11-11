@@ -91,6 +91,17 @@ func (c *HTTPKnowledgeSearchBackendClient) Search(ctx context.Context, input Kno
 	if len(body) > knowledgeSearchMaxResponse {
 		return KnowledgeSearchBackendResponse{}, capability.NewError(capability.ResultTooLarge, "knowledge.search.client", "search response exceeds 4 MiB", false, nil)
 	}
+	if response.StatusCode == http.StatusUnprocessableEntity {
+		var validation struct {
+			Detail struct {
+				Code string `json:"code"`
+			} `json:"detail"`
+		}
+		// Only the known code crosses the boundary. The backend message can contain secrets.
+		if json.Unmarshal(body, &validation) == nil && validation.Detail.Code == embeddingNotReadyReason {
+			return KnowledgeSearchBackendResponse{}, embeddingNotReadyError("knowledge.search.client", "algorithm_runtime_unavailable")
+		}
+	}
 	if response.StatusCode == http.StatusBadRequest || response.StatusCode == http.StatusUnprocessableEntity {
 		return KnowledgeSearchBackendResponse{}, capability.NewError(capability.InvalidArgument, "knowledge.search.client", "invalid search request", false, nil)
 	}

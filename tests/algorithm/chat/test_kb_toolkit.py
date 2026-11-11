@@ -378,7 +378,7 @@ def test_scoped_kb_discovery_and_default_filters_stay_inherited(monkeypatch):
 
     monkeypatch.setattr('lazymind.chat.engine.tools.kb.get_core_api', get_dataset)
     monkeypatch.setattr('lazymind.chat.engine.tools.kb.post_core_api', post_documents)
-    monkeypatch.setattr('lazymind.chat.engine.tools.kb._ensure_kb_search_runtime', lambda: ([], None, None))
+    monkeypatch.setattr('lazymind.chat.engine.tools.kb._ensure_kb_search_runtime', lambda **_kwargs: ([], None, None))
     monkeypatch.setattr('lazymind.chat.engine.tools.kb.search_kb', lambda payload, **kwargs: payload)
     toolkit = KBToolkit(kb_scope=['inherited-kb'])
     assert toolkit.list_knowledge_bases(keyword='search', tags=['papers'])['datasets'][0]['dataset_id'] == 'inherited-kb'
