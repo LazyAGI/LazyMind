@@ -174,6 +174,7 @@ def test_revision_clarification_waits_without_publishing_or_reporting_success(tm
     from lazymind.chat.engine.subagent.context import SubAgentContext
     from lazymind.document_tools.paper.writing.revise_document import RevisionInputRequired
     question = '请确认采用哪些审稿意见'
+
     def clarify(context, stream):
         current_events().progress(7, '正在确定修订范围')
         raise RevisionInputRequired(question)
@@ -322,3 +323,98 @@ def test_f4_progress_counts_estimated_tokens_without_changing_output(tmp_path, m
         assert step[channel]['text'] == text
         assert step[channel]['estimated_tokens'] == estimate_tokens(text)
         assert step[channel]['estimated_tokens'] != len(text)
+
+
+@pytest.mark.parametrize('wrapped', [False, True])
+def test_topic_body_response_and_numbered_references_match_saved_preview(monkeypatch, wrapped):
+    identifier = 'upload-' + 'a' * 64
+    papers = [dict(id=identifier, title='Study notes', filename='study-notes.md',
+                   attachment_key='uploaded', abstract='Uploaded findings.', text='Source text.'),
+              dict(id='P2', title='Prior work', citation='Author. Prior work. 2024.',
+                   abstract='Previous findings.', text='Prior work text.')]
+    before = copy.deepcopy(papers)
+    body = '# 研究选题\n\n## 研究问题\n比较证据[M1]与[M2]，再核对[M1]。'
+
+    class Model:
+        def share(self, *, stream):
+            def call(prompt):
+                for delta in ['# 研究选题\n\n## 研究问题\n比较证据', '[M', '1]', '与[M2]，再核对[M1]。']:
+                    stream['_stream_sink']({'tag': 'text', 'delta': delta})
+                return {'content': body, 'reasoning_content': 'PRIVATE_REASONING'} if wrapped else body
+            return call
+
+    monkeypatch.setattr(research_topic, 'AutoModel', lambda **kwargs: Model())
+    monkeypatch.setattr(research_topic, '_prompt_token_limit', lambda: 100000)
+    emitted = []
+    with bind_runtime_events(emitted.append, 'research_topic_document') as events:
+        result = api.run_algorithm('research_topic', {'topic': '研究主题', 'papers': papers})
+        events.complete()
+    saved = result['question']
+    assert saved.count(rf'[\[1\]](#paper-ref-{identifier})') == 2
+    assert r'[\[2\]](#paper-ref-P2)' in saved
+    assert saved.count('## 参考文献') == 1
+    assert '[1] study-notes.md（用户上传材料）' in saved
+    assert '[2] Author. Prior work. 2024.' in saved
+    assert f'[{identifier}]' not in saved
+    assert 'PRIVATE_REASONING' not in json.dumps(emitted, ensure_ascii=False)
+    latest = next(e['stream_id'] for e in reversed(emitted) if e['type'] == 'artifact_stream_start')
+    assert ''.join(e['delta'] for e in emitted if e.get('stream_id') == latest
+                   and e['type'] == 'artifact_stream') == saved
+    assert not any(f'[{identifier}]' in e.get('delta', '') for e in emitted)
+    assert papers == before
+
+
+@pytest.mark.parametrize('wrapped', [False, True])
+def test_topic_inference_and_summary_extract_body_without_reasoning(monkeypatch, wrapped):
+    monkeypatch.setattr(research_topic, '_prompt_token_limit', lambda: 100000)
+    raw = '{"topic":"证据追溯"}'
+    monkeypatch.setattr(research_topic, 'AutoModel', lambda **kwargs: lambda prompt:
+                        {'content': raw, 'reasoning_content': 'PRIVATE'} if wrapped else raw)
+    assert research_topic.infer_topic('根据附件选题', []) == '证据追溯'
+    raw = '提炼出的材料正文。'
+    assert research_topic._condense('材料', {'id': 'P1', 'title': '材料'}, 100000) == raw
+
+
+@pytest.mark.parametrize('raw', ['', {'content': '', 'reasoning_content': '{"topic":"假的主题"}'},
+                                 {'reasoning_content': '{"topic":"假的主题"}'},
+                                 {'content': '{broken', 'reasoning_content': '{"topic":"假的主题"}'}])
+def test_topic_inference_keeps_empty_and_invalid_json_failures(monkeypatch, raw):
+    monkeypatch.setattr(research_topic, '_prompt_token_limit', lambda: 100000)
+    monkeypatch.setattr(research_topic, 'AutoModel', lambda **kwargs: lambda prompt: raw)
+    with pytest.raises((ValueError, RuntimeError)):
+        research_topic.infer_topic('主题', [])
+
+
+def test_real_topic_step_publishes_numbered_document_and_pool(monkeypatch, tmp_path):
+    from lazymind.chat.engine.subagent.context import SubAgentContext
+    identifier = 'upload-' + 'a' * 64
+    papers = [dict(id=identifier, title='研究记录', filename='研究记录.md', attachment_key='upload',
+                   text='研究材料。', abstract='材料摘要。')]
+    pool = workflow.pool_from_business({'topic': '证据追溯', 'papers': papers})
+    seed = tmp_path / 'seed.json'
+    seed.write_text(json.dumps(pool, ensure_ascii=False))
+    monkeypatch.setattr(research_topic, '_prompt_token_limit', lambda: 100000)
+    monkeypatch.setattr(research_topic, 'AutoModel', lambda **kwargs: lambda prompt: {
+        'content': '# 研究选题\n\n## 研究问题\n如何核验已有材料[M1]？',
+        'reasoning_content': 'PRIVATE_REASONING'})
+    emitted = []
+    slots = ['research_topic_pool', 'research_topic_document']
+    lazyllm.globals['subagent_ctx'] = SubAgentContext(
+        task_id='topic-response', conversation_id='test', agent_type='workflow_step', objective='Research',
+        workspace_path=str(tmp_path), input_slots=['seed_pool'], output_slots=slots, db=None, emit=emitted.append,
+        params={'step_id': 'research_topic', 'current_user_input': '根据材料确定选题',
+                'user_input': '根据材料确定选题', 'remote_inputs': {'seed_pool': str(seed)},
+                'output_slot_types': dict.fromkeys(slots, 'file')})
+    assert workflow.run_paper_step()['status'] == 'completed'
+    artifacts = {e['slot']: e['value']['path'] for e in emitted if e['type'] == 'artifact'}
+    assert set(artifacts) == set(slots)
+    saved = Path(artifacts['research_topic_document']).read_text()
+    published = workflow._read_bound(artifacts['research_topic_pool'])
+    assert workflow.material(published, 'question')['content'] == saved
+    assert rf'[\[1\]](#paper-ref-{identifier})' in saved
+    assert '[1] 研究记录.md（用户上传材料）' in saved
+    assert 'PRIVATE_REASONING' not in saved
+    assert workflow.material(published, 'papers')['content'] == papers
+    latest = next(e['stream_id'] for e in reversed(emitted) if e['type'] == 'artifact_stream_start')
+    assert ''.join(e['delta'] for e in emitted if e.get('stream_id') == latest
+                   and e['type'] == 'artifact_stream') == saved
