@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import http.client
+import socket
 import threading
 import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -51,6 +52,9 @@ def test_non_user_queue_failure_does_not_cancel(monkeypatch):
 @pytest.mark.parametrize('phase', ['headers', 'body'])
 @pytest.mark.parametrize('stream', [False, True])
 def test_workflow_cancel_interrupts_blocked_model_read(monkeypatch, phase, stream):
+    # Windows shutdown does not reliably wake a timed socket read. Cancellation
+    # must make progress even when cross-thread shutdown cannot interrupt it.
+    monkeypatch.setattr(socket.socket, 'shutdown', lambda *_args: None)
     entered_read, reached_server, release, finished = (threading.Event() for _ in range(4))
     outcomes, requests = [], []
     sid = 'cancel-model-' + uuid.uuid4().hex
