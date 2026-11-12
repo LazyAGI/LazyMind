@@ -216,8 +216,8 @@ type ResumeInput struct {
 type Output struct {
 	Slot        string `json:"slot" jsonschema:"required,Declared Workflow output slot"`
 	ContentType string `json:"content_type,omitempty" jsonschema:"Slot type: text, json, image, file, or file_list"`
-	Value       any    `json:"value,omitempty" jsonschema:"Inline result: text, JSON, image URL, or file payload"`
-	LocalPath   string `json:"local_path,omitempty" jsonschema:"Local file path for a file slot; mutually exclusive with value"`
+	Value       any    `json:"value,omitempty" jsonschema:"Inline result: text, JSON, file payload, or image URL string/object with url. Use local_path for local images."`
+	LocalPath   string `json:"local_path,omitempty" jsonschema:"Local image or file to upload; mutually exclusive with value"`
 	ValueFile   string `json:"value_file,omitempty" jsonschema:"Absolute Connector-local UTF-8 file for a text or JSON slot; reads and publishes its value without echoing full content into controller context. Mutually exclusive with value and local_path"`
 	Caption     string `json:"caption,omitempty"`
 	Seq         int    `json:"seq,omitempty" jsonschema:"One-based idempotency sequence for list items or repeated revisions of one slot"`
