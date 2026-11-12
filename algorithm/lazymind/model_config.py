@@ -360,7 +360,7 @@ def inject_model_config(model_config: Optional[Dict[str, Any]]) -> None:
     # workflow actions that do not build a chat agentic_config. Empty requests must
     # replace prior routing state rather than inheriting another request's models.
     lazyllm.globals['lazymind_request_model_config'] = deepcopy(normalized or {})
-    lazyllm.globals['config']['dynamic_model_configs'] = {}
+    lazyllm.globals['config'].pop('dynamic_model_configs', None)
     _lazyllm_inject(_select_chat_transport(normalized) if isinstance(normalized, dict) else normalized)
     from lazymind.embedding_options import configure_embedding_options
     from lazymind.provider_request import configure_request_advanced
