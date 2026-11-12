@@ -196,6 +196,7 @@ def _resolved_from_local_file(
         raise FileNotFoundError(source)
     if source.lower().endswith('.pdf'):
         manifest = store.find_by_source_path(source)
+        retry_failed = manifest is not None
         if not manifest:
             from .ingest import ingest_pdf_file
             manifest = ingest_pdf_file(
@@ -204,7 +205,7 @@ def _resolved_from_local_file(
                 display_name=display_name,
                 store=store,
             )
-        return _resolved_manifest(store, manifest, target=str(manifest.get('file_id')))
+        return _resolved_manifest(store, manifest, target=str(manifest.get('file_id')), retry_failed=retry_failed)
     if is_chat_image_file(source):
         raise ValueError('images are not text targets; use an image or vision tool')
     if is_chat_spreadsheet_file(source):
@@ -362,9 +363,29 @@ def _resolve_file_resource(
     return store.load_manifest(str(matches[0].get('file_id')))
 
 
+def _retry_failed_manifest(
+    store: FileResourceStore, manifest: Dict[str, Any],
+) -> Dict[str, Any]:
+    if manifest.get('parse_status') == 'failed':
+        # Retry a previous parser failure from the workspace-owned original.
+        # The ingest layer preserves the resource identity and serializes leases.
+        original = os.path.realpath(str(manifest.get('original_path') or ''))
+        if os.path.commonpath((store.workspace, original)) != store.workspace:
+            raise ValueError('original file must stay inside the active workspace')
+        from .ingest import ingest_pdf_file
+        manifest = ingest_pdf_file(
+            original, source=str(manifest.get('source') or 'upload'),
+            source_url=manifest.get('source_url'),
+            display_name=manifest.get('display_name'), store=store,
+        )
+    return manifest
+
+
 def _resolved_manifest(
-    store: FileResourceStore, manifest: Dict[str, Any], *, target: str,
+    store: FileResourceStore, manifest: Dict[str, Any], *, target: str, retry_failed: bool = True,
 ) -> ResolvedTextResource:
+    if retry_failed:
+        manifest = _retry_failed_manifest(store, manifest)
     if manifest.get('parse_status') != 'ready':
         raise ValueError(
             f"file {manifest.get('file_id')} is not ready "
@@ -427,6 +448,7 @@ def resolve_text_target(
     store = FileResourceStore(workspace)
     manifest = _resolve_file_resource(store, key)
     if manifest:
+        manifest = _retry_failed_manifest(store, manifest)
         if manifest.get('parse_status') != 'ready':
             raise ValueError(
                 f"file {manifest.get('file_id')} is not ready "
@@ -504,7 +526,7 @@ def resolve_text_target(
             display_name=os.path.basename(resolved),
             store=store,
         )
-        return _resolved_manifest(store, manifest, target=str(manifest.get('file_id')))
+        return _resolved_manifest(store, manifest, target=str(manifest.get('file_id')), retry_failed=False)
     elif is_chat_image_file(resolved):
         raise ValueError('images are not text targets; use an image or vision tool')
     elif is_chat_document_file(resolved):

@@ -1,5 +1,6 @@
 import os
 import re
+from copy import deepcopy
 from functools import lru_cache
 from pathlib import Path
 from typing import Any, Dict, Optional
@@ -78,7 +79,7 @@ def is_model_role_available(role: str, *, config_path: Optional[str] = None) -> 
     '''Return whether a model role is configured and injectable for the current request.
 
     Static roles (source != dynamic) are available when declared in runtime_models.
-    Dynamic roles additionally require inject_model_config to have supplied that role.
+    Dynamic roles require an injected provider source; a model or URL alone cannot route.
     '''
     entry = _role_entry(load_model_config(config_path or get_config_path()).get(role))
     if not entry:
@@ -89,7 +90,7 @@ def is_model_role_available(role: str, *, config_path: Optional[str] = None) -> 
     dynamic_cfg = lazyllm.globals['config'].get('dynamic_model_configs') or {}
     buckets = dynamic_cfg.get(role) or {}
     return any(
-        (v.get('source') or v.get('model') or v.get('url'))
+        str(v.get('source') or '').strip()
         for v in buckets.values()
         if isinstance(v, dict)
     )
@@ -354,6 +355,12 @@ def inject_model_config(model_config: Optional[Dict[str, Any]]) -> None:
     if isinstance(normalized, dict):
         normalized = _enrich_role_types(normalized)
         normalized = resolve_request_api_keys(normalized)
+    import lazyllm
+    # Preserve the selected request configuration for remote Document calls, including
+    # workflow actions that do not build a chat agentic_config. Empty requests must
+    # replace prior routing state rather than inheriting another request's models.
+    lazyllm.globals['lazymind_request_model_config'] = deepcopy(normalized or {})
+    lazyllm.globals['config']['dynamic_model_configs'] = {}
     _lazyllm_inject(_select_chat_transport(normalized) if isinstance(normalized, dict) else normalized)
     from lazymind.embedding_options import configure_embedding_options
     from lazymind.provider_request import configure_request_advanced

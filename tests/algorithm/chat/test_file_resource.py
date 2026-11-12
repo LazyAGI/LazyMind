@@ -894,3 +894,61 @@ def test_workflow_without_chat_rejects_other_attempt_and_symlink(monkeypatch, tm
     for target in (secret, link):
         with pytest.raises(ToolExecutionError):
             workspace_tools.read_file_resource(str(target))
+
+
+@pytest.mark.parametrize('target_kind', ['filename', 'path', 'resource_id'])
+def test_read_retries_failed_paper_attachment_parse(monkeypatch, tmp_path, target_kind):
+    src = _write_pdf(tmp_path / 'paper-01.pdf')
+    _set_scope(monkeypatch, tmp_path, files=[src])
+    calls = []
+
+    def parse(path):
+        calls.append(path)
+        if len(calls) == 1:
+            raise RuntimeError('temporary OCR outage')
+        return [(1, 'Recovered paper full text')]
+
+    monkeypatch.setattr('lazymind.chat.engine.tools.file_resources.ingest.parse_pdf_pages', parse)
+    with pytest.raises(ToolExecutionError, match='temporary OCR outage'):
+        workspace_tools.read_file_resource(src.name)
+    store = FileResourceStore(str(tmp_path))
+    failed = store.find_by_source_path(str(src))
+    assert failed['parse_status'] == 'failed'
+    target = {'filename': src.name, 'path': str(src), 'resource_id': failed['file_id']}[target_kind]
+    result = workspace_tools.read_file_resource(target)
+    assert 'Recovered paper full text' in str(result)
+    assert len(calls) == 2
+    assert store.load_manifest(failed['file_id'])['parse_status'] == 'ready'
+
+
+@pytest.mark.parametrize('symlink', [False, True])
+def test_failed_pdf_retry_rejects_original_outside_workspace(monkeypatch, tmp_path, symlink):
+    workspace = tmp_path / 'chat'
+    workspace.mkdir()
+    _set_scope(monkeypatch, workspace)
+    outside = _write_pdf(tmp_path / 'private.pdf')
+    manifest = _ingest(monkeypatch, workspace)
+    store = FileResourceStore(str(workspace))
+    original = outside
+    if symlink:
+        original = workspace / 'redirect.pdf'
+        original.symlink_to(outside)
+    manifest.update(parse_status='failed', original_path=str(original))
+    store.write_manifest(manifest)
+    with pytest.raises(ToolExecutionError, match='original file must stay inside'):
+        workspace_tools.read_file_resource(manifest['file_id'])
+
+
+def test_workspace_pdf_first_parse_does_not_retry_in_same_read(monkeypatch, tmp_path):
+    _set_scope(monkeypatch, tmp_path)
+    source = _write_pdf(tmp_path / 'report.pdf')
+    calls = []
+
+    def parse(path):
+        calls.append(path)
+        raise RuntimeError('OCR unavailable')
+
+    monkeypatch.setattr('lazymind.chat.engine.tools.file_resources.ingest.parse_pdf_pages', parse)
+    with pytest.raises(ToolExecutionError, match='OCR unavailable'):
+        workspace_tools.read_file_resource(source.name)
+    assert len(calls) == 1

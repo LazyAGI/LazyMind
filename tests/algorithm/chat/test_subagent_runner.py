@@ -2529,7 +2529,8 @@ async def test_subagent_forwards_knowledge_confirmation_during_tool_execution(mo
     assert [event['ask_pending'] for event in events if event.get('type') == 'ask_pending'] == [card]
 
 
-def test_old_pinned_workflow_kb_retains_query_shims_but_new_group_uses_five_reads(monkeypatch):
+@pytest.mark.parametrize('rag_enabled', ['1', '0'])
+def test_old_pinned_workflow_kb_retains_query_shims_but_new_group_uses_five_reads(monkeypatch, rag_enabled):
     from types import SimpleNamespace
     from lazymind.chat.engine.tools.lazy_kb import KBToolkit
     monkeypatch.setattr(runner_mod, 'DEFAULT_TOOLS', [SimpleNamespace(name='kb', tool=KBToolkit())])
@@ -2537,15 +2538,22 @@ def test_old_pinned_workflow_kb_retains_query_shims_but_new_group_uses_five_read
     validated = []
     monkeypatch.setattr(runner_mod, 'load_workflow_tools', lambda params, names: validated.append(
         (params.get('revision_id'), tuple(names))) or {})
+    monkeypatch.setenv('LAZYMIND_RAG_ENABLED', rag_enabled)
     params = {'workflow_id': 'ppt-workflow', 'revision_id': 'fixed-old-revision'}
     old = runner_mod._resolve_runtime_tools(['kb'], params)[0]
-    assert 'list_knowledge_bases' in old.__tool_public_apis__
+    if rag_enabled == '1':
+        assert old.__tool_public_apis__ == [
+            'list_knowledge_bases', 'list_knowledge_base_documents',
+            'aggregate_knowledge_base_documents', *old.__public_apis__,
+        ]
+    else:
+        assert old.__tool_public_apis__ == ['read_document']
     assert validated == [('fixed-old-revision', ('kb',))]
     new = runner_mod._resolve_runtime_tools(['kb', 'knowledge_management'], params)[0]
     assert len(new.__public_apis__) == 5
-    assert not hasattr(new, '__tool_public_apis__')
+    assert new.__tool_public_apis__ == (new.__public_apis__ if rag_enabled == '1' else ['read_document'])
     normal = runner_mod._resolve_runtime_tools(['kb'], {})[0]
-    assert not hasattr(normal, '__tool_public_apis__')
+    assert normal.__tool_public_apis__ == (normal.__public_apis__ if rag_enabled == '1' else ['read_document'])
 
 
 def test_new_ppt_revision_uses_shared_management_discovery():
