@@ -2269,7 +2269,7 @@ export function SlotText({ slot, widget, sessionId, slotId, revisionCount, onRef
       if (e.key === 'Enter') handleEdit(e.currentTarget);
     } : undefined,
     style: typeof widget?.maxHeight === 'number'
-      ? { maxHeight: widget.maxHeight, overflowY: 'auto' as const }
+      ? { '--workflow-text-max-height': `${widget.maxHeight}px` } as React.CSSProperties
       : undefined,
   };
 

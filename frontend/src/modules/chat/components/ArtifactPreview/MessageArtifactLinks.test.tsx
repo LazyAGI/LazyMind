@@ -139,11 +139,34 @@ it('previews the complete restored final segment using the original UTF-16 expor
   const answer = list[list.length - 1];
   expect(answer.delta).toBe(body);
   render(<ArtifactPreviewContext.Provider value={{ open, close: vi.fn(), target: null, onVersions: undefined }}>
-    <MessageArtifactLinks conversationId='c1' historyId='h1' content={answer.delta} exports={answer.exports} />
+    <MessageArtifactLinks conversationId='c1' historyId='h1' content={answer.delta}
+      rawContent={answer.raw_delta} exports={answer.exports} />
   </ArtifactPreviewContext.Provider>);
   fireEvent.click(screen.getByRole('button', { name: '预览 trip.md' }));
   expect(open).toHaveBeenCalledWith(expect.objectContaining({ content: document }));
   expect(answer.raw_delta).toBe(raw);
+});
+
+it.each([false, true])('previews the entire export after commentary and tool rounds (steering=%s)', steering => {
+  const commentary = '我会按1人总预算3000元以内规划，把往返交通、两晚住宿和餐饮都算进去。';
+  const document = '# 旅行计划😀\n' + '完整内容\n'.repeat(200) + '**第三天漫步五大道后回武汉。保留完整体验，而不是尽量多打卡。**';
+  const raw = commentary + '<tp>核算预算</tp><trp>已核算</trp><tool_result>{}</tool_result>' + document;
+  const exports: ChatExport[] = [{ export_id: 'trip', filename: 'trip.md', title: '旅行计划', index: 0,
+    content_type: 'text/markdown', start: 0, end: document.length }];
+  const list = buildChatMessageListFromHistory([{
+    id: 'h1', query: '制定旅行计划', result: (steering ? '此前的回复' : '') + raw,
+    model_output: { version: 1 } as any, exports,
+    ...(steering ? { assistant_remainder: raw,
+      steering_messages: [{ id: 'budget', text: '预算3000以内', assistant_segment: '此前的回复' }] } : {}),
+  }]);
+  const answer = list[list.length - 1];
+  expect(answer.delta).toBe(commentary + document);
+  render(<ArtifactPreviewContext.Provider value={{ open, close: vi.fn(), target: null, onVersions: undefined }}>
+    <MessageArtifactLinks conversationId='c1' historyId='h1' content={answer.delta}
+      rawContent={answer.raw_delta} exports={answer.exports} />
+  </ArtifactPreviewContext.Provider>);
+  fireEvent.click(screen.getByRole('button', { name: '预览 trip.md' }));
+  expect(open).toHaveBeenCalledWith(expect.objectContaining({ content: document }));
 });
 
 it.each([undefined, 'different-work'])('keeps same-named formats separate without a matching group (%s)', async group => {

@@ -212,6 +212,9 @@ runtime:
         style_flow: style_flow
         generate_background_images: generate_background_images
         template_mode: template_mode
+    - step_id: generate_ppt
+      tool: check_ppt_delivery
+      artifacts_argument: artifacts
   input_checkpoint:
     after_step: collect_materials
     slot: material_clarification
@@ -463,6 +466,7 @@ tool_scripts:
       - ppt_publish_background_prompts
       - ppt_generate_background_images
       - check_ppt_workflow_capabilities
+      - check_ppt_delivery
       - ppt_analyze_template
       - ppt_publish_paper_reflection
       - ppt_cache_academic_sources

@@ -1133,3 +1133,20 @@ def test_generic_file_and_shell_rendering(name, argument, value, verb):
     for result in ({'ok': True, 'value': {'status': 'ok'}}, {'ok': False, 'msg': 'failed'}):
         preview = tool_rendering._tool_result_preview(name, result, value, language='zh')
         assert verb in preview and '工具 **' not in preview
+
+
+@pytest.mark.parametrize('name', ['advance_step', 'advance_step_and_hand_off', 'resume_and_rerun_step'])
+@pytest.mark.parametrize('language', ['zh', 'en'])
+@pytest.mark.parametrize('status,outcome,expected_zh,expected_en', [
+    ('paused', 'workflow_paused', '已暂停', 'paused'),
+    ('failed', 'step_failed', '执行失败', 'failed'),
+    ('waiting', 'workflow_approval_required', '人工确认', 'approval'),
+    ('waiting_input', 'workflow_input_required', '补充信息', 'additional information'),
+    ('completed', '', '工作流已完成', 'Workflow completed'),
+    ('active', 'step_succeeded', '步骤已完成', 'Step completed'),
+])
+def test_execution_preview_uses_business_outcome(name, language, status, outcome, expected_zh, expected_en):
+    result = {'ok': True, 'value': {'status': status, 'outcome': outcome}}
+    preview = tool_rendering._tool_result_preview(name, result, language=language)
+    assert (expected_zh if language == 'zh' else expected_en) in preview
+    assert '已启动' not in preview and 'launched' not in preview

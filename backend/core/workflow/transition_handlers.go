@@ -31,6 +31,7 @@ type transitionCommandRequest struct {
 	CommandID            string              `json:"command_id"`
 	Operation            string              `json:"operation"`
 	RetryOrigin          string              `json:"retry_origin"`
+	ResumeForRerun       bool                `json:"resume_for_rerun,omitempty"`
 	TargetStepID         string              `json:"target_step_id"`
 	ExpectedStateVersion int64               `json:"expected_state_version"`
 	GraphHash            string              `json:"graph_hash"`
@@ -663,6 +664,15 @@ func applyWorkflowTransition(ctx context.Context, tx *gorm.DB, sessionID string,
 			return snapshotErr
 		}
 		projection := projectSessionWithApprovalPreferences(tx.WithContext(ctx), session, graph, snapshot)
+		if req.ResumeForRerun {
+			if err := resumeForRerun(ctx, tx, &session, req); err != nil {
+				var rejected *controlstore.Error
+				if errors.As(err, &rejected) {
+					return rejectTransition(req.CommandID, &session, projection, http.StatusConflict, rejected.Code, rejected.Message, false, nil)
+				}
+				return err
+			}
+		}
 		if err := guardRunAdvance(tx, session); err != nil {
 			var rejected *controlstore.Error
 			if errors.As(err, &rejected) {

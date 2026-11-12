@@ -713,6 +713,12 @@ TOOL_RENDER_PROFILES: dict[str, dict[str, Any]] = (
                         'failure': {'en': 'Google Drive file names matching '
                                           '{value} could not be found.',
                                     'zh': '未能找到文件名匹配 {value} 的 Google Drive 文件。'}},
+ 'resume_and_rerun_step': {'argument': 'step_id',
+                           'call': {'en': 'Resuming and rerunning step {value}.',
+                                    'zh': '正在恢复并重新执行步骤 {value}...'},
+                           'success': {'en': 'Rerun request processed.', 'zh': '重跑请求已处理'},
+                           'failure': {'en': 'Step {value} could not be rerun.',
+                                       'zh': '步骤 {value} 未能重新执行'}},
  'advance_step': {'argument': 'step_ids/steps.step_id',
                   'call': {'en': 'Switching to step {value}.',
                            'zh': '正在切换到步骤 {value}...'},

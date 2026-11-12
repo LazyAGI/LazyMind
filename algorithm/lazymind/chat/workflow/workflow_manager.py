@@ -139,18 +139,29 @@ def _agentic_config() -> Dict[str, Any]:
     return lazyllm.globals.get('agentic_config', {}) or {}
 
 
-def _step_request_input(bound_input: Optional[str], session_id: str) -> tuple[str, str]:
+def _step_request_input(bound_input: Optional[str], session_id: str, request_quote: str = '') -> str:
     from lazymind.chat.service.component.history import is_workflow_rewind_action
 
     cfg = _agentic_config()
     current_input = str(
         bound_input or cfg.get('workflow_current_query') or cfg.get('query') or ''
     ).strip()
+    if request_quote:
+        if not request_quote.strip() or request_quote not in current_input:
+            raise WorkflowClientError('INVALID_RERUN_REQUEST', 'Quote the rerun instruction from this turn.')
+        # The tool selects the step; its control clause is not a new content brief.
+        # Keep any accompanying content amendments for this and downstream steps.
+        cfg['workflow_recovery_input'] = {
+            'session_id': session_id, 'query': current_input,
+            'content': current_input.replace(request_quote, '', 1).strip(' \t\r\n,，;；.。'),
+        }
+        lazyllm.globals['agentic_config'] = cfg
+    recovery = cfg.get('workflow_recovery_input') or {}
+    if recovery.get('session_id') == session_id and recovery.get('query') == current_input:
+        return recovery['content']
     if is_workflow_rewind_action(current_input, {'session_id': session_id}):
-        # Let Core restore session intent for every step in this rerun turn,
-        # including downstream execute operations, not only rewind/retry.
-        return '', f'Recovery request for this rerun only: {current_input}'
-    return current_input, ''
+        return ''
+    return current_input
 
 
 def _client() -> WorkflowClient:
@@ -230,8 +241,12 @@ def _handoff_tool(
                                 for value in (session, user_input)) else 'UNDECLARED')
 
     @_register_host_file(capability)
-    def advance_step_and_hand_off(step_id: str) -> Union[str, Dict[str, Any]]:
-        """Execute one Ready Workflow step, then hand off for result approval."""
+    def advance_step_and_hand_off(step_id: str, request_quote: str = '') -> Union[str, Dict[str, Any]]:
+        """Execute one Ready Workflow step, then hand off for result approval.
+
+        For an explicit rerun request, quote only its control clause in request_quote,
+        excluding content amendments. Leave it empty for ordinary forward execution.
+        """
         selected_session_id = session() if callable(session) else session
         selected_session_id = str(selected_session_id or '').strip()
         if not selected_session_id:
@@ -275,16 +290,14 @@ def _handoff_tool(
                         f'User is currently focused on artifact sort order {focused_sort_order}.'
                     )
                 bound_user_input = user_input() if callable(user_input) else user_input
-                current_user_input, recovery_instruction = _step_request_input(
-                    bound_user_input, selected_session_id,
+                current_user_input = _step_request_input(
+                    bound_user_input, selected_session_id, request_quote,
                 )
                 if step_id in (frontier.get('retryable_steps') or []):
                     pending = _input_required_result(client.get_state(
                         selected_session_id), [step_id], current_user_input)
                     if pending:
                         return pending
-                if recovery_instruction:
-                    focus_hints.append(recovery_instruction)
                 response = client.advance(AdvanceRequest(
                     session_id=selected_session_id,
                     expected_state_version=int(frontier.get('state_version') or 0),
@@ -465,6 +478,67 @@ def _paused_workflow_result(result: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     }
 
 
+def _paused_rerun_tool(session_id: str, state: Dict[str, Any], user_input: str,
+                       workflow_id: str, checkpoint: Optional[InputCheckpoint]) -> Any:
+    """Bind recovery to the paused snapshot and original input of this Chat turn."""
+    version = int(state.get('state_version') or 0)
+    projection = state.get('projection') or {}
+    targets = set(projection.get('retryable') or []) | set(projection.get('rewindable') or [])
+    consumed = False
+
+    @_register_host_file('NONE')
+    def resume_and_rerun_step(step_id: str, request_quote: str, handoff: bool = False) -> Dict[str, Any]:
+        """Resume a paused workflow ONLY when this turn's user explicitly asks to rerun a specific step.
+
+        Copy only the rerun control clause verbatim into request_quote, excluding any
+        content amendments (such as a new page count or style). Never use this
+        for status questions, hypothetical/negated requests, old history, or automatic
+        retries. Select one retryable/rewindable step from the initial Runtime snapshot.
+        Set handoff only for a required review or an explicit request to stop after this
+        step. Otherwise continue normally from the returned frontier. Do not first call
+        get_ready_steps or ordinary advance tools: those deliberately preserve pause.
+        """
+        nonlocal consumed
+        if consumed or not request_quote.strip() or request_quote not in user_input or step_id not in targets:
+            raise WorkflowClientError(
+                'INVALID_RERUN_REQUEST', 'Select a prior step and quote this turn\'s explicit rerun request.',
+            )
+        if checkpoint:
+            waiting = checkpoint.guard(session_id, [step_id])
+            if waiting:
+                return waiting
+        # Never refresh the captured version and retry: a newer pause revokes this
+        # turn's permission. Core resumes and dispatches atomically under this fence.
+        consumed = True
+        current_input = _step_request_input(user_input, session_id, request_quote)
+        try:
+            result = dict(_client().advance(AdvanceRequest(
+                session_id=session_id, expected_state_version=version,
+                steps=[StepCommand(step_id=step_id, user_input=current_input,
+                                   runtime_instruction=_WORKFLOW_EDIT_SCOPE_POLICY)],
+                handoff=handoff, retry_origin='user', resume_for_rerun=True,
+            )).result)
+        except WorkflowClientError as exc:
+            approval = _approval_blocked_result(exc)
+            if approval:
+                return approval
+            raise
+        result = HostWorkflowToolkit.execution_result(result, str(result.get('command_id') or ''))
+        result = _with_terminal_agent_control(result, workflow_id, user_retry=True)
+        if handoff and result.get('accepted') is True:
+            result.setdefault('_agent_control', {
+                'stop': True, 'reason': 'workflow_handoff',
+                'final_text': '本次工作流执行已结束，请在工作流中查看结果。',
+            })
+        if checkpoint and result.get('outcome') == 'step_succeeded':
+            waiting = checkpoint.guard(session_id, completed_step=step_id)
+            if waiting:
+                return waiting
+        return _compact_model_frontier(result)
+
+    return resume_and_rerun_step
+
+
 def _with_terminal_agent_control(result: Dict[str, Any], workflow_id: str = '', *,
                                  user_retry: bool = False) -> Dict[str, Any]:
     paused = _paused_workflow_result(result)
@@ -604,8 +678,12 @@ def _safe_session_tools(
         return _compact_model_frontier(_paused_workflow_result(result) or result)
 
     @_register_host_file(capability)
-    def advance_step(step_ids: List[str]) -> Dict[str, Any]:
-        """Execute exactly one Runtime-returned target; never batch or parallelize steps."""
+    def advance_step(step_ids: List[str], request_quote: str = '') -> Dict[str, Any]:
+        """Execute exactly one Runtime-returned target; never batch or parallelize steps.
+
+        For an explicit rerun request, quote only its control clause in request_quote,
+        excluding content amendments. Leave it empty for ordinary forward execution.
+        """
         requested = [str(value).strip() for value in step_ids if str(value).strip()]
         selected_session_id = session_id()
         if checkpoint:
@@ -651,16 +729,14 @@ def _safe_session_tools(
                         f'User is currently focused on artifact sort order {focused_sort_order}.'
                     )
                 bound_user_input = user_input() if callable(user_input) else user_input
-                current_user_input, recovery_instruction = _step_request_input(
-                    bound_user_input, selected_session_id,
+                current_user_input = _step_request_input(
+                    bound_user_input, selected_session_id, request_quote,
                 )
                 if any(value in (frontier.get('retryable_steps') or []) for value in requested):
                     pending = _input_required_result(toolkit.get_workflow_state(
                         selected_session_id), requested, current_user_input)
                     if pending:
                         return pending
-                if recovery_instruction:
-                    focus_hints.append(recovery_instruction)
                 user_retry = bool(cfg.get('user_authorized_workflow_retry'))
                 result = toolkit.advance_step(
                     selected_session_id, int(frontier.get('state_version') or 0),
@@ -2498,6 +2574,8 @@ def resolve_workflow_injection(
             'focused_sort_order': context.get('focused_sort_order'),
         })
         tools.append(_handoff_tool(selected_session_id, user_input=current_query, checkpoint=checkpoint))
+        if _paused_workflow_result(projection) and current_query:
+            tools.append(_paused_rerun_tool(session_id, projection, current_query, workflow_id, checkpoint))
         session_projection = (
             projection.get('projection')
             if isinstance(projection.get('projection'), dict) else {}
@@ -2570,6 +2648,11 @@ def resolve_workflow_injection(
             + _WORKFLOW_EDIT_SCOPE_POLICY
             + _WORKFLOW_RESPONSE_GUIDANCE
             + _USER_BOUNDARY_HANDOFF_POLICY
+            + 'If this turn explicitly asks to rerun a particular step while paused, use '
+            'resume_and_rerun_step directly with a verbatim quote of that request. This '
+            'authorizes only that recovery; do not ask for a separate Continue click. '
+            'For ordinary discussion or status questions, preserve the pause. Never '
+            'infer a stop-after-step boundary merely from a request to rerun a step. '
             + 'If a Workflow tool returns user_notice, explicitly relay that notice to the '
             + 'user. advance_step waits for '
             + 'terminal execution. A failed result never means success and never permits a '

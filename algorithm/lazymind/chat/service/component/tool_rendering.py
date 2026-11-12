@@ -705,6 +705,29 @@ def _tool_result_preview(tool_name: str, result: Any, value: str = '', language:
         )
     business_value = _normalized_success_business_value(result)
     render_name, _ = _render_tool_context(tool_name)
+    if (render_name in {'advance_step', 'advance_step_and_hand_off', 'resume_and_rerun_step'}
+            and isinstance(business_value, dict)):
+        display = (business_value.get('workflow_state') or {}).get('display') or business_value.get('display') or {}
+        outcome = business_value.get('outcome') or ''
+        state = display.get('status') or business_value.get('status')
+        if state == 'paused' or outcome == 'workflow_paused':
+            notice = ('工作流已暂停，等待恢复。', 'Workflow paused; waiting to resume.')
+        elif state == 'failed' or outcome == 'step_failed' or business_value.get('attempt_status') in {
+            'failed', 'cancelled', 'interrupted',
+        }:
+            notice = ('步骤执行失败，请查看失败原因。', 'Step failed. Review the failure details.')
+        elif outcome == 'workflow_approval_required' or display.get('approval_step_id'):
+            notice = ('步骤结果等待人工确认。', 'Step result is waiting for approval.')
+        elif outcome == 'workflow_input_required' or state in {'waiting_input', 'waiting_for_input', 'needs_input'}:
+            notice = ('工作流等待补充信息。', 'Workflow is waiting for additional information.')
+        elif state == 'completed' or (business_value.get('projection') or {}).get('completed'):
+            notice = ('工作流已完成。', 'Workflow completed.')
+        elif outcome == 'step_succeeded' or business_value.get('attempt_status') == 'succeeded':
+            notice = ('步骤已完成。', 'Step completed.')
+        else:
+            notice = None
+        if notice:
+            return _ensure_trailing_newline(notice[0 if language == 'zh' else 1])
     if render_name == 'search_provider_meta_search' and isinstance(business_value, dict):
         profile = TOOL_RENDER_PROFILES[render_name]
         variant = 'empty' if _tool_result_count(business_value) == 0 else (

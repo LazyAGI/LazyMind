@@ -1,4 +1,5 @@
 import json
+import pytest
 from unittest.mock import MagicMock
 
 from lazymind.chat.service.component.history import (
@@ -84,16 +85,17 @@ def test_normal_history_preserves_workflow_transition_projection():
     assert len(normalized[1]['content']) > 40_000
 
 
-def test_rewind_history_compacts_workflow_transition_projection_before_model_call():
+@pytest.mark.parametrize('tool_name', ['advance_step', 'resume_and_rerun_step'])
+def test_rewind_history_compacts_workflow_transition_projection_before_model_call(tool_name):
     tool_call = {
         'id': 'call-1',
         'type': 'function',
-        'function': {'name': 'advance_step', 'arguments': '{}'},
+        'function': {'name': tool_name, 'arguments': '{}'},
     }
     call_frame, preview = _tool_call_frame_text(tool_call)
     result_frame = _tool_result_frame_text({
         'id': 'call-1',
-        'name': 'advance_step',
+        'name': tool_name,
         'result': _large_transition_result(),
     }, preview_value=preview)
     history = [{

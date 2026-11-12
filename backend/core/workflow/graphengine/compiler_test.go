@@ -116,6 +116,7 @@ runtime:
     - step_id: b
       tool: check_ready
       arguments: {brief: b_result}
+      artifacts_argument: published_artifacts
   clarification_fields:
     - id: topic
       label: Topic
@@ -157,6 +158,9 @@ runtime:
 	}
 	if len(policy.PostStepChecks) != 1 || policy.PostStepChecks[0].StepID != "b" || policy.PostStepChecks[0].Tool != "check_ready" || policy.PostStepChecks[0].Arguments["brief"] != "b_result" {
 		t.Fatalf("runtime post-step checks were not compiled: %#v", policy.PostStepChecks)
+	}
+	if policy.PostStepChecks[0].ArtifactsArgument != "published_artifacts" {
+		t.Fatalf("post-step artifact list argument was lost: %#v", policy.PostStepChecks)
 	}
 }
 

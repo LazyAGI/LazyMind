@@ -1,5 +1,22 @@
 @use '../../../../styles/taskStatus' as status;
 
+// Flow layouts scroll the entire artifact, regardless of whether a text slot
+// resolves to plain Markdown, a persisted document editor, or a PPT prompt.
+// Bounded document workspaces and nested composite frames keep their own scroller.
+@mixin flowing-artifact-text {
+  .writer-markdown-editor {
+    max-height: none;
+  }
+
+  .workflow-slot__text,
+  .ppt-prompt-document__body,
+  .workflow-slot__artifact-body--markdown,
+  .writer-markdown-editor__surface {
+    max-height: none;
+    overflow-y: visible;
+  }
+}
+
 .workflow-panel {
   container: workflow-panel / inline-size;
   display: flex;
@@ -903,21 +920,17 @@
     flex-direction: column;
     gap: 12px;
 
-    > .workflow-panel__named-slot:not(.workflow-panel__named-slot--writer-document) {
-      // The tab scrolls ordinary text together with its metadata. A second
-      // default 520px text viewport can extend underneath the panel footer.
-      // Explicit widget maxHeight/overflow inline styles still take priority.
-      .workflow-slot__text {
-        max-height: none;
-        overflow-y: visible;
-      }
+    > .workflow-panel__named-slot:not(.workflow-panel__named-slot--writer-document),
+    > .workflow-panel__named-slot--writer-document:not(:only-of-type),
+    &:not(.workflow-panel__tab-content--list) > .workflow-panel__named-slot--writer-document {
+      @include flowing-artifact-text;
     }
 
     &--vertical,
     &--list {
       flex-direction: column;
 
-      > .workflow-panel__named-slot:not(.workflow-panel__named-slot--writer-document) {
+      > .workflow-panel__named-slot {
         flex-shrink: 0;
       }
     }
@@ -1478,7 +1491,7 @@
 
   &__text {
     margin: 0;
-    max-height: 520px;
+    max-height: var(--workflow-text-max-height, 520px);
     overflow-y: auto;
     overscroll-behavior: contain;
     padding-right: 6px;
@@ -3105,7 +3118,13 @@
   flex-direction: column;
   gap: 6px;
   padding: 8px 12px 12px;
-  overflow: auto;
+  // The paged grid below owns scrolling; keep its toolbar outside the viewport.
+  overflow: hidden;
+}
+
+.workflow-panel .composite-grid > .composite-grid__row:not(.composite-grid__row--tree) {
+  flex-shrink: 0;
+  @include flowing-artifact-text;
 }
 
 .composite-toolbar {

@@ -1681,7 +1681,7 @@ export function MarkdownArtifactEditor({
     } as CSSProperties
     : undefined;
   const editorStyle: CSSProperties | undefined = selectionToolbarStyle || maxHeight !== undefined
-    ? { ...selectionToolbarStyle, ...(maxHeight !== undefined ? { maxHeight } : {}) }
+    ? { ...selectionToolbarStyle, ...(maxHeight !== undefined ? { '--writer-markdown-max-height': `${maxHeight}px` } : {}) } as CSSProperties
     : undefined;
 
   let sourcePreview: string | undefined;

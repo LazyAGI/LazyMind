@@ -7,6 +7,7 @@ import { useWorkflowStore } from '../../store/workflowPanel';
 import { toArtifactFiles } from '../ArtifactCollectorCard/artifactFiles';
 import type { ChatExport } from '../newChatContainer/types';
 import { exportCitationMarkdown } from '../../utils/chatExportCitations';
+import { chatExportContent } from '../../utils/chatExportContent';
 import type { ChatSourceCollection } from '../../utils/sourceAdapter';
 import { useArtifactPreview } from './context';
 import { filePreviewTarget, previewFilename, type ArtifactPreviewTarget } from './target';
@@ -14,9 +15,11 @@ import './index.scss';
 
 const InlinePreview = lazy(() => import('./index').then(module => ({ default: module.PreviewContent })));
 
-export default function MessageArtifactLinks({ conversationId, historyId, content, exports = [], sources = [] }: {
-  conversationId: string; historyId: string; content: string; exports?: ChatExport[]; sources?: ChatSourceCollection;
+export default function MessageArtifactLinks({ conversationId, historyId, content, rawContent, exports = [], sources = [] }: {
+  conversationId: string; historyId: string; content: string; rawContent?: string;
+  exports?: ChatExport[]; sources?: ChatSourceCollection;
 }) {
+  content = chatExportContent(content, rawContent);
   const { t } = useTranslation();
   const preview = useArtifactPreview();
   const deliveries = useTaskCenterStore(state => state.deliveriesByConversation[conversationId]

@@ -1276,7 +1276,7 @@ def test_existing_session_tools_inject_protocol_and_concurrency_fields():
         )
 
     advance = _tool(contribution, 'advance_step')
-    assert list(inspect.signature(advance).parameters) == ['step_ids']
+    assert list(inspect.signature(advance).parameters) == ['step_ids', 'request_quote']
     assert list(inspect.signature(_tool(contribution, 'get_workflow_state')).parameters) == []
     assert advance(['draft']) == {'status': 'succeeded'}
     args = toolkit.advance_step.call_args.args
@@ -1421,7 +1421,7 @@ def test_rerun_turn_preserves_session_intent_for_downstream_steps(query, handoff
             assert command.user_input == ('' if is_rerun else query)
             assert 'result' in command.runtime_instruction
             if is_rerun:
-                assert query in command.runtime_instruction
+                assert query not in command.runtime_instruction
 
 
 def test_completed_actions_are_opt_in_and_domain_neutral():
@@ -1784,3 +1784,20 @@ def test_workflow_waiting_notice_is_visible_in_the_rendered_preview(outcome):
     }, 'en')
     preview = re.search(r'<trp id="workflow-notice">(.*?)</trp>', frame, re.S).group(1)
     assert notice in preview
+
+
+@pytest.mark.parametrize('status', ['paused', 'running', 'waiting', 'failed'])
+def test_rerun_recovery_is_only_exposed_on_turn_start_pause(status):
+    with patch('lazymind.chat.workflow.workflow_manager._client') as client_factory:
+        client_factory.return_value.get_state.return_value = {
+            'session_id': 'session-1', 'state_version': 7, 'display': {'status': status},
+            'projection': {'rewindable': ['analysis'], 'retryable': ['draft']},
+        }
+        contribution = resolve_workflow_injection(
+            {'session_id': 'session-1', 'workflow_id': 'writer-workflow'}, current_query='重跑分析步骤',
+        )
+        assert ('resume_and_rerun_step' in _tool_names(contribution)) == (status == 'paused')
+        if status == 'paused':
+            # The real ToolManager must be able to expose the new function schema.
+            manager = ToolManager([_tool(contribution, 'resume_and_rerun_step')])
+            assert set(manager._tool_call['resume_and_rerun_step'].args) == {'step_id', 'request_quote', 'handoff'}

@@ -1785,6 +1785,35 @@ def _required_output_format() -> str:
     return output
 
 
+def check_ppt_delivery(artifacts: list[dict]) -> dict[str, Any]:
+    """Require a published presentation from this attempt in the selected format.
+
+    This deterministic post-step check also covers partial edits: it requires an
+    updated presentation, not regeneration of every page or optional notes.
+    """
+    output_format = _required_output_format()
+    slot = 'native_pptx' if output_format == 'native_pptx' else 'preview_html'
+    for artifact in artifacts:
+        if artifact.get('slot') != slot:
+            continue
+        value = artifact.get('value') or {}
+        if not isinstance(value, dict):
+            continue
+        kind = artifact.get('content_type')
+        if kind == 'file' and str(value.get('path') or '').strip():
+            # The Host has already persisted this file before running the check.
+            if slot == 'native_pptx' or value.get('type') == 'text':
+                return {'status': 'ok', 'output_format': output_format}
+        if slot == 'preview_html' and kind == 'text':
+            text = str(value.get('text') or '')
+            if text.strip() and 'lazymind-ppt-placeholder' not in text:
+                return {'status': 'ok', 'output_format': output_format}
+    raise ToolExecutionError(
+        f'PPT_DELIVERY_MISSING: no {slot} was published by this attempt. '
+        'Generate and publish the requested presentation before completing this step.'
+    )
+
+
 def _require_html_output() -> None:
     if _required_output_format() != 'html':
         raise ToolExecutionError('PPT_OUTPUT_FORMAT_MISMATCH: saved output choice requires native_pptx; '
