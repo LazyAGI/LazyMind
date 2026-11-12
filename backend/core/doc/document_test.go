@@ -923,10 +923,10 @@ func TestRewriteCanonicalUploadPathMapsDockerMarker(t *testing.T) {
 	t.Setenv("LAZYMIND_UPLOAD_ROOT", root)
 
 	dockerPath := "/var/lib/lazymind/uploads/tmp/users/u1/files/upload_a/dog.jpg"
-	got := rewriteCanonicalUploadPath(dockerPath)
+	got := ResolveCanonicalUploadPath(dockerPath)
 	want := filepath.Join(root, "tmp", "users", "u1", "files", "upload_a", "dog.jpg")
 	if got != want {
-		t.Fatalf("rewriteCanonicalUploadPath = %q, want %q", got, want)
+		t.Fatalf("ResolveCanonicalUploadPath = %q, want %q", got, want)
 	}
 
 	rel := fileRelativePath(dockerPath)
@@ -938,8 +938,8 @@ func TestRewriteCanonicalUploadPathMapsDockerMarker(t *testing.T) {
 func TestRewriteCanonicalUploadPathKeepsDockerRootUnchanged(t *testing.T) {
 	t.Setenv("LAZYMIND_UPLOAD_ROOT", "/var/lib/lazymind/uploads")
 	dockerPath := "/var/lib/lazymind/uploads/tmp/dog.jpg"
-	if got := rewriteCanonicalUploadPath(dockerPath); got != dockerPath {
-		t.Fatalf("rewriteCanonicalUploadPath = %q, want unchanged %q", got, dockerPath)
+	if got := ResolveCanonicalUploadPath(dockerPath); got != dockerPath {
+		t.Fatalf("ResolveCanonicalUploadPath = %q, want unchanged %q", got, dockerPath)
 	}
 }
 

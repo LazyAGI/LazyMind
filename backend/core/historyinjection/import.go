@@ -100,7 +100,7 @@ func Apply(ctx context.Context, db *gorm.DB, source BundleSource, owner TargetOw
 			// An ID can also belong to the original user conversation on the
 			// machine where an example was recorded.
 			result.AlreadyPresent = true
-			return nil
+			return retirePredecessor(tx, manifest, owner.ID)
 		}
 		result.AlreadyPresent = marker.BundleID == manifest.BundleID &&
 			(marker.Fingerprint == "" || marker.Fingerprint == fingerprint)
