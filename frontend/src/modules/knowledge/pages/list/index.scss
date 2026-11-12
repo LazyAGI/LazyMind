@@ -18,7 +18,28 @@
   margin-bottom: 24px;
 
   .knowledge-page-heading { flex: 1; min-width: 0; }
-  .knowledge-square-entry { flex: 0 0 auto; }
+  .knowledge-square-entry.ant-btn {
+    flex: 0 0 auto;
+    height: 40px;
+    padding: 0 16px;
+    gap: 10px;
+    border-radius: 10px;
+    border-color: #284b9d;
+    background: #284b9d;
+    color: #fff;
+    font-weight: 600;
+    box-shadow: 0 3px 8px rgb(40 75 157 / 16%);
+    &:hover { background: #1d3c84; border-color: #1d3c84; color: #fff; }
+    &:focus-visible { outline: 3px solid #93b4f5; outline-offset: 3px; }
+    .knowledge-square-mark { flex-shrink: 0; }
+    &.is-return {
+      background: #eff4ff;
+      border-color: #d4e1fa;
+      color: #284b9d;
+      box-shadow: none;
+      &:hover { background: #e2ebff; }
+    }
+  }
 
   h1 {
     margin: 0;

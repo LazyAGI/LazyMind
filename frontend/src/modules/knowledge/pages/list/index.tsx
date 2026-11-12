@@ -1896,8 +1896,12 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
           <h1>{t(activeView === "square" ? "knowledge.knowledgeSquare" : fromPaperReading && paperReading ? "showcase.paperReadingTitle" : "layout.knowledgeBase")}</h1>
           <p>{t(activeView === "square" ? "knowledge.knowledgeSquareDescription" : fromPaperReading && paperReading ? "showcase.paperReadingDescription" : "knowledge.pageDescription")}</p>
         </div>
-        {!fromPaperReading && <Button className="knowledge-square-entry" icon={activeView === "square" ? <ArrowLeftOutlined /> : <ArrowUpOutlined rotate={45} />} iconPosition={activeView === "square" ? "start" : "end"}
+        {!fromPaperReading && <Button className={`knowledge-square-entry${activeView === "square" ? " is-return" : ""}`} icon={activeView === "square" ? <ArrowLeftOutlined /> : <ArrowUpOutlined rotate={45} />} iconPosition={activeView === "square" ? "start" : "end"}
           onClick={() => { setMineFilterOpen(false); updateListState({ view: activeView === "square" ? "mine" : "square" }); }}>
+          {activeView !== "square" && <svg className="knowledge-square-mark" width="18" height="18" viewBox="0 0 18 18" fill="currentColor" aria-hidden="true">
+            <rect x="1" y="1" width="6.5" height="6.5" rx="1.5" /><rect x="10.5" y="1" width="6.5" height="6.5" rx="1.5" opacity=".6" />
+            <rect x="1" y="10.5" width="6.5" height="6.5" rx="1.5" opacity=".6" /><rect x="10.5" y="10.5" width="6.5" height="6.5" rx="1.5" />
+          </svg>}
           {t(activeView === "square" ? "knowledge.backToLibrary" : "knowledge.knowledgeSquare")}
         </Button>}
 

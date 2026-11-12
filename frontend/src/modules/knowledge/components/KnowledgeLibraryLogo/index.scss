@@ -8,6 +8,9 @@
   border-radius: 9px;
   font-size: 19px;
   vertical-align: middle;
+  &.tone-paper { color: #2459a9; background: #eaf2ff; }
+  .paper-collection-mark { width: 25px; height: 25px; }
+  &.is-compact .paper-collection-mark { width: 20px; height: 20px; }
   &.tone-blue { color: #175cd3; background: #eff6ff; }
   &.tone-indigo { color: #4f46a5; background: #f0efff; }
   &.tone-green { color: #267048; background: #edf7f0; }
