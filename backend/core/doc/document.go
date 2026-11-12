@@ -1850,7 +1850,14 @@ func loadDatasetDocuments(ctx context.Context, datasetID, keyword, pid string, a
 	for _, doc := range docs {
 		docIDs = append(docIDs, doc.ID)
 	}
-	return loadMergedDocumentsByDocIDs(ctx, docIDs, datasetID, keyword, pid, mergedPIDFilter, limit, offset)
+	rows, total, err := loadMergedDocumentsByDocIDs(ctx, docIDs, datasetID, keyword, pid, mergedPIDFilter, limit, offset)
+	if err != nil {
+		return nil, 0, err
+	}
+	if err := applyManualReparseStages(ctx, datasetID, rows); err != nil {
+		return nil, 0, err
+	}
+	return rows, total, nil
 }
 
 func mergedDocRowFromCoreOnlyWithDatasetDisplay(row orm.Document, datasetDisplay string) mergedDocRow {

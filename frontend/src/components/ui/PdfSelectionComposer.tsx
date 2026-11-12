@@ -31,7 +31,6 @@ export function PdfSelectionComposer({selection,onAsk,onNote,initialMode,onModeC
  const noteId=useRef(uuidv4());
  const composing=draft.trim().length>0;
  const primaryActions=actions.filter(action=>action.key==='explanation'||action.key==='vocabulary');
- const moreActions=actions.filter(action=>!primaryActions.includes(action));
  const submit=async()=>{
   if(saving)return;
   if(mode==='ask'&&onAsk){onAsk({...selection,...(draft.trim()?{question:draft.trim()}:{})});onClose();return;}
@@ -56,7 +55,6 @@ export function PdfSelectionComposer({selection,onAsk,onNote,initialMode,onModeC
     {mode==='note'&&!composing&&onNote&&<button type="button" className="pdf-selection-mark" aria-label="高亮并记笔记" data-tooltip="高亮并记笔记" disabled={saving} onClick={()=>void submit()}><EditOutlined/></button>}
     {(mode==='ask'||!onAsk)&&onTranslate&&<span className="pdf-selection-translation" data-tooltip={translationDisabled&&translationTitle?`翻译 · ${translationTitle}`:translationTitle||'翻译'}><button type="button" className="pdf-selection-icon" aria-label="翻译" disabled={translationDisabled} onClick={()=>{onTranslate();onClose();}}><TranslationOutlined/></button></span>}
     {(mode==='ask'||!onAsk)&&!composing&&primaryActions.map(action=><button type="button" className="pdf-selection-primary-action" key={action.key} aria-label={action.label} disabled={action.disabled} data-tooltip={`${action.key==='explanation'?'快速解释选中文字':action.label}${action.title?` · ${action.title}`:''}`} onClick={()=>{action.onClick();onClose();}}>{action.key==='explanation'?<QuestionCircleOutlined/>:<BookOutlined/>}</button>)}
-    {(mode==='ask'||!onAsk)&&moreActions.length>0&&<details className="pdf-selection-more"><summary aria-label="更多操作" data-tooltip="更多操作"><span className="pdf-selection-sr-only">更多操作</span>⋯</summary><div>{moreActions.map(action=><button type="button" key={action.key} disabled={action.disabled} title={action.title} onClick={()=>{action.onClick();onClose();}}>{action.label}</button>)}</div></details>}
     {composing&&(onAsk||onNote)&&<button type="button" className="pdf-selection-send" aria-label={mode==='ask'?'向 AI 提问':'保存笔记'} data-tooltip={mode==='ask'?'向 AI 提问':'保存笔记'} disabled={saving} onClick={()=>void submit()}>{saving?'…':<ArrowUpOutlined/>}</button>}
    </div>
   </div>

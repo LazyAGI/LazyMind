@@ -42,7 +42,7 @@ it('keeps B visible when an earlier mutation in A completes', async () => {
  fireEvent.click(screen.getByRole('button', {name:'Go B'}));
  await screen.findByRole('heading', {name:'Directory B'});
  await act(async () => { release({}); await pending; });
- const heading = screen.getByRole('heading').textContent;
+ const heading = screen.getByRole('heading', { level: 1 }).textContent;
  expect(heading).toBe('Directory B');
 });
 

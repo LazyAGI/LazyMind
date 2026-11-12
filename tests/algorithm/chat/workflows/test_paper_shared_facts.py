@@ -511,3 +511,30 @@ def test_invalid_quote_does_not_block_other_grounded_correction(relationship):
     install([dict(issues=[invalid, issue], pending=[]), dict(issues=[], pending=[])])
     result = shared_facts.check_fact_relations(body, data)
     assert result == body.replace(issue['quote'], issue['replacement']) and len(calls) == 2
+
+
+@pytest.mark.parametrize('wrapped', [False, True])
+def test_fact_selection_accepts_body_envelopes_and_parsed_objects(monkeypatch, wrapped):
+    data, instructions = prepared(), real_plan()
+    value = selection(data, instructions)
+    calls = []
+
+    def respond(prompt):
+        calls.append(prompt)
+        return {'content': json.dumps(value), 'reasoning_content': 'PRIVATE'} if wrapped else value
+
+    monkeypatch.setattr(shared_facts, 'AutoModel', lambda **kwargs: respond)
+    bind_shared_facts(instructions, data)
+    assert len(calls) == 1
+    assert len(data['writing_context']['meta']['paper_source_coverage']) == len(value['sources'])
+    assert 'PRIVATE' not in json.dumps(data)
+
+
+@pytest.mark.parametrize('wrapped', [False, True])
+def test_fact_relation_check_accepts_body_envelopes_and_parsed_objects(monkeypatch, wrapped):
+    value = dict(issues=[], pending=['Needs external verification.'])
+    response = {'content': json.dumps(value), 'reasoning_content': 'PRIVATE'} if wrapped else value
+    monkeypatch.setattr(shared_facts, 'AutoModel', lambda **kwargs: lambda prompt: response)
+    result = shared_facts._review_relations('# Manuscript', {})
+    assert result.issues == []
+    assert result.pending == value['pending']

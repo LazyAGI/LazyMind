@@ -7,17 +7,15 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"strconv"
-	"strings"
 	"syscall"
 	"time"
 
 	"golang.org/x/sys/windows"
-
-	"lazymind/agentconnector/internal/desktopsetup"
 )
 
 // Include hidden/tray main processes when deciding whether startup is safe.
@@ -45,7 +43,7 @@ public static class LazyMindCodexNormalShutdown {
     public static void Close(int id, string expectedPath) {
         using (Process process = Process.GetProcessById(id)) {
             if (!String.Equals(process.MainModule.FileName, expectedPath, StringComparison.OrdinalIgnoreCase))
-                throw new InvalidOperationException("Codex process identity changed");
+                throw new InvalidOperationException("LAZYMIND_AGENT_process_inspection_failed: Codex process identity changed");
             long started = process.StartTime.ToUniversalTime().ToFileTimeUtc();
             UniqueProcess target = new UniqueProcess { pid=id, started=new System.Runtime.InteropServices.ComTypes.FILETIME {
                 dwLowDateTime=unchecked((int)started), dwHighDateTime=(int)(started >> 32) } };
@@ -97,13 +95,20 @@ function Start-CodexDesktop {
     if ($env:LAZYMIND_CODEX_NAVIGATION_ONLY -eq '1') {
         $arguments = @($env:LAZYMIND_CODEX_THREAD_LINK)
     } else {
-    $running = @(Get-CimInstance Win32_Process | Where-Object { $_.ExecutablePath -eq $exe })
+    try { $running = @(Get-CimInstance Win32_Process -ErrorAction Stop | Where-Object { $_.ExecutablePath -eq $exe }) }
+    catch { throw 'LAZYMIND_AGENT_process_inspection_failed: Cannot inspect Codex; quit it from its tray menu and retry' }
     foreach ($instance in $running) {
-        if (-not $instance.CommandLine) { throw 'Cannot inspect Codex; quit it from its tray menu and retry' }
+        if (-not $instance.CommandLine) { throw 'LAZYMIND_AGENT_process_inspection_failed: Cannot inspect Codex; quit it from its tray menu and retry' }
         if ($instance.CommandLine -match '(?:^|\s)--type(?:=|\s)') { continue }
-        $process = Get-Process -Id $instance.ProcessId -ErrorAction SilentlyContinue
+        try { $process = Get-Process -Id $instance.ProcessId -ErrorAction Stop }
+        catch {
+            if ($_.FullyQualifiedErrorId -like 'NoProcessFoundForGivenId*') { continue }
+            throw 'LAZYMIND_AGENT_process_inspection_failed: Cannot inspect the Codex process'
+        }
         if (-not $process) { continue }
-        if ($process.MainWindowHandle -eq 0) {
+        try { $windowHandle = $process.MainWindowHandle }
+        catch { throw 'LAZYMIND_AGENT_process_inspection_failed: Cannot inspect the Codex window' }
+        if ($windowHandle -eq 0) {
             Close-CodexBackgroundProcess $instance.ProcessId $exe
         } else {
             if (-not $process.CloseMainWindow()) { throw 'LAZYMIND_AGENT_quit_required: Codex refused to close; finish its pending dialog and retry' }
@@ -161,6 +166,9 @@ func openDesktopThread(ctx context.Context, application, thread string) error {
 }
 
 func runDesktopCommand(ctx context.Context, application string, port int, link string, navigateOnly bool) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	// Pass the installed executable via environment, never interpolate a path
 	// into PowerShell source. CloseMainWindow allows ordinary application shutdown.
 	script := "$ErrorActionPreference='Stop';" + windowsDesktopFunctions + "\nStart-CodexDesktop"
@@ -176,10 +184,13 @@ func runDesktopCommand(ctx context.Context, application string, port int, link s
 	command.Stderr = &stderr
 	stdout, err := command.StdoutPipe()
 	if err != nil {
-		return err
+		return setupError("launch_failed", err)
 	}
 	if err := command.Start(); err != nil {
-		return err
+		if ctx.Err() != nil {
+			return errors.Join(ctx.Err(), err)
+		}
+		return setupError("launch_failed", err)
 	}
 	scanner := bufio.NewScanner(stdout)
 	for scanner.Scan() {
@@ -191,13 +202,13 @@ func runDesktopCommand(ctx context.Context, application string, port int, link s
 		}
 	}
 	if err := command.Wait(); err != nil {
-		if strings.Contains(stderr.String(), "LAZYMIND_AGENT_quit_required:") {
-			return fmt.Errorf("%w: %v", desktopsetup.ErrQuitRequired, err)
+		if ctx.Err() != nil {
+			return errors.Join(ctx.Err(), err)
 		}
-		return fmt.Errorf("start Codex: %s: %w", stderr.String(), err)
+		return desktopLaunchError(stderr.String(), fmt.Errorf("start Codex: %w", err))
 	}
 	if err := scanner.Err(); err != nil {
-		return err
+		return setupError("launch_failed", err)
 	}
 	return nil
 }

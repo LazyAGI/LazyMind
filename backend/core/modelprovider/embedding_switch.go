@@ -49,8 +49,8 @@ func assessEmbeddingSwitch(state orm.EmbeddingIndexState, indexed int64, modelID
 		return "clear_required"
 	}
 	if state.Phase == "cleared" {
-		// Only an offline purge may write this terminal phase. Indexed KB rows
-		// remain in Core for reembedding, so their count cannot veto the first
+		// A completed purge writes this terminal phase. Document rows
+		// remain in Core for manual parsing, so their count cannot veto the first
 		// signed model selected after the purge.
 		if modelID != "" && fingerprint != "" && state.ActiveModelID == "" &&
 			state.ActiveSource == "" && state.Signature == "" &&
@@ -59,7 +59,7 @@ func assessEmbeddingSwitch(state orm.EmbeddingIndexState, indexed int64, modelID
 		}
 		return "clear_required"
 	}
-	if indexed == 0 && state.ActiveModelID == "" {
+	if indexed == 0 {
 		return "empty"
 	}
 	if modelID == state.ActiveModelID && source == state.ActiveSource && state.Signature != "" && fingerprint == state.Signature {

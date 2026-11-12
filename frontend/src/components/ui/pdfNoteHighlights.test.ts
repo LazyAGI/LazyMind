@@ -1,5 +1,5 @@
 import {beforeEach,expect,it} from 'vitest';
-import {pdfNoteHighlightPaths,readPdfNoteHighlights,writePdfNoteHighlights} from './pdfNoteHighlights';
+import {pdfNoteHighlightHitAreas,pdfNoteHighlightPaths,readPdfNoteHighlights,writePdfNoteHighlights} from './pdfNoteHighlights';
 
 beforeEach(()=>sessionStorage.clear());
 
@@ -21,4 +21,15 @@ it('uses the saved note color when local and server highlights cover the same te
  const paths=pdfNoteHighlightPaths([{id:'old-local',page:1,color:'yellow',rects:[rect]},{id:'saved-note',page:1,color:'blue',rects:[rect]}],1);
  expect(paths).toHaveLength(1);
  expect(paths[0].color).toBe('blue');
+});
+
+it('keeps each saved note id on its clickable highlight rectangles',()=>{
+ const areas=pdfNoteHighlightHitAreas([
+  {id:'note-a',page:2,color:'yellow',rects:[[.1,.2,.3,.24],[.1,.25,.4,.29]]},
+  {id:'note-b',page:1,color:'blue',rects:[[.5,.6,.8,.64]]},
+ ],2);
+ expect(areas).toEqual([
+  {id:'note-a',color:'yellow',rect:[.1,.2,.3,.24]},
+  {id:'note-a',color:'yellow',rect:[.1,.25,.4,.29]},
+ ]);
 });
