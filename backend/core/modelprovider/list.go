@@ -152,7 +152,7 @@ func buildListItems(ctx context.Context, db *gorm.DB, rows []orm.UserModelProvid
 	out := make([]listItem, 0, len(rows))
 	for i := range rows {
 		row := rows[i]
-		if row.Category == "translation" && !IsTranslationProviderAvailable(row.Name) {
+		if !isProviderListed(row) {
 			continue
 		}
 		brandKey, serviceKey := ProviderServiceIdentity(row)

@@ -10562,6 +10562,7 @@ const zhCN = {
     },
 
     counts: {
+      providerBreakdown: "模型供应商 {{models}} 项 · 外部服务 {{services}} 项",
       configuredItems: "已配置 {{count}} 项",
       pendingConfig: "待配置",
       automationPlans: "{{count}} 个自动化计划",

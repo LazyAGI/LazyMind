@@ -17,11 +17,13 @@ import (
 )
 
 type settingsOverviewCounts struct {
-	Total      int64 `json:"total"`
-	Enabled    int64 `json:"enabled"`
-	Verified   int64 `json:"verified"`
-	Runnable   int64 `json:"runnable"`
-	Configured int64 `json:"configured"`
+	Total            int64 `json:"total"`
+	Enabled          int64 `json:"enabled"`
+	Verified         int64 `json:"verified"`
+	Runnable         int64 `json:"runnable"`
+	Configured       int64 `json:"configured"`
+	ModelProviders   int64 `json:"model_providers"`
+	ExternalServices int64 `json:"external_services"`
 }
 
 type settingsOverviewSection struct {
@@ -195,7 +197,7 @@ func buildSettingsOverview(r *http.Request, db *gorm.DB, userID string) (setting
 	enabledUnverifiedMCP := enabledMCP - enabledVerifiedMCP
 	enabledVerifiedWithoutAuthorizationMCP := enabledVerifiedMCP - runnableMCP
 
-	configuredServices, err := modelprovider.CountConfiguredServices(r.Context(), db, userID)
+	configuredProviders, err := modelprovider.CountConfiguredProviders(r.Context(), db, userID)
 	if err != nil {
 		return settingsOverviewResponse{}, err
 	}
@@ -210,7 +212,7 @@ func buildSettingsOverview(r *http.Request, db *gorm.DB, userID string) (setting
 	mcpEffective := controls.MCPEnabled && runnableMCP > 0
 	sections := []settingsOverviewSection{
 		{ID: "overview", Title: "设置概览", Route: "/settings?section=overview", Status: "ready", Detail: "统一查看运行状态和待处理配置"},
-		{ID: "models", Title: "模型与服务", Route: "/model-providers/default-services", EffectiveEnabled: boolPointer(modelReady), Counts: settingsOverviewCounts{Configured: selectedModels + configuredServices}, Status: statusFor(modelReady), Detail: "已选模型决定对话与工具能力"},
+		{ID: "models", Title: "模型与服务", Route: "/model-providers/default-services", EffectiveEnabled: boolPointer(modelReady), Counts: settingsOverviewCounts{Configured: configuredProviders.ModelProviders + configuredProviders.ExternalServices, ModelProviders: configuredProviders.ModelProviders, ExternalServices: configuredProviders.ExternalServices}, Status: statusFor(modelReady), Detail: "已选模型决定对话与工具能力"},
 		{ID: "tasks", Title: "对话与任务", Route: "/task-center", RawEnabled: boolPointer(tasksControlEnabled), EffectiveEnabled: boolPointer(tasksEffective), Counts: settingsOverviewCounts{Total: schedules, Enabled: enabledSchedules}, Status: statusFor(tasksControlEnabled), Detail: "子任务、工作流和定时任务分别控制，关闭不会删除已有配置"},
 		{ID: "knowledge", Title: "知识与数据", Route: "/settings?section=knowledge", RawEnabled: boolPointer(controls.DocumentParsingEnabled), EffectiveEnabled: boolPointer(controls.DocumentParsingEnabled), Status: statusFor(controls.DocumentParsingEnabled), Detail: "管理检索工具、解析服务、数据源和文件连接"},
 		{ID: "memory", Title: "记忆与自进化", Route: "/memory-management", Status: "ready", Detail: "管理记忆、经验和术语"},

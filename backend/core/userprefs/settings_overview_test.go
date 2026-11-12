@@ -108,7 +108,7 @@ func overviewMCPIssues(issues []settingsOverviewIssue) map[string]string {
 	return out
 }
 
-func TestSettingsOverviewCountsConfiguredModelsAndServices(t *testing.T) {
+func TestSettingsOverviewCountsConfiguredProviders(t *testing.T) {
 	for _, tc := range []struct {
 		name          string
 		verified      bool
@@ -119,19 +119,22 @@ func TestSettingsOverviewCountsConfiguredModelsAndServices(t *testing.T) {
 		deleted       bool
 	}{
 		{"configured services", true, "test-key", 3, true, false, false},
-		{"unverified services", false, "test-key", 1, true, false, false},
-		{"missing credentials", true, "", 1, true, false, false},
+		{"unverified services with a saved model key", false, "test-key", 1, true, false, false},
+		{"verified keyless model provider", true, "", 1, true, false, false},
 		{"keyless custom endpoint", true, "", 3, true, true, false},
-		{"services without a model", true, "test-key", 2, false, false, false},
+		{"configured model provider without a selected model", true, "test-key", 3, false, false, false},
 		{"no configured entries", false, "", 0, false, false, false},
-		{"deleted groups", true, "test-key", 1, true, false, true},
+		{"deleted groups", true, "test-key", 0, true, false, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			db := newUIPreferencesTestDB(t)
 			now := time.Now().UTC()
 			if tc.selectedModel {
-				if err := db.Create(&orm.UserSelectedModel{UserID: "u1", ModelKey: "llm", UserModelProviderGroupModelID: "selected-model", CreatedAt: now, UpdatedAt: now}).Error; err != nil {
-					t.Fatal(err)
+				// Selecting the same provider for multiple roles must not inflate the inventory.
+				for _, role := range []string{"llm", "evo_llm"} {
+					if err := db.Create(&orm.UserSelectedModel{UserID: "u1", ModelKey: role, UserModelProviderGroupModelID: "selected-model", CreatedAt: now, UpdatedAt: now}).Error; err != nil {
+						t.Fatal(err)
+					}
 				}
 			}
 			for _, service := range []struct{ id, name, category, user string }{
@@ -139,6 +142,7 @@ func TestSettingsOverviewCountsConfiguredModelsAndServices(t *testing.T) {
 				{"mineru", "MinerU", "ocr", "u1"},
 				{"model", "OpenAI", "model", "u1"},
 				{"other-user", "Tavily", "search", "u2"},
+				{"unavailable-translation", "Unavailable Translation", "translation", "u1"},
 			} {
 				base := orm.BaseModel{CreateUserID: service.user, CreatedAt: now, UpdatedAt: now}
 				if err := db.Create(&orm.UserModelProvider{ID: service.id, DefaultModelProviderID: service.id, Name: service.name, Category: service.category, BaseModel: base}).Error; err != nil {
@@ -167,7 +171,14 @@ func TestSettingsOverviewCountsConfiguredModelsAndServices(t *testing.T) {
 			}
 			models := sectionByID(overview.Sections, "models")
 			if got := models.Counts.Configured; got != tc.want {
-				t.Fatalf("configured models and services = %d, want %d", got, tc.want)
+				t.Fatalf("configured providers = %d, want %d", got, tc.want)
+			}
+			wantModels := int64(0)
+			if !tc.deleted && (tc.verified || tc.key != "") {
+				wantModels = 1
+			}
+			if models.Counts.ModelProviders != wantModels || models.Counts.ExternalServices != tc.want-wantModels {
+				t.Fatalf("inventory breakdown = %#v, want model providers %d and external services %d", models.Counts, wantModels, tc.want-wantModels)
 			}
 			if models.EffectiveEnabled == nil || *models.EffectiveEnabled != tc.selectedModel {
 				t.Fatalf("service configuration must not imply model readiness: %#v", models)
@@ -182,5 +193,44 @@ func TestSettingsOverviewCountsConfiguredModelsAndServices(t *testing.T) {
 				t.Fatalf("missing-model issue = %v, selected model = %v", missingModelIssue, tc.selectedModel)
 			}
 		})
+	}
+}
+
+func TestSettingsOverviewModelInventoryUsesWorkspaceConfigurationAndBrands(t *testing.T) {
+	db := newUIPreferencesTestDB(t)
+	now := time.Now().UTC()
+	for _, item := range []struct {
+		id, name, key                         string
+		custom, verified, model, defaultModel bool
+	}{
+		{"qwen", "Qwen", "saved", false, false, false, false},
+		{"qwen-coding", "QwenCodingPlan", "", false, true, false, false},
+		{"custom-qwen", "Qwen", "saved", true, false, false, false},
+		{"claude", "Claude", "", false, false, true, false},
+		{"unverified-custom-defaults", "Custom", "", true, false, true, true},
+	} {
+		base := orm.BaseModel{CreateUserID: "u1", CreatedAt: now, UpdatedAt: now}
+		if err := db.Create(&orm.UserModelProvider{ID: item.id, Name: item.name, Category: "model", IsCustom: item.custom, BaseModel: base}).Error; err != nil {
+			t.Fatal(err)
+		}
+		if err := db.Create(&orm.UserModelProviderGroup{ID: item.id, UserModelProviderID: item.id, APIKey: item.key, IsVerified: item.verified, BaseModel: base}).Error; err != nil {
+			t.Fatal(err)
+		}
+		if item.model {
+			if err := db.Create(&orm.UserModelProviderGroupModel{ID: item.id, UserModelProviderID: item.id, UserModelProviderGroupID: item.id, Name: "saved-model", ModelType: "llm", IsDefault: item.defaultModel, BaseModel: base}).Error; err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	overview, err := buildSettingsOverview(httptest.NewRequest(http.MethodGet, "/settings/overview", nil), db.DB, "u1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	counts := sectionByID(overview.Sections, "models").Counts
+	if counts.ModelProviders != 3 || counts.ExternalServices != 0 {
+		t.Fatalf("unexpected inventory breakdown: %#v", counts)
+	}
+	if got := counts.Configured; got != 3 {
+		t.Fatalf("configured navigation nodes = %d, want 3 (Qwen brand, custom Qwen, model-only Claude)", got)
 	}
 }

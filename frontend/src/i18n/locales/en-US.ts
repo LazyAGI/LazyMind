@@ -10822,6 +10822,7 @@ const enUS = {
     },
 
     counts: {
+      providerBreakdown: "{{models}} model providers · {{services}} external services",
       configuredItems: "{{count}} configured",
       pendingConfig: "Not configured",
       automationPlans: "{{count}} automation plans",
