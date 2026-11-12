@@ -3984,7 +3984,7 @@ const zhCN = {
     featuredBack: "返回能力列表",
     mentionConversation: "历史对话",
     mentionNoResults: "没有匹配的内容",
-    mentionShowMore: "展开（{{count}}）",
+    mentionShowMore: "展开全部",
     mentionCollapse: "收起",
     mentionShortcutHint: "输入后只搜索本类",
     promptSuggestionsAria: "Prompt 优化建议",

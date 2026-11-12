@@ -2031,6 +2031,12 @@
   "2005090": {"en-US": "Failed to load the embedding configuration for indexing", "zh-CN": "读取用于建立索引的向量模型配置失败"},
   "2005091": {"en-US": "Configure a text embedding model before indexing this knowledge base", "zh-CN": "为知识库建立向量索引前，请先配置文本向量模型"},
   "2005092": {"en-US": "Model catalog entries must be objects", "zh-CN": "模型目录中的每一项必须是对象"},
+  "2005093": {"en-US": "Explicit confirmation is required to clear text vectors", "zh-CN": "清理文本向量需要明确确认"},
+  "2005094": {"en-US": "The embedding model state is unavailable; retry later", "zh-CN": "暂时无法获取向量模型状态，请稍后重试"},
+  "2005095": {"en-US": "The document changed during parsing; retry manually", "zh-CN": "文档在解析期间发生变化，请手动重试"},
+  "2005096": {"en-US": "The knowledge index changed; retry after model switching finishes", "zh-CN": "知识库索引已变化，请在模型切换完成后重试"},
+  "2005097": {"en-US": "The knowledge index is busy or has changed; refresh and retry", "zh-CN": "知识库索引正在处理或已变化，请刷新后重试"},
+  "2005098": {"en-US": "Knowledge-base cleanup is incomplete; retry clearing before switching models", "zh-CN": "知识库清理尚未完成，请重试清理后再切换模型"},
   "2005100": { "en-US": "Dataset write permission is required", "zh-CN": "需要知识库写入权限" },
   "2005101": { "en-US": "Library kind must be paper or document", "zh-CN": "知识库类型必须为论文库或文档库" },
   "2005102": { "en-US": "Library kind cannot be changed after it is set", "zh-CN": "知识库类型设置后不可更改" },
@@ -2136,12 +2142,5 @@
   "2004970": {"en-US": "Failed to read document processing details", "zh-CN": "读取文档处理详情失败"},
   "2004971": {"en-US": "Select between one and twenty documents", "zh-CN": "请选择 1 至 20 份文档"},
   "2004972": {"en-US": "Enable the RAG component before indexing", "zh-CN": "建立索引前请启用 RAG 组件"},
-  "2004973": {"en-US": "A selected document is missing or selected more than once", "zh-CN": "所选文档不存在或被重复选择"},
-  "2004974": {"en-US": "Administrator permission is required", "zh-CN": "此操作需要管理员权限"},
-  "2004975": {"en-US": "Explicit confirmation is required to clear text vectors", "zh-CN": "清理文本向量需要明确确认"},
-  "2004976": {"en-US": "Embedding state is unavailable; retry shortly", "zh-CN": "向量模型状态暂不可用，请稍后重试"},
-  "2004977": {"en-US": "The document changed during parsing; retry manually", "zh-CN": "文档在解析期间发生变化，请手动重试"},
-  "2004978": {"en-US": "The index changed; retry after the model switch completes", "zh-CN": "索引已变化，请在模型切换完成后重试"},
-  "2004979": {"en-US": "Text vector indexing or cleanup is in progress; retry after it finishes", "zh-CN": "文本向量正在索引或清理，请完成后重试"},
-  "2004980": {"en-US": "Text vector cleanup failed; retry in Index management", "zh-CN": "文本向量清理失败，请在索引管理中重试"}
+  "2004973": {"en-US": "A selected document is missing or selected more than once", "zh-CN": "所选文档不存在或被重复选择"}
 }

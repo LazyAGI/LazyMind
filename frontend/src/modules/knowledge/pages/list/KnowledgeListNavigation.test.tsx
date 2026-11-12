@@ -504,7 +504,7 @@ describe("knowledge list URL and data restoration", () => {
     expectNoOnlineCleanup();
   });
 
-  it("explains that vector search waits for rebuilding while source documents remain", async () => {
+  it("explains that vector rebuilding preserves source text and chunks", async () => {
     mocks.get.mockImplementation((url: string) => Promise.resolve({ data: url.includes("/embedding/index-state")
       ? { data: {
         status: "rebuilding", model_name: "新向量模型", provider_name: "测试供应商",
@@ -516,7 +516,8 @@ describe("knowledge list URL and data restoration", () => {
 
     const status = await screen.findByRole("status", { name: t("knowledge.embeddingIndexStateTitle") });
     expect(status).toHaveTextContent("2 个知识库");
-    expect(status).toHaveTextContent("原文和切片");
+    expect(status).toHaveTextContent("向量索引需要重建");
+    expect(status).toHaveTextContent("原文和切片会保留");
     expect(status).toHaveTextContent("向量检索");
   });
 
