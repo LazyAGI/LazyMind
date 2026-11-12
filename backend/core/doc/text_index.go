@@ -37,6 +37,23 @@ func GetTextIndex(w http.ResponseWriter, r *http.Request) {
 	query := store.DB().WithContext(r.Context()).Table("documents d").
 		Joins("LEFT JOIN document_processing_states s ON s.dataset_id=d.dataset_id AND s.document_id=d.id").
 		Where("d.dataset_id=? AND d.deleted_at IS NULL AND (d.document_type IS NULL OR d.document_type <> ?)", id, "FOLDER")
+	// Legacy folders predate document_type. Use the same classifier as parsing,
+	// before counting/pagination so they never appear as indexable documents.
+	var legacy []orm.Document
+	if err := store.DB().WithContext(r.Context()).Select("id", "display_name", "document_type", "ext").
+		Where("dataset_id=? AND deleted_at IS NULL AND (document_type IS NULL OR document_type = '')", id).Find(&legacy).Error; err != nil {
+		common.ReplyErr(w, "query legacy document types failed", 500)
+		return
+	}
+	var folderIDs []string
+	for _, document := range legacy {
+		if isFolderLikeDocument(document) {
+			folderIDs = append(folderIDs, document.ID)
+		}
+	}
+	if len(folderIDs) > 0 {
+		query = query.Where("d.id NOT IN ?", folderIDs)
+	}
 	var total int64
 	if err := query.Count(&total).Error; err != nil {
 		common.ReplyErr(w, "query documents failed", 500)
@@ -114,6 +131,12 @@ func ReindexText(w http.ResponseWriter, r *http.Request) {
 	if len(documents) != len(body.DocumentIDs) {
 		common.ReplyErr(w, "document not found or duplicate selection", 400)
 		return
+	}
+	for _, document := range documents {
+		if isFolderLikeDocument(document) {
+			common.ReplyErr(w, "folder cannot be indexed", 400)
+			return
+		}
 	}
 	results := []StartTaskResult{}
 	for _, document := range documents {

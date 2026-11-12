@@ -21,6 +21,7 @@ func TestTextIndexInventoryUsesDocumentEvidenceAndPermissions(t *testing.T) {
 		&orm.Dataset{ID: "ds-kind", Scene: "academic_papers", ProcessingLevel: "parsed", BaseModel: orm.BaseModel{CreateUserID: "owner"}},
 		&orm.Document{ID: "paper", DatasetID: "ds-kind", DisplayName: "Paper.pdf"},
 		&orm.Document{ID: "folder", DatasetID: "ds-kind", DocumentType: "FOLDER"},
+		&orm.Document{ID: "legacy-folder", DatasetID: "ds-kind", DisplayName: "kb1", Ext: json.RawMessage(`{"child_document_count":24}`)},
 		&orm.DocumentProcessingState{DatasetID: "ds-kind", DocumentID: "paper", ParseStatus: "succeeded", IndexStatus: "succeeded"},
 	} {
 		if err := db.Create(item).Error; err != nil {
@@ -36,7 +37,7 @@ func TestTextIndexInventoryUsesDocumentEvidenceAndPermissions(t *testing.T) {
 		t.Fatal(err)
 	}
 	documents := raw["documents"].([]any)
-	if len(documents) != 1 || documents[0].(map[string]any)["index_status"] != "succeeded" {
+	if raw["total"] != float64(1) || len(documents) != 1 || documents[0].(map[string]any)["index_status"] != "succeeded" {
 		t.Fatal(raw)
 	}
 	w = libraryKindRequest(t, GetTextIndex, "GET", "/api/core/datasets/ds-kind/text-index", "", "stranger")
