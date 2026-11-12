@@ -932,7 +932,7 @@ func run(ctx context.Context) error {
 		if vocabulary.Enabled() {
 			vocabulary.RegisterCloudSync(store.DB())
 			vocabularyRunner := asyncjob.Start(runtimeCtx, store.DB(), asyncjob.Options{JobTypes: []string{vocabulary.CloudSyncJobType}, SerializeResources: true, Concurrency: 2, PollInterval: 2 * time.Second, LockTTL: 2 * time.Minute})
-			backgroundDone = append(backgroundDone, vocabularyRunner.Done())
+			backgroundDone = append(backgroundDone, vocabularyRunner.Done(), vocabulary.StartAnkiSync(runtimeCtx, store.DB()))
 		}
 		excludedJobs := append([]string{doc.ReadingPreparationJob, vocabulary.CloudSyncJobType, documentdirectory.PlanJob, documentdirectory.OrganizeJob, academic.ChatLaunchJobType, academic.PreparationJobType}, chat.ConversationTitleJobTypes...)
 		if !systemdeps.PythonComponentActive("rag") {

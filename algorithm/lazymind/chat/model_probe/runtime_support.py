@@ -40,6 +40,7 @@ def runtime_source(source: str) -> str:
 
 def supports_runtime_type(source: str, kind: str) -> bool:
     # These local suppliers reuse OpenAI request shapes, not its hosted media models.
-    if re.sub('[^a-z0-9]', '', source.lower()) in {'vllm', 'lmdeploy'}:
+    source = re.sub('[^a-z0-9]', '', source.lower())
+    if source in {'vllm', 'lmdeploy'}:
         return kind in {'llm', 'vlm', 'embed', 'multimodal_embedding', 'rerank'}
     return kind in RUNTIME_TYPES_BY_SOURCE.get(runtime_source(source), set())

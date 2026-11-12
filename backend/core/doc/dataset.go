@@ -468,10 +468,15 @@ func AllDatasetTags(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	caller, err := resolveDatasetCatalogCallerFromRequest(r)
+	if err != nil {
+		replyDatasetForbidden(w)
+		return
+	}
 	var datasets []orm.Dataset
 	if err := corestore.DB().
 		Select("id, create_user_id, ext").
-		Where("deleted_at IS NULL").
+		Where("deleted_at IS NULL AND COALESCE(NULLIF(TRIM(tenant_id), ''), 'default') = ?", resourceTenant(caller.TenantID)).
 		Find(&datasets).Error; err != nil {
 		common.ReplyErr(w, "query datasets failed", http.StatusInternalServerError)
 		return
@@ -488,7 +493,6 @@ func AllDatasetTags(w http.ResponseWriter, r *http.Request) {
 		}
 		visible = append(visible, ds)
 	}
-	visible = filterDatasetsByScanSourceAccess(r, visible, acl.PermissionDatasetRead)
 	for _, ds := range visible {
 		for _, t := range parseDatasetTags(ds.Ext) {
 			if _, ok := seen[t]; ok {
@@ -1023,20 +1027,11 @@ func DeleteDataset(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var ds orm.Dataset
-	if err := corestore.DB().
-		Where("id = ? AND deleted_at IS NULL", datasetID).
-		First(&ds).Error; err != nil {
+	ds, _, permitted := requireDatasetPermission(r, datasetID, acl.PermissionDatasetRead)
+	if ds == nil {
 		common.ReplyErr(w, "dataset not found", http.StatusNotFound)
 		return
 	}
-	if !canAccessDataset(&ds, userID, acl.PermRead) || !datasetAllowedByScanSource(r, ds.ID, "delete") {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusForbidden)
-		_, _ = w.Write([]byte(common.ForbiddenBody))
-		return
-	}
-
 	// Official knowledge base installs use a dedicated delete path (uninstall):
 	// deletion is refused while the install is in flight, and the install
 	// link is cleared atomically with the dataset row; task history is retained.
@@ -1045,11 +1040,18 @@ func DeleteDataset(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, fmt.Sprintf("%s: %v", "query market install failed", err), http.StatusInternalServerError)
 		return
 	}
-	if isOfficial {
-		deleteOfficialInstalledDataset(w, r, &ds, userID, install)
+	// Older official installs have no tenant; their owner-bound install record
+	// is the existing authorization basis for uninstalling them.
+	legacyOfficial := isOfficial && strings.TrimSpace(ds.TenantID) == "" && ds.CreateUserID == userID
+	if !permitted && !legacyOfficial {
+		replyDatasetForbidden(w)
 		return
 	}
-	deleteRegularDataset(w, r, &ds, userID)
+	if isOfficial {
+		deleteOfficialInstalledDataset(w, r, ds, userID, install)
+		return
+	}
+	deleteRegularDataset(w, r, ds, userID)
 }
 
 // deleteOfficialInstalledDataset deletes an official knowledge base dataset
@@ -1089,7 +1091,7 @@ func deleteOfficialInstalledDataset(w http.ResponseWriter, r *http.Request, ds *
 			return err
 		}
 		result.Items[0].DocumentCount = int(count)
-		if err := deleteDatasetAlgoKB(r.Context(), &currentDataset, userID); err != nil {
+		if err := deleteDatasetAlgoKB(r.Context(), tx, &currentDataset, userID); err != nil {
 			externalDeleteFailed = true
 			return err
 		}
@@ -1141,7 +1143,20 @@ func deleteRegularDataset(w http.ResponseWriter, r *http.Request, ds *orm.Datase
 	common.ReplyJSON(w, result)
 }
 
-func deleteDatasetAlgoKB(ctx context.Context, ds *orm.Dataset, userID string) error {
+func deleteDatasetAlgoKB(ctx context.Context, db *gorm.DB, ds *orm.Dataset, userID string) error {
+	if !systemdeps.PythonComponentActive("rag") {
+		var externalDocuments int64
+		// Include tombstoned documents: an empty live library can retain an index.
+		if err := db.WithContext(ctx).Model(&orm.Document{}).
+			Where("dataset_id = ? AND TRIM(COALESCE(lazyllm_doc_id, '')) <> ''", ds.ID).
+			Count(&externalDocuments).Error; err != nil {
+			return err
+		}
+		if externalDocuments == 0 {
+			return nil
+		}
+		return resourceErr("UNAVAILABLE", "RAG component unavailable; external index cleanup is incomplete")
+	}
 	kbID := strings.TrimSpace(ds.KbID)
 	if kbID == "" {
 		kbID = ds.ID
@@ -1174,11 +1189,15 @@ func deleteDatasetAlgoKB(ctx context.Context, ds *orm.Dataset, userID string) er
 // softDeleteDataset soft-deletes the dataset row and cleans up its eval set
 // and default dataset references inside the caller's transaction.
 func softDeleteDataset(ctx context.Context, tx *gorm.DB, ds *orm.Dataset, userID string, now time.Time) error {
-	ds.DeletedAt = &now
-	ds.UpdatedAt = now
-	if err := tx.Save(ds).Error; err != nil {
-		return err
+	// The external KB may already be deleted. Preserve concurrent metadata without
+	// rejecting its newer version and leaving the Core dataset visible.
+	result := tx.WithContext(ctx).Model(&orm.Dataset{}).
+		Where("id = ? AND deleted_at IS NULL", ds.ID).
+		Updates(map[string]any{"deleted_at": now, "updated_at": now, "resource_version": gorm.Expr("resource_version + 1")})
+	if result.Error != nil {
+		return result.Error
 	}
+	ds.DeletedAt, ds.UpdatedAt = &now, now
 	if err := cleanupEvalSetDatasetReferences(ctx, tx, ds.ID, now); err != nil {
 		return err
 	}
@@ -1362,14 +1381,12 @@ func SetDefault(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// text dataset textUsertextPermission
-	var ds orm.Dataset
-	if err := corestore.DB().
-		Where("id = ? AND deleted_at IS NULL", datasetID).
-		First(&ds).Error; err != nil {
+	ds, _, permitted := requireDatasetPermission(r, datasetID, acl.PermissionDatasetRead)
+	if ds == nil {
 		common.ReplyErr(w, "dataset not found", http.StatusNotFound)
 		return
 	}
-	if !canAccessDataset(&ds, userID, acl.PermRead) || !datasetAllowedByScanSource(r, ds.ID, acl.PermissionDatasetRead) {
+	if !permitted {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusForbidden)
 		_, _ = w.Write([]byte(common.ForbiddenBody))
@@ -1419,14 +1436,12 @@ func UnsetDefault(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var ds orm.Dataset
-	if err := corestore.DB().
-		Where("id = ? AND deleted_at IS NULL", datasetID).
-		First(&ds).Error; err != nil {
+	ds, _, permitted := requireDatasetPermission(r, datasetID, acl.PermissionDatasetRead)
+	if ds == nil {
 		common.ReplyErr(w, "dataset not found", http.StatusNotFound)
 		return
 	}
-	if !canAccessDataset(&ds, userID, acl.PermRead) || !datasetAllowedByScanSource(r, ds.ID, acl.PermissionDatasetRead) {
+	if !permitted {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusForbidden)
 		_, _ = w.Write([]byte(common.ForbiddenBody))

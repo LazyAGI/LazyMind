@@ -6,12 +6,13 @@ import type {Dataset} from '@/api/generated/knowledge-client';
 import {useDatasetPermissionStore} from '@/modules/knowledge/store/dataset_permission';
 import Detail from './index';
 vi.mock('react-pdf', () => ({pdfjs: {GlobalWorkerOptions: {}}, Document: () => null, Page: () => null}));
-const surfaces=vi.hoisted(()=>({viewer:{} as Record<string,unknown>,viewerRenders:0,chat:{} as Record<string,unknown>,vocabularyEnabled:false,vocabulary:{} as Record<string,unknown>,vocabularyModal:{} as Record<string,unknown>}));
+const surfaces=vi.hoisted(()=>({viewer:{} as Record<string,unknown>,viewerRenders:0,chat:{} as Record<string,unknown>,vocabularyEnabled:false,vocabulary:{} as Record<string,unknown>,vocabularyModal:{} as Record<string,unknown>,learningModal:{} as Record<string,unknown>}));
 vi.mock('@/modules/knowledge/components/FileViewer', () => ({default: (props:Record<string,unknown>) => {surfaces.viewer=props;surfaces.viewerRenders++;return <div>{typeof props.pdfHeaderEnd === "function" ? (props.pdfHeaderEnd as (tools:null)=>React.ReactNode)(null) : props.pdfHeaderEnd as React.ReactNode}<div data-testid="file-viewer" data-file={String(props.file || "")} data-filename={String(props.fileName || "")}/></div>;}}));
 vi.mock('@/modules/knowledge/components/PdfTemporaryChat', () => ({default: (props:Record<string,unknown>) => {surfaces.chat=props;return null;}}));
 vi.mock('@/runtime/mode', async()=>({...await vi.importActual<any>('@/runtime/mode'),isVocabularyEnabled:()=>surfaces.vocabularyEnabled}));
 vi.mock('@/modules/vocabulary/DocumentVocabularyPanel',()=>({default:(props:Record<string,unknown>)=>{surfaces.vocabulary=props;return <div data-testid="document-vocabulary">Document vocabulary</div>;}}));
 vi.mock('@/modules/vocabulary/AddVocabularyModal',()=>({default:(props:Record<string,unknown>)=>{surfaces.vocabularyModal=props;return null;}}));
+vi.mock('@/modules/learning/AddLearningContentModal',()=>({default:(props:Record<string,unknown>)=>{surfaces.learningModal=props;return null;}}));
 const originalAdapter = axiosInstance.defaults.adapter;
 afterEach(() => {surfaces.vocabularyEnabled=false;surfaces.viewerRenders=0;sessionStorage.clear();localStorage.removeItem('paper-reader:assistant-width');axiosInstance.defaults.adapter = originalAdapter;useDatasetPermissionStore.getState().clearDataset();vi.unstubAllGlobals();});
 it('does not render the legacy document layout while file metadata is unresolved', () => {
@@ -175,23 +176,44 @@ it('preserves an ordinary document translation draft when switching panels and r
 });
 
 
-it.each([false,true])('gates paper information vocabulary by the existing feature flag (%s)',async(enabled)=>{
+it.each([false,true])('gates the notes and vocabulary reader tool by the existing feature flag (%s)',async(enabled)=>{
   surfaces.vocabularyEnabled=enabled;
   useDatasetPermissionStore.getState().setCurrentDataset({dataset_id:'library',scene:'academic_papers'} as Dataset);
   axiosInstance.defaults.adapter = config => config.url?.endsWith('/documents/paper')
     ? Promise.resolve({config,status:200,statusText:'OK',headers:{},data:{display_name:'paper.pdf'}})
     : new Promise(()=>{});
   const {container}=renderDocument();
-  fireEvent.click(await screen.findByRole('button',{name:/^Notes$|^笔记$/}));
+  fireEvent.click(await screen.findByRole('button',{name:enabled?/^Notes & vocabulary$|^笔记和生词$/:/^Notes$|^笔记$/}));
   if(enabled){
     expect(await screen.findByTestId('document-vocabulary')).toBeInTheDocument();
     expect(surfaces.vocabulary).toEqual(expect.objectContaining({documentId:'paper',refreshToken:0}));
     act(()=>{(surfaces.vocabularyModal.onAdded as ()=>void)();});
     expect(surfaces.vocabulary).toEqual(expect.objectContaining({documentId:'paper',refreshToken:1}));
-    expect(container.querySelector('.paper-workspace-dock button[aria-pressed="true"]')).toHaveAccessibleName(/^Notes$|^笔记$/);
+    expect(container.querySelector('.paper-workspace-dock button[aria-pressed="true"]')).toHaveAccessibleName(/^Notes & vocabulary$|^笔记和生词$/);
+    expect(screen.getByRole('tab',{name:/^Vocabulary$|^生词$/})).toHaveAttribute('aria-selected','true');
+    expect(screen.getByTestId('document-vocabulary')).toBeVisible();
+    act(()=>{(surfaces.viewer.onPdfNoteHighlightClick as (id:string)=>void)('note-id');});
+    expect(screen.getByRole('tab',{name:/^Notes$|^笔记$/})).toHaveAttribute('aria-selected','true');
   }else expect(screen.queryByTestId('document-vocabulary')).not.toBeInTheDocument();
   expect(container.querySelectorAll('.paper-workspace-dock button')).toHaveLength(3);
   expect(screen.queryByRole('button',{name:/Document details|文档详情/})).toBeNull();
+});
+
+it('opens the vocabulary panel after collecting a word before the reader details were opened',async()=>{
+  surfaces.vocabularyEnabled=true;
+  useDatasetPermissionStore.getState().setCurrentDataset({dataset_id:'library',scene:'academic_papers'} as Dataset);
+  axiosInstance.defaults.adapter=config=>config.url?.endsWith('/documents/paper')
+    ? Promise.resolve({config,status:200,statusText:'OK',headers:{},data:{display_name:'paper.pdf'}})
+    : new Promise(()=>{});
+  const {container}=renderDocument();
+  await screen.findByRole('button',{name:/^Notes & vocabulary$|^笔记和生词$/});
+  expect(screen.queryByTestId('document-vocabulary')).not.toBeInTheDocument();
+  expect(surfaces.learningModal.onAdded).toBeUndefined();
+  act(()=>{(surfaces.vocabularyModal.onAdded as ()=>void)();});
+  expect(await screen.findByRole('tab',{name:/^Vocabulary$|^生词$/})).toHaveAttribute('aria-selected','true');
+  expect(screen.getByTestId('document-vocabulary')).toBeVisible();
+  expect(surfaces.vocabulary.refreshToken).toBe(1);
+  expect(container.querySelector('.paper-workspace-dock button[aria-pressed="true"]')).toHaveAccessibleName(/^Notes & vocabulary$|^笔记和生词$/);
 });
 
 it('opens vocabulary from the paper reader with the selected word and source evidence',async()=>{
@@ -201,7 +223,7 @@ it('opens vocabulary from the paper reader with the selected word and source evi
     ? Promise.resolve({config,status:200,statusText:'OK',headers:{},data:{display_name:'paper.pdf'}})
     : new Promise(()=>{});
   renderDocument();
-  await screen.findByRole('button',{name:/^Notes$|^笔记$/});
+  await screen.findByRole('button',{name:/^Notes & vocabulary$|^笔记和生词$/});
   const selection={text:'resilient',context:'A resilient approach improves accuracy.',contextTranslation:'一种有韧性的方法提高了准确性。',page:3};
   act(()=>{(surfaces.viewer.onAddVocabularySelection as (value:typeof selection)=>void)(selection);});
   expect(surfaces.vocabularyModal).toEqual(expect.objectContaining({selection,datasetId:'library',documentId:'paper',context:selection.context}));
@@ -216,7 +238,7 @@ it('lets the paper reader choose a word from a phrase while retaining source con
     ? Promise.resolve({config,status:200,statusText:'OK',headers:{},data:{display_name:'paper.pdf'}})
     : new Promise(()=>{});
   renderDocument();
-  await screen.findByRole('button',{name:/^Notes$|^笔记$/});
+  await screen.findByRole('button',{name:/^Notes & vocabulary$|^笔记和生词$/});
   const selection={text:'resilient approach',context:'A resilient approach improves accuracy.',page:3};
   act(()=>{(surfaces.viewer.onAddVocabularySelection as (value:typeof selection)=>void)(selection);});
   expect(surfaces.vocabularyModal.selection).toBeNull();

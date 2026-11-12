@@ -43,7 +43,7 @@ def run_probe(kind='llm', source='OpenAI', response=None, status=200, **values):
 ])
 def test_each_type_sends_one_minimal_inference_request(kind, suffix, response):
     source = {
-        'multimodal_embedding': 'SiliconFlow', 'text2image': 'SenseNova',
+        'multimodal_embedding': 'SiliconFlow',
         'image_editing': 'SenseNova', 'stt': 'GLM', 'tts': 'SiliconFlow',
     }.get(kind, 'OpenAI')
     values = {'model': 'FunAudioLLM/CosyVoice2-0.5B'} if kind == 'tts' else {}
@@ -93,9 +93,9 @@ def test_embedding_probe_rejects_inconsistent_vector_dimensions():
 
 
 def test_embedding_probe_uses_saved_query_prefix_without_leaking_it():
-    result, requests = run_probe('embed', embedding={'query_prefix': 'query: ', 'passage_prefix': 'passage: ',
-                                                   'batch_size': 2},
-                                 response={'data': [{'embedding': [0.1, 0.2]}]})
+    result, requests = run_probe(
+        'embed', embedding={'query_prefix': 'query: ', 'passage_prefix': 'passage: ', 'batch_size': 2},
+        response={'data': [{'embedding': [0.1, 0.2]}]})
     assert result['status'] == 'passed'
     assert json.loads(requests[0].content)['input'] == 'query: test'
     assert 'query: ' not in json.dumps(result)

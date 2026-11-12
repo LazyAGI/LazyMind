@@ -1,4 +1,4 @@
-import {useRef,useState, type ReactNode} from 'react';
+import {useRef,useState} from 'react';
 import {ArrowUpOutlined, BookOutlined, CloseOutlined, EditOutlined, QuestionCircleOutlined, TranslationOutlined} from '@ant-design/icons';
 import type {PdfTextSelection} from './RenderPdf';
 import {PDF_NOTE_COLORS,type PdfNoteColor} from './pdfNoteHighlights';
@@ -16,12 +16,11 @@ interface Props {
  onTranslate?:()=>void;
  translationDisabled?:boolean;
  translationTitle?:string;
- translationHelp?:ReactNode;
  actions?:PdfComposerAction[];
  onClose:()=>void;
 }
 /** Editing uses the captured PDF selection; textarea selection never replaces it. */
-export function PdfSelectionComposer({selection,onAsk,onNote,initialMode,onModeChange,onHighlight,onTranslate,translationDisabled,translationTitle,translationHelp,actions=[],onClose}:Props){
+export function PdfSelectionComposer({selection,onAsk,onNote,initialMode,onModeChange,onHighlight,onTranslate,translationDisabled,translationTitle,actions=[],onClose}:Props){
  const [mode,setMode]=useState<'ask'|'note'>(()=>initialMode==='note'&&onNote?'note':onAsk?'ask':'note');
  const chooseMode=(next:'ask'|'note')=>{setMode(next);onModeChange?.(next);};
  const [draft,setDraft]=useState('');
@@ -58,6 +57,5 @@ export function PdfSelectionComposer({selection,onAsk,onNote,initialMode,onModeC
     {composing&&(onAsk||onNote)&&<button type="button" className="pdf-selection-send" aria-label={mode==='ask'?'向 AI 提问':'保存笔记'} data-tooltip={mode==='ask'?'向 AI 提问':'保存笔记'} disabled={saving} onClick={()=>void submit()}>{saving?'…':<ArrowUpOutlined/>}</button>}
    </div>
   </div>
-  {translationDisabled&&translationHelp&&<div className="pdf-selection-help">{translationHelp}</div>}
  </div>;
 }

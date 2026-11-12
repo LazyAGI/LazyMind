@@ -8,7 +8,7 @@ import { capabilityFamily, capabilityFamilyI18nKey } from "./capabilityFamilies"
 import "./AddLearningContentModal.scss";
 
 export interface LearningSelection { capabilityKey:string; selection:PdfTextSelection }
-interface Props { value:LearningSelection|null; datasetId:string; documentId:string; segmentId?:string; context?:string; onClose:()=>void; onAdded:()=>void }
+interface Props { value:LearningSelection|null; datasetId:string; documentId:string; segmentId?:string; context?:string; onClose:()=>void; onAdded?:()=>void }
 
 export default function AddLearningContentModal({value,datasetId,documentId,segmentId,context,onClose,onAdded}:Props){
   const {t}=useTranslation(); const [form]=Form.useForm(); const [capability,setCapability]=useState<LearningCapability>(); const [books,setBooks]=useState<LearningBook[]>([]); const [loading,setLoading]=useState(false); const [saving,setSaving]=useState(false); const [editing,setEditing]=useState(false); const [source,setSource]=useState(""); const [resolvedValue,setResolvedValue]=useState<Record<string,unknown>>({}); const [dictionaryMeaning,setDictionaryMeaning]=useState(""); const [quickName,setQuickName]=useState("");
@@ -17,7 +17,7 @@ export default function AddLearningContentModal({value,datasetId,documentId,segm
   useEffect(()=>{if(!editing)return;form.resetFields();form.setFieldsValue({...resolvedValue,book_ids:books.slice(0,1).map(book=>book.id)})},[editing]);
   const fields=useMemo(()=>capability?.fields||[],[capability]);
   const canAddToCollection=capabilityFamily(capability?.key||"")==="translation";
-  const save=async()=>{ try{const values=await form.validateFields(); const {book_ids,...schemaValue}=values; if(!request)return; setSaving(true); await resolveLearningContent({...request,value:dictionaryMeaning?{...schemaValue,dictionary_meaning:dictionaryMeaning}:schemaValue,book_ids:book_ids||[]}); message.success(t("learning.added")); onAdded(); onClose();}catch(e){message.error(getLocalizedErrorMessage(e))}finally{setSaving(false)}};
+  const save=async()=>{ try{const values=await form.validateFields(); const {book_ids,...schemaValue}=values; if(!request)return; setSaving(true); await resolveLearningContent({...request,value:dictionaryMeaning?{...schemaValue,dictionary_meaning:dictionaryMeaning}:schemaValue,book_ids:book_ids||[]}); message.success(t("learning.added")); onAdded?.(); onClose();}catch(e){message.error(getLocalizedErrorMessage(e))}finally{setSaving(false)}};
   const createCompatibleBook=async()=>{if(!capability||!quickName.trim())return;const book=await createLearningBook({name:quickName.trim(),capability_key:capability.key,question_types:capability.default_question_types});setBooks([book]);form.setFieldValue("book_ids",[book.id]);setQuickName("")};
   const displayValue=(value:unknown)=>Array.isArray(value)?<ul>{value.map((item,index)=><li key={index}>{typeof item==="object"?JSON.stringify(item):String(item)}</li>)}</ul>:<Typography.Paragraph>{typeof value==="object"?JSON.stringify(value):String(value||"—")}</Typography.Paragraph>;
   const close=()=>{setEditing(false);onClose()};

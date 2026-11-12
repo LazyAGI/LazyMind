@@ -7,7 +7,7 @@ import (
 )
 
 // DatasetAllowsWriteForCaller complements a successful GetDataset read check
-// with both the dataset edit ACL and the backing scan-source write policy.
+// with the dataset edit ACL. Source-provider policies do not govern the library.
 func DatasetAllowsWriteForCaller(ctx context.Context, caller DatasetCatalogCaller, dataset Dataset) bool {
 	allowed := dataset.IsOwner
 	for _, permission := range dataset.Acl {
@@ -15,5 +15,5 @@ func DatasetAllowsWriteForCaller(ctx context.Context, caller DatasetCatalogCalle
 			allowed = true
 		}
 	}
-	return allowed && datasetAllowedByScanSourceForCaller(ctx, caller, dataset.DatasetID, acl.PermissionDatasetWrite)
+	return allowed
 }
