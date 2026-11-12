@@ -220,6 +220,7 @@ export interface ExternalExecutionProjection {
   run_id: string;
   history_id: string;
   provider: string;
+  model?: string;
   status: "pending" | "running" | "completed" | "failed" | "stopped";
   host_id?: string;
   host_online: boolean;

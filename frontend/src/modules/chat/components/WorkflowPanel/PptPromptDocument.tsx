@@ -1,5 +1,6 @@
-import { useMemo } from 'react';
+import { useContext, useEffect, useId, useMemo, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
+import { SlotEditingContext } from './slotEditingContext';
 import './PptPromptDocument.scss';
 
 interface PromptSection {
@@ -37,23 +38,36 @@ export function splitPptPrompt(text: string): PromptSection[] {
 
 export function PptPromptDocument({ text, onEdit, maxHeight }: {
   text: string;
-  onEdit?: () => void;
+  onEdit?: (source: HTMLElement) => void;
   maxHeight?: number;
 }) {
   const { t } = useTranslation();
+  const { inlineDocumentActions, registerFooterAction } = useContext(SlotEditingContext);
+  const actionId = useId();
+  const documentRef = useRef<HTMLDivElement>(null);
+  const editRef = useRef(onEdit);
+  editRef.current = onEdit;
+  const canEdit = Boolean(onEdit);
+  useEffect(() => {
+    if (!inlineDocumentActions || !canEdit) return;
+    return registerFooterAction(`ppt-prompt-edit:${actionId}`, {
+      label: t('chat.slots.editText'),
+      onClick: () => { if (documentRef.current) editRef.current?.(documentRef.current); },
+    });
+  }, [inlineDocumentActions, canEdit, registerFooterAction, actionId, t]);
   const sections = useMemo(() => {
     const parsed = splitPptPrompt(text);
     const isLayout = (section: PromptSection) => /^(布局|页面布局|版式|构图)(?:$|[\s（(：:])/.test(section.title);
     if (text.trimStart().startsWith('<!-- ppt-page-prompt:v1 -->')) return parsed;
     return [...parsed.filter(isLayout), ...parsed.filter(section => !isLayout(section))];
   }, [text]);
-  return <div className='ppt-prompt-document'>
-    <div className='ppt-prompt-document__toolbar'>
+  return <div ref={documentRef} className={`ppt-prompt-document${inlineDocumentActions ? ' ppt-prompt-document--embedded' : ''}`}>
+    {!inlineDocumentActions && <div className='ppt-prompt-document__toolbar'>
       <strong>{t('chat.slots.pptDesignDocument')}</strong>
       <div className='ppt-prompt-document__actions'>
-        {onEdit && <button type='button' onClick={onEdit}>{t('chat.slots.editText')}</button>}
+        {onEdit && <button type='button' onClick={() => { if (documentRef.current) onEdit(documentRef.current); }}>{t('chat.slots.editText')}</button>}
       </div>
-    </div>
+    </div>}
     <div className='ppt-prompt-document__body' style={maxHeight ? { maxHeight, overflowY: 'auto' } : undefined}>
       {sections.map((section, index) => (
         section.title ? <details className='ppt-prompt-document__section' key={index} open>

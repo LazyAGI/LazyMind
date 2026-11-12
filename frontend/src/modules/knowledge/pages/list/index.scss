@@ -4,9 +4,104 @@
   padding: 4px;
   color: #101828;
 
-  .knowledge-embedding-warning {
+  .knowledge-retrieval-status {
     margin-bottom: 12px;
-    border-radius: 8px;
+    overflow: hidden;
+    border: 1px solid #e5eaf2;
+    border-radius: 12px;
+    background: #fff;
+
+    .knowledge-embedding-warning {
+      padding: 10px 14px;
+      border: 0;
+      border-radius: 0;
+      background: #fffbf2;
+
+      .ant-alert-icon {
+        margin-inline-end: 10px;
+        font-size: 14px;
+      }
+
+      .ant-alert-message {
+        color: #69573b;
+        font-size: 12px;
+        line-height: 20px;
+      }
+
+      .ant-alert-action {
+        flex-shrink: 0;
+        margin-inline-start: 16px;
+      }
+    }
+
+    > .knowledge-embedding-warning:not(:first-child) {
+      border-top: 1px solid #f1ebdf;
+    }
+
+    .knowledge-index-state .knowledge-embedding-warning {
+      align-items: flex-start;
+      padding: 14px;
+      background: #fff;
+
+      .ant-alert-icon {
+        margin-top: 3px;
+        font-size: 17px;
+      }
+
+      .ant-alert-message {
+        margin-bottom: 4px;
+        color: #344054;
+        font-size: 13px;
+      }
+
+      .ant-alert-description {
+        color: #667085;
+        font-size: 12px;
+        line-height: 20px;
+      }
+    }
+  }
+}
+
+.knowledge-index-state-heading {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+}
+
+.knowledge-index-state-model {
+  min-width: 0;
+  padding: 1px 8px;
+  border-radius: 5px;
+  background: #f5f7fa;
+  color: #5f6b7e;
+  font-size: 12px;
+  font-weight: 400;
+  overflow-wrap: anywhere;
+}
+
+.knowledge-embedding-config {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  padding: 0 8px;
+  border: 1px solid #e1e7ef;
+  border-radius: 6px;
+  background: #fff;
+  color: #175cd3;
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+
+  &:hover {
+    border-color: #b2ccff;
+    background: #eff6ff;
+  }
+
+  &:focus-visible {
+    outline: 2px solid #2f6bff;
+    outline-offset: 2px;
   }
 }
 

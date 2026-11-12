@@ -16,7 +16,7 @@ import React, { useEffect, useState, useCallback, useRef, useMemo } from 'react'
 import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
 import { useAppVersion } from '@/runtime/useAppVersion';
-import { message as antdMessage, Popconfirm, Tooltip, Dropdown, Collapse } from 'antd';
+import { message as antdMessage, Popconfirm, Tooltip, Dropdown, Collapse, Alert } from 'antd';
 import {
   MoreOutlined,
   InfoCircleOutlined,
@@ -2179,6 +2179,10 @@ export function WorkflowPanel({
           return;
         }
         const latest = useWorkflowStore.getState().sessionByConversation[conversationId];
+        if (latest?.controller_host === 'external-agent' && display?.status === 'paused') {
+          await onSendMessage?.(message);
+          return;
+        }
         await onSendMessage?.(message, completedContinueStepId
           ? { session_id: sessionId, kind: 'rewind', step_id: completedContinueStepId, expected_state_version: latest?.state_version ?? 0 }
           : display?.status === 'paused'
@@ -2245,6 +2249,12 @@ export function WorkflowPanel({
         // Retry must explicitly release that pause, just like Continue.
         if (controlAdapter) {
           await controlAdapter.execute({ kind: display?.status === 'paused' ? 'resume' : 'retry' });
+          return;
+        }
+        if (latest.controller_host === 'external-agent') {
+          // Resume through the original executor with the existing workflow
+          // context. Native control commands reject externally owned sessions.
+          await onSendMessage?.(t('chat.workflowRetry'));
           return;
         }
         await onSendMessage?.(t('chat.workflowRetry'), display?.status === 'paused'
@@ -2503,6 +2513,13 @@ export function WorkflowPanel({
       )}
 
       </div>
+
+      {!collapsed && display?.status === 'failed'
+        && ['execution_not_started', 'external_driver_failed'].includes(display.reason) && (
+        <Alert className='workflow-panel__recovery-notice' type='error' showIcon
+          message={t(display.reason === 'execution_not_started'
+            ? 'chat.workflowStartFailedHint' : 'chat.workflowDriverFailedHint')} />
+      )}
 
       {!collapsed && externalPresentation && runningTasks.length > 0 && <div className='workflow-external-activity'>
         <div className='workflow-external-activity__text' role='status'>

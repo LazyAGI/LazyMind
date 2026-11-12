@@ -1321,11 +1321,11 @@ export default function RenderPdf({
     {studyPulse>0&&<PdfStudyActivation key={studyPulse} frame={readerFrame}/>}
     {readerHeader}
     <div ref={pinStageRef} className="pdf-reader-stage">
-    {noteReturn&&<button type="button" className="pdf-reader-note-return" aria-label="返回阅读位置" onClick={()=>{
+    {noteReturn&&<button type="button" className="pdf-reader-note-return" aria-label={t('pdfReader.returnPosition')} onClick={()=>{
       const page=Math.min(numPages,Math.max(1,noteReturn.page));
       const top=(pageTops[page-1]||0)+(pageHeightsPx[page-1]||0)*noteReturn.progress;
       containerRef.current?.scrollTo({top,behavior:'auto'});setScrollTop(top);onViewPositionChange?.(noteReturn);setNoteReturn(undefined);
-    }}>← {t('pdfReader.returnPosition',{defaultValue:'返回阅读位置'})}</button>}
+    }}>← {t('pdfReader.returnPosition')}</button>}
     <div ref={studyReaderRef} data-study-layout={studyLayout} className="pdf-reader-with-study" style={{height:"100%",width:"100%",display:"flex"}}>
     <div
       className={[className,handPan.active?'pdf-reader-hand-active':'',handPan.dragging?'is-dragging':''].filter(Boolean).join(' ')}

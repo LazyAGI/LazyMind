@@ -51,7 +51,7 @@ vi.mock("react-i18next", () => ({
   useTranslation: () => ({
     t: (key: string, options?: { defaultValue?: string; agent?: string; count?: number }) => {
       if (key.startsWith("agentIntegration.quitRequired.") || key.startsWith("agentIntegration.dshErrors.")) return retryI18n.t(key, options);
-      if (key === "agentIntegration.retryDisconnection" || key.startsWith("agentIntegration.workbuddyInstallGuide.") || key.startsWith("agentIntegration.codexInstallGuide.") || key.startsWith("agentIntegration.dshInstallGuide.") || key.startsWith("agentIntegration.workbuddyErrors.") || key.startsWith("agentIntegration.connectionErrors.") || key.startsWith("agentIntegration.setupFeedback.") || key.startsWith("agentIntegration.waitingForApplication") || key.startsWith("agentIntegration.loginStates.") ||
+      if (key.startsWith("agentIntegration.executablePathPlaceholder") || key === "agentIntegration.retryDisconnection" || key.startsWith("agentIntegration.workbuddyInstallGuide.") || key.startsWith("agentIntegration.codexInstallGuide.") || key.startsWith("agentIntegration.dshInstallGuide.") || key.startsWith("agentIntegration.workbuddyErrors.") || key.startsWith("agentIntegration.connectionErrors.") || key.startsWith("agentIntegration.setupFeedback.") || key.startsWith("agentIntegration.waitingForApplication") || key.startsWith("agentIntegration.loginStates.") ||
         key.startsWith("agentIntegration.cliSources.") || ["agentIntegration.selectedCLI", "agentIntegration.reselectCLI"].includes(key)) {
         return retryI18n.t(key, options);
       }
@@ -164,11 +164,6 @@ vi.mock("react-i18next", () => ({
         "agentIntegration.enterExecutablePath": "输入本机路径",
         "agentIntegration.executablePathTitle": "配置本机程序路径",
         "agentIntegration.executablePathDescription": "输入运行 Docker 的主机上的完整可执行文件路径",
-        "agentIntegration.executablePathPlaceholderMacCodexDesktop": "例如 /Applications/ChatGPT.app/Contents/MacOS/ChatGPT",
-        "agentIntegration.executablePathPlaceholderMacCLI": "例如 /opt/homebrew/bin/codex",
-        "agentIntegration.executablePathPlaceholderMacDesktop": "例如 /Applications/Cursor.app/Contents/MacOS/Cursor",
-        "agentIntegration.executablePathPlaceholderWindowsCLI": "例如 C:\\Agents\\codex.exe",
-        "agentIntegration.executablePathPlaceholderWindowsDesktop": "例如 C:\\Program Files\\ChatGPT\\ChatGPT.exe",
         "agentIntegration.restoreAutoDetection": "恢复自动检测",
         "agentIntegration.operationFailed": "操作未完成",
         "agentIntegration.loginStarted": `已打开 ${agent} 登录流程`,
