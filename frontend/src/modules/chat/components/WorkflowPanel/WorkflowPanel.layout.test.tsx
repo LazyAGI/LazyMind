@@ -642,6 +642,36 @@ describe('shared workflow compact layout', () => {
     expect(screen.getByText('正文 notes')).toBeVisible();
   });
 
+  it('keeps a repeated status visible without giving it a separate media page', async () => {
+    fixture.ui.tabs = [{
+      id: 'enhance_image', label: '增强', layout: 'composite', slot_scope: 'selected',
+      composite_tab_position: 'left',
+      slots: [
+        { id: 'enhancement_status', label: '后处理状态', type: 'json', cardinality: 'single' },
+        { id: 'gif_output', label: '动态 GIF', type: 'image', cardinality: 'list', ordered: true },
+      ],
+      composite_behavior: { repeat_single_slots: ['enhancement_status'] },
+    }];
+    const status = {
+      slot: 'enhancement_status', slot_id: 'enhancement_status', sort_order: 0, selected: true,
+      artifact_value: { data: { status: 'completed' } },
+    } as SlotRevision;
+    fixture.session.slots = [status];
+    const view = render(<WorkflowPanel conversationId='layout-test' />);
+    expect(await screen.findByText('正文 enhancement_status')).toBeVisible();
+
+    fixture.session.slots = [status, ...[1, 2].map(sortOrder => ({
+      ...status, slot: 'gif_output', slot_id: 'gif_output', sort_order: sortOrder,
+      list_index: sortOrder - 1, artifact_value: { text: `sticker-${sortOrder}` },
+    }))];
+    view.rerender(<WorkflowPanel conversationId='layout-test' />);
+    expect(screen.getAllByRole('listitem')).toHaveLength(2);
+    expect(screen.getByText('正文 gif_output')).toHaveAttribute('data-value', 'sticker-1');
+    fireEvent.click(screen.getByRole('listitem', { name: '第 2 行' }));
+    expect(screen.getByText('正文 gif_output')).toHaveAttribute('data-value', 'sticker-2');
+    expect(screen.getByText('正文 enhancement_status')).toBeVisible();
+  });
+
   it.each(['preview', 'slide_outline'])('keeps stale %s content visible after an upstream edit', async slot => {
     fixture.session.workflow_id = 'ppt-workflow';
     fixture.ui.tabs = [{

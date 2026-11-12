@@ -518,14 +518,20 @@ function getCompositeRows(
   session: WorkflowSession,
 ): number[] {
   const participating = new Set(tab.slots.map((s) => s.id));
+  const repeatedSlots = new Set(tab.composite_behavior?.repeat_single_slots);
   const orders = new Set<number>();
+  let hasRepeatedSingle = false;
   const scopeStepId = resolveWorkflowTabStepId(tab, session.steps);
   for (const slot of session.slots ?? []) {
     const matchesTabStep = scopeStepId ? slot.step_id === scopeStepId : slot.selected;
-    if (matchesTabStep && participating.has(slot.slot) && slot.sort_order !== undefined) {
-      orders.add(slot.sort_order);
+    if (!matchesTabStep || !participating.has(slot.slot) || slot.sort_order === undefined) continue;
+    if (slot.sort_order === 0 && slot.list_index == null && repeatedSlots.has(slot.slot)) {
+      hasRepeatedSingle = true;
+      continue;
     }
+    orders.add(slot.sort_order);
   }
+  if (!orders.size && hasRepeatedSingle) return [0];
   return Array.from(orders).sort((a, b) => a - b);
 }
 
