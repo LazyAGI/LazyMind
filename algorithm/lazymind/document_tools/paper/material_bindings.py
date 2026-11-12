@@ -4,7 +4,8 @@ import re
 
 
 class MaterialBindings:
-    def __init__(self, papers):
+    def __init__(self, papers, *, citation_markers=None):
+        self.citation_markers = citation_markers or {}
         self.materials = {f'M{index}': copy.deepcopy(paper) for index, paper in enumerate(papers, 1)}
         self.aliases = {paper['id']: key for key, paper in self.materials.items()}
         if len(self.aliases) != len(self.materials):
@@ -17,6 +18,10 @@ class MaterialBindings:
         if isinstance(value, list):
             return [self.model_view(item) for item in value]
         if isinstance(value, str) and self.aliases:
+            if self.citation_markers:
+                value = re.sub(r'\[(?:\\.|[^\]\\\n])+\]\(#paper-ref-([\w.-]+)\)',
+                               lambda match: '[' + self.aliases[match[1]] + ']'
+                               if match[1] in self.aliases else match[0], value)
             if value in self.aliases:
                 return self.aliases[value]
             pattern = '|'.join(re.escape(key) for key in sorted(self.aliases, key=len, reverse=True))
@@ -34,7 +39,9 @@ class MaterialBindings:
                 if len(bounds) > 2 or start > end or end > len(self.materials):
                     raise ValueError(f'Model cited an unavailable source marker: {group}')
                 for index in range(start, end + 1):
-                    result.append('[' + (match['prefix'] or '') + self.materials[f'M{index}']['id'] + ']')
+                    identifier = self.materials[f'M{index}']['id']
+                    result.append(self.citation_markers.get(
+                        identifier, '[' + (match['prefix'] or '') + identifier + ']'))
             return ''.join(result)
 
         return re.sub(r'\[(?P<prefix>文献:)?(?P<keys>M[1-9][0-9]*(?:\s*[,，;；–—-]\s*M[1-9][0-9]*)*)\]',

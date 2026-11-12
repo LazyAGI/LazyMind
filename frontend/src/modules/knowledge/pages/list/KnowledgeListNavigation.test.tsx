@@ -6,7 +6,7 @@ import { deferred, desktopTestTranslation as t, installDesktopTestDOM } from "@/
 
 const mocks = vi.hoisted(() => ({ list: vi.fn(), catalog: vi.fn(), scan: vi.fn(), cloudCreate: vi.fn(), scenes: vi.fn(), remove: vi.fn(), get: vi.fn() }));
 vi.mock("@/modules/learning/api", () => ({ getLearningCatalog: mocks.scenes }));
-vi.mock("react-i18next", () => ({ useTranslation: () => ({ t }) }));
+vi.mock("react-i18next", async (load) => ({ ...await load<typeof import("react-i18next")>(), useTranslation: () => ({ t }) }));
 vi.mock("@/modules/knowledge/api/knowledgeMarket", () => ({
   listKnowledgeMarket: mocks.catalog,
   listKnowledgeMarketDomains: vi.fn().mockResolvedValue({ domains: { industry: ["团队"], evaluation: [] } }),

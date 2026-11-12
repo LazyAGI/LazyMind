@@ -815,7 +815,7 @@ def test_paper_attachments_reuse_text_resolver_and_content_identity(suffix, tmp_
     papers = tools._conversation_papers({'1': [path], '2': [path]})
     assert calls == [(path, 1, True)]
     assert papers == [{'id': 'upload-' + tools.text_digest('完整论文正文'), 'title': '论文', 'text': '完整论文正文',
-                       'attachment_key': tools.text_digest(path)}]
+                       'attachment_key': tools.text_digest(path), 'filename': '论文' + suffix}]
 
 
 @pytest.mark.parametrize('body,error', [

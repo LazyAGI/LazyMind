@@ -633,7 +633,9 @@ def test_f2_feedback_refines_f1_question_without_overwriting_evidence(monkeypatc
     assert model_input['evidence'] == edited
     assert [paper['abstract'] for paper in model_input['papers']] == ['原有摘要', '新证据']
     assert tools.material(result['pool'], 'papers')['content'] == [*papers, {**added, 'abstract': '新证据'}]
-    assert result['document'] == REFINED_TOPIC_MARKDOWN
+    from lazymind.document_tools.paper.publication import render_references
+    expected_references = render_references(papers + [added], paper_language='zh')
+    assert result['document'] == REFINED_TOPIC_MARKDOWN + '\n\n' + expected_references
 
 
 def test_one_real_algorithm_replacement_preserves_storage_and_next_input(monkeypatch):

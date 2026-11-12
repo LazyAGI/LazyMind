@@ -8,7 +8,10 @@ from threading import RLock
 import time
 import uuid
 
+from lazyllm.tools.writer.tools.base import WriterToolBase
+
 from ..writing import DraftMarkdownStreamEventEmitter
+from .model_response import normalize_response
 
 _current = ContextVar('paper_runtime_events', default=None)
 _log = logging.getLogger(__name__)
@@ -221,9 +224,14 @@ class StructuredPreview:
                 self.events.preview(text, self.slot)
 
 
+class _PaperTextWriter(WriterToolBase):
+    @staticmethod
+    def _call_model(model, prompt, **kwargs):
+        return normalize_response(WriterToolBase._call_model(model, prompt, **kwargs)).body
+
+
 def generate_markdown(model, prompt, *, bindings=None):
     """Shared Markdown transport, reasoning filtering and split citation recovery."""
-    from lazyllm.tools.writer.tools.base import WriterToolBase
     events = current_events()
     pending = ''
     leading = True
@@ -253,7 +261,7 @@ def generate_markdown(model, prompt, *, bindings=None):
         pending = pending[end:]
 
     streaming = events is not None and callable(getattr(model, 'share', None))
-    text = WriterToolBase(llm=model)._call_llm_text(
+    text = _PaperTextWriter(llm=model)._call_llm_text(
         prompt, stream_output={'_stream_sink': on_delta} if streaming else False,
     ).strip()
     if re.match(r'^<think\b', text, re.I):

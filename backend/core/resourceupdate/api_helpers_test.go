@@ -55,6 +55,26 @@ func TestOrganizeCancellationStatsDominateDifferentRunIDs(t *testing.T) {
 	}
 }
 
+func TestSkillClusterRequirementSurvivesTaskAPIProjection(t *testing.T) {
+	db := newResourceUpdateTestDB(t)
+	createSkillReviewStatsTable(t, db)
+	insertSkillReviewStats(t, db, map[string]any{
+		"id": "algorithm-task", "requestid": "req-cluster", "userid": "u",
+		"status": "failed", "started_at": "2026-11-11T00:00:00Z",
+		"summary": map[string]any{"error_code": "skill_review_cluster_required"},
+	})
+	task := orm.ResourceUpdateTask{
+		ID: "task-cluster", UserID: "u", ResultID: "algorithm-task",
+		TaskType: orm.ResourceUpdateTaskTypeGenerateReview, ResourceType: orm.ResourceUpdateResourceTypeSkill,
+		Status:      orm.ResourceUpdateTaskStatusDone,
+		RequestJSON: json.RawMessage(`{"requestid":"req-cluster"}`),
+	}
+	response, err := buildSkillReviewTaskStatus(context.Background(), db, task.UserID, task)
+	if err != nil || response.Status != "failed" || response.ErrorCode != "skill_review_cluster_required" {
+		t.Fatalf("expected an actionable dependency error, got %#v (%v)", response, err)
+	}
+}
+
 // TestTaskToResponse maps all ORM task fields to the response DTO.
 func TestTaskToResponse(t *testing.T) {
 	now := time.Now().UTC()

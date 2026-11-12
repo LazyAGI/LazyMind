@@ -619,6 +619,14 @@ func loadDesktopCredentialManifest(cloudIssuer string) (*credentialvault.Manifes
 func main() {
 	log.Init()
 
+	if len(os.Args) == 2 && os.Args[1] == "--prepare-cluster-component" {
+		ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+		defer stop()
+		if err := systemdeps.PrepareClusterComponent(ctx); err != nil {
+			log.Logger.Fatal().Err(err).Msg("prepare desktop clustering component")
+		}
+		return
+	}
 	if len(os.Args) > 1 && os.Args[1] == "--export-openapi-to" {
 		if len(os.Args) != 3 || strings.TrimSpace(os.Args[2]) == "" {
 			log.Logger.Fatal().Msg("--export-openapi-to requires one output path")

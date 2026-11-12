@@ -5,7 +5,6 @@ from typing import Any, Callable, Dict, NoReturn, Optional
 import lazyllm
 from lazyllm.tools.agent import ToolExecutionError
 
-from lazymind.chat.engine.tools.infra import GitHubSkillInstaller
 from lazymind.chat.engine.tools.infra.skill_operations import (
     create_skill_file,
     delete_skill_file,
@@ -14,13 +13,11 @@ from lazymind.chat.engine.tools.infra.skill_operations import (
 )
 from lazymind.common.skill.document import (
     SkillDocumentError,
-    parse_skill_document,
     require_skill_name,
     require_valid_skill_document,
 )
 from lazymind.common.skill.remote_store import SkillRemoteStore
 from lazymind.common.skill.storage_key import (
-    EXTERNAL_SKILL_CATEGORY,
     INTERNAL_SKILL_CATEGORY,
     parse_skill_key,
 )
@@ -56,78 +53,39 @@ class SkillManagementToolkit:
         'remove_skill',
     ]
 
-    def __init__(
-        self,
-        store: Optional[SkillRemoteStore] = None,
-        installer: Optional[GitHubSkillInstaller] = None,
-    ):
+    def __init__(self, store: Optional[SkillRemoteStore] = None, installer: Any = None):
+        # ``installer`` was accepted by older callers.  Imports now go through
+        # the shared RemoteFS service, but keep the keyword for compatibility
+        # with downstream tool construction and serialized agent configs.
         self.store = store or SkillRemoteStore()
-        self.installer = installer or GitHubSkillInstaller()
 
     @fc_register(host_file='NONE')
     def install_skill(self, github_url: str) -> Dict[str, Any]:
-        """Install one public GitHub skill package as a disabled reusable skill.
+        """Install a linked public skill package as a disabled reusable skill.
 
         Call this only when the user explicitly asks to install the linked
-        skill. Do not call it when the user only asks to inspect, explain, or
-        analyze a GitHub link. Installation runs immediately without a second
-        confirmation, but the installed skill remains disabled until the user
-        reviews and enables it in Skill Management.
+        skill, including an installation needed to use the skill. Inspecting,
+        explaining, or analyzing a link alone does not authorize installation.
+        Installation runs immediately; the user can review and enable the new
+        skill in Skill Management. Repeating an installed source reuses it.
 
         Args:
-            github_url: Public GitHub repository root or /tree/<ref>/<skill-path> URL.
+            github_url: GitHub repository, directory or SKILL.md URL, skills.sh,
+                SkillsMP, SkillHub, ClawHub skill page, or direct HTTP(S) ZIP URL.
         """
-        lazyllm.LOG.info(f'[install_skill] called github_url={github_url!r}')
+        lazyllm.LOG.info('[install_skill] called')
         try:
-            package = self.installer.prepare(github_url)
-        except Exception as exc:
-            raise ToolExecutionError(str(exc)) from exc
-
-        category = EXTERNAL_SKILL_CATEGORY
-        skill_key = f'{category}/{package.name}'
-        try:
-            if self.store.package_exists(category, package.name):
-                raise ToolExecutionError(f'Skill {skill_key!r} already exists.')
-            duplicate_key = self._find_installed_github_source(package.source.identity)
-            if duplicate_key:
-                raise ToolExecutionError(
-                    f'GitHub source is already installed as {duplicate_key!r}.',
-                )
-            self.store.install_package(category, package.name, package.files)
+            result = self.store.install_url(github_url)
         except Exception as exc:
             _skill_editor_error('Failed to install skill package', exc)
-
-        return {
-            'status': 'installed',
-            'skill_key': skill_key,
-            'github_url': package.source.canonical_url,
-            'enabled': False,
-            'message': (
-                'Skill installed. Go to Skill Management > My Skills to review and enable it.'
-            ),
-        }
-
-    def _find_installed_github_source(self, source_identity: tuple[str, str]) -> Optional[str]:
-        for package in self.store.list_packages():
-            category = package['category']
-            if category != EXTERNAL_SKILL_CATEGORY:
-                continue
-            name = package['name']
-            try:
-                document = parse_skill_document(self.store.read_skill_md(category, name))
-                github_url = str(document.metadata.get('github_url') or '').strip()
-                if not github_url:
-                    continue
-                existing_source = self.installer.resolve_source(github_url)
-            except (OSError, RuntimeError, ValueError) as exc:
-                lazyllm.LOG.warning(
-                    '[install_skill] skip unreadable or invalid existing github source '
-                    f'skill={category}/{name} error_type={type(exc).__name__} error={exc}'
-                )
-                continue
-            if existing_source.identity == source_identity:
-                return f'{category}/{name}'
-        return None
+        installed = dict(result)
+        installed['github_url'] = result.get('source_url') or github_url
+        installed['message'] = (
+            'This source is already installed. Review it in Skill Management > My Skills.'
+            if result.get('status') == 'already_installed'
+            else 'Skill installed. Go to Skill Management > My Skills to review and enable it.'
+        )
+        return installed
 
     @fc_register(host_file='NONE')
     def create_skill(self, name: str, *, content: str) -> Dict[str, Any]:

@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import { agentIntegrationStatuses, type DesktopAgentIntegrationStatus } from "@/runtime/desktopBridge";
 
 import { workbuddyErrorMessage } from "./workbuddyErrors";
+import { codexErrorMessage } from "./codexErrors";
 import { requiresAgentQuit } from "./agentActions";
 
 type Stage = "prepare" | "installing" | "login" | "quitRequired" | "installFailed" | "entry" | "trust" | "enable" | "verify" | "checking" | "notReady" | "success";
@@ -38,7 +39,7 @@ export default function WorkBuddyInstallationGuide({ status, onConnect, onLogin,
     try {
       const result = await onConnect();
       if (!mounted.current) return;
-      setDiagnostic(result?.issue?.operation_id || result?.diagnostic_id || "");
+      setDiagnostic(result?.diagnostic_id || result?.issue?.operation_id || "");
       if (requiresAgentQuit(result)) {
         setStage("quitRequired"); return;
       }
@@ -49,8 +50,10 @@ export default function WorkBuddyInstallationGuide({ status, onConnect, onLogin,
         if (!login) { setError(text("loginFailed")); setStage("installFailed"); }
         return;
       }
-      if (result?.state !== "enabled" || !result.connection?.mcp_configured) {
-        setError(agent === "workbuddy" && result?.issue ? workbuddyErrorMessage(result, t) : result?.message || text("installFailedDescription"));
+      if (result?.state !== "enabled" || !result.connection?.mcp_configured
+        || agent === "codex" && result.issue && !["mcp_enable_required", "mcp_trust_required"].includes(result.issue.code)) {
+        setError(agent === "codex" ? codexErrorMessage(result, t, "installFailedDescription")
+          : result?.issue ? workbuddyErrorMessage(result, t) : result?.message || text("installFailedDescription"));
         setStage("installFailed"); return;
       }
       // Connect includes restart and installation checks. Trust is a separate step.
@@ -91,20 +94,30 @@ export default function WorkBuddyInstallationGuide({ status, onConnect, onLogin,
     if (busy.current) return;
     busy.current = true;
     if (!automatic) { setStage("checking"); setError(""); }
+    const checkFailed = () => {
+      if (!automatic || agent === "codex" && ["notReady", "installFailed"].includes(stage)) {
+        setError(text("checkFailedDescription")); setDiagnostic("");
+        if (!automatic) setStage("notReady");
+      }
+    };
     try {
       const result = await agentIntegrationStatuses();
       if (!mounted.current) return;
-      if (!result.ok) { if (!automatic) { setError(text("checkFailedDescription")); setStage("notReady"); } return; }
+      if (!result.ok) { checkFailed(); return; }
       const current = result.data[agent];
       if (current) onStatus(current);
       const connection = current?.connection;
       const configured = current?.state === "enabled" && connection?.mcp_configured;
       const connectorReady = configured && connection?.mcp_enabled && connection.mcp_trusted;
       const ready = connectorReady && connection.control_ready && !current?.issue;
-      if (automatic && !ready) return;
-      if (!ready && agent === "codex") setError(connectorReady && current?.issue?.code === "capability_unavailable"
-        ? t("agentIntegration.connectionErrors.capability_unavailable")
-        : text(connectorReady ? "controlUnavailableDescription" : "notReadyDescription"));
+      if (!automatic || agent === "codex" || ready) setDiagnostic(current?.diagnostic_id || current?.issue?.operation_id || "");
+      if (automatic && !ready) {
+        if (agent === "codex" && ["notReady", "installFailed"].includes(stage)) {
+          setError(codexErrorMessage(current, t, connectorReady ? "controlUnavailableDescription" : "notReadyDescription"));
+        }
+        return;
+      }
+      if (!ready && agent === "codex") setError(codexErrorMessage(current, t, connectorReady ? "controlUnavailableDescription" : "notReadyDescription"));
       else if (!ready && current?.issue) setError(workbuddyErrorMessage(current, t));
       else if (connectorReady && !connection?.control_ready) setError(text("controlUnavailableDescription"));
       else if (!ready) setError(text(!configured ? "configurationMissingDescription"
@@ -112,7 +125,7 @@ export default function WorkBuddyInstallationGuide({ status, onConnect, onLogin,
           : !connection.mcp_trusted ? "trustRequiredDescription" : "enableRequiredDescription"));
       setStage(ready ? "success" : "notReady");
     } catch {
-      if (mounted.current && !automatic) { setError(text("checkFailedDescription")); setStage("notReady"); }
+      if (mounted.current) checkFailed();
     } finally { busy.current = false; }
   };
   // A late startup heartbeat or a return from trust/enable settings can finish
@@ -163,7 +176,7 @@ export default function WorkBuddyInstallationGuide({ status, onConnect, onLogin,
         description={t("agentIntegration.quitRequired.description", { agent: status?.display_name || (agent === "codex" ? "Codex" : "WorkBuddy") })} />}
       {(installing || checking) && <Space direction="vertical" align="center" className="agent-integration-installation-progress"><Spin /><Typography.Text>{text(installing ? "installingDescription" : "checkingDescription")}</Typography.Text></Space>}
       {stage === "installFailed" && <Alert type="error" showIcon message={text("installFailedTitle")} description={error} />}
-      {["installFailed", "quitRequired"].includes(stage) && diagnostic && <Typography.Text type="secondary" copyable>{t("agentIntegration.setupFeedback.diagnosticID")}: {diagnostic}</Typography.Text>}
+      {["installFailed", "quitRequired", "notReady"].includes(stage) && diagnostic && <Typography.Text type="secondary" copyable>{t("agentIntegration.setupFeedback.diagnosticID")}: {diagnostic}</Typography.Text>}
       {(stage === "entry" || stage === "trust" || stage === "enable") &&
         <Alert type="success" showIcon message={text("installedTitle")} description={text("installedDescription")} />
       }
