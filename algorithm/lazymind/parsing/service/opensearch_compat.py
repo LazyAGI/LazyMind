@@ -17,8 +17,16 @@ def encode_metadata(segment, properties):
         spec = properties.get(field, {})
         kind = spec.get('type')
         value = result[field]
-        if (kind in ('object', 'nested') or 'properties' in spec) and isinstance(value, str):
-            result[field] = json.loads(value)
+        if kind in ('object', 'nested') or 'properties' in spec or 'enabled' in spec:
+            # Retained nodes may already contain JSON text. The upstream
+            # serializer encodes them again, so one json.loads is insufficient.
+            for _ in range(2):
+                if not isinstance(value, str):
+                    break
+                value = json.loads(value)
+            if value is not None and not isinstance(value, (dict, list)):
+                raise ValueError(f'segment metadata {field} is incompatible with its object mapping')
+            result[field] = value
         elif kind in ('text', 'keyword') and isinstance(value, (dict, list)):
             result[field] = json.dumps(value, ensure_ascii=False)
     return result

@@ -122,6 +122,9 @@ if not getattr(DocumentProcessorWorker._Impl, '_lazymind_isolated', False):
         _lazymind_isolated = True
 
         def _get_processor(self):
+            # ServerModule can reconstruct this class in a fresh subprocess.
+            # Install there as well, before any retained segment is written.
+            install_opensearch_compat()
             from lazymind.parsing.service.embedding_reset import index_state, IndexBusy
             state = index_state()
             expected = getattr(self, '_lazymind_task_generation', None)

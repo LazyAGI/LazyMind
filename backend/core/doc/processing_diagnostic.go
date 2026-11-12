@@ -21,6 +21,9 @@ var diagnosticSecret = regexp.MustCompile(`(?i)(authorization|bearer|api[_-]?key
 // UI/MCP diagnostics must not carry upstream signed URLs, credentials or tracebacks.
 func SafeProcessingMessage(raw string) string {
 	text := extractParseTaskErrorMessage(raw)
+	if strings.Contains(text, "[_DocumentStore] Failed to upsert segment data for group") {
+		return "解析结果写入正文存储失败。请重新解析；若仍失败，请检查正文存储的格式兼容性与服务状态。"
+	}
 	for _, marker := range []string{"Traceback (", "\n  File ", "\ngoroutine ", "\n\tat "} {
 		if i := strings.Index(text, marker); i >= 0 {
 			text = text[:i]
