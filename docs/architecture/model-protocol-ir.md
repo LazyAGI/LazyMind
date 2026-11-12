@@ -19,7 +19,7 @@
 - `ToolCallIR`：保留调用 ID、工具名称、参数，以及兼容层需要的附加属性。
 - `MessageIR`：角色、内容块、工具调用及工具结果对应的调用 ID；`text` 始终返回字符串。
 - `RequestIR`：语义消息与生成参数快照。`ModelRequest.payload` 仍是实际待发送请求，`ModelRequest.ir` 是独立的语义快照。
-- `ResponseIR`：Responses 输出转换为统一消息、`ModelFinish` 和用量。底层模型调用器继续通过 `ModelCallError` 表达截断、拒绝、失败等非正常结束。
+- `ResponseIR`：Completions 与 Responses 输出转换为统一消息、`ModelFinish` 和用量。底层模型调用器继续通过 `ModelCallError` 表达截断、拒绝、失败等非正常结束。
 
 协议选项（工具定义、结构化输出、采样参数、输出 token 上限）的编码仍由供应商适配器负责。
 现有消息字典通过边界转换兼容，不要求修改已保存的工作流和会话数据。
@@ -36,12 +36,18 @@ Base64、文件编码数据、加密续接信息均不按正文字符估算。
 ## 多轮状态和终止
 
 Responses 的不透明输出项通过注明协议来源的 `_lazyllm_provider_items` 保留在历史中，供同一协议的适配器回放。
-普通文本和工具参数仍取当前历史值，不能因保留原响应而恢复已压缩的旧正文。
+完整原始输出保留消息 ID、引用、拒绝内容及顺序。角色、文本、媒体或工具参数变化时，语义摘要使原始快照失效，改用当前历史值，不能恢复已压缩的旧正文。
 这些私有属性不会作为 Completions 消息字段发送，也不进入正文 token 估算。
+
+主会话在已有 `ChatHistory.Ext` 中保存 canonical 消息序列，关联 run ID，并参与模型输出的 checkpoint/commit/rollback；失败尝试不会覆盖已提交历史。子代理工具步骤保存完整 assistant 消息，旧版扁平工具记录恢复时转换为标准调用格式。内部恢复使用这些数据，公开 SSE、任务历史与会话 DTO 不返回私有续接内容，无需数据库迁移。
 
 缺失、空值或内容块形式的 `content` 经 `MessageIR` 转为稳定的文本访问接口，工具循环不再直接假定供应商必然提供字符串字段。
 Responses 截断和拒绝状态优先于工具调用存在性；截断的工具参数不得触发工具执行。
 供应商返回空 Responses 输出时使用非成功终止状态，而不是假装完成。
+
+默认文本 formatter 在流式和非流式中返回相同的文本类型；工具 agent 使用结构化 formatter。Responses 的函数参数、推理和拒绝增量会保留为部分输出，只有完整终态可触发工具执行。坏 JSON/事件结构归为协议错误；失败响应保留已产生的输出和实际用量。取消和截止时间也闭合模型调用生命周期。
+
+适配器显式拒绝无法等价映射的参数（例如 `n>1`、`stop`、频率惩罚），并转换旧版函数定义；不支持的内置工具必须在请求前拒绝。本适配器当前支持函数工具，生图走独立 Images API。
 
 本地 `ContextCapacityError` 和 `UnsupportedModelInput` 穿过高级请求包装层时保留原类别。
 供应商异常仍按现有规则去除敏感正文和凭据。
@@ -55,13 +61,14 @@ Responses 截断和拒绝状态优先于工具调用存在性；截断的工具�
 适配器必须处理系统指令位置、工具结果关联、媒体 MIME/引用、流式与非流式对等，以及供应商私有续接信息。
 未知协议不得被猜测成已支持协议；`RequestIR.to_payload` 对未实现协议显式报错。
 跨协议切换时不可把签名、加密推理等不透明数据发送给另一个协议。
+未来 Gemini 的 thought signatures 与 Anthropic 的签名 thinking 必须由各自适配器声明与验证兼容范围；当前保留不透明项的能力不等于已实现这两种原生协议。
 
 ## 生图能力
 
 图像生成使用独立的 Images API 和既有编码文件结果，不经聊天 Responses 路由。
 OpenAI 原生 Base64 图片由适配器校验解码；硅基原生 `images` URL 被下载为本地图片，并兼容已有 `data` 响应。
 硅基调用使用选中的 API 根地址，传递 `image_size`/`batch_size`，框架的 `priority`、`stream_output` 不进入供应商请求。
-生成文件由工具层迁移到上传目录，返回静态资源链接；下载图片时不携带供应商 Authorization。
+生成文件由工具层迁移到上传目录，返回静态资源链接；下载图片时不携带供应商 Authorization，且每次重定向都重新验证目标。图片编辑根据实际文件类型声明 MIME；生成数量只接受正整数。
 
 协议参考：[OpenAI Responses 迁移](https://developers.openai.com/api/docs/guides/migrate-to-responses)、
 [OpenAI Images API](https://developers.openai.com/api/reference/resources/images/methods/generate)、

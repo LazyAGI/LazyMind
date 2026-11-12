@@ -241,7 +241,8 @@ def test_text_and_tool_relative_order_survives_round_trip(with_prefix):
     replay = chat_to_responses_request({'messages': [message]})['input']
     assert [item.get('type', 'message') for item in replay] == [item['type'] for item in output]
     expected_text = ['before', 'after'] if with_prefix else ['after']
-    assert [item['content'] for item in replay if 'content' in item] == expected_text
+    assert [''.join(part['text'] for part in item['content'])
+            for item in replay if 'content' in item] == expected_text
     message['content'] = 'compressed'
     replay = chat_to_responses_request({'messages': [message]})['input']
     assert [item['content'] for item in replay if 'content' in item] == ['compressed']
@@ -320,3 +321,26 @@ def test_workflow_tool_round_through_native_http(monkeypatch, tmp_path, source, 
     else:
         assert any(item.get('role') == 'tool' and item['tool_call_id'] == 'call_render'
                    for item in sent[1]['messages'])
+
+
+def test_advanced_policy_preserves_protocol_capability_rejection(monkeypatch):
+    from lazyllm import AutoModel
+    from lazyllm.common import new_session
+    from lazyllm.module.llms.model_config_inject import inject_model_config
+    from lazymind.provider_request import configure_request_advanced
+    from lazyllm.module.module import ModuleExecutionError
+
+    def unexpected(*args, **kwargs):
+        pytest.fail('Unsupported options must fail before HTTP')
+
+    monkeypatch.setattr('requests.Session.send', unexpected)
+    with new_session('ir-unsupported-option'):
+        config = {'llm': {'source': 'openai_responses', 'model': 'test', 'api_key': 'test-key',
+                          'base_url': 'https://provider.example/v1/',
+                          'request_advanced': {'headers': {'X-Test': 'private-token'}}}}
+        inject_model_config(config)
+        configure_request_advanced(config)
+        model = AutoModel(source='dynamic', name='llm', dynamic_auth=True)
+        with pytest.raises(ModuleExecutionError, match='Responses cannot translate chat options: stop') as caught:
+            model('Hi', stream_output=False, stop=['private-value'])
+        assert 'private' not in str(caught.value)

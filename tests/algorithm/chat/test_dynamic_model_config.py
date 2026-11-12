@@ -174,7 +174,7 @@ class TestAutoModelDynamic:
         assert type(supplier).__name__ == 'KimiChat'
         assert supplier._prompt is prompter
 
-        assert shared('hello', stream_output=False) == {'content': 'ok'}
+        assert shared('hello', stream_output=False) == 'ok'
         assert calls[0]['url'] == 'https://api.moonshot.cn/v1/chat/completions'
         assert calls[0]['headers'].get('Authorization') == 'Bearer sk-test'
         assert calls[0]['json'].get('model') == 'kimi-k2-0711-preview'

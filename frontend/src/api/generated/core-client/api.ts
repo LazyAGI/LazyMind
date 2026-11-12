@@ -6664,7 +6664,8 @@ export interface ModelCallFinishedData {
 
 export const ModelCallFinishedDataKindEnum = {
     Finish: 'finish',
-    Failure: 'failure'
+    Failure: 'failure',
+    Cancelled: 'cancelled'
 } as const;
 
 export type ModelCallFinishedDataKindEnum = typeof ModelCallFinishedDataKindEnum[keyof typeof ModelCallFinishedDataKindEnum];

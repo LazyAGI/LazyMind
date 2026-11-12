@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import copy
 import re
 from typing import Any
 
@@ -312,6 +313,24 @@ def normalize_history_for_agent(
     normalized: list[dict[str, Any]] = []
     for message in history or []:
         if not isinstance(message, dict):
+            continue
+        canonical = message.get('canonical_messages')
+        if isinstance(canonical, list):
+            for item in canonical:
+                if not isinstance(item, dict) or item.get('role') not in ('assistant', 'tool', 'user'):
+                    continue
+                restored = copy.deepcopy(item)
+                if restored.get('role') == 'tool' and compact_workflow_receipts:
+                    content = _sanitize_named_history_tool_result(
+                        str(restored.get('name') or ''), restored.get('content'),
+                        compact_workflow_receipts=True,
+                    )
+                    restored['content'] = (
+                        content if isinstance(content, str) else json.dumps(content, ensure_ascii=False)
+                    )
+                if message.get('history_seq') is not None:
+                    restored['history_seq'] = message['history_seq']
+                normalized.append(restored)
             continue
         role = str(message.get('role') or '').strip()
         if role == 'assistant':

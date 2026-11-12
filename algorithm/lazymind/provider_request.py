@@ -123,10 +123,11 @@ def _sanitize_failed_response(response, policy):
 
 
 def _configuration_error_in_chain(error):
+    from lazyllm.module.llms.onlinemodule.base.protocol_ir import ProtocolCapabilityError
     seen = set()
     while error is not None and id(error) not in seen:
         seen.add(id(error))
-        if isinstance(error, ProviderRequestConfigurationError):
+        if isinstance(error, (ProviderRequestConfigurationError, ProtocolCapabilityError)):
             return error
         error = error.__cause__ or error.__context__
     return None
