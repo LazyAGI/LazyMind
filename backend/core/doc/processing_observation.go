@@ -41,7 +41,7 @@ func loadProcessingSnapshot(ctx context.Context, db, lazyDB *gorm.DB, datasetID,
 		if err := docs.Find(&snapshot.documents).Error; err != nil {
 			return err
 		}
-		if len(snapshot.documents) == 0 || (documentID == "" && effectiveProcessingLevel(snapshot.dataset.ProcessingLevel) == ProcessingLevelStored) {
+		if len(snapshot.documents) == 0 || (documentID == "" && len(documentIDs) == 0 && effectiveProcessingLevel(snapshot.dataset.ProcessingLevel) == ProcessingLevelStored) {
 			return nil
 		}
 		var states []orm.DocumentProcessingState
@@ -151,7 +151,7 @@ func applyManualReparseStages(ctx context.Context, datasetID string, rows []merg
 	db := store.DB()
 	var resetIDs []string
 	if err := db.WithContext(ctx).Model(&orm.DocumentProcessingState{}).
-		Where("dataset_id = ? AND document_id IN ? AND embedding_version = ?", datasetID, ids, embeddingVersionReembedManual).
+		Where("dataset_id = ? AND document_id IN ? AND embedding_version IN ?", datasetID, ids, []string{embeddingVersionReembedManual, embeddingVersionRebuildRequired}).
 		Pluck("document_id", &resetIDs).Error; err != nil || len(resetIDs) == 0 {
 		return err
 	}
@@ -160,7 +160,7 @@ func applyManualReparseStages(ctx context.Context, datasetID string, rows []merg
 		return err
 	}
 	for _, document := range snapshot.documents {
-		if isFolderLikeDocument(document) || snapshot.states[document.ID].EmbeddingVersion != embeddingVersionReembedManual {
+		if isFolderLikeDocument(document) || (snapshot.states[document.ID].EmbeddingVersion != embeddingVersionReembedManual && snapshot.states[document.ID].EmbeddingVersion != embeddingVersionRebuildRequired) {
 			continue
 		}
 		state, _ := snapshot.observe(document)
@@ -185,12 +185,18 @@ func (snapshot processingSnapshot) observe(document orm.Document) (orm.DocumentP
 	}
 	task, hasTask := snapshot.tasks[document.ID]
 	if state.EmbeddingVersion == embeddingVersionReembedManual && (!hasTask || state.IndexArtifactRef != "core-task:"+task.ID) {
-		state.ParseStatus, state.ChunkStatus, state.IndexStatus = "pending", "pending", "pending"
+		state.IndexStatus = "pending"
 		return state, ""
+	}
+	if state.EmbeddingVersion == embeddingVersionRebuildRequired {
+		state.IndexStatus = "pending"
 	}
 	// Pending defaults are not evidence that an unrequested stage is queued.
 	// Preserve persisted terminal results, then overlay proven current task stages.
 	for _, stage := range []*string{&state.ChunkStatus, &state.IndexStatus} {
+		if stage == &state.IndexStatus && state.EmbeddingVersion == embeddingVersionRebuildRequired {
+			continue
+		}
 		if *stage != "succeeded" && *stage != "failed" {
 			*stage = "unknown"
 		}
@@ -209,7 +215,7 @@ func (snapshot processingSnapshot) observe(document orm.Document) (orm.DocumentP
 		task.LazyllmTaskID == "" && ext.ProcessingLevel == "" && ext.TaskState == string(TaskStateSucceeded) {
 		return state, ""
 	}
-	nativeIndexing := (state.ParseArtifactRef != "" || state.EmbeddingVersion == embeddingVersionReembedPending) && ext.ProcessingLevel == ProcessingLevelIndexed
+	nativeIndexing := (state.ParseArtifactRef != "" || (state.EmbeddingVersion == embeddingVersionRebuildRequired && state.ParseStatus == "succeeded") || state.EmbeddingVersion == embeddingVersionReembedPending || (state.EmbeddingVersion == embeddingVersionReembedManual && state.ParseStatus == "succeeded")) && ext.ProcessingLevel == ProcessingLevelIndexed
 	if nativeIndexing && (state.IndexArtifactRef != "core-task:"+task.ID || ext.ProcessingRevision != snapshot.dataset.ProcessingRevision) {
 		return state, ""
 	}

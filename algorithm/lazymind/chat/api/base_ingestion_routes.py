@@ -1,4 +1,5 @@
 from typing import Annotated, Optional
+import logging
 
 from fastapi import APIRouter, Header, HTTPException
 from pydantic import BaseModel, Field
@@ -52,10 +53,10 @@ async def clear_knowledge_chunks(
     except IndexBusy:
         raise HTTPException(409, detail={'code': 'INDEX_BUSY'}) from None
     except Exception:
+        logging.getLogger(__name__).exception('Text-vector cleanup failed')
         raise HTTPException(503, detail={'code': 'INDEX_CLEANUP_FAILED'}) from None
 
 
 def _prepare_guarded(request):
-    from lazymind.parsing.service.embedding_reset import index_operation
-    with index_operation(request.embedding_generation):
-        return prepare_document(request.source_path, config['shared_upload_dir'])
+    # This only writes a retained parse artifact, never vectors.
+    return prepare_document(request.source_path, config['shared_upload_dir'])

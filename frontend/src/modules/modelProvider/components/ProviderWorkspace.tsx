@@ -51,6 +51,7 @@ import { useSupplierOrder } from "../hooks/useSupplierOrder";
 import { useFocusModality } from "../hooks/useFocusModality";
 import { canDiscoverWithoutApiKey } from "../providerAuthentication";
 import { getProviderConnectionFailureMessage } from "../connectionFailure";
+import { getEmbeddingDeletionWarning } from "../embeddingRecovery";
 import { SortableSupplierList } from "./SortableSupplierList";
 import { ModelTaskTabs, matchesModelTaskFilter, type ModelTaskFilter } from "./ModelTaskTabs";
 import { SavedProviderModels } from "./SavedProviderModels";
@@ -548,11 +549,9 @@ export function ProviderWorkspace(props: Props) {
       if (target.isCustom) setSelectedId("");
       message.success(label(target.isCustom ? "supplierDeleted" : "supplierReset"));
     } catch (error) {
-      const response = (error as { response?: { status?: number; data?: { code?: number; detail?: string; message?: string } } })?.response;
-      const detail = String(response?.data?.detail || response?.data?.message || "");
-      if (response?.status === 409 && ([2005039, 2005081, 2005089].includes(response.data?.code ?? -1) || detail.includes("embedding model is in use") || detail.includes("requires confirmation to downgrade"))) {
-        message.warning(t("modelProvider.embeddingInUse"));
-      } else message.error(getLocalizedErrorMessage(error));
+      const warning = getEmbeddingDeletionWarning(error, t);
+      if (warning) message.warning({ key: "embedding-in-use", ...warning });
+      else message.error(getLocalizedErrorMessage(error));
     } finally {
       setProviderDeleting(false);
     }

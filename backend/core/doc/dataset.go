@@ -917,9 +917,6 @@ func CreateDataset(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "invalid body", http.StatusBadRequest)
 		return
 	}
-	if systemdeps.PythonComponentActive("rag") && body.ProcessingLevel == ProcessingLevelIndexed && replyEmbedNotReady(w, r, corestore.UserID(r)) {
-		return
-	}
 	service, op, err := resourcePageService(r)
 	if err != nil {
 		replyResourceError(w, err)

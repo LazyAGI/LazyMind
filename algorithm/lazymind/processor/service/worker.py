@@ -2,19 +2,103 @@ import signal
 import threading
 import inspect
 import os
+import time
+import json
+from datetime import datetime
+from contextvars import ContextVar
 
 import lazyllm
+from lazymind.parsing.service.opensearch_compat import install as install_opensearch_compat
 from lazymind.model_config import inject_model_config
+from lazymind.parsing.service.embedding_input_compat import install as install_embedding_input_compat
+install_opensearch_compat()
+install_embedding_input_compat()
 lazyllm.inject_model_config = inject_model_config
 
 from lazyllm.tools.rag.parsing_service import DocumentProcessorWorker  # noqa: E402
-from lazyllm.tools.rag.doc_node import ImageDocNode  # noqa: E402
+from lazyllm.tools.rag.doc_node import ImageDocNode, MetadataMode  # noqa: E402
 from lazyllm.tools.rag.store import LAZY_IMAGE_GROUP, LAZY_ROOT_NAME  # noqa: E402
 from lazymind.config import config as _cfg  # noqa: E402
 from lazymind.processor.service.db import require_shared_db_config  # noqa: E402
 
 
 _TEXT_REEMBED_GROUPS = frozenset(('block', 'line', 'code', 'doc-summary'))
+
+
+def _recover_owned_node_groups(worker, task_id, payload):
+    """A reclaimed queue task must not wait on its previous worker's markers."""
+    kb_id = payload.get('kb_id')
+    doc_ids = {info.get('doc_id') for info in payload.get('file_infos') or []} - {None}
+    if not kb_id or not doc_ids:
+        return
+    queue = worker._waiting_task_queue
+    Task = queue._sql_manager.get_table_orm_class(queue._table_name)
+    now = datetime.now()
+    with queue._sql_manager.get_session() as session:
+        owned = session.query(Task).filter(
+            Task.task_id == task_id, Task.worker_id == worker._worker_id,
+            Task.status == 'WORKING', Task.lease_expires_at > now,
+        ).first()
+        if owned is None or owned.updated_at is None:
+            return
+        observed_at = owned.updated_at
+        others = session.query(Task).filter(
+            Task.task_id != task_id, Task.status == 'WORKING', Task.lease_expires_at > now,
+        ).all()
+        for task in others:
+            try:
+                other = json.loads(task.message)
+                if other.get('kb_id') == kb_id:
+                    doc_ids.difference_update(info.get('doc_id') for info in other.get('file_infos') or [])
+            except (ValueError, TypeError, AttributeError):
+                # Unknown ownership is not proof that work was abandoned.
+                return
+        if not doc_ids:
+            return
+        Group = worker._db_manager.get_table_orm_class('lazyllm_doc_node_group_status')
+        with worker._db_manager.get_session() as group_session:
+            group_session.query(Group).filter(
+                Group.kb_id == kb_id, Group.doc_id.in_(doc_ids), Group.status == 'WORKING',
+                Group.updated_at <= observed_at,
+            ).update({'status': 'FAILED', 'error_msg': 'interrupted task reclaimed for retry',
+                      'updated_at': now}, synchronize_session=False)
+
+
+def _replace_parsed_roots(processor, payload, node_groups, reader):
+    """Refresh source nodes without initializing vectors or discarding descendants."""
+    infos = payload.get('file_infos') or []
+    if not infos:
+        return
+    paths = [info['file_path'] for info in infos]
+    ids, metadata, kb_id = processor._prepare_doc_inputs(
+        paths, [info['doc_id'] for info in infos],
+        [info.get('metadata') for info in infos], payload.get('kb_id'))
+    # Read first: service failures must leave the previous source intact.
+    loaded = reader.load_data(paths, metadata, split_nodes_by_type=True)
+    parsed_ids = {node.global_metadata.get('docid') for nodes in loaded.values() for node in nodes}
+    if not set(ids).issubset(parsed_ids):
+        raise RuntimeError('Source parsing returned incomplete documents; previous content retained')
+    store = processor._store
+    store._seg_init()
+    segments = getattr(store.seg_impl, 'segment_store', store.seg_impl)
+    previous = {}
+    for group in (LAZY_ROOT_NAME, LAZY_IMAGE_GROUP):
+        collection = store._gen_collection_name(group)
+        previous[collection] = {row['uid'] for row in segments.get(
+            collection, {'docid': ids, 'kb_id': kb_id})}
+    for group, nodes in loaded.items():
+        if not nodes:
+            continue
+        data = [store._serialize_node(node) for node in processor._set_nodes_number(nodes)]
+        for item in data:
+            item.pop('embedding', None)
+        if not segments.upsert(store._gen_collection_name(group), data):
+            raise RuntimeError('Failed to save parsed source nodes')
+    retained = {node.uid for nodes in loaded.values() for node in nodes}
+    for collection, old_ids in previous.items():
+        obsolete = old_ids - retained
+        if obsolete and not segments.delete(collection, {'uid': list(obsolete)}):
+            raise RuntimeError('Failed to replace previous parsed source nodes')
 
 
 def _has_verified_image_only_index(loaded, processor, doc_id, kb_id):
@@ -31,6 +115,36 @@ def _has_verified_image_only_index(loaded, processor, doc_id, kb_id):
     except Exception:
         return False
     return bool(retained) and all((node.embedding or {}).get('embed_image') for node in retained)
+
+
+def _install_deferred_group_guard(processor):
+    if getattr(processor, '_lazymind_deferred_group_guard', False):
+        return processor
+    original = processor._reparse_docs
+    full_rebuild = ContextVar('lazymind_full_rebuild', default=False)
+    explicit_lazy = ContextVar('lazymind_explicit_lazy_group', default=None)
+
+    def reparse_docs(group_name, node_groups, *args, **kwargs):
+        # Full source rebuild follows initial ingestion: summaries and other
+        # lazy groups remain deferred. Explicitly selecting one still creates it.
+        if (full_rebuild.get() and group_name is not None
+                and node_groups.get(group_name, {}).get('lazy_mode') == 'all'
+                and explicit_lazy.get() != group_name):
+            return
+        selected = explicit_lazy.get()
+        if not full_rebuild.get() and node_groups.get(group_name, {}).get('lazy_mode') == 'all':
+            selected = group_name
+        selected_token = explicit_lazy.set(selected)
+        token = full_rebuild.set(full_rebuild.get() or group_name is None)
+        try:
+            return original(group_name, node_groups, *args, **kwargs)
+        finally:
+            full_rebuild.reset(token)
+            explicit_lazy.reset(selected_token)
+
+    processor._reparse_docs = reparse_docs
+    processor._lazymind_deferred_group_guard = True
+    return processor
 
 
 def _install_text_reembed_guard(processor):
@@ -71,8 +185,10 @@ def _rebuild_empty_text_documents(processor, payload, node_groups, reader):
         doc_id = info.get('doc_id')
         if not doc_id:
             raise RuntimeError('text vector rebuild requires a document ID')
-        if any(processor._store.get_nodes(group=group, doc_ids=[doc_id], kb_id=kb_id)
-               for group in _TEXT_REEMBED_GROUPS if group in node_groups):
+        if any(node.get_text(MetadataMode.EMBED).strip()
+               for group in _TEXT_REEMBED_GROUPS if group in node_groups
+               for node in processor._store.get_nodes(group=group, doc_ids=[doc_id], kb_id=kb_id)
+               if not node.is_null_node):
             continue
         roots = processor._store.get_nodes(group=LAZY_ROOT_NAME, doc_ids=[doc_id], kb_id=kb_id)
         if not roots:
@@ -105,8 +221,10 @@ def _rebuild_empty_text_documents(processor, payload, node_groups, reader):
                     group_name=group, node_groups=node_groups, doc_ids=[doc_id], kb_id=kb_id,
                     processing_level='chunked', strategy='slice_missing',
                 )
-        if not any(processor._store.get_nodes(group=group, doc_ids=[doc_id], kb_id=kb_id)
-                   for group in _TEXT_REEMBED_GROUPS if group in node_groups):
+        if not any(node.get_text(MetadataMode.EMBED).strip()
+                   for group in _TEXT_REEMBED_GROUPS if group in node_groups
+                   for node in processor._store.get_nodes(group=group, doc_ids=[doc_id], kb_id=kb_id)
+                   if not node.is_null_node):
             raise RuntimeError(f'document {doc_id!r} produced no text nodes; manual rebuild is required')
 
 
@@ -120,11 +238,24 @@ if not getattr(DocumentProcessorWorker._Impl, '_lazymind_isolated', False):
         _lazymind_isolated = True
 
         def _get_processor(self):
+            # ServerModule can reconstruct this class in a fresh subprocess.
+            # Install there as well, before any retained segment is written.
+            install_opensearch_compat()
+            from lazymind.parsing.service.embedding_input_compat import install
+            install()
             from lazymind.parsing.service.embedding_reset import index_state, IndexBusy
             state = index_state()
             expected = getattr(self, '_lazymind_task_generation', None)
-            if (state['phase'] in ('clearing', 'cleanup_failed', 'cleared')
-                    or (expected is not None and expected != state['generation'])):
+            # Drop stale work before constructing a processor: chunk-only reparses
+            # also delete vectors. Missing generations from legacy reparses are
+            # unsafe after the first index transition.
+            stale = expected is not None and expected != state['generation']
+            legacy_reparse = (getattr(self, '_lazymind_task_reparse', False)
+                              and expected is None and state['generation'] > 0)
+            if stale or legacy_reparse:
+                raise IndexBusy('obsolete document task discarded after index generation changed')
+            if (getattr(self, '_lazymind_task_indexes', True)
+                    and state['phase'] in ('clearing', 'cleanup_failed', 'cleared', 'detached')):
                 raise IndexBusy('document task belongs to an unavailable index generation')
             if getattr(self, '_lazymind_store_generation', None) != state['generation']:
                 self._processor = None
@@ -144,17 +275,61 @@ if not getattr(DocumentProcessorWorker._Impl, '_lazymind_isolated', False):
                 fresh.activate_group(old.activated_groups())
                 processor._store = fresh
                 processor._lazymind_generation_initialized = True
-            return _install_text_reembed_guard(processor)
+            # Reembedding reads retained vectors before its first write. Initialize
+            # the vector connection now rather than letting HybridStore.get hit a
+            # freshly deserialized Milvus store without a client pool.
+            if getattr(self, '_lazymind_task_indexes', True) and hasattr(processor._store, '_seg_init'):
+                processor._store._seg_init()
+                processor._store._vec_init()
+            return _install_deferred_group_guard(_install_text_reembed_guard(processor))
 
         def _exec_reparse_task(self, processor, task_id, payload, node_groups, name_to_id, reader):
+            # The document service expands an all-groups selection into names,
+            # including the source root. Preserve full rebuild semantics: otherwise
+            # the base worker drops that root and only reslices stale source nodes.
+            from lazyllm.tools.rag.store import LAZY_ROOT_NAME
+            if (payload.get('strategy', 'rebuild') == 'rebuild'
+                    and LAZY_ROOT_NAME in (payload.get('ng_names') or [])):
+                payload = {**payload, 'ng_names': None}
+            if payload.get('processing_level') == 'parsed':
+                return _replace_parsed_roots(processor, payload, node_groups, reader)
+            if payload.get('strategy', 'rebuild') == 'rebuild' and payload.get('processing_level') != 'parsed':
+                # A freshly deserialized store has no local initialization flag,
+                # even when remote segments/vectors exist. Full rebuild must
+                # connect before deletion; otherwise remove_nodes silently skips
+                # old content and the subsequent empty-store check never passes.
+                store = processor._store
+                if hasattr(store, '_seg_init'):
+                    store._seg_init()
+                    store._vec_init()
             _rebuild_empty_text_documents(processor, payload, node_groups, reader)
             return _BaseDocumentWorkerImpl._exec_reparse_task(
                 self, processor, task_id, payload, node_groups, name_to_id, reader)
+
+        def _exec_add_task(self, processor, task_id, payload, node_groups, name_to_id, reader,
+                           extractor_names=None):
+            _recover_owned_node_groups(self, task_id, payload)
+            return _BaseDocumentWorkerImpl._exec_add_task(
+                self, processor, task_id, payload, node_groups, name_to_id, reader, extractor_names)
+
+        def _worker_impl(self):
+            # Queue acknowledgements and the index fence also use PostgreSQL.
+            # An outage there can escape the base task handler. Keep consuming
+            # after recovery; the queue lease owns retrying interrupted tasks.
+            while not self._shutdown:
+                try:
+                    return _BaseDocumentWorkerImpl._worker_impl(self)
+                except Exception as exc:
+                    lazyllm.LOG.error(f'Document worker loop interrupted ({type(exc).__name__}); retrying')
+                    if not self._shutdown:
+                        time.sleep(5)
 
         def _run_task(self, task_id, task_type, payload, from_queue):
             lazyllm.globals['config'].clear()
             lazyllm.inject_model_config = inject_model_config
             from lazymind.parsing.service.embedding_reset import index_lock
+            self._lazymind_task_reparse = task_type == 'DOC_REPARSE'
+            self._lazymind_task_indexes = payload.get('processing_level', 'indexed') == 'indexed'
             self._lazymind_task_generation = (payload.get('llm_config') or {}).get('_embedding_generation')
             with index_lock():
                 return _BaseDocumentWorkerImpl._run_task(self, task_id, task_type, payload, from_queue)

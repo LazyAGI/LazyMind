@@ -249,10 +249,10 @@ def test_mineru_split_retry_reuses_a_completed_part(monkeypatch, tmp_path):
     monkeypatch.setattr(first, '_split_large_pdf', lambda _: splits)
     original_wait = first._wait_for_batch
 
-    def wait(batch_id, auth_key, task_dir, fname, marker_path=None):
+    def wait(batch_id, auth_key, task_dir, fname, marker_path=None, **kwargs):
         if fname == 'part-b.pdf':
             raise TimeoutError('part B still pending')
-        return original_wait(batch_id, auth_key, task_dir, fname, marker_path)
+        return original_wait(batch_id, auth_key, task_dir, fname, marker_path, **kwargs)
 
     monkeypatch.setattr(first, '_wait_for_batch', wait)
     with pytest.raises(TimeoutError, match='part B'):
@@ -472,3 +472,28 @@ def test_mineru_reports_terminal_failure_without_resubmitting(monkeypatch, tmp_p
     with pytest.raises(RuntimeError, match='unsupported pdf'):
         reader._fetch_async(source)
     assert calls['submit'] == calls['upload'] == calls['poll'] == 1
+
+
+def test_mineru_retains_archive_for_reading_ir(monkeypatch, tmp_path):
+    reader, source, calls = _reader_with_batch(monkeypatch, tmp_path, lambda _: _status('done'))
+    reader._fetch_async(source)
+    digest = reader._source_digest(str(source))
+    cache = source.parent / '.lazymind-artifacts' / 'mineru-cache-v1' / f'{digest}-{reader._online_model_version()}.zip'
+    assert cache.is_file()
+    assert cache.read_bytes()
+
+
+def test_reader_initialization_preserves_retained_images_and_other_readers(tmp_path):
+    from lazymind.parsing.engine.readers.mineru_online import LazyMindMineruPDFReader
+    cache = tmp_path / 'images'
+    old = cache / 'existing-document' / 'figure.jpg'
+    old.parent.mkdir(parents=True)
+    old.write_bytes(b'retained-figure')
+    first = LazyMindMineruPDFReader(image_cache_dir=cache, api_key='fixture')
+    assert old.read_bytes() == b'retained-figure'
+    active = first._image_cache_dir / 'active-document' / 'figure.jpg'
+    active.parent.mkdir(parents=True)
+    active.write_bytes(b'active-figure')
+    LazyMindMineruPDFReader(image_cache_dir=cache, api_key='fixture')
+    assert old.read_bytes() == b'retained-figure'
+    assert active.read_bytes() == b'active-figure'

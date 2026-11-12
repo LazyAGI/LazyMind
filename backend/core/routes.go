@@ -290,6 +290,8 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "POST", "/datasets/{dataset}/documents/{document}:reparse", []string{"document.write"}, doc.ReparseDocument)
 	handleAPI(r, "GET", "/datasets/{dataset}/documents/{document}:read", []string{"document.read"}, doc.ReadDocument)
 	handleAPI(r, "GET", "/datasets/{dataset}/processing-status", []string{"document.read"}, doc.GetProcessingStatus)
+	handleAPI(r, "GET", "/datasets/{dataset}/text-index", []string{"document.read"}, doc.GetTextIndex)
+	handleAPI(r, "POST", "/datasets/{dataset}/text-index", []string{"document.write"}, doc.ReindexText)
 
 	// ----- Academic references and paper imports -----
 	handleAPI(r, "POST", "/academic/zotero/preview", []string{"document.write"}, academic.PreviewZoteroLibrary)
@@ -437,6 +439,7 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "POST", "/datasets/{dataset}:batchAddMember", []string{"document.write"}, doc.BatchAddDatasetMember)
 
 	// ----- Tasktext（text Task，text Job） -----
+	handleAPI(r, "GET", "/knowledge-processing/tasks", []string{"document.read"}, doc.ListProcessingTasks)
 	handleAPI(r, "GET", "/datasets/{dataset}/tasks", []string{"document.read"}, doc.ListTasks)
 	handleAPI(r, "POST", "/datasets/{dataset}/tasks", []string{"document.write"}, doc.CreateTask)
 	handleAPI(r, "POST", "/datasets/{dataset}/tasks:search", []string{"document.read"}, doc.SearchTasks)

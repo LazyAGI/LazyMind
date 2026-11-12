@@ -343,7 +343,7 @@ func TestWorkflowExecutorTokenMatchesCoreAndAlgorithmOverride(t *testing.T) {
 	}
 	assertEnvContains(t, algorithmServiceEnv(cfg, paths, chatProcessName),
 		"LAZYMIND_WORKFLOW_EXECUTOR_TOKEN=custom-workflow-secret")
-	assertEnvContains(t, coreServiceEnv(cfg, paths),
+	assertEnvContains(t, mustCoreServiceEnv(t, cfg, paths),
 		"LAZYMIND_WORKFLOW_EXECUTOR_TOKEN=custom-workflow-secret")
 }
 

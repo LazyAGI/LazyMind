@@ -15,7 +15,7 @@ function conciseError(error = '', provider?: string) {
   if (/deadline exceeded|timed?\s*out|timeout/i.test(error)) return `${source}请求超时，请稍后重试`;
   return error.length > 140 ? `${error.slice(0, 140)}…` : error || '操作未完成，请查看详情';
 }
-const operationNames: Record<string, string> = { paper_expansion: '扩展导入', paper_link: '链接导入', pdf_upload: '上传 PDF', bibliography: '题录导入', zotero: 'Zotero 导入', library_backup: '备份恢复', single_reference: '参考文献导入', paper_references: '参考文献导入', collection_references: '参考文献导入', conversation_sources: '对话来源导入' };
+const operationNames: Record<string, string> = { paper_expansion: '扩展导入', paper_link: '链接导入', pdf_upload: '上传 PDF', bibliography: '题录导入', zotero: 'Zotero 导入', library_backup: '备份恢复', library_migration: '本地文献迁移', single_reference: '参考文献导入', paper_references: '参考文献导入', collection_references: '参考文献导入', conversation_sources: '对话来源导入' };
 const statusNames: Record<string, string> = { running: '处理中', failed: '失败', partial_failed: '部分失败', skipped: '已存在', metadata_only: '题录已保存', canceled: '已取消', succeeded: '已完成', removed: '已移出论文库', awaiting_association: '待关联' };
 const itemNames: Record<string, string> = { importing: '导入中', processing: '处理中', ready: '已入库', metadata_only: '题录已保存', skipped: '已存在', failed: '导入失败', processing_failed: '处理失败', canceled: '已取消', deleted: '文档已删除', removed: '已移出论文库', awaiting_association: 'PDF 已上传，待关联' };
 const enrichmentStages: Record<string, string> = { metadata: '补全元信息', pdf_lookup: '查找 PDF', acquire: '准备下载', download: '下载 PDF' };

@@ -54,9 +54,13 @@ func (m *CoreServiceManager) Run(ctx context.Context, cfg RuntimeConfig, paths R
 		return err
 	}
 
+	environment, err := coreServiceEnv(cfg, paths)
+	if err != nil {
+		return err
+	}
 	cmd := exec.CommandContext(ctx, paths.CoreBin)
 	cmd.Dir = filepath.Join(paths.RepoRoot, coreSourceDirName)
-	cmd.Env = append(os.Environ(), coreServiceEnv(cfg, paths)...)
+	cmd.Env = append(os.Environ(), environment...)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	configureChildProcess(cmd, false)
@@ -190,7 +194,11 @@ func (m *CoreServiceManager) Down(ctx context.Context, cfg RuntimeConfig, paths 
 	}
 }
 
-func coreServiceEnv(cfg RuntimeConfig, paths RuntimePaths) []string {
+func coreServiceEnv(cfg RuntimeConfig, paths RuntimePaths) ([]string, error) {
+	modelKey, err := modelCredentialKey()
+	if err != nil {
+		return nil, fmt.Errorf("load model credential key: %w", err)
+	}
 	endpoints := serviceEndpointsFromConfig(cfg)
 	coreDSN := "sqliteproxy://core"
 	coreURL := "sqliteproxy://core"
@@ -263,11 +271,11 @@ func coreServiceEnv(cfg RuntimeConfig, paths RuntimePaths) []string {
 		"LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN=" + internalServiceToken(),
 		"LAZYMIND_CLIENT_INSTANCE_ID=" + runtimeClientInstanceID(),
 		"LAZYMIND_WORKFLOW_EXECUTOR_TOKEN=" + envText("LAZYMIND_WORKFLOW_EXECUTOR_TOKEN", "dev-workflow-executor-token"),
-		"LAZYMIND_MODEL_PROVIDER_SECRET_KEY=" + strings.TrimSpace(os.Getenv("LAZYMIND_MODEL_PROVIDER_SECRET_KEY")),
+		modelCredentialKeyEnvVar + "=" + modelKey,
 		"LAZYMIND_MCP_SECRET_KEY=" + envText("LAZYMIND_MCP_SECRET_KEY", "lazymind-core-mcp-default-secret"),
 	}
 	environment = append(environment, pythonComponentEnvironment(paths, cfg.Algorithm.RAGDisabled)...)
-	return append(environment, feishuCLIRuntimeEnv(paths)...)
+	return append(environment, feishuCLIRuntimeEnv(paths)...), nil
 }
 
 func feishuCLIRuntimeEnv(paths RuntimePaths) []string {

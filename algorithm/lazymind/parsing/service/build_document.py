@@ -1,5 +1,6 @@
 import os
 import lazyllm
+from lazymind.parsing.service.opensearch_compat import install as install_opensearch_compat
 from copy import deepcopy
 from typing import NamedTuple, Optional
 from lazyllm.tracing import set_trace_context
@@ -25,8 +26,11 @@ from lazymind.parsing.engine.readers.retained import RetainedReader
 from lazymind.parsing.engine.transform import GeneralParser, LineSplitter, NodeParser
 from lazymind.common.database.postgres import create_database_engine
 from lazymind.common.database.sqlite_proxy import install_lazyllm_sqlite_proxy
+from lazymind.parsing.service.embedding_input_compat import install as install_embedding_input_compat
 
 install_lazyllm_sqlite_proxy()
+install_opensearch_compat()
+install_embedding_input_compat()
 
 ALGO_ID = 'general_algo'
 _CODE_CHUNK_SIZE = 512

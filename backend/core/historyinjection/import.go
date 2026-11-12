@@ -2,7 +2,9 @@ package historyinjection
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -11,6 +13,7 @@ import (
 	"time"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 type TargetOwner struct {
@@ -63,97 +66,129 @@ func Apply(ctx context.Context, db *gorm.DB, source BundleSource, owner TargetOw
 		return ApplyResult{}, fmt.Errorf("materialized bundle ID changed from %q to %q", source.Manifest.BundleID, manifest.BundleID)
 	}
 	result := ApplyResult{BundleID: manifest.BundleID, ConversationID: manifest.ConversationID}
-	var existingOwner string
-	err = db.WithContext(ctx).Raw("SELECT create_user_id FROM conversations WHERE id = ?", manifest.ConversationID).Scan(&existingOwner).Error
-	if err != nil {
-		return result, err
-	}
-	if existingOwner != "" && existingOwner != owner.ID {
-		return result, fmt.Errorf("conversation %s already belongs to another user", manifest.ConversationID)
-	}
-	if existingOwner == owner.ID {
-		result.AlreadyPresent = true
-	}
-	filesCopied, err := installPayload(bundleRoot, manifest, roots, result.AlreadyPresent)
-	if err != nil {
-		return result, err
-	}
-	result.FilesCopied = filesCopied
 	sqlBody, err := os.ReadFile(filepath.Join(bundleRoot, filepath.FromSlash(manifest.SQLFile)))
 	if err != nil {
 		return result, err
 	}
-	if !result.AlreadyPresent {
-		compacted, _, err := CompactPortableSQL(string(sqlBody))
-		if err != nil {
-			return result, fmt.Errorf("history injection failed: compact imported SQL: %w", err)
-		}
-		sqlBody = []byte(compacted)
-	}
-	rendered := renderSQL(string(sqlBody), map[string]string{
-		ownerIDToken: owner.ID, ownerNameToken: owner.Username,
-		workflowResourceToken: "", workflowRevisionToken: "0",
-	})
-	statements, err := splitSQLStatements(rendered)
+	manifestJSON, err := json.Marshal(manifest)
 	if err != nil {
 		return result, err
 	}
-	if result.AlreadyPresent {
-		err = db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-			_, _, err := ensureWorkflowRevision(ctx, tx, manifest, owner)
-			if err != nil {
-				return err
-			}
-			if err := normalizeInjectedConversation(ctx, tx, manifest, owner); err != nil {
-				return err
-			}
-			if err := reconcileInjectedWorkflowTasks(ctx, tx, manifest, owner); err != nil {
-				return err
-			}
-			return normalizeSQLiteJSONColumns(ctx, tx, statements)
-		})
-		return result, err
-	}
+	digest := sha256.New()
+	digest.Write(manifestJSON)
+	digest.Write(sqlBody)
+	fingerprint := fmt.Sprintf("%x", digest.Sum(nil))
 
+	var payload payloadChanges
 	err = db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		resourceID, revisionNo, err := ensureWorkflowRevision(ctx, tx, manifest, owner)
+		// Serialize imports for this workflow, including first installs where the
+		// conversation row doesn't exist yet.
+		var resource struct{ ID string }
+		if err := tx.Table("plugins").Select("id").Where("plugin_ref = ?", manifest.WorkflowRef).
+			Clauses(clause.Locking{Strength: "UPDATE"}).Take(&resource).Error; err != nil {
+			return fmt.Errorf("lock workflow %s for history injection: %w", manifest.WorkflowRef, err)
+		}
+		existing, err := findInstalledConversation(tx, manifest.ConversationID)
 		if err != nil {
 			return err
 		}
-		rendered = renderSQL(string(sqlBody), map[string]string{
-			ownerIDToken: owner.ID, ownerNameToken: owner.Username,
-			workflowResourceToken: resourceID, workflowRevisionToken: fmt.Sprintf("%d", revisionNo),
-		})
-		statements, err = splitSQLStatements(rendered)
+		if existing.ID != "" && existing.OwnerID != owner.ID {
+			return fmt.Errorf("conversation %s already belongs to another user", manifest.ConversationID)
+		}
+		marker := existing.marker()
+		if existing.ID != "" && marker.BundleID == "" {
+			// An ID can also belong to the original user conversation on the
+			// machine where an example was recorded.
+			result.AlreadyPresent = true
+			return retirePredecessors(tx, manifest, owner.ID)
+		}
+		result.AlreadyPresent = marker.BundleID == manifest.BundleID &&
+			(marker.Fingerprint == "" || marker.Fingerprint == fingerprint)
+
+		revisionNo, err := ensureWorkflowRevision(ctx, tx, manifest, owner, resource.ID)
 		if err != nil {
 			return err
 		}
-		if tx.Dialector.Name() == "postgres" {
-			booleanColumns, err := postgresBooleanColumns(ctx, tx)
+		portableSQL := string(sqlBody)
+		if !result.AlreadyPresent {
+			portableSQL, _, err = CompactPortableSQL(portableSQL)
 			if err != nil {
+				return fmt.Errorf("history injection failed: compact imported SQL: %w", err)
+			}
+		}
+		rendered := renderSQL(portableSQL, map[string]string{
+			ownerIDToken: owner.ID, ownerNameToken: owner.Username,
+			workflowResourceToken: resource.ID, workflowRevisionToken: fmt.Sprintf("%d", revisionNo),
+		})
+		statements, err := splitSQLStatements(rendered)
+		if err != nil {
+			return err
+		}
+		if !result.AlreadyPresent {
+			replacing := existing.ID != ""
+			if replacing {
+				if err := clearInstalledSampleRows(tx, manifest.ConversationID, owner.ID); err != nil {
+					return err
+				}
+			}
+			if err := insertSampleRows(ctx, tx, statements, manifest.ConversationID, replacing); err != nil {
 				return err
 			}
-			for index, statement := range statements {
-				statements[index] = rewritePostgresBooleanLiterals(statement, booleanColumns)
-			}
 		}
-		for index, statement := range statements {
-			if err := tx.Exec(statement).Error; err != nil {
-				return fmt.Errorf("execute SQL statement %d: %w", index+1, err)
-			}
-		}
-		if err := normalizeInjectedConversation(ctx, tx, manifest, owner); err != nil {
+		if err := normalizeInjectedConversation(ctx, tx, manifest, owner, fingerprint, result.AlreadyPresent); err != nil {
 			return err
 		}
 		if err := reconcileInjectedWorkflowTasks(ctx, tx, manifest, owner); err != nil {
 			return err
 		}
-		return normalizeSQLiteJSONColumns(ctx, tx, statements)
+		if err := normalizeSQLiteJSONColumns(ctx, tx, statements); err != nil {
+			return err
+		}
+		if err := retirePredecessors(tx, manifest, owner.ID); err != nil {
+			return err
+		}
+		return payload.install(bundleRoot, manifest, roots, result.AlreadyPresent)
 	})
-	return result, err
+	if err != nil {
+		return result, errors.Join(err, payload.finish(false))
+	}
+	result.FilesCopied = len(payload)
+	return result, payload.finish(true)
 }
 
-func normalizeInjectedConversation(ctx context.Context, db *gorm.DB, manifest Manifest, owner TargetOwner) error {
+func insertSampleRows(ctx context.Context, tx *gorm.DB, statements []string, conversationID string, replacing bool) error {
+	var booleanColumns map[string]map[string]bool
+	if tx.Dialector.Name() == "postgres" {
+		var err error
+		booleanColumns, err = postgresBooleanColumns(ctx, tx)
+		if err != nil {
+			return err
+		}
+	}
+	replaced := false
+	for index, statement := range statements {
+		statement = rewritePostgresBooleanLiterals(statement, booleanColumns)
+		if replacing {
+			if insert, ok := parsePortableInsert(statement); ok && insert.table == "conversations" {
+				var err error
+				statement, err = replaceConversationInsert(insert, conversationID)
+				if err != nil {
+					return err
+				}
+				replaced = true
+			}
+		}
+		if err := tx.Exec(statement).Error; err != nil {
+			return fmt.Errorf("execute SQL statement %d: %w", index+1, err)
+		}
+	}
+	if replacing && !replaced {
+		return fmt.Errorf("replacement bundle has no conversation row for %s", conversationID)
+	}
+	return nil
+}
+
+func normalizeInjectedConversation(ctx context.Context, db *gorm.DB, manifest Manifest, owner TargetOwner, fingerprint string, preserveTimestamp bool) error {
 	var extValue any
 	row := db.WithContext(ctx).Raw(
 		"SELECT ext FROM conversations WHERE id = ? AND create_user_id = ?",
@@ -170,23 +205,25 @@ func normalizeInjectedConversation(ctx context.Context, db *gorm.DB, manifest Ma
 		"display_name": manifest.Title,
 		"is_task_conv": false,
 	}
-	if !hasInjectionTimestamp(ext, manifest.BundleID) {
-		injectedAt := time.Now().UTC()
-		ext[historyInjectionMetadataKey] = map[string]any{
-			"bundle_id":   manifest.BundleID,
-			"injected_at": injectedAt.Format(time.RFC3339Nano),
+	marker := readInjectionMarker(ext)
+	if !preserveTimestamp || marker.Fingerprint != fingerprint {
+		if !preserveTimestamp {
+			injectedAt := time.Now().UTC()
+			marker = injectionMarker{BundleID: manifest.BundleID, InjectedAt: injectedAt.Format(time.RFC3339Nano)}
+			updates["created_at"] = injectedAt
+			updates["updated_at"] = injectedAt
 		}
+		marker.Fingerprint = fingerprint
+		ext[historyInjectionMetadataKey] = marker
 		encoded, err := json.Marshal(ext)
 		if err != nil {
-			return fmt.Errorf("encode injected conversation %s metadata: %w", manifest.ConversationID, err)
+			return err
 		}
-		extStorage := any(string(encoded))
 		if db.Dialector.Name() == "sqlite" {
-			extStorage = encoded
+			updates["ext"] = encoded
+		} else {
+			updates["ext"] = string(encoded)
 		}
-		updates["ext"] = extStorage
-		updates["created_at"] = injectedAt
-		updates["updated_at"] = injectedAt
 	}
 	result := db.WithContext(ctx).Table("conversations").
 		Where("id = ? AND create_user_id = ?", manifest.ConversationID, owner.ID).
@@ -227,19 +264,6 @@ func decodeConversationExt(value any) (map[string]any, error) {
 		ext = map[string]any{}
 	}
 	return ext, nil
-}
-
-func hasInjectionTimestamp(ext map[string]any, bundleID string) bool {
-	metadata, ok := ext[historyInjectionMetadataKey].(map[string]any)
-	if !ok || strings.TrimSpace(fmt.Sprint(metadata["bundle_id"])) != bundleID {
-		return false
-	}
-	injectedAt := strings.TrimSpace(fmt.Sprint(metadata["injected_at"]))
-	if injectedAt == "" || injectedAt == "<nil>" {
-		return false
-	}
-	_, err := time.Parse(time.RFC3339Nano, injectedAt)
-	return err == nil
 }
 
 func postgresBooleanColumns(ctx context.Context, db *gorm.DB) (map[string]map[string]bool, error) {
@@ -343,17 +367,10 @@ func safeSQLIdentifier(value string) bool {
 	return true
 }
 
-func ensureWorkflowRevision(ctx context.Context, db *gorm.DB, manifest Manifest, owner TargetOwner) (string, int64, error) {
+func ensureWorkflowRevision(ctx context.Context, db *gorm.DB, manifest Manifest, owner TargetOwner, resourceID string) (int64, error) {
 	compiledGraph := strings.TrimSpace(string(manifest.WorkflowRevision.CompiledGraph))
 	if compiledGraph == "" || !json.Valid([]byte(compiledGraph)) {
-		return "", 0, fmt.Errorf("workflow revision %s has invalid compiled_graph", manifest.WorkflowRevision.ID)
-	}
-	var resourceID string
-	if err := db.WithContext(ctx).Raw("SELECT id FROM plugins WHERE plugin_ref = ?", manifest.WorkflowRef).Scan(&resourceID).Error; err != nil {
-		return "", 0, err
-	}
-	if resourceID == "" {
-		return "", 0, fmt.Errorf("workflow %s is not installed", manifest.WorkflowRef)
+		return 0, fmt.Errorf("workflow revision %s has invalid compiled_graph", manifest.WorkflowRevision.ID)
 	}
 	type existingRevision struct {
 		WorkflowResourceID string `gorm:"column:plugin_resource_id"`
@@ -361,11 +378,11 @@ func ensureWorkflowRevision(ctx context.Context, db *gorm.DB, manifest Manifest,
 	}
 	var existing existingRevision
 	if err := db.WithContext(ctx).Raw("SELECT plugin_resource_id, revision_no FROM plugin_revisions WHERE id = ?", manifest.WorkflowRevision.ID).Scan(&existing).Error; err != nil {
-		return "", 0, err
+		return 0, err
 	}
 	if existing.WorkflowResourceID != "" {
 		if existing.WorkflowResourceID != resourceID {
-			return "", 0, fmt.Errorf("workflow revision %s belongs to a different workflow resource", manifest.WorkflowRevision.ID)
+			return 0, fmt.Errorf("workflow revision %s belongs to a different workflow resource", manifest.WorkflowRevision.ID)
 		}
 		// SQLite's JSON columns are TEXT-affinity, but the workflow projection
 		// scans compiled_graph into json.RawMessage and therefore requires the
@@ -373,14 +390,14 @@ func ensureWorkflowRevision(ctx context.Context, db *gorm.DB, manifest Manifest,
 		// also repairs bundles injected by an older importer.
 		if db.Dialector.Name() == "sqlite" {
 			if err := db.WithContext(ctx).Exec("UPDATE plugin_revisions SET compiled_graph = ? WHERE id = ?", []byte(compiledGraph), manifest.WorkflowRevision.ID).Error; err != nil {
-				return "", 0, err
+				return 0, err
 			}
 		}
-		return resourceID, existing.RevisionNo, nil
+		return existing.RevisionNo, nil
 	}
 	var maximum int64
 	if err := db.WithContext(ctx).Raw("SELECT COALESCE(MAX(revision_no), 0) FROM plugin_revisions WHERE plugin_resource_id = ?", resourceID).Scan(&maximum).Error; err != nil {
-		return "", 0, err
+		return 0, err
 	}
 	revisionNo := maximum + 1
 	compiledGraphValue := any(compiledGraph)
@@ -399,44 +416,92 @@ func ensureWorkflowRevision(ctx context.Context, db *gorm.DB, manifest Manifest,
 		manifest.WorkflowRevision.Message, createdBy, manifest.WorkflowRevision.CreatedAt,
 		compiledGraphValue, manifest.WorkflowRevision.GraphHash, manifest.WorkflowRevision.GraphSchemaVersion,
 	).Error; err != nil {
-		return "", 0, err
+		return 0, err
 	}
-	return resourceID, revisionNo, nil
+	return revisionNo, nil
 }
 
-func installPayload(bundleRoot string, manifest Manifest, roots RuntimeRoots, preserveExisting bool) (int, error) {
+type payloadChange struct {
+	target string
+	backup string
+}
+
+type payloadChanges []payloadChange
+
+func (changes *payloadChanges) install(bundleRoot string, manifest Manifest, roots RuntimeRoots, preserveExisting bool) error {
 	targetRoots := map[string]string{"uploads": roots.Uploads, "subagent": roots.Subagent}
-	copied := 0
 	for _, file := range manifest.Files {
-		targetRoot := filepath.Clean(strings.TrimSpace(targetRoots[file.TargetRoot]))
-		if targetRoot == "" || targetRoot == "." {
-			return copied, fmt.Errorf("runtime root %s is not configured", file.TargetRoot)
-		}
-		source := filepath.Join(bundleRoot, filepath.FromSlash(file.Source))
-		digest, size, err := fileDigest(source)
+		digest, size, err := fileDigest(filepath.Join(bundleRoot, filepath.FromSlash(file.Source)))
 		if err != nil {
-			return copied, err
+			return err
 		}
 		if digest != file.SHA256 || size != file.Size {
-			return copied, fmt.Errorf("payload checksum mismatch for %s", file.Source)
+			return fmt.Errorf("payload checksum mismatch for %s", file.Source)
 		}
-		target := filepath.Join(targetRoot, filepath.FromSlash(file.RelativePath))
-		if preserveExisting {
-			if _, err := os.Stat(target); err == nil {
+		root := filepath.Clean(strings.TrimSpace(targetRoots[file.TargetRoot]))
+		if root == "." {
+			return fmt.Errorf("runtime root %s is not configured", file.TargetRoot)
+		}
+	}
+	for _, file := range manifest.Files {
+		target := filepath.Join(strings.TrimSpace(targetRoots[file.TargetRoot]), filepath.FromSlash(file.RelativePath))
+		info, err := os.Stat(target)
+		if err != nil && !os.IsNotExist(err) {
+			return err
+		}
+		change := payloadChange{target: target}
+		if info != nil {
+			if preserveExisting {
 				continue
-			} else if !os.IsNotExist(err) {
-				return copied, err
+			}
+			if digest, size, err := fileDigest(target); err == nil && digest == file.SHA256 && size == file.Size {
+				continue
+			}
+			if !info.Mode().IsRegular() {
+				return fmt.Errorf("history injection payload target is not a regular file: %s", target)
+			}
+			backup, err := os.CreateTemp(filepath.Dir(target), ".history-injection-backup-")
+			if err != nil {
+				return err
+			}
+			change.backup = backup.Name()
+			if err := backup.Close(); err != nil {
+				_ = os.Remove(change.backup)
+				return err
+			}
+			if err := copyAtomic(target, change.backup, info.Mode()); err != nil {
+				_ = os.Remove(change.backup)
+				return err
 			}
 		}
-		if existingDigest, existingSize, err := fileDigest(target); err == nil && existingDigest == digest && existingSize == size {
-			continue
-		}
+		source := filepath.Join(bundleRoot, filepath.FromSlash(file.Source))
 		if err := copyAtomic(source, target, os.FileMode(file.Mode)); err != nil {
-			return copied, err
+			if change.backup != "" {
+				_ = os.Remove(change.backup)
+			}
+			return err
 		}
-		copied++
+		*changes = append(*changes, change)
 	}
-	return copied, nil
+	return nil
+}
+
+func (changes payloadChanges) finish(committed bool) error {
+	var result error
+	for index := len(changes) - 1; index >= 0; index-- {
+		change := changes[index]
+		switch {
+		case committed && change.backup != "":
+			result = errors.Join(result, os.Remove(change.backup))
+		case !committed && change.backup != "":
+			result = errors.Join(result, os.Rename(change.backup, change.target))
+		case !committed:
+			if err := os.Remove(change.target); err != nil && !os.IsNotExist(err) {
+				result = errors.Join(result, err)
+			}
+		}
+	}
+	return result
 }
 
 func copyAtomic(source, target string, mode os.FileMode) error {

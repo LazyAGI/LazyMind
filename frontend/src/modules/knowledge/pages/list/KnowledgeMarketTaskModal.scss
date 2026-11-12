@@ -1,10 +1,10 @@
 .knowledge-market-task-modal {
-  top: 100px;
+  top: 16px;
   max-width: calc(100vw - 32px);
   padding-bottom: 0;
 
   .ant-modal-content {
-    max-height: min(704px, calc(100dvh - 124px));
+    max-height: min(704px, calc(100dvh - 32px));
     padding: 0;
     display: flex;
     flex-direction: column;
@@ -16,7 +16,7 @@
   }
   .ant-modal-header { flex: none; height: 52px; padding: 20px 24px 8px; margin: 0; }
   .ant-modal-title { font-size: 16px; line-height: 24px; }
-  .ant-modal-body { flex: 1; min-height: 0; display: flex; flex-direction: column; padding: 0 24px; overflow: hidden; }
+  .ant-modal-body { flex: 1; min-height: 0; display: flex; flex-direction: column; padding: 0 24px 16px; overflow: hidden; }
   .ant-modal-footer { flex: none; min-height: 48px; margin: 0; padding: 10px 24px; border-top: 1px solid #e5e6eb; display: flex; justify-content: flex-end; }
   .ant-btn-sm { height: 28px; border-radius: 6px; font-size: 12px; }
   .market-task-table { flex: 1; min-height: 0; overflow: hidden; }
@@ -69,10 +69,6 @@
   .ant-table-body::-webkit-scrollbar, .market-task-file-list::-webkit-scrollbar { width: 8px; height: 8px; }
   .ant-table-body::-webkit-scrollbar-thumb, .market-task-file-list::-webkit-scrollbar-thumb { background: #cbd0d7; border: 2px solid transparent; background-clip: padding-box; border-radius: 8px; }
   .ant-table-body::-webkit-scrollbar-track, .market-task-file-list::-webkit-scrollbar-track { background: transparent; }
-}
-@media (max-height: 740px) {
-  .knowledge-market-task-modal { top: 40px; }
-  .knowledge-market-task-modal .ant-modal-content { max-height: calc(100dvh - 64px); }
 }
 @media (max-width: 600px) {
   .knowledge-market-task-modal .ant-modal-footer { padding: 10px 12px; overflow-x: auto; justify-content: flex-start; }

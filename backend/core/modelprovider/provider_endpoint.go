@@ -85,8 +85,7 @@ func UpdateProviderEndpoint(w http.ResponseWriter, r *http.Request) {
 	}
 	baseURL = LazyLLMBaseURL(RuntimeProviderName(parent), baseURL)
 	if err := setProviderEndpoint(r.Context(), db, &parent, baseURL, time.Now()); err != nil {
-		if errors.Is(err, errEmbeddingIdentityInUse) {
-			common.ReplyErr(w, err.Error(), http.StatusConflict)
+		if replyEmbeddingMutationConflict(w, err) {
 			return
 		}
 		common.ReplyErr(w, "update model provider endpoint failed", http.StatusInternalServerError)
@@ -136,8 +135,11 @@ func updateProviderEndpointLocked(tx *gorm.DB, parent *orm.UserModelProvider, ba
 			if !errors.Is(err, errEmbeddingIdentityInUse) {
 				return err
 			}
-			if err := invalidateEmptyEmbeddingEndpoint(tx, parent.ID, now); err != nil {
-				return err
+			if emptyErr := invalidateEmptyEmbeddingEndpoint(tx, parent.ID, now); emptyErr != nil {
+				if errors.Is(emptyErr, errEmbeddingIdentityInUse) {
+					return err
+				}
+				return emptyErr
 			}
 		}
 	}

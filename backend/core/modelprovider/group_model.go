@@ -460,7 +460,7 @@ func UpdateGroupModel(w http.ResponseWriter, r *http.Request) {
 		}
 		if metadataChanged && next.Name != before.Name && isTextEmbeddingModelType(next.ModelType) && tx.Migrator().HasTable(&orm.EmbeddingIndexState{}) {
 			if err := tx.Model(&orm.EmbeddingIndexState{}).
-				Where("scope = ? AND active_model_id = ?", globalEmbeddingScope, before.ID).
+				Where("scope = ? AND active_source = ? AND active_model_id = ?", globalEmbeddingScope, "own", before.ID).
 				Updates(map[string]any{"active_model_name": next.Name, "updated_at": now}).Error; err != nil {
 				return err
 			}
@@ -473,8 +473,11 @@ func UpdateGroupModel(w http.ResponseWriter, r *http.Request) {
 		return nil
 	})
 	if err != nil {
+		if replyEmbeddingMutationConflict(w, err) {
+			return
+		}
 		switch {
-		case errors.Is(err, errModelAlreadyExists), errors.Is(err, errConnectionChanged), errors.Is(err, errModelDefaultReference), errors.Is(err, errModelConversationReference), errors.Is(err, errEmbeddingIdentityInUse):
+		case errors.Is(err, errModelAlreadyExists), errors.Is(err, errConnectionChanged), errors.Is(err, errModelDefaultReference), errors.Is(err, errModelConversationReference):
 			common.ReplyErr(w, err.Error(), http.StatusConflict)
 		case errors.Is(err, errUnsupportedModelType), errors.Is(err, errSupplierModelType), errors.Is(err, errInvalidModelName):
 			common.ReplyErr(w, err.Error(), http.StatusBadRequest)
@@ -851,19 +854,7 @@ func DeleteGroupModel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if isTextEmbeddingModelType(row.ModelType) {
-		if err := prepareEmptyEmbeddingRemoval(r, db, row.ID); err != nil {
-			if errors.Is(err, errEmbeddingIndexBusy) || errors.Is(err, errEmbeddingCleanupFailed) {
-				common.ReplyErr(w, err.Error(), http.StatusConflict)
-			} else {
-				common.ReplyErr(w, "query embedding index state failed", http.StatusInternalServerError)
-			}
-			return
-		}
-	}
-
 	var clearMultimodalSelection bool
-	confirmationRequired := errEmbeddingInUse
 	now := time.Now().UTC()
 	var downgradedKnowledgeBases int64
 	if err := db.WithContext(r.Context()).Transaction(func(tx *gorm.DB) error {
@@ -882,11 +873,8 @@ func DeleteGroupModel(w http.ResponseWriter, r *http.Request) {
 			return errConnectionChanged
 		}
 		clearMultimodalSelection = isMultimodalEmbeddingModelType(row.ModelType)
-		removeTextEmbedding := isTextEmbeddingModelType(row.ModelType)
-		if removeTextEmbedding {
-			if err := guardEmbeddingRemoval(tx, userID, row.ID); err != nil {
-				return err
-			}
+		if err := detachEmbeddingForModelRemoval(tx, row.ID); err != nil {
+			return err
 		}
 
 		deleted := tx.Model(&orm.UserModelProviderGroupModel{}).
@@ -906,12 +894,12 @@ func DeleteGroupModel(w http.ResponseWriter, r *http.Request) {
 			Delete(&orm.UserSelectedModel{}).Error; err != nil {
 			return err
 		}
-		if removeTextEmbedding {
-			return clearEmbeddingStateAfterRemoval(tx, row.ID)
-		}
 		return nil
 	}); err != nil {
-		if errors.Is(err, confirmationRequired) || errors.Is(err, errConnectionChanged) {
+		if replyEmbeddingMutationConflict(w, err) {
+			return
+		}
+		if errors.Is(err, errConnectionChanged) {
 			common.ReplyErr(w, err.Error(), http.StatusConflict)
 		} else {
 			common.ReplyErr(w, "delete model failed", http.StatusInternalServerError)
@@ -924,30 +912,4 @@ func DeleteGroupModel(w http.ResponseWriter, r *http.Request) {
 	}
 
 	common.ReplyOK(w, deleteGroupModelResponse{ID: modelID, DowngradedKnowledgeBases: downgradedKnowledgeBases})
-}
-
-// An empty Core inventory can still have orphaned vectors. Verify cleanup
-// through the index service before releasing the active model's removal guard.
-func prepareEmptyEmbeddingRemoval(r *http.Request, db *gorm.DB, modelID string) error {
-	db = db.WithContext(r.Context())
-	for _, model := range []any{&orm.EmbeddingIndexState{}, &orm.Dataset{}, &orm.Document{}, &orm.DocumentProcessingState{}} {
-		if !db.Migrator().HasTable(model) {
-			return nil
-		}
-	}
-	state, err := loadGlobalEmbeddingState(r.Context(), db)
-	if err != nil {
-		return err
-	}
-	if state.ActiveModelID != modelID || state.ActiveSource != "own" {
-		return nil
-	}
-	status, err := loadEmbeddingIndexStatus(r.Context(), db)
-	if err != nil {
-		return err
-	}
-	if status.AffectedKnowledgeBases > 0 || !common.RequestUserIsAdmin(r) {
-		return nil
-	}
-	return clearEmbeddingChunks(r.Context(), db, state, "", "", "", true)
 }

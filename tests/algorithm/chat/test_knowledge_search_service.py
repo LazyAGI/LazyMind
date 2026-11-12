@@ -11,6 +11,20 @@ from lazymind.chat.service import knowledge_search_service as svc
 from lazymind.router.api import proxy_routes
 
 
+@pytest.fixture(autouse=True)
+def configured_embedding(monkeypatch):
+    monkeypatch.setattr(svc, 'is_model_role_available', lambda role: True)
+
+
+def test_missing_embedding_fails_before_loading_vector_runtime(monkeypatch):
+    monkeypatch.setattr(svc, 'is_model_role_available', lambda role: False)
+    monkeypatch.setattr(svc, '_ensure_kb_search_runtime', lambda: pytest.fail('loaded vector runtime'))
+    with pytest.raises(svc.KnowledgeSearchError) as exc:
+        svc.search('user', 'query', ['kb'], 3)
+    assert exc.value.code == 'CAPABILITY_REQUIRED'
+    assert '默认向量模型' in str(exc.value)
+
+
 class Node:
     def __init__(self, **kwargs):
         self.__dict__.update(kwargs)

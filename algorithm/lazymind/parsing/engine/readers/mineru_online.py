@@ -21,7 +21,7 @@ from urllib.parse import urlsplit
 import requests
 from filelock import FileLock, Timeout as FileLockTimeout
 
-from lazyllm import LOG, globals as lazyllm_globals
+from lazyllm import LOG, config as lazyllm_config, globals as lazyllm_globals
 from lazyllm.common import AllKeysExhaustedError, KeyAuthError, KeyPool
 from lazyllm.common.threading import ThreadPoolExecutor
 from lazyllm.tools.rag.readers.ocrReader.dynamic_pdf_reader import DynamicPDFReader as _DynamicPDFReader
@@ -51,7 +51,13 @@ class LazyMindMineruPDFReader(_MineruPDFReader):
     """Keep an uploaded batch while waiting for the official MinerU API."""
 
     def __init__(self, **kwargs):
-        super().__init__(**kwargs)
+        cache_dir = kwargs.pop('image_cache_dir', None) or Path(lazyllm_config['home']) / 'mineru_cache'
+        # The upstream base constructor clears this directory. It contains image
+        # paths retained by earlier documents and may be in use by other workers.
+        # Bypass that cleanup; each parse already extracts into a unique task dir.
+        super().__init__(image_cache_dir=None, **kwargs)
+        self._image_cache_dir = Path(cache_dir)
+        self._image_cache_dir.mkdir(parents=True, exist_ok=True)
         # LazyLLM derives the dynamic auth lookup from the concrete class
         # name. Preserve the configured `ocr_auth.mineru` contract.
         self._auth_source_key = 'mineru'
@@ -268,6 +274,8 @@ class LazyMindMineruPDFReader(_MineruPDFReader):
         fname = os.path.basename(file_path)
         model_version = self._online_model_version()
         source_digest = self._source_digest(file_path)
+        cache_path = (Path(file_path).parent / '.lazymind-artifacts' / 'mineru-cache-v1'
+                      / f'{source_digest}-{model_version}.zip')
         lock_path = self._batch_lock_path(file_path, source_digest, model_version)
         lock_path.parent.mkdir(parents=True, exist_ok=True)
         try:
@@ -287,7 +295,7 @@ class LazyMindMineruPDFReader(_MineruPDFReader):
             raise TimeoutError(f'[MineruPDFReader] waiting to submit {fname} exceeded '
                                f'{self._timeout or _DEFAULT_WAIT_SECONDS}s') from None
         # Release the cross-process lock before potentially hour-long polling.
-        return self._wait_for_batch(batch_id, auth_key, task_dir, fname, marker_path)
+        return self._wait_for_batch(batch_id, auth_key, task_dir, fname, marker_path, cache_path=cache_path)
 
     def _submit_and_upload(self, file_path: str, fname: str,
                            source_digest: str, model_version: str):
@@ -326,7 +334,7 @@ class LazyMindMineruPDFReader(_MineruPDFReader):
         return batch_id, auth_key, marker_path
 
     def _wait_for_batch(self, batch_id: str, auth_key: str, task_dir: Path | None, fname: str,
-                        marker_path: Path | None = None):
+                        marker_path: Path | None = None, cache_path: Path | None = None):
         wait_started = time.monotonic()
         deadline = wait_started + (self._timeout or _DEFAULT_WAIT_SECONDS)
         status_url = f'https://mineru.net/api/v4/extract-results/batch/{batch_id}'
@@ -373,6 +381,14 @@ class LazyMindMineruPDFReader(_MineruPDFReader):
                         raise
                     # Keep the completed receipt for the marker TTL. Another
                     # split part or concurrent parse may still need this batch.
+                    if cache_path is not None and len(archive) <= 256 * 1024 * 1024:
+                        try:
+                            cache_path.parent.mkdir(parents=True, exist_ok=True)
+                            with tempfile.NamedTemporaryFile(dir=cache_path.parent, delete=False) as cached:
+                                cached.write(archive)
+                            os.replace(cached.name, cache_path)
+                        except OSError:
+                            LOG.warning('[MineruPDFReader] could not retain shared parsing archive')
                     return extracted
                 if last_state == 'failed':
                     self._clear_batch_marker(marker_path, batch_id)

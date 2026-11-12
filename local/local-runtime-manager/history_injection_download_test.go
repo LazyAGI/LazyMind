@@ -147,6 +147,44 @@ func TestDeferredHistoryManifestUsesMutableCacheAndDataPaths(t *testing.T) {
 	}
 }
 
+func TestLocalHistoryInjectionUsesPublishedPackageUnlessCheckoutProvidesBundles(t *testing.T) {
+	t.Setenv("LAZYMIND_HISTORY_INJECTION_ENABLED", "true")
+	root := t.TempDir()
+	repo := filepath.Join(root, "repo")
+	descriptorDir := filepath.Join(repo, "desktop")
+	if err := os.MkdirAll(descriptorDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	descriptor := HistoryInjectionDownload{URL: "https://example.com/history.zip", SHA256: strings.Repeat("a", 64), Size: 12}
+	body, err := json.Marshal(descriptor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(descriptorDir, "history-injection-package.json"), body, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	base := RuntimePaths{RepoRoot: repo, RuntimeRoot: root, DataDir: filepath.Join(root, "data"), HistoryInjectionRoot: filepath.Join(repo, "history-injection")}
+	paths := base
+	if err := applyLocalHistoryInjectionPaths(&paths); err != nil {
+		t.Fatal(err)
+	}
+	if paths.HistoryInjectionDownload == nil || *paths.HistoryInjectionDownload != descriptor ||
+		paths.HistoryInjectionRoot != filepath.Join(base.DataDir, "history-injection") {
+		t.Fatalf("Local package paths were not configured: %s", paths.HistoryInjectionRoot)
+	}
+
+	if err := os.Mkdir(base.HistoryInjectionRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	paths = base
+	if err := applyLocalHistoryInjectionPaths(&paths); err != nil {
+		t.Fatal(err)
+	}
+	if paths.HistoryInjectionRoot != base.HistoryInjectionRoot || paths.HistoryInjectionDownload != nil {
+		t.Fatal("the repository's local bundle directory must take precedence")
+	}
+}
+
 // Optional release validation against the exact already-published ModelScope asset.
 func TestDeferredHistoryPublishedModelScopePackage(t *testing.T) {
 	if os.Getenv("LAZYMIND_TEST_HISTORY_DOWNLOAD") != "1" {
