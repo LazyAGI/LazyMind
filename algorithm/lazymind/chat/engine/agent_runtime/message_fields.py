@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-import json
 from typing import Any
 
 from lazymind.common.token_estimation import estimate_tokens
 
 from lazyllm.tools.agent.base import TOOL_OBSERVATION_KEY
+from lazyllm.module.llms.onlinemodule.base.protocol_ir import MessageIR
 
 
 INTERNAL_MESSAGE_FIELDS = frozenset({
@@ -32,15 +32,4 @@ def estimate_message_tokens(message: dict[str, Any]) -> int:
     Image billing varies by provider and resolution. Use an approximate fixed
     allowance per image until the provider reports actual usage.
     """
-    visible = model_facing_message(message)
-    content = visible.get('content')
-    image_count = 0
-    if isinstance(content, list):
-        blocks = []
-        for block in content:
-            if isinstance(block, dict) and block.get('type') in {'image_url', 'input_image', 'image'}:
-                image_count += 1
-            else:
-                blocks.append(block)
-        visible = {**visible, 'content': blocks}
-    return estimate_tokens(json.dumps(visible, ensure_ascii=False, default=str)) + 1536 * image_count
+    return MessageIR.from_chat(model_facing_message(message)).estimate_tokens(estimate_tokens)

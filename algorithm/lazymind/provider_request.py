@@ -373,6 +373,9 @@ def _install_runtime_hooks():
                 if isinstance(exc, ModelCallError):
                     # Preserve structured categories/status used by the chat UI.
                     raise ModelCallError('provider request failed', exc.terminal) from None
+                from lazymind.chat.engine.agent_runtime.model_calls import ContextCapacityError, UnsupportedModelInput
+                if isinstance(exc, (ContextCapacityError, UnsupportedModelInput)):
+                    raise
                 raise ProviderRequestFailure(**(active['failure'] or {})) from None
             finally:
                 _ACTIVE_POLICY.reset(token)
