@@ -2685,11 +2685,12 @@ async def test_issue869_material_collection_does_not_require_skip_marker(monkeyp
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize('terminal, saved, tool_failed', [
-    (True, True, False), (False, True, False), (True, False, False), (True, True, True),
+@pytest.mark.parametrize('terminal, saved, tool_error', [
+    (True, True, None), (False, True, None), (True, False, None), (True, True, 'Publisher failed'),
+    (True, True, {'ok': False, 'value': 'Publisher failed: HTTP 429'}),
 ])
 async def test_workflow_terminal_delivery_uses_saved_result_summary(
-    monkeypatch, tmp_path, terminal, saved, tool_failed,
+    monkeypatch, tmp_path, terminal, saved, tool_error,
 ):
     model = MagicMock()
     result = {'status': 'ok', 'paper_count': 53, 'artifact': {'key': 'result'}}
@@ -2704,12 +2705,12 @@ async def test_workflow_terminal_delivery_uses_saved_result_summary(
                     'value': {'data': {'findings': ['Actual saved finding.']}}}] if saved else [],
         tool_events=[{'tag': 'tool_results', 'tool_results': [
             {'name': 'publish_result' if terminal else 'read_paper',
-             'result': 'Publisher failed' if tool_failed else result},
+             'result': tool_error or result},
         ]}],
         final=final,
     )
     completion = _terminal(events)
-    if tool_failed:
+    if tool_error:
         assert completion['status'] == 'failed'
         assert 'Publisher failed' in completion['summary']
     elif not saved:
