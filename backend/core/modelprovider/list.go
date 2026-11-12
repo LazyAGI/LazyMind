@@ -185,10 +185,8 @@ func buildListItems(ctx context.Context, db *gorm.DB, rows []orm.UserModelProvid
 		return out
 	}
 
-	providerIDs := make([]string, 0, len(out))
 	defaultProviderIDs := make([]string, 0, len(out))
 	for i := range out {
-		providerIDs = append(providerIDs, out[i].ID)
 		defaultProviderIDs = append(defaultProviderIDs, out[i].DefaultModelProviderID)
 	}
 	type localizedDescriptionRow struct {
@@ -222,27 +220,7 @@ func buildListItems(ctx context.Context, db *gorm.DB, rows []orm.UserModelProvid
 			)
 		}
 	}
-	var configuredRows []orm.UserModelProviderGroup
-	if err := db.WithContext(ctx).
-		Model(&orm.UserModelProviderGroup{}).
-		Where("user_model_provider_id IN ? AND deleted_at IS NULL AND is_verified = ?", providerIDs, true).
-		Find(&configuredRows).Error; err == nil {
-		providerByID := make(map[string]orm.UserModelProvider, len(rows))
-		for _, row := range rows {
-			providerByID[row.ID] = row
-		}
-		configuredProviderIDs := make(map[string]bool, len(configuredRows))
-		for _, row := range configuredRows {
-			parent := providerByID[row.UserModelProviderID]
-			apiKey, _ := apiKeyForGroup(db.WithContext(ctx), &row)
-			if strings.TrimSpace(apiKey) != "" ||
-				!providerAPIKeyRequiredForBaseURL(ctx, db, parent, row.BaseURL) ||
-				(parent.Category == "translation" &&
-					!isCustomBaseURL(ctx, db, parent.DefaultModelProviderID, row.BaseURL) &&
-					isSelectableProviderGroup(ctx, db, parent.DefaultModelProviderID, row.BaseURL, apiKey)) {
-				configuredProviderIDs[row.UserModelProviderID] = true
-			}
-		}
+	if configuredProviderIDs, err := configuredProviderIDs(ctx, db, rows); err == nil {
 		for i := range out {
 			out[i].IsConfigured = configuredProviderIDs[out[i].ID]
 		}

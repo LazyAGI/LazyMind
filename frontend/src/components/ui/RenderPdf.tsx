@@ -1401,6 +1401,8 @@ export default function RenderPdf({
         </div>
       ) : null}
       <Document
+        externalLinkTarget="_blank"
+        externalLinkRel="noopener noreferrer"
         // react-pdf retains this handler from mount; read the active source from a ref.
         onItemClick={({pageNumber,dest})=>setNativeDestination({source:currentSource.current,pageNumber,dest:Array.isArray(dest)?dest:undefined})}
         file={pdfFile}

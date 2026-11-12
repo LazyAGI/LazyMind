@@ -107,3 +107,80 @@ func overviewMCPIssues(issues []settingsOverviewIssue) map[string]string {
 	}
 	return out
 }
+
+func TestSettingsOverviewCountsConfiguredModelsAndServices(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		verified      bool
+		key           string
+		want          int64
+		selectedModel bool
+		customURL     bool
+		deleted       bool
+	}{
+		{"configured services", true, "test-key", 3, true, false, false},
+		{"unverified services", false, "test-key", 1, true, false, false},
+		{"missing credentials", true, "", 1, true, false, false},
+		{"keyless custom endpoint", true, "", 3, true, true, false},
+		{"services without a model", true, "test-key", 2, false, false, false},
+		{"no configured entries", false, "", 0, false, false, false},
+		{"deleted groups", true, "test-key", 1, true, false, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			db := newUIPreferencesTestDB(t)
+			now := time.Now().UTC()
+			if tc.selectedModel {
+				if err := db.Create(&orm.UserSelectedModel{UserID: "u1", ModelKey: "llm", UserModelProviderGroupModelID: "selected-model", CreatedAt: now, UpdatedAt: now}).Error; err != nil {
+					t.Fatal(err)
+				}
+			}
+			for _, service := range []struct{ id, name, category, user string }{
+				{"tavily", "Tavily", "search", "u1"},
+				{"mineru", "MinerU", "ocr", "u1"},
+				{"model", "OpenAI", "model", "u1"},
+				{"other-user", "Tavily", "search", "u2"},
+			} {
+				base := orm.BaseModel{CreateUserID: service.user, CreatedAt: now, UpdatedAt: now}
+				if err := db.Create(&orm.UserModelProvider{ID: service.id, DefaultModelProviderID: service.id, Name: service.name, Category: service.category, BaseModel: base}).Error; err != nil {
+					t.Fatal(err)
+				}
+				if err := db.Create(&orm.DefaultModelProvider{ID: service.id, Name: service.id, Category: service.category, BaseURL: "https://service.example/api"}).Error; err != nil {
+					t.Fatal(err)
+				}
+				groupURL := "https://service.example/api"
+				if tc.customURL {
+					groupURL = "http://localhost:8000/api"
+				}
+				if tc.deleted {
+					base.DeletedAt = &now
+				}
+				// Multiple verified groups still represent one configured service.
+				for _, suffix := range []string{"-one", "-two"} {
+					if err := db.Create(&orm.UserModelProviderGroup{ID: service.id + suffix, UserModelProviderID: service.id, Name: service.name, BaseURL: groupURL, APIKey: tc.key, IsVerified: tc.verified, BaseModel: base}).Error; err != nil {
+						t.Fatal(err)
+					}
+				}
+			}
+			overview, err := buildSettingsOverview(httptest.NewRequest(http.MethodGet, "/settings/overview", nil), db.DB, "u1")
+			if err != nil {
+				t.Fatal(err)
+			}
+			models := sectionByID(overview.Sections, "models")
+			if got := models.Counts.Configured; got != tc.want {
+				t.Fatalf("configured models and services = %d, want %d", got, tc.want)
+			}
+			if models.EffectiveEnabled == nil || *models.EffectiveEnabled != tc.selectedModel {
+				t.Fatalf("service configuration must not imply model readiness: %#v", models)
+			}
+			missingModelIssue := false
+			for _, issue := range overview.Issues {
+				if issue.ID == "model-not-configured" {
+					missingModelIssue = true
+				}
+			}
+			if missingModelIssue == tc.selectedModel {
+				t.Fatalf("missing-model issue = %v, selected model = %v", missingModelIssue, tc.selectedModel)
+			}
+		})
+	}
+}
