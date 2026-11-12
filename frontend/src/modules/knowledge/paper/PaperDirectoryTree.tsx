@@ -1,18 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Button, Tree, Tooltip, type TreeDataNode } from 'antd';
-import { DatabaseOutlined, DeleteOutlined, DownOutlined, FolderOutlined, PlusOutlined, ReadOutlined, StarFilled } from '@ant-design/icons';
-import { useDraggable, useDroppable } from '@dnd-kit/core';
+import { DeleteOutlined, DownOutlined, FolderOutlined, PlusOutlined } from '@ant-design/icons';
+import { useDroppable } from '@dnd-kit/core';
 import type { PaperLibraryData } from './model';
 import { indexFolderCounts } from './libraryIndex';
-export const PAPER_LIBRARY_ROOT = 'paper-library-root';
 interface DirectoryNode extends TreeDataNode {
     key: string;
     label: string;
     path: string;
     folderId?: string | null;
     count?: number;
-    paperId?: string;
-    important?: boolean;
 }
 interface Props {
     data: PaperLibraryData;
@@ -20,8 +17,6 @@ interface Props {
     active: boolean;
     folderId: string | null;
     disabled: boolean;
-    detailPaperId?: string | null;
-    onOpenPaper?: (id: string) => void;
     draggedIds: string[];
     dropFolderId: string | null;
     onSelectFolder: (id: string | null) => void;
@@ -42,41 +37,20 @@ function FolderTitle({ node, acceptsDrop, dropTarget, disabled, onCreateFolder, 
       {node.folderId && <Tooltip title="删除目录"><Button type="text" size="small" disabled={disabled} icon={<DeleteOutlined />} aria-label={`删除文件夹「${node.label}」`} onClick={() => onDeleteFolder(node.folderId!)} /></Tooltip>}
     </span></span>;
 }
-function PaperTitle({ node, disabled }: { node: DirectoryNode; disabled: boolean }) {
-    const { setNodeRef, attributes, listeners, isDragging } = useDraggable({ id: `tree-paper:${node.paperId}`, data: { paperId: node.paperId }, disabled });
-    const nameRef = useRef<HTMLSpanElement>(null);
-    const [previewOpen, setPreviewOpen] = useState(false);
-    return <Tooltip
-        title={<span className="paper-directory-title-preview">{node.label}</span>}
-        placement="right"
-        mouseEnterDelay={0.25}
-        styles={{ root: { maxWidth: 'min(360px, 40vw)' } }}
-        open={previewOpen && !isDragging}
-        onOpenChange={(open: boolean) => {
-            const name = nameRef.current;
-            setPreviewOpen(open && !!name && name.scrollWidth > name.clientWidth);
-        }}
-    >
-        <span ref={setNodeRef} {...attributes} {...listeners} aria-label={`拖动目录论文 ${node.label}`} className={`paper-directory-paper-title ${isDragging ? 'is-dragging' : ''}`} onClick={() => setPreviewOpen(false)}>
-            <span ref={nameRef} className="paper-directory-node-name">{node.label}</span>
-            {node.important && <StarFilled className="paper-directory-star" />}
-        </span>
-    </Tooltip>;
-}
 export default function PaperDirectoryTree(props: Props) {
-    const { data, title, active, folderId, disabled, draggedIds, dropFolderId, onSelectFolder, onCreateFolder, onDeleteFolder, onOpenPaper, detailPaperId } = props;
-    const [expanded, setExpanded] = useState<string[]>([PAPER_LIBRARY_ROOT]);
+    const { data, title, active, folderId, disabled, draggedIds, dropFolderId, onSelectFolder, onCreateFolder, onDeleteFolder } = props;
+    const [expanded, setExpanded] = useState<string[]>([]);
     const initialized = useRef(false);
     useEffect(() => {
         if (!initialized.current && data.folders.length) {
             initialized.current = true;
-            setExpanded([PAPER_LIBRARY_ROOT, ...data.folders.map(folder => folder.id)]);
+            setExpanded(data.folders.map(folder => folder.id));
         }
     }, [data.folders]);
     useEffect(() => {
         if (!active)
             return;
-        const parents = new Set<string>([PAPER_LIBRARY_ROOT]);
+        const parents = new Set<string>();
         let id = folderId;
         while (id && !parents.has(id)) {
             parents.add(id);
@@ -92,33 +66,21 @@ export default function PaperDirectoryTree(props: Props) {
             const siblings = children.get(parent) || [];
             siblings.push(folder); children.set(parent, siblings);
         }
-        const papersByFolder = new Map<string | null, typeof data.papers>();
-        if (onOpenPaper) for (const paper of data.papers) {
-            const id = paper.folderId || null;
-            const papers = papersByFolder.get(id) || [];
-            papers.push(paper);
-            papersByFolder.set(id, papers);
-        }
-        const build = (id: string | null, label: string, parentPath = ''): DirectoryNode => ({
-            key: id || PAPER_LIBRARY_ROOT, label, path: parentPath ? `${parentPath} / ${label}` : label, folderId: id,
-            icon: id ? <FolderOutlined /> : <DatabaseOutlined />,
-            count: id ? counts.get(id) || 0 : data.papers.length,
-            children: [
-                ...(children.get(id) || []).map(folder => build(folder.id, folder.name, parentPath ? `${parentPath} / ${label}` : label)),
-                ...(onOpenPaper ? (papersByFolder.get(id) || []).map(paper => ({ key: `paper:${paper.id}`, path: paper.metadata.title, label: paper.metadata.title, paperId: paper.id, important: paper.important, isLeaf: true, icon: <ReadOutlined /> })) : []),
-            ],
+        const build = (id: string, label: string, parentPath: string): DirectoryNode => ({
+            key: id, label, path: `${parentPath} / ${label}`, folderId: id,
+            icon: <FolderOutlined />,
+            count: counts.get(id) || 0,
+            children: (children.get(id) || []).map(folder => build(folder.id, folder.name, `${parentPath} / ${label}`)),
         });
-        return [build(null, title)];
-    }, [data.papers, data.folders, title, onOpenPaper]);
+        return (children.get(null) || []).map(folder => build(folder.id, folder.name, title));
+    }, [data.papers, data.folders, title]);
     const draggedPapers = useMemo(() => {
         const ids = new Set(draggedIds);
         return data.papers.filter(paper => ids.has(paper.id));
     }, [data.papers, draggedIds]);
-    return <Tree<DirectoryNode> className="paper-directory-tree" aria-label="论文目录" showIcon blockNode switcherIcon={<DownOutlined />} treeData={nodes} expandedKeys={expanded} selectedKeys={detailPaperId ? [`paper:${detailPaperId}`] : active ? [folderId || PAPER_LIBRARY_ROOT] : []} onExpand={keys => setExpanded(keys.map(String))} onSelect={(_, info) => {
-            if (info.node.paperId) onOpenPaper?.(info.node.paperId);
-            else onSelectFolder(info.node.folderId || null);
+    return <Tree<DirectoryNode> className="paper-directory-tree" aria-label="论文目录" showIcon blockNode switcherIcon={<DownOutlined />} treeData={nodes} expandedKeys={expanded} selectedKeys={active && folderId ? [folderId] : []} onExpand={keys => setExpanded(keys.map(String))} onSelect={(_, info) => {
+            onSelectFolder(info.node.folderId || null);
         }} titleRender={node => {
-            if (node.paperId) return <PaperTitle node={node} disabled={disabled}/>;
             const target = node.folderId || 'none';
             const acceptsDrop = !disabled && draggedPapers.some(paper => (paper.folderId !== (node.folderId || null) || paper.collectionIds?.some(id => id !== node.folderId)));
             return <FolderTitle node={node} acceptsDrop={acceptsDrop} dropTarget={dropFolderId === target} disabled={disabled} onCreateFolder={onCreateFolder} onDeleteFolder={onDeleteFolder}/>;

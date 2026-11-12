@@ -82,24 +82,40 @@ func recordZoteroImport(ctx context.Context, db *gorm.DB, dataset, user, source,
 		selected[source+":"+k] = true
 	}
 	ids := []string{}
-	if source == "library-backup" && len(snapshots) > 0 {
+	// Unkeyed snapshots (backup, browser migration, older clients) still need a
+	// receipt. Match only the requested papers against the normalized saved view.
+	if len(keys) == 0 && len(snapshots) > 0 {
 		var incoming paperlibrary.Data
 		if err = json.Unmarshal(snapshots[0], &incoming); err != nil {
 			return err
 		}
-		requested := map[string]bool{}
-		for _, p := range incoming.Papers {
-			requested["id:"+p.ID] = true
-			if p.Metadata.Identifiers.DOI != "" {
-				requested["doi:"+strings.ToLower(p.Metadata.Identifiers.DOI)] = true
+		// The importer keeps an existing paper ID before consulting scholarly
+		// identifiers. Do not let stale identifiers pull unrelated papers into
+		// this receipt, and count a deduplicated destination only once.
+		byID := make(map[string]paperlibrary.Paper, len(view.Data.Papers))
+		byDOI, byArxiv := map[string]string{}, map[string]string{}
+		for _, p := range view.Data.Papers {
+			byID[p.ID] = p
+			if doi := paperlibrary.DOI(p.Metadata.Identifiers.DOI); doi != "" {
+				byDOI[doi] = p.ID
 			}
-			if p.Metadata.Identifiers.Arxiv != "" {
-				requested["arxiv:"+p.Metadata.Identifiers.Arxiv] = true
+			if arxiv := paperlibrary.ArxivBase(p.Metadata.Identifiers.Arxiv); arxiv != "" {
+				byArxiv[arxiv] = p.ID
 			}
 		}
-		for _, p := range view.Data.Papers {
-			if requested["id:"+p.ID] || (p.Metadata.Identifiers.DOI != "" && requested["doi:"+strings.ToLower(p.Metadata.Identifiers.DOI)]) || (p.Metadata.Identifiers.Arxiv != "" && requested["arxiv:"+p.Metadata.Identifiers.Arxiv]) {
-				ids = append(ids, p.ID)
+		matched := map[string]bool{}
+		for _, p := range incoming.Papers {
+			id := ""
+			if _, exists := byID[p.ID]; exists {
+				id = p.ID
+			} else if doi := paperlibrary.DOI(p.Metadata.Identifiers.DOI); doi != "" && byDOI[doi] != "" {
+				id = byDOI[doi]
+			} else if arxiv := paperlibrary.ArxivBase(p.Metadata.Identifiers.Arxiv); arxiv != "" {
+				id = byArxiv[arxiv]
+			}
+			if id != "" && !matched[id] {
+				matched[id] = true
+				ids = append(ids, id)
 			}
 		}
 	}
@@ -121,10 +137,20 @@ func recordZoteroImport(ctx context.Context, db *gorm.DB, dataset, user, source,
 	kind := "zotero"
 	if source == "library-backup" {
 		kind = "library_backup"
+	} else if source == "browser-local-v3" {
+		kind = "library_migration"
 	}
 	batch := orm.PaperImportBatch{ID: uuid.NewString(), EntryType: kind, TargetDatasetID: dataset, CreatedBy: user, IdempotencyKey: key, Status: "succeeded", TotalItems: len(ids), CompletedItems: len(ids), SourceContextJSON: marshal(map[string]string{"title": source}), SourceDocumentIDsJSON: marshal([]string{}), PolicySnapshotJSON: marshal(map[string]any{}), CreatedAt: now, UpdatedAt: now}
 	if err = db.Create(&batch).Error; err != nil {
 		return err
+	}
+	attachments := map[string]paperlibrary.Attachment{}
+	for _, attachment := range view.Data.Attachments {
+		if attachment.Kind == "pdf" && attachment.ContentRef != "" && attachment.Available {
+			if _, exists := attachments[attachment.PaperID]; !exists || attachment.IsPrimary {
+				attachments[attachment.PaperID] = attachment
+			}
+		}
 	}
 	// Resolve titles in bounded batches, rather than two queries and one insert per paper.
 	for offset := 0; offset < len(ids); offset += 200 {
@@ -157,7 +183,11 @@ func recordZoteroImport(ctx context.Context, db *gorm.DB, dataset, user, source,
 			if !exists {
 				return gorm.ErrRecordNotFound
 			}
-			items = append(items, orm.PaperImportItem{TitleSnapshot: work.CanonicalTitle, ID: uuid.NewString(), BatchID: batch.ID, AcademicWorkID: entry.AcademicWorkID, LibraryPaperID: id, Status: "succeeded", Stage: "done", ResultKind: "metadata_only", ReferenceIDsJSON: marshal([]string{}), PresenceSnapshotJSON: marshal(map[string]any{}), SelectedCandidateJSON: marshal(map[string]any{}), ErrorDetailsJSON: marshal(map[string]any{}), CreatedAt: now, UpdatedAt: now})
+			resultKind, documentID := "metadata_only", ""
+			if attachment, exists := attachments[id]; exists {
+				resultKind, documentID = "fulltext", attachment.ContentRef
+			}
+			items = append(items, orm.PaperImportItem{DocumentID: documentID, TitleSnapshot: work.CanonicalTitle, ID: uuid.NewString(), BatchID: batch.ID, AcademicWorkID: entry.AcademicWorkID, LibraryPaperID: id, Status: "succeeded", Stage: "done", ResultKind: resultKind, ReferenceIDsJSON: marshal([]string{}), PresenceSnapshotJSON: marshal(map[string]any{}), SelectedCandidateJSON: marshal(map[string]any{}), ErrorDetailsJSON: marshal(map[string]any{}), CreatedAt: now, UpdatedAt: now})
 		}
 		if err = db.CreateInBatches(items, 200).Error; err != nil {
 			return err

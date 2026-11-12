@@ -118,6 +118,19 @@ describe("Settings overview", () => {
     mocks.applySettingsChange.mockReset().mockResolvedValue({ key: "document_parsing_enabled", enabled: false });
   });
 
+  it.each(["zh-CN", "en-US"])("explains model provider and external service counts in %s", async (language) => {
+    mocks.fetchSettingsOverview.mockResolvedValue({
+      controls: { document_parsing_enabled: true },
+      sections: [{ id: "models", title: "models", route: "/settings", status: "ready", detail: "",
+        counts: { total: 0, enabled: 0, verified: 0, runnable: 0, configured: 24, model_providers: 15, external_services: 9 } }],
+      issues: [], updated_at: "2026-11-12T00:00:00Z",
+    });
+    const t = await renderOverview(language);
+    const models = card(t("settingsPage.sections.models"));
+    expect(await models.findByText(t("settingsPage.counts.configuredItems", { count: 24 }))).toBeInTheDocument();
+    expect(models.getByText(language === "zh-CN" ? "模型供应商 15 项 · 外部服务 9 项" : "15 model providers · 9 external services")).toBeInTheDocument();
+  });
+
   it("uses consistent quick actions and opens diagnostics with the check results", async () => {
     mocks.runSettingsChecks.mockResolvedValue({ results: [], finished_at: "2026-11-03T00:00:00Z" });
     const t = await renderOverview();
