@@ -1546,6 +1546,13 @@ const zhCN = {
     },
     defaultConfigAria: "模块默认模型配置",
     defaults: {
+      openIndexManagement: "前往索引管理",
+      services: { search: "搜索引擎", academic: "学术搜索引擎", parsing: "文档解析（OCR）", translation: "机器翻译" },
+      notConfigured: "尚未配置",
+      serviceSeparator: "、",
+      translationSourceCount: "已配置 {{count}} 个翻译源",
+      serviceCount: "已配置 {{count}} 个服务",
+
       intro: "先选好日常使用的模型，其他能力按需配置。",
       basicTitle: "基础模型",
       addModels: "去添加模型",

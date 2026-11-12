@@ -12,6 +12,7 @@ RUN go mod download
 
 COPY backend/core/ ./
 COPY frontend/scripts/generate_upstream_model_catalog.py /tmp/generate_upstream_model_catalog.py
+COPY frontend/scripts/volcengine_models.json /tmp/volcengine_models.json
 
 FROM build-base AS build
 # The catalog is fetched when the image is built, not stored in git.
