@@ -316,7 +316,7 @@ def _conversation_papers(files_by_turn: dict | None) -> list[dict]:
             continue
         known_ids.add(file_id)
         papers.append({'id': file_id, 'title': Path(resolved.display_name).stem or file_id, 'text': text,
-                       'attachment_key': text_digest(path)})
+                       'attachment_key': text_digest(path), 'filename': Path(resolved.display_name).name})
     return papers
 
 

@@ -58,11 +58,12 @@ func sameFile(left, right string) bool {
 	return leftErr == nil && rightErr == nil && os.SameFile(leftInfo, rightInfo)
 }
 
-func TestWorkBuddyAuthenticationUsesWindowsRoamingProfile(t *testing.T) {
+func TestWorkBuddyAuthenticationUsesWindowsLocalProfile(t *testing.T) {
 	root := t.TempDir()
-	t.Setenv("APPDATA", root)
+	t.Setenv("USERPROFILE", root)
+	t.Setenv("APPDATA", filepath.Join(root, "AppData", "Roaming"))
 	want := filepath.Join(
-		root, "CodeBuddyExtension", "Data", "Public", "auth", "workbuddy-desktop.info",
+		root, "AppData", "Local", "CodeBuddyExtension", "Data", "Public", "auth", "workbuddy-desktop.info",
 	)
 	if got := authFile(); got != want {
 		t.Fatalf("auth file=%q want=%q", got, want)

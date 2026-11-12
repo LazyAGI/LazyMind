@@ -994,3 +994,35 @@ def test_model_receives_only_cited_papers_and_used_figure_content(example, monke
     assert set(prompts[0]['charts'][0]) == {'id', 'title', 'caption', 'svg'}
     assert output['review_data']['manuscript_sha256'] == peer_review.text_digest(inputs['manuscript'])
     assert inputs == before
+
+
+@pytest.mark.parametrize('response_kind', ['text', 'parsed', 'envelope'])
+def test_review_body_response_reaches_validated_report(example, monkeypatch, response_kind):
+    raw = example['model_response']
+    if response_kind != 'parsed':
+        raw = json.dumps(raw, ensure_ascii=False)
+    if response_kind == 'envelope':
+        raw = {'content': raw, 'reasoning_content': 'PRIVATE_REASONING'}
+    calls = []
+
+    def build(_self, *args, **kwargs):
+        def respond(prompt):
+            calls.append(prompt)
+            return raw
+        return respond
+
+    monkeypatch.setattr(peer_review, 'AutoModel', lambda **kwargs: object())
+    monkeypatch.setattr(peer_review.WriterToolBase, '_build_structured_llm', build)
+    output = api.run_algorithm('peer_review', copy.deepcopy(example['input']))
+    assert output['review'] == example['output']['review']
+    assert output['review_data']['manuscript_sha256'] == peer_review.text_digest(example['input']['manuscript'])
+    assert 'PRIVATE_REASONING' not in json.dumps(output)
+    assert len(calls) == 1
+
+
+@pytest.mark.parametrize('raw', [{'content': '', 'reasoning_content': '{"issues":[]}'},
+                                 {'content': '{"summary":"x","summary":"y","issues":[]}'},
+                                 {'content': '{broken'}])
+def test_review_envelope_retains_strict_json_rejection(raw):
+    with pytest.raises(ValueError):
+        peer_review.parse_response(raw)

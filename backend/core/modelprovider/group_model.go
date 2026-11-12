@@ -851,6 +851,17 @@ func DeleteGroupModel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if isTextEmbeddingModelType(row.ModelType) {
+		if err := prepareEmptyEmbeddingRemoval(r, db, row.ID); err != nil {
+			if errors.Is(err, errEmbeddingIndexBusy) || errors.Is(err, errEmbeddingCleanupFailed) {
+				common.ReplyErr(w, err.Error(), http.StatusConflict)
+			} else {
+				common.ReplyErr(w, "query embedding index state failed", http.StatusInternalServerError)
+			}
+			return
+		}
+	}
+
 	var clearMultimodalSelection bool
 	confirmationRequired := errEmbeddingInUse
 	now := time.Now().UTC()
@@ -913,4 +924,30 @@ func DeleteGroupModel(w http.ResponseWriter, r *http.Request) {
 	}
 
 	common.ReplyOK(w, deleteGroupModelResponse{ID: modelID, DowngradedKnowledgeBases: downgradedKnowledgeBases})
+}
+
+// An empty Core inventory can still have orphaned vectors. Verify cleanup
+// through the index service before releasing the active model's removal guard.
+func prepareEmptyEmbeddingRemoval(r *http.Request, db *gorm.DB, modelID string) error {
+	db = db.WithContext(r.Context())
+	for _, model := range []any{&orm.EmbeddingIndexState{}, &orm.Dataset{}, &orm.Document{}, &orm.DocumentProcessingState{}} {
+		if !db.Migrator().HasTable(model) {
+			return nil
+		}
+	}
+	state, err := loadGlobalEmbeddingState(r.Context(), db)
+	if err != nil {
+		return err
+	}
+	if state.ActiveModelID != modelID || state.ActiveSource != "own" {
+		return nil
+	}
+	status, err := loadEmbeddingIndexStatus(r.Context(), db)
+	if err != nil {
+		return err
+	}
+	if status.AffectedKnowledgeBases > 0 || !common.RequestUserIsAdmin(r) {
+		return nil
+	}
+	return clearEmbeddingChunks(r.Context(), db, state, "", "", "", true)
 }

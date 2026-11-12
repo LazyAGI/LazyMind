@@ -6,6 +6,7 @@ import classnames from "classnames";
 import "katex/dist/katex.min.css";
 import { Dropdown, Image, Popover, Tooltip, message } from "antd";
 import type { MenuProps } from "antd";
+import { SourceImportActions } from "../SourceImports";
 import rehypeSanitize from "rehype-sanitize";
 import { useTranslation } from "react-i18next";
 import "../../../../components/MarkdownViewer/markdown.scss";
@@ -204,6 +205,7 @@ function SourcePreview({ sources }: { sources: ChatSource[] }) {
       >
         {preview}
       </a> : <div className="md-source-preview-link">{preview}</div>}
+      <SourceImportActions source={source} inline />
     </div>
   );
 }

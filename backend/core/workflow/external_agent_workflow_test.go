@@ -327,6 +327,36 @@ func TestInputBindingsFromExternalRequestImportsInputFiles(t *testing.T) {
 	}
 }
 
+func TestInputBindingsFromExternalRequestCleansPartiallyImportedFiles(t *testing.T) {
+	db := newHandlerTestDB(t)
+	files := []any{
+		map[string]any{
+			"material_id":    "first",
+			"name":           "first.txt",
+			"mime_type":      "text/plain",
+			"content_base64": base64.StdEncoding.EncodeToString([]byte("first")),
+		},
+		map[string]any{
+			"material_id":    "second",
+			"name":           "second.txt",
+			"mime_type":      "text/plain",
+			"content_base64": "%%%invalid-base64%%%",
+		},
+	}
+	_, created, err := inputBindingsFromExternalRequestTracked(context.Background(), db.DB, "user-1", nil, files)
+	if err == nil || len(created) != 1 {
+		t.Fatalf("expected partial import error and one created resource, got created=%v err=%v", created, err)
+	}
+	cleanupUnboundInputResources(context.Background(), db.DB, "user-1", created)
+	var count int64
+	if err := db.Model(&orm.WorkflowInputResource{}).Where("owner_user_id=?", "user-1").Count(&count).Error; err != nil {
+		t.Fatal(err)
+	}
+	if count != 0 {
+		t.Fatalf("orphaned input resources=%d", count)
+	}
+}
+
 func TestExternalTaskResponseIncludesDisplayStatus(t *testing.T) {
 	response := externalTaskResponse(orm.ExternalAgentWorkflowTask{
 		ID: "task-1", AgentType: "codex", Status: externalTaskStatusConverting,
@@ -392,6 +422,40 @@ func TestExternalTaskStrictValidationBeforeEnqueue(t *testing.T) {
 	}
 }
 
+func TestExternalTaskInputLimits(t *testing.T) {
+	tooLarge := externalAgentWorkflowTaskRequest{InputFiles: []externalAgentWorkflowInputFile{{
+		MaterialID: "large", Name: "large.bin", MimeType: "application/octet-stream",
+		ContentBase64: strings.Repeat("A", base64.StdEncoding.EncodedLen(maxExternalWorkflowInputFileBytes)+8),
+	}}}
+	if err := validateExternalTaskInputs(tooLarge); err == nil || !strings.Contains(err.Error(), "file limit") {
+		t.Fatalf("oversized input file was accepted: %v", err)
+	}
+	tooMany := externalAgentWorkflowTaskRequest{InputFiles: make([]externalAgentWorkflowInputFile, maxExternalWorkflowInputFiles+1)}
+	if err := validateExternalTaskInputs(tooMany); err == nil || !strings.Contains(err.Error(), "at most") {
+		t.Fatalf("too many input files were accepted: %v", err)
+	}
+	tooManyBindings := externalAgentWorkflowTaskRequest{InputBindings: map[string]any{"brief": make([]any, maxExternalWorkflowInputBindings+1)}}
+	if err := validateExternalTaskInputs(tooManyBindings); err == nil || !strings.Contains(err.Error(), "input_bindings") {
+		t.Fatalf("too many input bindings were accepted: %v", err)
+	}
+}
+
+func TestCanonicalExternalSkillURLDropsRegistryTrackingParameters(t *testing.T) {
+	for _, tc := range []struct {
+		name, input, want string
+	}{
+		{"skillhub", "https://skillhub.cn/skills/acme/demo?utm_source=mail#install", "https://skillhub.cn/skills/acme/demo"},
+		{"clawhub", "https://clawhub.ai/acme/skills/demo?utm_source=mail&version=v2", "https://clawhub.ai/acme/skills/demo?version=v2"},
+		{"github", "https://github.com/acme/demo/tree/main/SKILL.md?tab=readme#install", "https://github.com/acme/demo/tree/main/SKILL.md"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := canonicalExternalSkillURL(tc.input); got != tc.want {
+				t.Fatalf("canonicalExternalSkillURL(%q)=%q, want %q", tc.input, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestExternalTaskIdempotencyRejectsChangedRequest(t *testing.T) {
 	newHandlerTestDB(t)
 	for index, description := range []string{"First task", "Different task"} {
@@ -406,6 +470,38 @@ func TestExternalTaskIdempotencyRejectsChangedRequest(t *testing.T) {
 		if index == 1 && (rec.Code != http.StatusConflict || !strings.Contains(rec.Body.String(), "IDEMPOTENCY_CONFLICT")) {
 			t.Fatalf("changed request should conflict: %s", rec.Body.String())
 		}
+	}
+}
+
+func TestExternalWorkflowTaskDraftCreationIsIdempotentForStaleSnapshots(t *testing.T) {
+	db := newHandlerTestDB(t)
+	seedSkillForWorkflowConversion(t, db, "owner", "skill-draft-race", "# Draft Race Skill\n\nCreate a short report from the supplied input.")
+	now := time.Now().UTC()
+	task := orm.ExternalAgentWorkflowTask{
+		ID: "task-draft-race", OwnerUserID: "owner", IdempotencyKey: "draft-race",
+		AgentType: "codex", SkillID: "skill-draft-race", Status: externalTaskStatusQueued,
+		Stage: "preflight", RequestJSON: json.RawMessage(`{"config":{}}`),
+		ResultSummaryJSON: json.RawMessage(`{}`), ResultArtifactsJSON: json.RawMessage(`[]`),
+		CreatedAt: now, UpdatedAt: now,
+	}
+	if err := db.Create(&task).Error; err != nil {
+		t.Fatal(err)
+	}
+	stale := task
+	first := ensureExternalWorkflowTaskWorkflow(t.Context(), db.DB, task)
+	if first.DraftID == "" {
+		t.Fatalf("first conversion did not create a draft: %#v", first)
+	}
+	second := ensureExternalWorkflowTaskWorkflow(t.Context(), db.DB, stale)
+	if second.DraftID != first.DraftID {
+		t.Fatalf("stale retry created a different draft: first=%q second=%q", first.DraftID, second.DraftID)
+	}
+	var drafts int64
+	if err := db.Model(&orm.WorkflowDraft{}).Where("source_skill_id=?", task.SkillID).Count(&drafts).Error; err != nil {
+		t.Fatal(err)
+	}
+	if drafts != 1 {
+		t.Fatalf("stale retry created %d workflow drafts, want 1", drafts)
 	}
 }
 
@@ -658,5 +754,29 @@ func TestExternalTaskRecoveryRestoresMissingJobAndReportsFailure(t *testing.T) {
 	}
 	if task.Status != externalTaskStatusFailed || task.ErrorCode != "TASK_WORKER_FAILED" {
 		t.Fatalf("worker failure was hidden: %#v", task)
+	}
+}
+
+func TestExternalWorkflowSkillRequestAcceptsZIPOverOldJSONLimit(t *testing.T) {
+	newHandlerTestDB(t)
+	var archive bytes.Buffer
+	writer := zip.NewWriter(&archive)
+	entry, err := writer.CreateHeader(&zip.FileHeader{Name: "SKILL.md", Method: zip.Store})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = entry.Write(bytes.Repeat([]byte("a"), 25<<20)); err != nil {
+		t.Fatal(err)
+	}
+	if err = writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	body, _ := json.Marshal(map[string]any{"agent_type": "codex", "task_description": "Run the skill.", "skill": map[string]string{"name": "large", "zip_base64": base64.StdEncoding.EncodeToString(archive.Bytes())}})
+	request := httptest.NewRequest(http.MethodPost, "/external-agent/workflow-tasks", bytes.NewReader(body))
+	request.Header.Set("X-User-Id", "user-1")
+	recorder := httptest.NewRecorder()
+	CreateExternalAgentWorkflowTask(recorder, request)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", recorder.Code, recorder.Body.String())
 	}
 }

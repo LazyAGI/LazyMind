@@ -44,7 +44,24 @@ function FolderTitle({ node, acceptsDrop, dropTarget, disabled, onCreateFolder, 
 }
 function PaperTitle({ node, disabled }: { node: DirectoryNode; disabled: boolean }) {
     const { setNodeRef, attributes, listeners, isDragging } = useDraggable({ id: `tree-paper:${node.paperId}`, data: { paperId: node.paperId }, disabled });
-    return <span ref={setNodeRef} {...attributes} {...listeners} aria-label={`拖动目录论文 ${node.label}`} className={`paper-directory-paper-title ${isDragging ? 'is-dragging' : ''}`}><Tooltip title={node.label}><span className="paper-directory-node-name">{node.label}</span></Tooltip>{node.important && <StarFilled className="paper-directory-star" />}</span>;
+    const nameRef = useRef<HTMLSpanElement>(null);
+    const [previewOpen, setPreviewOpen] = useState(false);
+    return <Tooltip
+        title={<span className="paper-directory-title-preview">{node.label}</span>}
+        placement="right"
+        mouseEnterDelay={0.25}
+        styles={{ root: { maxWidth: 'min(360px, 40vw)' } }}
+        open={previewOpen && !isDragging}
+        onOpenChange={(open: boolean) => {
+            const name = nameRef.current;
+            setPreviewOpen(open && !!name && name.scrollWidth > name.clientWidth);
+        }}
+    >
+        <span ref={setNodeRef} {...attributes} {...listeners} aria-label={`拖动目录论文 ${node.label}`} className={`paper-directory-paper-title ${isDragging ? 'is-dragging' : ''}`} onClick={() => setPreviewOpen(false)}>
+            <span ref={nameRef} className="paper-directory-node-name">{node.label}</span>
+            {node.important && <StarFilled className="paper-directory-star" />}
+        </span>
+    </Tooltip>;
 }
 export default function PaperDirectoryTree(props: Props) {
     const { data, title, active, folderId, disabled, draggedIds, dropFolderId, onSelectFolder, onCreateFolder, onDeleteFolder, onOpenPaper, detailPaperId } = props;

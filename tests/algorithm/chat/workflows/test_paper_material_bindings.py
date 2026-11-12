@@ -46,3 +46,13 @@ def test_invalid_citation_groups_keep_identity_validation(citation):
     bindings = MaterialBindings([{'id': f'source-{index}'} for index in range(1, 4)])
     with pytest.raises(ValueError, match='unavailable source'):
         bindings.restore_citations(citation)
+
+
+def test_numbered_citations_restore_and_refinement_keeps_canonical_source_identity():
+    identifier = 'upload-' + 'a' * 64
+    marker = rf'[\[1\]](#paper-ref-{identifier})'
+    bindings = MaterialBindings([{'id': identifier}], citation_markers={identifier: marker})
+    assert bindings.restore_citations('[M1]、[文献:M1]') == marker + '、' + marker
+    assert bindings.model_view('先前结论' + marker) == '先前结论[M1]'
+    with pytest.raises(ValueError, match='unavailable source'):
+        bindings.restore_citations('[M2]')

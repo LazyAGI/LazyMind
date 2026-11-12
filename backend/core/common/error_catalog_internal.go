@@ -931,6 +931,7 @@ func init() {
 	for _, source := range []string{
 		"block_id is required",
 		"at least one translation override is required",
+		"supply translation overrides or request rerender without overrides or a provider",
 	} {
 		registerAdditionalErrorAlias(source, "Invalid request", http.StatusBadRequest, 2000103)
 	}
@@ -946,6 +947,7 @@ func init() {
 		"decode translation draft",
 		"save translation overrides failed",
 		"save translation draft failed",
+		"save translation page map failed",
 		"pdf translation renderer did not render every block",
 		"register revised translation failed",
 	} {

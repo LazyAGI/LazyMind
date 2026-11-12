@@ -4,6 +4,7 @@ package codexhost
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os/exec"
 	"strconv"
@@ -29,7 +30,7 @@ repeat with runningApp in runningApps
   if bundlePath is not missing value and (bundlePath as text) is appPath then
    set closingPID to runningApp's processIdentifier() as integer
    if closingPID > 0 then
-    if not (runningApp's terminate() as boolean) then error "Codex refused to close; finish its pending dialog and retry"
+    if not (runningApp's terminate() as boolean) then error "LAZYMIND_AGENT_quit_required: Codex refused to close; finish its pending dialog and retry"
     set end of closingPIDs to closingPID
    end if
   end if
@@ -54,7 +55,14 @@ return closeApplications(current application's NSWorkspace's sharedWorkspace()'s
 end run`
 	output, err := runDarwinDesktopCommand(ctx, "/usr/bin/osascript", "-e", script, application)
 	if err != nil {
-		return fmt.Errorf("close Codex normally and retry: %s: %w", output, err)
+		if ctx.Err() != nil {
+			return errors.Join(ctx.Err(), err)
+		}
+		code := "process_inspection_failed"
+		if strings.Contains(string(output), "LAZYMIND_AGENT_quit_required:") {
+			code = "quit_required"
+		}
+		return setupError(code, fmt.Errorf("request Codex shutdown: %w", err))
 	}
 	// NSRunningApplication.isTerminated can remain stale in a script without an
 	// AppKit event loop. Check the exact returned PIDs at the OS instead.
@@ -63,7 +71,7 @@ end run`
 	for _, value := range strings.FieldsFunc(string(output), func(r rune) bool { return r == ',' || r == ' ' || r == '\n' || r == '\r' }) {
 		pid, err := strconv.Atoi(value)
 		if err != nil || pid <= 0 {
-			return fmt.Errorf("invalid Codex process ID: %q", value)
+			return setupError("process_inspection_failed", errors.New("invalid Codex process ID"))
 		}
 		for {
 			err := syscall.Kill(pid, 0)
@@ -71,11 +79,14 @@ end run`
 				break
 			}
 			if err != nil {
-				return fmt.Errorf("check Codex shutdown: %w", err)
+				return setupError("process_inspection_failed", fmt.Errorf("check Codex shutdown: %w", err))
 			}
 			select {
 			case <-wait.Done():
-				return fmt.Errorf("Codex did not close; finish its pending dialog and retry: %w", wait.Err())
+				if ctx.Err() != nil {
+					return ctx.Err()
+				}
+				return setupError("quit_required", fmt.Errorf("Codex did not close: %w", wait.Err()))
 			case <-time.After(100 * time.Millisecond):
 			}
 		}
@@ -85,8 +96,11 @@ end run`
 	}
 	reportRecovery(ctx, "starting")
 	args := append([]string{"-n", "-a", application, "--args"}, desktopLaunchArguments(ctx, port)...)
-	if output, err := runDarwinDesktopCommand(ctx, "/usr/bin/open", args...); err != nil {
-		return fmt.Errorf("start Codex: %s: %w", output, err)
+	if _, err := runDarwinDesktopCommand(ctx, "/usr/bin/open", args...); err != nil {
+		if ctx.Err() != nil {
+			return errors.Join(ctx.Err(), err)
+		}
+		return setupError("launch_failed", fmt.Errorf("start Codex: %w", err))
 	}
 	return nil
 }

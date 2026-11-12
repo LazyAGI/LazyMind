@@ -666,7 +666,7 @@ describe("MentionEditor", () => {
     expect(onMentionsChange).toHaveBeenLastCalledWith([expect.objectContaining({ resource_id: "dismiss-skill" })]);
   });
 
-  it("shows all loaded skills and workflows without expansion controls and supports keyboard selection", async () => {
+  it("limits the skill preview and keeps all workflows available for keyboard selection", async () => {
     mocks.listSkillAssetsPage.mockResolvedValue({ records: Array.from({ length: 10 }, (_, index) => ({
       id: `skill-${index}`, name: `技能 ${index + 1}`,
     })) });
@@ -678,11 +678,11 @@ describe("MentionEditor", () => {
       onPaste={vi.fn()} onSend={vi.fn()} onCompositionChange={vi.fn()} />);
     const editor = screen.getByRole("textbox");
     enterQuery('/');
-    expect(await screen.findByRole("option", { name: "技能 10" })).toBeVisible();
+    expect(await screen.findByRole("option", { name: "技能 6" })).toBeVisible();
     expect(await screen.findByRole("option", { name: "工作流 13" })).toBeVisible();
-    expect(screen.getAllByRole('option')).toHaveLength(23);
-    expect(screen.queryByRole('button', { name: 'chat.mentionShowMore' })).toBeNull();
-    expect(screen.queryByRole('button', { name: 'chat.mentionCollapse' })).toBeNull();
+    expect(screen.queryByRole("option", { name: "技能 7" })).not.toBeInTheDocument();
+    expect(screen.getAllByRole('option')).toHaveLength(19);
+    expect(screen.getByRole('button', { name: 'chat.mentionShowMore' })).toHaveAttribute('aria-expanded', 'false');
     fireEvent.pointerDown(editor);
     fireEvent.click(editor);
     const menu = screen.getByRole("listbox");
@@ -690,9 +690,43 @@ describe("MentionEditor", () => {
     fireEvent.mouseDown(menu);
     fireEvent.click(menu);
     expect(menu).toBeVisible();
-    for (let index = 0; index < 23; index += 1) fireEvent.keyDown(editor, { key: 'ArrowDown' });
+    for (let index = 0; index < 19; index += 1) fireEvent.keyDown(editor, { key: 'ArrowDown' });
     fireEvent.keyDown(editor, { key: 'Enter' });
     expect(onMentionsChange).toHaveBeenLastCalledWith([expect.objectContaining({ type: 'workflow', resource_id: 'builtin:workflow-12' })]);
+  });
+
+  it("expands skills across pages, collapses them and resets the preview when reopened", async () => {
+    const records = Array.from({ length: 101 }, (_, index) => ({
+      id: `skill-${index + 1}`, name: `技能 ${index + 1}`,
+    }));
+    mocks.listSkillAssetsPage.mockImplementation(async ({ page }: { page: number }) => ({
+      records: page === 1 ? records.slice(0, 100) : records.slice(100),
+      page, pageSize: 100, total: records.length,
+    }));
+    render(<MentionEditor value="" placeholder="message" onChange={vi.fn()} onMentionsChange={vi.fn()}
+      onPaste={vi.fn()} onSend={vi.fn()} onCompositionChange={vi.fn()} />);
+
+    enterQuery('/skill:');
+    const expand = await screen.findByRole('button', { name: 'chat.mentionShowMore' });
+    expect(screen.getAllByRole('option')).toHaveLength(6);
+    expect(mocks.listSkillAssetsPage).not.toHaveBeenCalledWith(expect.objectContaining({ page: 2 }));
+    fireEvent.click(expand);
+    expect(await screen.findByRole('option', { name: '技能 101' })).toBeVisible();
+    expect(screen.getAllByRole('option')).toHaveLength(101);
+    expect(screen.getByRole('button', { name: 'chat.mentionCollapse' })).toHaveAttribute('aria-expanded', 'true');
+
+    fireEvent.click(screen.getByRole('button', { name: 'chat.mentionCollapse' }));
+    expect(screen.getAllByRole('option')).toHaveLength(6);
+    fireEvent.click(screen.getByRole('button', { name: 'chat.mentionShowMore' }));
+    expect(screen.getByRole('option', { name: '技能 101' })).toBeVisible();
+    expect(mocks.listSkillAssetsPage.mock.calls.filter(([options]) => options.page === 2)).toHaveLength(1);
+
+    const editor = screen.getByRole('textbox');
+    fireEvent.keyDown(editor, { key: 'Escape' });
+    expect(screen.queryByRole('listbox')).not.toBeInTheDocument();
+    enterQuery('/skill:');
+    expect(await screen.findByRole('button', { name: 'chat.mentionShowMore' })).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.queryByRole('option', { name: '技能 101' })).not.toBeInTheDocument();
   });
 
   it("reloads skills after a previously cached empty list", async () => {
