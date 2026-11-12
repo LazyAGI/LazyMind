@@ -94,8 +94,6 @@ interface RenderPdfProps {
   translateSelectionLabel?: string;
   translateSelectionDisabled?: boolean;
   translateSelectionDisabledTip?: string;
-  translateSelectionConfigureLabel?: string;
-  translateSelectionConfigureUrl?: string;
   learningSelectionActions?: LearningSelectionAction[];
   onLearningSelection?: (key:string, selection:PdfTextSelection)=>void;
   onPdfKindDetected?: (kind: "image_only" | "native_text" | "mixed") => void;
@@ -180,8 +178,6 @@ export default function RenderPdf({
   addVocabularySelectionLabel = "加入生词",
   translateSelectionDisabled = false,
   translateSelectionDisabledTip,
-  translateSelectionConfigureLabel = "去配置",
-  translateSelectionConfigureUrl,
   learningSelectionActions = [],
   onLearningSelection,
   onPdfKindDetected,
@@ -1393,7 +1389,6 @@ export default function RenderPdf({
             onTranslate={onTranslateSelection ? ()=>onTranslateSelection(selectionAction.selection) : undefined}
             translationDisabled={translationUnavailable}
             translationTitle={translationUnavailable ? translateSelectionDisabledTip : "翻译"}
-            translationHelp={translationUnavailable && translateSelectionConfigureUrl ? <a href={translateSelectionConfigureUrl}>{translateSelectionConfigureLabel}</a> : undefined}
             actions={(() => {
               const actions:PdfComposerAction[]=[];
               if(onAddVocabularySelection && /[A-Za-z]/.test(selectionAction.selection.text))actions.push({key:"vocabulary",label:addVocabularySelectionLabel,onClick:()=>onAddVocabularySelection(selectionAction.selection)});
