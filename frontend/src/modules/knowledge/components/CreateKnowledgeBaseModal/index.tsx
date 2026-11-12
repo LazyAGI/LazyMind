@@ -344,9 +344,7 @@ const CreateKnowledgeBaseModal = forwardRef<
                   label={t("knowledge.knowledgeTags")}
                   rules={[
                     {
-                      required: true,
                       type: "array",
-                      min: 1,
                       max: KNOWLEDGE_BASE_TAG_MAX_COUNT,
                       message: t("knowledge.selectKnowledgeTags"),
                     },

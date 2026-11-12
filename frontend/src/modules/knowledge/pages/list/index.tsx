@@ -38,6 +38,7 @@ import {
   HistoryOutlined,
   PlusOutlined,
   SearchOutlined,
+  QuestionCircleOutlined,
 } from "@ant-design/icons";
 
 import SyncKnowledgeBaseCreationFlow, {
@@ -63,7 +64,6 @@ import {
 } from "@/api/generated/knowledge-client";
 import type { Dataset as CoreDataset, EmbeddingIndexStatusResponse } from "@/api/generated/core-client";
 type Dataset = LegacyDataset & Pick<CoreDataset, "paper_count" | "pdf_attachment_count">;
-import KnowledgeTag from "@/modules/knowledge/components/KnowledgeTag";
 import TextIndexManager from "@/modules/knowledge/components/TextIndexManager";
 import FileUtils from "@/modules/knowledge/utils/file";
 import {
@@ -344,6 +344,7 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
   const [officialDatasetOrder, setOfficialDatasetOrder] = useState<
     string[] | null
   >(null);
+  const [officialProcessingLevels, setOfficialProcessingLevels] = useState<Record<string, ProcessingLevel>>({});
   const [officialSortLoading, setOfficialSortLoading] = useState(false);
   const [loadedOfficialSort, setLoadedOfficialSort] = useState<KnowledgeMineSort>();
   const { rootRef, openDetail } = useKnowledgeListNavigation(
@@ -1156,16 +1157,10 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
       const requestSeq = officialSortRequestSeqRef.current + 1;
       officialSortRequestSeqRef.current = requestSeq;
       const orderBy = getKnowledgeMineOrderBy(selectedSort);
-      if (!orderBy) {
-        setOfficialDatasetOrder(null);
-        setOfficialSortLoading(false);
-        setLoadedOfficialSort(selectedSort);
-        return;
-      }
-
       setOfficialSortLoading(true);
       try {
         const datasetIds: string[] = [];
+        const levels: Record<string, ProcessingLevel> = {};
         const seenPageTokens = new Set<string>();
         let pageToken: string | undefined;
         do {
@@ -1178,7 +1173,10 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
             { params: { source: "official_installed" } },
           );
           (response.data.datasets || []).forEach((dataset) => {
-            if (dataset.dataset_id) datasetIds.push(dataset.dataset_id);
+            if (dataset.dataset_id) {
+              datasetIds.push(dataset.dataset_id);
+              levels[dataset.dataset_id] = effectiveProcessingLevel((dataset as Dataset & { processing_level?: ProcessingLevel }).processing_level);
+            }
           });
           const nextPageToken = response.data.next_page_token || undefined;
           if (!nextPageToken || seenPageTokens.has(nextPageToken)) break;
@@ -1187,7 +1185,8 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
         } while (pageToken);
 
         if (officialSortRequestSeqRef.current === requestSeq) {
-          setOfficialDatasetOrder(datasetIds);
+          setOfficialDatasetOrder(orderBy ? datasetIds : null);
+          setOfficialProcessingLevels(levels);
         }
       } catch {
         if (officialSortRequestSeqRef.current === requestSeq) {
@@ -1465,18 +1464,12 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
       },
     },
     {
-      title: t("knowledge.tags"),
-      dataIndex: "tags",
+      title: <span>{t("knowledge.processingLevel")} <Tooltip title={t("knowledge.processingLevelHint")}><QuestionCircleOutlined aria-label={t("knowledge.processingLevelHint")} tabIndex={0} /></Tooltip></span>,
+      dataIndex: "processing_level",
       width: 170,
-      render: (knowledgeBaseTags: string[]) => {
-        return (
-          <div className="knowledge-list-tags">
-            {(knowledgeBaseTags || []).slice(0, 2).map((tag, index) => (
-              <KnowledgeTag key={`${tag}-${index}`} title={tag} checkable={false} />
-            ))}
-            {!knowledgeBaseTags?.length ? <span>-</span> : null}
-          </div>
-        );
+      render: (value?: ProcessingLevel) => {
+        const level = effectiveProcessingLevel(value);
+        return t(`knowledge.processing${level[0].toUpperCase()}${level.slice(1)}`);
       },
     },
     {
@@ -1579,14 +1572,13 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
         },
       },
       {
-        title: t("knowledge.tags"),
-        dataIndex: "tags",
+        title: <span>{t("knowledge.processingLevel")} <Tooltip title={t("knowledge.processingLevelHint")}><QuestionCircleOutlined aria-label={t("knowledge.processingLevelHint")} tabIndex={0} /></Tooltip></span>,
+        key: "processing_level",
         width: 170,
-        render: (itemTags: string[]) => (
-          <div className="knowledge-list-tags">
-            {itemTags.slice(0, 2).map((tag) => <span key={tag}>{tag}</span>)}
-          </div>
-        ),
+        render: (_: unknown, item: OfficialKnowledgeBase) => {
+          const level = officialProcessingLevels[item.datasetId || ""];
+          return level ? t(`knowledge.processing${level[0].toUpperCase()}${level.slice(1)}`) : "—";
+        },
       },
       {
         title: t("knowledge.domainFilter"),
@@ -1651,6 +1643,7 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
       handleOfficialUninstall,
       handleOfficialUpdate,
       marketProgress,
+      officialProcessingLevels,
       t,
     ],
   );

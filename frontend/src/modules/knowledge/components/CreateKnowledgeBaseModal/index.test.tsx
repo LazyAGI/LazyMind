@@ -79,10 +79,7 @@ async function fillRequiredFields() {
   fireEvent.change(await screen.findByLabelText(/knowledge.knowledgeBaseName/), {
     target: { value: "test-knowledge" },
   });
-  const tags = screen.getByRole("combobox", { name: "" });
-  fireEvent.mouseDown(tags);
-  fireEvent.keyDown(tags, { key: "ArrowDown", keyCode: 40 });
-  fireEvent.keyDown(tags, { key: "Enter", keyCode: 13 });
+
 }
 
 async function selectEnglishProfile() {
