@@ -306,3 +306,26 @@ def test_worker_loop_recovers_from_queue_exception_and_respects_shutdown(monkeyp
     worker._shutdown = True
     worker._worker_impl()
     assert len(attempts) == 2
+
+
+def test_explicit_summary_survives_full_rebuild_fallback(monkeypatch):
+    from types import SimpleNamespace
+    processor = SimpleNamespace()
+    _worker_with_processor(monkeypatch, processor)
+    module = importlib.import_module('lazymind.processor.service.worker')
+    calls = []
+    roots_present = False
+
+    def rebuild(group_name, groups):
+        nonlocal roots_present
+        calls.append(group_name)
+        if group_name == 'doc-summary' and not roots_present:
+            return processor._reparse_docs(None, groups)
+        if group_name is None:
+            roots_present = True
+            processor._reparse_docs('doc-summary', groups)
+
+    processor._reparse_docs = rebuild
+    module._install_deferred_group_guard(processor)
+    processor._reparse_docs('doc-summary', _node_groups())
+    assert calls == ['doc-summary', None, 'doc-summary']

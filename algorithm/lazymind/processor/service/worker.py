@@ -44,18 +44,25 @@ def _install_deferred_group_guard(processor):
         return processor
     original = processor._reparse_docs
     full_rebuild = ContextVar('lazymind_full_rebuild', default=False)
+    explicit_lazy = ContextVar('lazymind_explicit_lazy_group', default=None)
 
     def reparse_docs(group_name, node_groups, *args, **kwargs):
         # Full source rebuild follows initial ingestion: summaries and other
         # lazy groups remain deferred. Explicitly selecting one still creates it.
         if (full_rebuild.get() and group_name is not None
-                and node_groups.get(group_name, {}).get('lazy_mode') == 'all'):
+                and node_groups.get(group_name, {}).get('lazy_mode') == 'all'
+                and explicit_lazy.get() != group_name):
             return
+        selected = explicit_lazy.get()
+        if not full_rebuild.get() and node_groups.get(group_name, {}).get('lazy_mode') == 'all':
+            selected = group_name
+        selected_token = explicit_lazy.set(selected)
         token = full_rebuild.set(full_rebuild.get() or group_name is None)
         try:
             return original(group_name, node_groups, *args, **kwargs)
         finally:
             full_rebuild.reset(token)
+            explicit_lazy.reset(selected_token)
 
     processor._reparse_docs = reparse_docs
     processor._lazymind_deferred_group_guard = True

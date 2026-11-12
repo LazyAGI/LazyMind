@@ -21,7 +21,7 @@ from urllib.parse import urlsplit
 import requests
 from filelock import FileLock, Timeout as FileLockTimeout
 
-from lazyllm import LOG, globals as lazyllm_globals
+from lazyllm import LOG, config as lazyllm_config, globals as lazyllm_globals
 from lazyllm.common import AllKeysExhaustedError, KeyAuthError, KeyPool
 from lazyllm.common.threading import ThreadPoolExecutor
 from lazyllm.tools.rag.readers.ocrReader.dynamic_pdf_reader import DynamicPDFReader as _DynamicPDFReader
@@ -51,7 +51,13 @@ class LazyMindMineruPDFReader(_MineruPDFReader):
     """Keep an uploaded batch while waiting for the official MinerU API."""
 
     def __init__(self, **kwargs):
-        super().__init__(**kwargs)
+        cache_dir = kwargs.pop('image_cache_dir', None) or Path(lazyllm_config['home']) / 'mineru_cache'
+        # The upstream base constructor clears this directory. It contains image
+        # paths retained by earlier documents and may be in use by other workers.
+        # Bypass that cleanup; each parse already extracts into a unique task dir.
+        super().__init__(image_cache_dir=None, **kwargs)
+        self._image_cache_dir = Path(cache_dir)
+        self._image_cache_dir.mkdir(parents=True, exist_ok=True)
         # LazyLLM derives the dynamic auth lookup from the concrete class
         # name. Preserve the configured `ocr_auth.mineru` contract.
         self._auth_source_key = 'mineru'

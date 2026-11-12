@@ -481,3 +481,19 @@ def test_mineru_retains_archive_for_reading_ir(monkeypatch, tmp_path):
     cache = source.parent / '.lazymind-artifacts' / 'mineru-cache-v1' / f'{digest}-{reader._online_model_version()}.zip'
     assert cache.is_file()
     assert cache.read_bytes()
+
+
+def test_reader_initialization_preserves_retained_images_and_other_readers(tmp_path):
+    from lazymind.parsing.engine.readers.mineru_online import LazyMindMineruPDFReader
+    cache = tmp_path / 'images'
+    old = cache / 'existing-document' / 'figure.jpg'
+    old.parent.mkdir(parents=True)
+    old.write_bytes(b'retained-figure')
+    first = LazyMindMineruPDFReader(image_cache_dir=cache, api_key='fixture')
+    assert old.read_bytes() == b'retained-figure'
+    active = first._image_cache_dir / 'active-document' / 'figure.jpg'
+    active.parent.mkdir(parents=True)
+    active.write_bytes(b'active-figure')
+    LazyMindMineruPDFReader(image_cache_dir=cache, api_key='fixture')
+    assert old.read_bytes() == b'retained-figure'
+    assert active.read_bytes() == b'active-figure'
