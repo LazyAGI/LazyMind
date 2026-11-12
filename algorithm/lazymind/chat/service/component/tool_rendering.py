@@ -647,6 +647,14 @@ def _tool_result_preview(tool_name: str, result: Any, value: str = '', language:
         result = _normalized_success_business_value(result)
     business_value = _normalized_success_business_value(result)
     if (isinstance(business_value, dict)
+            and business_value.get('ok') is not False
+            and business_value.get('status') == 'needs_input'
+            and any(re.fullmatch(r'trigger_.+_workflow', name) for name in _tool_name_suffixes(tool_name))):
+        return _ensure_trailing_newline(
+            '工作流正在等待补充必要信息，请填写问题卡片后继续。' if language == 'zh'
+            else 'The workflow is waiting for required information. Complete the question card to continue.'
+        )
+    if (isinstance(business_value, dict)
             and business_value.get('outcome') in {'workflow_approval_required', 'workflow_input_required'}
             and business_value.get('user_notice')):
         return _ensure_trailing_newline(str(business_value['user_notice']))

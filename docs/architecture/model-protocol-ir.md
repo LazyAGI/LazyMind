@@ -99,3 +99,11 @@ Gemini/Anthropic 原生端点尚未接入，当前仅验收 IR 扩展边界；Re
 环境恢复后确认原数据库仍连接原 bind mount，数据为 588 个对话（原 585 加 3 个验收会话）、29 个知识库、2963 个文档。OpenAI 生图已在恢复后重新验证成功；硅基目录新增 Kolors 以进行验收，默认生图模型已恢复为原 gpt-image-2。
 
 本地验证：整合最新 main 后 chat 测试 6748 passed、16 skipped、49 subtests passed；底层 Responses/IR/请求控制测试 272 passed；Core chat/subagent 及错误目录完整性测试通过；OpenAPI 四组产物均 fresh。跳过项包含原生 Windows/沙箱或专用 E2E 环境要求。真实调用验证使用现有 OpenAI GPT-6 配置；Completions 的正常、工具和异常路径使用确定性 HTTP 边界回归，未为验收新增 OpenAI 对话模型。
+
+## 重启后浏览器复验
+
+2026-11-12 在既有 8090 环境重新执行浏览器最小复现：普通中文/emoji/空字符串文本、多轮计算工具、斜杠菜单选择 qa-org-e Skill、页面刷新历史恢复、流式取消后继续对话、除零工具失败后继续计算均通过。554 KiB JPG 上传后识别为蓝色；一页 HTML PPT 完成生成发布，面板明确显示已完成。OpenAI gpt-image-2 和硅基 Kolors 再次实际生成图片并在页面预览，默认生图恢复 OpenAI。Kolors 构图偏离纯色几何要求，仅证明调用链与产物显示成功，不宣称视觉指令完全符合。
+
+使用现有 Qwen 模型补充 Responses → 兼容聊天协议 → Responses 双向切换：代号保留，工具返回 437，切回 OpenAI 后可复述该结果。这不是 OpenAI 官方 Completions 端点实测。中途原 PostgreSQL 子进程退出并自行恢复，未持久化的请求在恢复后通过浏览器重试成功；未初始化数据库或更换挂载。
+
+浏览器另复现工作流等待补充信息时显示未替换的 `{result.outcome}`/`{result.reason}`。实际工具结果为 `status=needs_input`，并没有这两个字段。提示层现按该状态展示等待信息，不再宣称初始化已完成；原始工具结果保持不变，明确失败仍优先显示失败。回归覆盖中英文、工具前缀、JSON 包装及失败优先级。
