@@ -7604,6 +7604,10 @@ components:
                     type: array
                 id:
                     type: string
+                templates:
+                    items:
+                        $ref: '#/components/schemas/DocumentProviderTemplate'
+                    type: array
             required:
                 - capabilities
                 - id
@@ -7616,6 +7620,16 @@ components:
                     type: array
             required:
                 - providers
+            type: object
+        DocumentProviderTemplate:
+            properties:
+                id:
+                    type: string
+                name:
+                    type: string
+            required:
+                - id
+                - name
             type: object
         DocumentPublicationGroupRequest:
             properties:
@@ -7727,6 +7741,8 @@ components:
                     type: string
                 retry_operation_id:
                     type: string
+                template:
+                    type: string
                 title:
                     type: string
             required:
@@ -7752,6 +7768,8 @@ components:
                 provider:
                     type: string
                 target_url:
+                    type: string
+                template:
                     type: string
                 title:
                     type: string

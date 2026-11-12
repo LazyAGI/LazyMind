@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any, Mapping
 from lazyllm.tools.agent import ToolExecutionError
 from lazyllm.tools.writer.data_models import (
+    MediaAssetLibrary,
     SectionInstruction,
     WriterDocument,
     WritingContext,
@@ -431,12 +432,14 @@ def markdown_to_writer_document(
     *,
     document_id: str,
     stage: str = 'final',
+    media_assets: dict[str, Any] | None = None,
 ) -> WriterDocument:
     """Convert the established Markdown subset to Writer IR."""
     return parse_document_markdown(
         markdown,
         document_id=document_id,
         stage=stage,
+        media_assets=MediaAssetLibrary.model_validate(media_assets) if media_assets is not None else None,
     )
 
 

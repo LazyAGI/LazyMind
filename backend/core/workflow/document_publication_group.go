@@ -22,6 +22,7 @@ type DocumentPublicationTargetInput struct {
 	ConnectionID     string `json:"connection_id,omitempty"`
 	Title            string `json:"title,omitempty"`
 	ParentURI        string `json:"parent_uri,omitempty"`
+	Template         string `json:"template,omitempty"`
 	RetryOperationID string `json:"retry_operation_id,omitempty"`
 }
 type DocumentPublicationGroupRequest struct {
@@ -41,6 +42,7 @@ type DocumentPublicationTargetState struct {
 	OperationHash   string                     `json:"operation_hash,omitempty"`
 	Title           string                     `json:"title,omitempty"`
 	ParentURI       string                     `json:"parent_uri,omitempty"`
+	Template        string                     `json:"template,omitempty"`
 }
 type DocumentPublicationGroupState struct {
 	PublicationID      string                           `json:"publication_id,omitempty"`
@@ -50,7 +52,7 @@ type DocumentPublicationGroupState struct {
 }
 
 func validPublicationTarget(input DocumentPublicationTargetInput) bool {
-	if len(input.ConnectionID) > 255 || len(input.Title) > 512 || len(input.ParentURI) > 2048 || len(input.RetryOperationID) > 64 {
+	if len(input.ConnectionID) > 255 || len(input.Title) > 512 || len(input.ParentURI) > 2048 || len(input.RetryOperationID) > 64 || len(input.Template) > 128 {
 		return false
 	}
 	switch input.Provider {
@@ -137,7 +139,7 @@ func CreateDocumentPublicationGroup(ctx context.Context, db *gorm.DB, owner, art
 			return nil
 		}
 		for _, target := range request.Targets {
-			input := DocumentPublicationInput{PublicationID: groupID, ConnectionID: target.ConnectionID, ArtifactID: artifactID, OwnerUserID: owner, SessionID: session.ID, SlotID: revision.SlotID, ListIndex: revision.ListIndex, BaseRevision: request.BaseRevision, BaseDraftVersion: request.BaseDraftVersion, IdempotencyKey: groupID + ":" + target.Provider, Provider: target.Provider, Title: target.Title, ParentURI: target.ParentURI, AllowBound: true}
+			input := DocumentPublicationInput{PublicationID: groupID, ConnectionID: target.ConnectionID, ArtifactID: artifactID, OwnerUserID: owner, SessionID: session.ID, SlotID: revision.SlotID, ListIndex: revision.ListIndex, BaseRevision: request.BaseRevision, BaseDraftVersion: request.BaseDraftVersion, IdempotencyKey: groupID + ":" + target.Provider, Provider: target.Provider, Title: target.Title, ParentURI: target.ParentURI, Template: target.Template, AllowBound: true}
 			op, _, err := prepareDocumentPublication(ctx, tx, input)
 			if err != nil {
 				return err
@@ -167,7 +169,16 @@ func CreateDocumentPublicationGroup(ctx context.Context, db *gorm.DB, owner, art
 			if err := publicationBindingQuery(tx, op).First(&binding).Error; err != nil {
 				return err
 			}
-			if binding.LastSuccessHash == op.SourceHash && len(binding.TargetDocument) > 0 {
+			unchanged := binding.LastSuccessHash == op.SourceHash && len(binding.TargetDocument) > 0
+			if unchanged && op.Template != "" {
+				// A presentation change still needs a provider write when the prose is unchanged.
+				var matchingTemplate int64
+				if err := tx.Model(&DocumentPublicationOperation{}).Where("id = ? AND template = ?", binding.LastOperationID, op.Template).Count(&matchingTemplate).Error; err != nil {
+					return err
+				}
+				unchanged = matchingTemplate > 0
+			}
+			if unchanged {
 				receipt, _ := json.Marshal(DocumentPublicationReceipt{Provider: op.Provider, TargetDocument: binding.TargetDocument, NoLocalChange: true})
 				values := map[string]any{"status": "succeeded", "receipt_json": json.RawMessage(receipt)}
 				clearPublicationPayload(values)
@@ -312,6 +323,7 @@ func ReadDocumentPublicationGroup(ctx context.Context, db *gorm.DB, owner, artif
 					}
 				}
 				state.ParentURI = op.ParentURI
+				state.Template = op.Template
 				if state.ConnectionID == "" {
 					state.ConnectionID = op.ConnectionID
 				}

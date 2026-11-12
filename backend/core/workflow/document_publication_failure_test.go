@@ -13,16 +13,27 @@ import (
 	appLog "lazymind/core/log"
 )
 
-func TestDocumentPublicationReportsConversionFailureBeforeWriting(t *testing.T) {
-	for _, provider := range []string{"feishu", "notion", "github", "wechat", "obsidian"} {
-		t.Run(provider, func(t *testing.T) {
+func TestDocumentPublicationReportsFailureReasons(t *testing.T) {
+	for _, test := range []struct{ provider, code string }{
+		{"feishu", "DOCUMENT_CONVERSION_FAILED"},
+		{"notion", "DOCUMENT_CONVERSION_FAILED"},
+		{"github", "DOCUMENT_CONVERSION_FAILED"},
+		{"wechat", "DOCUMENT_CONVERSION_FAILED"},
+		{"obsidian", "DOCUMENT_CONVERSION_FAILED"},
+		{"wechat", "WECHAT_BODY_IMAGE_TOO_LARGE"},
+		{"wechat", "WECHAT_IMAGE_FORMAT_UNSUPPORTED"},
+		{"wechat", "WECHAT_HTML_TOO_LARGE"},
+	} {
+		t.Run(test.provider+"/"+test.code, func(t *testing.T) {
+			provider := test.provider
+			write := test.code != "DOCUMENT_CONVERSION_FAILED"
 			var logs bytes.Buffer
 			previousLogger := appLog.Logger
 			appLog.Logger = zerolog.New(&logs)
 			t.Cleanup(func() { appLog.Logger = previousLogger })
 			f, input := publicationFixture(t, false)
 			input.Provider = provider
-			conversions := 0
+			failures := 0
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				w.Header().Set("Content-Type", "application/json")
 				switch r.URL.Path {
@@ -42,12 +53,20 @@ func TestDocumentPublicationReportsConversionFailureBeforeWriting(t *testing.T) 
 						Reference string `json:"reference"`
 					}
 					_ = json.NewDecoder(r.Body).Decode(&request)
-					if request.Reference != "builtin:document.convert_document.v1" {
-						t.Errorf("conversion failure must not call external write: %s", request.Reference)
+					if write && request.Reference == documentConvertReference {
+						json.NewEncoder(w).Encode(map[string]any{"result": map[string]any{"provider": provider, "format": "html", "content": "<p>Draft</p>", "source_document": map[string]any{"title": "Draft"}, "media_references": map[string]any{}}})
+						return
 					}
-					conversions++
+					reference, code := documentConvertReference, "WORKFLOW_ACTION_INVALID"
+					if write {
+						reference, code = "builtin:document.write_document.v1", test.code
+					}
+					if request.Reference != reference {
+						t.Errorf("unexpected action: %s", request.Reference)
+					}
+					failures++
 					w.WriteHeader(http.StatusUnprocessableEntity)
-					_, _ = w.Write([]byte(`{"detail":{"code":"WORKFLOW_ACTION_INVALID","message":"private provider details"}}`))
+					json.NewEncoder(w).Encode(map[string]any{"detail": map[string]any{"code": code, "message": "private provider details"}})
 				default:
 					t.Errorf("unexpected request %s", r.URL.Path)
 					w.WriteHeader(http.StatusNotFound)
@@ -59,17 +78,17 @@ func TestDocumentPublicationReportsConversionFailureBeforeWriting(t *testing.T) 
 			body := DocumentPublishRequest{Action: "publish_document", BaseRevision: &input.BaseRevision,
 				BaseDraftVersion: input.BaseDraftVersion, Input: &DocumentPublishInput{Provider: provider, IdempotencyKey: input.IdempotencyKey}}
 			result, op, err := PublishDocumentArtifact(t.Context(), f.db.DB, "owner", f.currentRevisionID, body, nil)
-			if err == nil || op == nil || publicationFailure(err).code != "DOCUMENT_CONVERSION_FAILED" {
+			if err == nil || op == nil || publicationFailure(err).code != test.code {
 				t.Fatalf("failure=%v operation=%#v", err, op)
 			}
 			recorder := httptest.NewRecorder()
 			replyPublicationResult(recorder, result, op, err)
-			if !strings.Contains(recorder.Body.String(), "DOCUMENT_CONVERSION_FAILED") || strings.Contains(recorder.Body.String(), "private provider details") {
+			if !strings.Contains(recorder.Body.String(), test.code) || strings.Contains(recorder.Body.String(), "private provider details") {
 				t.Fatalf("public failure=%s", recorder.Body.String())
 			}
 			var stored orm.DocumentPublicationOperation
 			mustPublicationErrorNil(t, f.db.First(&stored, "id = ?", op.ID).Error)
-			if stored.Status != "failed_no_write" || stored.ErrorCode != "DOCUMENT_CONVERSION_FAILED" {
+			if stored.Status != "failed_no_write" || stored.ErrorCode != test.code {
 				t.Fatalf("durable status=%s code=%s", stored.Status, stored.ErrorCode)
 			}
 			var event map[string]any
@@ -85,8 +104,8 @@ func TestDocumentPublicationReportsConversionFailureBeforeWriting(t *testing.T) 
 				}
 			}
 			_, _, replayErr := PublishDocumentArtifact(t.Context(), f.db.DB, "owner", f.currentRevisionID, body, nil)
-			if replayErr == nil || publicationFailure(replayErr).code != stored.ErrorCode || conversions != 1 {
-				t.Fatalf("replay=%v conversions=%d", replayErr, conversions)
+			if replayErr == nil || publicationFailure(replayErr).code != stored.ErrorCode || failures != 1 {
+				t.Fatalf("replay=%v failures=%d", replayErr, failures)
 			}
 		})
 	}

@@ -51,7 +51,7 @@ function mountEditor() {
   return () => action;
 }
 
-it('shares one account request per provider across the menu and dialog on mount, focus and manual refresh', async () => {
+it('shares account requests across the menu and dialog, refreshing only on demand', async () => {
   const action = mountEditor();
   await waitFor(() => expect(action()?.menu?.[0].disabled).toBe(false));
   expect(connections).toHaveBeenCalledTimes(2);
@@ -59,14 +59,18 @@ it('shares one account request per provider across the menu and dialog on mount,
   expect(await screen.findByRole('checkbox', { name: 'Notion' })).toBeEnabled();
   expect(connections).toHaveBeenCalledTimes(2);
   authorized = false;
-  fireEvent.focus(window);
+  await act(async () => { fireEvent.focus(window); });
+  expect(screen.getByRole('checkbox', { name: 'Notion' })).toBeEnabled();
+  expect(action()?.menu?.[0].disabled).toBe(false);
+  expect(connections).toHaveBeenCalledTimes(2);
+  fireEvent.click(await screen.findByRole('button', { name: 'Refresh' }));
   await waitFor(() => {
     expect(screen.getByRole('checkbox', { name: 'Notion' })).toBeDisabled();
     expect(action()?.menu?.[0].disabled).toBe(true);
   });
   expect(connections).toHaveBeenCalledTimes(4);
   authorized = true;
-  fireEvent.click(screen.getByRole('button', { name: 'Refresh' }));
+  fireEvent.click(await screen.findByRole('button', { name: 'Refresh' }));
   // The menu is registered in an effect after the dialog publishes its choices.
   await waitFor(() => {
     expect(screen.getByRole('checkbox', { name: 'Notion' })).toBeEnabled();
