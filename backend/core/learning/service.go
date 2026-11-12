@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"math"
-	"os"
 	"sort"
 	"strings"
 	"time"
@@ -46,13 +45,9 @@ func buildLegacyCacheKey(capability, text, sourceLanguage, targetLanguage, conte
 
 type Service struct{ db *gorm.DB }
 
-func LocalAvailable() bool {
-	switch strings.ToLower(strings.TrimSpace(os.Getenv("LAZYMIND_VOCABULARY_ENABLED"))) {
-	case "", "1", "true", "yes", "on":
-		return true
-	}
-	return false
-}
+// Learning collections use the application database in every deployment.
+func LocalAvailable() bool { return true }
+
 func requireLocal() error {
 	if !LocalAvailable() {
 		return errors.New("learning feature requires the Desktop local backend")

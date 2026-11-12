@@ -26,9 +26,6 @@ type ReviewLogExport struct {
 }
 
 func (s *Service) ActiveProfile(ctx context.Context, owner string) (FSRSProfile, error) {
-	if err := requireLocalRuntime(); err != nil {
-		return FSRSProfile{}, err
-	}
 	var row FSRSProfile
 	err := s.db.WithContext(ctx).Where("owner_id = ? AND active = ?", owner, true).First(&row).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -41,9 +38,6 @@ func (s *Service) ActiveProfile(ctx context.Context, owner string) (FSRSProfile,
 	return row, err
 }
 func (s *Service) SaveProfile(ctx context.Context, owner string, in FSRSProfile) (FSRSProfile, error) {
-	if err := requireLocalRuntime(); err != nil {
-		return FSRSProfile{}, err
-	}
 	var weights fsrs.Weights
 	if err := json.Unmarshal([]byte(in.WeightsJSON), &weights); err != nil {
 		return FSRSProfile{}, errors.New("FSRS weights must contain 19 numeric values for go-fsrs/v3")
@@ -72,9 +66,6 @@ func (s *Service) SaveProfile(ctx context.Context, owner string, in FSRSProfile)
 	})
 }
 func (s *Service) ExportReviewLogs(ctx context.Context, owner string) ([]ReviewLogExport, error) {
-	if err := requireLocalRuntime(); err != nil {
-		return nil, err
-	}
 	var rows []struct {
 		CardID      string
 		WordID      string
@@ -94,9 +85,6 @@ func (s *Service) ExportReviewLogs(ctx context.Context, owner string) ([]ReviewL
 	return out, nil
 }
 func (s *Service) ReviewHistory(ctx context.Context, owner, wordID string) ([]ReviewLogExport, error) {
-	if err := requireLocalRuntime(); err != nil {
-		return nil, err
-	}
 	var rows []struct {
 		CardID      string
 		Rating      int
@@ -114,14 +102,11 @@ func (s *Service) ReviewHistory(ctx context.Context, owner, wordID string) ([]Re
 	return out, nil
 }
 func (s *Service) Stats(ctx context.Context, owner string) (ReviewStats, error) {
-	if err := requireLocalRuntime(); err != nil {
-		return ReviewStats{}, err
-	}
 	var stats ReviewStats
-	if err := s.db.WithContext(ctx).Model(&Word{}).Where("owner_id = ? AND provider = ? AND archived_at IS NULL", owner, "local").Count(&stats.Total).Error; err != nil {
+	if err := s.db.WithContext(ctx).Model(&Word{}).Where("owner_id = ? AND archived_at IS NULL", owner).Count(&stats.Total).Error; err != nil {
 		return stats, err
 	}
-	s.db.WithContext(ctx).Model(&Word{}).Where("owner_id = ? AND provider = ? AND mastered_at IS NOT NULL", owner, "local").Count(&stats.Mastered)
+	s.db.WithContext(ctx).Model(&Word{}).Where("owner_id = ? AND mastered_at IS NOT NULL", owner).Count(&stats.Mastered)
 	now := time.Now().UTC()
 	var cards []ReviewCard
 	s.db.WithContext(ctx).Where("owner_id = ? AND suspended_at IS NULL", owner).Find(&cards)
@@ -153,7 +138,7 @@ func (s *Service) Stats(ctx context.Context, owner string) (ReviewStats, error) 
 }
 
 func (s *Service) AnkiStats(ctx context.Context, owner string) (ReviewStats, error) {
-	setting, err := s.Setting(ctx, owner)
+	setting, err := s.ankiSetting(ctx, owner)
 	if err != nil {
 		return ReviewStats{}, err
 	}
@@ -204,7 +189,7 @@ func (s *Service) AnkiStats(ctx context.Context, owner string) (ReviewStats, err
 }
 
 func (s *Service) ExportAnkiReviewLogs(ctx context.Context, owner string) ([]ReviewLogExport, error) {
-	setting, err := s.Setting(ctx, owner)
+	setting, err := s.ankiSetting(ctx, owner)
 	if err != nil {
 		return nil, err
 	}
@@ -282,7 +267,7 @@ func (s *Service) NextAnkiQuestion(ctx context.Context, owner string) (*ReviewQu
 }
 
 func (s *Service) NextAnkiQuestions(ctx context.Context, owner string, limit int) ([]ReviewQuestion, error) {
-	setting, err := s.Setting(ctx, owner)
+	setting, err := s.ankiSetting(ctx, owner)
 	if err != nil {
 		return nil, err
 	}
@@ -326,7 +311,7 @@ func (s *Service) ReviewAnki(ctx context.Context, owner string, req ReviewReques
 	if err != nil {
 		return err
 	}
-	setting, err := s.Setting(ctx, owner)
+	setting, err := s.ankiSetting(ctx, owner)
 	if err != nil {
 		return err
 	}

@@ -10,7 +10,7 @@ describe("isVocabularyEnabled", () => {
     expect(isVocabularyEnabled({ VITE_VOCABULARY_ENABLED: value })).toBe(true);
   });
 
-  it.each(["0", "false", "off", "unexpected"])("rejects %s", (value) => {
-    expect(isVocabularyEnabled({ VITE_VOCABULARY_ENABLED: value })).toBe(false);
+  it.each(["cloud", "local", "desktop"])("keeps vocabulary available in %s mode despite the legacy flag", (mode) => {
+    expect(isVocabularyEnabled({ VITE_LAZYMIND_MODE: mode, VITE_VOCABULARY_ENABLED: "false" })).toBe(true);
   });
 });

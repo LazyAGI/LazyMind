@@ -28,6 +28,18 @@ describe("AddVocabularyModal", () => {
     fireEvent.click(screen.getByRole("button",{name:/OK|确 定|确定/}));
     await waitFor(()=>expect(addVocabularyWord).toHaveBeenCalledWith(expect.objectContaining({provider:"local",wordbook_ids:["local-book"],document_id:"document-1"})));
   });
+  it("excludes learning collections that cannot accept vocabulary", async () => {
+    vi.mocked(resolveVocabularySelection).mockResolvedValueOnce({term:"localword",sentence:"A localword example.",provider:"local",dictionary:[],wordbooks:[
+      {id:"other",name:"Math collection",description:"",capability_key:"math",question_types:[]},
+      {id:"english",name:"English",description:"",capability_key:"english_definition",question_types:[]},
+    ]});
+    vi.mocked(addVocabularyWord).mockResolvedValueOnce({queued:false,word:{} as never});
+    render(<AddVocabularyModal selection={{text:"localword",page:1}} datasetId="dataset-1" documentId="document-1" onClose={vi.fn()} onAdded={vi.fn()}/>);
+    await screen.findByDisplayValue("localword");
+    expect(screen.queryByText("Math collection")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button",{name:/OK|确 定|确定/}));
+    await waitFor(()=>expect(addVocabularyWord).toHaveBeenLastCalledWith(expect.objectContaining({wordbook_ids:["english"]})));
+  });
   it("preserves the reader's translated source context when saving a word", async () => {
     const sentence = "Diverse workloads require flexible compute.";
     vi.mocked(resolveVocabularySelection).mockResolvedValueOnce({term:"workloads",sentence,provider:"local",dictionary:[],wordbooks:[{id:"book",name:"Local",description:"",capability_key:"",question_types:[]}]});

@@ -25,6 +25,17 @@ describe("cloud vocabulary connections",()=>{
     await waitFor(()=>expect(api.saveCloudConnection).toHaveBeenCalledWith("maimemo",{enabled:true,target_id:"target",target_name:"My book",add_to_study:false}));
     expect(await within(card).findByText("savedEnabled")).toBeInTheDocument();
   });
+  it("keeps the provider guide available with a saved connection", async () => {
+    render(<CloudVocabularyConnections />);
+    await open();
+    const dialog = await screen.findByRole("dialog");
+    const guide = within(dialog).getByText("setupGuide").closest("details")!;
+    expect(guide).not.toHaveAttribute("open");
+    expect(within(guide).getByText("maimemoTokenHelp")).toBeInTheDocument();
+    expect(within(guide).getByText("guideTarget")).toBeInTheDocument();
+    expect(within(guide).getByText("guideLocal")).toBeInTheDocument();
+    expect(api.saveCloudConnection).not.toHaveBeenCalled();
+  });
   it("requires verified credentials and a target before saving a new connection",async()=>{
     vi.mocked(api.listCloudConnections).mockResolvedValue([]);vi.mocked(api.testCloudConnection).mockResolvedValueOnce([]);
     render(<CloudVocabularyConnections/>);const card=await open();

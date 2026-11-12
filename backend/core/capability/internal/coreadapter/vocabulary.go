@@ -34,16 +34,7 @@ func (v *VocabularyTrainer) ListVocabularyWordbooks(ctx context.Context, call ca
 func (v *VocabularyTrainer) ListVocabularyWords(ctx context.Context, call capability.InvocationContext, input capability.ListVocabularyWordsInput) (capability.ListVocabularyWordsResult, error) {
 	if input.DueOnly {
 		owner := strings.TrimSpace(call.Principal.UserID)
-		setting, err := v.service.Setting(ctx, owner)
-		if err != nil {
-			return capability.ListVocabularyWordsResult{}, err
-		}
-		var questions []vocabulary.ReviewQuestion
-		if setting.SelectedProvider == vocabulary.ProviderAnki {
-			questions, err = v.service.NextAnkiQuestions(ctx, owner, 20)
-		} else {
-			questions, err = v.service.NextQuestions(ctx, owner, 20)
-		}
+		questions, err := v.service.NextQuestions(ctx, owner, 20)
 		if err != nil {
 			return capability.ListVocabularyWordsResult{}, err
 		}
@@ -55,7 +46,7 @@ func (v *VocabularyTrainer) ListVocabularyWords(ctx context.Context, call capabi
 			seen[q.Word.ID] = true
 			items = append(items, capability.VocabularyWord{ID: q.Word.ID, Term: q.Word.Term, Meaning: q.Word.Meaning, PartOfSpeech: q.Word.PartOfSpeech, State: q.State, ReviewCount: q.Reps, Lapses: q.Lapses, Tags: q.Tags})
 		}
-		return capability.ListVocabularyWordsResult{Provider: setting.SelectedProvider, Items: items, Total: len(items)}, nil
+		return capability.ListVocabularyWordsResult{Provider: "local", Items: items, Total: len(items)}, nil
 	}
 	provider, rows, err := v.service.ChatWords(ctx, strings.TrimSpace(call.Principal.UserID), input.WordbookID, input.Search)
 	if err != nil {
@@ -99,23 +90,14 @@ func (v *VocabularyTrainer) NextVocabularyReview(ctx context.Context, call capab
 		result.Questions = questions
 		return result, nil
 	}
-	setting, err := v.service.Setting(ctx, owner)
-	if err != nil {
-		return capability.NextVocabularyReviewResult{}, err
-	}
-	var q *vocabulary.ReviewQuestion
-	if setting.SelectedProvider == vocabulary.ProviderAnki {
-		q, err = v.service.NextAnkiQuestion(ctx, owner)
-	} else {
-		q, err = v.service.NextQuestion(ctx, owner)
-	}
+	q, err := v.service.NextQuestion(ctx, owner)
 	if err != nil {
 		return capability.NextVocabularyReviewResult{}, err
 	}
 	if q == nil {
-		return capability.NextVocabularyReviewResult{Provider: setting.SelectedProvider}, nil
+		return capability.NextVocabularyReviewResult{Provider: "local"}, nil
 	}
-	return capability.NextVocabularyReviewResult{Available: true, Provider: setting.SelectedProvider, CardID: q.CardID, WordID: q.Word.ID, Prompt: q.Prompt, Term: q.Word.Term, Answer: q.Answer, Remaining: q.Remaining, RowVersion: q.RowVersion, PreviewedAt: q.PreviewedAt}, nil
+	return capability.NextVocabularyReviewResult{Available: true, Provider: "local", CardID: q.CardID, WordID: q.Word.ID, Prompt: q.Prompt, Term: q.Word.Term, Answer: q.Answer, Remaining: q.Remaining, RowVersion: q.RowVersion, PreviewedAt: q.PreviewedAt}, nil
 }
 
 func containsString(values []string, target string) bool {
@@ -157,8 +139,6 @@ func (v *VocabularyTrainer) AnswerVocabularyReview(ctx context.Context, call cap
 	req := vocabulary.ReviewRequest{CardID: input.CardID, Rating: input.Rating, Response: input.Response, RowVersion: input.RowVersion, PreviewedAt: input.PreviewedAt, IdempotencyKey: uuid.NewString()}
 	if input.SessionID != "" {
 		err = v.service.RecordSessionAnswer(ctx, owner, input.SessionID, input.WordID, input.Term, req)
-	} else if input.Provider == vocabulary.ProviderAnki {
-		err = v.service.ReviewAnki(ctx, owner, req)
 	} else {
 		err = v.service.Review(ctx, owner, input.WordID, req)
 	}
