@@ -31,10 +31,13 @@ export function workflowTool(original: ToolDefinition, hooks: ToolHooks): ToolDe
         const control = readControl(value)
         const fields = object(object(value)?.structuredContent)
         const executionId = fields?.execution_id ?? object(fields?.execution)?.execution_id
+        const modelOperation = hooks.operation === 'generation_claim' || hooks.operation === 'generation_respond'
+        const runId = control?.session_id ?? (modelOperation && typeof fields?.session_id === 'string' ? fields.session_id : undefined)
         const hostSessionId = hooks.hostSessionId
-        return control ? { lazymind_workflow: { runId: control.session_id,
+        return runId ? { lazymind_workflow: { runId,
           ...(hostSessionId ? { hostSessionId } : {}), ...(hooks.operation ? { operation: hooks.operation } : {}),
           ...(typeof executionId === 'string' ? { executionId } : {}),
+          ...(typeof fields?.job_id === 'string' && typeof fields.status === 'string' ? { modelJobId: fields.job_id, modelJobStatus: fields.status } : {}),
         }, original: previous ?? null } : previous ?? null
       },
     },

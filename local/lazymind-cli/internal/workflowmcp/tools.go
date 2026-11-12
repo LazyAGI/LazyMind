@@ -20,6 +20,7 @@ import (
 const maxLocalArtifactBytes = 20 << 20
 
 var ToolNames = []string{
+	"workflow.generation.claim", "workflow.generation.respond",
 	"workflow.action.get", "workflow.action.respond", "workflow.action.cancel", "workflow.edit.context", "workflow.edit.commit",
 	"workflow.list",
 	"workflow.get",
@@ -113,6 +114,7 @@ func Register(server *mcp.Server, client *Client) {
 	readOnly, write := annotations(true), annotations(false)
 	registerExecutionTools(server, client)
 	registerActionTools(server, client)
+	registerGenerationTools(server, client)
 	registerEditTools(server, client)
 	registerInputAnswer(server, client)
 	mcp.AddTool(server, &mcp.Tool{Name: "workflow.list", Title: "List LazyMind Workflows",
@@ -123,7 +125,7 @@ func Register(server *mcp.Server, client *Client) {
 			return nil, value, err
 		})
 	mcp.AddTool(server, &mcp.Tool{Name: "workflow.get", Title: "Get a LazyMind Workflow",
-		Description: "Read a published Workflow revision and its startup_contract. Use exact input_materials IDs and clarification_fields when starting. The current step contract is returned by workflow.step.begin/claim.", Annotations: readOnly},
+		Description: "Read a published Workflow revision and its startup_contract. Use exact input_materials IDs, package-declared JSON schemas and clarification_fields when starting. input_requirements preserves per-step all/any source alternatives. The current step contract is returned by workflow.step.begin/claim.", Annotations: readOnly},
 		func(ctx context.Context, _ *mcp.CallToolRequest, input GetInput) (*mcp.CallToolResult, map[string]any, error) {
 			value, err := client.Get(ctx, input.WorkflowID, input.RevisionID)
 			return nil, value, err
@@ -194,7 +196,7 @@ func Register(server *mcp.Server, client *Client) {
 			return nil, value, err
 		})
 	mcp.AddTool(server, &mcp.Tool{Name: "workflow.step.begin", Title: "Begin a LazyMind Workflow step",
-		Description: "Begin a returned ready, retryable or rewindable step when admission.can_begin is true and receive its pinned contract and execution_handle. Reuse command_id with identical arguments after an uncertain result. User-requested retries use retry_origin=user. Native execution returns executor_host=lazymind without a handle. contract_directory writes the complete contract to a local handoff file. Legacy native wrapper names describe operations to fulfill with host capabilities or declared tools.", Annotations: write},
+		Description: "Begin a returned ready, retryable or rewindable step and receive its pinned contract and execution_handle. Automatic progression requires admission.can_begin=true. An explicit user request to rerun the exact pending-review projection.rewindable step uses retry_origin=user and actual user_input; Core replaces its pending result and review, then requires review after execution. Reuse command_id with identical arguments after an uncertain result. User-requested retries use retry_origin=user. Native execution returns executor_host=lazymind without a handle. contract_directory writes the complete contract to a local handoff file. Legacy native wrapper names describe operations to fulfill with host capabilities or declared tools.", Annotations: write},
 		func(ctx context.Context, _ *mcp.CallToolRequest, input BeginInput) (*mcp.CallToolResult, BeginResult, error) {
 			value, err := withContractFile(input.ContractDirectory, func() (BeginResult, error) { return client.Begin(ctx, input) })
 			return nil, value, err

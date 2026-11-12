@@ -48,6 +48,7 @@ from lazyllm.tools.tools.search import (
     TavilySearch,
 )
 from lazymind.chat.engine.tools.lazy_kb import KBToolkit
+from lazymind.provider_request import request_read_timeout
 from .artifacts import (
     WRITER_BLOCK_SCHEMA,
     WRITER_IR_SCHEMA,
@@ -215,7 +216,7 @@ _EXPLICIT_REWRITE_REQUEST = re.compile(
     re.IGNORECASE,
 )
 _EXPLICIT_NEW_DOCUMENT_REQUEST = re.compile(
-    r'(?:(?<![改重续扩])写|撰写|创作|生成|产出).{0,32}'
+    r'(?:(?<![改重续扩])写(?!回)|撰写|创作|生成|产出).{0,32}'
     r'(?:文章|报告|小说|故事|文案|稿件|正文|文档)'
     r'|(?:\b(?:write|draft|create|produce)\b.{0,32}'
     r'\b(?:article|report|story|novel|copy|draft|document)\b)',
@@ -601,6 +602,7 @@ def stream_short_document(
         context=writing_context_path,
         visual_plan=visual_plan_path or None,
         media_assets=media_assets_path or None,
+        idle_timeout=request_read_timeout(),
     ) as stream:
         for delta in stream:
             if on_delta is not None:
@@ -644,6 +646,7 @@ def stream_whole_document(
             task=writing_task_path, context=writing_context_path,
             instructions=section_instructions_path or None,
             visual_plan=visual_plan_path or None, media_assets=media_assets_path or None,
+            idle_timeout=request_read_timeout(),
             **({'defer_media': True} if defer_media else {}),
         ) as stream:
             for delta in stream:
@@ -1692,7 +1695,8 @@ class WriterWritingCapabilities:
         stream = None
         status = 'error'
         try:
-            with planning.stream_outline(task=task_path, context=context_path) as stream:
+            with planning.stream_outline(task=task_path, context=context_path,
+                                         idle_timeout=request_read_timeout()) as stream:
                 for delta in stream:
                     try:
                         on_delta(delta)
@@ -2364,6 +2368,10 @@ class WriterWritingCapabilities:
             1.0,
             float(os.getenv('LAZYMIND_WRITER_SECTION_STREAM_IDLE_TIMEOUT', '180')),
         )
+        model_timeout = request_read_timeout()
+        if model_timeout is not None:
+            # External Agents return a complete response after their generation finishes.
+            section_stream_idle_timeout = max(section_stream_idle_timeout, model_timeout)
         first_section_idle_timeout = max(
             section_stream_idle_timeout,
             float(os.getenv('LAZYMIND_WRITER_FIRST_SECTION_IDLE_TIMEOUT', '180')),

@@ -1,14 +1,18 @@
 import type { TabDef, WorkflowSession } from '@/modules/chat/store/workflowPanel';
 import { resolvePendingApprovalStep } from './workflowApproval';
 
-export type WorkflowContinueAction = { kind: 'approval' | 'resume' | 'completed' | 'regenerate'; stepId: string };
+export type WorkflowContinueAction = { kind: 'approval' | 'resume' | 'completed' | 'regenerate' | 'advance'; stepId: string };
 
 /** Waiting alone is not a checkpoint: automatic dispatch also passes through it. */
 export function resolveWorkflowContinueAction(
   session: Pick<WorkflowSession, 'status' | 'current_step_id' | 'steps' | 'projection'>,
   displayStatus: string,
   activeTab?: TabDef,
+  externalStepId?: string,
 ): WorkflowContinueAction | undefined {
+  if (externalStepId && (displayStatus === 'active' || displayStatus === 'waiting')) {
+    return { kind: 'advance', stepId: externalStepId };
+  }
   if (displayStatus === 'active' || displayStatus === 'waiting_input') return undefined;
   const completedStep = resolveCompletedContinueStep(session, activeTab);
   if (completedStep) return { kind: 'completed', stepId: completedStep };

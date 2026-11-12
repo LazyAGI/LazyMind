@@ -32,6 +32,7 @@ when_to_use: >
 runtime:
   execution:
     version: '1'
+    model_executor: external-agent
     skills:
     - scenario/execution.md
     constraints:

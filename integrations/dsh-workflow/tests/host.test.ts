@@ -184,6 +184,35 @@ it('yields automatic execution while Core runs a native step', async () => {
   expect((await f.execute('shell', f.unrelated)).isError).toBe(false)
 })
 
+it('consumes an already completed model notification without blocking the next queued model', async () => {
+  const f = await fixture({ native: true })
+  await f.execute('mcp__lazymind__workflow_start')
+  await f.execute('mcp__lazymind__workflow_step_begin')
+  const control = { ...await f.bridge.state('run-1', new AbortController().signal),
+    binding: { bound: true, driver_session_id: f.root.session.id, connector_id: 'connector' } }
+  vi.mocked(f.bridge.state).mockResolvedValue(control)
+  const action = { id: 'finished-model', session_id: 'run-1', native_session_id: f.root.session.id,
+    connector_id: 'connector', kind: 'model_generate' as const, execution_id: 'model-1', status: 'accepted' }
+  vi.mocked(f.bridge.action).mockResolvedValue({ action: { ...action, consumed_at: 'now' }, control })
+  const messages = [{ source: { kind: 'user', rpcId: action.id }, content: [] }] as unknown as UserMessage[]
+  expect(await f.turn(f.root, messages)).toEqual({ kind: 'enter', messages: [] })
+  const pending = [{ id: 'first' }, { id: 'last' }] as UserMessage[]
+  const followup = vi.fn((message: UserMessage) => { pending.push(message) })
+  Object.assign(f.root, { inbox: { nextTurn: pending, remove: (id: string) => {
+    const index = pending.findIndex(message => message.id === id)
+    if (index < 0) return false
+    pending.splice(index, 1)
+    return true
+  } }, followup })
+  f.ctx.emit(scopeTarget(f.root, f.root), 'agent/status', { agent: f.root, status: 'idle' })
+  expect(pending.map(message => message.id)).toEqual(['first', 'last'])
+  expect(followup).toHaveBeenCalledOnce()
+  vi.mocked(f.bridge.action).mockResolvedValue({ action: { ...action, id: 'next-model', execution_id: 'model-2' }, control })
+  const next = [{ source: { kind: 'user', rpcId: 'next-model' }, content: [] }] as unknown as UserMessage[]
+  expect(await f.turn(f.root, next)).toEqual({ kind: 'enter', messages: next })
+  expect(f.shell).not.toHaveBeenCalled()
+})
+
 it('does not bind historical discovery reads to the current driver', async () => {
   const f = await fixture()
   vi.mocked(f.bridge.state).mockRejectedValue(new Error('legacy run has no control binding'))

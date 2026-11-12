@@ -26,7 +26,7 @@ func stateInstruction(state Projection) string {
 		if state.Control["input_request"] != nil {
 			return "Ask the exact questions in control.input_request and wait for the user's actual reply. Save it with workflow.input.answer using the returned artifact_id, revision and state_version. Read workflow.state afterward."
 		}
-		return "Human review is required. Tell the user to review in the Workflow panel, then END this turn. The user approves the review. Read workflow.state on a new notification or explicit user input."
+		return "Human review is required. If the user explicitly asks to rerun the step awaiting review, call workflow.step.begin for that exact projection.rewindable step with retry_origin=user and their actual user_input. Core replaces the pending result and review, then requires review after execution. Otherwise tell the user to review in the Workflow panel and END this turn. Never approve the result yourself or advance another step while review is pending."
 	case "stopped":
 		return "The Workflow is stopped. END this turn. On an explicit user request to continue, call workflow.session.resume. Claim a returned execution_id with workflow.step.claim, or read workflow.state."
 	case "completed":

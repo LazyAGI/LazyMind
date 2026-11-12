@@ -68,6 +68,17 @@ html.workflow-run-embed #app {
 
   .workflow-panel__header, .workflow-panel__tabs, .workflow-panel__footer,
   .workflow-panel__approval-bar { flex-shrink: 0; }
+
+  // Bound iframe tabs so document surfaces receive the available scroll height.
+  html.workflow-run-embed & {
+    .workflow-panel__body { overflow: hidden; }
+    .workflow-panel__body > [role='tabpanel']:not([hidden]) { overflow: hidden; flex: 1 1 0px; }
+    // Analysis progress and artifacts share the tab's scroll viewport.
+    .workflow-panel__body > .workflow-panel__f4-tab[role='tabpanel']:not([hidden]) {
+      overflow: hidden auto;
+      > .workflow-panel__tab-content { flex: none; overflow: visible; }
+    }
+  }
 }
 
 // Scoped to the external presentation opt-in; native panels retain upstream styles.

@@ -782,7 +782,8 @@ func (h Handler) Prepare(w http.ResponseWriter, r *http.Request) {
 	}
 	plan := json.RawMessage(`{"status":"ready"}`)
 	if workflow, packageErr := h.Store.GetWorkflowPackage(r.Context(), owner, req.WorkflowID, req.RevisionID); packageErr == nil {
-		if _, err := h.Store.ResolveInputBindings(r.Context(), owner, req.InputBindings, "prepare"); err != nil {
+		bindings, err := h.Store.ResolveInputBindings(r.Context(), owner, req.InputBindings, "prepare")
+		if err != nil {
 			fail(w, http.StatusUnprocessableEntity, "INVALID_INPUT_BINDINGS", err.Error(), false)
 			return
 		}
@@ -811,6 +812,31 @@ func (h Handler) Prepare(w http.ResponseWriter, r *http.Request) {
 			}
 			if items, list := raw.([]any); list && len(items) > 1 && graph.MaterialCardinalities[material] != "list" {
 				fail(w, http.StatusUnprocessableEntity, "INVALID_INPUT_BINDINGS", "multiple resources require a list material: "+material, false)
+				return
+			}
+		}
+		for _, binding := range bindings {
+			contract := graph.Runtime.InputContracts[binding.MaterialID]
+			schema, err := contract.ResolveSchema()
+			if err != nil {
+				fail(w, http.StatusUnprocessableEntity, "INVALID_WORKFLOW_GRAPH", err.Error(), false)
+				return
+			}
+			if schema == nil {
+				continue
+			}
+			resource, err := h.Store.GetInputResource(r.Context(), owner, binding.ResourceID)
+			if err != nil {
+				fail(w, http.StatusUnprocessableEntity, "INVALID_INPUT_BINDINGS", err.Error(), false)
+				return
+			}
+			var value any
+			if err := json.Unmarshal(bytes.TrimPrefix(resource.Content, []byte{0xef, 0xbb, 0xbf}), &value); err != nil {
+				fail(w, http.StatusUnprocessableEntity, "WORKFLOW_INPUT_INVALID", binding.MaterialID+": "+err.Error(), false)
+				return
+			}
+			if err := schema.Validate(value); err != nil {
+				fail(w, http.StatusUnprocessableEntity, "WORKFLOW_INPUT_INVALID", binding.MaterialID+": "+err.Error(), false)
 				return
 			}
 		}

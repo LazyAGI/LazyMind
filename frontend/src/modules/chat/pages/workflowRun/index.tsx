@@ -8,7 +8,7 @@ import { WorkflowPanel } from '@/modules/chat/components/WorkflowPanel';
 import WorkflowInputRequestCard from '@/modules/chat/components/WorkflowPanel/WorkflowInputRequest';
 import { useWorkflowStore } from '@/modules/chat/store/workflowPanel';
 import { WorkflowSessionApi } from '@/modules/chat/utils/request';
-import { controlActions, deliveryBanner, externalPanelAction, overlayInfoBanner, REVIEW_CHANGED_NOTICE, ReviewRefreshRequired, INPUT_CHANGED_NOTICE, InputRefreshRequired, INPUT_SAVED_EXTERNAL_NOTICE, INPUT_SAVED_PAUSED_NOTICE, INPUT_SAVED_NOTICE, type WorkflowActionIntent, type WorkflowPanelActionIntent } from '@/modules/chat/utils/workflowControl';
+import { controlActions, deliveryBanner, externalPanelAction, externalContinuationStep, overlayInfoBanner, REVIEW_CHANGED_NOTICE, ReviewRefreshRequired, INPUT_CHANGED_NOTICE, InputRefreshRequired, INPUT_SAVED_EXTERNAL_NOTICE, INPUT_SAVED_PAUSED_NOTICE, INPUT_SAVED_NOTICE, type WorkflowActionIntent, type WorkflowPanelActionIntent } from '@/modules/chat/utils/workflowControl';
 import { loadWorkflowRunSnapshot, watchWorkflowRun, type WorkflowRunSnapshot } from './loadRun';
 import './index.scss';
 import { workflowHostOrigin } from './hostOrigin';
@@ -167,7 +167,10 @@ export default function WorkflowRunPage({ embedded = false, sessionId: suppliedS
           onToggleExpand: embedded && hostOrigin ? toggleHostExpand : undefined,
           collapsed: embedded ? hostCollapsed : undefined,
           onToggleCollapse: embedded && hostOrigin ? toggleHostCollapse : undefined }}
-        controlAdapter={control ? { execute: async intent => { await act(intent); } } : undefined} />
+        controlAdapter={control ? {
+          execute: async intent => { await act(intent); },
+          continuationStep: () => latest.current && externalContinuationStep(latest.current.session, latest.current.control),
+        } : undefined} />
     </>}
   </main>;
 }

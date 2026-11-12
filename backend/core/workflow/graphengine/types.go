@@ -180,6 +180,7 @@ type RuntimePolicy struct {
 	CompletedActions []CompletedAction `json:"completed_actions,omitempty" yaml:"completed_actions,omitempty"`
 	// These contracts are pinned to the package revision, never inferred from its ID.
 	TriggerInputs             *[]string                 `json:"trigger_inputs,omitempty" yaml:"trigger_inputs,omitempty"`
+	InputContracts            map[string]InputContract  `json:"input_contracts,omitempty" yaml:"input_contracts,omitempty"`
 	ExecutionLimits           map[string]ExecutionLimit `json:"execution_limits,omitempty" yaml:"execution_limits,omitempty"`
 	TransactionalOutputs      bool                      `json:"transactional_outputs,omitempty" yaml:"transactional_outputs,omitempty"`
 	Publication               *PublicationPolicy        `json:"publication,omitempty" yaml:"publication,omitempty"`
@@ -204,7 +205,7 @@ func (p RuntimePolicy) IsZero() bool {
 	if p.Execution != nil {
 		return false
 	}
-	return len(p.CompletedActions) == 0 && p.TriggerInputs == nil && len(p.ExecutionLimits) == 0 && !p.TransactionalOutputs && p.Publication == nil && len(p.PublishedInputAliases) == 0 && len(p.HostExtensions) == 0 && len(p.PublisherOwnedSlots) == 0 && len(p.ExclusiveToolCapabilities) == 0 && !p.CollectsKnowledge &&
+	return len(p.CompletedActions) == 0 && p.TriggerInputs == nil && len(p.InputContracts) == 0 && len(p.ExecutionLimits) == 0 && !p.TransactionalOutputs && p.Publication == nil && len(p.PublishedInputAliases) == 0 && len(p.HostExtensions) == 0 && len(p.PublisherOwnedSlots) == 0 && len(p.ExclusiveToolCapabilities) == 0 && !p.CollectsKnowledge &&
 		p.CompletedEditStep == "" && p.CompletedEditRouting == "" && len(p.CompletedContinueSteps) == 0 && len(p.ClarificationFields) == 0 &&
 		p.AttachmentClarification == nil && p.InputCheckpoint == nil && len(p.PostStepChecks) == 0 && len(p.RecoveryInputs) == 0
 }

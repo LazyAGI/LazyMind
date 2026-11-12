@@ -71,6 +71,20 @@ func TestSharedExecutionHasOneBusinessSpecification(t *testing.T) {
 	}
 }
 
+func TestSharedExecutionAcceptsExternalModelsAndEarlierRevisions(t *testing.T) {
+	for _, modelExecutor := range []string{ExternalModelExecutor, "codex"} {
+		workflow := strings.Replace(sharedWorkflow, `version: "1"`, `version: "1"`+"\n    model_executor: "+modelExecutor, 1)
+		result := Compile(workflow, sharedState, "", ProfilePublish)
+		if !result.Valid || !result.Graph.Runtime.Execution.UsesExternalModels() {
+			t.Fatalf("%s: %+v", modelExecutor, result.Diagnostics)
+		}
+	}
+	invalid := strings.Replace(sharedWorkflow, `version: "1"`, "version: '1'\n    model_executor: unknown", 1)
+	if Compile(invalid, sharedState, "", ProfilePublish).Valid {
+		t.Fatal("unknown model executor accepted")
+	}
+}
+
 func TestSharedExecutionRejectsAlternativeBusinessProfiles(t *testing.T) {
 	for name, override := range map[string]string{
 		"prompt": "prompt: Different task", "acceptance": "acceptance_criteria: [Different requirement]",

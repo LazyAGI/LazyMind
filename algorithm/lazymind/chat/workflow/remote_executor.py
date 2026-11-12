@@ -116,6 +116,9 @@ class RemoteWorkflowExecutor:
             metadata = context.get('metadata') or {}
             task_id = str(metadata.get('task_id') or attempt_id)
             spec = await self.runtime.execution_spec(client, task_id, lease)
+            from .external_model import model_config
+            spec['llm_config'] = model_config(
+                context, self.base_url, attempt_id, lease, spec.get('llm_config'))
             task = dict(spec.get('task') or {})
             workspace = str(spec['workspace_path'])
             pathlib.Path(workspace).mkdir(parents=True, exist_ok=True)

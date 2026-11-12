@@ -10,7 +10,7 @@ import i18n from '@/i18n';
 import { hydrateWorkflowUI, type SlotRevision, type WorkflowSession, type WorkflowUI } from '@/modules/chat/store/workflowPanel';
 import { SlotEditingContext, WorkflowPanelTabActiveContext, type SlotEditingContextValue } from './slotEditingContext';
 import { WorkflowPanel } from './index';
-import { controlActions, externalPanelAction, type WorkflowActionIntent, type WorkflowPanelActionIntent, type WorkflowControlView } from '@/modules/chat/utils/workflowControl';
+import { controlActions, externalPanelAction, externalContinuationStep, type WorkflowActionIntent, type WorkflowPanelActionIntent, type WorkflowControlView } from '@/modules/chat/utils/workflowControl';
 import { loadWorkflowRunSnapshot } from '@/modules/chat/utils/loadWorkflowRun';
 import { ArtifactPreviewContext, useArtifactPreviewController } from '../ArtifactPreview/context';
 
@@ -20,7 +20,10 @@ setupAntdStaticCleanup();
 // capabilities, reviews or delivery state.
 function panelAdapter(control: WorkflowControlView, execute: (intent: WorkflowActionIntent) => Promise<void>) {
   const session = fixture.session;
-  return { execute: (intent: WorkflowPanelActionIntent) => execute(externalPanelAction(intent, session, control)) };
+  return {
+    execute: (intent: WorkflowPanelActionIntent) => execute(externalPanelAction(intent, session, control)),
+    continuationStep: () => externalContinuationStep(fixture.session, control),
+  };
 }
 
 vi.mock('../ArtifactPreview', () => ({ PreviewContent: ({ target, close }: any) => <section aria-label={target.filename}>
@@ -1320,6 +1323,33 @@ describe('external workflow surface boundary', () => {
       await act(async () => finishStop());
     },
   );
+
+  it.each([false, true])('offers idle external continuation and rechecks execution before sending with advanced=%s', async advanced => {
+    fixture.session.status = 'active';
+    fixture.session.steps?.forEach(step => Reflect.deleteProperty(step, 'id'));
+    fixture.session.projection = { display: { status: 'running', reason: 'preparing', approval_step_id: '' },
+      past: ['prepare', 'write_document'], current: [], ready: ['finish'], nodes: {
+        write_document: { execution: 'succeeded', validity: 'effective', requires_approval: false,
+          reachability: 'reachable', readiness: 'not_applicable', branch: 'active' },
+      } };
+    const control: WorkflowControlView = {
+      protocol: 'workflow.control.v1', session_id: 'layout-test', state_version: 8,
+      continuation: 'continue', reviews: [], active_executions: 0, active_execution_ids: [],
+      binding: { bound: true }, admission: { can_begin: true }, available_actions: ['continue'],
+      delivery: { id: 'finished', kind: 'continue', status: 'accepted', execution_id: 'pss-completed' },
+    };
+    const execute = vi.fn(async () => {});
+    render(<WorkflowPanel conversationId='layout-test' embedded controlAdapter={panelAdapter(control, execute)} />);
+    await screen.findByText('正文 document');
+    const button = await screen.findByRole('button', { name: '继续' });
+    expect(button).toBeEnabled();
+    expect(button).toHaveAttribute('title', '继续');
+    if (advanced) fixture.refresh.mockImplementationOnce(async () => { control.active_executions = 1; });
+    await act(async () => fireEvent.click(button));
+    expect(fixture.flush).toHaveBeenCalledOnce();
+    if (advanced) expect(execute).not.toHaveBeenCalled();
+    else expect(execute).toHaveBeenCalledWith({ kind: 'continue' });
+  });
 
   it('uses the native running footer and routes stop without saving editors', async () => {
     fixture.session.status = 'active';

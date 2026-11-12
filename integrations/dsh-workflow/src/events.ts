@@ -18,6 +18,8 @@ export function presentationRun(meta: unknown, webUrl: string): RunLink | null {
     ...(typeof value.hostSessionId === 'string' ? { hostSessionId: value.hostSessionId } : {}),
     ...(typeof value.operation === 'string' ? { operation: value.operation } : {}),
     ...(typeof value.executionId === 'string' ? { executionId: value.executionId } : {}),
+    ...(typeof value.modelJobId === 'string' ? { modelJobId: value.modelJobId } : {}),
+    ...(typeof value.modelJobStatus === 'string' ? { modelJobStatus: value.modelJobStatus } : {}),
   }
 }
 
@@ -70,7 +72,7 @@ export function eventRun(event: unknown, serverName: string, webUrl: string): Ru
     return null
   }
   if (value?.type !== 'tool/ptc-dispatch' || data?.isError !== false || typeof data.name !== 'string'
-    || !['start', 'state', 'input_answer', 'step_begin', 'step_claim', 'step_resume', 'step_complete'].includes(workflowOperation(data.name, serverName) ?? '')
+    || !['start', 'state', 'input_answer', 'step_begin', 'step_claim', 'step_resume', 'step_complete', 'generation_claim', 'generation_respond'].includes(workflowOperation(data.name, serverName) ?? '')
     || !Array.isArray(data.content)) return null
   for (const raw of [...data.content].reverse()) {
     const content = object(raw)

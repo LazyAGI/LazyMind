@@ -38,6 +38,21 @@ export interface WorkflowPanelActionIntent extends Omit<WorkflowActionIntent, 'k
   kind: 'approve' | 'continue' | 'retry' | 'rewind' | 'stop' | 'resume';
 }
 
+/** A completed host notification may hand control back before the next step begins. */
+export function externalContinuationStep(session: WorkflowSession, control?: WorkflowControlView): string | undefined {
+  const delivery = control?.delivery;
+  if (!control || control.session_id !== session.session_id || !control.binding?.bound
+    || control.continuation !== 'continue' || !control.admission.can_begin || control.active_executions !== 0
+    || !control.available_actions.includes('continue') || control.reviews.some(review => review.status === 'pending')
+    || !['active', 'waiting'].includes(session.status) || !session.projection?.ready?.length
+    || delivery?.kind !== 'continue' || delivery.status !== 'accepted' || delivery.consumed_at || !delivery.execution_id) return undefined;
+  const completed = session.steps?.find(step => step.step_id === session.current_step_id
+    && step.status === 'succeeded' && step.validity !== 'stale');
+  const node = completed && session.projection.nodes?.[completed.step_id];
+  return node?.execution === 'succeeded' && node.validity !== 'stale' && !node.requires_approval
+    ? completed?.step_id : undefined;
+}
+
 /** Translate the shared action using the snapshot the user saw when clicking. */
 export function externalPanelAction(
   intent: WorkflowPanelActionIntent,

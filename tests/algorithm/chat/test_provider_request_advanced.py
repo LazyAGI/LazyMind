@@ -161,10 +161,11 @@ def test_dynamic_runtime_applies_options_per_role_without_changing_supplier(monk
     from lazyllm.common import new_session
     from lazyllm.module.llms.model_config_inject import inject_model_config
 
-    calls = []
+    calls, timeouts = [], []
 
     def send(session, request, **kwargs):
         calls.append(request)
+        timeouts.append(kwargs['timeout'])
         response = requests.Response()
         response.status_code = 200
         response._content = json.dumps({'choices': [{'message': {'content': 'ok'}, 'finish_reason': 'stop'}]}).encode()
@@ -177,6 +178,7 @@ def test_dynamic_runtime_applies_options_per_role_without_changing_supplier(monk
     with new_session('test-advanced-runtime'):
         config = {'llm': {'source': 'openai', 'model': 'private-model', 'api_key': 'selected-key',
                           'base_url': 'https://example.test/proxy/v1/',
+                          'timeout': (15, 600),
                           'request_advanced': {'headers': {'X-Gateway-Token': 'first'},
                                                'query': {'tenant': 'one'}, 'extra_body': {'metadata': {'p': 1}}}}}
         inject_model_config(config)
@@ -184,6 +186,9 @@ def test_dynamic_runtime_applies_options_per_role_without_changing_supplier(monk
         model = AutoModel(source='dynamic', name='llm', dynamic_auth=True)
         assert model('hi', stream_output=False)['content'] == 'ok'
         config['llm']['request_advanced'] = {'headers': {'X-Gateway-Token': 'second'}}
+        configure_request_advanced(config)
+        assert model('hi', stream_output=False)['content'] == 'ok'
+        config['llm']['request_advanced'] = {}
         configure_request_advanced(config)
         assert model('hi', stream_output=False)['content'] == 'ok'
         configure_request_advanced({})
@@ -195,6 +200,7 @@ def test_dynamic_runtime_applies_options_per_role_without_changing_supplier(monk
     assert calls[1].headers['X-Gateway-Token'] == 'second'
     assert 'tenant=' not in calls[1].url
     assert 'X-Gateway-Token' not in calls[2].headers
+    assert timeouts == [(15, 600)] * 3 + [180]
 
 
 def test_runtime_gateway_credentials_stay_inside_supplier_origin_and_path(monkeypatch):

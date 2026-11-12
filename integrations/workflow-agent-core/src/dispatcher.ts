@@ -1,6 +1,7 @@
 import { AdmissionRejected, type RuntimeAdapter } from './adapter'
 import type { Coordinator } from './coordinator'
 import { BridgeError, isHostAuthorizationError, type HostTransport, type HostAction } from './transport'
+import type { WorkflowControl } from './protocol'
 
 /** Polling and delivery policy are shared; only host admission/history live in the adapter. */
 export function createDispatcher<A>(runtime: RuntimeAdapter<A>, host: Pick<Coordinator<A>, 'cacheClaim' | 'cancelSession'> | undefined, bridge: HostTransport,
@@ -41,7 +42,7 @@ export function createDispatcher<A>(runtime: RuntimeAdapter<A>, host: Pick<Coord
       } else {
         signal.throwIfAborted()
         admissionStarted = true
-        seq = await runtime.prompt(resolved.agent, { actionId: action.id, message: continuationMessage(action) }, signal)
+        seq = await runtime.prompt(resolved.agent, { actionId: action.id, message: continuationMessage(action, claim.control) }, signal)
       }
     } catch (error) {
       // Once a host call begins, failure cannot prove that it was not admitted.
@@ -101,15 +102,26 @@ function delay(ms: number, signal: AbortSignal): Promise<void> {
   })
 }
 
-function continuationMessage(action: HostAction): string {
+function continuationMessage(action: HostAction, control?: WorkflowControl): string {
+  if (action.kind === 'model_generate') return `LazyMind model request: session_id=${action.session_id}, job_id=${action.execution_id}. ` +
+    'Call workflow.generation.claim with a stable command_id. Only with status=running, execute the exact generation_request as a model worker. ' +
+    'LazyMind has reserved one of at most two workers for this Workflow session. Claim ready_job_ids too and run up to two native model workers concurrently when available. Keep worker_token in the controller. ' +
+    'Use the supplied messages, tool definitions and response format. Generate an OpenAI assistant message with content or tool_calls. ' +
+    'Treat each job as a fresh model call. Read every message in its original order, including earlier data, schemas and guidance; the final message may contain only task parameters or a repair error. Generate the response from this request, including each repair request. ' +
+    'LazyMind runs the tools, business logic, validation and publication. After the worker ends, return its message with workflow.generation.respond and unchanged worker_token and request_hash. ' +
+    'For cancel_requested, acknowledge cancelled=true without generating. For already_claimed or terminal status, END this turn. ' +
+    'Do not begin or complete Workflow steps, publish artifacts, approve reviews, or call a LazyMind model. Wait for the next notification.'
   if (action.kind === 'artifact_edit') return `LazyMind artifact edit: session_id=${action.session_id}, job_id=${action.execution_id}. ` +
-    'Call workflow.action.get. When status=waiting_agent, delegate the returned generation_request to a native subagent. ' +
+    'Call workflow.action.get. When status=waiting_agent, execute the returned generation_request using a native subagent when available, or the current external agent otherwise. ' +
     'Use its exact LazyMind system_prompt and user_prompt; do not substitute your own business Skill. ' +
-    'Submit only its answer with workflow.action.respond using the unchanged version and request_hash. ' +
+    'Submit only the external answer with workflow.action.respond using the unchanged version and request_hash. ' +
     'Repeat only if another generation_request is returned. When ready or cancelled, END this turn: the user confirms the preview in LazyMind. ' +
-    'Do not begin, rewind or rerun workflow steps, and do not apply the edit yourself.'
+    'Do not begin, rewind or rerun workflow steps, and do not commit the preview yourself.'
 
-  const request = action.execution_id
+  const automaticRetry = control?.continuation === 'continue' && control.admission?.can_begin && control.automatic_retry_steps?.length
+  const request = automaticRetry
+    ? `Core has automatic retry budget for ${JSON.stringify(control.automatic_retry_steps)}. After reading workflow.state, if control.continuation=continue and admission.can_begin=true, call workflow.step.begin for a step in the returned control.automatic_retry_steps with retry_origin=automatic and the current state version. Inspect the failed attempt and use its actual error for repair.`
+    : action.execution_id
     ? `When applicable, call workflow.step.claim with execution_id=${action.execution_id}. For a completed internal execution, inspect its result and the current state instead of executing it again.`
     : 'When control.continuation=continue and admission.can_begin=true, call workflow.step.begin for a ready step.'
   return `LazyMind workflow ${action.session_id} has a control notification. Call workflow.state first; the notification may be delayed. ${request} ` +

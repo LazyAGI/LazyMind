@@ -269,6 +269,7 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "POST", "/internal/workflow-attempts/{attempt_id}:fail", nil, remoteExecutorHandler.Fail)
 	handleAPI(r, "POST", "/internal/workflow-attempts/{attempt_id}:cancel", nil, remoteExecutorHandler.Cancel)
 	handleAPI(r, "POST", "/internal/workflow-attempts/{attempt_id}:stop-ack", nil, workflow.ConfirmNativeStopHTTP)
+	handleAPI(r, "POST", "/internal/workflow-attempts/{attempt_id}/model/v1/chat/completions", nil, workflow.ModelCompletion)
 	hostedHandler := workflowhosted.Handler{Service: hostedService}
 	workflowToolHandler := workflowtool.Handler{Service: &workflowtool.Service{DB: corestore.DB()}}
 	workflowControl := workflow.WorkflowControlHandler{Service: workflow.WorkflowControlService{DB: corestore.DB()}}
@@ -817,6 +818,8 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "POST", "/workflow-sessions/{session_id}/artifact-edit", []string{"qa.write"}, workflowFacade.SessionAccess(http.HandlerFunc(workflow.CommitArtifactEdit)))
 	handleAPI(r, "GET", "/workflow-sessions/{session_id}/artifact-actions/{job_id}", []string{"qa.read"}, workflowFacade.SessionAccess(http.HandlerFunc(workflow.GetArtifactActionJob)))
 	handleAPI(r, "POST", "/workflow-sessions/{session_id}/artifact-actions/{job_id}", []string{"qa.write"}, workflowFacade.SessionAccess(http.HandlerFunc(workflow.SubmitArtifactActionJob)))
+	handleAPI(r, "POST", "/workflow-sessions/{session_id}/model-generations/{job_id}:claim", []string{"qa.write"}, workflowFacade.SessionAccess(http.HandlerFunc(workflow.ClaimModelGeneration)))
+	handleAPI(r, "POST", "/workflow-sessions/{session_id}/model-generations/{job_id}:respond", []string{"qa.write"}, workflowFacade.SessionAccess(http.HandlerFunc(workflow.SubmitModelGeneration)))
 	handleAPI(r, "POST", "/workflow-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}:action-preview", []string{"qa.write"}, workflowFacade.SessionAccess(http.HandlerFunc(workflow.PreviewArtifactAction)))
 	handleAPI(r, "POST", "/workflow-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}:action-execute", []string{"qa.write"}, workflowFacade.SessionAccess(http.HandlerFunc(workflow.ExecuteArtifactAction)))
 	handleAPI(r, "POST", "/workflow-sessions/{session_id}:sync-search-config", []string{"qa.write"}, workflowFacade.SessionAccess(http.HandlerFunc(workflow.SyncSessionSearchConfig)))

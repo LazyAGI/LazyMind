@@ -75,6 +75,7 @@ when_to_use: >
 runtime:
   execution:
     version: '1'
+    model_executor: external-agent
     skills:
     - scenario/execution.md
     constraints:
@@ -174,6 +175,77 @@ runtime:
         - name: academic_read_paper
           source: package
   trigger_inputs: [manuscript_file, manuscript_text, paper_topic, review_request, paper_input, experiment_execution, experiment_question]
+  input_contracts:
+    paper_topic:
+      description: >
+        Plain-text research topic. For research_topic, bind the user's topic here and retain
+        the full requirements in request_context. This input can be used on its own.
+    paper_input:
+      description: >
+        Optional structured business JSON matching this schema. For a plain-text topic,
+        use paper_topic and request_context. Writing preferences belong in constraints.
+        Pass the user's experiment choice through clarification_values.experiment_execution.
+      schema:
+        $defs:
+          business:
+            type: object
+            additionalProperties: false
+            dependentRequired:
+              execution_preference: [experiment, result_meta]
+              execution_available: [experiment, result_meta]
+              notice: [experiment, result_meta]
+            properties:
+              topic: {type: string, minLength: 1}
+              request: {type: string}
+              demo: {type: boolean}
+              selected_issue_ids: {type: array, items: {type: string, minLength: 1}, uniqueItems: true}
+              constraints:
+                type: object
+                additionalProperties: false
+                properties:
+                  paper_language: {enum: [zh-CN, en]}
+                  word_target: {type: [integer, 'null'], minimum: 1}
+                  paper_type: {enum: [null, research, empirical, literature_review, theoretical, case_study, conference]}
+                  citation_style: {type: string, minLength: 1}
+                  focus: {type: array, items: {type: string, minLength: 1}}
+                  required_sections:
+                    type: array
+                    uniqueItems: true
+                    items: {enum: [abstract, introduction, methods, evaluation, results, discussion, limitations, conclusion]}
+              papers: {}
+              question: {}
+              evidence: {}
+              writing_materials: {}
+              data: {}
+              source_data: {}
+              data_context: {}
+              study_design: {}
+              result_meta: {}
+              analysis: {}
+              charts: {}
+              experiment: {}
+              code_files: {}
+              outline: {}
+              manuscript: {}
+              review: {}
+              review_data: {}
+              media_assets: {}
+              reflection: {}
+              execution_preference: {}
+              execution_available: {}
+              notice: {}
+            examples:
+              - topic: 研究主题
+                request: 用户的研究要求与证据限制
+        anyOf:
+          - {$ref: '#/$defs/business'}
+          - type: object
+            not: {required: [topic]}
+            anyOf:
+              - required: [data]
+                properties: {data: {$ref: '#'}}
+              - required: [text]
+                properties: {text: {$ref: '#'}}
   clarification_fields:
     - id: experiment_execution
       label: 实验运行方式

@@ -663,7 +663,11 @@ func applyWorkflowTransition(ctx context.Context, tx *gorm.DB, sessionID string,
 			return snapshotErr
 		}
 		projection := projectSessionWithApprovalPreferences(tx.WithContext(ctx), session, graph, snapshot)
-		if err := guardRunAdvance(tx, session, replacesInputCheckpoint(graph, req)); err != nil {
+		recovery := runAdvanceRecovery{replacesInput: replacesInputCheckpoint(graph, req)}
+		if req.Operation == "rewind" && req.RetryOrigin == "user" && len(targets) == 1 {
+			recovery.replacesReviewStep = req.TargetStepID
+		}
+		if err := guardRunAdvance(tx, session, recovery); err != nil {
 			var rejected *controlstore.Error
 			if errors.As(err, &rejected) {
 				return rejectTransition(req.CommandID, &session, projection, http.StatusConflict, rejected.Code, rejected.Message, false, nil)
@@ -755,6 +759,13 @@ func applyWorkflowTransition(ctx context.Context, tx *gorm.DB, sessionID string,
 			if invalidErr := invalidateForOperation(ctx, tx, &session, graph, req.CommandID, req.Operation, targets[0].TargetStepID); invalidErr != nil {
 				return invalidErr
 			}
+			if controlstore.Controlled(session) {
+				if err := tx.Model(&orm.WorkflowReviewCheckpoint{}).Where("session_id = ? AND status = ? AND attempt_id IN (?)", session.ID, "pending",
+					tx.Model(&orm.WorkflowSessionStep{}).Select("id").Where("session_id = ? AND validity <> ?", session.ID, "effective")).
+					Updates(map[string]any{"status": "superseded", "decision_command_id": req.CommandID, "updated_at": time.Now().UTC()}).Error; err != nil {
+					return err
+				}
+			}
 			var reloadErr error
 			snapshot, reloadErr = loadRuntimeSnapshot(ctx, tx, session.ID, graph)
 			if reloadErr != nil {
@@ -834,7 +845,11 @@ func applyWorkflowTransition(ctx context.Context, tx *gorm.DB, sessionID string,
 			// Tool-dependent steps run inside LazyMind; the session controller stays unchanged.
 			executorHost := session.ControllerHost
 			if controlstore.Controlled(session) {
-				executorHost = executorHostForStep(session.ControllerHost, nodeDef, graph.Runtime)
+				binding, err := controlstore.DecodeBinding(session)
+				if err != nil {
+					return err
+				}
+				executorHost = executorHostForStep(session.ControllerHost, binding.Provider, nodeDef, graph.Runtime)
 			}
 			if executorHost == "external-agent" {
 				if err := queueHostAttempt(ctx, tx, session, target, nodeDef, now); err != nil {

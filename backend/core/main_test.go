@@ -99,6 +99,8 @@ func TestExternalAgentOperationExposesOnlyMCPRuntimeSurface(t *testing.T) {
 		{http.MethodPost, "/api/core/agent-invocations/inv-1:start", externallease.OperationInvocationWrite},
 		{http.MethodGet, "/api/core/workflow-sessions/session-1/projection", externallease.OperationWorkflowRead},
 		{http.MethodPost, "/api/core/workflow-sessions/session-1/hosted-attempts/attempt-1:submit", externallease.OperationWorkflowWrite},
+		{http.MethodPost, "/api/core/workflow-sessions/session-1/model-generations/job-1:claim", externallease.OperationWorkflowWrite},
+		{http.MethodPost, "/api/core/workflow-sessions/session-1/model-generations/job-1:respond", externallease.OperationWorkflowWrite},
 		{http.MethodPost, "/api/core/workflow-sessions/session-1/hosted-attempts/attempt-1:delete", ""},
 		{http.MethodPost, "/api/core/conversations:chat", ""},
 		{http.MethodDelete, "/api/core/workflow-artifacts/artifact-1", ""},

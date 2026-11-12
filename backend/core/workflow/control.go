@@ -27,6 +27,7 @@ type WorkflowControlCommand struct {
 	StepID          string `json:"step_id,omitempty"`
 	PreferenceScope string `json:"preference_scope,omitempty"`
 	Objective       string `json:"objective,omitempty"`
+	UserInput       string `json:"user_input,omitempty"`
 	Instruction     string `json:"runtime_instruction,omitempty"`
 	RetryOrigin     string `json:"retry_origin,omitempty"`
 	InputArtifactID string `json:"input_artifact_id,omitempty"`
@@ -149,7 +150,16 @@ func (s WorkflowControlService) execute(ctx context.Context, owner, sessionID st
 			}
 			transition := transitionCommandRequest{CommandID: command.CommandID, Operation: "advance", RetryOrigin: retryOrigin,
 				TargetStepID: command.StepID, ExpectedStateVersion: session.StateVersion, HandOff: true,
-				Objective: command.Objective, RuntimeInstruction: command.Instruction}
+				Objective: command.Objective, UserInput: command.UserInput, RuntimeInstruction: command.Instruction}
+			if transition.UserInput == "" && (session.WorkflowID == "paper-writing" || session.WorkflowID == "writer-workflow") {
+				var attempts int64
+				if err := tx.Model(&orm.WorkflowSessionStep{}).Where("session_id = ?", session.ID).Count(&attempts).Error; err != nil {
+					return err
+				}
+				if attempts == 0 {
+					transition.UserInput = sessionIntentText(session.IntentContext)
+				}
+			}
 			response, updated, tasks, err := applyWorkflowTransition(ctx, tx, session.ID, transition)
 			if err != nil {
 				return err
@@ -261,11 +271,6 @@ func (s WorkflowControlService) execute(ctx context.Context, owner, sessionID st
 				return controlstore.Reject("RECOVERY_REJECTED", "recovery did not create one execution")
 			}
 			*session = updated
-			if err := tx.Model(&orm.WorkflowReviewCheckpoint{}).Where("session_id = ? AND status = ? AND attempt_id IN (?)", session.ID, "pending",
-				tx.Model(&orm.WorkflowSessionStep{}).Select("id").Where("session_id = ? AND validity <> ?", session.ID, "effective")).
-				Updates(map[string]any{"status": "superseded", "decision_command_id": command.CommandID, "updated_at": time.Now().UTC()}).Error; err != nil {
-				return err
-			}
 			var execution orm.WorkflowSessionStep
 			if err := tx.Select("id").Where("task_id = ?", tasks[0]).First(&execution).Error; err != nil {
 				return err

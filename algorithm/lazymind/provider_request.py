@@ -10,6 +10,7 @@ from functools import wraps
 from http import HTTPStatus
 from io import BytesIO
 import json
+import math
 import posixpath
 import re
 import threading
@@ -260,6 +261,12 @@ def configure_request_advanced(model_config):
         if not isinstance(entry, dict):
             continue
         advanced = validate_request_advanced(entry.get('request_advanced'))
+        timeout = entry.get('timeout')
+        if timeout is not None:
+            timeout = tuple(timeout) if isinstance(timeout, (tuple, list)) else (timeout, timeout)
+            if len(timeout) != 2 or any(type(value) not in (int, float) or not math.isfinite(value) or value <= 0
+                                        for value in timeout):
+                raise ProviderRequestConfigurationError('request timeout must contain positive finite numbers')
         kind = str(entry.get('type') or 'llm').lower()
         features = entry.get('features') if kind in {'llm', 'vlm', 'chat'} else None
         features = features if isinstance(features, dict) else {}
@@ -268,7 +275,7 @@ def configure_request_advanced(model_config):
         source = str(entry.get('source') or '').lower()
         model = str(entry.get('model') or '').lower()
         completions_compatibility = source == 'openai' and _chat_completions_tools_require_no_reasoning(model)
-        if not feature_disables and not private and not completions_compatibility:
+        if not feature_disables and not private and not completions_compatibility and timeout is None:
             continue
         base = str(entry.get('base_url') or '').strip()
         parsed = urlsplit(base)
@@ -277,7 +284,7 @@ def configure_request_advanced(model_config):
             raise ProviderRequestConfigurationError('advanced request configuration requires a valid supplier API root')
         policies[role] = {'base': base, 'advanced': advanced, 'source': source,
                           'model': model, 'features': deepcopy(features),
-                          'private': private, 'kind': kind}
+                          'private': private, 'kind': kind, 'timeout': timeout}
     lazyllm.globals['lazymind_request_advanced'] = policies
     _install_runtime_hooks()
 
@@ -294,6 +301,13 @@ def _within_supplier(url, base):
         prefix = ''
     return ((target.scheme.lower(), target.netloc.lower()) == (root.scheme.lower(), root.netloc.lower())
             and (not prefix or target_path == prefix or target_path.startswith(prefix + '/')))
+
+
+def request_read_timeout(role='llm'):
+    """Expose the current role's transport wait budget to its stream consumer."""
+    import lazyllm
+    timeout = (lazyllm.globals.get('lazymind_request_advanced') or {}).get(role, {}).get('timeout')
+    return timeout[1] if timeout is not None else None
 
 
 def _install_runtime_hooks():
@@ -339,6 +353,8 @@ def _install_runtime_hooks():
                 return original_forward(module, *args, **kwargs)
             validate_runtime_request_transport(policy['source'], policy['kind'], policy['model'])
             merged = module._merge_dynamic_forward_kwargs(kwargs)
+            if policy['timeout'] is not None:
+                merged.setdefault('timeout', policy['timeout'])
             target = merged.get('url') or merged.get('base_url') or policy['base']
             if policy['private'] and not _within_supplier(target, policy['base']):
                 raise ProviderRequestConfigurationError(

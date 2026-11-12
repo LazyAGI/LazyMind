@@ -687,6 +687,19 @@ func Compile(workflowYAML, stateYAML, scenario string, profile Profile) CompileR
 			result.Diagnostics = append(result.Diagnostics, nodeDiag("E_RUNTIME_EXECUTION_LIMIT_INVALID", "error", "workflow.yaml.runtime.execution_limits", step, "execution limits require a declared step, bounded positive work limits and an optional timeout"))
 		}
 	}
+	for material, contract := range graph.Runtime.InputContracts {
+		path := "workflow.yaml.runtime.input_contracts." + material
+		if !knownMaterials[material] || graph.MaterialProducers[material].Kind != "external" {
+			result.Diagnostics = append(result.Diagnostics, materialDiag("E_RUNTIME_INPUT_CONTRACT_INVALID", "error", path, material, "input contract must name an external material"))
+			continue
+		}
+		if contract.Schema != nil && graph.MaterialTypes[material] != "json" {
+			result.Diagnostics = append(result.Diagnostics, materialDiag("E_RUNTIME_INPUT_CONTRACT_INVALID", "error", path, material, "input schema requires a JSON material"))
+		}
+		if _, err := contract.ResolveSchema(); err != nil {
+			result.Diagnostics = append(result.Diagnostics, materialDiag("E_RUNTIME_INPUT_CONTRACT_INVALID", "error", path, material, err.Error()))
+		}
+	}
 	if graph.Runtime.TriggerInputs != nil {
 		for _, material := range *graph.Runtime.TriggerInputs {
 			if !knownMaterials[material] || graph.MaterialProducers[material].Kind != "external" {

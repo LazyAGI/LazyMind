@@ -155,6 +155,7 @@ type BeginInput struct {
 	StepID             string `json:"step_id" jsonschema:"required,One Runtime-returned ready, retryable or rewindable step"`
 	CommandID          string `json:"command_id,omitempty" jsonschema:"Stable retry key; generated when omitted"`
 	Objective          string `json:"objective,omitempty" jsonschema:"Optional runtime refinement which cannot replace the Workflow prompt"`
+	UserInput          string `json:"user_input,omitempty" jsonschema:"The user's actual current request for this step or explicit edit. Omit for automatic continuation; never invent a new request"`
 	RuntimeInstruction string `json:"runtime_instruction,omitempty" jsonschema:"Optional retry or execution note"`
 }
 
@@ -325,6 +326,13 @@ func keepHostGetFiles(pkg map[string]any) {
 		producers, _ := graph["material_producers"].(map[string]any)
 		types, _ := graph["material_types"].(map[string]any)
 		cardinalities, _ := graph["material_cardinalities"].(map[string]any)
+		expressions, hasExpressions := graph["input_expressions"].(map[string]any)
+		required := map[string]bool{}
+		for _, expression := range expressions {
+			collectStartupRequiredInputs(expression, required)
+		}
+		runtime, _ := graph["runtime"].(map[string]any)
+		contracts, _ := runtime["input_contracts"].(map[string]any)
 		ids := make([]string, 0, len(producers))
 		for id, raw := range producers {
 			if producer, ok := raw.(map[string]any); ok && producer["kind"] == "external" {
@@ -336,13 +344,23 @@ func keepHostGetFiles(pkg map[string]any) {
 		for _, id := range ids {
 			producer := producers[id].(map[string]any)
 			optional, _ := producer["optional"].(bool)
-			materials = append(materials, map[string]any{
-				"material_id": id, "type": types[id], "cardinality": cardinalities[id], "required": !optional,
-			})
+			material := map[string]any{
+				"material_id": id, "type": types[id], "cardinality": cardinalities[id], "required": !optional && (!hasExpressions || required[id]),
+			}
+			metadata, _ := contracts[id].(map[string]any)
+			for _, key := range []string{"description", "schema"} {
+				if value, exists := metadata[key]; exists {
+					material[key] = value
+				}
+			}
+			materials = append(materials, material)
 		}
 		contract := map[string]any{"revision_id": pkg["revision_id"], "input_materials": materials}
-		if runtime, ok := graph["runtime"].(map[string]any); ok {
+		if runtime != nil {
 			contract["clarification_fields"] = runtime["clarification_fields"]
+		}
+		if len(expressions) > 0 {
+			contract["input_requirements"] = expressions
 		}
 		pkg["startup_contract"] = contract
 	}
@@ -350,6 +368,18 @@ func keepHostGetFiles(pkg map[string]any) {
 	// Runtime implementation stays on LazyMind. The execution grant delivers
 	// the pinned Skills and constraints for the current step, not every script.
 	delete(pkg, "files")
+}
+
+// Match Core preparation: all operands are required, any operands are alternatives.
+func collectStartupRequiredInputs(raw any, required map[string]bool) {
+	expression, _ := raw.(map[string]any)
+	if material, _ := expression["material"].(string); material != "" {
+		required[material] = true
+	}
+	all, _ := expression["all"].([]any)
+	for _, nested := range all {
+		collectStartupRequiredInputs(nested, required)
+	}
 }
 
 func (c *Client) State(ctx context.Context, sessionID string) (Projection, error) {
@@ -631,6 +661,7 @@ func (c *Client) Begin(ctx context.Context, input BeginInput) (BeginResult, erro
 		if err := c.api.DoJSON(ctx, http.MethodPost, "/workflow-sessions/"+url.PathEscape(input.SessionID)+"/executions:begin", map[string]any{
 			"command_id": input.CommandID, "step_id": input.StepID, "expected_state_version": state.StateVersion,
 			"objective": input.Objective, "runtime_instruction": input.RuntimeInstruction, "retry_origin": input.RetryOrigin,
+			"user_input": input.UserInput,
 		}, &grant); err != nil {
 			return BeginResult{}, err
 		}
@@ -640,7 +671,7 @@ func (c *Client) Begin(ctx context.Context, input BeginInput) (BeginResult, erro
 		"contract_version": contractVersion, "command_id": input.CommandID,
 		"tool": "advance_step_and_hand_off", "session_id": input.SessionID,
 		"expected_state_version": state.StateVersion, "retry_origin": input.RetryOrigin,
-		"steps": []map[string]any{{"step_id": input.StepID, "objective": input.Objective, "runtime_instruction": input.RuntimeInstruction}},
+		"steps": []map[string]any{{"step_id": input.StepID, "objective": input.Objective, "user_input": input.UserInput, "runtime_instruction": input.RuntimeInstruction}},
 	}
 	var advanced struct {
 		TaskID string `json:"task_id"`

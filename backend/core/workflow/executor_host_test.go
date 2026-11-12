@@ -37,7 +37,7 @@ func TestExecutorHostForStep(t *testing.T) {
 				if controller == "external-agent" && tc.wantExternal {
 					want = controller
 				}
-				got := executorHostForStep(controller, tc.node, graphengine.RuntimePolicy{PostStepChecks: tc.checks})
+				got := executorHostForStep(controller, "codex", tc.node, graphengine.RuntimePolicy{PostStepChecks: tc.checks})
 				if got != want {
 					t.Fatalf("controller=%q host=%q, want %q", controller, got, want)
 				}

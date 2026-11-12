@@ -13,10 +13,18 @@ import (
 // outputs and acceptance criteria live only in state.yml. The optional tool list
 // advertises audited capabilities to hosts; native tool bindings stay on the node.
 type ExecutionPolicy struct {
-	Version     string                   `json:"version" yaml:"version"`
-	Skills      []string                 `json:"skills,omitempty" yaml:"skills,omitempty"`
-	Constraints []string                 `json:"constraints,omitempty" yaml:"constraints,omitempty"`
-	Steps       map[string]StepExecution `json:"steps" yaml:"steps"`
+	Version       string                   `json:"version" yaml:"version"`
+	ModelExecutor string                   `json:"model_executor,omitempty" yaml:"model_executor,omitempty"`
+	Skills        []string                 `json:"skills,omitempty" yaml:"skills,omitempty"`
+	Constraints   []string                 `json:"constraints,omitempty" yaml:"constraints,omitempty"`
+	Steps         map[string]StepExecution `json:"steps" yaml:"steps"`
+}
+
+const ExternalModelExecutor = "external-agent"
+
+// UsesExternalModels also accepts the executor value stored by earlier revisions.
+func (policy *ExecutionPolicy) UsesExternalModels() bool {
+	return policy != nil && (policy.ModelExecutor == ExternalModelExecutor || policy.ModelExecutor == "codex")
 }
 
 type StepExecution struct {
@@ -93,6 +101,9 @@ func compileExecution(graph *CompiledStateGraph) []Diagnostic {
 	}
 	if policy.Version != "1" {
 		invalid(".version", "execution version must be 1")
+	}
+	if policy.ModelExecutor != "" && !policy.UsesExternalModels() {
+		invalid(".model_executor", "model_executor must be external-agent when specified")
 	}
 	for stepID := range policy.Steps {
 		if _, exists := graph.Nodes[stepID]; !exists {

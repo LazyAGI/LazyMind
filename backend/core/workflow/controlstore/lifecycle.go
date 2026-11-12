@@ -124,8 +124,12 @@ func EnqueueHostAction(tx *gorm.DB, session orm.WorkflowSession, commandID, kind
 		return "", Reject("BINDING_REQUIRED", "a paired host is required to resume automatically")
 	}
 	var previous orm.WorkflowHostAction
-	err = tx.Where("session_id = ? AND kind = ? AND consumed_at IS NULL AND status IN ?",
-		session.ID, kind, []string{"pending", "dispatching", "unknown", "accepted"}).Order("created_at DESC").First(&previous).Error
+	query := tx.Where("session_id = ? AND kind = ? AND consumed_at IS NULL AND status IN ?",
+		session.ID, kind, []string{"pending", "dispatching", "unknown", "accepted"})
+	if kind == "model_generate" {
+		query = query.Where("execution_id = ?", executionID)
+	}
+	err = query.Order("created_at DESC").First(&previous).Error
 	if err == nil {
 		if previous.Status == "unknown" && kind == "continue" {
 			return "", Reject("DELIVERY_UNKNOWN", "reconcile the previous host delivery before sending another")

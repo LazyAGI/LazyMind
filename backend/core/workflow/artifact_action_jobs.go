@@ -124,7 +124,7 @@ func actionJobView(job orm.WorkflowActionJob) map[string]any {
 
 func GetArtifactActionJob(w http.ResponseWriter, r *http.Request) {
 	var job orm.WorkflowActionJob
-	if err := store.DB().WithContext(r.Context()).Where("id = ? AND session_id = ?", common.PathVar(r, "job_id"), common.PathVar(r, "session_id")).First(&job).Error; err != nil {
+	if err := store.DB().WithContext(r.Context()).Where("id = ? AND session_id = ? AND slot_id <> ?", common.PathVar(r, "job_id"), common.PathVar(r, "session_id"), modelGenerationSlot).First(&job).Error; err != nil {
 		common.ReplyErr(w, "artifact edit not found", 404)
 		return
 	}
@@ -144,7 +144,7 @@ func SubmitArtifactActionJob(w http.ResponseWriter, r *http.Request) {
 	}
 	var job orm.WorkflowActionJob
 	err := func() error {
-		if err := store.DB().WithContext(r.Context()).Where("id = ? AND session_id = ?", common.PathVar(r, "job_id"), common.PathVar(r, "session_id")).First(&job).Error; err != nil {
+		if err := store.DB().WithContext(r.Context()).Where("id = ? AND session_id = ? AND slot_id <> ?", common.PathVar(r, "job_id"), common.PathVar(r, "session_id"), modelGenerationSlot).First(&job).Error; err != nil {
 			return err
 		}
 		previousVersion := job.Version

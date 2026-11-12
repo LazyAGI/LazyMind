@@ -10,6 +10,8 @@ const declaredWorkflow = `
 id: copied-package
 runtime:
   trigger_inputs: []
+  input_contracts:
+    seed: {description: Structured source, schema: {type: object}}
   transactional_outputs: true
   publication: {step: assemble, required_slots: [result]}
   published_input_aliases: {seed: result}
@@ -51,6 +53,9 @@ func TestRuntimeContractsSurviveCopyAndEmptyInputAllowlist(t *testing.T) {
 		if policy.ExecutionLimits["assemble"].Rounds != 5 {
 			t.Fatal("lost budget")
 		}
+		if policy.InputContracts["seed"].Schema["type"] != "object" {
+			t.Fatal("lost input schema")
+		}
 	}
 }
 func TestWorkLimitsDoNotRequireATimeBudget(t *testing.T) {
@@ -70,6 +75,8 @@ func TestInvalidRuntimeContractsAreRejected(t *testing.T) {
 		{"negative timeout", "timeout: 120", "timeout: -1", "E_RUNTIME_EXECUTION_LIMIT_INVALID"},
 		{"unbounded rounds", "rounds: 5", "rounds: 65", "E_RUNTIME_EXECUTION_LIMIT_INVALID"},
 		{"internal input", "trigger_inputs: []", "trigger_inputs: [result]", "E_RUNTIME_TRIGGER_INPUT_INVALID"},
+		{"internal input schema", "seed: {description:", "result: {description:", "E_RUNTIME_INPUT_CONTRACT_INVALID"},
+		{"unresolved input schema", "schema: {type: object}", "schema: {$ref: '#/$defs/missing'}", "E_RUNTIME_INPUT_CONTRACT_INVALID"},
 		{"non atomic", "transactional_outputs: true", "transactional_outputs: false", "E_RUNTIME_PUBLICATION_INVALID"},
 		{"external output", "required_slots: [result]", "required_slots: [seed]", "E_RUNTIME_PUBLICATION_SLOT_UNKNOWN"},
 		{"unpublished alias", "{seed: result}", "{seed: seed}", "E_RUNTIME_INPUT_ALIAS_INVALID"},

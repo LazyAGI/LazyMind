@@ -19,14 +19,14 @@ func TestBeginLeavesStepAdmissionToCore(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/api/core/workflow-sessions/run/projection":
-			_, _ = w.Write([]byte(`{"session_id":"run","state_version":7,"projection":{"ready":[]},"control":{"protocol":"workflow.control.v1"}}`))
+			_, _ = w.Write([]byte(`{"session_id":"run","state_version":7,"projection":{"ready":[],"rewindable":["step"]},"control":{"protocol":"workflow.control.v1","continuation":"awaiting_user","admission":{"can_begin":false,"reason":"review_pending"}}}`))
 		case "/api/core/workflow-sessions/run/executions:begin":
 			submitted = true
 			var input map[string]any
 			if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
 				t.Error(err)
 			}
-			if input["step_id"] != "step" || input["expected_state_version"] != float64(7) || input["retry_origin"] != "user" {
+			if input["step_id"] != "step" || input["expected_state_version"] != float64(7) || input["retry_origin"] != "user" || input["user_input"] != "研究主题与本轮要求" {
 				t.Errorf("wrong request: %v", input)
 			}
 			w.WriteHeader(http.StatusConflict)
@@ -43,7 +43,7 @@ func TestBeginLeavesStepAdmissionToCore(t *testing.T) {
 	}
 	api, _ := coreapi.New(store)
 	client := &Client{api: api}
-	_, err := client.Begin(context.Background(), BeginInput{SessionID: "run", StepID: "step", CommandID: "begin", RetryOrigin: "user"})
+	_, err := client.Begin(context.Background(), BeginInput{SessionID: "run", StepID: "step", CommandID: "begin", RetryOrigin: "user", UserInput: "研究主题与本轮要求"})
 	var rejected *coreapi.Error
 	if !submitted || !errors.As(err, &rejected) || rejected.StatusCode != http.StatusConflict || rejected.Code != "WORKFLOW_ADMISSION_DENIED" || rejected.Message != "Core rejected step" {
 		t.Fatalf("MCP must forward to Core and preserve rejection: submitted=%v err=%v", submitted, err)

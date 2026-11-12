@@ -19,15 +19,15 @@ async function fixture() {
  return { native, receipts, bridge, adapter: new CodexAdapter(native, receipts, bridge, new AbortController().signal) }
 }
 describe('CDP Workflow admission and interruption', () => {
- it('delivers an artifact edit on a completed run without starting a workflow step',async()=>{
-  const {adapter,native,bridge}=await fixture(),action=claim('artifact_edit')
+ it.each(['artifact_edit','model_generate'])('delivers %s without starting a workflow step',async(kind)=>{
+  const {adapter,native,bridge}=await fixture(),action=claim(kind)
   action.action.execution_id='edit-job';action.control.continuation='completed'
   bridge.claim=vi.fn().mockResolvedValue({...action,dispatch_token:'lease'})
   bridge.action.mockResolvedValue(action);bridge.settle=vi.fn().mockResolvedValue(undefined)
   await createDispatcher(adapter,adapter.host,bridge,'instance',new AbortController().signal).deliver({...action.action,status:'pending'})
   const message=native.start.mock.calls[0]?.[2]
-  expect(message).toContain('workflow.action.get');expect(message).toContain('job_id=edit-job')
-  expect(message).toContain('user confirms');expect(message).not.toContain('Call workflow.state first')
+  expect(message).toContain(kind==='artifact_edit'?'workflow.action.get':'workflow.generation.claim');expect(message).toContain('job_id=edit-job')
+  expect(message).toContain(kind==='artifact_edit'?'user confirms':'at most two workers');expect(message).not.toContain('Call workflow.state first')
   expect(bridge.settle).toHaveBeenCalledWith('action-1','instance','lease','accepted',0,'',expect.any(AbortSignal))
  })
 

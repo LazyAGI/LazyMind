@@ -31,7 +31,7 @@ export class CodexAdapter implements RuntimeAdapter<string> {
       return false
     }
   }
-  private validate(thread: string, claim: ActionClaim, kind: 'continue' | 'cancel' | 'artifact_edit') {
+  private validate(thread: string, claim: ActionClaim, kind: 'continue' | 'cancel' | 'artifact_edit' | 'model_generate') {
     const { action, control } = claim
     if (action.kind !== kind || action.status !== 'dispatching' || action.consumed_at || action.native_session_id !== thread
       || control.session_id !== action.session_id || !control.binding?.bound || control.binding.driver_session_id !== thread
@@ -42,7 +42,7 @@ export class CodexAdapter implements RuntimeAdapter<string> {
     const claim = this.claims.get(input.actionId)
     this.claims.delete(input.actionId)
     if (!claim) throw new AdmissionRejected('Workflow notification has not been claimed')
-    const kind = claim.action.kind === 'artifact_edit' ? 'artifact_edit' : 'continue'
+    const kind = claim.action.kind === 'model_generate' ? 'model_generate' : claim.action.kind === 'artifact_edit' ? 'artifact_edit' : 'continue'
     this.validate(thread, claim, kind)
     if (await this.receipts.read(input.actionId)) throw new Error('Message was already attempted; do not resend')
     const before = await this.native.read(thread, signal)
