@@ -1,7 +1,7 @@
 import { useModelSelectionStore } from "@/modules/chat/store/modelSelection";
 import { CHAT_MODEL_SELECTION_CHANGED_EVENT } from "@/modules/chat/constants/chat";
 import { createElement, createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
-import { Button, Modal, message } from "antd";
+import { Button, Modal, message, type ModalFuncProps } from "antd";
 import { useTranslation } from "react-i18next";
 import { AgentAppsAuth } from "@/components/auth";
 import { useModelFeatures } from "@/hooks/useModelFeatures";
@@ -1133,14 +1133,19 @@ export function useDefaultModelConfig({
     if (value === selectedModels.embed_main || previewingEmbedding || savingCapabilitiesRef.current.has(capability)) return;
     const request = ++embeddingSwitchRevision.current;
     const candidate = parseModelValue(value);
-      const indexManagementContent = (description: string) => createElement("div", null,
-        createElement("p", null, description),
-        createElement(Button, {
-          href: "/lib/knowledge/list?index_management=open",
-          onClick: (event: React.MouseEvent<HTMLElement>) => {
-            if (savingCapabilitiesRef.current.has(capability)) event.preventDefault();
-          },
-        }, "前往索引管理"));
+    const indexManagementDialog: Pick<ModalFuncProps, "width" | "footer"> = {
+      width: 600,
+      footer: (buttons) => createElement("div", {
+        style: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" },
+      }, createElement(Button, {
+        href: "/lib/knowledge/list?index_management=open",
+        onClick: (event: React.MouseEvent<HTMLElement>) => {
+          if (savingCapabilitiesRef.current.has(capability)) event.preventDefault();
+        },
+      }, "前往索引管理"), createElement("div", {
+        style: { display: "flex", alignItems: "center", gap: 8, marginLeft: "auto" },
+      }, buttons)),
+    };
     setPreviewingEmbedding(true);
     void previewEmbeddingSwitch({
       model_id: candidate.modelId,
@@ -1155,7 +1160,8 @@ export function useDefaultModelConfig({
       if (preview.can_switch && preview.outcome === "same") {
         Modal.confirm({
           title: t("modelProvider.embeddingSignatureMatchedTitle"),
-          content: indexManagementContent(t("modelProvider.embeddingSignatureMatched")),
+          ...indexManagementDialog,
+          content: t("modelProvider.embeddingSignatureMatched"),
           okText: t("modelProvider.confirmSwitch"),
           cancelText: t("modelProvider.cancelSwitch"),
           onOk: () => {
@@ -1173,7 +1179,8 @@ export function useDefaultModelConfig({
         let completed = false;
         const dialog = Modal.confirm({
           title: t("modelProvider.embeddingIndexResetTitle"),
-          content: indexManagementContent(t("modelProvider.embeddingIndexResetRequired")),
+          ...indexManagementDialog,
+          content: t("modelProvider.embeddingIndexResetRequired"),
           okText: t("modelProvider.embeddingClearAndSwitch"),
           okButtonProps: { danger: true },
           cancelText: t("modelProvider.cancelSwitch"),
@@ -1230,9 +1237,10 @@ export function useDefaultModelConfig({
         title: t(preview.outcome === "clear_required"
           ? "modelProvider.embeddingIndexResetTitle"
           : "modelProvider.embeddingSignatureCheckFailedTitle"),
-        content: indexManagementContent(t(preview.outcome === "clear_required"
+        ...indexManagementDialog,
+        content: t(preview.outcome === "clear_required"
           ? "modelProvider.embeddingIndexResetRequired"
-          : "modelProvider.embeddingSignatureCheckFailed")),
+          : "modelProvider.embeddingSignatureCheckFailed"),
         okText: t("common.confirm"),
       });
     }).catch(() => {
@@ -1240,7 +1248,8 @@ export function useDefaultModelConfig({
       setPreviewingEmbedding(false);
       Modal.warning({
         title: t("modelProvider.embeddingSignatureCheckFailedTitle"),
-        content: indexManagementContent(t("modelProvider.embeddingSignatureCheckFailed")),
+        ...indexManagementDialog,
+        content: t("modelProvider.embeddingSignatureCheckFailed"),
         okText: t("common.confirm"),
       });
     });

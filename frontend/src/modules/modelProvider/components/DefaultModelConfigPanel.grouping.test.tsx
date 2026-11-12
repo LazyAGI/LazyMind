@@ -591,7 +591,9 @@ describe("default capability configuration groups", () => {
       okText: "modelProvider.confirmSwitch",
     })));
     expect(screen.queryByRole("button", { name: "索引管理" })).not.toBeInTheDocument();
-    render(<>{confirm.mock.calls[0][0].content}</>);
+    const config = confirm.mock.calls[0][0];
+    const footer = config.footer as (buttons: React.ReactNode, extra: never) => React.ReactNode;
+    render(<>{config.content}{footer(<button>Confirm</button>, {} as never)}</>);
     expect(screen.getByText("modelProvider.embeddingSignatureMatched")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "前往索引管理" })).toHaveAttribute("href", "/lib/knowledge/list?index_management=open");
     await act(async () => { (confirm.mock.calls[0][0].onOk as () => void)(); });
