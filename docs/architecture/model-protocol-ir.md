@@ -88,8 +88,10 @@ OpenAI 原生 Base64 图片由适配器校验解码；硅基原生 `images` URL 
 | 多轮与恢复 | `test_engine_protocol_projection.py`、Core canonical history 测试 | 私有续接状态保存、压缩失效、回滚和公开字段过滤 |
 | 流式增量与结束状态 | 子模块 `test_openai_responses.py` | 参数/推理/拒绝增量；截断工具不可执行；失败保留部分输出及用量；取消只产生一次终态 |
 | 错误分类 | `test_protocol_ir.py`、`test_provider_request_advanced.py` | 本地容量/能力错误不包装为通用供应商失败；协议错误独立于网络和凭据错误 |
-| Skill | `skill_listing.append_loaded_skill_invocations`、`test_skill_usage_context.py` | get_skill 历史在协议边界保留调用和正文；两协议与两种流式模式已补充 HTTP 传输回归；实际 Skill 调用待验收 |
+| Skill | `skill_listing.append_loaded_skill_invocations`、`test_skill_usage_context.py` | get_skill 历史在协议边界保留调用和正文；两协议与两种流式模式已补充 HTTP 传输回归；现有 qa-org-e Skill 真实调用返回三条摘要 |
 | 图像生成 | `test_image_protocol_contract.py` | OpenAI Base64、硅基 URL、图片编辑 MIME、下载安全和资源落盘；真实供应商生成需单独验收 |
 
-真实 OpenAI gpt-6.1-sol 已验证首轮回复、多轮代号记忆和计算工具回传（137×149=20413）。工作流、Skill 与生图的真实环境验收和 PR 必需 CI 仍待完成，不以服务健康或上述 mock 测试代替。
+真实 OpenAI gpt-6.1-sol 已验证首轮回复、多轮代号记忆和计算工具回传（137×149=20413）。554 KB JPEG 实际上传后返回蓝色；一页 PPT HTML 已发布且工作流正常完成。生图真实环境验收和 PR 必需 CI 仍待完成，不以服务健康或上述 mock 测试代替。
 Gemini/Anthropic 原生端点尚未接入，当前仅验收 IR 扩展边界；Responses 后台任务和内置工具不支持，验收目标是明确拒绝，不能标记为已支持。
+
+验收环境说明：2026-11-12 生图尝试期间，原 PostgreSQL 进程退出并进入恢复状态，多进程处于 I/O 等待，页面断连；该尝试不能用于判定供应商或协议成功。未初始化、切换或清理数据库。
