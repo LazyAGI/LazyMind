@@ -1903,6 +1903,7 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
 
       </div>
 
+      <div className="knowledge-retrieval-status">
       {showEmbeddingNotice ? (
         <Alert
           key={indexNotice?.key ?? "model_unavailable"}
@@ -1967,6 +1968,8 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
           type="warning"
         />
       ) : null}
+
+      </div>
 
       <DatasetDeletionProgressList deletions={deletions} onDismiss={dismissDeletion} />
 

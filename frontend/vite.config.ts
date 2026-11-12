@@ -55,6 +55,8 @@ export default defineConfig(({ mode }) => {
     },
     server: {
       port: 5173,
+      // The local proxy allowlist expects this origin; do not silently switch ports.
+      strictPort: true,
       // Forward API and local-service requests to the selected backend.
       proxy: {
         "/api": {

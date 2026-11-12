@@ -2032,8 +2032,10 @@ export function SlotText({ slot, widget, sessionId, slotId, revisionCount, onRef
   const handleChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     const val = e.target.value;
     const minimumHeight = editViewportRef.current?.height ?? 0;
-    e.target.style.height = 'auto';
-    e.target.style.height = `${Math.max(minimumHeight, e.target.scrollHeight)}px`;
+    if (widget?.widgetType !== 'ppt-prompt') {
+      e.target.style.height = 'auto';
+      e.target.style.height = `${Math.max(minimumHeight, e.target.scrollHeight)}px`;
+    }
     setDraft(val);
     if (sessionId && slotId) {
       const draftPayload: Record<string, unknown> = { text: val };
@@ -2234,7 +2236,7 @@ export function SlotText({ slot, widget, sessionId, slotId, revisionCount, onRef
     if (!editor) return;
 
     const viewport = editViewportRef.current;
-    if (viewport) {
+    if (viewport && widget?.widgetType !== 'ppt-prompt') {
       editor.style.height = 'auto';
       editor.style.height = `${Math.max(viewport.height, editor.scrollHeight)}px`;
     }
@@ -2251,7 +2253,7 @@ export function SlotText({ slot, widget, sessionId, slotId, revisionCount, onRef
         viewport.scrollContainer.scrollTop = viewport.scrollTop;
       }
     }
-  }, [editing]);
+  }, [editing, widget?.widgetType]);
 
   if (showPending) {
     return <SlotPending type='text' />;
@@ -2375,7 +2377,7 @@ export function SlotText({ slot, widget, sessionId, slotId, revisionCount, onRef
         <>
           {widget?.widgetType === 'ppt-prompt' ? (
             <PptPromptDocument key={editingKey} text={displayText}
-              onEdit={canEdit ? () => handleEdit() : undefined} maxHeight={widget.maxHeight} />
+              onEdit={canEdit ? (source) => handleEdit(source) : undefined} maxHeight={widget.maxHeight} />
           ) : widget?.widgetType === 'text-markdown' ? (
             <div
               className={`workflow-slot__text workflow-slot__text--markdown${canEdit ? ' workflow-slot__text--editable' : ''}`}
