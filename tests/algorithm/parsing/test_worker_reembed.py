@@ -264,3 +264,21 @@ def test_full_source_rebuild_defers_optional_llm_groups_but_explicit_selection_r
     assert called == [None, 'block']
     processor._reparse_docs('doc-summary', _node_groups())
     assert called == [None, 'block', 'doc-summary']
+
+
+def test_index_task_connects_before_read_but_parse_only_does_not(monkeypatch):
+    store = _Store()
+    processor = _Processor(store)
+    worker = _worker_with_processor(monkeypatch, processor)
+    connected = []
+    store._seg_init = lambda: connected.append('segments')
+    store._vec_init = lambda: connected.append('vectors')
+    try:
+        worker._lazymind_task_indexes = False
+        worker._get_processor()
+        assert connected == []
+        worker._lazymind_task_indexes = True
+        worker._get_processor()
+        assert connected == ['segments', 'vectors']
+    finally:
+        processor._thread_pool.shutdown(wait=False)

@@ -189,6 +189,12 @@ if not getattr(DocumentProcessorWorker._Impl, '_lazymind_isolated', False):
                 fresh.activate_group(old.activated_groups())
                 processor._store = fresh
                 processor._lazymind_generation_initialized = True
+            # Reembedding reads retained vectors before its first write. Initialize
+            # the vector connection now rather than letting HybridStore.get hit a
+            # freshly deserialized Milvus store without a client pool.
+            if getattr(self, '_lazymind_task_indexes', True) and hasattr(processor._store, '_seg_init'):
+                processor._store._seg_init()
+                processor._store._vec_init()
             return _install_deferred_group_guard(_install_text_reembed_guard(processor))
 
         def _exec_reparse_task(self, processor, task_id, payload, node_groups, name_to_id, reader):
