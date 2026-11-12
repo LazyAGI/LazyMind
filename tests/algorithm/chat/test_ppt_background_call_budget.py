@@ -2,6 +2,7 @@ import pytest
 
 from lazyllm.tools.agent import ToolManager, ToolExecutionError, fc_register
 from lazymind.chat.engine.agent_runtime.tool_call_guard import ToolCallQuota, ToolExecutionMiddleware
+from lazymind.chat.engine.subagent.extensions import resolve_runtime_extension
 from lazymind.chat.engine.subagent.runner import WORKFLOW_TOOL_CALL_LIMITS
 from lazymind.chat.engine.tools.workspace_context import WorkspaceContext
 
@@ -23,11 +24,15 @@ def test_background_generation_executes_once_per_step_even_with_changed_argument
         return {'local_path': '/uploads/background.png'}
 
     manager = ToolManager([ppt_generate_background_images])
+    extension = resolve_runtime_extension('workflow_step', {
+        'workflow_ref': 'builtin:ppt-workflow',
+        'step_id': 'generate_backgrounds',
+    })
 
     def step():
         return ToolExecutionMiddleware(
             manager, workspace_permission=WorkspaceContext(local_runtime=False),
-            call_quota=ToolCallQuota(WORKFLOW_TOOL_CALL_LIMITS),
+            call_quota=ToolCallQuota({**WORKFLOW_TOOL_CALL_LIMITS, **extension.tool_call_limits}),
         )
 
     middleware = step()

@@ -431,16 +431,14 @@ services:
       timeout: 5s
       retries: 3
 
-  # Reuse the Chat/algorithm runtime as a one-shot initializer. It checks the
-  # persisted Core PostgreSQL database first and only downloads the release
-  # package when at least one configured sample conversation is missing.
+  # Reuse the Chat/algorithm runtime as a one-shot initializer. The release
+  # SHA-256 identifies the package to prepare, even when conversation IDs match.
   history-injection-init:
     image: ${LAZYMIND_IMAGE_MIRROR:-registry.cn-hangzhou.aliyuncs.com}/lazyllm/lazymind-algorithm:${LAZYMIND_IMAGE_TAG:-latest}
     restart: "no"
     command: ["python", "/opt/lazymind-bootstrap/prepare_history_injection.py"]
     environment:
       <<: *proxy-env
-      ACL_DB_DSN: "host=db user=root password=123456 dbname=core port=5432 sslmode=disable"
       LAZYMIND_HISTORY_INJECTION_ENABLED: ${LAZYMIND_HISTORY_INJECTION_ENABLED:-true}
       LAZYMIND_HISTORY_INJECTION_CONFIG: /opt/lazymind-bootstrap/history-injection-package.json
       LAZYMIND_HISTORY_INJECTION_CACHE_ROOT: /var/lib/lazymind/uploads/.history-injection

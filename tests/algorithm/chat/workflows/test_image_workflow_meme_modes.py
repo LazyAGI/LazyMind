@@ -160,6 +160,7 @@ def test_generate_exposes_only_present_seedance_frame_and_reference_materials():
     assert enhance_tab['composite_layout']['direction'] == 'row'
     assert all('tabs' not in child for child in enhance_tab['composite_layout']['children'])
     assert enhance_tab['composite_behavior']['repeat_single_slots'] == [
+        'enhancement_status',
         'generated_first_frame',
         'generated_last_frame',
         'material_images',

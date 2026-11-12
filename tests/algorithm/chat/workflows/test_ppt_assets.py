@@ -7,6 +7,7 @@ from xml.etree import ElementTree as ET
 
 from PIL import Image
 from pptx import Presentation
+from pptx.util import Inches
 import pytest
 
 
@@ -14,9 +15,10 @@ pytestmark = pytest.mark.usefixtures('ppt_asset_library')
 
 
 ROOT = Path(__file__).resolve().parents[4]
-LIB = ROOT / 'workflows/ppt-workflow/runtime/lib'
-sys.path.insert(0, str(LIB))
+RUNTIME = ROOT / 'workflows/ppt-workflow/runtime'
+sys.path[:0] = [str(RUNTIME / 'lib'), str(RUNTIME / 'scripts')]
 import presentation_assets as assets  # noqa: E402
+import run_stage  # noqa: E402
 
 
 def test_cached_catalog_has_verified_offline_files_and_license_notices():
@@ -48,16 +50,32 @@ def test_chinese_search_returns_named_meaningful_assets_and_rejects_paths():
 
 def test_named_icons_coexist_with_evidence_image_and_are_offline_and_idempotent(tmp_path):
     html = '<img src="../images/evidence.png"><img data-ppt-asset="fluent-3d:clipboard" ' \
-           'alt="需求分析" style="width:180px;height:80px;object-fit:fill">'
+           'alt="需求分析" srcset="../images/alternate.png 2x" ' \
+           'style="width:800px;height:600px;min-width:500px;object-fit:fill">'
     result, names = assets.resolve_html(html, tmp_path)
     assert names == ['fluent-3d:clipboard']
     assert '<img src="../images/evidence.png">' in result
     assert 'src="../images/asset-fluent-3d--clipboard.png"' in result
+    assert 'alternate.png' not in result
     assert 'object-fit:fill' not in result
+    assert 'min-width:500px' not in result
+    assert 'max-width:96px!important;max-height:96px!important' in result
     assert assets.resolve_html(result, tmp_path)[0] == result
     assert (tmp_path / 'images/ASSET-LICENSES.txt').is_file()
     with pytest.raises(ValueError, match='Unknown presentation asset'):
         assets.resolve_html('<img data-ppt-asset="fluent-3d:not-found">', tmp_path)
+
+
+def test_unknown_icon_fallback_keeps_explicit_material_sources(tmp_path):
+    omitted = []
+    html = (
+        '<img data-ppt-asset="fluent-3d:not-found">'
+        '<img data-ppt-asset="fluent-3d:unknown" src="../images/evidence.png" alt="Source">'
+    )
+    result, names = assets.resolve_html(html, tmp_path, omitted=omitted)
+    assert result == '<img src="../images/evidence.png" alt="Source">'
+    assert names == []
+    assert omitted == ['fluent-3d:not-found', 'fluent-3d:unknown']
 
 
 def test_named_asset_checksum_failure_does_not_stage_mutated_image(tmp_path, monkeypatch):
@@ -66,6 +84,10 @@ def test_named_asset_checksum_failure_does_not_stage_mutated_image(tmp_path, mon
     monkeypatch.setattr(assets, 'catalog', lambda: data)
     with pytest.raises(ValueError, match='checksum'):
         assets.stage(data['assets'][0]['name'], tmp_path, 'png')
+    omitted = []
+    with pytest.raises(ValueError, match='checksum'):
+        assets.resolve_html(f'<img data-ppt-asset="{data["assets"][0]["name"]}">', tmp_path, omitted=omitted)
+    assert omitted == []
     assert not list(tmp_path.iterdir())
 
 
@@ -84,10 +106,23 @@ def test_native_icons_embed_with_contained_aspect_ratio_and_keep_input_and_notes
     compose_template(source, output, info['sha256'], normalized, files)
     result = Presentation(output).slides[0]
     icon = next(s for s in result.shapes if s.shape_type == 13)
+    assert icon.width <= Inches(0.8) and icon.height <= Inches(0.8)
     with Image.open(files[next(iter(files))]['path']) as image:
         assert icon.width / icon.height == pytest.approx(image.width / image.height, abs=.01)
     assert 'Preserve approved evidence.' in result.notes_slide.notes_text_frame.text
     assert pages == original
+
+
+def test_native_optional_unknown_icon_leaves_registered_images_and_notes(tmp_path):
+    images = [{'material_index': 4, 'box': [1, 2, 4, 3]}]
+    pages = [{'source_page': 1, 'notes': 'Evidence stays', 'images': images,
+              'icons': [{'name': 'fluent-3d:clock', 'box': [0, 0, .5, .5]}]}]
+    registered = {4: {'path': 'evidence.png'}}
+    omitted = []
+    normalized, files = assets.native_pages(pages, registered, tmp_path, omitted=omitted)
+    assert normalized[0]['images'] == images and files == registered
+    assert normalized[0]['notes'] == 'Evidence stays'
+    assert omitted == [{'page': 1, 'name': 'fluent-3d:clock'}]
 
 
 def test_workflow_search_and_get_tools_are_registered_and_stage_real_assets(tmp_path, monkeypatch):
@@ -110,8 +145,6 @@ def test_workflow_search_and_get_tools_are_registered_and_stage_real_assets(tmp_
 
 
 def test_generator_resolves_named_assets_before_publishing(tmp_path):
-    sys.path.insert(0, str(ROOT / 'workflows/ppt-workflow/runtime/scripts'))
-    import run_stage
     (tmp_path / 'pages').mkdir()
     calls = []
 
@@ -128,3 +161,27 @@ def test_generator_resolves_named_assets_before_publishing(tmp_path):
     assert '../images/asset-fluent-3d--clipboard.png' in saved
     assert 'NAMED PRESENTATION ASSETS' in calls[0]
     assert len(calls) == 1
+
+
+def test_unknown_icon_fallback_does_not_accept_missing_required_material(tmp_path):
+    (tmp_path / 'pages').mkdir()
+    (tmp_path / 'images').mkdir()
+    Image.new('RGB', (80, 40), 'green').save(tmp_path / 'images/evidence.png')
+    calls = []
+
+    def model(system, query, **kwargs):
+        calls.append(query)
+        name = 'fluent-3d:clock' if len(calls) == 1 else 'fluent-3d:clock-24'
+        return f'<!doctype html><html><head></head><body><img data-ppt-asset="{name}"></body></html>'
+
+    code, result = run_stage._capture_cmd(
+        run_stage._write_page_html_from_query, tmp_path, 1, '立体需求分析流程',
+        page_plan={'slots': []}, inherited_image=None, background_image=None,
+        prompt_mode='complete-page-prompt', language='zh', llm_call=model,
+        material_images=['images/evidence.png'],
+    )
+    assert code != 0
+    assert 'missing or invalid material images' in result['error']
+    assert 'images/evidence.png' in result['error']
+    assert not (tmp_path / 'pages/page_001.html').exists()
+    assert len(calls) == 2

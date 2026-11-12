@@ -1,3 +1,4 @@
+import json
 import time
 from pathlib import Path
 
@@ -100,31 +101,25 @@ def test_suggestion_limit_does_not_truncate_fixed_choices():
     assert card['questions'][0]['allow_other'] is False
 
 
-def test_ppt_explicit_background_cannot_be_invented_by_model():
+def test_ppt_background_reuses_submitted_answer():
     runtime = policy('ppt-workflow')
-    values, missing = resolve_fields(runtime, '做一个关于气候变化的PPT，8页',
-                                     {'topic': '气候变化', 'generate_background_images': 'enabled'})
-    assert values['slide_count'] == '8'
-    assert [item['id'] for item in missing] == ['generate_background_images']
-    values, missing = resolve_fields(runtime, '做一个关于气候变化的PPT，8页',
-                                     {'topic': '气候变化'}, {'generate_background_images': '__ask_user_no__'})
+    values, missing = resolve_fields(
+        runtime, '做一个关于气候变化的PPT，8页',
+        {'topic': '气候变化', 'slide_count': '8', 'generate_background_images': 'enabled'},
+        {'generate_background_images': '__ask_user_no__'},
+    )
     assert not missing
     assert values['generate_background_images'] == 'disabled'
 
 
-@pytest.mark.parametrize('instruction,expected', [
-    ('不要启用AI底图', 'disabled'),
-    ('不启用AI底图', 'disabled'),
-    ('不要生成 AI 底图', 'disabled'),
-    ('不生成AI底图', 'disabled'),
-    ('生成AI底图', 'enabled'),
-    ('启用AI底图', 'enabled'),
-    ('不要关闭AI底图', 'enabled'),
+@pytest.mark.parametrize('brief', [
+    '做8页关于垃圾分类的PPT，启用｜为每页生成独立 AI 底图',
+    '做8页关于垃圾分类的PPT，生成AI底图',
 ])
-def test_ppt_background_aliases_respect_negation(instruction, expected):
-    values, missing = resolve_fields(policy('ppt-workflow'), f'做8页关于垃圾分类的PPT，{instruction}')
-    assert not missing
-    assert values['generate_background_images'] == expected
+def test_ppt_fields_are_not_extracted_from_request_text_by_host(brief):
+    values, missing = resolve_fields(policy('ppt-workflow'), brief)
+    assert values == {'template_mode': 'none'}
+    assert [field['id'] for field in missing] == ['topic', 'slide_count', 'generate_background_images']
 
 
 @pytest.mark.parametrize('instruction,expected', [
@@ -203,7 +198,7 @@ def test_ambiguous_lengths_require_confirmation_and_equal_normalized_lengths_do_
 
 def test_typed_template_binding_skips_style_and_background_questions():
     values, missing = resolve_fields(policy('ppt-workflow'), '用上传模板做8页关于气候变化的PPT', {
-        'topic': '气候变化', 'template_pptx': 'template.pptx',
+        'topic': '气候变化', 'slide_count': '8', 'template_pptx': 'template.pptx',
     })
     assert [field['id'] for field in missing] == ['presentation_output_format']
     assert values['template_mode'] == 'upload'
@@ -371,17 +366,56 @@ def startup_tools(monkeypatch):
     monkeypatch.setattr('lazymind.chat.engine.tools.ask_user._write_agent_data',
                         lambda tag, **payload: events.append((tag, payload)))
 
-    def build(runtime, request, history=None):
+    def build(runtime, request, history=None, *, workflow_id='writer-workflow', session_holder=None):
         client.get_workflow.return_value.result = {
             'revision_id': 'revision-1', 'runtime': runtime,
             'compiled_graph': {'material_types': {}, 'material_producers': {}},
         }
-        return manager._workflow_trigger_tools([{
-            'workflow_id': 'writer-workflow', 'workflow_ref': 'builtin:writer-workflow',
-            'revision_id': 'revision-1', 'tool_name': 'trigger_writer_workflow', 'runtime': runtime,
-        }], {'builtin:writer-workflow'}, current_query=request, conversation_history=history, session_holder={})[0]
+        ref = f'builtin:{workflow_id}'
+        activation = manager.workflow_activation_from_catalog_item({
+            'workflow_id': workflow_id, 'workflow_ref': ref, 'revision_id': 'revision-1', 'runtime': runtime,
+        })
+        return manager._workflow_trigger_tools(
+            [activation], {ref}, current_query=request, conversation_history=history,
+            session_holder=session_holder if session_holder is not None else {},
+        )[0]
 
     return build, client, toolkit, events
+
+
+@pytest.mark.parametrize('brief,model_choice', [
+    ('给我生成 12 页关于2026年英雄联盟 世界赛 比赛进程的ppt ai 底图 15分钟介绍 面向游戏观众 赛博朋克风格',
+     'enabled'),
+    ('做12页关于垃圾分类的PPT，幻灯片用纯色，别另外画背景', 'disabled'),
+    ('做12页关于AI底图设计的PPT', None),
+    ('做12页关于垃圾分类的PPT ai 底图，但不要生成 AI 底图', None),
+])
+def test_ppt_trigger_accepts_all_model_choices_together(startup_tools, brief, model_choice):
+    build, _, toolkit, events = startup_tools
+    holder = {}
+    trigger = build(policy('ppt-workflow'), brief, workflow_id='ppt-workflow', session_holder=holder)
+    assert 'pending_ask' not in holder
+    assert 'send all resolved fields in one trigger call' in trigger.__doc__
+    inputs = {'topic': '垃圾分类', 'slide_count': '12'}
+    if '英雄联盟' in brief:
+        inputs.update(topic='2026年英雄联盟世界赛比赛进程', presentation_duration='15分钟',
+                      target_customer='游戏观众', visual_style='赛博朋克风格')
+    if model_choice:
+        inputs['generate_background_images'] = model_choice
+    result = trigger(input_bindings=inputs)
+    if model_choice is None:
+        assert result['status'] == 'needs_input'
+        assert result['missing_clarification_fields'] == ['generate_background_images']
+        assert [tag for tag, _ in events] == ['ask_pending']
+        saved = json.loads(events[0][1]['workflow']['values_json'])
+        assert all(saved[key] == value for key, value in inputs.items())
+        toolkit.prepare_workflow.assert_not_called()
+    else:
+        assert result['outcome'] == 'ready'
+        submitted = toolkit.prepare_workflow.call_args.kwargs
+        assert submitted['clarification_values'] == {**inputs, 'template_mode': 'none'}
+        assert brief in submitted['request_context']
+        assert not events
 
 
 @pytest.fixture

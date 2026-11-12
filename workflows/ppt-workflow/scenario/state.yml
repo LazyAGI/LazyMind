@@ -647,9 +647,10 @@ steps:
          name). Prefer one consistent family: fluent-color for color SVG,
          fluent-3d for transparent 3D PNG, lucide/tabler for outline diagrams.
          Record selected exact names and their intended role in material_summary;
-         use ppt_get_asset only for selected assets. These are illustrative icons,
-         never factual evidence, and do not consume material_images slots. Do not
-         call web search for an icon already present in this local catalog.
+         use ppt_get_asset only for selected assets. Use icons only as small
+         labels or decoration. Reserve the main visual for registered materials,
+         content diagrams or data charts. Icons do not consume material_images
+         slots. Do not call web search for an icon already in the local catalog.
          A deck may complete with zero material_images. CSS, SVG, and ECharts
          are valid visual alternatives. Do not treat a generic desire for a
          polished or visual deck as a hard image requirement.
@@ -1072,17 +1073,17 @@ steps:
       from requirement_analysis into style_hint. The PPT runtime selects one
       deck-wide style and applies that same contract to every page.
 
-      This call reuses the prepared deck, locks one authoritative deck-wide style,
-      and saves your Markdown. Internal structure, schema validation, image
-      bindings and rendering are deferred to generate_ppt. This step only plans
-      user-visible content; keep page headings clear and content concise.
+      This call reuses the prepared deck and saves your Markdown. Keep page headings
+      clear and use ### for subsections. Internal structure, schema validation,
+      image bindings and rendering are deferred to generate_ppt.
       This step never generates AI backgrounds; the dedicated stages before it
       already published prompts and images. When AI backgrounds were
       disabled and those steps were skipped, call ppt_build_outline without
-      deck_dir so it initializes the deck and creates one unique style first.
-
-      This is an atomic step. If ppt_build_outline fails, report that exact tool
-      error and stop so only this Workflow step fails and can be retried.
+      deck_dir so it initializes the deck.
+      If tool arguments or the Markdown page count are invalid, correct those
+      arguments and call ppt_build_outline once more with the same authored
+      content. For other failures, or if that correction fails, report the exact
+      tool error so only this Workflow step fails and can be retried.
       On retry call ppt_build_outline with the same arguments and the returned
       deck_dir when available. It resumes the failed stage, preserving completed
       style/outline work and all existing materials/backgrounds. Never restart
@@ -1134,8 +1135,8 @@ steps:
       null at new positions], new_notes_json={final position: new script},
       update_outputs=false) to
       reallocate timings while preserving all prior script bodies. Do not move
-      script authorship into generate_ppt. Full fresh decks use speaker_notes
-      in ppt_publish_outline as below.
+      script authorship into generate_ppt. For a new deck, plan and save each
+      page's speaker note along with its visual prompt.
       Presentation copy policy: visible slides must explain the problem, concrete
       method, personal contribution and supported outcome in concise natural
       language. Never display PR/issue/work-log identifiers such as #1189 or
@@ -1182,8 +1183,8 @@ steps:
       editable charts/tables/images, and plain-language notes with approved timing.
       Preserve template masters, logos and geometry; remove sample/placeholder text.
       Do not request HTML documents, CSS layout or HTML speaker-note tags.
-      Call ppt_publish_outline(output_format="native_pptx", global_style="...", page_components=[...]).
-      For html, call it with output_format="html" and apply the HTML-only rules below.
+      Pass output_format="native_pptx" to the page planner or edit publisher.
+      For html, pass output_format="html" and apply the HTML-only rules below.
       If a template is uploaded, preserve its inspected positions, typography,
       colors, table structure and original background media while replacing sample
       content. Do not rasterize template pages into backgrounds. Include an explicit
@@ -1301,14 +1302,15 @@ steps:
       layout, not visible slide copy; Markdown is the design brief, not a reason
       to flatten the generated HTML table into repeated cells.
 
-      Call ppt_publish_outline once with output_format as specified above and
-      global_style=<shared audience, language, canvas, typography, colors and output rules>,
-      page_components=[{"content": <exact title and body copy>,
-                        "layout": <placement, hierarchy and page-specific design>,
-                        "assets": <actual asset references and usage, or explicit no-assets>} for each slide],
-      speaker_notes=[<complete timed spoken script for each slide>].
-      The tool saves speaker_notes_source as a hidden file artifact and returns
-      only its reference. Do not embed scripts or timing narration in slide_outline.
+      For a new deck or a retry of unfinished page planning in LazyMind, call
+      ppt_plan_page_prompts once with the saved output_format and
+      global_style=<shared audience, language, canvas, typography, colors and output rules>.
+      The tool authors and publishes one page at a time, checkpoints each prompt
+      and note, and resumes from the first missing page after a failure.
+      Do not assemble a deck-wide page_components payload for this path.
+      External executors author and publish each slide_outline item as it is ready,
+      using its approved position, and publish the complete hidden speaker notes
+      file after all prompts are ready. Do not embed scripts or timing in slide_outline.
       Omit deck_dir: the tool reads the bound deck automatically. Do not search
       for a deck or invent task_ref. If the tool reports a missing bound deck,
       stop and report that build_outline must be resumed.
@@ -1321,6 +1323,9 @@ steps:
       PPTX or HTML generation route. Generate only builds a page execution index; it must not ask
       another model to rewrite these prompts into an internal content outline.
 
+      For edits to an existing complete plan, use ppt_publish_outline with the saved
+      output_format, global_style, page_components=[{"content": "...", "layout": "...",
+      "assets": "..."}] and separately authored speaker_notes for changed pages.
       For modular plans, publish all updated components together after an insertion.
       Legacy incremental insertion: when the current request added one whole slide at
       position N, call
@@ -1332,8 +1337,12 @@ steps:
       Stop immediately after publishing. Do not call ppt_build_outline,
       ppt_generate_pages, page-html, or save_artifacts.
     tools:
+      - ppt_plan_page_prompts
       - ppt_publish_outline
       - ppt_update_speaker_notes
+    terminal_tools:
+      - ppt_plan_page_prompts
+      - ppt_publish_outline
     inputs:
       - material: presentation_output_format
         required: false
@@ -1496,8 +1505,10 @@ steps:
       The tool normalizes every saved background to the exact 1280x720 slide
       canvas. Do not treat a provider's square source image as the final asset.
       Never call ppt_generate_background_images more than once in the same step.
-      On a provider failure, stop and surface the exact error; a later workflow
-      retry resumes from the per-page checkpoint and reuses completed images.
+      The tool publishes each ready page. On HTTP 429 it waits 30 seconds and
+      retries the same page once within this call. If the tool reports a
+      failure, surface the exact error. A later workflow retry can reuse the
+      completed backgrounds.
 
       First full run:
       - Pass every prompt as prompts_json with its page_no.
@@ -1521,6 +1532,8 @@ steps:
       If generation fails or returns no file, report the exact model/tool reason
       and fail the step. After success, continue automatically.
     tools:
+      - ppt_generate_background_images
+    terminal_tools:
       - ppt_generate_background_images
     inputs:
       - material: background_prompts
@@ -1980,8 +1993,9 @@ steps:
       names. Prefer one consistent collection per diagram: fluent-color/fluent-3d
       for colorful dimensional references, ph for duotone, lucide/tabler for line art.
       Use exact names as HTML img data-ppt-asset attributes or native pages[].icons
-      [{name,box}]; do not fabricate file paths. These icons are separate from the
-      single evidence image and never replace factual diagrams, screenshots or charts.
+      [{name,box}]. Use them only as small labels or decorations (up to 96 CSS
+      pixels or 0.8 inches per side). Omit an icon when no exact name fits.
+      Reserve main visuals for factual diagrams, screenshots, or charts.
       For a user-approved rich reference, reproduce its visual hierarchy, balanced
       icon sizes, soft shadows and restrained depth with assets plus readable text.
       Preserve natural glyph widths and image aspect ratios. Never use scaleX/scaleY,
@@ -2071,7 +2085,10 @@ steps:
       already delivered a usable native_pptx; keep the last published version.
       For a full HTML run: the exact requested number of preview_html HTML pages must
       be saved (DOCTYPE/html documents), with matching preview_notes sort_order.
-      Generate pages sequentially; a two-page request still requires both pages.
+      A four-page request completes when all four usable pages and matching notes
+      are saved; a two-page request still requires both pages. PPTX download is a
+      separate UI action, not an HTML generation completion gate. Do not fail,
+      retry or regenerate saved pages for a missing PPTX or optional export error.
       preview_notes must be aligned with preview_html; the auto-generated draft
       must be a natural spoken explanation, not copied formula source. For
       academic pages explain intuition, key quantities, measured comparisons and
