@@ -168,6 +168,22 @@ if not getattr(DocumentProcessorWorker._Impl, '_lazymind_isolated', False):
             return _install_text_reembed_guard(processor)
 
         def _exec_reparse_task(self, processor, task_id, payload, node_groups, name_to_id, reader):
+            # The document service expands an all-groups selection into names,
+            # including the source root. Preserve full rebuild semantics: otherwise
+            # the base worker drops that root and only reslices stale source nodes.
+            from lazyllm.tools.rag.store import LAZY_ROOT_NAME
+            if (payload.get('strategy', 'rebuild') == 'rebuild'
+                    and LAZY_ROOT_NAME in (payload.get('ng_names') or [])):
+                payload = {**payload, 'ng_names': None}
+            if payload.get('strategy', 'rebuild') == 'rebuild' and payload.get('processing_level') != 'parsed':
+                # A freshly deserialized store has no local initialization flag,
+                # even when remote segments/vectors exist. Full rebuild must
+                # connect before deletion; otherwise remove_nodes silently skips
+                # old content and the subsequent empty-store check never passes.
+                store = processor._store
+                if hasattr(store, '_seg_init'):
+                    store._seg_init()
+                    store._vec_init()
             _rebuild_empty_text_documents(processor, payload, node_groups, reader)
             return _BaseDocumentWorkerImpl._exec_reparse_task(
                 self, processor, task_id, payload, node_groups, name_to_id, reader)

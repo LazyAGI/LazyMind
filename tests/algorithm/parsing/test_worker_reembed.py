@@ -217,3 +217,29 @@ def test_worker_image_only_reembed_succeeds_without_rewriting_image(monkeypatch,
         assert ordinary_calls == [True]
     finally:
         processor._thread_pool.shutdown(wait=False)
+
+
+def test_full_rebuild_expanded_source_selection_rereads_original(monkeypatch):
+    store = _Store()
+    processor = _Processor(store)
+    worker = _worker_with_processor(monkeypatch, processor)
+    calls = []
+    initialized = []
+    store._seg_init = lambda: initialized.append('segments')
+    store._vec_init = lambda: initialized.append('vectors')
+    base_impl = type(worker).__mro__[1]
+    monkeypatch.setattr(base_impl, '_exec_reparse_task',
+                        lambda _self, _processor, _task, payload, *_args: calls.append(payload))
+    try:
+        payload = {'strategy': 'rebuild', 'processing_level': 'chunked',
+                   'ng_names': [LAZY_ROOT_NAME, 'block', 'line']}
+        worker._exec_reparse_task(processor, 'task', payload, _node_groups(), {}, None)
+        assert calls[-1]['ng_names'] is None
+        assert initialized == ['segments', 'vectors']
+        assert payload['ng_names'] == [LAZY_ROOT_NAME, 'block', 'line']
+        for selection, strategy in [(['block'], 'rebuild'), ([LAZY_ROOT_NAME, 'block'], 'reembed')]:
+            payload = {'strategy': strategy, 'ng_names': selection}
+            worker._exec_reparse_task(processor, 'task', payload, _node_groups(), {}, None)
+            assert calls[-1]['ng_names'] == selection
+    finally:
+        processor._thread_pool.shutdown(wait=False)
