@@ -118,7 +118,8 @@ def test_template_startup_asks_only_missing_output_choice():
     from lazymind.chat.workflow.clarification import resolve_fields, startup_card
     policy = yaml.safe_load((ROOT / 'workflows/ppt-workflow/workflow.yaml').read_text(encoding='utf-8'))['runtime']
     values, missing = resolve_fields(policy, '主题：研究报告，8页，使用附件 company.pptx 作为 PPTX 模板',
-                                     supplied={'template_pptx': 'company.pptx'})
+                                     supplied={'topic': '研究报告', 'template_pptx': 'company.pptx'},
+                                     extractions={'slide_count': [{'value': '8', 'evidence': '8页'}]})
     assert values['template_mode'] == 'upload'
     assert [field['id'] for field in missing] == ['presentation_output_format']
     card = startup_card(missing, {})
@@ -131,7 +132,9 @@ def test_template_startup_asks_only_missing_output_choice():
 def test_plain_startup_never_asks_template_format_or_generation_mode():
     from lazymind.chat.workflow.clarification import resolve_fields
     policy = yaml.safe_load((ROOT / 'workflows/ppt-workflow/workflow.yaml').read_text(encoding='utf-8'))['runtime']
-    values, missing = resolve_fields(policy, '主题：城市介绍，8页，不生成AI底图')
+    values, missing = resolve_fields(policy, '主题：城市介绍，8页，不生成AI底图',
+                                     supplied={'topic': '城市介绍'},
+                                     extractions={'slide_count': [{'value': '8', 'evidence': '8页'}]})
     assert values['template_mode'] == 'none' and missing == []
     assert 'presentation_output_format' not in values
     assert 'generation_mode' not in {field['id'] for field in policy['clarification_fields']}
@@ -145,22 +148,23 @@ def test_explicit_template_output_does_not_ask_again(text, expected):
     from lazymind.chat.workflow.clarification import resolve_fields
     policy = yaml.safe_load((ROOT / 'workflows/ppt-workflow/workflow.yaml').read_text(encoding='utf-8'))['runtime']
     values, missing = resolve_fields(policy, '主题：研究报告，8页，' + text,
-                                     supplied={'template_pptx': 'template.pptx'})
+                                     supplied={'topic': '研究报告', 'template_pptx': 'template.pptx'},
+                                     extractions={'slide_count': [{'value': '8', 'evidence': '8页'}]})
     assert values['presentation_output_format'] == expected and missing == []
 
 
-@pytest.mark.parametrize('brief,output_format', [
-    ('转正答辩，生成12 页pptx，十五分钟演讲、五分钟问答', 'native_pptx'),
-    ('请按模板制作十二页可编辑的 PowerPoint 文件', 'native_pptx'),
-    ('沿用模板风格做12页网页幻灯片', 'html'),
+@pytest.mark.parametrize('brief,output_format,count_evidence', [
+    ('转正答辩，生成12 页pptx，十五分钟演讲、五分钟问答', 'native_pptx', '12 页pptx'),
+    ('请按模板制作十二页可编辑的 PowerPoint 文件', 'native_pptx', '十二页'),
+    ('沿用模板风格做12页网页幻灯片', 'html', '12页'),
 ])
-def test_template_output_accepts_model_extraction_from_user_request(brief, output_format):
+def test_template_output_accepts_model_extraction_from_user_request(brief, output_format, count_evidence):
     from lazymind.chat.workflow.clarification import resolve_fields
     policy = yaml.safe_load((ROOT / 'workflows/ppt-workflow/workflow.yaml').read_text())['runtime']
     values, missing = resolve_fields(policy, brief, supplied={
         'topic': '转正答辩', 'template_pptx': 'template.pptx',
         'presentation_output_format': output_format,
-    })
+    }, extractions={'slide_count': [{'value': '12', 'evidence': count_evidence}]})
     assert missing == []
     assert values['presentation_output_format'] == output_format
 
@@ -170,7 +174,7 @@ def test_user_output_choice_takes_precedence_over_model_binding(previous):
     from lazymind.chat.workflow.clarification import resolve_fields
     policy = yaml.safe_load((ROOT / 'workflows/ppt-workflow/workflow.yaml').read_text())['runtime']
     values, missing = resolve_fields(policy, '主题：研究报告，8页，输出 HTML', supplied={
-        'template_pptx': 'template.pptx', 'presentation_output_format': 'native_pptx',
-    }, previous=previous)
+        'topic': '研究报告', 'template_pptx': 'template.pptx', 'presentation_output_format': 'native_pptx',
+    }, previous=previous, extractions={'slide_count': [{'value': '8', 'evidence': '8页'}]})
     assert missing == []
     assert values['presentation_output_format'] == 'html'

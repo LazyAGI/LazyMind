@@ -90,12 +90,13 @@ def test_ppt_trigger_preserves_collection_request_without_reading_sources(monkey
     result = trigger(input_bindings={
         'topic': '转正答辩', 'template_pptx': 'template.pptx',
         'presentation_output_format': 'native_pptx',
-    })
+    }, clarification_extractions={'slide_count': [{'value': '12', 'evidence': '12 页pptx'}]})
     assert result['session_id'] == 'session'
     toolkit.prepare_workflow.assert_called_once()
     submitted = toolkit.prepare_workflow.call_args.kwargs
     assert brief in submitted['request_context']
     assert submitted['input_bindings']['template_pptx'] == 'resource:template'
     assert submitted['clarification_values']['presentation_output_format'] == 'native_pptx'
+    assert submitted['clarification_values']['slide_count'] == '12'
     toolkit.advance_step.assert_not_called()
     client.transport.request.assert_not_called()

@@ -109,9 +109,9 @@ it('retains an unsaved edit, blocks publication and allows retry after mapping a
   // reformatted replacement when its mapping is unavailable.
   const menu = document.querySelector<HTMLDetailsElement>('.writer-document-options')!;
   act(() => { menu.open = true; fireEvent(menu, new Event('toggle')); });
-  fireEvent.click(screen.getByRole('button', { name: '源码' }));
+  fireEvent.click(screen.getByRole('button', { name: '查看源码' }));
   expect(onSave).not.toHaveBeenCalled();
-  expect(screen.queryByRole('textbox', { name: '源码' })).not.toBeInTheDocument();
+  expect(screen.queryByRole('textbox', { name: '查看源码' })).not.toBeInTheDocument();
   capture.abortDiff = false;
   fireEvent.click(screen.getByRole('button', { name: '重试' }));
   await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1));
@@ -119,10 +119,10 @@ it('retains an unsaved edit, blocks publication and allows retry after mapping a
   const unsavedMarkdown = source.replace('Original paragraph.', 'Unsaved paragraph.');
   expect(publishedSource(savedMarkdown)).toBe(unsavedMarkdown);
   // Calling onSave starts persistence; its receipt updates the source preview.
-  await waitFor(() => expect(screen.getByRole('textbox', { name: '源码' })).toHaveValue(unsavedMarkdown));
+  await waitFor(() => expect(screen.getByRole('textbox', { name: '查看源码' })).toHaveValue(unsavedMarkdown));
   await act(async () => { finishSave!(); });
-  await waitFor(() => expect(screen.getByRole('textbox', { name: '源码' })).toHaveValue(savedMarkdown));
-  expect(screen.getByRole('textbox', { name: '源码' })).toHaveAttribute('readonly');
+  await waitFor(() => expect(screen.getByRole('textbox', { name: '查看源码' })).toHaveValue(savedMarkdown));
+  expect(screen.getByRole('textbox', { name: '查看源码' })).toHaveAttribute('readonly');
 }, 15000);
 
 it('round-trips the repository README editor input with only the added content in the diff', async () => {
