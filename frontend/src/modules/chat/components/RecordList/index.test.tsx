@@ -289,6 +289,79 @@ describe("RecordList conversation pinning", () => {
     expect(screen.queryByRole("menu")).not.toBeInTheDocument();
   });
 
+  it.each(["click", "hover", "contextMenu"])("dismisses a %s menu after leaving the whole conversation row", async trigger => {
+    renderRecordList();
+    const title = await screen.findByText(newerConversation.display_name);
+    const row = title.closest(".record")!;
+    if (trigger === "contextMenu") fireEvent.contextMenu(row);
+    else if (trigger === "hover") fireEvent.mouseEnter(moreActionsFor(newerConversation.display_name));
+    else fireEvent.click(moreActionsFor(newerConversation.display_name));
+    await screen.findByRole("menu");
+    // Right-clicking a row need not ever enter the Dropdown's button or popup.
+    fireEvent.pointerMove(row);
+    fireEvent.pointerMove(document.body);
+    await waitFor(() => expect(screen.queryByRole("menu")).not.toBeInTheDocument());
+  });
+
+  it("keeps the menu and its portaled group picker usable while crossing the popup gap", async () => {
+    const onSelected = vi.fn();
+    renderRecordList("", onSelected);
+    const title = await screen.findByText(newerConversation.display_name);
+    fireEvent.contextMenu(title.closest(".record")!);
+    const menu = await screen.findByRole("menu");
+    await waitFor(() => expect(menu).toBeVisible());
+    vi.useFakeTimers();
+    fireEvent.pointerMove(document.body);
+    await act(async () => vi.advanceTimersByTimeAsync(50));
+    fireEvent.pointerMove(menu);
+    await act(async () => vi.advanceTimersByTimeAsync(200));
+    expect(menu).toBeVisible();
+    vi.useRealTimers();
+    fireEvent.mouseEnter(within(menu).getByRole("menuitem", { name: /conversationOrganizer.moveToGroup/ }));
+    const search = await screen.findByPlaceholderText("conversationOrganizer.searchGroups");
+    await waitFor(() => expect(search).toBeVisible());
+    fireEvent.click(within(menu).getByRole("menuitem", { name: /conversationOrganizer.moveToGroup/ }));
+    expect(onSelected).not.toHaveBeenCalled();
+    vi.useFakeTimers();
+    fireEvent.pointerMove(document.body);
+    await act(async () => vi.advanceTimersByTimeAsync(50));
+    fireEvent.pointerMove(search);
+    await act(async () => vi.advanceTimersByTimeAsync(200));
+    expect(menu).toBeVisible();
+    expect(search).toBeVisible();
+    fireEvent.wheel(search);
+    expect(menu).toBeVisible();
+    fireEvent.keyDown(search, { key: "Escape" });
+    await act(async () => vi.advanceTimersByTimeAsync(300));
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+  });
+
+  it("does not let an old row's delayed close dismiss a newly opened menu", async () => {
+    renderRecordList();
+    const title = await screen.findByText(newerConversation.display_name);
+    fireEvent.contextMenu(title.closest(".record")!);
+    const menu = await screen.findByRole("menu");
+    await waitFor(() => expect(menu).toBeVisible());
+    vi.useFakeTimers();
+    fireEvent.pointerMove(document.body);
+    fireEvent.contextMenu(screen.getByText(olderConversation.display_name).closest(".record")!);
+    fireEvent.pointerMove(screen.getByText(olderConversation.display_name));
+    await act(async () => vi.advanceTimersByTimeAsync(300));
+    expect(screen.getAllByRole("menu")).toHaveLength(1);
+    fireEvent.wheel(document.body);
+    await act(async () => vi.advanceTimersByTimeAsync(300));
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+  });
+
+  it("dismisses a context menu when the pointer leaves the browser content", async () => {
+    renderRecordList();
+    const title = await screen.findByText(newerConversation.display_name);
+    fireEvent.contextMenu(title.closest(".record")!);
+    await screen.findByRole("menu");
+    fireEvent.pointerOut(document.body, { relatedTarget: null });
+    await waitFor(() => expect(screen.queryByRole("menu")).not.toBeInTheDocument());
+  });
+
   it.each([false, true])("renames Chat/Work from a dialog without changing ordering (work=%s)", async (work) => {
     sessionStorage.setItem(CHAT_CONVERSATION_FILTER_KEY, JSON.stringify([work ? "task" : "normal"]));
     mocks.listConversations.mockResolvedValue({ data: { conversations: [

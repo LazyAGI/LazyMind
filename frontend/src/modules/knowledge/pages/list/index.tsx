@@ -1,3 +1,4 @@
+import { DatasetDeletionProgressList, useDatasetDeletions } from "./DatasetDeletionProgress";
 import { useRAGComponent } from "@/modules/modelProvider/contexts/RAGComponentContext";
 import {
   FC,
@@ -173,6 +174,20 @@ interface KnowledgePageProps {
   modelSettingsPath?: string;
 }
 
+type EmbeddingIndexStatus = "empty" | "indexed" | "rebuilding" | "clearing" | "cleared" | "unknown";
+
+interface EmbeddingIndexState {
+  status: EmbeddingIndexStatus;
+  model_name?: string;
+  provider_name?: string;
+  indexed_knowledge_bases: number;
+  pending_knowledge_bases: number;
+}
+
+const embeddingIndexStatuses = new Set<EmbeddingIndexStatus>([
+  "empty", "indexed", "rebuilding", "clearing", "cleared", "unknown",
+]);
+
 const KnowledgePage: FC<KnowledgePageProps> = ({
   modelSettingsPath = "/settings?section=model_defaults",
 }) => {
@@ -281,10 +296,13 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
         : loadedTableQuery === tableQueryKey,
   );
   const [embeddingReady, setEmbeddingReady] = useState<boolean | null>(null);
+  const [embeddingIndexState, setEmbeddingIndexState] = useState<EmbeddingIndexState | null>(null);
+  const embeddingIndexRequestSeq = useRef(0);
   const [multimodalEmbeddingReady, setMultimodalEmbeddingReady] = useState<
     boolean | null
   >(null);
   const isAdmin = AgentAppsAuth.getUserInfo()?.role === "system-admin";
+  const { deletions, trackDeletion, dismissDeletion } = useDatasetDeletions();
   const syncCreateVm = useSyncKnowledgeBaseCreation({
     onSuccess: () => {
       getTableData();
@@ -453,6 +471,7 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
     };
     document.addEventListener("visibilitychange", onVisibilityChange);
     return () => {
+      embeddingIndexRequestSeq.current += 1;
       window.removeEventListener(
         MODEL_FEATURES_CHANGED_EVENT,
         onFeaturesChanged,
@@ -467,6 +486,7 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
   }, [fromPaperReading, mineScene]);
 
   async function checkEmbeddingReady() {
+    void checkEmbeddingIndexState();
     try {
       const features = await fetchModelFeatures(true);
       const imageEmbedRequired = isImageEmbedRequired(features);
@@ -501,6 +521,27 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
     } catch {
       setEmbeddingReady(null);
       setMultimodalEmbeddingReady(null);
+    }
+  }
+
+  async function checkEmbeddingIndexState() {
+    const request = ++embeddingIndexRequestSeq.current;
+    try {
+      const response = await axiosInstance.get<unknown>(
+        `${BASE_URL}/api/core/model_providers/embedding/index-state`,
+      );
+      const body = response.data;
+      const state = body && typeof body === "object" && "data" in body
+        ? body.data : body;
+      if (request !== embeddingIndexRequestSeq.current) return;
+      setEmbeddingIndexState(
+        state && typeof state === "object" && "status" in state
+          && typeof state.status === "string"
+          && embeddingIndexStatuses.has(state.status as EmbeddingIndexStatus)
+          ? state as EmbeddingIndexState : null,
+      );
+    } catch {
+      if (request === embeddingIndexRequestSeq.current) setEmbeddingIndexState(null);
     }
   }
 
@@ -1033,12 +1074,13 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
           await KnowledgeBaseServiceApi().datasetServiceDeleteDataset({
             dataset: item.datasetId,
           });
-          message.success(t("knowledge.uninstallSuccess", { name: item.name }));
+          trackDeletion(item.datasetId!, item.name);
+          message.info(t("knowledge.cleanupAccepted"));
           await loadKnowledgeMarket();
         },
       });
     },
-    [loadKnowledgeMarket, t],
+    [loadKnowledgeMarket, t, trackDeletion],
   );
 
   const loadOfficialDatasetOrder = useCallback(
@@ -1667,8 +1709,11 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
   function onDelete(id: string) {
     KnowledgeBaseServiceApi()
       .datasetServiceDeleteDataset({ dataset: id })
-      .then(() => {
-        message.success(t("knowledge.deleteSuccess"));
+      .then((response) => {
+        trackDeletion(id, dataSource.find((item) => item.dataset_id === id)?.display_name || t("layout.knowledgeBase"));
+        const item = (response.data as { items?: { cleanup_status?: string; error?: unknown }[] })?.items?.[0];
+        if (item?.cleanup_status === "failed" || item?.error) message.error(t("knowledge.cleanupFailed"));
+        else message.info(t("knowledge.cleanupAccepted"));
         void getLocalTags();
         getTableData();
       });
@@ -1783,6 +1828,34 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
         ) : null}
       </div>
 
+      {activeView === "mine" && embeddingIndexState ? (
+        <div role="status" aria-label={t("knowledge.embeddingIndexStateTitle")}>
+          <Alert
+            className="knowledge-embedding-warning"
+            showIcon
+            type={embeddingIndexState.status === "indexed" ? "success"
+              : embeddingIndexState.status === "empty" ? "info" : "warning"}
+            message={
+              <span>
+                <strong>{t("knowledge.embeddingIndexStateTitle")}</strong>
+                {embeddingIndexState.model_name ? ` · ${t("knowledge.embeddingIndexModel", {
+                  provider: embeddingIndexState.provider_name || t("knowledge.unknown"),
+                  model: embeddingIndexState.model_name,
+                })}` : null}
+              </span>
+            }
+            description={
+              embeddingIndexState.status === "indexed"
+                ? t("knowledge.embeddingIndexIndexed", { count: embeddingIndexState.indexed_knowledge_bases })
+                : embeddingIndexState.status === "rebuilding"
+                  ? t("knowledge.embeddingIndexRebuilding", { count: embeddingIndexState.pending_knowledge_bases })
+                  : t(`knowledge.embeddingIndex${embeddingIndexState.status === "empty" ? "Empty"
+                    : embeddingIndexState.status === "clearing" ? "Clearing"
+                      : embeddingIndexState.status === "cleared" ? "Cleared" : "Unknown"}`)
+            }
+          />
+        </div>
+      ) : null}
       {embeddingReady === false ? (
         <Alert
           banner
@@ -1838,6 +1911,7 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
         />
       ) : null}
 
+      <DatasetDeletionProgressList deletions={deletions} onDismiss={dismissDeletion} />
       {!fromPaperReading ? <div className="knowledge-view-tabs" role="tablist" aria-label={t("knowledge.viewTabs")}>
         <button
           type="button"

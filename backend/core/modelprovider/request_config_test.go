@@ -1,13 +1,19 @@
 package modelprovider
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
+	"github.com/glebarez/sqlite"
 	"github.com/gorilla/mux"
+	"gorm.io/gorm"
 	"lazymind/core/common/orm"
 	"lazymind/core/store"
 )
@@ -16,6 +22,151 @@ func requestConfigRequest(method, provider, user, body string) *http.Request {
 	req := httptest.NewRequest(method, "/request-config", strings.NewReader(body))
 	req.Header.Set("X-User-Id", user)
 	return mux.SetURLVars(req, map[string]string{"model_provider_id": provider})
+}
+
+type requestConfigConcurrentWrite struct {
+	ID    int `gorm:"primaryKey"`
+	Value string
+}
+
+func TestRequestConfigSaveSurvivesConcurrentSQLiteWriter(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "request-config.db")
+	db, err := gorm.Open(sqlite.Open(path), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sqlDB, err := db.DB()
+	if err != nil {
+		t.Fatal(err)
+	}
+	sqlDB.SetMaxOpenConns(4)
+	t.Cleanup(func() {
+		store.Init(nil, nil, nil)
+		_ = sqlDB.Close()
+	})
+	if err := db.Exec("PRAGMA journal_mode=WAL").Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.AutoMigrate(&orm.UserModelProvider{}, &orm.UserModelProviderGroup{}, &requestConfigConcurrentWrite{}); err != nil {
+		t.Fatal(err)
+	}
+	parent := orm.UserModelProvider{
+		ID: "concurrent-supplier", Name: "Qwen", Category: defaultProviderCategory,
+		BaseURL: "https://dashscope.aliyuncs.com/", IsCustom: true,
+		ActiveKeyInitialized: true, ActiveKeyGroupID: "concurrent-group",
+		ActiveKeyID: groupKeyID("concurrent-group", "saved-key"), ActiveKeyRevision: 7,
+		BaseModel: orm.BaseModel{CreateUserID: "user-1"},
+	}
+	if err := db.Create(&parent).Error; err != nil {
+		t.Fatal(err)
+	}
+	ciphertext, err := encryptModelProviderAPIKeyForGroup("user-1", "concurrent-group", 1, "saved-key")
+	if err != nil {
+		t.Fatal(err)
+	}
+	group := orm.UserModelProviderGroup{
+		ID: "concurrent-group", UserModelProviderID: parent.ID, Name: parent.Name,
+		BaseURL: parent.BaseURL, APIKeyCiphertext: ciphertext,
+		CredentialVersion: modelProviderCredentialVersion, CredentialRevision: 1, IsVerified: true,
+		BaseModel: orm.BaseModel{CreateUserID: "user-1"},
+	}
+	if err := db.Create(&group).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&requestConfigConcurrentWrite{ID: 1, Value: "initial"}).Error; err != nil {
+		t.Fatal(err)
+	}
+	store.Init(db, db, nil)
+
+	req := requestConfigRequest(http.MethodPut, parent.ID, "user-1", `{"default_protocol":"openai","advanced":{"extra_body":{"metadata":{"test":"value"}}}}`)
+	ctx, cancel := context.WithTimeout(req.Context(), 10*time.Second)
+	defer cancel()
+	triggered := make(chan struct{})
+	writerDone := make(chan struct{})
+	var writerErr error
+	var writerCommittedBeforeSave bool
+	var once sync.Once
+	const callbackName = "test:request-config-competing-writer"
+	if err := db.Callback().Query().After("gorm:query").Register(callbackName, func(tx *gorm.DB) {
+		if tx.Statement.Table != "user_model_providers" {
+			return
+		}
+		if _, lockedRead := tx.Statement.Clauses["FOR"]; !lockedRead {
+			return
+		}
+		once.Do(func() {
+			close(triggered)
+			go func() {
+				writerErr = db.WithContext(ctx).Model(&requestConfigConcurrentWrite{}).Where("id = 1").Update("value", "competing").Error
+				close(writerDone)
+			}()
+			// The competing writer commits after the supplier read and before
+			// this transaction's first write, invalidating its WAL snapshot.
+			select {
+			case <-writerDone:
+				writerCommittedBeforeSave = writerErr == nil
+			case <-ctx.Done():
+			}
+		})
+	}); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Callback().Query().Remove(callbackName) })
+	rec := httptest.NewRecorder()
+	SetProviderRequestConfig(rec, req.WithContext(ctx))
+	select {
+	case <-triggered:
+	default:
+		t.Fatal("the competing writer was not triggered after the supplier read")
+	}
+	select {
+	case <-writerDone:
+	case <-ctx.Done():
+		t.Fatal("the competing writer did not finish")
+	}
+	if writerErr != nil {
+		t.Fatalf("competing SQLite writer failed: %v", writerErr)
+	}
+	if !writerCommittedBeforeSave {
+		t.Fatal("the competing writer did not commit between the supplier read and save")
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("request configuration save failed after competing write: %d %s", rec.Code, rec.Body.String())
+	}
+	var saved orm.UserModelProvider
+	if err := db.First(&saved, "id = ?", parent.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if saved.ActiveKeyRevision != 8 {
+		t.Fatalf("provider revision advanced %d times, want one", saved.ActiveKeyRevision-7)
+	}
+	advanced, err := ResolveProviderRequestAdvanced(saved)
+	metadata, ok := advanced.ExtraBody["metadata"].(map[string]any)
+	if err != nil || !ok || metadata["test"] != "value" {
+		t.Fatalf("saved advanced request settings were lost: %+v, %v", advanced, err)
+	}
+	var savedGroup orm.UserModelProviderGroup
+	if err := db.First(&savedGroup, "id = ?", group.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	key, err := apiKeyForGroup(db, &savedGroup)
+	if err != nil || key != "saved-key" || savedGroup.CredentialRevision != 2 {
+		t.Fatalf("group credential was not refreshed exactly once: revision=%d, key readable=%t, err=%v", savedGroup.CredentialRevision, key == "saved-key", err)
+	}
+}
+
+func TestBuiltInOpenAIDefaultsToResponsesWhileCustomProviderKeepsChat(t *testing.T) {
+	official := orm.UserModelProvider{Name: "OpenAI", BaseURL: "https://api.openai.com/v1/"}
+	if got := savedRequestConfig(nil, official).DefaultProtocol; got != "openai-responses" {
+		t.Fatalf("OpenAI default protocol = %q, want openai-responses", got)
+	}
+	if !runtimeSupportsRequestProtocol(official, "openai-responses") {
+		t.Fatal("Responses is not available at runtime")
+	}
+	custom := orm.UserModelProvider{Name: "OpenAI", IsCustom: true, BaseURL: "https://proxy.example/v1/"}
+	if got := savedRequestConfig(nil, custom).DefaultProtocol; got != "openai" {
+		t.Fatalf("custom provider default protocol = %q, want openai", got)
+	}
 }
 
 func TestRequestDefaultsUseSupplierAddressAndKeepProxyPrefix(t *testing.T) {

@@ -31,7 +31,7 @@ def emitted(monkeypatch):
 def test_model_receives_typed_questions_and_distinct_open_fixed_limits():
     questions = schema()
     assert questions['minItems'] == 1
-    assert questions['maxItems'] == 3
+    assert 'maxItems' not in questions
     assert '$ref' not in json.dumps(questions)
     branches = questions['items']['oneOf']
     assert len(branches) == 6
@@ -105,7 +105,6 @@ def test_one_failure_reports_missing_body_excess_choices_and_duplicate_ids_toget
 
 @pytest.mark.parametrize('questions,path', [
     ([], 'questions'),
-    ([question('text', id=str(index)) for index in range(4)], 'questions'),
     ([question('text', text='  ')], 'questions[0].text'),
     ([question('text', required='true')], 'questions[0].required'),
     ([question('text', choices=['A'])], 'questions[0].choices'),
@@ -218,3 +217,9 @@ def test_function_call_sends_schema_and_all_errors_to_the_next_model_round(emitt
         lazyllm.locals['_lazyllm_agent'] = previous_agent
         lazyllm.locals['chat_history'].clear()
         lazyllm.locals['chat_history'].update(previous_history)
+
+
+@pytest.mark.parametrize('count', [1, 4, 12, 30])
+def test_model_can_emit_every_needed_question_without_a_count_cap(count, emitted):
+    module.ask_user([question('text', id=str(index)) for index in range(count)])
+    assert len(emitted[0][1]['questions']) == count

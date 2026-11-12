@@ -1,5 +1,6 @@
 """Create isolated update-format fixtures using the actual schema owners."""
 import ast
+from contextlib import closing
 import json
 import os
 from pathlib import Path
@@ -88,7 +89,7 @@ def create(repo, family, filename, action=None):
 
 
 def snapshot(filename, family):
-    with sqlite3.connect('file:' + str(filename) + '?mode=ro', uri=True) as db:
+    with closing(sqlite3.connect('file:' + str(filename) + '?mode=ro', uri=True)) as db, db:
         shape = {
             'present': True,
             'applicationId': db.execute('PRAGMA application_id').fetchone()[0],

@@ -245,8 +245,15 @@ class AgentEventFrameTranslator:
         event_type = str(event.get('tag', '') or '')
         if event_type == 'model_fallback_failed':
             code = event.get('fallback_code')
-            if code not in {'model_fallback_exhausted', 'model_context_not_fit', 'runtime_failure'}:
+            if code not in {'model_fallback_exhausted', 'model_context_not_fit', 'runtime_failure', 'model_failure'}:
                 raise ValueError('invalid model fallback terminal code')
+            if code == 'model_failure':
+                terminal = event.get('terminal')
+                if not isinstance(terminal, dict) or terminal.get('kind') != 'failure' or not isinstance(
+                    terminal.get('failure'), dict,
+                ) or not terminal.get('model_call_id'):
+                    raise ValueError('invalid primary model failure terminal')
+                self.run.failure_terminal = copy.deepcopy(terminal)
             self.run.fallback_code = code
             return frames
         if event_type == 'runtime_event':

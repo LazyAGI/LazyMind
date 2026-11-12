@@ -1,5 +1,50 @@
 components:
     schemas:
+        TaskCenterWorkbenchResponse:
+            properties:
+                groups:
+                    properties:
+                        attention:
+                            $ref: '#/components/schemas/TaskCenterWorkbenchGroup'
+                        canceled:
+                            $ref: '#/components/schemas/TaskCenterWorkbenchGroup'
+                        failed:
+                            $ref: '#/components/schemas/TaskCenterWorkbenchGroup'
+                        paused:
+                            $ref: '#/components/schemas/TaskCenterWorkbenchGroup'
+                        recent:
+                            $ref: '#/components/schemas/TaskCenterWorkbenchGroup'
+                        running:
+                            $ref: '#/components/schemas/TaskCenterWorkbenchGroup'
+                    required:
+                        - attention
+                        - running
+                        - paused
+                        - failed
+                        - recent
+                        - canceled
+                    type: object
+                page_size:
+                    type: integer
+            required:
+                - groups
+                - page_size
+            type: object
+        TaskCenterWorkbenchGroup:
+            properties:
+                items:
+                    items:
+                        $ref: '#/components/schemas/TaskCenterTaskResponse'
+                    type: array
+                page:
+                    type: integer
+                total:
+                    type: integer
+            required:
+                - items
+                - total
+                - page
+            type: object
         ACLApiResponse:
             properties:
                 code:
@@ -6225,6 +6270,31 @@ components:
                 - retrieve
                 - search
             type: object
+        DatasetDeletionProgress:
+            properties:
+                completed:
+                    type: integer
+                dataset_id:
+                    type: string
+                display_name:
+                    type: string
+                error:
+                    type: string
+                failed:
+                    format: int64
+                    type: integer
+                status:
+                    type: string
+                total:
+                    type: integer
+            required:
+                - completed
+                - dataset_id
+                - display_name
+                - failed
+                - status
+                - total
+            type: object
         DatasetMember:
             properties:
                 create_time:
@@ -8132,6 +8202,63 @@ components:
                         type: string
                     type: array
             type: object
+        EmbeddingClearRequest:
+            properties:
+                confirm_clear_chunks:
+                    type: boolean
+                generation:
+                    format: int64
+                    type: integer
+                model_id:
+                    type: string
+                source:
+                    type: string
+            required:
+                - confirm_clear_chunks
+                - generation
+                - model_id
+                - source
+            type: object
+        EmbeddingClearResponse:
+            properties:
+                activated:
+                    type: boolean
+                cleared:
+                    type: boolean
+            required:
+                - activated
+                - cleared
+            type: object
+        EmbeddingIndexStatusResponse:
+            properties:
+                affected_knowledge_bases:
+                    format: int64
+                    type: integer
+                indexed_knowledge_bases:
+                    format: int64
+                    type: integer
+                model_name:
+                    type: string
+                pending_knowledge_bases:
+                    format: int64
+                    type: integer
+                provider_name:
+                    type: string
+                status:
+                    enum:
+                        - empty
+                        - indexed
+                        - rebuilding
+                        - clearing
+                        - cleared
+                        - unknown
+                    type: string
+            required:
+                - affected_knowledge_bases
+                - indexed_knowledge_bases
+                - pending_knowledge_bases
+                - status
+            type: object
         EmbeddingOptions:
             properties:
                 batch_size:
@@ -8141,6 +8268,65 @@ components:
                     type: string
                 query_prefix:
                     type: string
+            type: object
+        EmbeddingSignatureResponse:
+            properties:
+                code:
+                    type: string
+                dimensions:
+                    type: integer
+                model_type:
+                    type: string
+                passage_signature:
+                    type: string
+                query_signature:
+                    type: string
+                status:
+                    type: string
+            required:
+                - code
+                - model_type
+                - status
+            type: object
+        EmbeddingSwitchPreviewRequest:
+            properties:
+                model_id:
+                    type: string
+                source:
+                    type: string
+            required:
+                - model_id
+                - source
+            type: object
+        EmbeddingSwitchPreviewResponse:
+            properties:
+                active_model_name:
+                    type: string
+                can_switch:
+                    type: boolean
+                candidate_model_name:
+                    type: string
+                generation:
+                    format: int64
+                    type: integer
+                indexed_knowledge_bases:
+                    format: int64
+                    type: integer
+                outcome:
+                    enum:
+                        - unchanged
+                        - empty
+                        - same
+                        - clear_required
+                        - probe_failed
+                    type: string
+                signature_status:
+                    type: string
+            required:
+                - can_switch
+                - generation
+                - indexed_knowledge_bases
+                - outcome
             type: object
         EmptyObject:
             properties: {}
@@ -17079,6 +17265,7 @@ components:
                 default_protocol:
                     enum:
                         - openai
+                        - openai-responses
                         - anthropic
                     type: string
                 protocols:
@@ -19199,12 +19386,13 @@ components:
                 default_protocol:
                     enum:
                         - openai
+                        - openai-responses
                         - anthropic
                     type: string
                 endpoints:
                     additionalProperties:
                         type: string
-                    description: Optional OpenAI/Anthropic API-root overrides keyed by openai or anthropic. Empty resets that protocol to its default root. Unsupported protocol keys are rejected.
+                    description: Optional API-root overrides keyed by openai, openai-responses or anthropic. Empty resets that protocol to its default root. Unsupported protocol keys are rejected.
                     type: object
             required:
                 - default_protocol
@@ -19836,6 +20024,44 @@ info:
     version: 0.1.0
 openapi: 3.0.3
 paths:
+    /api/core/task-center/workbench:
+        get:
+            parameters:
+                - in: query
+                  name: task_type
+                  required: false
+                  schema:
+                    type: string
+                - in: query
+                  name: keyword
+                  required: false
+                  schema:
+                    type: string
+                - in: query
+                  name: category
+                  required: false
+                  schema:
+                    enum:
+                        - attention
+                        - running
+                        - paused
+                        - failed
+                        - recent
+                        - canceled
+                    type: string
+                - in: query
+                  name: page
+                  required: false
+                  schema:
+                    type: integer
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/TaskCenterWorkbenchResponse'
+                    description: Task-center workbench
+            summary: Summarize task categories with four previews per page
     /api/core/academic/chat-context:
         get:
             parameters:
@@ -20747,6 +20973,12 @@ paths:
             summary: Add a note idempotently by stable note ID
             tags:
                 - AcademicWorkflows
+    /api/core/academic/library/papers:delete:
+        post:
+            responses:
+                "200":
+                    description: OK
+            summary: POST /academic/library/papers:delete
     /api/core/academic/library/papers:move:
         post:
             parameters:
@@ -26657,8 +26889,8 @@ paths:
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/EmptyObject'
-                    description: Deleted successfully
+                                $ref: '#/components/schemas/ResourceOperationResult'
+                    description: Cleanup submission
             summary: Delete dataset
             tags:
                 - datasets
@@ -26700,6 +26932,24 @@ paths:
                                 $ref: '#/components/schemas/Dataset'
                     description: Updated dataset
             summary: Update dataset
+            tags:
+                - datasets
+    /api/core/datasets/{dataset}/deletion:
+        get:
+            parameters:
+                - in: path
+                  name: dataset
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/DatasetDeletionProgress'
+                    description: Cleanup progress
+            summary: Get dataset cleanup progress
             tags:
                 - datasets
     /api/core/datasets/{dataset}/documents:
@@ -32568,6 +32818,35 @@ paths:
             summary: Update a connection group model
             tags:
                 - model_providers
+    /api/core/model_providers/{model_provider_id}/groups/{group_id}/models/{model_id}:embedding-signature:
+        post:
+            description: Computes SHA-256 digests for fixed passage and query samples through the saved model's actual embedding runtime, including its configured prefixes. Returns only digests and dimension, never vectors, credentials or upstream text. A ready result can be compared with a previously recorded signature; unsupported and failed results cannot establish compatibility. The request body must be empty and no model settings are changed.
+            parameters:
+                - in: path
+                  name: model_provider_id
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: group_id
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: model_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/EmbeddingSignatureResponse'
+                    description: Candidate embedding signatures or an unverified result
+            summary: Fingerprint one saved text embedding model
+            tags:
+                - model_providers
     /api/core/model_providers/{model_provider_id}/groups/{group_id}/models/{model_id}:probe:
         post:
             description: Tests an owned model with its saved supplier protocol, shared API address and currently enabled key. No credential or metadata overrides are accepted. Does not modify verification, credentials, models or default selections. Media probes do not download output; accepted video tasks are distinct from completed inference.
@@ -32766,6 +33045,57 @@ paths:
                                 $ref: '#/components/schemas/deleteCustomModelProviderOpenAPIResponse'
                     description: Reset supplier
             summary: Reset a built-in model supplier
+            tags:
+                - model_providers
+    /api/core/model_providers/embedding/clear-chunks:
+        post:
+            description: Requires a preview generation and explicit administrator confirmation for a server-verified candidate. Clears shared chunks and vectors, preserves source files and document records, and atomically activates the target model with its saved selection. The server completes the operation independently of browser cancellation. Retrying the same confirmed request resumes an interrupted cleanup or activation; replaying a completed request does not clear the new index. Success acknowledges both cleared and activated. Documents await manual parsing; no parsing tasks are enqueued.
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/EmbeddingClearRequest'
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/EmbeddingClearResponse'
+                    description: Chunks cleared and target model activated
+            summary: Clear knowledge chunks and activate the confirmed embedding model
+            tags:
+                - model_providers
+    /api/core/model_providers/embedding/index-state:
+        get:
+            description: Reports the persisted text embedding model identity and how many knowledge bases have indexed or pending document vectors. A legacy index without a recorded signature is reported as unknown, never inferred from the current model selection.
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/EmbeddingIndexStatusResponse'
+                    description: Text-vector index state
+            summary: Get shared text-vector index state
+            tags:
+                - model_providers
+    /api/core/model_providers/embedding/switch-preview:
+        post:
+            description: Probes the saved candidate through the document embedding runtime and compares its passage and query signatures with the recorded deployment-wide text-vector identity. Legacy indexes without a recorded signature are unverified and require vector cleanup before a change. Preview never changes selections or knowledge bases; a later save rechecks the current state.
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/EmbeddingSwitchPreviewRequest'
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/EmbeddingSwitchPreviewResponse'
+                    description: Embedding switch assessment
+            summary: Check whether a text embedding model can replace the active model
             tags:
                 - model_providers
     /api/core/model_providers/features:

@@ -77,6 +77,7 @@ async def test_stop_receipt_retry_is_cancellable(monkeypatch):
 @pytest.mark.parametrize('outcome', ['success', 'lease_lost', 'setup_failed'])
 async def test_stop_receipt_is_sent_only_after_execution_cleanup(monkeypatch, outcome):
     from unittest.mock import AsyncMock
+    from lazymind.chat.workflow.remote_executor import workflow_attempt_is_running
 
     worker = RemoteWorkflowExecutor()
     worker.runtime = AsyncMock()
@@ -84,6 +85,7 @@ async def test_stop_receipt_is_sent_only_after_execution_cleanup(monkeypatch, ou
 
     async def execute(*_):
         try:
+            assert workflow_attempt_is_running('attempt', 'lease')
             worker.runtime.acknowledge_stop.assert_not_awaited()
             if outcome == 'setup_failed':
                 raise RuntimeError('setup failed')
@@ -92,6 +94,7 @@ async def test_stop_receipt_is_sent_only_after_execution_cleanup(monkeypatch, ou
             order.append('executor exited')
 
     async def acknowledge(*_):
+        assert not workflow_attempt_is_running('attempt', 'lease')
         assert order == ['executor exited']
         order.append('receipt')
 

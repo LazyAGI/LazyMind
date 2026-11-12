@@ -9,53 +9,26 @@ package main
 #include <sys/proc_info.h>
 #include <sys/sysctl.h>
 
-static int lazymind_process_is_guard(pid_t pid) {
-	int mib[3] = {CTL_KERN, KERN_PROCARGS2, pid};
-	size_t size = 0;
-	if (sysctl(mib, 3, NULL, &size, NULL, 0) != 0 || size < sizeof(int)) {
-		return 0;
-	}
-	char *buffer = (char *)malloc(size);
-	if (buffer == NULL) {
-		return 0;
-	}
-	if (sysctl(mib, 3, buffer, &size, NULL, 0) != 0) {
-		free(buffer);
-		return 0;
-	}
-
-	int argc = 0;
-	memcpy(&argc, buffer, sizeof(argc));
-	char *cursor = buffer + sizeof(argc);
-	char *end = buffer + size;
-	while (cursor < end && *cursor != '\0') {
-		cursor++;
-	}
-	if (cursor < end) {
-		cursor++;
-	}
-	for (int index = 0; index < argc && cursor < end; index++) {
-		size_t remaining = (size_t)(end - cursor);
-		size_t length = strnlen(cursor, remaining);
-		if (length == remaining) {
-			break;
-		}
-		if (strcmp(cursor, "guard") == 0) {
-			free(buffer);
-			return 1;
-		}
-		cursor += length + 1;
-	}
-	free(buffer);
-	return 0;
+static char* lazymind_process_args(pid_t pid, int* length) {
+    int mib[3] = {CTL_KERN, KERN_PROCARGS2, pid};
+    size_t size = 0;
+    if (sysctl(mib, 3, NULL, &size, NULL, 0) != 0 || size < sizeof(int)) return NULL;
+    char* buffer = (char*)malloc(size);
+    if (buffer == NULL) return NULL;
+    if (sysctl(mib, 3, buffer, &size, NULL, 0) != 0) { free(buffer); return NULL; }
+    *length = (int)size;
+    return buffer;
 }
 
 */
 import "C"
 
 import (
+	"bytes"
+	"encoding/binary"
 	"os"
-	"strings"
+
+	"golang.org/x/sys/unix"
 	"unsafe"
 )
 
@@ -85,21 +58,54 @@ func scanLocalRuntimeProcesses(paths RuntimePaths) ([]LocalProcessRecord, error)
 			continue
 		}
 		exe := C.GoString(&pathBuffer[0])
-		if isLocalRuntimeManagerExecutable(exe) && C.lazymind_process_is_guard(C.pid_t(pid)) != 0 {
+		info, err := unix.SysctlKinfoProc("kern.proc.pid", pid)
+		if err != nil || info.Proc.P_stat == darwinZombieProcessState {
 			continue
 		}
-		if !processTextMatchesRuntime(paths, exe, "") {
-			continue
+		var length C.int
+		raw := C.lazymind_process_args(C.pid_t(pid), &length)
+		var args []string
+		var owner string
+		if raw != nil {
+			args, owner = parseDarwinProcessArgs(C.GoBytes(unsafe.Pointer(raw), length))
+			C.free(unsafe.Pointer(raw))
 		}
 		records = append(records, LocalProcessRecord{
-			Service:     inferServiceFromProcessText(paths, exe),
-			PID:         pid,
-			StartID:     processStartIdentity(pid),
-			PGID:        processGroupID(pid),
-			RepoRoot:    paths.RepoRoot,
-			RuntimeRoot: paths.RuntimeRoot,
-			Command:     []string{strings.TrimSpace(exe)},
+			PID: pid, ParentPID: int(info.Eproc.Ppid), PGID: int(info.Eproc.Pgid),
+			Executable: exe, Command: args, OwnerRoot: owner,
+			StartID: uint64(info.Proc.P_starttime.Sec)*1_000_000 + uint64(info.Proc.P_starttime.Usec),
 		})
 	}
 	return records, nil
+}
+
+// KERN_PROCARGS2 contains argc, executable path, padding, argv, then environ.
+// Do not search argv for the ownership label: an argument is not an environment.
+func parseDarwinProcessArgs(raw []byte) ([]string, string) {
+	if len(raw) < 4 {
+		return nil, ""
+	}
+	argc := int(binary.LittleEndian.Uint32(raw[:4]))
+	if argc <= 0 || argc > len(raw) {
+		return nil, ""
+	}
+	raw = raw[4:]
+	end := bytes.IndexByte(raw, 0)
+	if end < 0 {
+		return nil, ""
+	}
+	raw = raw[end+1:]
+	for len(raw) > 0 && raw[0] == 0 {
+		raw = raw[1:]
+	}
+	args := make([]string, 0, argc)
+	for i := 0; i < argc; i++ {
+		end = bytes.IndexByte(raw, 0)
+		if end < 0 {
+			return nil, ""
+		}
+		args = append(args, string(raw[:end]))
+		raw = raw[end+1:]
+	}
+	return args, processOwnerFromEnvironment(raw)
 }

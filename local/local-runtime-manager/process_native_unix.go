@@ -6,8 +6,6 @@ import (
 	"os"
 	"os/exec"
 	"syscall"
-
-	"github.com/mesotron7x/LazyMind/local/local-runtime-manager/internal/desktopupdate"
 )
 
 func configureChildProcess(cmd *exec.Cmd, sessionLeader bool) {
@@ -26,6 +24,22 @@ func interruptProcess(pid int) error {
 		return nil
 	}
 	return syscall.Kill(pid, syscall.SIGINT)
+}
+
+// Cleanup inventories already include owned children. These helpers must not
+// turn a PID into a process-group signal, even when PID happens to equal PGID.
+func interruptProcessPID(pid int) error {
+	if pid <= 0 {
+		return nil
+	}
+	return syscall.Kill(pid, syscall.SIGINT)
+}
+
+func forceKillProcessPID(pid int) error {
+	if pid <= 0 {
+		return nil
+	}
+	return syscall.Kill(pid, syscall.SIGKILL)
 }
 
 func forceKillProcessTree(pid int) error {
@@ -50,14 +64,6 @@ func nativeProcessGroupID(pid int) int {
 		return 0
 	}
 	return pgid
-}
-
-func processStartIdentity(pid int) uint64 {
-	actor, err := desktopupdate.IdentifyProcess(pid)
-	if err != nil {
-		return 0
-	}
-	return actor.StartID
 }
 
 func attachProcessJob(_ RuntimePaths, _ string, _ *os.Process) (func(), error) {

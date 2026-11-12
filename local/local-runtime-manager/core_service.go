@@ -198,6 +198,7 @@ func coreServiceEnv(cfg RuntimeConfig, paths RuntimePaths) []string {
 	environment := []string{
 		"LAZYMIND_RUNTIME_MODE=local",
 		"LAZYMIND_VOCABULARY_ENABLED=" + envText("LAZYMIND_VOCABULARY_ENABLED", "true"),
+		"LAZYMIND_VOCABULARY_ANKI_SYNC_ENABLED=" + envText("LAZYMIND_VOCABULARY_ANKI_SYNC_ENABLED", "true"),
 		"LAZYMIND_CLOUD_BASE_URL=" + strings.TrimSpace(os.Getenv("LAZYMIND_CLOUD_BASE_URL")),
 		"LAZYMIND_CLOUD_TOKEN_STORE=" + cloudTokenStoreMode(cfg.Profile),
 		"LAZYMIND_CREDENTIAL_MANIFEST_TRUST_PUBLIC_KEY_FILE=" + strings.TrimSpace(os.Getenv("LAZYMIND_CREDENTIAL_MANIFEST_TRUST_PUBLIC_KEY_FILE")),
@@ -220,6 +221,7 @@ func coreServiceEnv(cfg RuntimeConfig, paths RuntimePaths) []string {
 		"LAZYMIND_PDF_FONT_CATALOG=" + filepath.Join(paths.ResourcesRoot, "config", "pdf-font.json"),
 		"LAZYMIND_UPLOAD_ROOT=" + paths.UploadRoot,
 		"LAZYMIND_SHARED_UPLOAD_DIR=" + paths.UploadRoot,
+		"LAZYMIND_CHAT_MODEL_FALLBACK_ENABLED=" + envText("LAZYMIND_CHAT_MODEL_FALLBACK_ENABLED", "true"),
 		"LAZYMIND_HISTORY_INJECTION_ENABLED=" + envText("LAZYMIND_HISTORY_INJECTION_ENABLED", "true"),
 		"LAZYMIND_HISTORY_INJECTION_ROOT=" + paths.HistoryInjectionRoot,
 		"LAZYMIND_BOOTSTRAP_ADMIN_USERNAME=" + envText("LAZYMIND_BOOTSTRAP_ADMIN_USERNAME", "admin"),

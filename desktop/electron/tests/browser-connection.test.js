@@ -132,3 +132,31 @@ test('a failed browser initialization can recover on the next session synchroniz
   assert.ok(connection.controller);
   await connection.clear();
 });
+
+test('an unavailable browser gateway backs off and unchanged credentials do not bypass the delay', async () => {
+  const connection = new BrowserConnection({
+    fetch: async () => { throw new Error('gateway unavailable'); },
+    createController: async () => ({ dispose: async () => {} }),
+  });
+  const delays = [];
+  const schedule = connection.schedule.bind(connection);
+  connection.schedule = (delay) => {
+    delays.push(delay);
+    schedule(60000);
+  };
+  const auth = { server_url: 'https://example.test', user_id: 'alice', access_token: 'token' };
+  try {
+    await connection.setSession(auth);
+    for (let i = 0; i < 8; i++) {
+      await connection.connect();
+      await connection.setSession(auth);
+    }
+    assert.deepEqual(delays, [0, 2000, 4000, 8000, 16000, 32000, 60000, 60000, 60000]);
+
+    await connection.setSession({ ...auth, access_token: 'new-token' });
+    await connection.connect();
+    assert.deepEqual(delays.slice(-2), [0, 2000]);
+  } finally {
+    await connection.clear();
+  }
+});

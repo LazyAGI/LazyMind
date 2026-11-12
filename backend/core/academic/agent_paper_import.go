@@ -167,7 +167,7 @@ func AgentImportPapers(ctx context.Context, call capability.InvocationContext, i
 	}
 	batchID := uuid.NewSHA1(uuid.NameSpaceOID, []byte("source-import:"+op.Caller.UserID+":"+op.OperationKey)).String()
 	batch := newSourceImportBatch(op.Caller, source, in.KnowledgeBaseID, batchID, op.OperationKey, sourceHash(in), len(unique), false)
-	if err = enqueueSourceImport(ctx, op.Caller, &batch, unique, op.ValidateExecution); err != nil {
+	if err = enqueueSourceImport(ctx, op.Caller, &batch, unique, false, op.ValidateExecution); err != nil {
 		return capability.PaperImportResult{}, err
 	}
 	result.BatchID, result.QueuedCount = batch.ID, batch.TotalItems

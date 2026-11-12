@@ -52,14 +52,18 @@ def frozen():
     return inputs, analysis, charts
 
 
-def test_redraw_never_reexecutes_statistics_or_changes_other_figure(frozen, monkeypatch):
+@pytest.mark.parametrize('user_request', [
+    'Only redraw chart-a as a point plot.', 'Do not redraw all charts. Only update chart-a.',
+    '不要重画所有图表，只改第一张。'])
+def test_redraw_never_reexecutes_statistics_or_changes_other_figure(frozen, monkeypatch, user_request):
     inputs, analysis, charts = frozen
+    inputs['request'] = user_request
     before = copy.deepcopy((inputs, analysis, charts))
     forbidden = Mock(side_effect=AssertionError('redraw executed statistical analysis or rewrote interpretation'))
     for name in ('make_plan', 'generate_program', 'interpret_results'):
         monkeypatch.setattr(pipeline.model, name, forbidden)
     monkeypatch.setattr(pipeline.executor, 'execute', forbidden)
-    monkeypatch.setattr(pipeline.model, 'plan_figures', Mock(return_value=dict(figures=[dict(
+    monkeypatch.setattr(pipeline.model, 'plan_figures', Mock(return_value=dict(all_existing_figures=False, figures=[dict(
         title='A score', purpose='Observed score for A.', style='point_interval', result_indices=[0],
         source_chart_id='chart-a')])))
 
@@ -78,6 +82,46 @@ def test_redraw_never_reexecutes_statistics_or_changes_other_figure(frozen, monk
     assert records[0]['mode'] == 'redraw'
     assert records[0]['analysis_preserved_sha256'] == digest(analysis)
     forbidden.assert_not_called()
+
+
+def test_redraw_planner_receives_existing_style_and_coordinate_bindings(frozen, monkeypatch):
+    inputs, analysis, charts = frozen
+    charts[0].update(style='scatter_tradeoff', category='method', series='metric', facet=None)
+    charts[0]['caption'] = 'Scientific description.\n\nSources: internal-file.tsv\nLimitations: source notes'
+
+    def plan(bound_inputs, bound_analysis, previous, error):
+        assert previous['existing_figures'][0]['style'] == 'scatter_tradeoff'
+        assert previous['existing_figures'][0]['series'] == 'metric'
+        assert previous['existing_figures'][0]['caption'] == 'Scientific description.'
+        return dict(figures=[dict(title='A', purpose='Only labels.', style='point_interval',
+                                  source_chart_id='chart-a', finding_ids=['r1'])])
+
+    monkeypatch.setattr(pipeline.model, 'plan_figures', plan)
+    monkeypatch.setattr(plots, 'draw', lambda *args, **kwargs: ([charts[0]], []))
+    result = pipeline.redraw(inputs, analysis, charts)
+    assert result['analysis'] == analysis and result['charts'][1] == charts[1]
+
+
+@pytest.mark.parametrize('recovers', [True, False])
+def test_explicit_all_figures_scope_requires_complete_coverage_before_rendering(frozen, monkeypatch, recovers):
+    inputs, analysis, charts = frozen
+    inputs['request'] = 'Only redraw all existing charts.'
+    drafts = [dict(title=chart['title'], purpose='Improve layout.', style='point_interval',
+                   source_chart_id=chart['id'], finding_ids=chart['finding_ids']) for chart in charts]
+    planner = Mock(side_effect=[dict(all_existing_figures=True, figures=drafts[:1]),
+                                dict(all_existing_figures=True, figures=drafts if recovers else drafts[:1])])
+    monkeypatch.setattr(pipeline.model, 'plan_figures', planner)
+    renderer = Mock(return_value=(charts, []))
+    monkeypatch.setattr(plots, 'draw', renderer)
+    if recovers:
+        assert pipeline.redraw(inputs, analysis, charts)['charts'] == charts
+        renderer.assert_called_once()
+    else:
+        with pytest.raises(ContractError, match='missing source_chart_id'):
+            pipeline.redraw(inputs, analysis, charts)
+        renderer.assert_not_called()
+    assert planner.call_count == 2
+    assert 'chart-b' in planner.call_args.args[-1]
 
 
 def test_redraw_rejects_changed_raw_data_before_planning(frozen, monkeypatch):

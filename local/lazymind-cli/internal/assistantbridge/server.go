@@ -32,11 +32,13 @@ import (
 )
 
 const (
-	DefaultAddress       = "127.0.0.1:19091"
-	agentLoginTimeout    = 2 * time.Minute
-	bridgeProbeTimeout   = 5 * time.Second
-	clientPlatformHeader = "X-LazyMind-Client-Platform"
-	platformMismatchCode = "platform_mismatch"
+	// Restart older supervisors so upgraded WorkBuddy workers and login routes take effect.
+	bridgeProtocolVersion = "v9"
+	DefaultAddress        = "127.0.0.1:19091"
+	agentLoginTimeout     = 2 * time.Minute
+	bridgeProbeTimeout    = 5 * time.Second
+	clientPlatformHeader  = "X-LazyMind-Client-Platform"
+	platformMismatchCode  = "platform_mismatch"
 )
 
 type Server struct {
@@ -93,7 +95,7 @@ func Start(ctx context.Context, address string) (map[string]any, error) {
 		if err := validateBridgeIdentity(status, self); err != nil {
 			return nil, err
 		}
-		if status["version"] == "v8" {
+		if status["version"] == bridgeProtocolVersion {
 			return status, nil
 		}
 		if err := Stop(ctx, address); err != nil {
@@ -279,7 +281,7 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("GET /v1/health", func(writer http.ResponseWriter, _ *http.Request) {
 		executable, _ := os.Executable()
 		writeJSON(writer, http.StatusOK, map[string]any{
-			"ok": true, "pid": os.Getpid(), "version": "v8",
+			"ok": true, "pid": os.Getpid(), "version": bridgeProtocolVersion,
 			"platform": runtime.GOOS, "executable": executable,
 		})
 	})
@@ -532,11 +534,21 @@ func (s *Server) handleExecutorPolicyAction(writer http.ResponseWriter, request 
 
 func (s *Server) handleSession(writer http.ResponseWriter, request *http.Request) {
 	if request.Method == http.MethodDelete {
-		if err := s.store.Clear(); err != nil {
+		var clear credentials.ClearRequest
+		if err := json.NewDecoder(http.MaxBytesReader(writer, request.Body, 1<<20)).Decode(&clear); err != nil || clear.ExpectedSession.AccessToken == "" || clear.ExpectedSession.RefreshToken == "" {
+			writeJSON(writer, http.StatusBadRequest, map[string]string{"error": "expected LazyMind session is required"})
+			return
+		}
+		if origin := strings.TrimSpace(request.Header.Get("Origin")); origin != "" && !sameOrigin(origin, clear.ExpectedSession.ServerURL) {
+			writeJSON(writer, http.StatusForbidden, map[string]string{"error": "LazyMind session server does not match the page origin"})
+			return
+		}
+		cleared, err := s.store.ClearIfCurrent(clear)
+		if err != nil {
 			writeError(writer, err)
 			return
 		}
-		writeJSON(writer, http.StatusOK, map[string]bool{"ok": true})
+		writeJSON(writer, http.StatusOK, map[string]bool{"ok": true, "cleared": cleared})
 		return
 	}
 	var value credentials.Credentials
@@ -675,12 +687,16 @@ func (s *Server) agentAction(ctx context.Context, agent, action string) (agentin
 	case "disconnect":
 		return adapter.Disconnect(ctx), nil
 	case "login":
-		if agent != string(mcpclient.Cursor) {
+		var login func(context.Context) error
+		switch mcpclient.Kind(agent) {
+		case mcpclient.Cursor:
+			login = func(loginCtx context.Context) error { return cursoradapter.Login(loginCtx, "") }
+		case mcpclient.WorkBuddy:
+			login = workbuddyadapter.Login
+		default:
 			return agentintegration.Status{}, fmt.Errorf("unsupported %s action %q", agent, action)
 		}
-		s.startAgentLogin(agent, func(loginCtx context.Context) error {
-			return cursoradapter.Login(loginCtx, "")
-		})
+		s.startAgentLogin(agent, login)
 		return s.withLoginStatus(adapter.Status(ctx)), nil
 	default:
 		return agentintegration.Status{}, fmt.Errorf("unsupported %s action %q", agent, action)

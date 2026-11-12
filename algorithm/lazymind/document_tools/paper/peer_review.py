@@ -12,6 +12,7 @@ from lazyllm import AutoModel, LOG
 from lazyllm.tools.writer.tools.base import WriterToolBase
 from pydantic import ValidationError
 
+from .model_response import normalize_response
 from .contracts import validate_input
 from .fact_checks import (CATEGORY_LABELS as FACT_LABELS, STATUS_LABELS, NUMERIC, OPERATIONS,
                           _pointer, _quantity_token, check_facts,
@@ -87,12 +88,6 @@ def stage(name, trace_id, *, heartbeat=False, progress=None, **metadata):
 def review_scope(result: ReviewResult, inputs: dict) -> tuple[list[str], list[str]]:
     supplied = ['稿件']
     limitations = list(result.limitations)
-    if inputs.get('writing_materials'):
-        supplied.append('研究素材（非文献全文）')
-    if inputs.get('evidence'):
-        supplied.append('支持证据材料')
-    elif not inputs.get('papers'):
-        limitations.append('未提供文献证据材料，未核验外部引用的真实性及其对论断的支持。')
     coverage_labels = {'full_text': '文献全文', 'abstract': '文献摘要',
                        'excerpt': '文献文本（节选或覆盖不明）', 'metadata': '文献题录'}
     for index, paper in enumerate(inputs.get('papers') or [], 1):
@@ -105,11 +100,7 @@ def review_scope(result: ReviewResult, inputs: dict) -> tuple[list[str], list[st
             limitations.append(f'文献 {label} 为节选、截断或全文覆盖不明的文本；不能声明全文支持已核实。')
         elif coverage == 'metadata':
             limitations.append(f'文献 {label} 仅有题录，未提供可核读的正文或摘要，无法核验具体主张支持。')
-    if inputs.get('analysis'):
-        supplied.append('分析材料')
-    else:
-        limitations.append('未提供分析材料，未独立核验实验数值和统计结果。')
-    limitations.append('仅审查已提供的文本；未联网检索、查重或执行实验，不构成期刊录用判断。')
+    limitations.append('仅审查成稿及所提供的相关文献和图表；未联网检索、查重或复现实验，不构成期刊录用判断。')
     limitations.append('事实核对仅覆盖列出的原文与来源；主审模型自报不等于核实。独立全文核读会标明方法与范围，仍不构成确定性证明。'
                        '论证与语言建议不阻断交付；未核实事项仍需保留，不能标记为已解决。')
     return list(dict.fromkeys(supplied)), list(dict.fromkeys(limitations))
@@ -122,10 +113,14 @@ def render_review(result: ReviewResult, inputs: dict, coverage=None, issues=None
         audit = []
         issues = review_issues(result, coverage, audit=audit)
         result = result.model_copy(update={'limitations': result.limitations + audit})
-    lines = [f'# 模拟审稿 · {inputs["topic"]}', '', '## 总体评价', result.summary, '', '## 事实核对',
-             '状态仅覆盖逐项列出的摘录与来源。来源内容未重新测量；未列出的主张不代表已核实。', '',
-             '| 类型 | 状态 | 证据位置与范围 |', '| --- | --- | --- |']
-    for group in coverage:
+    lines = [f'# 模拟审稿 · {inputs["topic"]}', '', '## 总体评价', result.summary, '', '## 事实核对']
+    active = [group for group in coverage if group.status != 'not_applicable' or group.checks]
+    if active:
+        lines.extend(['状态仅覆盖列出的成稿内部一致性与文献支持核对，不代表已复现实验。', '',
+                      '| 类型 | 状态 | 证据位置与范围 |', '| --- | --- | --- |'])
+    else:
+        lines.append('本轮未单列可独立核对的事实项。')
+    for group in active:
         locations = '、'.join(group.evidence_locations) or group.reason
         lines.append(f'| {FACT_LABELS[group.category]} | {STATUS_LABELS[group.status]} | {locations} |')
     for group in coverage:
@@ -154,11 +149,6 @@ def render_review(result: ReviewResult, inputs: dict, coverage=None, issues=None
     if not issues:
         lines.extend(['', '本次检查未识别出明确问题；这不代表论文已达到发表标准。'])
 
-    supplied, limitations = review_scope(result, inputs)
-    lines.extend(['', '## 检查范围与限制', '本次使用：' + '、'.join(supplied) + '。'])
-    if inputs.get('request'):
-        lines.extend(['', '用户审查要求：', *['> ' + line for line in inputs['request'].splitlines()]])
-    lines.extend(['', *['- ' + item for item in dict.fromkeys(limitations)]])
     return '\n'.join(lines) + '\n'
 
 
@@ -538,6 +528,7 @@ def _unique_fields(pairs):
 
 def parse_response(response):
     """Never use structural JSON guessing: one damaged issue must not become two."""
+    response = normalize_response(response).body
     if not isinstance(response, str):
         return response
     text = WriterToolBase._strip_leading_think_blocks(response).strip()
@@ -640,7 +631,7 @@ def call_once(reviewer: WriterToolBase, prompt: str, schema, trace_id=None, *, a
                model_class=type(model).__name__,
                model_name=model_name if isinstance(model_name, str) else None,
                prompt_chars=len(prompt), streaming=True):
-        response = model(prompt)
+        response = normalize_response(model(prompt)).body
         if preview is not None:
             preview.flush()
     log_event('model_response', trace_id=trace_id, schema=schema.__name__,
@@ -712,7 +703,7 @@ def run(inputs: dict) -> dict:
             inputs = validate_input('peer_review', inputs)
         log_event('input_ready', trace_id=trace_id, manuscript_chars=len(inputs['manuscript']),
                   manuscript_sha256=text_digest(inputs['manuscript']),
-                  has_evidence=bool(inputs.get('evidence')), has_analysis=bool(inputs.get('analysis')))
+                  papers=len(inputs['papers']), charts=len(inputs['charts']))
         reviewer = WriterToolBase(llm=AutoModel(model='llm'))
         prompt = REVIEW_PROMPT + '\n\nInput JSON:\n' + json.dumps(inputs, ensure_ascii=False)
         candidate = call_once(reviewer, prompt, ReviewResult, trace_id)

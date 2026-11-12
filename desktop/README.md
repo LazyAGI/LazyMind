@@ -318,6 +318,8 @@ For source-based Local runs, setting the same environment variable before `make 
 
 ## Runtime behavior
 
+Runtime shutdown and stale-process cleanup use saved process start identities and inherited runtime ownership labels. A program's location under the build, resources, or data directory alone does not authorize termination. External Agent hosts own their `lazymind mcp proxy` processes; runtime cleanup leaves these Connectors and their children running. Owned descendants are recorded before ordered shutdown and terminated individually, so detached workers can be recovered without signalling an Agent's process group. Older leftovers whose ownership cannot be established are skipped with a diagnostic.
+
 Desktop binds only to `127.0.0.1`. It retains the normal Local/Desktop auto-login flow through `/_local/admin-session`, while LAN auto-login remains disabled.
 
 Local and Desktop share the platform LazyMind data directory so knowledge bases remain available when switching modes, but they cannot run concurrently. Stop Local before opening Desktop and close Desktop before starting Local. Electron also enforces a single Desktop instance.

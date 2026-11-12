@@ -7,7 +7,7 @@ import type { KnowledgeMarketTaskDetailOpenAPIResponse } from "@/api/generated/c
 import KnowledgePage from "./index";
 import * as marketApi from "@/modules/knowledge/api/knowledgeMarket";
 
-vi.mock("react-i18next", async () => {
+vi.mock("react-i18next", async (load) => {
   const { default: messages } = await import("@/i18n/locales/zh-CN");
   const t = (key: string, values: Record<string, unknown> = {}) => {
     const value = key.split(".").reduce<any>((result, part) => result?.[part], messages);
@@ -15,7 +15,7 @@ vi.mock("react-i18next", async () => {
       ? value.replace(/{{(\w+)}}/g, (_, name) => String(values[name] ?? ""))
       : key;
   };
-  return { useTranslation: () => ({ t }) };
+  return { ...await load<typeof import("react-i18next")>(), useTranslation: () => ({ t }) };
 });
 vi.mock("@/modules/knowledge/api/knowledgeMarket", () => ({
   getKnowledgeMarketItem: vi.fn(),

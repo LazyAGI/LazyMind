@@ -29,6 +29,7 @@ import (
 	"lazymind/core/common/readonlyorm"
 	applog "lazymind/core/log"
 	"lazymind/core/modelconfig"
+	"lazymind/core/modelprovider"
 	"lazymind/core/readingpolicy"
 	"lazymind/core/settings"
 	"lazymind/core/store"
@@ -1627,10 +1628,15 @@ func startParseTasksAtLevel(ctx context.Context, userID, datasetID string, taskI
 	if strings.TrimSpace(requestedLevel) != "" {
 		processingLevel = effectiveProcessingLevel(requestedLevel)
 	}
-	llmConfig, err := modelconfig.LoadLLMConfig(ctx, store.DB(), userID)
+	llmConfig, err := loadParsingLLMConfig(ctx, store.DB(), userID)
+	if errors.Is(err, errEmbeddingStateChanged) {
+		return nil, err
+	}
+	if validationErr := validateParsingLLMConfig(ctx, store.DB(), userID, processingLevel, llmConfig, err); validationErr != nil {
+		return nil, validationErr
+	}
 	if err != nil {
 		log.Printf("[startParseTasksInternal] failed to load llm_config for user=%s: %v", userID, err)
-		llmConfig = nil
 	}
 	llmConfig = normalizeParsingLLMConfig(llmConfig)
 	ocrConfig, err := modelconfig.LoadOCRConfig(ctx, store.DB(), userID)
@@ -1693,7 +1699,7 @@ func startParseTasksAtLevel(ctx context.Context, userID, datasetID string, taskI
 		submittedExt.ProcessingLevel = processingLevel
 		submittedExt.ProcessingRevision = dataset.ProcessingRevision
 		taskRow.Ext = mustJSON(submittedExt)
-		bindNativeIndexTask(ctx, datasetID, docRow.ID, taskRow.ID, processingLevel)
+		bindNativeIndexTask(ctx, datasetID, docRow.ID, taskRow.ID, processingLevel, llmConfig["_embedding_generation"].(int64))
 		if normalizeSpreadsheetDirectParse(&dExt) || normalizeLocalOfficeDirectParse(&dExt, parseProfile) {
 			persistDocumentConvertState(ctx, datasetID, docRow.ID, dExt)
 		}
@@ -2936,10 +2942,15 @@ func startReparseTasksInternalAtLevel(r *http.Request, datasetID string, taskIDs
 		Int("task_count", len(taskIDs)).
 		Strs("task_ids", taskIDs).
 		Msg("starting reparse tasks")
-	llmConfig, err := modelconfig.LoadLLMConfig(r.Context(), store.DB(), userID)
+	llmConfig, err := loadParsingLLMConfig(r.Context(), store.DB(), userID)
+	if errors.Is(err, errEmbeddingStateChanged) {
+		return nil, err
+	}
+	if validationErr := validateParsingLLMConfig(r.Context(), store.DB(), userID, processingLevel, llmConfig, err); validationErr != nil {
+		return nil, validationErr
+	}
 	if err != nil {
 		log.Printf("[startReparseTasksInternal] failed to load llm_config for user=%s: %v", userID, err)
-		llmConfig = nil
 	}
 	llmConfig = normalizeParsingLLMConfig(llmConfig)
 	ocrConfig, err := modelconfig.LoadOCRConfig(r.Context(), store.DB(), userID)
@@ -3044,6 +3055,9 @@ func startReparseTasksInternalAtLevel(r *http.Request, datasetID string, taskIDs
 		Str("reparse_mode", reparseMode).
 		Str("strategy", strategy).
 		Msg("submitting reparse batch to doc service")
+	for _, task := range taskRows {
+		bindNativeIndexTask(r.Context(), datasetID, task.DocID, task.ID, processingLevel, llmConfig["_embedding_generation"].(int64))
+	}
 	lazyllmTaskIDs, err := callExternalReparseDocs(r, reparseRequest{DocIDs: docIDs, KbID: kbID, NgNames: ngNames, Strategy: strategy, IdempotencyKey: parseSubmissionKey(datasetID, taskRows), ModelConfig: llmConfig, OCRConfig: ocrConfig, ProcessingLevel: processingLevel})
 	if err != nil {
 		errMsg := common.ResolveAppError(err.Error(), http.StatusBadGateway).Message
@@ -3068,7 +3082,6 @@ func startReparseTasksInternalAtLevel(r *http.Request, datasetID string, taskIDs
 		ext.ErrorMessage = ""
 		lazyllmTaskID := ""
 		ext.ProcessingLevel = processingLevel
-		bindNativeIndexTask(r.Context(), datasetID, taskRow.DocID, taskRow.ID, processingLevel)
 		if i < len(lazyllmTaskIDs) {
 			lazyllmTaskID = strings.TrimSpace(lazyllmTaskIDs[i])
 		}
@@ -3123,6 +3136,38 @@ func resolveReparseStrategy(processingLevel, reparseMode string) (string, error)
 		return "rebuild", nil
 	}
 	return mode, nil
+}
+
+func validateParsingLLMConfig(ctx context.Context, db *gorm.DB, userID, processingLevel string, cfg map[string]any, loadErr error) error {
+	if effectiveProcessingLevel(processingLevel) != ProcessingLevelIndexed {
+		return nil
+	}
+	if loadErr != nil {
+		return fmt.Errorf("cannot load model configuration for indexed processing: %w", loadErr)
+	}
+	role, ok := cfg["embed_main"].(map[string]any)
+	source, sourceOK := role["source"].(string)
+	model, modelOK := role["model"].(string)
+	if ok && sourceOK && modelOK && strings.TrimSpace(source) != "" && strings.TrimSpace(model) != "" {
+		return nil
+	}
+	// Static deployments have a built-in embedding role and no database choice.
+	// Once a global choice or state exists, an absent runtime config is a hard
+	// failure; a static fallback could encode vectors with a different model.
+	_, present, err := modelprovider.ResolveGlobalEmbeddingChoice(ctx, db)
+	if err != nil {
+		return fmt.Errorf("cannot resolve global embedding model: %w", err)
+	}
+	if !present {
+		ready, err := modelprovider.IsModelReady(ctx, db, userID, "embed_main")
+		if err != nil {
+			return fmt.Errorf("cannot check embedding model for indexed processing: %w", err)
+		}
+		if ready {
+			return nil
+		}
+	}
+	return fmt.Errorf("text embedding model is required for indexed processing")
 }
 
 func normalizeParsingLLMConfig(cfg map[string]any) map[string]any {

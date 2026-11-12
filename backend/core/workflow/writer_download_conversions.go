@@ -194,10 +194,7 @@ func ConvertWriterDownload(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		request.Language = strings.TrimSpace(request.Language)
-		if request.Language == "" {
-			request.Language = "zh-CN"
-		}
-		if request.Language != "zh-CN" && request.Language != "en-US" {
+		if request.Language != "" && request.Language != "zh-CN" && request.Language != "en-US" {
 			common.ReplyErr(w, "invalid LaTeX template language", http.StatusBadRequest)
 			return
 		}

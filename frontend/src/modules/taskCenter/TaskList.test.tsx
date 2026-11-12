@@ -1,22 +1,24 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { afterEach, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import TaskList from './TaskList';
 import type { Task } from './api';
 import { TASKS_REMOVED_EVENT } from './events';
 import { CHAT_CONVERSATION_LIST_REFRESH_EVENT } from '@/modules/chat/constants/chat';
 import { RECOVERY_ARCHIVE_PATH } from '@/modules/settings/recoveryRoute';
+import { useWorkflowStore } from '@/modules/chat/store/workflowPanel';
 
 const mocks = vi.hoisted(() => ({
   listTasks: vi.fn(), getTaskRemovalPreview: vi.fn(), removeTask: vi.fn(),
   navigate: vi.fn(), unarchiveConversation: vi.fn(), messageOpen: vi.fn(), messageSuccess: vi.fn(), messageError: vi.fn(),
+  requestGet: vi.fn(),
 }));
 vi.mock('./api', () => mocks);
-vi.mock('react-i18next', () => ({ useTranslation: () => ({ t: (key: string) => key }) }));
+vi.mock('react-i18next', () => ({ initReactI18next: { type: '3rdParty', init: vi.fn() }, useTranslation: () => ({ t: (key: string, values?: Record<string, unknown>) => key === 'taskCenter.stepsCompleted' ? `${values?.done}/${values?.total} 个步骤已完成` : key, i18n: { language: 'zh-CN' } }) }));
 vi.mock('react-router-dom', () => ({ useNavigate: () => mocks.navigate }));
-vi.mock('@/components/request', () => ({ getLocalizedErrorMessage: () => 'failure' }));
+vi.mock('@/components/request', () => ({ getLocalizedErrorMessage: () => 'failure', axiosInstance: { get: mocks.requestGet, defaults: {} }, BASE_URL: '' }));
 vi.mock('./TaskDetail', () => ({
   default: ({ task, onArchive }: { task: Task | null; onArchive: (task: Task) => void }) => task && <button onClick={() => onArchive(task)}>Archive task</button>,
-  StatusTag: () => null, formatDate: () => '',
+  formatDate: () => '',
 }));
 vi.mock('@/components/StateGraphModal', () => ({ default: () => null }));
 vi.mock('@/modules/chat/components/ArchiveConversationModal', () => ({
@@ -28,11 +30,82 @@ vi.mock('antd', async () => {
   return { ...actual, message: { ...actual.message, open: mocks.messageOpen, success: mocks.messageSuccess, error: mocks.messageError, destroy: vi.fn() } };
 });
 afterEach(() => { cleanup(); vi.clearAllMocks(); });
+beforeEach(() => {
+  mocks.requestGet.mockReset().mockResolvedValue({ data: {} });
+  useWorkflowStore.setState({ workflowUIByWorkflow: {} });
+});
 
 const task: Task = {
   id: 't', user_id: 'u', conversation_id: 'c', conversation_state: 'active', task_type: 'background_chat',
   title: 'Temporary task', status: 'failed', steps: [], created_at: '', updated_at: '',
 };
+
+it.each(['pending', 'running', 'paused', 'failed', 'succeeded', 'canceled'])('uses the complete five-step total in the %s list row', async status => {
+  const workflowTask = { ...task, status, task_type: 'workflow_run', workflow_session_id: 'session', steps: [{ step_id: 'one', status: 'succeeded' }] };
+  mocks.listTasks.mockResolvedValue({ items: [workflowTask], total: 1 });
+  mocks.requestGet.mockImplementation(async (url: string) => ({ data: url.endsWith('/projection') ? {
+    graph: { static_order: ['one', 'two', 'three', 'four', 'five'] },
+    projection: { nodes: { one: { execution: 'succeeded', branch: 'active' } } },
+  } : {} }));
+  render(<TaskList active status='' page={1} onStatusChange={vi.fn()} onPageChange={vi.fn()} />);
+  expect(await screen.findByText('1/5 个步骤已完成')).toBeInTheDocument();
+  expect(screen.queryByText('1/1 个步骤已完成')).not.toBeInTheDocument();
+});
+
+it('keeps the original six status categories and uses the grouped attention filter', async () => {
+  mocks.listTasks.mockResolvedValue({
+    items: [], total: 0,
+    status_counts: { all: 10, pending: 1, waiting: 2, waiting_inputs: 3, running: 1, paused: 1, succeeded: 1, completed: 0, failed: 1, interrupted: 0, canceled: 0 },
+  });
+  const onStatusChange = vi.fn();
+  render(<TaskList active status='' page={1} onStatusChange={onStatusChange} onPageChange={vi.fn()} />);
+
+  await waitFor(() => expect(mocks.listTasks).toHaveBeenCalledOnce());
+  for (const label of ['taskCenter.statusAttention', 'taskCenter.statusRunning', 'taskCenter.statusPaused', 'taskCenter.statusFailed', 'taskCenter.statusCompleted', 'taskCenter.statusCanceled']) {
+    expect(screen.getByText(label)).toBeInTheDocument();
+  }
+  expect(screen.queryByText('taskCenter.statusInterrupted')).not.toBeInTheDocument();
+  expect(screen.queryByText('taskCenter.statusWaiting')).not.toBeInTheDocument();
+  expect(screen.queryByText('taskCenter.statusWaitingInputs')).not.toBeInTheDocument();
+  fireEvent.click(screen.getByText('taskCenter.statusAttention'));
+  expect(onStatusChange).toHaveBeenCalledWith('attention');
+});
+
+it.each(['paused', 'failed', 'canceled'])('keeps the existing description without a loading label or partial count for a %s row', async status => {
+  const value = { ...task, status, workflow_session_id: 'planning-session', task_type: 'workflow_run', steps: [{ step_id: 'analysis', status }] };
+  mocks.listTasks.mockResolvedValue({ items: [value], total: 1 });
+  mocks.requestGet.mockImplementation(async (url: string) => {
+    if (url.endsWith('/projection')) return { data: { projection: { nodes: {} } } };
+    if (url.includes('/workflow-sessions/')) return { data: { session: {
+      session_id: 'planning-session', workflow_id: 'ppt', pinned_revision_id: 'planning-revision', steps: [], slots: [],
+    } } };
+    return { data: { ui: { tab_visibility_ready_material: 'execution_plan', tabs: [{ id: 'analysis', slots: [] }] } } };
+  });
+  render(<TaskList active status='' page={1} onStatusChange={vi.fn()} onPageChange={vi.fn()} />);
+  await waitFor(() => expect(document.querySelector('.task-list-state-copy')).toHaveTextContent(value.title!));
+  expect(screen.queryByText('common.loading')).not.toBeInTheDocument();
+  expect(screen.queryByText(/个步骤已完成/)).not.toBeInTheDocument();
+  expect(screen.queryByText('taskCenter.loadError')).not.toBeInTheDocument();
+});
+
+it('retries failed step reads on manual refresh even when the task version is unchanged', async () => {
+  const value = { ...task, workflow_session_id: 'retry-session', task_type: 'workflow_run' };
+  mocks.listTasks.mockResolvedValue({ items: [value], total: 1 });
+  let fail = true;
+  mocks.requestGet.mockImplementation(async (url: string) => {
+    if (url.endsWith('/projection')) {
+      if (fail) throw new Error('temporary failure');
+      return { data: { graph: { static_order: ['one'] }, projection: { nodes: { one: { execution: 'succeeded' } } } } };
+    }
+    return { data: {} };
+  });
+  render(<TaskList active status='' page={1} onStatusChange={vi.fn()} onPageChange={vi.fn()} />);
+  expect(await screen.findByText('taskCenter.loadError')).toBeInTheDocument();
+  fail = false;
+  fireEvent.click(screen.getByRole('button', { name: 'taskCenter.refresh' }));
+  expect(await screen.findByText('1/1 个步骤已完成')).toBeInTheDocument();
+  expect(mocks.requestGet).toHaveBeenCalledTimes(4);
+});
 
 it('reloads related task records when a batch archive is undone', async () => {
   mocks.listTasks.mockResolvedValue({ items: [], total: 0 });

@@ -858,8 +858,18 @@ test("Desktop renderer keeps Node disabled behind an isolated preload bridge", (
   assert.match(source, /preload:\s*path\.join\(__dirname, "preload\.js"\)/);
   assert.match(
     source,
-    /backgroundThrottling:\s*false/,
-    "hidden Chat windows must keep running until they report renderer readiness",
+    /backgroundThrottling:\s*show/,
+    "only hidden Chat windows need to bypass throttling during startup",
+  );
+  assert.match(
+    source,
+    /readyRendererAttempt\.window\.show\(\);\s*readyRendererAttempt\.window\.webContents\.setBackgroundThrottling\(true\)/,
+    "production Chat must restore throttling after its initial show",
+  );
+  assert.match(
+    source,
+    /window\.show\(\);\s*window\.webContents\.setBackgroundThrottling\(true\)/,
+    "development Chat must restore throttling after its initial show",
   );
 });
 

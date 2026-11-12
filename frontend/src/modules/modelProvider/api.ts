@@ -4,6 +4,7 @@ import {
   ModelProvidersApiFactory,
   type AddModelProviderGroupModelOpenAPIRequest,
   type AddModelProviderGroupModelsOpenAPIResponse,
+  type EmbeddingClearResponse,
   type UpdateModelProviderGroupModelOpenAPIRequest,
 } from "@/api/generated/core-client";
 import { BASE_URL, axiosInstance } from "@/components/request";
@@ -50,15 +51,55 @@ export function unwrapModelProviderData<T>(payload: unknown): T {
   return payload as T;
 }
 
+export interface EmbeddingSwitchPreview {
+  outcome: "unchanged" | "empty" | "same" | "clear_required" | "probe_failed";
+  indexed_knowledge_bases: number;
+  active_model_name: string;
+  candidate_model_name: string;
+  signature_status: string;
+  generation: number;
+  can_switch: boolean;
+}
+
+export async function previewEmbeddingSwitch(input: {
+  model_id: string;
+  source: "own" | "cloud";
+}): Promise<EmbeddingSwitchPreview> {
+  const response = await axiosInstance.post(
+    `${BASE_URL}/api/core/model_providers/embedding/switch-preview`,
+    input,
+    // Core may spend up to 90 seconds probing a cold embedding runtime.
+    { silentError: true, timeout: 105000 } as never,
+  );
+  return unwrapModelProviderData<EmbeddingSwitchPreview>(response.data);
+}
+
+export async function clearEmbeddingChunks(input: {
+  model_id: string;
+  source: "own" | "cloud";
+  generation: number;
+  confirm_clear_chunks: true;
+}): Promise<EmbeddingClearResponse> {
+  const response = await axiosInstance.post(
+    `${BASE_URL}/api/core/model_providers/embedding/clear-chunks`,
+    input,
+    { silentError: true, timeout: 225000 } as never,
+  );
+  return unwrapModelProviderData<EmbeddingClearResponse>(response.data);
+}
+
 export async function updateProviderEndpoint(
   providerId: string,
   baseUrl: string,
 ): Promise<{ id: string; base_url: string }> {
   const response =
-    await modelProvidersApi.apiCoreModelProvidersModelProviderIdEndpointPut({
-      modelProviderId: providerId,
-      updateModelProviderEndpointOpenAPIRequest: { base_url: baseUrl },
-    });
+    await modelProvidersApi.apiCoreModelProvidersModelProviderIdEndpointPut(
+      {
+        modelProviderId: providerId,
+        updateModelProviderEndpointOpenAPIRequest: { base_url: baseUrl },
+      },
+      withModelProviderJsonOptions({ silentError: true }),
+    );
   return unwrapModelProviderData(response.data);
 }
 
@@ -417,7 +458,7 @@ export interface ProviderRequestConfig {
 export interface ProviderRequestConfigInput {
   advanced?: ProviderRequestAdvanced;
   default_protocol: RequestProtocol;
-  endpoints: { openai?: string; anthropic?: string };
+  endpoints: { openai?: string; "openai-responses"?: string; anthropic?: string };
 }
 
 export async function getProviderRequestConfig(
@@ -436,6 +477,7 @@ export async function updateProviderRequestConfig(
 ): Promise<ProviderRequestConfig> {
   if (
     input.default_protocol !== "openai" &&
+    input.default_protocol !== "openai-responses" &&
     input.default_protocol !== "anthropic"
   )
     throw new Error("Unsupported request protocol");
@@ -478,7 +520,7 @@ export async function replaceProviderKey(
         keyId,
         replaceModelProviderKeyOpenAPIRequest: { api_key: apiKey },
       },
-      { timeout: 180000 },
+      withModelProviderJsonOptions({ timeout: 180000, silentError: true }),
     );
   return unwrapModelProviderData(response.data);
 }

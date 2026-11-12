@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
@@ -80,6 +81,7 @@ type selectedModelItem struct {
 	TechnicalModelType       string         `json:"model_type,omitempty" gorm:"column:technical_model_type"`
 	IsDefault                bool           `json:"is_default" gorm:"column:is_default"`
 	Enabled                  bool           `json:"enabled" gorm:"column:enabled"`
+	GroupVerified            bool           `json:"-" gorm:"column:group_verified"`
 	CreateUserID             string         `json:"-" gorm:"column:create_user_id"`
 }
 
@@ -315,6 +317,14 @@ func SetSelectedModels(w http.ResponseWriter, r *http.Request) {
 			modelIDs = append(modelIDs, modelID)
 		}
 	}
+	if _, switchesEmbedding := selectionByType["embed_main"]; switchesEmbedding && !common.RequestUserIsAdmin(r) {
+		common.ReplyErr(w, "admin role required for global embedding selection", http.StatusForbidden)
+		return
+	}
+	if selectionByType["embed_main"] != "" && sourceByType["embed_main"] == "cloud" {
+		common.ReplyErr(w, "embedding_signature_unsupported", http.StatusConflict)
+		return
+	}
 
 	var models []orm.UserModelProviderGroupModel
 	if len(modelIDs) > 0 {
@@ -376,6 +386,51 @@ func SetSelectedModels(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		cloudSelections[modelType] = *model
+	}
+	// Fingerprint the saved embedding runtime before entering the database
+	// transaction. The transaction later rechecks index state and generation;
+	// no network request is made while holding the global selection lock.
+	embeddingModelID, hasEmbeddingSelection := selectionByType["embed_main"]
+	embeddingSource := sourceByType["embed_main"]
+	if embeddingModelID == "" {
+		embeddingSource = ""
+	}
+	embeddingModelName, embeddingSignature := "", ""
+	var embeddingSnapshot *modelProbeSnapshot
+	if hasEmbeddingSelection && db.Migrator().HasTable(&orm.EmbeddingIndexState{}) {
+		var signatureStatus string
+		var err error
+		embeddingModelName, embeddingSignature, signatureStatus, embeddingSnapshot, err = probeSelectedEmbedding(r.Context(), db, userID, embeddingModelID, embeddingSource)
+		if err != nil {
+			common.ReplyErr(w, "embedding signature failed", http.StatusConflict)
+			return
+		}
+		if embeddingModelID != "" && embeddingSource == "own" && embeddingSignature == "" {
+			common.ReplyErr(w, errEmbeddingSignatureFailed.Error()+": "+signatureStatus, http.StatusConflict)
+			return
+		}
+		if embeddingSource == "cloud" {
+			embeddingModelName = cloudSelections["embed_main"].DisplayName
+		}
+	}
+
+	if hasEmbeddingSelection && embeddingSignature != "" && db.Migrator().HasTable(&orm.EmbeddingIndexState{}) {
+		state, err := loadGlobalEmbeddingState(r.Context(), db)
+		if err != nil {
+			common.ReplyErr(w, "embedding state unavailable", 503)
+			return
+		}
+		status, err := loadEmbeddingIndexStatus(r.Context(), db)
+		if err != nil {
+			common.ReplyErr(w, "embedding state unavailable", 503)
+			return
+		}
+		if status.AffectedKnowledgeBases == 0 && state.ActiveModelID != "" && state.Signature != embeddingSignature {
+			if err := clearEmbeddingChunks(r.Context(), db, state, embeddingModelID, embeddingSource, embeddingSignature, true); err != nil {
+				common.ReplyErr(w, err.Error(), 409)
+				return
+			}
+		}
 	}
 
 	// When embed_image is configured for the first time, clear lazy_mode so
@@ -448,6 +503,74 @@ func SetSelectedModels(w http.ResponseWriter, r *http.Request) {
 			}
 			if !modelSupportsSelectionForProvider(r.Context(), tx, parent, model, slot, baseURL) {
 				return errSelectionModelType
+			}
+		}
+		if embeddingSnapshot != nil {
+			model := currentModels[embeddingModelID]
+			currentSnapshot, unavailable, err := loadProbeSnapshot(r.Context(), tx, userID, model.UserModelProviderID, model.UserModelProviderGroupID, embeddingModelID)
+			if err != nil || unavailable != nil || currentSnapshot != *embeddingSnapshot {
+				return errConnectionChanged
+			}
+		}
+		if hasEmbeddingSelection && tx.Migrator().HasTable(&orm.EmbeddingIndexState{}) {
+			var state orm.EmbeddingIndexState
+			lookupErr := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("scope = ?", globalEmbeddingScope).Take(&state).Error
+			stateMissing := errors.Is(lookupErr, gorm.ErrRecordNotFound)
+			if stateMissing {
+				state = orm.EmbeddingIndexState{Scope: globalEmbeddingScope}
+				choice, present, err := ResolveGlobalEmbeddingChoice(r.Context(), tx)
+				if err != nil {
+					return err
+				}
+				if present && choice.Legacy {
+					state.ActiveModelID, state.ActiveSource = choice.ModelID, choice.Source
+					state.ActiveModelName, state.ActiveProviderName = choice.ModelName, choice.ProviderName
+				}
+			} else if lookupErr != nil {
+				return lookupErr
+			}
+			status, err := loadEmbeddingIndexStatus(r.Context(), tx)
+			if err != nil {
+				return err
+			}
+			outcome := assessEmbeddingSwitch(state, status.AffectedKnowledgeBases, embeddingModelID, embeddingSource, embeddingSignature)
+			if embeddingModelID == "" && status.AffectedKnowledgeBases > 0 || outcome == "clear_required" {
+				return errEmbeddingSwitchNeedsClear
+			}
+			providerName := ""
+			if embeddingModelID != "" {
+				if embeddingSource == "cloud" {
+					providerName = CloudSystemProviderName
+				} else {
+					model := currentModels[embeddingModelID]
+					var provider orm.UserModelProvider
+					if err := tx.Where("id = ? AND create_user_id = ? AND deleted_at IS NULL", model.UserModelProviderID, userID).Take(&provider).Error; err != nil {
+						return errConnectionChanged
+					}
+					providerName = provider.Name
+				}
+			}
+			if stateMissing ||
+				(state.ActiveModelID != embeddingModelID || state.ActiveSource != embeddingSource || state.Signature != embeddingSignature ||
+					state.ActiveModelName != embeddingModelName || state.ActiveProviderName != providerName) {
+				changedSpace := state.Signature != embeddingSignature
+				state.ActiveModelID, state.ActiveSource = embeddingModelID, embeddingSource
+				state.ActiveModelName, state.ActiveProviderName = embeddingModelName, providerName
+				state.Signature, state.Phase = embeddingSignature, "ready"
+				state.TargetModelID, state.TargetSource, state.TargetSignature = "", "", ""
+				if state.Generation < 1 {
+					state.Generation = 1
+				} else if changedSpace {
+					state.Generation++
+				}
+				state.UpdatedAt = now
+				if stateMissing {
+					if err := tx.Create(&state).Error; err != nil {
+						return err
+					}
+				} else if err := tx.Save(&state).Error; err != nil {
+					return err
+				}
 			}
 		}
 		for modelType, modelID := range selectionByType {
@@ -542,6 +665,8 @@ func SetSelectedModels(w http.ResponseWriter, r *http.Request) {
 	}); err != nil {
 		if errors.Is(err, errSelectionModelType) || errors.Is(err, ErrProviderKeyDisabled) || errors.Is(err, ErrProviderKeyUnverified) {
 			common.ReplyErr(w, err.Error(), http.StatusBadRequest)
+		} else if errors.Is(err, errEmbeddingSwitchNeedsClear) || errors.Is(err, errEmbeddingSignatureFailed) {
+			common.ReplyErr(w, err.Error(), http.StatusConflict)
 		} else if errors.Is(err, errConnectionChanged) {
 			common.ReplyErr(w, err.Error(), http.StatusConflict)
 		} else {
@@ -566,6 +691,10 @@ func SetSelectedModels(w http.ResponseWriter, r *http.Request) {
 }
 
 func loadSelectedModels(ctx context.Context, db *gorm.DB, userID string) ([]selectedModelItem, error) {
+	return loadSelectedModelsInternal(ctx, db, userID, true)
+}
+
+func loadSelectedModelsInternal(ctx context.Context, db *gorm.DB, userID string, projectGlobalEmbedding bool) ([]selectedModelItem, error) {
 	out := make([]selectedModelItem, 0)
 	err := db.WithContext(ctx).
 		Table("user_selected_models usm").
@@ -583,7 +712,8 @@ func loadSelectedModels(ctx context.Context, db *gorm.DB, userID string) ([]sele
 				"m.enabled, "+
 				"m.max_input_tokens, "+
 				"g.name AS group_name, "+
-				"g.base_url",
+				"g.base_url, "+
+				"g.is_verified AS group_verified",
 		).
 		Joins(
 			"JOIN user_model_provider_group_models m ON "+
@@ -615,6 +745,9 @@ func loadSelectedModels(ctx context.Context, db *gorm.DB, userID string) ([]sele
 	eligible := out[:0]
 	for _, item := range out {
 		identity := identities[item.UserModelProviderID]
+		if identity.IsCustom && item.IsDefault && !item.GroupVerified {
+			continue
+		}
 		item.BrandKey, item.ServiceKey, item.IsCustom = identity.BrandKey, identity.ServiceKey, identity.IsCustom
 		item.LogoDataURL = identity.LogoDataURL
 		item.ModelSettings = modelSettingsResponse(item.ModelSettingsRaw)
@@ -664,6 +797,9 @@ func loadSelectedModels(ctx context.Context, db *gorm.DB, userID string) ([]sele
 	catalog, _ := ResolveCloudModelCatalog(ctx)
 	if !catalog.Known {
 		sort.Slice(out, func(i, j int) bool { return out[i].ModelKey < out[j].ModelKey })
+		if projectGlobalEmbedding {
+			return projectGlobalSelectedEmbedding(ctx, db, userID, out)
+		}
 		return out, nil
 	}
 	byType := make(map[string]int, len(out))
@@ -696,7 +832,82 @@ func loadSelectedModels(ctx context.Context, db *gorm.DB, userID string) ([]sele
 		}
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ModelKey < out[j].ModelKey })
+	if projectGlobalEmbedding {
+		return projectGlobalSelectedEmbedding(ctx, db, userID, out)
+	}
 	return out, nil
+}
+
+func projectGlobalSelectedEmbedding(ctx context.Context, db *gorm.DB, userID string, selected []selectedModelItem) ([]selectedModelItem, error) {
+	choice, present, err := ResolveGlobalEmbeddingChoice(ctx, db)
+	if !present {
+		return selected, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	filtered := make([]selectedModelItem, 0, len(selected))
+	for _, item := range selected {
+		if item.ModelKey != "embed_main" {
+			filtered = append(filtered, item)
+		}
+	}
+	if choice.ModelID == "" {
+		return filtered, nil
+	}
+	if choice.Source == "cloud" {
+		cloudItem := selectedModelItem{
+			ModelKey: "embed_main", ModelID: choice.ModelID, Source: "cloud",
+			ProviderID: CloudSystemProviderID, ProviderName: CloudSystemProviderName,
+			Name: choice.ModelName, Availability: "unavailable", UnavailableReason: "model_unavailable", ReadOnly: true,
+		}
+		catalog, _ := ResolveCloudModelCatalog(ctx)
+		if model := FindCloudCatalogModel(catalog, "embed_main", choice.ModelID); model != nil {
+			cloudItem.Name = model.DisplayName
+			if cloudCatalogModelUsable(*model) {
+				cloudItem.Availability = model.Status
+				cloudItem.UnavailableReason = ""
+			}
+		} else if catalog.Reason != "" {
+			cloudItem.UnavailableReason = catalog.Reason
+		}
+		filtered = append(filtered, cloudItem)
+	} else if choice.Source == "own" {
+		ownerSelections := selected
+		if choice.OwnerID != "" && choice.OwnerID != userID {
+			ownerSelections, err = loadSelectedModelsInternal(ctx, db, choice.OwnerID, false)
+			if err != nil {
+				return nil, err
+			}
+		}
+		active := selectedModelItem{
+			ModelKey: "embed_main", ModelID: choice.ModelID, Source: "own",
+			Name: choice.ModelName, ProviderName: choice.ProviderName,
+			Availability: "unavailable", UnavailableReason: "model_unavailable", ReadOnly: true,
+		}
+		for _, item := range ownerSelections {
+			if item.ModelKey == "embed_main" && item.ModelID == choice.ModelID && item.Source == "own" {
+				active = item
+				active.ReadOnly = choice.OwnerID != userID
+				break
+			}
+		}
+		filtered = append(filtered, active)
+	}
+	if choice.Phase == "unverified" || choice.Phase == "clearing" || choice.Phase == "cleanup_failed" {
+		for i := range filtered {
+			if filtered[i].ModelKey == "embed_main" {
+				filtered[i].Availability = "unavailable"
+				if choice.Phase == "unverified" {
+					filtered[i].UnavailableReason = "index_identity_unverified"
+				} else {
+					filtered[i].UnavailableReason = "index_cleanup_incomplete"
+				}
+			}
+		}
+	}
+	sort.Slice(filtered, func(i, j int) bool { return filtered[i].ModelKey < filtered[j].ModelKey })
+	return filtered, nil
 }
 
 func loadSelectedCloudModels(ctx context.Context, db *gorm.DB, userID string) ([]orm.UserSelectedCloudModel, error) {
@@ -744,6 +955,10 @@ func SetSharedModel(w http.ResponseWriter, r *http.Request) {
 	}
 	if _, ok := allowedSelectionModelTypes[modelKey]; !ok {
 		common.ReplyErr(w, "invalid model_key", http.StatusBadRequest)
+		return
+	}
+	if modelKey == "embed_main" {
+		common.ReplyErr(w, "embedding sharing follows the global selection", http.StatusBadRequest)
 		return
 	}
 	userID := strings.TrimSpace(store.UserID(r))
@@ -827,6 +1042,17 @@ func GetModelReady(w http.ResponseWriter, r *http.Request) {
 	if modelType == "" {
 		common.ReplyErr(w, "model_type is required", http.StatusBadRequest)
 		return
+	}
+	if modelType == "embed_main" {
+		ready, present, err := globalEmbeddingReadiness(r.Context(), db, userID)
+		if err != nil {
+			common.ReplyErr(w, "query failed", http.StatusInternalServerError)
+			return
+		}
+		if present {
+			common.ReplyOK(w, ready)
+			return
+		}
 	}
 	if cloud, cloudErr := selectedCloudModel(r.Context(), db, userID, modelType); cloudErr != nil {
 		common.ReplyErr(w, "query failed", http.StatusInternalServerError)
@@ -1088,6 +1314,12 @@ func hasValidModelSelection(ctx context.Context, db *gorm.DB, userID, modelType 
 // An error is returned when the algorithm service is unreachable — callers should surface
 // this as a 502 rather than treating it as "not ready".
 func IsModelReady(ctx context.Context, db *gorm.DB, userID, modelType string) (bool, error) {
+	if modelType == "embed_main" {
+		ready, present, err := globalEmbeddingReadiness(ctx, db, userID)
+		if err != nil || present {
+			return ready.Ready, err
+		}
+	}
 	if cloud, err := selectedCloudModel(ctx, db, userID, modelType); err != nil {
 		return false, err
 	} else if cloud != nil {

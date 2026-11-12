@@ -1,10 +1,11 @@
 import { useId } from "react";
 import { useTranslation } from "react-i18next";
-import { BulbOutlined, CheckOutlined, CloseCircleFilled } from "@ant-design/icons";
+import { BulbOutlined, CheckOutlined, CloseCircleFilled, PauseCircleFilled } from "@ant-design/icons";
 import type { PublicProcessStep } from "@/modules/chat/types/ordinaryTask";
 import type { OrdinaryTaskState } from "./taskTimeline";
 import type { ChatModelSwitchRecord } from "@/api/generated/core-client";
 import { formatModelSwitchLabel } from "@/modules/chat/utils/modelSwitchDisplay";
+import { workflowTaskDisplayStatus } from "@/modules/chat/utils/workflowTaskStatus";
 
 export function TaskModelSwitchSummary({ record }: { record: ChatModelSwitchRecord }) {
   const { t } = useTranslation();
@@ -40,7 +41,7 @@ export function TaskProcessTimeline({ steps, legacyPlan = [], state, progress }:
   const labels: Record<string, string> = {
     pending: t("taskCenter.statusPending"), running: t("taskCenter.ordinaryStatusRunning"),
     succeeded: t("taskCenter.statusSucceeded"), failed: t("taskCenter.statusFailed"),
-    interrupted: t("taskCenter.statusInterrupted"), canceled: t("taskCenter.statusCanceled"),
+    paused: t("taskCenter.statusPaused"), canceled: t("taskCenter.statusCanceled"),
   };
   return (
     <section className={`ordinary-activity-section ordinary-thinking-section${hasPlan ? " ordinary-plan-section" : ""}`} aria-labelledby={headingId}>
@@ -49,21 +50,22 @@ export function TaskProcessTimeline({ steps, legacyPlan = [], state, progress }:
       </h3>
       {sorted.length === 0 ? (legacyPlan.length === 0 && <p className="ordinary-process-empty">{t("taskCenter.ordinaryNoProcessSteps")}</p>) : (
         <ol className="ordinary-thinking-list">
-          {sorted.map(step => (
-            <li className={`ordinary-thinking-item is-${statusClass(step.status)}`} key={step.step_id}
+          {sorted.map(step => {
+            const status = workflowTaskDisplayStatus(step.status, state === 'paused' ? 'paused' : undefined);
+            return <li className={`ordinary-thinking-item is-${statusClass(status)}`} key={step.step_id}
               aria-current={step.status === "running" ? "step" : undefined}>
               <span className="ordinary-thinking-marker" aria-hidden="true">
-                {step.status === "succeeded" ? <CheckOutlined /> : step.status === "running"
-                  ? <span className="ordinary-task-spinner" /> : step.status === "failed"
+                {status === "succeeded" ? <CheckOutlined /> : status === "paused" ? <PauseCircleFilled /> : status === "running"
+                  ? <span className="ordinary-task-spinner" /> : status === "failed"
                     ? <CloseCircleFilled /> : <span className="ordinary-thinking-dot" />}
               </span>
               <span className="ordinary-thinking-copy">
                 <strong>{step.title}</strong>
                 {step.model_switch ? <TaskModelSwitchSummary record={step.model_switch} /> : step.summary && <span>{step.summary}</span>}
-                <span className="ordinary-process-status">{labels[step.status] ?? t("taskCenter.statusPending")}</span>
+                <span className="ordinary-process-status">{labels[status] ?? t("taskCenter.statusPending")}</span>
               </span>
-            </li>
-          ))}
+            </li>;
+          })}
         </ol>
       )}
       {hasPlan && (
@@ -82,8 +84,8 @@ export function TaskProcessTimeline({ steps, legacyPlan = [], state, progress }:
               return <li className={`ordinary-thinking-item ordinary-plan-item is-${stepState}`} key={index}
                 aria-current={stepState === "running" ? "step" : undefined}>
                 <span className="ordinary-thinking-marker" aria-hidden="true">
-                  {stepState === "complete" ? <CheckOutlined /> : stepState === "running" ? <span className="ordinary-plan-active-dot" />
-                    : ["failed", "interrupted", "canceled"].includes(stepState) ? <CloseCircleFilled /> : index + 1}
+                  {stepState === "complete" ? <CheckOutlined /> : stepState === "paused" ? <PauseCircleFilled /> : stepState === "running" ? <span className="ordinary-plan-active-dot" />
+                    : ["failed", "canceled"].includes(stepState) ? <CloseCircleFilled /> : index + 1}
                 </span>
                 <span className="ordinary-thinking-copy"><strong>{title}</strong></span>
               </li>;

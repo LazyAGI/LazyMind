@@ -79,6 +79,9 @@ func prepareTaskModelInput(ctx context.Context, db *gorm.DB, task *orm.SubAgentT
 		}
 	}
 	if current == nil {
+		if !modelconfig.ChatModelFallbackEnabled() {
+			return errTaskModelsExhausted
+		}
 		var window *int64
 		if origin != nil {
 			window = origin.MaxInputTokens
@@ -98,6 +101,9 @@ func prepareTaskModelInput(ctx context.Context, db *gorm.DB, task *orm.SubAgentT
 	req.LLMConfig["llm"] = cloneTaskConfig(current.LLMConfig)["llm"]
 	req.ModelFallbackCurrentID = current.CandidateID
 	req.ModelFallbackCandidates = prepared.Candidates
+	if !modelconfig.ChatModelFallbackEnabled() {
+		req.ModelFallbackCandidates = []modelconfig.ChatModelCandidate{*current}
+	}
 	req.modelModels = prepared.Models
 	return nil
 }

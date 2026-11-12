@@ -127,11 +127,26 @@
 }
 .settings-reference-nav .ant-empty { padding: 28px 0; }
 .settings-reference-sidebar-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
   padding: 13px 16px 16px;
   border-top: 1px solid #dfe6ef;
   color: #8a97a9;
   font-size: 11px;
   line-height: 1.5;
+}
+.settings-app-version {
+  flex: 0 0 auto;
+  padding: 3px 6px;
+  border: 1px solid rgba(100, 116, 139, 0.12);
+  border-radius: 5px;
+  color: #7c8899;
+  font-size: 10px;
+  line-height: 16px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 
 .settings-reference-content {
@@ -948,16 +963,28 @@
 }
 .settings-system-tools-stack.has-local-dependencies {
   display: grid;
-  grid-template-rows: minmax(0, 2fr) minmax(220px, 1fr);
+  grid-template-rows: minmax(320px, 1fr);
+  grid-auto-rows: max-content;
+  overflow-y: auto;
+  scrollbar-width: thin;
 }
-.settings-system-tools-stack > .model-provider-service-category { margin: 0; }
+.settings-system-tools-dependencies {
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  overflow-y: auto;
+}
+.settings-system-tools-dependencies > .model-provider-service-category { flex: 0 0 auto; }
+.settings-system-tools-stack > .model-provider-service-category,
+.settings-system-tools-dependencies > .model-provider-service-category { margin: 0; }
 .settings-integrated-surface.is-system-tools .model-provider-tool-management-section {
   min-height: 0;
   display: flex;
   flex: 1 1 auto;
   flex-direction: column;
   overflow: hidden;
-  padding: 20px;
+  padding: 18px;
   border-radius: 12px;
   background: rgba(255, 255, 255, .97);
 }
@@ -973,8 +1000,8 @@
 }
 .settings-integrated-surface.is-system-tools .model-provider-service-category-top {
   align-items: center;
-  margin-bottom: 18px;
-  padding-bottom: 16px;
+  margin-bottom: 14px;
+  padding-bottom: 12px;
   border-bottom: 1px solid #e7edf5;
 }
 .settings-integrated-surface.is-system-tools .model-provider-tool-category-title > span {
@@ -1052,8 +1079,8 @@
   min-width: auto;
 }
 .settings-integrated-surface.is-system-tools .model-provider-managed-tool-pagination.ant-pagination {
-  margin-top: 16px;
-  padding-top: 16px;
+  margin-top: 12px;
+  padding-top: 12px;
   border-top: 1px solid #edf1f6;
 }
 .settings-model-tabs { display: flex; flex-wrap: wrap; gap: 8px; margin: -2px 0 18px; }
@@ -1374,6 +1401,7 @@
   .settings-integrated-page.is-system-tools-page > .settings-integrated-surface.is-system-tools { display: block; overflow: visible; }
   .settings-system-tools-stack,
   .settings-system-tools-stack.has-local-dependencies { display: flex; overflow: visible; }
+  .settings-system-tools-dependencies { overflow: visible; }
   .settings-integrated-surface.is-system-tools .model-provider-tool-management-section { overflow: visible; }
   .settings-integrated-surface.is-system-tools .model-provider-tool-management-section > .ant-spin-nested-loading { overflow: visible; flex: none; }
   .settings-integrated-surface.is-system-tools .model-provider-tool-management-section > .ant-spin-nested-loading > .ant-spin-container { height: auto; overflow: visible; }

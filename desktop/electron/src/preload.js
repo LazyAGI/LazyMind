@@ -39,6 +39,7 @@ function createDesktopBridge(ipcRenderer) {
       ipcRenderer.on("lazymind:update:state", listener);
       return () => ipcRenderer.removeListener("lazymind:update:state", listener);
     },
+    appVersion: () => ipcRenderer.invoke("lazymind:appVersion"),
     agentIntegrationStatuses: (refreshInstallations = false) => ipcRenderer.invoke("lazymind:agentIntegrationStatuses", refreshInstallations === true),
     agentIntegrationAction: (agent, action) => ipcRenderer.invoke("lazymind:agentIntegrationAction", agent, action),
     executorIntegrationPolicies: () => ipcRenderer.invoke("lazymind:executorIntegrationPolicies"),
@@ -49,7 +50,7 @@ function createDesktopBridge(ipcRenderer) {
     agentExecutableBind: (target, executablePath) => ipcRenderer.invoke("lazymind:agentExecutableBind", target, executablePath),
     agentExecutableClear: (target) => ipcRenderer.invoke("lazymind:agentExecutableClear", target),
     assistantSessionSet: (session) => ipcRenderer.invoke("lazymind:assistantSessionSet", session),
-    assistantSessionClear: () => ipcRenderer.invoke("lazymind:assistantSessionClear"),
+    assistantSessionClear: (request) => ipcRenderer.invoke("lazymind:assistantSessionClear", request),
     restartRuntime: (options) => options === undefined
       ? ipcRenderer.invoke("lazymind:restartRuntime")
       : ipcRenderer.invoke("lazymind:restartRuntime", { reload: options?.reload !== false }),
@@ -106,6 +107,7 @@ function storedNotificationUser(target, raw) {
 
 function installNotificationSessionSync(target, bridge) {
   let previous;
+  let previousSession;
   const sync = () => {
     let user;
     try { user = storedNotificationUser(target, target.localStorage.getItem("lazymind:user")); } catch { /* Treat invalid storage as logged out. */ }
@@ -117,8 +119,13 @@ function installNotificationSessionSync(target, bridge) {
     const fingerprint = JSON.stringify(value);
     if (previous === fingerprint) return;
     previous = fingerprint;
-    const operation = value ? bridge.assistantSessionSet(value) : bridge.assistantSessionClear();
-    Promise.resolve(operation).catch(() => {
+    const expected = previousSession;
+    if (value) previousSession = value;
+    const operation = value ? bridge.assistantSessionSet(value)
+      : expected ? bridge.assistantSessionClear({ expected_session: expected }) : undefined;
+    Promise.resolve(operation).then(() => {
+      if (!value && previousSession === expected) previousSession = undefined;
+    }).catch(() => {
       // A later readiness/login event can retry; never log session material.
       if (previous === fingerprint) previous = undefined;
     });

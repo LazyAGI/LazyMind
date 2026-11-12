@@ -49,6 +49,12 @@ func TestAuthServicePreparePythonEnvUsesUV(t *testing.T) {
 			return CommandResult{}, nil
 		},
 		func(cmd Command) (CommandResult, error) {
+			if cmd.Name != authServicePythonPath(paths) {
+				t.Fatalf("expected new venv check, got %s", cmd.Name)
+			}
+			return CommandResult{}, nil
+		},
+		func(cmd Command) (CommandResult, error) {
 			assertCommand(t, cmd, "uv", "pip", "install", "--python", authServicePythonPath(paths), "--link-mode", "copy", "--strict", "-r", requirements)
 			return CommandResult{}, nil
 		},
@@ -57,7 +63,7 @@ func TestAuthServicePreparePythonEnvUsesUV(t *testing.T) {
 	if err := manager.preparePythonEnv(context.Background(), cfg, paths); err != nil {
 		t.Fatalf("prepare python env: %v", err)
 	}
-	runner.assertCommandCount(4)
+	runner.assertCommandCount(5)
 }
 
 func TestUVCommandFallsBackToUserInstallForUnresolvedConfiguredName(t *testing.T) {

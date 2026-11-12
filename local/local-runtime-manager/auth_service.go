@@ -163,10 +163,16 @@ func (m *AuthServiceManager) preparePythonEnv(ctx context.Context, cfg RuntimeCo
 		}
 		return fmt.Errorf("desktop auth-service Python not found: %s", python)
 	}
+	if err := validateLocalPythonPaths(paths, paths.AuthServiceVenvDir); err != nil {
+		return err
+	}
 	if _, err := os.Stat(python); err != nil {
 		if err := m.createPythonEnv(ctx, cfg, paths); err != nil {
 			return err
 		}
+	}
+	if err := validatePythonEnvironment(ctx, m.runner, paths, paths.AuthServiceVenvDir, false); err != nil {
+		return err
 	}
 
 	if !cfg.AuthService.InstallDeps {

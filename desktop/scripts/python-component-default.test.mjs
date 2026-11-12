@@ -42,9 +42,11 @@ function fixture(environment = {}, failScript) {
 
 for (const [name, env, expected] of [
   ["default ad-hoc build", {}, "build-python-components.py"],
+  ["default rebuild with bundled clustering", { LAZYMIND_DESKTOP_DEFER_CLUSTER: "false" }, "build-python-components.py"],
   ["explicit rebuild", { LAZYMIND_DESKTOP_REBUILD_PYTHON_COMPONENTS: "true" }, "build-python-components.py"],
-  ["explicit published reuse", { LAZYMIND_DESKTOP_REBUILD_PYTHON_COMPONENTS: "false" }, "stage-published-python-components.py"],
-  ["Developer ID cannot reuse a foreign-signed component", { LAZYMIND_DESKTOP_SIGNING_MODE: "developer-id", LAZYMIND_DESKTOP_REBUILD_PYTHON_COMPONENTS: "false" }, "build-python-components.py"],
+  ["deferred clustering requires rebuilt components", { LAZYMIND_DESKTOP_REBUILD_PYTHON_COMPONENTS: "false" }, "build-python-components.py"],
+  ["explicit published reuse", { LAZYMIND_DESKTOP_REBUILD_PYTHON_COMPONENTS: "false", LAZYMIND_DESKTOP_DEFER_CLUSTER: "false" }, "stage-published-python-components.py"],
+  ["Developer ID cannot reuse a foreign-signed component", { LAZYMIND_DESKTOP_SIGNING_MODE: "developer-id", LAZYMIND_DESKTOP_REBUILD_PYTHON_COMPONENTS: "false", LAZYMIND_DESKTOP_DEFER_CLUSTER: "false" }, "build-python-components.py"],
 ]) test(name, async () => {
   const f = fixture(env);
   await f.execute();
@@ -64,7 +66,7 @@ test("bundled Python does not generate an optional component", async () => {
 
 for (const script of ["build-python-components.py", "verify-python-components.py", "stage-published-python-components.py"]) {
   test(`failure in ${script} fails the build and restores staging`, async () => {
-    const env = script === "stage-published-python-components.py" ? { LAZYMIND_DESKTOP_REBUILD_PYTHON_COMPONENTS: "false" } : {};
+    const env = script === "stage-published-python-components.py" ? { LAZYMIND_DESKTOP_REBUILD_PYTHON_COMPONENTS: "false", LAZYMIND_DESKTOP_DEFER_CLUSTER: "false" } : {};
     const f = fixture(env, script);
     await assert.rejects(f.execute(), error => error === f.failure);
     assert.equal(f.calls.at(-1).script, script);

@@ -38,7 +38,7 @@ import ImageUpload, {
 } from "../ImageUpload";
 import { fileToBase64 } from "@/modules/chat/utils/upload";
 import { useChatMessageStore } from "@/modules/chat/store/chatMessage";
-import { useChatInputStore } from "@/modules/chat/store/chatInput";
+import { NEW_CHAT_INPUT_DRAFT_KEY, useChatInputStore } from "@/modules/chat/store/chatInput";
 import { resolveMarkdownImageUrlAsync } from "@/modules/knowledge/utils/imageUrl";
 import { getRuntimeMode, isLocalLikeRuntimeMode } from "@/runtime/mode";
 
@@ -53,6 +53,7 @@ import ChatSelector, { type ChatSelectorImperativeProps } from "../ChatSelector"
 import PromptModal, { PromptImperativeProps } from "../PromptModal";
 import { appendPromptToDraft } from "../PromptModal/promptLibrary";
 import ChatConfigModal from "./ChatConfigModal";
+import { useWorkflowSelection } from "./useWorkflowSelection";
 import type { ConversationRuntimeSettings } from "../../utils/request";
 import { WorkflowSessionApi } from "../../utils/request";
 import { useWorkflowStore } from "@/modules/chat/store/workflowPanel";
@@ -140,7 +141,8 @@ import {
   useChatThinkStore,
   type ThinkingDepth,
 } from "@/modules/chat/store/chatThink";
-import { CHAT_SUBMIT_INPUT_EVENT, CHAT_CAPTURE_MODE_DRAFT_EVENT } from "@/modules/chat/constants/chat";
+import { CHAT_SUBMIT_INPUT_EVENT, CHAT_CAPTURE_MODE_DRAFT_EVENT, CHAT_SELECT_CONVERSATION_EVENT, selectChatConversationFilter } from "@/modules/chat/constants/chat";
+import type { ShowcaseEntryType } from "@/modules/showcase/classification";
 import { useChatNewMessageStore } from "@/modules/chat/store/chatNewMessage";
 import { useTranslation } from "react-i18next";
 import { PromptServiceApi } from "@/modules/chat/utils/request";
@@ -458,6 +460,7 @@ interface ChatInputProps {
   canStopGeneration?: boolean;
   onStopGeneration?: () => void;
   embeddingReady?: boolean | null;
+  vlmReady?: boolean | null;
   /** Called when workflow settings change (e.g. from the chat config popover). */
   onConversationSettingsChange?: (settings: ConversationRuntimeSettings) => void;
   /** Initial workflow settings to pre-populate the config popover. */
@@ -611,6 +614,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
       isStreaming = false,
       onStopGeneration,
       embeddingReady,
+      vlmReady,
       multimodalEmbeddingReady,
       rerankReady,
       disabled = false,
@@ -649,6 +653,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
       thinkingDepth: controlledThinkingDepth,
       onThinkingDepthChange,
     } = props;
+    const inputDraftKey = sessionId ?? draftKey;
     const showWorkspaceEnvironment = composerVariant !== "paper" && runInBackground && allowLocalWorkspace && isLocalLikeRuntimeMode(getRuntimeMode());
     const [workspaceId, setWorkspaceId] = useState<string>();
     const [projectName, setProjectName] = useState<string>();
@@ -723,6 +728,16 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
       return [...merged.values()];
     }, [allowKnowledgeBaseSelection, allowMentions, boundMentions, featuredMentions, mentions, ragReady]);
     const [contextRuntimeSettings, setContextRuntimeSettings] = useState(initialConversationSettings);
+    const handleRuntimeSettingsChange = useCallback((settings: ConversationRuntimeSettings) => {
+      setContextRuntimeSettings(settings);
+      onConversationSettingsChange?.(settings);
+    }, [onConversationSettingsChange]);
+    const { beforeWorkflowSelect, validateWorkflowSelection, busy: selectingWorkflow } = useWorkflowSelection({
+      conversationId: sessionId,
+      runInBackground,
+      settings: contextRuntimeSettings,
+      onChange: handleRuntimeSettingsChange,
+    });
     const [contextUsageReset, setContextUsageReset] = useState(0);
     const [menuHeight, setMenuHeight] = useState(420);
     const [activeMenu, setActiveMenu] = useState<string | null>(null);
@@ -744,7 +759,6 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
       kb: boolean | null;
     }>({ kb: null });
     const disabledNoticeId = useId();
-    const inputDraftKey = sessionId ?? draftKey;
     const draftRef = useRef<{ sessionId?: string; content: string; mentions: ChatMention[] }>({ content: value, mentions: [] });
     const [initialModelSelection, setInitialModelSelection] =
       useState<ChatModelSelectionRequest>();
@@ -776,7 +790,6 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
       const session = state.sessionByConversation[sessionId];
       return (
         session?.status === "active" ||
-        session?.status === "waiting" ||
         Boolean(state.autoRunningByConversation[sessionId])
       );
     });
@@ -816,6 +829,28 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
       uri: file.uri, filename: file.name,
     }))], value);
     useEffect(() => { setActiveMenu(null); }, [runInBackground, sessionId]);
+
+    useEffect(() => {
+      if (props.transferredDraft) textAreaRef.current?.focusAtEnd();
+    }, [props.transferredDraft]);
+
+    const handleCapabilityModeChange = useCallback((entryType: ShowcaseEntryType, draft: {
+      text: string;
+      mentions: ChatMention[];
+      featuredSelection: { caseId: string };
+    }) => {
+      const modeDraft = { ...draft, files: composerFiles.filter(file =>
+        file.id.startsWith('upload:') && Boolean(file.input?.uri)
+        || draft.mentions.some(mention => mention.type === 'file' && mention.resource_id === file.id),
+      ) };
+      useChatInputStore.getState().setModeDraft(modeDraft);
+      useChatInputStore.getState().saveInputContent(NEW_CHAT_INPUT_DRAFT_KEY, draft.text, draft.mentions);
+      sessionStorage.removeItem(CHAT_PENDING_CONVERSATION_GROUP_KEY);
+      selectChatConversationFilter(entryType === 'work' ? 'task' : 'normal');
+      window.dispatchEvent(new CustomEvent(CHAT_SELECT_CONVERSATION_EVENT, {
+        detail: { conversationId: '', runInBackground: entryType === 'work', source: 'mention' },
+      }));
+    }, [composerFiles]);
     // Keep synchronous mode-switch capture aligned with the committed composer.
     // Async uploads can commit before passive effects update the old listener.
     useLayoutEffect(() => {
@@ -823,12 +858,15 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
         const detail = (event as CustomEvent).detail;
         if (!allowMentions || !allowLocalWorkspace || detail?.runInBackground === undefined || detail.runInBackground === runInBackground
           || !innerRef.current?.getClientRects().length) return;
-        detail.draft = { text: value, mentions: [...mentions], featuredSelection: useFeaturedSelectionStore.getState().selections[sessionId || "new"], files: composerFiles.filter(file => file.id.startsWith('upload:') && Boolean(file.input?.uri) || mentions.some(mention => mention.type === 'file' && mention.resource_id === file.id)) };
+        const capabilityBindings = [...boundMentions, ...featuredMentions].filter(mention => mention.type === 'skill' || mention.type === 'workflow');
+        const draft = textAreaRef.current?.getDraftWithoutMentions(capabilityBindings) ?? { text: value, mentions: [...mentions] };
+        detail.draft = { ...draft, files: composerFiles.filter(file => file.id.startsWith('upload:') && Boolean(file.input?.uri) || draft.mentions.some(mention => mention.type === 'file' && mention.resource_id === file.id)) };
         useChatInputStore.getState().setModeDraft(detail.draft);
+        useChatInputStore.getState().saveInputContent(NEW_CHAT_INPUT_DRAFT_KEY, draft.text, draft.mentions);
       };
       window.addEventListener(CHAT_CAPTURE_MODE_DRAFT_EVENT, transferDraft, true);
       return () => window.removeEventListener(CHAT_CAPTURE_MODE_DRAFT_EVENT, transferDraft, true);
-    }, [runInBackground, value, mentions, composerFiles, sessionId, allowMentions, allowLocalWorkspace]);
+    }, [runInBackground, value, mentions, composerFiles, boundMentions, featuredMentions, allowMentions, allowLocalWorkspace]);
     const { setPendingMessage, clearPendingMessage } = useChatMessageStore();
     const { saveInputContent, getInputContent, getInputMentions, clearInputContent } =
       useChatInputStore();
@@ -939,7 +977,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
       ],
     );
 
-    useEffect(() => {
+    useLayoutEffect(() => {
       if (draftRef.current.sessionId === inputDraftKey && draftRef.current.content !== value) {
         draftRef.current = { sessionId: inputDraftKey, content: value, mentions: [] };
       }
@@ -1061,6 +1099,14 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
         preprocessUpload(newFiles, currentFiles, hasKB, t),
       [hasKB, t],
     );
+    const onFilesAdded = useCallback(
+      (files: File[]) => {
+        if (vlmReady === false && files.some(isImage)) {
+          message.warning(t("chat.vlmNotReadyWarning"));
+        }
+      },
+      [t, vlmReady],
+    );
     const normalizedCiteMessages = useMemo(() => {
       if (citeMessages) {
         return citeMessages.map((item) => item.trim()).filter(Boolean);
@@ -1070,13 +1116,16 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
       return normalizedCiteMessage ? [normalizedCiteMessage] : [];
     }, [citeMessage, citeMessages]);
     const isPromptPolishing = Boolean(polishingSuggestionKey);
+    const hasSendableDraft = Boolean(value.trim())
+      || composerFiles.some(file => localUploadIds.has(file.id) && file.input?.input_type === 'image')
+      || transferredUploads.some(file => file.input?.input_type === 'image');
     const isSendDisabled =
       disabled ||
       isPromptPolishing ||
       modelSelectionSaving ||
       (runInBackground && (workspacePermissionSaving || !projectValid)) ||
       resolvingSkillWorkflow ||
-      !value?.trim() ||
+      !hasSendableDraft ||
       isUploading;
     const shouldShowPromptSuggestions =
       composerVariant !== "paper" && showPromptSuggestions &&
@@ -1180,6 +1229,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
         if (!useWorkflow) {
           return originalMentions;
         }
+        if (!await beforeWorkflowSelect()) return originalMentions;
         return [
           ...originalMentions.filter((mention) => (
             mention.type !== "skill" || mention.resource_id !== skillMention.resource_id
@@ -1194,7 +1244,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
       } catch {
         return originalMentions;
       }
-    }, [t]);
+    }, [beforeWorkflowSelect, t]);
 
     const handleSend = async () => {
       if (disabled) {
@@ -1206,7 +1256,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
       if ((runInBackground && (!projectValid || workspacePermissionSavingRef.current)) || modelSelectionSaving) {
         return;
       }
-      if (isSendDisabled || resolvingSkillWorkflow || featuredBusy) {
+      if (isSendDisabled || resolvingSkillWorkflow || featuredBusy || selectingWorkflow) {
         return;
       }
       const normalizedText = value.trim();
@@ -1216,6 +1266,8 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
       let resolvedMentions = references.mentions;
       try {
         resolvedMentions = await resolveSkillWorkflowMentions(references.mentions);
+        if (resolvedMentions.some((mention) => mention.type === "workflow")
+          && !await validateWorkflowSelection()) return;
       } finally {
         setResolvingSkillWorkflow(false);
       }
@@ -1557,6 +1609,8 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                 conversationId={sessionId}
                 fileCandidates={composerFiles}
                 onQueryOpen={() => setActiveMenu(null)}
+                onEntryModeChange={allowMentions && allowLocalWorkspace ? handleCapabilityModeChange : undefined}
+                entryModeSwitchDisabled={isUploading}
                 initialMentions={inputDraftKey !== undefined ? getInputMentions(inputDraftKey) : props.transferredDraft?.mentions}
                 placeholder={placeholder || t(allowMentions
                   ? "chat.inputPlaceholder"
@@ -1566,6 +1620,8 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                 onMentionsChange={handleMentionsChange}
                 allowKnowledgeBaseSelection={allowKnowledgeBaseSelection}
                 allowMentions={allowMentions}
+                workflowDisabled={contextRuntimeSettings?.enable_workflow === false}
+                beforeWorkflowSelect={beforeWorkflowSelect}
                 disabledMentionReasons={knowledgeBaseSelectable ? undefined : {
                   knowledge_base: knowledgeBaseDisabledReason,
                 }}
@@ -1711,6 +1767,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                         types={uploadTypes}
                         max={Math.max(0, MAX_UPLOAD_FILES - transferredUploads.length)}
                         onBeforeAddFiles={onBeforeAddFiles}
+                        onFilesAdded={onFilesAdded}
                         disabled={disabled || isPromptPolishing}
                         disabledReason={isPromptPolishing ? t("chat.promptPolishing") : disabledReason}
                         icon={<span />}
@@ -1771,14 +1828,11 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                     onOpenChange={open => setActiveMenu(open ? "config" : null)}
                     key={configResetKey != null ? `config-reset-${configResetKey}` : undefined}
                     conversationId={sessionId && !sessionId.startsWith("temp_") ? sessionId : undefined}
-                    initialSettings={initialConversationSettings}
+                    initialSettings={contextRuntimeSettings}
                     disabled={disabled || isStreaming}
                     hasWorkflowSession={hasWorkflowSession}
                     lockedWorkflowMode={lockedWorkflowMode}
-                    onSave={(settings) => {
-                      setContextRuntimeSettings(settings);
-                      onConversationSettingsChange?.(settings);
-                    }}
+                    onSave={handleRuntimeSettingsChange}
                   />}
                   {composerVariant !== "paper" && showConversationConfig && sessionId && !sessionId.startsWith("temp_") && (
                     <DismissedWorkflowRestoreButton conversationId={sessionId} />
@@ -1851,8 +1905,8 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                   <div className="input-bottom-actions-right-item">
                     <SendButton
                       canStopGeneration={props.canStopGeneration ?? isStreaming}
-                      hasDraft={Boolean(value.trim())}
-                      sendDisabled={isSendDisabled || featuredBusy}
+                      hasDraft={hasSendableDraft}
+                      sendDisabled={isSendDisabled || featuredBusy || selectingWorkflow}
                       disabled={disabled}
                       sendLabel={t("chat.send")}
                       stopLabel={t("chat.stopGenerate")}

@@ -18,8 +18,10 @@ export function resolveWorkflowRealTabIndex(
   preferredTabId?: string,
 ): number {
   const projection = session.projection;
+  // projection.stale also contains steps with obsolete historical attempts.
+  // Current node validity and each attempt's validity determine live position.
   const effective = (id: string) => projection?.nodes?.[id]?.validity !== 'stale'
-    && !projection?.stale?.includes(id) && !projection?.pruned?.includes(id)
+    && !projection?.pruned?.includes(id)
     && !projection?.bypassed?.includes(id);
   const find = (id?: string) => id && effective(id) ? tabs.findIndex(tab => workflowTabMatchesStep(tab, id)) : -1;
   const latest = (predicate: (step: WorkflowSessionStep) => boolean) => [...(session.steps ?? [])]

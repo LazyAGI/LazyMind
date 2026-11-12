@@ -224,16 +224,6 @@ func Read(tx *gorm.DB, session orm.WorkflowSession) (*Snapshot, error) {
 }
 
 func GuardBegin(tx *gorm.DB, session orm.WorkflowSession) error {
-	return guardBegin(tx, session, false)
-}
-
-// GuardRetryBegin permits recovery admission, leaving the per-target budget to
-// the transition transaction. It never bypasses binding, review or stop barriers.
-func GuardRetryBegin(tx *gorm.DB, session orm.WorkflowSession) error {
-	return guardBegin(tx, session, true)
-}
-
-func guardBegin(tx *gorm.DB, session orm.WorkflowSession, retry bool) error {
 	if EditPaused(session) {
 		return Reject("EDITS_PENDING_CONTINUE", "continue explicitly after saving edits")
 	}
@@ -245,9 +235,6 @@ func guardBegin(tx *gorm.DB, session orm.WorkflowSession, retry bool) error {
 		return err
 	}
 	if session.Status == "failed" {
-		if retry && state.ActiveExecutions == 0 && (state.Admission.CanBegin || state.Admission.Reason == "recovery_required") {
-			return nil
-		}
 		if state.Admission.CanBegin {
 			return Reject("WORKFLOW_ADMISSION_DENIED", "recovery_required")
 		}

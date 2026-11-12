@@ -66,6 +66,23 @@ export interface UserInfo {
   timestamp?: number;
 }
 
+export interface AuthSessionSnapshot {
+  identity: string;
+  token: string;
+  refreshToken?: string;
+}
+
+function sessionSnapshot(): AuthSessionSnapshot {
+  const user = getStored();
+  return { identity: sessionIdentity(), token: user?.token || "", refreshToken: user?.refreshToken };
+}
+
+function snapshotIsCurrent(expected: AuthSessionSnapshot): boolean {
+  const current = sessionSnapshot();
+  return current.identity === expected.identity && current.token === expected.token
+    && current.refreshToken === expected.refreshToken;
+}
+
 function getStored(): UserInfo | null {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
@@ -126,6 +143,7 @@ function notifyUserInfoChange() {
 
 export const AgentAppsAuth = {
   getSessionIdentity: sessionIdentity,
+  getSessionSnapshot: sessionSnapshot,
 
   getUserInfo(): UserInfo | null {
     return getStored();
@@ -176,14 +194,25 @@ export const AgentAppsAuth = {
     return `${window.location.origin}${window.BASENAME || ""}/login`;
   },
 
-  async logout(redirectUrl?: string) {
+  async expireSession(expected: AuthSessionSnapshot) {
+    if (!snapshotIsCurrent(expected)) return;
+    return this.logout(undefined, expected);
+  },
+
+  async logout(redirectUrl?: string, expected?: AuthSessionSnapshot) {
+    if (expected && !snapshotIsCurrent(expected)) return;
     window.dispatchEvent(new Event(AUTH_LOGOUT_EVENT));
+    if (expected && !snapshotIsCurrent(expected)) return;
     const session = this.getUserInfo();
     const accessToken = session?.token;
     this.clearUserInfo();
     const clearedIdentity = sessionIdentity();
     // Begin clearing the old local session before any new login can occur.
-    const localCleanup = clearLocalAssistantSession().catch(() => {});
+    const localCleanup = clearLocalAssistantSession(15_000, session?.token && session.refreshToken ? {
+      server_url: window.location.origin, access_token: session.token,
+      refresh_token: session.refreshToken, username: session.username,
+      tenant_id: tenantFor(session),
+    } : undefined, !expected).catch(() => {});
     if (accessToken) {
       try {
         await fetch(coreApiUrl("browser/manage/devices"), {
@@ -292,20 +321,22 @@ export const AgentAppsAuth = {
       const current = getStored();
       if (!current?.refreshToken || !initial) throw new Error("No refresh token available");
       // Another tab may have rotated this same session while we waited for its lock.
-      if (current.token !== initial.token) return current.token;
+      if (current.token !== initial.token || current.refreshToken !== initial.refreshToken) return current.token;
       const refreshAxios = axios.create({ timeout: 10000, headers: { "Content-Type": "application/json" } });
       let response;
       try {
         response = await refreshAxios.post(endpoint, { refresh_token: current.refreshToken });
       } catch (error) {
         if (!alive()) throw stale();
+        const latest = getStored();
+        if (latest?.token && (latest.token !== initial.token || latest.refreshToken !== initial.refreshToken)) return latest.token;
         throw error;
       }
       if (!alive()) throw stale();
       // A same-account local recovery preserves the request generation but may
       // install newer credentials while this refresh is in flight.
       const latest = getStored();
-      if (latest?.token !== initial.token) return latest?.token || "";
+      if (latest?.token !== initial.token || latest?.refreshToken !== initial.refreshToken) return latest?.token || "";
       const loginData = response.data.data || response.data;
       if (!loginData.access_token) throw new Error(i18n.t("errors.2000509"));
       const credentials = {

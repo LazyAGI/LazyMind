@@ -12,6 +12,7 @@ export interface PersistedPaperLibrary {
     active: boolean;
 }
 export interface LibraryChanges {
+	cleanupPending?: boolean;
     data: PaperLibraryData;
     removedPaperIds?: string[];
     removedFolderIds?: string[];
@@ -69,8 +70,10 @@ export function patchLibraryPaper(dataset: string, paper: PaperRecord, changes: 
 const targets = (papers: PaperRecord[]) => papers.map(p => ({ id: p.id, revision: p.revision }));
 export function moveLibraryPapers(dataset: string, papers: PaperRecord[], folderId: string | null) { return mutation(dataset, 'post', 'library/papers:move', { items: targets(papers), folder_id: folderId || '' }); }
 export function removeLibraryPapers(dataset: string, papers: PaperRecord[]) { return mutation(dataset, 'post', 'library/papers:remove', { items: targets(papers) }); }
+export function deleteLibraryPapers(dataset: string, papers: PaperRecord[]) { return mutation(dataset, 'post', 'library/papers:delete', { items: targets(papers) }); }
 export function detachLibraryAttachment(dataset: string, paper: PaperRecord, id: string) { return mutation(dataset, 'post', `library/papers/${encodeURIComponent(paper.id)}/attachments/${encodeURIComponent(id)}:detach`, { revision: paper.revision }); }
 export function addLibraryNote(dataset: string, paperId: string, id: string, content: string, source?: PdfNoteSource) { return mutation(dataset, 'post', `library/papers/${encodeURIComponent(paperId)}/notes`, { id, content, ...(source ? { source } : {}) }); }
+export function deleteLibraryNote(dataset: string, paperId: string, id: string) { return mutation(dataset, 'post', `library/papers/${encodeURIComponent(paperId)}/notes/${encodeURIComponent(id)}:delete`, {}); }
 export function createLibraryFolder(dataset: string, id: string, name: string, parentId: string | null) { return mutation(dataset, 'post', 'library/folders', { id, name, parent_id: parentId || '' }); }
 export function renameLibraryFolder(dataset: string, folder: PaperFolder, name: string) { return mutation(dataset, 'patch', `library/folders/${encodeURIComponent(folder.id)}`, { revision: folder.revision, name }); }
 export function deleteLibraryFolder(dataset: string, folder: PaperFolder) { return mutation(dataset, 'post', `library/folders/${encodeURIComponent(folder.id)}:delete`, { revision: folder.revision }); }

@@ -1,6 +1,6 @@
 # Update-format fixtures
 
-These are schema-only captures from isolated databases created by the actual owners. The original baseline was captured at source commit `70b5b4835c4e01fce60e87b91ba86b613893df41` and LazyLLM `d53007dd95ce5f9180399a095cf81fb0b643093a`. The Core family is refreshed from the actual merged `LazyAGI/LazyMind:main` schema owner at `d998fab143410fbe22b21c456e3b165e3fd227e2` (migrations plus `episode.Initialize`); other family captures retain their original provenance and remain subject to their owner conformance tests. No user rows, credentials or runtime paths are captured. Core migration version/history is retained because it is part of the compatibility contract.
+These are schema-only captures from isolated databases created by the actual owners. The original baseline was captured at source commit `70b5b4835c4e01fce60e87b91ba86b613893df41` and LazyLLM `d53007dd95ce5f9180399a095cf81fb0b643093a`. The Core family is refreshed from the actual merged `LazyAGI/LazyMind:main` schema owner at `6cd2d1bb5cad97b9e6feed5ac6ff690b22c8e153` (migrations plus `episode.Initialize`). This refresh includes `embedding_index_states` and its migration history; other family captures retain their original provenance and remain subject to their owner conformance tests. No user rows, credentials or runtime paths are captured. Core migration version/history is retained because it is part of the compatibility contract.
 
 | Family | Actual producer |
 | --- | --- |

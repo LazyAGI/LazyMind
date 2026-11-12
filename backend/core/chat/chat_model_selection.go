@@ -22,6 +22,7 @@ import (
 	"lazymind/core/modelprovider"
 	"lazymind/core/store"
 	"lazymind/core/workflow"
+	"lazymind/core/workflow/displaystate"
 )
 
 const (
@@ -665,17 +666,38 @@ func conversationModelSwitchBlock(ctx context.Context, db *gorm.DB, userID, conv
 		return "workflow_running", nil
 	}
 
-	var activeTasks int64
+	var activeTasks []orm.TaskCenterTask
 	if err := db.WithContext(ctx).Model(&orm.TaskCenterTask{}).
 		Where(
 			"user_id = ? AND conversation_id = ? AND status IN ? AND task_type IN ?",
 			userID, conversationID, []string{"pending", "running"}, []string{"background_chat", "workflow_run"},
 		).
-		Count(&activeTasks).Error; err != nil {
+		Find(&activeTasks).Error; err != nil {
 		return "", err
 	}
-	if activeTasks > 0 {
-		return "background_task_running", nil
+	for _, task := range activeTasks {
+		if task.WorkflowSessionID == nil || strings.TrimSpace(*task.WorkflowSessionID) == "" {
+			return "background_task_running", nil
+		}
+		var session orm.WorkflowSession
+		err := db.WithContext(ctx).Where(
+			"id = ? AND conversation_id = ? AND create_user_id = ? AND dismissed = ? AND status = ? AND controller_host = ?",
+			*task.WorkflowSessionID, conversationID, userID, false, workflow.SessionStatusWaiting, "lazymind",
+		).Take(&session).Error
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return "background_task_running", nil
+		}
+		if err != nil {
+			return "", err
+		}
+		// Workflow task rows stay running while their execution is waiting for the user.
+		view, err := displaystate.Read(db.WithContext(ctx), session)
+		if err != nil {
+			return "", err
+		}
+		if view.Status != "waiting" {
+			return "background_task_running", nil
+		}
 	}
 	return "", nil
 }
@@ -965,6 +987,7 @@ func applyConversationChatModelConfig(ctx context.Context, db *gorm.DB, userID s
 		}
 	}
 	clearChatFallbackInput(body)
+	fallbackEnabled := modelconfig.ChatModelFallbackEnabled()
 	mode := chatModelModeFixed
 	legacy := conversation.ChatModelMode == nil || strings.TrimSpace(*conversation.ChatModelMode) == ""
 	if !legacy {
@@ -1005,6 +1028,9 @@ func applyConversationChatModelConfig(ctx context.Context, db *gorm.DB, userID s
 				return historyErr
 			}
 			unavailable := unavailableAutoChatModels(&conversation, histories)
+			if !fallbackEnabled {
+				unavailable = nil
+			}
 			usable := make([]availableChatModel, 0, len(models))
 			for _, candidate := range models {
 				key := chatModelIdentityKey(candidate.Source, candidate.ID)
@@ -1017,6 +1043,9 @@ func applyConversationChatModelConfig(ctx context.Context, db *gorm.DB, userID s
 					model = findAvailableChatModelBySource(usable, previous.ModelID, previous.Source)
 					reason = "session_sticky"
 					if model == nil {
+						if !fallbackEnabled {
+							return errChatModelUnavailable
+						}
 						reason = "model_unavailable"
 						prior := findAvailableChatModelBySource(models, previous.ModelID, previous.Source)
 						if !chatModelUsable(prior) || unavailable[chatModelIdentityKey(previous.Source, previous.ModelID)] {
@@ -1036,6 +1065,9 @@ func applyConversationChatModelConfig(ctx context.Context, db *gorm.DB, userID s
 						continue
 					}
 					model = findAvailableChatModelBySource(usable, previousRoute.ModelID, previousRoute.Source)
+					if model == nil && !fallbackEnabled {
+						return errChatModelUnavailable
+					}
 					if model != nil {
 						if reason == "initial_selection" {
 							reason = "session_sticky"
@@ -1106,7 +1138,7 @@ func applyConversationChatModelConfig(ctx context.Context, db *gorm.DB, userID s
 	if model != nil {
 		current = prepared.PrepareCandidate(ctx, *model)
 	}
-	if current == nil {
+	if current == nil && fallbackEnabled {
 		model, current = initialFallbackChatCandidate(prepared, original)
 	}
 	if current == nil {
@@ -1150,6 +1182,9 @@ func applyConversationChatModelConfig(ctx context.Context, db *gorm.DB, userID s
 		originalRoute = route
 	}
 	state := newChatFallbackState(prepared, current.CandidateID)
+	if !fallbackEnabled {
+		state.candidates = []modelconfig.ChatModelCandidate{*current}
+	}
 	if unavailableSticky != nil && modelconfig.ChatCandidateID(unavailableSticky.Source, unavailableSticky.ModelID) != current.CandidateID {
 		from := &chatModelRoute{Mode: mode, Strategy: route.Strategy, TaskClass: route.TaskClass, Reason: "model_unavailable", SelectionVersion: route.SelectionVersion, ModelID: unavailableSticky.ModelID, ProviderID: unavailableSticky.ProviderID, ProviderName: unavailableSticky.ProviderName, ModelName: unavailableSticky.ModelName, Source: unavailableSticky.Source, snapshot: unavailableSticky}
 		var window *int64
@@ -1305,11 +1340,12 @@ func buildChatLLMConfig(ctx context.Context, db *gorm.DB, model *availableChatMo
 	}
 	baseURL, apiKey := model.BaseURL, model.APIKey
 	var advanced credentialvault.ProviderRequestAdvanced
+	var requestProtocol string
 	var err error
 	if model.ProviderGroupID != "" {
 		var runtimeConfig modelprovider.RuntimeProviderConfiguration
 		runtimeConfig, err = modelprovider.ResolveProviderRuntimeConfiguration(ctx, db, model.ProviderGroupID)
-		baseURL, apiKey, advanced = runtimeConfig.BaseURL, runtimeConfig.APIKey, runtimeConfig.Advanced
+		baseURL, apiKey, advanced, requestProtocol = runtimeConfig.BaseURL, runtimeConfig.APIKey, runtimeConfig.Advanced, runtimeConfig.Protocol
 	} else {
 		apiKey, err = modelprovider.ResolveAPIKey(model.APIKey, model.APIKeyCiphertext)
 	}
@@ -1317,7 +1353,7 @@ func buildChatLLMConfig(ctx context.Context, db *gorm.DB, model *availableChatMo
 		return nil, errChatModelUnavailable
 	}
 	fixed := modelconfig.BuildLLMConfig([]modelconfig.SelectedRuntimeModel{{
-		ModelType: "llm", TechnicalModelType: model.ModelType, Vision: model.Vision, ModelSettings: model.ModelSettings, RequestAdvanced: advanced, ProviderName: model.ProviderName, ModelName: model.ModelName,
+		ModelType: "llm", TechnicalModelType: model.ModelType, Vision: model.Vision, ModelSettings: model.ModelSettings, RequestAdvanced: advanced, RequestProtocol: requestProtocol, ProviderName: model.ProviderName, ModelName: model.ModelName,
 		BaseURL: baseURL, APIKey: apiKey, SkipAuth: strings.TrimSpace(apiKey) == "" && strings.TrimSpace(baseURL) != "", MaxInputTokens: model.MaxInputTokens, InputTokenLimit: model.InputTokenLimit, MaxOutputTokens: model.MaxOutputTokens,
 	}})
 	fixedLLM, _ := fixed["llm"]

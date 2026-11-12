@@ -77,12 +77,12 @@ describe("citation target metadata", () => {
     expect(actions).toEqual(before);
   });
 
-  it("ignores nonnumeric keys and excludes invalid geometry without losing reference metadata", () => {
+  it("groups references without numeric keys by ID and excludes invalid geometry without losing metadata", () => {
     const action: PdfReferenceAction = { referenceId: "r12", referenceKey: "12", rawText: "Paper", kind: "download" };
     const targets = groupPdfCitationTargets([
-      { ...action, referenceKey: "author2020" },
-      { ...action, referenceKey: "" },
-      { ...action, referenceKey: undefined },
+      { ...action, referenceId: "author-2020", referenceKey: "author2020" },
+      { ...action, referenceId: "author-2020", referenceKey: "" },
+      { ...action, referenceId: "author-2020", referenceKey: undefined },
       { ...action, page: 0, bbox: [20, 60, 100, 80] },
       { ...action, page: 1.5, bbox: [20, 60, 100, 80] },
       { ...action, page: 8, bbox: [100, 60, 20, 80] },
@@ -90,7 +90,10 @@ describe("citation target metadata", () => {
       { ...action, page: 8, bbox: [20, 60, 100, Number.NaN] },
       { ...action, page: 8 },
     ]);
-    expect(targets).toEqual([{ ...action, fallbackPage: 8, regions: [] }]);
+    expect(targets).toEqual([
+      { ...action, referenceId: "author-2020", referenceKey: "ref:author-2020", regions: [] },
+      { ...action, fallbackPage: 8, regions: [] },
+    ]);
   });
 
   it("keeps the first valid page even when its crop is absent", () => {

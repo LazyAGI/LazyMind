@@ -7,7 +7,11 @@
 // p:embeddedFontLst in ppt/presentation.xml.
 
 import JSZip from 'jszip';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+import { fileURLToPath } from 'node:url';
 import { readFile, writeFile } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
 
 import { parseFontFamily } from './style_parser.mjs';
 
@@ -389,7 +393,7 @@ function nextFontPartNumber(zip) {
 }
 
 /** Inject already-downloaded TTF/OTF faces into a PPTX package. */
-export async function embedFontFacesInPptx(pptxPath, faces) {
+export async function embedFontFacesInPptx(pptxPath, faces, { strict = false } = {}) {
   if (!faces?.length) return [];
   const zip = await JSZip.loadAsync(await readFile(pptxPath));
   const presentationFile = zip.file('ppt/presentation.xml');
@@ -433,6 +437,7 @@ export async function embedFontFacesInPptx(pptxPath, faces) {
       familyEntries.get(key).variants.set(face.variant || 'regular', relId);
       embedded.push(`${face.family}:${face.variant || 'regular'}`);
     } catch (error) {
+      if (strict) throw error;
       process.stderr.write(`[fonts] Failed to embed ${face.family}: ${error.message}\n`);
     }
   }
@@ -473,15 +478,105 @@ export async function embedFontFacesInPptx(pptxPath, faces) {
   return embedded;
 }
 
+/** Legacy HTML carries full bytes; subset HTML resolves the original font by verified hash. */
+export function portableFontFaces(html, localFaces = []) {
+  const faces = [];
+  const styles = String(html).matchAll(/<style\b[^>]*data-lazymind-font-required="true"[^>]*>([\s\S]*?)<\/style>/gi);
+  for (const [, css] of styles) {
+    const matches = [...css.matchAll(/\/\*lazymind-font:([A-Za-z0-9+/=]+)\*\/@font-face\{[^}]*src:url\(data:font\/(ttf|woff);base64,([A-Za-z0-9+/=]+)\)\}/g)];
+    if (!matches.length || matches.length !== [...css.matchAll(/lazymind-font:/g)].length
+        || matches.length !== [...css.matchAll(/@font-face\b/gi)].length) {
+      throw new Error('Required portable font package is empty or invalid');
+    }
+    for (const [, token, format, encoded] of matches) {
+      const record = JSON.parse(Buffer.from(token, 'base64').toString('utf8'));
+      const data = format === 'woff'
+        ? localFaces.find(face => face.id === record.sha256
+          && normalizeFamily(face.family) === normalizeFamily(record.family)
+          && face.weight === record.weight && face.style === record.style)?.data
+        : Buffer.from(encoded, 'base64');
+      if (!data) throw new Error(`Original font resource unavailable for ${record.family}; import it before exporting`);
+      if (!record.family || !Number.isFinite(record.weight) || !['normal', 'italic'].includes(record.style)
+          || data.length > MAX_FONT_BYTES || createHash('sha256').update(data).digest('hex') !== record.sha256) {
+        throw new Error('Required portable font resource is missing or corrupted');
+      }
+      const metadata = parseSfntMetadata(data);
+      if ((metadata.fsType & (2 | 512)) || ((metadata.fsType & 4) && !(metadata.fsType & 8))) {
+        throw new Error(`Font ${record.family} does not permit editable embedding`);
+      }
+      const variant = record.style === 'italic'
+        ? (record.weight >= 600 ? 'boldItalic' : 'italic') : (record.weight >= 600 ? 'bold' : 'regular');
+      faces.push({ ...record, data, metadata, variant });
+    }
+  }
+  return faces;
+}
+
+export async function verifyEmbeddedFaces(pptxPath, faces) {
+  const zip = await JSZip.loadAsync(await readFile(pptxPath));
+  const presentation = await zip.file('ppt/presentation.xml')?.async('string');
+  const rels = await zip.file('ppt/_rels/presentation.xml.rels')?.async('string');
+  for (const face of faces) {
+    const entry = [...String(presentation).matchAll(/<p:embeddedFont\b[^>]*>([\s\S]*?)<\/p:embeddedFont>/g)]
+      .find(([, body]) => body.includes(`typeface="${xmlEscape(face.family)}"`));
+    const rid = entry?.[1].match(new RegExp(`<p:${face.variant}\\b[^>]*r:id="([^"]+)"`))?.[1];
+    const relation = [...String(rels).matchAll(/<Relationship\b[^>]*\/>/g)]
+      .map(match => match[0]).find(tag => tag.includes(`Id="${rid}"`) && tag.includes(`Type="${FONT_RELATIONSHIP}"`));
+    const target = relation?.match(/Target="([^"]+)"/)?.[1];
+    const part = target && zip.file(`ppt/${target}`);
+    if (!rid || !part || !(await part.async('nodebuffer')).equals(createEot(face.data).data)) {
+      throw new Error(`Required font was not embedded: ${face.family} (${face.variant})`);
+    }
+  }
+}
+
 /** Best-effort end-to-end web-font embedding for an exported deck. */
 export async function embedGoogleFontsFromPages(pptxPath, pages, options = {}) {
   const { localFontFaces } = await import('./local_fonts.mjs');
-  const local = selectUsedFaces(await localFontFaces(), collectUsedFontWeights(pages));
-  const families = new Set(local.map(face => normalizeFamily(face.family)));
+  const localFaces = await localFontFaces();
+  let required = [];
+  try {
+    for (const page of pages || []) {
+      const html = page.path ? await readFile(page.path, 'utf8').catch(error => {
+        if (error.code === 'ENOENT') return ''; // Synthetic IR callers have no source HTML.
+        throw error;
+      }) : '';
+      const packaged = portableFontFaces(html, localFaces);
+      for (const face of packaged) {
+        const previous = required.find(f => normalizeFamily(f.family) === normalizeFamily(face.family) && f.variant === face.variant);
+        if (previous && previous.sha256 !== face.sha256) throw new Error(`Conflicting font files for ${face.family}`);
+        if (!previous) required.push(face);
+      }
+    }
+    if (required.reduce((size, face) => size + face.data.length, 0) > MAX_TOTAL_FONT_BYTES) {
+      throw new Error('Required embedded fonts exceed the 64 MiB export limit');
+    }
+    if (required.length) {
+      await embedFontFacesInPptx(pptxPath, required, { strict: true });
+      await verifyEmbeddedFaces(pptxPath, required);
+    }
+  } catch (error) {
+    error.fontPortability = true;
+    throw error;
+  }
+  const local = selectUsedFaces(localFaces, collectUsedFontWeights(pages));
+  const requiredFamilies = new Set(required.map(face => normalizeFamily(face.family)));
+  const families = new Set([...requiredFamilies, ...local.map(face => normalizeFamily(face.family))]);
   const remote = await collectGoogleFontFaces(pages, options);
-  const faces = [...local, ...remote.filter(face => !families.has(normalizeFamily(face.family)))];
-  if (!faces.length) return [];
-  const embedded = await embedFontFacesInPptx(pptxPath, faces);
+  const faces = [...local.filter(face => !requiredFamilies.has(normalizeFamily(face.family))),
+    ...remote.filter(face => !families.has(normalizeFamily(face.family)))];
+  const embedded = [...required.map(face => `${face.family}:${face.variant}`),
+    ...await embedFontFacesInPptx(pptxPath, faces)];
+  if (embedded.length) {
+    try {
+      await promisify(execFile)(process.env.LAZYMIND_FONT_SUBSET_PYTHON || 'python3',
+        [fileURLToPath(new URL('../subset_fonts.py', import.meta.url)), pptxPath],
+        { timeout: 120_000, maxBuffer: 1024 * 1024 });
+    } catch (error) {
+      error.fontPortability = true;
+      throw error;
+    }
+  }
   if (embedded.length) process.stderr.write(`[fonts] Embedded ${embedded.join(', ')}\n`);
   return embedded;
 }

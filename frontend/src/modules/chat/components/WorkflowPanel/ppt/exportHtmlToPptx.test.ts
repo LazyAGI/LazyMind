@@ -4,10 +4,36 @@ import {
   applyHtmlPreviewCompatibilityFallbacks,
   htmlForStaticPreview,
   htmlForRasterCapture,
+  inlineSvgStylesForRasterCapture,
   waitForAnimationFrames,
 } from './exportHtmlToPptx';
 
 describe('PPT HTML preview compatibility', () => {
+  it('keeps class-styled SVG text and shapes styled after their document CSS is removed', () => {
+    document.body.innerHTML = `<style>
+      .node { fill: rgb(7, 13, 24); stroke: rgb(45, 212, 191); }
+      .label { fill: rgb(230, 237, 247); font-size: 11px; font-family: Arial; font-weight: 700; }
+    </style><svg><rect class="node"/><text class="label">M 维 = 16</text></svg>`;
+    inlineSvgStylesForRasterCapture(document);
+    document.querySelector('style')!.remove();
+    const shape = document.querySelector<SVGElement>('rect')!;
+    const label = document.querySelector<SVGElement>('text')!;
+    expect(shape.style.fill).toBe('rgb(7, 13, 24)');
+    expect(shape.style.stroke).toBe('rgb(45, 212, 191)');
+    expect(label.style.fill).toBe('rgb(230, 237, 247)');
+    expect(label.style.fontSize).toBe('11px');
+    expect(label.style.fontFamily).toBe('Arial');
+    expect(label.textContent).toBe('M 维 = 16');
+    document.body.innerHTML = '';
+  });
+
+  it('keeps authored font families and image fit in raster preparation', () => {
+    const prepared = htmlForRasterCapture('<html><head><style>body{font-family:Georgia}img{object-fit:contain}</style></head><body></body></html>');
+    expect(prepared).toContain('font-family:Georgia');
+    expect(prepared).not.toContain('font-family:-apple-system');
+    expect(prepared).not.toContain('img{object-fit:cover;}');
+  });
+
   it('injects stable compositing fallbacks into preview HTML once', () => {
     const html = '<!doctype html><html><head></head><body><div class="wrapper"></div></body></html>';
     const once = htmlForStaticPreview(html);

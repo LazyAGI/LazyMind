@@ -140,9 +140,8 @@ def test_empty_mapping_bug_gets_one_source_grounded_repair_without_changing_data
         columns=[dict(table_id='data', column='cohort')])])
 '''
     original = copy.deepcopy(inputs)
-    initial = Mock(return_value={'code': source})
-    repair = Mock(return_value=dict(replacements=[dict(
-        start_line=2, end_line=2, code="    question_by_cohort = {'A': 'q1'}")]))
+    calls = Mock(side_effect=[dict(code=source), dict(replacements=[dict(
+        start_line=2, end_line=2, code="    question_by_cohort = {'A': 'q1'}")])])
     executions = []
 
     def execute(payload):
@@ -151,18 +150,16 @@ def test_empty_mapping_bug_gets_one_source_grounded_repair_without_changing_data
         exec(payload['code'], namespace)
         return dict(results=namespace['analyze'](payload['tables'], payload['plan'], None), versions={})
 
-    monkeypatch.setattr(pipeline.model, 'call_code_model', initial)
-    monkeypatch.setattr(pipeline.model, 'call_model', repair)
+    monkeypatch.setattr(pipeline.model, 'call_code_model', calls)
     monkeypatch.setattr(pipeline.executor, 'execute', execute)
     code, history, rendered, analysis = pipeline.execute_analysis(inputs, plan, attempts=5)
     assert len(executions) == 2 and len(history) == 2
     assert history[0]['outcome'] == 'failed' and history[1]['outcome'] == 'passed'
     assert "{'A': 'q1'}" in code and analysis['findings'][0]['value'] == 1.
     assert analysis['targets'][0]['status'] == 'answered'
-    assert 'ALL_UNAVAILABLE_SELF_CHECK' in str(repair.call_args)
+    assert 'ALL_UNAVAILABLE_SELF_CHECK' in str(calls.call_args)
     assert inputs == original and executions[0]['tables'] == executions[1]['tables']
-    initial.assert_called_once()
-    repair.assert_called_once()
+    assert calls.call_count == 2
 
 
 def test_all_unavailable_self_check_rejects_no_op_without_five_retries(case, monkeypatch):
@@ -172,12 +169,10 @@ def test_all_unavailable_self_check_rejects_no_op_without_five_retries(case, mon
     results['unavailable_questions'].append(dict(
         question_id='q1', reason='No requested population in these observations.',
         columns=[dict(table_id='data', column='cohort')]))
-    initial = Mock(return_value={'code': 'def analyze(tables, plan, rng): return {}'})
-    repair = Mock(return_value=dict(replacements=[dict(
-        start_line=1, end_line=1, code='def analyze(tables, plan, rng): return {}')]))
+    calls = Mock(side_effect=[dict(code='def analyze(tables, plan, rng): return {}'), dict(replacements=[dict(
+        start_line=1, end_line=1, code='def analyze(tables, plan, rng): return {}')])])
     execute = Mock(return_value=dict(results=results))
-    monkeypatch.setattr(pipeline.model, 'call_code_model', initial)
-    monkeypatch.setattr(pipeline.model, 'call_model', repair)
+    monkeypatch.setattr(pipeline.model, 'call_code_model', calls)
     monkeypatch.setattr(pipeline.executor, 'execute', execute)
     with pytest.raises(ContractError) as failure:
         pipeline.execute_analysis(inputs, plan, attempts=5)
@@ -185,8 +180,7 @@ def test_all_unavailable_self_check_rejects_no_op_without_five_retries(case, mon
     assert 'q1:' in str(failure.value) and 'q2:' in str(failure.value)
     assert '未改变源码' in str(failure.value)
     execute.assert_called_once()
-    initial.assert_called_once()
-    repair.assert_called_once()
+    assert calls.call_count == 2
 
 
 def test_all_unavailable_respects_one_attempt_budget(case, monkeypatch):

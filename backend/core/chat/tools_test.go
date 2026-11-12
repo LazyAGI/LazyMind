@@ -45,26 +45,53 @@ func startChatToolsTestServer(t *testing.T, handler http.Handler) string {
 	return fmt.Sprintf("http://%s", listener.Addr().String())
 }
 
-func TestApplyMCPRuntimeConfigRegistersVocabularyTools(t *testing.T) {
+func TestVocabularyIsRegisteredAsSystemTools(t *testing.T) {
 	db := newToolsTestDB(t)
 	t.Setenv("LAZYMIND_VOCABULARY_ENABLED", "true")
-	t.Setenv("LAZYMIND_CORE_MCP_URL", "http://core.test/mcp/capabilities/v1")
+	t.Setenv("LAZYMIND_BROWSER_ENABLED", "false")
+	t.Setenv("LAZYMIND_KNOWLEDGE_MANAGEMENT_ENABLED", "false")
 	body := map[string]any{}
-	applyMCPRuntimeConfig(context.Background(), db.DB, "u1", "Bearer user-token", body)
-	configs, ok := body["mcp_config"].([]any)
+	applyMCPRuntimeConfig(context.Background(), db.DB, "u1", body)
+	if _, ok := body["mcp_config"]; ok {
+		t.Fatal("built-in vocabulary leaked into personal MCP connections")
+	}
+	if err := applySystemMCPConfig("u1", body); err != nil {
+		t.Fatal(err)
+	}
+	configs, ok := body["system_mcp_config"].([]any)
 	if !ok || len(configs) != 1 {
-		t.Fatalf("mcp_config = %#v", body["mcp_config"])
+		t.Fatalf("system_mcp_config = %#v", body["system_mcp_config"])
 	}
 	config, _ := configs[0].(map[string]any)
-	if config["url"] != "http://core.test/mcp/capabilities/v1" {
-		t.Fatalf("vocabulary MCP URL = %#v", config["url"])
+	if config["id"] != "lazymind-vocabulary" || config["url"] != nil || config["headers"] != nil {
+		t.Fatalf("unexpected vocabulary connection: %#v", config)
 	}
 	if config["transport"] != "streamable-http" {
 		t.Fatalf("vocabulary MCP transport = %#v", config["transport"])
 	}
-	headers, _ := config["headers"].(map[string]any)
-	if headers["Authorization"] != "Bearer user-token" {
-		t.Fatalf("vocabulary MCP headers = %#v", headers)
+	tools := config["allowed_tools"].([]string)
+	if strings.Join(tools, ",") != "vocabulary.wordbook.list,vocabulary.word.list" {
+		t.Fatalf("vocabulary tools = %#v", tools)
+	}
+	for _, disabled := range []bool{true, false} {
+		body["disabled_tools"] = []string{}
+		if disabled {
+			body["disabled_tools"] = []string{"vocabulary"}
+		}
+		if err := applySystemMCPConfig("u1", body); err != nil {
+			t.Fatal(err)
+		}
+		_, present := body["system_mcp_config"]
+		if present == disabled {
+			t.Fatalf("disabled=%v config=%v", disabled, body)
+		}
+	}
+	t.Setenv("LAZYMIND_VOCABULARY_ENABLED", "false")
+	if err := applySystemMCPConfig("u1", body); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := body["system_mcp_config"]; !ok {
+		t.Fatal("legacy deployment flag must not hide vocabulary tools")
 	}
 }
 
@@ -544,7 +571,7 @@ func TestChatConversationsMergesPersistedDisabledTools(t *testing.T) {
 
 func TestApplyMCPRuntimeConfigDiscardsUntrustedIdentityAndConfig(t *testing.T) {
 	body := map[string]any{"user_id": "attacker-target", "mcp_config": []any{map[string]any{"oauth": map[string]any{"user_id": "attacker-target"}}}}
-	applyMCPRuntimeConfig(context.Background(), nil, "authenticated-owner", "", body)
+	applyMCPRuntimeConfig(context.Background(), nil, "authenticated-owner", body)
 	if body["user_id"] != "authenticated-owner" {
 		t.Fatal("client user identity survived")
 	}

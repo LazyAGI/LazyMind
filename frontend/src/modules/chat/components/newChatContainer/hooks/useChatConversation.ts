@@ -1824,17 +1824,9 @@ export function useChatConversation({
       runtimeWaitInProgressRef.current ||
       loading ||
       isModelSelectionSaving?.() ||
-      isWorkspacePermissionSaving?.() ||
-      !normalizedText
+      isWorkspacePermissionSaving?.()
     ) {
       return false;
-    }
-    setCreationError(undefined);
-    pendingStops.current.delete(currentConversationIdRef.current);
-    if (!currentConversationIdRef.current) {
-      setDraftWorkspace(params.workspace_id
-        ? { workspace_id: params.workspace_id, workspace_permission_mode: params.workspace_permission_mode, project_name: params.project_name }
-        : undefined);
     }
     const normalizedCiteMessages =
       paramsCiteMessages
@@ -1848,12 +1840,6 @@ export function useChatConversation({
     );
 
     const submittedFileList = params.fileList ?? fileList;
-    if (params.fileList) {
-      setFileList(submittedFileList);
-    }
-    if (params?.fileListRef) {
-      fileRef.current = params.fileListRef.current;
-    }
 
     const tempGroup =
       Object.groupBy(submittedFileList, (item) => {
@@ -1869,7 +1855,7 @@ export function useChatConversation({
       }) ?? {};
 
     const inputs = [
-      { input_type: "text", text: textWithCitation },
+      ...(textWithCitation ? [{ input_type: "text", text: textWithCitation }] : []),
       ...getFileUrls(tempFileGroup?.image, tempGroup?.image).map((image) => ({
         input_type: "image",
         uri: image.uri || "",
@@ -1886,6 +1872,16 @@ export function useChatConversation({
     for (const file of params.referencedFiles || []) {
       if (file.uri && !inputs.some(input => 'uri' in input && input.uri === file.uri)) inputs.push(file);
     }
+    if (!normalizedText && !inputs.some(input => input.input_type === 'image' && 'uri' in input && input.uri)) return false;
+    setCreationError(undefined);
+    pendingStops.current.delete(currentConversationIdRef.current);
+    if (!currentConversationIdRef.current) {
+      setDraftWorkspace(params.workspace_id
+        ? { workspace_id: params.workspace_id, workspace_permission_mode: params.workspace_permission_mode, project_name: params.project_name }
+        : undefined);
+    }
+    if (params.fileList) setFileList(submittedFileList);
+    if (params.fileListRef) fileRef.current = params.fileListRef.current;
     if (params.featuredSelection) useFeaturedSelectionStore.getState().setSelection(currentConversationIdRef.current || 'new', params.featuredSelection);
 
     if (clearInput) {
@@ -2044,6 +2040,7 @@ export function useChatConversation({
           ? { thinking_depth: params.thinking_depth }
           : {}),
         ...(params.mentions?.length ? { mentions: params.mentions } : {}),
+        ...(params.document_context ? { document_context: params.document_context } : {}),
         ...(paramsCiteHistoryIds?.length
           ? {
               cite_history_ids: paramsCiteHistoryIds.filter(

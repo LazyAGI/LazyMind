@@ -74,3 +74,19 @@ func TestVisualContextFollowsProseAcrossPageBreaks(t *testing.T) {
 		t.Fatalf("incorrect nearby context: %v", ids)
 	}
 }
+
+func TestVisualTableEvidencePreservesMergedCellsOverFlattenedText(t *testing.T) {
+	block := pdfir.Block{ID: "table", Type: "table", Text: "flattened OCR", Table: &pdfir.Table{
+		Captions: []string{"Results"}, Footnotes: []string{"Same training run"},
+		Rows: []pdfir.TableRow{{Cells: []pdfir.TableCell{
+			{Text: "Model", RowSpan: 2, ColSpan: 1, Header: true},
+			{Text: "Score", RowSpan: 1, ColSpan: 2, Header: true},
+		}}, {Cells: []pdfir.TableCell{{Text: "A", RowSpan: 1, ColSpan: 1}, {Text: "B", RowSpan: 1, ColSpan: 1}}}},
+	}}
+	text := paperBlockText(block)
+	for _, want := range []string{"Results", "rowspan=2", "colspan=2", "Model", "Score", "A | B", "Same training run"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("table evidence missing %q: %s", want, text)
+		}
+	}
+}

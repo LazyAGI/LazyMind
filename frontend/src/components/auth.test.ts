@@ -189,3 +189,15 @@ it('starts a new request generation when local recovery returns another tenant',
   expect(AgentAppsAuth.getSessionIdentity()).not.toBe(identity);
   expect(AgentAppsAuth.getUserInfo()).toMatchObject({ tenantId: 'other-tenant', token: 'other-token' });
 });
+
+it('ignores expiration of credentials superseded by same-account recovery', async () => {
+  AgentAppsAuth.setUserInfo(user('A'));
+  const old = AgentAppsAuth.getSessionSnapshot();
+  AgentAppsAuth.replaceLocalSession({ ...user('A'), token: 'renewed', refreshToken: 'renewed-refresh' });
+  const logout = vi.spyOn(AgentAppsAuth, 'logout').mockResolvedValue();
+  try {
+    await AgentAppsAuth.expireSession(old);
+    expect(logout).not.toHaveBeenCalled();
+    expect(AgentAppsAuth.getAccessToken()).toBe('renewed');
+  } finally { logout.mockRestore(); }
+});

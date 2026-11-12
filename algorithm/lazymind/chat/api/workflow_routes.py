@@ -125,10 +125,13 @@ class TaskCancelRequest(BaseModel):
     task_id: Optional[str] = None
     conversation_id: Optional[str] = None
     history_id: Optional[str] = None
+    attempt_id: Optional[str] = None
+    lease_token: Optional[str] = None
 
 
 class TaskCancelResponse(BaseModel):
     ok: bool
+    executor_stopped: Optional[bool] = None
 
 
 class WorkflowDriverRequest(BaseModel):
@@ -158,7 +161,7 @@ class WriterDocumentConvertRequest(BaseModel):
     target_format: Literal['markdown', 'lmd', 'latex']
     content: str
     document_id: str = 'writer-document'
-    language: Literal['zh-CN', 'en-US'] = 'zh-CN'
+    language: Literal['zh-CN', 'en-US'] | None = None
     materialized_numbering: bool = True
 
 
@@ -432,11 +435,15 @@ def invoke_workflow_action(request: WorkflowActionInvokeRequest) -> Dict[str, An
         ) from exc
     except ValueError as exc:
         code = str(getattr(exc, 'error_code', 'WORKFLOW_ACTION_INVALID'))
+        logger.warning('Workflow artifact action rejected: workflow=%s action=%s phase=%s code=%s reason=%s',
+                       request.workflow_id, request.action, request.phase, code, str(exc))
         detail: Dict[str, Any] = {'code': code, 'message': str(exc)}
         detail.update(getattr(exc, 'details', {}) or {})
         status = 409 if code in {'SELECTION_AMBIGUOUS', 'SELECTION_STALE'} else 422
         raise HTTPException(status_code=status, detail=detail) from exc
     except TypeError as exc:
+        logger.warning('Workflow artifact action arguments rejected: workflow=%s action=%s phase=%s reason=%s',
+                       request.workflow_id, request.action, request.phase, str(exc))
         raise HTTPException(
             status_code=422,
             detail={'code': 'WORKFLOW_ACTION_INVALID', 'message': str(exc)},
@@ -476,7 +483,8 @@ async def workflow_driver(req: WorkflowDriverRequest) -> WorkflowDriverResponse:
     return WorkflowDriverResponse(message=result['message'])
 
 
-@router.post('/api/workflow/task-cancel', response_model=TaskCancelResponse, summary='Cancel a running SubAgent task')
+@router.post('/api/workflow/task-cancel', response_model=TaskCancelResponse, response_model_exclude_none=True,
+             summary='Cancel a running SubAgent task')
 async def task_cancel(req: TaskCancelRequest) -> TaskCancelResponse:
     """Enqueue a cancel signal for a running SubAgent ReAct loop.
 
@@ -534,6 +542,13 @@ async def task_cancel(req: TaskCancelRequest) -> TaskCancelResponse:
         if req.conversation_id:
             steering_registry.stop_accepting_for_session(req.conversation_id, sid)
         request_cancel(sid)
+        if req.task_id and req.attempt_id and req.lease_token:
+            # Only the parent process owns the Workflow Executor, including in
+            # router mode. Model workers cannot confirm this attempt's exit.
+            from lazymind.chat.workflow.remote_executor import workflow_attempt_is_running
+
+            return TaskCancelResponse(ok=True, executor_stopped=not workflow_attempt_is_running(
+                req.attempt_id, req.lease_token))
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
     return TaskCancelResponse(ok=True)
@@ -607,6 +622,7 @@ async def export_ppt_from_html(req: PptExportRequest):
         if os.name == 'nt':
             options['creationflags'] = subprocess.CREATE_NO_WINDOW
         export_env = os.environ.copy()
+        export_env['LAZYMIND_FONT_SUBSET_PYTHON'] = sys.executable
         if export_env.get('LAZYMIND_NODE_RUN_AS_NODE', '').strip().lower() == 'true':
             export_env['ELECTRON_RUN_AS_NODE'] = '1'
         process = await asyncio.create_subprocess_exec(

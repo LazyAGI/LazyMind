@@ -222,8 +222,11 @@ async function splitPythonComponents(runtimeRoot) {
     }
     if (process.env.LAZYMIND_DESKTOP_DEFER_PYTHON !== "false") {
       // Match CI: pair components with the current resolved base by default.
-      // Published reuse is explicit; Developer ID must use this build's signatures.
-      const rebuild = macSigningMode === "developer-id" || process.env.LAZYMIND_DESKTOP_REBUILD_PYTHON_COMPONENTS !== "false";
+      // Deferred clustering and Developer ID builds require fresh components.
+      const deferCluster = process.env.LAZYMIND_DESKTOP_DEFER_CLUSTER !== "false";
+      const rebuild = macSigningMode === "developer-id"
+        || process.env.LAZYMIND_DESKTOP_REBUILD_PYTHON_COMPONENTS !== "false"
+        || deferCluster;
       const published = componentArch === "arm64" && !rebuild;
       const componentArgs = [
         path.resolve(__dirname, published ? "../scripts/stage-published-python-components.py" : "../scripts/build-python-components.py"),
@@ -235,6 +238,7 @@ async function splitPythonComponents(runtimeRoot) {
         "--cache", path.resolve(__dirname, "../cache/published-python/darwin-arm64"),
       );
       if (rebuild) componentArgs.push("--slim-providers");
+      if (deferCluster) componentArgs.push("--defer-cluster");
       const { stdout } = await execFile(python, componentArgs, { maxBuffer: 4 * 1024 * 1024 });
       console.log(stdout);
       if (rebuild) {

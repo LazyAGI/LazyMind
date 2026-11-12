@@ -95,6 +95,26 @@ if ($scenario -in @('closed','tray-closed','close-to-tray')) {
 	}
 }
 
+func TestWindowsDesktopClassifiesProcessInspectionFailures(t *testing.T) {
+	for _, scenario := range []string{"cim-error", "hidden-command", "process-error"} {
+		t.Run(scenario, func(t *testing.T) {
+			runDesktopPowerShellTest(t, `$scenario = '`+scenario+`'
+$env:LAZYMIND_CODEX_DESKTOP = 'C:\Codex\Codex.exe'
+$env:LAZYMIND_CODEX_CDP_PORT = '9334'
+function Get-CimInstance {
+    if ($scenario -eq 'cim-error') { throw 'inspection unavailable' }
+    [pscustomobject]@{ExecutablePath=$env:LAZYMIND_CODEX_DESKTOP; CommandLine=$(if ($scenario -eq 'hidden-command') { '' } else { 'Codex.exe' }); ProcessId=1}
+}
+function Get-Process { throw 'process access denied' }
+function Start-Process { throw 'must not launch after inspection failure' }
+$caught = ''
+try { Start-CodexDesktop } catch { $caught = $_.Exception.Message }
+if ($caught -notmatch 'LAZYMIND_AGENT_process_inspection_failed:') { throw "lost inspection category: $caught" }
+`)
+		})
+	}
+}
+
 func runDesktopPowerShellTest(t *testing.T, body string) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)

@@ -1,7 +1,7 @@
 import type { TabDef, WorkflowSession } from '@/modules/chat/store/workflowPanel';
 import { resolvePendingApprovalStep } from './workflowApproval';
 
-export type WorkflowContinueAction = { kind: 'approval' | 'resume' | 'completed'; stepId: string };
+export type WorkflowContinueAction = { kind: 'approval' | 'resume' | 'completed' | 'regenerate'; stepId: string };
 
 /** Waiting alone is not a checkpoint: automatic dispatch also passes through it. */
 export function resolveWorkflowContinueAction(
@@ -9,23 +9,29 @@ export function resolveWorkflowContinueAction(
   displayStatus: string,
   activeTab?: TabDef,
 ): WorkflowContinueAction | undefined {
-  if (displayStatus === 'active') return undefined;
+  if (displayStatus === 'active' || displayStatus === 'waiting_input') return undefined;
   const completedStep = resolveCompletedContinueStep(session, activeTab);
   if (completedStep) return { kind: 'completed', stepId: completedStep };
   const approvalStep = resolvePendingApprovalStep(session, displayStatus);
   if (approvalStep) return { kind: 'approval', stepId: approvalStep };
-  if (!['waiting', 'stopped'].includes(displayStatus) || session.projection?.completed) return undefined;
   const nodes = session.projection?.nodes ?? {};
   if (Object.values(nodes).some((node) => node.validity !== 'stale'
     && ['pending', 'queued', 'claimed', 'running', 'failed'].includes(node.execution))) return undefined;
+  if (session.projection?.display?.reason === 'inputs_changed') {
+    const stepId = session.projection.ready?.[0];
+    return stepId ? { kind: 'regenerate', stepId } : undefined;
+  }
   const interruptedStep = (session.projection?.current ?? []).find((id) =>
     nodes[id]?.validity !== 'stale' && ['interrupted', 'cancelled', 'canceled'].includes(nodes[id]?.execution),
   );
   if (displayStatus === 'stopped') {
-    // A confirmed pause can occur before dispatch or between successful steps.
-    const stepId = interruptedStep ?? session.projection?.ready?.[0];
-    if (stepId) return { kind: 'resume', stepId };
+    // Resume releases the pause first. A suspended review must then be approved
+    // separately, including at the final checkpoint with no ready successor.
+    const stepId = session.projection?.display?.approval_step_id || interruptedStep
+      || session.projection?.ready?.[0] || session.current_step_id;
+    return stepId ? { kind: 'resume', stepId } : undefined;
   }
+  if (displayStatus !== 'waiting' || session.projection?.completed) return undefined;
   return interruptedStep ? { kind: 'resume', stepId: interruptedStep } : undefined;
 }
 

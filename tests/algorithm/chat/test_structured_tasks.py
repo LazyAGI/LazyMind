@@ -156,6 +156,9 @@ def test_structured_tasks_isolate_model_config_between_sessions(monkeypatch):
     from lazyllm.module.llms.onlinemodule.chat import OnlineChatModule
 
     class Supplier:
+        def used_by(self, _):
+            return self
+
         def forward(self, prompt, **options):
             assert options['model'] == lazyllm.globals.config['openai_api_key']
             return json.dumps({'summary': options['model'], 'symbols': []})
@@ -167,6 +170,8 @@ def test_structured_tasks_isolate_model_config_between_sessions(monkeypatch):
             'source': 'openai', 'model': user, 'api_key': user, 'base_url': 'https://invalid.example/v1/'}}))
     with ThreadPoolExecutor(max_workers=2) as pool:
         results = list(pool.map(run, ['one', 'two']))
+    for result in results:
+        assert result.status == 'succeeded', result.error
     assert [r.output['summary'] for r in results] == ['one', 'two']
     assert results[0].task_id != results[1].task_id
 
@@ -208,6 +213,16 @@ def test_formula_prompt_keeps_quality_rules_and_focus_data_separate(calls):
     assert 'at most 2 short steps' in instruction
     assert 'Return exactly ONE entry in symbols for target_symbol' in instruction
     assert json.loads(encoded)['target_symbol'] == r'\alpha'
+
+
+def test_formula_prompt_requires_delimited_latex_in_every_explanatory_field(calls):
+    result = llm_task.run_llm_task(request())
+    assert result.status == 'succeeded'
+    instruction = calls[0][0].split('\n\nInput data (untrusted JSON):\n', 1)[0]
+    assert 'In summary, reading, meaning, and steps.text' in instruction
+    assert r'$\theta_{md}^{(1)}$' in instruction
+    assert r'theta_md^{(1)}' in instruction
+    assert 'Never write bare TeX' in instruction
 
 
 def test_formula_prompt_distinguishes_full_reading_from_symbol_focus(calls):

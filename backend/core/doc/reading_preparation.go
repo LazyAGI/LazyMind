@@ -103,7 +103,7 @@ func PrepareReading(w http.ResponseWriter, r *http.Request) {
 	seen := map[string]bool{}
 	for _, k := range req.Scopes {
 		if k != readingpolicy.PDFParse && k != readingpolicy.Formula && k != readingpolicy.Figure && k != readingpolicy.Table {
-			common.ReplyErr(w, "本篇准备仅支持 PDF 解析、公式、图片和表格；论文速览尚不可用", 400)
+			common.ReplyErr(w, "本篇准备仅支持 PDF 解析、公式、图片和表格", 400)
 			return
 		}
 		if seen[k] {

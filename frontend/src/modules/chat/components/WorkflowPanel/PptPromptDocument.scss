@@ -1,0 +1,60 @@
+.ppt-prompt-document {
+  color: #1a1d21;
+  min-width: 0;
+  background: #fff;
+  border: 1px solid #e3e8ef;
+  border-radius: 10px;
+  overflow: hidden;
+
+  &__toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 12px;
+    padding: 14px 20px;
+    border-bottom: 1px solid #e3e8ef;
+  }
+  &__actions { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
+  button {
+    border: 0;
+    background: transparent;
+    color: #5a6068;
+    padding: 6px 10px;
+    border-radius: 5px;
+    cursor: pointer;
+    font: inherit;
+    font-size: 13px;
+    &:hover { color: #365cff; background: #edf2ff; }
+    &:focus-visible { outline: 2px solid #365cff; outline-offset: 2px; }
+  }
+  &__body { padding: 0 24px; }
+  &__section {
+    padding: 18px 0;
+    border-bottom: 1px solid #e8ecf2;
+    &:last-child { border-bottom: 0; }
+    summary {
+      cursor: pointer;
+      font-size: 15px;
+      font-weight: 600;
+      color: #24334b;
+      overflow-wrap: anywhere;
+      &::marker { color: #365cff; }
+      &:focus-visible { outline: 2px solid #365cff; outline-offset: 4px; }
+    }
+  }
+  &__text {
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    font: inherit;
+    font-size: 14px;
+    line-height: 1.85;
+    color: #424c5e;
+  }
+  &__text { margin-top: 12px; }
+  &__intro { margin: 0; padding: 18px 0; }
+  @media (max-width: 640px) {
+    &__toolbar { padding: 12px; }
+    &__body { padding: 0 14px; }
+  }
+}

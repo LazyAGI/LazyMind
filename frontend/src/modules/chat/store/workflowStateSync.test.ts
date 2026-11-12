@@ -24,6 +24,21 @@ beforeEach(() => {
 });
 
 describe('versioned workflow synchronization', () => {
+  it('starts the pinned UI read before the runtime projection has arrived', async () => {
+    let resolve!: (value: unknown) => void;
+    api.getLatestSession.mockResolvedValue({ data: { data: { session: { ...session(), pinned_revision_id: 'revision' } } } });
+    api.getProjection.mockReturnValueOnce(new Promise(done => { resolve = done; }));
+    const ui = vi.spyOn(useWorkflowStore.getState(), 'fetchWorkflowUI').mockResolvedValue({ tabs: [] });
+    try {
+      const loading = useWorkflowStore.getState().loadActiveSession('c');
+      await vi.waitFor(() => expect(ui).toHaveBeenCalledWith('image-workflow', 'revision'));
+      expect(useWorkflowStore.getState().sessionByConversation.c).toBeUndefined();
+      resolve({ data: { data: { state_version: 1, status: 'waiting', projection: {}, attempt_history: {} } } });
+      await loading;
+      expect(useWorkflowStore.getState().sessionByConversation.c?.session_id).toBe('s');
+    } finally { ui.mockRestore(); }
+  });
+
   it('keeps resumed Chat stop ownership across snapshots and rejects stale bindings', () => {
     const store = useWorkflowStore.getState();
     store.setSession('c', session());
@@ -44,6 +59,27 @@ describe('versioned workflow synchronization', () => {
     const old = reduceWorkflowEvent(state, { ...snapshot(1, 3, 'waiting'),
       payload: { display: { status: 'waiting', reason: 'approval_required', approval_step_id: 'review' } } });
     expect(old.projection.display).toEqual({ status: 'paused', reason: 'user_stopped', approval_step_id: '' });
+  });
+  it('accepts the edit snapshot after its artifact event and rejects an older approval', () => {
+    let state = reduceWorkflowEvent(emptyWorkflowProjection(), {
+      ...snapshot(47, 2161, 'waiting'), payload: {
+        display: { status: 'waiting', reason: 'approval_required', approval_step_id: 'plan' },
+        projection: { current: [], ready: [], nodes: { plan: { execution: 'succeeded', validity: 'effective' } } },
+      },
+    });
+    state = reduceWorkflowEvent(state, { type: 'artifact.upsert', cursor: 2171, state_version: 48,
+      entity_id: 'edited-outline', payload: { slot: 'deck_outline', revision: 2 } });
+    state = reduceWorkflowEvent(state, { ...snapshot(48, 2172, 'waiting'), payload: {
+      status: 'waiting', display: { status: 'waiting', reason: 'inputs_changed', approval_step_id: '' },
+      projection: { current: [], ready: ['plan'], nodes: { plan: { execution: 'none', validity: 'stale' } } },
+      attempt_history: { plan: [{ attempt: 1, status: 'succeeded', validity: 'stale' }] },
+    } });
+    state = reduceWorkflowEvent(state, { type: 'workflow.patch', cursor: 2173, state_version: 47,
+      payload: { display: { status: 'waiting', reason: 'approval_required', approval_step_id: 'plan' } } });
+    expect(state.projection.display).toEqual({ status: 'waiting', reason: 'inputs_changed', approval_step_id: '' });
+    expect(state.projection.ready).toEqual(['plan']);
+    expect(state.projection.attempt_history).toEqual({ plan: [{ attempt: 1, status: 'succeeded', validity: 'stale' }] });
+    expect(state.resyncRequired).toBe(false);
   });
 
   it('keeps 100% progress running until the authoritative completion snapshot arrives', () => {

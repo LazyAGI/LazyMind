@@ -13,6 +13,8 @@ import {
 import {
   modelProvidersApi,
   modelProvidersDefaultApi,
+  previewEmbeddingSwitch,
+  clearEmbeddingChunks,
   unwrapModelProviderData,
   withModelProviderJsonOptions,
 } from "../api";
@@ -584,7 +586,9 @@ export function useDefaultModelConfig({
   const [lazyMindCloudAvailable, setLazyMindCloudAvailable] = useState(false);
   const [defaultLoadState, setDefaultLoadState] = useState<"loading" | "ready" | "error">("loading");
   const [savingCapabilities, setSavingCapabilities] = useState<Set<ModelCapability | CloudServiceSlotKey>>(new Set());
+  const [previewingEmbedding, setPreviewingEmbedding] = useState(false);
   const savingCapabilitiesRef = useRef(new Set<ModelCapability | CloudServiceSlotKey>());
+  const embeddingSwitchRevision = useRef(0);
   const [capabilityReadyStates, setCapabilityReadyStates] = useState<CapabilityReadyStates>({});
   const readinessRequests = useRef(new Map<CapabilityKey, symbol>());
   const loadRevision = useRef(0);
@@ -637,18 +641,20 @@ export function useDefaultModelConfig({
     };
   }, []);
 
-  const loadDefaultModelState = useCallback(async () => {
-    if (savingCapabilitiesRef.current.size) return;
+  const loadDefaultModelState = useCallback(async (refreshWhileSaving = false) => {
+    if (savingCapabilitiesRef.current.size && !refreshWhileSaving) return false;
     const revision = ++loadRevision.current;
-    readinessRequests.current.clear();
     try {
-      const providerResponse = await modelProvidersApi.apiCoreModelProvidersGet();
+      const [providerResponse, selectedResponse, selectedProviderResponse] = await Promise.all([
+        modelProvidersApi.apiCoreModelProvidersGet(),
+        modelProvidersApi.apiCoreModelProvidersSelectedModelsGet(),
+        modelProvidersApi.apiCoreModelProvidersSelectedProvidersGet(),
+      ]);
       const providerData = unwrapModelProviderData<{ providers?: ApiProvider[] }>(providerResponse.data);
       const providers = (providerData.providers || []).map((provider) =>
         mapApiProvider(provider, localizedFallbacks),
       );
 
-      const selectedResponse = await modelProvidersApi.apiCoreModelProvidersSelectedModelsGet();
       const selectedData = unwrapModelProviderData<{ selections?: SelectedModelApiItem[] }>(selectedResponse.data);
       const nextSelectedModels: SelectedModels = {};
       const nextSelectedModelMaxInputTokens: SelectedModelMaxInputTokens = {};
@@ -763,7 +769,6 @@ export function useDefaultModelConfig({
           selection.source === "cloud" ? false : !!selection.share;
       });
 
-      const selectedProviderResponse = await modelProvidersApi.apiCoreModelProvidersSelectedProvidersGet();
       const selectedProviderData = unwrapModelProviderData<{ selections?: SelectedCloudServiceApiItem[] }>(
         selectedProviderResponse.data as unknown,
       );
@@ -793,25 +798,15 @@ export function useDefaultModelConfig({
           },
         );
       });
-      const nextReadyStatus: ModelReadyStatus = {};
-      const nextCloudReadyStatus: CloudServiceReadyStatus = {};
       const nextReadyStates: CapabilityReadyStates = {};
-      if (!isAdmin) {
-        const capabilities = [...visibleModuleConfigs, ...cloudServiceConfigs].map((item) => item.key);
-        const results = await Promise.allSettled(capabilities.map(fetchCapabilityReadiness));
-        results.forEach((result, index) => {
-          const capability = capabilities[index];
-          nextReadyStates[capability] = result.status === "fulfilled" ? "ready" : "error";
-          if (result.status === "fulfilled") {
-            if (capability === "cloudParsing" || capability === "searchEngine") {
-              nextCloudReadyStatus[capability] = result.value;
-            } else {
-              nextReadyStatus[capability] = result.value;
-            }
-          }
-        });
-      }
-      if (revision !== loadRevision.current) return;
+      const capabilities = isAdmin
+        ? []
+        : [...visibleModuleConfigs, ...cloudServiceConfigs].map((item) => item.key);
+      capabilities.forEach((capability) => {
+        nextReadyStates[capability] = "loading";
+      });
+      if (revision !== loadRevision.current) return false;
+      readinessRequests.current.clear();
       setProviderOptions(providers);
       setSelectedModels(nextSelectedModels);
       setSelectedModelMaxInputTokens(nextSelectedModelMaxInputTokens);
@@ -823,14 +818,43 @@ export function useDefaultModelConfig({
       setCloudServiceShareStatus(nextCloudShareStatus);
       setCloudServiceOptions(selectedCloudOptions);
       setCloudServiceOptionStates({});
-      // Keep the last known shared configuration on a failed check, but show
-      // its error state instead of presenting stale readiness as current.
-      setModelReadyStatus((current) => isAdmin ? {} : { ...current, ...nextReadyStatus });
-      setCloudServiceReadyStatus((current) => isAdmin ? {} : { ...current, ...nextCloudReadyStatus });
+      // Keep the last known shared configuration while its new check is pending.
+      if (isAdmin) {
+        setModelReadyStatus({});
+        setCloudServiceReadyStatus({});
+      }
       setCapabilityReadyStates(nextReadyStates);
       setDefaultLoadState("ready");
+      // Each capability becomes usable as soon as its own readiness check
+      // finishes. A slow or failed check must not hold the entire panel open.
+      capabilities.forEach((capability) => {
+        const request = Symbol();
+        readinessRequests.current.set(capability, request);
+        void fetchCapabilityReadiness(capability)
+          .then((response) => {
+            if (readinessRequests.current.get(capability) !== request) return;
+            if (capability === "cloudParsing" || capability === "searchEngine") {
+              setCloudServiceReadyStatus((current) => ({ ...current, [capability]: response }));
+            } else {
+              setModelReadyStatus((current) => ({ ...current, [capability]: response }));
+            }
+            setCapabilityReadyStates((current) => ({ ...current, [capability]: "ready" }));
+          })
+          .catch(() => {
+            if (readinessRequests.current.get(capability) === request) {
+              setCapabilityReadyStates((current) => ({ ...current, [capability]: "error" }));
+            }
+          })
+          .finally(() => {
+            if (readinessRequests.current.get(capability) === request) {
+              readinessRequests.current.delete(capability);
+            }
+          });
+      });
+      return true;
     } catch {
       if (revision === loadRevision.current) setDefaultLoadState("error");
+      return false;
     }
   }, [currentLanguage, isAdmin, localizedFallbacks, t, visibleModuleConfigs]);
 
@@ -838,6 +862,8 @@ export function useDefaultModelConfig({
     void loadDefaultModelState();
     return () => { loadRevision.current += 1; optionRevision.current += 1; readinessRequests.current.clear(); };
   }, [loadDefaultModelState]);
+
+  useEffect(() => () => { embeddingSwitchRevision.current += 1; }, []);
 
   useEffect(() => {
     const refreshModels = () => void loadDefaultModelState();
@@ -1101,7 +1127,7 @@ export function useDefaultModelConfig({
         )?.model.maxInputTokens
       : undefined;
     setCapabilitySaving(capability, true);
-    void saveSelectedModel(capability, value)
+    return saveSelectedModel(capability, value)
       .then((response) => {
         const savedSelection = value ? response.selections?.find((selection) => {
           const rawCapability = getCapabilityByModelType(selection.model_key);
@@ -1134,27 +1160,116 @@ export function useDefaultModelConfig({
     capability: ModelCapability,
     value?: string,
   ) => {
-    const previousValue = selectedModels[capability];
-    if (
-      capability === "embed_main" &&
-      previousValue &&
-      previousValue !== value &&
-      shareStatus.embed_main === true
-    ) {
-      Modal.confirm({
-        title: t("modelProvider.embeddingChangeTitle"),
-        content: t("modelProvider.embeddingChangeContent"),
-        okText: t("modelProvider.confirmSwitch"),
-        cancelText: t("modelProvider.cancelSwitch"),
-        okButtonProps: { danger: true },
-        onOk: () => {
-          applyModelSelection(capability, value);
-        },
-      });
+    if (capability !== "embed_main") {
+      applyModelSelection(capability, value);
       return;
     }
-
-    applyModelSelection(capability, value);
+    if (value === selectedModels.embed_main || previewingEmbedding || savingCapabilitiesRef.current.has(capability)) return;
+    const request = ++embeddingSwitchRevision.current;
+    const candidate = parseModelValue(value);
+    setPreviewingEmbedding(true);
+    void previewEmbeddingSwitch({
+      model_id: candidate.modelId,
+      source: candidate.source,
+    }).then((preview) => {
+      if (request !== embeddingSwitchRevision.current) return;
+      if (preview.can_switch && (preview.outcome === "empty" || preview.outcome === "unchanged")) {
+        setPreviewingEmbedding(false);
+        applyModelSelection(capability, value);
+        return;
+      }
+      if (preview.can_switch && preview.outcome === "same") {
+        Modal.confirm({
+          title: t("modelProvider.embeddingSignatureMatchedTitle"),
+          content: t("modelProvider.embeddingSignatureMatched"),
+          okText: t("modelProvider.confirmSwitch"),
+          cancelText: t("modelProvider.cancelSwitch"),
+          onOk: () => {
+            if (request !== embeddingSwitchRevision.current) return;
+            setPreviewingEmbedding(false);
+            applyModelSelection(capability, value);
+          },
+          onCancel: () => {
+            if (request === embeddingSwitchRevision.current) setPreviewingEmbedding(false);
+          },
+        });
+        return;
+      }
+      if (preview.outcome === "clear_required" && candidate.modelId && candidate.source === "own") {
+        let completed = false;
+        const dialog = Modal.confirm({
+          title: t("modelProvider.embeddingIndexResetTitle"),
+          content: t("modelProvider.embeddingIndexResetRequired"),
+          okText: t("modelProvider.embeddingClearAndSwitch"),
+          okButtonProps: { danger: true },
+          cancelText: t("modelProvider.cancelSwitch"),
+          onOk: async () => {
+            if (request !== embeddingSwitchRevision.current || completed || savingCapabilitiesRef.current.has(capability)) return;
+            setCapabilitySaving(capability, true);
+            dialog.update({ cancelButtonProps: { disabled: true } });
+            try {
+              let activated = false;
+              try {
+                const result = await clearEmbeddingChunks({
+                  model_id: candidate.modelId,
+                  source: candidate.source,
+                  generation: preview.generation,
+                  confirm_clear_chunks: true,
+                });
+                activated = result.cleared === true && result.activated === true;
+              } catch {
+                // A lost response may still have activated the target on the server.
+              }
+              if (request !== embeddingSwitchRevision.current) return;
+              // The server owns both cleanup and activation. Reconcile while the
+              // save lock is held; never send a separate selection PUT here.
+              const refreshed = await loadDefaultModelState(true);
+              if (request !== embeddingSwitchRevision.current) return;
+              void onModelSelectionChanged();
+              if (!activated || !refreshed) {
+                message.error(t("modelProvider.embeddingCleanupFailed"));
+                // Reject to keep the dialog open so retry reuses this confirmation
+                // and generation, including after partially completed activation.
+                throw new Error("embedding activation incomplete");
+              }
+              completed = true;
+              setPreviewingEmbedding(false);
+              if (capability === highlightTarget) onHighlightResolved?.();
+              message.success(t("modelProvider.embeddingSwitchManualParse"));
+            } finally {
+              if (request === embeddingSwitchRevision.current) {
+                setCapabilitySaving(capability, false);
+                if (!completed) dialog.update({ cancelButtonProps: { disabled: false } });
+              }
+            }
+          },
+          onCancel: () => {
+            if (request !== embeddingSwitchRevision.current || savingCapabilitiesRef.current.has(capability)) return;
+            embeddingSwitchRevision.current += 1;
+            setPreviewingEmbedding(false);
+          },
+        });
+        return;
+      }
+      setPreviewingEmbedding(false);
+      Modal.warning({
+        title: t(preview.outcome === "clear_required"
+          ? "modelProvider.embeddingIndexResetTitle"
+          : "modelProvider.embeddingSignatureCheckFailedTitle"),
+        content: t(preview.outcome === "clear_required"
+          ? "modelProvider.embeddingIndexResetRequired"
+          : "modelProvider.embeddingSignatureCheckFailed"),
+        okText: t("common.confirm"),
+      });
+    }).catch(() => {
+      if (request !== embeddingSwitchRevision.current) return;
+      setPreviewingEmbedding(false);
+      Modal.warning({
+        title: t("modelProvider.embeddingSignatureCheckFailedTitle"),
+        content: t("modelProvider.embeddingSignatureCheckFailed"),
+        okText: t("common.confirm"),
+      });
+    });
   };
 
   const saveSelectedCloudService = async (
@@ -1281,19 +1396,22 @@ export function useDefaultModelConfig({
     if (defaultLoadState !== "ready") return;
     if (modelProviderSetupState === "ready") {
       visibleModuleConfigs.forEach((module) => {
+        if ((!isAdmin && capabilityReadyStates[module.key] === "loading")) return;
         if (!isModelConfigured(module.key) && !moduleModelOptionStates[module.key]) {
           void loadModuleModels(module.key);
         }
       });
     }
     cloudServiceConfigs.forEach((service) => {
+      if (!isAdmin && capabilityReadyStates[service.key] === "loading") return;
       if (cloudServiceSetupStates[service.key] === "ready" &&
           !isCloudServiceConfigured(service.key) && !cloudServiceOptionStates[service.key]) {
         void loadVerifiedCloudService(service);
       }
     });
   }, [defaultLoadState, modelProviderSetupState, cloudServiceSetupStates, visibleModuleConfigs,
-    selectedModels, selectedCloudServices, moduleModelOptionStates, cloudServiceOptionStates, lazyMindCloudAvailable]);
+    selectedModels, selectedCloudServices, moduleModelOptionStates, cloudServiceOptionStates,
+    lazyMindCloudAvailable, capabilityReadyStates, modelReadyStatus, cloudServiceReadyStatus]);
 
   const retryCapabilityReadiness = async (capability: CapabilityKey, invalidate = false) => {
     if (invalidate) {
@@ -1340,6 +1458,7 @@ export function useDefaultModelConfig({
     lazyMindCloudAvailable,
     defaultLoadState,
     savingCapabilities,
+    previewingEmbedding,
     selectedModels,
     selectedModelMaxInputTokens,
     moduleModelOptions,

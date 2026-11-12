@@ -465,3 +465,11 @@ it("preserves a typed draft when clearing only citations imperatively", () => {
   act(() => ref.current?.prepareMessage({ citeMessages: [] }));
   expect(mocks.latestChatInputProps.value).toBe("My unfinished question");
 });
+
+it("appends a failed quick explanation to an existing draft", () => {
+  const ref = createRef<ChatImperativeProps>();
+  render(<ChatContainerComponent ref={ref} onOpenSSE={vi.fn()} parseErrorData={(data) => data} setIsChatContent={vi.fn()} setChatConfigFn={vi.fn()} />);
+  act(() => ref.current?.prepareMessage({ text: "My unfinished question" }));
+  act(() => ref.current?.prepareMessage({ text: "Explain the selected text", citeMessage: "Selected text", appendCitations: true, appendText: true }));
+  expect(mocks.latestChatInputProps.value).toBe("My unfinished question\n\nExplain the selected text");
+});

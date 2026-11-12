@@ -28,7 +28,7 @@ from lazyllm.tools.agent import ToolExecutionError
 from lazyllm.tools.agent.base import _write_agent_data
 
 from .ask_user_schema import (
-    MAX_MULTIPLE_SUGGESTIONS, MAX_QUESTIONS, MAX_SINGLE_SUGGESTIONS, ModelQuestions, validate_model_questions,
+    MAX_MULTIPLE_SUGGESTIONS, MAX_SINGLE_SUGGESTIONS, ModelQuestions, validate_model_questions,
 )
 
 _OTHER_OPTION = '__ask_user_other__'
@@ -239,8 +239,8 @@ def _normalise_questions(raw: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
 
 def question_card_payload(questions, title=None, description=None, workflow=None) -> Dict[str, Any]:
     """Build the same card for direct host checks and model-authored questions."""
-    if not isinstance(questions, list) or not 1 <= len(questions) <= MAX_QUESTIONS:
-        raise ToolExecutionError('Ask one to three questions per clarification card.')
+    if not isinstance(questions, list) or not questions:
+        raise ToolExecutionError('Provide at least one question per clarification card.')
     normalised = _normalise_questions(questions)
     if not str(description or '').strip() and any(not question.get('reason') for question in normalised):
         raise ToolExecutionError('Explain why confirmation is needed in reason or description.')
@@ -274,7 +274,7 @@ def ask_user(
     preferences merely because this tool exists. No earlier tool call is required.
 
     Args:
-        questions: One to three items, each requiring id, text, reason, required, and type.
+        questions: As many items as the task needs, each requiring id, text, reason, required, and type.
             Type is boolean, single, multiple, or text. Use one item when asked one question at a time.
             Use `text` without `choices` when useful suggestions are unavailable.
             Single suggestions have at most three choices, multiple suggestions at most four;

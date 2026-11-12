@@ -7,6 +7,15 @@ from lazyllm.tools.rag.store import HybridStore
 
 
 def list_doc_chunks_data(processor, algo_id, kb_id, doc_id, group, offset=0, limit=20):
+    from lazymind.parsing.service.embedding_reset import index_operation
+    with index_operation() as generation:
+        if getattr(processor, '_lazymind_store_generation', None) != generation:
+            processor._store = None
+            processor._lazymind_store_generation = generation
+        return _list_doc_chunks_data(processor, algo_id, kb_id, doc_id, group, offset, limit)
+
+
+def _list_doc_chunks_data(processor, algo_id, kb_id, doc_id, group, offset=0, limit=20):
     algorithm = processor._get_algo(algo_id)
     if algorithm is None:
         raise HTTPException(status_code=404, detail=f'Invalid algo_id {algo_id}')

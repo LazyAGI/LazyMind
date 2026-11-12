@@ -45,6 +45,51 @@ func TestExternalDocumentNormalizationPreservesStrictLocalCreation(t *testing.T)
 	}
 }
 
+func TestURLImportCompactsDescriptionWithoutWebsiteSlug(t *testing.T) {
+	db := newSkillV2TestDB(t)
+	description := strings.Repeat("仅使用明确授权的材料。", 150)
+	document := []byte("---\nname: fixture\ndescription: " + description + "\n---\n# Original body\n")
+	zipPath := filepath.Join(t.TempDir(), "fixture.zip")
+	writeSkillZip(t, zipPath, map[string][]byte{"SKILL.md": document})
+	svc := NewSkillService(SkillServiceDeps{DB: db, Downloader: NewFakeZipDownloader(map[string]string{"https://example.com/fixture.zip": zipPath}), BlobStore: NewBlobStore(db, NewLocalObjectStore(t.TempDir()))})
+	created, err := svc.CreateSkill(context.Background(), CreateSkillRequest{OwnerUserID: "user_001", Source: SourceInput{Type: "url", URL: "https://example.com/fixture.zip"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := getBlobByPath(t, db, created.HeadRevisionID, "SKILL.md").Content
+	meta, err := skillmetadata.ParseRequired(content)
+	if err != nil || meta.Name != "fixture" || utf8.RuneCountInString(meta.Description) > 1024 || !bytes.Contains(content, []byte(description)) {
+		t.Fatalf("normalized metadata = %#v, %v", meta, err)
+	}
+}
+
+func TestURLImportUsesRequestedMetadataOnlyWhenMissing(t *testing.T) {
+	for _, document := range []string{"# Heading only\n", "---\nname: source-name\ndescription: Source description.\n---\n# Body\n"} {
+		db := newSkillV2TestDB(t)
+		zipPath := filepath.Join(t.TempDir(), "fixture.zip")
+		writeSkillZip(t, zipPath, map[string][]byte{"SKILL.md": []byte(document)})
+		svc := NewSkillService(SkillServiceDeps{DB: db, Downloader: NewFakeZipDownloader(map[string]string{"https://example.com/fixture.zip": zipPath}), BlobStore: NewBlobStore(db, NewLocalObjectStore(t.TempDir()))})
+		created, err := svc.CreateSkill(context.Background(), CreateSkillRequest{OwnerUserID: "user_001", Name: "requested-name", Description: "Requested description.", Source: SourceInput{Type: "url", URL: "https://example.com/fixture.zip"}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var row testSkillV2SkillRow
+		if err := db.Where("id = ?", created.SkillID).Take(&row).Error; err != nil {
+			t.Fatal(err)
+		}
+		wantName, wantDescription := "requested-name", "Requested description."
+		if strings.HasPrefix(document, "---") {
+			wantName, wantDescription = "source-name", "Source description."
+		}
+		if row.SkillName != wantName || row.Description != wantDescription {
+			t.Fatalf("import metadata=(%q,%q), want=(%q,%q)", row.SkillName, row.Description, wantName, wantDescription)
+		}
+		if content := getBlobByPath(t, db, created.HeadRevisionID, "SKILL.md").Content; !bytes.Equal(content, []byte(document)) {
+			t.Fatal("request fallbacks rewrote the source document")
+		}
+	}
+}
+
 func TestLocalSourceReplacementRemainsStrict(t *testing.T) {
 	db := newSkillV2TestDB(t)
 	seedSkillWithHeadRevision(t, db, "replace-target", "replace-rev1")

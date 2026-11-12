@@ -20,6 +20,7 @@ export interface ChatImperativeProps {
   prepareMessage: (
     params: Partial<Pick<SendMessageParams, "text" | "citeMessage" | "citeMessages">> & {
       appendCitations?: boolean;
+      appendText?: boolean;
     },
   ) => void;
   disconnectConversationStream?: (conversationId: string) => void;
@@ -74,6 +75,7 @@ export interface ChatContainerProps {
   /** Disable workspace binding and approvals for document-only conversations. */
   allowLocalWorkspace?: boolean;
   embeddingReady?: boolean | null;
+  vlmReady?: boolean | null;
   multimodalEmbeddingReady?: boolean | null;
   rerankReady?: boolean | null;
   disabledReason?: string;

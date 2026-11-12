@@ -102,8 +102,7 @@ func loadFormulaExplanationModel(ctx context.Context, user string) (map[string]a
 	if err != nil || selected == nil {
 		return nil, "", "", errors.New("所选研读模型不可用，请在 AI 阅读准备中重新选择")
 	}
-	runtime := &modelconfig.ChatRuntimeConfig{Models: []modelconfig.AvailableChatModel{*selected}}
-	candidate := runtime.PrepareCandidate(ctx, *selected)
+	candidate := modelconfig.PrepareSelectedChatCandidate(ctx, store.DB(), *selected)
 	if candidate == nil {
 		return nil, "", "", errors.New("selected model credential unavailable")
 	}

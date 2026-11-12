@@ -99,6 +99,11 @@ func restoredSupplier(tx *gorm.DB, userID string, payload credentialvault.Provid
 			updates["protocol_name"] = source.ProtocolName
 		}
 		if len(updates) > 0 {
+			if err := guardEmbeddingRuntimeMutation(tx, userID, source.ID, "", ""); err != nil {
+				return source, err
+			}
+		}
+		if len(updates) > 0 {
 			if err := tx.Model(&source).Updates(updates).Error; err != nil {
 				return source, err
 			}

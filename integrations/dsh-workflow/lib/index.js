@@ -41,10 +41,21 @@ var BridgeError = class extends Error {
 		this.status = status;
 	}
 };
+function isHostAuthorizationError(error) {
+	return error instanceof BridgeError && (error.status === 401 || [
+		"HOST_PAIRING_MISSING",
+		"HOST_PAIRING_DISABLED",
+		"HOST_ACCOUNT_MISMATCH",
+		"HOST_CREDENTIAL_MISMATCH",
+		"HOST_PAIRING_INVALID",
+		"HOST_PAIRING_UNREADABLE"
+	].includes(error.code));
+}
 var HostBridge = class {
 	base;
-	constructor(url, pairing) {
+	constructor(url, pairing, actionHeaders) {
 		this.pairing = pairing;
+		this.actionHeaders = actionHeaders;
 		const parsed = new URL(url);
 		if (!["http:", "https:"].includes(parsed.protocol) || ![
 			"localhost",
@@ -53,18 +64,23 @@ var HostBridge = class {
 		].includes(parsed.hostname) || parsed.username || parsed.password || parsed.search || parsed.hash) throw new Error("Workflow Bridge must be a loopback URL without credentials");
 		this.base = parsed.href.replace(/\/$/, "") + "/v1/workflow-host";
 	}
-	async request(path, signal, body) {
+	async request(path, signal, body, headers) {
 		const response = await fetch(this.base + path, {
 			method: body === void 0 ? "GET" : "POST",
 			signal: AbortSignal.any([signal, AbortSignal.timeout(15e3)]),
 			headers: {
+				...headers,
 				Authorization: `Bearer ${this.pairing.token}`,
 				"X-LazyMind-Connector-Id": this.pairing.connector_id,
 				...body === void 0 ? {} : { "content-type": "application/json" }
 			},
 			...body === void 0 ? {} : { body: JSON.stringify(body) }
 		});
-		const value = await response.json();
+		const decoded = await response.json().catch(() => {
+			if (!response.ok) return {};
+			throw new Error("Invalid Workflow Bridge response");
+		});
+		const value = decoded && typeof decoded === "object" && !Array.isArray(decoded) ? decoded : {};
 		if (!response.ok) throw new BridgeError(typeof value.code === "string" ? value.code : "BRIDGE_ERROR", typeof value.error === "string" ? value.error : "Workflow Bridge request failed", response.status);
 		return value;
 	}
@@ -78,7 +94,7 @@ var HostBridge = class {
 		return (await this.request(`/runs/${encodeURIComponent(runId)}/control`, signal)).control;
 	}
 	async actions(after, signal) {
-		return this.request(`/actions${after ? `?after=${encodeURIComponent(after)}` : ""}`, signal);
+		return this.request(`/actions${after ? `?after=${encodeURIComponent(after)}` : ""}`, signal, void 0, await this.actionHeaders?.(signal));
 	}
 	async action(id, signal) {
 		return this.request(`/actions/${encodeURIComponent(id)}`, signal);
@@ -464,7 +480,9 @@ function createDispatcher(runtime, host, bridge, instanceId, signal) {
 		await bridge.settle(action.id, instanceId, claim.dispatch_token, "accepted", seq, "", signal);
 	}
 	async function poll() {
+		let failures = 0, lastWarning = "";
 		while (!signal.aborted) {
+			let retryMs = 1e3;
 			try {
 				let after = "";
 				do {
@@ -472,15 +490,25 @@ function createDispatcher(runtime, host, bridge, instanceId, signal) {
 					for (const action of [...page.actions].sort((a, b) => Number(b.kind === "cancel") - Number(a.kind === "cancel"))) try {
 						await deliver(action);
 					} catch (error) {
-						if (!(error instanceof BridgeError && ["DELIVERY_PENDING", "ACTION_CONSUMED"].includes(error.code)) && !signal.aborted) runtime.warn(`lazymind-workflow: delivery pending: ${String(error)}`);
+						if (isHostAuthorizationError(error)) throw error;
+						if (!(error instanceof BridgeError && ["DELIVERY_PENDING", "ACTION_CONSUMED"].includes(error.code)) && !signal.aborted) runtime.warn("lazymind-workflow: delivery pending; checking the previous receipt before retrying");
 					}
 					after = page.next_page_token ?? "";
 				} while (after && !signal.aborted);
+				failures = 0;
+				lastWarning = "";
 			} catch (error) {
-				if (!signal.aborted) runtime.warn(`lazymind-workflow: reconnecting Bridge: ${String(error)}`);
+				if (signal.aborted) break;
+				const needsAuthorization = isHostAuthorizationError(error);
+				retryMs = needsAuthorization ? 3e4 : Math.min(3e4, 1e3 * 2 ** Math.min(failures, 5));
+				failures++;
+				const code = error instanceof BridgeError && /^[A-Z][A-Z0-9_]{0,63}$/.test(error.code) ? error.code : "BRIDGE_UNAVAILABLE";
+				const warning = needsAuthorization ? `lazymind-workflow: authorization required (${code}); sign in or repair the connection in LazyMind` : `lazymind-workflow: reconnecting Bridge (${code})`;
+				if (warning !== lastWarning) runtime.warn(warning);
+				lastWarning = warning;
 			}
 			try {
-				await delay(1e3, signal);
+				await delay(retryMs, signal);
 			} catch {
 				break;
 			}
@@ -960,11 +988,35 @@ async function dispatcherLock(pairingFile, instanceId) {
 
 //#endregion
 //#region src/presentation-config.ts
+const PRESENTATION_CONFIG_PATH = "/lazymind-workflow/config";
 const CONFIG_KEY = "__LAZYMIND_WORKFLOW_PRESENTATION__";
 /** DSH loads browser plugins independently of the Node plugin's config. */
 function installPresentationConfig(ctx, source) {
-	ctx.on("webserver/index-inject", (table) => {
+	const current = () => {
 		const config = typeof source === "function" ? source() : source;
+		return config && presentationLink("config-check", config.webUrl) ? {
+			serverName: config.serverName,
+			webUrl: config.webUrl
+		} : void 0;
+	};
+	ctx.inject(["webServer"], (scope) => {
+		scope.effect(() => scope.webServer.register({
+			kind: "exact",
+			path: PRESENTATION_CONFIG_PATH,
+			handler(req, res) {
+				res.setHeader("Cache-Control", "no-store");
+				res.setHeader("Content-Type", "application/json");
+				if (req.method !== "GET") {
+					res.statusCode = 405;
+					res.end();
+					return;
+				}
+				res.end(JSON.stringify({ config: current() ?? null }));
+			}
+		}));
+	});
+	ctx.on("webserver/index-inject", (table) => {
+		const config = current();
 		if (!config) return;
 		table.push({
 			kind: "global",
@@ -1069,6 +1121,57 @@ function watchConnection(resolve, install, unavailable, interval = 3e3) {
 }
 
 //#endregion
+//#region src/mcp-readiness.ts
+/** A cached tool schema alone survives MCP disconnection in DSH. The resource
+* provider checks the current MCP client before answering even when that server
+* has no resource capability, so this also verifies the live connection without
+* invoking a Workflow tool or reading any resource contents. */
+function mcpReadiness(ctx, serverName) {
+	let resources;
+	ctx.inject(["mcpResources"], (injected) => {
+		resources = injected.mcpResources;
+		injected.effect(() => () => {
+			resources = void 0;
+		});
+	});
+	const toolsReady = () => {
+		const operations = new Set(ctx.tools.schemas().filter((schema) => ctx.tools.get(schema.name)).map((schema) => workflowOperation(schema.name, serverName)));
+		return [
+			"start",
+			"state",
+			"step_begin"
+		].every((operation) => operations.has(operation));
+	};
+	return async (signal) => {
+		const current = resources;
+		if (!current || !toolsReady() || signal.aborted) return false;
+		const bounded = new AbortController();
+		let interrupt;
+		const interrupted = new Promise((_resolve, reject) => {
+			interrupt = () => {
+				bounded.abort();
+				reject(/* @__PURE__ */ new Error("MCP readiness check interrupted"));
+			};
+		});
+		const timer = setTimeout(interrupt, 2e3);
+		signal.addEventListener("abort", interrupt, { once: true });
+		try {
+			await Promise.race([interrupted, current.request(serverName, { method: "resources/list" }, {
+				agent: void 0,
+				signal: bounded.signal
+			})]);
+			return !signal.aborted && current === resources && toolsReady();
+		} catch {
+			return false;
+		} finally {
+			clearTimeout(timer);
+			signal.removeEventListener("abort", interrupt);
+			bounded.abort();
+		}
+	};
+}
+
+//#endregion
 //#region src/index.ts
 const inject = [
 	"tools",
@@ -1079,13 +1182,19 @@ const inject = [
 async function apply(ctx, config) {
 	let presentation;
 	let lastError = "";
+	const readiness = /* @__PURE__ */ new Map();
 	installPresentationConfig(ctx, () => presentation);
 	const stop = watchConnection((signal) => resolveConnection(config, signal), async (current) => {
 		const pairing = await loadPairing(current.pairingFile);
 		const instance = randomUUID();
 		const release = await dispatcherLock(current.pairingFile, instance);
 		try {
-			const dispose = installHost(ctx, new HostBridge(current.bridgeUrl, pairing), current, instance);
+			let mcpReady = readiness.get(current.serverName);
+			if (!mcpReady) {
+				mcpReady = mcpReadiness(ctx, current.serverName);
+				readiness.set(current.serverName, mcpReady);
+			}
+			const dispose = installHost(ctx, new HostBridge(current.bridgeUrl, pairing, async (signal) => ({ "X-LazyMind-MCP-Ready": await mcpReady(signal) ? "1" : "0" })), current, instance);
 			presentation = current;
 			lastError = "";
 			return async () => {
@@ -1106,12 +1215,7 @@ async function apply(ctx, config) {
 		if (message) lastError = message;
 	});
 	ctx.effect(() => stop);
-	try {
-		await stop.ready;
-	} catch (error) {
-		await stop();
-		throw error;
-	}
+	await stop.ready.catch(() => {});
 }
 
 //#endregion

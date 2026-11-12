@@ -257,8 +257,9 @@ def test_handle_chat_constructs_react_agent_from_runtime_context(
     if mcp_failure:
         status = 'needs_authorization' if mcp_failure == 'authorization' else 'unavailable'
         assert status in agent_queries[0]
-        assert 'Notion' in body
-        assert ('reconnect in MCP settings' if mcp_failure == 'authorization' else 'try again later') in body
+        assert 'Notion' in agent_queries[0]
+        frames = [json.loads(chunk)['data'] for chunk in body.strip().split('\n\n')]
+        assert not any(frame.get('think') for frame in frames)
         assert 'private-secret' not in body + agent_queries[0]
         assert 'private-grant' not in body + agent_queries[0]
         if mcp_failure != 'all_failed':

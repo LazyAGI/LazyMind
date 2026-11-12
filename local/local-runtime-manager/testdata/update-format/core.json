@@ -1,5 +1,5 @@
 {
-  "producer": "actual merged LazyAGI/LazyMind main d998fab1: migrate.NewRunner.Up(0) + episode.Initialize; schema only",
+  "producer": "actual merged LazyAGI/LazyMind main 6cd2d1bb: migrate.NewRunner.Up(0) + episode.Initialize; isolated schema only",
   "shape": {
     "present": true,
     "applicationId": 0,
@@ -2689,6 +2689,12 @@
       },
       {
         "type": "table",
+        "name": "embedding_index_states",
+        "table": "embedding_index_states",
+        "sql": "CREATE TABLE embedding_index_states (\n    scope VARCHAR(255) PRIMARY KEY,\n    active_model_id VARCHAR(255) NOT NULL DEFAULT '',\n    active_source VARCHAR(16) NOT NULL DEFAULT '',\n    active_model_name VARCHAR(255) NOT NULL DEFAULT '',\n    active_provider_name VARCHAR(255) NOT NULL DEFAULT '',\n    signature VARCHAR(255) NOT NULL DEFAULT '',\n    phase VARCHAR(32) NOT NULL DEFAULT 'ready',\n    generation BIGINT NOT NULL DEFAULT 1,\n    target_model_id VARCHAR(255) NOT NULL DEFAULT '',\n    target_source VARCHAR(16) NOT NULL DEFAULT '',\n    target_signature VARCHAR(255) NOT NULL DEFAULT '',\n    updated_at TIMESTAMP NOT NULL\n)"
+      },
+      {
+        "type": "table",
         "name": "episode_memories",
         "table": "episode_memories",
         "sql": "CREATE TABLE episode_memories (\n    row_id INTEGER PRIMARY KEY AUTOINCREMENT,\n    id varchar(36) NOT NULL,\n    user_id varchar(255) NOT NULL,\n    conversation_id varchar(255) NOT NULL,\n    source_kind varchar(32) NOT NULL,\n    episode_type varchar(16) NOT NULL,\n    summary text NOT NULL,\n    normalized_summary text NOT NULL,\n    search_text text NOT NULL,\n    tokenizer_version varchar(64) NOT NULL,\n    occurred_at_ms integer NOT NULL,\n    recorded_at_ms integer NOT NULL,\n    hit_count integer NOT NULL DEFAULT 0,\n    CONSTRAINT uk_episode_memories_user_id UNIQUE (user_id, id),\n    CONSTRAINT uk_episode_memories_identity UNIQUE (user_id, conversation_id, normalized_summary),\n    CONSTRAINT chk_episode_memories_source_kind CHECK (source_kind IN ('chat_explicit', 'memory_review')),\n    CONSTRAINT chk_episode_memories_episode_type CHECK (episode_type IN ('decision', 'progress', 'result', 'blocker', 'event')),\n    CONSTRAINT chk_episode_memories_summary CHECK (length(trim(summary)) BETWEEN 1 AND 200),\n    CONSTRAINT chk_episode_memories_search_text CHECK (length(trim(search_text)) > 0),\n    CONSTRAINT chk_episode_memories_tokenizer_version CHECK (length(trim(tokenizer_version)) > 0),\n    CONSTRAINT chk_episode_memories_timestamps CHECK (occurred_at_ms > 0 AND recorded_at_ms > 0),\n    CONSTRAINT chk_episode_memories_hit_count CHECK (hit_count >= 0)\n)"
@@ -3810,7 +3816,7 @@
         "sql": "CREATE TRIGGER knowledge_document_version AFTER UPDATE ON documents\nWHEN NEW.resource_version = OLD.resource_version AND (\n NEW.dataset_id IS NOT OLD.dataset_id OR NEW.p_id IS NOT OLD.p_id OR NEW.display_name IS NOT OLD.display_name OR\n NEW.document_type IS NOT OLD.document_type OR NEW.tags IS NOT OLD.tags OR NEW.file_id IS NOT OLD.file_id OR\n NEW.ext IS NOT OLD.ext OR NEW.deleted_at IS NOT OLD.deleted_at)\nBEGIN\n UPDATE documents SET resource_version = OLD.resource_version + 1 WHERE id = NEW.id;\nEND"
       }
     ],
-    "coreVersion": 320261105090000,
+    "coreVersion": 320261106040849,
     "coreHistory": [
       {
         "version": 20260321131500,
@@ -4763,6 +4769,10 @@
       {
         "version": 320261105090000,
         "name": "v0_3/add_paper_note_source"
+      },
+      {
+        "version": 320261106040849,
+        "name": "v0_3/embedding_index_state"
       }
     ]
   }

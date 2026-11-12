@@ -97,8 +97,13 @@ def test_f4_materials_reach_writing_review_and_revision(f4_result, monkeypatch, 
     reviewed = workflow.execute_step('peer_review', written)['pool']
     prompt = review_call.call_args.args[1]
     review_input = json.loads(prompt.split('Input JSON:\n', 1)[1])
-    assert review_input['analysis'] == output['analysis']
-    assert f4_pool['current']['analysis'] in reviewed['history'][-1]['inputs']
+    assert review_input == {
+        'topic': inputs['topic'], 'request': '',
+        'manuscript': workflow.material(written, 'manuscript')['content'],
+        'papers': [], 'charts': [],
+    }
+    assert f4_pool['current']['analysis'] not in reviewed['history'][-1]['inputs']
+    assert workflow.material(reviewed, 'analysis')['content'] == output['analysis']
 
     reviewed['selected_issue_ids'] = ['R1']
     workflow.execute_step('revise_document', reviewed)
@@ -110,13 +115,14 @@ def test_f4_materials_reach_writing_review_and_revision(f4_result, monkeypatch, 
 
 
 @pytest.mark.parametrize('step', ['write_document', 'revise_document', 'peer_review'])
-def test_downstream_rejects_malformed_analysis(f4_result, step):
+def test_downstream_rejects_invalid_analysis_input(f4_result, step):
     _, output = f4_result
     output['analysis']['findings'][0]['value'] = 'not a number'
     inputs = dict(topic='T', analysis=output['analysis'], manuscript='# 稿件')
     if step == 'revise_document':
         inputs['review'] = '# 审稿意见'
-    with pytest.raises(ValueError, match='output.analysis'):
+    message = '未知字段' if step == 'peer_review' else 'output.analysis'
+    with pytest.raises(ValueError, match=message):
         contracts.validate_input(step, inputs)
 
 
@@ -129,10 +135,8 @@ def test_writing_rejects_chart_references_outside_analysis(f4_result):
 
 
 @pytest.mark.parametrize('step', ['write_document', 'revise_document', 'peer_review'])
-def test_legacy_text_analysis_still_works_for_peer_review_only(step):
+def test_downstream_rejects_legacy_text_analysis(step):
     inputs = dict(topic='T', analysis='已有文字分析', manuscript='# 稿件')
-    if step == 'peer_review':
-        assert contracts.validate_input(step, inputs)['analysis'] == inputs['analysis']
-    else:
-        with pytest.raises(ValueError):
-            contracts.validate_input(step, inputs)
+    message = '未知字段' if step == 'peer_review' else 'output.analysis'
+    with pytest.raises(ValueError, match=message):
+        contracts.validate_input(step, inputs)

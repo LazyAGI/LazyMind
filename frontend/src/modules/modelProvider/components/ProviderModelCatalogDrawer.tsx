@@ -18,7 +18,6 @@ import {
   SearchOutlined,
 } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
-import { builtInCatalog } from "../builtInCatalog";
 import { getProviderConnectionFailureMessage } from "../connectionFailure";
 import { isModelTypeSupportedByProtocol } from "../modelCapabilities";
 import { listRemoteGroupModels, type RemoteGroupModel } from "../api";
@@ -134,16 +133,14 @@ export function ProviderModelCatalogDrawer(props: Props) {
     setLoading(true);
     setError("");
     if (props.requiresVerification) {
-      const builtIn = builtInCatalog(props.runtimeIdentity || props.protocolName);
-      setRemote(builtIn);
-      if (builtIn.length) setError(copy("builtInFallback"));
+      setRemote([]);
       setLoading(false);
       return () => {
         sequence.current += 1;
       };
     }
     if (props.initialDiscoveryError && refresh === 0) {
-      setRemote(builtInCatalog(props.runtimeIdentity || props.protocolName));
+      setRemote([]);
       setError(props.initialDiscoveryError);
       setLoaded(false);
       setLoading(false);
@@ -167,7 +164,7 @@ export function ProviderModelCatalogDrawer(props: Props) {
       })
       .catch((cause) => {
         if (request === sequence.current) {
-          if (!keepResults) setRemote(builtInCatalog(props.runtimeIdentity || props.protocolName));
+          if (!keepResults) setRemote([]);
           setLoaded(false);
           setError(getProviderConnectionFailureMessage(cause, t));
         }

@@ -9,13 +9,13 @@ def test_template_collection_preserves_visuals_and_text_evidence():
     steps = state['steps']
     collect = steps['collect_materials']
     assert {'material': 'template_mode', 'required': False} in collect['inputs']
-    assert 'Default to zero material_images' in collect['prompt']
+    assert 'A template disables AI backgrounds, not evidence screenshots' in collect['prompt']
     assert 'image_topk=0' in collect['prompt']
     assert 'No applicable KB alone is not a reason' in collect['prompt']
     assert 'must not skip required text sources' in collect['prompt']
     assert 'ppt_collect_github_prs' in collect['tools']
     assert steps['generate_backgrounds']['skip_if'] == {'material': 'skip_background_images'}
-    assert 'Do not collect additional images or generate backgrounds' in steps['generate_ppt']['prompt']
+    assert 'Reuse registered evidence screenshots/figures' in steps['generate_ppt']['prompt']
 
 
 def test_template_is_read_before_material_collection():
@@ -29,11 +29,13 @@ def test_template_is_read_before_material_collection():
     assert 'read_template' not in state['steps']
     read = state['steps']['analyze_requirements']
     assert read['tools'] == ['pptx_analyzer']
-    assert 'following next_page until null' in read['prompt']
+    assert 'all_pages=true' in read['prompt']
     assert {'material': 'template_content_brief', 'required': False} in read['outputs']
     workflow = yaml.safe_load((root / 'workflows/ppt-workflow/workflow.yaml').read_text(encoding='utf-8'))
     analysis = next(tab for tab in workflow['ui']['tabs'] if tab['id'] == 'analysis')
-    assert {'id': 'template_content_brief'} in analysis['slots']
+    assert analysis['slots'] == [{'id': 'requirement_analysis'}]
+    brief_slot = next(slot for slot in workflow['slots'] if slot['id'] == 'template_content_brief')
+    assert brief_slot['exposed'] is False and brief_slot['user_visible'] is False
     for name in ('collect_materials', 'build_outline', 'generate_ppt'):
         assert {'material': 'template_content_brief', 'required': False} in state['steps'][name]['inputs']
 

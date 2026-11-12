@@ -56,6 +56,7 @@ env:
   UV_DEFAULT_INDEX: https://pypi.org/simple
   LAZYMIND_DESKTOP_DEFER_HISTORY: "true"
   LAZYMIND_DESKTOP_DEFER_PYTHON: "true"
+  LAZYMIND_DESKTOP_DEFER_CLUSTER: "true"
   LAZYMIND_PYTHON_COMPONENT_BASE_URL: ${{ format('https://modelscope.cn/datasets/{0}/resolve/master/RAG/', vars.LAZYMIND_MS_COMPONENT_REPO || 'CarlosShaoting/lazymind-cst') }}
   LAZYMIND_MS_COMPONENT_REPO: ${{ vars.LAZYMIND_MS_COMPONENT_REPO || 'CarlosShaoting/lazymind-cst' }}
   LAZYMIND_UPDATE_BUILD_CONFIG_JSON: ${{ inputs.enable_updates && vars.LAZYMIND_WINDOWS_UPDATE_CONFIG_JSON || '' }}

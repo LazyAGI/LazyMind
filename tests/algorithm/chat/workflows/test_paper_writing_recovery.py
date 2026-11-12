@@ -37,12 +37,12 @@ def correction_model(monkeypatch, respond):
     return requests
 
 
-def draft(monkeypatch, body, candidates):
+def draft(monkeypatch, body, candidates, material_identifiers=()):
     outline = '# Paper\n\n## Discussion'
     inputs = contracts.validate_input('write_document', {'topic': 'Paper', 'outline': outline})
     prepared = dict(writing_task={'constraints': contracts.normalize_constraints({})},
                     writing_context={}, outline=outline,
-                    charts=[], reference_candidates=candidates)
+                    charts=[], reference_candidates=candidates, material_identifiers=material_identifiers)
     monkeypatch.setattr(write_document, 'prepare_writer_context', lambda *a, **kw: prepared)
     toolkit = Mock()
     toolkit.generate_section_instructions.return_value = json.dumps({'section_instructions': {'instructions': [dict(
@@ -66,7 +66,7 @@ def test_recorded_draft_converts_known_markers_before_strict_validation(record, 
     assert draft(monkeypatch, source, record['references']) == expected
 
 
-@pytest.mark.parametrize('marker', ['[SRC-UNKNOWN]', '[文献:SRC-UNKNOWN]', '[1]'])
+@pytest.mark.parametrize('marker', ['[SRC-UNKNOWN]', '[文献:SRC-UNKNOWN]', '[文献:upload-unknown]', '[1]'])
 def test_draft_normalization_still_rejects_unknown_and_unmanaged_citations(record, monkeypatch, marker):
     with pytest.raises(ValueError):
         draft(monkeypatch, '# Paper\n\n## Discussion\n\n' + marker, record['references'])
@@ -200,19 +200,14 @@ def test_recovery_applies_all_validated_edits_once_and_never_publishes_invalid_r
     requests = correction_model(monkeypatch, lambda items: {'repairs': [dict(index=1, old_string=old, new_string=new)]})
     emitted = []
     with bind_runtime_events(emitted.append, 'revise_document_document'):
-        if invalid:
-            message = {True: 'exceeds the planned', 'citation': 'reference marker',
-                       'chart': 'unknown chart', 'noop': 'old_string and new_string must differ'}[invalid]
-            with pytest.raises(ValueError, match=message):
-                revise_document._modify_manuscript(data, {'word_target': None}, Mock(), editor=tools)
-            assert not any(event['type'].startswith('artifact_stream') for event in emitted)
-            if invalid is True or invalid == 'noop':
-                tools.apply_string_replace.assert_not_called()
-        else:
-            result = revise_document._modify_manuscript(data, {'word_target': None}, Mock(), editor=tools)
-            assert result['manuscript'] == data['manuscript'].replace('Original', 'Clarified')
-            tools.apply_string_replace.assert_called_once()
-            assert len([event for event in emitted if event['type'] == 'artifact_stream_end']) == 1
+        result = revise_document._modify_manuscript(data, {'word_target': None}, Mock(), editor=tools)
+        expected = data['manuscript'].replace('Original method.', 'Clarified method.')
+        if not invalid:
+            expected = expected.replace('Original result.', 'Clarified result.')
+        assert result['manuscript'] == expected
+        assert bool(result['_pending_edits']) == bool(invalid)
+        assert tools.apply_string_replace.call_count == (1 if invalid else 2)
+        assert len([event for event in emitted if event['type'] == 'artifact_stream_end']) == 1
     assert data == before
     assert len(requests) == 1
     tools.generate_modify_plan.assert_called_once()
@@ -224,15 +219,97 @@ def test_locator_and_patch_correction_share_one_attempt(monkeypatch):
     operations[0]['locator_text'] = 'Paraphrased method.'
     tools.generate_modify_plan.return_value = json.dumps({'scope': 'document', 'instructions': operations})
     requests = correction_model(monkeypatch, lambda items: {'repairs': [dict(index=0, locator_text='Original method.')]})
-    with pytest.raises(ValueError, match='exceeds the planned'):
-        revise_document._modify_manuscript(data, {'word_target': None}, Mock(), editor=tools)
+    result = revise_document._modify_manuscript(data, {'word_target': None}, Mock(), editor=tools)
+    assert result['manuscript'] == data['manuscript'].replace('Original method.', 'Clarified method.')
+    assert result['_pending_edits']
     assert len(requests) == 1
-    tools.apply_string_replace.assert_not_called()
+    tools.apply_string_replace.assert_called_once()
 
 
 def test_oversized_local_correction_stops_before_model_request(record):
     plan = MarkdownModifyPlan.model_validate(record['locator']['plan'])
     locator = '人工介入更适合被理解为高风险中间工件上的选择性判断'
-    source = record['source'].replace(locator, '原始材料' * 6000 + locator, 1)
+    source = record['source'].replace(locator, '原始材料' * 40000 + locator, 1)
     with pytest.raises(ValueError, match='超过预算'):
         revise_document._validated_ranges(source, plan)
+
+
+def test_reader_provenance_repairs_only_affected_blocks_and_preserves_code_and_citation_targets(monkeypatch):
+    source = ('# Paper\n\nRecords from `write_document:analysis` contain 30 tasks.\n\n'
+              '| Record | Source |\n| --- | --- |\n| Cache | `table-private` |\n\n'
+              'Supported claim [1](#paper-ref-table-private) and [文献:table-private].\n\n'
+              '```text\nwrite_document:analysis\n\nprivate example\n```\n\nRetained paragraph.')
+    edits = ['Operational records contain 30 tasks.',
+             '| Record | Source |\n| --- | --- |\n| Cache | Context-reuse record |']
+    requests = correction_model(monkeypatch, lambda items: {
+        'repairs': [dict(index=item['index'], new_string=edits[item['index']]) for item in items],
+    })
+    output = recovery.repair_reader_provenance([source], ['write_document:analysis', 'table-private'])[0]
+    assert len(requests) == 1 and len(requests[0]) == 2
+    assert output == source.replace(requests[0][0]['source_scope'], edits[0]).replace(
+        requests[0][1]['source_scope'], edits[1])
+
+
+def test_draft_corrects_registered_processing_identities_before_publication(monkeypatch):
+    source = '# Paper\n\n## Discussion\n\nSource write_document:analysis contains 30 tasks.'
+    requests = correction_model(monkeypatch, lambda items: {
+        'repairs': [dict(index=0, new_string='Operational records contain 30 tasks.')],
+    })
+    result = draft(monkeypatch, source, [], ['write_document:analysis'])
+    assert result == source.replace('Source write_document:analysis contains', 'Operational records contain')
+    assert len(requests) == 1
+
+
+@pytest.mark.parametrize('marker', ['[文献:M1]', '[文献:M1](#study-background)'])
+def test_registered_background_markers_are_removed_only_from_visible_prose(marker):
+    source = ('# Paper\n\nOur data ' + marker + ' supports this observation. Prior work [文献:M2].\n\n'
+              '```text\n[文献:M1]\n```\n\n<!-- [文献:M1] -->\n\n'
+              '[Public source](https://example.org/[文献:M1])')
+    result = recovery.repair_reader_provenance([source], ['[文献:M1]'])[0]
+    assert result == source.replace('Our data ' + marker, 'Our data ')
+    assert '[文献:M2]' in result
+
+
+def test_draft_and_result_boundary_accept_added_subsections(monkeypatch):
+    body = '# Paper\n\n## Discussion\n\nStudy findings.\n\n### Resource Use\n\nResource observations.'
+    assert draft(monkeypatch, body, []) == body
+    write_document.validate_result(dict(manuscript=body), dict(
+        mode='draft', manuscript=None, papers=[], charts=[], outline='# Paper\n\n## Discussion'))
+
+
+@pytest.mark.parametrize('body', [
+    '# Paper\n\n## Discussion\n\n### Second\n\n### First',
+    '# Paper\n\n## Discussion\n\n### First',
+    '# Paper\n\n## Discussion\n\n### First\n\n### Second\n\n## Unplanned Main Section',
+])
+def test_draft_outline_validation_keeps_planned_sections_and_order(body):
+    inputs = dict(mode='draft', manuscript=None, papers=[], charts=[],
+                  outline='# Paper\n\n## Discussion\n\n### First\n\n### Second')
+    with pytest.raises(ValueError, match='大纲与稿件不一致'):
+        write_document.validate_result(dict(manuscript=body), inputs)
+
+
+@pytest.mark.parametrize('corrected', ['', 'Records from write_document:analysis.'])
+def test_reader_provenance_rejects_empty_or_still_internal_text(monkeypatch, corrected):
+    requests = correction_model(monkeypatch, lambda items: {
+        'repairs': [dict(index=0, new_string=corrected)],
+    })
+    with pytest.raises(ValueError, match='Reader-facing source'):
+        recovery.repair_reader_provenance(['Records from write_document:analysis.'], ['write_document:analysis'])
+    assert len(requests) == 1
+
+
+def test_reader_provenance_correction_keeps_the_original_revision_scope_guard(monkeypatch):
+    source = '# Paper\n\n## Methods\n\nOriginal method. Source write_document:analysis.'
+    plan = MarkdownModifyPlan.model_validate(dict(scope='document', instructions=[]))
+    start = source.index('Original method.')
+    allowed = [(start, start + len('Original method.'))]
+    requests = correction_model(monkeypatch, lambda items: {
+        'repairs': [dict(index=0, new_string='Clarified method. Source operational records.')],
+    })
+    generated = {'replacements': [dict(old_string='Original method. Source write_document:analysis.',
+                                       new_string='Clarified method. Source write_document:analysis.')]}
+    with pytest.raises(ValueError, match='exceeds the planned'):
+        revise_document._validated_changes(source, plan, allowed, generated, allow_repair=False,
+                                           material_identifiers=['write_document:analysis'])
+    assert len(requests) == 1

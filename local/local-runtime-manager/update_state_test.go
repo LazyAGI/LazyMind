@@ -56,13 +56,26 @@ func newUpdateStateFixture(t *testing.T) *updateStateFixture {
 		}
 		db.SetMaxOpenConns(1)
 		t.Cleanup(func() { _ = db.Close() })
-		if _, err := db.Exec("PRAGMA journal_mode=WAL; PRAGMA wal_autocheckpoint=0; CREATE TABLE fixture_records (id INTEGER PRIMARY KEY, value TEXT); INSERT INTO fixture_records VALUES (1, 'PRIVATE-FIXTURE-VALUE')"); err != nil {
+		if _, err := db.Exec("PRAGMA journal_mode=WAL; PRAGMA wal_autocheckpoint=0"); err != nil {
+			t.Fatal(err)
+		}
+		seed := "CREATE TABLE fixture_records (id INTEGER PRIMARY KEY, value TEXT); INSERT INTO fixture_records VALUES (1, 'PRIVATE-FIXTURE-VALUE')"
+		if name == "core" {
+			seed += "; CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY, dirty BOOLEAN NOT NULL); INSERT INTO schema_migrations VALUES (101, 0); CREATE TABLE schema_migration_history (version INTEGER PRIMARY KEY, name TEXT NOT NULL, applied_at TEXT); INSERT INTO schema_migration_history VALUES (101, 'fixture_baseline', '2026-01-01')"
+		}
+		// Keep durable, uncheckpointed WAL while avoiding a commit per statement.
+		tx, err := db.Begin()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := tx.Exec(seed); err != nil {
+			_ = tx.Rollback()
+			t.Fatal(err)
+		}
+		if err := tx.Commit(); err != nil {
 			t.Fatal(err)
 		}
 		f.databases[name] = db
-	}
-	if _, err := f.databases["core"].Exec("CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY, dirty BOOLEAN NOT NULL); INSERT INTO schema_migrations VALUES (101, 0); CREATE TABLE schema_migration_history (version INTEGER PRIMARY KEY, name TEXT NOT NULL, applied_at TEXT); INSERT INTO schema_migration_history VALUES (101, 'fixture_baseline', '2026-01-01')"); err != nil {
-		t.Fatal(err)
 	}
 	return f
 }

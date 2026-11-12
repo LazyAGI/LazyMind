@@ -69,6 +69,21 @@ describe('formula study panel',()=>{
   await screen.findByText('Summary');
   expect(view.container.querySelectorAll('.pdf-study-summary p')).toHaveLength(1);
  });
+ it('renders legacy aliases in the summary with canonical model symbols',async()=>{
+  const symbols=[
+   {symbol:String.raw`\theta_ {m d} ^ {(1)}`,meaning:'Model parameter',evidence_ids:[],inferred:true},
+   {symbol:String.raw`\theta_ {a g} ^ {(0)}`,meaning:'Aggregated parameter',evidence_ids:[],inferred:true},
+   {symbol:String.raw`\hat {\theta} ^ {(0)}`,meaning:'Initial estimate',evidence_ids:[],inferred:true},
+   {symbol:String.raw`\alpha ^ {(1)}`,meaning:'Weight',evidence_ids:[],inferred:true},
+  ];
+  const summary='模型参数theta_md^{(1)}作为theta_ag^{(0)}与hat_theta^{(0)}的加权平均。\n\n权重由alpha^{(1)}控制。';
+  mocks.post.mockReset().mockResolvedValue({data:{data:{...explanation,summary,symbols}}});
+  const view=render(<PdfFormulaStudy target={{dataset:'d',document:'doc'}} sourceKey="summary-symbols" blocks={[block]} selected={block} autoExplain onSelect={vi.fn()} onNavigate={vi.fn()} onReturn={vi.fn()} canReturn={false} onClose={vi.fn()}/>);
+  await screen.findByText('Model parameter');
+  const rendered=view.container.querySelector('.pdf-study-summary')!;
+  expect(Array.from(rendered.querySelectorAll('annotation'),node=>node.textContent)).toEqual(symbols.map(symbol=>symbol.symbol));
+  expect(rendered.querySelectorAll('p')).toHaveLength(2);
+ });
  it('shows exact evidence separately from generated interpretation and navigates to it',async()=>{
  mocks.post.mockResolvedValue({data:{data:explanation}});
  const navigate=vi.fn();

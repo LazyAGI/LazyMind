@@ -43,6 +43,11 @@ func actualUpdateFormatFixture(t *testing.T, version int) *updateStateFixture {
 		if err := database.Ping(); err != nil {
 			t.Fatal(err)
 		}
+		transaction, err := database.Begin()
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer transaction.Rollback()
 		rank := map[string]int{"table": 0, "index": 1, "view": 2, "trigger": 3}
 		sort.SliceStable(captured.Shape.Schema, func(i, j int) bool {
 			a, b := captured.Shape.Schema[i], captured.Shape.Schema[j]
@@ -53,26 +58,29 @@ func actualUpdateFormatFixture(t *testing.T, version int) *updateStateFixture {
 		})
 		for _, entry := range captured.Shape.Schema {
 			var exists int
-			if err := database.QueryRow("SELECT COUNT(*) FROM sqlite_schema WHERE name = ?", entry.Name).Scan(&exists); err != nil {
+			if err := transaction.QueryRow("SELECT COUNT(*) FROM sqlite_schema WHERE name = ?", entry.Name).Scan(&exists); err != nil {
 				t.Fatal(err)
 			}
 			// FTS creates its shadow tables; never create a second copy.
 			if exists != 0 {
 				continue
 			}
-			if _, err := database.Exec(entry.SQL); err != nil {
+			if _, err := transaction.Exec(entry.SQL); err != nil {
 				t.Fatalf("restore %s object %s: %v", family, entry.Name, err)
 			}
 		}
 		if family == "core" {
-			if _, err := database.Exec("INSERT INTO schema_migrations(version,dirty) VALUES (?,0)", captured.Shape.CoreVersion); err != nil {
+			if _, err := transaction.Exec("INSERT INTO schema_migrations(version,dirty) VALUES (?,0)", captured.Shape.CoreVersion); err != nil {
 				t.Fatal(err)
 			}
 			for _, entry := range captured.Shape.CoreHistory {
-				if _, err := database.Exec("INSERT INTO schema_migration_history(version,name) VALUES (?,?)", entry.Version, entry.Name); err != nil {
+				if _, err := transaction.Exec("INSERT INTO schema_migration_history(version,name) VALUES (?,?)", entry.Version, entry.Name); err != nil {
 					t.Fatal(err)
 				}
 			}
+		}
+		if err := transaction.Commit(); err != nil {
+			t.Fatal(err)
 		}
 		f.databases[family] = database
 	}

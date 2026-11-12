@@ -663,8 +663,12 @@ func TestUpdateMaintenanceActualChildOwnsLockAfterManagerDeath(t *testing.T) {
 	// report already-installed or write while the OTA Core process owns the lock.
 	independent := exec.Command(coreBinary, "-test.run=^TestComponentHTTPInstallEntrypointChild$")
 	independent.Env = append(os.Environ(), "LAZYMIND_UNIT_COMPONENT_ENTRY=1", "LAZYMIND_RUNTIME_MODE=local", "LAZYMIND_RUNTIME_ROOT="+f.paths.RuntimeRoot, "LAZYMIND_PYTHON_COMPONENT_CATALOG="+filepath.Join(f.paths.ResourcesRoot, "config", "python-components.json"), "LAZYMIND_UNIT_UPDATER_ROOT="+root, "LAZYMIND_SOURCE_COMPONENT_INSTALLER="+managerWrapper, "LAZYMIND_ALGORITHM_SOURCE="+filepath.Join(f.paths.RepoRoot, "algorithm"))
-	if output, err := independent.CombinedOutput(); err != nil || !bytes.Contains(output, []byte("update_transaction_busy")) {
-		t.Fatalf("independent HTTP installer bypassed live writer: %s %v", output, err)
+	httpOutput, err := independent.CombinedOutput()
+	var refusal struct {
+		Code int `json:"code"`
+	}
+	if err != nil || json.Unmarshal(httpOutput, &refusal) != nil || refusal.Code != 2000107 {
+		t.Fatalf("independent HTTP installer bypassed live writer: %s %v", httpOutput, err)
 	}
 	// Killing the actual writer, rather than its parent, releases the OS lock.
 	if err := writer.Kill(); err != nil {

@@ -5,6 +5,7 @@ import "net/http"
 func init() {
 	registerAdditionalErrorAlias("agent not allowed", "forbidden", http.StatusForbidden, 2000102)
 	registerAdditionalErrorAlias("idempotency conflict", "Conflict", http.StatusConflict, 2000107)
+	registerAdditionalErrorAlias("workflow run changed before its state could be written", "Conflict", http.StatusConflict, 2000107)
 	registerAdditionalError("workflow controls require an interactive single Chat run", http.StatusBadRequest, 2004901)
 	registerAdditionalError("native workflow controls require the LazyMind Chat executor", http.StatusConflict, 2004902)
 	registerAdditionalError("lease_token required", http.StatusBadRequest, 2004903)
@@ -12,6 +13,7 @@ func init() {
 	registerAdditionalError("workflow state unavailable", http.StatusInternalServerError, 2004905)
 	registerAdditionalError("task cancellation rejected", http.StatusInternalServerError, 2004906)
 	registerAdditionalErrorPattern("task cancellation rejected: HTTP %d", "task cancellation rejected", http.StatusInternalServerError, 2004906)
+	registerAdditionalErrorPattern("collect recovered task %s", "Internal server error", http.StatusInternalServerError, 2000000)
 	for _, source := range []string{
 		"task_description is required", "invalid skill import url", "skill import url must use http or https",
 		"input_bindings requires a nonempty material ID",

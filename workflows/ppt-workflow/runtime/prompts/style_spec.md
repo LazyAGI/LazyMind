@@ -44,6 +44,16 @@ keep the user colors in palette and primary_color.hex. The catalog hex and
 compatibility rules below apply only to unspecified properties. Do not infer a
 dark/cyan scheme just because the topic is technical.
 
+The built-in 科研风格 / academic default uses a plain white #FFFFFF canvas,
+black #111111 titles and body text, and restrained blue/teal/orange/purple chart
+accents. Choose the Academic catalog style with Light tone, unless a user
+explicitly requests another direction. Write background and text colors into
+palette.background / palette.text and art_direction; carry them into tables,
+formulas, chart axes/legends and diagram labels. Prefer white or pale gray
+surfaces and thin gray rules. Do not interpret scientific/technical content as
+a request for dark dashboards, neon/HUD decoration or gradient backgrounds.
+Uploaded templates and explicit user color requests retain priority.
+
 ## Rules for the triple
 
 1. **One deck-wide contract** — Select exactly one visual triple for the whole deck. This result is authoritative for every slide; downstream pages must reuse it instead of selecting their own page-specific styles or palettes.
@@ -58,7 +68,22 @@ dark/cyan scheme just because the topic is technical.
 
 - `palette.primary` MUST equal `primary_color.hex` literally. When the user specifies a custom color, use that color in both fields instead of the catalog hex.
 - `palette.accent` and `palette.neutral` are your creative choice **but must harmonize** with the primary + tone. Use hex uppercase.
-- `typography` must match the design_style's personality (科技感 → Inter / Roboto Mono; 国潮 → serif like "Noto Serif SC"; 卡通可爱 → rounded like ZCOOL KuaiLe; etc.). Keep distinct heading and body stacks when the style calls for them; do not collapse every design to Arial/system-ui. Put the intended named face first and include a portable Office fallback later in each CSS stack (for Chinese, e.g. Microsoft YaHei/SimSun/KaiTi as appropriate; for Latin, e.g. Arial/Georgia/Courier New).
+- Resolve `typography` and text colors for this deck from explicit user choices, then the inspected reference, then audience, language, readability and available fonts. Do not map a topic/style label to a fixed font or body-text color. Keep heading/body roles consistent without requiring different typefaces. Put the selected face first and compatible available fallbacks later; disclose substitutions when a reference font is unavailable. Record concrete font stacks and semantic text/background colors in this deck's contract, not as global defaults learned from one example.
+
+## Conventional work-review references
+
+For a work review/probation defense with an explicitly approved conventional
+company-deck reference, inspect its hierarchy, alignment, spacing, typography
+and color roles before deriving this deck's visual contract. Reuse the actual
+reference's visual relationships; do not assume a top title band, separator,
+light background, dark body text, particular font or fixed accent placement.
+A work-inventory table, method/figure pairing or result comparison is an optional
+composition chosen for its information structure, not a mandatory page recipe.
+Keep the deck coherent while allowing content-specific compositions. Do not
+replace an approved direction with generic decorative cards or KPI blocks.
+Preserve meaningful information
+density while correcting edge crowding and screenshot overlap. A style reference
+does not authorize full-slide screenshot backgrounds or AI-background generation.
 
 ## Concrete visual design
 
@@ -82,3 +107,5 @@ Do not invent facts or decorative KPI values to implement the concept.
 - Do NOT change an explicit user color to the catalog's primary_color.hex.
 - Do NOT generate separate palettes for individual slides.
 - JSON must be valid.
+
+Default typography: unless the user explicitly requests another font or requires preserving template fonts, use `"Songti SC", "宋体-简", serif` for both headings and body text. This is 宋体-简, not SimSun. Keep this default across all style samples; vary layout and colors instead. Font resources must be embedded in the delivered HTML and editable PPTX; do not claim portability from a font name alone.

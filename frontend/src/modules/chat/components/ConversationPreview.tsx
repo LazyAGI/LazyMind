@@ -29,8 +29,10 @@ export default function ConversationPreview({
   const [open, setOpen] = useState(false);
   const [layout, setLayout] = useState({ offset: 8, width: 300 });
   const [source, setSource] = useState<{ id: string; relation: ConversationRelation | null } | null>(null);
-  const entry = useConversationRunningStore(state => state.entries[conversationId]);
-  const status = entry?.status === "idle" ? entry.terminalStatus : entry?.status;
+  const status = useConversationRunningStore(state => {
+    const entry = state.entries[conversationId];
+    return entry?.status === "idle" ? entry.terminalStatus : entry?.status;
+  });
   const statusLabels = {
     running: "chat.conversationRunning",
     unknown: "chat.conversationStatusUnavailable",

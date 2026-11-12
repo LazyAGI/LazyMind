@@ -240,7 +240,7 @@ def draw_ecdf(ax, series, methods, colors, edges, line_styles, title, xlabel, xl
     return results
 
 
-def draw_stacked(ax, values, categories, components, colors, normalized, title, ylabel):
+def draw_stacked(ax, values, categories, components, colors, normalized, title, ylabel, orientation='vertical'):
     values = np.asarray(values, dtype=float)
     if len(colors) != len(components) or len(set(components)) != len(components):
         raise ValueError('Supply one stable color per distinct component; never truncate data to a palette')
@@ -249,6 +249,10 @@ def draw_stacked(ax, values, categories, components, colors, normalized, title, 
     if np.any(values < 0) or np.any(values.sum(axis=1) <= 0):
         raise ValueError('Compositions require nonnegative components and a positive denominator')
     displayed = values / values.sum(axis=1, keepdims=True) * 100 if normalized else values.copy()
+    if orientation == 'horizontal':
+        draw_horizontal_stack(ax, displayed, values.sum(axis=1), categories, components, colors,
+                              normalized, title, ylabel)
+        return displayed
     paper_axes(ax, title, 'Method', ylabel, True)
     bottom = np.zeros(len(categories))
     for index, (name, color) in enumerate(zip(components, colors)):
@@ -267,6 +271,35 @@ def draw_stacked(ax, values, categories, components, colors, normalized, title, 
         for j, value in enumerate(bottom):
             ax.text(j, value + 2, f'{value:g}', ha='center', va='bottom', fontsize=7.2)
     return displayed
+
+
+def draw_horizontal_stack(ax, displayed, totals, categories, components, colors, normalized, title, xlabel):
+    paper_axes(ax, title, 'Share (%)' if normalized else xlabel, '', False)
+    positions, left = np.arange(len(categories)), np.zeros(len(categories))
+    for index, (component, color) in enumerate(zip(components, colors)):
+        bars = ax.barh(positions, displayed[:, index], left=left, height=.3, color=color,
+                       edgecolor='white', linewidth=.5, label=component, zorder=3)
+        for row, bar in enumerate(bars):
+            width = displayed[row, index]
+            middle = left[row] + width / 2
+            label = f'{width:.1f}%' if normalized else f'{width:.4g}'
+            if width >= displayed[row].sum() * .12:
+                ax.text(middle, row, label, ha='center', va='center', fontsize=7.2,
+                        color=contrast_text(bar.get_facecolor()))
+            elif width > 0:
+                ax.annotate(label, (middle, row - .15), (middle, row - .3),
+                            ha='center', va='bottom', fontsize=7,
+                            arrowprops=dict(arrowstyle='-', color='#555555', linewidth=.6))
+        left += displayed[:, index]
+    for row, total in enumerate(totals):
+        ax.text(left[row], row - .5, f'Total {total:.5g}', ha='right', va='center', fontsize=7.2)
+    ax.set_yticks(positions, categories)
+    ax.set_ylim(-.65, len(categories) - .35)
+    ax.invert_yaxis()
+    ax.set_xlim(0, max(left) * 1.05)
+    ax.spines['left'].set_visible(False)
+    ax.tick_params(axis='y', length=0)
+    ax.grid(axis='x', alpha=.2)
 
 
 def binary_curves(y_true, scores):

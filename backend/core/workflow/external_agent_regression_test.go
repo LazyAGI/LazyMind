@@ -94,6 +94,9 @@ func TestHostedStepsDoNotInvokeNativeDriver(t *testing.T) {
 				t.Fatal(err)
 			}
 			want := SessionStatusWaiting
+			if status == subagent.StatusSucceeded {
+				want = SessionStatusActive
+			}
 			if status == subagent.StatusFailed {
 				want = SessionStatusFailed
 			}
@@ -218,5 +221,38 @@ func TestExternalChatMergePreservesFeedbackForEveryOutcome(t *testing.T) {
 				t.Fatalf("bad merge: %s", result)
 			}
 		})
+	}
+}
+
+func TestExternalTaskPersistenceRetriesSQLiteBusy(t *testing.T) {
+	db, task, _ := seedRecoveredExternalTask(t)
+	if db.Dialector.Name() != "sqlite" {
+		t.Skip("SQLite retry semantics")
+	}
+	if err := db.Model(&task).Updates(map[string]any{"status": externalTaskStatusRunning, "error_code": "", "error_message": ""}).Error; err != nil {
+		t.Fatal(err)
+	}
+	const callback = "test:external-task-busy-once"
+	writes := 0
+	if err := db.Callback().Update().Before("gorm:update").Register(callback, func(tx *gorm.DB) {
+		if tx.Statement.Table == "external_agent_workflow_tasks" {
+			writes++
+			if writes == 1 {
+				tx.AddError(errors.New("database is locked (517) (SQLITE_BUSY_SNAPSHOT)"))
+			}
+		}
+	}); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { db.Callback().Update().Remove(callback) })
+	got := persistExternalTask(db.DB, task, map[string]any{"stage": "collect_result"})
+	if got.ErrorCode != "" || got.Status != externalTaskStatusRunning || writes != 2 {
+		t.Fatalf("transient write did not recover: code=%s status=%s writes=%d", got.ErrorCode, got.Status, writes)
+	}
+	if err := db.First(&task, "id=?", task.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if task.Stage != "collect_result" || task.Status != externalTaskStatusRunning {
+		t.Fatalf("unexpected persisted task: %+v", task)
 	}
 }

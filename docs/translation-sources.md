@@ -45,3 +45,11 @@
 本轮也验证了百度、有道等网页端请求。没有得到可重复、无需登录且无需绕过验证码的调用方式，因此未将其网页端伪装为可用翻译源。
 
 [Chrome 内置 Translator API](https://developer.chrome.com/docs/ai/translator-api) 和 [Edge 内置 Translator API](https://learn.microsoft.com/en-us/microsoft-edge/web-platform/translator-api) 可在支持的桌面浏览器内运行，但需要浏览器下载语言模型并在运行时检查可用性；它们不能作为当前后端文档任务的统一来源。[Apertium 公共 API](https://wiki.apertium.org/wiki/API) 目前没有本功能所需的中文语向。[LibreTranslate 公共镜像](https://docs.libretranslate.com/community/mirrors/) 无法确认可持续访问，自托管实例可以另行接入。Papago、Yandex、Reverso 未查到可持续使用的官方免密钥公网文本 API。
+
+## 页内自适应排版（2026-11-10）
+
+参考 [BabelDOC 排版技术文档](https://funstory-ai.github.io/BabelDOC/ImplementationDetails/Typesetting/Typesetting/)、[排版源码](https://github.com/funstory-ai/BabelDOC/blob/main/babeldoc/format/pdf/document_il/midend/typesetting.py) 和 [PyMuPDF 文字写入/字体度量](https://pymupdf.readthedocs.io/en/latest/textwriter.html)。参考的是排版策略，未复制 BabelDOC 源码。
+
+当前实现先试原框，逐步收紧行距，再尝试同页右侧/下方的可用空间，最后按 5% 步长缩字。其他段落、未翻译文本、图形和已分配译文区域共同限制可扩展空间。逐字使用真实字体度量，保留英文单词，长标识符允许折行，字体缺字记录诊断并继续生成。所有段落先试排和检查文字提取，再删除原文并写入；仍无法容纳时在段落当前位置连续分页，后续正文和原始图表按顺序顺延；保留可读字号，不因文本过长报错。
+
+不再生成文末补充页、蓝框或跨页跳转。图表内文字和旋转标签暂时保留原文，避免扁平化表格单元格或破坏图表；诊断随译本保存在后台。正文和图注优先在原页排版，极端长段落原位续排。续排通过保留矢量和图片的原始页面片段拼接，避免把整篇论文重建成纯文本；页码映射随分页更新，复制/搜索不包含被裁剪的重复文字。图片、矢量图形和未替换文字进行保留检查。界面不再提供“重新排版”按钮。新任务会把混排公式前后的正文分开翻译，保留原生数学符号；旧版草稿不包含这些分段，需要重新翻译才能采用新的抽取方式。

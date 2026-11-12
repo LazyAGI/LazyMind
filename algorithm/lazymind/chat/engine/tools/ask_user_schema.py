@@ -11,7 +11,6 @@ from pydantic import (
 from lazyllm.tools.agent import ToolExecutionError
 
 
-MAX_QUESTIONS = 3
 MAX_SINGLE_SUGGESTIONS = 3
 MAX_MULTIPLE_SUGGESTIONS = 4
 
@@ -166,7 +165,7 @@ _EXAMPLES = [
       'validation': {'example': '今天开会讨论了垃圾分类，决定先从办公室做起。'}}],
 ]
 _QUESTIONS = TypeAdapter(Annotated[
-    List[_ModelQuestion], Field(min_length=1, max_length=MAX_QUESTIONS, examples=_EXAMPLES),
+    List[_ModelQuestion], Field(min_length=1, examples=_EXAMPLES),
 ])
 
 

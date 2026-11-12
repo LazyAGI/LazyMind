@@ -45,7 +45,8 @@ type academicChatSummary struct {
 
 type academicHandoffContext struct {
 	academicChatSummary
-	Input json.RawMessage `json:"input"`
+	Input           json.RawMessage `json:"input"`
+	ReflectionFirst bool            `json:"reflection_first"`
 }
 
 type academicHandoffLink struct {

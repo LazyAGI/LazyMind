@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 
@@ -268,6 +269,50 @@ func syncDefaultModelToUserGroups(
 	providerIDs := tx.Model(&orm.UserModelProvider{}).
 		Select("id").
 		Where("default_model_provider_id = ? AND deleted_at IS NULL", providerID)
+	// A catalog refresh may reclassify a model. Keep an active text-embedding
+	// row's technical type intact until its vector space can be retired safely.
+	var copied []orm.UserModelProviderGroupModel
+	if err := tx.Where("is_default = ? AND name = ? AND user_model_provider_id IN (?) AND deleted_at IS NULL", true, modelName, providerIDs).
+		Find(&copied).Error; err != nil {
+		return err
+	}
+	providerOwners := make(map[string]string)
+	for _, model := range copied {
+		if model.ModelType != modelType && isTextEmbeddingModelType(model.ModelType) {
+			providerOwners[model.UserModelProviderID] = model.CreateUserID
+		}
+	}
+	lockedIDs := make([]string, 0, len(providerOwners))
+	for id := range providerOwners {
+		lockedIDs = append(lockedIDs, id)
+	}
+	sort.Strings(lockedIDs)
+	for _, id := range lockedIDs {
+		provider := orm.UserModelProvider{ID: id, BaseModel: orm.BaseModel{CreateUserID: providerOwners[id]}}
+		if err := lockProvider(tx, &provider); err != nil {
+			return errServiceSyncConflict
+		}
+	}
+	protectedIDs := make([]string, 0)
+	if len(lockedIDs) > 0 {
+		copied = nil
+		if err := tx.Where("is_default = ? AND name = ? AND user_model_provider_id IN (?) AND deleted_at IS NULL", true, modelName, providerIDs).
+			Find(&copied).Error; err != nil {
+			return err
+		}
+		for _, model := range copied {
+			if model.ModelType == modelType || !isTextEmbeddingModelType(model.ModelType) {
+				continue
+			}
+			if err := guardEmbeddingRuntimeMutation(tx, model.CreateUserID, model.UserModelProviderID, model.UserModelProviderGroupID, model.ID); err != nil {
+				if errors.Is(err, errEmbeddingIdentityInUse) {
+					protectedIDs = append(protectedIDs, model.ID)
+					continue
+				}
+				return err
+			}
+		}
+	}
 
 	updates := map[string]any{
 		"vision":                     vision,
@@ -281,9 +326,12 @@ func syncDefaultModelToUserGroups(
 		updates["input_token_limit"] = nil
 		updates["max_output_tokens"] = nil
 	}
-	if err := tx.Model(&orm.UserModelProviderGroupModel{}).
-		Where("is_default = ? AND name = ? AND user_model_provider_id IN (?) AND deleted_at IS NULL", true, modelName, providerIDs).
-		Updates(updates).Error; err != nil {
+	updateQuery := tx.Model(&orm.UserModelProviderGroupModel{}).
+		Where("is_default = ? AND name = ? AND user_model_provider_id IN (?) AND deleted_at IS NULL", true, modelName, providerIDs)
+	if len(protectedIDs) > 0 {
+		updateQuery = updateQuery.Where("id NOT IN ?", protectedIDs)
+	}
+	if err := updateQuery.Updates(updates).Error; err != nil {
 		return err
 	}
 	if isChatTechnicalType(modelType) {
@@ -346,6 +394,33 @@ func syncDefaultModelToUserGroups(
 		}
 		if count > 0 {
 			continue
+		}
+		// A refreshed catalog can reintroduce a model that was previously
+		// retired. Restore the soft-deleted row before inserting so the unique
+		// group/name index remains valid across catalog refreshes.
+		var retired orm.UserModelProviderGroupModel
+		if err := tx.Unscoped().
+			Where("user_model_provider_group_id = ? AND name = ?", group.GroupID, modelName).
+			Take(&retired).Error; err == nil {
+			if err := tx.Unscoped().Model(&retired).Updates(map[string]any{
+				"user_model_provider_id":     group.UserModelProviderID,
+				"provider_name":              providerName,
+				"model_type":                 modelType,
+				"vision":                     vision,
+				"max_input_tokens":           maxInputTokens,
+				"free_auto_select_priority":  freeAutoSelectPriority,
+				"free_auto_select_base_urls": freeAutoSelectBaseURLs,
+				"is_default":                 true,
+				"create_user_id":             group.CreateUserID,
+				"create_user_name":           group.CreateUserName,
+				"updated_at":                 now,
+				"deleted_at":                 nil,
+			}).Error; err != nil {
+				return err
+			}
+			continue
+		} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return err
 		}
 		row := orm.UserModelProviderGroupModel{
 			ID:                       common.GenerateID(),

@@ -623,6 +623,14 @@ func main() {
 	}
 	log.Init()
 
+	if len(os.Args) == 2 && os.Args[1] == "--prepare-cluster-component" {
+		ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+		defer stop()
+		if err := systemdeps.PrepareClusterComponent(ctx); err != nil {
+			log.Logger.Fatal().Err(err).Msg("prepare desktop clustering component")
+		}
+		return
+	}
 	if len(os.Args) > 1 && os.Args[1] == "--export-openapi-to" {
 		if len(os.Args) != 3 || strings.TrimSpace(os.Args[2]) == "" {
 			log.Logger.Fatal().Msg("--export-openapi-to requires one output path")
@@ -1012,7 +1020,7 @@ func run(ctx context.Context) error {
 				if vocabulary.Enabled() {
 					vocabulary.RegisterCloudSync(store.DB())
 					vocabularyRunner := updateControl.startRunner(runtimeCtx, store.DB(), asyncjob.Options{JobTypes: []string{vocabulary.CloudSyncJobType}, SerializeResources: true, Concurrency: 2, PollInterval: 2 * time.Second, LockTTL: 2 * time.Minute})
-					backgroundDone = append(backgroundDone, vocabularyRunner.Done())
+					backgroundDone = append(backgroundDone, vocabularyRunner.Done(), vocabulary.StartAnkiSync(runtimeCtx, store.DB()))
 				}
 				excludedJobs := append([]string{doc.ReadingPreparationJob, vocabulary.CloudSyncJobType, documentdirectory.PlanJob, documentdirectory.OrganizeJob, academic.ChatLaunchJobType, academic.PreparationJobType}, chat.ConversationTitleJobTypes...)
 				if !systemdeps.PythonComponentActive("rag") {
@@ -1038,6 +1046,7 @@ func run(ctx context.Context) error {
 
 				backgroundDone = append(backgroundDone, workflow.StartExternalWorkflowTaskRecovery(runtimeCtx, store.DB()))
 				backgroundDone = append(backgroundDone, workflow.StartWorkflowRepairRecovery(runtimeCtx, store.DB()))
+				backgroundDone = append(backgroundDone, workflow.StartNativeWorkflowStopRecovery(runtimeCtx, store.DB(), store.State()))
 				backgroundDone = append(backgroundDone, conversationgroup.StartTerminalJobReconciler(runtimeCtx, store.DB(), 2*time.Second))
 				backgroundDone = append(backgroundDone, chat.StartConversationTitle(runtimeCtx, store.DB(), func(r *asyncjob.Runner) {
 					updateControl.participants = append(updateControl.participants, desktopUpdateParticipant{r.PauseForUpdate, r.ResumeFromUpdate})
@@ -1154,6 +1163,9 @@ func run(ctx context.Context) error {
 		return &startupError{msg: "initialize capability MCP", err: err}
 	}
 	registerCapabilityMCPRoute(r, capabilityRuntime.MCP)
+	if capabilityRuntime.VocabularyMCP != nil {
+		r.Handle("/internal/mcp/vocabulary", capabilityRuntime.VocabularyMCP).Methods(http.MethodPost, http.MethodGet, http.MethodDelete)
+	}
 	if capabilityRuntime.KnowledgeInternal != nil {
 		for _, action := range []string{"credential", "prepare", "status", "claim", "supersede"} {
 			r.Handle("/internal/knowledge-management:"+action, capabilityRuntime.KnowledgeInternal).Methods(http.MethodPost)

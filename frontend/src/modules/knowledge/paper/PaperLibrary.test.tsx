@@ -10,7 +10,7 @@ import { libraryFixture, paperFixture } from './__tests__/fixtures';
 import { emptyLibrary, type PaperLibraryData } from './libraryModel';
 import type { PaperRecord } from './model';
 import * as paperModel from './model';
-import { importLibraryPapers, loadPersistedPaperLibrary, previewLibraryPapers, patchLibraryPaper, confirmLibraryPdf, createLibraryFolder, removeLibraryPapers } from './store';
+import { importLibraryPapers, loadPersistedPaperLibrary, previewLibraryPapers, patchLibraryPaper, confirmLibraryPdf, createLibraryFolder, moveLibraryPapers, deleteLibraryPapers } from './store';
 import { paperFromPdf } from './pdfMeta';
 import { setPaperImportance } from '../api/paperWorkflows';
 import { TaskServiceApi } from '../utils/request';
@@ -22,7 +22,7 @@ vi.mock('./pdfMeta', () => ({ paperFromPdf: vi.fn() }));
 vi.mock('../utils/fileHash', () => ({ computeFileSha256: vi.fn().mockResolvedValue('hash') }));
 vi.mock('../api/paperWorkflows', async (original) => ({ ...await original<typeof import('../api/paperWorkflows')>(), setPaperImportance: vi.fn() }));
 vi.mock('../api/academicReferences', async (original) => ({ ...await original<typeof import('../api/academicReferences')>(), previewPaperLink: vi.fn(), previewPaperPDF: vi.fn(), importPaperLink: vi.fn(), getAcademicImportBatch: vi.fn(), listAcademicImportBatches: vi.fn() }));
-vi.mock('./store', async (original) => ({ ...await original<typeof import('./store')>(), loadPersistedPaperLibrary: vi.fn(), previewLibraryPapers: vi.fn(), patchLibraryPaper: vi.fn(), confirmLibraryPdf: vi.fn(), createLibraryFolder: vi.fn(), moveLibraryPapers: vi.fn(), removeLibraryPapers: vi.fn(), deleteLibraryFolder: vi.fn(), importLibraryPapers: vi.fn() }));
+vi.mock('./store', async (original) => ({ ...await original<typeof import('./store')>(), loadPersistedPaperLibrary: vi.fn(), previewLibraryPapers: vi.fn(), patchLibraryPaper: vi.fn(), confirmLibraryPdf: vi.fn(), createLibraryFolder: vi.fn(), moveLibraryPapers: vi.fn(), deleteLibraryPapers: vi.fn(), deleteLibraryFolder: vi.fn(), importLibraryPapers: vi.fn() }));
 const datasetId = 'library';
 vi.mock('./PaperAttachmentPreview', () => ({ default: ({ attachment }: { attachment: { name: string } }) => <div aria-label="附件预览">{attachment.name}</div> }));
 const libraries = new Map<string, PaperLibraryData>();
@@ -95,6 +95,62 @@ function captureDownload() {
         return content;
     };
 }
+it('adds tags from the whole collection and removes only the current paper association', async () => {
+    const data = readLibrary(datasetId);
+    data.papers[0].tags = ['paper', 'arxiv:2302.04761', '方法'];
+    data.papers[1].tags = ['方法', '推理'];
+    writeLibrary(datasetId, data);
+    await renderLibrary();
+    const row = within(screen.getByRole('row', { name: /Folder paper/ }));
+    const openPicker = async () => {
+        fireEvent.click(row.getByRole('button', { name: '添加标签' }));
+        return within(await screen.findByRole('dialog', { name: '添加标签' }));
+    };
+    const picker = await openPicker();
+    const applied = within(picker.getByRole('group', { name: '已添加' })).getByRole('checkbox', { name: '方法' });
+    expect(applied).toBeChecked();
+    expect(applied).toBeDisabled();
+    expect(picker.queryByRole('checkbox', { name: 'paper' })).not.toBeInTheDocument();
+    fireEvent.click(within(picker.getByRole('group', { name: '可添加' })).getByRole('checkbox', { name: '推理' }));
+    fireEvent.change(picker.getByRole('textbox', { name: '搜索或新建标签' }), { target: { value: '工具调用' } });
+    fireEvent.click(picker.getByRole('button', { name: '＋ 新建「工具调用」' }));
+    fireEvent.click(picker.getByRole('button', { name: '添加' }));
+    expect(await row.findByRole('button', { name: '移除标签 工具调用' })).toBeInTheDocument();
+    expect(readLibrary(datasetId).papers[0].tags).toEqual(['paper', 'arxiv:2302.04761', '方法', '推理', '工具调用']);
+
+    fireEvent.click(row.getByRole('button', { name: '移除标签 方法' }));
+    await waitFor(() => expect(row.queryByRole('button', { name: '移除标签 方法' })).not.toBeInTheDocument());
+    fireEvent.click(row.getByRole('button', { name: '移除标签 工具调用' }));
+    await waitFor(() => expect(row.queryByRole('button', { name: '移除标签 工具调用' })).not.toBeInTheDocument());
+    const reopened = await openPicker();
+    expect(within(reopened.getByRole('group', { name: '可添加' })).getByRole('checkbox', { name: '方法' })).toBeEnabled();
+    expect(reopened.queryByRole('checkbox', { name: '工具调用' })).not.toBeInTheDocument();
+});
+
+it('combines any or all selected tags with the other paper filters', async () => {
+    const data = readLibrary(datasetId);
+    data.papers[0].tags = ['方法', '推理'];
+    data.papers[1].tags = ['方法'];
+    data.papers[2].tags = ['推理'];
+    writeLibrary(datasetId, data);
+    await renderLibrary();
+    fireEvent.click(libraryTools().getByRole('button', { name: '筛选' }));
+    const filter = within(await screen.findByRole('dialog', { name: '筛选文献' }));
+    const tags = within(filter.getByRole('group', { name: '标签' }));
+    fireEvent.click(tags.getByRole('button', { name: '方法' }));
+    fireEvent.click(tags.getByRole('button', { name: '推理' }));
+    expect(tags.getByRole('button', { name: '任一（OR）' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByText('筛选结果 3 篇')).toBeInTheDocument();
+    fireEvent.click(tags.getByRole('button', { name: '全部（AND）' }));
+    expect(screen.getByText('筛选结果 1 篇')).toBeInTheDocument();
+    expect(screen.getByRole('row', { name: /Folder paper/ })).toBeInTheDocument();
+    fireEvent.click(within(filter.getByRole('group', { name: '全文附件' })).getByRole('button', { name: '待补 PDF' }));
+    expect(screen.getByText('筛选结果 0 篇')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '移除标签筛选 方法' }));
+    expect(screen.getByText('筛选结果 1 篇')).toBeInTheDocument();
+    expect(screen.getByRole('row', { name: /Unfiled paper/ })).toBeInTheDocument();
+});
+
 it('shows paper import methods and sources only in detail', async () => {
     const data = readLibrary(datasetId);
     Object.assign(data.papers[0], { importMethod: 'bibliography', source: 'local' });
@@ -242,12 +298,12 @@ describe('paper library behavior', () => {
         expect(screen.queryByRole('menu')).not.toBeInTheDocument();
         expect(screen.queryByRole('dialog', { name: '文献详情' })).not.toBeInTheDocument();
     });
-    it('refreshes import notifications immediately after removing a paper', async () => {
+    it('refreshes import notifications immediately after permanently deleting a paper', async () => {
         let removed = false;
         const operation = (): ImportOperation => ({ id: 'upload', entry_type: 'pdf_upload', target_dataset_id: datasetId, source: { file_name: 'paper.pdf' }, status: removed ? 'removed' : 'succeeded', created_at: '2026-10-27T01:00:00Z', summary: { total: 1, ready: removed ? 0 : 1, metadata_only: 0, skipped: 0, active: 0, failed: 0, canceled: 0, deleted: 0, removed: removed ? 1 : 0, resolved_later: 0, retryable: 0, needs_action: 0 } });
         vi.mocked(listAcademicImportBatches).mockImplementation(async () => ({ items: [operation()], next_cursor: '', notification: { active: 0, needs_action: 0 } }));
         vi.mocked(getAcademicImportBatch).mockImplementation(async () => ({ operation: operation(), next_cursor: '', items: [{ item_id: 'upload-item', batch_id: 'upload', work_id: 'work-a', title: 'Imported paper', target_dataset_id: datasetId, library_paper_id: removed ? undefined : 'a', status: 'succeeded', stage: 'done', result_kind: 'imported', current_state: removed ? 'removed' : 'ready', document_deleted: false, resolved_later: false, can_retry: false, current_document: { document_id: 'stored-pdf-a', processing_status: 'ready' }, created_at: '', updated_at: '' }] }));
-        vi.mocked(removeLibraryPapers).mockImplementation(async (id, papers) => {
+        vi.mocked(deleteLibraryPapers).mockImplementation(async (id, papers) => {
             const ids = papers.map(paper => paper.id), data = readLibrary(id);
             data.papers = data.papers.filter(paper => !ids.includes(paper.id));
             data.attachments = data.attachments.filter(attachment => !ids.includes(attachment.paperId));
@@ -262,14 +318,32 @@ describe('paper library behavior', () => {
         expect(await screen.findByText('已入库')).toBeInTheDocument();
         fireEvent.click(screen.getByRole('button', { name: '关闭通知' }));
         fireEvent.mouseEnter(screen.getByRole('button', { name: 'Folder paper 的更多操作' }));
-        fireEvent.click(await screen.findByRole('menuitem', { name: '从论文集移除' }));
-        const confirmation = await screen.findByRole('dialog', { name: '从论文集移除这篇文献？' });
-        fireEvent.click(within(confirmation).getByRole('button', { name: /移\s*除/ }));
+        fireEvent.click(await screen.findByRole('menuitem', { name: '彻底删除' }));
+        const confirmation = await screen.findByRole('dialog', { name: '彻底删除 1 篇论文？' });
+        fireEvent.click(within(confirmation).getByRole('button', { name: /彻底删除/ }));
         await waitFor(() => expect(screen.queryByRole('heading', { name: 'Folder paper' })).not.toBeInTheDocument());
         fireEvent.click(screen.getByRole('button', { name: /^通知：/ }));
         await waitFor(() => expect(screen.getAllByText('已移出论文库')).toHaveLength(2));
         expect(screen.queryByText('已入库')).not.toBeInTheDocument();
         expect(screen.getByRole('link', { name: 'Imported paper' })).toHaveAttribute('href', `/lib/knowledge/knowledge/${datasetId}/stored-pdf-a`);
+    });
+    it('moves a paper to the library root without deleting its PDF or notes', async () => {
+        vi.mocked(moveLibraryPapers).mockImplementation(async (id, papers, folderId) => {
+            const data = readLibrary(id);
+            for (const paper of data.papers.filter(item => papers.some(candidate => candidate.id === item.id))) {
+                paper.folderId = folderId;
+                paper.collectionIds = folderId ? [folderId] : [];
+                paper.revision += 1;
+            }
+            return changes(id, data, papers.map(paper => paper.id));
+        });
+        await renderLibrary();
+        fireEvent.click(screen.getByRole('checkbox', { name: '选择 Folder paper' }));
+        fireEvent.click(within(screen.getByRole('region', { name: '已选论文' })).getByRole('button', { name: '从文件夹中移出' }));
+        await waitFor(() => expect(readLibrary(datasetId).papers.find(paper => paper.id === 'a')?.folderId).toBeNull());
+        expect(readLibrary(datasetId).attachments.some(attachment => attachment.paperId === 'a')).toBe(true);
+        expect(readLibrary(datasetId).notes.some(note => note.paperId === 'a')).toBe(true);
+        expect(deleteLibraryPapers).not.toHaveBeenCalled();
     });
     it('keeps real task controls available after saving a new DOI identity without another read', async () => {
         const { default: ActualTasks } = await vi.importActual<typeof import('../components/PaperTasks')>('../components/PaperTasks');
@@ -296,7 +370,7 @@ describe('paper library behavior', () => {
         expect(screen.getByRole('button', { name: '阅读心得' })).toBeEnabled();
         expect(vi.mocked(PaperTasks).mock.lastCall?.[0].selected).toEqual(['stored-pdf-a']);
         expect(loadPersistedPaperLibrary).toHaveBeenCalledOnce();
-    });
+    }, 15_000);
     it('reads a complete library once per initial load, active poll and focus refresh', async () => {
         vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
         try {

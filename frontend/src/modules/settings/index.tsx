@@ -46,6 +46,7 @@ import ToolRetrievalSetting from "./ToolRetrievalSetting";
 import TaskEntryDefaults from "@/modules/taskCenter/TaskEntryDefaults";
 import { fetchUserUiPreferences, patchUserUiPreferences } from "@/modules/user/uiPreferencesApi";
 import { runtimeFeatures } from "@/runtime/features";
+import { useAppVersion } from "@/runtime/useAppVersion";
 import {
 	getCloudSession,
 	isCloudBusinessAvailable,
@@ -185,7 +186,7 @@ function baseNavigation(isAdmin: boolean, t: Translate, cloudRuntimeAvailable = 
         { id: "mcp", label: t("settingsPage.sections.mcp"), keywords: t("settingsPage.sectionKeywords.mcp"), icon: <ApartmentOutlined /> },
         { id: "env_vars", label: t("settingsPage.sections.envVars"), keywords: t("settingsPage.sectionKeywords.envVars"), icon: <KeyOutlined /> },
         { id: "assistants", label: t("settingsPage.sections.assistants"), keywords: t("settingsPage.sectionKeywords.assistants"), icon: <RobotOutlined /> },
-        ...(isVocabularyEnabled() ? [{ id: "external_apps" as const, label: "外部应用", keywords: "Anki AnkiConnect 外部应用 词汇表", icon: <UnorderedListOutlined /> }] : []),
+        ...(isVocabularyEnabled() ? [{ id: "external_apps" as const, label: t("ankiSettings.externalApps"), keywords: "Anki AnkiConnect Eudic MaiMemo 欧路 墨墨 外部应用 词汇表", icon: <UnorderedListOutlined /> }] : []),
         { id: "channels", label: t("settingsPage.sections.channels"), keywords: t("settingsPage.sectionKeywords.channels"), icon: <LinkOutlined /> },
         { id: "notifications", label: t("notifications.title"), keywords: "通知 notification", icon: <BellOutlined /> },
       ],
@@ -239,6 +240,7 @@ function SettingsPageContent() {
   const [searchParams, setSearchParams] = useSearchParams();
   const isAdmin = isAdminRole(AgentAppsAuth.getUserInfo()?.role);
   const hasLocalDependencies = isLocalRuntime() || isDesktopRuntime();
+  const appVersion = useAppVersion();
 	const [cloudRuntimeAvailable, setCloudRuntimeAvailable] = useState(false);
 	const navigationGroups = useMemo(
 	  () => baseNavigation(isAdmin, t, cloudRuntimeAvailable),
@@ -829,7 +831,7 @@ function SettingsPageContent() {
       content = <UserEnvironmentVariablesSettings headingRef={headingRef} />;
     } else if (section === "external_apps" && isVocabularyEnabled()) {
       content = <>
-        {integratedHeader("外部应用", "查看并连接 LazyMind 可以配合使用的外部应用。")}
+        {integratedHeader(t("ankiSettings.externalApps"), t("ankiSettings.externalAppsDescription"))}
         <VocabularySettings />
       </>;
     } else if (section === "skills") {
@@ -854,7 +856,9 @@ function SettingsPageContent() {
               title={t("settingsPage.systemTools.builtinTitle")}
               view="builtin"
             />
-            <DependencyInstallSection />
+            <div className="settings-system-tools-dependencies">
+              <DependencyInstallSection />
+            </div>
           </div>,
           "is-system-tools",
         )}
@@ -1031,7 +1035,14 @@ function SettingsPageContent() {
         ))}
         {filteredGroups.length === 0 ? <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t("settingsPage.noMatch")} /> : null}
       </nav>
-      <div className="settings-reference-sidebar-foot">LazyAGI/LazyMind<br />{t("settingsPage.sidebarFoot")}</div>
+      <div className="settings-reference-sidebar-foot">
+        <span>LazyAGI/LazyMind<br />{t("settingsPage.sidebarFoot")}</span>
+        {appVersion && (
+          <span className="settings-app-version" title={t("settingsPage.appVersion", { version: appVersion })} aria-label={t("settingsPage.appVersion", { version: appVersion })}>
+            v{appVersion}
+          </span>
+        )}
+      </div>
     </aside>
     <section className="settings-reference-content" aria-busy={loading}>
       <div className="settings-reference-scroll">

@@ -28,6 +28,29 @@ const messages = {
   },
 } as const;
 
+export function GlobalErrorFallback() {
+  const copy = i18n.language === "en-US" ? messages["en-US"] : messages["zh-CN"];
+
+  return (
+    <main className="global-error" role="alert" aria-live="assertive">
+      <section className="global-error__card" aria-labelledby="global-error-title">
+        <div className="global-error__icon" aria-hidden="true">!</div>
+        <p className="global-error__eyebrow">{copy.eyebrow}</p>
+        <h1 id="global-error-title">{copy.title}</h1>
+        <p className="global-error__description">{copy.description}</p>
+        <div className="global-error__actions">
+          <button type="button" className="global-error__primary" onClick={() => window.location.reload()}>
+            {copy.reload}
+          </button>
+          <button type="button" className="global-error__secondary" onClick={() => window.location.assign(BASENAME || "/")}>
+            {copy.home}
+          </button>
+        </div>
+      </section>
+    </main>
+  );
+}
+
 class GlobalErrorBoundary extends Component<
   GlobalErrorBoundaryProps,
   GlobalErrorBoundaryState
@@ -42,37 +65,8 @@ class GlobalErrorBoundary extends Component<
     console.error("[GlobalErrorBoundary] Uncaught render error", error, errorInfo);
   }
 
-  private handleReload = () => {
-    window.location.reload();
-  };
-
-  private handleGoHome = () => {
-    window.location.assign(BASENAME || "/");
-  };
-
   render() {
-    if (!this.state.hasError) return this.props.children;
-
-    const copy = i18n.language === "en-US" ? messages["en-US"] : messages["zh-CN"];
-
-    return (
-      <main className="global-error" role="alert" aria-live="assertive">
-        <section className="global-error__card" aria-labelledby="global-error-title">
-          <div className="global-error__icon" aria-hidden="true">!</div>
-          <p className="global-error__eyebrow">{copy.eyebrow}</p>
-          <h1 id="global-error-title">{copy.title}</h1>
-          <p className="global-error__description">{copy.description}</p>
-          <div className="global-error__actions">
-            <button type="button" className="global-error__primary" onClick={this.handleReload}>
-              {copy.reload}
-            </button>
-            <button type="button" className="global-error__secondary" onClick={this.handleGoHome}>
-              {copy.home}
-            </button>
-          </div>
-        </section>
-      </main>
-    );
+    return this.state.hasError ? <GlobalErrorFallback /> : this.props.children;
   }
 }
 

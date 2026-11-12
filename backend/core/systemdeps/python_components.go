@@ -63,7 +63,8 @@ type PythonComponentStatus struct {
 	InstallMethod    string `json:"installMethod,omitempty"`
 }
 
-var pythonComponentLocks = map[string]*sync.Mutex{"rag": {}}
+var pythonComponentIDs = []string{"rag", "cluster"}
+var pythonComponentLocks = map[string]*sync.Mutex{"rag": {}, "cluster": {}}
 var pythonComponentDigest = regexp.MustCompile(`^[a-f0-9]{64}$`)
 
 func loadPythonCatalog() (*pythonCatalog, error) {
@@ -85,8 +86,11 @@ func loadPythonCatalog() (*pythonCatalog, error) {
 	if catalog.SchemaVersion != 1 || catalog.Platform != runtime.GOOS || catalog.Arch != runtime.GOARCH {
 		return nil, errors.New("Python dependency catalog does not match this platform")
 	}
-	for _, id := range []string{"rag"} {
+	for _, id := range pythonComponentIDs {
 		entry, ok := catalog.Components[id]
+		if !ok && id != "rag" {
+			continue // Older installers and full builds include clustering in base Python.
+		}
 		if !ok || entry.ID != id || !pythonComponentDigest.MatchString(entry.Revision) ||
 			!pythonComponentDigest.MatchString(entry.SHA256) || !pythonComponentDigest.MatchString(entry.BaseFingerprint) ||
 			entry.Platform != catalog.Platform || entry.Arch != catalog.Arch || entry.PythonABI == "" ||
@@ -242,9 +246,21 @@ source = os.path.join(sys.argv[3], "lazyllm")
 if os.path.isdir(os.path.join(source, "lazyllm")):
     sys.path.insert(0, source)
 site.addsitedir(sys.argv[1])
-import lazyllm.tools.rag, pymilvus, milvus_lite, spacy
+if sys.argv[2] == "cluster":
+    import llvmlite, numba, pynndescent, umap
+    root = os.path.realpath(sys.argv[1])
+    for module in (llvmlite, numba, pynndescent, umap):
+        if os.path.commonpath((root, os.path.realpath(module.__file__))) != root:
+            raise ImportError(f"{module.__name__} was not loaded from the clustering bundle")
+else:
+    import lazyllm.tools.rag, pymilvus, milvus_lite, spacy
 `
-	checkCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	verifyTimeout := 2 * time.Minute
+	if entry.ID == "cluster" {
+		// The first UMAP import initializes Numba's cache on the local machine.
+		verifyTimeout = 4 * time.Minute
+	}
+	checkCtx, cancel := context.WithTimeout(ctx, verifyTimeout)
 	defer cancel()
 	command := exec.CommandContext(checkCtx, python, "-I", "-B", "-c", code, filepath.Join(dir, "site-packages"), entry.ID, os.Getenv("LAZYMIND_ALGORITHM_SOURCE"))
 	if output, err := command.CombinedOutput(); err != nil {
@@ -326,6 +342,28 @@ func installPythonComponent(ctx context.Context, root string, entry PythonCompon
 	return nil
 }
 
+// PrepareClusterComponent runs before the Desktop supervisor starts. The
+// runtime manager serializes startup and activates the verified overlay when
+// it constructs the service environments.
+func PrepareClusterComponent(ctx context.Context) error {
+	if !IsLocalRuntime() {
+		return errors.New("clustering preparation requires a local runtime")
+	}
+	catalog, err := loadPythonCatalog()
+	if err != nil || catalog == nil {
+		return err
+	}
+	entry, ok := catalog.Components["cluster"]
+	if !ok {
+		return nil
+	}
+	root, err := RuntimeRootFromEnv()
+	if err != nil {
+		return err
+	}
+	return installPythonComponent(ctx, root, entry, entry.URL)
+}
+
 func GetPythonComponents(w http.ResponseWriter, r *http.Request) {
 	catalog, err := loadPythonCatalog()
 	if err != nil {
@@ -334,7 +372,10 @@ func GetPythonComponents(w http.ResponseWriter, r *http.Request) {
 	}
 	root, _ := RuntimeRootFromEnv()
 	statuses := []PythonComponentStatus{}
-	for _, id := range []string{"rag"} {
+	for _, id := range pythonComponentIDs {
+		if id != "rag" && (catalog == nil || catalog.Components[id].ID == "") {
+			continue
+		}
 		statuses = append(statuses, pythonComponentStatus(root, catalog, id))
 	}
 	common.ReplyOK(w, statuses)
@@ -374,7 +415,7 @@ func InstallPythonComponent(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, err.Error(), http.StatusServiceUnavailable)
 		return
 	}
-	if catalog != nil && os.Getenv("LAZYMIND_COMPONENT_MAINTENANCE_MANAGER") != "" {
+	if catalog != nil && request.ID == "rag" && os.Getenv("LAZYMIND_COMPONENT_MAINTENANCE_MANAGER") != "" {
 		probe, err := acquireComponentWriter(root)
 		if err != nil {
 			common.ReplyErr(w, "update_transaction_busy", http.StatusConflict)
@@ -414,6 +455,10 @@ func InstallPythonComponent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if catalog == nil {
+		if request.ID != "rag" {
+			common.ReplyErr(w, "dependency is not available for this runtime", http.StatusNotFound)
+			return
+		}
 		releaseComponentLock(writer)
 		writer = nil
 		installer := os.Getenv("LAZYMIND_SOURCE_COMPONENT_INSTALLER")
@@ -446,7 +491,11 @@ func InstallPythonComponent(w http.ResponseWriter, r *http.Request) {
 		common.ReplyOK(w, status)
 		return
 	}
-	entry := catalog.Components[request.ID]
+	entry, available := catalog.Components[request.ID]
+	if !available {
+		common.ReplyErr(w, "dependency is not available for this runtime", http.StatusNotFound)
+		return
+	}
 	ctx, cancel := context.WithTimeout(r.Context(), 40*time.Minute)
 	defer cancel()
 	if err := installPythonComponent(ctx, root, entry, entry.URL); err != nil {

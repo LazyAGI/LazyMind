@@ -10,6 +10,7 @@ import {
 import ChatInput from ".";
 import { createRef, Profiler, useState, type ReactNode } from "react";
 import { useChatInputStore, type ChatModeDraft } from "../../store/chatInput";
+import { useFeaturedSelectionStore } from "../../store/featuredSelection";
 import { useChatMessageStore } from "../../store/chatMessage";
 import { useWorkflowStore } from "../../store/workflowPanel";
 import type { ChatFileList, ChatInputImperativeProps } from "./types";
@@ -28,6 +29,7 @@ vi.mock("@/runtime/mode", async (importOriginal) => ({
 vi.mock("../SkillRecording", () => ({ default: () => null }));
 
 const promptMocks = vi.hoisted(() => ({ polish: vi.fn() }));
+const editorFocus = vi.hoisted(() => ({ atEnd: vi.fn(), draftWithoutMentions: vi.fn(), restoreMentionsOnValueChange: false }));
 const rag = vi.hoisted(() => ({ availability: "ready" }));
 vi.mock("@/modules/modelProvider/contexts/RAGComponentContext", () => ({
   useRAGComponent: () => ({ availability: rag.availability }),
@@ -54,10 +56,13 @@ vi.mock("react-i18next", async (importOriginal) => ({
 vi.mock("../ChatModelSelector", () => ({
   default: ({
     onSavingChange,
+    disabled,
   }: {
     onSavingChange?: (saving: boolean) => void;
+    disabled?: boolean;
   }) => (
     <>
+      <button type="button" aria-label="model selection" disabled={disabled}>model selection</button>
       <button type="button" onClick={() => onSavingChange?.(true)}>
         begin model save
       </button>
@@ -72,18 +77,28 @@ vi.mock("./MentionEditor", async () => {
   const React = await vi.importActual<typeof import("react")>("react");
   return {
     default: React.forwardRef(function MockMentionEditor(
-      props: { onSend?: () => void; initialMentions?: ChatMention[]; onMentionsChange?: (mentions: ChatMention[]) => void },
+      props: { value?: string; onSend?: () => void; initialMentions?: ChatMention[]; onMentionsChange?: (mentions: ChatMention[]) => void;
+        runInBackground?: boolean; onEntryModeChange?: (mode: 'chat' | 'work', draft: { text: string; mentions: ChatMention[]; featuredSelection: { caseId: string } }) => void },
       ref,
     ) {
-      React.useImperativeHandle(ref, () => ({ focus: vi.fn(), setPlainText: () => props.onMentionsChange?.([]) }));
+      React.useImperativeHandle(ref, () => ({ focus: vi.fn(), focusAtEnd: editorFocus.atEnd,
+        getDraftWithoutMentions: (excluded: ChatMention[]) => editorFocus.draftWithoutMentions(excluded) ?? { text: props.value || '', mentions: props.initialMentions || [] },
+        setPlainText: () => props.onMentionsChange?.([]) }));
       React.useEffect(() => { if (props.initialMentions?.length) props.onMentionsChange?.(props.initialMentions); }, []);
+      React.useEffect(() => {
+        if (editorFocus.restoreMentionsOnValueChange) props.onMentionsChange?.(props.initialMentions || []);
+      }, [props.value]);
       return (
-        <textarea
+        <><textarea
           aria-label="message editor"
           onKeyDown={(event) => {
             if (event.key === "Enter") props.onSend?.();
           }}
         />
+        {props.onEntryModeChange && <button onClick={() => props.onEntryModeChange?.(props.runInBackground ? 'chat' : 'work', {
+          text: 'Keep Chosen', mentions: [{ mention_id: 'chosen', type: 'skill', resource_id: 'chosen', display_name: 'Chosen', start: 5, end: 11 }],
+          featuredSelection: { caseId: 'chosen-case' },
+        })}>switch capability mode</button>}</>
       );
     }),
   };
@@ -102,6 +117,8 @@ vi.mock("../ImageUpload", async () => {
       max: number;
       listNum: number;
       updateFiles: (files: (File & { uid: string; uri: string })[]) => void;
+      onBeforeAddFiles?: (incoming: File[], current: File[]) => { filesToAdd: File[]; clearFirst: boolean; toasts: string[] } | null;
+      onFilesAdded?: (files: File[]) => void;
     }, ref) {
       const files = React.useRef<(File & { uid: string; uri: string })[]>([]);
       React.useImperativeHandle(ref, () => ({
@@ -114,11 +131,18 @@ vi.mock("../ImageUpload", async () => {
           props.updateFiles(files.current);
         },
         uploadFiles: (incoming: File[]) => {
-          for (const file of incoming) {
+          const result = props.onBeforeAddFiles?.(incoming, files.current);
+          if (result?.clearFirst) files.current = [];
+          const accepted: File[] = [];
+          for (const file of result?.filesToAdd ?? incoming) {
             if (files.current.length >= props.max) break;
+            if (!props.types.some(type => file.name.toLowerCase().endsWith(type))) continue;
+            if (file.type.startsWith("image/") && file.size > 5 * 1024 * 1024) continue;
             files.current.push(Object.assign(file, { uid: file.name, uri: `/uploads/${file.name}` }));
+            accepted.push(file);
           }
           props.updateFiles(files.current);
+          if (accepted.length > 0) props.onFilesAdded?.(accepted);
         },
       }));
       return <>
@@ -185,6 +209,59 @@ vi.mock("@/modules/memory/toolApi", () => ({
 describe("ChatInput model switch save lock", () => {
   beforeEach(() => {
     vi.mocked(getRuntimeMode).mockReturnValue("local");
+    editorFocus.draftWithoutMentions.mockReset();
+  });
+
+  it("warns about missing visual understanding only when an image attachment is added", async () => {
+    const warning = vi.spyOn(message, "warning").mockImplementation(() => undefined as never);
+    const ref = createRef<ChatInputImperativeProps>();
+    const createObjectURL = URL.createObjectURL;
+    const revokeObjectURL = URL.revokeObjectURL;
+    URL.createObjectURL = vi.fn(() => "blob:notes");
+    URL.revokeObjectURL = vi.fn();
+    try {
+      const view = render(<ChatInput ref={ref} value="" onChange={vi.fn()} isChatContent={false}
+        vlmReady={false} showConversationConfig={false} showHistoryButton={false} showPromptSuggestions={false} />);
+
+      await act(async () => ref.current?.uploadFiles([new File(["PDF"], "notes.pdf", { type: "application/pdf" })]));
+      expect(warning).not.toHaveBeenCalledWith("chat.vlmNotReadyWarning");
+
+      await act(async () => ref.current?.clearFiles());
+      await act(async () => ref.current?.uploadFiles([new File([new Uint8Array(5 * 1024 * 1024 + 1)], "large.png", { type: "image/png" })]));
+      expect(warning).not.toHaveBeenCalledWith("chat.vlmNotReadyWarning");
+
+      await act(async () => ref.current?.clearFiles());
+      await act(async () => ref.current?.uploadFiles([new File(["image"], "photo.png", { type: "image/png" })]));
+      expect(warning).toHaveBeenCalledWith("chat.vlmNotReadyWarning");
+
+      await act(async () => ref.current?.clearFiles());
+      warning.mockClear();
+      view.rerender(<ChatInput ref={ref} value="" onChange={vi.fn()} isChatContent={false}
+        vlmReady={true} showConversationConfig={false} showHistoryButton={false} showPromptSuggestions={false} />);
+      await act(async () => ref.current?.uploadFiles([new File(["image"], "ready.png", { type: "image/png" })]));
+      expect(warning).not.toHaveBeenCalledWith("chat.vlmNotReadyWarning");
+    } finally {
+      warning.mockRestore();
+      URL.createObjectURL = createObjectURL;
+      URL.revokeObjectURL = revokeObjectURL;
+    }
+  });
+
+  it.each([
+    ["waiting", false, false],
+    ["active", false, true],
+    ["waiting", true, true],
+  ] as const)("model recovery for workflow %s, auto running %s", (status, autoRunning, blocked) => {
+    useWorkflowStore.setState({ sessionByConversation: { "model-recovery": {
+      session_id: "waiting-flow", conversation_id: "model-recovery", controller_host: "lazymind",
+      workflow_id: "workflow", workflow_mode: "dynamic", status, current_step_id: "step", created_at: "", updated_at: "",
+    } }, autoRunningByConversation: { "model-recovery": autoRunning } });
+    onTestFinished(() => useWorkflowStore.setState({ sessionByConversation: {}, autoRunningByConversation: {} }));
+    render(<ChatInput value="继续" onChange={vi.fn()} sessionId="model-recovery" isChatContent
+      showConversationConfig={false} showHistoryButton={false} showPromptSuggestions={false}
+      showSkillDeposit={false} showThinkingDepth={false} />);
+    if (blocked) expect(screen.getByRole("button", { name: "model selection" })).toBeDisabled();
+    else expect(screen.getByRole("button", { name: "model selection" })).toBeEnabled();
   });
 
   it.each([
@@ -216,6 +293,92 @@ describe("ChatInput model switch save lock", () => {
       window.dispatchEvent(new CustomEvent('lazymind:chat-capture-mode-draft', { detail: { runInBackground: false } }));
       expect(useChatInputStore.getState().modeDraft).toMatchObject({ text: 'Keep historical draft', mentions: [] });
     } finally { rects.mockRestore(); useChatInputStore.getState().setModeDraft(); }
+  });
+
+  it('omits the selected capability from a manually transferred draft without clearing the source conversation', () => {
+    const rects = vi.spyOn(HTMLElement.prototype, 'getClientRects').mockReturnValue([{}] as unknown as DOMRectList);
+    const binding = { mention_id: 'featured:chosen', type: 'workflow' as const, resource_id: 'builtin:chosen', display_name: 'Chosen' };
+    useFeaturedSelectionStore.getState().setSelection('draft-source', { caseId: 'chosen-case' });
+    editorFocus.draftWithoutMentions.mockReturnValueOnce({ text: 'Keep ', mentions: [] });
+    try {
+      render(<ChatInput value='Keep Chosen' onChange={vi.fn()} isChatContent sessionId='draft-source' runInBackground boundMentions={[binding]}
+        showConversationConfig={false} showHistoryButton={false} showPromptSuggestions={false} />);
+      window.dispatchEvent(new CustomEvent('lazymind:chat-capture-mode-draft', { detail: { runInBackground: false } }));
+      expect(editorFocus.draftWithoutMentions).toHaveBeenCalledWith([binding]);
+      expect(useChatInputStore.getState().modeDraft).toEqual({ text: 'Keep ', mentions: [], files: [] });
+      expect(useFeaturedSelectionStore.getState().selections['draft-source']).toEqual({ caseId: 'chosen-case' });
+    } finally {
+      rects.mockRestore();
+      useChatInputStore.getState().setModeDraft();
+      useChatInputStore.getState().clearInputContent('__new_chat__');
+      useFeaturedSelectionStore.getState().setSelection('draft-source');
+    }
+  });
+
+  it('does not persist the old capability label when the restored editor reports its mentions', async () => {
+    vi.useFakeTimers();
+    editorFocus.restoreMentionsOnValueChange = true;
+    const rects = vi.spyOn(HTMLElement.prototype, 'getClientRects').mockReturnValue([{}] as unknown as DOMRectList);
+    onTestFinished(() => {
+      editorFocus.restoreMentionsOnValueChange = false;
+      rects.mockRestore();
+      useChatInputStore.getState().clearInputContent('__new_chat__');
+      useChatInputStore.getState().setModeDraft();
+      vi.useRealTimers();
+    });
+    const binding = { mention_id: 'chosen', type: 'workflow' as const, resource_id: 'builtin:chosen', display_name: 'Chosen', start: 0, end: 6 };
+    useChatInputStore.getState().saveInputContent('__new_chat__', 'Chosen', [binding]);
+    const props = { onChange: vi.fn(), isChatContent: false, draftKey: '__new_chat__', showConversationConfig: false, showHistoryButton: false, showPromptSuggestions: false };
+    const view = render(<ChatInput {...props} value='Chosen' runInBackground boundMentions={[binding]} />);
+    editorFocus.draftWithoutMentions.mockReturnValueOnce({ text: '', mentions: [] });
+    act(() => window.dispatchEvent(new CustomEvent('lazymind:chat-capture-mode-draft', { detail: { runInBackground: false } })));
+    const draft = useChatInputStore.getState().modeDraft!;
+    expect(draft.text).toBe('');
+    // The real editor reports restored mentions in a child passive effect.
+    view.rerender(<ChatInput {...props} value={draft.text} transferredDraft={draft} />);
+    await act(async () => { await vi.advanceTimersByTimeAsync(600); });
+    expect(useChatInputStore.getState().getInputContent('__new_chat__')).toBe('');
+    expect(useChatInputStore.getState().getInputMentions('__new_chat__')).toEqual([]);
+  });
+
+  it('focuses the end once for each transferred draft without moving it during subsequent typing', async () => {
+    editorFocus.atEnd.mockClear();
+    const props = { value: '', onChange: vi.fn(), isChatContent: false, showConversationConfig: false, showHistoryButton: false, showPromptSuggestions: false };
+    const view = render(<ChatInput {...props} />);
+    expect(editorFocus.atEnd).not.toHaveBeenCalled();
+    const draft = { mentions: [], files: [], featuredSelection: { caseId: 'chosen-case' } };
+    view.rerender(<ChatInput {...props} value='Chosen' runInBackground transferredDraft={draft} />);
+    await waitFor(() => expect(editorFocus.atEnd).toHaveBeenCalledTimes(1));
+    view.rerender(<ChatInput {...props} value='Chosen Continue writing' runInBackground transferredDraft={draft} />);
+    expect(editorFocus.atEnd).toHaveBeenCalledTimes(1);
+    view.rerender(<ChatInput {...props} value='Another capability' transferredDraft={{ ...draft }} />);
+    await waitFor(() => expect(editorFocus.atEnd).toHaveBeenCalledTimes(2));
+  });
+
+  it.each([false, true])('transfers the chosen capability and attachments to the other entry from task mode %s', async runInBackground => {
+    const ref = createRef<ChatInputImperativeProps>();
+    const onSend = vi.fn();
+    const selected = vi.fn();
+    window.addEventListener('lazymind:chat-select-conversation', selected);
+    onTestFinished(() => {
+      window.removeEventListener('lazymind:chat-select-conversation', selected);
+      useChatInputStore.getState().setModeDraft();
+      useChatInputStore.getState().clearInputContent('__new_chat__');
+    });
+    render(<ChatInput ref={ref} value='Keep /' onChange={vi.fn()} onSend={onSend} isChatContent sessionId='source-conversation'
+      runInBackground={runInBackground} showConversationConfig={false} showHistoryButton={false} showPromptSuggestions={false} />);
+    await act(async () => ref.current?.uploadFiles([new File(['test'], 'photo.png', { type: 'image/png' })]));
+    await screen.findByRole('button', { name: 'photo.png' });
+    fireEvent.click(screen.getByRole('button', { name: 'switch capability mode' }));
+    expect(useChatInputStore.getState().modeDraft).toMatchObject({
+      text: 'Keep Chosen', featuredSelection: { caseId: 'chosen-case' },
+      mentions: [expect.objectContaining({ resource_id: 'chosen', start: 5, end: 11 })],
+      files: [expect.objectContaining({ id: 'upload:photo.png', input: { input_type: 'image', uri: '/uploads/photo.png', filename: 'photo.png' } })],
+    });
+    expect(useChatInputStore.getState().getInputMentions('__new_chat__')).toEqual([expect.objectContaining({ resource_id: 'chosen' })]);
+    expect(selected).toHaveBeenCalledOnce();
+    expect(selected.mock.calls[0][0].detail).toEqual({ conversationId: '', runInBackground: !runInBackground, source: 'mention' });
+    expect(onSend).not.toHaveBeenCalled();
   });
 
   it('keeps uploads unique and removable across repeated welcome mode switches', async () => {
@@ -310,6 +473,21 @@ describe("ChatInput model switch save lock", () => {
     expect(within(screen.getByLabelText('attachments')).getAllByRole('button')).toHaveLength(2);
     expect(screen.getByTestId('upload-slots')).toHaveAttribute('data-max', '3');
     expect(contextPreview.build?.().input).toHaveLength(3);
+  });
+
+  it('sends an uploaded image with Enter when there is no text', async () => {
+    const ref = createRef<ChatInputImperativeProps>();
+    const onSend = vi.fn();
+    render(<ChatInput ref={ref} value="" onChange={vi.fn()} isChatContent onSend={onSend}
+      showConversationConfig={false} showHistoryButton={false} showPromptSuggestions={false} />);
+    expect(screen.getByRole('button', { name: 'chat.send' })).toBeDisabled();
+    await act(async () => ref.current?.uploadFiles([new File(['test'], 'photo.png', { type: 'image/png' })]));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'chat.send' })).toBeEnabled());
+    fireEvent.keyDown(screen.getByRole('textbox', { name: 'message editor' }), { key: 'Enter' });
+    await waitFor(() => expect(onSend).toHaveBeenCalledWith(expect.objectContaining({
+      text: '',
+      referencedFiles: [expect.objectContaining({ input_type: 'image', uri: '/uploads/photo.png' })],
+    })));
   });
 
   it('adapts a restored current-conversation file identically for preview and send', async () => {
@@ -891,6 +1069,24 @@ describe("ChatInput optional reranking", () => {
     await waitFor(() => expect(onSend).toHaveBeenCalledTimes(1));
     expect(info).not.toHaveBeenCalled();
   });
+});
+
+it.each([
+  { work: false, type: 'workflow' as const },
+  { work: true, type: 'workflow' as const },
+  { work: false, type: 'skill' as const },
+  { work: true, type: 'skill' as const },
+])('submits a selected $type directly in Work=$work without a repair dialog', async ({ work, type }) => {
+  useChatInputStore.getState().clearAllInputContents();
+  vi.mocked(listSkillLinkedWorkflows).mockResolvedValue({ skill_id: 'skill-1', skill_name: 'Advisor', workflows: [] });
+  const mention: ChatMention = { mention_id: `selected-${type}`, type, resource_id: type === 'workflow' ? 'user:owner:workflow' : 'skill-1', display_name: 'Selected capability' };
+  const onSend = vi.fn();
+  render(<ChatInput value="Run this" onChange={vi.fn()} onSend={onSend} isChatContent runInBackground={work}
+    boundMentions={[mention]} initialConversationSettings={{ enable_workflow: true, workflow_mode: 'dynamic' }}
+    showConversationConfig={false} showHistoryButton={false} showPromptSuggestions={false} />);
+  fireEvent.click(screen.getByRole('button', { name: 'chat.send' }));
+  await waitFor(() => expect(onSend).toHaveBeenCalledWith(expect.objectContaining({ text: 'Run this', mentions: [mention] })));
+  expect(screen.queryByRole('dialog')).toBeNull();
 });
 
 describe('paper composer scope',()=>{

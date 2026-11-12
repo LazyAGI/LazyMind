@@ -84,3 +84,22 @@ def test_experiment_projects_current_materials_without_serializing_historical_po
                       'data': workflow.material(pool, 'data')['content'],
                       'papers': workflow.material(pool, 'papers')['content'], 'input_is_demo': True}
     assert pool == before
+
+
+def test_generation_receives_only_literature_abstracts(model_response, monkeypatch):
+    inputs, model = model_response
+    inputs['papers'] = [{'id': 'reference', 'title': 'Related work', 'abstract': 'A concise abstract.',
+                         'text': 'EXTERNAL_DOCUMENT_BODY' * 30000,
+                         'reading': {'content_type': 'document', 'content': 'NESTED_DOCUMENT_BODY' * 30000}}]
+    before = copy.deepcopy(inputs)
+    monkeypatch.setattr(model_config, 'load_model_config', lambda: {'llm': {'source': 'openai'}})
+    with config.temp('context_compression_default_max_input_tokens', 131072):
+        experiment.run(inputs)
+    model.assert_called_once()
+    prompt = model.call_args.args[0]
+    payload = json.loads(prompt.split('Input JSON:\n', 1)[1])
+    assert payload['papers'] == [{'id': 'reference', 'title': 'Related work', 'abstract': 'A concise abstract.'}]
+    assert 'EXTERNAL_DOCUMENT_BODY' not in prompt
+    assert 'NESTED_DOCUMENT_BODY' not in prompt
+    assert payload['data'] == inputs.get('data')
+    assert inputs == before

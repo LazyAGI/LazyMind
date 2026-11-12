@@ -104,8 +104,8 @@ func TestRequestProtocolSeparatesOfficialDeclarationAndRuntime(t *testing.T) {
 	}{
 		{"SenseNovaTokenPlan", "anthropic", true, false, false},
 		{"SenseNovaTokenPlan", "openai", true, true, true},
-		{"DeepSeek", "openai-responses", true, false, false},
-		{"QwenCodingPlan", "openai-responses", false, false, false},
+		{"DeepSeek", "openai-responses", true, true, true},
+		{"QwenCodingPlan", "openai-responses", false, true, false},
 		{"OpenAI", "anthropic", false, true, false},
 		{"GLM", "anthropic", false, true, false},
 		{"LMDeploy", "anthropic", true, true, true},
@@ -132,7 +132,7 @@ func TestRequestProtocolSeparatesOfficialDeclarationAndRuntime(t *testing.T) {
 			if result.ProviderSupported != nil {
 				t.Fatalf("custom %s inherits vendor claim", name)
 			}
-			if result.Supported != (result.Protocol == "openai" || result.Protocol == "anthropic") {
+			if result.Supported != (result.Protocol == "openai" || result.Protocol == "openai-responses" || result.Protocol == "anthropic") {
 				t.Fatalf("custom configurable protocols changed: %#v", result)
 			}
 		}

@@ -1,5 +1,6 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { Modal, message } from "antd";
+import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from "vitest";
 import DefaultModelConfigPanel from "./DefaultModelConfigPanel";
 
 const mocks = vi.hoisted(() => ({
@@ -11,6 +12,8 @@ const mocks = vi.hoisted(() => ({
   services: vi.fn(),
   models: vi.fn(),
   saveModel: vi.fn(),
+  previewEmbeddingSwitch: vi.fn(),
+  clearEmbeddingChunks: vi.fn(),
   saveService: vi.fn(),
   ready: vi.fn(),
   verified: vi.fn(),
@@ -40,6 +43,8 @@ vi.mock("@/runtime/cloud/session", () => ({
   isCloudBusinessAvailable: () => mocks.cloudAvailable,
 }));
 vi.mock("../api", () => ({
+  previewEmbeddingSwitch: mocks.previewEmbeddingSwitch,
+  clearEmbeddingChunks: mocks.clearEmbeddingChunks,
   modelProvidersApi: {
     apiCoreModelProvidersGet: mocks.providers,
     apiCoreModelProvidersSelectedModelsGet: mocks.selections,
@@ -66,6 +71,13 @@ const availableModel = {
 };
 const selectedParsing = {
   category: "ocr", group_id: "parsing", group_name: "Parser", provider_name: "MinerU", share: false,
+};
+const selectedEmbedding = {
+  ...selectedLlm, model_key: "embed_main", model_id: "old-embedding",
+  name: "Old embedding", share: false,
+};
+const candidateEmbedding = {
+  ...availableModel, id: "new-embedding", name: "New embedding", model_type: "embed_main",
 };
 
 function renderPanel(
@@ -120,8 +132,15 @@ const readyToSelect = async (name: string) => {
   return select;
 };
 const configure = (name: string) => fireEvent.click(within(group(name)).getByRole("button", { name: "modelProvider.configureCapability" }));
+const chooseCandidateEmbedding = async () => {
+  await screen.findByRole("region", { name: "modelProvider.defaults.basicTitle" });
+  const select = await readyToSelect("modelProvider.module.embeddingTitle");
+  fireEvent.mouseDown(select);
+  fireEvent.click(await screen.findByText("New embedding", { selector: "strong" }));
+};
 
 describe("default capability configuration groups", () => {
+  afterEach(() => vi.restoreAllMocks());
   beforeEach(() => {
     vi.resetAllMocks();
     mocks.role = "system-admin";
@@ -132,11 +151,313 @@ describe("default capability configuration groups", () => {
     mocks.services.mockResolvedValue({ data: { selections: [selectedParsing] } });
     mocks.models.mockResolvedValue({ data: { models: [availableModel] } });
     mocks.saveModel.mockResolvedValue({ data: { selections: [selectedLlm] } });
+    mocks.previewEmbeddingSwitch.mockResolvedValue({
+      outcome: "empty", can_switch: true, indexed_knowledge_bases: 0,
+      active_model_name: "", candidate_model_name: "New embedding",
+      signature_status: "none", generation: 1,
+    });
     mocks.saveService.mockResolvedValue({ data: { selections: [] } });
     mocks.ready.mockResolvedValue({ data: { ready: false } });
     mocks.verified.mockResolvedValue({ data: { ready: false } });
     mocks.groups.mockResolvedValue({ data: { groups: [] } });
     Element.prototype.scrollIntoView = vi.fn();
+  });
+
+  it("checks the embedding signature and asks for confirmation before a compatible switch", async () => {
+    const confirm = vi.spyOn(Modal, "confirm").mockImplementation(() => ({ destroy: vi.fn(), update: vi.fn() }));
+    mocks.selections.mockResolvedValue({ data: { selections: [selectedEmbedding] } });
+    mocks.models.mockResolvedValue({ data: { models: [candidateEmbedding] } });
+    mocks.previewEmbeddingSwitch.mockResolvedValue({
+      outcome: "same", can_switch: true, indexed_knowledge_bases: 2,
+      active_model_name: "Old embedding", candidate_model_name: "New embedding",
+      signature_status: "verified", generation: 2,
+    });
+    renderPanel();
+
+    await chooseCandidateEmbedding();
+
+    await waitFor(() => expect(mocks.previewEmbeddingSwitch).toHaveBeenCalledWith({
+      model_id: "new-embedding", source: "own",
+    }));
+    expect(mocks.saveModel).not.toHaveBeenCalled();
+    await waitFor(() => expect(confirm).toHaveBeenCalledWith(expect.objectContaining({
+      content: "modelProvider.embeddingSignatureMatched",
+      okText: "modelProvider.confirmSwitch",
+    })));
+    await act(async () => { (confirm.mock.calls[0][0].onOk as () => void)(); });
+    await waitFor(() => expect(mocks.saveModel).toHaveBeenCalledOnce());
+  });
+
+  describe("confirmed embedding clear and activation", () => {
+    const title = "modelProvider.module.embeddingTitle";
+    const activatedEmbedding = { ...selectedEmbedding, model_id: "new-embedding", name: "New embedding" };
+    const confirmedRequest = {
+      model_id: "new-embedding", source: "own", generation: 2, confirm_clear_chunks: true,
+    };
+    let confirm: MockInstance<typeof Modal.confirm>;
+    let update: ReturnType<typeof vi.fn>;
+    let success: MockInstance<typeof message.success>;
+    let error: MockInstance<typeof message.error>;
+
+    beforeEach(() => {
+      update = vi.fn();
+      confirm = vi.spyOn(Modal, "confirm").mockImplementation(() => ({ destroy: vi.fn(), update }));
+      success = vi.spyOn(message, "success").mockImplementation(() => Object.assign(() => {}, { then: vi.fn(), promise: Promise.resolve() }));
+      error = vi.spyOn(message, "error").mockImplementation(() => Object.assign(() => {}, { then: vi.fn(), promise: Promise.resolve() }));
+      mocks.selections.mockResolvedValue({ data: { selections: [selectedEmbedding] } });
+      mocks.models.mockResolvedValue({ data: { models: [candidateEmbedding] } });
+      mocks.previewEmbeddingSwitch.mockResolvedValue({
+        outcome: "clear_required", can_switch: false, indexed_knowledge_bases: 2,
+        active_model_name: "Old embedding", candidate_model_name: "New embedding",
+        signature_status: "verified", generation: 2,
+      });
+      mocks.clearEmbeddingChunks.mockResolvedValue({ cleared: true, activated: true });
+    });
+
+    const openConfirmation = async () => {
+      await chooseCandidateEmbedding();
+      await waitFor(() => expect(confirm).toHaveBeenCalledWith(expect.objectContaining({
+        content: "modelProvider.embeddingIndexResetRequired",
+        okText: "modelProvider.embeddingClearAndSwitch",
+        okButtonProps: { danger: true },
+      })));
+      expect(mocks.clearEmbeddingChunks).not.toHaveBeenCalled();
+      expect(mocks.saveModel).not.toHaveBeenCalled();
+      return confirm.mock.calls[0][0];
+    };
+
+    it("does not clear or save when cancelled", async () => {
+      renderPanel();
+      const options = await openConfirmation();
+      await act(async () => { (options.onCancel as () => void)(); });
+      expect(mocks.clearEmbeddingChunks).not.toHaveBeenCalled();
+      expect(mocks.saveModel).not.toHaveBeenCalled();
+      expect(group(title)).toHaveTextContent("Old embedding");
+      expect(success).not.toHaveBeenCalled();
+      await readyToSelect(title);
+    });
+
+    it("refreshes authoritative selection after activation without a second PUT or optimistic selection", async () => {
+      renderPanel();
+      const options = await openConfirmation();
+      let resolveRefresh!: (value: unknown) => void;
+      mocks.selections.mockImplementationOnce(() => new Promise(resolve => { resolveRefresh = resolve; }));
+      let completion!: Promise<void>;
+      act(() => { completion = (options.onOk as () => Promise<void>)(); });
+      await waitFor(() => expect(mocks.selections).toHaveBeenCalledTimes(2));
+      expect(mocks.clearEmbeddingChunks).toHaveBeenCalledOnce();
+      expect(mocks.clearEmbeddingChunks).toHaveBeenCalledWith(confirmedRequest);
+      expect(mocks.saveModel).not.toHaveBeenCalled();
+      expect(group(title)).toHaveTextContent("Old embedding");
+      expect(within(group(title)).getByRole("combobox")).toBeDisabled();
+      expect(success).not.toHaveBeenCalled();
+      await act(async () => {
+        resolveRefresh({ data: { selections: [{ ...activatedEmbedding, name: "Authoritative embedding" }] } });
+        await completion;
+      });
+      expect(group(title)).toHaveTextContent("Authoritative embedding");
+      expect(success).toHaveBeenCalledOnce();
+      expect(success).toHaveBeenCalledWith("modelProvider.embeddingSwitchManualParse");
+      expect(error).not.toHaveBeenCalled();
+      expect(mocks.changed).toHaveBeenCalledOnce();
+      expect(mocks.saveModel).not.toHaveBeenCalled();
+      await readyToSelect(title);
+      await act(async () => { await (options.onOk as () => Promise<void>)(); });
+      expect(mocks.clearEmbeddingChunks).toHaveBeenCalledOnce();
+    });
+
+    it.each([
+      ["activation request failed", new Error("activation unavailable")],
+      ["activation false", { cleared: true, activated: false }],
+      ["activation missing", { cleared: true }],
+      ["cleanup incomplete", { cleared: false, activated: true }],
+      ["non-boolean acknowledgement", { cleared: true, activated: "true" }],
+    ])("reports %s and reconciles the old selection without success or PUT", async (_label, result) => {
+      if (result instanceof Error) mocks.clearEmbeddingChunks.mockRejectedValue(result);
+      else mocks.clearEmbeddingChunks.mockResolvedValue(result);
+      renderPanel();
+      const options = await openConfirmation();
+      await act(async () => { await expect((options.onOk as () => Promise<void>)()).rejects.toThrow(); });
+      expect(mocks.selections).toHaveBeenCalledTimes(2);
+      expect(mocks.changed).toHaveBeenCalledOnce();
+      expect(group(title)).toHaveTextContent("Old embedding");
+      expect(mocks.saveModel).not.toHaveBeenCalled();
+      expect(success).not.toHaveBeenCalled();
+      expect(error).toHaveBeenCalledOnce();
+      expect(error).toHaveBeenCalledWith("modelProvider.embeddingCleanupFailed");
+      expect(update).toHaveBeenLastCalledWith(expect.objectContaining({ cancelButtonProps: { disabled: false } }));
+      await act(async () => { (options.onCancel as () => void)(); });
+      await readyToSelect(title);
+    });
+
+    it("reconciles the server selection even when the activation response is lost", async () => {
+      renderPanel();
+      const options = await openConfirmation();
+      mocks.clearEmbeddingChunks.mockRejectedValue(new Error("response lost"));
+      mocks.selections.mockResolvedValue({ data: { selections: [activatedEmbedding] } });
+      await act(async () => { await expect((options.onOk as () => Promise<void>)()).rejects.toThrow(); });
+      expect(group(title)).toHaveTextContent("New embedding");
+      expect(mocks.saveModel).not.toHaveBeenCalled();
+      expect(success).not.toHaveBeenCalled();
+      expect(error).toHaveBeenCalledOnce();
+    });
+
+    it("retries the same confirmed request after activation failure and refreshes on success", async () => {
+      mocks.clearEmbeddingChunks.mockRejectedValueOnce(new Error("activation unavailable"));
+      renderPanel();
+      const options = await openConfirmation();
+      await act(async () => { await expect((options.onOk as () => Promise<void>)()).rejects.toThrow(); });
+      expect(group(title)).toHaveTextContent("Old embedding");
+      mocks.selections.mockResolvedValue({ data: { selections: [activatedEmbedding] } });
+      await act(async () => { await (options.onOk as () => Promise<void>)(); });
+      expect(mocks.clearEmbeddingChunks.mock.calls.map(([input]) => input)).toEqual([confirmedRequest, confirmedRequest]);
+      expect(mocks.previewEmbeddingSwitch).toHaveBeenCalledOnce();
+      expect(mocks.selections).toHaveBeenCalledTimes(3);
+      expect(mocks.saveModel).not.toHaveBeenCalled();
+      expect(group(title)).toHaveTextContent("New embedding");
+      expect(success).toHaveBeenCalledOnce();
+      expect(success).toHaveBeenCalledWith("modelProvider.embeddingSwitchManualParse");
+      await readyToSelect(title);
+    });
+
+    it("ignores duplicate confirmation and stale refreshes while activation is pending", async () => {
+      renderPanel();
+      const options = await openConfirmation();
+      let resolveOldRefresh!: (value: unknown) => void;
+      mocks.selections.mockImplementationOnce(() => new Promise(resolve => { resolveOldRefresh = resolve; }));
+      act(() => window.dispatchEvent(new Event("focus")));
+      await waitFor(() => expect(mocks.selections).toHaveBeenCalledTimes(2));
+      let resolveActivation!: (value: unknown) => void;
+      mocks.clearEmbeddingChunks.mockImplementationOnce(() => new Promise(resolve => { resolveActivation = resolve; }));
+      let completion!: Promise<void>;
+      act(() => { completion = (options.onOk as () => Promise<void>)(); });
+      await waitFor(() => expect(mocks.clearEmbeddingChunks).toHaveBeenCalledOnce());
+      await act(async () => { await (options.onOk as () => Promise<void>)(); });
+      act(() => window.dispatchEvent(new Event("focus")));
+      expect(mocks.clearEmbeddingChunks).toHaveBeenCalledOnce();
+      expect(mocks.selections).toHaveBeenCalledTimes(2);
+      expect(within(group(title)).getByRole("combobox")).toBeDisabled();
+      mocks.selections.mockResolvedValue({ data: { selections: [activatedEmbedding] } });
+      await act(async () => { resolveActivation({ cleared: true, activated: true }); await completion; });
+      await act(async () => { resolveOldRefresh({ data: { selections: [selectedEmbedding] } }); });
+      expect(group(title)).toHaveTextContent("New embedding");
+      expect(mocks.saveModel).not.toHaveBeenCalled();
+    });
+
+    it("does not refresh, notify or save when activation finishes after unmount", async () => {
+      const panel = renderPanel();
+      const options = await openConfirmation();
+      let resolveActivation!: (value: unknown) => void;
+      mocks.clearEmbeddingChunks.mockImplementationOnce(() => new Promise(resolve => { resolveActivation = resolve; }));
+      let completion!: Promise<void>;
+      act(() => { completion = (options.onOk as () => Promise<void>)(); });
+      panel.unmount();
+      await act(async () => { resolveActivation({ cleared: true, activated: true }); await completion; });
+      expect(mocks.selections).toHaveBeenCalledOnce();
+      expect(mocks.saveModel).not.toHaveBeenCalled();
+      expect(mocks.changed).not.toHaveBeenCalled();
+      expect(success).not.toHaveBeenCalled();
+      expect(error).not.toHaveBeenCalled();
+    });
+
+    it("ignores authoritative refresh completion after unmount", async () => {
+      const panel = renderPanel();
+      const options = await openConfirmation();
+      let resolveRefresh!: (value: unknown) => void;
+      mocks.selections.mockImplementationOnce(() => new Promise(resolve => { resolveRefresh = resolve; }));
+      let completion!: Promise<void>;
+      act(() => { completion = (options.onOk as () => Promise<void>)(); });
+      await waitFor(() => expect(mocks.selections).toHaveBeenCalledTimes(2));
+      panel.unmount();
+      await act(async () => { resolveRefresh({ data: { selections: [activatedEmbedding] } }); await completion; });
+      expect(mocks.saveModel).not.toHaveBeenCalled();
+      expect(mocks.changed).not.toHaveBeenCalled();
+      expect(success).not.toHaveBeenCalled();
+      expect(error).not.toHaveBeenCalled();
+    });
+
+    it("shows a recoverable refresh error rather than optimistically selecting after activation", async () => {
+      renderPanel();
+      const options = await openConfirmation();
+      mocks.selections.mockRejectedValueOnce(new Error("refresh unavailable"));
+      await act(async () => { await expect((options.onOk as () => Promise<void>)()).rejects.toThrow(); });
+      expect(await screen.findByRole("alert")).toHaveTextContent("modelProvider.defaultConfigLoadFailed");
+      expect(success).not.toHaveBeenCalled();
+      expect(error).toHaveBeenCalledOnce();
+      expect(mocks.saveModel).not.toHaveBeenCalled();
+      await act(async () => { (options.onCancel as () => void)(); });
+      mocks.selections.mockResolvedValue({ data: { selections: [activatedEmbedding] } });
+      fireEvent.click(screen.getByRole("button", { name: "common.retry" }));
+      await waitFor(() => expect(group(title)).toHaveTextContent("New embedding"));
+    });
+  });
+
+  it("keeps the old embedding when the candidate signature cannot be checked", async () => {
+    const warning = vi.spyOn(Modal, "warning").mockImplementation(() => ({ destroy: vi.fn(), update: vi.fn() }));
+    mocks.selections.mockResolvedValue({ data: { selections: [selectedEmbedding] } });
+    mocks.models.mockResolvedValue({ data: { models: [candidateEmbedding] } });
+    mocks.previewEmbeddingSwitch.mockResolvedValue({
+      outcome: "probe_failed", can_switch: false, indexed_knowledge_bases: 2,
+      active_model_name: "Old embedding", candidate_model_name: "New embedding",
+      signature_status: "unknown", generation: 2,
+    });
+    renderPanel();
+
+    await chooseCandidateEmbedding();
+
+    await waitFor(() => expect(warning).toHaveBeenCalledWith(expect.objectContaining({
+      content: "modelProvider.embeddingSignatureCheckFailed",
+    })));
+    expect(mocks.saveModel).not.toHaveBeenCalled();
+  });
+
+  it("honors a server refusal even when the preview reports a matching signature", async () => {
+    const warning = vi.spyOn(Modal, "warning").mockImplementation(() => ({ destroy: vi.fn(), update: vi.fn() }));
+    mocks.selections.mockResolvedValue({ data: { selections: [selectedEmbedding] } });
+    mocks.models.mockResolvedValue({ data: { models: [candidateEmbedding] } });
+    mocks.previewEmbeddingSwitch.mockResolvedValue({
+      outcome: "same", can_switch: false, indexed_knowledge_bases: 2,
+      active_model_name: "Old embedding", candidate_model_name: "New embedding",
+      signature_status: "verified", generation: 2,
+    });
+    renderPanel();
+
+    await chooseCandidateEmbedding();
+
+    await waitFor(() => expect(warning).toHaveBeenCalledWith(expect.objectContaining({
+      content: "modelProvider.embeddingSignatureCheckFailed",
+    })));
+    expect(mocks.saveModel).not.toHaveBeenCalled();
+  });
+
+  it("checks the candidate before selecting an embedding when no index exists", async () => {
+    mocks.selections.mockResolvedValue({ data: { selections: [] } });
+    mocks.models.mockResolvedValue({ data: { models: [candidateEmbedding] } });
+    renderPanel();
+
+    await chooseCandidateEmbedding();
+
+    await waitFor(() => expect(mocks.previewEmbeddingSwitch).toHaveBeenCalledWith({
+      model_id: "new-embedding", source: "own",
+    }));
+    await waitFor(() => expect(mocks.saveModel).toHaveBeenCalledOnce());
+  });
+
+  it("fails closed when the embedding switch preview request fails", async () => {
+    const warning = vi.spyOn(Modal, "warning").mockImplementation(() => ({ destroy: vi.fn(), update: vi.fn() }));
+    mocks.selections.mockResolvedValue({ data: { selections: [selectedEmbedding] } });
+    mocks.models.mockResolvedValue({ data: { models: [candidateEmbedding] } });
+    mocks.previewEmbeddingSwitch.mockRejectedValue(new Error("probe unavailable"));
+    renderPanel();
+
+    await chooseCandidateEmbedding();
+
+    await waitFor(() => expect(warning).toHaveBeenCalledWith(expect.objectContaining({
+      content: "modelProvider.embeddingSignatureCheckFailed",
+      okText: "common.confirm",
+    })));
+    expect(mocks.saveModel).not.toHaveBeenCalled();
+    await waitFor(() => expect(within(group("modelProvider.module.embeddingTitle")).getByRole("combobox")).toBeEnabled());
   });
 
   it("shows the four tool services in the requested order and opens their configuration", async () => {
@@ -209,6 +530,34 @@ describe("default capability configuration groups", () => {
     expect(mocks.saveModel.mock.calls[0][0].setSelectedModelsOpenAPIRequest.selections).toEqual(expect.arrayContaining([
       expect.objectContaining({ model_key: "llm", model_id: "other-model" }),
     ]));
+  });
+
+  it("loads a configured model list on first open and reuses it when reopened", async () => {
+    renderPanel();
+    await screen.findByRole("region", { name: "modelProvider.defaults.basicTitle" });
+    const select = await readyToSelect("modelProvider.module.llmChatTitle");
+    const llmRequests = () => mocks.models.mock.calls.filter(([params]) => params.modelType === "llm");
+    expect(llmRequests()).toHaveLength(0);
+
+    fireEvent.mouseDown(select);
+    await waitFor(() => expect(llmRequests()).toHaveLength(1));
+    await screen.findByText("Demo model", { selector: "strong" });
+    fireEvent.mouseDown(document.body);
+    await waitFor(() => expect(select).toHaveAttribute("aria-expanded", "false"));
+    fireEvent.mouseDown(select);
+    await waitFor(() => expect(select).toHaveAttribute("aria-expanded", "true"));
+    expect(llmRequests()).toHaveLength(1);
+  });
+
+  it("does not refetch a model list that was loaded before opening the selector", async () => {
+    renderPanel();
+    await screen.findByRole("region", { name: "modelProvider.defaults.basicTitle" });
+    const select = await readyToSelect("modelProvider.module.ttsTitle");
+    const ttsRequests = () => mocks.models.mock.calls.filter(([params]) => params.modelType === "tts");
+    await waitFor(() => expect(ttsRequests()).toHaveLength(1));
+
+    fireEvent.mouseDown(select);
+    expect(ttsRequests()).toHaveLength(1);
   });
 
   it("reveals collapsed supplier models when searching", async () => {

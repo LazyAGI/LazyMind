@@ -1,5 +1,5 @@
 import { act, fireEvent, render, screen } from '@testing-library/react';
-import { afterEach, it, expect, vi } from 'vitest';
+import { afterEach, it, expect, onTestFinished, vi } from 'vitest';
 import type { ComponentType } from 'react';
 import * as React from 'react';
 import * as ReactDOM from 'react-dom';
@@ -13,9 +13,11 @@ it('scrolls at the transcript tail and retains the iframe through messages, expa
     serverName: 'lazymind', webUrl: 'http://localhost:8090',
   });
   const seats = new Map<string, ComponentType<any>>();
+  const disposers: Array<() => void> = [];
+  onTestFinished(() => { for (const dispose of disposers.reverse()) dispose(); });
   const ctx = {
-    effect: () => {},
-    uiConversation: { events: { register: () => {} } },
+    effect: (effect: () => () => void) => { disposers.push(effect()); },
+    uiConversation: { events: { register: () => () => {} } },
     slots: {
       inject: (_name: string, register: () => void) => register(),
       register: ({ name }: { name: string }, component: ComponentType<any>) => { seats.set(name, component); },

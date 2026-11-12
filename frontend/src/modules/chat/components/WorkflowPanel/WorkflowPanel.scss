@@ -1,3 +1,5 @@
+@use '../../../../styles/taskStatus' as status;
+
 .workflow-panel {
   container: workflow-panel / inline-size;
   display: flex;
@@ -236,6 +238,7 @@
   &--active  { border-color: #d0e4ff; }
   &--completed { border-color: #d0f0e0; }
   &--waiting { border-color: #ffe8c0; }
+  &--waiting_input { border-color: status.$input-border; }
   &--failed { border-color: #fecaca; }
 
   &--loading {
@@ -284,6 +287,13 @@
     min-height: 48px;
   }
 
+  &__heading {
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+    min-width: 0;
+  }
+
   &__title {
     font-weight: 600;
     font-size: 13px;
@@ -291,6 +301,15 @@
     letter-spacing: 0.01em;
     overflow: hidden;
     text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  &__app-version {
+    flex-shrink: 0;
+    color: #6b7280;
+    font-size: 11px;
+    line-height: 16px;
+    font-variant-numeric: tabular-nums;
     white-space: nowrap;
   }
 
@@ -308,7 +327,9 @@
     &--active    { background: #e6f0ff; color: #2563eb; }
     &--completed { background: #e6f7ee; color: #16a34a; }
     &--waiting   { background: #fff4e0; color: #d97706; }
+    &--waiting_input { background: status.$input-soft; color: status.$input-text; }
     &--failed    { background: #fef2f2; color: #dc2626; }
+    &--stopped   { background: status.$paused-soft; color: status.$paused-text; }
   }
 
   &__revision {
@@ -633,10 +654,28 @@
     margin-left: 4px;
     flex-shrink: 0;
 
+    &--waiting_input { background: status.$input-accent; }
+    &--waiting { background: #fa8c16; }
     &--running     { background: #2563eb; }
-    &--interrupted { background: #f59e0b; }
+    &--paused { background: status.$paused-accent; }
     &--failed      { background: #ef4444; }
+    &--skipped     { background: status.$skipped-accent; }
+    &--canceled    { background: #7a8493; }
     &--succeeded   { background: #10b981; }
+  }
+
+  &__empty.workflow-panel__empty--skipped {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+    color: status.$skipped-text;
+    padding: 28px 24px;
+    text-align: center;
+    line-height: 1.6;
+
+    strong { font-weight: 500; }
+    span { max-width: 520px; }
   }
 
   // Horizontal scrollable image card list
@@ -758,7 +797,12 @@
         min-height: 0;
         overflow: hidden;
 
-        > .workflow-slot--artifact:not(.workflow-slot--pending):not(.workflow-slot--error) {
+        > .workflow-panel__document-item {
+          flex: 1 1 auto;
+        }
+
+        > .workflow-slot--artifact:not(.workflow-slot--pending):not(.workflow-slot--error),
+        > .workflow-panel__document-item > .workflow-slot--artifact:not(.workflow-slot--pending):not(.workflow-slot--error) {
           flex: 1 1 auto;
           min-height: 0;
         }

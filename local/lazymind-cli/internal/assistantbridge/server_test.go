@@ -147,7 +147,7 @@ func TestStatusesDoNotLaunchDesktopAgentCandidates(t *testing.T) {
 }
 
 func TestInteractiveLoginActionsReturnBeforeExternalLoginCompletes(t *testing.T) {
-	for _, agent := range []string{"cursor"} {
+	for _, agent := range []string{"cursor", "workbuddy"} {
 		t.Run(agent, func(t *testing.T) {
 			server := newTestServer(t, t.TempDir())
 			changes := server.policy.Changes()
@@ -429,7 +429,7 @@ func TestBrowserSessionCanBeSavedAndCleared(t *testing.T) {
 		t.Fatalf("save status=%d body=%s", response.Code, response.Body.String())
 	}
 
-	request = httptest.NewRequest(http.MethodDelete, "/v1/session", nil)
+	request = httptest.NewRequest(http.MethodDelete, "/v1/session", strings.NewReader(`{"expected_session":{"server_url":"http://127.0.0.1:8090","access_token":"access","refresh_token":"refresh"}}`))
 	request.Header.Set("Origin", "http://127.0.0.1:8090")
 	response = httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
@@ -451,6 +451,33 @@ func TestBrowserSessionRejectsAnotherServerOrigin(t *testing.T) {
 	server.routes().ServeHTTP(response, request)
 	if response.Code != http.StatusForbidden {
 		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+}
+
+func TestBrowserSessionLateClearPreservesReplacement(t *testing.T) {
+	for _, body := range []string{"", `{"expected_session":{"server_url":"http://127.0.0.1:8090","access_token":"old","refresh_token":"old-refresh"}}`} {
+		t.Run(fmt.Sprintf("body-length=%d", len(body)), func(t *testing.T) {
+			home := t.TempDir()
+			server := newTestServer(t, home)
+			if err := server.store.Save(credentials.Credentials{ServerURL: "http://127.0.0.1:8090", AccessToken: "new", RefreshToken: "new-refresh"}); err != nil {
+				t.Fatal(err)
+			}
+			request := httptest.NewRequest(http.MethodDelete, "/v1/session", strings.NewReader(body))
+			request.Header.Set("Origin", "http://127.0.0.1:8090")
+			response := httptest.NewRecorder()
+			server.routes().ServeHTTP(response, request)
+			want := http.StatusOK
+			if body == "" {
+				want = http.StatusBadRequest
+			}
+			if response.Code != want {
+				t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+			}
+			data, err := os.ReadFile(filepath.Join(home, "credentials.json"))
+			if err != nil || !bytes.Contains(data, []byte(`"access_token": "new"`)) {
+				t.Fatal("replacement credentials were deleted")
+			}
+		})
 	}
 }
 
@@ -506,7 +533,7 @@ func TestBrowserHealthReportsBridgeIdentityAcrossPlatforms(t *testing.T) {
 	if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
 		t.Fatal(err)
 	}
-	if payload["platform"] != runtime.GOOS || strings.TrimSpace(fmt.Sprint(payload["executable"])) == "" {
+	if payload["version"] != "v9" || payload["platform"] != runtime.GOOS || strings.TrimSpace(fmt.Sprint(payload["executable"])) == "" {
 		t.Fatalf("payload=%#v", payload)
 	}
 }

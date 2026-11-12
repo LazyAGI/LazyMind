@@ -1,8 +1,8 @@
 import {
   BookOutlined,
+  DownOutlined,
   CheckCircleFilled,
   CloseOutlined,
-  CloudSyncOutlined,
   MoreOutlined,
   PlusOutlined,
   SettingOutlined,
@@ -18,6 +18,9 @@ import {
   Form,
   Input,
   Modal,
+  Pagination,
+  Skeleton,
+  theme,
   Progress,
   Radio,
   Select,
@@ -26,27 +29,21 @@ import {
   Table,
   Tabs,
   Tag,
-  Tooltip,
   Typography,
   message,
 } from "antd";
 import type { ChangeEvent, CSSProperties, MouseEvent, ReactNode } from "react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { isVocabularyEnabled } from "@/runtime/mode";
 import {
   addVocabularyWord,
   completeVocabularyReviewSession,
-  createAnkiDeck,
   createWordbook,
-  deleteAnkiDeck,
   deleteVocabulary,
   deleteWordbook,
   getActiveVocabularyReviewSession,
-  getAnkiStatus,
   getVocabularyProvider,
   getVocabularyStats,
-  listAnkiDecks,
   listReviewLogs,
   listVocabulary,
   listWordbooks,
@@ -59,39 +56,15 @@ import {
   startVocabularyReviewSession,
   submitVocabularySessionReview,
   updateVocabularyWord,
-  type AnkiDeck,
-  type AnkiProviderStatus,
   type ReviewLog,
   type ReviewQuestion,
   type ReviewSessionReport,
   type ReviewStats,
   type VocabularyListItem,
-  type VocabularyProviderSetting,
   type Wordbook,
 } from "./api";
 import "./VocabularyPage.scss";
 
-const labels: Record<string, string> = {
-  new: "新词",
-  learning: "学习中",
-  review: "复习中",
-  relearning: "重学",
-  mastered: "已学会",
-  suspended: "已暂停",
-};
-const ratings: Record<number, string> = {
-  1: "错误",
-  2: "困难",
-  3: "良好",
-  4: "简单",
-};
-const interval = (value?: string) => {
-  if (!value) return "";
-  const ms = new Date(value).getTime() - Date.now();
-  if (ms < 3600000) return `${Math.max(1, Math.round(ms / 60000))} 分钟`;
-  if (ms < 86400000) return `${Math.round(ms / 3600000)} 小时`;
-  return `${Math.round(ms / 86400000)} 天`;
-};
 const logIntervals = (log: ReviewLog) => {
   const data = log.fsrs_log || {};
   if ("interval_before_days" in data)
@@ -126,22 +99,40 @@ const Panel = ({
 
 export default function VocabularyPage() {
   const { t } = useTranslation();
-  const desktop = isVocabularyEnabled();
+  const { token } = theme.useToken();
+  const [page, setPage] = useState(1);
+  const [startingReview, setStartingReview] = useState(false);
+  const reviewStartingRef = useRef(false);
+  const reviewBookRef = useRef<string>();
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
+  const loadSequence = useRef(0);
+  const labels = useMemo<Record<string, string>>(() => ({
+    new: t("vocabularyPage.new"),
+    learning: t("vocabularyPage.learning"),
+    review: t("vocabularyPage.reviewing"),
+    relearning: t("vocabularyPage.relearning"),
+    mastered: t("vocabularyPage.mastered"),
+    suspended: t("vocabularyPage.suspended"),
+  }), [t]);
+  const ratings: Record<number, string> = {
+    1: t("vocabularyPage.incorrectRating"),
+    2: t("vocabularyPage.hard"),
+    3: t("vocabularyPage.goodRating"),
+    4: t("vocabularyPage.easy"),
+  };
+  const interval = (value?: string) => {
+    if (!value) return "";
+    const ms = new Date(value).getTime() - Date.now();
+    if (ms < 3600000) return t("vocabularyPage.minutes", { count: Math.max(1, Math.round(ms / 60000)) });
+    if (ms < 86400000) return t("vocabularyPage.hours", { count: Math.round(ms / 3600000) });
+    return t("vocabularyPage.days", { count: Math.round(ms / 86400000) });
+  };
   const [tab, setTab] = useState("words");
-  const [settingsOpen, setSettingsOpen] = useState(false);
   const [newWordOpen, setNewWordOpen] = useState(false);
-  const [provider, setProvider] = useState<"local" | "anki">("local");
-  const [providerSetting, setProviderSetting] =
-    useState<VocabularyProviderSetting>({
-      selected_provider: "local",
-      anki_endpoint: "http://127.0.0.1:8765",
-      anki_deck_name: "LazyMind Vocabulary",
-    });
   const [items, setItems] = useState<VocabularyListItem[]>([]);
-  const [anki, setAnki] = useState<AnkiProviderStatus | null>(null);
   const [stats, setStats] = useState<ReviewStats | null>(null);
   const [books, setBooks] = useState<Wordbook[]>([]);
-  const [ankiDecks, setAnkiDecks] = useState<AnkiDeck[]>([]);
   const [logs, setLogs] = useState<ReviewLog[]>([]);
   const [search, setSearch] = useState("");
   const [state, setState] = useState<string>();
@@ -161,61 +152,64 @@ export default function VocabularyPage() {
   const [form] = Form.useForm();
   const [newWordForm] = Form.useForm();
   const load = useCallback(async (preferredWordbookId?: string) => {
-    const setting = await getVocabularyProvider();
-    const active = setting.selected_provider;
-    const [allBooks, nextDecks] = await Promise.all([
-      desktop ? listWordbooks() : Promise.resolve([]),
-      active === "anki" ? listAnkiDecks().catch(() => []) : Promise.resolve([]),
+    const sequence = ++loadSequence.current;
+    setLoading(true);
+    setLoadError(false);
+    try {
+    const [setting, allBooks] = await Promise.all([
+      getVocabularyProvider(),
+      listWordbooks(),
     ]);
     const nextBooks = allBooks.filter((book) => !book.capability_key || book.capability_key === "english_definition");
     let selected = preferredWordbookId || wordbookId || setting.local_default_wordbook_id || "";
-    if (active === "local" && !nextBooks.some((book) => book.id === selected))
-      selected =
-        nextBooks.find((book) => book.name === "默认生词本")?.id ||
-        nextBooks[0]?.id ||
-        "";
-    const [words, status, nextStats, nextLogs, activeReview] =
-      await Promise.all([
-        listVocabulary(active, {
-          search,
-          state: state || "",
-          wordbook_id: active === "local" ? selected : "",
-        }),
-        getAnkiStatus().catch(() => null),
-        getVocabularyStats(active).catch(() => null),
-        listReviewLogs(active).catch(() => []),
-        getActiveVocabularyReviewSession().catch(() => ({ active: false })),
-      ]);
-    setProvider(active);
-    setProviderSetting(
-      active === "local" && selected !== setting.local_default_wordbook_id
-        ? { ...setting, local_default_wordbook_id: selected }
-        : setting,
-    );
-    if (active === "local" && selected) setWordbookId(selected);
+    if (!nextBooks.some((book) => book.id === selected)) {
+      selected = nextBooks.find((book) => book.name === "默认生词本")?.id || nextBooks[0]?.id || "";
+    }
+    const [words, nextStats, nextLogs, activeReview] = await Promise.all([
+      listVocabulary("local", { search, state: state || "", wordbook_id: selected }),
+      getVocabularyStats().catch(() => null),
+      listReviewLogs().catch(() => []),
+      getActiveVocabularyReviewSession(selected).catch(() => ({ active: false })),
+    ]);
+    if (sequence !== loadSequence.current) return;
+    setWordbookId(selected || undefined);
     setItems(words);
-    setAnki(status);
     setBooks(nextBooks);
     setStats(nextStats);
-    setAnkiDecks(nextDecks);
     setLogs(nextLogs);
     setHasActiveReview(activeReview.active);
-  }, [desktop, search, state, wordbookId]);
+    } catch { if (sequence === loadSequence.current) setLoadError(true); }
+    finally { if (sequence === loadSequence.current) setLoading(false); }
+  }, [search, state, wordbookId]);
   useEffect(() => {
     void load();
+    return () => { loadSequence.current += 1; };
   }, [load]);
+  useEffect(() => { setPage(1); }, [search, state, wordbookId]);
   const start = async () => {
+    if (reviewStartingRef.current) return;
+    reviewStartingRef.current = true;
+    setStartingReview(true);
+    reviewBookRef.current = wordbookId;
     try {
       setReviewReport(null);
-      const batch = await startVocabularyReviewSession(5);
+      const batch = await startVocabularyReviewSession(5, reviewBookRef.current);
       setReviewSessionId(batch.session.id);
       setReviewQueue(batch.questions || []);
+      setHasActiveReview(Boolean(batch.questions?.length));
       setQuestion(batch.questions?.[0] || null);
       setRevealed(false);
-      if (!batch.questions?.length) message.info("当前词本没有到期单词");
+      if (!batch.questions?.length) {
+        const report = await completeVocabularyReviewSession(batch.session.id);
+        setReviewSessionId("");
+        setHasActiveReview(false);
+        if (hasActiveReview) setReviewReport(report);
+        else message.info(t("vocabularyPage.noDueWords"));
+        void load();
+      }
     } catch (error) {
-      message.error(error instanceof Error ? error.message : "无法开始复习");
-    }
+      message.error(error instanceof Error ? error.message : t("vocabularyPage.reviewStartFailed"));
+    } finally { reviewStartingRef.current = false; setStartingReview(false); }
   };
   const rate = async (rating?: string, response?: string) => {
     if (!question || !reviewSessionId) return;
@@ -237,7 +231,7 @@ export default function VocabularyPage() {
         setReviewQueue(remaining);
         setQuestion(remaining[0]);
       } else {
-        const next = await startVocabularyReviewSession(5);
+        const next = await startVocabularyReviewSession(5, reviewBookRef.current);
         if (next.questions?.length) {
           setReviewQueue(next.questions);
           setQuestion(next.questions[0]);
@@ -254,7 +248,7 @@ export default function VocabularyPage() {
       void load();
     } catch (error) {
       message.error(
-        error instanceof Error ? error.message : "提交复习结果失败",
+        error instanceof Error ? error.message : t("vocabularyPage.reviewSubmitFailed"),
       );
     }
   };
@@ -263,21 +257,21 @@ export default function VocabularyPage() {
       word_to_meaning: t("vocabulary.cardTypes.wordToMeaning"),
       meaning_to_word: t("vocabulary.cardTypes.meaningToWord"),
       sentence_cloze: t("vocabulary.cardTypes.sentenceCloze"),
-    })[type || ""] || t("vocabulary.cardTypes.anki");
+    })[type || ""] || t("vocabularyPage.review");
   const batchReset = (scope: "today" | "wordbook") =>
     Modal.confirm({
-      title: scope === "today" ? "重置今日学习？" : "重置当前单词本？",
+      title: scope === "today" ? t("vocabularyPage.resetTodayTitle") : t("vocabularyPage.resetBookTitle"),
       content:
         scope === "today"
-          ? "今天复习过的单词将回到初始学习状态。"
-          : "当前单词本内的所有单词将回到初始学习状态。",
-      okText: "确认重置",
+          ? t("vocabularyPage.resetTodayDescription")
+          : t("vocabularyPage.resetBookDescription"),
+      okText: t("vocabularyPage.confirmReset"),
       onOk: async () => {
         const result = await resetVocabularyBatch(
           scope,
           scope === "wordbook" ? wordbookId : undefined,
         );
-        message.success(`已重置 ${result.reset} 个单词`);
+        message.success(t("vocabularyPage.wordsReset", { count: result.reset }));
         await load();
       },
     });
@@ -302,51 +296,25 @@ export default function VocabularyPage() {
     const capabilityKey = "english_definition";
     const questionTypes = ["single_choice", "text_input", "cloze"];
     Modal.confirm({
-      title: provider === "anki" ? "新建 Anki 单词本" : "新建生词本",
+      title: t("vocabularyPage.newBook"),
       content: (
-        <Space direction="vertical" style={{ width: "100%" }}>
-          <Input autoFocus placeholder="输入名称" onChange={(event: ChangeEvent<HTMLInputElement>) => { name = event.target.value; }} />
-          {provider === "anki" ? <Alert type="info" showIcon message={t("vocabulary.localOnlyDesktop")} /> : null}
-        </Space>
+        <Input autoFocus placeholder={t("vocabularyPage.inputName")} onChange={(event: ChangeEvent<HTMLInputElement>) => { name = event.target.value; }} />
       ),
       onOk: async () => {
-        if (!name.trim()) throw new Error("请输入名称");
-        if (provider === "anki") {
-          await createAnkiDeck(name);
-          setProviderSetting(
-            await saveVocabularyProvider({
-              ...providerSetting,
-              anki_deck_name: name,
-            }),
-          );
-        } else {
-          const book = await createWordbook({ name, capability_key: capabilityKey, question_types: questionTypes });
-          setProviderSetting(
-            await saveVocabularyProvider({
-              ...providerSetting,
-              local_default_wordbook_id: book.id,
-            }),
-          );
-          setWordbookId(book.id);
-          await load(book.id);
-          return;
-        }
-        await load();
+        if (!name.trim()) throw new Error(t("vocabularyPage.nameRequired"));
+        const book = await createWordbook({ name, capability_key: capabilityKey, question_types: questionTypes });
+        await saveVocabularyProvider({ local_default_wordbook_id: book.id });
+        setWordbookId(book.id);
+        await load(book.id);
       },
     });
   };
   const removeBook = (id: string, name: string) => {
     let mode: "move" | "delete_words" = "move";
     const localTargets = books.filter((book) => book.id !== id);
-    const ankiTargets = ankiDecks.filter((deck) => String(deck.id) !== id);
-    let target =
-      provider === "anki"
-        ? ankiTargets.find((deck) => deck.is_default)?.name ||
-          ankiTargets[0]?.name
-        : localTargets.find((book) => book.name === "默认生词本")?.id ||
-          localTargets[0]?.id;
+    let target = localTargets.find((book) => book.name === "默认生词本")?.id || localTargets[0]?.id;
     Modal.confirm({
-      title: `删除单词本「${name}」？`,
+      title: t("vocabularyPage.deleteBookTitle", { name }),
       width: 520,
       content: (
         <Space direction="vertical" style={{ width: "100%" }}>
@@ -357,230 +325,63 @@ export default function VocabularyPage() {
             }}
           >
             <Space direction="vertical">
-              <Radio value="move">把其中的单词移动到</Radio>
-              <Radio value="delete_words">同时删除其中的所有单词</Radio>
+              <Radio value="move">{t("vocabularyPage.moveWords")}</Radio>
+              <Radio value="delete_words">{t("vocabularyPage.deleteWords")}</Radio>
             </Space>
           </Radio.Group>
           <Select
             defaultValue={target}
             style={{ width: "100%" }}
-            options={
-              provider === "anki"
-                ? ankiTargets.map((deck) => ({
-                    value: deck.name,
-                    label: deck.name,
-                  }))
-                : localTargets.map((book) => ({
-                    value: book.id,
-                    label: book.name,
-                  }))
-            }
+            options={localTargets.map((book) => ({ value: book.id, label: book.name }))}
             onChange={(value: string) => {
               target = value;
             }}
           />
         </Space>
       ),
-      okText: "确认删除",
+      okText: t("vocabularyPage.confirmDelete"),
       okButtonProps: { danger: true },
       onOk: async () => {
-        if (mode === "move" && !target) throw new Error("请选择目标单词本");
-        if (provider === "anki") await deleteAnkiDeck(name, mode, target);
-        else await deleteWordbook(id, mode, target);
-        if (provider === "anki" && providerSetting.anki_deck_name === name)
-          setProviderSetting(
-            await saveVocabularyProvider({
-              ...providerSetting,
-              anki_deck_name: target || ankiTargets[0]?.name || "",
-            }),
-          );
-        if (
-          provider === "local" &&
-          (wordbookId || providerSetting.local_default_wordbook_id) === id
-        ) {
+        if (mode === "move" && !target) throw new Error(t("vocabularyPage.selectTarget"));
+        await deleteWordbook(id, mode, target);
+        if (wordbookId === id) {
+          await saveVocabularyProvider({ local_default_wordbook_id: target || "" });
           setWordbookId(target);
-          setProviderSetting(
-            await saveVocabularyProvider({
-              ...providerSetting,
-              local_default_wordbook_id: target,
-            }),
-          );
+          await load(target);
+        } else {
+          await load();
         }
-        await load();
-        message.success("单词本已删除");
+        message.success(t("vocabularyPage.bookDeleted"));
       },
     });
   };
   const selectBook = async (value: string) => {
-    if (provider === "anki")
-      setProviderSetting(
-        await saveVocabularyProvider({
-          ...providerSetting,
-          anki_deck_name: value,
-        }),
-      );
-    else {
-      setWordbookId(value);
-      setProviderSetting(
-        await saveVocabularyProvider({
-          ...providerSetting,
-          local_default_wordbook_id: value,
-        }),
-      );
-    }
-  };
-  const selectBackend = async (next: "anki" | "local") => {
-    if (next === "anki" && !anki?.connected) return;
-    const saved = await saveVocabularyProvider({
-      ...providerSetting,
-      selected_provider: next,
-    });
-    setProviderSetting(saved);
-    setProvider(next);
-    setWordbookId(undefined);
-    void load();
+    setWordbookId(value);
+    await saveVocabularyProvider({ local_default_wordbook_id: value });
   };
   const createWord = async () => {
     const values = await newWordForm.validateFields();
     await addVocabularyWord({
       ...values,
-      provider,
-      wordbook_ids:
-        provider === "local"
-          ? [
-              wordbookId || providerSetting.local_default_wordbook_id || "",
-            ].filter(Boolean)
-          : undefined,
+      provider: "local",
+      wordbook_ids: wordbookId ? [wordbookId] : undefined,
       origin_type: "user",
     });
     setNewWordOpen(false);
     newWordForm.resetFields();
-    message.success("已加入生词表");
+    message.success(t("vocabularyPage.wordAdded"));
     void load();
   };
-  const columns = useMemo(
-    () => [
-      {
-        title: "单词",
-        render: (_: unknown, x: VocabularyListItem) => (
-          <Button type="link" onClick={() => setDetail(x)}>
-            {x.word.term}
-          </Button>
-        ),
-      },
-      {
-        title: "释义 / 词性",
-        render: (_: unknown, x: VocabularyListItem) => (
-          <div>
-            {x.word.meaning || x.example?.translation || "—"}
-            <Typography.Text type="secondary">
-              　{x.word.part_of_speech}
-            </Typography.Text>
-            {x.example?.sentence ? (
-              <div>
-                <Typography.Text type="secondary">
-                  {x.example.sentence}
-                </Typography.Text>
-              </div>
-            ) : null}
-          </div>
-        ),
-      },
-      {
-        title: "来源 / 标签",
-        render: (_: unknown, x: VocabularyListItem) => (
-          <Space wrap>
-            {x.word.source_name || x.word.origin_type}
-            {x.tags?.map((t) => (
-              <Tag key={t}>{t}</Tag>
-            ))}
-          </Space>
-        ),
-      },
-      {
-        title: "状态",
-        render: (_: unknown, x: VocabularyListItem) => (
-          <Tag
-            color={
-              x.state === "mastered" ? "green" : x.lapses > 2 ? "red" : "blue"
-            }
-          >
-            {labels[x.state] || x.state}
-          </Tag>
-        ),
-      },
-      {
-        title: "复习",
-        render: (_: unknown, x: VocabularyListItem) => (
-          <span>
-            {x.reps} 次 · 错 {x.lapses}
-          </span>
-        ),
-      },
-      {
-        title: "下次复习",
-        render: (_: unknown, x: VocabularyListItem) =>
-          x.due_at ? new Date(x.due_at).toLocaleString() : "—",
-      },
-      {
-        title: "操作",
-        render: (_: unknown, x: VocabularyListItem) => (
-          <Space>
-            {x.state === "mastered" ? (
-              <Button
-                size="small"
-                onClick={() => void resumeVocabulary(x.word.id).then(() => load())}
-              >
-                恢复
-              </Button>
-            ) : (
-              <Button
-                size="small"
-                onClick={() => void masterVocabulary(x.word.id).then(() => load())}
-              >
-                标记学会
-              </Button>
-            )}
-            <Dropdown
-              trigger={["click"]}
-              menu={{
-                items: [
-                  ...(provider === "local"
-                    ? [
-                        {
-                          key: "reset",
-                          label: "重置学习状态",
-                          onClick: () =>
-                            void resetVocabulary(x.word.id).then(() => load()),
-                        },
-                      ]
-                    : []),
-                  {
-                    key: "delete",
-                    danger: true,
-                    label: "删除单词",
-                    onClick: () =>
-                      Modal.confirm({
-                        title: `删除 ${x.word.term}？`,
-                        content: "相关例句、来源和复习历史也会删除。",
-                        onOk: () => deleteVocabulary(x.word.id).then(() => load()),
-                      }),
-                  },
-                ],
-              }}
-            >
-              <Button
-                size="small"
-                icon={<MoreOutlined />}
-                aria-label="更多操作"
-              />
-            </Dropdown>
-          </Space>
-        ),
-      },
-    ],
-    [load, provider],
-  );
+  const wordActions = (item: VocabularyListItem) => [
+    { key: "detail", label: t("vocabularyPage.viewDetails"), onClick: () => setDetail(item) },
+    { key: "master", label: t(item.state === "mastered" ? "vocabularyPage.resume" : "vocabularyPage.markMastered"),
+      onClick: () => void (item.state === "mastered" ? resumeVocabulary(item.word.id) : masterVocabulary(item.word.id)).then(() => load()).catch(() => message.error(t("vocabularyPage.actionFailed"))) },
+    { key: "reset", label: t("vocabularyPage.resetState"), onClick: () => void resetVocabulary(item.word.id).then(() => load()).catch(() => message.error(t("vocabularyPage.actionFailed"))) },
+    { key: "delete", danger: true, label: t("vocabularyPage.deleteWord"), onClick: () => Modal.confirm({
+      title: t("vocabularyPage.deleteWordTitle", { term: item.word.term }), content: t("vocabularyPage.deleteWordDescription"),
+      okButtonProps: { danger: true }, onOk: () => deleteVocabulary(item.word.id).then(() => load()),
+    }) },
+  ];
   const visibleLogs = useMemo(() => {
     const now = Date.now(),
       days = logRange === "today" ? 1 : logRange === "week" ? 7 : 30;
@@ -589,21 +390,12 @@ export default function VocabularyPage() {
     );
   }, [logs, logRange]);
   const correct = visibleLogs.filter((x) => x.rating > 1).length;
-  const bookOptions = (
-    provider === "anki"
-      ? ankiDecks.map((deck) => ({
-          value: deck.name,
-          id: String(deck.id),
-          name: deck.name,
-          locked: deck.is_default,
-        }))
-      : books.map((book) => ({
-          value: book.id,
-          id: book.id,
-          name: book.name,
-          locked: book.name === "默认生词本",
-        }))
-  ).map((option) => ({
+  const bookOptions = books.map((book) => ({
+    id: book.id,
+    value: book.id,
+    name: book.name,
+    locked: book.name === "默认生词本",
+  })).map((option) => ({
     value: option.value,
     label: (
       <span
@@ -615,10 +407,10 @@ export default function VocabularyPage() {
       >
         <span>{option.name}</span>
         {option.locked ? (
-          <Typography.Text type="secondary">系统默认</Typography.Text>
+          <Typography.Text type="secondary">{t("vocabularyPage.systemDefault")}</Typography.Text>
         ) : (
           <CloseOutlined
-            aria-label={`删除 ${option.name}`}
+            aria-label={t("vocabularyPage.deleteBookLabel", { name: option.name })}
             onMouseDown={(event: MouseEvent<HTMLElement>) => {
               event.preventDefault();
               event.stopPropagation();
@@ -629,159 +421,94 @@ export default function VocabularyPage() {
       </span>
     ),
   }));
-  const selectedBook =
-    provider === "anki"
-      ? providerSetting.anki_deck_name
-      : wordbookId || providerSetting.local_default_wordbook_id;
+  const currentPage = Math.min(page, Math.max(1, Math.ceil(items.length / 12)));
   const wordsView = (
-    <Space direction="vertical" size={18} style={{ width: "100%" }}>
-      <Panel>
-        <Space
-          wrap
-          style={{ display: "flex", justifyContent: "space-between" }}
-        >
-          <Space>
-            <Typography.Text strong>我的词本</Typography.Text>
-            <Select
-              value={selectedBook}
-              placeholder="选择单词本"
-              style={{ width: 260 }}
-              onChange={selectBook}
-              options={bookOptions}
-            />
-          </Space>
-          <Space>
-            <Button
-              icon={<PlusOutlined />}
-              onClick={() => setNewWordOpen(true)}
-            >
-              新建单词
-            </Button>
-            <Button
-              type="primary"
-              onClick={() => void start()}
-              disabled={
-                provider === "anki" && anki?.review_capability !== "full"
-              }
-            >
-              {hasActiveReview ? "继续复习" : "开始复习"}
-            </Button>
-            <Button onClick={createBook}>{provider === "anki" ? "新建 Anki 单词本" : "新建生词本"}</Button>
-            {provider === "anki" ? (
-              <Tooltip title={t("vocabulary.localOnlyDesktop")}>
-                <span><Button disabled>新建本地生词本</Button></span>
-              </Tooltip>
-            ) : null}
-            {provider === "local" ? (
-              <Dropdown
-                menu={{
-                  items: [
-                    {
-                      key: "today",
-                      label: "重置今日学习",
-                      onClick: () => batchReset("today"),
-                    },
-                    {
-                      key: "book",
-                      label: "重置当前单词本",
-                      danger: true,
-                      onClick: () => batchReset("wordbook"),
-                    },
-                  ],
-                }}
-              >
-                <Button icon={<MoreOutlined />}>批量操作</Button>
-              </Dropdown>
-            ) : null}
-          </Space>
-        </Space>
-        {stats ? (
-          <div
-            style={{
-              display: "flex",
-              justifyContent: "space-around",
-              marginTop: 20,
-              padding: 16,
-              background: "#f7f9fc",
-              borderRadius: 8,
-            }}
-          >
-            {[
-              ["全部", stats.total],
-              ["今日到期", stats.due],
-              ["新词", stats.new],
-              ["今日完成", stats.reviewed_today],
-              ["易错", stats.weak],
-            ].map(([title, value]) => (
-              <Statistic key={String(title)} title={title} value={value} />
-            ))}
+    <div className="vocabulary-library">
+      <section className="vocabulary-library__overview" aria-label={t("vocabularyPage.overview")}>
+        <div className="vocabulary-library__overview-label"><BookOutlined aria-hidden="true" /><span>{t("vocabularyPage.overview")}</span></div>
+        <div className="vocabulary-library__stats">
+          {[
+            [t("vocabularyPage.totalWords"), stats?.total],
+            [t("vocabularyPage.dueCards"), stats?.due],
+            [t("vocabularyPage.newCards"), stats?.new],
+            [t("vocabularyPage.answersToday"), stats?.reviewed_today],
+          ].map(([title, value]) => <div className="vocabulary-library__stat" key={String(title)}><span>{title}</span><strong>{value ?? "—"}</strong></div>)}
+        </div>
+        <p className="vocabulary-library__scope">{t("vocabularyPage.statsExplanation")}</p>
+      </section>
+      <section className="vocabulary-library__collection">
+        <div className="vocabulary-library__toolbar">
+          <div className="vocabulary-library__book">
+            <label htmlFor="vocabulary-wordbook">{t("vocabularyPage.myBooks")}</label>
+            <Select id="vocabulary-wordbook" disabled={startingReview} value={wordbookId} placeholder={t("vocabularyPage.selectBook")} onChange={selectBook} options={bookOptions} />
+            <Button type="text" icon={<PlusOutlined />} disabled={startingReview} onClick={createBook} aria-label={t("vocabularyPage.newBook")} title={t("vocabularyPage.newBook")} />
           </div>
-        ) : null}
-        <Space wrap style={{ marginTop: 20 }}>
-          <Input.Search
-            allowClear
-            placeholder="搜索单词或释义"
-            onSearch={setSearch}
-            style={{ width: 320 }}
-          />
-          <Select
-            allowClear
-            placeholder="记忆状态"
-            value={state}
-            onChange={setState}
-            style={{ width: 150 }}
-            options={Object.entries(labels).map(([value, label]) => ({
-              value,
-              label,
-            }))}
-          />
-        </Space>
-        {provider === "anki" && anki?.review_capability !== "full" ? (
-          <Alert
-            style={{ marginTop: 16 }}
-            type="info"
-            showIcon
-            message="当前 AnkiConnect 不支持可靠评分，请在 Anki 中复习；生词管理仍可使用。"
-          />
-        ) : null}
-        <Table<VocabularyListItem>
-          style={{ marginTop: 16 }}
-          rowKey={(x: VocabularyListItem) => x.word.id}
-          dataSource={items}
-          locale={{ emptyText: <Empty description="暂无生词" /> }}
-          columns={columns}
-        />
-      </Panel>
-    </Space>
+          <div className="vocabulary-library__actions">
+            <Button icon={<PlusOutlined />} onClick={() => setNewWordOpen(true)}>{t("vocabularyPage.newWord")}</Button>
+            <Button type="primary" loading={startingReview} disabled={loading || loadError} onClick={() => void start()}>{hasActiveReview ? t("vocabularyPage.resumeReview") : t("vocabularyPage.startReview")}</Button>
+            <Dropdown trigger={["click"]} menu={{ items: [
+              { key: "today", label: t("vocabularyPage.resetToday"), onClick: () => batchReset("today") },
+              { key: "book", label: t("vocabularyPage.resetBook"), danger: true, onClick: () => batchReset("wordbook") },
+            ] }}><Button type="text" icon={<MoreOutlined />} aria-label={t("vocabularyPage.batchActions")} /></Dropdown>
+          </div>
+        </div>
+        <div className="vocabulary-library__filters">
+          <Input.Search allowClear aria-label={t("vocabularyPage.search")} placeholder={t("vocabularyPage.search")} onSearch={setSearch} />
+          <Select allowClear aria-label={t("vocabularyPage.memoryState")} placeholder={t("vocabularyPage.memoryState")} value={state} onChange={setState} options={Object.entries(labels).map(([value, label]) => ({ value, label }))} />
+          <span className="vocabulary-library__result-count" aria-live="polite">{!loading && !loadError && t("vocabularyPage.resultCount", { count: items.length })}</span>
+        </div>
+        <p className="vocabulary-library__scope">{t("vocabularyPage.reviewScope")}</p>
+        {loadError ? <Alert type="error" showIcon message={t("vocabularyPage.loadFailed")} action={<Button onClick={() => void load()}>{t("vocabulary.document.retry")}</Button>} />
+          : loading ? <Skeleton active paragraph={{ rows: 4 }} />
+          : !items.length ? <Empty description={t(search || state ? "vocabularyPage.noMatches" : "vocabularyPage.empty")} />
+          : <div className="vocabulary-library__grid">
+            {items.slice((currentPage - 1) * 12, currentPage * 12).map(item => <article className="vocabulary-word-card" aria-label={item.word.term} key={item.word.id}>
+              <header>
+                <div className="vocabulary-word-card__identity"><button className="vocabulary-word-card__term" onClick={() => setDetail(item)}>{item.word.term}</button>{item.word.phonetic && <span>{item.word.phonetic}</span>}</div>
+                <Dropdown trigger={["click"]} menu={{ items: wordActions(item) }}><Button type="text" icon={<MoreOutlined />} aria-label={t("vocabulary.document.moreActions", { term: item.word.term })} /></Dropdown>
+              </header>
+              <p className="vocabulary-word-card__meaning">{item.word.meaning || item.example?.translation || "—"}</p>
+              <div className="vocabulary-word-card__status"><Tag color={item.state === "mastered" ? "green" : "blue"}>{labels[item.state] || item.state}</Tag><span>{t("vocabularyPage.reviewCounts", { reps: item.reps, lapses: item.lapses })}</span></div>
+              <details className="vocabulary-word-card__details"><summary aria-label={t("vocabulary.document.exampleDetails")} title={t("vocabulary.document.exampleDetails")}><DownOutlined aria-hidden="true" /></summary>
+                {item.example?.sentence && <blockquote>{item.example.sentence}{item.example.translation && <p>{item.example.translation}</p>}</blockquote>}
+                <p>{t("vocabularyPage.contentSource")}: {item.word.source_name || item.word.origin_type || "—"}</p>
+                <p>{t("vocabularyPage.nextReview")}: {item.due_at ? new Date(item.due_at).toLocaleString() : "—"}</p>
+                {item.tags?.map(tag => <Tag key={tag}>{tag}</Tag>)}
+              </details>
+            </article>)}
+          </div>}
+        {items.length > 12 && !loading && !loadError && <Pagination current={currentPage} total={items.length} pageSize={12} onChange={setPage} showSizeChanger={false} />}
+      </section>
+    </div>
   );
   const historyColumns = [
     {
-      title: "时间",
+      title: t("vocabularyPage.time"),
       dataIndex: "reviewed_at",
       render: (x: string) => new Date(x).toLocaleString(),
     },
-    { title: "单词", dataIndex: "term" },
+    { title: t("vocabularyPage.word"), dataIndex: "term" },
     {
-      title: "题型",
+      title: t("vocabularyPage.questionType"),
       dataIndex: "card_type",
       render: (x: string) => cardTypeLabel(x),
     },
     {
-      title: "结果",
+      title: t("vocabularyPage.result"),
       dataIndex: "rating",
       render: (x: number) => (
         <Tag color={x === 1 ? "red" : "green"}>{ratings[x] || x}</Tag>
       ),
     },
     {
-      title: "间隔变化",
+      title: t("vocabularyPage.intervalChange"),
       render: (_: unknown, x: ReviewLog) => {
         const [a, b] = logIntervals(x);
-        return b === undefined ? `${a} 天 → —` : `${a} 天 → ${b} 天`;
+        return t("vocabularyPage.intervalRange", { from: a, to: b === undefined ? "—" : t("vocabularyPage.days", { count: b }) });
       },
     },
     {
-      title: "下次复习",
+      title: t("vocabularyPage.nextReview"),
       render: (_: unknown, x: ReviewLog) =>
         "due_at" in (x.fsrs_log || {}) && x.fsrs_log.due_at
           ? new Date(x.fsrs_log.due_at).toLocaleDateString()
@@ -800,12 +527,12 @@ export default function VocabularyPage() {
             optionType="button"
             buttonStyle="solid"
             options={[
-              { label: "今天", value: "today" },
-              { label: "本周", value: "week" },
-              { label: "本月", value: "month" },
+              { label: t("vocabularyPage.today"), value: "today" },
+              { label: t("vocabularyPage.thisWeek"), value: "week" },
+              { label: t("vocabularyPage.thisMonth"), value: "month" },
             ]}
           />
-          <Button href={reviewLogsExportUrl(provider)}>导出记录</Button>
+          <Button href={reviewLogsExportUrl()}>{t("vocabularyPage.export")}</Button>
         </Space>
         <div
           style={{
@@ -816,11 +543,11 @@ export default function VocabularyPage() {
             borderRadius: 8,
           }}
         >
-          <Statistic title="作答次数" value={visibleLogs.length} />
-          <Statistic title="答对" value={correct} />
-          <Statistic title="答错" value={visibleLogs.length - correct} />
+          <Statistic title={t("vocabularyPage.answerCount")} value={visibleLogs.length} />
+          <Statistic title={t("vocabularyPage.correct")} value={correct} />
+          <Statistic title={t("vocabularyPage.incorrect")} value={visibleLogs.length - correct} />
           <Statistic
-            title="正确率"
+            title={t("vocabularyPage.accuracy")}
             value={
               visibleLogs.length
                 ? Math.round((correct / visibleLogs.length) * 100)
@@ -833,13 +560,17 @@ export default function VocabularyPage() {
           rowKey={(x: ReviewLog) => `${x.card_id}-${x.reviewed_at}`}
           dataSource={visibleLogs}
           columns={historyColumns}
-          locale={{ emptyText: <Empty description="暂无学习记录" /> }}
+          locale={{ emptyText: <Empty description={t("vocabularyPage.emptyHistory")} /> }}
         />
       </Space>
     </Panel>
   );
   return (
-    <div style={{ padding: 24, maxWidth: 1500, margin: "0 auto" }}>
+    <div className="vocabulary-page" style={{
+      "--vocab-bg": token.colorBgContainer, "--vocab-subtle": token.colorFillQuaternary,
+      "--vocab-border": token.colorBorder, "--vocab-text": token.colorText,
+      "--vocab-secondary": token.colorTextSecondary, "--vocab-primary": token.colorPrimary,
+    } as CSSProperties}>
       <Space direction="vertical" size={18} style={{ width: "100%" }}>
         <div
           style={{
@@ -850,131 +581,50 @@ export default function VocabularyPage() {
         >
           <div>
             <Typography.Title level={2} style={{ marginBottom: 4 }}>
-              {tab === "words" ? "生词表" : "学习记录"}
+              {tab === "words" ? t("vocabularyPage.title") : t("vocabularyPage.history")}
             </Typography.Title>
             <Typography.Text type="secondary">
               {tab === "words"
-                ? "管理生词并开始复习。"
-                : "查看作答结果与记忆间隔变化。"}
+                ? t("vocabularyPage.titleDescription")
+                : t("vocabularyPage.historyDescription")}
             </Typography.Text>
           </div>
           <Button
             icon={<SettingOutlined />}
-            onClick={() => setSettingsOpen(true)}
+            href="/settings?section=external_apps"
           >
-            设置
+            {t("vocabularyPage.settings")}
           </Button>
         </div>
         <Tabs
           activeKey={tab}
           onChange={setTab}
           items={[
-            { key: "words", label: "生词表", children: wordsView },
-            { key: "history", label: "学习记录", children: historyView },
+            { key: "words", label: t("vocabularyPage.title"), children: wordsView },
+            { key: "history", label: t("vocabularyPage.history"), children: historyView },
           ]}
         />
       </Space>
       <Modal
-        open={settingsOpen}
-        title="生词表设置"
-        footer={null}
-        width={760}
-        onCancel={() => setSettingsOpen(false)}
-      >
-        <Typography.Title level={5}>存储与学习方式</Typography.Title>
-        <div
-          style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}
-        >
-          <Panel
-            onClick={() => void selectBackend("local")}
-            style={{
-              borderColor: provider === "local" ? "#1677ff" : undefined,
-              cursor: "pointer",
-            }}
-          >
-            <Space>
-              <Radio checked={provider === "local"} />
-              <BookOutlined style={{ fontSize: 24 }} />
-              <div>
-                <Typography.Text strong>LazyMind 本地</Typography.Text>
-                <div>
-                  <Typography.Text type="secondary">
-                    使用内置 FSRS 安排复习
-                  </Typography.Text>
-                </div>
-              </div>
-            </Space>
-          </Panel>
-          <Panel
-            onClick={() => void selectBackend("anki")}
-            style={{
-              borderColor: provider === "anki" ? "#1677ff" : undefined,
-              opacity: anki?.connected ? 1 : 0.75,
-              cursor: anki?.connected ? "pointer" : "default",
-            }}
-          >
-            <Space>
-              <Radio
-                checked={provider === "anki"}
-                disabled={!anki?.connected}
-              />
-              <CloudSyncOutlined style={{ fontSize: 24 }} />
-              <div>
-                <Typography.Text strong>Anki</Typography.Text>
-                <div>
-                  <Typography.Text
-                    type={anki?.connected ? "success" : "secondary"}
-                  >
-                    {anki?.connected ? "已连接" : "尚未配置"}
-                  </Typography.Text>
-                </div>
-              </div>
-            </Space>
-          </Panel>
-        </div>
-        {!anki?.connected ? (
-          <Alert
-            style={{ marginTop: 16 }}
-            type="warning"
-            showIcon
-            message="使用 Anki 前需要完成连接"
-            action={
-              <Button href="/settings?section=external_apps">
-                前往外部应用
-              </Button>
-            }
-          />
-        ) : null}
-        {provider === "anki" ? (
-          <Alert
-            style={{ marginTop: 16 }}
-            type="info"
-            showIcon
-            message="数据会直接写入 Anki"
-            description="新增单词、修改词本和复习评分都会通过 AnkiConnect 立即生效，无需手动同步。"
-          />
-        ) : null}
-      </Modal>
-      <Modal
         open={newWordOpen}
-        title="新建单词"
+        title={t("vocabularyPage.newWord")}
         onCancel={() => setNewWordOpen(false)}
         onOk={() => void createWord()}
       >
         <Form form={newWordForm} layout="vertical">
-          <Form.Item name="term" label="单词" rules={[{ required: true }]}>
+          <Form.Item name="term" label={t("vocabularyPage.word")} rules={[{ required: true }]}>
             <Input />
           </Form.Item>
-          <Form.Item name="meaning" label="释义" rules={[{ required: true }]}>
+          <Form.Item name="meaning" label={t("vocabularyPage.meaning")} rules={[{ required: true }]}>
             <Input.TextArea />
           </Form.Item>
-          <Form.Item name="part_of_speech" label="词性">
+          <Form.Item name="part_of_speech" label={t("vocabularyPage.partOfSpeech")}>
             <Input />
           </Form.Item>
-          <Form.Item name="sentence" label="例句">
+          <Form.Item name="sentence" label={t("vocabularyPage.sentence")}>
             <Input.TextArea />
           </Form.Item>
-          <Form.Item name="translation" label="例句翻译">
+          <Form.Item name="translation" label={t("vocabularyPage.translation")}>
             <Input.TextArea />
           </Form.Item>
         </Form>
@@ -984,9 +634,9 @@ export default function VocabularyPage() {
         open={!!question}
         title={
           <span>
-            复习{" "}
+            {t("vocabularyPage.review")}{" "}
             <Typography.Text type="secondary">
-              {reviewQueue.length ? `${reviewQueue.length} 题待完成` : ""}
+              {reviewQueue.length ? t("vocabularyPage.pendingQuestions", { count: reviewQueue.length }) : ""}
             </Typography.Text>
           </span>
         }
@@ -1024,8 +674,8 @@ export default function VocabularyPage() {
                 <Input
                   size="large"
                   value={objectiveAnswer}
-                  placeholder="输入完整的英语单词"
-                  onChange={(event) => setObjectiveAnswer(event.target.value)}
+                  placeholder={t("vocabularyPage.typeAnswer")}
+                  onChange={(event: ChangeEvent<HTMLInputElement>) => setObjectiveAnswer(event.target.value)}
                   onPressEnter={() =>
                     objectiveAnswer.trim() &&
                     void rate(undefined, objectiveAnswer)
@@ -1037,10 +687,10 @@ export default function VocabularyPage() {
                   disabled={!objectiveAnswer.trim()}
                   onClick={() => void rate(undefined, objectiveAnswer)}
                 >
-                  提交答案
+                  {t("vocabularyPage.submitAnswer")}
                 </Button>
                 <Typography.Text type="secondary">
-                  忽略大小写，拼写必须完全正确
+                  {t("vocabularyPage.spellingHint")}
                 </Typography.Text>
               </div>
             ) : revealed ? (
@@ -1057,10 +707,10 @@ export default function VocabularyPage() {
                       <strong>
                         {
                           {
-                            again: "忘记",
-                            hard: "困难",
-                            good: "记得",
-                            easy: "简单",
+                            again: t("vocabularyPage.again"),
+                            hard: t("vocabularyPage.hard"),
+                            good: t("vocabularyPage.remembered"),
+                            easy: t("vocabularyPage.easy"),
                           }[r]
                         }
                       </strong>
@@ -1075,7 +725,7 @@ export default function VocabularyPage() {
                 type="primary"
                 onClick={() => setRevealed(true)}
               >
-                显示答案
+                {t("vocabularyPage.showAnswer")}
               </Button>
             )}
           </div>
@@ -1093,9 +743,9 @@ export default function VocabularyPage() {
             <div className="report-icon">
               <TrophyOutlined />
             </div>
-            <Typography.Title level={2}>本轮复习完成</Typography.Title>
+            <Typography.Title level={2}>{t("vocabularyPage.reviewComplete")}</Typography.Title>
             <Typography.Text type="secondary">
-              坚持得很好，复习结果已保存
+              {t("vocabularyPage.reviewSaved")}
             </Typography.Text>
             <div className="report-score">
               <Progress
@@ -1105,30 +755,29 @@ export default function VocabularyPage() {
               />
               <div>
                 <Statistic
-                  title="完成题目"
+                  title={t("vocabularyPage.completedQuestions")}
                   value={reviewReport.total || 0}
-                  suffix="题"
+                  suffix={t("vocabularyPage.questionUnit")}
                 />
                 <Typography.Text type="secondary">
-                  平均间隔{" "}
-                  {(reviewReport.average_interval_before_days || 0).toFixed(1)}{" "}
-                  天 →{" "}
-                  {(reviewReport.average_interval_after_days || 0).toFixed(1)}{" "}
-                  天
+                  {t("vocabularyPage.averageInterval", {
+                    from: (reviewReport.average_interval_before_days || 0).toFixed(1),
+                    to: (reviewReport.average_interval_after_days || 0).toFixed(1),
+                  })}
                 </Typography.Text>
               </div>
             </div>
             <div className="report-breakdown">
               <span>
-                <CheckCircleFilled /> 记得 {reviewReport.correct || 0}
+                <CheckCircleFilled /> {t("vocabularyPage.rememberedCount", { count: reviewReport.correct || 0 })}
               </span>
-              <span>需巩固 {reviewReport.incorrect || 0}</span>
+              <span>{t("vocabularyPage.practiceCount", { count: reviewReport.incorrect || 0 })}</span>
             </div>
             {reviewReport.difficult_words?.length ? (
               <Alert
                 type="warning"
                 showIcon
-                message={`建议继续巩固：${reviewReport.difficult_words.join("、")}`}
+                message={t("vocabularyPage.practiceSuggestion", { words: reviewReport.difficult_words.join(", ") })}
               />
             ) : null}
             <Button
@@ -1137,7 +786,7 @@ export default function VocabularyPage() {
               type="primary"
               onClick={() => setReviewReport(null)}
             >
-              完成
+              {t("vocabularyPage.done")}
             </Button>
           </div>
         ) : null}
@@ -1146,39 +795,39 @@ export default function VocabularyPage() {
         open={!!detail}
         title={detail?.word.term}
         onClose={() => setDetail(null)}
-        extra={<Button onClick={edit}>编辑</Button>}
+        extra={<Button onClick={edit}>{t("vocabularyPage.edit")}</Button>}
       >
         <Descriptions
           column={1}
           items={[
             {
               key: "meaning",
-              label: "释义",
+              label: t("vocabularyPage.meaning"),
               children: detail?.word.meaning || "—",
             },
             {
               key: "definition",
-              label: "补充释义",
+              label: t("vocabularyPage.definition"),
               children: detail?.word.definition || "—",
             },
             {
               key: "example",
-              label: "例句",
+              label: t("vocabularyPage.sentence"),
               children: detail?.example?.sentence || "—",
             },
             {
               key: "translation",
-              label: "例句译文",
+              label: t("vocabularyPage.exampleTranslation"),
               children: detail?.example?.translation || "—",
             },
             {
               key: "source",
-              label: "内容来源",
+              label: t("vocabularyPage.contentSource"),
               children: detail?.word.source_name || detail?.word.origin_type,
             },
             {
               key: "state",
-              label: "复习状态",
+              label: t("vocabularyPage.reviewStatus"),
               children: detail ? labels[detail.state] || detail.state : "",
             },
           ]}
@@ -1186,38 +835,36 @@ export default function VocabularyPage() {
       </Drawer>
       <Modal
         open={editOpen}
-        title="编辑单词"
+        title={t("vocabularyPage.editWord")}
         onCancel={() => setEditOpen(false)}
         onOk={() => void saveEdit()}
       >
         <Form form={form} layout="vertical">
-          <Form.Item name="term" label="单词" rules={[{ required: true }]}>
+          <Form.Item name="term" label={t("vocabularyPage.word")} rules={[{ required: true }]}>
             <Input />
           </Form.Item>
-          <Form.Item name="phonetic" label="音标">
+          <Form.Item name="phonetic" label={t("vocabularyPage.phonetic")}>
             <Input />
           </Form.Item>
-          <Form.Item name="part_of_speech" label="词性">
+          <Form.Item name="part_of_speech" label={t("vocabularyPage.partOfSpeech")}>
             <Input />
           </Form.Item>
-          <Form.Item name="meaning" label="基础释义">
+          <Form.Item name="meaning" label={t("vocabularyPage.basicMeaning")}>
             <Input.TextArea />
           </Form.Item>
-          <Form.Item name="definition" label="补充释义">
+          <Form.Item name="definition" label={t("vocabularyPage.definition")}>
             <Input.TextArea />
           </Form.Item>
-          <Form.Item name="user_note" label="备注">
+          <Form.Item name="user_note" label={t("vocabularyPage.note")}>
             <Input.TextArea />
           </Form.Item>
-          {provider === "local" ? (
-            <Form.Item name="wordbook_ids" label="单词本">
-              <Select
-                mode="multiple"
-                options={books.map((b) => ({ value: b.id, label: b.name }))}
-              />
-            </Form.Item>
-          ) : null}
-          <Form.Item name="tags" label="标签">
+          <Form.Item name="wordbook_ids" label={t("vocabularyPage.wordbook")}>
+            <Select
+              mode="multiple"
+              options={books.map((b) => ({ value: b.id, label: b.name }))}
+            />
+          </Form.Item>
+          <Form.Item name="tags" label={t("vocabularyPage.tags")}>
             <Select mode="tags" />
           </Form.Item>
         </Form>

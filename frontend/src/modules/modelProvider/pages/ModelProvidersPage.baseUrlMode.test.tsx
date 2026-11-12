@@ -261,10 +261,13 @@ describe("supplier endpoints and direct setup", () => {
   });
 
   it("checks a custom endpoint without requiring a key", async () => {
+    const keylessGroup = { ...group, has_api_key: false, keys: [], base_url: customUrl, is_verified: false };
     await renderPage(
-      [{ ...group, has_api_key: false, keys: [], base_url: customUrl }],
+      [keylessGroup],
       { ...openAI, base_url: customUrl },
     );
+    expect(document.querySelector(".provider-workspace-status")).not.toHaveTextContent("modelProvider.workspace.connected");
+    mocks.getGroups.mockResolvedValue({ data: { groups: [{ ...keylessGroup, is_verified: true }] } });
     fireEvent.click(
       screen.getByRole("button", {
         name: "modelProvider.workspace.checkConnection",
@@ -274,5 +277,8 @@ describe("supplier endpoints and direct setup", () => {
     expect(
       mocks.checkGroup.mock.calls[0][0].checkModelProviderOpenAPIRequest,
     ).not.toHaveProperty("api_key");
+    await waitFor(() => expect(document.querySelector(".provider-workspace-status")).toHaveTextContent("modelProvider.workspace.connected"));
+    const navigation = within(screen.getByRole("navigation", { name: "modelProvider.workspace.suppliers" }));
+    expect(navigation.getByRole("button", { name: "OpenAI" }).querySelector("i")).toHaveClass("is-ready");
   });
 });

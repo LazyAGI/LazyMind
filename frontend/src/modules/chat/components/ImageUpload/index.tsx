@@ -40,6 +40,7 @@ interface Props {
     newFiles: File[],
     currentFiles: (RcFile & { uri?: string })[],
   ) => OnBeforeAddFilesResult;
+  onFilesAdded?: (files: File[]) => void;
 }
 interface FileItem extends RcFile {
   uri: string;
@@ -104,6 +105,7 @@ const ImageUpload = forwardRef<ImageUploadImperativeProps, Props>(
       disabled = false,
       disabledReason,
       onBeforeAddFiles,
+      onFilesAdded,
     } = props;
     const [files, setFiles] = useState<FileItem[]>([]);
     const [uploadingCount, setUploadingCount] = useState(0);
@@ -224,6 +226,7 @@ const ImageUpload = forwardRef<ImageUploadImperativeProps, Props>(
     };
 
     const runAddFiles = (toAdd: File[], _baseFileList: FileItem[]) => {
+      const added: File[] = [];
       toAdd.forEach((file) => {
         const rcFile = file as RcFile;
         rcFile.uid = `rc-upload-${Date.now()}-${Math.random()}`;
@@ -236,6 +239,7 @@ const ImageUpload = forwardRef<ImageUploadImperativeProps, Props>(
         if (!tryAppendFile(rcFile)) {
           return;
         }
+        added.push(file);
         uploadFile(
           rcFile,
           (uri) => {
@@ -248,6 +252,9 @@ const ImageUpload = forwardRef<ImageUploadImperativeProps, Props>(
           },
         );
       });
+      if (added.length > 0) {
+        onFilesAdded?.(added);
+      }
     };
 
     const uploadProps: UploadProps = {
@@ -378,6 +385,7 @@ const ImageUpload = forwardRef<ImageUploadImperativeProps, Props>(
       if (!tryAppendFile(rcFile)) {
         return Upload.LIST_IGNORE;
       }
+      onFilesAdded?.([rawFile]);
       uploadFile(
         rcFile,
         (uri) => {

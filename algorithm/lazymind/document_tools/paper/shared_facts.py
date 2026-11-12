@@ -1,25 +1,33 @@
 """Prepare source-bound paper facts independently of Writer's deterministic plan."""
+from collections import Counter
 import copy
 import json
 import re
-from typing import Literal
 
 from lazyllm import AutoModel
 from lazyllm.tools.writer.tools.base import _WriterJsonFormatter
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
+from .model_response import normalize_response
 from .prompts.write_document_prompt import SECTION_CONTENT_INSTRUCTIONS, SHARED_FACTS_PROMPT
 
 
-Category = Literal['research_question', 'contribution', 'terminology', 'status', 'limitation',
-                   'conflict', 'method', 'literature', 'background']
+LOCAL_CATEGORIES = {'method', 'literature', 'background'}
 GLOBAL_CATEGORIES = {'research_question', 'contribution', 'terminology', 'status', 'limitation', 'conflict', 'number'}
 
 
 class SourceUse(BaseModel):
     model_config = ConfigDict(extra='forbid', strict=True)
     source_id: str = Field(min_length=1)
-    categories: list[Category] = Field(min_length=1)
+    categories: list[str] = Field(min_length=1)
+
+    @field_validator('categories')
+    @classmethod
+    def normalize_categories(cls, values):
+        categories = list(dict.fromkeys(value.strip().lower() for value in values))
+        if not all(categories):
+            raise ValueError('Source categories must be nonblank labels.')
+        return categories
 
 
 class SectionUse(BaseModel):
@@ -104,23 +112,39 @@ def _validate_selection(value, spans, facts, plan):
     expected = {span['id'] for span in spans}
     if len(used) != len(set(used)) or set(used) != expected:
         raise ValueError('Classify every supplied source paragraph exactly once; do not omit status or conflicts.')
-    sections = [item.instruction_id for item in selection.sections]
-    planned = [item['instruction_id'] for item in plan['instructions']]
-    if sections != planned:
+    _validate_section_uses(selection.sections, expected | set(facts), plan)
+    return selection
+
+
+def _validate_section_uses(sections, available, plan):
+    if [item.instruction_id for item in sections] != [item['instruction_id'] for item in plan['instructions']]:
         raise ValueError('Section assignments must match every real Writer instruction ID in order.')
-    available = expected | set(facts)
-    assigned = set()
-    for section in selection.sections:
+    for section in sections:
         if len(section.fact_ids) != len(set(section.fact_ids)) or not set(section.fact_ids) <= available:
             raise ValueError('Section fact_ids must be distinct known source/analysis IDs.')
-        assigned.update(section.fact_ids)
-    for item in selection.sources:
-        categories = set(item.categories)
-        if len(categories) != len(item.categories):
-            raise ValueError('Source categories must be distinct.')
-        if not categories & GLOBAL_CATEGORIES and 'background' not in categories and item.source_id not in assigned:
-            raise ValueError('Every supporting method/literature paragraph must be assigned to a section.')
-    return selection
+
+
+def _retain_valid_selection(value, spans, facts, plan):
+    """Retry damaged classifications without regenerating hundreds of valid entries."""
+    if not isinstance(value, dict) or not isinstance(value.get('sources'), list):
+        return [], []
+    expected = {span['id'] for span in spans}
+    try:
+        sections = [SectionUse.model_validate(item) for item in value['sections']]
+        _validate_section_uses(sections, expected | set(facts), plan)
+    except (ValueError, TypeError, KeyError):
+        return [], []
+    sources = []
+    for item in value['sources']:
+        try:
+            source = SourceUse.model_validate(item)
+        except (ValueError, TypeError):
+            continue
+        if source.source_id in expected:
+            sources.append(source)
+    counts = Counter(item.source_id for item in sources)
+    return [item.model_dump() for item in sources if counts[item.source_id] == 1], [
+        item.model_dump() for item in sections]
 
 
 def _select_facts(spans, facts, plan, prepared):
@@ -132,15 +156,36 @@ def _select_facts(spans, facts, plan, prepared):
                        for item in plan['instructions']])
     model = AutoModel(model='llm')
     error = ''
+    retained_sources, retained_sections = [], []
     for attempt in range(2):
         response = model(SHARED_FACTS_PROMPT + '\n' + json.dumps(dict(payload, correction=error), ensure_ascii=False))
+        value = None
         try:
-            value = _WriterJsonFormatter()(str(response))
+            body = normalize_response(response).body
+            value = _WriterJsonFormatter()(body) if isinstance(body, str) else body
+            if retained_sources and isinstance(value, dict) and isinstance(value.get('sources'), list):
+                incoming = {item.get('source_id') for item in value['sources'] if isinstance(item, dict)
+                            and isinstance(item.get('source_id'), str)}
+                value['sources'] = ([item for item in retained_sources if item['source_id'] not in incoming]
+                                    + value['sources'])
+                if not value.get('sections'):
+                    value['sections'] = retained_sections
             return _validate_selection(value, spans, facts, plan)
         except (ValueError, TypeError, KeyError) as exc:
-            error = str(exc)
+            if isinstance(exc, ValidationError):
+                counts = Counter(item['msg'] for item in exc.errors(include_input=False, include_url=False))
+                error = '; '.join(f'{message} ({count} errors)' for message, count in counts.items())
+            else:
+                error = str(exc)
             if attempt:
                 raise ValueError('Shared paper fact preparation failed: ' + error) from exc
+            retained_sources, retained_sections = _retain_valid_selection(value, spans, facts, plan)
+            if retained_sources:
+                retained_ids = {item['source_id'] for item in retained_sources}
+                payload['source_paragraphs'] = [item for item in spans if item['id'] not in retained_ids]
+                payload['sections'] = []
+                error += ('\nValid classifications and section assignments are retained by the host. '
+                          'Return classifications ONLY for the supplied source_paragraphs, with sections=[].')
 
 
 def bind_shared_facts(plan, prepared, *, selection=None):
@@ -158,6 +203,7 @@ def bind_shared_facts(plan, prepared, *, selection=None):
                 else _validate_selection(selection, spans, facts, plan))
     by_id = {span['id']: span for span in spans}
     global_ids = {key for key, fact in facts.items() if fact['key'] in GLOBAL_CATEGORIES}
+    assigned_ids = {key for section in selected.sections for key in section.fact_ids}
     coverage, categories = [], set()
     for item in selected.sources:
         span = by_id[item.source_id]
@@ -165,7 +211,9 @@ def bind_shared_facts(plan, prepared, *, selection=None):
         facts[span['id']] = _fact(
             span['id'], category, span['content'], span['source_id'], span['source_path'],
             start=span['start'], end=span['end'], categories=item.categories)
-        if set(item.categories) & GLOBAL_CATEGORIES:
+        # Unrecognized labels or missing section assignments must not hide source evidence.
+        if (set(item.categories) - LOCAL_CATEGORIES
+                or ('background' not in item.categories and span['id'] not in assigned_ids)):
             global_ids.add(span['id'])
         categories.update(item.categories)
         coverage.append(dict(id=span['id'], source_id=span['source_id'], source_path=span['source_path'],
@@ -252,7 +300,8 @@ def _review_relations(body, sources, previous=None):
     from .analysis import trace as diagnostics
     phase = 'recheck' if previous else 'initial'
     diagnostics.save('shared-fact-relation-model-' + phase + '.json', dict(response=str(response)))
-    proposed = RelationResponse.model_validate(_WriterJsonFormatter()(str(response)))
+    body = normalize_response(response).body
+    proposed = RelationResponse.model_validate(_WriterJsonFormatter()(body) if isinstance(body, str) else body)
     issues, pending = [], list(proposed.pending)
     for issue in proposed.issues:
         source = sources.get(issue.fact_id)

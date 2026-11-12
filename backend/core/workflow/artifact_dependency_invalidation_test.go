@@ -2,6 +2,7 @@ package workflow
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -9,11 +10,69 @@ import (
 	"time"
 
 	"github.com/gorilla/mux"
+	"gorm.io/gorm"
 
 	"lazymind/core/algo"
 	"lazymind/core/common/orm"
 	corestore "lazymind/core/store"
+	"lazymind/core/workflow/attempt"
 )
+
+func TestNativeRewindRevokesRunningConsumers(t *testing.T) {
+	f := seedArtifactDependencyFixture(t, StepStatusSucceeded, StepStatusRunning, false)
+	now := time.Now().UTC()
+	expires := now.Add(time.Minute)
+	if err := f.db.Model(&orm.WorkflowSessionStep{}).Where("id = ?", f.downstreamAttemptID).
+		Updates(map[string]any{"lease_token": "old-lease", "lease_expires_at": expires}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := f.db.Create(&orm.SubAgentTask{ID: "task-downstream", ConversationID: "conversation-dependency",
+		Status: "running", Title: "generate", AgentType: "workflow_step", Mode: "auto",
+		InputSlots: json.RawMessage(`[]`), OutputSlots: json.RawMessage(`[]`),
+		LastHeartbeat: now, CreatedAt: now, UpdatedAt: now}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := f.db.Create(&orm.WorkflowOutbox{ID: "consumer-outbox", SessionID: "session-dependency",
+		AttemptID: f.downstreamAttemptID, Status: "claimed", PayloadJSON: json.RawMessage(`{}`),
+		CreatedAt: now, UpdatedAt: now}).Error; err != nil {
+		t.Fatal(err)
+	}
+	var session orm.WorkflowSession
+	if err := f.db.Where("id = ?", "session-dependency").First(&session).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := f.db.Transaction(func(tx *gorm.DB) error {
+		return invalidateNativeForOperation(t.Context(), tx, &session, nil, "rewind", "rewind", "direct-step")
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var consumer orm.WorkflowSessionStep
+	if err := f.db.Where("id = ?", f.downstreamAttemptID).First(&consumer).Error; err != nil {
+		t.Fatal(err)
+	}
+	if consumer.Validity != "stale" || consumer.Status != "cancelled" || consumer.LeaseToken != "" || consumer.LeaseExpiresAt != nil {
+		t.Fatalf("running consumer retains execution authority: %#v", consumer)
+	}
+	service := attempt.New(f.db.DB, attempt.Config{})
+	if _, err := service.Heartbeat(t.Context(), consumer.ID, "old-lease"); !errors.Is(err, attempt.ErrLeaseLost) {
+		t.Fatalf("old worker heartbeat must lose its lease: %v", err)
+	}
+	if err := service.ValidateLease(t.Context(), consumer.ID, "old-lease"); !errors.Is(err, attempt.ErrLeaseLost) {
+		t.Fatalf("old worker publication must lose its lease: %v", err)
+	}
+	var task orm.SubAgentTask
+	if err := f.db.Where("id = ?", consumer.TaskID).First(&task).Error; err != nil {
+		t.Fatal(err)
+	}
+	if task.Status != "interrupted" || task.FinishedAt == nil {
+		t.Fatalf("task display and timer not stopped: %#v", task)
+	}
+	var outbox orm.WorkflowOutbox
+	if err := f.db.Where("id = ?", "consumer-outbox").First(&outbox).Error; err != nil || outbox.Status != "cancelled" {
+		t.Fatalf("old dispatch not cancelled: %#v %v", outbox, err)
+	}
+	requireAttemptValidity(t, f, f.unrelatedAttemptID, "effective")
+}
 
 type artifactDependencyFixture struct {
 	db                  *orm.DB

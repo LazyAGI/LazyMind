@@ -11,7 +11,8 @@ export class WorkBuddyAdapter implements RuntimeAdapter<string> {
   constructor(private cdp: Pick<Cdp, 'evaluate'>, private log: Diagnostic = () => {}) {}
   id(id: string) { return id }
   warn(message: string) {
-    this.log('connector.warning', { kind: message.includes('reconnecting Bridge') ? 'bridge-unavailable' : 'delivery-pending', status: 'retrying' })
+    const authorization = message.includes('authorization required')
+    this.log('connector.warning', { kind: authorization ? 'authorization-required' : message.includes('reconnecting Bridge') ? 'bridge-unavailable' : 'delivery-pending', status: authorization ? 'waiting-for-authorization' : 'retrying' })
   }
   probe(signal: AbortSignal) { return this.call({ kind: 'probe' }, signal) }
   private call(input: unknown, signal: AbortSignal): Promise<any> {

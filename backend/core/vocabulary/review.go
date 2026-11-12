@@ -18,10 +18,7 @@ func stateName(state fsrs.State) string {
 	return []string{"new", "learning", "review", "relearning"}[int(state)]
 }
 
-func (s *Service) addLocalWord(ctx context.Context, owner string, req AddWordRequest) (AddWordResult, error) {
-	if err := requireLocalRuntime(); err != nil {
-		return AddWordResult{}, err
-	}
+func (s *Service) addLocalWord(ctx context.Context, owner string, req AddWordRequest, mirrorAnki bool) (AddWordResult, error) {
 	now := time.Now().UTC()
 	normalized := normalizeTerm(req.Term)
 	if req.DictionaryEntryID != "" {
@@ -54,8 +51,12 @@ func (s *Service) addLocalWord(ctx context.Context, owner string, req AddWordReq
 	}
 	var result AddWordResult
 	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		var word Word
-		err := tx.Where("owner_id = ? AND provider = ? AND language = ? AND normalized_term = ?", owner, "local", req.Language, normalized).First(&word).Error
+		// Serialize repeated saves for the same word because example identity
+		// is enforced by the lookup, without a unique database constraint.
+		lockWord := func() (Word, error) {
+			return findStoredWord(tx.Clauses(clause.Locking{Strength: "UPDATE"}), owner, req.Language, normalized)
+		}
+		word, err := lockWord()
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			word = Word{ID: uuid.NewString(), OwnerID: owner, Provider: "local", NormalizedTerm: normalized, Term: req.Term, Language: req.Language, Phonetic: req.Phonetic, PartOfSpeech: req.PartOfSpeech, Meaning: req.Meaning, Definition: req.Definition, UserNote: req.UserNote, OriginType: defaultString(req.OriginType, "user"), CreatedAt: now, UpdatedAt: now}
 			if req.DictionaryEntryID != "" {
@@ -74,8 +75,15 @@ func (s *Service) addLocalWord(ctx context.Context, owner string, req AddWordReq
 					word.SourceLocator = entry.SourceLocator
 				}
 			}
-			if err = tx.Create(&word).Error; err != nil {
-				return err
+			insert := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&word)
+			if insert.Error != nil {
+				return insert.Error
+			}
+			if insert.RowsAffected == 0 {
+				word, err = lockWord()
+				if err != nil {
+					return err
+				}
 			}
 		} else if err != nil {
 			return err
@@ -92,8 +100,10 @@ func (s *Service) addLocalWord(ctx context.Context, owner string, req AddWordReq
 			sentence = strings.TrimSpace(req.ContextSentence)
 		}
 		if sentence != "" {
-			ex := Example{ID: uuid.NewString(), OwnerID: owner, WordID: word.ID, Sentence: sentence, Translation: req.Translation, ContentOrigin: defaultString(req.OriginType, "document"), CreatedAt: now, UpdatedAt: now}
-			if err := tx.Where("owner_id = ? AND word_id = ? AND sentence = ?", owner, word.ID, sentence).FirstOrCreate(&ex).Error; err != nil {
+			attrs := Example{ID: uuid.NewString(), OwnerID: owner, WordID: word.ID, Sentence: sentence, Translation: req.Translation, ContentOrigin: defaultString(req.OriginType, "document"), CreatedAt: now, UpdatedAt: now}
+			var ex Example
+			if err := tx.Where("owner_id = ? AND word_id = ? AND sentence = ?", owner, word.ID, sentence).
+				Order("created_at ASC").Attrs(attrs).FirstOrCreate(&ex).Error; err != nil {
 				return err
 			}
 			if err := s.setExampleTags(tx, owner, ex.ID, req.ExampleTags); err != nil {
@@ -118,21 +128,42 @@ func (s *Service) addLocalWord(ctx context.Context, owner string, req AddWordReq
 		if err == nil && example != nil {
 			_, _, err = s.ensureCardType(tx, owner, word.ID, example.ID, "sentence_cloze", now)
 		}
-		result = AddWordResult{Word: word, Example: example}
-		if err == nil {
-			result.CloudQueued, err = enqueueCloudConnections(ctx, tx, word)
+		if err != nil {
+			return err
 		}
+		result = AddWordResult{Word: word, Example: example}
+		result.CloudQueued, err = enqueueCloudConnections(ctx, tx, word)
+		if err != nil || !mirrorAnki {
+			return err
+		}
+		result.Queued, err = enqueueAnkiWord(ctx, tx, word)
 		return err
 	})
 	return result, err
 }
 
+func findStoredWord(tx *gorm.DB, owner, language, normalized string) (Word, error) {
+	var word Word
+	err := tx.Where("owner_id = ? AND language = ? AND normalized_term = ?", owner, language, normalized).
+		Order("CASE WHEN provider = 'local' THEN 0 ELSE 1 END").First(&word).Error
+	return word, err
+}
+
 func (s *Service) ListWords(ctx context.Context, owner, provider string) ([]VocabularyItem, error) {
-	if provider == "" {
-		provider = ProviderAnki
+	if err := s.recoverLegacyAnkiAdds(ctx, owner); err != nil {
+		return nil, err
 	}
 	var words []Word
-	if err := s.db.WithContext(ctx).Where("owner_id = ? AND provider = ?", owner, provider).Order("created_at DESC").Find(&words).Error; err != nil {
+	query := s.db.WithContext(ctx).Where("owner_id = ?", owner)
+	if provider != "" {
+		if err := validateProvider(provider); err != nil {
+			return nil, err
+		}
+	}
+	if err := query.Order("created_at DESC").Find(&words).Error; err != nil {
+		return nil, err
+	}
+	if err := s.ensureLegacyWordbooks(ctx, owner); err != nil {
 		return nil, err
 	}
 	items := make([]VocabularyItem, 0, len(words))
@@ -160,23 +191,8 @@ func (s *Service) ListWords(ctx context.Context, owner, provider string) ([]Voca
 			item.Tags = append(item.Tags, tag.Name)
 		}
 		s.db.WithContext(ctx).Table("vocabulary_wordbooks b").Joins("JOIN vocabulary_wordbook_entries e ON e.wordbook_id=b.id AND e.owner_id=b.owner_id").Where("e.owner_id = ? AND e.word_id = ?", owner, word.ID).Find(&item.Wordbooks)
-		if provider == ProviderAnki && word.ProviderNoteID != "" {
-			if setting, e := s.Setting(ctx, owner); e == nil {
-				if client, e := newAnkiClient(setting.AnkiEndpoint); e == nil {
-					if cards, e := client.cardsForNote(ctx, word.ProviderNoteID); e == nil && len(cards) > 0 {
-						c := cards[0]
-						item.Reps = uint64(c.Reps)
-						item.Lapses = uint64(c.Lapses)
-						if c.Queue < 0 {
-							item.State = "suspended"
-						} else if c.Reps == 0 {
-							item.State = "new"
-						} else {
-							item.State = "review"
-						}
-					}
-				}
-			}
+		if word.MasteredAt != nil {
+			item.State = "mastered"
 		}
 		items = append(items, item)
 	}
@@ -188,14 +204,21 @@ func (s *Service) ensureCard(tx *gorm.DB, owner, wordID string, now time.Time) (
 }
 func (s *Service) ensureCardType(tx *gorm.DB, owner, wordID, exampleID, cardType string, now time.Time) (ReviewCard, fsrs.Card, error) {
 	var row ReviewCard
-	err := tx.Where("owner_id = ? AND word_id = ? AND example_id = ? AND card_type = ?", owner, wordID, exampleID, cardType).First(&row).Error
+	find := func() error {
+		return tx.Where("owner_id = ? AND word_id = ? AND example_id = ? AND card_type = ?", owner, wordID, exampleID, cardType).First(&row).Error
+	}
+	err := find()
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		card := fsrs.NewCard()
 		card.Due = now
 		raw, _ := json.Marshal(card)
 		row = ReviewCard{ID: uuid.NewString(), OwnerID: owner, WordID: wordID, ExampleID: exampleID, CardType: cardType, SchedulerVersion: "go-fsrs/v3.3.1", ParametersVersion: "default-v3", FSRSCardJSON: string(raw), RowVersion: 1, CreatedAt: now, UpdatedAt: now}
-		err = tx.Create(&row).Error
-		return row, card, err
+		result := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&row)
+		if result.Error != nil || result.RowsAffected != 0 {
+			return row, card, result.Error
+		}
+		row = ReviewCard{}
+		err = find()
 	}
 	if err != nil {
 		return row, fsrs.Card{}, err
@@ -232,13 +255,43 @@ func (s *Service) NextQuestion(ctx context.Context, owner string) (*ReviewQuesti
 }
 
 func (s *Service) NextQuestions(ctx context.Context, owner string, limit int) ([]ReviewQuestion, error) {
-	if err := requireLocalRuntime(); err != nil {
+	return s.nextQuestions(ctx, owner, limit, "", "")
+}
+
+func (s *Service) nextQuestions(ctx context.Context, owner string, limit int, wordbookID, sessionID string) ([]ReviewQuestion, error) {
+	if err := s.recoverLegacyAnkiAdds(ctx, owner); err != nil {
+		return nil, err
+	}
+	if err := s.ensureLegacyWordbooks(ctx, owner); err != nil {
 		return nil, err
 	}
 	now := time.Now().UTC()
+	if err := s.prepareLegacyReviewCards(ctx, owner, now); err != nil {
+		return nil, err
+	}
 	parameters := s.schedulerParameters(ctx, owner)
+	db := s.db.WithContext(ctx)
+	query := db.Where("owner_id = ? AND suspended_at IS NULL", owner)
+	if wordbookID != "" {
+		query = query.Where("word_id IN (?)", wordbookMembers(db, owner, wordbookID))
+	}
+	var pendingItems []ReviewSessionItem
+	if sessionID != "" {
+		activeWords := db.Model(&Word{}).Select("id").Where("owner_id = ? AND mastered_at IS NULL AND archived_at IS NULL", owner)
+		query = query.Where("word_id IN (?)", activeWords)
+		sessionItems := func() *gorm.DB {
+			return db.Model(&ReviewSessionItem{}).Where("owner_id = ? AND session_id = ?", owner, sessionID)
+		}
+		seenWords := sessionItems().Select("word_id")
+		pending := pendingSessionItems(db, owner, sessionID)
+		if err := pending.Select("id", "card_id").Find(&pendingItems).Error; err != nil {
+			return nil, err
+		}
+		pendingCards := pendingSessionItems(db, owner, sessionID).Select("card_id")
+		query = query.Where("(word_id NOT IN (?) OR id IN (?))", seenWords, pendingCards)
+	}
 	var rows []ReviewCard
-	if err := s.db.WithContext(ctx).Where("owner_id = ? AND suspended_at IS NULL", owner).Find(&rows).Error; err != nil {
+	if err := query.Find(&rows).Error; err != nil {
 		return nil, err
 	}
 	type candidate struct {
@@ -254,6 +307,15 @@ func (s *Service) NextQuestions(ctx context.Context, owner string, limit int) ([
 		}
 		rank := map[fsrs.State]int{fsrs.Relearning: 0, fsrs.Review: 1, fsrs.Learning: 2, fsrs.New: 3}[card.State]
 		due = append(due, candidate{row, card, rank})
+	}
+	if len(pendingItems) > 0 {
+		eligible := make(map[string]bool, len(due))
+		for _, candidate := range due {
+			eligible[candidate.row.ID] = true
+		}
+		if err := releaseIneligibleSessionItems(db, owner, sessionID, pendingItems, eligible); err != nil {
+			return nil, err
+		}
 	}
 	sort.SliceStable(due, func(i, j int) bool {
 		if due[i].rank != due[j].rank {
@@ -387,9 +449,6 @@ func ratingValue(value string) (fsrs.Rating, error) {
 }
 
 func (s *Service) Review(ctx context.Context, owner, wordID string, req ReviewRequest) error {
-	if err := requireLocalRuntime(); err != nil {
-		return err
-	}
 	rating, err := ratingValue(req.Rating)
 	if err != nil {
 		return err
@@ -452,65 +511,68 @@ func (s *Service) Review(ctx context.Context, owner, wordID string, req ReviewRe
 }
 
 func (s *Service) Master(ctx context.Context, owner, wordID string) error {
-	var word Word
-	if err := s.db.WithContext(ctx).Where("owner_id = ? AND id = ?", owner, wordID).First(&word).Error; err != nil {
-		return err
-	}
-	if word.Provider == "local" {
-		if err := requireLocalRuntime(); err != nil {
-			return err
-		}
-	}
-	if word.Provider == ProviderAnki && word.ProviderNoteID != "" {
-		setting, err := s.Setting(ctx, owner)
-		if err != nil {
-			return err
-		}
-		client, err := newAnkiClient(setting.AnkiEndpoint)
-		if err == nil {
-			err = client.suspendNote(ctx, word.ProviderNoteID)
-		}
-		if err != nil {
-			if queueErr := s.queueMutation(ctx, owner, "master_word", word.ID, queuedMutation{NoteID: word.ProviderNoteID}, err); queueErr != nil {
-				return queueErr
-			}
-		}
-	}
-	now := time.Now().UTC()
-	if err := s.db.WithContext(ctx).Model(&Word{}).Where("owner_id = ? AND id = ?", owner, wordID).Update("mastered_at", now).Error; err != nil {
-		return err
-	}
-	return s.db.WithContext(ctx).Model(&ReviewCard{}).Where("owner_id = ? AND word_id = ?", owner, wordID).Update("suspended_at", now).Error
-}
-func (s *Service) DeleteWord(ctx context.Context, owner, wordID string) error {
-	var word Word
-	if err := s.db.WithContext(ctx).Where("owner_id = ? AND id = ?", owner, wordID).First(&word).Error; err != nil {
-		return err
-	}
-	if word.Provider == "local" {
-		if err := requireLocalRuntime(); err != nil {
-			return err
-		}
-	}
-	if word.Provider == ProviderAnki && word.ProviderNoteID != "" {
-		setting, err := s.Setting(ctx, owner)
-		if err != nil {
-			return err
-		}
-		client, err := newAnkiClient(setting.AnkiEndpoint)
-		if err == nil {
-			err = client.deleteNote(ctx, word.ProviderNoteID)
-		}
-		if err != nil {
-			if queueErr := s.queueMutation(ctx, owner, "delete_word", word.ID, queuedMutation{NoteID: word.ProviderNoteID}, err); queueErr != nil {
-				return queueErr
-			}
-		}
-	}
 	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		tx.Where("owner_id = ? AND word_id = ?", owner, wordID).Delete(&ReviewCard{})
-		tx.Where("owner_id = ? AND word_id = ?", owner, wordID).Delete(&Example{})
-		tx.Where("owner_id = ? AND word_id = ?", owner, wordID).Delete(&SourceRef{})
-		return tx.Where("owner_id = ? AND id = ?", owner, wordID).Delete(&Word{}).Error
+		var word Word
+		if err := tx.Where("owner_id = ? AND id = ?", owner, wordID).First(&word).Error; err != nil {
+			return err
+		}
+		now := time.Now().UTC()
+		if err := tx.Model(&word).Update("mastered_at", now).Error; err != nil {
+			return err
+		}
+		if err := tx.Model(&ReviewCard{}).Where("owner_id = ? AND word_id = ?", owner, wordID).Update("suspended_at", now).Error; err != nil {
+			return err
+		}
+		return enqueueAnkiMutation(ctx, tx, word, "master_word")
+	})
+}
+
+func (s *Service) DeleteWord(ctx context.Context, owner, wordID string) error {
+	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		return deleteLocalWordData(tx, owner, wordID)
+	})
+}
+
+// Older Anki words were already stored in LazyMind but did not receive local
+// review cards. Prepare missing cards in place, preserving the word IDs and
+// their existing document, example, and tag associations.
+func (s *Service) prepareLegacyReviewCards(ctx context.Context, owner string, now time.Time) error {
+	db := s.db.WithContext(ctx)
+	var words []Word
+	cards := db.Model(&ReviewCard{}).Select("word_id").Where("owner_id = ? AND card_type = ?", owner, "word_to_meaning")
+	err := db.Where("owner_id = ? AND provider = ? AND mastered_at IS NULL AND archived_at IS NULL AND id NOT IN (?)", owner, ProviderAnki, cards).Find(&words).Error
+	if err != nil || len(words) == 0 {
+		return err
+	}
+	return db.Transaction(func(tx *gorm.DB) error {
+		for _, word := range words {
+			if _, _, err := s.ensureCard(tx, owner, word.ID, now); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
+// Anki-origin words from older releases have no local wordbook membership.
+func (s *Service) ensureLegacyWordbooks(ctx context.Context, owner string) error {
+	db := s.db.WithContext(ctx)
+	var ids []string
+	entries := db.Model(&WordbookEntry{}).Select("word_id").Where("owner_id = ?", owner)
+	err := db.Model(&Word{}).Where("owner_id = ? AND provider = ? AND id NOT IN (?)", owner, ProviderAnki, entries).Pluck("id", &ids).Error
+	if err != nil || len(ids) == 0 {
+		return err
+	}
+	return db.Transaction(func(tx *gorm.DB) error {
+		book, err := ensureDefaultWordbook(tx, owner)
+		if err != nil {
+			return err
+		}
+		rows := make([]WordbookEntry, 0, len(ids))
+		now := time.Now().UTC()
+		for _, id := range ids {
+			rows = append(rows, WordbookEntry{OwnerID: owner, WordbookID: book.ID, WordID: id, CreatedAt: now})
+		}
+		return tx.Clauses(clause.OnConflict{DoNothing: true}).CreateInBatches(rows, 100).Error
 	})
 }

@@ -36,7 +36,7 @@ func InvalidateAttempts(tx *gorm.DB, session *orm.WorkflowSession, queue []orm.W
 			}
 			if current.TaskID != "" {
 				if err := tx.Model(&orm.SubAgentTask{}).Where("id = ? AND status IN ?", current.TaskID, []string{"pending", "running"}).
-					Updates(map[string]any{"status": "interrupted", "updated_at": now}).Error; err != nil {
+					Updates(map[string]any{"status": "interrupted", "finished_at": now, "updated_at": now}).Error; err != nil {
 					return err
 				}
 			}

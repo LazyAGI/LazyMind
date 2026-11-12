@@ -35,7 +35,10 @@ runtime:
       label: 写作目标
       question: 想写什么内容，或修改哪份文档？
       reason: 需要明确写作目标或修改对象才能开始。
-      required: true
+      ask_when: >
+        The writing topic or target document cannot be determined from the current
+        request, attachments, or prior conversation. Missing length, structure,
+        illustration preferences, or output format alone do not require a question.
       type: text
       validation: {min_length: 1, max_length: 4000, example: '例如：为新员工写一份企业知识库使用指南'}
     - id: writing_action
@@ -146,7 +149,7 @@ slots:
     type: file
     cardinality: single
   - id: writing_task
-    user_visible: false
+    user_visible: true
     label: Writing Task
     type: file
     cardinality: single
@@ -300,6 +303,7 @@ ui:
       label: Preparation
       layout: list
       slots:
+        - id: writing_task
         - id: source_document
 
     - id: outline

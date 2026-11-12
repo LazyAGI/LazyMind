@@ -153,6 +153,37 @@ describe("MainLayout conversation removal", () => {
     expect(readChatConversationFilters()).toEqual({ filter: "normal", sources: ["codex", "workbuddy"] });
   });
 
+  it("shows only the major and minor desktop version instead of the web build version", async () => {
+    vi.stubEnv("VITE_APP_VERSION", "0.5.0");
+    vi.stubGlobal("lazymindDesktop", { appVersion: async () => "0.6.2-beta.1" });
+    try {
+      render(<MemoryRouter><MainLayout /></MemoryRouter>);
+      expect(await screen.findByText("v0.6")).toBeVisible();
+      expect(screen.queryByText(/beta/)).not.toBeInTheDocument();
+      expect(screen.queryByText("v0.5")).not.toBeInTheDocument();
+    } finally {
+      vi.unstubAllGlobals();
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it("shows the configured web version and hides it when the sidebar collapses", async () => {
+    vi.stubEnv("VITE_APP_VERSION", "v0.5.1-alpha.0");
+    vi.stubGlobal("lazymindDesktop", undefined);
+    try {
+      render(<MemoryRouter><MainLayout /></MemoryRouter>);
+      expect(await screen.findByText("v0.5")).toBeVisible();
+      expect(screen.queryByText(/alpha/)).not.toBeInTheDocument();
+      fireEvent.click(screen.getByRole("button", { name: "layout.collapseMenu" }));
+      expect(screen.queryByText("v0.5")).not.toBeInTheDocument();
+      fireEvent.click(screen.getByRole("button", { name: "layout.expandMenu" }));
+      expect(screen.getByText("v0.5")).toBeVisible();
+    } finally {
+      vi.unstubAllGlobals();
+      vi.unstubAllEnvs();
+    }
+  });
+
   it('captures the draft before notifying the page about a mode change', () => {
     const events: string[] = [];
     const capture = () => events.push('capture');

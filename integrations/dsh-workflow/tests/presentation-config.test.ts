@@ -1,8 +1,8 @@
 import { Context } from '@deepseek-ai/cordis'
-import type { IndexInjection } from '@deepseek-ai/dsh-host-webserver'
-import { describe, expect, it } from 'vitest'
+import type { IndexInjection, WebRoute } from '@deepseek-ai/dsh-host-webserver'
+import { describe, expect, it, vi } from 'vitest'
 import { renderIndexInjections } from '@deepseek-ai/dsh-host-webserver'
-import { installPresentationConfig, readPresentationConfig } from '../src/presentation-config'
+import { installPresentationConfig, readPresentationConfig, observePresentationConfig } from '../src/presentation-config'
 import { eventRun } from '../src/events'
 
 describe('browser presentation configuration', () => {
@@ -35,5 +35,44 @@ describe('browser presentation configuration', () => {
 
   it('reports missing configuration instead of trusting a tool-provided URL', () => {
     expect(() => readPresentationConfig({})).toThrow('reload DSH')
+  })
+
+  it('serves only the latest public configuration and removes the route on disposal', async () => {
+    const ctx = new Context()
+    let route!: WebRoute
+    const unregister = vi.fn()
+    ctx.provide('webServer', { register: (value: WebRoute) => { route = value; return unregister } } as never)
+    let config: { serverName: string; webUrl: string; secret?: string } | undefined = {
+      serverName: 'lazymind', webUrl: 'http://localhost:8090', secret: 'private-pairing',
+    }
+    const plugin = ctx.plugin({ apply: (scope: Context) => installPresentationConfig(scope, () => config) })
+    try {
+      await plugin.await()
+      const reply = async () => {
+        let body = ''
+        const response = { setHeader: vi.fn(), end: (value: string) => { body = value } }
+        await route.handler({ method: 'GET' } as never, response as never)
+        expect(response.setHeader).toHaveBeenCalledWith('Cache-Control', 'no-store')
+        return JSON.parse(body)
+      }
+      expect(await reply()).toEqual({ config: { serverName: 'lazymind', webUrl: 'http://localhost:8090' } })
+      config = undefined
+      expect(await reply()).toEqual({ config: null })
+    } finally { await plugin.dispose() }
+    expect(unregister).toHaveBeenCalledTimes(1)
+  })
+
+  it('boots without browser config and adopts the host config when login recovers', async () => {
+    vi.stubGlobal('location', { protocol: 'http:' })
+    const update = vi.fn()
+    const request = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ config: { serverName: 'lazymind', webUrl: 'http://localhost:8090' } }) })
+    const stop = observePresentationConfig({}, update, request, 2)
+    try {
+      expect(update).toHaveBeenCalledWith(undefined)
+      await vi.waitFor(() => expect(update).toHaveBeenCalledWith({ serverName: 'lazymind', webUrl: 'http://localhost:8090' }))
+    } finally { stop(); vi.unstubAllGlobals() }
+    const count = update.mock.calls.length
+    await new Promise(resolve => setTimeout(resolve, 10))
+    expect(update).toHaveBeenCalledTimes(count)
   })
 })

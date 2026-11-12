@@ -4,7 +4,7 @@ import { useTranslation } from 'react-i18next';
 import { channelAccountLabel, isChannelAccountAvailable, type ChannelAccount, type ChannelProvider } from '@/modules/channelGateway/api';
 import { ChannelConnectionPage } from '@/modules/channelGateway/pages/ChannelConnectionPage';
 import { getTargets, getGroups, type ChannelRule, type Target } from './api';
-import { wechatTargetStatus, wechatStatusLabel } from './wechatNotificationStatus';
+import { wechatAccountStatus, wechatTargetStatus, wechatStatusLabel, wechatStatusHint } from './wechatNotificationStatus';
 
 export default function TargetPicker({ provider, accounts, current, onSave, onClose, inline = false, disabled = false, onAccountConnected, onAuthorizationChange, refreshKey }: {
   provider: ChannelProvider; accounts: ChannelAccount[]; current?: ChannelRule;
@@ -84,16 +84,22 @@ export default function TargetPicker({ provider, accounts, current, onSave, onCl
   const accountOptions = accounts.filter(account => selectableAccount(account) || provider === 'wechat' && account.id === accountId).map(account => {
     const target = account.id === accountId ? targets.find(value => value.recipient_id === recipientId) : undefined;
     const label = channelAccountLabel(account, accounts);
+    const accountStatus = wechatAccountStatus(account);
     return { value: account.id, disabled: !selectableAccount(account),
-      label: provider === 'wechat' ? `${label} · ${t('notifications.' + wechatStatusLabel(target ? wechatTargetStatus(account, target) : 'unconfigured'))}` : label };
+      label: provider === 'wechat' ? `${label} · ${t('notifications.' + wechatStatusLabel(target ? wechatTargetStatus(account, target) : accountStatus === 'connected' ? 'unconfigured' : accountStatus))}` : label };
   });
+  const selectedWechatStatus = provider === 'wechat' && accountId
+    ? recipientId ? wechatTargetStatus(accounts.find(account => account.id === accountId), targets.find(target => target.recipient_id === recipientId))
+      : wechatAccountStatus(accounts.find(account => account.id === accountId)) : undefined;
   const fields =     <div className="notification-target-picker">
       <label className="notification-target-field">{t('notifications.account')}<Select className="notification-target-select" disabled={disabled || loading} aria-label={t('notifications.account')} value={provider !== 'wechat' && !accounts.some(a => a.id === accountId && selectableAccount(a)) ? undefined : accountId} placeholder={t('notifications.chooseAccount')} onChange={(value: string) => { setAccountId(value); setRecipientId(undefined); if (inline) onSave({ enabled: true, account_id: value }); }} options={accountOptions} /></label>
       <label className="notification-target-field">{t('notifications.recipient')}<Select className="notification-target-select" showSearch optionFilterProp="label" aria-label={t('notifications.recipient')} value={recipientId} placeholder={t('notifications.chooseRecipient')} loading={loading} disabled={disabled || !accountId} onOpenChange={(open: boolean) => { if (open && !loading) setRefresh(n => n + 1); }} onChange={(value: string) => { setRecipientId(value); if (inline) onSave({ enabled: true, account_id: accountId, recipient_id: value }); }} options={targets.map(target => ({ value: target.recipient_id, label: targetLabel(target), disabled: provider !== 'wechat' && target.available === false }))} /></label>
+      {!inline && !loading && !error && selectedWechatStatus && !['connected', 'connecting', 'checking', 'unconfigured'].includes(selectedWechatStatus)
+        && <p className="notification-status-reason">{t('notifications.' + wechatStatusHint(selectedWechatStatus))}</p>}
       {groupLoading && <p>{t('notifications.loadingGroups')}</p>}
       {!error && !loading && !groupLoading && accountId && (provider === 'wechat' ? targets.length === 0 : !targets.some(target => target.available !== false)) && <p>{t(provider === 'feishu' ? 'notifications.noGroups' : provider === 'wecom' ? 'notifications.noWecomTargets' : 'notifications.noTargets')}</p>}
       {groupError && <Alert type="warning" message={t('notifications.groupPermissionHint')} />}
-      {error && <Alert type="error" showIcon message={t(authorizationRequired ? 'notifications.wecomAuthorizationExpired' : 'notifications.' + error)} description={authorizationRequired ? <>{t('notifications.wecomReauthorizeHint')}{accounts.some(account => account.id !== accountId && selectableAccount(account)) && <p>{t('notifications.wecomSwitchAccountHint')}</p>}</> : undefined} action={<Space direction="vertical"><Button disabled={disabled} type={authorizationRequired ? 'primary' : 'default'} onClick={() => authorizationRequired ? setReauthorizing(true) : setRefresh(n => n + 1)}>{t(authorizationRequired ? 'notifications.wecomRepairAuthorization' : 'notifications.retry')}</Button>{authorizationRequired && <Button disabled={disabled || loading} onClick={() => setRefresh(n => n + 1)}>{t('notifications.wecomRefreshAuthorization')}</Button>}</Space>} />}
+      {error && <Alert type="error" showIcon message={t(authorizationRequired ? 'notifications.notAuthorized' : 'notifications.' + error)} description={authorizationRequired ? <>{t('notifications.wecomReauthorizeHint')}{accounts.some(account => account.id !== accountId && selectableAccount(account)) && <p>{t('notifications.wecomSwitchAccountHint')}</p>}</> : undefined} action={<Space direction="vertical"><Button disabled={disabled} type={authorizationRequired ? 'primary' : 'default'} onClick={() => authorizationRequired ? setReauthorizing(true) : setRefresh(n => n + 1)}>{t(authorizationRequired ? 'notifications.wecomRepairAuthorization' : 'notifications.retry')}</Button>{authorizationRequired && <Button disabled={disabled || loading} onClick={() => setRefresh(n => n + 1)}>{t('notifications.wecomRefreshAuthorization')}</Button>}</Space>} />}
       <Modal open={reauthorizing} destroyOnHidden width={760} title={t('notifications.wecomRepairAuthorization')} footer={null} zIndex={1600} onCancel={() => setReauthorizing(false)}>
         {reauthorizing && accountId && <ChannelConnectionPage key={accountId} provider="wecom" accountId={accountId} onConnected={completeReauthorization} />}
       </Modal>
