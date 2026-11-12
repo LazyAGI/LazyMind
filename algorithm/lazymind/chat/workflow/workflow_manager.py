@@ -465,7 +465,8 @@ def _paused_workflow_result(result: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     }
 
 
-def _with_terminal_agent_control(result: Dict[str, Any], workflow_id: str = '') -> Dict[str, Any]:
+def _with_terminal_agent_control(result: Dict[str, Any], workflow_id: str = '', *,
+                                 user_retry: bool = False) -> Dict[str, Any]:
     paused = _paused_workflow_result(result)
     if paused:
         return paused
@@ -504,6 +505,13 @@ def _with_terminal_agent_control(result: Dict[str, Any], workflow_id: str = '') 
         or result.get('status') == 'completed'
     )
     if not completed:
+        # Paper retries intentionally end the turn; other workflows continue
+        # after success, but a failed retry must not trigger another attempt.
+        if user_retry and (workflow_id == 'paper-writing' or result.get('outcome') != 'step_succeeded'):
+            return {**result, '_agent_control': result.get('_agent_control') or {
+                'stop': True, 'reason': 'workflow_retry_completed',
+                'final_text': '本次重试已执行，请在工作流中查看结果。',
+            }}
         return result
     return {
         **result,
@@ -672,20 +680,18 @@ def _safe_session_tools(
                         'auto' if cfg.get('workflow_mode') == 'auto' else 'dynamic'
                     ),
                 )
+                if user_retry:
+                    # Consume authorization even when a post-step checkpoint stops the turn.
+                    cfg.pop('user_authorized_workflow_retry', None)
                 if state_refreshed:
                     result = {**result, **_state_refresh_notice()}
                 if checkpoint and result.get('outcome') == 'step_succeeded' and len(requested) == 1:
                     waiting = checkpoint.guard(selected_session_id, completed_step=requested[0])
                     if waiting:
                         return waiting
-                result = _with_terminal_agent_control(result, str((workflow_context or {}).get('workflow_id') or ''))
-                if user_retry:
-                    # One user retry must not authorize further model-initiated attempts.
-                    cfg.pop('user_authorized_workflow_retry', None)
-                    result.setdefault('_agent_control', {
-                        'stop': True, 'reason': 'workflow_retry_completed',
-                        'final_text': '本次重试已执行，请在工作流中查看结果。',
-                    })
+                result = _with_terminal_agent_control(
+                    result, str((workflow_context or {}).get('workflow_id') or ''), user_retry=user_retry,
+                )
                 if any(value in rewindable for value in requested):
                     result = _compact_transition_result(result)
                 return _compact_model_frontier(result)
