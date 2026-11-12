@@ -7478,6 +7478,30 @@ export interface ProcessingDiagnostic {
     'stage': string;
     'task_id'?: string;
 }
+export interface ProcessingTaskItem {
+    'created_at'?: string;
+    'dataset_id'?: string;
+    'dataset_name'?: string;
+    'document_id'?: string;
+    'document_name'?: string;
+    'error'?: string;
+    'id'?: string;
+    'level'?: string;
+    'stages'?: Array<ProcessingTaskStage>;
+    'status'?: string;
+}
+export interface ProcessingTaskStage {
+    'name'?: string;
+    'status'?: string;
+}
+export interface ProcessingTasksResponse {
+    'counts'?: { [key: string]: number; };
+    'items'?: Array<ProcessingTaskItem>;
+    'page'?: number;
+    'page_size'?: number;
+    'total'?: number;
+    'unfinished_count'?: number;
+}
 export interface ProjectionError {
     'code': string;
     'retryable': boolean;
@@ -26999,6 +27023,56 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
         },
         /**
          *
+         * @summary Latest document processing tasks
+         * @param {number} [page]
+         * @param {string} [status]
+         * @param {string} [level]
+         * @param {string} [q]
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreKnowledgeProcessingTasksGet: async (page?: number, status?: string, level?: string, q?: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            const localVarPath = `/api/core/knowledge-processing/tasks`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            if (page !== undefined) {
+                localVarQueryParameter['page'] = page;
+            }
+
+            if (status !== undefined) {
+                localVarQueryParameter['status'] = status;
+            }
+
+            if (level !== undefined) {
+                localVarQueryParameter['level'] = level;
+            }
+
+            if (q !== undefined) {
+                localVarQueryParameter['q'] = q;
+            }
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
          * @summary Archive a learning collection while preserving review history
          * @param {string} bookId
          * @param {*} [options] Override http request option.
@@ -37815,6 +37889,22 @@ export const DefaultApiFp = function(configuration?: Configuration) {
         },
         /**
          *
+         * @summary Latest document processing tasks
+         * @param {number} [page]
+         * @param {string} [status]
+         * @param {string} [level]
+         * @param {string} [q]
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreKnowledgeProcessingTasksGet(page?: number, status?: string, level?: string, q?: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ProcessingTasksResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreKnowledgeProcessingTasksGet(page, status, level, q, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreKnowledgeProcessingTasksGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
          * @summary Archive a learning collection while preserving review history
          * @param {string} bookId
          * @param {*} [options] Override http request option.
@@ -42942,6 +43032,16 @@ export const DefaultApiFactory = function (configuration?: Configuration, basePa
         },
         /**
          *
+         * @summary Latest document processing tasks
+         * @param {DefaultApiApiCoreKnowledgeProcessingTasksGetRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreKnowledgeProcessingTasksGet(requestParameters: DefaultApiApiCoreKnowledgeProcessingTasksGetRequest = {}, options?: RawAxiosRequestConfig): AxiosPromise<ProcessingTasksResponse> {
+            return localVarFp.apiCoreKnowledgeProcessingTasksGet(requestParameters.page, requestParameters.status, requestParameters.level, requestParameters.q, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
          * @summary Archive a learning collection while preserving review history
          * @param {DefaultApiApiCoreLearningBooksBookIdDeleteRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
@@ -46596,6 +46696,19 @@ export interface DefaultApiApiCoreKbPermissionBatchPostRequest {
 }
 
 /**
+ * Request parameters for apiCoreKnowledgeProcessingTasksGet operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreKnowledgeProcessingTasksGetRequest {
+    readonly page?: number
+
+    readonly status?: string
+
+    readonly level?: string
+
+    readonly q?: string
+}
+
+/**
  * Request parameters for apiCoreLearningBooksBookIdDelete operation in DefaultApi.
  */
 export interface DefaultApiApiCoreLearningBooksBookIdDeleteRequest {
@@ -49960,6 +50073,17 @@ export class DefaultApi extends BaseAPI {
      */
     public apiCoreKbPermissionBatchPost(requestParameters: DefaultApiApiCoreKbPermissionBatchPostRequest, options?: RawAxiosRequestConfig) {
         return DefaultApiFp(this.configuration).apiCoreKbPermissionBatchPost(requestParameters.permissionBatchRequest, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Latest document processing tasks
+     * @param {DefaultApiApiCoreKnowledgeProcessingTasksGetRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreKnowledgeProcessingTasksGet(requestParameters: DefaultApiApiCoreKnowledgeProcessingTasksGetRequest = {}, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreKnowledgeProcessingTasksGet(requestParameters.page, requestParameters.status, requestParameters.level, requestParameters.q, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**

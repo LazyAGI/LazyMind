@@ -51,7 +51,7 @@ vi.mock("@/modules/knowledge/components/KnowledgeTag", () => ({ default: () => n
 vi.mock("@/components/auth", () => ({ AgentAppsAuth: { getUserInfo: () => ({}) } }));
 vi.mock("@/components/request", () => ({
   BASE_URL: "",
-  axiosInstance: { get: vi.fn().mockResolvedValue({ data: { ready: true } }) },
+  axiosInstance: { get: vi.fn().mockResolvedValue({ data: { ready: true, items: [], total: 0, page: 1, page_size: 20, counts: {active: 0}, unfinished_count: 0 } }) },
 }));
 vi.mock("@/modules/knowledge/utils/request", () => ({
   KnowledgeBaseServiceApi: () => ({
@@ -127,6 +127,9 @@ function CurrentLocation() {
 
 async function click(element: HTMLElement) {
   await act(async () => { fireEvent.click(element); });
+  if (element.getAttribute("aria-haspopup") === "dialog" && (element.getAttribute("aria-label") || "").startsWith("后台任务")) {
+    await act(async () => { fireEvent.click(screen.getByRole("tab", { name: "安装与更新" })); });
+  }
 }
 
 beforeAll(() => {

@@ -16,7 +16,7 @@
   }
   .ant-modal-header { flex: none; height: 52px; padding: 20px 24px 8px; margin: 0; }
   .ant-modal-title { font-size: 16px; line-height: 24px; }
-  .ant-modal-body { flex: 1; min-height: 0; display: flex; flex-direction: column; padding: 0 24px; overflow: hidden; }
+  .ant-modal-body { flex: 1; min-height: 0; display: flex; flex-direction: column; padding: 0 24px 16px; overflow: hidden; }
   .ant-modal-footer { flex: none; min-height: 48px; margin: 0; padding: 10px 24px; border-top: 1px solid #e5e6eb; display: flex; justify-content: flex-end; }
   .ant-btn-sm { height: 28px; border-radius: 6px; font-size: 12px; }
   .market-task-table { flex: 1; min-height: 0; overflow: hidden; }

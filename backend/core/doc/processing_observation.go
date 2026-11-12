@@ -41,7 +41,7 @@ func loadProcessingSnapshot(ctx context.Context, db, lazyDB *gorm.DB, datasetID,
 		if err := docs.Find(&snapshot.documents).Error; err != nil {
 			return err
 		}
-		if len(snapshot.documents) == 0 || (documentID == "" && effectiveProcessingLevel(snapshot.dataset.ProcessingLevel) == ProcessingLevelStored) {
+		if len(snapshot.documents) == 0 || (documentID == "" && len(documentIDs) == 0 && effectiveProcessingLevel(snapshot.dataset.ProcessingLevel) == ProcessingLevelStored) {
 			return nil
 		}
 		var states []orm.DocumentProcessingState

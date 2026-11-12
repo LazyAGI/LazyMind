@@ -11311,6 +11311,57 @@ components:
                 - recovery
                 - stage
             type: object
+        ProcessingTaskItem:
+            properties:
+                created_at:
+                    type: string
+                dataset_id:
+                    type: string
+                dataset_name:
+                    type: string
+                document_id:
+                    type: string
+                document_name:
+                    type: string
+                error:
+                    type: string
+                id:
+                    type: string
+                level:
+                    type: string
+                stages:
+                    items:
+                        $ref: '#/components/schemas/ProcessingTaskStage'
+                    type: array
+                status:
+                    type: string
+            type: object
+        ProcessingTaskStage:
+            properties:
+                name:
+                    type: string
+                status:
+                    type: string
+            type: object
+        ProcessingTasksResponse:
+            properties:
+                counts:
+                    additionalProperties:
+                        type: integer
+                    type: object
+                items:
+                    items:
+                        $ref: '#/components/schemas/ProcessingTaskItem'
+                    type: array
+                page:
+                    type: integer
+                page_size:
+                    type: integer
+                total:
+                    type: integer
+                unfinished_count:
+                    type: integer
+            type: object
         ProjectionError:
             properties:
                 code:
@@ -30197,6 +30248,37 @@ paths:
             summary: One-click update of all installed official knowledge bases
             tags:
                 - knowledge-market
+    /api/core/knowledge-processing/tasks:
+        get:
+            parameters:
+                - in: query
+                  name: page
+                  required: false
+                  schema:
+                    type: integer
+                - in: query
+                  name: status
+                  required: false
+                  schema:
+                    type: string
+                - in: query
+                  name: level
+                  required: false
+                  schema:
+                    type: string
+                - in: query
+                  name: q
+                  required: false
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ProcessingTasksResponse'
+                    description: Permission-scoped latest processing attempts
+            summary: Latest document processing tasks
     /api/core/knowledge/options:
         get:
             responses:

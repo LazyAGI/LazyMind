@@ -439,6 +439,7 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "POST", "/datasets/{dataset}:batchAddMember", []string{"document.write"}, systemdeps.RequireRAG(doc.BatchAddDatasetMember))
 
 	// ----- Tasktext（text Task，text Job） -----
+	handleAPI(r, "GET", "/knowledge-processing/tasks", []string{"document.read"}, doc.ListProcessingTasks)
 	handleAPI(r, "GET", "/datasets/{dataset}/tasks", []string{"document.read"}, doc.ListTasks)
 	handleAPI(r, "POST", "/datasets/{dataset}/tasks", []string{"document.write"}, doc.CreateTask)
 	handleAPI(r, "POST", "/datasets/{dataset}/tasks:search", []string{"document.read"}, doc.SearchTasks)

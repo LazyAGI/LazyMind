@@ -155,6 +155,7 @@ import {
   type SourceCategory,
 } from "./knowledgeListState";
 
+import { useProcessingTasks } from "./useProcessingTasks";
 import { useKnowledgeMarketTasks } from "./useKnowledgeMarketTasks";
 
 import "./index.scss";
@@ -385,7 +386,9 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
   const availableUpdateCount = officialItems.filter((item) => item.updateAvailable).length;
   const marketTaskRefreshKey = `${Object.keys(trackedMarketJobs).sort().join(",")}:${marketTaskRevision}`;
   const marketTasks = useKnowledgeMarketTasks(marketTaskModalOpen, marketTaskRefreshKey);
-  const activeMarketTaskCount = marketTasks.data?.unfinished_count;
+  const processingTasks = useProcessingTasks(marketTaskModalOpen, marketTaskRefreshKey);
+  const activeMarketTaskCount = marketTasks.queryFailed || processingTasks.queryFailed ? undefined
+    : marketTasks.data && processingTasks.data ? marketTasks.data.unfinished_count + processingTasks.data.unfinished_count : undefined;
   const activeMarketJobTypes = useMemo(() => {
     const types: Record<string, "install" | "update"> = {};
     Object.values(trackedMarketJobs).forEach((job) => {
@@ -2191,6 +2194,7 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
       <KnowledgeMarketTaskModal
         open={marketTaskModalOpen}
         query={marketTasks}
+        processingQuery={processingTasks}
         onClose={() => setMarketTaskModalOpen(false)}
         onTasksChanged={(retriedTask) => {
           if (retriedTask) {

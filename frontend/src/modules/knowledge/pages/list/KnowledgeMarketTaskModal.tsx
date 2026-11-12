@@ -10,10 +10,13 @@ import { getKnowledgeMarketTaskPercent, isKnowledgeMarketTaskCompleted, isKnowle
 import KnowledgeMarketTaskFiles from "./KnowledgeMarketTaskFiles";
 import KnowledgeMarketTaskPagination from "./KnowledgeMarketTaskPagination";
 import "./KnowledgeMarketTaskModal.scss";
+import ProcessingTaskPanel from "./ProcessingTaskPanel";
+import type { ProcessingTasksQuery } from "./useProcessingTasks";
 
 type TaskRow = KnowledgeMarketTaskListItemOpenAPIResponse;
 interface KnowledgeMarketTaskModalProps {
   open: boolean;
+  processingQuery?: ProcessingTasksQuery;
   query: KnowledgeMarketTasksQuery;
   onClose: () => void;
   onTasksChanged: (retriedTask?: { name: string }) => void;
@@ -26,8 +29,10 @@ function displayState(task: TaskRow) {
   return task.display_state || (isKnowledgeMarketTaskPartiallyFailed(value) ? "partial_failed" : isKnowledgeMarketTaskFailed(value) ? "failed" : isKnowledgeMarketTaskCompleted(value) ? "done" : task.job_status === "pending" ? "pending" : "processing");
 }
 
-export default function KnowledgeMarketTaskModal({ open, query, onClose, onTasksChanged }: KnowledgeMarketTaskModalProps) {
+export default function KnowledgeMarketTaskModal({ open, query, processingQuery, onClose, onTasksChanged }: KnowledgeMarketTaskModalProps) {
   const { t } = useTranslation();
+  const [tab, setTab] = useState("processing");
+  const showProcessing = !!processingQuery && tab === "processing";
   const [messageApi, messageHolder] = message.useMessage();
   const { data, setPage, refresh, loading, queryFailed } = query;
   const [expanded, setExpanded] = useState<string>();
@@ -78,7 +83,7 @@ export default function KnowledgeMarketTaskModal({ open, query, onClose, onTasks
     observer.observe(footer);
     window.addEventListener("resize", measure);
     return () => { observer.disconnect(); window.removeEventListener("resize", measure); };
-  }, [open, table]);
+  }, [open, table, tab]);
 
   const runAction = async (task: TaskRow, action: "delete" | "retry" | "cancel") => {
     if (busy.current) return;
@@ -133,9 +138,13 @@ export default function KnowledgeMarketTaskModal({ open, query, onClose, onTasks
       <div>{task.can_retry === true && <Button size="small" loading={busyJob === task.job_id} disabled={!!busyJob} onClick={() => void runAction(task, "retry")}>{t("knowledge.taskRetry")}</Button>}</div>
     </div> },
   ];
-  return <Modal className="knowledge-market-task-modal" width={1100} open={open} title={t("knowledge.backgroundTasks")} onCancel={onClose} destroyOnHidden footer={<KnowledgeMarketTaskPagination scope="tasks" page={data?.page || 1} total={data?.total || 0} disabled={loading || !!busyJob} onChange={(value) => { setPage(value); setExpanded(undefined); refresh(); }} />}>
+  return <Modal className="knowledge-market-task-modal" width={1100} open={open} title={t("knowledge.backgroundTasks")} onCancel={onClose} destroyOnHidden footer={showProcessing ? null : <KnowledgeMarketTaskPagination scope="tasks" page={data?.page || 1} total={data?.total || 0} disabled={loading || !!busyJob} onChange={(value) => { setPage(value); setExpanded(undefined); refresh(); }} />}>
     {messageHolder}
-    <div className="market-task-table" ref={setTable}>
+    {processingQuery && <div className="knowledge-task-tabs" role="tablist" aria-label="后台任务类型">
+      <button type="button" role="tab" aria-selected={showProcessing} onClick={() => setTab("processing")}>文档处理</button>
+      <button type="button" role="tab" aria-selected={!showProcessing} onClick={() => setTab("market")}>安装与更新</button>
+    </div>}
+    {showProcessing ? <ProcessingTaskPanel query={processingQuery!} /> : <div className="market-task-table" ref={setTable}>
       <Table<TaskRow> rowKey="job_id" columns={columns} dataSource={tasks} loading={loading} pagination={false} tableLayout="fixed" locale={{ emptyText: <Empty description={queryFailed ? queryFailedHint : t("knowledge.taskEmpty")} /> }} rowClassName={(task: TaskRow) => expanded === task.job_id ? "market-task-selected" : ""} scroll={{ x: 1030, y: bodyHeight }} expandable={{
         columnWidth: 48,
         expandedRowKeys: expanded ? [expanded] : [],
@@ -143,6 +152,6 @@ export default function KnowledgeMarketTaskModal({ open, query, onClose, onTasks
         expandIcon: ({ expanded: isExpanded, onExpand, record }: { expanded: boolean; onExpand: (record: TaskRow, event: MouseEvent<HTMLElement>) => void; record: TaskRow }) => <button type="button" className="market-task-expand" aria-label={`${t(isExpanded ? "knowledge.taskCollapse" : "knowledge.taskExpand")} ${record.name || t("knowledge.taskTypeUpdateAll")}`} aria-expanded={isExpanded} onClick={(event) => onExpand(record, event)}>{isExpanded ? <MinusOutlined /> : <PlusOutlined />}</button>,
         expandedRowRender: (task: TaskRow) => <KnowledgeMarketTaskFiles key={task.job_id} task={task} height={Math.max(358, bodyHeight - tasks.length * 48)} busy={!!busyJob} onRetry={() => void runAction(task, "retry")} />,
       }} />
-    </div>
+    </div>}
   </Modal>;
 }
