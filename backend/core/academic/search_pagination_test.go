@@ -101,7 +101,6 @@ func TestSearchSourcePagesCachePartialResultsAndRespectCooldown(t *testing.T) {
 				return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(body)), Header: make(http.Header), Request: r}, nil
 			})
 			t.Cleanup(func() { http.DefaultTransport = previous })
-			mockArxivClient(t, http.DefaultTransport)
 			query := func() map[string]any {
 				return map[string]any{"query": "retrieval", "sources": []string{"openalex", "sciverse"}, "max_results": 1}
 			}

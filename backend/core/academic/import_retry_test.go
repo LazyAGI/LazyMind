@@ -29,7 +29,6 @@ func TestLinkPreviewKeepsRequestedVersionWhenIdentityAlreadyExists(t *testing.T)
 		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(body)), Header: make(http.Header), Request: r}, nil
 	})
 	t.Cleanup(func() { http.DefaultTransport = previous })
-	mockArxivClient(t, http.DefaultTransport)
 	w := httptest.NewRecorder()
 	PreviewImport(w, paperRequest(`{"identifier":"https://arxiv.org/abs/1706.03762v6","target_dataset_id":"papers"}`))
 	if w.Code != 200 {

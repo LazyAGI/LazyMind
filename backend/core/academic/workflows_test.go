@@ -24,7 +24,7 @@ import (
 
 func paperFixture(t *testing.T) *orm.DB {
 	t.Helper()
-	db := migratePaperFixtureDB(t)
+	db := orm.MigrateAllModelsForTest(t)
 	old, oldLazy, oldState := store.DB(), store.LazyLLMDB(), store.State()
 	shared, err := state.NewSQLiteStore(filepath.Join(t.TempDir(), "state.db"))
 	if err != nil {

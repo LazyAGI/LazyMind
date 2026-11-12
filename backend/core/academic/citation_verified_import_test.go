@@ -22,7 +22,6 @@ func citationLookupTransport(t *testing.T, handler func(*http.Request) (int, str
 		return &http.Response{StatusCode: status, Body: io.NopCloser(strings.NewReader(body)), Header: make(http.Header), Request: r}, nil
 	})
 	t.Cleanup(func() { http.DefaultTransport = previous })
-	mockArxivClient(t, http.DefaultTransport)
 }
 
 func TestCitationImportPrefersExactDOIMetadataOverTitleSearch(t *testing.T) {

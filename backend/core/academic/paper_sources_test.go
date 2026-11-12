@@ -70,7 +70,6 @@ func TestExternalDiscoveryReusesOnlyInitiatingCollection(t *testing.T) {
 		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(feed + `</feed>`)), Header: make(http.Header), Request: r}, nil
 	})
 	t.Cleanup(func() { http.DefaultTransport = previous })
-	mockArxivClient(t, http.DefaultTransport)
 	w = httptest.NewRecorder()
 	SearchPapers(w, paperRequest(string(marshal(map[string]any{"expansion_id": record.ID, "query": "all:agents", "sources": []string{"arxiv"}}))))
 	if w.Code != 200 {
@@ -196,7 +195,6 @@ func TestOpenAlexSearchIdentityAbstractCacheAndSourceFailures(t *testing.T) {
 		return &http.Response{StatusCode: status, Body: io.NopCloser(strings.NewReader(body)), Header: make(http.Header), Request: r}, nil
 	})
 	t.Cleanup(func() { http.DefaultTransport = previous })
-	mockArxivClient(t, http.DefaultTransport)
 	search := func(query string) map[string]any {
 		w := httptest.NewRecorder()
 		SearchPapers(w, paperRequest(string(marshal(map[string]any{"expansion_id": record.ID, "query": query, "sources": []string{"openalex", "sciverse", "web"}, "max_results": 5}))))
