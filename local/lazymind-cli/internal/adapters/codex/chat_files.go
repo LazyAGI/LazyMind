@@ -10,6 +10,18 @@ import (
 	"lazymind/agentconnector/internal/chatagent"
 )
 
+// Native Windows drive paths are not URLs: url.Parse treats the drive as a scheme.
+func pptLinkPath(target string) (string, bool) {
+	if len(target) >= 3 && ((target[0] >= 'A' && target[0] <= 'Z') || (target[0] >= 'a' && target[0] <= 'z')) && target[1] == ':' && (target[2] == '\\' || target[2] == '/') {
+		return target, true
+	}
+	parsed, err := url.Parse(target)
+	if err != nil || (parsed.Scheme != "" && parsed.Scheme != "file") || parsed.Host != "" || strings.HasPrefix(target, "/static-files/") {
+		return "", false
+	}
+	return parsed.Path, true
+}
+
 var pptLink = regexp.MustCompile(`\[([^\]\n]*)\]\((<[^>\n]+>|[^)\n]+)\)`)
 
 // Transfer only explicitly linked PPT files from this conversation's workspace.
@@ -21,16 +33,15 @@ func publishPPTLinks(text, workspace string, emit func(chatagent.Event) error) (
 	result := pptLink.ReplaceAllStringFunc(text, func(link string) string {
 		parts := pptLink.FindStringSubmatch(link)
 		target := strings.Trim(strings.TrimSpace(parts[2]), "<>")
-		parsed, err := url.Parse(target)
-		if err != nil || (parsed.Scheme != "" && parsed.Scheme != "file") || parsed.Host != "" ||
-			strings.HasPrefix(target, "/static-files/") || !strings.EqualFold(filepath.Ext(parsed.Path), ".pptx") {
+		localPath, ok := pptLinkPath(target)
+		if !ok || !strings.EqualFold(filepath.Ext(localPath), ".pptx") {
 			return link
 		}
 		if publishErr != nil {
 			return link
 		}
 		root, err := filepath.EvalSymlinks(workspace)
-		path := filepath.FromSlash(parsed.Path)
+		path := filepath.FromSlash(localPath)
 		if !filepath.IsAbs(path) {
 			path = filepath.Join(workspace, path)
 		}

@@ -90,3 +90,25 @@ func TestTurnModelSinceUsesOnlyCurrentTurn(t *testing.T) {
 		t.Fatalf("missing metadata returned %q", got)
 	}
 }
+
+func TestPPTLinkPath(t *testing.T) {
+	for _, tc := range []struct {
+		target, want string
+		ok           bool
+	}{
+		{`C:\Users\user\测试 deck.pptx`, `C:\Users\user\测试 deck.pptx`, true},
+		{`D:/output/deck.pptx`, `D:/output/deck.pptx`, true},
+		{`output/测试%20deck.pptx`, `output/测试 deck.pptx`, true},
+		{`/tmp/deck.pptx`, `/tmp/deck.pptx`, true},
+		{`https://example.com/deck.pptx`, "", false},
+		{`//example.com/deck.pptx`, "", false},
+		{`C:deck.pptx`, "", false},
+	} {
+		t.Run(tc.target, func(t *testing.T) {
+			got, ok := pptLinkPath(tc.target)
+			if got != tc.want || ok != tc.ok {
+				t.Fatalf("got=(%q, %v), want=(%q, %v)", got, ok, tc.want, tc.ok)
+			}
+		})
+	}
+}
