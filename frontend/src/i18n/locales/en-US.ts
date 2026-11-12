@@ -777,6 +777,7 @@ const enUS = {
   },
   modelProvider: {
     logoUpload: {
+      "preview": "View logo",
       "label": "Custom logo",
       "upload": "Upload logo",
       "replace": "Replace logo",

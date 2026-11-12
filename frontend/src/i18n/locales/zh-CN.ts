@@ -774,6 +774,7 @@ const zhCN = {
   },
   modelProvider: {
     logoUpload: {
+      "preview": "查看图标",
       "label": "自定义图标",
       "upload": "上传图标",
       "replace": "替换图标",
