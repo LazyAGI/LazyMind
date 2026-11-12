@@ -2,6 +2,7 @@ import signal
 import threading
 import inspect
 import os
+import time
 from contextvars import ContextVar
 
 import lazyllm
@@ -217,6 +218,18 @@ if not getattr(DocumentProcessorWorker._Impl, '_lazymind_isolated', False):
             _rebuild_empty_text_documents(processor, payload, node_groups, reader)
             return _BaseDocumentWorkerImpl._exec_reparse_task(
                 self, processor, task_id, payload, node_groups, name_to_id, reader)
+
+        def _worker_impl(self):
+            # Queue acknowledgements and the index fence also use PostgreSQL.
+            # An outage there can escape the base task handler. Keep consuming
+            # after recovery; the queue lease owns retrying interrupted tasks.
+            while not self._shutdown:
+                try:
+                    return _BaseDocumentWorkerImpl._worker_impl(self)
+                except Exception as exc:
+                    lazyllm.LOG.error(f'Document worker loop interrupted ({type(exc).__name__}); retrying')
+                    if not self._shutdown:
+                        time.sleep(5)
 
         def _run_task(self, task_id, task_type, payload, from_queue):
             lazyllm.globals['config'].clear()

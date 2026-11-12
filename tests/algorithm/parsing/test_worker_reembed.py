@@ -282,3 +282,27 @@ def test_index_task_connects_before_read_but_parse_only_does_not(monkeypatch):
         assert connected == ['segments', 'vectors']
     finally:
         processor._thread_pool.shutdown(wait=False)
+
+
+def test_worker_loop_recovers_from_queue_exception_and_respects_shutdown(monkeypatch):
+    from types import SimpleNamespace
+    worker = _worker_with_processor(monkeypatch, SimpleNamespace())
+    worker._shutdown = False
+    module = importlib.import_module('lazymind.processor.service.worker')
+    attempts = []
+    waits = []
+
+    def consume(_self):
+        attempts.append(True)
+        if len(attempts) == 1:
+            raise ConnectionError('database restarting')
+        return 'finished'
+
+    monkeypatch.setattr(type(worker).__mro__[1], '_worker_impl', consume)
+    monkeypatch.setattr(module.time, 'sleep', waits.append)
+    assert worker._worker_impl() == 'finished'
+    assert len(attempts) == 2
+    assert waits == [5]
+    worker._shutdown = True
+    worker._worker_impl()
+    assert len(attempts) == 2
