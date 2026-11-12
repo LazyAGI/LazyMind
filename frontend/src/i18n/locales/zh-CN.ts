@@ -5498,7 +5498,7 @@ const zhCN = {
   },
   knowledge: {
 	processingLevel: "处理级别",
-	processingLevelHint: "可随时升级；降级不会删除已有产物。",
+	processingLevelHint: "仅存储：保存原文件；解析：提取正文；分块：将正文拆分为片段；索引：生成向量用于语义检索。可随时升级，降级不会删除已有产物。",
 	processingStored: "仅存储（无需模型）",
 	processingParsed: "解析全文",
 	processingChunked: "解析并切片",
