@@ -83,7 +83,7 @@ func TestPDFIRWorkerRehydratesNondefaultTenantAndRejectsRevokedIdentity(t *testi
 		case "/api/scan/internal/source-access/by-dataset:batch":
 			scanCalls++
 			if r.Header.Get("X-Tenant-ID") != "company" {
-				t.Error("scan authorization lost current tenant")
+				t.Error("knowledge parsing must not ask Scan for authorization")
 			}
 			return testJSONResponse(200, `{"items":[{"dataset_id":"tenant-dataset","exists":false,"allowed":true}]}`), nil
 		default:
@@ -96,7 +96,7 @@ func TestPDFIRWorkerRehydratesNondefaultTenantAndRejectsRevokedIdentity(t *testi
 	t.Setenv("LAZYMIND_SCAN_CONTROL_PLANE_URL", "http://scan.test")
 	job := asyncjob.Job{CreateUserID: "owner", PayloadJSON: mustJSON(pdfIRPayload{DatasetID: "tenant-dataset", DocumentID: "tenant-doc", SourceSHA256: "changed", Revision: pdfir.Revision})}
 	_, err := handlePDFIRJob(t.Context(), job, nil)
-	if err == nil || err.Error() != "PDF source changed; request parsing again" || identityCalls != 1 || scanCalls != 1 {
+	if err == nil || err.Error() != "PDF source changed; request parsing again" || identityCalls != 1 || scanCalls != 0 {
 		t.Fatalf("worker denied legitimate tenant before validating source: identity=%d scan=%d err=%v", identityCalls, scanCalls, err)
 	}
 	hash, _ := pdfir.SourceHash(path)

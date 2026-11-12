@@ -170,6 +170,28 @@ test('required font failure preserves the previous exported file', async () => {
   }
 });
 
+test('editable export without font embedding keeps the font name and omits font parts', async () => {
+  const folder = await mkdtemp(path.join(os.tmpdir(), 'pptx-no-embed-'));
+  try {
+    const source = path.join(folder, 'page.html');
+    const output = path.join(folder, 'deck.pptx');
+    // A required font fails embedded export when its original bytes do not match.
+    await writeFile(source, portableHtml(makeTestTtf(), 'corrupt'));
+    const result = await buildPptx([{ path: source, ir: { ct: {
+      tag: 'P', text: 'Keep content', children: [],
+      bounds: { x: 0, y: 0, w: 300, h: 80 }, styles: { fontFamily: 'Test Web Font' },
+    } } }], folder, output, { embedFonts: false });
+    assert.equal(result.successCount, 1);
+    assert.deepEqual(result.embeddedFonts, []);
+    const zip = await JSZip.loadAsync(await readFile(output));
+    assert.match(await zip.file('ppt/slides/slide1.xml').async('string'), /typeface="Test Web Font"/);
+    assert.doesNotMatch(await zip.file('ppt/presentation.xml').async('string'), /embeddedFontLst/);
+    assert.equal(Object.keys(zip.files).some(name => name.startsWith('ppt/fonts/')), false);
+  } finally {
+    await rm(folder, { recursive: true, force: true });
+  }
+});
+
 function writeUInt16BE(buffer, value, offset) {
   buffer.writeUInt16BE(value, offset);
 }
@@ -248,9 +270,14 @@ test('local font catalog verifies content hashes and shares fonts with browser C
     }));
     assert.equal((await localFontFaces()).length, 1);
     assert.match(await localFontCss('font-family: Test Web Font'), /@font-face.*data:font\/ttf;base64,/);
+    const fileCss = await localFontCss('font-family: Test Web Font', { useFileUrls: true });
+    assert.match(fileCss, /src:url\("file:\/\/\/[^\"]+\.ttf"\)/);
+    assert.ok(fileCss.includes(`${id}.ttf`));
+    assert.doesNotMatch(fileCss, /base64/);
     assert.equal(await localFontCss('font-family: Arial'), '');
     await writeFile(path.join(root, `${id}.ttf`), 'corrupted');
     assert.deepEqual(await localFontFaces(), []);
+    assert.equal(await localFontCss('font-family: Test Web Font', { useFileUrls: true }), '');
   } finally {
     if (previous === undefined) delete process.env.LAZYMIND_FONT_DIR;
     else process.env.LAZYMIND_FONT_DIR = previous;

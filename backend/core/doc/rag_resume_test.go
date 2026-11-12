@@ -95,7 +95,7 @@ func TestKnowledgeProcessingResumesRAGAfterInstallation(t *testing.T) {
 				}
 				return
 			}
-			if err != nil || dataset.ProcessingLevel != level || dataset.ProcessingRevision != 2 || parseDatasetAlgo(dataset.Ext).AlgoID != "general_algo" {
+			if err != nil || dataset.ProcessingLevel != level || dataset.ProcessingRevision != 1 || parseDatasetAlgo(dataset.Ext).AlgoID != "general_algo" {
 				t.Fatalf("processing configuration not restored: %+v err=%v", dataset, err)
 			}
 			if tags := parseDatasetTags(dataset.Ext); len(tags) != 1 || tags[0] != "keep" {

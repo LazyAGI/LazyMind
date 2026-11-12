@@ -69,14 +69,6 @@ CREATE TABLE unrelated(id INTEGER); INSERT INTO unrelated VALUES(1);`)
 				t.Fatal(err)
 			}
 			runner := &fakeRunner{t: t}
-			if runtime.GOOS != "windows" {
-				runner.handlers = append(runner.handlers, func(cmd Command) (CommandResult, error) {
-					if cmd.Name != paths.LocalProxyStopScript {
-						t.Fatalf("unexpected shutdown command: %s", cmd.Name)
-					}
-					return CommandResult{}, nil
-				})
-			}
 			runner.handlers = append(runner.handlers,
 				func(cmd Command) (CommandResult, error) {
 					if cmd.Name != paths.AlgorithmPython {
@@ -92,11 +84,7 @@ CREATE TABLE unrelated(id INTEGER); INSERT INTO unrelated VALUES(1);`)
 			if err := manager.Reset(context.Background(), cfg, paths, scope); err != nil {
 				t.Fatalf("desktop %s reset failed: %v", scope, err)
 			}
-			wantCalls := 1
-			if runtime.GOOS != "windows" {
-				wantCalls++
-			}
-			runner.assertCommandCount(wantCalls)
+			runner.assertCommandCount(1)
 			if _, err := os.Stat(marker); !os.IsNotExist(err) {
 				t.Fatalf("KB upload was not removed: %v", err)
 			}

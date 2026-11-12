@@ -3,9 +3,11 @@ from __future__ import annotations
 import hashlib
 import importlib.util
 import io
+import json
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 import zipfile
 from pathlib import Path
 
@@ -82,6 +84,36 @@ class PrepareDockerTest(unittest.TestCase):
             self.assertFalse((output / "ignored.txt").exists())
             marker = output / prepare_history_injection.MARKER_NAME
             self.assertEqual(marker.read_text().strip(), "a" * 64)
+
+    def test_stale_package_marker_is_replaced_with_the_pinned_archive(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            output = root / "bundles"
+            output.mkdir()
+            (output / prepare_history_injection.MARKER_NAME).write_text("a" * 64)
+            (output / "old.zip").write_bytes(b"old")
+            archive = root / "cache" / "history-injection.zip"
+            archive.parent.mkdir()
+            with zipfile.ZipFile(archive, "w") as package:
+                package.writestr("history-injection/ppt/sample.zip", b"updated sample")
+            digest, size = prepare_history_injection.file_identity(archive)
+            config = root / "package.json"
+            config.write_text(json.dumps({
+                "url": "https://example.invalid/package.zip",
+                "sha256": digest,
+                "size": size,
+                "runtimeFileName": archive.name,
+                "conversationIds": ["same-conversation-id"],
+            }))
+            with patch.dict("os.environ", {
+                "LAZYMIND_HISTORY_INJECTION_CONFIG": str(config),
+                "LAZYMIND_HISTORY_INJECTION_CACHE_ROOT": str(root),
+                "LAZYMIND_HISTORY_INJECTION_ROOT": str(output),
+            }, clear=True):
+                self.assertEqual(prepare_history_injection.main(), 0)
+            self.assertFalse((output / "old.zip").exists())
+            self.assertEqual((output / "ppt" / "sample.zip").read_bytes(), b"updated sample")
+            self.assertTrue(prepare_history_injection.prepared_output_is_valid(output, digest))
 
     def test_rejects_parent_path(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

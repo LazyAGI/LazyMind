@@ -18,12 +18,15 @@ func init() {
 		"history injection requires a database and target owner",
 		"history injection sql_file is unsafe",
 		"history injection payload path is unsafe",
+		"history injection payload target is not a regular file",
 		"history injection zip already exists",
 		"resolve bootstrap admin for history injection",
 		"auth login response has no access token",
 		"auth me response has no user_id",
 		"history injection sql contains an unterminated string literal",
 		"inspect postgresql boolean columns",
+		"replacement conversation has no id",
+		"replacement conversation has no sample fields",
 	} {
 		registerAdditionalErrorAlias(alias, message, http.StatusInternalServerError, code)
 	}
@@ -48,6 +51,10 @@ func init() {
 		"history injection workspace may not contain symlink %s",
 		"history injection zip source contains symlink %s",
 		"apply history injection bundle %s",
+		"lock workflow %s for history injection",
+		"clear sample rows from %s",
+		"replacement bundle has no conversation row for %s",
+		"replacement conversation does not match %s",
 		"materialized bundle id changed from %q to %q",
 		"conversation %s already belongs to another user",
 		"read injected conversation %s metadata",

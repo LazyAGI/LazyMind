@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Prepare Docker history-injection bundles only when PostgreSQL needs them."""
+"""Prepare the verified history-injection bundle for Docker."""
 
 from __future__ import annotations
 
@@ -56,23 +56,6 @@ def load_config(path: Path) -> PackageConfig:
     if len(set(conversation_ids)) != len(conversation_ids):
         raise ValueError("history injection conversationIds contains duplicates")
     return PackageConfig(url, digest, size, runtime_file_name, conversation_ids)
-
-
-def database_has_all_conversations(dsn: str, conversation_ids: tuple[str, ...]) -> bool:
-    import psycopg
-
-    try:
-        with psycopg.connect(dsn, connect_timeout=10) as connection:
-            with connection.cursor() as cursor:
-                cursor.execute(
-                    "SELECT COUNT(DISTINCT id) FROM conversations WHERE id::text = ANY(%s)",
-                    (list(conversation_ids),),
-                )
-                count = int(cursor.fetchone()[0])
-    except psycopg.errors.UndefinedTable:
-        print("History injection: conversations table does not exist yet; package preparation is required")
-        return False
-    return count == len(conversation_ids)
 
 
 def file_identity(path: Path) -> tuple[str, int]:
@@ -221,14 +204,7 @@ def main() -> int:
         "LAZYMIND_HISTORY_INJECTION_ROOT",
         str(cache_root / "bundles"),
     ))
-    dsn = os.environ.get("ACL_DB_DSN", "").strip()
-    if not dsn:
-        raise ValueError("ACL_DB_DSN is required for Docker history injection preparation")
-
     config = load_config(config_path)
-    if database_has_all_conversations(dsn, config.conversation_ids):
-        print("History injection: all configured conversations already exist; download skipped")
-        return 0
     if prepared_output_is_valid(output_root, config.sha256):
         print("History injection: verified extracted cache is ready; download skipped")
         return 0

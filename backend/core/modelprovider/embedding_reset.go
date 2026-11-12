@@ -49,7 +49,7 @@ func ClearEmbeddingChunks(w http.ResponseWriter, r *http.Request) {
 	var req EmbeddingClearRequest
 	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096))
 	decoder.DisallowUnknownFields()
-	if decoder.Decode(&req) != nil || !req.ConfirmClearChunks || req.ModelID == "" || req.Source != "own" {
+	if decoder.Decode(&req) != nil || !req.ConfirmClearChunks || (req.Source != "own" && req.Source != "") {
 		common.ReplyErr(w, "explicit chunk clearing confirmation is required", 400)
 		return
 	}
@@ -60,6 +60,27 @@ func ClearEmbeddingChunks(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		common.ReplyErr(w, "embedding state unavailable", 503)
 		return
+	}
+	if req.ModelID == "" {
+		// Recovery must work without any usable model credential. Only the
+		// generation and explicit administrator confirmation authorize a purge.
+		if state.Phase == "cleared" && state.Generation == req.Generation+1 && !embeddingIndexStateHasIdentityResidue(state) {
+			common.ReplyOK(w, EmbeddingClearResponse{Cleared: true})
+			return
+		}
+		if state.Generation != req.Generation || state.Phase == "clearing" {
+			common.ReplyErr(w, errEmbeddingIndexBusy.Error(), 409)
+			return
+		}
+		if err := clearEmbeddingChunks(r.Context(), db, state, "", "", "", false); err != nil {
+			common.ReplyErr(w, err.Error(), 409)
+			return
+		}
+		common.ReplyOK(w, EmbeddingClearResponse{Cleared: true})
+		return
+	}
+	if req.Source == "" {
+		req.Source = "own"
 	}
 	if state.Phase == "ready" && state.Generation == req.Generation+1 && state.ActiveModelID == req.ModelID && state.ActiveSource == req.Source && validEmbeddingFingerprint(state.Signature) {
 		var owned int64

@@ -1,6 +1,6 @@
 import { embedSlideAssetsForExport } from './slideAssets';
-import { useCallback, useState } from 'react';
-import { Modal } from 'antd';
+import { useCallback, useEffect, useState } from 'react';
+import { Checkbox, Modal } from 'antd';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { axiosInstance, BASE_URL } from '@/components/request';
@@ -12,6 +12,7 @@ import type {
 } from '@/modules/chat/store/workflowPanel';
 import { resolveCoreAssetUrl, resolveMarkdownImageUrlAsync, isExpiredSignedUrl } from '@/modules/knowledge/utils/imageUrl';
 import {
+  declaredSlideFontFamilies,
   extractHtmlFromArtifact,
   exportHtmlSlidesAsRasterPdf,
   exportHtmlSlidesAsRasterPptx,
@@ -174,9 +175,22 @@ export function PresentationExportAction({
   const [exporting, setExporting] = useState(false);
   const [exportError, setExportError] = useState<string | null>(null);
   const [choiceOpen, setChoiceOpen] = useState(false);
+  const [embedFonts, setEmbedFonts] = useState(true);
+  const [fontFamilies, setFontFamilies] = useState<string[]>([]);
   const formatIds = action.formats?.length
     ? action.formats.filter((format) => FORMAT_MODES[format])
     : ['raster-pptx', 'pdf', 'editable-pptx'];
+  const editableOffered = formatIds.includes('editable-pptx');
+
+  useEffect(() => {
+    if (!choiceOpen || !editableOffered) return;
+    let current = true;
+    void collectPresentationPages(action, tab, session, rows)
+      .then(pages => declaredSlideFontFamilies(pages.map(page => page.html)))
+      .then(families => { if (current) setFontFamilies(families); })
+      .catch(() => { if (current) setFontFamilies([]); });
+    return () => { current = false; };
+  }, [action, choiceOpen, editableOffered, rows, session, tab]);
 
   const showDependencyPrompt = useCallback((dependency?: ExporterDependency) => {
     Modal.confirm({
@@ -228,7 +242,7 @@ export function PresentationExportAction({
         })));
         const response = await axiosInstance.post(
           `${BASE_URL}/api/core/exporters/${encodeURIComponent(action.provider)}:export`,
-          { format: 'editable-pptx', pages: exportPages, filename },
+          { format: 'editable-pptx', pages: exportPages, filename, embed_fonts: embedFonts },
           { responseType: 'blob', timeout: 20 * 60 * 1000 },
         );
         downloadBlob(response.data as Blob, filename);
@@ -238,7 +252,7 @@ export function PresentationExportAction({
     } finally {
       setExporting(false);
     }
-  }, [action, exporting, rows, session, showDependencyPrompt, t, tab]);
+  }, [action, embedFonts, exporting, rows, session, showDependencyPrompt, t, tab]);
 
   return (
     <>
@@ -247,7 +261,11 @@ export function PresentationExportAction({
           type='button'
           className='composite-toolbar__export'
           disabled={exporting}
-          onClick={() => setChoiceOpen(true)}
+          onClick={() => {
+            setEmbedFonts(true);
+            setFontFamilies([]);
+            setChoiceOpen(true);
+          }}
         >
           {exporting ? t('chat.workflowExportingPptx') : (action.label || t('chat.workflowExportPptx'))}
         </button>
@@ -261,6 +279,17 @@ export function PresentationExportAction({
       >
         <div className='composite-toolbar__export-mode'>
           <p>{t('chat.workflowExportSelectModeDesc')}</p>
+          {editableOffered && (
+            <>
+              <Checkbox checked={embedFonts} onChange={event => setEmbedFonts(event.target.checked)}>
+                {t('chat.workflowExportEmbedFonts')}
+              </Checkbox>
+              {fontFamilies.length > 0 && (
+                <p>{t('chat.workflowExportDeclaredFonts', { fonts: fontFamilies.join(', ') })}</p>
+              )}
+              <p>{t('chat.workflowExportUnembeddedFontsHelp')}</p>
+            </>
+          )}
           <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 12 }}>
             {formatIds.map((formatId) => {
               const mode = FORMAT_MODES[formatId];

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // HTML → PPTX 转换器 CLI
-// 用法: node html_to_pptx.mjs --deck-dir <path> [--output <filename>] [--force]
+// 用法: node html_to_pptx.mjs --deck-dir <path> [--output <filename>] [--force] [--no-embed-fonts]
 
 import { existsSync, statSync, mkdirSync, writeFileSync } from 'node:fs';
 import { resolve, basename, dirname } from 'node:path';
@@ -18,7 +18,7 @@ const { ensureDeckPreconditions } = await import('./lib/cli_guards.mjs');
 const { downloadRemoteImages } = await import('./lib/image_downloader.mjs');
 
 function parseArgs(args) {
-  const result = { deckDir: null, pagesDir: null, output: null, outputDir: null, force: false, batch: false, debug: false };
+  const result = { deckDir: null, pagesDir: null, output: null, outputDir: null, force: false, batch: false, debug: false, embedFonts: true };
   for (let i = 0; i < args.length; i++) {
     if (args[i] === '--deck-dir' && args[i + 1]) {
       result.deckDir = resolve(args[i + 1]);
@@ -39,6 +39,8 @@ function parseArgs(args) {
       result.force = true;
     } else if (args[i] === '--debug') {
       result.debug = true;
+    } else if (args[i] === '--no-embed-fonts') {
+      result.embedFonts = false;
     }
   }
   return result;
@@ -111,7 +113,7 @@ async function main() {
   mkdirSync(outputBase, { recursive: true });
   const outputPath = resolve(outputBase, outputFilename);
   console.error('步骤 2/2: 生成 PPTX...');
-  const result = await buildPptx(pages, args.deckDir, outputPath);
+  const result = await buildPptx(pages, args.deckDir, outputPath, { embedFonts: args.embedFonts });
 
   // 输出验证
   if (!existsSync(outputPath)) {
@@ -138,6 +140,7 @@ async function main() {
     rasterFallbacks: result.fallbackCount || 0,
     fallbackDetails: result.fallbacks || [],
     failures: result.failures || [],
+    fontEmbeddingEnabled: args.embedFonts,
     embeddedFonts: result.embeddedFonts || [],
     fileSize: `${sizeKB} KB`,
     error: ok ? undefined : `${result.failCount} page(s) failed DOM→PPTX (often Chromium/Playwright mismatch)`,

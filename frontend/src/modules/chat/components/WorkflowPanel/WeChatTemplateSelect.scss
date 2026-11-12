@@ -1,0 +1,76 @@
+.wechat-template-select {
+  display: flex;
+  align-items: center;
+  .ant-select { flex: 1; min-width: 0; height: 40px; }
+  .ant-select-selector { border-radius: 8px; }
+}
+.wechat-template-preview-trigger { display: block; }
+.wechat-template-dropdown {
+  padding: 6px;
+  border-radius: 12px;
+  .ant-select-item-option { padding: 0; border-radius: 8px; }
+  .ant-select-item-option-state { align-self: center; margin-inline-end: 12px; }
+}
+.wechat-template-option {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 10px 12px;
+}
+.wechat-template-miniature {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: 0 0 34px;
+  height: 42px;
+  padding: 8px 6px;
+  border: 1px solid color-mix(in srgb, var(--template-accent) 22%, transparent);
+  border-radius: 4px;
+  background: var(--template-paper);
+  i { display: block; height: 2px; border-radius: 1px; background: var(--template-accent); opacity: 0.35; }
+  i:first-child { height: 4px; margin-bottom: 2px; opacity: 1; }
+  i:last-child { width: 65%; }
+}
+.wechat-template-option-copy {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  gap: 3px;
+  white-space: normal;
+  strong { font-size: 13px; font-weight: 500; color: var(--ant-color-text, #253348); }
+  small { color: var(--ant-color-text-secondary, #7c8798); font-size: 11px; font-weight: 400; }
+}
+.wechat-template-preview-popover {
+  max-width: calc(100vw - 24px);
+  .ant-popover-inner {
+    padding: 0;
+    overflow: hidden;
+    border: 1px solid var(--ant-color-border-secondary, #e5e9f0);
+    border-radius: 12px;
+    box-shadow: 0 12px 40px rgb(23 34 53 / 14%);
+  }
+}
+.wechat-template-preview {
+  width: 320px;
+  max-width: calc(100vw - 26px);
+  header {
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--ant-color-border-secondary, #edf0f5);
+    strong { color: var(--ant-color-text, #253348); font-size: 13px; font-weight: 500; }
+  }
+  .wechat-template-preview-article {
+    display: block;
+    width: 100%;
+    height: min(420px, 65dvh);
+    overflow: auto;
+    overscroll-behavior: contain;
+    scrollbar-width: thin;
+    background: #fff;
+    color-scheme: light;
+    font-family: -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Microsoft YaHei', sans-serif;
+    p { margin: 0 0 18px; }
+    &, * { box-sizing: border-box; }
+  }
+}

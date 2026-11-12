@@ -353,6 +353,7 @@ ui:
         hide_empty_columns: true
         empty_column_scope: selected
         repeat_single_slots:
+          - enhancement_status
           - generated_first_frame
           - generated_last_frame
           - material_images

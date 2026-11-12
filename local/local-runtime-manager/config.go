@@ -970,6 +970,8 @@ func newRuntimeConfigWithOptions(opts RuntimeConfigOptions, skipPortChecks bool)
 		if err := applyDesktopManifestPaths(&p); err != nil {
 			return RuntimeConfig{}, RuntimePaths{}, err
 		}
+	} else if err := applyLocalHistoryInjectionPaths(&p); err != nil {
+		return RuntimeConfig{}, RuntimePaths{}, err
 	}
 	ports := newLocalPortAllocator()
 	ports.skipPortChecks = skipPortChecks
@@ -1178,13 +1180,9 @@ func applyDesktopManifestPaths(paths *RuntimePaths) error {
 		if manifest.Paths.HistoryInjectionArchive != "" {
 			return fmt.Errorf("history examples cannot be bundled and deferred at once")
 		}
-		if err := download.validate(); err != nil {
+		if err := applyHistoryInjectionDownload(paths, download); err != nil {
 			return err
 		}
-		paths.HistoryInjectionDownload = download
-		paths.HistoryInjectionSHA256 = download.SHA256
-		paths.HistoryInjectionArchive = filepath.Join(paths.RuntimeRoot, "cache", "history-injection", download.SHA256+".zip")
-		paths.HistoryInjectionRoot = filepath.Join(paths.DataDir, "history-injection")
 	}
 	if relativeArchive := strings.TrimSpace(manifest.Paths.HistoryInjectionArchive); relativeArchive != "" {
 		paths.HistoryInjectionArchive = joinResource(relativeArchive)

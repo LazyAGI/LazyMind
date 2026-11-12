@@ -51,7 +51,7 @@ describe("storage-only uploads", () => {
     await act(async () => ref.current!.handleOpen({ dataset_id: "papers" }));
     expect(screen.getByText(storageOnly
       ? "文件将保留在知识库内，仅保存原文件，不解析、不建立索引。"
-      : "无需安装 RAG 即可保存解析文本和基础切片。安装组件并配置 embedding 后自动建立索引；扫描件需要 OCR。")).toBeInTheDocument();
+      : "原文件可以正常上传。解析和索引进度可在知识库中查看，服务未就绪时可稍后重试。")).toBeInTheDocument();
     fireEvent.click(screen.getByText("select PDF"));
     fireEvent.click(screen.getByRole("button", { name: "上传并保存" }));
     await waitFor(() => expect(onOk).toHaveBeenCalled());

@@ -325,9 +325,6 @@ func BatchUploadTasks(w http.ResponseWriter, r *http.Request) {
 		replyDatasetForbidden(w)
 		return
 	}
-	if datasetRequiresEmbedding(ds) && replyEmbedNotReady(w, r, userID) {
-		return
-	}
 	r.Body = http.MaxBytesReader(w, r.Body, OriginalBatchMaxBytes+(1<<20))
 	if err := r.ParseMultipartForm(8 << 20); err != nil {
 		common.ReplyErr(w, fmt.Sprintf("%s: %v", "invalid multipart form", err), http.StatusBadRequest)
@@ -383,9 +380,6 @@ func UploadFile(w http.ResponseWriter, r *http.Request) {
 	ds, _, ok := requireDatasetPermission(r, datasetID, acl.PermissionDatasetUpload)
 	if !ok {
 		replyDatasetForbidden(w)
-		return
-	}
-	if datasetRequiresEmbedding(ds) && replyEmbedNotReady(w, r, userID) {
 		return
 	}
 	r.Body = http.MaxBytesReader(w, r.Body, OriginalBatchMaxBytes+(1<<20))
@@ -680,10 +674,6 @@ func CreateTask(w http.ResponseWriter, r *http.Request) {
 		replyDatasetForbidden(w)
 		return
 	}
-	if datasetRequiresEmbedding(ds) && replyEmbedNotReady(w, r, userID) {
-		return
-	}
-
 	var req CreateTaskRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		common.ReplyErr(w, fmt.Sprintf("%s: %v", "invalid body", err), http.StatusBadRequest)
@@ -1614,7 +1604,18 @@ func startParseTasksAtLevel(ctx context.Context, userID, datasetID string, taskI
 	}
 
 	if !systemdeps.PythonComponentActive("rag") {
-		return nil, fmt.Errorf("请先安装本地知识库组件，并重启本地服务。")
+		level := requestedLevel
+		if strings.TrimSpace(level) == "" {
+			var ds orm.Dataset
+			if err := store.DB().WithContext(ctx).Where("id=? AND deleted_at IS NULL", datasetID).Take(&ds).Error; err != nil {
+				return nil, err
+			}
+			level = ds.ProcessingLevel
+		}
+		if effectiveProcessingLevel(level) != ProcessingLevelIndexed {
+			return startNativeParseTasks(ctx, userID, datasetID, taskIDs)
+		}
+		return nil, fmt.Errorf("向量索引需要本地知识库组件，请前往设置中的系统工具安装并启用。原文件和解析结果不受影响。")
 	}
 	kbID := datasetKbIDByID(datasetID)
 	if kbID == "" {
@@ -1628,7 +1629,7 @@ func startParseTasksAtLevel(ctx context.Context, userID, datasetID string, taskI
 	if strings.TrimSpace(requestedLevel) != "" {
 		processingLevel = effectiveProcessingLevel(requestedLevel)
 	}
-	llmConfig, err := loadParsingLLMConfig(ctx, store.DB(), userID)
+	llmConfig, err := loadParsingLLMConfig(ctx, store.DB(), userID, processingLevel)
 	if errors.Is(err, errEmbeddingStateChanged) {
 		return nil, err
 	}
@@ -2942,7 +2943,7 @@ func startReparseTasksInternalAtLevel(r *http.Request, datasetID string, taskIDs
 		Int("task_count", len(taskIDs)).
 		Strs("task_ids", taskIDs).
 		Msg("starting reparse tasks")
-	llmConfig, err := loadParsingLLMConfig(r.Context(), store.DB(), userID)
+	llmConfig, err := loadParsingLLMConfig(r.Context(), store.DB(), userID, processingLevel)
 	if errors.Is(err, errEmbeddingStateChanged) {
 		return nil, err
 	}
@@ -3055,6 +3056,11 @@ func startReparseTasksInternalAtLevel(r *http.Request, datasetID string, taskIDs
 		Str("reparse_mode", reparseMode).
 		Str("strategy", strategy).
 		Msg("submitting reparse batch to doc service")
+	if strategy == "rebuild" {
+		if err := markSourceRebuildPending(r.Context(), store.DB(), datasetID, taskRows); err != nil {
+			return results, err
+		}
+	}
 	for _, task := range taskRows {
 		bindNativeIndexTask(r.Context(), datasetID, task.DocID, task.ID, processingLevel, llmConfig["_embedding_generation"].(int64))
 	}

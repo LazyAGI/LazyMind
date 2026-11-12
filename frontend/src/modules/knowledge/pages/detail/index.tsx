@@ -1,3 +1,4 @@
+import KnowledgeLibraryLogo from "@/modules/knowledge/components/KnowledgeLibraryLogo";
 import type { PaperUploadContext } from "../../api/academicReferences";
 import {
   Alert,
@@ -53,7 +54,6 @@ import { getImportErrorMessage } from "@/modules/knowledge/utils/importError";
 import { inspectFinishedImportTasks, mergeTrackedImportTasks, reconcileImportTaskFailures, type ImportTaskFailure, type ImportTaskState } from "./importTaskFailures";
 import { TaskTab } from "./components/ImportTaskList";
 import { createPaperPdfUploader } from "@/modules/knowledge/paper/pdfUpload";
-import { RuntimeReadinessError, waitForRuntimeCapability } from "@/runtime/readiness";
 import { DocumentServiceApi, TaskServiceApi } from "../../utils/request";
 import { useDatasetPermissionStore } from "@/modules/knowledge/store/dataset_permission";
 import {
@@ -431,15 +431,6 @@ const Detail = () => {
     if (!file.name.toLowerCase().endsWith(".pdf")) throw new Error("请选择 PDF 文件");
     if (file.size > 500 * 1024 * 1024) throw new Error("单个 PDF 文件不能超过 500 MB");
 
-    try {
-      if (effectiveProcessingLevel(detail?.processing_level) !== "stored") {
-        await waitForRuntimeCapability("parser");
-      }
-    } catch (error) {
-      if (error instanceof RuntimeReadinessError) throw new Error(t("runtime.initializationFailed"));
-      throw error;
-    }
-
     const { documentId, tasks } = await uploadPaperPdfTask(file, hasWritePermission ? "DEFAULT" : "UPLOAD", importContext);
     if (activeDatasetIdRef.current === id) {
       importingTaskListRef.current = mergeTrackedImportTasks(importingTaskListRef.current, tasks);
@@ -449,17 +440,10 @@ const Detail = () => {
     return documentId;
   }
 
-  const isDocumentParsingUnavailable = documentParsingEnabled !== true;
   const storageOnly = !ragReady || detail?.processing_level === "stored";
-  const importDisabled = ragAvailability === "checking" || ragAvailability === "error" ||
-    (!storageOnly && (isDocumentParsingUnavailable || embeddingReady === false || multimodalEmbeddingReady === false));
-  const importDisabledReason = ragAvailability === "checking" || ragAvailability === "error"
-    ? ragUnavailableReason
-    : !storageOnly && isDocumentParsingUnavailable
-      ? documentParsingEnabled === false
-        ? "文档解析已暂停，请在设置中重新启用"
-        : "正在读取文档解析状态"
-      : undefined;
+  // Upload permissions are independent of downstream processing services.
+  const importDisabled = false;
+  const importDisabledReason: string | undefined = undefined;
   const showDataSourceSync = isDatasetCreatedByDataSource(
     detail as DatasetWithDataSourceFlag | undefined,
   );
@@ -485,7 +469,7 @@ const Detail = () => {
         className="knowledge-detail-header"
         title={
           <span className="knowledge-detail-title-copy">
-            <strong>{detail?.display_name}</strong>
+            <strong><KnowledgeLibraryLogo scene={detail?.scene} compact />{detail?.display_name}</strong>
             {detail?.desc ? <small>{detail.desc}</small> : null}
           </span>
         }
@@ -600,7 +584,6 @@ const Detail = () => {
               <KnowledgeBaseSyncNow
                 datasetId={detail.dataset_id}
                 documentParsingEnabled={documentParsingEnabled}
-                enabled={ragReady}
                 onSyncComplete={refreshKnowledgeAfterSync}
               />
             ) : null}
@@ -795,7 +778,6 @@ const Detail = () => {
                     {
                       key: "batchReparse",
                       label: t("knowledge.batchReparse"),
-                      disabled: !ragReady || isDocumentParsingUnavailable,
                       onClick: () => {
                         knowledgeListRef.current?.restartCheckedKnowledge();
                       },

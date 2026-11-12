@@ -239,6 +239,8 @@ steps:
       - If inspection is unavailable, skip uninspected optional candidates and disclose
       the missing requested images. Zero material_images is valid and must not block
       otherwise sufficient text evidence. Do not fabricate a passed image check.
+      - Use named icons only as small labels or decoration. Reserve main visuals
+      for registered materials, diagrams or data charts.
 
       Publish material_summary with source coverage, findings, useful citations and
       visuals, assumptions, conflicts, missing measurements and remaining gaps.
@@ -352,6 +354,8 @@ steps:
       second model-written outline. Shared visual design and complete page prompts
       are planned next. For a requested insertion, add only the new section at its
       intended position, preserving other page plans and approved background bindings.
+      If the tool rejects the Markdown page count, correct the headings and retry
+      once with the same content. Use ### for subsections.
     tools:
       - ppt_plan_timing
       - ppt_find_deck
@@ -437,6 +441,9 @@ steps:
       copy and assets together in that editable card. Do not create separate
       presentation_style, page_layout or page_assets artifacts, or embed a positional
       '第N页' header that would require rewriting unchanged cards after insertion.
+      For a new deck or unfinished planning in LazyMind, call ppt_plan_page_prompts
+      with the saved output_format and the shared global_style. It checkpoints each prompt
+      and speaker note and resumes from the first missing page after a failure.
 
       Author each spoken script once, separately from slide copy and generation
       prompts. Use the allocated duration and cumulative range; explain the page's
@@ -447,13 +454,19 @@ steps:
       pages=[{page: 1, text: '...'}, ...]. Generation attaches these scripts verbatim.
       For insert/delete/reorder, remap the saved scripts to the final page order,
       preserve unedited script bodies and keep the total speaking budget.
+      For edits in LazyMind, use ppt_publish_outline with the saved output_format,
+      global_style, page_components and separate speaker_notes for changed pages.
 
       Before completion, compare every page prompt with deck_outline and sources.
       Keep the claim-to-visible-content coverage map in validation evidence, outside
       the editable card. A correct count or valid Markdown alone does not prove fidelity.
     tools:
+      - ppt_plan_page_prompts
       - ppt_publish_outline
       - ppt_update_speaker_notes
+    terminal_tools:
+      - ppt_plan_page_prompts
+      - ppt_publish_outline
     inputs:
       - material: presentation_output_format
         required: true
@@ -564,6 +577,8 @@ steps:
       findings or unavailable checks without withholding usable images, failing the
       step or automatically regenerating them. This includes provider-added generation
       labels or watermarks. Never claim an unperformed visual check passed.
+      The tool publishes each ready page. If it reports a provider failure, surface
+      the exact error and reuse completed backgrounds on retry.
 
       Publish the final images in approved page order with matching prompt identities.
       Report exact provider/model/file errors rather than empty success.
@@ -573,6 +588,8 @@ steps:
       insertion adds exactly the matching new image. User review pauses are controlled
       by the host's approval mode, not an extra requirement introduced by this step.
     tools:
+      - ppt_generate_background_images
+    terminal_tools:
       - ppt_generate_background_images
     inputs:
       - material: background_prompts
@@ -675,6 +692,9 @@ steps:
       - Reuse acknowledged outputs and generated files after interruption. Surface
       exact failures and missing capabilities, retaining useful progress; never
       restart the entire deck to repair one page.
+      - Use named icons as small labels or decorations, up to 96 CSS pixels or
+      0.8 inches per side. Reserve main visuals for factual diagrams, screenshots
+      or charts.
     tools:
       - ppt_search_assets
       - ppt_get_asset
@@ -764,6 +784,7 @@ steps:
       After page-level checks, publish each page and its matching notes in approved
       page order. Buffer any page that finishes early until all earlier pages and
       notes have been acknowledged. Preserve the approved page identities.
+      Keep saved HTML pages and notes if an optional PPTX export fails.
       preview_notes must be aligned with preview_html; the auto-generated draft
       must be a natural spoken explanation, not copied formula source. For
       academic pages explain intuition, key quantities, measured comparisons and

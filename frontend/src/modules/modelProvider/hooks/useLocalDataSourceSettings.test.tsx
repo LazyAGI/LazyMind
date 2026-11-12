@@ -46,15 +46,15 @@ describe("useLocalDataSourceSettings", () => {
     mocks.listBindingChatSettings.mockResolvedValue({ data: { sources: [] } });
   });
 
-  it("does not contact the scan service until the RAG component is available", async () => {
+  it("loads the scan service without waiting for RAG and keeps loaded settings when RAG becomes ready", async () => {
     const { result, rerender } = renderHook(useLocalDataSourceSettings, {
       wrapper,
     });
 
     await waitFor(() => expect(result.current.loading).toBe(false));
-    expect(result.current.canCreateLocalSource).toBe(false);
-    expect(mocks.listSources).not.toHaveBeenCalled();
-    expect(mocks.listBindingChatSettings).not.toHaveBeenCalled();
+    expect(result.current.canCreateLocalSource).toBe(true);
+    expect(mocks.listSources).toHaveBeenCalledTimes(1);
+    expect(mocks.listBindingChatSettings).toHaveBeenCalledTimes(1);
 
     mocks.ragAvailability = "ready";
     rerender();

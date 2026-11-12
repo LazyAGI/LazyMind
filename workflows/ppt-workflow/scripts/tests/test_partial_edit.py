@@ -592,7 +592,7 @@ class PartialEditTests(unittest.TestCase):
             shared.call_args_list[1],
             mock.call('user', timeout=75.0, max_retries=1, call_control=mock.ANY),
         )
-        self.assertTrue(all(callable(call.kwargs['call_control'].check) for call in shared.call_args_list))
+        self.assertTrue(all(callable(call.kwargs['call_control'].cancel_check) for call in shared.call_args_list))
         self.assertEqual(model.share.call_count, 2)
         self.assertTrue(all(
             call.kwargs['stream'] is True for call in model.share.call_args_list
@@ -1441,7 +1441,7 @@ class PartialEditTests(unittest.TestCase):
             self.assertEqual(result['retry_count'], 0)
             self.assertEqual(len(list(deck.glob('.page_retry_*.json'))), 2)
 
-    def test_batch_page_html_does_not_retry_timed_out_page(self):
+    def test_batch_page_html_limits_timed_out_page_to_one_retry(self):
         with tempfile.TemporaryDirectory() as tmp:
             deck, _page = make_deck(Path(tmp))
             attempts = 0
@@ -1467,15 +1467,15 @@ class PartialEditTests(unittest.TestCase):
             ), mock.patch.object(
                 TOOLS.time, 'sleep', return_value=None,
             ), mock.patch.dict(
-                TOOLS.os.environ, {'LAZYMIND_PPT_PAGE_RETRIES': '1'}, clear=False,
+                TOOLS.os.environ, {'LAZYMIND_PPT_PAGE_RETRIES': '3'}, clear=False,
             ):
                 result = TOOLS._batch_page_html_publish_progressive(
                     deck, concurrency=1,
                 )
 
-            self.assertEqual(attempts, 1)
+            self.assertEqual(attempts, 2)
             self.assertEqual(result['status'], 'failed')
-            self.assertEqual(result['retry_count'], 0)
+            self.assertEqual(result['retry_count'], 1)
             self.assertIn('timed out after 90s', result['failed_detail'][0]['error'])
 
 
@@ -1770,36 +1770,39 @@ class CompletionGateTests(unittest.TestCase):
 
 
 class DeferredTextOutlineTest(unittest.TestCase):
-    def test_text_outline_build_does_not_run_internal_stages(self):
+    def test_text_outline_publishes_without_generating_style_json(self):
         with tempfile.TemporaryDirectory() as tmp:
             deck = Path(tmp)
-            (deck / 'task_pack.json').write_text(json.dumps({'params': {'page_count': 1}}))
+            (deck / 'task_pack.json').write_text(json.dumps({'params': {'page_count': 2}}))
             with (
                 mock.patch.object(TOOLS, '_resolve_deck_dir', return_value=deck),
                 mock.patch.object(TOOLS, '_conversation_root', return_value=deck),
                 mock.patch.object(TOOLS, '_bind_workflow_deck'),
                 mock.patch.object(TOOLS, '_attach_material_images_to_deck', return_value={'attached': 0}),
-                mock.patch.object(TOOLS, '_save_artifact', return_value={'ok': True}),
-                mock.patch.object(TOOLS, 'ppt_run_stage') as stages,
-                mock.patch.object(TOOLS, '_agent_llm_call') as model,
+                mock.patch.object(TOOLS, '_save_artifact', return_value={'ok': True}) as save,
+                mock.patch.object(TOOLS, 'ppt_run_stage', return_value={'status': 'ok'}) as stages,
+                mock.patch.object(TOOLS, 'ppt_prepare_style', side_effect=ValueError('invalid style JSON')) as style,
             ):
-                def run_stage(deck_dir, *, stage, sample=None):
-                    if stage == 'style':
-                        (Path(deck_dir) / 'style_spec.json').write_text(json.dumps({
-                            'design_style': {'id': 1},
-                            'palette': {'primary': '#2563EB'},
-                            'typography': {'heading_font': 'Inter'},
-                        }))
-                    return {'status': 'ok'}
-
-                stages.side_effect = run_stage
                 result = TOOLS.ppt_build_outline(
-                    '一页总结', page_count=1, deck_dir=str(deck),
-                    outline_markdown='## 总结\n用户确认的三个结论。',
+                    '两页总结', page_count=2, deck_dir=str(deck),
+                    outline_markdown=('```markdown\n# 汇报\n## 第一页\n已确认的结论。\n'
+                                      '```text\n## 代码示例，不是页面\n```\n'
+                                      '##\t第二页\n补充信息。\n```'),
                 )
+                with self.assertRaisesRegex(ToolExecutionError, 'contains 1 slide headings; expected 2'):
+                    TOOLS.ppt_build_outline(
+                        '两页总结', page_count=2, deck_dir=str(deck),
+                        outline_markdown='## 第一页\n只有一页。',
+                    )
+
             self.assertTrue(result['structure_deferred'])
+            self.assertTrue(result['deck_outline_published'])
+            self.assertEqual(result['page_count'], 2)
+            self.assertTrue(save.call_args.kwargs['value'].startswith('# 汇报'))
+            self.assertEqual(save.call_args.kwargs['key'], 'deck_outline')
+            self.assertEqual(save.call_count, 1)
             stages.assert_not_called()
-            model.assert_not_called()
+            style.assert_not_called()
             self.assertFalse((deck / 'outline.json').exists())
 
     def test_page_document_publication_and_generation_reads_latest_edits(self):
@@ -2050,14 +2053,17 @@ class PageGenerationRecoveryTests(unittest.TestCase):
                 mock.patch.object(TOOLS, '_load_slide_outline_briefs', return_value={}),
                 mock.patch.object(TOOLS, '_ui_slot_order_list', return_value=[]),
                 mock.patch.object(TOOLS, '_resolve_deck_dir', return_value=deck),
+                mock.patch.object(TOOLS.time, 'sleep', return_value=None),
+                mock.patch.dict(TOOLS.os.environ, {'LAZYMIND_PPT_PAGE_RETRIES': '1'}),
             ):
                 result = TOOLS._batch_page_html_publish_progressive(deck, concurrency=1)
                 self.assertEqual(result['status'], 'failed')
+                self.assertEqual(result['retry_count'], 1)
                 with self.assertRaisesRegex(ToolExecutionError, 'already failed'):
                     TOOLS.ppt_generate_pages(str(deck))
                 with self.assertRaisesRegex(ToolExecutionError, 'already failed'):
                     TOOLS.ppt_run_stage(str(deck), stage='page-html', page=1)
-                runtime._capture_cmd.assert_called_once()
+                self.assertEqual(runtime._capture_cmd.call_count, 2)
                 phases = [c.args[0]['current_phase'] for c in ctx.emit.call_args_list]
                 self.assertTrue(any('第 1 页生成失败' in phase for phase in phases))
             with mock.patch.object(TOOLS, 'require_context', return_value=SimpleNamespace(task_id='attempt-two')):

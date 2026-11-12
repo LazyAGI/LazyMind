@@ -25,6 +25,8 @@ export interface SettingsOverviewCounts {
   verified: number;
   runnable: number;
   configured: number;
+  model_providers?: number;
+  external_services?: number;
 }
 
 export interface SettingsOverviewSection {

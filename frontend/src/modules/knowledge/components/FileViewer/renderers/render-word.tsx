@@ -37,6 +37,14 @@ const RenderWord = (props: WordViewerProps) => {
             className: "docx",
             inWrapper: true,
           });
+          // Preserve document bookmarks; article links belong outside the reader.
+          container.querySelectorAll<HTMLAnchorElement>('a[href]').forEach(anchor => {
+            if (/^(https?:|mailto:)/i.test(anchor.href)) {
+              if (anchor.getAttribute('href')?.startsWith('#')) return;
+              anchor.target = '_blank';
+              anchor.rel = 'noopener noreferrer';
+            }
+          });
         }
       } catch (err) {
         if (isMounted) errorCallback.current?.();

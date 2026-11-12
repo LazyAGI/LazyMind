@@ -1,7 +1,11 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 from pathlib import Path
+from types import SimpleNamespace
+
+import pytest
 
 
 def _load_ppt_tools():
@@ -330,6 +334,8 @@ def test_planning_authors_scripts_and_generation_only_references_them():
     plan, generate = steps['plan_page_prompts'], steps['generate_ppt']
     assert 'Author each spoken script once' in plan['prompt']
     assert {'material': 'presentation_timing', 'required': False} in plan['inputs']
+    assert 'checkpoints each prompt' in plan['prompt']
+    assert 'ppt_plan_page_prompts' in plan['terminal_tools']
     assert 'Speaker scripts were authored once' not in plan['prompt']
     assert 'rewrite the saved scripts' in generate['prompt']
     assert 'Write speakable prose that fits this duration' not in generate['prompt']
@@ -348,6 +354,70 @@ def test_planning_authors_scripts_and_generation_only_references_them():
     assert all(x['material'] != 'speaker_notes_source' for x in steps['analyze_requirements']['outputs'])
     shared = (root / 'workflows/ppt-workflow/scenario/execution.md').read_text()
     assert 'PR/issue/work-log identifiers and evidence citations in notes' in shared
+
+
+@pytest.mark.parametrize('failure', ['model', 'publish'])
+def test_page_prompt_retry_keeps_published_pages_and_resumes_missing_work(monkeypatch, tmp_path, failure):
+    tools = _load_ppt_tools()
+    ctx = SimpleNamespace(params={'launch_user_input': '设计一份三页 PPT'})
+    monkeypatch.setattr(tools, 'require_context', lambda: ctx)
+    monkeypatch.setattr(tools, '_bound_workflow_deck', lambda: tmp_path)
+    monkeypatch.setattr(tools, '_required_output_format', lambda: 'html')
+    monkeypatch.setattr(tools, 'make_cancel_stop_condition', lambda: lambda _: None)
+    timing = tools.ppt_plan_timing(3, json.dumps([{'title': str(n), 'weight': 1} for n in range(1, 4)]))
+    artifacts = {
+        'deck_outline': '## 封面\n介绍\n\n## 机制\n说明因果\n\n## 结论\n总结',
+        'presentation_timing': json.dumps(timing),
+    }
+    monkeypatch.setattr(tools, '_resolve_artifact_text', lambda _, key: (artifacts.get(key), 'text'))
+    visible, notes, requested = {}, {}, []
+    interrupted = True
+
+    def generate(_system, user, **_kwargs):
+        data = json.loads(user)
+        page = data['page']
+        requested.append(page)
+        if page > 1:
+            assert 0 in visible, 'first prompt must be published before the next model call'
+        if page == 2 and interrupted and failure == 'model':
+            return 'malformed response'
+        assert data['shared']['global_style'] == '已确认风格'
+        return json.dumps({
+            'content': f'页面 {page} 的可见正文', 'layout': '标题与证据两列',
+            'assets': '无外部素材', 'speaker_note': f'第 {page} 页口播',
+        })
+
+    def save(**kwargs):
+        if kwargs['key'] == 'speaker_notes_source':
+            notes.update({row['page']: row['text'] for row in json.loads(
+                Path(kwargs['value']).read_text())['pages']})
+        else:
+            index = kwargs['publisher_list_index']
+            if index == 1 and interrupted and failure == 'publish':
+                return {'ok': False, 'value': 'temporary publication error'}
+            visible[index] = kwargs['value']
+        return {'stored': True}
+
+    monkeypatch.setattr(tools, '_agent_llm_call', generate)
+    monkeypatch.setattr(tools, '_save_artifact', save)
+    monkeypatch.setattr(tools, '_ui_slot_order_list', lambda _: list(visible))
+    monkeypatch.setattr(tools, '_selected_slide_outline_items', lambda: list(visible.items()))
+    with pytest.raises(tools.ToolExecutionError, match='Page 2 prompt failed'):
+        tools.ppt_plan_page_prompts('已确认风格', 'html')
+    assert list(visible) == [0]
+    assert not notes
+    assert tools._prepare_deferred_outline(tmp_path)['status'] == 'failed'
+    assert requested == ([1, 2, 2] if failure == 'model' else [1, 2])
+    visible[0] = '保留用户编辑后的第一页'
+    interrupted = False
+    requested.clear()
+    result = tools.ppt_plan_page_prompts('重试时模型改写的风格', 'html')
+    assert requested == ([2, 3] if failure == 'model' else [3])
+    assert result['page_count'] == 3 and result['published_count'] == 2
+    assert visible[0] == '保留用户编辑后的第一页'
+    assert list(visible) == [0, 1, 2]
+    assert all(notes[n].startswith(timing['pages'][n - 1]['notes_prefix']) for n in range(1, 4))
+    assert tools._prepare_deferred_outline(tmp_path) == {'status': 'direct', 'page_count': 3}
 
 
 def test_retime_planning_only_saves_sources_without_touching_output(tmp_path, monkeypatch):

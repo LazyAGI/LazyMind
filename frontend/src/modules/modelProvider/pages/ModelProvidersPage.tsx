@@ -71,6 +71,7 @@ import { getSelectableCapabilities, isModelTypeSupportedByProtocol, normalizeRun
 import { resolveRemoteModelMetadata } from "../remoteModelMetadata";
 import { canDiscoverWithoutApiKey } from "../providerAuthentication";
 import { getProviderConnectionFailureMessage } from "../connectionFailure";
+import { getEmbeddingDeletionWarning } from "../embeddingRecovery";
 import { getProviderDisplayName } from "../providerDisplayNames";
 import { ModelEditorModal, type ModelEditorValues } from "../components/ModelEditorModal";
 import { ModelFeaturesEditor } from "../components/ModelFeaturesEditor";
@@ -1602,13 +1603,10 @@ export default function ModelProviderPage({
         }
         return true;
       } catch (error) {
-        const response = (error as { response?: { status?: number; data?: { code?: number; detail?: unknown; message?: unknown } } })?.response;
-        const detail = String(response?.data?.detail || response?.data?.message || "");
-        const embeddingBlocked = response?.status === 409 &&
-          ([2005039, 2005081, 2005089].includes(response.data?.code ?? -1) || detail.includes("requires confirmation to downgrade") || detail.includes("embedding model is in use"));
-        if (embeddingBlocked) {
-          if (notify) message.warning({ key: "embedding-in-use", content: t("modelProvider.embeddingInUse") });
-          else throw new Error(t("modelProvider.embeddingInUse"));
+        const warning = getEmbeddingDeletionWarning(error, t);
+        if (warning) {
+          if (notify) message.warning({ key: "embedding-in-use", ...warning });
+          else throw new Error(warning.content);
         } else if (notify) message.error(getLocalizedErrorMessage(error));
 
         return false;

@@ -54,9 +54,21 @@ func reconcileDeferredIndexingWithReady(ctx context.Context, isReady func(contex
 	if _, err := parsingEmbeddingGeneration(ctx, db); err != nil {
 		return
 	}
+	// Explicit work must reconcile even after the user lowers the default.
+	// Reconciliation observes completion; it never schedules a manual rebuild.
+	var activeDatasets []string
+	if db.Model(&orm.DocumentProcessingState{}).
+		Where("embedding_version IN ? AND index_artifact_ref LIKE ?", []string{embeddingVersionReembedManual, embeddingVersionRebuildRequired}, "core-task:%").
+		Distinct().Pluck("dataset_id", &activeDatasets).Error == nil {
+		for _, id := range activeDatasets {
+			r, _ := http.NewRequestWithContext(ctx, http.MethodGet, "/internal/index-status", nil)
+			syncProcessingTaskStates(r, id)
+		}
+	}
 	var states []orm.DocumentProcessingState
 	if db.Where("(parse_artifact_ref <> '' OR embedding_version = ?) AND embedding_version <> ? AND index_status <> ?",
 		embeddingVersionReembedPending, embeddingVersionReembedManual, "succeeded").
+		Where("embedding_version <> ?", embeddingVersionRebuildRequired).
 		Order("updated_at ASC").Find(&states).Error != nil {
 		return
 	}

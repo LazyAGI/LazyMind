@@ -2809,7 +2809,7 @@ function useRegisterWriterWriteBack({
     try {
       const currentRevision = getLatestRevision?.() ?? revision;
       const template = initialDelivery && targetProvider === 'wechat'
-        ? 'structured'
+        ? 'editorial_contrast'
         : undefined;
       const response = await WorkflowSessionApi().writeBackWriterDocument(
         sessionId,

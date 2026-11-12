@@ -62,8 +62,9 @@ import requests
 from lazyllm import ThreadPoolExecutor
 from lazyllm.tools.agent import ToolExecutionError
 
+from lazymind.chat.engine.agent_runtime.cancellation import make_cancel_stop_condition
 from lazymind.chat.engine.subagent.context import require_context
-from lazymind.document_tools.artifacts import normalize_generated_markdown
+from lazymind.document_tools.artifacts import _markdown_heading_rows, normalize_generated_markdown
 from lazymind.chat.engine.subagent.tools import (
     _resolve_artifact_text,
     _save_artifact,
@@ -218,7 +219,7 @@ def _is_model_timeout_exception(exc: BaseException) -> bool:
     current: BaseException | None = exc
     while current is not None and id(current) not in seen:
         seen.add(id(current))
-        if isinstance(current, (TimeoutError, requests.exceptions.Timeout)):
+        if isinstance(current, (TimeoutError, _PPTModelTimeoutError, requests.exceptions.Timeout)):
             return True
         if type(current).__name__ in {
             'ConnectTimeout', 'ReadTimeout', 'TimeoutException',
@@ -235,7 +236,8 @@ def _is_model_timeout_exception(exc: BaseException) -> bool:
 
 def _page_result_timed_out(result: dict[str, Any] | None) -> bool:
     payload = (result or {}).get('payload') or {}
-    if payload.get('failure_kind') == 'timeout':
+    if (payload.get('failure_kind') == 'timeout'
+            or (payload.get('diagnostics') or {}).get('code') in {'request_timeout', 'page_deadline_exceeded'}):
         return True
     error = str(payload.get('error') or '').lower()
     return any(marker in error for marker in (
@@ -319,11 +321,14 @@ class _PPTGenerationBudget:
         if page_deadline is not None and now >= page_deadline:
             raise _PPTGenerationLimit('page_deadline_exceeded')
 
-    def admit(self, _request: Any, page_deadline: float) -> None:
+    def check_model_call(self, page_deadline: float | None = None) -> None:
         self.check(page_deadline)
         if self.calls >= self.max_calls:
             self.stopped = 'model_call_budget_exhausted'
             raise _PPTGenerationLimit(self.stopped)
+
+    def admit(self, _request: Any, page_deadline: float) -> None:
+        self.check_model_call(page_deadline)
         self.calls += 1
 
     def record(self, ok: bool, payload: dict) -> None:
@@ -1021,8 +1026,8 @@ def ppt_search_assets(query: str = '', collection: str = '', limit: int = 12) ->
 
     Returns exact collection:icon-name IDs, styles and license metadata.
     Choose one family per diagram: fluent-color/fluent-3d for colorful presentation
-    visuals, lucide/tabler for restrained line art, ph for duotone. Icons explain
-    concepts; they are not evidence images and do not use the material-image quota.
+    visuals, lucide/tabler for restrained line art, ph for duotone. Use icons for
+    small labels or decoration. Reserve main visuals for content or evidence.
     HTML: <img data-ppt-asset="exact-name" alt="label">, resolved automatically.
     Native PPTX: pages[].icons=[{name:"exact-name",box:[x,y,w,h]}] in ppt_fill_template.
     """
@@ -1182,8 +1187,8 @@ def ppt_fill_template(template_file: str, source_sha256: str, edits: list[dict] 
     Optional images: [{material_index: 1, box: [1, 2, 8, 4]}] selects registered
     PDF/KB materials, preserving aspect ratio without cropping labels. Never pass paths.
     Optional icons: [{name: "fluent-3d:clipboard", box: [1, 2, 1, 1]}] selects
-    bundled assets by exact ppt_search_assets names. Up to 8 per page, independent
-    of evidence images; embedded as movable images with original aspect ratio.
+    bundled assets by exact ppt_search_assets names. Use up to 8 small labels or
+    decorations per page. Each side is capped at 0.8 inches with aspect ratio preserved.
     Chart type: column|bar|line|pie|doughnut; box is x/y/width/height in inches.
     Pie/doughnut requires one nonnegative series with a positive total, describing
     mutually exclusive parts of one known whole. Use line for ordered observations
@@ -1235,9 +1240,11 @@ def ppt_fill_template(template_file: str, source_sha256: str, edits: list[dict] 
         pages = _pages_with_saved_notes(pages, notes_ref)
     source, _ = _resolve_template_file(template_file)
     image_assets = _native_image_assets(pages)
+    omitted_icons = []
     if pages is not None and any(page.get('icons') for page in pages):
         pages, image_assets = _presentation_assets().native_pages(
-            pages, image_assets, _conversation_root() / 'presentation_assets')
+            pages, image_assets, _conversation_root() / 'presentation_assets', omitted=omitted_icons,
+        )
     payload = json.dumps([source_sha256, edits, pages, image_assets], ensure_ascii=False, sort_keys=True)
     digest = hashlib.sha256(payload.encode()).hexdigest()
     root = _conversation_root() / 'native_pptx' / f'fill-v3-{digest}'
@@ -1254,6 +1261,7 @@ def ppt_fill_template(template_file: str, source_sha256: str, edits: list[dict] 
     review = _deliver_native_pptx(output, root, 'ppt_fill_template')
     return {'representation': 'native_pptx', **stats, 'visual_review': review,
             'visual_validation': 'rendered_model_review' if review.get('pages') else 'not_performed',
+            'omitted_named_icons': omitted_icons,
             'filename': output.name, 'message': '模板内容已填充并发布为新 PPTX，生成已完成。原文件未修改。'
             '停止调用工具，不需要主 chat 追加检测或 HTML 生成。'}
 
@@ -3331,16 +3339,30 @@ def _format_deck_outline_markdown(outline: dict) -> str:
 
 def _split_text_outline(markdown: str) -> list[str]:
     """Split user-facing Markdown without imposing the internal page schema."""
-    sections = re.split(r'(?m)(?=^##\s+)', markdown.strip())
-    pages = [section.strip() for section in sections if section.startswith('## ')]
-    if not pages or any(not page.split('\n', 1)[0][3:].strip() for page in pages):
+    lines = markdown.splitlines()
+    headings = [(index, title) for index, level, title in _markdown_heading_rows(lines) if level == 2]
+    if not headings or any(not title for _, title in headings):
         raise ValueError('Use one non-empty ## heading per slide in outline_markdown')
-    return pages
+    starts = [index for index, _ in headings]
+    return ['\n'.join(lines[start:end]).strip()
+            for start, end in zip(starts, starts[1:] + [len(lines)])]
 
 
-def _publish_text_outline(deck: Path, markdown: str) -> dict[str, Any]:
+def _publish_text_outline(deck: Path, markdown: str, *, expected_pages: int | None = None) -> dict[str, Any]:
+    # A Markdown fence around the whole outline is a common model wrapper.
+    wrapped = re.fullmatch(
+        r'[ \t]*(?P<fence>`{3,}|~{3,})(?:markdown|md)?[ \t]*\r?\n'
+        r'(?P<body>[\s\S]*?)\r?\n(?P=fence)[ \t]*', markdown, re.IGNORECASE,
+    )
+    if wrapped:
+        markdown = wrapped['body']
     markdown = normalize_generated_markdown(markdown)
     pages = _split_text_outline(markdown)
+    if expected_pages is not None and len(pages) != expected_pages:
+        raise ValueError(
+            f'outline_markdown contains {len(pages)} slide headings; expected {expected_pages}. '
+            'Use one ## heading per slide and ### for subsections.'
+        )
     # Durable source only: internal outline.json is built by generate_ppt.
     (deck / 'outline_draft.md').write_text(markdown, encoding='utf-8')
     saved = _save_artifact(
@@ -3431,7 +3453,7 @@ def _pages_with_saved_notes(pages: list[dict], notes_ref: str = '') -> list[dict
     return [{**page, 'notes': notes[number]} for number, page in enumerate(pages, 1)]
 
 
-def _save_notes_source(deck: Path, notes: dict[int, str]) -> None:
+def _save_notes_source(deck: Path, notes: dict[int, str], *, source_tool: str = 'ppt_publish_outline') -> None:
     payload = json.dumps({'schema_version': 1, 'pages': [
         {'page': n, 'text': notes[n]} for n in sorted(notes)
     ]}, ensure_ascii=False)
@@ -3439,7 +3461,7 @@ def _save_notes_source(deck: Path, notes: dict[int, str]) -> None:
     path = deck / ('speaker-notes-' + hashlib.sha256(payload.encode()).hexdigest()[:16] + '.json')
     path.write_text(payload, encoding='utf-8')
     saved = _save_artifact(key=_SPEAKER_NOTES_SLOT, value=str(path.resolve()), content_type='file',
-                           source_tool='ppt_publish_outline', internal_publish=True)
+                           source_tool=source_tool, internal_publish=True)
     if _tool_failed(saved):
         raise ValueError(_tool_fail_reason(saved) or 'Speaker notes publication failed')
     ctx = require_context()
@@ -3578,6 +3600,8 @@ def _prepare_deferred_outline(deck: Path) -> dict[str, Any]:
         items = _selected_slide_outline_items()
     except Exception as exc:
         return {'status': 'failed', 'reason': f'Cannot read approved page briefs: {exc}'}
+    if (deck / '.page_prompt_progress.json').is_file() and not (deck / 'complete_page_prompts.json').is_file():
+        return {'status': 'failed', 'reason': 'Complete page prompts are missing; resume plan_page_prompts'}
     if not items or any(not brief.strip() for _, brief in items):
         return {'status': 'failed', 'reason': 'Complete page prompts are missing; resume plan_page_prompts'}
     index = {'pages': [
@@ -5033,16 +5057,16 @@ def _batch_page_html_publish_progressive(
         page_deadline = time.monotonic() + budget.page_seconds
         llm_call = partial(_agent_llm_call, _budget=budget, _page_deadline=page_deadline)
         if brief:
-            result = rs._capture_cmd(
-                rs.cmd_page_html_from_brief,
+            result = _capture_page_html(
+                rs, rs.cmd_page_html_from_brief,
                 deck,
                 pno,
                 brief,
                 llm_call=llm_call,
             )
         else:
-            result = rs._capture_cmd(
-                rs.cmd_page_html,
+            result = _capture_page_html(
+                rs, rs.cmd_page_html,
                 deck,
                 pno,
                 llm_call=llm_call,
@@ -5078,7 +5102,7 @@ def _batch_page_html_publish_progressive(
             except Exception as exc:
                 results[pno]['publish_error'] = str(exc)
 
-    def _record_result(fut, pno: int) -> None:
+    def _record_result(fut, pno: int, retry_no: int, elapsed: float) -> None:
         try:
             code, payload = fut.result()
         except Exception as exc:
@@ -5093,17 +5117,31 @@ def _batch_page_html_publish_progressive(
         if not isinstance(payload, dict):
             payload = {'status': 'failed', 'error': 'empty page payload'}
         ok = code == 0 and payload.get('status', 'ok' if code == 0 else 'failed') == 'ok'
+        previous = results.get(pno, {})
         results[pno] = {
             'page': pno,
             'ok': ok,
             'payload': payload,
             'brief_source': 'slide_outline' if pno in briefs else 'outline.json',
         }
+        if retry_no:
+            previous_payload = previous.get('payload') or {}
+            results[pno]['retry'] = retry_no
+            results[pno]['retried_timeout'] = _page_result_timed_out(previous)
+            retry_history.append({
+                'page': pno,
+                'retry': retry_no,
+                'ok': ok,
+                'previous_error': previous_payload.get('error') or 'failed',
+                'previous_diagnostics': previous_payload.get('diagnostics') or {},
+                'error': None if ok else payload.get('error') or 'failed',
+                'diagnostics': payload.get('diagnostics') or {},
+            })
         ready_ok[pno] = ok
         budget.record(ok, payload)
         message = (f'第 {pno} 页生成完成' if ok else
                    f'第 {pno} 页生成失败：{payload.get("error") or "unknown error"}')
-        _ppt_progress(message, 10 + 70 * len(results) // len(page_nos))
+        _ppt_progress(f'{message}（{elapsed:.1f} 秒）', 10 + 70 * len(results) // len(page_nos))
         _flush_ready()
 
     # Old Attempt outputs may have been invalidated while their files survived.
@@ -5115,7 +5153,41 @@ def _batch_page_html_publish_progressive(
             ready_ok[pno] = True
     _flush_ready()
 
+    def _run_with_progress(ex, pno: int, *, retry_no: int = 0) -> None:
+        started_at = time.monotonic()
+        future = ex.submit(_run_one, pno)
+        while True:
+            completed, _ = wait({future}, timeout=15, return_when=FIRST_COMPLETED)
+            if completed:
+                _record_result(future, pno, retry_no, time.monotonic() - started_at)
+                return
+            elapsed = int(time.monotonic() - started_at)
+            _ppt_progress(f'等待页面 [{pno}] 的模型响应，已等待 {elapsed} 秒',
+                          80 if retry_no else 10 + 70 * len(results) // len(page_nos))
+
+    def _can_retry(pno: int) -> bool:
+        result = results[pno]
+        payload = result['payload']
+        # Re-rendering cannot fix a deterministic asset catalog or checksum error.
+        if result['ok'] or result.get('retried_timeout') or payload.get('failure_kind') in {
+            'named_asset_resource', 'named_asset_repair_failed',
+        }:
+            return False
+        code = (payload.get('diagnostics') or {}).get('code')
+        if _page_result_timed_out(result):
+            # A page that timed out gets at most one fresh request sequence, after
+            # every initial page had a chance to run. Leave other timeouts alone.
+            return not result.get('retry') and (
+                code in {'request_timeout', 'page_deadline_exceeded'}
+                or (code is None and payload.get('failure_kind') == 'timeout')
+            )
+        return code in {
+            None, 'transport_error', 'rate_limited', 'concurrency_limited',
+            'provider_overloaded', 'service_unavailable', 'provider_internal_error',
+        }
+
     def _generate_pending() -> None:
+        retry_limit = _coerce_int(os.environ.get('LAZYMIND_PPT_PAGE_RETRIES'), 1, lo=0, hi=3)
         # One worker lets us report live waiting status without overlapping pages.
         with ThreadPoolExecutor(max_workers=1) as ex:
             for pno in page_nos:
@@ -5123,82 +5195,22 @@ def _batch_page_html_publish_progressive(
                     continue
                 _ppt_progress(f'正在生成第 {pno} 页，共 {len(page_nos)} 页',
                               10 + 70 * len(results) // len(page_nos))
-                future = ex.submit(_run_one, pno)
-                started_at = time.monotonic()
-                while True:
-                    completed, _ = wait({future}, timeout=15, return_when=FIRST_COMPLETED)
-                    if completed:
-                        _record_result(future, pno)
-                        break
-                    elapsed = int(time.monotonic() - started_at)
-                    _ppt_progress(f'等待页面 [{pno}] 的模型响应，已等待 {elapsed} 秒',
-                                  10 + 70 * len(results) // len(page_nos))
+                _run_with_progress(ex, pno)
 
-        # A page generation request can fail transiently (most commonly an
-        # upstream 502/503/504) while its neighbours succeed.  Retry only the
-        # failed pages, sequentially, so successful pages are never regenerated
-        # and the provider is not hit with another burst.  The default is one
-        # retry; deployments can tune 0..3 with LAZYMIND_PPT_PAGE_RETRIES.
-        retry_limit = _coerce_int(
-            os.environ.get('LAZYMIND_PPT_PAGE_RETRIES'), 1, lo=0, hi=3,
-        )
-        for retry_no in range(1, retry_limit + 1):
-            # A timed-out page has already spent the full inactivity window in
-            # the provider call. Retrying it serially can block the workflow
-            # for several more minutes without adding useful information.
-            pending = [
-                pno for pno in page_nos
-                if not ready_ok.get(pno, False)
-                and not _page_result_timed_out(results.get(pno))
-                and ((results.get(pno, {}).get('payload') or {}).get('diagnostics') or {}).get('code') in {
-                    None, 'transport_error', 'rate_limited', 'concurrency_limited',
-                    'provider_overloaded', 'service_unavailable', 'provider_internal_error',
-                }
-            ]
-            if not pending or budget.stopped:
-                break
-            time.sleep(min(2 ** (retry_no - 1), 4))
-            for pno in pending:
-                _ppt_progress(f'第 {pno} 页正在重试（{retry_no}/{retry_limit}）', 80)
-                previous = results.get(pno, {})
-                previous_payload = previous.get('payload') or {}
+            # Prioritize first attempts. Recover only failed pages, using the same
+            # shared deadline, request cap, and cancellation checks as the first pass.
+            for retry_no in range(1, retry_limit + 1):
+                pending = [pno for pno in page_nos if _can_retry(pno)]
+                if not pending or budget.stopped:
+                    break
                 try:
-                    code, payload = _run_one(pno)
-                except Exception as exc:
-                    code, payload = 1, {
-                        'status': 'failed',
-                        'error': str(exc),
-                        'diagnostics': _model_failure_details(exc),
-                        'failure_kind': (
-                            'timeout' if _is_model_timeout_exception(exc) else 'error'
-                        ),
-                    }
-                if not isinstance(payload, dict):
-                    payload = {'status': 'failed', 'error': 'empty page payload'}
-                ok = code == 0 and payload.get(
-                    'status', 'ok' if code == 0 else 'failed',
-                ) == 'ok'
-                retry_history.append({
-                    'page': pno,
-                    'retry': retry_no,
-                    'ok': ok,
-                    'previous_error': previous_payload.get('error') or 'failed',
-                    'error': None if ok else payload.get('error') or 'failed',
-                    'diagnostics': payload.get('diagnostics') or {},
-                })
-                results[pno] = {
-                    'page': pno,
-                    'ok': ok,
-                    'payload': payload,
-                    'brief_source': (
-                        'slide_outline' if pno in briefs else 'outline.json'
-                    ),
-                    'retry': retry_no,
-                }
-                ready_ok[pno] = ok
-                budget.record(ok, payload)
-                _flush_ready()
-                if budget.stopped:
+                    budget.check_model_call()
+                    time.sleep(min(2 ** (retry_no - 1), 4))
+                    for pno in pending:
+                        budget.check_model_call()
+                        _ppt_progress(f'第 {pno} 页正在重试（{retry_no}/{retry_limit}）', 80)
+                        _run_with_progress(ex, pno, retry_no=retry_no)
+                except _PPTGenerationLimit:
                     break
 
         # Artifact-save retries never invoke the model or block other pages.
@@ -5469,8 +5481,8 @@ def _run_stage_inprocess(
             brief = briefs.get(page)
             input_hash = _page_generation_input_hash(deck, brief)
             if brief:
-                code, payload = rs._capture_cmd(
-                    rs.cmd_page_html_from_brief,
+                code, payload = _capture_page_html(
+                    rs, rs.cmd_page_html_from_brief,
                     deck,
                     page,
                     brief,
@@ -5478,8 +5490,8 @@ def _run_stage_inprocess(
                     edit_instruction=edit_instruction,
                 )
             else:
-                code, payload = rs._capture_cmd(
-                    rs.cmd_page_html,
+                code, payload = _capture_page_html(
+                    rs, rs.cmd_page_html,
                     deck,
                     page,
                     llm_call=_agent_llm_call,
@@ -6734,6 +6746,23 @@ def _checkpoint_ppt_backgrounds(
     os.replace(tmp, manifest_path)
 
 
+def _generate_background_with_retry(kwargs: dict[str, Any]) -> dict:
+    try:
+        return image_generator(**kwargs)
+    except Exception as exc:
+        # LazyLLM can wrap the HTTP exception and retain only its message.
+        status = getattr(getattr(exc, 'response', None), 'status_code', None)
+        if status != 429 and not re.search(r'\b429\s+(?:Client Error|Too Many Requests)\b', str(exc)):
+            raise
+        _LOG.info('PPT background image provider returned HTTP 429, retrying in 30 seconds')
+    check_cancelled = make_cancel_stop_condition()
+    for _ in range(30):
+        check_cancelled(None)
+        time.sleep(1)
+    check_cancelled(None)
+    return image_generator(**kwargs)
+
+
 def ppt_generate_background_images(
     deck_dir: Optional[str] = None,
     prompts_json: Union[str, list, None] = None,
@@ -6849,23 +6878,7 @@ def ppt_generate_background_images(
             'ppt_generate_background_images',
             f'approved prompts are missing selected pages: {missing_prompts}',
         )
-    output: dict[int, dict[str, Any]] = dict(existing)
-    publish_items: list[dict[str, Any]] = []
-    generated_count = 0
-    reused_count = 0
-
-    for page in pages:
-        page_no = _coerce_int(page.get('page_no'), 0, lo=0)
-        if page_no <= 0 or page_no not in targets:
-            continue
-        old = existing.get(page_no) or {}
-        old_path = deck / _coerce_str(old.get('local_path'))
-        if not force and old_path.is_file():
-            output[page_no] = old
-            publish_items.append(old)
-            reused_count += 1
-            continue
-
+    def generate_page(page_no: int, page: dict[str, Any]) -> dict[str, Any]:
         kwargs: dict[str, Any] = {
             'prompt': prompt_map.get(page_no) or _background_prompt(page, style),
             'batch_size': 1,
@@ -6873,7 +6886,7 @@ def ppt_generate_background_images(
         if size:
             kwargs['image_size'] = size
         try:
-            result = image_generator(**kwargs)
+            result = _generate_background_with_retry(kwargs)
         except Exception as exc:
             return _tool_error(
                 'ppt_generate_background_images',
@@ -6913,7 +6926,7 @@ def ppt_generate_background_images(
                 f'page {page_no} background could not be normalized to 16:9: {exc}',
                 meta={'deck_dir': str(deck), 'page': page_no},
             )
-        item = {
+        return {
             'page_no': page_no,
             'local_path': relative,
             'source_path': str(src.resolve()),
@@ -6928,37 +6941,35 @@ def ppt_generate_background_images(
                 'aspect': '16:9',
             },
         }
-        output[page_no] = item
-        publish_items.append(item)
-        generated_count += 1
 
-        # Image providers can take minutes to report a transport timeout.  Save
-        # each successful page immediately so the next attempt only generates
-        # the missing pages instead of starting the whole deck again.
-        _checkpoint_ppt_backgrounds(manifest_path, output)
-
-    _checkpoint_ppt_backgrounds(manifest_path, output)
-    ordered_output = [output[page_no] for page_no in sorted(output)]
-
-    # A targeted recovery may start at page 2 or later while the UI list is
-    # still empty because the previous attempt failed before publication.
-    # Backfill completed predecessors first to preserve the ordered slot.
-    publish_map = {
-        int(item['page_no']): item for item in publish_items
-    }
-    if targets and not insertion:
-        for page_no in range(1, max(targets) + 1):
-            item = output.get(page_no)
-            local_path = deck / _coerce_str((item or {}).get('local_path'))
-            if item and local_path.is_file():
-                publish_map.setdefault(page_no, item)
-    publish_items = [publish_map[page_no] for page_no in sorted(publish_map)]
-
+    output: dict[int, dict[str, Any]] = dict(existing)
+    generated_count = 0
+    reused_count = 0
     published = 0
     publication_errors: list[str] = []
     order_list = _ui_slot_order_list('background_images')
-    for item in publish_items:
-        page_no = int(item['page_no'])
+    target_pages = {page_no for page_no in targets if page_no > 0}
+    # Older attempts may have saved predecessors without publishing them.
+    unpublished_predecessors = {
+        page_no for page_no in existing if len(order_list) < page_no < max(targets)
+    } if not insertion else set()
+    pages_by_no = dict(zip(outline_page_nos, pages))
+
+    for page_no in sorted(target_pages | unpublished_predecessors):
+        old = existing.get(page_no) or {}
+        old_path = deck / _coerce_str(old.get('local_path'))
+        selected = page_no in target_pages
+        if not selected and not old_path.is_file():
+            continue
+
+        if not selected or (not force and old_path.is_file()):
+            item = old
+            reused_count += int(selected)
+        else:
+            item = generate_page(page_no, pages_by_no[page_no])
+            output[page_no] = item
+            generated_count += 1
+            _checkpoint_ppt_backgrounds(manifest_path, output)
         try:
             saved = _publish_ordered_ppt_artifact(
                 slot='background_images',
@@ -6972,14 +6983,13 @@ def ppt_generate_background_images(
                 expected_total=len(outline_page_nos),
             )
             if _tool_failed(saved):
-                publication_errors.append(
-                    f'page {page_no}: {_tool_fail_reason(saved) or "publish failed"}',
-                )
+                publication_errors.append(f'page {page_no}: {_tool_fail_reason(saved) or "publish failed"}')
             else:
                 published += 1
         except Exception as exc:
             publication_errors.append(f'page {page_no}: {exc}')
 
+    ordered_output = [output[page_no] for page_no in sorted(output)]
     if publication_errors:
         return _tool_error(
             'ppt_generate_background_images',
@@ -7448,6 +7458,47 @@ def ppt_init_deck(
     })
 
 
+def _deck_reference_images(deck: Path) -> list[dict[str, Any]]:
+    reference_images: list[dict[str, Any]] = []
+    try:
+        info_pack = json.loads((deck / 'info_pack.json').read_text(encoding='utf-8'))
+        user_assets = info_pack.get('user_assets') or {}
+        captions = user_assets.get('reference_image_captions') or {}
+        for index, entry in enumerate(user_assets.get('reference_images') or []):
+            if isinstance(entry, dict):
+                path = _coerce_str(entry.get('path') or entry.get('local_path'))
+                caption = _coerce_str(entry.get('caption') or entry.get('alt'))
+            else:
+                path = _coerce_str(entry)
+                caption = ''
+            if not path:
+                continue
+            reference_images.append({
+                'reference_image_index': index,
+                'basename': Path(path).name,
+                'caption': caption or _coerce_str(captions.get(path)) or None,
+            })
+    except (FileNotFoundError, json.JSONDecodeError, AttributeError):
+        reference_images = []
+    return reference_images
+
+
+def _deck_background_pages(deck: Path) -> list[int]:
+    background_pages: list[int] = []
+    try:
+        backgrounds = json.loads(
+            (deck / 'background_images.json').read_text(encoding='utf-8'),
+        )
+        background_pages = sorted({
+            _coerce_int(item.get('page_no'), 0, lo=0)
+            for item in (backgrounds.get('pages') or [])
+            if isinstance(item, dict) and _coerce_int(item.get('page_no'), 0, lo=0) > 0
+        })
+    except (FileNotFoundError, json.JSONDecodeError, AttributeError):
+        background_pages = []
+    return background_pages
+
+
 def ppt_find_deck() -> dict:
     """Find the newest deck of this conversation, including earlier step tasks.
 
@@ -7492,40 +7543,9 @@ def ppt_find_deck() -> dict:
         deck_id = str(pack.get('deck_id') or deck_id)
     except Exception:
         pass
-    reference_images: list[dict[str, Any]] = []
-    try:
-        info_pack = json.loads((deck / 'info_pack.json').read_text(encoding='utf-8'))
-        user_assets = info_pack.get('user_assets') or {}
-        captions = user_assets.get('reference_image_captions') or {}
-        for index, entry in enumerate(user_assets.get('reference_images') or []):
-            if isinstance(entry, dict):
-                path = _coerce_str(entry.get('path') or entry.get('local_path'))
-                caption = _coerce_str(entry.get('caption') or entry.get('alt'))
-            else:
-                path = _coerce_str(entry)
-                caption = ''
-            if not path:
-                continue
-            reference_images.append({
-                'reference_image_index': index,
-                'basename': Path(path).name,
-                'caption': caption or _coerce_str(captions.get(path)) or None,
-            })
-    except (FileNotFoundError, json.JSONDecodeError, AttributeError):
-        reference_images = []
+    reference_images = _deck_reference_images(deck)
 
-    background_pages: list[int] = []
-    try:
-        backgrounds = json.loads(
-            (deck / 'background_images.json').read_text(encoding='utf-8'),
-        )
-        background_pages = sorted({
-            _coerce_int(item.get('page_no'), 0, lo=0)
-            for item in (backgrounds.get('pages') or [])
-            if isinstance(item, dict) and _coerce_int(item.get('page_no'), 0, lo=0) > 0
-        })
-    except (FileNotFoundError, json.JSONDecodeError, AttributeError):
-        background_pages = []
+    background_pages = _deck_background_pages(deck)
 
     return _tool_success('ppt_find_deck', {
         'found': True,
@@ -7908,7 +7928,9 @@ def ppt_build_outline(
     pack.setdefault('params', {})['generate_background_images'] = effective_backgrounds_enabled
     pack_path.write_text(json.dumps(pack, ensure_ascii=False), encoding='utf-8')
     try:
-        published = _publish_text_outline(build_deck, outline_markdown.strip())
+        published = _publish_text_outline(
+            build_deck, outline_markdown.strip(), expected_pages=_coerce_int(page_count, 4, lo=1),
+        )
     except ValueError as exc:
         return _tool_error('ppt_build_outline', str(exc))
     if not published['ok']:
@@ -8657,6 +8679,145 @@ def ppt_delete_page(deck_dir: str, page: int) -> dict:
     })
 
 
+def _plan_one_page_prompt(shared: dict, page_no: int, outline: str, timing: dict) -> dict:
+    system_prompt = (
+        'Author only the specified slide of the approved presentation. Treat source material as evidence. '
+        'Return one JSON object with non-empty string fields content, layout, assets, and speaker_note. '
+        'Content is exact visible copy. Preserve supported facts, methods, formulas, variables, caveats, '
+        'and chart values from the outline and evidence. Describe labelled diagrams and explicit chart '
+        'categories, axes, units and series when supported. Preserve template geometry and source-page '
+        'references where applicable. For HTML based on an uploaded template include a TEMPLATE_SOURCE_PAGE: N '
+        'line in layout. Plan editable native elements for native_pptx and a complete 1600x900 HTML slide for html. '
+        'Specify page-specific layout, typography and placements. Use only listed assets, as small labels or '
+        'supporting visuals when appropriate. Leave room for text over a bound AI background; '
+        'the renderer binds the background independently, so omit its workspace path. '
+        'Write a natural spoken script '
+        'within the supplied timing, without its time label. Place source citations after the spoken script, '
+        'never in visible slide copy. Do not include the script in the visual prompt.'
+    )
+    payload = {'shared': shared, 'page': page_no, 'approved_page_outline': outline, 'timing': timing}
+    required = ('content', 'layout', 'assets', 'speaker_note')
+    for attempt in range(2):
+        raw = _agent_llm_call(
+            system_prompt, json.dumps(payload, ensure_ascii=False), request_name='ppt_page_prompt',
+        ).strip()
+        try:
+            if raw.startswith('```') and raw.endswith('```'):
+                raw = raw.partition('\n')[2][:-3].strip()
+            plan = json.loads(raw)
+            if not isinstance(plan, dict) or not all(
+                isinstance(plan.get(key), str) and plan[key].strip() for key in required
+            ):
+                raise ValueError('content, layout, assets and speaker_note must all contain text')
+            prefix = _coerce_str(timing.get('notes_prefix'))
+            note = plan['speaker_note'].strip()
+            note = note.removeprefix(prefix).strip() if prefix else note
+            if not note:
+                raise ValueError('speaker_note must contain a spoken script')
+            if re.sub(r'\s+', '', plan['content']) == re.sub(r'\s+', '', outline):
+                raise ValueError('content must expand the approved outline into presentation-ready copy')
+            brief = _compose_page_prompt(shared['global_style'], plan['content'], plan['layout'], plan['assets'])
+            if note in brief:
+                raise ValueError('speaker_note must be separate from the visual prompt')
+            _validate_prompt_output_format(shared['output_format'], [brief])
+            return {'brief': brief, 'note': prefix + note, 'published': False}
+        except (ValueError, ToolExecutionError) as exc:
+            if attempt:
+                raise
+            payload['repair'] = str(exc)
+
+
+def ppt_plan_page_prompts(global_style: str, output_format: str = 'auto') -> dict:
+    """Author and publish one editable slide prompt at a time for a new deck or retry.
+
+    Args:
+        global_style: Shared audience, language, typography, colors and output rules.
+            A resumed plan retains the shared style already used by completed pages.
+        output_format: The saved html or native_pptx format.
+    """
+    deck = _bound_workflow_deck()
+    if deck is None:
+        raise ToolExecutionError('No deck is bound to this workflow. Resume build_outline once.')
+    if not _coerce_str(global_style):
+        raise ToolExecutionError('A non-empty global_style is required')
+    output_format = _validate_prompt_output_format(output_format, [global_style])
+    ctx = require_context()
+    outline, _ = _resolve_artifact_text(ctx, 'deck_outline')
+    pages = _split_text_outline(outline or '')
+    evidence = {
+        key: _resolve_artifact_text(ctx, key)[0] for key in (
+            'requirement_analysis', 'material_summary', 'material_clarification',
+            'template_mode', 'template_content_brief', 'reflection_markdown', 'presentation_timing',
+        )
+    }
+    timings = (json.loads(evidence['presentation_timing']).get('pages', [])
+               if evidence['presentation_timing'] else [])
+    _load_sn_ppt_modules()
+    from material_images import record_material_aliases
+
+    workspace = getattr(ctx, 'workspace_path', '')
+    record_material_aliases(deck, [], Path(workspace) / 'inputs' / 'material_images' if workspace else None)
+    assets = _deck_reference_images(deck)
+    shared = {'output_format': output_format, 'evidence': evidence, 'reference_images': assets,
+              'page_count': len(pages), 'background_pages': _deck_background_pages(deck),
+              'launch_request': (ctx.params or {}).get('launch_user_input', '')}
+    fingerprint = hashlib.sha256(json.dumps([pages, shared], ensure_ascii=False, sort_keys=True).encode()).hexdigest()
+    progress_path = deck / '.page_prompt_progress.json'
+    complete_path = deck / 'complete_page_prompts.json'
+    try:
+        checkpoint = json.loads(progress_path.read_text(encoding='utf-8'))
+    except (OSError, ValueError):
+        checkpoint = {}
+    if not isinstance(checkpoint, dict) or checkpoint.get('inputs') != fingerprint:
+        complete_path.unlink(missing_ok=True)
+        checkpoint = {'inputs': fingerprint, 'global_style': global_style, 'pages': {}}
+        _write_json_atomic(progress_path, checkpoint)
+
+    shared['global_style'] = checkpoint['global_style']
+    saved = checkpoint['pages']
+    order = _ui_slot_order_list('slide_outline')
+    existing = {index for index, brief in _selected_slide_outline_items() if brief} if saved else set()
+    check_cancelled = make_cancel_stop_condition()
+    generated = published = 0
+    for page_no, page in enumerate(pages, 1):
+        check_cancelled(None)
+        key = str(page_no)
+        try:
+            if key not in saved:
+                timing = timings[page_no - 1] if page_no <= len(timings) else {}
+                saved[key] = _plan_one_page_prompt(shared, page_no, page, timing)
+                _write_json_atomic(progress_path, checkpoint)
+                generated += 1
+            item = saved[key]
+            if item['published'] and page_no <= len(order) and order[page_no - 1] in existing:
+                continue
+            check_cancelled(None)
+            result = _publish_ordered_ppt_artifact(
+                slot='slide_outline', page_no=page_no, value=item['brief'],
+                content_type='text', source_tool='ppt_plan_page_prompts',
+                caption=page.splitlines()[0].lstrip('# ').strip(), order_list=order,
+                expected_total=len(pages),
+            )
+            if _tool_failed(result):
+                raise ValueError(_tool_fail_reason(result) or 'Page prompt publication failed')
+            item['published'] = True
+            _write_json_atomic(progress_path, checkpoint)
+            published += 1
+        except Exception as exc:
+            raise ToolExecutionError(f'Page {page_no} prompt failed: {exc}') from exc
+
+    for position in range(len(order), len(pages), -1):
+        if _tool_failed(_delete_ui_slot_item('slide_outline', position)):
+            raise ToolExecutionError(f'Cannot remove stale page prompt at position {position}')
+    _save_notes_source(
+        deck, {n: saved[str(n)]['note'] for n in range(1, len(pages) + 1)},
+        source_tool='ppt_plan_page_prompts',
+    )
+    _write_json_atomic(complete_path, {'version': 1, 'mode': 'direct'})
+    return {'page_count': len(pages), 'generated_count': generated, 'published_count': published,
+            'notes_ref': _SPEAKER_NOTES_SLOT, 'output_format': output_format}
+
+
 def ppt_publish_outline(
     deck_dir: Optional[str] = None,
     pages: Optional[Union[str, list, int]] = None,
@@ -8816,11 +8977,72 @@ def ppt_publish_pages(
     return _tool_success('ppt_publish_pages', result)
 
 
-def _upsert_font_override(html: str, target_font: str, text_scope: str) -> str:
-    # Modify existing text elements, including nested spans with explicit fonts.
-    # No content generation, theme rewrite, geometry or other-page changes.
+_FONT_SCOPES = ('all', 'titles', 'body')
+_FONT_OVERRIDES_META = re.compile(
+    r'<meta name="lazymind-font-overrides" content="([^"]*)">', re.IGNORECASE,
+)
+
+
+def _font_overrides(value: Any) -> dict[str, str]:
+    if not isinstance(value, dict):
+        return {}
+    return {scope: value[scope] for scope in _FONT_SCOPES
+            if isinstance(value.get(scope), str) and value[scope].strip()}
+
+
+def _read_page_font_overrides(html: str) -> dict[str, str]:
+    match = _FONT_OVERRIDES_META.search(html)
+    if not match:
+        return {}
+    try:
+        return _font_overrides(json.loads(_html_unescape(match[1])))
+    except ValueError:
+        return {}
+
+
+def _updated_font_overrides(previous: dict[str, str], scope: str, family: str) -> dict[str, str]:
+    return {'all': family} if scope == 'all' else {**previous, scope: family}
+
+
+def _store_page_font_overrides(html: str, choices: dict[str, str]) -> str:
+    html = _FONT_OVERRIDES_META.sub('', html)
+    meta = '<meta name="lazymind-font-overrides" content="' + _html_escape(
+        json.dumps(choices, ensure_ascii=False), quote=True,
+    ) + '">'
+    return re.sub(r'</head\s*>', lambda match: meta + match[0], html, count=1, flags=re.I)
+
+
+def _upsert_font_override(html: str, target_font: str, text_scope: str, *, allow_empty: bool = False) -> str:
     return _apply_html_text_format(
-        html, {'font-family': json.dumps(target_font, ensure_ascii=False)}, text_scope)
+        html, {'font-family': json.dumps(target_font, ensure_ascii=False)}, text_scope, allow_empty=allow_empty,
+    )
+
+
+def _capture_page_html(runtime, command, deck: Path, page: int, *args, **kwargs) -> tuple[int, dict]:
+    """Reapply explicit font replacements to the rendered page before publication."""
+    path = _page_html_path(deck, page)
+    previous = path.read_text(encoding='utf-8') if path.is_file() else None
+    choices = _read_page_font_overrides(previous or '') or _font_overrides(
+        _read_style_spec(deck).get('font_overrides'),
+    )
+    code, payload = runtime._capture_cmd(command, deck, page, *args, **kwargs)
+    if not choices or code or not isinstance(payload, dict) or payload.get('status') != 'ok':
+        return code, payload
+
+    try:
+        html = path.read_text(encoding='utf-8')
+        for scope, font in choices.items():
+            html = _upsert_font_override(html, font, scope, allow_empty=True)
+        html = _package_edited_html_fonts(html, choices.values())
+        path.write_text(_store_page_font_overrides(html, choices), encoding='utf-8')
+    except (OSError, ValueError) as exc:
+        if previous is None:
+            path.unlink(missing_ok=True)
+        else:
+            path.write_text(previous, encoding='utf-8')
+        return 1, {'status': 'failed', 'error': f'Cannot preserve slide {page} fonts: {exc}',
+                   'diagnostics': {'code': 'font_override_failed'}}
+    return code, payload
 
 
 def ppt_import_font(filename: str) -> dict:
@@ -8932,6 +9154,8 @@ def ppt_replace_deck_fonts(
                 updated = _apply_html_text_format(updated, _format_css(formatting), scope)
             if target:
                 updated = _package_edited_html_fonts(updated, [target], {target: font_records})
+                choices = _updated_font_overrides(_read_page_font_overrides(html), scope, target)
+                updated = _store_page_font_overrides(updated, choices)
             prepared[page] = updated
         # Validate every selected page and font before touching any page on disk.
         for page, updated in prepared.items():
@@ -8942,6 +9166,9 @@ def ppt_replace_deck_fonts(
         style_updated = page_list is None and target is not None
         if style_updated:
             style = _read_style_spec(deck)
+            style['font_overrides'] = _updated_font_overrides(
+                _font_overrides(style.get('font_overrides')), scope, target,
+            )
             typography = style.setdefault('typography', {})
             if not isinstance(typography, dict):
                 typography = {}
@@ -8998,7 +9225,7 @@ def _package_edited_html_fonts(html, families, prepared=None):
     return html
 
 
-def _apply_html_text_format(html: str, styles: dict, scope: str) -> str:
+def _apply_html_text_format(html: str, styles: dict, scope: str, *, allow_empty: bool = False) -> str:
     tree = _HtmlTree(html)
     def is_title(node):
         attrs = node['attrs']
@@ -9027,7 +9254,7 @@ def _apply_html_text_format(html: str, styles: dict, scope: str) -> str:
             if not in_title and not contains_title and tree.node_text(i).strip():
                 targets.append(i)
     roots = [i for i in targets if not any(tree.nodes[j]['start'] < tree.nodes[i]['start'] < tree.nodes[j]['end'] for j in targets)]
-    if not roots:
+    if not roots and not allow_empty:
         raise ValueError('No text targets found for requested scope; inspect the page and select exact elements')
     for i in sorted(roots, key=lambda i: tree.nodes[i]['start'], reverse=True):
         html = _set_inline_styles(html, tree.nodes[i], styles)

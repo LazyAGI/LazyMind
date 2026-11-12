@@ -145,6 +145,9 @@ func TestLegacyQueuedPaperImportSkipsUnboundedParsing(t *testing.T) {
 	db.Model(&orm.Dataset{}).Where("id=?", ds.ID).Update("tenant_id", "company")
 	previous := http.DefaultTransport
 	http.DefaultTransport = roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		if r.URL.Path == "/internal/documents:prepare" {
+			return nil, fmt.Errorf("native parser test boundary")
+		}
 		if r.URL.Path == "/api/authservice/user/owner/identity/internal" {
 			return testJSONResponse(200, `{"sub":"owner","tenant_id":"company","role":"user"}`), nil
 		}
@@ -169,7 +172,7 @@ func TestLegacyQueuedPaperImportSkipsUnboundedParsing(t *testing.T) {
 	// chat preparation. It must still enter the parser path, not be skipped.
 	payload.Level = ProcessingLevelParsed
 	result, err = runPaperProcessing(t.Context(), asyncjob.Job{ID: "explicit-parse", CreateUserID: "owner", PayloadJSON: mustJSON(payload)}, nil)
-	if err == nil || !strings.Contains(err.Error(), "知识库组件") || strings.Contains(string(result.ResultJSON), "not_requested") {
+	if err == nil || !strings.Contains(err.Error(), "native parser test boundary") || strings.Contains(string(result.ResultJSON), "not_requested") {
 		t.Fatalf("explicit parse was skipped: %+v %v", result, err)
 	}
 }
@@ -248,6 +251,9 @@ func TestQueuedPaperPreparationRevalidatesReadPermissionAndClearsFailure(t *test
 			}
 			previous := http.DefaultTransport
 			http.DefaultTransport = roundTripFunc(func(req *http.Request) (*http.Response, error) {
+				if req.URL.Path == "/internal/documents:prepare" {
+					return nil, fmt.Errorf("native parser test boundary")
+				}
 				if req.URL.Path == "/api/authservice/user/reader/identity/internal" {
 					return testJSONResponse(200, `{"sub":"reader","tenant_id":"default","role":"user"}`), nil
 				}
@@ -269,7 +275,7 @@ func TestQueuedPaperPreparationRevalidatesReadPermissionAndClearsFailure(t *test
 			if revoked && !strings.Contains(err.Error(), "权限") {
 				t.Fatalf("revoked read reached parser: %v", err)
 			}
-			if !revoked && !strings.Contains(err.Error(), "知识库组件") {
+			if !revoked && !strings.Contains(err.Error(), "native parser test boundary") {
 				t.Fatalf("read-only collaborator blocked before parser: %v", err)
 			}
 			var saved orm.Task

@@ -16,10 +16,10 @@ func TestPythonComponentsLegacyAndDeferredProcessPlans(t *testing.T) {
 	cfg := RuntimeConfig{Algorithm: AlgorithmConfig{RAGDisabled: true}}
 	cfg.ModeProfile.VectorStore.ManagedProcess = false
 	plan := buildRuntimeProcessPlan(cfg)
-	if !plan.includes(chatProcessName) || !plan.includes(coreProcessName) {
+	if !plan.includes(chatProcessName) || !plan.includes(coreProcessName) || !plan.includes(scanControlPlaneProcessName) || !plan.includes(fileWatcherProcessName) {
 		t.Fatal("base services missing")
 	}
-	for _, name := range []string{scanControlPlaneProcessName, fileWatcherProcessName, milvusLiteProcessName, processorWorkerProcessName, algoProcessName, docServerProcessName} {
+	for _, name := range []string{milvusLiteProcessName, processorWorkerProcessName, algoProcessName, docServerProcessName} {
 		if plan.includes(name) {
 			t.Fatalf("started optional service %s", name)
 		}
@@ -120,7 +120,7 @@ func TestPythonClusterComponentActivatesIndependentlyOfRAG(t *testing.T) {
 	if len(runner.calls) != 1 {
 		t.Fatal("missing clustering must be prepared at Desktop startup")
 	}
-	if !slices.Contains(coreServiceEnv(cfg, paths), "LAZYMIND_CLUSTER_ENABLED=0") ||
+	if !slices.Contains(mustCoreServiceEnv(t, cfg, paths), "LAZYMIND_CLUSTER_ENABLED=0") ||
 		!slices.Contains(algorithmServiceEnv(cfg, paths, chatProcessName), "LAZYMIND_CLUSTER_ENABLED=0") {
 		t.Fatal("Core and Chat must both gate an uninstalled clustering component")
 	}
@@ -143,7 +143,7 @@ func TestPythonClusterComponentActivatesIndependentlyOfRAG(t *testing.T) {
 	if len(runner.calls) != 1 {
 		t.Fatal("installed clustering must be reused on restart")
 	}
-	for service, env := range map[string][]string{"Core": coreServiceEnv(cfg, paths), "Chat": algorithmServiceEnv(cfg, paths, chatProcessName)} {
+	for service, env := range map[string][]string{"Core": mustCoreServiceEnv(t, cfg, paths), "Chat": algorithmServiceEnv(cfg, paths, chatProcessName)} {
 		if !slices.Contains(env, "LAZYMIND_CLUSTER_ENABLED=1") || !slices.Contains(env, "LAZYMIND_RAG_ENABLED=0") ||
 			!slices.Contains(env, "LAZYMIND_PYTHON_COMPONENT_PATHS="+site) {
 			t.Fatalf("%s did not activate clustering independently of RAG", service)
@@ -170,12 +170,12 @@ func TestLocalRAGFlagDisablesKnowledgeProcessesAndEnvironment(t *testing.T) {
 		t.Fatal("managed vector store remained enabled")
 	}
 	plan := buildRuntimeProcessPlan(cfg)
-	for _, name := range []string{scanControlPlaneProcessName, fileWatcherProcessName, milvusLiteProcessName, processorServerProcessName, processorWorkerProcessName, algoProcessName, docServerProcessName} {
+	for _, name := range []string{milvusLiteProcessName, processorServerProcessName, processorWorkerProcessName, algoProcessName, docServerProcessName} {
 		if plan.includes(name) {
 			t.Fatalf("started disabled RAG service %s", name)
 		}
 	}
-	if !plan.includes(chatProcessName) || !plan.includes(coreProcessName) {
+	if !plan.includes(chatProcessName) || !plan.includes(coreProcessName) || !plan.includes(scanControlPlaneProcessName) || !plan.includes(fileWatcherProcessName) {
 		t.Fatal("disabled RAG removed a base chat service")
 	}
 	if env := strings.Join(pythonComponentEnvironment(paths, cfg.Algorithm.RAGDisabled), "\n"); !strings.Contains(env, ragEnabledEnvVar+"=0") {

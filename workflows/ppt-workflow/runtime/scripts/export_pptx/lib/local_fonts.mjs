@@ -2,6 +2,7 @@ import { readdir, readFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import path from 'node:path';
 import os from 'node:os';
+import { pathToFileURL } from 'node:url';
 import { portableFontFaces } from './font_embedding.mjs';
 
 // TODO: use cloud object storage + local cache here later; preserve hash IDs.
@@ -92,7 +93,14 @@ export async function loadManagedFontResources(page) {
   }, prepared);
 }
 
-export async function localFontCss(html) {
+function fontFaceRule(face, family, useFileUrls) {
+  const source = useFileUrls
+    ? pathToFileURL(path.join(fontLibraryRoot(), face.file)).href
+    : `data:font/ttf;base64,${face.data.toString('base64')}`;
+  return `@font-face{font-family:${JSON.stringify(family).replaceAll('<', '\\3c ')};font-weight:${face.weight};font-style:${face.style};src:url(${JSON.stringify(source)})}`;
+}
+
+export async function localFontCss(html, { useFileUrls = false } = {}) {
   const packagedFamilies = new Set();
   const packaged = new Set([...html.matchAll(/\/\*lazymind-font:([A-Za-z0-9+/=]+)\*\//g)].flatMap(([, token]) => {
     try {
@@ -126,16 +134,14 @@ export async function localFontCss(html) {
     if (selected.has(key)) return false;
     selected.add(key);
     return true;
-  }).map(face =>
-    `@font-face{font-family:${JSON.stringify(face.family).replaceAll('<', '\\3c ')};font-weight:${face.weight};font-style:${face.style};src:url(data:font/ttf;base64,${face.data.toString('base64')})}`,
-  ).join('\n');
+  }).map(face => fontFaceRule(face, face.family, useFileUrls)).join('\n');
 }
 
 /** Substitute only unavailable CJK families with the managed, embeddable font.
  * Install before DOM measurement so geometry and embedded font bytes agree.
  * Never alias a font that is already installed or supplied by the document.
  */
-export async function installMissingFontFallbacks(page) {
+export async function installMissingFontFallbacks(page, { useFileUrls = false } = {}) {
   const faces = (await localFontFaces()).filter(face => face.family === 'Noto Sans SC');
   if (!faces.length) return [];
   const missing = await page.evaluate(async () => {
@@ -157,9 +163,7 @@ export async function installMissingFontFallbacks(page) {
     return missing;
   });
   if (!missing.length) return [];
-  const css = missing.flatMap(family => faces.map(face =>
-    `@font-face{font-family:${JSON.stringify(family)};font-weight:${face.weight};font-style:${face.style};src:url(data:font/ttf;base64,${face.data.toString('base64')})}`,
-  )).join('\n');
+  const css = missing.flatMap(family => faces.map(face => fontFaceRule(face, family, useFileUrls))).join('\n');
   await page.addStyleTag({ content: css });
   await page.evaluate(() => document.fonts.ready);
   process.stderr.write(`[fonts] Missing ${missing.join(', ')}; using managed Noto Sans SC before layout measurement.\n`);

@@ -225,6 +225,7 @@ let homeReadyStatus = null;
 let homeReadyWaiters = [];
 let guardProcess;
 let guardPID = 0;
+let guardReadyPromise;
 let guardWatchTimer;
 let currentStatus = null;
 let cloudOAuthCallbackRelay = null;
@@ -1117,7 +1118,11 @@ function disposeInstallationWarmupWindow(window) {
 
 async function runMacInstallationWarmupIfNeeded() {
   const version = app.getVersion();
-  if (!isMac || !isPackaged || macWarmupCompleted(macInstallationWarmupMarker, version)) {
+  if (!isMac || !isPackaged) {
+    return;
+  }
+  await startGuard();
+  if (macWarmupCompleted(macInstallationWarmupMarker, version)) {
     return;
   }
   startupMetricsRecorder.mark("macWarmupStarted");
@@ -1132,8 +1137,14 @@ async function runMacInstallationWarmupIfNeeded() {
 }
 
 function startGuard() {
-  if (guardProcess || guardPID || !fs.existsSync(sidecarPath)) {
+  if (guardPID) {
     return;
+  }
+  if (guardProcess) {
+    return guardReadyPromise;
+  }
+  if (!fs.existsSync(sidecarPath)) {
+    throw new Error("Desktop runtime guard executable is missing");
   }
   ensureDesktopLogDirs();
   const shutdownLog = path.join(desktopLogsDir, "desktop-shutdown.log");
@@ -1161,26 +1172,43 @@ function startGuard() {
   try {
     guardProcess = spawn(sidecarPath, sidecarArgs("guard", ["--owner-pid", String(process.pid)]), {
       env: sidecarShutdownEnv(),
-      stdio: ["ignore", "ignore", errFd],
+      stdio: ["ignore", "pipe", errFd],
       detached: true,
       windowsHide: isWindows,
     });
   } catch (error) {
     appendStartupLog("error", `failed to start desktop runtime guard: ${serializeError(error)}`);
-    return;
+    throw error;
   } finally {
     if (typeof errFd === "number") {
       fs.closeSync(errFd);
     }
   }
-  guardProcess.once("exit", (code, signal) => {
-    appendStartupLog(
-      "desktop",
-      `runtime guard exited with code ${code ?? "null"} signal ${signal ?? "null"}`,
-    );
-    guardProcess = null;
+  const child = guardProcess;
+  guardReadyPromise = new Promise((resolve, reject) => {
+    let output = "";
+    let ready = false;
+    child.stdout.on("data", (chunk) => {
+      output += String(chunk);
+      if (output.split(/\r?\n/).includes("desktop-guard-ready")) {
+        ready = true;
+        resolve();
+      }
+    });
+    child.once("error", (error) => {
+      guardProcess = null;
+      guardReadyPromise = undefined;
+      reject(error);
+    });
+    child.once("exit", (code, signal) => {
+      appendStartupLog("desktop", `runtime guard exited with code ${code ?? "null"} signal ${signal ?? "null"}`);
+      guardProcess = null;
+      guardReadyPromise = undefined;
+      if (!ready) reject(new Error("Desktop runtime guard exited before it was ready"));
+    });
   });
-  guardProcess.unref();
+  child.unref();
+  return guardReadyPromise;
 }
 
 function quoteWindowsArgument(value) {
@@ -1690,7 +1718,7 @@ async function waitForRuntimeReady(options = {}) {
       if (ownedReady && status.config?.frontendPort) {
         if (!targetCapability) {
           startupMetricsRecorder.mark("runtimeReady");
-          startGuard();
+          await startGuard();
           updateStartupState({ status: "ready", phase: "Ready", message: "LazyMind is ready." });
         }
         return status;
@@ -1922,7 +1950,7 @@ function loadingHTML() {
       <div class="summary">
         <div id="steps" class="steps"></div>
       </div>
-      <pre id="log" class="log empty">Waiting for startup output...</pre>
+      <pre id="log" class="log empty" tabindex="0" aria-label="Startup output">Waiting for startup output...</pre>
     </div>
   </aside>
   <script>
@@ -2093,7 +2121,7 @@ function attachExternalNavigationHandler(window) {
     window.webContents,
     (url) => shell.openExternal(url),
     (error) => appendStartupLog("error", `failed to open external URL: ${serializeError(error)}`),
-    { webPreferences: { preload: path.join(__dirname, "preload.js") } },
+    { icon: windowsDesktopIconPath(), webPreferences: { preload: path.join(__dirname, "preload.js") } },
   );
 }
 
@@ -3297,6 +3325,15 @@ if (!hasSingleInstanceLock) {
     app.quit();
   }
 } else {
+  if (isMac && isPackaged) {
+    const executablePath = app.getPath("exe");
+    fs.watchFile(executablePath, { persistent: false, interval: 1000 }, (current) => {
+      if (current.nlink === 0) {
+        beginFastQuit("application-removed");
+      }
+    });
+    app.once("will-quit", () => fs.unwatchFile(executablePath));
+  }
   app.on("second-instance", () => {
     void showActiveWindow();
   });
@@ -3351,14 +3388,21 @@ if (!hasSingleInstanceLock) {
         }
         return showActiveWindow();
       },
-      (error) => {
+      async (error) => {
         finishStartupMetrics("failed", "mac-installation-warmup");
         console.error("LazyMind macOS installation warmup failed:", error);
-        dialog.showErrorBox(
-          "LazyMind installation warmup failed",
-          `LazyMind could not prepare its local runtime. Reopen the app to retry.\n\n${serializeError(error)}`,
+        setStartupFailure(
+          error,
+          "LazyMind could not prepare its local runtime. Review the startup log below, then reopen the app to retry.",
         );
-        app.exit(1);
+        const failureWindow = new BrowserWindow(browserWindowOptions(true));
+        startupWindow = failureWindow;
+        failureWindow.once("closed", () => {
+          startupWindow = undefined;
+          beginFastQuit("warmup-failed");
+        });
+        await failureWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(loadingHTML())}`);
+        broadcastStartupDiagnostics();
       },
     );
   });
