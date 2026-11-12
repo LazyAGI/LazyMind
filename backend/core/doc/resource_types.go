@@ -155,8 +155,6 @@ type ResourceServiceDeps struct {
 	SubmitReparse func(context.Context, DatasetCatalogCaller, string, string) (StartTaskResult, error)
 	DB            *gorm.DB
 	Budget        ResourceBudget
-	// SourceAccess validates live source policy. Default uses Scan's strict batch endpoint.
-	SourceAccess func(context.Context, DatasetCatalogCaller, string, string) error
 	// ProvisionKnowledge creates the existing algorithm KB before the Core transaction.
 	ProvisionKnowledge func(context.Context, DatasetCatalogCaller, *orm.Dataset) error
 	Originals          *OriginalService
