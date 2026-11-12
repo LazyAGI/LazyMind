@@ -90,8 +90,8 @@ func TestVocabularyIsRegisteredAsSystemTools(t *testing.T) {
 	if err := applySystemMCPConfig("u1", body); err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := body["system_mcp_config"]; ok {
-		t.Fatal("disabled feature retained vocabulary tools")
+	if _, ok := body["system_mcp_config"]; !ok {
+		t.Fatal("legacy deployment flag must not hide vocabulary tools")
 	}
 }
 

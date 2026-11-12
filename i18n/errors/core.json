@@ -2142,5 +2142,13 @@
   "2004970": {"en-US": "Failed to read document processing details", "zh-CN": "读取文档处理详情失败"},
   "2004971": {"en-US": "Select between one and twenty documents", "zh-CN": "请选择 1 至 20 份文档"},
   "2004972": {"en-US": "Enable the RAG component before indexing", "zh-CN": "建立索引前请启用 RAG 组件"},
-  "2004973": {"en-US": "A selected document is missing or selected more than once", "zh-CN": "所选文档不存在或被重复选择"}
+  "2004973": {"en-US": "A selected document is missing or selected more than once", "zh-CN": "所选文档不存在或被重复选择"},
+  "2005310": {"en-US": "Anki endpoint cannot change while synced notes or pending operations exist", "zh-CN": "已有同步笔记或待处理任务，暂时无法更改 Anki 连接地址"},
+  "2005311": {"en-US": "Anki endpoint changed during sync; retry with the current connection", "zh-CN": "同步时 Anki 连接地址发生变化，请使用当前连接重试"},
+  "2005312": {"en-US": "Anki sync failed; your local word is preserved", "zh-CN": "Anki 同步失败，本地生词已保留"},
+  "2005313": {"en-US": "Unsupported queued Anki sync operation", "zh-CN": "Anki 同步队列中存在不支持的操作"},
+  "2005314": {"en-US": "This collection does not support vocabulary review", "zh-CN": "此学习集合不支持生词复习"},
+  "2005315": {"en-US": "This review session uses legacy Anki data; start a new local review", "zh-CN": "此复习会话使用旧版 Anki 数据，请开始新的本地复习"},
+  "2005316": {"en-US": "Anki sync is unavailable on this deployment; local vocabulary remains available", "zh-CN": "当前部署未开放 Anki 同步，本地生词本仍可正常使用"},
+  "2005317": {"en-US": "Anki sync is disabled; enable it in external application settings", "zh-CN": "Anki 同步尚未启用，请在外部应用设置中开启"}
 }

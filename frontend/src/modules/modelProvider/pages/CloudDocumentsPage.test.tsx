@@ -193,11 +193,12 @@ describe("CloudDocumentsPage onboarding", () => {
     };
   });
 
-  it("counts enabled vocabulary providers without unlocking document capabilities", async()=>{
+  it("excludes vocabulary providers from document connections even when enabled", async()=>{
     vi.mocked(listCloudConnections).mockResolvedValueOnce([{provider:"eudic",configured:true,enabled:true,target_id:"book",target_name:"Book",add_to_study:false,pending:0,failed:0,succeeded:0,last_error:""}]);
     renderPage();
-    expect(await screen.findByText("1 / 9")).toBeInTheDocument();
-    expect(screen.getByText("现在进行")).toBeInTheDocument();
+    expect(await screen.findByText("0 / 7")).toBeInTheDocument();
+    expect(listCloudConnections).not.toHaveBeenCalled();
+    expect(screen.queryByRole("button", { name: /欧路词典|墨墨/ })).not.toBeInTheDocument();
     expect(screen.getByRole("button",{name:"在对话中引用云文档"})).toBeDisabled();
   });
 
@@ -319,11 +320,11 @@ describe("CloudDocumentsPage onboarding", () => {
       "seen",
     );
     const { unmount } = renderPage();
-    expect(await screen.findByText("0 / 9")).toBeInTheDocument();
+    expect(await screen.findByText("0 / 7")).toBeInTheDocument();
     unmount();
     mocks.vm.isMailAuthValid = true;
     renderPage();
-    expect(await screen.findByText("1 / 9")).toBeInTheDocument();
+    expect(await screen.findByText("1 / 7")).toBeInTheDocument();
   });
 
   it("counts server-verified Obsidian readiness in web and Desktop environments", async () => {
@@ -335,12 +336,12 @@ describe("CloudDocumentsPage onboarding", () => {
     mocks.vm.obsidianConfig = { configured: true, available: true };
 
     const { unmount } = renderPage();
-    expect(await screen.findByText("1 / 8")).toBeInTheDocument();
+    expect(await screen.findByText("1 / 6")).toBeInTheDocument();
     unmount();
 
     mocks.vm.isDesktopRuntime = true;
     renderPage();
-    expect(await screen.findByText("1 / 8")).toBeInTheDocument();
+    expect(await screen.findByText("1 / 6")).toBeInTheDocument();
   });
 
   it("treats Obsidian as a chat-only connected provider in the guide", async () => {
