@@ -146,14 +146,12 @@ func signImageArtifactValue(raw json.RawMessage) json.RawMessage {
 	}
 	if strings.HasPrefix(pathVal, "http://") || strings.HasPrefix(pathVal, "https://") ||
 		strings.HasPrefix(pathVal, "data:") {
-		if strings.Contains(pathVal, "/static-files/") {
-			if signed := doc.StaticFileURLFromAnyStoragePath(pathVal); signed != "" {
-				m["url"] = signed
-				delete(m, "path")
-				out, err := json.Marshal(m)
-				if err == nil {
-					return out
-				}
+		if signed := doc.StaticFileURLFromAnyStoragePath(pathVal); signed != "" {
+			m["url"] = signed
+			delete(m, "path")
+			out, err := json.Marshal(m)
+			if err == nil {
+				return out
 			}
 		}
 		m["url"] = pathVal

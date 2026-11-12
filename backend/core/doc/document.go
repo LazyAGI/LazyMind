@@ -218,14 +218,33 @@ func fileRelativePath(fullPath string) string {
 }
 
 func relFromStaticFilesURL(raw string) string {
-	pathOnly := strings.SplitN(strings.TrimSpace(raw), "?", 2)[0]
-	if idx := strings.Index(pathOnly, "/static-files/"); idx >= 0 {
-		pathOnly = pathOnly[idx:]
-	}
-	if !strings.HasPrefix(pathOnly, "/static-files/") {
+	u, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || u.User != nil || u.Opaque != "" {
 		return ""
 	}
-	relEncoded := strings.TrimPrefix(pathOnly, "/static-files/")
+	pathOnly := u.EscapedPath()
+	prefix := "/static-files/"
+	if u.IsAbs() {
+		// A matching path on a third-party host is not a Core storage reference.
+		// Absolute URLs must belong to the configured public endpoint, including
+		// its deployment prefix, before their temporary signatures can be removed.
+		base, err := url.Parse(publicBaseURL())
+		if err != nil || (base.Scheme != "http" && base.Scheme != "https") || base.Host == "" ||
+			base.User != nil || base.RawQuery != "" || base.Fragment != "" ||
+			!strings.EqualFold(u.Scheme, base.Scheme) || !strings.EqualFold(u.Host, base.Host) {
+			return ""
+		}
+		prefix = strings.TrimRight(base.EscapedPath(), "/") + prefix
+	} else {
+		if u.Host != "" {
+			return ""
+		}
+		pathOnly = strings.TrimPrefix(pathOnly, "/api/core")
+	}
+	if !strings.HasPrefix(pathOnly, prefix) {
+		return ""
+	}
+	relEncoded := strings.TrimPrefix(pathOnly, prefix)
 	if relEncoded == "" {
 		return ""
 	}
@@ -288,28 +307,7 @@ func staticFileURLFromFullPath(fullPath string) string {
 }
 
 func refreshStaticFileURL(path string) string {
-	path = strings.TrimSpace(path)
-	if path == "" {
-		return ""
-	}
-	if idx := strings.Index(path, "/static-files/"); idx >= 0 {
-		path = path[idx:]
-	}
-	if !strings.HasPrefix(path, "/static-files/") {
-		return ""
-	}
-	rel := strings.TrimPrefix(strings.Split(path, "?")[0], "/static-files/")
-	parts := strings.Split(rel, "/")
-	for i, part := range parts {
-		if decoded, err := url.PathUnescape(part); err == nil {
-			parts[i] = decoded
-		}
-	}
-	rel = strings.Join(parts, "/")
-	if rel == "" || rel == "." || strings.HasPrefix(rel, "../") {
-		return ""
-	}
-	return staticFileURLFromRelativePath(rel)
+	return staticFileURLFromRel(relFromStaticFilesURL(path))
 }
 
 // UploadRoot returns the configured local root used by the signed static file service.
@@ -323,14 +321,14 @@ func StaticFileURLFromFullPath(fullPath string) string {
 }
 
 // StaticFileURLFromAnyStoragePath signs upload-root paths, subagent workspace paths,
-// or re-signs an existing /static-files/ reference (with or without a stale signature).
+// or re-signs a Core static-files URL (with or without a stale signature).
 func StaticFileURLFromAnyStoragePath(pathOrURL string) string {
 	raw := strings.TrimSpace(pathOrURL)
 	if raw == "" {
 		return ""
 	}
-	if strings.HasPrefix(raw, "/static-files/") {
-		return staticFileURLFromRel(relFromStaticFilesURL(raw))
+	if rel := relFromStaticFilesURL(raw); rel != "" {
+		return staticFileURLFromRel(rel)
 	}
 	return staticFileURLFromFullPath(raw)
 }
