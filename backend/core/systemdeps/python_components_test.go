@@ -85,6 +85,73 @@ func TestPythonComponentActivationRequiresCompatibleManifestAndReadyMarker(t *te
 	}
 }
 
+func TestPythonClusterComponentStatusRequiresCatalogAndRestart(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("LAZYMIND_RUNTIME_MODE", "local")
+	t.Setenv("LAZYMIND_RUNTIME_ROOT", root)
+	t.Setenv("LAZYMIND_ALGORITHM_PYTHON", "python")
+	t.Setenv("LAZYMIND_CLUSTER_ENABLED", "0")
+	rag := testPythonEntry()
+	cluster := testPythonEntry()
+	cluster.ID = "cluster"
+	catalog := pythonCatalog{SchemaVersion: 1, Platform: runtime.GOOS, Arch: runtime.GOARCH,
+		Components: map[string]PythonComponent{"rag": rag}}
+	catalogPath := filepath.Join(root, "catalog.json")
+	t.Setenv("LAZYMIND_PYTHON_COMPONENT_CATALOG", catalogPath)
+	writeJSON := func(path string, value any) {
+		t.Helper()
+		data, err := json.Marshal(value)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, data, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	statuses := func() []PythonComponentStatus {
+		t.Helper()
+		response := httptest.NewRecorder()
+		GetPythonComponents(response, httptest.NewRequest("GET", "/", nil))
+		var result struct {
+			Data []PythonComponentStatus `json:"data"`
+		}
+		if response.Code != http.StatusOK || json.Unmarshal(response.Body.Bytes(), &result) != nil {
+			t.Fatalf("unexpected response: %d %s", response.Code, response.Body)
+		}
+		return result.Data
+	}
+	writeJSON(catalogPath, catalog)
+	if got := statuses(); len(got) != 1 || got[0].ID != "rag" {
+		t.Fatalf("legacy components: %+v", got)
+	}
+	response := httptest.NewRecorder()
+	InstallPythonComponent(response, httptest.NewRequest("POST", "/", strings.NewReader(`{"id":"cluster"}`)))
+	if response.Code != http.StatusNotFound {
+		t.Fatalf("missing cluster descriptor should not trigger installation: %d %s", response.Code, response.Body)
+	}
+
+	catalog.Components[cluster.ID] = cluster
+	writeJSON(catalogPath, catalog)
+	if got := statuses(); len(got) != 2 || got[1].ID != cluster.ID || !got[1].InstallSupported || got[1].Installed || got[1].Active {
+		t.Fatalf("unexpected deferred components: %+v", got)
+	}
+	dir := pythonComponentDir(root, cluster)
+	if err := os.MkdirAll(filepath.Join(dir, "site-packages"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeJSON(filepath.Join(dir, "bundle-manifest.json"), cluster)
+	if err := os.WriteFile(filepath.Join(dir, ".ready"), []byte(cluster.SHA256), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if status := statuses()[1]; !status.Installed || status.Active || !status.RestartRequired {
+		t.Fatalf("unexpected pre-restart status: %+v", status)
+	}
+	t.Setenv("LAZYMIND_CLUSTER_ENABLED", "1")
+	if status := statuses()[1]; !status.Active || status.RestartRequired {
+		t.Fatalf("unexpected post-restart status: %+v", status)
+	}
+}
+
 func TestPythonComponentDownloadVerifiesSizeAndHash(t *testing.T) {
 	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.Write([]byte("test")) }))
 	defer server.Close()
@@ -178,9 +245,12 @@ func TestPythonComponentRealBundles(t *testing.T) {
 	transport := http.DefaultTransport
 	http.DefaultTransport = server.Client().Transport
 	defer func() { http.DefaultTransport = transport }()
-	for _, id := range []string{"rag"} {
+	for _, id := range pythonComponentIDs {
+		entry, available := catalog.Components[id]
+		if !available {
+			continue
+		}
 		t.Run(id, func(t *testing.T) {
-			entry := catalog.Components[id]
 			if err := installPythonComponent(context.Background(), root, entry, server.URL+"/"+entry.Filename); err != nil {
 				t.Fatal(err)
 			}

@@ -24,12 +24,12 @@ func GetProvider(w http.ResponseWriter, r *http.Request) {
 	common.ReplyOK(w, setting)
 }
 func PutProvider(w http.ResponseWriter, r *http.Request) {
-	var req ProviderSetting
+	var req providerSettingsPatch
 	if json.NewDecoder(r.Body).Decode(&req) != nil {
 		common.ReplyErr(w, "invalid body", 400)
 		return
 	}
-	setting, err := service().SaveSetting(r.Context(), store.UserID(r), req)
+	setting, err := service().patchSetting(r.Context(), store.UserID(r), req)
 	if err != nil {
 		common.ReplyErr(w, err.Error(), 400)
 		return
@@ -130,7 +130,7 @@ func ListDocumentWords(w http.ResponseWriter, r *http.Request) {
 }
 func ListWords(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
-	items, err := service().SearchWords(r.Context(), store.UserID(r), WordQuery{Provider: defaultString(q.Get("provider"), ProviderAnki), Search: q.Get("search"), State: q.Get("state"), WordbookID: q.Get("wordbook_id"), DocumentID: q.Get("document_id"), TagsAll: q["tag_all"], TagsAny: q["tag_any"], TagsNot: q["tag_not"]})
+	items, err := service().SearchWords(r.Context(), store.UserID(r), WordQuery{Provider: q.Get("provider"), Search: q.Get("search"), State: q.Get("state"), WordbookID: q.Get("wordbook_id"), DocumentID: q.Get("document_id"), TagsAll: q["tag_all"], TagsAny: q["tag_any"], TagsNot: q["tag_not"]})
 	if err != nil {
 		common.ReplyErr(w, err.Error(), 500)
 		return
@@ -138,13 +138,7 @@ func ListWords(w http.ResponseWriter, r *http.Request) {
 	common.ReplyOK(w, map[string]any{"items": items})
 }
 func NextReview(w http.ResponseWriter, r *http.Request) {
-	var item *ReviewQuestion
-	var err error
-	if r.URL.Query().Get("provider") == ProviderAnki {
-		item, err = service().NextAnkiQuestion(r.Context(), store.UserID(r))
-	} else {
-		item, err = service().NextQuestion(r.Context(), store.UserID(r))
-	}
+	item, err := service().NextQuestion(r.Context(), store.UserID(r))
 	if err != nil {
 		common.ReplyErr(w, err.Error(), 500)
 		return
@@ -153,13 +147,14 @@ func NextReview(w http.ResponseWriter, r *http.Request) {
 }
 func StartReviewSession(w http.ResponseWriter, r *http.Request) {
 	var in struct {
-		Count int `json:"count"`
+		Count      int    `json:"count"`
+		WordbookID string `json:"wordbook_id"`
 	}
 	_ = json.NewDecoder(r.Body).Decode(&in)
 	if in.Count == 0 {
 		in.Count = 5
 	}
-	batch, err := service().StartReviewSession(r.Context(), store.UserID(r), in.Count)
+	batch, err := service().startReviewSessionForWordbook(r.Context(), store.UserID(r), in.Count, in.WordbookID)
 	if err != nil {
 		common.ReplyErr(w, err.Error(), 400)
 		return
@@ -179,7 +174,7 @@ func PreviewReviewSession(w http.ResponseWriter, r *http.Request) {
 	common.ReplyOK(w, batch)
 }
 func GetActiveReviewSession(w http.ResponseWriter, r *http.Request) {
-	session, err := service().ActiveReviewSession(r.Context(), store.UserID(r))
+	session, err := service().activeReviewSessionForWordbook(r.Context(), store.UserID(r), r.URL.Query().Get("wordbook_id"))
 	if err != nil {
 		common.ReplyErr(w, err.Error(), 400)
 		return
@@ -325,12 +320,7 @@ func SubmitReview(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "invalid body", 400)
 		return
 	}
-	var err error
-	if r.URL.Query().Get("provider") == ProviderAnki {
-		err = service().ReviewAnki(r.Context(), store.UserID(r), req)
-	} else {
-		err = service().Review(r.Context(), store.UserID(r), mux.Vars(r)["word_id"], req)
-	}
+	err := service().Review(r.Context(), store.UserID(r), mux.Vars(r)["word_id"], req)
 	if err != nil {
 		common.ReplyErr(w, err.Error(), 409)
 		return
@@ -347,7 +337,7 @@ func ListWordbooks(w http.ResponseWriter, r *http.Request) {
 	common.ReplyOK(w, map[string]any{"items": rows})
 }
 func ListCapabilities(w http.ResponseWriter, r *http.Request) {
-	common.ReplyOK(w, map[string]any{"items": ListCapabilityDefinitions(), "local_available": Enabled()})
+	common.ReplyOK(w, map[string]any{"items": ListCapabilityDefinitions(), "local_available": true, "anki_sync_available": ankiSyncAvailable()})
 }
 func CreateWordbook(w http.ResponseWriter, r *http.Request) {
 	var in WordbookInput
@@ -469,13 +459,7 @@ func DictionaryLookup(w http.ResponseWriter, r *http.Request) {
 	common.ReplyOK(w, map[string]any{"items": rows})
 }
 func ReviewStatsHandler(w http.ResponseWriter, r *http.Request) {
-	var row ReviewStats
-	var err error
-	if r.URL.Query().Get("provider") == ProviderAnki {
-		row, err = service().AnkiStats(r.Context(), store.UserID(r))
-	} else {
-		row, err = service().Stats(r.Context(), store.UserID(r))
-	}
+	row, err := service().Stats(r.Context(), store.UserID(r))
 	if err != nil {
 		common.ReplyErr(w, err.Error(), 500)
 		return
@@ -504,13 +488,7 @@ func PutFSRSProfile(w http.ResponseWriter, r *http.Request) {
 	common.ReplyOK(w, row)
 }
 func ExportReviewLogs(w http.ResponseWriter, r *http.Request) {
-	var rows []ReviewLogExport
-	var err error
-	if r.URL.Query().Get("provider") == ProviderAnki {
-		rows, err = service().ExportAnkiReviewLogs(r.Context(), store.UserID(r))
-	} else {
-		rows, err = service().ExportReviewLogs(r.Context(), store.UserID(r))
-	}
+	rows, err := service().ExportReviewLogs(r.Context(), store.UserID(r))
 	if err != nil {
 		common.ReplyErr(w, err.Error(), 500)
 		return

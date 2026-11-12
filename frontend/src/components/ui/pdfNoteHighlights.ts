@@ -34,6 +34,12 @@ export function pdfNoteHighlightPaths(highlights:readonly PdfNoteHighlight[],pag
   return [...byColor].map(([color,rects])=>({color,path:pdfHighlightPath([...rects.values()])}));
 }
 
+export function pdfNoteHighlightHitAreas(highlights:readonly PdfNoteHighlight[],page:number):Array<{id:string;color:PdfNoteColor;rect:PdfHighlightRect}> {
+  return highlights.flatMap(highlight=>highlight.page===page
+    ?highlight.rects.map(rect=>({id:highlight.id,color:highlight.color,rect}))
+    :[]);
+}
+
 const validColors = new Set<string>(PDF_NOTE_COLORS.map(item=>item.key));
 const validRect = (value:unknown):value is [number,number,number,number] =>
   Array.isArray(value) && value.length===4 && value.every((n:unknown)=>typeof n==='number' && Number.isFinite(n) && n>=0 && n<=1) && value[0]<value[2] && value[1]<value[3];

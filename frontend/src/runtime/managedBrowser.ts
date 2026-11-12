@@ -53,13 +53,22 @@ export async function selectManagedBrowser(engine: 'builtin' | 'edge'): Promise<
 
 export function startManagedBrowserSync(): () => void {
   if (!hasManagedBrowser()) return () => {};
-  const sync = () => { void syncManagedBrowser().catch(() => {}); };
+  let retryTimer: number | undefined;
+  let revision = 0;
+  const sync = () => {
+    window.clearTimeout(retryTimer);
+    const currentRevision = ++revision;
+    // Desktop handles reconnects after accepting the session. Retry here only
+    // when Desktop could not accept the session update.
+    void syncManagedBrowser().catch(() => {
+      if (currentRevision === revision) retryTimer = window.setTimeout(sync, 30_000);
+    });
+  };
   sync();
   window.addEventListener(AUTH_USER_CHANGE_EVENT, sync);
-  // Keeps credentials current and retries startup after the local runtime recovers.
-  const timer = window.setInterval(sync, 30000);
   return () => {
+    revision++;
     window.removeEventListener(AUTH_USER_CHANGE_EVENT, sync);
-    window.clearInterval(timer);
+    window.clearTimeout(retryTimer);
   };
 }

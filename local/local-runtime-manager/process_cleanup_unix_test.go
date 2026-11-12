@@ -4,10 +4,14 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
+	"strconv"
+	"strings"
 	"syscall"
 	"testing"
 	"time"
@@ -136,4 +140,119 @@ func TestLocalProxyLocalDownKeepsExistingStopScript(t *testing.T) {
 		t.Fatal(err)
 	}
 	runner.assertCommandCount(1)
+}
+
+func TestDesktopClusterPreparationFixtureProcess(t *testing.T) {
+	if os.Getenv("LAZYMIND_CLUSTER_CLEANUP_FIXTURE") != "1" {
+		return
+	}
+	if err := syscall.Setpgid(0, 0); err != nil {
+		t.Fatal(err)
+	}
+	pidFile := filepath.Join(os.Getenv(runtimeRootEnvVar), "cluster-prepare.pid")
+	if err := os.WriteFile(pidFile, []byte(strconv.Itoa(os.Getpid())), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(time.Minute)
+}
+
+func TestDesktopGuardStopsClusterPreparationAfterAppRemoval(t *testing.T) {
+	root := t.TempDir()
+	appRoot := filepath.Join(root, "LazyMind.app")
+	resources := filepath.Join(appRoot, "Contents", "Resources", "runtime")
+	repo := filepath.Join(resources, "app")
+	if err := os.MkdirAll(filepath.Join(repo, coreSourceDirName), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeComposeFixture(t, repo)
+	cfg, paths, err := NewRuntimeConfigWithOptions(RuntimeConfigOptions{
+		Profile: "desktop", OwnerToken: "fixture-cluster-owner", RepoRoot: repo,
+		ResourcesRoot: resources, RuntimeRoot: filepath.Join(root, "user-data"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := paths.EnsureAllDirs(); err != nil {
+		t.Fatal(err)
+	}
+	self, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("LAZYMIND_CLUSTER_CLEANUP_FIXTURE", "1")
+	t.Setenv("LAZYMIND_CLUSTER_FIXTURE_BINARY", self)
+	t.Setenv(runtimeProcessOwnerEnvVar, "")
+	script := "#!/bin/sh\nexec \"$LAZYMIND_CLUSTER_FIXTURE_BINARY\" -test.run=^TestDesktopClusterPreparationFixtureProcess$\n"
+	if err := os.MkdirAll(filepath.Dir(paths.CoreBin), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(paths.CoreBin, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	catalog := pythonComponentCatalog{SchemaVersion: 1, Platform: runtime.GOOS, Arch: runtime.GOARCH, Components: map[string]pythonComponent{}}
+	for _, id := range []string{"rag", "cluster"} {
+		catalog.Components[id] = pythonComponent{ID: id, Revision: strings.Repeat("a", 64), SHA256: strings.Repeat("b", 64), BaseFingerprint: strings.Repeat("c", 64)}
+	}
+	data, err := json.Marshal(catalog)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(paths.ResourcesRoot, "config"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(paths.ResourcesRoot, "config", "python-components.json"), data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	sentinel := filepath.Join(paths.RuntimeRoot, "preserved.db")
+	if err := os.WriteFile(sentinel, []byte("user data"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	manager := NewRuntimeManager(&ExecRunner{}, filepath.Join(paths.BinDir, "local-runtime-manager"))
+	manager.SetOutput(io.Discard, io.Discard)
+	state := defaultRuntimeState(cfg, cfg.ProcessComposePort, paths.RunDirTokenFile)
+	state.OwnerToken, state.OverallStatus = cfg.OwnerToken, "starting"
+	if err := writeRuntimeState(paths.StateFile, state); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		manager.prepareDesktopCluster(ctx, cfg, paths)
+	}()
+	t.Cleanup(func() {
+		cancel()
+		select {
+		case <-done:
+		case <-time.After(5 * time.Second):
+			t.Error("cluster preparation fixture did not exit")
+		}
+	})
+	pidFile := filepath.Join(paths.RuntimeRoot, "cluster-prepare.pid")
+	deadline := time.Now().Add(5 * time.Second)
+	pid := 0
+	for time.Now().Before(deadline) {
+		if pid, _ = readPIDFile(pidFile); pid > 0 && processAlive(pid) {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if pid <= 0 || !processAlive(pid) {
+		t.Fatal("cluster preparation did not reach its blocking work")
+	}
+	if err := os.Rename(appRoot, appRoot+".removed"); err != nil {
+		t.Fatal(err)
+	}
+	if err := runRuntimeGuard(context.Background(), cfg, paths, 123, time.Millisecond, func(int) bool { return false }, manager.Down); err != nil {
+		t.Fatal(err)
+	}
+	if processAlive(pid) {
+		t.Fatal("cluster preparation survived guard cleanup after application removal")
+	}
+	if data, err := os.ReadFile(sentinel); err != nil || string(data) != "user data" {
+		t.Fatal("runtime cleanup removed user data")
+	}
+	if _, err := os.Stat(appRoot); !os.IsNotExist(err) {
+		t.Fatal("shutdown recreated the removed application bundle")
+	}
 }

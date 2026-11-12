@@ -24,6 +24,23 @@ const (
 	webResponseLimit       = 1 << 20
 )
 
+type WebHTTPError struct {
+	Status     int
+	RetryAfter time.Duration
+}
+
+func (e *WebHTTPError) Error() string {
+	return fmt.Sprintf("translation service returned HTTP %d", e.Status)
+}
+
+func RetryDelay(err error) time.Duration {
+	var remote *WebHTTPError
+	if errors.As(err, &remote) {
+		return remote.RetryAfter
+	}
+	return 0
+}
+
 func webTranslationClient(client *http.Client) *http.Client {
 	if client != nil {
 		return client
@@ -34,7 +51,16 @@ func webTranslationClient(client *http.Client) *http.Client {
 func webTranslationBody(resp *http.Response) ([]byte, error) {
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("translation service returned HTTP %d", resp.StatusCode)
+		delay := time.Duration(0)
+		if seconds, err := strconv.Atoi(resp.Header.Get("Retry-After")); err == nil && seconds > 0 {
+			delay = time.Duration(seconds) * time.Second
+		} else if date, err := http.ParseTime(resp.Header.Get("Retry-After")); err == nil {
+			delay = time.Until(date)
+		}
+		if resp.StatusCode == 429 && delay < 30*time.Second {
+			delay = 30 * time.Second
+		}
+		return nil, &WebHTTPError{Status: resp.StatusCode, RetryAfter: delay}
 	}
 	body, err := io.ReadAll(io.LimitReader(resp.Body, webResponseLimit+1))
 	if err != nil {

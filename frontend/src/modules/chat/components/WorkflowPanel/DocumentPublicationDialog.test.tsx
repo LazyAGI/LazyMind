@@ -126,6 +126,33 @@ it('a failed draft save prevents publication and keeps the confirmation open', a
   expect(close).not.toHaveBeenCalled();
 });
 
+it.each([
+  { savedTemplate: undefined, chosenTemplate: 'clean' },
+  { savedTemplate: 'warm_humanist', chosenTemplate: 'editorial_contrast' },
+])('publishes WeChat with the $chosenTemplate template', async ({ savedTemplate, chosenTemplate }) => {
+  state.targets.push({ provider: 'wechat', bound: true, template: savedTemplate, connection_id: 'wechat-account' });
+  render(view({ initialProvider: 'wechat', providers: [{ id: 'wechat', capabilities: ['create', 'replace'], templates: [
+    { id: 'clean', name: 'Clean Reading' },
+    { id: 'warm_humanist', name: 'Warm Humanist' },
+    { id: 'editorial_contrast', name: 'Editorial Contrast' },
+  ] }], availability: { ...availability, states: { wechat: 'ready' }, accounts: {
+    wechat: [{ connection_id: 'wechat-account', provider: 'wechat', status: 'ACTIVE', can_use_chat: true }],
+  } } }));
+  const selector = await screen.findByRole('combobox', { name: 'WeChat article template' });
+  expect(screen.getByTitle(savedTemplate ? 'Warm Humanist' : 'Clean Reading')).toBeInTheDocument();
+  if (chosenTemplate === 'editorial_contrast') {
+    fireEvent.mouseDown(selector);
+    fireEvent.click(await screen.findByText('Editorial Contrast'));
+  }
+  expect(beforePublish).not.toHaveBeenCalled();
+  expect(api.createPublicationGroup).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('button', { name: /^Publish to WeChat/ }));
+  await waitFor(() => expect(api.createPublicationGroup).toHaveBeenCalledOnce());
+  const body = api.createPublicationGroup.mock.calls[0][1];
+  expect(body.targets).toEqual([expect.objectContaining({ provider: 'wechat', connection_id: 'wechat-account', template: chosenTemplate })]);
+  expect(api.preflightPublication).toHaveBeenCalledWith('latest-draft', body, expect.anything());
+});
+
 it('opens the platform results as soon as publication is accepted', async () => {
   state.preferred_providers = ['github'];
   const { rerender } = render(view());

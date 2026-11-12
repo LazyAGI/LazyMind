@@ -479,6 +479,9 @@ func (c *HTTPCoreClient) doJSON(ctx context.Context, method, endpoint string, in
 	}
 	httpReq.Header.Set("Accept", "application/json")
 	c.setAuthHeaders(httpReq, userID, userName)
+	if method == http.MethodPost && endpoint == "/datasets" && c.internalToken != "" {
+		httpReq.Header.Set("X-LazyMind-Internal-Token", c.internalToken)
+	}
 	resp, err := c.httpClient.Do(httpReq)
 	if err != nil {
 		return err

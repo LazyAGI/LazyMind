@@ -45,6 +45,40 @@ describe('Desktop browser connection', () => {
     await vi.advanceTimersByTimeAsync(60000);
     expect(desktop.browserSessionSet).not.toHaveBeenCalled();
   });
+  it('does not resubmit accepted credentials while idle and updates rotated credentials', async () => {
+    const desktop = install();
+    user.mockReturnValue({ userId: 'alice', token: 'first' });
+    const stop = startManagedBrowserSync();
+    try {
+      await vi.advanceTimersByTimeAsync(120_000);
+      expect(desktop.browserSessionSet).toHaveBeenCalledTimes(1);
+      user.mockReturnValue({ userId: 'alice', token: 'rotated' });
+      window.dispatchEvent(new Event('test-user-change'));
+      expect(desktop.browserSessionSet).toHaveBeenLastCalledWith({
+        user_id: 'alice', access_token: 'rotated', server_url: 'http://127.0.0.1:8090',
+      });
+      await vi.advanceTimersByTimeAsync(120_000);
+      expect(desktop.browserSessionSet).toHaveBeenCalledTimes(2);
+    } finally {
+      stop();
+    }
+  });
+  it('retries a failed session update until Desktop accepts it', async () => {
+    const desktop = install();
+    desktop.browserSessionSet.mockRejectedValueOnce(new Error('offline'));
+    user.mockReturnValue({ userId: 'alice', token: 'token' });
+    const stop = startManagedBrowserSync();
+    try {
+      await vi.advanceTimersByTimeAsync(29_999);
+      expect(desktop.browserSessionSet).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(desktop.browserSessionSet).toHaveBeenCalledTimes(2);
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(desktop.browserSessionSet).toHaveBeenCalledTimes(2);
+    } finally {
+      stop();
+    }
+  });
   it('reports failed setup rather than opening an unbound window', async () => {
     const desktop = install();
     desktop.browserSessionSet.mockRejectedValue(new Error('offline'));

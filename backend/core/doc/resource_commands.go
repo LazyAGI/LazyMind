@@ -148,9 +148,6 @@ func (s *ResourceService) knowledgeNameConflict(ctx context.Context, tx *gorm.DB
 			perms, _ = acl.PermissionsForWithDB(tx, acl.ResourceTypeDB, ds.ID, op.Caller.UserID, resourceTransactionGroups(tx))
 		}
 		if len(perms) > 0 {
-			if err := s.checkSource(ctx, tx, op.Caller, ds.ID, acl.PermissionDatasetRead); err != nil {
-				return err
-			}
 			return resourceErr("CONFLICT", "dataset name already exists")
 		}
 	}

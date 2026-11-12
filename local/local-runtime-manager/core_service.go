@@ -206,6 +206,7 @@ func coreServiceEnv(cfg RuntimeConfig, paths RuntimePaths) ([]string, error) {
 	environment := []string{
 		"LAZYMIND_RUNTIME_MODE=local",
 		"LAZYMIND_VOCABULARY_ENABLED=" + envText("LAZYMIND_VOCABULARY_ENABLED", "true"),
+		"LAZYMIND_VOCABULARY_ANKI_SYNC_ENABLED=" + envText("LAZYMIND_VOCABULARY_ANKI_SYNC_ENABLED", "true"),
 		"LAZYMIND_CLOUD_BASE_URL=" + strings.TrimSpace(os.Getenv("LAZYMIND_CLOUD_BASE_URL")),
 		"LAZYMIND_CLOUD_TOKEN_STORE=" + cloudTokenStoreMode(cfg.Profile),
 		"LAZYMIND_CREDENTIAL_MANIFEST_TRUST_PUBLIC_KEY_FILE=" + strings.TrimSpace(os.Getenv("LAZYMIND_CREDENTIAL_MANIFEST_TRUST_PUBLIC_KEY_FILE")),

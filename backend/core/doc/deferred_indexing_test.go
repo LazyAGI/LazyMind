@@ -237,7 +237,7 @@ func TestDeferredIndexingMarksMissingOriginalForManualRebuild(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	bindNativeIndexTask(context.Background(), dataset.ID, document.ID, manualTask.ID, ProcessingLevelIndexed)
+	bindNativeIndexTask(context.Background(), dataset.ID, document.ID, manualTask.ID, ProcessingLevelIndexed, 0)
 	if err := db.Where("dataset_id = ? AND document_id = ?", dataset.ID, document.ID).Take(&state).Error; err != nil || state.IndexArtifactRef != "core-task:manual-task" {
 		t.Fatalf("manual rebuild was not bound to a fresh generation: %+v err=%v", state, err)
 	}

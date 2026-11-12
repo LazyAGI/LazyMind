@@ -56,6 +56,7 @@ const { startCloudOAuthCallbackRelay } = require("./cloud-oauth-callback-relay")
 const { clearTemporaryCredentials: clearRuntimeTemporaryCredentials } = require("./temporary-credential-cleanup");
 const { waitForRendererWithRuntimeRecovery } = require("./renderer-recovery");
 const { createDesktopNotifications, isTrustedNotificationSender } = require("./native-notifications.js");
+const { createNotificationRuntimeReader } = require("./notification-runtime.js");
 const { createNotificationSession } = require("./notification-session.js");
 const { createAgentRecovery, runRecoveryCommand } = require("./agent-recovery.js");
 const { registerNotificationSettingsIPC } = require("./notification-settings.js");
@@ -180,7 +181,7 @@ const agentConnectorStatusTimeoutMs = 30 * 1000;
 const agentConnectorDisconnectTimeoutMs = 60 * 1000;
 const agentConnectorInstallTimeoutMs = 660 * 1000;
 const agentConnectorWorkBuddyInstallTimeoutMs = 120 * 1000;
-const agentConnectorCodexInstallTimeoutMs = 90 * 1000;
+const agentConnectorCodexInstallTimeoutMs = 120 * 1000;
 const agentConnectorBindingTimeoutMs = 30 * 1000;
 const agentConnectorLoginTimeoutMs = 2 * 60 * 1000;
 const macInstallationWarmupMarker = macWarmupMarkerPath(app.getPath("userData"));
@@ -249,6 +250,22 @@ let notificationSessionRevision = 0;
 let sessionWrites = Promise.resolve();
 let notificationRenewalCandidate;
 const notificationSession = createNotificationSession();
+async function readNotificationRuntime() {
+  const status = await readStatus({ timeout: 10000 });
+  return {
+    ready: desktopNotificationRuntimeReady(status, isExternalRuntimeDev),
+    apiOrigin: desktopNotificationAPIOrigin(status, isExternalRuntimeDev),
+    frontendOrigin: notificationFrontendOrigin(),
+    instanceId: desktopNotificationInstanceID(status, isExternalRuntimeDev),
+  };
+}
+
+const readResidentNotificationRuntime = createNotificationRuntimeReader({
+  readRuntime: readNotificationRuntime,
+  getMonitor: () => runtimeStopping || isQuitting ? null : runtimeProcess,
+  getRuntimeRoot: currentRuntimeRoot,
+});
+
 const desktopNotifications = createDesktopNotifications({
   Notification,
   statePath: path.join(app.getPath("userData"), "native-notifications.json"),
@@ -288,14 +305,9 @@ const desktopNotifications = createDesktopNotifications({
     } catch { return false; }
   },
   getRuntime: async () => {
-    const status = await readStatus({ timeout: 10000 });
-    return {
-      ready: !isQuitting && !isInstallerWarmup && app.isReady()
-        && desktopNotificationRuntimeReady(status, isExternalRuntimeDev),
-      apiOrigin: desktopNotificationAPIOrigin(status, isExternalRuntimeDev),
-      frontendOrigin: notificationFrontendOrigin(),
-      instanceId: desktopNotificationInstanceID(status, isExternalRuntimeDev),
-    };
+    if (isQuitting || runtimeStopping || isInstallerWarmup || !app.isReady()) return null;
+    const runtime = await (isExternalRuntimeDev ? readNotificationRuntime() : readResidentNotificationRuntime());
+    return isQuitting || runtimeStopping ? null : runtime;
   },
   openPath: async (url, stillCurrent) => {
     await showActiveWindow();
@@ -553,9 +565,9 @@ function waitForHomeReadySignal() {
   return new Promise((resolve) => homeReadyWaiters.push(resolve));
 }
 
-function captureSidecarChunk(source, chunk) {
+function captureSidecarChunk(source, chunk, { warmup = false } = {}) {
   const text = String(chunk);
-  appendStartupChunk(source, text);
+  if (!warmup) appendStartupChunk(source, text);
   if (source === "sidecar.stderr") {
     sidecarStderrTail = `${sidecarStderrTail}${text}`.slice(-maxSidecarFailureBytes);
   }
@@ -573,6 +585,7 @@ function captureSidecarChunk(source, chunk) {
     }
     try {
       const event = JSON.parse(line.slice(markerIndex + marker.length));
+      if (warmup && event?.phase !== "python-cluster") continue;
       if (event?.event === "capability.ready" && event?.capability === "home") {
         publishHomeReady(Number(event.frontendPort));
       }
@@ -632,6 +645,26 @@ function captureSidecarChunk(source, chunk) {
           status: "starting",
           phase: "Sample conversations ready",
           message: "Starting the local services and importing sample conversations...",
+          progress: null,
+        });
+      }
+      if (event?.phase === "python-cluster" && event?.event === "phase.started") {
+        const isChinese = app.getLocale().toLowerCase().startsWith("zh");
+        updateStartupState({
+          status: "starting",
+          phase: isChinese ? "准备技能聚类" : "Preparing skill clustering",
+          message: isChinese
+            ? "正在下载并校验技能聚类组件…"
+            : "Downloading and verifying the skill clustering component...",
+          progress: null,
+        });
+      }
+      if (event?.phase === "python-cluster" && ["phase.completed", "phase.skipped"].includes(event.event)) {
+        const isChinese = app.getLocale().toLowerCase().startsWith("zh");
+        updateStartupState({
+          status: "starting",
+          phase: isChinese ? "启动本地服务" : "Starting local services",
+          message: isChinese ? "正在启动本地服务…" : "Starting the local services...",
           progress: null,
         });
       }
@@ -707,7 +740,7 @@ function broadcastStartupDiagnostics(extra = {}) {
 
 function runSidecar(command, extra = [], options = {}) {
   return new Promise((resolve, reject) => {
-    execFile(sidecarPath, sidecarArgs(command, extra), {
+    const child = execFile(sidecarPath, sidecarArgs(command, extra), {
       env: options.env || sidecarEnv(),
       timeout: options.timeout,
       windowsHide: isWindows,
@@ -719,6 +752,7 @@ function runSidecar(command, extra = [], options = {}) {
       }
       resolve(stdout);
     });
+    if (options.onStdout) child.stdout?.on("data", options.onStdout);
   });
 }
 
@@ -1013,6 +1047,7 @@ async function runInstallerWarmup() {
   await runInstallerWarmupLifecycle({
     startRuntime: () => runSidecar("up", maintenanceArgs, {
       timeout: timeoutSeconds * 1000,
+      onStdout: (chunk) => captureSidecarChunk("sidecar.stdout", chunk, { warmup: true }),
     }),
     readStatus,
     createRenderer: () => new BrowserWindow({
@@ -2075,7 +2110,8 @@ function browserWindowOptions(show = true) {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: false,
-      backgroundThrottling: false,
+      // Hidden chat renderers must complete startup before Chromium throttles them.
+      backgroundThrottling: show,
     },
   };
 }
@@ -2387,6 +2423,7 @@ async function createDesktopDevWindow() {
     currentStatus = desktopDevRuntimeStatus(externalRuntimeURL);
     updateStartupState({ status: "ready", phase: "Ready", message: "Desktop development mode is ready." });
     window.show();
+    window.webContents.setBackgroundThrottling(true);
     window.focus();
     appendStartupLog("desktop", "Desktop development renderer ready");
     finishStartupMetrics("success");
@@ -2472,6 +2509,7 @@ async function createWindow() {
     nextStartupWindow.removeAllListeners("close");
     nextStartupWindow.hide();
     readyRendererAttempt.window.show();
+    readyRendererAttempt.window.webContents.setBackgroundThrottling(true);
     startupMetricsRecorder.mark("mainWindowVisible");
     readyRendererAttempt.window.focus();
     appendStartupLog("desktop", "frontend window ready");

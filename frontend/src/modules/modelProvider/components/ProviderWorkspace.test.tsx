@@ -659,6 +659,66 @@ describe("compact provider workspace", () => {
   });
 
   it.each([
+    ["阿斯顿", "baseUrlInvalid"],
+    ["/v1", "baseUrlInvalid"],
+    ["ftp://api.example.test/v1", "baseUrlInvalid"],
+    ["https://user:password@api.example.test/v1", "baseUrlInvalid"],
+    ["https://api.example.test/v1?query=test", "baseUrlInvalid"],
+    ["https://api.example.test/v1#fragment", "baseUrlInvalid"],
+    ["", "baseUrlRequired"],
+    [`https://api.example.test/${"a".repeat(512)}`, "baseUrlMax"],
+  ])("shows one endpoint validation error and allows correction: %s", async (value, error) => {
+    const callbacks = setup();
+    const endpoint = screen.getByRole("textbox", { name: "modelProvider.apiAddressLabel" });
+    fireEvent.change(endpoint, { target: { value } });
+    fireEvent.click(screen.getByRole("button", { name: "modelProvider.workspace.saveEndpoint" }));
+
+    expect(await screen.findAllByText(`modelProvider.validation.${error}`)).toHaveLength(1);
+    expect(endpoint).toHaveAttribute("aria-invalid", "true");
+    expect(mocks.updateEndpoint).not.toHaveBeenCalled();
+
+    fireEvent.change(endpoint, { target: { value: "https://valid.example.test/v1" } });
+    fireEvent.click(screen.getByRole("button", { name: "modelProvider.workspace.saveEndpoint" }));
+    await waitFor(() => expect(callbacks.onReload).toHaveBeenCalledOnce());
+    expect(mocks.updateEndpoint).toHaveBeenCalledOnce();
+    await waitFor(() => expect(screen.queryByText(`modelProvider.validation.${error}`)).not.toBeInTheDocument());
+    expect(endpoint).not.toHaveAttribute("aria-invalid", "true");
+  });
+
+  it("shows one save error and preserves the endpoint draft for retry", async () => {
+    const errorText = "Clear the old text vectors before editing the active embedding model";
+    mocks.updateEndpoint.mockRejectedValueOnce(new Error(errorText));
+    const errorMessage = vi.spyOn(message, "error").mockImplementation(() => null as never);
+    const successMessage = vi.spyOn(message, "success").mockImplementation(() => null as never);
+    try {
+      const callbacks = setup();
+      const endpoint = screen.getByRole("textbox", { name: "modelProvider.apiAddressLabel" });
+      const draft = "https://new.example.test/v1";
+      fireEvent.change(endpoint, { target: { value: draft } });
+      fireEvent.click(screen.getByRole("button", { name: "modelProvider.workspace.saveEndpoint" }));
+
+      await waitFor(() => expect(errorMessage).toHaveBeenCalledOnce());
+      expect(errorMessage).toHaveBeenCalledWith(errorText);
+      expect(mocks.updateEndpoint).toHaveBeenCalledOnce();
+      expect(mocks.updateEndpoint).toHaveBeenCalledWith(provider.id, draft);
+      expect(endpoint).toHaveValue(draft);
+      expect(callbacks.onReload).not.toHaveBeenCalled();
+      expect(successMessage).not.toHaveBeenCalled();
+      await waitFor(() => expect(screen.getByRole("button", { name: "modelProvider.workspace.saveEndpoint" })).toBeEnabled());
+
+      mocks.updateEndpoint.mockResolvedValueOnce({ id: provider.id, base_url: draft });
+      fireEvent.click(screen.getByRole("button", { name: "modelProvider.workspace.saveEndpoint" }));
+      await waitFor(() => expect(callbacks.onReload).toHaveBeenCalledOnce());
+      await waitFor(() => expect(successMessage).toHaveBeenCalledOnce());
+      expect(successMessage).toHaveBeenCalledWith("modelProvider.workspace.endpointSaved");
+      expect(errorMessage).toHaveBeenCalledOnce();
+    } finally {
+      errorMessage.mockRestore();
+      successMessage.mockRestore();
+    }
+  });
+
+  it.each([
     ["https://api.example.test/", provider.baseUrl],
     ["https://new.example.test", "https://new.example.test/v1/"],
   ])("accepts the server's normalized endpoint after saving %s even before a provider refresh", async (entered, canonical) => {

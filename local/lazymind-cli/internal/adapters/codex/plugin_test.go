@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"lazymind/agentconnector/internal/agentintegration"
+	"lazymind/agentconnector/internal/codexhost"
 	"lazymind/agentconnector/internal/codexplugin"
 	"lazymind/agentconnector/internal/credentials"
 	"lazymind/agentconnector/internal/mcpbridge"
@@ -20,6 +21,7 @@ import (
 
 func TestPluginConnectOfflineMigrationFailureAndDisconnect(t *testing.T) {
 	originalPrepare := prepareCodexDesktop
+	originalWait := waitCodexReady
 	originalHealth := startupHealth
 	originalCleanup := cleanupCodexPresentation
 	var cleanupError error
@@ -27,9 +29,11 @@ func TestPluginConnectOfflineMigrationFailureAndDisconnect(t *testing.T) {
 	prepareCalls := 0
 	var prepareError error
 	prepareCodexDesktop = func(context.Context, string) error { prepareCalls++; return prepareError }
+	waitCodexReady = func(context.Context, string, string, time.Time) error { return nil }
 	startupHealth = func(context.Context, string) string { return "" }
 	t.Cleanup(func() {
 		prepareCodexDesktop = originalPrepare
+		waitCodexReady = originalWait
 		startupHealth = originalHealth
 		cleanupCodexPresentation = originalCleanup
 	})
@@ -106,8 +110,8 @@ exit 1
 	if prepareCalls != 2 {
 		t.Fatal("installed plugin skipped desktop connection")
 	}
-	prepareError = errors.New("Codex refused to close")
-	if status := adapter.Connect(context.Background()); status.State != agentintegration.Failed || !strings.Contains(status.Message, prepareError.Error()) {
+	prepareError = &codexhost.SetupError{Code: "launch_failed", Err: errors.New("fixture launch failure")}
+	if status := adapter.Connect(context.Background()); status.State != agentintegration.Failed || status.Issue == nil || status.Issue.Code != "launch_failed" {
 		t.Fatalf("installed plugin hid a failed restart: %+v", status)
 	}
 	prepareError = nil

@@ -43,7 +43,7 @@ def run_probe(kind='llm', source='OpenAI', response=None, status=200, **values):
 ])
 def test_each_type_sends_one_minimal_inference_request(kind, suffix, response):
     source = {
-        'multimodal_embedding': 'SiliconFlow', 'text2image': 'SenseNova',
+        'multimodal_embedding': 'SiliconFlow',
         'image_editing': 'SenseNova', 'stt': 'GLM', 'tts': 'SiliconFlow',
     }.get(kind, 'OpenAI')
     values = {'model': 'FunAudioLLM/CosyVoice2-0.5B'} if kind == 'tts' else {}
@@ -313,8 +313,11 @@ def test_missing_runtime_adapters_never_produce_false_positive_probes(source, ki
     assert requests == []
 
 
-@pytest.mark.parametrize('source', ['OpenAI', 'VLLM', 'LMDeploy'])
-@pytest.mark.parametrize('kind', ['text2image', 'text2video', 'image_editing', 'tts', 'stt'])
+@pytest.mark.parametrize(('source', 'kind'), [
+    (source, kind) for source in ['OpenAI', 'VLLM', 'LMDeploy']
+    for kind in ['text2image', 'text2video', 'image_editing', 'tts', 'stt']
+    if (source, kind) != ('OpenAI', 'text2image')
+])
 def test_compatible_protocol_does_not_imply_missing_runtime_media_support(source, kind):
     result, requests = run_probe(kind, source, response={'id': 'task-id'})
     assert result['status'] == 'unsupported'

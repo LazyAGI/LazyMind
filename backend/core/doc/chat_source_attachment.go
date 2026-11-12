@@ -328,6 +328,9 @@ func validateChatSourceDatasets(
 		if !exists {
 			return ErrChatSourceAttachmentUnavailable
 		}
+		if resourceTenant(dataset.TenantID) != resourceTenant(caller.TenantID) {
+			return ErrChatSourceAttachmentUnavailable
+		}
 		for _, attachment := range attachments {
 			if attachment.datasetID == datasetID && attachment.tenantID != "" &&
 				attachment.tenantID != strings.TrimSpace(dataset.TenantID) {
@@ -336,14 +339,6 @@ func validateChatSourceDatasets(
 		}
 		if !canAccessDataset(&dataset, caller.UserID, acl.PermissionDatasetRead) {
 			return ErrChatSourceAttachmentForbidden
-		}
-	}
-	items, checked := scanSourceAccessByDatasetForCaller(ctx, caller, datasetIDs, acl.PermissionDatasetRead)
-	if checked {
-		for _, datasetID := range datasetIDs {
-			if item, exists := items[datasetID]; exists && item.Exists && !item.Allowed {
-				return ErrChatSourceAttachmentForbidden
-			}
 		}
 	}
 	return nil

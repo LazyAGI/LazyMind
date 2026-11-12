@@ -509,6 +509,10 @@ func (m *RuntimeManager) Up(ctx context.Context, cfg RuntimeConfig, paths Runtim
 	if err := ensureLazyLLMSource(ctx, m.runner, paths.RepoRoot, freshCfg.Profile); err != nil {
 		return err
 	}
+	m.prepareDesktopCluster(ctx, freshCfg, paths)
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	for attempt := 1; attempt <= maxAutomaticPortStartupAttempts; attempt++ {
 		attemptCfg, attemptPaths, configErr := NewRuntimeConfigWithOptions(RuntimeConfigOptions{
 			Profile:         cfg.Profile,

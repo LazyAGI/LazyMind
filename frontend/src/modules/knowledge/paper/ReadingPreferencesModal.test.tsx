@@ -54,6 +54,7 @@ it('reveals per-feature controls on demand and keeps limits when choosing a plan
   expect(screen.queryByRole('combobox', { name: '公式研读' })).not.toBeInTheDocument();
   fireEvent.click(screen.getByRole('button', { name: /逐项调整/ }));
   expect(screen.getByRole('combobox', { name: '公式研读' })).toBeInTheDocument();
+  expect(screen.queryByText('论文速览')).not.toBeInTheDocument();
   fireEvent.click(screen.getByRole('radio', { name: /提前准备/ }));
   expect(screen.queryByRole('combobox', { name: '公式研读' })).not.toBeInTheDocument();
   fireEvent.click(screen.getByRole('button', { name: /保存预设/ }));

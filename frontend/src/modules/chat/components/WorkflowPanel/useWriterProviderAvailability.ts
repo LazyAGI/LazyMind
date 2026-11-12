@@ -50,9 +50,7 @@ export function useWriterProviderAvailability(providers: string[]) {
   }, [signature]);
   useEffect(() => {
     void refresh();
-    const onFocus = () => void refresh();
-    window.addEventListener('focus', onFocus);
-    return () => { generation.current++; window.removeEventListener('focus', onFocus); };
+    return () => { generation.current++; };
   }, [refresh]);
   return { states, accounts, obsidian, refresh };
 }

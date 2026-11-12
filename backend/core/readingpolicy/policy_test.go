@@ -48,6 +48,14 @@ func TestDefaultsValidationAndIsolation(t *testing.T) {
 	}
 }
 
+func TestRegistryDoesNotAdvertiseRemovedPaperOverview(t *testing.T) {
+	for _, capability := range Registry() {
+		if capability.ID == "overview" {
+			t.Fatal("removed paper overview is still advertised")
+		}
+	}
+}
+
 func TestPolicyRangeChangesNeverEnrollPriorDocuments(t *testing.T) {
 	db := orm.MigrateTestDB(t, &orm.UserReadingPolicy{})
 	ctx := context.Background()
