@@ -263,18 +263,6 @@ func TestResourceConcurrentFolderNameHasOneWinner(t *testing.T) {
 		t.Fatalf("concurrent conflict: successes=%d rows=%d", success, n)
 	}
 }
-func TestResourceSourcePolicyRunsBeforeTransaction(t *testing.T) {
-	s, _, op := resourceFixture(t)
-	calls := 0
-	s.sourceAccess = func(context.Context, DatasetCatalogCaller, string, string) error { calls++; return nil }
-	_, err := s.CreateFolders(context.Background(), op, CreateFoldersRequest{KnowledgeBaseID: "source", Folders: []string{"one/two"}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if calls != 1 {
-		t.Fatalf("source policy called %d times; transaction must reuse prepared policy", calls)
-	}
-}
 func TestResourceCrossMovePreparationFailureKeepsWholeTree(t *testing.T) {
 	s, db, op := resourceFixture(t)
 	ctx := context.Background()

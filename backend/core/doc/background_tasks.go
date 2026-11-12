@@ -48,6 +48,11 @@ func ListProcessingTasks(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "missing X-User-Id", 401)
 		return
 	}
+	caller, err := resolveDatasetCatalogCallerFromRequest(r)
+	if err != nil {
+		common.ReplyErr(w, "account identity unavailable", 403)
+		return
+	}
 	db := store.DB().WithContext(r.Context())
 	var datasets []orm.Dataset
 	if err := db.Where("deleted_at IS NULL").Find(&datasets).Error; err != nil {
@@ -57,12 +62,10 @@ func ListProcessingTasks(w http.ResponseWriter, r *http.Request) {
 	items := []ProcessingTaskItem{}
 	readable := make([]orm.Dataset, 0, len(datasets))
 	for _, dataset := range datasets {
-		if canAccessDataset(&dataset, user, acl.PermRead) {
+		if resourceTenant(dataset.TenantID) == resourceTenant(caller.TenantID) && canAccessDataset(&dataset, user, acl.PermRead) {
 			readable = append(readable, dataset)
 		}
 	}
-	// One scan-source authorization request per poll, not one per library.
-	readable = filterDatasetsByScanSourceAccess(r, readable, acl.PermissionDatasetRead)
 	for _, dataset := range readable {
 		var tasks []orm.Task
 		err := db.Where("tasks.dataset_id = ? AND tasks.deleted_at IS NULL", dataset.ID).

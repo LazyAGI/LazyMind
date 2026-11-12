@@ -10,6 +10,7 @@ import type { useWriterProviderAvailability } from './useWriterProviderAvailabil
 import { documentPublicationTargetUrl } from './documentPublicationUrl';
 import { documentPublicationErrorMessage } from './documentPublicationError';
 import { WriterProviderIcon } from './DocumentProviderChoice';
+import { WeChatTemplateSelect } from './WeChatTemplateSelect';
 import './DocumentPublicationDialog.scss';
 
 const running = new Set(['preparing', 'write_started', 'provider_confirmed', 'local_persist_failed', 'local_conflict']);
@@ -36,6 +37,7 @@ export function DocumentPublicationDialog({ artifactId, sourceSignature, provide
   const [state, setState] = useState<DocumentPublicationGroupState>();
   const [selected, setSelected] = useState<string[]>([]);
   const [connectionChoices, setConnectionChoices] = useState<Record<string, string>>({});
+  const [wechatTemplate, setWechatTemplate] = useState<string>();
   const [retryOperations, setRetryOperations] = useState<Record<string, string>>({});
   const [error, setError] = useState('');
   const [authorizationProvider, setAuthorizationProvider] = useState<string>();
@@ -55,6 +57,8 @@ export function DocumentPublicationDialog({ artifactId, sourceSignature, provide
   const [targetProblems, setTargetProblems] = useState<Record<string, string>>({});
   const vaults = availability.obsidian?.vaults ?? [];
   const savedParent = state?.targets.find(item => item.provider === 'obsidian')?.parent_uri;
+  const wechatTemplates = providers.find(item => item.id === 'wechat')?.templates ?? [];
+  const chosenTemplate = wechatTemplate ?? (state?.targets.find(item => item.provider === 'wechat')?.template || 'clean');
   const savedDestination = useMemo(() => {
     if (!savedParent) return undefined;
     try {
@@ -130,6 +134,7 @@ export function DocumentPublicationDialog({ artifactId, sourceSignature, provide
     if (providers.some(item => preferred.includes(item.id) && (!availability.states[item.id] || availability.states[item.id] === 'checking'))) return;
     initialized.current = true;
     setConnectionChoices({});
+    setWechatTemplate(undefined);
     setSelected(preferred.filter(canSelect));
     setRetryOperations({});
     setError('');
@@ -188,7 +193,8 @@ export function DocumentPublicationDialog({ artifactId, sourceSignature, provide
             parent = `obsidian://${chosenVault.id}/${path.split('/').map(encodeURIComponent).join('/')}`;
           }
           if (!existing?.bound && provider === 'github' && !parent) throw new Error(t('chat.publication.githubTargetRequired'));
-          return { provider, connection_id: account?.connection_id, parent_uri: existing?.bound ? undefined : parent, retry_operation_id: retryOperations[provider] };
+          return { provider, connection_id: account?.connection_id, parent_uri: existing?.bound ? undefined : parent,
+            template: provider === 'wechat' ? chosenTemplate : undefined, retry_operation_id: retryOperations[provider] };
         });
         if (targets.some(input => input.retry_operation_id && current.targets.find(item => item.provider === input.provider)?.operation_hash !== current.current_hash)) {
           setRetryOperations({});
@@ -358,6 +364,11 @@ export function DocumentPublicationDialog({ artifactId, sourceSignature, provide
               </div>;
             })}
           </div>
+          {selected.includes('wechat') && wechatTemplates.length > 0 && <div className='document-publication-accounts'>
+            <label htmlFor={`${resultsId}-wechat-template`}>{t('chat.publication.wechatTemplate')}</label>
+            <WeChatTemplateSelect id={`${resultsId}-wechat-template`} templates={wechatTemplates}
+              value={chosenTemplate} disabled={!open || submitting || uncertain || loading} onChange={setWechatTemplate} />
+          </div>}
           {selected.includes('obsidian') && !state.targets.find(item => item.provider === 'obsidian')?.bound && (vaults.length > 1 || vaultUnavailable || targetProblems.obsidian) && <div className='document-publication-accounts'>
             <label htmlFor={`${resultsId}-vault`}>{t('chat.publication.chooseVault')}</label>
             <Select id={`${resultsId}-vault`} value={chosenVault?.id} placeholder={t('chat.publication.chooseVault')} disabled={submitting || uncertain}

@@ -63,6 +63,7 @@ from .artifacts import (
     _set_document_editable,
     _temp_root,
     cleanup_writer_temporary,
+    markdown_to_writer_document,
     _write_document_input,
     _write_input_artifact,
     normalize_generated_markdown,
@@ -614,12 +615,12 @@ def stream_short_document(
     document = _primary_data(result)
     task = _read_artifact_data(writing_task_path)
     if (task.get('output') or {}).get('representation') == 'ir':
-        from lazyllm.tools.writer.utils import parse_document_markdown
         # Resolve placeholders before parsing Markdown images into IR.
-        document = finalize_short_document(
-            document, _read_artifact_data(media_assets_path) if media_assets_path else None,
+        media_assets = _read_artifact_data(media_assets_path) if media_assets_path else None
+        document = finalize_short_document(document, media_assets)
+        return markdown_to_writer_document(
+            document, document_id=task['task_id'], stage='draft', media_assets=media_assets,
         )
-        return parse_document_markdown(document, document_id=task['task_id'], stage='draft')
     return document
 
 

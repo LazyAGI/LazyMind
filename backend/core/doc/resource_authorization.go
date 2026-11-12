@@ -16,12 +16,9 @@ type resourceAuthorization struct {
 	allowed      map[ResourceAuthorizationRequest]bool
 }
 
-// PrepareResourceAuthorization resolves live external policy before opening a transaction.
+// PrepareResourceAuthorization snapshots group membership before opening a transaction.
 // The transaction still rechecks tenant, ACL rows, membership snapshots and resource versions.
 func PrepareResourceAuthorization(ctx context.Context, c DatasetCatalogCaller, requests []ResourceAuthorizationRequest) (context.Context, error) {
-	return prepareResourceAuthorization(ctx, c, requests, strictResourceSourceAccess)
-}
-func prepareResourceAuthorization(ctx context.Context, c DatasetCatalogCaller, requests []ResourceAuthorizationRequest, check func(context.Context, DatasetCatalogCaller, string, string) error) (context.Context, error) {
 	auth := &resourceAuthorization{user: c.UserID, tenant: resourceTenant(c.TenantID), groups: []string{}, allowed: map[ResourceAuthorizationRequest]bool{}}
 	if groups, ok := ctx.Value(resourcePreparedGroupsKey{}).([]string); ok {
 		auth.groups = groups
@@ -31,9 +28,6 @@ func prepareResourceAuthorization(ctx context.Context, c DatasetCatalogCaller, r
 	for _, r := range requests {
 		if auth.allowed[r] {
 			continue
-		}
-		if err := check(ctx, c, r.DatasetID, r.Action); err != nil {
-			return ctx, err
 		}
 		auth.allowed[r] = true
 	}
@@ -49,12 +43,6 @@ func resourcePreparedPolicy(tx *gorm.DB, c DatasetCatalogCaller, id, action stri
 		return resourceErr("UNAVAILABLE", "resource authorization must be prepared before transaction")
 	}
 	return nil
-}
-func (s *ResourceService) checkSource(ctx context.Context, tx *gorm.DB, c DatasetCatalogCaller, id, action string) error {
-	if resourceTransaction(tx) {
-		return resourcePreparedPolicy(tx, c, id, action)
-	}
-	return s.sourceAccess(ctx, c, id, action)
 }
 func resourceTransactionGroups(tx *gorm.DB) []string {
 	auth, _ := tx.Statement.Context.Value(resourceAuthorizationKey{}).(*resourceAuthorization)

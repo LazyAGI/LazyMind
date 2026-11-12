@@ -5040,9 +5040,14 @@ export type DocumentNumberingViewOrderedStyleEnum = typeof DocumentNumberingView
 export interface DocumentProvider {
     'capabilities': Array<string>;
     'id': string;
+    'templates'?: Array<DocumentProviderTemplate>;
 }
 export interface DocumentProviderCatalog {
     'providers': Array<DocumentProvider>;
+}
+export interface DocumentProviderTemplate {
+    'id': string;
+    'name': string;
 }
 export interface DocumentProvidersErrorOpenAPIData {
     'code': DocumentProvidersErrorOpenAPIDataCodeEnum;
@@ -5142,6 +5147,7 @@ export interface DocumentPublicationTargetInput {
     'parent_uri'?: string;
     'provider': string;
     'retry_operation_id'?: string;
+    'template'?: string;
     'title'?: string;
 }
 export interface DocumentPublicationTargetState {
@@ -5154,6 +5160,7 @@ export interface DocumentPublicationTargetState {
     'parent_uri'?: string;
     'provider': string;
     'target_url'?: string;
+    'template'?: string;
     'title'?: string;
 }
 export interface DocumentPublishInput {

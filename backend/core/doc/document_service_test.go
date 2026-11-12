@@ -108,7 +108,7 @@ func TestDocumentServiceGetMetadataChecksPermissionAndBelongsToDataset(t *testin
 	}
 }
 
-func TestDocumentServiceGetMetadataValidationNotFoundAndScanDeny(t *testing.T) {
+func TestDocumentServiceGetMetadataValidationAndCoreAuthorization(t *testing.T) {
 	db := newDocumentTestDB(t)
 	now := time.Date(2026, 7, 29, 11, 30, 0, 0, time.UTC)
 	seedDocumentServiceDataset(t, db, "dataset-1", "user-1", now)
@@ -147,8 +147,8 @@ func TestDocumentServiceGetMetadataValidationNotFoundAndScanDeny(t *testing.T) {
 	installDocumentServiceTransportWithScan(t, nil, `{"items":[{"dataset_id":"dataset-1","exists":true,"allowed":false}]}`)
 	denyService := mustDocumentService(t, db)
 	_, err := denyService.GetDocumentMetadata(context.Background(), DocumentGetRequest{UserID: "user-1", DatasetID: "dataset-1", DocumentID: "doc-1"})
-	if documentServiceCode(err) != DocumentServiceForbidden {
-		t.Fatalf("scan deny error = %v, want forbidden", err)
+	if err != nil {
+		t.Fatalf("Core owner metadata was rejected by source policy: %v", err)
 	}
 }
 

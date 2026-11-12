@@ -649,13 +649,6 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
       selectedSort: KnowledgeMineSort = "all",
       selectedCloudSource: KnowledgeMineCloudSource = "all",
     ) => {
-      if (ragAvailability !== "ready") {
-        mineTableRequestSeqRef.current += 1;
-        setCloudSources([]);
-        setTotal(0);
-        setLoading(false);
-        return;
-      }
       const requestSeq = mineTableRequestSeqRef.current + 1;
       mineTableRequestSeqRef.current = requestSeq;
       setLoading(true);
@@ -768,7 +761,7 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
         }
       }
     },
-    [ragAvailability, t, tableQueryKey, updateListState],
+    [t, tableQueryKey, updateListState],
   );
 
   const resolveCloudArchiveDatasetId = useCallback((record: DataSourceItem) => {

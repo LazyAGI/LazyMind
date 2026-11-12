@@ -3414,12 +3414,25 @@ const zhCN = {
       reason: { approval_capacity: "等待中的工作区请求过多，请先处理已有请求后再试。", operation_uncertain: "执行结果未知，请先核对文件再决定是否重试。", execution_inactive: "本次执行已结束或已被新的执行替代。", unsupported_file: "此工具无法读取该文件类型。", search_limit: "搜索已达到限制，请缩小目录或搜索范围。", mode_forbidden: "当前模式不支持本地工作区", selection_forbidden: "当前无法选择工作区", selection_expired: "工作区选择已过期，请重新选择", invalid_selection: "工作区选择无效", workspace_not_found: "工作区不存在", binding_conflict: "状态已变化，请重试", binding_locked: "任务工作区已锁定", revoked: "授权已撤销", path_unavailable: "目录当前不可用", path_invalid: "目录路径无效", unknown: "发生未知错误" },
     },
     publication: {
+      wechatTemplate: '公众号排版模板',
+      wechatTemplatePreview: '预览模板样式',
+      wechatTemplateDescriptions: {
+        clean: '清新绿调 · 舒展留白',
+        editorial_contrast: '鲜明对比 · 观点表达',
+        warm_humanist: '暖色纸感 · 人文叙事',
+      },
+      wechatTemplates: {
+        clean: '简洁阅读', editorial_contrast: '编辑对比', warm_humanist: '温暖人文',
+      },
       chooseVault: '选择 Obsidian 笔记库',
       configureVault: '需要配置笔记库或写入权限',
       notePath: '笔记库内的文件位置',
       notePathPlaceholder: '例如：文章/潮痕.md',
       githubDestination: 'GitHub 目标仓库、分支或目录',
       targetErrors: {
+        WECHAT_BODY_IMAGE_TOO_LARGE: '正文图片超过 1 MB，请压缩图片后重新发布。',
+        WECHAT_IMAGE_FORMAT_UNSUPPORTED: '公众号不支持此图片格式，请转换为 JPG 或 PNG 后重新发布。',
+        WECHAT_HTML_TOO_LARGE: '公众号正文 HTML 超过大小限制，请精简内容或排版后重新发布。',
         PUBLICATION_TARGET_EXISTS: '目标位置已存在同名文档，请调整目标后再发布。', PUBLICATION_PERMISSION_REQUIRED: '当前账号没有目标仓库的写入权限，请授权后重试。',
         OBSIDIAN_NOT_CONFIGURED: '尚未连接可访问的 Obsidian 笔记库，请先完成接入配置。',
         OBSIDIAN_VAULT_REQUIRED: '有多个或无法识别的笔记库，请明确选择目标库。',

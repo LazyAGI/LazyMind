@@ -584,7 +584,6 @@ const Detail = () => {
               <KnowledgeBaseSyncNow
                 datasetId={detail.dataset_id}
                 documentParsingEnabled={documentParsingEnabled}
-                enabled={ragReady}
                 onSyncComplete={refreshKnowledgeAfterSync}
               />
             ) : null}

@@ -12,7 +12,7 @@ func (s *ResourceService) cleanupResourceTree(ctx context.Context, caller Datase
 		if err := deleteScanSourceForDataset(ctx, tree.dataset.ID); err != nil {
 			return "failed", err
 		}
-		if err := deleteDatasetAlgoKB(ctx, &tree.dataset, caller.UserID); err != nil {
+		if err := deleteDatasetAlgoKB(ctx, s.db, &tree.dataset, caller.UserID); err != nil {
 			return "failed", err
 		}
 	} else {
