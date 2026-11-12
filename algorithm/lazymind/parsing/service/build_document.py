@@ -54,7 +54,15 @@ def _quiet_trace(kbs):
         from lazymind.model_config import inject_model_config
         inject_model_config(llm_config)
         args, kwargs = mark_embedding_query_arguments(args, kwargs)
-        return kbs[kb_group](*args, **kwargs)
+        from lazymind.parsing.service.embedding_reset import index_operation
+        with index_operation((llm_config or {}).get('_embedding_generation')) as generation:
+            doc = kbs[kb_group]
+            if getattr(doc, '_lazymind_store_generation', None) != generation:
+                if getattr(doc, '_lazy_init', None) is not None and doc._lazy_init.flag:
+                    doc._store = _build_store_config(EMBED_INDEX_KWARGS)
+                    doc._create_store()
+                doc._lazymind_store_generation = generation
+            return doc(*args, **kwargs)
     return call
 
 

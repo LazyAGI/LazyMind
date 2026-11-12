@@ -108,6 +108,11 @@ class RemoteWorkflowExecutor:
         task_id = ''
         try:
             context = await self.runtime.context(client, attempt_id, lease)
+            if context.get('objective_ref') == '#/prompt':
+                objective = str(context.get('prompt') or '')
+                if context.get('objective'):
+                    objective += '\n\nRuntime objective:\n' + str(context['objective'])
+                context['objective'] = objective
             metadata = context.get('metadata') or {}
             task_id = str(metadata.get('task_id') or attempt_id)
             spec = await self.runtime.execution_spec(client, task_id, lease)
@@ -181,6 +186,7 @@ class RemoteWorkflowExecutor:
                 # compiled step may request values, references, or fenced local paths.
                 # Keep every form out of attachment-only tools.
                 params['remote_inputs'] = inputs
+                params['remote_input_bindings'] = context.get('inputs') or {}
                 params['remote_input_types'] = input_types
                 params['remote_input_transports'] = input_transports
                 params['remote_input_value_slots'] = direct_value_slots

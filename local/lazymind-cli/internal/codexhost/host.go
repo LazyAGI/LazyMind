@@ -103,7 +103,7 @@ func DesktopReady(ctx context.Context, port int) (bool, error) {
 		if errors.Is(err, connectionRefused) {
 			return false, nil
 		}
-		return false, fmt.Errorf("Codex CDP endpoint is unavailable: %w", err)
+		return false, setupError("cdp_unavailable", fmt.Errorf("Codex CDP endpoint is unavailable: %w", err))
 	}
 	defer response.Body.Close()
 	var targets []struct {
@@ -111,7 +111,7 @@ func DesktopReady(ctx context.Context, port int) (bool, error) {
 		URL  string `json:"url"`
 	}
 	if response.StatusCode != 200 || json.NewDecoder(http.MaxBytesReader(nil, response.Body, 1<<20)).Decode(&targets) != nil {
-		return false, errors.New("Codex CDP port is occupied by another service")
+		return false, setupError("control_port_conflict", errors.New("Codex CDP port is occupied by another service"))
 	}
 	count := 0
 	for _, target := range targets {
@@ -122,7 +122,7 @@ func DesktopReady(ctx context.Context, port int) (bool, error) {
 		}
 	}
 	if count == 0 {
-		return false, errors.New("Codex chat window is missing")
+		return false, setupError("control_window_unavailable", errors.New("Codex chat window is missing"))
 	}
 	return true, nil
 }
@@ -130,32 +130,35 @@ func DesktopReady(ctx context.Context, port int) (bool, error) {
 var prepareDesktopLaunch = launchDesktop
 
 func PrepareDesktop(ctx context.Context, home string) error {
-	return prepareDesktop(ctx, home, waitForConnection)
+	return prepareDesktop(ctx, home, false, waitForConnection)
 }
 
-// Installation confirms a launched desktop, independently of optional native
-// session-control compatibility. Workflow execution still uses CheckConnection.
+// An explicit connection reloads the installed plugin even when CDP is already
+// reachable. The caller then waits for a new connector heartbeat with WaitReady.
 func PrepareDesktopForInstallation(ctx context.Context, home string) error {
-	return prepareDesktop(ctx, home, waitForDesktopStartup)
+	return prepareDesktop(ctx, home, true, waitForDesktopStartup)
 }
 
-func prepareDesktop(ctx context.Context, home string, wait func(context.Context, string) error) error {
+func prepareDesktop(ctx context.Context, home string, reload bool, wait func(context.Context, string) error) error {
 	c, err := readConfig(home)
 	if err != nil {
-		return err
+		return setupError("startup_unavailable", err)
 	}
 	application, err := startupApplication()
 	if err != nil {
-		return err
+		return setupError("startup_unavailable", err)
 	}
 	ready, err := startupDesktopReady(ctx, c.Port)
-	if err != nil {
+	missingWindow := SetupIssue(err) == "control_window_unavailable"
+	if err != nil && !(reload && missingWindow) {
 		return err
 	}
-	if ready && !startupListenerMatches(ctx, application, c.Port) {
-		return errors.New("CODEX_CDP_UNAVAILABLE: the debugging port is not owned by Codex; resolve the port conflict before reconnecting")
+	// A Codex process left in the tray can retain CDP without a chat window.
+	// Explicit reconnect may restore it only after verifying listener ownership.
+	if (ready || missingWindow) && !startupListenerMatches(ctx, application, c.Port) {
+		return setupError("control_port_conflict", errors.New("CODEX_CDP_UNAVAILABLE: the debugging port is not owned by Codex; resolve the port conflict before reconnecting"))
 	}
-	if !ready {
+	if reload || !ready {
 		reportRecovery(ctx, "closing")
 		if err := ctx.Err(); err != nil {
 			return err
@@ -177,11 +180,15 @@ func waitForDesktopStartup(ctx context.Context, home string) error {
 			return nil
 		}
 		if health == "startup_unavailable" {
-			return connectionIssue("CODEX_CONFIGURATION_UNAVAILABLE", "Codex installation or connection configuration is unavailable.", false)
+			return setupError(health, errors.New("Codex installation or connection configuration is unavailable"))
 		}
 		select {
 		case <-ctx.Done():
-			return fmt.Errorf("Codex startup did not become ready (%s): %w", health, ctx.Err())
+			code := health
+			if code == "waiting_for_app" || code == "connection_required" {
+				code = "startup_timeout"
+			}
+			return setupError(code, fmt.Errorf("Codex startup did not become ready (%s): %w", health, ctx.Err()))
 		case <-time.After(time.Second):
 		}
 	}

@@ -54,7 +54,7 @@ sequenceDiagram
 
 内部通过回调启动 Controller 下一轮，外部通过 HostAction 与 Host Connector 唤醒；同一 Agent 兼任 Executor 时，直接根据提交回执继续推进。
 
-新版工作流声明 `runtime.execution.version: '1'`，业务步骤、输出和验收标准只来自 `state.yml`。原生与外部执行器读取同 revision 的共享 Skill、约束和数据契约，仅工具调用与模型能力由执行适配器选择。外部宿主创建全部 subagent、生成内容并做语义/视觉验证，LazyMind 保存状态和产物。Core 只执行权限、租约、输入/输出类型、版本与存储一致性检查，不将服务端模型或语义验证回执作为完成前提。兼容字段 `external_execution` 是共享契约的投影，不是第二套工作流；历史 `runtime.external_execution` revision 与更早的执行归属规则保持不变。
+工作流声明 `runtime.execution.version: '1'`，业务步骤、输出和验收标准只来自 `state.yml`。原生与外部执行器读取同 revision 的共享 Skill、约束和数据契约，仅工具调用与模型能力由执行适配器选择。外部宿主可直接执行或分派 subagent，负责生成内容与语义/视觉验证；LazyMind 保存状态和产物。Core 只执行权限、租约、输入/输出类型、版本与存储一致性检查，不将服务端模型或语义验证回执作为完成前提。契约只使用共享 `execution`，不提供 `external_execution` 或旧格式转换。
 
 根 Controller 保留 `execution_handle`，子代理只接收固定契约、输入与输出目录。工具调用由根代理通过 `workflow.tool.list/call` 代理；生成与验证完成后，根代理发布真实产物并提交 outcome。宿主缺少某项能力时可调用契约允许的 LazyMind 工具；工具也不可用时提示用户在 LazyMind 配置相应功能后重试。完整接入说明见 [外部工作流开发接入](../dev/external-workflow.md)。
 

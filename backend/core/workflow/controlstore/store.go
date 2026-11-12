@@ -70,6 +70,7 @@ type Snapshot struct {
 	ActiveExecutions    int64                          `json:"active_executions"`
 	NativeExecutionIDs  []string                       `json:"native_execution_ids"`
 	ActiveExecutionIDs  []string                       `json:"active_execution_ids"`
+	ExpiredExecutionIDs []string                       `json:"expired_execution_ids,omitempty"`
 	AvailableActions    []string                       `json:"available_actions"`
 	AutomaticRetrySteps []string                       `json:"automatic_retry_steps"`
 }
@@ -161,22 +162,34 @@ func Read(tx *gorm.DB, session orm.WorkflowSession) (*Snapshot, error) {
 			pending++
 		}
 	}
-	result.ActiveExecutionIDs = []string{}
-	if err := tx.Model(&orm.WorkflowSessionStep{}).Where("session_id = ? AND validity = 'effective' AND status IN ?",
-		session.ID, []string{"queued", "pending", "claimed", "running"}).Order("id ASC").Pluck("id", &result.ActiveExecutionIDs).Error; err != nil {
+	var attempts []orm.WorkflowSessionStep
+	if err := tx.Select("id", "executor_host", "status", "lease_expires_at").Where("session_id = ? AND validity = 'effective' AND status IN ?",
+		session.ID, []string{"queued", "pending", "claimed", "running"}).Order("id ASC").Find(&attempts).Error; err != nil {
 		return nil, err
 	}
+	result.ActiveExecutionIDs = []string{}
 	result.NativeExecutionIDs = []string{}
-	if err := tx.Model(&orm.WorkflowSessionStep{}).Where("id IN ? AND executor_host = ?", result.ActiveExecutionIDs, "lazymind").Order("id ASC").Pluck("id", &result.NativeExecutionIDs).Error; err != nil {
-		return nil, err
+	now := time.Now().UTC()
+	for _, attempt := range attempts {
+		if attempt.ExecutorHost != "lazymind" && (attempt.Status == "claimed" || attempt.Status == "running") &&
+			attempt.LeaseExpiresAt != nil && attempt.LeaseExpiresAt.Before(now) {
+			result.ExpiredExecutionIDs = append(result.ExpiredExecutionIDs, attempt.ID)
+			continue
+		}
+		result.ActiveExecutionIDs = append(result.ActiveExecutionIDs, attempt.ID)
+		if attempt.ExecutorHost == "lazymind" {
+			result.NativeExecutionIDs = append(result.NativeExecutionIDs, attempt.ID)
+		}
 	}
 	result.ActiveExecutions = int64(len(result.ActiveExecutionIDs))
+	// An expired grant still represents unfinished work for admission.
+	outstanding := int64(len(attempts))
 	result.InputRequest, err = displaystate.PendingInput(tx, session)
 	if err != nil {
 		return nil, err
 	}
 	result.AutomaticRetrySteps = []string{}
-	if session.Status == "failed" && result.ActiveExecutions == 0 {
+	if session.Status == "failed" && outstanding == 0 {
 		exhausted := tx.Model(&orm.WorkflowTransitionCommand{}).Select("target_step_id").
 			Where("session_id = ? AND operation IN ? AND retry_origin = ? AND status = ?",
 				session.ID, []string{"execute", "retry"}, "automatic", "accepted").
@@ -189,7 +202,7 @@ func Read(tx *gorm.DB, session orm.WorkflowSession) (*Snapshot, error) {
 		}
 	}
 	result.Continuation, result.Admission = controlpolicy.Decide(controlpolicy.Facts{Status: session.Status,
-		Dismissed: session.Dismissed, PendingInput: result.InputRequest != nil, PendingReviews: pending, ActiveAttempts: result.ActiveExecutions, NativeAttempts: int64(len(result.NativeExecutionIDs)),
+		Dismissed: session.Dismissed, PendingInput: result.InputRequest != nil, PendingReviews: pending, ActiveAttempts: outstanding, NativeAttempts: int64(len(result.NativeExecutionIDs)),
 		BindingRequired: binding.Required, Bound: result.Binding.Bound, AutomaticRetryAvailable: len(result.AutomaticRetrySteps) > 0})
 	if binding.EditPaused && session.Status != "stopped" {
 		result.Continuation = "awaiting_user"
@@ -211,7 +224,7 @@ func Read(tx *gorm.DB, session orm.WorkflowSession) (*Snapshot, error) {
 			result.AvailableActions = append(result.AvailableActions, "confirm")
 		}
 		result.AvailableActions = append(result.AvailableActions, "rewind")
-		if result.ActiveExecutions == 0 {
+		if outstanding == 0 {
 			result.AvailableActions = append(result.AvailableActions, "retry")
 			if result.Binding.Bound {
 				if pending == 1 {

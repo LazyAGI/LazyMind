@@ -26,7 +26,7 @@ def entry_fixture():
 
 
 def catalog_for(entry):
-    return dict(schemaVersion=1, platform=entry['platform'], arch=entry['arch'], components={'rag': entry})
+    return dict(schemaVersion=1, platform=entry['platform'], arch=entry['arch'], components={entry['id']: entry})
 
 
 class OnlineCatalogTests(unittest.TestCase):
@@ -106,9 +106,14 @@ class PublicationTests(unittest.TestCase):
                 publish.publish(root, 'test/repo', python=Path('/python'), api=api, signing_mode='adhoc')
             self.assertEqual(signatures.call_args.kwargs, {'adhoc': True})
 
-    def fixture(self, directory, platform='windows'):
+    def fixture(self, directory, platform='windows', component='rag'):
         entry = entry_fixture()
         entry['platform'] = platform
+        if component != 'rag':
+            tag = 'f' * 64
+            url = entry['catalogUrl'].replace(entry['tag'], tag)
+            entry.update(id=component, tag=tag, revision=tag, filename=f'{component}.zip',
+                         catalogUrl=url, url=url.replace('python-components.json', f'{component}.zip'))
         with zipfile.ZipFile(directory / entry['filename'], 'w') as archive:
             archive.writestr('bundle-manifest.json', json.dumps(entry))
             archive.writestr('site-packages/orjson/__init__.py', '# fixture')
@@ -116,6 +121,25 @@ class PublicationTests(unittest.TestCase):
         entry.update(sha256=hashlib.sha256(payload).hexdigest(), sizeBytes=len(payload))
         (directory / 'python-components.json').write_text(json.dumps(catalog_for(entry)))
         return entry
+
+    def test_cluster_and_rag_publish_their_own_verified_tag_channels(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            rag = self.fixture(root)
+            cluster = self.fixture(root, component='cluster')
+            catalog = catalog_for(rag)
+            catalog['components']['cluster'] = cluster
+            (root / 'python-components.json').write_text(json.dumps(catalog))
+            api = Mock()
+            with patch.object(verify, 'resolve_catalog_entry', side_effect=lambda value: value) as resolve, \
+                    patch.object(verify, 'acquire_bundle'):
+                publish.publish(root, 'test/repo', api=api)
+            self.assertEqual([call.args[0]['id'] for call in resolve.call_args_list], ['rag', 'cluster'])
+            self.assertEqual([call.kwargs['path_in_repo'] for call in api.upload_file.call_args_list], [
+                f'RAG/tags/{entry["tag"]}/{filename}'
+                for entry in (rag, cluster)
+                for filename in (entry['filename'], 'SHA256SUMS', 'python-components.json')
+            ])
 
     def test_zip_and_checksums_precede_catalog_then_download_verification(self):
         with tempfile.TemporaryDirectory() as tmp:

@@ -8,7 +8,7 @@ import (
 	"time"
 )
 
-func TestAssetPrefetchHomePagesBeforeGallery(t *testing.T) {
+func TestAssetPrefetchOnlyVisibleHomeRows(t *testing.T) {
 	var catalog Catalog
 	downloads := assetDownloads{Bundles: map[string]assetBundle{}}
 	for i := 10; i >= 0; i-- {
@@ -21,6 +21,8 @@ func TestAssetPrefetchHomePagesBeforeGallery(t *testing.T) {
 	// A hidden case must never be downloaded just because its bundle exists.
 	catalog.Cases = append(catalog.Cases, FeaturedDefinition{ID: "hidden", Version: "v1", Type: TypeChat, Status: StatusPublished})
 	downloads.Bundles["hidden/v1"] = assetBundle{}
+	catalog.Cases = append(catalog.Cases, FeaturedDefinition{ID: "gallery", Version: "v1", Type: TypeChat, Status: StatusPublished, Placement: FeaturedPlacement{Gallery: true}})
+	downloads.Bundles["gallery/v1"] = assetBundle{}
 	got := assetPrefetchOrder(catalog, downloads)
 	var first []string
 	for _, kind := range []string{TypeChat, TypeWorkflow} {
@@ -28,15 +30,8 @@ func TestAssetPrefetchHomePagesBeforeGallery(t *testing.T) {
 			first = append(first, fmt.Sprintf("%s-%02d/v1", kind, i))
 		}
 	}
-	if len(got) != 22 || !reflect.DeepEqual(got[:16], first) {
+	if !reflect.DeepEqual(got, first) {
 		t.Fatalf("unexpected prefetch order: %v", got)
-	}
-	seen := map[string]bool{}
-	for _, key := range got {
-		if seen[key] {
-			t.Fatalf("duplicate %s", key)
-		}
-		seen[key] = true
 	}
 }
 

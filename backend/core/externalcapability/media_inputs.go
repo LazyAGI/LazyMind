@@ -16,7 +16,7 @@ const maxExternalMediaInputBytes = 20 << 20
 // Only immutable resources owned by the authenticated user cross this boundary.
 // External paths/URLs are never passed to the media tool's legacy file resolver.
 func (s *Service) resolveMediaInputs(ctx context.Context, userID, name string, arguments map[string]any) (map[string]any, error) {
-	if name != "image_editor" && name != "video_generator" {
+	if name != "image_editor" && name != "video_generator" && name != "multimodal" {
 		return arguments, nil
 	}
 	result := make(map[string]any, len(arguments))
@@ -53,6 +53,14 @@ func (s *Service) resolveMediaInputs(ctx context.Context, userID, name string, a
 		encoded := "data:" + mimeType + ";base64," + base64.StdEncoding.EncodeToString(resource.Content)
 		cache[ref] = encoded
 		return encoded, nil
+	}
+	if name == "multimodal" {
+		image, err := resolve(result["url"])
+		if err != nil {
+			return nil, err
+		}
+		result["url"] = image
+		return result, nil
 	}
 	for _, key := range []string{"urls", "reference_urls", "first_frame_url", "last_frame_url"} {
 		value, present := result[key]

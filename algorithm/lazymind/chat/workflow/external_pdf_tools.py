@@ -31,19 +31,20 @@ def _pdf_source(content_base64: str, filename: str):
     if (not isinstance(filename, str) or not filename or len(filename) > 200
             or Path(filename).name != filename or not filename.lower().endswith('.pdf')
             or not Path(filename).stem or any(char in filename for char in '\\\0\r\n')):
-        raise ExternalToolError('INVALID_ARGUMENT', 'filename must be a plain .pdf filename.')
+        raise ExternalToolError('INVALID_ARGUMENT', 'filename must be a plain .pdf filename.', public=True)
     if not isinstance(content_base64, str) or len(content_base64) > MAX_FILE_BYTES * 4 // 3 + 4:
-        raise ExternalToolError('INVALID_ARGUMENT', 'PDF input exceeds the 24 MiB transfer limit.')
+        raise ExternalToolError('INVALID_ARGUMENT', 'PDF input exceeds the 24 MiB transfer limit.', public=True)
     try:
         raw = base64.b64decode(content_base64, validate=True)
     except ValueError as exc:
-        raise ExternalToolError('INVALID_ARGUMENT', 'Provide a valid base64 PDF file.') from exc
+        raise ExternalToolError('INVALID_ARGUMENT', 'Provide a valid base64 PDF file.', public=True) from exc
     if not raw or len(raw) > MAX_FILE_BYTES:
-        raise ExternalToolError('INVALID_ARGUMENT', 'PDF input must be nonempty and within the 24 MiB limit.')
+        raise ExternalToolError('INVALID_ARGUMENT', 'PDF input must be nonempty and within the 24 MiB limit.',
+                                public=True)
     # MuPDF can open several document types. A renamed image must not silently
     # become a PDF source merely because it has a .pdf filename.
     if b'%PDF-' not in raw[:1024]:
-        raise ExternalToolError('INVALID_ARGUMENT', 'Provide a PDF file, not another document type.')
+        raise ExternalToolError('INVALID_ARGUMENT', 'Provide a PDF file.', public=True)
     with tempfile.TemporaryDirectory(prefix='external-pdf-') as directory:
         root = Path(directory)
         source = root / 'source.pdf'
@@ -51,10 +52,11 @@ def _pdf_source(content_base64: str, filename: str):
         try:
             with fitz.open(source) as document:
                 if not document.is_pdf or not len(document):
-                    raise ExternalToolError('INVALID_ARGUMENT', 'Provide a PDF containing at least one page.')
+                    raise ExternalToolError('INVALID_ARGUMENT', 'Provide a PDF containing at least one page.',
+                                            public=True)
                 if document.needs_pass:
                     raise ExternalToolError('INVALID_ARGUMENT',
-                                            'Password-protected PDF must be unlocked before extraction.')
+                                            'Password-protected PDF must be unlocked before extraction.', public=True)
                 total_pages = len(document)
             yield source, root, total_pages, hashlib.sha256(raw).hexdigest()
         except ExternalToolError:
@@ -69,16 +71,17 @@ def pdf_read_text(content_base64: str, filename: str = 'source.pdf', start_page:
                   page_count: int = 5, max_chars: int = 20000, page_offset: int = 0) -> dict[str, Any]:
     """Read bounded PDF text without OCR/models; resume using next_page and next_page_offset."""
     if type(start_page) is not int or start_page < 1:
-        raise ExternalToolError('INVALID_ARGUMENT', 'start_page must be a positive integer.')
+        raise ExternalToolError('INVALID_ARGUMENT', 'start_page must be a positive integer.', public=True)
     if type(page_count) is not int or not 1 <= page_count <= 10:
-        raise ExternalToolError('INVALID_ARGUMENT', 'page_count must be between 1 and 10.')
+        raise ExternalToolError('INVALID_ARGUMENT', 'page_count must be between 1 and 10.', public=True)
     if type(max_chars) is not int or not 1 <= max_chars <= 100000:
-        raise ExternalToolError('INVALID_ARGUMENT', 'max_chars must be between 1 and 100000.')
+        raise ExternalToolError('INVALID_ARGUMENT', 'max_chars must be between 1 and 100000.', public=True)
     if type(page_offset) is not int or page_offset < 0:
-        raise ExternalToolError('INVALID_ARGUMENT', 'page_offset must be a nonnegative character offset.')
+        raise ExternalToolError('INVALID_ARGUMENT', 'page_offset must be a nonnegative character offset.', public=True)
     with _pdf_source(content_base64, filename) as (source, _, total_pages, digest):
         if start_page > total_pages:
-            raise ExternalToolError('INVALID_ARGUMENT', 'start_page is outside the PDF.')
+            raise ExternalToolError('INVALID_ARGUMENT', f'start_page must be between 1 and {total_pages}.',
+                                    public=True)
         # Bypass LocalDocumentReader.__call__, whose configured route may use
         # OCR. This is the same sorted local extraction used by native PDF reads.
         nodes = LocalDocumentReader._read_pdf(source, start_page=start_page, page_count=page_count)
@@ -88,7 +91,8 @@ def pdf_read_text(content_base64: str, filename: str = 'source.pdf', start_page:
             number = node.metadata['page']
             offset = page_offset if number == start_page else 0
             if offset > len(node.text):
-                raise ExternalToolError('INVALID_ARGUMENT', 'page_offset is outside the first requested page text.')
+                raise ExternalToolError('INVALID_ARGUMENT', f'page_offset must be between 0 and {len(node.text)}.',
+                                        public=True)
             text = node.text[offset:offset + remaining]
             truncated = offset + len(text) < len(node.text)
             pages.append({'page': number, 'text': text, 'text_offset': offset, 'truncated': truncated})
@@ -112,10 +116,12 @@ def pdf_extract_images(content_base64: str, filename: str = 'source.pdf', page: 
                        include_content: bool = False) -> dict[str, Any]:
     """Extract one PDF page's images/crops; request include_content to transfer PNGs for external visual review."""
     if type(include_content) is not bool:
-        raise ExternalToolError('INVALID_ARGUMENT', 'include_content must be a boolean.')
+        raise ExternalToolError('INVALID_ARGUMENT', 'include_content must be a boolean.', public=True)
     if type(page) is not int or page < 1:
-        raise ExternalToolError('INVALID_ARGUMENT', 'page must be a positive integer.')
-    with _pdf_source(content_base64, filename) as (source, root, _, _):
+        raise ExternalToolError('INVALID_ARGUMENT', 'page must be a positive integer.', public=True)
+    with _pdf_source(content_base64, filename) as (source, root, total_pages, _):
+        if page > total_pages:
+            raise ExternalToolError('INVALID_ARGUMENT', f'page must be between 1 and {total_pages}.', public=True)
         extracted = extract_pdf_images(source, root / 'images', page=page, regions=regions, source_name=filename)
         images, files, total_bytes = [], [], 0
         for image in extracted['images']:

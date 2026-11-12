@@ -44,7 +44,7 @@ def pptx_bytes(order=(2, 1), absolute_targets=False):
     return output.getvalue()
 
 
-def request(files=None, tools=None, policy='external_execution', **extra):
+def request(files=None, tools=None, policy='execution', **extra):
     tools = tools if tools is not None else ['ppt_inspect_pptx']
     workflow = {'runtime': {policy: {'version': '1', 'steps': {
         'inspect': {'tools': [{'name': name, 'source': 'package'} for name in tools]}}}},
@@ -62,9 +62,8 @@ def call(payload, name='ppt_inspect_pptx', arguments=None):
 
 
 @pytest.mark.parametrize('absolute_targets', [False, True])
-@pytest.mark.parametrize('policy', ['external_execution', 'execution'])
-def test_pinned_tool_catalog_and_real_inspection_preserve_slide_order(absolute_targets, policy):
-    payload = request(policy=policy)
+def test_pinned_tool_catalog_and_real_inspection_preserve_slide_order(absolute_targets):
+    payload = request()
     catalog = list_external_tools(ExternalToolRequest(**payload))['tools']
     assert catalog[0]['available'] is True
     assert catalog[0]['name'] == 'ppt_inspect_pptx'
@@ -80,6 +79,7 @@ def test_pinned_tool_catalog_and_real_inspection_preserve_slide_order(absolute_t
     ({'files': {'../secret': b'no'}}, 'INVALID_PACKAGE'),
     ({'step_id': 'other-step'}, 'INVALID_PACKAGE'),
     ({'tree_hash': '0' * 64}, 'INVALID_PACKAGE'),
+    ({'policy': 'external_execution'}, 'INVALID_PACKAGE'),
 ])
 def test_snapshot_and_adapter_boundary(change, code):
     with pytest.raises(ppt.ExternalToolError) as raised:
@@ -153,6 +153,12 @@ def test_authenticated_route_uses_same_pinned_validation(monkeypatch):
     response = client.post('/api/workflow/external-tools/call', json=payload, headers=headers)
     assert response.status_code == 400
     assert response.json()['detail']['code'] == 'TOOL_NOT_ALLOWED'
+    assert 'public_message' not in response.json()['detail']
+
+    render = request(tools=['ppt_render_html'], tool_name='ppt_render_html', arguments={'html': '<div>fragment</div>'})
+    response = client.post('/api/workflow/external-tools/call', json=render, headers=headers)
+    assert response.status_code == 400
+    assert response.json()['detail']['public_message'] == 'Provide a complete html document with an <html> element.'
 
 
 def test_every_builtin_has_one_shared_business_specification():
@@ -173,7 +179,7 @@ def test_every_builtin_has_one_shared_business_specification():
             for skill in shared['skills'] + contract.get('skills', []):
                 assert (path.parent / skill).is_file()
             count += 1
-    assert count == 107
+    assert count == 104
 
 
 @pytest.mark.skipif(not os.environ.get('LAZYMIND_PPT_EXPORT_CLI'), reason='requires installed PPT exporter and Chromium')
@@ -191,3 +197,35 @@ def test_installed_exporter_one_page_and_preview_are_real_inline_files():
     rendered = call(payload, 'ppt_render_html', {'html': HTML})['result']['files'][0]
     assert base64.b64decode(rendered['content_base64']).startswith(b'\x89PNG\r\n\x1a\n')
     assert rendered['size_bytes'] > 100
+
+
+def test_template_inspection_returns_real_geometry_and_typography_without_a_model(monkeypatch):
+    import lazyllm
+    from pptx import Presentation
+    from pptx.util import Inches, Pt
+
+    monkeypatch.setattr(lazyllm, 'AutoModel', lambda **kw: pytest.fail('inspection must not call a model'))
+    presentation = Presentation()
+    for title in ('Template first', 'Template second'):
+        slide = presentation.slides.add_slide(presentation.slide_layouts[6])
+        shape = slide.shapes.add_textbox(Inches(1), Inches(2), Inches(5), Inches(1))
+        run = shape.text_frame.paragraphs[0].add_run()
+        run.text = title
+        run.font.size = Pt(24)
+        run.font.name = 'Arial'
+    raw = io.BytesIO()
+    presentation.save(raw)
+    result = call(request(), arguments={'content_base64': base64.b64encode(raw.getvalue()).decode(),
+                                        'include_layout': True})['result']
+    template = result['template']
+    assert template['slide_count'] == result['page_count'] == 2
+    assert template['all_pages'] is True and template['next_page'] is None
+    assert template['composition']['page_size_inches']['cx'] == presentation.slide_width / 914400
+    assert [page['page'] for page in template['pages']] == [1, 2]
+    for page, title in zip(template['pages'], ('Template first', 'Template second')):
+        slot = next(slot for slot in page['slots'] if slot['text'] == title)
+        assert slot['shape_id']
+        assert slot['effective_typography']['size_pt'] == 24
+        assert slot['effective_typography']['fonts']['latin'] == 'Arial'
+        assert any(shape['geometry'] for shape in page['shapes'])
+        assert 'layout_checks' in page

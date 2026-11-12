@@ -5,7 +5,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vite
 import { deferred, desktopTestTranslation as t, installDesktopTestDOM } from "@/test/desktopResourceFixtures";
 
 const mocks = vi.hoisted(() => ({ mode: "desktop", session: vi.fn(), get: vi.fn(), post: vi.fn(), local: vi.fn(), detail: vi.fn(), installs: vi.fn(), install: vi.fn(), update: vi.fn() }));
-vi.mock("react-i18next", () => ({ useTranslation: () => ({ t }) }));
+vi.mock("react-i18next", async (load) => ({ ...await load<typeof import("react-i18next")>(), useTranslation: () => ({ t }) }));
 vi.mock("@/runtime/mode", async (load) => ({ ...await load<object>(), isDesktopRuntime: () => mocks.mode === "desktop" }));
 vi.mock("@/runtime/cloud/session", () => ({ getCloudSession: mocks.session, isCloudBusinessAvailable: (session: any) => session?.state === "signed_in" && session?.configured !== false && session?.reachability !== "unreachable", LAZYMIND_CLOUD_SESSION_CHANGED_EVENT: "lazymind:cloud-session-changed" }));
 vi.mock("@/modules/knowledge/api/knowledgeMarket", () => ({

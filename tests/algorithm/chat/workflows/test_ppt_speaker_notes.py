@@ -233,7 +233,7 @@ def test_notes_source_is_hidden_and_bound_to_generation():
     source = next(s for s in workflow['slots'] if s['id'] == 'speaker_notes_source')
     assert source['user_visible'] is False and source['type'] == 'file'
     assert {'material': 'speaker_notes_source'} in state['steps']['plan_page_prompts']['outputs']
-    assert {'material': 'speaker_notes_source', 'required': False} in state['steps']['generate_ppt']['inputs']
+    assert {'material': 'speaker_notes_source', 'required': True} in state['steps']['generate_ppt']['inputs']
     assert all(s.get('id') != 'speaker_notes_source' for tab in workflow['ui']['tabs'] for s in tab.get('slots', []))
 
 
@@ -328,10 +328,10 @@ def test_planning_authors_scripts_and_generation_only_references_them():
     root = Path(__file__).resolve().parents[4]
     steps = yaml.safe_load((root / 'workflows/ppt-workflow/scenario/state.yml').read_text(encoding='utf-8'))['steps']
     plan, generate = steps['plan_page_prompts'], steps['generate_ppt']
-    assert 'speaker_notes=[<complete timed spoken script' in plan['prompt']
-    assert 'Talk timing plan:' in plan['prompt']
+    assert 'Author each spoken script once' in plan['prompt']
+    assert {'material': 'presentation_timing', 'required': False} in plan['inputs']
     assert 'Speaker scripts were authored once' not in plan['prompt']
-    assert 'Speaker scripts were authored once' in generate['prompt']
+    assert 'rewrite the saved scripts' in generate['prompt']
     assert 'Write speakable prose that fits this duration' not in generate['prompt']
     assert 'ppt_update_speaker_notes' not in generate['tools']
     assert 'ppt_update_speaker_notes' in steps['plan_page_prompts']['tools']
@@ -346,8 +346,8 @@ def test_planning_authors_scripts_and_generation_only_references_them():
             assert material not in producers, (step_name, material)
             producers[material] = step_name
     assert all(x['material'] != 'speaker_notes_source' for x in steps['analyze_requirements']['outputs'])
-    for name in ['build_outline', 'plan_page_prompts', 'generate_ppt']:
-        assert 'Never display PR/issue/work-log identifiers' in steps[name]['prompt']
+    shared = (root / 'workflows/ppt-workflow/scenario/execution.md').read_text()
+    assert 'PR/issue/work-log identifiers and evidence citations in notes' in shared
 
 
 def test_retime_planning_only_saves_sources_without_touching_output(tmp_path, monkeypatch):

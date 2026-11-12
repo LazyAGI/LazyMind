@@ -11,7 +11,7 @@ export interface ReadingPolicy {
   limits: { daily_documents: number; study_items_per_document: number; automatic_concurrency: number };
 }
 export interface ReadingCapability {
-  id: ReadingCapabilityId | 'overview'; name: string; available: boolean; unavailable_reason?: string;
+  id: ReadingCapabilityId; name: string; available: boolean; unavailable_reason?: string;
   supported_modes: ReadingMode[]; effective_mode: string; dependencies: string[];
 }
 export interface ReadingProviderSelection { options: { id: string; label: string }[]; default_label?: string; effective_label?: string; unavailable_reason?: string }

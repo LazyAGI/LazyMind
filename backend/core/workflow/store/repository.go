@@ -552,6 +552,43 @@ func (r *Repository) CommandByID(ctx context.Context, owner, commandID string) (
 	return value, nil
 }
 
+// ReplayHandOff recovers a committed legacy step.begin when its MCP retry
+// refreshed the state version. The saved digest still checks all caller input.
+func (r *Repository) ReplayHandOff(ctx context.Context, owner, sessionID, commandID, version string, request []byte) (Command, error) {
+	saved, err := r.CommandByID(ctx, owner, commandID)
+	if errors.Is(err, ErrNotFound) {
+		return Command{}, ErrIdempotencyConflict
+	}
+	if err != nil {
+		return Command{}, err
+	}
+	if saved.SessionID != sessionID || saved.ContractVersion != version || saved.HTTPStatus >= http.StatusBadRequest {
+		return Command{}, ErrIdempotencyConflict
+	}
+	var transition orm.WorkflowTransitionCommand
+	err = r.db.WithContext(ctx).Select("expected_state_version").
+		First(&transition, "command_id = ? AND session_id = ? AND status = ?", commandID, sessionID, "accepted").Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return Command{}, ErrIdempotencyConflict
+	}
+	if err != nil {
+		return Command{}, err
+	}
+	var original map[string]json.RawMessage
+	if err := json.Unmarshal(request, &original); err != nil {
+		return Command{}, err
+	}
+	original["expected_state_version"], _ = json.Marshal(transition.ExpectedStateVersion)
+	body, err := json.Marshal(original)
+	if err != nil {
+		return Command{}, err
+	}
+	if requestHash(body) != saved.RequestHash {
+		return Command{}, ErrIdempotencyConflict
+	}
+	return saved, nil
+}
+
 func (r *Repository) UpdateCommandResponse(ctx context.Context, owner, commandID string, status int, response json.RawMessage) error {
 	result := r.db.WithContext(ctx).Model(&Command{}).Where("command_id = ? AND owner_user_id = ?", commandID, owner).
 		Updates(map[string]any{"http_status": status, "response_json": response})

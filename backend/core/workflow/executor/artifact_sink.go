@@ -103,11 +103,19 @@ func NormalizeArtifact(attempt AttemptContext, artifact Artifact) (Artifact, err
 	if err := validateDeclaredArtifactType(attempt, artifact); err != nil {
 		return artifact, controlstore.Reject("OUTPUT_TYPE_MISMATCH", err.Error())
 	}
+	value, err := artifactfile.NormalizeImageValue(artifact.ContentType, artifact.Value)
+	if err != nil {
+		return artifact, controlstore.Reject("INVALID_ARTIFACT", err.Error())
+	}
+	artifact.Value = value
 	return artifact, nil
 }
 
 // Immutable files have content hashes; their generated storage path is not identity.
 func artifactIdentity(raw json.RawMessage, contentType string) []byte {
+	if normalized, err := artifactfile.NormalizeImageValue(contentType, raw); err == nil {
+		raw = normalized
+	}
 	var value any
 	decoder := json.NewDecoder(bytes.NewReader(raw))
 	decoder.UseNumber()
@@ -138,6 +146,11 @@ func (sink DBArtifactSink) Save(ctx context.Context, attempt AttemptContext, art
 		return err
 	}
 	controlled := controlstore.Controlled(sessionInfo)
+	value, err := artifactfile.NormalizeImageValue(artifact.ContentType, artifact.Value)
+	if err != nil {
+		return controlstore.Reject("INVALID_ARTIFACT", err.Error())
+	}
+	artifact.Value = value
 	var storedValue json.RawMessage
 	var cleanupDirectory string
 	transactionalOutputs, err := publication.PublicationEnabled(sink.DB.WithContext(ctx), sessionInfo)

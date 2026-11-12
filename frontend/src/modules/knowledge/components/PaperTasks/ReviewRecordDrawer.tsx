@@ -6,7 +6,8 @@ import { useConversationRunningStore } from '@/modules/chat/store/conversationRu
 import { getExpansion, getReviewRecordContext, type ExpansionDetail, type ReviewRecordTarget } from '../../api/paperWorkflows';
 import ReviewRecordStatus from './ReviewRecordStatus';
 import PaperFlow from './PaperFlow';
-import { paperDetailFlow, paperFlowSteps } from './paperFlowModel';
+import { expansionFlowSteps, paperFlowSteps, reviewGenerationStatus } from './paperFlowModel';
+import ExpansionSteps from './ExpansionSteps';
 
 export default function ReviewRecordDrawer({ record, onClose, onSource, onChat }: {
     record?: ReviewRecordTarget; onClose: () => void; onSource: (id: string) => void; onChat: (id: string) => void;
@@ -19,6 +20,7 @@ export default function ReviewRecordDrawer({ record, onClose, onSource, onChat }
     const [loading, setLoading] = useState(false);
     const [retry, setRetry] = useState(0);
     const watcher = useId();
+    const execution = useConversationRunningStore(state => record ? state.entries[record.conversation_id] : undefined);
     useEffect(() => {
         setContext(undefined); setSource(undefined); setFailed(false); setSourceFailed(false);
         if (!record) return;
@@ -40,12 +42,9 @@ export default function ReviewRecordDrawer({ record, onClose, onSource, onChat }
         return () => { controller.abort(); store.unwatch(watcher); };
     }, [record?.conversation_id, retry, watcher]);
     const created = record?.created_at ? dayjs(record.created_at) : undefined;
-    const automatic = source && source.record.auto_review_id === record?.id;
-    const steps = context && (automatic && source.record.version === record?.version && source.record.status === 'completed'
-        ? paperDetailFlow(source)
-        : !context.expansion_id || (source && !automatic)
-            ? paperFlowSteps('review', 'direct').map(step => ({ ...step, status: 'done' as const }))
-            : undefined);
+    const steps = context && paperFlowSteps('review', context.expansion_id ? 'balanced' : 'direct')
+        .map(step => ({ ...step, status: step.id === 'generateReview' ? reviewGenerationStatus(execution) : 'done' as const }));
+    const expansion = source?.record.version === record?.version && source?.record.status === 'completed' ? source.record : undefined;
     return <Drawer className="paper-review-record-drawer" width={780} open={!!record} onClose={onClose} title={t('paperTasks.viewReviewRecord')}>
         {record && <>
             <Typography.Title level={4}>{record.title || t('paperTasks.task.review')}</Typography.Title>
@@ -57,6 +56,10 @@ export default function ReviewRecordDrawer({ record, onClose, onSource, onChat }
             {failed && <Alert type="error" showIcon message={t('paperTasks.recordsDetailFailed')} action={<Button onClick={() => setRetry(value => value + 1)}>{t('paperTasks.retry')}</Button>} />}
             {context && <>
                 {steps && <PaperFlow title={t('paperTasks.reviewFlow.label')} steps={steps} />}
+                {context.expansion_id && expansion && <section className="paper-review-expansion-progress" aria-label={t(`paperTasks.expansionDepth.${expansion.budget_mode}.label`)}>
+                    <Typography.Title level={5}>{t(`paperTasks.expansionDepth.${expansion.budget_mode}.label`)}</Typography.Title>
+                    <ExpansionSteps steps={expansionFlowSteps(expansion.budget_mode, true).map(step => ({ ...step, status: 'done' }))} />
+                </section>}
                 <section className="paper-review-record-materials">
                     <Typography.Title level={5}>{t('paperTasks.recordsMaterials')}</Typography.Title>
                     <Space wrap><Typography.Text strong>{t('paperTasks.contentPaperCount', { count: context.input.papers.length })}</Typography.Text><Typography.Text type="secondary">{t('paperTasks.recordsFrozenAtStart')}</Typography.Text></Space>

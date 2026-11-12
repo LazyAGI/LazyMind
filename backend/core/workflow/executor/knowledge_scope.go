@@ -26,7 +26,7 @@ type KnowledgeDocumentRef struct {
 }
 
 func freezeKnowledgeScope(ctx context.Context, db *gorm.DB, session orm.WorkflowSession, value *AttemptContext) error {
-	if value.ExternalExecution == nil || value.KnowledgeScope != nil {
+	if value.Metadata["executor_host"] != "external-agent" || value.Execution == nil || value.KnowledgeScope != nil {
 		return nil
 	}
 	scope := &KnowledgeScope{}

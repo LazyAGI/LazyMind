@@ -78,6 +78,7 @@ func init() {
 			"tokenhub translation was truncated",
 			"translation request failed",
 			"translation response is too large",
+			"translation returned empty text",
 			"translation service returned http %d",
 			"transmart translation",
 			"transmart translation failed",
@@ -94,6 +95,9 @@ func init() {
 		}},
 		{2005205, http.StatusConflict, "The selected translation provider does not support documents", []string{
 			"selected translation provider does not support documents",
+		}},
+		{2005206, http.StatusConflict, "Translation changed while rendering; retry with the current translation", []string{
+			"translation changed while rendering; retry with the current translation",
 		}},
 	} {
 		for _, source := range group.sources {

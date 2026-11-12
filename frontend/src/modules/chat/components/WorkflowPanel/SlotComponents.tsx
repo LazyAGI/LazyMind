@@ -1579,10 +1579,10 @@ export function SlotImage({
     if (e.key === 'Escape') setCaptionEditing(false);
   }, [handleCaptionSave]);
 
-  if (!hasSource || pending) {
+  if (pending) {
     return <SlotPending type='image' cardMode={cardMode} />;
   }
-  if (!url) {
+  if (!hasSource || !url) {
     return (
       <div className='workflow-slot workflow-slot--image' role='status'>
         <span>图片加载失败</span>

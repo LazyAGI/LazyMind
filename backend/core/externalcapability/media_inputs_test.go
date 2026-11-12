@@ -12,6 +12,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"lazymind/core/capability"
 	"lazymind/core/common/orm"
@@ -78,13 +79,25 @@ func TestMediaInputResourcesAreOwnedImmutableImages(t *testing.T) {
 	if input["first_frame_url"] != "resource:image-1" {
 		t.Fatal("caller arguments were mutated")
 	}
+	vision, err := service.resolveMediaInputs(t.Context(), "user-1", "multimodal", map[string]any{
+		"url": "resource:image-1", "instruction": "Describe the image",
+	})
+	if err != nil || vision["url"] != result["first_frame_url"] || vision["instruction"] != "Describe the image" {
+		t.Fatalf("vision input=%v err=%v", vision, err)
+	}
 	for _, value := range []any{"/etc/passwd", "https://example.com/image.png", "data:image/png;base64,ignored", "resource:missing", map[string]any{"path": "/etc/passwd"}} {
 		if _, err := service.resolveMediaInputs(t.Context(), "user-1", "image_editor", map[string]any{"urls": []any{value}}); err == nil {
 			t.Fatalf("unsafe input accepted: %v", value)
 		}
+		if _, err := service.resolveMediaInputs(t.Context(), "user-1", "multimodal", map[string]any{"url": value}); err == nil {
+			t.Fatalf("unsafe vision input accepted: %v", value)
+		}
 	}
 	if _, err := service.resolveMediaInputs(t.Context(), "user-2", "image_editor", map[string]any{"urls": []string{"resource:image-1"}}); err == nil {
 		t.Fatal("another user's resource was accepted")
+	}
+	if _, err := service.resolveMediaInputs(t.Context(), "user-2", "multimodal", map[string]any{"url": "resource:image-1"}); err == nil {
+		t.Fatal("another user's vision input was accepted")
 	}
 	if _, err := service.resolveMediaInputs(t.Context(), "user-1", "video_generator", map[string]any{"prompt": "text only"}); err != nil {
 		t.Fatal(err)
@@ -94,6 +107,52 @@ func TestMediaInputResourcesAreOwnedImmutableImages(t *testing.T) {
 	}
 	if _, err := service.resolveMediaInputs(t.Context(), "user-1", "image_editor", map[string]any{"urls": []string{"resource:image-1"}}); err == nil {
 		t.Fatal("changed resource accepted")
+	}
+}
+
+func TestExternalVisionCatalogLoadsOnlyTheSelectedVLMWhenAvailable(t *testing.T) {
+	db := testDB(t)
+	seedModel(t, db, "https://model.example/v1", "fixture-key")
+	if err := db.Model(&orm.UserModelProvider{}).Where("id = ?", "provider-1").Updates(map[string]any{
+		"name": "OpenAI", "is_custom": true, "protocol_name": "OpenAI",
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Model(&orm.UserModelProviderGroupModel{}).Where("id = ?", "model-1").Updates(map[string]any{
+		"provider_name": "OpenAI", "vision": true,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	for _, role := range []string{"llm", "vlm"} {
+		if err := db.Create(&orm.UserSelectedModel{
+			UserID: "user-1", ModelKey: role, UserModelProviderGroupModelID: "model-1",
+			CreatedAt: now, UpdatedAt: now,
+		}).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var request struct {
+			ToolName string         `json:"tool_name"`
+			Config   map[string]any `json:"llm_config"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Error(err)
+			http.Error(w, "invalid fixture request", http.StatusBadRequest)
+			return
+		}
+		if request.ToolName == "multimodal" && (len(request.Config) != 1 || request.Config["vlm"] == nil) {
+			t.Errorf("vision catalog selected %d roles (VLM=%t, main=%t)", len(request.Config), request.Config["vlm"] != nil, request.Config["llm"] != nil)
+		}
+		_, _ = w.Write([]byte(`{"items":[{"name":"multimodal","available":true,"input_schema":{"type":"object"}}]}`))
+	}))
+	defer server.Close()
+	t.Setenv("LAZYMIND_CHAT_SERVICE_URL", server.URL)
+	call := capability.InvocationContext{Principal: capability.Principal{UserID: "user-1"}, ExternalAgent: "deepseek-harness"}
+	listed, err := New(db, server.Client()).ListExternalTools(t.Context(), call)
+	if err != nil || len(listed.Items) != 1 || listed.Items[0].ID != "builtin:multimodal" {
+		t.Fatalf("vision tool not listed: %+v %v", listed, err)
 	}
 }
 

@@ -208,7 +208,7 @@ func Compile(workflowYAML, stateYAML, scenario string, profile Profile) CompileR
 		}
 		graph.OptionalInputs[id] = node.OptionalInputs
 	}
-	result.Diagnostics = append(result.Diagnostics, compileExternalExecution(graph)...)
+	result.Diagnostics = append(result.Diagnostics, compileExecution(graph)...)
 	for i, slotID := range graph.Runtime.PublisherOwnedSlots {
 		if !knownMaterials[slotID] {
 			result.Diagnostics = append(result.Diagnostics, materialDiag(

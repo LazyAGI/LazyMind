@@ -2,6 +2,8 @@ package graphengine
 
 import (
 	"fmt"
+	"path"
+	"regexp"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -18,10 +20,50 @@ type ExecutionPolicy struct {
 }
 
 type StepExecution struct {
-	Version     string         `json:"version,omitempty" yaml:"-"`
-	Skills      []string       `json:"skills,omitempty" yaml:"skills,omitempty"`
-	Constraints []string       `json:"constraints,omitempty" yaml:"constraints,omitempty"`
-	Tools       []ExternalTool `json:"tools,omitempty" yaml:"tools,omitempty"`
+	Version     string          `json:"version,omitempty" yaml:"-"`
+	Skills      []string        `json:"skills,omitempty" yaml:"skills,omitempty"`
+	Constraints []string        `json:"constraints,omitempty" yaml:"constraints,omitempty"`
+	Tools       []ExecutionTool `json:"tools,omitempty" yaml:"tools,omitempty"`
+}
+
+type ExecutionTool struct {
+	Name   string `json:"name" yaml:"name"`
+	Source string `json:"source" yaml:"source"`
+}
+
+var executionToolName = regexp.MustCompile(`^[A-Za-z0-9_][A-Za-z0-9_.:-]*$`)
+
+// ValidExecutionSkillPath accepts only package-relative files, never host paths.
+func ValidExecutionSkillPath(value string) bool {
+	return value != "" && value != "." && value != ".." && value == strings.TrimSpace(value) &&
+		!strings.ContainsAny(value, "\\:\x00\r\n") && !strings.HasPrefix(value, "/") &&
+		!strings.HasPrefix(value, "../") && path.Clean(value) == value
+}
+
+func (e *StepExecution) Supported() bool {
+	return e != nil && e.Version == "1"
+}
+
+// ForExecutor keeps the shared business contract and selects native bindings
+// only for the native executor.
+func (node CompiledNode) ForExecutor(host string) CompiledNode {
+	if host == "external-agent" && node.Execution.Supported() {
+		node.LegacyTools, node.TerminalTools = nil, nil
+		node.ToolsOnly, node.TerminalToolsOnly = false, false
+	}
+	return node
+}
+
+func (p *RuntimePolicy) UnmarshalYAML(value *yaml.Node) error {
+	if value.Kind == yaml.MappingNode {
+		for i := 0; i < len(value.Content); i += 2 {
+			if value.Content[i].Value == "external_execution" {
+				return fmt.Errorf("runtime.external_execution is unsupported; declare runtime.execution")
+			}
+		}
+	}
+	type plain RuntimePolicy
+	return value.Decode((*plain)(p))
 }
 
 // Reject business overrides instead of silently accepting a second specification.
@@ -40,16 +82,14 @@ func (s *StepExecution) UnmarshalYAML(value *yaml.Node) error {
 	return value.Decode((*plain)(s))
 }
 
-const externalAdapterInstructions = `Read and follow every supplied pinned LazyMind Skill file and the shared step prompt before generating or validating. They are the authoritative business specification; never substitute a host domain Skill or an independent workflow. Host helpers may implement tool operations only, preserving the LazyMind method, style and quality criteria. Missing Skill content must be fetched from the pinned revision or reported, not guessed. Use the external host's own capabilities first for each required operation. Discover and call a declared, authorized LazyMind tool only when the host cannot meet the step contract. Include Skill paths and tool substitutions in validation evidence. Tool names, wrapper calls, local paths, tools-only/terminal rules and automatic publication described in the shared task are LazyMind implementation bindings, not required operations on an external host. Preserve their business intent using your own capabilities or explicitly advertised LazyMind tools; do not invoke unavailable native wrappers or a hidden LazyMind text/vision model. A restriction on a native wrapper, such as UI-only export or automatic saving, does not prohibit the host from delivering the user's requested file through the declared artifact slots. Do not change page count, requested format, evidence rules, review boundaries or output meanings. The external host owns generation and semantic/visual validation; LazyMind owns persistence and workflow transitions. Native subagents are optional: without them, the current external agent generates and then checks the actual artifacts in a separate verification pass, explicitly reporting same-agent validation rather than independent review. If a required capability is unavailable on both sides, report it and ask the user to configure that capability in LazyMind before retrying.`
-
 func compileExecution(graph *CompiledStateGraph) []Diagnostic {
 	policy := graph.Runtime.Execution
+	if policy == nil {
+		return nil
+	}
 	var diagnostics []Diagnostic
 	invalid := func(field, message string) {
 		diagnostics = append(diagnostics, diag("E_EXECUTION_INVALID", "error", "workflow.yaml.runtime.execution"+field, message))
-	}
-	if graph.Runtime.ExternalExecution != nil {
-		invalid("", "execution and legacy external_execution cannot be combined")
 	}
 	if policy.Version != "1" {
 		invalid(".version", "execution version must be 1")
@@ -72,7 +112,7 @@ func compileExecution(graph *CompiledStateGraph) []Diagnostic {
 		skills := map[string]bool{}
 		uniqueSkills := make([]string, 0, len(step.Skills))
 		for i, skill := range step.Skills {
-			if !ValidExternalSkillPath(skill) {
+			if !ValidExecutionSkillPath(skill) {
 				invalid(fmt.Sprintf("%s.skills[%d]", field, i), "skill must be a safe package-relative file path")
 			}
 			if !skills[skill] {
@@ -88,19 +128,12 @@ func compileExecution(graph *CompiledStateGraph) []Diagnostic {
 		}
 		names := map[string]bool{}
 		for i, tool := range step.Tools {
-			if !externalToolName.MatchString(tool.Name) || names[tool.Name] || (tool.Source != "package" && tool.Source != "global") {
+			if !executionToolName.MatchString(tool.Name) || names[tool.Name] || (tool.Source != "package" && tool.Source != "global") {
 				invalid(fmt.Sprintf("%s.tools[%d]", field, i), "tools require a unique name and package or global source")
 			}
 			names[tool.Name] = true
 		}
 		node.Execution = &step
-		// Compatibility projection for existing MCP clients. This is derived from
-		// the shared node, never independently authored business instructions.
-		node.ExternalExecution = &ExternalStepExecution{
-			Version: ExternalExecutionVersion, ValidationOwner: "external-agent", Prompt: node.Prompt,
-			AdapterInstructions: externalAdapterInstructions,
-			Skills:              step.Skills, Constraints: step.Constraints, Tools: step.Tools,
-		}
 		graph.Nodes[stepID] = node
 	}
 	return diagnostics

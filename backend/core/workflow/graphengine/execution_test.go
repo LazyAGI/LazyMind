@@ -26,8 +26,22 @@ steps:
   - {id: write}
 `
 
+const sharedState = `
+transitions:
+  __start__: [{to: write}]
+  write: [{to: __end__}]
+steps:
+  write:
+    prompt: Use the native generator
+    tools: [native_generator]
+    tools_only: true
+    terminal_tools: [native_generator]
+    acceptance_criteria: [At least two pages]
+    outputs: [{material: result, optional: true}]
+`
+
 func TestSharedExecutionHasOneBusinessSpecification(t *testing.T) {
-	result := Compile(sharedWorkflow, externalState, "", ProfilePublish)
+	result := Compile(sharedWorkflow, sharedState, "", ProfilePublish)
 	if !result.Valid {
 		t.Fatalf("compile: %+v", result.Diagnostics)
 	}
@@ -35,19 +49,23 @@ func TestSharedExecutionHasOneBusinessSpecification(t *testing.T) {
 	if node.Execution == nil || node.Execution.Version != "1" || len(node.Execution.Skills) != 2 || len(node.Execution.Constraints) != 1 || result.Graph.Runtime.IsZero() {
 		t.Fatalf("shared policy missing: %+v", node)
 	}
-	if node.ExternalExecution.Prompt != node.Prompt || node.ExternalExecution.Acceptance != nil || node.ExternalExecution.RequiredOutputs != nil {
-		t.Fatal("external compatibility projection overrode the shared business specification")
+	external := node.ForExecutor("external-agent")
+	if external.Prompt != node.Prompt || !reflect.DeepEqual(external.Acceptance, node.Acceptance) || !reflect.DeepEqual(external.RequiredOutputs, node.RequiredOutputs) {
+		t.Fatal("shared business specification changed for the external executor")
 	}
-	if !reflect.DeepEqual(node.ExternalExecution.Skills, node.Execution.Skills) || !reflect.DeepEqual(node.ExternalExecution.Constraints, node.Execution.Constraints) || node.ExternalExecution.AdapterInstructions == "" || !node.ToolsOnly {
+	if !reflect.DeepEqual(external.Execution, node.Execution) || external.ToolsOnly || len(external.LegacyTools) != 0 || !node.ToolsOnly {
 		t.Fatal("executor adapters lost shared instructions or native bindings")
+	}
+	if strings.Contains(string(result.Graph.JSON()), "external_execution") || strings.Contains(string(result.Graph.JSON()), "adapter_instructions") {
+		t.Fatal("shared graph still contains an external execution projection")
 	}
 	var restored CompiledStateGraph
 	if err := json.Unmarshal(result.Graph.JSON(), &restored); err != nil || !reflect.DeepEqual(restored.Nodes["write"].Execution, node.Execution) {
 		t.Fatalf("compiled round trip: %v", err)
 	}
 	for _, replacement := range []string{"Keep one page", "Keep the user's full page count"} {
-		changed := Compile(sharedWorkflow, strings.Replace(externalState, "Use the native generator", replacement, 1), "", ProfilePublish)
-		if !changed.Valid || changed.Graph.Nodes["write"].ExternalExecution.Prompt != replacement {
+		changed := Compile(sharedWorkflow, strings.Replace(sharedState, "Use the native generator", replacement, 1), "", ProfilePublish)
+		if !changed.Valid || changed.Graph.Nodes["write"].ForExecutor("external-agent").Prompt != replacement {
 			t.Fatal("editing the single state prompt did not update the external contract")
 		}
 	}
@@ -60,17 +78,20 @@ func TestSharedExecutionRejectsAlternativeBusinessProfiles(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			workflow := strings.Replace(sharedWorkflow, "      write:\n", "      write:\n        "+override+"\n", 1)
-			if result := Compile(workflow, externalState, "", ProfilePublish); result.Valid {
+			if result := Compile(workflow, sharedState, "", ProfilePublish); result.Valid {
 				t.Fatal("separate business specification silently accepted")
 			}
 		})
 	}
 	for _, pair := range [][2]string{
 		{"version: \"1\"", "version: \"2\""}, {"scenario/write.md", "../private.md"},
+		{"scenario/write.md", ".."}, {"scenario/write.md", "/tmp/skill.md"}, {"scenario/write.md", `C:\skill.md`},
 		{"      write:", "      unknown:"}, {"source: package", "source: shell"},
+		{"tools: [{name: inspect_output, source: package}]", "tools: [{name: inspect_output, source: package}, {name: inspect_output, source: global}]"},
 		{"runtime:\n", "runtime:\n  external_execution: {version: '1', steps: {}}\n"},
+		{"  execution:", "  external_execution:"},
 	} {
-		if Compile(strings.Replace(sharedWorkflow, pair[0], pair[1], 1), externalState, "", ProfilePublish).Valid {
+		if Compile(strings.Replace(sharedWorkflow, pair[0], pair[1], 1), sharedState, "", ProfilePublish).Valid {
 			t.Fatalf("invalid shared policy accepted: %v", pair)
 		}
 	}
@@ -93,7 +114,7 @@ func TestAllBuiltinWorkflowsShareBusinessContracts(t *testing.T) {
 				t.Fatal(err)
 			}
 			result := Compile(string(workflow), string(state), "", ProfilePublish)
-			if !result.Valid || result.Graph.Runtime.Execution == nil || result.Graph.Runtime.ExternalExecution != nil {
+			if !result.Valid || result.Graph.Runtime.Execution == nil {
 				t.Fatalf("shared package compilation: %+v", result.Diagnostics)
 			}
 			guide, err := os.ReadFile(filepath.Join(filepath.Dir(path), "scenario/execution.md"))
@@ -131,7 +152,7 @@ func TestAllBuiltinWorkflowsShareBusinessContracts(t *testing.T) {
 							t.Fatalf("%s omitted native presentation instructions %s", step, file)
 						}
 					}
-					if !reflect.DeepEqual(node.Execution.Skills, node.ExternalExecution.Skills) {
+					if !reflect.DeepEqual(node.Execution.Skills, node.ForExecutor("external-agent").Execution.Skills) {
 						t.Fatalf("%s supplies different Skills to external workers", step)
 					}
 				}
@@ -139,7 +160,7 @@ func TestAllBuiltinWorkflowsShareBusinessContracts(t *testing.T) {
 
 			for _, node := range result.Graph.Nodes {
 				steps++
-				if node.Execution == nil || !node.ExternalExecution.Supported() || node.Prompt != node.ExternalExecution.Prompt || node.ExternalExecution.Acceptance != nil || node.ExternalExecution.RequiredOutputs != nil {
+				if !node.Execution.Supported() || node.Prompt != node.ForExecutor("external-agent").Prompt {
 					t.Fatalf("divergent business specification: %s", node.ID)
 				}
 				for _, skill := range node.Execution.Skills {
@@ -150,7 +171,7 @@ func TestAllBuiltinWorkflowsShareBusinessContracts(t *testing.T) {
 			}
 		})
 	}
-	if steps != 107 {
-		t.Fatalf("expected all 107 shared steps, got %d", steps)
+	if steps != 104 {
+		t.Fatalf("expected all 104 shared steps, got %d", steps)
 	}
 }

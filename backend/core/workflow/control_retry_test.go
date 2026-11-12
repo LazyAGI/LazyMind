@@ -41,6 +41,26 @@ func TestControlledFailedRunNativeRetryPreservesExecutorOwnership(t *testing.T) 
 	}
 }
 
+func TestControlledBeginReplaysWithRefreshedStateVersion(t *testing.T) {
+	db, _ := setupBatchTransitionSession(t)
+	first := beginControlledExternalStep(t, db, nil, "id: batch-plugin\n")
+	if first.Control.StateVersion <= 4 {
+		t.Fatalf("begin did not advance workflow state: %+v", first)
+	}
+	service := WorkflowControlService{DB: db.DB}
+	command := WorkflowControlCommand{CommandID: "host-begin", Kind: "begin", StepID: "branch_b", StateVersion: first.Control.StateVersion}
+	replay, err := service.Execute(t.Context(), "batch-user", "batch-session", command)
+	if err != nil || replay.Receipt != first.Receipt {
+		t.Fatalf("retry did not recover the original grant: %+v %v", replay, err)
+	}
+	command.Objective = "different objective"
+	_, err = service.Execute(t.Context(), "batch-user", "batch-session", command)
+	expectControlCode(t, err, "COMMAND_CONFLICT")
+	command.CommandID, command.StateVersion = "new-command", 4
+	_, err = service.Execute(t.Context(), "batch-user", "batch-session", command)
+	expectControlCode(t, err, "STATE_VERSION_CONFLICT")
+}
+
 func TestControlledFailedRunBudgetIsCheckedForRequestedStep(t *testing.T) {
 	db, svc, _ := failedControlledRetryFixture(t)
 	if err := db.Create(&orm.WorkflowSessionStep{ID: "exhausted", SessionID: "batch-session", StepID: "blocked_d", TaskID: "exhausted", Attempt: 3, Status: "failed", Validity: "effective"}).Error; err != nil {

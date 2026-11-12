@@ -26,6 +26,7 @@ import (
 	"lazymind/core/externalcapability"
 	"lazymind/core/workflow/controlstore"
 	"lazymind/core/workflow/executor"
+	workflowstore "lazymind/core/workflow/store"
 )
 
 const maxPackageBytes = 64 << 20
@@ -51,9 +52,10 @@ type CallInput struct {
 }
 
 type ToolError struct {
-	Code      string `json:"code"`
-	Message   string `json:"message"`
-	Retryable bool   `json:"retryable"`
+	Code      string                    `json:"code"`
+	Message   string                    `json:"message"`
+	Retryable bool                      `json:"retryable"`
+	Upstream  *capability.UpstreamError `json:"upstream,omitempty"`
 }
 
 func (e *ToolError) Error() string { return e.Code + ": " + e.Message }
@@ -92,8 +94,10 @@ func publicToolError(err error) *ToolError {
 		switch capabilityErr.Code {
 		case capability.InvalidArgument, capability.Unauthenticated, capability.PermissionDenied,
 			capability.NotFound, capability.DeadlineExceeded, capability.Unavailable,
-			capability.ResultTooLarge, capability.Unsupported, capability.Conflict, capability.Internal:
-			return &ToolError{Code: string(capabilityErr.Code), Message: capabilityErr.Message, Retryable: capabilityErr.Retryable}
+			capability.ResultTooLarge, capability.Unsupported, capability.Conflict, capability.Internal,
+			capability.ToolExecutionFailed, capability.ProviderRejected, capability.RateLimited:
+			return &ToolError{Code: string(capabilityErr.Code), Message: capabilityErr.Message,
+				Retryable: capabilityErr.Retryable, Upstream: capabilityErr.Upstream}
 		}
 	}
 	return &ToolError{Code: "CAPABILITY_UNAVAILABLE", Message: "Tool execution failed; check the corresponding configuration and dependency in LazyMind, then retry the affected step"}
@@ -122,13 +126,13 @@ func (s *Service) List(ctx context.Context, owner, sessionID, attemptID, handle 
 		return nil, err
 	}
 	result := []Tool{}
-	if contract.ExternalExecution == nil {
+	if contract.Execution == nil {
 		return result, nil
 	}
 	var packageTools map[string]Tool
 	var globalTools map[string]capability.ExternalToolSummary
 	var packageErr, globalErr error
-	for _, declared := range contract.ExternalExecution.Tools {
+	for _, declared := range contract.Execution.Tools {
 		item := Tool{Name: declared.Name, Source: declared.Source}
 		switch declared.Source {
 		case "package":
@@ -176,6 +180,8 @@ func (s *Service) List(ctx context.Context, owner, sessionID, attemptID, handle 
 			}
 			if tool, ok := globalTools[globalID(declared.Name)]; ok && globalErr == nil {
 				item.Description, item.InputSchema, item.Available = tool.Description, tool.InputSchema, true
+			} else if declared.Name == "builtin:multimodal" && globalErr == nil {
+				item.Reason = "Configure a verified VLM or vision-enabled main model in LazyMind, enable multimodal for the connected Agent, then retry"
 			} else {
 				item.Reason = "Configure and enable this capability for the connected Agent in LazyMind, then retry"
 			}
@@ -243,7 +249,7 @@ func (s *Service) Call(ctx context.Context, owner, sessionID, attemptID string, 
 		if err := json.Unmarshal(previous.ResponseJSON, &replay); err != nil {
 			return Result{}, err
 		}
-		return replay, nil
+		return s.deliver(ctx, owner, sessionID, attemptID, input, replay)
 	}
 	var result Result
 	// Bound discovery plus execution together, including global tools whose
@@ -276,11 +282,6 @@ func (s *Service) Call(ctx context.Context, owner, sessionID, attemptID string, 
 	if err != nil {
 		result = Result{Error: publicToolError(err)}
 	}
-	// Stop/rewind/reclaim invalidates delivery even when an external service
-	// could not be interrupted. No tool may publish Workflow artifacts itself.
-	if _, _, err := executor.AuthorizeExternalToolCall(ctx, s.DB, owner, sessionID, attemptID, input.ExecutionHandle, input.ToolName); err != nil {
-		result = Result{Error: &ToolError{Code: "EXECUTION_FENCED", Message: "Execution authorization changed while the tool ran; its result was not delivered"}}
-	}
 	encoded, err := json.Marshal(result)
 	if err != nil {
 		return Result{}, err
@@ -289,11 +290,26 @@ func (s *Service) Call(ctx context.Context, owner, sessionID, attemptID string, 
 		result = Result{Error: &ToolError{Code: "TOOL_RESULT_TOO_LARGE", Message: "Tool result exceeds the supported resource transport limit"}}
 		encoded, _ = json.Marshal(result)
 	}
-	// Use a fresh bounded context to save the receipt even if the HTTP client left.
+	// Record the tool outcome independently of delivery. A disconnected client
+	// or an unavailable authorization query must not overwrite a real result.
 	saveCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
 	defer cancel()
 	if err := s.DB.WithContext(saveCtx).Model(&orm.WorkflowCommand{}).Where("command_id = ?", commandID).Updates(map[string]any{"http_status": http.StatusOK, "response_json": json.RawMessage(encoded)}).Error; err != nil {
 		return Result{}, err
+	}
+	return s.deliver(saveCtx, owner, sessionID, attemptID, input, result)
+}
+
+func (s *Service) deliver(ctx context.Context, owner, sessionID, attemptID string, input CallInput, result Result) (Result, error) {
+	// Check again at delivery, including replay, because the handle can be
+	// revoked while the provider is running or while a receipt is being read.
+	_, _, err := executor.AuthorizeExternalToolCall(ctx, s.DB, owner, sessionID, attemptID, input.ExecutionHandle, input.ToolName)
+	if err != nil {
+		var denied *controlstore.Error
+		if errors.As(err, &denied) || errors.Is(err, workflowstore.ErrPermissionDenied) || errors.Is(err, workflowstore.ErrNotFound) {
+			return Result{Error: &ToolError{Code: "EXECUTION_FENCED", Message: "Execution authorization changed while the tool ran; its result was not delivered"}}, nil
+		}
+		return Result{}, &ToolError{Code: "TOOL_DELIVERY_UNAVAILABLE", Message: "The tool outcome is saved. Retry the same command to check execution authorization and retrieve it.", Retryable: true}
 	}
 	return result, nil
 }
@@ -356,9 +372,13 @@ func (s *Service) packageRequest(ctx context.Context, contract executor.AttemptC
 		return &ToolError{Code: "TOOL_RESULT_TOO_LARGE", Message: "Tool result is unreadable or exceeds the supported resource transport limit"}
 	}
 	if response.StatusCode != http.StatusOK {
+		type packageError struct {
+			Code          string `json:"code"`
+			PublicMessage string `json:"public_message"`
+		}
 		var envelope struct {
-			Error  *ToolError `json:"error"`
-			Detail *ToolError `json:"detail"`
+			Error  *packageError `json:"error"`
+			Detail *packageError `json:"detail"`
 		}
 		if json.Unmarshal(raw, &envelope) == nil {
 			failure := envelope.Error
@@ -369,7 +389,12 @@ func (s *Service) packageRequest(ctx context.Context, contract executor.AttemptC
 				switch failure.Code {
 				case "DEPENDENCY_MISSING", "TOOL_ADAPTER_UNAVAILABLE":
 					return &ToolError{Code: failure.Code, Message: "The workflow tool requires a configured capability or installed dependency in LazyMind; configure it, then retry the affected step"}
-				case "INVALID_ARGUMENT", "INVALID_PACKAGE", "TOOL_NOT_ALLOWED":
+				case "INVALID_ARGUMENT":
+					if message := strings.TrimSpace(failure.PublicMessage); message != "" && len(message) <= 1024 {
+						return &ToolError{Code: failure.Code, Message: message}
+					}
+					fallthrough
+				case "INVALID_PACKAGE", "TOOL_NOT_ALLOWED":
 					return &ToolError{Code: failure.Code, Message: "The workflow tool rejected the pinned package or arguments; check its contract before retrying"}
 				}
 			}

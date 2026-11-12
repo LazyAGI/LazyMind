@@ -37,7 +37,6 @@ func (loader DBContextLoader) LoadAttemptContext(ctx context.Context, id string)
 	value.ContractVersion, value.SessionID, value.AttemptID, value.StepID, value.AttemptNo = attempt.ContractVersion, row.SessionID, row.ID, row.StepID, row.Attempt
 	// Execution instructions are authoritative only in the immutable revision.
 	value.Execution = nil
-	value.ExternalExecution = nil
 	var session orm.WorkflowSession
 	if err := loader.DB.WithContext(ctx).Where("id = ?", row.SessionID).First(&session).Error; err != nil {
 		return AttemptContext{}, err
@@ -47,6 +46,7 @@ func (loader DBContextLoader) LoadAttemptContext(ctx context.Context, id string)
 		value.Metadata = map[string]string{}
 	}
 	value.Metadata["controller_host"] = session.ControllerHost
+	value.Metadata["executor_host"] = row.ExecutorHost
 	value.Metadata["control_protocol"] = session.ControlProtocol
 	value.Metadata["origin_host"] = session.OriginHost
 	value.Metadata["conversation_id"] = session.ConversationID
@@ -66,6 +66,11 @@ func (loader DBContextLoader) LoadAttemptContext(ctx context.Context, id string)
 					value.DeclaredInputTypes[materialID] = materialType
 				}
 				if node, ok := graph.Nodes[row.StepID]; ok {
+					host := "lazymind"
+					if controlstore.Controlled(session) {
+						host = row.ExecutorHost
+					}
+					node = node.ForExecutor(host)
 					if node.Execution != nil {
 						value.Execution = &ExecutionContract{StepExecution: *node.Execution}
 					}
@@ -76,12 +81,6 @@ func (loader DBContextLoader) LoadAttemptContext(ctx context.Context, id string)
 					value.TerminalTools = node.TerminalTools
 					value.ToolsOnly = node.ToolsOnly
 					value.TerminalToolsOnly = node.TerminalToolsOnly
-					// Only the persisted external executor may select the new policy.
-					// Native runs retain tool bindings; business instructions are shared.
-					value.ExternalExecution = nil
-					if controlstore.Controlled(session) && row.ExecutorHost == "external-agent" {
-						ApplyExternalExecution(&value, node)
-					}
 				}
 			}
 			cardinality, err := loader.loadOutputCardinality(ctx, revision.ID, value.DeclaredOutputs)

@@ -15,7 +15,10 @@ def _invoke(function, request):
         return function(request)
     except ExternalToolError as exc:
         status = 503 if exc.code in {'DEPENDENCY_MISSING', 'TOOL_ADAPTER_UNAVAILABLE'} else 400
-        raise HTTPException(status_code=status, detail={'code': exc.code, 'message': str(exc)}) from exc
+        detail = {'code': exc.code, 'message': str(exc)}
+        if exc.public_message:
+            detail['public_message'] = exc.public_message
+        raise HTTPException(status_code=status, detail=detail) from exc
 
 
 @router.post('/api/workflow/external-tools/list')

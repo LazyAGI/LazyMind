@@ -5374,6 +5374,16 @@ export interface DocumentTableColumn {
 export interface DocumentTagsResponse {
     'tags'?: Array<string>;
 }
+export interface EmbeddingClearRequest {
+    'confirm_clear_chunks': boolean;
+    'generation': number;
+    'model_id': string;
+    'source': string;
+}
+export interface EmbeddingClearResponse {
+    'activated': boolean;
+    'cleared': boolean;
+}
 export interface EmbeddingIndexStatusResponse {
     'affected_knowledge_bases': number;
     'indexed_knowledge_bases': number;
@@ -58346,6 +58356,41 @@ export class McpServersApi extends BaseAPI {
 export const ModelProvidersApiAxiosParamCreator = function (configuration?: Configuration) {
     return {
         /**
+         * Requires a preview generation and explicit administrator confirmation for a server-verified candidate. Clears shared chunks and vectors, preserves source files and document records, and atomically activates the target model with its saved selection. The server completes the operation independently of browser cancellation. Retrying the same confirmed request resumes an interrupted cleanup or activation; replaying a completed request does not clear the new index. Success acknowledges both cleared and activated. Documents await manual parsing; no parsing tasks are enqueued.
+         * @summary Clear knowledge chunks and activate the confirmed embedding model
+         * @param {EmbeddingClearRequest} embeddingClearRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreModelProvidersEmbeddingClearChunksPost: async (embeddingClearRequest: EmbeddingClearRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'embeddingClearRequest' is not null or undefined
+            assertParamExists('apiCoreModelProvidersEmbeddingClearChunksPost', 'embeddingClearRequest', embeddingClearRequest)
+            const localVarPath = `/api/core/model_providers/embedding/clear-chunks`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(embeddingClearRequest, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
          * Reports the persisted text embedding model identity and how many knowledge bases have indexed or pending document vectors. A legacy index without a recorded signature is reported as unknown, never inferred from the current model selection.
          * @summary Get shared text-vector index state
          * @param {*} [options] Override http request option.
@@ -59722,6 +59767,19 @@ export const ModelProvidersApiFp = function(configuration?: Configuration) {
     const localVarAxiosParamCreator = ModelProvidersApiAxiosParamCreator(configuration)
     return {
         /**
+         * Requires a preview generation and explicit administrator confirmation for a server-verified candidate. Clears shared chunks and vectors, preserves source files and document records, and atomically activates the target model with its saved selection. The server completes the operation independently of browser cancellation. Retrying the same confirmed request resumes an interrupted cleanup or activation; replaying a completed request does not clear the new index. Success acknowledges both cleared and activated. Documents await manual parsing; no parsing tasks are enqueued.
+         * @summary Clear knowledge chunks and activate the confirmed embedding model
+         * @param {EmbeddingClearRequest} embeddingClearRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreModelProvidersEmbeddingClearChunksPost(embeddingClearRequest: EmbeddingClearRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<EmbeddingClearResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreModelProvidersEmbeddingClearChunksPost(embeddingClearRequest, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['ModelProvidersApi.apiCoreModelProvidersEmbeddingClearChunksPost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
          * Reports the persisted text embedding model identity and how many knowledge bases have indexed or pending document vectors. A legacy index without a recorded signature is reported as unknown, never inferred from the current model selection.
          * @summary Get shared text-vector index state
          * @param {*} [options] Override http request option.
@@ -60229,6 +60287,16 @@ export const ModelProvidersApiFactory = function (configuration?: Configuration,
     const localVarFp = ModelProvidersApiFp(configuration)
     return {
         /**
+         * Requires a preview generation and explicit administrator confirmation for a server-verified candidate. Clears shared chunks and vectors, preserves source files and document records, and atomically activates the target model with its saved selection. The server completes the operation independently of browser cancellation. Retrying the same confirmed request resumes an interrupted cleanup or activation; replaying a completed request does not clear the new index. Success acknowledges both cleared and activated. Documents await manual parsing; no parsing tasks are enqueued.
+         * @summary Clear knowledge chunks and activate the confirmed embedding model
+         * @param {ModelProvidersApiApiCoreModelProvidersEmbeddingClearChunksPostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreModelProvidersEmbeddingClearChunksPost(requestParameters: ModelProvidersApiApiCoreModelProvidersEmbeddingClearChunksPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<EmbeddingClearResponse> {
+            return localVarFp.apiCoreModelProvidersEmbeddingClearChunksPost(requestParameters.embeddingClearRequest, options).then((request) => request(axios, basePath));
+        },
+        /**
          * Reports the persisted text embedding model identity and how many knowledge bases have indexed or pending document vectors. A legacy index without a recorded signature is reported as unknown, never inferred from the current model selection.
          * @summary Get shared text-vector index state
          * @param {*} [options] Override http request option.
@@ -60588,6 +60656,13 @@ export const ModelProvidersApiFactory = function (configuration?: Configuration,
 };
 
 /**
+ * Request parameters for apiCoreModelProvidersEmbeddingClearChunksPost operation in ModelProvidersApi.
+ */
+export interface ModelProvidersApiApiCoreModelProvidersEmbeddingClearChunksPostRequest {
+    readonly embeddingClearRequest: EmbeddingClearRequest
+}
+
+/**
  * Request parameters for apiCoreModelProvidersEmbeddingSwitchPreviewPost operation in ModelProvidersApi.
  */
 export interface ModelProvidersApiApiCoreModelProvidersEmbeddingSwitchPreviewPostRequest {
@@ -60892,6 +60967,17 @@ export interface ModelProvidersApiApiCoreModelProvidersWithGroupsGetRequest {
  * ModelProvidersApi - object-oriented interface
  */
 export class ModelProvidersApi extends BaseAPI {
+    /**
+     * Requires a preview generation and explicit administrator confirmation for a server-verified candidate. Clears shared chunks and vectors, preserves source files and document records, and atomically activates the target model with its saved selection. The server completes the operation independently of browser cancellation. Retrying the same confirmed request resumes an interrupted cleanup or activation; replaying a completed request does not clear the new index. Success acknowledges both cleared and activated. Documents await manual parsing; no parsing tasks are enqueued.
+     * @summary Clear knowledge chunks and activate the confirmed embedding model
+     * @param {ModelProvidersApiApiCoreModelProvidersEmbeddingClearChunksPostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreModelProvidersEmbeddingClearChunksPost(requestParameters: ModelProvidersApiApiCoreModelProvidersEmbeddingClearChunksPostRequest, options?: RawAxiosRequestConfig) {
+        return ModelProvidersApiFp(this.configuration).apiCoreModelProvidersEmbeddingClearChunksPost(requestParameters.embeddingClearRequest, options).then((request) => request(this.axios, this.basePath));
+    }
+
     /**
      * Reports the persisted text embedding model identity and how many knowledge bases have indexed or pending document vectors. A legacy index without a recorded signature is reported as unknown, never inferred from the current model selection.
      * @summary Get shared text-vector index state

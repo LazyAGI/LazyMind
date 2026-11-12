@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ChangeEvent } from 'react';
-import { ArrowLeftOutlined, FileTextOutlined, FolderOutlined, MoreOutlined, PushpinFilled, PushpinOutlined, SearchOutlined } from '@ant-design/icons';
-import { Alert, Badge, Button, Card, Collapse, Drawer, Dropdown, Empty, Form, Input, Modal, message, Pagination, Select, Space, Spin, Switch, Table, Tabs, Tag, Tooltip, Typography, theme } from 'antd';
+import { ArrowLeftOutlined, CloudOutlined, FileTextOutlined, FolderOpenOutlined, FolderOutlined, InfoCircleOutlined, MoreOutlined, PlusOutlined, PushpinFilled, PushpinOutlined, SearchOutlined } from '@ant-design/icons';
+import { Alert, Badge, Breadcrumb, Button, Collapse, Drawer, Dropdown, Empty, Form, Input, Modal, message, Pagination, Popover, Select, Space, Spin, Switch, Table, Tag, Tooltip, Typography, theme, type TableColumnsType } from 'antd';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import type { DocumentDirectoryCommand } from '@/api/generated/core-client';
@@ -19,13 +19,13 @@ export default function DirectoryPage() {
   const { directoryId } = useParams();
   const navigate = useNavigate();
   const { token } = theme.useToken();
-  const [viewMode, setViewMode] = useState('groups');
+  const [viewMode, setViewMode] = useState<'all' | 'groups' | 'source'>('all');
   const [mailEntry, setMailEntry] = useState<DocumentDirectoryEntry>();
   const [localEntry, setLocalEntry] = useState<DocumentDirectoryEntry>();
   const [selectedGroup, setSelectedGroup] = useState<string | null>(null);
   const [query, setQuery] = useState('');
   const [stateFilter, setStateFilter] = useState('all');
-  const [selectedEntry, setSelectedEntry] = useState<string>();
+  const [selectedEntry, setSelectedEntry] = useState<DocumentDirectoryEntry>();
   const [page, setPage] = useState(1);
   const [directories, setDirectories] = useState<DocumentDirectory[]>([]);
   const [loadedDetail, setDetail] = useState<DocumentDirectoryDetail>();
@@ -70,7 +70,7 @@ export default function DirectoryPage() {
     void poll();
     return () => { disposed = true; window.clearTimeout(timer); };
   }, [refresh, owner]);
-  useEffect(() => { setSelectedGroup(null); setPage(1); setQuery(''); setStateFilter('all'); setViewMode('groups'); setSelectedEntry(undefined); setExcludedOpen(false); setDeleteTarget(undefined); setEditor(undefined); setMailEntry(undefined); setLocalEntry(undefined); }, [directoryId]);
+  useEffect(() => { setSelectedGroup(null); setPage(1); setQuery(''); setStateFilter('all'); setViewMode('all'); setSelectedEntry(undefined); setExcludedOpen(false); setDeleteTarget(undefined); setEditor(undefined); setMailEntry(undefined); setLocalEntry(undefined); }, [directoryId]);
   useEffect(() => {
     if (!directoryId) return;
     const touch = () => {
@@ -90,6 +90,8 @@ export default function DirectoryPage() {
     try {
       const result = await directoryAction({ directory_id: directoryId, version: detail?.directory.version, ...command });
       if (activeOwner.current !== operationOwner) throw new Error('Directory view changed');
+      const updatedEntry = result.entry;
+      if (updatedEntry) setSelectedEntry(current => current?.id === updatedEntry.id ? updatedEntry : current);
       if (result.evicted) message.info(`${t('directories.evicted')}: ${result.evicted}`);
       if (command.operation === 'delete' && directoryId) navigate('/document-directories');
       else if (command.operation === 'create' && result.directory) navigate(`/document-directories/${result.directory.id}`);
@@ -124,8 +126,8 @@ export default function DirectoryPage() {
   const defaultGroup = detail?.groups.find(g => (detail?.group_counts?.[g.id] ?? entries.filter(e => e.group_id === g.id).length) > 0)?.id || '';
   const activeGroup = selectedGroup !== null && (selectedGroup ? detail?.groups.some(g => g.id === selectedGroup) : ungroupedCount > 0) ? selectedGroup : defaultGroup;
   useEffect(() => {
-    if (detail && selectedGroup !== activeGroup) { setSelectedGroup(activeGroup); setPage(1); }
-  }, [detail, selectedGroup, activeGroup]);
+    if (viewMode === 'groups' && detail && selectedGroup !== activeGroup) { setSelectedGroup(activeGroup); setPage(1); }
+  }, [viewMode, detail, selectedGroup, activeGroup]);
   const pendingCount = entries.filter(e => !e.confirmed).length;
   const documentCount = detail?.group_counts ? Object.values(detail.group_counts).reduce((sum, count) => sum + count, 0) : entries.length;
   const entryTitle = (e: DocumentDirectoryEntry) => e.title || (e.source === 'local' ? e.resource_id.split(/[\\/]/).pop() : '') || e.resource_id;
@@ -154,13 +156,17 @@ export default function DirectoryPage() {
   const pageReady = matchesQuery && page === currentPage &&
     (viewMode !== 'groups' || selectedGroup !== null && selectedGroup === activeGroup);
   useEffect(() => { if (page !== currentPage) setPage(currentPage); }, [page, currentPage]);
-  const selected = detail?.entries.find(e => e.id === selectedEntry);
+  const selected = detail && selectedEntry && (entries.find(e => e.id === selectedEntry.id) ?? selectedEntry);
+  const readers = <>
+    <LocalFileReader directoryId={directoryId} entry={localEntry} onClose={() => setLocalEntry(undefined)} />
+    <MailReader directoryId={directoryId} entry={mailEntry} onClose={() => setMailEntry(undefined)} />
+  </>;
   const readState = (e: DocumentDirectoryEntry) => t(`directories.read_${e.read_state}`, { defaultValue: e.read_state });
-  const columns = [
+  const columns: TableColumnsType<DocumentDirectoryEntry> = [
     { title: t('directories.document'), key: 'title', render: (_: unknown, e: DocumentDirectoryEntry) => <div className="directory-document">
-      <span className={`directory-source-icon directory-source-${e.source}`}><FileTextOutlined /></span>
+      <span className="directory-item-icon">{e.source === 'feishu' || e.source === 'google_drive' ? <CloudOutlined /> : <FileTextOutlined />}</span>
       <div className="directory-document-text">
-        <div className="directory-document-title"><Tooltip title={e.title || e.resource_id}>{e.source === 'local' ? <button className="directory-title-button" onClick={() => setLocalEntry(e)}>{entryTitle(e)}</button> : e.source === 'mail' ? <button className="directory-title-button" onClick={() => setMailEntry(e)}>{entryTitle(e)}</button> : entryURL(e) ? <a href={entryURL(e)} target="_blank" rel="noreferrer">{entryTitle(e)}</a> : <button className="directory-title-button" onClick={() => setSelectedEntry(e.id)}>{entryTitle(e)}</button>}</Tooltip>{e.pinned && <Tooltip title={t('directories.entryPin')}><PushpinFilled /></Tooltip>}</div>
+        <div className="directory-document-title"><Tooltip title={entryTitle(e)}>{e.source === 'local' ? <button type="button" className="directory-title-button" onClick={() => setLocalEntry(e)}>{entryTitle(e)}</button> : e.source === 'mail' ? <button type="button" className="directory-title-button" onClick={() => setMailEntry(e)}>{entryTitle(e)}</button> : entryURL(e) ? <a href={entryURL(e)} target="_blank" rel="noreferrer">{entryTitle(e)}</a> : <button type="button" className="directory-title-button" onClick={() => setSelectedEntry(e)}>{entryTitle(e)}</button>}</Tooltip>{e.pinned && <Tooltip title={t('directories.entryPin')}><PushpinFilled /></Tooltip>}</div>
         <div className="directory-document-summary">
           <Typography.Text type="secondary" className="directory-document-meta">{sourceLabel(e.source)} · {groupName(e.group_id)}</Typography.Text>
           {(!e.confirmed || inaccessible(e) || e.content_state === 'changed') && <span className="directory-entry-states">
@@ -171,7 +177,7 @@ export default function DirectoryPage() {
         </div>
       </div>
     </div> },
-    { title: t('directories.actions'), key: 'actions', width: 80, render: (_: unknown, e: DocumentDirectoryEntry) => <Button type="text" onClick={() => setSelectedEntry(e.id)}>{t('directories.details')}</Button> },
+    { title: t('directories.actions'), key: 'actions', width: 94, align: 'center', render: (_, e) => <Button type="link" size="small" onClick={() => setSelectedEntry(e)}>{t('directories.details')}</Button> },
   ];
   const visibleBatches = latestDirectoryBatches(batches, directoryId);
   const unreadDirectoryIds = new Set(visibleBatches.filter(b => ['succeeded', 'failed', 'canceled'].includes(b.status)).map(b => b.directory_id));
@@ -188,24 +194,89 @@ export default function DirectoryPage() {
       }).catch(() => {}).finally(() => acknowledging.current.delete(batch.id));
     }
   }, [batches, directoryId, detail, loading]);
-  return <div ref={pageContainer} className="directory-page" style={{ '--directory-bg': token.colorBgLayout, '--directory-panel': token.colorBgContainer, '--directory-border': token.colorBorderSecondary, '--directory-muted': token.colorTextSecondary, '--directory-hover': token.controlItemBgHover, '--directory-selected': token.controlItemBgActive } as CSSProperties}>
-    <div className="directory-page-inner">
-      <header className="directory-header">
-        <div className="directory-heading">
-          {directoryId && <Button type="text" icon={<ArrowLeftOutlined />} onClick={() => navigate('/document-directories')}>{t('directories.back')}</Button>}
-          <Typography.Title level={3}>{d?.name || t('directories.title')}</Typography.Title>
-          <Typography.Paragraph type="secondary">{d?.intent || t('directories.intro')}</Typography.Paragraph>
-          {detail?.folder && <Tag>{t('directories.folderMembership')}</Tag>}
+  const directoryStyles = {
+    '--directory-panel': token.colorBgContainer,
+    '--directory-border': token.colorBorderSecondary,
+    '--directory-muted': token.colorTextSecondary,
+    '--directory-hover': token.controlItemBgHover,
+    '--directory-selected': token.controlItemBgActive,
+    '--directory-primary': token.colorPrimary,
+    '--directory-radius': `${token.borderRadiusLG}px`,
+  } as CSSProperties;
+  const pinButton = (item: DocumentDirectory, disabled: boolean | undefined, onClick: () => void) => {
+    const label = t(item.pinned ? 'directories.directoryUnpin' : 'directories.directoryPin');
+    return <Tooltip title={label}>
+      <Button type="text" className="directory-pin-button" aria-label={label} aria-pressed={item.pinned}
+        icon={item.pinned ? <PushpinFilled /> : <PushpinOutlined />} disabled={disabled} onClick={onClick} />
+    </Tooltip>;
+  };
+  const overviewColumns: TableColumnsType<DocumentDirectory> = [
+    { title: t('directories.nameAndIntent'), key: 'name', render: (_, item) => {
+      const unread = unreadDirectoryIds.has(item.id);
+      return <div className="directory-document">
+        <span className="directory-item-icon"><FolderOutlined /></span>
+        <div className="directory-document-text">
+          <div className="directory-document-title">
+            <Tooltip title={item.name}>
+              <button type="button" className="directory-title-button" aria-description={unread ? t('directories.unreadResult') : undefined}
+                onClick={() => navigate(`/document-directories/${item.id}`)}>{item.name}</button>
+            </Tooltip>
+            {unread && <Badge status="success" aria-hidden="true" />}
+          </div>
+          <Typography.Text className="directory-document-meta" type="secondary" ellipsis={{ tooltip: item.intent }}>{item.intent}</Typography.Text>
+          <time className="directory-inline-date" dateTime={item.last_used_at}>{new Date(item.last_used_at).toLocaleString()}</time>
         </div>
-        <Space wrap className="directory-primary-actions">{d ? <>
+      </div>;
+    } },
+    { title: t('directories.lastUsed'), key: 'lastUsed', width: 152, className: 'directory-date-column', render: (_, item) =>
+      <time dateTime={item.last_used_at}>{new Date(item.last_used_at).toLocaleString()}</time> },
+    { title: t('directories.actions'), key: 'actions', width: 104, align: 'center', render: (_, item) => <Space size={0}>
+      {pinButton(item, saving, () => run({ operation: 'update', directory_id: item.id, version: item.version, pinned: !item.pinned }))}
+      <Dropdown trigger={['click']} menu={{ items: [{ key: 'delete', label: t('directories.delete'), danger: true,
+        disabled: saving || batches.some(b => b.directory_id === item.id && ['pending', 'running'].includes(b.status)),
+        onClick: () => setDeleteTarget(item) }] }}>
+        <Button type="text" aria-label={`${item.name} ${t('directories.more')}`} icon={<MoreOutlined />} />
+      </Dropdown>
+    </Space> },
+  ];
+  return <div ref={pageContainer} className="directory-page" style={directoryStyles}>
+    <div className="directory-page-inner">
+      <header className={directoryId ? 'directory-detail-header' : undefined}>
+        <div className="directory-header">
+          {directoryId ? <Breadcrumb className="directory-breadcrumb" items={[
+            { title: <Button type="text" icon={<ArrowLeftOutlined />} aria-label={t('directories.back')}
+              onClick={() => navigate('/document-directories')}>{t('directories.title')}</Button> },
+            ...(d ? [{ title: <Typography.Title level={1} title={d.name} aria-current="page">{d.name}</Typography.Title> }] : []),
+          ]} /> : <Typography.Title level={1}>{t('directories.title')}</Typography.Title>}
+          <Space wrap className="directory-primary-actions">{d ? <>
+          {pinButton(d, blocked, () => run({ operation: 'update', pinned: !d.pinned }))}
+          <Space size={8}><span>{t('directories.autoAdd')}</span><Switch size="small" aria-label={t('directories.autoAdd')}
+            disabled={blocked} checked={d.auto_add} onChange={(auto_add: boolean) => run({ operation: 'update', auto_add })} /></Space>
           <Dropdown trigger={['click']} menu={{ items: [
             { key: 'edit', label: t('directories.edit'), disabled: blocked, onClick: () => edit('update') },
             { key: 'reorganize', label: t('directories.reorganize'), disabled: blocked, onClick: () => edit('reorganize') },
             { key: 'excluded', label: t('directories.excluded'), onClick: () => setExcludedOpen(true) },
             { type: 'divider' },
             { key: 'delete', label: t('directories.delete'), danger: true, disabled: blocked, onClick: () => setDeleteTarget(d) },
-          ] }}><Button aria-label={t('directories.more')} icon={<MoreOutlined />} /></Dropdown>
-        </> : !directoryId && <Button onClick={() => edit('create')}>{t('directories.create')}</Button>}</Space>
+          ] }}><Button type="text" aria-label={t('directories.more')} icon={<MoreOutlined />} /></Dropdown>
+          </> : !directoryId && <>
+            <Popover trigger="click" placement="bottomRight" title={t('directories.retentionRules')}
+              content={<ul className="directory-retention-rules">
+                <li>{t('directories.retentionLimit')}</li><li>{t('directories.retentionExpiry')}</li><li>{t('directories.retentionOriginals')}</li>
+              </ul>}>
+              <Button type="text" icon={<InfoCircleOutlined />}>{t('directories.retentionRules')}</Button>
+            </Popover>
+            <Button type="primary" icon={<PlusOutlined />} onClick={() => edit('create')}>{t('directories.create')}</Button>
+          </>}</Space>
+        </div>
+        {d ? <>
+          <Typography.Paragraph type="secondary" className="directory-intent">{d.intent}</Typography.Paragraph>
+          <Space wrap>
+            <Tag bordered={false} color={d.pinned ? 'blue' : undefined}>{t(d.pinned ? 'directories.pinned' : 'directories.temporaryStatus')}</Tag>
+            <Tag bordered={false}>{d.organization}</Tag>
+            {detail?.folder && <Tag bordered={false}>{t('directories.folderMembership')}</Tag>}
+          </Space>
+        </> : !directoryId && <Typography.Paragraph type="secondary" className="directory-intent">{t('directories.intro')}</Typography.Paragraph>}
       </header>
       {failedBatches.length > 0 && <Collapse size="small" items={[{
         key: 'failed',
@@ -227,41 +298,50 @@ export default function DirectoryPage() {
         action={<Space><Button size="small" disabled={saving} onClick={() => run({ operation: batch.status === 'canceled' ? 'retry' : 'cancel', batch_id: batch.id })}>{t(batch.status === 'canceled' ? 'directories.retry' : 'directories.cancel')}</Button>{batch.status === 'canceled' && <Button size="small" disabled={saving} onClick={() => run({ operation: 'acknowledge', batch_id: batch.id })}>{t('directories.dismissResult')}</Button>}</Space>} />)}
       {folderBatch?.status === 'succeeded' && <Alert type="success" message={folderProgress(folderBatch)} />}
       {loading ? <div className="directory-loading"><Spin /></div> : !directoryId ? <>
-        <Typography.Paragraph type="secondary">{t('directories.retention')}</Typography.Paragraph>
-        {[true, false].map(pinned => <section className="directory-list-section" key={String(pinned)}>
-          <Typography.Title level={4}>{pinned ? t('directories.pinned') : t('directories.recent')} <Typography.Text type="secondary">{directories.filter(x => x.pinned === pinned).length}</Typography.Text></Typography.Title>
-          {directories.filter(x => x.pinned === pinned).length === 0 ? <Typography.Paragraph type="secondary" className="directory-empty-section">{t(pinned ? 'directories.noPinned' : 'directories.noDirectories')}</Typography.Paragraph> : <div className="directory-card-grid">{directories.filter(x => x.pinned === pinned).map(x => <Card key={x.id} className="directory-overview-card">
-            <div className="directory-card-heading">
-              <FolderOutlined />
-              <Button type="link" aria-description={unreadDirectoryIds.has(x.id) ? t('directories.unreadResult') : undefined} onClick={() => navigate(`/document-directories/${x.id}`)}>
-                <span>{x.name}</span>
-                {unreadDirectoryIds.has(x.id) && <Badge status="success" aria-hidden="true" />}
-              </Button>
-              <Tooltip title={t(x.pinned ? 'directories.directoryUnpin' : 'directories.directoryPin')}><Button type="text" className="directory-pin-button" aria-label={t(x.pinned ? 'directories.directoryUnpin' : 'directories.directoryPin')} aria-pressed={x.pinned} icon={x.pinned ? <PushpinFilled /> : <PushpinOutlined />} disabled={saving} onClick={() => run({ operation: 'update', directory_id: x.id, version: x.version, pinned: !x.pinned })} /></Tooltip>
-              <Dropdown trigger={['click']} menu={{ items: [{ key: 'delete', label: t('directories.delete'), danger: true,
-                disabled: saving || batches.some(b => b.directory_id === x.id && ['pending', 'running'].includes(b.status)),
-                onClick: () => setDeleteTarget(x) }] }}><Button type="text" aria-label={`${x.name} ${t('directories.more')}`} icon={<MoreOutlined />} /></Dropdown>
+        {[true, false].map(pinned => {
+          const items = directories.filter(item => item.pinned === pinned);
+          const heading = `directory-list-${pinned ? 'pinned' : 'temporary'}`;
+          return <section className="directory-list-section" aria-labelledby={heading} key={heading}>
+            <div className="directory-list-heading">
+              <h2 id={heading}>{t(pinned ? 'directories.pinned' : 'directories.temporary')}</h2>
+              <Typography.Text type="secondary">{t('directories.directoryCount', { count: items.length })}</Typography.Text>
             </div>
-            <Typography.Paragraph type="secondary" ellipsis={{ rows: 2 }}>{x.intent}</Typography.Paragraph>
-            <Tooltip title={x.organization}><Tag bordered={false} className="directory-card-organization">{x.organization}</Tag></Tooltip><div className="directory-card-footer">{t('directories.lastUsed')}: {new Date(x.last_used_at).toLocaleString()}</div>
-          </Card>)}</div>}
-        </section>)}
+            <div className="directory-table-panel directory-overview-table">
+              {items.length > 0 ? <Table size="middle" rowKey="id" tableLayout="fixed" columns={overviewColumns} dataSource={items} pagination={false} /> :
+                <Typography.Paragraph type="secondary" className="directory-empty-section">{t(pinned ? 'directories.noPinned' : 'directories.noDirectories')}</Typography.Paragraph>}
+            </div>
+          </section>;
+        })}
       </> : detail && d ? <>
         {detail.organizing && !statusBatches.some(b => ['pending', 'running'].includes(b.status)) && <Alert type="info" showIcon message={t('directories.organizing')} />}
-        <div className="directory-summary"><Space wrap><Tag bordered={false}>{d.organization}</Tag><span>{t('directories.documentCount', { count: documentCount })}</span>{pendingCount > 0 && <span>{t(detail?.total !== undefined ? 'directories.pagePendingCount' : 'directories.pendingCount', { count: pendingCount })}</span>}</Space><Space wrap><Tooltip title={t(d.pinned ? 'directories.directoryUnpin' : 'directories.directoryPin')}><Button type="text" className="directory-pin-button" aria-label={t(d.pinned ? 'directories.directoryUnpin' : 'directories.directoryPin')} aria-pressed={d.pinned} icon={d.pinned ? <PushpinFilled /> : <PushpinOutlined />} disabled={blocked} onClick={() => run({ operation: 'update', pinned: !d.pinned })} /></Tooltip><span>{t('directories.autoAdd')}</span><Switch size="small" aria-label={t('directories.autoAdd')} disabled={blocked} checked={d.auto_add} onChange={(auto_add: boolean) => run({ operation: 'update', auto_add })} /></Space></div>
         {(sourceNotices.length > 0 || inaccessibleCount > 0) && <Alert type="warning" showIcon message={<>
           {sourceNotices.map(notice => <div key={notice}>{notice}</div>)}
           {inaccessibleCount > 0 && <div>{t('directories.inaccessibleDocuments', { count: inaccessibleCount })}</div>}
         </>} />}
-        <Tabs activeKey={viewMode} onChange={(value: string) => { setViewMode(value); setPage(1); }} items={[{ key: 'groups', label: t('directories.groupedView') }, { key: 'all', label: t('directories.allDocuments') }, ...(detail?.folder ? [{ key: 'source', label: t('directories.sourceTree') }] : [])]} />
-        {viewMode === 'source' && directoryId ? <SourceTree directoryId={directoryId} /> : <div className={`directory-workspace ${viewMode === 'all' ? 'directory-workspace-all' : ''}`} >
-          {viewMode === 'groups' && <nav className="directory-groups" aria-label={t('directories.group')}>
-            <div className="directory-section-heading"><Typography.Text strong>{t('directories.group')}</Typography.Text><Button type="text" size="small" disabled={blocked} onClick={() => edit('group')}>{t('directories.addGroup')}</Button></div>
+        <div className="directory-workspace">
+          <nav className="directory-groups" aria-label={t('directories.group')}>
+            <button type="button" className="directory-group-button" aria-pressed={viewMode === 'all'}
+              onClick={() => { setViewMode('all'); setPage(1); }}>
+              <FileTextOutlined /><span>{t('directories.allDocuments')}</span><span className="directory-group-count">{documentCount}</span>
+            </button>
+            {detail.folder && <button type="button" className="directory-group-button" aria-pressed={viewMode === 'source'}
+              onClick={() => { setViewMode('source'); setPage(1); }}>
+              <FolderOpenOutlined /><span>{t('directories.sourceTree')}</span>
+            </button>}
+            <div className="directory-section-heading">
+              <Typography.Text type="secondary">{t('directories.group')}</Typography.Text>
+              <Tooltip title={t('directories.addGroup')}>
+                <Button type="text" size="small" icon={<PlusOutlined />} aria-label={t('directories.addGroup')} disabled={blocked} onClick={() => edit('group')} />
+              </Tooltip>
+            </div>
             {groupOptions.filter(g => g.value !== '' || ungroupedCount > 0).map(g => {
               const count = detail?.group_counts?.[g.value] ?? entries.filter(e => e.group_id === g.value).length;
               const group = detail.groups.find(item => item.id === g.value);
               return <div key={g.value} className="directory-group-row">
-                <button className={`directory-group-button ${activeGroup === g.value ? 'is-selected' : ''}`} aria-pressed={activeGroup === g.value} onClick={() => { setSelectedGroup(g.value); setPage(1); }}><FolderOutlined /><span>{g.label}</span><span className="directory-group-count">{count}</span></button>
+                <button type="button" className="directory-group-button" aria-pressed={viewMode === 'groups' && activeGroup === g.value}
+                  onClick={() => { setViewMode('groups'); setSelectedGroup(g.value); setPage(1); }}>
+                  <FolderOutlined /><span>{g.label}</span><span className="directory-group-count">{count}</span>
+                </button>
                 {group && <Dropdown trigger={['click']} menu={{ items: [
                   { key: 'edit', label: t('directories.editGroup'), disabled: blocked,
                     onClick: () => { edit('group'); editingGroup.current = group.id; form.setFieldsValue(group); } },
@@ -271,13 +351,28 @@ export default function DirectoryPage() {
                 ] }}><Button type="text" size="small" aria-label={`${g.label} ${t('directories.more')}`} icon={<MoreOutlined />} /></Dropdown>}
               </div>;
             })}
-          </nav>}
-          <section className="directory-documents">
-            <div className="directory-document-toolbar"><Input allowClear prefix={<SearchOutlined />} aria-label={t('directories.search')} placeholder={t('directories.search')} value={query} onChange={(e: ChangeEvent<HTMLInputElement>) => { setQuery(e.target.value); setPage(1); }} /><Select aria-label={t('directories.filterState')} value={stateFilter} onChange={(value: string) => { setStateFilter(value); setPage(1); }} options={['all', 'unconfirmed', 'unread', 'inaccessible'].map(value => ({ value, label: t(`directories.filter_${value}`) }))} /></div>
-            <Table tableLayout="fixed" rowKey="id" loading={!pageReady} dataSource={pageReady ? entries : []} columns={columns} pagination={false} scroll={{ x: 580, y: 400 }} locale={{ emptyText: <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t('directories.noMatchingDocuments')} /> }} />
-            <Pagination className="directory-pagination" current={currentPage} onChange={setPage} total={entryTotal} pageSize={PAGE_SIZE} showSizeChanger={false} hideOnSinglePage={false} showTotal={(total: number) => t('directories.documentCount', { count: total })} />
-          </section>
-        </div>}
+          </nav>
+          {viewMode === 'source' && directoryId ? <SourceTree directoryId={directoryId} /> :
+            <section className="directory-table-panel directory-documents" aria-labelledby="directory-documents-heading">
+              <div className="directory-document-toolbar">
+                <div className="directory-document-toolbar-heading">
+                  <h2 id="directory-documents-heading">{viewMode === 'groups' ? groupName(activeGroup) : t('directories.allDocuments')}</h2>
+                  {matchesQuery && <Typography.Text type="secondary">
+                    {t('directories.documentCount', { count: entryTotal })}
+                    {pendingCount > 0 && ` · ${t(detail.total !== undefined ? 'directories.pagePendingCount' : 'directories.pendingCount', { count: pendingCount })}`}
+                  </Typography.Text>}
+                </div>
+                <div className="directory-document-filters">
+                  <Input allowClear prefix={<SearchOutlined />} aria-label={t('directories.search')} placeholder={t('directories.search')} value={query} onChange={(e: ChangeEvent<HTMLInputElement>) => { setQuery(e.target.value); setPage(1); }} />
+                  <Select aria-label={t('directories.filterState')} value={stateFilter} onChange={(value: string) => { setStateFilter(value); setPage(1); }}
+                    options={['all', 'unconfirmed', 'unread', 'inaccessible'].map(value => ({ value, label: t(`directories.filter_${value}`) }))} />
+                </div>
+              </div>
+              <Table size="middle" tableLayout="fixed" rowKey="id" loading={!pageReady} dataSource={pageReady ? entries : []} columns={columns} pagination={false}
+                locale={{ emptyText: <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t('directories.noMatchingDocuments')} /> }} />
+              <Pagination className="directory-pagination" current={currentPage} onChange={setPage} total={entryTotal} pageSize={PAGE_SIZE} showSizeChanger={false} hideOnSinglePage={false} />
+            </section>}
+        </div>
 
       </> : <Empty />}
     </div>
@@ -286,34 +381,71 @@ export default function DirectoryPage() {
       onOk={() => { if (deleteTarget) void act({ operation: 'delete', directory_id: deleteTarget.id, version: deleteTarget.version }).then(() => setDeleteTarget(undefined)).catch(() => {}); }}>
       <Typography.Text>{deleteTarget?.name}</Typography.Text>
     </Modal>
-    <Drawer open={excludedOpen} title={t('directories.excluded')} width={460} onClose={() => setExcludedOpen(false)}>
+    <Drawer open={excludedOpen} title={t('directories.excluded')} width="min(460px, 100vw)" onClose={() => setExcludedOpen(false)}>
       {excludedOpen && d && <ExcludedEntries key={d.id} directoryId={d.id} version={d.version} blocked={blocked} restore={id => run({ operation: 'restore', entry_id: id })} />}
     </Drawer>
-    <Drawer open={!!selected} title={t('directories.details')} width={460} onClose={() => setSelectedEntry(undefined)}>
-      {selected && <div className="directory-entry-detail">
-        <Typography.Title level={4}>{entryTitle(selected)}</Typography.Title>
-        <Space wrap><Tag>{sourceLabel(selected.source)}</Tag><Tag color={selected.confirmed ? 'green' : 'orange'}>{t(detail?.folder ? 'directories.folderMembership' : selected.confirmed ? 'directories.confirmed' : 'directories.unconfirmed')}</Tag></Space>
-        <Typography.Paragraph type="secondary">{t(detail?.folder ? 'directories.folderContract' : selected.confirmed ? 'directories.confirmedHelp' : 'directories.confirmationHelp')}</Typography.Paragraph>
-        <Typography.Text strong>{t('directories.aiReadState')}</Typography.Text>
-        <div><Tag>{readState(selected)}</Tag></div>
-        <Typography.Paragraph type="secondary">{t('directories.aiReadStateHelp')}</Typography.Paragraph>
-        {selected.source === 'local' && <Button onClick={() => { setSelectedEntry(undefined); setLocalEntry(selected); }}>{t('directories.previewFile')}</Button>}
-        {selected.source === 'mail' && <Button onClick={() => { setSelectedEntry(undefined); setMailEntry(selected); }}>{t('directories.viewMail')}</Button>}
-        {entryURL(selected) && <Button href={entryURL(selected)} target="_blank" rel="noreferrer">{t('directories.openOriginal')}</Button>}
-        <Typography.Text strong>{t('directories.evidence')}</Typography.Text><Typography.Paragraph>{String(selected.evidence?.reason || t('directories.noEvidence'))}</Typography.Paragraph>
-        <Typography.Text strong>{t('directories.group')}</Typography.Text><Select aria-label={t('directories.group')} disabled={blocked} value={selected.group_id} options={groupOptions} onChange={(group_id: string) => run({ operation: 'entry', entry_id: selected.id, group_id })} />
-        <Tooltip title={t(selected.pinned ? 'directories.entryUnpin' : 'directories.entryPin')}><Button type="text" className="directory-pin-button" aria-label={t(selected.pinned ? 'directories.entryUnpin' : 'directories.entryPin')} aria-pressed={selected.pinned} icon={selected.pinned ? <PushpinFilled /> : <PushpinOutlined />} disabled={blocked} onClick={() => run({ operation: 'entry_pin', entry_id: selected.id, pinned: !selected.pinned })}>{t(selected.pinned ? 'directories.entryUnpin' : 'directories.entryPin')}</Button></Tooltip>
-        <Typography.Paragraph type="secondary">{t('directories.entryPinHelp')}</Typography.Paragraph>
-        <Space wrap><Tag>{t(`directories.access_${selected.access_state}`, { defaultValue: selected.access_state })}</Tag><Tag>{t(`directories.content_${selected.content_state || 'unknown'}`)}</Tag></Space>
-        <Typography.Text strong>{t('directories.location')}</Typography.Text><Typography.Paragraph copyable={{ text: JSON.stringify(selected.locator || { resource_id: selected.resource_id }) }}>{selected.resource_id}</Typography.Paragraph>
-        <Typography.Text type="secondary">{selected.namespace}</Typography.Text>
-        <Button danger disabled={blocked} onClick={() => { void act({ operation: 'exclude', entry_id: selected.id }).then(() => setSelectedEntry(undefined)).catch(() => {}); }}>{t('directories.exclude')}</Button>
-      </div>}
+    <Drawer open={!!selected} title={t('directories.entryDetails')} width="min(460px, 100vw)" rootStyle={directoryStyles}
+      push={false} onClose={() => setSelectedEntry(undefined)} footer={selected && <Button danger type="text" disabled={blocked}
+        onClick={() => { void act({ operation: 'exclude', entry_id: selected.id }).then(() => setSelectedEntry(undefined)).catch(() => {}); }}>{t('directories.exclude')}</Button>}>
+      {selected && <>
+        <div className="directory-entry-detail">
+          <div className="directory-document">
+            <span className="directory-item-icon"><FileTextOutlined /></span>
+            <div className="directory-document-text">
+              <Typography.Title level={4}>{entryTitle(selected)}</Typography.Title>
+              <Space wrap size={[0, 4]}>
+                <Tag bordered={false}>{sourceLabel(selected.source)}</Tag>
+                <Tag bordered={false} color={selected.confirmed ? 'green' : 'orange'}>{t(detail?.folder ? 'directories.folderMembership' : selected.confirmed ? 'directories.confirmed' : 'directories.unconfirmed')}</Tag>
+              </Space>
+            </div>
+          </div>
+          <Space wrap>
+            {selected.source === 'local' && <Button type="primary" icon={<FileTextOutlined />} onClick={() => setLocalEntry(selected)}>{t('directories.previewFile')}</Button>}
+            {selected.source === 'mail' && <Button type="primary" onClick={() => setMailEntry(selected)}>{t('directories.viewMail')}</Button>}
+            {entryURL(selected) && <Button type="primary" href={entryURL(selected)} target="_blank" rel="noreferrer">{t('directories.openOriginal')}</Button>}
+          </Space>
+          <section className="directory-entry-section">
+            <Typography.Title level={5}>{t('directories.evidence')}</Typography.Title>
+            <Typography.Paragraph>{String(selected.evidence?.reason || t('directories.noEvidence'))}</Typography.Paragraph>
+            <Typography.Paragraph type="secondary">{t(detail?.folder ? 'directories.folderContract' : selected.confirmed ? 'directories.confirmedHelp' : 'directories.confirmationHelp')}</Typography.Paragraph>
+          </section>
+          <section className="directory-entry-section">
+            <Typography.Title level={5}>{t('directories.entryGroup')}</Typography.Title>
+            <div className="directory-entry-group">
+              <Select aria-label={t('directories.entryGroup')} disabled={blocked} value={selected.group_id} options={groupOptions}
+                onChange={(group_id: string) => run({ operation: 'entry', entry_id: selected.id, group_id })} />
+              <Button className="directory-pin-button" aria-label={t(selected.pinned ? 'directories.entryUnpin' : 'directories.entryPin')}
+                aria-pressed={selected.pinned} icon={selected.pinned ? <PushpinFilled /> : <PushpinOutlined />}
+                disabled={blocked} onClick={() => run({ operation: 'entry_pin', entry_id: selected.id, pinned: !selected.pinned })}>{t(selected.pinned ? 'directories.entryUnpin' : 'directories.entryPin')}</Button>
+            </div>
+            <Typography.Text type="secondary">{t('directories.entryPinHelp')}</Typography.Text>
+          </section>
+          <Collapse ghost className="directory-entry-source" items={[{
+            key: 'source', label: <Typography.Text strong>{t('directories.entrySourceDetails')}</Typography.Text>,
+            children: <div className="directory-entry-section">
+              <Typography.Text strong>{t('directories.aiReadState')}</Typography.Text>
+              <div><Tag>{readState(selected)}</Tag></div>
+              <Typography.Paragraph type="secondary">{t('directories.aiReadStateHelp')}</Typography.Paragraph>
+              <Space wrap size={[0, 4]}><Tag>{t(`directories.access_${selected.access_state}`, { defaultValue: selected.access_state })}</Tag><Tag>{t(`directories.content_${selected.content_state || 'unknown'}`)}</Tag></Space>
+              <Typography.Text strong>{t('directories.location')}</Typography.Text>
+              <Typography.Paragraph copyable={{ text: JSON.stringify(selected.locator || { resource_id: selected.resource_id }) }}>{selected.resource_id}</Typography.Paragraph>
+              <Typography.Text type="secondary">{selected.namespace}</Typography.Text>
+            </div>,
+          }]} />
+        </div>
+        {readers}
+      </>}
     </Drawer>
-    <LocalFileReader directoryId={directoryId} entry={localEntry} onClose={() => setLocalEntry(undefined)} />
-    <MailReader directoryId={directoryId} entry={mailEntry} onClose={() => setMailEntry(undefined)} />
+    {!selected && readers}
     <Modal open={!!editor} title={editor === 'group' ? t(editingGroup.current ? 'directories.editGroup' : 'directories.addGroup') : t(`directories.${editor || 'create'}`)} onCancel={() => setEditor(undefined)} confirmLoading={saving} onOk={() => { void form.validateFields().then(values => act({ operation: editor!, group_id: editor === 'group' ? editingGroup.current : undefined, parent_id: editor === 'group' ? detail?.groups.find(g => g.id === editingGroup.current)?.parent_id || '' : undefined, ...values })).then(() => setEditor(undefined)).catch(() => {}); }}>
-      <Form form={form} layout="vertical">{editor !== 'reorganize' && <Form.Item name="name" label={t('directories.name')} rules={[{ required: true, whitespace: true, max: 255 }]}><Input /></Form.Item>}{(editor === 'create' || editor === 'update') && <Form.Item name="intent" label={t('directories.intent')} rules={[{ required: true, whitespace: true, max: 4000 }]}><Input.TextArea /></Form.Item>}{editor === 'reorganize' && <><Alert message={t('directories.newView')} /><Form.Item name="organization" label={t('directories.organization')} rules={[{ required: true, whitespace: true }]}><Input /></Form.Item></>}</Form>
+      <Form form={form} layout={editor === 'create' || editor === 'update' ? 'horizontal' : 'vertical'}
+        labelCol={{ xs: { span: 24 }, sm: { span: 5 } }} wrapperCol={{ xs: { span: 24 }, sm: { span: 19 } }} labelAlign="left" colon={false}>
+        {editor !== 'reorganize' && <Form.Item name="name" label={t(editor === 'group' ? 'directories.name' : 'directories.directoryName')} rules={[{ required: true, whitespace: true, max: 255 }]}><Input /></Form.Item>}
+        {(editor === 'create' || editor === 'update') && <Form.Item name="intent" label={t('directories.intent')} rules={[{ required: true, whitespace: true, max: 4000 }]}>
+          <Input.TextArea rows={3} placeholder={t('directories.intentPlaceholder')} />
+        </Form.Item>}
+        {editor === 'reorganize' && <><Alert message={t('directories.newView')} /><Form.Item name="organization" label={t('directories.organization')} rules={[{ required: true, whitespace: true }]}><Input /></Form.Item></>}
+      </Form>
     </Modal>
   </div>;
 }

@@ -2,13 +2,17 @@ import { useRAGComponent } from "../contexts/RAGComponentContext";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Alert, Button, Modal, Space, Tag } from "antd";
-import { DatabaseOutlined } from "@ant-design/icons";
+import { ApartmentOutlined, DatabaseOutlined } from "@ant-design/icons";
 import { Link, useLocation } from "react-router-dom";
 import { getPythonComponents, type PythonComponentStatus } from "../api/systemDependencies";
 import {
   usePythonComponentTask, pythonComponentTaskBusy, runPythonComponentTask,
   cancelPythonComponentDownload, pythonComponentErrorText,
 } from "../store/pythonComponentTask";
+
+function componentLabel(id: PythonComponentStatus["id"]) {
+  return id === "cluster" ? "clusterComponent" : "ragComponent";
+}
 
 export default function PythonComponentDependencies() {
   const { t } = useTranslation();
@@ -45,37 +49,41 @@ export default function PythonComponentDependencies() {
   return <>
     {loadError && !busy && <Alert type="error" showIcon message={t("ragComponent.loadFailed")} description={loadError}
       action={<Button onClick={() => void refresh()}>{t("common.retry")}</Button>} />}
-    {items.filter(item => item.installSupported).map(item => <section key={item.id}
-      id={`python-${item.id}-dependency`} className="model-provider-service-category model-provider-python-component">
-      <div className="model-provider-python-component-row">
-        <div className="model-provider-service-category-head">
-          <span aria-hidden="true"><DatabaseOutlined /></span>
-          <div className="model-provider-python-component-copy">
-            <div className="model-provider-python-component-title">
-              <h3>{t("ragComponent.name")}</h3>
-              <Tag color={item.active ? "success" : "default"}>
-                {busy ? progressLabel : item.active ? t("common.enabled") : item.restartRequired ? t("ragComponent.pendingRestart") : t("ragComponent.notInstalled")}
-              </Tag>
+    {items.filter(item => item.installSupported).map(item => {
+      const label = componentLabel(item.id);
+      const inProgress = busy && task.id === item.id;
+      return <section key={item.id}
+          id={`python-${item.id}-dependency`} className="model-provider-service-category model-provider-python-component">
+          <div className="model-provider-python-component-row">
+            <div className="model-provider-service-category-head">
+              <span aria-hidden="true">{item.id === "cluster" ? <ApartmentOutlined /> : <DatabaseOutlined />}</span>
+              <div className="model-provider-python-component-copy">
+                <div className="model-provider-python-component-title">
+                  <h3>{t(`${label}.name`)}</h3>
+                  <Tag color={item.active ? "success" : "default"}>
+                    {inProgress ? progressLabel : item.active ? t("common.enabled") : item.restartRequired ? t("ragComponent.pendingRestart") : t("ragComponent.notInstalled")}
+                  </Tag>
+                </div>
+                <p>{t(`${label}.description`)}</p>
+                <span className="model-provider-python-component-meta">{item.installMethod === "source" ? t("ragComponent.sourceInstall") : t("ragComponent.downloadSize", { size: ((item.sizeBytes || 0) / 1048576).toFixed(1) })}</span>
+              </div>
             </div>
-            <p>{t("ragComponent.description")}</p>
-            <span className="model-provider-python-component-meta">{item.installMethod === "source" ? t("ragComponent.sourceInstall") : t("ragComponent.downloadSize", { size: ((item.sizeBytes || 0) / 1048576).toFixed(1) })}</span>
+            <Space className="model-provider-python-component-actions" wrap>
+              {inProgress ? <Button type="primary" loading disabled>{progressLabel}</Button> : <>
+                {!item.installed && <Button type="primary" disabled={busy || item.installing} onClick={() => setSelected(item)}>
+                  {item.installing ? t("ragComponent.installing") : t("ragComponent.install")}
+                </Button>}
+                {item.restartRequired && item.installMethod !== "source" && <Button disabled={busy} onClick={() => void runPythonComponentTask(item.id, true)}>{t("ragComponent.retryActivation")}</Button>}
+              </>}
+              {inProgress && task.phase === "installing" && <Button onClick={cancelPythonComponentDownload}>{t("ragComponent.cancelDownload")}</Button>}
+            </Space>
           </div>
-        </div>
-        <Space className="model-provider-python-component-actions" wrap>
-          {busy ? <Button type="primary" loading disabled>{progressLabel}</Button> : <>
-            {!item.installed && <Button type="primary" disabled={item.installing} onClick={() => setSelected(item)}>
-              {item.installing ? t("ragComponent.installing") : t("ragComponent.install")}
-            </Button>}
-            {item.restartRequired && item.installMethod !== "source" && <Button onClick={() => void runPythonComponentTask(item.id, true)}>{t("ragComponent.retryActivation")}</Button>}
-          </>}
-          {task.phase === "installing" && <Button onClick={cancelPythonComponentDownload}>{t("ragComponent.cancelDownload")}</Button>}
-        </Space>
-      </div>
-      {!busy && item.restartRequired && item.installMethod === "source" && <p className="model-provider-python-component-notice">{t("ragComponent.sourceRestart")}</p>}
-      {busy && <p className="model-provider-python-component-notice">{t("ragComponent.backgroundNotice")}</p>}
-      {task.phase === "error" && <Alert type="error" showIcon message={t("ragComponent.activationFailed")} description={task.error} />}
-    </section>)}
-    <Modal title={selected ? t("ragComponent.installTitle", { name: t("ragComponent.name") }) : t("ragComponent.install")} open={!!selected}
+          {!busy && item.restartRequired && item.installMethod === "source" && <p className="model-provider-python-component-notice">{t("ragComponent.sourceRestart")}</p>}
+          {inProgress && <p className="model-provider-python-component-notice">{t("ragComponent.backgroundNotice")}</p>}
+          {task.id === item.id && task.phase === "error" && <Alert type="error" showIcon message={t("ragComponent.activationFailed")} description={task.error} />}
+        </section>;
+    })}
+    <Modal title={selected ? t("ragComponent.installTitle", { name: t(`${componentLabel(selected.id)}.name`) }) : t("ragComponent.install")} open={!!selected}
       okText={t("ragComponent.downloadAndInstall")}
       okButtonProps={{ disabled: busy || selected?.installing || (selected?.installMethod !== "source" && !selected?.url?.startsWith("https://")) }}
       cancelText={t("common.cancel")} onOk={beginInstall} onCancel={() => setSelected(null)}>

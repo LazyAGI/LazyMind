@@ -464,10 +464,10 @@ func (s *Service) InvokeExternalTool(ctx context.Context, call capability.Invoca
 		raw, toolName, err = mcp.CallAuthorizedTool(ctx, s.db, call.Principal.UserID, input.ToolID, input.Arguments)
 	}
 	if err != nil {
-		if code, ok := capability.CodeOf(err); ok && code == capability.InvalidArgument {
+		if _, ok := capability.CodeOf(err); ok {
 			return result, err
 		}
-		return result, capability.NewError(capability.Unavailable, op, "tool execution failed; check the tool connection and authorization in Settings", false, err)
+		return result, capability.NewError(capability.Unavailable, op, "tool execution failed without public error details; check its service logs", false, err)
 	}
 	if len(raw) > maxProxyBytes {
 		return result, capability.NewError(capability.ResultTooLarge, op, "tool result exceeds 2 MiB", false, nil)
@@ -618,6 +618,14 @@ func (s *Service) callBuiltinTool(ctx context.Context, userID, name string, argu
 
 func (s *Service) requestBuiltinTools(ctx context.Context, userID, endpoint, name string, arguments map[string]any) (json.RawMessage, error) {
 	llmConfig, err := modelconfig.LoadOwnedToolModels(ctx, s.db, userID, builtinModelRoles(name))
+	if name == "multimodal" && len(llmConfig) == 0 {
+		// A configured VLM does not need the main chat model or its credentials.
+		llmConfig, err = modelconfig.LoadOwnedToolModels(ctx, s.db, userID, []string{"llm"})
+		mainModel, _ := llmConfig["llm"].(map[string]any)
+		if mainModel["vision"] != true {
+			delete(llmConfig, "llm")
+		}
+	}
 	if err != nil {
 		return nil, fmt.Errorf("load built-in tool model: %w", err)
 	}
@@ -675,13 +683,15 @@ func (s *Service) requestBuiltinTools(ctx context.Context, userID, endpoint, nam
 		return nil, errors.New("built-in tool result could not be read or exceeded 2 MiB")
 	}
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
-		return nil, fmt.Errorf("built-in tool request failed (%d)", resp.StatusCode)
+		return nil, builtinToolError(resp.StatusCode, raw)
 	}
 	return raw, nil
 }
 
 func builtinModelRoles(name string) []string {
 	switch name {
+	case "multimodal":
+		return []string{"vlm"}
 	case "image_generator":
 		// An editable image model can also serve text-to-image, matching the
 		// Python runtime's existing one-way image-role mirroring.
@@ -840,6 +850,10 @@ func (s *Service) finishAudit(call capability.InvocationContext, row *orm.Extern
 		updates["status"] = "failed"
 		updates["error_code"] = string(code)
 		updates["error_message"] = auditErrorMessage(code)
+		var public *capability.Error
+		if errors.As(callErr, &public) && public.Upstream != nil {
+			updates["error_message"] = public.Message
+		}
 	}
 	_ = s.db.Model(&orm.ExternalCapabilityInvocation{}).Where("id = ?", row.ID).Updates(updates).Error
 }

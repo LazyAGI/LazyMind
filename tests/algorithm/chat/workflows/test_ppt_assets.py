@@ -105,7 +105,7 @@ def test_workflow_search_and_get_tools_are_registered_and_stage_real_assets(tmp_
     preview, count = module._inline_preview_images(rendered, tmp_path, tmp_path / 'pages/page_001.html')
     assert count == 1 and 'data:image/svg+xml;base64,' in preview
     workflow = yaml.safe_load((ROOT / 'workflows/ppt-workflow/workflow.yaml').read_text())
-    functions = workflow['tool_scripts'][0]['functions']
+    functions = [name for script in workflow['tool_scripts'] for name in script['functions']]
     assert {'ppt_search_assets', 'ppt_get_asset'} <= set(functions)
 
 

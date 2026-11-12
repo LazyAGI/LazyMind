@@ -31,7 +31,7 @@ func TestExternalProfileNativeAndExternalLifecycle(t *testing.T) {
 			}
 			node := graph.Nodes["write"]
 			node.LegacyTools, node.TerminalTools, node.ToolsOnly = []string{"native_generator"}, []string{"native_generator"}, true
-			node.ExternalExecution = &graphengine.ExternalStepExecution{Version: "1", ValidationOwner: "external-agent", Prompt: "Externally generate and validate the report", Tools: []graphengine.ExternalTool{{Name: "inspect", Source: "package"}}}
+			node.Execution = &graphengine.StepExecution{Version: "1", Tools: []graphengine.ExecutionTool{{Name: "inspect", Source: "package"}}}
 			graph.Nodes["write"] = node
 			graph.Runtime.PostStepChecks = []graphengine.PostStepCheck{{StepID: "write", Tool: "native_check"}}
 			graph.Runtime.TransactionalOutputs = true
@@ -68,7 +68,7 @@ func TestExternalProfileNativeAndExternalLifecycle(t *testing.T) {
 					t.Fatal(err)
 				}
 				contract, err := service.Contexts.LoadAttemptContext(t.Context(), claim.AttemptID)
-				if err != nil || contract.ExternalExecution != nil || !contract.ToolsOnly || contract.Prompt != "write report" {
+				if err != nil || contract.Execution == nil || !contract.ToolsOnly || contract.Prompt != "write report" {
 					t.Fatalf("native contract: %+v %v", contract, err)
 				}
 				contract.ExecutionHandle = claim.LeaseToken
@@ -85,7 +85,7 @@ func TestExternalProfileNativeAndExternalLifecycle(t *testing.T) {
 				assertSelected(true)
 				return
 			}
-			if grant.ExecutionHandle == "" || grant.StepContract.ExternalExecution == nil || grant.StepContract.ToolsOnly {
+			if grant.ExecutionHandle == "" || grant.StepContract.Execution == nil || grant.StepContract.ToolsOnly {
 				t.Fatalf("external grant: %+v", grant)
 			}
 			if _, _, err := executor.AuthorizeExternalToolCall(t.Context(), db, "owner", "session-1", "attempt-1", grant.ExecutionHandle, "inspect"); err != nil {

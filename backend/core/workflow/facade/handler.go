@@ -26,6 +26,7 @@ import (
 	"lazymind/core/workflow"
 	workflowcore "lazymind/core/workflow"
 	"lazymind/core/workflow/artifactfile"
+	"lazymind/core/workflow/controlpolicy"
 	"lazymind/core/workflow/controlstore"
 	workflowexecutor "lazymind/core/workflow/executor"
 	"lazymind/core/workflow/graphengine"
@@ -557,7 +558,10 @@ func (h Handler) GetCommand(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	command, err := h.Store.CommandByID(r.Context(), owner, mux.Vars(r)["command_id"])
-	if errors.Is(err, workflowstore.ErrNotFound) {
+	// Tool and claim receipts require current execution authorization and can
+	// only be replayed through their own endpoints.
+	if errors.Is(err, workflowstore.ErrNotFound) ||
+		(err == nil && command.ContractVersion != ContractVersion && command.ContractVersion != controlpolicy.Protocol) {
 		fail(w, http.StatusNotFound, "COMMAND_NOT_FOUND", "workflow command was not found", false)
 		return
 	}
@@ -1057,6 +1061,12 @@ func (h Handler) Command(delegate http.Handler) http.HandlerFunc {
 			delegate.ServeHTTP(recorder, clone)
 			return recorder.status, unwrapLegacyTransitionResponse(recorder.body.Bytes()), nil
 		})
+		var command toolCommandRequest
+		_ = json.Unmarshal(body, &command)
+		if errors.Is(err, workflowstore.ErrIdempotencyConflict) && command.Tool == "advance_step_and_hand_off" &&
+			len(command.Steps) == 1 && command.CommandID == commandID {
+			result, err = h.Store.ReplayHandOff(r.Context(), owner, sessionID, commandID, ContractVersion, body)
+		}
 		if errors.Is(err, workflowstore.ErrIdempotencyConflict) {
 			fail(w, 409, "IDEMPOTENCY_CONFLICT", "command id was used with another payload", false)
 			return
@@ -1069,8 +1079,6 @@ func (h Handler) Command(delegate http.Handler) http.HandlerFunc {
 			fail(w, 503, "COMMAND_FAILED", err.Error(), true)
 			return
 		}
-		var command toolCommandRequest
-		_ = json.Unmarshal(body, &command)
 		response := append(json.RawMessage(nil), result.ResponseJSON...)
 		if result.HTTPStatus < 400 && command.Tool == "advance_step" {
 			var value map[string]any

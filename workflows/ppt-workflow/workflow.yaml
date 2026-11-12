@@ -71,6 +71,8 @@ runtime:
           source: package
       collect_materials:
         tools:
+        - name: builtin:multimodal
+          source: global
         - name: pdf_read_text
           source: package
         - name: pdf_extract_images
@@ -103,6 +105,8 @@ runtime:
         tools:
         - name: image_generator
           source: global
+        - name: builtin:multimodal
+          source: global
       generate_ppt:
         skills:
         - runtime/references/html_constraints.md
@@ -114,6 +118,8 @@ runtime:
         - runtime/prompts/refine_review.md
         - runtime/prompts/refine_apply.md
         tools:
+        - name: builtin:multimodal
+          source: global
         - name: ppt_prepare_page
           source: package
         - name: ppt_export_html
@@ -271,45 +277,11 @@ runtime:
     AI_BACKGROUND_IMAGES: disabled, rewind to build_outline. These insertion
     routes take precedence over completed_edit_step; all other completed-deck
     edits use the generate_ppt fallback.
-  post_step_checks:
-    - step_id: analyze_requirements
-      tool: check_ppt_workflow_capabilities
-      arguments:
-        capability_requirements: ppt_capability_requirements
-        style_flow: style_flow
-        generate_background_images: generate_background_images
-        template_mode: template_mode
   input_checkpoint:
     after_step: collect_materials
     slot: material_clarification
     before_steps: [plan_background_prompts, generate_backgrounds, build_outline, plan_page_prompts, generate_ppt]
     title: 素材搜集完成 · 补充缺失信息
-  attachment_clarification:
-    filename_suffixes: [.pptx]
-    question_id_prefix: template_detail_
-    inspection_tools:
-      - pptx_analyzer
-      - read_user_attachment
-      - find_user_attachment
-      - KBToolkit
-      - KBToolkit_kb_search
-      - KBToolkit_kb_keyword_search
-      - KBToolkit_kb_get_parent_node
-      - KBToolkit_kb_get_window_nodes
-      - KBToolkit_read_document
-      - KBToolkit_list_knowledge_bases
-      - KBToolkit_list_knowledge_base_documents
-      - KBToolkit_aggregate_knowledge_base_documents
-    # Retained for interpreting answers in older conversation histories.
-    # New tasks inspect attachments only inside the Workflow.
-    instructions: >
-      Main Chat analyzes the request, binds the exact supplied template filename
-      and source references, and starts the Workflow without reading their contents.
-      analyze_requirements owns whole-template inspection and template_content_brief.
-      collect_materials owns document body reads, knowledge-base retrieval, evidence
-      comparison and contribution selection. Do not move these operations before
-      the trigger. Ask unresolved material facts at the post-collection input_checkpoint;
-      preserve all facts and prior answers already supplied by the user.
   clarification_fields:
     - id: contribution_scope
       label: 个人贡献范围
@@ -519,13 +491,13 @@ tool_scripts:
       - ppt_search_web_images
       - ppt_search_assets
       - ppt_get_asset
+      - ppt_inspect_material_images
       - ppt_register_material_images
       - ppt_collect_kb_images
       - ppt_extract_pdf_images
       - ppt_generate_material_images
       - ppt_publish_background_prompts
       - ppt_generate_background_images
-      - check_ppt_workflow_capabilities
       - ppt_analyze_template
       - ppt_publish_paper_reflection
       - ppt_cache_academic_sources
@@ -540,6 +512,7 @@ tool_scripts:
       - ppt_insert_outline_page
       - ppt_publish_deck_outline
       - ppt_generate_pages
+      - ppt_export_deck
       - ppt_generate_native_pptx
       - ppt_restyle_pages
       - ppt_recolor_pages
@@ -567,21 +540,23 @@ artifact_edit:
   step: generate_ppt
   slots: [slide_outline, background_prompts, background_images, preview_html, preview_notes, native_pptx]
   linked_lists: [slide_outline, background_prompts, background_images, preview_html, preview_notes]
-  required: [native_pptx]
+  required_if_present: [native_pptx]
   instruction: |-
-    Use the original LazyMind PPT Skills and the current selected native_pptx.
-    Delegate the user's full edit instruction to a native worker. Inspect the current
-    page before editing. Never substitute the uploaded template or rebuild unrelated pages.
+    Follow the shared PPT Skills and inspect the current selected artifacts before editing.
+    Preserve the user's full edit instruction. Never substitute the uploaded template
+    for the generated deck or rebuild unrelated pages.
     Local text/style/chart/notes edits preserve every unspecified object and page.
     Explicit regeneration replaces only the requested pages, using their saved outline,
     prompts and paper evidence. Delete/insert/reorder whole pages as requested and keep
     every nonempty linked page list in the same visual order. Preserve existing stable
     list_index values; new pages omit list_index. Refresh visible page numbers and notes.
     Use host tools for capabilities unavailable in LazyMind; do not replace these Skills.
-    Keep editable native text, charts, fonts and notes. Render and validate the changed
-    pages and the complete PPTX page count; preview_html and preview_notes must match it.
-    Submit one atomic workflow.edit.commit bundle including native_pptx and all nonempty
-    linked lists. Existing unchanged items carry only list_index. A user-requested edit
+    Preserve editable text, charts, fonts and notes in an existing PPTX. Validate changed
+    content, page count and consistency of every existing representation. Apply the
+    generation step's visual-review policy and disclose any unperformed checks.
+    Submit one atomic workflow.edit.commit bundle with all nonempty linked lists.
+    If native_pptx exists, include its updated file; HTML-only edits need no PPTX.
+    Existing unchanged items carry only list_index. A user-requested edit
     authorizes this save; never use this API to bypass a pending AI preview confirmation.
     If a required operation cannot be validated, report the limitation and do not publish.
 
@@ -788,29 +763,6 @@ slots:
     ordered: true
     summary_max_chars: 900
 
-  - id: presentation_style
-    user_visible: true
-    label: Global Style
-    type: text
-    cardinality: single
-    summary_max_chars: 900
-
-  - id: page_layout
-    user_visible: true
-    label: Page Layout
-    type: text
-    cardinality: list
-    ordered: true
-    summary_max_chars: 900
-
-  - id: page_assets
-    user_visible: true
-    label: Page Assets
-    type: text
-    cardinality: list
-    ordered: true
-    summary_max_chars: 900
-
   - id: deck_outline
     user_visible: true
     label: Deck Outline
@@ -1007,8 +959,5 @@ i18n:
       background_images: {label: AI 底图}
       deck_outline: {label: 大纲}
       slide_outline: {label: 每页设计稿}
-      presentation_style: {label: 全局风格}
-      page_layout: {label: 页面布局}
-      page_assets: {label: 页面素材}
       preview_html: {label: 幻灯片}
       preview_notes: {label: 讲稿}

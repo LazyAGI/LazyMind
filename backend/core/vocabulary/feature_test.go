@@ -2,29 +2,20 @@ package vocabulary
 
 import "testing"
 
-func TestEnabled(t *testing.T) {
-	t.Setenv("LAZYMIND_VOCABULARY_ENABLED", "")
+func TestVocabularyIgnoresLegacyDisableFlag(t *testing.T) {
+	t.Setenv("LAZYMIND_VOCABULARY_ENABLED", "false")
 	if !Enabled() {
-		t.Fatal("vocabulary must be enabled by default")
-	}
-
-	for _, value := range []string{"1", "true", "TRUE", "yes", "on"} {
-		t.Run(value, func(t *testing.T) {
-			t.Setenv("LAZYMIND_VOCABULARY_ENABLED", value)
-			if !Enabled() {
-				t.Fatalf("expected %q to enable vocabulary", value)
-			}
-		})
+		t.Fatal("vocabulary must remain available")
 	}
 }
 
-func TestRequireLocalRuntimeUsesFeatureFlag(t *testing.T) {
-	t.Setenv("LAZYMIND_VOCABULARY_ENABLED", "false")
-	if err := requireLocalRuntime(); err == nil {
-		t.Fatal("expected disabled vocabulary to be rejected")
-	}
-	t.Setenv("LAZYMIND_VOCABULARY_ENABLED", "true")
-	if err := requireLocalRuntime(); err != nil {
-		t.Fatalf("expected enabled vocabulary to be accepted: %v", err)
+func TestAnkiDeploymentCapabilityRequiresOptIn(t *testing.T) {
+	for _, value := range []string{"", "false", "true"} {
+		t.Run(value, func(t *testing.T) {
+			t.Setenv("LAZYMIND_VOCABULARY_ANKI_SYNC_ENABLED", value)
+			if ankiSyncAvailable() != (value == "true") {
+				t.Fatalf("unexpected Anki sync availability for %q", value)
+			}
+		})
 	}
 }

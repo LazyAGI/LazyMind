@@ -314,9 +314,18 @@ function mdxMarkupLength(line: string, start: number): number {
     if (destination) return destination[0].length;
   }
   const markup = line.slice(start).match(
-    /^(?:<!--.*?-->|<\/?[A-Za-z][A-Za-z0-9:._-]*(?=[\s/>])[^<>]*>|<(?:https?:\/\/|mailto:)[^<>\s]+>|<[^<>\s@]+@[^<>\s@]+>)/i,
+    /^(?:<!--.*?-->|<(?:https?:\/\/|mailto:)[^<>\s]+>|<[^<>\s@]+@[^<>\s@]+>)/i,
   );
-  return markup?.[0].length ?? 0;
+  if (markup) return markup[0].length;
+  const tag = line.slice(start).match(/^<(\/?)([A-Za-z][A-Za-z0-9:._-]*)(?=[\s/>])[^<>]*>/);
+  if (tag) {
+    // Only preserve tags handled by this editor's plugins. Bare tag mentions
+    // such as <spring> or <img> are text, not unclosed JSX components.
+    const supportedTag = /^(?:a|u|code|sup|sub)$/.test(tag[2]);
+    const imageTag = tag[2] === 'img' && (tag[1] === '/' || /\ssrc\s*=/.test(tag[0]));
+    return supportedTag || imageTag ? tag[0].length : 0;
+  }
+  return 0;
 }
 
 function escapeMdxPlainTextInLine(line: string): string {

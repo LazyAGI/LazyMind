@@ -21,11 +21,12 @@ import (
 )
 
 type artifactEditPolicy struct {
-	Step        string   `yaml:"step" json:"step"`
-	Slots       []string `yaml:"slots" json:"slots"`
-	LinkedLists []string `yaml:"linked_lists" json:"linked_lists"`
-	Required    []string `yaml:"required" json:"required"`
-	Instruction string   `yaml:"instruction" json:"instruction"`
+	Step              string   `yaml:"step" json:"step"`
+	Slots             []string `yaml:"slots" json:"slots"`
+	LinkedLists       []string `yaml:"linked_lists" json:"linked_lists"`
+	Required          []string `yaml:"required" json:"required"`
+	RequiredIfPresent []string `yaml:"required_if_present" json:"required_if_present"`
+	Instruction       string   `yaml:"instruction" json:"instruction"`
 }
 type artifactEditItem struct {
 	ListIndex   *int            `json:"list_index,omitempty"`
@@ -92,7 +93,7 @@ func GetArtifactEditContext(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	common.ReplyOK(w, map[string]any{"session_id": session.ID, "state_version": session.StateVersion, "revision_id": pkg.RevisionID, "policy": policy, "artifacts": refs, "skills": skills, "step_prompt": node.Prompt, "constraints": node.Execution.Constraints, "agent_instruction": "Use the LazyMind edit policy and Skills with a native worker. Read current artifacts by ID. Page numbers mean visual order in this list, not list_index. Preserve unspecified pages. Submit one complete bundle via workflow.edit.commit; do not rewind for a local edit. Existing items without value are preserved; omit an item to delete it, omit list_index on a new item to insert it. Lists in a bundle are the full desired order. Include the updated downloadable file and all nonempty linked lists. Validate page count, notes, editable objects and preview consistency before committing."})
+	common.ReplyOK(w, map[string]any{"session_id": session.ID, "state_version": session.StateVersion, "revision_id": pkg.RevisionID, "policy": policy, "artifacts": refs, "skills": skills, "step_prompt": node.Prompt, "constraints": node.Execution.Constraints, "agent_instruction": "Follow the edit policy and supplied Skills. Read current artifacts by ID. Page numbers mean visual order in this list, not list_index. Preserve unspecified pages. Submit one complete bundle via workflow.edit.commit; do not rewind for a local edit. Existing items without value are preserved; omit an item to delete it, omit list_index on a new item to insert it. Lists in a bundle are the full desired order. Include all nonempty linked lists and update files required by the policy. Validate page count, notes and consistency of the representations being edited before committing."})
 }
 func CommitArtifactEdit(w http.ResponseWriter, r *http.Request) {
 	var input artifactEditBundle
@@ -151,7 +152,13 @@ func commitArtifactEditBundle(ctx context.Context, db *gorm.DB, id string, input
 		for _, slot := range policy.Slots {
 			allowed[slot] = true
 		}
-		for _, slot := range policy.Required {
+		required := append([]string(nil), policy.Required...)
+		for _, slot := range policy.RequiredIfPresent {
+			if len(grouped[slot]) > 0 {
+				required = append(required, slot)
+			}
+		}
+		for _, slot := range required {
 			items := input.Slots[slot]
 			if len(items) != 1 || len(items[0].Value) == 0 {
 				return fmt.Errorf("updated %s required", slot)

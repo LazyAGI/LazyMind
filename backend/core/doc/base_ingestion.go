@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -52,6 +53,17 @@ func prepareBaseDocument(r *http.Request, datasetID string, task orm.Task) error
 	if err := db.Clauses(clause.OnConflict{DoNothing: true}).Create(&initial).Error; err != nil {
 		return err
 	}
+	var before orm.DocumentProcessingState
+	if err := db.Where("dataset_id = ? AND document_id = ?", datasetID, task.DocID).Take(&before).Error; err != nil {
+		return err
+	}
+	if before.EmbeddingVersion == embeddingVersionReembedManual && task.TaskType != string(TaskTypeReparse) {
+		return errEmbeddingStateChanged
+	}
+	generation, err := parsingEmbeddingGeneration(r.Context(), db)
+	if err != nil {
+		return err
+	}
 	var ext documentExt
 	if err := json.Unmarshal(document.Ext, &ext); err != nil {
 		return err
@@ -64,16 +76,16 @@ func prepareBaseDocument(r *http.Request, datasetID string, task orm.Task) error
 	}
 	headers := map[string]string{"X-LazyMind-Internal-Token": strings.TrimSpace(os.Getenv("LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN"))}
 	err = common.ApiPost(r.Context(), common.ChatServiceEndpoint()+"/internal/documents:prepare",
-		map[string]string{"source_path": ext.StoredPath}, headers, &result, 2*time.Minute)
+		map[string]any{"source_path": ext.StoredPath, "embedding_generation": generation}, headers, &result, 2*time.Minute)
 	if err == nil && (result.ArtifactRef != ext.StoredPath+baseArtifactSuffix || result.SourceSHA == "") {
 		err = fmt.Errorf("invalid native reader artifact")
 	}
 	if err != nil {
-		db.Model(&orm.DocumentProcessingState{}).Where("dataset_id = ? AND document_id = ? AND parse_artifact_ref = ''", datasetID, task.DocID).
+		db.Model(&orm.DocumentProcessingState{}).Where("dataset_id = ? AND document_id = ? AND revision = ? AND parse_artifact_ref = ''", datasetID, task.DocID, before.Revision).
 			Updates(map[string]any{"parse_status": "failed", "parse_error_message": err.Error(), "updated_at": time.Now().UTC()})
 		return err
 	}
-	if err := db.Model(&orm.DocumentProcessingState{}).Where("dataset_id = ? AND document_id = ?", datasetID, task.DocID).
+	resultUpdate := db.Model(&orm.DocumentProcessingState{}).Where("dataset_id = ? AND document_id = ? AND revision = ?", datasetID, task.DocID, before.Revision).
 		Updates(map[string]any{
 			"parse_status": "succeeded", "chunk_status": "succeeded", "index_status": "pending",
 			"parse_error_message": "", "chunk_error_message": "", "index_error_message": "",
@@ -83,8 +95,12 @@ func prepareBaseDocument(r *http.Request, datasetID string, task orm.Task) error
 			"parse_artifact_ref": result.ArtifactRef, "chunk_artifact_ref": result.ArtifactRef,
 			"index_artifact_ref": "", "index_fingerprint": "", "embedding_version": "",
 			"updated_at": time.Now().UTC(),
-		}).Error; err != nil {
-		return err
+		})
+	if resultUpdate.Error != nil {
+		return resultUpdate.Error
+	}
+	if resultUpdate.RowsAffected != 1 {
+		return errors.New("document changed during parsing; retry manually")
 	}
 	var control taskExt
 	json.Unmarshal(task.Ext, &control)
@@ -94,14 +110,18 @@ func prepareBaseDocument(r *http.Request, datasetID string, task orm.Task) error
 	return db.Model(&orm.Task{}).Where("id = ?", task.ID).Update("ext", mustJSON(control)).Error
 }
 
-func bindNativeIndexTask(ctx context.Context, datasetID, documentID, taskID, level string) {
-	if level != ProcessingLevelIndexed {
-		return
+func bindNativeIndexTask(ctx context.Context, datasetID, documentID, taskID, level string, generation int64) {
+	db := store.DB().WithContext(ctx)
+	query := db.Model(&orm.DocumentProcessingState{}).Where("dataset_id = ? AND document_id = ?", datasetID, documentID)
+	if db.Migrator().HasTable(&orm.EmbeddingIndexState{}) {
+		query = query.Where("NOT EXISTS (SELECT 1 FROM embedding_index_states WHERE scope = 'global' AND (generation <> ? OR phase IN ?))", generation, []string{"clearing", "cleanup_failed", "cleared"})
 	}
-	store.DB().WithContext(ctx).Model(&orm.DocumentProcessingState{}).
-		Where("dataset_id = ? AND document_id = ? AND (parse_artifact_ref <> '' OR embedding_version IN ?)",
-			datasetID, documentID, []string{embeddingVersionReembedPending, embeddingVersionReembedManual}).
-		Update("index_artifact_ref", "core-task:"+taskID)
+	if level == ProcessingLevelIndexed {
+		query = query.Where("parse_artifact_ref <> '' OR embedding_version IN ?", []string{embeddingVersionReembedPending, embeddingVersionReembedManual})
+	} else {
+		query = query.Where("embedding_version = ?", embeddingVersionReembedManual)
+	}
+	query.Update("index_artifact_ref", "core-task:"+taskID)
 }
 
 func readBaseArtifact(ctx context.Context, rec documentServiceRecord) (*baseArtifact, error) {

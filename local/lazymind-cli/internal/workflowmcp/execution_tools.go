@@ -2,12 +2,14 @@ package workflowmcp
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/url"
 	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"lazymind/agentconnector/internal/coreapi"
 )
 
 type ExecutionToolsInput struct {
@@ -30,15 +32,27 @@ type ExecutionToolCallInput struct {
 
 func registerExecutionTools(server *mcp.Server, client *Client) {
 	mcp.AddTool(server, &mcp.Tool{Name: "workflow.tool.list", Title: "List tools for a Workflow execution",
-		Description: "List tools explicitly allowed by this active execution's pinned external contract, including schemas and availability. The bound controller holds the execution_handle and may execute directly or proxy optional worker requests; workers do not control Workflow state. Missing capabilities must be configured in LazyMind before retrying.", Annotations: annotations(true)},
+		Description: "List tools declared by the current step, with input schemas, availability and reasons for missing capabilities. The controller uses the execution_handle to discover tools for itself or a worker.", Annotations: annotations(true)},
 		func(ctx context.Context, _ *mcp.CallToolRequest, input ExecutionToolsInput) (*mcp.CallToolResult, map[string]any, error) {
 			value, err := client.ListExecutionTools(ctx, input)
 			return nil, value, err
 		})
 	mcp.AddTool(server, &mcp.Tool{Name: "workflow.tool.call", Title: "Call a tool for a Workflow execution",
-		Description: "The bound controller executes one tool explicitly allowed by the pinned external contract, directly or on behalf of an optional worker. Use the listed name and schema, unchanged execution_handle, and a stable command_id for unchanged retries. Use arguments_file for a worker-prepared JSON argument file and result_directory to return only local file references and brief status. Connector transport paths stay local; upstream arguments still follow the declared tool schema. This does not publish or complete a step. Do not send credentials or arbitrary server filesystem paths. If unavailable, show the LazyMind configuration guidance and yield; do not replace the workflow or silently use a different capability.", Annotations: annotations(false)},
-		func(ctx context.Context, _ *mcp.CallToolRequest, input ExecutionToolCallInput) (*mcp.CallToolResult, map[string]any, error) {
+		OutputSchema: map[string]any{"type": "object", "additionalProperties": true},
+		Description:  "Call a declared tool using its listed name and schema. The controller supplies the execution_handle and a command_id stable across identical retries. arguments_file reads worker-prepared JSON locally. result_directory saves the full response and files for handoff. Correct arguments or configuration using the returned error code and message. Workflow publication and completion use their own endpoints.", Annotations: annotations(false)},
+		func(ctx context.Context, _ *mcp.CallToolRequest, input ExecutionToolCallInput) (*mcp.CallToolResult, any, error) {
 			value, err := client.CallExecutionTool(ctx, input)
+			var failure *coreapi.Error
+			if errors.As(err, &failure) {
+				detail := map[string]any{"code": failure.Code, "message": failure.Message, "retryable": failure.Retryable}
+				if failure.Upstream != nil {
+					detail["upstream"] = failure.Upstream
+				}
+				payload := map[string]any{"error": detail}
+				encoded, _ := json.Marshal(payload)
+				return &mcp.CallToolResult{IsError: true, StructuredContent: payload,
+					Content: []mcp.Content{&mcp.TextContent{Text: string(encoded)}}}, nil, nil
+			}
 			return nil, value, err
 		})
 }

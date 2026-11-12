@@ -10,6 +10,16 @@ import (
 	workflowstore "lazymind/core/workflow/store"
 )
 
+const (
+	// External workflow requests may carry a 100 MiB Skill ZIP, but input
+	// materials have their own bounded budget so the larger request envelope
+	// cannot be used to smuggle an unbounded number of database resources.
+	maxExternalWorkflowInputBindings  = 128
+	maxExternalWorkflowInputFiles     = 32
+	maxExternalWorkflowInputFileBytes = 32 << 20
+	maxExternalWorkflowInputBytes     = 128 << 20
+)
+
 // Keep a fingerprint after large input bytes have been removed from task state.
 func externalTaskRequestHash(body externalAgentWorkflowTaskRequest) string {
 	body.IdempotencyKey = ""
@@ -52,6 +62,23 @@ func externalTaskGenerationDescription(task orm.ExternalAgentWorkflowTask) strin
 }
 
 func validateExternalTaskInputs(body externalAgentWorkflowTaskRequest) error {
+	if len(body.InputBindings) > maxExternalWorkflowInputBindings {
+		return fmt.Errorf("input_bindings must contain at most %d materials", maxExternalWorkflowInputBindings)
+	}
+	bindingCount := 0
+	for materialID, raw := range body.InputBindings {
+		if strings.TrimSpace(materialID) == "" {
+			continue
+		}
+		if values, ok := raw.([]any); ok {
+			bindingCount += len(values)
+		} else {
+			bindingCount++
+		}
+	}
+	if bindingCount > maxExternalWorkflowInputBindings {
+		return fmt.Errorf("input_bindings must contain at most %d resources", maxExternalWorkflowInputBindings)
+	}
 	seen := make(map[string]bool)
 	if _, err := workflowstore.ParseInputBindings(body.InputBindings, "external-agent-workflow"); err != nil {
 		return err
@@ -59,6 +86,10 @@ func validateExternalTaskInputs(body externalAgentWorkflowTaskRequest) error {
 	for id := range body.InputBindings {
 		seen[id] = true
 	}
+	if len(body.InputFiles) > maxExternalWorkflowInputFiles {
+		return fmt.Errorf("input_files must contain at most %d files", maxExternalWorkflowInputFiles)
+	}
+	var totalBytes int64
 	for i, file := range body.InputFiles {
 		id := strings.TrimSpace(file.MaterialID)
 		if id == "" || strings.TrimSpace(file.Name) == "" || strings.TrimSpace(file.MimeType) == "" {
@@ -68,9 +99,20 @@ func validateExternalTaskInputs(body externalAgentWorkflowTaskRequest) error {
 			return fmt.Errorf("input_files[%d]: duplicate material_id %q", i, id)
 		}
 		seen[id] = true
-		content, err := base64.StdEncoding.DecodeString(strings.TrimSpace(file.ContentBase64))
+		encoded := strings.TrimSpace(file.ContentBase64)
+		if len(encoded) > base64.StdEncoding.EncodedLen(maxExternalWorkflowInputFileBytes)+4 {
+			return fmt.Errorf("input_files[%d] exceeds the %d MiB file limit", i, maxExternalWorkflowInputFileBytes>>20)
+		}
+		content, err := base64.StdEncoding.DecodeString(encoded)
 		if err != nil || len(content) == 0 {
 			return fmt.Errorf("input_files[%d].content_base64 must encode a non-empty file", i)
+		}
+		if len(content) > maxExternalWorkflowInputFileBytes {
+			return fmt.Errorf("input_files[%d] exceeds the %d MiB file limit", i, maxExternalWorkflowInputFileBytes>>20)
+		}
+		totalBytes += int64(len(content))
+		if totalBytes > maxExternalWorkflowInputBytes {
+			return fmt.Errorf("input_files exceed the %d MiB total limit", maxExternalWorkflowInputBytes>>20)
 		}
 		if file.ContentHash != "" && strings.TrimSpace(file.ContentHash) != "sha256:"+sha256Hex(content) {
 			return fmt.Errorf("input_files[%d].content_hash does not match the file", i)

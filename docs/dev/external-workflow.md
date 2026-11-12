@@ -23,12 +23,20 @@ LazyMind 不根据模型评分决定外部产物是否合格，不要求语义�
 
 - 同一 revision 的原生和外部执行器收到相同的 `step_contract.prompt`、`execution.skill_files`、`execution.constraints`、验收和必需输出。Skill 按固定 revision 读取，包含 `path`、`content` 和 `sha256`；原生 runner 也实际加载这些内容。
 - 编译器拒绝在 `runtime.execution.steps` 覆盖 prompt、acceptance 或 required_outputs，避免形成第二套业务规则。
-- 原生工具包装、本地路径、tools-only 和自动保存方式属于执行适配。外部执行器按照公共 `external_execution.adapter_instructions`，用宿主能力或已声明的 MCP 工具完成相同业务要求。它不需要安装或调用原生模型包装。
-- 共享契约在线上传输时仅保留一份 Skill 和业务指令。`external_execution` 返回版本、验证归属、适配说明和 `execution_ref: "#/execution"`，引用同一 `execution`；不再重复 Skill 正文、prompt、验收及工具清单。`objective_ref: "#/prompt"` 表示复用顶层 prompt；若另有 objective 文本，将其作为额外运行要求。旧 revision 的独立 `runtime.external_execution` 及未声明外部能力的 executor 路由继续保持，运行中不能替换绑定 revision。
+- 原生工具包装、本地路径、tools-only 和自动保存方式属于执行适配。外部执行器优先用宿主能力，不足时调用已声明并获授权的 MCP 工具。业务目标与验收仍来自同一步骤契约。
+- 共享契约仅传输一份 `prompt` 与 `execution`，不再输出 `external_execution` 或 `adapter_instructions`。`objective_ref: "#/prompt"` 表示复用顶层 prompt；若另有 objective 文本，将其作为额外运行要求。Core 与 Connector 使用同一协议，不提供旧格式转换。运行中不能替换绑定 revision。
 - `launch_request` 和 `user_request` 分别携带启动与本次执行/重试请求，必须连同输入传给 worker。
 - 外部验证由宿主执行；服务端继续检查类型、哈希、owner、当前 lease 和幂等。Native 与外部均遵守同一状态机、列表顺序、审核、暂停和条件输出。
 
 更新工作流时应重新发布，再启动新运行测试共享契约。已有运行和已有 PPT 产物仍使用原来固定的 revision；打开历史结果不会触发重跑。
+
+## MCP 说明分层
+
+- 连接级 instructions：发现工作流、读取状态、执行共享契约、Controller 与可选 worker 的职责、宿主能力优先与工具回退原则。
+- 工具 description / schema：该操作的用途、参数、文件交接、幂等与回执语义。文档读取和授权说明放在对应文档工具上。
+- 运行返回：`agent_instruction` 根据当前 continuation/admission 给出操作指引；`step_contract` 提供固定 revision 的业务要求。人工审核、提问、恢复和重试指引在相关状态出现时返回。
+
+连接说明和宿主 Skill 不包含某个具体工作流的页面调度、导出流程或第二套验收规则。
 
 ## 根 Controller 的执行循环
 
@@ -38,8 +46,8 @@ Controller 按已返回状态调度、代理工具和保存结果，避免重复
 
 1. 发现并读取工作流；从用户请求和附件满足启动必需项。源文件经 `workflow.input.import` 得到不可变资源绑定。
 2. `workflow.start` 使用唯一且稳定的 `idempotency_key`。缺少输入时按返回问题继续收集；不创建重复 run。宿主 Connector 提供真实会话身份，不能编造 `driver_session_id`。
-3. 读取 `workflow.state`。已有 execution 用 `workflow.step.claim`，仅在 admission 允许时 `workflow.step.begin`。
-4. 取得 `execution_handle` 与固定 `step_contract`。根代理保留 handle，不给 worker。
+3. 读取 `workflow.state`。已有排队的 execution 用 `workflow.step.claim`，仅在 admission 允许时 `workflow.step.begin`。为 begin 提供稳定的 `command_id`，响应丢失时用原参数和原 ID 重试。
+4. 取得 `execution_handle` 与固定 `step_contract`。根代理保留 handle，不给 worker。MCP Connector 自动续租，若状态列出 `control.expired_execution_ids`，用 `workflow.step.resume` 领取同一次执行的新 handle。
 5. 有 subagent 时可分派执行；没有时由当前外部 Agent 执行该步骤。执行方读取完整固定契约（包括共享 execution Skill、步骤业务说明、启动/补充请求、输入资源、必需/条件输出）与独立输出目录。需要 LazyMind 工具时由 worker 返回调用请求，根代理代为调用。
 6. 对实际文件、源事实和预览进行单独验证，修复失败项。可由独立 worker 验证，也可由同一 Agent 进行第二轮检查；后者须注明同 Agent 验证，不能声称独立复核。返回真实 artifact manifest 和验证结论。
 7. 根代理逐项 `workflow.artifact.publish`；每个槽使用稳定正整数 `seq`，重试不换序号。文件必须存在于 Connector 可读的机器上。
@@ -67,7 +75,7 @@ MCP 不负责替宿主启动原生 subagent。所有宿主遵守相同的 MCP �
 
 文件模式不改变 command_id、幂等、当前 execution_handle、固定 revision、服务端类型检查及状态机。重试保持 command 和参数内容不变；修改参数文件后不能复用旧 command。文件结果使用私有随机目录，拒绝路径穿越、同名覆盖和错误哈希；不提供在任意已有文件上写入的接口。传输成功不代表视觉/语义检查通过，也不自动发布产物。
 
-固定共享大纲、准确文案、讲稿与风格后，有 subagent 的宿主按可用容量创建独立页面 worker 并行执行，各自读取完整固定业务契约与本页输入；无 subagent 时顺序执行。不得把上一个 worker 的历史带给下一页。检查通过的一页立即按稳定页身份和 seq 发布，不能把完成顺序当页序，也不能为等待较早页面而阻塞其他页面的保存。最终导出参数由工具从已接受文件按视觉页序组装；控制器只交接参数文件路径。整套导出一次，检查实际文件，修复失败页。宿主不支持共享路径时用其等价资源接口或既有内联协议，完整 Skill 和检查要求仍保留。
+固定共享大纲、准确文案、讲稿与风格后，有 subagent 的宿主按可用容量创建独立页面 worker 并行执行，各自读取完整固定业务契约与本页输入；无 subagent 时顺序执行。不得把上一个 worker 的历史带给下一页。主控缓存乱序完成且通过检查的页面及讲稿，等前面各页及其讲稿收到发布回执后，按已批准的页序和稳定的页身份、seq 逐页发布。最终导出参数由工具从已接受文件按视觉页序组装；控制器只交接参数文件路径。整套导出一次，检查实际文件，修复失败页。宿主不支持共享路径时用其等价资源接口或既有内联协议，完整 Skill 和检查要求仍保留。
 
 ## 用户追问、暂停与恢复
 

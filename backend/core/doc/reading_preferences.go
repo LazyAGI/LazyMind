@@ -72,9 +72,6 @@ func ReadingPreferences(w http.ResponseWriter, r *http.Request) {
 		key := descriptor.ID
 		c := readingCapability{Capability: descriptor, Available: true, EffectiveMode: p.Modes[key]}
 		switch key {
-		case "overview":
-			c.Available = false
-			c.UnavailableReason = "论文速览尚未提供可运行的生成服务"
 		case readingpolicy.PDFParse:
 			if parseErr != nil {
 				c.Available = false

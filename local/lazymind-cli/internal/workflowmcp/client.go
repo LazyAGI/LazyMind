@@ -5,7 +5,6 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -35,6 +34,7 @@ type Client struct {
 	BindController     func(context.Context, string, string) error
 	ResolveDriver      func(context.Context, *mcp.CallToolRequest, string) (string, error)
 	EnsureHostReady    func(context.Context) error
+	leaseRenewal       *stepLeaseRenewal
 }
 
 type executionReadinessKey struct{}
@@ -160,7 +160,6 @@ type BeginInput struct {
 
 type StepContract struct {
 	Execution               map[string]any    `json:"execution,omitempty"`
-	ExternalExecution       map[string]any    `json:"external_execution,omitempty"`
 	KnowledgeScope          map[string]any    `json:"knowledge_scope,omitempty"`
 	LaunchRequest           string            `json:"launch_request,omitempty"`
 	UserRequest             string            `json:"user_request,omitempty"`
@@ -217,8 +216,8 @@ type ResumeInput struct {
 type Output struct {
 	Slot        string `json:"slot" jsonschema:"required,Declared Workflow output slot"`
 	ContentType string `json:"content_type,omitempty" jsonschema:"Slot type: text, json, image, file, or file_list"`
-	Value       any    `json:"value,omitempty" jsonschema:"Inline result: text, JSON, image URL, or file payload"`
-	LocalPath   string `json:"local_path,omitempty" jsonschema:"Local file path for a file slot; mutually exclusive with value"`
+	Value       any    `json:"value,omitempty" jsonschema:"Inline result: text, JSON, file payload, or image URL string/object with url. Use local_path for local images."`
+	LocalPath   string `json:"local_path,omitempty" jsonschema:"Local image or file to upload; mutually exclusive with value"`
 	ValueFile   string `json:"value_file,omitempty" jsonschema:"Absolute Connector-local UTF-8 file for a text or JSON slot; reads and publishes its value without echoing full content into controller context. Mutually exclusive with value and local_path"`
 	Caption     string `json:"caption,omitempty"`
 	Seq         int    `json:"seq,omitempty" jsonschema:"One-based idempotency sequence for list items or repeated revisions of one slot"`
@@ -362,25 +361,8 @@ func (c *Client) State(ctx context.Context, sessionID string) (Projection, error
 	if err != nil {
 		return Projection{}, err
 	}
-	continuation, _ := state.Control["continuation"].(string)
-	admission, _ := state.Control["admission"].(map[string]any)
-	retries, _ := state.Control["automatic_retry_steps"].([]any)
-	if continuation == "continue" && admission["can_begin"] == true && len(retries) > 0 {
-		steps, _ := json.Marshal(retries)
-		state.AgentInstruction = "A step failed but automatic retry budget remains. Call workflow.step.begin for one step in control.automatic_retry_steps=" + string(steps) + " using the current state version. Keep this run; do not stop it or start a replacement run. Inspect the failure and adjust the retry instruction if needed."
-	} else if state.Control["input_request"] != nil && continuation == "awaiting_user" {
-		state.AgentInstruction = "Ask the exact questions in control.input_request using the host's question UI or ordinary conversation, then wait for the user's actual reply. Save only that reply with workflow.input.answer using the returned artifact_id, revision and state_version. Never infer answers or mark a review approved. Read workflow.state after saving; stopped runs still require an explicit user resume."
-	} else if continuation == "stopped" {
-		state.AgentInstruction = "The Workflow is stopped. If the user explicitly asks to continue, call workflow.session.resume on this run. Inspect or claim any returned execution_id with workflow.step.claim instead of beginning a duplicate; otherwise read workflow.state again. Without a new user request, END this turn."
-	} else if continuation == "completed" || continuation == "failed" {
-		state.AgentInstruction = "END this turn unless the user explicitly requested recovery. For an explicit edit to completed artifacts, read workflow.edit.context and follow the shared package Skills; use workflow.edit.commit for local changes, page insertion/deletion or scoped regeneration without rewinding. Only a request to rerun the workflow uses an exact projection.rewindable target with workflow.step.begin; for a requested retry, use an exact projection.retryable target and retry_origin=user. Core applies the same rules as the internal controller. Do not create a replacement Workflow."
-	} else {
-		if continuation, _ := state.Control["continuation"].(string); continuation == "awaiting_user" {
-			state.AgentInstruction = "Human review is required. Tell the user to review in the Workflow panel, then END this turn. Do not approve the review yourself, begin another step, or poll while waiting. Resume only on a new notification or explicit user input, and read workflow.state first."
-		} else if continuation == "awaiting_executor" || continuation == "draining" || continuation == "binding_required" {
-			state.AgentInstruction = "END this turn. Do not continue Workflow execution or poll while waiting. Resume only on a new notification or explicit user input, and read workflow.state first."
-		}
-	}
+	state.AgentInstruction = stateInstruction(state)
+
 	return state, nil
 }
 
@@ -652,7 +634,7 @@ func (c *Client) Begin(ctx context.Context, input BeginInput) (BeginResult, erro
 		}, &grant); err != nil {
 			return BeginResult{}, err
 		}
-		return c.Claim(ctx, ResumeInput{SessionID: input.SessionID, ExecutionID: grant.Receipt.ExecutionID})
+		return c.begin(ctx, input.SessionID, grant.Receipt.ExecutionID, false, input.CommandID)
 	}
 	command := map[string]any{
 		"contract_version": contractVersion, "command_id": input.CommandID,
@@ -680,19 +662,19 @@ func (c *Client) Begin(ctx context.Context, input BeginInput) (BeginResult, erro
 	if executionID == "" {
 		return BeginResult{}, errors.New("LazyMind accepted the step but returned no execution_id")
 	}
-	return c.begin(ctx, input.SessionID, executionID, false)
+	return c.begin(ctx, input.SessionID, executionID, false, input.CommandID)
 }
 
 // Claim acquires a previously created recovery grant without advancing the graph again.
 func (c *Client) Claim(ctx context.Context, input ResumeInput) (BeginResult, error) {
-	return c.begin(ctx, input.SessionID, input.ExecutionID, false)
+	return c.begin(ctx, input.SessionID, input.ExecutionID, false, "")
 }
 
 func (c *Client) Resume(ctx context.Context, input ResumeInput) (BeginResult, error) {
-	return c.begin(ctx, input.SessionID, input.ExecutionID, true)
+	return c.begin(ctx, input.SessionID, input.ExecutionID, true, "")
 }
 
-func (c *Client) begin(ctx context.Context, sessionID, executionID string, resume bool) (BeginResult, error) {
+func (c *Client) begin(ctx context.Context, sessionID, executionID string, resume bool, claimID string) (BeginResult, error) {
 	if strings.TrimSpace(sessionID) == "" || strings.TrimSpace(executionID) == "" {
 		return BeginResult{}, errors.New("session_id and execution_id are required")
 	}
@@ -705,12 +687,19 @@ func (c *Client) begin(ctx context.Context, sessionID, executionID string, resum
 	if resume {
 		action = ":resume"
 	}
+	payload := map[string]any{}
+	if claimID != "" {
+		payload["claim_id"] = claimID
+	}
 	var execution Execution
 	if err := c.api.DoJSON(ctx, http.MethodPost, "/workflow-sessions/"+url.PathEscape(sessionID)+
-		"/hosted-attempts/"+url.PathEscape(executionID)+action, map[string]any{}, &execution); err != nil {
+		"/hosted-attempts/"+url.PathEscape(executionID)+action, payload, &execution); err != nil {
 		return BeginResult{}, err
 	}
 	state, err := c.State(ctx, sessionID)
+	if err == nil {
+		c.trackStepLease(sessionID, execution)
+	}
 	return BeginResult{Execution: execution, State: state}, err
 }
 
@@ -728,11 +717,13 @@ func (c *Client) Complete(ctx context.Context, input CompleteInput) (CompleteRes
 	if err != nil {
 		return CompleteResult{}, err
 	}
+	c.stopStepLease(input.SessionID, input.ExecutionID, input.ExecutionHandle)
 	result.State, err = c.State(ctx, input.SessionID)
 	if err != nil && result.Control != nil {
 		// The terminal transaction succeeded. A read outage must not turn it into a failed tool.
 		result.StateUnavailable = true
 		result.State = Projection{SessionID: input.SessionID, Control: result.Control}
+		result.State.AgentInstruction = "Completion was accepted. Read workflow.state to refresh the projection before further execution."
 		return result, nil
 	}
 	if result.State.Control != nil {
@@ -790,7 +781,7 @@ type PublishInput struct {
 	SessionID       string `json:"session_id" jsonschema:"required,Workflow session identifier"`
 	ExecutionID     string `json:"execution_id" jsonschema:"required,Execution identifier"`
 	ExecutionHandle string `json:"execution_handle" jsonschema:"required,Unchanged execution handle from begin claim or resume"`
-	Output          Output `json:"output" jsonschema:"required,One artifact to publish immediately; use a stable positive seq per slot across calls"`
+	Output          Output `json:"output" jsonschema:"required,One artifact to publish in the step contract's required order; use a stable positive seq per slot across calls"`
 }
 
 func (c *Client) Publish(ctx context.Context, input PublishInput, artifact map[string]any) (map[string]any, error) {

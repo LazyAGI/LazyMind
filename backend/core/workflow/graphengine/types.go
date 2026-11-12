@@ -50,26 +50,25 @@ type ProducerRef struct {
 }
 
 type CompiledNode struct {
-	Execution         *StepExecution         `json:"execution,omitempty"`
-	ExternalExecution *ExternalStepExecution `json:"external_execution,omitempty"`
-	ID                string                 `json:"id"`
-	Label             string                 `json:"label,omitempty"`
-	Route             string                 `json:"route"`
-	Input             *Expression            `json:"input_expression,omitempty"`
-	OptionalInputs    []MaterialRef          `json:"optional_inputs,omitempty"`
-	InputTransports   map[string]string      `json:"input_transports,omitempty"`
-	Outputs           []string               `json:"outputs,omitempty"`
-	RequiredOutputs   []string               `json:"required_outputs,omitempty"`
-	SkipIf            *Expression            `json:"skip_if,omitempty"`
-	Prompt            string                 `json:"prompt,omitempty"`
-	Acceptance        []string               `json:"acceptance_criteria,omitempty"`
-	Capabilities      []string               `json:"capabilities,omitempty"`
-	LegacyTools       []string               `json:"legacy_tools,omitempty"`
-	TerminalTools     []string               `json:"terminal_tools,omitempty"`
-	ToolsOnly         bool                   `json:"tools_only,omitempty"`
-	TerminalToolsOnly bool                   `json:"terminal_tools_only,omitempty"`
-	StreamHeartbeat   bool                   `json:"stream_heartbeat,omitempty"`
-	Mode              string                 `json:"mode,omitempty"`
+	Execution         *StepExecution    `json:"execution,omitempty"`
+	ID                string            `json:"id"`
+	Label             string            `json:"label,omitempty"`
+	Route             string            `json:"route"`
+	Input             *Expression       `json:"input_expression,omitempty"`
+	OptionalInputs    []MaterialRef     `json:"optional_inputs,omitempty"`
+	InputTransports   map[string]string `json:"input_transports,omitempty"`
+	Outputs           []string          `json:"outputs,omitempty"`
+	RequiredOutputs   []string          `json:"required_outputs,omitempty"`
+	SkipIf            *Expression       `json:"skip_if,omitempty"`
+	Prompt            string            `json:"prompt,omitempty"`
+	Acceptance        []string          `json:"acceptance_criteria,omitempty"`
+	Capabilities      []string          `json:"capabilities,omitempty"`
+	LegacyTools       []string          `json:"legacy_tools,omitempty"`
+	TerminalTools     []string          `json:"terminal_tools,omitempty"`
+	ToolsOnly         bool              `json:"tools_only,omitempty"`
+	TerminalToolsOnly bool              `json:"terminal_tools_only,omitempty"`
+	StreamHeartbeat   bool              `json:"stream_heartbeat,omitempty"`
+	Mode              string            `json:"mode,omitempty"`
 }
 
 type CompiledEdge struct {
@@ -177,9 +176,8 @@ type CompletedAction struct {
 // Workflow package. Hosts consume this policy instead of branching on a
 // particular workflow id.
 type RuntimePolicy struct {
-	Execution         *ExecutionPolicy         `json:"execution,omitempty" yaml:"execution,omitempty"`
-	ExternalExecution *ExternalExecutionPolicy `json:"external_execution,omitempty" yaml:"external_execution,omitempty"`
-	CompletedActions  []CompletedAction        `json:"completed_actions,omitempty" yaml:"completed_actions,omitempty"`
+	Execution        *ExecutionPolicy  `json:"execution,omitempty" yaml:"execution,omitempty"`
+	CompletedActions []CompletedAction `json:"completed_actions,omitempty" yaml:"completed_actions,omitempty"`
 	// These contracts are pinned to the package revision, never inferred from its ID.
 	TriggerInputs             *[]string                 `json:"trigger_inputs,omitempty" yaml:"trigger_inputs,omitempty"`
 	ExecutionLimits           map[string]ExecutionLimit `json:"execution_limits,omitempty" yaml:"execution_limits,omitempty"`
@@ -203,7 +201,7 @@ type RuntimePolicy struct {
 }
 
 func (p RuntimePolicy) IsZero() bool {
-	if p.Execution != nil || p.ExternalExecution != nil {
+	if p.Execution != nil {
 		return false
 	}
 	return len(p.CompletedActions) == 0 && p.TriggerInputs == nil && len(p.ExecutionLimits) == 0 && !p.TransactionalOutputs && p.Publication == nil && len(p.PublishedInputAliases) == 0 && len(p.HostExtensions) == 0 && len(p.PublisherOwnedSlots) == 0 && len(p.ExclusiveToolCapabilities) == 0 && !p.CollectsKnowledge &&
