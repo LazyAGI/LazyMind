@@ -67,8 +67,10 @@ AI 底图属于单独的背景层，不计入这一张内容素材图。没有�
 ## 命名素材与展示稿质感
 
 - user message 的 `NAMED PRESENTATION ASSETS` 是可用离线素材清单。精确使用其中的名称：
-  `<img data-ppt-asset="fluent-3d:clipboard" alt="需求分析" style="width:100px;height:100px;object-fit:contain">`。
-  工具会补全真实 src；禁止猜测名称、远程 CDN、字体图标、emoji 字符或手写复杂 SVG 冒充素材库图标。
+  `<img data-ppt-asset="fluent-3d:clipboard" alt="需求分析" style="width:64px;height:64px;object-fit:contain">`。
+  工具会补全真实 src。图标仅用于标签旁或局部装饰，宽、高各不超过 96 CSS px，不得用作大幅主图或背景。
+  主体视觉用登记素材、内容结构或有依据的图表。清单内没有合适的精确名称时省略图标。
+  禁止猜测名称、远程 CDN、字体图标、emoji 字符或手写复杂 SVG 冒充素材库图标。
 - 一张流程图选同一素材家族。`fluent-color` 为彩色 SVG，`fluent-3d` 为透明 3D PNG，
   `ph` 为双色，`lucide`/`tabler` 为线性。图标名称代表语义，邻近标签使用普通 HTML 文字。
 - 用户认可彩色立体参考稿时，落实其层级、柔和阴影、浅渐变台座、统一光照和图标比例。

@@ -196,17 +196,22 @@ def publication_store(monkeypatch, tools, *, inputs=()):
     return SimpleNamespace(orders=orders, selected=selected, invalidate=invalidate)
 
 
-@pytest.mark.parametrize('repair_succeeds', [True, False])
+@pytest.mark.parametrize('outcome', ['resolved', 'omitted', 'checksum-failed'])
 def test_generate_pages_repairs_only_page_with_unknown_icon(
-    monkeypatch, tmp_path, tools, ppt_asset_library, repair_succeeds,
+    monkeypatch, tmp_path, tools, ppt_asset_library, outcome,
 ):
     deck = tmp_path / 'deck'
     (deck / 'pages').mkdir(parents=True)
     (deck / 'task_pack.json').write_text(json.dumps({'params': {'page_count': 3}}))
-    (deck / 'info_pack.json').write_text('{}')
+    (deck / 'images').mkdir()
+    Image.new('RGB', (80, 40), 'green').save(deck / 'images/evidence.png')
+    (deck / 'info_pack.json').write_text(json.dumps({
+        'user_assets': {'reference_images': ['images/evidence.png']},
+    }))
     (deck / 'outline_draft.md').write_text('## Page 1\nA\n## Page 2\nB\n## Page 3\nC')
     (deck / 'complete_page_prompts.json').write_text('{"version":1,"mode":"direct"}')
     briefs = {number: f'{tools._PAGE_PROMPT_MARKER}\nPage {number} 立体需求分析' for number in (1, 2, 3)}
+    briefs[2] += '\nRequired figure: images/evidence.png'
     store = publication_store(monkeypatch, tools, inputs=[
         {'slot': 'template_mode', 'value': {'text': 'none'}},
         *[{'slot': 'slide_outline', 'list_index': number - 1, 'value': {'text': brief}}
@@ -234,29 +239,32 @@ def test_generate_pages_repairs_only_page_with_unknown_icon(
             if correction:
                 assert 'Unknown presentation asset' in prompt and 'fluent-3d:clock' in prompt
                 assert 'Copy an exact identifier' in prompt
-                name = 'fluent-3d:clipboard' if repair_succeeds else 'fluent-3d:clock-24'
+                name = 'fluent-3d:clock-24' if outcome == 'omitted' else 'fluent-3d:clipboard'
             else:
                 name = 'fluent-3d:clock'
-            icon = f'<img data-ppt-asset="{name}" alt="需求分析">'
+            icon = f'<img data-ppt-asset="{name}" alt="需求分析"><img src="../images/evidence.png">'
         return HTML.replace('Generated page', f'Generated page {number}{icon}')
 
     monkeypatch.setattr(lazyllm, 'AutoModel', lambda **_kwargs: AdapterModel(respond))
-    if repair_succeeds:
-        result = tools.ppt_generate_pages(str(deck))
-    else:
-        with pytest.raises(ToolExecutionError, match=r'batch-page-html failed.*fluent-3d:clock-24'):
+    catalog_file = ppt_asset_library / 'fluent-3d--clipboard.png'
+    original_asset = catalog_file.read_bytes()
+    if outcome == 'checksum-failed':
+        catalog_file.write_bytes(b'corrupted icon resource')
+        with pytest.raises(ToolExecutionError, match=r'batch-page-html failed.*checksum mismatch'):
             tools.ppt_generate_pages(str(deck))
         partial = tools.ppt_list_pages(str(deck))
         assert partial['fully_published'] is False
         assert partial['missing_pages'] == partial['placeholder_pages'] == [2]
         assert not (deck / 'pages/page_002.html').exists()
+        catalog_file.write_bytes(original_asset)
+    else:
+        result = tools.ppt_generate_pages(str(deck))
 
     assert calls == [(1, False), (2, False), (2, True), (3, False)]
-    if not repair_succeeds:
+    if outcome == 'checksum-failed':
         unaffected = {number: (deck / f'pages/page_{number:03d}.html').read_bytes() for number in (1, 3)}
         store.invalidate()
         context = SimpleNamespace(params={}, task_id='ppt-repair-2', emit=lambda _event: None)
-        repair_succeeds = True
         calls.clear()
         result = tools.ppt_generate_pages(str(deck))
         assert calls == [(2, False), (2, True)]
@@ -267,8 +275,10 @@ def test_generate_pages_repairs_only_page_with_unknown_icon(
     assert [item['page'] for item in result['published']] == [1, 2, 3]
     assert tools.ppt_list_pages(str(deck))['fully_published'] is True
     page = (deck / 'pages/page_002.html').read_text()
-    assert 'asset-fluent-3d--clipboard.png' in page
+    assert ('asset-fluent-3d--clipboard.png' in page) == (outcome != 'omitted')
     assert 'fluent-3d:clock' not in page
+    assert '../images/evidence.png' in page
+    assert 'Generated page 2' in page
 
 
 def test_retry_republishes_cached_successes_in_new_attempt_before_model_calls(monkeypatch, tmp_path, tools):
@@ -551,6 +561,92 @@ def test_continuous_stream_is_stopped_at_page_deadline(monkeypatch, tools):
     assert clock[0] == 5
     assert tools._model_failure_details(failure.value)['code'] == 'page_deadline_exceeded'
     assert len(model.calls) == 1
+
+
+@pytest.mark.parametrize('timeout_code', ['request_timeout', 'page_deadline_exceeded'])
+@pytest.mark.parametrize('recovered', [True, False])
+def test_timeout_retries_only_missing_page_after_other_pages(
+    monkeypatch, tmp_path, tools, recovered, timeout_code,
+):
+    attempted = []
+    clock = [0.0]
+
+    def respond(prompt, control):
+        page = int(prompt)
+        attempted.append(page)
+        if page == 2 and (attempted.count(2) == 1 or not recovered):
+            if timeout_code == 'request_timeout':
+                raise transport_failure()
+            clock[0] += 5
+            control.check()
+        return HTML.replace('Generated page', f'Generated page {page}')
+
+    deck, model, saved = prepare_batch(monkeypatch, tmp_path, tools, 3, respond)
+    monkeypatch.setenv('LAZYMIND_PPT_PAGE_RETRIES', '3')
+    monkeypatch.setenv('LAZYMIND_PPT_PAGE_TIMEOUT', '5')
+    monkeypatch.setattr(tools.time, 'monotonic', lambda: clock[0])
+    monkeypatch.setattr(tools.time, 'sleep', lambda _: None)
+    result = tools._batch_page_html_publish_progressive(deck)
+
+    assert attempted == [1, 2, 3, 2]
+    assert result['model_calls'] == len(model.calls) == 4
+    assert result['retry_count'] == 1
+    assert result['retries'][0]['previous_diagnostics']['code'] == timeout_code
+    assert result['status'] == ('ok' if recovered else 'partial')
+    assert [row['page'] for row in result['published']] == ([1, 2, 3] if recovered else [1, 3])
+    assert result['unpublished_pages'] == ([] if recovered else [2])
+    assert ('Generated page 2' in saved['preview_html', 1]) is recovered
+
+
+@pytest.mark.parametrize('limit', ['calls', 'deadline'])
+def test_timeout_retry_honors_remaining_batch_budget(monkeypatch, tmp_path, tools, limit):
+    clock = [0.0]
+    attempted = []
+
+    def respond(prompt, _control):
+        page = int(prompt)
+        attempted.append(page)
+        if page == 2:
+            raise transport_failure()
+        return HTML
+
+    deck, model, _saved = prepare_batch(monkeypatch, tmp_path, tools, 3, respond)
+    monkeypatch.setenv('LAZYMIND_PPT_PAGE_RETRIES', '3')
+    monkeypatch.setattr(tools.time, 'monotonic', lambda: clock[0])
+    monkeypatch.setattr(tools.time, 'sleep', lambda _: clock.__setitem__(0, 10))
+    if limit == 'calls':
+        monkeypatch.setenv('LAZYMIND_PPT_MAX_MODEL_CALLS', '3')
+    else:
+        monkeypatch.setenv('LAZYMIND_PPT_BATCH_TIMEOUT', '5')
+
+    result = tools._batch_page_html_publish_progressive(deck)
+
+    assert attempted == [1, 2, 3]
+    assert result['model_calls'] == len(model.calls) == 3
+    assert result['retry_count'] == 0
+    assert result['budget']['stop_reason'] == (
+        'model_call_budget_exhausted' if limit == 'calls' else 'batch_deadline_exceeded'
+    )
+    assert result['status'] == 'partial'
+    assert result['unpublished_pages'] == [2]
+    assert result['failed_detail'][0]['diagnostics']['code'] == 'request_timeout'
+
+
+def test_pause_between_page_passes_prevents_timeout_retry(monkeypatch, tmp_path, tools, cancel_queue):
+    from lazymind.chat.engine.agent_runtime.cancellation import UserCancelledError, request_cancel
+
+    def respond(prompt, _control):
+        if prompt == '2':
+            raise transport_failure()
+        return HTML
+
+    deck, model, saved = prepare_batch(monkeypatch, tmp_path, tools, 3, respond)
+    monkeypatch.setenv('LAZYMIND_PPT_PAGE_RETRIES', '1')
+    monkeypatch.setattr(tools.time, 'sleep', lambda _: request_cancel('ppt-task'))
+    with lazyllm.globals._bind_sid('ppt-task'), pytest.raises(UserCancelledError):
+        tools._batch_page_html_publish_progressive(deck)
+    assert len(model.calls) == 3
+    assert ('preview_html', 0) in saved and ('preview_html', 2) in saved
 
 
 def test_batch_deadline_prevents_next_request(monkeypatch, tmp_path, tools):

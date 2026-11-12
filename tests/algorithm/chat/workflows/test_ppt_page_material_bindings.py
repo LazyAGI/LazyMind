@@ -239,3 +239,84 @@ def test_imported_material_origin_is_recorded_only_for_matching_bytes(runtime, d
     assert rewritten == '../images/material_02.png' and required == ['images/material_02.png']
     with pytest.raises(ValueError, match='Unregistered'):
         bind_prompt_materials(deck, '/old-session/unrelated.png')
+
+
+def set_backgrounds(deck, paths, *, enabled=True):
+    (deck / 'background_images.json').write_text(json.dumps({
+        'enabled': enabled,
+        'pages': [{'page_no': page, 'local_path': path} for page, path in enumerate(paths, 1)],
+    }))
+
+
+def background_snapshot(deck, path):
+    digest = hashlib.sha256((deck / path).read_bytes()).hexdigest()[:16]
+    return f'inputs/background_images/0001_{Path(path).stem}-{digest}.png'
+
+
+def test_four_registered_backgrounds_bind_without_foreground_images(runtime, deck):
+    (deck / 'info_pack.json').write_text('{}')
+    paths = [f'images/page_{page:03d}_background.png' for page in range(1, 5)]
+    for page, path in enumerate(paths, 1):
+        Image.new('RGB', (8, 8), (page, 0, 0)).save(deck / path)
+    set_backgrounds(deck, paths)
+    for page, path in enumerate(paths, 1):
+        snapshot = background_snapshot(deck, path)
+        calls = []
+
+        def llm(_system, query, **_kwargs):
+            calls.append(query)
+            return ('<!doctype html><html><head></head><body>'
+                    '<div id="bg"></div><h1>Slide content</h1></body></html>')
+
+        code, result = runtime._capture_cmd(
+            runtime.cmd_page_html_from_brief, deck, page, f'Use `{snapshot}` as the background', llm_call=llm,
+        )
+        assert code == 0 and result['background_restored']
+        assert calls == [f'Use `../{path}` as the background']
+        output = (deck / f'pages/page_{page:03d}.html').read_text()
+        assert f'background-image:url("../{path}")' in output
+        assert '<img' not in output
+
+
+def test_background_snapshot_remains_distinct_from_identical_foreground(runtime, deck):
+    from material_images import bind_prompt_materials
+
+    background = 'images/page_001_background.png'
+    (deck / background).write_bytes((deck / 'images/material_01.png').read_bytes())
+    set_backgrounds(deck, [background])
+    snapshot = background_snapshot(deck, background)
+    win_uri = PureWindowsPath(f'C:/removed-attempt/{snapshot}').as_uri()
+    resolved = runtime._resolve_background_image(deck, 1)
+    brief = f'Use `{win_uri}` as background and `../images/material_01.png` as evidence'
+    rewritten, required = bind_prompt_materials(deck, brief, background_image=resolved)
+    assert rewritten == f'Use `../{background}` as background and `../images/material_01.png` as evidence'
+    assert required == ['images/material_01.png']
+    with pytest.raises(ValueError, match='Ambiguous material image reference'):
+        bind_prompt_materials(deck, '/' + snapshot.split('/')[-1], background_image=resolved)
+
+    css_only = ('<!doctype html><html><head></head><body>'
+                '<div id="bg"></div><h1>Slide content</h1></body></html>')
+    code, result, calls = generate(runtime, deck, brief, [css_only])
+    assert code != 0 and 'material_01.png' in result['error']
+    assert len(calls) == 2
+
+
+@pytest.mark.parametrize('failure', ['disabled', 'wrong_page', 'missing', 'outside'])
+def test_unavailable_background_snapshot_fails_before_model_call(runtime, deck, tmp_path, failure):
+    background = 'images/page_001_background.png'
+    Image.new('RGB', (8, 8), 'black').save(deck / background)
+    snapshot = background_snapshot(deck, background)
+    if failure == 'outside':
+        outside = tmp_path / 'outside.png'
+        outside.write_bytes((deck / background).read_bytes())
+        set_backgrounds(deck, [str(outside)])
+    elif failure == 'wrong_page':
+        set_backgrounds(deck, ['images/other.png', background])
+    else:
+        set_backgrounds(deck, [background], enabled=failure != 'disabled')
+        if failure == 'missing':
+            (deck / background).unlink()
+
+    code, result, calls = generate(runtime, deck, snapshot, [html([])])
+    assert code != 0 and 'Unregistered material image reference' in result['error']
+    assert calls == []

@@ -173,6 +173,7 @@ class PptExportPage(BaseModel):
 class PptExportRequest(BaseModel):
     pages: List[PptExportPage]
     filename: Optional[str] = None
+    embed_fonts: bool = True
 
 
 def _writer_artifact(result: dict, key: Optional[str] = None) -> str:
@@ -625,8 +626,11 @@ async def export_ppt_from_html(req: PptExportRequest):
         export_env['LAZYMIND_FONT_SUBSET_PYTHON'] = sys.executable
         if export_env.get('LAZYMIND_NODE_RUN_AS_NODE', '').strip().lower() == 'true':
             export_env['ELECTRON_RUN_AS_NODE'] = '1'
+        args = [export_node, export_cli, '--deck-dir', str(deck_dir), '--force']
+        if not req.embed_fonts:
+            args.append('--no-embed-fonts')
         process = await asyncio.create_subprocess_exec(
-            export_node, export_cli, '--deck-dir', str(deck_dir), '--force',
+            *args,
             stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
             env=export_env, **options,
         )
@@ -642,8 +646,11 @@ async def export_ppt_from_html(req: PptExportRequest):
             or 'http://ppt-export:8099'
         ).rstrip('/')
         url = f'{export_base}/export'
+        export_body: Dict[str, Any] = {'deck_dir': str(deck_dir)}
+        if not req.embed_fonts:
+            export_body['embed_fonts'] = False
         request = urllib.request.Request(
-            url, data=json.dumps({'deck_dir': str(deck_dir)}).encode('utf-8'),
+            url, data=json.dumps(export_body).encode('utf-8'),
             headers={'Content-Type': 'application/json'}, method='POST',
         )
         try:
@@ -662,6 +669,11 @@ async def export_ppt_from_html(req: PptExportRequest):
     except json.JSONDecodeError:
         payload = {}
     ok = isinstance(payload, dict) and (payload.get('status') == 'ok' or payload.get('success') is True)
+    if ok and not req.embed_fonts and payload.get('fontEmbeddingEnabled') is not False:
+        shutil.rmtree(deck_dir, ignore_errors=True)
+        raise HTTPException(
+            status_code=502, detail='The installed PPTX exporter does not support exporting without embedded fonts.',
+        )
     pptx_path = deck_dir / f'{job_id}.pptx'
     if not pptx_path.exists():
         candidates = list(deck_dir.glob('*.pptx'))

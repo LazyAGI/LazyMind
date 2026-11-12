@@ -41,9 +41,31 @@ export async function localFontCss(html) {
     } catch { return []; }
   }));
   const faces = await localFontFaces();
+  const knownFamilies = new Set(faces.map(face => face.family.toLowerCase()));
+  const usedFamilies = new Set();
+  for (const [, declaration] of html.matchAll(/font-family\s*:\s*([^;}]+)/gi)) {
+    const first = declaration.split(',').map(name => name.trim().replace(/^['"]|['"]$/g, '').toLowerCase())
+      .find(name => knownFamilies.has(name));
+    if (first) usedFamilies.add(first);
+  }
+  const selected = new Set();
   return faces.filter(face => !packaged.has(face.id)
     && !face.aliases.some(alias => packagedFamilies.has(alias.toLowerCase()))
-    && html.toLowerCase().includes(face.family.toLowerCase())).map(face =>
+    && html.toLowerCase().includes(face.family.toLowerCase())).filter(face => {
+    // Aliases describe the same bytes, not separate fonts. Install one used
+    // alias per face and one version per CSS face: duplicate CJK data URLs can
+    // otherwise exceed Chromium's protocol message limit during addStyleTag.
+    if (usedFamilies.size) {
+      if (!usedFamilies.has(face.family.toLowerCase())) return false;
+    } else {
+      const alias = face.aliases.find(name => html.toLowerCase().includes(name.toLowerCase()));
+      if (face.family !== alias) return false;
+    }
+    const key = JSON.stringify([face.family.toLowerCase(), face.weight, face.style]);
+    if (selected.has(key)) return false;
+    selected.add(key);
+    return true;
+  }).map(face =>
     `@font-face{font-family:${JSON.stringify(face.family).replaceAll('<', '\\3c ')};font-weight:${face.weight};font-style:${face.style};src:url(data:font/ttf;base64,${face.data.toString('base64')})}`,
   ).join('\n');
 }

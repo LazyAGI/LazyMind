@@ -120,6 +120,28 @@ test('required font failure preserves the previous exported file', async () => {
   }
 });
 
+test('editable export without font embedding keeps the font name and omits font parts', async () => {
+  const folder = await mkdtemp(path.join(os.tmpdir(), 'pptx-no-embed-'));
+  try {
+    const source = path.join(folder, 'page.html');
+    const output = path.join(folder, 'deck.pptx');
+    // A required font fails embedded export when its original bytes do not match.
+    await writeFile(source, portableHtml(makeTestTtf(), 'corrupt'));
+    const result = await buildPptx([{ path: source, ir: { ct: {
+      tag: 'P', text: 'Keep content', children: [],
+      bounds: { x: 0, y: 0, w: 300, h: 80 }, styles: { fontFamily: 'Test Web Font' },
+    } } }], folder, output, { embedFonts: false });
+    assert.equal(result.successCount, 1);
+    assert.deepEqual(result.embeddedFonts, []);
+    const zip = await JSZip.loadAsync(await readFile(output));
+    assert.match(await zip.file('ppt/slides/slide1.xml').async('string'), /typeface="Test Web Font"/);
+    assert.doesNotMatch(await zip.file('ppt/presentation.xml').async('string'), /embeddedFontLst/);
+    assert.equal(Object.keys(zip.files).some(name => name.startsWith('ppt/fonts/')), false);
+  } finally {
+    await rm(folder, { recursive: true, force: true });
+  }
+});
+
 function writeUInt16BE(buffer, value, offset) {
   buffer.writeUInt16BE(value, offset);
 }
@@ -201,6 +223,31 @@ test('local font catalog verifies content hashes and shares fonts with browser C
     assert.equal(await localFontCss('font-family: Arial'), '');
     await writeFile(path.join(root, `${id}.ttf`), 'corrupted');
     assert.deepEqual(await localFontFaces(), []);
+  } finally {
+    if (previous === undefined) delete process.env.LAZYMIND_FONT_DIR;
+    else process.env.LAZYMIND_FONT_DIR = previous;
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('local font CSS avoids duplicate versions and fallback aliases but keeps separately used aliases', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'ppt-font-aliases-'));
+  const previous = process.env.LAZYMIND_FONT_DIR;
+  process.env.LAZYMIND_FONT_DIR = root;
+  try {
+    for (const data of [makeTestTtf(), Buffer.concat([makeTestTtf(), Buffer.from('second version')])]) {
+      const id = createHash('sha256').update(data).digest('hex');
+      await writeFile(path.join(root, `${id}.ttf`), data);
+      await writeFile(path.join(root, `${id}.json`), JSON.stringify({
+        id, file: `${id}.ttf`, aliases: ['Test Serif', '测试宋体'],
+        weight: 400, style: 'normal', embeddable: true,
+      }));
+    }
+    const css = await localFontCss('body{font-family:"Test Serif","测试宋体",serif}');
+    assert.equal((css.match(/@font-face/g) || []).length, 1);
+    assert.match(css, /font-family:"Test Serif"/);
+    const separate = await localFontCss('body{font-family:"Test Serif"}h1{font-family:"测试宋体"}');
+    assert.equal((separate.match(/@font-face/g) || []).length, 2);
   } finally {
     if (previous === undefined) delete process.env.LAZYMIND_FONT_DIR;
     else process.env.LAZYMIND_FONT_DIR = previous;

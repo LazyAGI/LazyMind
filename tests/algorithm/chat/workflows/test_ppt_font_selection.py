@@ -107,3 +107,55 @@ def test_whole_deck_request_persists_and_publishes_resolved_font(tools, monkeypa
         html = page.read_text()
         assert '宋体-简' in html and '>Title<' in html and '>Body<' in html
     assert '宋体-简' in json.loads((tmp_path / 'style_spec.json').read_text())['typography']['body_font']
+
+
+@pytest.mark.parametrize('stage', ['page-html', 'batch-page-html'])
+def test_redraw_preserves_deck_and_page_font_choices(tools, monkeypatch, tmp_path, stage):
+    from types import SimpleNamespace
+    from lazymind.chat.engine.tools.file_resources import font_library
+
+    pages = tmp_path / 'pages'
+    pages.mkdir()
+    document = '<html><head></head><body><h1>Title</h1><p>Body</p></body></html>'
+    for page in (1, 2):
+        (pages / f'page_{page:03d}.html').write_text(document)
+    (tmp_path / 'complete_page_prompts.json').write_text('{}')
+    (tmp_path / 'outline.json').write_text(json.dumps({'pages': [{'page_no': 1}, {'page_no': 2}]}))
+    monkeypatch.setattr(tools, '_resolve_deck_dir', lambda _: tmp_path)
+    monkeypatch.setattr(font_library, 'ensure_font', lambda family, _allow: family)
+    monkeypatch.setattr(tools, '_prepare_portable_font', lambda family: (family, []))
+    monkeypatch.setattr(tools, '_package_edited_html_fonts', lambda html, *_args: html)
+    monkeypatch.setattr(tools, '_publish_pages_from_disk', lambda _deck, numbers, **_kwargs: {
+        'published_count': len(numbers), 'failed_count': 0,
+    })
+    monkeypatch.setattr(tools, '_publish_one_page', lambda *_args, **_kwargs: {'ok': True})
+    monkeypatch.setattr(tools, '_ui_slot_order_list', lambda _slot: [])
+    monkeypatch.setattr(tools, '_load_slide_outline_briefs',
+                        lambda numbers: {number: 'Approved page brief' for number in numbers})
+
+    tools.ppt_replace_deck_fonts(str(tmp_path), target_font='Arial', allow_font_download=False)
+    tools.ppt_replace_deck_fonts(
+        str(tmp_path), target_font='Songti SC', pages=2, text_scope='titles', allow_font_download=False,
+    )
+    original_first_page = (pages / 'page_001.html').read_text()
+
+    def render(_command, _deck, number, *_args, **_kwargs):
+        (pages / f'page_{number:03d}.html').write_text(document.replace('Title', 'Updated title'))
+        return 0, {'status': 'ok'}
+
+    runtime = SimpleNamespace(_capture_cmd=render, cmd_page_html_from_brief=object())
+    monkeypatch.setattr(tools, '_load_sn_ppt_modules', lambda: (None, runtime))
+    result = tools._run_stage_inprocess(stage, tmp_path, page=2)
+
+    assert result['status'] == 'ok'
+    second = (pages / 'page_002.html').read_text()
+    assert 'Updated title' in second
+    assert tools._read_page_font_overrides(second) == {'all': 'Arial', 'titles': 'Songti SC'}
+    title, body = (next(n for n in tools._HtmlTree(second).nodes if n['tag'] == tag) for tag in ('h1', 'p'))
+    assert 'Songti SC' in title['attrs']['style']
+    assert 'Arial' in body['attrs']['style']
+    first = (pages / 'page_001.html').read_text()
+    if stage == 'page-html':
+        assert first == original_first_page
+    else:
+        assert 'Updated title' in first and tools._read_page_font_overrides(first) == {'all': 'Arial'}

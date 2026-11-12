@@ -42,6 +42,55 @@ export function isHtmlSlideArtifact(value: unknown): boolean {
   return extractHtmlFromArtifact(value) != null;
 }
 
+const GENERIC_FONT_FAMILIES = new Set([
+  'serif', 'sans-serif', 'monospace', 'cursive', 'fantasy', 'system-ui', 'ui-serif',
+  'ui-sans-serif', 'ui-monospace', 'ui-rounded', 'emoji', 'math', 'fangsong',
+  '-apple-system', 'blinkmacsystemfont', 'inherit', 'initial', 'unset', 'revert', 'revert-layer',
+]);
+
+export function declaredSlideFontFamilies(slides: readonly string[]): string[] {
+  const families = new Map<string, string>();
+  const template = document.createElement('template');
+  const shorthand = document.createElement('span').style;
+  const addFamily = (declaration: string) => {
+    const value = declaration.replace(/\s*!important\s*$/i, '').trim();
+    const first = /^(?:"([^"]+)"|'([^']+)'|([^,]+))/.exec(value);
+    const name = (first?.[1] ?? first?.[2] ?? first?.[3] ?? '').trim();
+    const key = name.toLowerCase();
+    if (name && !name.includes('(') && !GENERIC_FONT_FAMILIES.has(key) && !families.has(key)) {
+      families.set(key, name);
+    }
+  };
+  for (const html of slides) {
+    // Parse inertly while keeping styles on the document wrappers.
+    template.innerHTML = html.replace(/<(\/?)(?:html|head|body)(?=[\s>])/gi, '<$1div');
+    const elements = Array.from(template.content.querySelectorAll('style,[style],[font-family],font[face]'));
+    const styles = elements.map(element => element.tagName.toLowerCase() === 'style'
+      ? element.textContent ?? ''
+      : element.getAttribute('style') ?? '');
+    const declarations = styles.flatMap(style => [...style
+      .replace(/\/\*[\s\S]*?\*\//g, '')
+      .replace(/@font-face\s*\{[^{}]*\}/gi, '')
+      .matchAll(/(?:^|[;{])\s*(font(?:-family)?|--[\w-]+)\s*:\s*([^;}]+)/gi)]);
+    const variables = new Map(declarations.filter(([, property]) => property.startsWith('--'))
+      .map(([, property, value]) => [property, value.trim()]));
+    for (const [, property, value] of declarations) {
+      const variable = /^\s*var\(\s*(--[\w-]+)\s*\)\s*$/.exec(value);
+      const resolved = variable ? variables.get(variable[1]) ?? '' : value;
+      if (property.toLowerCase() === 'font-family') {
+        addFamily(resolved);
+      } else if (property.toLowerCase() === 'font') {
+        shorthand.cssText = 'font:' + resolved;
+        addFamily(shorthand.fontFamily);
+      }
+    }
+    for (const element of elements) {
+      addFamily(element.getAttribute('font-family') ?? element.getAttribute('face') ?? '');
+    }
+  }
+  return [...families.values()];
+}
+
 /** Kill CSS motion so clicking a thumb does not replay entrance sweeps. */
 const PREVIEW_STATIC_STYLE =
   '<style data-lazymind-preview-static>' +

@@ -11,7 +11,7 @@ from urllib.parse import unquote
 # Keep spaces inside paths, but do not start at a standalone prose slash.
 # Quotes and backticks delimit paths without becoming part of the alias.
 _LOCAL_IMAGE = re.compile(
-    r'(?<![\w:/])(?:file://)?(?:/(?!\s)|[A-Za-z]:[\\/]|\.{1,2}/|images/)'
+    r'(?<![\w:/])(?:file://)?(?:/(?!\s)|[A-Za-z]:[\\/]|\.{1,2}/|images/|inputs[\\/]background_images[\\/])'
     r"[^\n<>\"'`]+?\.(?:png|jpe?g|gif|webp|bmp|svg)(?=$|[\s\"'`<>),;，。])", re.I,
 )
 _IMG_SRC = re.compile(r"(<img\b[^>]*?\bsrc\s*=\s*)([\"'])(.*?)\2", re.I)
@@ -27,29 +27,31 @@ def _key(value: str) -> str:
     return key
 
 
-def _materials(deck: Path) -> tuple[dict[str, str], dict[str, list[str]]]:
-    path = deck / 'info_pack.json'
-    assets = json.loads(path.read_text(encoding='utf-8')).get('user_assets', {}) if path.is_file() else {}
+def _image_bindings(deck: Path, images: list) -> tuple[dict[str, str], dict[str, list[str]]]:
     aliases: dict[str, str] = {}
     hashes: dict[str, list[str]] = {}
-    for item in assets.get('reference_images', []):
+    root = deck.resolve()
+    for item in images:
         source = (item.get('path') or item.get('local_path')) if isinstance(item, dict) else item
         if not source or str(source).startswith(('http:', 'https:', 'data:')):
             continue
-        file = Path(source)
-        if not file.is_absolute():
-            file = deck / file
-        file = file.resolve()
-        try:
-            relative = file.relative_to(deck.resolve()).as_posix()
-        except ValueError:
+        file = (root / Path(source)).resolve()
+        if not file.is_relative_to(root):
             continue
+        relative = file.relative_to(root).as_posix()
         canonical = '../' + relative
         for alias in (source, str(file), relative, canonical):
             aliases[_key(alias)] = canonical
         if file.is_file():
             digest = hashlib.sha256(file.read_bytes()).hexdigest()
             hashes.setdefault(digest[:16], []).append(canonical)
+    return aliases, hashes
+
+
+def _materials(deck: Path) -> tuple[dict[str, str], dict[str, list[str]]]:
+    path = deck / 'info_pack.json'
+    assets = json.loads(path.read_text(encoding='utf-8')).get('user_assets', {}) if path.is_file() else {}
+    aliases, hashes = _image_bindings(deck, assets.get('reference_images', []))
     for alias, target in assets.get('reference_image_aliases', {}).items():
         canonical = aliases.get(_key(target))
         if canonical:
@@ -71,20 +73,40 @@ def _resolve(source: str, aliases: dict[str, str], hashes: dict[str, list[str]])
     return next(iter(matches)) if len(matches) == 1 else None
 
 
-def bind_prompt_materials(deck: Path, brief: str) -> tuple[str, list[str]]:
+def bind_prompt_materials(
+    deck: Path, brief: str, *, background_image: dict | None = None,
+) -> tuple[str, list[str]]:
     aliases, hashes = _materials(deck)
+    background_aliases, background_hashes = _image_bindings(deck, [background_image] if background_image else [])
     required: list[str] = []
 
     def replace(match: re.Match) -> str:
         source = match[0]
-        canonical = _resolve(source, aliases, hashes)
+        key = _key(source)
+        input_slot = re.search(r'(?:^|/)inputs/(background_images|material_images)/', key)
+        if input_slot and input_slot[1] == 'background_images':
+            material = None
+            background = _resolve(source, background_aliases, background_hashes)
+        elif input_slot and input_slot[1] == 'material_images':
+            material = _resolve(source, aliases, hashes)
+            background = None
+        else:
+            material = aliases.get(key)
+            background = background_aliases.get(key) if not material else None
+            if not (material or background):
+                material = _resolve(source, aliases, hashes)
+                background = _resolve(source, background_aliases, background_hashes)
+                if material and background and material != background:
+                    raise ValueError(f'Ambiguous material image reference: {Path(source).name}; '
+                                     'use its registered deck path')
+        canonical = material or background
         if not canonical:
             raise ValueError(f'Unregistered material image reference: {Path(source).name}')
         file = (deck / 'pages' / canonical).resolve()
         if not file.is_file():
             raise ValueError(f'Required material image is missing: {canonical}')
         relative = file.relative_to(deck.resolve()).as_posix()
-        if relative not in required:
+        if material and relative not in required:
             required.append(relative)
         return canonical
 

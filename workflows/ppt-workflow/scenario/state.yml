@@ -647,9 +647,10 @@ steps:
          name). Prefer one consistent family: fluent-color for color SVG,
          fluent-3d for transparent 3D PNG, lucide/tabler for outline diagrams.
          Record selected exact names and their intended role in material_summary;
-         use ppt_get_asset only for selected assets. These are illustrative icons,
-         never factual evidence, and do not consume material_images slots. Do not
-         call web search for an icon already present in this local catalog.
+         use ppt_get_asset only for selected assets. Use icons only as small
+         labels or decoration. Reserve the main visual for registered materials,
+         content diagrams or data charts. Icons do not consume material_images
+         slots. Do not call web search for an icon already in the local catalog.
          A deck may complete with zero material_images. CSS, SVG, and ECharts
          are valid visual alternatives. Do not treat a generic desire for a
          polished or visual deck as a hard image requirement.
@@ -1980,8 +1981,9 @@ steps:
       names. Prefer one consistent collection per diagram: fluent-color/fluent-3d
       for colorful dimensional references, ph for duotone, lucide/tabler for line art.
       Use exact names as HTML img data-ppt-asset attributes or native pages[].icons
-      [{name,box}]; do not fabricate file paths. These icons are separate from the
-      single evidence image and never replace factual diagrams, screenshots or charts.
+      [{name,box}]. Use them only as small labels or decorations (up to 96 CSS
+      pixels or 0.8 inches per side). Omit an icon when no exact name fits.
+      Reserve main visuals for factual diagrams, screenshots, or charts.
       For a user-approved rich reference, reproduce its visual hierarchy, balanced
       icon sizes, soft shadows and restrained depth with assets plus readable text.
       Preserve natural glyph widths and image aspect ratios. Never use scaleX/scaleY,

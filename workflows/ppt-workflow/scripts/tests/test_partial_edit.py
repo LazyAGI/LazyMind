@@ -633,12 +633,13 @@ class PartialEditTests(unittest.TestCase):
 
         self.assertEqual(
             shared.call_args_list[0],
-            mock.call('user', timeout=90.0, max_retries=1),
+            mock.call('user', timeout=90.0, max_retries=1, call_control=mock.ANY),
         )
         self.assertEqual(
             shared.call_args_list[1],
-            mock.call('user', timeout=75.0, max_retries=1),
+            mock.call('user', timeout=75.0, max_retries=1, call_control=mock.ANY),
         )
+        self.assertTrue(all(callable(call.kwargs['call_control'].cancel_check) for call in shared.call_args_list))
         self.assertEqual(model.share.call_count, 2)
         self.assertTrue(all(
             call.kwargs['stream'] is True for call in model.share.call_args_list
@@ -1487,7 +1488,7 @@ class PartialEditTests(unittest.TestCase):
             self.assertEqual(result['retry_count'], 0)
             self.assertEqual(len(list(deck.glob('.page_retry_*.json'))), 2)
 
-    def test_batch_page_html_does_not_retry_timed_out_page(self):
+    def test_batch_page_html_limits_timed_out_page_to_one_retry(self):
         with tempfile.TemporaryDirectory() as tmp:
             deck, _page = make_deck(Path(tmp))
             attempts = 0
@@ -1513,15 +1514,15 @@ class PartialEditTests(unittest.TestCase):
             ), mock.patch.object(
                 TOOLS.time, 'sleep', return_value=None,
             ), mock.patch.dict(
-                TOOLS.os.environ, {'LAZYMIND_PPT_PAGE_RETRIES': '1'}, clear=False,
+                TOOLS.os.environ, {'LAZYMIND_PPT_PAGE_RETRIES': '3'}, clear=False,
             ):
                 result = TOOLS._batch_page_html_publish_progressive(
                     deck, concurrency=1,
                 )
 
-            self.assertEqual(attempts, 1)
+            self.assertEqual(attempts, 2)
             self.assertEqual(result['status'], 'failed')
-            self.assertEqual(result['retry_count'], 0)
+            self.assertEqual(result['retry_count'], 1)
             self.assertIn('timed out after 90s', result['failed_detail'][0]['error'])
 
 
@@ -2118,14 +2119,17 @@ class PageGenerationRecoveryTests(unittest.TestCase):
                 mock.patch.object(TOOLS, '_load_slide_outline_briefs', return_value={}),
                 mock.patch.object(TOOLS, '_ui_slot_order_list', return_value=[]),
                 mock.patch.object(TOOLS, '_resolve_deck_dir', return_value=deck),
+                mock.patch.object(TOOLS.time, 'sleep', return_value=None),
+                mock.patch.dict(TOOLS.os.environ, {'LAZYMIND_PPT_PAGE_RETRIES': '1'}),
             ):
                 result = TOOLS._batch_page_html_publish_progressive(deck, concurrency=1)
                 self.assertEqual(result['status'], 'failed')
+                self.assertEqual(result['retry_count'], 1)
                 with self.assertRaisesRegex(ToolExecutionError, 'already failed'):
                     TOOLS.ppt_generate_pages(str(deck))
                 with self.assertRaisesRegex(ToolExecutionError, 'already failed'):
                     TOOLS.ppt_run_stage(str(deck), stage='page-html', page=1)
-                runtime._capture_cmd.assert_called_once()
+                self.assertEqual(runtime._capture_cmd.call_count, 2)
                 phases = [c.args[0]['current_phase'] for c in ctx.emit.call_args_list]
                 self.assertTrue(any('第 1 页生成失败' in phase for phase in phases))
             with mock.patch.object(TOOLS, 'require_context', return_value=SimpleNamespace(task_id='attempt-two')):
