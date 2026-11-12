@@ -112,7 +112,10 @@ export default function TextIndexManager({ datasetId }: { datasetId?: string }) 
   };
   return <>
     <Button icon={<DatabaseOutlined />} onClick={() => void show()}>索引管理</Button>
-    <Modal title="文本向量索引管理" open={open} width={960} className="text-index-manager" footer={null}
+    <Modal title="文本向量索引管理" open={open} width={960} className="text-index-manager" footer={isAdmin && <section className="text-index-cleanup" aria-label="全局索引清理">
+        <div><strong>清理全部文本向量</strong><p>影响所有资料库的向量检索。原文件、解析正文、切片和图片向量保留。</p></div>
+        <Button danger icon={<DeleteOutlined />} disabled={busy || !state || state.operation_phase === "clearing"} onClick={clear}>清理全部向量</Button>
+      </section>}
       onCancel={() => { if (!busy) setOpen(false); }} destroyOnHidden>
       <p className="text-index-intro">管理用于语义检索的文档。上传和解析不依赖向量模型。</p>
       {state?.index_identity === "legacy_unknown" && <Alert className="text-index-error" type="warning" showIcon message="旧向量索引待处理" description="模型已移除或旧索引身份尚未确认。原文件、解析正文和旧向量保留；选择新模型后，按提示清理旧向量并重新索引。" />}
@@ -167,10 +170,7 @@ export default function TextIndexManager({ datasetId }: { datasetId?: string }) 
             { title: "说明", dataIndex: "error", render: (value: string) => value ? <Tooltip title={value}><span className="text-index-document-error">{value}</span></Tooltip> : <span className="text-index-muted">—</span> },
           ]} />
       </div>
-      {isAdmin && <section className="text-index-cleanup" aria-label="全局索引清理">
-        <div><strong>清理全部文本向量</strong><p>影响所有资料库的向量检索。原文件、解析正文、切片和图片向量保留。</p></div>
-        <Button danger icon={<DeleteOutlined />} disabled={busy || !state || state.operation_phase === "clearing"} onClick={clear}>清理全部向量</Button>
-      </section>}
+
     </Modal>
   </>;
 }

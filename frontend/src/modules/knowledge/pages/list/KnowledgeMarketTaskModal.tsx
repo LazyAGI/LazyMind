@@ -67,7 +67,7 @@ export default function KnowledgeMarketTaskModal({ open, query, onClose, onTasks
     const footer = content?.querySelector<HTMLElement>(".ant-modal-footer");
     if (!content || !footer) return;
     const measure = () => {
-      const maxHeight = Math.min(704, window.innerHeight - (window.innerHeight <= 740 ? 64 : 124));
+      const maxHeight = Math.min(704, window.innerHeight - 32);
       const top = table.getBoundingClientRect().top - content.getBoundingClientRect().top;
       setBodyHeight(Math.max(0, maxHeight - top - footer.offsetHeight - 44));
     };
