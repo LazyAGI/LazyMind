@@ -13,10 +13,10 @@ func TestPythonComponentsLegacyAndDeferredProcessPlans(t *testing.T) {
 	cfg := RuntimeConfig{Algorithm: AlgorithmConfig{RAGDisabled: true}}
 	cfg.ModeProfile.VectorStore.ManagedProcess = false
 	plan := buildRuntimeProcessPlan(cfg)
-	if !plan.includes(chatProcessName) || !plan.includes(coreProcessName) {
+	if !plan.includes(chatProcessName) || !plan.includes(coreProcessName) || !plan.includes(scanControlPlaneProcessName) || !plan.includes(fileWatcherProcessName) {
 		t.Fatal("base services missing")
 	}
-	for _, name := range []string{scanControlPlaneProcessName, fileWatcherProcessName, milvusLiteProcessName, processorWorkerProcessName, algoProcessName, docServerProcessName} {
+	for _, name := range []string{milvusLiteProcessName, processorWorkerProcessName, algoProcessName, docServerProcessName} {
 		if plan.includes(name) {
 			t.Fatalf("started optional service %s", name)
 		}
@@ -85,12 +85,12 @@ func TestLocalRAGFlagDisablesKnowledgeProcessesAndEnvironment(t *testing.T) {
 		t.Fatal("managed vector store remained enabled")
 	}
 	plan := buildRuntimeProcessPlan(cfg)
-	for _, name := range []string{scanControlPlaneProcessName, fileWatcherProcessName, milvusLiteProcessName, processorServerProcessName, processorWorkerProcessName, algoProcessName, docServerProcessName} {
+	for _, name := range []string{milvusLiteProcessName, processorServerProcessName, processorWorkerProcessName, algoProcessName, docServerProcessName} {
 		if plan.includes(name) {
 			t.Fatalf("started disabled RAG service %s", name)
 		}
 	}
-	if !plan.includes(chatProcessName) || !plan.includes(coreProcessName) {
+	if !plan.includes(chatProcessName) || !plan.includes(coreProcessName) || !plan.includes(scanControlPlaneProcessName) || !plan.includes(fileWatcherProcessName) {
 		t.Fatal("disabled RAG removed a base chat service")
 	}
 	if env := strings.Join(pythonComponentEnvironment(paths, cfg.Algorithm.RAGDisabled), "\n"); !strings.Contains(env, ragEnabledEnvVar+"=0") {

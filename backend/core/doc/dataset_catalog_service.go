@@ -195,7 +195,6 @@ func (s *DatasetCatalogService) ListDatasets(ctx context.Context, req DatasetLis
 			}
 			candidates = append(candidates, ds)
 		}
-		candidates = filterDatasetsByScanSourceAccessForCaller(ctx, caller, candidates, permission)
 
 		if len(candidates) > 0 {
 			candidateIDs := make([]string, len(candidates))
@@ -267,13 +266,6 @@ func (s *DatasetCatalogService) accessibleDataset(ctx context.Context, req Datas
 	datasetACL := datasetACLForUser(&ds, userID)
 	if len(datasetACL) == 0 {
 		return orm.Dataset{}, nil, DatasetCatalogCaller{}, &DatasetServiceError{Code: DatasetServiceForbidden, Message: "dataset forbidden"}
-	}
-	decisions, checked := scanSourceAccessByDatasetForCaller(ctx, caller, []string{ds.ID}, acl.PermissionDatasetRead)
-	if item, found := decisions[ds.ID]; checked && found {
-		learnDatasetSourceOrigin(ctx, s.db, &ds, item)
-		if item.Exists && !item.Allowed {
-			return orm.Dataset{}, nil, DatasetCatalogCaller{}, &DatasetServiceError{Code: DatasetServiceForbidden, Message: "dataset forbidden"}
-		}
 	}
 	return ds, datasetACL, caller, nil
 }

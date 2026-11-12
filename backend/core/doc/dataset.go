@@ -468,10 +468,15 @@ func AllDatasetTags(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	caller, err := resolveDatasetCatalogCallerFromRequest(r)
+	if err != nil {
+		replyDatasetForbidden(w)
+		return
+	}
 	var datasets []orm.Dataset
 	if err := corestore.DB().
 		Select("id, create_user_id, ext").
-		Where("deleted_at IS NULL").
+		Where("deleted_at IS NULL AND COALESCE(NULLIF(TRIM(tenant_id), ''), 'default') = ?", resourceTenant(caller.TenantID)).
 		Find(&datasets).Error; err != nil {
 		common.ReplyErr(w, "query datasets failed", http.StatusInternalServerError)
 		return
@@ -488,7 +493,6 @@ func AllDatasetTags(w http.ResponseWriter, r *http.Request) {
 		}
 		visible = append(visible, ds)
 	}
-	visible = filterDatasetsByScanSourceAccess(r, visible, acl.PermissionDatasetRead)
 	for _, ds := range visible {
 		for _, t := range parseDatasetTags(ds.Ext) {
 			if _, ok := seen[t]; ok {
@@ -845,9 +849,6 @@ func isDatasetCreatedByDataSource(ctx context.Context, datasetID string) bool {
 	if datasetID == "" {
 		return false
 	}
-	if ordinarySourceDatasetIDs(ctx, []string{datasetID})[datasetID] {
-		return false
-	}
 	scanURL := common.JoinURL(common.ScanControlPlaneEndpoint(), "/api/scan/internal/sources/by-dataset/"+url.PathEscape(datasetID))
 	var resp struct {
 		Source struct {
@@ -863,29 +864,16 @@ func batchCheckDatasetsHaveSource(ctx context.Context, datasetIDs []string) map[
 	if len(datasetIDs) == 0 {
 		return nil
 	}
-	ordinary := ordinarySourceDatasetIDs(ctx, datasetIDs)
-	remoteIDs := make([]string, 0, len(datasetIDs))
-	for _, id := range datasetIDs {
-		if !ordinary[id] {
-			remoteIDs = append(remoteIDs, id)
-		}
-	}
-	if len(remoteIDs) == 0 {
-		return map[string]bool{}
-	}
 	scanURL := common.JoinURL(common.ScanControlPlaneEndpoint(), "/api/scan/internal/sources/by-datasets")
 	var resp struct {
 		SourceMap map[string]bool `json:"source_map"`
 	}
-	if err := common.ApiPost(ctx, scanURL, map[string]any{"dataset_ids": remoteIDs}, nil, &resp, 5*time.Second); err != nil {
+	if err := common.ApiPost(ctx, scanURL, map[string]any{"dataset_ids": datasetIDs}, nil, &resp, 5*time.Second); err != nil {
 		result := make(map[string]bool, len(datasetIDs))
 		for _, id := range datasetIDs {
 			result[id] = false
 		}
 		return result
-	}
-	for id := range ordinary {
-		delete(resp.SourceMap, id)
 	}
 	return resp.SourceMap
 }
@@ -924,17 +912,9 @@ type kbUpdateRequest struct {
 }
 
 func CreateDataset(w http.ResponseWriter, r *http.Request) {
-	var body struct {
-		Dataset
-		IdempotencyKey string `json:"idempotency_key"`
-	}
+	var body Dataset
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		common.ReplyErr(w, "invalid body", http.StatusBadRequest)
-		return
-	}
-	scanCreated, err := scanDatasetCreation(r, body.Tags, body.IdempotencyKey)
-	if err != nil {
-		replyResourceError(w, err)
 		return
 	}
 	if systemdeps.PythonComponentActive("rag") && body.ProcessingLevel == ProcessingLevelIndexed && replyEmbedNotReady(w, r, corestore.UserID(r)) {
@@ -945,7 +925,7 @@ func CreateDataset(w http.ResponseWriter, r *http.Request) {
 		replyResourceError(w, err)
 		return
 	}
-	result, err := service.CreateKnowledge(r.Context(), op, CreateKnowledgeRequest{scanCreated: scanCreated, Name: body.DisplayName, Description: body.Desc, Scene: body.Scene, ProcessingLevel: body.ProcessingLevel, PreferredID: strings.TrimSpace(r.URL.Query().Get("dataset_id")), PageOptions: &body.Dataset, Tags: body.Tags, AlgoID: body.AlgoID, ProfileID: body.ProfileID, Capabilities: body.ReadingCapabilities})
+	result, err := service.CreateKnowledge(r.Context(), op, CreateKnowledgeRequest{Name: body.DisplayName, Description: body.Desc, Scene: body.Scene, ProcessingLevel: body.ProcessingLevel, PreferredID: strings.TrimSpace(r.URL.Query().Get("dataset_id")), PageOptions: &body, Tags: body.Tags, AlgoID: body.AlgoID, ProfileID: body.ProfileID, Capabilities: body.ReadingCapabilities})
 	if err != nil {
 		replyResourceError(w, err)
 		return
@@ -1047,20 +1027,11 @@ func DeleteDataset(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var ds orm.Dataset
-	if err := corestore.DB().
-		Where("id = ? AND deleted_at IS NULL", datasetID).
-		First(&ds).Error; err != nil {
+	ds, _, permitted := requireDatasetPermission(r, datasetID, acl.PermissionDatasetRead)
+	if ds == nil {
 		common.ReplyErr(w, "dataset not found", http.StatusNotFound)
 		return
 	}
-	if !canAccessDataset(&ds, userID, acl.PermRead) || !datasetAllowedByScanSource(r, ds.ID, "delete") {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusForbidden)
-		_, _ = w.Write([]byte(common.ForbiddenBody))
-		return
-	}
-
 	// Official knowledge base installs use a dedicated delete path (uninstall):
 	// deletion is refused while the install is in flight, and the install
 	// link is cleared atomically with the dataset row; task history is retained.
@@ -1069,11 +1040,18 @@ func DeleteDataset(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, fmt.Sprintf("%s: %v", "query market install failed", err), http.StatusInternalServerError)
 		return
 	}
-	if isOfficial {
-		deleteOfficialInstalledDataset(w, r, &ds, userID, install)
+	// Older official installs have no tenant; their owner-bound install record
+	// is the existing authorization basis for uninstalling them.
+	legacyOfficial := isOfficial && strings.TrimSpace(ds.TenantID) == "" && ds.CreateUserID == userID
+	if !permitted && !legacyOfficial {
+		replyDatasetForbidden(w)
 		return
 	}
-	deleteRegularDataset(w, r, &ds, userID)
+	if isOfficial {
+		deleteOfficialInstalledDataset(w, r, ds, userID, install)
+		return
+	}
+	deleteRegularDataset(w, r, ds, userID)
 }
 
 // deleteOfficialInstalledDataset deletes an official knowledge base dataset
@@ -1113,7 +1091,7 @@ func deleteOfficialInstalledDataset(w http.ResponseWriter, r *http.Request, ds *
 			return err
 		}
 		result.Items[0].DocumentCount = int(count)
-		if err := deleteDatasetAlgoKB(r.Context(), &currentDataset, userID); err != nil {
+		if err := deleteDatasetAlgoKB(r.Context(), tx, &currentDataset, userID); err != nil {
 			externalDeleteFailed = true
 			return err
 		}
@@ -1165,7 +1143,20 @@ func deleteRegularDataset(w http.ResponseWriter, r *http.Request, ds *orm.Datase
 	common.ReplyJSON(w, result)
 }
 
-func deleteDatasetAlgoKB(ctx context.Context, ds *orm.Dataset, userID string) error {
+func deleteDatasetAlgoKB(ctx context.Context, db *gorm.DB, ds *orm.Dataset, userID string) error {
+	if !systemdeps.PythonComponentActive("rag") {
+		var externalDocuments int64
+		// Include tombstoned documents: an empty live library can retain an index.
+		if err := db.WithContext(ctx).Model(&orm.Document{}).
+			Where("dataset_id = ? AND TRIM(COALESCE(lazyllm_doc_id, '')) <> ''", ds.ID).
+			Count(&externalDocuments).Error; err != nil {
+			return err
+		}
+		if externalDocuments == 0 {
+			return nil
+		}
+		return resourceErr("UNAVAILABLE", "RAG component unavailable; external index cleanup is incomplete")
+	}
 	kbID := strings.TrimSpace(ds.KbID)
 	if kbID == "" {
 		kbID = ds.ID
@@ -1390,14 +1381,12 @@ func SetDefault(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// text dataset textUsertextPermission
-	var ds orm.Dataset
-	if err := corestore.DB().
-		Where("id = ? AND deleted_at IS NULL", datasetID).
-		First(&ds).Error; err != nil {
+	ds, _, permitted := requireDatasetPermission(r, datasetID, acl.PermissionDatasetRead)
+	if ds == nil {
 		common.ReplyErr(w, "dataset not found", http.StatusNotFound)
 		return
 	}
-	if !canAccessDataset(&ds, userID, acl.PermRead) || !datasetAllowedByScanSource(r, ds.ID, acl.PermissionDatasetRead) {
+	if !permitted {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusForbidden)
 		_, _ = w.Write([]byte(common.ForbiddenBody))
@@ -1447,14 +1436,12 @@ func UnsetDefault(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var ds orm.Dataset
-	if err := corestore.DB().
-		Where("id = ? AND deleted_at IS NULL", datasetID).
-		First(&ds).Error; err != nil {
+	ds, _, permitted := requireDatasetPermission(r, datasetID, acl.PermissionDatasetRead)
+	if ds == nil {
 		common.ReplyErr(w, "dataset not found", http.StatusNotFound)
 		return
 	}
-	if !canAccessDataset(&ds, userID, acl.PermRead) || !datasetAllowedByScanSource(r, ds.ID, acl.PermissionDatasetRead) {
+	if !permitted {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusForbidden)
 		_, _ = w.Write([]byte(common.ForbiddenBody))

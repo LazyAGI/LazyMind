@@ -9,10 +9,11 @@ import (
 	"time"
 
 	"gorm.io/gorm"
+	"lazymind/core/acl"
 	"lazymind/core/common/orm"
 )
 
-func TestSourceOriginDeletionCompletesAfterConcurrentMetadataUpdate(t *testing.T) {
+func TestDatasetDeletionCompletesAfterConcurrentMetadataUpdate(t *testing.T) {
 	for _, market := range []bool{false, true} {
 		t.Run(fmt.Sprintf("market=%t", market), func(t *testing.T) {
 			db := originTestDB(t)
@@ -28,6 +29,7 @@ func TestSourceOriginDeletionCompletesAfterConcurrentMetadataUpdate(t *testing.T
 			}
 			var err error
 			if market {
+				t.Setenv("LAZYMIND_RAG_ENABLED", "1")
 				deletedExternally := false
 				previous := http.DefaultTransport
 				http.DefaultTransport = roundTripFunc(func(r *http.Request) (*http.Response, error) {
@@ -55,4 +57,37 @@ func TestSourceOriginDeletionCompletesAfterConcurrentMetadataUpdate(t *testing.T
 			}
 		})
 	}
+}
+
+func originTestDB(t *testing.T) *orm.DB {
+	t.Helper()
+	t.Setenv("LAZYMIND_RAG_ENABLED", "0")
+	t.Setenv("LAZYMIND_UPLOAD_ROOT", t.TempDir())
+	t.Setenv("LAZYMIND_SCAN_CONTROL_PLANE_URL", "http://scan.test")
+	t.Setenv("LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN", "origin-test-token")
+	db := newDocumentTestDB(t)
+	if err := db.AutoMigrate(&orm.ACLModel{}, &orm.KBModel{}, &orm.UserGroupModel{}, &orm.ACLGroupModel{}, &orm.UserUIPreferences{}); err != nil {
+		t.Fatal(err)
+	}
+	acl.InitStore(db)
+	return db
+}
+
+func originTestSeed(t *testing.T, db *orm.DB, id, info string) {
+	t.Helper()
+	seedDatasetCatalogDataset(t, db, id, "user-1", id, "", []string{"test"}, time.Now().UTC())
+	if err := db.Model(&orm.Dataset{}).Where("id = ?", id).Updates(map[string]any{
+		"dataset_info": json.RawMessage(info), "processing_level": ProcessingLevelStored, "resource_version": 7,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+}
+
+func originTestRow(t *testing.T, db *orm.DB, id string) orm.Dataset {
+	t.Helper()
+	var row orm.Dataset
+	if err := db.Where("id = ?", id).Take(&row).Error; err != nil {
+		t.Fatal(err)
+	}
+	return row
 }

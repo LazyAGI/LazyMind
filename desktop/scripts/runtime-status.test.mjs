@@ -46,7 +46,7 @@ test("accepts the slim runtime service plan before RAG installation", () => {
     },
     services: Object.fromEntries([
       "process-supervisor", "sqlite-server", "local-proxy", "auth-service",
-      "channel-gateway", "core", "frontend", "chat",
+      "channel-gateway", "core", "frontend", "chat", "scan-control-plane", "file-watcher",
     ].map((name) => [name, { status: "running" }])),
   });
   assert.equal(desktopRuntimeReady(status, true), true);

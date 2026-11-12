@@ -267,12 +267,7 @@ func DeleteMarketDataset(ctx context.Context, userID, datasetID string) error {
 	}
 
 	// Delete the KB on the algo service (mirrors DeleteDataset).
-	kbID := strings.TrimSpace(ds.KbID)
-	if kbID == "" {
-		kbID = ds.ID
-	}
-	kbURL := common.JoinURL(common.AlgoServiceEndpoint(), "/v1/kbs/"+kbID)
-	if err := common.ApiDelete(ctx, kbURL, nil, nil, 10*time.Second); err != nil {
+	if err := deleteDatasetAlgoKB(ctx, db, &ds, userID); err != nil {
 		return fmt.Errorf("kb service delete failed: %w", err)
 	}
 
@@ -392,7 +387,7 @@ func CreateMarketDataset(ctx context.Context, userID, userName, datasetID, displ
 		DisplayName:            displayName,
 		Desc:                   description,
 		ResourceUID:            datasetID,
-		DatasetInfo:            createdDatasetSourceInfo(false),
+		DatasetInfo:            json.RawMessage(`{}`),
 		EmbeddingModel:         "default",
 		EmbeddingModelProvider: "default",
 		Type:                   uint8(1),

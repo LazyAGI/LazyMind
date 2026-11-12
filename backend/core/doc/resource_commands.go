@@ -56,7 +56,6 @@ func (s *ResourceService) prepareKnowledgeCreate(ctx context.Context, op Resourc
 	if len(tags) == 0 {
 		return orm.Dataset{}, nil, resourceErr("INVALID_ARGUMENT", "at least one knowledge base tag is required")
 	}
-	ds.DatasetInfo = createdDatasetSourceInfo(req.scanCreated)
 	if err := validateKnowledgeDescription(req.Description); err != nil {
 		return orm.Dataset{}, nil, err
 	}
@@ -149,9 +148,6 @@ func (s *ResourceService) knowledgeNameConflict(ctx context.Context, tx *gorm.DB
 			perms, _ = acl.PermissionsForWithDB(tx, acl.ResourceTypeDB, ds.ID, op.Caller.UserID, resourceTransactionGroups(tx))
 		}
 		if len(perms) > 0 {
-			if err := s.checkSource(ctx, tx, op.Caller, ds.ID, acl.PermissionDatasetRead); err != nil {
-				return err
-			}
 			return resourceErr("CONFLICT", "dataset name already exists")
 		}
 	}

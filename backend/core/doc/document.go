@@ -68,9 +68,6 @@ func requireDatasetPermission(r *http.Request, datasetID string, action string) 
 	if !canAccessDataset(&ds, userID, action) {
 		return &ds, userID, false
 	}
-	if !datasetAllowedByScanSourceForCaller(r.Context(), caller, ds.ID, action) {
-		return &ds, userID, false
-	}
 	return &ds, userID, true
 }
 
@@ -1971,8 +1968,12 @@ func normalizeKeywordList(keywordList []string) []string {
 
 func accessibleDatasetIDs(r *http.Request, userID string) ([]string, error) {
 	ctx := r.Context()
+	caller, err := resolveDatasetCatalogCallerFromRequest(r)
+	if err != nil {
+		return nil, err
+	}
 	var datasets []orm.Dataset
-	if err := store.DB().WithContext(ctx).Where("deleted_at IS NULL").Find(&datasets).Error; err != nil {
+	if err := store.DB().WithContext(ctx).Where("deleted_at IS NULL AND COALESCE(NULLIF(TRIM(tenant_id), ''), 'default') = ?", resourceTenant(caller.TenantID)).Find(&datasets).Error; err != nil {
 		return nil, err
 	}
 	visible := make([]orm.Dataset, 0, len(datasets))
@@ -1981,7 +1982,6 @@ func accessibleDatasetIDs(r *http.Request, userID string) ([]string, error) {
 			visible = append(visible, ds)
 		}
 	}
-	visible = filterDatasetsByScanSourceAccess(r, visible, acl.PermissionDatasetRead)
 	ids := make([]string, 0, len(visible))
 	for _, ds := range visible {
 		ids = append(ids, ds.ID)
@@ -2517,8 +2517,12 @@ func readableRequestedDatasetIDs(r *http.Request, userID string, datasetIDs []st
 		return nil, nil
 	}
 	ctx := r.Context()
+	caller, err := resolveDatasetCatalogCallerFromRequest(r)
+	if err != nil {
+		return nil, err
+	}
 	var datasets []orm.Dataset
-	if err := store.DB().WithContext(ctx).Where("id IN ? AND deleted_at IS NULL", datasetIDs).Find(&datasets).Error; err != nil {
+	if err := store.DB().WithContext(ctx).Where("id IN ? AND deleted_at IS NULL AND COALESCE(NULLIF(TRIM(tenant_id), ''), 'default') = ?", datasetIDs, resourceTenant(caller.TenantID)).Find(&datasets).Error; err != nil {
 		return nil, err
 	}
 	byID := make(map[string]orm.Dataset, len(datasets))
@@ -2535,7 +2539,6 @@ func readableRequestedDatasetIDs(r *http.Request, userID string, datasetIDs []st
 			visible = append(visible, ds)
 		}
 	}
-	visible = filterDatasetsByScanSourceAccess(r, visible, acl.PermissionDatasetRead)
 	out := make([]string, 0, len(visible))
 	for _, ds := range visible {
 		out = append(out, ds.ID)
