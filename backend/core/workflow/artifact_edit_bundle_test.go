@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"lazymind/core/common/orm"
+	"strings"
 	"testing"
 )
 
@@ -76,5 +77,56 @@ func TestCompletedEditBundleInsertDeleteAndConflict(t *testing.T) {
 	current, _ = GetSession(t.Context(), db.DB, session.ID)
 	if current.Status != "completed" {
 		t.Fatal(current.Status)
+	}
+}
+
+func TestCompletedEditRequiresDownloadOnlyWhenPresent(t *testing.T) {
+	db := newHandlerTestDB(t)
+	if err := db.AutoMigrate(&orm.WorkflowHumanArtifact{}); err != nil {
+		t.Fatal(err)
+	}
+	session := orm.WorkflowSession{ID: "html-edit", ConversationID: "conv", WorkflowID: "test", Status: "completed", CreateUserID: "owner"}
+	if err := db.Create(&session).Error; err != nil {
+		t.Fatal(err)
+	}
+	for _, slot := range []string{"html", "notes"} {
+		if _, err := WriteSlotRevisionWithHumanArtifact(t.Context(), db.DB, session.ID, slot, slot, "generate", 1, "list", nil, "text", json.RawMessage(`"original"`), nil, "human", nil, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	policy := artifactEditPolicy{Slots: []string{"html", "notes", "download"}, LinkedLists: []string{"html", "notes"}, RequiredIfPresent: []string{"download"}}
+	zero := 0
+	current, _ := GetSession(t.Context(), db.DB, session.ID)
+	input := artifactEditBundle{StateVersion: current.StateVersion, Slots: map[string][]artifactEditItem{
+		"html":  {{ListIndex: &zero, ContentType: "text", Value: json.RawMessage(`"edited"`)}},
+		"notes": {{ListIndex: &zero}},
+	}}
+	if err := commitArtifactEditBundle(t.Context(), db.DB, session.ID, input, policy); err != nil {
+		t.Fatalf("HTML-only edit should not require a download: %v", err)
+	}
+	if _, err := WriteSlotRevisionWithHumanArtifact(t.Context(), db.DB, session.ID, "download", "download", "generate", 1, "single", nil, "text", json.RawMessage(`"original download"`), nil, "human", nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	current, _ = GetSession(t.Context(), db.DB, session.ID)
+	input.StateVersion = current.StateVersion
+	if err := commitArtifactEditBundle(t.Context(), db.DB, session.ID, input, policy); err == nil || !strings.Contains(err.Error(), "updated download required") {
+		t.Fatalf("existing downloadable file must remain synchronized: %v", err)
+	}
+	unchanged, _ := GetSession(t.Context(), db.DB, session.ID)
+	if unchanged.StateVersion != current.StateVersion {
+		t.Fatal("rejected edit mutated the session")
+	}
+	input.Slots["download"] = []artifactEditItem{{ContentType: "text", Value: json.RawMessage(`"updated download"`)}}
+	if err := commitArtifactEditBundle(t.Context(), db.DB, session.ID, input, policy); err != nil {
+		t.Fatal(err)
+	}
+	rows, err := LoadSelectedSlots(t.Context(), db.DB, session.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, row := range rows {
+		if row.SlotID == "notes" && row.Revision != 1 {
+			t.Fatal("unchanged notes were rewritten")
+		}
 	}
 }

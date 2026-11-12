@@ -300,75 +300,31 @@ class DeckInitializationTests(unittest.TestCase):
             }])
 
     def test_build_outline_continues_when_no_material_images_exist(self):
-        stages: list[str] = []
-
-        def run_stage(deck_dir, *, stage, sample=None):
-            stages.append(stage)
-            if stage == 'style':
-                (Path(deck_dir) / 'style_spec.json').write_text(json.dumps({
-                    'design_style': {'id': 1},
-                    'palette': {'primary': '#2563EB'},
-                    'typography': {'heading_font': 'Inter'},
-                }))
-            return {'status': 'ok', 'pages': 4}
-
-        with mock.patch.object(TOOLS, 'ppt_init_deck', return_value={
-            'deck_dir': str(self.root / 'deck-without-images'),
-            'deck_id': 'deck-without-images',
-            'page_count': 4,
-            'ppt_mode': 'fast',
-            'material_images_attached': 0,
-        }), mock.patch.object(TOOLS, 'ppt_attach_material_images', return_value={
-            'deck_dir': str(self.root / 'deck-without-images'),
-            'attached': 0,
-            'reference_image_count': 0,
-            'reference_images': [],
-        }) as attach, mock.patch.object(
-            TOOLS, 'ppt_run_stage', side_effect=run_stage,
-        ), mock.patch.object(TOOLS, '_publish_deck_outline', return_value={
-            'ok': True,
-            'page_count': 4,
-            'chars': 120,
-        }):
+        with mock.patch.object(TOOLS, '_attach_material_images_to_deck', return_value={'attached': 0}), \
+             mock.patch.object(TOOLS, '_save_artifact', return_value={'ok': True}), \
+             mock.patch.object(TOOLS, 'ppt_run_stage') as generate:
             result = TOOLS.ppt_build_outline(
-                user_query='生成四页无图汇报',
-                page_count=4,
+                user_query='生成四页无图汇报', page_count=4,
+                outline_markdown='\n\n'.join(f'## Page {n}\nApproved content' for n in range(1, 5)),
             )
-
-        attach.assert_not_called()
-        self.assertEqual(stages, ['preflight', 'style', 'preflight', 'content-outline'])
+        generate.assert_not_called()
         self.assertEqual(result['material_images_attached'], 0)
         self.assertTrue(result['deck_outline_published'])
-        self.assertEqual(result['background_images_count'], 0)
         self.assertEqual(result['next_step'], 'plan_page_prompts')
 
-    def test_build_outline_defers_enabled_background_generation_to_human_steps(self):
-        with mock.patch.object(TOOLS, 'ppt_init_deck', return_value={
-            'deck_dir': str(self.root / 'deck-with-backgrounds'),
-            'deck_id': 'deck-with-backgrounds',
-            'page_count': 3,
-            'ppt_mode': 'fast',
-            'material_images_attached': 0,
-        }), mock.patch.object(
-            TOOLS, 'ppt_run_stage', return_value={'status': 'ok', 'pages': 3},
-        ), mock.patch.object(
-            TOOLS, '_publish_deck_outline', return_value={
-                'ok': True,
-                'page_count': 3,
-                'chars': 100,
-            },
-        ), mock.patch.object(
-            TOOLS, 'ppt_generate_background_images',
-        ) as generate:
+    def test_build_outline_preserves_enabled_backgrounds_without_generating_them(self):
+        with mock.patch.object(TOOLS, '_attach_material_images_to_deck', return_value={'attached': 0}), \
+             mock.patch.object(TOOLS, '_save_artifact', return_value={'ok': True}), \
+             mock.patch.object(TOOLS, 'ppt_run_stage') as stages, \
+             mock.patch.object(TOOLS, 'ppt_generate_background_images') as generate:
             result = TOOLS.ppt_build_outline(
-                user_query='生成三页汇报并启用底图',
-                page_count=3,
+                user_query='生成三页汇报并启用底图', page_count=3,
+                outline_markdown='\n\n'.join(f'## Page {n}\nApproved content' for n in range(1, 4)),
                 generate_background_images=True,
             )
-
+        stages.assert_not_called()
         generate.assert_not_called()
         self.assertTrue(result['background_images_enabled'])
-        self.assertEqual(result['background_images_count'], 0)
         self.assertEqual(result['next_step'], 'plan_page_prompts')
 
     def test_build_outline_reuses_deck_prepared_by_background_steps(self):
@@ -395,14 +351,11 @@ class DeckInitializationTests(unittest.TestCase):
             ) as init, mock.patch.object(
                 TOOLS, 'ppt_run_stage', return_value={'status': 'ok', 'pages': 3},
             ), mock.patch.object(
-                TOOLS, '_publish_deck_outline', return_value={
-                    'ok': True,
-                    'page_count': 3,
-                    'chars': 100,
-                },
+                TOOLS, '_save_artifact', return_value={'ok': True},
             ):
                 result = TOOLS.ppt_build_outline(
                     user_query='三页汇报',
+                    outline_markdown='\n\n'.join(f'## Page {n}\nApproved content' for n in range(1, 4)),
                     page_count=3,
                     deck_dir=str(deck),
                     generate_background_images=True,
@@ -410,7 +363,7 @@ class DeckInitializationTests(unittest.TestCase):
 
             init.assert_not_called()
             self.assertEqual(result['deck_id'], 'prepared-deck')
-            self.assertEqual(result['stages'][0]['step'], 'reuse')
+            self.assertEqual(Path(result['deck_dir']).resolve(), deck.resolve())
             self.assertTrue((deck / 'background_prompts.json').exists())
             self.assertTrue((deck / 'background_images.json').exists())
 
@@ -568,7 +521,7 @@ class WholePageInsertionTests(unittest.TestCase):
             with mock.patch.object(
                 TOOLS, '_resolve_deck_dir', return_value=deck,
             ), mock.patch.object(
-                TOOLS, '_sync_outline_from_selected_artifacts',
+                TOOLS, '_prepare_deferred_outline',
             ) as sync, mock.patch.object(
                 TOOLS, 'ppt_run_stage', return_value=stage_result,
             ) as run_stage:
@@ -633,12 +586,13 @@ class PartialEditTests(unittest.TestCase):
 
         self.assertEqual(
             shared.call_args_list[0],
-            mock.call('user', timeout=90.0, max_retries=1),
+            mock.call('user', timeout=90.0, max_retries=1, call_control=mock.ANY),
         )
         self.assertEqual(
             shared.call_args_list[1],
-            mock.call('user', timeout=75.0, max_retries=1),
+            mock.call('user', timeout=75.0, max_retries=1, call_control=mock.ANY),
         )
+        self.assertTrue(all(callable(call.kwargs['call_control'].check) for call in shared.call_args_list))
         self.assertEqual(model.share.call_count, 2)
         self.assertTrue(all(
             call.kwargs['stream'] is True for call in model.share.call_args_list
@@ -1733,7 +1687,7 @@ class CompletionGateTests(unittest.TestCase):
             with self.subTest(payload=payload), tempfile.TemporaryDirectory() as tmp:
                 deck, _ = make_deck(Path(tmp))
                 with mock.patch.object(TOOLS, '_resolve_deck_dir', return_value=deck), \
-                     mock.patch.object(TOOLS, '_sync_outline_from_selected_artifacts', return_value={'status': 'ok'}), \
+                     mock.patch.object(TOOLS, '_prepare_deferred_outline', return_value={'status': 'ok'}), \
                      mock.patch.object(TOOLS, 'ppt_run_stage', side_effect=[{'status': 'ok'}, payload]), \
                      mock.patch.object(TOOLS, 'ppt_publish_pages') as fallback:
                     with self.assertRaises(ToolExecutionError) as error:
@@ -1747,7 +1701,7 @@ class CompletionGateTests(unittest.TestCase):
             (deck / 'pages/page_099.html').write_text(PAGE_HTML)
             payload = {'status': 'ok', 'ok': 1, 'failed': 0, 'published': [{'page': 1}]}
             with mock.patch.object(TOOLS, '_resolve_deck_dir', return_value=deck), \
-                 mock.patch.object(TOOLS, '_sync_outline_from_selected_artifacts', return_value={'status': 'ok'}), \
+                 mock.patch.object(TOOLS, '_prepare_deferred_outline', return_value={'status': 'ok'}), \
                  mock.patch.object(TOOLS, 'ppt_run_stage', side_effect=[{'status': 'ok'}, payload]):
                 result = TOOLS.ppt_generate_pages(str(deck))
             self.assertEqual(result['published_count'], 1)
@@ -1844,10 +1798,7 @@ class DeferredTextOutlineTest(unittest.TestCase):
                     outline_markdown='## 总结\n用户确认的三个结论。',
                 )
             self.assertTrue(result['structure_deferred'])
-            self.assertEqual(
-                [call.kwargs['stage'] for call in stages.call_args_list],
-                ['preflight', 'style'],
-            )
+            stages.assert_not_called()
             model.assert_not_called()
             self.assertFalse((deck / 'outline.json').exists())
 
@@ -1887,18 +1838,15 @@ class DeferredTextOutlineTest(unittest.TestCase):
                 self.assertNotIn('旧风格', edited)
                 self.assertEqual(edited, artifacts['slide_outline'])
 
-    def test_legacy_split_prompts_still_read_current_components(self):
-        artifacts = {'presentation_style': '浅色背景', 'page_layout': '左右布局', 'page_assets': '图1'}
-        with mock.patch.object(TOOLS, '_resolve_artifact_text',
+    def test_complete_prompt_reads_do_not_merge_unrelated_split_artifacts(self):
+        artifacts = {'slide_outline': '当前完整提示词：上下布局',
+                     'presentation_style': '旧风格', 'page_layout': '旧布局', 'page_assets': '旧素材'}
+        with mock.patch.object(TOOLS, 'require_context', return_value=object()), \
+             mock.patch.object(TOOLS, '_resolve_artifact_text',
                                side_effect=lambda ctx, key, **kw: (artifacts.get(key), 'text')):
-            self.assertIn('左右布局', TOOLS._assemble_page_prompt(object(), 1, '正文'))
-            artifacts['page_layout'] = '上下布局'
-            self.assertIn('上下布局', TOOLS._assemble_page_prompt(object(), 1, '正文'))
-            del artifacts['page_assets']
-            with self.assertRaisesRegex(ValueError, 'incomplete prompt components'):
-                TOOLS._assemble_page_prompt(object(), 1, '正文')
-            artifacts.clear()
-            self.assertEqual(TOOLS._assemble_page_prompt(object(), 1, '正文'), '正文')
+            self.assertEqual(TOOLS._load_slide_outline_briefs([1]), {1: artifacts['slide_outline']})
+            artifacts['slide_outline'] = '用户更新的完整提示词：左右布局'
+            self.assertEqual(TOOLS._load_slide_outline_briefs([1]), {1: artifacts['slide_outline']})
 
     def test_text_cards_use_edited_artifact_not_original_file(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -1918,46 +1866,33 @@ class DeferredTextOutlineTest(unittest.TestCase):
             self.assertIn('用户删改后内容', publish.call_args.kwargs['value'])
             self.assertNotIn('原始内容', publish.call_args.kwargs['value'])
 
-    def test_generate_structure_reuses_checkpoint_and_invalidates_on_user_edit(self):
+    def test_generation_index_tracks_current_approved_prompts_without_model_calls(self):
         with tempfile.TemporaryDirectory() as tmp:
             deck = Path(tmp)
             (deck / 'task_pack.json').write_text(json.dumps({'params': {'page_count': 1}}))
-            (deck / 'info_pack.json').write_text('{}')
-            stages = []
+            with mock.patch.object(TOOLS, '_selected_slide_outline_items',
+                                   return_value=[(0, '# 用户编辑后的内容')]) as selected, \
+                 mock.patch.object(TOOLS, 'ppt_run_stage') as generate:
+                self.assertEqual(TOOLS._prepare_deferred_outline(deck)['status'], 'direct')
+                first = (deck / 'outline.json').read_text()
+                self.assertIn('用户编辑后的内容', first)
+                self.assertEqual(TOOLS._prepare_deferred_outline(deck)['status'], 'direct')
+                self.assertEqual((deck / 'outline.json').read_text(), first)
+                selected.return_value = [(0, '# 再次修改')]
+                self.assertEqual(TOOLS._prepare_deferred_outline(deck)['status'], 'direct')
+                self.assertIn('再次修改', (deck / 'outline.json').read_text())
+                generate.assert_not_called()
 
-            def run(_deck, *, stage):
-                stages.append(stage)
-                if stage == 'content-outline':
-                    (deck / 'outline.json').write_text(json.dumps({'pages': [{'page_no': 1, 'title': '结果'}]}))
-                return {'status': 'ok'}
-
-            with (
-                mock.patch.object(TOOLS, '_selected_slide_outline_items', return_value=[(0, '用户编辑后的内容')]) as selected,
-                mock.patch.object(TOOLS, 'ppt_run_stage', side_effect=run),
-            ):
-                self.assertEqual(TOOLS._prepare_deferred_outline(deck)['status'], 'ok')
-                self.assertIn('用户编辑后的内容', (deck / 'approved_outline.md').read_text())
-                self.assertEqual(TOOLS._prepare_deferred_outline(deck)['status'], 'reused')
-                self.assertEqual(stages, ['preflight', 'content-outline'])
-                selected.return_value = [(0, '再次修改')]
-                self.assertEqual(TOOLS._prepare_deferred_outline(deck)['status'], 'ok')
-                self.assertEqual(len(stages), 4)
-
-    def test_structure_failure_does_not_checkpoint_or_start_rendering(self):
+    def test_missing_approved_prompts_do_not_create_index_or_start_rendering(self):
         with tempfile.TemporaryDirectory() as tmp:
             deck = Path(tmp)
             (deck / 'task_pack.json').write_text(json.dumps({'params': {'page_count': 1}}))
-            (deck / 'info_pack.json').write_text('{}')
-            with (
-                mock.patch.object(TOOLS, '_selected_slide_outline_items', return_value=[(0, '内容')]),
-                mock.patch.object(TOOLS, 'ppt_run_stage', side_effect=[
-                    {'status': 'ok'}, {'status': 'failed', 'error': 'invalid outline'},
-                ]) as run,
-            ):
+            with mock.patch.object(TOOLS, '_selected_slide_outline_items', return_value=[]), \
+                 mock.patch.object(TOOLS, 'ppt_run_stage') as run:
                 result = TOOLS._prepare_deferred_outline(deck)
             self.assertEqual(result['status'], 'failed')
-            self.assertEqual(run.call_count, 2)
-            self.assertFalse((deck / '.deferred_outline_checkpoint.json').exists())
+            run.assert_not_called()
+            self.assertFalse((deck / 'outline.json').exists())
 
     def test_public_generate_defers_structure_failure_without_starting_html(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -1968,13 +1903,11 @@ class DeferredTextOutlineTest(unittest.TestCase):
                 mock.patch.object(TOOLS, '_prepare_deferred_outline', return_value={
                     'status': 'failed', 'reason': 'structure correction exhausted',
                 }) as prepare,
-                mock.patch.object(TOOLS, '_sync_outline_from_selected_artifacts') as legacy,
                 mock.patch.object(TOOLS, 'ppt_run_stage') as render,
             ):
                 with self.assertRaises(ToolExecutionError):
                     TOOLS.ppt_generate_pages(str(deck))
             prepare.assert_called_once_with(deck)
-            legacy.assert_not_called()
             render.assert_not_called()
 
 

@@ -259,7 +259,16 @@ def _run(command: list[str], timeout: int) -> dict[str, Any]:
 
 
 def ppt_export_html(pages: list[dict[str, Any]], filename: str = 'presentation.pptx') -> dict[str, Any]:
-    """Convert 1–100 supplied offline HTML slides and notes into an editable PPTX file."""
+    """Export 1–100 ordered {html, notes} pages to a downloadable PPTX file.
+
+    Supply complete HTML with inline data assets and static HTML/CSS/SVG.
+    Scripts, remote URLs and server file paths are not accepted by this offline
+    adapter. Render active charts with an available host tool before transfer.
+    Text and table text/lines are editable; this exporter does not promise native
+    PowerPoint chart/table objects. Use another authorized authoring capability
+    when those object types are required. Returns file bytes and checked page
+    count; the executing agent owns content fidelity and pixel inspection.
+    """
     if not isinstance(pages, list) or not 1 <= len(pages) <= 100:
         raise ExternalToolError('INVALID_ARGUMENT', 'pages must contain between 1 and 100 slides.', public=True)
     prepared = []
@@ -301,7 +310,13 @@ def ppt_export_html(pages: list[dict[str, Any]], filename: str = 'presentation.p
 
 
 def ppt_render_html(html: str) -> dict[str, Any]:
-    """Render one supplied offline HTML slide to PNG for the external agent to inspect."""
+    """Render one complete offline HTML slide at 1600×900 and return a PNG file.
+
+    Embed assets as data URLs; use static HTML/CSS/SVG without scripts, remote
+    URLs or server file paths. Rendering does not inspect pixels or approve the
+    design: inspect the returned image with the executing model or an available
+    image-understanding tool before reporting a visual-review result.
+    """
     html = _html(html)
     node, cli = _cli(render=True)
     with tempfile.TemporaryDirectory(prefix='external-ppt-preview-') as directory:
@@ -314,8 +329,15 @@ def ppt_render_html(html: str) -> dict[str, Any]:
                 'validation_owner': 'external-agent'}
 
 
-def ppt_inspect_pptx(content_base64: str) -> dict[str, Any]:
-    """Read slide text/count from an inline PPTX without rendering or calling any model."""
+def ppt_inspect_pptx(content_base64: str, include_layout: bool = False) -> dict[str, Any]:
+    """Inspect an inline PPTX without rendering or calling a model.
+
+    Use include_layout=true when analyzing a template: returns every page's
+    editable slots, shape geometry, effective typography, layout checks and
+    canvas size through the same inspector used by template authoring.
+    The default returns ordered slide text/count and notes presence for delivery
+    checks. Neither mode verifies rendered pixels or claims visual approval.
+    """
     if not isinstance(content_base64, str) or len(content_base64) > MAX_FILE_BYTES * 4 // 3 + 4:
         raise ExternalToolError('INVALID_ARGUMENT', 'PPTX input exceeds the transfer limit.')
     try:
@@ -354,8 +376,16 @@ def ppt_inspect_pptx(content_base64: str) -> dict[str, Any]:
                 pages.append({'page': number, 'texts': texts})
             if not pages:
                 raise ValueError('no slides')
-            return {'page_count': len(pages), 'pages': pages,
-                    'has_notes': any(re.fullmatch(r'ppt/notesSlides/notesSlide\d+\.xml', name) for name in names)}
+            result = {'page_count': len(pages), 'pages': pages,
+                      'has_notes': any(re.fullmatch(r'ppt/notesSlides/notesSlide\d+\.xml', name) for name in names)}
+        if include_layout:
+            from lazymind.chat.engine.tools.file_resources.pptx_template_fill import inspect_template
+            with tempfile.TemporaryDirectory(prefix='ppt-template-') as directory:
+                root = Path(directory)
+                source = root / 'template.pptx'
+                source.write_bytes(raw)
+                result['template'] = inspect_template(source, cache_workspace=root / 'cache', all_pages=True)
+        return result
     except (ValueError, KeyError, OSError, zipfile.BadZipFile, ET.ParseError) as exc:
         if isinstance(exc, ExternalToolError):
             raise

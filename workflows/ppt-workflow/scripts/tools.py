@@ -6,7 +6,7 @@ Preferred high-level pipeline (one tool call each):
     → ppt_generate_material_images  (ONLY when user explicitly asks for AI material images)
   ppt_build_outline(..., outline_markdown=...) # publish readable content only
   ppt_publish_outline(...) # publish editable per-page generation prompts
-  ppt_generate_pages(...)  # internal outline → asset-plan → style → batch-page-html
+  ppt_generate_pages(...)  # approved page index → asset-plan → batch-page-html
 
 Low-level stages (ppt_init_deck / ppt_run_stage / ppt_publish_*) remain for
 debug and recovery; prefer the wrappers above for full runs.
@@ -24,7 +24,7 @@ Delete an entire slide (not a bullet):
   ppt_find_deck → ppt_delete_page(deck_dir, page=N)
     renumbers later pages on disk + outline; removes UI list items.
 
-PPTX export is NOT a skill tool — the user clicks Export in WorkflowPanel.
+ppt_export_deck publishes an actual PPTX when explicitly requested; UI export remains available.
 Runtime lives under workflows/ppt-workflow/runtime/ (vendored SenseNova subset).
 Do NOT ppt_read_page_html + save_artifacts for full HTML — tool results >16KB
 are offloaded and the model never sees the body, so saves get stuck forever.
@@ -40,6 +40,7 @@ import logging
 import os
 import re
 import shutil
+import subprocess
 import sys
 import tempfile
 import time
@@ -1709,8 +1710,8 @@ def _required_output_format() -> str:
     formats = [item for item in artifacts if item.get('slot') == 'presentation_output_format'
                and item.get('selected') is not False and not item.get('deleted')]
     if not formats:
-        # Existing sessions predate the explicit choice and keep their original route.
-        return 'native_pptx' if mode == 'upload' else 'html'
+        raise ToolExecutionError('PPT_OUTPUT_CONTRACT_UNAVAILABLE: missing presentation_output_format; '
+                                 'resume analyze_requirements')
     output = _artifact_text(max(formats, key=lambda item: int(item.get('revision') or 0)).get('value'))
     if output not in ('html', 'native_pptx') or (mode == 'none' and output != 'html'):
         raise ToolExecutionError('PPT_OUTPUT_CONTRACT_INVALID: invalid presentation_output_format for template mode')
@@ -2573,7 +2574,9 @@ def _portable_ppt_source_path(source_path: Path) -> str:
     return str(resolved)
 
 
-def _inline_preview_images(html: str, deck: Path, html_path: Path) -> tuple[str, int]:
+def _inline_preview_images(
+    html: str, deck: Path, html_path: Path, *, inline_assets: bool = False,
+) -> tuple[str, int]:
     """Use durable local asset references; inline only legacy files outside uploads.
 
     The browser signs references when opening a slide, so stored artifacts never
@@ -2594,19 +2597,24 @@ def _inline_preview_images(html: str, deck: Path, html_path: Path) -> tuple[str,
         if not value or value.startswith(('data:', 'http://', 'https://', '//', '#')):
             return None
         clean_path = value.split('#', 1)[0].split('?', 1)[0]
-        candidate = Path(clean_path)
+        mapped = local_path_from_static_file_url(clean_path) if inline_assets else None
+        candidate = Path(mapped or clean_path)
         if not candidate.is_absolute():
             candidate = page_root / candidate
         try:
             candidate = candidate.resolve()
             candidate.relative_to(deck_root)
         except (OSError, ValueError):
+            if inline_assets:
+                raise ValueError('Selected image is outside the current presentation workspace') from None
             return None
         mime = _PREVIEW_IMAGE_MIME.get(candidate.suffix.lower())
         if not mime or not candidate.is_file():
+            if inline_assets:
+                raise ValueError('Selected image is missing or unsupported for export')
             return None
         relative = file_relative_path(str(candidate))
-        if relative:
+        if relative and not inline_assets:
             inlined += 1
             return f'/static-files/{encode_static_file_path(relative)}'
         try:
@@ -3517,11 +3525,6 @@ def _publish_text_page_briefs(
     if not isinstance(prompts, list) or len(prompts) != len(targets):
         raise ValueError('Provide page_prompts: one authored visual generation prompt per target page; '
                          'do not copy deck_outline')
-    old_style, _ = _resolve_artifact_text(ctx, 'presentation_style')
-    if old_style and page_components is None and not all(
-        isinstance(prompt, str) and prompt.lstrip().startswith(_PAGE_PROMPT_MARKER) for prompt in prompts
-    ):
-        raise ValueError('This plan uses components; update content/layout/assets instead of legacy page_prompts')
     if page_components is not None:
         if len(page_components) != len(targets):
             raise ValueError('Provide one content/layout/assets object per target page')
@@ -3568,60 +3571,22 @@ def _publish_text_page_briefs(
 
 
 def _prepare_deferred_outline(deck: Path) -> dict[str, Any]:
-    """Build internal structure only in generate, from current edited cards."""
+    """Build the execution index from approved complete prompts, without a model."""
     try:
         items = _selected_slide_outline_items()
     except Exception as exc:
         return {'status': 'failed', 'reason': f'Cannot read approved page briefs: {exc}'}
-    complete = (deck / 'complete_page_prompts.json').is_file()
-    if complete:
-        if not items or any(not brief.strip() for _, brief in items):
-            return {'status': 'failed', 'reason': 'Complete page prompts are missing; resume plan_page_prompts'}
-        # Only build an execution index. The approved prompts go directly to the
-        # HTML model; no content-outline or prompt-writing model call is needed.
-        index = {'pages': [
-            {'page_no': number, 'title': _page_prompt_title(brief),
-             'page_kind': 'content'}
-            for number, (_, brief) in enumerate(items, 1)
-        ]}
-        (deck / 'outline.json').write_text(json.dumps(index, ensure_ascii=False), encoding='utf-8')
-        _sync_task_pack_page_count(deck, len(items))
-        return {'status': 'direct', 'page_count': len(items)}
-    if not items:
-        # Quick mode can bypass the editable prompt step. Preserve its generation
-        # path by deriving internal content from the approved deck outline.
-        text, _ = _resolve_artifact_text(require_context(), 'deck_outline')
-        if not text or not str(text).strip():
-            return {'status': 'failed', 'reason': 'No deck outline or page prompts available'}
-        items = list(enumerate(_split_text_outline(str(text)), 1))
-    if any(not brief.strip() for _, brief in items):
-        return {'status': 'failed', 'reason': 'Empty slide_outline page'}
-    approved = '\n\n'.join(f'Page {n}:\n{brief}' for n, (_, brief) in enumerate(items, 1))
-    (deck / 'approved_outline.md').write_text(approved, encoding='utf-8')
+    if not items or any(not brief.strip() for _, brief in items):
+        return {'status': 'failed', 'reason': 'Complete page prompts are missing; resume plan_page_prompts'}
+    index = {'pages': [
+        {'page_no': number, 'title': _page_prompt_title(brief), 'page_kind': 'content'}
+        for number, (_, brief) in enumerate(items, 1)
+    ]}
+    (deck / 'outline.json').write_text(json.dumps(index, ensure_ascii=False), encoding='utf-8')
+    (deck / 'complete_page_prompts.json').write_text(
+        json.dumps({'version': 1, 'mode': 'direct'}), encoding='utf-8')
     _sync_task_pack_page_count(deck, len(items))
-    digest = hashlib.sha256()
-    for name in ('approved_outline.md', 'task_pack.json', 'info_pack.json'):
-        digest.update((deck / name).read_bytes())
-    key = digest.hexdigest()
-    checkpoint = deck / '.deferred_outline_checkpoint.json'
-    output = deck / 'outline.json'
-    try:
-        saved = json.loads(checkpoint.read_text(encoding='utf-8'))
-        if (saved.get('input_hash') == key and
-                saved.get('output_hash') == hashlib.sha256(output.read_bytes()).hexdigest()):
-            return {'status': 'reused', 'page_count': len(items)}
-    except (OSError, ValueError, AttributeError):
-        pass
-    for stage in ('preflight', 'content-outline'):
-        result = ppt_run_stage(str(deck), stage=stage)
-        if _tool_failed(result) or _tool_payload(result).get('status') == 'failed':
-            return {'status': 'failed', 'reason': _tool_fail_reason(result), 'stage': stage}
-    if not output.is_file():
-        return {'status': 'failed', 'reason': 'Internal outline was not created'}
-    checkpoint.write_text(json.dumps({
-        'input_hash': key, 'output_hash': hashlib.sha256(output.read_bytes()).hexdigest(),
-    }), encoding='utf-8')
-    return {'status': 'ok', 'page_count': len(items)}
+    return {'status': 'direct', 'page_count': len(items)}
 
 
 def _publish_deck_outline(deck: Path) -> dict[str, Any]:
@@ -3757,7 +3722,7 @@ def _load_slide_outline_briefs(page_nos: list[int]) -> dict[int, str]:
         except Exception:
             text = None
         if text and str(text).strip():
-            briefs[page_no] = _assemble_page_prompt(ctx, page_no, str(text).strip())
+            briefs[page_no] = str(text).strip()
     return briefs
 
 
@@ -3778,20 +3743,6 @@ def _compose_page_prompt(style: str, content: str, layout: str, assets: str) -> 
             ('风格', style), ('布局', layout), ('页面正文', content), ('页面素材', assets),
         )
     )
-
-
-def _assemble_page_prompt(ctx: Any, page_no: int, content: str) -> str:
-    """Read a complete page document, or assemble legacy split artifacts."""
-    if content.lstrip().startswith(_PAGE_PROMPT_MARKER):
-        return content
-    style, _ = _resolve_artifact_text(ctx, 'presentation_style')
-    layout, _ = _resolve_artifact_text(ctx, 'page_layout', sort_order=page_no)
-    assets, _ = _resolve_artifact_text(ctx, 'page_assets', sort_order=page_no)
-    if not any((style, layout, assets)):
-        return content  # Existing sessions still own a complete text prompt.
-    if not all(isinstance(value, str) and value.strip() for value in (style, layout, assets, content)):
-        raise ValueError(f'Page {page_no} has incomplete prompt components; restore style/content/layout/assets')
-    return _compose_page_prompt(style, content, layout, assets)
 
 
 def _artifact_text(value: Any) -> str:
@@ -3840,155 +3791,8 @@ def _selected_slide_outline_items() -> list[tuple[int, str]]:
                 detail = _workflow_client().read_artifact(artifact_id).result
                 if isinstance(detail, dict):
                     content = _artifact_text(detail.get('value'))
-        items.append((list_index, _assemble_page_prompt(require_context(), len(items) + 1, content)))
+        items.append((list_index, content))
     return items
-
-
-def _parse_brief_item(line: str) -> tuple[str, str]:
-    item = re.sub(r'^\s*(?:[-*•]|\d+[.、])\s*', '', line).strip()
-    if ' — ' in item:
-        head, detail = item.split(' — ', 1)
-    elif '—' in item:
-        head, detail = item.split('—', 1)
-    else:
-        head, detail = item, ''
-    return head.strip(), detail.strip()
-
-
-def _parse_brief_json(value: str, label: str) -> Any:
-    raw = value.strip()
-    if not raw or raw.lower() in {'none', 'null', '无', '不使用'}:
-        return None
-    try:
-        return json.loads(raw)
-    except json.JSONDecodeError as exc:
-        raise ValueError(f'{label}字段必须是有效 JSON：{exc.msg}') from exc
-
-
-def _parse_slide_outline_brief(text: str, fallback: dict, page_no: int) -> dict:
-    """Convert one human-editable slide brief back into outline.json shape."""
-    page = json.loads(json.dumps(fallback, ensure_ascii=False)) if fallback else {}
-    page.update({
-        'page_no': page_no,
-        'page_kind': '',
-        'title': '',
-        'subtitle': '',
-        'narrative': '',
-        'visual_hints': '',
-        'bullets': [],
-        'data_points': [],
-        'use_image': None,
-        'use_table': None,
-    })
-    field_labels = {
-        '页面类型：': 'page_kind',
-        '标题：': 'title',
-        '副标题：': 'subtitle',
-        '叙事：': 'narrative',
-        '版面提示：': 'visual_hints',
-    }
-    section = ''
-    extra_narrative: list[str] = []
-    ignored = (
-        '请根据以上内容生成完整可渲染的单页 PPT HTML',
-        '保留全部事实、标题、要点数量与数据',
-        '按版面提示排版；配图/表格字段如存在必须落到页面上',
-    )
-    for raw_line in text.splitlines():
-        line = raw_line.strip()
-        if not line or re.fullmatch(r'第\s*\d+\s*页', line):
-            continue
-        if line == '要点：':
-            section = 'bullets'
-            continue
-        if line == '数据点：':
-            section = 'data_points'
-            continue
-        matched_field = False
-        for label, field in field_labels.items():
-            if line.startswith(label):
-                page[field] = line[len(label):].strip()
-                section = ''
-                matched_field = True
-                break
-        if matched_field:
-            continue
-        if line.startswith('配图：'):
-            page['use_image'] = _parse_brief_json(line[len('配图：'):], '配图')
-            section = ''
-            continue
-        if line.startswith('表格：'):
-            page['use_table'] = _parse_brief_json(line[len('表格：'):], '表格')
-            section = ''
-            continue
-        if line.startswith(ignored):
-            section = ''
-            continue
-        head, detail = _parse_brief_item(line)
-        if section == 'bullets' and head:
-            page['bullets'].append({'head': head, 'detail': detail})
-        elif section == 'data_points' and head:
-            bits = [bit.strip() for bit in head.split('·', 2)]
-            bits.extend([''] * (3 - len(bits)))
-            page['data_points'].append({
-                'label': bits[0], 'value': bits[1], 'context': bits[2],
-            })
-        else:
-            extra_narrative.append(line)
-
-    if extra_narrative:
-        existing = _coerce_str(page.get('narrative'))
-        page['narrative'] = '\n'.join(([existing] if existing else []) + extra_narrative)
-    page['page_kind'] = _coerce_str(page.get('page_kind')) or 'content'
-    page['title'] = _coerce_str(page.get('title')) or f'第 {page_no} 页'
-    return page
-
-
-def _sync_outline_from_selected_artifacts(deck: Path) -> dict[str, Any]:
-    """Make selected, user-edited slide_outline cards authoritative on disk."""
-    if not _workflow_session_id():
-        return {'status': 'skipped', 'reason': 'no workflow session'}
-    try:
-        items = _selected_slide_outline_items()
-    except Exception as exc:
-        return {'status': 'failed', 'reason': f'读取 slide_outline 失败：{exc}'}
-    if not items:
-        return {'status': 'failed', 'reason': '没有可读取的 slide_outline 页面'}
-
-    outline = _load_outline(deck)
-    old_pages = outline.get('pages') or []
-    old_by_page: dict[int, dict] = {}
-    for old_page in old_pages:
-        if not isinstance(old_page, dict):
-            continue
-        try:
-            old_by_page[int(old_page.get('page_no'))] = old_page
-        except (TypeError, ValueError):
-            continue
-
-    pages: list[dict] = []
-    for page_no, (list_index, brief) in enumerate(items, start=1):
-        if not brief.strip():
-            return {'status': 'failed', 'reason': f'第 {page_no} 页编辑稿为空'}
-        fallback = old_by_page.get(list_index + 1)
-        if fallback is None and page_no <= len(old_pages):
-            fallback = old_pages[page_no - 1]
-        try:
-            pages.append(_parse_slide_outline_brief(brief, fallback or {}, page_no))
-        except ValueError as exc:
-            return {'status': 'failed', 'reason': f'第 {page_no} 页编辑稿无法解析：{exc}'}
-
-    before = json.dumps(old_pages, ensure_ascii=False, sort_keys=True)
-    outline['pages'] = pages
-    outline['page_count'] = len(pages)
-    _write_outline(deck, outline)
-    _sync_task_pack_page_count(deck, len(pages))
-    return {
-        'status': 'ok',
-        'page_count': len(pages),
-        'changed': before != json.dumps(pages, ensure_ascii=False, sort_keys=True),
-        'list_indices': [list_index for list_index, _brief in items],
-    }
 
 
 _VOID_TAGS = frozenset({
@@ -7986,6 +7790,7 @@ def ppt_prepare_style(
 
 def ppt_build_outline(
     user_query: str,
+    outline_markdown: str,
     page_count: Union[int, str, None] = 4,
     topic: Optional[str] = None,
     role: Optional[str] = None,
@@ -7998,44 +7803,18 @@ def ppt_build_outline(
     key_points_json: Union[str, list, None] = None,
     generate_background_images: Union[bool, str, None] = False,
     deck_dir: Optional[str] = None,
-    outline_markdown: Optional[str] = None,
 ) -> dict:
-    """Build a full deck outline in one call (preferred for build_outline step).
+    """Publish the worker-authored content outline; never generate another outline.
 
-    Pass outline_markdown (one ## heading per page) to publish text only.
-    Internal structure, image bindings and validation then run in generate_ppt.
-    Omitting it preserves the legacy API for existing callers.
-
-    Runs the legacy fixed serial pipeline internally. It initializes a deck when
-    ``deck_dir`` is omitted, otherwise it reuses the prepared deck, then runs:
-      preflight → content-outline → publish deck_outline Markdown
-
-    Prefer this over calling those stages one by one. Do NOT generate HTML here —
-    that is ppt_generate_pages / generate_ppt.
-
-    Args:
-        outline_markdown (str): User-facing content outline, one ## heading per page.
-            Required for new workflow runs; no internal JSON or visual schema.
-        deck_dir (str): Optional prepared deck from ppt_init_deck. When supplied,
-            reuse it so approved background prompts/images remain attached.
-        user_query (str): Full presentation request (required).
-        page_count (int): Target slide count (positive integer). Default 4.
-        topic (str): Short topic; inferred from user_query when empty.
-        role (str): Speaker role.
-        audience (str): Target audience.
-        scene (str): Presentation scene.
-        style_hint (str): Optional visual style guidance.
-        ppt_mode (str): Deprecated compatibility field; derived from style_flow.
-        style_flow (str): Internal route: auto when previews are skipped; preview_choice only with saved previews.
-        style_selection (str): A, B, or C for preview_choice.
-        key_points_json (str): JSON array string like '["a","b"]', or omit.
-        generate_background_images (bool): True only when the startup AI
-            background question was explicitly enabled. Default false.
-
-    Returns:
-        deck_dir, stages summary, and the deck_outline publication result.
-        Per-page slide_outline prompts are published by plan_page_prompts.
+    outline_markdown is required: one ## heading per requested page. This tool
+    creates/reuses the workflow's durable deck, attaches
+    selected materials and publishes deck_outline. It makes no model calls.
+    On retry the same deck and approved backgrounds are retained. Pass the exact
+    user request/count and confirmed background choice; omit deck_dir to reuse
+    the bound deck. Visual design and scripts belong to ppt_publish_outline next.
     """
+    if not isinstance(outline_markdown, str) or not outline_markdown.strip():
+        return _tool_error('ppt_build_outline', 'outline_markdown is required; author the approved content first')
     # Prefer the workflow's durable deck binding. Outside a workflow, an exact
     # request checkpoint avoids accidentally reusing an unrelated presentation.
     request_key = hashlib.sha256(json.dumps({
@@ -8043,6 +7822,7 @@ def ppt_build_outline(
         'audience': audience, 'scene': scene, 'style': style_hint, 'mode': ppt_mode,
         'style_flow': style_flow, 'style_selection': style_selection,
         'points': key_points_json, 'backgrounds': generate_background_images,
+        'outline': outline_markdown,
     }, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
     resume_path = _conversation_root() / '.outline_builds' / f'{request_key}.json'
     resolved_deck = _coerce_str(deck_dir)
@@ -8058,7 +7838,6 @@ def ppt_build_outline(
             resolved_deck = str(candidate)
         except (OSError, ValueError, KeyError, TypeError):
             pass
-    reused_deck = bool(resolved_deck)
     prepared_backgrounds_enabled = False
     if resolved_deck:
         try:
@@ -8114,152 +7893,60 @@ def ppt_build_outline(
         if generate_background_images is None
         else _coerce_bool(generate_background_images)
     )
-    style_res = ppt_prepare_style(
-        user_query=user_query,
-        page_count=page_count,
-        topic=topic,
-        role=role,
-        audience=audience,
-        scene=scene,
-        style_hint=style_hint,
-        style_flow=style_flow or init_payload.get('style_flow'),
-        style_selection=style_selection,
-        key_points_json=key_points_json,
-        generate_background_images=effective_backgrounds_enabled,
-        deck_dir=resolved_deck,
-    )
-    if _tool_failed(style_res):
-        return _tool_error(
-            'ppt_build_outline',
-            f'style preparation failed: {_tool_fail_reason(style_res)}',
-            meta={'deck_dir': resolved_deck, 'failed_stage': 'style'},
-        )
-    style_payload = _tool_payload(style_res)
-    if outline_markdown is not None:
-        try:
-            published = _publish_text_outline(build_deck, str(outline_markdown).strip())
-        except ValueError as exc:
-            return _tool_error('ppt_build_outline', str(exc))
-        if not published['ok']:
-            return _tool_error('ppt_build_outline', published.get('error') or 'Publish failed')
-        resume_path.unlink(missing_ok=True)
-        return _tool_success('ppt_build_outline', {
-            **init_payload, 'deck_outline_published': True,
-            'style_flow': style_payload.get('style_flow'),
-            'style_selection': style_payload.get('style_selection'),
-            'style_spec_ready': True,
-            'page_count': published['page_count'], 'structure_deferred': True,
-            'next_step': 'plan_page_prompts',
-            'note': 'Text outline published. Internal page structure is deferred to generate_ppt.',
-        })
-    checkpoint_path = build_deck / '.outline_checkpoint.json'
-
-    def outline_input_hash() -> str:
-        digest = hashlib.sha256(b'content-outline-v1')
-        for name in ('task_pack.json', 'info_pack.json'):
-            digest.update((build_deck / name).read_bytes())
-        return digest.hexdigest()
-
-    stages: list[dict[str, Any]] = [
-        {
-            'step': 'reuse' if reused_deck else 'init',
-            'ok': True,
-            'deck_id': init_payload.get('deck_id'),
-        },
-    ]
-
-    for stage_name in ('preflight', 'outline'):
-        if stage_name == 'outline':
-            try:
-                checkpoint = json.loads(checkpoint_path.read_text(encoding='utf-8'))
-                if (checkpoint.get('input_hash') == outline_input_hash()
-                        and checkpoint.get('output_hash') == hashlib.sha256((build_deck / 'outline.json').read_bytes()).hexdigest()):
-                    stages.append({'step': 'outline', 'ok': True, 'status': 'reused'})
-                    continue
-            except (OSError, ValueError, AttributeError):
-                pass
-        effective_stage = 'content-outline' if stage_name == 'outline' else stage_name
-        stage_started_at = time.monotonic()
-        stage_res = ppt_run_stage(resolved_deck, stage=effective_stage)
-        stage_elapsed = round(time.monotonic() - stage_started_at, 3)
-        if _tool_failed(stage_res):
-            return _tool_error(
-                'ppt_build_outline',
-                f'{stage_name} failed: {_tool_fail_reason(stage_res)}',
-                detail=json.dumps({
-                    'deck_dir': resolved_deck,
-                    'stages': stages,
-                    'failed_stage': stage_res,
-                }, ensure_ascii=False)[:2500],
-                meta={'deck_dir': resolved_deck, 'failed_stage': stage_name,
-                      'retry_tool': 'ppt_build_outline', 'reuse_existing_deck': True},
-            )
-        if stage_name == 'outline':
-            checkpoint_path.write_text(json.dumps({
-                'input_hash': outline_input_hash(),
-                'output_hash': hashlib.sha256((build_deck / 'outline.json').read_bytes()).hexdigest(),
-            }), encoding='utf-8')
-        payload = _tool_payload(stage_res)
-        stages.append({
-            'step': stage_name,
-            'execution': effective_stage,
-            'elapsed_seconds': stage_elapsed,
-            'ok': True,
-            'status': payload.get('status', 'ok'),
-            'pages': payload.get('pages'),
-        })
-
-    deck_outline_res = _publish_deck_outline(Path(resolved_deck))
-    if not deck_outline_res.get('ok'):
-        return _tool_error(
-            'ppt_build_outline',
-            f'publish deck outline failed: {deck_outline_res.get("error") or "unknown error"}',
-            detail=json.dumps({
-                'deck_dir': resolved_deck,
-                'stages': stages,
-                'publish': deck_outline_res,
-            }, ensure_ascii=False)[:2500],
-            meta={'deck_dir': resolved_deck},
-        )
-    stages.append({
-        'step': 'publish_deck_outline',
-        'ok': True,
-        'page_count': deck_outline_res.get('page_count'),
-        'chars': deck_outline_res.get('chars'),
-    })
-
-    resume_path.unlink(missing_ok=True)
-
-    background_count = 0
+    pack_path = build_deck / 'task_pack.json'
+    pack = json.loads(pack_path.read_text(encoding='utf-8'))
+    pack.setdefault('params', {})['generate_background_images'] = effective_backgrounds_enabled
+    pack_path.write_text(json.dumps(pack, ensure_ascii=False), encoding='utf-8')
     try:
-        background_manifest = json.loads(
-            (Path(resolved_deck) / 'background_images.json').read_text(encoding='utf-8'),
-        )
-        background_count = len(background_manifest.get('pages') or [])
-    except (FileNotFoundError, json.JSONDecodeError, AttributeError):
-        background_count = 0
-
+        published = _publish_text_outline(build_deck, outline_markdown.strip())
+    except ValueError as exc:
+        return _tool_error('ppt_build_outline', str(exc))
+    if not published['ok']:
+        return _tool_error('ppt_build_outline', published.get('error') or 'Publish failed')
+    resume_path.unlink(missing_ok=True)
     return _tool_success('ppt_build_outline', {
-        'deck_dir': resolved_deck,
-        'deck_id': init_payload.get('deck_id'),
-        'page_count': init_payload.get('page_count'),
-        'ppt_mode': init_payload.get('ppt_mode'),
-        'style_flow': style_payload.get('style_flow'),
-        'style_selection': style_payload.get('style_selection'),
-        'material_images_attached': init_payload.get('material_images_attached'),
+        **init_payload, 'deck_outline_published': True,
+        'page_count': published['page_count'], 'structure_deferred': True,
         'background_images_enabled': effective_backgrounds_enabled,
-        'background_images_count': background_count,
         'next_step': 'plan_page_prompts',
-        'deck_outline_published': True,
-        'deck_outline_chars': deck_outline_res.get('chars'),
-        'stages': stages,
-        'note': (
-            'One deck_outline Markdown artifact is published for the Outline tab. '
-            'The next step publishes editable per-page generation prompts. '
-            'Stop here. AI backgrounds, when enabled, were already handled by '
-            'the two dedicated approval steps.'
-        ),
     })
+
+
+def _prepare_page_generation(deck: Path) -> list[dict[str, Any]]:
+    """Resolve approved prompts and assets before any page model call."""
+    deck_dir_s = str(deck.resolve())
+    sync_result = _prepare_deferred_outline(deck)
+    if sync_result.get('status') == 'failed':
+        return _tool_error(
+            'ppt_generate_pages',
+            f'page preparation failed: {sync_result.get("reason") or "unknown error"}',
+            meta={'deck_dir': deck_dir_s},
+        )
+    stages: list[dict[str, Any]] = [{
+        'step': 'approved-page-index',
+        'ok': True,
+        'status': sync_result.get('status'),
+        'changed': sync_result.get('changed', False),
+        'page_count': sync_result.get('page_count'),
+    }]
+
+    plan_res = ppt_run_stage(deck_dir_s, stage='asset-plan')
+    if _tool_failed(plan_res):
+        return _tool_error(
+            'ppt_generate_pages',
+            f'asset-plan failed: {_tool_fail_reason(plan_res)}',
+            detail=json.dumps(plan_res, ensure_ascii=False)[:2000],
+            meta={'deck_dir': deck_dir_s},
+        )
+    plan_payload = _tool_payload(plan_res)
+    stages.append({
+        'step': 'asset-plan',
+        'ok': True,
+        'pages': plan_payload.get('pages'),
+        'slots': plan_payload.get('slots'),
+    })
+
+    return stages
 
 
 def ppt_generate_pages(
@@ -8269,7 +7956,7 @@ def ppt_generate_pages(
     """Generate all slide HTML pages from published slide_outline in one call.
 
     Preferred for the full-deck generate_ppt path. Runs:
-      approved text → internal outline (or legacy sync) → asset-plan → batch-page-html
+      approved page index → asset-plan → batch-page-html
     batch-page-html auto-publishes preview_html (+ notes) page-by-page.
 
     If a durable whole-page insertion is pending, this entry point safely
@@ -8281,8 +7968,11 @@ def ppt_generate_pages(
     A completed deck with a new follow-up request is protected from this full
     generation path. Use ppt_restyle_pages for visual edits, ppt_publish_pages
     to republish, or ppt_run_stage for an explicitly requested redraw.
-    Shared style is created on demand before page workers; existing style is reused.
-    Do NOT re-run outline/init here.
+    Shared style is already included in each approved page prompt.
+    Do NOT re-run outline/style/init here.
+    For HTML from an uploaded template, first call ppt_analyze_template with
+    the bound template attachment and this deck. It stages the measured page
+    geometry and original background media used by the HTML renderer.
 
     Args:
         deck_dir (str): Absolute deck directory. Omit to use ppt_find_deck().
@@ -8393,37 +8083,7 @@ def ppt_generate_pages(
             ),
         })
 
-    sync_result = (_prepare_deferred_outline(deck) if (deck / 'outline_draft.md').exists()
-                   else _sync_outline_from_selected_artifacts(deck))
-    if sync_result.get('status') == 'failed':
-        return _tool_error(
-            'ppt_generate_pages',
-            f'edited outline sync failed: {sync_result.get("reason") or "unknown error"}',
-            meta={'deck_dir': deck_dir_s},
-        )
-    stages: list[dict[str, Any]] = [{
-        'step': 'sync-edited-outline',
-        'ok': True,
-        'status': sync_result.get('status'),
-        'changed': sync_result.get('changed', False),
-        'page_count': sync_result.get('page_count'),
-    }]
-
-    plan_res = ppt_run_stage(deck_dir_s, stage='asset-plan')
-    if _tool_failed(plan_res):
-        return _tool_error(
-            'ppt_generate_pages',
-            f'asset-plan failed: {_tool_fail_reason(plan_res)}',
-            detail=json.dumps(plan_res, ensure_ascii=False)[:2000],
-            meta={'deck_dir': deck_dir_s},
-        )
-    plan_payload = _tool_payload(plan_res)
-    stages.append({
-        'step': 'asset-plan',
-        'ok': True,
-        'pages': plan_payload.get('pages'),
-        'slots': plan_payload.get('slots'),
-    })
+    stages = _prepare_page_generation(deck)
 
     html_res = ppt_run_stage(
         deck_dir_s, stage='batch-page-html', concurrency=conc,
@@ -8487,11 +8147,79 @@ def ppt_generate_pages(
         'published': html_payload.get('published'),
         'stages': stages,
         'note': (
-            'preview_html pages published. Stop — do not export PPTX from tools.'
+            'HTML and notes published. Use ppt_export_deck only if a PPTX file was requested.'
             if status == 'ok' else
             'Some pages failed; inspect failed_detail or redraw with page-html.'
         ),
     })
+
+
+def ppt_export_deck() -> dict:
+    """Export current selected HTML pages/notes and publish native_pptx.
+
+    Call only when a downloadable PPTX was requested, after every page/notes
+    pair is published. Reads current artifact revisions in visual order, not
+    stale generation files. Makes no model calls and never regenerates pages.
+    Uses the configured editable exporter. Export/count/publication failures
+    preserve existing HTML and the previous PPTX; report them and retry export.
+    """
+    from lazymind.chat.workflow.external_ppt_tools import _cli, ppt_inspect_pptx
+
+    _require_html_output()
+    ctx = require_context()
+    order = _ui_slot_order_list('preview_html')
+    if (not order or len(order) != len(_ui_slot_order_list('preview_notes'))
+            or len(order) != len(_ui_slot_order_list('slide_outline'))):
+        return _tool_error('ppt_export_deck', 'Publish every approved HTML page and matching notes before export')
+    pages = []
+    for number in range(1, len(order) + 1):
+        html, _ = _resolve_artifact_text(ctx, 'preview_html', sort_order=number)
+        notes, _ = _resolve_artifact_text(ctx, 'preview_notes', sort_order=number)
+        if (not isinstance(html, str) or '<html' not in html.lower() or _is_ppt_placeholder(html)
+                or not isinstance(notes, str) or not notes.strip() or _is_ppt_placeholder(notes)):
+            return _tool_error('ppt_export_deck', f'Page {number} has incomplete HTML or notes; export was not started')
+        html, _ = _inline_preview_images(
+            html, _conversation_root(), _conversation_root() / 'pages' / f'page_{number:03d}.html',
+            inline_assets=True,
+        )
+        pages.append((html, notes))
+    node, cli = _cli()
+    root = _conversation_root() / 'ppt_exports' / uuid.uuid4().hex
+    root.mkdir(parents=True)
+    output = root / 'presentation.pptx'
+    try:
+        (root / 'pages').mkdir()
+        for number, (html, notes) in enumerate(pages, 1):
+            (root / 'pages' / f'page_{number:03d}.html').write_text(html, encoding='utf-8')
+            (root / 'pages' / f'page_{number:03d}.notes.txt').write_text(notes, encoding='utf-8')
+        (root / 'task_pack.json').write_text(json.dumps({'deck_id': root.name, 'deck_dir': str(root)}))
+        (root / 'review.md').write_text('Export of selected workflow artifacts.\n')
+        export_env = {**os.environ, 'LAZYMIND_FONT_SUBSET_PYTHON': sys.executable}
+        if export_env.get('LAZYMIND_NODE_RUN_AS_NODE', '').lower() == 'true':
+            export_env['ELECTRON_RUN_AS_NODE'] = '1'
+        process = subprocess.run(
+            [node, str(cli), '--deck-dir', str(root), '--output', output.name, '--force'],
+            capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=300,
+            env=export_env, **({'creationflags': subprocess.CREATE_NO_WINDOW} if os.name == 'nt' else {}),
+        )
+        messages = [line for line in process.stdout.splitlines() if line.strip().startswith('{')]
+        result = json.loads(messages[-1]) if messages else {}
+        if (process.returncode or result.get('status') != 'ok' or result.get('failed')
+                or not output.is_file()):
+            raise ValueError(result.get('error') or result.get('reason') or process.stderr[-1500:]
+                             or 'Exporter did not produce a complete PPTX')
+        inspection = ppt_inspect_pptx(base64.b64encode(output.read_bytes()).decode())
+        if inspection['page_count'] != len(pages):
+            raise ValueError('Exported PPTX page count does not match selected HTML')
+    except (OSError, ValueError, subprocess.TimeoutExpired, ToolExecutionError) as exc:
+        shutil.rmtree(root, ignore_errors=True)
+        return _tool_error('ppt_export_deck', str(exc))
+    saved = _save_artifact(key='native_pptx', value=str(output), content_type='file',
+                           source_tool='ppt_export_deck', internal_publish=True)
+    if _tool_failed(saved):
+        return _tool_error('ppt_export_deck', _tool_fail_reason(saved) or 'PPTX publication failed')
+    return _tool_success('ppt_export_deck', {'page_count': len(pages), 'published': True,
+                         'visual_validation': 'not_performed'})
 
 
 def ppt_run_stage(
@@ -8929,9 +8657,10 @@ def ppt_publish_outline(
     page_components: Optional[Union[str, list]] = None,
     global_style: Optional[str] = None,
 ) -> dict:
-    """Publish outline.json pages into slide_outline list artifacts for the UI.
+    """Publish complete authored page prompts and separate scripts for generation.
 
-    Call once after stage=outline. Each page becomes one editable list item
+    Call after ppt_build_outline with page_components + global_style (preferred)
+    or complete page_prompts, and one speaker_notes script per target page. Each page becomes one editable list item
     (sort_order = page number). generate_ppt reads these briefs — including any
     human edits in the Outline tab — when generating the required output format.
 
@@ -8950,6 +8679,8 @@ def ppt_publish_outline(
         page_components: Preferred array of objects with non-empty content, layout,
             assets strings, one per target page. Saved together in one editable Markdown page.
             Use assets="无外部素材" when the page needs no external image.
+            For an uploaded template, include TEMPLATE_SOURCE_PAGE: N in each
+            layout to bind its inspected source page; repeated source pages are allowed.
         global_style: Shared typography, colors, canvas and output rules. Required
             with page_components; placed before the page prompt in the same Markdown artifact.
         pages: Optional 1-based page filter. Omit = all outline pages.
@@ -8962,7 +8693,7 @@ def ppt_publish_outline(
     components = json.loads(page_components) if isinstance(page_components, str) else page_components
     if components is not None:
         if page_prompts is not None:
-            raise ValueError('Use page_components or legacy page_prompts, not both')
+            raise ValueError('Use page_components or page_prompts, not both')
         if not isinstance(global_style, str) or not global_style.strip():
             raise ValueError('page_components requires non-empty global_style')
         if not isinstance(components, list) or not components or any(

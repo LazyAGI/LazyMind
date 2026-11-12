@@ -197,3 +197,35 @@ def test_installed_exporter_one_page_and_preview_are_real_inline_files():
     rendered = call(payload, 'ppt_render_html', {'html': HTML})['result']['files'][0]
     assert base64.b64decode(rendered['content_base64']).startswith(b'\x89PNG\r\n\x1a\n')
     assert rendered['size_bytes'] > 100
+
+
+def test_template_inspection_returns_real_geometry_and_typography_without_a_model(monkeypatch):
+    import lazyllm
+    from pptx import Presentation
+    from pptx.util import Inches, Pt
+
+    monkeypatch.setattr(lazyllm, 'AutoModel', lambda **kw: pytest.fail('inspection must not call a model'))
+    presentation = Presentation()
+    for title in ('Template first', 'Template second'):
+        slide = presentation.slides.add_slide(presentation.slide_layouts[6])
+        shape = slide.shapes.add_textbox(Inches(1), Inches(2), Inches(5), Inches(1))
+        run = shape.text_frame.paragraphs[0].add_run()
+        run.text = title
+        run.font.size = Pt(24)
+        run.font.name = 'Arial'
+    raw = io.BytesIO()
+    presentation.save(raw)
+    result = call(request(), arguments={'content_base64': base64.b64encode(raw.getvalue()).decode(),
+                                        'include_layout': True})['result']
+    template = result['template']
+    assert template['slide_count'] == result['page_count'] == 2
+    assert template['all_pages'] is True and template['next_page'] is None
+    assert template['composition']['page_size_inches']['cx'] == presentation.slide_width / 914400
+    assert [page['page'] for page in template['pages']] == [1, 2]
+    for page, title in zip(template['pages'], ('Template first', 'Template second')):
+        slot = next(slot for slot in page['slots'] if slot['text'] == title)
+        assert slot['shape_id']
+        assert slot['effective_typography']['size_pt'] == 24
+        assert slot['effective_typography']['fonts']['latin'] == 'Arial'
+        assert any(shape['geometry'] for shape in page['shapes'])
+        assert 'layout_checks' in page
