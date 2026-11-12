@@ -5497,6 +5497,7 @@ const zhCN = {
     groupDeleteCancel: "取消",
   },
   knowledge: {
+    advancedOptions: "高级选项",
 	processingLevel: "处理级别",
 	processingLevelHint: "仅保存原文件：不做解析；解析正文：提取文档正文；解析正文并切片：将正文拆分为片段；启用向量检索：生成向量用于语义检索。可随时升级，降级不会删除已有产物。",
 	processingStored: "仅保存原文件",

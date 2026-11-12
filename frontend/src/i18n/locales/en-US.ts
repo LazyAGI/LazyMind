@@ -5582,6 +5582,7 @@ const enUS = {
 
   // Knowledge Base
   knowledge: {
+    advancedOptions: "Advanced options",
 	processingLevel: "Processing level",
 	processingLevelHint: "Store: retain original files. Parse: extract text. Chunk: split text into segments. Index: create vectors for semantic search. You can upgrade later; downgrading keeps existing artifacts.",
 	processingStored: "Store only (no model)",

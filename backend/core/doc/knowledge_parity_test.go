@@ -68,8 +68,22 @@ func TestKnowledgeParityScenesAndAtomicConfiguration(t *testing.T) {
 			}
 		})
 	}
-	if _, err := s.CreateKnowledge(ctx, op, CreateKnowledgeRequest{Name: "Missing-tags", ProcessingLevel: "stored"}); err == nil {
-		t.Fatal("missing required tags accepted")
+	for _, scene := range []string{"general", "academic_papers"} {
+		level := "stored"
+		if scene == "academic_papers" {
+			level = "parsed"
+		}
+		result, err := s.CreateKnowledge(ctx, op, CreateKnowledgeRequest{Name: "No-tags-" + scene, Scene: scene, ProcessingLevel: level})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var saved orm.Dataset
+		if err := db.First(&saved, "id = ?", result.Items[0].ResourceRef.ID()).Error; err != nil {
+			t.Fatal(err)
+		}
+		if len(parseDatasetTags(saved.Ext)) != 0 {
+			t.Fatal("unexpected default tags")
+		}
 	}
 	invalid := []learning.CapabilityRef{{Key: "nonexistent", Version: 1, Enabled: true}}
 	if _, err := s.CreateKnowledge(ctx, op, CreateKnowledgeRequest{Name: "Invalid-caps", Tags: []string{"test"}, ProcessingLevel: "stored", Capabilities: invalid}); err == nil {
