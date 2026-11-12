@@ -4,6 +4,7 @@ import { DatabaseOutlined, FileTextOutlined, ReloadOutlined, SettingOutlined, De
 import "./TextIndexManager.scss";
 import { axiosInstance, BASE_URL } from "@/components/request";
 import { AgentAppsAuth } from "@/components/auth";
+import { useRAGComponent } from "@/modules/modelProvider/contexts/RAGComponentContext";
 import { clearEmbeddingChunks } from "@/modules/modelProvider/api";
 
 type IndexDocument = { id: string; name: string; parse_status: string; index_status: string; embedding_version: string; error: string };
@@ -11,6 +12,7 @@ type IndexState = { generation: number; model_name?: string; provider_name?: str
 const statusNames: Record<string, string> = { succeeded: "已完成", pending: "未建立", running: "处理中", processing: "处理中", failed: "失败" };
 
 export default function TextIndexManager({ datasetId }: { datasetId?: string }) {
+  const { availability: ragAvailability, refresh: refreshRAG } = useRAGComponent();
   const [open, setOpen] = useState(false);
   const [dataset, setDataset] = useState(datasetId);
   const [libraries, setLibraries] = useState<{ label: string; value: string }[]>([]);
@@ -114,6 +116,13 @@ export default function TextIndexManager({ datasetId }: { datasetId?: string }) 
       onCancel={() => { if (!busy) setOpen(false); }} destroyOnHidden>
       <p className="text-index-intro">管理用于语义检索的文档。上传和解析不依赖向量模型。</p>
       {state?.index_identity === "legacy_unknown" && <Alert className="text-index-error" type="warning" showIcon message="旧向量索引待处理" description="模型已移除或旧索引身份尚未确认。原文件、解析正文和旧向量保留；选择新模型后，按提示清理旧向量并重新索引。" />}
+      {ragAvailability !== "ready" && <Alert type="info" showIcon
+        message={ragAvailability === "missing" ? "向量索引需要本地知识库组件" : "正在确认知识库组件状态"}
+        description="原文件上传、原生解析和阅读仍可使用。安装并启用组件后再建立向量索引。"
+        action={ragAvailability === "missing" ? <a href="/settings?section=system_tools#python-rag-dependency">安装并启用组件</a> : <Button onClick={refreshRAG}>重新检查</Button>} />}
+      {state && !state.model_name && <Alert type="info" showIcon message="尚未选择默认向量模型"
+        description="清空索引后可以重新选择原模型，也可以选择其他模型。"
+        action={<a href="/settings?section=model_defaults">配置向量模型</a>} />}
       <section className="text-index-overview" aria-label="当前向量模型">
         <div className="text-index-model">
           <span className="text-index-model-icon" aria-hidden><DatabaseOutlined /></span>
@@ -141,7 +150,7 @@ export default function TextIndexManager({ datasetId }: { datasetId?: string }) 
         </div>
         <div className="text-index-selection-bar">
           <span>{selected.length ? <>已选择 <strong>{selected.length}</strong> 份文档</> : "选择需要参与向量检索的文档"}<small>每次最多 20 份</small></span>
-          <Button type="primary" loading={busy} disabled={!dataset || selected.length === 0 || maintenance} onClick={() => void reindex()}>
+          <Button type="primary" loading={busy} disabled={!dataset || selected.length === 0 || maintenance || ragAvailability !== "ready" || !state?.model_name} onClick={() => void reindex()}>
             {selected.length ? `建立索引（${selected.length}）` : "建立索引"}
           </Button>
         </div>

@@ -192,3 +192,27 @@ func baseDocumentChunks(artifact *baseArtifact, pageToken string, pageSize int, 
 	}
 	return result, nil
 }
+
+// The bounded paper worker uses the same native reader as ordinary uploads.
+// It needs neither the optional RAG process nor an embedding model.
+func startNativeParseTasks(ctx context.Context, userID, datasetID string, ids []string) ([]StartTaskResult, error) {
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, "/", nil)
+	if err != nil {
+		return nil, err
+	}
+	request.Header.Set("X-User-Id", userID)
+	results := make([]StartTaskResult, 0, len(ids))
+	for _, id := range ids {
+		var task orm.Task
+		if err := store.DB().WithContext(ctx).Where("id=? AND dataset_id=? AND deleted_at IS NULL", id, datasetID).Take(&task).Error; err != nil {
+			return nil, err
+		}
+		result := StartTaskResult{TaskID: id, DocumentID: task.DocID, DisplayName: task.DisplayName, Status: "STARTED", SubmitStatus: "ACCEPTED"}
+		if err := prepareBaseDocument(request, datasetID, task); err != nil {
+			markTaskStartFailed(ctx, datasetID, task, err.Error())
+			return results, err
+		}
+		results = append(results, result)
+	}
+	return results, nil
+}

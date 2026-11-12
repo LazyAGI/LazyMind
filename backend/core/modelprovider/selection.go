@@ -849,7 +849,7 @@ func projectGlobalSelectedEmbedding(ctx context.Context, db *gorm.DB, userID str
 		filtered = append(filtered, item)
 	}
 	if choice.ModelID == "" {
-		if choice.Phase == "detached" {
+		if choice.Phase == "detached" || choice.indexState.StrictlyCleared {
 			return filtered, nil
 		}
 		reason := choice.indexState.ReadinessReason

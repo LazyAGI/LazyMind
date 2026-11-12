@@ -1604,7 +1604,18 @@ func startParseTasksAtLevel(ctx context.Context, userID, datasetID string, taskI
 	}
 
 	if !systemdeps.PythonComponentActive("rag") {
-		return nil, fmt.Errorf("请先安装本地知识库组件，并重启本地服务。")
+		level := requestedLevel
+		if strings.TrimSpace(level) == "" {
+			var ds orm.Dataset
+			if err := store.DB().WithContext(ctx).Where("id=? AND deleted_at IS NULL", datasetID).Take(&ds).Error; err != nil {
+				return nil, err
+			}
+			level = ds.ProcessingLevel
+		}
+		if effectiveProcessingLevel(level) != ProcessingLevelIndexed {
+			return startNativeParseTasks(ctx, userID, datasetID, taskIDs)
+		}
+		return nil, fmt.Errorf("向量索引需要本地知识库组件，请前往设置中的系统工具安装并启用。原文件和解析结果不受影响。")
 	}
 	kbID := datasetKbIDByID(datasetID)
 	if kbID == "" {

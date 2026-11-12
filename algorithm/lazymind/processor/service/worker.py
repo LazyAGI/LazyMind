@@ -125,9 +125,16 @@ if not getattr(DocumentProcessorWorker._Impl, '_lazymind_isolated', False):
             from lazymind.parsing.service.embedding_reset import index_state, IndexBusy
             state = index_state()
             expected = getattr(self, '_lazymind_task_generation', None)
+            # Drop stale work before constructing a processor: chunk-only reparses
+            # also delete vectors. Missing generations from legacy reparses are
+            # unsafe after the first index transition.
+            stale = expected is not None and expected != state['generation']
+            legacy_reparse = (getattr(self, '_lazymind_task_reparse', False)
+                              and expected is None and state['generation'] > 0)
+            if stale or legacy_reparse:
+                raise IndexBusy('obsolete document task discarded after index generation changed')
             if (getattr(self, '_lazymind_task_indexes', True)
-                    and (state['phase'] in ('clearing', 'cleanup_failed', 'cleared', 'detached')
-                         or (expected is not None and expected != state['generation']))):
+                    and state['phase'] in ('clearing', 'cleanup_failed', 'cleared', 'detached')):
                 raise IndexBusy('document task belongs to an unavailable index generation')
             if getattr(self, '_lazymind_store_generation', None) != state['generation']:
                 self._processor = None
@@ -158,6 +165,7 @@ if not getattr(DocumentProcessorWorker._Impl, '_lazymind_isolated', False):
             lazyllm.globals['config'].clear()
             lazyllm.inject_model_config = inject_model_config
             from lazymind.parsing.service.embedding_reset import index_lock
+            self._lazymind_task_reparse = task_type == 'DOC_REPARSE'
             self._lazymind_task_indexes = payload.get('processing_level', 'indexed') == 'indexed'
             self._lazymind_task_generation = (payload.get('llm_config') or {}).get('_embedding_generation')
             with index_lock():

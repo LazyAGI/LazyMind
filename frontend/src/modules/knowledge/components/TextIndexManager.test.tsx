@@ -2,15 +2,16 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testi
 import { ConfigProvider, Modal } from "antd";
 import { afterEach, beforeAll, beforeEach, expect, it, vi } from "vitest";
 import { installDesktopTestDOM } from "@/test/desktopResourceFixtures";
-const mocks = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn(), clear: vi.fn(), role: "system-admin" }));
+const mocks = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn(), clear: vi.fn(), rag: "ready", role: "system-admin" }));
 vi.mock("@/components/request", () => ({ BASE_URL: "", axiosInstance: { get: mocks.get, post: mocks.post } }));
 vi.mock("@/components/auth", () => ({ AgentAppsAuth: { getUserInfo: () => ({ role: mocks.role }) } }));
 vi.mock("@/modules/modelProvider/api", () => ({ clearEmbeddingChunks: mocks.clear }));
+vi.mock("@/modules/modelProvider/contexts/RAGComponentContext", () => ({ useRAGComponent: () => ({ availability: mocks.rag, refresh: vi.fn() }) }));
 import TextIndexManager from "./TextIndexManager";
 beforeAll(installDesktopTestDOM);
 afterEach(() => { vi.restoreAllMocks(); Modal.destroyAll(); cleanup(); });
 beforeEach(() => {
-  installDesktopTestDOM(); vi.clearAllMocks(); mocks.role = "system-admin";
+  installDesktopTestDOM(); vi.clearAllMocks(); mocks.role = "system-admin"; mocks.rag = "ready";
   mocks.get.mockImplementation(async (url: string) => ({ data: url.endsWith("index-state")
     ? { data: { generation: 7, model_name: "example-embedding", provider_name: "Example", indexed_knowledge_bases: 1, operation_phase: "ready", index_identity: "verified" } }
     : url.endsWith("/datasets") ? { datasets: [{ dataset_id: "library", display_name: "示例资料库" }] }
@@ -63,4 +64,14 @@ it("explains retained old vectors when the model has been removed", async () => 
   expect(dialog.getByText(/原文件、解析正文和旧向量保留/)).toBeInTheDocument();
   expect(dialog.getByRole("link", { name: /切换默认模型/ })).toBeInTheDocument();
   expect(await dialog.findByText("示例.pdf")).toBeInTheDocument();
+});
+
+it("keeps documents readable while missing RAG blocks only indexing with an installation link", async () => {
+  mocks.rag = "missing";
+  const dialog = within(await open());
+  await waitFor(() => expect(dialog.getByText("示例.pdf")).toBeVisible());
+  fireEvent.click(within(dialog.getByRole("row", { name: /示例.pdf/ })).getByRole("checkbox"));
+  expect(dialog.getByRole("button", { name: "建立索引（1）" })).toBeDisabled();
+  expect(dialog.getByRole("link", { name: "安装并启用组件" })).toHaveAttribute("href", "/settings?section=system_tools#python-rag-dependency");
+  expect(mocks.post).not.toHaveBeenCalled();
 });

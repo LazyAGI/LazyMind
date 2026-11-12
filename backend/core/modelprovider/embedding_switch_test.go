@@ -304,6 +304,12 @@ func TestEmbeddingReadinessAndSelectionExposeExactIndexReasons(t *testing.T) {
 			if err := json.Unmarshal(selectedRec.Body.Bytes(), &selectedBody); err != nil {
 				t.Fatal(err)
 			}
+			if tc.wantReason == "index_cleared" {
+				if selectedRec.Code != http.StatusOK || len(selectedBody.Data.Selections) != 0 {
+					t.Fatalf("cleared selection shadows model catalog: %+v", selectedBody)
+				}
+				return
+			}
 			if selectedRec.Code != http.StatusOK || len(selectedBody.Data.Selections) != 1 || selectedBody.Data.Selections[0].ModelID != selectedModel.ID || selectedBody.Data.Selections[0].Availability != "unavailable" || selectedBody.Data.Selections[0].UnavailableReason != tc.wantReason {
 				t.Fatalf("selected reason = %d %+v, want retained model with %q", selectedRec.Code, selectedBody.Data.Selections, tc.wantReason)
 			}
@@ -422,7 +428,7 @@ func TestLegacyUnknownWithoutDisplaySelectionBlocksStaticReadiness(t *testing.T)
 	}
 }
 
-func TestClearedCloudSelectionSurvivesUnavailableCatalog(t *testing.T) {
+func TestClearedCloudSelectionDoesNotShadowAvailableModels(t *testing.T) {
 	tests := []struct {
 		name     string
 		provider CloudCatalogProvider
@@ -459,12 +465,8 @@ func TestClearedCloudSelectionSurvivesUnavailableCatalog(t *testing.T) {
 			if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
 				t.Fatal(err)
 			}
-			if rec.Code != http.StatusOK || len(body.Data.Selections) != 1 {
-				t.Fatalf("persisted Cloud selection disappeared: status=%d selections=%+v", rec.Code, body.Data.Selections)
-			}
-			selected := body.Data.Selections[0]
-			if selected.ModelKey != "embed_main" || selected.ModelID != "cloud-embed-saved" || selected.Name != "Saved Cloud Embed" || selected.Source != "cloud" || selected.ProviderID != CloudSystemProviderID || selected.ProviderName != CloudSystemProviderName || !selected.ReadOnly || selected.Availability != "unavailable" || selected.UnavailableReason != "index_cleared" {
-				t.Fatalf("persisted Cloud selection lost its snapshot or index reason: %+v", selected)
+			if rec.Code != http.StatusOK || len(body.Data.Selections) != 0 {
+				t.Fatalf("cleared index retained a disabled selection: status=%d selections=%+v", rec.Code, body.Data.Selections)
 			}
 		})
 	}
@@ -571,7 +573,17 @@ func TestGlobalEmbeddingSelectionOnlySwitchesWithVerifiedCompatibleVectors(t *te
 		}).Error; err != nil {
 		t.Fatal(err)
 	}
-	previewReq = httptest.NewRequest(http.MethodPost, "/embedding/switch-preview", strings.NewReader(`{"model_id":"`+third.ID+`","source":"own"}`))
+	selectionReq := httptest.NewRequest(http.MethodGet, "/model_providers/selected", nil)
+	selectionReq.Header.Set("X-User-Id", first.CreateUserID)
+	selectionRec := httptest.NewRecorder()
+	GetSelectedModels(selectionRec, selectionReq)
+	var selectionBody struct {
+		Data selectedModelsResponse `json:"data"`
+	}
+	if err := json.Unmarshal(selectionRec.Body.Bytes(), &selectionBody); err != nil || selectionRec.Code != 200 || len(selectionBody.Data.Selections) != 0 {
+		t.Fatalf("clear must leave the original model selectable: %s err=%v", selectionRec.Body.String(), err)
+	}
+	previewReq = httptest.NewRequest(http.MethodPost, "/embedding/switch-preview", strings.NewReader(`{"model_id":"`+second.ID+`","source":"own"}`))
 	previewReq.Header.Set("X-User-Id", first.CreateUserID)
 	previewReq.Header.Set("X-User-Role", "admin")
 	previewRec = httptest.NewRecorder()
@@ -579,11 +591,11 @@ func TestGlobalEmbeddingSelectionOnlySwitchesWithVerifiedCompatibleVectors(t *te
 	if err := json.Unmarshal(previewRec.Body.Bytes(), &preview); err != nil || previewRec.Code != http.StatusOK || preview.Data.Outcome != "empty" || !preview.Data.CanSwitch {
 		t.Fatalf("post-clear preview = %d %s (%v)", previewRec.Code, previewRec.Body.String(), err)
 	}
-	if rec := selectModel(third.ID); rec.Code != http.StatusOK {
+	if rec := selectModel(second.ID); rec.Code != http.StatusOK {
 		t.Fatalf("first post-clear selection = %d: %s", rec.Code, rec.Body.String())
 	}
 	if err := db.Take(&state, "scope = ?", globalEmbeddingScope).Error; err != nil ||
-		state.ActiveModelID != third.ID || state.Signature == "" || state.Phase != "ready" {
+		state.ActiveModelID != second.ID || state.Signature == "" || state.Phase != "ready" {
 		t.Fatalf("post-clear selection did not establish the new identity: %+v %v", state, err)
 	}
 	_ = parent

@@ -206,18 +206,20 @@ def test_worker_rejects_late_submission_using_queued_llm_config(monkeypatch, pha
 
 
 @pytest.mark.parametrize('phase', ['cleared', 'cleanup_failed', 'clearing', 'detached'])
-def test_parse_only_worker_does_not_require_vector_identity(monkeypatch, phase):
+@pytest.mark.parametrize('generation', [0, 8])
+def test_parse_only_worker_does_not_require_vector_identity(monkeypatch, phase, generation):
     monkeypatch.setitem(config._impl, 'database_url', 'sqlite:///:memory:')
     module = importlib.import_module('lazymind.processor.service.worker')
     monkeypatch.setattr(embedding_reset, 'index_lock', nullcontext)
-    monkeypatch.setattr(embedding_reset, 'index_state', lambda: {'generation': 0, 'phase': phase})
+    monkeypatch.setattr(embedding_reset, 'index_state', lambda: {'generation': generation, 'phase': phase})
     base = module.DocumentProcessorWorker._Impl.__mro__[1]
-    processor = object()
+    from types import SimpleNamespace
+    processor = SimpleNamespace(_lazymind_generation_initialized=True)
     monkeypatch.setattr(base, '_run_task', lambda self, *args: self._get_processor())
     monkeypatch.setattr(base, '_get_processor', lambda self: processor)
     monkeypatch.setattr(module, '_install_text_reembed_guard', lambda value: value)
     worker = object.__new__(module.DocumentProcessorWorker._Impl)
-    assert worker._run_task('parse', 'doc_add', {'processing_level': 'parsed'}, True) is processor
+    assert worker._run_task('parse', 'doc_add', {'processing_level': 'parsed', 'llm_config': {'_embedding_generation': generation}}, True) is processor
 
 
 @pytest.mark.parametrize('expected', [None, 8, 7])
@@ -227,3 +229,19 @@ def test_removed_model_blocks_index_operations_even_without_task_generation(monk
     with pytest.raises(embedding_reset.IndexBusy):
         with embedding_reset.index_operation(expected):
             pytest.fail('removed model allowed vector access')
+
+
+@pytest.mark.parametrize('generation', [None, 0, 7])
+@pytest.mark.parametrize('level', ['parsed', 'chunked', 'indexed'])
+def test_stale_reparse_is_discarded_before_touching_store(monkeypatch, generation, level):
+    monkeypatch.setitem(config._impl, 'database_url', 'sqlite:///:memory:')
+    module = importlib.import_module('lazymind.processor.service.worker')
+    monkeypatch.setattr(embedding_reset, 'index_lock', nullcontext)
+    monkeypatch.setattr(embedding_reset, 'index_state', lambda: {'generation': 8, 'phase': 'ready'})
+    base = module.DocumentProcessorWorker._Impl.__mro__[1]
+    monkeypatch.setattr(base, '_run_task', lambda self, *args: self._get_processor())
+    monkeypatch.setattr(base, '_get_processor', lambda self: pytest.fail('obsolete task touched store'))
+    worker = object.__new__(module.DocumentProcessorWorker._Impl)
+    with pytest.raises(embedding_reset.IndexBusy, match='obsolete'):
+        worker._run_task('old-task', 'DOC_REPARSE', {
+            'processing_level': level, 'llm_config': {'_embedding_generation': generation}}, True)
