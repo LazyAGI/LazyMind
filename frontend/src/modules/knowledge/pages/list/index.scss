@@ -24,12 +24,12 @@
     padding: 0 16px;
     gap: 10px;
     border-radius: 10px;
-    border-color: #284b9d;
-    background: #284b9d;
-    color: #fff;
+    border-color: #cddcf5;
+    background: #eaf1ff;
+    color: #284b9d;
     font-weight: 600;
-    box-shadow: 0 3px 8px rgb(40 75 157 / 16%);
-    &:hover { background: #1d3c84; border-color: #1d3c84; color: #fff; }
+    box-shadow: 0 2px 5px rgb(40 75 157 / 6%);
+    &:hover { background: #dce8ff; border-color: #adc5ee; color: #1d3c84; }
     &:focus-visible { outline: 3px solid #93b4f5; outline-offset: 3px; }
     .knowledge-square-mark { flex-shrink: 0; }
     &.is-return {
