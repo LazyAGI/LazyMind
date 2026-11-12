@@ -4685,6 +4685,15 @@ func registeredCoreOperations() []openAPIOperation {
 			Responses:   map[int]openAPIResponse{200: resp("Embedding switch assessment", modelprovider.EmbeddingSwitchPreviewResponse{})},
 		},
 		{
+			Method:      "POST",
+			Path:        "/model_providers/embedding/clear-chunks",
+			Summary:     "Clear knowledge chunks and activate the confirmed embedding model",
+			Description: "Requires a preview generation and explicit administrator confirmation for a server-verified candidate. Clears shared chunks and vectors, preserves source files and document records, and atomically activates the target model with its saved selection. The server completes the operation independently of browser cancellation. Retrying the same confirmed request resumes an interrupted cleanup or activation; replaying a completed request does not clear the new index. Success acknowledges both cleared and activated. Documents await manual parsing; no parsing tasks are enqueued.",
+			Tags:        []string{"model_providers"},
+			RequestBody: jsonBodyOf(modelprovider.EmbeddingClearRequest{}, true),
+			Responses:   map[int]openAPIResponse{200: resp("Chunks cleared and target model activated", modelprovider.EmbeddingClearResponse{})},
+		},
+		{
 			Method:      "PUT",
 			Path:        "/model_providers/selected_models",
 			Summary:     "Save selected models by model_type",
