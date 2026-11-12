@@ -11,7 +11,7 @@ type IndexDocument = { id: string; name: string; parse_status: string; index_sta
 type IndexState = { generation: number; model_name?: string; provider_name?: string; indexed_knowledge_bases: number; operation_phase: string; index_identity: string };
 const statusNames: Record<string, string> = { succeeded: "已完成", pending: "未建立", running: "处理中", processing: "处理中", failed: "失败" };
 
-export default function TextIndexManager({ datasetId }: { datasetId?: string }) {
+export default function TextIndexManager({ datasetId, autoOpen = false }: { datasetId?: string; autoOpen?: boolean }) {
   const { availability: ragAvailability, refresh: refreshRAG } = useRAGComponent();
   const [open, setOpen] = useState(false);
   const [dataset, setDataset] = useState(datasetId);
@@ -55,7 +55,8 @@ export default function TextIndexManager({ datasetId }: { datasetId?: string }) 
   }, [open, refresh, busy]);
   useEffect(() => { setDataset(datasetId); setSelected([]); setPage(1); }, [datasetId]);
 
-  const show = async () => {
+  const autoOpened = useRef(false);
+  const show = useCallback(async () => {
     setError("");
     setOpen(true);
     if (datasetId) return;
@@ -72,7 +73,13 @@ export default function TextIndexManager({ datasetId }: { datasetId?: string }) 
       if (!dataset && items.length) setDataset(items[0].value);
     } catch { setError("资料库列表读取失败，请关闭后重试。"); }
     finally { setLibrariesLoading(false); }
-  };
+  }, [datasetId, dataset]);
+  useEffect(() => {
+    if (autoOpen && !autoOpened.current) {
+      autoOpened.current = true;
+      void show();
+    }
+  }, [autoOpen, show]);
   const reindex = async () => {
     if (!dataset || !selected.length) return;
     setBusy(true);

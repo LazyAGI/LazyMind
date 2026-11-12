@@ -66,7 +66,6 @@ import {
 } from "@/utils/developerMode";
 
 import { DetailPageHeader } from "@/components/ui";
-import TextIndexManager from "@/modules/knowledge/components/TextIndexManager";
 import KnowledgeBaseSyncNow from "@/modules/knowledge/components/KnowledgeBaseSyncNow";
 import {
   effectiveProcessingLevel,
@@ -466,7 +465,6 @@ const Detail = () => {
         paddingBottom: paperLibrary ? "12px" : "24px",
       }}
     >
-      <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 8 }}><TextIndexManager datasetId={id} /></div>
       {!paperLibrary && <DetailPageHeader
         className="knowledge-detail-header"
         title={

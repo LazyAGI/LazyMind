@@ -2029,7 +2029,7 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
               ))}
             </div> : <strong>{t(paperReading ? "showcase.choosePaperLibrary" : "chat.selectKnowledgeBase")}</strong>}
             <div className="knowledge-source-actions" role="group" aria-label={t("knowledge.libraryActions")}>
-              <TextIndexManager />
+              <TextIndexManager autoOpen={entryParams.get("index_management") === "open"} />
               {backgroundTasksButton}
               {createKnowledgeButton}
             </div>

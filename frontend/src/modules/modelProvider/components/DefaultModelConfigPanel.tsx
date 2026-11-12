@@ -39,7 +39,6 @@ import {
 import { formatContextWindow } from "../maxInputTokens";
 import { probeHealthVersion, readModelProbeHealth, subscribeProbeHealth } from "../modelProbeHealth";
 import "./DefaultModelConfigPanel.scss";
-import TextIndexManager from "@/modules/knowledge/components/TextIndexManager";
 
 export type {
   CloudServiceSlotKey,
@@ -827,7 +826,6 @@ export default function DefaultModelConfigPanel({
       aria-label={t("modelProvider.defaultConfigAria")}
     >
       <div className="model-provider-panel-title-row">
-        <TextIndexManager />
         <div>
           <h2 className="model-provider-section-title">
             {t("modelProvider.defaultTitle")}

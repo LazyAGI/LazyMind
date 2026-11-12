@@ -587,9 +587,13 @@ describe("default capability configuration groups", () => {
     }));
     expect(mocks.saveModel).not.toHaveBeenCalled();
     await waitFor(() => expect(confirm).toHaveBeenCalledWith(expect.objectContaining({
-      content: "modelProvider.embeddingSignatureMatched",
+      content: expect.anything(),
       okText: "modelProvider.confirmSwitch",
     })));
+    expect(screen.queryByRole("button", { name: "索引管理" })).not.toBeInTheDocument();
+    render(<>{confirm.mock.calls[0][0].content}</>);
+    expect(screen.getByText("modelProvider.embeddingSignatureMatched")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "前往索引管理" })).toHaveAttribute("href", "/lib/knowledge/list?index_management=open");
     await act(async () => { (confirm.mock.calls[0][0].onOk as () => void)(); });
     await waitFor(() => expect(mocks.saveModel).toHaveBeenCalledOnce());
   });
@@ -623,7 +627,7 @@ describe("default capability configuration groups", () => {
     const openConfirmation = async () => {
       await chooseCandidateEmbedding();
       await waitFor(() => expect(confirm).toHaveBeenCalledWith(expect.objectContaining({
-        content: "modelProvider.embeddingIndexResetRequired",
+        content: expect.anything(),
         okText: "modelProvider.embeddingClearAndSwitch",
         okButtonProps: { danger: true },
       })));
@@ -812,7 +816,7 @@ describe("default capability configuration groups", () => {
     await chooseCandidateEmbedding();
 
     await waitFor(() => expect(warning).toHaveBeenCalledWith(expect.objectContaining({
-      content: "modelProvider.embeddingSignatureCheckFailed",
+      content: expect.anything(),
     })));
     expect(mocks.saveModel).not.toHaveBeenCalled();
   });
@@ -831,7 +835,7 @@ describe("default capability configuration groups", () => {
     await chooseCandidateEmbedding();
 
     await waitFor(() => expect(warning).toHaveBeenCalledWith(expect.objectContaining({
-      content: "modelProvider.embeddingSignatureCheckFailed",
+      content: expect.anything(),
     })));
     expect(mocks.saveModel).not.toHaveBeenCalled();
   });

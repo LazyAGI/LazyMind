@@ -75,3 +75,11 @@ it("keeps documents readable while missing RAG blocks only indexing with an inst
   expect(dialog.getByRole("link", { name: "安装并启用组件" })).toHaveAttribute("href", "/settings?section=system_tools#python-rag-dependency");
   expect(mocks.post).not.toHaveBeenCalled();
 });
+
+it("opens from the library deep link and stays closed after dismissal", async () => {
+  render(<ConfigProvider theme={{ token: { motion: false } }}><TextIndexManager autoOpen /></ConfigProvider>);
+  const dialog = await screen.findByRole("dialog", { name: "文本向量索引管理" });
+  await within(dialog).findByText("示例.pdf");
+  fireEvent.click(within(dialog).getByRole("button", { name: "Close" }));
+  await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+});
