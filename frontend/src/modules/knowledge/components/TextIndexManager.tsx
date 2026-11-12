@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Alert, Button, Modal, Select, Space, Table, Tag, message } from "antd";
+import { Alert, Button, Empty, Modal, Select, Table, Tag, Tooltip, message } from "antd";
+import { DatabaseOutlined, FileTextOutlined, ReloadOutlined, SettingOutlined, DeleteOutlined, SearchOutlined } from "@ant-design/icons";
+import "./TextIndexManager.scss";
 import { axiosInstance, BASE_URL } from "@/components/request";
 import { AgentAppsAuth } from "@/components/auth";
 import { clearEmbeddingChunks } from "@/modules/modelProvider/api";
@@ -17,23 +19,30 @@ export default function TextIndexManager({ datasetId }: { datasetId?: string }) 
   const [selected, setSelected] = useState<React.Key[]>([]);
   const [page, setPage] = useState(1);
   const [total, setTotal] = useState(0);
+  const [loading, setLoading] = useState(false);
+  const [librariesLoading, setLibrariesLoading] = useState(false);
+  const [loadError, setLoadError] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const revision = useRef(0);
   const isAdmin = AgentAppsAuth.getUserInfo()?.role === "system-admin";
   const refresh = useCallback(async () => {
     const current = ++revision.current;
+    setLoading(true);
     try {
       const [index, documents] = await Promise.all([
         axiosInstance.get(`${BASE_URL}/api/core/model_providers/embedding/index-state`),
         dataset ? axiosInstance.get(`${BASE_URL}/api/core/datasets/${encodeURIComponent(dataset)}/text-index`, { params: { page } }) : Promise.resolve(undefined),
       ]);
       if (current !== revision.current) return;
+      setLoadError("");
       setState(index.data.data ?? index.data);
       setRows(documents?.data.documents ?? []);
       setTotal(documents?.data.total ?? 0);
     } catch {
-      if (current === revision.current) setError("索引状态读取失败，请刷新重试。");
+      if (current === revision.current) setLoadError("索引状态读取失败，请刷新重试。");
+    } finally {
+      if (current === revision.current) setLoading(false);
     }
   }, [dataset, page]);
   useEffect(() => {
@@ -45,8 +54,10 @@ export default function TextIndexManager({ datasetId }: { datasetId?: string }) 
   useEffect(() => { setDataset(datasetId); setSelected([]); setPage(1); }, [datasetId]);
 
   const show = async () => {
+    setError("");
     setOpen(true);
     if (datasetId) return;
+    setLibrariesLoading(true);
     try {
       const items: { label: string; value: string }[] = [];
       let token = "";
@@ -56,7 +67,9 @@ export default function TextIndexManager({ datasetId }: { datasetId?: string }) 
         token = response.data.next_page_token || "";
       } while (token);
       setLibraries(items);
-    } catch { setError("知识库列表读取失败，请关闭后重试。"); }
+      if (!dataset && items.length) setDataset(items[0].value);
+    } catch { setError("资料库列表读取失败，请关闭后重试。"); }
+    finally { setLibrariesLoading(false); }
   };
   const reindex = async () => {
     if (!dataset || !selected.length) return;
@@ -85,30 +98,69 @@ export default function TextIndexManager({ datasetId }: { datasetId?: string }) 
       finally { setBusy(false); }
     },
   });
+  const maintenance = ["clearing", "cleanup_failed"].includes(state?.operation_phase || "");
+  const statusLabel = state?.operation_phase === "clearing" ? "正在清理"
+    : state?.operation_phase === "cleanup_failed" ? "清理未完成"
+      : state?.index_identity === "verified" ? "模型已确认" : state?.model_name ? "索引待确认" : "未配置模型";
+  const statusTag = (value: string, row?: IndexDocument) => {
+    const manual = row?.embedding_version === "reembed:manual" && !["running", "processing", "failed"].includes(value);
+    return <Tag color={manual ? "default" : value === "succeeded" ? "success" : value === "failed" ? "error" : ["running", "processing"].includes(value) ? "processing" : "default"}>
+      {manual ? "待重新索引" : statusNames[value] || "待核实"}
+    </Tag>;
+  };
   return <>
-    <Button onClick={() => void show()}>索引管理</Button>
-    <Modal title="文本向量索引管理" open={open} width={960} footer={null} onCancel={() => { if (!busy) setOpen(false); }} destroyOnHidden>
-      <Space direction="vertical" style={{ width: "100%" }} size="middle">
-        <Alert type="info" showIcon message={state?.model_name ? `当前模型：${state.provider_name || ""} · ${state.model_name}` : "尚未建立可用的文本向量索引"}
-          description={`已索引知识库：${state?.indexed_knowledge_bases ?? "—"}。上传和解析无需向量模型；在此选择需要用于向量检索的文档。`} />
-        {error && <Alert type="error" showIcon message={error} />}
-        <Space wrap>
-          {!datasetId && <Select aria-label="选择知识库" placeholder="选择知识库查看索引" showSearch optionFilterProp="label" options={libraries} value={dataset} style={{ width: 300 }}
-            onChange={(value: string) => { setDataset(value); setPage(1); setSelected([]); setRows([]); }} />}
-          <Button onClick={() => void refresh()} disabled={busy}>刷新状态</Button>
-          <Button type="primary" disabled={busy || selected.length === 0 || selected.length > 20} onClick={() => void reindex()}>索引所选文档（{selected.length}/20）</Button>
-          {isAdmin && <Button danger disabled={busy || !state || state.operation_phase === "clearing"} onClick={clear}>清除全部文本向量</Button>}
-          <a href="/settings?section=model_defaults">切换默认向量模型</a>
-        </Space>
-        <Table<IndexDocument> rowKey="id" size="small" dataSource={rows} pagination={{ current: page, pageSize: 100, total, showSizeChanger: false, onChange: (value: number) => { setPage(value); setSelected([]); } }}
-          rowSelection={{ selectedRowKeys: selected, onChange: setSelected, getCheckboxProps: (row: IndexDocument) => ({ disabled: busy || ["running", "processing"].includes(row.index_status) || ["running", "processing"].includes(row.parse_status) }) }}
+    <Button icon={<DatabaseOutlined />} onClick={() => void show()}>索引管理</Button>
+    <Modal title="文本向量索引管理" open={open} width={960} className="text-index-manager" footer={null}
+      onCancel={() => { if (!busy) setOpen(false); }} destroyOnHidden>
+      <p className="text-index-intro">管理用于语义检索的文档。上传和解析不依赖向量模型。</p>
+      <section className="text-index-overview" aria-label="当前向量模型">
+        <div className="text-index-model">
+          <span className="text-index-model-icon" aria-hidden><DatabaseOutlined /></span>
+          <div>
+            <span className="text-index-caption">当前向量模型</span>
+            <strong>{state?.model_name || (loading ? "正在读取模型…" : "尚未配置向量模型")}</strong>
+            <span className="text-index-model-meta">{state?.provider_name || "选择模型后即可建立向量索引"}{state && <> <Tag>{statusLabel}</Tag></>}</span>
+          </div>
+        </div>
+        <div className="text-index-model-actions">
+          <span><strong>{state?.indexed_knowledge_bases ?? "—"}</strong> 个资料库已索引</span>
+          <a href="/settings?section=model_defaults"><SettingOutlined /> 切换默认模型</a>
+        </div>
+      </section>
+      {(error || loadError) && <Alert className="text-index-error" type="error" showIcon message={error || loadError} />}
+      <div className="text-index-documents">
+        <div className="text-index-library-toolbar">
+          {!datasetId ? <div className="text-index-library-select">
+            <label htmlFor="text-index-library">资料库</label>
+            <Select id="text-index-library" aria-label="选择知识库" placeholder="选择资料库" showSearch optionFilterProp="label"
+              options={libraries} value={dataset} loading={librariesLoading} disabled={busy} suffixIcon={<SearchOutlined />}
+              onChange={(value: string) => { setDataset(value); setPage(1); setSelected([]); setRows([]); setError(""); }} />
+          </div> : <h3>文档索引</h3>}
+          <Button icon={<ReloadOutlined spin={loading} />} onClick={() => void refresh()} disabled={busy || loading}>刷新状态</Button>
+        </div>
+        <div className="text-index-selection-bar">
+          <span>{selected.length ? <>已选择 <strong>{selected.length}</strong> 份文档</> : "选择需要参与向量检索的文档"}<small>每次最多 20 份</small></span>
+          <Button type="primary" loading={busy} disabled={!dataset || selected.length === 0 || maintenance} onClick={() => void reindex()}>
+            {selected.length ? `建立索引（${selected.length}）` : "建立索引"}
+          </Button>
+        </div>
+        <Table<IndexDocument> rowKey="id" size="middle" dataSource={rows} loading={loading && rows.length === 0}
+          scroll={{ x: 620 }} pagination={total ? { current: page, pageSize: 100, total, showSizeChanger: false,
+            showTotal: (count: number) => `共 ${count} 份文档`, onChange: (value: number) => { setPage(value); setSelected([]); } } : false}
+          locale={{ emptyText: <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={!dataset ? "选择资料库，查看文档的解析与索引状态" : "这个资料库还没有可索引的文档"} /> }}
+          rowSelection={{ selectedRowKeys: selected, onChange: (keys: React.Key[]) => setSelected(keys.slice(0, 20)),
+            getCheckboxProps: (row: IndexDocument) => ({ disabled: busy || maintenance || ["running", "processing"].includes(row.index_status) || ["running", "processing"].includes(row.parse_status) || (selected.length >= 20 && !selected.includes(row.id)) }) }}
           columns={[
-            { title: "文档", dataIndex: "name", render: (name: string, row: IndexDocument) => name || row.id },
-            { title: "解析", dataIndex: "parse_status", render: (value: string) => statusNames[value] || "待核实" },
-            { title: "向量索引", dataIndex: "index_status", render: (value: string, row: IndexDocument) => <Tag color={value === "succeeded" ? "green" : value === "failed" ? "red" : "default"}>{row.embedding_version === "reembed:manual" && !["running", "processing", "failed"].includes(value) ? "已清除，待重新索引" : statusNames[value] || "待核实"}</Tag> },
-            { title: "详情", dataIndex: "error" },
+            { title: "文档", dataIndex: "name", width: "44%", render: (name: string, row: IndexDocument) => <div className="text-index-document-name"><FileTextOutlined /><span title={name || row.id}>{name || row.id}</span></div> },
+            { title: "解析状态", dataIndex: "parse_status", width: 110, render: (value: string) => statusTag(value) },
+            { title: "向量索引", dataIndex: "index_status", width: 130, render: (value: string, row: IndexDocument) => statusTag(value, row) },
+            { title: "说明", dataIndex: "error", render: (value: string) => value ? <Tooltip title={value}><span className="text-index-document-error">{value}</span></Tooltip> : <span className="text-index-muted">—</span> },
           ]} />
-      </Space>
+      </div>
+      {isAdmin && <section className="text-index-cleanup" aria-label="全局索引清理">
+        <div><strong>清理全部文本向量</strong><p>影响所有资料库的向量检索。原文件、解析正文、切片和图片向量保留。</p></div>
+        <Button danger icon={<DeleteOutlined />} disabled={busy || !state || state.operation_phase === "clearing"} onClick={clear}>清理全部向量</Button>
+      </section>}
     </Modal>
   </>;
 }

@@ -31,6 +31,8 @@ import moment from "moment";
 import {
   AppstoreOutlined,
   ArrowLeftOutlined,
+  ArrowUpOutlined,
+  CloudOutlined,
   CheckOutlined,
   DatabaseOutlined,
   HistoryOutlined,
@@ -1871,8 +1873,7 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
     <div className="knowledge-list-page" ref={rootRef}>
       {taskNotificationHolder}
       <div className="knowledge-page-header">
-        <TextIndexManager />
-        <div>
+        <div className="knowledge-page-heading">
           {new URLSearchParams(location.search).get("from") === "settings-knowledge" ? (
             <Button
               className="knowledge-settings-return"
@@ -1889,14 +1890,14 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
               {t("showcase.backToHome")}
             </Button>
           ) : null}
-          <h1>{t(fromPaperReading && paperReading ? "showcase.paperReadingTitle" : "layout.knowledgeBase")}</h1>
-          <p>{t(fromPaperReading && paperReading ? "showcase.paperReadingDescription" : "knowledge.pageDescription")}</p>
+          <h1>{t(activeView === "square" ? "knowledge.knowledgeSquare" : fromPaperReading && paperReading ? "showcase.paperReadingTitle" : "layout.knowledgeBase")}</h1>
+          <p>{t(activeView === "square" ? "knowledge.knowledgeSquareDescription" : fromPaperReading && paperReading ? "showcase.paperReadingDescription" : "knowledge.pageDescription")}</p>
         </div>
-        {activeView === "square" ? (
-          <div className="knowledge-page-header-actions">
-            {backgroundTasksButton}
-          </div>
-        ) : null}
+        {!fromPaperReading && <Button className="knowledge-square-entry" icon={activeView === "square" ? <ArrowLeftOutlined /> : <ArrowUpOutlined rotate={45} />} iconPosition={activeView === "square" ? "start" : "end"}
+          onClick={() => { setMineFilterOpen(false); updateListState({ view: activeView === "square" ? "mine" : "square" }); }}>
+          {t(activeView === "square" ? "knowledge.backToLibrary" : "knowledge.knowledgeSquare")}
+        </Button>}
+
       </div>
 
       {showEmbeddingNotice ? (
@@ -1965,37 +1966,10 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
       ) : null}
 
       <DatasetDeletionProgressList deletions={deletions} onDismiss={dismissDeletion} />
-      {!fromPaperReading ? <div className="knowledge-view-tabs" role="tablist" aria-label={t("knowledge.viewTabs")}>
-        <button
-          type="button"
-          role="tab"
-          className={activeView === "mine" ? "is-active" : ""}
-          aria-selected={activeView === "mine"}
-          onClick={() => {
-            setMineFilterOpen(false);
-            updateListState({ view: "mine" });
-          }}
-        >
-          <span className="knowledge-view-tab-icon"><DatabaseOutlined /></span>
-          <span><strong>{t("knowledge.myKnowledge")}</strong><small>{t("knowledge.myKnowledgeDescription")}</small></span>
-        </button>
-        <button
-          type="button"
-          role="tab"
-          className={activeView === "square" ? "is-active" : ""}
-          aria-selected={activeView === "square"}
-          onClick={() => {
-            setMineFilterOpen(false);
-            updateListState({ view: "square" });
-          }}
-        >
-          <span className="knowledge-view-tab-icon"><AppstoreOutlined /></span>
-          <span><strong>{t("knowledge.knowledgeSquare")}</strong><small>{t("knowledge.knowledgeSquareDescription")}</small></span>
-        </button>
-      </div> : null}
 
       {activeView === "square" ? (
         <>
+        <div className="knowledge-square-actions">{backgroundTasksButton}</div>
         {officialError ? <Alert type="error" showIcon message={t("admin.memoryResourceLocalLoadFailed")} action={<Button onClick={() => void loadKnowledgeMarket(true)}>{t("common.retry")}</Button>} /> : null}
         {cloudCatalogError ? <Alert type="error" showIcon message={t("admin.memoryCloudLoadFailed")} action={<Button onClick={() => void loadCloudCatalog()}>{t("common.retry")}</Button>} /> : null}
         {cloudCatalogLoading ? <div role="status">{t("admin.memoryCloudLoading")}</div> : null}
@@ -2047,7 +2021,8 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
                 </button>
               ))}
             </div> : <strong>{t(paperReading ? "showcase.choosePaperLibrary" : "chat.selectKnowledgeBase")}</strong>}
-            <div className="knowledge-source-actions">
+            <div className="knowledge-source-actions" role="group" aria-label={t("knowledge.libraryActions")}>
+              <TextIndexManager />
               {backgroundTasksButton}
               {createKnowledgeButton}
             </div>
@@ -2132,7 +2107,7 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
               action={<Button onClick={() => void loadKnowledgeMarket(true)}>{t("common.retry")}</Button>} />
           ) : null}
           <ListPageTable
-            rootClassName={`knowledge-mine-table ${isCloudArchiveView ? "data-source-asset-table" : ""}`}
+            rootClassName={`knowledge-mine-table ${isCloudArchiveView ? "data-source-asset-table" : ""} ${!(isCloudArchiveView ? cloudSources : isOfficialView ? installedOfficialItems : dataSource).length ? "is-empty" : ""}`}
             rowKey={isCloudArchiveView || isOfficialView ? "id" : "dataset_id"}
             columns={
               (isCloudArchiveView
@@ -2142,7 +2117,18 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
                   : columns) as ColumnsType<any>
             }
             loading={isOfficialView ? officialLoading || officialSortLoading : loading}
-            locale={paperReading ? { emptyText: t(mineSearch.trim() || mineLocalTag !== ALL_TAGS ? "showcase.noMatchingPaperLibraries" : "showcase.noPaperLibraries") } : undefined}
+            locale={{ emptyText: paperReading
+              ? t(mineSearch.trim() || mineLocalTag !== ALL_TAGS ? "showcase.noMatchingPaperLibraries" : "showcase.noPaperLibraries")
+              : <div className="knowledge-library-empty">
+                  <span className="knowledge-library-empty-icon" aria-hidden>{isOfficialView ? <AppstoreOutlined /> : isCloudArchiveView ? <CloudOutlined /> : <DatabaseOutlined />}</span>
+                  <h2>{t(mineSearch.trim() ? "knowledge.emptySearchTitle" : isOfficialView ? "knowledge.emptyOfficialTitle" : isCloudArchiveView ? "knowledge.emptyCloudTitle" : "knowledge.emptyLocalTitle")}</h2>
+                  <p>{t(isOfficialView ? "knowledge.emptyOfficialDescription" : isCloudArchiveView ? "knowledge.emptyCloudDescription" : "knowledge.emptyLocalDescription")}</p>
+                  <Button type="primary" icon={isOfficialView ? <ArrowUpOutlined rotate={45} /> : <PlusOutlined />} disabled={!isOfficialView && createActionDisabled}
+                    onClick={() => {
+                      if (isOfficialView) updateListState({ view: "square" });
+                      else createKnowledgeRef.current?.onOpen(isCloudArchiveView ? "cloud" : "direct");
+                    }}>{t(isOfficialView ? "knowledge.openKnowledgeSquare" : isCloudArchiveView ? "knowledge.addCloudSync" : "knowledge.createKnowledgeBase")}</Button>
+                </div> }}
             dataSource={
               isCloudArchiveView
                 ? cloudSources
@@ -2172,7 +2158,7 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
                 }
               },
             })}
-            scroll={{ x: isCloudArchiveView ? 1240 : isOfficialView ? 1080 : 960 }}
+            scroll={(isCloudArchiveView ? cloudSources : isOfficialView ? installedOfficialItems : dataSource).length ? { x: isCloudArchiveView ? 1240 : isOfficialView ? 1080 : 960 } : undefined}
           />
         </div>
       )}

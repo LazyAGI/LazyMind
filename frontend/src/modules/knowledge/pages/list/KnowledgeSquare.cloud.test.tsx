@@ -32,7 +32,7 @@ const cloudItem = { catalog_key: "same-key", name: "云端知识", category: "in
 const envelope = (data: unknown) => ({ data: { data } });
 async function mount() {
   await act(async () => { render(<ConfigProvider button={{ autoInsertSpace: false }} theme={{ token: { motion: false } }}><MemoryRouter initialEntries={["/lib/knowledge/list"]}><KnowledgePage /></MemoryRouter></ConfigProvider>); });
-  fireEvent.click(screen.getByRole("tab", { name: /知识广场/ }));
+  fireEvent.click(screen.getByRole("button", { name: /知识广场/ }));
 }
 const cloudRequests = () => mocks.get.mock.calls.filter(([url]) => String(url).includes("/cloud/knowledge-market"));
 

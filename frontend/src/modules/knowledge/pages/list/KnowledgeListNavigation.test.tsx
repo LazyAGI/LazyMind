@@ -5,7 +5,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vite
 import { deferred, desktopTestTranslation as t, installDesktopTestDOM } from "@/test/desktopResourceFixtures";
 
 const mocks = vi.hoisted(() => ({
-  list: vi.fn(), catalog: vi.fn(), scan: vi.fn(), cloudCreate: vi.fn(), scenes: vi.fn(), remove: vi.fn(), get: vi.fn(),
+  openCreate: vi.fn(), list: vi.fn(), catalog: vi.fn(), scan: vi.fn(), cloudCreate: vi.fn(), scenes: vi.fn(), remove: vi.fn(), get: vi.fn(),
   post: vi.fn(), put: vi.fn(), patch: vi.fn(), delete: vi.fn(), features: vi.fn(), imageEmbedRequired: false, role: "user",
 }));
 vi.mock("@/modules/learning/api", () => ({ getLearningCatalog: mocks.scenes }));
@@ -23,7 +23,10 @@ vi.mock("@/modules/knowledge/components/SyncKnowledgeBaseCreationFlow", () => ({
   useSyncKnowledgeBaseCreation: () => ({ cloudConnectionLoading: false, handleCreateFromCloudDocuments: mocks.cloudCreate }),
 }));
 vi.mock("@/modules/knowledge/components/UpdateModal", async () => ({ default: (await import("react")).forwardRef(() => null) }));
-vi.mock("@/modules/knowledge/components/CreateKnowledgeBaseModal", async () => ({ default: (await import("react")).forwardRef(() => null) }));
+vi.mock("@/modules/knowledge/components/CreateKnowledgeBaseModal", async () => {
+  const React = await import("react");
+  return { default: React.forwardRef((_props, ref) => { React.useImperativeHandle(ref, () => ({ onOpen: mocks.openCreate, onClose: vi.fn() })); return null; }) };
+});
 vi.mock("@/modules/knowledge/components/KnowledgeTag", () => ({ default: () => null }));
 vi.mock("@/modules/knowledge/components/KnowledgeBaseSyncNow", () => ({ default: () => null }));
 vi.mock("@/components/auth", () => ({ AgentAppsAuth: { getUserInfo: () => ({ role: mocks.role }) } }));
@@ -593,7 +596,7 @@ describe("knowledge list URL and data restoration", () => {
     expect(router.state.location.pathname).toBe("/lib/knowledge/detail/official-id");
     expect(router.state.location.state.knowledgeListOrigin.url).toContain("source=official");
     await act(async () => { await router.navigate(-1); });
-    expect(await screen.findByRole("tab", { name: "已安装的官方知识库" })).toHaveAttribute("aria-selected", "true");
+    expect(await screen.findByRole("tab", { name: "已安装的官方资料库" })).toHaveAttribute("aria-selected", "true");
     expect(screen.getByDisplayValue("手册")).toBeVisible();
     expect(new URLSearchParams(router.state.location.search).get("officialTag")).toBe("团队");
     expect(mocks.list.mock.calls.some(([params, options]) => params.orderBy === "most_used" && options.params.source === "official_installed")).toBe(true);
@@ -731,4 +734,34 @@ it("reports cleanup acceptance after confirming a knowledge base deletion", asyn
   expect(screen.getByText(t("knowledge.cleanupProgress", { completed: 2, total: 5 }))).toBeVisible();
   expect(success).not.toHaveBeenCalledWith(t("knowledge.deleteSuccess"));
   success.mockRestore(); info.mockRestore(); localStorage.clear();
+});
+
+
+describe("library navigation and empty state actions", () => {
+  it("uses three source tabs and places all management actions together", async () => {
+    await mount("");
+    const tabs = within(screen.getByRole("tablist", { name: t("knowledge.sourceCategory") })).getAllByRole("tab");
+    expect(tabs.map(tab => tab.textContent)).toEqual(["本地上传", "云文档同步", "已安装的官方资料库"]);
+    expect(screen.getAllByRole("tablist")).toHaveLength(1);
+    const actions = within(screen.getByRole("group", { name: "资料库操作" }));
+    expect(actions.getByRole("button", { name: /索引管理/ })).toBeInTheDocument();
+    expect(actions.getByRole("button", { name: /后台任务/ })).toBeInTheDocument();
+    expect(actions.getByRole("button", { name: /创建资料库/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /知识广场/ })).toBeInTheDocument();
+  });
+  it.each([["local", "开始整理你的资料", "创建资料库", "direct"], ["cloudArchive", "连接你的云端文档", "添加云文档同步", "cloud"]])("opens the correct add flow for empty %s", async (source, title, action, tab) => {
+    mocks.list.mockResolvedValue({ data: { datasets: [], total_size: 0 } });
+    await mount(`?source=${source}`);
+    const heading = await screen.findByRole("heading", { name: title });
+    fireEvent.click(within(heading.parentElement!).getByRole("button", { name: new RegExp(action) }));
+    expect(mocks.openCreate).toHaveBeenCalledWith(tab);
+  });
+  it("opens the full square from an empty installed library and returns to that category", async () => {
+    mocks.catalog.mockResolvedValue([]);
+    const router = await mount("?source=official");
+    fireEvent.click(await screen.findByRole("button", { name: /前往知识广场/ }));
+    await waitFor(() => expect(router.state.location.search).toContain("view=square"));
+    fireEvent.click(screen.getByRole("button", { name: /返回资料库/ }));
+    expect(screen.getByRole("tab", { name: "已安装的官方资料库" })).toHaveAttribute("aria-selected", "true");
+  });
 });

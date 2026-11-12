@@ -223,7 +223,7 @@ describe("knowledge market background tasks", () => {
       }] : [],
     });
     await mountPage();
-    await click(screen.getByRole("tab", { name: "已安装的官方知识库" }));
+    await click(screen.getByRole("tab", { name: "已安装的官方资料库" }));
     const button = screen.getByRole("button", { name: "一键更新", exact: true });
     expect(button).toBeDisabled();
     await click(button);
@@ -232,7 +232,7 @@ describe("knowledge market background tasks", () => {
 
   it("enables update all with the available count and disables it while the batch runs", async () => {
     await mountPage();
-    await click(screen.getByRole("tab", { name: "已安装的官方知识库" }));
+    await click(screen.getByRole("tab", { name: "已安装的官方资料库" }));
     const button = screen.getByRole("button", { name: "一键更新 (1)" });
     expect(button).toBeEnabled();
     await click(button);
@@ -243,7 +243,7 @@ describe("knowledge market background tasks", () => {
 
   it("announces the batch count and only announces completion when an individual update finishes", async () => {
     await mountPage();
-    await click(screen.getByRole("tab", { name: "已安装的官方知识库" }));
+    await click(screen.getByRole("tab", { name: "已安装的官方资料库" }));
     await click(screen.getByRole("button", { name: "一键更新 (1)" }));
     expect(screen.getByText("已加入后台任务")).toBeInTheDocument();
     expect(screen.getByText("1 个知识库将在后台继续更新，你可以继续操作当前页面。")).toBeInTheDocument();
@@ -265,7 +265,7 @@ describe("knowledge market background tasks", () => {
 
   it("opens background task details if a completed update has no dataset ID", async () => {
     await mountPage();
-    await click(screen.getByRole("tab", { name: /知识广场/ }));
+    await click(screen.getByRole("button", { name: /知识广场/ }));
     await click(screen.getByRole("button", { name: "检查更新" }));
     expect(screen.getByText("已加入后台任务")).toBeInTheDocument();
     jobs.set("update", task("update", {
@@ -279,7 +279,7 @@ describe("knowledge market background tasks", () => {
 
   it.each([false, true])("dismisses the submitted notice after five seconds while the task continues (hover: %s)", async (hover) => {
     await mountPage();
-    await click(screen.getByRole("tab", { name: /知识广场/ }));
+    await click(screen.getByRole("button", { name: /知识广场/ }));
     await click(screen.getByRole("button", { name: "安装" }));
     if (hover) {
       fireEvent.mouseEnter(screen.getByRole("status"));
@@ -296,7 +296,7 @@ describe("knowledge market background tasks", () => {
 
   it("expires a completion notice created while an earlier notice is hovered", async () => {
     await mountPage();
-    await click(screen.getByRole("tab", { name: /知识广场/ }));
+    await click(screen.getByRole("button", { name: /知识广场/ }));
     await click(screen.getByRole("button", { name: "安装" }));
     fireEvent.mouseEnter(screen.getByRole("status"));
     jobs.set("install", task("install", { job_status: "succeeded", stage: "done", overall_percent: 100 }));
@@ -319,7 +319,7 @@ describe("knowledge market background tasks", () => {
       domain: "测试", icon: "", install_state: "failed", installed_version: "1", updated_at: "2026-09-01",
     }] });
     await mountPage();
-    await click(screen.getByRole("tab", { name: "已安装的官方知识库" }));
+    await click(screen.getByRole("tab", { name: "已安装的官方资料库" }));
     expect(tableRows).toHaveBeenLastCalledWith(expect.arrayContaining([expect.objectContaining({ id: "update", datasetId: "dataset", installState: "failed" })]));
   });
   it("keeps completed history and deletes only the selected record", async () => {
@@ -370,7 +370,7 @@ describe("knowledge market background tasks", () => {
 
   it('shows how many installed knowledge bases have updates', async () => {
     await mountPage();
-    await click(screen.getByRole('tab', { name: '已安装的官方知识库' }));
+    await click(screen.getByRole('tab', { name: '已安装的官方资料库' }));
     expect(screen.getByRole('button', { name: '一键更新 (1)' })).toBeInTheDocument();
   });
   it.each([
@@ -378,7 +378,7 @@ describe("knowledge market background tasks", () => {
     ["update", "检查更新", "更新中"],
   ])("labels a submitted %s task in its card and detail", async (id, action, label) => {
     await mountPage();
-    await click(screen.getByRole("tab", { name: /知识广场/ }));
+    await click(screen.getByRole("button", { name: /知识广场/ }));
     const card = screen.getByRole("button", { name: `查看知识库 ${id}详情` });
     mockActiveInstall(id);
     await click(within(card).getByRole("button", { name: action }));
@@ -401,7 +401,7 @@ describe("knowledge market background tasks", () => {
       job_type: "knowledge_market_update", job_status: "succeeded",
     }));
     await mountPage();
-    await click(screen.getByRole("tab", { name: /知识广场/ }));
+    await click(screen.getByRole("button", { name: /知识广场/ }));
     const card = screen.getByRole("button", { name: "查看知识库 update详情" });
     expect(within(card).getByRole("button", { name: /更新中$/ })).toBeDisabled();
   });
@@ -409,7 +409,7 @@ describe("knowledge market background tasks", () => {
   it("uses a neutral processing label when the active task type is unavailable", async () => {
     mockActiveInstall("update");
     await mountPage();
-    await click(screen.getByRole("tab", { name: /知识广场/ }));
+    await click(screen.getByRole("button", { name: /知识广场/ }));
     const card = screen.getByRole("button", { name: "查看知识库 update详情" });
     expect(within(card).getByRole("button", { name: /处理中$/ })).toBeDisabled();
   });
@@ -417,7 +417,7 @@ describe("knowledge market background tasks", () => {
   it("tracks install and update counts, shows task details, and announces completion at bottom right", async () => {
     await mountPage();
     expect(taskEntry(0).querySelector(".ant-badge-count")).toBeNull();
-    await click(screen.getByRole("tab", { name: /知识广场/ }));
+    await click(screen.getByRole("button", { name: /知识广场/ }));
     await click(screen.getByRole("button", { name: "安装" }));
     expect(taskEntry(1).querySelector(".ant-badge")).toHaveTextContent("1");
     expect(screen.getByText("已加入后台任务").closest(".ant-notification-bottomRight")).not.toBeNull();
@@ -474,7 +474,7 @@ describe("knowledge market background tasks", () => {
 
   it("counts a batch update and removes failed tasks without a success notification", async () => {
     await mountPage();
-    await click(screen.getByRole("tab", { name: "已安装的官方知识库" }));
+    await click(screen.getByRole("tab", { name: "已安装的官方资料库" }));
     await click(screen.getByRole("button", { name: /一键更新/ }));
     expect(taskEntry(1)).toBeInTheDocument();
     expect(screen.getByText("已加入后台任务")).toBeInTheDocument();
@@ -503,7 +503,7 @@ describe("knowledge market background tasks", () => {
 
   it("keeps counting updates spawned by a completed batch check", async () => {
     await mountPage();
-    await click(screen.getByRole("tab", { name: "已安装的官方知识库" }));
+    await click(screen.getByRole("tab", { name: "已安装的官方资料库" }));
     await click(screen.getByRole("button", { name: /一键更新/ }));
     jobs.set("batch", task("batch", {
       market_item_id: "", job_type: "knowledge_market_update_all", job_status: "succeeded", display_state: "done",
@@ -523,7 +523,7 @@ describe("knowledge market background tasks", () => {
   it("does not add a task or show a submitted notification when submission fails", async () => {
     vi.mocked(marketApi.installKnowledgeMarketItem).mockRejectedValueOnce(new Error("failed"));
     await mountPage();
-    await click(screen.getByRole("tab", { name: /知识广场/ }));
+    await click(screen.getByRole("button", { name: /知识广场/ }));
     await click(screen.getByRole("button", { name: "安装" }));
     expect(taskEntry(0)).toBeInTheDocument();
     expect(screen.queryByText("已加入后台任务")).toBeNull();
