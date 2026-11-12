@@ -6,7 +6,7 @@ import path from "node:path";
 import test from "node:test";
 import vm from "node:vm";
 
-const source = fs.readFileSync(new URL("../electron/src/main.js", import.meta.url), "utf8");
+const source = fs.readFileSync(new URL("../electron/src/main.js", import.meta.url), "utf8").replace(/\r\n/g, "\n");
 function declaration(name, next) {
   const definition = source.indexOf(`function ${name}`);
   assert.ok(definition >= 0);
