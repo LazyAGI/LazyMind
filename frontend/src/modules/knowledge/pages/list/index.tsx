@@ -64,6 +64,7 @@ import {
 } from "@/api/generated/knowledge-client";
 import type { Dataset as CoreDataset, EmbeddingIndexStatusResponse } from "@/api/generated/core-client";
 type Dataset = LegacyDataset & Pick<CoreDataset, "paper_count" | "pdf_attachment_count">;
+import KnowledgeLibraryLogo from "@/modules/knowledge/components/KnowledgeLibraryLogo";
 import TextIndexManager from "@/modules/knowledge/components/TextIndexManager";
 import FileUtils from "@/modules/knowledge/utils/file";
 import {
@@ -1443,7 +1444,7 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
       render: (name: string, data: Dataset) => {
         return (
           <div className="knowledge-list-name-cell">
-            <span className="knowledge-list-name-icon"><DatabaseOutlined /></span>
+            <KnowledgeLibraryLogo scene={data.scene} />
             <span className="knowledge-list-name-copy">
               <Button
                 className="knowledge-list-name-button"
@@ -1535,7 +1536,7 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
         dataIndex: "name",
         render: (name, item) => (
           <div className="knowledge-list-name-cell">
-            <span className="knowledge-list-name-icon is-official"><AppstoreOutlined /></span>
+            <KnowledgeLibraryLogo scene={`official_${item.type}`} />
             <span className="knowledge-list-name-copy">
               <Button
                 className="knowledge-list-name-button"

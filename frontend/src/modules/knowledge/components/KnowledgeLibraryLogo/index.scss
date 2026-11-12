@@ -1,0 +1,21 @@
+.knowledge-library-logo {
+  display: inline-flex;
+  flex: 0 0 36px;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 9px;
+  font-size: 19px;
+  vertical-align: middle;
+  &.tone-blue { color: #175cd3; background: #eff6ff; }
+  &.tone-indigo { color: #4f46a5; background: #f0efff; }
+  &.tone-green { color: #267048; background: #edf7f0; }
+  &.tone-brown { color: #8a4b32; background: #fbf0e9; }
+  &.tone-teal { color: #13756c; background: #eaf7f5; }
+  &.tone-navy { color: #345775; background: #edf2f7; }
+  &.tone-cyan { color: #146b86; background: #eaf5fa; }
+  &.tone-amber { color: #8b631b; background: #fcf5e7; }
+  &.tone-gray { color: #596273; background: #f0f2f5; }
+  &.is-compact { width: 28px; height: 28px; flex-basis: 28px; font-size: 16px; margin-right: 8px; }
+}

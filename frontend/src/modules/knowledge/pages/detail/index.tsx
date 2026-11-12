@@ -1,3 +1,4 @@
+import KnowledgeLibraryLogo from "@/modules/knowledge/components/KnowledgeLibraryLogo";
 import type { PaperUploadContext } from "../../api/academicReferences";
 import {
   Alert,
@@ -470,7 +471,7 @@ const Detail = () => {
         className="knowledge-detail-header"
         title={
           <span className="knowledge-detail-title-copy">
-            <strong>{detail?.display_name}</strong>
+            <strong><KnowledgeLibraryLogo scene={detail?.scene} compact />{detail?.display_name}</strong>
             {detail?.desc ? <small>{detail.desc}</small> : null}
           </span>
         }
