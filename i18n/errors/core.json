@@ -2150,5 +2150,12 @@
   "2005314": {"en-US": "This collection does not support vocabulary review", "zh-CN": "此学习集合不支持生词复习"},
   "2005315": {"en-US": "This review session uses legacy Anki data; start a new local review", "zh-CN": "此复习会话使用旧版 Anki 数据，请开始新的本地复习"},
   "2005316": {"en-US": "Anki sync is unavailable on this deployment; local vocabulary remains available", "zh-CN": "当前部署未开放 Anki 同步，本地生词本仍可正常使用"},
-  "2005317": {"en-US": "Anki sync is disabled; enable it in external application settings", "zh-CN": "Anki 同步尚未启用，请在外部应用设置中开启"}
+  "2005317": {"en-US": "Anki sync is disabled; enable it in external application settings", "zh-CN": "Anki 同步尚未启用，请在外部应用设置中开启"},
+  "2004974": {"en-US": "Select documents instead of folders for indexing", "zh-CN": "请选择文档建立索引，不能选择文件夹"},
+  "2004975": {"en-US": "Document processing status is temporarily unavailable; refresh and retry", "zh-CN": "文档处理状态暂时不可用，请刷新后重试"},
+  "2004976": {"en-US": "Unable to verify index freshness; retry later", "zh-CN": "暂时无法确认索引是否有效，请稍后重试"},
+  "2004977": {"en-US": "MinerU certificate hostname mismatch; check the endpoint, DNS or proxy certificate", "zh-CN": "MinerU 证书域名不匹配，请检查服务地址、DNS 或代理证书"},
+  "2004978": {"en-US": "MinerU certificate verification failed; check the certificate trust chain", "zh-CN": "MinerU 证书校验失败，请检查证书信任链"},
+  "2004979": {"en-US": "MinerU request timed out; check connectivity and retry", "zh-CN": "MinerU 请求超时，请检查网络连接后重试"},
+  "2004980": {"en-US": "MinerU connection failed; check DNS, proxy and service connectivity", "zh-CN": "MinerU 连接失败，请检查 DNS、代理和服务连接"}
 }

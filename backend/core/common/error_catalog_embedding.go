@@ -38,3 +38,18 @@ func init() {
 	registerAdditionalErrorAlias("rag component is required for indexing", "Enable the RAG component before indexing", http.StatusConflict, 2004972)
 	registerAdditionalErrorAlias("document not found or duplicate selection", "A selected document is missing or selected more than once", http.StatusBadRequest, 2004973)
 }
+
+func init() {
+	registerAdditionalErrorAlias("account identity unavailable", "forbidden", http.StatusForbidden, ErrCodeForbidden)
+	registerAdditionalErrorAlias("query libraries failed", "Failed to query datasets", http.StatusInternalServerError, 2000522)
+	registerAdditionalErrorAlias("query processing tasks failed", "Failed to query tasks", http.StatusInternalServerError, 2000505)
+	registerAdditionalErrorAlias("query legacy document types failed", "Failed to read document processing details", http.StatusInternalServerError, 2004970)
+	registerAdditionalErrorAlias("folder cannot be indexed", "Select documents instead of folders for indexing", http.StatusBadRequest, 2004974)
+	registerAdditionalErrorAlias("processing status temporarily unavailable", "Document processing status is temporarily unavailable; refresh and retry", http.StatusServiceUnavailable, 2004975)
+	registerAdditionalErrorAlias("index freshness could not be checked", "Unable to verify index freshness; retry later", http.StatusServiceUnavailable, 2004976)
+	registerAdditionalErrorAlias("向量索引需要本地知识库组件，请前往设置中的系统工具安装并启用。原文件和解析结果不受影响。", "Enable the RAG component before indexing", http.StatusConflict, 2004972)
+	registerAdditionalErrorAlias("mineru tls certificate hostname mismatch; check the endpoint, dns or proxy certificate", "MinerU certificate hostname mismatch; check the endpoint, DNS or proxy certificate", http.StatusBadGateway, 2004977)
+	registerAdditionalErrorAlias("mineru tls certificate verification failed; check the certificate trust chain", "MinerU certificate verification failed; check the certificate trust chain", http.StatusBadGateway, 2004978)
+	registerAdditionalErrorAlias("mineru request timed out; retry when the service is reachable", "MinerU request timed out; check connectivity and retry", http.StatusGatewayTimeout, 2004979)
+	registerAdditionalErrorAlias("mineru network connection failed; check dns, proxy and service connectivity", "MinerU connection failed; check DNS, proxy and service connectivity", http.StatusBadGateway, 2004980)
+}
