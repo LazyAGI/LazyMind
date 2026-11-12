@@ -65,6 +65,8 @@ def _worker_with_processor(monkeypatch, processor):
     from lazymind.config import config
 
     monkeypatch.setitem(config._impl, 'database_url', 'sqlite:///:memory:')
+    from lazymind.parsing.service import embedding_reset
+    monkeypatch.setattr(embedding_reset, 'index_state', lambda: {'generation': 0, 'phase': 'ready'})
     worker = importlib.import_module('lazymind.processor.service.worker')
     base_impl = worker.DocumentProcessorWorker._Impl.__mro__[1]
     monkeypatch.setattr(base_impl, '_get_processor', lambda _self: processor)

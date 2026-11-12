@@ -162,9 +162,6 @@ func updateKnowledgeConfiguration(ctx context.Context, tx *gorm.DB, user string,
 		if err != nil {
 			return err
 		}
-		if len(tags) == 0 {
-			return resourceErr("INVALID_ARGUMENT", "at least one knowledge base tag is required")
-		}
 		before["tags"], after["tags"], ext["tags"] = parseDatasetTags(ds.Ext), tags, tags
 		extChanged = true
 	}

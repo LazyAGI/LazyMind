@@ -29,6 +29,8 @@ from lazymind.common.database.sqlite_proxy import install_lazyllm_sqlite_proxy
 
 install_lazyllm_sqlite_proxy()
 install_opensearch_compat()
+from lazymind.parsing.service.embedding_input_compat import install as install_embedding_input_compat
+install_embedding_input_compat()
 
 ALGO_ID = 'general_algo'
 _CODE_CHUNK_SIZE = 512

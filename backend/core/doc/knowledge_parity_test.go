@@ -183,3 +183,24 @@ func TestPageAndResourceUpdatesPreserveUnsubmittedKnowledgeConfiguration(t *test
 		t.Fatalf("resource command discarded configuration: %+v %s", saved, saved.Ext)
 	}
 }
+
+func TestPageUpdateCanClearAllKnowledgeTags(t *testing.T) {
+	_, db, op := resourceFixture(t)
+	if err := db.Model(&orm.Dataset{}).Where("id = ?", "source").Update("ext", json.RawMessage(`{"tags":["old"]}`)).Error; err != nil {
+		t.Fatal(err)
+	}
+	req := mux.SetURLVars(httptest.NewRequest("POST", "/datasets/source", bytes.NewBufferString(`{"tags":[]}`)), map[string]string{"dataset": "source"})
+	req.Header.Set("X-User-Id", op.Caller.UserID)
+	rec := httptest.NewRecorder()
+	UpdateDataset(rec, req)
+	if rec.Code != 200 {
+		t.Fatal(rec.Code, rec.Body.String())
+	}
+	var saved orm.Dataset
+	if err := db.Where("id = ?", "source").Take(&saved).Error; err != nil {
+		t.Fatal(err)
+	}
+	if len(parseDatasetTags(saved.Ext)) != 0 {
+		t.Fatal("tags were not cleared")
+	}
+}

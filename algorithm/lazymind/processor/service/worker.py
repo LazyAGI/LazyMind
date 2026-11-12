@@ -7,10 +7,12 @@ import lazyllm
 from lazymind.parsing.service.opensearch_compat import install as install_opensearch_compat
 from lazymind.model_config import inject_model_config
 install_opensearch_compat()
+from lazymind.parsing.service.embedding_input_compat import install as install_embedding_input_compat
+install_embedding_input_compat()
 lazyllm.inject_model_config = inject_model_config
 
 from lazyllm.tools.rag.parsing_service import DocumentProcessorWorker  # noqa: E402
-from lazyllm.tools.rag.doc_node import ImageDocNode  # noqa: E402
+from lazyllm.tools.rag.doc_node import ImageDocNode, MetadataMode  # noqa: E402
 from lazyllm.tools.rag.store import LAZY_IMAGE_GROUP, LAZY_ROOT_NAME  # noqa: E402
 from lazymind.config import config as _cfg  # noqa: E402
 from lazymind.processor.service.db import require_shared_db_config  # noqa: E402
@@ -73,8 +75,10 @@ def _rebuild_empty_text_documents(processor, payload, node_groups, reader):
         doc_id = info.get('doc_id')
         if not doc_id:
             raise RuntimeError('text vector rebuild requires a document ID')
-        if any(processor._store.get_nodes(group=group, doc_ids=[doc_id], kb_id=kb_id)
-               for group in _TEXT_REEMBED_GROUPS if group in node_groups):
+        if any(node.get_text(MetadataMode.EMBED).strip()
+               for group in _TEXT_REEMBED_GROUPS if group in node_groups
+               for node in processor._store.get_nodes(group=group, doc_ids=[doc_id], kb_id=kb_id)
+               if not node.is_null_node):
             continue
         roots = processor._store.get_nodes(group=LAZY_ROOT_NAME, doc_ids=[doc_id], kb_id=kb_id)
         if not roots:
@@ -107,8 +111,10 @@ def _rebuild_empty_text_documents(processor, payload, node_groups, reader):
                     group_name=group, node_groups=node_groups, doc_ids=[doc_id], kb_id=kb_id,
                     processing_level='chunked', strategy='slice_missing',
                 )
-        if not any(processor._store.get_nodes(group=group, doc_ids=[doc_id], kb_id=kb_id)
-                   for group in _TEXT_REEMBED_GROUPS if group in node_groups):
+        if not any(node.get_text(MetadataMode.EMBED).strip()
+                   for group in _TEXT_REEMBED_GROUPS if group in node_groups
+                   for node in processor._store.get_nodes(group=group, doc_ids=[doc_id], kb_id=kb_id)
+                   if not node.is_null_node):
             raise RuntimeError(f'document {doc_id!r} produced no text nodes; manual rebuild is required')
 
 
@@ -125,6 +131,8 @@ if not getattr(DocumentProcessorWorker._Impl, '_lazymind_isolated', False):
             # ServerModule can reconstruct this class in a fresh subprocess.
             # Install there as well, before any retained segment is written.
             install_opensearch_compat()
+            from lazymind.parsing.service.embedding_input_compat import install
+            install()
             from lazymind.parsing.service.embedding_reset import index_state, IndexBusy
             state = index_state()
             expected = getattr(self, '_lazymind_task_generation', None)

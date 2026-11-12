@@ -3,10 +3,12 @@ package pdfir
 import (
 	"bytes"
 	"context"
+	"crypto/x509"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -89,7 +91,7 @@ func (c Client) request(ctx context.Context, method, target string, body io.Read
 	safe.CheckRedirect = func(_ *http.Request, _ []*http.Request) error { return http.ErrUseLastResponse }
 	res, e := safe.Do(req)
 	if e != nil {
-		return nil, errors.New("MinerU request failed")
+		return nil, mineruTransportError(e)
 	}
 	defer res.Body.Close()
 	if res.StatusCode < 200 || res.StatusCode >= 300 {
@@ -173,5 +175,25 @@ func (c Client) Parse(ctx context.Context, p string) ([]byte, error) {
 			return nil, ctx.Err()
 		case <-timer.C:
 		}
+	}
+}
+
+// Do not expose signed artifact URLs or credentials from url.Error.
+func mineruTransportError(err error) error {
+	var hostname x509.HostnameError
+	var authority x509.UnknownAuthorityError
+	var invalid x509.CertificateInvalidError
+	var network net.Error
+	switch {
+	case errors.As(err, &hostname):
+		return errors.New("MinerU TLS certificate hostname mismatch; check the endpoint, DNS or proxy certificate")
+	case errors.As(err, &authority), errors.As(err, &invalid):
+		return errors.New("MinerU TLS certificate verification failed; check the certificate trust chain")
+	case errors.Is(err, context.Canceled):
+		return context.Canceled
+	case errors.As(err, &network) && network.Timeout():
+		return errors.New("MinerU request timed out; retry when the service is reachable")
+	default:
+		return errors.New("MinerU network connection failed; check DNS, proxy and service connectivity")
 	}
 }
