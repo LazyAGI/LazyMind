@@ -1714,7 +1714,7 @@ const enUS = {
     embeddingOfflineMaintenance: "Open Index management in Knowledge bases or Default models and clear text vectors before removing the model, or select a replacement model and confirm cleanup and switching. Originals, parsed content and chunks are retained.",
 	confirmDeleteEmbeddingDesc: "Removing the active embedding model requires clearing old text vectors from every knowledge base. Source documents and chunks remain, and vector search pauses until the indexes are rebuilt.",
     deleteModelAria: "Delete {{name}}",
-    removeModelHint: "Delete model",
+    removeModelHint: "Remove model and clear its default selections; existing documents and indexes are retained",
     disableModelAria: "Disable {{name}}",
     disableModelHint: "Keep the configuration and allow enabling it again",
     enableModelAria: "Enable {{name}}",
@@ -1857,7 +1857,7 @@ const enUS = {
       modelAdded: "Model added",
       modelUpdated: "Model settings updated",
       maxInputTokensSaved: "Context length saved",
-      modelDeleted: "Model deleted",
+      modelDeleted: "Model removed and its default selections cleared",
     },
     autoSelection: {
       title: "Automatic model configuration",

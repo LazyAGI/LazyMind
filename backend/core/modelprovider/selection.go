@@ -849,6 +849,9 @@ func projectGlobalSelectedEmbedding(ctx context.Context, db *gorm.DB, userID str
 		filtered = append(filtered, item)
 	}
 	if choice.ModelID == "" {
+		if choice.Phase == "detached" {
+			return filtered, nil
+		}
 		reason := choice.indexState.ReadinessReason
 		if reason == "" {
 			reason = "model_unavailable"

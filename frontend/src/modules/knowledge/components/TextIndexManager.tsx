@@ -113,6 +113,7 @@ export default function TextIndexManager({ datasetId }: { datasetId?: string }) 
     <Modal title="文本向量索引管理" open={open} width={960} className="text-index-manager" footer={null}
       onCancel={() => { if (!busy) setOpen(false); }} destroyOnHidden>
       <p className="text-index-intro">管理用于语义检索的文档。上传和解析不依赖向量模型。</p>
+      {state?.index_identity === "legacy_unknown" && <Alert className="text-index-error" type="warning" showIcon message="旧向量索引待处理" description="模型已移除或旧索引身份尚未确认。原文件、解析正文和旧向量保留；选择新模型后，按提示清理旧向量并重新索引。" />}
       <section className="text-index-overview" aria-label="当前向量模型">
         <div className="text-index-model">
           <span className="text-index-model-icon" aria-hidden><DatabaseOutlined /></span>

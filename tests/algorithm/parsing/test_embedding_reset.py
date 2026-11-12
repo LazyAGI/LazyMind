@@ -192,19 +192,20 @@ def test_failed_store_cleanup_never_marks_documents_ready(reset_index):
             pytest.fail('partial cleanup allowed access')
 
 
-def test_worker_rejects_late_submission_using_queued_llm_config(monkeypatch):
+@pytest.mark.parametrize(('phase', 'generation'), [('ready', 7), ('detached', 8), ('detached', None)])
+def test_worker_rejects_late_submission_using_queued_llm_config(monkeypatch, phase, generation):
     monkeypatch.setitem(config._impl, 'database_url', 'sqlite:///:memory:')
     module = importlib.import_module('lazymind.processor.service.worker')
     monkeypatch.setattr(embedding_reset, 'index_lock', nullcontext)
-    monkeypatch.setattr(embedding_reset, 'index_state', lambda: {'generation': 8, 'phase': 'ready'})
+    monkeypatch.setattr(embedding_reset, 'index_state', lambda: {'generation': 8, 'phase': phase})
     base = module.DocumentProcessorWorker._Impl.__mro__[1]
     monkeypatch.setattr(base, '_run_task', lambda self, *args: self._get_processor())
     worker = object.__new__(module.DocumentProcessorWorker._Impl)
     with pytest.raises(embedding_reset.IndexBusy):
-        worker._run_task('old-task', 'doc_add', {'llm_config': {'_embedding_generation': 7}}, True)
+        worker._run_task('old-task', 'doc_add', {'llm_config': {'_embedding_generation': generation}}, True)
 
 
-@pytest.mark.parametrize('phase', ['cleared', 'cleanup_failed', 'clearing'])
+@pytest.mark.parametrize('phase', ['cleared', 'cleanup_failed', 'clearing', 'detached'])
 def test_parse_only_worker_does_not_require_vector_identity(monkeypatch, phase):
     monkeypatch.setitem(config._impl, 'database_url', 'sqlite:///:memory:')
     module = importlib.import_module('lazymind.processor.service.worker')
@@ -217,3 +218,12 @@ def test_parse_only_worker_does_not_require_vector_identity(monkeypatch, phase):
     monkeypatch.setattr(module, '_install_text_reembed_guard', lambda value: value)
     worker = object.__new__(module.DocumentProcessorWorker._Impl)
     assert worker._run_task('parse', 'doc_add', {'processing_level': 'parsed'}, True) is processor
+
+
+@pytest.mark.parametrize('expected', [None, 8, 7])
+def test_removed_model_blocks_index_operations_even_without_task_generation(monkeypatch, expected):
+    monkeypatch.setattr(embedding_reset, 'index_lock', nullcontext)
+    monkeypatch.setattr(embedding_reset, 'index_state', lambda: {'generation': 8, 'phase': 'detached'})
+    with pytest.raises(embedding_reset.IndexBusy):
+        with embedding_reset.index_operation(expected):
+            pytest.fail('removed model allowed vector access')

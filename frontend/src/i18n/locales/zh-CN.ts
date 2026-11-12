@@ -1693,7 +1693,7 @@ const zhCN = {
     embeddingOfflineMaintenance: "请打开知识库或默认模型页的“索引管理”，确认清除文本向量后再移除模型；也可以直接选择新模型并确认清理和切换。原文件、解析结果和切片会保留。",
 	confirmDeleteEmbeddingDesc: "移除正在使用的向量模型需要清理所有知识库的旧文本向量。原文和切片会保留，重新建立索引前向量检索暂不可用。",
     deleteModelAria: "删除 {{name}}",
-    removeModelHint: "删除模型",
+    removeModelHint: "移除模型，并清空引用它的默认项；已有资料和索引保留",
     disableModelAria: "禁用 {{name}}",
     disableModelHint: "禁用后保留配置，可重新启用",
     enableModelAria: "启用 {{name}}",
@@ -1825,7 +1825,7 @@ const zhCN = {
       modelAdded: "模型已添加",
       modelUpdated: "模型配置已更新",
       maxInputTokensSaved: "上下文长度已保存",
-      modelDeleted: "模型已删除",
+      modelDeleted: "模型已移除，引用它的默认项已清空",
     },
     autoSelection: {
       title: "模型自动配置结果",

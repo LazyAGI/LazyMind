@@ -104,6 +104,9 @@ func ResolveGlobalEmbeddingChoice(ctx context.Context, db *gorm.DB) (GlobalEmbed
 }
 
 func embeddingChoiceCompatibilityPhase(persistedPhase string, indexState embeddingIndexClassification) string {
+	if persistedPhase == "detached" {
+		return "detached"
+	}
 	switch indexState.ReadinessReason {
 	case "index_identity_unverified":
 		return "unverified"

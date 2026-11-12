@@ -11,7 +11,7 @@
   .text-index-model-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 8px; color: var(--color-text-secondary, #667085); font-size: 13px; }
   .text-index-model-actions { flex-shrink: 0; display: flex; flex-direction: column; gap: 10px; align-items: flex-end; color: var(--color-text-secondary, #667085); font-size: 13px; }
   .text-index-model-actions strong { color: var(--color-text, #101828); font-size: 20px; }
-  .text-index-error { margin-top: 16px; }
+  .text-index-error { margin: 16px 0; }
   .text-index-documents { margin-top: 24px; }
   .text-index-library-toolbar { display: flex; align-items: flex-end; gap: 16px; justify-content: space-between; margin-bottom: 16px; }
   .text-index-library-toolbar h3 { margin: 0; font-size: 15px; }

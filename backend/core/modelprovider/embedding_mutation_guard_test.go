@@ -421,7 +421,9 @@ func TestEmbeddingDeletionEndpointsReturnRecoveryData(t *testing.T) {
 		req = mux.SetURLVars(req, map[string]string{"model_provider_id": provider.ID, "group_id": group.ID, "model_id": model.ID})
 		rec := httptest.NewRecorder()
 		DeleteGroupModel(rec, req)
-		requireEmbeddingConflictResponse(t, rec, "active_index_owner")
+		if rec.Code != http.StatusOK {
+			t.Fatalf("single-model removal=%d %s", rec.Code, rec.Body.String())
+		}
 	})
 
 	t.Run("group delete", func(t *testing.T) {

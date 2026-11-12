@@ -291,7 +291,7 @@ func TestAddGroupModelRestoresSoftDeletedCustomModel(t *testing.T) {
 	}
 }
 
-func TestDeleteEmbeddingModelBlocksUntilIndexedKnowledgeRemoved(t *testing.T) {
+func TestDeleteEmbeddingModelPreservesIndexedKnowledge(t *testing.T) {
 	db := setupListProviderTestDB(t)
 	if err := db.AutoMigrate(&orm.UserSelectedModel{}, &orm.Dataset{}, &orm.DocumentProcessingState{}); err != nil {
 		t.Fatal(err)
@@ -325,25 +325,8 @@ func TestDeleteEmbeddingModelBlocksUntilIndexedKnowledgeRemoved(t *testing.T) {
 		return rec
 	}
 
-	if rec := deleteRequest(false); rec.Code != http.StatusConflict {
-		t.Fatalf("unconfirmed status = %d, want 409: %s", rec.Code, rec.Body.String())
-	}
-	var stillPresent orm.UserModelProviderGroupModel
-	if err := db.Where("id = ? AND deleted_at IS NULL", model.ID).Take(&stillPresent).Error; err != nil {
-		t.Fatal("model was deleted without confirmation")
-	}
-
-	groupRequest := httptest.NewRequest(http.MethodDelete, "/group?confirm_indexed_downgrade=true", nil)
-	groupRequest.Header.Set("X-User-Id", "user-1")
-	groupRequest = mux.SetURLVars(groupRequest, map[string]string{"model_provider_id": provider.ID, "group_id": group.ID})
-	groupRecorder := httptest.NewRecorder()
-	DeleteGroup(groupRecorder, groupRequest)
-	if groupRecorder.Code != http.StatusConflict {
-		t.Fatalf("group delete bypassed guard: %d %s", groupRecorder.Code, groupRecorder.Body.String())
-	}
-
-	if rec := deleteRequest(true); rec.Code != http.StatusConflict {
-		t.Fatalf("referenced embedding must remain protected: %d %s", rec.Code, rec.Body.String())
+	if rec := deleteRequest(false); rec.Code != http.StatusOK {
+		t.Fatalf("model removal failed: %d %s", rec.Code, rec.Body.String())
 	}
 
 	for id, wantLevel := range map[string]string{ownerDataset.ID: "indexed", otherDataset.ID: "indexed"} {
@@ -365,19 +348,6 @@ func TestDeleteEmbeddingModelBlocksUntilIndexedKnowledgeRemoved(t *testing.T) {
 	if retained.IndexArtifactRef != "vector-index-v1" || retained.IndexStatus != "succeeded" {
 		t.Fatalf("index artifact was changed: %#v", retained)
 	}
-	if err := db.Model(&ownerDataset).Update("deleted_at", now).Error; err != nil {
-		t.Fatal(err)
-	}
-	if rec := deleteRequest(false); rec.Code != http.StatusConflict {
-		t.Fatalf("another user's indexed knowledge must still protect the shared model: %d %s", rec.Code, rec.Body.String())
-	}
-	if err := db.Model(&otherDataset).Update("deleted_at", now).Error; err != nil {
-		t.Fatal(err)
-	}
-	if rec := deleteRequest(false); rec.Code != http.StatusOK {
-		t.Fatalf("unreferenced embedding removal failed: %d %s", rec.Code, rec.Body.String())
-	}
-
 }
 
 func TestDeleteUnusedEmbeddingModelKeepsIndexedKnowledge(t *testing.T) {
@@ -419,8 +389,8 @@ func TestDeleteUnusedEmbeddingModelKeepsIndexedKnowledge(t *testing.T) {
 	req = mux.SetURLVars(req, map[string]string{"model_provider_id": provider.ID, "group_id": group.ID, "model_id": active.ID})
 	rec = httptest.NewRecorder()
 	DeleteGroupModel(rec, req)
-	if rec.Code != http.StatusConflict {
-		t.Fatalf("active model removal must wait for physical-vector cleanup even after KB rows disappear: %d %s", rec.Code, rec.Body.String())
+	if rec.Code != http.StatusOK {
+		t.Fatalf("active model removal should preserve physical vectors without waiting: %d %s", rec.Code, rec.Body.String())
 	}
 }
 
@@ -438,9 +408,9 @@ func TestDeleteActiveEmbeddingModelWithEmptyKnowledge(t *testing.T) {
 		{name: "nested empty folders", role: "admin", foldersOnly: true, cleanup: 200, want: 200},
 		{name: "legacy default", role: "admin", legacy: true, cleanup: 200, want: 200},
 		{name: "another user's parsed document", role: "admin", hasDocument: true, cleanup: 200, want: 200},
-		{name: "new documents or active jobs", role: "admin", cleanup: 409, want: 409},
-		{name: "cleanup unavailable", role: "admin", cleanup: 503, want: 409},
-		{name: "non-admin", role: "member", want: 409},
+		{name: "new documents or active jobs", role: "admin", cleanup: 409, want: 200},
+		{name: "cleanup unavailable", role: "admin", cleanup: 503, want: 200},
+		{name: "non-admin", role: "member", want: 200},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			db, parent, group, model := setupProbeTest(t, &orm.EmbeddingIndexState{}, &orm.UserSelectedModel{}, &orm.Dataset{}, &orm.Document{}, &orm.DocumentProcessingState{})
@@ -515,8 +485,8 @@ func TestDeleteActiveEmbeddingModelWithEmptyKnowledge(t *testing.T) {
 			if rec.Code != tc.want {
 				t.Fatalf("delete status = %d, want %d: %s", rec.Code, tc.want, rec.Body.String())
 			}
-			if got := calls.Load(); (tc.cleanup == 0 && got != 0) || (tc.cleanup != 0 && got != 1) {
-				t.Fatalf("unexpected cleanup call count: %d", got)
+			if got := calls.Load(); got != 0 {
+				t.Fatalf("model removal must not contact cleanup service: %d", got)
 			}
 
 			var remainingModel, remainingSelection int64
@@ -533,8 +503,8 @@ func TestDeleteActiveEmbeddingModelWithEmptyKnowledge(t *testing.T) {
 				if err := db.Take(&state, "scope = ?", globalEmbeddingScope).Error; err != nil {
 					t.Fatal(err)
 				}
-				if state.Phase != "cleared" || state.ActiveModelID != "" || state.Generation != generation+1 {
-					t.Fatalf("active index state was not cleared: %+v", state)
+				if state.Phase != "detached" || state.ActiveModelID != "" || state.Generation != generation+1 {
+					t.Fatalf("active model was not detached: %+v", state)
 				}
 			}
 			if remainingModel != wantRemaining || remainingSelection != wantRemaining {

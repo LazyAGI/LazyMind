@@ -52,6 +52,9 @@ func classifyEmbeddingIndexState(state orm.EmbeddingIndexState, statePresent boo
 		if validIdentity && pendingKnowledgeBases > 0 {
 			classification.OperationPhase = "rebuilding"
 		}
+	case "detached":
+		classification.IndexIdentity = "legacy_unknown"
+		classification.ReadinessReason = "index_identity_unverified"
 	case "clearing":
 		classification.OperationPhase = "clearing"
 		classification.ReadinessReason = "index_cleanup_in_progress"

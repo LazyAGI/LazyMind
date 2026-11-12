@@ -53,3 +53,14 @@ it("shows an actionable empty selection and hides administrator cleanup for memb
   expect(dialog.getByRole("button", { name: "建立索引" })).toBeDisabled();
   expect(dialog.queryByRole("button", { name: /清理全部向量/ })).not.toBeInTheDocument();
 });
+it("explains retained old vectors when the model has been removed", async () => {
+  const get = mocks.get.getMockImplementation()!;
+  mocks.get.mockImplementation((url: string, ...args: unknown[]) => url.endsWith("index-state")
+    ? Promise.resolve({ data: { data: { generation: 8, indexed_knowledge_bases: 1, operation_phase: "idle", index_identity: "legacy_unknown" } } })
+    : get(url, ...args));
+  const dialog = within(await open());
+  expect(await dialog.findByText("旧向量索引待处理")).toBeInTheDocument();
+  expect(dialog.getByText(/原文件、解析正文和旧向量保留/)).toBeInTheDocument();
+  expect(dialog.getByRole("link", { name: /切换默认模型/ })).toBeInTheDocument();
+  expect(await dialog.findByText("示例.pdf")).toBeInTheDocument();
+});

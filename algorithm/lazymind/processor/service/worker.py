@@ -126,7 +126,7 @@ if not getattr(DocumentProcessorWorker._Impl, '_lazymind_isolated', False):
             state = index_state()
             expected = getattr(self, '_lazymind_task_generation', None)
             if (getattr(self, '_lazymind_task_indexes', True)
-                    and (state['phase'] in ('clearing', 'cleanup_failed', 'cleared')
+                    and (state['phase'] in ('clearing', 'cleanup_failed', 'cleared', 'detached')
                          or (expected is not None and expected != state['generation']))):
                 raise IndexBusy('document task belongs to an unavailable index generation')
             if getattr(self, '_lazymind_store_generation', None) != state['generation']:
