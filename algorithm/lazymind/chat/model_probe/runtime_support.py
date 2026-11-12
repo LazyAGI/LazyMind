@@ -15,7 +15,7 @@ RUNTIME_TYPES_BY_SOURCE = {
     'glm': {'llm', 'vlm', 'embed', 'rerank', 'text2image', 'text2video', 'tts', 'stt'},
     'kimi': {'llm', 'vlm'},
     'minimax': {'llm', 'vlm', 'text2image', 'tts'},
-    'openai': {'llm', 'vlm', 'embed', 'multimodal_embedding', 'rerank'},
+    'openai': {'llm', 'vlm', 'embed', 'multimodal_embedding', 'rerank', 'text2image'},
     'openai_responses': {'llm', 'vlm'},
     'openrouter': {'llm', 'vlm', 'embed', 'text2image', 'text2video', 'tts', 'stt'},
     'ppio': {'llm', 'vlm'},
@@ -39,4 +39,7 @@ def runtime_source(source: str) -> str:
 
 
 def supports_runtime_type(source: str, kind: str) -> bool:
+    source = re.sub('[^a-z0-9]', '', source.lower())
+    if source in {'vllm', 'lmdeploy'}:
+        return kind in {'llm', 'vlm', 'embed', 'multimodal_embedding', 'rerank'}
     return kind in RUNTIME_TYPES_BY_SOURCE.get(runtime_source(source), set())
