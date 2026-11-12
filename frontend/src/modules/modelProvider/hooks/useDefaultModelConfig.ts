@@ -289,7 +289,6 @@ const moduleConfigs: ModuleConfig[] = [
     key: "embed_main",
     titleKey: "modelProvider.module.embeddingTitle",
     subtitleKey: "modelProvider.module.embeddingSubtitle",
-    required: true,
     restricted: true,
   },
   {
@@ -332,7 +331,6 @@ const moduleConfigs: ModuleConfig[] = [
     key: "evo_llm",
     titleKey: "modelProvider.module.selfEvolutionTitle",
     subtitleKey: "modelProvider.module.selfEvolutionSubtitle",
-    required: true,
   },
 ];
 
