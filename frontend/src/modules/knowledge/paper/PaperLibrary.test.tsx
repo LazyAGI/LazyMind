@@ -393,6 +393,37 @@ describe('paper library behavior', () => {
             vi.useRealTimers();
         }
     });
+    it.each(['ready', 'failed'] as const)('stops polling when body parsing becomes %s', async terminalState => {
+        vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+        try {
+            const parsing = readLibrary(datasetId);
+            parsing.papers[0].parse = 'parsing';
+            const terminal = readLibrary(datasetId);
+            terminal.papers[0].parse = terminalState;
+            vi.mocked(loadPersistedPaperLibrary)
+                .mockResolvedValueOnce({ ...snapshot(parsing), active: true })
+                .mockResolvedValue(snapshot(terminal));
+
+            await renderLibrary();
+            const paperRow = () => within(screen.getByRole('row', { name: /Folder paper/ }));
+            expect(paperRow().getByText('正文解析中')).toBeInTheDocument();
+            expect(loadPersistedPaperLibrary).toHaveBeenCalledOnce();
+
+            await act(async () => { await vi.advanceTimersByTimeAsync(12_000); });
+            expect(loadPersistedPaperLibrary).toHaveBeenCalledTimes(2);
+            expect(paperRow().queryByText('正文解析中')).not.toBeInTheDocument();
+            if (terminalState === 'failed') {
+                expect(paperRow().getByText('正文解析失败')).toBeInTheDocument();
+            } else {
+                expect(paperRow().queryByText('正文解析失败')).not.toBeInTheDocument();
+            }
+
+            await act(async () => { await vi.advanceTimersByTimeAsync(24_000); });
+            expect(loadPersistedPaperLibrary).toHaveBeenCalledTimes(2);
+        } finally {
+            vi.useRealTimers();
+        }
+    });
     it('shows the library when the independent import notification request fails', async () => {
         vi.mocked(listAcademicImportBatches).mockRejectedValueOnce(new Error('通知暂时不可用'));
         await renderLibrary();

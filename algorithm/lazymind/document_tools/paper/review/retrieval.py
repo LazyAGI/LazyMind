@@ -9,7 +9,11 @@ from httpx import HTTPError
 from lazyllm.common import KeyAuthError
 
 
-RETRIEVAL_ERRORS = (HTTPError, KeyAuthError, ValueError)
+class EmbeddingNotReady(RuntimeError):
+    """Knowledge-base retrieval cannot run without a text embedding model."""
+
+
+RETRIEVAL_ERRORS = (HTTPError, KeyAuthError, ValueError, EmbeddingNotReady)
 
 
 def identities(paper):

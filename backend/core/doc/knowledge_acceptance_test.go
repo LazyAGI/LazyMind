@@ -188,7 +188,7 @@ func TestKnowledgeDiagnosticRedactsSecretsAndClearsOnSuccess(t *testing.T) {
 			t.Fatalf("leaked %s: %s", text, msg)
 		}
 	}
-	if processingDiagnostic(orm.DocumentProcessingState{ParseStatus: "succeeded"}, orm.Task{}, "SUCCESS", "OLD", errors.New("old failure").Error()) != nil {
+	if processingDiagnostic(orm.DocumentProcessingState{ParseStatus: "succeeded"}, orm.Task{}, ProcessingLevelParsed, "SUCCESS", "OLD", errors.New("old failure").Error()) != nil {
 		t.Fatal("success retained failure")
 	}
 }

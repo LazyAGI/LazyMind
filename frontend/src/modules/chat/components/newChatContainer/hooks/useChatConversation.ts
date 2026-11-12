@@ -2032,6 +2032,7 @@ export function useChatConversation({
       inputs,
       ChatConversationsRequestActionEnum.ChatActionNext,
       {
+        ...(params.chatConfigSnapshot ? { chat_config_snapshot: params.chatConfigSnapshot } : {}),
         ...(params.initial_model_selection ? { initial_model_selection: params.initial_model_selection } : {}),
         ...(params.workflow_control ? { workflow_control: params.workflow_control } : {}),
         ...(params.run_in_background ? { run_in_background: true } : {}),

@@ -48,7 +48,7 @@ def test_kb_search_core_flow(monkeypatch):
     monkeypatch.setattr(
         kb,
         '_ensure_kb_search_runtime',
-        lambda: (['retriever'], 'reranker', 'image-retriever'),
+        lambda **_kwargs: (['retriever'], 'reranker', 'image-retriever'),
     )
     original_config = kb.lazyllm.globals.get('agentic_config')
     kb.lazyllm.globals['agentic_config'] = {

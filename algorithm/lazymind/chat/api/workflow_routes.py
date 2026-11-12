@@ -27,10 +27,10 @@ import yaml
 from fastapi import APIRouter, HTTPException, Response
 from pydantic import BaseModel, Field
 
-from lazymind.chat.engine.tool_auth import inject_tool_config
 from lazyllm.tools.writer.data_models import WriterDocument
 from lazyllm.tools.writer.utils import convert_writer_content
 from lazyllm.tools.writer.utils.pandoc import PandocError
+from lazymind.chat.request_scope import request_configuration_scope
 from lazymind.document_tools import (
     DocumentActionError,
     inspect_document,
@@ -39,7 +39,6 @@ from lazymind.document_tools import (
     sync_writer_documents,
 )
 from lazymind.config import config
-from lazymind.model_config import inject_model_config
 from lazymind.workflow_sdk import WorkflowClient
 from lazymind.workflow_toolkit import load_workflow_package_tools
 
@@ -224,8 +223,8 @@ def sync_writer_document(request: WriterDocumentSyncRequest) -> dict:
         raise HTTPException(status_code=400, detail='A provider credential is required.')
 
     try:
-        inject_tool_config(request.tool_config)
-        return sync_writer_documents(request.source_document, request.revised_document)
+        with request_configuration_scope(tool_config=request.tool_config):
+            return sync_writer_documents(request.source_document, request.revised_document)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
@@ -294,16 +293,17 @@ def invoke_builtin_document_action(
     request: DocumentActionInvokeRequest,
 ) -> Dict[str, Any]:
     try:
-        inject_model_config(request.llm_config or {})
-        inject_tool_config(request.tool_config or {})
-        result = invoke_document_action(
-            request.reference,
-            request.phase,
-            request.arguments,
-            artifact=request.artifact,
-            artifact_store=request.artifact_store,
-        )
-        return {'result': result}
+        with request_configuration_scope(
+            model_config=request.llm_config or {}, tool_config=request.tool_config or {},
+        ):
+            result = invoke_document_action(
+                request.reference,
+                request.phase,
+                request.arguments,
+                artifact=request.artifact,
+                artifact_store=request.artifact_store,
+            )
+            return {'result': result}
     except DocumentActionError as exc:
         detail: Dict[str, Any] = {
             'code': exc.error_code,
@@ -380,38 +380,39 @@ def invoke_workflow_action(request: WorkflowActionInvokeRequest) -> Dict[str, An
             'message': f'reserved arguments: {sorted(reserved)}',
         })
     try:
-        inject_model_config(request.llm_config or {})
-        inject_tool_config(request.tool_config or {})
-        if tool_name.startswith('builtin:'):
-            result = invoke_document_action(
-                tool_name, request.phase, kwargs,
-                artifact=request.artifact,
-                artifact_store=request.artifact_store,
-                slot=request.slot,
-                action=request.action,
-            )
-            return {'result': result}
-        try:
-            tools = load_workflow_package_tools(
-                package, [tool_name], request.workflow_id, request.revision_id,
-            )
-        except Exception as exc:
-            raise HTTPException(
-                status_code=500, detail='artifact action tool is unavailable'
-            ) from exc
-        tool = tools.get(tool_name)
-        if tool is None:
-            raise HTTPException(
-                status_code=500, detail='artifact action tool is unavailable'
-            )
-        parameters = inspect.signature(tool).parameters
-        if 'artifact' in parameters:
-            kwargs['artifact'] = request.artifact
-        if 'artifact_store' in parameters:
-            kwargs['artifact_store'] = request.artifact_store
-        if 'slot' in parameters:
-            kwargs['slot'] = request.slot
-        return {'result': tool(**kwargs)}
+        with request_configuration_scope(
+            model_config=request.llm_config or {}, tool_config=request.tool_config or {},
+        ):
+            if tool_name.startswith('builtin:'):
+                result = invoke_document_action(
+                    tool_name, request.phase, kwargs,
+                    artifact=request.artifact,
+                    artifact_store=request.artifact_store,
+                    slot=request.slot,
+                    action=request.action,
+                )
+                return {'result': result}
+            try:
+                tools = load_workflow_package_tools(
+                    package, [tool_name], request.workflow_id, request.revision_id,
+                )
+            except Exception as exc:
+                raise HTTPException(
+                    status_code=500, detail='artifact action tool is unavailable'
+                ) from exc
+            tool = tools.get(tool_name)
+            if tool is None:
+                raise HTTPException(
+                    status_code=500, detail='artifact action tool is unavailable'
+                )
+            parameters = inspect.signature(tool).parameters
+            if 'artifact' in parameters:
+                kwargs['artifact'] = request.artifact
+            if 'artifact_store' in parameters:
+                kwargs['artifact_store'] = request.artifact_store
+            if 'slot' in parameters:
+                kwargs['slot'] = request.slot
+            return {'result': tool(**kwargs)}
     except HTTPException:
         raise
     except DocumentActionError as exc:

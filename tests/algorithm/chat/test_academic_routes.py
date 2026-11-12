@@ -3,9 +3,11 @@ import hashlib
 from pathlib import Path
 from types import SimpleNamespace
 
+import lazyllm
 import pytest
 from fastapi import HTTPException
 from lazymind.chat.api import academic_routes as ar
+from lazymind.chat.request_scope import request_configuration_scope
 
 
 @pytest.fixture
@@ -331,6 +333,37 @@ def test_search_registry_preserves_sciverse_pages_and_web_parameters(monkeypatch
     assert calls[-1] == {'query': 'retrieval', 'count': 2, 'date_restrict': ''}
 
 
+def test_search_registry_isolates_provider_credentials_after_failure(monkeypatch):
+    from lazymind.chat.service import academic_preparation
+    from lazymind.chat.service.component import tool_registry
+
+    observed = []
+
+    def meta_search(**_kwargs):
+        tool_key = lazyllm.globals['config'].get('dynamic_tool_auth', {}).get('sciverse')
+        observed.append((tool_key, dict(lazyllm.locals.curr_key)))
+        if tool_key:
+            lazyllm.locals.curr_key['sciverse'] = tool_key
+            raise ValueError('Provider rejected search')
+        return {'items': []}
+
+    monkeypatch.setattr(tool_registry, '_instance_is_active', lambda _: True)
+    monkeypatch.setattr(tool_registry, '_ACADEMIC_SEARCH_ENGINE_INSTANCES', [
+        SimpleNamespace(source_name='sciverse', meta_search=meta_search),
+    ])
+    payload = {'source': 'sciverse', 'query': 'retrieval', 'limit': 2, 'page': 1, 'cursor': ''}
+    with request_configuration_scope() as caller_sid:
+        lazyllm.locals.curr_key['caller'] = 'caller-key'
+        with pytest.raises(ValueError, match='Provider rejected search'):
+            academic_preparation.search_registry({**payload, 'tool_config': {'sciverse': 'sciverse-key'}})
+        assert academic_preparation.search_registry(payload) == {'items': []}
+        assert lazyllm.globals._sid == lazyllm.locals._sid == caller_sid
+        assert lazyllm.locals.curr_key == {'caller': 'caller-key'}
+        assert 'sciverse' not in lazyllm.globals['config'].get('dynamic_tool_auth', {})
+
+    assert observed == [('sciverse-key', {}), (None, {})]
+
+
 def test_search_bridge_preserves_cooldown_and_key_pool_failures(monkeypatch):
     import httpx
     from lazyllm.common import AllKeysExhaustedError
@@ -433,7 +466,6 @@ def test_preparation_tools_execute_with_normal_workspace_authorization(monkeypat
         plan.tools[-1]('Grounded directions', directions, selected_directions=['retrieval'])
 
     monkeypatch.setattr(preparation, 'WorkflowClient', Client)
-    monkeypatch.setattr(preparation, 'inject_model_config', lambda _: None)
     monkeypatch.setattr(preparation, 'AutoModel', lambda **_: object())
     monkeypatch.setattr(preparation.AgentExecutor, 'run', execute)
     result = preparation.run_preparation({

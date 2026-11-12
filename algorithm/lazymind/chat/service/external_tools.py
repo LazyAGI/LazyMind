@@ -4,13 +4,10 @@ import inspect
 import logging
 from typing import Any
 
-import lazyllm
-from lazyllm.common.globals import init_session
 from lazyllm.tools import ToolManager
 
-from lazymind.chat.engine.tool_auth import inject_tool_config
+from lazymind.chat.request_scope import request_configuration_scope
 from lazymind.chat.service.component.tool_registry import DEFAULT_TOOLS, _instance_is_active, tool_is_active
-from lazymind.model_config import inject_model_config
 
 
 LOG = logging.getLogger(__name__)
@@ -96,27 +93,25 @@ def _schema(methods):
 
 def run_external_tools(payload: dict, *, execute: bool = False) -> dict:
     """Use a fresh request session so one user's injected keys cannot reach another."""
-    init_session()
     try:
-        inject_model_config(payload.get('llm_config') or {})
-        inject_tool_config(payload.get('tool_config') or {})
-        if execute:
-            return _execute(payload)
-        items = []
-        for config in DEFAULT_TOOLS:
-            _, methods, reason = _resolve(config)
-            items.append({
-                'name': config.name, 'description': config.description,
-                'input_schema': _schema(methods), 'available': not reason, 'reason': reason,
-            })
-        return {'items': items}
+        with request_configuration_scope(
+            model_config=payload.get('llm_config') or {}, tool_config=payload.get('tool_config') or {},
+        ):
+            if execute:
+                return _execute(payload)
+            items = []
+            for config in DEFAULT_TOOLS:
+                _, methods, reason = _resolve(config)
+                items.append({
+                    'name': config.name, 'description': config.description,
+                    'input_schema': _schema(methods), 'available': not reason, 'reason': reason,
+                })
+            return {'items': items}
     except Exception as exc:
         name = next((item.name for item in DEFAULT_TOOLS if item.name == payload.get('tool_name')), 'unknown')
         LOG.error('External tool request failed tool=%s execute=%s error_type=%s',
                   name, execute, type(exc).__name__)
         raise
-    finally:
-        lazyllm.globals.clear()
 
 
 def _execute(payload):

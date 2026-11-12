@@ -1,7 +1,9 @@
 from types import SimpleNamespace
 
+import lazyllm
 import pytest
 
+from lazymind.chat.request_scope import request_configuration_scope
 from lazymind.chat.service import external_tools
 
 
@@ -60,15 +62,30 @@ def test_required_arguments_are_validated(registry):
 
 
 def test_credentials_are_request_scoped(registry, monkeypatch):
-    import lazyllm
     observed = []
 
     def active(_):
-        observed.append(dict(lazyllm.globals.config['dynamic_tool_auth'] or {}))
+        config = lazyllm.globals['config']
+        model = config.get('dynamic_model_configs', {}).get('llm', {}).get('chat', {}).get('model')
+        tool_key = config.get('dynamic_tool_auth', {}).get('tavily')
+        observed.append((model, tool_key, dict(lazyllm.locals.curr_key)))
+        if tool_key:
+            lazyllm.locals.curr_key['tavily'] = tool_key
         return True
 
     monkeypatch.setattr(external_tools, 'tool_is_active', active)
-    external_tools.run_external_tools({'tool_config': {'tavily': 'test-only-secret'}})
-    external_tools.run_external_tools({})
-    assert observed[0]
-    assert not observed[1]
+    with request_configuration_scope() as caller_sid:
+        lazyllm.locals.curr_key['caller'] = 'caller-key'
+        with pytest.raises(ValueError, match='Invalid tool arguments'):
+            external_tools.run_external_tools({
+                'tool_name': registry.name,
+                'llm_config': {'llm': {'source': 'openai', 'model': 'external-model'}},
+                'tool_config': {'tavily': 'external-tool-key'},
+            }, execute=True)
+        assert external_tools.run_external_tools({})['items'][0]['available']
+        assert lazyllm.globals._sid == lazyllm.locals._sid == caller_sid
+        assert lazyllm.locals.curr_key == {'caller': 'caller-key'}
+        assert 'dynamic_model_configs' not in lazyllm.globals['config']
+        assert 'tavily' not in lazyllm.globals['config'].get('dynamic_tool_auth', {})
+
+    assert observed == [('external-model', 'external-tool-key', {}), (None, None, {})]

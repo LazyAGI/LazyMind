@@ -80,7 +80,7 @@ def search_kb(
         user_id=payload['user_id'],
     )
 
-    if image_retriever is None:
+    if image_topk <= 0 or image_retriever is None:
         return text_nodes
 
     image_kwargs = {'filters': payload.get('filters') or {}, 'topk': image_topk}

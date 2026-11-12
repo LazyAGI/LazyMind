@@ -219,6 +219,11 @@ func (snapshot processingSnapshot) observe(document orm.Document) (orm.DocumentP
 		raw = snapshot.external[[2]string{task.LazyllmTaskID, document.LazyllmDocID}]
 		if raw == "" {
 			raw = "UNKNOWN"
+			// An unobserved parse-only task cannot invalidate a newer persisted parse success.
+			if ext.ProcessingLevel == ProcessingLevelParsed && ext.ProcessingRevision == snapshot.dataset.ProcessingRevision &&
+				state.ParseStatus == "succeeded" && state.UpdatedAt.After(task.CreatedAt) && state.UpdatedAt.After(task.UpdatedAt) {
+				return state, raw
+			}
 		}
 	}
 	status := ""
@@ -272,6 +277,11 @@ func (snapshot processingSnapshot) observe(document orm.Document) (orm.DocumentP
 func (snapshot processingSnapshot) observedProcessingLevel(task orm.Task, state orm.DocumentProcessingState) string {
 	var ext taskExt
 	_ = json.Unmarshal(task.Ext, &ext)
+	// Stored is an explicit terminal choice and does not require a parser
+	// submission revision.
+	if ext.ProcessingLevel == ProcessingLevelStored {
+		return ProcessingLevelStored
+	}
 	if ext.ProcessingRevision == snapshot.dataset.ProcessingRevision {
 		switch ext.ProcessingLevel {
 		case ProcessingLevelParsed, ProcessingLevelChunked, ProcessingLevelIndexed:
@@ -288,22 +298,43 @@ func (snapshot processingSnapshot) observedProcessingLevel(task orm.Task, state 
 	case state.ParseStatus == "succeeded" || state.ParseStatus == "failed" || state.ParseStatus == "running",
 		task.LazyllmTaskID != "", ext.MarketSubmission == "submitting":
 		return ProcessingLevelParsed
-	default:
+	case snapshot.dataset.Scene == "academic_papers" && task.TaskType == string(TaskTypeParseUploaded) &&
+		task.LazyllmTaskID == "" && ext.ProcessingLevel == "" && ext.TaskState == string(TaskStateSucceeded):
+		// Older original-only paper receipts intentionally completed without
+		// submitting a parser task.
 		return ProcessingLevelStored
+	case effectiveProcessingLevel(snapshot.dataset.ProcessingLevel) == ProcessingLevelStored:
+		return ProcessingLevelStored
+	default:
+		// No submitted level has been observed yet. Callers fall back to the
+		// configured level, keeping a freshly bound non-stored document pending.
+		return ""
 	}
 }
 
 func ObserveDocumentProcessingDetails(ctx context.Context, db, lazyDB *gorm.DB, document orm.Document) (orm.DocumentProcessingState, string, *ProcessingDiagnostic, error) {
+	metadata, raw, err := observeDocumentProcessingDetails(ctx, db, lazyDB, document)
+	return metadata.ProcessingState, raw, metadata.ProcessingError, err
+}
+
+// ObserveDocumentProcessingMetadata reads processing metadata for an already authorized document.
+func ObserveDocumentProcessingMetadata(ctx context.Context, db, lazyDB *gorm.DB, document orm.Document) (DocumentMetadata, error) {
+	metadata, _, err := observeDocumentProcessingDetails(ctx, db, lazyDB, document)
+	return metadata, err
+}
+
+func observeDocumentProcessingDetails(ctx context.Context, db, lazyDB *gorm.DB, document orm.Document) (DocumentMetadata, string, error) {
+	metadata := DocumentMetadata{ID: document.ID, DatasetID: document.DatasetID, ProcessingState: unknownProcessingState(document)}
 	snapshot, err := loadProcessingSnapshot(ctx, db, lazyDB, document.DatasetID, document.ID)
 	if err != nil {
-		return unknownProcessingState(document), "UNKNOWN", nil, err
+		return metadata, "UNKNOWN", err
 	}
 	if len(snapshot.documents) == 0 {
-		return unknownProcessingState(document), "UNKNOWN", nil, gorm.ErrRecordNotFound
+		return metadata, "UNKNOWN", gorm.ErrRecordNotFound
 	}
 	current := snapshot.documents[0]
 	if current.ResourceVersion != document.ResourceVersion || current.LazyllmDocID != document.LazyllmDocID {
-		return unknownProcessingState(document), "UNKNOWN", nil, nil
+		return metadata, "UNKNOWN", nil
 	}
 	state, raw := snapshot.observe(current)
 	task := snapshot.tasks[current.ID]
@@ -313,7 +344,11 @@ func ObserveDocumentProcessingDetails(ctx context.Context, db, lazyDB *gorm.DB, 
 		_ = json.Unmarshal(task.Ext, &ext)
 		detail[1] = ext.ErrorMessage
 	}
-	return state, raw, processingDiagnostic(state, task, raw, detail[0], detail[1]), nil
+	metadata.ProcessingLevel = snapshot.dataset.ProcessingLevel
+	metadata.ObservedProcessingLevel = snapshot.observedProcessingLevel(task, state)
+	metadata.ProcessingState = state
+	metadata.ProcessingError = processingDiagnostic(state, task, metadata.ObservedProcessingLevel, raw, detail[0], detail[1])
+	return metadata, raw, nil
 }
 
 func datasetProcessingCoverage(ctx context.Context, db, lazyDB *gorm.DB, dataset orm.Dataset) (ProcessingCoverage, error) {

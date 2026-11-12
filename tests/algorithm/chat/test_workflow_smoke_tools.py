@@ -5,8 +5,11 @@ import sys
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
 
+import lazyllm
 import pytest
 import yaml
+
+from lazymind.chat.request_scope import request_configuration_scope
 
 
 def _load_workflow_routes(monkeypatch):
@@ -211,9 +214,6 @@ def test_workflow_action_route_uses_pinned_definition_and_server_owned_arguments
             {'preview_rewrite': preview_rewrite} if loaded is package and names else {}
         ),
     )
-    monkeypatch.setattr(workflow_routes, 'inject_model_config', lambda _config: None)
-    monkeypatch.setattr(workflow_routes, 'inject_tool_config', lambda _config: None)
-
     payload = {
         'workflow_id': 'writer-workflow',
         'revision_id': 'revision-1',
@@ -256,8 +256,6 @@ def test_writer_workflows_preview_and_execute_paragraph_list(monkeypatch, tmp_pa
     monkeypatch.setattr(routes, 'WorkflowClient', lambda *_args, **_kwargs: SimpleNamespace(
         get_workflow=lambda *_args: SimpleNamespace(result=package),
     ))
-    monkeypatch.setattr(routes, 'inject_model_config', lambda _config: None)
-    monkeypatch.setattr(routes, 'inject_tool_config', lambda _config: None)
     monkeypatch.setattr(routes, 'load_workflow_package_tools',
                         lambda *_args: pytest.fail('rewrite must use the shared document action'))
     calls = []
@@ -297,15 +295,12 @@ def test_writer_workflows_preview_and_execute_paragraph_list(monkeypatch, tmp_pa
 
 def test_builtin_document_action_route_does_not_load_a_workflow(monkeypatch):
     workflow_routes = _load_workflow_routes(monkeypatch)
-    calls = []
 
     monkeypatch.setattr(
         workflow_routes,
         'WorkflowClient',
         lambda *_args, **_kwargs: pytest.fail('public document actions must not load a workflow'),
     )
-    monkeypatch.setattr(workflow_routes, 'inject_model_config', lambda config: calls.append(('model', config)))
-    monkeypatch.setattr(workflow_routes, 'inject_tool_config', lambda config: calls.append(('tool', config)))
     monkeypatch.setattr(
         workflow_routes,
         'invoke_document_action',
@@ -332,7 +327,91 @@ def test_builtin_document_action_route_does_not_load_a_workflow(monkeypatch):
         'phase': 'preview',
         'artifact': '# Draft',
     }
-    assert calls == [('model', {}), ('tool', {})]
+
+
+@pytest.mark.parametrize('workflow', [False, True], ids=['builtin', 'workflow'])
+def test_document_actions_isolate_configuration_after_an_error(monkeypatch, workflow):
+    from fastapi import HTTPException
+
+    routes = _load_workflow_routes(monkeypatch)
+    reference = 'builtin:document.rewrite_selection.v1'
+    observed = []
+
+    def action(_reference, _phase, arguments, **_context):
+        config = lazyllm.globals['config']
+        model = config.get('dynamic_model_configs', {}).get('llm', {}).get('chat', {}).get('model')
+        tool_key = config.get('dynamic_tool_auth', {}).get('tavily')
+        observed.append((model, tool_key, dict(lazyllm.locals.curr_key)))
+        if arguments.get('fail'):
+            lazyllm.locals.curr_key['tavily'] = tool_key
+            raise routes.DocumentActionError('ACTION_REJECTED', 'Action rejected', status_code=409)
+        return {'ok': True}
+
+    monkeypatch.setattr(routes, 'invoke_document_action', action)
+    if workflow:
+        monkeypatch.setattr(routes, '_action_definition', lambda _: ({
+            'slots': ['draft'], 'preview_tool': reference,
+        }, {}))
+        invoke = routes.invoke_workflow_action
+        request = routes.WorkflowActionInvokeRequest(
+            workflow_id='writer', revision_id='rev', action='rewrite_selection', phase='preview', slot='draft',
+        )
+    else:
+        invoke = routes.invoke_builtin_document_action
+        request = routes.DocumentActionInvokeRequest(reference=reference, phase='preview')
+
+    with request_configuration_scope() as caller_sid:
+        lazyllm.locals.curr_key['caller'] = 'caller-key'
+        with pytest.raises(HTTPException) as error:
+            invoke(request.model_copy(update={
+                'arguments': {'fail': True},
+                'llm_config': {'llm': {'source': 'openai', 'model': 'action-model'}},
+                'tool_config': {'tavily': 'action-tool-key'},
+            }))
+        assert error.value.status_code == 409
+        assert error.value.detail == {
+            'code': 'ACTION_REJECTED', 'message': 'Action rejected', 'retryable': False,
+        }
+        assert invoke(request) == {'result': {'ok': True}}
+        assert lazyllm.globals._sid == lazyllm.locals._sid == caller_sid
+        assert lazyllm.locals.curr_key == {'caller': 'caller-key'}
+        assert 'dynamic_model_configs' not in lazyllm.globals['config']
+        assert 'tavily' not in lazyllm.globals['config'].get('dynamic_tool_auth', {})
+
+    assert observed == [('action-model', 'action-tool-key', {}), (None, None, {})]
+
+
+def test_writer_sync_isolates_provider_credentials_after_an_error(monkeypatch):
+    from fastapi import HTTPException
+
+    routes = _load_workflow_routes(monkeypatch)
+    observed = []
+
+    def sync(_source, _revised):
+        credentials = dict(lazyllm.globals['config'].get('dynamic_fs_auth', {}))
+        observed.append(credentials)
+        if len(observed) == 1:
+            raise ValueError('Writer edit rejected')
+        return {'ok': True}
+
+    monkeypatch.setattr(routes, 'sync_writer_documents', sync)
+    request = routes.WriterDocumentSyncRequest(
+        source_document={'document_id': 'doc'}, revised_document={'document_id': 'doc'},
+    )
+    with request_configuration_scope():
+        with pytest.raises(HTTPException) as error:
+            routes.sync_writer_document(request.model_copy(update={'tool_config': {'feishu': 'feishu-key'}}))
+        assert error.value.status_code == 400
+        assert error.value.detail == 'Writer edit rejected'
+        with pytest.raises(HTTPException) as missing:
+            routes.sync_writer_document(request)
+        assert missing.value.status_code == 400
+        assert missing.value.detail == 'A provider credential is required.'
+        assert routes.sync_writer_document(
+            request.model_copy(update={'tool_config': {'notion': 'notion-key'}}),
+        ) == {'ok': True}
+        assert 'dynamic_fs_auth' not in lazyllm.globals['config']
+    assert observed == [{'feishu': 'feishu-key'}, {'notion': 'notion-key'}]
 
 
 @pytest.mark.parametrize('workflow_id', ['academic-writer', 'custom-writing-workflow'])
@@ -343,6 +422,7 @@ def test_portable_conversion_available_to_pinned_workflows_without_action_declar
         'revision_id': 'old-revision', 'tree_hash': 'tree',
         'files': {'workflow.yaml': base64.b64encode(b'id: arbitrary\n').decode()},
     }
+
     class FakeWorkflowClient:
         def __init__(self, *args, **kwargs):
             pass
@@ -351,8 +431,6 @@ def test_portable_conversion_available_to_pinned_workflows_without_action_declar
             return SimpleNamespace(result=package)
 
     monkeypatch.setattr(workflow_routes, 'WorkflowClient', FakeWorkflowClient)
-    monkeypatch.setattr(workflow_routes, 'inject_model_config', lambda _config: None)
-    monkeypatch.setattr(workflow_routes, 'inject_tool_config', lambda _config: None)
     request = workflow_routes.WorkflowActionInvokeRequest(
         workflow_id=workflow_id, revision_id='old-revision', tree_hash='tree',
         action='convert_document', phase='preview', slot='custom_article',
@@ -408,8 +486,6 @@ def test_ppt_selection_preview_loads_pinned_runtime_dependencies(monkeypatch, tm
             return SimpleNamespace(result=package)
 
     monkeypatch.setattr(routes, 'WorkflowClient', Client)
-    monkeypatch.setattr(routes, 'inject_model_config', lambda config: None)
-    monkeypatch.setattr(routes, 'inject_tool_config', lambda config: None)
     monkeypatch.setattr('tempfile.gettempdir', lambda: str(tmp_path))
     monkeypatch.delitem(sys.modules, 'html_structure', raising=False)
     monkeypatch.setattr(sys, 'path', [p for p in sys.path if not p.endswith('/runtime/lib')])

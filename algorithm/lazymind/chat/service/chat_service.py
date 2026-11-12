@@ -44,6 +44,7 @@ from lazymind.common.memory import (
     load_memory_context,
 )
 from lazymind.chat.service.chat_request import ChatRequest
+from lazymind.chat.request_scope import request_configuration_scope
 from lazymind.chat.service.multimodal_input import prepare_direct_image_history
 from lazymind.vision_model import main_model_supports_vision
 from lazymind.chat.service.document_selection import (
@@ -833,6 +834,33 @@ def _resolve_task_profile_with_model(
     )
 
 
+def _resolve_task_profile_in_request_scope_sync(
+    request: ChatRequest,
+    inputs: dict[str, Any],
+) -> Any:
+    with request_configuration_scope(model_config=request.runtime.llm_config):
+        return _resolve_task_profile_with_model(
+            inputs,
+            trace_id=(
+                request.conversation.conversation_id
+                or request.conversation.session_id
+                or ''
+            ).strip(),
+            session_id=request.conversation.session_id,
+        )
+
+
+async def _resolve_task_profile_in_request_scope(
+    request: ChatRequest,
+    inputs: dict[str, Any],
+) -> Any:
+    return await asyncio.to_thread(
+        _resolve_task_profile_in_request_scope_sync,
+        request,
+        inputs,
+    )
+
+
 def _context_preview_status(
     model_context: Any,
     *,
@@ -1049,22 +1077,15 @@ async def handle_chat(request: ChatRequest) -> Union[Dict[str, Any], StreamingRe
             sensitive_match_override=sensitive_match,
         )
 
-    inject_model_config(request.runtime.llm_config)
-
     early_run_id = _register_steering_before_stream(request)
 
     async def resolve_and_continue():
+        routing_task = None
         try:
             started = time.time()
-            routing_task = asyncio.create_task(asyncio.to_thread(
-                _resolve_task_profile_with_model, inputs,
-                trace_id=(
-                    request.conversation.conversation_id
-                    or request.conversation.session_id
-                    or ''
-                ).strip(),
-                session_id=request.conversation.session_id,
-            ))
+            routing_task = asyncio.create_task(
+                _resolve_task_profile_in_request_scope(request, inputs)
+            )
             for status_delta in ('正在', '分析', '用户意图', '，请稍后'):
                 yield log_and_emit_frame(
                     {'think': status_delta, 'text': None, 'sources': []},
@@ -1087,20 +1108,26 @@ async def handle_chat(request: ChatRequest) -> Union[Dict[str, Any], StreamingRe
                 return
             yield sse_line(response_payload(200, 'success', response, time.time() - started))
         finally:
+            if routing_task is not None:
+                if not routing_task.done():
+                    routing_task.cancel()
+                    try:
+                        await routing_task
+                    except asyncio.CancelledError:
+                        pass
+                elif not routing_task.cancelled():
+                    # Retrieve a failure when the client closes before this
+                    # generator reaches the normal await above.
+                    routing_task.exception()
             if early_run_id:
                 steering_registry.unregister(early_run_id)
 
     if request.runtime.context_usage_preview or request.runtime.context_prompt_export:
         profile = provisional
         if request.runtime.context_preview_allow_llm_routing:
-            profile = await asyncio.to_thread(
-                _resolve_task_profile_with_model, inputs,
-                trace_id=(
-                    request.conversation.conversation_id
-                    or request.conversation.session_id
-                    or ''
-                ).strip(),
-                session_id=request.conversation.session_id,
+            profile = await _resolve_task_profile_in_request_scope(
+                request,
+                inputs,
             )
         return await _run_chat_with_parse_status(
             request,

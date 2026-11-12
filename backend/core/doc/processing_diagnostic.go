@@ -40,18 +40,25 @@ func SafeProcessingMessage(raw string) string {
 	return text
 }
 
-func processingDiagnostic(state orm.DocumentProcessingState, task orm.Task, raw, code, message string) *ProcessingDiagnostic {
+func processingDiagnostic(state orm.DocumentProcessingState, task orm.Task, observedLevel, raw, code, message string) *ProcessingDiagnostic {
 	d := &ProcessingDiagnostic{Stage: "processing", Code: code, TaskID: task.ID, Message: message, Recovery: "可明确要求重新解析；若仍失败，请根据任务 ID 检查文件或解析服务。"}
-	stages := []struct{ stage, status, code, message string }{{"parse", state.ParseStatus, state.ParseErrorCode, state.ParseErrorMessage}, {"chunk", state.ChunkStatus, state.ChunkErrorCode, state.ChunkErrorMessage}, {"index", state.IndexStatus, state.IndexErrorCode, state.IndexErrorMessage}}
 	failed := NormalizeTaskStateForUI(raw) == "FAILED"
-	for _, s := range stages {
-		if s.status == "failed" {
-			failed = true
-			if s.code != "" || s.message != "" {
-				d.Stage = s.stage
-				d.Code = s.code
-				d.Message = s.message
-				break
+	if observedLevel == ProcessingLevelParsed && failed && state.ParseStatus == "failed" {
+		d.Stage = "parse"
+		if code == "" && message == "" {
+			d.Code, d.Message = state.ParseErrorCode, state.ParseErrorMessage
+		}
+	} else {
+		stages := []struct{ stage, status, code, message string }{{"parse", state.ParseStatus, state.ParseErrorCode, state.ParseErrorMessage}, {"chunk", state.ChunkStatus, state.ChunkErrorCode, state.ChunkErrorMessage}, {"index", state.IndexStatus, state.IndexErrorCode, state.IndexErrorMessage}}
+		for _, s := range stages {
+			if s.status == "failed" {
+				failed = true
+				if s.code != "" || s.message != "" {
+					d.Stage = s.stage
+					d.Code = s.code
+					d.Message = s.message
+					break
+				}
 			}
 		}
 	}
@@ -87,4 +94,28 @@ func DocumentProcessingStatus(level string, state orm.DocumentProcessingState) s
 	default:
 		return "unknown"
 	}
+}
+
+// DocumentBodyProcessingStatus reports the readiness of the parsed body.
+func DocumentBodyProcessingStatus(observedLevel string, state orm.DocumentProcessingState) string {
+	if observedLevel == ProcessingLevelStored {
+		return "not_requested"
+	}
+	switch state.ParseStatus {
+	case "succeeded":
+		return "ready"
+	case "pending", "running", "failed":
+		return state.ParseStatus
+	default:
+		return "unknown"
+	}
+}
+
+// ObservedDocumentProcessingStatus reports status at the submitted level when available.
+func ObservedDocumentProcessingStatus(observedLevel, configuredLevel string, state orm.DocumentProcessingState) string {
+	level := strings.TrimSpace(observedLevel)
+	if level == "" {
+		level = configuredLevel
+	}
+	return DocumentProcessingStatus(level, state)
 }

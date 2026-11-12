@@ -9,14 +9,13 @@ import time
 import lazyllm
 from lazyllm import AutoModel
 from lazyllm.tools.agent import ToolExecutionError
-from lazyllm.common.globals import init_session
 from lazyllm.tools.agent.toolsManager import fc_register
 from typing_extensions import NotRequired, TypedDict
 
 from lazymind.chat.engine.agent_runtime import (
     AgentExecutionOptions, AgentExecutor, AgentRole, AgentRunPlan, PromptBuilder,
 )
-from lazymind.model_config import inject_model_config
+from lazymind.chat.request_scope import request_configuration_scope
 from lazymind.workflow_sdk import WorkflowClient
 
 
@@ -132,9 +131,7 @@ summary 只用简短的话概括拟研究的范围与目标，说明将研究什
 
 
 def run_preparation(payload: dict) -> dict:
-    init_session()
-    try:
-        inject_model_config(payload['llm_config'])
+    with request_configuration_scope(model_config=payload['llm_config']):
         started = time.monotonic()
         depth = payload['depth']
         limits = depth['preparation']
@@ -347,19 +344,14 @@ def run_preparation(payload: dict) -> dict:
             'provider_usage_records': list((lazyllm.globals.get('usage') or {}).values()), 'currency_cost': None,
         }
         return result
-    finally:
-        lazyllm.globals.clear()
 
 
 def search_registry(payload: dict) -> dict:
     """Reuse configured provider instances without generic preview-as-fulltext fallback."""
-    from lazymind.chat.engine.tool_auth import inject_tool_config
     from lazymind.chat.service.component.tool_registry import (
         _ACADEMIC_SEARCH_ENGINE_INSTANCES, _WEB_SEARCH_ENGINE_INSTANCES, _instance_is_active,
     )
-    init_session()
-    try:
-        inject_tool_config(payload.get('tool_config') or {})
+    with request_configuration_scope(tool_config=payload.get('tool_config') or {}):
         source = payload['source']
         if source == 'sciverse':
             provider = next((tool for tool in _ACADEMIC_SEARCH_ENGINE_INSTANCES
@@ -391,5 +383,3 @@ def search_registry(payload: dict) -> dict:
         else:
             raise ValueError('unsupported academic source')
         return {'items': items[:payload['limit']]}
-    finally:
-        lazyllm.globals.clear()

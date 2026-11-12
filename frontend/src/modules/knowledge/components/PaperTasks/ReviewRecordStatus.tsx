@@ -4,6 +4,7 @@ import PaperTaskStatus from './PaperTaskStatus';
 
 export default function ReviewRecordStatus({ conversationId, kind = 'review' }: { conversationId: string; kind?: string }) {
     const { t } = useTranslation();
+    const isIdle = useConversationRunningStore(state => state.entries[conversationId]?.status === 'idle');
     const status = useConversationRunningStore(state => {
         const entry = state.entries[conversationId];
         return entry?.status === 'idle' ? entry.terminalStatus : entry?.status;

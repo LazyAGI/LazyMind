@@ -1,5 +1,7 @@
 import importlib
+from unittest.mock import Mock
 
+import lazyllm
 import pytest
 import httpx
 from fastapi import FastAPI
@@ -7,6 +9,8 @@ from fastapi.testclient import TestClient
 
 from lazymind.chat.api import knowledge_search_routes as routes
 from lazymind.chat.api.knowledge_search_routes import router
+from lazymind.chat.engine.tools import kb
+from lazymind.chat.request_scope import request_configuration_scope
 from lazymind.chat.service import knowledge_search_service as svc
 from lazymind.router.api import proxy_routes
 
@@ -22,18 +26,30 @@ def create_search_app():
     return app
 
 
-def test_search_calls_search_kb_without_chat_agent(monkeypatch):
-    calls = {}
+@pytest.fixture
+def static_embedding(monkeypatch, tmp_path):
+    path = tmp_path / 'models.yaml'
+    path.write_text('embed_main:\n  source: openai\n  type: embed\n  name: static-embed\n', encoding='utf-8')
+    monkeypatch.setenv('LAZYMIND_MODEL_CONFIG_PATH', str(path))
+    return path
 
-    monkeypatch.setattr(svc, 'init_session', lambda: calls.setdefault('session_initialized', True))
-    monkeypatch.setattr(svc.lazyllm.globals, 'clear', lambda: calls.setdefault('session_cleared', True))
-    monkeypatch.setattr(svc, 'inject_model_config', lambda config: calls.setdefault('injected', config))
+
+@pytest.fixture
+def dynamic_embedding(monkeypatch, tmp_path):
+    path = tmp_path / 'models.yaml'
+    path.write_text('embed_main:\n  source: dynamic\n  type: embed\n', encoding='utf-8')
+    monkeypatch.setenv('LAZYMIND_MODEL_CONFIG_PATH', str(path))
+
+
+def test_search_calls_search_kb_without_chat_agent(monkeypatch, dynamic_embedding):
+    calls = {}
 
     monkeypatch.setattr(svc, '_ensure_kb_search_runtime', lambda: (['retriever'], None, 'image'))
 
     def fake_search_kb(payload, **kwargs):
         calls['payload'] = payload
         calls['kwargs'] = kwargs
+        calls['models'] = lazyllm.globals['config']['dynamic_model_configs']
         return [
             Node(
                 uid='chunk-1',
@@ -51,9 +67,8 @@ def test_search_calls_search_kb_without_chat_agent(monkeypatch):
     }
     hits = svc.search('user-1', ' query ', ['kb_backend_901'], 3, llm_config=model_config)
 
-    assert calls['session_initialized'] is True
-    assert calls['session_cleared'] is True
-    assert calls['injected'] == model_config
+    assert calls['models']['llm']['chat']['model'] == 'llm'
+    assert calls['models']['embed_main']['embed']['model'] == 'embed'
     assert calls['payload']['user_id'] == 'user-1'
     assert calls['payload']['filters']['kb_id'] == ['kb_backend_901']
     assert calls['payload']['query'] == 'query'
@@ -73,7 +88,7 @@ def test_search_calls_search_kb_without_chat_agent(monkeypatch):
     ]
 
 
-def test_search_normalizes_topk_and_empty_hits(monkeypatch):
+def test_search_normalizes_topk_and_empty_hits(monkeypatch, static_embedding):
     captured = {}
     monkeypatch.setattr(svc, '_ensure_kb_search_runtime', lambda: ([], None, None))
 
@@ -89,7 +104,7 @@ def test_search_normalizes_topk_and_empty_hits(monkeypatch):
     assert captured['k_max'] == 50
 
 
-def test_search_filters_image_only_and_unsafe_fields(monkeypatch):
+def test_search_filters_image_only_and_unsafe_fields(monkeypatch, static_embedding):
     monkeypatch.setattr(svc, '_ensure_kb_search_runtime', lambda: ([], None, None))
     monkeypatch.setattr(
         svc,
@@ -126,7 +141,7 @@ def test_search_filters_image_only_and_unsafe_fields(monkeypatch):
     assert hits[0].source_url == ''
 
 
-def test_search_validation_and_backend_error(monkeypatch):
+def test_search_validation_and_backend_error(monkeypatch, static_embedding):
     with pytest.raises(svc.KnowledgeSearchError) as invalid:
         svc.search('user-1', '', ['kb'], 10)
     assert invalid.value.code == 'INVALID_ARGUMENT'
@@ -142,7 +157,37 @@ def test_search_validation_and_backend_error(monkeypatch):
     assert isinstance(unavailable.value.cause, RuntimeError)
 
 
-def test_search_does_not_share_default_user_context(monkeypatch):
+def test_search_isolates_embedding_config_after_backend_failure(monkeypatch, static_embedding):
+    observed = []
+
+    def runtime():
+        config = lazyllm.globals['config']
+        model = config.get('dynamic_model_configs', {}).get('embed_main', {}).get('embed', {}).get('model')
+        observed.append((model, dict(lazyllm.locals.curr_key)))
+        if model:
+            lazyllm.locals.curr_key['embed_main'] = 'embedding-key'
+            raise RuntimeError('backend failure with private provider details')
+        return [], None, None
+
+    monkeypatch.setattr(svc, '_ensure_kb_search_runtime', runtime)
+    monkeypatch.setattr(svc, 'search_kb', lambda *_args, **_kwargs: [])
+    model_config = {'embed_main': {'source': 'openai', 'model': 'request-embed', 'api_key': 'embedding-key'}}
+
+    with request_configuration_scope() as caller_sid:
+        lazyllm.locals.curr_key['caller'] = 'caller-key'
+        with pytest.raises(svc.KnowledgeSearchError) as unavailable:
+            svc.search('user-a', 'q', ['kb'], 10, llm_config=model_config)
+        assert unavailable.value.code == 'BACKEND_UNAVAILABLE'
+        assert str(unavailable.value) == 'knowledge search backend unavailable'
+        assert svc.search('user-b', 'q', ['kb'], 10) == []
+        assert lazyllm.globals._sid == lazyllm.locals._sid == caller_sid
+        assert lazyllm.locals.curr_key == {'caller': 'caller-key'}
+        assert 'dynamic_model_configs' not in lazyllm.globals['config']
+
+    assert observed == [('request-embed', {}), (None, {})]
+
+
+def test_search_does_not_share_default_user_context(monkeypatch, static_embedding):
     seen_users = []
     monkeypatch.setattr(svc, '_ensure_kb_search_runtime', lambda: ([], None, None))
 
@@ -156,6 +201,36 @@ def test_search_does_not_share_default_user_context(monkeypatch):
     svc.search('user-b', 'q', ['kb'], 10)
 
     assert seen_users == ['user-a', 'user-b']
+
+
+def test_search_rejects_missing_dynamic_embedding_before_building_retrievers(monkeypatch, dynamic_embedding):
+    build_runtime = Mock(return_value=([], None, None))
+    monkeypatch.setattr(svc, '_ensure_kb_search_runtime', build_runtime)
+    monkeypatch.setattr(svc, 'search_kb', lambda *_args, **_kwargs: [])
+
+    with pytest.raises(svc.KnowledgeSearchError) as unavailable:
+        svc.search('user-1', 'q', ['kb'], 10, llm_config={'llm': {'source': 'openai', 'model': 'chat-only'}})
+
+    assert unavailable.value.code == 'EMBEDDING_NOT_READY'
+    assert unavailable.value.cause is None
+    build_runtime.assert_not_called()
+
+
+def test_text_only_service_does_not_construct_image_retriever(monkeypatch, static_embedding):
+    with static_embedding.open('a', encoding='utf-8') as config:
+        config.write('embed_image:\n  source: openai\n  type: cross_modal_embed\n  name: static-image-embed\n')
+
+    def retriever(_doc, *, group_name, **_kwargs):
+        if group_name == 'image':
+            raise RuntimeError('remote image group is unavailable')
+        return object()
+
+    monkeypatch.setattr(kb, '_kb_retrievers', None)
+    monkeypatch.setattr(kb, '_kb_image_retriever', None)
+    monkeypatch.setattr(kb, 'Retriever', retriever)
+    monkeypatch.setattr(svc, 'search_kb', lambda *_args, **_kwargs: [])
+
+    assert svc.search('user-1', 'q', ['kb'], 10) == []
 
 
 def test_internal_route_returns_structured_hits(monkeypatch):
@@ -186,13 +261,18 @@ def test_internal_route_returns_structured_hits(monkeypatch):
     assert resp.json()['hits'][0]['doc_id'] == 'lazy'
 
 
-def test_internal_route_maps_service_errors(monkeypatch):
+@pytest.mark.parametrize(('code', 'status'), [
+    ('BACKEND_UNAVAILABLE', 503),
+    ('INVALID_ARGUMENT', 400),
+    ('EMBEDDING_NOT_READY', 422),
+])
+def test_internal_route_maps_service_errors(monkeypatch, code, status):
     monkeypatch.setattr(routes, 'expected_internal_token', lambda: 'secret-token')
     app = create_search_app()
     monkeypatch.setattr(
         svc,
         'search',
-        lambda **kwargs: (_ for _ in ()).throw(svc.KnowledgeSearchError('BACKEND_UNAVAILABLE', 'down')),
+        lambda **kwargs: (_ for _ in ()).throw(svc.KnowledgeSearchError(code, 'request unavailable')),
     )
     client = TestClient(app)
 
@@ -202,8 +282,8 @@ def test_internal_route_maps_service_errors(monkeypatch):
         json={'user_id': 'user-1', 'query': 'q', 'kb_ids': ['kb'], 'top_k': 2},
     )
 
-    assert resp.status_code == 503
-    assert resp.json()['detail']['code'] == 'BACKEND_UNAVAILABLE'
+    assert resp.status_code == status
+    assert resp.json()['detail'] == {'code': code, 'message': 'request unavailable'}
 
 
 def test_internal_route_requires_service_token(monkeypatch):
@@ -297,6 +377,24 @@ def test_search_kb_forwards_model_config_to_algorithm_document_calls(monkeypatch
 
     assert calls[0][1]['llm_config'] == config
     assert calls[1][1]['llm_config'] == config
+
+
+@pytest.mark.parametrize('image_topk', [0, -1])
+def test_search_kb_skips_image_retrieval_for_nonpositive_topk(monkeypatch, image_topk):
+    search_module = importlib.import_module('lazymind.chat.engine.tools.algo.search_kb')
+    node = Node(text='text evidence')
+    monkeypatch.setattr(search_module, 'get_vocab_manager', lambda _user_id: lambda query: query)
+    monkeypatch.setattr(search_module, '_search_text', lambda *_args: [node])
+    monkeypatch.setattr(search_module, 'filter_active_nodes', lambda nodes, **_kwargs: nodes)
+    image_retriever = Mock(return_value=[])
+
+    result = search_module.search_kb(
+        {'query': 'q', 'user_id': 'user'}, retrievers=[], reranker=None,
+        image_retriever=image_retriever, image_topk=image_topk,
+    )
+
+    assert result == [node]
+    image_retriever.assert_not_called()
 
 
 def test_algorithm_document_call_injects_and_strips_model_config(monkeypatch):

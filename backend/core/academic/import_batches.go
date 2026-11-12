@@ -123,17 +123,39 @@ type operationObservation struct {
 	States    []operationProcessing
 }
 
-// Observe distinct active documents, not every historical import receipt.
-// Terminal stages need no external query unless a task was created or resumed.
+// Observe distinct documents with active work or a current task at a different level.
 func observeOperationProcessing(r *http.Request, db *gorm.DB, dataset string, batchIDs, pageItems []string) (operationObservation, error) {
 	out := operationObservation{Documents: map[string]string{}, Metadata: map[string]doc.DocumentMetadata{}}
 	var ids []string
 	source := operationDocuments(db, store.UserID(r), dataset, batchIDs, nil)
+	validTaskExt := "CASE WHEN json_valid(t.ext) THEN t.ext END"
+	taskLevel := "json_extract(" + validTaskExt + ",'$.processing_level')"
+	sameRevision := "json_type(" + validTaskExt + ",'$.processing_revision')='integer' AND json_extract(" + validTaskExt + ",'$.processing_revision')=ds.processing_revision"
+	if db.Dialector.Name() == "postgres" {
+		taskLevel = "(t.ext->>'processing_level')"
+		sameRevision = "CAST(t.ext->'processing_revision' AS text)=CAST(ds.processing_revision AS text)"
+	}
+	// A later persisted stage can coexist with a current task submitted at a different level.
+	tasks := db.Table("tasks t").Select("1").
+		Where("t.dataset_id=d.dataset_id AND t.doc_id=d.id AND t.deleted_at IS NULL").
+		Where(`(t.created_at>p.updated_at OR t.updated_at>p.updated_at OR (
+			` + taskLevel + ` IN ('parsed','chunked','indexed') AND ` + taskLevel + `<>ds.processing_level AND ` + sameRevision + `
+			AND NOT EXISTS (
+				SELECT 1 FROM tasks newer
+				WHERE newer.dataset_id=t.dataset_id AND newer.doc_id=t.doc_id AND newer.deleted_at IS NULL
+				AND (newer.created_at>t.created_at OR (newer.created_at=t.created_at AND newer.id>t.id))
+			)
+		))`)
 	err := db.Table("(?) x", source).Select("DISTINCT d.id").
 		Joins("JOIN documents d ON d.id=x.effective_document_id AND d.dataset_id=x.target_dataset_id AND d.deleted_at IS NULL").
 		Joins("JOIN datasets ds ON ds.id=d.dataset_id").
 		Joins("LEFT JOIN document_processing_states p ON p.document_id=d.id AND p.dataset_id=d.dataset_id").
-		Where(`ds.processing_level <> 'stored' AND (p.document_id IS NULL OR p.parse_status NOT IN ('succeeded','failed') OR (ds.processing_level IN ('chunked','indexed') AND p.chunk_status NOT IN ('succeeded','failed')) OR (ds.processing_level='indexed' AND p.index_status NOT IN ('succeeded','failed')) OR EXISTS (SELECT 1 FROM tasks t WHERE t.dataset_id=d.dataset_id AND t.doc_id=d.id AND t.deleted_at IS NULL AND (t.created_at>p.updated_at OR t.updated_at>p.updated_at)))`).
+		Where(`ds.processing_level <> 'stored' AND (
+			p.document_id IS NULL OR p.parse_status NOT IN ('succeeded','failed')
+			OR (ds.processing_level IN ('chunked','indexed') AND p.chunk_status NOT IN ('succeeded','failed'))
+			OR (ds.processing_level='indexed' AND p.index_status NOT IN ('succeeded','failed'))
+			OR EXISTS (?)
+		)`, tasks).
 		Pluck("d.id", &ids).Error
 	if err != nil {
 		return out, err
@@ -165,7 +187,7 @@ func observeOperationProcessing(r *http.Request, db *gorm.DB, dataset string, ba
 	out.Metadata = metadata
 	result := make([]operationProcessing, 0, len(metadata))
 	for id, current := range metadata {
-		status := doc.DocumentProcessingStatus(current.ProcessingLevel, current.ProcessingState)
+		status := doc.ObservedDocumentProcessingStatus(current.ObservedProcessingLevel, current.ProcessingLevel, current.ProcessingState)
 		if status == "not_requested" {
 			status = "ready"
 		}

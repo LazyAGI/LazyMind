@@ -96,13 +96,13 @@ func currentImportDocuments(r *http.Request, db *gorm.DB, items []ImportQueueIte
 			if !ok {
 				continue
 			}
-			status := doc.DocumentProcessingStatus(value.ProcessingLevel, value.ProcessingState)
+			status := doc.ObservedDocumentProcessingStatus(value.ObservedProcessingLevel, value.ProcessingLevel, value.ProcessingState)
 			if status == "not_requested" {
 				status = "ready"
 			}
 			message := ""
-			if value.ProcessingError != nil {
-				status, message = "failed", value.ProcessingError.Message
+			if status == "failed" && value.ProcessingError != nil {
+				message = value.ProcessingError.Message
 			}
 			current[document.ID] = &ImportQueueDocument{DocumentID: document.ID, ProcessingStatus: status, ProcessingError: message}
 		}
@@ -113,20 +113,16 @@ func currentImportDocuments(r *http.Request, db *gorm.DB, items []ImportQueueIte
 	return result, nil
 }
 func paperProcessingStatus(ctx context.Context, db *gorm.DB, d orm.Document) (string, string, error) {
-	var ds orm.Dataset
-	if err := db.WithContext(ctx).Where("id=? AND deleted_at IS NULL", d.DatasetID).Take(&ds).Error; err != nil {
-		return "", "", err
-	}
-	if ds.ProcessingLevel == doc.ProcessingLevelStored {
-		return "ready", "", nil
-	}
-	state, _, diagnostic, err := doc.ObserveDocumentProcessingDetails(ctx, db, store.LazyLLMDB(), d)
+	current, err := doc.ObserveDocumentProcessingMetadata(ctx, db, store.LazyLLMDB(), d)
 	if err != nil {
 		return "", "", err
 	}
-	status := doc.DocumentProcessingStatus(ds.ProcessingLevel, state)
-	if diagnostic != nil {
-		return "failed", diagnostic.Message, nil
+	status := doc.DocumentBodyProcessingStatus(current.ObservedProcessingLevel, current.ProcessingState)
+	if current.ProcessingLevel == doc.ProcessingLevelStored || status == "not_requested" {
+		return "ready", "", nil
+	}
+	if status == "failed" {
+		return status, paperBodyProcessingError(current.ProcessingError), nil
 	}
 	return status, "", nil
 }

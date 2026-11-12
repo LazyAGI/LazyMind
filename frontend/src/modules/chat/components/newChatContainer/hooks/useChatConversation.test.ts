@@ -162,6 +162,29 @@ function createPreparedStream(clientConversationId: string) {
 }
 
 describe("useChatConversation regeneration recovery", () => {
+  it("keeps the send-time resource selection when opening the chat stream", async () => {
+    const { stream } = createMockStream();
+    const onOpenSSE = vi.fn(() => stream);
+    const { result } = renderConversation({ onOpenSSE });
+    const chatConfigSnapshot = {
+      knowledgeBaseId: ["selected-kb"],
+      databaseBaseId: "selected-db",
+      creators: ["selected-creator"],
+      tags: ["selected-tag"],
+    };
+
+    await act(async () => {
+      await result.current.sendMessage({ text: "Search resources", chatConfigSnapshot });
+    });
+
+    expect(onOpenSSE).toHaveBeenCalledWith(
+      expect.any(Array),
+      ChatConversationsRequestActionEnum.ChatActionNext,
+      {},
+      expect.objectContaining({ chat_config_snapshot: chatConfigSnapshot }),
+    );
+  });
+
   it('keeps the request-scoped paper selection when opening the chat stream', async () => {
     const { stream } = createMockStream();
     const onOpenSSE = vi.fn(() => stream);

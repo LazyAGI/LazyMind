@@ -12,6 +12,7 @@ from httpx import HTTPStatusError, ReadTimeout, Request, Response
 from lazymind.common.token_estimation import estimate_tokens
 from lazymind.document_tools.paper import api, contracts, literature_review, workflow
 from lazymind.document_tools.paper.review import materials as review_materials
+from lazymind.document_tools.paper.review import retrieval as review_retrieval
 from lazymind.document_tools.paper.runtime_events import current_events
 
 
@@ -42,6 +43,11 @@ def selection(monkeypatch):
         monkeypatch.setattr(review_materials, 'WriterToolBase', lambda **_: SimpleNamespace(_call_llm_structured=choose))
         return calls
     return use
+
+
+@pytest.fixture
+def embedding_ready(monkeypatch):
+    monkeypatch.setattr(review_materials, 'is_model_role_available', lambda role: role == 'embed_main', raising=False)
 
 
 def test_scope_selects_requested_papers_and_keeps_background(paper, selection):
@@ -103,7 +109,7 @@ def test_background_alone_is_not_a_review(paper, selection):
         review_materials.prepare({'papers': [paper]}, [])
 
 
-def test_kb_selection_reads_only_chosen_documents_and_merges_hits(monkeypatch, selection):
+def test_kb_selection_reads_only_chosen_documents_and_merges_hits(monkeypatch, selection, embedding_ready):
     from lazymind.chat.engine.tools.lazy_kb import KBToolkit
     calls = selection({'material_roles': {}, 'queries': {'timed learning': 4}},
                       {'material_roles': {'M1': 'paper', 'M2': 'exclude'}, 'queries': {}})
@@ -123,7 +129,8 @@ def test_kb_selection_reads_only_chosen_documents_and_merges_hits(monkeypatch, s
     assert result[0]['reading']['content_type'] == 'knowledge_base_document'
 
 
-def test_kb_candidates_are_selected_together_with_existing_papers(paper, monkeypatch, selection):
+def test_kb_candidates_are_selected_together_with_existing_papers(
+        paper, monkeypatch, selection, embedding_ready):
     from lazymind.chat.engine.tools.lazy_kb import KBToolkit
     calls = selection({'material_roles': {'M1': 'paper'}, 'queries': {'related methods': 3}},
                       {'material_roles': {'M1': 'paper'}, 'queries': {}})
@@ -236,7 +243,8 @@ def test_invalid_default_range_is_rejected_before_model_calls(selection):
     assert calls == []
 
 
-def test_all_queries_and_sources_share_the_remaining_budget(paper, sciverse, selection, monkeypatch):
+def test_all_queries_and_sources_share_the_remaining_budget(
+        paper, sciverse, selection, monkeypatch, embedding_ready):
     from lazymind.chat.engine.tools.lazy_kb import KBToolkit
     selection({'material_roles': {'M1': 'paper'}, 'queries': {'methods': 50, 'applications': 50},
                'external_queries': {'related': 50}},
@@ -346,7 +354,8 @@ def test_sciverse_duplicate_preserves_uploaded_identity_and_skips_read(paper, sc
     sciverse.get_content.assert_not_called()
 
 
-def test_kb_and_sciverse_expand_together_without_querying_other_libraries(paper, sciverse, selection, monkeypatch):
+def test_kb_and_sciverse_expand_together_without_querying_other_libraries(
+        paper, sciverse, selection, monkeypatch, embedding_ready):
     from lazymind.chat.engine.tools.lazy_kb import KBToolkit
     selection({'material_roles': {'M1': 'paper'}, 'queries': {'learning': 3},
                'external_queries': {'related': 4}},
@@ -375,7 +384,8 @@ def test_search_failure_keeps_supplied_papers_and_discloses_it(paper, sciverse, 
 
 
 @pytest.mark.parametrize('role', ['paper', 'background'])
-def test_kb_read_failure_keeps_actual_excerpt_and_other_sources(paper, selection, monkeypatch, role):
+def test_kb_read_failure_keeps_actual_excerpt_and_other_sources(
+        paper, selection, monkeypatch, role, embedding_ready):
     from lazymind.chat.engine.tools.lazy_kb import KBToolkit
     selection({'material_roles': {'M1': 'paper'}, 'queries': {'learning': 3}},
               {'material_roles': {'M1': role}, 'queries': {}})
@@ -389,6 +399,111 @@ def test_kb_read_failure_keeps_actual_excerpt_and_other_sources(paper, selection
     assert result[1].get('review_role', 'paper') == role
     assert result[1]['reading'] == {'content_type': 'knowledge_base_excerpt', 'truncated': True}
     assert '知识库全文读取失败' in result[0]['retrieval_warnings'][0]
+
+
+@pytest.mark.parametrize(('papers', 'roles'), [
+    ([], {}),
+    ([{'id': 'brief', 'title': 'System brief', 'text': 'Background constraints'}], {'M1': 'background'}),
+], ids=['no-materials', 'background-only'])
+def test_kb_only_without_embedding_raises_actionable_dependency_error(
+        papers, roles, monkeypatch, selection):
+    from lazymind.chat.engine.tools.lazy_kb import KBToolkit
+    selection({'material_roles': roles, 'queries': {'timed learning': 4}})
+    monkeypatch.setattr(review_materials, 'is_model_role_available', lambda _role: False, raising=False)
+    construct = Mock(side_effect=AssertionError('KBToolkit must not be constructed'))
+    monkeypatch.setattr(KBToolkit, '__init__', construct)
+    error_type = getattr(review_retrieval, 'EmbeddingNotReady', RuntimeError)
+
+    with pytest.raises(error_type, match='文本向量模型.*模型默认服务') as unavailable:
+        review_materials.prepare({'topic': 'Learning', 'papers': papers}, ['library'])
+
+    assert unavailable.type is review_retrieval.EmbeddingNotReady
+    construct.assert_not_called()
+
+
+def test_supplied_paper_survives_when_embedding_is_unavailable(paper, monkeypatch, selection):
+    from lazymind.chat.engine.tools.lazy_kb import KBToolkit
+    selection({'material_roles': {'M1': 'paper'}, 'queries': {'related methods': 3}})
+    monkeypatch.setattr(review_materials, 'is_model_role_available', lambda _role: False, raising=False)
+    construct = Mock(side_effect=AssertionError('KBToolkit must not be constructed'))
+    monkeypatch.setattr(KBToolkit, '__init__', construct)
+
+    result = review_materials.prepare({'papers': [paper]}, ['library'])
+
+    assert {key: value for key, value in result[0].items() if key != 'retrieval_warnings'} == paper
+    assert any('文本向量模型' in warning and '模型默认服务' in warning
+               for warning in result[0]['retrieval_warnings'])
+    assert 'retrieval_warnings' not in paper
+    construct.assert_not_called()
+
+
+def test_satisfied_target_does_not_warn_about_unused_embedding(paper, monkeypatch, selection):
+    from lazymind.chat.engine.tools.lazy_kb import KBToolkit
+    selection({'material_roles': {'M1': 'paper'}, 'requested_paper_count': 1,
+               'queries': {'unused expansion': 1}})
+    monkeypatch.setattr(review_materials, 'is_model_role_available', lambda _role: False)
+    construct = Mock(side_effect=AssertionError('KBToolkit must not be constructed'))
+    monkeypatch.setattr(KBToolkit, '__init__', construct)
+
+    result = review_materials.prepare({'papers': [paper]}, ['library'])
+
+    assert result == [paper]
+    assert 'retrieval_warnings' not in result[0]
+    construct.assert_not_called()
+
+
+def test_external_search_remains_real_evidence_when_embedding_is_unavailable(
+        sciverse, monkeypatch, selection):
+    from lazymind.chat.engine.tools.lazy_kb import KBToolkit
+    selection({'material_roles': {}, 'queries': {'library methods': 3},
+               'external_queries': {'related': 3}},
+              {'material_roles': {'M1': 'paper'}, 'queries': {}})
+    monkeypatch.setattr(review_materials, 'is_model_role_available', lambda _role: False, raising=False)
+    construct = Mock(side_effect=AssertionError('KBToolkit must not be constructed'))
+    monkeypatch.setattr(KBToolkit, '__init__', construct)
+
+    result = review_materials.prepare({'topic': 'Learning'}, ['library'])
+
+    assert [(item['title'], item['text'], item['source']) for item in result] == [
+        ('Related research', 'Complete Sciverse paper', 'sciverse'),
+    ]
+    assert any('文本向量模型' in warning and '模型默认服务' in warning
+               for warning in result[0]['retrieval_warnings'])
+    sciverse.meta_search.assert_called_once()
+    construct.assert_not_called()
+
+
+def test_unavailable_embedding_cannot_spend_external_retrieval_budget(
+        sciverse, monkeypatch, selection):
+    from lazymind.chat.engine.tools.lazy_kb import KBToolkit
+    selection({'material_roles': {}, 'requested_paper_count': 1,
+               'queries': {'KB A': 1, 'KB B': 1, 'KB C': 1},
+               'external_queries': {'external evidence': 1}},
+              {'material_roles': {'M1': 'paper'}, 'queries': {}})
+    monkeypatch.setattr(review_materials, 'is_model_role_available', lambda _role: False)
+    construct = Mock(side_effect=AssertionError('KBToolkit must not be constructed'))
+    monkeypatch.setattr(KBToolkit, '__init__', construct)
+
+    result = review_materials.prepare({'topic': 'Learning'}, ['library'])
+
+    assert [(item['title'], item['text'], item['source']) for item in result] == [
+        ('Related research', 'Complete Sciverse paper', 'sciverse'),
+    ]
+    assert any('文本向量模型' in warning and '模型默认服务' in warning
+               for warning in result[0]['retrieval_warnings'])
+    sciverse.meta_search.assert_called_once_with(
+        query='external evidence', page_size=3, include_content=False, year_from=None, year_to=None)
+    construct.assert_not_called()
+
+
+def test_unexpected_kb_key_error_is_not_treated_as_retrieval_degradation(
+        monkeypatch, selection, embedding_ready):
+    from lazymind.chat.engine.tools.lazy_kb import KBToolkit
+    selection({'material_roles': {}, 'queries': {'timed learning': 4}})
+    monkeypatch.setattr(KBToolkit, 'kb_search', Mock(side_effect=KeyError('unexpected schema')))
+
+    with pytest.raises(KeyError, match='unexpected schema'):
+        review_materials.prepare({'topic': 'Learning'}, ['library'])
 
 
 def test_no_search_results_cannot_become_a_successful_review(sciverse, selection):
