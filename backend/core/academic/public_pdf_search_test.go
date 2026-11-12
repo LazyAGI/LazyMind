@@ -117,6 +117,7 @@ func TestPublicPDFSearchKeepsResolvedOfficialPaperLinks(t *testing.T) {
 		return previous.RoundTrip(r)
 	})
 	t.Cleanup(func() { http.DefaultTransport = previous })
+	mockArxivClient(t, http.DefaultTransport)
 	results, err := searchPublicPDFs(t.Context(), "u", houlsbyTitle)
 	if err != nil {
 		t.Fatal(err)

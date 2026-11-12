@@ -327,6 +327,7 @@ func TestUnifiedImportPinsMetadataBeforeBindingAndReusesItAfterFailure(t *testin
 		return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(xml)), Request: r}, nil
 	})
 	t.Cleanup(func() { http.DefaultTransport = previous })
+	mockArxivClient(t, http.DefaultTransport)
 	db.Callback().Create().Before("gorm:create").Register("fail-pinned-association", func(tx *gorm.DB) {
 		if tx.Statement.Table == "academic_work_documents" {
 			tx.AddError(errors.New("association temporarily unavailable"))

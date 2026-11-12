@@ -8,6 +8,9 @@ import (
 	"strings"
 )
 
+// Production clients retain the official endpoint and process-wide request gate.
+var newArxivClient = arxivsource.NewClient
+
 var citationYearTitlePattern = regexp.MustCompile(`(?i)(?:\(|\b)(?:19|20)\d{2}[a-z]?\b(?:\)|\.)?\s*[.,:]?\s*(.+)$`)
 var brokenWordPattern = regexp.MustCompile(`([\p{L}\p{N}])-\s*\p{M}*\s+([\p{L}\p{N}])`)
 
@@ -80,7 +83,7 @@ func resolveWithArxiv(ctx context.Context, citation string) (WorkInput, bool, er
 	if len(query) > 300 {
 		query = query[:300]
 	}
-	papers, err := arxivsource.NewClient().Search(ctx, field+strconv.Quote(query), 5)
+	papers, err := newArxivClient().Search(ctx, field+strconv.Quote(query), 5)
 	if err != nil {
 		return WorkInput{}, false, err
 	}

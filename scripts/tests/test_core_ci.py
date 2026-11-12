@@ -1,5 +1,6 @@
 import os
 from pathlib import Path
+import re
 import subprocess
 import sys
 import tempfile
@@ -12,19 +13,30 @@ WORKFLOW = SCRIPT.parents[1] / '.github/workflows/ci.yml'
 SHARDS = ('root', 'chat', 'workflow', 'other')
 PACKAGES = (
     'lazymind/core',
+    'lazymind/core/academic',
     'lazymind/core/chat',
-    'lazymind/core/chat/child',
+    'lazymind/core/migrate',
+    'lazymind/core/migrations',
     'lazymind/core/workflow',
+    'lazymind/core/academic/child',
+    'lazymind/core/chat/child',
+    'lazymind/core/migrate/child',
+    'lazymind/core/migrations/child',
     'lazymind/core/workflow/child',
     'lazymind/core/new-package',
     'lazymind/core/package-without-tests',
 )
 
 
-def workflow_step(name):
+def workflow_step_block(name):
     workflow = WORKFLOW.read_text(encoding='utf-8')
     start = workflow.index(f'      - name: {name}\n')
-    step = workflow[start:].splitlines()
+    end = workflow.find('\n      - ', start + 1)
+    return workflow[start:end if end >= 0 else None]
+
+
+def workflow_step(name):
+    step = workflow_step_block(name).splitlines()
     run = step.index('        run: |')
     lines = []
     for line in step[run + 1:]:
@@ -41,20 +53,23 @@ class CoreTestShardTests(unittest.TestCase):
             capture_output=True, text=True,
         )
 
-    def test_heavy_shards_select_only_the_exact_package(self):
-        for shard, package in (('root', 'lazymind/core'),
-                               ('chat', 'lazymind/core/chat'),
-                               ('workflow', 'lazymind/core/workflow')):
+    def test_heavy_packages_are_spread_across_the_existing_shards(self):
+        for shard, packages in (
+            ('root', ['lazymind/core', 'lazymind/core/academic']),
+            ('chat', ['lazymind/core/chat', 'lazymind/core/migrations']),
+            ('workflow', ['lazymind/core/migrate', 'lazymind/core/workflow']),
+        ):
             with self.subTest(shard=shard):
                 result = self.select(shard)
                 self.assertEqual(result.returncode, 0, result.stderr)
-                self.assertEqual(result.stdout.splitlines(), [package])
+                self.assertEqual(result.stdout.splitlines(), packages)
 
     def test_other_keeps_subpackages_new_packages_and_packages_without_tests(self):
         result = self.select('other')
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stdout.splitlines(), [
-            'lazymind/core/chat/child', 'lazymind/core/workflow/child',
+            'lazymind/core/academic/child', 'lazymind/core/chat/child',
+            'lazymind/core/migrate/child', 'lazymind/core/migrations/child', 'lazymind/core/workflow/child',
             'lazymind/core/new-package', 'lazymind/core/package-without-tests',
         ])
 
@@ -82,8 +97,7 @@ class CoreTestShardTests(unittest.TestCase):
     def test_missing_shard_packages_fail_instead_of_defaulting_to_root(self):
         for shard in SHARDS:
             with self.subTest(shard=shard):
-                packages = (PACKAGES[:2] + ('lazymind/core/workflow',)
-                            if shard == 'other' else ('lazymind/core/new-package',))
+                packages = PACKAGES[:6] if shard == 'other' else ('lazymind/core/new-package',)
                 result = self.select(shard, packages)
                 self.assertNotEqual(result.returncode, 0)
                 self.assertEqual(result.stdout, '')
@@ -149,6 +163,51 @@ class CoreCIWorkflowTests(unittest.TestCase):
         (self.profiles / 'coverage-core-chat.out').write_text('mode: count\n')
         result = self.run_step('Merge backend core coverage')
         self.assertNotEqual(result.returncode, 0)
+
+    def test_build_cache_is_distinct_per_shard_and_revision(self):
+        block = workflow_step_block('Cache core shard build outputs')
+        key = next(line.strip()[5:] for line in block.splitlines() if line.startswith('          key: '))
+        restore = block.split('          restore-keys: |\n', 1)[1].strip()
+
+        def render(template, shard='root', revision='first', dependency='lock-a', **overrides):
+            values = {
+                'runner.os': 'Linux', 'runner.arch': 'X64',
+                'steps.core-go-cache.outputs.image': 'ubuntu26',
+                'steps.core-go-cache.outputs.version': 'go1.25.11',
+                'matrix.shard': shard, 'github.sha': revision, **overrides,
+            }
+            rendered = re.sub(r'\$\{\{ hashFiles\(.*?\) \}\}', dependency, template)
+            for name, value in values.items():
+                rendered = rendered.replace('${{ ' + name + ' }}', value)
+            self.assertNotIn('${{', rendered)
+            return rendered
+
+        self.assertEqual(len({render(key, shard=shard) for shard in SHARDS}), 4)
+        self.assertNotEqual(render(key), render(key, revision='second'))
+        for shard in SHARDS:
+            self.assertTrue(render(key, shard=shard, revision='second').startswith(render(restore, shard=shard)))
+        self.assertFalse(render(key, shard='chat').startswith(render(restore, shard='root')))
+        self.assertNotEqual(render(restore), render(restore, dependency='lock-b'))
+        for name, value in (('runner.os', 'Windows'), ('runner.arch', 'ARM64'),
+                            ('steps.core-go-cache.outputs.image', 'ubuntu28'),
+                            ('steps.core-go-cache.outputs.version', 'go1.26.0')):
+            with self.subTest(changed=name):
+                self.assertNotEqual(render(restore), render(restore, **{name: value}))
+        for dependency in ('backend/core/go.mod', 'backend/core/go.sum',
+                           'tests/backend/core/go.mod', 'tests/backend/core/go.sum'):
+            self.assertIn(dependency, key)
+
+    def test_shared_module_cache_has_only_one_writer(self):
+        restore = workflow_step_block('Restore core Go modules')
+        save = workflow_step_block('Save core Go modules')
+        self.assertIn('uses: actions/cache/restore@v4', restore)
+        self.assertNotIn('matrix.shard', restore)
+        self.assertIn("if: matrix.shard == 'other' && steps.core-go-modules.outputs.cache-hit != 'true'", save)
+        self.assertIn('uses: actions/cache/save@v4', save)
+        self.assertIn('key: ${{ steps.core-go-modules.outputs.cache-primary-key }}', save)
+        self.assertIn('path: ${{ steps.core-go-cache.outputs.modules }}', save)
+        self.assertIn('path: ${{ steps.core-go-cache.outputs.build }}',
+                      workflow_step_block('Cache core shard build outputs'))
 
 
 if __name__ == '__main__':

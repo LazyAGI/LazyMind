@@ -39,6 +39,7 @@ func TestPaperReferencesListsCluesThenRegistersOnlySelectedIdentity(t *testing.T
 		return &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": []string{"application/atom+xml"}}, Body: io.NopCloser(strings.NewReader(body)), Request: r}, nil
 	})
 	t.Cleanup(func() { http.DefaultTransport = transport })
+	mockArxivClient(t, http.DefaultTransport)
 	var first struct {
 		References []paperReferenceClue `json:"references"`
 		Next       string               `json:"next_cursor"`

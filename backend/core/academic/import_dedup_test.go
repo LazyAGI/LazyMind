@@ -120,6 +120,7 @@ func TestLocalPreviewDoesNotQueryArxiv(t *testing.T) {
 		return &http.Response{StatusCode: 503, Body: io.NopCloser(strings.NewReader("unavailable")), Header: http.Header{}, Request: r}, nil
 	})
 	t.Cleanup(func() { http.DefaultTransport = previous })
+	mockArxivClient(t, http.DefaultTransport)
 	w := httptest.NewRecorder()
 	PreviewImport(w, paperRequest(`{"target_dataset_id":"papers","work_ids":["a"],"resolve_external":false}`))
 	if w.Code != 200 || calls != 0 {

@@ -454,9 +454,33 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: '1.25.11'
-          cache-dependency-path: |
-            backend/core/go.sum
-            tests/backend/core/go.sum
+          cache: false
+
+      - name: Resolve core Go cache paths
+        id: core-go-cache
+        working-directory: backend/core
+        run: |
+          {
+            echo "modules=$(go env GOMODCACHE)"
+            echo "build=$(go env GOCACHE)"
+            echo "version=$(go env GOVERSION)"
+            echo "image=${ImageOS:-$RUNNER_OS}"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Restore core Go modules
+        id: core-go-modules
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ steps.core-go-cache.outputs.modules }}
+          key: core-go-modules-v2-${{ runner.os }}-${{ runner.arch }}-${{ steps.core-go-cache.outputs.version }}-${{ hashFiles('backend/core/go.mod', 'backend/core/go.sum', 'tests/backend/core/go.mod', 'tests/backend/core/go.sum') }}
+
+      - name: Cache core shard build outputs
+        uses: actions/cache@v4
+        with:
+          path: ${{ steps.core-go-cache.outputs.build }}
+          key: core-go-build-v2-${{ runner.os }}-${{ runner.arch }}-${{ steps.core-go-cache.outputs.image }}-${{ steps.core-go-cache.outputs.version }}-${{ matrix.shard }}-${{ hashFiles('backend/core/go.mod', 'backend/core/go.sum', 'tests/backend/core/go.mod', 'tests/backend/core/go.sum') }}-${{ github.sha }}
+          restore-keys: |
+            core-go-build-v2-${{ runner.os }}-${{ runner.arch }}-${{ steps.core-go-cache.outputs.image }}-${{ steps.core-go-cache.outputs.version }}-${{ matrix.shard }}-${{ hashFiles('backend/core/go.mod', 'backend/core/go.sum', 'tests/backend/core/go.mod', 'tests/backend/core/go.sum') }}-
 
       - name: Test core CI partitioning and aggregation
         if: matrix.shard == 'other'
@@ -496,6 +520,13 @@ jobs:
       - name: Test backend core integration module
         if: matrix.shard == 'other'
         run: cd tests/backend/core && go mod tidy && go test ./... -v -timeout 40m
+
+      - name: Save core Go modules
+        if: matrix.shard == 'other' && steps.core-go-modules.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ steps.core-go-cache.outputs.modules }}
+          key: ${{ steps.core-go-modules.outputs.cache-primary-key }}
 
       - name: Upload backend core shard coverage
         uses: actions/upload-artifact@v4

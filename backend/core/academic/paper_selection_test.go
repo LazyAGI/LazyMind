@@ -246,6 +246,7 @@ func mockPaperTransport(t *testing.T, fn func(*http.Request) (*http.Response, er
 	previous := http.DefaultTransport
 	http.DefaultTransport = sourceTransport(fn)
 	t.Cleanup(func() { http.DefaultTransport = previous })
+	mockArxivClient(t, http.DefaultTransport)
 }
 func paperTestResponse(r *http.Request, status int, body string) *http.Response {
 	return &http.Response{StatusCode: status, Header: http.Header{"Content-Type": {"application/json"}}, Body: io.NopCloser(strings.NewReader(body)), Request: r}

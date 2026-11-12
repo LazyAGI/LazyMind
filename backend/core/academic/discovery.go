@@ -12,7 +12,6 @@ import (
 	"strings"
 	"time"
 
-	"lazymind/core/academic/arxivsource"
 	"lazymind/core/common/orm"
 	"lazymind/core/store"
 )
@@ -336,7 +335,7 @@ func discoverPaperPage(ctx context.Context, record orm.AcademicExpansion, source
 	case "openalex":
 		return searchOpenAlex(ctx, record, request)
 	case "arxiv":
-		result, err := arxivsource.NewClient().SearchPage(ctx, request.Query, request.MaxResults, request.position.Offset)
+		result, err := newArxivClient().SearchPage(ctx, request.Query, request.MaxResults, request.position.Offset)
 		if err != nil {
 			return discoveredPage{}, err
 		}

@@ -177,4 +177,5 @@ func installFallbackTransport(t *testing.T, response func(string) (int, string))
 		return &http.Response{StatusCode: status, Body: io.NopCloser(strings.NewReader(body)), Header: make(http.Header), Request: r}, nil
 	})
 	t.Cleanup(func() { http.DefaultTransport = previous })
+	mockArxivClient(t, http.DefaultTransport)
 }

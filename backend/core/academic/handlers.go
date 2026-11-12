@@ -20,7 +20,6 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 
-	"lazymind/core/academic/arxivsource"
 	"lazymind/core/acl"
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
@@ -717,7 +716,7 @@ func referenceMetadata(ctx context.Context, ref *orm.AcademicReference, allowExt
 		if base == id {
 			id += version
 		}
-		metadata, err := arxivsource.NewClient().Lookup(ctx, id)
+		metadata, err := newArxivClient().Lookup(ctx, id)
 		if err != nil {
 			return WorkInput{}, err
 		}
@@ -1351,7 +1350,7 @@ func PreviewImport(w http.ResponseWriter, r *http.Request) {
 			sourceInput, hasSource := previewInputs[work.ID]
 			verifiedSource := hasSource && sourceInput.Provider == "arxiv"
 			if work.ID != linkedWorkID && resolveExternal && !verifiedSource {
-				metadata, e := arxivsource.NewClient().Lookup(r.Context(), work.ArxivIDBase+version)
+				metadata, e := newArxivClient().Lookup(r.Context(), work.ArxivIDBase+version)
 				if e != nil {
 					replyArxivImportError(w, e)
 					return
@@ -1397,7 +1396,7 @@ func PreviewImport(w http.ResponseWriter, r *http.Request) {
 		if len(candidates) > 0 {
 			primary := candidates[0]
 			if primary.SourceProvider == "arxiv" && primary.Version == "" {
-				metadata, e := arxivsource.NewClient().Lookup(r.Context(), primary.URL)
+				metadata, e := newArxivClient().Lookup(r.Context(), primary.URL)
 				if e != nil {
 					replyArxivImportError(w, e)
 					return

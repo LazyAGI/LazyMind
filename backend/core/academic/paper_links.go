@@ -35,7 +35,7 @@ func lookupPaperLink(ctx context.Context, input string) (WorkInput, error) {
 
 func lookupPaperLinkMetadata(ctx context.Context, input string) (WorkInput, error) {
 	if _, err := arxivsource.Parse(input); err == nil {
-		metadata, err := arxivsource.NewClient().Lookup(ctx, input)
+		metadata, err := newArxivClient().Lookup(ctx, input)
 		if err != nil {
 			return WorkInput{}, err
 		}

@@ -266,7 +266,7 @@ func withArxivSource[T any](ctx context.Context, request func() (T, error)) (T, 
 }
 
 func lookupImportArxiv(ctx context.Context, id string) (arxivsource.Metadata, error) {
-	return withArxivSource(ctx, func() (arxivsource.Metadata, error) { return arxivsource.NewClient().Lookup(ctx, id) })
+	return withArxivSource(ctx, func() (arxivsource.Metadata, error) { return newArxivClient().Lookup(ctx, id) })
 }
 
 func paperSelectionFromSource(ctx context.Context, db *gorm.DB, paper capability.PaperSelection, records []sourceRecord) (capability.PaperSelection, error) {

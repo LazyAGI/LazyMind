@@ -36,6 +36,7 @@ func TestBibliographySavesAndQueuesWithoutNetworkAndReplayDoesNotDuplicateJob(t 
 				return old.RoundTrip(r)
 			})
 			t.Cleanup(func() { http.DefaultTransport = old })
+			mockArxivClient(t, http.DefaultTransport)
 			input := createImportRequest{EntryType: "bibliography", TargetDatasetID: "papers", IdempotencyKey: "first", Format: format, Items: []selectedImportItem{{Paper: libraryDraft("p1", "Original title", "10.1234/test")}}}
 			for i := 0; i < 2; i++ {
 				response := libraryRequest(t, "POST", "/imports", "papers", "owner", input)
@@ -104,6 +105,7 @@ func TestBibliographyMetadataProviderFillsOnlyEmptyFields(t *testing.T) {
 		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(`{"message":{"DOI":"10.1234/test","title":["Remote title"],"author":[{"given":"Jane","family":"Doe"}],"container-title":["Remote journal"],"issued":{"date-parts":[[2024]]}}}`)), Header: make(http.Header)}, nil
 	})
 	t.Cleanup(func() { http.DefaultTransport = old })
+	mockArxivClient(t, http.DefaultTransport)
 	prepared, prepareErr := prepareSourceTarget(t.Context(), sourceImportCaller(batch), batch.TargetDatasetID)
 	if prepareErr != nil {
 		t.Fatal(prepareErr)
@@ -135,6 +137,7 @@ func TestBibliographyMetadataOutageStillFindsPDFAndRetainsDiagnostic(t *testing.
 		return &http.Response{StatusCode: 503, Header: make(http.Header), Body: io.NopCloser(strings.NewReader("")), Request: r}, nil
 	})
 	t.Cleanup(func() { http.DefaultTransport = old })
+	mockArxivClient(t, http.DefaultTransport)
 	client := &http.Client{Transport: importErrorTransport(func(r *http.Request) (*http.Response, error) {
 		body := `{"best_oa_location":{"url_for_pdf":"https://example.org/paper.pdf"}}`
 		if r.URL.Host == "example.org" {
@@ -263,6 +266,7 @@ func TestBibliographyFormatsDiscoverPDFForeachBatchItem(t *testing.T) {
 				return &http.Response{StatusCode: 503, Header: make(http.Header), Body: io.NopCloser(strings.NewReader("")), Request: r}, nil
 			})
 			t.Cleanup(func() { http.DefaultTransport = old })
+			mockArxivClient(t, http.DefaultTransport)
 			client := &http.Client{Transport: importErrorTransport(func(r *http.Request) (*http.Response, error) {
 				body := `{"results":[]}`
 				if r.URL.Host == "api.unpaywall.org" {

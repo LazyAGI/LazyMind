@@ -4,9 +4,10 @@ import sys
 
 
 PACKAGES = {
-    'root': 'lazymind/core',
-    'chat': 'lazymind/core/chat',
-    'workflow': 'lazymind/core/workflow',
+    # Spread the three long-running packages from #966 across separate runners.
+    'root': {'lazymind/core', 'lazymind/core/academic'},
+    'chat': {'lazymind/core/chat', 'lazymind/core/migrations'},
+    'workflow': {'lazymind/core/workflow', 'lazymind/core/migrate'},
 }
 
 
@@ -16,9 +17,10 @@ def main():
     args = parser.parse_args()
     packages = [line.strip() for line in sys.stdin if line.strip()]
     if args.shard == 'other':
-        selected = [package for package in packages if package not in PACKAGES.values()]
+        assigned = set().union(*PACKAGES.values())
+        selected = [package for package in packages if package not in assigned]
     else:
-        selected = [package for package in packages if package == PACKAGES[args.shard]]
+        selected = [package for package in packages if package in PACKAGES[args.shard]]
     if not selected:
         parser.error(f'no packages selected for core shard {args.shard}')
     print('\n'.join(selected))

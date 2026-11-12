@@ -121,6 +121,7 @@ func TestReferenceMetadataExplicitArxivReferenceResolution(t *testing.T) {
 				return &http.Response{StatusCode: tc.status, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(houlsbyAtom(tc.base, "v1"))), Request: r}, nil
 			})
 			t.Cleanup(func() { http.DefaultTransport = old })
+			mockArxivClient(t, http.DefaultTransport)
 			ref := orm.AcademicReference{ID: "screenshot", RawText: houlsbyCitation, ArxivIDBase: "1902.00751", PublicationYear: extractYear(houlsbyCitation), AuthorsJSON: marshal([]string{}), BBoxJSON: marshal([]string{}), SegmentIDsJSON: marshal([]string{})}
 			if e := db.Create(&ref).Error; e != nil {
 				t.Fatal(e)
@@ -257,6 +258,7 @@ func TestReferenceMetadataPreviewImportLibraryRoundTrip(t *testing.T) {
 		return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(`{"items":[{"dataset_id":"papers","exists":false,"allowed":true}],"source_map":{},"code":200,"data":[]}`)), Request: r}, nil
 	})
 	t.Cleanup(func() { http.DefaultTransport = old })
+	mockArxivClient(t, http.DefaultTransport)
 	t.Setenv("LAZYMIND_SCAN_CONTROL_PLANE_URL", "http://scan.test")
 	items := splitReferences("[1] " + houlsbyCitation)
 	if len(items) != 1 {
@@ -347,6 +349,7 @@ func TestReferenceMetadataOpenAlexAuthorsArePreserved(t *testing.T) {
 		return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(body)), Request: r}, nil
 	})
 	t.Cleanup(func() { http.DefaultTransport = old })
+	mockArxivClient(t, http.DefaultTransport)
 	ref := orm.AcademicReference{ID: "oa-authors", RawText: "A. Example. 2024. A sufficiently long paper title.", AuthorsJSON: marshal([]string{}), BBoxJSON: marshal([]string{}), SegmentIDsJSON: marshal([]string{})}
 	if err := db.Create(&ref).Error; err != nil {
 		t.Fatal(err)
@@ -386,6 +389,7 @@ func referenceVersionPreview(t *testing.T, resolved bool) {
 		return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(body)), Request: r}, nil
 	})
 	t.Cleanup(func() { http.DefaultTransport = old })
+	mockArxivClient(t, http.DefaultTransport)
 	ref := orm.AcademicReference{ID: "cited-v1", SourceDocumentID: "a", RawText: strings.ReplaceAll(houlsbyCitation, "1902.00751", "1902.00751v1"), ArxivIDBase: "1902.00751", PublicationYear: 2019, AuthorsJSON: marshal([]string{}), BBoxJSON: marshal([]string{}), SegmentIDsJSON: marshal([]string{})}
 	if resolved {
 		work, _, err := findOrCreateWork(t.Context(), db.DB, WorkInput{Title: houlsbyCitation, Year: 1902, ArxivID: "1902.00751"})
@@ -482,6 +486,7 @@ func TestReferenceMetadataPreviewReusesLookupsAndRejectsConflictingVersions(t *t
 				return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(body)), Request: r}, nil
 			})
 			t.Cleanup(func() { http.DefaultTransport = old })
+			mockArxivClient(t, http.DefaultTransport)
 			for index, id := range []string{"one", "two"} {
 				raw := houlsbyCitation
 				if conflict {
@@ -548,6 +553,7 @@ func TestConversationVersionedArxivImportLooksUpBibliography(t *testing.T) {
 		return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(houlsbyAtom("1902.00751", "v1"))), Request: r}, nil
 	})
 	t.Cleanup(func() { http.DefaultTransport = old })
+	mockArxivClient(t, http.DefaultTransport)
 	request := httptest.NewRequest("POST", "/academic/imports", strings.NewReader(`{"source_context":{"conversation_id":"source-chat","history_id":"source-answer"},"source_ids":["1"],"target_dataset_id":"target","idempotency_key":"versioned-source"}`))
 	request.Header.Set("X-User-Id", "alice")
 	response := httptest.NewRecorder()
