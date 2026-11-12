@@ -13,7 +13,6 @@ import { inferSourceKind } from "@/modules/dataSource/utils/scanAccessors";
 import { isAdminRole } from "@/modules/dataSource/utils/role";
 import { CLOUD_DOCUMENTS_PATH } from "../utils/cloudDocumentUrls";
 import { markCloudDocumentConnectionSuccess } from "../utils/cloudDocumentOnboarding";
-import { useRAGComponent } from "../contexts/RAGComponentContext";
 
 export type LocalChatSettingSource = SourceChatSettingEntry & {
   bindings: BindingChatSettingEntry[];
@@ -33,8 +32,6 @@ const getEnabledBindingIds = (sources: LocalChatSettingSource[]) =>
 export function useLocalDataSourceSettings() {
   const { t } = useTranslation();
   const navigate = useNavigate();
-  const { availability: ragAvailability } = useRAGComponent();
-  const scanAvailable = ragAvailability === "ready";
   const [loading, setLoading] = useState(true);
   const [localSourceCount, setLocalSourceCount] = useState(0);
   const [localChatSources, setLocalChatSources] = useState<LocalChatSettingSource[]>([]);
@@ -44,14 +41,9 @@ export function useLocalDataSourceSettings() {
   const [chatSettingsModalOpen, setChatSettingsModalOpen] = useState(false);
   const [selectedBindingIds, setSelectedBindingIds] = useState<string[]>([]);
   const chatSettingsRequestSeqRef = useRef(0);
-  const canCreateLocalSource =
-    scanAvailable && isAdminRole(AgentAppsAuth.getUserInfo()?.role);
+  const canCreateLocalSource = isAdminRole(AgentAppsAuth.getUserInfo()?.role);
 
   const refreshLocalSourceCount = useCallback(async () => {
-    if (!scanAvailable) {
-      setLocalSourceCount(0);
-      return;
-    }
     try {
       const response = await dataSourceScanApi.listSources({ page: 1, pageSize: 200 });
       const items = (response.data.items || []) as ScanV2Source[];
@@ -59,15 +51,9 @@ export function useLocalDataSourceSettings() {
     } catch (error) {
       console.error("Failed to refresh local source count", error);
     }
-  }, [scanAvailable]);
+  }, []);
 
   const refreshBindingChatSettings = useCallback(async () => {
-    if (!scanAvailable) {
-      setLocalChatSources([]);
-      setChatSettingsLoadFailed(false);
-      setChatSettingsLoading(false);
-      return null;
-    }
     const requestSeq = chatSettingsRequestSeqRef.current + 1;
     chatSettingsRequestSeqRef.current = requestSeq;
     setChatSettingsLoading(true);
@@ -98,17 +84,9 @@ export function useLocalDataSourceSettings() {
         setChatSettingsLoading(false);
       }
     }
-  }, [scanAvailable]);
+  }, []);
 
   const refreshSettings = useCallback(async () => {
-    if (!scanAvailable) {
-      chatSettingsRequestSeqRef.current += 1;
-      setLocalSourceCount(0);
-      setLocalChatSources([]);
-      setChatSettingsLoadFailed(false);
-      setLoading(false);
-      return;
-    }
     setLoading(true);
     try {
       await Promise.all([
@@ -118,7 +96,7 @@ export function useLocalDataSourceSettings() {
     } finally {
       setLoading(false);
     }
-  }, [refreshBindingChatSettings, refreshLocalSourceCount, scanAvailable]);
+  }, [refreshBindingChatSettings, refreshLocalSourceCount]);
 
   const handleOpenChatSettings = async () => {
     setSelectedBindingIds(getEnabledBindingIds(localChatSources));

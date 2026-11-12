@@ -493,9 +493,6 @@ func (s *DocumentService) requireDatasetRead(ctx context.Context, userID, datase
 	if !canAccessDataset(&ds, userID, acl.PermissionDatasetRead) {
 		return orm.Dataset{}, &DocumentServiceError{Code: DocumentServiceForbidden, Message: "dataset forbidden"}
 	}
-	if !datasetAllowedByScanSourceForCaller(ctx, caller, ds.ID, acl.PermissionDatasetRead) {
-		return orm.Dataset{}, &DocumentServiceError{Code: DocumentServiceForbidden, Message: "dataset forbidden"}
-	}
 	return ds, nil
 }
 

@@ -17,6 +17,7 @@ import (
 	"github.com/gorilla/mux"
 	"gorm.io/gorm"
 
+	"lazymind/core/acl"
 	"lazymind/core/common/orm"
 	"lazymind/core/doc"
 	"lazymind/core/state"
@@ -502,7 +503,7 @@ func TestSidechatSourceAttachmentRevalidationRejectsUnauthorizedReferences(t *te
 		}
 
 		resolved, err := doc.ValidateChatSourceAttachments(
-			context.Background(), db, doc.DatasetCatalogCaller{UserID: "user-1"},
+			context.Background(), db, doc.DatasetCatalogCaller{UserID: "user-1", TenantID: "tenant-1"},
 			[]doc.ChatSourceAttachmentReference{{Path: path}},
 		)
 		if err != nil || len(resolved) != 1 || resolved[0].DatasetID != "dataset-legacy" ||
@@ -541,25 +542,33 @@ func TestSidechatSourceAttachmentRevalidationRejectsUnauthorizedReferences(t *te
 		}
 	})
 
-	t.Run("revoked dataset source access", func(t *testing.T) {
+	t.Run("revoked Core dataset read access", func(t *testing.T) {
 		db := newSidechatTestDB(t)
 		uploadRoot := t.TempDir()
 		t.Setenv("LAZYMIND_UPLOAD_ROOT", uploadRoot)
+		var scanCalls atomic.Int64
 		scanServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if got := r.Header.Get("X-User-ID"); got != "user-1" {
-				t.Errorf("scan caller user=%q", got)
-			}
 			w.Header().Set("Content-Type", "application/json")
+			if strings.HasSuffix(r.URL.Path, "/groups/internal") {
+				_, _ = w.Write([]byte(`{"groups":[]}`))
+				return
+			}
+			scanCalls.Add(1)
 			_, _ = w.Write([]byte(`{"items":[{"dataset_id":"dataset-source","exists":true,"allowed":false}]}`))
 		}))
 		defer scanServer.Close()
 		t.Setenv("LAZYMIND_SCAN_CONTROL_PLANE_URL", scanServer.URL)
+		t.Setenv("LAZYMIND_AUTH_SERVICE_URL", scanServer.URL)
+		if err := db.AutoMigrate(&orm.ACLModel{}, &orm.UserGroupModel{}, &orm.ACLGroupModel{}); err != nil {
+			t.Fatal(err)
+		}
+		acl.InitStore(&orm.DB{DB: db})
 
 		now := time.Now().UTC()
 		if err := db.Create(&orm.Dataset{
 			ID: "dataset-source", TenantID: "tenant-1",
 			BaseModel: orm.BaseModel{
-				CreateUserID: "user-1", CreateUserName: "user-1", CreatedAt: now, UpdatedAt: now,
+				CreateUserID: "dataset-owner", CreateUserName: "dataset-owner", CreatedAt: now, UpdatedAt: now,
 			},
 		}).Error; err != nil {
 			t.Fatalf("create dataset: %v", err)
@@ -582,14 +591,30 @@ func TestSidechatSourceAttachmentRevalidationRejectsUnauthorizedReferences(t *te
 			t.Fatalf("configure child: %v", err)
 		}
 
+		grant := orm.ACLModel{ResourceType: acl.ResourceTypeDB, ResourceID: "dataset-source", GranteeType: acl.GranteeUser, TargetID: "user-1", Permission: acl.PermissionDatasetRead}
+		if err := db.Create(&grant).Error; err != nil {
+			t.Fatal(err)
+		}
+		if refs, err := doc.ValidateChatSourceAttachments(context.Background(), db, doc.DatasetCatalogCaller{UserID: "user-1", TenantID: "tenant-1"}, []doc.ChatSourceAttachmentReference{{Path: path}}); err != nil || len(refs) != 1 {
+			t.Fatalf("initial Core read grant did not authorize attachment: refs=%v err=%v", refs, err)
+		}
+		removed := db.Delete(&orm.ACLModel{}, grant.ID)
+		if removed.Error != nil || removed.RowsAffected != 1 {
+			t.Fatalf("revoke Core read grant: %v rows=%d", removed.Error, removed.RowsAffected)
+		}
+
 		request := sidechatRequest(http.MethodPost, "/api/core/conversations:chat", "user-1", `{
 			"conversation_id":"`+child.ID+`","stream":true,
 			"input":[{"input_type":"text","text":"continue"}]
 		}`, nil)
+		request.Header.Set("X-Tenant-ID", "tenant-1")
 		recorder := httptest.NewRecorder()
 		ChatConversations(recorder, request)
 		if recorder.Code != http.StatusForbidden || strings.Contains(recorder.Body.String(), path) {
-			t.Fatalf("revoked dataset source status=%d body=%s", recorder.Code, recorder.Body.String())
+			t.Fatalf("revoked Core dataset read status=%d body=%s", recorder.Code, recorder.Body.String())
+		}
+		if scanCalls.Load() != 0 {
+			t.Errorf("knowledge authorization queried Scan %d times", scanCalls.Load())
 		}
 	})
 }
