@@ -328,4 +328,4 @@ PDF 提取或裁剪的图作为前景图片，使用 `object-fit: contain` 并�
 本阶段仅生成可见幻灯片内容，不生成 speaker-notes，也不需要读取讲稿 artifact。
 规划阶段已经保存独立讲稿，发布工具会在渲染完成后按页自动插入隐藏备注，供演讲与导出使用。
 
-Default typography: unless the user explicitly requests another font or requires preserving template fonts, use `"Songti SC", "宋体-简", serif` for both headings and body text. This is 宋体-简, not SimSun. Keep this default across all style samples; vary layout and colors instead. Font resources must be embedded in the delivered HTML and editable PPTX; do not claim portability from a font name alone.
+Default typography: unless the user explicitly requests another font or requires preserving template fonts, use `"Songti SC", "宋体-简", serif` for both headings and body text. This is 宋体-简, not SimSun. Keep this default across all style samples; vary layout and colors instead. HTML must load verified font resources by URL; the exporter embeds the same fonts in editable PPTX. Do not inline font bytes in HTML or claim portability from a font name alone.
