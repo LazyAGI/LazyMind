@@ -1011,9 +1011,9 @@ export function buildTextElement(node) {
     }
   }
 
-  // keep-all only changes word breaking; pre-line still wraps. A short
-  // measured line is not evidence that the author requested nowrap.
-  options.wrap = !['nowrap', 'pre'].includes(s.whiteSpace);
+  // Office can reflow tight text boxes using different font metrics. Keep
+  // browser-measured single lines intact, including shrink-to-content labels.
+  options.wrap = !node.singleLine && !['nowrap', 'pre'].includes(s.whiteSpace);
 
   // Runs contain text/styles, not child coordinates, so their parent padding
   // must be retained too. Always set margins: Office's default inset otherwise

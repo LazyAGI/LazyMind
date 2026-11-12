@@ -220,9 +220,14 @@ test('local font catalog verifies content hashes and shares fonts with browser C
     }));
     assert.equal((await localFontFaces()).length, 1);
     assert.match(await localFontCss('font-family: Test Web Font'), /@font-face.*data:font\/ttf;base64,/);
+    const fileCss = await localFontCss('font-family: Test Web Font', { useFileUrls: true });
+    assert.match(fileCss, /src:url\("file:\/\/\/[^\"]+\.ttf"\)/);
+    assert.ok(fileCss.includes(`${id}.ttf`));
+    assert.doesNotMatch(fileCss, /base64/);
     assert.equal(await localFontCss('font-family: Arial'), '');
     await writeFile(path.join(root, `${id}.ttf`), 'corrupted');
     assert.deepEqual(await localFontFaces(), []);
+    assert.equal(await localFontCss('font-family: Test Web Font', { useFileUrls: true }), '');
   } finally {
     if (previous === undefined) delete process.env.LAZYMIND_FONT_DIR;
     else process.env.LAZYMIND_FONT_DIR = previous;

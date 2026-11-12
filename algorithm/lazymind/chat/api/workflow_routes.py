@@ -602,6 +602,11 @@ async def export_ppt_from_html(req: PptExportRequest):
         document = re.search(r'(?is)(<!doctype\s+html\b[\s\S]*?</html>|<html\b[\s\S]*?</html>)', value)
         return document.group(1).strip() if document else value
 
+    def export_error_for_log(detail: str) -> str:
+        detail = re.sub(r'''(?i)data:[^\s"'<>]+''', 'data:[redacted]', detail)
+        detail = re.sub(r'''(?i)(https?://[^\s"'<>?]+)\?[^\s"'<>]+''', r'\1?[redacted]', detail)
+        return detail.strip()[-4000:]
+
     workspace = Path(os.environ.get('LAZYMIND_SUBAGENT_WORKSPACE') or '/data/subagent')
     job_id = f'ppt_export_{uuid.uuid4().hex[:12]}'
     deck_dir = workspace / '.ppt_on_demand' / job_id
@@ -638,6 +643,8 @@ async def export_ppt_from_html(req: PptExportRequest):
         raw = stdout.decode('utf-8', errors='replace')
         if process.returncode != 0:
             detail = stderr.decode('utf-8', errors='replace') or raw
+            logger.error('PPTX export failed: job=%s pages=%d exit_code=%s error=%s',
+                         job_id, len(pages), process.returncode, export_error_for_log(detail))
             shutil.rmtree(deck_dir, ignore_errors=True)
             raise HTTPException(status_code=502, detail=f'ppt-export failed: {detail[-1500:]}')
     else:
@@ -658,6 +665,7 @@ async def export_ppt_from_html(req: PptExportRequest):
                 raw = response.read().decode('utf-8', errors='replace')
         except urllib.error.HTTPError as exc:
             detail = exc.read().decode('utf-8', errors='replace') if exc.fp else str(exc)
+            logger.error('PPTX export failed: job=%s pages=%d upstream_status=%s', job_id, len(pages), exc.code)
             shutil.rmtree(deck_dir, ignore_errors=True)
             raise HTTPException(status_code=502, detail=f'ppt-export failed: {detail[:1500]}') from exc
         except Exception as exc:
@@ -684,6 +692,8 @@ async def export_ppt_from_html(req: PptExportRequest):
             if isinstance(payload, dict)
             else ''
         )
+        logger.error('PPTX export produced no file: job=%s pages=%d exporter_ok=%s error=%s',
+                     job_id, len(pages), ok, export_error_for_log(detail))
         shutil.rmtree(deck_dir, ignore_errors=True)
         raise HTTPException(status_code=502, detail=detail or 'PPTX not produced')
 
