@@ -3056,6 +3056,11 @@ func startReparseTasksInternalAtLevel(r *http.Request, datasetID string, taskIDs
 		Str("reparse_mode", reparseMode).
 		Str("strategy", strategy).
 		Msg("submitting reparse batch to doc service")
+	if strategy == "rebuild" {
+		if err := markSourceRebuildPending(r.Context(), store.DB(), datasetID, taskRows); err != nil {
+			return results, err
+		}
+	}
 	for _, task := range taskRows {
 		bindNativeIndexTask(r.Context(), datasetID, task.DocID, task.ID, processingLevel, llmConfig["_embedding_generation"].(int64))
 	}

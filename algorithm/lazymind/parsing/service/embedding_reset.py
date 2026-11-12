@@ -150,7 +150,8 @@ def clear_chunks(generation, empty_only=False):
             conn.execute(text("""UPDATE document_processing_states SET
                 index_status='pending', index_error_code='', index_error_message='',
                 index_artifact_ref='', index_fingerprint='',
-                embedding_version='reembed:manual', revision=revision+1, updated_at=CURRENT_TIMESTAMP
+                embedding_version=CASE WHEN embedding_version='rebuild:manual' THEN 'rebuild:manual'
+                    ELSE 'reembed:manual' END, revision=revision+1, updated_at=CURRENT_TIMESTAMP
                 WHERE EXISTS (SELECT 1 FROM documents d JOIN datasets ds ON ds.id=d.dataset_id
                     WHERE d.id=document_processing_states.document_id
                       AND d.dataset_id=document_processing_states.dataset_id

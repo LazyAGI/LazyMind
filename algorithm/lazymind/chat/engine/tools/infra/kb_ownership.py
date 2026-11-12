@@ -21,7 +21,8 @@ def _identity(node: Any) -> tuple[str, str]:
     return str(kb or '').strip(), str(doc or '').strip()
 
 
-def filter_active_nodes(nodes: list, *, user_id: str | None = None) -> list:
+def filter_active_nodes(nodes: list, *, user_id: str | None = None,
+                        require_current_index: bool = False) -> list:
     """Authorize exact KB/document pairs before exposing text, images or references.
 
     Never cache the result across tool calls: deletion/move and ACL revocation
@@ -35,6 +36,8 @@ def filter_active_nodes(nodes: list, *, user_id: str | None = None) -> list:
     for offset in range(0, len(pairs), 500):
         payload = {'items': [{'knowledge_id': kb, 'document_id': doc}
                              for kb, doc in pairs[offset:offset + 500]]}
+        if require_current_index:
+            payload['require_current_index'] = True
         response = post_core_api('/documents:filterActive', payload, user_id=user_id)
         body = response.get('response') if isinstance(response, dict) else None
         if not isinstance(body, dict) or not isinstance(body.get('items'), list):

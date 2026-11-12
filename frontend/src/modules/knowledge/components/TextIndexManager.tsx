@@ -112,7 +112,7 @@ export default function TextIndexManager({ datasetId, autoOpen = false }: { data
     : state?.operation_phase === "cleanup_failed" ? "清理未完成"
       : state?.index_identity === "verified" ? "模型已确认" : state?.model_name ? "索引待确认" : "未配置模型";
   const statusTag = (value: string, row?: IndexDocument) => {
-    const manual = row?.embedding_version === "reembed:manual" && !["running", "processing", "failed"].includes(value);
+    const manual = ["reembed:manual", "rebuild:manual"].includes(row?.embedding_version || "") && !["running", "processing", "failed"].includes(value);
     return <Tag color={manual ? "default" : value === "succeeded" ? "success" : value === "failed" ? "error" : ["running", "processing"].includes(value) ? "processing" : "default"}>
       {manual ? "待重新索引" : statusNames[value] || "待核实"}
     </Tag>;

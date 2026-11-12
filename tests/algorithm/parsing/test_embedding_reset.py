@@ -214,7 +214,7 @@ def test_parse_only_worker_does_not_require_vector_identity(monkeypatch, phase, 
     monkeypatch.setattr(embedding_reset, 'index_state', lambda: {'generation': generation, 'phase': phase})
     base = module.DocumentProcessorWorker._Impl.__mro__[1]
     from types import SimpleNamespace
-    processor = SimpleNamespace(_lazymind_generation_initialized=True)
+    processor = SimpleNamespace(_lazymind_generation_initialized=True, _reparse_docs=lambda *a, **k: None)
     monkeypatch.setattr(base, '_run_task', lambda self, *args: self._get_processor())
     monkeypatch.setattr(base, '_get_processor', lambda self: processor)
     monkeypatch.setattr(module, '_install_text_reembed_guard', lambda value: value)
@@ -245,3 +245,12 @@ def test_stale_reparse_is_discarded_before_touching_store(monkeypatch, generatio
     with pytest.raises(embedding_reset.IndexBusy, match='obsolete'):
         worker._run_task('old-task', 'DOC_REPARSE', {
             'processing_level': level, 'llm_config': {'_embedding_generation': generation}}, True)
+
+
+def test_clear_preserves_source_rebuild_requirement(reset_index):
+    with reset_index.core.begin() as conn:
+        conn.execute(text("UPDATE document_processing_states SET embedding_version='rebuild:manual'"))
+    embedding_reset.clear_chunks(7)
+    with reset_index.core.connect() as conn:
+        versions = conn.execute(text("SELECT embedding_version FROM document_processing_states WHERE document_id <> 'legacy-doc'")).scalars().all()
+    assert versions and all(value == 'rebuild:manual' for value in versions)

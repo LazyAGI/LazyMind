@@ -274,7 +274,8 @@ class LazyMindMineruPDFReader(_MineruPDFReader):
         fname = os.path.basename(file_path)
         model_version = self._online_model_version()
         source_digest = self._source_digest(file_path)
-        cache_path = Path(file_path).parent / '.lazymind-artifacts' / 'mineru-cache-v1' / f'{source_digest}-{model_version}.zip'
+        cache_path = (Path(file_path).parent / '.lazymind-artifacts' / 'mineru-cache-v1'
+                      / f'{source_digest}-{model_version}.zip')
         lock_path = self._batch_lock_path(file_path, source_digest, model_version)
         lock_path.parent.mkdir(parents=True, exist_ok=True)
         try:

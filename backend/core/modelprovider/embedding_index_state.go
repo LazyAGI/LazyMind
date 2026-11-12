@@ -239,7 +239,7 @@ func loadEmbeddingIndexKnowledgeBaseCounts(ctx context.Context, db *gorm.DB) (em
 		Joins("JOIN document_processing_states s ON s.dataset_id = d.id").
 		Joins("JOIN documents doc ON doc.dataset_id = d.id AND doc.id = s.document_id AND doc.deleted_at IS NULL").
 		Where("doc.document_type IS NULL OR doc.document_type <> ?", "FOLDER").
-		Where("d.deleted_at IS NULL AND d.processing_level NOT IN ? AND s.index_status <> ? AND s.embedding_version <> ?", nonIndexedLevels, "succeeded", "reembed:manual").
+		Where("d.deleted_at IS NULL AND d.processing_level NOT IN ? AND s.index_status <> ? AND s.embedding_version NOT IN ?", nonIndexedLevels, "succeeded", []string{"reembed:manual", "rebuild:manual"}).
 		Distinct("d.id").Count(&counts.Pending).Error; err != nil {
 		return embeddingIndexKnowledgeBaseCounts{}, err
 	}

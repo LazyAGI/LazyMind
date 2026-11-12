@@ -113,7 +113,7 @@ func bindNativeIndexTask(ctx context.Context, datasetID, documentID, taskID, lev
 		query = query.Where("NOT EXISTS (SELECT 1 FROM embedding_index_states WHERE scope = 'global' AND (generation <> ? OR phase IN ?))", generation, []string{"clearing", "cleanup_failed", "cleared"})
 	}
 	if level == ProcessingLevelIndexed {
-		query = query.Where("parse_artifact_ref <> '' OR embedding_version IN ?", []string{embeddingVersionReembedPending, embeddingVersionReembedManual})
+		query = query.Where("parse_artifact_ref <> '' OR embedding_version IN ?", []string{embeddingVersionReembedPending, embeddingVersionReembedManual, embeddingVersionRebuildRequired})
 	} else {
 		query = query.Where("embedding_version = ?", embeddingVersionReembedManual)
 	}

@@ -144,8 +144,13 @@ func ReindexText(w http.ResponseWriter, r *http.Request) {
 		if strings.TrimSpace(document.LazyllmDocID) == "" {
 			kind = string(TaskTypeParseUploaded)
 		}
+		var state orm.DocumentProcessingState
+		if err := store.DB().WithContext(r.Context()).Where("dataset_id=? AND document_id=?", id, document.ID).Find(&state).Error; err != nil {
+			results = append(results, StartTaskResult{DocumentID: document.ID, Status: "FAILED", Message: "query processing state failed"})
+			continue
+		}
 		task, err := createTaskFromExistingDocument(r, id, user, store.UserName(r), CreateTaskItem{Task: TaskPayload{
-			DocumentID: document.ID, ReparseMode: "slice_and_embed", ReparseGroups: []string{"block", "line", "code", "doc-summary"},
+			DocumentID: document.ID, ReparseMode: textIndexReparseMode(state), ReparseGroups: textIndexReparseGroups(state),
 		}}, kind)
 		if err != nil {
 			results = append(results, StartTaskResult{DocumentID: document.ID, Status: "FAILED", Message: err.Error()})

@@ -187,7 +187,7 @@ func updateKnowledgeConfiguration(ctx context.Context, tx *gorm.DB, user string,
 	if c.ProcessingLevel != nil && *c.ProcessingLevel != effectiveProcessingLevel(ds.ProcessingLevel) {
 		before["processing_level"], after["processing_level"] = ds.ProcessingLevel, *c.ProcessingLevel
 		updates["processing_level"] = *c.ProcessingLevel
-		updates["processing_revision"] = ds.ProcessingRevision + 1
+		// The default controls future work; existing task/artifact revisions remain valid.
 		updates["transition_status"] = TransitionIdle
 	}
 	if c.Scene != nil || c.ProfileID != nil || c.Capabilities != nil {

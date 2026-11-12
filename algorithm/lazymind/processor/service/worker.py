@@ -3,13 +3,15 @@ import threading
 import inspect
 import os
 import time
+import json
+from datetime import datetime
 from contextvars import ContextVar
 
 import lazyllm
 from lazymind.parsing.service.opensearch_compat import install as install_opensearch_compat
 from lazymind.model_config import inject_model_config
-install_opensearch_compat()
 from lazymind.parsing.service.embedding_input_compat import install as install_embedding_input_compat
+install_opensearch_compat()
 install_embedding_input_compat()
 lazyllm.inject_model_config = inject_model_config
 
@@ -21,6 +23,82 @@ from lazymind.processor.service.db import require_shared_db_config  # noqa: E402
 
 
 _TEXT_REEMBED_GROUPS = frozenset(('block', 'line', 'code', 'doc-summary'))
+
+
+def _recover_owned_node_groups(worker, task_id, payload):
+    """A reclaimed queue task must not wait on its previous worker's markers."""
+    kb_id = payload.get('kb_id')
+    doc_ids = {info.get('doc_id') for info in payload.get('file_infos') or []} - {None}
+    if not kb_id or not doc_ids:
+        return
+    queue = worker._waiting_task_queue
+    Task = queue._sql_manager.get_table_orm_class(queue._table_name)
+    now = datetime.now()
+    with queue._sql_manager.get_session() as session:
+        owned = session.query(Task).filter(
+            Task.task_id == task_id, Task.worker_id == worker._worker_id,
+            Task.status == 'WORKING', Task.lease_expires_at > now,
+        ).first()
+        if owned is None or owned.updated_at is None:
+            return
+        observed_at = owned.updated_at
+        others = session.query(Task).filter(
+            Task.task_id != task_id, Task.status == 'WORKING', Task.lease_expires_at > now,
+        ).all()
+        for task in others:
+            try:
+                other = json.loads(task.message)
+                if other.get('kb_id') == kb_id:
+                    doc_ids.difference_update(info.get('doc_id') for info in other.get('file_infos') or [])
+            except (ValueError, TypeError, AttributeError):
+                # Unknown ownership is not proof that work was abandoned.
+                return
+        if not doc_ids:
+            return
+        Group = worker._db_manager.get_table_orm_class('lazyllm_doc_node_group_status')
+        with worker._db_manager.get_session() as group_session:
+            group_session.query(Group).filter(
+                Group.kb_id == kb_id, Group.doc_id.in_(doc_ids), Group.status == 'WORKING',
+                Group.updated_at <= observed_at,
+            ).update({'status': 'FAILED', 'error_msg': 'interrupted task reclaimed for retry',
+                      'updated_at': now}, synchronize_session=False)
+
+
+def _replace_parsed_roots(processor, payload, node_groups, reader):
+    """Refresh source nodes without initializing vectors or discarding descendants."""
+    infos = payload.get('file_infos') or []
+    if not infos:
+        return
+    paths = [info['file_path'] for info in infos]
+    ids, metadata, kb_id = processor._prepare_doc_inputs(
+        paths, [info['doc_id'] for info in infos],
+        [info.get('metadata') for info in infos], payload.get('kb_id'))
+    # Read first: service failures must leave the previous source intact.
+    loaded = reader.load_data(paths, metadata, split_nodes_by_type=True)
+    parsed_ids = {node.global_metadata.get('docid') for nodes in loaded.values() for node in nodes}
+    if not set(ids).issubset(parsed_ids):
+        raise RuntimeError('Source parsing returned incomplete documents; previous content retained')
+    store = processor._store
+    store._seg_init()
+    segments = getattr(store.seg_impl, 'segment_store', store.seg_impl)
+    previous = {}
+    for group in (LAZY_ROOT_NAME, LAZY_IMAGE_GROUP):
+        collection = store._gen_collection_name(group)
+        previous[collection] = {row['uid'] for row in segments.get(
+            collection, {'docid': ids, 'kb_id': kb_id})}
+    for group, nodes in loaded.items():
+        if not nodes:
+            continue
+        data = [store._serialize_node(node) for node in processor._set_nodes_number(nodes)]
+        for item in data:
+            item.pop('embedding', None)
+        if not segments.upsert(store._gen_collection_name(group), data):
+            raise RuntimeError('Failed to save parsed source nodes')
+    retained = {node.uid for nodes in loaded.values() for node in nodes}
+    for collection, old_ids in previous.items():
+        obsolete = old_ids - retained
+        if obsolete and not segments.delete(collection, {'uid': list(obsolete)}):
+            raise RuntimeError('Failed to replace previous parsed source nodes')
 
 
 def _has_verified_image_only_index(loaded, processor, doc_id, kb_id):
@@ -213,6 +291,8 @@ if not getattr(DocumentProcessorWorker._Impl, '_lazymind_isolated', False):
             if (payload.get('strategy', 'rebuild') == 'rebuild'
                     and LAZY_ROOT_NAME in (payload.get('ng_names') or [])):
                 payload = {**payload, 'ng_names': None}
+            if payload.get('processing_level') == 'parsed':
+                return _replace_parsed_roots(processor, payload, node_groups, reader)
             if payload.get('strategy', 'rebuild') == 'rebuild' and payload.get('processing_level') != 'parsed':
                 # A freshly deserialized store has no local initialization flag,
                 # even when remote segments/vectors exist. Full rebuild must
@@ -225,6 +305,12 @@ if not getattr(DocumentProcessorWorker._Impl, '_lazymind_isolated', False):
             _rebuild_empty_text_documents(processor, payload, node_groups, reader)
             return _BaseDocumentWorkerImpl._exec_reparse_task(
                 self, processor, task_id, payload, node_groups, name_to_id, reader)
+
+        def _exec_add_task(self, processor, task_id, payload, node_groups, name_to_id, reader,
+                           extractor_names=None):
+            _recover_owned_node_groups(self, task_id, payload)
+            return _BaseDocumentWorkerImpl._exec_add_task(
+                self, processor, task_id, payload, node_groups, name_to_id, reader, extractor_names)
 
         def _worker_impl(self):
             # Queue acknowledgements and the index fence also use PostgreSQL.

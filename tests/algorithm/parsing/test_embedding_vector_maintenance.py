@@ -344,3 +344,19 @@ def test_offline_handoff_rejects_vectors_reappearing_after_cleared_phase(monkeyp
             store_config=_config(), client_factory=lambda **kwargs: client)
     assert name in client.schemas
     assert _row(core, 'embedding_index_states', "scope='global'")['generation'] == 7
+
+
+def test_offline_handoff_preserves_source_rebuild_requirement():
+    core = _core_engine()
+    try:
+        with core.begin() as conn:
+            conn.execute(text("UPDATE document_processing_states SET embedding_version='rebuild:manual'"))
+        embedding_maintenance._mark_clearing(core)
+        embedding_maintenance._finalize_core(core)
+        with core.connect() as conn:
+            versions = conn.execute(text(
+                "SELECT embedding_version FROM document_processing_states WHERE document_id <> 'legacy-doc'"
+            )).scalars().all()
+        assert versions and all(value == 'rebuild:manual' for value in versions)
+    finally:
+        core.dispose()

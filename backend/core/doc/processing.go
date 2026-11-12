@@ -191,7 +191,7 @@ func UpdateProcessingLevel(w http.ResponseWriter, r *http.Request) {
 		replyResourceError(w, err)
 		return
 	}
-	common.ReplyJSON(w, map[string]any{"dataset_id": datasetID, "processing_level": ds.ProcessingLevel, "processing_revision": ds.ProcessingRevision, "transition_status": ds.TransitionStatus, "capabilities": capabilitiesForProcessingLevel(ds.ProcessingLevel)})
+	common.ReplyJSON(w, map[string]any{"dataset_id": datasetID, "processing_level": ds.ProcessingLevel, "processing_revision": ds.ProcessingRevision, "transition_status": ds.TransitionStatus, "capabilities": capabilitiesWithRetainedArtifacts(r.Context(), store.DB(), *ds)})
 }
 
 // Storage-only datasets may have been created before the optional RAG service
@@ -279,7 +279,7 @@ func GetProcessingStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	level := effectiveProcessingLevel(ds.ProcessingLevel)
-	common.ReplyJSON(w, map[string]any{"dataset_id": datasetID, "processing_level": level, "processing_revision": ds.ProcessingRevision, "transition_status": effectiveTransitionStatus(ds.TransitionStatus), "capabilities": capabilitiesForProcessingLevel(level), "coverage": coverage})
+	common.ReplyJSON(w, map[string]any{"dataset_id": datasetID, "processing_level": level, "processing_revision": ds.ProcessingRevision, "transition_status": effectiveTransitionStatus(ds.TransitionStatus), "capabilities": capabilitiesWithRetainedArtifacts(r.Context(), store.DB(), *ds), "coverage": coverage})
 }
 
 // Reconcile only tasks with a recorded submission level. A successful reader
@@ -335,8 +335,8 @@ func syncProcessingTaskStates(r *http.Request, datasetID string) {
 		}
 		var base orm.DocumentProcessingState
 		if store.DB().WithContext(r.Context()).Where("dataset_id = ? AND document_id = ?", datasetID, task.DocID).
-			Take(&base).Error == nil && (base.ParseArtifactRef != "" || base.EmbeddingVersion == embeddingVersionReembedPending || base.EmbeddingVersion == embeddingVersionReembedManual) {
-			if base.EmbeddingVersion == embeddingVersionReembedManual {
+			Take(&base).Error == nil && (base.ParseArtifactRef != "" || base.EmbeddingVersion == embeddingVersionRebuildRequired || base.EmbeddingVersion == embeddingVersionReembedPending || base.EmbeddingVersion == embeddingVersionReembedManual) {
+			if base.EmbeddingVersion == embeddingVersionReembedManual || base.EmbeddingVersion == embeddingVersionRebuildRequired {
 				if base.IndexArtifactRef != "core-task:"+task.ID {
 					continue
 				}
@@ -344,7 +344,7 @@ func syncProcessingTaskStates(r *http.Request, datasetID string) {
 					delete(updates, "parse_status")
 					delete(updates, "chunk_status")
 				}
-				if status == "succeeded" {
+				if status == "succeeded" && (base.EmbeddingVersion != embeddingVersionRebuildRequired || ext.ProcessingLevel == ProcessingLevelIndexed) {
 					updates["embedding_version"] = ""
 				}
 			} else {
