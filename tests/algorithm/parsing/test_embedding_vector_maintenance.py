@@ -176,13 +176,17 @@ def _row(engine, table, where):
         return conn.execute(text(f'SELECT * FROM {table} WHERE {where}')).mappings().one()
 
 
-def test_offline_handoff_preserves_parse_chunks_and_image_vectors(monkeypatch):
+@pytest.mark.parametrize('phase', ['ready', 'detached'])
+def test_offline_handoff_preserves_parse_chunks_and_image_vectors(monkeypatch, phase):
     monkeypatch.setenv('LAZYMIND_EMBEDDING_MAINTENANCE_MODE', 'true')
     names = embedding_maintenance.text_collection_names()
     schemas = {name: {'uid', 'embedding_embed_main'} for name in names}
     schemas['col_image'] = {'uid', 'embedding_embed_image'}
     client = FakeMilvusClient(schemas)
     core, tasks = _core_engine(), _task_engine()
+
+    with core.begin() as conn:
+        conn.execute(text("UPDATE embedding_index_states SET phase=:phase"), {'phase': phase})
 
     result = embedding_maintenance.clear_text_vectors_with_core_handoff(
         writers_stopped=True, core_engine=core, task_engine=tasks,

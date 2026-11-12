@@ -275,7 +275,7 @@ def clear_text_vectors_with_core_handoff(
                     raise RuntimeError('Core phase is cleared but text vectors still exist; inspect writers')
                 return {'dropped_collections': [], 'phase': 'cleared',
                         'reset_document_states': 0, 'queue_check': queue_check}
-            if phase not in {None, 'ready', 'clearing', 'cleanup_failed'}:
+            if phase not in {None, 'ready', 'clearing', 'cleanup_failed', 'detached'}:
                 raise RuntimeError(f'cannot clear text vectors from Core phase {phase!r}')
             _mark_clearing(core_engine)
             for name in names:
