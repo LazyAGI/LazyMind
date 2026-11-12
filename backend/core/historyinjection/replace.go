@@ -139,7 +139,7 @@ func replaceConversationInsert(insert portableInsert, conversationID string) (st
 	for _, column := range insert.columns {
 		column = strings.Trim(strings.TrimSpace(column), `"`)
 		switch column {
-		case "display_name", "ext", "chat_times", "enable_plugin", "plugin_mode", "enable_subagent", "is_task_conv":
+		case "display_name", "ext", "chat_times", "enable_plugin", "plugin_mode", "enable_subagent", "is_task_conv": // workflow-naming: persistence
 			assignments = append(assignments, column+" = excluded."+column)
 		}
 	}
