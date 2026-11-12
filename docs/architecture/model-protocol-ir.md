@@ -73,3 +73,23 @@ OpenAI 原生 Base64 图片由适配器校验解码；硅基原生 `images` URL 
 协议参考：[OpenAI Responses 迁移](https://developers.openai.com/api/docs/guides/migrate-to-responses)、
 [OpenAI Images API](https://developers.openai.com/api/reference/resources/images/methods/generate)、
 [SiliconFlow Images API](https://api-docs.siliconflow.cn/docs/api/images-generations-post)。
+
+## 协议验收清单
+
+下表区分确定性的协议回归与真实供应商验收。HTTP mock 只能证明请求编码、响应处理及本地工具循环，不能证明凭据、配额或供应商支持情况。
+
+| 场景 | 代码与回归入口 | 验收要求 |
+| --- | --- | --- |
+| 动态模型路由 | `model_config.py`、`test_responses_transport.py` | 官方 GPT-6 路由 Responses；代理端点保持配置边界；嵌入模型不进入聊天路由 |
+| 角色、文本、空内容、内容块 | `test_protocol_ir.py`、子模块 `test_protocol_ir_fidelity.py` | 保留语义与角色，缺失 content 不使工作流收尾失败 |
+| JPEG 附件与请求准入 | `test_protocol_ir.py` | 554 KB 图片不作为正文估算；两种协议均到达 HTTP 边界 |
+| 工具调用与结果关联 | `test_protocol_ir.py` | 流式/非流式、两协议均执行真实本地工具并回传匹配 call ID |
+| PPT 工作流 | `test_ppt_protocol_finalization.py` | AutoModel 与 runner 完成页面发布；必需产物缺失仍失败 |
+| 多轮与恢复 | `test_engine_protocol_projection.py`、Core canonical history 测试 | 私有续接状态保存、压缩失效、回滚和公开字段过滤 |
+| 流式增量与结束状态 | 子模块 `test_openai_responses.py` | 参数/推理/拒绝增量；截断工具不可执行；失败保留部分输出及用量；取消只产生一次终态 |
+| 错误分类 | `test_protocol_ir.py`、`test_provider_request_advanced.py` | 本地容量/能力错误不包装为通用供应商失败；协议错误独立于网络和凭据错误 |
+| Skill | `skill_listing.append_loaded_skill_invocations`、`test_skill_usage_context.py` | get_skill 历史在协议边界保留调用和正文；两协议与两种流式模式已补充 HTTP 传输回归；实际 Skill 调用待验收 |
+| 图像生成 | `test_image_protocol_contract.py` | OpenAI Base64、硅基 URL、图片编辑 MIME、下载安全和资源落盘；真实供应商生成需单独验收 |
+
+真实 OpenAI gpt-6.1-sol 已验证首轮回复、多轮代号记忆和计算工具回传（137×149=20413）。工作流、Skill 与生图的真实环境验收和 PR 必需 CI 仍待完成，不以服务健康或上述 mock 测试代替。
+Gemini/Anthropic 原生端点尚未接入，当前仅验收 IR 扩展边界；Responses 后台任务和内置工具不支持，验收目标是明确拒绝，不能标记为已支持。
