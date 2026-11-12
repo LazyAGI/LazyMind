@@ -100,7 +100,7 @@ func Apply(ctx context.Context, db *gorm.DB, source BundleSource, owner TargetOw
 			// An ID can also belong to the original user conversation on the
 			// machine where an example was recorded.
 			result.AlreadyPresent = true
-			return retirePredecessor(tx, manifest, owner.ID)
+			return retirePredecessors(tx, manifest, owner.ID)
 		}
 		result.AlreadyPresent = marker.BundleID == manifest.BundleID &&
 			(marker.Fingerprint == "" || marker.Fingerprint == fingerprint)
@@ -144,7 +144,7 @@ func Apply(ctx context.Context, db *gorm.DB, source BundleSource, owner TargetOw
 		if err := normalizeSQLiteJSONColumns(ctx, tx, statements); err != nil {
 			return err
 		}
-		if err := retirePredecessor(tx, manifest, owner.ID); err != nil {
+		if err := retirePredecessors(tx, manifest, owner.ID); err != nil {
 			return err
 		}
 		return payload.install(bundleRoot, manifest, roots, result.AlreadyPresent)

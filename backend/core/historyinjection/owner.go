@@ -38,11 +38,13 @@ func ResolveImportedOwner(ctx context.Context, db *gorm.DB, sources []BundleSour
 			return TargetOwner{}, false, result.Error
 		}
 		if result.RowsAffected == 0 {
-			previous, err := findPredecessor(db.WithContext(ctx), source.Manifest)
+			predecessors, err := findPredecessors(db.WithContext(ctx), source.Manifest)
 			if err != nil {
 				return TargetOwner{}, false, err
 			}
-			persisted.ID, persisted.Username = previous.OwnerID, previous.OwnerName
+			if len(predecessors) > 0 {
+				persisted.ID, persisted.Username = predecessors[0].OwnerID, predecessors[0].OwnerName
+			}
 		}
 		if strings.TrimSpace(persisted.ID) == "" {
 			return TargetOwner{}, false, nil

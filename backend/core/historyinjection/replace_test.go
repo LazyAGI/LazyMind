@@ -40,9 +40,7 @@ func TestReplaceInstalledSampleOnUpgrade(t *testing.T) {
 	if err := db.Create(&resource).Error; err != nil {
 		t.Fatal(err)
 	}
-	previous := releasePredecessors["ppt-group-meeting-v1"]
-	old := writeReplacementBundle(t, previous.bundleID, previous.conversationID, "old", "history-old")
-	current := writeReplacementBundle(t, "ppt-group-meeting-v1", "new-ppt", "new", "history-new")
+	current := writeReplacementBundle(t, "ppt-group-meeting-v2", "new-ppt", "new", "history-new")
 	apply := func(source BundleSource) ApplyResult {
 		t.Helper()
 		result, err := Apply(t.Context(), db, source, owner, roots)
@@ -51,7 +49,10 @@ func TestReplaceInstalledSampleOnUpgrade(t *testing.T) {
 		}
 		return result
 	}
-	apply(old)
+	for index, previous := range releasePredecessors[current.Manifest.BundleID] {
+		historyID := fmt.Sprintf("history-old-%d", index)
+		apply(writeReplacementBundle(t, previous.bundleID, previous.conversationID, "old", historyID))
+	}
 	resolved, found, err := ResolveImportedOwner(t.Context(), db, []BundleSource{current})
 	if err != nil || !found || resolved != owner {
 		t.Fatalf("resolve owner from marked predecessor: %#v %t %v", resolved, found, err)

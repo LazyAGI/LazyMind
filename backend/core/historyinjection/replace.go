@@ -58,39 +58,58 @@ type predecessorSample struct {
 
 // The November release changed conversation IDs. Match both old identifiers,
 // so a custom bundle or an ordinary conversation cannot be retired by title.
-var releasePredecessors = map[string]predecessorSample{
-	"academic-personal-knowledge-mock-v2": {"e97d6394-5b7c-4bab-8757-3f04c9aefdde", "academic-research-personal-knowledge-ai-v1"},
-	"bid-technical-proposal-mock-v2":      {"a3b1d442-7a49-4225-a806-13fc162f7745", "bid-tech-proposal-smoke-test-v1"},
-	"image-workplace-stickers-mock-v2":    {"bcea6551-d6a2-4dec-83bb-1ccf9fa11f51", "image-workplace-stickers-8-v1"},
-	"ppt-group-meeting-v1":                {"e3096625-c245-45a0-bc32-ce203f3c94f3", "ppt-league-of-legends-v1"},
-	"product-meeting-assistant-mock-v2":   {"3ecbcfdc-2e2a-4c38-ae75-060ba6bd02e4", "product-solution-delivery-enterprise-meeting-assistant-v1"},
+var releasePredecessors = map[string][]predecessorSample{
+	"academic-personal-knowledge-mock-v2": {{"e97d6394-5b7c-4bab-8757-3f04c9aefdde", "academic-research-personal-knowledge-ai-v1"}},
+	"bid-technical-proposal-mock-v2":      {{"a3b1d442-7a49-4225-a806-13fc162f7745", "bid-tech-proposal-smoke-test-v1"}},
+	"image-workplace-stickers-mock-v2":    {{"bcea6551-d6a2-4dec-83bb-1ccf9fa11f51", "image-workplace-stickers-8-v1"}},
+	"image-workplace-stickers-v3":         {{"bcea6551-d6a2-4dec-83bb-1ccf9fa11f51", "image-workplace-stickers-8-v1"}},
+	"ppt-group-meeting-v1":                {{"e3096625-c245-45a0-bc32-ce203f3c94f3", "ppt-league-of-legends-v1"}},
+	"ppt-group-meeting-v2": {
+		{"15c4e554-5e95-4e1c-af64-8ce8291290f8", "ppt-group-meeting-v1"},
+		{"e3096625-c245-45a0-bc32-ce203f3c94f3", "ppt-league-of-legends-v1"},
+	},
+	"product-meeting-assistant-mock-v2": {{"3ecbcfdc-2e2a-4c38-ae75-060ba6bd02e4", "product-solution-delivery-enterprise-meeting-assistant-v1"}},
 }
 
-func findPredecessor(db *gorm.DB, manifest Manifest) (installedConversation, error) {
-	previous, ok := releasePredecessors[manifest.BundleID]
-	if !ok || previous.conversationID == manifest.ConversationID {
-		return installedConversation{}, nil
+func findPredecessors(db *gorm.DB, manifest Manifest) ([]installedConversation, error) {
+	var installed []installedConversation
+	for _, previous := range releasePredecessors[manifest.BundleID] {
+		if previous.conversationID == manifest.ConversationID {
+			continue
+		}
+		row, err := findInstalledConversation(db, previous.conversationID)
+		if err != nil {
+			return nil, err
+		}
+		if row.marker().BundleID == previous.bundleID {
+			installed = append(installed, row)
+		}
 	}
-	row, err := findInstalledConversation(db, previous.conversationID)
-	if err != nil || row.marker().BundleID != previous.bundleID {
-		return installedConversation{}, err
-	}
-	return row, nil
+	return installed, nil
 }
 
-func retirePredecessor(db *gorm.DB, manifest Manifest, ownerID string) error {
-	previous, err := findPredecessor(db, manifest)
-	if err != nil || previous.OwnerID != ownerID {
+func retirePredecessors(db *gorm.DB, manifest Manifest, ownerID string) error {
+	predecessors, err := findPredecessors(db, manifest)
+	if err != nil {
 		return err
 	}
 	now := time.Now().UTC()
-	result := db.Table("conversations").Where("id = ? AND create_user_id = ? AND deleted_at IS NULL", previous.ID, ownerID).
-		Update("deleted_at", now)
-	if result.Error != nil {
-		return result.Error
+	for _, previous := range predecessors {
+		if previous.OwnerID != ownerID {
+			continue
+		}
+		result := db.Table("conversations").Where("id = ? AND create_user_id = ? AND deleted_at IS NULL", previous.ID, ownerID).
+			Update("deleted_at", now)
+		if result.Error != nil {
+			return result.Error
+		}
+		result = db.Table("task_center_tasks").Where("conversation_id = ? AND user_id = ? AND archived_at IS NULL", previous.ID, ownerID).
+			Updates(map[string]any{"archived_at": now, "archived_reason": "history_sample_replaced"})
+		if result.Error != nil {
+			return result.Error
+		}
 	}
-	return db.Table("task_center_tasks").Where("conversation_id = ? AND user_id = ? AND archived_at IS NULL", previous.ID, ownerID).
-		Updates(map[string]any{"archived_at": now, "archived_reason": "history_sample_replaced"}).Error
+	return nil
 }
 
 func clearInstalledSampleRows(db *gorm.DB, conversationID, ownerID string) error {
