@@ -8,9 +8,9 @@ state guidance. Discover the selected Workflow and execute its pinned step
 contract. Read its complete prompt, Skills, inputs, outputs and acceptance
 criteria before working. Business requirements come from that contract.
 
-The root chat holds the execution_handle and submits state changes. It may work
-directly or delegate to native Codex subagents when appropriate. Give each worker
-the complete contract and resolved inputs. Keep credentials and the handle with
+The root chat holds the execution_handle and submits state changes. Prefer native
+Codex subagents for step execution when available; otherwise execute directly.
+Give each worker the complete contract and resolved inputs. Keep credentials and the handle with
 the root, and proxy declared tool requests on the worker's behalf.
 
 Use Codex capabilities first for business operations, then discover an authorized
