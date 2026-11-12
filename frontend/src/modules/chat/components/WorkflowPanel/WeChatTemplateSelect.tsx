@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type CSSProperties, type ReactElement } from 'react';
-import { Popover, Select, type TooltipRef } from 'antd';
+import { Popover, Select } from 'antd';
+import type { TooltipRef } from 'antd/es/tooltip';
 import { useTranslation } from 'react-i18next';
 import type { DocumentProviderTemplate } from '@/api/generated/core-client';
 import cleanHtml from '@/modules/chat/assets/wechat-templates/clean.html?raw';
@@ -38,7 +39,7 @@ function TemplatePreview({ html, title, disabled, children }: {
   };
   return <Popover ref={trigger} open={open && !disabled} onOpenChange={changeOpen} trigger={disabled ? [] : ['hover', 'focus']}
     placement={placement} arrow={false} zIndex={1080} mouseEnterDelay={0.15} mouseLeaveDelay={0.12} destroyOnHidden
-    autoAdjustOverflow={{ adjustX: 1, adjustY: 1, shiftX: 12, shiftY: 12 }}
+    align={{ overflow: { adjustX: 1, adjustY: 1, shiftX: 12, shiftY: 12 } }}
     classNames={{ root: 'wechat-template-preview-popover' }}
     content={<section className='wechat-template-preview' aria-label={t('chat.publication.wechatTemplatePreview')}
       onMouseDown={event => { event.preventDefault(); event.stopPropagation(); }}
