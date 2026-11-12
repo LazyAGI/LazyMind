@@ -92,8 +92,12 @@ func TestExecutionToolsMCPPreservesAuthorizationAndIdempotency(t *testing.T) {
 		t.Fatalf("expected MCP tool error: %+v %v", rejected, err)
 	}
 	body, _ := json.Marshal(rejected.Content)
-	if !strings.Contains(string(body), "INVALID_ARGUMENT: start_page must be between 1 and 5.") {
+	if !strings.Contains(string(body), "INVALID_ARGUMENT") || !strings.Contains(string(body), "start_page must be between 1 and 5.") {
 		t.Fatalf("lost remediation in MCP response: %s", body)
+	}
+	structured, _ := json.Marshal(rejected.StructuredContent)
+	if !strings.Contains(string(structured), `"code":"INVALID_ARGUMENT"`) || !strings.Contains(string(structured), "start_page must be between 1 and 5.") {
+		t.Fatalf("lost structured remediation in MCP response: %s", structured)
 	}
 }
 

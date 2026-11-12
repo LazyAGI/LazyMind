@@ -16,6 +16,7 @@ from lazyllm.tools import ToolManager
 
 from lazymind.chat.engine.tool_auth import inject_tool_config
 from lazymind.chat.service.component.tool_registry import DEFAULT_TOOLS, _instance_is_active, tool_is_active
+from lazymind.chat.service.external_tool_errors import from_exception, from_result
 from lazymind.model_config import inject_model_config
 from lazymind.vision_model import VisionModelUnavailable, select_vision_model_role
 
@@ -178,19 +179,34 @@ def _execute(payload):
     tool = manager.tools_info[method]
     if not tool.validate_parameters(arguments):
         raise ValueError('Invalid tool arguments')
+    failures = []
+
+    @contextmanager
+    def capture_failure(_invocation):
+        try:
+            yield
+        except Exception as exc:
+            # Capture the structured provider response before ToolManager reduces
+            # the exception to a text-only tool result. Keep its execution policy.
+            failures.append(from_exception(exc, payload))
+            raise
+
     with _media_arguments(name, arguments) as resolved:
-        result = manager.execute_with_records(
+        prepared = manager.prepare_tool_calls(
             [{'type': 'function', 'function': {'name': method, 'arguments': resolved}}],
             allowed_tool_names={method},
-        ).results[0]
+        )
+        result = manager.execute_prepared(prepared, execution_context=capture_failure).results[0]
+    if failures:
+        raise failures[0]
     if isinstance(result, dict) and (result.get('ok') is False or result.get('isError') is True):
         LOG.error('External tool failed tool=%s stage=execution', config.name)
-        raise RuntimeError('Tool execution failed; check its connection and arguments')
+        raise from_result(result, payload)
     if isinstance(result, dict) and result.get('ok') is True and 'value' in result:
         result = result['value']
     if isinstance(result, dict) and (result.get('ok') is False or result.get('isError') is True):
         LOG.error('External tool failed tool=%s stage=execution', config.name)
-        raise RuntimeError('Tool execution failed; check its connection and arguments')
+        raise from_result(result, payload)
     if name == 'multimodal':
         description = result.get('description') if isinstance(result, dict) else None
         if not isinstance(description, str) or not description.strip():

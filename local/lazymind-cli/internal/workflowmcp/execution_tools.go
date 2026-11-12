@@ -2,12 +2,14 @@ package workflowmcp
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/url"
 	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"lazymind/agentconnector/internal/coreapi"
 )
 
 type ExecutionToolsInput struct {
@@ -36,9 +38,21 @@ func registerExecutionTools(server *mcp.Server, client *Client) {
 			return nil, value, err
 		})
 	mcp.AddTool(server, &mcp.Tool{Name: "workflow.tool.call", Title: "Call a tool for a Workflow execution",
-		Description: "Call a declared tool using its listed name and schema. The controller supplies the execution_handle and a command_id stable across identical retries. arguments_file reads worker-prepared JSON locally. result_directory saves the full response and files for handoff. Correct arguments or configuration using the returned error code and message. Workflow publication and completion use their own endpoints.", Annotations: annotations(false)},
-		func(ctx context.Context, _ *mcp.CallToolRequest, input ExecutionToolCallInput) (*mcp.CallToolResult, map[string]any, error) {
+		OutputSchema: map[string]any{"type": "object", "additionalProperties": true},
+		Description:  "Call a declared tool using its listed name and schema. The controller supplies the execution_handle and a command_id stable across identical retries. arguments_file reads worker-prepared JSON locally. result_directory saves the full response and files for handoff. Correct arguments or configuration using the returned error code and message. Workflow publication and completion use their own endpoints.", Annotations: annotations(false)},
+		func(ctx context.Context, _ *mcp.CallToolRequest, input ExecutionToolCallInput) (*mcp.CallToolResult, any, error) {
 			value, err := client.CallExecutionTool(ctx, input)
+			var failure *coreapi.Error
+			if errors.As(err, &failure) {
+				detail := map[string]any{"code": failure.Code, "message": failure.Message, "retryable": failure.Retryable}
+				if failure.Upstream != nil {
+					detail["upstream"] = failure.Upstream
+				}
+				payload := map[string]any{"error": detail}
+				encoded, _ := json.Marshal(payload)
+				return &mcp.CallToolResult{IsError: true, StructuredContent: payload,
+					Content: []mcp.Content{&mcp.TextContent{Text: string(encoded)}}}, nil, nil
+			}
 			return nil, value, err
 		})
 }

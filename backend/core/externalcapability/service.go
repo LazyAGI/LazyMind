@@ -464,10 +464,10 @@ func (s *Service) InvokeExternalTool(ctx context.Context, call capability.Invoca
 		raw, toolName, err = mcp.CallAuthorizedTool(ctx, s.db, call.Principal.UserID, input.ToolID, input.Arguments)
 	}
 	if err != nil {
-		if code, ok := capability.CodeOf(err); ok && code == capability.InvalidArgument {
+		if _, ok := capability.CodeOf(err); ok {
 			return result, err
 		}
-		return result, capability.NewError(capability.Unavailable, op, "tool execution failed; check the tool connection and authorization in Settings", false, err)
+		return result, capability.NewError(capability.Unavailable, op, "tool execution failed without public error details; check its service logs", false, err)
 	}
 	if len(raw) > maxProxyBytes {
 		return result, capability.NewError(capability.ResultTooLarge, op, "tool result exceeds 2 MiB", false, nil)
@@ -683,7 +683,7 @@ func (s *Service) requestBuiltinTools(ctx context.Context, userID, endpoint, nam
 		return nil, errors.New("built-in tool result could not be read or exceeded 2 MiB")
 	}
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
-		return nil, fmt.Errorf("built-in tool request failed (%d)", resp.StatusCode)
+		return nil, builtinToolError(resp.StatusCode, raw)
 	}
 	return raw, nil
 }
@@ -850,6 +850,10 @@ func (s *Service) finishAudit(call capability.InvocationContext, row *orm.Extern
 		updates["status"] = "failed"
 		updates["error_code"] = string(code)
 		updates["error_message"] = auditErrorMessage(code)
+		var public *capability.Error
+		if errors.As(callErr, &public) && public.Upstream != nil {
+			updates["error_message"] = public.Message
+		}
 	}
 	_ = s.db.Model(&orm.ExternalCapabilityInvocation{}).Where("id = ?", row.ID).Updates(updates).Error
 }

@@ -29,6 +29,13 @@ type Error struct {
 	Code       string
 	Message    string
 	Retryable  bool
+	Upstream   *UpstreamError
+}
+
+type UpstreamError struct {
+	HTTPStatus int    `json:"http_status"`
+	Code       string `json:"code,omitempty"`
+	RequestID  string `json:"request_id,omitempty"`
 }
 
 func (e *Error) Error() string {
@@ -139,9 +146,10 @@ func unwrap(status int, body []byte) (json.RawMessage, error) {
 		OK     *bool           `json:"ok"`
 		Result json.RawMessage `json:"result"`
 		Error  *struct {
-			Code      string `json:"code"`
-			Message   string `json:"message"`
-			Retryable bool   `json:"retryable"`
+			Code      string         `json:"code"`
+			Message   string         `json:"message"`
+			Retryable bool           `json:"retryable"`
+			Upstream  *UpstreamError `json:"upstream"`
 		} `json:"error"`
 		Code    *int            `json:"code"`
 		Message string          `json:"message"`
@@ -153,7 +161,8 @@ func unwrap(status int, body []byte) (json.RawMessage, error) {
 	if value.OK != nil {
 		if !*value.OK || status < 200 || status >= 300 {
 			if value.Error != nil {
-				return nil, &Error{StatusCode: status, Code: value.Error.Code, Message: value.Error.Message, Retryable: value.Error.Retryable}
+				return nil, &Error{StatusCode: status, Code: value.Error.Code, Message: value.Error.Message,
+					Retryable: value.Error.Retryable, Upstream: value.Error.Upstream}
 			}
 			return nil, &Error{StatusCode: status, Message: http.StatusText(status)}
 		}

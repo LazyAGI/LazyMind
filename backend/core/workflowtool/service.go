@@ -52,9 +52,10 @@ type CallInput struct {
 }
 
 type ToolError struct {
-	Code      string `json:"code"`
-	Message   string `json:"message"`
-	Retryable bool   `json:"retryable"`
+	Code      string                    `json:"code"`
+	Message   string                    `json:"message"`
+	Retryable bool                      `json:"retryable"`
+	Upstream  *capability.UpstreamError `json:"upstream,omitempty"`
 }
 
 func (e *ToolError) Error() string { return e.Code + ": " + e.Message }
@@ -93,8 +94,10 @@ func publicToolError(err error) *ToolError {
 		switch capabilityErr.Code {
 		case capability.InvalidArgument, capability.Unauthenticated, capability.PermissionDenied,
 			capability.NotFound, capability.DeadlineExceeded, capability.Unavailable,
-			capability.ResultTooLarge, capability.Unsupported, capability.Conflict, capability.Internal:
-			return &ToolError{Code: string(capabilityErr.Code), Message: capabilityErr.Message, Retryable: capabilityErr.Retryable}
+			capability.ResultTooLarge, capability.Unsupported, capability.Conflict, capability.Internal,
+			capability.ToolExecutionFailed, capability.ProviderRejected, capability.RateLimited:
+			return &ToolError{Code: string(capabilityErr.Code), Message: capabilityErr.Message,
+				Retryable: capabilityErr.Retryable, Upstream: capabilityErr.Upstream}
 		}
 	}
 	return &ToolError{Code: "CAPABILITY_UNAVAILABLE", Message: "Tool execution failed; check the corresponding configuration and dependency in LazyMind, then retry the affected step"}
