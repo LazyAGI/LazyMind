@@ -100,6 +100,22 @@ describe("default model configuration load timing", () => {
     await waitFor(() => expect(result.current.capabilityReadyStates.tts).toBe("ready"));
   });
 
+  it("loads a capability's options while its own readiness check stays pending", async () => {
+    mocks.role = "user";
+    mocks.ready.mockImplementation(() => new Promise(() => {}));
+    mocks.models.mockImplementation(({ modelType }: { modelType: string }) => Promise.resolve({ data: {
+      models: modelType === "embed_main" ? [{
+        id: "available-embedding", name: "Available embedding", model_type: "embed_main",
+        provider_name: "OpenAI", user_model_provider_id: "provider", user_model_provider_group_id: "group",
+      }] : [],
+    } }));
+    const { result } = renderConfig();
+
+    await waitFor(() => expect(result.current.moduleModelOptions.embed_main?.[0]?.value)
+      .toBe("own:provider:group:available-embedding"));
+    expect(result.current.capabilityReadyStates.embed_main).toBe("loading");
+  });
+
   it("ignores an older readiness result after a newer page refresh", async () => {
     mocks.role = "user";
     let resolveOldEmbedding!: (value: unknown) => void;

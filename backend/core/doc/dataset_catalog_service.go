@@ -306,6 +306,7 @@ func (s *DatasetCatalogService) GetDataset(ctx context.Context, req DatasetGetRe
 			out[0].ReadingCapabilities = append(out[0].ReadingCapabilities, learning.CapabilityRef{Key: row.CapabilityKey, Version: row.CapabilityVersion, Enabled: row.Enabled, DisplayOrder: row.DisplayOrder, Settings: config})
 		}
 	}
+	addRetainedCapabilities(ctx, s.db, out)
 	s.addAllowedActions(ctx, caller, out)
 	return out[0], nil
 }
@@ -328,6 +329,7 @@ func (s *DatasetCatalogService) datasetsFromRows(ctx context.Context, rows []orm
 		}
 		out = append(out, s.datasetFromRow(ctx, ds, userID, datasetACL, statsMap[ds.ID], sourceMap[ds.ID], sourceTypeMap[ds.ID], liveParsers))
 	}
+	addRetainedCapabilities(ctx, s.db, out)
 	return out
 }
 

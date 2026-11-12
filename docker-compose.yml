@@ -669,7 +669,7 @@ services:
       - *lazyllm-src-mount
       - *algorithm-src-mount
     environment:
-      <<: [*db-conn, *upload-paths, *llm-api-keys, *trace-config]
+      <<: [*db-conn, *core-db-conn, *upload-paths, *llm-api-keys, *trace-config]
       LAZYMIND_DOCUMENT_SERVICE_PORT: "8000"
       LAZYMIND_DOCUMENT_PROCESSOR_URL: http://processor-server:8000
       LAZYMIND_DOCUMENT_SERVICE_CALLBACK_URL: http://doc-server:8000/v1/internal/callbacks/tasks
@@ -796,7 +796,7 @@ services:
       - *lazyllm-src-mount
     environment:
       LAZYMIND_DOCUMENT_PROCESSOR_PORT: "8000"
-      <<: [*runtime-home, *db-conn, *upload-paths, *llm-api-keys, *ocr-env, *cache-env, *trace-config]
+      <<: [*runtime-home, *db-conn, *core-db-conn, *upload-paths, *llm-api-keys, *ocr-env, *cache-env, *trace-config]
       LAZYMIND_MODEL_CONFIG_PATH: ${LAZYMIND_MODEL_CONFIG_PATH:-dynamic}
       LAZYLLM_EXPECTED_LOG_MODULES: "all"
     command: ["python", "-m", "lazymind.processor.service.server"]
@@ -827,6 +827,11 @@ services:
       - *algorithm-src-mount
       - *lazyllm-src-mount
     environment:
+      LAZYMIND_MILVUS_URI: ${LAZYMIND_MILVUS_URI:-http://milvus:19530}
+      LAZYMIND_SEGMENT_STORE_TYPE: ${LAZYMIND_SEGMENT_STORE_TYPE:-opensearch}
+      LAZYMIND_SEGMENT_STORE_URI_OR_PATH: ${LAZYMIND_SEGMENT_STORE_URI_OR_PATH:-https://opensearch:9200}
+      LAZYMIND_SEGMENT_STORE_USER: ${LAZYMIND_SEGMENT_STORE_USER:-admin}
+      LAZYMIND_SEGMENT_STORE_PASSWORD: ${LAZYMIND_SEGMENT_STORE_PASSWORD:-LazyRAG_OpenSearch123!}
       LAZYMIND_DOCUMENT_WORKER_PORT: "8001"
       LAZYMIND_DOCUMENT_WORKER_NUM_WORKERS: "1"
       LAZYMIND_DOCUMENT_WORKER_LEASE_DURATION: "300"
@@ -834,7 +839,7 @@ services:
       LAZYMIND_DOCUMENT_WORKER_HIGH_PRIORITY_TASK_TYPES: ""
       LAZYMIND_DOCUMENT_WORKER_HIGH_PRIORITY_ONLY: "false"
       LAZYMIND_DOCUMENT_WORKER_POLL_MODE: direct
-      <<: [*runtime-home, *db-conn, *upload-paths, *llm-api-keys, *ocr-env, *cache-env, *trace-config]
+      <<: [*runtime-home, *db-conn, *core-db-conn, *upload-paths, *llm-api-keys, *ocr-env, *cache-env, *trace-config]
       LAZYMIND_MODEL_CONFIG_PATH: ${LAZYMIND_MODEL_CONFIG_PATH:-dynamic}
       LAZYLLM_EXPECTED_LOG_MODULES: "all"
     command: ["python", "-m", "lazymind.processor.service.worker"]
@@ -880,7 +885,7 @@ services:
       start_period: 180s
     environment:
       LAZYMIND_UPLOAD_ROOT: /var/lib/lazymind/uploads
-      <<: [*runtime-home, *upload-paths, *llm-api-keys, *ocr-env, *cache-env, *db-conn, *trace-config]
+      <<: [*runtime-home, *upload-paths, *llm-api-keys, *ocr-env, *cache-env, *db-conn, *core-db-conn, *trace-config]
       LAZYMIND_DOCUMENT_PROCESSOR_URL: http://processor-server:8000
       LAZYMIND_ALGO_SERVER_PORT: "8000"
       LAZYMIND_MODEL_CONFIG_PATH: ${LAZYMIND_MODEL_CONFIG_PATH:-dynamic}
@@ -977,6 +982,9 @@ services:
       # as one API surface from the chat container.
       LAZYMIND_DOCUMENT_SERVER_URL: http://parsing:8000,general_algo
       LAZYMIND_DOCUMENT_PROCESSOR_URL: http://processor-server:8000
+      # Online text-vector maintenance runs on the internal chat API and must
+      # use the same vector database as the parsing/search service.
+      LAZYMIND_MILVUS_URI: ${LAZYMIND_MILVUS_URI:-http://milvus:19530}
       LAZYMIND_SEGMENT_STORE_TYPE: ${LAZYMIND_SEGMENT_STORE_TYPE:-opensearch}
       LAZYMIND_SEGMENT_STORE_URI_OR_PATH: ${LAZYMIND_SEGMENT_STORE_URI_OR_PATH:-https://opensearch:9200}
       LAZYMIND_SEGMENT_STORE_USER: ${LAZYMIND_SEGMENT_STORE_USER:-admin}

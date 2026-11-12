@@ -7,6 +7,7 @@ import DefaultModelConfigPanel, {
   type ModelCapability,
   type SetupAvailabilityState,
 } from "../components/DefaultModelConfigPanel";
+import { DefaultModelConfigRefreshContext } from "../hooks/useDefaultModelConfig";
 import ExternalServicesPage from "./ExternalServicesPage";
 import "./DefaultServicesPage.scss";
 
@@ -93,14 +94,14 @@ export default function DefaultServicesPage({
 }: DefaultServicesPageProps) {
   const { t } = useTranslation();
   const [setupAvailability, setSetupAvailability] = useState<SetupAvailability>(loadingSetupAvailability);
-  const [selectionVersion, setSelectionVersion] = useState(0);
+  const [selectionRevision, setSelectionRevision] = useState(0);
   const [activeFocusCategory, setActiveFocusCategory] = useState(focusServiceCategory);
   const [toolServiceSummaries, setToolServiceSummaries] = useState<Partial<Record<ServiceCategory, string>>>({});
   const latestRequest = useRef(0);
 
-  const checkSetupAvailability = useCallback(async () => {
+  const checkSetupAvailability = useCallback(async (preserveCurrent = false) => {
     const requestId = ++latestRequest.current;
-    setSetupAvailability(loadingSetupAvailability);
+    if (!preserveCurrent) setSetupAvailability(loadingSetupAvailability);
     void listAvailableModels()
       .then((response) => {
         if (requestId !== latestRequest.current) return;
@@ -164,8 +165,8 @@ export default function DefaultServicesPage({
   };
 
   const handleServiceConfigurationChanged = () => {
-    setSelectionVersion((current) => current + 1);
-    void checkSetupAvailability();
+    setSelectionRevision((current) => current + 1);
+    void checkSetupAvailability(true);
     void onModelSelectionChanged();
   };
 
@@ -190,22 +191,23 @@ export default function DefaultServicesPage({
 
   return (
     <div className="model-provider-service-page default-services-page">
-      <DefaultModelConfigPanel
-        key={selectionVersion}
-        cloudServiceSetupStates={{
-          cloudParsing: setupAvailability.cloudParsing,
-          searchEngine: setupAvailability.searchEngine,
-        }}
-        modelProviderSetupState={setupAvailability.modelProvider}
-        onConfigureCloudService={handleConfigureCloudService}
-        onConfigureToolService={setActiveFocusCategory}
-        toolServiceSummaries={toolServiceSummaries}
-        onConfigureProviders={onConfigureProviders}
-        onModelSelectionChanged={onModelSelectionChanged}
-        onRetrySetup={() => void checkSetupAvailability()}
-        highlightTarget={highlightTarget}
-        onHighlightResolved={onHighlightResolved}
-      />
+      <DefaultModelConfigRefreshContext.Provider value={selectionRevision}>
+        <DefaultModelConfigPanel
+          cloudServiceSetupStates={{
+            cloudParsing: setupAvailability.cloudParsing,
+            searchEngine: setupAvailability.searchEngine,
+          }}
+          modelProviderSetupState={setupAvailability.modelProvider}
+          onConfigureCloudService={handleConfigureCloudService}
+          onConfigureToolService={setActiveFocusCategory}
+          toolServiceSummaries={toolServiceSummaries}
+          onConfigureProviders={onConfigureProviders}
+          onModelSelectionChanged={onModelSelectionChanged}
+          onRetrySetup={() => void checkSetupAvailability()}
+          highlightTarget={highlightTarget}
+          onHighlightResolved={onHighlightResolved}
+        />
+      </DefaultModelConfigRefreshContext.Provider>
       <Modal
         open={Boolean(activeFocusCategory)}
         title={activeFocusCategory ? ({ search: "搜索引擎", academic: "学术搜索引擎", parsing: "文档解析（OCR）", translation: "机器翻译" }[activeFocusCategory]) : ""}

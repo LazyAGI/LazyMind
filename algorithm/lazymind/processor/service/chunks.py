@@ -7,12 +7,9 @@ from lazyllm.tools.rag.store import HybridStore
 
 
 def list_doc_chunks_data(processor, algo_id, kb_id, doc_id, group, offset=0, limit=20):
-    from lazymind.parsing.service.embedding_reset import index_operation
-    with index_operation() as generation:
-        if getattr(processor, '_lazymind_store_generation', None) != generation:
-            processor._store = None
-            processor._lazymind_store_generation = generation
-        return _list_doc_chunks_data(processor, algo_id, kb_id, doc_id, group, offset, limit)
+    # Text-vector cleanup retains segments. Reading them is independent of
+    # vector readiness and must remain possible after clearing the index.
+    return _list_doc_chunks_data(processor, algo_id, kb_id, doc_id, group, offset, limit)
 
 
 def _list_doc_chunks_data(processor, algo_id, kb_id, doc_id, group, offset=0, limit=20):

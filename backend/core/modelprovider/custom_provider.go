@@ -237,7 +237,7 @@ func UpdateCustomProvider(w http.ResponseWriter, r *http.Request) {
 			}
 			if len(modelIDs) > 0 {
 				if err := tx.Model(&orm.EmbeddingIndexState{}).
-					Where("scope = ? AND active_model_id IN ?", globalEmbeddingScope, modelIDs).
+					Where("scope = ? AND active_source = ? AND active_model_id IN ?", globalEmbeddingScope, "own", modelIDs).
 					Updates(map[string]any{"active_provider_name": name, "updated_at": now}).Error; err != nil {
 					return err
 				}
@@ -342,8 +342,7 @@ func clearProviderConfiguration(w http.ResponseWriter, r *http.Request, reset bo
 		return clearEmbeddingStateAfterRemoval(tx, embeddingModelIDs...)
 	})
 	if err != nil {
-		if errors.Is(err, errEmbeddingInUse) {
-			common.ReplyErr(w, err.Error(), http.StatusConflict)
+		if replyEmbeddingMutationConflict(w, err) {
 			return
 		}
 		common.ReplyErr(w, "delete custom provider failed", 500)

@@ -27,6 +27,7 @@ const pdfIRTooLargeMessage = "PDF reading structure exceeds the 32 MiB limit. Us
 var errPDFIRTooLarge = errors.New("PDF reading structure exceeds the 32 MiB limit. Use a smaller PDF or split the original PDF into smaller documents.")
 
 type pdfIRPayload struct {
+	Force        bool   `json:"force,omitempty"`
 	Automatic    bool   `json:"automatic,omitempty"`
 	Revision     string `json:"revision"`
 	DatasetID    string `json:"dataset_id"`
@@ -181,7 +182,7 @@ func CreatePDFIR(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	resource := pdfIRResource(row.DatasetID, row.ID)
-	job, e := asyncjob.Enqueue(r.Context(), store.DB(), asyncjob.EnqueueRequest{JobType: pdfIRJobType, ResourceType: "document_pdf_ir", ResourceID: resource, IdempotencyKey: pdfir.Digest(resource + hash + pdfir.Revision), Payload: pdfIRPayload{DatasetID: row.DatasetID, DocumentID: row.ID, SourceSHA256: hash, Revision: pdfir.Revision}, MaxAttempts: 2, SkipSucceeded: true, CreateUserID: store.UserID(r)})
+	job, e := asyncjob.Enqueue(r.Context(), store.DB(), asyncjob.EnqueueRequest{JobType: pdfIRJobType, ResourceType: "document_pdf_ir", ResourceID: resource, IdempotencyKey: pdfir.Digest(resource + hash + pdfir.Revision), Payload: pdfIRPayload{Force: req.Force, DatasetID: row.DatasetID, DocumentID: row.ID, SourceSHA256: hash, Revision: pdfir.Revision}, MaxAttempts: 2, SkipSucceeded: true, CreateUserID: store.UserID(r)})
 	if e != nil {
 		common.ReplyErr(w, "enqueue PDF parsing failed", 500)
 		return
@@ -281,9 +282,15 @@ func handlePDFIRJob(ctx context.Context, job asyncjob.Job, reporter asyncjob.Rep
 			}
 		}
 	}()
-	raw, e := client.Parse(runCtx, snapshot)
-	if e != nil {
-		return fail(e)
+	var raw []byte
+	if !p.Force {
+		raw = pdfir.ReadCachedArchive(pdfIRSource(ext), hash, client.Model)
+	}
+	if raw == nil {
+		raw, e = client.Parse(runCtx, snapshot)
+		if e != nil {
+			return fail(e)
+		}
 	}
 	rawPath := filepath.Join(dir, "mineru-result.zip")
 	if e = os.WriteFile(rawPath, raw, 0600); e != nil {
@@ -293,6 +300,7 @@ func handlePDFIRJob(ctx context.Context, job asyncjob.Job, reporter asyncjob.Rep
 	if e != nil {
 		return fail(errors.New("MinerU result has invalid layout data"))
 	}
+	pdfir.SaveCachedArchive(pdfIRSource(ext), hash, client.Model, raw)
 	current, e := pdfIRHash(ext)
 	if e != nil || current != hash {
 		return asyncjob.Result{Permanent: true}, errors.New("PDF source changed during parsing")

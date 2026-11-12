@@ -121,9 +121,6 @@ func validateModelEditReferences(ctx context.Context, tx *gorm.DB, parent orm.Us
 		}
 	}
 	if identityChanged && isTextEmbeddingModelType(before.ModelType) {
-		if len(selections) > 0 && !tx.Migrator().HasTable(&orm.EmbeddingIndexState{}) {
-			return errEmbeddingIdentityInUse
-		}
 		if err := guardEmbeddingRuntimeMutation(tx, before.CreateUserID, before.UserModelProviderID, before.UserModelProviderGroupID, before.ID); err != nil {
 			return err
 		}

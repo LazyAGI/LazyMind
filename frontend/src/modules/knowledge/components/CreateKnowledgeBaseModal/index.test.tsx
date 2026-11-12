@@ -79,20 +79,27 @@ async function fillRequiredFields() {
   fireEvent.change(await screen.findByLabelText(/knowledge.knowledgeBaseName/), {
     target: { value: "test-knowledge" },
   });
-  const tags = screen.getByRole("combobox", { name: "" });
-  fireEvent.mouseDown(tags);
-  fireEvent.keyDown(tags, { key: "ArrowDown", keyCode: 40 });
-  fireEvent.keyDown(tags, { key: "Enter", keyCode: 13 });
+
 }
 
 async function selectEnglishProfile() {
-  const profiles = screen.getByRole("combobox", { name: "learning.capabilityProfile" });
-  fireEvent.mouseDown(profiles);
-  fireEvent.keyDown(profiles, { key: "ArrowDown", keyCode: 40 });
-  fireEvent.keyDown(profiles, { key: "Enter", keyCode: 13 });
+  fireEvent.click(screen.getByRole("radio", { name: /English learning/ }));
 }
 
 describe("knowledge creation capability submission", () => {
+  it("shows all scenes directly and exposes optional fields under advanced options", async () => {
+    const { onCreate } = await mountModal();
+    expect(screen.getByRole("radio", { name: /General reading/ })).toBeChecked();
+    await waitFor(() => expect(screen.getByText("English learning", { exact: true })).toBeVisible());
+    expect(screen.queryByLabelText("knowledge.knowledgeDesc")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByText("knowledge.advancedOptions"));
+    expect(await screen.findByLabelText("knowledge.knowledgeDesc")).toBeVisible();
+    expect(screen.getByText("knowledge.knowledgeTags")).toBeVisible();
+    expect(screen.getByRole("combobox", { name: /knowledge.processingLevel/ })).toBeEnabled();
+    await fillRequiredFields();
+    fireEvent.click(screen.getByRole("button", { name: "common.confirm" }));
+    await waitFor(() => expect(onCreate).toHaveBeenCalledWith(expect.objectContaining({ tags: [] })));
+  });
   it("keeps the settings of a selected custom preset", async () => {
     vi.mocked(getKnowledgeOptions).mockResolvedValue({
       ...options,
@@ -102,9 +109,7 @@ describe("knowledge creation capability submission", () => {
     });
     const { onCreate } = await mountModal();
     await fillRequiredFields();
-    const profiles = screen.getByRole("combobox", { name: "learning.capabilityProfile" });
-    fireEvent.mouseDown(profiles);
-    fireEvent.click(await screen.findByText("Translation preset"));
+    fireEvent.click(screen.getByRole("radio", { name: /Translation preset/ }));
     fireEvent.click(screen.getByRole("button", { name: "common.confirm" }));
     await waitFor(() => expect(onCreate).toHaveBeenCalledWith(expect.objectContaining({
       scene: "custom", profile_id: "preset-translation",
@@ -129,7 +134,7 @@ describe("knowledge creation capability submission", () => {
     vi.mocked(isDeveloperModeActive).mockReturnValue(developer);
     const { onCreate } = await mountModal();
     await fillRequiredFields();
-    if (!developer) expect(screen.queryByText("learning.advancedSettings")).not.toBeInTheDocument();
+    expect(screen.getByText("knowledge.advancedOptions")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "common.confirm" }));
     await waitFor(() => expect(onCreate).toHaveBeenCalledWith(expect.objectContaining({ scene: "general", reading_capabilities: generalKeys.map((key, index) => ({ key, version: 1, enabled: true, display_order: index + 1, settings: {} })) })));
     expect(onCreate).toHaveBeenCalledWith(expect.objectContaining({ processing_level: "stored" }));
@@ -148,11 +153,11 @@ describe("knowledge creation capability submission", () => {
     vi.mocked(isDeveloperModeActive).mockReturnValue(true);
     const { onCreate } = await mountModal();
     await fillRequiredFields();
-    fireEvent.click(screen.getByText("learning.advancedSettings"));
+    fireEvent.click(screen.getByText("knowledge.advancedOptions"));
     fireEvent.change(await screen.findByRole("spinbutton", { name: /learning.maxSelectionLength/ }), {
       target: { value: "321" },
     });
-    fireEvent.click(screen.getByText("learning.advancedSettings"));
+    fireEvent.click(screen.getByText("knowledge.advancedOptions"));
     fireEvent.click(screen.getByRole("button", { name: "common.confirm" }));
     await waitFor(() => expect(onCreate).toHaveBeenCalledWith(expect.objectContaining({ reading_capabilities: [
       expect.objectContaining({ key: "chinese_definition", settings: expect.objectContaining({ max_selection_length: 321 }) }),

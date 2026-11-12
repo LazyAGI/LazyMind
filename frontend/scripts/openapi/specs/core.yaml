@@ -1,50 +1,5 @@
 components:
     schemas:
-        TaskCenterWorkbenchResponse:
-            properties:
-                groups:
-                    properties:
-                        attention:
-                            $ref: '#/components/schemas/TaskCenterWorkbenchGroup'
-                        canceled:
-                            $ref: '#/components/schemas/TaskCenterWorkbenchGroup'
-                        failed:
-                            $ref: '#/components/schemas/TaskCenterWorkbenchGroup'
-                        paused:
-                            $ref: '#/components/schemas/TaskCenterWorkbenchGroup'
-                        recent:
-                            $ref: '#/components/schemas/TaskCenterWorkbenchGroup'
-                        running:
-                            $ref: '#/components/schemas/TaskCenterWorkbenchGroup'
-                    required:
-                        - attention
-                        - running
-                        - paused
-                        - failed
-                        - recent
-                        - canceled
-                    type: object
-                page_size:
-                    type: integer
-            required:
-                - groups
-                - page_size
-            type: object
-        TaskCenterWorkbenchGroup:
-            properties:
-                items:
-                    items:
-                        $ref: '#/components/schemas/TaskCenterTaskResponse'
-                    type: array
-                page:
-                    type: integer
-                total:
-                    type: integer
-            required:
-                - items
-                - total
-                - page
-            type: object
         ACLApiResponse:
             properties:
                 code:
@@ -8215,10 +8170,27 @@ components:
                 affected_knowledge_bases:
                     format: int64
                     type: integer
+                generation:
+                    format: int64
+                    type: integer
+                index_identity:
+                    enum:
+                        - empty
+                        - verified
+                        - legacy_unknown
+                    type: string
                 indexed_knowledge_bases:
                     format: int64
                     type: integer
                 model_name:
+                    type: string
+                operation_phase:
+                    enum:
+                        - idle
+                        - rebuilding
+                        - clearing
+                        - cleanup_failed
+                        - cleared
                     type: string
                 pending_knowledge_bases:
                     format: int64
@@ -8236,7 +8208,10 @@ components:
                     type: string
             required:
                 - affected_knowledge_bases
+                - generation
+                - index_identity
                 - indexed_knowledge_bases
+                - operation_phase
                 - pending_knowledge_bases
                 - status
             type: object
@@ -11354,6 +11329,57 @@ components:
                 - recovery
                 - stage
             type: object
+        ProcessingTaskItem:
+            properties:
+                created_at:
+                    type: string
+                dataset_id:
+                    type: string
+                dataset_name:
+                    type: string
+                document_id:
+                    type: string
+                document_name:
+                    type: string
+                error:
+                    type: string
+                id:
+                    type: string
+                level:
+                    type: string
+                stages:
+                    items:
+                        $ref: '#/components/schemas/ProcessingTaskStage'
+                    type: array
+                status:
+                    type: string
+            type: object
+        ProcessingTaskStage:
+            properties:
+                name:
+                    type: string
+                status:
+                    type: string
+            type: object
+        ProcessingTasksResponse:
+            properties:
+                counts:
+                    additionalProperties:
+                        type: integer
+                    type: object
+                items:
+                    items:
+                        $ref: '#/components/schemas/ProcessingTaskItem'
+                    type: array
+                page:
+                    type: integer
+                page_size:
+                    type: integer
+                total:
+                    type: integer
+                unfinished_count:
+                    type: integer
+            type: object
         ProjectionError:
             properties:
                 code:
@@ -13074,6 +13100,51 @@ components:
                 - created_at
                 - updated_at
             type: object
+        TaskCenterWorkbenchGroup:
+            properties:
+                items:
+                    items:
+                        $ref: '#/components/schemas/TaskCenterTaskResponse'
+                    type: array
+                page:
+                    type: integer
+                total:
+                    type: integer
+            required:
+                - items
+                - total
+                - page
+            type: object
+        TaskCenterWorkbenchResponse:
+            properties:
+                groups:
+                    properties:
+                        attention:
+                            $ref: '#/components/schemas/TaskCenterWorkbenchGroup'
+                        canceled:
+                            $ref: '#/components/schemas/TaskCenterWorkbenchGroup'
+                        failed:
+                            $ref: '#/components/schemas/TaskCenterWorkbenchGroup'
+                        paused:
+                            $ref: '#/components/schemas/TaskCenterWorkbenchGroup'
+                        recent:
+                            $ref: '#/components/schemas/TaskCenterWorkbenchGroup'
+                        running:
+                            $ref: '#/components/schemas/TaskCenterWorkbenchGroup'
+                    required:
+                        - attention
+                        - running
+                        - paused
+                        - failed
+                        - recent
+                        - canceled
+                    type: object
+                page_size:
+                    type: integer
+            required:
+                - groups
+                - page_size
+            type: object
         TaskDocumentInfo:
             properties:
                 display_name:
@@ -14123,6 +14194,8 @@ components:
                 objective:
                     type: string
                 preference_scope:
+                    type: string
+                retry_origin:
                     type: string
                 review_id:
                     type: string
@@ -19898,44 +19971,6 @@ info:
     version: 0.1.0
 openapi: 3.0.3
 paths:
-    /api/core/task-center/workbench:
-        get:
-            parameters:
-                - in: query
-                  name: task_type
-                  required: false
-                  schema:
-                    type: string
-                - in: query
-                  name: keyword
-                  required: false
-                  schema:
-                    type: string
-                - in: query
-                  name: category
-                  required: false
-                  schema:
-                    enum:
-                        - attention
-                        - running
-                        - paused
-                        - failed
-                        - recent
-                        - canceled
-                    type: string
-                - in: query
-                  name: page
-                  required: false
-                  schema:
-                    type: integer
-            responses:
-                "200":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/TaskCenterWorkbenchResponse'
-                    description: Task-center workbench
-            summary: Summarize task categories with four previews per page
     /api/core/academic/chat-context:
         get:
             parameters:
@@ -20845,6 +20880,41 @@ paths:
                                 $ref: '#/components/schemas/PaperLibraryChanges'
                     description: Add a note idempotently by stable note ID
             summary: Add a note idempotently by stable note ID
+            tags:
+                - AcademicWorkflows
+    /api/core/academic/library/papers/{library_paper_id}/notes/{note_id}:delete:
+        post:
+            parameters:
+                - in: query
+                  name: target_dataset_id
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: library_paper_id
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: note_id
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            properties: {}
+                            type: object
+                required: false
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/PaperLibraryChanges'
+                    description: Delete one saved paper note
+            summary: Delete one saved paper note
             tags:
                 - AcademicWorkflows
     /api/core/academic/library/papers:delete:
@@ -28138,6 +28208,29 @@ paths:
             summary: Start task
             tags:
                 - tasks
+    /api/core/datasets/{dataset}/text-index:
+        get:
+            parameters:
+                - in: path
+                  name: dataset
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: GET /datasets/{dataset}/text-index
+        post:
+            parameters:
+                - in: path
+                  name: dataset
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: POST /datasets/{dataset}/text-index
     /api/core/datasets/{dataset}/uploads:
         post:
             parameters:
@@ -30173,6 +30266,37 @@ paths:
             summary: One-click update of all installed official knowledge bases
             tags:
                 - knowledge-market
+    /api/core/knowledge-processing/tasks:
+        get:
+            parameters:
+                - in: query
+                  name: page
+                  required: false
+                  schema:
+                    type: integer
+                - in: query
+                  name: status
+                  required: false
+                  schema:
+                    type: string
+                - in: query
+                  name: level
+                  required: false
+                  schema:
+                    type: string
+                - in: query
+                  name: q
+                  required: false
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ProcessingTasksResponse'
+                    description: Permission-scoped latest processing attempts
+            summary: Latest document processing tasks
     /api/core/knowledge/options:
         get:
             responses:
@@ -32915,7 +33039,7 @@ paths:
                 - model_providers
     /api/core/model_providers/embedding/clear-chunks:
         post:
-            description: Requires a preview generation and explicit administrator confirmation for a server-verified candidate. Clears shared chunks and vectors, preserves source files and document records, and atomically activates the target model with its saved selection. The server completes the operation independently of browser cancellation. Retrying the same confirmed request resumes an interrupted cleanup or activation; replaying a completed request does not clear the new index. Success acknowledges both cleared and activated. Documents await manual parsing; no parsing tasks are enqueued.
+            description: Requires the current generation and explicit administrator confirmation. Clears text vectors while preserving originals, parsed content, chunks and image vectors. An empty model_id performs credential-independent recovery without activating a model. Otherwise the server verifies and activates the replacement independently of browser cancellation. Replaying a completed request does not clear the new index. Documents await explicit reindexing.
             requestBody:
                 content:
                     application/json:
@@ -32929,7 +33053,7 @@ paths:
                             schema:
                                 $ref: '#/components/schemas/EmbeddingClearResponse'
                     description: Chunks cleared and target model activated
-            summary: Clear knowledge chunks and activate the confirmed embedding model
+            summary: Clear text vectors and optionally activate a replacement embedding model
             tags:
                 - model_providers
     /api/core/model_providers/embedding/index-state:
@@ -36363,6 +36487,44 @@ paths:
                                 $ref: '#/components/schemas/TaskRemovalResult'
                     description: Removal committed
             summary: Move task and related conversations to Trash
+    /api/core/task-center/workbench:
+        get:
+            parameters:
+                - in: query
+                  name: task_type
+                  required: false
+                  schema:
+                    type: string
+                - in: query
+                  name: keyword
+                  required: false
+                  schema:
+                    type: string
+                - in: query
+                  name: category
+                  required: false
+                  schema:
+                    enum:
+                        - attention
+                        - running
+                        - paused
+                        - failed
+                        - recent
+                        - canceled
+                    type: string
+                - in: query
+                  name: page
+                  required: false
+                  schema:
+                    type: integer
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/TaskCenterWorkbenchResponse'
+                    description: Task-center workbench
+            summary: Summarize task categories with four previews per page
     /api/core/task-center/workflow-events:
         get:
             responses:
