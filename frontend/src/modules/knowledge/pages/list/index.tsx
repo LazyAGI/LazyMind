@@ -64,7 +64,6 @@ type Dataset = LegacyDataset & Pick<CoreDataset, "paper_count" | "pdf_attachment
 import KnowledgeTag from "@/modules/knowledge/components/KnowledgeTag";
 import FileUtils from "@/modules/knowledge/utils/file";
 import {
-  effectiveProcessingLevel,
   type ProcessingLevel,
 } from "@/modules/knowledge/utils/processingLevel";
 import { isPaperLibrary } from "@/modules/knowledge/paper/store";

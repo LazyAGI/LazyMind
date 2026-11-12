@@ -1,0 +1,93 @@
+name: Publish desktop update policy
+
+on:
+  workflow_dispatch:
+    inputs:
+      build_run_ids:
+        description: "Comma-separated successful build run IDs from this repository"
+        required: true
+        type: string
+      plan:
+        description: "JSON plan: policySequence, issuedAt, expiresAt, releaseIds, explicit edges, revoked"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: desktop-update-publication
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    environment: desktop_updates
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@v6
+        with:
+          go-version: "1.26.5"
+          cache-dependency-path: local/local-runtime-manager/go.sum
+      - uses: astral-sh/setup-uv@v6
+      - name: Download successful build artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          BUILD_RUN_IDS: ${{ inputs.build_run_ids }}
+        run: |
+          set -euo pipefail
+          [[ "${BUILD_RUN_IDS}" =~ ^[0-9]+(,[0-9]+)*$ ]]
+          IFS=',' read -ra run_ids <<< "${BUILD_RUN_IDS}"
+          for run_id in "${run_ids[@]}"; do
+            test "$(gh run view "${run_id}" --json conclusion --jq .conclusion)" = success
+            gh run download "${run_id}" --pattern 'desktop-update-*' --dir "publication/${run_id}"
+          done
+      - name: Assemble and sign explicit update policy
+        env:
+          UPDATE_PLAN: ${{ inputs.plan }}
+          UPDATE_PRIVATE_KEY: ${{ secrets.LAZYMIND_UPDATE_POLICY_PRIVATE_KEY }}
+          UPDATE_KEY_ID: ${{ vars.LAZYMIND_UPDATE_POLICY_KEY_ID }}
+        run: |
+          set -euo pipefail
+          test -n "${UPDATE_PRIVATE_KEY}"
+          test -n "${UPDATE_KEY_ID}"
+          umask 077
+          key_path="${RUNNER_TEMP}/desktop-update-private.pem"
+          trap 'rm -f "${key_path}"' EXIT
+          printf '%s' "${UPDATE_PRIVATE_KEY}" > "${key_path}"
+          printf '%s' "${UPDATE_PLAN}" > "${RUNNER_TEMP}/update-plan.json"
+          (cd local/local-runtime-manager && go build -o "${RUNNER_TEMP}/update-publisher" ./cmd/update-publisher)
+          "${RUNNER_TEMP}/update-publisher" sign \
+            --records publication --plan "${RUNNER_TEMP}/update-plan.json" \
+            --key-id "${UPDATE_KEY_ID}" --key-file "${key_path}" \
+            --output "${RUNNER_TEMP}/update-policy.json" --config-output "${RUNNER_TEMP}/update-config.json"
+      - name: Publish and verify files before policy
+        env:
+          MODELSCOPE_API_TOKEN: ${{ secrets.MODELSCOPE_UPDATE_TOKEN }}
+          UPDATE_REPO: ${{ vars.LAZYMIND_UPDATE_MODELSCOPE_REPO }}
+        run: |
+          set -euo pipefail
+          test -n "${MODELSCOPE_API_TOKEN}"
+          test -n "${UPDATE_REPO}"
+          uv run --no-project --python 3.11 --with modelscope-hub==0.4.6 \
+            python desktop/scripts/publish-desktop-update.py \
+            --directory publication --policy "${RUNNER_TEMP}/update-policy.json" \
+            --config "${RUNNER_TEMP}/update-config.json" --repo "${UPDATE_REPO}" \
+            --validator "${RUNNER_TEMP}/update-publisher"
+      - name: Save public publication records
+        if: success()
+        uses: actions/upload-artifact@v7
+        with:
+          name: desktop-update-policy-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/update-policy.json
+            ${{ runner.temp }}/update-config.json
+          if-no-files-found: error
+      - name: Remove signing material
+        if: always()
+        run: rm -f "${RUNNER_TEMP}/desktop-update-private.pem"

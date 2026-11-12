@@ -36,6 +36,10 @@ func NewScheduler(db *gorm.DB, cfg Config, workerID string) *Scheduler {
 }
 
 func (s *Scheduler) RunOnce(ctx context.Context) (SchedulerTickResult, error) {
+	if !updateWork.Enter() {
+		return SchedulerTickResult{}, nil
+	}
+	defer updateWork.Leave()
 	var result SchedulerTickResult
 	if s == nil || s.db == nil {
 		return result, errors.New("resource update scheduler db is nil")

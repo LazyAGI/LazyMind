@@ -16,7 +16,7 @@ function setup() {
     clientHeight: { value: 400 },
     scrollTop: { value: 600, writable: true },
   });
-  element.scrollTo = vi.fn(({ top }: ScrollToOptions) => { element.scrollTop = Math.min(top || 0, height - 400); });
+  element.scrollTo = vi.fn((options?: ScrollToOptions | number, y?: number) => { const top = typeof options === "number" ? y : options?.top; element.scrollTop = Math.min(top || 0, height - 400); });
   const chatInputRef = createRef<ChatInputImperativeProps>();
   const { result, rerender, unmount } = renderHook(() => {
     const scroll = useChatScroll({ chatInputRef, messageListLength: 2, thinkingCollapseMap: new Map() });

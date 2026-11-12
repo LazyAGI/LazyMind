@@ -17,6 +17,9 @@ func main() {
 	if err != nil {
 		failLaunch("resolve the LazyMind launcher path", err)
 	}
+	if err = checkPendingDesktopUpdate(launcherPath); err != nil {
+		failLaunch("check pending desktop update", err)
+	}
 	electronPath := electronExecutablePath(launcherPath, electronExecutableName)
 	environment, removedRunAsNode := sanitizedEnvironment(os.Environ())
 	if removedRunAsNode {

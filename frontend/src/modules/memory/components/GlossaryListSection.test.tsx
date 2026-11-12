@@ -1,3 +1,4 @@
+import { createInstance } from "i18next";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import GlossaryListSection from "./GlossaryListSection";
@@ -6,9 +7,11 @@ describe("GlossaryListSection", () => {
   it("keeps create and inbox actions in the list toolbar", () => {
     const onCreate = vi.fn();
     const onOpenInbox = vi.fn();
+    const translations = createInstance();
+    void translations.init({ lng: "en", resources: {}, initImmediate: false });
     render(
       <GlossaryListSection
-        t={(key) => key}
+        t={translations.t}
         assets={[]}
         columns={[{ key: "term", title: "Term", dataIndex: "term" }]}
         filteredItems={[]}

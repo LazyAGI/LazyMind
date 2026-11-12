@@ -41,12 +41,17 @@ func RunCleanup(ctx context.Context, db *gorm.DB, now time.Time) {
 }
 
 // Start executes once during Core startup and then every interval until the
-// process context is canceled.
-func Start(ctx context.Context, db *gorm.DB, interval time.Duration) {
+// process context is canceled. Completion includes the active cleanup pass.
+func Start(ctx context.Context, db *gorm.DB, interval time.Duration) <-chan struct{} {
 	if interval <= 0 {
 		interval = DefaultCleanupInterval
 	}
+	done := make(chan struct{})
 	go func() {
+		defer close(done)
+		if ctx.Err() != nil {
+			return
+		}
 		RunCleanup(ctx, db, time.Now().UTC())
 		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
@@ -55,8 +60,12 @@ func Start(ctx context.Context, db *gorm.DB, interval time.Duration) {
 			case <-ctx.Done():
 				return
 			case now := <-ticker.C:
+				if ctx.Err() != nil {
+					return
+				}
 				RunCleanup(ctx, db, now.UTC())
 			}
 		}
 	}()
+	return done
 }

@@ -382,7 +382,7 @@ describe('MarkdownArtifactEditor MDX compatibility', () => {
   it.each([12, 40])('keeps the unordered heading control connected to the heading across a %spx gutter', async (gutter) => {
     render(<MarkdownArtifactEditor markdown={'<a id="block-sec-1"></a>\n## Heading'}
       sourceRevision={1} onSave={async () => 1}
-      numbering={{ entries: { 'sec-1': { mode: 'unordered', label: '' } } }} />);
+      numbering={{ ordered_style: 'hierarchical', entries: { 'sec-1': { mode: 'unordered', label: '' } } }} />);
     const surface = document.querySelector<HTMLElement>('.writer-markdown-editor__surface')!;
     vi.spyOn(surface, 'getBoundingClientRect').mockReturnValue({ ...rect(), left: 100, width: 400 });
     const heading = document.createElement('h2');
@@ -908,7 +908,7 @@ describe('MarkdownArtifactEditor rewrite selection highlight', () => {
       <MarkdownArtifactEditor
         markdown={markdown}
         sourceRevision={1}
-        numbering={{ entries: { 'sec-1': { label } } }}
+        numbering={{ ordered_style: 'hierarchical', entries: label === undefined ? {} : { 'sec-1': { label } } }}
         onSave={onSave}
       />
     );

@@ -1,0 +1,144 @@
+{
+  "producer": "backend/channel-gateway SQLiteGatewayStore.initialize",
+  "sourceCommit": "70b5b4835c4e01fce60e87b91ba86b613893df41",
+  "lazyllmCommit": "d53007dd95ce5f9180399a095cf81fb0b643093a",
+  "shape": {
+    "present": true,
+    "applicationId": 0,
+    "userVersion": 0,
+    "schema": [
+      {
+        "type": "index",
+        "name": "channel_accounts_owner_idx",
+        "table": "channel_accounts",
+        "sql": "CREATE INDEX channel_accounts_owner_idx\n            ON channel_accounts(owner_user_id, provider, updated_at DESC)\n            "
+      },
+      {
+        "type": "index",
+        "name": "channel_connection_sessions_idempotency_idx",
+        "table": "channel_connection_sessions",
+        "sql": "CREATE UNIQUE INDEX channel_connection_sessions_idempotency_idx\n            ON channel_connection_sessions(\n                owner_user_id, provider, idempotency_key\n            )\n            WHERE idempotency_key IS NOT NULL\n            "
+      },
+      {
+        "type": "index",
+        "name": "channel_connection_sessions_owner_idx",
+        "table": "channel_connection_sessions",
+        "sql": "CREATE INDEX channel_connection_sessions_owner_idx\n            ON channel_connection_sessions(\n                owner_user_id, provider, updated_at DESC\n            )\n            "
+      },
+      {
+        "type": "index",
+        "name": "channel_inbox_claim_idx",
+        "table": "channel_inbox",
+        "sql": "CREATE INDEX channel_inbox_claim_idx\n            ON channel_inbox(status, next_attempt_at, received_at)\n            "
+      },
+      {
+        "type": "index",
+        "name": "channel_inbox_order_idx",
+        "table": "channel_inbox",
+        "sql": "CREATE INDEX channel_inbox_order_idx\n            ON channel_inbox(account_id, order_key, ingest_sequence)\n            "
+      },
+      {
+        "type": "index",
+        "name": "channel_outbox_claim_idx",
+        "table": "channel_outbox",
+        "sql": "CREATE INDEX channel_outbox_claim_idx\n            ON channel_outbox(status, next_attempt_at, created_at)\n            "
+      },
+      {
+        "type": "index",
+        "name": "channel_outbox_dedupe_idx",
+        "table": "channel_outbox",
+        "sql": "CREATE UNIQUE INDEX channel_outbox_dedupe_idx\n            ON channel_outbox(account_id, dedupe_key)\n            "
+      },
+      {
+        "type": "index",
+        "name": "channel_outbox_monitor_idx",
+        "table": "channel_outbox",
+        "sql": "CREATE INDEX channel_outbox_monitor_idx\n            ON channel_outbox(provider, status, created_sequence)\n            "
+      },
+      {
+        "type": "index",
+        "name": "channel_outbox_order_idx",
+        "table": "channel_outbox",
+        "sql": "CREATE INDEX channel_outbox_order_idx\n            ON channel_outbox(account_id, order_key, created_sequence)\n            "
+      },
+      {
+        "type": "index",
+        "name": "channel_processed_messages_time_idx",
+        "table": "channel_processed_messages",
+        "sql": "CREATE INDEX channel_processed_messages_time_idx\n            ON channel_processed_messages(processed_at)\n            "
+      },
+      {
+        "type": "table",
+        "name": "channel_accounts",
+        "table": "channel_accounts",
+        "sql": "CREATE TABLE channel_accounts (\n                id TEXT PRIMARY KEY,\n                owner_user_id TEXT NOT NULL,\n                provider VARCHAR(32) NOT NULL,\n                external_id_hash VARCHAR(64) NOT NULL,\n                label TEXT NOT NULL,\n                status VARCHAR(32) NOT NULL,\n                runtime_status VARCHAR(32) NOT NULL DEFAULT 'stopped',\n                last_poll_at TIMESTAMPTZ,\n                last_message_at TIMESTAMPTZ,\n                last_error TEXT,\n                credentials_ciphertext TEXT NOT NULL,\n                credential_revision INTEGER NOT NULL DEFAULT 1,\n                welcome_pending BOOLEAN NOT NULL DEFAULT FALSE,\n                connected_at TIMESTAMPTZ,\n                created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,\n                updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP, identity_metadata TEXT NOT NULL DEFAULT '{}', label_custom BOOLEAN NOT NULL DEFAULT FALSE, archived_at TIMESTAMPTZ, default_recipient_id TEXT NOT NULL DEFAULT '', connection_check_status TEXT NOT NULL DEFAULT 'unknown', connection_checked_at TIMESTAMPTZ, connection_check_started_at TIMESTAMPTZ, connection_check_id TEXT NOT NULL DEFAULT '', connection_error_code TEXT NOT NULL DEFAULT '', connection_context_revision INTEGER NOT NULL DEFAULT 0,\n                UNIQUE (owner_user_id, provider, external_id_hash)\n            )"
+      },
+      {
+        "type": "table",
+        "name": "channel_checkpoints",
+        "table": "channel_checkpoints",
+        "sql": "CREATE TABLE channel_checkpoints (\n                account_id TEXT PRIMARY KEY\n                    REFERENCES channel_accounts(id) ON DELETE CASCADE,\n                cursor TEXT NOT NULL DEFAULT '',\n                longpoll_timeout_ms INTEGER NOT NULL DEFAULT 35000,\n                created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,\n                updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP\n            )"
+      },
+      {
+        "type": "table",
+        "name": "channel_connection_sessions",
+        "table": "channel_connection_sessions",
+        "sql": "CREATE TABLE channel_connection_sessions (\n                id TEXT PRIMARY KEY,\n                owner_user_id TEXT NOT NULL,\n                provider VARCHAR(32) NOT NULL,\n                account_id TEXT REFERENCES channel_accounts(id),\n                idempotency_key TEXT,\n                status VARCHAR(32) NOT NULL,\n                revision INTEGER NOT NULL DEFAULT 1,\n                qr_version INTEGER NOT NULL DEFAULT 1,\n                message TEXT NOT NULL,\n                provider_state_ciphertext TEXT,\n                expires_at TIMESTAMPTZ NOT NULL,\n                error_code TEXT,\n                error_message TEXT,\n                error_retryable BOOLEAN,\n                cleanup_pending BOOLEAN NOT NULL DEFAULT FALSE,\n                created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,\n                updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP\n            , requested_account_id TEXT)"
+      },
+      {
+        "type": "table",
+        "name": "channel_inbox",
+        "table": "channel_inbox",
+        "sql": "CREATE TABLE channel_inbox (\n                id TEXT PRIMARY KEY,\n                ingest_sequence INTEGER UNIQUE,\n                account_id TEXT NOT NULL\n                    REFERENCES channel_accounts(id) ON DELETE CASCADE,\n                provider VARCHAR(32) NOT NULL,\n                message_key VARCHAR(128) NOT NULL,\n                order_key VARCHAR(128) NOT NULL,\n                external_address_hash VARCHAR(64) NOT NULL,\n                owner_user_id TEXT NOT NULL,\n                recipient_id TEXT NOT NULL,\n                text TEXT NOT NULL,\n                provider_context TEXT NOT NULL DEFAULT '{}',\n                sensitive_payload_ciphertext TEXT,\n                status VARCHAR(32) NOT NULL DEFAULT 'pending',\n                attempt_count INTEGER NOT NULL DEFAULT 0,\n                lease_owner TEXT,\n                lease_until TIMESTAMPTZ,\n                next_attempt_at TIMESTAMPTZ,\n                last_error TEXT,\n                received_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,\n                updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,\n                UNIQUE(account_id, message_key)\n            )"
+      },
+      {
+        "type": "table",
+        "name": "channel_navigation_states",
+        "table": "channel_navigation_states",
+        "sql": "CREATE TABLE channel_navigation_states (\n                account_id TEXT NOT NULL\n                    REFERENCES channel_accounts(id) ON DELETE CASCADE,\n                external_address_hash VARCHAR(64) NOT NULL,\n                mode VARCHAR(32) NOT NULL DEFAULT 'active',\n                snapshot_json TEXT NOT NULL DEFAULT '{}',\n                snapshot_expires_at TIMESTAMPTZ,\n                history_conversation_id TEXT,\n                history_next_page_token TEXT,\n                created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,\n                updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,\n                PRIMARY KEY (account_id, external_address_hash),\n                CHECK (mode IN ('active', 'new_pending'))\n            )"
+      },
+      {
+        "type": "table",
+        "name": "channel_notification_targets",
+        "table": "channel_notification_targets",
+        "sql": "CREATE TABLE channel_notification_targets (\n                account_id TEXT NOT NULL REFERENCES channel_accounts(id) ON DELETE CASCADE,\n                recipient_id TEXT NOT NULL,\n                context_ciphertext TEXT,\n                label TEXT NOT NULL DEFAULT '',\n                kind TEXT NOT NULL DEFAULT 'conversation',\n                updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP, connection_check_status TEXT NOT NULL DEFAULT 'unknown', connection_checked_at TIMESTAMPTZ, connection_check_started_at TIMESTAMPTZ, connection_check_id TEXT NOT NULL DEFAULT '', connection_error_code TEXT NOT NULL DEFAULT '',\n                PRIMARY KEY (account_id, recipient_id)\n            )"
+      },
+      {
+        "type": "table",
+        "name": "channel_outbox",
+        "table": "channel_outbox",
+        "sql": "CREATE TABLE channel_outbox (\n                id TEXT PRIMARY KEY,\n                created_sequence INTEGER UNIQUE,\n                inbox_id TEXT\n                    REFERENCES channel_inbox(id) ON DELETE SET NULL,\n                account_id TEXT NOT NULL\n                    REFERENCES channel_accounts(id) ON DELETE CASCADE,\n                dedupe_key VARCHAR(160) NOT NULL,\n                provider VARCHAR(32) NOT NULL,\n                order_key VARCHAR(128) NOT NULL,\n                sequence INTEGER NOT NULL DEFAULT 0,\n                recipient_id TEXT NOT NULL,\n                provider_context TEXT NOT NULL DEFAULT '{}',\n                text TEXT NOT NULL,\n                intent_kind VARCHAR(64) NOT NULL,\n                purpose VARCHAR(32) NOT NULL DEFAULT 'reply',\n                metadata TEXT NOT NULL DEFAULT '{}',\n                rendered_parts TEXT NOT NULL DEFAULT '[]',\n                next_part_index INTEGER NOT NULL DEFAULT 0,\n                provider_state TEXT NOT NULL DEFAULT '{}',\n                status VARCHAR(32) NOT NULL DEFAULT 'pending',\n                attempt_count INTEGER NOT NULL DEFAULT 0,\n                lease_owner TEXT,\n                lease_until TIMESTAMPTZ,\n                next_attempt_at TIMESTAMPTZ,\n                last_error TEXT,\n                created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,\n                updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP\n            )"
+      },
+      {
+        "type": "table",
+        "name": "channel_processed_messages",
+        "table": "channel_processed_messages",
+        "sql": "CREATE TABLE channel_processed_messages (\n                account_id TEXT NOT NULL\n                    REFERENCES channel_accounts(id) ON DELETE CASCADE,\n                message_key VARCHAR(64) NOT NULL,\n                status VARCHAR(32) NOT NULL,\n                response_text TEXT,\n                response_media_ciphertext TEXT,\n                intent_kind VARCHAR(32),\n                response_to_user_id TEXT,\n                response_context_token TEXT,\n                response_provider_context TEXT,\n                claim_owner TEXT,\n                reply_attempt_count INTEGER NOT NULL DEFAULT 0,\n                reply_last_error TEXT,\n                reply_next_attempt_at TIMESTAMPTZ,\n                processed_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,\n                PRIMARY KEY (account_id, message_key)\n            )"
+      },
+      {
+        "type": "table",
+        "name": "channel_routes",
+        "table": "channel_routes",
+        "sql": "CREATE TABLE channel_routes (\n                account_id TEXT NOT NULL\n                    REFERENCES channel_accounts(id) ON DELETE CASCADE,\n                external_address_hash VARCHAR(64) NOT NULL,\n                conversation_id TEXT NOT NULL,\n                created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,\n                updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,\n                PRIMARY KEY (account_id, external_address_hash)\n            )"
+      },
+      {
+        "type": "table",
+        "name": "channel_runtime_leases",
+        "table": "channel_runtime_leases",
+        "sql": "CREATE TABLE channel_runtime_leases (\n                lease_key TEXT PRIMARY KEY,\n                owner_id TEXT NOT NULL,\n                generation INTEGER NOT NULL,\n                lease_until TIMESTAMPTZ NOT NULL,\n                updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP\n            )"
+      },
+      {
+        "type": "trigger",
+        "name": "channel_inbox_sequence",
+        "table": "channel_inbox",
+        "sql": "CREATE TRIGGER channel_inbox_sequence\n            AFTER INSERT ON channel_inbox\n            WHEN NEW.ingest_sequence IS NULL\n            BEGIN\n                UPDATE channel_inbox\n                SET ingest_sequence = (\n                    SELECT COALESCE(MAX(ingest_sequence), 0) + 1\n                    FROM channel_inbox\n                    WHERE id <> NEW.id\n                )\n                WHERE id = NEW.id;\n            END"
+      },
+      {
+        "type": "trigger",
+        "name": "channel_outbox_sequence",
+        "table": "channel_outbox",
+        "sql": "CREATE TRIGGER channel_outbox_sequence\n            AFTER INSERT ON channel_outbox\n            WHEN NEW.created_sequence IS NULL\n            BEGIN\n                UPDATE channel_outbox\n                SET created_sequence = (\n                    SELECT COALESCE(MAX(created_sequence), 0) + 1\n                    FROM channel_outbox\n                    WHERE id <> NEW.id\n                )\n                WHERE id = NEW.id;\n            END"
+      }
+    ]
+  }
+}

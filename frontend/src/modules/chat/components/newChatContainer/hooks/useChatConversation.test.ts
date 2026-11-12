@@ -1388,7 +1388,7 @@ describe("useChatConversation regeneration recovery", () => {
     const initial = { id: "h2", seq: 2, query: "current question", result: "current answer" };
     const older = {
       id: "h1", seq: 1, query: "older question", result: "final answer",
-      failed_attempts: [{ run_id: "run-1", result: "partial failed answer", run_status: "failed" }],
+      failed_attempts: [{ run_id: "run-1", result: "partial failed answer", run_status: "failed" as const }],
     };
     const { result } = renderConversation();
     act(() => {
@@ -2073,7 +2073,7 @@ describe("useChatConversation regeneration recovery", () => {
       onRequestPendingChange,
     });
 
-    let send: Promise<void> | undefined;
+    let send: Promise<boolean> | undefined;
     act(() => {
       send = result.current.sendMessage({ text: "pending question" });
     });
@@ -2547,7 +2547,7 @@ describe("useChatConversation regeneration recovery", () => {
     } }) }));
 
     expect(result.current.isStreaming).toBe(false);
-    expect(result.current.messageList[result.current.messageList.length - 1]).toMatchObject({ delta: "partial answer", run_status: "failed" });
+    expect(result.current.messageList[result.current.messageList.length - 1]).toMatchObject({ delta: "partial answer", run_status: "failed" as const });
     expect(stream.close).toHaveBeenCalled();
     expect(result.current.streamRecovery.status).toBe("idle");
   });

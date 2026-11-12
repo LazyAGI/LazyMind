@@ -158,6 +158,10 @@ type readingEnrollmentCursor struct {
 // The scheduler owns these cursors. Restarting only rechecks unqueued candidates;
 // durable job exclusion prevents duplicate generation, regardless of job status.
 func enrollReadingPreparation(ctx context.Context, db *gorm.DB, cursors map[string]readingEnrollmentCursor) error {
+	if ctx.Err() != nil || !deferredIndexingWork.Enter() {
+		return nil
+	}
+	defer deferredIndexingWork.Leave()
 	if cursors == nil {
 		cursors = make(map[string]readingEnrollmentCursor)
 	}

@@ -320,9 +320,7 @@ export default function VocabularyPage() {
         <Space direction="vertical" style={{ width: "100%" }}>
           <Radio.Group
             defaultValue="move"
-            onChange={(event: {
-              target: { value: "move" | "delete_words" };
-            }) => {
+            onChange={(event) => {
               mode = event.target.value;
             }}
           >
@@ -523,7 +521,7 @@ export default function VocabularyPage() {
         <Space style={{ display: "flex", justifyContent: "space-between" }}>
           <Radio.Group
             value={logRange}
-            onChange={(event: { target: { value: string } }) =>
+            onChange={(event) =>
               setLogRange(event.target.value)
             }
             optionType="button"

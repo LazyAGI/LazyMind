@@ -415,11 +415,52 @@ func InstallPythonComponent(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, err.Error(), http.StatusServiceUnavailable)
 		return
 	}
+	if catalog != nil && request.ID == "rag" && os.Getenv("LAZYMIND_COMPONENT_MAINTENANCE_MANAGER") != "" {
+		probe, err := acquireComponentWriter(root)
+		if err != nil {
+			common.ReplyErr(w, "update_transaction_busy", http.StatusConflict)
+			return
+		}
+		releaseComponentLock(probe)
+		resources := os.Getenv("LAZYMIND_RUNTIME_RESOURCES_ROOT")
+		command := exec.CommandContext(r.Context(), os.Getenv("LAZYMIND_COMPONENT_MAINTENANCE_MANAGER"), "install-component", "--profile", "desktop", "--runtime-root", root, "--resources-root", resources, "--repo-root", filepath.Join(resources, "app"), "--owner-token", os.Getenv("LAZYMIND_RUNTIME_OWNER_TOKEN"))
+		var output boundedComponentResponse
+		command.Stdout = &output
+		command.Stderr = io.Discard
+		err = command.Run()
+		var response struct{ Status, Reason string }
+		if err != nil || json.Unmarshal(output.raw, &response) != nil || response.Status != "installed" {
+			common.ReplyErr(w, "component_install_failed", http.StatusServiceUnavailable)
+			return
+		}
+		entry := installedPythonDescriptor(root, catalog.Components[request.ID])
+		catalog.Components[request.ID] = entry
+		common.ReplyOK(w, pythonComponentStatus(root, catalog, request.ID))
+		return
+	}
+	// Legacy/local callers share the same physical writer mutex as OTA.
+	writer, err := acquireComponentWriter(root)
+	if err != nil {
+		common.ReplyErr(w, "update_transaction_busy", http.StatusConflict)
+		return
+	}
+	defer func() { releaseComponentLock(writer) }()
+	updater, err := componentUpdaterRoot()
+	if err != nil {
+		common.ReplyErr(w, "component_state_unknown", http.StatusServiceUnavailable)
+		return
+	}
+	if _, err := os.Lstat(filepath.Join(updater, "native-v2", "active.json")); !os.IsNotExist(err) {
+		common.ReplyErr(w, "update_transaction_busy", http.StatusConflict)
+		return
+	}
 	if catalog == nil {
 		if request.ID != "rag" {
 			common.ReplyErr(w, "dependency is not available for this runtime", http.StatusNotFound)
 			return
 		}
+		releaseComponentLock(writer)
+		writer = nil
 		installer := os.Getenv("LAZYMIND_SOURCE_COMPONENT_INSTALLER")
 		source := os.Getenv("LAZYMIND_ALGORITHM_SOURCE")
 		if installer == "" || source == "" {

@@ -187,7 +187,14 @@ func failDependentTaskClaim(ctx context.Context, db *gorm.DB, task orm.TaskCente
 	return err == nil, err
 }
 
-func resumeWaitingTasks(ctx context.Context, db *gorm.DB) {
+// resumeWaitingTasks reports root admission, not business success. Admitted
+// manual continuations can handle their own task when a reversible pause blocks
+// this independent scan.
+func resumeWaitingTasks(ctx context.Context, db *gorm.DB) bool {
+	if !admitScheduledWork() {
+		return false
+	}
+	defer finishScheduledWork()
 	now := time.Now().UTC()
 	var tasks []orm.TaskCenterTask
 	if err := db.WithContext(ctx).
@@ -195,11 +202,12 @@ func resumeWaitingTasks(ctx context.Context, db *gorm.DB) {
 		Where(dependencyClaimableCondition, "waiting", "checking", now.Add(-dependencyClaimTimeout)).
 		Order("CASE WHEN dependency_status = 'checking' THEN 0 ELSE 1 END").
 		Order("created_at ASC").Limit(100).Find(&tasks).Error; err != nil {
-		return
+		return true
 	}
 	for _, task := range tasks {
 		resumeWaitingTask(ctx, db, task)
 	}
+	return true
 }
 
 func resumeWaitingTask(ctx context.Context, db *gorm.DB, task orm.TaskCenterTask) {
@@ -450,6 +458,6 @@ func launchDependentTask(db *gorm.DB, s orm.UserSchedule, task orm.TaskCenterTas
 	if err != nil {
 		return err
 	}
-	go sendScheduledChatRequest(s.UserID, convID, task.ID, db, reqBody)
+	continueScheduledWork(func() { sendScheduledChatRequest(s.UserID, convID, task.ID, db, reqBody) })
 	return nil
 }

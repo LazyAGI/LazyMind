@@ -26,6 +26,19 @@ function createDesktopBridge(ipcRenderer) {
     openNotificationSettings: () => ipcRenderer.invoke("lazymind:openNotificationSettings"),
     openBrowserExtensionDir: () => ipcRenderer.invoke("lazymind:openBrowserExtensionDir"),
     runtimeStatus: () => ipcRenderer.invoke("lazymind:runtimeStatus"),
+    updateStatus: () => ipcRenderer.invoke("lazymind:update:status"),
+    updateCheck: () => ipcRenderer.invoke("lazymind:update:check"),
+    updateDownload: (releaseId) => ipcRenderer.invoke("lazymind:update:download", releaseId),
+    updateResume: () => ipcRenderer.invoke("lazymind:update:resume"),
+    updateInstall: (releaseId) => ipcRenderer.invoke("lazymind:update:install", releaseId),
+    updateLater: () => ipcRenderer.invoke("lazymind:update:later"),
+    updateCancel: () => ipcRenderer.invoke("lazymind:update:cancel"),
+    updateReveal: () => ipcRenderer.invoke("lazymind:update:reveal"),
+    onUpdateState: (handler) => {
+      const listener = (_event, state) => handler(state);
+      ipcRenderer.on("lazymind:update:state", listener);
+      return () => ipcRenderer.removeListener("lazymind:update:state", listener);
+    },
     appVersion: () => ipcRenderer.invoke("lazymind:appVersion"),
     agentIntegrationStatuses: (refreshInstallations = false) => ipcRenderer.invoke("lazymind:agentIntegrationStatuses", refreshInstallations === true),
     agentIntegrationAction: (agent, action) => ipcRenderer.invoke("lazymind:agentIntegrationAction", agent, action),

@@ -1,8 +1,10 @@
 import notifications from './notifications-zh-CN';
+import desktopUpdates from './desktop-updates-zh-CN';
 import { evolutionControlsZh } from "@/modules/selfEvolution/shared/controlTranslations";
 import { zhCNErrorMessages } from "./error-codes";
 
 const zhCN = {
+  desktopUpdates,
   pdfReader: {
   "displaySettings": "显示与解析",
   "sourceChanged": "原 PDF 已变化，请重新加载原文后再生成解读。",

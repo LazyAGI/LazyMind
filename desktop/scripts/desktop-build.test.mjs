@@ -563,11 +563,8 @@ test("macOS distribution build signs packages while CI owns notarization sequenc
   assert.match(builderSource, /notarize:\s*false/);
   assert.match(builderSource, /sign:\s*macSigningMode === "developer-id"/);
   assert.doesNotMatch(builderSource, /signIgnore:/);
-  assert.match(
-    source,
-    /SIGNING_MODE}" == "adhoc"[\s\S]*codesign --force --deep --sign - "\$\{APP_PATH\}"/,
-    "local macOS builds must apply an explicit ad-hoc bundle signature",
-  );
+  assert.match(builderSource, /await adhocSignAppBundle\(appPath\)/);
+  assert.doesNotMatch(source, /codesign --force --deep --sign - "\$\{APP_PATH\}"/);
   assert.doesNotMatch(source, /notarytool submit[\s\S]*--wait/);
   assert.doesNotMatch(source, /stapler staple/);
   for (const privatePath of ["/.env", "/.lazymind-local", "/data", "/volumes", "/local/config.env"]) {
@@ -601,7 +598,8 @@ test("macOS CI requires credentials only for official LazyAGI releases", () => {
     source,
     /CSC_LINK: \$\{\{ steps\.release\.outputs\.official_release == 'true' && secrets\.MAC_CSC_LINK \|\| '' \}\}/,
   );
-  assert.match(source, /OFFICIAL_REPOSITORY: \$\{\{ github\.repository == 'LazyAGI\/LazyMind' \}\}/);
+  assert.match(source, /SIGNING_MODE: \$\{\{ inputs\.signing_mode/);
+  assert.doesNotMatch(source, /OFFICIAL_REPOSITORY/);
   assert.match(source, /official_release=true/);
   assert.match(source, /Non-official build: using ad-hoc signing and skipping notarization/);
   assert.match(source, /name: Submit app ZIP for notarization\s*\n\s*if: steps\.release\.outputs\.official_release == 'true'/);
@@ -678,7 +676,7 @@ test("desktop release builds each platform once and publishes only after both pa
   assert.match(source, /macos:[\s\S]*uses: \.\/\.github\/workflows\/macos-installer\.yml/);
   assert.match(source, /windows:[\s\S]*uses: \.\/\.github\/workflows\/windows-installer\.yml/);
   assert.match(source, /release:[\s\S]*needs:\s*\n\s*- macos\s*\n\s*- windows/);
-  assert.match(source, /release:\s*\n\s*name: Create draft desktop release\s*\n\s*if: \$\{\{ !contains\(github\.ref_name, '-'\) \}\}/);
+  assert.doesNotMatch(source, /!contains\(github\.ref_name, '-'\)/);
   assert.match(source, /release:[\s\S]*permissions:[\s\S]*contents: write/);
   assert.match(source, /GH_REPO: \$\{\{ github\.repository \}\}/);
   assert.match(source, /name: Download tested macOS installer/);
@@ -783,8 +781,8 @@ test("Desktop warmup reports bundled history extraction before Core starts", () 
 
 test("selected Desktop folders become dynamic allowed roots without confirmation or restart", () => {
   const source = readFileSync(electronMainScript, "utf8");
-  const start = source.indexOf('ipcMain.handle("lazymind:authorizeLocalFolders"');
-  const end = source.indexOf('ipcMain.handle("lazymind:selectFolder"', start);
+  const start = source.indexOf('handleDesktopWork("lazymind:authorizeLocalFolders"');
+  const end = source.indexOf('handleDesktopWork("lazymind:selectFolder"', start);
   const handler = source.slice(start, end);
   assert.ok(start >= 0 && end > start);
   assert.match(handler, /replaceFileWatcherAllowedRoots\([\s\S]*saveAccessState\([\s\S]*allowedRoots/);
@@ -811,8 +809,8 @@ test("Desktop waits for the previous runtime monitor to close before restarting"
 
 test("Desktop discovery asks for consent before choosing roots and skips protected content folders", () => {
   const source = readFileSync(electronMainScript, "utf8");
-  const start = source.indexOf('ipcMain.handle("lazymind:chooseLocalDiscoveryRoots"');
-  const end = source.indexOf('ipcMain.handle("lazymind:discoverLocalFolders"', start);
+  const start = source.indexOf('handleDesktopWork("lazymind:chooseLocalDiscoveryRoots"');
+  const end = source.indexOf('handleDesktopWork("lazymind:discoverLocalFolders"', start);
   const handler = source.slice(start, end);
   assert.ok(start >= 0 && end > start);
   assert.ok(

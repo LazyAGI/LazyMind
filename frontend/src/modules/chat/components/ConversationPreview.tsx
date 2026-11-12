@@ -1,11 +1,13 @@
-import { cloneElement, useEffect, useRef, useState, type HTMLAttributes, type ReactElement } from "react";
-import { Popover, type TooltipRef } from "antd";
+import { cloneElement, useEffect, useRef, useState, type HTMLAttributes, type ReactElement, type ComponentRef, type MouseEvent, type DragEvent } from "react";
+import { Popover } from "antd";
 import dayjs from "dayjs";
 import { useTranslation } from "react-i18next";
 import { useConversationRunningStore } from "@/modules/chat/store/conversationRunning";
 import { ChatServiceApi } from "../utils/request";
 import { CONVERSATION_RELATION_FORK, getConversationRelation, type ConversationRelation } from "../utils/conversationRelation";
 import "./ConversationPreview.scss";
+
+const previewOverflow = { adjustX: 0, adjustY: 0, shiftY: 12 } as const;
 
 interface ConversationPreviewProps {
   conversationId: string;
@@ -23,7 +25,7 @@ export default function ConversationPreview({
   conversationId, title, summary, updateTime, isTask, relation, groupName, disabled, children,
 }: ConversationPreviewProps) {
   const { t } = useTranslation();
-  const ref = useRef<TooltipRef>(null);
+  const ref = useRef<ComponentRef<typeof Popover>>(null);
   const [open, setOpen] = useState(false);
   const [layout, setLayout] = useState({ offset: 8, width: 300 });
   const [source, setSource] = useState<{ id: string; relation: ConversationRelation | null } | null>(null);
@@ -82,7 +84,7 @@ export default function ConversationPreview({
     trigger={["hover", "focus"]}
     placement="rightTop"
     align={{ offset: [layout.offset, 0] }}
-    autoAdjustOverflow={{ adjustX: 0, adjustY: 0, shiftY: 12 }}
+    autoAdjustOverflow={previewOverflow}
     arrow={false}
     mouseEnterDelay={0.25}
     mouseLeaveDelay={0.12}
@@ -102,7 +104,7 @@ export default function ConversationPreview({
       {updated?.isValid() && <time className="record-preview-time" dateTime={updateTime}>{t("chat.conversationPreviewUpdated", { time: updated.format("YYYY/MM/DD HH:mm") })}</time>}
     </section>}
   >{cloneElement(children, {
-    onClickCapture: event => { setOpen(false); children.props.onClickCapture?.(event); },
-    onDragStartCapture: event => { setOpen(false); children.props.onDragStartCapture?.(event); },
+    onClickCapture: (event: MouseEvent<HTMLElement>) => { setOpen(false); children.props.onClickCapture?.(event); },
+    onDragStartCapture: (event: DragEvent<HTMLElement>) => { setOpen(false); children.props.onDragStartCapture?.(event); },
   })}</Popover>;
 }

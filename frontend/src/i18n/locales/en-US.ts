@@ -1,8 +1,10 @@
 import notifications from './notifications-en-US';
+import desktopUpdates from './desktop-updates-en-US';
 import { evolutionControlsEn } from "@/modules/selfEvolution/shared/controlTranslations";
 import { enUSErrorMessages } from "./error-codes";
 
 const enUS = {
+  desktopUpdates,
   pdfReader: {
   "displaySettings": "Display & parsing",
   "sourceChanged": "The source PDF changed. Reload the original PDF before generating an explanation.",

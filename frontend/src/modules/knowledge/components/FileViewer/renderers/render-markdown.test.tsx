@@ -32,7 +32,7 @@ describe("RenderMarkdown", () => {
 
     const source = document.querySelector(".file-viewer-markdown-source");
     expect(source).toHaveTextContent("# Heading");
-    expect(source.tagName).toBe("PRE");
+    expect(source?.tagName).toBe("PRE");
     expect(source).not.toHaveAttribute("contenteditable");
     expect(document.querySelector("script")).not.toBeInTheDocument();
   });
