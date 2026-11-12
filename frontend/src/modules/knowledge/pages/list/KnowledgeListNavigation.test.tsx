@@ -38,7 +38,7 @@ vi.mock("@/hooks/useModelFeatures", () => ({ fetchModelFeatures: mocks.features,
 vi.mock("@/runtime/mode", async (load) => ({ ...await load<object>(), isDesktopRuntime: () => false }));
 vi.mock("@/components/ui", () => ({
   ListPageTable: (props: any) => <div className="list-page-table-scroll">
-    {!props.loading && props.dataSource.length === 0 ? props.locale?.emptyText : null}
+    {props.dataSource.length === 0 ? props.locale?.emptyText : null}
     {props.dataSource.map((row: any) => <div key={row.dataset_id || row.id} {...props.onRow?.(row)}>
       {props.columns[0].render(row[props.columns[0].dataIndex], row)}
       {props.columns.find((column: any) => column.key === "action")?.render(row)}
@@ -763,5 +763,25 @@ describe("library navigation and empty state actions", () => {
     await waitFor(() => expect(router.state.location.search).toContain("view=square"));
     fireEvent.click(screen.getByRole("button", { name: /返回资料库/ }));
     expect(screen.getByRole("tab", { name: "已安装的官方资料库" })).toHaveAttribute("aria-selected", "true");
+  });
+});
+
+
+describe("library loading is not empty", () => {
+  it.each([
+    ["local", "开始整理你的资料"],
+    ["cloudArchive", "连接你的云端文档"],
+    ["official", "安装官方资料库"],
+  ])("does not show an add empty state while %s is pending or failed", async (source, title) => {
+    const pending = deferred<any>();
+    if (source === "official") mocks.catalog.mockReturnValue(pending.promise);
+    else if (source === "cloudArchive") mocks.scan.mockReturnValue(pending.promise);
+    else mocks.list.mockReturnValue(pending.promise);
+    await mount(`?source=${source}`);
+    expect(screen.queryByRole("heading", { name: title })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /前往知识广场/ })).not.toBeInTheDocument();
+    expect(document.querySelector(".knowledge-library-empty")).toBeNull();
+    await act(async () => pending.reject(new Error("offline")));
+    expect(document.querySelector(".knowledge-library-empty")).toBeNull();
   });
 });

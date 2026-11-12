@@ -396,6 +396,15 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
   const isCloudArchiveView = sourceCategory === "cloudArchive";
   const isOfficialView = sourceCategory === "official";
   const { availability: ragAvailability } = useRAGComponent();
+  // An empty array is also the initial/loading value, not evidence of an empty library.
+  const libraryQueryReady = isOfficialView
+    ? officialLoaded && loadedOfficialSort === mineSort
+    : loadedTableQuery === tableQueryKey;
+  const libraryQueryError = isOfficialView ? officialError : tableError;
+  const libraryLoading = isOfficialView
+    ? officialLoading || officialSortLoading || (!libraryQueryReady && !libraryQueryError)
+    : loading || (!libraryQueryReady && !libraryQueryError && (!isCloudArchiveView || ragAvailability === "ready"));
+  const libraryEmptyConfirmed = libraryQueryReady && !libraryLoading && !libraryQueryError;
   const createActionDisabled = ragAvailability === "checking" || ragAvailability === "error";
   const createActionDisabledTooltip = ragAvailability === "checking"
     ? "正在检查本地知识库组件状态"
@@ -2107,7 +2116,7 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
               action={<Button onClick={() => void loadKnowledgeMarket(true)}>{t("common.retry")}</Button>} />
           ) : null}
           <ListPageTable
-            rootClassName={`knowledge-mine-table ${isCloudArchiveView ? "data-source-asset-table" : ""} ${!(isCloudArchiveView ? cloudSources : isOfficialView ? installedOfficialItems : dataSource).length ? "is-empty" : ""}`}
+            rootClassName={`knowledge-mine-table ${isCloudArchiveView ? "data-source-asset-table" : ""} ${libraryEmptyConfirmed && !(isCloudArchiveView ? cloudSources : isOfficialView ? installedOfficialItems : dataSource).length ? "is-empty" : ""}`}
             rowKey={isCloudArchiveView || isOfficialView ? "id" : "dataset_id"}
             columns={
               (isCloudArchiveView
@@ -2116,8 +2125,8 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
                   ? officialColumns
                   : columns) as ColumnsType<any>
             }
-            loading={isOfficialView ? officialLoading || officialSortLoading : loading}
-            locale={{ emptyText: paperReading
+            loading={libraryLoading}
+            locale={{ emptyText: !libraryEmptyConfirmed ? null : paperReading
               ? t(mineSearch.trim() || mineLocalTag !== ALL_TAGS ? "showcase.noMatchingPaperLibraries" : "showcase.noPaperLibraries")
               : <div className="knowledge-library-empty">
                   <span className="knowledge-library-empty-icon" aria-hidden>{isOfficialView ? <AppstoreOutlined /> : isCloudArchiveView ? <CloudOutlined /> : <DatabaseOutlined />}</span>
