@@ -2,6 +2,7 @@ import signal
 import threading
 import inspect
 import os
+from contextvars import ContextVar
 
 import lazyllm
 from lazymind.parsing.service.opensearch_compat import install as install_opensearch_compat
@@ -35,6 +36,29 @@ def _has_verified_image_only_index(loaded, processor, doc_id, kb_id):
     except Exception:
         return False
     return bool(retained) and all((node.embedding or {}).get('embed_image') for node in retained)
+
+
+def _install_deferred_group_guard(processor):
+    if getattr(processor, '_lazymind_deferred_group_guard', False):
+        return processor
+    original = processor._reparse_docs
+    full_rebuild = ContextVar('lazymind_full_rebuild', default=False)
+
+    def reparse_docs(group_name, node_groups, *args, **kwargs):
+        # Full source rebuild follows initial ingestion: summaries and other
+        # lazy groups remain deferred. Explicitly selecting one still creates it.
+        if (full_rebuild.get() and group_name is not None
+                and node_groups.get(group_name, {}).get('lazy_mode') == 'all'):
+            return
+        token = full_rebuild.set(full_rebuild.get() or group_name is None)
+        try:
+            return original(group_name, node_groups, *args, **kwargs)
+        finally:
+            full_rebuild.reset(token)
+
+    processor._reparse_docs = reparse_docs
+    processor._lazymind_deferred_group_guard = True
+    return processor
 
 
 def _install_text_reembed_guard(processor):
@@ -165,7 +189,7 @@ if not getattr(DocumentProcessorWorker._Impl, '_lazymind_isolated', False):
                 fresh.activate_group(old.activated_groups())
                 processor._store = fresh
                 processor._lazymind_generation_initialized = True
-            return _install_text_reembed_guard(processor)
+            return _install_deferred_group_guard(_install_text_reembed_guard(processor))
 
         def _exec_reparse_task(self, processor, task_id, payload, node_groups, name_to_id, reader):
             # The document service expands an all-groups selection into names,

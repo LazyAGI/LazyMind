@@ -243,3 +243,24 @@ def test_full_rebuild_expanded_source_selection_rereads_original(monkeypatch):
             assert calls[-1]['ng_names'] == selection
     finally:
         processor._thread_pool.shutdown(wait=False)
+
+
+def test_full_source_rebuild_defers_optional_llm_groups_but_explicit_selection_runs(monkeypatch):
+    from types import SimpleNamespace
+    processor = SimpleNamespace()
+    called = []
+
+    def rebuild(group_name, groups):
+        called.append(group_name)
+        if group_name is None:
+            processor._reparse_docs('doc-summary', groups)
+            processor._reparse_docs('block', groups)
+
+    processor._reparse_docs = rebuild
+    worker = _worker_with_processor(monkeypatch, processor)
+    module = importlib.import_module('lazymind.processor.service.worker')
+    module._install_deferred_group_guard(processor)
+    processor._reparse_docs(None, _node_groups())
+    assert called == [None, 'block']
+    processor._reparse_docs('doc-summary', _node_groups())
+    assert called == [None, 'block', 'doc-summary']
