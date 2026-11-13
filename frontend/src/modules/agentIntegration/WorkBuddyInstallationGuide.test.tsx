@@ -4,7 +4,8 @@ import type { DesktopAgentIntegrationStatus } from "@/runtime/desktopBridge";
 import zhCN from "@/i18n/locales/zh-CN";
 import WorkBuddyInstallationGuide from "./WorkBuddyInstallationGuide";
 
-const mocks = vi.hoisted(() => ({ statuses: vi.fn(), node: vi.fn() }));
+const mocks = vi.hoisted(() => ({ statuses: vi.fn(), node: vi.fn(), local: vi.fn(), desktop: vi.fn() }));
+vi.mock("@/runtime/mode", () => ({ isLocalRuntime: mocks.local, isDesktopRuntime: mocks.desktop }));
 vi.mock("@/runtime/desktopBridge", () => ({ agentIntegrationStatuses: mocks.statuses }));
 vi.mock("react-i18next", () => ({ useTranslation: () => ({ t: (key: string, values?: { agent?: string }) =>
   String(key.split(".").reduce((value: any, part) => value?.[part], zhCN) || key).replaceAll("{{agent}}", values?.agent || "Agent") }) }));
@@ -18,7 +19,12 @@ const signedOut: DesktopAgentIntegrationStatus = {
   ...installed, state: "action_required", action: { kind: "login" },
   issue: { code: "workbuddy_login_required", operation_id: "test-operation" },
 };
-beforeEach(() => { vi.clearAllMocks(); mocks.node.mockResolvedValue({ installed: true }); });
+beforeEach(() => {
+  vi.clearAllMocks();
+  mocks.node.mockResolvedValue({ installed: true });
+  mocks.local.mockReturnValue(true);
+  mocks.desktop.mockReturnValue(false);
+});
 afterEach(() => { cleanup(); vi.useRealTimers(); });
 
 describe("manual agent shutdown", () => {
@@ -199,6 +205,29 @@ describe("WorkBuddy native sign-in setup", () => {
 
 
 describe("Codex Node.js prerequisite", () => {
+  it("keeps cloud connections on the local assistant bridge without probing the cloud server for Node", async () => {
+    mocks.local.mockReturnValue(false);
+    mocks.node.mockRejectedValue(new Error("Node.js dependency is only available locally"));
+    const connect = vi.fn().mockResolvedValue({ ...installed, agent: "codex" });
+    render(<WorkBuddyInstallationGuide agent="codex" onConnect={connect} onStatus={vi.fn()} onClose={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: zhCN.agentIntegration.codexInstallGuide.saveAndContinue }));
+    await waitFor(() => expect(connect).toHaveBeenCalledTimes(1));
+    expect(mocks.node).not.toHaveBeenCalled();
+    expect(screen.queryByRole("link", { name: zhCN.nodeDependency.goto })).not.toBeInTheDocument();
+  });
+
+  it("still checks Node before connecting from the desktop runtime", async () => {
+    mocks.local.mockReturnValue(false);
+    mocks.desktop.mockReturnValue(true);
+    mocks.node.mockResolvedValue({ installed: false });
+    const connect = vi.fn();
+    render(<WorkBuddyInstallationGuide agent="codex" onConnect={connect} onStatus={vi.fn()} onClose={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: zhCN.agentIntegration.codexInstallGuide.saveAndContinue }));
+    expect(await screen.findByRole("link", { name: zhCN.nodeDependency.goto })).toBeInTheDocument();
+    expect(mocks.node).toHaveBeenCalled();
+    expect(connect).not.toHaveBeenCalled();
+  });
+
   it("detects and displays the existing Node version when opened", async () => {
     mocks.node.mockResolvedValue({ installed: true, version: "v22.22.2" });
     const connect = vi.fn();

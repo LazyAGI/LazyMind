@@ -4,10 +4,37 @@ import (
 	"archive/tar"
 	"archive/zip"
 	"compress/gzip"
+	"context"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
+
+func TestDetectNodeDoesNotProbeDesktopPPTExecutable(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX executable fixture")
+	}
+	dir := t.TempDir()
+	desktop := filepath.Join(dir, "desktop-app")
+	marker := filepath.Join(dir, "desktop-started")
+	if err := os.WriteFile(desktop, []byte("#!/bin/sh\n: > \"$NODE_TEST_PROBE_MARKER\"\nprintf 'v41.0.0\\n'\n"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir)
+	t.Setenv("LAZYMIND_RUNTIME_MODE", "local")
+	t.Setenv("LAZYMIND_NODE_BIN", "")
+	t.Setenv("LAZYMIND_NODE_EXECUTABLE", desktop)
+	t.Setenv("LAZYMIND_NODE_RUN_AS_NODE", "true")
+	t.Setenv("NODE_TEST_PROBE_MARKER", marker)
+	status := detectNode(context.Background())
+	if status.Path == desktop {
+		t.Error("accepted the desktop application as a standalone Node.js runtime")
+	}
+	if _, err := os.Stat(marker); !os.IsNotExist(err) {
+		t.Errorf("Node.js detection launched the desktop application: %v", err)
+	}
+}
 
 func TestCompatibleNodeVersion(t *testing.T) {
 	for version, want := range map[string]bool{"v22.18.0": false, "v22.19.0": true, "v24.22.3": true, "v20.0.0": false, "invalid": false} {

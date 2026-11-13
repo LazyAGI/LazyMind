@@ -1,4 +1,5 @@
 import { getNodeDependencyStatus, type NodeDependencyStatus } from "@/modules/modelProvider/api/systemDependencies";
+import { isDesktopRuntime, isLocalRuntime } from "@/runtime/mode";
 import { useEffect, useRef, useState } from "react";
 import { Alert, Button, Modal, Space, Spin, Steps, Tag, Typography } from "antd";
 import { useTranslation } from "react-i18next";
@@ -46,6 +47,7 @@ export default function WorkBuddyInstallationGuide({ status, onConnect, onLogin,
   const { t } = useTranslation();
   const text = (key: string) => t(`agentIntegration.${agent === "codex" ? "codexInstallGuide" : "workbuddyInstallGuide"}.${key}`);
   const confirmationStage = agent === "codex" ? "enable" : "entry";
+  const checkLocalNode = agent === "codex" && (isLocalRuntime() || isDesktopRuntime());
   // An installed plugin survives a normal Codex launch without CDP. It must
   // still go through the explicit connection/restart step before confirmation.
   const [stage, setStage] = useState<Stage>(requiresAgentQuit(status) ? "quitRequired" : status?.state === "enabled" && status.connection?.mcp_configured
@@ -63,7 +65,7 @@ export default function WorkBuddyInstallationGuide({ status, onConnect, onLogin,
     busy.current = true;
     setStage("installing"); setError("");
     try {
-      if (agent === "codex") {
+      if (checkLocalNode) {
         const node = await getNodeDependencyStatus();
         if (!mounted.current) return;
         if (!node.installed) { setStage("nodeRequired"); return; }
@@ -202,7 +204,7 @@ export default function WorkBuddyInstallationGuide({ status, onConnect, onLogin,
     <Steps size="small" current={current} items={["saveStep", "installStep", "checkStep"].map(key => ({ title: text(key) }))} />
     <div className="agent-integration-installation-content" aria-live="polite">
       {stage === "prepare" && <Typography.Paragraph>{text("saveDescription")}</Typography.Paragraph>}
-      {agent === "codex" && stage === "prepare" && <NodePrerequisite />}
+      {checkLocalNode && stage === "prepare" && <NodePrerequisite />}
       {stage === "nodeRequired" && <Alert type="warning" showIcon message={t("nodeDependency.title")} description={t("nodeDependency.required")} />}
       {loggingIn && <Alert type="info" showIcon message={text("waitingForLogin")} description={text("loginDescription")} />}
       {stage === "quitRequired" && <Alert type="warning" showIcon

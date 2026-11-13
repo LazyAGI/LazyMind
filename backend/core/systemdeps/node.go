@@ -71,7 +71,9 @@ func compatibleNodeVersion(version string) bool {
 func detectNode(ctx context.Context) NodeDependencyStatus {
 	status := NodeDependencyStatus{InstallSupported: IsLocalRuntime() && nodeChecksums[nodePlatform()] != ""}
 	managed, _ := managedNodePath()
-	candidates := []string{os.Getenv("LAZYMIND_NODE_EXECUTABLE"), "node", managed}
+	// LAZYMIND_NODE_EXECUTABLE may be Electron for PPT export. The connector
+	// needs a standalone Node.js executable and cannot use that desktop runtime.
+	candidates := []string{"node", managed}
 	// Match the connector's explicit override: installation cannot fix an invalid override.
 	if override := strings.TrimSpace(os.Getenv("LAZYMIND_NODE_BIN")); override != "" {
 		candidates = []string{override}
