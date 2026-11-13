@@ -139,6 +139,43 @@ func TestExternalPPTImagePublicationRequiresDecodableBytes(t *testing.T) {
 	}
 }
 
+func TestExternalPPTMaterialMarkdownPublication(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var request struct {
+			Text string `json:"text"`
+		}
+		if r.URL.Path != "/api/document:normalize-generated" || json.NewDecoder(r.Body).Decode(&request) != nil || request.Text != "# 素材\n## 1. 来源\n事实" {
+			t.Errorf("unexpected normalization request: %s %+v", r.URL.Path, request)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]string{"text": "# 素材\n## 来源\n事实"})
+	}))
+	defer server.Close()
+	t.Setenv("LAZYMIND_CHAT_SERVICE_URL", server.URL)
+	s, db := pptHostedFixture(t, "collect_materials")
+	grant, err := s.Begin(t.Context(), "owner", "session-1", "attempt-1")
+	pptMust(t, err)
+	publication := Publication{ExecutionHandle: grant.ExecutionHandle, Artifact: executor.Artifact{
+		Slot: "material_summary", Seq: 1, ContentType: "text", Value: pptJSON(t, "# 素材\n## 1. 来源\n事实"),
+	}}
+	for range 2 {
+		pptMust(t, s.Publish(t.Context(), "owner", "session-1", "attempt-1", publication))
+	}
+	var revisions []orm.WorkflowSlotRevision
+	pptMust(t, db.Where("producer_attempt_id = ? AND slot_id = ?", "attempt-1", "material_summary").Find(&revisions).Error)
+	if len(revisions) != 1 || revisions[0].HumanArtifactID == nil {
+		t.Fatalf("unexpected revisions: %+v", revisions)
+	}
+	var saved orm.WorkflowHumanArtifact
+	pptMust(t, db.First(&saved, "id = ?", *revisions[0].HumanArtifactID).Error)
+	var value struct {
+		Text string `json:"text"`
+	}
+	pptMust(t, json.Unmarshal(saved.Value, &value))
+	if value.Text != "# 素材\n## 来源\n事实" {
+		t.Fatalf("saved text: %q", value.Text)
+	}
+}
+
 func TestExternalPPTPreviewUsesPinnedForegroundAndPerPageBackground(t *testing.T) {
 	s, db := pptHostedFixture(t, "generate_ppt")
 	bindPPTFixture(t, db, "html-format", "presentation_output_format", nil, pptJSON(t, "html"))
