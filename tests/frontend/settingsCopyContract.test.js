@@ -73,12 +73,12 @@ describe('settings copy contract', () => {
     expect(zhCN).toContain('关闭后，新任务将无法使用该功能，正在执行的任务不受影响。');
     expect(enUS).toContain('New tasks will no longer use this feature. Tasks already running are not affected.');
     expect(zhCN).toContain('disableTitle: "关闭开发者模式"');
-    expect(zhCN).toContain('developerEnableContent: "开启后将激活开发者模式相关功能"');
+    expect(zhCN).toContain('developerEnableContent: "开启前需要关联有效的 GitHub 账号，系统会先检查关联状态。开启后将激活开发者模式相关功能。"');
     expect(zhCN).toContain('developerDisableContent: "关闭后将停用开发者模式相关功能，但不会删除已有的自进化数据"');
     expect(zhCN).toContain('enableDesc: "本页总开关。关闭后暂停开发者专属功能及下方选项，但保留已保存的偏好设置；开启后可使用工具管理、算法跃迁、内部 ID 和完整执行过程。"');
     expect(zhCN).toContain('enableDescWithoutEvo: "本页总开关。关闭后暂停开发者专属功能及下方选项，但保留已保存的偏好设置；开启后可使用工具管理、内部 ID 和完整执行过程。"');
     expect(enUS).toContain('disableTitle: "Disable developer mode"');
-    expect(enUS).toContain('developerEnableContent: "Turning this on activates developer-mode features."');
+    expect(enUS).toContain('developerEnableContent: "A valid GitHub connection is required. We will check your connection before enabling developer-mode features."');
     expect(enUS).toContain('developerDisableContent: "Turning this off disables developer-mode features but does not delete existing self-evolution data."');
     expect(enUS).toContain('enableDesc: "Master switch for this page. Turning it off pauses developer-only features and the options below without deleting your saved preferences. When on, tool management, algorithm leap, internal IDs, and full execution traces are available."');
     expect(enUS).toContain('enableDescWithoutEvo: "Master switch for this page. Turning it off pauses developer-only features and the options below without deleting your saved preferences. When on, tool management, internal IDs, and full execution traces are available."');
