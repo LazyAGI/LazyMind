@@ -3,6 +3,22 @@ import { evolutionControlsEn } from "@/modules/selfEvolution/shared/controlTrans
 import { enUSErrorMessages } from "./error-codes";
 
 const enUS = {
+
+  nodeDependency: {
+    "guidePrerequisite": "Requires Node.js 22.19 or later. An existing compatible version can be used directly.",
+    "title": "Node.js runtime",
+    "summary": "Connect Codex desktop to LazyMind.",
+    "ready": "Ready",
+    "missing": "Not ready",
+    "checking": "Checking",
+    "failed": "Operation failed. Please retry.",
+    "description": "Requires Node.js 22.19 or later. Installs into a LazyMind-managed directory without replacing your system runtime.",
+    "install": "Install Node.js",
+    "refresh": "Check again",
+    "unsupported": "Automatic installation is unavailable for this platform or custom Node path. Configure it manually.",
+    "required": "Install Node.js, then return here to connect.",
+    "goto": "Open dependency installation"
+},
   pdfReader: {
   "displaySettings": "Display & parsing",
   "sourceChanged": "The source PDF changed. Reload the original PDF before generating an explanation.",

@@ -913,3 +913,24 @@
     }
   }
 }
+
+.agent-integration-node-prerequisite {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin: 16px 0 20px;
+  padding: 12px 14px;
+  border: 1px solid #e3e9f2;
+  border-radius: 8px;
+  background: #f8fafc;
+
+  &__copy {
+    flex: 1 1 240px;
+    min-width: 0;
+    strong { margin-right: 8px; font-size: 13px; }
+    .ant-typography { display: block; margin-top: 4px; font-size: 12px; }
+    .ant-tag { margin-inline-end: 0; }
+  }
+}

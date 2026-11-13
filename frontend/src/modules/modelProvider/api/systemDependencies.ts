@@ -205,3 +205,20 @@ export async function installPythonComponent(id: PythonComponentStatus["id"], si
   );
   return unwrapApiData<PythonComponentStatus>(response.data);
 }
+
+export interface NodeDependencyStatus {
+  installed: boolean;
+  version?: string;
+  path?: string;
+  installSupported: boolean;
+}
+
+export async function getNodeDependencyStatus(): Promise<NodeDependencyStatus> {
+  const response = await axiosInstance.get(`${basePath}/api/core/system-dependencies/node`);
+  return unwrapApiData<NodeDependencyStatus>(response.data);
+}
+
+export async function installNodeDependency(): Promise<NodeDependencyStatus> {
+  const response = await axiosInstance.post(`${basePath}/api/core/system-dependencies/node:install`, {}, { timeout: 15 * 60 * 1000 });
+  return unwrapApiData<NodeDependencyStatus>(response.data);
+}

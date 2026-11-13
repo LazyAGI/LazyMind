@@ -3,6 +3,22 @@ import { evolutionControlsZh } from "@/modules/selfEvolution/shared/controlTrans
 import { zhCNErrorMessages } from "./error-codes";
 
 const zhCN = {
+
+  nodeDependency: {
+    "guidePrerequisite": "需要 Node.js 22.19 或更高版本，已安装的兼容版本可直接使用。",
+    "title": "Node.js 运行环境",
+    "summary": "用于 Codex 桌面端连接 LazyMind。",
+    "ready": "已就绪",
+    "missing": "未就绪",
+    "checking": "检测中",
+    "failed": "操作失败，请重试。",
+    "description": "需要 Node.js 22.19 或更高版本。安装到 LazyMind 专用目录，不覆盖系统环境。",
+    "install": "安装 Node.js",
+    "refresh": "重新检测",
+    "unsupported": "当前平台或自定义 Node 路径不支持自动安装，请手动配置。",
+    "required": "请先安装 Node.js，再返回此处继续连接。",
+    "goto": "前往依赖安装"
+},
   pdfReader: {
   "displaySettings": "显示与解析",
   "sourceChanged": "原 PDF 已变化，请重新加载原文后再生成解读。",
