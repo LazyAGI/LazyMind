@@ -791,7 +791,51 @@ async function prepareCodexBrowser(loadModule = (url) => import(
 	};
 	host[key] = state;
 	state.pending = (async () => {
-		const asset = /^app:\/\/-\/assets\/(?:(?:index|app-main|app-initial)-[a-zA-Z0-9_-]+|[0-9]+\.[a-zA-Z0-9_-]+)\.js$/;
+		const capable = (value) => {
+			try {
+				return value && typeof value === "object" && typeof value.pages?.getWebview === "function" && typeof value.pages?.disposeHost === "function" && typeof value.getSnapshot === "function";
+			} catch {
+				return false;
+			}
+		};
+		const entries = Array.from(document.querySelectorAll("script[type=\"module\"][src]")).map((element) => element.src).filter((url) => /^app:\/\/-\/assets\/\d+\.[a-zA-Z0-9_-]+\.js$/.test(url));
+		for (const url of [...new Set(entries)].slice(0, 8)) {
+			let exports;
+			try {
+				exports = await loadModule(url);
+			} catch {
+				continue;
+			}
+			const runtime = exports.__webpack_require__;
+			if (typeof runtime !== "function" || !runtime.c || !runtime.m) continue;
+			let count = 0, sourceSize = 0;
+			const deadline = Date.now() + 2e3;
+			for (const id of Object.keys(runtime.c)) {
+				if (++count > 16384 || Date.now() > deadline) break;
+				if (count % 128 === 0) await new Promise((resolve) => setTimeout(resolve, 0));
+				const factory = runtime.m[id];
+				if (typeof factory !== "function") continue;
+				const source = Function.prototype.toString.call(factory);
+				sourceSize += source.length;
+				if (sourceSize > 32 * 1024 * 1024) break;
+				if (!source.includes("getWebview") || !source.includes("disposeHost") || !source.includes("getSnapshot")) continue;
+				const namespace = runtime.c[id]?.exports;
+				if (!namespace || typeof namespace !== "object") continue;
+				for (const descriptor of Object.values(Object.getOwnPropertyDescriptors(namespace))) {
+					let value;
+					try {
+						value = "value" in descriptor ? descriptor.value : descriptor.get?.call(namespace);
+					} catch {
+						continue;
+					}
+					if (capable(value)) {
+						host.__lazymindCodexBrowser = value;
+						return;
+					}
+				}
+			}
+		}
+		const asset = /^app:\/\/-\/assets\/(?:index|app-main|app-initial)-[a-zA-Z0-9_-]+\.js$/;
 		const urls = Array.from(document.querySelectorAll("link[href],script[type=\"module\"][src]")).map((element) => "href" in element ? element.href : element.src).filter((url) => asset.test(url));
 		const queue = [...new Set(urls)].sort((a, b) => Number(!a.includes("/app-initial-")) - Number(!b.includes("/app-initial-")));
 		const seen = /* @__PURE__ */ new Set();
@@ -799,23 +843,13 @@ async function prepareCodexBrowser(loadModule = (url) => import(
 			const url = queue.shift();
 			if (seen.has(url)) continue;
 			seen.add(url);
-			const exports = await loadModule(url);
-			const modules = [exports, ...Object.values(exports.__webpack_require__?.c ?? {}).map((module) => module?.exports)];
-			for (const module of modules) {
-				let candidates;
-				try {
-					candidates = [module, ...Object.values(module ?? {})];
-				} catch {
-					continue;
-				}
-				for (const value of candidates) try {
-					if (value && typeof value === "object" && typeof value.pages?.getWebview === "function" && typeof value.pages?.disposeHost === "function" && typeof value.getSnapshot === "function") {
-						host.__lazymindCodexBrowser = value;
-						return;
-					}
-				} catch {}
+			if (url.includes("/app-initial-")) {
+				const exports = await loadModule(url);
+				const manager = Object.values(exports).find((value) => value && typeof value === "object" && typeof value.pages?.getWebview === "function" && typeof value.pages?.disposeHost === "function" && typeof value.getSnapshot === "function");
+				if (!manager) throw Error("Codex native browser interface is unavailable");
+				host.__lazymindCodexBrowser = manager;
+				return;
 			}
-			if (!/\/(?:index|app-main)-/.test(url)) continue;
 			const response = await fetch(url, {
 				signal: AbortSignal.timeout(2e3),
 				redirect: "error"

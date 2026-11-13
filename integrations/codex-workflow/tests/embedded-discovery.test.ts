@@ -111,3 +111,24 @@ it('the shipped RPC reports host ownership and refuses an unfenced interruption'
   expect(result.stop.rejected).toContain('Stop the current response in Codex')
   expect(result.interrupts).toBe(0)
 })
+
+it('the shipped panel discovers the cached browser in numeric Rspack entries', async () => {
+  const bundle = readFileSync(new URL('../../../local/lazymind-cli/internal/codexplugin/assets/dispatcher.mjs', import.meta.url), 'utf8')
+  const start = bundle.indexOf('async function prepareCodexBrowser(')
+  const end = bundle.indexOf('\nfunction createCodexSurface(', start)
+  expect(start).toBeGreaterThanOrEqual(0)
+  expect(end).toBeGreaterThan(start)
+  const host: any = {}
+  const manager = {pages:{getWebview(){},disposeHost(){}},getSnapshot(){}}
+  let executions = 0
+  const runtime = Object.assign(() => {executions++}, {
+    c:{browser:{exports:{instance:manager}}},
+    m:{browser:()=>'getWebview disposeHost getSnapshot'},
+  })
+  await runInNewContext(`${bundle.slice(start,end)};prepareCodexBrowser(load)`, {
+    window:host, document:{querySelectorAll:()=>[{src:'app://-/assets/348410.fcfef000d0.js'}]},
+    load:async () => ({__webpack_require__:runtime}), setTimeout,
+  }, {timeout:250})
+  expect(host.__lazymindCodexBrowser).toBe(manager)
+  expect(executions).toBe(0)
+})
