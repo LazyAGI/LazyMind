@@ -3696,6 +3696,8 @@ const enUS = {
 	fileShowInFolder: "Show in folder",
 	fileSaveAs: "Save as...",
 	fileDownload: "Download file",
+	fileOpenFailed: "Unable to open file. Check that it exists and use the LazyMind desktop app",
+	linkOpenFailed: "Unable to open link",
 	fileRevealFailed: "Unable to show this file in the folder",
 	fileSaveFailed: "Failed to save the file",
 	fileDownloadFailed: "Failed to download the file",

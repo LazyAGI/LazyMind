@@ -25,6 +25,7 @@ const { createInputRecorder } = require("./input-recording");
 const { createRecordingHelper } = require("./recording-helper");
 const { resolveWindowsDesktopPaths } = require("./desktop-paths");
 const { resolveRuntimeLocalFile } = require("./runtime-local-file");
+const { localFileAction, openChatExternal } = require("./chat-link-actions");
 const { revealDirectoryFile } = require("./directory-file");
 const {
   desktopRuntimeReady,
@@ -3247,6 +3248,9 @@ async function materializeArtifactFile(payload, destPath) {
   await fs.promises.writeFile(destPath, bytes);
   return destPath;
 }
+
+ipcMain.handle("lazymind:localFileAction", (_event, payload) => localFileAction(payload, shell));
+ipcMain.handle("lazymind:openChatExternal", (_event, url) => openChatExternal(url, shell));
 
 ipcMain.handle("lazymind:showItemInFolder", async (_event, payload) => {
   if (payload?.directoryEntry) {

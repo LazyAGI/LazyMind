@@ -210,6 +210,8 @@ type DesktopBridgeCommand =
   | "openCloudRegister";
 
 interface LazyMindDesktopBridge {
+  localFileAction?: (payload: { path: string; action: "open" | "reveal" }) => Promise<unknown>;
+  openChatExternal?: (url: string) => Promise<unknown>;
   platform?: string;
   appVersion?: () => Promise<string>;
   openLogsDir?: () => Promise<void> | void;
@@ -823,4 +825,14 @@ export function downloadDesktopFile(
   payload: DesktopArtifactFilePayload,
 ): Promise<DesktopFileActionResult> {
   return callDesktopFileAction("downloadFile", payload);
+}
+
+export async function actOnLocalChatFile(path: string, action: "open" | "reveal"): Promise<void> {
+  const bridge = getDesktopBridge();
+  if (!bridge?.localFileAction) throw new Error("Local files require the LazyMind desktop app");
+  await bridge.localFileAction({ path, action });
+}
+
+export function openChatExternal(url: string): Promise<unknown> | undefined {
+  return getDesktopBridge()?.openChatExternal?.(url);
 }
