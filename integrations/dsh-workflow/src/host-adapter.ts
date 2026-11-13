@@ -54,10 +54,26 @@ export function dshRuntime(ctx: Context, serverName: string, webUrl: string): Ru
     } finally { controller.abort() }
   }
 
+  function parent(agent: Agent): Agent | undefined {
+    // Before DSH 0.2.2-rc.2, the Agent registry tracked runtime parents.
+    const agents = ctx.agents as typeof ctx.agents & { isOwnedBy?(id: SessionId, owner: Agent): boolean }
+    if (typeof agents.isOwnedBy === 'function') {
+      return agents.list().find(candidate => candidate !== agent && agents.isOwnedBy!(agent.session.id, candidate))
+    }
+    // Newer hosts own this relation in the subagent runtime. A Session fork's
+    // durable parent is not authority to share its creator's Workflow binding.
+    const subagents = ctx.get('subagents') as { rootOf?(agent: Agent): Agent } | undefined
+    if (typeof subagents?.rootOf !== 'function' && agent.session.header.origin === 'subagent') {
+      throw new Error('DSH subagent runtime ownership is unavailable')
+    }
+    const root = subagents?.rootOf?.(agent)
+    return root === agent ? undefined : root
+  }
+
   return {
     cancellation: 'session',
     id: agent => agent.session.id,
-    parent: agent => ctx.agents.list().find(candidate => candidate !== agent && ctx.agents.isOwnedBy(agent.session.id, candidate)),
+    parent,
     isLive: agent => ctx.agents.get(agent.session.id) === agent,
     isRunning: agent => agent.status === 'running',
     history: agent => [...agent.session.ownEvents()].map(event => ({

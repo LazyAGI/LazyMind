@@ -17,7 +17,9 @@ const publicName = (name: string) => name.startsWith('mcp__lazymind__workflow_')
 const cleanup: Array<() => Promise<unknown>> = []
 afterEach(async () => { for (const dispose of cleanup.splice(0).reverse()) await dispose() })
 
-async function fixture({ history, native = false }: { history?: 'start' | 'completion'; native?: boolean } = {}) {
+async function fixture({ history, native = false, ownership = 'legacy' }: {
+  history?: 'start' | 'completion'; native?: boolean; ownership?: 'legacy' | 'subagents' | 'none'
+} = {}) {
   const ctx = new Context()
   const prompt = ctx.plugin(SystemPrompt)
   await prompt.await(); cleanup.push(() => prompt.dispose())
@@ -29,10 +31,11 @@ async function fixture({ history, native = false }: { history?: 'start' | 'compl
   const agents: Agent[] = []
   const parents = new Map<Agent, Agent>()
   // Fake lifecycle handles at the host boundary; scope routing and tool execution use the released SDK.
-  const makeAgent = (id: string, parent?: Agent) => {
-    const handle = { session: Session.create(id as SessionId), status: 'running', ctx }
+  const makeAgent = (id: string, parent?: Agent, delegated = false) => {
+    const session = Session.create(id as SessionId)
+    const handle = { session: delegated ? Session.create(session.id, [], { ...session.header, origin: 'subagent' }) : session, status: 'running', ctx }
     const agent = handle as unknown as Agent
-    const scope = createScope(toolsContext, agent, parent ? { parent } : undefined)
+    const scope = createScope(toolsContext, agent, ownership === 'legacy' && parent ? { parent } : undefined)
     handle.ctx = scope.ctx
     agents.push(agent)
     if (parent) parents.set(agent, parent)
@@ -43,7 +46,13 @@ async function fixture({ history, native = false }: { history?: 'start' | 'compl
   const child = makeAgent('native-child', root)
   const unrelated = makeAgent('native-unrelated')
   ctx.provide('agents', { list: () => agents, get: (id: string) => agents.find(a => a.session.id === id),
-    isOwnedBy: (id: string, parent: Agent) => parents.get(agents.find(a => a.session.id === id)!) === parent })
+    ...(ownership === 'legacy' ? { isOwnedBy: (id: string, parent: Agent) => parents.get(agents.find(a => a.session.id === id)!) === parent } : {}) })
+  const rootOf = vi.fn((agent: Agent): Agent => {
+    let parent: Agent | undefined
+    while ((parent = parents.get(agent))) agent = parent
+    return agent
+  })
+  if (ownership === 'subagents') ctx.provide('subagents', { rootOf })
   let control: WorkflowControl = { protocol: 'workflow.control.v1', session_id: 'run-1', state_version: 1,
     continuation: 'continue', admission: { can_begin: true }, active_execution_ids: [], active_executions: 0,
     binding: { driver_session_id: 'native-root', bound: true } }
@@ -109,12 +118,18 @@ async function fixture({ history, native = false }: { history?: 'start' | 'compl
   const turn = (agent = root, messages: UserMessage[] = []) => ctx.waterfall(scopeTarget(agent, agent), 'agent/pre-step', {
     agent, turn: 2, step: 0, messages, signal: new AbortController().signal,
   }, async () => ({ kind: 'enter' as const, messages }))
-  return { turn, ctx, root, child, unrelated, bridge, shell, execute, begin, publish }
+  return { turn, ctx, root, child, unrelated, bridge, shell, execute, begin, publish, rootOf, makeAgent, agents }
 }
 
-describe('workflow host isolation through DSH public scopes', () => {
+it.each(['subagents', 'none'] as const)('allows ordinary conversation without isOwnedBy (%s)', async ownership => {
+  const f = await fixture({ ownership })
+  expect((await f.turn()).kind).toBe('enter')
+  expect(f.bridge.state).not.toHaveBeenCalled()
+})
+
+describe.each(['legacy', 'subagents'] as const)('workflow host isolation through DSH public scopes (%s)', ownership => {
   it('concludes human submission and gates the next automatic step without guarding tools', async () => {
-    const f = await fixture()
+    const f = await fixture({ ownership })
     await f.execute('mcp__lazymind__workflow_start')
     await f.execute('mcp__lazymind__workflow_step_begin', f.root, { session_id: 'run-1' })
     const result = await f.execute('mcp__lazymind__workflow_step_complete', f.root, { session_id: 'run-1', execution_id: 'attempt-1' })
@@ -128,7 +143,7 @@ describe('workflow host isolation through DSH public scopes', () => {
   })
 
   it('lets a child report its required structured output while its parent remains paused', async () => {
-    const f = await fixture()
+    const f = await fixture({ ownership })
     await f.execute('mcp__lazymind__workflow_start')
     await f.execute('mcp__lazymind__workflow_step_begin', f.child, { session_id: 'run-1' })
     const submitted = await f.execute('mcp__lazymind__workflow_step_complete', f.child, { session_id: 'run-1', execution_id: 'attempt-1' })
@@ -142,7 +157,7 @@ describe('workflow host isolation through DSH public scopes', () => {
   })
 
   it('allows user conversation and forwards Core rejection without a host tool gate', async () => {
-    const f = await fixture()
+    const f = await fixture({ ownership })
     await f.execute('mcp__lazymind__workflow_start')
     await f.execute('mcp__lazymind__workflow_step_begin', f.root, { session_id: 'run-1' })
     await f.execute('mcp__lazymind__workflow_step_complete', f.root, { session_id: 'run-1', execution_id: 'attempt-1' })
@@ -159,6 +174,32 @@ describe('workflow host isolation through DSH public scopes', () => {
     expect(JSON.stringify(rejected.content)).toContain('WORKFLOW_ADMISSION_DENIED: review pending')
     expect(f.bridge.state).not.toHaveBeenCalled()
   })
+})
+
+it('preserves a subagent runtime ownership rejection instead of treating the child as an independent driver', async () => {
+  const f = await fixture({ ownership: 'subagents' })
+  f.rootOf.mockImplementation(agent => {
+    if (agent === f.child) throw new Error('agent has no active runtime owner')
+    return agent
+  })
+  expect((await f.turn(f.child)).kind).toBe('reject')
+  expect(f.bridge.bind).not.toHaveBeenCalled()
+})
+
+it('keeps a resumed child bound to its live root after its intermediate creator leaves', async () => {
+  const f = await fixture({ ownership: 'subagents' })
+  const descendant = f.makeAgent('resumed-descendant', f.child, true)
+  f.agents.splice(f.agents.indexOf(f.child), 1)
+  expect((await f.turn(descendant)).kind).toBe('enter')
+  expect((await f.execute('mcp__lazymind__workflow_start', descendant)).isError).toBe(false)
+  expect(f.bridge.bind).toHaveBeenCalledWith('run-1', f.root.session.id, expect.any(AbortSignal))
+})
+
+it('refuses to assign a delegated session an independent binding when the subagent runtime is unavailable', async () => {
+  const f = await fixture({ ownership: 'none' })
+  const orphan = f.makeAgent('orphaned-child', f.root, true)
+  await expect(f.turn(orphan)).rejects.toThrow('DSH subagent runtime ownership is unavailable')
+  expect(f.bridge.bind).not.toHaveBeenCalled()
 })
 
 it('restores a review barrier from a standard PTC event before an automatic step after restart', async () => {
