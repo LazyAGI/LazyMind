@@ -635,3 +635,28 @@ it('omits redundant study catalog controls while keeping direct PDF study target
  expect(view.container.querySelector('.pdf-table-marker')).toBeInTheDocument();
  expect(view.container.querySelector('.pdf-figure-layer button')).toBeInTheDocument();
 });
+
+it.each([true,false])('keeps the note composer on viewport scroll only while editing (focused: %s)',async(focused)=>{
+ const note=vi.fn().mockResolvedValue(undefined);
+ const view=renderView(<RenderPdf fileData="caption-note.pdf" className="caption-note-viewport" onAskSelection={vi.fn()} onNoteSelection={note}/>);
+ await act(async()=>{});
+ const page=screen.getAllByTestId('rendered-pdf-page')[0];
+ const caption=window.document.createElement('span');caption.textContent='Figure 1: Original caption';page.append(caption);
+ const range=window.document.createRange();range.selectNodeContents(caption);
+ Object.defineProperty(range,'getBoundingClientRect',{value:()=>({left:100,top:200,right:300,bottom:220,width:200,height:20})});
+ Object.defineProperty(range,'getClientRects',{value:()=>[]});
+ window.getSelection()?.removeAllRanges();window.getSelection()?.addRange(range);fireEvent.mouseUp(caption);
+ fireEvent.click(screen.getByRole('button',{name:'笔记'}));
+ const input=screen.getByRole('textbox',{name:'向 AI 提问或记笔记'});input.focus();
+ fireEvent.change(input,{target:{value:'Keep this caption insight'}});
+ window.getSelection()?.removeAllRanges();window.document.dispatchEvent(new Event('selectionchange'));
+ const viewport=view.container.querySelector('.caption-note-viewport')!;
+ // Browsers can scroll a focused textarea/caret into view after an input event.
+ if(!focused)input.blur();
+ fireEvent.scroll(viewport);
+ if(!focused){expect(screen.queryByRole('dialog',{name:'选中文本操作'})).toBeNull();expect(note).not.toHaveBeenCalled();return;}
+ expect(screen.getByRole('textbox',{name:'向 AI 提问或记笔记'})).toHaveValue('Keep this caption insight');
+ fireEvent.click(screen.getByRole('button',{name:'保存笔记'}));
+ await waitFor(()=>expect(note).toHaveBeenCalledWith(expect.objectContaining({text:'Figure 1: Original caption',page:1}),'Keep this caption insight','yellow',expect.any(String)));
+ await waitFor(()=>expect(screen.queryByRole('dialog',{name:'选中文本操作'})).toBeNull());
+});

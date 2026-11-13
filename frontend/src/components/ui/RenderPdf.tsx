@@ -440,7 +440,11 @@ export default function RenderPdf({
       return;
     }
     setScrollTop(containerRef.current.scrollTop);
-    setSelectionAction(null);
+    // Focusing or typing in the note editor can scroll its caret into view.
+    // Keep the captured quote and draft while the user is editing the toolbar.
+    if (!containerRef.current.querySelector('[data-pdf-selection-toolbar]')?.contains(document.activeElement)) {
+      setSelectionAction(null);
+    }
     if (reportPosition.current && pageTops.length) {
       const currentTop = containerRef.current.scrollTop;
       let currentPage = 0;
