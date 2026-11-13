@@ -24,8 +24,8 @@ import zipfile
 
 
 class ExternalToolError(ValueError):
-    def __init__(self, code: str, message: str, *, public: bool = False):
-        super().__init__(code, message)
+    def __init__(self, code: str, message: str, public: bool = False):
+        super().__init__(code, message, public)
         self.code = code
         self.public_message = message if public else None
 
@@ -53,9 +53,13 @@ def ppt_order_papers(
     """Use native prerequisite ordering for {source_id,title} papers and {prerequisite,dependent,evidence} edges."""
     from .ppt_planning import plan_paper_order
     if not isinstance(papers, list) or not 1 <= len(papers) <= 200:
-        raise ExternalToolError('INVALID_ARGUMENT', 'papers must contain between 1 and 200 selected papers.', public=True)
+        raise ExternalToolError(
+            'INVALID_ARGUMENT', 'papers must contain between 1 and 200 selected papers.', public=True,
+        )
     if dependencies is not None and (not isinstance(dependencies, list) or len(dependencies) > 1000):
-        raise ExternalToolError('INVALID_ARGUMENT', 'dependencies may contain at most 1000 paper dependencies.', public=True)
+        raise ExternalToolError(
+            'INVALID_ARGUMENT', 'dependencies may contain at most 1000 paper dependencies.', public=True,
+        )
     try:
         return plan_paper_order(json.dumps(papers, ensure_ascii=False),
                                 json.dumps(dependencies if dependencies is not None else [], ensure_ascii=False))
@@ -129,7 +133,9 @@ def ppt_prepare_page(
     if type(page_no) is not int or not 1 <= page_no <= 100:
         raise ExternalToolError('INVALID_ARGUMENT', 'page_no must be between 1 and 100.', public=True)
     if not isinstance(brief, str) or not brief.strip() or len(brief.encode()) > MAX_HTML_BYTES:
-        raise ExternalToolError('INVALID_ARGUMENT', 'Provide a complete page brief within the 16 MiB limit.', public=True)
+        raise ExternalToolError(
+            'INVALID_ARGUMENT', 'Provide a complete page brief within the 16 MiB limit.', public=True,
+        )
     responses = generation_responses if generation_responses is not None else []
     if (not isinstance(responses, list) or len(responses) > 1
             or any(not isinstance(item, dict) or set(item) != {'request_hash', 'text'}

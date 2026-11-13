@@ -1,9 +1,13 @@
 import {act,fireEvent,render as renderView,screen,waitFor} from '@testing-library/react';
 import {beforeEach,describe,expect,it,vi} from 'vitest';
 import {useEffect,type ReactNode} from 'react';
+import {createInstance} from 'i18next';
+import zhCN from '@/i18n/locales/zh-CN';
+import enUS from '@/i18n/locales/en-US';
 import type {PdfIRDocument} from '@/modules/knowledge/api/pdfIR';
+const returnPositionI18n=createInstance();
 const state=vi.hoisted(()=>({externalLinkTarget:undefined as string|undefined,externalLinkRel:undefined as string|undefined,nativeClick:undefined as undefined|((item:{pageNumber:number;dest?:unknown[]})=>void),pageLoads:new Map<number,(width:number,height:number)=>void>(),document:undefined as unknown,status:'ready',failLoad:false,deferLoad:false,load:undefined as undefined|(()=>void),pdfFile:undefined as unknown,text:undefined as undefined|((page:number)=>Promise<{items:Array<{str:string}>}>)}));
-vi.mock('react-i18next',async original=>({...await original<typeof import('react-i18next')>(),useTranslation:()=>({t:(key:string)=>key})}));
+vi.mock('react-i18next',async original=>({...await original<typeof import('react-i18next')>(),useTranslation:()=>({t:(key:string)=>key==='pdfReader.returnPosition'?returnPositionI18n.t(key):key})}));
 vi.mock('react-pdf',()=>({pdfjs:{GlobalWorkerOptions:{}},Document:({children,onLoadSuccess,onLoadError,file,onItemClick,externalLinkTarget,externalLinkRel}:{externalLinkTarget?:string;externalLinkRel?:string;file:unknown;onItemClick?:typeof state.nativeClick;children:ReactNode;onLoadSuccess:(value:unknown)=>void;onLoadError:(error:Error)=>void})=>{state.externalLinkTarget=externalLinkTarget;state.externalLinkRel=externalLinkRel;state.pdfFile=file;state.nativeClick=onItemClick;useEffect(()=>{if(state.failLoad){onLoadError(new Error("Invalid PDF"));return;}state.load=()=>onLoadSuccess({numPages:3,getPage:async(page:number)=>({view:[0,0,600,800],getViewport:()=>({width:600,height:800,convertToViewportPoint:(x:number,y:number)=>[x,800-y]}),getTextContent:()=>state.text?state.text(page):Promise.resolve({items:[{str:page===3?'needle result':'ordinary text'}]})})});if(!state.deferLoad)state.load();},[file]);return <>{children}</>;},Page:({width,pageNumber,onLoadSuccess,devicePixelRatio,renderTextLayer}:{width:number;pageNumber:number;onLoadSuccess:(page:unknown)=>void;devicePixelRatio?:number;renderTextLayer?:boolean})=> {state.pageLoads.set(pageNumber,(w,h)=>onLoadSuccess({getViewport:()=>({width:w,height:h})}));return <div data-testid="rendered-pdf-page" data-width={width} data-pixel-ratio={devicePixelRatio}>{renderTextLayer&&<span data-testid="pdf-text-layer">Selectable PDF sentence</span>}</div>;}}));
 vi.mock('@/modules/knowledge/api/pdfIR',async original=>({...await original<typeof import('@/modules/knowledge/api/pdfIR')>(),usePdfIR:()=>({state,starting:false,start:vi.fn()})}));
 vi.mock('./pdfPinStore',async original=>({...await original<typeof import('./pdfPinStore')>(),readPdfPinBoard:vi.fn().mockResolvedValue([]),writePdfPinBoard:vi.fn().mockResolvedValue(true)}));
@@ -19,6 +23,7 @@ function pageButton(page:number){return screen.getByRole('button',{name:`pdfRead
 function expectPage(page:number){expect(pageButton(page)).toBeInTheDocument();}
 
 beforeEach(()=>{vi.mocked(readPdfPinBoard).mockClear().mockResolvedValue([]);vi.mocked(writePdfPinBoard).mockClear().mockResolvedValue(true);state.pageLoads.clear();state.failLoad=false;state.text=undefined;state.deferLoad=false;sessionStorage.clear();state.document=document();state.status='ready';});
+beforeEach(async()=>{await returnPositionI18n.init({lng:'zh-CN',fallbackLng:false,resources:{'zh-CN':{translation:zhCN},'en-US':{translation:enUS}}});});
 
 it('keeps the paper reader on the original document without an overview mode',async()=>{
  const view=render(<RenderPdf fileData="paper.pdf" pdfIRTarget={target} pdfSourceHash="hash"/>);
@@ -50,13 +55,14 @@ it('opens the saved note represented by a clicked PDF highlight',async()=>{
  expect(open).toHaveBeenCalledWith('server-note');
 });
 
-it('opens a saved note at its anchored position and offers return to the reading position',async()=>{
+it.each([['zh-CN','返回阅读位置'],['en-US','Return to reading position']])('offers a localized return to the reading position in %s',async(lng,label)=>{
+ await returnPositionI18n.changeLanguage(lng);
  const props={fileData:'saved-location.pdf'};
  const view=render(<RenderPdf {...props}/>);
  await act(async()=>{});
  view.rerender(<RenderPdf {...props} pdfNavigateToPosition={{page:2,progress:.35,requestId:1}}/>);
  await waitFor(()=>expectPage(2));
- expect(screen.getByRole('button',{name:'返回阅读位置'})).toBeInTheDocument();
+ expect(screen.getByRole('button',{name:label})).toHaveTextContent(label);
 });
 
 it('isolates saved and mounted note highlights when the account changes',async()=>{

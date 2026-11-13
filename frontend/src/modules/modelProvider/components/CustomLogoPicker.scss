@@ -32,3 +32,10 @@
 @media (pointer: coarse) {
   .custom-logo-picker-actions .ant-btn { min-height: 44px; }
 }
+
+.custom-logo-picker-full-image {
+  display: block;
+  width: 100%;
+  max-height: 65vh;
+  object-fit: contain;
+}

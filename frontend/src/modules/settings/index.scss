@@ -1593,7 +1593,7 @@
   .settings-resource-table { min-width: 440px; }
 }
 
-// Full white canvas; each task keeps a centered, readable working column.
+// Full white canvas for model configuration.
 .settings-reference.is-model-settings-workspace > .settings-reference-content {
   background: #fff;
 }
@@ -1646,18 +1646,17 @@
   h1 { margin: 0; font-size: 24px; font-weight: 600; line-height: 1.4; letter-spacing: -.02em; }
 }
 .settings-integrated-surface.is-models .provider-workspace-detail {
-  --provider-detail-width: 960px;
   --provider-detail-gutter: 32px;
   container: provider-detail / inline-size;
 }
 .settings-integrated-surface.is-models .provider-workspace-supplier-header {
-  width: min(calc(100% - 2 * var(--provider-detail-gutter)), var(--provider-detail-width));
+  width: calc(100% - 2 * var(--provider-detail-gutter));
   min-height: 104px;
   margin-inline: auto;
   padding: 32px 0 24px;
 }
 .settings-integrated-surface.is-models .provider-workspace-scroll {
-  padding: 4px max(var(--provider-detail-gutter), calc((100% - var(--provider-detail-width)) / 2)) 40px;
+  padding: 4px var(--provider-detail-gutter) 40px;
 }
 @container provider-detail (max-width: 560px) {
   .provider-workspace-model-toolbar {
@@ -1690,7 +1689,7 @@
     min-height: 0;
     overflow: visible;
     width: 100%;
-    max-width: 864px;
+    max-width: none;
     margin-inline: auto;
     padding-block: 40px 48px;
   }
@@ -1711,6 +1710,10 @@
     background: transparent;
     box-shadow: none;
     backdrop-filter: none;
+
+    .model-provider-default-row:not(.model-provider-cloud-service-row) .model-provider-default-input {
+      max-width: none;
+    }
   }
   .model-provider-section-title { display: none; }
   .model-provider-section-subtitle { margin-top: 0; }

@@ -8,11 +8,14 @@ from lazyllm.tools.agent import ToolExecutionError
 
 
 class ExternalToolFailure(Exception):
-    def __init__(self, code, message, *, retryable=False, upstream=None):
-        super().__init__(message)
+    def __init__(self, code, message, retryable=False, upstream=None):
+        super().__init__(code, message, retryable, upstream)
         self.detail = {'code': code, 'message': message, 'retryable': retryable}
         if upstream:
             self.detail['upstream'] = upstream
+
+    def __str__(self):
+        return self.args[1]
 
 
 def _secrets(value, *, credentials=False):

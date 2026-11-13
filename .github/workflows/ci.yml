@@ -248,6 +248,10 @@ jobs:
         if: matrix.shard == 1
         working-directory: frontend
         run: pnpm typecheck
+      - name: Verify PDF CMap assets and Chinese text decoding
+        if: matrix.shard == 1
+        working-directory: frontend
+        run: pnpm test:pdf-cmaps
       - name: Test frontend including model settings and workflow boundaries
         working-directory: frontend
         run: pnpm test --shard=${{ matrix.shard }}/4 --maxWorkers=2 --minWorkers=1

@@ -1161,6 +1161,53 @@ describe('shared workflow compact layout', () => {
     expect(view.container.querySelector('.workflow-panel__step-status--interrupted')).not.toBeInTheDocument();
   });
 
+  it('explains an external startup failure and retries through the original Chat executor', async () => {
+    fixture.session.status = 'active';
+    fixture.session.controller_host = 'external-agent';
+    fixture.session.steps = [];
+    fixture.session.slots = [];
+    fixture.session.projection!.display = { status: 'failed', reason: 'execution_not_started', approval_step_id: '' };
+    const send = vi.fn(async () => false);
+    render(<WorkflowPanel conversationId='layout-test' onSendMessage={send} />);
+    const retry = await screen.findByRole('button', { name: '重试' });
+    expect(screen.getByText('启动失败')).toBeVisible();
+    expect(screen.getByRole('alert')).toHaveTextContent('本轮回复已结束，但工作流未能启动。可点击“重试”继续原工作流。');
+    expect(screen.queryByText('等待下一步')).not.toBeInTheDocument();
+    await act(async () => fireEvent.click(retry));
+    // The external executor resumes this session; native control rejects it.
+    expect(send).toHaveBeenCalledWith('重试');
+    expect(retry).toBeEnabled();
+  });
+
+  it('keeps external retry disabled while another Chat turn is running', async () => {
+    fixture.session.controller_host = 'external-agent';
+    fixture.session.projection!.display = { status: 'failed', reason: 'external_driver_failed', approval_step_id: '' };
+    const send = vi.fn();
+    render(<WorkflowPanel conversationId='layout-test' onSendMessage={send} chatBusy />);
+    const retry = await screen.findByRole('button', { name: '重试' });
+    expect(screen.getByRole('alert')).toHaveTextContent('执行未能继续，工作流尚未完成。已有内容已保留，可点击“重试”继续。');
+    expect(retry).toBeDisabled();
+    fireEvent.click(retry);
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it('resumes a stopped external driver through Chat without a native control command', async () => {
+    fixture.session.status = 'active';
+    fixture.session.controller_host = 'external-agent';
+    fixture.session.steps = [];
+    fixture.session.slots = [];
+    fixture.session.projection = {
+      current: [], past: [], ready: ['prepare'],
+      display: { status: 'paused', reason: 'user_stopped', approval_step_id: '' },
+    };
+    const send = vi.fn();
+    render(<WorkflowPanel conversationId='layout-test' onSendMessage={send} />);
+    const resume = await screen.findByRole('button', { name: '继续' });
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    await act(async () => fireEvent.click(resume));
+    expect(send).toHaveBeenCalledWith('继续');
+  });
+
   it('offers retry after pausing a parallel run with an already failed branch', async () => {
     fixture.session.status = 'waiting';
     fixture.session.projection!.display = { status: 'paused', reason: 'user_stopped', approval_step_id: '' };

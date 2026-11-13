@@ -2529,6 +2529,7 @@ func publishRuntimeChunk(
 	performanceMetrics *RunPerformanceMetrics,
 	toolCallTurns int,
 	writeClient bool,
+	execution ...*externalExecutionProjection,
 ) {
 	chunk := &ChatChunkResponse{
 		ConversationID:     convID,
@@ -2536,6 +2537,9 @@ func publishRuntimeChunk(
 		HistoryID:          historyID,
 		RuntimeEvent:       event,
 		PerformanceMetrics: performanceMetrics,
+	}
+	if len(execution) > 0 {
+		chunk.Execution = execution[0]
 	}
 	if event != nil && event.Type == RuntimeEventRunFinished {
 		chunk.ToolCallTurns = &toolCallTurns
@@ -2798,6 +2802,7 @@ func streamSingleAnswer(
 	}
 	if !usesCoreRun {
 		initialChunk.ModelOutput = nil
+		initialChunk.ModelRoute = nil
 	}
 	writeSSEChunk(w, flusher, initialChunk)
 	if stateStore != nil {
@@ -2926,7 +2931,7 @@ func streamSingleAnswer(
 						return d.ModelOutput
 					}
 					return nil
-				}(), PerformanceMetrics: decision.PerformanceMetrics, ModelRoute: chatModelRouteFromBody(reqBody), ModelSwitches: modelSwitchesFromBody(reqBody)}
+				}(), PerformanceMetrics: decision.PerformanceMetrics, ModelRoute: chatModelRouteFromBody(reqBody), ModelSwitches: modelSwitchesFromBody(reqBody), Execution: d.Execution}
 				if decision.Terminal != nil {
 					chunk.ToolCallTurns = &toolCallTurns
 				}
@@ -2937,7 +2942,7 @@ func streamSingleAnswer(
 					_ = appendChatChunk(chatCtx, stateStore, convID, historyID, chunk)
 				}
 			} else {
-				publishRuntimeChunk(reqCtx, chatCtx, w, flusher, stateStore, convID, historyID, seq, decision.Event, decision.PerformanceMetrics, toolCallTurns, true)
+				publishRuntimeChunk(reqCtx, chatCtx, w, flusher, stateStore, convID, historyID, seq, decision.Event, decision.PerformanceMetrics, toolCallTurns, true, d.Execution)
 			}
 			if decision.Stop {
 				break
