@@ -24,6 +24,28 @@ class UpstreamCatalogTests(unittest.TestCase):
             self.assertIn(model, result['recognition_models'])
         self.assertIn('doubao-seed-evolving', {model['name'] for model in result['providers']['Doubao']})
 
+    def test_generation_skips_openrouter_by_default_and_preserves_cached_models(self):
+        for cached in [False, True]:
+            with self.subTest(cached=cached), tempfile.TemporaryDirectory() as temp:
+                path = Path(temp) / 'catalog.json'
+                old = catalog.blank_model('cached-router')
+                if cached:
+                    path.write_text(json.dumps({
+                        'schema_version': catalog.SCHEMA_VERSION,
+                        'generated_at': '2020-01-01T00:00:00Z',
+                        'providers': {'OpenRouter': [old]}, 'recognition_models': [old],
+                    }))
+                dev = {'openai': {'models': {'direct': {'id': 'direct'}}}}
+                with patch.dict(catalog.os.environ, {'LAZYMIND_CATALOG_OPENROUTER_ENABLED': 'false'}), patch.object(catalog, 'fetch_json', return_value=dev) as fetch:
+                    catalog.generate([str(path)], refresh=True)
+                fetch.assert_called_once_with(catalog.MODELS_DEV_URL)
+                result = catalog.read_snapshot(str(path))
+                self.assertIsNotNone(result)
+                self.assertEqual(result['providers']['OpenRouter'], [old] if cached else [])
+                self.assertNotIn(catalog.OPENROUTER_URL, result['sources'])
+                if cached:
+                    self.assertIn(old, result['recognition_models'])
+
     def test_volcengine_builtin_models_cover_official_tasks_without_discovery(self):
         payload = catalog.build_catalog(
             {'openai': {'models': {'chat': {'id': 'chat', 'modalities': {'input': ['text'], 'output': ['text']}}}}},
@@ -261,7 +283,7 @@ class UpstreamCatalogTests(unittest.TestCase):
             router = {'data': [{'id': 'opaque', 'architecture': {
                 'input_modalities': ['text'], 'output_modalities': ['embeddings'],
             }}]}
-            with patch.object(catalog, 'fetch_json', side_effect=[dev, router]) as fetch:
+            with patch.dict(catalog.os.environ, {'LAZYMIND_CATALOG_OPENROUTER_ENABLED': 'true'}), patch.object(catalog, 'fetch_json', side_effect=[dev, router]) as fetch:
                 catalog.generate([str(path)])
             self.assertEqual(
                 fetch.call_args_list[1].args[0], 'https://openrouter.ai/api/v1/models?output_modalities=all',
@@ -298,7 +320,7 @@ class UpstreamCatalogTests(unittest.TestCase):
             router = {'data': [{'id': 'live', 'architecture': {
                 'input_modalities': ['text'], 'output_modalities': ['embeddings'],
             }}]}
-            with patch.object(catalog, 'fetch_json', side_effect=[dev, router]):
+            with patch.dict(catalog.os.environ, {'LAZYMIND_CATALOG_OPENROUTER_ENABLED': 'true'}), patch.object(catalog, 'fetch_json', side_effect=[dev, router]):
                 catalog.generate([str(path)])
             result = catalog.read_snapshot(str(path))
             self.assertEqual(result['schema_version'], catalog.SCHEMA_VERSION)
