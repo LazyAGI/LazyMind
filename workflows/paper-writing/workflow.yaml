@@ -240,11 +240,15 @@ runtime:
       description: >
         Plain-text research topic. For research_topic, bind the user's topic here and retain
         the full requirements in request_context. This input can be used on its own.
+        If paper_input.topic is also supplied, equivalent topics are accepted after ignoring
+        whitespace, case, character width and common quote differences. Different topics conflict.
     paper_input:
       description: >
         Optional structured business JSON matching this schema. For a plain-text topic,
         use paper_topic and request_context. Writing preferences belong in constraints.
         Experiment execution is decided from the request, materials and current environment.
+        constraints.citation_style must be one of APA 7, Chicago Author-Date, MLA 9, IEEE,
+        Vancouver or GB/T 7714; abbreviations such as APA are not accepted.
       schema:
         $defs:
           business:
@@ -266,7 +270,7 @@ runtime:
                   paper_language: {enum: [zh-CN, en]}
                   word_target: {type: [integer, 'null'], minimum: 1}
                   paper_type: {enum: [null, research, empirical, literature_review, theoretical, case_study, conference]}
-                  citation_style: {type: string, minLength: 1}
+                  citation_style: {enum: ['APA 7', 'Chicago Author-Date', 'MLA 9', IEEE, Vancouver, 'GB/T 7714']}
                   focus: {type: array, items: {type: string, minLength: 1}}
                   required_sections:
                     type: array

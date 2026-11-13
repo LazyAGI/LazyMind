@@ -6,6 +6,7 @@ import copy
 import json
 import re
 import tempfile
+import unicodedata
 from concurrent.futures import CancelledError
 from pathlib import Path
 from typing import Any
@@ -694,6 +695,12 @@ def _read_f7_paper(paper_id: str) -> dict:
     return {'status': 'ready', 'text': text}
 
 
+def _topic_key(value: str) -> str:
+    value = unicodedata.normalize('NFKC', value).casefold()
+    value = value.translate(str.maketrans({'“': '"', '”': '"', '‘': "'", '’': "'", '「': '"', '」': '"'}))
+    return ''.join(value.split())
+
+
 def _read_entry_value(bound: dict[str, str]) -> dict:
     """Read bound business inputs without creating a pool or selecting paper sources."""
     value = _read_bound(bound['paper_input']) if 'paper_input' in bound else {}
@@ -705,9 +712,14 @@ def _read_entry_value(bound: dict[str, str]) -> dict:
         if slot in bound:
             incoming = Path(bound[slot]).read_text(encoding='utf-8-sig')
             contracts.text(incoming, field)
-            if field in value and value[field] != incoming:
-                raise ValueError(f'{field} 存在冲突输入，请只提供一个版本')
-            value[field] = incoming
+            existing = value.get(field, incoming)
+            matches = existing == incoming
+            if field == 'topic' and isinstance(existing, str):
+                matches = _topic_key(existing) == _topic_key(incoming)
+            if not matches:
+                detail = f'：paper_input.topic={existing!r}，paper_topic={incoming!r}' if field == 'topic' else ''
+                raise ValueError(f'{field} 存在冲突输入，请只提供一个版本{detail}')
+            value[field] = incoming.strip() if field == 'topic' else incoming
     if 'manuscript_file' in bound:
         if 'manuscript' in value:
             raise ValueError('同时提供了论文文件和正文，请选择一个待审稿版本')
