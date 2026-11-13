@@ -21,6 +21,7 @@ import (
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
 	"lazymind/core/common/readonlyorm"
+	"lazymind/core/paperlibrary"
 	"lazymind/core/systemdeps"
 )
 
@@ -125,22 +126,24 @@ type DocumentReadResult struct {
 }
 
 type DocumentMetadata struct {
-	ProcessingError *ProcessingDiagnostic
-	ID              string
-	DatasetID       string
-	Name            string
-	RelativePath    string
-	Source          string
-	Tags            []string
-	ProcessingLevel string
-	ProcessingState orm.DocumentProcessingState
-	ParseStatus     string
-	MIMEType        string
-	SizeBytes       int64
-	CreatedAt       time.Time
-	UpdatedAt       time.Time
-	CreatedBy       string
-	OriginalFile    *DocumentFileRef
+	ProcessingError         *ProcessingDiagnostic
+	ID                      string
+	DatasetID               string
+	Name                    string
+	RelativePath            string
+	Source                  string
+	Tags                    []string
+	ProcessingLevel         string
+	ObservedProcessingLevel string
+	ProcessingState         orm.DocumentProcessingState
+	OriginalAvailable       bool
+	ParseStatus             string
+	MIMEType                string
+	SizeBytes               int64
+	CreatedAt               time.Time
+	UpdatedAt               time.Time
+	CreatedBy               string
+	OriginalFile            *DocumentFileRef
 }
 
 type DocumentFileRef struct {
@@ -488,9 +491,6 @@ func (s *DocumentService) requireDatasetRead(ctx context.Context, userID, datase
 		return orm.Dataset{}, &DocumentServiceError{Code: DocumentServiceNotFound, Message: "dataset not found"}
 	}
 	if !canAccessDataset(&ds, userID, acl.PermissionDatasetRead) {
-		return orm.Dataset{}, &DocumentServiceError{Code: DocumentServiceForbidden, Message: "dataset forbidden"}
-	}
-	if !datasetAllowedByScanSourceForCaller(ctx, caller, ds.ID, acl.PermissionDatasetRead) {
 		return orm.Dataset{}, &DocumentServiceError{Code: DocumentServiceForbidden, Message: "dataset forbidden"}
 	}
 	return ds, nil
@@ -841,6 +841,7 @@ func (s *DocumentService) GetProcessingMetadata(ctx context.Context, caller Data
 			detail[1] = ext.ErrorMessage
 		}
 		out[row.ID] = DocumentMetadata{ID: row.ID, DatasetID: datasetID, ProcessingLevel: ds.ProcessingLevel, ProcessingState: state,
+			ObservedProcessingLevel: snapshot.observedProcessingLevel(task, state), OriginalAvailable: paperlibrary.OriginalAvailable(row),
 			ProcessingError: processingDiagnostic(state, task, raw, detail[0], detail[1])}
 	}
 	return out, nil

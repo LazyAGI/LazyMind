@@ -55,7 +55,7 @@ func TestReadingStudyOverrideSharedByManualAndAutomaticExecution(t *testing.T) {
 	}
 	for _, row := range []any{
 		&orm.UserModelProvider{ID: "p", Name: "OpenAI", BaseModel: orm.BaseModel{CreateUserID: "owner"}},
-		&orm.UserModelProviderGroup{ID: "g", UserModelProviderID: "p", BaseURL: "https://fixture.invalid/v1", APIKey: "secret", IsVerified: true, BaseModel: orm.BaseModel{CreateUserID: "owner"}},
+		&orm.UserModelProviderGroup{ID: "g", UserModelProviderID: "p", BaseURL: "https://fixture.invalid/v1", APIKey: "secret", IsVerified: true, CredentialRevision: 1, BaseModel: orm.BaseModel{CreateUserID: "owner"}},
 		&orm.UserModelProviderGroupModel{ID: "a", UserModelProviderID: "p", UserModelProviderGroupID: "g", ProviderName: "OpenAI", Name: "global", ModelType: "llm", BaseModel: orm.BaseModel{CreateUserID: "owner"}},
 		&orm.UserModelProviderGroupModel{ID: "b", UserModelProviderID: "p", UserModelProviderGroupID: "g", ProviderName: "OpenAI", Name: "study", ModelType: "llm", BaseModel: orm.BaseModel{CreateUserID: "owner"}},
 		&orm.UserSelectedModel{UserID: "owner", ModelKey: "llm", UserModelProviderGroupModelID: "a"},

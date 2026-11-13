@@ -987,6 +987,7 @@ func applyConversationChatModelConfig(ctx context.Context, db *gorm.DB, userID s
 		}
 	}
 	clearChatFallbackInput(body)
+	fallbackEnabled := modelconfig.ChatModelFallbackEnabled()
 	mode := chatModelModeFixed
 	legacy := conversation.ChatModelMode == nil || strings.TrimSpace(*conversation.ChatModelMode) == ""
 	if !legacy {
@@ -1027,6 +1028,9 @@ func applyConversationChatModelConfig(ctx context.Context, db *gorm.DB, userID s
 				return historyErr
 			}
 			unavailable := unavailableAutoChatModels(&conversation, histories)
+			if !fallbackEnabled {
+				unavailable = nil
+			}
 			usable := make([]availableChatModel, 0, len(models))
 			for _, candidate := range models {
 				key := chatModelIdentityKey(candidate.Source, candidate.ID)
@@ -1039,6 +1043,9 @@ func applyConversationChatModelConfig(ctx context.Context, db *gorm.DB, userID s
 					model = findAvailableChatModelBySource(usable, previous.ModelID, previous.Source)
 					reason = "session_sticky"
 					if model == nil {
+						if !fallbackEnabled {
+							return errChatModelUnavailable
+						}
 						reason = "model_unavailable"
 						prior := findAvailableChatModelBySource(models, previous.ModelID, previous.Source)
 						if !chatModelUsable(prior) || unavailable[chatModelIdentityKey(previous.Source, previous.ModelID)] {
@@ -1058,6 +1065,9 @@ func applyConversationChatModelConfig(ctx context.Context, db *gorm.DB, userID s
 						continue
 					}
 					model = findAvailableChatModelBySource(usable, previousRoute.ModelID, previousRoute.Source)
+					if model == nil && !fallbackEnabled {
+						return errChatModelUnavailable
+					}
 					if model != nil {
 						if reason == "initial_selection" {
 							reason = "session_sticky"
@@ -1128,7 +1138,7 @@ func applyConversationChatModelConfig(ctx context.Context, db *gorm.DB, userID s
 	if model != nil {
 		current = prepared.PrepareCandidate(ctx, *model)
 	}
-	if current == nil {
+	if current == nil && fallbackEnabled {
 		model, current = initialFallbackChatCandidate(prepared, original)
 	}
 	if current == nil {
@@ -1172,6 +1182,9 @@ func applyConversationChatModelConfig(ctx context.Context, db *gorm.DB, userID s
 		originalRoute = route
 	}
 	state := newChatFallbackState(prepared, current.CandidateID)
+	if !fallbackEnabled {
+		state.candidates = []modelconfig.ChatModelCandidate{*current}
+	}
 	if unavailableSticky != nil && modelconfig.ChatCandidateID(unavailableSticky.Source, unavailableSticky.ModelID) != current.CandidateID {
 		from := &chatModelRoute{Mode: mode, Strategy: route.Strategy, TaskClass: route.TaskClass, Reason: "model_unavailable", SelectionVersion: route.SelectionVersion, ModelID: unavailableSticky.ModelID, ProviderID: unavailableSticky.ProviderID, ProviderName: unavailableSticky.ProviderName, ModelName: unavailableSticky.ModelName, Source: unavailableSticky.Source, snapshot: unavailableSticky}
 		var window *int64

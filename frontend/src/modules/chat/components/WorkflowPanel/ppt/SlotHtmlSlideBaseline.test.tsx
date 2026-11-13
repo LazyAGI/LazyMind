@@ -56,6 +56,24 @@ describe('SlotHtmlSlide mutation baseline', () => {
 
   afterEach(() => vi.unstubAllGlobals());
 
+  it('resizes the normal and enlarged preview to the loaded canvas dimensions', async () => {
+    const canvas = '<div class="wrapper" style="width:1280px;height:720px">Slide</div>';
+    const slot = { slot_id: 'slides', slot: 'slides', revision: 1, selected: true,
+      created_at: '', content_type: 'text', artifact_value: `<html><body>${canvas}</body></html>`,
+    } as SlotRevision;
+    render(<SlotHtmlSlide slot={slot} />);
+    const frame = await screen.findByTitle('slide-1') as HTMLIFrameElement;
+    frame.contentDocument!.body.innerHTML = canvas;
+    fireEvent.load(frame);
+    await waitFor(() => expect(frame).toHaveStyle({ width: '1280px', height: '720px' }));
+    fireEvent.click(screen.getByRole('button', { name: '放大幻灯片' }));
+    const enlarged = await screen.findByTitle('放大预览-1') as HTMLIFrameElement;
+    // JSDOM does not load srcdoc; populate each frame before its load event.
+    enlarged.contentDocument!.body.innerHTML = canvas;
+    fireEvent.load(enlarged);
+    await waitFor(() => expect(enlarged).toHaveStyle({ width: '1280px', height: '720px' }));
+  });
+
   it('uses the applied revision and draft version for the next rewrite on the same mount', async () => {
     const slot: SlotRevision = {
       slot_id: 'slides',
@@ -92,6 +110,30 @@ describe('SlotHtmlSlide mutation baseline', () => {
       expect(latest.baseDraftVersion).toBe(1);
     });
   });
+  it('keeps a saved edit when chat refresh returns an older slide, but accepts newer content', async () => {
+    const slot = { slot_id: 'slides', slot: 'slides', revision: 1, draft_version: 4, list_index: 0,
+      selected: true, created_at: '', content_type: 'text', change_source: 'human',
+      artifact_value: { text: '<html><body>Old</body></html>' },
+    } as SlotRevision;
+    const view = render(<SlotHtmlSlide slot={slot} sessionId='ppt-session' slotId='slides' />);
+    fireEvent.click(await screen.findByRole('button', { name: 'apply slide rewrite' }));
+    await waitFor(() => expect(screen.getByTitle('slide-1').getAttribute('srcdoc')).toContain('New'));
+    view.rerender(<SlotHtmlSlide slot={{ ...slot, artifact_value: { ...slot.artifact_value as object } }}
+      sessionId='ppt-session' slotId='slides' />);
+    await waitFor(() => expect(screen.getByTitle('slide-1').getAttribute('srcdoc')).toContain('New'));
+    expect(dialogRender.mock.lastCall?.[0].baseRevision).toBe(2);
+    view.rerender(<SlotHtmlSlide slot={{ ...slot,
+      artifact_value: { text: '<html><body>Old refreshed response</body></html>' },
+    }} sessionId='ppt-session' slotId='slides' />);
+    await waitFor(() => expect(screen.getByTitle('slide-1').getAttribute('srcdoc')).toContain('New'));
+    expect(dialogRender.mock.lastCall?.[0].baseRevision).toBe(2);
+    view.rerender(<SlotHtmlSlide slot={{ ...slot, revision: 3, draft_version: 1,
+      artifact_value: { text: '<html><body>Newest</body></html>' },
+    }} sessionId='ppt-session' slotId='slides' />);
+    await waitFor(() => expect(screen.getByTitle('slide-1').getAttribute('srcdoc')).toContain('Newest'));
+    expect(dialogRender.mock.lastCall?.[0].baseRevision).toBe(3);
+  });
+
   it('keeps enlarged navigation open across pages and disables the end buttons', async () => {
     const slot = {
       slot_id: 'slides', slot: 'slides', revision: 1, list_index: 0,

@@ -2,6 +2,8 @@ import importlib.util
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
+from zipfile import ZipFile
 
 from pptx import Presentation
 
@@ -35,9 +37,19 @@ class NativePresentationTests(unittest.TestCase):
     def test_plain_presentation_is_editable(self):
         with tempfile.TemporaryDirectory() as temp:
             output = Path(temp) / 'plain.pptx'
-            module.build_native_pptx([{'title': 'Plain', 'bullets': ['Editable text']}], output)
+            from test_pptx_font_edit import make_font
+            from lazymind.chat.engine.tools.file_resources.font_library import register_font
+            with patch.dict('os.environ', {'LAZYMIND_FONT_DIR': str(Path(temp) / 'fonts')}):
+                record = register_font(make_font(Path(temp), family='Songti SC', text='PlainEditable text'))
+                with patch('lazymind.chat.engine.tools.file_resources.presentation_edit.available_font_families',
+                           return_value={'Songti SC'}):
+                    module.build_native_pptx([{'title': 'Plain', 'bullets': ['Editable text']}], output)
+            with ZipFile(output) as archive:
+                self.assertIn(b'embeddedFontLst', archive.read('ppt/presentation.xml'))
+                self.assertIn(f'ppt/fonts/lazymind-{record["id"]}.fntdata', archive.namelist())
             actual = Presentation(output)
             self.assertEqual(actual.slides[0].shapes.title.text, 'Plain')
+            self.assertEqual(actual.slides[0].shapes.title.text_frame.paragraphs[0].runs[0].font.name, 'Songti SC')
 
 
 if __name__ == '__main__':

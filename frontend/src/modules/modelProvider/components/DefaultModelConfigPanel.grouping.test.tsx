@@ -1,6 +1,10 @@
-import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { act, fireEvent, render, renderHook, screen, waitFor, within } from "@testing-library/react";
+import { Modal, message } from "antd";
+import { useLayoutEffect, type ReactNode } from "react";
+import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from "vitest";
 import DefaultModelConfigPanel from "./DefaultModelConfigPanel";
+import { cloudServiceConfigs, DefaultModelConfigRefreshContext, useDefaultModelConfig } from "../hooks/useDefaultModelConfig";
+vi.mock("@/modules/knowledge/components/TextIndexManager", () => ({ default: () => <button>索引管理</button> }));
 
 const mocks = vi.hoisted(() => ({
   role: "system-admin",
@@ -11,6 +15,8 @@ const mocks = vi.hoisted(() => ({
   services: vi.fn(),
   models: vi.fn(),
   saveModel: vi.fn(),
+  previewEmbeddingSwitch: vi.fn(),
+  clearEmbeddingChunks: vi.fn(),
   saveService: vi.fn(),
   ready: vi.fn(),
   verified: vi.fn(),
@@ -21,7 +27,7 @@ const mocks = vi.hoisted(() => ({
   translate: (key: string, options?: { configured?: number; total?: number }) =>
     key === "modelProvider.defaults.configuredCount"
       ? `${options?.configured}/${options?.total}`
-      : key,
+      : key === "common.confirm" ? "确认" : key,
 }));
 
 vi.mock("react-i18next", () => ({
@@ -40,6 +46,8 @@ vi.mock("@/runtime/cloud/session", () => ({
   isCloudBusinessAvailable: () => mocks.cloudAvailable,
 }));
 vi.mock("../api", () => ({
+  previewEmbeddingSwitch: mocks.previewEmbeddingSwitch,
+  clearEmbeddingChunks: mocks.clearEmbeddingChunks,
   modelProvidersApi: {
     apiCoreModelProvidersGet: mocks.providers,
     apiCoreModelProvidersSelectedModelsGet: mocks.selections,
@@ -66,6 +74,13 @@ const availableModel = {
 };
 const selectedParsing = {
   category: "ocr", group_id: "parsing", group_name: "Parser", provider_name: "MinerU", share: false,
+};
+const selectedEmbedding = {
+  ...selectedLlm, model_key: "embed_main", model_id: "old-embedding",
+  name: "Old embedding", share: false,
+};
+const candidateEmbedding = {
+  ...availableModel, id: "new-embedding", name: "New embedding", model_type: "embed_main",
 };
 
 function renderPanel(
@@ -120,8 +135,33 @@ const readyToSelect = async (name: string) => {
   return select;
 };
 const configure = (name: string) => fireEvent.click(within(group(name)).getByRole("button", { name: "modelProvider.configureCapability" }));
+const chooseCandidateEmbedding = async () => {
+  await screen.findByRole("region", { name: "modelProvider.defaults.basicTitle" });
+  const select = await readyToSelect("modelProvider.module.embeddingTitle");
+  fireEvent.mouseDown(select);
+  fireEvent.click(await screen.findByText("New embedding", { selector: "strong" }));
+};
+
+const expectLocalizedWarning = async (content: string) => {
+  const warning = await screen.findByText(content);
+  const dialog = within(warning.closest<HTMLElement>('[role="dialog"]')!);
+  try {
+    expect.soft(dialog.getByRole("button", { hidden: true })).toHaveTextContent(/^确\s*认$/);
+    expect.soft(dialog.queryByText("common.ok")).not.toBeInTheDocument();
+  } finally {
+    await act(async () => { Modal.destroyAll(); });
+  }
+};
+
+function deferredResponse() {
+  let resolve!: (value: unknown) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise((complete, fail) => { resolve = complete; reject = fail; });
+  return { promise, resolve, reject };
+}
 
 describe("default capability configuration groups", () => {
+  afterEach(() => vi.restoreAllMocks());
   beforeEach(() => {
     vi.resetAllMocks();
     mocks.role = "system-admin";
@@ -132,11 +172,700 @@ describe("default capability configuration groups", () => {
     mocks.services.mockResolvedValue({ data: { selections: [selectedParsing] } });
     mocks.models.mockResolvedValue({ data: { models: [availableModel] } });
     mocks.saveModel.mockResolvedValue({ data: { selections: [selectedLlm] } });
+    mocks.previewEmbeddingSwitch.mockResolvedValue({
+      outcome: "empty", can_switch: true, indexed_knowledge_bases: 0,
+      active_model_name: "", candidate_model_name: "New embedding",
+      signature_status: "none", generation: 1,
+    });
     mocks.saveService.mockResolvedValue({ data: { selections: [] } });
     mocks.ready.mockResolvedValue({ data: { ready: false } });
     mocks.verified.mockResolvedValue({ data: { ready: false } });
     mocks.groups.mockResolvedValue({ data: { groups: [] } });
     Element.prototype.scrollIntoView = vi.fn();
+  });
+
+  it.each([
+    ["cloudParsing", "pending"], ["cloudParsing", "failed"],
+    ["searchEngine", "pending"], ["searchEngine", "failed"],
+    ["cloudParsing", "completed"],
+  ] as const)("refreshes %s options and readiness independently of a %s selected-provider request", async (slot, selectionRequest) => {
+    mocks.role = "user";
+    const service = cloudServiceConfigs.find(({ key }) => key === slot)!;
+    const serviceGroup = (id: string) => ({
+      ...selectedParsing, category: service.category, group_id: id, group_name: id,
+      base_url: "https://example.test", user_model_provider_id: "provider",
+    });
+    const groups = (id: string) => ({ data: { groups: [serviceGroup(id)] } });
+    const readiness = (name: string) => ({ data: { ready: true, group_name: name, source: "own" } });
+    const oldGroups = deferredResponse();
+    const freshGroups = deferredResponse();
+    const oldReadiness = deferredResponse();
+    const freshReadiness = deferredResponse();
+    const freshSelections = deferredResponse();
+    mocks.services.mockResolvedValueOnce({ data: { selections: [serviceGroup("saved")] } });
+    if (selectionRequest === "failed") mocks.services.mockRejectedValueOnce(new Error("selection service unavailable"));
+    else mocks.services.mockImplementationOnce(() => freshSelections.promise);
+    mocks.groups.mockResolvedValueOnce(groups("cached-option"))
+      .mockImplementationOnce(() => oldGroups.promise)
+      .mockImplementationOnce(() => freshGroups.promise);
+    const checks = [Promise.resolve(readiness("cached-runtime")), oldReadiness.promise, freshReadiness.promise];
+    mocks.verified.mockImplementation(({ category }: { category: string }) => category === service.category
+      ? checks.shift()
+      : Promise.resolve({ data: { ready: false } }));
+    let revision = 0;
+    const { result, rerender } = renderHook(() => useDefaultModelConfig({
+      cloudServiceSetupStates: {
+        cloudParsing: slot === "cloudParsing" ? "ready" : "empty",
+        searchEngine: slot === "searchEngine" ? "ready" : "empty",
+      },
+      modelProviderSetupState: "empty",
+      onModelSelectionChanged: mocks.changed,
+    }), { wrapper: ({ children }) => <DefaultModelConfigRefreshContext.Provider value={revision}>{children}</DefaultModelConfigRefreshContext.Provider> });
+    const optionIds = () => result.current.cloudServiceOptions[slot]?.map((option) => option.groupId);
+    await waitFor(() => expect(result.current.cloudServiceReadyStatus[slot]?.group_name).toBe("cached-runtime"));
+    await act(async () => { await result.current.loadVerifiedCloudService(service); });
+    expect(optionIds()).toEqual(["saved", "cached-option"]);
+    act(() => {
+      void result.current.loadVerifiedCloudService(service);
+      void result.current.retryCapabilityReadiness(slot);
+    });
+
+    revision += 1;
+    rerender();
+    await waitFor(() => expect(mocks.services).toHaveBeenCalledTimes(2));
+    await act(async () => {
+      oldGroups.resolve(groups("obsolete-option"));
+      oldReadiness.resolve(readiness("obsolete-runtime"));
+    });
+    expect.soft(optionIds()).toEqual(["saved", "cached-option"]);
+    expect.soft(result.current.cloudServiceReadyStatus[slot]?.group_name).toBe("cached-runtime");
+    expect.soft(result.current.cloudServiceOptionStates[slot]).toBe("loading");
+    expect.soft(result.current.capabilityReadyStates[slot]).toBe("loading");
+
+    await act(async () => {
+      freshGroups.resolve(groups("current-option"));
+      freshReadiness.resolve(readiness("current-runtime"));
+    });
+    expect(optionIds()).toEqual(["saved", "current-option"]);
+    expect(result.current.cloudServiceReadyStatus[slot]?.group_name).toBe("current-runtime");
+    if (selectionRequest === "completed") {
+      await act(async () => { freshSelections.resolve({ data: { selections: [serviceGroup("newly-saved")] } }); });
+      expect(optionIds()).toEqual(["newly-saved", "current-option"]);
+      expect(result.current.cloudServiceReadyStatus[slot]?.group_name).toBe("current-runtime");
+    }
+  });
+
+  it("applies a refresh revision after a model save starts before its effect", async () => {
+    let revision = 0;
+    const saveModel = vi.fn();
+    const saving = deferredResponse();
+    mocks.saveModel.mockImplementationOnce(() => saving.promise);
+    const { result, rerender } = renderHook(() => useDefaultModelConfig({
+      cloudServiceSetupStates: { cloudParsing: "empty", searchEngine: "empty" },
+      modelProviderSetupState: "empty",
+      onModelSelectionChanged: mocks.changed,
+    }), { wrapper: function RevisionProvider({ children }: { children: ReactNode }) {
+      useLayoutEffect(() => { if (revision > 0) saveModel(); }, [revision]);
+      return <DefaultModelConfigRefreshContext.Provider value={revision}>{children}</DefaultModelConfigRefreshContext.Provider>;
+    } });
+    await waitFor(() => expect(result.current.hasLoadedModelSelections).toBe(true));
+    saveModel.mockImplementation(() => result.current.handleModelSelection("tts", "own:provider:group:tts-model"));
+
+    revision += 1;
+    rerender();
+    expect(mocks.selections).toHaveBeenCalledOnce();
+    await act(async () => { saving.resolve({ data: { selections: [] } }); });
+    await waitFor(() => expect(mocks.selections).toHaveBeenCalledTimes(2));
+  });
+
+  it.each([
+    ["clear", "success", "save-first"],
+    ["save", "success", "refresh-first"],
+    ["save", "failure", "save-first"],
+    ["clear", "failure", "refresh-first"],
+  ] as const)("retries an invalidated service refresh after a %s %s completes %s", async (action, outcome, completion) => {
+    const initialSearch = {
+      category: "search", group_id: "search", group_name: "Search",
+      provider_name: "Search Provider", share: false,
+    };
+    const savedSearch = {
+      ...initialSearch, group_id: "saved-search", group_name: "Saved search",
+    };
+    const updatedParser = { ...selectedParsing, group_name: "Updated parser" };
+    const expectedSearch = outcome === "success"
+      ? action === "clear" ? undefined : savedSearch
+      : initialSearch;
+    const staleRefresh = deferredResponse();
+    const save = deferredResponse();
+    mocks.services
+      .mockResolvedValueOnce({ data: { selections: [selectedParsing, initialSearch] } })
+      .mockImplementationOnce(() => staleRefresh.promise)
+      .mockResolvedValueOnce({ data: { selections: [updatedParser, ...(expectedSearch ? [expectedSearch] : [])] } });
+    mocks.saveService.mockImplementationOnce(() => save.promise);
+    let revision = 0;
+    const { result, rerender } = renderHook(() => useDefaultModelConfig({
+      cloudServiceSetupStates: { cloudParsing: "ready", searchEngine: "ready" },
+      modelProviderSetupState: "empty",
+      onModelSelectionChanged: mocks.changed,
+    }), { wrapper: ({ children }) => (
+      <DefaultModelConfigRefreshContext.Provider value={revision}>{children}</DefaultModelConfigRefreshContext.Provider>
+    ) });
+    const selectedName = (slot: "cloudParsing" | "searchEngine") =>
+      result.current.cloudServiceOptions[slot]?.find((option) =>
+        option.groupId === result.current.selectedCloudServices[slot])?.groupName;
+    await waitFor(() => expect(selectedName("cloudParsing")).toBe("Parser"));
+    expect(selectedName("searchEngine")).toBe("Search");
+
+    revision += 1;
+    rerender();
+    await waitFor(() => expect(mocks.services).toHaveBeenCalledTimes(2));
+    act(() => {
+      result.current.handleCloudServiceSelection("searchEngine", action === "clear" ? undefined : savedSearch.group_id);
+    });
+    expect(mocks.saveService).toHaveBeenCalledOnce();
+
+    const settleSave = async () => {
+      if (outcome === "success") {
+        save.resolve({ data: { selections: action === "clear" ? [] : [savedSearch] } });
+      } else {
+        save.reject(new Error("save failed"));
+      }
+    };
+    if (completion === "refresh-first") {
+      await act(async () => { staleRefresh.resolve({ data: { selections: [updatedParser, initialSearch] } }); });
+      await act(settleSave);
+    } else {
+      await act(settleSave);
+      await act(async () => { staleRefresh.resolve({ data: { selections: [updatedParser, initialSearch] } }); });
+    }
+
+    await waitFor(() => expect(mocks.services).toHaveBeenCalledTimes(3));
+    await waitFor(() => expect(selectedName("cloudParsing")).toBe("Updated parser"));
+    expect(result.current.selectedCloudServices.searchEngine).toBe(expectedSearch?.group_id);
+    expect(selectedName("searchEngine")).toBe(expectedSearch?.group_name);
+    expect(mocks.saveService).toHaveBeenCalledOnce();
+    await act(async () => {});
+    expect(mocks.services).toHaveBeenCalledTimes(3);
+  });
+
+  it("applies only the newest consecutive external service refresh", async () => {
+    const staleRefresh = deferredResponse();
+    const newestParser = { ...selectedParsing, group_name: "Newest parser" };
+    mocks.services
+      .mockResolvedValueOnce({ data: { selections: [selectedParsing] } })
+      .mockImplementationOnce(() => staleRefresh.promise)
+      .mockResolvedValueOnce({ data: { selections: [newestParser] } });
+    let revision = 0;
+    const { result, rerender } = renderHook(() => useDefaultModelConfig({
+      cloudServiceSetupStates: { cloudParsing: "ready", searchEngine: "empty" },
+      modelProviderSetupState: "empty",
+      onModelSelectionChanged: mocks.changed,
+    }), { wrapper: ({ children }) => (
+      <DefaultModelConfigRefreshContext.Provider value={revision}>{children}</DefaultModelConfigRefreshContext.Provider>
+    ) });
+    const parserName = () => result.current.cloudServiceOptions.cloudParsing?.[0]?.groupName;
+    await waitFor(() => expect(parserName()).toBe("Parser"));
+
+    revision = 1;
+    rerender();
+    await waitFor(() => expect(mocks.services).toHaveBeenCalledTimes(2));
+    revision = 2;
+    rerender();
+    await waitFor(() => expect(parserName()).toBe("Newest parser"));
+    await act(async () => { staleRefresh.resolve({ data: { selections: [{ ...selectedParsing, group_name: "Stale parser" }] } }); });
+
+    expect(parserName()).toBe("Newest parser");
+    expect(mocks.services).toHaveBeenCalledTimes(3);
+    rerender();
+    await act(async () => {});
+    expect(mocks.services).toHaveBeenCalledTimes(3);
+  });
+
+  it("does not retry a pending external refresh after unmount", async () => {
+    const pendingRefresh = deferredResponse();
+    mocks.services
+      .mockResolvedValueOnce({ data: { selections: [selectedParsing] } })
+      .mockImplementationOnce(() => pendingRefresh.promise);
+    let revision = 0;
+    const { rerender, unmount } = renderHook(() => useDefaultModelConfig({
+      cloudServiceSetupStates: { cloudParsing: "ready", searchEngine: "empty" },
+      modelProviderSetupState: "empty",
+      onModelSelectionChanged: mocks.changed,
+    }), { wrapper: ({ children }) => (
+      <DefaultModelConfigRefreshContext.Provider value={revision}>{children}</DefaultModelConfigRefreshContext.Provider>
+    ) });
+    await waitFor(() => expect(mocks.services).toHaveBeenCalledOnce());
+    revision = 1;
+    rerender();
+    await waitFor(() => expect(mocks.services).toHaveBeenCalledTimes(2));
+
+    unmount();
+    await act(async () => { pendingRefresh.resolve({ data: { selections: [{ ...selectedParsing, group_name: "Late parser" }] } }); });
+
+    expect(mocks.services).toHaveBeenCalledTimes(2);
+    expect(mocks.saveService).not.toHaveBeenCalled();
+  });
+
+  it.each(["failed", "late"] as const)("shows updated selected-service metadata with a %s catalog refresh", async (catalogRefresh) => {
+    const before = { ...selectedParsing, group_id: "before", group_name: "First candidate" };
+    const cached = { ...selectedParsing, group_name: "Previous parser", base_url: "https://previous.example.test" };
+    const after = { ...selectedParsing, group_id: "after", group_name: "Last candidate" };
+    const updated = {
+      ...cached, group_name: "Updated parser", base_url: "https://updated.example.test",
+      provider_name: catalogRefresh === "late" ? "" : "MinerU Updated",
+    };
+    const updatedProvider = updated.provider_name || cached.provider_name;
+    const catalog = deferredResponse();
+    mocks.services.mockResolvedValueOnce({ data: { selections: [cached] } })
+      .mockResolvedValueOnce({ data: { selections: [updated] } });
+    mocks.groups.mockResolvedValueOnce({ data: { groups: [before, cached, after] } });
+    if (catalogRefresh === "failed") mocks.groups.mockRejectedValueOnce(new Error("catalog unavailable"));
+    else mocks.groups.mockImplementationOnce(() => catalog.promise);
+    const panel = (revision: number) => (
+      <DefaultModelConfigRefreshContext.Provider value={revision}>
+        <DefaultModelConfigPanel
+          cloudServiceSetupStates={{ cloudParsing: "ready", searchEngine: "empty" }}
+          modelProviderSetupState="empty"
+          onConfigureCloudService={mocks.configureService}
+          onConfigureProviders={mocks.configureProviders}
+          onModelSelectionChanged={mocks.changed}
+          onRetrySetup={vi.fn()}
+        />
+      </DefaultModelConfigRefreshContext.Provider>
+    );
+    const { rerender } = render(panel(0));
+    expect(await screen.findByText("MinerU · Previous parser")).toBeInTheDocument();
+    const row = group("modelProvider.module.cloudParsingServiceTitle");
+    fireEvent.mouseDown(within(row).getByRole("combobox"));
+    expect(await screen.findByText("Previous parser · https://previous.example.test", { selector: "small" })).toBeInTheDocument();
+    expect(await screen.findByText("First candidate", { selector: "small" })).toBeInTheDocument();
+
+    rerender(panel(1));
+
+    expect(await within(row).findByText(`${updatedProvider} · Updated parser`)).toBeInTheDocument();
+    const dropdownLabels = () => screen.getAllByText(/First candidate|Updated parser|Last candidate/, { selector: "small" })
+      .map((option) => option.textContent);
+    expect(dropdownLabels()).toEqual(["First candidate", "Updated parser · https://updated.example.test", "Last candidate"]);
+    expect(screen.queryByText(/Previous parser/)).not.toBeInTheDocument();
+
+    if (catalogRefresh === "late") {
+      await act(async () => { catalog.resolve({ data: { groups: [before, cached, { ...after, group_name: "Last candidate refreshed" }] } }); });
+      expect(await screen.findByText("Last candidate refreshed", { selector: "small" })).toBeInTheDocument();
+      expect(within(row).getByText(`${updatedProvider} · Updated parser`)).toBeInTheDocument();
+      expect(dropdownLabels()).toEqual(["First candidate", "Updated parser · https://updated.example.test", "Last candidate refreshed"]);
+      expect(screen.queryByText(/Previous parser/)).not.toBeInTheDocument();
+    }
+  });
+
+  it.each([true, false])("keeps the unavailable saved embedding when the catalog contains the same model (saved provider IDs: %s)", async (hasProviderIds) => {
+    mocks.selections.mockResolvedValue({ data: { selections: [{
+      ...selectedEmbedding, availability: "unavailable", unavailable_reason: "index_identity_unverified",
+      group_name: "Demo",
+      user_model_provider_id: hasProviderIds ? "provider" : undefined,
+      user_model_provider_group_id: hasProviderIds ? "group" : undefined,
+    }] } });
+    mocks.models.mockResolvedValue({ data: { models: [{ ...candidateEmbedding, id: "old-embedding", name: "Catalog embedding" }] } });
+    renderPanel();
+
+    const row = await screen.findByRole("group", { name: "modelProvider.module.embeddingTitle" });
+    const select = await within(row).findByRole("combobox");
+    expect(within(row).getByText("Old embedding · Demo")).toBeInTheDocument();
+    expect(within(row).getByRole("alert")).toHaveTextContent("knowledge.embeddingIndexUnknown");
+    expect(row).not.toHaveClass("is-pending");
+    fireEvent.mouseDown(select);
+    await waitFor(() => expect(screen.getByText("Old embedding", { selector: "strong" })
+      .closest(".ant-select-item-option")).toHaveClass("ant-select-item-option-disabled"));
+    expect(screen.queryByText("Catalog embedding")).not.toBeInTheDocument();
+    expect(within(row).getByText("Old embedding · Demo")).toBeInTheDocument();
+  });
+
+  it("keeps an embedding confirmed by the save response when the index makes it unavailable", async () => {
+    mocks.selections.mockResolvedValue({ data: { selections: [selectedEmbedding] } });
+    mocks.models.mockResolvedValue({ data: { models: [candidateEmbedding] } });
+    mocks.saveModel.mockResolvedValue({ data: { selections: [{
+      ...selectedEmbedding, model_id: "new-embedding", name: "Saved embedding", availability: "unavailable",
+      unavailable_reason: "index_cleanup_incomplete",
+    }] } });
+    renderPanel();
+
+    await chooseCandidateEmbedding();
+
+    const row = group("modelProvider.module.embeddingTitle");
+    expect(await within(row).findByText("Saved embedding · Demo")).toBeInTheDocument();
+    expect(within(row).getByRole("alert")).toHaveTextContent("knowledge.embeddingIndexCleanupFailed");
+    expect(row).not.toHaveClass("is-pending");
+    expect(within(row).queryByText("Old embedding · Demo")).not.toBeInTheDocument();
+  });
+
+  it.each(["empty", "error"] as const)("retains a saved embedding when provider setup is %s", async (setupState) => {
+    mocks.selections.mockResolvedValue({ data: { selections: [{
+      ...selectedEmbedding, availability: "unavailable", unavailable_reason: "credentials_unavailable",
+    }] } });
+    mocks.models.mockResolvedValue({ data: { models: [] } });
+    renderPanel(setupState);
+
+    const row = await screen.findByRole("group", { name: "modelProvider.module.embeddingTitle" });
+    expect(within(row).getByRole("combobox")).toBeDisabled();
+    expect(within(row).getByText("Old embedding · Demo")).toBeInTheDocument();
+    expect(within(row).getByText("credentials_unavailable")).toBeInTheDocument();
+    expect(row).not.toHaveClass("is-pending");
+  });
+
+  it.each(["providers", "services"] as const)("shows the saved embedding while %s never resolves", async (part) => {
+    mocks[part].mockImplementation(() => new Promise(() => {}));
+    mocks.selections.mockResolvedValue({ data: { selections: [{
+      ...selectedEmbedding, group_name: "Saved supplier", availability: "unavailable", unavailable_reason: "index_cleared",
+    }] } });
+    renderPanel();
+
+    const supplier = part === "providers" ? "Saved supplier" : "Demo";
+    expect(await screen.findByText(`Old embedding · ${supplier}`)).toBeInTheDocument();
+    const row = group("modelProvider.module.embeddingTitle");
+    expect(within(row).getByText("knowledge.embeddingIndexCleared")).toBeInTheDocument();
+    expect(screen.queryByText("modelProvider.defaultConfigLoadFailed")).not.toBeInTheDocument();
+  });
+
+  it("keeps initial selection loading when the provider catalog arrives first", async () => {
+    let resolveSelections!: (value: unknown) => void;
+    mocks.selections.mockImplementation(() => new Promise((resolve) => { resolveSelections = resolve; }));
+    renderPanel();
+
+    await waitFor(() => expect(resolveSelections).toBeTypeOf("function"));
+    expect(screen.getByText("common.loading")).toBeInTheDocument();
+    expect(screen.queryByText("modelProvider.defaultConfigLoadFailed")).not.toBeInTheDocument();
+    await act(async () => { resolveSelections({ data: { selections: [selectedEmbedding] } }); });
+    expect(await screen.findByText("Old embedding · Demo")).toBeInTheDocument();
+  });
+
+  it("preserves the server's available selection while its catalog metadata is pending", async () => {
+    mocks.providers.mockImplementation(() => new Promise(() => {}));
+    mocks.selections.mockResolvedValue({ data: { selections: [{
+      ...selectedEmbedding, provider_name: "Unlisted gateway", group_name: "Saved supplier",
+    }] } });
+    renderPanel();
+
+    expect(await screen.findByText("Old embedding · Saved supplier")).toBeInTheDocument();
+    expect(within(group("modelProvider.module.embeddingTitle")).queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it.each(["providers", "services"] as const)("retains a successful selection when %s fails", async (part) => {
+    mocks[part].mockRejectedValue(new Error("initial request failed"));
+    mocks.selections.mockResolvedValue({ data: { selections: [selectedEmbedding] } });
+    renderPanel();
+
+    const supplier = part === "providers" ? "Demo group" : "Demo";
+    expect(await screen.findByText(`Old embedding · ${supplier}`)).toBeInTheDocument();
+    expect(screen.getByText("modelProvider.defaultConfigLoadFailed")).toBeInTheDocument();
+  });
+
+  it("shows the selection and options without a failure warning during readiness checks", async () => {
+    mocks.role = "user";
+    mocks.ready.mockImplementation(() => new Promise(() => {}));
+    mocks.verified.mockImplementation(() => new Promise(() => {}));
+    renderPanel();
+
+    expect(await screen.findByText("Demo model · Demo")).toBeInTheDocument();
+    await readyToSelect("modelProvider.module.ttsTitle");
+    expect(screen.queryByText("modelProvider.capabilityStatusLoadFailed")).not.toBeInTheDocument();
+  });
+
+  it("checks the embedding signature and asks for confirmation before a compatible switch", async () => {
+    const confirm = vi.spyOn(Modal, "confirm").mockImplementation(() => ({ destroy: vi.fn(), update: vi.fn() }));
+    mocks.selections.mockResolvedValue({ data: { selections: [selectedEmbedding] } });
+    mocks.models.mockResolvedValue({ data: { models: [candidateEmbedding] } });
+    mocks.previewEmbeddingSwitch.mockResolvedValue({
+      outcome: "same", can_switch: true, indexed_knowledge_bases: 2,
+      active_model_name: "Old embedding", candidate_model_name: "New embedding",
+      signature_status: "verified", generation: 2,
+    });
+    renderPanel();
+
+    await chooseCandidateEmbedding();
+
+    await waitFor(() => expect(mocks.previewEmbeddingSwitch).toHaveBeenCalledWith({
+      model_id: "new-embedding", source: "own",
+    }));
+    expect(mocks.saveModel).not.toHaveBeenCalled();
+    await waitFor(() => expect(confirm).toHaveBeenCalledWith(expect.objectContaining({
+      content: expect.anything(),
+      okText: "modelProvider.confirmSwitch",
+    })));
+    expect(screen.queryByRole("button", { name: "索引管理" })).not.toBeInTheDocument();
+    const config = confirm.mock.calls[0][0];
+    const footer = config.footer as (buttons: React.ReactNode, extra: never) => React.ReactNode;
+    render(<>{config.content}{footer(<button>Confirm</button>, {} as never)}</>);
+    expect(screen.getByText("modelProvider.embeddingSignatureMatched")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "modelProvider.defaults.openIndexManagement" })).toHaveAttribute("href", "/lib/knowledge/list?index_management=open");
+    await act(async () => { (confirm.mock.calls[0][0].onOk as () => void)(); });
+    await waitFor(() => expect(mocks.saveModel).toHaveBeenCalledOnce());
+  });
+
+  describe("confirmed embedding clear and activation", () => {
+    const title = "modelProvider.module.embeddingTitle";
+    const activatedEmbedding = { ...selectedEmbedding, model_id: "new-embedding", name: "New embedding" };
+    const confirmedRequest = {
+      model_id: "new-embedding", source: "own", generation: 2, confirm_clear_chunks: true,
+    };
+    let confirm: MockInstance<typeof Modal.confirm>;
+    let update: ReturnType<typeof vi.fn>;
+    let success: MockInstance<typeof message.success>;
+    let error: MockInstance<typeof message.error>;
+
+    beforeEach(() => {
+      update = vi.fn();
+      confirm = vi.spyOn(Modal, "confirm").mockImplementation(() => ({ destroy: vi.fn(), update }));
+      success = vi.spyOn(message, "success").mockImplementation(() => Object.assign(() => {}, { then: vi.fn(), promise: Promise.resolve() }));
+      error = vi.spyOn(message, "error").mockImplementation(() => Object.assign(() => {}, { then: vi.fn(), promise: Promise.resolve() }));
+      mocks.selections.mockResolvedValue({ data: { selections: [selectedEmbedding] } });
+      mocks.models.mockResolvedValue({ data: { models: [candidateEmbedding] } });
+      mocks.previewEmbeddingSwitch.mockResolvedValue({
+        outcome: "clear_required", can_switch: false, indexed_knowledge_bases: 2,
+        active_model_name: "Old embedding", candidate_model_name: "New embedding",
+        signature_status: "verified", generation: 2,
+      });
+      mocks.clearEmbeddingChunks.mockResolvedValue({ cleared: true, activated: true });
+    });
+
+    const openConfirmation = async () => {
+      await chooseCandidateEmbedding();
+      await waitFor(() => expect(confirm).toHaveBeenCalledWith(expect.objectContaining({
+        content: expect.anything(),
+        okText: "modelProvider.embeddingClearAndSwitch",
+        okButtonProps: { danger: true },
+      })));
+      expect(mocks.clearEmbeddingChunks).not.toHaveBeenCalled();
+      expect(mocks.saveModel).not.toHaveBeenCalled();
+      return confirm.mock.calls[0][0];
+    };
+
+    it("does not clear or save when cancelled", async () => {
+      renderPanel();
+      const options = await openConfirmation();
+      await act(async () => { (options.onCancel as () => void)(); });
+      expect(mocks.clearEmbeddingChunks).not.toHaveBeenCalled();
+      expect(mocks.saveModel).not.toHaveBeenCalled();
+      expect(group(title)).toHaveTextContent("Old embedding");
+      expect(success).not.toHaveBeenCalled();
+      await readyToSelect(title);
+    });
+
+    it("refreshes authoritative selection after activation without a second PUT or optimistic selection", async () => {
+      renderPanel();
+      const options = await openConfirmation();
+      let resolveRefresh!: (value: unknown) => void;
+      mocks.selections.mockImplementationOnce(() => new Promise(resolve => { resolveRefresh = resolve; }));
+      let completion!: Promise<void>;
+      act(() => { completion = (options.onOk as () => Promise<void>)(); });
+      await waitFor(() => expect(mocks.selections).toHaveBeenCalledTimes(2));
+      expect(mocks.clearEmbeddingChunks).toHaveBeenCalledOnce();
+      expect(mocks.clearEmbeddingChunks).toHaveBeenCalledWith(confirmedRequest);
+      expect(mocks.saveModel).not.toHaveBeenCalled();
+      expect(group(title)).toHaveTextContent("Old embedding");
+      expect(within(group(title)).getByRole("combobox")).toBeDisabled();
+      expect(success).not.toHaveBeenCalled();
+      await act(async () => {
+        resolveRefresh({ data: { selections: [{ ...activatedEmbedding, name: "Authoritative embedding" }] } });
+        await completion;
+      });
+      expect(group(title)).toHaveTextContent("Authoritative embedding");
+      expect(success).toHaveBeenCalledOnce();
+      expect(success).toHaveBeenCalledWith("modelProvider.embeddingSwitchManualParse");
+      expect(error).not.toHaveBeenCalled();
+      expect(mocks.changed).toHaveBeenCalledOnce();
+      expect(mocks.saveModel).not.toHaveBeenCalled();
+      await readyToSelect(title);
+      await act(async () => { await (options.onOk as () => Promise<void>)(); });
+      expect(mocks.clearEmbeddingChunks).toHaveBeenCalledOnce();
+    });
+
+    it.each([
+      ["activation request failed", new Error("activation unavailable")],
+      ["activation false", { cleared: true, activated: false }],
+      ["activation missing", { cleared: true }],
+      ["cleanup incomplete", { cleared: false, activated: true }],
+      ["non-boolean acknowledgement", { cleared: true, activated: "true" }],
+    ])("reports %s and reconciles the old selection without success or PUT", async (_label, result) => {
+      if (result instanceof Error) mocks.clearEmbeddingChunks.mockRejectedValue(result);
+      else mocks.clearEmbeddingChunks.mockResolvedValue(result);
+      renderPanel();
+      const options = await openConfirmation();
+      await act(async () => { await expect((options.onOk as () => Promise<void>)()).rejects.toThrow(); });
+      expect(mocks.selections).toHaveBeenCalledTimes(2);
+      expect(mocks.changed).toHaveBeenCalledOnce();
+      expect(group(title)).toHaveTextContent("Old embedding");
+      expect(mocks.saveModel).not.toHaveBeenCalled();
+      expect(success).not.toHaveBeenCalled();
+      expect(error).toHaveBeenCalledOnce();
+      expect(error).toHaveBeenCalledWith("modelProvider.embeddingCleanupFailed");
+      expect(update).toHaveBeenLastCalledWith(expect.objectContaining({ cancelButtonProps: { disabled: false } }));
+      await act(async () => { (options.onCancel as () => void)(); });
+      await readyToSelect(title);
+    });
+
+    it("reconciles the server selection even when the activation response is lost", async () => {
+      renderPanel();
+      const options = await openConfirmation();
+      mocks.clearEmbeddingChunks.mockRejectedValue(new Error("response lost"));
+      mocks.selections.mockResolvedValue({ data: { selections: [activatedEmbedding] } });
+      await act(async () => { await expect((options.onOk as () => Promise<void>)()).rejects.toThrow(); });
+      expect(group(title)).toHaveTextContent("New embedding");
+      expect(mocks.saveModel).not.toHaveBeenCalled();
+      expect(success).not.toHaveBeenCalled();
+      expect(error).toHaveBeenCalledOnce();
+    });
+
+    it("retries the same confirmed request after activation failure and refreshes on success", async () => {
+      mocks.clearEmbeddingChunks.mockRejectedValueOnce(new Error("activation unavailable"));
+      renderPanel();
+      const options = await openConfirmation();
+      await act(async () => { await expect((options.onOk as () => Promise<void>)()).rejects.toThrow(); });
+      expect(group(title)).toHaveTextContent("Old embedding");
+      mocks.selections.mockResolvedValue({ data: { selections: [activatedEmbedding] } });
+      await act(async () => { await (options.onOk as () => Promise<void>)(); });
+      expect(mocks.clearEmbeddingChunks.mock.calls.map(([input]) => input)).toEqual([confirmedRequest, confirmedRequest]);
+      expect(mocks.previewEmbeddingSwitch).toHaveBeenCalledOnce();
+      expect(mocks.selections).toHaveBeenCalledTimes(3);
+      expect(mocks.saveModel).not.toHaveBeenCalled();
+      expect(group(title)).toHaveTextContent("New embedding");
+      expect(success).toHaveBeenCalledOnce();
+      expect(success).toHaveBeenCalledWith("modelProvider.embeddingSwitchManualParse");
+      await readyToSelect(title);
+    });
+
+    it("ignores duplicate confirmation and stale refreshes while activation is pending", async () => {
+      renderPanel();
+      const options = await openConfirmation();
+      let resolveOldRefresh!: (value: unknown) => void;
+      mocks.selections.mockImplementationOnce(() => new Promise(resolve => { resolveOldRefresh = resolve; }));
+      act(() => window.dispatchEvent(new Event("focus")));
+      await waitFor(() => expect(mocks.selections).toHaveBeenCalledTimes(2));
+      let resolveActivation!: (value: unknown) => void;
+      mocks.clearEmbeddingChunks.mockImplementationOnce(() => new Promise(resolve => { resolveActivation = resolve; }));
+      let completion!: Promise<void>;
+      act(() => { completion = (options.onOk as () => Promise<void>)(); });
+      await waitFor(() => expect(mocks.clearEmbeddingChunks).toHaveBeenCalledOnce());
+      await act(async () => { await (options.onOk as () => Promise<void>)(); });
+      act(() => window.dispatchEvent(new Event("focus")));
+      expect(mocks.clearEmbeddingChunks).toHaveBeenCalledOnce();
+      expect(mocks.selections).toHaveBeenCalledTimes(2);
+      expect(within(group(title)).getByRole("combobox")).toBeDisabled();
+      mocks.selections.mockResolvedValue({ data: { selections: [activatedEmbedding] } });
+      await act(async () => { resolveActivation({ cleared: true, activated: true }); await completion; });
+      await act(async () => { resolveOldRefresh({ data: { selections: [selectedEmbedding] } }); });
+      expect(group(title)).toHaveTextContent("New embedding");
+      expect(mocks.saveModel).not.toHaveBeenCalled();
+    });
+
+    it("does not refresh, notify or save when activation finishes after unmount", async () => {
+      const panel = renderPanel();
+      const options = await openConfirmation();
+      let resolveActivation!: (value: unknown) => void;
+      mocks.clearEmbeddingChunks.mockImplementationOnce(() => new Promise(resolve => { resolveActivation = resolve; }));
+      let completion!: Promise<void>;
+      act(() => { completion = (options.onOk as () => Promise<void>)(); });
+      panel.unmount();
+      await act(async () => { resolveActivation({ cleared: true, activated: true }); await completion; });
+      expect(mocks.selections).toHaveBeenCalledOnce();
+      expect(mocks.saveModel).not.toHaveBeenCalled();
+      expect(mocks.changed).not.toHaveBeenCalled();
+      expect(success).not.toHaveBeenCalled();
+      expect(error).not.toHaveBeenCalled();
+    });
+
+    it("ignores authoritative refresh completion after unmount", async () => {
+      const panel = renderPanel();
+      const options = await openConfirmation();
+      let resolveRefresh!: (value: unknown) => void;
+      mocks.selections.mockImplementationOnce(() => new Promise(resolve => { resolveRefresh = resolve; }));
+      let completion!: Promise<void>;
+      act(() => { completion = (options.onOk as () => Promise<void>)(); });
+      await waitFor(() => expect(mocks.selections).toHaveBeenCalledTimes(2));
+      panel.unmount();
+      await act(async () => { resolveRefresh({ data: { selections: [activatedEmbedding] } }); await completion; });
+      expect(mocks.saveModel).not.toHaveBeenCalled();
+      expect(mocks.changed).not.toHaveBeenCalled();
+      expect(success).not.toHaveBeenCalled();
+      expect(error).not.toHaveBeenCalled();
+    });
+
+    it("shows a recoverable refresh error rather than optimistically selecting after activation", async () => {
+      renderPanel();
+      const options = await openConfirmation();
+      mocks.selections.mockRejectedValueOnce(new Error("refresh unavailable"));
+      await act(async () => { await expect((options.onOk as () => Promise<void>)()).rejects.toThrow(); });
+      expect(await screen.findByRole("alert")).toHaveTextContent("modelProvider.defaultConfigLoadFailed");
+      expect(success).not.toHaveBeenCalled();
+      expect(error).toHaveBeenCalledOnce();
+      expect(mocks.saveModel).not.toHaveBeenCalled();
+      await act(async () => { (options.onCancel as () => void)(); });
+      mocks.selections.mockResolvedValue({ data: { selections: [activatedEmbedding] } });
+      fireEvent.click(screen.getByRole("button", { name: "common.retry" }));
+      await waitFor(() => expect(group(title)).toHaveTextContent("New embedding"));
+    });
+  });
+
+  it("keeps the old embedding when the candidate signature cannot be checked", async () => {
+    const warning = vi.spyOn(Modal, "warning").mockImplementation(() => ({ destroy: vi.fn(), update: vi.fn() }));
+    mocks.selections.mockResolvedValue({ data: { selections: [selectedEmbedding] } });
+    mocks.models.mockResolvedValue({ data: { models: [candidateEmbedding] } });
+    mocks.previewEmbeddingSwitch.mockResolvedValue({
+      outcome: "probe_failed", can_switch: false, indexed_knowledge_bases: 2,
+      active_model_name: "Old embedding", candidate_model_name: "New embedding",
+      signature_status: "unknown", generation: 2,
+    });
+    renderPanel();
+
+    await chooseCandidateEmbedding();
+
+    await waitFor(() => expect(warning).toHaveBeenCalledWith(expect.objectContaining({
+      content: expect.anything(),
+    })));
+    expect(mocks.saveModel).not.toHaveBeenCalled();
+  });
+
+  it("honors a server refusal even when the preview reports a matching signature", async () => {
+    const warning = vi.spyOn(Modal, "warning").mockImplementation(() => ({ destroy: vi.fn(), update: vi.fn() }));
+    mocks.selections.mockResolvedValue({ data: { selections: [selectedEmbedding] } });
+    mocks.models.mockResolvedValue({ data: { models: [candidateEmbedding] } });
+    mocks.previewEmbeddingSwitch.mockResolvedValue({
+      outcome: "same", can_switch: false, indexed_knowledge_bases: 2,
+      active_model_name: "Old embedding", candidate_model_name: "New embedding",
+      signature_status: "verified", generation: 2,
+    });
+    renderPanel();
+
+    await chooseCandidateEmbedding();
+
+    await waitFor(() => expect(warning).toHaveBeenCalledWith(expect.objectContaining({
+      content: expect.anything(),
+    })));
+    expect(mocks.saveModel).not.toHaveBeenCalled();
+  });
+
+  it("checks the candidate before selecting an embedding when no index exists", async () => {
+    mocks.selections.mockResolvedValue({ data: { selections: [] } });
+    mocks.models.mockResolvedValue({ data: { models: [candidateEmbedding] } });
+    renderPanel();
+
+    await chooseCandidateEmbedding();
+
+    await waitFor(() => expect(mocks.previewEmbeddingSwitch).toHaveBeenCalledWith({
+      model_id: "new-embedding", source: "own",
+    }));
+    await waitFor(() => expect(mocks.saveModel).toHaveBeenCalledOnce());
+  });
+
+  it("fails closed when the embedding switch preview request fails", async () => {
+    mocks.selections.mockResolvedValue({ data: { selections: [selectedEmbedding] } });
+    mocks.models.mockResolvedValue({ data: { models: [candidateEmbedding] } });
+    mocks.previewEmbeddingSwitch.mockRejectedValue(new Error("probe unavailable"));
+    renderPanel();
+
+    await chooseCandidateEmbedding();
+
+    await expectLocalizedWarning("modelProvider.embeddingSignatureCheckFailed");
+    expect(mocks.saveModel).not.toHaveBeenCalled();
+    await waitFor(() => expect(within(group("modelProvider.module.embeddingTitle")).getByRole("combobox")).toBeEnabled());
   });
 
   it("shows the four tool services in the requested order and opens their configuration", async () => {
@@ -154,7 +883,7 @@ describe("default capability configuration groups", () => {
     const retrieval = await screen.findByRole("region", { name: "modelProvider.defaults.retrievalTitle" });
     const rows = within(retrieval).getAllByRole("group");
     expect(rows.slice(0, 4).map((row) => row.getAttribute("aria-label")))
-      .toEqual(["搜索引擎", "学术搜索引擎", "文档解析（OCR）", "机器翻译"]);
+      .toEqual(["modelProvider.defaults.services.search", "modelProvider.defaults.services.academic", "modelProvider.defaults.services.parsing", "modelProvider.defaults.services.translation"]);
     for (const [index, category] of ["search", "academic", "parsing", "translation"].entries()) {
       fireEvent.click(within(rows[index]).getByRole("button", { name: "modelProvider.configureCapability" }));
       expect(configureTool).toHaveBeenLastCalledWith(category);
@@ -209,6 +938,34 @@ describe("default capability configuration groups", () => {
     expect(mocks.saveModel.mock.calls[0][0].setSelectedModelsOpenAPIRequest.selections).toEqual(expect.arrayContaining([
       expect.objectContaining({ model_key: "llm", model_id: "other-model" }),
     ]));
+  });
+
+  it("loads a configured model list on first open and reuses it when reopened", async () => {
+    renderPanel();
+    await screen.findByRole("region", { name: "modelProvider.defaults.basicTitle" });
+    const select = await readyToSelect("modelProvider.module.llmChatTitle");
+    const llmRequests = () => mocks.models.mock.calls.filter(([params]) => params.modelType === "llm");
+    expect(llmRequests()).toHaveLength(0);
+
+    fireEvent.mouseDown(select);
+    await waitFor(() => expect(llmRequests()).toHaveLength(1));
+    await screen.findByText("Demo model", { selector: "strong" });
+    fireEvent.mouseDown(document.body);
+    await waitFor(() => expect(select).toHaveAttribute("aria-expanded", "false"));
+    fireEvent.mouseDown(select);
+    await waitFor(() => expect(select).toHaveAttribute("aria-expanded", "true"));
+    expect(llmRequests()).toHaveLength(1);
+  });
+
+  it("does not refetch a model list that was loaded before opening the selector", async () => {
+    renderPanel();
+    await screen.findByRole("region", { name: "modelProvider.defaults.basicTitle" });
+    const select = await readyToSelect("modelProvider.module.ttsTitle");
+    const ttsRequests = () => mocks.models.mock.calls.filter(([params]) => params.modelType === "tts");
+    await waitFor(() => expect(ttsRequests()).toHaveLength(1));
+
+    fireEvent.mouseDown(select);
+    expect(ttsRequests()).toHaveLength(1);
   });
 
   it("reveals collapsed supplier models when searching", async () => {
@@ -472,7 +1229,7 @@ describe("default capability configuration groups", () => {
       readiness().mockImplementationOnce(() => new Promise(resolve => { resolveReadiness = resolve; }));
       fireEvent.mouseDown(within(group(title)).getByLabelText("close-circle"));
       await waitFor(() => expect(readiness()).toHaveBeenCalledTimes(calls + 1));
-      expect(within(group(title)).getByRole("combobox")).toBeDisabled();
+      await readyToSelect(title);
       expect(within(group(title)).queryByLabelText("modelProvider.readyStatusAria")).not.toBeInTheDocument();
       expect(within(group(title)).queryByText(oldName)).not.toBeInTheDocument();
       await act(async () => {
@@ -629,10 +1386,14 @@ describe("default capability configuration groups", () => {
     mocks.models.mockResolvedValue({ data: { models: [{ ...availableModel, availability: "unavailable" }] } });
     mocks.services.mockResolvedValue({ data: { selections: [] } });
     act(() => window.dispatchEvent(new Event("focus")));
-    await waitFor(() => expect(group("modelProvider.module.llmChatTitle")).toHaveClass("is-pending"));
+    await waitFor(() => expect(within(group("modelProvider.module.llmChatTitle")).getByRole("alert"))
+      .toHaveTextContent("modelProvider.modelNotReadyTip"));
+    expect(group("modelProvider.module.llmChatTitle")).not.toHaveClass("is-pending");
+    expect(within(group("modelProvider.module.llmChatTitle")).getByText("Demo model · Demo")).toBeInTheDocument();
     revealAllCategories();
     expect(screen.getAllByRole("group")).toHaveLength(12);
-    expect(screen.getAllByRole("group").every((row) => row.classList.contains("is-pending"))).toBe(true);
+    expect(screen.getAllByRole("group").filter((row) => !row.classList.contains("is-pending")))
+      .toEqual([group("modelProvider.module.llmChatTitle")]);
   });
 
   it("preserves shared capability readiness and administrator-only configuration", async () => {
@@ -670,6 +1431,7 @@ describe("default capability configuration groups", () => {
     renderPanel();
     expect(await screen.findByRole("alert")).toHaveTextContent("modelProvider.defaultConfigLoadFailed");
     expect(screen.queryByRole("region", { name: "modelProvider.defaults.basicTitle" })).not.toBeInTheDocument();
+    expect(within(group("modelProvider.module.cloudParsingServiceTitle")).getByText(/MinerU/)).toBeInTheDocument();
     mocks.selections.mockResolvedValue({ data: { selections: [selectedLlm] } });
     fireEvent.click(screen.getByRole("button", { name: "common.retry" }));
     expect(await screen.findByRole("region", { name: "modelProvider.defaults.basicTitle" })).toBeInTheDocument();
@@ -693,7 +1455,7 @@ describe("default capability configuration groups", () => {
     const retry = within(card).getByRole("button", { name: "common.retry" });
     fireEvent.click(retry);
     fireEvent.click(retry);
-    expect(retry).toBeDisabled();
+    expect(within(card).queryByRole("alert")).not.toBeInTheDocument();
     expect(mocks.ready).toHaveBeenCalledTimes(calls + 1);
     expect(mocks.ready).toHaveBeenLastCalledWith(expect.objectContaining({ params: { model_type: "tts" } }));
     await act(async () => { resolveRetry({ data: { ready: true, source: "shared", model_name: "Shared speech" } }); });

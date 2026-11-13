@@ -14,6 +14,7 @@ from lazymind.model_config import _role_entry, load_model_config
 
 from .contracts import MissingMaterials, validate_input
 from .material_bindings import MaterialBindings
+from .publication import render_references
 from .runtime_events import report_progress
 from .prompts.literature_review_prompt import (
     INPUT_PROMPT,
@@ -147,16 +148,14 @@ def _render(inputs: dict, notes: list[dict], background: list[dict]) -> str:
     }))
     document = generate_markdown(AutoModel(model='llm'), prompt, bindings=bindings)
     # The model writes prose; Python owns reference membership and display numbering.
-    heading = '## References' if re.search(r'(?m)^## References\s*$', document) else '## 参考文献'
+    language = 'en' if re.search(r'(?m)^## References\s*$', document) else 'zh'
     body = re.split(r'(?m)^## (?:参考文献|References)\s*$', document, maxsplit=1)[0].rstrip()
     markers = {'[' + paper['id'] + ']': f'[\\[{number}\\]](#paper-ref-{paper["id"]})'
                for number, paper in enumerate(notes, 1)}
     markers.update({'[' + paper['id'] + ']': '' for paper in background})
     if markers:
         body = re.sub('|'.join(re.escape(marker) for marker in markers), lambda match: markers[match[0]], body)
-    references = '\n'.join(f'{number}. <a id="paper-ref-{paper["id"]}"></a> {paper["citation"]}'
-                           for number, paper in enumerate(notes, 1))
-    return body + '\n\n' + heading + '\n\n' + references
+    return body + '\n\n' + render_references(notes, paper_language=language)
 
 
 def run(inputs: dict) -> dict:

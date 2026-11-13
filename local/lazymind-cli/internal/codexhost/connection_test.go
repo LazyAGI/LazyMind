@@ -3,13 +3,12 @@ package codexhost
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
-
-	"lazymind/agentconnector/internal/integrationstate"
 )
 
 // These tests observe only simulated OS state. They never launch, quit or
@@ -53,7 +52,7 @@ func TestCurrentConnectionNeedsNoManagedStartupEntry(t *testing.T) {
 }
 
 func TestConnectionChecksCurrentProcessEndpointOwnerAndNativeCapability(t *testing.T) {
-	for _, scenario := range []string{"closed", "no-cdp", "foreign", "bad-endpoint", "not-ready", "probe-failed", "changed-owner", "disabled", "missing-config", "uninspectable"} {
+	for _, scenario := range []string{"closed", "no-cdp", "foreign", "bad-endpoint", "not-ready", "probe-failed", "changed-owner", "missing-config", "uninspectable"} {
 		t.Run(scenario, func(t *testing.T) {
 			home := connectionFixture(t)
 			want := "CODEX_CONNECTION_REQUIRED"
@@ -80,11 +79,6 @@ func TestConnectionChecksCurrentProcessEndpointOwnerAndNativeCapability(t *testi
 					startupListenerMatches = func(context.Context, string, int) bool { return false }
 					return true, nil
 				}
-			case "disabled":
-				if err := integrationstate.Set(home, "codex", false); err != nil {
-					t.Fatal(err)
-				}
-				want = "CODEX_INTEGRATION_DISABLED"
 			case "missing-config":
 				if err := os.Remove(configPath(home)); err != nil {
 					t.Fatal(err)
@@ -145,6 +139,7 @@ func TestConnectionWaitHasItsOwnDeadlineAndSpacesFailedProbes(t *testing.T) {
 
 func TestInstallationStartupDoesNotRequireNativeSessionControl(t *testing.T) {
 	home := connectionFixture(t)
+	prepareDesktopLaunch = func(context.Context, string, int) error { return nil }
 	calls := 0
 	controlProbe = func(context.Context, string, Config) (bool, error) { calls++; return false, nil }
 	if err := PrepareDesktopForInstallation(context.Background(), home); err != nil {
@@ -155,6 +150,44 @@ func TestInstallationStartupDoesNotRequireNativeSessionControl(t *testing.T) {
 	}
 	if err := CheckConnection(context.Background(), home); err == nil || !strings.Contains(err.Error(), "CODEX_CONTROL_UNAVAILABLE") {
 		t.Fatalf("Workflow execution bypassed native readiness: %v", err)
+	}
+}
+
+func TestInstallationReloadsAnAlreadyReachableDesktop(t *testing.T) {
+	home := connectionFixture(t)
+	launches := 0
+	prepareDesktopLaunch = func(context.Context, string, int) error { launches++; return nil }
+	for range 2 {
+		if err := PrepareDesktopForInstallation(context.Background(), home); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if launches != 2 {
+		t.Fatalf("explicit connect and reconnect must both reload configuration; launches=%d", launches)
+	}
+}
+
+func TestInstallationReloadsOwnedPortWithoutChatWindow(t *testing.T) {
+	for _, owned := range []bool{true, false} {
+		t.Run(fmt.Sprint(owned), func(t *testing.T) {
+			home := connectionFixture(t)
+			launched := false
+			startupDesktopReady = func(context.Context, int) (bool, error) {
+				if !launched {
+					return false, setupError("control_window_unavailable", errors.New("no chat window"))
+				}
+				return true, nil
+			}
+			startupListenerMatches = func(context.Context, string, int) bool { return owned }
+			prepareDesktopLaunch = func(context.Context, string, int) error { launched = true; return nil }
+			err := PrepareDesktopForInstallation(context.Background(), home)
+			if owned && (err != nil || !launched) {
+				t.Fatalf("did not restore Codex's chat window: %v", err)
+			}
+			if !owned && (launched || SetupIssue(err) != "control_port_conflict") {
+				t.Fatalf("restarted against foreign listener: %v", err)
+			}
+		})
 	}
 }
 

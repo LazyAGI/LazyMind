@@ -39,6 +39,7 @@ func TestChatOnlySuppliersRejectEmbeddingAtEveryEntry(t *testing.T) {
 			}
 			req := httptest.NewRequest(http.MethodPost, "/selected", strings.NewReader(`{"selections":[{"model_key":"embed_main","model_id":"old-vector"}]}`))
 			req.Header.Set("X-User-Id", parent.CreateUserID)
+			req.Header.Set("X-User-Role", "admin")
 			rec = httptest.NewRecorder()
 			SetSelectedModels(rec, req)
 			if rec.Code != http.StatusBadRequest {

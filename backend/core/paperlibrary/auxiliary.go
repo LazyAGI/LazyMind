@@ -348,3 +348,48 @@ func mergeHistoricalValues(old, next any) any {
 	}
 	return existing
 }
+
+// RemovePaperExtras drops live extension records for deleted papers. The
+// migration archive remains untouched, so its history cannot be replayed.
+func RemovePaperExtras(ctx context.Context, tx *gorm.DB, dataset string, ids []string) error {
+	var state orm.PaperLibraryLegacyState
+	err := tx.WithContext(ctx).Clauses(clause.Locking{Strength: "UPDATE"}).Where("dataset_id = ?", dataset).Take(&state).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	var graph map[string]any
+	if err = decodeAuxiliaryJSON(state.ExtrasJSON, &graph); err != nil {
+		return err
+	}
+	removed := make(map[string]bool, len(ids))
+	for _, id := range ids {
+		removed[id] = true
+	}
+	for _, key := range []string{"papers", "hiddenArxivPapers", "attachments", "notes", "annotations", "relations"} {
+		items, _ := graph[key].([]any)
+		if items == nil {
+			continue
+		}
+		kept := make([]any, 0, len(items))
+		for _, item := range items {
+			m, _ := item.(map[string]any)
+			id, _ := m["id"].(string)
+			paperID, _ := m["paperId"].(string)
+			from, _ := m["fromPaperId"].(string)
+			to, _ := m["toPaperId"].(string)
+			if ((key == "papers" || key == "hiddenArxivPapers") && removed[id]) || removed[paperID] || removed[from] || removed[to] {
+				continue
+			}
+			kept = append(kept, item)
+		}
+		graph[key] = kept
+	}
+	raw, err := json.Marshal(graph)
+	if err != nil {
+		return err
+	}
+	return tx.Model(&state).Updates(map[string]any{"extras_json": raw, "updated_at": time.Now().UTC()}).Error
+}

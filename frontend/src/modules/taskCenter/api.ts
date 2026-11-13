@@ -89,10 +89,12 @@ export interface TaskListResponse {
     waiting: number;
     waiting_inputs: number;
     running: number;
-    succeeded: number;
-    failed: number;
-    canceled: number;
     paused?: number;
+    succeeded: number;
+    completed?: number;
+    failed: number;
+    interrupted?: number;
+    canceled: number;
   };
 }
 
@@ -112,6 +114,25 @@ export interface CreateScheduleRequest {
   file_ids?: string[];
   group_id?: string;
   dependencies?: ScheduleDependency[];
+}
+
+export type WorkbenchCategory = 'attention' | 'running' | 'paused' | 'failed' | 'recent' | 'canceled';
+
+export interface WorkbenchResponse {
+  groups: Record<WorkbenchCategory, { items: Task[]; total: number; page: number }>;
+  page_size: number;
+}
+
+export async function getWorkbench(params: {
+  keyword?: string;
+  task_type?: string;
+  category?: WorkbenchCategory;
+  page?: number;
+}): Promise<WorkbenchResponse> {
+  const response = await defaultClient.apiCoreTaskCenterWorkbenchGet({
+    taskType: params.task_type, keyword: params.keyword, category: params.category, page: params.page,
+  });
+  return response.data as unknown as WorkbenchResponse;
 }
 
 export async function listTasks(params: {

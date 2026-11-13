@@ -16,17 +16,17 @@ test("repository history injection metadata points to the verified ModelScope as
   const config = JSON.parse(readFileSync(repositoryConfig, "utf8"));
   assert.equal(
     config.url,
-    "https://modelscope.cn/datasets/CarlosShaoting/lazymind-cst/resolve/master/lazymind-history-injection-five-samples-20260829.zip",
+    "https://modelscope.cn/datasets/CarlosShaoting/lazymind-cst/resolve/master/lazymind-history-injection-five-samples-20261112-cdff88d0ca65.zip",
   );
-  assert.equal(config.sha256, "cbe7774ff2b64ceb7083fa0edfa62d2e0ed59d283c37ade6f210b87267979e9f");
-  assert.equal(config.size, 74408904);
+  assert.equal(config.sha256, "cdff88d0ca65867842ea12d71f08569ab1f8f37b5512ecb06c505657d0d06c31");
+  assert.equal(config.size, 52060542);
   assert.equal(config.runtimeFileName, "history-injection.zip");
   assert.deepEqual(config.conversationIds, [
-    "e97d6394-5b7c-4bab-8757-3f04c9aefdde",
-    "a3b1d442-7a49-4225-a806-13fc162f7745",
-    "bcea6551-d6a2-4dec-83bb-1ccf9fa11f51",
-    "e3096625-c245-45a0-bc32-ce203f3c94f3",
-    "3ecbcfdc-2e2a-4c38-ae75-060ba6bd02e4",
+    "5bea5b4c-081d-5f9a-9017-b53f674fcc03",
+    "ec375a1f-d6df-55ea-8d61-dc2dfc6494fd",
+    "bcb3f7d6-9ec8-5dd6-a16b-683e31254f97",
+    "fcb148c3-c22a-5b4a-aaa2-5aabfac4a339",
+    "3f26e747-50cd-5736-8d73-4befce120ff3",
   ]);
 });
 

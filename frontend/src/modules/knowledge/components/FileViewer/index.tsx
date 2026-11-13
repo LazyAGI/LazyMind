@@ -1,3 +1,4 @@
+import type { PdfScrollSyncEndpoint } from "@/components/ui/pdfScrollSync";
 import {
   forwardRef,
   useCallback,
@@ -51,10 +52,14 @@ export interface FileViewerRef {
 
 interface FileViewerProps {
   paperMode?: boolean;
+  pdfScrollSync?: PdfScrollSyncEndpoint;
+  pdfToolbarMode?: "full" | "navigation";
+  pdfSelectableText?: boolean;
   onPdfNoteSelection?: (selection: PdfTextSelection, note: string, color: PdfNoteColor, id: string) => Promise<void>;
   pdfNoteHighlights?: PdfNoteHighlight[];
+  onPdfNoteHighlightClick?: (id:string) => void;
   pdfHeaderStart?: ReactNode;
-  pdfHeaderEnd?: ReactNode;
+  pdfHeaderEnd?: ReactNode | ((tools: ReactNode) => ReactNode);
   onPdfStudyOpenChange?: (open: boolean) => void;
   onPdfIRDocumentChange?: (document: import("@/modules/knowledge/api/pdfIR").PdfIRDocument | undefined) => void;
   onPdfOutlineChange?: (outline: import("@/modules/knowledge/api/pdfOutline").PdfNativeOutlineItem[]) => void;
@@ -410,11 +415,13 @@ const FileViewer = forwardRef<FileViewerRef, FileViewerProps>((props, ref) => {
       case "pdf":
         return pdfPreviewData ? (
           <RenderPdf
+            pdfScrollSync={props.pdfScrollSync}
             paperMode={props.paperMode}
+            pdfToolbarMode={props.pdfToolbarMode}
+            pdfSelectableText={props.pdfSelectableText}
             pdfHeaderStart={props.pdfHeaderStart}
             pdfHeaderEnd={props.pdfHeaderEnd}
             key={`${props.pdfIRTarget?.dataset || ""}:${props.pdfIRTarget?.document || ""}:${props.file || ""}`}
-            paperTitle={props.fileName.replace(/\.pdf$/i, "")}
             onStudyOpenChange={props.onPdfStudyOpenChange}
             pdfIRTarget={props.pdfIRTarget}
             onPdfIRDocumentChange={props.onPdfIRDocumentChange}
@@ -423,6 +430,7 @@ const FileViewer = forwardRef<FileViewerRef, FileViewerProps>((props, ref) => {
             pdfNavigateToPage={props.pdfNavigateToPage}
             pdfNavigateToPosition={props.pdfNavigateToPosition}
             savedNoteHighlights={props.pdfNoteHighlights}
+            onNoteHighlightClick={props.onPdfNoteHighlightClick}
             pdfSourceHash={pdfFingerprint?.data === fileData ? pdfFingerprint?.hash : undefined}
             className="scroll-container"
             style={{
@@ -443,8 +451,6 @@ const FileViewer = forwardRef<FileViewerRef, FileViewerProps>((props, ref) => {
             translateSelectionLabel={t("knowledge.translateSelection")}
             translateSelectionDisabled={!props.translationConfigured}
             translateSelectionDisabledTip={t("knowledge.translationConfigureTip")}
-            translateSelectionConfigureLabel={t("knowledge.translationConfigureAction")}
-            translateSelectionConfigureUrl="/settings?section=model_defaults&service=translation"
             learningSelectionActions={props.learningSelectionActions}
             onLearningSelection={props.onLearningSelection}
             onPdfKindDetected={props.onPdfKindDetected}
@@ -539,6 +545,9 @@ const FileViewer = forwardRef<FileViewerRef, FileViewerProps>((props, ref) => {
     pdfPreviewData,
     pdfFingerprint,
     props.pdfIRTarget,
+    props.pdfScrollSync,
+    props.pdfToolbarMode,
+    props.pdfSelectableText,
     props.paperMode,
     props.onPdfIRDocumentChange,
     props.onPdfOutlineChange,
@@ -546,6 +555,7 @@ const FileViewer = forwardRef<FileViewerRef, FileViewerProps>((props, ref) => {
     props.pdfNavigateToPage,
     props.pdfNavigateToPosition,
     props.pdfNoteHighlights,
+    props.onPdfNoteHighlightClick,
     props.pdfHeaderStart,
     props.pdfHeaderEnd,
     props.file,
@@ -606,7 +616,7 @@ const FileViewer = forwardRef<FileViewerRef, FileViewerProps>((props, ref) => {
         <nav className="pdf-reader-modebar pdf-reader-header" aria-label={t("pdfReader.reading")}>
           <div className="pdf-reader-header-start">{props.pdfHeaderStart}</div>
           <div />
-          <div className="pdf-reader-header-end">{props.pdfHeaderEnd}</div>
+          <div className="pdf-reader-header-end">{typeof props.pdfHeaderEnd === "function" ? props.pdfHeaderEnd(null) : props.pdfHeaderEnd}</div>
         </nav>
       </div>}
       {props.paragraphSelectionMode?<div className="file-viewer-paragraph-selection-panel"><div className="file-viewer-paragraph-selection-bar"><span>{t("learning.paragraphSelectionInstruction")}</span><strong>{t("learning.paragraphSelectionCount",{count:paragraphSelections.length})}</strong>{paragraphSelections.length?<button type="button" onClick={()=>setParagraphSelections([])}>{t("learning.clearParagraphSelections")}</button>:null}<button type="button" onClick={props.onParagraphSelectionCancel}>{t("learning.exitParagraphSelection")}</button><button type="button" disabled={!paragraphSelections.length} onClick={()=>props.onParagraphSelectionConfirm?.(paragraphSelections)}>{t("common.confirm")}</button></div>{paragraphSelections.length?<div className="file-viewer-paragraph-selection-list">{paragraphSelections.map((item,index)=><div key={`${item.page}-${item.text}-${index}`} title={item.text}><span>{index+1}. {item.text}</span><button type="button" aria-label={t("learning.removeSelectedParagraph",{index:index+1})} onClick={()=>setParagraphSelections(current=>current.filter((_,currentIndex)=>currentIndex!==index))}>×</button></div>)}</div>:null}</div>:null}

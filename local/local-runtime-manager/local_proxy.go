@@ -64,8 +64,8 @@ func (m *LocalProxyManager) Down(ctx context.Context, cfg RuntimeConfig, paths R
 	if err := paths.EnsureAllDirs(); err != nil {
 		return err
 	}
-	if runtime.GOOS == "windows" {
-		records, err := scanLocalRuntimeProcesses(paths)
+	if runtime.GOOS == "windows" || cfg.Profile == "desktop" {
+		records, err := discoverLocalRuntimeProcessesChecked(paths, cfg, scanLocalRuntimeProcesses)
 		if err != nil {
 			return fmt.Errorf("scan local-proxy processes: %w", err)
 		}

@@ -445,6 +445,30 @@ func AddLibraryNote(w http.ResponseWriter, r *http.Request) {
 	replyLibraryNoteChanges(w, r, dataset, id, err)
 }
 
+func DeleteLibraryNote(w http.ResponseWriter, r *http.Request) {
+	dataset, _, ok := libraryAccess(w, r, true)
+	if !ok {
+		return
+	}
+	paperID, noteID := mux.Vars(r)["library_paper_id"], mux.Vars(r)["note_id"]
+	if !paperlibrary.ValidID(paperID) || !paperlibrary.ValidID(noteID) {
+		replyError(w, http.StatusBadRequest, "INVALID_REQUEST", "笔记标识无效")
+		return
+	}
+	err := store.DB().WithContext(r.Context()).Transaction(func(tx *gorm.DB) error {
+		var entry orm.PaperLibraryEntry
+		if e := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("dataset_id=? AND id=? AND removed_at IS NULL", dataset, paperID).Take(&entry).Error; e != nil {
+			return e
+		}
+		var note orm.PaperLibraryNote
+		if e := tx.Where("dataset_id=? AND paper_id=? AND id=?", dataset, paperID, noteID).Take(&note).Error; e != nil {
+			return e
+		}
+		return tx.Delete(&note).Error
+	})
+	replyLibraryNoteChanges(w, r, dataset, paperID, err)
+}
+
 func validLibraryNoteSource(source *paperlibrary.NoteSource) bool {
 	if source == nil {
 		return true

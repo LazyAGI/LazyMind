@@ -191,7 +191,7 @@ func UpdateProcessingLevel(w http.ResponseWriter, r *http.Request) {
 		replyResourceError(w, err)
 		return
 	}
-	common.ReplyJSON(w, map[string]any{"dataset_id": datasetID, "processing_level": ds.ProcessingLevel, "processing_revision": ds.ProcessingRevision, "transition_status": ds.TransitionStatus, "capabilities": capabilitiesForProcessingLevel(ds.ProcessingLevel)})
+	common.ReplyJSON(w, map[string]any{"dataset_id": datasetID, "processing_level": ds.ProcessingLevel, "processing_revision": ds.ProcessingRevision, "transition_status": ds.TransitionStatus, "capabilities": capabilitiesWithRetainedArtifacts(r.Context(), store.DB(), *ds)})
 }
 
 // Storage-only datasets may have been created before the optional RAG service
@@ -279,7 +279,7 @@ func GetProcessingStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	level := effectiveProcessingLevel(ds.ProcessingLevel)
-	common.ReplyJSON(w, map[string]any{"dataset_id": datasetID, "processing_level": level, "processing_revision": ds.ProcessingRevision, "transition_status": effectiveTransitionStatus(ds.TransitionStatus), "capabilities": capabilitiesForProcessingLevel(level), "coverage": coverage})
+	common.ReplyJSON(w, map[string]any{"dataset_id": datasetID, "processing_level": level, "processing_revision": ds.ProcessingRevision, "transition_status": effectiveTransitionStatus(ds.TransitionStatus), "capabilities": capabilitiesWithRetainedArtifacts(r.Context(), store.DB(), *ds), "coverage": coverage})
 }
 
 // Reconcile only tasks with a recorded submission level. A successful reader
@@ -328,19 +328,36 @@ func syncProcessingTaskStates(r *http.Request, datasetID string) {
 		}
 		if ext.ProcessingLevel == ProcessingLevelIndexed {
 			updates["index_status"] = status
+			if status == "succeeded" {
+				updates["index_error_code"] = ""
+				updates["index_error_message"] = ""
+			}
 		}
 		var base orm.DocumentProcessingState
 		if store.DB().WithContext(r.Context()).Where("dataset_id = ? AND document_id = ?", datasetID, task.DocID).
-			Take(&base).Error == nil && base.ParseArtifactRef != "" {
-			if ext.ProcessingLevel == ProcessingLevelIndexed && base.IndexArtifactRef != "core-task:"+task.ID {
-				continue // A previous generation must not complete a newly prepared artifact.
+			Take(&base).Error == nil && (base.ParseArtifactRef != "" || base.EmbeddingVersion == embeddingVersionRebuildRequired || base.EmbeddingVersion == embeddingVersionReembedPending || base.EmbeddingVersion == embeddingVersionReembedManual) {
+			if base.EmbeddingVersion == embeddingVersionReembedManual || base.EmbeddingVersion == embeddingVersionRebuildRequired {
+				if base.IndexArtifactRef != "core-task:"+task.ID {
+					continue
+				}
+				if base.ParseStatus == "succeeded" && ext.ProcessingLevel == ProcessingLevelIndexed {
+					delete(updates, "parse_status")
+					delete(updates, "chunk_status")
+				}
+				if status == "succeeded" && (base.EmbeddingVersion != embeddingVersionRebuildRequired || ext.ProcessingLevel == ProcessingLevelIndexed) {
+					updates["embedding_version"] = ""
+				}
+			} else {
+				if ext.ProcessingLevel == ProcessingLevelIndexed && base.IndexArtifactRef != "core-task:"+task.ID {
+					continue // A previous generation must not complete a newly prepared artifact.
+				}
+				// A vector failure must not erase independently usable native artifacts.
+				delete(updates, "parse_status")
+				delete(updates, "chunk_status")
 			}
-			// A vector failure must not erase independently usable native artifacts.
-			delete(updates, "parse_status")
-			delete(updates, "chunk_status")
 		}
 		query := store.DB().WithContext(r.Context()).Model(&orm.DocumentProcessingState{}).
-			Where("dataset_id = ? AND document_id = ?", datasetID, task.DocID)
+			Where("dataset_id = ? AND document_id = ? AND revision = ?", datasetID, task.DocID, base.Revision)
 		if ext.ProcessingLevel == ProcessingLevelIndexed {
 			query = query.Where("index_status <> ?", status)
 		}

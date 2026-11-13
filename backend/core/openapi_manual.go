@@ -616,6 +616,9 @@ func manualSchemas() map[string]any {
 			prop("status", strSchema()),
 			prop("error_message", strSchema()),
 		),
+		"ProcessingTaskStage":        obj(prop("name", strSchema()), prop("status", strSchema())),
+		"ProcessingTaskItem":         obj(prop("id", strSchema()), prop("dataset_id", strSchema()), prop("dataset_name", strSchema()), prop("document_id", strSchema()), prop("document_name", strSchema()), prop("level", strSchema()), prop("status", strSchema()), prop("created_at", strSchema()), prop("error", strSchema()), prop("stages", array(refSchema("ProcessingTaskStage")))),
+		"ProcessingTasksResponse":    obj(prop("items", array(refSchema("ProcessingTaskItem"))), prop("total", intSchema()), prop("page", intSchema()), prop("page_size", intSchema()), prop("unfinished_count", intSchema()), prop("counts", map[string]any{"type": "object", "additionalProperties": intSchema()})),
 		"ListTasksResponse":          obj(prop("tasks", array(refSchema("TaskResponse"))), prop("total_size", intSchema()), prop("next_page_token", strSchema())),
 		"PromptRequest":              objReq([]string{"display_name", "content"}, prop("display_name", strSchema()), prop("content", strSchema()), prop("category", strSchema())),
 		"PromptPatchRequest":         obj(prop("display_name", strSchema()), prop("content", strSchema()), prop("category", strSchema())),
@@ -721,6 +724,14 @@ func manualSchemas() map[string]any {
 		"TaskRemovalPreview": objReq([]string{"task_id", "task_count", "conversation_count", "active_task_count", "impact_version"}, prop("task_id", strSchema()), prop("task_count", intSchema()), prop("conversation_count", intSchema()), prop("active_task_count", intSchema()), prop("impact_version", strSchema())),
 		"TaskRemovalRequest": obj(prop("impact_version", strSchema())),
 		"TaskRemovalResult":  objReq([]string{"removed_task_ids", "trashed_conversation_ids", "cancellation_pending"}, prop("removed_task_ids", array(strSchema())), prop("trashed_conversation_ids", array(strSchema())), prop("cancellation_pending", boolSchema())),
+		"TaskCenterWorkbenchGroup": objReq([]string{"items", "total", "page"},
+			prop("items", array(refSchema("TaskCenterTaskResponse"))), prop("total", intSchema()), prop("page", intSchema())),
+		"TaskCenterWorkbenchResponse": objReq([]string{"groups", "page_size"},
+			prop("groups", objReq([]string{"attention", "running", "paused", "failed", "recent", "canceled"},
+				prop("attention", refSchema("TaskCenterWorkbenchGroup")), prop("running", refSchema("TaskCenterWorkbenchGroup")),
+				prop("paused", refSchema("TaskCenterWorkbenchGroup")), prop("failed", refSchema("TaskCenterWorkbenchGroup")),
+				prop("recent", refSchema("TaskCenterWorkbenchGroup")), prop("canceled", refSchema("TaskCenterWorkbenchGroup")))),
+			prop("page_size", intSchema())),
 		"TaskCenterTaskListResponse": objReq(
 			[]string{"items", "total", "page", "page_size"}, prop("items", array(refSchema("TaskCenterTaskResponse"))),
 			prop("total", int64Schema()), prop("page", intSchema()), prop("page_size", intSchema()), prop("status_counts", refSchema("TaskCenterStatusCounts")),
@@ -1050,6 +1061,7 @@ func manualPaths() map[string]any {
 		},
 		"/datasets/{dataset}/members:search": map[string]any{"post": op("Search dataset members", queryParams(param("query", "name_prefix", false, strSchema())), jsonBody(refSchema("SearchDatasetMemberRequest"), false), response(200, "Member search results", refSchema("ListDatasetMembersResponse")))},
 		"/datasets/{dataset}:batchAddMember": map[string]any{"post": op("Batch add dataset members", nil, jsonBody(refSchema("BatchAddDatasetMemberRequest"), true), response(200, "Added members", refSchema("BatchAddDatasetMemberResponse")))},
+		"/knowledge-processing/tasks":        map[string]any{"get": op("Latest document processing tasks", queryParams(param("query", "page", false, intSchema()), param("query", "status", false, strSchema()), param("query", "level", false, strSchema()), param("query", "q", false, strSchema())), nil, response(200, "Permission-scoped latest processing attempts", refSchema("ProcessingTasksResponse")))},
 		"/datasets/{dataset}/tasks": map[string]any{
 			"get":  op("Task list", queryParams(param("query", "page_token", false, strSchema()), param("query", "page_size", false, intSchema()), param("query", "task_state", false, strSchema()), param("query", "task_type", false, strSchema()), param("query", "document_id", false, strSchema()), param("query", "document_pid", false, strSchema())), nil, response(200, "Task list", refSchema("ListTasksResponse"))),
 			"post": op("Create task", nil, jsonBody(refSchema("CreateTaskRequest"), true), response(200, "Created task", refSchema("CreateTasksResponse"))),
@@ -1214,6 +1226,13 @@ func manualPaths() map[string]any {
 		"/schedules/{schedule_id}:move": map[string]any{"post": op(
 			"Move a schedule to an automation group", queryParams(param("path", "schedule_id", true, strSchema())),
 			jsonBody(refSchema("ScheduleMoveRequest"), true), map[string]any{"description": "Schedule moved"},
+		)},
+		"/task-center/workbench": map[string]any{"get": op(
+			"Summarize task categories with four previews per page", queryParams(
+				param("query", "task_type", false, strSchema()), param("query", "keyword", false, strSchema()),
+				param("query", "category", false, enumStringSchema("attention", "running", "paused", "failed", "recent", "canceled")),
+				param("query", "page", false, intSchema()),
+			), nil, response(200, "Task-center workbench", refSchema("TaskCenterWorkbenchResponse")),
 		)},
 		"/task-center/tasks": map[string]any{"get": op(
 			"List task-center tasks", queryParams(

@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net"
@@ -21,6 +22,43 @@ type HistoryInjectionDownload struct {
 	URL    string `json:"url"`
 	SHA256 string `json:"sha256"`
 	Size   int64  `json:"size"`
+}
+
+// A checkout can provide its own bundles for development. Otherwise Local
+// uses the same verified package and user cache as the packaged runtime.
+func applyLocalHistoryInjectionPaths(paths *RuntimePaths) error {
+	if !envBool("LAZYMIND_HISTORY_INJECTION_ENABLED", true) {
+		return nil
+	}
+	if _, err := os.Stat(paths.HistoryInjectionRoot); err == nil {
+		return nil
+	} else if !os.IsNotExist(err) {
+		return err
+	}
+	configPath := filepath.Join(paths.RepoRoot, "desktop", "history-injection-package.json")
+	body, err := os.ReadFile(configPath)
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	var download HistoryInjectionDownload
+	if err := json.Unmarshal(body, &download); err != nil {
+		return fmt.Errorf("read Local history examples descriptor: %w", err)
+	}
+	return applyHistoryInjectionDownload(paths, &download)
+}
+
+func applyHistoryInjectionDownload(paths *RuntimePaths, download *HistoryInjectionDownload) error {
+	if err := download.validate(); err != nil {
+		return err
+	}
+	paths.HistoryInjectionDownload = download
+	paths.HistoryInjectionSHA256 = download.SHA256
+	paths.HistoryInjectionArchive = filepath.Join(paths.RuntimeRoot, "cache", "history-injection", download.SHA256+".zip")
+	paths.HistoryInjectionRoot = filepath.Join(paths.DataDir, "history-injection")
+	return nil
 }
 
 func safeHistoryDownloadURL(address string) bool {

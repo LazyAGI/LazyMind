@@ -7559,6 +7559,10 @@ components:
                     type: array
                 id:
                     type: string
+                templates:
+                    items:
+                        $ref: '#/components/schemas/DocumentProviderTemplate'
+                    type: array
             required:
                 - capabilities
                 - id
@@ -7571,6 +7575,16 @@ components:
                     type: array
             required:
                 - providers
+            type: object
+        DocumentProviderTemplate:
+            properties:
+                id:
+                    type: string
+                name:
+                    type: string
+            required:
+                - id
+                - name
             type: object
         DocumentPublicationGroupRequest:
             properties:
@@ -7682,6 +7696,8 @@ components:
                     type: string
                 retry_operation_id:
                     type: string
+                template:
+                    type: string
                 title:
                     type: string
             required:
@@ -7707,6 +7723,8 @@ components:
                 provider:
                     type: string
                 target_url:
+                    type: string
+                template:
                     type: string
                 title:
                     type: string
@@ -8120,6 +8138,83 @@ components:
                         type: string
                     type: array
             type: object
+        EmbeddingClearRequest:
+            properties:
+                confirm_clear_chunks:
+                    type: boolean
+                generation:
+                    format: int64
+                    type: integer
+                model_id:
+                    type: string
+                source:
+                    type: string
+            required:
+                - confirm_clear_chunks
+                - generation
+                - model_id
+                - source
+            type: object
+        EmbeddingClearResponse:
+            properties:
+                activated:
+                    type: boolean
+                cleared:
+                    type: boolean
+            required:
+                - activated
+                - cleared
+            type: object
+        EmbeddingIndexStatusResponse:
+            properties:
+                affected_knowledge_bases:
+                    format: int64
+                    type: integer
+                generation:
+                    format: int64
+                    type: integer
+                index_identity:
+                    enum:
+                        - empty
+                        - verified
+                        - legacy_unknown
+                    type: string
+                indexed_knowledge_bases:
+                    format: int64
+                    type: integer
+                model_name:
+                    type: string
+                operation_phase:
+                    enum:
+                        - idle
+                        - rebuilding
+                        - clearing
+                        - cleanup_failed
+                        - cleared
+                    type: string
+                pending_knowledge_bases:
+                    format: int64
+                    type: integer
+                provider_name:
+                    type: string
+                status:
+                    enum:
+                        - empty
+                        - indexed
+                        - rebuilding
+                        - clearing
+                        - cleared
+                        - unknown
+                    type: string
+            required:
+                - affected_knowledge_bases
+                - generation
+                - index_identity
+                - indexed_knowledge_bases
+                - operation_phase
+                - pending_knowledge_bases
+                - status
+            type: object
         EmbeddingOptions:
             properties:
                 batch_size:
@@ -8129,6 +8224,65 @@ components:
                     type: string
                 query_prefix:
                     type: string
+            type: object
+        EmbeddingSignatureResponse:
+            properties:
+                code:
+                    type: string
+                dimensions:
+                    type: integer
+                model_type:
+                    type: string
+                passage_signature:
+                    type: string
+                query_signature:
+                    type: string
+                status:
+                    type: string
+            required:
+                - code
+                - model_type
+                - status
+            type: object
+        EmbeddingSwitchPreviewRequest:
+            properties:
+                model_id:
+                    type: string
+                source:
+                    type: string
+            required:
+                - model_id
+                - source
+            type: object
+        EmbeddingSwitchPreviewResponse:
+            properties:
+                active_model_name:
+                    type: string
+                can_switch:
+                    type: boolean
+                candidate_model_name:
+                    type: string
+                generation:
+                    format: int64
+                    type: integer
+                indexed_knowledge_bases:
+                    format: int64
+                    type: integer
+                outcome:
+                    enum:
+                        - unchanged
+                        - empty
+                        - same
+                        - clear_required
+                        - probe_failed
+                    type: string
+                signature_status:
+                    type: string
+            required:
+                - can_switch
+                - generation
+                - indexed_knowledge_bases
+                - outcome
             type: object
         EmptyObject:
             properties: {}
@@ -11215,6 +11369,57 @@ components:
                 - recovery
                 - stage
             type: object
+        ProcessingTaskItem:
+            properties:
+                created_at:
+                    type: string
+                dataset_id:
+                    type: string
+                dataset_name:
+                    type: string
+                document_id:
+                    type: string
+                document_name:
+                    type: string
+                error:
+                    type: string
+                id:
+                    type: string
+                level:
+                    type: string
+                stages:
+                    items:
+                        $ref: '#/components/schemas/ProcessingTaskStage'
+                    type: array
+                status:
+                    type: string
+            type: object
+        ProcessingTaskStage:
+            properties:
+                name:
+                    type: string
+                status:
+                    type: string
+            type: object
+        ProcessingTasksResponse:
+            properties:
+                counts:
+                    additionalProperties:
+                        type: integer
+                    type: object
+                items:
+                    items:
+                        $ref: '#/components/schemas/ProcessingTaskItem'
+                    type: array
+                page:
+                    type: integer
+                page_size:
+                    type: integer
+                total:
+                    type: integer
+                unfinished_count:
+                    type: integer
+            type: object
         ProjectionError:
             properties:
                 code:
@@ -12935,6 +13140,51 @@ components:
                 - created_at
                 - updated_at
             type: object
+        TaskCenterWorkbenchGroup:
+            properties:
+                items:
+                    items:
+                        $ref: '#/components/schemas/TaskCenterTaskResponse'
+                    type: array
+                page:
+                    type: integer
+                total:
+                    type: integer
+            required:
+                - items
+                - total
+                - page
+            type: object
+        TaskCenterWorkbenchResponse:
+            properties:
+                groups:
+                    properties:
+                        attention:
+                            $ref: '#/components/schemas/TaskCenterWorkbenchGroup'
+                        canceled:
+                            $ref: '#/components/schemas/TaskCenterWorkbenchGroup'
+                        failed:
+                            $ref: '#/components/schemas/TaskCenterWorkbenchGroup'
+                        paused:
+                            $ref: '#/components/schemas/TaskCenterWorkbenchGroup'
+                        recent:
+                            $ref: '#/components/schemas/TaskCenterWorkbenchGroup'
+                        running:
+                            $ref: '#/components/schemas/TaskCenterWorkbenchGroup'
+                    required:
+                        - attention
+                        - running
+                        - paused
+                        - failed
+                        - recent
+                        - canceled
+                    type: object
+                page_size:
+                    type: integer
+            required:
+                - groups
+                - page_size
+            type: object
         TaskDocumentInfo:
             properties:
                 display_name:
@@ -13984,6 +14234,8 @@ components:
                 objective:
                     type: string
                 preference_scope:
+                    type: string
+                retry_origin:
                     type: string
                 review_id:
                     type: string
@@ -20670,6 +20922,47 @@ paths:
             summary: Add a note idempotently by stable note ID
             tags:
                 - AcademicWorkflows
+    /api/core/academic/library/papers/{library_paper_id}/notes/{note_id}:delete:
+        post:
+            parameters:
+                - in: query
+                  name: target_dataset_id
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: library_paper_id
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: note_id
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            properties: {}
+                            type: object
+                required: false
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/PaperLibraryChanges'
+                    description: Delete one saved paper note
+            summary: Delete one saved paper note
+            tags:
+                - AcademicWorkflows
+    /api/core/academic/library/papers:delete:
+        post:
+            responses:
+                "200":
+                    description: OK
+            summary: POST /academic/library/papers:delete
     /api/core/academic/library/papers:move:
         post:
             parameters:
@@ -27955,6 +28248,29 @@ paths:
             summary: Start task
             tags:
                 - tasks
+    /api/core/datasets/{dataset}/text-index:
+        get:
+            parameters:
+                - in: path
+                  name: dataset
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: GET /datasets/{dataset}/text-index
+        post:
+            parameters:
+                - in: path
+                  name: dataset
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: POST /datasets/{dataset}/text-index
     /api/core/datasets/{dataset}/uploads:
         post:
             parameters:
@@ -29990,6 +30306,37 @@ paths:
             summary: One-click update of all installed official knowledge bases
             tags:
                 - knowledge-market
+    /api/core/knowledge-processing/tasks:
+        get:
+            parameters:
+                - in: query
+                  name: page
+                  required: false
+                  schema:
+                    type: integer
+                - in: query
+                  name: status
+                  required: false
+                  schema:
+                    type: string
+                - in: query
+                  name: level
+                  required: false
+                  schema:
+                    type: string
+                - in: query
+                  name: q
+                  required: false
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ProcessingTasksResponse'
+                    description: Permission-scoped latest processing attempts
+            summary: Latest document processing tasks
     /api/core/knowledge/options:
         get:
             responses:
@@ -32501,6 +32848,35 @@ paths:
             summary: Update a connection group model
             tags:
                 - model_providers
+    /api/core/model_providers/{model_provider_id}/groups/{group_id}/models/{model_id}:embedding-signature:
+        post:
+            description: Computes SHA-256 digests for fixed passage and query samples through the saved model's actual embedding runtime, including its configured prefixes. Returns only digests and dimension, never vectors, credentials or upstream text. A ready result can be compared with a previously recorded signature; unsupported and failed results cannot establish compatibility. The request body must be empty and no model settings are changed.
+            parameters:
+                - in: path
+                  name: model_provider_id
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: group_id
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: model_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/EmbeddingSignatureResponse'
+                    description: Candidate embedding signatures or an unverified result
+            summary: Fingerprint one saved text embedding model
+            tags:
+                - model_providers
     /api/core/model_providers/{model_provider_id}/groups/{group_id}/models/{model_id}:probe:
         post:
             description: Tests an owned model with its saved supplier protocol, shared API address and currently enabled key. No credential or metadata overrides are accepted. Does not modify verification, credentials, models or default selections. Media probes do not download output; accepted video tasks are distinct from completed inference.
@@ -32699,6 +33075,57 @@ paths:
                                 $ref: '#/components/schemas/deleteCustomModelProviderOpenAPIResponse'
                     description: Reset supplier
             summary: Reset a built-in model supplier
+            tags:
+                - model_providers
+    /api/core/model_providers/embedding/clear-chunks:
+        post:
+            description: Requires the current generation and explicit administrator confirmation. Clears text vectors while preserving originals, parsed content, chunks and image vectors. An empty model_id performs credential-independent recovery without activating a model. Otherwise the server verifies and activates the replacement independently of browser cancellation. Replaying a completed request does not clear the new index. Documents await explicit reindexing.
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/EmbeddingClearRequest'
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/EmbeddingClearResponse'
+                    description: Chunks cleared and target model activated
+            summary: Clear text vectors and optionally activate a replacement embedding model
+            tags:
+                - model_providers
+    /api/core/model_providers/embedding/index-state:
+        get:
+            description: Reports the persisted text embedding model identity and how many knowledge bases have indexed or pending document vectors. A legacy index without a recorded signature is reported as unknown, never inferred from the current model selection.
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/EmbeddingIndexStatusResponse'
+                    description: Text-vector index state
+            summary: Get shared text-vector index state
+            tags:
+                - model_providers
+    /api/core/model_providers/embedding/switch-preview:
+        post:
+            description: Probes the saved candidate through the document embedding runtime and compares its passage and query signatures with the recorded deployment-wide text-vector identity. Legacy indexes without a recorded signature are unverified and require vector cleanup before a change. Preview never changes selections or knowledge bases; a later save rechecks the current state.
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/EmbeddingSwitchPreviewRequest'
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/EmbeddingSwitchPreviewResponse'
+                    description: Embedding switch assessment
+            summary: Check whether a text embedding model can replace the active model
             tags:
                 - model_providers
     /api/core/model_providers/features:
@@ -36121,6 +36548,44 @@ paths:
                                 $ref: '#/components/schemas/TaskRemovalResult'
                     description: Removal committed
             summary: Move task and related conversations to Trash
+    /api/core/task-center/workbench:
+        get:
+            parameters:
+                - in: query
+                  name: task_type
+                  required: false
+                  schema:
+                    type: string
+                - in: query
+                  name: keyword
+                  required: false
+                  schema:
+                    type: string
+                - in: query
+                  name: category
+                  required: false
+                  schema:
+                    enum:
+                        - attention
+                        - running
+                        - paused
+                        - failed
+                        - recent
+                        - canceled
+                    type: string
+                - in: query
+                  name: page
+                  required: false
+                  schema:
+                    type: integer
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/TaskCenterWorkbenchResponse'
+                    description: Task-center workbench
+            summary: Summarize task categories with four previews per page
     /api/core/task-center/workflow-events:
         get:
             responses:

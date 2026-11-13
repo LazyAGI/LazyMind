@@ -8,7 +8,8 @@ import {
 import { echartsOptionToPptx } from './echarts_to_pptx.mjs';
 import { createGradientHandler } from './postprocess_pptx.mjs';
 import { readFileSync, existsSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { resolve, dirname, join } from 'node:path';
+import { mkdtemp, rename, rm } from 'node:fs/promises';
 
 // Module-level: chart options captured from the current IR. Set by
 // buildSlideFromIR before flattening, read by flattenIRToElements when it
@@ -973,39 +974,14 @@ export function buildTextElement(node) {
     if (!hasStroke && !hasShadow) return null;
   }
 
-  // 文本框宽度余量：PowerPoint 字体渲染比 Chrome 稍宽（尤其字体替换时），
-  // 精确匹配 HTML 像素宽度会导致本来一行的文字在 PPT 中换行。
-  //
-  // R4 修复（Turn-2）：之前 buffer = max(5%, 半字符)，禁用 autoFit 后字体差异
-  // 导致 "智能物业系统" 拆成 "智能物业系\n统"、单字落单等问题。改为更宽的
-  // buffer：12% 比例 + 1 个字符宽度。
-  const fontSizePx = parseFloat(s.fontSize) || 16;
-  const oneCharPx = fontSizePx * 1.0;
-  const bufferPx = Math.max(b.w * 0.12, oneCharPx);
-
-  // E-vi: word-break: keep-all / white-space: nowrap → 不允许 wrap
-  const wb = s.wordBreak;
-  const ws = s.whiteSpace;
-  const keepAll = wb === 'keep-all' || ws === 'nowrap' || ws === 'pre' || ws === 'pre-line';
-
-  // E-iv: 极短文本（≤4 字符）容器经常宽度刚够字符，PPTX 字体细微差异会让
-  // "01" 拆成 "0/1" —— 强制不 wrap，并把文本框略加宽。
-  const shortText = !textRuns && text && text.trim().length <= 4;
-  const boxWidthPx = shortText
-    ? Math.max(b.w, fontSizePx * text.trim().length * 0.7) + bufferPx
-    : b.w + bufferPx;
-
-  // 余量全加在右侧会把居中/右对齐的文字整体推向右边（整页宽标题可偏 0.6in，
-  // 肉眼可见不居中，文本框还会伸出画布）。按对齐方式分摊余量，让文本框的
-  // 对齐基准边与 HTML 一致。
+  // Keep the measured HTML border box. Expanding every textbox by 12% made
+  // paragraphs overlap adjacent cards/charts and moved centered/right text.
   const align = mapTextAlign(s.textAlign);
-  const extraPx = boxWidthPx - b.w;
-  const alignShiftPx = align === 'center' ? extraPx / 2 : (align === 'right' ? extraPx : 0);
 
   const options = {
-    x: pxToInch(b.x - alignShiftPx),
+    x: pxToInch(b.x),
     y: pxToInch(b.y),
-    w: pxToInch(boxWidthPx),
+    w: pxToInch(b.w),
     h: pxToInch(b.h),
     fontSize: pxToPt(parseFloat(s.fontSize) || 16),
     fontFace: parseFontFamily(s.fontFamily, { genericFallback: false })
@@ -1015,10 +991,10 @@ export function buildTextElement(node) {
     italic: s.fontStyle === 'italic',
     underline: s.textDecoration?.includes('underline') ? { style: 'sng' } : undefined,
     align,
-    valign: mapVerticalAlign(s.verticalAlign),
-    // E-iii: 禁用 autoFit。autoFit 会悄悄把字号缩小或自动 wrap，行为不可预测。
-    // 我们已经从 HTML 测出真实 fontSize 和 bounds，直接用即可。
-    autoFit: false,
+    valign: mapVerticalAlign(s.verticalAlign)
+      || (s.display === 'flex' && s.alignItems === 'center' ? 'middle' : 'top'),
+    // Keep geometry fixed; Office may shrink text when fonts differ.
+    fit: 'shrink',
   };
 
   // transform: rotate() → pptxgenjs rotate
@@ -1035,34 +1011,25 @@ export function buildTextElement(node) {
     }
   }
 
-  // wrap 决策（E-iii / E-iv / E-vi 综合）：
-  //  - 多 run（混合内容含 br/装饰子元素）→ 强制 wrap=true，让 breakLine 生效
-  //  - keep-all / nowrap / 短文本 → 强制 wrap=false
-  //  - 单行短文本（高度 < 字号 × 2）→ wrap=false，避免字体差异引发意外换行
-  //  - 其余 → wrap=true
-  const fsPx = parseFloat(s.fontSize) || 16;
-  const isSingleLine = !textRuns && b.h < fsPx * 2;
-  if (textRuns && textRuns.length > 1) {
-    options.wrap = true;
-  } else if (keepAll || shortText) {
-    options.wrap = false;
-  } else {
-    options.wrap = !isSingleLine;
-  }
+  // Office can reflow tight text boxes using different font metrics. Keep
+  // browser-measured single lines intact, including shrink-to-content labels.
+  options.wrap = !node.singleLine && !['nowrap', 'pre'].includes(s.whiteSpace);
 
-  // padding → pptxgenjs margin（文本框内边距）
-  // G-i 修复：仅对**叶子文本节点**保留 padding。混合内容父节点（textRuns 路径）
-  // 的 padding 已经通过子元素的 bounds 偏移体现在子节点上 —— 在父级 textbox
-  // 再加一次 margin 会产生"双倍缩进"。
-  const padTop = parseFloat(s.paddingTop) || 0;
-  const padRight = parseFloat(s.paddingRight) || 0;
-  const padBottom = parseFloat(s.paddingBottom) || 0;
-  const padLeft = parseFloat(s.paddingLeft) || 0;
-  if (!textRuns && (padTop > 0 || padRight > 0 || padBottom > 0 || padLeft > 0)) {
-    options.margin = [
-      pxToPt(padTop), pxToPt(padRight), pxToPt(padBottom), pxToPt(padLeft),
-    ];
-  }
+  // Runs contain text/styles, not child coordinates, so their parent padding
+  // must be retained too. Always set margins: Office's default inset otherwise
+  // consumes space that the browser did not reserve (especially small chips).
+  const inset = (padding, border) => pxToPt(
+    (parseFloat(s[padding]) || 0) + (parseFloat(s[border]) || 0),
+  );
+  // pptxgenjs 3.x addText serializes arrays as LEFT, RIGHT, BOTTOM, TOP
+  // (unlike CSS and its table margins). Passing CSS order turns padding-left
+  // into top inset: headings drop below their accent bars and pills misalign.
+  options.margin = [
+    inset('paddingLeft', 'borderLeftWidth'),
+    inset('paddingRight', 'borderRightWidth'),
+    inset('paddingBottom', 'borderBottomWidth'),
+    inset('paddingTop', 'borderTopWidth'),
+  ];
 
   // text-shadow → pptxgenjs shadow
   if (s.textShadow) {
@@ -1623,9 +1590,12 @@ export function buildListElement(node) {
     options: {
       x: pxToInch(b.x),
       y: pxToInch(b.y),
-      w: pxToInch(b.w + Math.max(b.w * 0.05, (parseFloat(node.listData?.[0]?.styles?.fontSize) || 16) * 0.6)),
+      w: pxToInch(b.w),
       h: pxToInch(b.h),
       valign: 'top',
+      wrap: true,
+      fit: 'shrink',
+      margin: 0,
     }
   };
 }
@@ -1903,8 +1873,18 @@ function flattenNode(node, deckDir, parentBorderRadius = 0, parentBgColor = null
         }
         return elements;  // don't recurse into chart internals (svg children)
       }
-      // unsupported chart type: fall through, the inner <svg> will be
-      // rasterized by buildSvgElement like before.
+      if (entry.renderedImageDataUri) {
+        let data = entry.renderedImageDataUri;
+        if (/^data:image\/svg\+xml[^,]*,/.test(data) && !/^data:[^,]*;base64,/.test(data)) {
+          data = 'data:image/svg+xml;base64,' + Buffer.from(decodeURIComponent(data.slice(data.indexOf(',') + 1))).toString('base64');
+        }
+        const b = node.bounds;
+        elements.push({ type: 'image', data: {
+          data, x: pxToInch(b.x), y: pxToInch(b.y), w: pxToInch(b.w), h: pxToInch(b.h),
+        } });
+        return elements;
+      }
+      // Older IR has no captured image: keep its styled inner SVG.
     }
   }
 
@@ -2256,8 +2236,21 @@ export function buildSlideFromIR(pptx, ir, deckDir) {
  * @param {Array<{path: string, ir: object}>} pages - 页面 IR 数组
  * @param {string} deckDir - deck 目录路径
  * @param {string} outputPath - PPTX 输出路径
+ * @param {{embedFonts?: boolean}} [options] - 是否将字体嵌入 PPTX
  */
-export async function buildPptx(pages, deckDir, outputPath) {
+export async function buildPptx(pages, deckDir, outputPath, { embedFonts = true } = {}) {
+  const temporary = await mkdtemp(join(dirname(resolve(outputPath)), '.pptx-export-'));
+  try {
+    const candidate = join(temporary, 'presentation.pptx');
+    const result = await buildPptxCandidate(pages, deckDir, candidate, embedFonts);
+    await rename(candidate, outputPath);
+    return result;
+  } finally {
+    await rm(temporary, { recursive: true, force: true });
+  }
+}
+
+async function buildPptxCandidate(pages, deckDir, outputPath, embedFonts) {
   const pptx = new PptxGenJS();
 
   // 设置 16:9 画布（10" × 5.625"）
@@ -2343,23 +2336,27 @@ export async function buildPptx(pages, deckDir, outputPath) {
   await pptx.writeFile({ fileName: outputPath });
 
   // 后处理：将渐变 token 替换为真正的 <a:gradFill> OOXML
-  if (_currentGradientHandler && _currentGradientHandler._replacementsCount() > 0) {
-    const { postprocessPptx } = await import('./postprocess_pptx.mjs');
-    await postprocessPptx(outputPath, [_currentGradientHandler]);
-  }
+  // Normalize rich-text paragraphs even when the deck has no gradients.
+  const { postprocessPptx } = await import('./postprocess_pptx.mjs');
+  await postprocessPptx(outputPath, _currentGradientHandler ? [_currentGradientHandler] : []);
   _currentGradientHandler = null;
 
   // Preserve web typography across machines. Preview HTML commonly imports
   // open fonts from Google Fonts; without a font part PowerPoint only receives
   // the family name and silently substitutes a standard local font.
   let embeddedFonts = [];
-  try {
-    const { embedGoogleFontsFromPages } = await import('./font_embedding.mjs');
-    embeddedFonts = await embedGoogleFontsFromPages(outputPath, pages);
-  } catch (error) {
-    // Font download/embedding is visual fidelity enhancement. Keep the
-    // editable PPTX usable during network outages or for restricted fonts.
-    process.stderr.write(`[fonts] Web font embedding skipped: ${error.message}\n`);
+  if (embedFonts) {
+    try {
+      const { embedGoogleFontsFromPages } = await import('./font_embedding.mjs');
+      embeddedFonts = await embedGoogleFontsFromPages(outputPath, pages);
+    } catch (error) {
+      if (error.fontPortability) {
+        throw error;
+      }
+      // Font download/embedding is visual fidelity enhancement. Keep the
+      // editable PPTX usable during network outages or for restricted fonts.
+      process.stderr.write(`[fonts] Web font embedding skipped: ${error.message}\n`);
+    }
   }
 
   return {

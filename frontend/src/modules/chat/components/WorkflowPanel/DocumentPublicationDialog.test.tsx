@@ -74,6 +74,31 @@ it('uses remembered choices, but requires confirmation even for a menu-selected 
   expect(beforePublish).not.toHaveBeenCalled();
 });
 
+it.each(['menu', 'preference'])('initializes the %s selection without waiting for unrelated Obsidian checks', async source => {
+  availability.states.obsidian = 'checking';
+  state.preferred_providers = source === 'preference' ? ['notion'] : [];
+  render(view({ providers: [...providers, { id: 'obsidian' }], initialProvider: source === 'menu' ? 'notion' : undefined }));
+  expect(await screen.findByRole('checkbox', { name: 'Notion' })).toBeChecked();
+  expect(screen.getByRole('checkbox', { name: 'Obsidian' })).toBeDisabled();
+  expect(screen.getByRole('button', { name: 'Publish to Notion' })).toBeEnabled();
+  expect(beforePublish).not.toHaveBeenCalled();
+  expect(api.createPublicationGroup).not.toHaveBeenCalled();
+});
+
+it('keeps a manual choice when a preferred platform finishes checking later', async () => {
+  availability.states.obsidian = 'checking';
+  state.preferred_providers = ['obsidian'];
+  const options = { providers: [...providers, { id: 'obsidian' }] };
+  const { rerender } = render(view(options));
+  expect(await screen.findByRole('checkbox', { name: 'Obsidian' })).not.toBeChecked();
+  fireEvent.click(screen.getByRole('checkbox', { name: 'Notion' }));
+  availability.states.obsidian = 'ready';
+  rerender(view(options));
+  expect(screen.getByRole('checkbox', { name: 'Notion' })).toBeChecked();
+  expect(screen.getByRole('checkbox', { name: 'Obsidian' })).not.toBeChecked();
+  expect(api.createPublicationGroup).not.toHaveBeenCalled();
+});
+
 it('flushes before one atomic multi-platform confirmation and blocks double clicks', async () => {
   let finish!: (value: { id: string; revision: number; draft: number }) => void;
   beforePublish.mockImplementation(() => new Promise(resolve => { finish = resolve; }));
@@ -99,6 +124,44 @@ it('a failed draft save prevents publication and keeps the confirmation open', a
   expect(await screen.findByRole('alert')).toHaveTextContent('Save failed');
   expect(api.createPublicationGroup).not.toHaveBeenCalled();
   expect(close).not.toHaveBeenCalled();
+});
+
+it.each([
+  { savedTemplate: undefined, chosenTemplate: 'clean' },
+  { savedTemplate: 'warm_humanist', chosenTemplate: 'editorial_contrast' },
+])('publishes WeChat with the $chosenTemplate template', async ({ savedTemplate, chosenTemplate }) => {
+  state.targets.push({ provider: 'wechat', bound: true, template: savedTemplate, connection_id: 'wechat-account' });
+  render(view({ initialProvider: 'wechat', providers: [{ id: 'wechat', capabilities: ['create', 'replace'], templates: [
+    { id: 'clean', name: 'Clean Reading' },
+    { id: 'warm_humanist', name: 'Warm Humanist' },
+    { id: 'editorial_contrast', name: 'Editorial Contrast' },
+  ] }], availability: { ...availability, states: { wechat: 'ready' }, accounts: {
+    wechat: [{ connection_id: 'wechat-account', provider: 'wechat', status: 'ACTIVE', can_use_chat: true }],
+  } } }));
+  const selector = await screen.findByRole('combobox', { name: 'WeChat article template' });
+  expect(screen.getByTitle(savedTemplate ? 'Warm Humanist' : 'Clean Reading')).toBeInTheDocument();
+  if (chosenTemplate === 'editorial_contrast') {
+    fireEvent.mouseDown(selector);
+    fireEvent.click(await screen.findByText('Editorial Contrast'));
+  }
+  expect(beforePublish).not.toHaveBeenCalled();
+  expect(api.createPublicationGroup).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('button', { name: /^Publish to WeChat/ }));
+  await waitFor(() => expect(api.createPublicationGroup).toHaveBeenCalledOnce());
+  const body = api.createPublicationGroup.mock.calls[0][1];
+  expect(body.targets).toEqual([expect.objectContaining({ provider: 'wechat', connection_id: 'wechat-account', template: chosenTemplate })]);
+  expect(api.preflightPublication).toHaveBeenCalledWith('latest-draft', body, expect.anything());
+});
+
+it('opens the platform results as soon as publication is accepted', async () => {
+  state.preferred_providers = ['github'];
+  const { rerender } = render(view());
+  const confirm = await screen.findByRole('button', { name: 'Publish to GitHub' });
+  await waitFor(() => expect(confirm).toBeEnabled());
+  fireEvent.click(confirm);
+  await waitFor(() => expect(close).toHaveBeenCalledOnce());
+  rerender(view({ open: false }));
+  await waitFor(() => expect(screen.getByRole('dialog', { name: 'Publication results by platform' })).toBeVisible());
 });
 
 it('lost acceptance is retried with the identical saved body and key despite new edits', async () => {

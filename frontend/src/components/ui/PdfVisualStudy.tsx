@@ -5,11 +5,11 @@ import {FormulaMathText} from './FormulaMathText';
 import {paperVisualLabel,usePaperReaderLabels} from './paperReaderLabels';
 import {PdfTableStudy} from './PdfTableStudy';
 import './PdfVisualStudy.css';
-interface Props {target:PdfIRTarget;document:PdfIRDocument;block:PdfIRBlock;sourcePreview?:string;onNavigate:(id:string)=>void;onInspectTable:(block:PdfIRBlock)=>void;onClose:()=>void;onReturn:()=>void;canReturn:boolean}
-export function PdfVisualStudy({target,document,block,sourcePreview,onNavigate,onInspectTable,onClose,onReturn,canReturn}:Props){
+interface Props {target:PdfIRTarget;document:PdfIRDocument;block:PdfIRBlock;sourcePreview?:string;initialExplanation?:VisualExplanation;autoExplain?:boolean;onExplanationChange?:(data:VisualExplanation)=>void;onNavigate:(id:string)=>void;onInspectTable:(block:PdfIRBlock)=>void;onClose:()=>void;onReturn:()=>void;canReturn:boolean}
+export function PdfVisualStudy({target,document,block,sourcePreview,initialExplanation,autoExplain=true,onExplanationChange,onNavigate,onInspectTable,onClose,onReturn,canReturn}:Props){
  const {label,language}=usePaperReaderLabels();
  const text=(zh:string,en:string)=>language==='zh'?zh:en;
- const request=usePaperReaderResource<VisualExplanation>(target,paperSourceKey(target,document),document.source_sha256,`blocks/${encodeURIComponent(block.id)}/explanation`,language,true);
+ const request=usePaperReaderResource<VisualExplanation>(target,paperSourceKey(target,document),document.source_sha256,`blocks/${encodeURIComponent(block.id)}/explanation`,language,autoExplain,initialExplanation,onExplanationChange);
  const [tableView,setTableView]=useState<'cells'|'original'>('cells');
  const [expanded,setExpanded]=useState(false),[elapsed,setElapsed]=useState(0);
  useEffect(()=>{setExpanded(false);},[block.id,document.source_sha256]);

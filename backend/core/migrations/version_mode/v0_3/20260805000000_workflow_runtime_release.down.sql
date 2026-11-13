@@ -968,3 +968,4 @@ DROP TABLE IF EXISTS vocabulary_cloud_connections;
 
 -- +migrate Dialect postgres,sqlite
 DROP TABLE IF EXISTS user_github_star_prompts;
+DROP TABLE IF EXISTS embedding_index_states;

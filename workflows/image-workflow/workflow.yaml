@@ -109,7 +109,7 @@ steps:
 
 slots:
   - id: subject_analysis
-    user_visible: false
+    user_visible: true
     label: Subject Analysis
     type: text
     cardinality: single
@@ -136,14 +136,14 @@ slots:
     ordered: true
 
   - id: material_summary
-    user_visible: false
+    user_visible: true
     label: Material Summary
     type: text
     cardinality: single
     summary_max_chars: 400
 
   - id: prompt_used
-    user_visible: false
+    user_visible: true
     label: Optimized Prompt
     type: text
     cardinality: single
@@ -175,12 +175,12 @@ slots:
     ordered: true
 
   - id: generated_base_image
-    user_visible: false
+    user_visible: true
     label: Generated Base Image
     type: image
     cardinality: list
     ordered: true
-    exposed: false
+    exposed: true
 
   - id: generated_first_frame
     user_visible: false
@@ -204,11 +204,11 @@ slots:
     ordered: true
 
   - id: enhancement_status
-    user_visible: false
+    user_visible: true
     label: Enhancement Status
     type: json
     cardinality: single
-    exposed: false
+    exposed: true
 
   - id: meme_static_output
     user_visible: true
@@ -295,8 +295,8 @@ ui:
       slot_scope: selected
       composite_tab_position: left
       slots:
+        - {id: enhancement_status}
         - id: generated_first_frame
-        - id: generated_base_image
         - id: generated_last_frame
         - id: material_images
         - id: meme_static_output
@@ -306,10 +306,9 @@ ui:
       composite_layout:
         direction: row
         children:
+          - {slot: enhancement_status}
           - weight: 1
             slot: generated_first_frame
-          - weight: 1
-            slot: generated_base_image
           - weight: 1
             slot: generated_last_frame
           - weight: 1
@@ -326,19 +325,17 @@ ui:
         hide_empty_columns: true
         empty_column_scope: selected
         repeat_single_slots:
+          - enhancement_status
           - generated_first_frame
-          - generated_base_image
           - generated_last_frame
           - material_images
         mutually_exclusive:
           - slots:
               - generated_first_frame
-              - generated_base_image
               - generated_last_frame
               - material_images
             prefer:
               - generated_first_frame
-              - generated_base_image
               - material_images
               - generated_last_frame
           - slots:

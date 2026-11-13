@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -9,6 +10,7 @@ import (
 	"regexp"
 	"runtime"
 	"strings"
+	"time"
 )
 
 type pythonComponent struct {
@@ -32,6 +34,7 @@ type pythonComponentCatalog struct {
 }
 
 var componentDigestPattern = regexp.MustCompile(`^[a-f0-9]{64}$`)
+var pythonComponentIDs = []string{"rag", "cluster"}
 
 func sourceRAGInstalled(paths RuntimePaths) bool {
 	data, err := os.ReadFile(filepath.Join(paths.RuntimeRoot, "deps", "python-components", "rag", "source.ready"))
@@ -53,8 +56,11 @@ func loadPythonComponentCatalog(paths RuntimePaths) (*pythonComponentCatalog, er
 	if catalog.SchemaVersion != 1 || catalog.Platform != runtime.GOOS || catalog.Arch != runtime.GOARCH {
 		return nil, fmt.Errorf("Python component catalog does not match %s/%s", runtime.GOOS, runtime.GOARCH)
 	}
-	for _, id := range []string{"rag"} {
+	for _, id := range pythonComponentIDs {
 		entry, ok := catalog.Components[id]
+		if !ok && id != "rag" {
+			continue // Older installers and full builds include clustering in base Python.
+		}
 		if !ok || entry.ID != id || !componentDigestPattern.MatchString(entry.Revision) ||
 			!componentDigestPattern.MatchString(entry.SHA256) || !componentDigestPattern.MatchString(entry.BaseFingerprint) {
 			return nil, fmt.Errorf("invalid Python component descriptor: %s", id)
@@ -99,6 +105,44 @@ func installedPythonComponentPath(paths RuntimePaths, entry pythonComponent) str
 	return site
 }
 
+func (m *RuntimeManager) prepareDesktopCluster(ctx context.Context, cfg RuntimeConfig, paths RuntimePaths) {
+	if cfg.Profile != "desktop" {
+		return
+	}
+	catalog, err := loadPythonComponentCatalog(paths)
+	if err != nil {
+		m.progressf("could not read desktop Python component catalog: %v", err)
+		return
+	}
+	if catalog == nil {
+		return
+	}
+	cluster, deferred := catalog.Components["cluster"]
+	if !deferred || installedPythonComponentPath(paths, cluster) != "" {
+		return
+	}
+
+	started := m.now()
+	m.startupEvent("phase.started", "python-cluster", started, nil)
+	prepareCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	defer cancel()
+	environment := append(serviceRuntimeEnv(paths), pythonComponentEnvironment(paths, cfg.Algorithm.RAGDisabled)...)
+	result, err := m.runner.Run(prepareCtx, Command{
+		Name: paths.CoreBin,
+		Args: []string{"--prepare-cluster-component"},
+		Dir:  filepath.Join(paths.RepoRoot, coreSourceDirName),
+		Env: append(environment,
+			"LAZYMIND_RUNTIME_MODE=local",
+			"LAZYMIND_RUNTIME_ROOT="+paths.RuntimeRoot),
+	})
+	if err != nil {
+		m.progressf("desktop clustering preparation unavailable; will retry on the next start: %v %s", err, commandResultDetail(result))
+		m.startupEvent("phase.skipped", "python-cluster", started, nil)
+		return
+	}
+	m.startupEvent("phase.completed", "python-cluster", started, nil)
+}
+
 func pythonComponentEnvironment(paths RuntimePaths, ragDisabled bool) []string {
 	values := []string{
 		"LAZYMIND_PYTHON_COMPONENT_CATALOG=" + filepath.Join(paths.ResourcesRoot, "config", "python-components.json"),
@@ -118,9 +162,13 @@ func pythonComponentEnvironment(paths RuntimePaths, ragDisabled bool) []string {
 		return values
 	}
 	var sites []string
-	for _, id := range []string{"rag"} {
+	for _, id := range pythonComponentIDs {
+		entry, deferred := catalog.Components[id]
+		if !deferred {
+			continue
+		}
 		enabled := "0"
-		if site := installedPythonComponentPath(paths, catalog.Components[id]); site != "" && !ragDisabled {
+		if site := installedPythonComponentPath(paths, entry); site != "" && (id != "rag" || !ragDisabled) {
 			sites = append(sites, site)
 			enabled = "1"
 		}
@@ -135,9 +183,11 @@ func pythonComponentSites(paths RuntimePaths) []string {
 		return nil
 	}
 	var sites []string
-	for _, id := range []string{"rag"} {
-		if site := installedPythonComponentPath(paths, catalog.Components[id]); site != "" {
-			sites = append(sites, site)
+	for _, id := range pythonComponentIDs {
+		if entry, deferred := catalog.Components[id]; deferred {
+			if site := installedPythonComponentPath(paths, entry); site != "" {
+				sites = append(sites, site)
+			}
 		}
 	}
 	return sites

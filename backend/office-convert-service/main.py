@@ -14,6 +14,8 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 import fitz
 from fontTools.ttLib import TTCollection
+from translation_pdf import render_preserving_pages
+from translation_layout import protected_span
 
 
 logging.basicConfig(level=logging.INFO, format='%(message)s', force=True)
@@ -115,6 +117,22 @@ def _reference_match_text(value: str) -> str:
     return ''.join(character.lower() for character in value if character.isalnum())
 
 
+def _has_two_text_columns(lines: list[dict[str, object]], page_width: float) -> bool:
+    midpoint = page_width / 2
+    gutter = page_width * 0.01
+    left = [line['bbox'] for line in lines
+            if line['bbox'][0] < midpoint - gutter and line['bbox'][2] <= midpoint + gutter]
+    right = [line['bbox'] for line in lines
+             if line['bbox'][0] >= midpoint - gutter and line['bbox'][2] > midpoint + gutter]
+    if len(left) < 2 or len(right) < 2 or (len(left) + len(right)) * 2 < len(lines):
+        return False
+    # Separate columns have independent text on the same horizontal rows.
+    # Right-aligned DOI/URL continuations in a single column follow the text
+    # above them, so they do not provide this evidence.
+    aligned = sum(any(a[1] < b[3] and b[1] < a[3] for a in left) for b in right)
+    return aligned >= 2 and aligned * 2 >= len(right)
+
+
 def _pdf_reference_lines(document: fitz.Document) -> list[dict[str, object]]:
     lines: list[dict[str, object]] = []
     for page_index, page in enumerate(document):
@@ -135,13 +153,15 @@ def _pdf_reference_lines(document: fitz.Document) -> list[dict[str, object]]:
                         'text': text,
                         'normalized': normalized,
                     })
-        # Scientific PDFs are commonly two-column. Reading the complete left
-        # column before the right column preserves bibliography entry order.
-        midpoint = float(page.rect.width) / 2
-        page_lines.sort(key=lambda item: (
-            0 if (item['bbox'][0] + item['bbox'][2]) / 2 < midpoint else 1,
-            item['bbox'][1], item['bbox'][0],
-        ))
+        if _has_two_text_columns(page_lines, float(page.rect.width)):
+            # Read the complete left column before the right column.
+            midpoint = float(page.rect.width) / 2
+            page_lines.sort(key=lambda item: (
+                0 if item['bbox'][0] < midpoint else 1,
+                item['bbox'][1], item['bbox'][0],
+            ))
+        else:
+            page_lines.sort(key=lambda item: (item['bbox'][1], item['bbox'][0]))
         lines.extend(page_lines)
     return lines
 
@@ -180,6 +200,15 @@ def _locate_reference_regions(document: fitz.Document, references: list[str]) ->
     for index, (needle, start) in enumerate(zip(needles, starts)):
         next_start = next((value for value in starts[index + 1:] if value >= 0), -1)
         end = next_start
+        if start >= 0 and next_start >= 0:
+            # The reference key ([46], for example) is present in the PDF
+            # line but removed from extracted reference text. Its match starts
+            # inside the next line, so stop at that line's beginning.
+            for line_start, line_end in offsets:
+                if line_start <= next_start < line_end:
+                    if line_start > start:
+                        end = line_start
+                    break
         if start >= 0 and end < 0:
             tail = needle[-min(28, max(12, len(needle) // 5)):]
             tail_at = stream.find(tail, start + min(12, len(needle)))
@@ -610,316 +639,14 @@ def render_pdf_translation(req: PDFTranslationRenderRequest) -> dict[str, object
     try:
         blocks = json.loads(layout.read_text(encoding='utf-8')).get('blocks', [])
         translations = json.loads(translations_file.read_text(encoding='utf-8'))
-    except (OSError, ValueError, TypeError) as exc:
-        raise HTTPException(status_code=400, detail=f'invalid translation manifest: {exc}') from exc
+    except (OSError, ValueError, TypeError):
+        blocks, translations = [], {}
 
     output.parent.mkdir(parents=True, exist_ok=True)
     document = fitz.open(source)
-    warnings = 0
-    rendered_blocks = 0
-    requested_blocks = 0
-    probe_document = fitz.open()
-    for source_page in document:
-        probe_page = probe_document.new_page(width=source_page.rect.width, height=source_page.rect.height)
-        probe_page.insert_font(fontname='NotoSansCJK', fontfile=str(TRANSLATION_FONT_PATH))
     translation_font = fitz.Font(fontfile=str(TRANSLATION_FONT_PATH))
-    prepared_blocks: list[dict[str, object]] = []
     try:
-        candidates: list[dict[str, object]] = []
-        for block in blocks:
-            translated = _protect_short_latin_terms(
-                _normalize_pdf_block_text(str(translations.get(str(block.get('id', '')), '')))
-            )
-            bbox = block.get('bbox')
-            page_index = int(block.get('page', 1)) - 1
-            if not translated or not isinstance(bbox, list) or len(bbox) != 4 or not (0 <= page_index < len(document)):
-                continue
-            requested_blocks += 1
-            page = document[page_index]
-            source_width = float(block.get('pageWidth') or page.rect.width)
-            source_height = float(block.get('pageHeight') or page.rect.height)
-            sx, sy = page.rect.width / source_width, page.rect.height / source_height
-            rect = fitz.Rect(float(bbox[0]) * sx, float(bbox[1]) * sy, float(bbox[2]) * sx, float(bbox[3]) * sy)
-            if rect.is_empty or rect.is_infinite:
-                warnings += 1
-                continue
-            # Keep a small gutter inside the source block. This prevents glyph
-            # ascenders / descenders from visually touching an adjacent block even
-            # though both text boxes technically fit their source rectangles.
-            redaction_rect = fitz.Rect(rect)
-            is_single_line = rect.height < 18
-            inset_rect = (
-                fitz.Rect(rect.x0 + 0.5, rect.y0, rect.x1 - 0.5, rect.y1)
-                if is_single_line
-                else fitz.Rect(rect.x0 + 0.5, rect.y0 + 0.5, rect.x1 - 0.5, rect.y1 - 1.5)
-            )
-            if not inset_rect.is_empty:
-                rect = inset_rect
-            level = str(block.get('styleLevel') or 'body')
-            if level not in {'title', 'heading', 'body', 'caption', 'footnote', 'reference'}:
-                level = 'body'
-            is_list = bool(_split_list_items(translated))
-            source_text = str(block.get('text') or '').strip()
-            source_indent = float(block.get('firstLineIndent') or 0)
-            indent_first_line = (
-                source_indent > float(block.get('fontSize') or 10.0) * 0.4
-                or (
-                    level == 'body'
-                    and not is_list
-                    and bool(re.match(r'^[A-Z“"(]', source_text))
-                )
-            )
-            candidates.append({
-                'page': page_index,
-                'rect': rect,
-                'redaction_rect': redaction_rect,
-                'text': translated,
-                'source_text': source_text,
-                'level': level,
-                'source_size': max(3.0, min(24.0, float(block.get('fontSize') or 10.0))),
-                'bold': bool(block.get('bold')),
-                'align': str(block.get('align') or 'justify'),
-                'single_line': is_single_line,
-                'is_list': is_list,
-                'indent_first_line': indent_first_line,
-            })
-
-        # A translated body block needs a visible paragraph gap when it follows
-        # a heading in the same column. Source PDFs often encode only a tiny
-        # baseline gap that becomes visually lost with CJK glyph metrics.
-        headings = [item for item in candidates if item['level'] in {'title', 'heading'}]
-        for candidate in candidates:
-            if candidate['level'] != 'body':
-                continue
-            preceding = [
-                heading for heading in headings
-                if heading['page'] == candidate['page']
-                and 0 <= candidate['rect'].y0 - heading['rect'].y1 <= max(14, candidate['source_size'] * 1.5)
-                and (candidate['rect'] & fitz.Rect(
-                    heading['rect'].x0, candidate['rect'].y0,
-                    heading['rect'].x1, candidate['rect'].y1,
-                )).width > 0
-            ]
-            if preceding:
-                top_gap = min(candidate['source_size'] * 0.6, candidate['rect'].height * 0.08)
-                candidate['rect'].y0 += top_gap
-
-        # Plan typography once for the whole document. The median source size keeps
-        # each semantic level close to the original design. Every block is then
-        # measured and the smallest fitting size becomes the shared size for that
-        # level, guaranteeing consistency without overflowing any source bbox.
-        level_candidates: dict[str, list[dict[str, object]]] = {}
-        for candidate in candidates:
-            level_candidates.setdefault(str(candidate['level']), []).append(candidate)
-        planned_sizes: dict[str, float] = {}
-        safety_factors = {
-            'title': 0.98,
-            'heading': 0.96,
-            'body': 0.92,
-            'caption': 0.92,
-            'footnote': 0.92,
-            'reference': 0.92,
-        }
-        minimum_sizes = {
-            'title': 5.0,
-            'heading': 4.5,
-            'body': 3.5,
-            'caption': 3.0,
-            'footnote': 3.0,
-            'reference': 3.0,
-        }
-        for level, level_blocks in level_candidates.items():
-            source_sizes = [float(item['source_size']) for item in level_blocks]
-            target_size = statistics.median(source_sizes) * safety_factors[level]
-            fitting_sizes: list[float] = []
-            for candidate in level_blocks:
-                probe_page = probe_document[int(candidate['page'])]
-                font_size = target_size
-                remaining = -1.0
-                while remaining < 0 and font_size >= minimum_sizes[level]:
-                    is_bold = bool(candidate['bold'])
-                    measured_text = _protect_latin_word_wrapping(_restore_source_latin_terms(
-                        str(candidate['text']), str(candidate['source_text']),
-                    ))
-                    if candidate['indent_first_line']:
-                        measured_text = '\u3000\u3000' + measured_text
-                    if level in {'title', 'heading'} and not candidate['single_line']:
-                        measured_text = _balanced_heading_text(
-                            measured_text, translation_font, font_size, candidate['rect'].width,
-                        )
-                    elif not candidate['single_line'] and not candidate['is_list']:
-                        measured_text = _wrap_mixed_text(
-                            measured_text, translation_font, font_size, candidate['rect'].width,
-                        )
-                    if candidate['single_line']:
-                        text_width = translation_font.text_length(measured_text, fontsize=font_size)
-                        line_height_limit = candidate['rect'].height * 1.05
-                        remaining = candidate['rect'].width - text_width if font_size <= line_height_limit else -1.0
-                    elif candidate['is_list']:
-                        remaining = _insert_list_textbox(
-                            probe_page,
-                            candidate['rect'],
-                            measured_text,
-                            fontsize=font_size,
-                            lineheight=1.05,
-                            font=translation_font,
-                            color=(0, 0, 0),
-                        )
-                    else:
-                        remaining = probe_page.insert_textbox(
-                            candidate['rect'],
-                            measured_text,
-                            fontsize=font_size,
-                            lineheight=1.05 if level in {'body', 'caption'} else 1.0,
-                            fontname='NotoSansCJK',
-                            color=(0, 0, 0),
-                            align=(
-                                fitz.TEXT_ALIGN_CENTER
-                                if candidate['align'] == 'center'
-                                else fitz.TEXT_ALIGN_JUSTIFY
-                            ),
-                            render_mode=2 if is_bold else 0,
-                            border_width=0.06 if is_bold else 0.05,
-                        )
-                    if remaining < 0:
-                        font_size -= 0.25
-                if remaining < 0:
-                    warnings += 1
-                    break
-                fitting_sizes.append(font_size)
-            if len(fitting_sizes) == len(level_blocks):
-                planned_sizes[level] = min(fitting_sizes)
-
-        for candidate in candidates:
-            level = str(candidate['level'])
-            font_size = planned_sizes.get(level)
-            if font_size is None:
-                continue
-            candidate['font_size'] = font_size
-            prepared_text = _protect_latin_word_wrapping(_restore_source_latin_terms(
-                str(candidate['text']), str(candidate['source_text']),
-            ))
-            if candidate['indent_first_line']:
-                prepared_text = '\u3000\u3000' + prepared_text
-            candidate['render_text'] = (
-                _balanced_heading_text(
-                    prepared_text, translation_font, font_size, candidate['rect'].width,
-                )
-                if level in {'title', 'heading'} and not candidate['single_line']
-                else _wrap_mixed_text(
-                    prepared_text, translation_font, font_size, candidate['rect'].width,
-                ) if not candidate['single_line'] and not candidate['is_list'] else prepared_text
-            )
-            candidate['line_height'] = 1.0
-            if not candidate['single_line'] and level in {'body', 'caption', 'footnote', 'reference'}:
-                # Font sizes are shared by semantic level, while line spacing may
-                # use the spare vertical room of each individual block. Probe in
-                # small increments and never exceed 2x. Sparse blocks can use
-                # their available height without changing the shared font size.
-                probe_page = probe_document[int(candidate['page'])]
-                for line_height_step in range(105, 201, 5):
-                    line_height = line_height_step / 100
-                    if candidate['is_list']:
-                        remaining = _insert_list_textbox(
-                            probe_page,
-                            candidate['rect'],
-                            str(candidate['render_text']),
-                            fontsize=font_size,
-                            lineheight=line_height,
-                            font=translation_font,
-                            color=(0, 0, 0),
-                        )
-                    else:
-                        remaining = probe_page.insert_textbox(
-                            candidate['rect'],
-                            str(candidate['render_text']),
-                            fontsize=font_size,
-                            lineheight=line_height,
-                            fontname='NotoSansCJK',
-                            color=(0, 0, 0),
-                            align=(
-                                fitz.TEXT_ALIGN_CENTER
-                                if candidate['align'] == 'center'
-                                else fitz.TEXT_ALIGN_JUSTIFY
-                            ),
-                            render_mode=2 if candidate['bold'] else 0,
-                            border_width=0.06 if candidate['bold'] else 0.05,
-                        )
-                    if remaining < 0:
-                        break
-                    candidate['line_height'] = line_height
-            prepared_blocks.append(candidate)
-
-        # Redact once per page, preserving both raster images and vector graphics.
-        # Applying one redaction at a time can repeatedly damage overlapping line
-        # art and can also erase text inserted for a previous block.
-        page_indexes = sorted({int(item['page']) for item in prepared_blocks})
-        for page_index in page_indexes:
-            page = document[page_index]
-            for item in prepared_blocks:
-                if int(item['page']) == page_index:
-                    page.add_redact_annot(item['redaction_rect'], fill=(1, 1, 1))
-            page.apply_redactions(
-                images=fitz.PDF_REDACT_IMAGE_NONE,
-                graphics=fitz.PDF_REDACT_LINE_ART_NONE,
-                text=fitz.PDF_REDACT_TEXT_REMOVE,
-            )
-            page.insert_font(fontname='NotoSansCJK', fontfile=str(TRANSLATION_FONT_PATH))
-
-        for item in prepared_blocks:
-            page_index = int(item['page'])
-            page = document[page_index]
-            if item['single_line']:
-                text_width = translation_font.text_length(str(item['render_text']), fontsize=float(item['font_size']))
-                start_x = item['rect'].x0
-                if item['align'] == 'center':
-                    start_x += max((item['rect'].width - text_width) / 2, 0)
-                page.insert_text(
-                    fitz.Point(start_x, item['rect'].y1 - 0.5),
-                    str(item['render_text']),
-                    fontsize=float(item['font_size']),
-                    fontname='NotoSansCJK',
-                    color=(0, 0, 0),
-                    overlay=True,
-                    render_mode=2 if item['bold'] else 0,
-                    border_width=0.06 if item['bold'] else 0.05,
-                )
-                actual_remaining = item['rect'].width - text_width
-            elif item['is_list']:
-                actual_remaining = _insert_list_textbox(
-                    page,
-                    item['rect'],
-                    str(item['render_text']),
-                    fontsize=float(item['font_size']),
-                    lineheight=float(item['line_height']),
-                    font=translation_font,
-                    color=(0, 0, 0),
-                    overlay=True,
-                )
-            else:
-                actual_remaining = page.insert_textbox(
-                    item['rect'],
-                    str(item['render_text']),
-                    fontsize=float(item['font_size']),
-                    lineheight=float(item['line_height']),
-                    fontname='NotoSansCJK',
-                    color=(0, 0, 0),
-                    align=(fitz.TEXT_ALIGN_CENTER if item['align'] == 'center' else fitz.TEXT_ALIGN_JUSTIFY),
-                    overlay=True,
-                    render_mode=2 if item['bold'] else 0,
-                    border_width=0.06 if item['bold'] else 0.05,
-                )
-            if actual_remaining < 0:
-                warnings += 1
-                continue
-            rendered_blocks += 1
-        if requested_blocks == 0:
-            raise HTTPException(status_code=422, detail='translation manifest contains no renderable text blocks')
-        if rendered_blocks != len(prepared_blocks):
-            raise HTTPException(
-                status_code=500,
-                detail=f'translation renderer produced {rendered_blocks} of {len(prepared_blocks)} prepared text blocks',
-            )
+        result = render_preserving_pages(document, blocks, translations, TRANSLATION_FONT_PATH)
         target_language = req.target_language.strip().lower()
         is_chinese_translation = target_language.startswith('zh')
         attribution_text = (
@@ -932,32 +659,38 @@ def render_pdf_translation(req: PDFTranslationRenderRequest) -> dict[str, object
             attribution_font = 'NotoSansCJK' if is_chinese_translation else 'helv'
             if is_chinese_translation:
                 page.insert_font(fontname=attribution_font, fontfile=str(TRANSLATION_FONT_PATH))
-            attribution_regions = (
-                fitz.Rect(18, 3, page.rect.width - 18, 20),
-                fitz.Rect(18, page.rect.height - 20, page.rect.width - 18, page.rect.height - 3),
+            # Keep branding in the header only; never add a footer watermark.
+            font = translation_font if is_chinese_translation else fitz.Font('helv')
+            fontsize = min(10.5, (page.rect.width - 70) / max(font.text_length(attribution_text, fontsize=1), 1))
+            text_width = font.text_length(attribution_text, fontsize=fontsize)
+            logo_width, logo_height, gap = 24, 16, 5
+            start_x = (page.rect.width - text_width - logo_width - gap) / 2
+            logo_region = fitz.Rect(start_x, 3, start_x + logo_width, 3 + logo_height)
+            page.insert_image(logo_region, filename=str(Path(__file__).parent
+                              / 'assets' / 'lazymind-logo.png'), overlay=True)
+            region = fitz.Rect(start_x + logo_width + gap, 3, page.rect.width - 18, 20)
+            page.insert_textbox(
+                region,
+                attribution_text,
+                fontsize=fontsize,
+                fontname=attribution_font,
+                color=(0.18, 0.18, 0.18),
+                align=fitz.TEXT_ALIGN_LEFT,
+                overlay=True,
+                fill_opacity=0.96,
             )
-            for region in attribution_regions:
-                page.insert_textbox(
-                    region,
-                    attribution_text,
-                    fontsize=10.5,
-                    fontname=attribution_font,
-                    color=(0.18, 0.18, 0.18),
-                    align=fitz.TEXT_ALIGN_CENTER,
-                    overlay=True,
-                    fill_opacity=0.96,
-                )
-                page.insert_link({'kind': fitz.LINK_URI, 'from': region, 'uri': attribution_url})
+            page.insert_link({'kind': fitz.LINK_URI, 'from': fitz.Rect(start_x, 3, start_x
+                             + logo_width + gap + text_width, 20), 'uri': attribution_url})
         document.save(output, garbage=4, deflate=True)
+        try:
+            Path(str(output) + '.diagnostics.json').write_text(json.dumps(result, ensure_ascii=False), encoding='utf-8')
+        except OSError:
+            pass  # Diagnostic storage must never prevent publishing the PDF.
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     finally:
-        probe_document.close()
         document.close()
-    return {
-        'output_path': str(output),
-        'warning_count': warnings,
-        'rendered_block_count': rendered_blocks,
-        'requested_block_count': requested_blocks,
-    }
+    return {'output_path': str(output), **result}
 
 
 @app.post('/v1/pdf/extract-translation-layout')
@@ -976,28 +709,6 @@ def extract_pdf_translation_layout(req: PDFTranslationLayoutRequest) -> dict[str
                 block for block in page.get_text('dict', sort=True).get('blocks', [])
                 if block.get('type') == 0
             ]
-            figure_regions: list[fitz.Rect] = []
-            for image in page.get_image_info():
-                bbox = image.get('bbox')
-                if bbox:
-                    image_rect = fitz.Rect(bbox)
-                    figure_regions.append(fitz.Rect(
-                        max(page.rect.x0, image_rect.x0 - 20),
-                        max(page.rect.y0, image_rect.y0 - 8),
-                        min(page.rect.x1, image_rect.x1 + 20),
-                        min(page.rect.y1, image_rect.y1 + 8),
-                    ))
-            for cluster in page.cluster_drawings():
-                # Ignore isolated rules and tiny glyph-like paths. Dense vector
-                # diagrams, charts and boxed figures must remain untouched,
-                # including any text labels drawn over them.
-                if cluster.width >= 25 and cluster.height >= 20 and cluster.width * cluster.height >= 1000:
-                    figure_regions.append(fitz.Rect(
-                        max(page.rect.x0, cluster.x0 - 60),
-                        max(page.rect.y0, cluster.y0 - 8),
-                        min(page.rect.x1, cluster.x1 + 60),
-                        min(page.rect.y1, cluster.y1 + 8),
-                    ))
             block_index = 0
             for raw_block in page.get_text('blocks', sort=True):
                 if len(raw_block) < 7 or int(raw_block[6]) != 0:
@@ -1031,14 +742,41 @@ def extract_pdf_translation_layout(req: PDFTranslationLayoutRequest) -> dict[str
                 )
                 if is_code or is_formula:
                     continue
-                text_area = max(text_rect.width * text_rect.height, 1.0)
-                is_caption = re.match(r'^(figure|fig\.|table)\s*\d', text, re.IGNORECASE) is not None
-                overlaps_figure = any(
-                    (text_rect & region).get_area() / text_area >= 0.15
-                    for region in figure_regions
-                )
-                if not is_caption and overlaps_figure:
+                # Translate prose around inline math independently. Sending the
+                # complete sentence would duplicate the retained native symbols.
+                if any(protected_span(span) for span in spans):
+                    for line in lines:
+                        if tuple(line.get('dir', (1, 0))) != (1, 0):
+                            continue
+                        groups = [[]]
+                        for span in line.get('spans', []):
+                            if protected_span(span):
+                                groups.append([])
+                            else:
+                                groups[-1].append(span)
+                        for group in groups:
+                            prose = _normalize_pdf_block_text(''.join(span.get('text', '') for span in group))
+                            if sum(character.isalpha() for character in prose) < 2:
+                                continue
+                            rect = fitz.Rect(group[0]['bbox'])
+                            for span in group[1:]:
+                                rect |= fitz.Rect(span['bbox'])
+                            blocks.append({
+                                'id': f'native-block-{page_index + 1}-{block_index}',
+                                'page': page_index + 1,
+                                'pageWidth': page.rect.width,
+                                'pageHeight': page.rect.height,
+                                'bbox': list(rect),
+                                'type': 'native_text_block',
+                                'text': prose,
+                                'fontSize': statistics.median(float(span.get('size', 10)) for span in group),
+                                'styleLevel': 'body',
+                            })
+                            block_index += 1
                     continue
+                is_caption = re.match(r'^(figure|fig\.|table)\s*\d', text, re.IGNORECASE) is not None
+                # Keep source geometry in the manifest. The renderer fits prose
+                # in-page and preserves native chart/table content in place.
                 # Preserve running headers, footers, narrow side metadata and the
                 # author line. They are page furniture rather than translatable
                 # content, and fitting translated prose into these narrow regions
@@ -1049,20 +787,7 @@ def extract_pdf_translation_layout(req: PDFTranslationLayoutRequest) -> dict[str
                     or text_rect.x0 < page.rect.width * 0.07
                     or text_rect.x1 > page.rect.width * 0.93
                 )
-                is_first_page_author_block = (
-                    page_index == 0
-                    and page.rect.height * 0.18 <= text_rect.y0
-                    and text_rect.y1 < page.rect.height * 0.76
-                    and text_rect.height < 30
-                    and len(text) < 100
-                )
-                is_first_page_legal_notice = (
-                    page_index == 0
-                    and text_rect.y0 > page.rect.height * 0.72
-                    and text_rect.x1 < page.rect.width * 0.52
-                    and bool(re.search(r'copyright|permission|isbn|doi\.org|proceedings', text, re.IGNORECASE))
-                )
-                if is_page_furniture or is_first_page_author_block or is_first_page_legal_notice:
+                if is_page_furniture and re.fullmatch(r'\d+', text):
                     continue
                 visible_rich_lines = [
                     line for line in lines

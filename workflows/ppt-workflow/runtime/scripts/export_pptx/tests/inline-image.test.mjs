@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -123,6 +123,40 @@ test('editable PPTX embeds publisher-inlined images instead of a transparent pla
     // The inlined PNG bytes must be packaged in the OOXML zip. This also
     // proves the exporter did not replace it with TRANSPARENT_PIXEL_PNG.
     assert.notEqual(pptx.indexOf(Buffer.from(ONE_PIXEL_PNG.split(',')[1], 'base64')), -1);
+  } finally {
+    await rm(deckDir, { recursive: true, force: true });
+  }
+});
+
+
+test('registered PDF figure survives HTML export with contain sizing', async () => {
+  const deckDir = await mkdtemp(path.join(os.tmpdir(), 'lazymind-pdf-figure-'));
+  try {
+    await mkdir(path.join(deckDir, 'images'));
+    const raw = Buffer.from(ONE_PIXEL_PNG.split(',')[1], 'base64');
+    await writeFile(path.join(deckDir, 'images', 'pdf-figure.png'), raw);
+    const node = { ...inlineImageNode(), src: '../images/pdf-figure.png', styles: { objectFit: 'contain' } };
+    const image = buildImageElement(node, deckDir);
+    assert.equal(image.path, path.join(deckDir, 'images', 'pdf-figure.png'));
+    assert.equal(image.sizing.type, 'contain');
+    const outputPath = path.join(deckDir, 'figure.pptx');
+    const ir = {
+      canvasWidth: 1600, canvasHeight: 900, bodyBgColor: 'rgb(255,255,255)',
+      bodyBgImage: 'none', wrapperBgImage: 'none', bg: null, header: null, footer: null,
+      overlays: [], rest: [],
+      ct: { tag: 'DIV', bounds: { x: 0, y: 0, w: 1600, h: 900 }, styles: {}, children: [node] },
+    };
+    const result = await buildPptx([{ path: path.join(deckDir, 'pages', 'page_001.html'), ir }], deckDir, outputPath);
+    assert.equal(result.successCount, 1);
+    assert.equal(result.failCount, 0);
+    const JSZip = (await import('jszip')).default;
+    const archive = await JSZip.loadAsync(await readFile(outputPath));
+    const media = Object.keys(archive.files).filter(name => name.startsWith('ppt/media/') && !archive.files[name].dir);
+    assert.ok((await Promise.all(media.map(name => archive.files[name].async('nodebuffer'))))
+      .some(bytes => bytes.equals(raw)));
+    const xml = await archive.file('ppt/slides/slide1.xml').async('string');
+    assert.match(xml, /<p:pic>/);
+    assert.doesNotMatch(xml, /<a:srcRect[^>]+[lrtb]="[1-9]/);
   } finally {
     await rm(deckDir, { recursive: true, force: true });
   }

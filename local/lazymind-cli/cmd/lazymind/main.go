@@ -138,11 +138,17 @@ func runInternal(ctx context.Context, args []string, stdout, stderr io.Writer) e
 		return runInternalCodex(ctx, action, *agentBinary, bridge, stdout)
 	case string(mcpclient.Cursor), string(mcpclient.WorkBuddy), string(mcpclient.Raccoon), string(mcpclient.TRAEWork), string(mcpclient.DeepSeekHarness):
 		if action == "login" {
-			if agent != string(mcpclient.Cursor) {
+			var loginErr error
+			switch mcpclient.Kind(agent) {
+			case mcpclient.Cursor:
+				loginErr = cursor.Login(ctx, *agentBinary)
+			case mcpclient.WorkBuddy:
+				loginErr = workbuddy.Login(ctx)
+			default:
 				return fmt.Errorf("unsupported %s action %q", agent, action)
 			}
-			if err := cursor.Login(ctx, *agentBinary); err != nil {
-				return err
+			if loginErr != nil {
+				return loginErr
 			}
 		}
 		adapter, err := mcpclient.New(mcpclient.Kind(agent), "", bridge)
@@ -170,7 +176,7 @@ func runInternal(ctx context.Context, args []string, stdout, stderr io.Writer) e
 
 func runInternalSession(args []string, stdin io.Reader, stdout io.Writer) error {
 	if len(args) != 1 {
-		return errors.New("usage: internal session <set|clear|renew|snapshot>")
+		return errors.New("usage: internal session <set|clear|clear-if-current|renew|snapshot>")
 	}
 	store, err := credentials.NewStore("", "")
 	if err != nil {
@@ -226,6 +232,17 @@ func runInternalSession(args []string, stdin io.Reader, stdout io.Writer) error 
 		if err != nil {
 			return err
 		}
+	case "clear-if-current":
+		var request credentials.ClearRequest
+		body, err := io.ReadAll(io.LimitReader(stdin, maxInternalSessionBytes+1))
+		if err != nil || len(body) > maxInternalSessionBytes || json.Unmarshal(body, &request) != nil {
+			return errors.New("expected LazyMind session is required")
+		}
+		cleared, err := store.ClearIfCurrent(request)
+		if err != nil {
+			return err
+		}
+		return printJSON(stdout, map[string]bool{"ok": true, "cleared": cleared})
 	case "clear":
 		if err := store.Clear(); err != nil {
 			return err

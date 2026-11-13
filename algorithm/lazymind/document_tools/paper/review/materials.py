@@ -21,7 +21,7 @@ from .retrieval import RETRIEVAL_ERRORS, read_sciverse, sciverse_provider, searc
 
 class SearchPlan(BaseModel):
     model_config = ConfigDict(extra='forbid')
-    queries: dict[str, Annotated[int, Field(ge=1, le=200)]]
+    queries: dict[str, Annotated[int, Field(ge=1, le=200)]] = Field(default_factory=dict)
     external_queries: dict[str, Annotated[int, Field(ge=1, le=200)]] = Field(default_factory=dict)
     requested_paper_count: int | None = Field(
         default=None, ge=1, description='Final total only when the user explicitly specifies a count.',
@@ -102,6 +102,7 @@ def _select(papers: list[dict], inputs: dict, knowledge_bases: list[str], *, fix
     if minimum > maximum:
         raise ValueError('综述论文数量下限不能大于上限。')
     bindings = MaterialBindings(papers)
+
     roles = create_model('ReviewMaterialRoles', __config__=ConfigDict(extra='forbid'),
                          **{key: (Literal['paper', 'background', 'exclude'], ...) for key in bindings.materials})
     schema = create_model('ReviewSelection', __base__=SearchPlan, material_roles=(roles, ...))
@@ -111,15 +112,18 @@ def _select(papers: list[dict], inputs: dict, knowledge_bases: list[str], *, fix
             'knowledge_bases': knowledge_bases,
             'fixed_scope': fixed_scope, 'plan_search': plan_search,
             'paper_count_range': {'min': minimum, 'max': maximum},
+            'material_role_keys': list(bindings.materials),
             'retained_papers': [{'title': paper['title'], 'review_role': paper.get('review_role', 'paper')}
                                 for paper in retained],
             'papers': [{**{key: value for key, value in paper.items() if key not in ('text', 'abstract')},
-                        'snippet': (paper.get('abstract') or paper.get('text') or '')[:1200]} for paper in papers],
+                        'snippet': (paper.get('text') or paper.get('abstract') or '')[:1200]} for paper in papers],
         })), schema)
     selected = []
     for key, role in selection.material_roles.model_dump().items():
         if role != 'exclude':
             paper = bindings.materials[key]
+            if paper.get('review_role') == 'background':
+                role = 'background'
             if role == 'background':
                 paper['review_role'] = role
             else:
@@ -192,8 +196,10 @@ def prepare(inputs: dict, knowledge_bases: list[str], *, fixed_scope: bool = Fal
     if plan.requested_paper_count is not None:
         selected = selected[:target_count]
     elif not fixed_scope:
-        supplied = [paper for paper in selected if paper.get('source') not in {'sciverse', 'knowledge_base'}]
-        retrieved = [paper for paper in selected if paper.get('source') in {'sciverse', 'knowledge_base'}]
+        supplied = [paper for paper in selected
+                    if paper.get('source') not in {'sciverse', 'crossref', 'knowledge_base'}]
+        retrieved = [paper for paper in selected
+                     if paper.get('source') in {'sciverse', 'crossref', 'knowledge_base'}]
         selected = supplied + retrieved[:max(0, target_count - _paper_count(supplied))]
     _limit_queries(plan, max(0, target_count - _paper_count(selected))
                    if _paper_count(selected) < minimum_count else 0)
@@ -206,6 +212,8 @@ def prepare(inputs: dict, knowledge_bases: list[str], *, fixed_scope: bool = Fal
         toolkit = KBToolkit(kb_scope=knowledge_bases)
     if plan.external_queries:
         provider = sciverse_provider()
+        if getattr(provider, 'source_name', 'sciverse') == 'crossref':
+            warnings.append('Sciverse 检索凭据未配置，本轮使用 Crossref 元数据与实际取得的论文摘要。')
     kb_queries, external_queries = plan.queries, plan.external_queries
     for page in range(1, 4):
         if not (kb_queries or external_queries):

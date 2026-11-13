@@ -9,6 +9,15 @@ import (
 	"testing"
 )
 
+func mustCoreServiceEnv(t *testing.T, cfg RuntimeConfig, paths RuntimePaths) []string {
+	t.Helper()
+	env, err := coreServiceEnv(cfg, paths)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return env
+}
+
 func TestCoreServiceBuildUsesBackendCore(t *testing.T) {
 	repo := t.TempDir()
 	writeComposeFixture(t, repo)
@@ -44,6 +53,7 @@ func TestCoreServiceBuildUsesBackendCore(t *testing.T) {
 }
 
 func TestCoreServiceEnvUsesLocalEndpoints(t *testing.T) {
+	t.Setenv("LAZYMIND_VOCABULARY_ANKI_SYNC_ENABLED", "")
 	t.Setenv("LAZYMIND_KNOWLEDGE_MANAGEMENT_ENABLED", "")
 	t.Setenv("LAZYMIND_KNOWLEDGE_MOVE_BUDGET_JSON", "")
 	repo := t.TempDir()
@@ -52,9 +62,10 @@ func TestCoreServiceEnvUsesLocalEndpoints(t *testing.T) {
 	if err != nil {
 		t.Fatalf("runtime config: %v", err)
 	}
-	env := coreServiceEnv(cfg, paths)
+	env := mustCoreServiceEnv(t, cfg, paths)
 
 	assertEnvContains(t, env, "LAZYMIND_CORE_HOST=127.0.0.1")
+	assertEnvContains(t, env, "LAZYMIND_VOCABULARY_ANKI_SYNC_ENABLED=true")
 	assertEnvContains(t, env, "LAZYMIND_CLOUD_TOKEN_STORE=memory")
 	assertEnvContains(t, env, "LAZYMIND_CORE_PORT="+strconv.Itoa(cfg.LocalProxy.CoreHostPort))
 	assertEnvContains(t, env, "ACL_DB_DRIVER=sqlite")
@@ -97,7 +108,7 @@ func TestCoreServiceEnvUsesRuntimeUploadPaths(t *testing.T) {
 	if err != nil {
 		t.Fatalf("runtime config: %v", err)
 	}
-	env := coreServiceEnv(cfg, paths)
+	env := mustCoreServiceEnv(t, cfg, paths)
 
 	assertEnvContains(t, env, "LAZYMIND_UPLOAD_ROOT="+paths.UploadRoot)
 	assertEnvContains(t, env, "LAZYMIND_SHARED_UPLOAD_DIR="+paths.UploadRoot)
@@ -183,5 +194,24 @@ func assertEnvNotContains(t *testing.T, env []string, forbidden string) {
 		if strings.Contains(item, forbidden) {
 			t.Fatalf("env contains forbidden path %q in %q", forbidden, item)
 		}
+	}
+}
+
+func TestCoreServiceEnvChatModelFallback(t *testing.T) {
+	for _, value := range []string{"", "true", "false"} {
+		t.Run(value, func(t *testing.T) {
+			t.Setenv("LAZYMIND_CHAT_MODEL_FALLBACK_ENABLED", value)
+			repo := t.TempDir()
+			writeComposeFixture(t, repo)
+			cfg, paths, err := NewRuntimeConfig(defaultProfileValue(), repo)
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := value
+			if want == "" {
+				want = "true"
+			}
+			assertEnvContains(t, mustCoreServiceEnv(t, cfg, paths), "LAZYMIND_CHAT_MODEL_FALLBACK_ENABLED="+want)
+		})
 	}
 }

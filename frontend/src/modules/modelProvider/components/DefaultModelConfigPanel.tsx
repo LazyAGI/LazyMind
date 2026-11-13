@@ -25,6 +25,7 @@ import { useFocusModality } from "../hooks/useFocusModality";
 import { revealModelSetting } from "../utils/revealModelSetting";
 import {
   cloudServiceConfigs,
+  isSelectableModelOption,
   normalizeProviderKey,
   useDefaultModelConfig,
   type CloudServiceCategory,
@@ -223,8 +224,13 @@ export default function DefaultModelConfigPanel({
     visibleModuleConfigs,
     isAdmin,
     lazyMindCloudAvailable,
+    cloudSessionKnown,
     defaultLoadState,
+    defaultLoadFailed,
+    hasLoadedModelSelections,
+    selectedServicesLoadState,
     savingCapabilities,
+    previewingEmbedding,
     selectedModels,
     selectedModelMaxInputTokens,
     moduleModelOptions,
@@ -236,7 +242,8 @@ export default function DefaultModelConfigPanel({
     cloudServiceOptionStates,
     cloudServiceReadyStatus,
     cloudServiceShareStatus,
-    isModelConfigured,
+    hasPersistedSelection,
+    isUsable,
     isCloudServiceConfigured,
     loadModuleModels,
     loadVerifiedCloudService,
@@ -305,16 +312,16 @@ export default function DefaultModelConfigPanel({
     return () => window.cancelAnimationFrame(frame);
   }, [highlightTarget, modelProviderSetupState, moduleModelOptions, defaultLoadState, expandedGroups]);
 
-  const modelCards = visibleModuleConfigs.map((module) => {
+  const modelCards = (hasLoadedModelSelections ? visibleModuleConfigs : []).map((module) => {
+    const selectedValue = selectedModels[module.key];
     const options = (moduleModelOptions[module.key] || []).filter(
-			(option) => lazyMindCloudAvailable || option.source !== "cloud",
-		  );
+      (option) => option.value === selectedValue || lazyMindCloudAvailable || option.source !== "cloud",
+    );
     const optionState = moduleModelOptionStates[module.key];
     const optionLoading = optionState === "loading";
-    const hasAvailableOptions = options.some((option) =>
-      option.model.availability !== "unavailable" &&
-      option.model.lifecycle !== "deprecated" && option.model.lifecycle !== "retired",
-    );
+    const isSelectable = (option: typeof options[number]) => isSelectableModelOption(option, lazyMindCloudAvailable) &&
+      !(probeHealth >= 0 && readModelProbeHealth(option.model.id)?.status === "failed");
+    const hasAvailableOptions = options.some(isSelectable);
     const keyword = (moduleModelSearchKeywords[module.key] || "").trim().toLowerCase();
     const visibleOptions = options.filter((option) =>
       !keyword || `${option.model.name} ${getProviderSearchText(option.provider, language)}`.toLowerCase().includes(keyword),
@@ -340,13 +347,15 @@ export default function DefaultModelConfigPanel({
     const moduleSubtitle = t(module.subtitleKey);
     const maxInputTokens = selectedModelMaxInputTokens[module.key];
     const contextWindow = formatContextWindow(maxInputTokens);
-    const selectedOption = options.find(
-      (option) => option.value === selectedModels[module.key],
-    );
+    const selectedOption = options.find((option) => option.value === selectedValue);
     const selectedIsCloud = selectedOption?.source === "cloud";
-
-    const configured = isModelConfigured(module.key);
-    const saving = savingCapabilities.has(module.key);
+    const persisted = hasPersistedSelection(module.key);
+    const usable = isUsable(module.key);
+    const hasRuntimeFallback = !persisted && !isAdmin && !!modelReadyStatus[module.key]?.ready;
+    const configured = persisted || hasRuntimeFallback;
+    const selectedUnavailable = selectedOption && !usable &&
+      (!selectedIsCloud || cloudSessionKnown || selectedOption.model.availability === "unavailable");
+    const saving = savingCapabilities.has(module.key) || (module.key === "embed_main" && previewingEmbedding);
     return { key: module.key, configured, node: (
       <div
         ref={module.key === highlightTarget ? highlightedRowRef : undefined}
@@ -417,13 +426,21 @@ export default function DefaultModelConfigPanel({
         <div className="model-provider-default-controls">
         <div className="model-provider-default-input">
         {!configured && <p className="model-provider-pending-description">{moduleSubtitle}</p>}
-        {!isAdmin && (capabilityReadyStates[module.key] === "error" || capabilityReadyStates[module.key] === "loading") ? (
+        {selectedUnavailable ? (
+          <Alert type="warning" showIcon message={t("modelProvider.modelNotReadyTip")} description={
+            selectedOption.model.unavailableReason === "index_identity_unverified" ? t("knowledge.embeddingIndexUnknown")
+              : selectedOption.model.unavailableReason === "index_cleanup_in_progress" ? t("knowledge.embeddingIndexClearing")
+              : selectedOption.model.unavailableReason === "index_cleanup_incomplete" ? t("knowledge.embeddingIndexCleanupFailed")
+              : selectedOption.model.unavailableReason === "index_cleared" ? t("knowledge.embeddingIndexCleared")
+              : selectedOption.model.unavailableReason
+          } />
+        ) : null}
+        {!isAdmin && capabilityReadyStates[module.key] === "error" ? (
           <Alert type="warning" showIcon message={t("modelProvider.capabilityStatusLoadFailed")}
-            action={<Button size="small" aria-label={t("common.retry")} disabled={capabilityReadyStates[module.key] === "loading"}
-              loading={capabilityReadyStates[module.key] === "loading"}
+            action={<Button size="small" aria-label={t("common.retry")}
               onClick={() => void retryCapabilityReadiness(module.key)}>{t("common.retry")}</Button>} />
         ) : null}
-        {modelProviderSetupState === "loading" || (!configured && !hasAvailableOptions && modelProviderSetupState === "ready" && (!optionState || optionLoading)) ? (
+        {!persisted && (modelProviderSetupState === "loading" || (!configured && !hasAvailableOptions && modelProviderSetupState === "ready" && (!optionState || optionLoading))) ? (
           <div role="status" aria-label={t("common.loading")}><Skeleton.Input active block size="small" /></div>
         ) : null}
         {modelProviderSetupState === "error" || (!configured && optionState === "error") ? (
@@ -439,10 +456,10 @@ export default function DefaultModelConfigPanel({
             <RightOutlined aria-hidden="true" />
           </Button>
         ) : null}
-        {modelProviderSetupState === "ready" && (configured || hasAvailableOptions) && <Select
+        {(persisted || (modelProviderSetupState === "ready" && (hasRuntimeFallback || hasAvailableOptions))) && <Select
           allowClear={!module.required}
           className={`model-provider-model-select${configured && contextWindow ? " has-context-window" : ""}`}
-          disabled={(module.restricted && !isAdmin) || saving}
+          disabled={modelProviderSetupState !== "ready" || (module.restricted && !isAdmin) || saving}
           filterOption={false}
           id={`model-provider-${module.key.toLowerCase()}`}
           listHeight={340}
@@ -480,7 +497,7 @@ export default function DefaultModelConfigPanel({
               <DownOutlined className="model-provider-select-caret" />
             </span>
           }
-          value={selectedModels[module.key]}
+          value={selectedValue}
           onChange={(value) => handleModelSelection(module.key, value)}
           onSearch={(value) => {
             if (value.trim()) {
@@ -493,7 +510,7 @@ export default function DefaultModelConfigPanel({
           }}
           onDropdownVisibleChange={(open) => {
             if (open) {
-              void loadModuleModels(module.key, true);
+              void loadModuleModels(module.key);
             } else {
               setKeyboardNavigation(false);
             }
@@ -545,13 +562,7 @@ export default function DefaultModelConfigPanel({
                     <Select.Option
                       key={value}
                       title={`${displayName} · ${supplierDisplayName}`}
-                      disabled={
-                        model.availability === "unavailable" ||
-                        model.enabled === false ||
-                        model.lifecycle === "deprecated" ||
-                        model.lifecycle === "retired" ||
-                        (probeHealth >= 0 && readModelProbeHealth(model.id)?.status === "failed")
-                      }
+                      disabled={!isSelectable(option)}
                       label={renderModelValue(option)}
                       value={value}
                     >
@@ -583,7 +594,7 @@ export default function DefaultModelConfigPanel({
           })}
         </Select>}
         </div>
-        {configured && isAdmin && !runtimeFeatures.hideUserGroupSurfaces && !selectedIsCloud ? (
+        {persisted && usable && isAdmin && !runtimeFeatures.hideUserGroupSurfaces && !selectedIsCloud ? (
           <Tooltip title={t(shareStatus[module.key] ? "modelProvider.shareOn" : "modelProvider.shareOff")}>
             <span className="model-provider-share-control">
               <span aria-hidden="true">{t(shareStatus[module.key] ? "modelProvider.shared" : "modelProvider.unshared")}</span>
@@ -667,13 +678,13 @@ export default function DefaultModelConfigPanel({
         <div className="model-provider-default-controls">
         <div className="model-provider-default-input">
         {!configured && <p className="model-provider-pending-description">{t(service.setupDescriptionKey)}</p>}
-        {!isAdmin && (capabilityReadyStates[service.key] === "error" || capabilityReadyStates[service.key] === "loading") ? (
+        {!isAdmin && capabilityReadyStates[service.key] === "error" ? (
           <Alert type="warning" showIcon message={t("modelProvider.capabilityStatusLoadFailed")}
-            action={<Button size="small" aria-label={t("common.retry")} disabled={capabilityReadyStates[service.key] === "loading"}
-              loading={capabilityReadyStates[service.key] === "loading"}
+            action={<Button size="small" aria-label={t("common.retry")}
               onClick={() => void retryCapabilityReadiness(service.key)}>{t("common.retry")}</Button>} />
         ) : null}
-        {setupState === "loading" || (!configured && !options.length && setupState === "ready" && (!optionState || optionLoading)) ? (
+        {selectedServicesLoadState === "loading" || setupState === "loading" ||
+          (selectedServicesLoadState === "ready" && !configured && !options.length && setupState === "ready" && (!optionState || optionLoading)) ? (
           <div role="status" aria-label={t("common.loading")}><Skeleton.Input active block size="small" /></div>
         ) : null}
         {setupState === "error" || (!configured && optionState === "error") ? (
@@ -758,7 +769,7 @@ export default function DefaultModelConfigPanel({
             </Select.Option>
           ))}
         </Select>}
-        {setupState === "empty" || setupState === "ready" ? (
+        {selectedServicesLoadState === "ready" && (setupState === "empty" || setupState === "ready") ? (
           <Button className="model-provider-configure-capability" type="text" size="small" disabled={saving} onClick={() => onConfigureCloudService(service.key)}>
             {t("modelProvider.configureCapability")}
             <RightOutlined aria-hidden="true" />
@@ -787,10 +798,10 @@ export default function DefaultModelConfigPanel({
   });
 
   const toolCards = onConfigureToolService ? ([
-    { key: "searchEngine", category: "search", title: "搜索引擎", icon: SearchOutlined },
-    { key: "academicSearch", category: "academic", title: "学术搜索引擎", icon: ReadOutlined },
-    { key: "cloudParsing", category: "parsing", title: "文档解析（OCR）", icon: ScanOutlined },
-    { key: "machineTranslation", category: "translation", title: "机器翻译", icon: TranslationOutlined },
+    { key: "searchEngine", category: "search", title: t("modelProvider.defaults.services.search"), icon: SearchOutlined },
+    { key: "academicSearch", category: "academic", title: t("modelProvider.defaults.services.academic"), icon: ReadOutlined },
+    { key: "cloudParsing", category: "parsing", title: t("modelProvider.defaults.services.parsing"), icon: ScanOutlined },
+    { key: "machineTranslation", category: "translation", title: t("modelProvider.defaults.services.translation"), icon: TranslationOutlined },
   ] as const).map((service) => ({
     key: service.key,
     configured: Boolean(toolServiceSummaries?.[service.category]),
@@ -799,7 +810,7 @@ export default function DefaultModelConfigPanel({
       <div className="model-provider-default-controls">
         <button type="button" className="default-services-tool-picker" aria-label={t("modelProvider.configureCapability")} onClick={() => onConfigureToolService(service.category)}>
           <span className="default-services-tool-icon" aria-hidden="true"><service.icon /></span>
-          <span className="default-services-summary" title={toolServiceSummaries?.[service.category] || "尚未配置"}>{toolServiceSummaries?.[service.category] || "尚未配置"}</span>
+          <span className="default-services-summary" title={toolServiceSummaries?.[service.category] || t("modelProvider.defaults.notConfigured")}>{toolServiceSummaries?.[service.category] || t("modelProvider.defaults.notConfigured")}</span>
           <span className="default-services-tool-action">{t("modelProvider.configureCapability")}<RightOutlined aria-hidden="true" /></span>
         </button>
       </div>
@@ -835,22 +846,24 @@ export default function DefaultModelConfigPanel({
 		/>
 	  ) : null}
 
-      {defaultLoadState === "loading" ? (
+      {!hasLoadedModelSelections && defaultLoadState === "loading" ? (
         <div role="status" aria-live="polite">
           <span>{t("common.loading")}</span>
           <Skeleton active paragraph={{ rows: 4 }} />
         </div>
-      ) : defaultLoadState === "error" ? (
+      ) : null}
+      {defaultLoadFailed ? (
         <Alert type="error" showIcon message={t("modelProvider.defaultConfigLoadFailed")}
           action={<Button onClick={retryDefaultModelState}>{t("common.retry")}</Button>} />
-      ) : (
+      ) : null}
+      {hasLoadedModelSelections || selectedServicesLoadState === "ready" || Object.keys(selectedCloudServices).length > 0 ? (
         <>
-          <section className="model-defaults-basic" aria-label={t("modelProvider.defaults.basicTitle")}>
+          {hasLoadedModelSelections && <section className="model-defaults-basic" aria-label={t("modelProvider.defaults.basicTitle")}>
             <div className="model-defaults-section-heading">
               <h3>{t("modelProvider.defaults.basicTitle")}</h3>
             </div>
             <div className="model-defaults-rows">{basicCards.map((card) => card.node)}</div>
-          </section>
+          </section>}
           <div className="model-defaults-extensions-heading">
             <h3>{t("modelProvider.defaults.extensionsTitle")}</h3>
             <p>{t("modelProvider.defaults.extensionsDescription")}</p>
@@ -891,7 +904,7 @@ export default function DefaultModelConfigPanel({
             })}
           </div>
         </>
-      )}
+      ) : null}
     </section>
   );
 }

@@ -1,5 +1,6 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
+import { message } from "antd";
 
 import AskCard, { type AskPending } from "./index";
 
@@ -223,6 +224,11 @@ describe("AskCard read-only history", () => {
       }],
     }} onSubmit={onSubmit} />);
 
+    expect(screen.queryByRole("button", { name: /chat\.askCardUploadFile/ })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("radio", { name: "Upload template" }));
+    expect(screen.getByRole("button", { name: /chat\.askCardUploadFile/ })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("radio", { name: "No template" }));
+    expect(screen.queryByRole("button", { name: /chat\.askCardUploadFile/ })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("radio", { name: "Upload template" }));
     expect(screen.getByRole("button", { name: /chat\.askCardUploadFile/ })).toBeInTheDocument();
     const submit = screen.getByRole("button", { name: "chat.askCardSubmit" });
@@ -236,6 +242,35 @@ describe("AskCard read-only history", () => {
     expect(onSubmit.mock.calls[0][0].files).toEqual([
       expect.objectContaining({ name: "brand.pptx", uri: "/uploads/template.pptx" }),
     ]);
+  });
+
+  it("warns about missing visual understanding only after an image attachment is accepted", async () => {
+    const warning = vi.spyOn(message, "warning").mockImplementation(() => undefined as never);
+    try {
+      const upload = async (askId: string, file: File, accepted: boolean) => {
+        const view = render(<AskCard vlmReady={false} askPending={{
+          ask_id: askId,
+          questions: [{ text: "Upload material?", type: "single", choices: ["Upload material"],
+            attachment: { when_choice: "Upload material", material_id: "material",
+              accept: [".pdf", ".png"], max_files: 2 } }],
+        }} onSubmit={vi.fn()} />);
+        fireEvent.click(screen.getByRole("radio", { name: "Upload material" }));
+        fireEvent.change(view.container.querySelector('input[type="file"]')!, { target: { files: [file] } });
+        if (accepted) await screen.findByText(file.name);
+        view.unmount();
+      };
+
+      await upload("document-material", new File(["pdf"], "notes.pdf", { type: "application/pdf" }), true);
+      expect(warning).not.toHaveBeenCalledWith("chat.vlmNotReadyWarning");
+
+      await upload("large-material", new File([new Uint8Array(5 * 1024 * 1024 + 1)], "oversized.png", { type: "image/png" }), false);
+      expect(warning).not.toHaveBeenCalledWith("chat.vlmNotReadyWarning");
+
+      await upload("image-material", new File(["image"], "photo.png", { type: "image/png" }), true);
+      expect(warning).toHaveBeenCalledWith("chat.vlmNotReadyWarning");
+    } finally {
+      warning.mockRestore();
+    }
   });
 
   it("submits more than three academic papers without a count limit", async () => {

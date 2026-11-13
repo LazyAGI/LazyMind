@@ -26,6 +26,22 @@ func interruptProcess(pid int) error {
 	return syscall.Kill(pid, syscall.SIGINT)
 }
 
+// Cleanup inventories already include owned children. These helpers must not
+// turn a PID into a process-group signal, even when PID happens to equal PGID.
+func interruptProcessPID(pid int) error {
+	if pid <= 0 {
+		return nil
+	}
+	return syscall.Kill(pid, syscall.SIGINT)
+}
+
+func forceKillProcessPID(pid int) error {
+	if pid <= 0 {
+		return nil
+	}
+	return syscall.Kill(pid, syscall.SIGKILL)
+}
+
 func forceKillProcessTree(pid int) error {
 	if pid <= 0 {
 		return nil
@@ -49,8 +65,6 @@ func nativeProcessGroupID(pid int) int {
 	}
 	return pgid
 }
-
-func processStartIdentity(pid int) uint64 { return 0 }
 
 func attachProcessJob(_ RuntimePaths, _ string, _ *os.Process) (func(), error) {
 	return func() {}, nil

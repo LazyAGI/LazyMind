@@ -31,6 +31,7 @@ func resolvePythonDescriptor(ctx context.Context, client *http.Client, pinned Py
 	if err := validateAssetURL(pinned.CatalogURL); err != nil {
 		return pinned, err
 	}
+	name := strings.ToUpper(pinned.ID)
 	secure := *client
 	secure.CheckRedirect = func(req *http.Request, via []*http.Request) error {
 		if len(via) >= 10 {
@@ -44,18 +45,18 @@ func resolvePythonDescriptor(ctx context.Context, client *http.Client, pinned Py
 	}
 	res, err := secure.Do(req)
 	if err != nil {
-		return pinned, fmt.Errorf("download RAG catalog: %w", err)
+		return pinned, fmt.Errorf("download %s catalog: %w", name, err)
 	}
 	defer res.Body.Close()
 	if res.StatusCode != http.StatusOK {
-		return pinned, fmt.Errorf("RAG catalog returned HTTP %d", res.StatusCode)
+		return pinned, fmt.Errorf("%s catalog returned HTTP %d", name, res.StatusCode)
 	}
 	data, err := io.ReadAll(io.LimitReader(res.Body, 1024*1024+1))
 	if err != nil {
 		return pinned, err
 	}
 	if len(data) > 1024*1024 {
-		return pinned, errors.New("RAG catalog exceeds 1 MiB")
+		return pinned, fmt.Errorf("%s catalog exceeds 1 MiB", name)
 	}
 	var catalog pythonCatalog
 	if err := json.Unmarshal(data, &catalog); err != nil {
@@ -64,7 +65,7 @@ func resolvePythonDescriptor(ctx context.Context, client *http.Client, pinned Py
 	resolved := catalog.Components[pinned.ID]
 	if catalog.SchemaVersion != 1 || catalog.Platform != pinned.Platform || catalog.Arch != pinned.Arch ||
 		(resolved.Tag != "" && resolved.Tag != pinned.Tag) || !compatiblePythonDescriptor(pinned, resolved) {
-		return pinned, errors.New("online RAG catalog is incompatible with this client")
+		return pinned, fmt.Errorf("online %s catalog is incompatible with this client", name)
 	}
 	// Never let remote metadata redirect the next catalog refresh to another channel.
 	resolved.Tag, resolved.CatalogURL = pinned.Tag, pinned.CatalogURL

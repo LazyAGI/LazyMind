@@ -64,5 +64,22 @@ func appendArtifactUpsertEvent(
 		ContractVersion: "workflow.v1", EventType: "artifact.upsert", EntityID: revision.ID,
 		StateVersion: nextStateVersion, PayloadJSON: encoded, CreatedAt: now,
 	}
-	return tx.Create(&event).Error
+	if err := tx.Create(&event).Error; err != nil {
+		return err
+	}
+	session.StateVersion = nextStateVersion
+	if session.WorkflowRevisionID == "" {
+		return nil
+	}
+	// Edits can invalidate executions and reviews as well as the edited artifact.
+	// Publish their authoritative graph/display together for every live surface.
+	projection, err := projectSession(tx.Statement.Context, tx, session)
+	if err != nil {
+		return err
+	}
+	snapshotPayload, err := json.Marshal(projection)
+	if err != nil {
+		return err
+	}
+	return appendSessionStateEvent(tx, *session, "workflow.snapshot", snapshotPayload)
 }

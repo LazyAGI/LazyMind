@@ -195,7 +195,6 @@ func (s *DatasetCatalogService) ListDatasets(ctx context.Context, req DatasetLis
 			}
 			candidates = append(candidates, ds)
 		}
-		candidates = filterDatasetsByScanSourceAccessForCaller(ctx, caller, candidates, permission)
 
 		if len(candidates) > 0 {
 			candidateIDs := make([]string, len(candidates))
@@ -268,10 +267,6 @@ func (s *DatasetCatalogService) accessibleDataset(ctx context.Context, req Datas
 	if len(datasetACL) == 0 {
 		return orm.Dataset{}, nil, DatasetCatalogCaller{}, &DatasetServiceError{Code: DatasetServiceForbidden, Message: "dataset forbidden"}
 	}
-	if !datasetAllowedByScanSourceForCaller(ctx, caller, ds.ID, acl.PermissionDatasetRead) {
-		return orm.Dataset{}, nil, DatasetCatalogCaller{}, &DatasetServiceError{Code: DatasetServiceForbidden, Message: "dataset forbidden"}
-	}
-
 	return ds, datasetACL, caller, nil
 }
 
@@ -311,6 +306,7 @@ func (s *DatasetCatalogService) GetDataset(ctx context.Context, req DatasetGetRe
 			out[0].ReadingCapabilities = append(out[0].ReadingCapabilities, learning.CapabilityRef{Key: row.CapabilityKey, Version: row.CapabilityVersion, Enabled: row.Enabled, DisplayOrder: row.DisplayOrder, Settings: config})
 		}
 	}
+	addRetainedCapabilities(ctx, s.db, out)
 	s.addAllowedActions(ctx, caller, out)
 	return out[0], nil
 }
@@ -333,6 +329,7 @@ func (s *DatasetCatalogService) datasetsFromRows(ctx context.Context, rows []orm
 		}
 		out = append(out, s.datasetFromRow(ctx, ds, userID, datasetACL, statsMap[ds.ID], sourceMap[ds.ID], sourceTypeMap[ds.ID], liveParsers))
 	}
+	addRetainedCapabilities(ctx, s.db, out)
 	return out
 }
 

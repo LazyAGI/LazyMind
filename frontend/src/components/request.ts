@@ -1,7 +1,7 @@
-import axios from "axios";
+import axios, { AxiosHeaders } from "axios";
 import type { AxiosInstance, AxiosError, InternalAxiosRequestConfig } from "axios";
 import { message } from "antd";
-import { AgentAppsAuth } from "@/components/auth";
+import { AgentAppsAuth, type AuthSessionSnapshot } from "@/components/auth";
 import i18n from "@/i18n";
 import { getApiBaseUrl } from "@/runtime/apiBase";
 import {
@@ -64,6 +64,12 @@ function applyOptionalAuthHeader(config: any) {
   if (config.headers.authorization === "Bearer undefined") {
     delete config.headers.authorization;
   }
+  if (config._authManaged === undefined) {
+    config._authManaged = Boolean(authHeaders.authorization
+      && String(AxiosHeaders.from(config.headers).get("authorization") || "") === authHeaders.authorization);
+  }
+  if (config._authManaged) config._authCredentials = { ...authSnapshot(), token: requestToken(config) };
+  if (authSessionIdentity() !== identity) throw new Error("STALE_AUTH_SESSION");
   return config;
 }
 
@@ -289,27 +295,89 @@ function extractBusinessEnvelopeErrorCode(responseData: any): string | undefined
   return undefined;
 }
 
-async function restoreLocalSessionAndRetry(
-  originalRequest?: InternalAxiosRequestConfig & { _authSession?: string; _localSessionRetry?: boolean },
-) {
-  if (!isLocalSessionEnabled()) {
-    return null;
+type AuthRequest = InternalAxiosRequestConfig & {
+  _authSession?: string; _retry?: boolean; _localSessionRetry?: boolean;
+  _newerCredentialRetry?: boolean; _authManaged?: boolean; _authCredentials?: AuthSessionSnapshot; silentError?: boolean;
+};
+
+function requestToken(request?: AuthRequest): string {
+  return String(AxiosHeaders.from(request?.headers).get("authorization") || "").replace(/^Bearer\s+/i, "");
+}
+
+function authSnapshot(): AuthSessionSnapshot {
+  const user = AgentAppsAuth.getUserInfo();
+  return { identity: authSessionIdentity(), token: user?.token || "", refreshToken: user?.refreshToken };
+}
+
+function retryWithToken(request: AuthRequest, token: string) {
+  request.headers = AxiosHeaders.from(request.headers);
+  request.headers.set("authorization", `Bearer ${token}`);
+  return axiosInstance(request);
+}
+
+function retryNewerCredentials(request: AuthRequest, failed: AuthSessionSnapshot): Promise<any> | null {
+  const current = authSnapshot();
+  if (current.identity !== failed.identity || !current.token
+    || current.token === failed.token && current.refreshToken === failed.refreshToken) return null;
+  // A late response is never evidence against a newer credential. Bound replay
+  // independently of refresh retries so continuously rotating logins cannot loop.
+  if (request._newerCredentialRetry) return Promise.reject(new Error("STALE_AUTH_CREDENTIALS"));
+  request._newerCredentialRetry = true;
+  return retryWithToken(request, current.token);
+}
+
+async function handleUnauthorized(error: AxiosError, request?: AuthRequest): Promise<any> {
+  if (!request || request._authManaged === false || ["2002920", "1001306"].includes(extractErrorCode(error) ?? "")) return Promise.reject(error);
+  const used = requestToken(request);
+  const failed = request._authCredentials ?? { ...authSnapshot(), token: used || authSnapshot().token };
+  const renewed = retryNewerCredentials(request, failed);
+  if (renewed) return renewed;
+  // Login/logout errors belong to their caller, not to the active login.
+  if (isRefreshEndpoint(request.url)) return Promise.reject(error);
+  const expire = () => used && used === failed.token
+    ? AgentAppsAuth.expireSession(failed) : undefined;
+  const warn = (failure: unknown) => {
+    if (!request.silentError) message.warning({ key: API_ERROR_MESSAGE_KEY,
+      content: getLocalizedErrorMessage(failure) || localizeErrorCode(GENERIC_REQUEST_ERROR_CODE) });
+  };
+  let failure: unknown = error;
+  if (!request._retry) {
+    request._retry = true;
+    let token: string | undefined;
+    try { token = await AgentAppsAuth.refreshAccessToken(); }
+    catch (refreshError) { failure = refreshError; }
+    if (authSessionIdentity() !== failed.identity) return Promise.reject(failure);
+    if (token) return retryWithToken(request, token);
+    const newer = retryNewerCredentials(request, failed);
+    if (newer) return newer;
   }
-  if (!originalRequest) {
-    return null;
+  if (isLocalSessionEnabled() && !request._localSessionRetry) {
+    request._localSessionRetry = true;
+    let token: string | undefined;
+    try { token = await restoreLocalSessionAndGetToken(); }
+    catch (localError) { failure = localError; }
+    if (authSessionIdentity() !== failed.identity) return Promise.reject(failure);
+    if (token) return retryWithToken(request, token);
+    const newer = retryNewerCredentials(request, failed);
+    if (newer) return newer;
+    // A local runtime may be restarting. Failed recovery is retryable and does
+    // not authorize global logout or deletion of the connector's credentials.
+    warn(failure);
+    return Promise.reject(failure);
   }
-  const token = await restoreLocalSessionAndGetToken();
-  originalRequest._authSession = authSessionIdentity();
-  originalRequest._localSessionRetry = true;
-  originalRequest.headers = originalRequest.headers ?? {};
-  originalRequest.headers.authorization = `Bearer ${token}`;
-  return axiosInstance(originalRequest);
+  if (authSessionIdentity() !== failed.identity) return Promise.reject(failure);
+  const newer = retryNewerCredentials(request, failed);
+  if (newer) return newer;
+  const status = (failure as AxiosError)?.response?.status;
+  if (status === 401) void expire();
+  warn(failure);
+  return Promise.reject(failure);
 }
 
 export const handleError = async (error: AxiosError): Promise<any> => {
   if (isCanceledError(error)) return Promise.reject(error);
   
-  const originalRequest = error.config as InternalAxiosRequestConfig & { _authSession?: string; _retry?: boolean; _localSessionRetry?: boolean; silentError?: boolean };
+  const originalRequest = error.config as AuthRequest;
   const silentError = Boolean(originalRequest?.silentError);
   if (originalRequest?._authSession !== undefined && originalRequest._authSession !== authSessionIdentity()) {
     return Promise.reject(error);
@@ -339,97 +407,7 @@ export const handleError = async (error: AxiosError): Promise<any> => {
         });
       }
     } else if (error.response.status === 401) {
-      // Provider credentials are independent from the LazyMind login session.
-      const providerCode = extractErrorCode(error);
-      if (providerCode === "2002920" || providerCode === "1001306") return Promise.reject(error);
-      if (isRefreshEndpoint(originalRequest?.url)) {
-        if (isLocalSessionEnabled()) {
-          try {
-            await restoreLocalSessionAndGetToken();
-          } catch (localSessionError) {
-            console.error("Local admin session restore failed:", localSessionError);
-          }
-          return Promise.reject(error);
-        }
-        if (AgentAppsAuth.isLoggedIn()) {
-          message.warning({
-            key: API_ERROR_MESSAGE_KEY,
-            content:
-              getLocalizedErrorMessage(error) ||
-              localizeErrorCode(GENERIC_REQUEST_ERROR_CODE),
-          });
-        }
-        void AgentAppsAuth.logout();
-        return Promise.reject(error);
-      }
-
-      if (!originalRequest || originalRequest._retry) {
-        if (isLocalSessionEnabled() && originalRequest && !originalRequest._localSessionRetry) {
-          try {
-            const localSessionRetryResponse = await restoreLocalSessionAndRetry(originalRequest);
-            if (localSessionRetryResponse) {
-              return localSessionRetryResponse;
-            }
-          } catch (localSessionError) {
-            console.error("Local admin session restore failed:", localSessionError);
-          }
-        }
-        if (originalRequest?._authSession !== undefined && originalRequest._authSession !== authSessionIdentity()) {
-          return Promise.reject(error);
-        }
-        if (AgentAppsAuth.isLoggedIn()) {
-          message.warning({
-            key: API_ERROR_MESSAGE_KEY,
-            content:
-              getLocalizedErrorMessage(error) ||
-              localizeErrorCode(GENERIC_REQUEST_ERROR_CODE),
-          });
-        }
-        void AgentAppsAuth.logout();
-        return Promise.reject(error);
-      }
-
-      originalRequest._retry = true;
-
-      const refreshIdentity = authSessionIdentity();
-
-      try {
-        const newAccessToken = await AgentAppsAuth.refreshAccessToken();
-        
-        if (authSessionIdentity() !== refreshIdentity) throw new Error("STALE_AUTH_SESSION");
-
-        if (originalRequest.headers) {
-          originalRequest.headers.authorization = `Bearer ${newAccessToken}`;
-        }
-
-        return await axiosInstance(originalRequest);
-      } catch (refreshError) {
-        if (authSessionIdentity() !== refreshIdentity) return Promise.reject(refreshError);
-        console.error("Token refresh failed:", refreshError);
-
-        if (isLocalSessionEnabled()) {
-          try {
-            const token = await restoreLocalSessionAndGetToken();
-            originalRequest._authSession = authSessionIdentity();
-            originalRequest.headers = originalRequest.headers ?? {};
-            originalRequest.headers.authorization = `Bearer ${token}`;
-            originalRequest._localSessionRetry = true;
-            return await axiosInstance(originalRequest);
-          } catch (localSessionError) {
-            console.error("Local admin session restore failed:", localSessionError);
-          }
-        }
-        
-        if (authSessionIdentity() !== refreshIdentity) return Promise.reject(refreshError);
-        message.warning({
-          key: API_ERROR_MESSAGE_KEY,
-          content:
-            getLocalizedErrorMessage(refreshError) ||
-            localizeErrorCode(GENERIC_REQUEST_ERROR_CODE),
-        });
-        void AgentAppsAuth.logout();
-        return Promise.reject(refreshError);
-      }
+      return handleUnauthorized(error, originalRequest);
     } else {
       if (!silentError && !shouldSuppressTransientRequestError(error)) {
         message.error({

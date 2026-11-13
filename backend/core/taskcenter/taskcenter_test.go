@@ -3,6 +3,7 @@ package taskcenter
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -79,6 +80,88 @@ func TestListTasks_FilterByStatus(t *testing.T) {
 	}
 	if len(running) != 1 {
 		t.Fatalf("expected 1 running task, got %d", len(running))
+	}
+}
+
+func TestListTasksFiltersConversationBeforePaginationAndCounts(t *testing.T) {
+	db := orm.MigrateTestDB(t,
+		&orm.TaskCenterTask{}, &orm.Conversation{}, &orm.UserSchedule{},
+		&orm.WorkflowSession{}, &orm.SubAgentTask{},
+	)
+	store.Init(db.DB, nil, nil)
+	t.Cleanup(func() { store.Init(nil, nil, nil) })
+	now := time.Now().UTC()
+	tasks := []orm.TaskCenterTask{
+		{ID: "target-old", UserID: "owner", ConversationID: "target", TaskType: "workflow_run", Status: "succeeded", CreatedAt: now.Add(-2 * time.Hour), UpdatedAt: now},
+		{ID: "target-new", UserID: "owner", ConversationID: "target", TaskType: "workflow_run", Status: "failed", CreatedAt: now.Add(-time.Hour), UpdatedAt: now},
+		{ID: "foreign", UserID: "another-user", ConversationID: "target", TaskType: "workflow_run", Status: "succeeded", CreatedAt: now, UpdatedAt: now},
+	}
+	for i := 0; i < 101; i++ {
+		tasks = append(tasks, orm.TaskCenterTask{
+			ID: fmt.Sprintf("other-%03d", i), UserID: "owner", ConversationID: "other",
+			TaskType: "workflow_run", Status: "succeeded", CreatedAt: now, UpdatedAt: now,
+		})
+	}
+	if err := db.Create(&tasks).Error; err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		query string
+		id    string
+		total int
+	}{
+		{"page=1", "target-new", 2},
+		{"page=2", "target-old", 2},
+		{"status=succeeded", "target-old", 1},
+	} {
+		t.Run(tc.query, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, "/task-center/tasks?conversation_id=target&page_size=1&"+tc.query, nil)
+			req.Header.Set("X-User-Id", "owner")
+			rec := httptest.NewRecorder()
+			ListTasks(rec, req)
+			if rec.Code != http.StatusOK {
+				t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+			}
+			var response struct {
+				Items        []taskResponse `json:"items"`
+				Total        int            `json:"total"`
+				StatusCounts map[string]int `json:"status_counts"`
+			}
+			if err := json.NewDecoder(rec.Body).Decode(&response); err != nil {
+				t.Fatal(err)
+			}
+			if len(response.Items) != 1 || response.Items[0].ID != tc.id || response.Total != tc.total {
+				t.Fatalf("unexpected filtered page: %+v", response)
+			}
+			if response.StatusCounts["all"] != 2 || response.StatusCounts["succeeded"] != 1 || response.StatusCounts["failed"] != 1 {
+				t.Fatalf("counts include another conversation or user: %+v", response.StatusCounts)
+			}
+		})
+	}
+}
+
+func TestTaskMatchesCanonicalStatusFilter(t *testing.T) {
+	tests := []struct {
+		status string
+		filter string
+		want   bool
+	}{
+		{"pending", "attention", true},
+		{"waiting", "attention", true},
+		{"waiting_inputs", "attention", true},
+		{"paused", "attention", false},
+		{"paused", "paused", true},
+		{"interrupted", "failed", true},
+		{"interrupted", "interrupted", true},
+		{"failed", "failed", true},
+		{"completed", "succeeded", true},
+		{"succeeded", "succeeded", true},
+		{"canceled", "canceled", true},
+	}
+	for _, tt := range tests {
+		if got := taskMatchesStatusFilter(tt.status, tt.filter); got != tt.want {
+			t.Fatalf("status %q filter %q: got %v want %v", tt.status, tt.filter, got, tt.want)
+		}
 	}
 }
 
@@ -244,6 +327,19 @@ func TestResolveTaskStatusDoesNotTreatStreamingHistoryAsComplete(t *testing.T) {
 	}
 	if got := resolveTaskStatus(context.Background(), db.DB, task); got != "running" {
 		t.Fatalf("streaming progress must remain running, got %q", got)
+	}
+}
+
+func TestInterruptedTaskIsTerminalAndDoesNotBecomeRunningOrTimeoutFailure(t *testing.T) {
+	db := newTestTaskDB(t)
+	for _, age := range []time.Duration{time.Minute, 3 * time.Hour} {
+		task := orm.TaskCenterTask{ID: "interrupted", Status: "interrupted", TaskType: "background_chat", CreatedAt: time.Now().Add(-age)}
+		if got := resolveTaskStatus(t.Context(), db.DB, task); got != "interrupted" {
+			t.Fatalf("interrupted task became %s at age %s", got, age)
+		}
+	}
+	if !IsTerminalStatus("interrupted") {
+		t.Fatal("interrupted execution must be terminal")
 	}
 }
 

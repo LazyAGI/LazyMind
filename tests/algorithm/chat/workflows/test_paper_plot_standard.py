@@ -82,6 +82,104 @@ def test_standard_bar_preserves_values_selection_and_condition_n(analysis):
         plt.close(figure)
 
 
+@pytest.mark.parametrize('category', ['metric', 'label'])
+@pytest.mark.parametrize('mixed_units', [False, True])
+def test_comparable_metric_categories_share_axes_without_losing_unit_boundaries(analysis, category, mixed_units):
+    pytest.importorskip('matplotlib')
+    import matplotlib.pyplot as plt
+
+    prototype = analysis['findings'][0]
+    analysis['findings'] = []
+    for index in range(6):
+        item = copy.deepcopy(prototype)
+        item.update(id=f'r{index + 1}', value=.9 + index / 100)
+        metadata = json.loads(item['calculation'])
+        metadata.update(metric=f'Outcome {index + 1}', label=f'Outcome {index + 1}', coordinates={})
+        item['calculation'] = json.dumps(metadata)
+        if mixed_units and index == 5:
+            item['unit'] = 's'
+        analysis['findings'].append(item)
+    original = copy.deepcopy(analysis)
+    plan = bind_figures(dict(figures=[dict(
+        title='Evaluation profile', purpose='Compare the recorded outcomes.', style='point_interval',
+        finding_ids=[item['id'] for item in analysis['findings']], category=category,
+    )]), analysis)
+    assert len(plan['figures']) == 1
+    figure = draw_rows(result_rows(analysis), plan['figures'][0])
+    try:
+        assert len(figure.axes) == (2 if mixed_units else 1)
+        assert sum(len(axis.collections) for axis in figure.axes) == 6
+        assert analysis == original
+    finally:
+        plt.close(figure)
+
+
+def test_shared_legend_moves_above_axes_without_hiding_observations():
+    pytest.importorskip('matplotlib')
+    import matplotlib.pyplot as plt
+    from lazymind.document_tools.paper.plotting.worker import place_figure_legends
+    figure, axis = plt.subplots(figsize=(6.2, 2.5))
+    try:
+        for index in range(5):
+            axis.scatter(index, index, label=f'Task {index + 1}')
+        figure.legend(loc='upper right')
+        place_figure_legends(figure)
+        renderer = figure.canvas.get_renderer()
+        box = figure.legends[0].get_window_extent(renderer)
+        assert not box.overlaps(axis.get_window_extent(renderer))
+        assert box.height < figure.bbox.height * .25
+        assert [text.get_text() for text in figure.legends[0].get_texts()] == [f'Task {i + 1}' for i in range(5)]
+        assert [tuple(item.get_offsets()[0]) for item in axis.collections] == [(i, i) for i in range(5)]
+    finally:
+        plt.close(figure)
+
+
+@pytest.mark.parametrize('geometry,invalid_limits,valid_limits,error', [
+    ('bar(0, 10, width=.4)', 'set_xlim(0, 1)', 'set_xlim(-.5, .5)', 'Bar is clipped on categorical'),
+    ('barh(0, 10, height=.4)', 'set_ylim(0, 1)', 'set_ylim(-.5, .5)', 'Bar is clipped on categorical'),
+    ('bar(0, 85)', 'set_ylim(0, 3)', 'set_ylim(0, 90)', 'Measured bar endpoint 85 is outside numeric'),
+    ('barh(0, 85)', 'set_xlim(0, 3)', 'set_xlim(0, 90)', 'Measured bar endpoint 85 is outside numeric'),
+])
+def test_actual_export_rejects_clipping_and_accepts_complete_limits(geometry, invalid_limits, valid_limits, error):
+    pytest.importorskip('matplotlib')
+    from lazymind.document_tools.paper.plotting import worker
+
+    code = f'''import matplotlib.pyplot as plt
+def draw(data, statistics, spec):
+    figure, axis = plt.subplots(figsize=(5.8, 1.8))
+    axis.{geometry}
+    axis.{invalid_limits}
+    return figure
+'''
+    payload = dict(table={}, statistics={}, spec={}, data_sha256='a' * 64, code=code)
+    with pytest.raises(ValueError, match=error):
+        worker.render(payload)
+    payload['code'] = code.replace(invalid_limits, valid_limits)
+    assert '<svg' in worker.render(payload)['svg']
+
+
+def test_long_category_bars_are_horizontal_and_preserve_values_and_intervals(analysis):
+    pytest.importorskip('matplotlib')
+    import matplotlib.pyplot as plt
+    rows = result_rows(analysis)[:2]
+    rows[0]['coordinates']['method'] = 'Overall document task completion'
+    rows[1]['coordinates']['method'] = 'Target scope classification accuracy'
+    rows[0]['interval'] = dict(lower=.8, upper=.99, kind='confidence', level=.95, method='supplied')
+    original = copy.deepcopy(rows)
+    figure = draw_rows(rows, dict(style='bar_grouped_hatch', category='method'))
+    try:
+        axis = figure.axes[0]
+        assert [patch.get_width() for patch in axis.patches] == pytest.approx([18 / 19, 20 / 21])
+        assert axis.get_xlim() == (0, 1)
+        assert list(axis.lines[0].get_xdata()) == [.8, .99]
+        assert [text.get_text().replace('\n', ' ') for text in axis.get_yticklabels()] == [
+            'Overall document task completion', 'Target scope classification accuracy']
+        assert figure.get_figwidth() > figure.get_figheight()
+        assert rows == original
+    finally:
+        plt.close(figure)
+
+
 def test_standard_line_orders_x_without_recomputing_intervals(analysis):
     pytest.importorskip('matplotlib')
     import matplotlib
@@ -112,7 +210,6 @@ def test_public_standard_draw_uses_actual_renderer_without_model(analysis, monke
     from lazymind.document_tools.paper.plotting import analysis as plots, pipeline, worker
     monkeypatch.setattr(pipeline, 'execute_plot', worker.render)  # Replace transport, keep actual drawing/export.
     monkeypatch.setattr(plots, 'call_code_model', lambda *_: pytest.fail('standard figure requested generated code'))
-    monkeypatch.setattr(plots, 'call_model', lambda *_: pytest.fail('standard figure requested model repair'))
     figure = bind_figures(dict(figures=[dict(
         title='Rates', purpose='Conditional execution.', style='bar_grouped_hatch', result_indices=[0, 1])]),
         analysis)['figures'][0]
@@ -122,6 +219,41 @@ def test_public_standard_draw_uses_actual_renderer_without_model(analysis, monke
     assert '<svg' in charts[0]['svg'] and set(traces[0]['exports']) == {'png', 'pdf'}
     assert 'n=19' in charts[0]['caption'] and 'n=21' in charts[0]['caption']
     assert traces[0]['renderer'] == 'standard_estimates_v2' and not traces[0].get('fallback')
+
+
+@pytest.mark.parametrize('normalize', [False, True])
+@pytest.mark.parametrize('series', ['phase', 'label'])
+def test_native_horizontal_stack_uses_existing_helper_and_preserves_components(analysis, monkeypatch, normalize, series):
+    pytest.importorskip('matplotlib')
+    import xml.etree.ElementTree as ET
+    from lazymind.document_tools.paper.plotting import analysis as plots, pipeline, worker
+    monkeypatch.setattr(pipeline, 'execute_plot', worker.render)
+    monkeypatch.setattr(plots, 'call_code_model', lambda *_: pytest.fail('stack requested generated code'))
+    prototype = analysis['findings'][0]
+    analysis['findings'] = []
+    for index, value in enumerate([12., 18., 64., 6.]):
+        item = copy.deepcopy(prototype)
+        item.update(id=f'r{index + 1}', value=value, unit='s')
+        metadata = json.loads(item['calculation'])
+        metadata.update(label=f'Component {index + 1}', metric='Elapsed time',
+                        coordinates={'phase': f'Phase {index + 1}'})
+        item['calculation'] = json.dumps(metadata)
+        analysis['findings'].append(item)
+    original = copy.deepcopy(analysis)
+    figure = bind_figures(dict(figures=[dict(
+        title='Stage composition', purpose='Show additive stage durations.', style='bar_stacked',
+        series=series, normalize=normalize, finding_ids=['r1', 'r2', 'r3', 'r4'])]), analysis)['figures'][0]
+    charts, traces = plots.draw(analysis, [figure], dict(topic='Stage timing', data=dict(
+        columns=['success'], column_types=['number'], units=[None], rows=[[1.]])))
+    assert traces[0]['renderer'] == 'native_stacked_v1' and len(traces[0]['attempts']) == 1
+    root = ET.fromstring(charts[0]['svg'])
+    assert float(root.attrib['width'].removesuffix('pt')) > float(root.attrib['height'].removesuffix('pt'))
+    visible = [''.join(node.itertext()) for node in root.iter() if node.tag.rsplit('}', 1)[-1] == 'text']
+    assert all(f'Phase {index}' in visible for index in range(1, 5))
+    assert any('Total 100' in text for text in visible)
+    assert any('Share (%)' in text for text in visible) is normalize
+    assert (charts[0]['style'], charts[0]['series']) == ('bar_stacked', 'phase')
+    assert analysis == original
 
 
 @pytest.mark.parametrize('style', ['line_confidence_band', 'point_interval', 'bar_grouped_hatch'])
@@ -595,6 +727,43 @@ def test_dimension_binding_discovers_actual_fields_and_keeps_unknown_fields_inva
         check_encoding(dict(style='bar_grouped_hatch', category='value'), rows)
 
 
+@pytest.mark.parametrize('dimension', ['category', 'series', 'facet'])
+def test_dimension_value_alias_uses_its_unique_field_without_changing_evidence(analysis, dimension):
+    for row in analysis['findings']:
+        metadata = json.loads(row['calculation'])
+        metadata['coordinates']['指标'] = '图片数量'
+        row['calculation'] = json.dumps(metadata)
+    original = copy.deepcopy(analysis)
+    encoding = dict(category='method', series=None, facet=None)
+    encoding[dimension] = '图片数量'
+    if dimension == 'category':
+        encoding['series'] = 'method'
+    plan = bind_figures(dict(figures=[dict(
+        title='Observed results', purpose='Display the selected observations.', style='bar_grouped_hatch',
+        finding_ids=['r1', 'r2'], **encoding)]), analysis)['figures'][0]
+    assert plan[dimension] == '指标'
+    assert plan['finding_ids'] == ['r1', 'r2']
+    assert analysis == original
+
+
+@pytest.mark.parametrize('defect', ['ambiguous', 'varying', 'partial_field'])
+def test_dimension_value_alias_keeps_ambiguous_or_incomplete_fields_invalid(analysis, defect):
+    rows = result_rows(analysis)[:2]
+    for row in rows:
+        row['coordinates']['指标'] = '图片数量'
+    if defect == 'ambiguous':
+        for row in rows:
+            row['coordinates']['另一个指标'] = '图片数量'
+    elif defect == 'varying':
+        rows[1]['coordinates']['指标'] = '耗时'
+    else:
+        rows[0]['coordinates']['图片数量'] = 2
+    original = copy.deepcopy(rows)
+    with pytest.raises(ValueError, match='unavailable'):
+        check_encoding(dict(style='bar_grouped_hatch', category='method', series='图片数量'), rows)
+    assert rows == original
+
+
 @pytest.mark.parametrize('mode', ['metrics', 'facets', 'dense'])
 def test_dense_standard_figure_is_split_without_losing_evidence(analysis, mode):
     count = 70 if mode == 'dense' else 6
@@ -614,7 +783,7 @@ def test_dense_standard_figure_is_split_without_losing_evidence(analysis, mode):
     proposal = dict(figures=[dict(
         title='Measurements', purpose='Show every observed result.',
         style='bar_grouped_hatch', finding_ids=ids, category='label',
-        facet='condition' if mode == 'facets' else None)])
+        facet={'facets': 'condition', 'metrics': 'metric'}.get(mode))])
     figures = bind_figures(proposal, analysis)['figures']
     selected = [identifier for figure in figures for identifier in figure['finding_ids']]
     assert selected == ids

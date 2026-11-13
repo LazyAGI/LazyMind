@@ -2,13 +2,13 @@
 import copy
 from concurrent.futures import CancelledError, as_completed
 
-from .model import call_model, call_code_model, PlotModelError
-from .code_response import CODE_INSTRUCTION, REPAIR_INSTRUCTION, code_response, repair_response, numbered_source
+from .model import call_code_model, PlotModelError
+from .code_response import CODE_INSTRUCTION, REPAIR_INSTRUCTION, code_response, repair_response
 from .code import ALLOWED_IMPORTS, FORBIDDEN, FORBIDDEN_ATTRIBUTES
 from .skills import PlotSkills
 from .labels import display_unit
 from .pipeline import draw_one, limits, FigureRenderError
-from .standard import STANDARD_STYLES, check_encoding, evidence_caption, generate_standard_code
+from .standard import STANDARD_STYLES, check_encoding, evidence_caption, generate_standard_code, generate_stacked_code
 from ..analysis.results import result_rows
 from ..analysis.schema import prompt_tables, table_map
 from ..analysis.model import facts
@@ -23,6 +23,7 @@ Use the plain function declaration without type annotations; no annotation-only 
 Import names actually used in executable statements explicitly; an alias binds only that alias.
 Prefer 1 or 2 data panels, with at most 4 in this figure/script. Implement only this figure's planned purpose;
 do not expand the full analysis context into a large dashboard or add unrelated panels and duplicated plotting code.
+Prefer a moderately landscape canvas.
 Use loops and the supplied helpers for related series. Additional planned figures have their own independent scripts.
 data.analysis_results is the COMPLETE executed result table, with values, meaning, units, intervals, source columns,
 scope, coordinates and comparison direction in each row. display_unit is an optional formatted unit symbol with the
@@ -30,13 +31,14 @@ original numeric scale; unit preserves source metadata. At execution data.tables
 source tables, each with columns, column_types, units and rows (lists of cells). This request shows a table marked
 rows_omitted only by row_count, column_profiles and sample_rows; draw still receives all of its rows.
 data.facts supplies the research topic and context.
+selected_results highlights this figure's selected rows. Bind plotted values and coordinates to the same result row.
 spec.purpose/requirements describe this figure; spec.finding_ids identifies its focus. Other results are context.
 These requirements are generated planning hints, not additional observations. Actual result rows are authoritative
 if a hint implies an incorrect value/direction. Derive annotations from runtime values, not literal planning text.
 Use actual runtime values, never hardcoded example numbers. Do not recompute estimates/tests/intervals.
 Keep data/statistics unchanged; construct local label lists or copied frames for presentation.
 Raw rows can be used for real distributions/paired observations when appropriate; do not fabricate missing observations.
-Write readable English axis/tick/legend labels yourself from scientific meaning. Use shared terminology consistently.
+Write concise axis/tick/legend labels in the requested paper language. Use shared terminology consistently.
 Source IDs and filter expressions are provenance, not display labels. Keep every selected comparison and its direction;
 do not drop adverse values or imply unrelated x/y scopes are paired. State subtraction direction with concise level
 names and define their full meanings in the caption. Shared terminology identifies scientific meaning; if its full
@@ -47,6 +49,7 @@ Matplotlib code can implement a needed geometry. There is no mandatory result_gr
 spec.style_contract provides style-specific appearance/layout; data.shared_style supplies common terminology,
 series_order and group colors for ALL figures. Preserve those shared choices across independently generated figures.
 series_order and series_colors use ORIGINAL coordinate values; terminology maps those keys to display labels.
+Use integer indices for palette, edge, marker and size arrays; series_colors maps original group keys to colors.
 For each panel derive its actual groups from the selected result rows and chosen coordinate. Filter the global order
 to these observed groups, then append any remaining observed groups. The global order is not a data inventory for
 every panel. Never filter observations by translated labels or key summaries by display labels.
@@ -83,19 +86,19 @@ In-figure numeric labels use the actual values.
 Keep full titles/captions outside the canvas; axis names, panel identifiers and scientific annotations belong inside.
 No file/network/process access, installation, save/show or extra computation. Return the figure; the host exports it.
 Use only the actual allowed imports below. Arguments are dictionaries. No attribute-compatibility readers,
-schema guards or validation frameworks. On repair preserve evidence; a simpler honest layout is allowed.
+schema guards or validation frameworks. On repair correct the actual error while preserving evidence and geometry.
 '''
-    request = call_model if previous else call_code_model
     rows = [{key: value for key, value in row.items() if key != 'display_unit'} for row in data['analysis_results']]
-    answer = request(model_prompt(
+    answer = call_code_model(model_prompt(
         prompt, facts=data['facts'], tables=prompt_tables(data['tables']),
-        shared=dict(analysis_results=rows, statistics=statistics, shared_style=data['shared_style'],
+        shared=dict(selected_results=[row for row in rows if row['id'] in spec['finding_ids']],
+                    analysis_results=rows, statistics=statistics, shared_style=data['shared_style'],
                     execution_rules=dict(allowed_imports=sorted(ALLOWED_IMPORTS), forbidden_names=sorted(FORBIDDEN),
                                          forbidden_attributes=sorted(FORBIDDEN_ATTRIBUTES)),
                     skill_reference=reference),
         task=dict(spec={key: value for key, value in spec.items() if key != 'caption'},
                   display_units={row['id']: row.get('display_unit') for row in data['analysis_results']},
-                  previous_code=numbered_source(previous) if previous else '', error=error,
+                  previous_code=previous, error=error,
                   caption=spec.get('caption', '')),
         response_instruction=REPAIR_INSTRUCTION if previous else CODE_INSTRUCTION))
     source = repair_response(answer, previous, error) if previous else code_response(answer)
@@ -126,7 +129,8 @@ def prepare_figures(analysis, figures, inputs, shared=None):
                     style_contract=contract, data_contract={'results': 'executed', 'tables': 'complete_original'})
         standard = figure['style'] in STANDARD_STYLES
         reference = '' if standard else skills.reference(figure['style'], figure.get('base_style'))
-        spec['renderer'] = 'standard_estimates_v2' if standard else 'generated'
+        spec['renderer'] = ('standard_estimates_v2' if standard else
+                            'native_stacked_v1' if figure['style'] == 'bar_stacked' else 'generated')
         spec['paper_language'] = inputs.get('constraints', {}).get('paper_language', 'zh-CN')
         bundle = (inputs.get('data') or {}).get('tables', [])
         spec['source_names'] = {item['id']: item.get('description', '').split('。', 1)[0].split('\n', 1)[0]
@@ -155,43 +159,27 @@ def draw(analysis, figures, inputs, shared=None):
         # not discard the other figures' successfully exported files.
         item = prepare_figures(analysis, [figure], inputs, shared)[0]
         figure, data, statistics, spec, reference, hashes = item
-        fallback, original_attempts = None, []
         try:
-            standard = spec['renderer'] == 'standard_estimates_v2'
-            generator = generate_standard_code if standard else generate_code
-            chart, trace = draw_one(data, statistics, spec, reference, 1 if standard else attempts, generator)
+            generator = {'standard_estimates_v2': generate_standard_code,
+                         'native_stacked_v1': generate_stacked_code}.get(spec['renderer'], generate_code)
+            fixed = spec['renderer'] != 'generated'
+            chart, trace = draw_one(data, statistics, spec, reference, 1 if fixed else attempts, generator)
         except (FigureRenderError, PlotModelError) as exc:
-            from .simple import fallback_style, generate_simple_code
-            original_attempts = getattr(exc, 'history', [])
-            style = fallback_style(figure['style'])
-            fallback = dict(reason=str(exc), original_style=figure['style'], style=style,
-                            relationship_not_shown=True)
-            spec.update(style=style, base_style=None, fallback=fallback,
-                        style_contract=PlotSkills().style_contract(style))
-            spec['caption'] = ('Simple display of the selected executed estimates; the originally planned geometry '
-                               'was not completed. Original units and available intervals are retained.')
-            try:
-                with diagnostics.stage('figure_simple_fallback', figure_id=figure['id']):
-                    chart, trace = draw_one(data, statistics, spec, '', 1, generate_simple_code)
-            except (FigureRenderError, PlotModelError) as failure:
-                trace = dict(id=figure['id'], title=figure['title'], status='failed',
-                             error=diagnostics.safe_error(failure), original_attempts=original_attempts,
-                             attempts=getattr(failure, 'history', []), exports={})
-                diagnostics.save(f"figure-{diagnostics.figure_name(figure['id'])}-failed.json", trace)
-                return None, trace
-            diagnostics.save(f"figure-{diagnostics.figure_name(figure['id'])}-fallback.json", fallback)
+            trace = dict(id=figure['id'], title=figure['title'], status='failed',
+                         error=diagnostics.safe_error(exc), attempts=getattr(exc, 'history', []), exports={})
+            diagnostics.save(f"figure-{diagnostics.figure_name(figure['id'])}-failed.json", trace)
+            return None, trace
         selected = [row for row in data['analysis_results'] if row['id'] in figure['finding_ids']]
-        description = spec.get('caption') or ('' if standard else figure['purpose'])
+        description = spec.get('caption') or ('' if fixed else figure['purpose'])
         caption = '\n\n'.join(filter(None, (description, evidence_caption(
             spec, selected, spec['paper_language']))))
         result = dict(id=figure['id'], title=figure['title'], columns=figure['columns'], svg=chart['svg'],
-                      finding_ids=figure['finding_ids'], caption=caption)
+                      finding_ids=figure['finding_ids'], caption=caption,
+                      normalize=figure.get('normalize', False),
+                      **{key: figure.get(key) for key in ('style', 'base_style', 'category', 'series', 'facet')})
         trace.update(exports=chart['exports'], skill_resources_sha256=hashes,
                      concurrency=min(concurrency, len(figures)), caption=result['caption'], renderer=spec['renderer'],
                      evidence=figure.get('evidence', []))
-        if fallback:
-            trace.update(fallback=fallback, original_attempts=original_attempts,
-                         first_attempt_passed_execution_and_file_checks=False)
         return result, trace
 
     ordered = [None] * len(figures)

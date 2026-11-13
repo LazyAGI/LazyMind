@@ -32,6 +32,17 @@ def test_overlapping_ranges_are_not_applied():
                                            dict(start_line=2, end_line=2, code='pass')]), 'a\nb\n')
 
 
+def test_complete_program_repair_reads_native_python_without_json_escaping():
+    previous = 'def analyze():\n    return ["duration, "calls"]\n'
+    corrected = 'def analyze():\n    return ["duration", "calls"]\n'
+    answer = parse_code_response('```python\n' + corrected + '```')
+    source = repair_response(answer, previous, 'SyntaxError: unterminated string literal')
+    namespace = {}
+    exec(source, namespace)
+    assert source == corrected
+    assert namespace['analyze']() == ['duration', 'calls']
+
+
 def test_identical_repair_is_rejected_with_original_scientific_error():
     source = 'def analyze():\n    raise ValueError("No matched measurement")\n'
     answer = dict(replacements=[dict(start_line=2, end_line=2, code=source.splitlines()[1])])
@@ -50,6 +61,17 @@ def test_code_is_read_from_native_body_without_merging_reasoning():
     assert normalize_response(dict(content=code, reasoning_details=[dict(text='Draft')])).reasoning == 'Draft'
     with pytest.raises(ValueError, match='未返回代码'):
         parse_code_response(normalize_response(dict(reasoning_content=code)).body)
+
+
+@pytest.mark.parametrize('tag', ['think', 'thinking'])
+def test_explicitly_delimited_thinking_is_removed_before_json_parsing(monkeypatch, tag):
+    monkeypatch.setattr(lazyllm, 'AutoModel', lambda **_: object())
+    monkeypatch.setattr(model.transport, 'configure', lambda *_args, **_kwargs: False)
+    monkeypatch.setattr(model.transport, 'call', lambda *_args, **_kwargs: {
+        'content': f'<{tag}>Untrusted draft {{"value": 0}}</{tag}>\n{{"value": 2}}',
+        'reasoning_content': 'Separate provider reasoning',
+    })
+    assert model.call_model('Return the answer') == {'value': 2}
 
 
 @pytest.mark.parametrize('stream', [False, True])

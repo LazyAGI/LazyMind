@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from 'react';
+import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import type { SlotRevision } from '@/modules/chat/store/workflowPanel';
 import { resolveCoreAssetUrl, resolveMarkdownImageUrlAsync, isExpiredSignedUrl } from '@/modules/knowledge/utils/imageUrl';
 import { extractHtmlFromArtifact } from './exportHtmlToPptx';
@@ -54,22 +55,58 @@ function aliasKey(sessionId: string, slot: SlotRevision): string {
  * static <img>. Shared cache with raster PPTX export. Edit / regenerate bumps
  * revision or HTML fingerprint → replaces the shot. Reorder keeps the same PNG.
  */
-export function SlideThumb({
+export interface SlideThumbHandle { retry: () => void }
+
+export const SlideThumb = forwardRef<SlideThumbHandle, { slot: SlotRevision; sessionId: string }>(function SlideThumb({
   slot,
   sessionId,
-}: {
-  slot: SlotRevision;
-  sessionId: string;
-}) {
-  const [previewSrc, setPreviewSrc] = useState<string | null>(() => getRasterPng(aliasKey(sessionId, slot)));
+}, ref) {
+  const { t } = useTranslation();
+  const elementRef = useRef<HTMLDivElement>(null);
+  const autoRetries = useRef(0);
+  const [retry, setRetry] = useState(0);
+  const aKey = aliasKey(sessionId, slot);
+  const [previewSrc, setPreviewSrc] = useState<string | null>(() => getRasterPng(aKey));
   const [failed, setFailed] = useState(false);
   const genRef = useRef(0);
+
+  useImperativeHandle(ref, () => ({ retry: () => {
+    if (failed) setRetry(value => value + 1);
+  } }), [failed]);
+
+  useEffect(() => { autoRetries.current = 0; }, [aKey]);
+
+  useEffect(() => {
+    if (!failed || autoRetries.current >= 2) return;
+    let scheduled = false;
+    const recover = () => {
+      if (scheduled || document.hidden || autoRetries.current >= 2) return;
+      scheduled = true;
+      autoRetries.current += 1;
+      setRetry(value => value + 1);
+    };
+    // Intersection detects a cross-origin host hiding our iframe; visibility
+    // events also recover when the entire browser tab returns to the foreground.
+    let intersecting = typeof IntersectionObserver === 'undefined';
+    const recoverIfVisible = () => { if (intersecting) recover(); };
+    const observer = typeof IntersectionObserver === 'undefined' ? undefined : new IntersectionObserver(entries => {
+      intersecting = entries.some(entry => entry.isIntersecting);
+      recoverIfVisible();
+    });
+    if (elementRef.current) observer?.observe(elementRef.current);
+    document.addEventListener('visibilitychange', recoverIfVisible);
+    window.addEventListener('focus', recoverIfVisible);
+    return () => {
+      observer?.disconnect();
+      document.removeEventListener('visibilitychange', recoverIfVisible);
+      window.removeEventListener('focus', recoverIfVisible);
+    };
+  }, [failed]);
 
   useEffect(() => {
     const gen = ++genRef.current;
     setFailed(false);
 
-    const aKey = aliasKey(sessionId, slot);
     const aliased = getRasterPng(aKey);
     if (aliased) {
       setPreviewSrc(aliased);
@@ -85,10 +122,7 @@ export function SlideThumb({
       const text = await loadArtifactText(slot.artifact_value);
       if (cancelled || gen !== genRef.current) return;
       const html = extractHtmlFromArtifact(text) || extractHtmlFromArtifact(slot.artifact_value);
-      if (!html) {
-        setFailed(true);
-        return;
-      }
+      if (!html) throw new Error('Slide artifact does not contain HTML');
 
       const contentKey = rasterCacheKey(sessionId, fingerprintText(html));
       const png = await ensureRasterPng(contentKey, html);
@@ -96,28 +130,33 @@ export function SlideThumb({
       await setRasterPng(aKey, png, RASTER_EXPORT_PIXEL_RATIO);
       if (cancelled || gen !== genRef.current) return;
       setPreviewSrc(png);
-    })().catch(() => {
-      if (!cancelled && gen === genRef.current) setFailed(true);
+    })().catch(error => {
+      if (cancelled || gen !== genRef.current) return;
+      console.warn('[workflow] slide thumbnail failed', {
+        sessionId, slot: slot.slot, listIndex: slot.list_index,
+        message: error instanceof Error ? error.message : 'Slide capture failed',
+      });
+      setFailed(true);
     });
 
     return () => {
       cancelled = true;
     };
-  }, [sessionId, slot.artifact_value, slot.slot_id, slot.revision, slot.draft_version, slot.sort_order]);
+  }, [aKey, retry, sessionId, slot.artifact_value, slot.slot, slot.list_index, slot.sort_order]);
 
   if (previewSrc) {
     return (
-      <div className='slide-thumb slide-thumb--shot'>
+      <div ref={elementRef} className='slide-thumb slide-thumb--shot'>
         <img className='slide-thumb__img' src={previewSrc} alt='' draggable={false} />
       </div>
     );
   }
 
   return (
-    <div className='slide-thumb slide-thumb--pending'>
+    <div ref={elementRef} className='slide-thumb slide-thumb--pending' title={failed ? t('chat.workflowThumbnailFailed') : undefined}>
       <div className='slide-thumb__body'>
-        <div className='slide-thumb__title'>{failed ? '—' : '…'}</div>
+        <div className='slide-thumb__title'>{failed ? t('chat.workflowRetry') : '…'}</div>
       </div>
     </div>
   );
-}
+});

@@ -71,6 +71,7 @@ import { getSelectableCapabilities, isModelTypeSupportedByProtocol, normalizeRun
 import { resolveRemoteModelMetadata } from "../remoteModelMetadata";
 import { canDiscoverWithoutApiKey } from "../providerAuthentication";
 import { getProviderConnectionFailureMessage } from "../connectionFailure";
+import { getEmbeddingDeletionWarning } from "../embeddingRecovery";
 import { getProviderDisplayName } from "../providerDisplayNames";
 import { ModelEditorModal, type ModelEditorValues } from "../components/ModelEditorModal";
 import { ModelFeaturesEditor } from "../components/ModelFeaturesEditor";
@@ -440,7 +441,7 @@ function mapApiGroup(
   const isApiGroup =
     "base_url" in group || "has_api_key" in group || "is_verified" in group;
 
-  return createConnectionGroup(provider, {
+  const mapped = createConnectionGroup(provider, {
     id: group.id,
     name: group.name,
     baseUrl: isApiGroup
@@ -470,6 +471,14 @@ function mapApiGroup(
       maxOutputTokens: model.max_output_tokens || undefined,
     }))),
   });
+  return {
+    ...mapped,
+    models: visibleSavedProviderModels(provider, mapped.verified, mapped.models),
+  };
+}
+
+function visibleSavedProviderModels(provider: Pick<ProviderOption, "isCustom">, verified: boolean, models: ProviderModel[]) {
+  return provider.isCustom && !verified ? models.filter((model) => !model.builtIn) : models;
 }
 
 function normalizeModelName(value: string) {
@@ -788,7 +797,7 @@ export default function ModelProviderPage({
           ...item,
           groups: item.groups.map((group) => ({
             ...group,
-            models: cachedModels.get(group.id) || [],
+            models: visibleSavedProviderModels(item, group.verified, cachedModels.get(group.id) || []),
           })),
         }));
       });
@@ -1073,14 +1082,16 @@ export default function ModelProviderPage({
           provider.id === providerId
             ? {
                 ...provider,
-                groups: provider.groups.map((group) =>
-                  group.id === groupId
-                    ? {
-                        ...group,
-                        verified: isVerified,
-                      }
-                    : group,
-                ),
+                groups: provider.groups.map((group) => {
+                  if (group.id !== groupId) return group;
+                  const models = visibleSavedProviderModels(provider, isVerified, group.models);
+                  return {
+                    ...group,
+                    verified: isVerified,
+                    models,
+                    ...(provider.isCustom && !isVerified ? { modelCount: models.length } : {}),
+                  };
+                }),
               }
             : provider,
         ),
@@ -1136,11 +1147,11 @@ export default function ModelProviderPage({
           item.id === providerId
             ? {
                 ...item,
-                groups: item.groups.map((candidate) =>
-                  candidate.id === groupId
-                    ? { ...candidate, models: nextGroup.models, modelCount: nextGroup.models.length }
-                    : candidate,
-                ),
+                groups: item.groups.map((candidate) => {
+                  if (candidate.id !== groupId) return candidate;
+                  const models = visibleSavedProviderModels(item, candidate.verified, nextGroup.models);
+                  return { ...candidate, models, modelCount: models.length };
+                }),
               }
             : item,
         ),
@@ -1592,13 +1603,10 @@ export default function ModelProviderPage({
         }
         return true;
       } catch (error) {
-        const response = (error as { response?: { status?: number; data?: { detail?: unknown; message?: unknown } } })?.response;
-        const detail = String(response?.data?.detail || response?.data?.message || "");
-        const embeddingBlocked = response?.status === 409 &&
-          (detail.includes("requires confirmation to downgrade") || detail.includes("embedding model is in use"));
-        if (embeddingBlocked) {
-          if (notify) message.warning({ key: "embedding-in-use", content: t("modelProvider.embeddingInUse") });
-          else throw new Error(t("modelProvider.embeddingInUse"));
+        const warning = getEmbeddingDeletionWarning(error, t);
+        if (warning) {
+          if (notify) message.warning({ key: "embedding-in-use", ...warning });
+          else throw new Error(warning.content);
         } else if (notify) message.error(getLocalizedErrorMessage(error));
 
         return false;

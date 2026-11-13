@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -70,6 +71,7 @@ func desktopAdapterFixture(t *testing.T) *Adapter {
 	}
 	a.home = filepath.Join(root, "LazyMind home")
 	a.bridge = dshTestProbe{}
+	a.dshRunning = func(context.Context, string) (bool, error) { return false, nil }
 	a.dshInspector = func(context.Context, string) (dshRuntimeInspection, error) {
 		return dshRuntimeInspection{Version: "0.2.0-rc.2", Supported: true, Profiles: []dshRuntimeProfile{
 			{Name: "desktop", MCPVersion: "0.2.0-rc.2", MCPPath: "/bundled/mcp"},
@@ -116,6 +118,45 @@ func TestDesktopStatusIsReadOnlyAndRequiresValidInitialization(t *testing.T) {
 		writeTestFile(t, manifest, body)
 		if s := a.Status(context.Background()); s.State != agentintegration.Failed || s.CanConnect || s.Issue == nil || s.Issue.Code != "dependency_environment" {
 			t.Fatalf("bad manifest %q: %+v", body, s)
+		}
+	}
+}
+
+func TestDesktopInstallChecksExitBeforeChangingProfiles(t *testing.T) {
+	for _, configured := range []bool{false, true} {
+		for _, inspectionError := range []bool{false, true} {
+			t.Run(fmt.Sprintf("configured=%v/inspectionError=%v", configured, inspectionError), func(t *testing.T) {
+				a := desktopAdapterFixture(t)
+				a.dshRunning = func(context.Context, string) (bool, error) { return false, nil }
+				runs := 0
+				a.dshRunner = func(_ context.Context, profile string, _ ...string) error {
+					runs++
+					installDSHFixture(t, profile)
+					return nil
+				}
+				if configured {
+					if s := a.Connect(context.Background()); s.State != agentintegration.Enabled {
+						t.Fatalf("setup: %+v", s)
+					}
+				}
+				runs = 0
+				checks := 0
+				a.dshRunning = func(context.Context, string) (bool, error) {
+					checks++
+					if inspectionError {
+						return false, errors.New("process inspection unavailable")
+					}
+					return true, nil
+				}
+				status := a.Connect(context.Background())
+				want := "quit_required"
+				if inspectionError {
+					want = "process_inspection_failed"
+				}
+				if checks == 0 || runs != 0 || status.Issue == nil || status.Issue.Code != want {
+					t.Fatalf("want=%s checks=%d profile mutations=%d status=%+v", want, checks, runs, status)
+				}
+			})
 		}
 	}
 }
@@ -210,6 +251,45 @@ func TestDesktopPartialInstallRetryAndDisconnect(t *testing.T) {
 	}
 	if pathExists(filepath.Join(dshHome(), "cordis.patch.yml")) {
 		t.Fatal("wrote global patch")
+	}
+}
+
+func TestDesktopConnectEnablesAlreadyInstalledBundle(t *testing.T) {
+	a := desktopAdapterFixture(t)
+	dir := filepath.Join(dshHome(), "profiles", "desktop")
+	manifest := filepath.Join(dir, "package.json")
+	// DSH leaves an existing dependency unselected even when plugin add succeeds.
+	const before = `{
+		"private": true,
+		"dependencies": {"@lazymind/dsh-workflow": "file:workflow.tgz"},
+		"dsh": {"profile": {
+			"patchReload": "startup",
+			"bundles": ["@deepseek-ai/dsh-base", "@deepseek-ai/dsh-web-app", "another-bundle"]
+		}}
+	}`
+	writeTestFile(t, manifest, before)
+	writeTestFile(t, filepath.Join(dir, "node_modules", dshWorkflowPackage, "package.json"), `{"version":"0.1.1"}`)
+	a.dshRunner = func(_ context.Context, name string, _ ...string) error {
+		if name == "web" {
+			installDSHFixture(t, name)
+		}
+		return nil
+	}
+	if s := a.Connect(context.Background()); s.State != agentintegration.Enabled {
+		t.Fatalf("connect with existing bundle: %+v", s)
+	}
+	body, err := os.ReadFile(manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, field := range []string{`"private": true`, `"@lazymind/dsh-workflow": "file:workflow.tgz"`,
+		`"patchReload": "startup"`, "\"another-bundle\",\n        \"@lazymind/dsh-workflow\""} {
+		if !strings.Contains(string(body), field) {
+			t.Fatalf("expected %q in updated manifest: %s", field, body)
+		}
+	}
+	if backup, err := os.ReadFile(manifest + ".lazymind-backup"); err != nil || string(backup) != before {
+		t.Fatalf("original manifest backup: %s (%v)", backup, err)
 	}
 }
 
@@ -607,5 +687,52 @@ func TestInstalledDSHInspectionIsReadOnly(t *testing.T) {
 	}
 	if before != snapshot() {
 		t.Fatal("inspection changed old environment")
+	}
+}
+
+func TestDesktopConnectionCanMoveBetweenLazyMindEnvironments(t *testing.T) {
+	first := desktopAdapterFixture(t)
+	first.dshRunner = func(_ context.Context, name string, _ ...string) error { installDSHFixture(t, name); return nil }
+	if status := first.Connect(context.Background()); status.State != agentintegration.Enabled {
+		t.Fatalf("first connect: %+v", status)
+	}
+	second := *first
+	second.home = filepath.Join(t.TempDir(), "second-state")
+	second.hostID = "host-second"
+	firstStore, err := credentials.NewStore(first.home, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	serverURL, err := firstStore.ServerURL(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	secondStore, err := credentials.NewStore(second.home, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := secondStore.Save(credentials.Credentials{ServerURL: serverURL, Username: "fixture", AccessToken: "access", RefreshToken: "refresh", ExpiresIn: 3600, SavedAt: float64(time.Now().Unix())}); err != nil {
+		t.Fatal(err)
+	}
+	if status := second.Status(context.Background()); status.State != agentintegration.Conflict || status.Enabled == nil || !*status.Enabled || !status.CanDisconnect {
+		t.Fatalf("second status: %+v", status)
+	}
+	if status := second.Disconnect(context.Background()); status.State == agentintegration.Failed || status.Enabled == nil || *status.Enabled {
+		t.Fatalf("second disconnect: %+v", status)
+	}
+	if status := second.Connect(context.Background()); status.State != agentintegration.Enabled {
+		t.Fatalf("second connect: %+v", status)
+	}
+	if status := first.Status(context.Background()); status.State != agentintegration.Conflict || status.Enabled == nil || !*status.Enabled {
+		t.Fatalf("first status: %+v", status)
+	}
+}
+
+func TestDesktopMalformedPatchReportsUnknownConfiguration(t *testing.T) {
+	adapter := desktopAdapterFixture(t)
+	writeTestFile(t, adapter.forDSHProfile("web", "").dshConfigPath(), "[broken")
+	status := adapter.Status(context.Background())
+	if status.Enabled != nil || status.Issue == nil || status.Issue.Code != "configuration_unreadable" {
+		t.Fatalf("unreadable patch: %+v", status)
 	}
 }

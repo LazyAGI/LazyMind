@@ -104,7 +104,12 @@ function installExternalNavigationHandler(
 ) {
   webContents.setWindowOpenHandler((details) => {
     if (isOAuthPopup(details)) {
-      return { action: "allow" };
+      return {
+        action: "allow",
+        ...(sameOriginWindowOptions?.icon
+          ? { overrideBrowserWindowOptions: { icon: sameOriginWindowOptions.icon } }
+          : {}),
+      };
     }
 
     if (isSameOrigin(details.url, webContents.getURL())) {
@@ -126,7 +131,9 @@ function installExternalNavigationHandler(
     const childSameOriginWindowOptions = sameOriginWindowOptions &&
       isSameOrigin(details.url, webContents.getURL())
       ? sameOriginWindowOptions
-      : undefined;
+      : sameOriginWindowOptions?.icon
+        ? { icon: sameOriginWindowOptions.icon }
+        : undefined;
     installExternalNavigationHandler(
       childWindow.webContents,
       openExternal,

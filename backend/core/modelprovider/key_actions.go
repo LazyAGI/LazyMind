@@ -142,6 +142,9 @@ func ReplaceKey(w http.ResponseWriter, r *http.Request) {
 		return enqueueCredentialBackup(tx, group.ID, revision, credentialvault.BackupUpsert, now)
 	})
 	if err != nil {
+		if replyEmbeddingMutationConflict(w, err) {
+			return
+		}
 		if errors.Is(err, errConnectionChanged) {
 			common.ReplyErr(w, err.Error(), http.StatusConflict)
 		} else {

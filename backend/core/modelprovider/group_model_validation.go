@@ -19,7 +19,7 @@ var (
 	errInvalidModelName           = errors.New("model name must contain 1 to 512 bytes")
 	errModelDefaultReference      = errors.New("model update would invalidate a default selection; change the selection first")
 	errModelConversationReference = errors.New("model update would invalidate a conversation selection; change the conversation model first")
-	errEmbeddingIdentityInUse     = errors.New("embedding model identity is in use; change the default model and downgrade indexed knowledge bases before editing")
+	errEmbeddingIdentityInUse     = errors.New("embedding model is encoding knowledge bases; clear its vectors before changing this runtime configuration")
 	errSelectionModelType         = errors.New("selected model does not support this default model role")
 )
 
@@ -113,26 +113,19 @@ func modelSupportsSelectionForProvider(ctx context.Context, db *gorm.DB, parent 
 // The model UUID is kept stable. Reject changes that would make its existing
 // role bindings invalid rather than silently clearing or repointing them.
 func validateModelEditReferences(ctx context.Context, tx *gorm.DB, parent orm.UserModelProvider, before, after orm.UserModelProviderGroupModel, baseURL string) error {
-	identityChanged := before.Name != after.Name || equivalentTechnicalType(before.ModelType) != equivalentTechnicalType(after.ModelType) || modelsettings.EmbeddingIdentityChanged(before.ModelSettings, after.ModelSettings)
+	identityChanged := embeddingModelIdentityChanged(before, after)
 	var selections []orm.UserSelectedModel
 	if tx.Migrator().HasTable(&orm.UserSelectedModel{}) {
 		if err := tx.Where("user_model_provider_group_model_id = ?", before.ID).Find(&selections).Error; err != nil {
 			return err
 		}
 	}
-	if identityChanged && isAnyEmbeddingTechnicalType(before.ModelType) {
-		if len(selections) > 0 {
-			return errEmbeddingIdentityInUse
+	if identityChanged && isTextEmbeddingModelType(before.ModelType) {
+		if err := guardEmbeddingRuntimeMutation(tx, before.CreateUserID, before.UserModelProviderID, before.UserModelProviderGroupID, before.ID); err != nil {
+			return err
 		}
-		if isTextEmbeddingModelType(before.ModelType) && tx.Migrator().HasTable(&orm.Dataset{}) {
-			var count int64
-			if err := tx.Model(&orm.Dataset{}).Where("create_user_id = ? AND processing_level = ? AND deleted_at IS NULL", before.CreateUserID, "indexed").Count(&count).Error; err != nil {
-				return err
-			}
-			if count > 0 {
-				return errEmbeddingIdentityInUse
-			}
-		}
+	} else if identityChanged && isAnyEmbeddingTechnicalType(before.ModelType) && len(selections) > 0 {
+		return errEmbeddingIdentityInUse
 	}
 	for _, selection := range selections {
 		if !modelSupportsSelectionForProvider(ctx, tx, parent, after, selection.ModelKey, baseURL) {
@@ -149,6 +142,10 @@ func validateModelEditReferences(ctx context.Context, tx *gorm.DB, parent orm.Us
 		}
 	}
 	return nil
+}
+
+func embeddingModelIdentityChanged(before, after orm.UserModelProviderGroupModel) bool {
+	return before.Name != after.Name || equivalentTechnicalType(before.ModelType) != equivalentTechnicalType(after.ModelType) || modelsettings.EmbeddingIdentityChanged(before.ModelSettings, after.ModelSettings)
 }
 
 // Catalog synchronizers treat any existing name, including a soft-deleted

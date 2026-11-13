@@ -94,7 +94,7 @@ function ExternalExecutionSummary({
     >
       <summary>
         <span className="external-execution-dot" />
-        <span>{provider}</span>
+        <span>{execution.model ? `${provider} · ${execution.model}` : provider}</span>
         <span className="external-execution-status">{status}</span>
       </summary>
       <div className="external-execution-details">
@@ -291,6 +291,7 @@ const AssistantMessage = (props: any) => {
     renderText,
     updateMessage,
     sessionId,
+    vlmReady,
     conversationFiles,
     onPreferenceSelect,
     isLatestDualAnswer,
@@ -1287,6 +1288,7 @@ const AssistantMessage = (props: any) => {
         <AskCard
           key={askPending.ask_id}
           askPending={askPending}
+          vlmReady={vlmReady}
           disabled={isReadOnly}
           answered={!!item.ask_answered}
           savedAnswers={item.ask_saved_answers}
@@ -1429,7 +1431,7 @@ const AssistantMessage = (props: any) => {
         <IdentityAvatar className="chat-avatar" kind="soul" size={32} />
         <div className="chat-bot-box-multi">
         <div className="chat-bot">
-            <ModelRouteSummary route={item.model_route} />
+            {!item.execution && <ModelRouteSummary route={item.model_route} />}
             <ExternalExecutionSummary execution={item.execution} />
             <RunStatusCard
               terminal={displayTerminal}
@@ -1535,7 +1537,7 @@ const AssistantMessage = (props: any) => {
       <IdentityAvatar className="chat-avatar" kind="soul" size={32} />
       <div className="chat-bot-box-single">
         <div className="chat-bot">
-          <ModelRouteSummary route={item.model_route} />
+          {!item.execution && <ModelRouteSummary route={item.model_route} />}
           <ExternalExecutionSummary execution={item.execution} />
           <RunStatusCard
             terminal={displayTerminal}

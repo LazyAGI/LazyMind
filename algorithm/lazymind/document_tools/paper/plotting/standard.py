@@ -1,5 +1,7 @@
 """Deterministic, explicitly grouped displays of executed estimates."""
 import math
+import inspect
+from .labels import display_text
 
 STANDARD_STYLES = {'bar_grouped_hatch', 'bar_paired_delta', 'point_interval',
                    'line_training_curve', 'line_confidence_band'}
@@ -14,6 +16,14 @@ def coordinate(row, key, default=None):
         return row['coordinates'][key]
     value = row.get(key)
     return value if isinstance(value, str) else default
+
+
+def panel_key(row, spec):
+    """Metrics explicitly encoded as categories or series share compatible axes."""
+    metric = row['metric']
+    if spec.get('category') in {'metric', 'label'} or spec.get('series') == 'metric':
+        metric = None
+    return metric, row['unit'], row['kind'], coordinate(row, spec.get('facet'))
 
 
 def _levels(rows, key):
@@ -33,14 +43,28 @@ def check_encoding(spec, rows, *, check_capacity=True):
     """Resolve only unambiguous grouping, never turn numeric metadata into category labels."""
     for key in ('category', 'series', 'facet'):
         name = spec.get(key)
-        if name and any(not isinstance(coordinate(row, name), (str, int, float, bool)) for row in rows):
+        missing = [row['id'] for row in rows if name and not isinstance(
+            coordinate(row, name), (str, int, float, bool))]
+        if missing:
+            fields = set(rows[0]['coordinates']) | {key for key, value in rows[0].items() if isinstance(value, str)}
+            aliases = [field for field in fields if all(coordinate(row, field) == name for row in rows)]
+            if len(missing) == len(rows) and len(aliases) == 1:
+                spec[key] = aliases[0]
+                continue
             available = set.intersection(*(
                 {key for key, value in row['coordinates'].items() if isinstance(value, (str, int, float, bool))}
                 | {key for key, value in row.items() if isinstance(value, str)} for row in rows))
             raise ValueError(f'{key}={name!r} is unavailable on the selected results. '
+                             f'Result IDs missing this field: {missing}. '
                              f'Available coordinates or descriptive result fields: {sorted(available)}. '
                              'Use an actual field name; category=null uses result labels; '
-                             'metric/unit panels are automatic.')
+                             'metric/unit panels are automatic. Keep aggregate summaries as annotations '
+                             'or captions when plotting individual observations.')
+    if spec['style'] == 'bar_stacked' and spec.get('series') == 'label':
+        candidates = [key for key in rows[0]['coordinates'] if key != spec.get('category')
+                      and _categorical(rows, key) and _equivalent(rows, key, 'label')]
+        if len(candidates) == 1:
+            spec['series'] = candidates[0]
     if spec['style'] not in STANDARD_STYLES:
         return
     dimensions = [spec[key] for key in ('category', 'series', 'facet') if spec.get(key)]
@@ -66,7 +90,7 @@ def check_encoding(spec, rows, *, check_capacity=True):
         value = row['value']
         if value is not None and (type(value) not in (int, float) or not math.isfinite(value)):
             raise ValueError('Figure values must be finite executed numbers or explicitly missing')
-        panel = (row['metric'], row['unit'], row['kind'], coordinate(row, spec.get('facet')))
+        panel = panel_key(row, spec)
         identity = (panel, coordinate(row, spec.get('category'), row['label']),
                     coordinate(row, spec.get('series')))
         if identity in cells:
@@ -192,15 +216,60 @@ def generate_standard_code(data, statistics, spec, reference, previous, error):
     return PROGRAM
 
 
+def generate_stacked_code(data, statistics, spec, reference, previous, error):
+    return STACK_PROGRAM
+
+
+STACK_PROGRAM = '''import matplotlib.pyplot as plt
+import re
+''' + inspect.getsource(coordinate) + inspect.getsource(display_text) + '''
+
+def draw(data, statistics, spec):
+    rows = [row for row in data['analysis_results'] if row['id'] in spec['finding_ids']]
+    if not spec.get('series'):
+        raise ValueError('Stacked bars require series to name the component coordinate or metric field')
+    if len({(row['unit'], row['kind']) for row in rows}) != 1:
+        raise ValueError('Additive components must share their units and result kind')
+    names = data['shared_style'].get('terminology', {})
+    categories = list(dict.fromkeys(coordinate(row, spec.get('category'), '') for row in rows))
+    components = list(dict.fromkeys(coordinate(row, spec['series']) for row in rows))
+    cells = {(coordinate(row, spec.get('category'), ''), coordinate(row, spec['series'])): row['value'] for row in rows}
+    if len(cells) != len(rows) or any((category, component) not in cells
+                                    for category in categories for component in components):
+        raise ValueError('Every composition needs exactly one observed value per component')
+    values = [[cells[(category, component)] for component in components] for category in categories]
+    labels = [display_text(component, names) for component in components]
+    colors = spec['style_contract']['component_colors'][:len(components)]
+    figure, axis = plt.subplots(figsize=(6.2, max(2.1, .65 * len(categories) + 1.3)))
+    metric = rows[0]['metric'] if len({row['metric'] for row in rows}) == 1 else 'Value'
+    unit = rows[0].get('display_unit', rows[0]['unit'])
+    quantity = display_text(metric, names) + (' (' + unit + ')' if unit else '')
+    draw_stacked(axis, values, [display_text(category, names) for category in categories], labels, colors,
+                 spec.get('normalize', False), '', quantity, orientation='horizontal')
+    axis.legend(loc='upper center', bbox_to_anchor=(.5, -.35), ncol=min(4, len(components)),
+                frameon=False, fontsize=7)
+    figure.tight_layout(pad=.8)
+    return figure
+'''
+
+
 PROGRAM = '''import matplotlib.pyplot as plt
+import re
 from matplotlib.ticker import PercentFormatter, FuncFormatter
 from matplotlib.colors import to_rgb
 from matplotlib.patches import Patch
-
+''' + inspect.getsource(panel_key) + inspect.getsource(display_text) + '''
 
 def wrap_label(text, width=14):
     lines, current, length = [], '', 0
     for word in str(text).split():
+        if word.isascii():
+            if current and length + len(word) > width:
+                lines.append(current.strip())
+                current, length = '', 0
+            current += word + ' '
+            length += len(word) + 1
+            continue
         for char in word + ' ':
             size = 2 if ord(char) > 255 else 1
             if current and length + size > width:
@@ -208,7 +277,7 @@ def wrap_label(text, width=14):
                 current, length = '', 0
             current += char
             length += size
-    return '\\n'.join(lines + [current.strip()])
+    return '\\n'.join(lines + [current.strip()]).rstrip()
 
 
 def ordered(values, order):
@@ -217,7 +286,7 @@ def ordered(values, order):
 
 
 def display(value, names):
-    return str(names.get(str(value), value))
+    return display_text(value, names)
 
 
 def coordinate(row, key, default=None):
@@ -281,13 +350,22 @@ def draw(data, statistics, spec):
     bars = spec['style'] in ('bar_grouped_hatch', 'bar_paired_delta')
     groups = {}
     for row in rows:
-        facet = coordinate(row, spec.get('facet'))
-        groups.setdefault((row['metric'], row['unit'], row['kind'], facet), []).append(row)
-    figure, axes = plt.subplots(len(groups), 1, squeeze=False, figsize=(3.35, 2.25 * len(groups)))
+        groups.setdefault(panel_key(row, spec), []).append(row)
+    horizontal = bars and max(len(display(category(row, spec), names)) for row in rows) > 18
+    columns = 2 if len(groups) > 1 else 1
+    panel_rows = (len(groups) + columns - 1) // columns
+    category_count = max(len({category(row, spec) for row in members}) for members in groups.values())
+    height = 2.2 * panel_rows if columns > 1 else 2.5
+    if horizontal and columns == 1:
+        height = max(2.4, .34 * category_count + 1.1)
+    figure, axes = plt.subplots(panel_rows, columns, squeeze=False, figsize=(6.7 if columns > 1 else 5.8, height))
+    for unused in axes.ravel()[len(groups):]:
+        figure.delaxes(unused)
     for axis, ((metric, unit, kind, facet), members) in zip(axes.ravel(), groups.items()):
+        vertical = line or (bars and not horizontal)
         scale, suffix, formatter = numeric_format(members, spec)
         limit = 1 if scale == 100 else 100
-        comparable = [row for row in rows if (row['metric'], row['unit'], row['kind']) == (metric, unit, kind)]
+        comparable = [row for row in rows if panel_key(row, spec)[:3] == (metric, unit, kind)]
         endpoints = [value for row in comparable for value in (
             row['value'], (row['interval'] or {}).get('lower'), (row['interval'] or {}).get('upper'))
             if value is not None]
@@ -328,13 +406,17 @@ def draw(data, statistics, spec):
                 if row['value'] is None:
                     continue
                 if bars:
-                    axis.bar(position, row['value'], width=width, color=color, hatch='//' if series_index == 1 else '',
-                             edgecolor='white', linewidth=.45, label=legend, zorder=2)
+                    appearance = dict(color=color, hatch='//' if series_index == 1 else '',
+                                      edgecolor='white', linewidth=.45, label=legend, zorder=2)
+                    if horizontal:
+                        axis.barh(position, row['value'], height=width, **appearance)
+                    else:
+                        axis.bar(position, row['value'], width=width, **appearance)
                     legend = None
                 elif not line:
-                    axis.scatter(row['value'], position, color=color, s=20, label=legend, zorder=3)
+                    axis.scatter(row['value'], position, color=color, s=20, label=legend, zorder=3, clip_on=False)
                     legend = None
-                interval_marks(axis, row, position, '#354CC8', bars or line)
+                interval_marks(axis, row, position, '#354CC8', vertical)
                 annotation = value_text(row, spec, scale, suffix)
                 if annotation:
                     if bars:
@@ -342,15 +424,19 @@ def draw(data, statistics, spec):
                         offset = -4 if inside or row['value'] < 0 else 3
                         red, green, blue = to_rgb(color)
                         dark = .2126 * red + .7152 * green + .0722 * blue < .5
-                        axis.annotate(annotation, (position, row['value']), xytext=(0, offset),
-                                      textcoords='offset points', ha='center',
-                                      va='top' if offset < 0 else 'bottom', fontsize=6.7, clip_on=False,
+                        location = (position, row['value']) if vertical else (row['value'], position)
+                        displacement = (0, offset) if vertical else (offset, 0)
+                        axis.annotate(annotation, location, xytext=displacement,
+                                      textcoords='offset points',
+                                      ha='center' if vertical else 'right' if offset < 0 else 'left',
+                                      va=('top' if offset < 0 else 'bottom') if vertical else 'center',
+                                      fontsize=6.7, clip_on=False,
                                       color='white' if inside and dark else '#111111',
                                       bbox=dict(facecolor=color, edgecolor='none', pad=.25) if inside else None)
                     elif not line:
-                        axis.annotate(annotation, (row['value'], position), xytext=(4, 0),
+                        axis.annotate(annotation, (row['value'], position), xytext=(0, 5),
                                       textcoords='offset points',
-                                      ha='left', va='center', fontsize=6.7)
+                                      ha='center', va='bottom', fontsize=6.7)
         # Missing category/series cells remain gaps, with a status label rather than a zero-valued bar.
         if not line:
             for index, key in enumerate(categories):
@@ -360,21 +446,20 @@ def draw(data, statistics, spec):
                     if not matching or all(row['value'] is None for row in matching):
                         position = index + (series_index - (len(series) - 1) / 2) * width
                         missing = '缺失' if spec.get('paper_language') == 'zh-CN' else 'missing'
-                        if bars:
+                        if vertical:
                             axis.text(position, .02, missing, transform=axis.get_xaxis_transform(),
                                       ha='center', va='bottom', fontsize=6.2, rotation=90)
                         else:
                             axis.text(.02, position, missing, transform=axis.get_yaxis_transform(), fontsize=6.2)
-        quantity = display(metric, names)
-        if len(quantity) > 24:
-            quantity = '数值' if spec.get('paper_language') == 'zh-CN' else 'Value'
+        quantity = display(metric, names) if metric is not None else (
+            '数值' if spec.get('paper_language') == 'zh-CN' else 'Value')
         if suffix in ('pp', '百分点', '个百分点'):
             quantity = '变化' if spec.get('paper_language') == 'zh-CN' else 'Change'
         if formatter:
             quantity = '比例' if spec.get('paper_language') == 'zh-CN' else 'Proportion'
         quantity += ' (' + str(suffix) + ')' if suffix else ''
-        if bars or line:
-            axis.set_ylabel(quantity, fontsize=8)
+        if vertical:
+            axis.set_ylabel(wrap_label(quantity, width=24), fontsize=8)
             if formatter:
                 axis.yaxis.set_major_formatter(formatter)
             elif scale != 1:
@@ -392,14 +477,14 @@ def draw(data, statistics, spec):
         else:
             axis.set_yticks(range(len(categories)), [wrap_label(display(key, names)) for key in categories])
             axis.invert_yaxis()
-            axis.set_xlabel(quantity, fontsize=8)
+            axis.set_xlabel(wrap_label(quantity, width=40), fontsize=8)
             if formatter:
                 axis.xaxis.set_major_formatter(formatter)
             elif scale != 1:
                 axis.xaxis.set_major_formatter(FuncFormatter(
                     lambda value, position, factor=scale: format(value * factor, '.3g')))
-            if kind == 'effect':
-                axis.axvline(0, color='#707070', linewidth=.6, linestyle='--')
+            if bars or kind == 'effect':
+                axis.axvline(0, color='#707070', linewidth=.6, linestyle='--' if kind == 'effect' else '-')
             axis.set_xlim(*numeric_limits)
             axis.grid(axis='x', alpha=.2)
         if facet is not None:

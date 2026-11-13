@@ -1,5 +1,6 @@
 import os
 import lazyllm
+from lazymind.parsing.service.opensearch_compat import install as install_opensearch_compat
 from copy import deepcopy
 from typing import NamedTuple, Optional
 from lazyllm.tracing import set_trace_context
@@ -14,19 +15,22 @@ from lazyllm.tools.rag.readers import (
     PandasCSVReader,
     PandasExcelReader
 )
-from lazyllm.tools.rag.readers.ocrReader import DynamicPDFReader
 
 from lazymind.model_config import get_dynamic_role_slot_map
 from lazymind.embedding_options import mark_embedding_query_arguments, wrap_embedding_model
 from lazymind.config import EMBED_IMAGE, EMBED_INDEX_KWARGS, EMBED_KEYS, EMBED_MAIN, config as _cfg
 from lazymind.parsing.engine.readers import ImageEmbReader, VideoReader
+from lazymind.parsing.engine.readers.mineru_online import LazyMindDynamicPDFReader as DynamicPDFReader
 from lazymind.parsing.engine.readers.native_office import NativeOfficeReader
 from lazymind.parsing.engine.readers.retained import RetainedReader
 from lazymind.parsing.engine.transform import GeneralParser, LineSplitter, NodeParser
 from lazymind.common.database.postgres import create_database_engine
 from lazymind.common.database.sqlite_proxy import install_lazyllm_sqlite_proxy
+from lazymind.parsing.service.embedding_input_compat import install as install_embedding_input_compat
 
 install_lazyllm_sqlite_proxy()
+install_opensearch_compat()
+install_embedding_input_compat()
 
 ALGO_ID = 'general_algo'
 _CODE_CHUNK_SIZE = 512
@@ -48,11 +52,21 @@ def _quiet_trace(kbs):
     def call(kb_group, *args, **kwargs):
         set_trace_context({'enabled': False})
         llm_config = kwargs.pop('llm_config', None)
-        if llm_config:
-            from lazymind.model_config import inject_model_config
-            inject_model_config(llm_config)
+        # ServerModule reuses request threads. Reset all per-request model
+        # overrides before injecting the current request's configuration.
+        lazyllm.globals['config'].clear()
+        from lazymind.model_config import inject_model_config
+        inject_model_config(llm_config)
         args, kwargs = mark_embedding_query_arguments(args, kwargs)
-        return kbs[kb_group](*args, **kwargs)
+        from lazymind.parsing.service.embedding_reset import index_operation
+        with index_operation((llm_config or {}).get('_embedding_generation')) as generation:
+            doc = kbs[kb_group]
+            if getattr(doc, '_lazymind_store_generation', None) != generation:
+                if getattr(doc, '_lazy_init', None) is not None and doc._lazy_init.flag:
+                    doc._store = _build_store_config(EMBED_INDEX_KWARGS)
+                    doc._create_store()
+                doc._lazymind_store_generation = generation
+            return doc(*args, **kwargs)
     return call
 
 

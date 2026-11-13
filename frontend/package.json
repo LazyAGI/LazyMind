@@ -21,6 +21,7 @@
     "typecheck": "tsc -p tsconfig.mcp.json",
     "typecheck:all": "tsc --noEmit",
     "test": "vitest run",
+    "test:pdf-cmaps": "node --test scripts/pdf-cmaps.test.mjs",
     "test:model-settings": "vitest run --config vitest.model-settings.config.ts",
     "test:workflow-panel": "vitest run --config vitest.workflow-panel.config.ts",
     "test:cloud-ui": "vitest run --config vitest.desktop-cloud.config.ts src/modules/knowledge/pages/list/KnowledgeSquare.cloud.test.tsx src/modules/memory/components/SkillManagementSection/SkillInstalledView.cloud.test.tsx src/modules/memory/components/SkillManagementSection/WorkflowInstalledView.cloud.test.tsx src/router/cloudResourceDetails.test.tsx",
@@ -49,7 +50,7 @@
     "diff": "^8.0.3",
     "docx-preview": "^0.3.7",
     "echarts": "^5.6.0",
-    "html-to-image": "^1.11.13",
+    "html-to-image": "1.11.13",
     "i18next": "^25.8.20",
     "i18next-browser-languagedetector": "^8.2.1",
     "js-yaml": "4.1.0",
@@ -117,5 +118,10 @@
   },
   "allowScripts": {
     "@openapitools/openapi-generator-cli@2.38.0": true
+  },
+  "pnpm": {
+    "patchedDependencies": {
+      "html-to-image@1.11.13": "patches/html-to-image@1.11.13.patch"
+    }
   }
 }

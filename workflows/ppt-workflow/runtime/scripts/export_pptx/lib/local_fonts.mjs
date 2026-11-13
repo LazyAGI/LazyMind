@@ -2,6 +2,7 @@ import { readdir, readFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import path from 'node:path';
 import os from 'node:os';
+import { pathToFileURL } from 'node:url';
 
 // TODO: use cloud object storage + local cache here later; preserve hash IDs.
 export const fontLibraryRoot = () => path.resolve(process.env.LAZYMIND_FONT_DIR || path.join(os.homedir(), '.local/share/lazymind/fonts'));
@@ -31,9 +32,79 @@ export async function localFontFaces() {
   return faces;
 }
 
-export async function localFontCss(html) {
+function fontFaceRule(face, family, useFileUrls) {
+  const source = useFileUrls
+    ? pathToFileURL(path.join(fontLibraryRoot(), face.file)).href
+    : `data:font/ttf;base64,${face.data.toString('base64')}`;
+  return `@font-face{font-family:${JSON.stringify(family).replaceAll('<', '\\3c ')};font-weight:${face.weight};font-style:${face.style};src:url(${JSON.stringify(source)})}`;
+}
+
+export async function localFontCss(html, { useFileUrls = false } = {}) {
+  const packagedFamilies = new Set();
+  const packaged = new Set([...html.matchAll(/\/\*lazymind-font:([A-Za-z0-9+/=]+)\*\//g)].flatMap(([, token]) => {
+    try {
+      const record = JSON.parse(Buffer.from(token, 'base64').toString('utf8'));
+      packagedFamilies.add(record.family.toLowerCase());
+      return [record.sha256];
+    } catch { return []; }
+  }));
   const faces = await localFontFaces();
-  return faces.filter(face => html.toLowerCase().includes(face.family.toLowerCase())).map(face =>
-    `@font-face{font-family:${JSON.stringify(face.family).replaceAll('<', '\\3c ')};font-weight:${face.weight};font-style:${face.style};src:url(data:font/ttf;base64,${face.data.toString('base64')})}`,
-  ).join('\n');
+  const knownFamilies = new Set(faces.map(face => face.family.toLowerCase()));
+  const usedFamilies = new Set();
+  for (const [, declaration] of html.matchAll(/font-family\s*:\s*([^;}]+)/gi)) {
+    const first = declaration.split(',').map(name => name.trim().replace(/^['"]|['"]$/g, '').toLowerCase())
+      .find(name => knownFamilies.has(name));
+    if (first) usedFamilies.add(first);
+  }
+  const selected = new Set();
+  return faces.filter(face => !packaged.has(face.id)
+    && !face.aliases.some(alias => packagedFamilies.has(alias.toLowerCase()))
+    && html.toLowerCase().includes(face.family.toLowerCase())).filter(face => {
+    // Aliases describe the same bytes, not separate fonts. Install one used
+    // alias per face and one version per CSS face: duplicate CJK data URLs can
+    // otherwise exceed Chromium's protocol message limit during addStyleTag.
+    if (usedFamilies.size) {
+      if (!usedFamilies.has(face.family.toLowerCase())) return false;
+    } else {
+      const alias = face.aliases.find(name => html.toLowerCase().includes(name.toLowerCase()));
+      if (face.family !== alias) return false;
+    }
+    const key = JSON.stringify([face.family.toLowerCase(), face.weight, face.style]);
+    if (selected.has(key)) return false;
+    selected.add(key);
+    return true;
+  }).map(face => fontFaceRule(face, face.family, useFileUrls)).join('\n');
+}
+
+/** Substitute only unavailable CJK families with the managed, embeddable font.
+ * Install before DOM measurement so geometry and embedded font bytes agree.
+ * Never alias a font that is already installed or supplied by the document.
+ */
+export async function installMissingFontFallbacks(page, { useFileUrls = false } = {}) {
+  const faces = (await localFontFaces()).filter(face => face.family === 'Noto Sans SC');
+  if (!faces.length) return [];
+  const missing = await page.evaluate(async () => {
+    const allowed = new Set(['microsoft yahei', '微软雅黑', 'pingfang sc', 'noto sans cjk sc']);
+    const names = new Set();
+    for (const el of document.querySelectorAll('body *')) {
+      for (const part of getComputedStyle(el).fontFamily.split(',')) {
+        const name = part.trim().replace(/^['"]|['"]$/g, '');
+        if (allowed.has(name.toLowerCase())) names.add(name);
+      }
+    }
+    const missing = [];
+    for (const name of names) {
+      // document.fonts.check alone returns true for nonexistent families.
+      if ([...document.fonts].some(face => face.family.replace(/^['"]|['"]$/g, '').toLowerCase() === name.toLowerCase())) continue;
+      try { await new FontFace('__ppt_font_probe', `local(${JSON.stringify(name)})`).load(); }
+      catch { missing.push(name); }
+    }
+    return missing;
+  });
+  if (!missing.length) return [];
+  const css = missing.flatMap(family => faces.map(face => fontFaceRule(face, family, useFileUrls))).join('\n');
+  await page.addStyleTag({ content: css });
+  await page.evaluate(() => document.fonts.ready);
+  process.stderr.write(`[fonts] Missing ${missing.join(', ')}; using managed Noto Sans SC before layout measurement.\n`);
+  return missing;
 }

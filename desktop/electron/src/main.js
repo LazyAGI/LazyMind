@@ -56,6 +56,7 @@ const { startCloudOAuthCallbackRelay } = require("./cloud-oauth-callback-relay")
 const { clearTemporaryCredentials: clearRuntimeTemporaryCredentials } = require("./temporary-credential-cleanup");
 const { waitForRendererWithRuntimeRecovery } = require("./renderer-recovery");
 const { createDesktopNotifications, isTrustedNotificationSender } = require("./native-notifications.js");
+const { createNotificationRuntimeReader } = require("./notification-runtime.js");
 const { createNotificationSession } = require("./notification-session.js");
 const { createAgentRecovery, runRecoveryCommand } = require("./agent-recovery.js");
 const { registerNotificationSettingsIPC } = require("./notification-settings.js");
@@ -180,7 +181,7 @@ const agentConnectorStatusTimeoutMs = 30 * 1000;
 const agentConnectorDisconnectTimeoutMs = 60 * 1000;
 const agentConnectorInstallTimeoutMs = 660 * 1000;
 const agentConnectorWorkBuddyInstallTimeoutMs = 120 * 1000;
-const agentConnectorCodexInstallTimeoutMs = 90 * 1000;
+const agentConnectorCodexInstallTimeoutMs = 120 * 1000;
 const agentConnectorBindingTimeoutMs = 30 * 1000;
 const agentConnectorLoginTimeoutMs = 2 * 60 * 1000;
 const macInstallationWarmupMarker = macWarmupMarkerPath(app.getPath("userData"));
@@ -224,6 +225,7 @@ let homeReadyStatus = null;
 let homeReadyWaiters = [];
 let guardProcess;
 let guardPID = 0;
+let guardReadyPromise;
 let guardWatchTimer;
 let currentStatus = null;
 let cloudOAuthCallbackRelay = null;
@@ -248,6 +250,22 @@ let notificationSessionRevision = 0;
 let sessionWrites = Promise.resolve();
 let notificationRenewalCandidate;
 const notificationSession = createNotificationSession();
+async function readNotificationRuntime() {
+  const status = await readStatus({ timeout: 10000 });
+  return {
+    ready: desktopNotificationRuntimeReady(status, isExternalRuntimeDev),
+    apiOrigin: desktopNotificationAPIOrigin(status, isExternalRuntimeDev),
+    frontendOrigin: notificationFrontendOrigin(),
+    instanceId: desktopNotificationInstanceID(status, isExternalRuntimeDev),
+  };
+}
+
+const readResidentNotificationRuntime = createNotificationRuntimeReader({
+  readRuntime: readNotificationRuntime,
+  getMonitor: () => runtimeStopping || isQuitting ? null : runtimeProcess,
+  getRuntimeRoot: currentRuntimeRoot,
+});
+
 const desktopNotifications = createDesktopNotifications({
   Notification,
   statePath: path.join(app.getPath("userData"), "native-notifications.json"),
@@ -287,14 +305,9 @@ const desktopNotifications = createDesktopNotifications({
     } catch { return false; }
   },
   getRuntime: async () => {
-    const status = await readStatus({ timeout: 10000 });
-    return {
-      ready: !isQuitting && !isInstallerWarmup && app.isReady()
-        && desktopNotificationRuntimeReady(status, isExternalRuntimeDev),
-      apiOrigin: desktopNotificationAPIOrigin(status, isExternalRuntimeDev),
-      frontendOrigin: notificationFrontendOrigin(),
-      instanceId: desktopNotificationInstanceID(status, isExternalRuntimeDev),
-    };
+    if (isQuitting || runtimeStopping || isInstallerWarmup || !app.isReady()) return null;
+    const runtime = await (isExternalRuntimeDev ? readNotificationRuntime() : readResidentNotificationRuntime());
+    return isQuitting || runtimeStopping ? null : runtime;
   },
   openPath: async (url, stillCurrent) => {
     await showActiveWindow();
@@ -552,9 +565,9 @@ function waitForHomeReadySignal() {
   return new Promise((resolve) => homeReadyWaiters.push(resolve));
 }
 
-function captureSidecarChunk(source, chunk) {
+function captureSidecarChunk(source, chunk, { warmup = false } = {}) {
   const text = String(chunk);
-  appendStartupChunk(source, text);
+  if (!warmup) appendStartupChunk(source, text);
   if (source === "sidecar.stderr") {
     sidecarStderrTail = `${sidecarStderrTail}${text}`.slice(-maxSidecarFailureBytes);
   }
@@ -572,6 +585,7 @@ function captureSidecarChunk(source, chunk) {
     }
     try {
       const event = JSON.parse(line.slice(markerIndex + marker.length));
+      if (warmup && event?.phase !== "python-cluster") continue;
       if (event?.event === "capability.ready" && event?.capability === "home") {
         publishHomeReady(Number(event.frontendPort));
       }
@@ -631,6 +645,26 @@ function captureSidecarChunk(source, chunk) {
           status: "starting",
           phase: "Sample conversations ready",
           message: "Starting the local services and importing sample conversations...",
+          progress: null,
+        });
+      }
+      if (event?.phase === "python-cluster" && event?.event === "phase.started") {
+        const isChinese = app.getLocale().toLowerCase().startsWith("zh");
+        updateStartupState({
+          status: "starting",
+          phase: isChinese ? "准备技能聚类" : "Preparing skill clustering",
+          message: isChinese
+            ? "正在下载并校验技能聚类组件…"
+            : "Downloading and verifying the skill clustering component...",
+          progress: null,
+        });
+      }
+      if (event?.phase === "python-cluster" && ["phase.completed", "phase.skipped"].includes(event.event)) {
+        const isChinese = app.getLocale().toLowerCase().startsWith("zh");
+        updateStartupState({
+          status: "starting",
+          phase: isChinese ? "启动本地服务" : "Starting local services",
+          message: isChinese ? "正在启动本地服务…" : "Starting the local services...",
           progress: null,
         });
       }
@@ -706,7 +740,7 @@ function broadcastStartupDiagnostics(extra = {}) {
 
 function runSidecar(command, extra = [], options = {}) {
   return new Promise((resolve, reject) => {
-    execFile(sidecarPath, sidecarArgs(command, extra), {
+    const child = execFile(sidecarPath, sidecarArgs(command, extra), {
       env: options.env || sidecarEnv(),
       timeout: options.timeout,
       windowsHide: isWindows,
@@ -718,6 +752,7 @@ function runSidecar(command, extra = [], options = {}) {
       }
       resolve(stdout);
     });
+    if (options.onStdout) child.stdout?.on("data", options.onStdout);
   });
 }
 
@@ -779,7 +814,7 @@ function startAgentLogin(agent) {
     login.child = child;
     login.timer = setTimeout(() => {
       finish("failed", "Login timed out. Try signing in again.");
-      stopAgentLoginProcess(child);
+      stopAgentLoginProcess(child, agent);
     }, agentConnectorLoginTimeoutMs);
     child.stdout?.on("data", (chunk) => { stdout = (stdout + chunk).slice(-65536); });
     child.stderr?.on("data", (chunk) => { stderr = (stderr + chunk).slice(-8192); });
@@ -830,11 +865,17 @@ function clearAgentLogin(agent) {
   agentLogins.delete(agent);
   if (!login) return;
   clearTimeout(login.timer);
-  if (login.status.state === "running") stopAgentLoginProcess(login.child);
+  if (login.status.state === "running") stopAgentLoginProcess(login.child, agent);
 }
 
-function stopAgentLoginProcess(child) {
+function stopAgentLoginProcess(child, agent) {
   if (!child || child.exitCode !== null || child.signalCode !== null) return;
+  // WorkBuddy login opens the native desktop. Cancel only our waiter so its
+  // window and user sessions survive timeout/cancellation.
+  if (agent === "workbuddy") {
+    child.kill();
+    return;
+  }
   if (isWindows && Number.isInteger(child.pid) && child.pid > 0) {
     execFile("taskkill", ["/PID", String(child.pid), "/T", "/F"], {
       windowsHide: true,
@@ -1006,6 +1047,7 @@ async function runInstallerWarmup() {
   await runInstallerWarmupLifecycle({
     startRuntime: () => runSidecar("up", maintenanceArgs, {
       timeout: timeoutSeconds * 1000,
+      onStdout: (chunk) => captureSidecarChunk("sidecar.stdout", chunk, { warmup: true }),
     }),
     readStatus,
     createRenderer: () => new BrowserWindow({
@@ -1076,7 +1118,11 @@ function disposeInstallationWarmupWindow(window) {
 
 async function runMacInstallationWarmupIfNeeded() {
   const version = app.getVersion();
-  if (!isMac || !isPackaged || macWarmupCompleted(macInstallationWarmupMarker, version)) {
+  if (!isMac || !isPackaged) {
+    return;
+  }
+  await startGuard();
+  if (macWarmupCompleted(macInstallationWarmupMarker, version)) {
     return;
   }
   startupMetricsRecorder.mark("macWarmupStarted");
@@ -1091,8 +1137,14 @@ async function runMacInstallationWarmupIfNeeded() {
 }
 
 function startGuard() {
-  if (guardProcess || guardPID || !fs.existsSync(sidecarPath)) {
+  if (guardPID) {
     return;
+  }
+  if (guardProcess) {
+    return guardReadyPromise;
+  }
+  if (!fs.existsSync(sidecarPath)) {
+    throw new Error("Desktop runtime guard executable is missing");
   }
   ensureDesktopLogDirs();
   const shutdownLog = path.join(desktopLogsDir, "desktop-shutdown.log");
@@ -1120,26 +1172,43 @@ function startGuard() {
   try {
     guardProcess = spawn(sidecarPath, sidecarArgs("guard", ["--owner-pid", String(process.pid)]), {
       env: sidecarShutdownEnv(),
-      stdio: ["ignore", "ignore", errFd],
+      stdio: ["ignore", "pipe", errFd],
       detached: true,
       windowsHide: isWindows,
     });
   } catch (error) {
     appendStartupLog("error", `failed to start desktop runtime guard: ${serializeError(error)}`);
-    return;
+    throw error;
   } finally {
     if (typeof errFd === "number") {
       fs.closeSync(errFd);
     }
   }
-  guardProcess.once("exit", (code, signal) => {
-    appendStartupLog(
-      "desktop",
-      `runtime guard exited with code ${code ?? "null"} signal ${signal ?? "null"}`,
-    );
-    guardProcess = null;
+  const child = guardProcess;
+  guardReadyPromise = new Promise((resolve, reject) => {
+    let output = "";
+    let ready = false;
+    child.stdout.on("data", (chunk) => {
+      output += String(chunk);
+      if (output.split(/\r?\n/).includes("desktop-guard-ready")) {
+        ready = true;
+        resolve();
+      }
+    });
+    child.once("error", (error) => {
+      guardProcess = null;
+      guardReadyPromise = undefined;
+      reject(error);
+    });
+    child.once("exit", (code, signal) => {
+      appendStartupLog("desktop", `runtime guard exited with code ${code ?? "null"} signal ${signal ?? "null"}`);
+      guardProcess = null;
+      guardReadyPromise = undefined;
+      if (!ready) reject(new Error("Desktop runtime guard exited before it was ready"));
+    });
   });
-  guardProcess.unref();
+  child.unref();
+  return guardReadyPromise;
 }
 
 function quoteWindowsArgument(value) {
@@ -1649,7 +1718,7 @@ async function waitForRuntimeReady(options = {}) {
       if (ownedReady && status.config?.frontendPort) {
         if (!targetCapability) {
           startupMetricsRecorder.mark("runtimeReady");
-          startGuard();
+          await startGuard();
           updateStartupState({ status: "ready", phase: "Ready", message: "LazyMind is ready." });
         }
         return status;
@@ -1881,7 +1950,7 @@ function loadingHTML() {
       <div class="summary">
         <div id="steps" class="steps"></div>
       </div>
-      <pre id="log" class="log empty">Waiting for startup output...</pre>
+      <pre id="log" class="log empty" tabindex="0" aria-label="Startup output">Waiting for startup output...</pre>
     </div>
   </aside>
   <script>
@@ -2041,7 +2110,8 @@ function browserWindowOptions(show = true) {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: false,
-      backgroundThrottling: false,
+      // Hidden chat renderers must complete startup before Chromium throttles them.
+      backgroundThrottling: show,
     },
   };
 }
@@ -2051,7 +2121,7 @@ function attachExternalNavigationHandler(window) {
     window.webContents,
     (url) => shell.openExternal(url),
     (error) => appendStartupLog("error", `failed to open external URL: ${serializeError(error)}`),
-    { webPreferences: { preload: path.join(__dirname, "preload.js") } },
+    { icon: windowsDesktopIconPath(), webPreferences: { preload: path.join(__dirname, "preload.js") } },
   );
 }
 
@@ -2353,6 +2423,7 @@ async function createDesktopDevWindow() {
     currentStatus = desktopDevRuntimeStatus(externalRuntimeURL);
     updateStartupState({ status: "ready", phase: "Ready", message: "Desktop development mode is ready." });
     window.show();
+    window.webContents.setBackgroundThrottling(true);
     window.focus();
     appendStartupLog("desktop", "Desktop development renderer ready");
     finishStartupMetrics("success");
@@ -2438,6 +2509,7 @@ async function createWindow() {
     nextStartupWindow.removeAllListeners("close");
     nextStartupWindow.hide();
     readyRendererAttempt.window.show();
+    readyRendererAttempt.window.webContents.setBackgroundThrottling(true);
     startupMetricsRecorder.mark("mainWindowVisible");
     readyRendererAttempt.window.focus();
     appendStartupLog("desktop", "frontend window ready");
@@ -2471,6 +2543,7 @@ ipcMain.on("lazymind:renderer-ready", (event) => {
 });
 
 ipcMain.handle("lazymind:runtimeStatus", () => readStatus());
+ipcMain.handle("lazymind:appVersion", () => app.getVersion());
 ipcMain.handle("lazymind:agentIntegrationStatuses", (_event, refreshInstallations) => runAgentConnector("all", "status", refreshInstallations === true));
 ipcMain.handle("lazymind:agentIntegrationAction", (_event, agent, action) => runAgentConnector(agent, action));
 ipcMain.handle("lazymind:executorIntegrationPolicies", () => runExecutorConnector("all", "status"));
@@ -2656,19 +2729,34 @@ ipcMain.handle("lazymind:assistantSessionSet", async (event, value) => {
   }
   return result;
 });
-ipcMain.handle("lazymind:assistantSessionClear", async (event) => {
+ipcMain.handle("lazymind:assistantSessionClear", async (event, request) => {
   if (isQuitting || !isTrustedNotificationSender(event, mainWindow, notificationFrontendOrigin())) {
     throw new Error("DESKTOP_SESSION_UNAVAILABLE");
   }
-  notificationSessionRevision += 1;
-  await agentRecovery.stop();
-  recoverySessionIdentity = undefined;
-  notificationRenewalCandidate = undefined;
-  notificationSession.clear();
-  desktopNotifications.clearSession();
-  return (sessionWrites = sessionWrites.catch(() => {}).then(() =>
-    runConnectorJSON(["internal", "session", "clear"], agentConnectorActionTimeoutMs)));
+  if (!request?.expected_session?.server_url || !request.expected_session.access_token || !request.expected_session.refresh_token) {
+    throw new Error("DESKTOP_SESSION_INVALID");
+  }
+  const expected = request.expected_session;
+  const remembered = notificationSession.restore(expected);
+  const matches = remembered && (request.allow_renewed || remembered.access_token === expected.access_token && remembered.refresh_token === expected.refresh_token);
+  const revision = matches ? ++notificationSessionRevision : notificationSessionRevision;
+  const stopping = matches ? agentRecovery.stop() : Promise.resolve();
+  const result = await (sessionWrites = sessionWrites.catch(() => {}).then(() =>
+    runConnectorJSON(["internal", "session", "clear-if-current"], agentConnectorActionTimeoutMs, request)));
+  await stopping;
+  // Disk cleanup is conditional and idempotent. A parallel clear may already
+  // have removed the file; this matching memory session still needs to expire.
+  if (matches && revision === notificationSessionRevision) {
+    notificationSessionRevision += 1;
+    recoverySessionIdentity = undefined;
+    notificationRenewalCandidate = undefined;
+    notificationSession.clear();
+    desktopNotifications.clearSession();
+    await agentRecovery.stop();
+  }
+  return result;
 });
+
 ipcMain.on("lazymind:notificationSessionRestore", (event, value) => {
   // Synchronous, memory-only lookup runs in preload before application code.
   // It never waits for disk/network or exposes credentials to a different frame.
@@ -3237,6 +3325,15 @@ if (!hasSingleInstanceLock) {
     app.quit();
   }
 } else {
+  if (isMac && isPackaged) {
+    const executablePath = app.getPath("exe");
+    fs.watchFile(executablePath, { persistent: false, interval: 1000 }, (current) => {
+      if (current.nlink === 0) {
+        beginFastQuit("application-removed");
+      }
+    });
+    app.once("will-quit", () => fs.unwatchFile(executablePath));
+  }
   app.on("second-instance", () => {
     void showActiveWindow();
   });
@@ -3291,14 +3388,21 @@ if (!hasSingleInstanceLock) {
         }
         return showActiveWindow();
       },
-      (error) => {
+      async (error) => {
         finishStartupMetrics("failed", "mac-installation-warmup");
         console.error("LazyMind macOS installation warmup failed:", error);
-        dialog.showErrorBox(
-          "LazyMind installation warmup failed",
-          `LazyMind could not prepare its local runtime. Reopen the app to retry.\n\n${serializeError(error)}`,
+        setStartupFailure(
+          error,
+          "LazyMind could not prepare its local runtime. Review the startup log below, then reopen the app to retry.",
         );
-        app.exit(1);
+        const failureWindow = new BrowserWindow(browserWindowOptions(true));
+        startupWindow = failureWindow;
+        failureWindow.once("closed", () => {
+          startupWindow = undefined;
+          beginFastQuit("warmup-failed");
+        });
+        await failureWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(loadingHTML())}`);
+        broadcastStartupDiagnostics();
       },
     );
   });

@@ -100,6 +100,16 @@ class WorkflowNamingCheckTest(unittest.TestCase):
     def test_ignores_unrelated_plain_english_word(self):
         self.assertEqual([], self._scan("comment.py", "# load a plugin dynamically\n"))  # noqa: Q000
 
+    def test_dsh_external_marker_only_allows_connector_names_on_marked_lines(self):
+        violations = self._scan(
+            'frontend/src/modules/agentIntegration/dshConnection.ts',
+            'const menu = "Plugins"; // workflow-naming: dsh-external\n'
+            'const code = "plugin_update_required"; // workflow-naming: dsh-external\n'
+            'const route = "/api/plugins"; // workflow-naming: dsh-external\n'
+            'const unmarked = "Plugin";\n',
+        )
+        self.assertEqual(['/api/plugins', 'Plugin'], [item.token for item in violations])
+
 
 if __name__ == "__main__":  # noqa: Q000
     unittest.main()

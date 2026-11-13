@@ -9,6 +9,7 @@ import (
 	"gorm.io/gorm"
 	"lazymind/core/common/orm"
 	"lazymind/core/common/readonlyorm"
+	"lazymind/core/store"
 )
 
 type processingSnapshot struct {
@@ -40,7 +41,7 @@ func loadProcessingSnapshot(ctx context.Context, db, lazyDB *gorm.DB, datasetID,
 		if err := docs.Find(&snapshot.documents).Error; err != nil {
 			return err
 		}
-		if len(snapshot.documents) == 0 || (documentID == "" && effectiveProcessingLevel(snapshot.dataset.ProcessingLevel) == ProcessingLevelStored) {
+		if len(snapshot.documents) == 0 || (documentID == "" && len(documentIDs) == 0 && effectiveProcessingLevel(snapshot.dataset.ProcessingLevel) == ProcessingLevelStored) {
 			return nil
 		}
 		var states []orm.DocumentProcessingState
@@ -134,20 +135,73 @@ func unknownProcessingState(document orm.Document) orm.DocumentProcessingState {
 	return orm.DocumentProcessingState{DatasetID: document.DatasetID, DocumentID: document.ID, ParseStatus: "unknown", ChunkStatus: "unknown", IndexStatus: "unknown"}
 }
 
+// Index cleanup invalidates previous parser results, but historical task
+// records remain available. For reset documents, use the current task bound
+// to the Core processing state instead of the latest remote history entry.
+func applyManualReparseStages(ctx context.Context, datasetID string, rows []mergedDocRow) error {
+	if len(rows) == 0 {
+		return nil
+	}
+	rowByDocument := make(map[string]int, len(rows))
+	ids := make([]string, 0, len(rows))
+	for i, row := range rows {
+		rowByDocument[row.DocID] = i
+		ids = append(ids, row.DocID)
+	}
+	db := store.DB()
+	var resetIDs []string
+	if err := db.WithContext(ctx).Model(&orm.DocumentProcessingState{}).
+		Where("dataset_id = ? AND document_id IN ? AND embedding_version IN ?", datasetID, ids, []string{embeddingVersionReembedManual, embeddingVersionRebuildRequired}).
+		Pluck("document_id", &resetIDs).Error; err != nil || len(resetIDs) == 0 {
+		return err
+	}
+	snapshot, err := loadProcessingSnapshot(ctx, db, store.LazyLLMDB(), datasetID, "", resetIDs)
+	if err != nil {
+		return err
+	}
+	for _, document := range snapshot.documents {
+		if isFolderLikeDocument(document) || (snapshot.states[document.ID].EmbeddingVersion != embeddingVersionReembedManual && snapshot.states[document.ID].EmbeddingVersion != embeddingVersionRebuildRequired) {
+			continue
+		}
+		state, _ := snapshot.observe(document)
+		stage := "DOCUMENT_REPARSE_REQUIRED"
+		switch state.ParseStatus {
+		case "running":
+			stage = "DOCUMENT_PARSING"
+		case "succeeded":
+			stage = "SUCCESS"
+		case "failed":
+			stage = "DOCUMENT_PARSING_FAILED"
+		}
+		rows[rowByDocument[document.ID]].DocumentStage = stage
+	}
+	return nil
+}
+
 func (snapshot processingSnapshot) observe(document orm.Document) (orm.DocumentProcessingState, string) {
 	state, exists := snapshot.states[document.ID]
 	if !exists {
 		state = unknownProcessingState(document)
 	}
+	task, hasTask := snapshot.tasks[document.ID]
+	if state.EmbeddingVersion == embeddingVersionReembedManual && (!hasTask || state.IndexArtifactRef != "core-task:"+task.ID) {
+		state.IndexStatus = "pending"
+		return state, ""
+	}
+	if state.EmbeddingVersion == embeddingVersionRebuildRequired {
+		state.IndexStatus = "pending"
+	}
 	// Pending defaults are not evidence that an unrequested stage is queued.
 	// Preserve persisted terminal results, then overlay proven current task stages.
 	for _, stage := range []*string{&state.ChunkStatus, &state.IndexStatus} {
+		if stage == &state.IndexStatus && state.EmbeddingVersion == embeddingVersionRebuildRequired {
+			continue
+		}
 		if *stage != "succeeded" && *stage != "failed" {
 			*stage = "unknown"
 		}
 	}
-	task, exists := snapshot.tasks[document.ID]
-	if !exists {
+	if !hasTask {
 		return state, ""
 	}
 	var ext taskExt
@@ -155,7 +209,13 @@ func (snapshot processingSnapshot) observe(document orm.Document) (orm.DocumentP
 	if ext.ProcessingLevel == ProcessingLevelStored {
 		return state, ""
 	}
-	nativeIndexing := state.ParseArtifactRef != "" && ext.ProcessingLevel == ProcessingLevelIndexed
+	// An upload receipt for an original-only paper is not a parser result.
+	// Older receipts have no submitted level or remote task ID.
+	if snapshot.dataset.Scene == "academic_papers" && task.TaskType == string(TaskTypeParseUploaded) &&
+		task.LazyllmTaskID == "" && ext.ProcessingLevel == "" && ext.TaskState == string(TaskStateSucceeded) {
+		return state, ""
+	}
+	nativeIndexing := (state.ParseArtifactRef != "" || (state.EmbeddingVersion == embeddingVersionRebuildRequired && state.ParseStatus == "succeeded") || state.EmbeddingVersion == embeddingVersionReembedPending || (state.EmbeddingVersion == embeddingVersionReembedManual && state.ParseStatus == "succeeded")) && ext.ProcessingLevel == ProcessingLevelIndexed
 	if nativeIndexing && (state.IndexArtifactRef != "core-task:"+task.ID || ext.ProcessingRevision != snapshot.dataset.ProcessingRevision) {
 		return state, ""
 	}
@@ -213,6 +273,30 @@ func (snapshot processingSnapshot) observe(document orm.Document) (orm.DocumentP
 		state.IndexStatus = status
 	}
 	return state, raw
+}
+
+func (snapshot processingSnapshot) observedProcessingLevel(task orm.Task, state orm.DocumentProcessingState) string {
+	var ext taskExt
+	_ = json.Unmarshal(task.Ext, &ext)
+	if ext.ProcessingRevision == snapshot.dataset.ProcessingRevision {
+		switch ext.ProcessingLevel {
+		case ProcessingLevelParsed, ProcessingLevelChunked, ProcessingLevelIndexed:
+			return ext.ProcessingLevel
+		}
+	}
+	// Legacy tasks can still prove a completed stage through the observed
+	// document state. Seeded pending values alone do not prove a submission.
+	switch {
+	case state.IndexStatus == "succeeded" || state.IndexStatus == "failed":
+		return ProcessingLevelIndexed
+	case state.ChunkStatus == "succeeded" || state.ChunkStatus == "failed":
+		return ProcessingLevelChunked
+	case state.ParseStatus == "succeeded" || state.ParseStatus == "failed" || state.ParseStatus == "running",
+		task.LazyllmTaskID != "", ext.MarketSubmission == "submitting":
+		return ProcessingLevelParsed
+	default:
+		return ProcessingLevelStored
+	}
 }
 
 func ObserveDocumentProcessingDetails(ctx context.Context, db, lazyDB *gorm.DB, document orm.Document) (orm.DocumentProcessingState, string, *ProcessingDiagnostic, error) {

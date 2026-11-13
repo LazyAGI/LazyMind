@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createRef } from "react";
 import PdfTemporaryChat, { type PdfTemporaryChatHandle } from "./index";
@@ -6,7 +6,9 @@ import { ChatConversationsRequestActionEnum } from "@/api/generated/chatbot-clie
 
 const requests = vi.hoisted(() => ({ options: [] as Array<{ payload: string }> }));
 const locale = vi.hoisted(() => ({ language: "en-US" }));
+const modelGuard = vi.hoisted(() => ({ vlmReady: false as boolean | null }));
 vi.mock("react-i18next", () => ({ useTranslation: () => ({ t: (key: string) => key, i18n: locale }) }));
+vi.mock("@/modules/chat/hooks/useChatModelProviderGuard", () => ({ useChatModelProviderGuard: () => modelGuard }));
 vi.mock("@/components/auth", () => ({ AgentAppsAuth: { getAuthHeaders: () => ({}) } }));
 vi.mock("@/components/request", () => ({
   BASE_URL: "",
@@ -52,6 +54,7 @@ vi.mock("@/modules/chat/components/newChatContainer", async () => {
 
 beforeEach(() => {
   locale.language = "en-US";
+  modelGuard.vlmReady = false;
   requests.options.length = 0;
   chatActions.createNewChat.mockClear();
   chatActions.sendMessage.mockReset().mockResolvedValue(true);
@@ -66,6 +69,15 @@ afterEach(() => {
 });
 
 describe("document question context", () => {
+  it("passes visual model readiness to the document chat composer", async () => {
+    const view = render(<PdfTemporaryChat datasetId="dataset-a" documentId="document-pdf" fileName="source.pdf" onClose={() => {}} />);
+    await act(async () => { await Promise.resolve(); });
+    expect(chatActions.composer.vlmReady).toBe(false);
+    modelGuard.vlmReady = true;
+    view.rerender(<PdfTemporaryChat datasetId="dataset-a" documentId="document-pdf" fileName="source.pdf" onClose={() => {}} />);
+    expect(chatActions.composer.vlmReady).toBe(true);
+  });
+
   it("prepares the same text again for a new selection action without duplicating unchanged selections", async () => {
     vi.useFakeTimers();
     getDocumentParseStatus.mockResolvedValueOnce({ status: "parsed" });
@@ -439,6 +451,41 @@ it('prepares the selection question with its citation without sending it',async(
  await act(async()=>{await vi.advanceTimersByTimeAsync(50)});
  expect(chatActions.prepareMessage).toHaveBeenLastCalledWith({text:'Why is this true?',citeMessage:'Original quote',appendCitations:true});
  expect(chatActions.sendMessage).not.toHaveBeenCalled();
+});
+
+it('sends quick explanation with the selected passage and current paper context',async()=>{
+ getDocumentParseStatus.mockResolvedValueOnce({status:'parsed'});
+ chatActions.sendMessage.mockImplementationOnce(async(params)=>{
+   chatActions.openSSE?.([{query:'Explain this in the paper.'}],ChatConversationsRequestActionEnum.ChatActionNext,{},params);
+   return true;
+ });
+ render(<PdfTemporaryChat datasetId="paper-library" documentId="paper-1" fileName="paper.pdf" paperMode selection={{source:'pdf',text:'scaled dot-product attention',context:'Attention uses scaled dot products to score keys.',page:4,bbox:[10,20,30,40],question:'Explain this in the paper.',quickExplain:true}} onClose={vi.fn()}/>);
+ await waitFor(()=>expect(chatActions.sendMessage).toHaveBeenCalledTimes(1));
+ expect(chatActions.sendMessage).toHaveBeenCalledWith(expect.objectContaining({text:'Explain this in the paper.',citeMessage:'scaled dot-product attention',clearInput:false,fileList:[],document_context:expect.objectContaining({dataset_id:'paper-library',document_id:'paper-1',page:4,expand_paper_context:true})}));
+ expect(chatActions.prepareMessage).not.toHaveBeenCalled();
+ expect(JSON.parse(requests.options[requests.options.length-1].payload).document_context).toMatchObject({
+   dataset_id:'paper-library',document_id:'paper-1',page:4,bbox:[10,20,30,40],
+   selected_text:'scaled dot-product attention',paragraph_text:'Attention uses scaled dot products to score keys.',expand_paper_context:true,
+ });
+});
+
+it('starts on-demand parsing before auto-sending a quick explanation',async()=>{
+ getDocumentParseStatus.mockResolvedValueOnce({status:'not_requested'}).mockResolvedValueOnce({status:'parsed'});
+ ensureDocumentParsed.mockResolvedValueOnce({status:'parsing'});
+ render(<PdfTemporaryChat datasetId="paper-library" documentId="paper-2" fileName="paper.pdf" paperMode selection={{source:'pdf',text:'key result',page:2,quickExplain:true}} onClose={vi.fn()}/>);
+ await waitFor(()=>expect(ensureDocumentParsed).toHaveBeenCalledOnce());
+ await waitFor(()=>expect(chatActions.sendMessage).toHaveBeenCalledOnce());
+ expect(chatActions.sendMessage).toHaveBeenCalledWith(expect.objectContaining({citeMessage:'key result',document_context:expect.objectContaining({document_id:'paper-2'})}));
+});
+
+it('leaves a quick explanation as a draft when parsing cannot start',async()=>{
+ getDocumentParseStatus.mockResolvedValueOnce({status:'not_requested'});
+ ensureDocumentParsed.mockResolvedValueOnce({status:'not_requested'});
+ render(<PdfTemporaryChat datasetId="paper-library" documentId="paper-3" fileName="paper.pdf" paperMode selection={{source:'pdf',text:'model term',quickExplain:true}} onClose={vi.fn()}/>);
+ await waitFor(()=>expect(ensureDocumentParsed).toHaveBeenCalledOnce());
+ await waitFor(()=>expect(chatActions.prepareMessage).toHaveBeenCalledOnce());
+ expect(chatActions.sendMessage).not.toHaveBeenCalled();
+ expect(chatActions.prepareMessage).toHaveBeenCalledWith(expect.objectContaining({citeMessage:'model term'}));
 });
 
  it('does not overwrite the chat draft when a quoted selection has a blank question',async()=>{

@@ -1,0 +1,21 @@
+.pdf-pin-dock{position:fixed;z-index:1451;width:54px;height:54px;pointer-events:none;transition:left .18s ease,top .18s ease;font:13px/1.2 system-ui,sans-serif}
+.pdf-pin-dock.is-dragging{transition:none}
+.pdf-pin-dock button{font:inherit}
+.pdf-pin-dock-hub{position:relative;z-index:2;display:grid;place-items:center;width:54px;height:54px;padding:0;border:1px solid #bdcfe7;border-radius:50%;background:repeating-conic-gradient(from -30deg,#fff 0deg 1.5deg,transparent 1.5deg 60deg),conic-gradient(from -30deg,#dceeff 0deg 60deg,#c9e1ff 60deg 120deg,#e1e7ff 120deg 180deg,#cfe8f5 180deg 240deg,#d9e7ff 240deg 300deg,#c3dcff 300deg 360deg);color:#24578d;box-shadow:0 5px 18px #1c3b6430,0 0 0 4px #ffffffc9;cursor:grab;touch-action:none;user-select:none;pointer-events:auto}
+.pdf-pin-dock-hub:hover{border-color:#81b2e5;box-shadow:0 7px 22px #1c3b6438,0 0 0 4px #ffffffdc}
+.pdf-pin-dock-hub:active{cursor:grabbing}
+.pdf-pin-dock-hub-core{display:grid;place-items:center;width:29px;height:29px;border:1px solid #bad5f0;border-radius:50%;background:#fff;color:#2468ad;font-size:14px;font-weight:700;box-shadow:0 2px 6px #244b7923}
+.pdf-pin-dock-wheel{position:absolute;z-index:1;left:calc(50% - 103px);top:calc(50% - 103px);width:206px;height:206px;border:1px solid #dce8f5;border-radius:50%;background:repeating-conic-gradient(from -30deg,#dce7f2 0deg 1deg,transparent 1deg 60deg),radial-gradient(circle,#fff 0 22%,#f6faff 23% 73%,#edf5ff 100%);box-shadow:0 12px 38px #18375d2b,0 0 0 5px #ffffffbd;pointer-events:auto;animation:pdf-pin-dock-open .16s ease-out both}
+.pdf-pin-dock-slot{position:absolute;z-index:1;display:grid;place-items:center;transform:translate(-50%,-50%);width:42px;height:42px;padding:0;border:1px solid #d8e4f2;border-radius:50%;background:#fff;color:#336da6;box-shadow:0 2px 7px #1a416a20;cursor:pointer;pointer-events:auto}
+.pdf-pin-dock-slot.has-item:hover{border-color:#83b5ea;background:#edf7ff;color:#075bad;transform:translate(-50%,-50%) scale(1.08)}
+.pdf-pin-dock-slot.has-item:is(:hover,:focus-visible){z-index:4}
+.pdf-pin-dock-slot.has-item:is(:hover,:focus-visible)::after{content:attr(data-label);position:absolute;top:calc(100% + 7px);left:50%;transform:translateX(-50%);max-width:min(210px,70vw);overflow:hidden;text-overflow:ellipsis;padding:5px 8px;border-radius:7px;background:#243b57;color:#fff;box-shadow:0 4px 12px #172b4640;font-size:11px;font-weight:500;white-space:nowrap;pointer-events:none}
+.pdf-pin-dock-slot:disabled{border-color:#e7edf5;background:#f8fbff;box-shadow:none;cursor:default;opacity:.67}
+.pdf-pin-dock-glyph{display:block;font-size:24px;line-height:1;font-weight:550}
+.pdf-pin-dock-index{position:absolute;right:4px;bottom:3px;color:#7894b1;font-size:9px;font-weight:700}
+.pdf-pin-dock-glyph.is-formula{font-family:Georgia,serif;font-style:italic}
+.pdf-pin-dock-glyph.is-image{font-size:26px}
+.pdf-pin-dock-empty{width:5px;height:5px;border-radius:50%;background:#c7d5e4}
+.pdf-pin-dock :is(button):focus-visible{outline:2px solid var(--paper-accent,var(--color-primary,#006ae6));outline-offset:3px}
+@keyframes pdf-pin-dock-open{from{opacity:0;transform:scale(.72)}to{opacity:1;transform:scale(1)}}
+@media(prefers-reduced-motion:reduce){.pdf-pin-dock{transition:none}.pdf-pin-dock-wheel{animation:none}.pdf-pin-dock-slot.has-item:hover{transform:translate(-50%,-50%)}}

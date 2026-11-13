@@ -235,7 +235,8 @@ def test_dynamic_trigger_loads_pinned_remote_package_without_listing(json_encode
     )
     assert result['status'] == 'prepared'
     assert result['outcome'] == 'ready'
-    assert result['request_context'] == 'original workflow request'
+    assert result['request_context'].startswith('original workflow request')
+    assert attachment.name in result['request_context']
     assert result['revision_id'] == 'revision-1'
     assert result['reachable_steps'] == ['prompt']
     assert result['ready_steps'] == ['prompt']
@@ -244,7 +245,7 @@ def test_dynamic_trigger_loads_pinned_remote_package_without_listing(json_encode
         'image-workflow', input_bindings={
             'source': {'resource_id': 'resource-1', 'revision': 1,
                        'content_hash': 'sha256:test'},
-        }, request_context='original workflow request', workflow_mode='dynamic',
+        }, request_context=result['request_context'], workflow_mode='dynamic',
     )
     toolkit.advance_step.assert_not_called()
 
@@ -948,6 +949,7 @@ def test_active_workflow_forwards_current_edit_request_and_focus_to_step():
         assert 'do not hand off early' in contribution.runtime_context
         assert 'explanation of the result in Chat' in contribution.runtime_context
         lazyllm.globals['agentic_config'].update(contribution.agentic_config_patch)
+        lazyllm.globals['agentic_config']['workflow_current_query'] = '过期的原始深色生成要求'
         result = _tool(contribution, 'advance_step')(['generate_ppt'])
 
     assert result == {'status': 'succeeded'}
@@ -1500,6 +1502,9 @@ def test_trigger_routes_ppt_clarification_answers_to_analysis_context(selected):
     import yaml
     workflow_path = Path(__file__).parents[3] / 'workflows/ppt-workflow/workflow.yaml'
     runtime = yaml.safe_load(workflow_path.read_text(encoding='utf-8'))['runtime']
+    # This fixture exposes an extra external topic input; declare it alongside
+    # the package's real hidden paper/attachment inputs.
+    runtime = {**runtime, 'trigger_inputs': [*runtime['trigger_inputs'], 'topic']}
     toolkit = MagicMock()
     toolkit.prepare_workflow.return_value = {'session_id': 'session-1', 'ready_steps': ['analyze_requirements']}
     with patch('lazymind.chat.workflow.workflow_manager._client') as factory, patch(
@@ -1513,7 +1518,7 @@ def test_trigger_routes_ppt_clarification_answers_to_analysis_context(selected):
         importer.return_value = {'resource_id': 'r1', 'revision': 1, 'content_hash': 'sha256:test'}
         factory.return_value.get_state.return_value = {'projection': {'ready': ['analyze_requirements']}}
         contribution = resolve_workflow_injection(
-            None, current_query='制作13页中国新年PPT，不生成AI底图',
+            None, current_query='制作13页中国新年PPT，面向小孩子，风格喜庆，不生成AI底图',
             allowed_workflow_refs=['builtin:ppt'] if selected else None,
             workflow_catalog=[{'workflow_ref': 'builtin:ppt', 'workflow_id': 'ppt', 'revision_id': 'r1'}],
             workflow_activations=[{'workflow_ref': 'builtin:ppt', 'workflow_id': 'ppt', 'revision_id': 'r1',
@@ -1523,12 +1528,15 @@ def test_trigger_routes_ppt_clarification_answers_to_analysis_context(selected):
             _tool(contribution, 'trigger_ppt_workflow')(input_bindings={'undeclared': 'value'})
         assert error.value.code == 'WORKFLOW_INPUT_NOT_EXPOSED'
         result = _tool(contribution, 'trigger_ppt_workflow')(
-            input_bindings={'topic': '中国新年', 'target_customer': '小孩子', 'visual_style': '喜庆'},
+            input_bindings={'topic': '中国新年', 'slide_count': '13', 'target_customer': '小孩子',
+                            'visual_style': '喜庆', 'generate_background_images': 'disabled'},
         )
         assert result['session_id'] == 'session-1'
         importer.assert_called_once_with('topic', '中国新年')
         submitted = toolkit.prepare_workflow.call_args.kwargs
         assert submitted['input_bindings'] == {'topic': importer.return_value}
+        assert submitted['clarification_values']['slide_count'] == '13'
+        assert submitted['clarification_values']['generate_background_images'] == 'disabled'
         assert '制作13页中国新年PPT' in submitted['request_context']
         assert '小孩子' in submitted['request_context']
         assert '喜庆' in submitted['request_context']
@@ -1576,6 +1584,88 @@ def test_parallel_workflow_triggers_keep_conversation_sessions_separate():
             results = list(executor.map(run, ['chat-a', 'chat-b']))
     assert results == [('session-chat-a', 'session-chat-a', 'chat-a'),
                        ('session-chat-b', 'session-chat-b', 'chat-b')]
+
+
+@pytest.mark.parametrize('policy', [None, '', 'invalid', [], 42])
+def test_startup_guidance_accepts_absent_or_invalid_policy(policy):
+    from lazymind.chat.workflow.workflow_manager import _startup_clarification_guidance
+    assert _startup_clarification_guidance(policy) == ''
+
+
+@pytest.mark.parametrize('paper_count', [1, 2])
+def test_direct_chat_papers_and_description_launch_without_library_handoff(tmp_path, paper_count):
+    runtime = {
+        'trigger_inputs': [],
+        'clarification_fields': [{'id': 'academic_materials', 'question': '请上传论文', 'type': 'single',
+                                  'choices': ['上传论文'], 'choice_policy': 'fixed',
+                                  'attachment': {'accept': ['.pdf'], 'material_id': 'uploaded_materials',
+                                                 'when_choice': '上传论文', 'max_files': -1}}],
+    }
+    files = []
+    for index in range(paper_count):
+        path = tmp_path / f'paper-{index}.pdf'
+        path.write_text(f'paper {index}')
+        files.append(str(path))
+    lazyllm.globals['agentic_config'] = {
+        'enable_workflow': True, 'files': files, 'history_files_per_turn': {'1': files},
+    }
+    toolkit = MagicMock()
+    toolkit.prepare_workflow.return_value = {'session_id': 's', 'ready_steps': ['analyze_requirements']}
+    request = '请把附件做成8页学生组会汇报，比较方法与实验局限'
+    with patch('lazymind.chat.workflow.workflow_manager._client') as factory, patch(
+        'lazymind.chat.workflow.workflow_manager.HostWorkflowToolkit', return_value=toolkit,
+    ):
+        client = factory.return_value
+        client.transport.request.return_value.status_code = 404
+        client.get_workflow.return_value.result = {
+            'workflow_id': 'ppt-workflow', 'runtime': runtime,
+            'compiled_graph': {'material_types': {}, 'material_producers': {}},
+        }
+        client.get_state.return_value = {'session_id': 's', 'projection': {'ready': ['analyze_requirements']}}
+        contribution = resolve_workflow_injection(
+            None, conversation_id='direct-upload-chat', current_query=request,
+            workflow_catalog=[{'workflow_ref': 'builtin:ppt-workflow', 'workflow_id': 'ppt-workflow',
+                               'runtime': runtime}],
+            allowed_workflow_refs=['builtin:ppt-workflow'],
+            workflow_activations=[{'workflow_ref': 'builtin:ppt-workflow', 'workflow_id': 'ppt-workflow',
+                                   'tool_name': 'trigger_ppt_workflow'}],
+        )
+        assert contribution.runtime_policy['_host_satisfied_fields'] == ['academic_materials']
+        question = {'id': 'academic_materials', 'text': '请上传论文', 'choices': ['上传论文']}
+        other = {'id': 'slide_count', 'text': '多少页？'}
+        assert enforce_startup_clarification_policy([question, other], contribution.runtime_policy) == [other]
+        with pytest.raises(WorkflowClientError, match='advertised'):
+            _tool(contribution, 'trigger_ppt_workflow')(input_bindings={'task_context': 'invented IDs'})
+        result = _tool(contribution, 'trigger_ppt_workflow')()
+        assert result['input_bindings'] == {}
+        assert request in result['request_context']
+        for index in range(paper_count):
+            assert f'paper-{index}.pdf' in result['request_context']
+        assert '"turn": 1' in result['request_context']
+        client.transport.request.assert_not_called()
+
+
+def test_paper_budget_ask_keeps_concrete_counts_and_merges_user_override():
+    from lazymind.chat.workflow.workflow_manager import (
+        enforce_startup_clarification_policy, _merge_startup_clarification_context,
+    )
+    runtime = _ppt_completed_action_policy()
+    questions = [{
+        'id': 'academic_page_budget', 'type': 'single',
+        'text': '选了 3 篇论文，建议 9 页；你要求 5 页，是否调整？',
+        'choices': ['采用建议的 9 页', '保留 5 页，压缩内容'],
+    }]
+    assert enforce_startup_clarification_policy(questions, runtime) == questions
+    history = [
+        {'role': 'user', 'content': '请把这三篇论文做成 5 页 PPT'},
+        {'role': 'assistant', 'content': '', 'tool_calls': [{
+            'id': 'budget-ask', 'type': 'function',
+            'function': {'name': 'ask_user', 'arguments': json.dumps({'questions': questions}, ensure_ascii=False)},
+        }]},
+    ]
+    merged = _merge_startup_clarification_context('保留 5 页，压缩内容', history, runtime)
+    assert '三篇论文' in merged
+    assert '保留 5 页，压缩内容' in merged
 
 
 @pytest.fixture
@@ -1652,8 +1742,6 @@ def test_paper_reference_explanation_does_not_change_runtime_binding(workflow_in
     assert 'binding_kind' not in resource
 
 
-
-
 def test_existing_empty_session_accepts_inputs_and_repeated_input_is_idempotent(workflow_input_runtime):
     trigger, toolkit, holder, _, resource = workflow_input_runtime
     holder['session_id'] = 'session'
@@ -1684,3 +1772,17 @@ def test_later_chat_turn_can_supply_inputs_to_pinned_session(workflow_input_runt
     repair({'paper_input': '{"topic":"Synthetic","request":"Write"}'})
     toolkit.bind_workflow_input.assert_called_once_with('session', 'paper_input', resource)
     toolkit.prepare_workflow.assert_not_called()
+
+
+@pytest.mark.parametrize('outcome', ['workflow_approval_required', 'workflow_input_required'])
+def test_workflow_waiting_notice_is_visible_in_the_rendered_preview(outcome):
+    import re
+    from lazymind.chat.service.component.tool_rendering import _tool_result_frame_text
+
+    notice = 'Review the current stage before continuing.'
+    frame = _tool_result_frame_text({
+        'id': 'workflow-notice', 'name': 'trigger_writer_workflow',
+        'result': {'ok': True, 'value': {'outcome': outcome, 'user_notice': notice}},
+    }, 'en')
+    preview = re.search(r'<trp id="workflow-notice">(.*?)</trp>', frame, re.S).group(1)
+    assert notice in preview

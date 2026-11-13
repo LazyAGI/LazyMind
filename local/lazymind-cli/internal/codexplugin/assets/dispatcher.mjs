@@ -17,10 +17,21 @@ var BridgeError = class extends Error {
 		this.status = status;
 	}
 };
+function isHostAuthorizationError(error) {
+	return error instanceof BridgeError && (error.status === 401 || [
+		"HOST_PAIRING_MISSING",
+		"HOST_PAIRING_DISABLED",
+		"HOST_ACCOUNT_MISMATCH",
+		"HOST_CREDENTIAL_MISMATCH",
+		"HOST_PAIRING_INVALID",
+		"HOST_PAIRING_UNREADABLE"
+	].includes(error.code));
+}
 var HostBridge = class {
 	base;
-	constructor(url, pairing) {
+	constructor(url, pairing, actionHeaders) {
 		this.pairing = pairing;
+		this.actionHeaders = actionHeaders;
 		const parsed = new URL(url);
 		if (!["http:", "https:"].includes(parsed.protocol) || ![
 			"localhost",
@@ -29,18 +40,23 @@ var HostBridge = class {
 		].includes(parsed.hostname) || parsed.username || parsed.password || parsed.search || parsed.hash) throw new Error("Workflow Bridge must be a loopback URL without credentials");
 		this.base = parsed.href.replace(/\/$/, "") + "/v1/workflow-host";
 	}
-	async request(path, signal, body) {
+	async request(path, signal, body, headers) {
 		const response = await fetch(this.base + path, {
 			method: body === void 0 ? "GET" : "POST",
 			signal: AbortSignal.any([signal, AbortSignal.timeout(15e3)]),
 			headers: {
+				...headers,
 				Authorization: `Bearer ${this.pairing.token}`,
 				"X-LazyMind-Connector-Id": this.pairing.connector_id,
 				...body === void 0 ? {} : { "content-type": "application/json" }
 			},
 			...body === void 0 ? {} : { body: JSON.stringify(body) }
 		});
-		const value = await response.json();
+		const decoded = await response.json().catch(() => {
+			if (!response.ok) return {};
+			throw new Error("Invalid Workflow Bridge response");
+		});
+		const value = decoded && typeof decoded === "object" && !Array.isArray(decoded) ? decoded : {};
 		if (!response.ok) throw new BridgeError(typeof value.code === "string" ? value.code : "BRIDGE_ERROR", typeof value.error === "string" ? value.error : "Workflow Bridge request failed", response.status);
 		return value;
 	}
@@ -54,7 +70,7 @@ var HostBridge = class {
 		return (await this.request(`/runs/${encodeURIComponent(runId)}/control`, signal)).control;
 	}
 	async actions(after, signal) {
-		return this.request(`/actions${after ? `?after=${encodeURIComponent(after)}` : ""}`, signal);
+		return this.request(`/actions${after ? `?after=${encodeURIComponent(after)}` : ""}`, signal, void 0, await this.actionHeaders?.(signal));
 	}
 	async action(id, signal) {
 		return this.request(`/actions/${encodeURIComponent(id)}`, signal);
@@ -124,7 +140,9 @@ function createDispatcher(runtime, host, bridge, instanceId, signal) {
 		await bridge.settle(action.id, instanceId, claim.dispatch_token, "accepted", seq, "", signal);
 	}
 	async function poll() {
+		let failures = 0, lastWarning = "";
 		while (!signal.aborted) {
+			let retryMs = 1e3;
 			try {
 				let after = "";
 				do {
@@ -132,15 +150,25 @@ function createDispatcher(runtime, host, bridge, instanceId, signal) {
 					for (const action of [...page.actions].sort((a, b) => Number(b.kind === "cancel") - Number(a.kind === "cancel"))) try {
 						await deliver(action);
 					} catch (error) {
-						if (!(error instanceof BridgeError && ["DELIVERY_PENDING", "ACTION_CONSUMED"].includes(error.code)) && !signal.aborted) runtime.warn(`lazymind-workflow: delivery pending: ${String(error)}`);
+						if (isHostAuthorizationError(error)) throw error;
+						if (!(error instanceof BridgeError && ["DELIVERY_PENDING", "ACTION_CONSUMED"].includes(error.code)) && !signal.aborted) runtime.warn("lazymind-workflow: delivery pending; checking the previous receipt before retrying");
 					}
 					after = page.next_page_token ?? "";
 				} while (after && !signal.aborted);
+				failures = 0;
+				lastWarning = "";
 			} catch (error) {
-				if (!signal.aborted) runtime.warn(`lazymind-workflow: reconnecting Bridge: ${String(error)}`);
+				if (signal.aborted) break;
+				const needsAuthorization = isHostAuthorizationError(error);
+				retryMs = needsAuthorization ? 3e4 : Math.min(3e4, 1e3 * 2 ** Math.min(failures, 5));
+				failures++;
+				const code = error instanceof BridgeError && /^[A-Z][A-Z0-9_]{0,63}$/.test(error.code) ? error.code : "BRIDGE_UNAVAILABLE";
+				const warning = needsAuthorization ? `lazymind-workflow: authorization required (${code}); sign in or repair the connection in LazyMind` : `lazymind-workflow: reconnecting Bridge (${code})`;
+				if (warning !== lastWarning) runtime.warn(warning);
+				lastWarning = warning;
 			}
 			try {
-				await delay(1e3, signal);
+				await delay(retryMs, signal);
 			} catch {
 				break;
 			}
@@ -1582,9 +1610,14 @@ var CodexNative = class {
 	}
 	async probe(signal) {
 		const windows = await codexTargets(this.port, signal);
+		const results = await Promise.allSettled(windows.map((window$1) => this.evaluate(window$1.id, { kind: "probe" }, signal)));
+		const ready = results.some((result) => result.status === "fulfilled" && result.value?.ready === true);
+		const reachable = results.some((result) => result.status === "fulfilled" && result.value?.ready === false);
+		const issue = ready ? "" : !windows.length ? "control_window_unavailable" : reachable ? "capability_unavailable" : "cdp_unavailable";
 		return {
-			ready: (await Promise.allSettled(windows.map((window$1) => this.evaluate(window$1.id, { kind: "probe" }, signal)))).some((result) => result.status === "fulfilled" && result.value?.ready === true),
-			window_count: windows.length
+			ready,
+			window_count: windows.length,
+			issue
 		};
 	}
 	async locate(threadId, signal) {
@@ -1951,8 +1984,9 @@ async function main() {
 		while (!signal.aborted) {
 			let ready = false, issue = "host_unavailable";
 			try {
-				ready = (await native.probe(signal)).ready === true;
-				issue = ready ? "" : "capability_unavailable";
+				const probe = await native.probe(signal);
+				ready = probe.ready;
+				issue = probe.issue;
 			} catch {
 				issue = "cdp_unavailable";
 			}

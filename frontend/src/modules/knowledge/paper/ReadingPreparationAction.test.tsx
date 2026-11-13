@@ -13,7 +13,7 @@ it('opens without paid work, explicitly submits chosen scopes, and polls to term
   api.get.mockResolvedValueOnce({ status: 'not_requested' }).mockResolvedValueOnce({ status: 'running', progress_current: 1, progress_total: 2 }).mockResolvedValueOnce({ status: 'failed', error_message: '服务暂时不可用', model_requests: 1 });
   api.prepare.mockResolvedValueOnce({ status: 'pending' });
   render(<ReadingPreparationAction target={{ dataset: 'ds', document: 'doc', canWrite: true }} />);
-  fireEvent.click(screen.getByRole('button', { name: '准备进度' }));
+  fireEvent.click(screen.getByRole('button', { name: '研读论文' }));
   await act(async () => { await Promise.resolve(); });
   expect(api.prepare).not.toHaveBeenCalled();
   fireEvent.click(screen.getByText('选择本篇准备内容'));
@@ -41,7 +41,7 @@ it('refreshes observed artifacts once after preparation succeeds without generat
   render(<Reader />);
   await act(async () => {});
   expect(screen.getByRole('button', { name: '研读工具' })).toBeDisabled();
-  fireEvent.click(screen.getByRole('button', { name: '准备进度' }));
+  fireEvent.click(screen.getByRole('button', { name: '研读论文' }));
   await act(async () => {});
   fireEvent.click(screen.getByRole('button', { name: /开始准备/ }));
   await act(async () => {});
@@ -50,7 +50,7 @@ it('refreshes observed artifacts once after preparation succeeds without generat
   expect(http.get).toHaveBeenCalledTimes(2);
   expect(http.post).not.toHaveBeenCalled();
   fireEvent.click(screen.getByRole('button', { name: /关\s*闭/ }));
-  fireEvent.click(screen.getByRole('button', { name: '准备进度' }));
+  fireEvent.click(screen.getByRole('button', { name: '研读论文' }));
   await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
   expect(http.get).toHaveBeenCalledTimes(2);
   expect(api.prepare).toHaveBeenCalledOnce();
@@ -59,7 +59,7 @@ it('does not refresh for an old completed job when opened', async () => {
   api.get.mockReset().mockResolvedValue({ job_id: 'old-job', status: 'succeeded' });
   const refresh = vi.fn();
   render(<ReadingPreparationAction target={{ dataset: 'ds', document: 'doc' }} onPrepared={refresh} />);
-  fireEvent.click(screen.getByRole('button', { name: '准备进度' }));
+  fireEvent.click(screen.getByRole('button', { name: '研读论文' }));
   await act(async () => {});
   expect(refresh).not.toHaveBeenCalled();
 });
@@ -74,7 +74,7 @@ it('observes an active job to completion after progress closes and refreshes exa
   const refresh = vi.fn();
   render(<ReadingPreparationAction target={{ dataset: 'ds', document: 'doc' }} onPrepared={refresh} />);
   expect(api.get).not.toHaveBeenCalled();
-  fireEvent.click(screen.getByRole('button', { name: '准备进度' }));
+  fireEvent.click(screen.getByRole('button', { name: '研读论文' }));
   await act(async () => {});
   fireEvent.click(screen.getByRole('button', { name: /开始准备/ }));
   await act(async () => {});
@@ -87,7 +87,7 @@ it('observes an active job to completion after progress closes and refreshes exa
   await act(async () => { await vi.advanceTimersByTimeAsync(10000); });
   expect(api.get).toHaveBeenCalledTimes(reads);
   expect(api.prepare).toHaveBeenCalledOnce();
-  fireEvent.click(screen.getByRole('button', { name: '准备进度' }));
+  fireEvent.click(screen.getByRole('button', { name: '研读论文' }));
   await act(async () => {});
   expect(refresh).toHaveBeenCalledOnce();
 });
@@ -97,7 +97,7 @@ it.each(['target change', 'unmount'])('stops closed-dialog observation on %s', a
   api.get.mockReset().mockResolvedValue({ job_id: 'active-job', status: 'running' });
   const refresh = vi.fn();
   const view = render(<ReadingPreparationAction target={{ dataset: 'ds', document: 'doc' }} onPrepared={refresh} />);
-  fireEvent.click(screen.getByRole('button', { name: '准备进度' }));
+  fireEvent.click(screen.getByRole('button', { name: '研读论文' }));
   await act(async () => {});
   fireEvent.click(screen.getByRole('button', { name: /关\s*闭/ }));
   await act(async () => {});

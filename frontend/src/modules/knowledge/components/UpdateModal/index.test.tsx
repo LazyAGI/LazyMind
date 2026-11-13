@@ -23,16 +23,28 @@ beforeEach(() => {
 });
 afterEach(cleanup);
 
-async function open(reject = false) {
+async function open(reject = false, tags: string[] = ["test"]) {
   const ref = createRef<UpdateImperativeProps>();
   const onUpdate = reject ? vi.fn().mockRejectedValue(new Error("at least one capability is required")) : vi.fn().mockResolvedValue(undefined);
   render(<ConfigProvider theme={{ token: { motion: false } }}><UpdateModal ref={ref} onUpdate={onUpdate} /></ConfigProvider>);
-  await act(async () => ref.current!.onOpen({ dataset_id: "mcp-library", display_name: "MCP-library", desc: "before", tags: ["test"], algo: { algo_id: "general_algo" } }));
+  await act(async () => ref.current!.onOpen({ dataset_id: "mcp-library", display_name: "MCP-library", desc: "before", tags, algo: { algo_id: "general_algo" } }));
   await screen.findByRole("dialog");
   return onUpdate;
 }
 
 describe("metadata-only library editing", () => {
+  it("saves a library without tags", async () => {
+    const onUpdate = await open(false, []);
+    fireEvent.click(screen.getByRole("button", { name: "OK" }));
+    await waitFor(() => expect(onUpdate).toHaveBeenCalledWith(expect.objectContaining({ tags: [] })));
+  });
+  it("allows removing the last existing tag", async () => {
+    const onUpdate = await open();
+    const field = screen.getByText("knowledge.knowledgeTags").closest(".ant-form-item")!;
+    fireEvent.click(field.querySelector(".ant-select-selection-item-remove")!);
+    fireEvent.click(screen.getByRole("button", { name: "OK" }));
+    await waitFor(() => expect(onUpdate).toHaveBeenCalledWith(expect.objectContaining({ tags: [] })));
+  });
   it("closes after saving an MCP-created library without adding learning capabilities", async () => {
     const onUpdate = await open();
     fireEvent.change(screen.getByLabelText("knowledge.knowledgeDesc"), { target: { value: "after" } });

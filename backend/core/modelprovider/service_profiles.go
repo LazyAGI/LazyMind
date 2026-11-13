@@ -3,6 +3,7 @@ package modelprovider
 import (
 	"errors"
 	"net/url"
+	"sort"
 	"strings"
 	"time"
 
@@ -144,7 +145,12 @@ func rebindLegacyServiceProviders(tx *gorm.DB, existing []orm.UserModelProvider,
 	for _, row := range existing {
 		occupied[row.DefaultModelProviderID] = true
 	}
-	for i := range existing {
+	order := make([]int, len(existing))
+	for i := range order {
+		order[i] = i
+	}
+	sort.Slice(order, func(i, j int) bool { return existing[order[i]].ID < existing[order[j]].ID })
+	for _, i := range order {
 		row := &existing[i]
 		standard, ok := byID[row.DefaultModelProviderID]
 		if !ok || row.IsCustom || row.Name != standard.Name || row.Category != defaultProviderCategory {
@@ -169,6 +175,25 @@ func rebindLegacyServiceProviders(tx *gorm.DB, existing []orm.UserModelProvider,
 			}
 			updates["protocol_name"] = adapter
 			row.ProtocolName = adapter
+		}
+		proposed := *row
+		proposed.Name = target.Name
+		if RuntimeProviderName(proposed) != RuntimeProviderName(orm.UserModelProvider{Name: standard.Name, ProtocolName: oldProtocol}) {
+			var locked orm.UserModelProvider
+			locked.ID, locked.CreateUserID = row.ID, row.CreateUserID
+			if err := lockProvider(tx, &locked); err != nil {
+				return errServiceSyncConflict
+			}
+			if locked.Name != row.Name || locked.DefaultModelProviderID != row.DefaultModelProviderID || locked.ProtocolName != oldProtocol || locked.BaseURL != row.BaseURL || locked.RequestConfig != row.RequestConfig {
+				return errServiceSyncConflict
+			}
+			if err := guardEmbeddingRuntimeMutation(tx, row.CreateUserID, row.ID, "", ""); err != nil {
+				if errors.Is(err, errEmbeddingIdentityInUse) {
+					row.ProtocolName = oldProtocol
+					continue
+				}
+				return err
+			}
 		}
 		result := tx.Model(&orm.UserModelProvider{}).
 			Where("id = ? AND create_user_id = ? AND is_custom = ? AND default_model_provider_id = ? AND name = ? AND deleted_at IS NULL", row.ID, row.CreateUserID, false, standard.ID, standard.Name).

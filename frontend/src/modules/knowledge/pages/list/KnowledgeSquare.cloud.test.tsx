@@ -5,7 +5,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vite
 import { deferred, desktopTestTranslation as t, installDesktopTestDOM } from "@/test/desktopResourceFixtures";
 
 const mocks = vi.hoisted(() => ({ mode: "desktop", session: vi.fn(), get: vi.fn(), post: vi.fn(), local: vi.fn(), detail: vi.fn(), installs: vi.fn(), install: vi.fn(), update: vi.fn() }));
-vi.mock("react-i18next", () => ({ useTranslation: () => ({ t }) }));
+vi.mock("react-i18next", async (load) => ({ ...await load<typeof import("react-i18next")>(), useTranslation: () => ({ t }) }));
 vi.mock("@/runtime/mode", async (load) => ({ ...await load<object>(), isDesktopRuntime: () => mocks.mode === "desktop" }));
 vi.mock("@/runtime/cloud/session", () => ({ getCloudSession: mocks.session, isCloudBusinessAvailable: (session: any) => session?.state === "signed_in" && session?.configured !== false && session?.reachability !== "unreachable", LAZYMIND_CLOUD_SESSION_CHANGED_EVENT: "lazymind:cloud-session-changed" }));
 vi.mock("@/modules/knowledge/api/knowledgeMarket", () => ({
@@ -32,7 +32,7 @@ const cloudItem = { catalog_key: "same-key", name: "云端知识", category: "in
 const envelope = (data: unknown) => ({ data: { data } });
 async function mount() {
   await act(async () => { render(<ConfigProvider button={{ autoInsertSpace: false }} theme={{ token: { motion: false } }}><MemoryRouter initialEntries={["/lib/knowledge/list"]}><KnowledgePage /></MemoryRouter></ConfigProvider>); });
-  fireEvent.click(screen.getByRole("tab", { name: /知识广场/ }));
+  fireEvent.click(screen.getByRole("button", { name: /知识广场/ }));
 }
 const cloudRequests = () => mocks.get.mock.calls.filter(([url]) => String(url).includes("/cloud/knowledge-market"));
 

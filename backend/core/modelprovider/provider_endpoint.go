@@ -85,6 +85,9 @@ func UpdateProviderEndpoint(w http.ResponseWriter, r *http.Request) {
 	}
 	baseURL = LazyLLMBaseURL(RuntimeProviderName(parent), baseURL)
 	if err := setProviderEndpoint(r.Context(), db, &parent, baseURL, time.Now()); err != nil {
+		if replyEmbeddingMutationConflict(w, err) {
+			return
+		}
 		common.ReplyErr(w, "update model provider endpoint failed", http.StatusInternalServerError)
 		return
 	}
@@ -127,6 +130,19 @@ func setProviderEndpoint(ctx context.Context, db *gorm.DB, parent *orm.UserModel
 // encrypted backup revision even when the active endpoint has not changed.
 func updateProviderEndpointLocked(tx *gorm.DB, parent *orm.UserModelProvider, baseURL string, now time.Time, refresh, invalidate bool) error {
 	changed := normalizeBaseURLForCompare(parent.BaseURL) != normalizeBaseURLForCompare(baseURL)
+	if changed {
+		if err := guardEmbeddingRuntimeMutation(tx, parent.CreateUserID, parent.ID, "", ""); err != nil {
+			if !errors.Is(err, errEmbeddingIdentityInUse) {
+				return err
+			}
+			if emptyErr := invalidateEmptyEmbeddingEndpoint(tx, parent.ID, now); emptyErr != nil {
+				if errors.Is(emptyErr, errEmbeddingIdentityInUse) {
+					return err
+				}
+				return emptyErr
+			}
+		}
+	}
 	var groups []orm.UserModelProviderGroup
 	if err := tx.Where("user_model_provider_id = ? AND create_user_id = ? AND deleted_at IS NULL", parent.ID, parent.CreateUserID).
 		Order("created_at ASC, id ASC").Find(&groups).Error; err != nil {
@@ -163,6 +179,58 @@ func updateProviderEndpointLocked(tx *gorm.DB, parent *orm.UserModelProvider, ba
 	}
 	parent.BaseURL = baseURL
 	return nil
+}
+
+// Called inside the supplier update transaction after the active embedding
+// guard rejects a changed URL. A saved selection alone is not knowledge data.
+// Invalidate its old fingerprint and fence stale parsing jobs atomically with
+// the URL change; any later model selection still performs the signed probe
+// and empty-index cleanup before it can use a different vector space.
+func invalidateEmptyEmbeddingEndpoint(tx *gorm.DB, providerID string, now time.Time) error {
+	for _, model := range []any{&orm.EmbeddingIndexState{}, &orm.Dataset{}, &orm.Document{}, &orm.DocumentProcessingState{}} {
+		if !tx.Migrator().HasTable(model) {
+			return errEmbeddingIdentityInUse
+		}
+	}
+	var state orm.EmbeddingIndexState
+	err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("scope = ?", globalEmbeddingScope).Take(&state).Error
+	missing := errors.Is(err, gorm.ErrRecordNotFound)
+	if missing {
+		state, err = loadGlobalEmbeddingState(tx.Statement.Context, tx)
+	}
+	if err != nil {
+		return err
+	}
+	if state.Phase == "clearing" || state.Phase == "cleanup_failed" || state.TargetModelID != "" {
+		return errEmbeddingIdentityInUse
+	}
+	status, err := loadEmbeddingIndexStatus(tx.Statement.Context, tx)
+	if err != nil {
+		return err
+	}
+	if status.AffectedKnowledgeBases > 0 {
+		return errEmbeddingIdentityInUse
+	}
+	if state.ActiveSource != "own" || state.ActiveModelID == "" {
+		return nil
+	}
+	var affected int64
+	if err := tx.Model(&orm.UserModelProviderGroupModel{}).
+		Where("id = ? AND user_model_provider_id = ?", state.ActiveModelID, providerID).Count(&affected).Error; err != nil {
+		return err
+	}
+	if affected == 0 {
+		return nil
+	}
+	state.Signature = ""
+	state.Generation++
+	state.UpdatedAt = now
+	if missing {
+		return tx.Create(&state).Error
+	}
+	return tx.Model(&orm.EmbeddingIndexState{}).Where("scope = ?", globalEmbeddingScope).Updates(map[string]any{
+		"signature": "", "generation": state.Generation, "updated_at": now,
+	}).Error
 }
 
 var errConnectionChanged = errors.New("connection changed; reload and retry")

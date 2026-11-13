@@ -31,7 +31,6 @@ func RuntimeProviderName(provider orm.UserModelProvider) string {
 }
 
 var errCanonicalGroupExists = errors.New("model supplier already has credential storage")
-var errEmbeddingConfirmationRequired = errors.New("removing an embedding model requires confirmation to downgrade all indexed knowledge bases to chunked")
 var errCustomProviderNameExists = errors.New("model supplier name already exists")
 
 func checkCustomProviderName(tx *gorm.DB, userID, excludeID, name string) error {
@@ -229,6 +228,21 @@ func UpdateCustomProvider(w http.ResponseWriter, r *http.Request) {
 		if err := tx.Model(&orm.UserModelProviderGroup{}).Where("user_model_provider_id = ? AND create_user_id = ? AND deleted_at IS NULL", row.ID, row.CreateUserID).Updates(map[string]any{"name": name, "updated_at": now}).Error; err != nil {
 			return err
 		}
+		if tx.Migrator().HasTable(&orm.EmbeddingIndexState{}) && tx.Migrator().HasTable(&orm.UserModelProviderGroupModel{}) {
+			var modelIDs []string
+			if err := tx.Model(&orm.UserModelProviderGroupModel{}).
+				Where("user_model_provider_id = ? AND create_user_id = ? AND deleted_at IS NULL", row.ID, row.CreateUserID).
+				Pluck("id", &modelIDs).Error; err != nil {
+				return err
+			}
+			if len(modelIDs) > 0 {
+				if err := tx.Model(&orm.EmbeddingIndexState{}).
+					Where("scope = ? AND active_source = ? AND active_model_id IN ?", globalEmbeddingScope, "own", modelIDs).
+					Updates(map[string]any{"active_provider_name": name, "updated_at": now}).Error; err != nil {
+					return err
+				}
+			}
+		}
 		for _, g := range groups {
 			if err := enqueueCredentialBackup(tx, g.ID, max(g.CredentialRevision, 1), credentialvault.BackupUpsert, now); err != nil {
 				return err
@@ -271,15 +285,15 @@ func clearProviderConfiguration(w http.ResponseWriter, r *http.Request, reset bo
 		if err := tx.Where("user_model_provider_id = ? AND create_user_id = ? AND deleted_at IS NULL", row.ID, row.CreateUserID).Find(&models).Error; err != nil {
 			return err
 		}
-		hasEmbedding := false
+		embeddingModelIDs := make([]string, 0)
 		for _, model := range models {
-			hasEmbedding = hasEmbedding || isTextEmbeddingModelType(model.ModelType)
+			if isTextEmbeddingModelType(model.ModelType) {
+				embeddingModelIDs = append(embeddingModelIDs, model.ID)
+			}
 			hasImage = hasImage || isMultimodalEmbeddingModelType(model.ModelType)
 		}
-		if hasEmbedding {
-			if err := guardEmbeddingRemoval(tx, row.CreateUserID); err != nil {
-				return err
-			}
+		if err := guardEmbeddingRemoval(tx, row.CreateUserID, embeddingModelIDs...); err != nil {
+			return err
 		}
 
 		var groups []orm.UserModelProviderGroup
@@ -322,11 +336,13 @@ func clearProviderConfiguration(w http.ResponseWriter, r *http.Request, reset bo
 			updates["logo_data_url"] = ""
 			updates["active_key_initialized"] = false
 		}
-		return tx.Model(&row).Updates(updates).Error
+		if err := tx.Model(&row).Updates(updates).Error; err != nil {
+			return err
+		}
+		return clearEmbeddingStateAfterRemoval(tx, embeddingModelIDs...)
 	})
 	if err != nil {
-		if errors.Is(err, errEmbeddingConfirmationRequired) || errors.Is(err, errEmbeddingInUse) {
-			common.ReplyErr(w, err.Error(), http.StatusConflict)
+		if replyEmbeddingMutationConflict(w, err) {
 			return
 		}
 		common.ReplyErr(w, "delete custom provider failed", 500)

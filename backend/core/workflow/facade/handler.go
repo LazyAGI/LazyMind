@@ -2,6 +2,7 @@ package facade
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
@@ -19,6 +20,7 @@ import (
 	"gorm.io/gorm"
 	"lazymind/core/common"
 	"lazymind/core/common/askuser"
+	"lazymind/core/common/orm"
 	corestore "lazymind/core/store"
 	"lazymind/core/subagent"
 	"lazymind/core/workflow"
@@ -232,11 +234,7 @@ func collectRequiredInputMaterials(expression graphengine.Expression, materials 
 	for _, nested := range expression.All {
 		collectRequiredInputMaterials(nested, materials)
 	}
-	for _, nested := range expression.Any {
-		// Keep the existing conservative preparation contract for alternatives:
-		// every candidate branch input must be available before the Session starts.
-		collectRequiredInputMaterials(nested, materials)
-	}
+	// Alternative sources are checked by the node input expression when that node runs.
 }
 
 func missingExternalInputs(graph preparationGraph, inputBindings map[string]any) []string {
@@ -587,7 +585,8 @@ func (h Handler) setStopped(w http.ResponseWriter, r *http.Request, stopped bool
 		fail(w, http.StatusUnprocessableEntity, "IDEMPOTENCY_KEY_REQUIRED", "command_id is required", false)
 		return
 	}
-	state, err := h.Store.SetSessionStopped(r.Context(), owner, mux.Vars(r)["session_id"], commandID, stopped, workflowcore.IsWorkflowUserControlRequest(r))
+	sessionID := mux.Vars(r)["session_id"]
+	state, err := h.setSessionStopped(r.Context(), owner, sessionID, commandID, stopped)
 	if errors.Is(err, workflowstore.ErrNotFound) {
 		fail(w, http.StatusNotFound, "WORKFLOW_SESSION_NOT_FOUND", "workflow session was not found", false)
 		return
@@ -599,9 +598,6 @@ func (h Handler) setStopped(w http.ResponseWriter, r *http.Request, stopped bool
 	var controlError *controlstore.Error
 	if errors.As(err, &controlError) {
 		status := http.StatusConflict
-		if controlError.Code == "USER_CONTROL_REQUIRED" {
-			status = http.StatusForbidden
-		}
 		fail(w, status, controlError.Code, controlError.Message, false)
 		return
 	}
@@ -610,6 +606,38 @@ func (h Handler) setStopped(w http.ResponseWriter, r *http.Request, stopped bool
 		return
 	}
 	writeJSON(w, http.StatusOK, envelope{Data: state})
+}
+
+// The legacy lifecycle URL and the panel use the same control operation for
+// bound runs, including recovery scheduling and review barriers.
+func (h Handler) setSessionStopped(ctx context.Context, owner, sessionID, commandID string, stopped bool) (workflowstore.SessionLifecycleState, error) {
+	var state workflowstore.SessionLifecycleState
+	if err := h.Store.AuthorizeSession(ctx, sessionID, owner); err != nil {
+		return state, err
+	}
+	var session orm.WorkflowSession
+	if err := h.Store.Database().WithContext(ctx).First(&session, "id = ?", sessionID).Error; err != nil {
+		return state, err
+	}
+	if !controlstore.Controlled(session) {
+		return h.Store.SetSessionStopped(ctx, owner, sessionID, commandID, stopped)
+	}
+	// Commands accepted before this URL used the shared control service retain
+	// their original receipt and request fingerprint across upgrades.
+	if saved, err := h.Store.CommandByID(ctx, owner, commandID); err == nil {
+		if saved.ContractVersion == ContractVersion {
+			return h.Store.SetSessionStopped(ctx, owner, sessionID, commandID, stopped)
+		}
+	} else if !errors.Is(err, workflowstore.ErrNotFound) {
+		return state, err
+	}
+	result, err := (workflowcore.WorkflowControlService{DB: h.Store.Database()}).ExecuteLifecycle(ctx, owner, sessionID, commandID, stopped)
+	if err != nil {
+		return state, err
+	}
+	return workflowstore.SessionLifecycleState{SessionID: sessionID, Status: result.SessionStatus,
+		StateVersion: result.Control.StateVersion, CommandID: commandID,
+		ExecutionID: result.Receipt.ExecutionID, ActionID: result.Receipt.ActionID, ResumeReason: result.Receipt.ResumeReason}, nil
 }
 
 func (h Handler) StopWorkflow(w http.ResponseWriter, r *http.Request)   { h.setStopped(w, r, true) }

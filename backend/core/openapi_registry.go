@@ -2311,6 +2311,21 @@ type remoteFSDeleteQueryParams struct {
 	Confirm   bool   `query:"confirm,omitempty" desc:"Required true for package root physical purge."`
 }
 
+type remoteFSSkillInstallOpenAPIRequest struct {
+	URL              string `json:"url,omitempty" desc:"Skill source page or direct HTTP(S) ZIP URL. Mutually exclusive with package_zip_base64."`
+	PackageZIPBase64 string `json:"package_zip_base64,omitempty" desc:"Complete ZIP package, base64 encoded; maximum decoded size 100 MiB."`
+	ExpectedName     string `json:"expected_name,omitempty" desc:"Optional expected package frontmatter name for byte imports."`
+}
+
+type remoteFSSkillInstallOpenAPIResponse struct {
+	Status    string                                     `json:"status" enum:"installed,already_installed"`
+	SkillID   string                                     `json:"skill_id"`
+	SkillKey  string                                     `json:"skill_key"`
+	SourceURL string                                     `json:"source_url,omitempty"`
+	Enabled   bool                                       `json:"enabled"`
+	Warnings  []skillNormalizationWarningOpenAPIResponse `json:"warnings,omitempty"`
+}
+
 type remoteFSDirOpenAPIRequest struct {
 	Path      string `json:"path"`
 	Recursive bool   `json:"recursive"`
@@ -4509,6 +4524,16 @@ func registeredCoreOperations() []openAPIOperation {
 		},
 		{
 			Method:      "POST",
+			Path:        "/remote-fs/skills:install",
+			Summary:     "Atomically install a linked or uploaded skill",
+			Description: "Uses the same source adapters, package limits, and metadata validation as personal imports. New skills are disabled. An already installed source is returned unchanged, including its current enabled state. Requires internal service authentication and user_id/task_id.",
+			Tags:        []string{"remote-fs"},
+			QueryParams: remoteFSTaskQueryParams{},
+			RequestBody: jsonBodyOf(remoteFSSkillInstallOpenAPIRequest{}, true),
+			Responses:   map[int]openAPIResponse{200: resp("Complete skill installation", remoteFSSkillInstallOpenAPIResponse{})},
+		},
+		{
+			Method:      "POST",
 			Path:        "/remote-fs/dir",
 			Summary:     "Create remote skill filesystem directory or empty package",
 			Tags:        []string{"remote-fs"},
@@ -4641,6 +4666,32 @@ func registeredCoreOperations() []openAPIOperation {
 			Description: "Returns the authoritative own or Cloud selection for each model_type. An unavailable Cloud selection remains visible through its public snapshot and never exposes credentials or Cloud-only entitlement details.",
 			Tags:        []string{"model_providers"},
 			Responses:   map[int]openAPIResponse{200: resp("Selected models", listSelectedModelsOpenAPIResponse{})},
+		},
+		{
+			Method:      "GET",
+			Path:        "/model_providers/embedding/index-state",
+			Summary:     "Get shared text-vector index state",
+			Description: "Reports the persisted text embedding model identity and how many knowledge bases have indexed or pending document vectors. A legacy index without a recorded signature is reported as unknown, never inferred from the current model selection.",
+			Tags:        []string{"model_providers"},
+			Responses:   map[int]openAPIResponse{200: resp("Text-vector index state", modelprovider.EmbeddingIndexStatusResponse{})},
+		},
+		{
+			Method:      "POST",
+			Path:        "/model_providers/embedding/switch-preview",
+			Summary:     "Check whether a text embedding model can replace the active model",
+			Description: "Probes the saved candidate through the document embedding runtime and compares its passage and query signatures with the recorded deployment-wide text-vector identity. Legacy indexes without a recorded signature are unverified and require vector cleanup before a change. Preview never changes selections or knowledge bases; a later save rechecks the current state.",
+			Tags:        []string{"model_providers"},
+			RequestBody: jsonBodyOf(modelprovider.EmbeddingSwitchPreviewRequest{}, true),
+			Responses:   map[int]openAPIResponse{200: resp("Embedding switch assessment", modelprovider.EmbeddingSwitchPreviewResponse{})},
+		},
+		{
+			Method:      "POST",
+			Path:        "/model_providers/embedding/clear-chunks",
+			Summary:     "Clear text vectors and optionally activate a replacement embedding model",
+			Description: "Requires the current generation and explicit administrator confirmation. Clears text vectors while preserving originals, parsed content, chunks and image vectors. An empty model_id performs credential-independent recovery without activating a model. Otherwise the server verifies and activates the replacement independently of browser cancellation. Replaying a completed request does not clear the new index. Documents await explicit reindexing.",
+			Tags:        []string{"model_providers"},
+			RequestBody: jsonBodyOf(modelprovider.EmbeddingClearRequest{}, true),
+			Responses:   map[int]openAPIResponse{200: resp("Chunks cleared and target model activated", modelprovider.EmbeddingClearResponse{})},
 		},
 		{
 			Method:      "PUT",
@@ -4786,6 +4837,15 @@ func registeredCoreOperations() []openAPIOperation {
 			Tags:        []string{"model_providers"},
 			PathParams:  modelProviderGroupModelPathParams{},
 			Responses:   map[int]openAPIResponse{200: resp("Bounded model availability result without provider text or secrets", modelprovider.ModelProbeResponse{})},
+		},
+		{
+			Method:      "POST",
+			Path:        "/model_providers/{model_provider_id}/groups/{group_id}/models/{model_id}:embedding-signature",
+			Summary:     "Fingerprint one saved text embedding model",
+			Description: "Computes SHA-256 digests for fixed passage and query samples through the saved model's actual embedding runtime, including its configured prefixes. Returns only digests and dimension, never vectors, credentials or upstream text. A ready result can be compared with a previously recorded signature; unsupported and failed results cannot establish compatibility. The request body must be empty and no model settings are changed.",
+			Tags:        []string{"model_providers"},
+			PathParams:  modelProviderGroupModelPathParams{},
+			Responses:   map[int]openAPIResponse{200: resp("Candidate embedding signatures or an unverified result", modelprovider.EmbeddingSignatureResponse{})},
 		},
 		{
 			Method:      "PATCH",

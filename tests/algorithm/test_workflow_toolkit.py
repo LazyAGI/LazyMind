@@ -129,6 +129,35 @@ def test_advance_step_returns_failure_for_chat_agent_retry_decision():
     assert result['next_action']['decision_owner'] == 'ChatAgent'
 
 
+@pytest.mark.parametrize('status', ['interrupted', 'succeeded'])
+def test_confirmed_pause_returns_a_user_boundary_not_a_failure_or_next_step(status):
+    client = MagicMock()
+    client.advance.return_value.result = {
+        'attempt_statuses': {'task-1': status},
+        'workflow_state': {'status': 'waiting', 'display': {'status': 'paused', 'reason': 'user_stopped'}},
+        'projection': {'ready': ['next'], 'retryable': ['prompt']},
+    }
+    result = HostWorkflowToolkit(lambda: client).advance_step('session', 1, [{'step_id': 'prompt'}])
+    assert result['status'] == 'paused'
+    assert result['outcome'] == 'workflow_paused'
+    assert result['ready_steps'] == result['retryable_steps'] == []
+    assert result['next_action']['tool'] is None
+    assert 'failed_attempts' not in result
+
+
+def test_abnormal_interruption_remains_a_failure():
+    client = MagicMock()
+    client.advance.return_value.result = {
+        'attempt_statuses': {'task-1': 'interrupted'},
+        'attempt_results': [{'task_id': 'task-1', 'failure_reason': 'executor lost'}],
+        'workflow_state': {'display': {'status': 'failed'}},
+        'projection': {'retryable': ['prompt']},
+    }
+    result = HostWorkflowToolkit(lambda: client).advance_step('session', 1, [{'step_id': 'prompt'}])
+    assert result['outcome'] == 'step_failed'
+    assert result['failure_reasons'] == {'task-1': 'executor lost'}
+
+
 def test_advance_step_does_not_retry_missing_media_configuration():
     client = MagicMock()
     toolkit = HostWorkflowToolkit(lambda: client)
@@ -302,3 +331,17 @@ def test_reorder_pages_rejects_bad_permutations_or_misaligned_lists(order):
     with pytest.raises(ValueError):
         HostWorkflowToolkit(lambda: client).reorder_artifact_pages('session', ['slides'], order)
     client.reorder_slot_orders.assert_not_called()
+
+
+def test_ppt_preparation_starts_background_libraries_only_for_ppt(monkeypatch):
+    from unittest.mock import Mock
+    from lazymind import presentation_resources
+    prefetch = Mock()
+    monkeypatch.setattr(presentation_resources, 'prefetch', prefetch)
+    client = MagicMock()
+    client.prepare_workflow.return_value.result = {'status': 'missing_inputs'}
+    toolkit = HostWorkflowToolkit(lambda: client)
+    toolkit.prepare_workflow('writer')
+    prefetch.assert_not_called()
+    assert toolkit.prepare_workflow('ppt-workflow') == {'status': 'missing_inputs'}
+    prefetch.assert_called_once_with()

@@ -1,4 +1,4 @@
-import { useId, useState } from 'react';
+import { useEffect, useId, useState } from 'react';
 import { Button, Tag, Typography } from 'antd';
 import { BranchesOutlined, DownOutlined } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
@@ -6,7 +6,10 @@ import type { ExpansionDetail } from '../../api/paperWorkflows';
 import MarkdownViewer from '../MarkdownViewer';
 import PreparationPanel from './PreparationPanel';
 import PaperFlow from './PaperFlow';
-import { paperDetailFlow, reviewMaterialCounts, stageArtifacts } from './paperFlowModel';
+import { paperDetailFlow, paperExpansionDetailFlow, reviewExpansionDetailFlow, reviewGenerationStatus, reviewMaterialCounts, stageArtifacts } from './paperFlowModel';
+import ExpansionSteps from './ExpansionSteps';
+import ReviewRecordStatus from './ReviewRecordStatus';
+import { useConversationRunningStore } from '@/modules/chat/store/conversationRunning';
 import PaperResearchCompletion from '@/modules/chat/components/WorkflowPanel/PaperResearchCompletion';
 import PaperLineageView from '@/modules/chat/components/WorkflowPanel/PaperLineageView';
 import { PaperDetail } from '@/modules/chat/components/WorkflowPanel/PaperExpansionArtifactView';
@@ -18,6 +21,15 @@ export default function ExpansionDetails({ detail, onRefresh, onStart }: {
     const [processOpen, setProcessOpen] = useState(false);
     const processId = useId();
     const { record } = detail;
+    const watcher = useId();
+    const reviewConversationId = detail.handoffs.find(item => item.id === record.auto_review_id && item.kind === 'review')?.conversation_id;
+    const execution = useConversationRunningStore(state => reviewConversationId ? state.entries[reviewConversationId] : undefined);
+    useEffect(() => {
+        if (!reviewConversationId) return;
+        const store = useConversationRunningStore.getState();
+        store.watch(watcher, [reviewConversationId]);
+        return () => store.unwatch(watcher);
+    }, [watcher, reviewConversationId]);
     const report = record.report;
     const completed = record.status === 'completed';
     const preparing = ['preparing', 'awaiting_info', 'awaiting_confirmation', 'preparation_failed'].includes(record.status);
@@ -25,11 +37,11 @@ export default function ExpansionDetails({ detail, onRefresh, onStart }: {
     const originalInstruction = record.preparation?.original_instruction || record.result.user_instruction;
     const directions = record.result.selected_directions?.filter(direction => direction.trim() !== originalInstruction.trim()) || [];
     const seeds = record.result.papers.filter(item => item.is_seed);
-    const steps = paperDetailFlow(detail);
-    const fulltext = steps.find(step => step.id === 'prepareFulltext');
-    const handoff = steps.find(step => step.id === 'handoff');
+    const steps = paperDetailFlow(detail, reviewGenerationStatus(execution));
+    const expansionSteps = paperExpansionDetailFlow(detail);
+    const fulltext = expansionSteps.find(step => step.id === 'prepareFulltext');
     const { ready, distinctReady, processing } = reviewMaterialCounts(detail);
-    const processCounts = steps.flatMap(step => {
+    const processCounts = expansionSteps.flatMap(step => {
         const artifact = record.progress?.[stageArtifacts[step.id]];
         const papers = (artifact?.input || artifact)?.papers;
         return papers?.length ? [{ step, count: new Set(papers.map(paper => paper.paper.paper_id)).size }] : [];
@@ -37,12 +49,12 @@ export default function ExpansionDetails({ detail, onRefresh, onStart }: {
     return <>
         <PaperFlow title={t(review ? 'paperTasks.reviewFlow.label' : 'paperTasks.overview.progress')} steps={steps}>
             <div className="paper-task-flow-summary">
-                {handoff?.status === 'done' ? <Typography.Text>{t('paperTasks.recordsMaterialsReceived')}</Typography.Text>
+                {review && record.auto_review_id ? <ReviewRecordStatus conversationId={reviewConversationId || ''} />
                     : completed && report?.completion && <PaperResearchCompletion completion={report.completion} />}
                 {fulltext?.status === 'needFulltext' && <Typography.Text type="warning">
                     {t('paperTasks.reviewFlow.needFulltextHint', { count: distinctReady })}
                 </Typography.Text>}
-                {handoff?.status === 'incompleteResearch' && <Typography.Text type="warning">{t('paperTasks.reviewFlow.incompleteResearchHint')}</Typography.Text>}
+                {review && record.report?.research_complete === false && !record.auto_review_id && <Typography.Text type="warning">{t('paperTasks.reviewFlow.incompleteResearchHint')}</Typography.Text>}
                 {completed && fulltext?.status !== 'needFulltext' && detail.contents.length > 0 && <Typography.Text type="secondary">
                     {t('paperTasks.availableCount', { count: ready })}{fulltext?.status === 'running' && <> · {t('paperTasks.processingFulltextCount', { count: processing })}</>}
                 </Typography.Text>}
@@ -58,6 +70,11 @@ export default function ExpansionDetails({ detail, onRefresh, onStart }: {
                 </li>)}
             </ul>
         </PaperFlow>
+        {review && <section className="paper-review-expansion-progress" aria-label={t(`paperTasks.expansionDepth.${record.budget_mode}.label`)}>
+            <Typography.Title level={5}>{t(`paperTasks.expansionDepth.${record.budget_mode}.label`)}</Typography.Title>
+            {record.budget_mode !== 'fast' && record.preparation?.direction_selection && <p className="paper-expansion-muted">{t('paperTasks.expansionDepth.directionSelection')} · {t(`paperTasks.expansionDepth.${record.preparation.direction_selection === 'manual' ? 'yourChoice' : 'allDirections'}`)}</p>}
+            <ExpansionSteps steps={reviewExpansionDetailFlow(detail)} />
+        </section>}
         <section className="paper-expansion-context" aria-label={t('paperTasks.overview.context')}>
             {originalInstruction && <div className="paper-expansion-original-request">
                 <Typography.Text type="secondary">{t('paperTasks.originalRequest')}</Typography.Text>

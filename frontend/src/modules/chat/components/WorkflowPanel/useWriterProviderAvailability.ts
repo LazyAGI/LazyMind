@@ -42,15 +42,15 @@ export function useWriterProviderAvailability(providers: string[]) {
         });
         return [id, ready ? 'ready' : (id === 'feishu' || id === 'github') && chatDisabled ? 'chat-disabled' : 'authorize'] as const;
       } catch { return [id, 'failed'] as const; }
-    }));
-    if (request === generation.current) setStates(current => ({ ...current, ...Object.fromEntries(results) }));
+    }).map(check => check.then(result => {
+      if (request === generation.current) setStates(current => ({ ...current, [result[0]]: result[1] }));
+      return result;
+    })));
     return Object.fromEntries(results);
   }, [signature]);
   useEffect(() => {
     void refresh();
-    const onFocus = () => void refresh();
-    window.addEventListener('focus', onFocus);
-    return () => { generation.current++; window.removeEventListener('focus', onFocus); };
+    return () => { generation.current++; };
   }, [refresh]);
   return { states, accounts, obsidian, refresh };
 }

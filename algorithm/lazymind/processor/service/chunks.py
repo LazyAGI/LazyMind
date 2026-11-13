@@ -7,6 +7,12 @@ from lazyllm.tools.rag.store import HybridStore
 
 
 def list_doc_chunks_data(processor, algo_id, kb_id, doc_id, group, offset=0, limit=20):
+    # Text-vector cleanup retains segments. Reading them is independent of
+    # vector readiness and must remain possible after clearing the index.
+    return _list_doc_chunks_data(processor, algo_id, kb_id, doc_id, group, offset, limit)
+
+
+def _list_doc_chunks_data(processor, algo_id, kb_id, doc_id, group, offset=0, limit=20):
     algorithm = processor._get_algo(algo_id)
     if algorithm is None:
         raise HTTPException(status_code=404, detail=f'Invalid algo_id {algo_id}')

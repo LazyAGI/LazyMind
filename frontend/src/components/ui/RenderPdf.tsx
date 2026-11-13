@@ -1,24 +1,36 @@
+import type { PdfScrollSyncEndpoint } from "./pdfScrollSync";
+import { createPdfViewportScheduler } from "./pdfViewportScheduler";
 import ReadingPreparationAction from "@/modules/knowledge/paper/ReadingPreparationAction";
+import {PdfPageControl} from "./PdfPageControl";
+import {PdfZoomControl} from "./PdfZoomControl";
+import {PdfPinnedRegion} from "./PdfPinnedRegion";
+import {PdfPinDock} from "./PdfPinDock";
+import {usePdfPinBoard} from "./usePdfPinBoard";
+import {isPersistablePdfPin,type PdfPinRecord,type PdfRegionPinRecord,type PdfStudyPinRecord} from "./pdfPinStore";
+import {usePdfHandPan} from "./usePdfHandPan";
 import {PdfStudyActivation,StudySparkle} from "./PdfStudyActivation";
 import {usePdfReaderPreferences} from "./usePdfReaderPreferences";
 import {AgentAppsAuth} from "@/components/auth";
 import {authServiceApiUrl} from "@/runtime/apiBase";
-import {usePaperReaderSession} from "@/modules/knowledge/api/paperReader";
-import {PdfPaperOverview} from "./PdfPaperOverview";
+import {usePaperReaderSession,type VisualExplanation} from "@/modules/knowledge/api/paperReader";
 import {PdfVisualStudy} from "./PdfVisualStudy";
 import {PdfFigureLayer} from "./PdfFigureLayer";
 import {usePaperReaderLabels,paperVisualLabel} from "./paperReaderLabels";
 import "./PdfPaperReader.css";
 import { useTranslation } from "react-i18next";
+import { message } from "antd";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Document, Page, pdfjs } from "react-pdf";
+import { pdfDocumentOptions } from "./pdfDocumentOptions";
 import { PdfCitationLayer } from "./PdfCitationLayer";
 import { restorePdfLinkAnnotationBorders } from "./pdfNativeLinkBorders";
 import { groupPdfCitationTargets, type PdfCitationTarget } from "./pdfCitationReferences";
 import { createPdfCitationPreviewCache } from "./pdfCitationPreview";
+import { addCitationToPaperLibrary } from "@/modules/knowledge/api/academicReferences";
+import { getImportErrorMessage } from "@/modules/knowledge/utils/importError";
 import {PdfSelectionComposer, type PdfComposerAction} from "./PdfSelectionComposer";
-import {pdfNoteHighlightBackground,pdfNoteHighlightPaths,readPdfNoteHighlights,writePdfNoteHighlights,type PdfNoteColor,type PdfNoteHighlight} from "./pdfNoteHighlights";
-import {ControlOutlined, ZoomInOutlined, ZoomOutOutlined, LeftOutlined, RightOutlined} from "@ant-design/icons";
+import {pdfNoteHighlightBackground,pdfNoteHighlightHitAreas,pdfNoteHighlightPaths,readPdfNoteHighlights,writePdfNoteHighlights,type PdfNoteColor,type PdfNoteHighlight} from "./pdfNoteHighlights";
+import {ControlOutlined, MinusOutlined, PlusOutlined, LeftOutlined, RightOutlined} from "@ant-design/icons";
 import "react-pdf/dist/Page/AnnotationLayer.css";
 import "react-pdf/dist/Page/TextLayer.css";
 import { isSingleEnglishWord } from "@/modules/knowledge/api/translation";
@@ -28,12 +40,12 @@ import { normalizePdfSelectionText } from "./pdfSelectionText";
 import { referenceActionAtPoint, referenceActionForSelection, type PdfReferenceAction } from "./pdfReferenceGeometry";
 import { usePdfStudyLayout } from "./usePdfStudyLayout";
 import { PdfFormulaStudy } from "./PdfFormulaStudy";
-import {PdfStudyDialog} from "./PdfStudyDialog";
+import {PdfStudyDialog,type PinnedGeometry} from "./PdfStudyDialog";
 import {cropPdfBlockPreview} from './pdfBlockPreview';
 import { PdfTableStudy } from "./PdfTableStudy";
 import { PdfTableLayer, hasTableGeometry } from "./PdfTableLayer";
 import { formulaNumberMap, formulaReferenceForClick } from "./pdfFormulaReferences";
-import type { FormulaEvidence } from "@/modules/knowledge/api/formulaExplanation";
+import type { FormulaEvidence,FormulaExplanation } from "@/modules/knowledge/api/formulaExplanation";
 import type { PdfIRBlock, PdfIRDocument } from "@/modules/knowledge/api/pdfIR";
 import { PdfFormulaLayer, hasFormulaGeometry } from "./PdfFormulaLayer";
 import { usePdfIR, usablePdfIR, type PdfIRTarget } from "@/modules/knowledge/api/pdfIR";
@@ -46,10 +58,12 @@ type LoadedPdfDocument = Parameters<NonNullable<React.ComponentProps<typeof Docu
 pdfjs.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
 
 interface RenderPdfProps {
+  pdfScrollSync?: PdfScrollSyncEndpoint;
   paperMode?: boolean;
+  pdfToolbarMode?: "full" | "navigation";
+  pdfSelectableText?: boolean;
   pdfHeaderStart?: React.ReactNode;
-  pdfHeaderEnd?: React.ReactNode;
-  paperTitle?: string;
+  pdfHeaderEnd?: React.ReactNode | ((tools: React.ReactNode) => React.ReactNode);
   onStudyOpenChange?: (open: boolean) => void;
   onPdfIRDocumentChange?: (document: PdfIRDocument | undefined) => void;
   onPdfOutlineChange?: (outline: PdfNativeOutlineItem[]) => void;
@@ -57,6 +71,7 @@ interface RenderPdfProps {
   pdfNavigateToPage?: {page:number;requestId:number};
   pdfNavigateToPosition?: {page:number;progress:number;requestId:number};
   savedNoteHighlights?: PdfNoteHighlight[];
+  onNoteHighlightClick?: (id:string) => void;
   pdfIRTarget?: PdfIRTarget;
   pdfSourceHash?: string;
   onPreviewError?: () => void;
@@ -80,8 +95,6 @@ interface RenderPdfProps {
   translateSelectionLabel?: string;
   translateSelectionDisabled?: boolean;
   translateSelectionDisabledTip?: string;
-  translateSelectionConfigureLabel?: string;
-  translateSelectionConfigureUrl?: string;
   learningSelectionActions?: LearningSelectionAction[];
   onLearningSelection?: (key:string, selection:PdfTextSelection)=>void;
   onPdfKindDetected?: (kind: "image_only" | "native_text" | "mixed") => void;
@@ -137,6 +150,9 @@ function hasUsablePdfText(value: string): boolean {
 export default function RenderPdf({
   onPreviewError,
   paperMode = false,
+  pdfToolbarMode = "full",
+  pdfSelectableText = false,
+  pdfScrollSync,
   pdfHeaderStart,
   pdfHeaderEnd,
   onStudyOpenChange,
@@ -146,9 +162,9 @@ export default function RenderPdf({
   pdfNavigateToPage,
   pdfNavigateToPosition,
   savedNoteHighlights = [],
+  onNoteHighlightClick,
   pdfIRTarget,
   pdfSourceHash,
-  paperTitle,
   fileData,
   metadata,
   defaultPageWidth,
@@ -159,14 +175,10 @@ export default function RenderPdf({
   onAskSelection,
   onNoteSelection,
   onTranslateSelection,
-  onRetranslateSelection,
-  retranslateSelectionLabel = "重译此段",
   onAddVocabularySelection,
   addVocabularySelectionLabel = "加入生词",
   translateSelectionDisabled = false,
   translateSelectionDisabledTip,
-  translateSelectionConfigureLabel = "去配置",
-  translateSelectionConfigureUrl,
   learningSelectionActions = [],
   onLearningSelection,
   onPdfKindDetected,
@@ -176,7 +188,7 @@ export default function RenderPdf({
   onViewPositionChange,
 }: RenderPdfProps) {
   const { t } = useTranslation();
-  const {label:readerLabel}=usePaperReaderLabels();
+  const {label:readerLabel,language:readerLanguage}=usePaperReaderLabels();
   const preferenceKey = pdfSourceHash && pdfIRTarget ? `pdf-reader:${pdfIRTarget?.dataset || ""}:${pdfIRTarget?.document || ""}:${pdfSourceHash}` : undefined;
   const {zoom,setZoom} = usePdfReaderPreferences(preferenceKey,fileData,pdfIRTarget ? `${pdfIRTarget.dataset}:${pdfIRTarget.document}` : undefined);
   const readerSession = usePaperReaderSession();
@@ -185,13 +197,21 @@ export default function RenderPdf({
   // Keep credentials out of storage keys, while separating users, tenants and servers.
   const noteHighlightKey = readerAccount?.userId && pdfIRTarget && pdfSourceHash
     ? `pdf-note-highlights:v2:${JSON.stringify([authServiceApiUrl("auth/refresh"),readerAccount.userId,readerAccount.tenantId || readerAccount.tenant_id || readerAccount.tenantKey || readerAccount.tenant_key || "",pdfIRTarget.dataset,pdfIRTarget.document,pdfSourceHash])}` : undefined;
+  const pinBoardKey = readerAccount?.userId && pdfIRTarget && pdfSourceHash
+    ? `pdf-pin-board:v1:${JSON.stringify([authServiceApiUrl("auth/refresh"),readerAccount.userId,readerAccount.tenantId || readerAccount.tenant_id || readerAccount.tenantKey || readerAccount.tenant_key || "",pdfIRTarget.dataset,pdfIRTarget.document,pdfSourceHash])}` : undefined;
+  const pinBoard=usePdfPinBoard(pinBoardKey,fileData);
+  const pinBoardReady=pinBoard.ready&&(!pdfIRTarget||!!pinBoardKey);
+  useEffect(()=>{
+    if(pinBoard.saveError)message.warning(readerLanguage==='zh'?'钉住内容暂时无法保存到本机，请检查浏览器存储空间。':'Pinned content could not be saved on this device. Check browser storage.');
+  },[pinBoard.saveError,readerLanguage]);
   const [noteHighlightState,setNoteHighlightState] = useState<{key?:string;session:string;highlights:PdfNoteHighlight[]}>({session:readerSession,highlights:[]});
   const noteHighlights = noteHighlightState.key === noteHighlightKey && noteHighlightState.session === readerSession ? noteHighlightState.highlights : [];
   useEffect(()=>setNoteHighlightState({key:noteHighlightKey,session:readerSession,highlights:readPdfNoteHighlights(noteHighlightKey)}),[noteHighlightKey,readerSession,fileData]);
-  const [readerMode,setReaderMode] = useState<"overview" | "original">("original");
   const [noteReturn,setNoteReturn]=useState<PdfViewPosition>();
-  useEffect(()=>setReaderMode("original"),[fileData]);
+  const [pinCaptureActive,setPinCaptureActive] = useState(false);
+  const pinStageRef=useRef<HTMLDivElement>(null);
   useEffect(()=>setNoteReturn(undefined),[fileData]);
+  useEffect(()=>setPinCaptureActive(false),[fileData]);
   // PDF.js may transfer its input buffer to a worker. Retain original bytes for download.
   const pdfFile = useMemo(()=>fileData instanceof ArrayBuffer ? fileData.slice(0) : fileData,[fileData]);
   const currentSource = useRef(fileData);
@@ -209,6 +229,10 @@ export default function RenderPdf({
   const studyReaderRef = useRef<HTMLDivElement>(null);
   const studyLayout = usePdfStudyLayout(studyReaderRef);
   const [studyOpen, setStudyOpen] = useState(false);
+  const [studyPinned, setStudyPinned] = useState(false);
+  const [activeStudyPinId,setActiveStudyPinId]=useState<string>();
+  const restoredStudyPinId=useRef<string>();
+  const studyExplanationRef=useRef<{kind:'formula'|'image'|'table';blockId:string;data:FormulaExplanation|VisualExplanation}>();
   const [tablesEnabled, setTablesEnabled] = useState(true);
   const [tableStudyOpen, setTableStudyOpen] = useState(false);
   const [tableSelection, setTableSelection] = useState<PdfIRBlock>();
@@ -227,10 +251,18 @@ export default function RenderPdf({
   const numberedFormulas = useMemo(() => formulaNumberMap(studyBlocks), [studyBlocks]);
   const studySourceKey = formulaDocument ? `${formulaDocument.source_sha256}:${formulaDocument.version}:${formulaDocument.projection_version || 0}:${formulaDocument.parser.name}:${formulaDocument.parser.model}` : "";
   useEffect(() => {
+    studyExplanationRef.current=undefined;
     setVisualSelection(undefined);
-    setStudyOpen(false); setTableStudyOpen(false); setTableSelection(undefined); setStudySelection(undefined); setStudyHighlight(undefined); setStudyReturn(undefined); setPendingStudyNavigation(undefined);
+    setStudyOpen(false); setStudyPinned(false); setActiveStudyPinId(undefined); setTableStudyOpen(false); setTableSelection(undefined); setStudySelection(undefined); setStudyHighlight(undefined); setStudyReturn(undefined); setPendingStudyNavigation(undefined);
   }, [studySourceKey]);
-  const explainFormula = (block: PdfIRBlock) => { setVisualSelection(undefined);setTableStudyOpen(false); setStudySelection({block,explain:true}); setStudyOpen(true); };
+  const releasePinnedStudy=()=>{
+    if(!activeStudyPinId)return;
+    pinBoard.update(activeStudyPinId,{minimized:true});
+    setActiveStudyPinId(undefined);setStudyPinned(false);
+    restoredStudyPinId.current=undefined;
+    studyExplanationRef.current=undefined;
+  };
+  const explainFormula = (block: PdfIRBlock) => { releasePinnedStudy();setVisualSelection(undefined);setTableStudyOpen(false); setStudySelection({block,explain:true}); setStudyOpen(true); };
   const formulaPages = useMemo(() => {
     const pages = new Map<number, import("@/modules/knowledge/api/pdfIR").PdfIRBlock[]>();
     for (const block of formulaDocument?.blocks || []) {
@@ -260,6 +292,7 @@ export default function RenderPdf({
   >({});
   const pageRefs = useRef<(HTMLDivElement | null)[]>([]);
   const containerRef = useRef<HTMLDivElement | null>(null);
+  const handPan=usePdfHandPan(containerRef,fileData);
   const appliedPositionRef = useRef("");
   const positionIdleTimer=useRef<ReturnType<typeof setTimeout>>();
   const pendingPosition=useRef<PdfViewPosition>();
@@ -279,6 +312,20 @@ export default function RenderPdf({
   const referenceHoverTimer = useRef<number | undefined>(undefined);
   const referenceHoverCloseTimer = useRef<number | undefined>(undefined);
   const citationTargets = useMemo(() => groupPdfCitationTargets(referenceActions), [referenceActions]);
+  const citationDatasetId = pdfIRTarget?.dataset;
+  const canAddCitationToLibrary = Boolean(citationDatasetId && pdfIRTarget?.document && pdfIRTarget.canWrite !== false);
+  const addCitation = useCallback(async (target: PdfCitationTarget) => {
+    if (!citationDatasetId || !canAddCitationToLibrary) return;
+    const key = `citation-library:${citationDatasetId}:${target.referenceId}`;
+    message.open({ key, type: "loading", content: t("pdfCitation.addStarted"), duration: 0 });
+    try {
+      const result = await addCitationToPaperLibrary(citationDatasetId, target.referenceId);
+      message.open({ key, type: "success", content: t(result.status === "pending" ? "pdfCitation.addSucceeded" : "pdfCitation.addedToLibrary"), duration: 3 });
+    } catch (error) {
+      message.open({ key, type: "error", content: getImportErrorMessage(error, t("pdfCitation.addFailed")), duration: 5 });
+      throw error;
+    }
+  }, [citationDatasetId, canAddCitationToLibrary, t]);
   const [citationPreview, setCitationPreview] = useState<{source: RenderPdfProps["fileData"]; cache: ReturnType<typeof createPdfCitationPreviewCache>}>();
   useEffect(() => {
     const cache = createPdfCitationPreviewCache();
@@ -372,18 +419,25 @@ export default function RenderPdf({
       setContainerWidth(clientWidth);
     };
     updateViewport();
+    const viewportUpdates = createPdfViewportScheduler(updateViewport);
     const resizeObserver = typeof ResizeObserver === "undefined"
       ? undefined
-      : new ResizeObserver(updateViewport);
+      : new ResizeObserver(viewportUpdates.schedule);
     if (containerRef.current) resizeObserver?.observe(containerRef.current);
-    window.addEventListener("resize", updateViewport);
+    window.addEventListener("resize", viewportUpdates.schedule);
     return () => {
       resizeObserver?.disconnect();
-      window.removeEventListener("resize", updateViewport);
+      window.removeEventListener("resize", viewportUpdates.schedule);
+      viewportUpdates.cancel();
     };
   }, []);
 
+  useEffect(() => {
+    if (pdfLoaded && containerRef.current) return pdfScrollSync?.connect(containerRef.current);
+  }, [pdfScrollSync, pdfLoaded]);
+
   const onScroll = () => {
+    pdfScrollSync?.onScroll();
     if (!containerRef.current) {
       return;
     }
@@ -403,7 +457,7 @@ export default function RenderPdf({
       };
       pendingPosition.current=position;
       clearTimeout(positionIdleTimer.current);
-      const publish=()=>{const latest=pendingPosition.current;if(!latest)return;pendingPosition.current=undefined;appliedPositionRef.current=`${latest.page-1}:${latest.progress.toFixed(4)}`;reportPosition.current?.(latest);};
+      const publish=()=>{const latest=pendingPosition.current;if(!latest)return;pendingPosition.current=undefined;reportPosition.current?.(latest);};
       if(position.page!==reportedPage.current){reportedPage.current=position.page;publish();}
       else positionIdleTimer.current=setTimeout(publish,250);
     }
@@ -415,7 +469,7 @@ export default function RenderPdf({
     // during text selection. The explicit selection toolbar always wins.
     window.clearTimeout(referenceHoverTimer.current);
     window.clearTimeout(referenceHoverCloseTimer.current);
-    if ((!onAskSelection && !onNoteSelection && !onTranslateSelection && !onRetranslateSelection && !onImportReferenceSelection && !onAddVocabularySelection && !onLearningSelection) || !containerRef.current) {
+    if ((!onAskSelection && !onNoteSelection && !onTranslateSelection && !onImportReferenceSelection && !onAddVocabularySelection && !onLearningSelection) || !containerRef.current) {
       return;
     }
     const selection = window.getSelection();
@@ -551,13 +605,13 @@ export default function RenderPdf({
 
   const pageTops = useMemo(() => {
     const arr = [];
-    let cumulativeTop = 0;
+    let cumulativeTop = handPan.gutterY;
     for (let i = 0; i < numPages; i++) {
       arr.push(cumulativeTop);
       cumulativeTop += pageHeightsPx[i] + GAP;
     }
     return arr;
-  }, [pageHeightsPx, numPages]);
+  }, [pageHeightsPx, numPages, handPan.gutterY]);
 
   const [nativeDestination,setNativeDestination] = useState<{source:RenderPdfProps["fileData"];pageNumber:number;dest?:unknown[];bbox?:[number,number,number,number]}>();
   const [resolvedDestination,setResolvedDestination] = useState<{source:RenderPdfProps["fileData"];page:number;progress:number}>();
@@ -616,7 +670,6 @@ export default function RenderPdf({
     const key = `${pdfNavigateToPage.requestId}:${pdfNavigateToPage.page}`;
     if (lastPageNavigation.current === key) return;
     lastPageNavigation.current = key;
-    setReaderMode("original");
     jumpPage(pdfNavigateToPage.page);
   }, [pdfNavigateToPage?.page,pdfNavigateToPage?.requestId,pdfLoaded,pageTops,numPages,fileData]);
   const lastNoteNavigation=useRef('');
@@ -632,12 +685,12 @@ export default function RenderPdf({
     setNoteReturn({page:originPage+1,progress:Math.max(0,Math.min(1,(scrollTop-(pageTops[originPage]||0))/(pageHeightsPx[originPage]||1)))});
     const page=request.page,progress=Math.max(0,Math.min(.999,request.progress));
     const top=(pageTops[page-1]||0)+(pageHeightsPx[page-1]||0)*progress;
-    setReaderMode('original');containerRef.current?.scrollTo({top,behavior:'auto'});setScrollTop(top);setSelectionAction(null);
+    containerRef.current?.scrollTo({top,behavior:'auto'});setScrollTop(top);setSelectionAction(null);
     onViewPositionChange?.({page,progress});
   },[pdfNavigateToPosition,pdfLoaded,fileData,numPages,pageTops,pageHeightsPx,scrollTop,onViewPositionChange]);
   const changeZoom = (value: number) => {
     zoomPosition.current = {page:currentPage,progress:Math.max(0,(scrollTop-(pageTops[currentPage-1]||0))/(pageHeightsPx[currentPage-1]||1))};
-    setZoom(Math.min(2, Math.max(.5, Math.round(value * 10) / 10)));
+    setZoom(Math.min(2, Math.max(.5, Math.round(value * 100) / 100)));
   };
   const previousGeometry = useRef({width:pageWidthPx,tops:pageTops,heights:pageHeightsPx});
   useLayoutEffect(() => {
@@ -657,7 +710,6 @@ export default function RenderPdf({
     const top=(pageTops[page-1]||0)+(pageHeightsPx[page-1]||0)*progress;
     containerRef.current?.scrollTo({top,behavior:"auto"});
     setScrollTop(top);
-    setReaderMode("original");
     setSelectionAction(null);
     onViewPositionChange?.({page,progress});
     setResolvedDestination(undefined);
@@ -945,7 +997,7 @@ export default function RenderPdf({
   };
   const navigateFromStudy = (evidence:FormulaEvidence) => {
     navigateStudyEvidence(evidence);
-    setVisualSelection(undefined);setStudyOpen(false);setTableStudyOpen(false);
+    if(!studyPinned){setVisualSelection(undefined);setStudyOpen(false);setTableStudyOpen(false);}
   };
   useEffect(() => {
     if (!pendingStudyNavigation) return;
@@ -960,11 +1012,95 @@ export default function RenderPdf({
     return () => window.clearTimeout(timer);
   }, [pendingStudyNavigation,pageTops,pageHeightsPx,pageSizesMap]);
   const openTableStudy = (block: PdfIRBlock) => {
+    releasePinnedStudy();
     setVisualSelection(undefined);setStudyOpen(false); setTableStudyOpen(true); setTableSelection(block);
     setPendingStudyNavigation(undefined);setStudyHighlight(undefined);setStudyReturn(undefined);
   };
+  const currentStudyPin = ():Omit<PdfStudyPinRecord,'id'|'geometry'|'minimized'>|undefined => {
+    const kind=studyOpen?'formula':tableStudyOpen?'table':visualSelection?.type==='table'?'table':visualSelection?'image':undefined;
+    const block=kind==='formula'?(studySelection?.block||studyBlocks[0]):kind==='table'?(visualSelection?.type==='table'?visualSelection:tableSelection||tableBlocks[0]):visualSelection;
+    if(!kind||!block)return;
+    const name=readerLanguage==='zh'?{formula:'公式',table:'表格',image:'图片'}[kind]:{formula:'Formula',table:'Table',image:'Figure'}[kind];
+    return {kind,blockId:block.id,page:block.page+1,title:readerLanguage==='zh'?`${name} · 第 ${block.page+1} 页`:`${name} · Page ${block.page+1}`,...(visualSelection?.type==='table'&&kind==='table'?{view:'visual' as const}:{})};
+  };
+  const showStudyPin=useCallback((record:PdfStudyPinRecord)=>{
+    const block=formulaDocument?.blocks.find(item=>item.id===record.blockId&&item.type===record.kind);
+    if(!block)return false;
+    restoredStudyPinId.current=record.id;
+    studyExplanationRef.current=record.explanation?{kind:record.kind,blockId:record.blockId,data:record.explanation}:undefined;
+    setActiveStudyPinId(record.id);setStudyPinned(true);
+    setStudyOpen(record.kind==='formula');setTableStudyOpen(record.kind==='table'&&record.view!=='visual');
+    setStudySelection(record.kind==='formula'?{block,explain:!record.explanation}:undefined);
+    setTableSelection(record.kind==='table'&&record.view!=='visual'?block:undefined);
+    setVisualPreview(record.sourcePreview);
+    setVisualSelection(record.kind==='image'||record.view==='visual'?block:undefined);
+    setPendingStudyNavigation(undefined);setStudyHighlight(undefined);setStudyReturn(undefined);
+    return true;
+  },[formulaDocument]);
+  const rememberStudyExplanation=(kind:'formula'|'table'|'image',blockId:string,data:FormulaExplanation|VisualExplanation)=>{
+    studyExplanationRef.current={kind,blockId,data};
+    if(!activeStudyPinId)return;
+    const record=pinBoard.records.find(item=>item.id===activeStudyPinId);
+    if(record&&record.kind===kind&&record.blockId===blockId&&record.explanation!==data&&isPersistablePdfPin({...record,explanation:data})){
+      pinBoard.update(activeStudyPinId,{explanation:data});
+    }
+  };
+  const handleStudyGeometryChange=useCallback((geometry:PinnedGeometry)=>{
+    if(!activeStudyPinId)return;
+    pinBoard.change(current=>{
+      const stored=current.find(item=>item.id===activeStudyPinId);
+      if(!stored||stored.geometry.x===geometry.x&&stored.geometry.y===geometry.y&&stored.geometry.width===geometry.width&&stored.geometry.height===geometry.height)return;
+      return current.map(item=>item.id===activeStudyPinId?{...item,geometry}:item);
+    });
+  },[activeStudyPinId,pinBoard.change]);
+  const handleStudyPinChange=(pinned:boolean,geometry?:PinnedGeometry)=>{
+    if(!pinned){
+      if(activeStudyPinId)pinBoard.remove(activeStudyPinId);
+      setActiveStudyPinId(undefined);setStudyPinned(false);
+      return;
+    }
+    if(!pinBoardReady){message.info(readerLanguage==='zh'?'正在恢复钉住内容，请稍后再试。':'Restoring pinned items. Try again shortly.');return false;}
+    const snapshot=currentStudyPin();
+    if(!snapshot||!geometry)return false;
+    const matching=pinBoard.records.find((item):item is PdfStudyPinRecord=>item.kind!=='region'&&item.kind===snapshot.kind&&item.blockId===snapshot.blockId&&item.view===snapshot.view);
+    const id=activeStudyPinId||matching?.id||crypto.randomUUID();
+    const explanation=studyExplanationRef.current?.kind===snapshot.kind&&studyExplanationRef.current.blockId===snapshot.blockId?studyExplanationRef.current.data:matching?.explanation;
+    const sourcePreview=visualSelection?visualPreview||matching?.sourcePreview:undefined;
+    const base:PdfStudyPinRecord={...snapshot,id,geometry,minimized:false,...(explanation?{explanation}:{})};
+    // An unusually large crop must not prevent the smaller study window itself
+    // from being saved; the PDF can render its source preview again on restore.
+    const withPreview=sourcePreview?{...base,sourcePreview}:base;
+    const record:PdfStudyPinRecord=isPersistablePdfPin(withPreview)?withPreview:base;
+    if(!isPersistablePdfPin(record)){message.warning(readerLanguage==='zh'?'钉住内容过大，无法保存到本机。':'This pin is too large to save on this device.');return false;}
+    const saved=pinBoard.change(current=>{
+      if(!current.some(item=>item.id===id)&&current.length>=6)return;
+      const next=current.some(item=>item.id===id)?current.map(item=>item.id===id?record:item):[...current,record];
+      return next.map(item=>item.kind!=='region'&&item.id!==id?{...item,minimized:true}:item);
+    });
+    if(!saved){message.warning(readerLanguage==='zh'?'最多钉住 6 项，请先关闭一项。':'You can pin up to 6 items. Close one first.');return false;}
+    setActiveStudyPinId(id);setStudyPinned(true);
+  };
+  const minimizeStudy=(geometry:PinnedGeometry)=>{
+    if(activeStudyPinId)pinBoard.update(activeStudyPinId,{geometry,minimized:true});
+    setActiveStudyPinId(undefined);setStudyPinned(false);
+    setVisualSelection(undefined);setStudyOpen(false);setTableStudyOpen(false);
+    setStudyHighlight(undefined);setPendingStudyNavigation(undefined);setStudyReturn(undefined);
+  };
+  const restorePin=(id:string)=>{
+    const record=pinBoard.records.find(item=>item.id===id);
+    if(!record)return;
+    if(record.kind==='region'){pinBoard.update(id,{minimized:false});return;}
+    if(!showStudyPin(record)){
+      message.warning(readerLanguage==='zh'?'原文结构尚未就绪，稍后再恢复。':'The paper structure is not ready yet. Try again shortly.');
+      return;
+    }
+    pinBoard.change(current=>current.map(item=>item.kind!=='region'&&item.id===activeStudyPinId?{...item,minimized:true}:item.id===id?{...item,minimized:false}:item));
+  };
   const closeStudy = () => {
-    setVisualSelection(undefined);setStudyOpen(false);setTableStudyOpen(false);setStudyHighlight(undefined);setPendingStudyNavigation(undefined);setStudyReturn(undefined);
+    if(activeStudyPinId)pinBoard.remove(activeStudyPinId);
+    restoredStudyPinId.current=undefined;
+    setActiveStudyPinId(undefined);
+    setVisualSelection(undefined);setStudyOpen(false);setStudyPinned(false);setTableStudyOpen(false);setStudyHighlight(undefined);setPendingStudyNavigation(undefined);setStudyReturn(undefined);
   };
   const returnFromStudy = () => {
     if (!studyReturn) return;
@@ -972,23 +1108,45 @@ export default function RenderPdf({
     const top=(pageTops[page] || 0) + studyReturn.progress * (pageHeightsPx[page] || 0);
     containerRef.current?.scrollTo({top,behavior:"auto"}); setScrollTop(top);
     setStudyHighlight(undefined); setPendingStudyNavigation(undefined); setStudyReturn(undefined);
-    setVisualSelection(undefined); setStudyOpen(false); setTableStudyOpen(false);
+    if(!studyPinned){setVisualSelection(undefined); setStudyOpen(false); setTableStudyOpen(false);}
   };
 
   const navigateSourceBlock = (id:string) => {
     const block=formulaDocument?.blocks.find(item=>item.id===id);if(!block)return;
-    setReaderMode("original");
     navigateStudyEvidence({id:block.id,text:block.text || block.latex || "",page:block.page,bbox:block.bbox});
   };
   const openVisualStudy = (block:PdfIRBlock) => {
+    releasePinnedStudy();
+    studyExplanationRef.current=undefined;
     setStudyOpen(false);setTableStudyOpen(false);setVisualPreview(undefined);setVisualSelection(block);
     setPendingStudyNavigation(undefined);setStudyHighlight(undefined);setStudyReturn(undefined);
   };
+  const currentStudySnapshot=currentStudyPin();
+  const activeStoredStudyPin=activeStudyPinId?pinBoard.records.find((item):item is PdfStudyPinRecord=>item.kind!=='region'&&item.id===activeStudyPinId):undefined;
+  const hasRestoredVisualSnapshot=!!activeStudyPinId&&!!visualSelection&&restoredStudyPinId.current===activeStudyPinId&&activeStoredStudyPin?.blockId===visualSelection.id&&!!activeStoredStudyPin?.explanation;
+  useEffect(()=>{
+    if(!activeStudyPinId||!visualSelection||!visualPreview)return;
+    const stored=pinBoard.records.find(item=>item.id===activeStudyPinId);
+    if(!stored||stored.kind==='region'||stored.blockId!==visualSelection.id||stored.sourcePreview===visualPreview)return;
+    const next={...stored,sourcePreview:visualPreview};
+    if(isPersistablePdfPin(next))pinBoard.update(activeStudyPinId,{sourcePreview:visualPreview});
+  },[activeStudyPinId,visualSelection?.id,visualPreview,pinBoard.records,pinBoard.update]);
+  useEffect(()=>{
+    if(!activeStudyPinId||!currentStudySnapshot)return;
+    const stored=pinBoard.records.find(item=>item.id===activeStudyPinId);
+    if(!stored||stored.kind==='region'||stored.kind===currentStudySnapshot.kind&&stored.blockId===currentStudySnapshot.blockId&&stored.view===currentStudySnapshot.view&&stored.title===currentStudySnapshot.title)return;
+    studyExplanationRef.current=undefined;
+    pinBoard.change(current=>current.map(item=>item.id===activeStudyPinId?{...item,...currentStudySnapshot,explanation:undefined,sourcePreview:undefined} as PdfPinRecord:item));
+  },[activeStudyPinId,currentStudySnapshot?.kind,currentStudySnapshot?.blockId,currentStudySnapshot?.view,currentStudySnapshot?.title,pinBoard.records,pinBoard.change]);
+  useEffect(()=>{
+    if(!formulaDocument||activeStudyPinId||studyOpen||tableStudyOpen||visualSelection)return;
+    const pending=pinBoard.records.find((item):item is PdfStudyPinRecord=>item.kind!=='region'&&!item.minimized);
+    if(pending)showStudyPin(pending);
+  },[formulaDocument,activeStudyPinId,studyOpen,tableStudyOpen,visualSelection,pinBoard.records,showStudyPin]);
   useEffect(()=>{
     if(!pdfNavigateTo || !pdfLoaded || !formulaDocument)return;
     const request=`${pdfNavigateTo.requestId}:${pdfNavigateTo.id}`;
     if(lastRequestedNavigation.current===request || !formulaDocument.blocks.some(block=>block.id===pdfNavigateTo.id))return;
-    setReaderMode("original");
     lastRequestedNavigation.current=request;navigateSourceBlock(pdfNavigateTo.id);
   // Navigation events are keyed by request ID; source/readiness may arrive later.
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1013,9 +1171,22 @@ export default function RenderPdf({
           const block=formulaReferenceForClick(event.currentTarget,numberedFormulas,event.target as Element,studyPointer.current,event.clientX,event.clientY,window.getSelection()?.toString() || "");
           if (block) {
             event.preventDefault(); event.stopPropagation();
+            releasePinnedStudy();
             setVisualSelection(undefined);setTableStudyOpen(false);setStudyOpen(true);setStudySelection({block,explain:false});
             navigateStudyEvidence({id:block.id,page:block.page,text:block.latex || "",bbox:block.bbox});
           }
+        }}
+        onClick={event => {
+          if (!onNoteHighlightClick || event.button !== 0 || event.detail > 1 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+          if ((event.target as Element).closest('a,button,input,textarea,select,[role="link"]') || window.getSelection()?.isCollapsed === false) return;
+          const pointer = studyPointer.current;
+          if (!pointer || Math.hypot(event.clientX - pointer.x, event.clientY - pointer.y) > 4) return;
+          const bounds = event.currentTarget.getBoundingClientRect();
+          if (!bounds.width || !bounds.height) return;
+          const x = (event.clientX - bounds.left) / bounds.width;
+          const y = (event.clientY - bounds.top) / bounds.height;
+          const hit = pdfNoteHighlightHitAreas(savedNoteHighlights,index+1).find(({rect}) => x >= rect[0] && x <= rect[2] && y >= rect[1] && y <= rect[3]);
+          if (hit) onNoteHighlightClick(hit.id);
         }}
         ref={(el) => (pageRefs.current[index] = el)}
         style={{
@@ -1036,7 +1207,7 @@ export default function RenderPdf({
           pageNumber={index + 1}
           width={RASTER_WIDTH}
           devicePixelRatio={Math.min(2, Math.max(1.5, window.devicePixelRatio || 1))}
-          renderTextLayer={Boolean(pdfIRTarget || onNoteSelection || onAskSelection || onTranslateSelection || onImportReferenceSelection || citationTargets.length)}
+          renderTextLayer={Boolean(pdfSelectableText || pdfIRTarget || onNoteSelection || onAskSelection || onTranslateSelection || onImportReferenceSelection || citationTargets.length)}
           renderAnnotationLayer
           filterAnnotations={restorePdfLinkAnnotationBorders}
           onRenderSuccess={() => {
@@ -1054,12 +1225,13 @@ export default function RenderPdf({
         />
         </div>
         {pdfNoteHighlightPaths([...noteHighlights,...savedNoteHighlights],index+1).map(({color,path})=><svg key={color} data-pdf-note-highlight={color} aria-hidden="true" viewBox="0 0 1 1" preserveAspectRatio="none" style={{position:'absolute',inset:0,width:'100%',height:'100%',mixBlendMode:'multiply',pointerEvents:'none',zIndex:5}}><path d={path} fill={pdfNoteHighlightBackground(color)} fillRule="nonzero"/></svg>)}
+        {onNoteHighlightClick&&savedNoteHighlights.filter(note=>note.page===index+1&&note.rects.length>0).map(note=><button key={note.id} type="button" className="pdf-note-highlight-marker" aria-label={readerLanguage==='zh'?'打开笔记':'Open note'} onClick={event=>{event.stopPropagation();onNoteHighlightClick(note.id);}} style={{top:`${note.rects[0][1]*100}%`}}>✎</button>)}
         {studyHighlight?.page === index && <div className="pdf-study-highlight" style={(() => {
           const box = studyHighlight.bbox;
           const valid = box && box.length === 4 && box.every(value=>Number.isFinite(value)&&value>=0&&value<=1) && box[0]<box[2] && box[1]<box[3];
           return valid ? {left:`${box[0]*100}%`,top:`${box[1]*100}%`,width:`${(box[2]-box[0])*100}%`,height:`${(box[3]-box[1])*100}%`} : {inset:3,background:"transparent"};
         })()} />}
-        {citationTargets.length > 0 && citationPreview?.source === fileData && <PdfCitationLayer targets={citationTargets} getDocument={getCitationDocument} previewCache={citationPreview.cache} onNavigate={navigateCitation} sourceKey={fileData}/>}
+        {citationTargets.length > 0 && citationPreview?.source === fileData && <PdfCitationLayer targets={citationTargets} getDocument={getCitationDocument} previewCache={citationPreview.cache} onNavigate={navigateCitation} onAddToLibrary={canAddCitationToLibrary ? addCitation : undefined} sourceKey={fileData}/>}
         {formulasEnabled && formulaDocument && formulaPages.has(index) && <PdfFormulaLayer key={`${formulaDocument.source_sha256}:${formulaDocument.version}`} blocks={formulaPages.get(index)!} onExplain={explainFormula} />}
         {formulaDocument && <PdfFigureLayer blocks={imageBlocks.filter(block=>block.page===index)} allBlocks={formulaDocument.blocks} onSelect={openVisualStudy}/> }
         {tablesEnabled && formulaDocument && tablePages.has(index) && <PdfTableLayer key={`tables:${studySourceKey}`} blocks={tablePages.get(index)!} onSelect={pdfIRTarget?openVisualStudy:openTableStudy} />}
@@ -1069,11 +1241,12 @@ export default function RenderPdf({
 
   const pageControls = (
       <div className="pdf-reader-tools">
-        <><button aria-label={readerLabel("previousPage")} disabled={!pdfLoaded||currentPage<=1} onClick={()=>jumpPage(currentPage-1)}><LeftOutlined/></button><input className="pdf-reader-page-input" aria-label={readerLabel("page")} type="number" disabled={!pdfLoaded} min={1} max={numPages} value={currentPage} onChange={event=>jumpPage(Number(event.target.value))}/><span className="pdf-reader-page-total">/ {pdfLoaded ? numPages : "—"}</span><button aria-label={readerLabel("nextPage")} disabled={!pdfLoaded||currentPage>=numPages} onClick={()=>jumpPage(currentPage+1)}><RightOutlined/></button><span className="pdf-reader-tool-divider"/><button aria-label={readerLabel("zoomOut")} disabled={!pdfLoaded||zoom<=.5} onClick={()=>changeZoom(zoom-.1)}><ZoomOutOutlined/></button><button title={readerLabel("fitWidth")} onClick={()=>changeZoom(1)}>{Math.round(zoom*100)}%</button><button aria-label={readerLabel("zoomIn")} disabled={!pdfLoaded||zoom>=2} onClick={()=>changeZoom(zoom+.1)}><ZoomInOutlined/></button></>
+        <div className="pdf-reader-control-group"><button aria-label={readerLabel("previousPage")} disabled={!pdfLoaded||currentPage<=1} onClick={()=>jumpPage(currentPage-1)}><LeftOutlined/></button><PdfPageControl page={currentPage} total={numPages} disabled={!pdfLoaded} onChange={jumpPage}/><button aria-label={readerLabel("nextPage")} disabled={!pdfLoaded||currentPage>=numPages} onClick={()=>jumpPage(currentPage+1)}><RightOutlined/></button></div>
+        <div className="pdf-reader-control-group"><button aria-label={readerLabel("zoomOut")} disabled={!pdfLoaded||zoom<=.5} onClick={()=>changeZoom(zoom-.1)}><MinusOutlined/></button><PdfZoomControl zoom={zoom} disabled={!pdfLoaded} onChange={changeZoom}/><button aria-label={readerLabel("zoomIn")} disabled={!pdfLoaded||zoom>=2} onClick={()=>changeZoom(zoom+.1)}><PlusOutlined/></button></div>
       </div>
   );
   const readerTools = (
-    <div className="pdf-reader-modebar pdf-reader-toolbar" hidden={!toolsOpen} style={{maxWidth:containerWidth ? Math.max(180,containerWidth-24) : undefined}}>
+    <div className="pdf-reader-modebar pdf-reader-toolbar" hidden={typeof pdfHeaderEnd !== "function" && !toolsOpen} style={{maxWidth:containerWidth ? Math.max(180,containerWidth-24) : undefined}}>
       {pdfIRTarget && <div className="pdf-formula-controls" onMouseUp={event => event.stopPropagation()}>
 
         {!formulaDocument && !formulaBusy && <div className="pdf-reader-service-notice"><span>{t("pdfFormula.serviceRequired")}</span><a href={`/settings?section=model_defaults&service=parsing&return_to=${encodeURIComponent(window.location.pathname+window.location.search)}`}>{t("pdfFormula.configureService")}</a></div>}
@@ -1082,8 +1255,8 @@ export default function RenderPdf({
         {tableBlocks.length > 0 && <button onClick={() => setTablesEnabled(value => !value)} aria-pressed={tablesEnabled}>{t(tablesEnabled ? "pdfTable.hide" : "pdfTable.show")}</button>}
         {!formulaBusy && pdfIRTarget.canWrite !== false && <button onClick={() => void pdfIR.start(pdfIR.state.status === "ready" || pdfIR.state.status === "failed")}>{pdfIR.state.status === "not_requested" ? t("pdfFormula.enable") : t("pdfFormula.retry")}</button>}
         </div></details>
-        {formulaDocument && studyBlocks.length > 0 && <button type="button" className="pdf-study-ai-button" onClick={() => {setStudyPulse(value=>value+1);setVisualSelection(undefined);setTableStudyOpen(false);setStudyOpen(true);}}><StudySparkle/><span>{t("pdfFormula.openCatalog")}</span></button>}
-        {tableBlocks.length > 0 && <button onClick={() => {setVisualSelection(undefined);setStudyOpen(false);setTableStudyOpen(true);}}>{t("pdfTable.openCatalog", {count:tableBlocks.length})}</button>}
+        {formulaDocument && studyBlocks.length > 0 && <button type="button" className="pdf-study-ai-button" onClick={() => {releasePinnedStudy();setStudyPulse(value=>value+1);setVisualSelection(undefined);setTableStudyOpen(false);setStudyOpen(true);}}><StudySparkle/><span>{t("pdfFormula.openCatalog")}</span></button>}
+        {tableBlocks.length > 0 && <button onClick={() => {releasePinnedStudy();setVisualSelection(undefined);setStudyOpen(false);setTableStudyOpen(true);}}>{t("pdfTable.openCatalog", {count:tableBlocks.length})}</button>}
         {imageBlocks.length>0&&<select aria-label={readerLabel("visuals")} value="" onChange={event=>{const block=imageBlocks.find(item=>item.id===event.target.value);if(block)openVisualStudy(block);}}><option value="" disabled>{readerLabel("imageRegion")} ({imageBlocks.length})</option>{imageBlocks.filter(block=>block.image?.number).map(block=><option key={block.id} value={block.id}>{paperVisualLabel(block,formulaDocument!.blocks,readerLabel)}</option>)}{imageBlocks.some(block=>!block.image?.number)&&<optgroup label={readerLabel("imageRegion")}>{imageBlocks.filter(block=>!block.image?.number).map(block=><option key={block.id} value={block.id}>{paperVisualLabel(block,formulaDocument!.blocks,readerLabel)}</option>)}</optgroup>}</select>}
 
       </div>}
@@ -1091,33 +1264,39 @@ export default function RenderPdf({
   );
 
   const readerHeader = (
-    <nav className={`pdf-reader-modebar pdf-reader-header${pdfIRTarget ? " has-overview" : ""}`} aria-label={paperMode ? readerLabel("reading") : t("paperShell.document",{defaultValue:"Document"})}>
-      <div className="pdf-reader-header-start">{pdfHeaderStart}{pdfIRTarget && <ReadingPreparationAction key={`${pdfIRTarget.dataset}/${pdfIRTarget.document}`} target={pdfIRTarget} onPrepared={pdfIR.refresh} />}</div>
-      {pdfIRTarget && <div role="tablist" className="pdf-reader-view-toggle" aria-label={readerLabel("reading")}><button type="button" role="tab" aria-selected={readerMode==="overview"} onClick={()=>setReaderMode("overview")}>{readerLabel("insight")}</button><button type="button" role="tab" aria-selected={readerMode==="original"} onClick={()=>setReaderMode("original")}>{readerLabel("reading")}</button></div>}
+    <nav className={`pdf-reader-modebar pdf-reader-header${pdfToolbarMode === "navigation" ? " pdf-reader-header--compact" : ""}`} aria-label={paperMode ? readerLabel("reading") : t("paperShell.document",{defaultValue:"Document"})}>
+      <div className="pdf-reader-header-start">{pdfHeaderStart}</div>
       <div className="pdf-reader-header-end">
-        {readerMode === "original" && pageControls}
-        <div ref={toolsRef} className="pdf-reader-tools-popover" onKeyDown={event=>{if(event.key==="Escape"){setToolsOpen(false);toolsRef.current?.querySelector<HTMLButtonElement>("button")?.focus();}}}>
-          <button type="button" aria-label="阅读工具" title="阅读工具" aria-expanded={toolsOpen} onClick={()=>setToolsOpen(open=>!open)}><ControlOutlined/></button>
-          {readerTools}
-        </div>
-        {pdfHeaderEnd}
+        {pdfToolbarMode === "navigation" ? <>{typeof pdfHeaderEnd === "function" ? pdfHeaderEnd(null) : pdfHeaderEnd}{pageControls}</> : <>
+        {pageControls}
+        <button type="button" className="pdf-reader-hand-trigger" aria-label={readerLabel("panPaper")} title={readerLabel("panPaper")} aria-pressed={handPan.active} disabled={!pdfLoaded} onClick={toggleHandPan}><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M8 13.5V7a1.5 1.5 0 0 1 3 0v4.5-7a1.5 1.5 0 0 1 3 0v7-5a1.5 1.5 0 0 1 3 0v5-3a1.5 1.5 0 0 1 3 0V16a6 6 0 0 1-6 6h-1.5a6 6 0 0 1-5-2.7l-3.3-4.8a1.6 1.6 0 0 1 2.6-1.8L8 13.5Z"/></svg></button>
+        <button type="button" className="pdf-reader-pin-trigger" aria-label={readerLabel("captureRegion")} title={readerLabel("captureRegion")} aria-pressed={pinCaptureActive} disabled={!pdfLoaded||!pinBoardReady} onClick={()=>{handPan.disable();setPinCaptureActive(active=>!active);}}><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M6 3v12a3 3 0 0 0 3 3h12"/><path d="M18 21V9a3 3 0 0 0-3-3H3"/></svg></button>
+        {pdfIRTarget && <ReadingPreparationAction key={`${pdfIRTarget.dataset}/${pdfIRTarget.document}`} target={pdfIRTarget} onPrepared={pdfIR.refresh} />}
+        {typeof pdfHeaderEnd === "function" ? pdfHeaderEnd(pdfIRTarget ? readerTools : null) : <>
+          <div ref={toolsRef} className="pdf-reader-tools-popover" onKeyDown={event=>{if(event.key==="Escape"){setToolsOpen(false);toolsRef.current?.querySelector<HTMLButtonElement>("button")?.focus();}}}>
+            <button type="button" aria-label="阅读工具" title="阅读工具" aria-expanded={toolsOpen} onClick={()=>setToolsOpen(open=>!open)}><ControlOutlined/></button>
+            {readerTools}
+          </div>
+          {pdfHeaderEnd}
+        </>}
+        </>}
       </div>
     </nav>
   );
 
   if (error && errorSource.current === fileData) {
     return (
-      <div ref={readerFrame} className="pdf-reader-workspace" data-reader-mode={readerMode} style={{height:style?.height || "100%",width:"100%"}}>
+      <div ref={readerFrame} className="pdf-reader-workspace" data-reader-mode="original" style={{height:style?.height || "100%",width:"100%"}}>
         {studyPulse>0&&<PdfStudyActivation key={studyPulse} frame={readerFrame}/>}
     {readerHeader}
-        {readerMode === "overview" && pdfIRTarget ? <div className="pdf-reader-overview-scroll"><PdfPaperOverview onAddVocabularySelection={onAddVocabularySelection} document={formulaDocument} paperTitle={paperTitle} onOpenSource={()=>setReaderMode("original")}/></div> : <div role="alert" style={{padding:20,textAlign:"center",color:"#a6574c"}}>加载失败: {error}</div>}
+        <div role="alert" style={{padding:20,textAlign:"center",color:"#a6574c"}}>加载失败: {error}</div>
       </div>
     );
   }
 
   const totalHeight =
     (pageHeightsPx.reduce((s, h) => s + h, 0) || pageSlotHeight * numPages) +
-    GAP * Math.max(0, numPages - 1);
+    GAP * Math.max(0, numPages - 1) + handPan.gutterY * 2;
 
   const translationUnavailable=translateSelectionDisabled&&!isSingleEnglishWord(selectionAction?.selection.text||"");
   const commitNoteHighlight=(color:PdfNoteColor)=>{
@@ -1130,24 +1309,37 @@ export default function RenderPdf({
     setNoteHighlightState({key:noteHighlightKey,session:readerSession,highlights:next});
     writePdfNoteHighlights(noteHighlightKey,next);
   };
+  function toggleHandPan(){
+    setPinCaptureActive(false);
+    setSelectionAction(null);setSelectionHighlights([]);
+    window.clearTimeout(referenceHoverTimer.current);
+    window.clearTimeout(referenceHoverCloseTimer.current);
+    window.getSelection()?.removeAllRanges();
+    handPan.toggle();
+  }
   return (
-    <div ref={readerFrame} className="pdf-reader-workspace" data-reader-mode={readerMode} style={{height:style?.height || "calc(100vh - 220px)",width:"100%"}}>
+    <div ref={readerFrame} className="pdf-reader-workspace" data-reader-mode="original" style={{height:style?.height || "calc(100vh - 220px)",width:"100%"}}>
     {studyPulse>0&&<PdfStudyActivation key={studyPulse} frame={readerFrame}/>}
     {readerHeader}
-    <div className="pdf-reader-stage">
-    {readerMode==='original'&&noteReturn&&<button type="button" className="pdf-reader-note-return" aria-label="返回阅读位置" onClick={()=>{
+    <div ref={pinStageRef} className="pdf-reader-stage">
+    {noteReturn&&<button type="button" className="pdf-reader-note-return" aria-label={t('pdfReader.returnPosition')} onClick={()=>{
       const page=Math.min(numPages,Math.max(1,noteReturn.page));
       const top=(pageTops[page-1]||0)+(pageHeightsPx[page-1]||0)*noteReturn.progress;
       containerRef.current?.scrollTo({top,behavior:'auto'});setScrollTop(top);onViewPositionChange?.(noteReturn);setNoteReturn(undefined);
-    }}>← {t('pdfReader.returnPosition',{defaultValue:'返回阅读位置'})}</button>}
-    {pdfIRTarget && <div className="pdf-reader-overview-scroll" aria-hidden={readerMode!=="overview"} style={{visibility:readerMode==="overview"?"visible":"hidden",pointerEvents:readerMode==="overview"?"auto":"none"}}><PdfPaperOverview onAddVocabularySelection={onAddVocabularySelection} document={formulaDocument} paperTitle={paperTitle} onOpenSource={id=>{setReaderMode("original");if(id)requestAnimationFrame(()=>navigateSourceBlock(id));}}/></div>}
-    <div ref={studyReaderRef} data-study-layout={studyLayout} className="pdf-reader-with-study" aria-hidden={readerMode!=="original"} style={{height:"100%",width:"100%",display:"flex",visibility:readerMode==="original"?"visible":"hidden"}}>
+    }}>← {t('pdfReader.returnPosition')}</button>}
+    <div ref={studyReaderRef} data-study-layout={studyLayout} className="pdf-reader-with-study" style={{height:"100%",width:"100%",display:"flex"}}>
     <div
-      className={className}
+      className={[className,handPan.active?'pdf-reader-hand-active':'',handPan.dragging?'is-dragging':''].filter(Boolean).join(' ')}
       ref={containerRef}
       onScroll={onScroll}
-      onMouseUp={updateSelectionAction}
-      onMouseMove={handleReferenceHover}
+      onPointerDownCapture={handPan.onPointerDown}
+      onPointerMove={handPan.onPointerMove}
+      onPointerUp={handPan.onPointerEnd}
+      onPointerCancel={handPan.onPointerEnd}
+      onLostPointerCapture={handPan.onPointerEnd}
+      onClickCapture={event=>{if(handPan.active){event.preventDefault();event.stopPropagation();}}}
+      onMouseUp={handPan.active?undefined:updateSelectionAction}
+      onMouseMove={handPan.active?undefined:handleReferenceHover}
       onMouseLeave={() => {
         window.clearTimeout(referenceHoverTimer.current);
         if (selectionAction?.referenceHover && !document.activeElement?.closest("[data-pdf-selection-toolbar]")) {
@@ -1198,10 +1390,8 @@ export default function RenderPdf({
             onTranslate={onTranslateSelection ? ()=>onTranslateSelection(selectionAction.selection) : undefined}
             translationDisabled={translationUnavailable}
             translationTitle={translationUnavailable ? translateSelectionDisabledTip : "翻译"}
-            translationHelp={translationUnavailable && translateSelectionConfigureUrl ? <a href={translateSelectionConfigureUrl}>{translateSelectionConfigureLabel}</a> : undefined}
             actions={(() => {
               const actions:PdfComposerAction[]=[];
-              if(onRetranslateSelection)actions.push({key:"retranslate",label:retranslateSelectionLabel,onClick:()=>onRetranslateSelection(selectionAction.selection)});
               if(onAddVocabularySelection && /[A-Za-z]/.test(selectionAction.selection.text))actions.push({key:"vocabulary",label:addVocabularySelectionLabel,onClick:()=>onAddVocabularySelection(selectionAction.selection)});
               for(const action of visibleLearningSelectionActions(learningSelectionActions,selectionAction.selection.text,Boolean(onTranslateSelection)))actions.push({key:action.key,label:action.label,disabled:action.disabled,title:action.disabledTip,onClick:()=>onLearningSelection?.(action.key,selectionAction.selection)});
               const reference=selectionAction.referenceAction;
@@ -1212,6 +1402,9 @@ export default function RenderPdf({
         </div>
       ) : null}
       <Document
+        options={pdfDocumentOptions}
+        externalLinkTarget="_blank"
+        externalLinkRel="noopener noreferrer"
         // react-pdf retains this handler from mount; read the active source from a ref.
         onItemClick={({pageNumber,dest})=>setNativeDestination({source:currentSource.current,pageNumber,dest:Array.isArray(dest)?dest:undefined})}
         file={pdfFile}
@@ -1268,7 +1461,7 @@ export default function RenderPdf({
           style={{
             position: "relative",
             height: totalHeight,
-            minWidth: pageWidthPx + 32,
+            minWidth: handPan.gutter ? Math.max(pageWidthPx + 32,containerWidth) + handPan.gutter * 2 : pageWidthPx + 32,
             background: GAP_BACKGROUND,
           }}
         >
@@ -1276,13 +1469,15 @@ export default function RenderPdf({
         </div>
       </Document>
     </div>
-    {(studyOpen||tableStudyOpen||!!visualSelection)&&formulaDocument&&<PdfStudyDialog onClose={closeStudy}>
-      {studyOpen && pdfIRTarget && <PdfFormulaStudy key={studySourceKey} target={pdfIRTarget} sourceKey={studySourceKey} blocks={studyBlocks} selected={studySelection?.block} autoExplain={studySelection?.explain} compact onSelect={block=>setStudySelection({block,explain:false})} onNavigate={navigateFromStudy} canReturn={!!studyReturn} onReturn={returnFromStudy} onClose={closeStudy} />}
+    {(studyOpen||tableStudyOpen||!!visualSelection)&&formulaDocument&&<PdfStudyDialog key={activeStudyPinId||'current-study'} onClose={closeStudy} onPinChange={handleStudyPinChange} onMinimize={minimizeStudy} onGeometryChange={handleStudyGeometryChange} initialPinned={!!activeStudyPinId} initialGeometry={activeStudyPinId?pinBoard.records.find(item=>item.id===activeStudyPinId)?.geometry:undefined}>
+      {studyOpen && pdfIRTarget && <PdfFormulaStudy key={studySourceKey} target={pdfIRTarget} sourceKey={studySourceKey} blocks={studyBlocks} selected={studySelection?.block} autoExplain={studySelection?.explain} initialExplanation={activeStoredStudyPin?.kind==='formula'&&activeStoredStudyPin.blockId===studySelection?.block?.id?activeStoredStudyPin.explanation as FormulaExplanation:undefined} onExplanationChange={data=>{if(studySelection?.block)rememberStudyExplanation('formula',studySelection.block.id,data);}} compact onSelect={block=>setStudySelection({block,explain:false})} onNavigate={navigateFromStudy} canReturn={!!studyReturn} onReturn={returnFromStudy} onClose={closeStudy} />}
       {tableStudyOpen && <PdfTableStudy key={`tables:${studySourceKey}`} sourceKey={studySourceKey} blocks={tableBlocks} allBlocks={formulaDocument.blocks} selected={tableSelection} onSelect={openTableStudy} onNavigate={navigateFromStudy} onExplainVisual={openVisualStudy} canReturn={!!studyReturn} onReturn={returnFromStudy} onClose={closeStudy} />}
-      {visualSelection&&pdfIRTarget&&<PdfVisualStudy key={`${studySourceKey}:${visualSelection.id}`} target={pdfIRTarget} document={formulaDocument} block={visualSelection} sourcePreview={visualPreview} onNavigate={id=>{navigateSourceBlock(id);setVisualSelection(undefined);}} onInspectTable={openTableStudy} onClose={closeStudy} onReturn={returnFromStudy} canReturn={!!studyReturn}/>}
+      {visualSelection&&pdfIRTarget&&<PdfVisualStudy key={`${studySourceKey}:${visualSelection.id}`} target={pdfIRTarget} document={formulaDocument} block={visualSelection} sourcePreview={visualPreview} autoExplain={!hasRestoredVisualSnapshot} initialExplanation={activeStoredStudyPin?.kind===visualSelection.type&&activeStoredStudyPin.blockId===visualSelection.id?activeStoredStudyPin.explanation as VisualExplanation:undefined} onExplanationChange={data=>rememberStudyExplanation(visualSelection.type==='table'?'table':'image',visualSelection.id,data)} onNavigate={id=>{navigateSourceBlock(id);if(!studyPinned)setVisualSelection(undefined);}} onInspectTable={openTableStudy} onClose={closeStudy} onReturn={returnFromStudy} canReturn={!!studyReturn}/>}
     </PdfStudyDialog>}
     </div>
+    <PdfPinnedRegion stageRef={pinStageRef} viewportRef={containerRef} pageRefs={pageRefs} sourceKey={fileData} active={pinCaptureActive} onActiveChange={setPinCaptureActive} language={readerLanguage === "zh" ? "zh" : "en"} pins={pinBoard.records.filter((item):item is PdfRegionPinRecord=>item.kind==='region')} onAddPin={pin=>!isPersistablePdfPin(pin)?(readerLanguage==='zh'?'截图过大，无法钉住并保存。':'The capture is too large to pin and save.'):pinBoard.add(pin)} onUpdatePin={record=>pinBoard.update(record.id,{geometry:record.geometry})} onRemovePin={pinBoard.remove} onMinimizePin={id=>{pinBoard.update(id,{minimized:true});}}/>
     </div>
+    {(!(studyOpen||tableStudyOpen||visualSelection)||studyPinned)&&<PdfPinDock items={pinBoard.records.filter(item=>item.minimized).map(item=>({id:item.id,title:item.title,kind:item.kind}))} onRestore={restorePin} storageKey={pinBoardKey} language={readerLanguage==='zh'?'zh':'en'}/>}
     </div>
   );
 }

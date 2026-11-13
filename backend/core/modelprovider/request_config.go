@@ -282,7 +282,7 @@ func SetProviderRequestConfig(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	now := time.Now()
-	err := db.WithContext(r.Context()).Transaction(func(tx *gorm.DB) error {
+	err := common.TransactionWithSQLiteBusyRetry(r.Context(), db, func(tx *gorm.DB) error {
 		if err := lockProvider(tx, &parent); err != nil {
 			return err
 		}
@@ -372,6 +372,14 @@ func SetProviderRequestConfig(w http.ResponseWriter, r *http.Request) {
 		if unchanged {
 			return nil
 		}
+		// Advanced options are user-managed request defaults. Validate their shape
+		// above, but do not gate saving them on embedding usage. Protocol and
+		// endpoint changes retain their existing index protections.
+		if protocolChanged {
+			if err := guardEmbeddingRuntimeMutation(tx, parent.CreateUserID, parent.ID, "", ""); err != nil {
+				return err
+			}
+		}
 		if err := initializeProviderActiveKey(tx, &parent); err != nil {
 			return err
 		}
@@ -396,7 +404,9 @@ func SetProviderRequestConfig(w http.ResponseWriter, r *http.Request) {
 		return updateProviderEndpointLocked(tx, &parent, effective, now, true, protocolChanged || advancedChanged)
 	})
 	if err != nil {
-		if errors.Is(err, credentialvault.ErrInvalidContract) {
+		if replyEmbeddingMutationConflict(w, err) {
+			return
+		} else if errors.Is(err, credentialvault.ErrInvalidContract) {
 			common.ReplyErr(w, "request configuration exceeds credential limits", 400)
 		} else if errors.Is(err, errUnsupportedRequestModels) {
 			common.ReplyErr(w, err.Error(), 400)

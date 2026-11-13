@@ -15,4 +15,5 @@ func init() {
 	registerAdditionalErrorPattern("decode interrupted workflow repair %s", "Failed to read the interrupted workflow repair", http.StatusInternalServerError, 2004919)
 	registerAdditionalError("decode previous repair changes", http.StatusInternalServerError, 2004920)
 	registerAdditionalErrorPattern("invalid workflow input correction for node %s", "Only unknown required input references may be explicitly replaced with existing materials", http.StatusBadRequest, 2004921)
+	registerAdditionalError("read automatic retry intent", http.StatusInternalServerError, 2004922)
 }

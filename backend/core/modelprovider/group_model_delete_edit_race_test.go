@@ -21,7 +21,7 @@ func TestDeleteGroupModelRevalidatesTypeAfterConcurrentEdit(t *testing.T) {
 		indexed             bool
 		wantStatus          int
 	}{
-		{"llm becomes embedding requires confirmation", "llm", "embed", true, http.StatusConflict},
+		{"llm becomes embedding still removes immediately", "llm", "embed", true, http.StatusOK},
 		{"embedding becomes llm no longer requires confirmation", "embed", "llm", false, http.StatusOK},
 	} {
 		t.Run(test.name, func(t *testing.T) {
@@ -100,7 +100,7 @@ func TestDeleteGroupModelRevalidatesTypeAfterConcurrentEdit(t *testing.T) {
 			if rec.Code != test.wantStatus {
 				t.Errorf("DELETE after %s -> %s: status=%d want=%d body=%s", test.before, test.after, rec.Code, test.wantStatus, rec.Body.String())
 			}
-			if test.wantStatus == http.StatusConflict && !strings.Contains(rec.Body.String(), "embedding model is in use") {
+			if test.wantStatus == http.StatusConflict && !strings.Contains(rec.Body.String(), `"code":2005089`) {
 				t.Errorf("wrong confirmation error: %s", rec.Body.String())
 			}
 			if !locked.Load() || !rereadUnderLock.Load() {

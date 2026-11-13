@@ -114,6 +114,37 @@ def test_typography_batch_is_forwarded_without_dropping_false(context, monkeypat
               {'slot_ids': ['4:2'], 'bold': False, 'italic': True, 'underline': False}]
     pptx_edit.publish_pptx_edit('hash', style_edits=styles)
     assert edit.call_args.kwargs['style_edits'] == styles
+
+
+def test_chart_inspection_and_targeted_palette_publication(context, monkeypatch):
+    edit = MagicMock(return_value={
+        'sha256': 'hash', 'slide_count': 5,
+        'pages': [{'page': 5, 'slots': [], 'speaker_notes': '保持原讲稿',
+                   'charts': [{'chart_index': 1, 'colors': ['FF0000']}]}],
+    })
+    monkeypatch.setattr(pptx_edit.tools, 'edit_presentation', edit)
+    view = pptx_edit.inspect_current_pptx(5)
+    assert view['pages'][0]['charts'][0]['chart_index'] == 1
+    assert edit.call_args.kwargs['pages'] == 5
+    edit.return_value = {'status': 'ok', 'workflow_artifact': {'id': 'revision-2'}}
+    changes = [{'page': 5, 'chart_index': 1, 'palette': 'teal'}]
+    pptx_edit.publish_pptx_edit('hash', chart_edits=changes)
+    assert edit.call_args.kwargs['chart_edits'] == changes
+    assert edit.call_args.kwargs['text_edits'] is None
+    assert edit.call_args.kwargs['speaker_notes'] is None
+    assert len(context.local_artifacts()) == 1
+
+
+def test_layout_edit_delegates_exact_inspected_shape(context, monkeypatch):
+    layout = {'page': 2, 'shapes': [{'shape_id': 7, 'box': [1, 1, 3, 2]}]}
+    edit = MagicMock(return_value={'sha256': 'hash', 'slide_count': 2,
+                                   'pages': [{'page': 2, 'slots': [], 'speaker_notes': '', 'layout': layout}]})
+    monkeypatch.setattr(pptx_edit.tools, 'edit_presentation', edit)
+    assert pptx_edit.inspect_current_pptx(2)['pages'][0]['layout'] == layout
+    edit.return_value = {'status': 'ok', 'workflow_artifact': {'id': 'revision-2'}}
+    moves = [{'page': 2, 'shape_id': 7, 'expected_box': [1, 1, 3, 2], 'box': [1, 2, 3, 2]}]
+    pptx_edit.publish_pptx_edit('hash', layout_edits=moves)
+    assert edit.call_args.kwargs['layout_edits'] == moves
     assert len(context.local_artifacts()) == 1
 
 
@@ -167,3 +198,15 @@ def test_extension_preserves_editor_failure_budget():
     with pytest.raises(ToolExecutionError, match='failed twice'):
         extension.on_tool_results(event, state)
     assert resolve_runtime_extension('research').on_tool_results is None
+
+
+def test_structure_batch_reaches_publisher_and_creates_single_receipt(context, monkeypatch):
+    edit = MagicMock(return_value={'status': 'ok', 'workflow_artifact': {'id': 'revision-2'}})
+    monkeypatch.setattr(pptx_edit.tools, 'edit_presentation', edit)
+    operations = [{'op': 'table_delete_row', 'page': 2, 'shape_id': 4, 'index': 3},
+                  {'op': 'resize', 'page': 1, 'shape_ids': [3, 4], 'dw': .5}]
+    pptx_edit.publish_pptx_edit('hash', structure_edits=operations)
+    assert edit.call_args.kwargs['structure_edits'] == operations
+    assert edit.call_args.kwargs['source_sha256'] == 'hash'
+    assert len(context.local_artifacts()) == 1
+    context.emit.assert_called_once()

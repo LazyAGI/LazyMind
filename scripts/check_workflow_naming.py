@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Reject legacy Plugin domain names outside persistence compatibility syntax.  # noqa: Q000
+"""Reject legacy Plugin domain names in the LazyMind Workflow domain.  # noqa: Q000
 
 The workflow migration deliberately keeps physical ``plugin_*`` database names.
 Those names are allowed only where they are unambiguously used as SQL identifiers,
@@ -70,6 +70,11 @@ LEGACY_DOMAIN = re.compile(
     r"(?<![A-Za-z0-9])(?:Plugin[A-Za-z0-9_]*|plugin[A-Z][A-Za-z0-9_]*|"  # noqa: Q000
     r"plugin[-_][A-Za-z0-9_-]+|/api/plugins(?:/|\b))"  # noqa: Q000
 )
+
+# DeepSeek Harness uses these names in its UI and in the connector status contract.
+# Require an explicit marker on each reference to keep the exemption local.
+DSH_EXTERNAL_NAMES = {'Plugin', 'Plugins', 'plugin_update_required'}
+DSH_EXTERNAL_MARKER = '// workflow-naming: dsh-external'
 
 GO_PERSISTENCE = re.compile(
     r"(?:gorm:\"[^\"]*(?:column|index|uniqueIndex):[^\"]*plugin_|"  # noqa: Q000
@@ -159,6 +164,8 @@ def scan_file(path: Path) -> Iterator[Violation]:
         for match in LEGACY_DOMAIN.finditer(line):
             token = match.group(0)
             absolute = offset + match.start()
+            if token in DSH_EXTERNAL_NAMES and line.rstrip().endswith(DSH_EXTERNAL_MARKER):
+                continue
             if PHYSICAL_NAME.fullmatch(token) and any(
                 start <= absolute < end for start, end in sql_literals
             ):

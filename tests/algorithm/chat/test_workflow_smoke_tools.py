@@ -364,8 +364,8 @@ def test_portable_conversion_available_to_pinned_workflows_without_action_declar
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize('count', [31, 100])
-async def test_ppt_export_keeps_all_pages_above_former_limit(monkeypatch, tmp_path, count):
+@pytest.mark.parametrize('count, embed_fonts', [(31, None), (100, None), (31, False)])
+async def test_ppt_export_keeps_all_pages_above_former_limit(monkeypatch, tmp_path, count, embed_fonts):
     import io
     import urllib.request
 
@@ -375,17 +375,97 @@ async def test_ppt_export_keeps_all_pages_above_former_limit(monkeypatch, tmp_pa
     monkeypatch.setenv('LAZYMIND_PPT_EXPORT_CLI', '')
 
     def export(request, timeout):
-        deck = Path(json.loads(request.data)['deck_dir'])
+        payload = json.loads(request.data)
+        assert payload.get('embed_fonts') is embed_fonts
+        deck = Path(payload['deck_dir'])
         pages = sorted((deck / 'pages').glob('*.html'))
         assert len(pages) == count
         assert pages[-1].read_text() == f'<html>Page {count}</html>'
         (deck / 'output.pptx').write_bytes(b'export-result')
-        return io.BytesIO(b'{"status":"ok"}')
+        return io.BytesIO(json.dumps({'status': 'ok', 'fontEmbeddingEnabled': embed_fonts is not False}).encode())
 
     monkeypatch.setattr(urllib.request, 'urlopen', export)
     response = await routes.export_ppt_from_html(routes.PptExportRequest(
         pages=[routes.PptExportPage(html=f'<html>Page {index}</html>') for index in range(1, count + 1)],
+        **({'embed_fonts': embed_fonts} if embed_fonts is not None else {}),
     ))
     assert Path(response.path).read_bytes() == b'export-result'
     await response.background()
     assert not Path(response.path).exists()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('supports_opt_out', [True, False])
+async def test_local_ppt_export_honors_explicit_font_opt_out(monkeypatch, tmp_path, supports_opt_out):
+    import asyncio
+
+    routes = _load_workflow_routes(monkeypatch)
+    monkeypatch.setattr(routes, 'editable_pptx_enabled', lambda: True)
+    monkeypatch.setattr(routes, '_resolve_executable', lambda _name: 'node')
+    cli = tmp_path / 'html_to_pptx.mjs'
+    cli.touch()
+    monkeypatch.setenv('LAZYMIND_SUBAGENT_WORKSPACE', str(tmp_path))
+    monkeypatch.setenv('LAZYMIND_PPT_EXPORT_CLI', str(cli))
+
+    async def launch(node, cli_path, *args, **kwargs):
+        assert node == 'node' and cli_path == str(cli)
+        assert args[-1] == '--no-embed-fonts'
+        deck = Path(args[args.index('--deck-dir') + 1])
+        (deck / 'output.pptx').write_bytes(b'export-result')
+
+        async def communicate():
+            payload = {'status': 'ok'}
+            if supports_opt_out:
+                payload['fontEmbeddingEnabled'] = False
+            return json.dumps(payload).encode(), b''
+
+        return SimpleNamespace(returncode=0, communicate=communicate)
+
+    monkeypatch.setattr(asyncio, 'create_subprocess_exec', launch)
+    request = routes.PptExportRequest(pages=[routes.PptExportPage(html='<html>Page</html>')], embed_fonts=False)
+    if supports_opt_out:
+        response = await routes.export_ppt_from_html(request)
+        assert Path(response.path).read_bytes() == b'export-result'
+        await response.background()
+    else:
+        with pytest.raises(routes.HTTPException, match='does not support'):
+            await routes.export_ppt_from_html(request)
+    assert list((tmp_path / '.ppt_on_demand').iterdir()) == []
+
+
+def test_ppt_selection_preview_loads_pinned_runtime_dependencies(monkeypatch, tmp_path):
+    routes = _load_workflow_routes(monkeypatch)
+    root = Path(__file__).resolve().parents[3] / 'workflows/ppt-workflow'
+    package = {'revision_id': 'ppt-action-runtime-test', 'tree_hash': 'ppt-action-runtime-test', 'files': {
+        path: base64.b64encode((root / path).read_bytes()).decode()
+        for path in ('workflow.yaml', 'scripts/tools.py', 'runtime/lib/html_structure.py')
+    }}
+
+    class Client:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def get_workflow(self, workflow_id, revision_id):
+            assert workflow_id == 'ppt-workflow' and revision_id == package['revision_id']
+            return SimpleNamespace(result=package)
+
+    monkeypatch.setattr(routes, 'WorkflowClient', Client)
+    monkeypatch.setattr(routes, 'inject_model_config', lambda config: None)
+    monkeypatch.setattr(routes, 'inject_tool_config', lambda config: None)
+    monkeypatch.setattr('tempfile.gettempdir', lambda: str(tmp_path))
+    monkeypatch.delitem(sys.modules, 'html_structure', raising=False)
+    monkeypatch.setattr(sys, 'path', [p for p in sys.path if not p.endswith('/runtime/lib')])
+    original = ('<html><head></head><body><div class="wrapper"><div id="ct">'
+                '<h1 data-el="title">标题</h1><p data-el="footer">来源：资料.pdf</p>'
+                '</div></div><aside hidden data-el="speaker-notes">保留文稿</aside></body></html>')
+    encoded = base64.b64encode(original.encode()).decode()
+    request = routes.WorkflowActionInvokeRequest(
+        workflow_id='ppt-workflow', revision_id=package['revision_id'], tree_hash=package['tree_hash'],
+        action='rewrite_selection', phase='preview', slot='preview_html',
+        artifact={'path': f'data:text/plain;base64,{encoded}', 'type': 'text'}, artifact_store=str(tmp_path),
+        arguments={'instruction': '删除', 'selection': {'type': 'ppt_html', 'page': 2, 'el': 'footer'}},
+    )
+    result = routes.invoke_workflow_action(request)['result']
+    assert '来源：资料.pdf' not in result['candidate_html']
+    assert '标题' in result['candidate_html'] and '保留文稿' in result['candidate_html']
+    assert result['patch']['type'] == 'ppt_html_ops'

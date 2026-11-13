@@ -8,6 +8,8 @@ from zipfile import ZipFile, ZIP_DEFLATED
 from lxml import etree
 
 from .font_library import ensure_font
+from .portable_fonts import portable_font_faces, check_glyphs
+from .pptx_font_embedding import embed_font_records
 from .pptx_template_fill import _load, _slots, NS
 from .presentation_edit import normalize_page_numbers
 from .text_format import text_format
@@ -15,7 +17,7 @@ from .pptx_layout_check import inspect_layout
 
 
 def edit_fonts(source, output, source_sha256, target_font=None, pages=None,
-               slot_ids=None, text_scope='all', allow_download=False, *,
+               slot_ids=None, text_scope='all', allow_download=True, *,
                font_size_pt=None, bold=None, italic=None, underline=None, text_color=None):
     formatting = text_format(font_size_pt, bold, italic, underline, text_color)
     if not target_font and not formatting:
@@ -58,6 +60,10 @@ def edit_fonts(source, output, source_sha256, target_font=None, pages=None,
     if requested - found or not targets:
         raise ValueError('Requested font targets were not found in the selected scope; inspect exact slots')
     family = ensure_font(target_font, allow_download) if target_font else None
+    font_records = []
+    if family:
+        family, font_records = portable_font_faces(family)
+        check_glyphs(font_records, ''.join(slot['text'] for _, _, slot in targets))
     before = {(page, report['shape_id']): report
               for page in selected for report in inspect_layout(data, slides[page - 1][0], slides[page - 1][1], page)}
     changed = set()
@@ -112,9 +118,23 @@ def edit_fonts(source, output, source_sha256, target_font=None, pages=None,
             if report['status'] in {'overflow', 'unknown'}:
                 warnings.append({key: report[key] for key in ('page', 'shape_id', 'status', 'reason') if key in report})
         data[name] = etree.tostring(root, xml_declaration=True, encoding='UTF-8', standalone=True)
-    with ZipFile(output, 'w', compression=ZIP_DEFLATED) as archive:
-        for info in infos:
-            archive.writestr(info, data[info.filename])
+    embedded = embed_font_records(data, family, font_records) if family else []
+    output.parent.mkdir(parents=True, exist_ok=True)
+    handle, temporary = tempfile.mkstemp(dir=output.parent, suffix='.pptx')
+    os.close(handle)
+    try:
+        with ZipFile(temporary, 'w', compression=ZIP_DEFLATED) as archive:
+            originals = {info.filename for info in infos}
+            for info in infos:
+                archive.writestr(info, data[info.filename])
+            for name in data.keys() - originals:
+                archive.writestr(name, data[name])
+        with ZipFile(temporary) as archive:
+            if archive.testzip() is not None:
+                raise ValueError('Font-edited PPTX package verification failed')
+        os.replace(temporary, output)
+    finally:
+        Path(temporary).unlink(missing_ok=True)
     complex_parts = [name for name in data if name.startswith(
         ('ppt/charts/', 'ppt/diagrams/')) and name.endswith('.xml')]
     return {'target_font': family, 'slide_count': len(slides), 'updated_font_pages': sorted(changed),
@@ -122,7 +142,8 @@ def edit_fonts(source, output, source_sha256, target_font=None, pages=None,
             'text_format': formatting, 'layout_warnings': warnings,
             'layout_check': 'conservative estimate, not rendered visual validation',
             'unmodified_complex_text_parts': complex_parts,
-            'font_notice': ('Receiving PowerPoint also needs this font installed; native font embedding is not added.'
+            'embedded_fonts': embedded, 'edit_mode': 'sparse_patch', 'regenerated_pages': [],
+            'font_notice': ('Full font files are embedded and package relationships verified.'
                             if family else 'Existing font families are preserved.')}
 
 

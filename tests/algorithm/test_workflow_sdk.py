@@ -107,17 +107,22 @@ def test_external_mcp_zip_path_to_http_contract(tmp_path):
     assert 'zip_base64' not in response['content'][0]['text']
 
 
-def test_core_error_details_survive_sdk_and_mcp():
+@pytest.mark.parametrize('envelope,nested', [('data', False), ('data', True), ('result', True)])
+def test_core_error_details_survive_sdk_and_mcp(envelope, nested):
     from lazymind.workflow_sdk import WorkflowClient
     transport = MagicMock()
+    data = {'error_code': 'IDEMPOTENCY_CONFLICT', 'error_message': 'Different request',
+            'suggestion': 'Use a new key'}
+    if nested:
+        data = {'error': {'code': data['error_code'], 'message': data['error_message'],
+                          'details': {'suggestion': data['suggestion']}}}
     transport.post.return_value = MagicMock(status_code=409, json=lambda: {
-        'code': 2000107, 'message': 'Conflict', 'data': {
-            'error_code': 'IDEMPOTENCY_CONFLICT', 'error_message': 'Different request',
-            'suggestion': 'Use a new key'}})
+        'code': 2000107, 'message': 'Conflict', envelope: data})
     server = WorkflowMCPServer(lambda: WorkflowClient('http://core/api/core', transport=transport), mode='external')
     response = server.handle({'id': 1, 'method': 'tools/call', 'params': {
-        'name': 'start_skill_workflow_task', 'arguments': {'agent_type': 'codex',
-            'skill': {'name': 'demo', 'url': 'https://example.com/demo.zip'}, 'task_description': 'Make a report'}}})
+        'name': 'start_skill_workflow_task', 'arguments': {
+            'agent_type': 'codex', 'skill': {'name': 'demo', 'url': 'https://example.com/demo.zip'},
+            'task_description': 'Make a report'}}})
     error = response['result']['structuredContent']['error']
     assert error['code'] == 'IDEMPOTENCY_CONFLICT'
     assert error['message'] == 'Different request'
@@ -223,8 +228,8 @@ def test_explicit_missing_runtime_does_not_fall_back_to_another_instance(tmp_pat
 
 
 @pytest.mark.parametrize('value', ['localhost:8090', 'file:///tmp/core',
-                                  'http://user:secret@localhost', 'http://localhost/?token=secret',
-                                  'http://localhost/#settings', 'http://localhost:wrong', 'http://[bad'])
+                                   'http://user:secret@localhost', 'http://localhost/?token=secret',
+                                   'http://localhost/#settings', 'http://localhost:wrong', 'http://[bad'])
 def test_invalid_instance_url_fails_before_transport(value):
     from lazymind.workflow_sdk import WorkflowClient, WorkflowClientError
     transport = MagicMock()
@@ -557,6 +562,24 @@ def test_advance_inherits_retrieval_snapshot_only_when_host_provides_it():
         else:
             restored = _build_agentic_config({'conversation_id': 'c'}, payload, 'workflow_step')
             assert restored['enable_tool_retrieval'] is enabled
+
+
+def test_external_sdk_accepts_zip_path_over_twenty_mib(tmp_path):
+    from lazymind.workflow_sdk import WorkflowClient
+    archive = tmp_path / 'larger.zip'
+    with archive.open('wb') as handle:
+        handle.truncate(21 << 20)
+    source = WorkflowClient._external_skill_source({'name': 'large', 'zip_path': str(archive)})
+    assert len(base64.b64decode(source['zip_base64'])) == 21 << 20
+
+
+def test_external_sdk_rejects_zip_path_over_hundred_mib(tmp_path):
+    from lazymind.workflow_sdk import WorkflowClient, WorkflowClientError
+    archive = tmp_path / 'too-large.zip'
+    with archive.open('wb') as handle:
+        handle.truncate((100 << 20) + 1)
+    with pytest.raises(WorkflowClientError, match='100 MiB'):
+        WorkflowClient._external_skill_source({'name': 'large', 'zip_path': str(archive)})
 
 
 def test_sdk_reorders_linked_slots_in_one_request():

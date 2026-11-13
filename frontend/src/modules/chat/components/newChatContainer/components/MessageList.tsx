@@ -28,6 +28,8 @@ import { IdentityAvatar } from "@/modules/identityAvatar";
 import type { ChatSource } from "@/modules/chat/utils/sourceAdapter";
 import { mailDraftsFromAskPending } from "@/modules/chat/utils/message";
 
+const WORKFLOW_CONTROL_NOTIFICATION_PATTERN = /^\[LazyMind action_id=[^\]\r\n]+\]\r?\nLazyMind workflow \S+ has a control notification\. Call workflow\.state first; the notification may be delayed\.[\s\S]*Do not create a new workflow\.$/;
+
 const MENTION_ICONS = {
   knowledge_base: <DatabaseOutlined />,
   skill: <ThunderboltOutlined />,
@@ -138,6 +140,7 @@ interface MessageListProps {
   onScroll?: () => void;
   chatContentRef?: React.RefObject<HTMLDivElement>;
   sessionId?: string;
+  vlmReady?: boolean | null;
   onPreferenceSelect?: (preference: PreferenceType, sessionId?: string) => void;
   editingUserMessageIndex?: number | null;
   editingUserMessageText?: string;
@@ -321,6 +324,7 @@ const MessageList: React.FC<MessageListProps> = ({
   onScroll,
   chatContentRef,
   sessionId = "",
+  vlmReady,
   onPreferenceSelect,
   editingUserMessageIndex = null,
   editingUserMessageText = "",
@@ -592,6 +596,11 @@ const MessageList: React.FC<MessageListProps> = ({
     >
       {messageList.length > 0 &&
         messageList.map((item, index) => {
+          // Native hosts import dispatcher notifications as user turns. Hide
+          // only their bubbles; keep the turn and its reply for execution tracking.
+          if (item.role === RoleTypes.USER && WORKFLOW_CONTROL_NOTIFICATION_PATTERN.test(
+            String(item.display_delta || item.delta || "").trim(),
+          )) return null;
           // Retried attempts remain in history, but only the current reply is shown.
           if (item.role === RoleTypes.ASSISTANT && item.archived_failure) return null;
           const next = messageList[index + 1];
@@ -638,6 +647,7 @@ const MessageList: React.FC<MessageListProps> = ({
                     updateAssistantMessage(msg, msg.id || msg.history_id, index)
                   }
                   sessionId={sessionId}
+                  vlmReady={vlmReady}
                   conversationFiles={conversationFiles}
                   supersededAskPending={(latestOrdinaryAsks.get(pending?.ask_id) ?? index) > index}
                   supersededMailDraftIds={mailDraftsFromAskPending(pending)

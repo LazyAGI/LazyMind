@@ -22,6 +22,52 @@ func githubStarMigrationPostgresDSN(t *testing.T) string {
 	return dsn
 }
 
+func TestGitHubStarMergedAggregateRoundTrip(t *testing.T) {
+	for _, driver := range []string{"sqlite", "postgres"} {
+		t.Run(driver, func(t *testing.T) {
+			var db *sql.DB
+			if driver == "postgres" {
+				db = createTemporaryPostgresDatabase(t, githubStarMigrationPostgresDSN(t), "star_aggregate")
+			} else {
+				db = openRawSQLite(t, t.TempDir()+"/aggregate.db")
+			}
+			catalog, err := (&Runner{dir: "../migrations"}).loadCatalog()
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, mode := range catalog.Modes[:len(catalog.Modes)-1] {
+				execMigrationFileForDriver(t, db, mode.Aggregate.UpPath, driver)
+			}
+			if _, err := db.Exec("CREATE TABLE star_legacy_fixture (id TEXT PRIMARY KEY, value TEXT NOT NULL); INSERT INTO star_legacy_fixture VALUES ('existing-user','keep-existing-preferences')"); err != nil {
+				t.Fatal(err)
+			}
+			current := catalog.Modes[len(catalog.Modes)-1]
+			execMigrationFileForDriver(t, db, current.Aggregate.UpPath, driver)
+			for _, query := range []string{
+				"SELECT user_id,prompted_task_ids,last_prompt_at,supported,created_at,updated_at FROM user_github_star_prompts LIMIT 0",
+				"SELECT scope,active_model_id,phase,generation,target_signature FROM embedding_index_states LIMIT 0",
+			} {
+				rows, err := db.Query(query)
+				if err != nil {
+					t.Fatal(err)
+				}
+				rows.Close()
+			}
+			execMigrationFileForDriver(t, db, current.Aggregate.DownPath, driver)
+			for _, table := range []string{"user_github_star_prompts", "embedding_index_states"} {
+				if rows, err := db.Query("SELECT * FROM " + table); err == nil {
+					rows.Close()
+					t.Fatalf("aggregate down retained %s", table)
+				}
+			}
+			var legacy string
+			if err := db.QueryRow("SELECT value FROM star_legacy_fixture WHERE id='existing-user'").Scan(&legacy); err != nil || legacy != "keep-existing-preferences" {
+				t.Fatalf("legacy data changed: %q %v", legacy, err)
+			}
+		})
+	}
+}
+
 func TestGitHubStarPromptMigrationPathsAndRollback(t *testing.T) {
 	for _, driver := range []string{"sqlite", "postgres"} {
 		t.Run(driver, func(t *testing.T) {
@@ -55,6 +101,11 @@ func TestGitHubStarPromptMigrationPathsAndRollback(t *testing.T) {
 				rows, err := releaseDB.Query("SELECT user_id,prompted_task_ids,last_prompt_at,supported,created_at,updated_at FROM user_github_star_prompts LIMIT 0")
 				if err != nil {
 					t.Fatalf("maintained aggregate does not yet provide Star storage: %v", err)
+				}
+				rows.Close()
+				rows, err = releaseDB.Query("SELECT scope,active_model_id,phase,generation,target_signature FROM embedding_index_states LIMIT 0")
+				if err != nil {
+					t.Fatalf("maintained aggregate lost embedding index storage: %v", err)
 				}
 				rows.Close()
 			})
@@ -114,9 +165,11 @@ VALUES ('owner',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)`); err != nil {
 				t.Fatalf("dev re-up failed: %v", err)
 			}
 			execMigrationFileForDriver(t, releaseDB, current.Aggregate.DownPath, driver)
-			if rows, err := releaseDB.Query("SELECT user_id FROM user_github_star_prompts"); err == nil {
-				rows.Close()
-				t.Fatal("aggregate down retained the feature table")
+			for _, table := range []string{"user_github_star_prompts", "embedding_index_states"} {
+				if rows, err := releaseDB.Query("SELECT * FROM " + table); err == nil {
+					rows.Close()
+					t.Fatalf("aggregate down retained %s", table)
+				}
 			}
 			for _, db := range []*sql.DB{devDB, releaseDB} {
 				var value string

@@ -118,6 +118,19 @@ describe("Settings overview", () => {
     mocks.applySettingsChange.mockReset().mockResolvedValue({ key: "document_parsing_enabled", enabled: false });
   });
 
+  it.each(["zh-CN", "en-US"])("explains model provider and external service counts in %s", async (language) => {
+    mocks.fetchSettingsOverview.mockResolvedValue({
+      controls: { document_parsing_enabled: true },
+      sections: [{ id: "models", title: "models", route: "/settings", status: "ready", detail: "",
+        counts: { total: 0, enabled: 0, verified: 0, runnable: 0, configured: 24, model_providers: 15, external_services: 9 } }],
+      issues: [], updated_at: "2026-11-12T00:00:00Z",
+    });
+    const t = await renderOverview(language);
+    const models = card(t("settingsPage.sections.models"));
+    expect(await models.findByText(t("settingsPage.counts.configuredItems", { count: 24 }))).toBeInTheDocument();
+    expect(models.getByText(language === "zh-CN" ? "模型供应商 15 项 · 外部服务 9 项" : "15 model providers · 9 external services")).toBeInTheDocument();
+  });
+
   it("uses consistent quick actions and opens diagnostics with the check results", async () => {
     mocks.runSettingsChecks.mockResolvedValue({ results: [], finished_at: "2026-11-03T00:00:00Z" });
     const t = await renderOverview();
@@ -130,6 +143,39 @@ describe("Settings overview", () => {
     await waitFor(() => expect(routeParams().get("section")).toBe("diagnostics"));
     expect(mocks.runSettingsChecks).toHaveBeenCalledTimes(1);
     expect(routeParams().get("return_to")).toBe("/agent/chat/home/test-conversation");
+  });
+
+  it("shows the short desktop application version in the sidebar footer", async () => {
+    mocks.mode = "desktop";
+    vi.stubEnv("VITE_APP_VERSION", "0.4");
+    vi.stubGlobal("lazymindDesktop", { appVersion: async () => "0.5.1-alpha.0" });
+    try {
+      await renderOverview();
+      const version = await screen.findByLabelText("应用版本 0.5");
+      expect(version).toHaveTextContent(/^v0.5$/);
+      expect(version.closest(".settings-reference-sidebar-foot")).not.toBeNull();
+      expect(screen.queryByText(/alpha/)).not.toBeInTheDocument();
+    } finally {
+      vi.unstubAllGlobals();
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it("shows the configured web version in the sidebar footer across settings pages", async () => {
+    vi.stubEnv("VITE_APP_VERSION", "v0.5");
+    vi.stubGlobal("lazymindDesktop", undefined);
+    try {
+      const t = await renderOverview();
+      expect(await screen.findByLabelText("应用版本 0.5")).toHaveTextContent(/^v0.5$/);
+      fireEvent.click(card(t("settingsPage.sections.memory")).getByRole("button", {
+        name: t("settingsPage.goToDetailAria", { title: t("settingsPage.sections.memory") }),
+      }));
+      await screen.findByRole("heading", { name: "Memory configuration" });
+      expect(screen.getByLabelText("应用版本 0.5")).toBeVisible();
+    } finally {
+      vi.unstubAllGlobals();
+      vi.unstubAllEnvs();
+    }
   });
 
   it.each([

@@ -40,7 +40,7 @@ slots:
     type: text
     cardinality: single
   - id: metadata_json
-    user_visible: false
+    user_visible: true
     label: JSON Metadata
     type: json
     cardinality: single

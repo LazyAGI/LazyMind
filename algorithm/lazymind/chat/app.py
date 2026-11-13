@@ -88,6 +88,7 @@ def create_app() -> FastAPI:
         title='LazyMind API',
         description='Knowledge-base-backed conversational and routing API service',
         version='1.0.0',
+        telemetry={'tracing': False},
     )
     return register_chat_routers(app)
 

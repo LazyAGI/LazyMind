@@ -5048,9 +5048,14 @@ export type DocumentNumberingViewOrderedStyleEnum = typeof DocumentNumberingView
 export interface DocumentProvider {
     'capabilities': Array<string>;
     'id': string;
+    'templates'?: Array<DocumentProviderTemplate>;
 }
 export interface DocumentProviderCatalog {
     'providers': Array<DocumentProvider>;
+}
+export interface DocumentProviderTemplate {
+    'id': string;
+    'name': string;
 }
 export interface DocumentProvidersErrorOpenAPIData {
     'code': DocumentProvidersErrorOpenAPIDataCodeEnum;
@@ -5150,6 +5155,7 @@ export interface DocumentPublicationTargetInput {
     'parent_uri'?: string;
     'provider': string;
     'retry_operation_id'?: string;
+    'template'?: string;
     'title'?: string;
 }
 export interface DocumentPublicationTargetState {
@@ -5162,6 +5168,7 @@ export interface DocumentPublicationTargetState {
     'parent_uri'?: string;
     'provider': string;
     'target_url'?: string;
+    'template'?: string;
     'title'?: string;
 }
 export interface DocumentPublishInput {
@@ -5382,11 +5389,92 @@ export interface DocumentTableColumn {
 export interface DocumentTagsResponse {
     'tags'?: Array<string>;
 }
+export interface EmbeddingClearRequest {
+    'confirm_clear_chunks': boolean;
+    'generation': number;
+    'model_id': string;
+    'source': string;
+}
+export interface EmbeddingClearResponse {
+    'activated': boolean;
+    'cleared': boolean;
+}
+export interface EmbeddingIndexStatusResponse {
+    'affected_knowledge_bases': number;
+    'generation': number;
+    'index_identity': EmbeddingIndexStatusResponseIndexIdentityEnum;
+    'indexed_knowledge_bases': number;
+    'model_name'?: string;
+    'operation_phase': EmbeddingIndexStatusResponseOperationPhaseEnum;
+    'pending_knowledge_bases': number;
+    'provider_name'?: string;
+    'status': EmbeddingIndexStatusResponseStatusEnum;
+}
+
+export const EmbeddingIndexStatusResponseIndexIdentityEnum = {
+    Empty: 'empty',
+    Verified: 'verified',
+    LegacyUnknown: 'legacy_unknown'
+} as const;
+
+export type EmbeddingIndexStatusResponseIndexIdentityEnum = typeof EmbeddingIndexStatusResponseIndexIdentityEnum[keyof typeof EmbeddingIndexStatusResponseIndexIdentityEnum];
+export const EmbeddingIndexStatusResponseOperationPhaseEnum = {
+    Idle: 'idle',
+    Rebuilding: 'rebuilding',
+    Clearing: 'clearing',
+    CleanupFailed: 'cleanup_failed',
+    Cleared: 'cleared'
+} as const;
+
+export type EmbeddingIndexStatusResponseOperationPhaseEnum = typeof EmbeddingIndexStatusResponseOperationPhaseEnum[keyof typeof EmbeddingIndexStatusResponseOperationPhaseEnum];
+export const EmbeddingIndexStatusResponseStatusEnum = {
+    Empty: 'empty',
+    Indexed: 'indexed',
+    Rebuilding: 'rebuilding',
+    Clearing: 'clearing',
+    Cleared: 'cleared',
+    Unknown: 'unknown'
+} as const;
+
+export type EmbeddingIndexStatusResponseStatusEnum = typeof EmbeddingIndexStatusResponseStatusEnum[keyof typeof EmbeddingIndexStatusResponseStatusEnum];
+
 export interface EmbeddingOptions {
     'batch_size'?: number | null;
     'passage_prefix'?: string;
     'query_prefix'?: string;
 }
+export interface EmbeddingSignatureResponse {
+    'code': string;
+    'dimensions'?: number;
+    'model_type': string;
+    'passage_signature'?: string;
+    'query_signature'?: string;
+    'status': string;
+}
+export interface EmbeddingSwitchPreviewRequest {
+    'model_id': string;
+    'source': string;
+}
+export interface EmbeddingSwitchPreviewResponse {
+    'active_model_name'?: string;
+    'can_switch': boolean;
+    'candidate_model_name'?: string;
+    'generation': number;
+    'indexed_knowledge_bases': number;
+    'outcome': EmbeddingSwitchPreviewResponseOutcomeEnum;
+    'signature_status'?: string;
+}
+
+export const EmbeddingSwitchPreviewResponseOutcomeEnum = {
+    Unchanged: 'unchanged',
+    Empty: 'empty',
+    Same: 'same',
+    ClearRequired: 'clear_required',
+    ProbeFailed: 'probe_failed'
+} as const;
+
+export type EmbeddingSwitchPreviewResponseOutcomeEnum = typeof EmbeddingSwitchPreviewResponseOutcomeEnum[keyof typeof EmbeddingSwitchPreviewResponseOutcomeEnum];
+
 export interface EpisodeMemory {
     'conversation_id': string;
     'episode_type': EpisodeMemoryEpisodeTypeEnum;
@@ -7419,6 +7507,30 @@ export interface ProcessingDiagnostic {
     'stage': string;
     'task_id'?: string;
 }
+export interface ProcessingTaskItem {
+    'created_at'?: string;
+    'dataset_id'?: string;
+    'dataset_name'?: string;
+    'document_id'?: string;
+    'document_name'?: string;
+    'error'?: string;
+    'id'?: string;
+    'level'?: string;
+    'stages'?: Array<ProcessingTaskStage>;
+    'status'?: string;
+}
+export interface ProcessingTaskStage {
+    'name'?: string;
+    'status'?: string;
+}
+export interface ProcessingTasksResponse {
+    'counts'?: { [key: string]: number; };
+    'items'?: Array<ProcessingTaskItem>;
+    'page'?: number;
+    'page_size'?: number;
+    'total'?: number;
+    'unfinished_count'?: number;
+}
 export interface ProjectionError {
     'code': string;
     'retryable': boolean;
@@ -9170,6 +9282,23 @@ export const TaskCenterTaskResponseConversationStateEnum = {
 
 export type TaskCenterTaskResponseConversationStateEnum = typeof TaskCenterTaskResponseConversationStateEnum[keyof typeof TaskCenterTaskResponseConversationStateEnum];
 
+export interface TaskCenterWorkbenchGroup {
+    'items': Array<TaskCenterTaskResponse>;
+    'page': number;
+    'total': number;
+}
+export interface TaskCenterWorkbenchResponse {
+    'groups': TaskCenterWorkbenchResponseGroups;
+    'page_size': number;
+}
+export interface TaskCenterWorkbenchResponseGroups {
+    'attention': TaskCenterWorkbenchGroup;
+    'canceled': TaskCenterWorkbenchGroup;
+    'failed': TaskCenterWorkbenchGroup;
+    'paused': TaskCenterWorkbenchGroup;
+    'recent': TaskCenterWorkbenchGroup;
+    'running': TaskCenterWorkbenchGroup;
+}
 export interface TaskDocumentInfo {
     'display_name'?: string;
     'document_id'?: string;
@@ -9941,6 +10070,7 @@ export interface WorkflowControlCommand {
     'manifest_hash'?: string;
     'objective'?: string;
     'preference_scope'?: string;
+    'retry_origin'?: string;
     'review_id'?: string;
     'review_version'?: number;
     'runtime_instruction'?: string;
@@ -11093,6 +11223,54 @@ export const AcademicWorkflowsApiAxiosParamCreator = function (configuration?: C
         },
         /**
          *
+         * @summary Delete one saved paper note
+         * @param {string} targetDatasetId
+         * @param {string} libraryPaperId
+         * @param {string} noteId
+         * @param {object} [body]
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreAcademicLibraryPapersLibraryPaperIdNotesNoteIdDeletePost: async (targetDatasetId: string, libraryPaperId: string, noteId: string, body?: object, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'targetDatasetId' is not null or undefined
+            assertParamExists('apiCoreAcademicLibraryPapersLibraryPaperIdNotesNoteIdDeletePost', 'targetDatasetId', targetDatasetId)
+            // verify required parameter 'libraryPaperId' is not null or undefined
+            assertParamExists('apiCoreAcademicLibraryPapersLibraryPaperIdNotesNoteIdDeletePost', 'libraryPaperId', libraryPaperId)
+            // verify required parameter 'noteId' is not null or undefined
+            assertParamExists('apiCoreAcademicLibraryPapersLibraryPaperIdNotesNoteIdDeletePost', 'noteId', noteId)
+            const localVarPath = `/api/core/academic/library/papers/{library_paper_id}/notes/{note_id}:delete`
+                .replace(`{${"library_paper_id"}}`, encodeURIComponent(String(libraryPaperId)))
+                .replace(`{${"note_id"}}`, encodeURIComponent(String(noteId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            if (targetDatasetId !== undefined) {
+                localVarQueryParameter['target_dataset_id'] = targetDatasetId;
+            }
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(body, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
          * @summary Add a note idempotently by stable note ID
          * @param {string} targetDatasetId
          * @param {string} libraryPaperId
@@ -11948,6 +12126,22 @@ export const AcademicWorkflowsApiFp = function(configuration?: Configuration) {
         },
         /**
          *
+         * @summary Delete one saved paper note
+         * @param {string} targetDatasetId
+         * @param {string} libraryPaperId
+         * @param {string} noteId
+         * @param {object} [body]
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreAcademicLibraryPapersLibraryPaperIdNotesNoteIdDeletePost(targetDatasetId: string, libraryPaperId: string, noteId: string, body?: object, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<PaperLibraryChanges>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreAcademicLibraryPapersLibraryPaperIdNotesNoteIdDeletePost(targetDatasetId, libraryPaperId, noteId, body, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['AcademicWorkflowsApi.apiCoreAcademicLibraryPapersLibraryPaperIdNotesNoteIdDeletePost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
          * @summary Add a note idempotently by stable note ID
          * @param {string} targetDatasetId
          * @param {string} libraryPaperId
@@ -12349,6 +12543,16 @@ export const AcademicWorkflowsApiFactory = function (configuration?: Configurati
         },
         /**
          *
+         * @summary Delete one saved paper note
+         * @param {AcademicWorkflowsApiApiCoreAcademicLibraryPapersLibraryPaperIdNotesNoteIdDeletePostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreAcademicLibraryPapersLibraryPaperIdNotesNoteIdDeletePost(requestParameters: AcademicWorkflowsApiApiCoreAcademicLibraryPapersLibraryPaperIdNotesNoteIdDeletePostRequest, options?: RawAxiosRequestConfig): AxiosPromise<PaperLibraryChanges> {
+            return localVarFp.apiCoreAcademicLibraryPapersLibraryPaperIdNotesNoteIdDeletePost(requestParameters.targetDatasetId, requestParameters.libraryPaperId, requestParameters.noteId, requestParameters.body, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
          * @summary Add a note idempotently by stable note ID
          * @param {AcademicWorkflowsApiApiCoreAcademicLibraryPapersLibraryPaperIdNotesPostRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
@@ -12686,6 +12890,19 @@ export interface AcademicWorkflowsApiApiCoreAcademicLibraryPapersLibraryPaperIdA
 }
 
 /**
+ * Request parameters for apiCoreAcademicLibraryPapersLibraryPaperIdNotesNoteIdDeletePost operation in AcademicWorkflowsApi.
+ */
+export interface AcademicWorkflowsApiApiCoreAcademicLibraryPapersLibraryPaperIdNotesNoteIdDeletePostRequest {
+    readonly targetDatasetId: string
+
+    readonly libraryPaperId: string
+
+    readonly noteId: string
+
+    readonly body?: object
+}
+
+/**
  * Request parameters for apiCoreAcademicLibraryPapersLibraryPaperIdNotesPost operation in AcademicWorkflowsApi.
  */
 export interface AcademicWorkflowsApiApiCoreAcademicLibraryPapersLibraryPaperIdNotesPostRequest {
@@ -13011,6 +13228,17 @@ export class AcademicWorkflowsApi extends BaseAPI {
      */
     public apiCoreAcademicLibraryPapersLibraryPaperIdAttachmentsAttachmentIdDetachPost(requestParameters: AcademicWorkflowsApiApiCoreAcademicLibraryPapersLibraryPaperIdAttachmentsAttachmentIdDetachPostRequest, options?: RawAxiosRequestConfig) {
         return AcademicWorkflowsApiFp(this.configuration).apiCoreAcademicLibraryPapersLibraryPaperIdAttachmentsAttachmentIdDetachPost(requestParameters.targetDatasetId, requestParameters.libraryPaperId, requestParameters.attachmentId, requestParameters.apiCoreAcademicLibraryFoldersFolderIdDeletePostRequest, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Delete one saved paper note
+     * @param {AcademicWorkflowsApiApiCoreAcademicLibraryPapersLibraryPaperIdNotesNoteIdDeletePostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreAcademicLibraryPapersLibraryPaperIdNotesNoteIdDeletePost(requestParameters: AcademicWorkflowsApiApiCoreAcademicLibraryPapersLibraryPaperIdNotesNoteIdDeletePostRequest, options?: RawAxiosRequestConfig) {
+        return AcademicWorkflowsApiFp(this.configuration).apiCoreAcademicLibraryPapersLibraryPaperIdNotesNoteIdDeletePost(requestParameters.targetDatasetId, requestParameters.libraryPaperId, requestParameters.noteId, requestParameters.body, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**
@@ -19861,6 +20089,35 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
         },
         /**
          *
+         * @summary POST /academic/library/papers:delete
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreAcademicLibraryPapersDeletePost: async (options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            const localVarPath = `/api/core/academic/library/papers:delete`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
          * @summary POST /academic/references:resolve
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
@@ -25412,6 +25669,72 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
         },
         /**
          *
+         * @summary GET /datasets/{dataset}/text-index
+         * @param {string} dataset
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreDatasetsDatasetTextIndexGet: async (dataset: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'dataset' is not null or undefined
+            assertParamExists('apiCoreDatasetsDatasetTextIndexGet', 'dataset', dataset)
+            const localVarPath = `/api/core/datasets/{dataset}/text-index`
+                .replace(`{${"dataset"}}`, encodeURIComponent(String(dataset)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary POST /datasets/{dataset}/text-index
+         * @param {string} dataset
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreDatasetsDatasetTextIndexPost: async (dataset: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'dataset' is not null or undefined
+            assertParamExists('apiCoreDatasetsDatasetTextIndexPost', 'dataset', dataset)
+            const localVarPath = `/api/core/datasets/{dataset}/text-index`
+                .replace(`{${"dataset"}}`, encodeURIComponent(String(dataset)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
          * @summary Upload file
          * @param {string} dataset
          * @param {string} [documentPid]
@@ -26721,6 +27044,56 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
             localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
             localVarRequestOptions.data = serializeDataIfNeeded(permissionBatchRequest, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary Latest document processing tasks
+         * @param {number} [page]
+         * @param {string} [status]
+         * @param {string} [level]
+         * @param {string} [q]
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreKnowledgeProcessingTasksGet: async (page?: number, status?: string, level?: string, q?: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            const localVarPath = `/api/core/knowledge-processing/tasks`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            if (page !== undefined) {
+                localVarQueryParameter['page'] = page;
+            }
+
+            if (status !== undefined) {
+                localVarQueryParameter['status'] = status;
+            }
+
+            if (level !== undefined) {
+                localVarQueryParameter['level'] = level;
+            }
+
+            if (q !== undefined) {
+                localVarQueryParameter['q'] = q;
+            }
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
 
             return {
                 url: toPathString(localVarUrlObj),
@@ -30362,6 +30735,56 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
             localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
             localVarRequestOptions.data = serializeDataIfNeeded(taskRemovalRequest, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary Summarize task categories with four previews per page
+         * @param {string} [taskType]
+         * @param {string} [keyword]
+         * @param {ApiCoreTaskCenterWorkbenchGetCategoryEnum} [category]
+         * @param {number} [page]
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreTaskCenterWorkbenchGet: async (taskType?: string, keyword?: string, category?: ApiCoreTaskCenterWorkbenchGetCategoryEnum, page?: number, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            const localVarPath = `/api/core/task-center/workbench`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            if (taskType !== undefined) {
+                localVarQueryParameter['task_type'] = taskType;
+            }
+
+            if (keyword !== undefined) {
+                localVarQueryParameter['keyword'] = keyword;
+            }
+
+            if (category !== undefined) {
+                localVarQueryParameter['category'] = category;
+            }
+
+            if (page !== undefined) {
+                localVarQueryParameter['page'] = page;
+            }
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
 
             return {
                 url: toPathString(localVarUrlObj),
@@ -34942,6 +35365,18 @@ export const DefaultApiFp = function(configuration?: Configuration) {
         },
         /**
          *
+         * @summary POST /academic/library/papers:delete
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreAcademicLibraryPapersDeletePost(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreAcademicLibraryPapersDeletePost(options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreAcademicLibraryPapersDeletePost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
          * @summary POST /academic/references:resolve
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
@@ -37032,6 +37467,32 @@ export const DefaultApiFp = function(configuration?: Configuration) {
         },
         /**
          *
+         * @summary GET /datasets/{dataset}/text-index
+         * @param {string} dataset
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreDatasetsDatasetTextIndexGet(dataset: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreDatasetsDatasetTextIndexGet(dataset, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreDatasetsDatasetTextIndexGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary POST /datasets/{dataset}/text-index
+         * @param {string} dataset
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreDatasetsDatasetTextIndexPost(dataset: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreDatasetsDatasetTextIndexPost(dataset, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreDatasetsDatasetTextIndexPost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
          * @summary Upload file
          * @param {string} dataset
          * @param {string} [documentPid]
@@ -37528,6 +37989,22 @@ export const DefaultApiFp = function(configuration?: Configuration) {
             const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreKbPermissionBatchPost(permissionBatchRequest, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreKbPermissionBatchPost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Latest document processing tasks
+         * @param {number} [page]
+         * @param {string} [status]
+         * @param {string} [level]
+         * @param {string} [q]
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreKnowledgeProcessingTasksGet(page?: number, status?: string, level?: string, q?: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ProcessingTasksResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreKnowledgeProcessingTasksGet(page, status, level, q, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreKnowledgeProcessingTasksGet']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
@@ -38936,6 +39413,22 @@ export const DefaultApiFp = function(configuration?: Configuration) {
             const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreTaskCenterTasksTaskIdRemovePost(taskId, taskRemovalRequest, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreTaskCenterTasksTaskIdRemovePost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Summarize task categories with four previews per page
+         * @param {string} [taskType]
+         * @param {string} [keyword]
+         * @param {ApiCoreTaskCenterWorkbenchGetCategoryEnum} [category]
+         * @param {number} [page]
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreTaskCenterWorkbenchGet(taskType?: string, keyword?: string, category?: ApiCoreTaskCenterWorkbenchGetCategoryEnum, page?: number, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<TaskCenterWorkbenchResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreTaskCenterWorkbenchGet(taskType, keyword, category, page, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreTaskCenterWorkbenchGet']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
@@ -40751,6 +41244,15 @@ export const DefaultApiFactory = function (configuration?: Configuration, basePa
         },
         /**
          *
+         * @summary POST /academic/library/papers:delete
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreAcademicLibraryPapersDeletePost(options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreAcademicLibraryPapersDeletePost(options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
          * @summary POST /academic/references:resolve
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
@@ -42273,6 +42775,26 @@ export const DefaultApiFactory = function (configuration?: Configuration, basePa
         },
         /**
          *
+         * @summary GET /datasets/{dataset}/text-index
+         * @param {DefaultApiApiCoreDatasetsDatasetTextIndexGetRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreDatasetsDatasetTextIndexGet(requestParameters: DefaultApiApiCoreDatasetsDatasetTextIndexGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreDatasetsDatasetTextIndexGet(requestParameters.dataset, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary POST /datasets/{dataset}/text-index
+         * @param {DefaultApiApiCoreDatasetsDatasetTextIndexPostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreDatasetsDatasetTextIndexPost(requestParameters: DefaultApiApiCoreDatasetsDatasetTextIndexPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreDatasetsDatasetTextIndexPost(requestParameters.dataset, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
          * @summary Upload file
          * @param {DefaultApiApiCoreDatasetsDatasetUploadsPostRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
@@ -42638,6 +43160,16 @@ export const DefaultApiFactory = function (configuration?: Configuration, basePa
          */
         apiCoreKbPermissionBatchPost(requestParameters: DefaultApiApiCoreKbPermissionBatchPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<ApiCoreKbPermissionBatchPost200Response> {
             return localVarFp.apiCoreKbPermissionBatchPost(requestParameters.permissionBatchRequest, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Latest document processing tasks
+         * @param {DefaultApiApiCoreKnowledgeProcessingTasksGetRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreKnowledgeProcessingTasksGet(requestParameters: DefaultApiApiCoreKnowledgeProcessingTasksGetRequest = {}, options?: RawAxiosRequestConfig): AxiosPromise<ProcessingTasksResponse> {
+            return localVarFp.apiCoreKnowledgeProcessingTasksGet(requestParameters.page, requestParameters.status, requestParameters.level, requestParameters.q, options).then((request) => request(axios, basePath));
         },
         /**
          *
@@ -43693,6 +44225,16 @@ export const DefaultApiFactory = function (configuration?: Configuration, basePa
          */
         apiCoreTaskCenterTasksTaskIdRemovePost(requestParameters: DefaultApiApiCoreTaskCenterTasksTaskIdRemovePostRequest, options?: RawAxiosRequestConfig): AxiosPromise<TaskRemovalResult> {
             return localVarFp.apiCoreTaskCenterTasksTaskIdRemovePost(requestParameters.taskId, requestParameters.taskRemovalRequest, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Summarize task categories with four previews per page
+         * @param {DefaultApiApiCoreTaskCenterWorkbenchGetRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreTaskCenterWorkbenchGet(requestParameters: DefaultApiApiCoreTaskCenterWorkbenchGetRequest = {}, options?: RawAxiosRequestConfig): AxiosPromise<TaskCenterWorkbenchResponse> {
+            return localVarFp.apiCoreTaskCenterWorkbenchGet(requestParameters.taskType, requestParameters.keyword, requestParameters.category, requestParameters.page, options).then((request) => request(axios, basePath));
         },
         /**
          *
@@ -46073,6 +46615,20 @@ export interface DefaultApiApiCoreDatasetsDatasetTasksBatchUploadPostRequest {
 }
 
 /**
+ * Request parameters for apiCoreDatasetsDatasetTextIndexGet operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreDatasetsDatasetTextIndexGetRequest {
+    readonly dataset: string
+}
+
+/**
+ * Request parameters for apiCoreDatasetsDatasetTextIndexPost operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreDatasetsDatasetTextIndexPostRequest {
+    readonly dataset: string
+}
+
+/**
  * Request parameters for apiCoreDatasetsDatasetUploadsPost operation in DefaultApi.
  */
 export interface DefaultApiApiCoreDatasetsDatasetUploadsPostRequest {
@@ -46288,6 +46844,19 @@ export interface DefaultApiApiCoreKbListGetRequest {
  */
 export interface DefaultApiApiCoreKbPermissionBatchPostRequest {
     readonly permissionBatchRequest: PermissionBatchRequest
+}
+
+/**
+ * Request parameters for apiCoreKnowledgeProcessingTasksGet operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreKnowledgeProcessingTasksGetRequest {
+    readonly page?: number
+
+    readonly status?: string
+
+    readonly level?: string
+
+    readonly q?: string
 }
 
 /**
@@ -46789,6 +47358,19 @@ export interface DefaultApiApiCoreTaskCenterTasksTaskIdRemovePostRequest {
     readonly taskId: string
 
     readonly taskRemovalRequest?: TaskRemovalRequest
+}
+
+/**
+ * Request parameters for apiCoreTaskCenterWorkbenchGet operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreTaskCenterWorkbenchGetRequest {
+    readonly taskType?: string
+
+    readonly keyword?: string
+
+    readonly category?: ApiCoreTaskCenterWorkbenchGetCategoryEnum
+
+    readonly page?: number
 }
 
 /**
@@ -47542,6 +48124,16 @@ export class DefaultApi extends BaseAPI {
      */
     public apiCoreAcademicImportsBatchIdCancelPost(requestParameters: DefaultApiApiCoreAcademicImportsBatchIdCancelPostRequest, options?: RawAxiosRequestConfig) {
         return DefaultApiFp(this.configuration).apiCoreAcademicImportsBatchIdCancelPost(requestParameters.batchId, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary POST /academic/library/papers:delete
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreAcademicLibraryPapersDeletePost(options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreAcademicLibraryPapersDeletePost(options).then((request) => request(this.axios, this.basePath));
     }
 
     /**
@@ -49224,6 +49816,28 @@ export class DefaultApi extends BaseAPI {
 
     /**
      *
+     * @summary GET /datasets/{dataset}/text-index
+     * @param {DefaultApiApiCoreDatasetsDatasetTextIndexGetRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreDatasetsDatasetTextIndexGet(requestParameters: DefaultApiApiCoreDatasetsDatasetTextIndexGetRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreDatasetsDatasetTextIndexGet(requestParameters.dataset, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary POST /datasets/{dataset}/text-index
+     * @param {DefaultApiApiCoreDatasetsDatasetTextIndexPostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreDatasetsDatasetTextIndexPost(requestParameters: DefaultApiApiCoreDatasetsDatasetTextIndexPostRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreDatasetsDatasetTextIndexPost(requestParameters.dataset, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
      * @summary Upload file
      * @param {DefaultApiApiCoreDatasetsDatasetUploadsPostRequest} requestParameters Request parameters.
      * @param {*} [options] Override http request option.
@@ -49626,6 +50240,17 @@ export class DefaultApi extends BaseAPI {
      */
     public apiCoreKbPermissionBatchPost(requestParameters: DefaultApiApiCoreKbPermissionBatchPostRequest, options?: RawAxiosRequestConfig) {
         return DefaultApiFp(this.configuration).apiCoreKbPermissionBatchPost(requestParameters.permissionBatchRequest, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Latest document processing tasks
+     * @param {DefaultApiApiCoreKnowledgeProcessingTasksGetRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreKnowledgeProcessingTasksGet(requestParameters: DefaultApiApiCoreKnowledgeProcessingTasksGetRequest = {}, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreKnowledgeProcessingTasksGet(requestParameters.page, requestParameters.status, requestParameters.level, requestParameters.q, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**
@@ -50791,6 +51416,17 @@ export class DefaultApi extends BaseAPI {
      */
     public apiCoreTaskCenterTasksTaskIdRemovePost(requestParameters: DefaultApiApiCoreTaskCenterTasksTaskIdRemovePostRequest, options?: RawAxiosRequestConfig) {
         return DefaultApiFp(this.configuration).apiCoreTaskCenterTasksTaskIdRemovePost(requestParameters.taskId, requestParameters.taskRemovalRequest, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Summarize task categories with four previews per page
+     * @param {DefaultApiApiCoreTaskCenterWorkbenchGetRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreTaskCenterWorkbenchGet(requestParameters: DefaultApiApiCoreTaskCenterWorkbenchGetRequest = {}, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreTaskCenterWorkbenchGet(requestParameters.taskType, requestParameters.keyword, requestParameters.category, requestParameters.page, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**
@@ -52293,6 +52929,15 @@ export const ApiCoreConversationsTrashGetKindEnum = {
     Task: 'task'
 } as const;
 export type ApiCoreConversationsTrashGetKindEnum = typeof ApiCoreConversationsTrashGetKindEnum[keyof typeof ApiCoreConversationsTrashGetKindEnum];
+export const ApiCoreTaskCenterWorkbenchGetCategoryEnum = {
+    Attention: 'attention',
+    Running: 'running',
+    Paused: 'paused',
+    Failed: 'failed',
+    Recent: 'recent',
+    Canceled: 'canceled'
+} as const;
+export type ApiCoreTaskCenterWorkbenchGetCategoryEnum = typeof ApiCoreTaskCenterWorkbenchGetCategoryEnum[keyof typeof ApiCoreTaskCenterWorkbenchGetCategoryEnum];
 export const ApiCoreTasksTaskIdArtifactsGetViewEnum = {
     Ordinary: 'ordinary',
     Developer: 'developer'
@@ -58290,6 +58935,106 @@ export class McpServersApi extends BaseAPI {
 export const ModelProvidersApiAxiosParamCreator = function (configuration?: Configuration) {
     return {
         /**
+         * Requires the current generation and explicit administrator confirmation. Clears text vectors while preserving originals, parsed content, chunks and image vectors. An empty model_id performs credential-independent recovery without activating a model. Otherwise the server verifies and activates the replacement independently of browser cancellation. Replaying a completed request does not clear the new index. Documents await explicit reindexing.
+         * @summary Clear text vectors and optionally activate a replacement embedding model
+         * @param {EmbeddingClearRequest} embeddingClearRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreModelProvidersEmbeddingClearChunksPost: async (embeddingClearRequest: EmbeddingClearRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'embeddingClearRequest' is not null or undefined
+            assertParamExists('apiCoreModelProvidersEmbeddingClearChunksPost', 'embeddingClearRequest', embeddingClearRequest)
+            const localVarPath = `/api/core/model_providers/embedding/clear-chunks`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(embeddingClearRequest, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         * Reports the persisted text embedding model identity and how many knowledge bases have indexed or pending document vectors. A legacy index without a recorded signature is reported as unknown, never inferred from the current model selection.
+         * @summary Get shared text-vector index state
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreModelProvidersEmbeddingIndexStateGet: async (options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            const localVarPath = `/api/core/model_providers/embedding/index-state`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         * Probes the saved candidate through the document embedding runtime and compares its passage and query signatures with the recorded deployment-wide text-vector identity. Legacy indexes without a recorded signature are unverified and require vector cleanup before a change. Preview never changes selections or knowledge bases; a later save rechecks the current state.
+         * @summary Check whether a text embedding model can replace the active model
+         * @param {EmbeddingSwitchPreviewRequest} embeddingSwitchPreviewRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreModelProvidersEmbeddingSwitchPreviewPost: async (embeddingSwitchPreviewRequest: EmbeddingSwitchPreviewRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'embeddingSwitchPreviewRequest' is not null or undefined
+            assertParamExists('apiCoreModelProvidersEmbeddingSwitchPreviewPost', 'embeddingSwitchPreviewRequest', embeddingSwitchPreviewRequest)
+            const localVarPath = `/api/core/model_providers/embedding/switch-preview`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(embeddingSwitchPreviewRequest, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
          * Returns feature flags derived from the algorithm service runtime_models.yaml. Result is permanently cached after the first successful fetch. image_embed_enabled is true when a cross_modal_embed role is configured.
          * @summary Get model feature flags
          * @param {*} [options] Override http request option.
@@ -58759,6 +59504,48 @@ export const ModelProvidersApiAxiosParamCreator = function (configuration?: Conf
             }
 
             const localVarRequestOptions = { method: 'DELETE', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         * Computes SHA-256 digests for fixed passage and query samples through the saved model\'s actual embedding runtime, including its configured prefixes. Returns only digests and dimension, never vectors, credentials or upstream text. A ready result can be compared with a previously recorded signature; unsupported and failed results cannot establish compatibility. The request body must be empty and no model settings are changed.
+         * @summary Fingerprint one saved text embedding model
+         * @param {string} modelProviderId
+         * @param {string} groupId
+         * @param {string} modelId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdEmbeddingSignaturePost: async (modelProviderId: string, groupId: string, modelId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'modelProviderId' is not null or undefined
+            assertParamExists('apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdEmbeddingSignaturePost', 'modelProviderId', modelProviderId)
+            // verify required parameter 'groupId' is not null or undefined
+            assertParamExists('apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdEmbeddingSignaturePost', 'groupId', groupId)
+            // verify required parameter 'modelId' is not null or undefined
+            assertParamExists('apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdEmbeddingSignaturePost', 'modelId', modelId)
+            const localVarPath = `/api/core/model_providers/{model_provider_id}/groups/{group_id}/models/{model_id}:embedding-signature`
+                .replace(`{${"model_provider_id"}}`, encodeURIComponent(String(modelProviderId)))
+                .replace(`{${"group_id"}}`, encodeURIComponent(String(groupId)))
+                .replace(`{${"model_id"}}`, encodeURIComponent(String(modelId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
             const localVarHeaderParameter = {} as any;
             const localVarQueryParameter = {} as any;
 
@@ -59559,6 +60346,44 @@ export const ModelProvidersApiFp = function(configuration?: Configuration) {
     const localVarAxiosParamCreator = ModelProvidersApiAxiosParamCreator(configuration)
     return {
         /**
+         * Requires the current generation and explicit administrator confirmation. Clears text vectors while preserving originals, parsed content, chunks and image vectors. An empty model_id performs credential-independent recovery without activating a model. Otherwise the server verifies and activates the replacement independently of browser cancellation. Replaying a completed request does not clear the new index. Documents await explicit reindexing.
+         * @summary Clear text vectors and optionally activate a replacement embedding model
+         * @param {EmbeddingClearRequest} embeddingClearRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreModelProvidersEmbeddingClearChunksPost(embeddingClearRequest: EmbeddingClearRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<EmbeddingClearResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreModelProvidersEmbeddingClearChunksPost(embeddingClearRequest, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['ModelProvidersApi.apiCoreModelProvidersEmbeddingClearChunksPost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         * Reports the persisted text embedding model identity and how many knowledge bases have indexed or pending document vectors. A legacy index without a recorded signature is reported as unknown, never inferred from the current model selection.
+         * @summary Get shared text-vector index state
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreModelProvidersEmbeddingIndexStateGet(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<EmbeddingIndexStatusResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreModelProvidersEmbeddingIndexStateGet(options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['ModelProvidersApi.apiCoreModelProvidersEmbeddingIndexStateGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         * Probes the saved candidate through the document embedding runtime and compares its passage and query signatures with the recorded deployment-wide text-vector identity. Legacy indexes without a recorded signature are unverified and require vector cleanup before a change. Preview never changes selections or knowledge bases; a later save rechecks the current state.
+         * @summary Check whether a text embedding model can replace the active model
+         * @param {EmbeddingSwitchPreviewRequest} embeddingSwitchPreviewRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreModelProvidersEmbeddingSwitchPreviewPost(embeddingSwitchPreviewRequest: EmbeddingSwitchPreviewRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<EmbeddingSwitchPreviewResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreModelProvidersEmbeddingSwitchPreviewPost(embeddingSwitchPreviewRequest, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['ModelProvidersApi.apiCoreModelProvidersEmbeddingSwitchPreviewPost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
          * Returns feature flags derived from the algorithm service runtime_models.yaml. Result is permanently cached after the first successful fetch. image_embed_enabled is true when a cross_modal_embed role is configured.
          * @summary Get model feature flags
          * @param {*} [options] Override http request option.
@@ -59729,6 +60554,21 @@ export const ModelProvidersApiFp = function(configuration?: Configuration) {
             const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdDelete(modelProviderId, groupId, modelId, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['ModelProvidersApi.apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdDelete']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         * Computes SHA-256 digests for fixed passage and query samples through the saved model\'s actual embedding runtime, including its configured prefixes. Returns only digests and dimension, never vectors, credentials or upstream text. A ready result can be compared with a previously recorded signature; unsupported and failed results cannot establish compatibility. The request body must be empty and no model settings are changed.
+         * @summary Fingerprint one saved text embedding model
+         * @param {string} modelProviderId
+         * @param {string} groupId
+         * @param {string} modelId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdEmbeddingSignaturePost(modelProviderId: string, groupId: string, modelId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<EmbeddingSignatureResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdEmbeddingSignaturePost(modelProviderId, groupId, modelId, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['ModelProvidersApi.apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdEmbeddingSignaturePost']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
@@ -60026,6 +60866,35 @@ export const ModelProvidersApiFactory = function (configuration?: Configuration,
     const localVarFp = ModelProvidersApiFp(configuration)
     return {
         /**
+         * Requires the current generation and explicit administrator confirmation. Clears text vectors while preserving originals, parsed content, chunks and image vectors. An empty model_id performs credential-independent recovery without activating a model. Otherwise the server verifies and activates the replacement independently of browser cancellation. Replaying a completed request does not clear the new index. Documents await explicit reindexing.
+         * @summary Clear text vectors and optionally activate a replacement embedding model
+         * @param {ModelProvidersApiApiCoreModelProvidersEmbeddingClearChunksPostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreModelProvidersEmbeddingClearChunksPost(requestParameters: ModelProvidersApiApiCoreModelProvidersEmbeddingClearChunksPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<EmbeddingClearResponse> {
+            return localVarFp.apiCoreModelProvidersEmbeddingClearChunksPost(requestParameters.embeddingClearRequest, options).then((request) => request(axios, basePath));
+        },
+        /**
+         * Reports the persisted text embedding model identity and how many knowledge bases have indexed or pending document vectors. A legacy index without a recorded signature is reported as unknown, never inferred from the current model selection.
+         * @summary Get shared text-vector index state
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreModelProvidersEmbeddingIndexStateGet(options?: RawAxiosRequestConfig): AxiosPromise<EmbeddingIndexStatusResponse> {
+            return localVarFp.apiCoreModelProvidersEmbeddingIndexStateGet(options).then((request) => request(axios, basePath));
+        },
+        /**
+         * Probes the saved candidate through the document embedding runtime and compares its passage and query signatures with the recorded deployment-wide text-vector identity. Legacy indexes without a recorded signature are unverified and require vector cleanup before a change. Preview never changes selections or knowledge bases; a later save rechecks the current state.
+         * @summary Check whether a text embedding model can replace the active model
+         * @param {ModelProvidersApiApiCoreModelProvidersEmbeddingSwitchPreviewPostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreModelProvidersEmbeddingSwitchPreviewPost(requestParameters: ModelProvidersApiApiCoreModelProvidersEmbeddingSwitchPreviewPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<EmbeddingSwitchPreviewResponse> {
+            return localVarFp.apiCoreModelProvidersEmbeddingSwitchPreviewPost(requestParameters.embeddingSwitchPreviewRequest, options).then((request) => request(axios, basePath));
+        },
+        /**
          * Returns feature flags derived from the algorithm service runtime_models.yaml. Result is permanently cached after the first successful fetch. image_embed_enabled is true when a cross_modal_embed role is configured.
          * @summary Get model feature flags
          * @param {*} [options] Override http request option.
@@ -60143,6 +61012,16 @@ export const ModelProvidersApiFactory = function (configuration?: Configuration,
          */
         apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdDelete(requestParameters: ModelProvidersApiApiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdDeleteRequest, options?: RawAxiosRequestConfig): AxiosPromise<DeleteModelProviderGroupModelOpenAPIResponse> {
             return localVarFp.apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdDelete(requestParameters.modelProviderId, requestParameters.groupId, requestParameters.modelId, options).then((request) => request(axios, basePath));
+        },
+        /**
+         * Computes SHA-256 digests for fixed passage and query samples through the saved model\'s actual embedding runtime, including its configured prefixes. Returns only digests and dimension, never vectors, credentials or upstream text. A ready result can be compared with a previously recorded signature; unsupported and failed results cannot establish compatibility. The request body must be empty and no model settings are changed.
+         * @summary Fingerprint one saved text embedding model
+         * @param {ModelProvidersApiApiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdEmbeddingSignaturePostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdEmbeddingSignaturePost(requestParameters: ModelProvidersApiApiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdEmbeddingSignaturePostRequest, options?: RawAxiosRequestConfig): AxiosPromise<EmbeddingSignatureResponse> {
+            return localVarFp.apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdEmbeddingSignaturePost(requestParameters.modelProviderId, requestParameters.groupId, requestParameters.modelId, options).then((request) => request(axios, basePath));
         },
         /**
          * Updates model metadata without replacing its UUID or default/conversation references. At least one metadata field must be supplied. Catalog models require customize=true for actual changes and become user overrides; unchanged saves do not convert them. Supported fields are the API model identifier, technical model type, chat vision support, and context window for unclassified or LLM/VLM models. Changing an unclassified model to LLM/VLM preserves an existing explicit context window unless overridden. Type/vision changes incompatible with existing references, or in-use embedding identity changes, return 409 without changing references or knowledge-base processing levels.
@@ -60356,6 +61235,20 @@ export const ModelProvidersApiFactory = function (configuration?: Configuration,
 };
 
 /**
+ * Request parameters for apiCoreModelProvidersEmbeddingClearChunksPost operation in ModelProvidersApi.
+ */
+export interface ModelProvidersApiApiCoreModelProvidersEmbeddingClearChunksPostRequest {
+    readonly embeddingClearRequest: EmbeddingClearRequest
+}
+
+/**
+ * Request parameters for apiCoreModelProvidersEmbeddingSwitchPreviewPost operation in ModelProvidersApi.
+ */
+export interface ModelProvidersApiApiCoreModelProvidersEmbeddingSwitchPreviewPostRequest {
+    readonly embeddingSwitchPreviewRequest: EmbeddingSwitchPreviewRequest
+}
+
+/**
  * Request parameters for apiCoreModelProvidersGet operation in ModelProvidersApi.
  */
 export interface ModelProvidersApiApiCoreModelProvidersGetRequest {
@@ -60467,6 +61360,17 @@ export interface ModelProvidersApiApiCoreModelProvidersModelProviderIdGroupsGrou
  * Request parameters for apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdDelete operation in ModelProvidersApi.
  */
 export interface ModelProvidersApiApiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdDeleteRequest {
+    readonly modelProviderId: string
+
+    readonly groupId: string
+
+    readonly modelId: string
+}
+
+/**
+ * Request parameters for apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdEmbeddingSignaturePost operation in ModelProvidersApi.
+ */
+export interface ModelProvidersApiApiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdEmbeddingSignaturePostRequest {
     readonly modelProviderId: string
 
     readonly groupId: string
@@ -60643,6 +61547,38 @@ export interface ModelProvidersApiApiCoreModelProvidersWithGroupsGetRequest {
  */
 export class ModelProvidersApi extends BaseAPI {
     /**
+     * Requires the current generation and explicit administrator confirmation. Clears text vectors while preserving originals, parsed content, chunks and image vectors. An empty model_id performs credential-independent recovery without activating a model. Otherwise the server verifies and activates the replacement independently of browser cancellation. Replaying a completed request does not clear the new index. Documents await explicit reindexing.
+     * @summary Clear text vectors and optionally activate a replacement embedding model
+     * @param {ModelProvidersApiApiCoreModelProvidersEmbeddingClearChunksPostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreModelProvidersEmbeddingClearChunksPost(requestParameters: ModelProvidersApiApiCoreModelProvidersEmbeddingClearChunksPostRequest, options?: RawAxiosRequestConfig) {
+        return ModelProvidersApiFp(this.configuration).apiCoreModelProvidersEmbeddingClearChunksPost(requestParameters.embeddingClearRequest, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     * Reports the persisted text embedding model identity and how many knowledge bases have indexed or pending document vectors. A legacy index without a recorded signature is reported as unknown, never inferred from the current model selection.
+     * @summary Get shared text-vector index state
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreModelProvidersEmbeddingIndexStateGet(options?: RawAxiosRequestConfig) {
+        return ModelProvidersApiFp(this.configuration).apiCoreModelProvidersEmbeddingIndexStateGet(options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     * Probes the saved candidate through the document embedding runtime and compares its passage and query signatures with the recorded deployment-wide text-vector identity. Legacy indexes without a recorded signature are unverified and require vector cleanup before a change. Preview never changes selections or knowledge bases; a later save rechecks the current state.
+     * @summary Check whether a text embedding model can replace the active model
+     * @param {ModelProvidersApiApiCoreModelProvidersEmbeddingSwitchPreviewPostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreModelProvidersEmbeddingSwitchPreviewPost(requestParameters: ModelProvidersApiApiCoreModelProvidersEmbeddingSwitchPreviewPostRequest, options?: RawAxiosRequestConfig) {
+        return ModelProvidersApiFp(this.configuration).apiCoreModelProvidersEmbeddingSwitchPreviewPost(requestParameters.embeddingSwitchPreviewRequest, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
      * Returns feature flags derived from the algorithm service runtime_models.yaml. Result is permanently cached after the first successful fetch. image_embed_enabled is true when a cross_modal_embed role is configured.
      * @summary Get model feature flags
      * @param {*} [options] Override http request option.
@@ -60771,6 +61707,17 @@ export class ModelProvidersApi extends BaseAPI {
      */
     public apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdDelete(requestParameters: ModelProvidersApiApiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdDeleteRequest, options?: RawAxiosRequestConfig) {
         return ModelProvidersApiFp(this.configuration).apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdDelete(requestParameters.modelProviderId, requestParameters.groupId, requestParameters.modelId, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     * Computes SHA-256 digests for fixed passage and query samples through the saved model\'s actual embedding runtime, including its configured prefixes. Returns only digests and dimension, never vectors, credentials or upstream text. A ready result can be compared with a previously recorded signature; unsupported and failed results cannot establish compatibility. The request body must be empty and no model settings are changed.
+     * @summary Fingerprint one saved text embedding model
+     * @param {ModelProvidersApiApiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdEmbeddingSignaturePostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdEmbeddingSignaturePost(requestParameters: ModelProvidersApiApiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdEmbeddingSignaturePostRequest, options?: RawAxiosRequestConfig) {
+        return ModelProvidersApiFp(this.configuration).apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdEmbeddingSignaturePost(requestParameters.modelProviderId, requestParameters.groupId, requestParameters.modelId, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**

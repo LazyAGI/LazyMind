@@ -2,27 +2,27 @@
 
 package main
 
-import "testing"
+import (
+	"os"
+	"strconv"
+	"testing"
+)
 
-func TestExcludeProcessTreeExcludesDesktopOwnerDescendantsOnly(t *testing.T) {
-	parents := map[int]int{
-		100: 1,
-		110: 100,
-		111: 110,
-		120: 100,
-		200: 1,
-		210: 200,
+func TestWindowsInventoryContainsCurrentIdentity(t *testing.T) {
+	// Owner exclusions belong to the common selector, so inventory can still
+	// verify registered services beneath the Desktop process.
+	t.Setenv(desktopOwnerPIDEnvVar, strconv.Itoa(os.Getpid()))
+	inventory, err := scanLocalRuntimeProcesses(RuntimePaths{})
+	if err != nil {
+		t.Fatal(err)
 	}
-	excluded := map[int]bool{}
-	excludeProcessTree(excluded, parents, 100)
-	for _, pid := range []int{100, 110, 111, 120} {
-		if !excluded[pid] {
-			t.Fatalf("owner process tree PID %d was not excluded", pid)
+	for _, process := range inventory {
+		if process.PID == os.Getpid() {
+			if process.StartID == 0 || process.StartID != processStartIdentity(os.Getpid()) || process.Executable == "" {
+				t.Fatalf("incomplete process observation: %+v", process)
+			}
+			return
 		}
 	}
-	for _, pid := range []int{1, 200, 210} {
-		if excluded[pid] {
-			t.Fatalf("unrelated PID %d was excluded", pid)
-		}
-	}
+	t.Fatal("current process omitted from raw inventory")
 }

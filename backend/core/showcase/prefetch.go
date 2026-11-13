@@ -36,17 +36,12 @@ func assetPrefetchOrder(catalog Catalog, downloads assetDownloads) []string {
 			}
 		}
 	}
-	for _, item := range cases {
-		if item.Status == StatusPublished && (item.Placement.Home || item.Placement.Gallery) {
-			add(item)
-		}
-	}
 	return result
 }
 
 // StartAssetPrefetch runs after history injection, without delaying readiness.
-// Sequential downloads finish the home page before competing for bandwidth
-// with the rest of the gallery. On-demand requests share the same cache locks.
+// Only the home rows are prefetched. Gallery assets are fetched when requested.
+// On-demand requests share the same cache locks.
 func StartAssetPrefetch(ctx context.Context) <-chan struct{} {
 	done := make(chan struct{})
 	go func() {

@@ -7,6 +7,7 @@ import DefaultModelConfigPanel, {
   type ModelCapability,
   type SetupAvailabilityState,
 } from "../components/DefaultModelConfigPanel";
+import { DefaultModelConfigRefreshContext } from "../hooks/useDefaultModelConfig";
 import ExternalServicesPage from "./ExternalServicesPage";
 import "./DefaultServicesPage.scss";
 
@@ -93,16 +94,37 @@ export default function DefaultServicesPage({
 }: DefaultServicesPageProps) {
   const { t } = useTranslation();
   const [setupAvailability, setSetupAvailability] = useState<SetupAvailability>(loadingSetupAvailability);
-  const [selectionVersion, setSelectionVersion] = useState(0);
+  const [selectionRevision, setSelectionRevision] = useState(0);
   const [activeFocusCategory, setActiveFocusCategory] = useState(focusServiceCategory);
-  const [toolServiceSummaries, setToolServiceSummaries] = useState<Partial<Record<ServiceCategory, string>>>({});
+  const [toolServiceGroups, setToolServiceGroups] = useState<Partial<Record<ServiceCategory, { name?: string; provider_name?: string }[]>>>({});
+  const toolServiceSummaries: Partial<Record<ServiceCategory, string>> = {};
+  for (const category of ["parsing", "search", "academic", "translation"] as const) {
+    const groups = toolServiceGroups[category];
+    if (!groups?.length) continue;
+    toolServiceSummaries[category] = category === "translation"
+      ? t("modelProvider.defaults.translationSourceCount", { count: groups.length })
+      : groups.map((group) => group.name || group.provider_name).filter(Boolean).join(t("modelProvider.defaults.serviceSeparator"))
+        || t("modelProvider.defaults.serviceCount", { count: groups.length });
+  }
   const latestRequest = useRef(0);
 
-  const checkSetupAvailability = useCallback(async () => {
+  const checkSetupAvailability = useCallback(async (preserveCurrent = false) => {
     const requestId = ++latestRequest.current;
-    setSetupAvailability(loadingSetupAvailability);
-    const [modelResult, parsingResult, searchResult, academicResult, translationResult] = await Promise.allSettled([
-      listAvailableModels(),
+    if (!preserveCurrent) setSetupAvailability(loadingSetupAvailability);
+    void listAvailableModels()
+      .then((response) => {
+        if (requestId !== latestRequest.current) return;
+        const models = unwrapModelProviderData<{ models?: unknown[] }>(response.data).models ?? [];
+        setSetupAvailability((current) => ({
+          ...current,
+          modelProvider: models.length > 0 ? "ready" : "empty",
+        }));
+      })
+      .catch(() => {
+        if (requestId !== latestRequest.current) return;
+        setSetupAvailability((current) => ({ ...current, modelProvider: "error" }));
+      });
+    const [parsingResult, searchResult, academicResult, translationResult] = await Promise.allSettled([
       modelProvidersApi.apiCoreModelProvidersProviderGroupsGet(
         { category: "ocr" },
         silentSetupCheckOptions,
@@ -116,9 +138,6 @@ export default function DefaultServicesPage({
     ]);
     if (requestId !== latestRequest.current) return;
 
-    const modelProvider = modelResult.status === "fulfilled"
-      ? (unwrapModelProviderData<{ models?: unknown[] }>(modelResult.value.data).models ?? []).length > 0 ? "ready" : "empty"
-      : "error";
     const cloudParsing = parsingResult.status === "fulfilled"
       ? (unwrapModelProviderData<{ groups?: unknown[] }>(parsingResult.value.data).groups ?? []).length > 0 ? "ready" : "empty"
       : "error";
@@ -126,16 +145,14 @@ export default function DefaultServicesPage({
       ? (unwrapModelProviderData<{ groups?: unknown[] }>(searchResult.value.data).groups ?? []).length > 0 ? "ready" : "empty"
       : "error";
 
-    setSetupAvailability({ cloudParsing, modelProvider, searchEngine });
-    const summaries: Partial<Record<ServiceCategory, string>> = {};
+    setSetupAvailability((current) => ({ ...current, cloudParsing, searchEngine }));
+    const serviceGroups: Partial<Record<ServiceCategory, { name?: string; provider_name?: string }[]>> = {};
     for (const [category, result] of [["parsing", parsingResult], ["search", searchResult], ["academic", academicResult], ["translation", translationResult]] as const) {
       if (result.status !== "fulfilled") continue;
       const groups = unwrapModelProviderData<{ groups?: { name?: string; provider_name?: string }[] }>(result.value.data).groups || [];
-      if (groups.length) summaries[category] = category === "translation"
-        ? `已配置 ${groups.length} 个翻译源`
-        : groups.map((group) => group.name || group.provider_name).filter(Boolean).join("、") || `已配置 ${groups.length} 个服务`;
+      serviceGroups[category] = groups;
     }
-    setToolServiceSummaries(summaries);
+    setToolServiceGroups(serviceGroups);
   }, []);
 
   useEffect(() => {
@@ -155,8 +172,8 @@ export default function DefaultServicesPage({
   };
 
   const handleServiceConfigurationChanged = () => {
-    setSelectionVersion((current) => current + 1);
-    void checkSetupAvailability();
+    setSelectionRevision((current) => current + 1);
+    void checkSetupAvailability(true);
     void onModelSelectionChanged();
   };
 
@@ -181,25 +198,26 @@ export default function DefaultServicesPage({
 
   return (
     <div className="model-provider-service-page default-services-page">
-      <DefaultModelConfigPanel
-        key={selectionVersion}
-        cloudServiceSetupStates={{
-          cloudParsing: setupAvailability.cloudParsing,
-          searchEngine: setupAvailability.searchEngine,
-        }}
-        modelProviderSetupState={setupAvailability.modelProvider}
-        onConfigureCloudService={handleConfigureCloudService}
-        onConfigureToolService={setActiveFocusCategory}
-        toolServiceSummaries={toolServiceSummaries}
-        onConfigureProviders={onConfigureProviders}
-        onModelSelectionChanged={onModelSelectionChanged}
-        onRetrySetup={() => void checkSetupAvailability()}
-        highlightTarget={highlightTarget}
-        onHighlightResolved={onHighlightResolved}
-      />
+      <DefaultModelConfigRefreshContext.Provider value={selectionRevision}>
+        <DefaultModelConfigPanel
+          cloudServiceSetupStates={{
+            cloudParsing: setupAvailability.cloudParsing,
+            searchEngine: setupAvailability.searchEngine,
+          }}
+          modelProviderSetupState={setupAvailability.modelProvider}
+          onConfigureCloudService={handleConfigureCloudService}
+          onConfigureToolService={setActiveFocusCategory}
+          toolServiceSummaries={toolServiceSummaries}
+          onConfigureProviders={onConfigureProviders}
+          onModelSelectionChanged={onModelSelectionChanged}
+          onRetrySetup={() => void checkSetupAvailability()}
+          highlightTarget={highlightTarget}
+          onHighlightResolved={onHighlightResolved}
+        />
+      </DefaultModelConfigRefreshContext.Provider>
       <Modal
         open={Boolean(activeFocusCategory)}
-        title={activeFocusCategory ? ({ search: "搜索引擎", academic: "学术搜索引擎", parsing: "文档解析（OCR）", translation: "机器翻译" }[activeFocusCategory]) : ""}
+        title={activeFocusCategory ? t(`modelProvider.defaults.services.${activeFocusCategory}`) : ""}
         width={1000}
         footer={null}
         destroyOnHidden

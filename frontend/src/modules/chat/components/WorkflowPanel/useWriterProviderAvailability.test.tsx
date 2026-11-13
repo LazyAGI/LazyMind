@@ -16,7 +16,7 @@ it.each([
   expect(result.current.states.obsidian).toBe('ready');
   expect(list).toHaveBeenCalledTimes(1);
 });
-it('rechecks Feishu on return from settings and accepts any enabled active connection', async () => {
+it('rechecks Feishu on explicit refresh and accepts any enabled active connection', async () => {
   list.mockResolvedValue({ data: { items: [{ status: 'ACTIVE', provider_account_meta: { chatEnabled: false }, can_use_chat: false }] } });
   const { result } = renderHook(() => useWriterProviderAvailability(['feishu']));
   await waitFor(() => expect(result.current.states.feishu).toBe('chat-disabled'));
@@ -24,8 +24,22 @@ it('rechecks Feishu on return from settings and accepts any enabled active conne
     { status: 'ACTIVE', provider_options: { chat_enabled: false }, can_use_chat: false },
     { status: 'ACTIVE', provider_account_meta: { chat_enabled: true }, can_use_chat: true },
   ] } });
-  act(() => window.dispatchEvent(new Event('focus')));
+  await act(async () => result.current.refresh());
   await waitFor(() => expect(result.current.states.feishu).toBe('ready'));
+});
+it('keeps provider states and accounts when returning to the tab', async () => {
+  list.mockResolvedValue({ data: { items: [{ status: 'ACTIVE', can_use_chat: true }] } });
+  const ids = ['feishu', 'github', 'googledrive', 'notion', 'wechat', 'obsidian'];
+  const { result } = renderHook(() => useWriterProviderAvailability(ids));
+  await waitFor(() => expect(result.current.states).toEqual(Object.fromEntries(ids.map(id => [id, 'ready']))));
+  const { states, accounts, obsidian } = result.current;
+  await act(async () => {
+    window.dispatchEvent(new Event('focus'));
+    document.dispatchEvent(new Event('visibilitychange'));
+  });
+  expect(list).toHaveBeenCalledTimes(5);
+  expect(status).toHaveBeenCalledTimes(1);
+  expect(result.current).toMatchObject({ states, accounts, obsidian });
 });
 it('distinguishes failed checks and ignores a stale response after a provider change', async () => {
   let finish!: (value: unknown) => void;
@@ -44,6 +58,22 @@ it('requires authorization when no connections exist', async () => {
   list.mockResolvedValue({ data: { items: [] } });
   const { result } = renderHook(() => useWriterProviderAvailability(['feishu']));
   await waitFor(() => expect(result.current.states.feishu).toBe('authorize'));
+});
+
+it.each(['ready', 'failed'])('updates cloud availability before Obsidian finishes with %s', async expected => {
+  let finish!: () => void;
+  status.mockImplementationOnce(() => new Promise((resolve, reject) => {
+    finish = () => expected === 'ready'
+      ? resolve({ data: { data: { state: 'ready', vaults: [] } } })
+      : reject(new Error('offline'));
+  }));
+  list.mockResolvedValue({ data: { items: [{ status: 'ACTIVE', can_use_chat: true }] } });
+  const { result } = renderHook(() => useWriterProviderAvailability(['feishu', 'obsidian']));
+  await waitFor(() => expect(result.current.states.feishu).toBe('ready'));
+  expect(result.current.accounts.feishu).toHaveLength(1);
+  expect(result.current.states.obsidian).toBe('checking');
+  await act(async () => finish());
+  expect(result.current.states).toEqual({ feishu: 'ready', obsidian: expected });
 });
 
 it.each(['not_configured', 'permission_required'])('does not enable Obsidian when server reports %s', async state => {

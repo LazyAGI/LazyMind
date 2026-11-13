@@ -22,12 +22,14 @@ import type { ChatConfig } from "@/modules/chat/components/ChatConfigs";
 import type { DocumentTranslationRequest } from "./types";
 import { touchCachedPdfChat } from "./cache";
 import { getDocumentParseStatus, ensureDocumentParsed, retryDocumentParsed, type DocumentParseResult } from "@/modules/knowledge/api/pdfArtifacts";
+import { useChatModelProviderGuard } from "@/modules/chat/hooks/useChatModelProviderGuard";
 
 interface PdfTemporaryChatProps {
   datasetId: string;
   documentId: string;
   fileName: string;
   paperMode?: boolean;
+  newConversationInToolbar?: boolean;
   selection?: DocumentChatSelection;
   conversationToLoad?: string;
   translationRequest?: DocumentTranslationRequest | null;
@@ -49,11 +51,50 @@ function newPreviewConversationId() {
   return `pdf-${suffix}`.slice(0, 36);
 }
 
+function documentContextForSelection(
+  datasetId: string,
+  documentId: string,
+  fileName: string,
+  selection?: DocumentChatSelection,
+) {
+  return {
+    dataset_id: datasetId,
+    document_id: documentId,
+    file_name: fileName,
+    page: selection?.page,
+    bbox: selection?.bbox,
+    segment_id: selection?.segmentId,
+    segment_number: selection?.segmentNumber,
+    segment_group: selection?.group,
+    selected_text: selection?.text,
+    paragraph_text: selection?.context,
+    ...(selection?.quickExplain ? { expand_paper_context: true } : {}),
+  };
+}
+
+function scopedDocumentContext(
+  datasetId: string,
+  documentId: string,
+  fileName: string,
+  selection: DocumentChatSelection | undefined,
+  snapshot: unknown,
+) {
+  if (
+    snapshot && typeof snapshot === "object" && !Array.isArray(snapshot) &&
+    (snapshot as Record<string, unknown>).dataset_id === datasetId &&
+    (snapshot as Record<string, unknown>).document_id === documentId
+  ) {
+    return { ...snapshot, dataset_id: datasetId, document_id: documentId, file_name: fileName };
+  }
+  return documentContextForSelection(datasetId, documentId, fileName, selection);
+}
+
 const PdfTemporaryChat = forwardRef<PdfTemporaryChatHandle, PdfTemporaryChatProps>(function PdfTemporaryChat({
   datasetId,
   documentId,
   fileName,
   paperMode = false,
+  newConversationInToolbar = false,
   selection,
   conversationToLoad,
   translationRequest,
@@ -64,6 +105,7 @@ const PdfTemporaryChat = forwardRef<PdfTemporaryChatHandle, PdfTemporaryChatProp
   onNavigateSelection,
 }: PdfTemporaryChatProps, ref) {
   const { t, i18n } = useTranslation();
+  const { vlmReady } = useChatModelProviderGuard();
   const zh = (i18n?.resolvedLanguage || i18n?.language || "en").startsWith("zh");
   const copy = zh ? {
     assistant:"论文助手", hint:"细读论文，随时提问。", ready:"论文已就绪", scope:"回答基于当前文档", quote:"原文摘录", page:"第", remove:"移除原文摘录", companion:"阅读助手", welcome:"从方法开始读懂论文", intro:"沿着方法走一遍，再回原文核对设计、实验和边界。点击下方问题可先编辑再发送。",
@@ -89,6 +131,9 @@ const PdfTemporaryChat = forwardRef<PdfTemporaryChatHandle, PdfTemporaryChatProp
   const initialConversationIdRef = useRef(newPreviewConversationId());
   const conversationIdRef = useRef(initialConversationIdRef.current);
   const preparedSelectionRef = useRef<DocumentChatSelection>();
+  const requestedQuickParseRef = useRef<DocumentChatSelection>();
+  const activeSelectionRef = useRef<DocumentChatSelection>();
+  activeSelectionRef.current = activeSelection;
   const handledTranslationRequestRef = useRef(0);
   const pendingTranslationRef = useRef<(DocumentTranslationRequest & { conversationId: string }) | null>(null);
   const [conversationId, setConversationId] = useState(initialConversationIdRef.current);
@@ -164,6 +209,7 @@ const PdfTemporaryChat = forwardRef<PdfTemporaryChatHandle, PdfTemporaryChatProp
 
   useEffect(() => {
     if (!activeSelection) return;
+    if (activeSelection.quickExplain) return;
     if (preparedSelectionRef.current === activeSelection) return;
     let attempts = 0;
     const sendWhenReady = () => {
@@ -184,6 +230,60 @@ const PdfTemporaryChat = forwardRef<PdfTemporaryChatHandle, PdfTemporaryChatProp
     let timer = window.setTimeout(sendWhenReady, 50);
     return () => window.clearTimeout(timer);
   }, [restartKey, selection, activeSelection]);
+
+  useEffect(() => {
+    if (!activeSelection?.quickExplain || preparedSelectionRef.current === activeSelection) return;
+    if (parseState === "loading" || parseState === "parsing") return;
+    const request = activeSelection;
+    const question = request.question?.trim() || t("knowledge.pdfQuickExplainPrompt");
+    const prepareForRetry = () => {
+      if (activeSelectionRef.current !== request) return;
+      preparedSelectionRef.current = request;
+      chatRef.current?.prepareMessage({ text: question, citeMessage: request.text, appendCitations: true, appendText: true });
+      message.warning(t("knowledge.pdfQuickExplainSendFailed"));
+    };
+    if (parseState === "not_requested" && requestedQuickParseRef.current !== request) {
+      requestedQuickParseRef.current = request;
+      setParseState("parsing");
+      void ensureDocumentParsed(datasetId, documentId).then(result => {
+        setParseState(result.status);
+        setParseError(result.error?.message || "");
+        if (result.status === "not_requested") prepareForRetry();
+        if (result.status === "parsing") setParseAttempt(value => value + 1);
+      }).catch(error => {
+        setParseError(getLocalizedErrorMessage(error));
+        setParseState("failed");
+      });
+      return;
+    }
+    let attempts = 0;
+    let timer: number;
+    const sendWhenReady = () => {
+      if (activeSelectionRef.current !== request || preparedSelectionRef.current === request) return;
+      if (!chatRef.current) {
+        if (attempts++ < 10) timer = window.setTimeout(sendWhenReady, 50);
+        return;
+      }
+      preparedSelectionRef.current = request;
+      if (parseState !== "parsed") { prepareForRetry(); return; }
+      const conversationAtSend = conversationIdRef.current;
+      void chatRef.current.sendMessage({
+        text: question,
+        citeMessage: request.text,
+        clearInput: false,
+        fileList: [],
+        document_context: documentContextForSelection(datasetId, documentId, fileName, request),
+      })
+        .then(sent => {
+          if (activeSelectionRef.current !== request || conversationIdRef.current !== conversationAtSend) return;
+          if (!sent) { prepareForRetry(); return; }
+          setDismissedSelection(request);
+          onClearSelection?.();
+        }).catch(prepareForRetry);
+    };
+    timer = window.setTimeout(sendWhenReady, 50);
+    return () => window.clearTimeout(timer);
+  }, [activeSelection, parseState, restartKey, datasetId, documentId, fileName, onClearSelection, t]);
 
   const openSSE = (
     input: Query[],
@@ -224,18 +324,7 @@ const PdfTemporaryChat = forwardRef<PdfTemporaryChatHandle, PdfTemporaryChatProp
         source_document_id: documentId,
         source_display_name: fileName,
       },
-      document_context: {
-        dataset_id: datasetId,
-        document_id: documentId,
-        file_name: fileName,
-        page: activeSelection?.page,
-        bbox: activeSelection?.bbox,
-        segment_id: activeSelection?.segmentId,
-        segment_number: activeSelection?.segmentNumber,
-        segment_group: activeSelection?.group,
-        selected_text: activeSelection?.text,
-        paragraph_text: activeSelection?.context,
-      },
+      document_context: scopedDocumentContext(datasetId, documentId, fileName, activeSelection, extras?.document_context),
     }),
     callbacks,
   });
@@ -335,14 +424,14 @@ const PdfTemporaryChat = forwardRef<PdfTemporaryChatHandle, PdfTemporaryChatProp
           <strong>{isPaper ? copy.assistant : t("knowledge.pdfChatPanelLabel")}</strong>
           <span>{isPaper ? copy.hint : t("knowledge.pdfChatTemporaryHint")}</span>
         </div>
-        {isPaper && <Button type="text" icon={<PlusOutlined />} aria-label={t("knowledge.pdfChatNew")} title={t("knowledge.pdfChatNew")} onClick={() => void startNewConversation()} />}
+        {isPaper && !newConversationInToolbar && <Button type="text" icon={<PlusOutlined />} aria-label={t("knowledge.pdfChatNew")} title={t("knowledge.pdfChatNew")} onClick={() => void startNewConversation()} />}
         <Button type="text" icon={<CloseOutlined />} aria-label={t("common.close")} onClick={onClose} />
       </header>
       {isPaper && parseState === "parsed" && <div className="paper-assistant-ready" role="status"><span />{copy.ready}<span className="paper-assistant-ready__scope">{copy.scope}</span></div>}
       {!isPaper && <div className="pdf-temporary-chat__actions">
-        <Button size="small" icon={<PlusOutlined />} onClick={() => void startNewConversation()}>
+        {!newConversationInToolbar && <Button size="small" icon={<PlusOutlined />} onClick={() => void startNewConversation()}>
           {t("knowledge.pdfChatNew")}
-        </Button>
+        </Button>}
         <Button
           size="small"
           type="primary"
@@ -430,6 +519,7 @@ const PdfTemporaryChat = forwardRef<PdfTemporaryChatHandle, PdfTemporaryChatProp
           showThinkingDepth={false}
           showSkillDeposit={false}
           showConversationConfig={false}
+          vlmReady={vlmReady}
           showModelSelector={isPaper}
           composerVariant={isPaper ? "paper" : "default"}
           modelSelectionDraft={isPaper && !conversationCreated}

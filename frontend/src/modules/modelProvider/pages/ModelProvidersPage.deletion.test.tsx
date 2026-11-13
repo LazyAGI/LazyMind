@@ -5,8 +5,8 @@ import {
   waitFor,
   within,
 } from "@testing-library/react";
-import { ConfigProvider } from "antd";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { ConfigProvider, message } from "antd";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import ModelProviderPage from "./ModelProvidersPage";
 
@@ -15,6 +15,7 @@ const mocks = vi.hoisted(() => ({
   getProvidersWithGroups: vi.fn(),
   getGroups: vi.fn(),
   getModels: vi.fn(),
+  deleteModel: vi.fn(),
   deleteSupplier: vi.fn(),
   translate: (key: string, options?: { name?: string }) =>
     options?.name ? `${key}:${options.name}` : key,
@@ -33,6 +34,7 @@ vi.mock("../api", () => ({
     apiCoreModelProvidersWithGroupsGet: mocks.getProvidersWithGroups,
     apiCoreModelProvidersModelProviderIdGroupsGet: mocks.getGroups,
     apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsGet: mocks.getModels,
+    apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdDelete: mocks.deleteModel,
   },
   modelProvidersDefaultApi: {},
   createCustomProvider: vi.fn(),
@@ -92,12 +94,16 @@ const embedding = {
   model_type: "embed",
 };
 
-async function requestDeletion() {
+function renderProviders() {
   render(
     <ConfigProvider theme={{ token: { motion: false } }}>
       <ModelProviderPage />
     </ConfigProvider>,
   );
+}
+
+async function requestDeletion() {
+  renderProviders();
   fireEvent.click(await screen.findByRole("button", { name: "modelProvider.workspace.deleteSupplier" }));
 }
 
@@ -109,7 +115,56 @@ beforeEach(() => {
   });
   mocks.getGroups.mockResolvedValue({ data: { groups: [group] } });
   mocks.getModels.mockResolvedValue({ data: { models: [embedding] } });
+  mocks.deleteModel.mockResolvedValue({ data: {} });
   mocks.deleteSupplier.mockResolvedValue({ id: provider.id, downgraded_knowledge_bases: 0 });
+});
+afterEach(() => message.destroy());
+
+describe("model deletion", () => {
+  const deleteModel = () => screen.findByRole("button", { name: "modelProvider.deleteModelAria:fixture-embedding" });
+
+  it("deletes a default-marked embedding when the server permits it", async () => {
+    mocks.getModels.mockResolvedValue({ data: { models: [{ ...embedding, is_default: true }] } });
+    renderProviders();
+
+    fireEvent.click(await deleteModel());
+
+    await waitFor(() => expect(mocks.deleteModel).toHaveBeenCalledWith(
+      { modelProviderId: provider.id, groupId: group.id, modelId: embedding.id }, { silentError: true },
+    ));
+    expect(await screen.findByText("modelProvider.message.modelDeleted")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "modelProvider.deleteModelAria:fixture-embedding" })).not.toBeInTheDocument();
+  });
+
+  it.each([
+    ["active_index_owner", "modelProvider.embeddingInUse"],
+    ["legacy_selected_owner", "modelProvider.embeddingDeletionLegacyOwner"],
+    ["index_identity_unverified", "modelProvider.embeddingDeletionUnverified"],
+  ])("keeps the model and explains the %s conflict", async (reason, label) => {
+    mocks.deleteModel.mockRejectedValueOnce({ response: { status: 409, data: {
+      code: 2005089, message: "raw diagnostic canary",
+      data: { reason, recovery: "offline_vector_cleanup", credential: "secret-canary" },
+    } } });
+    renderProviders();
+
+    fireEvent.click(await deleteModel());
+
+    const warning = await screen.findByText((text) => text.startsWith(label) && text.includes("modelProvider.embeddingOfflineMaintenance"));
+    expect(warning).not.toHaveTextContent(/raw diagnostic canary|secret-canary/);
+    expect(await deleteModel()).toBeEnabled();
+    expect(mocks.deleteModel).toHaveBeenCalledOnce();
+  });
+
+  it("keeps the legacy warning for a code-only conflict", async () => {
+    mocks.deleteModel.mockRejectedValueOnce({ response: { status: 409, data: { code: 2005089 } } });
+    renderProviders();
+
+    fireEvent.click(await deleteModel());
+
+    expect(await screen.findByText("modelProvider.embeddingInUse")).toBeInTheDocument();
+    expect(screen.queryByText(/embeddingOfflineMaintenance/)).not.toBeInTheDocument();
+    expect(await deleteModel()).toBeEnabled();
+  });
 });
 
 describe("custom supplier deletion", () => {
@@ -130,7 +185,7 @@ describe("custom supplier deletion", () => {
   });
 
   it("keeps the supplier and shows guidance when an embedding is occupied", async () => {
-    mocks.deleteSupplier.mockRejectedValue({ response: { status: 409, data: { message: "embedding model is in use; remove indexed knowledge bases before removing the model" } } });
+    mocks.deleteSupplier.mockRejectedValue({ response: { status: 409, data: { code: 2005089, message: "Clear the old text vectors before changing the embedding model; source documents and chunks remain" } } });
     await requestDeletion();
     fireEvent.click(within(await screen.findByRole("dialog")).getByRole("button", { name: "modelProvider.workspace.deleteSupplier" }));
     expect(await screen.findByText("modelProvider.embeddingInUse")).toBeInTheDocument();

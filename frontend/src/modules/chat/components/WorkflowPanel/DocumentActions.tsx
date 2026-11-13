@@ -113,7 +113,7 @@ export function DocumentActionScope({ inline, label, children, showTitle = true 
 }) {
   const parent = useContext(SlotEditingContext);
   const { footerActions, registerFooterAction } = useSlotFooterActions();
-  const context = useMemo(() => inline ? { ...parent, registerFooterAction } : parent,
+  const context = useMemo(() => inline ? { ...parent, registerFooterAction, inlineDocumentActions: true } : parent,
     [inline, parent, registerFooterAction]);
   return <SlotEditingContext.Provider value={context}>
     {inline ? <div className='workflow-panel__document-item' role='group' aria-label={label}>
