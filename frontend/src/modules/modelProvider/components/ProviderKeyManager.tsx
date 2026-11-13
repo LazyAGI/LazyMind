@@ -33,6 +33,7 @@ export interface ProviderKeyManagerProps {
   disabled?: boolean;
   changingKey?: string;
   removingKey?: string;
+  removesModelsOnDelete?: boolean;
   onAdd: () => void;
   onCreate?: (apiKey: string) => Promise<boolean | void>;
   onDelete: (id: string) => Promise<void>;
@@ -224,7 +225,7 @@ export function ProviderKeyManager(props: ProviderKeyManagerProps) {
           </Tooltip>
           <Popconfirm
             title={workspace("deleteKey")}
-            description={workspace("deleteKeyHint")}
+            description={workspace(props.removesModelsOnDelete ? "deleteKeyModelsHint" : "deleteKeyHint")}
             okText={t("common.delete")}
             cancelText={t("common.cancel")}
             okButtonProps={{ danger: true }}
