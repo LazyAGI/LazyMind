@@ -268,3 +268,20 @@ it('defaults the Docker build to the host gateway', () => {
     expect(screen.getByLabelText('本地 API 地址')).toHaveValue('http://host.docker.internal:23119/api');
   } finally { vi.mocked(getRuntimeMode).mockReturnValue('cloud'); }
 });
+
+it('explicitly updates existing notes and annotations without importing PDFs',async()=>{
+ const importedPreview={...preview,items:[preview.items[0],preview.items[2],{key:'ANN001',data:{key:'ANN001',itemType:'annotation',parentItem:'PDF00001',annotationText:'source quote',annotationPosition:'{"pageIndex":0,"rects":[[20,30,80,45]]}'}}]};
+ vi.mocked(previewZotero).mockResolvedValue(importedPreview);
+ onImport.mockResolvedValue({imported:0,attachments:0});
+ render(<ConfigProvider theme={{token:{motion:false}}}><ZoteroImportModal open datasetId="dataset" canWrite persistedPapers={[{zoteroSources:['users:42:PAPER001']}]} onCancel={onCancel} onImport={onImport}/></ConfigProvider>);
+ await load();
+ fireEvent.click(screen.getByRole('checkbox',{name:'同时导入 PDF 附件'}));
+ expect(screen.getByRole('button',{name:'确认导入 0 篇'})).toBeDisabled();
+ fireEvent.click(screen.getByRole('checkbox',{name:'补充已导入文献的笔记、批注及所选附件'}));
+ expect(screen.getByText('本次选择包含 1 个 PDF、1 条笔记与批注')).toBeInTheDocument();
+ fireEvent.click(screen.getByRole('button',{name:'更新已导入笔记与批注'}));
+ await waitFor(()=>expect(onImport).toHaveBeenCalledTimes(1));
+ expect(onImport.mock.calls[0][0].items).toHaveLength(3);
+ expect(onImport.mock.calls[0][2]).toMatchObject({includeAttachments:false});
+ expect(onCancel).toHaveBeenCalled();
+});

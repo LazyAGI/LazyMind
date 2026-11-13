@@ -141,6 +141,10 @@ func TestZoteroDatabasePreviewReadsWALAndPreservesGraph(t *testing.T) {
 	if items["NOTE0001"]["parentItem"] != "PAPER001" || items["ANNOT001"]["parentItem"] != "ATTACH01" || items["ANNOT001"]["annotationType"] != "underline" {
 		t.Fatalf("child graph lost: %v", items)
 	}
+	annotation := items["ANNOT001"]
+	if annotation["annotationText"] != "Quoted text" || annotation["annotationComment"] != "Comment" || annotation["annotationColor"] != "#ffff00" || annotation["annotationPosition"] != `{"pageIndex":1,"rects":[[1,2,3,4]]}` {
+		t.Fatalf("annotation text or PDF geometry lost in database preview: %v", annotation)
+	}
 	if items["ATTACH01"]["filename"] != "paper.pdf" || items["ATTACH01"]["localFileAvailable"] != true {
 		t.Fatalf("attachment unavailable: %v", items["ATTACH01"])
 	}

@@ -13,7 +13,7 @@ const sample = (): ZoteroPreview => ({
     { key: 'PAPER001', data: { key: 'PAPER001', itemType: 'journalArticle', title: 'A paper', creators: [{ firstName: 'Ada', lastName: 'Lovelace', creatorType: 'author' }], DOI: '10.1234/test', publicationTitle: 'Journal', date: '2024-03-02', collections: ['ROOT0001', 'CHILD001'], tags: [{ tag: 'important' }] } },
     { key: 'PDF00001', data: { key: 'PDF00001', itemType: 'attachment', parentItem: 'PAPER001', contentType: 'application/pdf', filename: 'paper.pdf', md5: 'abc' } },
     { key: 'NOTE0001', data: { key: 'NOTE0001', itemType: 'note', parentItem: 'PAPER001', note: '<p>Useful <b>note</b></p><script>alert(1)</script>', dateAdded: '2024-03-03T00:00:00Z' } },
-    { key: 'ANNOT001', data: { key: 'ANNOT001', itemType: 'annotation', parentItem: 'PDF00001', annotationText: 'A result', annotationComment: 'Interesting', annotationPosition: '{"pageIndex":2}', annotationColor: '#ffd400' } },
+    { key: 'ANNOT001', data: { key: 'ANNOT001', itemType: 'annotation', parentItem: 'PDF00001', annotationText: 'A result', annotationComment: 'Interesting', annotationPosition: '{"pageIndex":2,"rects":[[72,700,200,716],[72,680,150,696]]}', annotationColor: '#ffd400' } },
   ],
 });
 
@@ -43,7 +43,7 @@ describe('Zotero import graph', () => {
     expect(paper).toMatchObject({ metadata: { title: 'A paper', authors: ['Ada Lovelace'], year: 2024, identifiers: { doi: '10.1234/test' } } });
     expect(paper.collectionIds).toHaveLength(2);
     expect(plan.library.notes[0].content).toBe('Useful note');
-    expect(plan.library.annotations[0]).toMatchObject({ paperId: paper.id, quote: 'A result', comment: 'Interesting', page: 3 });
+    expect(plan.library.annotations[0]).toMatchObject({ paperId: paper.id, quote: 'A result', comment: 'Interesting', page: 3, pdfRects:[[72,700,200,716],[72,680,150,696]] });
     expect(plan.library.attachments[0].contentRef).toBeUndefined();
     expect(plan.attachments[0]).toMatchObject({ key: 'PDF00001', paperId: paper.id, name: 'paper.pdf' });
   });
@@ -225,4 +225,32 @@ it('retains selected folder ancestry and duplicate names in different branches',
  expect(leaf.parentId).toBe(child.id);
  expect(other.id).not.toBe(child.id);
  expect(plan.library.papers[0].collectionIds).toEqual(expect.arrayContaining([leaf.id,other.id]));
+});
+
+it('repairs geometry on re-import without duplicating or overwriting an edited annotation',()=>{
+ const first=buildZoteroImport(sample(),emptyLibrary());
+ delete first.library.annotations[0].pdfRects;
+ first.library.annotations[0].comment='My edited comment';
+ const repaired=buildZoteroImport(sample(),first.library);
+ expect(repaired.library.annotations).toHaveLength(1);
+ expect(repaired.library.annotations[0]).toMatchObject({comment:'My edited comment',quote:'A result',pdfRects:[[72,700,200,716],[72,680,150,696]]});
+ expect(repaired.counts.annotations).toBe(0);
+});
+
+it('does not backfill a changed source page rectangle onto an existing different page',()=>{
+ const first=buildZoteroImport(sample(),emptyLibrary());
+ delete first.library.annotations[0].pdfRects;
+ first.library.annotations[0].page=1;
+ const repaired=buildZoteroImport(sample(),first.library);
+ expect(repaired.library.annotations[0].page).toBe(1);
+ expect(repaired.library.annotations[0].pdfRects).toBeUndefined();
+});
+
+it('does not backfill imported coordinates onto a different existing attachment',()=>{
+ const first=buildZoteroImport(sample(),emptyLibrary());
+ delete first.library.annotations[0].pdfRects;
+ first.library.annotations[0].attachmentId='different-pdf';
+ const repaired=buildZoteroImport(sample(),first.library);
+ expect(repaired.library.annotations[0].attachmentId).toBe('different-pdf');
+ expect(repaired.library.annotations[0].pdfRects).toBeUndefined();
 });

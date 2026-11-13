@@ -126,7 +126,7 @@ it('shows written note content without displaying its captured source quote',asy
  expect(screen.getByText('My annotation')).toBeInTheDocument();
  expect(screen.queryByText(/Original PDF quote/)).not.toBeInTheDocument();
  expect(screen.queryByText(/Continued source text/)).not.toBeInTheDocument();
- expect(screen.queryByText('Another original quote')).not.toBeInTheDocument();
+ expect(screen.getByText('Another original quote')).toBeInTheDocument();
  expect(screen.queryByText('新笔记')).not.toBeInTheDocument();
 });
 it('keeps source location in saved content while editing only the note text',async()=>{
@@ -203,7 +203,7 @@ it('keeps imported PDF annotations compact, color coded and clickable as a whole
  const onNavigatePage=vi.fn();render(<PaperReaderDetails {...props} initialTab="notes" onNavigatePage={onNavigatePage}/>);
  const button=await screen.findByRole('button',{name:/Check this result/});
  expect(within(button).getByLabelText('Green')).toBeInTheDocument();
- expect(screen.queryByText('PDF quote')).not.toBeInTheDocument();
+ expect(within(button).getByText('PDF quote')).toBeInTheDocument();
  fireEvent.click(button);expect(onNavigatePage).toHaveBeenCalledWith(5);
 });
 it('shows saved notes first and opens the manual editor only when requested',async()=>{
