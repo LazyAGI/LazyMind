@@ -78,6 +78,10 @@ func TestPanelURLScopeOnMCPWire(t *testing.T) {
 				if err != nil || result.IsError {
 					t.Fatalf("%s: %v %+v", call.name, err, result)
 				}
+				encodedResult, _ := json.Marshal(result.StructuredContent)
+				if !strings.Contains(string(encodedResult), "https://panel.example/workflow-runs/run-1") {
+					t.Fatalf("%s missing browser fallback: %s", call.name, encodedResult)
+				}
 				for _, channel := range []any{result.Content, result.StructuredContent} {
 					encoded, _ := json.Marshal(channel)
 					text := string(encoded)

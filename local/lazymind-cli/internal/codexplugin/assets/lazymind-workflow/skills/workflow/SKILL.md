@@ -31,3 +31,5 @@ artifacts when the state confirms completion.
 For user-requested changes to completed artifacts, use workflow.edit.context and
 workflow.edit.commit. For an artifact_edit notification, use workflow.action.get
 and workflow.action.respond and follow the returned preview/confirmation state.
+
+If the embedded panel cannot render or the user reports it missing, read workflow.state and present its web_url as a clickable link for browser review and export. Use only the returned URL.
