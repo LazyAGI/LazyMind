@@ -29,7 +29,7 @@ def _smoke_package():
     from lazymind.chat.workflow.external_tools import package_tree_hash
 
     root = Path(__file__).resolve().parents[3] / 'workflows/test-workflow'
-    files = {str(path.relative_to(root)): path.read_bytes() for path in root.rglob('*')
+    files = {path.relative_to(root).as_posix(): path.read_bytes() for path in root.rglob('*')
              if path.is_file() and '__pycache__' not in path.parts}
     tree_hash = package_tree_hash(files)
     return root, {'tree_hash': tree_hash, 'files': {
