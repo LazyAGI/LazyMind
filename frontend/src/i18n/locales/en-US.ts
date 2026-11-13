@@ -1044,6 +1044,7 @@ const enUS = {
       "addAndCheckKey": "Save key",
       "deleteKey": "Delete API key",
       "deleteKeyNumber": "Delete key {{number}}",
+      "deleteKeyModelsHint": "This cannot be undone. All configured models and their default selections for this supplier will also be removed, even if other keys remain. If this is the enabled key, enable another saved key manually afterward.",
       "deleteKeyHint": "This cannot be undone. If this is the enabled key, enable another saved key manually afterward.",
       "keyAdded": "Key added",
       "keyRemoved": "Key deleted",

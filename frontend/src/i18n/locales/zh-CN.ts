@@ -1041,6 +1041,7 @@ const zhCN = {
       "addAndCheckKey": "保存秘钥",
       "deleteKey": "删除 API秘钥",
       "deleteKeyNumber": "删除秘钥 {{number}}",
+      "deleteKeyModelsHint": "删除后无法恢复，并会移除此供应商当前已配置的全部模型及相关默认模型选择，即使仍有其他秘钥。删除当前启用项后，需手动启用其他秘钥。",
       "deleteKeyHint": "删除后无法恢复；删除当前启用项后，需手动启用其他秘钥。",
       "keyAdded": "秘钥已添加",
       "keyRemoved": "秘钥已删除",
