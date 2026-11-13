@@ -570,76 +570,53 @@ func ListTasks(w http.ResponseWriter, r *http.Request) {
 		query = query.Where("document_pid = ?", documentPID)
 	}
 
-	// task_state doubles as a UI-level filter when set to "running", "success", or "failed".
-	// These UI values are expanded into sets of internal lazyllm status strings so that
-	// filtering happens at the database level and pagination counts are accurate.
+	// Filter before pagination, combining optional RAG state with locally tracked tasks.
 	if uiStatus := strings.ToLower(strings.TrimSpace(q.Get("task_state"))); uiStatus != "" {
-		internalStates := uiTaskStatusToInternalStates(uiStatus)
-		if len(internalStates) > 0 {
+		if internalStates := uiTaskStatusToInternalStates(uiStatus); len(internalStates) > 0 {
 			var lazyllmTaskIDs []string
-			store.LazyLLMDB().WithContext(r.Context()).
-				Table((readonlyorm.LazyLLMDocServiceTaskRow{}).TableName()).
-				Select("task_id").
-				Where("kb_id = ? AND status IN ?", datasetID, internalStates).
-				Pluck("task_id", &lazyllmTaskIDs)
+			externalDB := store.LazyLLMDB().WithContext(r.Context())
+			if externalDB.Migrator().HasTable(&readonlyorm.LazyLLMDocServiceTaskRow{}) {
+				if err := externalDB.Table((readonlyorm.LazyLLMDocServiceTaskRow{}).TableName()).
+					Where("kb_id = ? AND status IN ?", datasetID, internalStates).
+					Pluck("task_id", &lazyllmTaskIDs).Error; err != nil {
+					common.ReplyErr(w, "query external task states failed", http.StatusInternalServerError)
+					return
+				}
+			}
 			if uiStatus == "running" {
-				// Deleted sources retain task history, but no longer represent active uploads.
-				// Require an explicit tombstone so unbound/new uploads remain visible.
+				// Deleted sources retain history but no longer represent active uploads.
 				query = query.Where(`NOT EXISTS (
 					SELECT 1 FROM documents
 					WHERE documents.id = tasks.doc_id AND documents.dataset_id = tasks.dataset_id
 					AND documents.deleted_at IS NOT NULL
 				)`)
-				// Tasks that have not yet been submitted to lazyllm have no lazyllm_task_id.
-				// Their state lives in ext and they are implicitly "running" only when their
-				// ext.task_state is a non-terminal value (CREATING / UPLOADING / UPLOADED / "").
-				// We must NOT include tasks whose ext.task_state is already SUCCEEDED/FAILED/etc.
-				// because those are historical completed tasks that happen to lack a lazyllm_task_id.
-				var noLazyllmIDs []string
-				{
-					var noLazyllmRows []orm.Task
-					noLazyllmQ := db.Where("dataset_id = ? AND deleted_at IS NULL AND lazyllm_task_id = ''", datasetID)
-					if taskType := strings.TrimSpace(q.Get("task_type")); taskType != "" {
-						noLazyllmQ = noLazyllmQ.Where("task_type = ?", taskType)
-					}
-					if documentID := strings.TrimSpace(q.Get("document_id")); documentID != "" {
-						noLazyllmQ = noLazyllmQ.Where("doc_id = ?", documentID)
-					}
-					if documentPID := strings.TrimSpace(q.Get("document_pid")); documentPID != "" {
-						noLazyllmQ = noLazyllmQ.Where("document_pid = ?", documentPID)
-					}
-					_ = noLazyllmQ.Select("id, ext").Find(&noLazyllmRows).Error
-					for _, row := range noLazyllmRows {
-						var ext taskExt
-						_ = json.Unmarshal(row.Ext, &ext)
-						s := strings.ToUpper(strings.TrimSpace(ext.TaskState))
-						if s == "" || s == string(TaskStateCreating) || s == string(TaskStateUploading) || s == string(TaskStateUploaded) {
-							noLazyllmIDs = append(noLazyllmIDs, row.ID)
-						}
-					}
-				}
-				if len(lazyllmTaskIDs) > 0 && len(noLazyllmIDs) > 0 {
-					query = query.Where("lazyllm_task_id IN ? OR id IN ?", lazyllmTaskIDs, noLazyllmIDs)
-				} else if len(lazyllmTaskIDs) > 0 {
-					query = query.Where("lazyllm_task_id IN ?", lazyllmTaskIDs)
-				} else if len(noLazyllmIDs) > 0 {
-					query = query.Where("id IN ?", noLazyllmIDs)
-				} else {
-					common.ReplyJSON(w, ListTasksResponse{Tasks: []TaskResponse{}, TotalSize: 0, NextPageToken: ""})
-					return
-				}
-			} else {
-				if len(lazyllmTaskIDs) == 0 {
-					common.ReplyJSON(w, ListTasksResponse{Tasks: []TaskResponse{}, TotalSize: 0, NextPageToken: ""})
-					return
-				}
-				query = query.Where("lazyllm_task_id IN ?", lazyllmTaskIDs)
 			}
+			var localRows []orm.Task
+			if err := query.Session(&gorm.Session{}).Where("lazyllm_task_id = ''").Select("id, ext").Find(&localRows).Error; err != nil {
+				common.ReplyErr(w, "query local task states failed", http.StatusInternalServerError)
+				return
+			}
+			var localIDs []string
+			for _, row := range localRows {
+				var ext taskExt
+				_ = json.Unmarshal(row.Ext, &ext)
+				state := strings.TrimSpace(ext.TaskState)
+				if state == "" {
+					state = string(TaskStateCreating)
+				}
+				if taskStateMatchesFilter(state, uiStatus) {
+					localIDs = append(localIDs, row.ID)
+				}
+			}
+			query = query.Where("lazyllm_task_id IN ? OR id IN ?", lazyllmTaskIDs, localIDs)
 		}
 	}
 
 	var total int64
-	_ = query.Model(&orm.Task{}).Count(&total).Error
+	if err := query.Model(&orm.Task{}).Count(&total).Error; err != nil {
+		common.ReplyErr(w, "count tasks failed", http.StatusInternalServerError)
+		return
+	}
 	var rows []orm.Task
 	if err := query.Order("created_at DESC").Offset(offset).Limit(pageSize).Find(&rows).Error; err != nil {
 		common.ReplyErr(w, fmt.Sprintf("%s: %v", "query tasks failed", err), http.StatusInternalServerError)

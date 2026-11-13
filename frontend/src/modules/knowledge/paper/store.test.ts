@@ -30,3 +30,10 @@ describe('restored bibliography write contract', () => {
   expect(paper.metadata.identifiers.pmid).toBe('77');
  });
 });
+
+it('updates note content through the scoped PATCH endpoint without sending its anchor', async()=>{
+ const {updateLibraryNote}=await import('./store');
+ const data=libraryFixture({papers:[paperFixture()]});request.mockResolvedValue({data:{data}});
+ expect(await updateLibraryNote('library','paper/1','note/1','Revised')).toEqual({data});
+ expect(request).toHaveBeenLastCalledWith(expect.objectContaining({method:'patch',url:'/api/core/academic/library/papers/paper%2F1/notes/note%2F1',params:{target_dataset_id:'library'},data:{content:'Revised'}}));
+});

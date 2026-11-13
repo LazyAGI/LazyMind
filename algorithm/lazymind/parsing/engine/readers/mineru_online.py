@@ -9,6 +9,7 @@ and retry only the request that failed.
 import hashlib
 import io
 import json
+import ntpath
 import os
 import re
 import tempfile
@@ -204,8 +205,18 @@ class LazyMindMineruPDFReader(_MineruPDFReader):
 
     @staticmethod
     def _archive_cache_path(file_path: str, source_digest: str, model_version: str) -> Path:
-        return (Path(file_path).parent / '.lazymind-artifacts' / 'mineru-cache-v1'
+        path = (Path(file_path).parent / '.lazymind-artifacts' / 'mineru-cache-v1'
                 / f'{source_digest}-{model_version}.zip')
+        if os.name == 'nt':
+            # The shared sidecar exceeds MAX_PATH even for ordinary desktop
+            # uploads. Use Win32's extended namespace without relocating it:
+            # Go and Python must still lock and publish the same cache file.
+            absolute = ntpath.abspath(str(path))
+            if not absolute.startswith('\\\\?\\'):
+                absolute = ('\\\\?\\UNC\\' + absolute[2:] if absolute.startswith('\\\\')
+                            else '\\\\?\\' + absolute)
+            return Path(absolute)
+        return path
 
     def _batch_lock_path(self, file_path: str, source_digest: str, model_version: str) -> Path:
         # Go uses flock on this exact persistent sidecar; never unlink a lock file.

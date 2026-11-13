@@ -175,7 +175,7 @@ func (h paperReadingHandler) read(r *http.Request, request paperReadingRequest) 
 		raw, err = h.model.generate(ctx, string(content), instruction, config)
 	}
 	if err != nil {
-		return nil, "", formulaExplanationFailure{502, "The selected model could not complete this reading request. Check the model connection and retry."}
+		return nil, "", err
 	}
 	result, err := validate(raw)
 	if err != nil {
@@ -223,6 +223,11 @@ func savePaperReading(dir, path string, result any) error {
 }
 
 func replyReadingServiceError(w http.ResponseWriter, err error) {
+	var taskError *algo.StructuredTaskError
+	if errors.Is(err, context.DeadlineExceeded) || (errors.As(err, &taskError) && taskError.Code == "request_timeout") {
+		formulaExplanationError(w, 504, "The reading model did not finish within 2 minutes. Retry or choose another study model.")
+		return
+	}
 	var failure formulaExplanationFailure
 	if errors.As(err, &failure) {
 		formulaExplanationError(w, failure.status, failure.message)

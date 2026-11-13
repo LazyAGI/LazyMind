@@ -4,6 +4,7 @@ import { enUSErrorMessages } from "./error-codes";
 
 const enUS = {
   pdfReader: {
+  "timeout": "The reading model did not finish within 2 minutes. Retry or choose another study model.",
   "displaySettings": "Display & parsing",
   "sourceChanged": "The source PDF changed. Reload the original PDF before generating an explanation.",
   "reading": "Paper",
@@ -22,7 +23,7 @@ const enUS = {
   "retry": "Retry",
   "regenerate": "Regenerate",
   "cancel": "Cancel",
-  "error": "Could not load this explanation. Check the model configuration and retry.",
+  "error": "Could not load this explanation. Retry or choose another study model.",
   "noStage": "The available source does not support a reliable summary of this stage.",
   "sourcePage": "Source · p. {{page}}",
   "formula": "Formula",
@@ -186,7 +187,7 @@ const enUS = {
     "cancel": "Cancel",
     "regenerate": "Regenerate",
     "explainRetry": "Retry explanation",
-    "explainError": "Could not explain this formula. Check the model configuration and retry.",
+    "explainError": "Could not explain this formula. Retry or choose another study model.",
     "explainCancelled": "Cancelled. You can start again.",
     "summary": "What this formula does",
     "generalMath": "General math meaning",

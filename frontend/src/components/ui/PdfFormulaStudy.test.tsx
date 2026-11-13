@@ -271,3 +271,18 @@ it('invalidates a mounted formula and aborts its request on session change',asyn
  expect(hook.result.current.data).toBeUndefined();
  hook.unmount();identity.mockRestore();
 });
+
+it('localizes formula timeouts and preserves a previous explanation',async()=>{
+ await act(async()=>{await i18n.changeLanguage('zh-CN');});
+ try{
+  mocks.post.mockReset().mockResolvedValueOnce({data:{data:explanation}});
+  const {result}=renderHook(()=>useFormulaExplanation({dataset:'d',document:'doc'},'timeout-formula','f',true));
+  await waitFor(()=>expect(result.current.status).toBe('ready'));
+  mocks.post.mockRejectedValueOnce({response:{status:504,data:{data:{error_code:'request_timeout',error_message:'Reading timed out.'}}}});
+  await act(async()=>{await result.current.load(true);});
+  expect(result.current.error).toContain('2 分钟');
+  expect(result.current.error).toContain('切换研读模型');
+  expect(result.current.error).not.toContain('配置');
+  expect(result.current.data).toEqual(explanation);
+ }finally{await act(async()=>{await i18n.changeLanguage('en-US');});}
+});

@@ -4,6 +4,7 @@ import { zhCNErrorMessages } from "./error-codes";
 
 const zhCN = {
   pdfReader: {
+  "timeout": "研读模型未能在 2 分钟内完成解读。请重试或切换研读模型。",
   "displaySettings": "显示与解析",
   "sourceChanged": "原 PDF 已变化，请重新加载原文后再生成解读。",
   "reading": "论文",
@@ -22,7 +23,7 @@ const zhCN = {
   "retry": "重试",
   "regenerate": "重新生成",
   "cancel": "取消",
-  "error": "暂时无法加载解读，请检查模型配置后重试。",
+  "error": "暂时无法加载解读，请重试或切换研读模型。",
   "noStage": "当前原文不足以可靠概括这一部分。",
   "sourcePage": "原文 · 第 {{page}} 页",
   "formula": "公式",
@@ -186,7 +187,7 @@ const zhCN = {
     "cancel": "取消",
     "regenerate": "重新生成",
     "explainRetry": "重试解释",
-    "explainError": "暂时无法解释此公式，请检查模型配置后重试。",
+    "explainError": "暂时无法解释此公式，请重试或切换研读模型。",
     "explainCancelled": "已取消，可以重新开始。",
     "summary": "这条公式在做什么",
     "generalMath": "通用数学释义",

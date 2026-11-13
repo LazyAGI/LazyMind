@@ -96,7 +96,7 @@ func currentImportDocuments(r *http.Request, db *gorm.DB, items []ImportQueueIte
 			if !ok {
 				continue
 			}
-			status := doc.DocumentProcessingStatus(value.ProcessingLevel, value.ProcessingState)
+			status := doc.DocumentProcessingStatus(value.ObservedProcessingLevel, value.ProcessingState)
 			if status == "not_requested" {
 				status = "ready"
 			}

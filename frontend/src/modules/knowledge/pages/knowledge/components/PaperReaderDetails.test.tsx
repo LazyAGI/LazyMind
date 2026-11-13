@@ -2,11 +2,11 @@ import {act,fireEvent,render,screen,waitFor,cleanup,within} from '@testing-libra
 import {afterEach,beforeEach,expect,it,vi} from 'vitest';
 import PaperReaderDetails from './PaperReaderDetails';
 vi.mock('react-i18next',()=>({useTranslation:()=>({i18n:{language:'en-US'}})}));
-const api=vi.hoisted(()=>({get:vi.fn(),add:vi.fn(),remove:vi.fn()}));
+const api=vi.hoisted(()=>({get:vi.fn(),add:vi.fn(),remove:vi.fn(),edit:vi.fn()}));
 vi.mock('@/components/request',()=>({BASE_URL:'',axiosInstance:{get:api.get}}));
-vi.mock('@/modules/knowledge/paper/store',async()=>{const original=await vi.importActual<any>('@/modules/knowledge/paper/store');return {...original,addLibraryNote:api.add,deleteLibraryNote:api.remove};});
+vi.mock('@/modules/knowledge/paper/store',async()=>{const original=await vi.importActual<any>('@/modules/knowledge/paper/store');return {...original,addLibraryNote:api.add,deleteLibraryNote:api.remove,updateLibraryNote:api.edit};});
 const library=()=>({can_write:true,paper_count:1,pdf_attachment_count:1,active:true,data:{folders:[],papers:[{id:'paper',revision:1,metadata:{title:'Real {paper} & result',authors:['Ada Example'],year:2025,venue:'Test journal',abstract:'A real abstract.',identifiers:{doi:'10.1234/example'}},tags:[],attachmentIds:['a'],noteIds:['n']}],attachments:[{id:'a',paperId:'paper',contentRef:'doc'}],notes:[{id:'n',paperId:'paper',title:'Earlier note',content:'Read the evaluation.',createdAt:'2026-01-01'}]}});
-beforeEach(()=>{api.get.mockReset().mockResolvedValue({data:library()});api.add.mockReset();api.remove.mockReset();vi.spyOn(window,'confirm').mockReturnValue(true);Object.defineProperty(navigator,'clipboard',{configurable:true,value:{writeText:vi.fn().mockResolvedValue(undefined)}});});
+beforeEach(()=>{api.get.mockReset().mockResolvedValue({data:library()});api.add.mockReset();api.remove.mockReset();api.edit.mockReset();vi.spyOn(window,'confirm').mockReturnValue(true);Object.defineProperty(navigator,'clipboard',{configurable:true,value:{writeText:vi.fn().mockResolvedValue(undefined)}});});
 afterEach(cleanup);
 const props={datasetId:'dataset',documentId:'doc',canWrite:true,fileName:'source.pdf'};
 it('reads server metadata without migration and copies escaped BibTeX',async()=>{
@@ -227,4 +227,33 @@ it('shows a saved color even when the note has no usable page and avoids a broke
  const imported=(await screen.findByText('Imported mark without page')).closest('li')!;
  expect(within(imported).getByLabelText('Red')).toBeInTheDocument();
  expect(within(imported).queryByRole('button')).toBeNull();
+});
+
+it('edits a saved note while preserving its anchor and separate new-note draft across tabs and retry',async()=>{
+ const value=library();const source={attachmentId:'a',page:3,quote:'Evidence',color:'yellow',rects:[[.1,.2,.4,.3]]};Object.assign(value.data.notes[0],{source});api.get.mockResolvedValue({data:value});
+ api.edit.mockRejectedValueOnce(new Error('Edit offline')).mockResolvedValueOnce({data:{...value.data,notes:[{...value.data.notes[0],content:'Updated insight'}]}});
+ const navigate=vi.fn();render(<PaperReaderDetails {...props} initialTab="notes" onNavigateNote={navigate} documentVocabulary={<p>Words</p>}/>);
+ await screen.findByText('Read the evaluation.');fireEvent.click(screen.getByText('Write a note'));fireEvent.change(screen.getByRole('textbox',{name:'New note'}),{target:{value:'Separate draft'}});
+ fireEvent.click(screen.getByRole('button',{name:'Edit note'}));fireEvent.change(screen.getByRole('textbox',{name:'Edit note'}),{target:{value:'Updated insight'}});
+ fireEvent.click(screen.getByRole('tab',{name:'Vocabulary'}));fireEvent.click(screen.getByRole('tab',{name:'Notes'}));expect(screen.getByRole('textbox',{name:'Edit note'})).toHaveValue('Updated insight');
+ fireEvent.click(screen.getByRole('button',{name:'Save changes'}));await screen.findByText('Edit offline');expect(screen.getByRole('textbox',{name:'Edit note'})).toHaveValue('Updated insight');
+ fireEvent.click(screen.getByRole('button',{name:'Save changes'}));await waitFor(()=>expect(screen.queryByRole('textbox',{name:'Edit note'})).not.toBeInTheDocument());
+ expect(api.edit).toHaveBeenLastCalledWith('dataset','paper','n','Updated insight');expect(screen.getByRole('textbox',{name:'New note'})).toHaveValue('Separate draft');
+ fireEvent.click(screen.getByRole('button',{name:/Updated insight/}));expect(navigate).toHaveBeenCalledWith(source);
+});
+
+it('preserves legacy quote location when editing and lets cancellation discard only the edit draft',async()=>{
+ const value=library();value.data.notes[0].content='> Evidence (page 4)\n\nMy thought';api.get.mockResolvedValue({data:value});api.edit.mockResolvedValue({data:value.data});
+ render(<PaperReaderDetails {...props} initialTab="notes"/>);await screen.findByText('My thought');
+ fireEvent.click(screen.getByRole('button',{name:'Edit note'}));expect(screen.getByRole('textbox',{name:'Edit note'})).toHaveValue('My thought');
+ fireEvent.change(screen.getByRole('textbox',{name:'Edit note'}),{target:{value:'Discard'}});fireEvent.click(screen.getByRole('button',{name:'Cancel editing'}));expect(api.edit).not.toHaveBeenCalled();
+ fireEvent.click(screen.getByRole('button',{name:'Edit note'}));expect(screen.getByRole('textbox',{name:'Edit note'})).toHaveValue('My thought');fireEvent.change(screen.getByRole('textbox',{name:'Edit note'}),{target:{value:'Revised'}});fireEvent.click(screen.getByRole('button',{name:'Save changes'}));
+ await waitFor(()=>expect(api.edit).toHaveBeenCalledWith('dataset','paper','n','> Evidence (page 4)\n\nRevised'));
+});
+
+it('ignores pending edit completion after switching documents',async()=>{
+ let complete!:(value:any)=>void;api.edit.mockImplementation(()=>new Promise(resolve=>complete=resolve));
+ const view=render(<PaperReaderDetails {...props} initialTab="notes"/>);await screen.findByText('Read the evaluation.');fireEvent.click(screen.getByRole('button',{name:'Edit note'}));fireEvent.change(screen.getByRole('textbox',{name:'Edit note'}),{target:{value:'Old edit'}});fireEvent.click(screen.getByRole('button',{name:'Save changes'}));
+ view.rerender(<PaperReaderDetails {...props} documentId="other" initialTab="notes"/>);await screen.findByText(/not linked to a paper/);
+ await act(async()=>complete({data:library().data}));expect(screen.queryByText('Old edit')).not.toBeInTheDocument();expect(screen.getByText(/not linked to a paper/)).toBeVisible();
 });

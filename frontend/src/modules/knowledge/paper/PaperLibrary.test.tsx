@@ -296,6 +296,16 @@ describe('paper library behavior', () => {
         fireEvent.click(screen.getByRole('button', { name: '关闭通知' }));
         fireEvent.mouseEnter(screen.getByRole('button', { name: 'Folder paper 的更多操作' }));
         fireEvent.click(await screen.findByRole('menuitem', { name: '彻底删除' }));
+        const firstConfirmation = await screen.findByRole('dialog', { name: '彻底删除 1 篇论文？' });
+        const beforeCancel = readLibrary(datasetId);
+        const deleteCalls = vi.mocked(deleteLibraryPapers).mock.calls.length;
+        fireEvent.click(within(firstConfirmation).getByRole('button', { name: /取\s*消|Cancel/ }));
+        await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+        expect(deleteLibraryPapers).toHaveBeenCalledTimes(deleteCalls);
+        expect(readLibrary(datasetId)).toEqual(beforeCancel);
+        expect(screen.getByRole('heading', { name: 'Folder paper' })).toBeInTheDocument();
+        fireEvent.mouseEnter(screen.getByRole('button', { name: 'Folder paper 的更多操作' }));
+        fireEvent.click(await screen.findByRole('menuitem', { name: '彻底删除' }));
         const confirmation = await screen.findByRole('dialog', { name: '彻底删除 1 篇论文？' });
         fireEvent.click(within(confirmation).getByRole('button', { name: /彻底删除/ }));
         await waitFor(() => expect(screen.queryByRole('heading', { name: 'Folder paper' })).not.toBeInTheDocument());
