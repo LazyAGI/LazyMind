@@ -253,6 +253,7 @@ const PdfTemporaryChat = forwardRef<PdfTemporaryChatHandle, PdfTemporaryChatProp
       }).catch(error => {
         setParseError(getLocalizedErrorMessage(error));
         setParseState("failed");
+        setParseAttempt(value => value + 1);
       });
       return;
     }
@@ -468,7 +469,7 @@ const PdfTemporaryChat = forwardRef<PdfTemporaryChatHandle, PdfTemporaryChatProp
           <Alert className="pdf-temporary-chat__parse-status" type="error" showIcon message={t("knowledge.pdfChatParseFailed")} description={parseErrorDescription} action={<Button size="small" loading={retrying} onClick={async () => {
             setRetrying(true);
             try { await retryDocumentParsed(datasetId, documentId); setParseAttempt(value => value + 1); }
-            catch (error) { setParseError(getLocalizedErrorMessage(error)); }
+            catch (error) { setParseError(getLocalizedErrorMessage(error)); setParseAttempt(value => value + 1); }
             finally { setRetrying(false); }
           }}>{t("knowledge.pdfChatRetryParse")}</Button>} />
         ) : null}
@@ -481,7 +482,7 @@ const PdfTemporaryChat = forwardRef<PdfTemporaryChatHandle, PdfTemporaryChatProp
           action={parseState !== "loading" ? <Space><Button size="small" onClick={() => setParseAttempt(value => value + 1)}>{t("knowledge.pdfChatRefreshStatus")}</Button><Button size="small" loading={retrying} onClick={async () => {
             setRetrying(true);
             try { await ensureDocumentParsed(datasetId, documentId); setParseAttempt(value => value + 1); }
-            catch (error) { setParseError(getLocalizedErrorMessage(error)); }
+            catch (error) { setParseError(getLocalizedErrorMessage(error)); setParseAttempt(value => value + 1); }
             finally { setRetrying(false); }
           }}>{i18n.language.startsWith("zh") ? '准备文档' : 'Prepare document'}</Button></Space> : undefined}
         />}

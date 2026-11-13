@@ -5278,8 +5278,33 @@ components:
             required:
                 - task
             type: object
+        CreateTaskOutcome:
+            properties:
+                code:
+                    type: string
+                display_name:
+                    type: string
+                input_index:
+                    type: integer
+                message:
+                    type: string
+                status:
+                    type: string
+                target_pid:
+                    type: string
+                task_ids:
+                    items:
+                        type: string
+                    type: array
+            required:
+                - display_name
+                - input_index
+                - status
+            type: object
         CreateTaskRequest:
             properties:
+                allow_partial:
+                    type: boolean
                 items:
                     items:
                         $ref: '#/components/schemas/CreateTaskItem'
@@ -5308,6 +5333,10 @@ components:
             type: object
         CreateTasksResponse:
             properties:
+                outcomes:
+                    items:
+                        $ref: '#/components/schemas/CreateTaskOutcome'
+                    type: array
                 paper_import_batch_id:
                     type: string
                 tasks:

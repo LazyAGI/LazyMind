@@ -116,6 +116,21 @@ describe("document question context", () => {
     expect(screen.getByText("knowledge.pdfChatParsing")).toBeInTheDocument();
   });
 
+  it("refreshes authoritative failure after a rejected prepare without retrying", async () => {
+    getDocumentParseStatus.mockResolvedValueOnce({ status: "not_requested" })
+      .mockResolvedValueOnce({ status: "failed", error: { code: "EMPTY_DOCUMENT", message: "文档无可读正文，请补充内容后重新上传。" } });
+    ensureDocumentParsed.mockRejectedValueOnce(new Error("Invalid request"));
+    render(<PdfTemporaryChat datasetId="dataset-a" documentId="blank" fileName="blank.txt" onClose={() => {}} />);
+    await screen.findByText("knowledge.pdfChatNotParsed");
+    fireEvent.click(screen.getByRole("button", { name: "Prepare document" }));
+    await screen.findByText("文档无可读正文，请补充内容后重新上传。");
+    expect(screen.getByText("knowledge.pdfChatParseFailed")).toBeInTheDocument();
+    expect(screen.queryByText("knowledge.pdfChatNotParsed")).not.toBeInTheDocument();
+    expect(ensureDocumentParsed).toHaveBeenCalledTimes(1);
+    expect(getDocumentParseStatus).toHaveBeenCalledTimes(2);
+    expect(retryDocumentParsed).not.toHaveBeenCalled();
+  });
+
   it("shows a failed status with its reason without implicitly retrying", async () => {
     getDocumentParseStatus.mockResolvedValueOnce({ status: "failed", error: { message: "Reader could not decode the PDF" } });
     render(<PdfTemporaryChat datasetId="dataset-a" documentId="broken-pdf" fileName="broken.pdf" onClose={() => {}} />);

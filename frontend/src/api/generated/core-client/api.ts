@@ -3812,12 +3812,23 @@ export interface CreateTaskItem {
     'task_id'?: string;
     'upload_file_id'?: string;
 }
+export interface CreateTaskOutcome {
+    'code'?: string;
+    'display_name': string;
+    'input_index': number;
+    'message'?: string;
+    'status': string;
+    'target_pid'?: string;
+    'task_ids'?: Array<string>;
+}
 export interface CreateTaskRequest {
+    'allow_partial'?: boolean;
     'items': Array<CreateTaskItem>;
     'paper_import'?: PaperUploadContext;
     'parent'?: string;
 }
 export interface CreateTasksResponse {
+    'outcomes'?: Array<CreateTaskOutcome>;
     'paper_import_batch_id'?: string;
     'tasks'?: Array<TaskResponse>;
 }

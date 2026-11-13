@@ -56,7 +56,7 @@ describe("storage-only uploads", () => {
     fireEvent.click(screen.getByRole("button", { name: "上传并保存" }));
     await waitFor(() => expect(onOk).toHaveBeenCalled());
     expect(mocks.wait).not.toHaveBeenCalled();
-    expect(mocks.create).toHaveBeenCalledWith("papers", { items: [{ upload_file_id: "upload-1" }] });
+    expect(mocks.create).toHaveBeenCalledWith("papers", { items: [{ upload_file_id: "upload-1" }], allow_partial: true });
     expect(mocks.start).toHaveBeenCalledWith("papers", { task_ids: ["task-1"], start_mode: "DEFAULT" });
   });
 });

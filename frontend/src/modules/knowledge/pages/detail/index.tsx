@@ -127,11 +127,6 @@ const Detail = () => {
   const { t } = useTranslation();
   const { availability: ragAvailability } = useRAGComponent();
   const ragReady = ragAvailability === "ready";
-  const ragUnavailableReason = ragAvailability === "checking"
-    ? "正在检查本地知识库组件状态"
-    : ragAvailability === "error"
-      ? "无法确认本地知识库组件状态，请重试"
-      : "请先安装本地知识库组件，并重启本地服务";
   const knowledgeListRef = useRef<IKnowledgeListRef>(null);
   const createFolderRef = useRef<RenameModalRef>(null);
   const importKnowledgeRef = useRef<IImportKnowledgeModalRef>();
@@ -563,7 +558,7 @@ const Detail = () => {
             onUploadPdf={uploadPaperPdf}
             processingLevel={effectiveProcessingLevel(detail.processing_level)}
             parsers={detail.parsers}
-            canParse={ragReady && documentParsingEnabled !== false}
+            canParse={documentParsingEnabled !== false}
           />
         </div>
       ) : null}
@@ -592,8 +587,6 @@ const Detail = () => {
                 color="primary"
                 variant="outlined"
                 ghost
-                disabled={!ragReady}
-                title={!ragReady ? ragUnavailableReason : undefined}
                 onClick={() => {
                   createFolderRef.current?.onOpen({
                     title: t("knowledge.createFolder"),
@@ -708,7 +701,6 @@ const Detail = () => {
                             )}
                           </>
                         ),
-                        disabled: !ragReady,
                       },
                     ],
                     onClick: ({ key }: { key: string }) => {
@@ -762,7 +754,6 @@ const Detail = () => {
                     {
                       key: "batchMove",
                       label: t("knowledge.batchMove"),
-                      disabled: !ragReady,
                       onClick: () => {
                         knowledgeListRef.current?.openBatchMove?.();
                       },
@@ -770,7 +761,6 @@ const Detail = () => {
                     {
                       key: "batchDelete",
                       label: t("knowledge.batchDelete"),
-                      disabled: !ragReady,
                       onClick: () => {
                         knowledgeListRef.current?.deleteKnowledge();
                       },

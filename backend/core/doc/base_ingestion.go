@@ -77,14 +77,15 @@ func prepareBaseDocument(r *http.Request, datasetID string, task orm.Task) error
 		err = fmt.Errorf("invalid native reader artifact")
 	}
 	if err != nil {
+		failure := classifyNativeParseError(err)
 		db.Model(&orm.DocumentProcessingState{}).Where("dataset_id = ? AND document_id = ? AND revision = ? AND parse_artifact_ref = ''", datasetID, task.DocID, before.Revision).
-			Updates(map[string]any{"parse_status": "failed", "parse_error_message": err.Error(), "updated_at": time.Now().UTC()})
-		return err
+			Updates(map[string]any{"parse_status": "failed", "parse_error_code": failure.code, "parse_error_message": failure.message, "updated_at": time.Now().UTC()})
+		return failure
 	}
 	resultUpdate := db.Model(&orm.DocumentProcessingState{}).Where("dataset_id = ? AND document_id = ? AND revision = ?", datasetID, task.DocID, before.Revision).
 		Updates(map[string]any{
 			"parse_status": "succeeded", "chunk_status": "succeeded", "index_status": "pending",
-			"parse_error_message": "", "chunk_error_message": "", "index_error_message": "",
+			"parse_error_code": "", "parse_error_message": "", "chunk_error_message": "", "index_error_message": "",
 			"source_fingerprint": result.SourceSHA, "parser_version": result.ParserVersion,
 			"chunker_version": result.ChunkerVersion, "parse_fingerprint": result.SourceSHA + ":" + result.ParserVersion,
 			"chunk_fingerprint":  result.SourceSHA + ":" + result.ChunkerVersion,

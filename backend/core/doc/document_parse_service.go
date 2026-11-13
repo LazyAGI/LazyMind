@@ -258,6 +258,12 @@ func (s *DocumentService) EnsureDocumentParsed(r *http.Request, req EnsureDocume
 	}
 	results, startErr := startParseTasksInternalAtLevel(r, req.DatasetID, []string{taskID}, ProcessingLevelParsed)
 	if startErr != nil || len(results) == 0 || results[0].Status != "STARTED" {
+		var nativeFailure *nativeParseError
+		if errors.As(startErr, &nativeFailure) {
+			_ = s.updateParseState(r, req.DatasetID, req.DocumentID, "failed", nativeFailure.code, nativeFailure.message)
+			result := failedDocumentParseResult(&ProcessingDiagnostic{Stage: "parse", Code: nativeFailure.code, Message: nativeFailure.message, TaskID: taskID, Recovery: nativeFailure.message})
+			return result, nativeFailure
+		}
 		message := "submit document Reader parsing failed"
 		if startErr != nil {
 			message = startErr.Error()
