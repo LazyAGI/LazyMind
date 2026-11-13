@@ -54,7 +54,7 @@ func GitHubStarPromptConfigFromEnv() (GitHubStarPromptConfig, error) {
 		}
 	}
 	if int64(values[1]) > math.MaxInt64/int64(24*time.Hour) {
-		return GitHubStarPromptConfig{}, errors.New("GitHub Star cooldown is out of range")
+		return GitHubStarPromptConfig{}, fmt.Errorf("invalid %s", "LAZYMIND_GITHUB_STAR_COOLDOWN_DAYS")
 	}
 	return GitHubStarPromptConfig{MinSuccessfulTasks: values[0], Cooldown: time.Duration(values[1]) * 24 * time.Hour, MaxPrompts: values[2]}, nil
 }
@@ -228,7 +228,7 @@ func (s GitHubStarPromptService) Claim(ctx context.Context, userID, taskID strin
 
 func (s GitHubStarPromptService) MarkSupported(ctx context.Context, userID string) error {
 	if userID == "" {
-		return errors.New("missing user")
+		return errors.New("missing user id")
 	}
 	now := time.Now().UTC()
 	if s.Now != nil {
@@ -298,7 +298,7 @@ func SupportGitHubStarPrompt(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if body.Supported == nil || !*body.Supported {
-		common.ReplyErr(w, "supported must be true", http.StatusBadRequest)
+		common.ReplyAppErr(w, common.NewAppError(http.StatusBadRequest, common.ErrCodeInvalidParams, "supported must be true"))
 		return
 	}
 	if err := (GitHubStarPromptService{DB: store.DB()}).MarkSupported(r.Context(), owner); err != nil {
