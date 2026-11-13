@@ -875,6 +875,7 @@ const NewChatPage = () => {
                     chatConfig={chatConfig}
                     setChatConfig={setChatConfig}
                     disabled={isWelcomeInputDisabled}
+                    disabledLoading={entryDefaultsLoading || (!entryDefaultsUnavailable && isShowcaseCapabilityPreparing)}
                     embeddingReady={modelProviderGuard.embeddingReady}
                     vlmReady={modelProviderGuard.vlmReady}
                     multimodalEmbeddingReady={modelProviderGuard.multimodalEmbeddingReady}

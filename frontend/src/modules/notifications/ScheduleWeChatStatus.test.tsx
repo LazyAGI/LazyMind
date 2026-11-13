@@ -158,7 +158,7 @@ it.each([
   await flush();
   expect(container.querySelector('.notification-wechat-status')).not.toBeInTheDocument();
   expect(screen.getByRole('switch', { name: 'notifications.' + (gate === 'master' ? 'global' : 'wechat') })).not.toBeChecked();
-  expect(container.querySelector('.notification-settings .is-wechat .notification-status')).toHaveTextContent('notifications.off');
+  expect(container.querySelector('.notification-settings .is-wechat .notification-status')).toHaveTextContent('notifications.connected');
   await tick(WECHAT_CONNECTION_CHECK_INTERVAL_MS);
   expect(mocks.targets.mock.calls.filter(call => call[3]?.checkConnection)).toHaveLength(before);
   expect(mocks.put).not.toHaveBeenCalled(); expect(mocks.patch).not.toHaveBeenCalled();

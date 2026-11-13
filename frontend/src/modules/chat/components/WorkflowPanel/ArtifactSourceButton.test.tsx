@@ -16,7 +16,7 @@ it.each([
 ])('shows %s literally in a read-only source view', async (_, value) => {
   render(<ArtifactSourceButton value={value} />);
   fireEvent.click(screen.getByRole('button', { name: '展示源码' }));
-  const source = await screen.findByRole('textbox', { name: '源码' });
+  const source = await screen.findByRole('textbox', { name: '查看源码' });
   expect(source).toHaveValue(typeof value === 'string' ? value : JSON.stringify(value, null, 2));
   expect(source).toHaveAttribute('readonly');
   expect(document.querySelector('script')).toBeNull();
@@ -29,14 +29,14 @@ it('updates an open source view when the displayed data changes', async () => {
   const { rerender } = render(<ArtifactSourceButton value={{ revision: 1 }} />);
   fireEvent.click(screen.getByRole('button', { name: '展示源码' }));
   rerender(<ArtifactSourceButton value={{ revision: 2 }} />);
-  expect(await screen.findByRole('textbox', { name: '源码' })).toHaveValue('{\n  "revision": 2\n}');
+  expect(await screen.findByRole('textbox', { name: '查看源码' })).toHaveValue('{\n  "revision": 2\n}');
 });
 
 it('explains binary file records instead of presenting them as file contents', async () => {
   render(<ArtifactSourceButton value={{ path: 'image.png' }} fileRecord />);
   fireEvent.click(screen.getByRole('button', { name: '展示源码' }));
   expect(await screen.findByText('以下展示文件的原始数据记录，不包含二进制内容。')).toBeInTheDocument();
-  expect(screen.getByRole('textbox', { name: '源码' })).toHaveValue('{\n  "path": "image.png"\n}');
+  expect(screen.getByRole('textbox', { name: '查看源码' })).toHaveValue('{\n  "path": "image.png"\n}');
 });
 
 it('loads text files on demand and offers retry after a failure', async () => {
@@ -48,7 +48,7 @@ it('loads text files on demand and offers retry after a failure', async () => {
   fireEvent.click(screen.getByRole('button', { name: '展示源码' }));
   expect(await screen.findByRole('alert')).toBeInTheDocument();
   fireEvent.click(screen.getByRole('button', { name: /重\s*试/ }));
-  expect(await screen.findByRole('textbox', { name: '源码' })).toHaveValue('name,count\nexample,7\n');
+  expect(await screen.findByRole('textbox', { name: '查看源码' })).toHaveValue('name,count\nexample,7\n');
 });
 
 it('ignores an old file response after the displayed source changes', async () => {
@@ -59,8 +59,8 @@ it('ignores an old file response after the displayed source changes', async () =
   const { rerender } = render(<ArtifactSourceButton value={null} sourceUrl='/old.txt' />);
   fireEvent.click(screen.getByRole('button', { name: '展示源码' }));
   rerender(<ArtifactSourceButton value={null} sourceUrl='/new.txt' />);
-  expect(await screen.findByRole('textbox', { name: '源码' })).toHaveValue('new file');
+  expect(await screen.findByRole('textbox', { name: '查看源码' })).toHaveValue('new file');
   expect(fetcher.mock.calls[0][1].signal.aborted).toBe(true);
   finishOld({ ok: true, text: async () => 'old file' });
-  await waitFor(() => expect(screen.getByRole('textbox', { name: '源码' })).toHaveValue('new file'));
+  await waitFor(() => expect(screen.getByRole('textbox', { name: '查看源码' })).toHaveValue('new file'));
 });

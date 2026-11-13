@@ -137,6 +137,8 @@ type PostStepCheck struct {
 	StepID    string            `json:"step_id" yaml:"step_id"`
 	Tool      string            `json:"tool" yaml:"tool"`
 	Arguments map[string]string `json:"arguments,omitempty" yaml:"arguments,omitempty"`
+	// ArtifactsArgument receives only this attempt's published artifacts, including list entries.
+	ArtifactsArgument string `json:"artifacts_argument,omitempty" yaml:"artifacts_argument,omitempty"`
 }
 
 // AttachmentClarification permits one supplemental startup card after reading

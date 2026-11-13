@@ -30712,15 +30712,16 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
         },
         /**
          *
-         * @summary Summarize task categories with four previews per page
+         * @summary Summarize task categories with paginated previews
          * @param {string} [taskType]
          * @param {string} [keyword]
          * @param {ApiCoreTaskCenterWorkbenchGetCategoryEnum} [category]
          * @param {number} [page]
+         * @param {number} [pageSize]
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        apiCoreTaskCenterWorkbenchGet: async (taskType?: string, keyword?: string, category?: ApiCoreTaskCenterWorkbenchGetCategoryEnum, page?: number, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+        apiCoreTaskCenterWorkbenchGet: async (taskType?: string, keyword?: string, category?: ApiCoreTaskCenterWorkbenchGetCategoryEnum, page?: number, pageSize?: number, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
             const localVarPath = `/api/core/task-center/workbench`;
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
@@ -30747,6 +30748,10 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
 
             if (page !== undefined) {
                 localVarQueryParameter['page'] = page;
+            }
+
+            if (pageSize !== undefined) {
+                localVarQueryParameter['page_size'] = pageSize;
             }
 
             localVarHeaderParameter['Accept'] = 'application/json';
@@ -39337,16 +39342,17 @@ export const DefaultApiFp = function(configuration?: Configuration) {
         },
         /**
          *
-         * @summary Summarize task categories with four previews per page
+         * @summary Summarize task categories with paginated previews
          * @param {string} [taskType]
          * @param {string} [keyword]
          * @param {ApiCoreTaskCenterWorkbenchGetCategoryEnum} [category]
          * @param {number} [page]
+         * @param {number} [pageSize]
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        async apiCoreTaskCenterWorkbenchGet(taskType?: string, keyword?: string, category?: ApiCoreTaskCenterWorkbenchGetCategoryEnum, page?: number, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<TaskCenterWorkbenchResponse>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreTaskCenterWorkbenchGet(taskType, keyword, category, page, options);
+        async apiCoreTaskCenterWorkbenchGet(taskType?: string, keyword?: string, category?: ApiCoreTaskCenterWorkbenchGetCategoryEnum, page?: number, pageSize?: number, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<TaskCenterWorkbenchResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreTaskCenterWorkbenchGet(taskType, keyword, category, page, pageSize, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreTaskCenterWorkbenchGet']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
@@ -44125,13 +44131,13 @@ export const DefaultApiFactory = function (configuration?: Configuration, basePa
         },
         /**
          *
-         * @summary Summarize task categories with four previews per page
+         * @summary Summarize task categories with paginated previews
          * @param {DefaultApiApiCoreTaskCenterWorkbenchGetRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
         apiCoreTaskCenterWorkbenchGet(requestParameters: DefaultApiApiCoreTaskCenterWorkbenchGetRequest = {}, options?: RawAxiosRequestConfig): AxiosPromise<TaskCenterWorkbenchResponse> {
-            return localVarFp.apiCoreTaskCenterWorkbenchGet(requestParameters.taskType, requestParameters.keyword, requestParameters.category, requestParameters.page, options).then((request) => request(axios, basePath));
+            return localVarFp.apiCoreTaskCenterWorkbenchGet(requestParameters.taskType, requestParameters.keyword, requestParameters.category, requestParameters.page, requestParameters.pageSize, options).then((request) => request(axios, basePath));
         },
         /**
          *
@@ -47249,6 +47255,8 @@ export interface DefaultApiApiCoreTaskCenterWorkbenchGetRequest {
     readonly category?: ApiCoreTaskCenterWorkbenchGetCategoryEnum
 
     readonly page?: number
+
+    readonly pageSize?: number
 }
 
 /**
@@ -51280,13 +51288,13 @@ export class DefaultApi extends BaseAPI {
 
     /**
      *
-     * @summary Summarize task categories with four previews per page
+     * @summary Summarize task categories with paginated previews
      * @param {DefaultApiApiCoreTaskCenterWorkbenchGetRequest} requestParameters Request parameters.
      * @param {*} [options] Override http request option.
      * @throws {RequiredError}
      */
     public apiCoreTaskCenterWorkbenchGet(requestParameters: DefaultApiApiCoreTaskCenterWorkbenchGetRequest = {}, options?: RawAxiosRequestConfig) {
-        return DefaultApiFp(this.configuration).apiCoreTaskCenterWorkbenchGet(requestParameters.taskType, requestParameters.keyword, requestParameters.category, requestParameters.page, options).then((request) => request(this.axios, this.basePath));
+        return DefaultApiFp(this.configuration).apiCoreTaskCenterWorkbenchGet(requestParameters.taskType, requestParameters.keyword, requestParameters.category, requestParameters.page, requestParameters.pageSize, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**

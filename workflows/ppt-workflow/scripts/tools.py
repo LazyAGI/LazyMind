@@ -1793,6 +1793,35 @@ def _required_output_format() -> str:
     return output
 
 
+def check_ppt_delivery(artifacts: list[dict]) -> dict[str, Any]:
+    """Require a published presentation from this attempt in the selected format.
+
+    This deterministic post-step check also covers partial edits: it requires an
+    updated presentation, not regeneration of every page or optional notes.
+    """
+    output_format = _required_output_format()
+    slot = 'native_pptx' if output_format == 'native_pptx' else 'preview_html'
+    for artifact in artifacts:
+        if artifact.get('slot') != slot:
+            continue
+        value = artifact.get('value') or {}
+        if not isinstance(value, dict):
+            continue
+        kind = artifact.get('content_type')
+        if kind == 'file' and str(value.get('path') or '').strip():
+            # The Host has already persisted this file before running the check.
+            if slot == 'native_pptx' or value.get('type') == 'text':
+                return {'status': 'ok', 'output_format': output_format}
+        if slot == 'preview_html' and kind == 'text':
+            text = str(value.get('text') or '')
+            if text.strip() and 'lazymind-ppt-placeholder' not in text:
+                return {'status': 'ok', 'output_format': output_format}
+    raise ToolExecutionError(
+        f'PPT_DELIVERY_MISSING: no {slot} was published by this attempt. '
+        'Generate and publish the requested presentation before completing this step.'
+    )
+
+
 def _require_html_output() -> None:
     if _required_output_format() != 'html':
         raise ToolExecutionError('PPT_OUTPUT_FORMAT_MISMATCH: saved output choice requires native_pptx; '
@@ -5334,6 +5363,7 @@ def _batch_page_html_publish_progressive(
         for pno in page_nos:
             if pno not in ready_ok or pno in published_pages:
                 continue
+            budget._check_cancel()
             if not ready_ok[pno]:
                 _reserve_missing_page_positions(pno, slot_orders)
                 continue
@@ -8373,9 +8403,10 @@ def ppt_generate_pages(
         params = {}  # Standalone legacy generation has no bound follow-up request.
     current = _coerce_str(params.get('current_user_input'))
     launch = _coerce_str(params.get('launch_user_input'))
+    recovering = params.get('retry_existing_outputs') is True
     existing_pages = (_outline_page_numbers(deck) if current and launch and current != launch
                       and (deck / 'outline.json').is_file() else [])
-    if (not pending_insertion and current and launch and current != launch
+    if (not recovering and not pending_insertion and current and launch and current != launch
             and existing_pages and all(_page_html_path(deck, page).is_file() for page in existing_pages)):
         palette = _palette_from_request(current)
         if palette and not re.search(r'第.{0,8}页|page\s*\d', current, re.I):
@@ -8458,37 +8489,44 @@ def ppt_generate_pages(
         'page_count': sync_result.get('page_count'),
     }]
 
-    plan_res = ppt_run_stage(deck_dir_s, stage='asset-plan')
-    if _tool_failed(plan_res):
-        return _tool_error(
-            'ppt_generate_pages',
-            f'asset-plan failed: {_tool_fail_reason(plan_res)}',
-            detail=json.dumps(plan_res, ensure_ascii=False)[:2000],
-            meta={'deck_dir': deck_dir_s},
-        )
-    plan_payload = _tool_payload(plan_res)
-    stages.append({
-        'step': 'asset-plan',
-        'ok': True,
-        'pages': plan_payload.get('pages'),
-        'slots': plan_payload.get('slots'),
-    })
+    pages = _outline_page_numbers(deck) if recovering else []
+    briefs = _load_slide_outline_briefs(pages) if pages else {}
+    if pages and all(_page_checkpoint_matches(deck, page, briefs.get(page)) for page in pages):
+        # Current approved inputs still match. Re-publish under this Attempt
+        # through the cancellable batch path and the same delivery checks.
+        html_payload = _batch_page_html_publish_progressive(deck)
+    else:
+        plan_res = ppt_run_stage(deck_dir_s, stage='asset-plan')
+        if _tool_failed(plan_res):
+            return _tool_error(
+                'ppt_generate_pages',
+                f'asset-plan failed: {_tool_fail_reason(plan_res)}',
+                detail=json.dumps(plan_res, ensure_ascii=False)[:2000],
+                meta={'deck_dir': deck_dir_s},
+            )
+        plan_payload = _tool_payload(plan_res)
+        stages.append({
+            'step': 'asset-plan',
+            'ok': True,
+            'pages': plan_payload.get('pages'),
+            'slots': plan_payload.get('slots'),
+        })
 
-    html_res = ppt_run_stage(
-        deck_dir_s, stage='batch-page-html', concurrency=conc,
-    )
-    if _tool_failed(html_res):
-        return _tool_error(
-            'ppt_generate_pages',
-            f'batch-page-html failed: {_tool_fail_reason(html_res)}',
-            detail=json.dumps({
-                'deck_dir': deck_dir_s,
-                'stages': stages,
-                'failed': html_res,
-            }, ensure_ascii=False)[:2500],
-            meta={'deck_dir': deck_dir_s},
+        html_res = ppt_run_stage(
+            deck_dir_s, stage='batch-page-html', concurrency=conc,
         )
-    html_payload = _tool_payload(html_res)
+        if _tool_failed(html_res):
+            return _tool_error(
+                'ppt_generate_pages',
+                f'batch-page-html failed: {_tool_fail_reason(html_res)}',
+                detail=json.dumps({
+                    'deck_dir': deck_dir_s,
+                    'stages': stages,
+                    'failed': html_res,
+                }, ensure_ascii=False)[:2500],
+                meta={'deck_dir': deck_dir_s},
+            )
+        html_payload = _tool_payload(html_res)
     stages.append({
         'step': 'batch-page-html',
         'ok': True,

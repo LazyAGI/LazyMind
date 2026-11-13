@@ -172,3 +172,23 @@ def test_load_model_config_expands_nested_env_vars(monkeypatch, tmp_path):
     # load_model_config returns raw yaml without env expansion
     assert config['embed_main'][0]['url'] == '${EMBED_URL:-http://localhost:8080}'
     assert config['embed_main'][0]['name'] == '${EMBED_MODEL:-default-model}'
+
+
+def test_dynamic_embedding_requires_provider_source(monkeypatch, tmp_path):
+    import lazyllm
+    from lazymind.model_config import inject_model_config, is_model_role_available
+
+    path = write_config(tmp_path, 'embed_main: {source: dynamic, type: embed}')
+    monkeypatch.setenv('LAZYMIND_MODEL_CONFIG_PATH', str(path))
+    lazyllm.init_session()
+    try:
+        for role_config, expected in [
+            ({'model': 'embedding'}, False),
+            ({'model': 'embedding', 'base_url': 'https://example.test/v1'}, False),
+            ({'source': ' ', 'model': 'embedding'}, False),
+            ({'source': 'openai', 'model': 'embedding'}, True),
+        ]:
+            inject_model_config({'embed_main': role_config})
+            assert is_model_role_available('embed_main') is expected
+    finally:
+        lazyllm.globals.clear()

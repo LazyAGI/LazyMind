@@ -47,6 +47,18 @@ it('shows independent reviews with expansions and filters without changing the r
     expect(onExpansion).toHaveBeenCalledWith('source');
 });
 
+it('updates a review from unavailable status to confirmed idle without marking it completed', () => {
+    mount(<ResearchRecords expansions={[]} reviews={[review]} open loading={false} error={false} statusLabel={() => '已完成'} onExpansion={vi.fn()} onReview={vi.fn()} />);
+    const row = screen.getByRole('button', { name: '查看综述记录: 工具学习综述' });
+    expect(row).toHaveTextContent(zhCN.chat.conversationStatusUnavailable);
+    act(() => useConversationRunningStore.setState({ entries: {
+        [review.conversation_id]: { status: 'idle', confirmedAt: Date.now() },
+    } }));
+    expect(row).toHaveTextContent(zhCN.paperTasks.flowStatus.waiting);
+    expect(row).not.toHaveTextContent(zhCN.chat.conversationStatusUnavailable);
+    expect(row).not.toHaveTextContent(zhCN.chat.conversationCompleted);
+});
+
 it('keeps the frozen list separate from current source counts and opens its source or conversation', async () => {
     const onSource = vi.fn(), onChat = vi.fn();
     useConversationRunningStore.setState({ entries: { [review.conversation_id]: { status: 'running', confirmedAt: Date.now() } } });

@@ -32,6 +32,15 @@
     &:focus-visible { outline: 2px solid #3174ff; outline-offset: 2px; }
   }
 }
+.message-artifact-preview {
+  width: 100%;
+  min-width: 0;
+  margin-top: 12px;
+  border: 1px solid #e6ebf5;
+  border-radius: 10px;
+  overflow: hidden;
+  > .artifact-preview:not(.artifact-preview--inline-html) { height: clamp(320px, 60vh, 640px); }
+}
 .artifact-preview {
   display: flex;
   flex-direction: column;
@@ -41,12 +50,18 @@
   &__header {
     display: flex; align-items: center; gap: 4px;
     padding: 10px 12px; border-bottom: 1px solid #e6ebf5; flex-shrink: 0;
-    strong { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; }
+    strong { flex: 1; min-width: 0; max-width: 320px; margin-right: auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; }
+    > button { flex-shrink: 0; }
   }
   &__body { flex: 1; min-height: 0; overflow: auto; overscroll-behavior: contain; padding: 16px; }
   &__state { min-height: 180px; height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; text-align: center; color: #64748b; overflow-wrap: anywhere; }
   &__text { white-space: pre-wrap; overflow-wrap: anywhere; margin: 0; }
   .file-viewer-container { height: 100%; }
+  &--inline-html {
+    height: auto;
+    .artifact-preview__body { padding: 0; }
+    .md-html-block { margin: 0; border: 0; border-radius: 0; box-shadow: none; }
+  }
 }
 .artifact-preview-modal {
   top: 5vh;
