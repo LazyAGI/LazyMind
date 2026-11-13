@@ -2213,5 +2213,13 @@
   "2005628": {"en-US": "PPT page could not be saved as HTML within 16 MiB", "zh-CN": "无法将 PPT 页面保存为不超过 16 MiB 的 HTML"},
   "2005629": {"en-US": "A requested page has no saved output", "zh-CN": "所请求的页面没有已保存的输出"},
   "2005630": {"en-US": "Saved page count does not match the approved page plan", "zh-CN": "已保存的页面数量与已确认的页面计划不一致"},
-  "2005631": {"en-US": "A selected material image is not bound to any page prompt", "zh-CN": "选中的素材图片未绑定到任何页面提示词"}
+  "2005631": {"en-US": "A selected material image is not bound to any page prompt", "zh-CN": "选中的素材图片未绑定到任何页面提示词"},
+  "2003180": {"en-US": "Node.js dependency status is only available in the local runtime", "zh-CN": "仅本地运行模式支持查询 Node.js 依赖状态"},
+  "2003181": {"en-US": "Node.js installation is only available in the local runtime", "zh-CN": "仅本地运行模式支持安装 Node.js"},
+  "2003182": {"en-US": "Automatic Node.js installation is unavailable. Check your platform and custom Node.js path", "zh-CN": "无法自动安装 Node.js，请检查当前平台和自定义 Node.js 路径"},
+  "2003183": {"en-US": "Node.js installation could not be verified. Please retry", "zh-CN": "Node.js 安装验证失败，请重试"},
+  "2003184": {"en-US": "Node.js download failed. Check your network and retry", "zh-CN": "Node.js 下载失败，请检查网络后重试"},
+  "2003185": {"en-US": "Node.js download integrity check failed. Please download it again", "zh-CN": "Node.js 下载文件完整性校验失败，请重新下载"},
+  "2003186": {"en-US": "The downloaded Node.js could not be verified. Please retry installation", "zh-CN": "下载的 Node.js 验证失败，请重新安装"},
+  "2003187": {"en-US": "The Node.js download is incomplete. Please download it again", "zh-CN": "Node.js 下载内容不完整，请重新下载"}
 }
