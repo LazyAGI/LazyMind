@@ -2,10 +2,10 @@ initial: __start__
 start_route: choice
 transitions:
   __start__:
-    - {to: research_topic, when: "The user explicitly selects research topic development"}
-    - {to: literature_review, when: "The user explicitly selects literature review"}
-    - {to: experiment, when: "The user selects experimental research or analysis requiring data preparation"}
-    - {to: write_outline, when: "The user requests a new manuscript or an outline before drafting"}
+    - {to: research_topic, when: "The user requests topic development, without earlier unfinished literature retrieval"}
+    - {to: literature_review, when: "Literature retrieval or review is the earliest unfinished requested work, including a new paper requiring literature search and analysis of supplied results"}
+    - {to: experiment, when: "Data preparation, experimental research or analysis is the earliest unfinished requested work; requested literature retrieval is already complete or out of scope"}
+    - {to: write_outline, when: "The user requests only an outline, or earlier requested literature retrieval and data analysis are complete or explicitly out of scope"}
     - {to: write_document, when: "The user continues drafting from the confirmed outline"}
     - {to: revise_document, when: "The user requests direct edits to an existing manuscript without peer review"}
     - {to: peer_review, when: "The user explicitly selects peer review"}
@@ -68,6 +68,7 @@ steps:
     tools: [run_paper_step]
     terminal_tools: [run_paper_step]
     inputs:
+      - {material: research_materials, required: false, transport: path}
       - {material: seed_pool, required: false, transport: path}
       - {material: paper_input, required: false, transport: path}
       - {material: manuscript_file, required: false, transport: path}
@@ -98,6 +99,7 @@ steps:
     tools: [run_paper_step]
     terminal_tools: [run_paper_step]
     inputs:
+      - {material: research_materials, required: false, transport: path}
       - {material: seed_pool, required: false, transport: path}
       - {material: paper_input, required: false, transport: path}
       - {material: manuscript_file, required: false, transport: path}
@@ -134,6 +136,7 @@ steps:
     tools: [run_paper_step]
     terminal_tools: [run_paper_step]
     inputs:
+      - {material: research_materials, required: false, transport: path}
       - {material: seed_pool, required: false, transport: path}
       - {material: paper_input, required: false, transport: path}
       - {material: manuscript_file, required: false, transport: path}
@@ -167,6 +170,7 @@ steps:
     tools: [run_paper_step]
     terminal_tools: [run_paper_step]
     inputs:
+      - {material: research_materials, required: false, transport: path}
       - {material: seed_pool, required: false, transport: path}
       - {material: paper_input, required: false, transport: path}
       - {material: manuscript_file, required: false, transport: path}
@@ -258,6 +262,7 @@ steps:
     tools: [run_paper_step]
     terminal_tools: [run_paper_step]
     inputs:
+      - {material: research_materials, required: false, transport: path}
       - {material: seed_pool, required: false, transport: path}
       - {material: paper_input, required: false, transport: path}
       - {material: manuscript_file, required: false, transport: path}

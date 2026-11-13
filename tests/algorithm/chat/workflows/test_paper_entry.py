@@ -194,3 +194,36 @@ def test_image_only_pdf_does_not_silently_review_empty_text(tmp_path):
         writer.write(output)
     with pytest.raises(ValueError, match='提取文字'):
         read_manuscript(str(source))
+
+
+@pytest.mark.usefixtures('paper_simulation')
+def test_bound_research_materials_preserve_measurements_and_retry_sources(tmp_path):
+    from lazymind.document_tools.paper.source_materials import sync_bound_materials
+
+    source = tmp_path / 'notes.md'
+    source.write_text('# Study method\nDescriptive observations, not a controlled experiment.\n\n'
+                      '## Deletion tasks\n| Metric | Completed | Total |\n| --- | ---: | ---: |\n'
+                      '| Task success | 28 | 30 |\n\n'
+                      '## Timing\nThe windows overlap.\n| Window | Time (s) |\n| --- | ---: |\n'
+                      '| End to end | 61.62 |\n| Body | 27.69 |\n')
+    pool = workflow.pool_from_business({'topic': 'Interactive writing'})
+    assert sync_bound_materials(pool, [str(source)], 'Search literature and analyze these observations')
+    papers = workflow.material(pool, 'papers')['content']
+    assert papers[0]['filename'] == 'notes.md'
+    assert papers[0]['review_role'] == 'background'
+    assert 'not a controlled experiment' in papers[0]['text']
+    assert 'windows overlap' in papers[0]['text']
+    tables = workflow.material(pool, 'source_data')['content']['tables']
+    assert [t['table']['rows'] for t in tables] == [
+        [['Task success', 28, 30]], [['End to end', 61.62], ['Body', 27.69]],
+    ]
+    assert all(papers[0]['id'] in table['description'] for table in tables)
+    assert all(not item['mock'] for item in pool['materials'])
+    workflow.validate_pool(pool)
+    # Retry in a different attempt directory must not duplicate or re-extract the source.
+    retry = tmp_path / 'retry' / source.name
+    retry.parent.mkdir()
+    retry.write_bytes(source.read_bytes())
+    before = json.dumps(pool, sort_keys=True)
+    assert not sync_bound_materials(pool, [str(retry)], 'retry')
+    assert json.dumps(pool, sort_keys=True) == before

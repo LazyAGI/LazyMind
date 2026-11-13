@@ -25,20 +25,23 @@ A delivery method such as UI export does not waive an explicit request for a fil
 
 ## Scientific work rules
 
-Follow only the user's requested unfinished research stages. Literature reviews
+Follow only the user's requested unfinished research stages. When a new paper requires literature
+retrieval and analysis of supplied observations, start at literature_review, then experiment, data_analysis,
+write_outline and write_document. A tentative title or Markdown attachment does not skip those stages.
+Raw research attachments belong in research_materials; seed_pool requires a paper-material-pool.v2 JSON pool. Literature reviews
 retain all supplied/frozen papers and use real retrieval; never substitute model
 memory for a missing source. Carry a structured JSON material pool between stages,
 including source identities/versions, facts, methods, data, citations, current
 manuscript and completed work. Preserve unknown prior pool fields and prior facts.
 Publish each *_pool as an actual JSON file, plus the corresponding readable document.
 
-Use the workflow's declared ask_user execution preference before startup. Keep its two fixed
-choices and reuse the answer for this task through experiment_execution and request_context.
+Do not ask a fixed experiment-execution question. Decide from the user's request, supplied
+materials and current environment, honoring an explicit refusal to run code.
 Existing user data may be organized directly. Reference-paper tables are not user measurements.
-An explicit choice to generate code and simulation, or to use simulation when conditions are
-insufficient, permits labeled synthetic previews when no user data exists. Only execute a new
-experiment with explicit user permission; honor bounded CPU, no network/dependency installation/GPU
-and 30-second constraints. Failed computations on real user data report the missing results.
+With no observations, use clearly labeled simulation only when it fits the user's goal; explain
+missing data when actual empirical results are required. New computations must remain within
+bounded CPU, no network/dependency installation/GPU and 30-second constraints.
+Failed computations on real user data report the missing results, never synthetic replacements.
 Label every simulated value and record code, inputs, provenance and actual execution.
 
 Data analysis uses complete real tables, preserves units and produces reproducible
