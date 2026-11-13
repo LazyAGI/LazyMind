@@ -764,10 +764,18 @@ function dshRuntime(ctx, serverName, webUrl) {
 			controller.abort();
 		}
 	}
+	function parent(agent) {
+		const agents = ctx.agents;
+		if (typeof agents.isOwnedBy === "function") return agents.list().find((candidate) => candidate !== agent && agents.isOwnedBy(agent.session.id, candidate));
+		const subagents = ctx.get("subagents");
+		if (typeof subagents?.rootOf !== "function" && agent.session.header.origin === "subagent") throw new Error("DSH subagent runtime ownership is unavailable");
+		const root = subagents?.rootOf?.(agent);
+		return root === agent ? void 0 : root;
+	}
 	return {
 		cancellation: "session",
 		id: (agent) => agent.session.id,
-		parent: (agent) => ctx.agents.list().find((candidate) => candidate !== agent && ctx.agents.isOwnedBy(agent.session.id, candidate)),
+		parent,
 		isLive: (agent) => ctx.agents.get(agent.session.id) === agent,
 		isRunning: (agent) => agent.status === "running",
 		history: (agent) => [...agent.session.ownEvents()].map((event) => ({
