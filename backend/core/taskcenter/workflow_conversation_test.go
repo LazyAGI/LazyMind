@@ -83,7 +83,7 @@ func TestExternalWorkflowConversationDoesNotReviveUserHiddenResults(t *testing.T
 	for _, lifecycle := range []string{"renamed", "archived", "trashed", "purged", "bound-renamed", "bound-archived", "bound-trashed", "bound-purged"} {
 		t.Run(lifecycle, func(t *testing.T) {
 			db := orm.MigrateTestDB(t, &orm.Conversation{}, &orm.TaskCenterTask{}, &orm.WorkflowSession{}, &orm.WorkflowSlotRevision{})
-			now := time.Now().UTC().Add(-time.Hour)
+			now := time.Now().UTC().Add(-time.Hour).Truncate(time.Second).Add(123456789 * time.Nanosecond)
 			session := orm.WorkflowSession{ID: "run", CreateUserID: "owner", OriginHost: "external-agent", ControllerHost: "external-agent",
 				WorkflowID: "ppt", CreatedAt: now, UpdatedAt: now}
 			if strings.HasPrefix(lifecycle, "bound-") {
@@ -141,7 +141,7 @@ func TestExternalWorkflowConversationDoesNotReviveUserHiddenResults(t *testing.T
 				(lifecycle == "trashed" && records[0].DeletedAt == nil) || (lifecycle == "renamed" && records[0].DisplayName != "My title") {
 				t.Fatalf("user presentation changed: %+v", records)
 			}
-			if lifecycle != "renamed" && !records[0].UpdatedAt.Equal(now) {
+			if lifecycle != "renamed" && !records[0].UpdatedAt.Equal(conversation.UpdatedAt) {
 				t.Fatal("hidden result activity was changed")
 			}
 		})

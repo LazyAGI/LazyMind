@@ -198,6 +198,7 @@ def _execute(payload):
         )
         result = manager.execute_prepared(prepared, execution_context=capture_failure).results[0]
     if failures:
+        LOG.error('External tool failed tool=%s stage=execution', config.name)
         raise failures[0]
     if isinstance(result, dict) and (result.get('ok') is False or result.get('isError') is True):
         LOG.error('External tool failed tool=%s stage=execution', config.name)
