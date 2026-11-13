@@ -352,7 +352,7 @@ def test_retry_page_five_first_replaces_placeholders_for_cached_three_and_four(m
 
 
 @pytest.mark.parametrize('problem', ['placeholder', 'legacy_placeholder', 'notes_placeholder',
-                                     'stale', 'wrong_notes', 'missing_file', 'changed_file'])
+                                     'stale', 'empty_notes', 'missing_file', 'changed_file'])
 def test_seven_positions_do_not_prove_seven_real_pages(monkeypatch, tmp_path, tools, problem):
     deck, _model, _saved = prepare_batch(
         monkeypatch, tmp_path, tools, 7, lambda prompt, _control: HTML.replace('Page', f'Page {prompt}'))
@@ -369,8 +369,8 @@ def test_seven_positions_do_not_prove_seven_real_pages(monkeypatch, tmp_path, to
         notes['value']['text'] = '<!-- lazymind-ppt-placeholder --> Missing speaker notes'
     elif problem == 'stale':
         html['validity'] = 'stale'
-    elif problem == 'wrong_notes':
-        notes['value'] = dict(store.selected['preview_notes', 1]['value'])
+    elif problem == 'empty_notes':
+        notes['value']['text'] = '   '
     elif problem == 'missing_file':
         (deck / 'pages/page_003.html').unlink()
     else:
@@ -814,3 +814,12 @@ def test_pause_during_cached_republication_stops_and_can_resume(monkeypatch, tmp
         assert tools.ppt_generate_pages(str(deck))['status'] == 'ok'
     assert len(store.selected) == 8
     assert len(model.calls) == 4
+
+
+def test_existing_notes_do_not_need_source_equality(monkeypatch, tmp_path, tools):
+    deck, _model, _saved = prepare_batch(monkeypatch, tmp_path, tools, 1, lambda *_args: HTML)
+    store = publication_store(monkeypatch, tools)
+    tools._batch_page_html_publish_progressive(deck)
+    store.selected['preview_notes', 0]['value']['text'] = 'A user-edited script with no separate source.'
+    monkeypatch.setattr(tools, '_load_saved_notes', lambda: pytest.fail('no notes source check at delivery'))
+    assert tools.ppt_list_pages(str(deck))['fully_published'] is True
