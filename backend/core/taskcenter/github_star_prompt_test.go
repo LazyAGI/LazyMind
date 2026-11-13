@@ -186,7 +186,7 @@ func TestGitHubStarPromptDuplicateWorkflowAssociationsCountOnce(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := f.db.Model(&orm.TaskCenterTask{}).Where("id IN ?", []string{first.ID, second.ID}).Updates(map[string]any{
-		"plugin_session_id": session.ID, "conversation_id": first.ConversationID,
+		"plugin_session_id": session.ID, "conversation_id": first.ConversationID, // workflow-naming: persistence
 	}).Error; err != nil {
 		t.Fatal(err)
 	}
