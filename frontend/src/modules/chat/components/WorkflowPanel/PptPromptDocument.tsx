@@ -15,7 +15,9 @@ export function splitPptPrompt(text: string): PromptSection[] {
   let current: PromptSection = { title: '', body: '' };
   let fence = '';
   for (const line of text.split('\n')) {
-    if (!fence && line.trim() === '<!-- ppt-page-prompt:v1 -->') continue;
+    const marker = line.trim();
+    if (!fence && (marker === '<!-- ppt-page-prompt:v1 -->'
+      || (marker.startsWith('<!-- ppt-material-images:') && marker.endsWith('-->')))) continue;
     const fenceMatch = line.trim().match(/^(`{3,}|~{3,})/);
     if (fenceMatch) {
       fence = fence ? '' : fenceMatch[1][0];

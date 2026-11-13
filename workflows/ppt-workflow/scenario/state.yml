@@ -236,14 +236,28 @@ steps:
       image-understanding tool. Record what is visible, relevance, legibility and
       limitations. A filename, URL, resolution or generated caption alone is not
       visual inspection. Select only images supported by successful observations.
-      - Publish selected material_images individually, with source and intended page
-      use in material_summary. Keep the returned artifact/asset references; do not
-      fabricate paths or indices. Preserve provenance when files are normalized.
+      - In an external execution, download direct image search results using
+      host tools or workflow.tool.call with tool_name=ppt_download_material_image,
+      arguments.urls and a Connector-local result_directory.
+      If a source is expired, returns 403/404 or serves an HTML page, try another
+      candidate or refresh the search. Inspect the actual file. Publish it with
+      workflow.artifact.publish using output.slot=material_images,
+      output.content_type=image, output.local_path and a stable positive seq.
+      The local file must be readable by the Connector.
+      - Publish only selected images intended for the deck. Record their source
+      URL/document and intended page use in material_summary.
+      For external execution, list acknowledged artifacts with
+      workflow.artifact.list (metadata_only=true) and record the material_images
+      artifact IDs. For LazyMind execution, use ppt_register_material_images.
+      - If a user-required photo is unavailable after trying alternative sources,
+      report the missing photo and the actual download or capability error. Keep
+      acknowledged assets for recovery. Fail the step or ask for a replacement
+      source or permission to omit it through material_clarification.
       - With an uploaded template, retain its artwork and avoid unrelated decorative
       searches. Evidence diagrams/product screenshots are still valid when useful.
       - If inspection is unavailable, skip uninspected optional candidates and disclose
-      the missing requested images. Zero material_images is valid and must not block
-      otherwise sufficient text evidence. Do not fabricate a passed image check.
+      any missing requested images. Zero material_images is valid when no image
+      is required. Do not fabricate a passed image check.
       - Use named icons only as small labels or decoration. Reserve main visuals
       for registered materials, diagrams or data charts.
 
@@ -446,6 +460,15 @@ steps:
       copy and assets together in that editable card. Do not create separate
       presentation_style, page_layout or page_assets artifacts, or embed a positional
       '第N页' header that would require rewriting unchanged cards after insertion.
+      In external HTML execution, include exactly one comment on its own line
+      in each slide_outline, for example <!-- ppt-material-images: ["id"] -->.
+      List the exact source_revision_id of every approved foreground image for
+      the page from bound material_images. Use [] for a page without approved
+      foreground materials. A full plan with selected foreground materials
+      must assign them to their intended pages. Describe placement and purpose
+      under Assets. AI backgrounds bind by sort_order independently. Preserve the comment
+      when editing a card and update it when replacing foreground materials.
+      Report a required missing image and recover collection before generating.
       For a new deck or unfinished planning in LazyMind, call ppt_plan_page_prompts
       with the saved output_format and the shared global_style. It checkpoints each prompt
       and speaker note and resumes from the first missing page after a failure.
@@ -586,7 +609,10 @@ steps:
       the exact error and reuse completed backgrounds on retry.
 
       Publish the final images in approved page order with matching prompt identities.
-      Report exact provider/model/file errors rather than empty success.
+      In external execution, download the provider's image using its signed URL
+      if remote, normalize it locally, and publish each file with
+      output.slot=background_images, output.content_type=image and output.local_path.
+      Report exact provider/model/file errors.
 
       Full runs produce one image per prompt. Targeted regeneration replaces only the
       requested positions; never append, reorder or regenerate untouched pages. A page
@@ -644,6 +670,17 @@ steps:
       - Generate one complete 1600×900 HTML document per page using the supplied
       page-authoring prompt and HTML constraints. Use stable unique data-el IDs,
       a background layer and an editable content layer. Render text as real text.
+      - In external execution, call ppt_prepare_page with the one-based page_no
+        (the approved sort_order) for the pinned brief
+        and pass its model response with the same page_no and a new command_id. Put each approved
+        foreground image in an <img data-ppt-image="ARTIFACT_ID"> in the intended
+        layout with meaningful alt text. Core fills src from the saved bytes.
+        Include a #bg layer for the bound AI background. Use the returned HTML
+        for rendering, export and publication. Keep the markers and embedded
+        assets intact. Publish using output.value_file (content_type=text) or
+        an inline text value. For targeted regeneration use the partial selector
+        or the existing preview list_index in the inline text object. Fix
+        rejected pages and retry with the same seq before completing.
       - Use real inline SVG/evidence diagrams and source-backed charts. Preserve
       requested editable chart semantics; rasterizing a chart does not make it
       editable. Choose distinct, legible scientific chart colors and labels.
@@ -743,6 +780,8 @@ steps:
       - material: background_images
         required: false
       - material: background_prompts
+        required: false
+      - material: generate_background_images
         required: false
       - material: slide_outline
         required: true

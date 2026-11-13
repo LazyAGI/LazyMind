@@ -72,7 +72,12 @@ runtime:
         - name: ppt_inspect_pptx
           source: package
       collect_materials:
+        output_validator: ppt-images-v1
         tools:
+        - name: builtin:web_search
+          source: global
+        - name: ppt_download_material_image
+          source: package
         - name: builtin:multimodal
           source: global
         - name: pdf_read_text
@@ -96,6 +101,7 @@ runtime:
         - name: ppt_compute_timing
           source: package
       plan_page_prompts:
+        output_validator: ppt-images-v1
         skills:
         - runtime/prompts/style_spec.md
         - runtime/references/style_catalog.md
@@ -104,12 +110,14 @@ runtime:
       plan_background_prompts:
         tools: []
       generate_backgrounds:
+        output_validator: ppt-images-v1
         tools:
         - name: image_generator
           source: global
         - name: builtin:multimodal
           source: global
       generate_ppt:
+        output_validator: ppt-images-v1
         skills:
         - runtime/references/html_constraints.md
         - runtime/prompts/style_spec.md
@@ -498,6 +506,8 @@ runtime:
 tool_scripts:
   - path: scripts/external_pdf_tools.py
     functions: [pdf_read_text, pdf_extract_images]
+  - path: scripts/external_image_tools.py
+    functions: [ppt_download_material_image]
   - path: scripts/external_generation_tools.py
     functions: [ppt_prepare_page, ppt_compute_timing, ppt_order_papers]
   - path: scripts/external_tools.py

@@ -72,6 +72,19 @@ def test_complete_prompt_rebinds_removed_attempt_without_reading_it(runtime, dec
     assert len(calls) == 1
 
 
+def test_saved_prompt_binds_registered_basename_and_repairs_missing_image(runtime, deck):
+    bare = 'material_01.png'
+    canonical = '../images/' + bare
+    brief = f'Use the panorama {bare}. Source https://example.org/{bare}'
+    code, _, calls = generate(runtime, deck, brief, [html([]), html([bare])])
+    assert code == 0 and len(calls) == 2
+    assert calls[0] == f'Use the panorama {canonical}. Source https://example.org/{bare}'
+    assert canonical in calls[1]
+    assert f'src="{canonical}"' in (deck / 'pages/page_001.html').read_text()
+    code, result, calls = generate(runtime, deck, f'Use /unregistered/{bare}', [html([bare])])
+    assert code != 0 and not calls and 'Unregistered material image reference' in result['error']
+
+
 def test_retry_with_new_input_paths_and_three_images_preserves_every_material(runtime, deck):
     for attempt in ['old attempt', 'new attempt']:
         sources = [old_input(deck, n, attempt) for n in range(1, 4)]

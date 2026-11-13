@@ -24,6 +24,7 @@ import (
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
 	"lazymind/core/externalcapability"
+	workflowcore "lazymind/core/workflow"
 	"lazymind/core/workflow/controlstore"
 	"lazymind/core/workflow/executor"
 	workflowstore "lazymind/core/workflow/store"
@@ -136,6 +137,13 @@ func (s *Service) List(ctx context.Context, owner, sessionID, attemptID, handle 
 		item := Tool{Name: declared.Name, Source: declared.Source}
 		switch declared.Source {
 		case "package":
+			if declared.Name == downloadPPTImage {
+				item = pptImageDownloadTool()
+				if err := s.validatePPTImageBinding(ctx, contract); err != nil {
+					item.Available, item.Reason = false, err.Error()
+				}
+				break
+			}
 			if adapter, ok := academicTool(declared.Name); ok {
 				item = adapter
 				if err := s.validateAcademicBinding(ctx, contract); err != nil {
@@ -162,6 +170,7 @@ func (s *Service) List(ctx context.Context, owner, sessionID, attemptID, handle 
 			}
 			if tool, ok := packageTools[declared.Name]; ok && packageErr == nil {
 				item.Description, item.InputSchema, item.Available, item.Reason = tool.Description, tool.InputSchema, tool.Available, tool.Reason
+				item = withPPTPageSchema(contract, item)
 			} else {
 				item.Reason = "Package tool is unavailable; check its adapter and dependencies in LazyMind"
 			}
@@ -258,16 +267,16 @@ func (s *Service) Call(ctx context.Context, owner, sessionID, attemptID string, 
 	defer cancelCall()
 	switch source {
 	case "package":
-		if _, ok := academicTool(input.ToolName); ok {
+		if input.ToolName == downloadPPTImage {
+			if err = s.validatePPTImageBinding(callCtx, contract); err == nil {
+				result, err = callPPTImageDownload(callCtx, input.Arguments, workflowcore.DownloadPublicImage)
+			}
+		} else if _, ok := academicTool(input.ToolName); ok {
 			result, err = s.callAcademic(callCtx, owner, contract, input.ToolName, input.Arguments)
 		} else if _, ok := knowledgeTool(input.ToolName); ok {
 			result, err = s.callKnowledge(callCtx, owner, contract, input.ToolName, input.Arguments)
 		} else {
-			var arguments map[string]any
-			arguments, err = s.resolveFileArguments(callCtx, owner, contract, input.ToolName, input.Arguments)
-			if err == nil {
-				err = s.packageRequest(callCtx, contract, "call", input.ToolName, arguments, &result)
-			}
+			result, err = s.callPackage(callCtx, owner, contract, input.ToolName, input.Arguments)
 		}
 	case "global":
 		var call capability.InvocationContext
@@ -310,6 +319,25 @@ func (s *Service) deliver(ctx context.Context, owner, sessionID, attemptID strin
 			return Result{Error: &ToolError{Code: "EXECUTION_FENCED", Message: "Execution authorization changed while the tool ran; its result was not delivered"}}, nil
 		}
 		return Result{}, &ToolError{Code: "TOOL_DELIVERY_UNAVAILABLE", Message: "The tool outcome is saved. Retry the same command to check execution authorization and retrieve it.", Retryable: true}
+	}
+	return result, nil
+}
+
+func (s *Service) callPackage(ctx context.Context, owner string, contract executor.AttemptContext, name string, arguments map[string]any) (Result, error) {
+	var result Result
+	arguments, err := s.resolveFileArguments(ctx, owner, contract, name, arguments)
+	if err != nil {
+		return result, err
+	}
+	arguments, binding, err := s.bindPPTPageArguments(ctx, contract, name, arguments)
+	if err != nil {
+		return result, err
+	}
+	if err := s.packageRequest(ctx, contract, "call", name, arguments, &result); err != nil {
+		return result, err
+	}
+	if err := s.finishPPTPage(ctx, binding, &result); err != nil {
+		return Result{}, err
 	}
 	return result, nil
 }

@@ -20,7 +20,10 @@ type ExecutionPolicy struct {
 	Steps         map[string]StepExecution `json:"steps" yaml:"steps"`
 }
 
-const ExternalModelExecutor = "external-agent"
+const (
+	ExternalModelExecutor    = "external-agent"
+	PPTImagesOutputValidator = "ppt-images-v1"
+)
 
 // UsesExternalModels also accepts the executor value stored by earlier revisions.
 func (policy *ExecutionPolicy) UsesExternalModels() bool {
@@ -28,10 +31,11 @@ func (policy *ExecutionPolicy) UsesExternalModels() bool {
 }
 
 type StepExecution struct {
-	Version     string          `json:"version,omitempty" yaml:"-"`
-	Skills      []string        `json:"skills,omitempty" yaml:"skills,omitempty"`
-	Constraints []string        `json:"constraints,omitempty" yaml:"constraints,omitempty"`
-	Tools       []ExecutionTool `json:"tools,omitempty" yaml:"tools,omitempty"`
+	OutputValidator string          `json:"output_validator,omitempty" yaml:"output_validator,omitempty"`
+	Version         string          `json:"version,omitempty" yaml:"-"`
+	Skills          []string        `json:"skills,omitempty" yaml:"skills,omitempty"`
+	Constraints     []string        `json:"constraints,omitempty" yaml:"constraints,omitempty"`
+	Tools           []ExecutionTool `json:"tools,omitempty" yaml:"tools,omitempty"`
 }
 
 type ExecutionTool struct {
@@ -81,7 +85,7 @@ func (s *StepExecution) UnmarshalYAML(value *yaml.Node) error {
 	}
 	for i := 0; i < len(value.Content); i += 2 {
 		switch value.Content[i].Value {
-		case "skills", "constraints", "tools":
+		case "skills", "constraints", "tools", "output_validator":
 		default:
 			return fmt.Errorf("execution step field %q is unsupported; prompts, outputs and acceptance belong in scenario/state.yml", value.Content[i].Value)
 		}
@@ -116,6 +120,9 @@ func compileExecution(graph *CompiledStateGraph) []Diagnostic {
 		if !exists || strings.TrimSpace(node.Prompt) == "" {
 			invalid(field, "every execution step requires a state.yml prompt and an explicit capability declaration")
 			continue
+		}
+		if step.OutputValidator != "" && step.OutputValidator != PPTImagesOutputValidator {
+			invalid(field+".output_validator", "unknown output validator")
 		}
 		step.Version = policy.Version
 		step.Skills = append(append([]string{}, policy.Skills...), step.Skills...)

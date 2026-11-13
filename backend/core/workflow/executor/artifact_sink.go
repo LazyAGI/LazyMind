@@ -146,6 +146,14 @@ func (sink DBArtifactSink) Save(ctx context.Context, attempt AttemptContext, art
 		return err
 	}
 	controlled := controlstore.Controlled(sessionInfo)
+	validatePPT := attempt.Metadata["executor_host"] == "external-agent" && UsesPPTImageContract(attempt)
+	if validatePPT && (artifact.Slot == "material_images" || artifact.Slot == "background_images") {
+		imageValue, err := normalizePPTImageUpload(artifact.Slot, artifact.Value)
+		if err != nil {
+			return err
+		}
+		artifact.Value = imageValue
+	}
 	value, err := artifactfile.NormalizeImageValue(artifact.ContentType, artifact.Value)
 	if err != nil {
 		return controlstore.Reject("INVALID_ARTIFACT", err.Error())
@@ -198,7 +206,14 @@ func (sink DBArtifactSink) Save(ctx context.Context, attempt AttemptContext, art
 				if err := tx.First(&saved, "id = ?", *existing.HumanArtifactID).Error; err != nil {
 					return err
 				}
-				if saved.ContentType != artifact.ContentType || !bytes.Equal(artifactIdentity(saved.Value, saved.ContentType), artifactIdentity(storedValue, artifact.ContentType)) {
+				replayValue := storedValue
+				if validatePPT {
+					replayValue, err = preparePPTOutput(tx, attempt, artifact.Slot, storedValue, existing.ListIndex)
+					if err != nil {
+						return err
+					}
+				}
+				if saved.ContentType != artifact.ContentType || !bytes.Equal(artifactIdentity(saved.Value, saved.ContentType), artifactIdentity(replayValue, artifact.ContentType)) {
 					return controlstore.Reject("COMMAND_CONFLICT", "artifact sequence was already published with different content")
 				}
 				return nil
@@ -240,6 +255,13 @@ func (sink DBArtifactSink) Save(ctx context.Context, attempt AttemptContext, art
 		if err != nil {
 			return err
 		}
+		preparedValue := storedValue
+		if validatePPT {
+			preparedValue, err = preparePPTOutput(tx, attempt, artifact.Slot, storedValue, listIndex)
+			if err != nil {
+				return err
+			}
+		}
 		revision, err := nextArtifactRevision(tx, attempt.SessionID, artifact.Slot, cardinality, listIndex)
 		if err != nil {
 			return err
@@ -274,7 +296,7 @@ func (sink DBArtifactSink) Save(ctx context.Context, attempt AttemptContext, art
 		}
 		seq := artifact.Seq
 		if err := tx.Create(&orm.WorkflowHumanArtifact{ID: valueID, SessionID: attempt.SessionID,
-			Slot: artifact.Slot, ContentType: artifact.ContentType, Value: storedValue,
+			Slot: artifact.Slot, ContentType: artifact.ContentType, Value: preparedValue,
 			Caption: caption, CreatedAt: now}).Error; err != nil {
 			return err
 		}
@@ -469,7 +491,8 @@ func stringValue(value any) string {
 // ValidateRequiredOutputs keeps completion policy shared by managed, remote,
 // and externally hosted execution paths.
 func ValidateRequiredOutputs(ctx context.Context, db *gorm.DB, attempt AttemptContext) error {
-	if len(attempt.RequiredOutputs) == 0 {
+	validatePPT := attempt.Metadata["executor_host"] == "external-agent" && UsesPPTImageContract(attempt)
+	if len(attempt.RequiredOutputs) == 0 && !validatePPT {
 		return nil
 	}
 	var rows []orm.WorkflowSlotRevision
@@ -486,6 +509,9 @@ func ValidateRequiredOutputs(ctx context.Context, db *gorm.DB, attempt AttemptCo
 		if !seen[slot] {
 			return errors.New("required output missing: " + slot)
 		}
+	}
+	if validatePPT {
+		return validatePPTCompletion(db.WithContext(ctx), attempt, rows)
 	}
 	return nil
 }

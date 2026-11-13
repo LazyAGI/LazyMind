@@ -146,10 +146,12 @@ def ppt_prepare_page(
     system_prompt = page_generation_system(_package_page_prompt()) + (
         '\n\nOFFLINE TRANSFER CONTRACT: Return a standalone HTML page with all assets inline. '
         'Use static HTML/CSS or self-contained SVG for charts. Scripts, ECharts initialization, '
-        'external URLs, local file paths, named asset placeholders and active elements are unavailable '
+        'external URLs, local file paths, decorative asset placeholders and active elements are unavailable '
         'in this transfer. If an approved image is supplied as a data URI, preserve it inline. '
-        'Do not invent or fetch missing assets. This transport rule takes priority over optional '
-        'script-based chart or named-asset examples in the package prompt.'
+        'For managed PPT image bindings supplied by Core, place each exact data-ppt-image marker '
+        'on a foreground img without src and include the specified background layer. '
+        'Core inserts the saved image bytes. Do not invent or fetch missing assets. This transfer '
+        'rule takes priority over optional script-based chart or named-asset examples in the package prompt.'
     )
     query = page_generation_query(brief, prompt_mode='complete-page-prompt', language='')
     try:

@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/xml"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -78,6 +79,46 @@ func imageExportHTTPClient() *http.Client {
 	}}
 }
 
+var errPublicImageTooLarge = errors.New("image download exceeds the size limit")
+
+// DownloadPublicImage shares the document image export transport. It does not
+// resolve server-local references or trust the response's claimed image type.
+func DownloadPublicImage(ctx context.Context, source string, limit int64) ([]byte, error) {
+	client := imageExportHTTPClient()
+	defer client.CloseIdleConnections()
+	return readPublicImage(ctx, client, source, limit)
+}
+
+func readPublicImage(ctx context.Context, client *http.Client, source string, limit int64) ([]byte, error) {
+	if !validImageRemoteURL(source) {
+		return nil, errors.New("image download requires a public HTTP(S) URL")
+	}
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, source, nil)
+	if err != nil {
+		return nil, errors.New("invalid image URL")
+	}
+	request.Header.Set("Accept", "image/*")
+	response, err := client.Do(request)
+	if err != nil {
+		return nil, errors.New("image could not be downloaded")
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("image download returned HTTP %d", response.StatusCode)
+	}
+	if response.ContentLength > limit {
+		return nil, errPublicImageTooLarge
+	}
+	data, err := io.ReadAll(io.LimitReader(response.Body, limit+1))
+	if err != nil {
+		return nil, errors.New("image download was interrupted")
+	}
+	if int64(len(data)) > limit {
+		return nil, errPublicImageTooLarge
+	}
+	return data, nil
+}
+
 func fetchDocumentImage(ctx context.Context, client *http.Client, owner string, item imageExportSource) ([]byte, string) {
 	var data []byte
 	var err error
@@ -91,23 +132,10 @@ func fetchDocumentImage(ctx context.Context, client *http.Client, owner string, 
 		}
 		data, err = io.ReadAll(io.LimitReader(base64.NewDecoder(base64.StdEncoding, strings.NewReader(parts[1])), maxExportImageBytes+1))
 	case validImageRemoteURL(item.Source):
-		request, requestErr := http.NewRequestWithContext(ctx, http.MethodGet, item.Source, nil)
-		if requestErr != nil {
-			return nil, "IMAGE_UNAVAILABLE"
-		}
-		request.Header.Set("Accept", "image/*")
-		response, requestErr := client.Do(request)
-		if requestErr != nil {
-			return nil, "IMAGE_UNAVAILABLE"
-		}
-		defer response.Body.Close()
-		if response.StatusCode != http.StatusOK {
-			return nil, "IMAGE_UNAVAILABLE"
-		}
-		if response.ContentLength > maxExportImageBytes {
+		data, err = readPublicImage(ctx, client, item.Source, maxExportImageBytes)
+		if errors.Is(err, errPublicImageTooLarge) {
 			return nil, "IMAGE_TOO_LARGE"
 		}
-		data, err = io.ReadAll(io.LimitReader(response.Body, maxExportImageBytes+1))
 	default:
 		return nil, "IMAGE_UNAVAILABLE"
 	}
