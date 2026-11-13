@@ -615,6 +615,57 @@ describe('MarkdownArtifactEditor rewrite selection highlight', () => {
       .toBe('$\\mathcal\\{D\\}=\\{(x_i,y_i)\\}_\\{i=1\\}^\\{N\\}$ and $y_\\{\\<t\\}$');
   });
 
+  it.each(['editor', 'artifact', 'tab', 'composite'])('navigates the outline using the actual %s scroller', (owner) => {
+    const { container } = render(
+      <div className='workflow-panel__tab-content' style={{ overflowY: 'auto' }}>
+        <div className='composite-grid' style={{ overflowY: 'auto' }}>
+          <div className='workflow-slot__artifact-body' style={{ overflowY: 'auto' }}>
+            <MarkdownArtifactEditor
+              markdown={'# Document\n\n<a id="block-sec-1"></a>\n## Heading'}
+              sourceRevision={1}
+              onSave={async () => 1}
+            />
+          </div>
+        </div>
+      </div>,
+    );
+    const surface = container.querySelector<HTMLElement>('.writer-markdown-editor__surface')!;
+    surface.style.overflowY = owner === 'editor' ? 'auto' : 'visible';
+    const selectors = {
+      editor: '.writer-markdown-editor__surface',
+      artifact: '.workflow-slot__artifact-body',
+      tab: '.workflow-panel__tab-content',
+      composite: '.composite-grid',
+    };
+    const scroller = container.querySelector<HTMLElement>(selectors[owner as keyof typeof selectors])!;
+    Object.defineProperties(scroller, {
+      clientHeight: { value: 300 },
+      scrollHeight: { value: 1800 },
+      clientTop: { value: 1 },
+    });
+    scroller.scrollTop = 100;
+    vi.spyOn(scroller, 'getBoundingClientRect').mockReturnValue({ top: 200 } as DOMRect);
+    const target = container.querySelector<HTMLElement>('#block-sec-1')!;
+    vi.spyOn(target, 'getBoundingClientRect').mockReturnValue({ top: 900 } as DOMRect);
+    const scrollTo = vi.fn();
+    Object.defineProperty(scroller, 'scrollTo', { value: scrollTo });
+    // A clipping ancestor must not intercept navigation, even if it overflows.
+    const root = container.querySelector<HTMLElement>('.writer-markdown-editor')!;
+    root.style.overflowY = 'hidden';
+    Object.defineProperties(root, {
+      clientHeight: { value: 300 },
+      scrollHeight: { value: 1800 },
+    });
+    const clippedScrollTo = vi.fn();
+    Object.defineProperty(root, 'scrollTo', { value: clippedScrollTo });
+
+    fireEvent.click(screen.getByLabelText('chat.writerIR.expandOutline'));
+    fireEvent.click(screen.getByTitle('Heading'));
+
+    expect(scrollTo).toHaveBeenCalledWith({ top: 791, behavior: 'smooth' });
+    expect(clippedScrollTo).not.toHaveBeenCalled();
+  });
+
   it('navigates internal references without opening the link editor', () => {
     const { container } = render(<Harness />);
     const surface = container.querySelector<HTMLElement>('.writer-markdown-editor__surface');
@@ -630,6 +681,11 @@ describe('MarkdownArtifactEditor rewrite selection highlight', () => {
     expect(internalLink).not.toBeNull();
     expect(externalLink).not.toBeNull();
     Object.defineProperty(surface!, 'scrollTo', { value: scrollTo });
+    surface!.style.overflowY = 'auto';
+    Object.defineProperties(surface!, {
+      clientHeight: { value: 300 },
+      scrollHeight: { value: 1200 },
+    });
     editableRoot!.addEventListener('click', (event) => {
       event.preventDefault();
       linkEditorClick();

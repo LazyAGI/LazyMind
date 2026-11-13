@@ -160,13 +160,25 @@ it.each(['ref-001', 'SRC-001', 'KB-001', 'source.v2_甲'])('preserves and naviga
   await replaceText('Original paragraph.', 'Edited paragraph.');
   await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1), { timeout: 3000 });
   expect(publishedSource(onSave.mock.calls[0][0])).toBe(source.replace('Original paragraph.', 'Edited paragraph.'));
-  expect(document.getElementById(`paper-ref-${id}`)).toHaveClass('writer-markdown-editor__system-anchor');
+  const target = document.getElementById(`paper-ref-${id}`)!;
+  expect(target).toHaveClass('writer-markdown-editor__system-anchor');
   const surface = document.querySelector<HTMLElement>('.writer-markdown-editor__surface')!;
+  // JSDOM does not lay out the document; model an overflowing editor viewport.
+  surface.style.overflowY = 'auto';
+  Object.defineProperties(surface, {
+    clientHeight: { value: 300 },
+    scrollHeight: { value: 1800 },
+    clientTop: { value: 1 },
+  });
+  surface.scrollTop = 100;
+  vi.spyOn(surface, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 200, 600, 300));
+  vi.spyOn(target, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 900, 600, 20));
   surface.scrollTo = vi.fn();
   const link = document.querySelector<HTMLAnchorElement>(`a[href="#paper-ref-${id}"]`)!;
   expect(link.textContent).toBe('[1]');
   fireEvent.click(link);
-  expect(surface.scrollTo).toHaveBeenCalled();
+  expect(surface.scrollTo).toHaveBeenCalledTimes(1);
+  expect(surface.scrollTo).toHaveBeenCalledWith({ top: 791, behavior: 'smooth' });
 }, 15000);
 
 it('selects a bibliography entry and saves a canonical citation through the real editor', async () => {
