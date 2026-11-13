@@ -21,6 +21,7 @@ import { useTranslation } from "react-i18next";
 import { message } from "antd";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Document, Page, pdfjs } from "react-pdf";
+import { pdfDocumentOptions } from "./pdfDocumentOptions";
 import { PdfCitationLayer } from "./PdfCitationLayer";
 import { restorePdfLinkAnnotationBorders } from "./pdfNativeLinkBorders";
 import { groupPdfCitationTargets, type PdfCitationTarget } from "./pdfCitationReferences";
@@ -1401,6 +1402,7 @@ export default function RenderPdf({
         </div>
       ) : null}
       <Document
+        options={pdfDocumentOptions}
         externalLinkTarget="_blank"
         externalLinkRel="noopener noreferrer"
         // react-pdf retains this handler from mount; read the active source from a ref.
