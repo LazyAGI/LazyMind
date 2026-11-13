@@ -1,6 +1,7 @@
 import { useExecutionActivity } from '@/modules/chat/components/WorkflowPanel/external/useExecutionActivity';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, Button, Spin } from 'antd';
+import { Alert, Button, Spin, Tabs } from 'antd';
+import TaskCenter from '@/modules/chat/components/TaskCenter';
 import { useParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { AgentAppsAuth } from '@/components/auth';
@@ -146,10 +147,12 @@ export default function WorkflowRunPage({ embedded = false, sessionId: suppliedS
   const infoBanner = overlayInfoBanner(noticeKey, control?.delivery, control?.binding);
   const bannerFromNotice = Boolean(infoBanner && (!liveDelivery || infoBanner.key === noticeKey));
 
-  return <main className={`workflow-run${embedded || resultsOnly ? ' workflow-run--embedded' : ''}${resultsOnly ? ' workflow-run--results' : ''}`}
+  const splitWorkbench = resultsOnly && !embedded;
+  const refreshSnapshot = () => refresh().then(() => {});
+
+  return <main className={`workflow-run${embedded || resultsOnly ? ' workflow-run--embedded' : ''}${resultsOnly ? ' workflow-run--results' : ''}${splitWorkbench ? ' workflow-run--workbench' : ''}`}
     style={embedded || resultsOnly ? undefined : { maxWidth: 1200, margin: '24px auto', padding: 24 }}>
     {!embedded && !resultsOnly && <div className='workflow-run__heading'><h1>{title || t('chat.workflowPanelTitle')}</h1></div>}
-    {!embedded && resultsOnly && snapshot && <WorkflowRequestMessage session={snapshot.session} fallback={title} />}
     {error && <Alert type='error' showIcon closable onClose={() => setError('')} message={error} />}
     {syncError && <Alert type='warning' showIcon message={t('chat.workflowRunSyncFailed')} description={syncError} />}
     {control?.continuation === 'binding_required' && <Alert type='warning' showIcon
@@ -157,7 +160,8 @@ export default function WorkflowRunPage({ embedded = false, sessionId: suppliedS
     {!error && infoBanner && <Alert type={infoBanner.tone} showIcon
       closable={bannerFromNotice} onClose={() => setNoticeKey('')} message={t(infoBanner.key)} />}
     {!snapshot && !error && !syncError && <Spin />}
-    {snapshot && <>
+    {snapshot && <div className={splitWorkbench ? 'workflow-run__workspace' : 'workflow-run__content'}>
+      <section className='workflow-run__canvas'>
       {!embedded && !resultsOnly && <Button onClick={() => { void refresh().catch(reason => setError(String(reason))); }}>{t('chat.workflowRunRefresh')}</Button>}
       {control?.input_request && <WorkflowInputRequestCard request={control.input_request}
         onAnswer={answerText => act({ kind: 'answer_input', input: control.input_request!, answerText })} />}
@@ -171,6 +175,16 @@ export default function WorkflowRunPage({ embedded = false, sessionId: suppliedS
           execute: async intent => { await act(intent); },
           continuationStep: () => latest.current && externalContinuationStep(latest.current.session, latest.current.control),
         } : undefined} />
-    </>}
+      </section>
+      {splitWorkbench && <aside className='workflow-run__rail'>
+        <Tabs defaultActiveKey='chat' items={[
+          { key: 'chat', label: t('chat.workflowRailConversation'), children:
+            <WorkflowRequestMessage session={snapshot.session} fallback={title} /> },
+          { key: 'tasks', label: t('taskCenter.panelTitle'), children:
+            <TaskCenter sessionId={key} workflowSteps={snapshot.session.steps}
+              showHeader={false} onRefreshSnapshot={refreshSnapshot} /> },
+        ]} />
+      </aside>}
+    </div>}
   </main>;
 }

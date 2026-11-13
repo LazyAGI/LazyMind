@@ -1,5 +1,6 @@
+import { getNodeDependencyStatus, type NodeDependencyStatus } from "@/modules/modelProvider/api/systemDependencies";
 import { useEffect, useRef, useState } from "react";
-import { Alert, Button, Modal, Space, Spin, Steps, Typography } from "antd";
+import { Alert, Button, Modal, Space, Spin, Steps, Tag, Typography } from "antd";
 import { useTranslation } from "react-i18next";
 import { agentIntegrationStatuses, type DesktopAgentIntegrationStatus } from "@/runtime/desktopBridge";
 
@@ -7,7 +8,32 @@ import { workbuddyErrorMessage } from "./workbuddyErrors";
 import { codexErrorMessage } from "./codexErrors";
 import { requiresAgentQuit } from "./agentActions";
 
-type Stage = "prepare" | "installing" | "login" | "quitRequired" | "installFailed" | "entry" | "trust" | "enable" | "verify" | "checking" | "notReady" | "success";
+type Stage = "nodeRequired" | "prepare" | "installing" | "login" | "quitRequired" | "installFailed" | "entry" | "trust" | "enable" | "verify" | "checking" | "notReady" | "success";
+
+function NodePrerequisite() {
+  const { t } = useTranslation();
+  const [status, setStatus] = useState<NodeDependencyStatus>();
+  const [failed, setFailed] = useState(false);
+  const [attempt, setAttempt] = useState(0);
+  useEffect(() => {
+    let cancelled = false;
+    setStatus(undefined);
+    setFailed(false);
+    void getNodeDependencyStatus().then(value => {
+      if (!cancelled) setStatus(value);
+    }).catch(() => {
+      if (!cancelled) setFailed(true);
+    });
+    return () => { cancelled = true; };
+  }, [attempt]);
+  return <div className="agent-integration-node-prerequisite" aria-live="polite">
+    <div className="agent-integration-node-prerequisite__copy">
+      <div><strong>{t("nodeDependency.title")}</strong> {status && <Tag color={status.installed ? "success" : "warning"}>{status.installed ? t("nodeDependency.ready") : t("nodeDependency.missing")}{status.version ? ` · ${status.version}` : ""}</Tag>}</div>
+      <Typography.Text type="secondary">{failed ? t("nodeDependency.failed") : t("nodeDependency.guidePrerequisite")}</Typography.Text>
+    </div>
+    {!status && !failed ? <Spin size="small" aria-label={t("nodeDependency.checking")} /> : failed ? <Button size="small" onClick={() => setAttempt(value => value + 1)}>{t("nodeDependency.refresh")}</Button> : !status?.installed && <Button size="small" href="/settings?section=system_tools#node-dependency">{t("nodeDependency.goto")}</Button>}
+  </div>;
+}
 
 export default function WorkBuddyInstallationGuide({ status, onConnect, onLogin, onStatus, onClose, agent = "workbuddy" }: {
   agent?: "workbuddy" | "codex";
@@ -37,6 +63,11 @@ export default function WorkBuddyInstallationGuide({ status, onConnect, onLogin,
     busy.current = true;
     setStage("installing"); setError("");
     try {
+      if (agent === "codex") {
+        const node = await getNodeDependencyStatus();
+        if (!mounted.current) return;
+        if (!node.installed) { setStage("nodeRequired"); return; }
+      }
       const result = await onConnect();
       if (!mounted.current) return;
       setDiagnostic(result?.diagnostic_id || result?.issue?.operation_id || "");
@@ -138,9 +169,10 @@ export default function WorkBuddyInstallationGuide({ status, onConnect, onLogin,
     return () => { window.clearInterval(timer); window.removeEventListener("focus", recheck); };
   }, [stage, agent]);
   const installing = stage === "installing", checking = stage === "checking", loggingIn = stage === "login";
-  const current = stage === "prepare" ? 0 : ["installing", "login", "quitRequired", "installFailed", "entry", "trust", "enable"].includes(stage) ? 1 : 2;
+  const current = ["prepare", "nodeRequired"].includes(stage) ? 0 : ["installing", "login", "quitRequired", "installFailed", "entry", "trust", "enable"].includes(stage) ? 1 : 2;
   let primary;
   if (stage === "prepare" || stage === "installFailed") primary = <Button type="primary" onClick={() => void install()}>{text(stage === "prepare" ? "saveAndContinue" : "retryInstall")}</Button>;
+  else if (stage === "nodeRequired") primary = <Space><Button onClick={() => void install()}>{t("nodeDependency.refresh")}</Button><Button type="primary" href="/settings?section=system_tools#node-dependency">{t("nodeDependency.goto")}</Button></Space>;
   else if (stage === "quitRequired") primary = <Button type="primary" onClick={() => void install()}>{t("agentIntegration.quitRequired.retryInstall")}</Button>;
   else if (stage === "entry") primary = <Button type="primary" onClick={() => setStage(agent === "codex" ? "enable" : "trust")}>{text("next")}</Button>;
   else if (stage === "trust") primary = <Button type="primary" onClick={() => setStage("enable")}>{text("trustConfirmation")}</Button>;
@@ -170,6 +202,8 @@ export default function WorkBuddyInstallationGuide({ status, onConnect, onLogin,
     <Steps size="small" current={current} items={["saveStep", "installStep", "checkStep"].map(key => ({ title: text(key) }))} />
     <div className="agent-integration-installation-content" aria-live="polite">
       {stage === "prepare" && <Typography.Paragraph>{text("saveDescription")}</Typography.Paragraph>}
+      {agent === "codex" && stage === "prepare" && <NodePrerequisite />}
+      {stage === "nodeRequired" && <Alert type="warning" showIcon message={t("nodeDependency.title")} description={t("nodeDependency.required")} />}
       {loggingIn && <Alert type="info" showIcon message={text("waitingForLogin")} description={text("loginDescription")} />}
       {stage === "quitRequired" && <Alert type="warning" showIcon
         message={t("agentIntegration.quitRequired.title", { agent: status?.display_name || (agent === "codex" ? "Codex" : "WorkBuddy") })}

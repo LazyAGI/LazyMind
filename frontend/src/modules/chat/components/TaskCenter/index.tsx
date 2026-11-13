@@ -70,6 +70,8 @@ interface Props {
   developerMode?: boolean;
   workflowSteps?: WorkflowSessionStep[];
   plannedCount?: number;
+  /** External runs are refreshed by their workflow snapshot subscription. */
+  onRefreshSnapshot?: () => Promise<void>;
 }
 
 const EMPTY_TASKS: SubAgentTask[] = [];
@@ -1134,6 +1136,7 @@ const TaskCenter = (props: Props) => {
     developerMode = false,
     workflowSteps = [],
     plannedCount,
+    onRefreshSnapshot,
   } = props;
   const { t } = useTranslation();
   const now = Date.now();
@@ -1170,7 +1173,7 @@ const TaskCenter = (props: Props) => {
   }, [runs, tasks, workflowSession?.session_id, workflowSession?.projection?.display?.status, workflowSession?.ordinary_runs]);
   const runTiming = useRunTiming(currentRun);
   useEffect(() => {
-    if (!sessionId) return;
+    if (!sessionId || onRefreshSnapshot) return;
     const refresh = () => {
       if (document.hidden) return;
       void loadConversationTasks(sessionId);
@@ -1182,7 +1185,7 @@ const TaskCenter = (props: Props) => {
     document.addEventListener("visibilitychange", refresh);
     window.addEventListener("online", refresh);
     return () => { window.clearInterval(timer); document.removeEventListener("visibilitychange", refresh); window.removeEventListener("online", refresh); };
-  }, [currentRun?.timing?.finished_at, loadConversationTasks, sessionId, workflowSession?.session_id]);
+  }, [currentRun?.timing?.finished_at, loadConversationTasks, sessionId, workflowSession?.session_id, onRefreshSnapshot]);
   const ordinaryTimeline = useMemo(() => ({
     ...buildOrdinaryTaskTimeline(
       currentRun ? tasks.filter(task => task.ordinary?.run_id === currentRun.run_id
@@ -1213,6 +1216,7 @@ const TaskCenter = (props: Props) => {
   ];
 
   const reloadOrdinary = async () => {
+    if (onRefreshSnapshot) return onRefreshSnapshot();
     if (!sessionId) return;
     await Promise.all([
       loadConversationTasks(sessionId),

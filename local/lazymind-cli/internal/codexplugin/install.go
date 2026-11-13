@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
 	"time"
 
@@ -111,6 +112,13 @@ func findNode(ctx context.Context, preferred string) (string, error) {
 	candidates := []string{preferred}
 	if path, err := agentexec.FindExecutable("", []string{"node"}); err == nil {
 		candidates = append(candidates, path)
+	}
+	if home, err := os.UserHomeDir(); err == nil {
+		name := "node"
+		if runtime.GOOS == "windows" {
+			name += ".exe"
+		}
+		candidates = append(candidates, filepath.Join(home, ".lazymind", "deps", "node", "bin", name))
 	}
 	return agentexec.CompatibleNode(ctx, candidates...)
 }

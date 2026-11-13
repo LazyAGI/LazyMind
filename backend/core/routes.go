@@ -353,6 +353,8 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "GET", "/system-dependencies/pdf-font", []string{"document.read"}, systemdeps.GetPDFFont)
 	handleAPI(r, "GET", "/system-dependencies/python", []string{"document.read"}, systemdeps.GetPythonComponents)
 	handleAPI(r, "POST", "/system-dependencies/python:install", []string{"document.write"}, systemdeps.InstallPythonComponent)
+	handleAPI(r, "GET", "/system-dependencies/node", []string{"document.read"}, systemdeps.GetNodeDependency)
+	handleAPI(r, "POST", "/system-dependencies/node:install", []string{"document.write"}, systemdeps.InstallNodeDependency)
 	handleAPI(r, "GET", "/system-dependencies/ffmpeg", []string{"document.read"}, systemdeps.GetFFmpegDependency)
 	handleAPI(r, "PUT", "/system-dependencies/ffmpeg", []string{"document.write"}, systemdeps.UpdateFFmpegDependency)
 	handleAPI(r, "POST", "/system-dependencies/ffmpeg:check", []string{"document.read"}, systemdeps.CheckFFmpegDependency)

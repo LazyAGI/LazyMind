@@ -11,6 +11,9 @@ const fixture = vi.hoisted(() => ({
   activity: vi.fn(), panel: vi.fn(),
   review: { id: 'review', step_id: 'analyze', execution_id: 'attempt', status: 'pending', version: 1, manifest_hash: 'test-hash' },
 }));
+vi.mock('@/modules/chat/components/TaskCenter', () => ({ default: (props: any) =>
+  <div data-testid='external-tasks'>{props.workflowSteps?.map((step: any) =>
+    <span key={step.id}>{step.step_id}: {step.status}</span>)}</div> }));
 vi.mock('@/modules/identityAvatar', () => ({ IdentityAvatar: () => <span data-testid='user-avatar' /> }));
 vi.mock('react-router-dom', () => ({ useParams: () => ({ sessionId: 'acceptance-test' }) }));
 vi.mock('@/components/auth', () => ({ AgentAppsAuth: { getUserInfo: () => ({ userId: 'test-user' }) } }));
@@ -168,4 +171,22 @@ it('clears a failed authentication/read warning after a successful resynchroniza
   act(() => fixture.reload());
   expect(await screen.findByRole('button', { name: '确认测试审核' })).toBeVisible();
   expect(screen.queryByText('401 Unauthorized')).not.toBeInTheDocument();
+});
+
+it('places external results beside request and snapshot tasks, without changing hosted panels', async () => {
+  const baseline = await fixture.load();
+  baseline.session.steps = [{ id: 'step-1', step_id: 'generate_ppt', status: 'failed', attempt: 1 }];
+  fixture.load.mockResolvedValue(baseline);
+  const { container, unmount } = render(<WorkflowRunPage resultsOnly title='Original request' />);
+  await screen.findByText('Original request');
+  expect(container.querySelector('.workflow-run__canvas .chat-user')).toBeNull();
+  expect(container.querySelector('.workflow-run__rail .chat-user')).not.toBeNull();
+  fireEvent.click(screen.getByRole('tab', { name: '子任务' }));
+  expect(await screen.findByText('generate_ppt: failed')).toBeVisible();
+  fireEvent.click(screen.getByRole('tab', { name: '对话' }));
+  expect(screen.getByText('Original request')).toBeVisible();
+  unmount();
+  render(<WorkflowRunPage embedded />);
+  await screen.findByRole('button', { name: '确认测试审核' });
+  expect(screen.queryByRole('tab', { name: '子任务' })).not.toBeInTheDocument();
 });
