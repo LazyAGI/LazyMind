@@ -74,12 +74,12 @@ func GetReadingPreparation(w http.ResponseWriter, r *http.Request) {
 	}
 	state, err := pdfIRStatus(r.Context(), row, hash)
 	if err != nil {
-		common.ReplyErr(w, "读取 PDF 结构失败", 500)
+		common.ReplyErr(w, "读取准备状态失败", 500)
 		return
 	}
 	capabilities, err := readReadingCapabilities(state, pdfIRSource(ext), row.DatasetID, row.ID, store.UserID(r), jobs)
 	if err != nil {
-		common.ReplyErr(w, "读取研读缓存失败", 500)
+		common.ReplyErr(w, "读取准备状态失败", 500)
 		return
 	}
 	status := readingPreparationStatus{Status: "not_requested"}
