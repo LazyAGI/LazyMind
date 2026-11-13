@@ -15,6 +15,8 @@ import (
 )
 
 func TestPanelURLScopeOnMCPWire(t *testing.T) {
+	t.Setenv("LAZYMIND_CONNECTOR_CONFIG", "")
+	t.Setenv("LAZYMIND_RUNTIME_PROFILE", "")
 	t.Setenv("LAZYMIND_WEB_URL", "https://panel.example")
 	for _, provider := range []string{"codex", "workbuddy", "deepseek-harness", ""} {
 		t.Run(provider, func(t *testing.T) {
