@@ -5,6 +5,7 @@ import hashlib
 import json
 import os
 import re
+import tempfile
 import time
 import uuid
 from collections.abc import Callable, Iterator, Mapping
@@ -2425,15 +2426,15 @@ class WriterWritingCapabilities:
                 return None
 
         def save_checkpoint(path: Path, section: Any) -> None:
-            temporary = path.with_name(f'.{path.name}.{uuid.uuid4().hex}.tmp')
-            if representation == 'markdown':
-                temporary.write_text(str(section), encoding='utf-8')
-            else:
-                temporary.write_text(
-                    json.dumps(section, ensure_ascii=False, indent=2),
-                    encoding='utf-8',
-                )
-            temporary.replace(path)
+            # Keep the temporary name short enough for Windows paths near MAX_PATH.
+            descriptor, temporary = tempfile.mkstemp(prefix='cp-', suffix='.tmp', dir=path.parent)
+            try:
+                with os.fdopen(descriptor, 'w', encoding='utf-8', newline='') as stream:
+                    stream.write(str(section) if representation == 'markdown' else
+                                 json.dumps(section, ensure_ascii=False, indent=2))
+                os.replace(temporary, path)
+            finally:
+                Path(temporary).unlink(missing_ok=True)
 
         def cached_preview(section: Any) -> str:
             if representation == 'markdown':

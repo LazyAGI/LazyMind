@@ -926,6 +926,9 @@ def _run_paper_step(context, stream=None) -> dict:
             pool = pool_from_business(handoff_input(review_context))
         else:
             pool = initialize_pool(bound, request)
+        if bound.get('research_materials'):
+            from .source_materials import sync_bound_materials
+            sync_bound_materials(pool, bound['research_materials'], request)
         if bound.get('_imported_attachments'):
             pool['imported_attachments'] = sorted(set(pool.get('imported_attachments', [])).union(
                 bound['_imported_attachments']))
@@ -1017,7 +1020,9 @@ def _run_paper_step(context, stream=None) -> dict:
         if (step == 'write_document' and 'write_outline_document' in getattr(context, 'input_slots', [])
                 and not material(pool, 'manuscript') and 'write_outline_document' not in bound):
             raise MissingMaterials('请先生成并确认论文大纲，再继续写作。')
-        preference = _read_bound(bound['experiment_execution']) if 'experiment_execution' in bound else 'simulate_only'
+        preference = _read_bound(bound['experiment_execution']) if 'experiment_execution' in bound else 'allow_local'
+        preference = ('allow_local' if preference in ('allow_local', '允许受限运行，条件不足时使用模拟数据')
+                      else 'simulate_only')
         result = execute_step(step, pool, request, fail=fail, on_event=stream,
                               allow_execution=preference == 'allow_local', skip_revision=skip_revision)
         if stream:
