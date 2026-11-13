@@ -8,17 +8,27 @@ import (
 type ErrorCode string
 
 const (
-	InvalidArgument  ErrorCode = "INVALID_ARGUMENT"
-	Unauthenticated  ErrorCode = "UNAUTHENTICATED"
-	PermissionDenied ErrorCode = "PERMISSION_DENIED"
-	NotFound         ErrorCode = "NOT_FOUND"
-	DeadlineExceeded ErrorCode = "DEADLINE_EXCEEDED"
-	Unavailable      ErrorCode = "UNAVAILABLE"
-	ResultTooLarge   ErrorCode = "RESULT_TOO_LARGE"
-	Unsupported      ErrorCode = "UNSUPPORTED"
-	Conflict         ErrorCode = "CONFLICT"
-	Internal         ErrorCode = "INTERNAL"
+	InvalidArgument     ErrorCode = "INVALID_ARGUMENT"
+	Unauthenticated     ErrorCode = "UNAUTHENTICATED"
+	PermissionDenied    ErrorCode = "PERMISSION_DENIED"
+	NotFound            ErrorCode = "NOT_FOUND"
+	DeadlineExceeded    ErrorCode = "DEADLINE_EXCEEDED"
+	Unavailable         ErrorCode = "UNAVAILABLE"
+	ResultTooLarge      ErrorCode = "RESULT_TOO_LARGE"
+	Unsupported         ErrorCode = "UNSUPPORTED"
+	Conflict            ErrorCode = "CONFLICT"
+	Internal            ErrorCode = "INTERNAL"
+	ToolExecutionFailed ErrorCode = "TOOL_EXECUTION_FAILED"
+	ProviderRejected    ErrorCode = "PROVIDER_REJECTED"
+	RateLimited         ErrorCode = "RATE_LIMITED"
 )
+
+// UpstreamError contains public transport diagnostics, never headers or raw bodies.
+type UpstreamError struct {
+	HTTPStatus int    `json:"http_status"`
+	Code       string `json:"code,omitempty"`
+	RequestID  string `json:"request_id,omitempty"`
+}
 
 type Error struct {
 	Code      ErrorCode
@@ -28,6 +38,7 @@ type Error struct {
 	Details   map[string]any
 	Reason    string
 	Action    *ErrorAction
+	Upstream  *UpstreamError
 	cause     error
 }
 

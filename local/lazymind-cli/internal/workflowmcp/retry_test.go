@@ -46,6 +46,9 @@ func TestStateGuidesBudgetedRetryWithoutBypassingBarriers(t *testing.T) {
 				} else if provider != "deepseek-harness" && !strings.Contains(state.AgentInstruction, "END this turn") {
 					t.Fatalf("missing yield guidance: %q", state.AgentInstruction)
 				}
+				if continuation == "awaiting_user" && (!strings.Contains(state.AgentInstruction, "retry_origin=user") || !strings.Contains(state.AgentInstruction, "projection.rewindable")) {
+					t.Fatalf("missing explicit rerun guidance: %q", state.AgentInstruction)
+				}
 			})
 		}
 	}

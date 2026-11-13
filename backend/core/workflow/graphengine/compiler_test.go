@@ -823,16 +823,22 @@ func TestBuiltinSelfTestDefaultExecutionModes(t *testing.T) {
 		t.Fatalf("test workflow must compile: %#v", result.Diagnostics)
 	}
 	want := map[string]string{
-		"prompt":          "auto",
-		"script":          "human",
-		"typed_artifacts": "auto",
-		"rewrite":         "human",
-		"list_artifacts":  "auto",
-		"verify":          "human",
+		"generate": "auto",
+		"update":   "human",
+		"verify":   "auto",
+	}
+	if len(result.Graph.Nodes) != len(want) {
+		t.Fatalf("self-test should have three steps, got %d", len(result.Graph.Nodes))
 	}
 	for stepID, mode := range want {
-		if got := result.Graph.Nodes[stepID].Mode; got != mode {
+		node := result.Graph.Nodes[stepID]
+		if got := node.Mode; got != mode {
 			t.Fatalf("step %s mode=%q, want %q", stepID, got, mode)
+		}
+		tool := "smoke_" + stepID
+		if len(node.LegacyTools) != 1 || node.LegacyTools[0] != tool || len(node.Execution.Tools) != 1 ||
+			node.Execution.Tools[0].Name != tool || node.Execution.Tools[0].Source != "package" {
+			t.Fatalf("step %s must expose the same smoke tool on both hosts: %+v", stepID, node)
 		}
 	}
 }

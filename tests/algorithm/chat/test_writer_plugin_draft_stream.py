@@ -156,6 +156,7 @@ def test_shared_visual_resolution_preserves_non_strict_failure(monkeypatch, tmp_
         ),
         ('修改上传的文章，让表达更简洁', 'create', 'revise_document'),
         ('重写上传的整篇文章', 'create', 'rewrite_document'),
+        ('在原文末尾追加联调记录，写回目标为上述文章', 'revise_document', 'revise_document'),
     ],
 )
 def test_prepare_control_distinguishes_reference_from_edit_source(

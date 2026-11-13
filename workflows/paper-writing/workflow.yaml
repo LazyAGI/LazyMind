@@ -12,25 +12,17 @@ when_to_use: >
   Honor explicit source restrictions, dates, counts and focus. Frozen review handoffs use only their selection
   unless the user explicitly asks to expand it. Never substitute model knowledge for missing literature.
   Start review handoffs at literature_review with the frozen selection.
-  Do not ask about experiment data or execution when starting unrelated stages (F1/F2/F5/F6/F7).
-  When reaching experiment (F3), inspect the current request, attachments and material pool for usable
-  user experiment data/results. Read existing materials when needed; filenames alone and reference-paper
-  tables are not evidence of user measurements.
-  If usable user data exists, directly use it in F3 without ask_user, a data-choice confirmation,
-  or an execution-permission question just to organize existing results.
-  Only when usable data is absent and the user has not already specified how to proceed, use framework
-  ask_user to ask whether they will supply real data or want labeled simulation, then wait for the answer.
-  Tailor the question to the actual research goal and missing data; do not use a fixed environment questionnaire.
-  If the user chooses to supply data, wait for it. If they already requested simulation, reuse that answer.
-  Preserve the answer and original research goal through the existing request_context/user_input mechanism.
-  Do not add a required input field, data-mode binding, or preparation node for this decision.
-  Only for a requested new computation needing code execution, ask about unresolved execution permission
-  in the current LazyMind deployment: bounded CPU execution, no network, dependency installation or GPU,
-  and at most 30 seconds. Bind the existing experiment_execution to allow_local only for explicit consent,
-  otherwise simulate_only. Refusing execution does not request synthetic data.
-  Failed computations on real data must report missing results, never substitute synthetic results.
-  If ask_user is unavailable, ask in Chat only for the missing information. A tool validation failure is
-  not a user answer: report it and stop.
+  Before starting, use the framework ask_user clarification card for the declared execution
+  preference unless the user has explicitly answered it for this task. A request to do only
+  literature review this turn is NOT an answer about execution of later experiment steps.
+  Never infer consent from an attachment, a request to write a paper, an old task, or a preselected option. Do not create another
+  questionnaire or preparation step. Preserve the original research/review request after the answer.
+  Bind experiment_execution to simulate_only for refusal/no answer, or allow_local for explicit agreement.
+  Bind allow_local only after explicit consent for this task. The experiment tool applies the
+  bounded CPU execution policy; computations using real user data that cannot run must report missing results, not synthetic replacements.
+  If ask_user is not registered, use simulate_only. A registered tool's validation failure is NOT
+  unavailability or a user answer: report that failure and stop rather than bypassing the question.
+  Execution takes place in the current LazyMind service container, not on the browser user's computer.
   For direct experiment entry, bind the user's stated goal to experiment_question; ask if missing for
   a new experiment. Existing data does not require a new experimental question.
   F1/F2 entries reuse the accumulated question and evidence. F3 returns final results for F4.
@@ -81,7 +73,193 @@ when_to_use: >
   Retry only when the user explicitly requests a retry after seeing the failure.
   Always relay necessary user_notice messages from tools.
 runtime:
+  execution:
+    version: '1'
+    model_executor: external-agent
+    skills:
+    - scenario/execution.md
+    constraints:
+    - Follow the shared state.yml step specification, declared output schemas and acceptance criteria; preserve the
+      user request and bound input revisions.
+    - Validate actual artifacts before completion, honor questions and review pauses, and report missing capabilities
+      without fabricating output.
+    steps:
+      research_topic:
+        tools:
+        - name: academic_context
+          source: package
+        - name: academic_read_paper
+          source: package
+        - name: knowledge_list_documents
+          source: package
+        - name: knowledge_read_document
+          source: package
+      literature_review:
+        tools:
+        - name: academic_context
+          source: package
+        - name: academic_read_paper
+          source: package
+        - name: knowledge_list_documents
+          source: package
+        - name: knowledge_read_document
+          source: package
+      refine_topic:
+        tools:
+        - name: academic_context
+          source: package
+        - name: academic_read_paper
+          source: package
+        - name: knowledge_list_documents
+          source: package
+        - name: knowledge_read_document
+          source: package
+      experiment:
+        tools:
+        - name: academic_context
+          source: package
+        - name: academic_read_paper
+          source: package
+      data_analysis:
+        tools:
+        - name: academic_context
+          source: package
+        - name: academic_read_paper
+          source: package
+      write_outline:
+        tools:
+        - name: academic_context
+          source: package
+        - name: academic_read_paper
+          source: package
+      write_document:
+        tools:
+        - name: academic_context
+          source: package
+        - name: academic_read_paper
+          source: package
+      peer_review:
+        tools:
+        - name: academic_context
+          source: package
+        - name: academic_read_paper
+          source: package
+        - name: knowledge_list_documents
+          source: package
+        - name: knowledge_read_document
+          source: package
+      revise_document:
+        tools:
+        - name: academic_context
+          source: package
+        - name: academic_read_paper
+          source: package
+        - name: knowledge_list_documents
+          source: package
+        - name: knowledge_read_document
+          source: package
+      reading_reflection:
+        tools:
+        - name: academic_context
+          source: package
+        - name: academic_read_paper
+          source: package
+        - name: knowledge_list_documents
+          source: package
+        - name: knowledge_read_document
+          source: package
+      finish:
+        tools:
+        - name: academic_context
+          source: package
+        - name: academic_read_paper
+          source: package
   trigger_inputs: [manuscript_file, manuscript_text, paper_topic, review_request, paper_input, experiment_execution, experiment_question]
+  input_contracts:
+    paper_topic:
+      description: >
+        Plain-text research topic. For research_topic, bind the user's topic here and retain
+        the full requirements in request_context. This input can be used on its own.
+    paper_input:
+      description: >
+        Optional structured business JSON matching this schema. For a plain-text topic,
+        use paper_topic and request_context. Writing preferences belong in constraints.
+        Pass the user's experiment choice through clarification_values.experiment_execution.
+      schema:
+        $defs:
+          business:
+            type: object
+            additionalProperties: false
+            dependentRequired:
+              execution_preference: [experiment, result_meta]
+              execution_available: [experiment, result_meta]
+              notice: [experiment, result_meta]
+            properties:
+              topic: {type: string, minLength: 1}
+              request: {type: string}
+              demo: {type: boolean}
+              selected_issue_ids: {type: array, items: {type: string, minLength: 1}, uniqueItems: true}
+              constraints:
+                type: object
+                additionalProperties: false
+                properties:
+                  paper_language: {enum: [zh-CN, en]}
+                  word_target: {type: [integer, 'null'], minimum: 1}
+                  paper_type: {enum: [null, research, empirical, literature_review, theoretical, case_study, conference]}
+                  citation_style: {type: string, minLength: 1}
+                  focus: {type: array, items: {type: string, minLength: 1}}
+                  required_sections:
+                    type: array
+                    uniqueItems: true
+                    items: {enum: [abstract, introduction, methods, evaluation, results, discussion, limitations, conclusion]}
+              papers: {}
+              question: {}
+              evidence: {}
+              writing_materials: {}
+              data: {}
+              source_data: {}
+              data_context: {}
+              study_design: {}
+              result_meta: {}
+              analysis: {}
+              charts: {}
+              experiment: {}
+              code_files: {}
+              outline: {}
+              manuscript: {}
+              review: {}
+              review_data: {}
+              media_assets: {}
+              reflection: {}
+              execution_preference: {}
+              execution_available: {}
+              notice: {}
+            examples:
+              - topic: 研究主题
+                request: 用户的研究要求与证据限制
+        anyOf:
+          - {$ref: '#/$defs/business'}
+          - type: object
+            not: {required: [topic]}
+            anyOf:
+              - required: [data]
+                properties: {data: {$ref: '#'}}
+              - required: [text]
+                properties: {text: {$ref: '#'}}
+  clarification_fields:
+    - id: experiment_execution
+      label: 实验运行方式
+      question: >
+        是否允许本次论文任务在当前 LazyMind 部署环境受限运行轻量实验？
+        部署环境不一定是你打开浏览器的电脑。仅使用所选数据，不联网、不安装依赖、不使用 GPU。
+        简单实验的代码执行最多 30 秒；方案和代码生成可能耗时数分钟。
+        复杂实验或执行失败时提供明确标记的模拟数据。
+      type: single
+      choice_policy: fixed
+      allow_other: false
+      choices:
+        - 不允许，仅生成代码和模拟数据
+        - 允许受限运行，条件不足时使用模拟数据
   transactional_outputs: true
   recovery_inputs:
     experiment:

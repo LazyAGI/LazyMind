@@ -140,6 +140,61 @@ def test_register_material_images_publishes_one_previewable_image_per_new_file(
     assert result['ui_published'] == 2
 
 
+def test_inspection_stages_candidates_and_only_registration_publishes_selection(monkeypatch, tmp_path):
+    from PIL import Image, ImageDraw
+
+    tools = _load_ppt_tools()
+    material_root = tmp_path / 'materials'
+    material_root.mkdir()
+    monkeypatch.setattr(tools, '_material_root', lambda: material_root)
+    monkeypatch.setattr(tools, 'select_vision_model_role', lambda: 'vlm')
+    monkeypatch.setattr(tools, 'get_model_role_runtime_identity', lambda role: 'configured-vision')
+    candidates = {}
+    for color in ('red', 'blue'):
+        path = tmp_path / f'{color}.png'
+        image = Image.new('RGB', (128, 128), 'white')
+        ImageDraw.Draw(image).rectangle((16, 16, 96, 96), fill=color)
+        image.save(path)
+        candidates[f'https://example.com/{path.name}'] = path.read_bytes()
+    monkeypatch.setattr(tools, '_download_image_bytes', candidates.__getitem__)
+    observed = []
+
+    def describe(system, instruction, paths):
+        observed.append(Path(paths[0]).read_bytes())
+        return f'Candidate figure {len(observed)}'
+
+    monkeypatch.setattr(tools, '_agent_vlm_call', describe)
+    saved = []
+    monkeypatch.setattr(tools, '_ui_slot_order_list', lambda slot: [])
+    monkeypatch.setattr(tools, '_save_artifact', lambda **item: saved.append(item) or {'success': True})
+
+    inspected = tools.ppt_inspect_material_images([
+        {'url': url, 'caption': Path(url).stem, 'source': 'web'} for url in candidates
+    ])
+
+    assert [item['visual_inspection']['description'] for item in inspected['images']] == [
+        'Candidate figure 1', 'Candidate figure 2',
+    ]
+    assert not saved and not tools._material_manifest_path().exists()
+    selected = inspected['images'][1]
+    result = tools.ppt_register_material_images([selected])
+
+    assert observed == list(candidates.values())
+    assert result['ui_published'] == 1
+    assert [(item['key'], item['caption'], item['value']) for item in saved] == [
+        ('material_images', 'blue', selected['path']),
+    ]
+    [registered] = tools._load_material_manifest()['images']
+    assert registered['origin'] == 'https://example.com/blue.png'
+    assert registered['sha256'] == selected['sha256']
+
+    stale = inspected['images'][0]
+    Path(stale['path']).write_bytes(candidates['https://example.com/blue.png'])
+    with pytest.raises(tools.ToolExecutionError, match='Prepared image changed'):
+        tools.ppt_register_material_images([stale])
+    assert len(saved) == 1 and len(observed) == 2
+
+
 def test_replace_material_images_overwrites_cards_and_removes_stale_tail(
     monkeypatch, tmp_path,
 ):

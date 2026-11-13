@@ -73,12 +73,23 @@ class LocalDocumentReader:
         )
 
     @staticmethod
-    def _read_pdf(path: Path) -> List[ExtractedDocumentNode]:
+    def _read_pdf(path: Path, *, start_page: int = 1,
+                  page_count: int | None = None) -> List[ExtractedDocumentNode]:
         import fitz
 
+        if type(start_page) is not int or start_page < 1:
+            raise ValueError('start_page must be a positive integer')
+        if page_count is not None and (type(page_count) is not int or page_count < 1):
+            raise ValueError('page_count must be a positive integer')
         nodes: List[ExtractedDocumentNode] = []
         with fitz.open(path) as document:
-            for page_index, page in enumerate(document):
+            if document.needs_pass:
+                raise ValueError('Password-protected PDF must be unlocked before extraction')
+            if start_page > len(document):
+                raise ValueError('start_page is outside the PDF')
+            stop = len(document) if page_count is None else min(len(document), start_page - 1 + page_count)
+            for page_index in range(start_page - 1, stop):
+                page = document[page_index]
                 nodes.append(ExtractedDocumentNode(
                     text=page.get_text('text', sort=True) or '',
                     metadata={'page': page_index + 1, 'page_label': str(page_index + 1)},

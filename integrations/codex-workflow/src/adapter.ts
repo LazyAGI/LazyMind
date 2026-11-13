@@ -31,7 +31,7 @@ export class CodexAdapter implements RuntimeAdapter<string> {
       return false
     }
   }
-  private validate(thread: string, claim: ActionClaim, kind: 'continue' | 'cancel') {
+  private validate(thread: string, claim: ActionClaim, kind: 'continue' | 'cancel' | 'artifact_edit' | 'model_generate') {
     const { action, control } = claim
     if (action.kind !== kind || action.status !== 'dispatching' || action.consumed_at || action.native_session_id !== thread
       || control.session_id !== action.session_id || !control.binding?.bound || control.binding.driver_session_id !== thread
@@ -42,7 +42,8 @@ export class CodexAdapter implements RuntimeAdapter<string> {
     const claim = this.claims.get(input.actionId)
     this.claims.delete(input.actionId)
     if (!claim) throw new AdmissionRejected('Workflow notification has not been claimed')
-    this.validate(thread, claim, 'continue')
+    const kind = claim.action.kind === 'model_generate' ? 'model_generate' : claim.action.kind === 'artifact_edit' ? 'artifact_edit' : 'continue'
+    this.validate(thread, claim, kind)
     if (await this.receipts.read(input.actionId)) throw new Error('Message was already attempted; do not resend')
     const before = await this.native.read(thread, signal)
     if (before.active) throw new AdmissionRejected('Codex chat became busy; no message was sent')
@@ -59,7 +60,7 @@ export class CodexAdapter implements RuntimeAdapter<string> {
         receipt.status = 'rejected'
         await this.receipts.write(receipt)
         await delay(250, undefined, { signal })
-        this.validate(thread, await this.bridge.action(input.actionId, signal), 'continue')
+        this.validate(thread, await this.bridge.action(input.actionId, signal), kind)
         signal.throwIfAborted()
         receipt.status = 'sending'
         await this.receipts.write(receipt)

@@ -45,7 +45,7 @@ when_to_use: >
   analyze_requirements owns template inspection; collect_materials owns source
   retrieval, doc read, factual analysis and evidence selection; later steps own generation.
   For an uploaded PPTX template, preserve the original file and let the Workflow
-  inspect it through the native template tools. Never invoke Office-to-PDF, HTML conversion
+  inspect it directly. Never invoke Office-to-PDF, HTML conversion
   or an OCR conversion tool merely to read or fill the template.
   After successful native PPTX publication, generation is complete. Do not
   launch additional parent-chat inspection, academic analysis or rendering.
@@ -57,6 +57,87 @@ when_to_use: >
   PowerPoint file.
 
 runtime:
+  execution:
+    version: '1'
+    skills:
+    - scenario/execution.md
+    constraints:
+    - Follow the shared state.yml step specification, declared output schemas and acceptance criteria; preserve the
+      user request and bound input revisions.
+    - Validate actual artifacts before completion, honor questions and review pauses, and report missing capabilities
+      without fabricating output.
+    steps:
+      analyze_requirements:
+        tools:
+        - name: ppt_inspect_pptx
+          source: package
+      collect_materials:
+        output_validator: ppt-images-v1
+        tools:
+        - name: builtin:web_search
+          source: global
+        - name: ppt_download_material_image
+          source: package
+        - name: builtin:multimodal
+          source: global
+        - name: pdf_read_text
+          source: package
+        - name: pdf_extract_images
+          source: package
+        - name: ppt_order_papers
+          source: package
+        - name: academic_context
+          source: package
+        - name: academic_read_paper
+          source: package
+        - name: knowledge_list_documents
+          source: package
+        - name: knowledge_read_document
+          source: package
+      build_outline:
+        skills:
+        - runtime/prompts/outline.md
+        tools:
+        - name: ppt_compute_timing
+          source: package
+      plan_page_prompts:
+        output_validator: ppt-images-v1
+        skills:
+        - runtime/prompts/style_spec.md
+        - runtime/references/style_catalog.md
+        - runtime/prompts/outline.md
+        tools: []
+      plan_background_prompts:
+        tools: []
+      generate_backgrounds:
+        output_validator: ppt-images-v1
+        tools:
+        - name: image_generator
+          source: global
+        - name: builtin:multimodal
+          source: global
+      generate_ppt:
+        output_validator: ppt-images-v1
+        skills:
+        - runtime/references/html_constraints.md
+        - runtime/prompts/style_spec.md
+        - runtime/references/style_catalog.md
+        - runtime/references/style_rendering_recipes.json
+        - runtime/prompts/page_html.md
+        - runtime/prompts/page_html_rewrite.md
+        - runtime/prompts/refine_review.md
+        - runtime/prompts/refine_apply.md
+        tools:
+        - name: builtin:multimodal
+          source: global
+        - name: ppt_prepare_page
+          source: package
+        - name: ppt_export_html
+          source: package
+        - name: ppt_render_html
+          source: package
+        - name: ppt_inspect_pptx
+          source: package
   trigger_inputs: [template_pptx, uploaded_materials]
   publisher_owned_slots:
     - reflection_markdown
@@ -222,32 +303,6 @@ runtime:
     slot: material_clarification
     before_steps: [plan_background_prompts, generate_backgrounds, build_outline, plan_page_prompts, generate_ppt]
     title: 素材搜集完成 · 补充缺失信息
-  attachment_clarification:
-    filename_suffixes: [.pptx]
-    question_id_prefix: template_detail_
-    inspection_tools:
-      - pptx_analyzer
-      - read_user_attachment
-      - find_user_attachment
-      - KBToolkit
-      - KBToolkit_kb_search
-      - KBToolkit_kb_keyword_search
-      - KBToolkit_kb_get_parent_node
-      - KBToolkit_kb_get_window_nodes
-      - KBToolkit_read_document
-      - KBToolkit_list_knowledge_bases
-      - KBToolkit_list_knowledge_base_documents
-      - KBToolkit_aggregate_knowledge_base_documents
-    # Retained for interpreting answers in older conversation histories.
-    # New tasks inspect attachments only inside the Workflow.
-    instructions: >
-      Main Chat analyzes the request, binds the exact supplied template filename
-      and source references, and starts the Workflow without reading their contents.
-      analyze_requirements owns whole-template inspection and template_content_brief.
-      collect_materials owns document body reads, knowledge-base retrieval, evidence
-      comparison and contribution selection. Do not move these operations before
-      the trigger. Ask unresolved material facts at the post-collection input_checkpoint;
-      preserve all facts and prior answers already supplied by the user.
   clarification_fields:
     - id: contribution_scope
       label: 个人贡献范围
@@ -469,6 +524,14 @@ runtime:
         - 不启用｜使用纯色、渐变和矢量装饰
 
 tool_scripts:
+  - path: scripts/external_pdf_tools.py
+    functions: [pdf_read_text, pdf_extract_images]
+  - path: scripts/external_image_tools.py
+    functions: [ppt_download_material_image]
+  - path: scripts/external_generation_tools.py
+    functions: [ppt_prepare_page, ppt_compute_timing, ppt_order_papers]
+  - path: scripts/external_tools.py
+    functions: [ppt_export_html, ppt_inspect_pptx, ppt_render_html]
   - path: scripts/tools.py
     functions:
       - ppt_source_connections
@@ -477,6 +540,7 @@ tool_scripts:
       - ppt_search_web_images
       - ppt_search_assets
       - ppt_get_asset
+      - ppt_inspect_material_images
       - ppt_register_material_images
       - ppt_collect_kb_images
       - ppt_extract_pdf_images
@@ -499,6 +563,7 @@ tool_scripts:
       - ppt_insert_outline_page
       - ppt_publish_deck_outline
       - ppt_generate_pages
+      - ppt_export_deck
       - ppt_generate_native_pptx
       - ppt_restyle_pages
       - ppt_recolor_pages
@@ -523,8 +588,34 @@ tool_scripts:
       - ppt_preview_selection_edit
       - ppt_apply_selection_edit
 
+artifact_edit:
+  step: generate_ppt
+  slots: [slide_outline, background_prompts, background_images, preview_html, preview_notes, native_pptx]
+  linked_lists: [slide_outline, background_prompts, background_images, preview_html, preview_notes]
+  required_if_present: [native_pptx]
+  instruction: |-
+    Follow the shared PPT Skills and inspect the current selected artifacts before editing.
+    Preserve the user's full edit instruction. Never substitute the uploaded template
+    for the generated deck or rebuild unrelated pages.
+    Local text/style/chart/notes edits preserve every unspecified object and page.
+    Explicit regeneration replaces only the requested pages, using their saved outline,
+    prompts and paper evidence. Delete/insert/reorder whole pages as requested and keep
+    every nonempty linked page list in the same visual order. Preserve existing stable
+    list_index values; new pages omit list_index. Refresh visible page numbers and notes.
+    Use host tools for capabilities unavailable in LazyMind; do not replace these Skills.
+    Preserve editable text, charts, fonts and notes in an existing PPTX. Validate changed
+    content, page count and consistency of every existing representation. Apply the
+    generation step's visual-review policy and disclose any unperformed checks.
+    Submit one atomic workflow.edit.commit bundle with all nonempty linked lists.
+    If native_pptx exists, include its updated file; HTML-only edits need no PPTX.
+    Existing unchanged items carry only list_index. A user-requested edit
+    authorizes this save; never use this API to bypass a pending AI preview confirmation.
+    If a required operation cannot be validated, report the limitation and do not publish.
+
 artifact_actions:
   rewrite_selection:
+    external_generation: true
+    companion_slot: native_pptx
     revision_policy: head
     slots:
       - preview_html
@@ -719,29 +810,6 @@ slots:
   - id: slide_outline
     user_visible: true
     label: Page Prompt
-    type: text
-    cardinality: list
-    ordered: true
-    summary_max_chars: 900
-
-  - id: presentation_style
-    user_visible: true
-    label: Global Style
-    type: text
-    cardinality: single
-    summary_max_chars: 900
-
-  - id: page_layout
-    user_visible: true
-    label: Page Layout
-    type: text
-    cardinality: list
-    ordered: true
-    summary_max_chars: 900
-
-  - id: page_assets
-    user_visible: true
-    label: Page Assets
     type: text
     cardinality: list
     ordered: true
@@ -943,8 +1011,5 @@ i18n:
       background_images: {label: AI 底图}
       deck_outline: {label: 大纲}
       slide_outline: {label: 每页设计稿}
-      presentation_style: {label: 全局风格}
-      page_layout: {label: 页面布局}
-      page_assets: {label: 页面素材}
       preview_html: {label: 幻灯片}
       preview_notes: {label: 讲稿}

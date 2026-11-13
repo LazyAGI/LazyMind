@@ -89,13 +89,16 @@ async def _external_tool_request(payload, token, *, execute=False):
     require_internal_token(token)
     await _chat_service()
     from lazymind.chat.service.external_tools import run_external_tools
+    from lazymind.chat.service.external_tool_errors import ExternalToolFailure, from_exception
     try:
         return await asyncio.to_thread(run_external_tools, payload, execute=execute)
+    except ExternalToolFailure as exc:
+        raise HTTPException(status_code=502, detail=exc.detail) from exc
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail='tool unavailable or invalid arguments') from exc
+        raise HTTPException(status_code=400, detail=from_exception(exc, payload).detail) from exc
     except Exception as exc:
         raise HTTPException(
-            status_code=502, detail='tool execution failed; check its connection and configuration',
+            status_code=502, detail='tool execution failed without public error details',
         ) from exc
 
 

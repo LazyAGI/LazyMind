@@ -16,3 +16,27 @@ slots:
   - {id: evidence, user_visible: true, label: Execution evidence, type: json, cardinality: single}
   - {id: completion, user_visible: true, label: Completion checks, type: json, cardinality: single}
   - {id: result, user_visible: true, label: Result, type: json, cardinality: single}
+
+runtime:
+  execution:
+    version: '1'
+    skills:
+    - scenario/execution.md
+    constraints:
+    - Follow the shared state.yml step specification, declared output schemas and acceptance criteria; preserve the
+      user request and bound input revisions.
+    - Validate actual artifacts before completion, honor questions and review pauses, and report missing capabilities
+      without fabricating output.
+    steps:
+      prepare:
+        tools: []
+      validate_dispatch:
+        tools: []
+      dispatch:
+        tools: []
+      collect:
+        tools: []
+      validate_completion:
+        tools: []
+      record:
+        tools: []

@@ -11,6 +11,8 @@ export type SidebarConversation = ConversationWithRelation & {
   history_order?: number | null;
   source_type?: string;
   source_display_name?: string;
+  external_workflow_session_id?: string;
+  execution_owner?: string;
   is_task_conv?: boolean;
   assistant?: string;
   group_id?: string | null;

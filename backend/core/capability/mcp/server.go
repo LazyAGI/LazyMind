@@ -61,7 +61,7 @@ func NewHandler(service *capability.Service, config HandlerConfig) (http.Handler
 					}
 					call, err := config.AuthorizeCall(ctx, req)
 					if err != nil {
-						return cloudToolError(err), nil
+						return capabilityToolError(err), nil
 					}
 					ctx = context.WithValue(ctx, trustedInvocationKey{}, call)
 				}
@@ -205,9 +205,12 @@ func newServer(service *capability.Service) *mcp.Server {
 				"required":   []string{"result"},
 			},
 			Description: "Execute an available tool through LazyMind after checking ownership, current availability, and the Agent's explicit opt-outs.", Annotations: executionAnnotations(true),
-		}, func(ctx context.Context, request *mcp.CallToolRequest, input capability.InvokeExternalToolInput) (*mcp.CallToolResult, capability.InvokeExternalToolResult, error) {
+		}, func(ctx context.Context, request *mcp.CallToolRequest, input capability.InvokeExternalToolInput) (*mcp.CallToolResult, any, error) {
 			result, err := service.InvokeExternalTool(ctx, invocation(ctx, request), input)
-			return nil, result, err
+			if err != nil {
+				return capabilityToolError(err), nil, nil
+			}
+			return nil, result, nil
 		})
 	}
 	return server
@@ -242,21 +245,24 @@ func addCloudTool[In, Out any](server *mcp.Server, tool *mcp.Tool, handler mcp.T
 			notifyKnowledgeProgress(ctx, request, 1, message)
 		}
 		if err != nil {
-			return cloudToolError(err), nil, nil
+			return capabilityToolError(err), nil, nil
 		}
 		return result, output, nil
 	})
 }
 
-func cloudToolError(err error) *mcp.CallToolResult {
+func capabilityToolError(err error) *mcp.CallToolResult {
 	if err == nil {
 		return nil
 	}
 	var detail *capability.Error
 	if !errors.As(err, &detail) {
-		detail = capability.NewError(capability.Internal, "cloud_document", "cloud document operation failed", false, nil)
+		detail = capability.NewError(capability.Internal, "capability", "capability operation failed", false, nil)
 	}
 	data := map[string]any{"code": detail.Code, "message": detail.Message, "retryable": detail.Retryable}
+	if detail.Upstream != nil {
+		data["upstream"] = detail.Upstream
+	}
 	if detail.Details != nil {
 		data["details"] = detail.Details
 	}

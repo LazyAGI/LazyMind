@@ -10,7 +10,7 @@ import i18n from '@/i18n';
 import { hydrateWorkflowUI, type SlotRevision, type WorkflowSession, type WorkflowUI } from '@/modules/chat/store/workflowPanel';
 import { SlotEditingContext, WorkflowPanelTabActiveContext, type SlotEditingContextValue } from './slotEditingContext';
 import { WorkflowPanel } from './index';
-import { controlActions, externalPanelAction, type WorkflowActionIntent, type WorkflowPanelActionIntent, type WorkflowControlView } from '@/modules/chat/utils/workflowControl';
+import { controlActions, externalPanelAction, externalContinuationStep, type WorkflowActionIntent, type WorkflowPanelActionIntent, type WorkflowControlView } from '@/modules/chat/utils/workflowControl';
 import { loadWorkflowRunSnapshot } from '@/modules/chat/utils/loadWorkflowRun';
 import { ArtifactPreviewContext, useArtifactPreviewController } from '../ArtifactPreview/context';
 
@@ -20,7 +20,10 @@ setupAntdStaticCleanup();
 // capabilities, reviews or delivery state.
 function panelAdapter(control: WorkflowControlView, execute: (intent: WorkflowActionIntent) => Promise<void>) {
   const session = fixture.session;
-  return { execute: (intent: WorkflowPanelActionIntent) => execute(externalPanelAction(intent, session, control)) };
+  return {
+    execute: (intent: WorkflowPanelActionIntent) => execute(externalPanelAction(intent, session, control)),
+    continuationStep: () => externalContinuationStep(fixture.session, control),
+  };
 }
 
 vi.mock('../ArtifactPreview', () => ({ PreviewContent: ({ target, close }: any) => <section aria-label={target.filename}>
@@ -109,7 +112,9 @@ vi.mock('./SlotComponents', () => ({
       });
       return () => { unregisterFlush(); unregisterAction(); };
     }, [active, context.registerFlush, context.registerFooterAction, slotId, slot.document, slot.list_index]);
-    return <article onDoubleClick={() => context.setEditing(slotId, true)} data-widget={widget?.widgetType} data-readonly={Boolean(readOnly)} data-value={(slot.artifact_value as { text?: string })?.text}>正文 {slotId}<button onClick={() => context.onBrowse?.()}>查看历史</button></article>;
+    return <article onDoubleClick={() => context.setEditing(slotId, true)} data-widget={widget?.widgetType} data-readonly={Boolean(readOnly)} data-value={(slot.artifact_value as { text?: string })?.text}>正文 {slotId}
+      {slot.artifact_value?.url && <a href={String(slot.artifact_value.url)} download={String(slot.artifact_value.filename)}>下载原始文件</a>}
+      <button onClick={() => context.onBrowse?.()}>查看历史</button></article>;
   },
 }));
 
@@ -665,6 +670,94 @@ describe('shared workflow compact layout', () => {
     expect(screen.getByRole('listitem', { name: '第 2 行' })).toHaveAttribute('aria-current', 'true');
     expect(screen.getByText('正文 preview')).toBeVisible();
     expect(screen.getByText('正文 notes')).toBeVisible();
+  });
+
+  function configureFileAndPreviews() {
+    fixture.ui.tabs = [{
+      id: 'slides', label: '幻灯片', layout: 'composite', slot_scope: 'selected', composite_tab_position: 'left',
+      slots: [
+        { id: 'native_file', label: '演示文件', type: 'file', cardinality: 'single' },
+        { id: 'preview', label: '预览', type: 'text', cardinality: 'list', ordered: true, widget: { widgetType: 'html-slide' } },
+        { id: 'notes', label: '备注', type: 'text', cardinality: 'list', ordered: true },
+      ],
+      composite_layout: { direction: 'column', children: [{ slot: 'native_file' }, { slot: 'preview', weight: 3 }, { slot: 'notes' }] },
+    }];
+    fixture.session.slots = [
+      { slot: 'native_file', slot_id: 'native_file', sort_order: 0, selected: true,
+        artifact_value: { url: '/artifacts/original-editable.pptx', filename: 'original-editable.pptx' } },
+      ...[1, 2, 3, 4].flatMap(sort_order => ['preview', 'notes'].map(slot => ({
+        slot, slot_id: slot, sort_order, list_index: sort_order - 1, selected: true,
+        artifact_value: { text: `${slot}-${sort_order}` },
+      }))),
+    ] as WorkflowSession['slots'];
+  }
+
+  it.each(['native', 'external'])('separates the original file delivery from four actual preview pages on %s surfaces', async surface => {
+    configureFileAndPreviews();
+    const original = JSON.stringify(fixture.session.slots);
+    render(<WorkflowPanel conversationId='layout-test' {...(surface === 'external' ? { embedded: true, resultsOnly: true, externalPresentation: { activities: {} } } : {})} />);
+    const first = await screen.findByRole('listitem', { name: '第 1 行' });
+    expect(screen.getAllByRole('listitem')).toHaveLength(4);
+    expect(first).toHaveAttribute('aria-current', 'true');
+    expect(screen.getByText('正文 preview')).toHaveAttribute('data-value', 'preview-1');
+    expect(screen.getByText('正文 notes')).toHaveAttribute('data-value', 'notes-1');
+    const delivery = screen.getByRole('region', { name: '演示文件' });
+    expect(delivery.closest('.composite-grid--paged')).toBeNull();
+    expect(within(delivery).getByRole('link', { name: '下载原始文件' })).toHaveAttribute('href', '/artifacts/original-editable.pptx');
+    expect(within(delivery).getByRole('link', { name: '下载原始文件' })).toHaveAttribute('download', 'original-editable.pptx');
+    fireEvent.click(screen.getByRole('button', { name: '下一张幻灯片' }));
+    expect(screen.getByRole('listitem', { name: '第 2 行' })).toHaveAttribute('aria-current', 'true');
+    expect(screen.getByText('正文 preview')).toHaveAttribute('data-value', 'preview-2');
+    expect(within(delivery).getByRole('link', { name: '下载原始文件' })).toBeVisible();
+    expect(JSON.stringify(fixture.session.slots)).toBe(original);
+  });
+
+  it.each([0, undefined])('keeps a file-only result downloadable without inventing a slide (file order=%s)', async sort_order => {
+    configureFileAndPreviews();
+    fixture.session.slots = [{ ...fixture.session.slots![0], sort_order }];
+    render(<WorkflowPanel conversationId='layout-test' />);
+    expect(await screen.findByRole('link', { name: '下载原始文件' })).toHaveAttribute('href', '/artifacts/original-editable.pptx');
+    expect(screen.queryByRole('listitem')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '下一张幻灯片' })).not.toBeInTheDocument();
+    expect(screen.queryByText('等待生成结果...')).not.toBeInTheDocument();
+  });
+
+  it('keeps preview selection stable when the original file is published later', async () => {
+    configureFileAndPreviews();
+    const file = fixture.session.slots!.shift()!;
+    const view = render(<WorkflowPanel conversationId='layout-test' />);
+    await screen.findByRole('listitem', { name: '第 1 行' });
+    expect(screen.getAllByRole('listitem')).toHaveLength(4);
+    expect(screen.queryByRole('region', { name: '演示文件' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '下一张幻灯片' }));
+    fixture.session.slots!.unshift(file);
+    view.rerender(<WorkflowPanel conversationId='layout-test' />);
+    expect(await screen.findByRole('link', { name: '下载原始文件' })).toBeVisible();
+    expect(screen.getAllByRole('listitem')).toHaveLength(4);
+    expect(screen.getByRole('listitem', { name: '第 2 行' })).toHaveAttribute('aria-current', 'true');
+    expect(screen.getByText('正文 preview')).toHaveAttribute('data-value', 'preview-2');
+  });
+
+  it('keeps partially published notes pages and their original sort orders', async () => {
+    configureFileAndPreviews();
+    fixture.session.slots = fixture.session.slots!.filter(slot => slot.slot !== 'preview' || slot.sort_order === 1);
+    render(<WorkflowPanel conversationId='layout-test' />);
+    await screen.findByRole('listitem', { name: '第 1 行' });
+    expect(screen.getAllByRole('listitem')).toHaveLength(4);
+    fireEvent.click(screen.getByRole('listitem', { name: '第 4 行' }));
+    expect(screen.getByText('正文 notes')).toHaveAttribute('data-value', 'notes-4');
+    expect(screen.queryByText('正文 preview')).not.toBeInTheDocument();
+  });
+
+  it('preserves files explicitly declared as repeated page material', async () => {
+    configureFileAndPreviews();
+    fixture.ui.tabs![0].composite_behavior = { repeat_single_slots: ['native_file'] };
+    fixture.session.slots![0].sort_order = 1;
+    render(<WorkflowPanel conversationId='layout-test' />);
+    await screen.findByRole('listitem', { name: '第 1 行' });
+    expect(screen.queryByRole('region', { name: '演示文件' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '下一张幻灯片' }));
+    expect(screen.getByRole('link', { name: '下载原始文件' }).closest('.composite-grid--paged')).not.toBeNull();
   });
 
   it('keeps a repeated status visible without giving it a separate media page', async () => {
@@ -1356,6 +1449,33 @@ describe('external workflow surface boundary', () => {
     },
   );
 
+  it.each([false, true])('offers idle external continuation and rechecks execution before sending with advanced=%s', async advanced => {
+    fixture.session.status = 'active';
+    fixture.session.steps?.forEach(step => Reflect.deleteProperty(step, 'id'));
+    fixture.session.projection = { display: { status: 'running', reason: 'preparing', approval_step_id: '' },
+      past: ['prepare', 'write_document'], current: [], ready: ['finish'], nodes: {
+        write_document: { execution: 'succeeded', validity: 'effective', requires_approval: false,
+          reachability: 'reachable', readiness: 'not_applicable', branch: 'active' },
+      } };
+    const control: WorkflowControlView = {
+      protocol: 'workflow.control.v1', session_id: 'layout-test', state_version: 8,
+      continuation: 'continue', reviews: [], active_executions: 0, active_execution_ids: [],
+      binding: { bound: true }, admission: { can_begin: true }, available_actions: ['continue'],
+      delivery: { id: 'finished', kind: 'continue', status: 'accepted', execution_id: 'pss-completed' },
+    };
+    const execute = vi.fn(async () => {});
+    render(<WorkflowPanel conversationId='layout-test' embedded controlAdapter={panelAdapter(control, execute)} />);
+    await screen.findByText('正文 document');
+    const button = await screen.findByRole('button', { name: '继续' });
+    expect(button).toBeEnabled();
+    expect(button).toHaveAttribute('title', '继续');
+    if (advanced) fixture.refresh.mockImplementationOnce(async () => { control.active_executions = 1; });
+    await act(async () => fireEvent.click(button));
+    expect(fixture.flush).toHaveBeenCalledOnce();
+    if (advanced) expect(execute).not.toHaveBeenCalled();
+    else expect(execute).toHaveBeenCalledWith({ kind: 'continue' });
+  });
+
   it('uses the native running footer and routes stop without saving editors', async () => {
     fixture.session.status = 'active';
     fixture.session.projection!.display = { status: 'running', reason: 'executing', approval_step_id: '' };
@@ -1472,6 +1592,21 @@ describe('external workflow surface boundary', () => {
 
 
 describe('external presentation opt-in', () => {
+  it('keeps conversation results on persisted artifacts even when execution and developer activity are available', async () => {
+    fixture.session.status = 'active';
+    fixture.session.steps![1] = { ...fixture.session.steps![1], status: 'running', task_id: 'task' };
+    fixture.ui.tabs![0].slots = [{ id: 'internal_prompt', label: '生成提示词', type: 'text', user_visible: false }];
+    fixture.session.slots!.push({ ...fixture.session.slots![0], slot_id: 'internal_prompt', slot: 'internal_prompt', step_id: 'prepare' });
+    const { setDeveloperModeActive } = await import('@/utils/developerMode');
+    setDeveloperModeActive(true);
+    render(<WorkflowPanel conversationId='layout-test' resultsOnly externalPresentation={{ activities: {
+      task: { kind: 'tool', tool: 'search', artifacts: [{ slot: 'document', content_type: 'text', seq: 2, value: { text: 'provisional' } }] },
+    } }} />);
+    expect(await screen.findByText('正文 document')).toHaveAttribute('data-value', '正文');
+    expect(screen.queryByText('正文 internal_prompt')).not.toBeInTheDocument();
+    expect(screen.queryByText('正在调用工具：search')).not.toBeInTheDocument();
+    expect(screen.queryByText('生成中预览')).not.toBeInTheDocument();
+  });
   it('shows activity and readonly previews only for the external surface, without changing stored artifacts', async () => {
     fixture.session.status = 'active';
     fixture.session.steps![1] = { ...fixture.session.steps![1], status: 'running', task_id: 'task' };

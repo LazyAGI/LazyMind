@@ -193,9 +193,9 @@ def run_image_model_instance(
         raise ToolExecutionError('prompt is required')
 
     size = str(image_size or _DEFAULT_IMAGE_SIZE).strip() or _DEFAULT_IMAGE_SIZE
-    count = int(batch_size or _DEFAULT_BATCH_SIZE)
-    if count < 1:
-        raise ToolExecutionError('batch_size must be at least 1')
+    if not isinstance(batch_size, int) or isinstance(batch_size, bool) or batch_size < 1:
+        raise ToolExecutionError('batch_size must be a positive integer')
+    count = batch_size
 
     call_kwargs: Dict[str, Any] = {
         'image_size': size,

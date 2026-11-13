@@ -59,6 +59,13 @@ def _materials(deck: Path) -> tuple[dict[str, str], dict[str, list[str]]]:
     return aliases, hashes
 
 
+def _basename_aliases(aliases: dict[str, str]) -> dict[str, str]:
+    matches: dict[str, set[str]] = {}
+    for canonical in set(aliases.values()):
+        matches.setdefault(Path(canonical).name, set()).add(canonical)
+    return {name: next(iter(paths)) for name, paths in matches.items() if len(paths) == 1}
+
+
 def _resolve(source: str, aliases: dict[str, str], hashes: dict[str, list[str]]) -> str | None:
     key = _key(source)
     if key.lower().startswith(('http:', 'https:', 'data:', '//')):
@@ -79,6 +86,11 @@ def bind_prompt_materials(
     aliases, hashes = _materials(deck)
     background_aliases, background_hashes = _image_bindings(deck, [background_image] if background_image else [])
     required: list[str] = []
+    # Old editable briefs may refer to a registered asset by its display name.
+    # Match a bare name only when it identifies one exact foreground file.
+    bare = _basename_aliases(aliases)
+    for canonical in set(background_aliases.values()):
+        bare.pop(Path(canonical).name, None)
 
     def replace(match: re.Match) -> str:
         source = match[0]
@@ -91,7 +103,7 @@ def bind_prompt_materials(
             material = _resolve(source, aliases, hashes)
             background = None
         else:
-            material = aliases.get(key)
+            material = aliases.get(key) or bare.get(source)
             background = background_aliases.get(key) if not material else None
             if not (material or background):
                 material = _resolve(source, aliases, hashes)
@@ -110,14 +122,25 @@ def bind_prompt_materials(
             required.append(relative)
         return canonical
 
-    return _LOCAL_IMAGE.sub(replace, brief), required
+    pattern = _LOCAL_IMAGE
+    if bare:
+        names = '|'.join(re.escape(name) for name in sorted(bare, key=lambda name: (-len(name), name)))
+        # Path alternatives take precedence, so an unknown path with a known
+        # basename is still rejected. The left boundary excludes URL/path parts.
+        bare_pattern = (
+            r'(?<![\w/\\:.%+@?&#=-])(?-i:' + names
+            + r""")(?=$|[\s"'\x60<>),;，。]|\.(?=\s|$))"""
+        )
+        pattern = re.compile(_LOCAL_IMAGE.pattern + '|' + bare_pattern, re.I)
+    return pattern.sub(replace, brief), required
 
 
 def normalize_material_sources(html: str, deck: Path) -> str:
     aliases, hashes = _materials(deck)
+    bare = _basename_aliases(aliases)
 
     def replace(match: re.Match) -> str:
-        canonical = _resolve(match[3], aliases, hashes)
+        canonical = _resolve(match[3], aliases, hashes) or bare.get(match[3])
         return f'{match[1]}{match[2]}{canonical}{match[2]}' if canonical else match[0]
 
     return _IMG_SRC.sub(replace, html)

@@ -95,11 +95,18 @@ def test_template_mode_requires_resolved_template_binding(
 def runtime():
     package = Path(__file__).resolve().parents[3] / 'workflows/ppt-workflow/workflow.yaml'
     policy = yaml.safe_load(package.read_text(encoding='utf-8'))['runtime']
-    # Exercise the generic host's upload/follow-up contract. PPT now derives
-    # template_mode internally; its current startup UI is covered separately.
+    # Exercise the generic host's upload/follow-up contract independently of
+    # PPT's current post-collection checkpoint and internally derived template_mode.
     template = next(f for f in policy['clarification_fields'] if f['id'] == 'template_mode')
     template.update(question='请选择并上传模板', choice_policy='fixed', allow_other=False)
-    return {key: policy[key] for key in ('clarification_fields', 'attachment_clarification')}
+    return {
+        'clarification_fields': policy['clarification_fields'],
+        'attachment_clarification': {
+            'filename_suffixes': ['.pptx'],
+            'question_id_prefix': 'template_detail_',
+            'inspection_tools': ['pptx_analyzer', 'KBToolkit_kb_search'],
+        },
+    }
 
 
 def test_discovered_template_ask_emits_upload_control_without_model_metadata(runtime):

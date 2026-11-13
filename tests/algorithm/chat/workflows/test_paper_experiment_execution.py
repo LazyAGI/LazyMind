@@ -12,7 +12,7 @@ from lazymind.document_tools.paper.experiment.handoff import to_analysis
 from lazymind.document_tools.paper.experiment.schema import ExperimentDraft
 
 ROOT = Path(__file__).resolve().parents[4]
-SANDBOX = sys.platform == 'win32' or (sys.platform == 'linux' and any(
+SANDBOX = sys.platform in ('win32', 'darwin') or (sys.platform == 'linux' and any(
     Path(marker).exists() for marker in ('/.dockerenv', '/run/.containerenv')))
 
 
@@ -84,7 +84,7 @@ def test_unsupported_code_does_not_enter_worker(example, statement):
         validate_code(source)
 
 
-@pytest.mark.skipif(not SANDBOX, reason='Requires a Linux service container or native Windows AppContainer')
+@pytest.mark.skipif(not SANDBOX, reason='Requires a Linux container or native desktop isolation')
 def test_real_computation_replaces_preview_and_matches_f4(example):
     draft = ExperimentDraft.model_validate(example['model_response'])
     receipt = execute(draft, example['input'], allowed=True)
@@ -102,7 +102,7 @@ def test_real_computation_replaces_preview_and_matches_f4(example):
     assert execute(draft, example['input'], allowed=True)['results'] == receipt['results']
 
 
-@pytest.mark.skipif(not SANDBOX, reason='Requires a Linux service container or native Windows AppContainer')
+@pytest.mark.skipif(not SANDBOX, reason='Requires a Linux container or native desktop isolation')
 def test_execution_failure_preserves_preview_and_error(example):
     candidate = copy.deepcopy(example['model_response'])
     code = candidate['code_files'][0]

@@ -451,3 +451,18 @@ func TestStoredRunEventDropsLegacyProviderTransportFields(t *testing.T) {
 		t.Fatalf("legacy transport fields were re-exposed: %s", event.Data)
 	}
 }
+
+func TestRuntimeEventValidatesCancelledModelCall(t *testing.T) {
+	valid := json.RawMessage(`{"model_call_id":"call-cancelled","attempt_count":1,"kind":"cancelled","has_semantic_output":true,"usage":{"prompt_tokens":11}}`)
+	if err := validateModelCallFinished(valid); err != nil {
+		t.Fatalf("cancelled model call must close its lifecycle: %v", err)
+	}
+	for _, raw := range []string{
+		`{"model_call_id":"call-cancelled","attempt_count":1,"kind":"cancelled","has_semantic_output":true,"finish":"stop"}`,
+		`{"model_call_id":"call-cancelled","attempt_count":1,"kind":"cancelled","has_semantic_output":true,"failure":{"origin":"transport","code":"request_timeout"}}`,
+	} {
+		if err := validateModelCallFinished(json.RawMessage(raw)); err == nil {
+			t.Fatalf("contradictory cancellation accepted: %s", raw)
+		}
+	}
+}

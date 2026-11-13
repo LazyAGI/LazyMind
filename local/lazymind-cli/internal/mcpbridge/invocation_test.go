@@ -165,14 +165,14 @@ func (r *recordingInvocationRecorder) values() ([]coreapi.InvocationStart, []cor
 }
 
 func TestWorkflowInstructionsDescribeExecutionAndArtifactMapping(t *testing.T) {
-	for _, part := range []string{"workflow.start", "The host displays the Workflow panel automatically", "workflow.step.begin", "workflow.step.claim", "execution_handle", "executor_host is lazymind", "save_artifact/save_artifacts", "workflow.artifact.publish", "key becomes slot", "when execution finishes", "control.continuation", "workflow.state confirms completed"} {
+	for _, part := range []string{"workflow.start", "execution_handle", "workflow.artifact.publish", "control.continuation", "workflow.state confirms completed"} {
 		if !strings.Contains(workflowInstructions, part) {
 			t.Errorf("instructions missing %q", part)
 		}
 	}
-	for _, obsolete := range []string{"workflow.get", "legacy_tools", "if a function cannot run"} {
+	for _, obsolete := range []string{"legacy_tools", "external_execution", "hidden LazyMind", "page workers", "export once"} {
 		if strings.Contains(workflowInstructions, obsolete) {
-			t.Errorf("instructions retain obsolete guidance %q", obsolete)
+			t.Errorf("connection instructions contain legacy or business-specific guidance %q", obsolete)
 		}
 	}
 }

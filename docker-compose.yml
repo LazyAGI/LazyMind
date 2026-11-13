@@ -209,9 +209,10 @@ services:
       - pgdata:/var/lib/postgresql/data
       - ./db-init:/docker-entrypoint-initdb.d
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U root -d postgres"]
+      # Avoid an orphaned shell child being reaped by PostgreSQL as a crashed backend.
+      test: ["CMD", "pg_isready", "-U", "root", "-d", "postgres", "-t", "2"]
       interval: 5s
-      timeout: 3s
+      timeout: 10s
       retries: 20
 
   db-bootstrap:

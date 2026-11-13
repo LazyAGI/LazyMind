@@ -683,13 +683,18 @@ def test_direct_entry_accepts_question_without_pool_and_missing_question_fails(t
         contracts.validate_input('experiment', {'topic': 'T'})
 
 
-def test_experiment_question_is_dynamic_and_not_required_at_startup():
+def test_experiment_execution_keeps_the_original_two_fixed_choices():
     from lazymind.chat.workflow.workflow_manager import enforce_startup_clarification_policy
     package = yaml.safe_load((PACKAGE / 'workflow.yaml').read_text())
-    assert not package['runtime'].get('clarification_fields')
-    questions = [{'id': 'q1', 'text': '当前没有耗时实验数据，接下来如何准备？',
-                  'type': 'single', 'choices': ['我会补充真实数据', '使用模拟数据']}]
-    assert enforce_startup_clarification_policy(questions, package['runtime']) == questions
+    field = package['runtime']['clarification_fields'][0]
+    choices = ['不允许，仅生成代码和模拟数据', '允许受限运行，条件不足时使用模拟数据']
+    questions = [{'id': field['id'], 'text': field['question'], 'type': 'single',
+                  'choices': ['提供数据', '模拟研究', '公开数据集'], 'allow_other': True}]
+    question = enforce_startup_clarification_policy(questions, package['runtime'])[0]
+    assert question['id'] == 'experiment_execution'
+    assert question['choices'] == choices
+    assert question['choice_policy'] == 'fixed'
+    assert question['allow_other'] is False
     state = yaml.safe_load((PACKAGE / 'scenario/state.yml').read_text())
     assert 'prepare' not in state['steps']
     assert all(not item.get('required', True) for item in state['steps']['experiment']['inputs'])

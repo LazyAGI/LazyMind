@@ -1,4 +1,4 @@
-"""Core Windows execution, isolation and Desktop compatibility regressions."""
+"""Native execution, isolation and Desktop compatibility regressions."""
 import base64
 import json
 import os
@@ -19,6 +19,7 @@ from lazymind.document_tools.paper.plotting.executor import execute_plot
 
 
 NATIVE_WINDOWS = pytest.mark.skipif(sys.platform != 'win32', reason='Requires native Windows AppContainer APIs')
+NATIVE_DESKTOP = pytest.mark.skipif(sys.platform not in ('win32', 'darwin'), reason='Requires native desktop isolation')
 
 
 @pytest.mark.parametrize('available', [True, False])
@@ -91,8 +92,8 @@ def test_windows_launch_failure_does_not_fall_back_to_host(monkeypatch, tmp_path
     host.assert_not_called()
 
 
-@NATIVE_WINDOWS
-def test_real_windows_statistics_and_three_plot_formats():
+@NATIVE_DESKTOP
+def test_real_desktop_statistics_and_three_plot_formats():
     # Go through both public executors, including their environment validation.
     result = generated_executor.execute(dict(
         tables={'data': {'rows': [[1.0], [3.0], [5.0]]}}, plan={}, seed=42,
@@ -117,11 +118,11 @@ def test_real_windows_statistics_and_three_plot_formats():
 def _native_worker(tmp_path, code, payload=None, timeout=20):
     worker = tmp_path / 'trusted-worker.py'
     worker.write_text(code, encoding='utf-8')
-    return container.execute(payload or {}, worker, timeout, label='Windows test')
+    return container.execute(payload or {}, worker, timeout, label='Desktop test')
 
 
-@NATIVE_WINDOWS
-def test_real_windows_isolation(tmp_path, monkeypatch):
+@NATIVE_DESKTOP
+def test_real_desktop_isolation(tmp_path, monkeypatch):
     private = tmp_path / 'service-secret.txt'
     private.write_text('service credential', encoding='utf-8')
     monkeypatch.setenv('PAPER_TEST_CREDENTIAL', 'must not inherit')

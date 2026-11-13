@@ -9,6 +9,42 @@ export async function prepareCodexBrowser(loadModule = (url: string): Promise<Re
   const state = {pending: undefined as Promise<void> | undefined, retryAfter: 0}
   host[key] = state
   state.pending = (async () => {
+    const capable = (value: any) => {
+      try { return value && typeof value === 'object' && typeof value.pages?.getWebview === 'function'
+        && typeof value.pages?.disposeHost === 'function' && typeof value.getSnapshot === 'function' } catch { return false }
+    }
+    // Rspack desktops expose their existing module cache from a loaded numeric
+    // entry. Inspect only initialized modules; calling a factory would create a
+    // second service with its own subscriptions and browser registrations.
+    const entries = Array.from(document.querySelectorAll<HTMLScriptElement>('script[type="module"][src]'))
+      .map(element => element.src).filter(url => /^app:\/\/-\/assets\/\d+\.[a-zA-Z0-9_-]+\.js$/.test(url))
+    for (const url of [...new Set(entries)].slice(0, 8)) {
+      let exports: Record<string, any>
+      try { exports = await loadModule(url) } catch { continue }
+      const runtime = exports.__webpack_require__
+      if (typeof runtime !== 'function' || !runtime.c || !runtime.m) continue
+      let count = 0, sourceSize = 0
+      const deadline = Date.now() + 2000
+      for (const id of Object.keys(runtime.c)) {
+        if (++count > 16384 || Date.now() > deadline) break
+        if (count % 128 === 0) await new Promise(resolve => setTimeout(resolve, 0))
+        const factory = runtime.m[id]
+        if (typeof factory !== 'function') continue
+        const source = Function.prototype.toString.call(factory)
+        sourceSize += source.length
+        if (sourceSize > 32 * 1024 * 1024) break
+        if (!source.includes('getWebview') || !source.includes('disposeHost') || !source.includes('getSnapshot')) continue
+        // ES module export getters return live bindings. Only inspect them for
+        // a cached factory carrying all three browser capability markers.
+        const namespace = runtime.c[id]?.exports
+        if (!namespace || typeof namespace !== 'object') continue
+        for (const descriptor of Object.values(Object.getOwnPropertyDescriptors(namespace))) {
+          let value: any
+          try { value = 'value' in descriptor ? descriptor.value : descriptor.get?.call(namespace) } catch { continue }
+          if (capable(value)) { host.__lazymindCodexBrowser = value; return }
+        }
+      }
+    }
     const asset = /^app:\/\/-\/assets\/(?:index|app-main|app-initial)-[a-zA-Z0-9_-]+\.js$/
     const urls = Array.from(document.querySelectorAll<HTMLLinkElement | HTMLScriptElement>('link[href],script[type="module"][src]'))
       .map(element => 'href' in element ? element.href : element.src).filter(url => asset.test(url))
@@ -19,14 +55,12 @@ export async function prepareCodexBrowser(loadModule = (url: string): Promise<Re
       const url = queue.shift()!
       if (seen.has(url)) continue
       seen.add(url)
-      if (url.includes('/app-initial-')) {
+      {
         const exports = await loadModule(url)
         const manager = Object.values(exports).find((value: any) => value && typeof value === 'object'
           && typeof value.pages?.getWebview === 'function' && typeof value.pages?.disposeHost === 'function'
           && typeof value.getSnapshot === 'function')
-        if (!manager) throw Error('Codex native browser interface is unavailable')
-        host.__lazymindCodexBrowser = manager
-        return
+        if (manager) { host.__lazymindCodexBrowser = manager; return }
       }
       const response = await fetch(url, {signal: AbortSignal.timeout(2000), redirect: 'error'})
       if (!response.ok) throw Error('Codex browser entry module is unavailable')

@@ -51,7 +51,9 @@ export function activeExecutionTasks(session?: WorkflowSession | null) {
     if (step.validity === 'stale') continue;
     if (!latest.has(step.step_id) || latest.get(step.step_id)!.attempt < step.attempt) latest.set(step.step_id, step);
   }
-  return [...latest.values()].filter(step => step.task_id
+  // External workers publish through the workflow protocol, not native task SSE.
+  return [...latest.values()].filter(step => (step.executor_host ?? session.controller_host) !== 'external-agent'
+    && step.task_id
     && ['pending', 'queued', 'claimed', 'running'].includes(step.status)
     && ['pending', 'queued', 'claimed', 'running'].includes(session?.projection?.nodes?.[step.step_id]?.execution ?? step.status));
 }

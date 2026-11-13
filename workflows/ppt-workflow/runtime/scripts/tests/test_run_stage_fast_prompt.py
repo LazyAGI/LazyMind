@@ -216,7 +216,8 @@ class StyleRenderingRecipeTest(unittest.TestCase):
         workflow = yaml.safe_load(workflow_path.read_text(encoding='utf-8'))
         state = yaml.safe_load(state_path.read_text(encoding='utf-8'))
 
-        registered = workflow['tool_scripts'][0]['functions']
+        registered = next(item['functions'] for item in workflow['tool_scripts']
+                          if item['path'] == 'scripts/tools.py')
         step_tools = state['steps']['generate_ppt']['tools']
         prompt = state['steps']['generate_ppt']['prompt']
         for tool in (

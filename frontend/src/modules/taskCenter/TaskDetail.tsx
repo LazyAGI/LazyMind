@@ -20,6 +20,7 @@ interface TaskDetailProps {
   task: Task | null;
   onClose: () => void;
   onOpenConversation: (conversationId: string) => void;
+  onOpenWorkflow?: (sessionId: string) => void;
   onOpenGraph?: (sessionId: string) => void;
   onArchive?: (task: Task) => void;
   onDelete?: (task: Task) => Promise<void> | void;
@@ -27,7 +28,7 @@ interface TaskDetailProps {
 
 const containsChinese = (value: string) => /[\u3400-\u4dbf\u4e00-\u9fff]/.test(value);
 
-export default function TaskDetail({ task: initialTask, onClose, onOpenConversation, onOpenGraph, onArchive, onDelete }: TaskDetailProps) {
+export default function TaskDetail({ task: initialTask, onClose, onOpenConversation, onOpenWorkflow, onOpenGraph, onArchive, onDelete }: TaskDetailProps) {
   const { t } = useTranslation();
   const [selection, setSelection] = useState<{ sourceId: string; task: Task } | null>(null);
   const selectedTask = initialTask && selection?.sourceId === initialTask.id ? selection.task : initialTask;
@@ -131,11 +132,15 @@ export default function TaskDetail({ task: initialTask, onClose, onOpenConversat
         <Button danger size='large' icon={<CloseCircleFilled />} disabled={!onDelete} onClick={() => handleAction({ key: 'trash' })}>{t('taskCenter.scheduleDelete')}</Button>
         <Button type='primary' size='large' disabled={!task.conversation_id} onClick={() => task.conversation_id && onOpenConversation(task.conversation_id)}>{t('taskCenter.scheduleEdit')}</Button>
       </div> : task ? (
-        <Tooltip title={!task.conversation_id ? t('taskCenter.conversationUnavailable') : undefined}>
-          <Button type='primary' block size='large' disabled={!task.conversation_id} onClick={() => task.conversation_id && onOpenConversation(task.conversation_id)}>
-            {t('taskCenter.openConversation')}
-          </Button>
-        </Tooltip>
+        <div style={{ display: 'grid', gap: 8 }}>
+          {task.workflow_session_id && onOpenWorkflow && <Button type='primary' block size='large'
+            onClick={() => onOpenWorkflow(task.workflow_session_id!)}>{t('taskCenter.openWorkflow')}</Button>}
+          {(task.conversation_id || !task.workflow_session_id || !onOpenWorkflow) && <Tooltip title={!task.conversation_id ? t('taskCenter.conversationUnavailable') : undefined}>
+            <Button type={task.workflow_session_id && onOpenWorkflow ? 'default' : 'primary'} block size='large' disabled={!task.conversation_id} onClick={() => task.conversation_id && onOpenConversation(task.conversation_id)}>
+              {t('taskCenter.openConversation')}
+            </Button>
+          </Tooltip>}
+        </div>
       ) : null}
     >
       {task ? (

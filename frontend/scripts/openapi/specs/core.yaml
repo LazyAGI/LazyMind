@@ -9895,6 +9895,7 @@ components:
                     enum:
                         - finish
                         - failure
+                        - cancelled
                     type: string
                 model_call_id:
                     type: string

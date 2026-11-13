@@ -58,12 +58,15 @@ func executorID(owner string) string {
 }
 
 func (s *Service) Begin(ctx context.Context, owner, sessionID, attemptID string) (Execution, error) {
-	return s.begin(ctx, owner, sessionID, attemptID, false)
+	return s.begin(ctx, owner, sessionID, attemptID, false, "")
 }
 
-func (s *Service) begin(ctx context.Context, owner, sessionID, attemptID string, resume bool) (Execution, error) {
+func (s *Service) begin(ctx context.Context, owner, sessionID, attemptID string, resume bool, claimID string) (Execution, error) {
 	if strings.TrimSpace(owner) == "" || strings.TrimSpace(sessionID) == "" || strings.TrimSpace(attemptID) == "" {
 		return Execution{}, &ProtocolError{Code: "INVALID_EXECUTION", Message: "owner, session_id and execution_id are required"}
+	}
+	if len(claimID) > 255 {
+		return Execution{}, &ProtocolError{Code: "INVALID_EXECUTION", Message: "claim command ID must be at most 255 characters"}
 	}
 	if err := s.Store.AuthorizeSession(ctx, sessionID, owner); err != nil {
 		return Execution{}, err
@@ -72,8 +75,8 @@ func (s *Service) begin(ctx context.Context, owner, sessionID, attemptID string,
 	if err := s.DB.WithContext(ctx).Where("id = ?", sessionID).First(&session).Error; err != nil {
 		return Execution{}, err
 	}
-	if controlstore.Controlled(session) {
-		return s.beginControlled(ctx, owner, sessionID, attemptID, resume)
+	if controlstore.Controlled(session) || claimID != "" {
+		return s.claimExecution(ctx, owner, sessionID, attemptID, resume, claimID)
 	}
 	row, err := s.Attempts.Attempt(ctx, attemptID)
 	if err != nil || row.SessionID != sessionID {
@@ -96,7 +99,7 @@ func (s *Service) begin(ctx context.Context, owner, sessionID, attemptID string,
 }
 
 func (s *Service) Resume(ctx context.Context, owner, sessionID, attemptID string) (Execution, error) {
-	return s.begin(ctx, owner, sessionID, attemptID, true)
+	return s.begin(ctx, owner, sessionID, attemptID, true, "")
 }
 
 func (s *Service) authorizeExecution(ctx context.Context, owner, sessionID, attemptID string) error {

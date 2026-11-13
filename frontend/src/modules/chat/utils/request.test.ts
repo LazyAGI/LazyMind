@@ -300,3 +300,24 @@ describe('ask answer autosave', () => {
       { history_id: 'history', ask_id: 'ask-new', answers }, { silentError: true, headers: { 'Content-Type': 'application/json' } });
   });
 });
+
+describe('external artifact edit polling', () => {
+  it('waits for the persisted preview without rerunning the workflow', async () => {
+    vi.useFakeTimers();
+    postMock.mockReset(); getMock.mockReset();
+    const ready = { status: 'ready', action: 'rewrite_selection', base_revision: 1,
+      representation: 'ppt_html', commit: { token: 'external:job' } };
+    postMock.mockResolvedValueOnce({ data: { data: { status: 'waiting_agent', job_id: 'job' } } });
+    getMock.mockResolvedValueOnce({ data: { data: ready } });
+    try {
+      const request = WorkflowSessionApi().previewRewriteSelection('session', 'preview_html', 0, {
+        action: 'rewrite_selection', base_revision: 1,
+        input: { instruction: 'Polish', selection: { type: 'ppt_html', page: 1, el: 'title' } },
+      });
+      await vi.advanceTimersByTimeAsync(1500);
+      expect((await request).data.data).toEqual(ready);
+      expect(postMock).toHaveBeenCalledTimes(1);
+      expect(getMock).toHaveBeenCalledWith('/api/core/workflow-sessions/session/artifact-actions/job', undefined);
+    } finally { vi.useRealTimers(); }
+  });
+});

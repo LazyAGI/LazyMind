@@ -5,6 +5,8 @@ import copy
 import re
 import time
 from typing import Any, Optional
+from lazyllm.tools.agent.functionCall import _tool_result_observation
+from lazymind.chat.engine.agent_runtime.message_fields import canonical_history_message
 
 from lazymind.config import config as _cfg
 from lazymind.chat.runtime_events import RunAccumulator, RunOutcome
@@ -243,6 +245,11 @@ class AgentEventFrameTranslator:
     def _feed(self, event: Any) -> list[dict[str, Any]]:
         frames: list[dict[str, Any]] = []
         event_type = str(event.get('tag', '') or '')
+        if event_type == 'assistant_message':
+            message = event.get('assistant_message')
+            if isinstance(message, dict):
+                frames.append(_stream_frame(extra={'canonical_messages': [canonical_history_message(message)]}))
+            return frames
         if event_type == 'model_fallback_failed':
             code = event.get('fallback_code')
             if code not in {'model_fallback_exhausted', 'model_context_not_fit', 'runtime_failure', 'model_failure'}:
@@ -400,6 +407,15 @@ class AgentEventFrameTranslator:
         if event_type == 'tool_calls':
             tool_calls = [tc for tc in (event.get('tool_calls', []) or []) if isinstance(tc, dict)]
             if tool_calls:
+                message = event.get('assistant_message')
+                if not isinstance(message, dict):
+                    # Host-generated calls (for example upload parsing) also
+                    # belong in replay, even though no model produced them.
+                    message = {'role': 'assistant', 'content': '', 'tool_calls': [
+                        {'id': call.get('id', ''), 'type': 'function', 'function': call.get('function') or {
+                            'name': call.get('name', ''), 'arguments': call.get('args', {}),
+                        }} for call in tool_calls
+                    ]}
                 self.run.semantic_output = True
                 self.tool_call_turns += 1
                 self.metrics.on_tool_calls(len(tool_calls))
@@ -410,6 +426,7 @@ class AgentEventFrameTranslator:
                     if pv:
                         self._pending_previews[str(tc.get('id', ''))] = pv
                 frames.append(_stream_frame(text=''.join(parts)))
+                frames.append(_stream_frame(extra={'canonical_messages': [canonical_history_message(message)]}))
             return frames
 
         if event_type == 'tool_results':
@@ -440,6 +457,13 @@ class AgentEventFrameTranslator:
                         if dependency is not None else None
                     ),
                 ))
+                frames.append(_stream_frame(extra={'canonical_messages': [
+                    {'role': 'tool', 'tool_call_id': result.get('id'), 'name': result.get('name', ''),
+                     'content': (observation if isinstance(observation, str)
+                                 else json.dumps(observation, ensure_ascii=False, default=str))}
+                    for result in tool_results
+                    for observation in [_tool_result_observation(result.get('result'))]
+                ]}))
 
         if event_type == 'subagent_think':
             think = str(event.get('think') or '')

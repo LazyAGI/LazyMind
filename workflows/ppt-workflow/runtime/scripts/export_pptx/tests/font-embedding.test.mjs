@@ -73,6 +73,56 @@ test('subset HTML embeds verified original bytes and fails when the original is 
   }
 });
 
+test('resource URL fonts embed their verified local bytes without fetching the preview URL', async () => {
+  const folder = await mkdtemp(path.join(os.tmpdir(), 'font-resource-export-'));
+  const previous = process.env.LAZYMIND_FONT_DIR;
+  process.env.LAZYMIND_FONT_DIR = folder;
+  try {
+    const data = makeTestTtf();
+    const id = createHash('sha256').update(data).digest('hex');
+    const record = { id, file: `${id}.ttf`, aliases: ['Test Web Font'], family: 'Test Web Font',
+      weight: 400, style: 'normal', embeddable: true };
+    await writeFile(path.join(folder, record.file), data);
+    await writeFile(path.join(folder, `${id}.json`), JSON.stringify(record));
+    const html = portableHtml().replace(/data:font\/ttf;base64,[A-Za-z0-9+/=]+/,
+      `/static-files/presentation-fonts/${id}.ttf`);
+    const faces = portableFontFaces(html, await localFontFaces());
+    assert.ok(faces[0].data.equals(data));
+    assert.throws(() => portableFontFaces(html), /Original font resource unavailable/);
+    for (const prefix of ['https://preview.invalid', 'https://preview.invalid/api/core']) {
+      const signed = html.replace(`/static-files/presentation-fonts/${id}.ttf`,
+        `${prefix}/static-files/presentation-fonts/${id}.ttf?signature=test&expires=1`);
+      assert.ok(portableFontFaces(signed, await localFontFaces())[0].data.equals(data));
+    }
+    for (const invalid of ['https://example.com/font.ttf', `/static-files/presentation-fonts/${'f'.repeat(64)}.ttf`,
+      `file:///tmp/${id}.ttf`]) {
+      assert.throws(() => portableFontFaces(html.replace(`/static-files/presentation-fonts/${id}.ttf`, invalid), faces),
+        /resource URL is invalid/);
+    }
+    for (const [before, after] of [['font-family:"Test Web Font"', 'font-family:"Another Font"'],
+      ['font-weight:400', 'font-weight:700'], ['font-style:normal', 'font-style:italic']]) {
+      assert.throws(() => portableFontFaces(html.replace(before, after), faces), /declarations do not match/);
+    }
+    const source = path.join(folder, 'page.html');
+    const output = path.join(folder, 'deck.pptx');
+    await writeFile(source, html);
+    const zip = new JSZip();
+    zip.file('[Content_Types].xml', '<Types></Types>');
+    zip.file('ppt/_rels/presentation.xml.rels', '<Relationships></Relationships>');
+    zip.file('ppt/presentation.xml', '<p:presentation><p:defaultTextStyle/></p:presentation>');
+    await writeFile(output, await zip.generateAsync({ type: 'nodebuffer' }));
+    const fonts = await embedGoogleFontsFromPages(output, [{ path: source }], {
+      fetchImpl: () => { throw new Error('managed font export must not access network'); },
+    });
+    assert.deepEqual(fonts, ['Test Web Font:regular']);
+    await verifyEmbeddedFaces(output, faces);
+  } finally {
+    if (previous === undefined) delete process.env.LAZYMIND_FONT_DIR;
+    else process.env.LAZYMIND_FONT_DIR = previous;
+    await rm(folder, { recursive: true, force: true });
+  }
+});
+
 test('HTML exports its own fonts offline and verifies actual PPTX parts', async () => {
   const folder = await mkdtemp(path.join(os.tmpdir(), 'portable-export-'));
   try {
