@@ -1,3 +1,4 @@
+import { getRuntimeMode, isLocalLikeRuntimeMode } from '@/runtime/mode';
 import ZoteroWebDAVAddress from './ZoteroWebDAVAddress';
 import PaperAuthors from './PaperAuthors';
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type InputHTMLAttributes } from 'react';
@@ -16,7 +17,7 @@ export interface ZoteroImportModalProps {
   onCancel: () => void;
   onImport: (preview: ZoteroPreview, config: ZoteroImportConfig, options: ZoteroImportOptions) => Promise<ZoteroImportResult>;
 }
-const initialConfig = (source: ZoteroImportConfig['source'] = 'database'): ZoteroImportConfig => ({ source, library_type: 'users', library_id: source === 'local' || source === 'database' ? '0' : '', ...(source === 'local' ? { local_url: 'http://host.docker.internal:23119/api' } : {}), ...(source === 'remote' || source === 'webdav' ? { api_key: '' } : {}), ...(source === 'webdav' ? { webdav: { url: '', username: '', password: '' } } : {}) });
+const initialConfig = (source: ZoteroImportConfig['source'] = 'database'): ZoteroImportConfig => ({ source, library_type: 'users', library_id: source === 'local' || source === 'database' ? '0' : '', ...(source === 'local' ? { local_url: isLocalLikeRuntimeMode(getRuntimeMode()) ? 'http://localhost:23119/api' : 'http://host.docker.internal:23119/api' } : {}), ...(source === 'remote' || source === 'webdav' ? { api_key: '' } : {}), ...(source === 'webdav' ? { webdav: { url: '', username: '', password: '' } } : {}) });
 const directoryInput = { webkitdirectory: '', directory: '' } as InputHTMLAttributes<HTMLInputElement>;
 const pageSize = 50;
 const noPersistedPapers: readonly { zoteroSources?: string[] }[] = [];

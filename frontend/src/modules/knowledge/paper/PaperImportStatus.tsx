@@ -189,8 +189,10 @@ export default function PaperImportStatus({ datasetId, page, currentPage, canWri
   </article>;
   const renderPaper = (item: ImportOperationItem) => {
     const message = item.current_state === 'processing_failed' ? item.current_document?.processing_error || item.error_message : item.error_message;
-    const errorSummary = item.current_state === 'processing_failed' ? 'PDF 已保存，正文处理失败' : conciseError(message, item.source_provider);
-    const errorDetail = item.error_detail || (message !== errorSummary ? message : '');
+    const enrichmentFailed = item.current_state === 'failed' && item.result_kind === 'enrichment' && !!item.library_paper_id && !item.current_document;
+    const errorSummary = enrichmentFailed ? '题录已保存，附件补全失败' : item.current_state === 'processing_failed' ? 'PDF 已保存，正文处理失败' : conciseError(message, item.source_provider);
+    const rawErrorDetail = item.error_detail || (message !== errorSummary ? message : '') || '';
+    const errorDetail = enrichmentFailed ? rawErrorDetail.replace(/[，,]?论文尚未入库/g, '') : rawErrorDetail;
     const failed = ['failed', 'processing_failed'].includes(item.current_state);
     const content = <Tooltip title={item.title}><span className="paper-library-import-paper-title">{item.title}</span></Tooltip>;
     return <li key={item.item_id} className={`paper-library-import-paper${item.resolved_later ? ' is-resolved' : ''}`}>
@@ -200,13 +202,13 @@ export default function PaperImportStatus({ datasetId, page, currentPage, canWri
           ? <button type="button" className="paper-library-import-title-link" onClick={() => { onOpenChange(false); onOpenPaper(item.library_paper_id!); }}>{content}</button>
           : content}
       <div className="paper-library-import-paper-meta"><span>{[paperSourceProviderLabels[item.source_provider || ''] || item.source_provider, paperSourceVersionLabels[item.source_version || ''] || item.source_version].filter(Boolean).join(' · ')}</span>
-        <Badge className="paper-library-import-status" status={failed && !item.resolved_later ? 'error' : ['importing', 'processing'].includes(item.current_state) ? 'processing' : ['ready', 'metadata_only'].includes(item.current_state) ? 'success' : 'default'} text={`${item.result_kind === 'enrichment' && item.current_state === 'importing' ? `文献信息已保存 · ${enrichmentStages[item.stage] || '后台补全中'}` : itemNames[item.current_state] || item.current_state}${failed && item.resolved_later ? '（已解决）' : ''}`} />
+        <Badge className="paper-library-import-status" status={failed && !item.resolved_later ? 'error' : ['importing', 'processing'].includes(item.current_state) ? 'processing' : ['ready', 'metadata_only'].includes(item.current_state) ? 'success' : 'default'} text={`${enrichmentFailed ? '题录已保存 · 附件补全失败' : item.result_kind === 'enrichment' && item.current_state === 'importing' ? `文献信息已保存 · ${enrichmentStages[item.stage] || '后台补全中'}` : itemNames[item.current_state] || item.current_state}${failed && item.resolved_later ? '（已解决）' : ''}`} />
       </div>
       {item.current_state === 'awaiting_association' && canWrite && onResumeAssociation && <Button size="small" type="link" onClick={() => { onOpenChange(false); onResumeAssociation(item); }}>继续关联</Button>}
       {item.current_state !== 'removed' && (item.resolved_later ? <p className="paper-library-import-note">已通过后续操作入库</p>
         : item.status === 'skipped' ? <p className="paper-library-import-note">{item.current_document ? '本次跳过，复用已有 PDF' : '本次跳过，题录已存在'}</p>
           : item.current_state === 'processing' ? <p className="paper-library-import-note">PDF 已保存 · 正文处理中</p> : null)}
-      {failed && message && <div className="paper-library-import-error"><p>{errorSummary}</p><p className="paper-library-import-note">{item.error_recovery || (item.current_state === 'processing_failed' ? '可重试正文处理，无需重新上传 PDF。' : '')}</p>
+      {failed && message && <div className="paper-library-import-error"><p>{errorSummary}</p><p className="paper-library-import-note">{enrichmentFailed ? '可重试补全或手动添加 PDF，无需重新导入题录。' : item.error_recovery || (item.current_state === 'processing_failed' ? '可重试正文处理，无需重新上传 PDF。' : '')}</p>
         {(errorDetail || item.error_code) && <details><summary>技术详情</summary>{errorDetail && <p>{errorDetail}</p>}<p>{[item.error_code && `错误码：${item.error_code}`, item.document_id && `文档编号：${item.document_id}`, `导入项：${item.item_id}`].filter(Boolean).join(' · ')}</p></details>}
       </div>}
     </li>;

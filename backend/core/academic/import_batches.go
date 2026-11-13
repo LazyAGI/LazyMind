@@ -497,6 +497,11 @@ func loadOperationPage(r *http.Request, db *gorm.DB, batch orm.PaperImportBatch,
 	for _, s := range states {
 		row := &result[byID[s.ID]]
 		row.CurrentState = s.CurrentState
+		// Normalize historical diagnostics as well as newly recorded failures.
+		if row.CurrentState == "failed" && row.ResultKind == "enrichment" && row.LibraryPaperID != "" && row.CurrentDocument == nil {
+			diagnostic := metadataEnrichmentFailure(importFailureDetails{Message: row.ErrorMessage, Recovery: row.ErrorRecovery})
+			row.ErrorMessage, row.ErrorRecovery = diagnostic.Message, diagnostic.Recovery
+		}
 		row.ResolvedLater = s.ResolvedLater > 0
 		if row.CurrentState == "processing_failed" {
 			row.ErrorMessage = "PDF 已保存，正文处理失败"

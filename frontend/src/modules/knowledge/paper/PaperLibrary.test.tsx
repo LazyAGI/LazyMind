@@ -1100,3 +1100,36 @@ it('keeps the cached library visible while revalidating after returning from a r
   expect(screen.queryByText('正在加载文献…')).not.toBeInTheDocument();
   await act(async () => finish(snapshot(readLibrary(datasetId))));
 });
+
+it('persists corrected PDF metadata from the confirmation form', async () => {
+    const upload = vi.fn().mockResolvedValue('corrected-pdf-document');
+    vi.mocked(paperFromPdf).mockResolvedValueOnce(makePaper('corrected-pdf', 'Recognized PDF', null));
+    await renderLibrary({ onUploadPdf: upload });
+    const dialog = await openImportDialog('直接上传', '上传文献');
+    fireEvent.change(dialog.querySelector<HTMLInputElement>('input[type="file"]')!, { target: { files: [new File(['pdf'], 'corrected.pdf')] } });
+    const title = await within(dialog).findByRole('textbox', { name: '题名' });
+    fireEvent.change(title, { target: { value: '' } });
+    expect(within(dialog).getByRole('button', { name: '加入论文库' })).toBeDisabled();
+    fireEvent.change(title, { target: { value: 'Corrected system card' } });
+    fireEvent.change(within(dialog).getByRole('textbox', { name: '作者（分号分隔）' }), { target: { value: 'OpenAI; Research' } });
+    fireEvent.change(within(dialog).getByRole('spinbutton', { name: '年份' }), { target: { value: '2025' } });
+    fireEvent.change(within(dialog).getByRole('textbox', { name: 'DOI' }), { target: { value: '10.1234/card' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: '加入论文库' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    expect(readLibrary(datasetId).papers.find(paper => paper.id === 'corrected-pdf')?.metadata).toMatchObject({ title: 'Corrected system card', authors: ['OpenAI', 'Research'], year: 2025, identifiers: { doi: '10.1234/card' } });
+});
+
+it('does not let a corrected DOI bypass verified PDF identity', async () => {
+    const upload = vi.fn();
+    const recognized = makePaper('verified-pdf', 'Verified PDF', null);
+    recognized.metadata.identifiers = { doi: '10.1234/original' };
+    vi.mocked(paperFromPdf).mockResolvedValueOnce({ ...recognized, identityVerified: true });
+    await renderLibrary({ onUploadPdf: upload });
+    const dialog = await openImportDialog('直接上传', '上传文献');
+    fireEvent.change(dialog.querySelector<HTMLInputElement>('input[type="file"]')!, { target: { files: [new File(['pdf'], 'verified.pdf')] } });
+    fireEvent.change(await within(dialog).findByRole('textbox', { name: 'DOI' }), { target: { value: '10.1234/other' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: '加入论文库' }));
+    expect(await within(dialog).findByText('PDF 与目标论文身份冲突，未添加附件')).toBeVisible();
+    expect(upload).not.toHaveBeenCalled();
+    expect(confirmLibraryPdf).not.toHaveBeenCalled();
+});

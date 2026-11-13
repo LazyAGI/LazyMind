@@ -7,8 +7,8 @@ import {useDatasetPermissionStore} from '@/modules/knowledge/store/dataset_permi
 import Detail from './index';
 vi.mock('react-pdf', () => ({pdfjs: {GlobalWorkerOptions: {}}, Document: () => null, Page: () => null}));
 const surfaces=vi.hoisted(()=>({viewer:{} as Record<string,unknown>,viewerRenders:0,chat:{} as Record<string,unknown>,vocabularyEnabled:false,vocabulary:{} as Record<string,unknown>,vocabularyModal:{} as Record<string,unknown>,learningModal:{} as Record<string,unknown>}));
-vi.mock('@/modules/knowledge/components/FileViewer', () => ({default: (props:Record<string,unknown>) => {surfaces.viewer=props;surfaces.viewerRenders++;return <div>{typeof props.pdfHeaderEnd === "function" ? (props.pdfHeaderEnd as (tools:null)=>React.ReactNode)(null) : props.pdfHeaderEnd as React.ReactNode}<div data-testid="file-viewer" data-file={String(props.file || "")} data-filename={String(props.fileName || "")}/></div>;}}));
-vi.mock('@/modules/knowledge/components/PdfTemporaryChat', () => ({default: (props:Record<string,unknown>) => {surfaces.chat=props;return null;}}));
+vi.mock('@/modules/knowledge/components/FileViewer', async () => ({default: (await import('react')).forwardRef((_props:Record<string,unknown>, _ref) => { const props = _props; surfaces.viewer=props;surfaces.viewerRenders++;return <div>{typeof props.pdfHeaderEnd === "function" ? (props.pdfHeaderEnd as (tools:null)=>React.ReactNode)(null) : props.pdfHeaderEnd as React.ReactNode}<div data-testid="file-viewer" data-file={String(props.file || "")} data-filename={String(props.fileName || "")}/></div>;})}));
+vi.mock('@/modules/knowledge/components/PdfTemporaryChat', async () => ({default: (await import('react')).forwardRef((props:Record<string,unknown>, _ref) => {surfaces.chat=props;return null;})}));
 vi.mock('@/runtime/mode', async()=>({...await vi.importActual<any>('@/runtime/mode'),isVocabularyEnabled:()=>surfaces.vocabularyEnabled}));
 vi.mock('@/modules/vocabulary/DocumentVocabularyPanel',()=>({default:(props:Record<string,unknown>)=>{surfaces.vocabulary=props;return <div data-testid="document-vocabulary">Document vocabulary</div>;}}));
 vi.mock('@/modules/vocabulary/AddVocabularyModal',()=>({default:(props:Record<string,unknown>)=>{surfaces.vocabularyModal=props;return null;}}));
@@ -88,19 +88,19 @@ it('keeps an ordinary PDF in the document workspace with existing learning and c
   expect(container.querySelectorAll('.paper-workspace-dock button')).toHaveLength(3);
   expect(screen.queryByRole('button',{name:/Document details|文档详情/})).toBeNull();
   fireEvent.click(screen.getByRole('button',{name:/Document navigation|文档导航/}));
-  expect(screen.getByRole('tab',{name:/References|参考文献/})).toBeInTheDocument();
+  expect(screen.queryByRole('tab',{name:/References|参考文献/})).toBeNull();
+  expect(screen.getByRole('tab',{name:/Outline|目录/})).toBeVisible();
   fireEvent.click(screen.getByRole('button',{name:/Document navigation|文档导航/}));
   expect(surfaces.viewer.pdfIRTarget).toBeUndefined();
-  expect(surfaces.viewer.onImportReferenceSelection).toBeTypeOf('function');
+  expect(surfaces.viewer.onImportReferenceSelection).toBeUndefined();
+  expect(surfaces.viewer.onAddVocabularySelection).toBeUndefined();
   expect(surfaces.viewer.onPdfTranslateSelection).toBeTypeOf('function');
   expect(surfaces.viewer.onLearningSelection).toBeTypeOf('function');
   expect(container.querySelector('.paper-chat-pane.is-collapsed')).not.toBeNull();
   expect(surfaces.chat.paperMode).toBeUndefined();
   fireEvent.click(screen.getByRole('button',{name:/^Document assistant$|^文档助手$/}));
   await waitFor(()=>expect(surfaces.chat.paperMode).toBe(false));
-  act(()=>{(surfaces.viewer.onImportReferenceSelection as (selection:{text:string})=>void)({text:'Selected reference'});});
-  expect(screen.getByRole('tab',{name:/References|参考文献/})).toBeVisible();
-  expect(screen.getByRole('button',{name:/Document navigation|文档导航/})).toHaveAttribute('aria-pressed','true');
+
 });
 
 it('keeps non-PDF navigation available after the file type is known', async () => {
@@ -110,7 +110,8 @@ it('keeps non-PDF navigation available after the file type is known', async () =
   const {container} = renderDocument();
   await waitFor(() => expect(container.querySelector('.paper-workspace-dock')).not.toBeNull());
   fireEvent.click(screen.getByRole('button',{name:/Document navigation|文档导航/}));
-  expect(screen.getByRole('tab',{name:/References|参考文献/})).toBeVisible();
+  expect(screen.queryByRole('tab',{name:/References|参考文献/})).toBeNull();
+  expect(screen.getByRole('tab',{name:/Outline|目录/})).toBeVisible();
   expect(screen.queryByRole('status')).toBeNull();
 });
 

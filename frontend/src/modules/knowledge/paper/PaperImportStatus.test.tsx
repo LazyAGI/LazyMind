@@ -23,6 +23,20 @@ function Notice(props: Omit<ComponentProps<typeof PaperImportStatus>, 'open' | '
 }
 const openNotice = () => fireEvent.click(screen.getByRole('button', { name: /^通知：/ }));
 describe('paper import operations', () => {
+  it('keeps saved bibliography visible when PDF enrichment fails', async () => {
+    const batch = operation('enrichment', { entry_type: 'bibliography', status: 'failed' });
+    batch.summary = { ...batch.summary, total: 1, ready: 0, skipped: 0, failed: 1, needs_action: 1, retryable: 1 };
+    vi.mocked(getAcademicImportBatch).mockResolvedValue({ operation: batch, items: [paper('saved', {
+      status: 'failed', current_state: 'failed', result_kind: 'enrichment', current_document: undefined,
+      library_paper_id: 'saved', error_message: '未找到可下载的开放全文，论文尚未入库',
+    })], next_cursor: '' });
+    render(<Notice canWrite onRetry={vi.fn()} page={{ ...emptyImportBatchPage(), items: [batch], notification: { active: 0, needs_action: 1 } }} />);
+    openNotice(); fireEvent.click(screen.getByRole('button', { name: /^展开导入记录/ }));
+    expect(await screen.findByText('题录已保存 · 附件补全失败')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Paper saved' })).toBeInTheDocument();
+    expect(screen.queryByText(/论文尚未入库/)).not.toBeInTheDocument();
+    expect(screen.getByText('可重试补全或手动添加 PDF，无需重新导入题录。')).toBeInTheDocument();
+  });
   it('keeps persisted research notifications out of import history', async () => {
     vi.spyOn(AgentAppsAuth, 'getUserInfo').mockReturnValue({ userId: 'user' } as ReturnType<typeof AgentAppsAuth.getUserInfo>);
     vi.spyOn(axiosInstance, 'get').mockResolvedValue({ data: { items: [{ notification_id: 'ready', event: 'paper_ready', title: '初步调研已完成', body: '请确认研究方向', navigation: { dataset_id: 'papers', expansion_id: 'expansion' } }] } });

@@ -12,7 +12,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -56,7 +55,7 @@ func (s zoteroDatabaseSchema) optional(table, column, fallback string) string {
 }
 
 func openZoteroReadTransaction(ctx context.Context, location *zoteroDatabaseLocation) (*sql.Tx, func(), error) {
-	u := url.URL{Scheme: "file", Path: filepath.ToSlash(location.Path)}
+	u := sqliteFileURL(location.Path)
 	q := u.Query()
 	q.Set("mode", "ro")
 	q.Add("_pragma", "query_only(1)")

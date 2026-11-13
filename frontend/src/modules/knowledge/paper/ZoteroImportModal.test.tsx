@@ -1,9 +1,11 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { ConfigProvider } from 'antd';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import { getRuntimeMode, type RuntimeMode } from '@/runtime/mode';
 import ZoteroImportModal from './ZoteroImportModal';
 import { previewZotero } from './zoteroImport';
 
+vi.mock('@/runtime/mode', async original => ({ ...await original<typeof import('@/runtime/mode')>(), getRuntimeMode: vi.fn(() => 'cloud') }));
 vi.mock('@/components/request', () => ({ BASE_URL: '', axiosInstance: { post: vi.fn() } }));
 vi.mock('./zoteroImport', async (original) => ({ ...await original<typeof import('./zoteroImport')>(), previewZotero: vi.fn() }));
 const preview = { source_id: 'users:42', collections: [], warnings: [], items: [
@@ -21,7 +23,7 @@ async function load() {
   await screen.findByText('Real paper');
 }
 function selectPaper() { fireEvent.click(screen.getByRole('checkbox', { name: '选择 Real paper' })); }
-beforeEach(() => { vi.resetAllMocks(); localStorage.clear(); vi.mocked(previewZotero).mockResolvedValue(preview); onImport.mockResolvedValue({ imported: 1, attachments: 0 }); });
+beforeEach(() => { vi.resetAllMocks(); vi.mocked(getRuntimeMode).mockReturnValue('cloud'); localStorage.clear(); vi.mocked(previewZotero).mockResolvedValue(preview); onImport.mockResolvedValue({ imported: 1, attachments: 0 }); });
 afterEach(cleanup);
 
 it('offers only database and API entries and reads the database without API credentials or a directory', async () => {
@@ -245,4 +247,24 @@ it('retries partial attachments even after the backend mapping appears', async (
   fireEvent.click(await screen.findByRole('button', {name:'重试未完成的导入'}));
   await waitFor(() => expect(onImport).toHaveBeenCalledTimes(2));
   expect(onImport.mock.calls[1][0].items.map((item:{key:string}) => item.key)).toEqual(['PAPER001','PDF00001']);
+});
+
+it.each(['desktop', 'local'])('defaults %s Zotero API to the host loopback and allows an explicit override', async mode => {
+  vi.mocked(getRuntimeMode).mockReturnValue(mode as RuntimeMode);
+  try {
+    mount();
+    fireEvent.click(screen.getByRole('radio', { name: 'API' }));
+    expect(screen.getByLabelText('本地 API 地址')).toHaveValue('http://localhost:23119/api');
+    fireEvent.click(screen.getByRole('radio', { name: 'Docker 连接' }));
+    expect(screen.getByLabelText('本地 API 地址')).toHaveValue('http://host.docker.internal:23119/api');
+  } finally { vi.mocked(getRuntimeMode).mockReturnValue('cloud'); }
+});
+
+it('defaults the Docker build to the host gateway', () => {
+  vi.mocked(getRuntimeMode).mockReturnValue('cloud');
+  try {
+    mount();
+    fireEvent.click(screen.getByRole('radio', { name: 'API' }));
+    expect(screen.getByLabelText('本地 API 地址')).toHaveValue('http://host.docker.internal:23119/api');
+  } finally { vi.mocked(getRuntimeMode).mockReturnValue('cloud'); }
 });
