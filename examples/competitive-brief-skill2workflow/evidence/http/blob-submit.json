@@ -1,0 +1,51 @@
+{
+  "started_at": "2026-10-27T03:35:14.833369+00:00",
+  "elapsed_seconds": 0.014,
+  "method": "POST",
+  "path": "/external-agent/workflow-tasks",
+  "http_status": 200,
+  "response": {
+    "code": 0,
+    "message": "ok",
+    "data": {
+      "agent_type": "codex",
+      "completed_at": null,
+      "contract_version": "external-workflow.v1",
+      "conversation_id": "",
+      "created_at": "2026-10-27T03:35:14.841316Z",
+      "display_status": "waiting",
+      "done": false,
+      "draft_id": "",
+      "error_code": "",
+      "error_message": "",
+      "external_conversation_id": "",
+      "external_thread_id": "",
+      "idempotency_key": "competitive-brief-20261027-blob-probe-v1",
+      "lazymind_url": "/memory-management/workflows",
+      "next_action": "poll",
+      "poll_after_seconds": 3,
+      "progress": null,
+      "result_artifacts": [],
+      "result_ready": false,
+      "result_summary": {},
+      "session_id": "",
+      "skill": {
+        "install_status": "",
+        "name": "competitive-brief-public-trial-20261027",
+        "resolved": false,
+        "source_key": "",
+        "source_type": "",
+        "url": "https://github.com/anthropics/knowledge-work-plugins/blob/c75fda00ff0e41c8ee331ae312c8a07f1967653b/marketing/skills/competitive-brief/SKILL.md"
+      },
+      "stage": "resolve_skill",
+      "stage_label": "安装或复用 Skill",
+      "status": "queued",
+      "suggestion": "",
+      "task_id": "8edee2b7-7969-44cc-a471-d32da579c4df",
+      "updated_at": "2026-10-27T03:35:14.841316Z",
+      "workflow_id": "",
+      "workflow_ref": "",
+      "workflow_revision_id": ""
+    }
+  }
+}

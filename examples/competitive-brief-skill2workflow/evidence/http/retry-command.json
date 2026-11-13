@@ -1,0 +1,155 @@
+{
+  "started_at": "2026-10-27T04:03:33.197355+00:00",
+  "elapsed_seconds": 0.007,
+  "method": "GET",
+  "path": "/workflow-commands/competitive-brief-20261027-retry-analysis-1",
+  "http_status": 200,
+  "response": {
+    "contract_version": "workflow.v1",
+    "request_id": "server-generated",
+    "ok": true,
+    "result": {
+      "CommandID": "competitive-brief-20261027-retry-analysis-1",
+      "OwnerUserID": "REDACTED_ACCOUNT",
+      "SessionID": "ce3dbc32-0454-5928-aac0-e3a349666882",
+      "ContractVersion": "workflow.v1",
+      "RequestHash": "125e074d37ba2c72e4f0e18bb1436a4b8cde21e109989bd3d3768cb854de7626",
+      "HTTPStatus": 200,
+      "ResponseJSON": {
+        "accepted": true,
+        "command_id": "competitive-brief-20261027-retry-analysis-1",
+        "session_id": "ce3dbc32-0454-5928-aac0-e3a349666882",
+        "task_id": "24e2a9ac-9456-4bd1-984b-cc8aa7fd579d",
+        "state_version": 12,
+        "step_state": "pending",
+        "tasks": [
+          {
+            "step_id": "analyze_positioning",
+            "task_id": "24e2a9ac-9456-4bd1-984b-cc8aa7fd579d",
+            "step_state": "pending"
+          }
+        ],
+        "projection": {
+          "past": [
+            "collect_request",
+            "research_competitors"
+          ],
+          "current": [
+            "analyze_positioning"
+          ],
+          "reachable": null,
+          "ready": null,
+          "retryable": null,
+          "rewindable": [
+            "collect_request",
+            "research_competitors"
+          ],
+          "continue": null,
+          "blocked": null,
+          "stale": [
+            "analyze_positioning"
+          ],
+          "pruned": null,
+          "bypassed": null,
+          "nodes": {
+            "analyze_positioning": {
+              "id": "analyze_positioning",
+              "requires_approval": false,
+              "execution": "queued",
+              "validity": "effective",
+              "reachability": "unreachable",
+              "readiness": "not_applicable",
+              "branch": "active",
+              "evaluation": {
+                "satisfied": true
+              }
+            },
+            "build_battlecard": {
+              "id": "build_battlecard",
+              "requires_approval": false,
+              "execution": "none",
+              "validity": "effective",
+              "reachability": "unreachable",
+              "readiness": "not_applicable",
+              "branch": "active",
+              "evaluation": {
+                "satisfied": true
+              }
+            },
+            "collect_request": {
+              "id": "collect_request",
+              "requires_approval": false,
+              "execution": "succeeded",
+              "validity": "effective",
+              "reachability": "unreachable",
+              "readiness": "not_applicable",
+              "branch": "active",
+              "evaluation": {
+                "satisfied": true
+              }
+            },
+            "research_competitors": {
+              "id": "research_competitors",
+              "requires_approval": false,
+              "execution": "succeeded",
+              "validity": "effective",
+              "reachability": "unreachable",
+              "readiness": "not_applicable",
+              "branch": "active",
+              "evaluation": {
+                "satisfied": true
+              }
+            },
+            "synthesize_brief": {
+              "id": "synthesize_brief",
+              "requires_approval": false,
+              "execution": "none",
+              "validity": "effective",
+              "reachability": "unreachable",
+              "readiness": "not_applicable",
+              "branch": "active",
+              "evaluation": {
+                "satisfied": true
+              }
+            }
+          },
+          "edges": [
+            {
+              "from": "synthesize_brief",
+              "to": "build_battlecard",
+              "state": "inactive"
+            },
+            {
+              "from": "__start__",
+              "to": "collect_request",
+              "state": "active"
+            },
+            {
+              "from": "analyze_positioning",
+              "to": "synthesize_brief",
+              "state": "inactive"
+            },
+            {
+              "from": "build_battlecard",
+              "to": "__end__",
+              "state": "inactive"
+            },
+            {
+              "from": "collect_request",
+              "to": "research_competitors",
+              "state": "active"
+            },
+            {
+              "from": "research_competitors",
+              "to": "analyze_positioning",
+              "state": "active"
+            }
+          ],
+          "end_reached": false,
+          "completed": false
+        }
+      },
+      "CreatedAt": "2026-10-27T03:49:57.453648Z"
+    }
+  }
+}
