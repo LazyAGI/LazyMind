@@ -1,4 +1,6 @@
 import json
+import copy
+import pytest
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
@@ -7,6 +9,43 @@ from lazyllm.module.llms.onlinemodule.supplier.openai_responses import chat_to_r
 from lazymind.chat.engine.agent_runtime.summarizer import _llm_response_text
 from lazymind.chat.engine.subagent import runner
 from lazymind.chat.engine.subagent.db import MemorySubAgentStore
+
+
+@pytest.mark.parametrize('native', [False, True])
+@pytest.mark.parametrize('tail', ['missing', 'partial', 'next_assistant', 'duplicate', 'complete_split'])
+def test_resume_only_replays_complete_tool_groups(native, tail):
+    output = [{'type': 'reasoning', 'id': 'r', 'summary': [], 'encrypted_content': 'opaque'}] + [
+        {'type': 'function_call', 'call_id': call_id, 'name': 'render', 'arguments': '{}'}
+        for call_id in ('a', 'b')
+    ]
+    message = ResponseIR.from_responses({'status': 'completed', 'output': output}).message.to_chat()
+    content = {'assistant_message': message} if native else {'tool_calls': message['tool_calls']}
+    steps = [
+        {'seq': 0, 'role': 'assistant', 'content': {'text': 'Earlier complete answer'}},
+        {'seq': 1, 'role': 'assistant', 'content': content},
+        {'seq': 2, 'role': 'plan', 'content': {'steps': ['render']}},
+    ]
+    if tail != 'missing':
+        steps.append({'seq': 3, 'role': 'tool', 'content': {'tool_results': [
+            {'tool_call_id': 'a', 'name': 'render', 'result': 'saved'}]}})
+    if tail == 'next_assistant':
+        steps.append({'seq': 4, 'role': 'assistant', 'content': {'text': 'premature'}})
+    if tail in ('duplicate', 'complete_split'):
+        steps.append({'seq': 4, 'role': 'tool', 'content': {'tool_results': [
+            {'tool_call_id': 'a' if tail == 'duplicate' else 'b', 'name': 'render', 'result': 'saved'}]}})
+    original = copy.deepcopy(steps)
+    history = runner._rebuild_history_from_steps(MemorySubAgentStore({'id': 't'}, steps), 't')
+    replay = chat_to_responses_request({'messages': history})['input']
+    if tail == 'complete_split':
+        assert len(history) == 4
+        assert [item['call_id'] for item in replay if item.get('type') == 'function_call_output'] == ['a', 'b']
+        if native:
+            assert replay[1:4] == output
+    else:
+        assert len(history) == 1
+        assert history[0]['content'] == 'Earlier complete answer'
+        assert not any(item.get('type') == 'function_call' for item in replay)
+    assert steps == original
 
 
 def test_legacy_resume_calls_retain_name_and_arguments():

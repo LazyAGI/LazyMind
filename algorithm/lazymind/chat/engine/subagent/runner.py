@@ -2299,10 +2299,13 @@ def _rebuild_history_from_steps(db: Any, task_id: str) -> List[Dict[str, Any]]:
     steps = db.load_steps(task_id)
     history: List[Dict[str, Any]] = []
     pending_ids: set = set()
+    complete_boundary = 0
     for step in steps:
         role = step.get('role')
         content = step.get('content') or {}
         if role == 'assistant':
+            if pending_ids:
+                break
             message = copy.deepcopy(content.get('assistant_message') or {
                 'role': 'assistant', 'content': content.get('text', ''),
                 'tool_calls': content.get('tool_calls') or [],
@@ -2329,17 +2332,21 @@ def _rebuild_history_from_steps(db: Any, task_id: str) -> List[Dict[str, Any]]:
                             f'[SubAgent] resume: dropping corrupt tool_call '
                             f'(task={task_id}, name={(tc.get("function") or {}).get("name")})'
                         )
-                        return history
+                        return history[:complete_boundary]
             pending_ids = {tc.get('id') for tc in tool_calls if tc.get('id')}
+            if len(pending_ids) != len(tool_calls):
+                # Missing/duplicate identities cannot form a valid exchange.
+                break
             message['tool_calls'] = tool_calls
             history.append(MessageIR.from_chat(message).to_chat())
+            if not pending_ids:
+                complete_boundary = len(history)
         elif role == 'tool':
             results = content.get('tool_results') or []
             valid = [r for r in results if r.get('tool_call_id') in pending_ids]
-            if not valid:
-                # Orphan tool results: drop and stop replay at the last complete boundary.
-                if history and history[-1].get('role') == 'assistant':
-                    history.pop()
+            result_ids = {r.get('tool_call_id') for r in valid}
+            if not valid or len(valid) != len(results) or len(result_ids) != len(valid):
+                # Do not replay partial groups or duplicate/orphan results.
                 break
             for r in valid:
                 result = r.get('result', '')
@@ -2353,5 +2360,10 @@ def _rebuild_history_from_steps(db: Any, task_id: str) -> List[Dict[str, Any]]:
                 if observation is not None:
                     tool_msg[TOOL_OBSERVATION_KEY] = observation
                 history.append(tool_msg)
-            pending_ids = set()
-    return history
+            pending_ids.difference_update(result_ids)
+            if not pending_ids:
+                complete_boundary = len(history)
+    # An interrupted tool execution may end with only the assistant call (or
+    # some parallel results). Responses requires an output for every call.
+    # Roll back the whole group, including its private provider continuation.
+    return history[:complete_boundary]
