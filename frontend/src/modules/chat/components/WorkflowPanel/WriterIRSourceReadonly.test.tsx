@@ -13,10 +13,10 @@ type Save = NonNullable<WriterIRControlProps['onSave']>;
 function toggleSource() {
   const menu = document.querySelector<HTMLDetailsElement>('.writer-document-options')!;
   act(() => { menu.open = true; fireEvent(menu, new Event('toggle')); });
-  fireEvent.click(screen.getByRole('button', { name: /^(源码|返回正文)$/ }));
+  fireEvent.click(screen.getByRole('button', { name: /^(查看源码|返回正文)$/ }));
   expect(menu.open).toBe(false);
 }
-const source = () => screen.getByRole('textbox', { name: '源码' }) as HTMLTextAreaElement;
+const source = () => screen.getByRole('textbox', { name: '查看源码' }) as HTMLTextAreaElement;
 const autosave = () => act(async () => { await vi.advanceTimersByTimeAsync(1_100); });
 
 beforeEach(async () => { await i18n.changeLanguage('zh-CN'); vi.useFakeTimers(); });
@@ -33,7 +33,7 @@ it.each([true, false])('keeps inline source read-only regardless of document edi
   expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   fireEvent.change(source(), { target: { value: '{"title":"attempted edit"}' } });
   toggleSource();
-  expect(screen.queryByRole('textbox', { name: '源码' })).not.toBeInTheDocument();
+  expect(screen.queryByRole('textbox', { name: '查看源码' })).not.toBeInTheDocument();
   expect(screen.getByText('正文')).toBeInTheDocument();
   expect(screen.getByRole('heading', { name: '标题' })).toBeInTheDocument();
   await autosave();

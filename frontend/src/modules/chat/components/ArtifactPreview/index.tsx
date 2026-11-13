@@ -1,5 +1,5 @@
 import { Component, useEffect, useRef, useState, type ReactNode } from 'react';
-import { Button, Modal, Spin, message } from 'antd';
+import { Button, Modal, Spin, Tooltip, message } from 'antd';
 import { CloseOutlined, DownloadOutlined, ReloadOutlined } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 import FileViewer from '@/modules/knowledge/components/FileViewer';
@@ -17,7 +17,7 @@ class PreviewBoundary extends Component<{ children: ReactNode; fallback: ReactNo
   render() { return this.state.failed ? this.props.fallback : this.props.children; }
 }
 
-export function PreviewContent({ target, close, onVersions }: { target: ArtifactPreviewTarget; close: () => void; onVersions?: () => void }) {
+export function PreviewContent({ target, close, onVersions, inline = false }: { target: ArtifactPreviewTarget; close?: () => void; onVersions?: () => void; inline?: boolean }) {
   const { t } = useTranslation();
   const [attempt, setAttempt] = useState(0);
   const [data, setData] = useState<ArrayBuffer>();
@@ -25,12 +25,18 @@ export function PreviewContent({ target, close, onVersions }: { target: Artifact
   const [downloading, setDownloading] = useState(false);
   const downloadController = useRef<AbortController>();
   const kind = previewKind(target);
+  const inlineHtml = inline && (kind === 'html' || kind === 'svg');
+  const latestTarget = useRef(target);
+  useEffect(() => { latestTarget.current = target; }, [target]);
+  const { key, url, content: inlineContent } = target;
+  // Store snapshots recreate targets, including their URL refresh callbacks.
+  // Reload only when the requested artifact or its bytes actually change.
   useEffect(() => {
     const controller = new AbortController();
     const timeout = window.setTimeout(() => { setError('failed'); controller.abort(); }, 60_000);
     setData(undefined); setError('');
     if (kind !== 'unsupported') {
-      void readPreviewFile(target, controller.signal).then(bytes => {
+      void readPreviewFile(latestTarget.current, controller.signal).then(bytes => {
         if (!controller.signal.aborted) setData(bytes);
       }).catch(failure => {
         if (controller.signal.aborted) return;
@@ -40,7 +46,7 @@ export function PreviewContent({ target, close, onVersions }: { target: Artifact
       window.clearTimeout(timeout);
     }
     return () => { window.clearTimeout(timeout); controller.abort(); };
-  }, [target, attempt, kind]);
+  }, [key, url, inlineContent, attempt, kind]);
   useEffect(() => () => downloadController.current?.abort(), []);
   const retry = () => setAttempt(value => value + 1);
   const download = async () => {
@@ -74,7 +80,7 @@ export function PreviewContent({ target, close, onVersions }: { target: Artifact
   if (kind === 'unsupported') content = <div className="artifact-preview__state" role="status"><p>{t('chat.preview.unsupported')}</p><span>{target.filename}</span></div>;
   else if (error) content = failure;
   else if (data === undefined) content = <div className="artifact-preview__state" role="status"><Spin /><p>{t('common.loading')}</p></div>;
-  else if (kind === 'html') content = <HtmlBlock code={new TextDecoder().decode(data)} allowDownload={target.canDownload !== false} />;
+  else if (kind === 'html' || kind === 'svg') content = <HtmlBlock code={new TextDecoder().decode(data)} format={kind} filename={previewFilename(target)} allowDownload={target.canDownload !== false} />;
   else if (kind === 'json' || kind === 'text') {
     let text = new TextDecoder().decode(data);
     if (kind === 'json') { try { text = JSON.stringify(JSON.parse(text), null, 2); } catch { /* Keep malformed JSON readable. */ } }
@@ -84,13 +90,13 @@ export function PreviewContent({ target, close, onVersions }: { target: Artifact
     {content}
     <div className="chat-assistant-msg-tool-actions"><ReferenceSourcesButton sources={sourceContext.sources} /></div>
   </SourceImportProvider>;
-  return <section className="artifact-preview" aria-label={t('chat.previewNamedFile', { name: target.filename })}>
-    <header className="artifact-preview__header">
-      <strong title={target.filename}>{target.filename}</strong>
-      {onVersions && <Button size="small" onClick={() => { close(); onVersions(); }}>{t('chat.preview.versions')}</Button>}
+  return <section className={`artifact-preview${inlineHtml ? ' artifact-preview--inline-html' : ''}`} data-inline={inline || undefined} aria-label={t('chat.previewNamedFile', { name: target.filename })}>
+    {!inlineHtml && <header className="artifact-preview__header">
+      <Tooltip title={target.filename} mouseEnterDelay={1.5}><strong>{target.filename}</strong></Tooltip>
+      {onVersions && <Button size="small" onClick={() => { close?.(); onVersions(); }}>{t('chat.preview.versions')}</Button>}
       <Button type="text" icon={<DownloadOutlined />} loading={downloading} disabled={error === 'unavailable' || target.canDownload === false} onClick={() => void download()} aria-label={t('chat.preview.download', { name: target.filename })} />
-      <Button type="text" icon={<CloseOutlined />} onClick={close} aria-label={t('chat.closePreview')} />
-    </header>
+      {close && <Button type="text" icon={<CloseOutlined />} onClick={close} aria-label={t('chat.closePreview')} />}
+    </header>}
     <div className="artifact-preview__body">
       <PreviewBoundary key={attempt} fallback={failure}>{content}</PreviewBoundary>
     </div>

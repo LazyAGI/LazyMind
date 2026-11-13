@@ -15,6 +15,7 @@ import (
 	"gorm.io/gorm"
 	"lazymind/core/common/orm"
 	"lazymind/core/localworkspace"
+	"lazymind/core/state"
 	"lazymind/core/subagent"
 	"lazymind/core/workflow/displaystate"
 	"lazymind/core/workflow/graphengine"
@@ -241,6 +242,75 @@ func seedEventLoopRevision(t *testing.T, db *orm.DB, revisionID string) (string,
 // ──────────────────────────────────────────────
 // OnSubAgentDone — status routing
 // ──────────────────────────────────────────────
+
+func TestWorkflowTerminalPreservesActiveChatRuns(t *testing.T) {
+	for _, outcome := range []string{"succeeded", "failed", "legacy_end"} {
+		t.Run(outcome, func(t *testing.T) {
+			db := newTestDB(t)
+			cache, err := state.NewSQLiteStore(filepath.Join(t.TempDir(), "state.db"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = cache.Close() })
+			ctx := t.Context()
+			key := "rag/chat/status:terminal-chat"
+			entries := map[string]any{
+				"parent-reply":     `{"status":"generating","run_id":"parent-run"}`,
+				"concurrent-reply": `{"status":"generating","run_id":"concurrent-run"}`,
+				"finished-reply":   `{"status":"completed","run_id":"finished-run"}`,
+			}
+			if err := cache.HSet(ctx, key, entries, time.Hour); err != nil {
+				t.Fatal(err)
+			}
+			input := CreateSessionInput{SessionID: "terminal-session", ConversationID: "terminal-chat", WorkflowID: "test-workflow"}
+			if outcome != "legacy_end" {
+				hash, schema := seedEventLoopRevision(t, db, "terminal-revision")
+				graph := graphengine.CompiledStateGraph{
+					SchemaVersion: schema, GraphHash: hash, StartRoute: "work",
+					Nodes:        map[string]graphengine.CompiledNode{"work": {ID: "work"}},
+					ControlEdges: []graphengine.CompiledEdge{{From: "__start__", To: "work"}, {From: "work", To: "__end__"}},
+				}
+				if err := db.Model(&orm.WorkflowRevision{}).Where("id = ?", "terminal-revision").Update("compiled_graph", graph.JSON()).Error; err != nil {
+					t.Fatal(err)
+				}
+				input.WorkflowRevisionID, input.GraphHash, input.GraphSchemaVersion = "terminal-revision", hash, schema
+			}
+			if _, err := CreateSession(ctx, db.DB, input); err != nil {
+				t.Fatal(err)
+			}
+			if outcome == "legacy_end" {
+				_, _, completed, err := HandleWorkflowStepCreated(ctx, db.DB, cache, "terminal-chat", "parent-reply", "owner", "", "", "",
+					WorkflowStepParams{SessionID: "terminal-session", StepID: "__end__"}, nil, nil, nil, nil)
+				if err != nil || !completed {
+					t.Fatalf("legacy completion: completed=%v err=%v", completed, err)
+				}
+			} else {
+				if _, err := CreateSessionStep(ctx, db.DB, "terminal-session", "work", "terminal-task", 1); err != nil {
+					t.Fatal(err)
+				}
+				OnSubAgentDone(ctx, db.DB, cache, "terminal-task", outcome, "step ended", func(string, map[string]any) {},
+					&WorkflowChatContext{SessionID: "terminal-session", StepID: "work", ConvID: "terminal-chat", WorkflowMode: "dynamic"})
+			}
+			session, err := GetSession(ctx, db.DB, "terminal-session")
+			want := SessionStatusCompleted
+			if outcome == "failed" {
+				want = SessionStatusFailed
+			}
+			if err != nil || session.Status != want {
+				t.Fatalf("workflow did not settle: session=%+v err=%v", session, err)
+			}
+			actual, err := cache.HGetAll(ctx, key)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for historyID, expected := range entries {
+				if actual[historyID] != expected {
+					t.Errorf("workflow %s changed Chat run %s: got %q, want %q", outcome, historyID, actual[historyID], expected)
+				}
+			}
+		})
+	}
+}
 
 func TestOnSubAgentDonePublishesCompletedStateForDomainProjection(t *testing.T) {
 	db := newTestDB(t)

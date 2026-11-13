@@ -40,12 +40,21 @@ class KBToolkit:
 
     def __init__(self, kb_scope: Optional[List[str]] = None, *, legacy_management: bool = False):
         self._kb_scope = tuple(kb_scope) if kb_scope is not None else None
-        if legacy_management:
+        self._legacy_management = legacy_management
+
+    @property
+    def __tool_public_apis__(self):
+        from lazymind.common.optional_components import component_enabled
+
+        if not component_enabled('rag'):
+            return ['read_document']
+        if self._legacy_management:
             # Only the Host's pinned Workflow resolver selects this compatibility surface.
-            self.__tool_public_apis__ = [
+            return [
                 'list_knowledge_bases', 'list_knowledge_base_documents',
                 'aggregate_knowledge_base_documents', *self.__public_apis__,
             ]
+        return self.__public_apis__
 
     def _toolkit(self):
         return _toolkit(self._kb_scope) if self._kb_scope is not None else _toolkit()
@@ -115,7 +124,22 @@ class KBToolkit:
     @fc_register(host_file='NONE')
     def read_document(self, knowledge_base_id: str, document_id: str) -> Dict[str, Any]:
         """Read a document without requiring an embedding model."""
-        return self._toolkit().read_document(knowledge_base_id, document_id)
+        from urllib.parse import quote
+        from lazyllm.tools.agent import ToolExecutionError
+        from .infra.core_api_client import get_core_api
+
+        kb_id = str(knowledge_base_id or '').strip()
+        doc_id = str(document_id or '').strip()
+        if not kb_id or not doc_id:
+            raise ToolExecutionError('knowledge_base_id and document_id are required')
+        if self._kb_scope is not None and kb_id not in self._kb_scope:
+            raise ToolExecutionError('Knowledge base is outside the inherited knowledge-base scope.')
+        # Core authorizes the current user and owns parsing. Importing the RAG
+        # toolkit here would prevent stored/parsed libraries from being read
+        # when the optional retrieval component is not installed.
+        return get_core_api(
+            f'/datasets/{quote(kb_id, safe="")}/documents/{quote(doc_id, safe="")}:read'
+        )
 
     @fc_register(host_file='NONE')
     def kb_get_parent_node(self, node_id: str) -> Dict[str, Any]:

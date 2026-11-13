@@ -89,14 +89,37 @@ $shadow: 0 1px 2px rgb(31 35 41 / 3%), 0 6px 20px rgb(31 35 41 / 3%);
 
 .workbench { container: task-workbench / inline-size; }
 
+.task-center-tabs:has(.ant-tabs-tabpane-active .workbench) > .ant-tabs-content-holder {
+  padding-top: 16px;
+  padding-bottom: 18px;
+}
+
+.workbench-results {
+  --workbench-columns: 1;
+  --workbench-card-min-height: 152px;
+  --workbench-card-max-height: 220px;
+  --workbench-card-height: 220px;
+  --workbench-card-gap: 12px;
+  // Section heading, grid padding, pagination and page-bottom spacing.
+  --workbench-page-chrome: 144px;
+}
+
+@container task-workbench (width >= 620px) {
+  .workbench-results { --workbench-columns: 2; }
+}
+
+@container task-workbench (width >= 980px) {
+  .workbench-results { --workbench-columns: 3; }
+}
+
 .task-metrics {
   display: grid;
   grid-template-columns: repeat(6, minmax(0, 1fr));
   container-type: inline-size;
-  min-height: 72px;
+  min-height: 64px;
   align-items: center;
   gap: 8px;
-  padding: 12px 18px;
+  padding: 8px 18px;
   border: 1px solid $border;
   border-radius: 12px;
   background: #fff;
@@ -244,8 +267,14 @@ $shadow: 0 1px 2px rgb(31 35 41 / 3%), 0 6px 20px rgb(31 35 41 / 3%);
 .task-toolbar > *,
 .schedule-toolbar > * { min-width: 0; }
 
+.workbench > .task-toolbar {
+  min-height: 54px;
+  margin-top: 10px;
+  padding-block: 8px;
+}
+
 .workbench-section {
-  margin-top: 14px;
+  margin-top: 12px;
   overflow: hidden;
   border: 1px solid $border;
   border-radius: 12px;
@@ -255,8 +284,8 @@ $shadow: 0 1px 2px rgb(31 35 41 / 3%), 0 6px 20px rgb(31 35 41 / 3%);
 
 .workbench-section-heading {
   display: flex;
-  min-height: 57px;
-  padding: 10px 18px;
+  height: 52px;
+  padding: 6px 14px;
   align-items: center;
   justify-content: space-between;
   gap: 16px;
@@ -298,9 +327,10 @@ $shadow: 0 1px 2px rgb(31 35 41 / 3%), 0 6px 20px rgb(31 35 41 / 3%);
 
 .attention-task-grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 12px;
-  padding: 14px;
+  grid-template-columns: repeat(var(--workbench-columns), minmax(0, 1fr));
+  grid-auto-rows: var(--workbench-card-height);
+  gap: var(--workbench-card-gap);
+  padding: 10px;
   background: #fafbfc;
 }
 
@@ -376,12 +406,23 @@ $shadow: 0 1px 2px rgb(31 35 41 / 3%), 0 6px 20px rgb(31 35 41 / 3%);
 .workbench-task-card-progress {
   display: flex;
   min-width: 0;
-  margin: -2px 0 8px;
+  margin: 0 0 4px;
   align-items: center;
   gap: 9px;
 
   .ant-progress { min-width: 80px; max-width: 128px; margin: 0; flex: 1; line-height: 1; }
   small { overflow: hidden; color: $muted; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+}
+
+.workbench-task-card {
+  padding: 10px 12px;
+
+  .attention-task-card-top { align-items: center; gap: 8px; }
+  .attention-task-card-title { flex: 1; margin-top: 0; }
+  .task-type-icon { width: 32px; height: 32px; flex-basis: 32px; }
+  .attention-task-card-top > .ant-tag { flex-shrink: 0; margin-inline-end: 0; }
+  > p { margin: 6px 0; }
+  footer { padding-top: 6px; }
 }
 
 .workbench-empty {
@@ -953,7 +994,7 @@ $shadow: 0 1px 2px rgb(31 35 41 / 3%), 0 6px 20px rgb(31 35 41 / 3%);
   .schedule-toolbar-spacer { min-width: 12px; }
   .schedule-toolbar > .ant-btn,
   .schedule-view-toggle { flex: 0 0 auto; white-space: nowrap; }
-  .attention-task-grid, .schedule-grid.large, .schedule-group-grid.large { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .schedule-grid.large, .schedule-group-grid.large { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .schedule-grid.compact .schedule-card { grid-template-columns: minmax(280px, 1.2fr) minmax(210px, 0.8fr) 260px; }
 }
 
@@ -983,7 +1024,7 @@ $shadow: 0 1px 2px rgb(31 35 41 / 3%), 0 6px 20px rgb(31 35 41 / 3%);
   .task-status-segmented .ant-segmented-group { min-width: 650px; }
   .task-toolbar, .schedule-toolbar { align-items: stretch; flex-wrap: wrap; }
   .task-toolbar .ant-input-affix-wrapper, .schedule-toolbar .ant-input-affix-wrapper { width: 100%; }
-  .attention-task-grid, .schedule-grid.large, .schedule-group-grid.large { grid-template-columns: 1fr; }
+  .schedule-grid.large, .schedule-group-grid.large { grid-template-columns: 1fr; }
   .all-tasks-filters { flex-wrap: wrap; justify-content: flex-start; }
   .all-tasks-filters .ant-input-affix-wrapper { width: 100%; }
   .schedule-toolbar-spacer { display: none; }
@@ -1092,7 +1133,7 @@ $shadow: 0 1px 2px rgb(31 35 41 / 3%), 0 6px 20px rgb(31 35 41 / 3%);
 .workbench-pagination {
   display: flex;
   justify-content: flex-end;
-  padding: 0 20px 20px;
+  padding: 0 14px 12px;
 }
 
 .task-step.step-tone-input .task-step-dot { --step-color: #{status.$input-accent}; }

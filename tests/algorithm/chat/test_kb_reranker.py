@@ -86,3 +86,19 @@ def test_search_returns_evidence_without_reranking(monkeypatch):
     retrieve = Mock(return_value=nodes)
     assert search._search_text('query', retrieve, None, 20, 10) == nodes
     assert nodes[0].relevance_score == 0.8
+
+
+def test_text_runtime_does_not_require_image_embedding(runtime):
+    configure(None)
+    _, _, image = kb._ensure_kb_search_runtime()
+    assert image is None
+    assert kb.Retriever.call_count == len(kb._KB_RETRIEVER_CONFIGS)
+
+
+def test_text_only_search_skips_image_backend(monkeypatch):
+    search = importlib.import_module('lazymind.chat.engine.tools.algo.search_kb')
+    monkeypatch.setattr(search, 'get_vocab_manager', lambda _: lambda query: query)
+    monkeypatch.setattr(search, '_search_text', lambda *args: [])
+    image = Mock(side_effect=AssertionError('unexpected image request'))
+    assert search.search_kb({'query': 'q', 'user_id': 'user'}, retrievers=[], reranker=None,
+                            image_retriever=image, image_topk=0) == []

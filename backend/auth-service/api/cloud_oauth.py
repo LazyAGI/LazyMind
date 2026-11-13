@@ -49,7 +49,8 @@ def _github_star_call(function, **kwargs):
     except AppException as exc:
         return JSONResponse(status_code=exc.http_code,
                             content={'code': exc.code, 'message': exc.message,
-                                     'reason': getattr(exc, 'reason', 'permission_denied' if exc.http_code == 403 else 'unavailable')},
+                                     'reason': getattr(exc, 'reason',
+                                                       'permission_denied' if exc.http_code == 403 else 'unavailable')},
                             headers={'Cache-Control': 'no-store'})
     except Exception:
         status, code, message = ErrorCodes.GITHUB_STAR_UNAVAILABLE
@@ -59,13 +60,16 @@ def _github_star_call(function, **kwargs):
 
 @router.get('/github/star', response_model=GitHubStarStatus)
 @permission_required('model.read')
-def github_star_status(response: Response, connection_id: str = Query(default='', max_length=64),
+def github_star_status(response: Response, connection_id: str = Query(default='', max_length=64),  # noqa: B008
                        user: User = Depends(current_user)):  # noqa: B008
     response.headers['Cache-Control'] = 'no-store'
     result = _github_star_call(github_star_service.status, owner_user_id=str(user.id), connection_id=connection_id)
     if isinstance(result, dict):
         role = getattr(user, 'role', None)
-        result['can_star'] = getattr(role, 'name', None) == 'system-admin' or 'model.write' in rbac.get_effective_permission_codes(user)
+        result['can_star'] = (
+            getattr(role, 'name', None) == 'system-admin'
+            or 'model.write' in rbac.get_effective_permission_codes(user)
+        )
     return result
 
 

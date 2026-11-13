@@ -11,7 +11,7 @@ import (
 	"lazymind/core/store"
 )
 
-const workbenchPageSize = 4
+const defaultWorkbenchPageSize = 4
 
 var workbenchCategories = []string{"attention", "running", "paused", "failed", "recent", "canceled"}
 
@@ -60,6 +60,11 @@ func Workbench(w http.ResponseWriter, r *http.Request) {
 	if page < 1 {
 		page = 1
 	}
+	pageSize, _ := strconv.Atoi(q.Get("page_size"))
+	if pageSize < 1 {
+		pageSize = defaultWorkbenchPageSize
+	}
+	pageSize = min(pageSize, 100)
 	groups := make(map[string]*workbenchGroup, len(workbenchCategories))
 	for _, key := range workbenchCategories {
 		groups[key] = &workbenchGroup{Items: []taskResponse{}, Page: 1}
@@ -91,12 +96,12 @@ func Workbench(w http.ResponseWriter, r *http.Request) {
 		matching := groupRows[key]
 		group.Total = len(matching)
 		if key == category {
-			group.Page = min(page, max(1, (group.Total+workbenchPageSize-1)/workbenchPageSize))
+			group.Page = min(page, max(1, (group.Total+pageSize-1)/pageSize))
 		}
-		start := (group.Page - 1) * workbenchPageSize
-		for _, row := range matching[start:min(start+workbenchPageSize, group.Total)] {
+		start := (group.Page - 1) * pageSize
+		for _, row := range matching[start:min(start+pageSize, group.Total)] {
 			group.Items = append(group.Items, taskListResponse(r.Context(), db, row, row.TaskCenterTask))
 		}
 	}
-	common.ReplyJSON(w, map[string]any{"groups": groups, "page_size": workbenchPageSize})
+	common.ReplyJSON(w, map[string]any{"groups": groups, "page_size": pageSize})
 }

@@ -364,6 +364,7 @@ def test_scoped_kb_rejects_explicit_ids_outside_inheritance(monkeypatch, method,
 
 
 def test_scoped_kb_discovery_and_default_filters_stay_inherited(monkeypatch):
+    monkeypatch.setattr('lazymind.chat.engine.tools.kb.is_model_role_available', lambda role: True)
     calls = []
     lazyllm.globals['agentic_config'] = {'filters': {'kb_id': ['outside-kb']}}
 
@@ -378,7 +379,7 @@ def test_scoped_kb_discovery_and_default_filters_stay_inherited(monkeypatch):
 
     monkeypatch.setattr('lazymind.chat.engine.tools.kb.get_core_api', get_dataset)
     monkeypatch.setattr('lazymind.chat.engine.tools.kb.post_core_api', post_documents)
-    monkeypatch.setattr('lazymind.chat.engine.tools.kb._ensure_kb_search_runtime', lambda: ([], None, None))
+    monkeypatch.setattr('lazymind.chat.engine.tools.kb._ensure_kb_search_runtime', lambda **kwargs: ([], None, None))
     monkeypatch.setattr('lazymind.chat.engine.tools.kb.search_kb', lambda payload, **kwargs: payload)
     toolkit = KBToolkit(kb_scope=['inherited-kb'])
     assert toolkit.list_knowledge_bases(keyword='search', tags=['papers'])['datasets'][0]['dataset_id'] == 'inherited-kb'
@@ -439,6 +440,7 @@ def test_lazy_kb_actual_tool_call_forwards_decoded_ids(monkeypatch):
     lazyllm_locals['_lazyllm_agent'] = {'workspace': {}}
     lazyllm.globals['agentic_config'] = {'filters': {}}
     calls = []
+
     def search(*args):
         calls.append(args[-1])
         return {'items': []}
@@ -458,6 +460,7 @@ def test_deleted_node_is_not_expanded_or_serialized(monkeypatch):
         lambda *args, **kwargs: {'response': {'items': []}},
     )
     calls = []
+
     def get_nodes(**kwargs):
         calls.append(kwargs)
         return [_node('deleted', parent='parent')]
@@ -480,3 +483,85 @@ def test_pinned_legacy_kb_keeps_original_names_without_mutating_normal_registry(
     normal = _kb_tool_names(ToolManager([LazyKBToolkit()]))
     assert len(normal) == 5
     assert 'KBToolkit_list_knowledge_bases' not in normal
+
+
+def test_kb_search_forwards_request_models_to_document_service(monkeypatch):
+    from lazymind.chat.engine.tools import kb
+
+    init_session()
+    monkeypatch.setattr(kb, 'is_model_role_available', lambda role: True)
+    config = {'embed_main': {'source': 'openai', 'model': 'request-embedding'}}
+    lazyllm.globals['agentic_config'] = {
+        'filters': {'kb_id': ['selected-kb']}, 'user_id': 'user', 'llm_config': config,
+    }
+    captured = {}
+    monkeypatch.setattr(kb, '_ensure_kb_search_runtime', lambda **kwargs: ([], None, None))
+
+    def search(payload, **kwargs):
+        captured.update(payload)
+        return []
+
+    monkeypatch.setattr(kb, 'search_kb', search)
+    KBToolkit().kb_search('paper evidence')
+    assert captured['llm_config'] == config
+
+
+def test_injected_models_override_parent_config_and_clear_on_next_request(monkeypatch, tmp_path):
+    from lazymind.chat.engine.tools import kb
+    from lazymind.model_config import inject_model_config, is_model_role_available
+
+    runtime = tmp_path / 'models.yaml'
+    runtime.write_text('embed_main: {source: dynamic, type: embed}\n')
+    monkeypatch.setenv('LAZYMIND_MODEL_CONFIG_PATH', str(runtime))
+    lazyllm.init_session()
+    lazyllm.globals['agentic_config'] = {
+        'filters': {'kb_id': ['selected-kb']}, 'user_id': 'user',
+        'llm_config': {'embed_main': {'source': 'openai', 'model': 'stale-parent'}},
+    }
+    monkeypatch.setattr(kb, '_ensure_kb_search_runtime', lambda **kwargs: ([], None, None))
+    captured = []
+    monkeypatch.setattr(kb, 'search_kb', lambda payload, **kwargs: captured.append(payload) or [])
+    config = {'embed_main': {'source': 'openai', 'model': 'fresh', 'api_key': 'request-key'}}
+    try:
+        inject_model_config(config)
+        config['embed_main']['model'] = 'mutated-after-injection'
+        KBToolkit().kb_search('paper evidence')
+        assert captured[-1]['llm_config']['embed_main']['model'] == 'fresh'
+        assert captured[-1]['llm_config']['embed_main']['api_key'] == 'request-key'
+        inject_model_config({})
+        with pytest.raises(ToolExecutionError, match='文本向量模型'):
+            KBToolkit().kb_search('second request')
+        assert lazyllm.globals['lazymind_request_model_config'] == {}
+        assert len(captured) == 1
+        assert not is_model_role_available('embed_main')
+    finally:
+        lazyllm.globals.clear()
+
+
+def test_kb_search_missing_embedding_is_actionable_before_runtime(monkeypatch, tmp_path):
+    from lazymind.chat.engine.tools import kb
+    from lazymind.model_config import inject_model_config
+
+    runtime = tmp_path / 'models.yaml'
+    runtime.write_text('embed_main: {source: dynamic, type: embed}\n')
+    monkeypatch.setenv('LAZYMIND_MODEL_CONFIG_PATH', str(runtime))
+    init_session()
+    inject_model_config({'embed_main': {'model': 'without-provider'}})
+    lazyllm.globals['agentic_config'] = {'filters': {'kb_id': ['selected-kb']}}
+    monkeypatch.setattr(kb, '_ensure_kb_search_runtime', lambda **kwargs: pytest.fail('loaded runtime'))
+    with pytest.raises(ToolExecutionError, match='文本向量模型'):
+        KBToolkit().kb_search('paper evidence')
+
+
+def test_kb_search_preserves_explicit_text_only_request(monkeypatch):
+    from lazymind.chat.engine.tools import kb
+    init_session()
+    lazyllm.globals['agentic_config'] = {'filters': {'kb_id': ['selected-kb']}}
+    monkeypatch.setattr(kb, 'is_model_role_available', lambda role: True)
+    calls = {}
+    monkeypatch.setattr(kb, '_ensure_kb_search_runtime',
+                        lambda **kwargs: calls.update(kwargs) or ([], None, None))
+    monkeypatch.setattr(kb, 'search_kb', lambda payload, **kwargs: calls.update(kwargs) or [])
+    KBToolkit().kb_search('text', image_topk=0)
+    assert calls['include_images'] is False
+    assert calls['image_topk'] == 0

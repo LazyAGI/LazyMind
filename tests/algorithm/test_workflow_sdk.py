@@ -630,3 +630,20 @@ def test_prepare_preserves_explicit_host_chat_turn(history_id):
     payload = transport.post.call_args.kwargs['json']
     assert payload.get('trigger_history_id', '') == history_id
     assert ('trigger_history_id' in payload) == bool(history_id)
+
+
+@pytest.mark.parametrize('resume', [True, False])
+def test_paused_rerun_transport_binds_host_turn_without_changing_ordinary_advance(resume):
+    from lazymind.workflow_sdk import AdvanceRequest, StepCommand, WorkflowClient
+    transport = MagicMock()
+    transport.post.return_value = httpx.Response(200, json={'result': {'accepted': True}})
+    client = WorkflowClient('http://core', 'owner', transport=transport, trigger_history_id='current-turn')
+    client.advance(AdvanceRequest(session_id='session', expected_state_version=7,
+                                  steps=[StepCommand(step_id='analysis')], resume_for_rerun=resume))
+    payload = transport.post.call_args.kwargs['json']
+    assert payload['expected_state_version'] == 7
+    if resume:
+        assert payload['resume_for_rerun'] is True
+        assert payload['trigger_history_id'] == 'current-turn'
+    else:
+        assert 'resume_for_rerun' not in payload and 'trigger_history_id' not in payload

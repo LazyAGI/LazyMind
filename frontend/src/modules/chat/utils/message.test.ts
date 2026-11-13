@@ -590,7 +590,7 @@ describe("buildChatMessageListFromHistory", () => {
     const userMessage = list[0] as Record<string, unknown>;
 
     expect(userMessage.images).toEqual([{ base64: "b64", uid: "img1" }]);
-    expect(userMessage.files).toEqual([{ name: "report.pdf", uid: "file1" }]);
+    expect(userMessage.files).toEqual([{ name: "report.pdf", uid: "file1", uri: "s3://bucket/report.pdf" }]);
   });
 });
 
@@ -843,4 +843,11 @@ it("renders unavailable inherited attachments as named placeholders", () => {
   ] }]);
   expect(list[0].images).toEqual([]);
   expect(list[0].files).toEqual([{ name: "diagram.png", uid: "img", unavailable: true }, { name: "report.pdf", uid: "file", unavailable: true }]);
+});
+
+it("retains a reused attachment URI when restoring conversation history", () => {
+  const [message] = buildChatMessageListFromHistory([{ id: "second-turn", query: "Read this again", input: [
+    { input_type: "file", uri: "/static-files/report.pdf", filename: "report.pdf" },
+  ] }]);
+  expect(message.files[0]).toMatchObject({ name: "report.pdf", uri: "/static-files/report.pdf" });
 });

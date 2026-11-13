@@ -132,3 +132,22 @@ func TestFilterRetrievalModelConfigAllowsOnlyExistingSearchRoles(t *testing.T) {
 		t.Fatalf("non-retrieval roles leaked: %#v", filtered)
 	}
 }
+
+func TestHTTPKnowledgeSearchClientPreservesEmbeddingDependencyError(t *testing.T) {
+	httpClient := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		return &http.Response{StatusCode: http.StatusUnprocessableEntity, Header: make(http.Header),
+			Body: io.NopCloser(strings.NewReader(`{"detail":{"code":"CAPABILITY_REQUIRED","message":"private backend URL or API key"}}`)), Request: request}, nil
+	})}
+	client, err := NewHTTPKnowledgeSearchBackendClient("http://chat.test", "internal-token", httpClient)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = client.Search(context.Background(), KnowledgeSearchBackendRequest{UserID: "user", Query: "q", KBIDs: []string{"kb"}})
+	failure, ok := err.(*capability.Error)
+	if !ok || failure.Code != capability.Unavailable || failure.Retryable || failure.Reason != "CAPABILITY_REQUIRED" {
+		t.Fatalf("unexpected dependency error: %#v", err)
+	}
+	if !strings.Contains(failure.Message, "模型") || strings.Contains(failure.Message, "private") {
+		t.Fatalf("dependency error must be actionable without exposing backend details: %s", failure.Message)
+	}
+}

@@ -95,8 +95,8 @@ def test_chat_completions_compatibility_activates_without_advanced_settings(monk
         sent.append(json.loads(request.body))
         response = requests.Response()
         response.status_code = 200
-        response._content = json.dumps({'choices': [{'message': {'content': 'ok'},
-                                                      'finish_reason': 'stop'}]}).encode()
+        response._content = json.dumps({'choices': [{'message': {'role': 'assistant', 'content': 'ok'},
+                                                    'finish_reason': 'stop'}]}).encode()
         response._content_consumed = True
         response.raw = BytesIO()
         response.request = request
@@ -112,7 +112,7 @@ def test_chat_completions_compatibility_activates_without_advanced_settings(monk
         assert lazyllm.globals['lazymind_request_advanced']['llm']['private'] is False
         assert lazyllm.globals['lazymind_request_advanced']['llm']['model'] == 'gpt-5.6-sol'
         model = AutoModel(source='dynamic', name='llm', dynamic_auth=True)
-        assert model('Hi', stream_output=False)['content'] == 'ok'
+        assert model('Hi', stream_output=False) == 'ok'
         supplier = next(iter(model._suppliers.values()))
         generate = supplier._prompt.generate_prompt
 
@@ -122,7 +122,7 @@ def test_chat_completions_compatibility_activates_without_advanced_settings(monk
 
         with monkeypatch.context() as patch:
             patch.setattr(type(supplier._prompt), 'generate_prompt', with_tool)
-            assert model('Hi', stream_output=False)['content'] == 'ok'
+            assert model('Hi', stream_output=False) == 'ok'
         assert sent[0].get('reasoning_effort') is None
         assert sent[1].get('reasoning_effort') == 'none', sent[1]
         configure_request_advanced({'llm': {'source': 'openai', 'model': 'gpt-4o',
@@ -167,7 +167,8 @@ def test_dynamic_runtime_applies_options_per_role_without_changing_supplier(monk
         calls.append(request)
         response = requests.Response()
         response.status_code = 200
-        response._content = json.dumps({'choices': [{'message': {'content': 'ok'}, 'finish_reason': 'stop'}]}).encode()
+        response._content = json.dumps({'choices': [{'message': {'role': 'assistant', 'content': 'ok'},
+                                                    'finish_reason': 'stop'}]}).encode()
         response._content_consumed = True
         response.raw = BytesIO()
         response.request = request
@@ -182,12 +183,12 @@ def test_dynamic_runtime_applies_options_per_role_without_changing_supplier(monk
         inject_model_config(config)
         configure_request_advanced(config)
         model = AutoModel(source='dynamic', name='llm', dynamic_auth=True)
-        assert model('hi', stream_output=False)['content'] == 'ok'
+        assert model('hi', stream_output=False) == 'ok'
         config['llm']['request_advanced'] = {'headers': {'X-Gateway-Token': 'second'}}
         configure_request_advanced(config)
-        assert model('hi', stream_output=False)['content'] == 'ok'
+        assert model('hi', stream_output=False) == 'ok'
         configure_request_advanced({})
-        assert model('hi', stream_output=False)['content'] == 'ok'
+        assert model('hi', stream_output=False) == 'ok'
         assert 'lazymind_request_advanced' in lazyllm.globals
     assert calls[0].headers['X-Gateway-Token'] == 'first'
     assert calls[0].url.endswith('?tenant=one')

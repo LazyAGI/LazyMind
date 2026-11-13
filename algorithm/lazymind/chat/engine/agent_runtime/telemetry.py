@@ -26,6 +26,7 @@ _HARNESS_TOOLS = {
     'create_subagent',
     'advance_step',
     'advance_step_and_hand_off',
+    'resume_and_rerun_step',
     'create_workflow_draft',
     'ask_user',
 }

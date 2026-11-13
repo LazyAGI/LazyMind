@@ -712,3 +712,104 @@ def test_http_200_is_not_enough_but_small_valid_images_are_accepted(monkeypatch,
     assert len(data[0]) < 1076  # small, compressed, valid images must not be rejected by byte size
     assert tools._download_image_bytes('https://example.test/image.png') == data[0]
     assert closed == [True, True]
+
+
+def prepare_completed_retry(monkeypatch, tmp_path, tools):
+    deck, model, _ = prepare_batch(monkeypatch, tmp_path, tools, 4, lambda *_: HTML)
+    store = publication_store(monkeypatch, tools)
+    ctx = SimpleNamespace(workspace_path=str(tmp_path), params={}, task_id='retry-task', emit=lambda event: None)
+    monkeypatch.setattr(tools, 'require_context', lambda: ctx)
+    monkeypatch.setattr(tools, '_required_output_format', lambda: 'html')
+    (deck / 'outline_draft.md').write_text('Approved outline')
+    (deck / 'complete_page_prompts.json').write_text('{}')
+    monkeypatch.setattr(tools, '_selected_slide_outline_items', lambda: [
+        (number - 1, f'Page {number} design') for number in range(1, 5)
+    ])
+    monkeypatch.setattr(tools, '_load_slide_outline_briefs', lambda numbers: {
+        number: brief for number, (_, brief) in enumerate(tools._selected_slide_outline_items(), 1)
+        if number in numbers
+    })
+    assert tools._prepare_deferred_outline(deck)['status'] == 'direct'
+    assert tools._batch_page_html_publish_progressive(deck)['published_count'] == 4
+    store.invalidate()
+    # Same confirmed request with the duplicate metadata seen in the failed run.
+    current = 'Generate four slides\n\nConfirmed workflow parameters:\n{"slide_count":"4"}'
+    ctx.params = {'current_user_input': current, 'launch_user_input': current + '\nConfirmed workflow parameters:\n{}',
+                  'retry_existing_outputs': True}
+    return deck, model, store, ctx
+
+
+def test_generate_pages_retry_recovers_and_publishes_complete_deck(monkeypatch, tmp_path, tools):
+    deck, model, store, _ = prepare_completed_retry(monkeypatch, tmp_path, tools)
+    monkeypatch.setattr(tools, 'ppt_run_stage', lambda *a, **k: pytest.fail('complete retry must not regenerate'))
+    result = tools.ppt_generate_pages(str(deck))
+    assert result['status'] == 'ok'
+    assert result['published_count'] == 4
+    assert len(model.calls) == 4
+    assert len(store.selected) == 8
+    assert all(item['attempt'] == 2 for item in store.selected.values())
+    artifacts = [{'slot': item['slot'], 'content_type': 'text', 'value': item['value']}
+                 for item in store.selected.values()]
+    assert tools.check_ppt_delivery(artifacts)['status'] == 'ok'
+
+
+def test_completed_deck_edit_is_not_treated_as_failed_retry(monkeypatch, tmp_path, tools):
+    deck, _, store, ctx = prepare_completed_retry(monkeypatch, tmp_path, tools)
+    ctx.params.pop('retry_existing_outputs')
+    ctx.params['current_user_input'] = 'Move the title to the bottom'
+    with pytest.raises(tools.ToolExecutionError, match='existing deck is complete'):
+        tools.ppt_generate_pages(str(deck))
+    assert store.selected == {}
+
+
+@pytest.mark.parametrize('change', ['brief', 'page_count', 'input', 'html', 'placeholder', 'missing'])
+def test_retry_does_not_republish_changed_or_incomplete_deck(monkeypatch, tmp_path, tools, change):
+    deck, _, store, _ = prepare_completed_retry(monkeypatch, tmp_path, tools)
+    if change in {'brief', 'page_count'}:
+        items = tools._selected_slide_outline_items()
+        if change == 'brief':
+            items[0] = (0, 'A new confirmed design')
+        else:
+            items.append((4, 'Page 5 design'))
+        monkeypatch.setattr(tools, '_selected_slide_outline_items', lambda: items)
+    elif change == 'input':
+        (deck / 'info_pack.json').write_text('{"updated":true}')
+    elif change == 'missing':
+        (deck / 'pages/page_001.html').unlink()
+    else:
+        (deck / 'pages/page_001.html').write_text(
+            '<html><!-- lazymind-ppt-placeholder --></html>' if change == 'placeholder' else HTML + 'changed')
+    # Changed inputs or files must use normal generation before publishing.
+
+    def generate(_deck, *, stage):
+        assert stage == 'asset-plan'
+        assert store.selected == {}
+        raise RuntimeError('normal generation required')
+    monkeypatch.setattr(tools, 'ppt_run_stage', generate)
+    with pytest.raises(RuntimeError, match='normal generation required'):
+        tools.ppt_generate_pages(str(deck))
+
+
+def test_pause_during_cached_republication_stops_and_can_resume(monkeypatch, tmp_path, tools, cancel_queue):
+    from lazymind.chat.engine.agent_runtime.cancellation import UserCancelledError, request_cancel
+
+    deck, model, store, ctx = prepare_completed_retry(monkeypatch, tmp_path, tools)
+    save = tools._save_artifact
+
+    def pause_after_first_page(**kwargs):
+        result = save(**kwargs)
+        if kwargs['key'] == 'preview_notes':
+            request_cancel('cached-retry')
+        return result
+
+    monkeypatch.setattr(tools, '_save_artifact', pause_after_first_page)
+    with lazyllm.globals._bind_sid('cached-retry'), pytest.raises(UserCancelledError):
+        tools.ppt_generate_pages(str(deck))
+    assert len(store.selected) == 2
+    assert len(model.calls) == 4
+    monkeypatch.setattr(tools, '_save_artifact', save)
+    ctx._ppt_page_failures = {}
+    with lazyllm.globals._bind_sid('resumed-retry'):
+        assert tools.ppt_generate_pages(str(deck))['status'] == 'ok'
+    assert len(store.selected) == 8
+    assert len(model.calls) == 4

@@ -86,7 +86,7 @@ class GitHubStarService:
             if status == 403:
                 raise _error(ErrorCodes.GITHUB_STAR_PERMISSION_REQUIRED, 'permission_denied') from None
             raise _error(ErrorCodes.GITHUB_STAR_UNAVAILABLE, 'unavailable') from None
-        except (URLError, TimeoutError, OSError, ValueError):
+        except (URLError, OSError, ValueError):
             raise _error(ErrorCodes.GITHUB_STAR_UNAVAILABLE, 'unavailable') from None
 
     def _connection(self, owner, connection_id):

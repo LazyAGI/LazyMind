@@ -30,6 +30,62 @@ async def _collect_streaming_response(response):
     return ''.join(chunks)
 
 
+@pytest.mark.parametrize('user_query,context,expected', [
+    ('Please create a presentation.', '本任务的工作区：未绑定',
+     'Please provide the required information to continue.'),
+    ('请帮我制作演示文稿。', 'Workspace: unbound', '请补充必要信息后继续。'),
+])
+def test_tool_preview_language_uses_original_user_query(monkeypatch, tmp_path, provider, user_query, context, expected):
+    from lazymind.chat.engine.tools import temporary_retrieval_session as session
+    from lazymind.chat.engine.subagent.db import TaskQueryDB
+    from lazymind.chat.workflow import workflow_manager
+    from lazymind.config import config
+
+    monkeypatch.setattr(session, 'workspace_for_request', lambda **kwargs: str(tmp_path))
+    monkeypatch.setattr(session, 'is_model_role_available', lambda role: False)
+    monkeypatch.setattr(TaskQueryDB, '_get', lambda *a, **kw: {'tasks': []})
+    monkeypatch.setattr(chat_service, 'AutoModel', lambda *a, **kw: chat_service.lazyllm.OnlineChatModule(
+        source='openai', model='preview-language', url=provider.url, api_key='offline-key', stream=False,
+    ))
+    monkeypatch.setattr(chat_service, 'load_memory_context', lambda: SimpleNamespace(soul='', profile='', preference=''))
+    client = MagicMock()
+    runtime = {'clarification_fields': [{
+        'id': 'topic', 'question': '主题是什么？', 'type': 'text', 'required': True,
+        'reason': '主题决定内容范围。',
+    }]}
+    client.get_workflow.return_value.result = {'revision_id': 'r1', 'runtime': runtime}
+    monkeypatch.setattr(workflow_manager, '_client', lambda: client)
+    entry = {'workflow_ref': 'builtin:writer', 'workflow_id': 'writer', 'revision_id': 'r1', 'runtime': runtime}
+    provider.script['preview-language'] = [{'message': {'role': 'assistant', 'content': '', 'tool_calls': [{
+        'id': 'init-language', 'type': 'function',
+        'function': {'name': 'trigger_writer_workflow', 'arguments': '{}'},
+    }]}}]
+
+    async def drive():
+        response = await chat_service._handle_chat_impl(ChatRequest(
+            message={'query': f'{context}\n\nUser query:\n{user_query}', 'user_query': user_query},
+            conversation={'session_id': 'language-session', 'conversation_id': 'language-conversation',
+                          'run_id': 'language-run', 'history_id': 'language-history'},
+            runtime={'llm_config': {}}, personalization={'use_memory': False},
+            agent={'enable_subagent': False, 'disabled_tools': [
+                'kb', 'wikipedia', 'arxiv', 'sciverse', 'google', 'bing', 'bocha', 'url_fetch',
+                'multimodal', 'vocab_learn', 'skill_editor', 'feishu',
+            ]},
+            workflow={'enable_workflow': True, 'catalog': [entry],
+                      'activations': [{**entry, 'tool_name': 'trigger_writer_workflow'}]},
+        ))
+        return [json.loads(chunk)['data'] async for chunk in response.body_iterator]
+
+    with config.temp('context_compression_enabled', False):
+        frames = asyncio.run(drive())
+    text = ''.join(frame.get('text') or '' for frame in frames)
+    assert expected in text
+    assert any(frame.get('ask_pending') for frame in frames)
+    assert len(provider.requests) == 1
+    # Language selection must not remove system context from the model's input.
+    assert context in str(provider.requests[0]['messages'])
+
+
 @pytest.mark.parametrize('guidance_timing', [None, 'before_card', 'after_card'])
 def test_startup_card_preserves_accepted_steering_without_repeating_card(
     monkeypatch, tmp_path, provider, guidance_timing,
@@ -358,9 +414,15 @@ def test_sensitive_input_is_blocked_before_model_execution(monkeypatch, message)
     }
 
 
-def test_task_profile_review_emits_ephemeral_pseudo_stream(monkeypatch):
+@pytest.mark.parametrize('user_query,context,expected', [
+    ('推荐一款适合我的相机', '', '正在分析用户意图，请稍后'),
+    ('推荐一款适合我的相机', 'Workspace: unbound', '正在分析用户意图，请稍后'),
+    ('Recommend a camera that suits me.', '本任务的工作区：未绑定', 'Analyzing your request, please wait…'),
+])
+def test_task_profile_review_emits_ephemeral_pseudo_stream(monkeypatch, user_query, context, expected):
     request = ChatRequest(
-        message={'query': '推荐一款适合我的相机', 'history': []},
+        message={'query': f'{context}\n\nUser query:\n{user_query}' if context else user_query,
+                 **({'user_query': user_query} if context else {}), 'history': []},
         conversation={'session_id': 'sid-router'},
         retrieval={'filters': {}},
         runtime={'llm_config': {}, 'thinking_depth': 'medium'},
@@ -402,13 +464,11 @@ def test_task_profile_review_emits_ephemeral_pseudo_stream(monkeypatch):
         return await _collect_streaming_response(response)
 
     body = asyncio.run(drive())
-    assert '正在' in body
-    assert '分析' in body
-    assert '用户意图' in body
-    assert '，请稍后' in body
+    frames = [json.loads(chunk)['data'] for chunk in body.split('\n\n') if chunk and chunk != 'final']
+    assert ''.join(frame.get('think') or '' for frame in frames) == expected
     assert body.endswith('final\n\n')
     assert request.message.history == original_history
-    assert sensitive_checks == ['推荐一款适合我的相机']
+    assert sensitive_checks == [user_query]
 
 
 def test_context_usage_preview_only_uses_model_when_explicitly_requested(monkeypatch):

@@ -43,9 +43,9 @@ it.each(cases)('exposes source for $label, including read-only data', async ({ t
     revision: 1, created_at: '2026-09-16', content_type: type, artifact_value: value };
   render(<SlotRenderer slot={slot} readOnly expectedType={expectedType} widget={widget} />);
   fireEvent.click(await screen.findByRole('button', { name: '展示源码' }));
-  expect(await screen.findByRole('textbox', { name: '源码' })).toHaveValue(
+  expect(await screen.findByRole('textbox', { name: '查看源码' })).toHaveValue(
     typeof expected === 'string' ? expected : JSON.stringify(expected, null, 2));
-  expect(screen.getByRole('textbox', { name: '源码' })).toHaveAttribute('readonly');
+  expect(screen.getByRole('textbox', { name: '查看源码' })).toHaveAttribute('readonly');
 });
 
 it('keeps the source accessible without revealing a disabled Markdown download action', async () => {
@@ -69,7 +69,7 @@ it('displays PPT prompt text literally even with a legacy Markdown descriptor', 
   expect(container.querySelector('.writer-markdown-editor')).toBeNull();
   expect(container.querySelector('i, sub, sup')).toBeNull();
   fireEvent.click(screen.getByRole('button', { name: '展示源码' }));
-  expect(await screen.findByRole('textbox', { name: '源码' })).toHaveValue(prompt);
+  expect(await screen.findByRole('textbox', { name: '查看源码' })).toHaveValue(prompt);
 });
 
 it.each(['academic_brief', 'deck_outline'])('renders %s as Markdown and preserves comments in editable source', async (slotName) => {
@@ -99,7 +99,7 @@ it('loads historical offloaded research analysis as Markdown without requiring a
   fireEvent.doubleClick(screen.getByRole('heading', { name: '科研内容分析' }));
   expect(screen.queryByRole('textbox', { name: '编辑文本' })).not.toBeInTheDocument();
   fireEvent.click(screen.getByRole('button', { name: '展示源码' }));
-  expect(await screen.findByRole('textbox', { name: '源码' })).toHaveValue(text);
+  expect(await screen.findByRole('textbox', { name: '查看源码' })).toHaveValue(text);
 });
 
 it('opens the complete PPT design source for editing without treating section toggles as edits', async () => {

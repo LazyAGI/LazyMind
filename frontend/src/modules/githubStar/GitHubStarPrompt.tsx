@@ -19,7 +19,7 @@ type Invitation = { opportunity: GitHubStarOpportunity; accounts: GitHubStarAcco
 type PendingInvitation = { opportunity: GitHubStarOpportunity; connectionId?: string; claimed?: boolean; userId: string; identity: string; scope: string };
 
 function hasOpenDialog(excludeStar = false) {
-  return Array.from(document.querySelectorAll<HTMLElement>('[role="dialog"], .artifact-preview')).some(dialog =>
+  return Array.from(document.querySelectorAll<HTMLElement>('[role="dialog"], .artifact-preview:not([data-inline="true"])')).some(dialog =>
     dialog.getClientRects().length > 0 && !(excludeStar && dialog.closest('.github-star-prompt')));
 }
 

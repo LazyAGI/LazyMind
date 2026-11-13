@@ -214,6 +214,9 @@ runtime:
         style_flow: style_flow
         generate_background_images: generate_background_images
         template_mode: template_mode
+    - step_id: generate_ppt
+      tool: check_ppt_delivery
+      artifacts_argument: artifacts
   input_checkpoint:
     after_step: collect_materials
     slot: material_clarification
@@ -288,19 +291,28 @@ runtime:
       required: true
       resolution: model
       reason: 主题决定内容范围，未明确主题时无法组织幻灯片。
-      ask_when: Only when the presentation purpose/topic is not already clear from the request. A probation defense is a supplied topic.
+      ask_when: >
+        Extract only the presentation topic semantically from the current request into input_bindings.topic.
+        Preserve the topic's wording, including meaningful numbers in the title, in any language.
+        Exclude surrounding instructions, page-count discussion, uncertainty, audience and style preferences.
+        Ask only when the presentation purpose/topic is not already clear. A probation defense is a supplied topic.
       question: 这份 PPT 的主题是什么？
       type: text
     - id: slide_count
       label: 页数
       required: true
-      resolution: model
+      resolution: grounded_count
       reason: 页数会影响内容颗粒度和生成时间。
-      value_aliases: {沿用模板全部页面（已上传模板时）: preserve_all}
+      value_aliases: {沿用模板全部页面（已上传模板时）: preserve_all, 沿用模板全部页面: preserve_all, 填满模板全部页面: preserve_all, 保留模板页数: preserve_all}
       ask_when: >
-        Bind slide_count as the total number of slides (for example, "12" for 十二页),
-        or as preserve_all when the user asks to fill or keep all uploaded template pages.
-        Distinguish the total from page references, time, years, and section counts.
+        Extract the requested TOTAL slide count semantically in any language.
+        Normalize digits or number words (3, 三, three) to a positive integer string.
+        Page 3 / Slide 3 / 第三页 are page ordinals, not total counts; a section's
+        length is not the deck total. Do not infer the total from enumerated pages.
+        Quote the exact original phrase establishing each active total in
+        clarification_extractions.slide_count. Include all conflicting totals;
+        do not select one arbitrarily. Exclude a total explicitly superseded by a correction.
+        For an explicit request to keep all template pages, use preserve_all with its exact quote.
         For paper presentations with N known papers and no requested count, default
         to 3*N content pages plus explicitly requested shared pages; do not ask this
         field. Otherwise only when the desired page count is unknown, the user has not delegated
@@ -472,6 +484,7 @@ tool_scripts:
       - ppt_publish_background_prompts
       - ppt_generate_background_images
       - check_ppt_workflow_capabilities
+      - check_ppt_delivery
       - ppt_analyze_template
       - ppt_publish_paper_reflection
       - ppt_cache_academic_sources

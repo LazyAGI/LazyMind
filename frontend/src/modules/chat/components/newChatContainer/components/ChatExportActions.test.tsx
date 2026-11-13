@@ -23,6 +23,21 @@ beforeEach(() => {
 });
 
 describe("Chat export actions", () => {
+  it("saves export ranges from their original body instead of retained commentary", async () => {
+    const commentary = "我先核算交通和住宿预算。";
+    const body = "前言😀\n# 完整报告\n" + "详细行程\n".repeat(50) + "**最后一段完整结论。**";
+    const start = body.indexOf("# 完整报告");
+    const expected = body.slice(start);
+    const rawContent = commentary + '<tp>核算</tp><trp>完成</trp><tool_result>{}</tool_result>' + body;
+    api.create.mockResolvedValue({ data: { ...artifact, value: { text: expected } } });
+    useTaskCenterStore.setState({ artifactsByConversation: { conv: [] } });
+    render(<ChatExportActions {...props} content={commentary + body} rawContent={rawContent}
+      exports={[{ ...item, start, end: body.length }]} />);
+    fireEvent.click(screen.getByRole("button", { name: "chat.exportSave · 报告.md" }));
+    await waitFor(() => expect(api.create).toHaveBeenCalledWith("conv", expect.objectContaining({ content: expected })));
+    expect(api.create).toHaveBeenCalledTimes(1);
+  });
+
   it("closes a withdrawn export preview and retains saved exports and real tool artifacts", () => {
     const saved = { ...artifact, value: { text: "saved answer", chat_export: true } };
     const tool = { ...artifact, artifact_id: "tool-file", filename: "tool.md", value: { text: "completed tool result" } };

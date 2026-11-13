@@ -34,6 +34,7 @@ _MULTI_SPACE_PATTERN = re.compile(r'[ \t]{2,}')
 _COMPACT_WORKFLOW_TOOL_RESULTS = {
     'advance_step',
     'advance_step_and_hand_off',
+    'resume_and_rerun_step',
     'get_workflow_state',
 }
 _WORKFLOW_REWIND_QUERY_PATTERNS = (

@@ -390,6 +390,11 @@ class HostWorkflowToolkit:
             retry_origin=retry_origin,
             workflow_mode=workflow_mode,
         )).result
+        return self.execution_result(result, resolved_command_id)
+
+    @staticmethod
+    def execution_result(result: Dict[str, Any], resolved_command_id: str = '') -> Dict[str, Any]:
+        """Interpret a synchronous execution receipt consistently across Chat recovery paths."""
         workflow_state = result.get('workflow_state') or {}
         display = workflow_state.get('display') or {}
         if display.get('status') == 'paused':
