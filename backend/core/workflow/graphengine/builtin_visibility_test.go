@@ -91,16 +91,17 @@ func TestBuiltinStepsKeepVisibleOutputs(t *testing.T) {
 					}
 				}
 				outputs := state.Steps[step.ID].Outputs
-				hasRequired := false
+				hasVisibleRequired := false
 				for _, output := range outputs {
-					if output.Required == nil || *output.Required {
-						hasRequired = true
+					if visible[output.Material] && (output.Required == nil || *output.Required) {
+						hasVisibleRequired = true
 					}
 				}
 				found := false
 				for _, output := range outputs {
-					// Alternative delivery formats may all be optional (HTML or native PPTX).
-					if hasRequired && output.Required != nil && !*output.Required {
+					// Alternative delivery formats can be optional even when a step
+					// has required internal outputs, such as a postprocessing status.
+					if hasVisibleRequired && output.Required != nil && !*output.Required {
 						continue
 					}
 					if visible[output.Material] && (len(workflow.UI.Tabs) == 0 || displayed[output.Material]) {
