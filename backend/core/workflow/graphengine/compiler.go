@@ -282,6 +282,13 @@ func Compile(workflowYAML, stateYAML, scenario string, profile Profile) CompileR
 		path := fmt.Sprintf("workflow.yaml.runtime.post_step_checks[%d]", i)
 		check.StepID = strings.TrimSpace(check.StepID)
 		check.Tool = strings.TrimSpace(check.Tool)
+		check.ArtifactsArgument = strings.TrimSpace(check.ArtifactsArgument)
+		if _, duplicate := check.Arguments[check.ArtifactsArgument]; check.ArtifactsArgument != "" && duplicate {
+			result.Diagnostics = append(result.Diagnostics, diag(
+				"E_RUNTIME_POST_CHECK_ARGUMENT_INVALID", "error", path+".artifacts_argument",
+				"artifacts_argument must not also be a mapped artifact argument",
+			))
+		}
 		node, stepExists := graph.Nodes[check.StepID]
 		if check.StepID == "" {
 			result.Diagnostics = append(result.Diagnostics, diag(
@@ -362,9 +369,9 @@ func Compile(workflowYAML, stateYAML, scenario string, profile Profile) CompileR
 		field.Question = strings.TrimSpace(field.Question)
 		field.Type = strings.ToLower(strings.TrimSpace(field.Type))
 		field.ChoicePolicy = strings.ToLower(strings.TrimSpace(field.ChoicePolicy))
-		if field.Resolution != "" && field.Resolution != "explicit" && field.Resolution != "model" {
+		if field.Resolution != "" && field.Resolution != "explicit" && field.Resolution != "model" && field.Resolution != "grounded_count" {
 			result.Diagnostics = append(result.Diagnostics, diag("E_RUNTIME_CLARIFICATION_RESOLUTION_INVALID", "error",
-				path+".resolution", "resolution must be empty, explicit, or model"))
+				path+".resolution", "resolution must be empty, explicit, model or grounded_count"))
 		}
 		if field.Required && strings.TrimSpace(field.Reason) == "" {
 			result.Diagnostics = append(result.Diagnostics, diag("E_RUNTIME_CLARIFICATION_REASON_REQUIRED", "error",

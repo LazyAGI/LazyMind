@@ -63,10 +63,10 @@
     &:focus-visible { outline: 2px solid var(--color-primary, #2563eb); outline-offset: 2px; }
   }
   fieldset { border: 0; margin: 8px 0 0; padding: 0; }
-  label { display: block; padding: 5px; cursor: pointer; }
+  legend { padding: 0 6px; }
+  label { display: flex; align-items: center; gap: 6px; padding: 5px 12px; cursor: pointer; }
+  input[type='radio'] { margin: 0; }
 }
-.writer-markdown-editor--width-reading .mdxeditor-root-contenteditable > div { max-width: 760px; margin-inline: auto; }
 .writer-markdown-editor__main > .mdxeditor { min-width: 0; }
 .writer-markdown-editor .mdxeditor-root-contenteditable img { max-width: 100%; height: auto; object-fit: contain; }
 .writer-markdown-editor .mdxeditor-toolbar { min-height: 36px; }
-.writer-ir--width-reading .writer-ir__document { max-width: 760px; margin-inline: auto; }

@@ -113,6 +113,7 @@ func projectRows(rows []projectionRow) []PublishedProjection {
 		var meta struct {
 			Filename      string `json:"filename"`
 			ChangeSummary string `json:"change_summary"`
+			PreviewGroup  string `json:"preview_group"`
 		}
 		_ = json.Unmarshal(row.Metadata, &meta)
 		if meta.Filename != "" {
@@ -120,7 +121,11 @@ func projectRows(rows []projectionRow) []PublishedProjection {
 		}
 		p.ChangeSummary = meta.ChangeSummary
 		if row.StorageKey != "" {
-			p.OverlayValue, _ = json.Marshal(map[string]any{"url": doc.StaticFileURLFromAnyStoragePath(row.StorageKey), "filename": p.Filename})
+			value := map[string]any{"url": doc.StaticFileURLFromAnyStoragePath(row.StorageKey), "filename": p.Filename}
+			if meta.PreviewGroup != "" {
+				value["preview_group"] = meta.PreviewGroup
+			}
+			p.OverlayValue, _ = json.Marshal(value)
 			// A file_list snapshot is an immutable archive, not mutable workspace members.
 			if p.ContentType == "file_list" {
 				p.ContentType = "file"

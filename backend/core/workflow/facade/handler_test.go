@@ -731,10 +731,13 @@ func TestCommandHTTPReportsMissingSessionInsteadOfPermissionDenied(t *testing.T)
 
 func TestLegacyHandOffReplaysWithRefreshedStateVersion(t *testing.T) {
 	h, db := testHandler(t)
-	if err := db.AutoMigrate(&orm.WorkflowTransitionCommand{}); err != nil {
+	if err := db.AutoMigrate(&orm.WorkflowTransitionCommand{}, &orm.WorkflowSessionStep{}, &orm.SubAgentTask{}, &orm.SubAgentStep{}); err != nil {
 		t.Fatal(err)
 	}
 	if err := db.Exec(`INSERT INTO plugin_sessions(id, create_user_id) VALUES ('s1','owner')`).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&orm.WorkflowSessionStep{ID: "original-attempt", SessionID: "s1", StepID: "draft", TaskID: "original", Attempt: 1, Status: "succeeded", Validity: "effective"}).Error; err != nil {
 		t.Fatal(err)
 	}
 	var calls int

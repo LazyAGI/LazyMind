@@ -1,4 +1,4 @@
-import { useContext, useEffect, useId, useMemo, useRef } from 'react';
+import { useContext, useEffect, useId, useMemo, useRef, type CSSProperties } from 'react';
 import { useTranslation } from 'react-i18next';
 import { SlotEditingContext } from './slotEditingContext';
 import './PptPromptDocument.scss';
@@ -70,7 +70,8 @@ export function PptPromptDocument({ text, onEdit, maxHeight }: {
         {onEdit && <button type='button' onClick={() => { if (documentRef.current) onEdit(documentRef.current); }}>{t('chat.slots.editText')}</button>}
       </div>
     </div>}
-    <div className='ppt-prompt-document__body' style={maxHeight ? { maxHeight, overflowY: 'auto' } : undefined}>
+    <div className='ppt-prompt-document__body' style={maxHeight
+      ? { '--workflow-ppt-prompt-max-height': `${maxHeight}px` } as CSSProperties : undefined}>
       {sections.map((section, index) => (
         section.title ? <details className='ppt-prompt-document__section' key={index} open>
           <summary>{section.title}</summary>

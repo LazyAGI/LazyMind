@@ -98,6 +98,7 @@ import type { DocumentRenderContext } from '@/api/generated/core-client';
 import { writerLocalCodeEditor, writerLocalSourcePlugin } from './writerLocalSourcePlugin';
 import { WriterCodeDisplayContext, useWriterLocalDisplayHints } from './writerLocalDisplayHints';
 import { WriterDocumentOptions } from './WriterDocumentOptions';
+import { useWriterPageWidth } from './useWriterPageWidth';
 
 /** Idle debounce after the latest edit before a silent draft save. */
 const MARKDOWN_AUTOSAVE_IDLE_MS = 1_000;
@@ -554,7 +555,7 @@ export function MarkdownArtifactEditor({
   const [renderErrorSource, setRenderErrorSource] = useState<string>();
   const [conflict, setConflict] = useState(false);
   const [outlineOpen, setOutlineOpen] = useState(false);
-  const [pageWidth, setPageWidth] = useState<'default' | 'wide' | 'reading'>('default');
+  const [pageWidth, setPageWidth] = useWriterPageWidth();
   const [selection, setSelection] = useState<MarkdownSelection | null>(null);
   const [selectionToolbar, setSelectionToolbar] = useState<FloatingToolbarAnchor | null>(null);
   const [emptyHeadingLevel, setEmptyHeadingLevel] = useState<string | null>(null);
@@ -1616,19 +1617,22 @@ export function MarkdownArtifactEditor({
       '.writer-markdown-editor__surface',
     );
     if (!surface || !target) return;
-    const artifactBody = surface.closest<HTMLElement>('.workflow-slot__artifact-body');
-    const scrollContainer = [surface, artifactBody].find(
-      (element): element is HTMLElement => Boolean(
-        element && element.scrollHeight > element.clientHeight + 1,
-      ),
-    ) ?? surface;
+    // Workflow flow layouts delegate scrolling to the tab or composite grid;
+    // dedicated document workspaces keep it inside the editor.
+    let scrollContainer: HTMLElement | null = surface;
+    while (scrollContainer) {
+      if (/^(auto|scroll)$/.test(getComputedStyle(scrollContainer).overflowY)
+        && scrollContainer.scrollHeight > scrollContainer.clientHeight + 1) break;
+      scrollContainer = scrollContainer.parentElement;
+    }
+    if (!scrollContainer) return;
     const containerRect = scrollContainer.getBoundingClientRect();
     const targetRect = target.getBoundingClientRect();
     const reduceMotion = globalThis.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
     scrollContainer.scrollTo({
       top: Math.max(
         0,
-        scrollContainer.scrollTop + targetRect.top - containerRect.top - 8,
+        scrollContainer.scrollTop + targetRect.top - containerRect.top - scrollContainer.clientTop - 8,
       ),
       behavior: reduceMotion ? 'auto' : 'smooth',
     });
@@ -1680,7 +1684,7 @@ export function MarkdownArtifactEditor({
     } as CSSProperties
     : undefined;
   const editorStyle: CSSProperties | undefined = selectionToolbarStyle || maxHeight !== undefined
-    ? { ...selectionToolbarStyle, ...(maxHeight !== undefined ? { maxHeight } : {}) }
+    ? { ...selectionToolbarStyle, ...(maxHeight !== undefined ? { '--writer-markdown-max-height': `${maxHeight}px` } : {}) } as CSSProperties
     : undefined;
 
   let sourcePreview: string | undefined;

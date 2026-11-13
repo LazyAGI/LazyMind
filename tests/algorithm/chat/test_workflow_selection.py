@@ -166,7 +166,7 @@ def test_mentioned_workflow_is_injected_as_authoritative_selection():
     assert 'LAST step' in _tool(contribution, 'advance_step_and_hand_off').__doc__
     assert list(inspect.signature(
         _tool(contribution, 'trigger_image_workflow'),
-    ).parameters) == ['request_context']
+    ).parameters) == ['request_context', 'clarification_extractions']
     assert 'prepare_workflow' not in _tool_names(contribution)
     assert 'list_workflow_attachments' not in _tool_names(contribution)
     assert 'bind_workflow_input' not in _tool_names(contribution)
@@ -1293,7 +1293,7 @@ def test_existing_session_tools_inject_protocol_and_concurrency_fields():
         )
 
     advance = _tool(contribution, 'advance_step')
-    assert list(inspect.signature(advance).parameters) == ['step_ids']
+    assert list(inspect.signature(advance).parameters) == ['step_ids', 'request_quote']
     assert list(inspect.signature(_tool(contribution, 'get_workflow_state')).parameters) == []
     assert advance(['draft']) == {'status': 'succeeded'}
     args = toolkit.advance_step.call_args.args
@@ -1438,7 +1438,7 @@ def test_rerun_turn_preserves_session_intent_for_downstream_steps(query, handoff
             assert command.user_input == ('' if is_rerun else query)
             assert 'result' in command.runtime_instruction
             if is_rerun:
-                assert query in command.runtime_instruction
+                assert query not in command.runtime_instruction
 
 
 def test_completed_actions_are_opt_in_and_domain_neutral():
@@ -1545,8 +1545,9 @@ def test_trigger_routes_ppt_clarification_answers_to_analysis_context(selected):
             _tool(contribution, 'trigger_ppt_workflow')(input_bindings={'undeclared': 'value'})
         assert error.value.code == 'WORKFLOW_INPUT_NOT_EXPOSED'
         result = _tool(contribution, 'trigger_ppt_workflow')(
-            input_bindings={'topic': '中国新年', 'slide_count': '13', 'target_customer': '小孩子',
-                            'visual_style': '喜庆', 'generate_background_images': 'disabled'},
+            input_bindings={'topic': '中国新年', 'target_customer': '小孩子', 'visual_style': '喜庆',
+                            'generate_background_images': 'disabled'},
+            clarification_extractions={'slide_count': [{'value': '13', 'evidence': '制作13页中国新年PPT'}]},
         )
         assert result['session_id'] == 'session-1'
         importer.assert_called_once_with('topic', '中国新年')
@@ -1730,7 +1731,7 @@ def test_minimax_wire_schema_and_correction_preserve_input(workflow_input_runtim
             'Write the paper', tools=manager.tools_description,
         )
     schema = captured['tools'][0]['function']['parameters']
-    assert set(schema['properties']) == {'input_bindings', 'request_context'}
+    assert set(schema['properties']) == {'input_bindings', 'request_context', 'clarification_extractions'}
     assert schema['additionalProperties'] is False
     bindings = {'paper_input': json.dumps({'topic': 'Synthetic', 'request': 'Write', 'charts': []})}
     _, failure = manager._validate_tool(trigger.__name__, {'inputBindings': bindings})
@@ -1803,3 +1804,20 @@ def test_workflow_waiting_notice_is_visible_in_the_rendered_preview(outcome):
     }, 'en')
     preview = re.search(r'<trp id="workflow-notice">(.*?)</trp>', frame, re.S).group(1)
     assert notice in preview
+
+
+@pytest.mark.parametrize('status', ['paused', 'running', 'waiting', 'failed'])
+def test_rerun_recovery_is_only_exposed_on_turn_start_pause(status):
+    with patch('lazymind.chat.workflow.workflow_manager._client') as client_factory:
+        client_factory.return_value.get_state.return_value = {
+            'session_id': 'session-1', 'state_version': 7, 'display': {'status': status},
+            'projection': {'rewindable': ['analysis'], 'retryable': ['draft']},
+        }
+        contribution = resolve_workflow_injection(
+            {'session_id': 'session-1', 'workflow_id': 'writer-workflow'}, current_query='重跑分析步骤',
+        )
+        assert ('resume_and_rerun_step' in _tool_names(contribution)) == (status == 'paused')
+        if status == 'paused':
+            # The real ToolManager must be able to expose the new function schema.
+            manager = ToolManager([_tool(contribution, 'resume_and_rerun_step')])
+            assert set(manager._tool_call['resume_and_rerun_step'].args) == {'step_id', 'request_quote', 'handoff'}

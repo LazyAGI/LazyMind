@@ -19,7 +19,7 @@ it('uses one card title and moves editing into the enclosing header', async () =
   fireEvent.click(await within(header).findByRole('button', { name: '编辑文本' }));
   expect(onEdit).toHaveBeenCalledTimes(1);
   expect(screen.getByText('浅色背景')).toBeVisible();
-  expect(container.querySelector('.ppt-prompt-document__body')).toHaveStyle({ maxHeight: '320px', overflowY: 'auto' });
+  expect(container.querySelector('.ppt-prompt-document__body')).toHaveStyle({ '--workflow-ppt-prompt-max-height': '320px' });
   rerender(view(false));
   await waitFor(() => expect(screen.queryByRole('button', { name: '编辑文本' })).not.toBeInTheDocument());
 });

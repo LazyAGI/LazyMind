@@ -496,6 +496,11 @@ class RemoteWorkflowExecutor:
                         f'deterministic post-step check input is missing: {material_id}'
                     )
                 arguments[str(parameter)] = values[material_id]
+            artifacts_argument = str(check.get('artifacts_argument') or '').strip()
+            if artifacts_argument:
+                if artifacts_argument in arguments:
+                    raise RuntimeError(f'duplicate post-step check argument: {artifacts_argument}')
+                arguments[artifacts_argument] = artifacts
             call_id = f'post-step-check-{index}'
             await self.runtime.task_event(client, task_id, lease, {
                 'type': 'tool_calls',

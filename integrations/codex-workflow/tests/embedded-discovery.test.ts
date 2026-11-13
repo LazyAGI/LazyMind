@@ -66,7 +66,7 @@ it('the shipped panel discovers the browser through the numbered Rspack entry ca
   const foreignWindow = {get pages(): any {throw new Error('Blocked cross-origin property access')}}
   const pending = {get value(): any {throw new Error('Module export is not initialized')}}
   const runtime = Object.assign(factory, {c:{foreign:{exports:{foreignWindow}},pending:{exports:pending},
-    loaded:{exports:{p:manager}}},m:{unloaded:factory}})
+    loaded:{exports:{p:manager}}},m:{unloaded:factory,loaded:()=> 'getWebview disposeHost getSnapshot'}})
   const urls = ['782259.7a3e865ee5.js','727403.da6b00f04b.js','158624.0baba19172.js','348410.46c6a64506.js']
     .map(name => `app://-/assets/${name}`)
   const imported: string[] = []

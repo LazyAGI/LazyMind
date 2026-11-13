@@ -479,7 +479,7 @@ def test_html_font_references_verified_shared_resource(tmp_path, monkeypatch, fs
     assert local_font_css(html) == ''
 
 
-def test_generated_songti_page_references_font_before_publication(tmp_path, monkeypatch):
+def test_generated_songti_page_references_font_before_publication(tmp_path, monkeypatch, ppt_asset_library):
     import importlib.util
     from pathlib import Path
     from lazymind.chat.engine.tools.file_resources import font_library, presentation_edit

@@ -5,7 +5,7 @@
   display: flex;
   flex-direction: column;
   min-height: 0;
-  max-height: 620px;
+  max-height: var(--writer-markdown-max-height, 620px);
   border: 1px solid var(--color-border, #d9dce3);
   border-radius: 8px;
   overflow: hidden;
@@ -14,6 +14,10 @@
 
 .writer-markdown-editor--width-wide {
   --writer-markdown-page-max-width: 1080px;
+}
+
+.writer-markdown-editor--width-reading {
+  --writer-markdown-page-max-width: 640px;
 }
 
 .writer-markdown-editor--chat {
@@ -37,9 +41,7 @@
 }
 
 .writer-markdown-editor--chat .writer-markdown-editor__surface .mdxeditor-root-contenteditable {
-  width: 100%;
   min-height: 0;
-  margin: 0;
   padding: 14px 16px;
   text-align: left;
 }

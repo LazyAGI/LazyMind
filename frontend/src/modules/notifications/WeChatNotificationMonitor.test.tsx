@@ -5,7 +5,7 @@ import WeChatNotificationMonitor from './WeChatNotificationMonitor';
 import { emptyRule, NOTIFICATION_PREFERENCES_CHANGED_EVENT, type Preferences } from './api';
 import { clearWeChatNotificationState, WECHAT_NOTIFICATION_CONFIG_CHANGED_EVENT } from './wechatNotificationState';
 import type { ChannelAccount } from '@/modules/channelGateway/api';
-import useWeChatNotificationStatus from './useWeChatNotificationStatus';
+import { WECHAT_NOTIFICATION_CHECK_REQUESTED_EVENT } from './notificationEvents';
 
 const mocks = vi.hoisted(() => ({ preferences: vi.fn(), catalog: vi.fn(), targets: vi.fn(), accounts: vi.fn(), identity: 'user-a' }));
 vi.mock('./api', async original => ({ ...await original<typeof import('./api')>(), getPreferences: mocks.preferences,
@@ -33,10 +33,6 @@ const mount = (userKey = 'user-a') => render(<MemoryRouter><WeChatNotificationMo
 const flush = () => act(async () => {});
 const changed = async (event = NOTIFICATION_PREFERENCES_CHANGED_EVENT) => { fireEvent(window, new Event(event)); await flush(); };
 const configure = () => { mocks.catalog.mockResolvedValue({ items: [savedTarget] }); };
-function SettingsRefresh({ refreshKey = 0 }: { refreshKey?: number }) {
-  const state = useWeChatNotificationStatus({ enabled: true, aggregate: true, refreshKey });
-  return <button onClick={state.refresh}>Refresh settings</button>;
-}
 
 beforeEach(() => {
   vi.useFakeTimers(); vi.clearAllMocks(); mocks.identity = 'user-a'; clearWeChatNotificationState();
@@ -60,14 +56,14 @@ it('does not probe when a global switch is open but no task has a saved recipien
   expect(screen.queryByRole('alert')).not.toBeInTheDocument();
 });
 
-it('reloads only saved catalog recipients when settings manually requests a connection refresh', async () => {
+it('reloads only saved catalog recipients when a connection refresh is requested', async () => {
   configure(); mocks.targets.mockResolvedValue({ items: [recipient(false)] });
-  render(<MemoryRouter><WeChatNotificationMonitor userKey="user-a" /><SettingsRefresh /></MemoryRouter>);
+  mount();
   await flush();
   expect(screen.getByRole('alert')).toHaveTextContent('notifications.wechatActivationRequired');
   expect(mocks.catalog).toHaveBeenCalledTimes(1);
   mocks.targets.mockResolvedValue({ items: [recipient()] });
-  fireEvent.click(screen.getByRole('button', { name: 'Refresh settings' })); await flush();
+  await changed(WECHAT_NOTIFICATION_CHECK_REQUESTED_EVENT);
   expect(mocks.catalog).toHaveBeenCalledTimes(2);
   expect(mocks.targets.mock.calls).toEqual([
     ['wechat-a', '', 'recipient-a', { checkConnection: true }],
@@ -76,12 +72,11 @@ it('reloads only saved catalog recipients when settings manually requests a conn
   expect(screen.queryByRole('alert')).not.toBeInTheDocument();
 });
 
-it('performs zero provider probes on a settings refresh when the saved catalog is empty', async () => {
-  const view = render(<MemoryRouter><WeChatNotificationMonitor userKey="user-a" /><SettingsRefresh /></MemoryRouter>);
+it('performs zero provider probes on a refresh request when the saved catalog is empty', async () => {
+  mount();
   await flush();
   expect(mocks.catalog).toHaveBeenCalledTimes(1);
-  view.rerender(<MemoryRouter><WeChatNotificationMonitor userKey="user-a" /><SettingsRefresh refreshKey={1} /></MemoryRouter>);
-  await flush();
+  await changed(WECHAT_NOTIFICATION_CHECK_REQUESTED_EVENT);
   expect(mocks.catalog).toHaveBeenCalledTimes(2);
   expect(mocks.targets).not.toHaveBeenCalled();
   expect(mocks.accounts).not.toHaveBeenCalled();

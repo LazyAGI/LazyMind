@@ -31,6 +31,7 @@ type transitionCommandRequest struct {
 	CommandID            string              `json:"command_id"`
 	Operation            string              `json:"operation"`
 	RetryOrigin          string              `json:"retry_origin"`
+	ResumeForRerun       bool                `json:"resume_for_rerun,omitempty"`
 	TargetStepID         string              `json:"target_step_id"`
 	ExpectedStateVersion int64               `json:"expected_state_version"`
 	GraphHash            string              `json:"graph_hash"`
@@ -663,8 +664,17 @@ func applyWorkflowTransition(ctx context.Context, tx *gorm.DB, sessionID string,
 			return snapshotErr
 		}
 		projection := projectSessionWithApprovalPreferences(tx.WithContext(ctx), session, graph, snapshot)
+		if req.ResumeForRerun {
+			if err := resumeForRerun(ctx, tx, &session, req); err != nil {
+				var rejected *controlstore.Error
+				if errors.As(err, &rejected) {
+					return rejectTransition(req.CommandID, &session, projection, http.StatusConflict, rejected.Code, rejected.Message, false, nil)
+				}
+				return err
+			}
+		}
 		recovery := runAdvanceRecovery{replacesInput: replacesInputCheckpoint(graph, req)}
-		if req.Operation == "rewind" && req.RetryOrigin == "user" && len(targets) == 1 {
+		if !req.ResumeForRerun && req.Operation == "rewind" && req.RetryOrigin == "user" && len(targets) == 1 {
 			recovery.replacesReviewStep = req.TargetStepID
 		}
 		if err := guardRunAdvance(tx, session, recovery); err != nil {
@@ -692,15 +702,17 @@ func applyWorkflowTransition(ctx context.Context, tx *gorm.DB, sessionID string,
 			}
 		}
 		var postStepCheckpoint *executor.PostStepCheckpoint
+		retryExistingOutputs := false
 		if req.Operation == "retry" || req.Operation == "rewind" {
 			var latest orm.WorkflowSessionStep
 			if err := tx.Where("session_id = ? AND step_id = ? AND validity = ?", session.ID,
 				targets[0].TargetStepID, "effective").Order("attempt DESC").First(&latest).Error; err != nil {
 				return err
 			}
-			// A bare retry repeats this failed attempt's confirmed request, not
-			// the workflow launch intent or a successful older attempt's request.
-			if req.Operation == "retry" && session.ControllerHost != "external-agent" && isBareRetryInput(currentInputs[targets[0].TaskID]) {
+			// Bare retries and automatic retries with inherited input repeat this
+			// failed attempt's request, not the launch or an older successful input.
+			if req.Operation == "retry" && session.ControllerHost != "external-agent" &&
+				(req.RetryOrigin == "automatic" || isBareRetryInput(currentInputs[targets[0].TaskID])) {
 				var previous orm.SubAgentTask
 				err := tx.Select("params").Where("id = ?", latest.TaskID).First(&previous).Error
 				if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
@@ -709,9 +721,11 @@ func applyWorkflowTransition(ctx context.Context, tx *gorm.DB, sessionID string,
 				var input struct {
 					CurrentUserInput string `json:"current_user_input"`
 				}
-				if err == nil && json.Unmarshal(previous.Params, &input) == nil && !isBareRetryInput(input.CurrentUserInput) {
+				if err == nil && json.Unmarshal(previous.Params, &input) == nil && !isBareRetryInput(input.CurrentUserInput) &&
+					(isBareRetryInput(currentInputs[targets[0].TaskID]) || currentInputs[targets[0].TaskID] == input.CurrentUserInput) {
 					targets[0].UserInput = input.CurrentUserInput
 					currentInputs[targets[0].TaskID] = input.CurrentUserInput
+					retryExistingOutputs = latest.Status == StepStatusFailed
 				}
 			}
 			var failedResult struct {
@@ -874,12 +888,21 @@ func applyWorkflowTransition(ctx context.Context, tx *gorm.DB, sessionID string,
 				}
 				params := WorkflowStepParams{WorkflowID: session.WorkflowID, WorkflowRef: session.WorkflowRef, RevisionID: session.WorkflowRevisionID, RevisionNo: session.WorkflowRevisionNo, TreeHash: session.WorkflowTreeHash, RemoteRoot: session.WorkflowRemoteRoot, StepID: target.TargetStepID, SessionID: session.ID, UserInput: target.UserInput, LaunchUserInput: sessionIntentText(session.IntentContext), CurrentUserInput: currentInputs[target.TaskID], HandOff: &handOff, ChatSessionID: req.ChatSessionID, TraceID: req.TraceID, ParentSpanID: req.ParentSpanID, WorkflowMode: req.WorkflowMode, RetryHint: target.RuntimeInstruction, PartialIndices: target.PartialIndices, HistoryFilesPerTurn: req.HistoryFilesPerTurn, Filters: req.Filters, ParentAgenticConfig: req.ParentAgenticConfig, UserID: session.CreateUserID, RequiredOutputs: nodeDef.RequiredOutputs, Capabilities: nodeDef.Capabilities, LegacyTools: nodeDef.LegacyTools, TerminalTools: nodeDef.TerminalTools, ToolsOnly: nodeDef.ToolsOnly, TerminalToolsOnly: nodeDef.TerminalToolsOnly, StreamHeartbeat: nodeDef.StreamHeartbeat, Runtime: graph.Runtime}
 				params.HostedTaskID = req.HostedTaskID
+				params.RetryExistingOutputs = retryExistingOutputs
 				params.RetryHint = workflowStepRuntimeInstruction(target.Objective, target.RuntimeInstruction)
 				var launchErr error
 				stepObjective := workflowStepObjectiveWithRuntimeBoundaries(nodeDef.Prompt, target.Objective, target.UserInput, nodeDef.Capabilities, nodeDef.LegacyTools, nodeDef.TerminalTools)
 				toolConfig, toolErr := workflowNodeToolConfig(ctx, tx, session.CreateUserID, req.ToolConfig, nodeDef.Capabilities, nodeDef.LegacyTools)
 				if toolErr != nil {
 					return toolErr
+				}
+				// Admit the controlled continuation before the native launcher reconciles
+				// status: a retry has invalidated the failed attempt, but its replacement
+				// does not exist yet. Activation and launch share this transaction.
+				if controlstore.Controlled(session) {
+					if err := acceptRunControl(ctx, tx, &session, "continue", nil, nil); err != nil {
+						return err
+					}
 				}
 				_, taskID, _, launchErr = launchWorkflowAttempt(ctx, tx, store.State(), session.ConversationID, session.TriggerHistoryID, session.CreateUserID, target.TaskID, session.WorkflowID+":"+target.TargetStepID, stepObjective, params, inputKeys, nodeDef.Outputs, req.LLMConfig, toolConfig, false, false)
 				if launchErr != nil {

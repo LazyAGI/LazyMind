@@ -713,6 +713,12 @@ TOOL_RENDER_PROFILES: dict[str, dict[str, Any]] = (
                         'failure': {'en': 'Google Drive file names matching '
                                           '{value} could not be found.',
                                     'zh': '未能找到文件名匹配 {value} 的 Google Drive 文件。'}},
+ 'resume_and_rerun_step': {'argument': 'step_id',
+                           'call': {'en': 'Resuming and rerunning step {value}.',
+                                    'zh': '正在恢复并重新执行步骤 {value}...'},
+                           'success': {'en': 'Rerun request processed.', 'zh': '重跑请求已处理'},
+                           'failure': {'en': 'Step {value} could not be rerun.',
+                                       'zh': '步骤 {value} 未能重新执行'}},
  'advance_step': {'argument': 'step_ids/steps.step_id',
                   'call': {'en': 'Switching to step {value}.',
                            'zh': '正在切换到步骤 {value}...'},
@@ -753,23 +759,26 @@ TOOL_RENDER_PROFILES: dict[str, dict[str, Any]] = (
                             'failure': {'en': 'The {match} Toolkit could not be '
                                               'expanded.',
                                         'zh': '未能展开{match}工具箱。'}},
- 'regex:trigger_(.+)_workflow': {'call': {'en': 'Checking whether the {match} '
-                                                'workflow fits this request.',
-                                          'zh': '正在检查 {match} 工作流是否适合当前需求...'},
-                                 'success': {'en': 'Workflow initialization '
-                                                   'completed. Result: '
-                                                   '{result.outcome}. Reason: '
-                                                   '{result.reason}.',
-                                             'zh': '工作流初始化已完成，结果是 '
-                                                   '{result.outcome}，原因是 '
-                                                   '{result.reason}。'},
-                                 'failure': {'en': 'Workflow initialization '
-                                                   'failed. Result: '
-                                                   '{result.outcome}. Reason: '
-                                                   '{result.reason}.',
-                                             'zh': '工作流初始化失败，结果是 '
-                                                   '{result.outcome}，原因是 '
-                                                   '{result.reason}。'}},
+ 'regex:trigger_(.+)_workflow': {
+     'call': {'en': 'Checking whether the {match} workflow fits this request.',
+              'zh': '正在检查 {match} 工作流是否适合当前需求...'},
+     'success': {'en': 'Workflow preparation has been checked.', 'zh': '已检查工作流的准备情况。'},
+     'failure': {'en': 'The workflow could not start. Please review the error details.',
+                 'zh': '工作流未能启动，请查看错误详情。'},
+     'outcomes': {
+         'waiting_for_input': {'en': 'Please provide the required information to continue.',
+                               'zh': '请补充必要信息后继续。'},
+         'ready': {'en': 'The workflow is ready and will start shortly.',
+                   'zh': '工作流已准备就绪，即将开始执行。'},
+         'waiting': {'en': 'The workflow has been created and is waiting for the next step to become available.',
+                     'zh': '工作流已创建，正在等待后续步骤具备执行条件。'},
+         'already_initialized': {'en': 'The workflow has already been created; there is no need to create it again.',
+                                 'zh': '工作流已创建，无需重复创建。'},
+         'not_applicable': {'en': 'This request can be handled directly without starting a workflow.',
+                            'zh': '当前请求可以直接处理，无需启动工作流。'},
+         'queued': {'en': 'The workflow is queued and waiting to run.',
+                    'zh': '工作流已加入队列，等待执行。'},
+     }},
  'ask_user': {'call': {'en': 'Gathering questions for you, please wait…',
                        'zh': '我正在组织问题，请稍后'},
               'success': {'en': 'Please answer the questions below.',

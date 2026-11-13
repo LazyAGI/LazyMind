@@ -116,6 +116,7 @@ runtime:
     - step_id: b
       tool: check_ready
       arguments: {brief: b_result}
+      artifacts_argument: published_artifacts
   clarification_fields:
     - id: topic
       label: Topic
@@ -157,6 +158,9 @@ runtime:
 	}
 	if len(policy.PostStepChecks) != 1 || policy.PostStepChecks[0].StepID != "b" || policy.PostStepChecks[0].Tool != "check_ready" || policy.PostStepChecks[0].Arguments["brief"] != "b_result" {
 		t.Fatalf("runtime post-step checks were not compiled: %#v", policy.PostStepChecks)
+	}
+	if policy.PostStepChecks[0].ArtifactsArgument != "published_artifacts" {
+		t.Fatalf("post-step artifact list argument was lost: %#v", policy.PostStepChecks)
 	}
 }
 
@@ -211,6 +215,37 @@ runtime:
 		if Compile(invalid, validState, "", ProfilePublish).Valid {
 			t.Fatal("invalid checkpoint contract was accepted")
 		}
+	}
+}
+
+func TestCompileGroundedCountResolution(t *testing.T) {
+	workflowYAML := strings.Replace(validWorkflow, "id: graph-test", `id: graph-test
+runtime:
+  clarification_fields:
+    - id: slide_count
+      question: How many slides?
+      required: true
+      reason: Determines the deck length.
+      resolution: grounded_count
+      type: text
+`, 1)
+	result := Compile(workflowYAML, validState, "", ProfilePublish)
+	if !result.Valid {
+		t.Fatalf("grounded count failed to compile: %#v", result.Diagnostics)
+	}
+	encoded, err := json.Marshal(result.Graph)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded CompiledStateGraph
+	if err := json.Unmarshal(encoded, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if decoded.Runtime.ClarificationFields[0].Resolution != "grounded_count" {
+		t.Fatal("grounded resolution lost on publication")
+	}
+	if Compile(strings.Replace(workflowYAML, "grounded_count", "unknown", 1), validState, "", ProfilePublish).Valid {
+		t.Fatal("unknown resolution accepted")
 	}
 }
 

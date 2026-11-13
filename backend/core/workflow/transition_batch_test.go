@@ -282,6 +282,9 @@ func TestAutomaticRetryRetainsCurrentEdit(t *testing.T) {
 	if !containsAll(got["retry_hint"].(string), edit, diagnostic, "保留内容、页数和讲稿") {
 		t.Fatalf("retry lost scope or diagnostics: %v", got["retry_hint"])
 	}
+	if got["retry_existing_outputs"] != true {
+		t.Fatalf("automatic retry must allow validated output recovery: %#v", got)
+	}
 }
 
 func TestExecuteStaleStepPreservesLaunchIntent(t *testing.T) {
@@ -370,6 +373,10 @@ func TestRetryKeepsFailedAttemptInput(t *testing.T) {
 			}
 			if params["current_user_input"] != tc.want || params["launch_user_input"] != "原始研究任务" {
 				t.Fatalf("current=%v launch=%v", params["current_user_input"], params["launch_user_input"])
+			}
+			wantRecovery := tc.operation == "retry" && !isBareRetryInput(tc.previous) && isBareRetryInput(tc.current)
+			if got, _ := params["retry_existing_outputs"].(bool); got != wantRecovery {
+				t.Fatalf("retry_existing_outputs=%v, want %v", got, wantRecovery)
 			}
 		})
 	}

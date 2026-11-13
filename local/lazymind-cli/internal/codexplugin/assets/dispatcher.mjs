@@ -843,12 +843,13 @@ async function prepareCodexBrowser(loadModule = (url) => import(
 			const url = queue.shift();
 			if (seen.has(url)) continue;
 			seen.add(url);
-			if (url.includes("/app-initial-")) {
+			{
 				const exports = await loadModule(url);
 				const manager = Object.values(exports).find((value) => value && typeof value === "object" && typeof value.pages?.getWebview === "function" && typeof value.pages?.disposeHost === "function" && typeof value.getSnapshot === "function");
-				if (!manager) throw Error("Codex native browser interface is unavailable");
-				host.__lazymindCodexBrowser = manager;
-				return;
+				if (manager) {
+					host.__lazymindCodexBrowser = manager;
+					return;
+				}
 			}
 			const response = await fetch(url, {
 				signal: AbortSignal.timeout(2e3),

@@ -24,8 +24,9 @@ export default function Workbench({ active }: WorkbenchProps) {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const request = useRef(0);
+  const resultsRef = useRef<HTMLDivElement>(null);
   const [data, setData] = useState<WorkbenchResponse | null>(null);
-  const [pagination, setPagination] = useState<{ category?: WorkbenchCategory; page: number }>({ page: 1 });
+  const [pagination, setPagination] = useState<{ category?: WorkbenchCategory; page: number; page_size: number }>({ page: 1, page_size: 4 });
   const [loading, setLoading] = useState(false);
   const [stepsRefreshVersion, setStepsRefreshVersion] = useState(0);
   const [loadFailed, setLoadFailed] = useState(false);
@@ -35,6 +36,34 @@ export default function Workbench({ active }: WorkbenchProps) {
   const [selected, setSelected] = useState<Task | null>(null);
   const [graphTask, setGraphTask] = useState<Task | null>(null);
   const [activeCategory, setActiveCategory] = useState<WorkbenchCategory>('attention');
+
+  useLayoutEffect(() => {
+    if (!active) return;
+    const results = resultsRef.current!;
+    const viewport = results.closest<HTMLElement>('.task-center-page');
+    if (!viewport) return;
+    const measure = () => {
+      if (!results.clientWidth || !viewport.clientHeight) return;
+      const style = getComputedStyle(results);
+      const columns = Number(style.getPropertyValue('--workbench-columns'));
+      const minCardHeight = parseFloat(style.getPropertyValue('--workbench-card-min-height'));
+      const maxCardHeight = parseFloat(style.getPropertyValue('--workbench-card-max-height'));
+      const gap = parseFloat(style.getPropertyValue('--workbench-card-gap'));
+      const chrome = parseFloat(style.getPropertyValue('--workbench-page-chrome'));
+      // Use the unscrolled position: scrolling must not change the page size.
+      const top = results.getBoundingClientRect().top - viewport.getBoundingClientRect().top + viewport.scrollTop;
+      const available = viewport.clientHeight - top - chrome;
+      const rows = Math.min(Math.max(1, Math.floor((available + gap) / (minCardHeight + gap))), Math.floor(100 / columns));
+      const cardHeight = Math.max(minCardHeight, Math.min(maxCardHeight, (available - (rows - 1) * gap) / rows));
+      results.style.setProperty('--workbench-card-height', `${Math.floor(cardHeight)}px`);
+      const pageSize = columns * rows;
+      setPagination(current => current.page_size === pageSize ? current : { page: 1, page_size: pageSize });
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    [viewport, results, results.parentElement!].forEach(element => observer.observe(element));
+    return () => observer.disconnect();
+  }, [active]);
 
   const load = useCallback(async (refreshSteps = false) => {
     const current = ++request.current;
@@ -96,8 +125,8 @@ export default function Workbench({ active }: WorkbenchProps) {
         <Metric icon={<StopOutlined />} tone='gray' label={t('taskCenter.statusCanceled')} value={count('canceled')} active={activeCategory === 'canceled'} onClick={() => setActiveCategory('canceled')} />
       </div>
       <div className='task-toolbar'>
-        <Input prefix={<SearchOutlined />} allowClear placeholder={t('taskCenter.searchPlaceholder')} value={keyword} onChange={(event: React.ChangeEvent<HTMLInputElement>) => { setKeyword(event.target.value); setPagination({ page: 1 }); }} />
-        <Select value={type} onChange={(value) => { setType(value); setPagination({ page: 1 }); }} options={[
+        <Input prefix={<SearchOutlined />} allowClear placeholder={t('taskCenter.searchPlaceholder')} value={keyword} onChange={(event: React.ChangeEvent<HTMLInputElement>) => { setKeyword(event.target.value); setPagination(current => ({ page: 1, page_size: current.page_size })); }} />
+        <Select value={type} onChange={(value) => { setType(value); setPagination(current => ({ page: 1, page_size: current.page_size })); }} options={[
           { value: '', label: t('taskCenter.triggerAll') },
           { value: 'workflow_run', label: t('taskCenter.typeWorkflowRun') },
           { value: 'background_chat', label: t('taskCenter.typeBackgroundChat') },
@@ -106,13 +135,13 @@ export default function Workbench({ active }: WorkbenchProps) {
         <Button icon={<ReloadOutlined />} onClick={() => void load(true)}>{t('taskCenter.refresh')}</Button>
       </div>
 
-      <Spin spinning={loading}>
+      <div className='workbench-results' ref={resultsRef}><Spin spinning={loading}>
         {loadFailed ? <Alert className='workbench-load-error' type='warning' showIcon message={t('taskCenter.loadError')} description={t('taskCenter.loadErrorDescription')} action={<Button size='small' onClick={() => void load()}>{t('common.retry')}</Button>} /> : null}
         {data && visibleCategories.map(category => <WorkbenchSection key={category} category={category} group={data.groups[category]}
-          pageSize={data.page_size} refreshVersion={stepsRefreshVersion} onPageChange={page => setPagination({ category, page })}
+          pageSize={data.page_size} refreshVersion={stepsRefreshVersion} onPageChange={page => setPagination(current => ({ ...current, category, page }))}
           onSelect={setSelected} onOpenGraph={setGraphTask} />)}
         {!loading && !loadFailed && !visibleCategories.length ? <WorkbenchEmpty /> : null}
-      </Spin>
+      </Spin></div>
       <TaskRemovalDialog task={removingTask} onClose={() => setRemovingTask(null)} />
       <TaskDetail task={selected} onClose={() => setSelected(null)} onOpenConversation={openConversation} onOpenWorkflow={(sessionId) => navigate(`/workflow-runs/${encodeURIComponent(sessionId)}`)} onOpenGraph={(sessionId) => selected && setGraphTask({ ...selected, workflow_session_id: sessionId })} onDelete={setRemovingTask} />
       {graphTask?.workflow_session_id && <StateGraphModal open onClose={() => setGraphTask(null)} sessionId={graphTask.workflow_session_id} workflowId='' liveRefresh={false} fallbackSteps={graphTask.steps} />}
@@ -202,11 +231,11 @@ function WorkbenchTaskCard({ task, tone, icon, actionLabel, onSelect, onOpenGrap
   return <article className={`attention-task-card workbench-task-card ${tone}`}>
     <div className='attention-task-card-top'>
       <span className={`task-type-icon status-icon-${tone}`}>{icon}</span>
+      <div className='attention-task-card-title'>
+        <Tooltip title={taskTitle(task, t)}><strong>{taskTitle(task, t)}</strong></Tooltip>
+        <small>{taskMeta(task, t)}</small>
+      </div>
       <StatusTag status={task.status} onClick={task.workflow_session_id && onOpenGraph ? () => onOpenGraph(task) : undefined} />
-    </div>
-    <div className='attention-task-card-title'>
-      <Tooltip title={taskTitle(task, t)}><strong>{taskTitle(task, t)}</strong></Tooltip>
-      <small>{taskMeta(task, t)}</small>
     </div>
     <p>{taskDescription(task, t)}</p>
     {showProgress && (loading || failed) ? <small>{t(failed ? 'taskCenter.loadError' : 'common.loading')}</small> : progress.total ? <div className='workbench-task-card-progress'><Progress percent={progress.percent} showInfo={false} size='small' /><small>{t('taskCenter.stepsCompleted', { done: progress.done, total: progress.total })}</small></div> : null}
