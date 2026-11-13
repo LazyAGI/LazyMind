@@ -11,6 +11,7 @@ import (
 )
 
 func TestImagePublicationNormalizesURLAndReplaysWithoutAnotherRevision(t *testing.T) {
+	t.Setenv("LAZYMIND_PUBLIC_BASE_URL", "http://localhost:5024/api/core")
 	s, db, grant := controlledService(t)
 	const source = "http://localhost:5024/api/core/static-files/ai_generated/background.png?expires=1&sig=expired"
 	raw, _ := json.Marshal(source)

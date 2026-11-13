@@ -162,6 +162,11 @@ steps:
       Source selection and completeness:
       - Reuse the conversation and relevant uploads first. For a selected KB or an
       internal topic, retrieve authorized KB evidence before optional web research.
+      In the native runtime, if the knowledge base is not already bound, use
+      knowledge.list(keyword='', page={'page_size': 20}) to discover readable bases.
+      Select the matching IDs from result.items and pass them as a JSON list in
+      kb_ids when calling KBToolkit_kb_search. For the external runtime, use the
+      selected knowledge documents and the read tools declared for this step.
       Search the web only for a concrete remaining gap. A selected collection step
       may finish without web calls when the existing evidence is sufficient.
       - Read actual document bodies, preserving source identity, page/chunk locations
