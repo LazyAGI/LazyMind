@@ -1005,6 +1005,35 @@ def test_plugin_preflight_result_renders_user_facing_outcome_in_chinese():
     assert '当前请求可以直接处理，无需启动工作流。' in result_text
 
 
+@pytest.mark.parametrize('language', ['zh', 'en'])
+@pytest.mark.parametrize('tool_name', ['trigger_ppt_workflow', 'Agent_trigger_writer_workflow'])
+@pytest.mark.parametrize('wrapped', [False, True])
+def test_workflow_clarification_is_not_rendered_as_completed(language, tool_name, wrapped):
+    payload = {
+        'status': 'needs_input',
+        'missing_clarification_fields': ['generate_background_images'],
+        '_agent_control': {'stop': True, 'reason': 'awaiting_user', 'final_text': '请补充问题卡片中的必要信息后继续。'},
+    }
+    result = {'ok': True, 'value': json.dumps(payload)} if wrapped else payload
+    frame = _tool_result_frame_text({'id': 'retrieval-call', 'name': tool_name, 'result': result}, language)
+    preview, raw = _preview_and_payload(frame, 'trp', 'tool_result')
+    assert preview == (
+        '工作流正在等待补充必要信息，请填写问题卡片后继续。' if language == 'zh'
+        else 'The workflow is waiting for required information. Complete the question card to continue.'
+    )
+    assert raw['result'] == result
+
+
+def test_workflow_clarification_status_does_not_hide_explicit_failure():
+    result = {'ok': False, 'status': 'needs_input', 'msg': 'question card could not be created'}
+    frame = _tool_result_frame_text(
+        {'id': 'retrieval-call', 'name': 'trigger_ppt_workflow', 'result': result}, 'en',
+    )
+    preview, raw = _preview_and_payload(frame, 'trp', 'tool_result')
+    assert preview == 'The workflow could not start. Please review the error details.'
+    assert raw['result'] == result
+
+
 def test_result_template_supports_generic_dotted_paths_for_nested_json_fields():
     result = json.dumps({
         'result': json.dumps({

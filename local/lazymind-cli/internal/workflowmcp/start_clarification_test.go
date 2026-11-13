@@ -162,9 +162,13 @@ func TestGetExposesDeclaredStartupInputsWithoutExecutionGraph(t *testing.T) {
 			t.Errorf("unexpected request: %s", r.URL.Path)
 		}
 		_, _ = w.Write([]byte(`{"workflow_id":"ppt-workflow","revision_id":"r1","compiled_graph":{
-			"material_producers":{"requirement_analysis":{"kind":"step"},"uploaded_materials":{"kind":"external","optional":true}},
-			"material_types":{"uploaded_materials":"file"},"material_cardinalities":{"uploaded_materials":"list"},
-			"runtime":{"clarification_fields":[{"id":"topic","type":"text","required":true}]}}}`))
+			"material_producers":{"requirement_analysis":{"kind":"step"},"uploaded_materials":{"kind":"external","optional":true},
+				"brief":{"kind":"external"},"topic":{"kind":"external"},"structured_input":{"kind":"external"}},
+			"material_types":{"uploaded_materials":"file","brief":"text","topic":"text","structured_input":"json"},
+			"material_cardinalities":{"uploaded_materials":"list","brief":"single","topic":"single","structured_input":"single"},
+			"input_expressions":{"prepare":{"all":[{"material":"brief"},{"any":[{"material":"topic"},{"material":"structured_input"}]}]}},
+			"runtime":{"clarification_fields":[{"id":"topic","type":"text","required":true}],"input_contracts":{
+				"structured_input":{"description":"Optional business JSON","schema":{"type":"object","additionalProperties":false,"properties":{"topic":{"type":"string"}}}}}}}}`))
 	})
 	session := inputToolSession(t, client)
 	result := inputToolCall(t, session, "workflow.get", map[string]any{"workflow_id": "ppt-workflow"})
@@ -182,9 +186,21 @@ func TestGetExposesDeclaredStartupInputsWithoutExecutionGraph(t *testing.T) {
 		t.Fatalf("missing pinned startup contract: %s", encoded)
 	}
 	inputs := contract["input_materials"].([]any)
-	if len(inputs) != 1 || !reflect.DeepEqual(inputs[0], map[string]any{
+	byID := map[string]map[string]any{}
+	for _, raw := range inputs {
+		material := raw.(map[string]any)
+		byID[material["material_id"].(string)] = material
+	}
+	if len(inputs) != 4 || !reflect.DeepEqual(byID["uploaded_materials"], map[string]any{
 		"material_id": "uploaded_materials", "type": "file", "cardinality": "list", "required": false,
 	}) || contract["clarification_fields"].([]any)[0].(map[string]any)["id"] != "topic" {
 		t.Fatalf("lost external material or clarification declaration: %s", encoded)
+	}
+	if byID["brief"]["required"] != true || byID["topic"]["required"] != false || byID["structured_input"]["required"] != false {
+		t.Fatalf("alternative sources became universally required: %s", encoded)
+	}
+	if byID["structured_input"]["description"] != "Optional business JSON" ||
+		byID["structured_input"]["schema"].(map[string]any)["additionalProperties"] != false || contract["input_requirements"] == nil {
+		t.Fatalf("lost input schema or source alternatives: %s", encoded)
 	}
 }

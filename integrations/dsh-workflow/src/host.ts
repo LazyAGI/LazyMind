@@ -15,6 +15,7 @@ interface Registration {
   ready: Promise<unknown>
   dispose(): Promise<void>
   wrappers: Map<string, { original: ToolDefinition; dispose(): void }>
+  resumeInbox?: boolean
 }
 export interface HostConfig { serverName: string; webUrl: string }
 
@@ -83,6 +84,10 @@ export function installHost(ctx: Context, bridge: HostTransport, config: HostCon
       const source = object(object(message)?.source)
       return { user: source?.kind === 'user', requestId: typeof source?.rpcId === 'string' ? source.rpcId : undefined }
     }) })
+    if (allowed === 'skip') {
+      registration.resumeInbox = true
+      return { kind: 'enter' as const, messages: [] }
+    }
     return allowed ? next() : { kind: 'reject' as const }
   })()))
   const removeHook1 = ctx.on('tools/ptc-dispatch-log', async (dispatch, next) => {
@@ -92,7 +97,17 @@ export function installHost(ctx: Context, bridge: HostTransport, config: HostCon
     const { url: _url, ...identity } = run
     return [...content, { type: 'text', text: JSON.stringify({ lazymind_workflow: identity }) }]
   })
-  const removeHook2 = ctx.on('agent/status', ({ agent, status }) => { if (status === 'idle') coordinator.idle(agent) })
+  const removeHook2 = ctx.on('agent/status', ({ agent, status }) => {
+    if (status !== 'idle') return
+    coordinator.idle(agent)
+    const registration = registrations.get(agent)
+    if (!registration?.resumeInbox) return
+    registration.resumeInbox = false
+    // DSH ends its driver after an empty first step. Wake the existing inbox
+    // by moving its last item in place, preserving IDs and FIFO order.
+    const pending = agent.inbox.nextTurn.at(-1)
+    if (pending && agent.inbox.remove(pending.id)) agent.followup(pending)
+  })
   const removeHook3 = ctx.on('agent/disposed', ({ agent }) => {
     const entry = registrations.get(agent)
     if (entry) {

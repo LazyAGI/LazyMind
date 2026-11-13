@@ -1332,8 +1332,17 @@ func RemoveKey(w http.ResponseWriter, r *http.Request) {
 	}
 	encryptedUpdates["is_verified"] = row.IsVerified && len(filtered) > 0
 	encryptedUpdates["updated_at"] = now
+	var removedMultimodal bool
 	if err := db.WithContext(r.Context()).Transaction(func(tx *gorm.DB) error {
 		if err := updateConnectionSafely(tx, &parent, &row, connectionBaseURL(parent, row.BaseURL), encryptedUpdates); err != nil {
+			return err
+		}
+		// updateConnectionSafely holds the supplier lock for model providers.
+		// Remove models before reconciling the active key so an embedding
+		// model is detached just as it is by explicit model deletion.
+		var err error
+		removedMultimodal, err = removeBuiltinModelsAfterKeyDeletion(tx, parent, now)
+		if err != nil {
 			return err
 		}
 		if err := reconcileProviderActiveKey(tx, &parent); err != nil {
@@ -1352,6 +1361,9 @@ func RemoveKey(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if removedMultimodal {
+		maybeScheduleImageGroupLazyReset(r.Context(), db)
+	}
 	common.ReplyOK(w, map[string]bool{"success": true})
 }
 

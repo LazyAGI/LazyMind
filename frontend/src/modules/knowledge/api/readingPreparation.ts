@@ -16,7 +16,13 @@ export interface ReadingCapability {
 }
 export interface ReadingProviderSelection { options: { id: string; label: string }[]; default_label?: string; effective_label?: string; unavailable_reason?: string }
 export interface ReadingPreferences extends ReadingPolicy { provider_selections?: { parser: ReadingProviderSelection; study: ReadingProviderSelection }; capabilities: ReadingCapability[]; automatic_eligible_after?: string }
+export interface ReadingCapabilityStatus {
+  id: 'formula' | 'figure' | 'table';
+  status: 'not_requested' | 'pending' | 'running' | 'partial' | 'succeeded' | 'failed' | 'unavailable' | 'empty';
+  completed: number; total: number; running?: number; failed?: number; error_message?: string;
+}
 export interface ReadingPreparation {
+  capabilities?: ReadingCapabilityStatus[];
   job_id?: string; status: 'not_requested' | 'pending' | 'running' | 'succeeded' | 'failed' | 'canceled';
   progress_current?: number; progress_total?: number; model_requests?: number; scopes?: ReadingScope[]; error_message?: string;
 }

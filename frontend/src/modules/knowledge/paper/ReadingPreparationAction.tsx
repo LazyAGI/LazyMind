@@ -28,22 +28,22 @@ export default function ReadingPreparationAction({ target, onPrepared }: { targe
     let stale = false; let timer: ReturnType<typeof setTimeout>;
     setState(undefined); setError('');
     const poll = async () => {
-      try { const result = await getReadingPreparation(target.dataset, target.document); if (stale || currentTarget.current !== targetKey) return; setState(result);
+      try { const result = await getReadingPreparation(target.dataset, target.document); if (stale || currentTarget.current !== targetKey) return; setState(result); setError('');
         const jobKey = result.job_id ? `${targetKey}/${result.job_id}` : undefined;
         if (jobKey && (result.status === 'pending' || result.status === 'running')) activeJob.current = jobKey;
         if (jobKey && result.status === 'succeeded' && activeJob.current === jobKey && !notifiedJobs.current.has(jobKey)) {
           notifiedJobs.current.add(jobKey);
           preparedCallback.current?.();
         }
-        if (result.status === 'pending' || result.status === 'running') timer = setTimeout(poll, 1500);
-        else activeJob.current = undefined;
-      } catch (err) { if (!stale) setError(getLocalizedErrorMessage(err)); }
+        if (result.status !== 'pending' && result.status !== 'running') activeJob.current = undefined;
+        if (open || activeJob.current) timer = setTimeout(poll, result.status === 'pending' || result.status === 'running' ? 1500 : 4000);
+      } catch (err) { if (!stale) { setError(getLocalizedErrorMessage(err)); if (open || activeJob.current) timer = setTimeout(poll, 4000); } }
     };
     void poll(); return () => { stale = true; clearTimeout(timer); };
   }, [open, target.dataset, target.document, revision]);
   const running = state?.status === 'pending' || state?.status === 'running';
   return <><button className="paper-preparation-trigger pdf-study-ai-button" type="button" aria-label="研读论文" title="研读论文 · 查看解析与研读准备进度" onClick={() => setOpen(true)}><StudySparkle/><span>研读论文</span></button>
-    <Modal forceRender className="paper-preparation-modal" width={600} centered title="当前论文 · 准备进度" open={open} onCancel={() => { if (!submitting) setOpen(false); }} closable={!submitting} maskClosable={!submitting} keyboard={!submitting} cancelButtonProps={{ disabled: submitting }} okText="开始准备" cancelText="关闭" confirmLoading={submitting} okButtonProps={{ disabled: !state || !scopes.length || running || target.canWrite === false }} onOk={async () => {
+    <Modal forceRender className="paper-preparation-modal" width={720} centered title="当前论文 · 准备进度" open={open} onCancel={() => { if (!submitting) setOpen(false); }} closable={!submitting} maskClosable={!submitting} keyboard={!submitting} cancelButtonProps={{ disabled: submitting }} okText="开始准备" cancelText="关闭" confirmLoading={submitting} okButtonProps={{ disabled: !state || !scopes.length || running || target.canWrite === false }} onOk={async () => {
       setSubmitting(true); setError('');
       try {
         const result = await prepareReading(target.dataset, target.document, scopes);
@@ -54,7 +54,7 @@ export default function ReadingPreparationAction({ target, onPrepared }: { targe
       catch (err) { setError(getLocalizedErrorMessage(err)); } finally { setSubmitting(false); }
     }}>
       {/* forceRender lets this guard update even while rc-dialog memoizes closed content. */}
-      {open && <PaperPreparationStatus key={`${targetKey}/${state?.status || "loading"}`} target={target} onRefresh={() => setRevision(v => v + 1)} />}
+      {open && <PaperPreparationStatus key={targetKey} target={target} capabilities={state?.capabilities} batchStatus={state?.status} onRefresh={() => setRevision(v => v + 1)} />}
       {target.canWrite === false && <Alert type="info" message="当前论文为只读，无法提交准备。" />}
       {error && <Alert type="error" showIcon message={error} />}
       {state && <div className="paper-preparation-batch" role="status"><Typography.Paragraph><strong>最近一次批量准备</strong> · {labels[state.status]}</Typography.Paragraph><Typography.Paragraph type="secondary">{state.scopes?.map(scope => ({pdf_parse:"结构解析",formula:"公式研读",figure:"图片研读",table:"表格研读",chat_prepare:"对话准备"})[scope]).join("、") || "尚无批量准备记录；单独解析的进度见上方"}</Typography.Paragraph>
@@ -62,12 +62,12 @@ export default function ReadingPreparationAction({ target, onPrepared }: { targe
         {state.status !== 'not_requested' && <Typography.Paragraph type="secondary">任务步骤 {state.progress_current || 0} / {state.progress_total || 0}；模型请求 {state.model_requests || 0} 次（含失败与备用调用，不代表费用金额）</Typography.Paragraph>}
         {state.error_message && <Alert type="error" message={state.error_message} />}
       </div>}
-      <details className="paper-preparation-options"><summary>选择本篇准备内容</summary>      <Typography.Paragraph>仅准备当前论文，已有结果会复用。解析和研读可能产生费用，禁用的能力无法生成；每篇研读总数沿用个人预设限额。</Typography.Paragraph>
-      <Checkbox.Group aria-label="准备范围" value={scopes} disabled={running || submitting} onChange={values => setScopes(values as ReadingScope[])}><Space wrap>
+      <section className="paper-preparation-options" aria-label="选择本篇准备内容"><Typography.Title level={5}>选择本篇准备内容</Typography.Title>      <Typography.Paragraph>仅准备当前论文，已有结果会复用。解析和研读可能产生费用，禁用的能力无法生成；每篇研读总数沿用个人预设限额。</Typography.Paragraph>
+      <Checkbox.Group aria-label="准备范围" value={scopes} disabled={running || submitting} onChange={(values: (string | number | boolean)[]) => setScopes(values as ReadingScope[])}><Space wrap>
         <Checkbox value="pdf_parse">结构解析</Checkbox><Checkbox value="formula">公式研读</Checkbox><Checkbox value="figure">图片研读</Checkbox><Checkbox value="table">表格研读</Checkbox>
       </Space></Checkbox.Group>
       <Typography.Paragraph type="secondary">公式、图片和表格研读需要论文结构；缺少时会先解析。文档对话请在对话面板点击「准备文档」。</Typography.Paragraph>
-</details>
+</section>
     </Modal>
   </>;
 }

@@ -4,6 +4,7 @@ import pytest
 
 from lazyllm.module.llms.onlinemodule.supplier import glm
 from lazymind.chat.engine.tools.infra import image_generation_support as images
+from lazymind.chat.service.external_tool_errors import ExternalToolFailure
 from lazymind.chat.service.external_tools import run_external_tools
 
 
@@ -71,9 +72,11 @@ def test_glm_failure_has_sanitized_diagnostics(provider, caplog, failure, monkey
         download.side_effect = RuntimeError('secret-key-and-private-prompt')
     else:
         request.side_effect = RuntimeError('secret-key-and-private-prompt')
-    with pytest.raises(RuntimeError):
+    with pytest.raises(ExternalToolFailure) as caught:
         run_external_tools(payload(), execute=True)
+    assert caught.value.detail['code'] == 'TOOL_EXECUTION_FAILED'
+    assert caught.value.detail['retryable'] is False
     assert 'stage=execution' in caplog.text
-    diagnostic = caplog.text
+    diagnostic = caplog.text + str(caught.value.detail)
     assert 'secret-key-and-private-prompt' not in diagnostic
     assert 'test-image-key' not in diagnostic

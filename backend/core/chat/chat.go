@@ -165,6 +165,7 @@ type ChatWorkflowOptions struct {
 
 // LazyChatData text data text。
 type LazyChatData struct {
+	CanonicalMessages        []map[string]any               `json:"canonical_messages,omitempty"`
 	SteeringApplied          []steeringApplied              `json:"steering_applied,omitempty"`
 	ModelOutput              *ChatModelOutput               `json:"model_output,omitempty"`
 	Text                     string                         `json:"text"`
@@ -497,6 +498,7 @@ func lazyStreamHandler(ctx context.Context, resp *http.Response) <-chan *LazyStr
 
 // UpstreamStreamChunk text ChatConversations text，text LazyChatResponse.Data。
 type UpstreamStreamChunk struct {
+	CanonicalMessages        []map[string]any               `json:"canonical_messages,omitempty"`
 	SteeringApplied          []steeringApplied              `json:"steering_applied,omitempty"`
 	ModelOutput              *ChatModelOutput               `json:"model_output,omitempty"`
 	Text                     string                         `json:"text"`
@@ -1181,6 +1183,7 @@ func upstreamStreamErrorKind(kind lazyStreamErrorKind) UpstreamStreamErrorKind {
 
 func upstreamStreamChunkFromData(data LazyChatData) UpstreamStreamChunk {
 	return UpstreamStreamChunk{
+		CanonicalMessages:        data.CanonicalMessages,
 		SteeringApplied:          data.SteeringApplied,
 		ModelOutput:              data.ModelOutput,
 		Text:                     data.Text,

@@ -52,3 +52,10 @@ it('shows one marked page document with style before the page prompt', () => {
   expect(container.textContent).not.toContain('ppt-page-prompt:v1');
   expect(container.textContent).toContain('浅色背景');
 });
+
+it('keeps the image revision comment out of the prompt preview', () => {
+  const text = '## Assets\nPalace panorama\n<!-- ppt-material-images: ["image-revision"] -->';
+  const { container } = render(<PptPromptDocument text={text} />);
+  expect(container.textContent).toContain('Palace panorama');
+  expect(container.textContent).not.toContain('image-revision');
+});

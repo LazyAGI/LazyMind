@@ -46,3 +46,37 @@ func detachEmbeddingForModelRemoval(tx *gorm.DB, modelID string) error {
 	}
 	return tx.Save(&state).Error
 }
+
+// The caller holds the supplier lock and owns the credential transaction.
+// All connections share the supplier's key selection and model inventory.
+func removeBuiltinModelsAfterKeyDeletion(tx *gorm.DB, parent orm.UserModelProvider, now time.Time) (bool, error) {
+	if parent.IsCustom || !hasSharedProviderEndpoint(parent) || !parent.HasCapability("has_models") || isLocalOpenAISupplier(tx.Statement.Context, tx, parent) {
+		return false, nil
+	}
+	if !tx.Migrator().HasTable(&orm.UserModelProviderGroupModel{}) {
+		return false, nil
+	}
+	var models []orm.UserModelProviderGroupModel
+	if err := tx.Where("user_model_provider_id = ? AND create_user_id = ? AND deleted_at IS NULL", parent.ID, parent.CreateUserID).Find(&models).Error; err != nil {
+		return false, err
+	}
+	ids := make([]string, 0, len(models))
+	hasMultimodal := false
+	for _, model := range models {
+		if err := detachEmbeddingForModelRemoval(tx, model.ID); err != nil {
+			return false, err
+		}
+		ids = append(ids, model.ID)
+		hasMultimodal = hasMultimodal || isMultimodalEmbeddingModelType(model.ModelType)
+	}
+	if len(ids) == 0 {
+		return false, nil
+	}
+	if err := tx.Where("user_model_provider_group_model_id IN ?", ids).Delete(&orm.UserSelectedModel{}).Error; err != nil {
+		return false, err
+	}
+	if err := tx.Model(&orm.UserModelProviderGroupModel{}).Where("id IN ?", ids).Updates(map[string]any{"deleted_at": now, "updated_at": now}).Error; err != nil {
+		return false, err
+	}
+	return hasMultimodal, nil
+}

@@ -13,6 +13,7 @@ def deck(tmp_path, monkeypatch):
     from lazymind.chat.engine.tools.file_resources import presentation_edit
     from lazymind.chat.engine.tools.file_resources.font_library import register_font
     monkeypatch.setenv('LAZYMIND_FONT_DIR', str(tmp_path / 'font-library'))
+    monkeypatch.setenv('LAZYMIND_UPLOAD_ROOT', str(tmp_path / 'uploads'))
     register_font(make_font(tmp_path))
     monkeypatch.setattr(presentation_edit, 'available_font_families', lambda: {'Test Font'})
     prs = Presentation()
@@ -333,7 +334,8 @@ def test_html_font_edit_packages_bytes_and_never_generates(html_tools, tmp_path,
     assert publisher.call_args.args[1] == (pages or [1, 2])
     changed = paths[0].read_text()
     assert 'data-lazymind-font-required="true"' in changed
-    assert 'data:font/woff;base64,' in changed
+    assert '/static-files/presentation-fonts/' in changed
+    assert 'data:font/' not in changed
     assert '<script>const unchanged = 123;</script>' in changed
     assert 'font-family:Old' not in changed
     if scope == 'titles':
@@ -447,22 +449,29 @@ def test_missing_font_has_actionable_error_code_without_substitution(monkeypatch
     assert '宋体' in str(error.value)
 
 
-@pytest.mark.parametrize('fs_type,keeps_unused', [(0, False), (256, True)])
-def test_html_font_subsets_page_glyphs_and_honors_no_subsetting(tmp_path, monkeypatch, fs_type, keeps_unused):
-    import base64
+@pytest.mark.parametrize('fs_type', [0, 256])
+def test_html_font_references_verified_shared_resource(tmp_path, monkeypatch, fs_type):
     import io
     import re
     from fontTools.ttLib import TTFont
     from lazymind.chat.engine.tools.file_resources.font_library import register_font, local_font_css
     from lazymind.chat.engine.tools.file_resources.portable_fonts import package_html_fonts
     monkeypatch.setenv('LAZYMIND_FONT_DIR', str(tmp_path / 'library'))
+    monkeypatch.setenv('LAZYMIND_UPLOAD_ROOT', str(tmp_path / 'uploads'))
     record = register_font(make_font(tmp_path, fs_type=fs_type, text='正文TitleUnused'))
     html = package_html_fonts('<html><head></head><body>正文Title</body></html>', 'Test Font', [record])
-    encoded = re.search(r'data:font/woff;base64,([A-Za-z0-9+/=]+)', html).group(1)
-    with TTFont(io.BytesIO(base64.b64decode(encoded))) as font:
+    resource = re.search(r'src:url\((/static-files/presentation-fonts/[^)]+)\)', html).group(1)
+    data = (tmp_path / 'uploads' / resource.removeprefix('/static-files/')).read_bytes()
+    assert data == (tmp_path / 'library' / record['file']).read_bytes()
+    assert 'data:font/' not in html
+    assert len(html.encode()) < 1000
+    with TTFont(io.BytesIO(data)) as font:
         cmap = font.getBestCmap()
         assert all(ord(char) in cmap for char in '正文Title')
-        assert (ord('U') in cmap) is keeps_unused
+        assert ord('U') in cmap  # Preview resources remain reusable after text edits.
+    again = package_html_fonts(html, 'Test Font', [record], text='Unused')
+    assert again == html
+    assert len(list((tmp_path / 'uploads/presentation-fonts').iterdir())) == 1
     assert local_font_css(html) == ''
     # An unselected intermediate weight must not reintroduce a full-family font.
     from lazymind.chat.engine.tools.file_resources import font_library
@@ -470,7 +479,7 @@ def test_html_font_subsets_page_glyphs_and_honors_no_subsetting(tmp_path, monkey
     assert local_font_css(html) == ''
 
 
-def test_generated_songti_page_contains_subset_font_before_publication(tmp_path, monkeypatch, ppt_asset_library):
+def test_generated_songti_page_references_font_before_publication(tmp_path, monkeypatch, ppt_asset_library):
     import importlib.util
     from pathlib import Path
     from lazymind.chat.engine.tools.file_resources import font_library, presentation_edit
@@ -479,17 +488,20 @@ def test_generated_songti_page_contains_subset_font_before_publication(tmp_path,
     stage = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(stage)
     monkeypatch.setenv('LAZYMIND_FONT_DIR', str(tmp_path / 'fonts'))
+    monkeypatch.setenv('LAZYMIND_UPLOAD_ROOT', str(tmp_path / 'uploads'))
     font_library.register_font(make_font(tmp_path, family='Songti SC'))
     monkeypatch.setattr(presentation_edit, 'available_font_families', lambda: {'Songti SC'})
     html = ('<html><head><style>body{font-family:"Songti SC",serif}</style></head>'
             '<body><h1>正文Title</h1></body></html>')
     monkeypatch.setattr(stage, 'llm', lambda *a, **kw: html)
+    monkeypatch.setattr(stage, 'prompt_catalog', lambda _: '')
     code, result = stage._capture_cmd(stage._write_page_html_from_query, tmp_path, 1, '正文',
                                       page_plan={}, inherited_image=None, background_image=None,
                                       prompt_mode='deterministic', language='zh')
     assert code == 0, result
     saved = (tmp_path / 'pages/page_001.html').read_text()
-    assert 'data:font/woff;base64,' in saved
+    assert '/static-files/presentation-fonts/' in saved
+    assert 'data:font/' not in saved
     assert 'data-lazymind-font-required="true"' in saved
     assert '<h1>正文Title</h1>' in saved
 
@@ -529,15 +541,39 @@ def test_export_subsets_across_slides_and_notes(tmp_path, monkeypatch, no_subset
     assert Presentation(path).slides[1].shapes.title.text == '乙'
 
 
-def test_legacy_preview_font_injection_subsets_visible_text(tmp_path, monkeypatch):
-    import base64
-    import io
-    import re
-    from fontTools.ttLib import TTFont
+def test_legacy_preview_font_injection_uses_same_resource(tmp_path, monkeypatch):
     from lazymind.chat.engine.tools.file_resources.font_library import register_font, local_font_css
     monkeypatch.setenv('LAZYMIND_FONT_DIR', str(tmp_path / 'library'))
-    register_font(make_font(tmp_path, text='正文Unused'))
+    monkeypatch.setenv('LAZYMIND_UPLOAD_ROOT', str(tmp_path / 'uploads'))
+    record = register_font(make_font(tmp_path, text='正文Unused'))
     css = local_font_css('<style>body{font-family:"Test Font"}</style><body>正文</body>')
-    encoded = re.search(r'data:font/woff;base64,([A-Za-z0-9+/=]+)', css).group(1)
-    with TTFont(io.BytesIO(base64.b64decode(encoded))) as font:
-        assert set(font.getBestCmap()) == set(map(ord, '正文'))
+    assert f'/static-files/presentation-fonts/{record["file"]}' in css
+    assert 'data:font/' not in css
+    assert '/*lazymind-font:' in css
+
+
+def test_font_resource_cache_repairs_corruption_and_rejects_changed_original(tmp_path, monkeypatch):
+    from lazymind.chat.engine.tools.file_resources.font_library import register_font, font_resource_url
+    monkeypatch.setenv('LAZYMIND_FONT_DIR', str(tmp_path / 'library'))
+    monkeypatch.setenv('LAZYMIND_UPLOAD_ROOT', str(tmp_path / 'uploads'))
+    record = register_font(make_font(tmp_path))
+    url = font_resource_url(record)
+    resource = tmp_path / 'uploads' / url.removeprefix('/static-files/')
+    original = tmp_path / 'library' / record['file']
+    resource.write_bytes(b'corrupted cache')
+    assert font_resource_url(record) == url
+    assert resource.read_bytes() == original.read_bytes()
+    original.write_bytes(b'changed original')
+    with pytest.raises(ValueError, match='Font resource changed'):
+        font_resource_url(record)
+
+
+def test_published_legacy_font_resource_is_required_for_native_export(html_tools, tmp_path):
+    html, _ = html_tools._inline_preview_images(
+        '<html><head><style>body{font-family:"Test Font"}</style></head><body>正文</body></html>',
+        tmp_path, tmp_path / 'page_001.html',
+    )
+    assert 'id="lazymind-local-fonts" data-lazymind-font-required="true"' in html
+    assert '/static-files/presentation-fonts/' in html
+    assert '/*lazymind-font:' in html
+    assert 'data:font/' not in html

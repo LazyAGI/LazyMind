@@ -12,7 +12,7 @@ from .budget import usage_ratio
 from .model_calls import ContextCapacityError, request_tokens, configured_output_limit
 from lazyllm.module.llms.onlinemodule.base import ModelCallControl, ModelCallError, ModelFinish
 from .context_estimator import estimate_tokens
-from .message_fields import model_facing_history, estimate_message_tokens
+from .message_fields import model_facing_history, estimate_message_tokens, model_response_text
 from .models import ContextBudget, CompressionTrigger, SummaryEvent
 from .summary_prompt import (
     build_summary_user_prompt,
@@ -48,16 +48,7 @@ def _estimate_history_tokens(history: list[dict[str, Any]]) -> int:
 
 
 def _llm_response_text(resp: Any) -> str:
-    if resp is None:
-        return ''
-    if isinstance(resp, str):
-        return resp.strip()
-    if isinstance(resp, dict):
-        content = resp.get('content')
-        if isinstance(content, str):
-            return content.strip()
-        return str(content or '').strip()
-    return str(resp).strip()
+    return model_response_text(resp)
 
 
 def _call_summarizer_llm(llm: Any, system_prompt: str, user_prompt: str, *,

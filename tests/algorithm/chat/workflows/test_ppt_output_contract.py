@@ -23,6 +23,8 @@ def bind(monkeypatch, tools, mode):
     artifacts = [] if mode is None else [
         {'slot': 'template_mode', 'selected': True, 'revision': 2, 'value': {'text': mode}},
         {'slot': 'template_mode', 'selected': False, 'revision': 3, 'value': {'text': 'none'}},
+        {'slot': 'presentation_output_format', 'selected': True, 'revision': 1,
+         'value': 'native_pptx' if mode == 'upload' else 'html'},
     ]
     monkeypatch.setattr(tools, '_workflow_client', lambda: SimpleNamespace(
         list_artifacts=lambda session: SimpleNamespace(result={'artifacts': artifacts})))
@@ -94,8 +96,8 @@ def test_prompt_stage_receives_durable_template_mode():
     state = yaml.safe_load((ROOT / 'workflows/ppt-workflow/scenario/state.yml').read_text(encoding='utf-8'))
     step = state['steps']['plan_page_prompts']
     assert {'material': 'template_mode', 'required': True} in step['inputs']
-    assert 'output_format="native_pptx"' in step['prompt']
-    assert 'HTML ONLY (presentation_output_format=html' in step['prompt']
+    assert 'native PPTX' in step['prompt']
+    assert 'HTML uses 1600×900' in step['prompt']
 
 
 @pytest.mark.parametrize('output_format', ['html', 'native_pptx'])
@@ -180,6 +182,15 @@ def test_confirmed_user_output_choice_takes_precedence_over_model_binding():
         extractions={'slide_count': [{'value': '8', 'evidence': '8页'}]})
     assert missing == []
     assert values['presentation_output_format'] == 'html'
+
+
+def test_missing_saved_output_format_never_infers_a_legacy_route(monkeypatch, tools):
+    monkeypatch.setattr(tools, '_workflow_client', lambda: SimpleNamespace(
+        list_artifacts=lambda _: SimpleNamespace(result={'artifacts': [
+            {'slot': 'template_mode', 'value': 'upload'},
+        ]})))
+    with pytest.raises(tools.ToolExecutionError, match='missing presentation_output_format'):
+        tools._required_output_format()
 
 
 @pytest.mark.parametrize('mode,slot,kind,value,expected', [

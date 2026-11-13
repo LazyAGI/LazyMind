@@ -3,6 +3,7 @@ package hosted
 import (
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"strings"
 
@@ -90,7 +91,14 @@ func (h Handler) begin(w http.ResponseWriter, r *http.Request, resume bool) {
 	if resume {
 		value, err = h.Service.Resume(r.Context(), ownerID, vars["session_id"], vars["attempt_id"])
 	} else {
-		value, err = h.Service.Begin(r.Context(), ownerID, vars["session_id"], vars["attempt_id"])
+		var input struct {
+			ClaimID string `json:"claim_id"`
+		}
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4<<10)).Decode(&input); err != nil && !errors.Is(err, io.EOF) {
+			reply(w, http.StatusUnprocessableEntity, nil, &responseError{Code: "INVALID_EXECUTION", Message: "invalid execution claim"})
+			return
+		}
+		value, err = h.Service.begin(r.Context(), ownerID, vars["session_id"], vars["attempt_id"], false, input.ClaimID)
 	}
 	if err != nil {
 		writeServiceError(w, err)
@@ -101,6 +109,27 @@ func (h Handler) begin(w http.ResponseWriter, r *http.Request, resume bool) {
 
 func (h Handler) Begin(w http.ResponseWriter, r *http.Request)  { h.begin(w, r, false) }
 func (h Handler) Resume(w http.ResponseWriter, r *http.Request) { h.begin(w, r, true) }
+
+func (h Handler) Heartbeat(w http.ResponseWriter, r *http.Request) {
+	ownerID, ok := owner(w, r)
+	if !ok {
+		return
+	}
+	var input struct {
+		ExecutionHandle string `json:"execution_handle"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4<<10)).Decode(&input); err != nil {
+		reply(w, http.StatusUnprocessableEntity, nil, &responseError{Code: "INVALID_EXECUTION", Message: "invalid execution heartbeat"})
+		return
+	}
+	vars := mux.Vars(r)
+	expires, err := h.Service.Heartbeat(r.Context(), ownerID, vars["session_id"], vars["attempt_id"], input.ExecutionHandle)
+	if err != nil {
+		writeServiceError(w, err)
+		return
+	}
+	reply(w, http.StatusOK, map[string]any{"lease_expires_at": expires}, nil)
+}
 
 func (h Handler) Complete(w http.ResponseWriter, r *http.Request) {
 	ownerID, ok := owner(w, r)

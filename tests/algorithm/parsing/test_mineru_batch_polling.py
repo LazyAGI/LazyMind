@@ -497,3 +497,124 @@ def test_reader_initialization_preserves_retained_images_and_other_readers(tmp_p
     LazyMindMineruPDFReader(image_cache_dir=cache, api_key='fixture')
     assert old.read_bytes() == b'retained-figure'
     assert active.read_bytes() == b'active-figure'
+
+
+def _shared_fixture(reader, source, content=None):
+    import io
+    import zipfile
+    data = io.BytesIO()
+    with zipfile.ZipFile(data, 'w') as archive:
+        archive.writestr('paper_content_list.json', content or '[{"type":"text","text":"cached","page_idx":0}]')
+    cache = source.parent / '.lazymind-artifacts' / 'mineru-cache-v1' / f'{reader._source_digest(source)}-{reader._online_model_version()}.zip'
+    cache.parent.mkdir(parents=True, exist_ok=True)
+    cache.write_bytes(data.getvalue())
+    return cache
+
+
+def test_shared_archive_reused_before_split_or_remote_request(monkeypatch, tmp_path):
+    reader, source, calls = _reader_with_batch(monkeypatch, tmp_path, lambda _: _status('done'))
+    _shared_fixture(reader, source)
+    monkeypatch.setattr(reader, '_split_large_pdf', lambda _: pytest.fail('cached original must bypass splitting'))
+    assert reader._fetch_async(source)[0] == '[]'
+    assert calls == {'submit': 0, 'upload': 0, 'poll': 0, 'download': 0}
+
+
+@pytest.mark.parametrize('content', [b'broken', b'[]'])
+def test_invalid_shared_archive_falls_back_to_remote(monkeypatch, tmp_path, content):
+    reader, source, calls = _reader_with_batch(monkeypatch, tmp_path, lambda _: _status('done'))
+    _shared_fixture(reader, source).write_bytes(content)
+    assert reader._fetch_async(source)[0] == '[]'
+    assert calls['upload'] == 1
+
+
+def test_shared_cache_bypass_forces_fresh_submission(monkeypatch, tmp_path):
+    reader, source, calls = _reader_with_batch(monkeypatch, tmp_path, lambda _: _status('done'))
+    reader._fetch_async(source)
+    _shared_fixture(reader, source)
+    reader._fetch_async(source, use_cache=False)
+    assert calls['upload'] == 2
+
+
+@pytest.mark.parametrize('split', [False, True])
+def test_shared_cache_rechecked_after_waiting_for_flock(monkeypatch, tmp_path, split):
+    import subprocess
+    import sys
+    import time
+    if sys.platform == 'win32':
+        pytest.skip('Unix flock interoperability')
+    real_sleep = time.sleep
+    reader, source, calls = _reader_with_batch(monkeypatch, tmp_path, lambda _: _status('done'))
+    monkeypatch.setattr(time, 'sleep', real_sleep)
+    if split:
+        parts = [tmp_path / 'part-a.pdf', tmp_path / 'part-b.pdf']
+        for index, part in enumerate(parts):
+            part.write_bytes(f'part-{index}'.encode())
+        monkeypatch.setattr(reader, '_split_large_pdf', lambda _: [(str(part), i) for i, part in enumerate(parts)])
+    cache = _shared_fixture(reader, source)
+    raw = cache.read_bytes()
+    cache.unlink()
+    lock = str(cache) + '.lock'
+    script = """import fcntl, pathlib, sys
+with open(sys.argv[1], 'w') as lock:
+    fcntl.flock(lock, fcntl.LOCK_EX)
+    print('locked', flush=True)
+    sys.stdin.buffer.read(1)
+    pathlib.Path(sys.argv[2]).write_bytes(bytes.fromhex(sys.argv[3]))
+"""
+    with subprocess.Popen([sys.executable, '-c', script, lock, str(cache), raw.hex()],
+                          stdin=subprocess.PIPE, stdout=subprocess.PIPE) as process:
+        assert process.stdout.readline() == b'locked\n'
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            waiting = executor.submit(reader._fetch_async, str(source))
+            real_sleep(0.1)
+            assert not waiting.done()
+            process.stdin.write(b'x')
+            process.stdin.flush()
+            assert waiting.result(timeout=5)[0] == '[]'
+        assert process.wait(timeout=5) == 0
+    assert calls['upload'] == calls['poll'] == 0
+
+
+def test_shared_archive_real_extraction_retains_images(monkeypatch, tmp_path):
+    import zipfile
+    from lazymind.parsing.engine.readers.mineru_online import LazyMindMineruPDFReader
+    reader, source, calls = _reader_with_batch(monkeypatch, tmp_path, lambda _: _status('done'))
+    cache = _shared_fixture(reader, source)
+    with zipfile.ZipFile(cache, 'a') as zipped:
+        zipped.writestr('images/figure.png', b'fixture-image')
+    monkeypatch.setattr(reader, '_extract_content_from_zip',
+                        LazyMindMineruPDFReader._extract_content_from_zip.__get__(reader))
+    content, extracted = reader._fetch_async(source)
+    assert 'cached' in content
+    assert (extracted / 'images/figure.png').read_bytes() == b'fixture-image'
+    assert calls['submit'] == 0
+
+
+def test_shared_lock_wait_times_out_without_upload(monkeypatch, tmp_path):
+    import time
+    from filelock import FileLock
+    real_sleep = time.sleep
+    reader, source, calls = _reader_with_batch(monkeypatch, tmp_path, lambda _: _status('done'))
+    monkeypatch.setattr(time, 'sleep', real_sleep)
+    reader._timeout = 0.05
+    cache = _shared_fixture(reader, source)
+    cache.unlink()
+    with FileLock(str(cache) + '.lock'):
+        with pytest.raises(TimeoutError, match='waiting to submit'):
+            reader._fetch_async(source)
+    assert calls['submit'] == 0
+
+
+def test_shared_archive_malformed_layout_falls_back(monkeypatch, tmp_path):
+    import zipfile
+    from lazymind.parsing.engine.readers.mineru_online import LazyMindMineruPDFReader
+    reader, source, calls = _reader_with_batch(monkeypatch, tmp_path, lambda _: _status('done'))
+    cache = _shared_fixture(reader, source)
+    with zipfile.ZipFile(cache, 'a') as zipped:
+        zipped.writestr('layout.json', '[]')
+    real_extract = LazyMindMineruPDFReader._extract_content_from_zip.__get__(reader)
+    monkeypatch.setattr(reader, '_extract_content_from_zip',
+                        lambda data, task_dir=None: ('[]', task_dir) if data == b'zip'
+                        else real_extract(data, task_dir=task_dir))
+    assert reader._fetch_async(source)[0] == '[]'
+    assert calls['upload'] == 1

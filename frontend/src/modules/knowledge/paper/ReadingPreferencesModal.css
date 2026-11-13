@@ -20,8 +20,8 @@
 .reading-preset-description { margin-top: 10px; display: block; color: var(--reading-muted); font-size: 12px; line-height: 1.65; }
 .reading-plan-summary { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 10px 0 16px; color: var(--reading-muted); font-size: 12px; }
 .reading-plan-summary .ant-btn { font-size: 12px; padding-right: 0; }
-.reading-model-heading { margin-top: 8px; }
-.reading-provider-selections { padding: 4px 16px 12px; border-radius: 12px; background: var(--reading-surface); }
+.reading-model-heading { margin-top: 0; }
+.reading-provider-selections { margin-bottom: 20px; padding: 4px 16px 12px; border-radius: 12px; background: var(--reading-surface); }
 .reading-capability { display: grid; grid-template-columns: minmax(0, 1fr) 124px; gap: 16px; align-items: center; padding: 10px 0; }
 .reading-capability strong { font-size: 13px; font-weight: 500; }
 .reading-capability p { margin: 3px 0 0; color: var(--reading-muted); font-size: 12px; line-height: 1.6; }

@@ -25,159 +25,153 @@ def _load_workflow_routes(monkeypatch):
     return module
 
 
-def _load_tools():
-    root = Path(__file__).resolve().parents[3]
-    path = root / 'workflows' / 'test-workflow' / 'scripts' / 'tools.py'
-    spec = importlib.util.spec_from_file_location('workflow_smoke_tools', path)
-    module = importlib.util.module_from_spec(spec)
-    assert spec.loader is not None
-    spec.loader.exec_module(module)
-    return module
+def _smoke_package():
+    from lazymind.chat.workflow.external_tools import package_tree_hash
+
+    root = Path(__file__).resolve().parents[3] / 'workflows/test-workflow'
+    files = {path.relative_to(root).as_posix(): path.read_bytes() for path in root.rglob('*')
+             if path.is_file() and '__pycache__' not in path.parts}
+    tree_hash = package_tree_hash(files)
+    return root, {'tree_hash': tree_hash, 'files': {
+        name: base64.b64encode(raw).decode() for name, raw in files.items()
+    }}
 
 
-def test_smoke_tools_cover_json_types_rewrite_and_list():
-    tools = _load_tools()
+def _external_request(package, step):
+    return {'workflow_id': 'test-workflow', 'revision_id': 'pinned-smoke',
+            'tree_hash': package['tree_hash'], 'package': package, 'step_id': step}
 
-    metadata = tools.build_test_metadata('hello')
-    typed = tools.create_typed_fixtures('hello')
-    rewritten = tools.create_rewrite_fixture('hello')
-    tools.rewrite_fixture(rewritten, 'revision-2')
-    listed = tools.create_list_fixtures()
-    result = tools.verify_fixtures(
-        typed['text_path'], typed['image_url'], rewritten, listed,
+
+@pytest.fixture(params=['native', 'external'])
+def smoke_call(request):
+    from lazymind.chat.workflow.external_tools import (
+        ExternalToolCallRequest, ExternalToolRequest, call_external_tool, list_external_tools,
     )
+    from lazymind.workflow_toolkit import load_workflow_package_tools
 
-    assert metadata == {
-        'smoke_test': True,
-        'summary': 'hello',
-        'schema': 'test.v1',
+    root, package = _smoke_package()
+    names = ['smoke_generate', 'smoke_update', 'smoke_verify']
+    native = load_workflow_package_tools(package, names, 'test-workflow', 'pinned-smoke', package_root=root)
+    assert set(native) == set(names)
+
+    def call(step, **arguments):
+        if request.param == 'native':
+            return native['smoke_' + step](**arguments)
+        payload = _external_request(package, step)
+        catalog = list_external_tools(ExternalToolRequest(**payload))['tools']
+        assert [tool['name'] for tool in catalog] == ['smoke_' + step]
+        assert catalog[0]['available'] is True
+        return call_external_tool(ExternalToolCallRequest(
+            **payload, tool_name='smoke_' + step, arguments=arguments,
+        ))['result']
+    return call
+
+
+def _save_tool_files(result, directory):
+    import hashlib
+
+    directory.mkdir()
+    paths = []
+    for item in result['files']:
+        raw = (Path(item['local_path']).read_bytes() if 'local_path' in item
+               else base64.b64decode(item['content_base64'], validate=True))
+        assert item['size_bytes'] == len(raw)
+        assert item['sha256'] == hashlib.sha256(raw).hexdigest()
+        path = directory / item['name']
+        path.write_bytes(raw)
+        paths.append(path)
+    return paths
+
+
+def test_three_step_smoke_tools_read_saved_contents_on_both_hosts(smoke_call, tmp_path):
+    summary = '测试 hello'
+    generated = smoke_call('generate', summary=summary)
+    source, = _save_tool_files(generated, tmp_path / 'generate')
+    source_text = source.read_text(encoding='utf-8')
+    assert source_text == 'Workflow smoke test\n测试 hello\nrevision-1\n'
+    metadata_path = tmp_path / 'metadata.json'
+    metadata_path.write_text(json.dumps(generated['metadata']), encoding='utf-8')
+
+    updated = smoke_call('update', summary=summary, source_text=source_text)
+    first, second, item1, item2 = _save_tool_files(updated, tmp_path / 'update')
+    assert first.read_bytes() == source.read_bytes()
+    assert second.read_bytes() == first.read_bytes() + b'revision-2\n'
+    assert [path.read_text() for path in (item1, item2)] == ['list-item-1\n', 'list-item-2\n']
+    for revision in (2, 4):  # A repeated attempt keeps monotonic Core revision numbers.
+        report = smoke_call(
+            'verify', summary=summary, metadata=json.loads(metadata_path.read_text()),
+            source_text=source.read_text(), rewritten_text=second.read_text(),
+            rewritten_revision=revision, list_texts=[path.read_text() for path in (item1, item2)],
+        )
+        assert report['status'] == 'Workflow smoke test passed'
+        assert report['rewritten_revision'] == revision
+        assert all(report['checks'].values())
+
+
+@pytest.mark.parametrize(('field', 'value', 'reason'), [
+    ('metadata', {'smoke_test': True, 'schema': 'test.v2', 'summary': 'other'}, 'metadata'),
+    ('metadata', {}, 'metadata'),
+    ('source_text', '/tmp/source.txt', 'source'),
+    ('rewritten_text', 'Workflow smoke test\nhello\nrevision-1\n', 'updated_content'),
+    ('rewritten_revision', 1, 'updated_revision'),
+    ('list_texts', ['list-item-2\n', 'list-item-1\n'], 'ordered_list'),
+    ('list_texts', ['list-item-1\n', 'list-item-1\n'], 'ordered_list'),
+    ('list_texts', ['list-item-1\n', 'list-item-2\n', 'extra'], 'ordered_list'),
+    ('list_texts', ['list-item-1\n'], 'ordered_list'),
+])
+def test_smoke_verification_rejects_bad_saved_values(smoke_call, field, value, reason):
+    arguments = {
+        'summary': 'hello', 'metadata': {'smoke_test': True, 'schema': 'test.v2', 'summary': 'hello'},
+        'source_text': 'Workflow smoke test\nhello\nrevision-1\n',
+        'rewritten_text': 'Workflow smoke test\nhello\nrevision-1\nrevision-2\n',
+        'rewritten_revision': 2, 'list_texts': ['list-item-1\n', 'list-item-2\n'],
     }
-    assert typed['image_url'].startswith('https://placehold.co/640x360/')
-    assert 'Workflow+Smoke+Test' in typed['image_url']
-    assert 'revision-2' in Path(rewritten).read_text(encoding='utf-8')
-    assert [Path(path).name for path in listed] == ['list-1.txt', 'list-2.txt']
-    assert result['status'] == 'Workflow smoke test passed'
-    assert Path(result['report_path']).is_file()
+    arguments[field] = value
+    with pytest.raises(ValueError, match=reason):
+        smoke_call('verify', **arguments)
 
 
-class _ArtifactStore:
-    def __init__(self, cardinalities):
-        self.cardinalities = cardinalities
-        self.values = {}
-
-    def save(self, slot, content_type, value, caption=None):
-        snapshot = value
-        if content_type == 'file':
-            path = Path(value)
-            snapshot = {'path': str(path), 'content': path.read_bytes()}
-        revision = {
-            'content_type': content_type,
-            'value': snapshot,
-            'caption': caption,
-        }
-        if self.cardinalities[slot] == 'list':
-            self.values.setdefault(slot, []).append([revision])
-        else:
-            self.values.setdefault(slot, []).append(revision)
-
-    def latest(self, slot):
-        values = self.values[slot]
-        if self.cardinalities[slot] == 'list':
-            return [item[-1] for item in values]
-        return values[-1]
+def test_smoke_update_rejects_a_path_or_truncated_content(smoke_call):
+    for source_text in ('/tmp/source.txt', 'Workflow smoke test\nhello\nrevision-1'):
+        with pytest.raises(ValueError, match='source_text must be the complete saved'):
+            smoke_call('update', summary='hello', source_text=source_text)
 
 
-class _FixedModel:
-    """Fixed model I/O; no model provider or token is used by this test."""
+def test_native_smoke_tools_have_usable_model_schemas():
+    from lazyllm.tools.agent import ToolManager
+    from lazymind.workflow_toolkit import load_workflow_package_tools
 
-    def __init__(self):
-        self.calls = []
-
-    def run(self, step, prompt, inputs):
-        self.calls.append({'step': step, 'prompt': prompt, 'inputs': inputs})
-        outputs = {
-            'prompt': {'summary': '运行测试工作流，内容是 hello'},
-            'script': {'tool': 'build_test_metadata'},
-            'typed_artifacts': {'tool': 'create_typed_fixtures'},
-            'rewrite': {'tools': ['create_rewrite_fixture', 'rewrite_fixture']},
-            'list_artifacts': {'tool': 'create_list_fixtures'},
-            'verify': {'tool': 'verify_fixtures'},
-        }
-        return outputs[step]
-
-
-def test_complete_smoke_workflow_with_fixed_model_io():
-    tools = _load_tools()
-    root = Path(__file__).resolve().parents[3]
-    plugin = yaml.safe_load(
-        (root / 'workflows/test-workflow/workflow.yaml').read_text(encoding='utf-8'),
-    )
-    state = yaml.safe_load(
-        (root / 'workflows/test-workflow/scenario/state.yml').read_text(encoding='utf-8'),
-    )
-    cardinalities = {
-        slot['id']: slot.get('cardinality', 'single') for slot in plugin['slots']
+    root, package = _smoke_package()
+    names = ['smoke_generate', 'smoke_update', 'smoke_verify']
+    loaded = load_workflow_package_tools(package, names, 'test-workflow', 'pinned-smoke', package_root=root)
+    schemas = {tool['function']['name']: tool['function']['parameters']
+               for tool in ToolManager(list(loaded.values())).tools_description}
+    assert schemas['smoke_generate']['required'] == ['summary']
+    assert set(schemas['smoke_verify']['required']) == {
+        'summary', 'metadata', 'source_text', 'rewritten_text', 'rewritten_revision', 'list_texts',
     }
-    artifacts = _ArtifactStore(cardinalities)
-    model = _FixedModel()
-    summary = '运行测试工作流，内容是 hello'
+    assert schemas['smoke_verify']['properties']['rewritten_revision']['type'] == 'integer'
+    assert schemas['smoke_verify']['properties']['list_texts']['type'] == 'array'
 
-    expected_steps = [
-        'prompt', 'script', 'typed_artifacts', 'rewrite', 'list_artifacts', 'verify',
-    ]
-    current = state['transitions']['__start__'][0]['to']
-    visited = []
-    while current != '__end__':
-        visited.append(current)
-        definition = state['steps'][current]
-        inputs = {
-            item['material']: artifacts.latest(item['material'])
-            for item in definition.get('inputs', [])
-        }
-        action = model.run(current, definition['prompt'], inputs)
 
-        if current == 'prompt':
-            artifacts.save('prompt_result', 'text', action['summary'])
-        elif current == 'script':
-            metadata = tools.build_test_metadata(summary)
-            artifacts.save('metadata_json', 'json', metadata)
-        elif current == 'typed_artifacts':
-            typed = tools.create_typed_fixtures(summary)
-            artifacts.save('text_attachment', 'file', typed['text_path'])
-            artifacts.save('image_attachment', 'image', typed['image_url'])
-        elif current == 'rewrite':
-            path = tools.create_rewrite_fixture(summary)
-            artifacts.save('rewritten_attachment', 'file', path)
-            tools.rewrite_fixture(path, 'revision-2')
-            artifacts.save('rewritten_attachment', 'file', path)
-        elif current == 'list_artifacts':
-            for index, path in enumerate(tools.create_list_fixtures(), start=1):
-                artifacts.save('list_attachments', 'file', path, f'item-{index}')
-        elif current == 'verify':
-            text = artifacts.latest('text_attachment')['value']['path']
-            image = artifacts.latest('image_attachment')['value']
-            rewritten = artifacts.latest('rewritten_attachment')['value']['path']
-            listed = [item['value']['path'] for item in artifacts.latest('list_attachments')]
-            result = tools.verify_fixtures(text, image, rewritten, listed)
-            artifacts.save('verification_report', 'file', result['report_path'])
-            artifacts.save('test_status', 'text', result['status'])
-        current = state['transitions'][current][0]['to']
+def test_smoke_error_route_preserves_field_level_remediation(monkeypatch):
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from lazymind.chat.api import agent_control_routes, external_workflow_tool_routes
 
-    assert visited == expected_steps
-    assert [call['step'] for call in model.calls] == expected_steps
-    assert '{{user_input}}' in model.calls[0]['prompt']
-    assert model.calls[1]['inputs']['prompt_result']['value'] == summary
-    assert artifacts.latest('metadata_json')['content_type'] == 'json'
-    assert artifacts.latest('image_attachment')['value'].startswith('https://placehold.co/')
-    rewrite_revisions = artifacts.values['rewritten_attachment']
-    assert len(rewrite_revisions) == 2
-    assert b'revision-2' not in rewrite_revisions[0]['value']['content']
-    assert b'revision-2' in rewrite_revisions[1]['value']['content']
-    listed = artifacts.latest('list_attachments')
-    assert [item['caption'] for item in listed] == ['item-1', 'item-2']
-    assert artifacts.latest('test_status')['value'] == 'Workflow smoke test passed'
-    report = artifacts.latest('verification_report')['value']['content']
-    assert all(json.loads(report).values())
+    monkeypatch.setattr(agent_control_routes, 'config', {'core_internal_token': 'smoke-test-only'})
+    app = FastAPI()
+    app.include_router(external_workflow_tool_routes.router)
+    _, package = _smoke_package()
+    payload = {**_external_request(package, 'update'), 'tool_name': 'smoke_update',
+               'arguments': {'summary': 'hello', 'source_text': '/tmp/source.txt'}}
+    response = TestClient(app).post('/api/workflow/external-tools/call', json=payload,
+                                    headers={'X-LazyMind-Internal-Token': 'smoke-test-only'})
+    assert response.status_code == 400
+    assert response.json()['detail']['code'] == 'INVALID_ARGUMENT'
+    assert response.json()['detail']['public_message'] == (
+        'source_text must be the complete saved source.txt content, including newlines.'
+    )
 
 
 def test_workflow_action_route_uses_pinned_definition_and_server_owned_arguments(monkeypatch):
@@ -343,6 +337,7 @@ def test_portable_conversion_available_to_pinned_workflows_without_action_declar
         'revision_id': 'old-revision', 'tree_hash': 'tree',
         'files': {'workflow.yaml': base64.b64encode(b'id: arbitrary\n').decode()},
     }
+
     class FakeWorkflowClient:
         def __init__(self, *args, **kwargs):
             pass

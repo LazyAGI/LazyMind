@@ -75,6 +75,14 @@ describe('released DSH tool contract', () => {
 })
 
 describe('presentation protocol', () => {
+  it('records model job identity and status for shared recovery', () => {
+    const wrapped = workflowTool(definition(), { operation: 'generation_claim', hostSessionId: 'native-1' })
+    const value = { structuredContent: { session_id: 'run-1', job_id: 'model-job', status: 'running' } }
+    const meta = wrapped.output.presentationMeta?.({}, value)
+    expect(presentationRun(meta, 'http://localhost:8090')).toMatchObject({
+      runId: 'run-1', hostSessionId: 'native-1', operation: 'generation_claim', modelJobId: 'model-job', modelJobStatus: 'running',
+    })
+  })
   it('matches server names literally', () => {
     expect(workflowOperation('mcp__lazy.mind__workflow_start', 'lazy.mind')).toBe('start')
     expect(workflowOperation('mcp__lazyXmind__workflow_start', 'lazy.mind')).toBeNull()

@@ -251,6 +251,9 @@ func ensureConversation(ctx context.Context, db *gorm.DB, convID, displayName st
 		if c.DeletedAt != nil {
 			return nil, 0, errConversationInTrash
 		}
+		if taskcenter.ExternalWorkflowSessionID(c) != "" {
+			return nil, 0, errExternalWorkflowConversation
+		}
 		var count int64
 		db.Model(&orm.ChatHistory{}).Where("conversation_id = ?", convID).Count(&count)
 
@@ -556,6 +559,7 @@ func buildHistoryMessages(histories []orm.ChatHistory, askAnswersStructured map[
 	out := make([]map[string]any, 0, len(histories)*2)
 	for idx, h := range histories {
 		assistantContent := buildAssistantHistoryContent(h)
+		canonical := canonicalMessagesFromHistory(h)
 
 		// Rewrite the ask_user tool_result for the identified history entry.
 		if idx == askRewriteIdx {
@@ -574,6 +578,11 @@ func buildHistoryMessages(histories []orm.ChatHistory, askAnswersStructured map[
 			}
 
 			newContent := buildAskUserToolResultContent(askPendingData, structuredPayload, askSavedAnswersRaw)
+			for _, message := range canonical {
+				if message["role"] == "tool" && message["name"] == "ask_user" {
+					message["content"] = newContent
+				}
+			}
 			// Replace the placeholder tool_result content in the assistant message.
 			assistantContent = replaceAskUserToolResult(assistantContent, newContent)
 		}
@@ -581,6 +590,10 @@ func buildHistoryMessages(histories []orm.ChatHistory, askAnswersStructured map[
 		out = append(out, map[string]any{
 			"role": "user", "content": h.RawContent, "history_seq": h.Seq,
 		})
+		if len(canonical) > 0 {
+			out = append(out, map[string]any{"role": "assistant", "canonical_messages": canonical, "history_seq": h.Seq})
+			continue
+		}
 		if timeline := steeringTimelineFromHistory(h); len(timeline.Items) > 0 {
 			start := 0
 			for _, boundary := range timeline.Items {
@@ -2041,6 +2054,7 @@ func handleNonStreamChat(
 			}
 		}
 		nextOwner.apply(chunk.ModelOutput, &output)
+		output.appendCanonical(chunk.CanonicalMessages)
 		if chunk.RuntimeEvent != nil && chunk.RuntimeEvent.Type == RuntimeEventRunFinished {
 			nextOwner.rollback(&output)
 		}
@@ -2819,6 +2833,7 @@ func streamSingleAnswer(
 			}
 			boundaryErr := resolveSteeringIDs(chatCtx, db, convID, historyID, runID, d.SteeringApplied)
 			if boundaryErr == nil {
+				output.appendCanonicalSteering(d.SteeringApplied)
 				historyExt = withSteeringBoundary(historyExt, runID, len(output.result), d.SteeringApplied)
 				boundaryErr = persistStreamProgress(true)
 			}
@@ -2847,6 +2862,16 @@ func streamSingleAnswer(
 		}
 		if d.Err == nil && !accepted {
 			continue
+		}
+		if d.Err == nil && len(d.CanonicalMessages) > 0 {
+			output.appendCanonical(d.CanonicalMessages)
+			if err := persistStreamProgress(true); err != nil {
+				d.Err, d.ErrKind = err, UpstreamStreamErrorProtocol
+			} else {
+				// Canonical state belongs only to internal model replay, never
+				// the public SSE stream or reconnect cache.
+				continue
+			}
 		}
 		toolCallTurns = observeToolCallTurns(toolCallTurns, d, runID)
 		if d.Err != nil || d.RuntimeEvent != nil && d.RuntimeEvent.Type == RuntimeEventRunFinished {
@@ -3550,21 +3575,26 @@ func streamDualAnswer(
 	db.Model(&orm.MultiAnswersChatHistory{}).Where("id = ? AND run_id = ?", historyID, primaryRunID).Count(&primaryCount)
 	db.Model(&orm.MultiAnswersChatHistory{}).Where("id = ? AND run_id = ?", secondaryHistoryID, secondaryRunID).Count(&secondaryCount)
 	primaryProgressCreated, secondaryProgressCreated := primaryCount > 0, secondaryCount > 0
+	canonicalOutputs := map[string]*canonicalOutput{
+		historyID:          {owner: newChatModelOutput(primaryRunID)},
+		secondaryHistoryID: {owner: newChatModelOutput(secondaryRunID)},
+	}
 	persistProgress := func(id, runID, result, pending string, duration int64, created *bool) {
+		ext := canonicalOutputs[id].ext(historyExt)
 		partialResult := result
 		if pending != "" {
 			partialResult += "<think>" + pending + "</think>"
 		}
 		if *created {
 			_, _ = updateOwnedMultiAnswerHistory(chatCtx, db, id, runID, map[string]any{
-				"result": partialResult, "thinking_duration_s": duration, "update_time": time.Now(),
+				"result": partialResult, "thinking_duration_s": duration, "update_time": time.Now(), "ext": ext,
 			})
 			return
 		}
 		now := time.Now()
 		if err := db.Create(&orm.MultiAnswersChatHistory{
 			ID: id, Seq: seq, ConversationID: convID, RawContent: query, Content: query,
-			Result: partialResult, ThinkingDurationS: duration, RunID: runID, RunStatus: "generating", Ext: historyExt,
+			Result: partialResult, ThinkingDurationS: duration, RunID: runID, RunStatus: "generating", Ext: ext,
 			TimeMixin: orm.TimeMixin{CreateTime: now, UpdateTime: now},
 		}).Error; err == nil {
 			*created = true
@@ -3644,12 +3674,33 @@ func streamDualAnswer(
 			})
 		}
 	}
+	handleCanonical := func(chunk *UpstreamStreamChunk, primary bool) bool {
+		id := secondaryHistoryID
+		if primary {
+			id = historyID
+		}
+		if err := canonicalOutputs[id].consume(*chunk); err != nil && chunk.Err == nil {
+			chunk.Err, chunk.ErrKind = err, UpstreamStreamErrorProtocol
+		}
+		private := len(chunk.CanonicalMessages) > 0 && chunk.Err == nil
+		if private || chunk.ModelOutput != nil && chunk.ModelOutput.Phase != "" {
+			if primary {
+				persistProgress(historyID, primaryRunID, primaryResult, primaryPendingThink, primaryThinkingDurationS, &primaryProgressCreated)
+			} else {
+				persistProgress(secondaryHistoryID, secondaryRunID, secondaryResult, secondaryPendingThink, secondaryThinkingDurationS, &secondaryProgressCreated)
+			}
+		}
+		return private
+	}
 	for !primaryDone || !secondaryDone {
 		select {
 		case d, ok := <-primaryCh:
 			if !ok {
 				primaryDone = true
 				primaryCh = nil
+				continue
+			}
+			if handleCanonical(&d, true) {
 				continue
 			}
 			if d.AskPending != nil && d.AskPending.EnvInput != nil {
@@ -3707,6 +3758,9 @@ func streamDualAnswer(
 			if !ok {
 				secondaryDone = true
 				secondaryCh = nil
+				continue
+			}
+			if handleCanonical(&d, false) {
 				continue
 			}
 			if d.AskPending != nil && d.AskPending.EnvInput != nil {
@@ -3769,6 +3823,9 @@ func streamDualAnswer(
 						primaryDone = true
 						primaryCh = nil
 					} else {
+						if handleCanonical(&d, true) {
+							continue
+						}
 						if d.AskPending != nil && d.AskPending.EnvInput != nil {
 							envInputRequests[historyID] = true
 							appendPrimary(envInputNotice, "", nil)
@@ -3850,6 +3907,9 @@ func streamDualAnswer(
 						secondaryDone = true
 						secondaryCh = nil
 					} else {
+						if handleCanonical(&d, false) {
+							continue
+						}
 						if d.AskPending != nil && d.AskPending.EnvInput != nil {
 							envInputRequests[secondaryHistoryID] = true
 							appendSecondary(envInputNotice, "", nil)
@@ -4005,6 +4065,8 @@ dualPersist:
 	}
 	primaryExt := finalizeExport(historyID, primaryRunID, &primaryResult, &primaryText, primaryTerminal)
 	secondaryExt := finalizeExport(secondaryHistoryID, secondaryRunID, &secondaryResult, &secondaryText, secondaryTerminal)
+	primaryExt = canonicalOutputs[historyID].ext(primaryExt)
+	secondaryExt = canonicalOutputs[secondaryHistoryID].ext(secondaryExt)
 	primaryExt = taskcenter.WithNotificationCompletionTimeForRun(primaryExt, now, primaryRunID)
 	secondaryExt = taskcenter.WithNotificationCompletionTimeForRun(secondaryExt, now, secondaryRunID)
 	primaryHistory := &orm.MultiAnswersChatHistory{

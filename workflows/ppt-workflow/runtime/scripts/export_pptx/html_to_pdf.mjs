@@ -176,6 +176,11 @@ function renderPdfHost(slides) {
 
         try {
           await waitForLoad(iframe);
+          for (const request of slide.fontRequests || []) {
+            if (!(await iframe.contentDocument.fonts.load(request)).length) {
+              throw new Error('Required font did not load: ' + request);
+            }
+          }
           await iframe.contentDocument.fonts.ready;
           await Promise.all([...iframe.contentDocument.images].map(img => img.decode().catch(() => {})));
           await waitForCharts(iframe);
@@ -245,6 +250,9 @@ async function main() {
     console.error(`正在处理 ${htmlFiles.length} 个 HTML 页面...`);
     const page = await browser.newPage({ viewport: { width: PAGE_W, height: PAGE_H } });
     const slides = loadSlides(htmlFiles);
+    const { prepareManagedFontResources } = await import('./lib/local_fonts.mjs');
+    const prepared = await prepareManagedFontResources(page, slides.map(slide => slide.html));
+    slides.forEach((slide, index) => Object.assign(slide, prepared[index]));
     // A file-origin host lets relative offline assets load inside srcdoc frames.
     // about:blank + setContent blocks file: images even with an explicit base URL.
     hostDirectory = mkdtempSync(resolve(tmpdir(), 'lazymind-pdf-host-'));

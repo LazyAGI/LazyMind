@@ -8,19 +8,27 @@ import type { WorkflowPanelControlAdapter } from '@/modules/chat/components/Work
 // live Agent. Panel controls themselves are covered by WorkflowPanel.layout.
 const fixture = vi.hoisted(() => ({
   load: vi.fn(), control: vi.fn(), setSession: vi.fn(), reload: () => {},
+  activity: vi.fn(), panel: vi.fn(),
   review: { id: 'review', step_id: 'analyze', execution_id: 'attempt', status: 'pending', version: 1, manifest_hash: 'test-hash' },
 }));
+vi.mock('@/modules/identityAvatar', () => ({ IdentityAvatar: () => <span data-testid='user-avatar' /> }));
 vi.mock('react-router-dom', () => ({ useParams: () => ({ sessionId: 'acceptance-test' }) }));
 vi.mock('@/components/auth', () => ({ AgentAppsAuth: { getUserInfo: () => ({ userId: 'test-user' }) } }));
 vi.mock('@/modules/chat/utils/request', () => ({ WorkflowSessionApi: () => ({ control: fixture.control }) }));
-vi.mock('@/modules/chat/store/workflowPanel', () => ({ useWorkflowStore: (select: any) => select({ setSession: fixture.setSession }) }));
+vi.mock('@/modules/chat/store/workflowPanel', () => ({ useWorkflowStore: (select: any) => select({
+  setSession: fixture.setSession,
+  workflowUIByWorkflow: { '["ppt-workflow","fixed-revision","zh-CN"]': { name: '汇报 PPT' } },
+}) }));
 vi.mock('./loadRun', () => ({
   loadWorkflowRunSnapshot: (...args: unknown[]) => fixture.load(...args),
   watchWorkflowRun: (_id: string, reload: () => void) => { fixture.reload = reload; return () => {}; },
 }));
-vi.mock('@/modules/chat/components/WorkflowPanel/external/useExecutionActivity', () => ({ useExecutionActivity: () => ({}) }));
-vi.mock('@/modules/chat/components/WorkflowPanel', () => ({ WorkflowPanel: ({ controlAdapter }: { controlAdapter: WorkflowPanelControlAdapter }) =>
-  <button onClick={() => controlAdapter.execute({ kind: 'approve', stepId: 'analyze' })}>确认测试审核</button>,
+vi.mock('@/modules/chat/components/ImageUpload', () => ({ default: () => null, allowedImageTypes: [] }));
+vi.mock('@/modules/chat/components/WorkflowPanel/external/useExecutionActivity', () => ({ useExecutionActivity: (...args: unknown[]) => { fixture.activity(...args); return {}; } }));
+vi.mock('@/modules/chat/components/WorkflowPanel', () => ({ WorkflowPanel: (props: { controlAdapter: WorkflowPanelControlAdapter }) => {
+  fixture.panel(props);
+  return <button onClick={() => props.controlAdapter.execute({ kind: 'approve', stepId: 'analyze' })}>确认测试审核</button>;
+},
 }));
 beforeEach(async () => {
   vi.clearAllMocks();
@@ -34,6 +42,76 @@ beforeEach(async () => {
   fixture.control.mockImplementation(async (_id, command) => ({ data: { data: { receipt: { command_id: command.command_id } } } }));
 });
 afterEach(cleanup);
+
+it('shows results for the explicitly linked run without subscribing to execution trace', async () => {
+  render(<WorkflowRunPage sessionId='external-run' resultsOnly title='Paper summary' />);
+  await screen.findByRole('button', { name: '确认测试审核' });
+  expect(fixture.load.mock.calls[0][0]).toBe('external-run');
+  expect(fixture.activity).toHaveBeenLastCalledWith(undefined);
+  expect(fixture.panel).toHaveBeenLastCalledWith(expect.objectContaining({ resultsOnly: true, embedded: true }));
+  expect(screen.getByText('Paper summary').closest('.chat-user')).not.toBeNull();
+  expect(screen.queryByRole('region', { name: '工作流面板' })).not.toBeInTheDocument();
+  expect(screen.queryByRole('heading')).not.toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: /刷\s*新/ })).not.toBeInTheDocument();
+});
+
+it('shows and copies the complete original request as a native user bubble', async () => {
+  const baseline = await fixture.load();
+  const text = '根据附件生成四页 PPT，并覆盖论文方法、证据和局限。'.repeat(8);
+  baseline.session.intent_context = JSON.stringify({ text: text + '\n\nConfirmed workflow parameters:\n{"slide_count":"4"}', clarification_values: { slide_count: '4' } });
+  baseline.session.created_at = '2026-11-06T08:00:00Z';
+  fixture.load.mockResolvedValue(baseline);
+  const copy = vi.fn().mockResolvedValue(undefined);
+  Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: copy } });
+  render(<WorkflowRunPage resultsOnly title='截断的标题…' />);
+  expect((await screen.findByText(text)).closest('.chat-user')).not.toBeNull();
+  expect(screen.queryByText('截断的标题…')).not.toBeInTheDocument();
+  expect(screen.getByTestId('user-avatar')).toBeVisible();
+  expect(document.querySelector('time')).toHaveAttribute('datetime', baseline.session.created_at);
+  fireEvent.click(screen.getByRole('button', { name: '复制' }));
+  expect(copy).toHaveBeenCalledWith(text);
+});
+
+it.each(['stopped', 'awaiting_user'])('saves real Ask answers without auto-resuming (%s)', async continuation => {
+  const baseline = await fixture.load();
+  fixture.load.mockClear();
+  baseline.control.continuation = continuation;
+  baseline.control.binding = { bound: false };
+  baseline.control.input_request = { artifact_id: 'input-1', revision: 2, slot: 'runtime.input_checkpoint', title: '确认演示文稿要求',
+    questions: [{ id: 'slides', text: '需要几页？', type: 'text', required: true }] };
+  fixture.load.mockImplementation(async () => structuredClone(baseline));
+  fixture.control.mockImplementation(async (_id, command) => {
+    baseline.control.input_request = null;
+    baseline.control.state_version += 1;
+    return { data: { data: { receipt: { command_id: command.command_id } } } };
+  });
+  render(<WorkflowRunPage resultsOnly />);
+  await screen.findByText('需要几页？');
+  expect(screen.getByRole('button', { name: /提\s*交/ })).toBeDisabled();
+  fireEvent.change(screen.getByRole('textbox'), { target: { value: '4 页' } });
+  fireEvent.click(screen.getByRole('button', { name: /提\s*交/ }));
+  await waitFor(() => expect(fixture.control).toHaveBeenCalledOnce());
+  expect(fixture.control.mock.calls[0][1]).toMatchObject({ kind: 'answer_input', expected_state_version: 1,
+    input_artifact_id: 'input-1', input_revision: 2, answer_text: expect.stringContaining('4 页') });
+  expect(await screen.findByText(continuation === 'stopped'
+    ? '答案已保存，工作流仍处于暂停状态。准备好后可继续。'
+    : '答案已保存。请回到执行此工作流的外部 Agent 继续。')).toBeVisible();
+  expect(screen.queryByText('需要几页？')).not.toBeInTheDocument();
+});
+
+it('keeps an uncommitted Ask answer editable after a control error', async () => {
+  const baseline = await fixture.load();
+  baseline.control.input_request = { artifact_id: 'input-1', revision: 2, slot: 'runtime.input_checkpoint',
+    questions: [{ id: 'style', text: '请选择风格', type: 'single', choices: ['简洁', '详细'], required: true, choice_policy: 'fixed' }] };
+  fixture.load.mockResolvedValue(baseline);
+  fixture.control.mockRejectedValue({ response: { status: 409, data: { error: { code: 'STATE_VERSION_CONFLICT', message: 'State changed' } } } });
+  render(<WorkflowRunPage resultsOnly />);
+  fireEvent.click(await screen.findByRole('radio', { name: '简洁' }));
+  fireEvent.click(screen.getByRole('button', { name: /提\s*交/ }));
+  await screen.findByText('State changed');
+  expect(screen.getByRole('radio', { name: '简洁' })).toBeChecked();
+  expect(screen.getByRole('button', { name: /提\s*交/ })).toBeEnabled();
+});
 
 it('refreshes after the matching receipt without adding a routine confirmation banner', async () => {
   let acknowledge!: () => void;

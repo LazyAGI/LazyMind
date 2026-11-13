@@ -203,72 +203,35 @@ def test_preview_never_links_files_outside_the_deck(monkeypatch, tmp_path):
     assert tools._inline_preview_images(html, deck, deck / 'pages' / 'page.html') == (html, 0)
 
 
-def test_outline_retry_reuses_deck_style_and_completed_outline(monkeypatch, tmp_path):
-    import pytest
+def test_authored_outline_retry_preserves_deck_assets_without_model_calls(monkeypatch, tmp_path):
     tools = _load_ppt_tools()
     monkeypatch.setattr(tools, '_conversation_root', lambda: tmp_path)
     monkeypatch.setattr(tools, '_attach_material_images_to_deck', lambda _: {'attached': 0})
-    calls = []
-    fail_outline = True
-    fail_publish = True
-    deck_paths = []
-    published = []
-    publish_outline = tools._publish_deck_outline
-    monkeypatch.setattr(tools, '_save_artifact', lambda **kwargs: published.append(kwargs) or {'status': 'ok'})
+    monkeypatch.setattr(tools, 'ppt_run_stage', lambda *a, **kw: pytest.fail('outline publication called a model'))
+    saves = []
 
-    def stage(deck_dir, stage, sample=None):
-        nonlocal fail_outline
-        calls.append(stage)
-        deck = Path(deck_dir)
-        deck_paths.append(deck)
-        if stage == 'style':
-            assert sample is None
-            _write_ready_style(deck)
-        if stage in ('outline', 'content-outline'):
-            if fail_outline:
-                fail_outline = False
-                return {'ok': False, 'value': 'upstream timeout'}
-            (deck / 'outline.json').write_text('{"pages":[{"page_no":1,"title":"Background"}]}', encoding='utf-8')
-        return {'status': 'ok'}
+    def save(**kwargs):
+        saves.append(kwargs)
+        return {'ok': False, 'value': 'temporary publication failure'} if len(saves) == 1 else {'status': 'ok'}
 
-    def publish(deck):
-        nonlocal fail_publish
-        if fail_publish:
-            fail_publish = False
-            return {'ok': False, 'error': 'temporary publication failure'}
-        return publish_outline(deck)
-
-    monkeypatch.setattr(tools, 'ppt_run_stage', stage)
-    monkeypatch.setattr(tools, '_publish_deck_outline', publish)
-    with pytest.raises(Exception, match='outline failed'):
-        tools.ppt_build_outline('Retry this presentation', page_count=1)
-    deck = deck_paths[0]
-    (deck / 'images' / 'preserved.png').write_bytes(b'original image')
-    with pytest.raises(Exception, match='publish deck outline failed'):
-        tools.ppt_build_outline('Retry this presentation', page_count=1)
-    # Editing a valid visual contract must not invalidate the content checkpoint.
-    style = json.loads((deck / 'style_spec.json').read_text(encoding='utf-8'))
-    style['palette']['primary'] = '#000'
-    (deck / 'style_spec.json').write_text(json.dumps(style), encoding='utf-8')
-    result = tools.ppt_build_outline('Retry this presentation', page_count=1)
-    assert result['deck_dir'] == str(deck)
-    assert calls == [
-        'preflight', 'style', 'preflight', 'content-outline',
-        'preflight', 'preflight', 'content-outline', 'preflight', 'preflight',
-    ]
-    assert json.loads((deck / 'style_spec.json').read_text(encoding='utf-8')) == style
-    assert len(set(deck_paths)) == 1
-    assert (deck / 'images' / 'preserved.png').read_bytes() == b'original image'
+    monkeypatch.setattr(tools, '_save_artifact', save)
+    outline = '## 1. Background\n\n1. Keep this list.\n'
+    with pytest.raises(tools.ToolExecutionError, match='temporary publication failure'):
+        tools.ppt_build_outline('Retry this presentation', outline, page_count=1)
+    checkpoint = next((tmp_path / '.outline_builds').glob('*.json'))
+    deck = Path(json.loads(checkpoint.read_text())['deck_dir'])
+    image = deck / 'images' / 'preserved.png'
+    image.write_bytes(b'original image')
+    _write_ready_style(deck)
+    style = (deck / 'style_spec.json').read_bytes()
+    result = tools.ppt_build_outline('Retry this presentation', outline, page_count=1)
+    assert result['deck_dir'] == str(deck) and result['page_count'] == 1
+    assert len(list((tmp_path / 'ppt_decks').iterdir())) == 1
+    assert image.read_bytes() == b'original image'
+    assert (deck / 'style_spec.json').read_bytes() == style
     assert not list((tmp_path / '.outline_builds').glob('*.json'))
-    from lazymind.document_tools.artifacts import render_document
-
-    assert '## Background' in published[-1]['value']
-    assert '## 1. Background' in render_document(published[-1]['value'])['export_document']
-    result = tools._publish_text_outline(deck, '# Deck\n\n## 1. Background\n\n1. Keep this list.\n')
-    assert result['ok'] and result['page_count'] == 1
-    expected = '# Deck\n\n## Background\n\n1. Keep this list.\n'
-    assert published[-1]['value'] == expected
-    assert (deck / 'outline_draft.md').read_text() == expected
+    assert not (deck / 'outline.json').exists()
+    assert saves[-1]['value'] == '## Background\n\n1. Keep this list.'
 
 
 def test_ordered_publication_inserts_only_one_new_stable_index(monkeypatch):
@@ -292,40 +255,21 @@ def test_ordered_publication_inserts_only_one_new_stable_index(monkeypatch):
     assert reserve.call_args.kwargs['value'] == save.call_args.kwargs['value']
 
 
-def test_legacy_standard_deck_recovers_without_recreating_assets(monkeypatch, tmp_path):
+def test_outline_publication_reuses_prepared_backgrounds(monkeypatch, tmp_path):
     tools = _load_ppt_tools()
     monkeypatch.setattr(tools, '_conversation_root', lambda: tmp_path)
     monkeypatch.setattr(tools, '_attach_material_images_to_deck', lambda _: {'attached': 0})
-    initial = tools.ppt_init_deck('A short presentation', page_count=1, ppt_mode='standard')
+    initial = tools.ppt_init_deck('A short presentation', page_count=1, style_flow='auto',
+                                  generate_background_images=True)
     deck = Path(initial['deck_dir'])
-    assert initial['style_flow'] == 'preview_choice'
-    assert initial['ppt_mode'] == 'standard'
-    pack = json.loads((deck / 'task_pack.json').read_text(encoding='utf-8'))
-    # A real legacy deck has no style_flow field or style samples.
-    pack['params'].pop('style_flow')
-    pack['ppt_mode'] = 'standard'
-    (deck / 'task_pack.json').write_text(json.dumps(pack), encoding='utf-8')
     image = deck / 'images' / 'background.png'
     image.write_bytes(b'preserved background')
-    calls = []
-
-    def stage(deck_dir, stage, sample=None):
-        calls.append(stage)
-        if stage == 'style':
-            assert sample is None
-            _write_ready_style(deck)
-        assert Path(deck_dir) == deck
-        if stage == 'content-outline':
-            (deck / 'outline.json').write_text('{"pages":[{"page_no":1}]}', encoding='utf-8')
-        return {'status': 'ok'}
-
-    monkeypatch.setattr(tools, 'ppt_run_stage', stage)
-    monkeypatch.setattr(tools, '_publish_deck_outline', lambda _: {'ok': True, 'page_count': 1})
-    result = tools.ppt_build_outline('A short presentation', page_count=1, deck_dir=str(deck))
-    assert result['ppt_mode'] == 'fast'
+    monkeypatch.setattr(tools, 'ppt_run_stage', lambda *a, **kw: pytest.fail('publication must not generate'))
+    monkeypatch.setattr(tools, '_save_artifact', lambda **kw: {'ok': True})
+    result = tools.ppt_build_outline('A short presentation', '## Background\nEvidence',
+                                     page_count=1, deck_dir=str(deck), generate_background_images=None)
     assert result['deck_dir'] == str(deck)
-    assert result['style_flow'] == 'auto'
-    assert calls == ['preflight', 'style', 'preflight', 'content-outline']
+    assert result['background_images_enabled'] is True
     assert image.read_bytes() == b'preserved background'
 
 
@@ -346,34 +290,19 @@ def test_workflow_deck_binding_survives_reworded_retry_and_other_workflows(monke
     assert other != deck
     session = 'workflow-a'
     assert Path(tools.ppt_find_deck()['deck_dir']) == deck
-    calls = []
-    failed = False
+    saves = []
 
-    def stage(deck_dir, stage, sample=None):
-        nonlocal failed
-        assert Path(deck_dir) == deck
-        calls.append(stage)
-        if stage == 'style':
-            assert sample is None
-            _write_ready_style(deck)
-        if stage == 'content-outline':
-            if not failed:
-                failed = True
-                return {'ok': False, 'value': 'temporary timeout'}
-        if stage == 'content-outline':
-            (deck / 'outline.json').write_text('{"pages":[{"page_no":1}]}', encoding='utf-8')
-        return {'status': 'ok'}
+    def save(**kwargs):
+        saves.append(kwargs)
+        return {'ok': False, 'value': 'temporary publication failure'} if len(saves) == 1 else {'ok': True}
 
-    monkeypatch.setattr(tools, 'ppt_run_stage', stage)
-    monkeypatch.setattr(tools, '_publish_deck_outline', lambda _: {'ok': True, 'page_count': 1})
-    with pytest.raises(Exception, match='outline failed'):
-        tools.ppt_build_outline('First wording', page_count=1)
-    result = tools.ppt_build_outline('Completely different recovery wording', page_count=1, style_hint='green')
+    monkeypatch.setattr(tools, 'ppt_run_stage', lambda *a, **kw: pytest.fail('publication must not generate'))
+    monkeypatch.setattr(tools, '_save_artifact', save)
+    with pytest.raises(tools.ToolExecutionError, match='temporary publication failure'):
+        tools.ppt_build_outline('First wording', '## First page\nApproved content', page_count=1)
+    result = tools.ppt_build_outline('Completely different recovery wording',
+                                     '## First page\nApproved content', page_count=1, style_hint='green')
     assert Path(result['deck_dir']) == deck
-    assert calls == [
-        'preflight', 'style', 'preflight', 'content-outline',
-        'preflight', 'preflight', 'content-outline',
-    ]
     assert (deck / 'images' / 'background.png').read_bytes() == b'keep'
     assert len(list((tmp_path / 'ppt_decks').iterdir())) == 2
 

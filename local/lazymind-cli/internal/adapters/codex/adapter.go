@@ -265,6 +265,69 @@ func (a *Adapter) connectDesktop(ctx context.Context, account string, status age
 	return a.Status(setup)
 }
 
+// Refresh updates an already enabled, owned plugin without performing desktop
+// lifecycle control. Connect is the explicit install/restart flow; it must not
+// be reused as a harmless refresh while a user is working in Codex.
+func (a *Adapter) Refresh(ctx context.Context) (result agentintegration.Status) {
+	defer func() {
+		details := a.inspectConfiguration(&result)
+		agentintegration.RecordInspection(a.home, a.self, details, &result)
+	}()
+	status := a.status(ctx)
+	profile, err := codexHome()
+	if err != nil {
+		return agentintegration.Fail(status, err.Error())
+	}
+	record, err := codexplugin.Read()
+	if err != nil || record.Home != a.home || record.Profile != profile {
+		return agentintegration.Fail(status, "Refresh requires an existing LazyMind Workflow plugin owned by this installation and Codex profile.")
+	}
+	if enabled, err := codexplugin.Enabled(profile, record.Marketplace); err != nil || !enabled {
+		return agentintegration.Fail(status, "Refresh requires an enabled LazyMind Workflow plugin; use the installation guide to connect it first.")
+	}
+	if config, exists, err := a.getConfig(); err != nil {
+		return agentintegration.Fail(status, err.Error())
+	} else if exists && !a.isOwned(config) {
+		return agentintegration.Fail(status, "Refresh cannot replace a lazymind MCP entry owned by another installation.")
+	}
+	store, err := credentials.NewStore(a.home, "")
+	if err != nil {
+		return agentintegration.Fail(status, err.Error())
+	}
+	account, err := store.AccountScope()
+	if err != nil || !workflowhost.Configured(a.home, record.ConnectorID, account) {
+		return agentintegration.Fail(status, "Refresh requires the existing pairing for the signed-in LazyMind account.")
+	}
+	if err := a.prepareRuntime(ctx); err != nil {
+		return agentintegration.Fail(status, err.Error())
+	}
+	record, err = codexplugin.Install(ctx, a.home, a.self, a.binary, profile, a.hostID)
+	if err != nil {
+		return agentintegration.Fail(status, "refresh LazyMind Workflow plugin: "+err.Error())
+	}
+	if err := codexhost.Configure(a.home, record.Node, record.PairingFile); err != nil {
+		return agentintegration.Fail(status, err.Error())
+	}
+	// An earlier Connect may have installed the plugin but stopped before legacy
+	// migration when the desktop declined to restart. Remove only our own old
+	// entry after successful refresh; this CLI edit does not control the desktop.
+	if config, exists, err := a.getConfig(); err != nil {
+		return agentintegration.Fail(status, err.Error())
+	} else if exists {
+		if !a.isOwned(config) {
+			return agentintegration.Fail(status, "Plugin refreshed, but the lazymind MCP entry changed ownership; it was preserved.")
+		}
+		if _, err := a.run(ctx, "mcp", "remove", serverName); err != nil {
+			return agentintegration.Fail(status, "Plugin refreshed, but its legacy MCP entry could not be removed: "+err.Error())
+		}
+	}
+	status = a.status(ctx)
+	if status.State == agentintegration.Enabled {
+		status.Message = "LazyMind Workflow plugin files were refreshed without restarting Codex. Open a new task to load the updated skills and MCP tools; existing tasks may keep their current tool processes."
+	}
+	return status
+}
+
 func (a *Adapter) Disconnect(ctx context.Context) (result agentintegration.Status) {
 	operation := agentintegration.NewOperation(a.home, "codex", "disconnect", a.self)
 	operation.Enter("disconnect")

@@ -14,10 +14,10 @@ export default function ReadingPreferencesModal({ open, onClose }: { open: boole
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [reload, setReload] = useState(0);
-  const [detailsOpen, setDetailsOpen] = useState(false);
+  const [detailsOpen, setDetailsOpen] = useState(true);
   useEffect(() => {
     if (!open) return;
-    let stale = false; setDetailsOpen(false); setLoading(true); setError(''); setDraft(undefined);
+    let stale = false; setDetailsOpen(true); setLoading(true); setError(''); setDraft(undefined);
     getReadingPreferences().then(value => { if (!stale) { setDraft(value); setLoadedRefs({ parser_ref: value.parser_ref || '', study_model_ref: value.study_model_ref || '' }); } }).catch(err => { if (!stale) setError(getLocalizedErrorMessage(err)); }).finally(() => { if (!stale) setLoading(false); });
     return () => { stale = true; };
   }, [open, reload]);
@@ -30,25 +30,6 @@ export default function ReadingPreferencesModal({ open, onClose }: { open: boole
     {error && <Alert type="error" showIcon message={error} action={!draft ? <Button onClick={() => setReload(v => v + 1)}>重试</Button> : undefined} />}
     {loading && <Spin />}
     {draft && <div style={{ '--reading-border': token.colorBorderSecondary, '--reading-muted': token.colorTextSecondary, '--reading-primary': token.colorPrimary, '--reading-tint': token.colorPrimaryBg, '--reading-surface': token.colorFillQuaternary } as React.CSSProperties}>
-      <div className="reading-section-heading"><span>准备方案</span><span className="reading-section-hint">已有结果始终优先复用</span></div>
-      <Radio.Group aria-label="准备预设" className="reading-preset-options" disabled={saving} value={draft.preset} onChange={event => {
-        const preset = event.target.value as ReadingPreset;
-        setDetailsOpen(false);
-        setDraft({ ...draft, preset, modes: preset === 'custom' ? draft.modes : presetModes(preset) });
-      }}>
-        {presets.map(([value, title, , description]) => <Radio key={value} value={value}><span className="reading-preset-heading"><strong>{title}</strong><CheckOutlined /></span><span className="reading-preset-description">{description}</span></Radio>)}
-      </Radio.Group>
-      <div className="reading-plan-summary"><span>{draft.preset === 'custom' ? `自定义 · ${Object.entries(names).filter(([id]) => draft.modes[id as ReadingCapabilityId] === 'automatic').map(([, name]) => name).join('、') || '无自动准备'}${Object.values(draft.modes).some(mode => mode === 'automatic') ? '自动准备' : ''}` : '仅对之后导入的论文自动准备，不补跑历史论文'}</span><Button type="link" size="small" disabled={saving} icon={<SlidersOutlined />} aria-expanded={detailsOpen} onClick={() => setDetailsOpen(!detailsOpen)}>{detailsOpen ? '收起设置' : '逐项调整'}</Button></div>
-      {(detailsOpen) && <div className="reading-capabilities">
-        {Object.entries(names).map(([key, name]) => {
-          const id = key as ReadingCapabilityId; const capability = draft.capabilities.find(c => c.id === id);
-          return <div className="reading-capability" key={id}><div><strong>{name}</strong><p>{id === 'chat_prepare' ? '为文档对话准备可检索文本，与结构解析独立。' : id === 'pdf_parse' ? '识别正文、公式、图片与表格，供后续研读使用。' : '每个条目可能调用模型，已有结果优先复用。'}</p>
-            {capability?.unavailable_reason && <Typography.Text type="warning">{capability.unavailable_reason}</Typography.Text>}</div>
-            <Select aria-label={name} value={draft.modes[id]} disabled={saving} options={[{ value: 'on_demand', label: '按需' }, { value: 'automatic', label: '自动' }, { value: 'disabled', label: '禁用生成' }]} onChange={mode => setDraft({ ...draft, preset: 'custom', modes: { ...draft.modes, [id]: mode } })} />
-          </div>;
-        })}
-      </div>}
-      {!(detailsOpen) && draft.capabilities.filter(c => c.unavailable_reason).map(c => <Alert key={c.id} type="warning" showIcon message={c.unavailable_reason} />)}
       <div className="reading-section-heading reading-model-heading"><span>服务与模型</span><span className="reading-section-hint">仅用于论文阅读</span></div>
       <div className="reading-provider-selections">
         {([['parser', 'parser_ref', '文档解析服务', '/settings?section=model_defaults&service=parsing'], ['study', 'study_model_ref', '研读模型', '/settings?section=models']] as const).map(([kind, field, label, href]) => {
@@ -66,6 +47,24 @@ export default function ReadingPreferencesModal({ open, onClose }: { open: boole
         })}
         <Typography.Paragraph type="secondary">独立于聊天与全局默认，切换不会重新生成已有解读。</Typography.Paragraph>
       </div>
+      <div className="reading-section-heading"><span>准备方案</span><span className="reading-section-hint">已有结果始终优先复用</span></div>
+      <Radio.Group aria-label="准备预设" className="reading-preset-options" disabled={saving} value={draft.preset} onChange={event => {
+        const preset = event.target.value as ReadingPreset;
+        setDraft({ ...draft, preset, modes: preset === 'custom' ? draft.modes : presetModes(preset) });
+      }}>
+        {presets.map(([value, title, , description]) => <Radio key={value} value={value}><span className="reading-preset-heading"><strong>{title}</strong><CheckOutlined /></span><span className="reading-preset-description">{description}</span></Radio>)}
+      </Radio.Group>
+      <div className="reading-plan-summary"><span>{draft.preset === 'custom' ? `自定义 · ${Object.entries(names).filter(([id]) => draft.modes[id as ReadingCapabilityId] === 'automatic').map(([, name]) => name).join('、') || '无自动准备'}${Object.values(draft.modes).some(mode => mode === 'automatic') ? '自动准备' : ''}` : '仅对之后导入的论文自动准备，不补跑历史论文'}</span><Button type="link" size="small" disabled={saving} icon={<SlidersOutlined />} aria-expanded={detailsOpen} onClick={() => setDetailsOpen(!detailsOpen)}>{detailsOpen ? '收起设置' : '逐项调整'}</Button></div>
+      {(detailsOpen) && <div className="reading-capabilities">
+        {Object.entries(names).map(([key, name]) => {
+          const id = key as ReadingCapabilityId; const capability = draft.capabilities.find(c => c.id === id);
+          return <div className="reading-capability" key={id}><div><strong>{name}</strong><p>{id === 'chat_prepare' ? '为文档对话准备可检索文本，与结构解析独立。' : id === 'pdf_parse' ? '识别正文、公式、图片与表格，供后续研读使用。' : '每个条目可能调用模型，已有结果优先复用。'}</p>
+            {capability?.unavailable_reason && <Typography.Text type="warning">{capability.unavailable_reason}</Typography.Text>}</div>
+            <Select aria-label={name} value={draft.modes[id]} disabled={saving} options={[{ value: 'on_demand', label: '按需' }, { value: 'automatic', label: '自动' }, { value: 'disabled', label: '禁用生成' }]} onChange={mode => setDraft({ ...draft, preset: 'custom', modes: { ...draft.modes, [id]: mode } })} />
+          </div>;
+        })}
+      </div>}
+      {!(detailsOpen) && draft.capabilities.filter(c => c.unavailable_reason).map(c => <Alert key={c.id} type="warning" showIcon message={c.unavailable_reason} />)}
       {dependencyError && <Alert type="warning" showIcon message={dependencyError} />}
       <Collapse ghost items={[{ key: 'limits', label: <span className="reading-limit-heading"><span>自动准备上限</span><span>每天 {draft.limits.daily_documents} 篇 · 每篇 {draft.limits.study_items_per_document} 项</span></span>, children: <div className="reading-limits">
         <label>每天自动准备论文<InputNumber aria-label="每天自动准备论文" disabled={saving} min={1} max={100} value={draft.limits.daily_documents} onChange={value => value != null && setDraft({ ...draft, limits: { ...draft.limits, daily_documents: value } })} />篇</label>

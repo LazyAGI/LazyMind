@@ -108,9 +108,17 @@ class RemoteWorkflowExecutor:
         task_id = ''
         try:
             context = await self.runtime.context(client, attempt_id, lease)
+            if context.get('objective_ref') == '#/prompt':
+                objective = str(context.get('prompt') or '')
+                if context.get('objective'):
+                    objective += '\n\nRuntime objective:\n' + str(context['objective'])
+                context['objective'] = objective
             metadata = context.get('metadata') or {}
             task_id = str(metadata.get('task_id') or attempt_id)
             spec = await self.runtime.execution_spec(client, task_id, lease)
+            from .external_model import model_config
+            spec['llm_config'] = model_config(
+                context, self.base_url, attempt_id, lease, spec.get('llm_config'))
             task = dict(spec.get('task') or {})
             workspace = str(spec['workspace_path'])
             pathlib.Path(workspace).mkdir(parents=True, exist_ok=True)
@@ -181,6 +189,7 @@ class RemoteWorkflowExecutor:
                 # compiled step may request values, references, or fenced local paths.
                 # Keep every form out of attachment-only tools.
                 params['remote_inputs'] = inputs
+                params['remote_input_bindings'] = context.get('inputs') or {}
                 params['remote_input_types'] = input_types
                 params['remote_input_transports'] = input_transports
                 params['remote_input_value_slots'] = direct_value_slots
@@ -191,6 +200,20 @@ class RemoteWorkflowExecutor:
                     'input_slots': task.get('input_slots') or [],
                     'output_slots': task.get('output_slots') or [],
                 })
+                # Both executors receive the same pinned Skills and constraints.
+                # Native tool bindings remain in the task; they do not replace
+                # the package's shared business instructions.
+                execution = context.get('execution') or {}
+                shared_instructions = [str(value) for value in execution.get('constraints', [])]
+                for skill in execution.get('skill_files', []):
+                    shared_instructions.append(
+                        f"Pinned workflow Skill ({skill['path']}):\n{skill['content']}")
+                if shared_instructions:
+                    task['objective'] = '\n\n'.join([
+                        str(task.get('objective') or context.get('objective') or context.get('prompt') or ''),
+                        'Shared workflow instructions (apply to every executor):',
+                        *shared_instructions,
+                    ])
                 checkpoint = context.get('post_step_checkpoint')
                 if checkpoint:
                     # Core pins this completed execution only when retrying its

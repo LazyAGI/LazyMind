@@ -282,25 +282,39 @@ func handlePDFIRJob(ctx context.Context, job asyncjob.Job, reporter asyncjob.Rep
 			}
 		}
 	}()
-	var raw []byte
-	if !p.Force {
-		raw = pdfir.ReadCachedArchive(pdfIRSource(ext), hash, client.Model)
+	// Recheck under the same flock used by ingestion, and hold through cache
+	// publication. Force intentionally bypasses any completed shared archive.
+	unlock, e := pdfir.LockCachedArchive(runCtx, pdfIRSource(ext), hash, client.Model)
+	if e != nil {
+		return fail(e)
 	}
-	if raw == nil {
-		raw, e = client.Parse(runCtx, snapshot)
-		if e != nil {
-			return fail(e)
+	var raw []byte
+	var d pdfir.Document
+	func() {
+		defer unlock()
+		if !p.Force {
+			raw = pdfir.ReadCachedArchive(pdfIRSource(ext), hash, client.Model)
 		}
+		if raw == nil {
+			raw, e = client.Parse(runCtx, snapshot)
+			if e != nil {
+				return
+			}
+		}
+		d, e = pdfir.AdaptZIP(raw, hash, client.Model)
+		if e != nil {
+			e = errors.New("MinerU result has invalid layout data")
+			return
+		}
+		pdfir.SaveCachedArchive(pdfIRSource(ext), hash, client.Model, raw)
+	}()
+	if e != nil {
+		return fail(e)
 	}
 	rawPath := filepath.Join(dir, "mineru-result.zip")
 	if e = os.WriteFile(rawPath, raw, 0600); e != nil {
 		return fail(errors.New("save MinerU raw result failed"))
 	}
-	d, e := pdfir.AdaptZIP(raw, hash, client.Model)
-	if e != nil {
-		return fail(errors.New("MinerU result has invalid layout data"))
-	}
-	pdfir.SaveCachedArchive(pdfIRSource(ext), hash, client.Model, raw)
 	current, e := pdfIRHash(ext)
 	if e != nil || current != hash {
 		return asyncjob.Result{Permanent: true}, errors.New("PDF source changed during parsing")
