@@ -6,6 +6,14 @@ from typing import Any, Dict, List, Literal, Optional
 from lazyllm.tools import fc_register
 
 
+def has_active_document(context: Dict[str, Any]) -> bool:
+    document = context.get('document_context') or {}
+    return isinstance(document, dict) and all(
+        isinstance(document.get(key), str) and document[key].strip()
+        for key in ('dataset_id', 'document_id')
+    )
+
+
 def _adapt_kb_search_input(tool_input: Any) -> Any:
     """Decode only JSON-encoded kb_ids arrays before tool schema validation."""
     if not isinstance(tool_input, dict) or not isinstance(tool_input.get('kb_ids'), str):
@@ -62,7 +70,7 @@ class KBToolkit:
     def __lazy_source__(self) -> bool:
         import lazyllm
         agentic_config = lazyllm.globals.get('agentic_config') or {}
-        return not bool((agentic_config.get('filters') or {}).get('kb_id'))
+        return not (bool((agentic_config.get('filters') or {}).get('kb_id')) or has_active_document(agentic_config))
 
     @fc_register(host_file='NONE')
     def list_knowledge_bases(

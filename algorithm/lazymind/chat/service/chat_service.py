@@ -1347,6 +1347,7 @@ async def _handle_chat_impl(
         'mode': conversation.mode if conversation.mode in ('auto', 'manual') else 'auto',
         'has_subagents': bool(agent.has_subagents),
         'document_preview_chat': is_document_preview_chat,
+        'document_context': document_context,
         'document_selection_context_available': has_document_selection,
         'conversation_id': conversation_id,
         'query': query or '',
@@ -2262,6 +2263,10 @@ async def _handle_chat_impl(
             ),
             required_tool_names=() if sidechat_readonly else (
                 *workflow_contribution.required_tool_names,
+                *(('KBToolkit_read_document',) if (
+                    any(cfg.name == 'kb' for cfg in active_configs)
+                    and (is_document_preview_chat or (has_document_selection and document_context.get('expand_paper_context') is True))
+                ) else ()),
                 *(getattr(tool, '__name__', '') for tool in [
                     *attachment_tools,
                     *([directory_runtime.list_document_directories, directory_runtime.open_document_directory,
