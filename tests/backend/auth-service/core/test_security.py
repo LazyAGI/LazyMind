@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 import pytest
 from jose import jwt
 
+from api.auth import on_startup
 import core.security as security
 
 
@@ -12,6 +13,34 @@ def test_jwt_secret_requires_env(monkeypatch):
 
     with pytest.raises(RuntimeError, match='LAZYMIND_JWT_SECRET is required'):
         security.jwt_secret()
+
+
+def test_validate_jwt_secret_requires_minimum_length(monkeypatch):
+    monkeypatch.setenv('LAZYMIND_JWT_SECRET', 'short-secret')
+
+    with pytest.raises(RuntimeError, match='at least 32 bytes'):
+        security.validate_jwt_secret()
+
+
+def test_validate_jwt_secret_rejects_low_entropy(monkeypatch):
+    monkeypatch.setenv('LAZYMIND_JWT_SECRET', 'a' * 32)
+
+    with pytest.raises(RuntimeError, match='insufficient entropy'):
+        security.validate_jwt_secret()
+
+
+def test_validate_jwt_secret_accepts_random_like_value(monkeypatch):
+    secret = 'test-secret-7f4b0f9a2c6d8e1b3a5c7d9f'
+    monkeypatch.setenv('LAZYMIND_JWT_SECRET', secret)
+
+    assert security.validate_jwt_secret() == secret
+
+
+def test_auth_startup_rejects_invalid_jwt_secret_before_bootstrap(monkeypatch):
+    monkeypatch.setenv('LAZYMIND_JWT_SECRET', 'a' * 32)
+
+    with pytest.raises(RuntimeError, match='insufficient entropy'):
+        on_startup()
 
 
 def test_env_int_uses_default_for_missing_or_invalid_value(monkeypatch):

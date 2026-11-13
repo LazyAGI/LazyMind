@@ -11,7 +11,7 @@ from pathlib import Path
 _test_dir = os.path.dirname(os.path.abspath(__file__))
 _db_path = Path(_test_dir) / '.auth_service_test.sqlite3'
 os.environ['LAZYMIND_DATABASE_URL'] = f'sqlite:///{_db_path}'
-os.environ['LAZYMIND_JWT_SECRET'] = 'test-secret'
+os.environ['LAZYMIND_JWT_SECRET'] = 'test-secret-7f4b0f9a2c6d8e1b3a5c7d9f'
 os.environ['LAZYMIND_JWT_TTL_MINUTES'] = '60'
 os.environ['LAZYMIND_JWT_REFRESH_TTL_DAYS'] = '7'
 os.environ['LAZYMIND_AUTH_API_PERMISSIONS_FILE'] = os.path.join(_test_dir, 'api_permissions_test.json')
