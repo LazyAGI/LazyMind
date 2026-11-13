@@ -9,7 +9,8 @@ from lazyllm import AutoModel
 from lazyllm.tools.writer.tools.base import WriterToolBase
 from pydantic import BaseModel, ConfigDict, Field, create_model, field_validator, model_validator
 
-from lazymind.config import config
+from lazymind.config import EMBED_MAIN, config
+from lazymind.model_config import is_model_role_available
 
 from ..contracts import MissingMaterials
 from ..literature_review import _prompt
@@ -201,10 +202,16 @@ def prepare(inputs: dict, knowledge_bases: list[str], *, fixed_scope: bool = Fal
         retrieved = [paper for paper in selected
                      if paper.get('source') in {'sciverse', 'crossref', 'knowledge_base'}]
         selected = supplied + retrieved[:max(0, target_count - _paper_count(supplied))]
-    _limit_queries(plan, max(0, target_count - _paper_count(selected))
-                   if _paper_count(selected) < minimum_count else 0)
+    remaining = max(0, target_count - _paper_count(selected)) if _paper_count(selected) < minimum_count else 0
     warnings, seen = [], list(selected)
     expanding = bool(plan.queries or plan.external_queries)
+    if remaining and plan.queries and not is_model_role_available(EMBED_MAIN):
+        plan.queries = {}
+        message = '知识库检索需要可用的文本向量模型，请在设置中的默认模型配置补全服务来源后重试。'
+        if not any(paper.get('review_role') != 'background' for paper in selected) and not plan.external_queries:
+            raise MissingMaterials(message)
+        warnings.append(message + '本轮已跳过知识库检索，仅使用实际取得的材料。')
+    _limit_queries(plan, remaining)
     toolkit, provider = None, None
     if plan.queries:
         from lazymind.chat.engine.tools.lazy_kb import KBToolkit

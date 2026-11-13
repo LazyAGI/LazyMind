@@ -174,6 +174,28 @@ describe("useChatConversation regeneration recovery", () => {
     expect(onOpenSSE).toHaveBeenCalledWith(expect.anything(), expect.anything(), expect.anything(), expect.objectContaining({ document_context: selection }));
   });
 
+  it("keeps reused attachment URLs in the live message and request", async () => {
+    const { stream } = createMockStream();
+    const onOpenSSE = vi.fn(() => stream);
+    const { result } = renderConversation({ onOpenSSE });
+    act(() => result.current.replaceMessageList('reuse-chat', []));
+    const file = { input_type: 'file' as const, uri: '/static-files/report.pdf', filename: 'report.pdf' };
+    await act(async () => { await result.current.sendMessage({ text: 'Read this again', referencedFiles: [file] }); });
+    expect(result.current.messageList[0].inputs).toContainEqual(file);
+    expect(result.current.messageList[0].files[0]).toMatchObject({ name: file.filename, uri: file.uri });
+  });
+
+  it("keeps uploaded attachment URLs in the live message", async () => {
+    const { stream } = createMockStream();
+    const { result } = renderConversation({ onOpenSSE: vi.fn(() => stream) });
+    act(() => result.current.replaceMessageList('upload-chat', []));
+    const file = Object.assign(new File(['PDF'], 'report.pdf'), { uid: 'upload-1', lastModifiedDate: new Date(0), uri: '/var/lib/lazymind/uploads/report.pdf' });
+    await act(async () => { await result.current.sendMessage({ text: 'Read this', files: [file], fileList: [
+      { uid: file.uid, name: file.name, suffix: '.pdf', base64: '', size: '3 B' },
+    ] }); });
+    expect(result.current.messageList[0].files[0]).toMatchObject({ name: file.name, uri: file.uri });
+  });
+
   it("submits an image-only turn without an empty text input", async () => {
     const { stream } = createMockStream();
     const onOpenSSE = vi.fn(() => stream);

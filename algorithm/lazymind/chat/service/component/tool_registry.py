@@ -10,7 +10,6 @@ from typing import Any, Callable, Literal
 
 import docstring_parser
 import lazyllm
-from lazymind.common.optional_components import component_enabled
 from lazyllm.tools.fs.supplier.feishu import FeishuFS
 from lazyllm.tools.fs.supplier.googledrive import GoogleDriveFS
 from lazyllm.tools.fs.supplier.notion import NotionFS
@@ -1008,7 +1007,7 @@ def _tool_summary(tool: Any) -> str:
 def _extract_methods(instance: Any) -> list[dict]:
     if isinstance(instance, dict):
         return _extract_group_methods(instance.get('tools', []))
-    public_apis = getattr(instance, '__public_apis__', None)
+    public_apis = getattr(instance, '__tool_public_apis__', getattr(instance, '__public_apis__', None))
     if public_apis is not None:
         methods = []
         for method_name in public_apis:
@@ -1073,8 +1072,6 @@ def _registration_key_source(tool: Any) -> Callable[[], Any] | None:
 
 
 def tool_is_active(cfg: ToolConfig) -> bool:
-    if cfg.name == 'kb' and not component_enabled('rag'):
-        return False
     if cfg.name == 'kb':
         context = lazyllm.globals.get('agentic_config') or {}
         if not (context.get('filters') or {}).get('kb_id'):

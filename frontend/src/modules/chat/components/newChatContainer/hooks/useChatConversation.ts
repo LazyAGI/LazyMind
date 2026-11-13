@@ -1906,7 +1906,7 @@ export function useChatConversation({
       ),
       role: RoleTypes.USER,
       images: [...(tempGroup?.image || []), ...(params.referencedFiles || []).filter(file => file.input_type === 'image' && !tempFileGroup?.image?.some(upload => upload.uri === file.uri)).map(file => ({ uid: file.uri, base64: file.input_base64 || file.uri }))],
-      files: [...(tempGroup?.file || []), ...(params.referencedFiles || []).filter(file => file.input_type === 'file' && !tempFileGroup?.file?.some(upload => upload.uri === file.uri)).map(file => ({ uid: file.uri, name: file.filename }))],
+      files: [...(tempGroup?.file || []).map(file => ({ ...file, uri: tempFileGroup?.file?.find(upload => upload.uid === file.uid)?.uri })), ...(params.referencedFiles || []).filter(file => file.input_type === 'file' && !tempFileGroup?.file?.some(upload => upload.uri === file.uri)).map(file => ({ uid: file.uri, name: file.filename, uri: file.uri }))],
       fileList: submittedFileList,
       inputs,
       finish_reason: ChatConversationsResponseFinishReasonEnum.FinishReasonStop,
