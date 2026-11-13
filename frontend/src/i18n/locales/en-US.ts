@@ -777,6 +777,7 @@ const enUS = {
   },
   modelProvider: {
     logoUpload: {
+      "preview": "View logo",
       "label": "Custom logo",
       "upload": "Upload logo",
       "replace": "Replace logo",
@@ -1566,6 +1567,15 @@ const enUS = {
     },
     defaultConfigAria: "Module default model configuration",
     defaults: {
+      openIndexManagement: "Open index management",
+      services: { search: "Search engine", academic: "Academic search", parsing: "Document parsing (OCR)", translation: "Machine translation" },
+      notConfigured: "Not configured",
+      serviceSeparator: ", ",
+      translationSourceCount_one: "{{count}} translation source configured",
+      translationSourceCount_other: "{{count}} translation sources configured",
+      serviceCount_one: "{{count}} service configured",
+      serviceCount_other: "{{count}} services configured",
+
       intro: "Choose your everyday models first. Set up other capabilities as you need them.",
       basicTitle: "Core models",
       addModels: "Add models",
