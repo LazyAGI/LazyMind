@@ -48,15 +48,25 @@ it('returns a missing selection to inherited default without changing the preset
   fireEvent.click(screen.getByRole('button', { name: /保存预设/ }));
   await waitFor(() => expect(api.save).toHaveBeenCalledWith(expect.objectContaining({ parser_ref: '', study_model_ref: '', preset: 'demand' })));
 });
-it('reveals per-feature controls on demand and keeps limits when choosing a plan', async () => {
+it('expands per-feature controls by default and keeps them open when choosing a plan', async () => {
   render(<ReadingPreferencesModal open onClose={() => {}} />);
   await screen.findByRole('radio', { name: /按需准备/ });
-  expect(screen.queryByRole('combobox', { name: '公式研读' })).not.toBeInTheDocument();
-  fireEvent.click(screen.getByRole('button', { name: /逐项调整/ }));
   expect(screen.getByRole('combobox', { name: '公式研读' })).toBeInTheDocument();
   expect(screen.queryByText('论文速览')).not.toBeInTheDocument();
   fireEvent.click(screen.getByRole('radio', { name: /提前准备/ }));
-  expect(screen.queryByRole('combobox', { name: '公式研读' })).not.toBeInTheDocument();
+  expect(screen.getByRole('combobox', { name: '公式研读' })).toBeInTheDocument();
   fireEvent.click(screen.getByRole('button', { name: /保存预设/ }));
   await waitFor(() => expect(api.save).toHaveBeenCalledWith(expect.objectContaining({ preset: 'advance', limits: { daily_documents: 5, study_items_per_document: 10, automatic_concurrency: 1 } })));
+});
+
+it('places services above plans and restores expanded controls when reopened', async () => {
+ const view=render(<ReadingPreferencesModal open onClose={() => {}} />);
+ const services=await screen.findByText('服务与模型');
+ expect(services.compareDocumentPosition(screen.getByText('准备方案')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+ for (const name of ['结构解析','文档对话准备','公式研读','图片研读','表格研读']) expect(screen.getByRole('combobox',{name})).toBeInTheDocument();
+ fireEvent.click(screen.getByRole('button',{name:/收起设置/}));
+ expect(screen.queryByRole('combobox',{name:'公式研读'})).not.toBeInTheDocument();
+ view.rerender(<ReadingPreferencesModal open={false} onClose={() => {}} />);
+ view.rerender(<ReadingPreferencesModal open onClose={() => {}} />);
+ expect(await screen.findByRole('combobox',{name:'公式研读'})).toBeInTheDocument();
 });

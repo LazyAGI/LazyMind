@@ -111,21 +111,21 @@ describe('reader study integration',()=>{
  });
  it('switches between formula and table studies instead of opening two panels',async()=>{
   render(<RenderPdf fileData="test.pdf" pdfIRTarget={target} pdfSourceHash="hash"/>);
-  fireEvent.click(screen.getByRole('button',{name:'pdfFormula.openCatalog'}));
+  fireEvent.click(window.document.querySelector('.pdf-formula-trigger')!);
   expect(screen.getByRole('complementary',{name:'formula-study'})).toBeInTheDocument();
-  fireEvent.click(screen.getByRole('button',{name:'pdfTable.openCatalog'}));
+  fireEvent.click(window.document.querySelector('.pdf-table-marker')!);
   expect(screen.queryByRole('complementary',{name:'formula-study'})).not.toBeInTheDocument();
-  expect(screen.getByRole('complementary',{name:'pdfTable.study'})).toBeInTheDocument();
-  fireEvent.click(screen.getByRole('button',{name:'pdfFormula.openCatalog'}));
-  expect(screen.queryByRole('complementary',{name:'pdfTable.study'})).not.toBeInTheDocument();
+  expect(screen.getByRole('complementary',{name:'visual-study'})).toBeInTheDocument();
+  fireEvent.click(window.document.querySelector('.pdf-formula-trigger')!);
+  expect(screen.queryByRole('complementary',{name:'visual-study'})).not.toBeInTheDocument();
   await act(async()=>{});
  });
  it('closes the table study when the source changes and suppresses mismatched structures',async()=>{
   const view=render(<RenderPdf fileData="test.pdf" pdfIRTarget={target} pdfSourceHash="hash"/>);
-  fireEvent.click(screen.getByRole('button',{name:'pdfTable.openCatalog'}));
+  fireEvent.click(window.document.querySelector('.pdf-table-marker')!);
   state.document=document('next');
   view.rerender(<RenderPdf fileData="next.pdf" pdfIRTarget={target} pdfSourceHash="next"/>);
-  expect(screen.queryByRole('complementary',{name:'pdfTable.study'})).not.toBeInTheDocument();
+  expect(screen.queryByRole('complementary',{name:'visual-study'})).not.toBeInTheDocument();
   view.rerender(<RenderPdf fileData="mismatch.pdf" pdfIRTarget={target} pdfSourceHash="different"/>);
   expect(screen.queryByRole('button',{name:'pdfTable.openCatalog'})).not.toBeInTheDocument();
   await act(async()=>{});
@@ -332,7 +332,7 @@ it('omits the PDF download action and still opens the study panel',async()=>{
  const onStudyOpenChange=vi.fn();
  render(<RenderPdf fileData={new ArrayBuffer(12)} pdfIRTarget={target} pdfSourceHash="hash" onStudyOpenChange={onStudyOpenChange}/>);
  expect(screen.queryByRole('button',{name:'pdfReader.download'})).toBeNull();
- fireEvent.click(screen.getByRole('button',{name:'pdfFormula.openCatalog'}));
+ fireEvent.click(window.document.querySelector('.pdf-formula-trigger')!);
  expect(onStudyOpenChange).toHaveBeenLastCalledWith(true);
  await act(async()=>{});
 });
@@ -478,8 +478,7 @@ it('preserves the reading anchor when a newly mounted page reveals a different h
 
 it('closes a table study without navigating away from the reading position',async()=>{
  const view=render(<RenderPdf fileData="return.pdf" pdfIRTarget={target} pdfSourceHash="hash"/>);
- fireEvent.click(screen.getByRole('button',{name:'pdfTable.openCatalog'}));
- fireEvent.change(screen.getByRole('combobox',{name:'pdfTable.catalog'}),{target:{value:'table'}});
+ fireEvent.click(window.document.querySelector('.pdf-table-marker')!);
  expect(screen.getByRole('dialog')).toBeInTheDocument();
  expect(screen.queryByRole('button',{name:'pdfFormula.returnReading'})).toBeNull();
  fireEvent.click(screen.getByRole('button',{name:'关闭原文解读'}));
@@ -525,13 +524,13 @@ it('keeps native link navigation working through the callback retained by react-
  expect(position).toHaveBeenLastCalledWith({page:2,progress:0});
 });
 
-it('opens a figure from the catalog without moving the PDF viewport',async()=>{
- state.document={...document(),blocks:[...document().blocks,{id:'figure',type:'image',page:2,bbox:[.1,.1,.8,.8],image:{number:'1',captions:['Figure 1'],footnotes:[],related_blocks:[]}}]};
+it('opens a figure from the original PDF without moving the viewport',async()=>{
+ state.document={...document(),blocks:[...document().blocks,{id:'figure',type:'image',page:0,bbox:[.1,.1,.8,.8],image:{number:'1',captions:['Figure 1'],footnotes:[],related_blocks:[]}}]};
  const view=render(<RenderPdf fileData="still.pdf" pdfIRTarget={target} pdfSourceHash="hash"/>);
  await act(async()=>{});
  const viewport=view.container.querySelector('.pdf-reader-with-study > div') as HTMLElement;
  const scroll=vi.spyOn(viewport,'scrollTo');scroll.mockClear();
- fireEvent.change(screen.getByRole('combobox',{name:'pdfReader.visuals'}),{target:{value:'figure'}});
+ fireEvent.click(view.container.querySelector('.pdf-figure-layer button')!);
  await act(async()=>{await new Promise(resolve=>setTimeout(resolve,150));});
  expect(screen.getByRole('complementary',{name:'visual-study'})).toBeInTheDocument();
  expect(scroll).not.toHaveBeenCalled();
@@ -623,4 +622,16 @@ it('opens PDF external annotations in a separate browsing context',async()=>{
  await act(async()=>{});
  expect(state.externalLinkTarget).toBe('_blank');
  expect(state.externalLinkRel).toBe('noopener noreferrer');
+});
+
+it('omits redundant study catalog controls while keeping direct PDF study targets',async()=>{
+ state.document={...document(),blocks:[...document().blocks,{id:'image',type:'image',page:0,bbox:[.1,.2,.3,.4],image:{captions:['Figure'],footnotes:[],related_blocks:[]}}]};
+ const view=render(<RenderPdf fileData="clean-tools.pdf" pdfIRTarget={target} pdfSourceHash="hash"/>);
+ await act(async()=>{});
+ expect(screen.queryByRole('button',{name:'pdfFormula.openCatalog'})).not.toBeInTheDocument();
+ expect(screen.queryByRole('button',{name:'pdfTable.openCatalog'})).not.toBeInTheDocument();
+ expect(screen.queryByRole('combobox',{name:'pdfReader.visuals'})).not.toBeInTheDocument();
+ expect(view.container.querySelector('.pdf-formula-trigger')).toBeInTheDocument();
+ expect(view.container.querySelector('.pdf-table-marker')).toBeInTheDocument();
+ expect(view.container.querySelector('.pdf-figure-layer button')).toBeInTheDocument();
 });

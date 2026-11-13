@@ -7817,6 +7817,36 @@ export interface QuestionTypeOption {
 export interface QuestionTypeOptionsResponse {
     'items'?: Array<QuestionTypeOption>;
 }
+export interface ReadingCapabilityStatus {
+    'completed': number;
+    'error_message'?: string;
+    'failed'?: number;
+    'id': ReadingCapabilityStatusIdEnum;
+    'running'?: number;
+    'status': ReadingCapabilityStatusStatusEnum;
+    'total': number;
+}
+
+export const ReadingCapabilityStatusIdEnum = {
+    Formula: 'formula',
+    Figure: 'figure',
+    Table: 'table'
+} as const;
+
+export type ReadingCapabilityStatusIdEnum = typeof ReadingCapabilityStatusIdEnum[keyof typeof ReadingCapabilityStatusIdEnum];
+export const ReadingCapabilityStatusStatusEnum = {
+    NotRequested: 'not_requested',
+    Pending: 'pending',
+    Running: 'running',
+    Partial: 'partial',
+    Succeeded: 'succeeded',
+    Failed: 'failed',
+    Unavailable: 'unavailable',
+    Empty: 'empty'
+} as const;
+
+export type ReadingCapabilityStatusStatusEnum = typeof ReadingCapabilityStatusStatusEnum[keyof typeof ReadingCapabilityStatusStatusEnum];
+
 export interface ReadingPreparationPolicy {
     'automatic_eligible_after'?: string;
     'limits': ReadingPreparationPolicyLimits;
@@ -7873,6 +7903,7 @@ export const ReadingPreparationRequestScopesEnum = {
 export type ReadingPreparationRequestScopesEnum = typeof ReadingPreparationRequestScopesEnum[keyof typeof ReadingPreparationRequestScopesEnum];
 
 export interface ReadingPreparationStatus {
+    'capabilities'?: Array<ReadingCapabilityStatus>;
     'error_message'?: string;
     'job_id'?: string;
     'model_requests'?: number;

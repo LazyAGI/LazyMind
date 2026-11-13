@@ -7,6 +7,7 @@ and retry only the request that failed.
 """
 
 import hashlib
+import io
 import json
 import os
 import re
@@ -191,10 +192,37 @@ class LazyMindMineruPDFReader(_MineruPDFReader):
         # sibling so a document task can resume after a worker restart.
         return self._image_cache_dir.parent / '.mineru_batches' / name
 
+    @staticmethod
+    def _archive_cache_path(file_path: str, source_digest: str, model_version: str) -> Path:
+        return (Path(file_path).parent / '.lazymind-artifacts' / 'mineru-cache-v1'
+                / f'{source_digest}-{model_version}.zip')
+
     def _batch_lock_path(self, file_path: str, source_digest: str, model_version: str) -> Path:
-        identity = '\0'.join((str(Path(file_path).resolve()), source_digest, model_version))
-        name = hashlib.sha256(identity.encode()).hexdigest() + '.lock'
-        return self._image_cache_dir.parent / '.mineru_batches' / name
+        # Go uses flock on this exact persistent sidecar; never unlink a lock file.
+        return Path(str(self._archive_cache_path(file_path, source_digest, model_version)) + '.lock')
+
+    def _read_cached_archive(self, cache_path: Path, task_dir: Path):
+        try:
+            with cache_path.open('rb') as cached:
+                archive = cached.read(256 * 1024 * 1024 + 1)
+            if len(archive) > 256 * 1024 * 1024:
+                return None
+            with zipfile.ZipFile(io.BytesIO(archive)) as zipped:
+                members = zipped.infolist()
+                if any(Path(m.filename).is_absolute() or '..' in Path(m.filename).parts
+                       or '\\' in m.filename for m in members):
+                    return None
+                lists = [m for m in members if m.filename.endswith('_content_list.json')]
+                if len(lists) != 1 or lists[0].file_size > 32 * 1024 * 1024:
+                    return None
+                if sum(m.file_size for m in members) > 256 * 1024 * 1024:
+                    return None
+                content = json.loads(zipped.read(lists[0]))
+                if not isinstance(content, list) or any(not isinstance(item, dict) for item in content):
+                    return None
+            return self._extract_content_from_zip(archive, task_dir=task_dir)
+        except (OSError, zipfile.BadZipFile, ValueError, TypeError, KeyError, AttributeError, IndexError, RuntimeError):
+            return None
 
     def _candidate_auth_keys(self) -> list[str]:
         # A new reader can choose another key from the same configured pool.
@@ -255,32 +283,57 @@ class LazyMindMineruPDFReader(_MineruPDFReader):
 
     def _fetch_async(self, file, use_cache: bool = True):
         file_str = str(file)
-        splits = self._split_large_pdf(file_str)
         task_dir = self._image_cache_dir / str(uuid.uuid4())
+        if use_cache:
+            cached = self._read_cached_archive(self._archive_cache_path(
+                file_str, self._source_digest(file_str), self._online_model_version()), task_dir)
+            if cached is not None:
+                return cached
+        splits = self._split_large_pdf(file_str)
         if len(splits) == 1:
-            return self._fetch_async_by_upload(splits[0][0], task_dir=task_dir)
+            return self._fetch_async_by_upload(splits[0][0], task_dir=task_dir, use_cache=use_cache)
 
-        results = {}
-        with ThreadPoolExecutor(max_workers=min(len(splits), 5)) as executor:
-            futures = {
-                executor.submit(self._fetch_async_by_upload, sub_path, task_dir=task_dir): start_page
-                for sub_path, start_page in splits
-            }
-            for future in as_completed(futures):
-                results[futures[future]] = future.result()
-        return self._merge_split_results(results)
+        # Split parts have different hashes, but still represent this original.
+        # Coordinate the whole workflow with Go before submitting any part.
+        digest = self._source_digest(file_str)
+        model = self._online_model_version()
+        lock_path = self._batch_lock_path(file_str, digest, model)
+        lock_path.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            with FileLock(str(lock_path), timeout=self._timeout or _DEFAULT_WAIT_SECONDS):
+                if use_cache:
+                    cached = self._read_cached_archive(
+                        self._archive_cache_path(file_str, digest, model), task_dir)
+                    if cached is not None:
+                        return cached
+                results = {}
+                with ThreadPoolExecutor(max_workers=min(len(splits), 5)) as executor:
+                    futures = {
+                        executor.submit(self._fetch_async_by_upload, sub_path,
+                                        task_dir=task_dir, use_cache=use_cache): start_page
+                        for sub_path, start_page in splits
+                    }
+                    for future in as_completed(futures):
+                        results[futures[future]] = future.result()
+                return self._merge_split_results(results)
+        except FileLockTimeout:
+            raise TimeoutError('[MineruPDFReader] waiting to parse split PDF exceeded '
+                               f'{self._timeout or _DEFAULT_WAIT_SECONDS}s') from None
 
-    def _fetch_async_by_upload(self, file_path: str, task_dir: Path | None = None):
+    def _fetch_async_by_upload(self, file_path: str, task_dir: Path | None = None, use_cache: bool = True):
         fname = os.path.basename(file_path)
         model_version = self._online_model_version()
         source_digest = self._source_digest(file_path)
-        cache_path = (Path(file_path).parent / '.lazymind-artifacts' / 'mineru-cache-v1'
-                      / f'{source_digest}-{model_version}.zip')
+        cache_path = self._archive_cache_path(file_path, source_digest, model_version)
         lock_path = self._batch_lock_path(file_path, source_digest, model_version)
         lock_path.parent.mkdir(parents=True, exist_ok=True)
         try:
             with FileLock(str(lock_path), timeout=self._timeout or _DEFAULT_WAIT_SECONDS):
-                for marker_key in self._candidate_auth_keys():
+                if use_cache:
+                    cached = self._read_cached_archive(cache_path, task_dir)
+                    if cached is not None:
+                        return cached
+                for marker_key in self._candidate_auth_keys() if use_cache else []:
                     marker_path = self._batch_marker_path(
                         file_path, source_digest, marker_key, model_version)
                     resumed_batch = self._load_batch_marker(marker_path)
@@ -291,11 +344,13 @@ class LazyMindMineruPDFReader(_MineruPDFReader):
                 else:
                     batch_id, auth_key, marker_path = self._submit_and_upload(
                         file_path, fname, source_digest, model_version)
+                # Hold until atomic archive publication so Go cannot upload the
+                # same source while Python is still polling its paid batch.
+                return self._wait_for_batch(batch_id, auth_key, task_dir, fname,
+                                            marker_path, cache_path=cache_path)
         except FileLockTimeout:
             raise TimeoutError(f'[MineruPDFReader] waiting to submit {fname} exceeded '
                                f'{self._timeout or _DEFAULT_WAIT_SECONDS}s') from None
-        # Release the cross-process lock before potentially hour-long polling.
-        return self._wait_for_batch(batch_id, auth_key, task_dir, fname, marker_path, cache_path=cache_path)
 
     def _submit_and_upload(self, file_path: str, fname: str,
                            source_digest: str, model_version: str):

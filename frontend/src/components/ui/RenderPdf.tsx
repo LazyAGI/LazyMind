@@ -8,14 +8,13 @@ import {PdfPinDock} from "./PdfPinDock";
 import {usePdfPinBoard} from "./usePdfPinBoard";
 import {isPersistablePdfPin,type PdfPinRecord,type PdfRegionPinRecord,type PdfStudyPinRecord} from "./pdfPinStore";
 import {usePdfHandPan} from "./usePdfHandPan";
-import {PdfStudyActivation,StudySparkle} from "./PdfStudyActivation";
 import {usePdfReaderPreferences} from "./usePdfReaderPreferences";
 import {AgentAppsAuth} from "@/components/auth";
 import {authServiceApiUrl} from "@/runtime/apiBase";
 import {usePaperReaderSession,type VisualExplanation} from "@/modules/knowledge/api/paperReader";
 import {PdfVisualStudy} from "./PdfVisualStudy";
 import {PdfFigureLayer} from "./PdfFigureLayer";
-import {usePaperReaderLabels,paperVisualLabel} from "./paperReaderLabels";
+import {usePaperReaderLabels} from "./paperReaderLabels";
 import "./PdfPaperReader.css";
 import { useTranslation } from "react-i18next";
 import { message } from "antd";
@@ -218,7 +217,6 @@ export default function RenderPdf({
   currentSource.current = fileData;
   const [visualSelection,setVisualSelection]=useState<PdfIRBlock>();
   const readerFrame=useRef<HTMLDivElement>(null);
-  const [studyPulse,setStudyPulse]=useState(0);
   const [visualPreview,setVisualPreview]=useState<string>();
   const lastRequestedNavigation=useRef("");
   const pdfIR = usePdfIR(pdfIRTarget);
@@ -1255,9 +1253,6 @@ export default function RenderPdf({
         {tableBlocks.length > 0 && <button onClick={() => setTablesEnabled(value => !value)} aria-pressed={tablesEnabled}>{t(tablesEnabled ? "pdfTable.hide" : "pdfTable.show")}</button>}
         {!formulaBusy && pdfIRTarget.canWrite !== false && <button onClick={() => void pdfIR.start(pdfIR.state.status === "ready" || pdfIR.state.status === "failed")}>{pdfIR.state.status === "not_requested" ? t("pdfFormula.enable") : t("pdfFormula.retry")}</button>}
         </div></details>
-        {formulaDocument && studyBlocks.length > 0 && <button type="button" className="pdf-study-ai-button" onClick={() => {releasePinnedStudy();setStudyPulse(value=>value+1);setVisualSelection(undefined);setTableStudyOpen(false);setStudyOpen(true);}}><StudySparkle/><span>{t("pdfFormula.openCatalog")}</span></button>}
-        {tableBlocks.length > 0 && <button onClick={() => {releasePinnedStudy();setVisualSelection(undefined);setStudyOpen(false);setTableStudyOpen(true);}}>{t("pdfTable.openCatalog", {count:tableBlocks.length})}</button>}
-        {imageBlocks.length>0&&<select aria-label={readerLabel("visuals")} value="" onChange={event=>{const block=imageBlocks.find(item=>item.id===event.target.value);if(block)openVisualStudy(block);}}><option value="" disabled>{readerLabel("imageRegion")} ({imageBlocks.length})</option>{imageBlocks.filter(block=>block.image?.number).map(block=><option key={block.id} value={block.id}>{paperVisualLabel(block,formulaDocument!.blocks,readerLabel)}</option>)}{imageBlocks.some(block=>!block.image?.number)&&<optgroup label={readerLabel("imageRegion")}>{imageBlocks.filter(block=>!block.image?.number).map(block=><option key={block.id} value={block.id}>{paperVisualLabel(block,formulaDocument!.blocks,readerLabel)}</option>)}</optgroup>}</select>}
 
       </div>}
     </div>
@@ -1287,7 +1282,6 @@ export default function RenderPdf({
   if (error && errorSource.current === fileData) {
     return (
       <div ref={readerFrame} className="pdf-reader-workspace" data-reader-mode="original" style={{height:style?.height || "100%",width:"100%"}}>
-        {studyPulse>0&&<PdfStudyActivation key={studyPulse} frame={readerFrame}/>}
     {readerHeader}
         <div role="alert" style={{padding:20,textAlign:"center",color:"#a6574c"}}>加载失败: {error}</div>
       </div>
@@ -1319,7 +1313,6 @@ export default function RenderPdf({
   }
   return (
     <div ref={readerFrame} className="pdf-reader-workspace" data-reader-mode="original" style={{height:style?.height || "calc(100vh - 220px)",width:"100%"}}>
-    {studyPulse>0&&<PdfStudyActivation key={studyPulse} frame={readerFrame}/>}
     {readerHeader}
     <div ref={pinStageRef} className="pdf-reader-stage">
     {noteReturn&&<button type="button" className="pdf-reader-note-return" aria-label={t('pdfReader.returnPosition')} onClick={()=>{

@@ -241,7 +241,7 @@ func (h formulaExplanationHandler) explain(r *http.Request, request formulaReadi
 	if request.Force {
 		flightKey += ":force:" + modelID
 	}
-	result, shared, flightErr := formulaExplanationFlights.do(ctx, flightKey, func(runCtx context.Context) (formulaExplanation, error) {
+	result, shared, flightErr := formulaExplanationFlights.do(ctx, flightKey, func(runCtx context.Context) (result formulaExplanation, resultErr error) {
 		if err := runCtx.Err(); err != nil {
 			return formulaExplanation{}, err
 		}
@@ -251,6 +251,10 @@ func (h formulaExplanationHandler) explain(r *http.Request, request formulaReadi
 			if cached, ok := readCache(); ok {
 				return cached, nil
 			}
+		}
+		if request.FocusSymbol == nil {
+			finish := startReadingWork(cachePath)
+			defer func() { finish(resultErr) }()
 		}
 		sources := make([]map[string]string, 0, len(evidence))
 		for _, item := range evidence {

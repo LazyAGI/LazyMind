@@ -1,8 +1,11 @@
 package pdfir
 
 import (
+	"context"
+	"errors"
 	"os"
 	"path/filepath"
+	"time"
 )
 
 // CachePath is shared with the ingestion reader. Content and model identity
@@ -51,5 +54,44 @@ func SaveCachedArchive(source, hash, model string, raw []byte) {
 	closeErr := f.Close()
 	if err == nil && closeErr == nil {
 		_ = os.Rename(f.Name(), path)
+	}
+}
+
+// LockCachedArchive coordinates paid uploads with Python's Unix FileLock.
+// The sidecar is persistent: removing it would let waiters lock different inodes.
+// Callers must recheck the cache after locking and publish before unlocking.
+func LockCachedArchive(ctx context.Context, source, hash, model string) (func(), error) {
+	path := CachePath(source, hash, model)
+	if path == "" {
+		return nil, errors.New("invalid MinerU cache identity")
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+		return nil, err
+	}
+	f, err := os.OpenFile(path+".lock", os.O_CREATE|os.O_RDWR, 0600)
+	if err != nil {
+		return nil, err
+	}
+	for {
+		if err := ctx.Err(); err != nil {
+			f.Close()
+			return nil, err
+		}
+		err = tryArchiveLock(f)
+		if err == nil {
+			return func() { _ = releaseArchiveLock(f); _ = f.Close() }, nil
+		}
+		if !archiveLockBusy(err) {
+			f.Close()
+			return nil, err
+		}
+		timer := time.NewTimer(50 * time.Millisecond)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			f.Close()
+			return nil, ctx.Err()
+		case <-timer.C:
+		}
 	}
 }

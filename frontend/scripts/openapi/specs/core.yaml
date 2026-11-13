@@ -11865,6 +11865,45 @@ components:
                         $ref: '#/components/schemas/QuestionTypeOption'
                     type: array
             type: object
+        ReadingCapabilityStatus:
+            properties:
+                completed:
+                    minimum: 0
+                    type: integer
+                error_message:
+                    type: string
+                failed:
+                    minimum: 0
+                    type: integer
+                id:
+                    enum:
+                        - formula
+                        - figure
+                        - table
+                    type: string
+                running:
+                    minimum: 0
+                    type: integer
+                status:
+                    enum:
+                        - not_requested
+                        - pending
+                        - running
+                        - partial
+                        - succeeded
+                        - failed
+                        - unavailable
+                        - empty
+                    type: string
+                total:
+                    minimum: 0
+                    type: integer
+            required:
+                - id
+                - status
+                - completed
+                - total
+            type: object
         ReadingPreparationPolicy:
             properties:
                 automatic_eligible_after:
@@ -11935,6 +11974,10 @@ components:
             type: object
         ReadingPreparationStatus:
             properties:
+                capabilities:
+                    items:
+                        $ref: '#/components/schemas/ReadingCapabilityStatus'
+                    type: array
                 error_message:
                     type: string
                 job_id:

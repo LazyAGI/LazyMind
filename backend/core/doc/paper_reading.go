@@ -65,7 +65,7 @@ type paperReadingRequest struct {
 	SourceSHA256 json.RawMessage `json:"source_sha256"`
 }
 
-func (h paperReadingHandler) read(r *http.Request, request paperReadingRequest) (any, string, error) {
+func (h paperReadingHandler) read(r *http.Request, request paperReadingRequest) (response any, cache string, resultErr error) {
 	row, ext, _, ok := loadPDFDocument(r, false)
 	if !ok {
 		return nil, "", formulaExplanationFailure{404, "Document not found or access denied."}
@@ -112,11 +112,7 @@ func (h paperReadingHandler) read(r *http.Request, request paperReadingRequest) 
 	defer cancel()
 	var config map[string]any
 	var modelName string
-	cacheKey := func(model string) string {
-		keyData, _ := json.Marshal([]any{paperReadingPromptVersion, "visual", blockID, d.SourceSHA256, d.Parser, pdfir.Revision, d.ProjectionVersion, model, request.Language, evidence, []pdfir.Block(nil)})
-		return pdfir.Digest(string(keyData))
-	}
-	key := cacheKey("")
+	key := paperVisualCacheKey(d, blockID, request.Language, evidence)
 	dir := filepath.Join(filepath.Dir(pdfIRSource(ext)), ".lazymind-artifacts", "paper-reading", pdfIRResource(row.DatasetID, row.ID), pdfir.Digest(store.UserID(r)))
 	path := filepath.Join(dir, key+".json")
 	validate := func(raw string) (any, error) {
@@ -168,6 +164,8 @@ func (h paperReadingHandler) read(r *http.Request, request paperReadingRequest) 
 		return nil, "", formulaExplanationFailure{422, "Select an available study model in AI reading preferences before using the paper reader."}
 	}
 
+	finish := startReadingWork(path)
+	defer func() { finish(resultErr) }()
 	content, _ := json.Marshal(input)
 	raw := ""
 	if len(evidence) == 0 {

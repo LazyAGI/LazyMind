@@ -31,3 +31,31 @@ it('does not claim a structure status before its first observation completes', (
  expect(screen.queryByText('已就绪')).not.toBeInTheDocument();
  expect(screen.queryByText('尚未解析')).not.toBeInTheDocument();
 });
+
+it('shows every study capability and actual partial counts independently of batch success', async () => {
+ api.chat.mockResolvedValue({status:'parsed'});
+ render(<PaperPreparationStatus target={{dataset:'ds',document:'doc'}} capabilities={[
+  {id:'formula',status:'partial',completed:2,total:8},
+  {id:'figure',status:'running',completed:1,total:3,running:1},
+  {id:'table',status:'empty',completed:0,total:0},
+ ]}/>);
+ await act(async()=>{});
+ expect(screen.getByText('公式研读')).toBeInTheDocument();
+ expect(screen.getByText('已完成 2 / 8 项')).toBeInTheDocument();
+ expect(screen.getByText('部分完成')).toBeInTheDocument();
+ expect(screen.getByText('进行中')).toBeInTheDocument();
+ expect(screen.getByText('本文无此内容')).toBeInTheDocument();
+});
+
+it('keeps observing an initially idle document and cleans up on unmount', async () => {
+ vi.useFakeTimers();api.chat.mockResolvedValue({status:'not_requested'});
+ const view=render(<PaperPreparationStatus target={{dataset:'ds',document:'doc'}}/>);
+ await act(async()=>{});
+ api.chat.mockResolvedValue({status:'parsing'});
+ await act(async()=>{await vi.advanceTimersByTimeAsync(5000);});
+ expect(screen.getByText('准备中')).toBeInTheDocument();
+ expect(api.refresh).toHaveBeenCalled();
+ view.unmount();const reads=api.chat.mock.calls.length;
+ await act(async()=>{await vi.advanceTimersByTimeAsync(5000);});
+ expect(api.chat).toHaveBeenCalledTimes(reads);
+});

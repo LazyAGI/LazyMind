@@ -36,13 +36,14 @@ type readingPreparationPayload struct {
 	ItemLimit    int      `json:"item_limit"`
 }
 type readingPreparationStatus struct {
-	ModelRequests   int      `json:"model_requests"`
-	JobID           string   `json:"job_id,omitempty"`
-	Status          string   `json:"status"`
-	ProgressCurrent int64    `json:"progress_current"`
-	ProgressTotal   int64    `json:"progress_total"`
-	ErrorMessage    string   `json:"error_message,omitempty"`
-	Scopes          []string `json:"scopes,omitempty"`
+	Capabilities    []readingCapabilityStatus `json:"capabilities,omitempty"`
+	ModelRequests   int                       `json:"model_requests"`
+	JobID           string                    `json:"job_id,omitempty"`
+	Status          string                    `json:"status"`
+	ProgressCurrent int64                     `json:"progress_current"`
+	ProgressTotal   int64                     `json:"progress_total"`
+	ErrorMessage    string                    `json:"error_message,omitempty"`
+	Scopes          []string                  `json:"scopes,omitempty"`
 }
 
 func init() { asyncjob.Register(ReadingPreparationJob, runReadingPreparation) }
@@ -66,19 +67,27 @@ func GetReadingPreparation(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, err.Error(), 409)
 		return
 	}
-	var job orm.AsyncJob
-	err = store.DB().WithContext(r.Context()).Where("job_type=? AND create_user_id=?", ReadingPreparationJob, store.UserID(r)).
-		Where("payload_json ->> 'dataset_id' = ? AND payload_json ->> 'document_id' = ? AND payload_json ->> 'source_sha256' = ?", row.DatasetID, row.ID, hash).
-		Order("created_at DESC, id DESC").Take(&job).Error
-	if err == nil {
-		common.ReplyOK(w, preparationStatus(job))
-		return
-	}
-	if !errors.Is(err, gorm.ErrRecordNotFound) {
+	jobs, err := loadReadingPreparationJobs(r.Context(), store.DB(), row, store.UserID(r), hash)
+	if err != nil {
 		common.ReplyErr(w, "读取准备状态失败", 500)
 		return
 	}
-	common.ReplyOK(w, readingPreparationStatus{Status: "not_requested"})
+	state, err := pdfIRStatus(r.Context(), row, hash)
+	if err != nil {
+		common.ReplyErr(w, "读取准备状态失败", 500)
+		return
+	}
+	capabilities, err := readReadingCapabilities(state, pdfIRSource(ext), row.DatasetID, row.ID, store.UserID(r), jobs)
+	if err != nil {
+		common.ReplyErr(w, "读取准备状态失败", 500)
+		return
+	}
+	status := readingPreparationStatus{Status: "not_requested"}
+	if len(jobs) > 0 {
+		status = preparationStatus(jobs[0])
+	}
+	status.Capabilities = capabilities
+	common.ReplyOK(w, status)
 }
 func PrepareReading(w http.ResponseWriter, r *http.Request) {
 	row, ext, _, ok := loadPDFDocument(r, true)
@@ -454,15 +463,20 @@ func runReadingPreparation(ctx context.Context, job asyncjob.Job, reporter async
 				return result, e
 			}
 			rr = mux.SetURLVars(rr, map[string]string{"dataset": p.DatasetID, "document": p.DocumentID, "block": block.ID})
+			var cache string
 			if key == readingpolicy.Formula {
-				_, _, e = defaultFormulaHandler().explain(rr, formulaReadingRequest{Language: "zh"})
+				_, cache, e = defaultFormulaHandler().explain(rr, formulaReadingRequest{Language: "zh"})
 			} else {
-				_, _, e = defaultVisualHandler().read(rr, paperReadingRequest{Language: "zh"})
+				_, cache, e = defaultVisualHandler().read(rr, paperReadingRequest{Language: "zh"})
 			}
 			if e != nil {
 				return result, fmt.Errorf("%s 准备失败: %w", key, e)
 			}
-			count++
+			// Reusing a saved result spends no generation budget. A later
+			// explicit batch can therefore advance beyond a previous limit.
+			if cache != "hit" {
+				count++
+			}
 			if e = reporter.SetProgress(ctx, int64(1+count), total); e != nil {
 				return result, e
 			}
