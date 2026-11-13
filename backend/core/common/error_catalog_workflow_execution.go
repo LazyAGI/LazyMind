@@ -34,37 +34,29 @@ func init() {
 	} {
 		registerAdditionalErrorAlias(message, "Invalid request", http.StatusBadRequest, ErrCodeInvalidParams)
 	}
-	for _, message := range []string{
-		"artifact action unavailable",
-		"edit skill contract unavailable",
-		"edit skills unavailable",
-		"workflow package does not support completed artifact edits; update the package",
-		"update the workflow package to enable external ai editing",
-	} {
-		registerAdditionalErrorAlias(message, message, http.StatusUnprocessableEntity, ErrCodeInvalidParams)
-	}
-	for _, message := range []string{
-		"connect an external agent before editing this artifact",
-		"complete or resume the workflow before editing",
-		"cannot queue external edit",
-		"stale or invalid edit response",
-		"edit generation limit reached",
-		"edit changed during generation; reload before retrying",
-		"external preview confirmation required",
-		"stale or cancelled edit preview",
-		"artifact version changed; reload edit context",
-		"confirm or cancel the pending ai preview before a chat edit",
-		"this conversation displays external workflow results; use the workflow controls or continue with the external agent",
-		"a bound external agent document workflow is required",
-		"model request belongs to an inactive attempt",
-		"model request cannot be claimed",
-		"model response is stale or invalid",
-		"model response does not match its claimed request",
-		"a completed generation cannot be replaced",
-		"model request is not running",
-	} {
-		registerAdditionalErrorAlias(message, message, http.StatusConflict, ErrCodeConflict)
-	}
+	registerAdditionalError("artifact action unavailable", http.StatusUnprocessableEntity, 2005500)
+	registerAdditionalError("edit skill contract unavailable", http.StatusUnprocessableEntity, 2005501)
+	registerAdditionalError("edit skills unavailable", http.StatusUnprocessableEntity, 2005502)
+	registerAdditionalError("workflow package does not support completed artifact edits; update the package", http.StatusUnprocessableEntity, 2005503)
+	registerAdditionalError("update the workflow package to enable external ai editing", http.StatusUnprocessableEntity, 2005504)
+	registerAdditionalError("connect an external agent before editing this artifact", http.StatusConflict, 2005505)
+	registerAdditionalError("complete or resume the workflow before editing", http.StatusConflict, 2005506)
+	registerAdditionalError("cannot queue external edit", http.StatusConflict, 2005507)
+	registerAdditionalError("stale or invalid edit response", http.StatusConflict, 2005508)
+	registerAdditionalError("edit generation limit reached", http.StatusConflict, 2005509)
+	registerAdditionalError("edit changed during generation; reload before retrying", http.StatusConflict, 2005510)
+	registerAdditionalError("external preview confirmation required", http.StatusConflict, 2005511)
+	registerAdditionalError("stale or cancelled edit preview", http.StatusConflict, 2005512)
+	registerAdditionalError("artifact version changed; reload edit context", http.StatusConflict, 2005513)
+	registerAdditionalError("confirm or cancel the pending ai preview before a chat edit", http.StatusConflict, 2005514)
+	registerAdditionalError("this conversation displays external workflow results; use the workflow controls or continue with the external agent", http.StatusConflict, 2005515)
+	registerAdditionalError("a bound external agent document workflow is required", http.StatusConflict, 2005516)
+	registerAdditionalError("model request belongs to an inactive attempt", http.StatusConflict, 2005517)
+	registerAdditionalError("model request cannot be claimed", http.StatusConflict, 2005518)
+	registerAdditionalError("model response is stale or invalid", http.StatusConflict, 2005519)
+	registerAdditionalError("model response does not match its claimed request", http.StatusConflict, 2005520)
+	registerAdditionalError("a completed generation cannot be replaced", http.StatusConflict, 2005521)
+	registerAdditionalError("model request is not running", http.StatusConflict, 2005522)
 	for _, message := range []string{"artifact edit not found", "media input resource is unavailable to this user"} {
 		registerAdditionalErrorAlias(message, "Resource not found", http.StatusNotFound, ErrCodeResourceAbsent)
 	}
@@ -79,5 +71,5 @@ func init() {
 		registerAdditionalErrorPattern(pattern, "Invalid request", http.StatusBadRequest, ErrCodeInvalidParams)
 	}
 	registerAdditionalErrorPattern("selected document %q changed before execution",
-		"A selected document changed before execution", http.StatusConflict, ErrCodeConflict)
+		"A selected document changed before execution", http.StatusConflict, 2005524)
 }
