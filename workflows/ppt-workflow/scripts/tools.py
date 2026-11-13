@@ -1231,7 +1231,9 @@ def ppt_fill_template(template_file: str, source_sha256: str, edits: list[dict] 
     from lazymind.chat.engine.tools.file_resources.pptx_template_fill import fill_template
     from lazymind.chat.engine.tools.file_resources.pptx_template_compose import compose_template
     if _workflow_session_id() and _required_output_format() != 'native_pptx':
-        raise ToolExecutionError('PPT_OUTPUT_FORMAT_MISMATCH: saved output choice requires HTML')
+        raise ToolExecutionError('PPT_OUTPUT_FORMAT_MISMATCH: saved output choice requires HTML; '
+                                 'preserve existing pages and notes. '
+                                 'For a PPTX download use ppt_export_deck; do not switch generation routes')
     if (edits is None) == (pages is None):
         raise ValueError('Supply exactly one of edits or pages')
     if notes_ref and pages is None:
@@ -1279,7 +1281,9 @@ def ppt_generate_native_pptx(slides: list[dict], template_file: str = '', notes_
     """
     from lazymind.chat.engine.tools.file_resources.native_presentation import build_native_pptx
     if _workflow_session_id() and _required_output_format() != 'native_pptx':
-        raise ToolExecutionError('PPT_OUTPUT_FORMAT_MISMATCH: saved output choice requires HTML')
+        raise ToolExecutionError('PPT_OUTPUT_FORMAT_MISMATCH: saved output choice requires HTML; '
+                                 'preserve existing pages and notes. '
+                                 'For a PPTX download use ppt_export_deck; do not switch generation routes')
 
     if template_file:
         raise ValueError('Uploaded templates must use ppt_inspect_template_page and ppt_fill_template; '
@@ -2619,7 +2623,7 @@ def _inline_preview_images(
     The browser signs references when opening a slide, so stored artifacts never
     contain expiring URLs. On-disk HTML retains relative paths for offline export.
     """
-    from lazymind.chat.engine.tools.file_resources.font_library import local_font_css
+    from lazymind.chat.engine.tools.file_resources.font_library import local_font_css, inline_shared_font_resource
     if 'id="lazymind-local-fonts"' not in html:
         font_css = local_font_css(html)
         if font_css:
@@ -2682,6 +2686,11 @@ def _inline_preview_images(
     )
 
     def _replace_css(match: re.Match) -> str:
+        nonlocal inlined
+        font_uri = inline_shared_font_resource(match.group(3)) if inline_assets else None
+        if font_uri:
+            inlined += 1
+            return f'{match.group(1)}"{font_uri}"{match.group(5)}'
         data_uri = _data_uri(match.group(3))
         if not data_uri:
             return match.group(0)
@@ -2866,7 +2875,6 @@ def _page_publication_state(
         artifacts = response['artifacts']
         if not isinstance(artifacts, list):
             raise ValueError('Invalid artifact list')
-        saved_notes = _load_saved_notes() if with_notes else None
         content = {}
         for artifact in artifacts:
             slot = artifact.get('slot')
@@ -2904,9 +2912,7 @@ def _page_publication_state(
                     stale_pages.add(pno)
             if with_notes:
                 notes = content.get(('preview_notes', pno), '')
-                expected_notes = (saved_notes.get(pno, '') if saved_notes is not None else
-                                  _notes_from_html(source, pno) or _notes_stub(_title_from_html(source), pno))
-                if notes and notes == expected_notes.strip():
+                if isinstance(notes, str) and notes.strip():
                     notes_pages.add(pno)
     except Exception as exc:
         # A read failure must never be interpreted as complete delivery.
@@ -3450,9 +3456,7 @@ def _load_saved_notes(notes_ref: str = '') -> dict[int, str] | None:
         return dict(override)
     text, _ = _resolve_artifact_text(ctx, _SPEAKER_NOTES_SLOT)
     if not text:
-        if notes_ref:
-            raise ValueError('Missing speaker_notes_source; resume page planning')
-        return None  # Compatibility for decks created before separate notes.
+        return None  # Existing page notes do not require a separate source artifact.
     payload = json.loads(text)
     if not isinstance(payload, dict) or payload.get('schema_version') != 1:
         raise ValueError('Invalid speaker notes artifact')
@@ -3474,6 +3478,8 @@ def _load_saved_notes(notes_ref: str = '') -> dict[int, str] | None:
 
 
 def _pages_with_saved_notes(pages: list[dict], notes_ref: str = '') -> list[dict]:
+    if pages and all(isinstance(page.get('notes'), str) and page['notes'].strip() for page in pages):
+        return pages
     notes = _load_saved_notes(notes_ref)
     if notes is None:
         return pages
@@ -3536,7 +3542,7 @@ def ppt_update_speaker_notes(page_order: list, total_minutes: float | None = Non
     """
     if update_outputs:
         raise ValueError('Update notes in plan_page_prompts, then generate the edited slides')
-    notes = _load_saved_notes(_SPEAKER_NOTES_SLOT)
+    notes = _load_saved_notes(_SPEAKER_NOTES_SLOT) or {}
     replacements = json.loads(new_notes_json)
     if not isinstance(replacements, dict):
         raise ValueError('new_notes_json must be an object keyed by final page number')
@@ -8240,8 +8246,7 @@ def ppt_export_deck() -> dict:
     _require_html_output()
     ctx = require_context()
     order = _ui_slot_order_list('preview_html')
-    if (not order or len(order) != len(_ui_slot_order_list('preview_notes'))
-            or len(order) != len(_ui_slot_order_list('slide_outline'))):
+    if not order or len(order) != len(_ui_slot_order_list('preview_notes')):
         return _tool_error('ppt_export_deck', 'Publish every approved HTML page and matching notes before export')
     pages = []
     for number in range(1, len(order) + 1):
@@ -8250,10 +8255,15 @@ def ppt_export_deck() -> dict:
         if (not isinstance(html, str) or '<html' not in html.lower() or _is_ppt_placeholder(html)
                 or not isinstance(notes, str) or not notes.strip() or _is_ppt_placeholder(notes)):
             return _tool_error('ppt_export_deck', f'Page {number} has incomplete HTML or notes; export was not started')
-        html, _ = _inline_preview_images(
-            html, _conversation_root(), _conversation_root() / 'pages' / f'page_{number:03d}.html',
-            inline_assets=True,
-        )
+        try:
+            html, _ = _inline_preview_images(
+                html, _conversation_root(), _conversation_root() / 'pages' / f'page_{number:03d}.html',
+                inline_assets=True,
+            )
+        except (OSError, ValueError) as exc:
+            return _tool_error('ppt_export_deck', f'Page {number} export resource failed: {exc}. '
+                               'Existing HTML and notes are preserved. Fix the resource and retry ppt_export_deck; '
+                               'do not switch to native generation or restart planning.')
         pages.append((html, notes))
     node, cli = _cli()
     root = _conversation_root() / 'ppt_exports' / uuid.uuid4().hex

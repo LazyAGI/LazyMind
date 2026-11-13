@@ -182,6 +182,29 @@ def font_resource_url(record: dict) -> str:
     return f'/static-files/presentation-fonts/{record["file"]}'
 
 
+def inline_shared_font_resource(url: str) -> str | None:
+    """Embed only immutable, verified fonts from the shared presentation library."""
+    from lazymind.chat.service.utils.static_file_url import _upload_root
+    clean = url.strip().split('#', 1)[0].split('?', 1)[0]
+    if not clean.startswith('/static-files/presentation-fonts/'):
+        return None
+    match = re.fullmatch(r'/static-files/presentation-fonts/([0-9a-f]{64})\.(ttf|otf)', clean)
+    if not match:
+        raise ValueError('Invalid shared presentation font resource')
+    root = Path(_upload_root()).resolve()
+    library = root / 'presentation-fonts'
+    candidate = library / (match[1] + '.' + match[2])
+    if library.resolve() != library or candidate.resolve().parent != library:
+        raise ValueError('Shared presentation font is outside the font library')
+    try:
+        data = candidate.read_bytes()
+    except OSError as exc:
+        raise ValueError('Shared presentation font is missing or unreadable') from exc
+    if hashlib.sha256(data).hexdigest() != match[1]:
+        raise ValueError('Shared presentation font checksum mismatch')
+    return f'data:font/{match[2]};base64,' + base64.b64encode(data).decode('ascii')
+
+
 def font_face_css(family: str, record: dict) -> str:
     metadata = {'family': family, 'weight': record['weight'], 'style': record['style'], 'sha256': record['id']}
     token = base64.b64encode(json.dumps(metadata, ensure_ascii=False).encode()).decode()

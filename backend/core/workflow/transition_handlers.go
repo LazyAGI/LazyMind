@@ -15,6 +15,7 @@ import (
 	"gorm.io/gorm/clause"
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
+	"lazymind/core/exporter"
 	"lazymind/core/modelconfig"
 	"lazymind/core/store"
 	"lazymind/core/subagent"
@@ -450,6 +451,9 @@ func StartWorkflowSession(w http.ResponseWriter, r *http.Request) {
 		_ = persistTransitionCommand(store.DB(), req, response, "rejected")
 		writeTransitionResponse(w, response, http.StatusServiceUnavailable)
 		return
+	}
+	if pkg, err := workflowstore.New(store.DB()).GetWorkflowPackage(r.Context(), req.UserID, firstNonEmpty(req.WorkflowRef, req.WorkflowID), req.WorkflowRevisionID); err == nil {
+		exporter.PrewarmWorkflow(pkg.Files["workflow.yaml"])
 	}
 	emitTaskCreatedConvEvent(r.Context(), taskID, sessionID, req.ConversationID)
 	writeTransitionResponse(w, response, http.StatusOK)

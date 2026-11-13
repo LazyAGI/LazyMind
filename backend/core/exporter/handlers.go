@@ -61,12 +61,7 @@ func capabilityPayload(editable bool) map[string]any {
 		"id":        "editable-pptx",
 		"available": editable,
 	}
-	if !editable {
-		editableFormat["dependency"] = map[string]any{
-			"id":           "editable-ppt-dependency",
-			"settings_url": "/settings?section=system_tools#editable-ppt-dependency",
-		}
-	}
+
 	return map[string]any{
 		"provider_id": htmlPresentationProviderID,
 		"formats": []map[string]any{
@@ -118,9 +113,20 @@ func htmlPresentationCapabilities(w http.ResponseWriter, r *http.Request) {
 }
 
 func exportHTMLPresentation(w http.ResponseWriter, r *http.Request) {
-	upstream := common.ChatServiceEndpoint() + "/api/workflow/ppt/export"
 	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Minute)
 	defer cancel()
+	if systemdeps.IsLocalRuntime() {
+		root, err := systemdeps.RuntimeRootFromEnv()
+		if err == nil {
+			_, err = systemdeps.EnsureEditablePPT(ctx, root)
+		}
+		if err != nil {
+			common.ReplyErr(w, "Unable to prepare editable PPTX export; please retry: "+err.Error(), http.StatusServiceUnavailable)
+			return
+		}
+	}
+
+	upstream := common.ChatServiceEndpoint() + "/api/workflow/ppt/export"
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, upstream, r.Body)
 	if err != nil {
 		common.ReplyErr(w, "build upstream request failed", http.StatusInternalServerError)

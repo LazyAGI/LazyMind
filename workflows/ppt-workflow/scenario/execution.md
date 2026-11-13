@@ -38,9 +38,10 @@ and publish each page with its matching notes after earlier pairs are acknowledg
 An insertion, deletion or reorder preserves stable item identities and unchanged
 revisions while keeping every nonempty page list aligned.
 
-Speaker scripts are authored once in speaker_notes_source, a UTF-8 JSON file with
+Speaker scripts may be stored in the optional speaker_notes_source, a UTF-8 JSON file with
 schema_version=1 and ordered pages=[{page: 1, text: "..."}, ...]. Attach the bound
-scripts verbatim during generation. Background prompts/images stay aligned with
+scripts verbatim when available; existing non-empty per-page notes are sufficient
+and require no separate source artifact or source equality check. Background prompts/images stay aligned with
 pages; request text-free AI backgrounds and deliver 1280×720 images when enabled.
 
 Deliver the selected representation and any explicitly requested downloadable
