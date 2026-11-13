@@ -785,8 +785,31 @@ export function WorkflowSessionApi() {
       }>(
         `${coreApiBaseUrl}/workflow-sessions/${encodeURIComponent(sessionId)}/slots/${encodeURIComponent(slotId)}/items/idx/${listIndex}:action-preview`,
         payload,
-        options,
+        options ? { ...options, signal: undefined } : undefined,
       );
+      let pending = response.data.data as unknown as { status: string; job_id?: string };
+      if (pending.job_id && pending.status === 'waiting_agent') {
+        const jobUrl = `${coreApiBaseUrl}/workflow-sessions/${encodeURIComponent(sessionId)}/artifact-actions/${encodeURIComponent(pending.job_id)}`;
+        const cancel = () => { void axiosInstance.post(jobUrl, { cancel: true }, { silentError: true } as RawAxiosRequestConfig).catch(() => undefined); };
+        options?.signal?.addEventListener?.('abort', cancel, { once: true });
+        try {
+          if (options?.signal?.aborted) { cancel(); throw new Error('Edit cancelled'); }
+          while (pending.status === 'waiting_agent') {
+            await new Promise(resolve => window.setTimeout(resolve, 1500));
+            if (options?.signal?.aborted) throw new Error('Edit cancelled');
+            const update = await axiosInstance.get(jobUrl, options);
+            pending = update.data.data;
+            response.data.data = update.data.data;
+          }
+          if (pending.status !== 'ready') throw new Error('Edit cancelled');
+        } catch (error) {
+          cancel();
+          options?.signal?.removeEventListener?.('abort', cancel);
+          throw error;
+        } finally {
+          options?.signal?.removeEventListener?.('abort', cancel);
+        }
+      }
       const result = response.data.data;
       if ('type' in payload.input) {
         if (!('results' in result) || !Array.isArray(result.results) || result.results.length !== 1) {
@@ -796,6 +819,10 @@ export function WorkflowSessionApi() {
         return { ...response, data: { ...response.data, data: { ...preview, ...results[0] } } };
       }
       return { ...response, data: { ...response.data, data: result as RewriteSelectionPreview } };
+    },
+    cancelArtifactActionPreview(sessionId: string, token: string) {
+      if (!token.startsWith('external:')) return Promise.resolve();
+      return axiosInstance.post(`${coreApiBaseUrl}/workflow-sessions/${encodeURIComponent(sessionId)}/artifact-actions/${encodeURIComponent(token.slice('external:'.length))}`, { cancel: true }, { silentError: true } as RawAxiosRequestConfig);
     },
     executeArtifactAction(
       sessionId: string,

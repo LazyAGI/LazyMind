@@ -1,7 +1,9 @@
 package facade
 
 import (
+	"crypto/sha256"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -74,5 +76,39 @@ func TestPreparePaperWritingDoesNotRequireExperimentSetupOrEveryAlternativeSourc
 	}
 	if len(result.MissingInputs) != 0 || result.Status != "ready" {
 		t.Fatalf("internal/alternative sources blocked startup: %s", encoded)
+	}
+	for _, tc := range []struct {
+		name, content string
+		status        int
+	}{
+		{"valid", `{"topic":"RAG chunk size","constraints":{"paper_language":"zh-CN"}}`, http.StatusOK},
+		{"utf8-bom", "\xef\xbb\xbf" + `{"topic":"RAG chunk size"}`, http.StatusOK},
+		{"artifact-envelope", `{"schema_version":1,"data":{"topic":"RAG chunk size"}}`, http.StatusOK},
+		{"unknown-fields", `{"research_topic":"RAG chunk size","experiment_policy":"simulate_only"}`, http.StatusUnprocessableEntity},
+		{"unknown-constraints", `{"topic":"RAG chunk size","constraints":{"no_local_execution":true}}`, http.StatusUnprocessableEntity},
+		{"malformed-json", `{"topic":`, http.StatusUnprocessableEntity},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			sum := sha256.Sum256([]byte(tc.content))
+			resource, _, err := h.Store.ImportInputResource(t.Context(), "owner", "input.json", "application/json", fmt.Sprintf("sha256:%x", sum), []byte(tc.content))
+			if err != nil {
+				t.Fatal(err)
+			}
+			body, _ := json.Marshal(map[string]any{
+				"workflow_id": "paper-writing", "revision_id": "paper-revision", "idempotency_key": t.Name(),
+				"input_bindings": map[string]any{"paper_input": map[string]any{"resource_id": resource.ID}},
+			})
+			w := httptest.NewRecorder()
+			h.Prepare(w, request(http.MethodPost, "/workflow-preparations", "owner", body))
+			if w.Code != tc.status || tc.status != http.StatusOK && decodeEnvelope(t, w).Error.Code != "WORKFLOW_INPUT_INVALID" {
+				t.Fatalf("prepare=%d %s", w.Code, w.Body.String())
+			}
+			if tc.status != http.StatusOK {
+				var count int64
+				if err := db.Table("workflow_preparations").Where("idempotency_key = ?", t.Name()).Count(&count).Error; err != nil || count != 0 {
+					t.Fatalf("invalid input persisted a preparation: count=%d err=%v", count, err)
+				}
+			}
+		})
 	}
 }

@@ -68,6 +68,7 @@ import (
 	workflowhosted "lazymind/core/workflow/hosted"
 	workflowstore "lazymind/core/workflow/store"
 	workflowstream "lazymind/core/workflow/stream"
+	"lazymind/core/workflowtool"
 
 	"github.com/gorilla/mux"
 )
@@ -268,7 +269,9 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "POST", "/internal/workflow-attempts/{attempt_id}:fail", nil, remoteExecutorHandler.Fail)
 	handleAPI(r, "POST", "/internal/workflow-attempts/{attempt_id}:cancel", nil, remoteExecutorHandler.Cancel)
 	handleAPI(r, "POST", "/internal/workflow-attempts/{attempt_id}:stop-ack", nil, workflow.ConfirmNativeStopHTTP)
+	handleAPI(r, "POST", "/internal/workflow-attempts/{attempt_id}/model/v1/chat/completions", nil, workflow.ModelCompletion)
 	hostedHandler := workflowhosted.Handler{Service: hostedService}
+	workflowToolHandler := workflowtool.Handler{Service: &workflowtool.Service{DB: corestore.DB()}}
 	workflowControl := workflow.WorkflowControlHandler{Service: workflow.WorkflowControlService{DB: corestore.DB()}}
 	handleAPI(r, "GET", "/workflow-control/capabilities", []string{"qa.read"}, workflowControl.Capabilities)
 
@@ -735,9 +738,12 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "POST", "/workflow-sessions/{session_id}:advance-step-and-hand-off", []string{"qa.write"}, workflowFacade.Command(http.HandlerFunc(workflow.TransitionWorkflowSession)))
 	handleAPI(r, "POST", "/workflow-sessions/{session_id}/hosted-attempts/{attempt_id}:begin", []string{"qa.write"}, hostedHandler.Begin)
 	handleAPI(r, "POST", "/workflow-sessions/{session_id}/hosted-attempts/{attempt_id}:resume", []string{"qa.write"}, hostedHandler.Resume)
+	handleAPI(r, "POST", "/workflow-sessions/{session_id}/hosted-attempts/{attempt_id}:heartbeat", []string{"qa.write"}, hostedHandler.Heartbeat)
 	handleAPI(r, "POST", "/workflow-sessions/{session_id}/hosted-attempts/{attempt_id}:submit", []string{"qa.write"}, hostedHandler.Submit)
 	handleAPI(r, "POST", "/workflow-sessions/{session_id}/hosted-attempts/{attempt_id}:complete", []string{"qa.write"}, hostedHandler.Complete)
 	handleAPI(r, "POST", "/workflow-sessions/{session_id}/hosted-attempts/{attempt_id}/artifacts", []string{"qa.write"}, hostedHandler.Publish)
+	handleAPI(r, "POST", "/workflow-sessions/{session_id}/hosted-attempts/{attempt_id}/tools:list", []string{"qa.read"}, workflowToolHandler.List)
+	handleAPI(r, "POST", "/workflow-sessions/{session_id}/hosted-attempts/{attempt_id}/tools:call", []string{"qa.write"}, workflowToolHandler.Call)
 	handleAPI(r, "POST", "/workflow-sessions/{session_id}/input-bindings", []string{"qa.write"}, workflowFacade.BindInput)
 	handleAPI(r, "GET", "/workflow-sessions/{session_id}/input-bindings", []string{"qa.read"}, workflowFacade.ListInputs)
 	handleAPI(r, "GET", "/workflow-sessions/{session_id}/artifacts", []string{"qa.read"}, workflowFacade.ListArtifacts)
@@ -811,6 +817,12 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "POST", "/internal/workflow-sessions/{session_id}:transition", nil, workflow.TransitionWorkflowSession)
 	handleAPI(r, "GET", "/internal/workflow-transition-commands/{command_id}", nil, workflow.GetTransitionCommand)
 	handleAPI(r, "PATCH", "/workflow-sessions/{session_id}/slots/{slot_id}", []string{"qa.write"}, workflowFacade.SessionAccess(http.HandlerFunc(workflow.PatchSessionSlot)))
+	handleAPI(r, "GET", "/workflow-sessions/{session_id}/artifact-edit", []string{"qa.read"}, workflowFacade.SessionAccess(http.HandlerFunc(workflow.GetArtifactEditContext)))
+	handleAPI(r, "POST", "/workflow-sessions/{session_id}/artifact-edit", []string{"qa.write"}, workflowFacade.SessionAccess(http.HandlerFunc(workflow.CommitArtifactEdit)))
+	handleAPI(r, "GET", "/workflow-sessions/{session_id}/artifact-actions/{job_id}", []string{"qa.read"}, workflowFacade.SessionAccess(http.HandlerFunc(workflow.GetArtifactActionJob)))
+	handleAPI(r, "POST", "/workflow-sessions/{session_id}/artifact-actions/{job_id}", []string{"qa.write"}, workflowFacade.SessionAccess(http.HandlerFunc(workflow.SubmitArtifactActionJob)))
+	handleAPI(r, "POST", "/workflow-sessions/{session_id}/model-generations/{job_id}:claim", []string{"qa.write"}, workflowFacade.SessionAccess(http.HandlerFunc(workflow.ClaimModelGeneration)))
+	handleAPI(r, "POST", "/workflow-sessions/{session_id}/model-generations/{job_id}:respond", []string{"qa.write"}, workflowFacade.SessionAccess(http.HandlerFunc(workflow.SubmitModelGeneration)))
 	handleAPI(r, "POST", "/workflow-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}:action-preview", []string{"qa.write"}, workflowFacade.SessionAccess(http.HandlerFunc(workflow.PreviewArtifactAction)))
 	handleAPI(r, "POST", "/workflow-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}:action-execute", []string{"qa.write"}, workflowFacade.SessionAccess(http.HandlerFunc(workflow.ExecuteArtifactAction)))
 	handleAPI(r, "POST", "/workflow-sessions/{session_id}:sync-search-config", []string{"qa.write"}, workflowFacade.SessionAccess(http.HandlerFunc(workflow.SyncSessionSearchConfig)))

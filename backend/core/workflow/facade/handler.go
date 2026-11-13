@@ -26,6 +26,7 @@ import (
 	"lazymind/core/workflow"
 	workflowcore "lazymind/core/workflow"
 	"lazymind/core/workflow/artifactfile"
+	"lazymind/core/workflow/controlpolicy"
 	"lazymind/core/workflow/controlstore"
 	workflowexecutor "lazymind/core/workflow/executor"
 	"lazymind/core/workflow/graphengine"
@@ -557,7 +558,10 @@ func (h Handler) GetCommand(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	command, err := h.Store.CommandByID(r.Context(), owner, mux.Vars(r)["command_id"])
-	if errors.Is(err, workflowstore.ErrNotFound) {
+	// Tool and claim receipts require current execution authorization and can
+	// only be replayed through their own endpoints.
+	if errors.Is(err, workflowstore.ErrNotFound) ||
+		(err == nil && command.ContractVersion != ContractVersion && command.ContractVersion != controlpolicy.Protocol) {
 		fail(w, http.StatusNotFound, "COMMAND_NOT_FOUND", "workflow command was not found", false)
 		return
 	}
@@ -778,7 +782,8 @@ func (h Handler) Prepare(w http.ResponseWriter, r *http.Request) {
 	}
 	plan := json.RawMessage(`{"status":"ready"}`)
 	if workflow, packageErr := h.Store.GetWorkflowPackage(r.Context(), owner, req.WorkflowID, req.RevisionID); packageErr == nil {
-		if _, err := h.Store.ResolveInputBindings(r.Context(), owner, req.InputBindings, "prepare"); err != nil {
+		bindings, err := h.Store.ResolveInputBindings(r.Context(), owner, req.InputBindings, "prepare")
+		if err != nil {
 			fail(w, http.StatusUnprocessableEntity, "INVALID_INPUT_BINDINGS", err.Error(), false)
 			return
 		}
@@ -807,6 +812,31 @@ func (h Handler) Prepare(w http.ResponseWriter, r *http.Request) {
 			}
 			if items, list := raw.([]any); list && len(items) > 1 && graph.MaterialCardinalities[material] != "list" {
 				fail(w, http.StatusUnprocessableEntity, "INVALID_INPUT_BINDINGS", "multiple resources require a list material: "+material, false)
+				return
+			}
+		}
+		for _, binding := range bindings {
+			contract := graph.Runtime.InputContracts[binding.MaterialID]
+			schema, err := contract.ResolveSchema()
+			if err != nil {
+				fail(w, http.StatusUnprocessableEntity, "INVALID_WORKFLOW_GRAPH", err.Error(), false)
+				return
+			}
+			if schema == nil {
+				continue
+			}
+			resource, err := h.Store.GetInputResource(r.Context(), owner, binding.ResourceID)
+			if err != nil {
+				fail(w, http.StatusUnprocessableEntity, "INVALID_INPUT_BINDINGS", err.Error(), false)
+				return
+			}
+			var value any
+			if err := json.Unmarshal(bytes.TrimPrefix(resource.Content, []byte{0xef, 0xbb, 0xbf}), &value); err != nil {
+				fail(w, http.StatusUnprocessableEntity, "WORKFLOW_INPUT_INVALID", binding.MaterialID+": "+err.Error(), false)
+				return
+			}
+			if err := schema.Validate(value); err != nil {
+				fail(w, http.StatusUnprocessableEntity, "WORKFLOW_INPUT_INVALID", binding.MaterialID+": "+err.Error(), false)
 				return
 			}
 		}
@@ -1057,6 +1087,12 @@ func (h Handler) Command(delegate http.Handler) http.HandlerFunc {
 			delegate.ServeHTTP(recorder, clone)
 			return recorder.status, unwrapLegacyTransitionResponse(recorder.body.Bytes()), nil
 		})
+		var command toolCommandRequest
+		_ = json.Unmarshal(body, &command)
+		if errors.Is(err, workflowstore.ErrIdempotencyConflict) && command.Tool == "advance_step_and_hand_off" &&
+			len(command.Steps) == 1 && command.CommandID == commandID {
+			result, err = h.Store.ReplayHandOff(r.Context(), owner, sessionID, commandID, ContractVersion, body)
+		}
 		if errors.Is(err, workflowstore.ErrIdempotencyConflict) {
 			fail(w, 409, "IDEMPOTENCY_CONFLICT", "command id was used with another payload", false)
 			return
@@ -1069,8 +1105,6 @@ func (h Handler) Command(delegate http.Handler) http.HandlerFunc {
 			fail(w, 503, "COMMAND_FAILED", err.Error(), true)
 			return
 		}
-		var command toolCommandRequest
-		_ = json.Unmarshal(body, &command)
 		response := append(json.RawMessage(nil), result.ResponseJSON...)
 		// Handoff changes the post-execution approval boundary, not the completion
 		// of this call. Both tools wait for execution and any pending stop receipts.

@@ -1833,6 +1833,9 @@ def _workflow_trigger_tools(
             try:
                 package_hint = _client().get_workflow(workflow_id, revision_id).result
                 input_types_hint = _trigger_input_types(package_hint)
+                if (session_holder is not None and session_holder.get('workflow_id') == workflow_id
+                        and isinstance(package_hint, dict)):
+                    session_holder['workflow_guidance'] = _clean_workflow_text(package_hint.get('when_to_use'))
             except Exception as exc:
                 LOG.debug('Could not preload Workflow %s input contract: %s', workflow_id, exc)
         for field in _runtime_clarification_fields(item.get('runtime')):
@@ -2561,6 +2564,7 @@ def resolve_workflow_injection(
             *[tool for tool in tools if isinstance(tool, dict)],
         ]
     if session_id:
+        workflow_guidance = session_holder.get('workflow_guidance', '')
         tools = [*trigger_tools, *_safe_session_tools(
             toolkit, selected_session_id, user_input=current_query, checkpoint=checkpoint,
             workflow_context=session_holder,
@@ -2642,6 +2646,7 @@ def resolve_workflow_injection(
         runtime_context = (
             '## Workflow Runtime [AUTHORITATIVE]\n'
             + _WORKFLOW_CHAT_RESPONSIBILITIES
+            + ('Pinned Workflow guidance:\n' + workflow_guidance + '\n' if workflow_guidance else '')
             + checkpoint_guidance
             + 'The Host owns session/version concurrency fields. Never ask the user for '
             + 'state_version or expected_state_version. '

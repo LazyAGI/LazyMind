@@ -19,12 +19,12 @@ import (
 // Use the same graph and execution facts through the native and MCP entry paths.
 // Transport must not change which advance/recovery the Runtime admits.
 func TestControllerAdvanceParity(t *testing.T) {
-	for _, scenario := range []string{"ready", "rewind-completed", "rewind-failed", "retry", "retry-with-sibling", "user-retry", "retry-exhausted", "approval", "skip-approval", "stopped", "stale-version"} {
+	for _, scenario := range []string{"ready", "rewind-completed", "rewind-failed", "retry", "retry-with-sibling", "user-retry", "retry-exhausted", "approval", "review-rerun", "skip-approval", "stopped", "stale-version"} {
 		for _, controller := range []string{"lazymind", "external-agent"} {
 			t.Run(scenario+"/"+controller, func(t *testing.T) {
 				graph := graphengine.CompiledStateGraph{StartRoute: "all", Nodes: map[string]graphengine.CompiledNode{"draft": {ID: "draft", Mode: "auto"}},
 					ControlEdges: []graphengine.CompiledEdge{{ID: "start", From: "__start__", To: "draft"}, {ID: "end", From: "draft", To: "__end__"}}}
-				if scenario == "approval" || scenario == "skip-approval" {
+				if scenario == "approval" || scenario == "review-rerun" || scenario == "skip-approval" {
 					graph.Nodes["draft"] = graphengine.CompiledNode{ID: "draft", Mode: "human"}
 				}
 				must := func(err error) {
@@ -49,6 +49,8 @@ func TestControllerAdvanceParity(t *testing.T) {
 					status, updates["status"] = "failed", "failed"
 				case "approval":
 					status, updates["status"], wantCode = "succeeded", "waiting", "WORKFLOW_APPROVAL_REQUIRED"
+				case "review-rerun":
+					status, updates["status"], origin = "succeeded", "waiting", "user"
 				case "skip-approval":
 					status = "succeeded"
 				case "stopped":
@@ -59,9 +61,9 @@ func TestControllerAdvanceParity(t *testing.T) {
 				must(db.Model(&orm.WorkflowSession{}).Where("id = ?", "batch-session").Updates(updates).Error)
 				must(db.First(&session, "id = ?", "batch-session").Error)
 				if status != "" {
-					step := orm.WorkflowSessionStep{ID: "old", TaskID: "old-task", SessionID: session.ID, StepID: "draft", Attempt: 1, Status: status, Validity: "effective", ReviewRequired: scenario == "approval"}
+					step := orm.WorkflowSessionStep{ID: "old", TaskID: "old-task", SessionID: session.ID, StepID: "draft", Attempt: 1, Status: status, Validity: "effective", ReviewRequired: scenario == "approval" || scenario == "review-rerun"}
 					must(db.Create(&step).Error)
-					if controller == "external-agent" && scenario == "approval" {
+					if controller == "external-agent" && step.ReviewRequired {
 						must(controlstore.CreateReview(db.DB, session, step, nil))
 					}
 				}
@@ -114,6 +116,13 @@ func TestControllerAdvanceParity(t *testing.T) {
 				}
 				if count == 2 && (attempts[0].Validity != "stale" || attempts[1].Attempt != 2 || attempts[1].Validity != "effective") {
 					t.Fatalf("recovery did not replace the old attempt: %+v", attempts)
+				}
+				if scenario == "review-rerun" && controller == "external-agent" {
+					var review orm.WorkflowReviewCheckpoint
+					must(db.Where("attempt_id = ?", "old").First(&review).Error)
+					if review.Status != "superseded" || review.DecisionCommandID != "advance" || review.AcceptedAt != nil {
+						t.Fatalf("rerun did not replace the old review: %+v", review)
+					}
 				}
 			})
 		}

@@ -214,6 +214,7 @@ def test_generate_pages_repairs_only_page_with_unknown_icon(
     briefs[2] += '\nRequired figure: images/evidence.png'
     store = publication_store(monkeypatch, tools, inputs=[
         {'slot': 'template_mode', 'value': {'text': 'none'}},
+        {'slot': 'presentation_output_format', 'value': {'text': 'html'}},
         *[{'slot': 'slide_outline', 'list_index': number - 1, 'value': {'text': brief}}
           for number, brief in briefs.items()],
     ])

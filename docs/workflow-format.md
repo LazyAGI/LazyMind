@@ -1,6 +1,6 @@
 # LazyMind 插件格式规范
 
-插件是 LazyMind 的可扩展工作流单元，由最多五个文件组成。本文档是插件格式的**唯一 source of truth**，供开发者查阅和大模型生成时参考。
+插件是 LazyMind 的可扩展工作流单元，由注册文件、步骤规范、Skill 和可选工具组成。本文档是插件格式的**唯一 source of truth**，供开发者查阅和大模型生成时参考。
 
 ---
 
@@ -30,6 +30,37 @@ workflows/<workflow-id>/
 ---
 
 ## 二、workflow.yaml 字段说明
+
+### 外部 Agent 执行
+
+同一工作流由原生 LazyMind 和任意外部 Agent 共用一套业务契约：步骤提示词、输入、输出与验收标准只定义在 `state.yml`，`runtime.execution` 提供双方共用的 Skill、约束与可选工具。原生执行器保留本地工具绑定和已配置的模型；外部 Agent 负责生成和验证，可使用自己的 subagent，也可在同一 Agent 内顺序完成生成和独立的一轮检查（不声称独立执行者验证）。LazyMind 保存步骤、输入、产物版本、状态和调用回执，不另行调度外部步骤的业务模型，也不要求服务端语义验证回执；执行者按声明调用工具。
+
+```yaml
+runtime:
+  execution:
+    version: '1'
+    skills: [scenario/execution.md]
+    constraints:
+      - Validate the actual result and preserve the requested scope.
+    steps:
+      step_one:
+        skills: [scenario/step-one.md]
+        tools:
+          - {name: ppt_export_html, source: package}
+          - {name: 'builtin:image_generator', source: global}
+```
+
+声明必须覆盖图中所有步骤；每一步的 `state.yml` 有非空 `prompt`。`execution.steps` 只接受 `skills`、`constraints` 和 `tools`，禁止重新定义 prompt、acceptance_criteria 或 required_outputs，避免执行器产生两套业务规则。全局与步骤级 Skill、约束合并；Skill 路径必须是包内相对路径。Core 从固定 revision 读取 UTF-8 Skill 正文，在两端同形的 `step_contract.execution.skill_files` 返回路径、内容和 SHA-256；单文件上限 256 KiB，总上限 512 KiB。原生执行器把这些正文传入 SubAgent，外部执行者也须完整读取，分派时原样传给 worker，不能替换为本机其他版本。
+
+契约同时返回 `launch_request`、本次 `user_request` 和固定输入。顶层 `prompt` 是业务说明，`execution` 携带共用 Skill、约束和工具；不再输出 `external_execution` 或 `adapter_instructions`。`objective_ref: "#/prompt"` 表示复用 prompt，另有 objective 时作为额外运行要求。原生 wrapper、工具专用模式和自动保存方式由执行适配器处理，不另写外部业务提示词。
+
+`acceptance_criteria`、`required_outputs`、槽类型、单值/列表、控制边和输入版本均直接使用共同节点的数据契约，可选与条件输出不会因执行器不同变成强制输出。人工审核、提问和停止/重试规则不因使用外部执行器而改变。
+
+`tools` 是允许请求的可选能力，不决定 executor 的归属。`source: global` 指现有 capability gateway 中用户已授权的工具；推荐使用完整工具 ID。`source: package` 需要显式服务适配器，不能仅通过 YAML 声明就远程执行任意包脚本。PPT 提供 `ppt_export_html`、`ppt_render_html`、`ppt_inspect_pptx` 三个无模型适配器；脚本绑定与固定包内容须匹配服务实现。
+
+外部宿主有能力时直接使用宿主能力。能力缺失时先检查已声明的 LazyMind 工具；仍不可用则向用户说明应在 LazyMind 配置哪项功能，保存已完成工作并等待重试。按工具清单和授权调用能力，如实报告限制与检查结果。
+
+执行声明仅使用 `runtime.execution`，不支持 `runtime.external_execution`，也不提供旧契约转换。Core 与 Connector 使用同一协议版本。修改声明后重新发布并启动新运行；运行中不能替换绑定 revision。接入流程见 [外部工作流开发接入](dev/external-workflow.md)。
 
 ### 启动前字段与 Ask User
 

@@ -30,6 +30,41 @@ when_to_use: >
   its locator.
 
 runtime:
+  execution:
+    version: '1'
+    model_executor: external-agent
+    skills:
+    - scenario/execution.md
+    constraints:
+    - Follow the shared state.yml step specification, declared output schemas and acceptance criteria; preserve the
+      user request and bound input revisions.
+    - Validate actual artifacts before completion, honor questions and review pauses, and report missing capabilities
+      without fabricating output.
+    steps:
+      prepare:
+        tools:
+        - name: knowledge_list_documents
+          source: package
+        - name: knowledge_read_document
+          source: package
+      outline:
+        tools:
+        - name: knowledge_list_documents
+          source: package
+        - name: knowledge_read_document
+          source: package
+      write_flat_document:
+        tools:
+        - name: knowledge_list_documents
+          source: package
+        - name: knowledge_read_document
+          source: package
+      write_document:
+        tools:
+        - name: knowledge_list_documents
+          source: package
+        - name: knowledge_read_document
+          source: package
   clarification_fields:
     - id: writing_goal
       label: 写作目标

@@ -310,7 +310,7 @@ def test_table_parser_preserves_booleans_scientific_notation_and_missingness():
     assert table['column_types'] == ['string', 'number', 'boolean']
 
 
-@pytest.mark.skipif(sys.platform != 'win32' and not Path('/.dockerenv').exists()
+@pytest.mark.skipif(sys.platform not in ('win32', 'darwin') and not Path('/.dockerenv').exists()
                     and not Path('/run/.containerenv').exists(), reason='Requires the experiment sandbox')
 def test_selected_user_data_computation_and_download_use_identical_values(model_boundary, monkeypatch, tmp_path):
     _, action = model_boundary

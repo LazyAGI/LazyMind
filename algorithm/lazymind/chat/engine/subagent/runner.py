@@ -561,6 +561,7 @@ _STRUCTURED_PARAM_KEYS = {
     'remote_input_types',
     'remote_input_transports',
     'remote_input_value_slots',
+    'remote_input_bindings',
     'partial_indices',
     'required_output_artifact_keys',
     # Framework-owned Workflow routing/concurrency metadata. The effective
@@ -615,6 +616,9 @@ def _workflow_material_bindings_section(params: Dict[str, Any]) -> str:
             'kind': kind,
             kind: value,
         }
+        revision_binding = (params.get('remote_input_bindings') or {}).get(slot)
+        if revision_binding is not None:
+            bindings[str(slot)]['revision_binding'] = revision_binding
     return '\n'.join((
         'These are typed Workflow material bindings, not user-uploaded attachments.',
         'For kind=value, pass the exact value to scalar tool arguments. For kind=reference, '

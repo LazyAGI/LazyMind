@@ -15,6 +15,82 @@ when_to_use: >
   不用于单独市场规模、路线图排序、技术架构、发布运维、数据分析方案或营销文案。
 
 runtime:
+  execution:
+    version: '1'
+    skills:
+    - scenario/execution.md
+    constraints:
+    - Follow the shared state.yml step specification, declared output schemas and acceptance criteria; preserve the
+      user request and bound input revisions.
+    - Validate actual artifacts before completion, honor questions and review pauses, and report missing capabilities
+      without fabricating output.
+    steps:
+      route_product_stage:
+        tools: []
+      build_direction_outline:
+        tools: []
+      write_direction_document:
+        tools:
+        - name: knowledge_list_documents
+          source: package
+        - name: knowledge_read_document
+          source: package
+      analyze_competitive_position:
+        tools:
+        - name: knowledge_list_documents
+          source: package
+        - name: knowledge_read_document
+          source: package
+      route_design_scope:
+        tools: []
+      collect_design_light_evidence:
+        tools:
+        - name: knowledge_list_documents
+          source: package
+        - name: knowledge_read_document
+          source: package
+      collect_design_heavy_evidence:
+        tools:
+        - name: knowledge_list_documents
+          source: package
+        - name: knowledge_read_document
+          source: package
+      build_design_outline:
+        tools: []
+      write_design_document:
+        tools:
+        - name: knowledge_list_documents
+          source: package
+        - name: knowledge_read_document
+          source: package
+      build_prd_outline:
+        tools: []
+      write_prd_document:
+        tools:
+        - name: knowledge_list_documents
+          source: package
+        - name: knowledge_read_document
+          source: package
+      build_interactive_prototype:
+        tools: []
+      build_review_outline:
+        tools: []
+      write_review_document:
+        tools:
+        - name: knowledge_list_documents
+          source: package
+        - name: knowledge_read_document
+          source: package
+      build_handoff_outline:
+        tools: []
+      write_handoff_document:
+        tools:
+        - name: knowledge_list_documents
+          source: package
+        - name: knowledge_read_document
+          source: package
+      finalize_product_delivery:
+        tools: []
   transactional_outputs: true
   host_extensions: [product-project-v1]
   trigger_inputs: [product_goal, product_materials, requested_stage, execution_depth, word_target, reference_sample, reference_sample_choice]

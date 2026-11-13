@@ -65,9 +65,11 @@ Decorative layers do not get them.
 
 ## 5. real-photo slot rule
 
-Any real photograph embedded in a slide MUST reference a local image that was
-registered as a material image (KB / web / explicit AI material generation) and
-resolved into `images/page_XXX_inherited.*`.
+Use real photographs registered as material images (KB, web or explicitly
+requested AI generation). In the local renderer, use the registered deck path.
+In external HTML generation, place an `<img data-ppt-image="ARTIFACT_ID">` for
+each foreground ID bound to the approved page. Page preparation embeds its
+verified bytes as the image source. The page's AI background uses `#bg`.
 Do NOT use `<svg>` placeholders, empty `<div>` blocks, grey squares, or text like "配图待补".
 
 ## 6. Canvas size (advisory, not gated)

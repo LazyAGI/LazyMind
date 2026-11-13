@@ -21,6 +21,13 @@ func TestExecutorHostForStep(t *testing.T) {
 		{name: "post-step check", checks: []graphengine.PostStepCheck{{StepID: "step", Tool: "check_ready"}}},
 		{name: "other step check", checks: []graphengine.PostStepCheck{{StepID: "other", Tool: "check_ready"}}, wantExternal: true},
 		{name: "mode flags only", node: graphengine.CompiledNode{ToolsOnly: true, TerminalToolsOnly: true}, wantExternal: true},
+		{name: "shared contract with native tools and checks", node: graphengine.CompiledNode{
+			LegacyTools: []string{"native_generator"}, ToolsOnly: true,
+			Execution: &graphengine.StepExecution{Version: "1"},
+		}, checks: []graphengine.PostStepCheck{{StepID: "step", Tool: "native_check"}}, wantExternal: true},
+		{name: "unsupported execution version", node: graphengine.CompiledNode{
+			LegacyTools: []string{"native_generator"}, Execution: &graphengine.StepExecution{Version: "2"},
+		}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -30,7 +37,7 @@ func TestExecutorHostForStep(t *testing.T) {
 				if controller == "external-agent" && tc.wantExternal {
 					want = controller
 				}
-				got := executorHostForStep(controller, tc.node, graphengine.RuntimePolicy{PostStepChecks: tc.checks})
+				got := executorHostForStep(controller, "codex", tc.node, graphengine.RuntimePolicy{PostStepChecks: tc.checks})
 				if got != want {
 					t.Fatalf("controller=%q host=%q, want %q", controller, got, want)
 				}

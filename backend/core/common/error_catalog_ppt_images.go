@@ -1,0 +1,38 @@
+package common
+
+import "net/http"
+
+func init() {
+	registerAdditionalErrorAlias("image download exceeds the size limit", "Image download exceeds the size limit", http.StatusRequestEntityTooLarge, 2005600)
+	registerAdditionalErrorAlias("image download requires a public http(s) url", "Image download requires a public HTTP(S) URL", http.StatusBadRequest, 2005601)
+	registerAdditionalErrorAlias("image could not be downloaded", "Image could not be downloaded", http.StatusBadGateway, 2005602)
+	registerAdditionalErrorPattern("image download returned http %d", "Image download returned an HTTP error", http.StatusBadGateway, 2005603)
+	registerAdditionalErrorAlias("image download was interrupted", "Image download was interrupted", http.StatusBadGateway, 2005604)
+	registerAdditionalErrorAlias("image is empty or exceeds 12 mib", "Image is empty or exceeds 12 MiB", http.StatusRequestEntityTooLarge, 2005605)
+	registerAdditionalErrorAlias("image format or dimensions are invalid; use png, jpeg, gif, webp or bmp up to 36 megapixels", "Use a valid PNG, JPEG, GIF, WebP or BMP image up to 36 megapixels", http.StatusUnprocessableEntity, 2005606)
+	registerAdditionalErrorAlias("use png, jpeg, gif, webp or bmp for a ppt image", "Use PNG, JPEG, GIF, WebP or BMP for a PPT image", http.StatusUnprocessableEntity, 2005607)
+	registerAdditionalErrorAlias("image is corrupt or truncated", "Image is corrupt or truncated", http.StatusUnprocessableEntity, 2005608)
+	registerAdditionalErrorAlias("use one ppt-material-images comment with a json array of artifact revision ids", "Use one ppt-material-images comment containing a JSON array of artifact revision IDs", http.StatusUnprocessableEntity, 2005609)
+	registerAdditionalErrorAlias("each ppt material id must be a distinct bound material_images revision", "Each PPT material ID must identify a distinct bound material_images revision", http.StatusUnprocessableEntity, 2005610)
+	registerAdditionalErrorAlias("add a ppt-material-images comment to the approved page prompt; use [] for a page without material images", "Add a ppt-material-images comment to the approved page prompt; use [] when no material images are needed", http.StatusUnprocessableEntity, 2005611)
+	registerAdditionalErrorPattern("page %d", "PPT page processing failed", http.StatusUnprocessableEntity, 2005612)
+	registerAdditionalErrorPattern("page %d has no approved slide_outline", "PPT page has no approved slide outline", http.StatusUnprocessableEntity, 2005613)
+	registerAdditionalErrorAlias("the ai background choice could not be read", "The AI background choice could not be read", http.StatusUnprocessableEntity, 2005614)
+	registerAdditionalErrorPattern("expected %d saved ai backgrounds, got %d; recover the background step", "Saved AI background count does not match the pages; recover the background step", http.StatusUnprocessableEntity, 2005615)
+	registerAdditionalErrorPattern("page %d has no saved ai background; retry the corresponding background page", "PPT page has no saved AI background; retry that background page", http.StatusUnprocessableEntity, 2005616)
+	registerAdditionalErrorAlias("the bound revision has no saved image file", "The bound revision has no saved image file", http.StatusUnprocessableEntity, 2005617)
+	registerAdditionalErrorAlias("the bound revision has no saved image bytes", "The bound revision has no saved image bytes", http.StatusUnprocessableEntity, 2005618)
+	registerAdditionalErrorAlias("the bound revision has an unsupported image mime type", "The bound revision has an unsupported image MIME type", http.StatusUnprocessableEntity, 2005619)
+	registerAdditionalErrorPattern("page %d requires an html document within 16 mib", "PPT page requires an HTML document within 16 MiB", http.StatusRequestEntityTooLarge, 2005620)
+	registerAdditionalErrorPattern("page %d requires a complete html document within 16 mib", "PPT page requires a complete HTML document within 16 MiB", http.StatusUnprocessableEntity, 2005621)
+	registerAdditionalErrorPattern("page %d requires a unique #bg layer", "PPT page requires a unique #bg layer", http.StatusUnprocessableEntity, 2005622)
+	registerAdditionalErrorPattern("page %d has too many bound foreground placements", "PPT page has too many bound foreground image placements", http.StatusUnprocessableEntity, 2005623)
+	registerAdditionalErrorPattern("page %d is missing <img %s=%q> for an approved material image", "PPT page is missing an image element for an approved material image", http.StatusUnprocessableEntity, 2005624)
+	registerAdditionalErrorPattern("page %d is missing the #bg layer for its ai background", "PPT page is missing the #bg layer for its AI background", http.StatusUnprocessableEntity, 2005625)
+	registerAdditionalErrorPattern("page %d exceeds 16 mib after embedding material images; use smaller images", "PPT page exceeds 16 MiB after embedding material images; use smaller images", http.StatusRequestEntityTooLarge, 2005626)
+	registerAdditionalErrorPattern("page %d exceeds 16 mib after embedding its background; use a smaller image", "PPT page exceeds 16 MiB after embedding its background; use a smaller image", http.StatusRequestEntityTooLarge, 2005627)
+	registerAdditionalErrorPattern("page %d could not be serialized as html within 16 mib", "PPT page could not be saved as HTML within 16 MiB", http.StatusUnprocessableEntity, 2005628)
+	registerAdditionalErrorPattern("%s has no saved output for requested list index %d", "A requested page has no saved output", http.StatusUnprocessableEntity, 2005629)
+	registerAdditionalErrorPattern("%s has %d saved pages; expected %d from %s", "Saved page count does not match the approved page plan", http.StatusUnprocessableEntity, 2005630)
+	registerAdditionalErrorPattern("selected material image %s has no binding in any page prompt", "A selected material image is not bound to any page prompt", http.StatusUnprocessableEntity, 2005631)
+}

@@ -11,18 +11,19 @@ import (
 )
 
 type WorkflowActionInvokeRequest struct {
-	WorkflowID    string          `json:"workflow_id"`
-	RevisionID    string          `json:"revision_id"`
-	TreeHash      string          `json:"tree_hash,omitempty"`
-	UserID        string          `json:"user_id,omitempty"`
-	Action        string          `json:"action"`
-	Phase         string          `json:"phase"`
-	Slot          string          `json:"slot"`
-	Artifact      json.RawMessage `json:"artifact,omitempty"`
-	Arguments     map[string]any  `json:"arguments"`
-	ArtifactStore string          `json:"artifact_store,omitempty"`
-	LLMConfig     map[string]any  `json:"llm_config,omitempty"`
-	ToolConfig    map[string]any  `json:"tool_config,omitempty"`
+	GenerationResponses *[]map[string]any `json:"generation_responses,omitempty"`
+	WorkflowID          string            `json:"workflow_id"`
+	RevisionID          string            `json:"revision_id"`
+	TreeHash            string            `json:"tree_hash,omitempty"`
+	UserID              string            `json:"user_id,omitempty"`
+	Action              string            `json:"action"`
+	Phase               string            `json:"phase"`
+	Slot                string            `json:"slot"`
+	Artifact            json.RawMessage   `json:"artifact,omitempty"`
+	Arguments           map[string]any    `json:"arguments"`
+	ArtifactStore       string            `json:"artifact_store,omitempty"`
+	LLMConfig           map[string]any    `json:"llm_config,omitempty"`
+	ToolConfig          map[string]any    `json:"tool_config,omitempty"`
 }
 
 type WorkflowActionInvokeResponse struct {

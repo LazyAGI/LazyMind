@@ -1,4 +1,4 @@
-"""Run bounded Python children in the Linux service sandbox or Windows AppContainer."""
+"""Run bounded Python children using the platform's isolated execution backend."""
 from __future__ import annotations
 
 import ctypes
@@ -24,13 +24,19 @@ def validate_environment():
             windows.validate_environment()
         except (OSError, AttributeError) as exc:
             raise ContainerEnvironmentError('Windows Python 沙箱不可用: ' + str(exc)) from exc
+    elif sys.platform == 'darwin':
+        from . import macos
+        try:
+            macos.validate_environment()
+        except (OSError, AttributeError) as exc:
+            raise ContainerEnvironmentError('macOS Python 沙箱不可用: ' + str(exc)) from exc
     elif sys.platform != 'linux' or not any(Path(p).exists() for p in ('/.dockerenv', '/run/.containerenv')):
-        raise ContainerEnvironmentError('执行后端需要 Linux 服务容器或 Windows AppContainer，不允许无隔离执行')
+        raise ContainerEnvironmentError('执行后端需要 Linux 服务容器、macOS Seatbelt 或 Windows AppContainer')
     missing = [name for name in ('numpy', 'scipy', 'pandas', 'matplotlib', 'seaborn')
                if importlib.util.find_spec(name) is None]
     if missing:
         raise ContainerEnvironmentError('Python 执行环境缺少科学计算依赖: ' + ', '.join(missing))
-    if sys.platform == 'win32':
+    if sys.platform in ('win32', 'darwin'):
         return
     try:
         seccomp = ctypes.CDLL('libseccomp.so.2')
@@ -68,6 +74,9 @@ def execute(payload, worker: Path, timeout: int, *, label: str) -> dict:
                 if sys.platform == 'win32':
                     from . import windows
                     process = windows.start(worker, scratch, timeout, (source, out, err), env)
+                elif sys.platform == 'darwin':
+                    from . import macos
+                    process = macos.start(worker, scratch, timeout, (source, out, err), env)
                 else:
                     process = subprocess.Popen(command, stdin=source, stdout=out, stderr=err, env=env,
                                                cwd=scratch, close_fds=True, start_new_session=True)
@@ -75,6 +84,8 @@ def execute(payload, worker: Path, timeout: int, *, label: str) -> dict:
                 while process.poll() is None:
                     if sys.platform == 'win32':
                         process.check_storage()
+                    elif sys.platform == 'darwin':
+                        macos.check_limits(process, scratch)
                     if time.monotonic() >= deadline:
                         raise RuntimeError(f'{label}执行超时（{timeout} 秒）')
                     if any(p.stat().st_size > 16 * 1024 * 1024 for p in paths[1:]):
@@ -82,11 +93,13 @@ def execute(payload, worker: Path, timeout: int, *, label: str) -> dict:
                     time.sleep(0.05)
                 if sys.platform == 'win32':
                     process.check_storage()  # Include children that exit before the first polling interval.
+                elif sys.platform == 'darwin':
+                    macos.check_limits(process, scratch)
             if any(p.stat().st_size > 16 * 1024 * 1024 for p in paths[1:]):
                 raise RuntimeError(f'{label}输出超过 16 MiB')
             stderr = paths[2].read_text(encoding='utf-8', errors='replace')[-3000:]
             if process.returncode == 78:
-                raise ContainerEnvironmentError('容器内 Python 沙箱启动失败: ' + stderr)
+                raise ContainerEnvironmentError('Python 沙箱启动失败: ' + stderr)
             try:
                 result = json.loads(paths[1].read_text(encoding='utf-8'))
             except ValueError as exc:

@@ -94,7 +94,7 @@ var HostBridge = class {
 /** Polling and delivery policy are shared; only host admission/history live in the adapter. */
 function createDispatcher(runtime, host, bridge, instanceId, signal) {
 	async function deliver(action) {
-		if (action.status === "pending" && action.kind === "continue" && runtime.ready && !await runtime.ready(action.native_session_id, signal)) return;
+		if (action.status === "pending" && action.kind !== "cancel" && runtime.ready && !await runtime.ready(action.native_session_id, signal)) return;
 		if (action.status !== "pending") {
 			const current = await bridge.action(action.id, signal);
 			if (![
@@ -102,7 +102,7 @@ function createDispatcher(runtime, host, bridge, instanceId, signal) {
 				"dispatching",
 				"unknown"
 			].includes(current.action.status)) return;
-			if (current.action.status !== "pending" && action.kind === "continue") {
+			if (current.action.status !== "pending" && action.kind !== "cancel") {
 				const seq$1 = await runtime.reconcile?.(action.native_session_id, action.id, signal) ?? 0;
 				if (seq$1 > 0) {
 					await bridge.settle(action.id, instanceId, "", "accepted", seq$1, "", signal);
@@ -130,7 +130,7 @@ function createDispatcher(runtime, host, bridge, instanceId, signal) {
 				admissionStarted = true;
 				seq = await runtime.prompt(resolved.agent, {
 					actionId: action.id,
-					message: continuationMessage(action)
+					message: continuationMessage(action, claim.control)
 				}, signal);
 			}
 		} catch (error) {
@@ -196,9 +196,11 @@ function delay(ms, signal) {
 		signal.addEventListener("abort", abort, { once: true });
 	});
 }
-function continuationMessage(action) {
-	const request = action.execution_id ? `When applicable, call workflow.step.claim with execution_id=${action.execution_id}. For a completed internal execution, inspect its result and the current state instead of executing it again.` : "When control.continuation=continue and admission.can_begin=true, call workflow.step.begin for a ready step.";
-	return `LazyMind workflow ${action.session_id} has a control notification. Call workflow.state first; the notification may be delayed. ${request} Execute only a granted external step_contract and publish/submit using its execution_handle. If executor_host is lazymind, let Core execute it. After submission, use the returned state to continue. Yield when awaiting_user, awaiting_executor, draining, stopped, binding_required, completed, or failed; do not poll while waiting. A human step requires review AFTER execution. Do not assume this notification means a review was approved. Do not create a new workflow.`;
+function continuationMessage(action, control) {
+	if (action.kind === "model_generate") return `LazyMind model request: session_id=${action.session_id}, job_id=${action.execution_id}. Call workflow.generation.claim with a stable command_id. Only with status=running, execute the exact generation_request as a model worker. LazyMind has reserved one of at most two workers for this Workflow session. Claim ready_job_ids too and run up to two native model workers concurrently when available. Keep worker_token in the controller. Use the supplied messages, tool definitions and response format. Generate an OpenAI assistant message with content or tool_calls. Treat each job as a fresh model call. Read every message in its original order, including earlier data, schemas and guidance; the final message may contain only task parameters or a repair error. Generate the response from this request, including each repair request. LazyMind runs the tools, business logic, validation and publication. After the worker ends, return its message with workflow.generation.respond and unchanged worker_token and request_hash. For cancel_requested, acknowledge cancelled=true without generating. For already_claimed or terminal status, END this turn. Do not begin or complete Workflow steps, publish artifacts, approve reviews, or call a LazyMind model. Wait for the next notification.`;
+	if (action.kind === "artifact_edit") return `LazyMind artifact edit: session_id=${action.session_id}, job_id=${action.execution_id}. Call workflow.action.get. When status=waiting_agent, execute the returned generation_request using a native subagent when available, or the current external agent otherwise. Use its exact LazyMind system_prompt and user_prompt; do not substitute your own business Skill. Submit only the external answer with workflow.action.respond using the unchanged version and request_hash. Repeat only if another generation_request is returned. When ready or cancelled, END this turn: the user confirms the preview in LazyMind. Do not begin, rewind or rerun workflow steps, and do not commit the preview yourself.`;
+	const request = control?.continuation === "continue" && control.admission?.can_begin && control.automatic_retry_steps?.length ? `Core has automatic retry budget for ${JSON.stringify(control.automatic_retry_steps)}. After reading workflow.state, if control.continuation=continue and admission.can_begin=true, call workflow.step.begin for a step in the returned control.automatic_retry_steps with retry_origin=automatic and the current state version. Inspect the failed attempt and use its actual error for repair.` : action.execution_id ? `When applicable, call workflow.step.claim with execution_id=${action.execution_id}. For a completed internal execution, inspect its result and the current state instead of executing it again.` : "When control.continuation=continue and admission.can_begin=true, call workflow.step.begin for a ready step.";
+	return `LazyMind workflow ${action.session_id} has a control notification. Call workflow.state first; the notification may be delayed. ${request} Execute only a granted external step_contract and publish/submit using its execution_handle. If executor_host is lazymind, let Core execute it. After submission, use the returned state to continue. Yield when awaiting_user, awaiting_executor, draining, stopped, binding_required, completed, or failed; do not poll while waiting. When control.input_request is present, show its exact questions and wait for the user; submit their actual answers with workflow.input.answer against that artifact revision. An input answer does not itself approve a separate result review. A human step requires review AFTER execution. Do not assume this notification means a review was approved. Do not create a new workflow.`;
 }
 
 //#endregion
@@ -333,7 +335,8 @@ var CodexAdapter = class {
 		const claim = this.claims.get(input.actionId);
 		this.claims.delete(input.actionId);
 		if (!claim) throw new AdmissionRejected("Workflow notification has not been claimed");
-		this.validate(thread, claim, "continue");
+		const kind = claim.action.kind === "model_generate" ? "model_generate" : claim.action.kind === "artifact_edit" ? "artifact_edit" : "continue";
+		this.validate(thread, claim, kind);
 		if (await this.receipts.read(input.actionId)) throw new Error("Message was already attempted; do not resend");
 		const before = await this.native.read(thread, signal);
 		if (before.active) throw new AdmissionRejected("Codex chat became busy; no message was sent");
@@ -355,7 +358,7 @@ var CodexAdapter = class {
 				receipt.status = "rejected";
 				await this.receipts.write(receipt);
 				await setTimeout$1(250, void 0, { signal });
-				this.validate(thread, await this.bridge.action(input.actionId, signal), "continue");
+				this.validate(thread, await this.bridge.action(input.actionId, signal), kind);
 				signal.throwIfAborted();
 				receipt.status = "sending";
 				await this.receipts.write(receipt);
@@ -674,7 +677,7 @@ function installTailFollow(scroller, content, panel, initiallyFollowing, bottomB
 //#region src/presentation-view.ts
 /** Presentation identity comes from the committed main-chat view, never binds a run. */
 function readCodexView() {
-	const scrollers = Array.from(document.querySelectorAll("[data-app-action-timeline-scroll]")).filter((element) => element.getBoundingClientRect().width > 0);
+	const scrollers = Array.from(document.querySelectorAll("[data-app-action-timeline-scroll]")).filter((element) => element.getBoundingClientRect().width > 0 && !element.closest("[data-app-shell-tab-panel-controller]"));
 	if (scrollers.length !== 1) return null;
 	const scroller = scrollers[0];
 	const fiberKey = Object.keys(scroller).find((key) => key.startsWith("__reactFiber$"));
@@ -707,7 +710,7 @@ function readCodexView() {
 function readPresentationSession(readView = readCodexView) {
 	const host = window;
 	const key = "__lazymindCodexPresentationSession";
-	const version = "codex-view-v1";
+	const version = "codex-view-v2";
 	if (host[key]?.version !== version) host[key]?.dispose();
 	if (!host[key]) {
 		let view = readView(), epoch = crypto.randomUUID(), queued = false;
@@ -788,6 +791,50 @@ async function prepareCodexBrowser(loadModule = (url) => import(
 	};
 	host[key] = state;
 	state.pending = (async () => {
+		const capable = (value) => {
+			try {
+				return value && typeof value === "object" && typeof value.pages?.getWebview === "function" && typeof value.pages?.disposeHost === "function" && typeof value.getSnapshot === "function";
+			} catch {
+				return false;
+			}
+		};
+		const entries = Array.from(document.querySelectorAll("script[type=\"module\"][src]")).map((element) => element.src).filter((url) => /^app:\/\/-\/assets\/\d+\.[a-zA-Z0-9_-]+\.js$/.test(url));
+		for (const url of [...new Set(entries)].slice(0, 8)) {
+			let exports;
+			try {
+				exports = await loadModule(url);
+			} catch {
+				continue;
+			}
+			const runtime = exports.__webpack_require__;
+			if (typeof runtime !== "function" || !runtime.c || !runtime.m) continue;
+			let count = 0, sourceSize = 0;
+			const deadline = Date.now() + 2e3;
+			for (const id of Object.keys(runtime.c)) {
+				if (++count > 16384 || Date.now() > deadline) break;
+				if (count % 128 === 0) await new Promise((resolve) => setTimeout(resolve, 0));
+				const factory = runtime.m[id];
+				if (typeof factory !== "function") continue;
+				const source = Function.prototype.toString.call(factory);
+				sourceSize += source.length;
+				if (sourceSize > 32 * 1024 * 1024) break;
+				if (!source.includes("getWebview") || !source.includes("disposeHost") || !source.includes("getSnapshot")) continue;
+				const namespace = runtime.c[id]?.exports;
+				if (!namespace || typeof namespace !== "object") continue;
+				for (const descriptor of Object.values(Object.getOwnPropertyDescriptors(namespace))) {
+					let value;
+					try {
+						value = "value" in descriptor ? descriptor.value : descriptor.get?.call(namespace);
+					} catch {
+						continue;
+					}
+					if (capable(value)) {
+						host.__lazymindCodexBrowser = value;
+						return;
+					}
+				}
+			}
+		}
 		const asset = /^app:\/\/-\/assets\/(?:index|app-main|app-initial)-[a-zA-Z0-9_-]+\.js$/;
 		const urls = Array.from(document.querySelectorAll("link[href],script[type=\"module\"][src]")).map((element) => "href" in element ? element.href : element.src).filter((url) => asset.test(url));
 		const queue = [...new Set(urls)].sort((a, b) => Number(!a.includes("/app-initial-")) - Number(!b.includes("/app-initial-")));
@@ -796,12 +843,13 @@ async function prepareCodexBrowser(loadModule = (url) => import(
 			const url = queue.shift();
 			if (seen.has(url)) continue;
 			seen.add(url);
-			if (url.includes("/app-initial-")) {
+			{
 				const exports = await loadModule(url);
 				const manager = Object.values(exports).find((value) => value && typeof value === "object" && typeof value.pages?.getWebview === "function" && typeof value.pages?.disposeHost === "function" && typeof value.getSnapshot === "function");
-				if (!manager) throw Error("Codex native browser interface is unavailable");
-				host.__lazymindCodexBrowser = manager;
-				return;
+				if (manager) {
+					host.__lazymindCodexBrowser = manager;
+					return;
+				}
 			}
 			const response = await fetch(url, {
 				signal: AbortSignal.timeout(2e3),

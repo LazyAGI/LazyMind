@@ -733,6 +733,7 @@ def test_demo_provenance_cannot_be_erased_by_real_algorithm(monkeypatch):
 
 @pytest.mark.usefixtures('mock_topic_model')
 def test_plugin_contains_only_thin_entry_and_calls_shared_runtime(tmp_path, monkeypatch):
+    import ast
     from lazymind.workflow_toolkit import load_workflow_package_tools
     files = {}
     for source in PACKAGE.rglob('*'):
@@ -743,7 +744,16 @@ def test_plugin_contains_only_thin_entry_and_calls_shared_runtime(tmp_path, monk
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_bytes(source.read_bytes())
         files[relative.as_posix()] = base64.b64encode(source.read_bytes()).decode()
-    assert sorted(p.relative_to(PACKAGE).as_posix() for p in (PACKAGE / 'scripts').rglob('*.py')) == ['scripts/tools.py']
+    scripts = PACKAGE / 'scripts'
+    assert {path.relative_to(scripts).as_posix() for path in scripts.rglob('*.py')} == {
+        'tools.py', 'external_academic_tools.py', 'external_knowledge_tools.py',
+    }
+    for adapter in ('external_academic_tools.py', 'external_knowledge_tools.py'):
+        declarations = ast.parse((scripts / adapter).read_text(encoding='utf-8')).body
+        assert len(declarations) == 1 and isinstance(declarations[0], ast.Assign)
+        target, = declarations[0].targets
+        assert isinstance(target, ast.Name) and target.id == 'ADAPTER_ID'
+        assert isinstance(declarations[0].value, ast.Constant)
     assert len((PACKAGE / 'scripts/tools.py').read_text().splitlines()) < 15
     loaded = load_workflow_package_tools({'files': files}, ['run_paper_step'],
                                         'paper-writing', 'isolated-revision', package_root=tmp_path)

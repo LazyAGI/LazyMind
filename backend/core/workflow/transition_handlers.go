@@ -673,7 +673,11 @@ func applyWorkflowTransition(ctx context.Context, tx *gorm.DB, sessionID string,
 				return err
 			}
 		}
-		if err := guardRunAdvance(tx, session); err != nil {
+		recovery := runAdvanceRecovery{replacesInput: replacesInputCheckpoint(graph, req)}
+		if !req.ResumeForRerun && req.Operation == "rewind" && req.RetryOrigin == "user" && len(targets) == 1 {
+			recovery.replacesReviewStep = req.TargetStepID
+		}
+		if err := guardRunAdvance(tx, session, recovery); err != nil {
 			var rejected *controlstore.Error
 			if errors.As(err, &rejected) {
 				return rejectTransition(req.CommandID, &session, projection, http.StatusConflict, rejected.Code, rejected.Message, false, nil)
@@ -769,6 +773,13 @@ func applyWorkflowTransition(ctx context.Context, tx *gorm.DB, sessionID string,
 			if invalidErr := invalidateForOperation(ctx, tx, &session, graph, req.CommandID, req.Operation, targets[0].TargetStepID); invalidErr != nil {
 				return invalidErr
 			}
+			if controlstore.Controlled(session) {
+				if err := tx.Model(&orm.WorkflowReviewCheckpoint{}).Where("session_id = ? AND status = ? AND attempt_id IN (?)", session.ID, "pending",
+					tx.Model(&orm.WorkflowSessionStep{}).Select("id").Where("session_id = ? AND validity <> ?", session.ID, "effective")).
+					Updates(map[string]any{"status": "superseded", "decision_command_id": req.CommandID, "updated_at": time.Now().UTC()}).Error; err != nil {
+					return err
+				}
+			}
 			var reloadErr error
 			snapshot, reloadErr = loadRuntimeSnapshot(ctx, tx, session.ID, graph)
 			if reloadErr != nil {
@@ -848,7 +859,11 @@ func applyWorkflowTransition(ctx context.Context, tx *gorm.DB, sessionID string,
 			// Tool-dependent steps run inside LazyMind; the session controller stays unchanged.
 			executorHost := session.ControllerHost
 			if controlstore.Controlled(session) {
-				executorHost = executorHostForStep(session.ControllerHost, nodeDef, graph.Runtime)
+				binding, err := controlstore.DecodeBinding(session)
+				if err != nil {
+					return err
+				}
+				executorHost = executorHostForStep(session.ControllerHost, binding.Provider, nodeDef, graph.Runtime)
 			}
 			if executorHost == "external-agent" {
 				if err := queueHostAttempt(ctx, tx, session, target, nodeDef, now); err != nil {
@@ -1041,7 +1056,11 @@ func isBareRetryInput(input string) bool {
 
 func queueHostAttempt(ctx context.Context, tx *gorm.DB, session orm.WorkflowSession, target transitionTarget,
 	node graphengine.CompiledNode, now time.Time) error {
+	node = node.ForExecutor("external-agent")
 	objective := workflowStepObjectiveWithRuntimeBoundaries(node.Prompt, target.Objective, target.UserInput, node.Capabilities, node.LegacyTools, node.TerminalTools)
+	if node.Execution.Supported() {
+		objective = workflowStepObjective(node.Prompt, target.Objective, target.UserInput)
+	}
 	refOrID := session.WorkflowRef
 	if refOrID == "" {
 		refOrID = session.WorkflowID
@@ -1053,11 +1072,15 @@ func queueHostAttempt(ctx context.Context, tx *gorm.DB, session orm.WorkflowSess
 	}
 	value := executor.AttemptContext{ContractVersion: attempt.ContractVersion, SessionID: session.ID,
 		AttemptID: target.TaskID, StepID: target.TargetStepID, AttemptNo: int(count) + 1, Operation: "execute",
+		LaunchRequest: sessionIntentText(session.IntentContext), UserRequest: target.UserInput,
 		Objective: objective, Prompt: node.Prompt, Acceptance: node.Acceptance,
 		Instruction: workflowStepRuntimeInstruction(target.Objective, target.RuntimeInstruction), PartialSelector: target.PartialIndices,
 		WorkflowRevision: session.WorkflowRevisionID, DeclaredOutputs: node.Outputs, DeclaredOutputTypes: outputTypes, RequiredOutputs: node.RequiredOutputs,
 		Capabilities: node.Capabilities, LegacyTools: node.LegacyTools, TerminalTools: node.TerminalTools,
 		ToolsOnly: node.ToolsOnly, TerminalToolsOnly: node.TerminalToolsOnly}
+	if node.Execution != nil {
+		value.Execution = &executor.ExecutionContract{StepExecution: *node.Execution}
+	}
 	payload, err := json.Marshal(value)
 	if err != nil {
 		return err
@@ -1152,11 +1175,12 @@ func attemptInputBindingFromWitness(tx *gorm.DB, sessionID, attemptID string,
 	}
 	var revision orm.WorkflowSlotRevision
 	if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
-		Select("id", "human_artifact_id", "content_snapshot").
+		Select("id", "revision", "human_artifact_id", "content_snapshot").
 		Where("id = ? AND session_id = ?", witness.RevisionID, sessionID).
 		First(&revision).Error; err != nil {
 		return value
 	}
+	value.SourceRevision = fmt.Sprintf("%d", revision.Revision)
 	if revision.HumanArtifactID == nil || *revision.HumanArtifactID == "" {
 		if len(revision.ContentSnapshot) > 0 {
 			value.ContentHash = fmt.Sprintf("sha256:%x", sha256.Sum256(revision.ContentSnapshot))

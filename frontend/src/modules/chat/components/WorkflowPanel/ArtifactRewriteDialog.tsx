@@ -163,11 +163,13 @@ export function ArtifactRewriteDialog({
   const lastFocusRef = useRef<HTMLElement | null>(null);
   const mountedRef = useRef(true);
   const requestIdRef = useRef(0);
+  const previewAbortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
     mountedRef.current = true;
     return () => {
       mountedRef.current = false;
+      previewAbortRef.current?.abort();
       requestIdRef.current += 1;
     };
   }, []);
@@ -213,6 +215,7 @@ export function ArtifactRewriteDialog({
 
   const close = useCallback(() => {
     if (phase === 'previewing') return;
+    previewAbortRef.current?.abort();
     onClose();
     window.setTimeout(() => lastFocusRef.current?.focus(), 0);
   }, [onClose, phase]);
@@ -237,6 +240,9 @@ export function ArtifactRewriteDialog({
     if (!trimmedInstruction || !selection || phase !== 'form') return;
 
     const requestId = ++requestIdRef.current;
+    previewAbortRef.current?.abort();
+    const controller = new AbortController();
+    previewAbortRef.current = controller;
     setPhase('previewing');
     setError(undefined);
     try {
@@ -277,7 +283,7 @@ export function ArtifactRewriteDialog({
                 : { type: 'markdown', selection_ranges: [selection.sourceRange ?? { selected_text: selection.selected_text }] }),
           },
         },
-        { silentError: true } as never,
+        { silentError: true, signal: controller.signal } as never,
       )).data?.data;
       if (!isReadyPreview(result)) {
         throw new Error('invalid preview response');
@@ -319,6 +325,7 @@ export function ArtifactRewriteDialog({
       <div className={`artifact-rewrite-progress artifact-rewrite-progress--${progressHost ? 'docked' : 'floating'}`}
         role='status' aria-live='polite' aria-atomic='true'
         style={progressHost ? undefined : { ...formStyle, ...(portalZIndex === undefined ? {} : { zIndex: portalZIndex }) }}>
+        <button type='button' onClick={() => { previewAbortRef.current?.abort(); requestIdRef.current += 1; setPhase('form'); onClose(); }} aria-label={t('common.cancel')}>{t('common.cancel')}</button>
         <span className='artifact-rewrite-progress__spinner' aria-hidden='true' />
         <span>{tr('previewing')}<span className='artifact-rewrite-progress__hint'>{t('chat.writerLocal.loadingCount', { count: selection.type === 'ir' ? selection.nodeSelections?.length ?? 1 : selection.type === 'markdown' ? selection.sourceRanges?.length ?? selection.paragraphs?.length ?? 1 : 1 })}</span></span>
       </div>,

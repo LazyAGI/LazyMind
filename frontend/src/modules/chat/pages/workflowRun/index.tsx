@@ -5,16 +5,24 @@ import { useParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { AgentAppsAuth } from '@/components/auth';
 import { WorkflowPanel } from '@/modules/chat/components/WorkflowPanel';
+import WorkflowInputRequestCard from '@/modules/chat/components/WorkflowPanel/WorkflowInputRequest';
 import { useWorkflowStore } from '@/modules/chat/store/workflowPanel';
 import { WorkflowSessionApi } from '@/modules/chat/utils/request';
-import { controlActions, deliveryBanner, externalPanelAction, overlayInfoBanner, REVIEW_CHANGED_NOTICE, ReviewRefreshRequired, type WorkflowPanelActionIntent } from '@/modules/chat/utils/workflowControl';
+import { controlActions, deliveryBanner, externalPanelAction, externalContinuationStep, overlayInfoBanner, REVIEW_CHANGED_NOTICE, ReviewRefreshRequired, INPUT_CHANGED_NOTICE, InputRefreshRequired, INPUT_SAVED_EXTERNAL_NOTICE, INPUT_SAVED_PAUSED_NOTICE, INPUT_SAVED_NOTICE, type WorkflowActionIntent, type WorkflowPanelActionIntent } from '@/modules/chat/utils/workflowControl';
 import { loadWorkflowRunSnapshot, watchWorkflowRun, type WorkflowRunSnapshot } from './loadRun';
 import './index.scss';
 import { workflowHostOrigin } from './hostOrigin';
+import WorkflowRequestMessage from './WorkflowRequestMessage';
 
 /** Shared run workbench: user intent goes to Core, never to an interpreted chat prompt. */
-export default function WorkflowRunPage({ embedded = false }: { embedded?: boolean }) {
-  const { sessionId = '' } = useParams();
+export default function WorkflowRunPage({ embedded = false, sessionId: suppliedSessionId, title, resultsOnly = false }: {
+  embedded?: boolean;
+  sessionId?: string;
+  title?: string;
+  resultsOnly?: boolean;
+}) {
+  const { sessionId: routeSessionId = '' } = useParams();
+  const sessionId = suppliedSessionId ?? routeSessionId;
   const { t } = useTranslation();
   const [hostExpanded, setHostExpanded] = useState(false);
   const [hostCollapsed, setHostCollapsed] = useState(false);
@@ -106,31 +114,42 @@ export default function WorkflowRunPage({ embedded = false }: { embedded?: boole
     return () => { current.controller.abort(); unsubscribe(); if (lifetime.current === current) lifetime.current = undefined; setSession(key, null); };
   }, [sessionId, refresh, key, setSession]);
 
-  const act = async (intent: WorkflowPanelActionIntent) => {
+  const act = async (intent: WorkflowPanelActionIntent | WorkflowActionIntent) => {
     setError(''); setNoticeKey('');
     try {
       if (!snapshot?.control) throw new Error('Workflow controls are unavailable');
-      await actions.execute(externalPanelAction(intent, snapshot.session, snapshot.control));
+      await actions.execute(intent.kind === 'answer_input' ? intent : externalPanelAction(intent as WorkflowPanelActionIntent, snapshot.session, snapshot.control));
+      if (intent.kind === 'answer_input') {
+        const current = latest.current?.control;
+        if (current?.continuation === 'stopped') setNoticeKey(INPUT_SAVED_PAUSED_NOTICE);
+        else if (!current?.binding?.bound) setNoticeKey(INPUT_SAVED_EXTERNAL_NOTICE);
+        else setNoticeKey(INPUT_SAVED_NOTICE);
+      }
+      return true;
     } catch (reason) {
-      if (lifetime.current?.key !== key || lifetime.current.controller.signal.aborted) return;
+      if (lifetime.current?.key !== key || lifetime.current.controller.signal.aborted) return false;
       if (reason instanceof ReviewRefreshRequired) setNoticeKey(REVIEW_CHANGED_NOTICE);
+      else if (reason instanceof InputRefreshRequired) setNoticeKey(INPUT_CHANGED_NOTICE);
       else {
         const payload = (reason as { response?: { data?: { error?: { code?: string; message?: string }; message?: string } } })?.response?.data;
         if (payload?.error?.code === 'REVIEW_VERSION_CONFLICT') setNoticeKey(REVIEW_CHANGED_NOTICE);
+        else if (payload?.error?.code === 'INPUT_VERSION_CONFLICT') setNoticeKey(INPUT_CHANGED_NOTICE);
         else setError(payload?.error?.message ?? payload?.message ?? (reason instanceof Error ? reason.message : t('chat.workflowRunControlFailed')));
       }
       void refresh().catch(() => {});
+      return false;
     }
   };
-  const activities = useExecutionActivity(snapshot?.session);
+  const activities = useExecutionActivity(resultsOnly ? undefined : snapshot?.session);
   const control = snapshot?.control;
   const liveDelivery = deliveryBanner(control?.delivery, control?.binding);
   const infoBanner = overlayInfoBanner(noticeKey, control?.delivery, control?.binding);
-  const bannerFromNotice = Boolean(infoBanner && (!liveDelivery || noticeKey === REVIEW_CHANGED_NOTICE));
+  const bannerFromNotice = Boolean(infoBanner && (!liveDelivery || infoBanner.key === noticeKey));
 
-  return <main className={embedded ? 'workflow-run workflow-run--embedded' : 'workflow-run'}
-    style={embedded ? undefined : { maxWidth: 1200, margin: '24px auto', padding: 24 }}>
-    {!embedded && <h1>{t('chat.workflowPanelTitle')}</h1>}
+  return <main className={`workflow-run${embedded || resultsOnly ? ' workflow-run--embedded' : ''}${resultsOnly ? ' workflow-run--results' : ''}`}
+    style={embedded || resultsOnly ? undefined : { maxWidth: 1200, margin: '24px auto', padding: 24 }}>
+    {!embedded && !resultsOnly && <div className='workflow-run__heading'><h1>{title || t('chat.workflowPanelTitle')}</h1></div>}
+    {!embedded && resultsOnly && snapshot && <WorkflowRequestMessage session={snapshot.session} fallback={title} />}
     {error && <Alert type='error' showIcon closable onClose={() => setError('')} message={error} />}
     {syncError && <Alert type='warning' showIcon message={t('chat.workflowRunSyncFailed')} description={syncError} />}
     {control?.continuation === 'binding_required' && <Alert type='warning' showIcon
@@ -139,14 +158,19 @@ export default function WorkflowRunPage({ embedded = false }: { embedded?: boole
       closable={bannerFromNotice} onClose={() => setNoticeKey('')} message={t(infoBanner.key)} />}
     {!snapshot && !error && !syncError && <Spin />}
     {snapshot && <>
-      {!embedded && <Button onClick={() => { void refresh().catch(reason => setError(String(reason))); }}>{t('chat.workflowRunRefresh')}</Button>}
+      {!embedded && !resultsOnly && <Button onClick={() => { void refresh().catch(reason => setError(String(reason))); }}>{t('chat.workflowRunRefresh')}</Button>}
+      {control?.input_request && <WorkflowInputRequestCard request={control.input_request}
+        onAnswer={answerText => act({ kind: 'answer_input', input: control.input_request!, answerText })} />}
       <WorkflowPanel conversationId={key} onRefresh={() => refresh().then(() => {})}
-        embedded={embedded} externalPresentation={{ activities, expanded: hostExpanded,
+        embedded={embedded || resultsOnly} resultsOnly={resultsOnly} externalPresentation={{ activities, expanded: hostExpanded,
           compactEmptyStates: false,
           onToggleExpand: embedded && hostOrigin ? toggleHostExpand : undefined,
           collapsed: embedded ? hostCollapsed : undefined,
           onToggleCollapse: embedded && hostOrigin ? toggleHostCollapse : undefined }}
-        controlAdapter={control ? { execute: act } : undefined} />
+        controlAdapter={control ? {
+          execute: async intent => { await act(intent); },
+          continuationStep: () => latest.current && externalContinuationStep(latest.current.session, latest.current.control),
+        } : undefined} />
     </>}
   </main>;
 }

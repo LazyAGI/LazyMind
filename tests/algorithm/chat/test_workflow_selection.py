@@ -463,6 +463,23 @@ def test_active_workflow_retains_missing_preference_clarification():
     assert 'experiment_execution' in contribution.runtime_context
 
 
+def test_active_workflow_keeps_pinned_stage_guidance_on_continue():
+    guidance = 'Missing experiment data requires ask_user. Draft only from the confirmed outline.'
+    with patch('lazymind.chat.workflow.workflow_manager._client') as factory:
+        factory.return_value.get_state.return_value = {'session_id': 'session', 'status': 'active'}
+        factory.return_value.get_workflow.return_value.result = {'when_to_use': guidance}
+        contribution = resolve_workflow_injection(
+            {'session_id': 'session', 'workflow_id': 'paper-writing', 'revision_id': 'pinned'},
+            current_query='继续',
+            workflow_catalog=[{'workflow_id': 'paper-writing', 'workflow_ref': 'builtin:paper-writing',
+                               'revision_id': 'new-head', 'when_to_use': 'Different latest workflow rules.'}],
+        )
+    factory.return_value.get_workflow.assert_called_once_with('paper-writing', 'pinned')
+    assert guidance in contribution.runtime_context
+    assert 'Different latest workflow rules.' not in contribution.runtime_context
+    assert 'advance_step' in _tool_names(contribution)
+
+
 def test_fixed_startup_choice_policy_overrides_model_other_option():
     runtime = {
         'clarification_fields': [{
