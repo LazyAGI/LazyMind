@@ -22,6 +22,9 @@ import { useEffect, useRef, useState, useCallback, useMemo, MouseEvent } from "r
 import { useParams } from "react-router-dom";
 import {
   CopyOutlined,
+  ArrowLeftOutlined,
+  FolderAddOutlined,
+  PlusOutlined,
   DownOutlined,
   RightOutlined,
 } from "@ant-design/icons";
@@ -65,7 +68,6 @@ import {
   isDeveloperModeActive,
 } from "@/utils/developerMode";
 
-import { DetailPageHeader } from "@/components/ui";
 import KnowledgeBaseSyncNow from "@/modules/knowledge/components/KnowledgeBaseSyncNow";
 import {
   effectiveProcessingLevel,
@@ -456,7 +458,7 @@ const Detail = () => {
 
   return (
     <div
-      className={`knowledge-detail-page${paperLibrary ? " knowledge-detail-page--paper" : ""}`}
+      className={`knowledge-detail-page${paperLibrary ? " knowledge-detail-page--paper" : " knowledge-detail-page--documents"}`}
       style={{
         width: "100%",
         minWidth: 0,
@@ -465,49 +467,32 @@ const Detail = () => {
         paddingBottom: paperLibrary ? "12px" : "24px",
       }}
     >
-      {!paperLibrary && <DetailPageHeader
-        className="knowledge-detail-header"
-        title={
-          <span className="knowledge-detail-title-copy">
-            <strong><KnowledgeLibraryLogo scene={detail?.scene} compact />{detail?.display_name}</strong>
-            {detail?.desc ? <small>{detail.desc}</small> : null}
-          </span>
-        }
-        titleExtra={
-          developerActive ? (
-            <>
-              <span
-                style={{
-                  marginRight: "4px",
-                  color: "var(--color-text-description)",
-                }}
-              >
-                ID: {detail?.dataset_id}
-              </span>
-              <CopyOutlined
-                style={{ color: "var(--color-text-description)" }}
-                onClick={async () => {
-                  try {
-                    await writeTextToClipboard(detail?.dataset_id || "");
-                    message.success(t("knowledge.copySuccess"));
-                  } catch {
-                    message.error(t("knowledge.copyFailedManual"));
-                  }
-                }}
-              />
-            </>
-          ) : null
-        }
-        breadcrumbs={[
-          { title: <Link to={listUrl} onClick={(event: MouseEvent<HTMLAnchorElement>) => {
-            if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
-            event.preventDefault();
-            returnToList();
-          }}>{t("layout.knowledgeBase")}</Link> },
-          { title: detail?.display_name },
-        ]}
-        onBack={() => returnToList()}
-      />}
+      {!paperLibrary && <header className="document-library-header">
+        <div className="document-library-heading">
+          <Button type="text" icon={<ArrowLeftOutlined aria-hidden />} aria-label={t("common.back")} onClick={() => returnToList()} />
+          <nav aria-label={t("layout.knowledgeBase")}>
+            <Link to={listUrl} onClick={(event: MouseEvent<HTMLAnchorElement>) => {
+              if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+              event.preventDefault();
+              returnToList();
+            }}>{t("layout.knowledgeBase")}</Link>
+            <span aria-hidden="true">/</span>
+            <KnowledgeLibraryLogo scene={detail?.scene} compact />
+            <h1 aria-current="page" title={detail?.display_name}>{detail?.display_name}</h1>
+          </nav>
+        </div>
+        {developerActive && detail?.dataset_id && <div className="document-library-id">
+          <span>ID: {detail.dataset_id}</span>
+          <Button type="text" size="small" icon={<CopyOutlined aria-hidden />} aria-label={`${t("common.copy")} ID`} onClick={async () => {
+            try {
+              await writeTextToClipboard(detail.dataset_id || "");
+              message.success(t("knowledge.copySuccess"));
+            } catch {
+              message.error(t("knowledge.copyFailedManual"));
+            }
+          }} />
+        </div>}
+      </header>}
       {(taskPollingError || importTaskFailures.length > 0) && (
         <Alert
           className="knowledge-parsing-notice knowledge-import-error"
@@ -567,19 +552,10 @@ const Detail = () => {
           />
         </div>
       ) : null}
-      {!paperLibrary && <div className="toolbar my-4 mt-6 w-full">
-        <Search
-          className="search-input"
-          placeholder={t("knowledge.searchDocPlaceholder")}
-          allowClear
-          variant="borderless"
-          onSearch={onSearch}
-          style={{
-            width: 300,
-          }}
-        />
-        {canImport && (
-          <div className="toolbar-actions">
+      {!paperLibrary && <div className={`document-library-layout${canImport ? "" : " is-readonly"}`}>
+        {canImport && <aside className="document-library-rail" aria-label={t("knowledge.libraryActions")}>
+          {detail?.desc && <p className="document-library-description">{detail.desc}</p>}
+          <div className="document-library-actions">
             {showDataSourceSync && detail?.dataset_id ? (
               <KnowledgeBaseSyncNow
                 datasetId={detail.dataset_id}
@@ -587,51 +563,6 @@ const Detail = () => {
                 onSyncComplete={refreshKnowledgeAfterSync}
               />
             ) : null}
-            {hasWritePermission && (
-              <Button
-                color="primary"
-                variant="outlined"
-                ghost
-                disabled={!ragReady}
-                title={!ragReady ? ragUnavailableReason : undefined}
-                onClick={() => {
-                  createFolderRef.current?.onOpen({
-                    title: t("knowledge.createFolder"),
-                    form: {
-                      name: t("knowledge.folderName"),
-                      namePlaceholder: t("knowledge.folderNameRule"),
-                      nameLen: 30,
-                      nameRules: [
-                        {
-                          required: true,
-                          validator: (_: any, value: string) => {
-                            if (!value) {
-                              return Promise.reject(
-                                t("knowledge.inputFolderName"),
-                              );
-                            }
-                            if (
-                              !/^[a-zA-Z\d\u4e00-\u9fa5_]+$/.test(value) ||
-                              value.length > 30
-                            ) {
-                              return Promise.reject(
-                                t("knowledge.folderNameRule"),
-                              );
-                            }
-                            return Promise.resolve();
-                          },
-                        },
-                      ],
-                    },
-                    data: {
-                      name: "",
-                    },
-                  });
-                }}
-              >
-                {t("knowledge.createFolder")}
-              </Button>
-            )}
             <Badge count={runningTotal} size="small" style={{ zIndex: 2 }}>
               <Tooltip
                 title={
@@ -740,13 +671,57 @@ const Detail = () => {
                   <Button
                     className="knowledge-toolbar-dropdown-button"
                     type="primary"
+                    icon={<PlusOutlined aria-hidden />}
                   >
                     {t("knowledge.importFile")}
-                    <DownOutlined />
+                    <DownOutlined aria-hidden />
                   </Button>
                 </Dropdown>
               </Tooltip>
             </Badge>
+            {hasWritePermission && (
+              <Button
+                icon={<FolderAddOutlined aria-hidden />}
+                disabled={!ragReady}
+                title={!ragReady ? ragUnavailableReason : undefined}
+                onClick={() => {
+                  createFolderRef.current?.onOpen({
+                    title: t("knowledge.createFolder"),
+                    form: {
+                      name: t("knowledge.folderName"),
+                      namePlaceholder: t("knowledge.folderNameRule"),
+                      nameLen: 30,
+                      nameRules: [
+                        {
+                          required: true,
+                          validator: (_: any, value: string) => {
+                            if (!value) {
+                              return Promise.reject(
+                                t("knowledge.inputFolderName"),
+                              );
+                            }
+                            if (
+                              !/^[a-zA-Z\d\u4e00-\u9fa5_]+$/.test(value) ||
+                              value.length > 30
+                            ) {
+                              return Promise.reject(
+                                t("knowledge.folderNameRule"),
+                              );
+                            }
+                            return Promise.resolve();
+                          },
+                        },
+                      ],
+                    },
+                    data: {
+                      name: "",
+                    },
+                  });
+                }}
+              >
+                {t("knowledge.createFolder")}
+              </Button>
+            )}
             {hasWritePermission && (
               <Dropdown
                 menu={{
@@ -796,29 +771,39 @@ const Detail = () => {
                 <span style={{ display: "inline-flex" }}>
                   <Button
                     className="knowledge-toolbar-dropdown-button"
-                    variant="outlined"
-                    color="primary"
-                    ghost
                   >
                     {t("knowledge.batchActions")}
-                    <DownOutlined />
+                    <DownOutlined aria-hidden />
                   </Button>
                 </span>
               </Dropdown>
             )}
           </div>
-        )}
+        </aside>}
+        <section className="document-library-board" aria-label={detail?.display_name}>
+          <div className="document-library-toolbar">
+            <h2>{t("knowledge.documentList")}</h2>
+            <Search
+              className="search-input"
+              placeholder={t("knowledge.searchDocPlaceholder")}
+              allowClear
+              aria-label={t("knowledge.searchDocPlaceholder")}
+              onSearch={onSearch}
+            />
+          </div>
+          {!canImport && detail?.desc && <p className="document-library-description">{detail.desc}</p>}
+          {detail && (
+            <KnowledgeTable
+              ref={knowledgeListRef}
+              detail={detail}
+              documentParsingEnabled={documentParsingEnabled}
+              onImportKnowledge={(data) => openImportModal(data)}
+              getImportingTotal={getImportingTotal}
+              getDetail={getDetail}
+            />
+          )}
+        </section>
       </div>}
-      {detail && !paperLibrary && (
-        <KnowledgeTable
-          ref={knowledgeListRef}
-          detail={detail}
-          documentParsingEnabled={documentParsingEnabled}
-          onImportKnowledge={(data) => openImportModal(data)}
-          getImportingTotal={getImportingTotal}
-          getDetail={getDetail}
-        />
-      )}
 
       <RenameModel
         ref={createFolderRef}
