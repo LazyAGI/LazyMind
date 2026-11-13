@@ -10921,7 +10921,7 @@ const enUS = {
       resourceConsequence: "{{title}} calls already in flight are not force-stopped; the other resource group is unaffected.",
       defaultConsequence: "Calls already in flight are not force-stopped. Re-enabling restores child selections.",
       developerTitle: "{{action}} developer mode",
-      developerEnableContent: "A valid GitHub connection is required. We will check your connection before enabling developer-mode features.",
+      developerEnableContent: "Before enabling Developer Mode, you need a valid GitHub connection or local GitHub credentials. Confirm to check automatically.",
       developerDisableContent: "Turning this off disables developer-mode features but does not delete existing self-evolution data.",
       mcpEnabledToast: "Enabled {{updated}} services; {{skipped}} unverified services stay disabled",
       mcpToggledToast: "{{state}} {{count}} MCP services",
@@ -11258,11 +11258,11 @@ const enUS = {
 
     developer: {
       description: "Manage Developer Mode and the options that take effect only while it is on.",
-      githubGuideTitle: "Connect GitHub to enable Developer Mode",
-      githubGuideDescription: "Connect a GitHub account before enabling Developer Mode. Once connected, return to Settings and enable it again. Canceling or leaving the connection incomplete keeps Developer Mode off.",
+      githubGuideTitle: "Cannot enable Developer Mode yet",
+      githubGuideDescription: "No usable GitHub credentials were found. Check your local credentials or connect GitHub, then try again.",
       githubGuideConnect: "Connect GitHub",
       githubGuideCancel: "Cancel enabling",
-      githubCheckFailed: "Could not check your GitHub connection. Developer Mode is still off. Please retry.",
+      githubCheckFailed: "Could not check your GitHub connection or local Git credential capability. Developer Mode is still off. Please retry.",
       inactiveNotice: "Your saved options are preserved but currently inactive. Enable Developer Mode to use them.",
       optionsGroupAria: "Dependent Developer Mode options",
       enableTitle: "Enable developer mode",

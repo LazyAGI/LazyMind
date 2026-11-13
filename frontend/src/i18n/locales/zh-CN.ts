@@ -10657,7 +10657,7 @@ const zhCN = {
       resourceConsequence: "已经发起的{{title}}调用不会被强制终止，另一组资源不受影响。",
       defaultConsequence: "已经发起的调用不会被强制终止。重新开启后恢复子项选择。",
       developerTitle: "{{action}}开发者模式",
-      developerEnableContent: "开启前需要关联有效的 GitHub 账号，系统会先检查关联状态。开启后将激活开发者模式相关功能。",
+      developerEnableContent: "开启开发者模式前，需要有效的 GitHub 连接或本机 GitHub 凭证。确认后将自动检查。",
       developerDisableContent: "关闭后将停用开发者模式相关功能，但不会删除已有的自进化数据",
       mcpEnabledToast: "已启用 {{updated}} 个服务，{{skipped}} 个未验证服务保持停用",
       mcpToggledToast: "已{{state}} {{count}} 个 MCP 服务",
@@ -10994,11 +10994,11 @@ const zhCN = {
 
     developer: {
       description: "管理开发者模式，以及仅在该模式开启时生效的选项。",
-      githubGuideTitle: "关联 GitHub 后开启开发者模式",
-      githubGuideDescription: "开启开发者模式前，请先关联 GitHub 账号。关联完成后，返回设置再次开启；取消或未完成关联时，开发者模式将保持关闭。",
+      githubGuideTitle: "暂时无法开启开发者模式",
+      githubGuideDescription: "未检测到可用的 GitHub 凭证。请检查本机凭证，或关联 GitHub 后重试。",
       githubGuideConnect: "关联 GitHub",
       githubGuideCancel: "取消开启",
-      githubCheckFailed: "暂时无法确认 GitHub 关联状态，开发者模式尚未开启。请重试。",
+      githubCheckFailed: "暂时无法确认 GitHub 连接或本机 Git 凭证能力，开发者模式尚未开启。请重试。",
       inactiveNotice: "已保存的选项会保留，但当前暂停生效。开启开发者模式后即可使用。",
       optionsGroupAria: "依赖开发者模式的选项",
       enableTitle: "启用开发者模式",

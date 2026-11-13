@@ -62,6 +62,11 @@ class GitHubStarLocalResult(BaseModel):
     write_performed: bool
 
 
+class GitHubStarLocalCapability(BaseModel):
+    repository: str
+    eligible: bool
+
+
 class CloudOAuthAuthorizeURLBody(BaseModel):
     tenant_id: str = ''
     owner_user_id: str | None = None

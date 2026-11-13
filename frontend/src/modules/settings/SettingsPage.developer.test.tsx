@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { ConfigProvider } from "antd";
 import { Link, MemoryRouter, Route, Routes } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -22,6 +22,7 @@ const mocks = vi.hoisted(() => {
     fetchUserUiPreferences: vi.fn(),
     applySettingsChange: vi.fn(),
     listTasks: vi.fn(),
+    readLocalCapability: vi.fn(),
   };
 });
 
@@ -56,6 +57,10 @@ vi.mock("./api", () => ({
   applySettingsChange: mocks.applySettingsChange,
 }));
 
+vi.mock("@/modules/githubStar/api", () => ({
+  readLocalGitHubStarCapability: mocks.readLocalCapability,
+}));
+
 vi.mock("@/modules/user/uiPreferencesApi", () => ({
   fetchUserUiPreferences: mocks.fetchUserUiPreferences,
   patchUserUiPreferences: vi.fn(),
@@ -73,6 +78,7 @@ describe("SettingsPage developer preferences", () => {
     localStorage.clear();
     vi.spyOn(dataSourceCloudOauthApi, "listConnectionsApiAuthserviceV1CloudConnectionsGet").mockResolvedValue({ data: { items: [{ provider: "github", status: "ACTIVE" }] } } as never);
     mocks.listTasks.mockReset().mockResolvedValue({ items: [], total: 0 });
+    mocks.readLocalCapability.mockReset().mockResolvedValue({ repository: "LazyAGI/LazyMind", eligible: false });
     mocks.applySettingsChange.mockReset().mockResolvedValue({ key: "developer_mode_active", enabled: true, preferences: { developer_mode_active: true } });
     mocks.fetchSettingsOverview.mockReset().mockResolvedValue({
       controls: {},
@@ -87,12 +93,14 @@ describe("SettingsPage developer preferences", () => {
     });
   });
 
-  it("enables developer mode only after confirmation and persistence", async () => {
+  it("checks and saves developer mode directly without a confirmation dialog", async () => {
     mocks.fetchUserUiPreferences.mockResolvedValue({
       developer_mode_active: false,
       performance_stats_enabled: true,
       sensitive_word_filter_enabled: true,
     });
+    let finish!: (value: unknown) => void;
+    mocks.applySettingsChange.mockReturnValue(new Promise(resolve => { finish = resolve; }));
     render(<ConfigProvider theme={{ token: { motion: false } }}><MemoryRouter initialEntries={["/settings?section=developer"]}><SettingsPage /></MemoryRouter></ConfigProvider>);
     const toggle = await screen.findByRole("switch", { name: "settingsPage.developer.modeAria" });
     const group = screen.getByRole("group", { name: "settingsPage.developer.optionsGroupAria" });
@@ -100,12 +108,15 @@ describe("SettingsPage developer preferences", () => {
     expect(within(group).queryByRole("status")).not.toBeInTheDocument();
     expect(within(group).queryByText("settingsPage.developer.inactiveNotice")).not.toBeInTheDocument();
     fireEvent.click(toggle);
-    await screen.findByText("settingsPage.confirm.developerEnableContent");
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    await waitFor(() => expect(mocks.applySettingsChange).toHaveBeenCalledTimes(1));
     expect(toggle).toHaveAttribute("aria-checked", "false");
-    expect(mocks.applySettingsChange).not.toHaveBeenCalled();
-    expect(dataSourceCloudOauthApi.listConnectionsApiAuthserviceV1CloudConnectionsGet).not.toHaveBeenCalled();
+    expect(dataSourceCloudOauthApi.listConnectionsApiAuthserviceV1CloudConnectionsGet).toHaveBeenCalledTimes(1);
+    expect(mocks.readLocalCapability).not.toHaveBeenCalled();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     expect(screen.getByRole("switch", { name: "settingsPage.developer.performanceAria" })).toBeDisabled();
-    fireEvent.click(screen.getByText("settingsPage.confirmEnable"));
+    await act(async () => finish({ key: "developer_mode_active", enabled: true,
+      preferences: { developer_mode_active: true } }));
     await waitFor(() => expect(toggle).toHaveAttribute("aria-checked", "true"));
     expect(mocks.applySettingsChange).toHaveBeenCalledTimes(1);
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
@@ -129,10 +140,9 @@ describe("SettingsPage developer preferences", () => {
     render(<ConfigProvider theme={{ token: { motion: false } }}><MemoryRouter initialEntries={["/settings?section=overview"]}><SettingsPage /></MemoryRouter></ConfigProvider>);
     const toggle = await screen.findByRole("switch", { name: "settingsPage.overview.enableDeveloper" });
     fireEvent.click(toggle);
-    await screen.findByText("settingsPage.confirm.developerEnableContent");
-    expect(dataSourceCloudOauthApi.listConnectionsApiAuthserviceV1CloudConnectionsGet).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByText("settingsPage.confirmEnable"));
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     await waitFor(() => expect(toggle).toBeChecked());
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     expect(dataSourceCloudOauthApi.listConnectionsApiAuthserviceV1CloudConnectionsGet).toHaveBeenCalledTimes(1);
     expect(mocks.applySettingsChange).toHaveBeenCalledTimes(1);
     expect(screen.queryByText("settingsPage.developer.githubGuideTitle")).not.toBeInTheDocument();
@@ -141,20 +151,40 @@ describe("SettingsPage developer preferences", () => {
   it.each([
     ["developer", "settingsPage.developer.modeAria"],
     ["overview", "settingsPage.overview.enableDeveloper"],
-  ])("keeps %s mode off without a GitHub connection, including an old skip record", async (section, name) => {
+  ])("keeps %s mode off without a GitHub connection or local capability, including an old skip record", async (section, name) => {
     vi.mocked(dataSourceCloudOauthApi.listConnectionsApiAuthserviceV1CloudConnectionsGet).mockResolvedValue({ data: { items: [] } } as never);
     localStorage.setItem("lazymind:developer-github-guide-dismissed:user-1", "1");
     render(<ConfigProvider theme={{ token: { motion: false } }}><MemoryRouter initialEntries={[`/settings?section=${section}`]}><SettingsPage /></MemoryRouter></ConfigProvider>);
     const toggle = await screen.findByRole("switch", { name });
     fireEvent.click(toggle);
-    fireEvent.click(await screen.findByText("settingsPage.confirmEnable"));
     await screen.findByText("settingsPage.developer.githubGuideDescription");
+    expect(screen.queryByText("settingsPage.confirm.developerEnableContent")).not.toBeInTheDocument();
+    expect(dataSourceCloudOauthApi.listConnectionsApiAuthserviceV1CloudConnectionsGet).toHaveBeenCalledTimes(1);
+    expect(mocks.readLocalCapability).toHaveBeenCalledTimes(1);
     expect(toggle).not.toBeChecked();
     expect(mocks.applySettingsChange).not.toHaveBeenCalled();
     expect(screen.queryByText("settingsPage.developer.githubGuideSkip")).not.toBeInTheDocument();
     fireEvent.click(screen.getByText("settingsPage.developer.githubGuideCancel"));
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
     expect(toggle).not.toBeChecked();
+  });
+
+  it.each([
+    ["developer", "settingsPage.developer.modeAria"],
+    ["overview", "settingsPage.overview.enableDeveloper"],
+  ])("enables %s mode with local capability and no GitHub connection", async (section, name) => {
+    vi.mocked(dataSourceCloudOauthApi.listConnectionsApiAuthserviceV1CloudConnectionsGet)
+      .mockResolvedValue({ data: { items: [] } } as never);
+    mocks.readLocalCapability.mockResolvedValue({ repository: "LazyAGI/LazyMind", eligible: true });
+    render(<ConfigProvider theme={{ token: { motion: false } }}><MemoryRouter initialEntries={[`/settings?section=${section}`]}><SettingsPage /></MemoryRouter></ConfigProvider>);
+    const toggle = await screen.findByRole("switch", { name });
+    fireEvent.click(toggle);
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    await waitFor(() => expect(toggle).toBeChecked());
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(mocks.readLocalCapability).toHaveBeenCalledTimes(1);
+    expect(mocks.applySettingsChange).toHaveBeenCalledTimes(1);
+    expect(screen.queryByText("settingsPage.developer.githubGuideDescription")).not.toBeInTheDocument();
   });
 
   it("keeps mode off after an incomplete GitHub round trip and enables only after a fresh valid check", async () => {
@@ -166,7 +196,6 @@ describe("SettingsPage developer preferences", () => {
       </Routes>
     </MemoryRouter></ConfigProvider>);
     fireEvent.click(await screen.findByRole("switch", { name: "settingsPage.developer.modeAria" }));
-    fireEvent.click(await screen.findByText("settingsPage.confirmEnable"));
     fireEvent.click(await screen.findByText("settingsPage.developer.githubGuideConnect"));
     fireEvent.click(await screen.findByText("Return from GitHub"));
     const toggle = await screen.findByRole("switch", { name: "settingsPage.developer.modeAria" });
@@ -174,7 +203,6 @@ describe("SettingsPage developer preferences", () => {
     expect(mocks.applySettingsChange).not.toHaveBeenCalled();
     vi.mocked(dataSourceCloudOauthApi.listConnectionsApiAuthserviceV1CloudConnectionsGet).mockResolvedValue({ data: { items: [{ provider: "github", status: "ACTIVE" }] } } as never);
     fireEvent.click(toggle);
-    fireEvent.click(await screen.findByText("settingsPage.confirmEnable"));
     await waitFor(() => expect(toggle).toBeChecked());
     expect(mocks.applySettingsChange).toHaveBeenCalledTimes(1);
     expect(dataSourceCloudOauthApi.listConnectionsApiAuthserviceV1CloudConnectionsGet).toHaveBeenCalledTimes(2);
@@ -189,12 +217,16 @@ describe("SettingsPage developer preferences", () => {
     expect(screen.queryByText("settingsPage.developer.githubGuideDescription")).not.toBeInTheDocument();
   });
 
-  it("keeps developer mode and its child controls off when enabling is canceled", async () => {
-    render(<MemoryRouter initialEntries={["/settings?section=developer"]}><SettingsPage /></MemoryRouter>);
+  it("keeps mode and its child controls off when the direct GitHub guide is canceled", async () => {
+    vi.mocked(dataSourceCloudOauthApi.listConnectionsApiAuthserviceV1CloudConnectionsGet)
+      .mockResolvedValue({ data: { items: [] } } as never);
+    render(<ConfigProvider theme={{ token: { motion: false } }}><MemoryRouter initialEntries={["/settings?section=developer"]}><SettingsPage /></MemoryRouter></ConfigProvider>);
     const toggle = await screen.findByRole("switch", { name: "settingsPage.developer.modeAria" });
     fireEvent.click(toggle);
-    await screen.findByText("settingsPage.confirm.developerEnableContent");
-    fireEvent.click(screen.getByText("settingsPage.cancel"));
+    await screen.findByText("settingsPage.developer.githubGuideDescription");
+    expect(screen.queryByText("settingsPage.confirm.developerEnableContent")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByText("settingsPage.developer.githubGuideCancel"));
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
     expect(toggle).toHaveAttribute("aria-checked", "false");
     expect(mocks.applySettingsChange).not.toHaveBeenCalled();
     expect(screen.getByRole("switch", { name: "settingsPage.developer.performanceAria" })).toBeDisabled();

@@ -5,6 +5,7 @@ import { applySettingsChange } from "./api";
 import { listTasks } from "@/modules/taskCenter/api";
 import { dataSourceCloudOauthApi } from "@/modules/dataSource/api/clients";
 import { getCloudConnectionItems } from "@/modules/dataSource/mappers/cloudConnection";
+import { readLocalGitHubStarCapability } from "@/modules/githubStar/api";
 import type { SettingsChangeRequest, SettingsChangeKey, SettingsChangeResult } from "./api";
 import { useSettingsDraft } from "./SettingsNavigationGuard";
 
@@ -31,15 +32,28 @@ export function useSettingsChange(onSaved: (result: SettingsChangeResult) => voi
     let checkingGitHub = change.key === "developer_mode_active" && change.enabled;
     try {
       if (checkingGitHub) {
-        const response = await dataSourceCloudOauthApi.listConnectionsApiAuthserviceV1CloudConnectionsGet(
-          { provider: "github", status: null }, githubCheckOptions,
-        );
+        let hasConnection = false;
+        let connectionCheckFailed = false;
+        try {
+          const response = await dataSourceCloudOauthApi.listConnectionsApiAuthserviceV1CloudConnectionsGet(
+            { provider: "github", status: null }, githubCheckOptions,
+          );
+          hasConnection = getCloudConnectionItems(response.data).some(
+            account => account.provider === "github" && account.status === "ACTIVE",
+          );
+        } catch {
+          connectionCheckFailed = true;
+        }
         if (!mounted.current) return;
-        if (!getCloudConnectionItems(response.data).some(account => account.provider === "github" && account.status === "ACTIVE")) {
-          setPending(change);
-          setFailure(null);
-          setGitHubRequired(true);
-          return;
+        if (!hasConnection) {
+          const local = await readLocalGitHubStarCapability();
+          if (!mounted.current) return;
+          if (local.eligible !== true) {
+            setPending(change);
+            setFailure(connectionCheckFailed ? "github" : null);
+            setGitHubRequired(!connectionCheckFailed);
+            return;
+          }
         }
         checkingGitHub = false;
       }
@@ -80,8 +94,7 @@ export function useSettingsChange(onSaved: (result: SettingsChangeResult) => voi
   };
   const requestChange = (key: SettingsChangeKey, enabled: boolean) => {
     if (busy.current || pending) return;
-    if (enabled && key === "developer_mode_active") setPending({ key, enabled });
-    else if (enabled) void save({ key, enabled });
+    if (enabled) void save({ key, enabled });
     else if (key === "developer_mode_active") void checkDeveloperTasks({ key, enabled });
     else setPending({ key, enabled });
   };

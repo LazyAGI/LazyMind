@@ -17,6 +17,7 @@ import (
 	"gorm.io/gorm/clause"
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
+	"lazymind/core/historyinjection"
 	"lazymind/core/maintenance"
 	"lazymind/core/store"
 )
@@ -73,6 +74,24 @@ func githubStarRoot(ctx context.Context, db *gorm.DB, task orm.TaskCenterTask) (
 	resolved, err := resolveTaskForResponse(ctx, db, task)
 	if err != nil || resolved.Status != "succeeded" {
 		return "", false, err
+	}
+	if injectedAt, imported := historyinjection.InjectionTime(conversation.Ext); imported {
+		rootCreatedAt := task.CreatedAt
+		if resolved.WorkflowSessionID != nil && *resolved.WorkflowSessionID != "" {
+			var session orm.WorkflowSession
+			err := db.WithContext(ctx).Select("created_at").Where("id=?", *resolved.WorkflowSessionID).Take(&session).Error
+			if err != nil {
+				if errors.Is(err, gorm.ErrRecordNotFound) {
+					return "", false, nil
+				}
+				return "", false, err
+			}
+			rootCreatedAt = session.CreatedAt
+		}
+		// Imported roots do not count, while new work in the same conversation can.
+		if !rootCreatedAt.After(injectedAt) {
+			return "", false, nil
+		}
 	}
 	key := "task:" + task.ID
 	if resolved.WorkflowSessionID != nil && *resolved.WorkflowSessionID != "" {

@@ -39,6 +39,11 @@ export interface LocalGitHubStarResult {
   write_performed: boolean;
 }
 
+export interface LocalGitHubStarCapability {
+  repository: string;
+  eligible: boolean;
+}
+
 export interface GitHubStarClaim {
   show: boolean;
   reason: string;
@@ -67,6 +72,11 @@ export async function writeGitHubStar(body: {
 
 export async function writeLocalGitHubStar(body: { confirmed: true }): Promise<LocalGitHubStarResult> {
   const response = await axiosInstance.put(`${starPath}/local`, body, options);
+  return unwrapApiData(response.data);
+}
+
+export async function readLocalGitHubStarCapability(): Promise<LocalGitHubStarCapability> {
+  const response = await axiosInstance.get(`${starPath}/local`, options);
   return unwrapApiData(response.data);
 }
 

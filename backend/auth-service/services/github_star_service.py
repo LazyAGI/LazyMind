@@ -119,6 +119,24 @@ class GitHubStarService:
             raise _error(ErrorCodes.GITHUB_STAR_UNAVAILABLE, 'unavailable')
         return account_id, login
 
+    def _local_identity(self, probe):
+        if probe is None:
+            return None
+        try:
+            credential = probe()
+        except GitHubCLIError:
+            return None
+        if credential is None:
+            return None
+        token = credential['access_token']
+        try:
+            account_id, login = self._inspect_token(token)
+        except AppException as exc:
+            if exc.http_code in (401, 403):
+                return None
+            raise
+        return token, account_id, login
+
     def status(self, *, owner_user_id: str, connection_id: str = '') -> dict:
         if connection_id:
             # Ownership errors are not disguised as an empty account list.
@@ -156,6 +174,9 @@ class GitHubStarService:
                       'account_id': account_id, 'login': login, 'state': 'starred', 'write_performed': False}
             return self._write_star(token, result)
 
+    def local_capability(self, *, probe=None) -> dict:
+        return {'repository': REPOSITORY, 'eligible': self._local_identity(probe) is not None}
+
     def star_local(self, *, confirmed: bool, probe=None) -> dict:
         if confirmed is not True:
             raise _error(ErrorCodes.INVALID_REQUEST, 'confirmation_required')
@@ -165,14 +186,10 @@ class GitHubStarService:
             return unavailable
         with self._write_lock:
             try:
-                credential = probe()
-            except GitHubCLIError:
-                return unavailable
-            if credential is None:
-                return unavailable
-            token = credential['access_token']
-            try:
-                account_id, login = self._inspect_token(token)
+                identity = self._local_identity(probe)
+                if identity is None:
+                    return unavailable
+                token, account_id, login = identity
                 result = {**unavailable, 'state': 'starred', 'account_id': account_id, 'login': login}
                 return self._write_star(token, result)
             except AppException as exc:
