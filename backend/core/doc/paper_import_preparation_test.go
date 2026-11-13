@@ -106,6 +106,39 @@ func TestPaperImportUsesOnlyBoundedReadingPreparation(t *testing.T) {
 		}
 	}
 }
+
+func TestPaperOriginalImportAndUploadWithoutRAG(t *testing.T) {
+	t.Setenv("LAZYMIND_RAG_ENABLED", "false")
+	for _, entry := range []string{"original_service", "page_upload"} {
+		t.Run(entry, func(t *testing.T) {
+			db, ds, document, task := seedPaperImportPreparation(t, "academic_papers", ProcessingLevelIndexed, "demand")
+			if entry == "original_service" {
+				svc, _ := NewOriginalService(OriginalServiceDeps{DB: db.DB})
+				result := svc.SubmitOriginalProcessing(context.Background(), DatasetCatalogCaller{UserID: "owner"}, OriginalImportResult{Document: document, Task: task})
+				if result.SubmissionStatus != "not_requested" || result.Start.Message != "document stored without parsing" {
+					t.Fatalf("paper original depended on RAG: %+v", result)
+				}
+			} else {
+				r := httptest.NewRequest("POST", "/tasks:start", nil)
+				r.Header.Set("X-User-Id", "owner")
+				result, err := startTasksInternal(r, ds.ID, []string{task.ID})
+				if err != nil || len(result) != 1 || result[0].Message != "document stored without parsing" {
+					t.Fatalf("paper upload depended on RAG: %+v %v", result, err)
+				}
+			}
+			var ext documentExt
+			json.Unmarshal(document.Ext, &ext)
+			if _, err := os.Stat(ext.StoredPath); err != nil {
+				t.Fatal("original is no longer readable", err)
+			}
+			var jobs int64
+			db.Model(&orm.AsyncJob{}).Count(&jobs)
+			if jobs != 0 {
+				t.Fatal("import unexpectedly enqueued parsing")
+			}
+		})
+	}
+}
 func TestPaperExplicitEnsureStillSubmitsAfterStoreOnlyImport(t *testing.T) {
 	installOriginalSourceTransport(t)
 	t.Setenv("LAZYMIND_RAG_ENABLED", "true")

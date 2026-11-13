@@ -27,6 +27,7 @@ from lazyllm.common import AllKeysExhaustedError, KeyAuthError, KeyPool
 from lazyllm.common.threading import ThreadPoolExecutor
 from lazyllm.tools.rag.readers.ocrReader.dynamic_pdf_reader import DynamicPDFReader as _DynamicPDFReader
 from lazyllm.tools.rag.readers.ocrReader.mineru_pdf_reader import MineruPDFReader as _MineruPDFReader
+from lazymind.common.mineru_transport import official_api_request
 
 
 _PENDING_STATES = frozenset({'waiting-file', 'uploading', 'pending', 'running', 'converting'})
@@ -40,6 +41,8 @@ def _safe_message(value) -> str:
 
 
 def _retryable_transport(error: requests.RequestException) -> bool:
+    if isinstance(error, requests.exceptions.SSLError):
+        return False
     if isinstance(error, (requests.Timeout, requests.ConnectionError)):
         return True
     if isinstance(error, requests.HTTPError):
@@ -62,6 +65,13 @@ class LazyMindMineruPDFReader(_MineruPDFReader):
         # LazyLLM derives the dynamic auth lookup from the concrete class
         # name. Preserve the configured `ocr_auth.mineru` contract.
         self._auth_source_key = 'mineru'
+
+    def _http_execute(self, method: str, url: str, **kwargs):
+        return official_api_request(super()._http_execute, method, url, **kwargs)
+
+    def _online_request_kwargs(self):
+        # Signed storage URLs must also validate their own host and trust chain.
+        return {'verify': True}
 
     def _get_active_pool(self):
         if not self._dynamic_auth:

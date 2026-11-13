@@ -3,6 +3,7 @@ package main
 import (
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/gorilla/mux"
@@ -32,6 +33,53 @@ func TestNativeSegmentDetailRouteDoesNotRequireRAG(t *testing.T) {
 	}
 	if rec.Code == http.StatusOK {
 		t.Fatal("segment detail must still require identity")
+	}
+}
+
+func TestPaperManagementRoutesWithoutRAG(t *testing.T) {
+	t.Setenv("LAZYMIND_RAG_ENABLED", "false")
+	router := mux.NewRouter()
+	registerAllRoutes(router)
+	for _, route := range []struct{ method, path string }{
+		{"POST", "/academic/works:presence"},
+		{"POST", "/academic/imports:preview"},
+		{"POST", "/academic/imports"},
+		{"GET", "/academic/imports"},
+		{"GET", "/academic/imports/test-batch"},
+		{"POST", "/academic/imports/test-batch:cancel"},
+		{"POST", "/academic/imports/test-batch:retry"},
+		{"GET", "/academic/documents/test-document/references"},
+		{"POST", "/academic/documents/test-document/references:extract"},
+	} {
+		t.Run(route.method+route.path, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			router.ServeHTTP(rec, httptest.NewRequest(route.method, route.path, nil))
+			if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "USER_REQUIRED") {
+				t.Fatalf("must reach identity validation without RAG: %d %s", rec.Code, rec.Body.String())
+			}
+		})
+	}
+}
+
+func TestPDFReadingArtifactRoutesWithoutRAG(t *testing.T) {
+	t.Setenv("LAZYMIND_RAG_ENABLED", "false")
+	router := mux.NewRouter()
+	registerAllRoutes(router)
+	for _, route := range []struct{ method, suffix string }{
+		{"GET", "pdf-capabilities"}, {"POST", "pdf-artifacts/searchable"},
+		{"POST", "pdf-translations"}, {"GET", "pdf-translations"},
+		{"PATCH", "pdf-render-jobs/test"}, {"POST", "pdf-render-jobs/test:complete"},
+		{"GET", "pdf-artifacts/test:content"}, {"GET", "pdf-artifacts/test:layout"},
+		{"GET", "pdf-artifacts/test:draft"}, {"POST", "pdf-artifacts/test:retranslate"},
+		{"POST", "pdf-artifacts/test:revise"}, {"DELETE", "pdf-artifacts/test"},
+	} {
+		t.Run(route.method+route.suffix, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			router.ServeHTTP(rec, httptest.NewRequest(route.method, "/datasets/test/documents/test/"+route.suffix, nil))
+			if rec.Code != http.StatusNotFound {
+				t.Fatalf("expected document permission check, got %d %s", rec.Code, rec.Body.String())
+			}
+		})
 	}
 }
 
