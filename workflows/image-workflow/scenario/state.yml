@@ -668,8 +668,8 @@ steps:
     mode: human
     route: choice
     prompt: |
-      You generate or stage text-free images. Every route must produce at least one image
-      in its designated output slot. Editing, animation, GIF conversion, and exact
+      You are the base-image generation/staging agent. Every route must leave this step with at
+      least one concrete text-free base image. Editing, animation, GIF conversion, and exact
       caption layout belong to the optional downstream enhance_image step.
 
       Optimized prompt:
@@ -745,17 +745,20 @@ steps:
          references even when one is also used as the first or last frame. Do not save this slot
          when no reference exists. Reference images remain inputs; they are never mislabeled as
          generated_image_output.
-      5. For every successful image, take local_path (preferred) or image_url.
-         For CREATE_NEW / KB_STYLE / REFERENCE_GENERATE, save the image only to
-         generated_image_output with source_tool='image_generator' and sort_order=1.
-         For routes requiring enhancement, save bases to generated_base_image in item order.
-         Omit sort_order on a first full run; use sort_order=k only for a partial retry.
-      6. ZERO-IMAGE FAILURE CONTRACT: if a model raises an error or returns no usable image
-         and this attempt produced no image in the route's output slot, report a failed
-         execution with the concrete model/tool error. Save no placeholder or status in
-         an image slot. For a pack with some successes, save successful bases and
-         report failed item indexes exactly.
-      7. After saving an image in the route's output slot, call select_image_postprocess_route
+      5. For every successful base, take local_path (preferred) or image_url. Never fabricate a
+         path. Save bases sequentially in index order to generated_base_image. Omit sort_order on
+         a first full run; use sort_order=k only for a partial retry.
+         For CREATE_NEW / KB_STYLE / REFERENCE_GENERATE, save the same path in the same call as
+         generated_image_output with source_tool='image_generator' and sort_order=1 so the direct
+         still is visible in Result.
+      6. ZERO-IMAGE FAILURE CONTRACT: if a configured image model raises an error or returns no
+         local_path/image_url and no base image was successfully produced, stop with an execution
+         error that preserves the model/tool name and its concrete error message. Save no fake
+         path, status text, or placeholder image. generated_base_image is a required output, so
+         Workflow Runtime must mark this attempt failed and Chat must tell the user why no image
+         was produced. For a pack with some successes, save successful bases and report failed
+         item indexes exactly.
+      7. After saving at least one generated_base_image, call select_image_postprocess_route
          exactly once with the exact workflow_routing text. It returns __end__ only for ordinary
          still routes; all edit, animation, GIF, meme, and caption routes go to enhance_image.
     tools:
@@ -778,7 +781,7 @@ steps:
         required: false
     outputs:
       - material: generated_base_image
-        required: false
+        required: true
       - material: generated_image_output
         required: false
       - material: generated_first_frame
@@ -788,10 +791,9 @@ steps:
       - material: generation_reference_images
         required: false
     acceptance_criteria: |
-      At least one valid image from this attempt is mandatory. Ordinary still routes save only
-      generated_image_output and end. Routes requiring enhancement save generated_base_image.
-      Animated routes save every real first frame to generated_first_frame and save only
-      explicitly requested/designated tails to
+      At least one valid generated_base_image from this attempt is mandatory. Ordinary still
+      routes also save generated_image_output and end. Animated routes save every real first frame
+      to generated_first_frame, save only explicitly requested/designated tails to
       generated_last_frame, and expose all real uploaded/collected references through
       generation_reference_images. Every existing-source route stages the
       source without editing; text-free base creation for meme/animation routes uses only

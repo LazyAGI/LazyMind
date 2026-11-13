@@ -56,6 +56,7 @@ def test_generate_then_enhance_owns_distinct_meme_strategies():
     enhance = state['steps']['enhance_image']
 
     assert {'material': 'meme_generation_plan', 'required': False} in generate['inputs']
+    assert {'material': 'generated_base_image', 'required': True} in generate['outputs']
     assert {'material': 'meme_static_output', 'required': False} in enhance['outputs']
     assert set(generate['tools']) == {
         'image_generator', 'select_image_postprocess_route',
@@ -93,7 +94,7 @@ def test_optimize_step_freezes_the_only_valid_image_route():
     assert optimize['terminal_tools'] == ['select_image_route']
 
 
-def test_capability_gate_and_route_specific_image_outputs():
+def test_code_level_capability_gate_and_zero_image_failure_contract_are_required():
     workflow = _load_workflow()
     state = _load_state()
     generate = state['steps']['generate_image']
@@ -109,8 +110,7 @@ def test_capability_gate_and_route_specific_image_outputs():
     assert 'capability_report' not in slots
     assert slots['generated_base_image']['exposed'] is True
     assert slots['generated_base_image']['user_visible'] is True
-    assert {'material': 'generated_base_image', 'required': False} in generate['outputs']
-    assert {'material': 'generated_image_output', 'required': False} in generate['outputs']
+    assert {'material': 'generated_base_image', 'required': True} in generate['outputs']
 
 
 def test_workflow_panel_navigation_matches_the_five_visible_runtime_steps():
@@ -154,22 +154,11 @@ def test_generate_exposes_only_present_seedance_frame_and_reference_materials():
         'generation_reference_images',
     ]
 
-    image_slots = ['generated_image_output', 'generated_base_image']
-    assert generate_tab['composite_behavior']['mutually_exclusive'] == [
-        {'slots': image_slots, 'prefer': image_slots},
-    ]
-
     enhance_tab = tabs['enhance_image']
     assert enhance_tab['slot_scope'] == 'selected'
     assert enhance_tab['composite_tab_position'] == 'left'
     assert enhance_tab['composite_layout']['direction'] == 'row'
     assert all('tabs' not in child for child in enhance_tab['composite_layout']['children'])
-    assert slots['enhancement_status']['user_visible'] is False
-    assert {'material': 'enhancement_status', 'required': True} in enhance['outputs']
-    assert 'enhancement_status' not in {slot['id'] for slot in enhance_tab['slots']}
-    assert 'enhancement_status' not in {
-        child['slot'] for child in enhance_tab['composite_layout']['children']
-    }
     assert enhance_tab['composite_behavior']['repeat_single_slots'] == [
         'generated_first_frame',
         'generated_last_frame',

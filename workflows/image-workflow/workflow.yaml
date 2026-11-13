@@ -315,13 +315,6 @@ ui:
       composite_behavior:
         hide_empty_columns: true
         empty_column_scope: selected
-        mutually_exclusive:
-          - slots:
-              - generated_image_output
-              - generated_base_image
-            prefer:
-              - generated_image_output
-              - generated_base_image
 
     - id: enhance_image
       label: Enhance Image
