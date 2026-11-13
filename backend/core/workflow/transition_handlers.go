@@ -1252,8 +1252,8 @@ func invalidateNativeForOperation(ctx context.Context, tx *gorm.DB, session *orm
 		}
 		return rejectTransition(commandID, session, graphengine.Projection{}, http.StatusConflict, code, "target has no effective attempt to invalidate", false, nil)
 	}
-	if operation == "retry" && attempt.Status != "failed" && attempt.Status != "interrupted" {
-		return rejectTransition(commandID, session, graphengine.Projection{}, http.StatusConflict, "INVALID_RETRY", "only failed or interrupted attempts can be retried", false, nil)
+	if operation == "retry" && attempt.Status != "failed" && attempt.Status != "interrupted" && attempt.Status != "cancelled" && attempt.Status != "canceled" {
+		return rejectTransition(commandID, session, graphengine.Projection{}, http.StatusConflict, "INVALID_RETRY", "only failed, interrupted, or cancelled attempts can be retried", false, nil)
 	}
 	if operation == "rewind" && attempt.Status != "succeeded" {
 		return rejectTransition(commandID, session, graphengine.Projection{}, http.StatusConflict, "INVALID_REWIND", "only succeeded attempts can be rewound", false, nil)

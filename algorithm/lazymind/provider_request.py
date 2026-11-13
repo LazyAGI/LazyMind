@@ -124,10 +124,11 @@ def _sanitize_failed_response(response, policy):
 
 
 def _configuration_error_in_chain(error):
+    from lazyllm.module.llms.onlinemodule.base.protocol_ir import ProtocolCapabilityError
     seen = set()
     while error is not None and id(error) not in seen:
         seen.add(id(error))
-        if isinstance(error, ProviderRequestConfigurationError):
+        if isinstance(error, (ProviderRequestConfigurationError, ProtocolCapabilityError)):
             return error
         error = error.__cause__ or error.__context__
     return None
@@ -389,6 +390,9 @@ def _install_runtime_hooks():
                 if isinstance(exc, ModelCallError):
                     # Preserve structured categories/status used by the chat UI.
                     raise ModelCallError('provider request failed', exc.terminal) from None
+                from lazymind.chat.engine.agent_runtime.model_calls import ContextCapacityError, UnsupportedModelInput
+                if isinstance(exc, (ContextCapacityError, UnsupportedModelInput)):
+                    raise
                 raise ProviderRequestFailure(**(active['failure'] or {})) from None
             finally:
                 _ACTIVE_POLICY.reset(token)

@@ -102,7 +102,8 @@ type TaskEvent struct {
 	ToolResults json.RawMessage `json:"tool_results,omitempty"`
 	// DurableToolResults carries the resume-safe (bounded or offloaded) result.
 	// Core persists it, then removes it before publishing the compact live event.
-	DurableToolResults json.RawMessage `json:"durable_tool_results,omitempty"`
+	DurableToolResults      json.RawMessage `json:"durable_tool_results,omitempty"`
+	DurableAssistantMessage json.RawMessage `json:"durable_assistant_message,omitempty"`
 	// Writer document-level subtasks are carried on progress events for the
 	// developer Task Center. They are not workflow steps.
 	WritingSubtasks json.RawMessage `json:"writing_subtasks,omitempty"`
@@ -180,6 +181,7 @@ func RunObserved(ctx context.Context, db *gorm.DB, stateStore state.Store, req R
 				req.LLMConfig["llm"] = cloneTaskConfig(taskModelCandidate(&req, call.currentID).LLMConfig)["llm"]
 			}
 			ev.DurableToolResults = nil
+			ev.DurableAssistantMessage = nil
 			publishTaskEvent(runCtx, db, stateStore, ev, true, true)
 		}
 		return err
@@ -348,6 +350,7 @@ func routeEvent(ctx context.Context, db *gorm.DB, stateStore state.Store, ev Tas
 		}
 	}
 	ev.DurableToolResults = nil
+	ev.DurableAssistantMessage = nil
 	return routeEventWithWorkflowHooks(ctx, db, stateStore, ev, true, true)
 }
 
@@ -434,7 +437,7 @@ func hydrateRunRequest(ctx context.Context, db *gorm.DB, req *RunRequest) error 
 	}
 	req.InitialSteps = make([]stepDTO, 0, len(steps))
 	for i := range steps {
-		req.InitialSteps = append(req.InitialSteps, toStepDTO(&steps[i]))
+		req.InitialSteps = append(req.InitialSteps, toPrivateStepDTO(&steps[i]))
 	}
 	artifactSpecs := make([]map[string]any, 0, len(artifacts))
 	for i := range artifacts {

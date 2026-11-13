@@ -84,6 +84,8 @@ def test_dynamic_chat_uses_responses_and_recovers_completed_text(monkeypatch, tm
             config = tmp_path / 'models.yaml'
             config.write_text('llm:\n  source: dynamic\n  dynamic_auth: true\n  type: llm\n')
             model = AutoModel(model='llm', config=str(config), stream=True)
+            # The shared IR supplies the assistant role for both transport modes,
+            # so the default text formatter has one stable return type.
             assert model('Hello', stream_output=True) == 'Ready'
             assert calls[0][0] == 'https://api.openai.com/v1/responses'
             assert calls[0][1]['model'] == 'gpt-6.1-sol'

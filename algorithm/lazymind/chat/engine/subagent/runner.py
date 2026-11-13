@@ -19,6 +19,7 @@ from lazymind.chat.engine.tools.workspace_context import (
 )
 from lazymind.chat.engine.tools.conversation_workspace import chat_agent_workspace
 from lazyllm import LOG, AutoModel, enable_trace, config as llm_config
+from lazyllm.module.llms.onlinemodule.base.protocol_ir import MessageIR
 from lazyllm.tools.fs.client import FS
 from lazyllm.tools.agent.base import (
     TOOL_OBSERVATION_KEY,
@@ -28,6 +29,8 @@ from lazymind.chat.engine.tool_auth import inject_tool_config
 from lazymind.chat.engine.agent_runtime.env_runtime import inject_runtime_env
 from lazymind.chat.engine.agent_runtime.executor import AGENT_MODULE_TRACE
 from lazymind.chat.engine.agent_runtime.tool_call_guard import ToolArgumentRetryExhausted
+from lazymind.chat.engine.agent_runtime.message_fields import model_response_text, canonical_history_message
+from lazymind.chat.engine.agent_runtime.env_redaction import redact_session_env_arguments
 
 from lazymind.chat.engine.agent_runtime import (
     AgentExecutionOptions,
@@ -195,9 +198,7 @@ def _generate_display_plan(llm: Any, objective: str, scope: Optional[Dict[str, A
     # Streaming-only models still return an aggregated response through LazyLLM.
     # Keep this background request's text and reasoning out of the agent event queue.
     response = _silent_background_model_call(llm, prompt)
-    text = response if isinstance(response, str) else (
-        response.get('content', '') if isinstance(response, dict) else ''
-    )
+    text = model_response_text(response)
     text = re.sub(r'^```(?:json)?\s*|\s*```$', '', text.strip())
     steps = json.loads(text)
     if not isinstance(steps, list) or not 3 <= len(steps) <= 5:
@@ -1132,9 +1133,15 @@ def _persist_step(
             tool_calls.append({
                 'id': tc.get('id', ''),
                 'name': tc.get('name') or (tc.get('function') or {}).get('name', ''),
-                'args': tc.get('args') or (tc.get('function') or {}).get('arguments', {}),
+                'args': redact_session_env_arguments(
+                    tc.get('name') or (tc.get('function') or {}).get('name', ''),
+                    tc.get('args') or (tc.get('function') or {}).get('arguments', {})),
             })
         content = {'text': '', 'tool_calls': tool_calls}
+        if isinstance(event.get('assistant_message'), dict):
+            # The display call records remain compact; replay retains the full
+            # semantic message and adapter-private continuation separately.
+            content['assistant_message'] = canonical_history_message(event['assistant_message'])
         ctx.db.append_step(ctx.task_id, seq, 'assistant', content)
         return content
     elif tag == 'tool_results':
@@ -1746,18 +1753,12 @@ async def run_subagent_stream(
                                 workflow_control = candidate_control
                         # Forward tool steps as SSE events so the frontend can render them.
                         if tag == 'tool_calls':
-                            calls = [
-                                {
-                                    'id': tc.get('id', ''),
-                                    'name': tc.get('name') or (tc.get('function') or {}).get('name', ''),
-                                    'args': tc.get('args') or (tc.get('function') or {}).get('arguments', {}),
-                                }
-                                for tc in (item.get('tool_calls') or [])
-                                if isinstance(tc, dict)
-                            ]
+                            calls = (durable_step or {}).get('tool_calls') or []
                             if calls:
                                 workflow_tool_in_flight = effective_agent_type == 'workflow_step'
-                                yield _sse({'type': 'tool_calls', 'task_id': task_id, 'tool_calls': calls})
+                                yield _sse({'type': 'tool_calls', 'task_id': task_id, 'tool_calls': calls,
+                                            **({'durable_assistant_message': durable_step['assistant_message']}
+                                               if (durable_step or {}).get('assistant_message') else {})})
                         elif tag == 'tool_results':
                             results = [
                                 {
@@ -2199,12 +2200,7 @@ def _evaluate_completion(
     for attempt in range(2):
         try:
             resp = _silent_background_model_call(llm, eval_prompt)
-            text = resp if isinstance(resp, str) else (
-                resp.get('content', '') if isinstance(resp, dict) else ''
-            )
-            if not isinstance(text, str):
-                raise ValueError('Completion response content must be text')
-            text = text.strip()
+            text = model_response_text(resp)
             fenced = re.fullmatch(r'```(?:json)?\s*\n?(.*?)\n?```', text, re.DOTALL | re.IGNORECASE)
             if fenced:
                 text = fenced.group(1).strip()
@@ -2307,11 +2303,27 @@ def _rebuild_history_from_steps(db: Any, task_id: str) -> List[Dict[str, Any]]:
     steps = db.load_steps(task_id)
     history: List[Dict[str, Any]] = []
     pending_ids: set = set()
+    complete_boundary = 0
     for step in steps:
         role = step.get('role')
         content = step.get('content') or {}
         if role == 'assistant':
-            tool_calls = content.get('tool_calls') or []
+            if pending_ids:
+                break
+            message = copy.deepcopy(content.get('assistant_message') or {
+                'role': 'assistant', 'content': content.get('text', ''),
+                'tool_calls': content.get('tool_calls') or [],
+            })
+            tool_calls = []
+            for call in message.get('tool_calls') or []:
+                function = call.get('function') or {
+                    'name': call.get('name', ''), 'arguments': call.get('args', {}),
+                }
+                arguments = function.get('arguments', {})
+                if not isinstance(arguments, str):
+                    arguments = json.dumps(arguments, ensure_ascii=False)
+                tool_calls.append({'id': call.get('id', ''), 'type': 'function',
+                                   'function': {**function, 'arguments': arguments}})
             # Validate function.arguments JSON before appending.
             for tc in tool_calls:
                 args = (tc.get('function') or {}).get('arguments') or tc.get('args')
@@ -2324,20 +2336,21 @@ def _rebuild_history_from_steps(db: Any, task_id: str) -> List[Dict[str, Any]]:
                             f'[SubAgent] resume: dropping corrupt tool_call '
                             f'(task={task_id}, name={(tc.get("function") or {}).get("name")})'
                         )
-                        return history
+                        return history[:complete_boundary]
             pending_ids = {tc.get('id') for tc in tool_calls if tc.get('id')}
-            history.append({
-                'role': 'assistant',
-                'content': content.get('text', ''),
-                'tool_calls': tool_calls,
-            })
+            if len(pending_ids) != len(tool_calls):
+                # Missing/duplicate identities cannot form a valid exchange.
+                break
+            message['tool_calls'] = tool_calls
+            history.append(MessageIR.from_chat(message).to_chat())
+            if not pending_ids:
+                complete_boundary = len(history)
         elif role == 'tool':
             results = content.get('tool_results') or []
             valid = [r for r in results if r.get('tool_call_id') in pending_ids]
-            if not valid:
-                # Orphan tool results: drop and stop replay at the last complete boundary.
-                if history and history[-1].get('role') == 'assistant':
-                    history.pop()
+            result_ids = {r.get('tool_call_id') for r in valid}
+            if not valid or len(valid) != len(results) or len(result_ids) != len(valid):
+                # Do not replay partial groups or duplicate/orphan results.
                 break
             for r in valid:
                 result = r.get('result', '')
@@ -2351,5 +2364,10 @@ def _rebuild_history_from_steps(db: Any, task_id: str) -> List[Dict[str, Any]]:
                 if observation is not None:
                     tool_msg[TOOL_OBSERVATION_KEY] = observation
                 history.append(tool_msg)
-            pending_ids = set()
-    return history
+            pending_ids.difference_update(result_ids)
+            if not pending_ids:
+                complete_boundary = len(history)
+    # An interrupted tool execution may end with only the assistant call (or
+    # some parallel results). Responses requires an output for every call.
+    # Roll back the whole group, including its private provider continuation.
+    return history[:complete_boundary]
