@@ -156,9 +156,14 @@ export function usePaperImports(options: ImportOptions) {
         try {
             const current = dataRef.current;
             if (pendingPdf) {
-                const target = pending.attachTo ? current.papers.find(p => p.id === pending.attachTo!.id) : pending.fresh[0];
-                if (!target)
+                const selected = pending.attachTo ? current.papers.find(p => p.id === pending.attachTo!.id) : pending.fresh[0];
+                if (!selected)
                     throw new Error('目标文献已被移除，请重新核对后导入');
+                // The upload API normalizes its title before comparing the paper
+                // snapshot. Use one normalized draft for upload and confirmation.
+                const target = pending.attachTo ? selected : {
+                    ...selected, metadata: { ...selected.metadata, title: selected.metadata.title.trim() },
+                };
                 if (pending.attachTo && target.revision !== pending.attachTo.revision)
                     throw new Error('目标题录已更新，请重新核对 PDF 关联');
                 if (pdfIdentityMatch(target, pendingPdf.metadata) === 'conflict')

@@ -1110,12 +1110,16 @@ it('persists corrected PDF metadata from the confirmation form', async () => {
     const title = await within(dialog).findByRole('textbox', { name: '题名' });
     fireEvent.change(title, { target: { value: '' } });
     expect(within(dialog).getByRole('button', { name: '加入论文库' })).toBeDisabled();
-    fireEvent.change(title, { target: { value: 'Corrected system card' } });
+    fireEvent.change(title, { target: { value: '  Corrected system card  ' } });
     fireEvent.change(within(dialog).getByRole('textbox', { name: '作者（分号分隔）' }), { target: { value: 'OpenAI; Research' } });
     fireEvent.change(within(dialog).getByRole('spinbutton', { name: '年份' }), { target: { value: '2025' } });
     fireEvent.change(within(dialog).getByRole('textbox', { name: 'DOI' }), { target: { value: '10.1234/card' } });
     fireEvent.click(within(dialog).getByRole('button', { name: '加入论文库' }));
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    expect(upload).toHaveBeenCalledWith(expect.any(File), expect.objectContaining({
+        title: 'Corrected system card',
+        paper: expect.objectContaining({ metadata: expect.objectContaining({ title: 'Corrected system card' }) }),
+    }));
     expect(readLibrary(datasetId).papers.find(paper => paper.id === 'corrected-pdf')?.metadata).toMatchObject({ title: 'Corrected system card', authors: ['OpenAI', 'Research'], year: 2025, identifiers: { doi: '10.1234/card' } });
 });
 
