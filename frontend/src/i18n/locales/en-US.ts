@@ -325,7 +325,7 @@ const enUS = {
   githubStar: {
     title: 'Support LazyMind', message: 'Has LazyMind been helpful? Star our GitHub project to support continued improvements.',
     star: 'Star the project', close: 'Close', account: 'GitHub account', selectAccount: 'Choose a GitHub account',
-    localHint: 'We will try your existing local GitHub sign-in first. If none is available, you can connect through GitHub authorization.',
+    localHint: 'No usable local GitHub sign-in was found. Connect an account to continue.',
     continueAuth: 'Continue to GitHub connection', success: 'Thank you for your support. Project starred.',
     alreadyStarred: 'You have already starred the project. Thank you!',
     permissionDenied: 'GitHub permission is missing. Please authorize again.',

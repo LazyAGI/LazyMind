@@ -1810,6 +1810,33 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /api/authservice/v1/cloud/github/star/local:
+    put:
+      tags:
+      - cloud-oauth
+      summary: Github Star Local
+      operationId: github_star_local_api_authservice_v1_cloud_github_star_local_put
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GitHubStarLocalBody'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GitHubStarLocalResult'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+      security:
+      - HTTPBearer: []
 components:
   schemas:
     AuthorizeBody:
@@ -3542,6 +3569,45 @@ components:
       - repository
       - accounts
       title: GitHubStarStatus
+    GitHubStarLocalBody:
+      properties:
+        confirmed:
+          type: boolean
+          const: true
+          title: Confirmed
+      additionalProperties: false
+      type: object
+      required:
+      - confirmed
+      title: GitHubStarLocalBody
+    GitHubStarLocalResult:
+      properties:
+        repository:
+          type: string
+          title: Repository
+        state:
+          type: string
+          enum:
+          - starred
+          - connection_required
+          title: State
+        account_id:
+          type: string
+          title: Account Id
+        login:
+          type: string
+          title: Login
+        write_performed:
+          type: boolean
+          title: Write Performed
+      type: object
+      required:
+      - repository
+      - state
+      - account_id
+      - login
+      - write_performed
+      title: GitHubStarLocalResult
   securitySchemes:
     HTTPBearer:
       type: http

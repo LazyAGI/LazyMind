@@ -325,7 +325,7 @@ const zhCN = {
   githubStar: {
     title: '支持 LazyMind', message: '觉得 LazyMind 对你有帮助吗？欢迎为我们的 GitHub 项目点个 Star，支持我们持续改进。',
     star: '为项目点 Star', close: '关闭', account: 'GitHub 账号', selectAccount: '选择 GitHub 账号',
-    localHint: '将优先复用本机 GitHub 登录信息；没有可用登录时会进入 GitHub 授权。',
+    localHint: '未找到可用的本机 GitHub 登录信息，请连接账号后继续。',
     continueAuth: '继续连接 GitHub', success: '感谢支持，已点 Star', alreadyStarred: '你已为项目点过 Star，感谢支持',
     permissionDenied: 'GitHub 权限不足，请重新授权', unknownResult: '暂未确认是否成功，请稍后查询',
     rateLimited: 'GitHub 请求过于频繁，请等待后再试',

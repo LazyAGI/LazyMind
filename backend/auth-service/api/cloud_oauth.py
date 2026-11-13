@@ -28,6 +28,8 @@ from schemas.cloud_oauth import (
     GitHubCLISessionCreateBody,
     GitHubCLISessionResponse,
     GitHubStarBody,
+    GitHubStarLocalBody,
+    GitHubStarLocalResult,
     GitHubStarResult,
     GitHubStarStatus,
 )
@@ -80,6 +82,14 @@ def github_star(body: GitHubStarBody, response: Response, user: User = Depends(c
     return _github_star_call(github_star_service.star, owner_user_id=str(user.id),
                              connection_id=body.connection_id, expected_account_id=body.expected_account_id,
                              confirmed=body.confirmed)
+
+
+@router.put('/github/star/local', response_model=GitHubStarLocalResult)
+@permission_required('model.write')
+def github_star_local(body: GitHubStarLocalBody, response: Response, user: User = Depends(current_user)):  # noqa: B008
+    response.headers['Cache-Control'] = 'no-store'
+    probe = github_cli_auth_service.runner.probe if github_cli_auth_service.host_credentials_enabled else None
+    return _github_star_call(github_star_service.star_local, confirmed=body.confirmed, probe=probe)
 
 
 def _github_cli_call(function, *args, **kwargs):

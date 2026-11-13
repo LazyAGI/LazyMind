@@ -40,7 +40,7 @@ vi.mock('@/modules/chat/utils/request', async original => ({
 }));
 vi.mock('./api', async original => ({
   ...await original<typeof import('./api')>(), readGitHubStarAccounts: vi.fn(),
-  claimGitHubStarPrompt: vi.fn(), writeGitHubStar: vi.fn(), markGitHubStarSupported: vi.fn(), findGitHubStarOpportunity: vi.fn(),
+  claimGitHubStarPrompt: vi.fn(), writeGitHubStar: vi.fn(), writeLocalGitHubStar: vi.fn(), markGitHubStarSupported: vi.fn(), findGitHubStarOpportunity: vi.fn(),
 }));
 
 const CODE = 'ABCD-EFGH';
@@ -92,6 +92,7 @@ beforeEach(async () => {
   vi.mocked(starAPI.findGitHubStarOpportunity).mockResolvedValue(opportunity);
   vi.mocked(starAPI.writeGitHubStar).mockResolvedValue({ repository: 'LazyAGI/LazyMind', connection_id: target.connection_id,
     account_id: '10001', login: 'intended-user', state: 'starred', write_performed: true });
+  vi.mocked(starAPI.writeLocalGitHubStar).mockImplementation(async () => { throw new Error('Connected-account flow must not probe local credentials'); });
   vi.stubGlobal('fetch', vi.fn(() => { throw new Error('Unexpected external request in Star fixture'); }));
 });
 afterEach(() => {
@@ -171,4 +172,5 @@ it.each(['local', 'web'] as const)('real %s completion returns the intended acco
   await act(async () => fireEvent.click(screen.getByRole('button', { name: '为项目点 Star' })));
   expect(starAPI.writeGitHubStar).toHaveBeenCalledTimes(1);
   expect(starAPI.writeGitHubStar).toHaveBeenCalledWith({ connection_id: target.connection_id, expected_account_id: '10001', confirmed: true });
+  expect(starAPI.writeLocalGitHubStar).not.toHaveBeenCalled();
 });

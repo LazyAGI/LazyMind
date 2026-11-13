@@ -42,6 +42,26 @@ class GitHubStarResult(BaseModel):
     write_performed: bool
 
 
+class GitHubStarLocalBody(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    confirmed: StrictBool = Field(json_schema_extra={'const': True})
+
+    @field_validator('confirmed')
+    @classmethod
+    def require_confirmation(cls, value):
+        if value is not True:
+            raise PydanticCustomError('confirmation_required', 'Confirm the GitHub Star operation')
+        return value
+
+
+class GitHubStarLocalResult(BaseModel):
+    repository: str
+    state: Literal['starred', 'connection_required']
+    account_id: str
+    login: str
+    write_performed: bool
+
+
 class CloudOAuthAuthorizeURLBody(BaseModel):
     tenant_id: str = ''
     owner_user_id: str | None = None

@@ -263,6 +263,31 @@ export const GitHubStarBodyConfirmedEnum = {
 
 export type GitHubStarBodyConfirmedEnum = typeof GitHubStarBodyConfirmedEnum[keyof typeof GitHubStarBodyConfirmedEnum];
 
+export interface GitHubStarLocalBody {
+    'confirmed': GitHubStarLocalBodyConfirmedEnum;
+}
+
+export const GitHubStarLocalBodyConfirmedEnum = {
+    True: true
+} as const;
+
+export type GitHubStarLocalBodyConfirmedEnum = typeof GitHubStarLocalBodyConfirmedEnum[keyof typeof GitHubStarLocalBodyConfirmedEnum];
+
+export interface GitHubStarLocalResult {
+    'repository': string;
+    'state': GitHubStarLocalResultStateEnum;
+    'account_id': string;
+    'login': string;
+    'write_performed': boolean;
+}
+
+export const GitHubStarLocalResultStateEnum = {
+    Starred: 'starred',
+    ConnectionRequired: 'connection_required'
+} as const;
+
+export type GitHubStarLocalResultStateEnum = typeof GitHubStarLocalResultStateEnum[keyof typeof GitHubStarLocalResultStateEnum];
+
 export interface GitHubStarResult {
     'repository': string;
     'connection_id': string;
@@ -1829,6 +1854,45 @@ export const CloudOauthApiAxiosParamCreator = function (configuration?: Configur
         },
         /**
          *
+         * @summary Github Star Local
+         * @param {GitHubStarLocalBody} gitHubStarLocalBody
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        githubStarLocalApiAuthserviceV1CloudGithubStarLocalPut: async (gitHubStarLocalBody: GitHubStarLocalBody, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'gitHubStarLocalBody' is not null or undefined
+            assertParamExists('githubStarLocalApiAuthserviceV1CloudGithubStarLocalPut', 'gitHubStarLocalBody', gitHubStarLocalBody)
+            const localVarPath = `/api/authservice/v1/cloud/github/star/local`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'PUT', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            // authentication HTTPBearer required
+            // http bearer authentication required
+            await setBearerAuthToObject(localVarHeaderParameter, configuration)
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(gitHubStarLocalBody, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
          * @summary Github Star Status
          * @param {string} [connectionId]
          * @param {*} [options] Override http request option.
@@ -2503,6 +2567,19 @@ export const CloudOauthApiFp = function(configuration?: Configuration) {
         },
         /**
          *
+         * @summary Github Star Local
+         * @param {GitHubStarLocalBody} gitHubStarLocalBody
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async githubStarLocalApiAuthserviceV1CloudGithubStarLocalPut(gitHubStarLocalBody: GitHubStarLocalBody, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<GitHubStarLocalResult>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.githubStarLocalApiAuthserviceV1CloudGithubStarLocalPut(gitHubStarLocalBody, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['CloudOauthApi.githubStarLocalApiAuthserviceV1CloudGithubStarLocalPut']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
          * @summary Github Star Status
          * @param {string} [connectionId]
          * @param {*} [options] Override http request option.
@@ -2799,6 +2876,16 @@ export const CloudOauthApiFactory = function (configuration?: Configuration, bas
         },
         /**
          *
+         * @summary Github Star Local
+         * @param {CloudOauthApiGithubStarLocalApiAuthserviceV1CloudGithubStarLocalPutRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        githubStarLocalApiAuthserviceV1CloudGithubStarLocalPut(requestParameters: CloudOauthApiGithubStarLocalApiAuthserviceV1CloudGithubStarLocalPutRequest, options?: RawAxiosRequestConfig): AxiosPromise<GitHubStarLocalResult> {
+            return localVarFp.githubStarLocalApiAuthserviceV1CloudGithubStarLocalPut(requestParameters.gitHubStarLocalBody, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
          * @summary Github Star Status
          * @param {CloudOauthApiGithubStarStatusApiAuthserviceV1CloudGithubStarGetRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
@@ -3012,6 +3099,13 @@ export interface CloudOauthApiGetOauthAppCredentialsApiAuthserviceV1CloudProvide
  */
 export interface CloudOauthApiGithubStarApiAuthserviceV1CloudGithubStarPutRequest {
     readonly gitHubStarBody: GitHubStarBody
+}
+
+/**
+ * Request parameters for githubStarLocalApiAuthserviceV1CloudGithubStarLocalPut operation in CloudOauthApi.
+ */
+export interface CloudOauthApiGithubStarLocalApiAuthserviceV1CloudGithubStarLocalPutRequest {
+    readonly gitHubStarLocalBody: GitHubStarLocalBody
 }
 
 /**
@@ -3254,6 +3348,17 @@ export class CloudOauthApi extends BaseAPI {
      */
     public githubStarApiAuthserviceV1CloudGithubStarPut(requestParameters: CloudOauthApiGithubStarApiAuthserviceV1CloudGithubStarPutRequest, options?: RawAxiosRequestConfig) {
         return CloudOauthApiFp(this.configuration).githubStarApiAuthserviceV1CloudGithubStarPut(requestParameters.gitHubStarBody, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Github Star Local
+     * @param {CloudOauthApiGithubStarLocalApiAuthserviceV1CloudGithubStarLocalPutRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public githubStarLocalApiAuthserviceV1CloudGithubStarLocalPut(requestParameters: CloudOauthApiGithubStarLocalApiAuthserviceV1CloudGithubStarLocalPutRequest, options?: RawAxiosRequestConfig) {
+        return CloudOauthApiFp(this.configuration).githubStarLocalApiAuthserviceV1CloudGithubStarLocalPut(requestParameters.gitHubStarLocalBody, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**

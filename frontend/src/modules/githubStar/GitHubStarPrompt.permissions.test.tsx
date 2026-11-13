@@ -8,7 +8,7 @@ import * as api from './api';
 
 vi.mock('./api', async original => ({
   ...await original<typeof import('./api')>(), readGitHubStarAccounts: vi.fn(),
-  claimGitHubStarPrompt: vi.fn(), writeGitHubStar: vi.fn(), markGitHubStarSupported: vi.fn(),
+  claimGitHubStarPrompt: vi.fn(), writeGitHubStar: vi.fn(), writeLocalGitHubStar: vi.fn(), markGitHubStarSupported: vi.fn(),
   findGitHubStarOpportunity: vi.fn(),
 }));
 beforeEach(() => {
@@ -31,6 +31,7 @@ it('a caller lacking application write permission does not receive an invitation
   expect(api.readGitHubStarAccounts).toHaveBeenCalled();
   expect(api.claimGitHubStarPrompt).not.toHaveBeenCalled();
   expect(api.writeGitHubStar).not.toHaveBeenCalled();
+  expect(api.writeLocalGitHubStar).not.toHaveBeenCalled();
   expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
 });
 

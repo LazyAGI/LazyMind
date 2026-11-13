@@ -31,6 +31,14 @@ export interface GitHubStarResult {
   write_performed: boolean;
 }
 
+export interface LocalGitHubStarResult {
+  repository: string;
+  account_id: string;
+  login: string;
+  state: 'starred' | 'connection_required';
+  write_performed: boolean;
+}
+
 export interface GitHubStarClaim {
   show: boolean;
   reason: string;
@@ -54,6 +62,11 @@ export async function writeGitHubStar(body: {
   connection_id: string; expected_account_id: string; confirmed: true;
 }): Promise<GitHubStarResult> {
   const response = await axiosInstance.put(starPath, body, options);
+  return unwrapApiData(response.data);
+}
+
+export async function writeLocalGitHubStar(body: { confirmed: true }): Promise<LocalGitHubStarResult> {
+  const response = await axiosInstance.put(`${starPath}/local`, body, options);
   return unwrapApiData(response.data);
 }
 

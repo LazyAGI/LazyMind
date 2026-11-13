@@ -6,7 +6,7 @@ import { useTranslation } from 'react-i18next';
 import { AgentAppsAuth, AUTH_LOGOUT_EVENT, AUTH_USER_CHANGE_EVENT } from '@/components/auth';
 import { isStarOpportunity, starReturnPath } from './intent';
 import { GITHUB_STAR_OPPORTUNITY_EVENT, claimGitHubStarPrompt, findGitHubStarOpportunity, readGitHubStarAccounts,
-  writeGitHubStar, markGitHubStarSupported, type GitHubStarAccount, type GitHubStarOpportunity } from './api';
+  writeGitHubStar, writeLocalGitHubStar, markGitHubStarSupported, type GitHubStarAccount, type GitHubStarOpportunity } from './api';
 
 export interface GitHubStarPromptProps {
   userId: string;
@@ -80,10 +80,6 @@ export default function GitHubStarPrompt({ userId, blocked, returnTo, conversati
           && (!identities.has(account.account_id) || account.connection_id === connectionId)) identities.set(account.account_id, account);
       }
       const accounts = [...identities.values()];
-      if (result.accounts.length && !accounts.length) {
-        if (connectionId) { setInvitation({ opportunity, accounts: [], connectionId, scope }); setPhase('retry'); setNotice('failed'); }
-        return;
-      }
       if (!connectionId && !request.claimed) {
         const claim = await claimGitHubStarPrompt(opportunity);
         if (!valid(owner, version, identity, scope) || !claim.show || claim.task_id !== opportunity.task_id) return;
@@ -161,16 +157,21 @@ export default function GitHubStarPrompt({ userId, blocked, returnTo, conversati
 
   async function confirm() {
     if (!invitation || invitation.scope !== viewScope || busy.current || blocked) return;
-    if (!invitation.accounts.length) { setPhase('connect'); return; }
     const account = invitation.accounts.find(item => item.connection_id === selected);
-    if (!account) return;
+    if (invitation.accounts.length && !account) return;
     const version = generation.current, owner = userId, identity = AgentAppsAuth.getSessionIdentity(), scope = viewScope;
     busy.current = true; setWorking(true); setNotice('');
     try {
-      const result = await writeGitHubStar({ connection_id: account.connection_id, expected_account_id: account.account_id, confirmed: true });
+      const result = account
+        ? await writeGitHubStar({ connection_id: account.connection_id, expected_account_id: account.account_id, confirmed: true })
+        : await writeLocalGitHubStar({ confirmed: true });
       if (!valid(owner, version, identity, scope)) return;
+      if (!account && result.state === 'connection_required' && result.repository === 'LazyAGI/LazyMind') {
+        setPhase('connect'); return;
+      }
       if (result.state !== 'starred' || result.repository !== 'LazyAGI/LazyMind'
-        || result.connection_id !== account.connection_id || result.account_id !== account.account_id) {
+        || (account && (!('connection_id' in result) || result.connection_id !== account.connection_id || result.account_id !== account.account_id))
+        || (!account && (!result.account_id || !result.login))) {
         setNotice('accountChanged'); return;
       }
       setPhase('success'); setNotice(result.write_performed ? 'success' : 'alreadyStarred');

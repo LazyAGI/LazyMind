@@ -12,7 +12,7 @@ vi.mock('react-router-dom', async original => ({
 vi.mock('./api', async original => ({
   ...await original<typeof import('./api')>(),
   readGitHubStarAccounts: vi.fn(), claimGitHubStarPrompt: vi.fn(),
-  writeGitHubStar: vi.fn(), markGitHubStarSupported: vi.fn(), findGitHubStarOpportunity: vi.fn(),
+  writeGitHubStar: vi.fn(), writeLocalGitHubStar: vi.fn(), markGitHubStarSupported: vi.fn(), findGitHubStarOpportunity: vi.fn(),
 }));
 vi.mock('react-i18next', async original => ({
   ...await original<typeof import('react-i18next')>(), useTranslation: () => ({ t: (key: string) => ({
@@ -20,12 +20,13 @@ vi.mock('react-i18next', async original => ({
   'githubStar.message': '觉得 LazyMind 对你有帮助吗？欢迎为我们的 GitHub 项目点个 Star，支持我们持续改进。',
   'githubStar.star': '为项目点 Star', 'githubStar.close': '关闭', 'common.close': '关闭',
   'githubStar.account': 'GitHub 账号', 'githubStar.selectAccount': '选择 GitHub 账号',
-  'githubStar.localHint': '将优先复用本机 GitHub 登录信息；没有可用登录时会进入 GitHub 授权。',
+  'githubStar.localHint': '未找到可用的本机 GitHub 登录信息，请连接账号后继续。',
   'githubStar.continueAuth': '继续连接 GitHub', 'githubStar.success': '感谢支持，已点 Star',
   'githubStar.alreadyStarred': '你已为项目点过 Star，感谢支持',
   'githubStar.permissionDenied': 'GitHub 权限不足，请重新授权',
   'githubStar.unknownResult': '暂未确认是否成功，请稍后查询',
   'githubStar.failed': '未能点 Star，请重试', 'githubStar.accountChanged': 'GitHub 账号已变化，请重新确认',
+  'githubStar.rateLimited': '请求过于频繁，请稍后重试',
 } as Record<string, string>)[key] || key }) }));
 
 const opportunity: api.GitHubStarOpportunity = {
@@ -38,6 +39,9 @@ const account: api.GitHubStarAccount = {
 const success: api.GitHubStarResult = {
   repository: 'LazyAGI/LazyMind', connection_id: account.connection_id, account_id: account.account_id,
   login: account.login, state: 'starred', write_performed: true,
+};
+const localSuccess = {
+  repository: 'LazyAGI/LazyMind', account_id: '30003', login: 'local-user', state: 'starred' as const, write_performed: true,
 };
 
 async function announce(value: api.GitHubStarOpportunity = opportunity) {
@@ -73,6 +77,9 @@ beforeEach(() => {
     min_successful_tasks: 3, cooldown_days: 7, max_prompts: 3,
   });
   vi.mocked(api.writeGitHubStar).mockResolvedValue(success);
+  vi.mocked(api.writeLocalGitHubStar).mockResolvedValue({
+    repository: 'LazyAGI/LazyMind', state: 'connection_required', account_id: '', login: '', write_performed: false,
+  });
   vi.mocked(api.markGitHubStarSupported).mockResolvedValue(undefined);
   vi.mocked(api.findGitHubStarOpportunity).mockImplementation(async (conversationId, workflowSessionId, taskIds) => {
     if (conversationId !== opportunity.conversation_id || workflowSessionId !== undefined) return null;
@@ -149,14 +156,18 @@ describe('GitHub Star invitation', () => {
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   });
 
-  it('does not treat unknown or insufficient authorization as no connected account', async () => {
+  it('tries local credentials only on click when all saved accounts are unavailable', async () => {
     vi.mocked(api.readGitHubStarAccounts).mockResolvedValue({
       repository: 'LazyAGI/LazyMind', accounts: [{ ...account, state: 'unknown', eligible: false }],
     });
-    mount();
-    await announce();
+    vi.mocked(api.writeLocalGitHubStar).mockResolvedValue(localSuccess);
+    await offer();
     expect(api.readGitHubStarAccounts).toHaveBeenCalled();
-    expect(api.claimGitHubStarPrompt).not.toHaveBeenCalled();
+    expect(api.writeLocalGitHubStar).not.toHaveBeenCalled();
+    await act(async () => fireEvent.click(screen.getByRole('button', { name: '为项目点 Star' })));
+    expect(api.writeLocalGitHubStar).toHaveBeenCalledWith({ confirmed: true });
+    expect(api.writeGitHubStar).not.toHaveBeenCalled();
+    expect(screen.getByText('感谢支持，已点 Star')).toBeInTheDocument();
     expect(navigate).not.toHaveBeenCalled();
   });
 
@@ -178,14 +189,17 @@ describe('GitHub Star invitation', () => {
     });
     expect(screen.getByText('感谢支持，已点 Star')).toBeInTheDocument();
     expect(api.markGitHubStarSupported).toHaveBeenCalledTimes(1);
+    expect(api.writeLocalGitHubStar).not.toHaveBeenCalled();
     expect(navigate).not.toHaveBeenCalled();
   });
 
-  it('closing the invitation does not write, authenticate, or consume another claim', async () => {
+  it.each(['saved', 'none'])('closing the invitation with %s accounts does not write, authenticate, or consume another claim', async kind => {
+    if (kind === 'none') vi.mocked(api.readGitHubStarAccounts).mockResolvedValue({ repository: 'LazyAGI/LazyMind', accounts: [] });
     await offer();
     await act(async () => fireEvent.click(screen.getByRole('button', { name: '关闭' })));
     await announce({ ...opportunity, task_id: 'root-4' });
     expect(api.writeGitHubStar).not.toHaveBeenCalled();
+    expect(api.writeLocalGitHubStar).not.toHaveBeenCalled();
     expect(navigate).not.toHaveBeenCalled();
     expect(api.claimGitHubStarPrompt).toHaveBeenCalledTimes(1);
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
@@ -207,11 +221,14 @@ describe('GitHub Star invitation', () => {
     expect(api.writeGitHubStar).toHaveBeenCalledWith({ connection_id: 'conn-bob', expected_account_id: '20002', confirmed: true });
   });
 
-  it('no LazyMind connection asks for consent before local reuse or CLI navigation', async () => {
+  it('offers connection only after local credentials are confirmed unavailable', async () => {
     vi.mocked(api.readGitHubStarAccounts).mockResolvedValue({ repository: 'LazyAGI/LazyMind', accounts: [] });
     await offer();
+    expect(api.writeLocalGitHubStar).not.toHaveBeenCalled();
     await act(async () => fireEvent.click(screen.getByRole('button', { name: '为项目点 Star' })));
-    expect(screen.getByText(/将优先复用本机 GitHub 登录信息/)).toBeInTheDocument();
+    expect(api.writeLocalGitHubStar).toHaveBeenCalledTimes(1);
+    expect(api.writeLocalGitHubStar).toHaveBeenCalledWith({ confirmed: true });
+    expect(screen.getByText(/未找到可用的本机 GitHub 登录信息/)).toBeInTheDocument();
     expect(navigate).not.toHaveBeenCalled();
     expect(api.writeGitHubStar).not.toHaveBeenCalled();
     await act(async () => fireEvent.click(screen.getByRole('button', { name: '继续连接 GitHub' })));
@@ -219,6 +236,60 @@ describe('GitHub Star invitation', () => {
       state: { githubStarReturn: { userId: 'owner-1', returnTo: '/task-center', opportunity } },
     });
     expect(api.writeGitHubStar).not.toHaveBeenCalled();
+  });
+
+  it.each([true, false])('uses local credentials directly without connecting: write_performed=%s', async writePerformed => {
+    vi.mocked(api.readGitHubStarAccounts).mockResolvedValue({ repository: 'LazyAGI/LazyMind', accounts: [] });
+    vi.mocked(api.writeLocalGitHubStar).mockResolvedValue({ ...localSuccess, write_performed: writePerformed });
+    await offer();
+    expect(api.writeLocalGitHubStar).not.toHaveBeenCalled();
+    await act(async () => fireEvent.click(screen.getByRole('button', { name: '为项目点 Star' })));
+    expect(api.writeLocalGitHubStar).toHaveBeenCalledWith({ confirmed: true });
+    expect(api.writeGitHubStar).not.toHaveBeenCalled();
+    expect(screen.getByText(writePerformed ? '感谢支持，已点 Star' : '你已为项目点过 Star，感谢支持')).toBeInTheDocument();
+    expect(api.markGitHubStarSupported).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole('button', { name: '继续连接 GitHub' })).not.toBeInTheDocument();
+    expect(navigate).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    [503, 'unavailable', /重试/], [503, 'result_unknown', /暂未确认是否成功/],
+    [429, 'rate_limited', /请求过于频繁/], [403, 'permission_denied', /权限不足/],
+  ])('local failure %s/%s does not become a missing-credential result', async (status, reason, message) => {
+    vi.mocked(api.readGitHubStarAccounts).mockResolvedValue({ repository: 'LazyAGI/LazyMind', accounts: [] });
+    vi.mocked(api.writeLocalGitHubStar).mockRejectedValue({ response: { status, data: { reason } } });
+    await offer();
+    await act(async () => fireEvent.click(screen.getByRole('button', { name: '为项目点 Star' })));
+    expect(screen.getByRole('alert')).toHaveTextContent(message);
+    expect(api.markGitHubStarSupported).not.toHaveBeenCalled();
+    expect(screen.queryByRole('button', { name: '继续连接 GitHub' })).not.toBeInTheDocument();
+    expect(navigate).not.toHaveBeenCalled();
+  });
+
+  it('does not replay a pending local write after double clicking', async () => {
+    let finish!: (result: typeof localSuccess) => void;
+    vi.mocked(api.readGitHubStarAccounts).mockResolvedValue({ repository: 'LazyAGI/LazyMind', accounts: [] });
+    vi.mocked(api.writeLocalGitHubStar).mockReturnValue(new Promise(resolve => { finish = resolve; }));
+    await offer();
+    const button = screen.getByRole('button', { name: '为项目点 Star' });
+    fireEvent.click(button); fireEvent.click(button);
+    expect(api.writeLocalGitHubStar).toHaveBeenCalledTimes(1);
+    await act(async () => finish(localSuccess));
+    expect(screen.getByText('感谢支持，已点 Star')).toBeInTheDocument();
+  });
+
+  it.each(['identity change', 'closing'])('ignores a delayed successful local write after %s', async kind => {
+    let finish!: (result: typeof localSuccess) => void;
+    vi.mocked(api.readGitHubStarAccounts).mockResolvedValue({ repository: 'LazyAGI/LazyMind', accounts: [] });
+    vi.mocked(api.writeLocalGitHubStar).mockReturnValue(new Promise(resolve => { finish = resolve; }));
+    const view = mount();
+    await announce();
+    fireEvent.click(screen.getByRole('button', { name: '为项目点 Star' }));
+    if (kind === 'identity change') view.rerender(host({ userId: 'owner-2' }));
+    else fireEvent.click(screen.getByRole('button', { name: '关闭' }));
+    await act(async () => finish(localSuccess));
+    expect(screen.queryByText('感谢支持，已点 Star')).not.toBeInTheDocument();
+    expect(api.markGitHubStarSupported).not.toHaveBeenCalled();
   });
 
   it('a successful CLI return resumes the existing invitation, rechecks the account, and waits for a click', async () => {

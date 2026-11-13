@@ -7,6 +7,7 @@ from urllib import request as urllib_request
 from urllib.error import HTTPError, URLError
 
 from core.errors import AppException, ErrorCodes
+from services.github_cli_runner import GitHubCLIError
 
 
 REPOSITORY = 'LazyAGI/LazyMind'
@@ -105,14 +106,18 @@ class GitHubStarService:
         if token['provider'] != 'github' or not token.get('access_token'):
             raise _error(ErrorCodes.GITHUB_STAR_INVALID_CONNECTION, 'reauthorize')
         access_token = token['access_token']
+        account_id, login = self._inspect_token(access_token, expected_account_id=row['provider_account_id'])
+        return access_token, account_id, login
+
+    def _inspect_token(self, access_token, *, expected_account_id=None):
         profile = self._http('/user', access_token, require_scope=True)
         account_id, login = str(profile.get('id') or ''), str(profile.get('login') or '')
-        if not account_id or not login or account_id != row['provider_account_id']:
+        if not account_id or not login or (expected_account_id is not None and account_id != expected_account_id):
             raise _error(ErrorCodes.GITHUB_STAR_ACCOUNT_CHANGED, 'account_changed')
         repository = self._http('/repos/' + REPOSITORY, access_token)
         if str(repository.get('full_name') or '').lower() != REPOSITORY.lower():
             raise _error(ErrorCodes.GITHUB_STAR_UNAVAILABLE, 'unavailable')
-        return access_token, account_id, login
+        return account_id, login
 
     def status(self, *, owner_user_id: str, connection_id: str = '') -> dict:
         if connection_id:
@@ -149,17 +154,44 @@ class GitHubStarService:
             token, account_id, login = self._inspect(row, owner_user_id)
             result = {'repository': REPOSITORY, 'connection_id': connection_id,
                       'account_id': account_id, 'login': login, 'state': 'starred', 'write_performed': False}
-            if self._http(_STAR_PATH, token, not_found=True):
-                return result
+            return self._write_star(token, result)
+
+    def star_local(self, *, confirmed: bool, probe=None) -> dict:
+        if confirmed is not True:
+            raise _error(ErrorCodes.INVALID_REQUEST, 'confirmation_required')
+        unavailable = {'repository': REPOSITORY, 'state': 'connection_required',
+                       'account_id': '', 'login': '', 'write_performed': False}
+        if probe is None:
+            return unavailable
+        with self._write_lock:
             try:
-                self._http(_STAR_PATH, token, method='PUT')
+                credential = probe()
+            except GitHubCLIError:
+                return unavailable
+            if credential is None:
+                return unavailable
+            token = credential['access_token']
+            try:
+                account_id, login = self._inspect_token(token)
+                result = {**unavailable, 'state': 'starred', 'account_id': account_id, 'login': login}
+                return self._write_star(token, result)
             except AppException as exc:
-                if exc.http_code in (401, 403, 429):
-                    raise
-                # A lost response may follow a committed write. Never replay PUT.
-            try:
-                if self._http(_STAR_PATH, token, not_found=True):
-                    return {**result, 'write_performed': True}
-            except AppException:
-                pass
-            raise _error(ErrorCodes.GITHUB_STAR_RESULT_UNKNOWN, 'result_unknown')
+                if exc.http_code in (401, 403):
+                    return unavailable
+                raise
+
+    def _write_star(self, token, result):
+        if self._http(_STAR_PATH, token, not_found=True):
+            return result
+        try:
+            self._http(_STAR_PATH, token, method='PUT')
+        except AppException as exc:
+            if exc.http_code in (401, 403, 429):
+                raise
+            # A lost response may follow a committed write. Never replay PUT.
+        try:
+            if self._http(_STAR_PATH, token, not_found=True):
+                return {**result, 'write_performed': True}
+        except AppException:
+            pass
+        raise _error(ErrorCodes.GITHUB_STAR_RESULT_UNKNOWN, 'result_unknown')
