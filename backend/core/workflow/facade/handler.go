@@ -1072,7 +1072,9 @@ func (h Handler) Command(delegate http.Handler) http.HandlerFunc {
 		var command toolCommandRequest
 		_ = json.Unmarshal(body, &command)
 		response := append(json.RawMessage(nil), result.ResponseJSON...)
-		if result.HTTPStatus < 400 && command.Tool == "advance_step" {
+		// Handoff changes the post-execution approval boundary, not the completion
+		// of this call. Both tools wait for execution and any pending stop receipts.
+		if result.HTTPStatus < 400 && (command.Tool == "advance_step" || command.Tool == "advance_step_and_hand_off") {
 			var value map[string]any
 			_ = json.Unmarshal(response, &value)
 			taskIDs := []string{}

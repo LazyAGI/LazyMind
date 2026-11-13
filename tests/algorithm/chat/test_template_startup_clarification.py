@@ -10,6 +10,85 @@ from lazymind.chat.workflow.workflow_manager import (
     resolve_workflow_injection,
     workflow_startup_clarification_already_asked,
 )
+from lazymind.workflow_sdk import WorkflowClientError
+
+
+@pytest.mark.parametrize('binding,resolved,claimed,previous_mode,expected', [
+    (None, None, 'upload', None, 'needs_input'),
+    (None, None, 'upload', 'upload', 'needs_input'),
+    ('missing.pptx', None, 'upload', None, 'ATTACHMENT_NOT_SELECTED'),
+    ('notes.pdf', '/uploads/notes.pdf', 'upload', None, 'WORKFLOW_INPUT_INVALID'),
+    ('template.pptx', '/uploads/template.pptx', 'none', 'none', 'prepared'),
+])
+def test_template_mode_requires_resolved_template_binding(
+    monkeypatch, binding, resolved, claimed, previous_mode, expected,
+):
+    from lazymind.chat.workflow import workflow_manager as manager
+
+    package_path = Path(__file__).resolve().parents[3] / 'workflows/ppt-workflow/workflow.yaml'
+    runtime = yaml.safe_load(package_path.read_text(encoding='utf-8'))['runtime']
+    item = {
+        'workflow_id': 'ppt-workflow', 'workflow_ref': 'builtin:ppt-workflow',
+        'revision_id': 'revision-1', 'runtime': runtime, 'tool_name': 'trigger_ppt_workflow',
+        'compiled_graph': {
+            'material_types': {'template_pptx': 'file'},
+            'material_producers': {'template_pptx': {'kind': 'external'}},
+        },
+    }
+    client, toolkit = MagicMock(), MagicMock()
+    client.get_workflow.return_value.result = item
+    toolkit.prepare_workflow.return_value = {
+        'session_id': 'session-1', 'state_version': 1, 'ready_steps': ['analyze_requirements'],
+    }
+    resolve = MagicMock(return_value=(resolved, None if resolved else 'Attachment not found'))
+    import_attachment = MagicMock(return_value='artifact:template')
+    monkeypatch.setattr(manager, '_client', lambda: client)
+    monkeypatch.setattr(manager, 'HostWorkflowToolkit', lambda *a, **kw: toolkit)
+    monkeypatch.setattr(manager, '_resolve_workflow_attachment', resolve)
+    monkeypatch.setattr(manager, '_import_attachment', import_attachment)
+    monkeypatch.setattr(manager, '_conversation_has_attachments', lambda: bool(binding))
+    monkeypatch.setattr('lazyllm.tools.agent.base._write_agent_data', lambda *a, **kw: None)
+    contribution = resolve_workflow_injection(
+        None, current_query='用模板制作关于气候变化的PPT，8页，输出PPTX',
+        workflow_catalog=[item], allowed_workflow_refs=['builtin:ppt-workflow'], workflow_activations=[item],
+        clarification=({'workflow_ref': 'builtin:ppt-workflow', 'values': {'template_mode': previous_mode}}
+                       if previous_mode else None),
+    )
+    pending, registered = list(contribution.tools), {}
+    while pending:
+        tool = pending.pop()
+        if isinstance(tool, dict):
+            pending.extend(tool.get('tools') or [])
+        else:
+            registered[tool.__name__] = tool
+    bindings = {'topic': '气候变化', 'template_mode': claimed, 'presentation_output_format': 'native_pptx'}
+    if binding:
+        bindings['template_pptx'] = binding
+    if expected.startswith(('ATTACHMENT_', 'WORKFLOW_')):
+        with pytest.raises(WorkflowClientError) as exc:
+            registered['trigger_ppt_workflow'](
+                input_bindings=bindings,
+                clarification_extractions={'slide_count': [{'value': '8', 'evidence': '8页'}]},
+            )
+        assert exc.value.code == expected
+    else:
+        result = registered['trigger_ppt_workflow'](
+            input_bindings=bindings,
+            clarification_extractions={'slide_count': [{'value': '8', 'evidence': '8页'}]},
+        )
+        assert result['status'] == expected
+        if expected == 'needs_input':
+            assert result['missing_clarification_fields'] == ['generate_background_images']
+        else:
+            assert result['input_bindings'] == {'template_pptx': 'artifact:template'}
+            assert '"template_mode": "upload"' in toolkit.prepare_workflow.call_args.kwargs['request_context']
+    if binding:
+        resolve.assert_called_once_with(binding)
+    else:
+        resolve.assert_not_called()
+    if expected != 'prepared':
+        toolkit.prepare_workflow.assert_not_called()
+        import_attachment.assert_not_called()
 
 
 @pytest.fixture
@@ -64,14 +143,14 @@ def test_academic_prompt_defaults_preserve_explicit_visual_requirements():
     request = '请根据附件生成科研汇报 PPT，主题：方法比较，8页。科研风格，不生成 AI 底图。'
     values, missing = resolve_fields(policy, request, {
         'topic': '方法比较', 'slide_count': '8', 'visual_style': '科研风格', 'generate_background_images': 'disabled',
-    })
+    }, extractions={'slide_count': [{'value': '8', 'evidence': '8页'}]})
     assert values['visual_style'] == '科研风格'
     assert values['generate_background_images'] == 'disabled'
     assert not missing
     explicit = '请根据附件生成科研汇报 PPT，主题：方法比较，8页。使用深色风格，启用AI底图'
     values, missing = resolve_fields(policy, explicit, {
         'topic': '方法比较', 'slide_count': '8', 'visual_style': '深色风格', 'generate_background_images': 'enabled',
-    })
+    }, extractions={'slide_count': [{'value': '8', 'evidence': '8页'}]})
     assert values['visual_style'] == '深色风格'
     assert values['generate_background_images'] == 'enabled'
     assert not missing

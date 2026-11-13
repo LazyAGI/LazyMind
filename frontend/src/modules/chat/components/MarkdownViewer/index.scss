@@ -1,12 +1,15 @@
 .rag-markdown a.md-file-link,
-.rag-markdown span.md-file-link {
+.rag-markdown span.md-file-link,
+.rag-markdown button.md-file-link {
   color: var(--color-accent-fg);
   text-decoration: none;
   cursor: pointer;
   word-break: break-all;
 }
 
-.rag-markdown a.md-file-link:hover {
+.rag-markdown a.md-file-link:hover,
+.rag-markdown button.md-file-link:hover,
+.rag-markdown button.md-file-download:not(:disabled):hover {
   text-decoration: underline;
   text-decoration-style: dashed;
   text-underline-offset: 3px;
@@ -292,6 +295,7 @@
 
 .md-html-file {
   display: flex;
+  flex: 1;
   min-width: 0;
   align-items: center;
   gap: 9px;
@@ -305,20 +309,14 @@
 }
 
 .md-html-file-name {
+  min-width: 0;
+  max-width: 320px;
   overflow: hidden;
   font-size: 14px;
   font-weight: 600;
   line-height: 22px;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.md-html-file-type {
-  flex: 0 0 auto;
-  color: var(--color-fg-subtle);
-  font-size: 11px;
-  font-weight: 500;
-  letter-spacing: 0.04em;
 }
 
 .md-html-actions {
@@ -761,10 +759,6 @@
     gap: 7px;
   }
 
-  .md-html-file-type {
-    display: none;
-  }
-
   .md-html-actions {
     gap: 2px;
 
@@ -828,6 +822,6 @@
 
 .md-file-actions { display: inline-flex; align-items: baseline; gap: 8px; max-width: 100%; }
 .md-file-link--preview { border: 0; padding: 0; background: transparent; font: inherit; text-align: left; cursor: pointer; }
-.md-file-download { flex-shrink: 0; border: 0; padding: 0 3px; background: transparent; color: #64748b; font-size: 12px; cursor: pointer; }
+.md-file-download { flex-shrink: 0; border: 0; padding: 0 3px; background: transparent; color: var(--color-accent-fg); font-size: 12px; cursor: pointer; }
 .md-file-actions button:focus-visible { outline: 2px solid #2f6bff; outline-offset: 2px; border-radius: 3px; }
 .md-file-download:disabled { opacity: .5; cursor: default; }

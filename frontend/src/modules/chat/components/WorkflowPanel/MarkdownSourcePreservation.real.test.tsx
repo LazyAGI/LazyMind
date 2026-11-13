@@ -109,9 +109,9 @@ it('retains an unsaved edit, blocks publication and allows retry after mapping a
   // reformatted replacement when its mapping is unavailable.
   const menu = document.querySelector<HTMLDetailsElement>('.writer-document-options')!;
   act(() => { menu.open = true; fireEvent(menu, new Event('toggle')); });
-  fireEvent.click(screen.getByRole('button', { name: '源码' }));
+  fireEvent.click(screen.getByRole('button', { name: '查看源码' }));
   expect(onSave).not.toHaveBeenCalled();
-  expect(screen.queryByRole('textbox', { name: '源码' })).not.toBeInTheDocument();
+  expect(screen.queryByRole('textbox', { name: '查看源码' })).not.toBeInTheDocument();
   capture.abortDiff = false;
   fireEvent.click(screen.getByRole('button', { name: '重试' }));
   await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1));
@@ -119,10 +119,10 @@ it('retains an unsaved edit, blocks publication and allows retry after mapping a
   const unsavedMarkdown = source.replace('Original paragraph.', 'Unsaved paragraph.');
   expect(publishedSource(savedMarkdown)).toBe(unsavedMarkdown);
   // Calling onSave starts persistence; its receipt updates the source preview.
-  await waitFor(() => expect(screen.getByRole('textbox', { name: '源码' })).toHaveValue(unsavedMarkdown));
+  await waitFor(() => expect(screen.getByRole('textbox', { name: '查看源码' })).toHaveValue(unsavedMarkdown));
   await act(async () => { finishSave!(); });
-  await waitFor(() => expect(screen.getByRole('textbox', { name: '源码' })).toHaveValue(savedMarkdown));
-  expect(screen.getByRole('textbox', { name: '源码' })).toHaveAttribute('readonly');
+  await waitFor(() => expect(screen.getByRole('textbox', { name: '查看源码' })).toHaveValue(savedMarkdown));
+  expect(screen.getByRole('textbox', { name: '查看源码' })).toHaveAttribute('readonly');
 }, 15000);
 
 it('round-trips the repository README editor input with only the added content in the diff', async () => {
@@ -160,13 +160,25 @@ it.each(['ref-001', 'SRC-001', 'KB-001', 'source.v2_甲'])('preserves and naviga
   await replaceText('Original paragraph.', 'Edited paragraph.');
   await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1), { timeout: 3000 });
   expect(publishedSource(onSave.mock.calls[0][0])).toBe(source.replace('Original paragraph.', 'Edited paragraph.'));
-  expect(document.getElementById(`paper-ref-${id}`)).toHaveClass('writer-markdown-editor__system-anchor');
+  const target = document.getElementById(`paper-ref-${id}`)!;
+  expect(target).toHaveClass('writer-markdown-editor__system-anchor');
   const surface = document.querySelector<HTMLElement>('.writer-markdown-editor__surface')!;
+  // JSDOM does not lay out the document; model an overflowing editor viewport.
+  surface.style.overflowY = 'auto';
+  Object.defineProperties(surface, {
+    clientHeight: { value: 300 },
+    scrollHeight: { value: 1800 },
+    clientTop: { value: 1 },
+  });
+  surface.scrollTop = 100;
+  vi.spyOn(surface, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 200, 600, 300));
+  vi.spyOn(target, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 900, 600, 20));
   surface.scrollTo = vi.fn();
   const link = document.querySelector<HTMLAnchorElement>(`a[href="#paper-ref-${id}"]`)!;
   expect(link.textContent).toBe('[1]');
   fireEvent.click(link);
-  expect(surface.scrollTo).toHaveBeenCalled();
+  expect(surface.scrollTo).toHaveBeenCalledTimes(1);
+  expect(surface.scrollTo).toHaveBeenCalledWith({ top: 791, behavior: 'smooth' });
 }, 15000);
 
 it('selects a bibliography entry and saves a canonical citation through the real editor', async () => {

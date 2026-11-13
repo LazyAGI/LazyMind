@@ -26,32 +26,31 @@ describe('WeChat notification status precedence', () => {
 
 describe('WeChat editor account and recipient scope', () => {
   it('shows no account as disconnected, not as a missing recipient', () => {
-    for (const aggregate of [false, true]) {
-      expect(wechatEditorStatus({ accounts: [], status: 'unconfigured', aggregate })).toBe('disconnected');
-    }
-    expect(wechatEditorStatus({ accounts: [account({ status: 'disconnected' })], aggregate: false })).toBe('disconnected');
+    expect(wechatEditorStatus({ accounts: [], status: 'unconfigured' })).toBe('disconnected');
+    expect(wechatEditorStatus({ accounts: [account({ status: 'disconnected' })] })).toBe('disconnected');
   });
   it('shows an account awaiting activation before recipient guidance', () => {
     const bot = account({ capabilities: { notification_ready: false } });
-    expect(wechatEditorStatus({ accounts: [bot], status: 'unconfigured', aggregate: true })).toBe('pending');
-    expect(wechatEditorStatus({ accounts: [bot], status: 'unconfigured', accountId: bot.id, aggregate: false })).toBe('pending');
+    expect(wechatEditorStatus({ accounts: [bot], status: 'unconfigured', accountId: bot.id })).toBe('pending');
   });
   it('does not use another account to determine an incomplete task selection', () => {
     const selected = account({ status: 'disconnected' });
-    expect(wechatEditorStatus({ accounts: [selected, account({ id: 'other' })], accountId: selected.id, aggregate: false })).toBe('disconnected');
-    expect(wechatEditorStatus({ accounts: [account({ id: 'other' })], accountId: selected.id, aggregate: false })).toBe('disconnected');
+    expect(wechatEditorStatus({ accounts: [selected, account({ id: 'other' })], accountId: selected.id })).toBe('disconnected');
+    expect(wechatEditorStatus({ accounts: [account({ id: 'other' })], accountId: selected.id })).toBe('disconnected');
   });
   it('does not choose an account or recipient implicitly', () => {
     const accounts = [account()];
-    expect(wechatEditorStatus({ accounts, aggregate: true })).toBe('unconfigured');
-    expect(wechatEditorStatus({ accounts, aggregate: false })).toBe('unconfigured');
-    expect(wechatEditorStatus({ accounts, accountId: 'selected', aggregate: false })).toBe('unconfigured');
+    expect(wechatEditorStatus({ accounts })).toBe('unconfigured');
+    expect(wechatEditorStatus({ accounts, accountId: 'selected' })).toBe('unconfigured');
+  });
+  it.each([undefined, 'unconfigured'] as const)('retains a configured recipient without a live check: %s', status => {
+    expect(wechatEditorStatus({ accounts: [account()], accountId: 'selected', recipientId: 'a', status })).toBe('connected');
+    expect(wechatEditorStatus({ accounts: [account({ status: 'disconnected' })], accountId: 'selected', recipientId: 'a', status })).toBe('disconnected');
   });
   it('uses live results only for confirmed recipients', () => {
     const accounts = [account()];
-    expect(wechatEditorStatus({ accounts, accountId: 'selected', status: 'pending', aggregate: false })).toBe('unconfigured');
-    expect(wechatEditorStatus({ accounts, accountId: 'selected', recipientId: 'a', status: 'pending', aggregate: false })).toBe('pending');
-    expect(wechatEditorStatus({ accounts, status: 'unavailable', aggregate: true })).toBe('unavailable');
+    expect(wechatEditorStatus({ accounts, accountId: 'selected', status: 'pending' })).toBe('unconfigured');
+    expect(wechatEditorStatus({ accounts, accountId: 'selected', recipientId: 'a', status: 'pending' })).toBe('pending');
   });
 });
 

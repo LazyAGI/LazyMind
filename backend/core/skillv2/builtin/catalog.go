@@ -56,6 +56,7 @@ type CatalogSkill struct {
 	Provider            string         `json:"provider,omitempty"`
 	MarketVisible       *bool          `json:"market_visible,omitempty"`
 	Content             string         `json:"content,omitempty"`
+	OriginVersion       string         `json:"origin_version,omitempty"`
 	OriginArchiveSHA256 string         `json:"origin_archive_sha256,omitempty"`
 	OriginTreeSHA256    string         `json:"origin_tree_sha256,omitempty"`
 	OriginArchiveSize   int64          `json:"origin_archive_size,omitempty"`
@@ -121,6 +122,7 @@ func LoadCatalog(catalogPath string) (Catalog, error) {
 		entry.SourceURL = strings.TrimSpace(entry.SourceURL)
 		entry.ResolvedURL = strings.TrimSpace(entry.ResolvedURL)
 		entry.Version = strings.TrimSpace(entry.Version)
+		entry.OriginVersion = strings.TrimSpace(entry.OriginVersion)
 		entry.Name = strings.TrimSpace(entry.Name)
 		entry.Description = strings.TrimSpace(entry.Description)
 		entry.Category = strings.TrimSpace(entry.Category)
@@ -168,7 +170,7 @@ func LoadCatalog(catalogPath string) (Catalog, error) {
 }
 
 func validatePatchProvenance(entry *CatalogSkill) error {
-	hasProvenance := entry.OriginArchiveSHA256 != "" || entry.OriginTreeSHA256 != "" || entry.OriginArchiveSize != 0 || entry.PatchSetSHA256 != "" || len(entry.AppliedPatches) > 0
+	hasProvenance := entry.OriginVersion != "" || entry.OriginArchiveSHA256 != "" || entry.OriginTreeSHA256 != "" || entry.OriginArchiveSize != 0 || entry.PatchSetSHA256 != "" || len(entry.AppliedPatches) > 0
 	if !hasProvenance {
 		return nil
 	}

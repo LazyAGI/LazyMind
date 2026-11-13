@@ -988,7 +988,7 @@ def test_kb_total_normalizes_json_string_and_nested_result_value():
     assert 'completed with **4** relevant items' in result_text
 
 
-def test_plugin_preflight_result_renders_outcome_and_reason_in_chinese():
+def test_plugin_preflight_result_renders_user_facing_outcome_in_chinese():
     reason = 'The request can be answered directly without a multi-stage workflow.'
     result_text = _tool_result_frame_text(
         {
@@ -1002,8 +1002,7 @@ def test_plugin_preflight_result_renders_outcome_and_reason_in_chinese():
         'zh',
     )
 
-    assert '工作流初始化已完成，结果是 **not_applicable**' in result_text
-    assert f'原因是 **{reason}**' in result_text
+    assert '当前请求可以直接处理，无需启动工作流。' in result_text
 
 
 def test_result_template_supports_generic_dotted_paths_for_nested_json_fields():
@@ -1047,8 +1046,7 @@ def test_plugin_preflight_result_supports_ready_status_payload():
         'en',
     )
 
-    assert 'Workflow initialization completed. Result: **ready**.' in result_text
-    assert 'Reason: **The user explicitly requested this plugin.**' in result_text
+    assert 'The workflow is ready and will start shortly.' in result_text
 
 
 def test_workflow_failure_template_handles_canonical_failure():
@@ -1064,7 +1062,7 @@ def test_workflow_failure_template_handles_canonical_failure():
         'zh',
     )
 
-    assert '工作流初始化失败，结果是 **failed**' in result_text
+    assert '工作流未能启动，请查看错误详情。' in result_text
     assert 'workflow or revision was not found' in result_text
 
 
@@ -1081,7 +1079,7 @@ def test_workflow_success_template_normalizes_json_string_value():
         'en',
     )
 
-    assert 'Result: **queued**. Reason: **accepted**.' in result_text
+    assert 'The workflow is queued and waiting to run.' in result_text
 
 
 def test_workflow_success_template_normalizes_nested_result_value():
@@ -1099,7 +1097,7 @@ def test_workflow_success_template_normalizes_nested_result_value():
         'en',
     )
 
-    assert 'Result: **queued**. Reason: **accepted**.' in result_text
+    assert 'The workflow is queued and waiting to run.' in result_text
 
 
 def test_permission_failure_uses_canonical_failure_rendering():
@@ -1135,3 +1133,20 @@ def test_generic_file_and_shell_rendering(name, argument, value, verb):
     for result in ({'ok': True, 'value': {'status': 'ok'}}, {'ok': False, 'msg': 'failed'}):
         preview = tool_rendering._tool_result_preview(name, result, value, language='zh')
         assert verb in preview and '工具 **' not in preview
+
+
+@pytest.mark.parametrize('name', ['advance_step', 'advance_step_and_hand_off', 'resume_and_rerun_step'])
+@pytest.mark.parametrize('language', ['zh', 'en'])
+@pytest.mark.parametrize('status,outcome,expected_zh,expected_en', [
+    ('paused', 'workflow_paused', '已暂停', 'paused'),
+    ('failed', 'step_failed', '执行失败', 'failed'),
+    ('waiting', 'workflow_approval_required', '人工确认', 'approval'),
+    ('waiting_input', 'workflow_input_required', '补充信息', 'additional information'),
+    ('completed', '', '工作流已完成', 'Workflow completed'),
+    ('active', 'step_succeeded', '步骤已完成', 'Step completed'),
+])
+def test_execution_preview_uses_business_outcome(name, language, status, outcome, expected_zh, expected_en):
+    result = {'ok': True, 'value': {'status': status, 'outcome': outcome}}
+    preview = tool_rendering._tool_result_preview(name, result, language=language)
+    assert (expected_zh if language == 'zh' else expected_en) in preview
+    assert '已启动' not in preview and 'launched' not in preview

@@ -242,10 +242,11 @@ def install_stream_interrupt_hook(llm: object) -> bool:
     output hook lazily after the stack has been entered. Static models can be
     hooked directly. The interrupt check itself is scoped by session ID.
     """
+    from .model_cancellation import CancellableLLM
     from .model_fallback import FallbackLLM
 
-    if isinstance(llm, FallbackLLM):
-        # FallbackLLM streams through copied supplier views, not its inherited
+    if isinstance(llm, (FallbackLLM, CancellableLLM)):
+        # These wrappers stream through copied supplier views, not their inherited
         # _stream_output. Install on the owner of those calls instead.
         llm._steering_interrupt_check = check_stream_interrupt
         return True

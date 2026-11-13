@@ -213,7 +213,7 @@ export default function ChatMessageContent({
       </div>
       {item.role !== RoleTypes.USER && !isStreaming && !item.fork_read_only && conversationId && (item.history_id || item.id) &&
         <MessageArtifactLinks conversationId={conversationId} historyId={item.history_id || item.id}
-          content={item.delta || ''} exports={item.exports} sources={item.sources} />}
+          content={item.delta || ''} rawContent={item.raw_delta} exports={item.exports} sources={item.sources} />}
     </Flex>
   );
 }

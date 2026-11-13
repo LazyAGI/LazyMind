@@ -218,6 +218,9 @@ func acquireLockedPackage(ctx context.Context, catalogPath string, entry Catalog
 	if pkg, found, err := cachedPackage(catalogPath, entry, cacheRoot); err != nil || found {
 		return pkg, err
 	}
+	if len(entry.AppliedPatches) > 0 && entry.OriginVersion == "" {
+		return Package{}, catalogFailure("builtin Skill %s is missing origin_version; regenerate the catalog", entry.UID)
+	}
 	if err := os.MkdirAll(cacheRoot, 0o700); err != nil {
 		return Package{}, catalogFailure("create builtin Skill cache: %v", err)
 	}
@@ -247,7 +250,7 @@ func acquireLockedPackage(ctx context.Context, catalogPath string, entry Catalog
 			return Package{}, catalogFailure("load builtin Skill patches: %v", err)
 		}
 		patched, err := skillpatch.Apply(skillpatch.Target{
-			UID: entry.UID, Version: entry.Version, OriginTreeHash: expectedOriginTree,
+			UID: entry.UID, Version: entry.OriginVersion, OriginTreeHash: expectedOriginTree,
 		}, originFiles, patches)
 		if err != nil {
 			return Package{}, err
@@ -375,7 +378,7 @@ func downloadClient() *http.Client {
 	proxied.Proxy = http.ProxyFromEnvironment
 	return &http.Client{
 		Transport: &downloadTransport{direct: direct, proxied: proxied, proxyFor: http.ProxyFromEnvironment},
-		Timeout:   90 * time.Second,
+		Timeout:   5 * time.Minute,
 		CheckRedirect: func(request *http.Request, via []*http.Request) error {
 			if len(via) >= 5 {
 				return catalogFailure("too many download redirects")

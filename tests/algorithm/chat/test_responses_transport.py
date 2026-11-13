@@ -62,7 +62,7 @@ def test_dynamic_chat_uses_responses_and_recovers_completed_text(monkeypatch, tm
 
         def iter_lines(self):
             event = {'type': 'response.completed', 'response': {'output': [
-                {'type': 'message', 'content': [{'type': 'output_text', 'text': 'Ready'}]},
+                {'type': 'message', 'role': 'assistant', 'content': [{'type': 'output_text', 'text': 'Ready'}]},
             ]}}
             yield ('data: ' + json.dumps(event)).encode()
 
@@ -84,7 +84,7 @@ def test_dynamic_chat_uses_responses_and_recovers_completed_text(monkeypatch, tm
             config = tmp_path / 'models.yaml'
             config.write_text('llm:\n  source: dynamic\n  dynamic_auth: true\n  type: llm\n')
             model = AutoModel(model='llm', config=str(config), stream=True)
-            assert model('Hello', stream_output=True) == {'content': 'Ready'}
+            assert model('Hello', stream_output=True) == 'Ready'
             assert calls[0][0] == 'https://api.openai.com/v1/responses'
             assert calls[0][1]['model'] == 'gpt-6.1-sol'
             assert 'input' in calls[0][1] and 'messages' not in calls[0][1]
