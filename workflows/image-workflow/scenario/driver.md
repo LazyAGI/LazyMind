@@ -55,9 +55,10 @@ describing what was produced and whether it meets the criteria below.
 - Static source-edit+subtitle requests keep only the non-text visual edit in image_prompt.
 
 ### generate_image
-- At least one valid `generated_base_image` produced by this attempt is mandatory for every route.
-- Ordinary still routes call image_generator, save the same path to generated_image_output, and
-  end. Existing-source edit routes stage the source as the base without editing it yet.
+- At least one valid image produced by this attempt is mandatory. Ordinary still routes call
+  image_generator, save only `generated_image_output`, and end. Routes requiring enhancement
+  save their bases to `generated_base_image`. Existing-source edit routes stage the source as
+  the base without editing it yet.
 - Meme/animation routes generate or stage text-free bases according to REQUIRES. This step never
   calls image_editor, video_generator, video_to_gif, or meme_add_caption.
 - Animation routes expose real first frames, only requested/designated last frames, and every
