@@ -179,7 +179,7 @@ def resolve_fields(runtime: Any, request: str, supplied: dict | None = None,
             else:
                 values[field['id']] = _canonical(field, value)
             continue
-        extracted = _extract(field, request)
+        extracted = None if field.get('resolution') == 'model' else _extract(field, request)
         if not _present(value) and extracted is _UNRESOLVED:
             # An explicit conflict cannot be replaced with a model guess or
             # a default, even for an otherwise optional field.

@@ -56,7 +56,7 @@ if str(LIB_DIR) not in sys.path:
     sys.path.insert(0, str(LIB_DIR))
 
 from model_client import ModelClientError, llm, vlm  # noqa: E402
-from presentation_assets import prompt_catalog, resolve_html as resolve_asset_html  # noqa: E402
+from presentation_assets import InvalidNamedIcon, prompt_catalog, resolve_html as resolve_asset_html  # noqa: E402
 import template_html  # noqa: E402
 from material_images import bind_prompt_materials, normalize_material_sources, missing_material_images  # noqa: E402
 
@@ -1920,11 +1920,12 @@ def _resolve_background_image(deck: Path, page_no: int) -> dict | None:
         local_path = str(item.get("local_path") or "").strip()
         if not local_path:
             return None
-        path = deck / local_path
-        if not path.is_file():
+        root = deck.resolve()
+        path = (root / local_path.replace("\\", "/")).resolve()
+        if not path.is_relative_to(root) or not path.is_file():
             return None
         return {
-            "local_path": local_path.replace("\\", "/"),
+            "local_path": path.relative_to(root).as_posix(),
             "size": _read_image_size(path),
         }
     return None
@@ -2111,8 +2112,11 @@ def cmd_page_html_from_brief(
         return _fail(f'page-html brief p{page_no}: empty brief', page_no=page_no)
 
     if (deck / 'complete_page_prompts.json').is_file():
+        background_image = _resolve_background_image(deck, page_no)
         try:
-            brief_text, material_images = bind_prompt_materials(deck, brief_text)
+            brief_text, material_images = bind_prompt_materials(
+                deck, brief_text, background_image=background_image,
+            )
         except (ValueError, OSError) as exc:
             return _fail(f'page-html p{page_no}: {exc}', page_no=page_no)
         return _write_page_html_from_query(
@@ -2120,7 +2124,7 @@ def cmd_page_html_from_brief(
             page_plan={'page_no': page_no, 'slots': []},
             inherited_image=None,
             material_images=material_images,
-            background_image=_resolve_background_image(deck, page_no),
+            background_image=background_image,
             prompt_mode='complete-page-prompt', language='',
             llm_call=llm_call, edit_instruction=edit_instruction,
         )
@@ -2204,6 +2208,13 @@ def _write_page_html_from_query(
     current_path = deck / 'pages' / f'page_{page_no:03d}.html'
     current_html = current_path.read_text(encoding='utf-8') if edit_instruction and current_path.exists() else ''
     current_html = template_html.remove_legacy_narrative_override(current_html)
+    if 'name="lazymind-font-overrides"' in current_html:
+        # The workflow publisher restores the chosen fonts. Passing their
+        # embedded glyph bytes through the model would inflate the edit prompt.
+        current_html = re.sub(
+            r'<style\b[^>]*\bid="lazymind-portable-font-[0-9a-f]+"[^>]*>[\s\S]*?</style>',
+            '', current_html, flags=re.IGNORECASE,
+        )
     if edit_instruction:
         if not current_html:
             return _fail('Cannot revise a missing page; no original HTML to preserve', page_no=page_no)
@@ -2235,7 +2246,11 @@ def _write_page_html_from_query(
     if prompt_mode != 'complete-page-prompt' and 'Target language for all visible text:' not in rewritten_query:
         rewritten_query = f'{lang_hint}\n\n{rewritten_query}'
 
-    rewritten_query += prompt_catalog(rewritten_query)
+    try:
+        rewritten_query += prompt_catalog(rewritten_query)
+    except (ValueError, OSError, KeyError, RuntimeError) as exc:
+        return _fail(f'page-html p{page_no}: {exc}', page_no=page_no,
+                     failure_kind='named_asset_resource')
     rewritten_query += template_html.prompt(template_context)
     query_path = deck / 'pages' / f'page_{page_no:03d}.query.txt'
     _write_text(query_path, rewritten_query)
@@ -2260,11 +2275,17 @@ def _write_page_html_from_query(
         return _fail(f'page-html p{page_no}: {e}', page_no=page_no)
 
     html = _sanitize_page_html(html)
+    named_asset_error = ''
+    named_assets = []
+    omitted_named_assets: list[str] = []
     try:
         html, named_assets = resolve_asset_html(html, deck)
-    except (ValueError, OSError) as exc:
-        return _fail(f'page-html p{page_no}: {exc}', page_no=page_no)
-    if edit_instruction and html.strip() == current_html.strip():
+    except InvalidNamedIcon as exc:
+        named_asset_error = str(exc)
+    except (ValueError, OSError, KeyError, RuntimeError) as exc:
+        return _fail(f'page-html p{page_no}: {exc}', page_no=page_no,
+                     failure_kind='named_asset_resource')
+    if not named_asset_error and edit_instruction and html.strip() == current_html.strip():
         return _fail('Revision returned unchanged HTML; requested change was not applied', page_no=page_no)
 
     extra_paths: list[str] = []
@@ -2293,8 +2314,15 @@ def _write_page_html_from_query(
         and not _html_has_background_image(html, required_background_path)
     )
     invalid_document = not bool(_HTML_DOC_RE.fullmatch(html.strip()))
-    if missing_foreground or missing_background or missing_materials or image_error or invalid_document:
+    if (missing_foreground or missing_background or missing_materials or image_error
+            or invalid_document or named_asset_error):
         corrections: list[str] = []
+        if named_asset_error:
+            corrections.append(
+                f'Named icon validation failed: {named_asset_error[:300]}. '
+                'Copy an exact identifier from NAMED PRESENTATION ASSETS above. '
+                'If none fits, omit the optional decorative icon. Preserve required images and slide content.'
+            )
         if image_error:
             corrections.append('Use only valid, approved image paths: ' + image_error)
         if invalid_document:
@@ -2331,9 +2359,10 @@ def _write_page_html_from_query(
             return _fail(f'page-html image repair p{page_no}: {e}', page_no=page_no)
         html = _sanitize_page_html(html)
         try:
-            html, named_assets = resolve_asset_html(html, deck)
-        except (ValueError, OSError) as exc:
-            return _fail(f'page-html p{page_no}: {exc}', page_no=page_no)
+            html, named_assets = resolve_asset_html(html, deck, omitted=omitted_named_assets)
+        except (ValueError, OSError, KeyError, RuntimeError) as exc:
+            return _fail(f'page-html p{page_no}: {exc}', page_no=page_no,
+                         failure_kind='named_asset_resource')
         if not _HTML_DOC_RE.fullmatch(html.strip()):
             return _fail(f'page-html p{page_no}: incomplete HTML document after one repair attempt', page_no=page_no)
         html = normalize_material_sources(html, deck)
@@ -2398,6 +2427,7 @@ def _write_page_html_from_query(
         images_localized=imgs_localized,
         background_restored=background_restored,
         named_assets=named_assets,
+        omitted_named_assets=omitted_named_assets,
         template_source_page=template_context['page']['source_page'] if template_context else None,
         elapsed_seconds=round(time.monotonic() - started_at, 3),
     )

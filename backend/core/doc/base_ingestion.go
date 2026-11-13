@@ -60,10 +60,6 @@ func prepareBaseDocument(r *http.Request, datasetID string, task orm.Task) error
 	if before.EmbeddingVersion == embeddingVersionReembedManual && task.TaskType != string(TaskTypeReparse) {
 		return errEmbeddingStateChanged
 	}
-	generation, err := parsingEmbeddingGeneration(r.Context(), db)
-	if err != nil {
-		return err
-	}
 	var ext documentExt
 	if err := json.Unmarshal(document.Ext, &ext); err != nil {
 		return err
@@ -76,7 +72,7 @@ func prepareBaseDocument(r *http.Request, datasetID string, task orm.Task) error
 	}
 	headers := map[string]string{"X-LazyMind-Internal-Token": strings.TrimSpace(os.Getenv("LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN"))}
 	err = common.ApiPost(r.Context(), common.ChatServiceEndpoint()+"/internal/documents:prepare",
-		map[string]any{"source_path": ext.StoredPath, "embedding_generation": generation}, headers, &result, 2*time.Minute)
+		map[string]any{"source_path": ext.StoredPath}, headers, &result, 2*time.Minute)
 	if err == nil && (result.ArtifactRef != ext.StoredPath+baseArtifactSuffix || result.SourceSHA == "") {
 		err = fmt.Errorf("invalid native reader artifact")
 	}
@@ -113,11 +109,11 @@ func prepareBaseDocument(r *http.Request, datasetID string, task orm.Task) error
 func bindNativeIndexTask(ctx context.Context, datasetID, documentID, taskID, level string, generation int64) {
 	db := store.DB().WithContext(ctx)
 	query := db.Model(&orm.DocumentProcessingState{}).Where("dataset_id = ? AND document_id = ?", datasetID, documentID)
-	if db.Migrator().HasTable(&orm.EmbeddingIndexState{}) {
+	if level == ProcessingLevelIndexed && db.Migrator().HasTable(&orm.EmbeddingIndexState{}) {
 		query = query.Where("NOT EXISTS (SELECT 1 FROM embedding_index_states WHERE scope = 'global' AND (generation <> ? OR phase IN ?))", generation, []string{"clearing", "cleanup_failed", "cleared"})
 	}
 	if level == ProcessingLevelIndexed {
-		query = query.Where("parse_artifact_ref <> '' OR embedding_version IN ?", []string{embeddingVersionReembedPending, embeddingVersionReembedManual})
+		query = query.Where("parse_artifact_ref <> '' OR embedding_version IN ?", []string{embeddingVersionReembedPending, embeddingVersionReembedManual, embeddingVersionRebuildRequired})
 	} else {
 		query = query.Where("embedding_version = ?", embeddingVersionReembedManual)
 	}
@@ -195,4 +191,28 @@ func baseDocumentChunks(artifact *baseArtifact, pageToken string, pageSize int, 
 		result.NextPageToken = strconv.Itoa(end)
 	}
 	return result, nil
+}
+
+// The bounded paper worker uses the same native reader as ordinary uploads.
+// It needs neither the optional RAG process nor an embedding model.
+func startNativeParseTasks(ctx context.Context, userID, datasetID string, ids []string) ([]StartTaskResult, error) {
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, "/", nil)
+	if err != nil {
+		return nil, err
+	}
+	request.Header.Set("X-User-Id", userID)
+	results := make([]StartTaskResult, 0, len(ids))
+	for _, id := range ids {
+		var task orm.Task
+		if err := store.DB().WithContext(ctx).Where("id=? AND dataset_id=? AND deleted_at IS NULL", id, datasetID).Take(&task).Error; err != nil {
+			return nil, err
+		}
+		result := StartTaskResult{TaskID: id, DocumentID: task.DocID, DisplayName: task.DisplayName, Status: "STARTED", SubmitStatus: "ACCEPTED"}
+		if err := prepareBaseDocument(request, datasetID, task); err != nil {
+			markTaskStartFailed(ctx, datasetID, task, err.Error())
+			return results, err
+		}
+		results = append(results, result)
+	}
+	return results, nil
 }

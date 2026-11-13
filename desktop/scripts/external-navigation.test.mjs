@@ -42,6 +42,26 @@ test("recognizes the named, sized OAuth windows used by the frontend", () => {
   assert.equal(isOAuthPopup({ frameName: "_blank", features: "" }), false);
 });
 
+test("OAuth windows receive the native app icon without local preload privileges", () => {
+  let handler;
+  installExternalNavigationHandler({
+    getURL: () => "http://127.0.0.1:8090/agent/chat/home",
+    setWindowOpenHandler: (value) => { handler = value; },
+    on: () => {},
+  }, async () => {}, () => {}, {
+    icon: "/runtime/LazyMind.ico",
+    webPreferences: { preload: "/runtime/preload.js" },
+  });
+  assert.deepEqual(handler({
+    url: "https://open.feishu.cn/oauth/authorize",
+    frameName: "Feishu OAuth",
+    features: "width=560,height=760",
+  }), {
+    action: "allow",
+    overrideBrowserWindowOptions: { icon: "/runtime/LazyMind.ico" },
+  });
+});
+
 test("opens Obsidian notes without allowing write actions or callbacks", () => {
   const url = "obsidian://open?path=%2FUsers%2Ftest%2FVault%2Fnote.md";
   assert.equal(canOpenExternally(url), true);

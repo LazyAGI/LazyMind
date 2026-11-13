@@ -2,7 +2,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import i18n from "@/i18n";
 import VocabularyPage from "./VocabularyPage";
-import { completeVocabularyReviewSession, createWordbook, getActiveVocabularyReviewSession, getAnkiStatus, getVocabularyProvider, listAnkiDecks, listVocabulary, listWordbooks, saveVocabularyProvider, startVocabularyReviewSession, submitVocabularySessionReview } from "./api";
+import { completeVocabularyReviewSession, createWordbook, getActiveVocabularyReviewSession, getAnkiStatus, getVocabularyProvider, getVocabularyStats, listAnkiDecks, listVocabulary, listWordbooks, saveVocabularyProvider, startVocabularyReviewSession, submitVocabularySessionReview } from "./api";
 
 const vocabularyWord = vi.hoisted(() => ({
   id: "w1",
@@ -137,5 +137,25 @@ describe("VocabularyPage", () => {
     await waitFor(()=>expect(saveVocabularyProvider).toHaveBeenCalledWith(expect.objectContaining({local_default_wordbook_id:"new-book"})));
     await waitFor(()=>expect(listVocabulary).toHaveBeenLastCalledWith("local",expect.objectContaining({wordbook_id:"new-book"})));
     expect(saveVocabularyProvider).not.toHaveBeenCalledWith(expect.objectContaining({local_default_wordbook_id:"default"}));
+  });
+
+  it.each([false, true])("keeps local words usable without probing Anki (connected: %s)", async (connected) => {
+    vi.mocked(getVocabularyProvider).mockResolvedValueOnce({
+      selected_provider: "anki", anki_sync_enabled: true, anki_sync_available: true,
+      anki_endpoint: "http://127.0.0.1:8765", anki_deck_name: "Saved deck",
+    });
+    vi.mocked(getAnkiStatus).mockResolvedValue({
+      provider: "anki", available: true, enabled: true, connected, initialized: connected,
+      deck_name: "Saved deck", pending_operations: 0, review_capability: "manage_only",
+    });
+    render(<VocabularyPage />);
+    expect(await screen.findByRole("article", { name: "evidence" })).toBeVisible();
+    expect(listVocabulary).toHaveBeenCalledWith("local", expect.anything());
+    expect(getVocabularyStats).toHaveBeenCalled();
+    expect(getAnkiStatus).not.toHaveBeenCalled();
+    expect(listAnkiDecks).not.toHaveBeenCalled();
+    expect(screen.queryByText(i18n.t("vocabularyPage.ankiReviewUnavailable"))).toBeNull();
+    expect(screen.queryByText(i18n.t("vocabularyPage.ankiRequired"))).toBeNull();
+    expect(saveVocabularyProvider).not.toHaveBeenCalled();
   });
 });

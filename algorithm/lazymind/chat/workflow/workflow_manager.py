@@ -1414,9 +1414,9 @@ def _history_startup_ask_index(
             continue
 
         # An ask belongs to the current startup exchange only while no later
-        # assistant response has continued/completed that request. Otherwise a
-        # historical PPT task would suppress clarification for every future PPT
-        # started in the same conversation. The current answer may appear as a
+        # assistant response has continued/completed that request. Otherwise it
+        # would suppress clarification for later tasks in the same conversation.
+        # The current answer may appear as a
         # trailing user message in some history adapters; allow only that one.
         tail = [entry for entry in history[index + 1:] if isinstance(entry, dict)]
         if any(entry.get('role') == 'assistant' for entry in tail):
@@ -1592,7 +1592,10 @@ def _startup_clarification_guidance(runtime_policy: Any) -> str:
         return (
             'Startup fields are checked by the Host, without another model call. Call the trigger with '
             'only values explicitly supplied or unambiguously grounded in the current request, '
-            'prior answers and attachment metadata. Bind attachments without reading their bodies; '
+            'prior answers and attachment metadata. Read the original request as a whole and '
+            'send all resolved fields in one trigger call. For fields with resolution=model, '
+            'interpret the request according to ask_when and pass the results in input_bindings. '
+            'Omit unresolved fields. Bind attachments without reading their bodies; '
             'the owning Workflow step performs template inspection and source collection. '
             'The trigger sends all missing required questions and stops automatically. Do not '
             'ask optional preferences or invent missing values. Reuse submitted answers; later batches '
@@ -1835,8 +1838,8 @@ def _workflow_trigger_tools(
         for field in _runtime_clarification_fields(item.get('runtime')):
             input_types_hint.setdefault(str(field['id']), 'text')
 
-        # A resumed, owned card already has a task identity and structured
-        # answers. Resolve its next batch without another planning-model turn.
+        # Resume a submitted card directly when the remaining fields can be
+        # resolved without model input.
         from lazymind.chat.workflow.clarification import managed, resolve_fields, startup_card, startup_metadata
         selected_runtime = (package_hint.get('runtime')
                             or (package_hint.get('compiled_graph') or {}).get('runtime') or item.get('runtime'))
@@ -1847,7 +1850,8 @@ def _workflow_trigger_tools(
             direct_opt_in = (not attachments_available and '模板' not in current_query
                              and 'template' not in current_query.lower()
                              and all(field.get('resolution') == 'explicit' for field in missing))
-            if missing and (clarification or direct_opt_in):
+            if (missing and (clarification or direct_opt_in)
+                    and all(field.get('resolution') != 'model' for field in missing)):
                 session_holder['pending_ask'] = startup_card(missing, startup_metadata(
                     workflow_ref, str(package_hint.get('revision_id') or revision_id),
                     current_query, known, clarification,
@@ -2332,9 +2336,6 @@ def resolve_workflow_injection(
                              + '\n\nClarification answers:\n' + current_query)
     session_id = str(context.get('session_id') or '')
     workflow_id = str(context.get('workflow_id') or context.get('workflow_ref') or '')
-    if session_id and workflow_id.removeprefix('builtin:') == 'ppt-workflow':
-        from lazymind.presentation_resources import prefetch
-        prefetch()
     revision_id = str(context.get('revision_id') or '')
     mode = 'auto' if context.get('workflow_mode') == 'auto' else 'dynamic'
     # Keep the model-facing advance tools narrow (step_id only), while restoring

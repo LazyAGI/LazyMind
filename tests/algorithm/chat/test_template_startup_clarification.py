@@ -141,14 +141,16 @@ def test_academic_prompt_defaults_preserve_explicit_visual_requirements():
     package = Path(__file__).resolve().parents[3] / 'workflows/ppt-workflow/workflow.yaml'
     policy = yaml.safe_load(package.read_text(encoding='utf-8'))['runtime']
     request = '请根据附件生成科研汇报 PPT，主题：方法比较，8页。科研风格，不生成 AI 底图。'
-    values, missing = resolve_fields(policy, request, {'topic': '方法比较', 'visual_style': '科研风格'},
-                                     extractions={'slide_count': [{'value': '8', 'evidence': '8页'}]})
+    values, missing = resolve_fields(policy, request, {
+        'topic': '方法比较', 'slide_count': '8', 'visual_style': '科研风格', 'generate_background_images': 'disabled',
+    }, extractions={'slide_count': [{'value': '8', 'evidence': '8页'}]})
     assert values['visual_style'] == '科研风格'
     assert values['generate_background_images'] == 'disabled'
     assert not missing
     explicit = '请根据附件生成科研汇报 PPT，主题：方法比较，8页。使用深色风格，启用AI底图'
-    values, missing = resolve_fields(policy, explicit, {'topic': '方法比较', 'visual_style': '深色风格'},
-                                     extractions={'slide_count': [{'value': '8', 'evidence': '8页'}]})
+    values, missing = resolve_fields(policy, explicit, {
+        'topic': '方法比较', 'slide_count': '8', 'visual_style': '深色风格', 'generate_background_images': 'enabled',
+    }, extractions={'slide_count': [{'value': '8', 'evidence': '8页'}]})
     assert values['visual_style'] == '深色风格'
     assert values['generate_background_images'] == 'enabled'
     assert not missing
@@ -343,6 +345,7 @@ def test_trigger_and_first_step_receive_both_rounds_and_original_template_bindin
             clarification={'workflow_ref': 'builtin:ppt-workflow',
                            'values': {'topic': '转正答辩', 'slide_count': '12'}},
         )
+        assert contribution.pending_ask is None
         pending = list(contribution.tools)
         registered = {}
         while pending:
@@ -352,7 +355,8 @@ def test_trigger_and_first_step_receive_both_rounds_and_original_template_bindin
             else:
                 registered[tool.__name__] = tool
         result = registered['trigger_ppt_workflow'](
-            input_bindings={'template_pptx': '转正模版.pptx'}, request_context='汇报日期 11 月 10 日',
+            input_bindings={'template_pptx': '转正模版.pptx', 'presentation_output_format': 'native_pptx'},
+            request_context='汇报日期 11 月 10 日',
         )
         assert result['status'] == 'prepared', result
         registered['advance_step'](['analyze_requirements'])

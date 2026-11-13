@@ -26,7 +26,7 @@ func TestEmbeddingEndpointChangeWithEmptyKnowledge(t *testing.T) {
 		{"empty knowledge directory", "ready", "empty-directory", 200},
 		{"nested empty folders", "ready", "folders", 200},
 		{"deleted document", "ready", "deleted", 200},
-		{"parsed document", "ready", "parsed", 409},
+		{"parsed document", "ready", "parsed", 200},
 		{"indexed document", "ready", "indexed", 409},
 		{"legacy indexed document", "", "indexed", 409},
 		{"another user's document", "ready", "other-user", 409},

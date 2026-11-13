@@ -29,6 +29,13 @@
   // Only border color; never animate inset/width/height on expand.
   transition: border-color 0.2s;
 
+  &__recovery-notice {
+    flex-shrink: 0;
+    margin: 12px 12px 0;
+
+    .ant-alert-message { font-size: 13px; line-height: 1.6; }
+  }
+
   &__trust-notice {
     display: flex;
     flex-shrink: 0;

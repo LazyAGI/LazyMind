@@ -30,6 +30,8 @@ when_to_use: >
   Before starting, collect only missing declared fields: presentation topic,
   slide count, target customer/audience, visual style, AI-generated per-slide
   backgrounds. Never ask quick/full generation mode, with or without a template.
+  Read the original request as a whole and send all resolved startup parameters
+  in one trigger call. The Host asks for any missing required values together.
   When a supplied PPTX is identified as the template, it already determines
   visual style: never ask about style, palette, typography, decorative images
   or AI backgrounds, even via a custom question. Reuse supplied facts and ask
@@ -249,6 +251,7 @@ runtime:
   clarification_fields:
     - id: contribution_scope
       label: 个人贡献范围
+      resolution: model
       ask_when: >
         Only when the user requests personal work/contribution analysis from
         GitHub, Git or PR descriptions and author identity or repository is missing,
@@ -264,6 +267,7 @@ runtime:
       type: text
     - id: academic_materials
       label: 科研材料
+      resolution: model
       ask_when: >
         Only for research reports, paper reviews, thesis defenses or reading-note
         presentations when no relevant source attachments, substantive research
@@ -285,6 +289,7 @@ runtime:
     - id: topic
       label: 主题
       required: true
+      resolution: model
       reason: 主题决定内容范围，未明确主题时无法组织幻灯片。
       ask_when: >
         Extract only the presentation topic semantically from the current request into input_bindings.topic.
@@ -298,7 +303,7 @@ runtime:
       required: true
       resolution: grounded_count
       reason: 页数会影响内容颗粒度和生成时间。
-      value_aliases: {沿用模板全部页面: preserve_all, 填满模板全部页面: preserve_all, 保留模板页数: preserve_all}
+      value_aliases: {沿用模板全部页面（已上传模板时）: preserve_all, 沿用模板全部页面: preserve_all, 填满模板全部页面: preserve_all, 保留模板页数: preserve_all}
       ask_when: >
         Extract the requested TOTAL slide count semantically in any language.
         Normalize digits or number words (3, 三, three) to a positive integer string.
@@ -327,6 +332,7 @@ runtime:
         - 沿用模板全部页面（已上传模板时）
     - id: presentation_duration
       label: 演讲时长
+      resolution: model
       ask_when: >
         Only when the user has not supplied a talk duration or delegated timing.
         Reuse explicit minutes and any Q&A allowance; combine with the existing
@@ -337,6 +343,7 @@ runtime:
       choices: [5 分钟, 10 分钟, 15 分钟, 20 分钟, 按内容建议时长]
     - id: academic_page_budget
       label: 论文展示页数确认
+      resolution: model
       ask_when: >
         Only for paper presentations/reviews when N distinct selected or uploaded
         papers are known and the user's requested total is below 3*N content pages
@@ -357,6 +364,7 @@ runtime:
         - 保留我的页数，压缩内容
     - id: target_customer
       label: 对应客户
+      resolution: model
       reason: 受众会影响内容表达，已有使用场景时由场景确定。
       ask_when: Only when the audience is unknown and cannot be inferred from the stated purpose. A company probation defense already implies its reviewers/managers; do not ask for a customer.
       question: 这份 PPT 面向哪位客户或哪类受众？
@@ -364,7 +372,9 @@ runtime:
     - id: template_mode
       label: Template binding
       default: none
-      ask_when: Never ask this field. Derive upload only from an actually bound template_pptx; otherwise none; do not ask for another upload.
+      ask_when: >-
+        Never ask or bind template_mode directly. Bind the exact uploaded template filename
+        as template_pptx and the Host derives upload. With no template binding it uses none.
       question: Template binding (internal default; never display this question).
       type: single
       choices: [none, upload]
@@ -377,11 +387,10 @@ runtime:
     - id: presentation_output_format
       label: 输出格式
       required: true
+      resolution: model
       reason: HTML 会重建模板样式，PPTX 会保留并复用原生模板版式。
-      # Accept grounded extraction from requests such as "生成12 页pptx";
-      # this is an output parameter, not an opt-in requiring a card answer.
       applies_when: {field: template_mode, equals: upload}
-      value_aliases: {HTML｜参考模板样式生成: html, PPTX｜复用模板并按需增删页面: native_pptx, 输出HTML: html, 输出 HTML: html, 生成HTML: html, 生成 HTML: html, 输出PPTX: native_pptx, 输出 PPTX: native_pptx, 生成PPTX: native_pptx, 生成 PPTX: native_pptx, 用HTML: html, 用 HTML: html, 要HTML: html, 要 HTML: html, HTML输出: html, HTML 输出: html, HTML格式: html, HTML 格式: html, 选择HTML: html, 选择 HTML: html, output HTML: html, generate HTML: html, 用PPTX: native_pptx, 用 PPTX: native_pptx, 要PPTX: native_pptx, 要 PPTX: native_pptx, PPTX输出: native_pptx, PPTX 输出: native_pptx, PPTX格式: native_pptx, PPTX 格式: native_pptx, 选择PPTX: native_pptx, 选择 PPTX: native_pptx, output PPTX: native_pptx, generate PPTX: native_pptx}
+      value_aliases: {HTML｜参考模板样式生成: html, PPTX｜复用模板并按需增删页面: native_pptx}
       ask_when: >
         Only after a PPTX template is actually uploaded, and the user has not chosen
         HTML or PPTX output. Bind native_pptx for an explicit request such as
@@ -397,6 +406,7 @@ runtime:
       choices: [HTML｜参考模板样式生成, PPTX｜复用模板并按需增删页面]
     - id: visual_style
       label: 风格
+      resolution: model
       reason: 未指定风格时按主题自动设计，明确要求优先保留。
       applies_when: {field: template_mode, equals: none}
       ask_when: >
@@ -432,16 +442,24 @@ runtime:
     - id: generate_background_images
       label: AI 底图
       required: true
-      resolution: explicit
+      resolution: model
       reason: AI 底图会影响视觉效果、生成时间和图片资源使用。
       applies_when: {field: template_mode, equals: none}
-      value_aliases: {启用｜为每页生成独立 AI 底图: enabled, 不启用｜使用纯色、渐变和矢量装饰: disabled, 不生成AI底图: disabled, 不生成 AI 底图: disabled, 不要生成AI底图: disabled, 不要生成 AI 底图: disabled, 不启用AI底图: disabled, 生成AI底图: enabled, 生成 AI 底图: enabled, 不需要底图: disabled, 启用AI底图: enabled, 关闭AI底图: disabled, '__ask_user_yes__': enabled, '__ask_user_no__': disabled}
+      value_aliases:
+        启用｜为每页生成独立 AI 底图: enabled
+        不启用｜使用纯色、渐变和矢量装饰: disabled
+        '__ask_user_yes__': enabled
+        '__ask_user_no__': disabled
       ask_when: >
-        Never for academic/scientific decks or paper group meetings: default to
-        disabled, unless the user explicitly requested enabling AI backgrounds.
-        Otherwise only when no PPTX template has been uploaded or selected AND
-        the user has not already specified whether backgrounds should be generated.
-        Uploaded templates always disable AI backgrounds.
+        Read the original presentation request to determine whether the user wants
+        AI-generated slide backgrounds. Pass input_bindings.generate_background_images
+        as enabled or disabled when the preference is clear. Understand terse briefs:
+        for example, “生成12页PPT ai 底图 赛博朋克风格” asks to enable backgrounds.
+        A deck about AI backgrounds or a visual style alone does not specify this preference.
+        If the user did not choose or the intent is conflicting, omit the field so
+        the Host asks. For academic/scientific decks and paper group meetings with
+        no stated preference, pass disabled. If a PPTX template is supplied, omit
+        the field because the template takes precedence.
       question: 是否为每一页启用 AI 生成底图？启用后会根据需求和素材先生成一组相互关联、可编辑的底图提示词，再生成 16:9 无文字背景并应用到幻灯片背景层。
       type: single
       choice_policy: fixed
@@ -491,6 +509,7 @@ tool_scripts:
       - ppt_find_deck
       - ppt_run_stage
       - ppt_list_pages
+      - ppt_plan_page_prompts
       - ppt_publish_outline
       - ppt_publish_pages
       - ppt_replace_deck_fonts

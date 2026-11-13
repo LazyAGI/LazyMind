@@ -126,11 +126,12 @@ func (m *RuntimeManager) prepareDesktopCluster(ctx context.Context, cfg RuntimeC
 	m.startupEvent("phase.started", "python-cluster", started, nil)
 	prepareCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
+	environment := append(serviceRuntimeEnv(paths), pythonComponentEnvironment(paths, cfg.Algorithm.RAGDisabled)...)
 	result, err := m.runner.Run(prepareCtx, Command{
 		Name: paths.CoreBin,
 		Args: []string{"--prepare-cluster-component"},
 		Dir:  filepath.Join(paths.RepoRoot, coreSourceDirName),
-		Env: append(pythonComponentEnvironment(paths, cfg.Algorithm.RAGDisabled),
+		Env: append(environment,
 			"LAZYMIND_RUNTIME_MODE=local",
 			"LAZYMIND_RUNTIME_ROOT="+paths.RuntimeRoot),
 	})

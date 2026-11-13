@@ -173,6 +173,7 @@ class PptExportPage(BaseModel):
 class PptExportRequest(BaseModel):
     pages: List[PptExportPage]
     filename: Optional[str] = None
+    embed_fonts: bool = True
 
 
 def _writer_artifact(result: dict, key: Optional[str] = None) -> str:
@@ -601,6 +602,11 @@ async def export_ppt_from_html(req: PptExportRequest):
         document = re.search(r'(?is)(<!doctype\s+html\b[\s\S]*?</html>|<html\b[\s\S]*?</html>)', value)
         return document.group(1).strip() if document else value
 
+    def export_error_for_log(detail: str) -> str:
+        detail = re.sub(r'''(?i)data:[^\s"'<>]+''', 'data:[redacted]', detail)
+        detail = re.sub(r'''(?i)(https?://[^\s"'<>?]+)\?[^\s"'<>]+''', r'\1?[redacted]', detail)
+        return detail.strip()[-4000:]
+
     workspace = Path(os.environ.get('LAZYMIND_SUBAGENT_WORKSPACE') or '/data/subagent')
     job_id = f'ppt_export_{uuid.uuid4().hex[:12]}'
     deck_dir = workspace / '.ppt_on_demand' / job_id
@@ -625,8 +631,11 @@ async def export_ppt_from_html(req: PptExportRequest):
         export_env['LAZYMIND_FONT_SUBSET_PYTHON'] = sys.executable
         if export_env.get('LAZYMIND_NODE_RUN_AS_NODE', '').strip().lower() == 'true':
             export_env['ELECTRON_RUN_AS_NODE'] = '1'
+        args = [export_node, export_cli, '--deck-dir', str(deck_dir), '--force']
+        if not req.embed_fonts:
+            args.append('--no-embed-fonts')
         process = await asyncio.create_subprocess_exec(
-            export_node, export_cli, '--deck-dir', str(deck_dir), '--force',
+            *args,
             stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
             env=export_env, **options,
         )
@@ -634,6 +643,8 @@ async def export_ppt_from_html(req: PptExportRequest):
         raw = stdout.decode('utf-8', errors='replace')
         if process.returncode != 0:
             detail = stderr.decode('utf-8', errors='replace') or raw
+            logger.error('PPTX export failed: job=%s pages=%d exit_code=%s error=%s',
+                         job_id, len(pages), process.returncode, export_error_for_log(detail))
             shutil.rmtree(deck_dir, ignore_errors=True)
             raise HTTPException(status_code=502, detail=f'ppt-export failed: {detail[-1500:]}')
     else:
@@ -642,8 +653,11 @@ async def export_ppt_from_html(req: PptExportRequest):
             or 'http://ppt-export:8099'
         ).rstrip('/')
         url = f'{export_base}/export'
+        export_body: Dict[str, Any] = {'deck_dir': str(deck_dir)}
+        if not req.embed_fonts:
+            export_body['embed_fonts'] = False
         request = urllib.request.Request(
-            url, data=json.dumps({'deck_dir': str(deck_dir)}).encode('utf-8'),
+            url, data=json.dumps(export_body).encode('utf-8'),
             headers={'Content-Type': 'application/json'}, method='POST',
         )
         try:
@@ -651,6 +665,7 @@ async def export_ppt_from_html(req: PptExportRequest):
                 raw = response.read().decode('utf-8', errors='replace')
         except urllib.error.HTTPError as exc:
             detail = exc.read().decode('utf-8', errors='replace') if exc.fp else str(exc)
+            logger.error('PPTX export failed: job=%s pages=%d upstream_status=%s', job_id, len(pages), exc.code)
             shutil.rmtree(deck_dir, ignore_errors=True)
             raise HTTPException(status_code=502, detail=f'ppt-export failed: {detail[:1500]}') from exc
         except Exception as exc:
@@ -662,6 +677,11 @@ async def export_ppt_from_html(req: PptExportRequest):
     except json.JSONDecodeError:
         payload = {}
     ok = isinstance(payload, dict) and (payload.get('status') == 'ok' or payload.get('success') is True)
+    if ok and not req.embed_fonts and payload.get('fontEmbeddingEnabled') is not False:
+        shutil.rmtree(deck_dir, ignore_errors=True)
+        raise HTTPException(
+            status_code=502, detail='The installed PPTX exporter does not support exporting without embedded fonts.',
+        )
     pptx_path = deck_dir / f'{job_id}.pptx'
     if not pptx_path.exists():
         candidates = list(deck_dir.glob('*.pptx'))
@@ -672,6 +692,8 @@ async def export_ppt_from_html(req: PptExportRequest):
             if isinstance(payload, dict)
             else ''
         )
+        logger.error('PPTX export produced no file: job=%s pages=%d exporter_ok=%s error=%s',
+                     job_id, len(pages), ok, export_error_for_log(detail))
         shutil.rmtree(deck_dir, ignore_errors=True)
         raise HTTPException(status_code=502, detail=detail or 'PPTX not produced')
 

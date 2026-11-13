@@ -1,10 +1,12 @@
 package codex
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -113,8 +115,12 @@ func (r *ChatRunner) Run(ctx context.Context, run chatagent.Run, emit func(chata
 				Text string `json:"text"`
 			}
 			if json.Unmarshal(envelope.Item, &item) == nil && item.Type == "agent_message" && item.Text != "" {
+				text, err := publishPPTLinks(item.Text, workspace, emit)
+				if err != nil {
+					return err
+				}
 				sawMessage = true
-				return emit(chatagent.Event{Type: "message", Text: item.Text})
+				return emit(chatagent.Event{Type: "message", Text: text})
 			}
 		case "turn.completed":
 			if !sawTurnCompleted {
@@ -128,6 +134,11 @@ func (r *ChatRunner) Run(ctx context.Context, run chatagent.Run, emit func(chata
 			return ctx.Err()
 		}
 		return fmt.Errorf("Codex failed: %w", err)
+	}
+	if model := turnModelSince(agentcatalog.CodexRolloutPath(providerThreadID), startedAt); model != "" {
+		if err := emit(chatagent.Event{Type: "model", Text: model}); err != nil {
+			return err
+		}
 	}
 	attachments := []chatagent.Attachment(nil)
 	if providerThreadID != "" {
@@ -155,4 +166,33 @@ func (r *ChatRunner) Run(ctx context.Context, run chatagent.Run, emit func(chata
 		return err
 	}
 	return nil
+}
+
+// Read the model recorded by this turn, never the configured LazyMind model or
+// an earlier turn in a resumed thread. Missing native metadata is non-fatal.
+func turnModelSince(path string, since time.Time) string {
+	file, err := os.Open(path)
+	if err != nil {
+		return ""
+	}
+	defer file.Close()
+	scanner := bufio.NewScanner(file)
+	scanner.Buffer(make([]byte, 64<<10), maxCodexEventBytes)
+	model := ""
+	for scanner.Scan() {
+		var event struct {
+			Type      string    `json:"type"`
+			Timestamp time.Time `json:"timestamp"`
+			Payload   struct {
+				Model string `json:"model"`
+			} `json:"payload"`
+		}
+		if json.Unmarshal(scanner.Bytes(), &event) == nil && event.Type == "turn_context" && !event.Timestamp.Before(since) {
+			model = strings.TrimSpace(event.Payload.Model)
+		}
+	}
+	if scanner.Err() != nil || len(model) > 256 {
+		return ""
+	}
+	return model
 }

@@ -8,6 +8,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"lazymind/agentconnector/internal/agentexec"
 	"lazymind/agentconnector/internal/chatagent"
@@ -78,6 +79,53 @@ esac
 				}
 			})
 		}
+	}
+}
+
+func TestCodexRunTransfersPPTAndReportsActualModel(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fixture uses a POSIX script")
+	}
+	root := t.TempDir()
+	stateHome := filepath.Join(root, "lazymind")
+	t.Setenv("LAZYMIND_HOME", stateHome)
+	t.Setenv("CODEX_HOME", filepath.Join(root, "codex"))
+	binary := writeExecutable(t, filepath.Join(root, "bin"), "codex", fmt.Sprintf(`#!/bin/sh
+if [ "$1" = "--version" ]; then echo 'codex-cli 0.100.0'; exit 0; fi
+while [ "$#" -gt 0 ]; do
+  if [ "$1" = "-C" ]; then shift; cd "$1" || exit 1; fi
+  shift
+done
+cat > received-prompt.txt
+mkdir -p output "$CODEX_HOME/sessions"
+printf 'PPT fixture' > output/deck.pptx
+printf '%%s\n' '{"type":"turn_context","timestamp":"%s","payload":{"model":"actual-codex-model"}}' > "$CODEX_HOME/sessions/rollout-fixture-ppt-thread.jsonl"
+echo '{"type":"thread.started","thread_id":"fixture-ppt-thread"}'
+echo '{"type":"item.completed","item":{"type":"agent_message","text":"[下载 PPT](output/deck.pptx)"}}'
+echo '{"type":"turn.completed"}'
+`, time.Now().Add(time.Minute).UTC().Format(time.RFC3339Nano)))
+	runner := &ChatRunner{configured: binary, self: binary, home: stateHome}
+	prompt := "生成四页 PPT\nLazyMind workflow selection: builtin:ppt-workflow"
+	var events []chatagent.Event
+	err := runner.Run(context.Background(), chatagent.Run{RunID: "run-ppt", ConversationID: "conversation-ppt", Action: "start", Prompt: prompt}, func(event chatagent.Event) error {
+		events = append(events, event)
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(events) != 5 || events[0].Type != "thread_started" || events[1].Type != "attachment" ||
+		events[2].Type != "message" || events[2].Text != "下载 PPT" || events[3].Type != "model" ||
+		events[3].Text != "actual-codex-model" || events[4].Type != "turn_completed" {
+		t.Fatalf("events=%#v", events)
+	}
+	workspace, err := agentexec.EnsureConversationWorkspace("conversation-ppt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(filepath.Join(workspace, "received-prompt.txt"))
+	if err != nil || string(got) != prompt {
+		t.Fatalf("workflow handoff lost: prompt=%q err=%v", got, err)
 	}
 }
 

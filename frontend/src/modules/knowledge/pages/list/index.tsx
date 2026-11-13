@@ -31,11 +31,14 @@ import moment from "moment";
 import {
   AppstoreOutlined,
   ArrowLeftOutlined,
+  ArrowUpOutlined,
+  CloudOutlined,
   CheckOutlined,
   DatabaseOutlined,
   HistoryOutlined,
   PlusOutlined,
   SearchOutlined,
+  QuestionCircleOutlined,
 } from "@ant-design/icons";
 
 import SyncKnowledgeBaseCreationFlow, {
@@ -59,9 +62,10 @@ import { ALL_TAGS } from "@/modules/knowledge/constants/common";
 import {
   Dataset as LegacyDataset,
 } from "@/api/generated/knowledge-client";
-import type { Dataset as CoreDataset } from "@/api/generated/core-client";
+import type { Dataset as CoreDataset, EmbeddingIndexStatusResponse } from "@/api/generated/core-client";
 type Dataset = LegacyDataset & Pick<CoreDataset, "paper_count" | "pdf_attachment_count">;
-import KnowledgeTag from "@/modules/knowledge/components/KnowledgeTag";
+import KnowledgeLibraryLogo from "@/modules/knowledge/components/KnowledgeLibraryLogo";
+import TextIndexManager from "@/modules/knowledge/components/TextIndexManager";
 import FileUtils from "@/modules/knowledge/utils/file";
 import {
   effectiveProcessingLevel,
@@ -140,6 +144,7 @@ import {
   isCloudKnowledgeCreateRequest,
 } from "@/modules/modelProvider/utils/cloudDocumentKnowledge";
 import { useKnowledgeListNavigation } from "../../hooks/useKnowledgeListNavigation";
+import { embeddingOfflineMaintenanceInstructions } from "@/modules/modelProvider/embeddingRecovery";
 import { parseShowcaseEntryType, SHOWCASE_ENTRY_QUERY_PARAM } from "@/modules/showcase/classification";
 import { getLearningCatalog, type CapabilityProfile } from "@/modules/learning/api";
 import {
@@ -150,6 +155,7 @@ import {
   type SourceCategory,
 } from "./knowledgeListState";
 
+import { useProcessingTasks } from "./useProcessingTasks";
 import { useKnowledgeMarketTasks } from "./useKnowledgeMarketTasks";
 
 import "./index.scss";
@@ -175,19 +181,72 @@ interface KnowledgePageProps {
   modelSettingsPath?: string;
 }
 
-type EmbeddingIndexStatus = "empty" | "indexed" | "rebuilding" | "clearing" | "cleared" | "unknown";
+type EmbeddingIndexState = Pick<EmbeddingIndexStatusResponse, "status"> & Partial<EmbeddingIndexStatusResponse>;
+type EmbeddingIndexStatus = EmbeddingIndexState["status"];
 
-interface EmbeddingIndexState {
-  status: EmbeddingIndexStatus;
-  model_name?: string;
-  provider_name?: string;
-  indexed_knowledge_bases: number;
-  pending_knowledge_bases: number;
+interface EmbeddingReadiness {
+  ready: boolean;
+  reason?: string;
+}
+
+interface EmbeddingStatusSnapshot {
+  generation: number;
+  index: EmbeddingIndexState | null;
+  readiness: EmbeddingReadiness | null;
+  multimodalReady: boolean | null;
 }
 
 const embeddingIndexStatuses = new Set<EmbeddingIndexStatus>([
   "empty", "indexed", "rebuilding", "clearing", "cleared", "unknown",
 ]);
+
+const indexNoticeDescriptions = {
+  rebuilding: "knowledge.embeddingIndexRebuilding",
+  clearing: "knowledge.embeddingIndexClearing",
+  cleanup_failed: "knowledge.embeddingIndexCleanupFailed",
+  cleared: "knowledge.embeddingIndexCleared",
+  legacy_unknown: "knowledge.embeddingIndexUnknown",
+} as const;
+type IndexNoticePhase = keyof typeof indexNoticeDescriptions;
+
+const legacyIndexNotices: Partial<Record<EmbeddingIndexStatus, IndexNoticePhase>> = {
+  rebuilding: "rebuilding",
+  clearing: "clearing",
+  cleared: "cleared",
+  unknown: "legacy_unknown",
+};
+
+const readinessIndexNotices = new Map<string, IndexNoticePhase>([
+  ["index_identity_unverified", "legacy_unknown"],
+  ["index_cleanup_in_progress", "clearing"],
+  ["index_cleanup_incomplete", "cleanup_failed"],
+  ["index_cleared", "cleared"],
+]);
+
+type EmbeddingNotice = { kind: "model_unavailable" } | {
+  kind: "index";
+  phase: IndexNoticePhase;
+  key: string;
+  showModelWarning: boolean;
+};
+
+function getEmbeddingNotice(index: EmbeddingIndexState | null, readiness: EmbeddingReadiness | null): EmbeddingNotice | null {
+  const operation = index?.operation_phase;
+  const knownOperation = operation && Object.prototype.hasOwnProperty.call(indexNoticeDescriptions, operation)
+    ? operation as IndexNoticePhase : undefined;
+  const phase = knownOperation
+    ?? (index?.index_identity === "legacy_unknown" ? "legacy_unknown" : undefined)
+    ?? (!operation && readiness?.ready === false ? readinessIndexNotices.get(readiness.reason || "") : undefined)
+    ?? (index ? legacyIndexNotices[index.status] : undefined);
+  if (phase) {
+    const identity = index?.index_identity ?? (phase === "legacy_unknown" ? "legacy_unknown" : phase === "cleared" ? "empty" : "");
+    // Rebuilding can coincide with a separate provider or credentials failure.
+    const showModelWarning = phase === "rebuilding" && readiness?.ready === false &&
+      Boolean(readiness.reason && !readinessIndexNotices.has(readiness.reason));
+    return { kind: "index", phase, key: `${identity}:${phase}`, showModelWarning };
+  }
+  return readiness?.ready === false ? { kind: "model_unavailable" } : null;
+}
 
 const KnowledgePage: FC<KnowledgePageProps> = ({
   modelSettingsPath = "/settings?section=model_defaults",
@@ -287,6 +346,7 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
   const [officialDatasetOrder, setOfficialDatasetOrder] = useState<
     string[] | null
   >(null);
+  const [officialProcessingLevels, setOfficialProcessingLevels] = useState<Record<string, ProcessingLevel>>({});
   const [officialSortLoading, setOfficialSortLoading] = useState(false);
   const [loadedOfficialSort, setLoadedOfficialSort] = useState<KnowledgeMineSort>();
   const { rootRef, openDetail } = useKnowledgeListNavigation(
@@ -296,12 +356,19 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
         ? officialLoaded && loadedOfficialSort === mineSort
         : loadedTableQuery === tableQueryKey,
   );
-  const [embeddingReady, setEmbeddingReady] = useState<boolean | null>(null);
-  const [embeddingIndexState, setEmbeddingIndexState] = useState<EmbeddingIndexState | null>(null);
-  const embeddingIndexRequestSeq = useRef(0);
-  const [multimodalEmbeddingReady, setMultimodalEmbeddingReady] = useState<
-    boolean | null
-  >(null);
+  const [embeddingStatus, setEmbeddingStatus] = useState<EmbeddingStatusSnapshot | null>(null);
+  const embeddingReadiness = embeddingStatus?.readiness ?? null;
+  const embeddingReady = embeddingReadiness?.ready ?? null;
+  const embeddingIndexState = embeddingStatus?.index ?? null;
+  const multimodalEmbeddingReady = embeddingStatus?.multimodalReady ?? null;
+  const embeddingStatusRequestSeq = useRef(0);
+  const [dismissedIndexNotice, setDismissedIndexNotice] = useState<string | null>(null);
+  const embeddingNotice = getEmbeddingNotice(embeddingIndexState, embeddingReadiness);
+  const indexNotice = embeddingNotice?.kind === "index" ? embeddingNotice : null;
+  const indexNoticeKey = indexNotice?.key ?? null;
+  useEffect(() => {
+    setDismissedIndexNotice((dismissed) => dismissed === indexNoticeKey ? dismissed : null);
+  }, [indexNoticeKey]);
   const isAdmin = AgentAppsAuth.getUserInfo()?.role === "system-admin";
   const { deletions, trackDeletion, dismissDeletion } = useDatasetDeletions();
   const syncCreateVm = useSyncKnowledgeBaseCreation({
@@ -319,7 +386,9 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
   const availableUpdateCount = officialItems.filter((item) => item.updateAvailable).length;
   const marketTaskRefreshKey = `${Object.keys(trackedMarketJobs).sort().join(",")}:${marketTaskRevision}`;
   const marketTasks = useKnowledgeMarketTasks(marketTaskModalOpen, marketTaskRefreshKey);
-  const activeMarketTaskCount = marketTasks.data?.unfinished_count;
+  const processingTasks = useProcessingTasks(marketTaskModalOpen, marketTaskRefreshKey);
+  const activeMarketTaskCount = marketTasks.queryFailed || processingTasks.queryFailed ? undefined
+    : marketTasks.data && processingTasks.data ? marketTasks.data.unfinished_count + processingTasks.data.unfinished_count : undefined;
   const activeMarketJobTypes = useMemo(() => {
     const types: Record<string, "install" | "update"> = {};
     Object.values(trackedMarketJobs).forEach((job) => {
@@ -332,6 +401,15 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
   const isCloudArchiveView = sourceCategory === "cloudArchive";
   const isOfficialView = sourceCategory === "official";
   const { availability: ragAvailability } = useRAGComponent();
+  // An empty array is also the initial/loading value, not evidence of an empty library.
+  const libraryQueryReady = isOfficialView
+    ? officialLoaded && loadedOfficialSort === mineSort
+    : loadedTableQuery === tableQueryKey;
+  const libraryQueryError = isOfficialView ? officialError : tableError;
+  const libraryLoading = isOfficialView
+    ? officialLoading || officialSortLoading || (!libraryQueryReady && !libraryQueryError)
+    : loading || (!libraryQueryReady && !libraryQueryError && (!isCloudArchiveView || ragAvailability === "ready"));
+  const libraryEmptyConfirmed = libraryQueryReady && !libraryLoading && !libraryQueryError;
   const createActionDisabled = ragAvailability === "checking" || ragAvailability === "error";
   const createActionDisabledTooltip = ragAvailability === "checking"
     ? "正在检查本地知识库组件状态"
@@ -472,7 +550,7 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
     };
     document.addEventListener("visibilitychange", onVisibilityChange);
     return () => {
-      embeddingIndexRequestSeq.current += 1;
+      embeddingStatusRequestSeq.current += 1;
       window.removeEventListener(
         MODEL_FEATURES_CHANGED_EVENT,
         onFeaturesChanged,
@@ -487,63 +565,57 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
   }, [fromPaperReading, mineScene]);
 
   async function checkEmbeddingReady() {
-    void checkEmbeddingIndexState();
-    try {
-      const features = await fetchModelFeatures(true);
-      const imageEmbedRequired = isImageEmbedRequired(features);
-
-      const [embResp, multiResp] = await Promise.all([
-        axiosInstance
-          .get<
-            { data?: { ready: boolean } } | { ready: boolean }
-          >(`${BASE_URL}/api/core/model_providers/models/ready?model_type=embed_main`)
-          .catch(() => null),
-        imageEmbedRequired
-          ? axiosInstance
-              .get<
-                { data?: { ready: boolean } } | { ready: boolean }
-              >(`${BASE_URL}/api/core/model_providers/models/ready?model_type=embed_image`)
-              .catch(() => null)
-          : Promise.resolve(null),
-      ]);
-      const unwrap = (resp: typeof embResp): boolean | null => {
-        if (!resp) return null;
-        const d =
-          resp.data && typeof resp.data === "object" && "data" in resp.data
-            ? (resp.data as { data?: { ready: boolean } }).data
-            : (resp.data as { ready: boolean });
-        return d?.ready ?? null;
-      };
-      setEmbeddingReady(unwrap(embResp));
-      // null means "not applicable" — does not trigger disabled state.
-      setMultimodalEmbeddingReady(
-        imageEmbedRequired ? unwrap(multiResp) : null,
-      );
-    } catch {
-      setEmbeddingReady(null);
-      setMultimodalEmbeddingReady(null);
-    }
-  }
-
-  async function checkEmbeddingIndexState() {
-    const request = ++embeddingIndexRequestSeq.current;
-    try {
-      const response = await axiosInstance.get<unknown>(
-        `${BASE_URL}/api/core/model_providers/embedding/index-state`,
-      );
-      const body = response.data;
-      const state = body && typeof body === "object" && "data" in body
-        ? body.data : body;
-      if (request !== embeddingIndexRequestSeq.current) return;
-      setEmbeddingIndexState(
-        state && typeof state === "object" && "status" in state
-          && typeof state.status === "string"
-          && embeddingIndexStatuses.has(state.status as EmbeddingIndexStatus)
-          ? state as EmbeddingIndexState : null,
-      );
-    } catch {
-      if (request === embeddingIndexRequestSeq.current) setEmbeddingIndexState(null);
-    }
+    const request = ++embeddingStatusRequestSeq.current;
+    const indexPromise = axiosInstance
+      .get<unknown>(`${BASE_URL}/api/core/model_providers/embedding/index-state`)
+      .then((response): EmbeddingIndexState | null => {
+        const body = response.data;
+        const state = body && typeof body === "object" && "data" in body ? body.data : body;
+        return state && typeof state === "object" && "status" in state &&
+          typeof state.status === "string" && embeddingIndexStatuses.has(state.status as EmbeddingIndexStatus)
+          ? state as EmbeddingIndexState
+          : null;
+      })
+      .catch(() => null);
+    const readinessPromise = axiosInstance
+      .get<{ data?: EmbeddingReadiness } | EmbeddingReadiness>(
+        `${BASE_URL}/api/core/model_providers/models/ready?model_type=embed_main`,
+      )
+      .catch(() => null);
+    const features = await fetchModelFeatures(true).catch(() => null);
+    const imageEmbedRequired = features !== null && isImageEmbedRequired(features);
+    const multimodalPromise = imageEmbedRequired
+      ? axiosInstance
+          .get<{ data?: EmbeddingReadiness } | EmbeddingReadiness>(
+            `${BASE_URL}/api/core/model_providers/models/ready?model_type=embed_image`,
+          )
+          .catch(() => null)
+      : Promise.resolve(null);
+    const [index, readinessResponse, multimodalResponse] = await Promise.all([
+      indexPromise,
+      readinessPromise,
+      multimodalPromise,
+    ]);
+    if (request !== embeddingStatusRequestSeq.current) return;
+    const unwrap = (response: typeof readinessResponse): EmbeddingReadiness | null => {
+      if (!response) return null;
+      const data = response.data && typeof response.data === "object" && "data" in response.data
+        ? (response.data as { data?: EmbeddingReadiness }).data
+        : response.data as EmbeddingReadiness;
+      return typeof data?.ready === "boolean" ? data : null;
+    };
+    const readiness = unwrap(readinessResponse);
+    const multimodalReadiness = unwrap(multimodalResponse);
+    const next: EmbeddingStatusSnapshot = {
+      generation: request,
+      index,
+      readiness,
+      // null means unavailable/not applicable and never disables creation by itself.
+      multimodalReady: imageEmbedRequired ? multimodalReadiness?.ready ?? null : null,
+    };
+    const complete = index !== null && readiness !== null &&
+      (!imageEmbedRequired || multimodalReadiness !== null);
+    setEmbeddingStatus((current) => complete || current === null ? next : current);
   }
 
   useEffect(() => {
@@ -1082,16 +1154,10 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
       const requestSeq = officialSortRequestSeqRef.current + 1;
       officialSortRequestSeqRef.current = requestSeq;
       const orderBy = getKnowledgeMineOrderBy(selectedSort);
-      if (!orderBy) {
-        setOfficialDatasetOrder(null);
-        setOfficialSortLoading(false);
-        setLoadedOfficialSort(selectedSort);
-        return;
-      }
-
       setOfficialSortLoading(true);
       try {
         const datasetIds: string[] = [];
+        const levels: Record<string, ProcessingLevel> = {};
         const seenPageTokens = new Set<string>();
         let pageToken: string | undefined;
         do {
@@ -1104,7 +1170,10 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
             { params: { source: "official_installed" } },
           );
           (response.data.datasets || []).forEach((dataset) => {
-            if (dataset.dataset_id) datasetIds.push(dataset.dataset_id);
+            if (dataset.dataset_id) {
+              datasetIds.push(dataset.dataset_id);
+              levels[dataset.dataset_id] = effectiveProcessingLevel((dataset as Dataset & { processing_level?: ProcessingLevel }).processing_level);
+            }
           });
           const nextPageToken = response.data.next_page_token || undefined;
           if (!nextPageToken || seenPageTokens.has(nextPageToken)) break;
@@ -1113,7 +1182,8 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
         } while (pageToken);
 
         if (officialSortRequestSeqRef.current === requestSeq) {
-          setOfficialDatasetOrder(datasetIds);
+          setOfficialDatasetOrder(orderBy ? datasetIds : null);
+          setOfficialProcessingLevels(levels);
         }
       } catch {
         if (officialSortRequestSeqRef.current === requestSeq) {
@@ -1370,7 +1440,7 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
       render: (name: string, data: Dataset) => {
         return (
           <div className="knowledge-list-name-cell">
-            <span className="knowledge-list-name-icon"><DatabaseOutlined /></span>
+            <KnowledgeLibraryLogo scene={data.scene} />
             <span className="knowledge-list-name-copy">
               <Button
                 className="knowledge-list-name-button"
@@ -1391,18 +1461,12 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
       },
     },
     {
-      title: t("knowledge.tags"),
-      dataIndex: "tags",
+      title: <span>{t("knowledge.processingLevel")} <Tooltip title={t("knowledge.processingLevelHint")}><QuestionCircleOutlined aria-label={t("knowledge.processingLevelHint")} tabIndex={0} /></Tooltip></span>,
+      dataIndex: "processing_level",
       width: 170,
-      render: (knowledgeBaseTags: string[]) => {
-        return (
-          <div className="knowledge-list-tags">
-            {(knowledgeBaseTags || []).slice(0, 2).map((tag, index) => (
-              <KnowledgeTag key={`${tag}-${index}`} title={tag} checkable={false} />
-            ))}
-            {!knowledgeBaseTags?.length ? <span>-</span> : null}
-          </div>
-        );
+      render: (value?: ProcessingLevel) => {
+        const level = effectiveProcessingLevel(value);
+        return t(`knowledge.processing${level[0].toUpperCase()}${level.slice(1)}`);
       },
     },
     {
@@ -1468,7 +1532,7 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
         dataIndex: "name",
         render: (name, item) => (
           <div className="knowledge-list-name-cell">
-            <span className="knowledge-list-name-icon is-official"><AppstoreOutlined /></span>
+            <KnowledgeLibraryLogo scene={`official_${item.type}`} />
             <span className="knowledge-list-name-copy">
               <Button
                 className="knowledge-list-name-button"
@@ -1505,14 +1569,13 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
         },
       },
       {
-        title: t("knowledge.tags"),
-        dataIndex: "tags",
+        title: <span>{t("knowledge.processingLevel")} <Tooltip title={t("knowledge.processingLevelHint")}><QuestionCircleOutlined aria-label={t("knowledge.processingLevelHint")} tabIndex={0} /></Tooltip></span>,
+        key: "processing_level",
         width: 170,
-        render: (itemTags: string[]) => (
-          <div className="knowledge-list-tags">
-            {itemTags.slice(0, 2).map((tag) => <span key={tag}>{tag}</span>)}
-          </div>
-        ),
+        render: (_: unknown, item: OfficialKnowledgeBase) => {
+          const level = officialProcessingLevels[item.datasetId || ""];
+          return level ? t(`knowledge.processing${level[0].toUpperCase()}${level.slice(1)}`) : "—";
+        },
       },
       {
         title: t("knowledge.domainFilter"),
@@ -1577,6 +1640,7 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
       handleOfficialUninstall,
       handleOfficialUpdate,
       marketProgress,
+      officialProcessingLevels,
       t,
     ],
   );
@@ -1791,11 +1855,24 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
     </Tooltip>
   );
 
+  const modelSettingsLink = isAdmin ? (
+    <a href={modelSettingsPath} style={{ marginLeft: 8, fontWeight: 500 }} onClick={(event) => {
+      event.preventDefault();
+      navigate(modelSettingsPath);
+    }}>
+      {t("knowledge.goToConfig")}
+    </a>
+  ) : null;
+  const showEmbeddingNotice = indexNotice
+    ? activeView === "mine" && indexNotice.key !== dismissedIndexNotice
+    : embeddingNotice?.kind === "model_unavailable";
+  const embeddingReadinessMessage = t(isAdmin ? "knowledge.embeddingNotReadyBannerAdmin" : "knowledge.embeddingNotReadyBanner");
+
   return (
     <div className="knowledge-list-page" ref={rootRef}>
       {taskNotificationHolder}
       <div className="knowledge-page-header">
-        <div>
+        <div className="knowledge-page-heading">
           {new URLSearchParams(location.search).get("from") === "settings-knowledge" ? (
             <Button
               className="knowledge-settings-return"
@@ -1812,69 +1889,56 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
               {t("showcase.backToHome")}
             </Button>
           ) : null}
-          <h1>{t(fromPaperReading && paperReading ? "showcase.paperReadingTitle" : "layout.knowledgeBase")}</h1>
-          <p>{t(fromPaperReading && paperReading ? "showcase.paperReadingDescription" : "knowledge.pageDescription")}</p>
+          <h1>{t(activeView === "square" ? "knowledge.knowledgeSquare" : fromPaperReading && paperReading ? "showcase.paperReadingTitle" : "layout.knowledgeBase")}</h1>
+          <p>{t(activeView === "square" ? "knowledge.knowledgeSquareDescription" : fromPaperReading && paperReading ? "showcase.paperReadingDescription" : "knowledge.pageDescription")}</p>
         </div>
-        {activeView === "square" ? (
-          <div className="knowledge-page-header-actions">
-            {backgroundTasksButton}
-          </div>
-        ) : null}
+        {!fromPaperReading && <Button className={`knowledge-square-entry${activeView === "square" ? " is-return" : ""}`} icon={activeView === "square" ? <ArrowLeftOutlined /> : <ArrowUpOutlined rotate={45} />} iconPosition={activeView === "square" ? "start" : "end"}
+          onClick={() => { setMineFilterOpen(false); updateListState({ view: activeView === "square" ? "mine" : "square" }); }}>
+          {activeView !== "square" && <svg className="knowledge-square-mark" width="18" height="18" viewBox="0 0 18 18" fill="currentColor" aria-hidden="true">
+            <rect x="1" y="1" width="6.5" height="6.5" rx="1.5" /><rect x="10.5" y="1" width="6.5" height="6.5" rx="1.5" opacity=".6" />
+            <rect x="1" y="10.5" width="6.5" height="6.5" rx="1.5" opacity=".6" /><rect x="10.5" y="10.5" width="6.5" height="6.5" rx="1.5" />
+          </svg>}
+          {t(activeView === "square" ? "knowledge.backToLibrary" : "knowledge.knowledgeSquare")}
+        </Button>}
+
       </div>
 
-      {activeView === "mine" && embeddingIndexState ? (
-        <div role="status" aria-label={t("knowledge.embeddingIndexStateTitle")}>
-          <Alert
-            className="knowledge-embedding-warning"
-            showIcon
-            type={embeddingIndexState.status === "indexed" ? "success"
-              : embeddingIndexState.status === "empty" ? "info" : "warning"}
-            message={
-              <span>
-                <strong>{t("knowledge.embeddingIndexStateTitle")}</strong>
-                {embeddingIndexState.model_name ? ` · ${t("knowledge.embeddingIndexModel", {
-                  provider: embeddingIndexState.provider_name || t("knowledge.unknown"),
-                  model: embeddingIndexState.model_name,
-                })}` : null}
-              </span>
-            }
-            description={
-              embeddingIndexState.status === "indexed"
-                ? t("knowledge.embeddingIndexIndexed", { count: embeddingIndexState.indexed_knowledge_bases })
-                : embeddingIndexState.status === "rebuilding"
-                  ? t("knowledge.embeddingIndexRebuilding", { count: embeddingIndexState.pending_knowledge_bases })
-                  : t(`knowledge.embeddingIndex${embeddingIndexState.status === "empty" ? "Empty"
-                    : embeddingIndexState.status === "clearing" ? "Clearing"
-                      : embeddingIndexState.status === "cleared" ? "Cleared" : "Unknown"}`)
-            }
-          />
-        </div>
-      ) : null}
-      {embeddingReady === false ? (
+      {(showEmbeddingNotice || multimodalEmbeddingReady === false) && <div className="knowledge-retrieval-status">
+      {showEmbeddingNotice ? (
         <Alert
-          banner
+          key={indexNotice?.key ?? "model_unavailable"}
+          role={indexNotice ? "status" : "alert"}
+          aria-label={indexNotice ? t("knowledge.embeddingIndexStateTitle") : undefined}
+          banner={!indexNotice}
           className="knowledge-embedding-warning"
-          message={
-            isAdmin ? (
-              <span>
-                {t("knowledge.embeddingNotReadyBannerAdmin")}
-                <a
-                  href={modelSettingsPath}
-                  style={{ marginLeft: 8, fontWeight: 500 }}
-                  onClick={(e: MouseEvent<HTMLAnchorElement>) => {
-                    e.preventDefault();
-                    navigate(modelSettingsPath);
-                  }}
-                >
-                  {t("knowledge.goToConfig")}
-                </a>
-              </span>
-            ) : (
-              t("knowledge.embeddingNotReadyBanner")
-            )
-          }
           showIcon
-          type="warning"
+          type={!indexNotice?.showModelWarning && (indexNotice?.phase === "rebuilding" || indexNotice?.phase === "clearing") ? "info" : "warning"}
+          closable={indexNotice ? { closeIcon: true, "aria-label": t("common.close") } : false}
+          onClose={indexNotice ? () => setDismissedIndexNotice(indexNotice.key) : undefined}
+          message={indexNotice ? (
+            <span>
+              <strong>{t("knowledge.embeddingIndexStateTitle")}</strong>
+              {embeddingIndexState?.model_name ? ` · ${t("knowledge.embeddingIndexModel", {
+                provider: embeddingIndexState.provider_name || t("knowledge.unknown"),
+                model: embeddingIndexState.model_name,
+              })}` : null}
+            </span>
+          ) : (
+            <span>
+              {embeddingReadinessMessage}
+              {modelSettingsLink}
+            </span>
+          )}
+          description={indexNotice ? (
+            <>
+              <div>{t(indexNoticeDescriptions[indexNotice.phase], { count: embeddingIndexState?.pending_knowledge_bases ?? 0 })}</div>
+              {indexNotice.showModelWarning ? <div>{embeddingReadinessMessage}</div> : null}
+              {isAdmin && (indexNotice.phase === "legacy_unknown" || indexNotice.phase === "cleanup_failed") ? (
+                <div>{embeddingOfflineMaintenanceInstructions(t)}</div>
+              ) : null}
+            </>
+          ) : undefined}
+          action={indexNotice ? modelSettingsLink : undefined}
         />
       ) : null}
       {multimodalEmbeddingReady === false ? (
@@ -1905,38 +1969,13 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
         />
       ) : null}
 
+      </div>}
+
       <DatasetDeletionProgressList deletions={deletions} onDismiss={dismissDeletion} />
-      {!fromPaperReading ? <div className="knowledge-view-tabs" role="tablist" aria-label={t("knowledge.viewTabs")}>
-        <button
-          type="button"
-          role="tab"
-          className={activeView === "mine" ? "is-active" : ""}
-          aria-selected={activeView === "mine"}
-          onClick={() => {
-            setMineFilterOpen(false);
-            updateListState({ view: "mine" });
-          }}
-        >
-          <span className="knowledge-view-tab-icon"><DatabaseOutlined /></span>
-          <span><strong>{t("knowledge.myKnowledge")}</strong><small>{t("knowledge.myKnowledgeDescription")}</small></span>
-        </button>
-        <button
-          type="button"
-          role="tab"
-          className={activeView === "square" ? "is-active" : ""}
-          aria-selected={activeView === "square"}
-          onClick={() => {
-            setMineFilterOpen(false);
-            updateListState({ view: "square" });
-          }}
-        >
-          <span className="knowledge-view-tab-icon"><AppstoreOutlined /></span>
-          <span><strong>{t("knowledge.knowledgeSquare")}</strong><small>{t("knowledge.knowledgeSquareDescription")}</small></span>
-        </button>
-      </div> : null}
 
       {activeView === "square" ? (
         <>
+        <div className="knowledge-square-actions">{backgroundTasksButton}</div>
         {officialError ? <Alert type="error" showIcon message={t("admin.memoryResourceLocalLoadFailed")} action={<Button onClick={() => void loadKnowledgeMarket(true)}>{t("common.retry")}</Button>} /> : null}
         {cloudCatalogError ? <Alert type="error" showIcon message={t("admin.memoryCloudLoadFailed")} action={<Button onClick={() => void loadCloudCatalog()}>{t("common.retry")}</Button>} /> : null}
         {cloudCatalogLoading ? <div role="status">{t("admin.memoryCloudLoading")}</div> : null}
@@ -1988,7 +2027,8 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
                 </button>
               ))}
             </div> : <strong>{t(paperReading ? "showcase.choosePaperLibrary" : "chat.selectKnowledgeBase")}</strong>}
-            <div className="knowledge-source-actions">
+            <div className="knowledge-source-actions" role="group" aria-label={t("knowledge.libraryActions")}>
+              <TextIndexManager autoOpen={entryParams.get("index_management") === "open"} />
               {backgroundTasksButton}
               {createKnowledgeButton}
             </div>
@@ -2073,7 +2113,7 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
               action={<Button onClick={() => void loadKnowledgeMarket(true)}>{t("common.retry")}</Button>} />
           ) : null}
           <ListPageTable
-            rootClassName={`knowledge-mine-table ${isCloudArchiveView ? "data-source-asset-table" : ""}`}
+            rootClassName={`knowledge-mine-table ${isCloudArchiveView ? "data-source-asset-table" : ""} ${libraryEmptyConfirmed && !(isCloudArchiveView ? cloudSources : isOfficialView ? installedOfficialItems : dataSource).length ? "is-empty" : ""}`}
             rowKey={isCloudArchiveView || isOfficialView ? "id" : "dataset_id"}
             columns={
               (isCloudArchiveView
@@ -2082,8 +2122,19 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
                   ? officialColumns
                   : columns) as ColumnsType<any>
             }
-            loading={isOfficialView ? officialLoading || officialSortLoading : loading}
-            locale={paperReading ? { emptyText: t(mineSearch.trim() || mineLocalTag !== ALL_TAGS ? "showcase.noMatchingPaperLibraries" : "showcase.noPaperLibraries") } : undefined}
+            loading={libraryLoading}
+            locale={{ emptyText: !libraryEmptyConfirmed ? null : paperReading
+              ? t(mineSearch.trim() || mineLocalTag !== ALL_TAGS ? "showcase.noMatchingPaperLibraries" : "showcase.noPaperLibraries")
+              : <div className="knowledge-library-empty">
+                  <span className="knowledge-library-empty-icon" aria-hidden>{isOfficialView ? <AppstoreOutlined /> : isCloudArchiveView ? <CloudOutlined /> : <DatabaseOutlined />}</span>
+                  <h2>{t(mineSearch.trim() ? "knowledge.emptySearchTitle" : isOfficialView ? "knowledge.emptyOfficialTitle" : isCloudArchiveView ? "knowledge.emptyCloudTitle" : "knowledge.emptyLocalTitle")}</h2>
+                  <p>{t(isOfficialView ? "knowledge.emptyOfficialDescription" : isCloudArchiveView ? "knowledge.emptyCloudDescription" : "knowledge.emptyLocalDescription")}</p>
+                  <Button type="primary" icon={isOfficialView ? <ArrowUpOutlined rotate={45} /> : <PlusOutlined />} disabled={!isOfficialView && createActionDisabled}
+                    onClick={() => {
+                      if (isOfficialView) updateListState({ view: "square" });
+                      else createKnowledgeRef.current?.onOpen(isCloudArchiveView ? "cloud" : "direct");
+                    }}>{t(isOfficialView ? "knowledge.openKnowledgeSquare" : isCloudArchiveView ? "knowledge.addCloudSync" : "knowledge.createKnowledgeBase")}</Button>
+                </div> }}
             dataSource={
               isCloudArchiveView
                 ? cloudSources
@@ -2113,7 +2164,7 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
                 }
               },
             })}
-            scroll={{ x: isCloudArchiveView ? 1240 : isOfficialView ? 1080 : 960 }}
+            scroll={(isCloudArchiveView ? cloudSources : isOfficialView ? installedOfficialItems : dataSource).length ? { x: isCloudArchiveView ? 1240 : isOfficialView ? 1080 : 960 } : undefined}
           />
         </div>
       )}
@@ -2139,6 +2190,7 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
       <KnowledgeMarketTaskModal
         open={marketTaskModalOpen}
         query={marketTasks}
+        processingQuery={processingTasks}
         onClose={() => setMarketTaskModalOpen(false)}
         onTasksChanged={(retriedTask) => {
           if (retriedTask) {

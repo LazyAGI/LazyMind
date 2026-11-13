@@ -88,7 +88,7 @@ def test_ppt_trigger_preserves_collection_request_without_reading_sources(monkey
     }
     trigger = manager._workflow_trigger_tools([item], set(), current_query=brief)[0]
     result = trigger(input_bindings={
-        'topic': '转正答辩', 'template_pptx': 'template.pptx',
+        'topic': '转正答辩', 'slide_count': '12', 'template_pptx': 'template.pptx',
         'presentation_output_format': 'native_pptx',
     }, clarification_extractions={'slide_count': [{'value': '12', 'evidence': '12 页pptx'}]})
     assert result['session_id'] == 'session'
@@ -96,6 +96,7 @@ def test_ppt_trigger_preserves_collection_request_without_reading_sources(monkey
     submitted = toolkit.prepare_workflow.call_args.kwargs
     assert brief in submitted['request_context']
     assert submitted['input_bindings']['template_pptx'] == 'resource:template'
+    assert submitted['clarification_values']['slide_count'] == '12'
     assert submitted['clarification_values']['presentation_output_format'] == 'native_pptx'
     assert submitted['clarification_values']['slide_count'] == '12'
     toolkit.advance_step.assert_not_called()

@@ -116,6 +116,7 @@ const UpdateAppModel = forwardRef<UpdateImperativeProps, ForwardProps>(
       if (sourceData) {
         form.setFieldsValue({
           ...sourceData,
+          tags: sourceData.tags ?? [],
           processing_level: effectiveProcessingLevel(
             (sourceData as Dataset & { processing_level?: ProcessingLevel })
               .processing_level,
@@ -279,7 +280,6 @@ const UpdateAppModel = forwardRef<UpdateImperativeProps, ForwardProps>(
             name="tags"
             label={t("knowledge.knowledgeTags")}
             rules={[
-              { required: true, message: t("knowledge.selectKnowledgeTags") },
               {
                 validator: (_, value?: string[]) => {
                   const hasOverLengthTag = (value || []).some(

@@ -746,6 +746,7 @@ describe("ChatModelSelector", () => {
       );
     });
     expect(await screen.findByRole("dialog")).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByRole("dialog")).toHaveAttribute("aria-busy", "false"));
 
     fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
     expect(
@@ -777,31 +778,23 @@ describe("ChatModelSelector", () => {
     expect(document.getElementById(reasonId!)).toHaveTextContent("任务执行中");
   });
 
-  it("localizes a server-only switch block reason", async () => {
+  it.each([
+    ["generating", "正在生成回复，暂时无法切换模型"],
+    ["workflow_running", "Workflow 正在执行，暂时无法切换模型"],
+    ["background_task_running", "后台任务正在执行，暂时无法切换模型"],
+  ])("keeps model choices blocked when the refreshed server state is %s", async (reason, label) => {
     fetchCatalogMock.mockResolvedValue({
       ...catalog(),
       switch_allowed: false,
-      switch_blocked_reason: "workflow_running",
+      switch_blocked_reason: reason,
     });
-    const warning = vi
-      .spyOn(message, "warning")
-      .mockImplementation(() => undefined as never);
 
     render(<ChatModelSelector conversationId="conversation-1" />);
 
     const trigger = await screen.findByRole("button", {
       name: "当前模型：DeepSeek · DeepSeek-V3",
     });
-    expect(trigger).toHaveAttribute("aria-disabled", "true");
-    const reasonId = trigger.getAttribute("aria-describedby");
-    expect(reasonId).toBeTruthy();
-    expect(document.getElementById(reasonId!)).toHaveTextContent(
-      "Workflow 正在执行，暂时无法切换模型",
-    );
-    fireEvent.mouseEnter(trigger.parentElement!);
-    expect(await screen.findByRole("tooltip")).toHaveTextContent(
-      "Workflow 正在执行，暂时无法切换模型",
-    );
+    expect(trigger).toHaveAttribute("aria-disabled", "false");
 
     act(() => {
       window.dispatchEvent(
@@ -810,9 +803,104 @@ describe("ChatModelSelector", () => {
         }),
       );
     });
-    expect(warning).toHaveBeenCalledWith(
-      "Workflow 正在执行，暂时无法切换模型",
-    );
+    const dialog = await screen.findByRole("dialog");
+    await waitFor(() => expect(dialog).toHaveAttribute("aria-busy", "false"));
+    expect(within(dialog).getByRole("status")).toHaveTextContent(label);
+    const model = within(dialog).getByRole("button", { name: /GPT-4o/ });
+    expect(model).toBeDisabled();
+    fireEvent.click(model);
+    expect(updateSelectionMock).not.toHaveBeenCalled();
+    expect(fetchCatalogMock).toHaveBeenCalledTimes(2);
+
+    fetchCatalogMock.mockResolvedValue(catalog());
+    fireEvent.click(within(dialog).getByRole("button", { name: "重新加载" }));
+    await waitFor(() => expect(within(dialog).getByRole("button", { name: /GPT-4o/ })).toBeEnabled());
+  });
+
+  it.each([false, true])("revalidates a stale generating block from recovery (combined=%s)", async (combined) => {
+    fetchCatalogMock.mockResolvedValue({
+      ...catalog(),
+      switch_allowed: false,
+      switch_blocked_reason: "generating",
+    });
+    const warning = vi.spyOn(message, "warning").mockImplementation(() => undefined as never);
+    const props = {
+      conversationId: "conversation-1",
+      ...(combined ? { thinkingDepth: "medium" as const, onThinkingDepthChange: vi.fn() } : {}),
+    };
+    const { rerender } = render(<ChatModelSelector {...props} disabled />);
+    await screen.findByTitle("DeepSeek · DeepSeek-V3");
+    // Completion can refresh the catalog before the server clears generating.
+    await act(async () => rerender(<ChatModelSelector {...props} disabled={false} />));
+    expect(fetchCatalogMock).toHaveBeenCalledTimes(2);
+    let resolve!: (value: ChatModelCatalog) => void;
+    fetchCatalogMock.mockImplementationOnce(() => new Promise<ChatModelCatalog>((done) => { resolve = done; }));
+    act(() => window.dispatchEvent(new CustomEvent(CHAT_OPEN_MODEL_SELECTOR_EVENT, {
+      detail: { conversationId: "conversation-1" },
+    })));
+    const dialog = await screen.findByRole("dialog");
+    expect(dialog).toHaveAttribute("aria-busy", "true");
+    expect(within(dialog).queryByRole("button", { name: /GPT-4o/ })).not.toBeInTheDocument();
+    expect(updateSelectionMock).not.toHaveBeenCalled();
+
+    await act(async () => resolve(catalog()));
+    const model = await within(dialog).findByRole("button", { name: /GPT-4o/ });
+    expect(model).toBeEnabled();
+    updateSelectionMock.mockResolvedValue({ ...catalog().selection, model_id: "gpt-4o", version: 4 });
+    vi.spyOn(message, "success").mockImplementation(() => undefined as never);
+    fireEvent.click(model);
+    await waitFor(() => expect(updateSelectionMock).toHaveBeenCalledWith(
+      "conversation-1", { mode: "fixed", model_id: "gpt-4o", source: undefined }, 3, expect.any(AbortSignal),
+    ));
+    expect(fetchCatalogMock).toHaveBeenCalledTimes(3);
+    expect(warning).not.toHaveBeenCalled();
+  });
+
+  it.each([false, true])("refreshes a stale block when opening the selector directly (combined=%s)", async (combined) => {
+    fetchCatalogMock.mockResolvedValue({ ...catalog(), switch_allowed: false, switch_blocked_reason: "generating" });
+    render(<ChatModelSelector conversationId="conversation-1" {...(combined ? {
+      thinkingDepth: "medium" as const, onThinkingDepthChange: vi.fn(),
+    } : {})} />);
+    const trigger = await screen.findByTitle("DeepSeek · DeepSeek-V3");
+    fetchCatalogMock.mockResolvedValue(catalog());
+    fireEvent.click(trigger);
+    const dialog = await screen.findByRole("dialog");
+    await waitFor(() => expect(dialog).toHaveAttribute("aria-busy", "false"));
+    if (combined) fireEvent.click(within(dialog).getByRole("button", { name: "选择模型" }));
+    expect(await within(dialog).findByRole("button", { name: /GPT-4o/ })).toBeEnabled();
+    expect(fetchCatalogMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("allows retrying a failed recovery refresh without using the stale catalog", async () => {
+    fetchCatalogMock.mockResolvedValue({ ...catalog(), switch_allowed: false, switch_blocked_reason: "generating" });
+    render(<ChatModelSelector conversationId="conversation-1" />);
+    await screen.findByTitle("DeepSeek · DeepSeek-V3");
+    fetchCatalogMock.mockRejectedValueOnce(new Error("offline"));
+    act(() => window.dispatchEvent(new CustomEvent(CHAT_OPEN_MODEL_SELECTOR_EVENT, {
+      detail: { conversationId: "conversation-1" },
+    })));
+    const dialog = await screen.findByRole("dialog");
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent("模型信息加载失败，请重试");
+    expect(within(dialog).queryByRole("button", { name: /GPT-4o/ })).not.toBeInTheDocument();
+    expect(updateSelectionMock).not.toHaveBeenCalled();
+    fetchCatalogMock.mockResolvedValue(catalog());
+    fireEvent.click(within(dialog).getByRole("button", { name: "重试" }));
+    expect(await within(dialog).findByRole("button", { name: /GPT-4o/ })).toBeEnabled();
+  });
+
+  it("does not reopen a dismissed recovery menu when its refresh finishes", async () => {
+    fetchCatalogMock.mockResolvedValue({ ...catalog(), switch_allowed: false, switch_blocked_reason: "generating" });
+    render(<ChatModelSelector conversationId="conversation-1" />);
+    await screen.findByTitle("DeepSeek · DeepSeek-V3");
+    let resolve!: (value: ChatModelCatalog) => void;
+    fetchCatalogMock.mockImplementationOnce(() => new Promise<ChatModelCatalog>((done) => { resolve = done; }));
+    act(() => window.dispatchEvent(new CustomEvent(CHAT_OPEN_MODEL_SELECTOR_EVENT, {
+      detail: { conversationId: "conversation-1" },
+    })));
+    fireEvent.keyDown(await screen.findByRole("dialog"), { key: "Escape" });
+    await act(async () => resolve(catalog()));
+    expect(await screen.findByTitle("DeepSeek · DeepSeek-V3")).toHaveAttribute("aria-expanded", "false");
+    expect(updateSelectionMock).not.toHaveBeenCalled();
   });
 
   it("renders LazyMind Cloud as a distinct provider and persists its source", async () => {

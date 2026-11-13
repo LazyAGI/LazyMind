@@ -26,7 +26,11 @@ func (s *ResourceService) prepareKnowledgeCreate(ctx context.Context, op Resourc
 	if err != nil {
 		return orm.Dataset{}, nil, err
 	}
-	level, err := knowledgeProcessingLevel(ctx, s.db, op.Caller.UserID, req.ProcessingLevel)
+	requestedLevel := req.ProcessingLevel
+	if scene == "academic_papers" && strings.TrimSpace(requestedLevel) == "" {
+		requestedLevel = ProcessingLevelParsed
+	}
+	level, err := knowledgeProcessingLevel(ctx, s.db, op.Caller.UserID, requestedLevel)
 	if err != nil {
 		return orm.Dataset{}, nil, err
 	}
@@ -52,9 +56,6 @@ func (s *ResourceService) prepareKnowledgeCreate(ctx context.Context, op Resourc
 	tags, err := normalizeAndValidateDatasetTags(options.Tags)
 	if err != nil {
 		return orm.Dataset{}, nil, err
-	}
-	if len(tags) == 0 {
-		return orm.Dataset{}, nil, resourceErr("INVALID_ARGUMENT", "at least one knowledge base tag is required")
 	}
 	if err := validateKnowledgeDescription(req.Description); err != nil {
 		return orm.Dataset{}, nil, err

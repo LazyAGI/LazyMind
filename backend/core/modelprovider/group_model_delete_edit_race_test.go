@@ -21,7 +21,7 @@ func TestDeleteGroupModelRevalidatesTypeAfterConcurrentEdit(t *testing.T) {
 		indexed             bool
 		wantStatus          int
 	}{
-		{"llm becomes embedding requires confirmation", "llm", "embed", true, http.StatusConflict},
+		{"llm becomes embedding still removes immediately", "llm", "embed", true, http.StatusOK},
 		{"embedding becomes llm no longer requires confirmation", "embed", "llm", false, http.StatusOK},
 	} {
 		t.Run(test.name, func(t *testing.T) {

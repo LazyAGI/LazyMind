@@ -2,6 +2,8 @@ from pathlib import Path
 
 import yaml
 
+from lazymind.chat.workflow.clarification import resolve_fields
+
 
 def test_template_collection_preserves_visuals_and_text_evidence():
     root = Path(__file__).resolve().parents[4]
@@ -43,14 +45,25 @@ def test_template_is_read_before_material_collection():
 def test_template_ask_omits_visuals_but_allows_missing_page_count():
     root = Path(__file__).resolve().parents[4]
     workflow = yaml.safe_load((root / 'workflows/ppt-workflow/workflow.yaml').read_text(encoding='utf-8'))
-    fields = {field['id']: field for field in workflow['runtime']['clarification_fields']}
+    runtime = workflow['runtime']
+    fields = {field['id']: field for field in runtime['clarification_fields']}
     assert 'never ask about style' in workflow['when_to_use']
-    assert 'uploaded, selected or identified' in fields['visual_style']['ask_when']
-    assert 'Uploaded templates always disable' in fields['generate_background_images']['ask_when']
     assert 'filling all existing template pages' in fields['slide_count']['ask_when']
     assert 'opening/closing pages' in fields['slide_count']['ask_when']
-    assert 'do not ask for another upload' in fields['template_mode']['ask_when']
     assert 'probation defense' in fields['target_customer']['ask_when']
+
+    supplied = {
+        'topic': '转正答辩',
+        'template_pptx': 'template.pptx',
+        'presentation_output_format': 'native_pptx',
+        'visual_style': '科研风格',
+        'generate_background_images': 'enabled',
+    }
+    values, missing = resolve_fields(runtime, '用这个模板制作转正答辩 PPTX', supplied)
+    assert values['template_mode'] == 'upload'
+    assert values['presentation_output_format'] == 'native_pptx'
+    assert {'visual_style', 'generate_background_images'}.isdisjoint(values)
+    assert [field['id'] for field in missing] == ['slide_count']
 
 
 def test_native_pptx_is_a_final_result_not_a_separate_tab():

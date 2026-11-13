@@ -184,6 +184,19 @@ describe("MainLayout conversation removal", () => {
     }
   });
 
+  it.each([undefined, "", "   "])("shows the default version in local mode when the build version is %s", async (version) => {
+    vi.stubEnv("VITE_LAZYMIND_MODE", "local");
+    vi.stubEnv("VITE_APP_VERSION", version);
+    vi.stubGlobal("lazymindDesktop", undefined);
+    try {
+      render(<MemoryRouter><MainLayout /></MemoryRouter>);
+      expect(await screen.findByText("v0.5")).toBeVisible();
+    } finally {
+      vi.unstubAllGlobals();
+      vi.unstubAllEnvs();
+    }
+  });
+
   it('captures the draft before notifying the page about a mode change', () => {
     const events: string[] = [];
     const capture = () => events.push('capture');

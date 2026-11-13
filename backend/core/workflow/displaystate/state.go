@@ -134,7 +134,7 @@ func readState(db *gorm.DB, session orm.WorkflowSession) (View, error) {
 	// Only an admitted driver or explicit user resume can enter active. Historical
 	// stop markers must not hide that preparation before its new attempt exists.
 	if session.Status == "active" {
-		return View{Status: "running", Reason: "preparing"}, nil
+		return preparingState(db, session, current)
 	}
 	if session.Status == "failed" {
 		return View{Status: "failed", Reason: "execution_failed"}, nil
@@ -147,7 +147,7 @@ func readState(db *gorm.DB, session orm.WorkflowSession) (View, error) {
 		return View{Status: "waiting", Reason: "inputs_changed"}, nil
 	}
 	if len(current) == 0 {
-		return View{Status: "running", Reason: "preparing"}, nil
+		return preparingState(db, session, current)
 	}
 	step := current[0]
 	if step.Status != "succeeded" {
@@ -231,6 +231,54 @@ func legacyUserStoppedAt(db *gorm.DB, current []orm.WorkflowSessionStep) (time.T
 		}
 	}
 	return stoppedAt, nil
+}
+
+func preparingState(db *gorm.DB, session orm.WorkflowSession, current []orm.WorkflowSessionStep) (View, error) {
+	preparing := View{Status: "running", Reason: "preparing"}
+	if session.ControllerHost != "external-agent" || !strings.HasPrefix(session.OriginRef, "run_") {
+		return preparing, nil
+	}
+	var origin orm.ExternalChatRun
+	err := db.Where("id = ? AND actor_user_id = ? AND conversation_id = ?", session.OriginRef, session.CreateUserID, session.ConversationID).Take(&origin).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return preparing, nil
+	}
+	if err != nil {
+		return View{}, err
+	}
+	runs := db.Model(&orm.ExternalChatRun{}).Where("actor_user_id = ? AND conversation_id = ? AND created_at >= ?", session.CreateUserID, session.ConversationID, origin.CreatedAt).Session(&gorm.Session{})
+	var active int64
+	if err := runs.Where("status IN ?", []string{"pending", "running"}).Count(&active).Error; err != nil {
+		return View{}, err
+	}
+	if active > 0 {
+		return preparing, nil
+	}
+	var latest orm.ExternalChatRun
+	if err := runs.Order("created_at DESC, id DESC").Take(&latest).Error; err != nil {
+		return View{}, err
+	}
+	// A completed Chat reply does not prove the workflow started. Preserve real
+	// execution/review states above, and distinguish failure from normal handoff.
+	switch latest.Status {
+	case "stopped":
+		return View{Status: "paused", Reason: "user_stopped"}, nil
+	case "completed", "failed":
+		if len(current) == 0 {
+			return View{Status: "failed", Reason: "execution_not_started"}, nil
+		}
+		for _, step := range current {
+			if step.Status != "succeeded" {
+				return View{Status: "failed", Reason: step.Status}, nil
+			}
+		}
+		if latest.Status == "failed" {
+			return View{Status: "failed", Reason: "external_driver_failed"}, nil
+		}
+		return View{Status: "waiting", Reason: "next_step_required"}, nil
+	default:
+		return preparing, nil
+	}
 }
 
 // A checkpoint is waiting only after its producer finished and the host persisted

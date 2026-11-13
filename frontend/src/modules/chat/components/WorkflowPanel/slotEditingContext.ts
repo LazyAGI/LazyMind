@@ -32,6 +32,8 @@ export interface SlotFooterAction {
 }
 
 export interface SlotEditingContextValue {
+  /** Document actions are rendered in the enclosing card header. */
+  inlineDocumentActions?: boolean;
   /** Explicit reading/editing intent stops automatic stage navigation. */
   onBrowse?: () => void;
   actionPending?: boolean;

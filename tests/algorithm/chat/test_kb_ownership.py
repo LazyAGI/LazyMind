@@ -38,3 +38,18 @@ def test_ownership_is_rechecked_after_delete_not_cached(monkeypatch):
     assert kb_ownership.filter_active_nodes(nodes) == nodes
     response['response']['items'] = []
     assert kb_ownership.filter_active_nodes(nodes) == []
+
+
+def test_current_index_filter_is_explicit_and_keeps_default_read_access(monkeypatch):
+    calls = []
+
+    def post(path, payload, **kwargs):
+        calls.append(payload)
+        return {'response': {'items': payload['items']}}
+
+    monkeypatch.setattr(kb_ownership, 'post_core_api', post)
+    nodes = [{'kb_id': 'kb', 'doc_id': 'doc'}]
+    assert kb_ownership.filter_active_nodes(nodes, require_current_index=True) == nodes
+    assert calls[-1]['require_current_index'] is True
+    assert kb_ownership.filter_active_nodes(nodes) == nodes
+    assert 'require_current_index' not in calls[-1]

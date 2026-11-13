@@ -7,6 +7,7 @@ from unittest import mock
 
 from lazyllm.tools.agent import ToolExecutionError
 from PIL import Image
+from requests import HTTPError, Response
 
 
 TOOLS_PATH = Path(__file__).resolve().parents[1] / 'tools.py'
@@ -49,6 +50,7 @@ class BackgroundImageGenerationTest(unittest.TestCase):
             calls = []
 
             def fake_image_generator(**kwargs):
+                self.assertEqual(save.call_count, len(calls))
                 calls.append(kwargs)
                 return {'local_path': str(generated[len(calls) - 1])}
 
@@ -300,13 +302,25 @@ class BackgroundImageGenerationTest(unittest.TestCase):
             ), mock.patch.object(
                 TOOLS, 'image_generator', side_effect=[
                     {'local_path': str(first)},
-                    TimeoutError('provider connect timeout'),
+                    RuntimeError('429 Client Error: Too Many Requests'),
+                    RuntimeError('429 Client Error: Too Many Requests'),
                 ],
+            ) as first_attempt, mock.patch.object(
+                TOOLS.time, 'sleep',
+            ) as sleep, mock.patch.object(
+                TOOLS, '_save_artifact', return_value={'stored': True},
+            ) as partial_save, mock.patch.object(
+                TOOLS, 'make_cancel_stop_condition', return_value=mock.Mock(),
             ), self.assertRaisesRegex(
-                ToolExecutionError, 'page 2 background generation failed',
+                ToolExecutionError, 'page 2 background generation failed: 429',
             ):
                 TOOLS.ppt_generate_background_images(str(deck))
 
+            self.assertEqual(first_attempt.call_count, 3)
+            self.assertEqual(first_attempt.call_args_list[1:], [first_attempt.call_args] * 2)
+            self.assertEqual(sum(call.args[0] for call in sleep.call_args_list), 30)
+            partial_save.assert_called_once()
+            self.assertEqual(partial_save.call_args.kwargs['caption'], '第 1 页 AI 底图')
             checkpoint = json.loads(
                 (deck / 'background_images.json').read_text(encoding='utf-8'),
             )
@@ -330,6 +344,39 @@ class BackgroundImageGenerationTest(unittest.TestCase):
             self.assertEqual(result['reused_count'], 1)
             self.assertEqual(result['published_count'], 2)
             self.assertEqual(save.call_count, 2)
+
+    def test_rate_limited_page_can_succeed_in_the_same_step(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            deck = self._deck(root)
+            image = root / 'generated.png'
+            self._write_generated_image(image)
+            response = Response()
+            response.status_code = 429
+            generated = {'local_path': str(image)}
+
+            with mock.patch.object(
+                TOOLS, '_resolve_deck_dir', return_value=deck,
+            ), mock.patch.object(
+                TOOLS, 'image_generator', side_effect=[
+                    generated, HTTPError('provider limited the request', response=response), generated,
+                ],
+            ) as generate, mock.patch.object(
+                TOOLS.time, 'sleep',
+            ) as sleep, mock.patch.object(
+                TOOLS, '_save_artifact', return_value={'stored': True},
+            ) as save, mock.patch.object(
+                TOOLS, 'make_cancel_stop_condition', return_value=mock.Mock(),
+            ):
+                result = TOOLS.ppt_generate_background_images(str(deck))
+
+            self.assertEqual(generate.call_count, 3)
+            self.assertEqual(generate.call_args_list[1], generate.call_args_list[2])
+            self.assertEqual(sum(call.args[0] for call in sleep.call_args_list), 30)
+            self.assertEqual(result['generated_count'], 2)
+            self.assertEqual(result['published_count'], 2)
+            self.assertEqual([c.kwargs['caption'] for c in save.call_args_list],
+                             ['第 1 页 AI 底图', '第 2 页 AI 底图'])
 
     def test_targeted_recovery_backfills_predecessors_before_ui_publication(self) -> None:
         with tempfile.TemporaryDirectory() as temp:

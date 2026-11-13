@@ -230,8 +230,14 @@ func projectExternalChatRunCache(
 	if !externalRunTerminal(run.Status) {
 		return nil
 	}
-	_, err := projectExternalChatRunCacheRecord(ctx, db, stateStore, run)
-	return err
+	projected, err := projectExternalChatRunCacheRecord(ctx, db, stateStore, run)
+	if err != nil || !projected {
+		return err
+	}
+	// The Agent turn is committed before clients reload the workflow projection.
+	// It may have stopped driving without completing (or even admitting) a step.
+	return PublishConversationEvent(ctx, stateStore, run.ConversationID, run.HistoryID,
+		"workflow_runtime_updated", map[string]any{"run_id": run.ID, "change": "external_driver_finished"})
 }
 
 func projectExternalChatRunCacheRecord(

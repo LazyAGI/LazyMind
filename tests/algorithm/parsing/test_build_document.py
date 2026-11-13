@@ -124,11 +124,13 @@ class Store:
 class Processor:
     def __init__(self):
         self._store = Store()
+        self._reparse_docs = lambda *_args, **_kwargs: None
         self._reembed_group = lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError('old fallback'))
 
 processor = Processor()
 impl._get_processor.__func__.__globals__['_BaseDocumentWorkerImpl']._get_processor = lambda _self: processor
 assert impl._get_processor() is processor
+assert processor._lazymind_deferred_group_guard
 processor._reembed_group('code', {'code': {'parent': 'lazyllm_root'}}, doc_ids=['doc'], kb_id='kb')
 '''
     result = subprocess.run(

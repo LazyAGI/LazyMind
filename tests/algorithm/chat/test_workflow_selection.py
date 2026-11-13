@@ -1518,7 +1518,7 @@ def test_trigger_routes_ppt_clarification_answers_to_analysis_context(selected):
         importer.return_value = {'resource_id': 'r1', 'revision': 1, 'content_hash': 'sha256:test'}
         factory.return_value.get_state.return_value = {'projection': {'ready': ['analyze_requirements']}}
         contribution = resolve_workflow_injection(
-            None, current_query='制作13页中国新年PPT，不生成AI底图',
+            None, current_query='制作13页中国新年PPT，面向小孩子，风格喜庆，不生成AI底图',
             allowed_workflow_refs=['builtin:ppt'] if selected else None,
             workflow_catalog=[{'workflow_ref': 'builtin:ppt', 'workflow_id': 'ppt', 'revision_id': 'r1'}],
             workflow_activations=[{'workflow_ref': 'builtin:ppt', 'workflow_id': 'ppt', 'revision_id': 'r1',
@@ -1528,13 +1528,16 @@ def test_trigger_routes_ppt_clarification_answers_to_analysis_context(selected):
             _tool(contribution, 'trigger_ppt_workflow')(input_bindings={'undeclared': 'value'})
         assert error.value.code == 'WORKFLOW_INPUT_NOT_EXPOSED'
         result = _tool(contribution, 'trigger_ppt_workflow')(
-            input_bindings={'topic': '中国新年', 'target_customer': '小孩子', 'visual_style': '喜庆'},
+            input_bindings={'topic': '中国新年', 'target_customer': '小孩子', 'visual_style': '喜庆',
+                            'generate_background_images': 'disabled'},
             clarification_extractions={'slide_count': [{'value': '13', 'evidence': '制作13页中国新年PPT'}]},
         )
         assert result['session_id'] == 'session-1'
         importer.assert_called_once_with('topic', '中国新年')
         submitted = toolkit.prepare_workflow.call_args.kwargs
         assert submitted['input_bindings'] == {'topic': importer.return_value}
+        assert submitted['clarification_values']['slide_count'] == '13'
+        assert submitted['clarification_values']['generate_background_images'] == 'disabled'
         assert '制作13页中国新年PPT' in submitted['request_context']
         assert '小孩子' in submitted['request_context']
         assert '喜庆' in submitted['request_context']

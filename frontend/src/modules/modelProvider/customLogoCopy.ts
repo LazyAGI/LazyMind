@@ -5,6 +5,7 @@ export function getCustomLogoCopy(t: TFunction): CustomLogoPickerCopy {
   const text = (key: string) => t(`modelProvider.logoUpload.${key}`);
   return {
     label: text("label"),
+    preview: text("preview"),
     upload: text("upload"),
     replace: text("replace"),
     reset: text("reset"),

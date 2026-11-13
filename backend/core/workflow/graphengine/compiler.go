@@ -368,9 +368,9 @@ func Compile(workflowYAML, stateYAML, scenario string, profile Profile) CompileR
 		field.Question = strings.TrimSpace(field.Question)
 		field.Type = strings.ToLower(strings.TrimSpace(field.Type))
 		field.ChoicePolicy = strings.ToLower(strings.TrimSpace(field.ChoicePolicy))
-		if field.Resolution != "" && field.Resolution != "explicit" && field.Resolution != "grounded_count" {
+		if field.Resolution != "" && field.Resolution != "explicit" && field.Resolution != "model" && field.Resolution != "grounded_count" {
 			result.Diagnostics = append(result.Diagnostics, diag("E_RUNTIME_CLARIFICATION_RESOLUTION_INVALID", "error",
-				path+".resolution", "resolution must be empty, explicit or grounded_count"))
+				path+".resolution", "resolution must be empty, explicit, model or grounded_count"))
 		}
 		if field.Required && strings.TrimSpace(field.Reason) == "" {
 			result.Diagnostics = append(result.Diagnostics, diag("E_RUNTIME_CLARIFICATION_REASON_REQUIRED", "error",
