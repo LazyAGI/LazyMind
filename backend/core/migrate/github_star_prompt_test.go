@@ -112,9 +112,6 @@ func TestGitHubStarPromptMigrationPathsAndRollback(t *testing.T) {
 			var starUp, starDown string
 			for _, migration := range current.Dev {
 				execMigrationFileForDriver(t, devDB, migration.UpPath, driver)
-				if migration.FileVersion > current.Aggregate.Version {
-					execMigrationFileForDriver(t, releaseDB, migration.UpPath, driver)
-				}
 				if strings.HasSuffix(migration.UpPath, "_github_star_prompts.up.sql") {
 					starUp, starDown = migration.UpPath, migration.DownPath
 				}
@@ -149,7 +146,7 @@ VALUES ('owner',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)`); err != nil {
 				t.Fatal("Star persistence requires its own new dev up/down pair")
 			}
 			if driver == "sqlite" {
-				if sqliteSchemaFingerprint(t, devDB) != sqliteSchemaFingerprint(t, releaseDB) {
+				if githubStarSQLiteSchemaFingerprint(t, devDB) != githubStarSQLiteSchemaFingerprint(t, releaseDB) {
 					t.Fatal("SQLite aggregate and dev paths differ")
 				}
 			} else if postgresSchemaFingerprint(t, devDB) != postgresSchemaFingerprint(t, releaseDB) {
