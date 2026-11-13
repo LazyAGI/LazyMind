@@ -301,7 +301,7 @@ func TestKnowledgeDocumentFiltersBindCursor(t *testing.T) {
 }
 
 func TestSearchKnowledgeNormalizesAndBoundsRetrieval(t *testing.T) {
-	ports := &fakePorts{searchResult: SearchKnowledgeResult{Hits: []KnowledgeSearchHit{{Text: "safe"}}}}
+	ports := &fakePorts{searchResult: SearchKnowledgeResult{Hits: []KnowledgeSearchHit{{KnowledgeID: "kb-1", Text: "safe"}}}}
 	service := mustService(t, ports)
 	result, err := service.SearchKnowledge(context.Background(), authorizedCall(), SearchKnowledgeInput{
 		Query: " query ", KnowledgeIDs: []string{"kb-1", " kb-1 ", "kb-2"},
@@ -312,11 +312,124 @@ func TestSearchKnowledgeNormalizesAndBoundsRetrieval(t *testing.T) {
 	if ports.searchInput.Query != "query" || ports.searchInput.TopK != defaultSearchTopK || strings.Join(ports.searchInput.KnowledgeIDs, ",") != "kb-1,kb-2" {
 		t.Fatalf("normalized search input = %#v", ports.searchInput)
 	}
-	ports.searchResult = SearchKnowledgeResult{Hits: []KnowledgeSearchHit{{Text: strings.Repeat("x", maxSearchHitTextBytes+1)}}}
+	ports.searchResult = SearchKnowledgeResult{Hits: []KnowledgeSearchHit{{KnowledgeID: "kb", Text: strings.Repeat("x", maxSearchHitTextBytes+1)}}}
 	_, err = service.SearchKnowledge(context.Background(), authorizedCall(), SearchKnowledgeInput{Query: "q", KnowledgeIDs: []string{"kb"}})
 	assertCode(t, err, ResultTooLarge)
 	_, err = service.SearchKnowledge(context.Background(), authorizedCall(), SearchKnowledgeInput{Query: "q", KnowledgeIDs: []string{"kb"}, TopK: 51})
 	assertCode(t, err, InvalidArgument)
+}
+
+func TestSearchKnowledgeExecutionScope(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		scope, ids []string
+		want       ErrorCode
+	}{
+		{"unrestricted", nil, []string{"outside"}, ""},
+		{"allowed", []string{"inside"}, []string{" inside "}, ""},
+		{"denied", []string{"inside"}, []string{"outside"}, PermissionDenied},
+		{"mixed", []string{"inside"}, []string{"inside", "outside"}, PermissionDenied},
+		{"empty scope", []string{}, []string{"inside"}, PermissionDenied},
+		{"missing ids", []string{"inside"}, nil, InvalidArgument},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			p := &fakePorts{}
+			s := mustService(t, p)
+			c := authorizedCall()
+			c.AllowedDatasetIDs = tc.scope
+			_, err := s.SearchKnowledge(context.Background(), c, SearchKnowledgeInput{Query: "q", KnowledgeIDs: tc.ids})
+			if tc.want != "" {
+				assertCode(t, err, tc.want)
+				if p.searchInput.Query != "" {
+					t.Fatal("denied request reached search adapter")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if p.call.Principal.UserID != c.Principal.UserID || p.call.Principal.TenantID != c.Principal.TenantID {
+				t.Fatal("caller identity lost before ACL checks")
+			}
+		})
+	}
+}
+
+func TestSearchKnowledgeParameterBoundaries(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		input   SearchKnowledgeInput
+		invalid bool
+	}{
+		{"empty query", SearchKnowledgeInput{KnowledgeIDs: []string{"kb"}}, true},
+		{"whitespace query", SearchKnowledgeInput{Query: " \t\n", KnowledgeIDs: []string{"kb"}}, true},
+		{"8192 bytes", SearchKnowledgeInput{Query: strings.Repeat("x", 8192), KnowledgeIDs: []string{"kb"}}, false},
+		{"8193 bytes", SearchKnowledgeInput{Query: strings.Repeat("x", 8193), KnowledgeIDs: []string{"kb"}}, true},
+		{"nil IDs", SearchKnowledgeInput{Query: "q"}, true},
+		{"empty IDs", SearchKnowledgeInput{Query: "q", KnowledgeIDs: []string{}}, true},
+		{"blank ID", SearchKnowledgeInput{Query: "q", KnowledgeIDs: []string{" "}}, true},
+		{"negative topK", SearchKnowledgeInput{Query: "q", KnowledgeIDs: []string{"kb"}, TopK: -1}, true},
+		{"minimum topK", SearchKnowledgeInput{Query: "q", KnowledgeIDs: []string{"kb"}, TopK: 1}, false},
+		{"maximum topK", SearchKnowledgeInput{Query: "q", KnowledgeIDs: []string{"kb"}, TopK: 50}, false},
+		{"excessive topK", SearchKnowledgeInput{Query: "q", KnowledgeIDs: []string{"kb"}, TopK: 51}, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ports := &fakePorts{}
+			_, err := mustService(t, ports).SearchKnowledge(context.Background(), authorizedCall(), tc.input)
+			if tc.invalid {
+				assertCode(t, err, InvalidArgument)
+				if ports.searchInput.Query != "" {
+					t.Fatal("invalid request reached search adapter")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if ports.searchInput.Query != tc.input.Query {
+				t.Fatal("query changed at valid boundary")
+			}
+			if tc.input.TopK != 0 && ports.searchInput.TopK != tc.input.TopK {
+				t.Fatal("valid top_k changed")
+			}
+		})
+	}
+}
+
+func TestGetKnowledgeDocumentExecutionScope(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		scope  []string
+		denied bool
+	}{
+		{"unrestricted", nil, false}, {"allowed", []string{"inside"}, false},
+		{"outside", []string{"outside"}, true}, {"empty", []string{}, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			p := &fakePorts{}
+			c := authorizedCall()
+			c.AllowedDatasetIDs = tc.scope
+			_, err := mustService(t, p).GetKnowledgeDocument(context.Background(), c, GetKnowledgeDocumentInput{KnowledgeID: " inside ", DocumentID: "doc", IncludeContent: true})
+			if tc.denied {
+				assertCode(t, err, PermissionDenied)
+				if p.call.Principal.UserID != "" {
+					t.Fatal("denied read reached adapter")
+				}
+			} else if err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
+func TestSearchKnowledgeDropsHitsOutsideRequestedLibraries(t *testing.T) {
+	p := &fakePorts{searchResult: SearchKnowledgeResult{Hits: []KnowledgeSearchHit{{KnowledgeID: "inside", Text: "allowed"}, {KnowledgeID: "outside", Text: "unrequested"}}}}
+	c := authorizedCall()
+	c.AllowedDatasetIDs = []string{"inside"}
+	r, e := mustService(t, p).SearchKnowledge(context.Background(), c, SearchKnowledgeInput{Query: "q", KnowledgeIDs: []string{"inside"}})
+	if e != nil || len(r.Hits) != 1 || r.Hits[0].KnowledgeID != "inside" {
+		t.Fatalf("result=%+v err=%v", r, e)
+	}
 }
 
 func TestServiceRejectsUntrustedOrUnderprivilegedCaller(t *testing.T) {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"slices"
 	"sort"
 	"strings"
 )
@@ -507,6 +508,9 @@ func (s *Service) GetKnowledgeDocument(ctx context.Context, call InvocationConte
 	if err != nil {
 		return GetKnowledgeDocumentResult{}, err
 	}
+	if call.AllowedDatasetIDs != nil && !slices.Contains(call.AllowedDatasetIDs, knowledgeID) {
+		return GetKnowledgeDocumentResult{}, NewError(PermissionDenied, operation, "library outside execution scope", false, nil)
+	}
 	documentID, err := boundedRequired(input.DocumentID, maxIDBytes, operation, "document_id")
 	if err != nil {
 		return GetKnowledgeDocumentResult{}, err
@@ -549,6 +553,13 @@ func (s *Service) SearchKnowledge(ctx context.Context, call InvocationContext, i
 	if err != nil {
 		return SearchKnowledgeResult{}, err
 	}
+	if call.AllowedDatasetIDs != nil {
+		for _, id := range knowledgeIDs {
+			if !slices.Contains(call.AllowedDatasetIDs, id) {
+				return SearchKnowledgeResult{}, NewError(PermissionDenied, operation, "library outside execution scope", false, nil)
+			}
+		}
+	}
 	topK := input.TopK
 	if topK == 0 {
 		topK = defaultSearchTopK
@@ -561,6 +572,9 @@ func (s *Service) SearchKnowledge(ctx context.Context, call InvocationContext, i
 		return SearchKnowledgeResult{}, err
 	}
 	result.Hits = nonNilSearchHits(result.Hits)
+	result.Hits = slices.DeleteFunc(result.Hits, func(hit KnowledgeSearchHit) bool {
+		return !slices.Contains(knowledgeIDs, hit.KnowledgeID)
+	})
 	for _, hit := range result.Hits {
 		if len(hit.Text) > maxSearchHitTextBytes {
 			return SearchKnowledgeResult{}, NewError(ResultTooLarge, operation, "one search hit exceeds 16 KiB", false, nil)
