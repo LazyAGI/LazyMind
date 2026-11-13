@@ -1,7 +1,6 @@
 import { embedSlideAssetsForExport } from './slideAssets';
 import { useCallback, useEffect, useState } from 'react';
 import { Checkbox, Modal } from 'antd';
-import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { axiosInstance, BASE_URL } from '@/components/request';
 import type {
@@ -19,22 +18,6 @@ import {
 } from './exportHtmlToPptx';
 
 type PresentationExportMode = 'editable' | 'raster' | 'pdf';
-
-interface ExporterDependency {
-  id: string;
-  settings_url?: string;
-}
-
-interface ExporterFormatCapability {
-  id: string;
-  available: boolean;
-  dependency?: ExporterDependency;
-}
-
-interface ExporterCapabilities {
-  provider_id: string;
-  formats: ExporterFormatCapability[];
-}
 
 function getTabSlotRevisions(
   session: WorkflowSession,
@@ -171,7 +154,6 @@ export function PresentationExportAction({
   rows: number[];
 }) {
   const { t } = useTranslation();
-  const navigate = useNavigate();
   const [exporting, setExporting] = useState(false);
   const [exportError, setExportError] = useState<string | null>(null);
   const [choiceOpen, setChoiceOpen] = useState(false);
@@ -191,16 +173,6 @@ export function PresentationExportAction({
       .catch(() => { if (current) setFontFamilies([]); });
     return () => { current = false; };
   }, [action, choiceOpen, editableOffered, rows, session, tab]);
-
-  const showDependencyPrompt = useCallback((dependency?: ExporterDependency) => {
-    Modal.confirm({
-      title: t('chat.editablePptRequiredTitle'),
-      content: t('chat.editablePptRequiredDesc'),
-      okText: t('chat.configureEditablePpt'),
-      cancelText: t('common.close'),
-      onOk: () => navigate(dependency?.settings_url || '/settings?section=system_tools#editable-ppt-dependency'),
-    });
-  }, [navigate, t]);
 
   const runExport = useCallback(async (mode: PresentationExportMode) => {
     if (exporting) return;
@@ -227,16 +199,6 @@ export function PresentationExportAction({
       } else if (mode === 'raster') {
         await exportHtmlSlidesAsRasterPptx(slideInputs, filename, { sessionId: session.session_id });
       } else {
-        const capabilitiesResponse = await axiosInstance.get(
-          `${BASE_URL}/api/core/exporters/${encodeURIComponent(action.provider)}:capabilities`,
-        );
-        const capabilities = ((capabilitiesResponse.data as { data?: ExporterCapabilities })?.data
-          ?? capabilitiesResponse.data) as ExporterCapabilities;
-        const editable = capabilities.formats?.find((format) => format.id === 'editable-pptx');
-        if (!editable?.available) {
-          showDependencyPrompt(editable?.dependency);
-          throw new Error(t('chat.editablePptRequiredDesc'));
-        }
         const exportPages = await Promise.all(pages.map(async page => ({
           ...page, html: await embedSlideAssetsForExport(page.html, { embedFonts: false }),
         })));
@@ -252,7 +214,7 @@ export function PresentationExportAction({
     } finally {
       setExporting(false);
     }
-  }, [action, embedFonts, exporting, rows, session, showDependencyPrompt, t, tab]);
+  }, [action, embedFonts, exporting, rows, session, t, tab]);
 
   return (
     <>
