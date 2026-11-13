@@ -1864,6 +1864,14 @@ export interface ApiCoreTaskCenterTasksTaskIdNotificationsGet200Response {
     'code'?: number;
     'data'?: TaskNotifications;
 }
+export interface ApiCoreUserGithubStarPromptSupportPut200Response {
+    'code'?: number;
+    'data'?: ApiCoreUserGithubStarPromptSupportPut200ResponseData;
+    'message'?: string;
+}
+export interface ApiCoreUserGithubStarPromptSupportPut200ResponseData {
+    'supported'?: boolean;
+}
 export interface ApiCoreUserNotificationPreferencesGet200Response {
     'code'?: number;
     'data'?: NotificationPreferences;
@@ -5792,6 +5800,20 @@ export interface ForkResult {
 export interface GetKBAuthorizationResponse {
     'grants'?: Array<AuthorizationSubjectGrant>;
     'kb_id'?: string;
+}
+export interface GitHubStarPromptClaim {
+    'task_id': string;
+}
+export interface GitHubStarPromptDecision {
+    'cooldown_days': number;
+    'max_prompts': number;
+    'min_successful_tasks': number;
+    'reason': string;
+    'show': boolean;
+    'task_id': string;
+}
+export interface GitHubStarPromptSupport {
+    'supported': boolean;
 }
 export interface GrantPrincipal {
     'grantee_id'?: string;
@@ -30476,6 +30498,41 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
         },
         /**
          *
+         * @summary Atomically claim an optional GitHub Star invitation after a successful complete Work task
+         * @param {GitHubStarPromptClaim} gitHubStarPromptClaim
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreTaskCenterGithubStarPromptClaimPost: async (gitHubStarPromptClaim: GitHubStarPromptClaim, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'gitHubStarPromptClaim' is not null or undefined
+            assertParamExists('apiCoreTaskCenterGithubStarPromptClaimPost', 'gitHubStarPromptClaim', gitHubStarPromptClaim)
+            const localVarPath = `/api/core/task-center/github-star-prompt/claim`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(gitHubStarPromptClaim, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
          * @summary List tasks for a schedule
          * @param {string} scheduleId
          * @param {number} [page]
@@ -30521,6 +30578,7 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
         /**
          *
          * @summary List task-center tasks
+         * @param {string} [conversationId]
          * @param {string} [status]
          * @param {string} [taskType]
          * @param {string} [keyword]
@@ -30529,7 +30587,7 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        apiCoreTaskCenterTasksGet: async (status?: string, taskType?: string, keyword?: string, page?: number, pageSize?: number, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+        apiCoreTaskCenterTasksGet: async (conversationId?: string, status?: string, taskType?: string, keyword?: string, page?: number, pageSize?: number, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
             const localVarPath = `/api/core/task-center/tasks`;
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
@@ -30541,6 +30599,10 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
             const localVarHeaderParameter = {} as any;
             const localVarQueryParameter = {} as any;
+
+            if (conversationId !== undefined) {
+                localVarQueryParameter['conversation_id'] = conversationId;
+            }
 
             if (status !== undefined) {
                 localVarQueryParameter['status'] = status;
@@ -31129,6 +31191,41 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             setSearchParams(localVarUrlObj, localVarQueryParameter);
             let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
             localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary Stop future invitations for the authenticated user; does not perform or prove a GitHub write
+         * @param {GitHubStarPromptSupport} gitHubStarPromptSupport
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreUserGithubStarPromptSupportPut: async (gitHubStarPromptSupport: GitHubStarPromptSupport, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'gitHubStarPromptSupport' is not null or undefined
+            assertParamExists('apiCoreUserGithubStarPromptSupportPut', 'gitHubStarPromptSupport', gitHubStarPromptSupport)
+            const localVarPath = `/api/core/user/github-star-prompt/support`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'PUT', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(gitHubStarPromptSupport, localVarRequestOptions, configuration)
 
             return {
                 url: toPathString(localVarUrlObj),
@@ -39258,6 +39355,19 @@ export const DefaultApiFp = function(configuration?: Configuration) {
         },
         /**
          *
+         * @summary Atomically claim an optional GitHub Star invitation after a successful complete Work task
+         * @param {GitHubStarPromptClaim} gitHubStarPromptClaim
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreTaskCenterGithubStarPromptClaimPost(gitHubStarPromptClaim: GitHubStarPromptClaim, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<GitHubStarPromptDecision>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreTaskCenterGithubStarPromptClaimPost(gitHubStarPromptClaim, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreTaskCenterGithubStarPromptClaimPost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
          * @summary List tasks for a schedule
          * @param {string} scheduleId
          * @param {number} [page]
@@ -39274,6 +39384,7 @@ export const DefaultApiFp = function(configuration?: Configuration) {
         /**
          *
          * @summary List task-center tasks
+         * @param {string} [conversationId]
          * @param {string} [status]
          * @param {string} [taskType]
          * @param {string} [keyword]
@@ -39282,8 +39393,8 @@ export const DefaultApiFp = function(configuration?: Configuration) {
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        async apiCoreTaskCenterTasksGet(status?: string, taskType?: string, keyword?: string, page?: number, pageSize?: number, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<TaskCenterTaskListResponse>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreTaskCenterTasksGet(status, taskType, keyword, page, pageSize, options);
+        async apiCoreTaskCenterTasksGet(conversationId?: string, status?: string, taskType?: string, keyword?: string, page?: number, pageSize?: number, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<TaskCenterTaskListResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreTaskCenterTasksGet(conversationId, status, taskType, keyword, page, pageSize, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreTaskCenterTasksGet']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
@@ -39491,6 +39602,19 @@ export const DefaultApiFp = function(configuration?: Configuration) {
             const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreUserEnvVarsPost(options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreUserEnvVarsPost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Stop future invitations for the authenticated user; does not perform or prove a GitHub write
+         * @param {GitHubStarPromptSupport} gitHubStarPromptSupport
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreUserGithubStarPromptSupportPut(gitHubStarPromptSupport: GitHubStarPromptSupport, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ApiCoreUserGithubStarPromptSupportPut200Response>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreUserGithubStarPromptSupportPut(gitHubStarPromptSupport, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreUserGithubStarPromptSupportPut']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
@@ -44072,6 +44196,16 @@ export const DefaultApiFactory = function (configuration?: Configuration, basePa
         },
         /**
          *
+         * @summary Atomically claim an optional GitHub Star invitation after a successful complete Work task
+         * @param {DefaultApiApiCoreTaskCenterGithubStarPromptClaimPostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreTaskCenterGithubStarPromptClaimPost(requestParameters: DefaultApiApiCoreTaskCenterGithubStarPromptClaimPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<GitHubStarPromptDecision> {
+            return localVarFp.apiCoreTaskCenterGithubStarPromptClaimPost(requestParameters.gitHubStarPromptClaim, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
          * @summary List tasks for a schedule
          * @param {DefaultApiApiCoreTaskCenterSchedulesScheduleIdTasksGetRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
@@ -44088,7 +44222,7 @@ export const DefaultApiFactory = function (configuration?: Configuration, basePa
          * @throws {RequiredError}
          */
         apiCoreTaskCenterTasksGet(requestParameters: DefaultApiApiCoreTaskCenterTasksGetRequest = {}, options?: RawAxiosRequestConfig): AxiosPromise<TaskCenterTaskListResponse> {
-            return localVarFp.apiCoreTaskCenterTasksGet(requestParameters.status, requestParameters.taskType, requestParameters.keyword, requestParameters.page, requestParameters.pageSize, options).then((request) => request(axios, basePath));
+            return localVarFp.apiCoreTaskCenterTasksGet(requestParameters.conversationId, requestParameters.status, requestParameters.taskType, requestParameters.keyword, requestParameters.page, requestParameters.pageSize, options).then((request) => request(axios, basePath));
         },
         /**
          *
@@ -44235,6 +44369,16 @@ export const DefaultApiFactory = function (configuration?: Configuration, basePa
          */
         apiCoreUserEnvVarsPost(options?: RawAxiosRequestConfig): AxiosPromise<void> {
             return localVarFp.apiCoreUserEnvVarsPost(options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Stop future invitations for the authenticated user; does not perform or prove a GitHub write
+         * @param {DefaultApiApiCoreUserGithubStarPromptSupportPutRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreUserGithubStarPromptSupportPut(requestParameters: DefaultApiApiCoreUserGithubStarPromptSupportPutRequest, options?: RawAxiosRequestConfig): AxiosPromise<ApiCoreUserGithubStarPromptSupportPut200Response> {
+            return localVarFp.apiCoreUserGithubStarPromptSupportPut(requestParameters.gitHubStarPromptSupport, options).then((request) => request(axios, basePath));
         },
         /**
          *
@@ -47190,6 +47334,13 @@ export interface DefaultApiApiCoreStaticFilesPathGetRequest {
 }
 
 /**
+ * Request parameters for apiCoreTaskCenterGithubStarPromptClaimPost operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreTaskCenterGithubStarPromptClaimPostRequest {
+    readonly gitHubStarPromptClaim: GitHubStarPromptClaim
+}
+
+/**
  * Request parameters for apiCoreTaskCenterSchedulesScheduleIdTasksGet operation in DefaultApi.
  */
 export interface DefaultApiApiCoreTaskCenterSchedulesScheduleIdTasksGetRequest {
@@ -47204,6 +47355,8 @@ export interface DefaultApiApiCoreTaskCenterSchedulesScheduleIdTasksGetRequest {
  * Request parameters for apiCoreTaskCenterTasksGet operation in DefaultApi.
  */
 export interface DefaultApiApiCoreTaskCenterTasksGetRequest {
+    readonly conversationId?: string
+
     readonly status?: string
 
     readonly taskType?: string
@@ -47318,6 +47471,13 @@ export interface DefaultApiApiCoreUserEnvVarsIdDeleteRequest {
  */
 export interface DefaultApiApiCoreUserEnvVarsIdPatchRequest {
     readonly id: string
+}
+
+/**
+ * Request parameters for apiCoreUserGithubStarPromptSupportPut operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreUserGithubStarPromptSupportPutRequest {
+    readonly gitHubStarPromptSupport: GitHubStarPromptSupport
 }
 
 /**
@@ -51223,6 +51383,17 @@ export class DefaultApi extends BaseAPI {
 
     /**
      *
+     * @summary Atomically claim an optional GitHub Star invitation after a successful complete Work task
+     * @param {DefaultApiApiCoreTaskCenterGithubStarPromptClaimPostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreTaskCenterGithubStarPromptClaimPost(requestParameters: DefaultApiApiCoreTaskCenterGithubStarPromptClaimPostRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreTaskCenterGithubStarPromptClaimPost(requestParameters.gitHubStarPromptClaim, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
      * @summary List tasks for a schedule
      * @param {DefaultApiApiCoreTaskCenterSchedulesScheduleIdTasksGetRequest} requestParameters Request parameters.
      * @param {*} [options] Override http request option.
@@ -51240,7 +51411,7 @@ export class DefaultApi extends BaseAPI {
      * @throws {RequiredError}
      */
     public apiCoreTaskCenterTasksGet(requestParameters: DefaultApiApiCoreTaskCenterTasksGetRequest = {}, options?: RawAxiosRequestConfig) {
-        return DefaultApiFp(this.configuration).apiCoreTaskCenterTasksGet(requestParameters.status, requestParameters.taskType, requestParameters.keyword, requestParameters.page, requestParameters.pageSize, options).then((request) => request(this.axios, this.basePath));
+        return DefaultApiFp(this.configuration).apiCoreTaskCenterTasksGet(requestParameters.conversationId, requestParameters.status, requestParameters.taskType, requestParameters.keyword, requestParameters.page, requestParameters.pageSize, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**
@@ -51402,6 +51573,17 @@ export class DefaultApi extends BaseAPI {
      */
     public apiCoreUserEnvVarsPost(options?: RawAxiosRequestConfig) {
         return DefaultApiFp(this.configuration).apiCoreUserEnvVarsPost(options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Stop future invitations for the authenticated user; does not perform or prove a GitHub write
+     * @param {DefaultApiApiCoreUserGithubStarPromptSupportPutRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreUserGithubStarPromptSupportPut(requestParameters: DefaultApiApiCoreUserGithubStarPromptSupportPutRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreUserGithubStarPromptSupportPut(requestParameters.gitHubStarPromptSupport, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**

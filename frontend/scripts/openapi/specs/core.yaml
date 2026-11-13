@@ -9006,6 +9006,46 @@ components:
                 kb_id:
                     type: string
             type: object
+        GitHubStarPromptClaim:
+            additionalProperties: false
+            properties:
+                task_id:
+                    type: string
+            required:
+                - task_id
+            type: object
+        GitHubStarPromptDecision:
+            properties:
+                cooldown_days:
+                    type: integer
+                max_prompts:
+                    type: integer
+                min_successful_tasks:
+                    type: integer
+                reason:
+                    type: string
+                show:
+                    type: boolean
+                task_id:
+                    type: string
+            required:
+                - show
+                - reason
+                - task_id
+                - min_successful_tasks
+                - cooldown_days
+                - max_prompts
+            type: object
+        GitHubStarPromptSupport:
+            additionalProperties: false
+            properties:
+                supported:
+                    enum:
+                        - true
+                    type: boolean
+            required:
+                - supported
+            type: object
         GrantPrincipal:
             properties:
                 grantee_id:
@@ -36248,6 +36288,22 @@ paths:
             summary: Idempotent system-notification receipt; delivered means submitted, not seen by the user
             tags:
                 - TaskNotifications
+    /api/core/task-center/github-star-prompt/claim:
+        post:
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/GitHubStarPromptClaim'
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/GitHubStarPromptDecision'
+                    description: Invitation eligibility
+            summary: Atomically claim an optional GitHub Star invitation after a successful complete Work task
     /api/core/task-center/notification-events/{notification_id}:claim:
         post:
             description: Internal service token required; atomically grant one segment against the global gate. Configuration bodies are limited to 16 KiB; errors include stable data.detail.reason and request_id.
@@ -36360,6 +36416,11 @@ paths:
     /api/core/task-center/tasks:
         get:
             parameters:
+                - in: query
+                  name: conversation_id
+                  required: false
+                  schema:
+                    type: string
                 - in: query
                   name: status
                   required: false
@@ -37078,6 +37139,32 @@ paths:
                 "200":
                     description: OK
             summary: PATCH /user/env-vars/{id}
+    /api/core/user/github-star-prompt/support:
+        put:
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/GitHubStarPromptSupport'
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                properties:
+                                    code:
+                                        type: integer
+                                    data:
+                                        properties:
+                                            supported:
+                                                type: boolean
+                                        type: object
+                                    message:
+                                        type: string
+                                type: object
+                    description: Invitation preference saved
+            summary: Stop future invitations for the authenticated user; does not perform or prove a GitHub write
     /api/core/user/notification-preferences:
         get:
             description: Read scheduled-task notification defaults and global gate. Configuration bodies are limited to 16 KiB; errors include stable data.detail.reason and request_id.

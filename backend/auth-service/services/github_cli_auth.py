@@ -166,7 +166,9 @@ class GitHubCLIAuthService:
 
     def start(self, *, owner_user_id, attempt_id, reauthorize_connection_id='', force_web=False):
         owner = self._attempt_owner(attempt_id, owner_user_id)
-        if not self.web_authorization_enabled:
+        if not (self.host_credentials_enabled or self.web_authorization_enabled) or (
+            force_web and not self.web_authorization_enabled
+        ):
             raise_error(ErrorCodes.GITHUB_CLI_DISABLED)
         if self._recovery_failed:
             raise_error(
@@ -268,6 +270,8 @@ class GitHubCLIAuthService:
                         session.deadline = min(session.deadline, self.clock() + max(0, expires_in))
                         session.status, session.user_code, session.verification_uri = 'WAITING_USER', code, uri
             if credential is None:
+                if not self.web_authorization_enabled:
+                    raise GitHubCLIError('GITHUB_CLI_DISABLED')
                 credential = self.runner.authorize(cancel_event=session.cancel, on_device=on_device)
             # One lock arbitrates cancellation/disconnect against the entire atomic save.
             with self._lock:
@@ -303,11 +307,13 @@ class GitHubCLIAuthService:
 
 
 _single_worker = os.environ.get('WEB_CONCURRENCY', '1') == '1'
-_host_credentials_enabled = sys.platform == 'darwin' and os.environ.get('LAZYMIND_RUNTIME_MODE') == 'local'
+_host_credentials_enabled = sys.platform in ('darwin', 'win32') and os.environ.get('LAZYMIND_RUNTIME_MODE') == 'local'
 _container_web_enabled = sys.platform == 'linux' and os.environ.get('LAZYMIND_GITHUB_CLI_CONTAINER_ENABLED') == '1'
 
 github_cli_auth_service = GitHubCLIAuthService(
     runner=GitHubCLIRunner.from_runtime(), connections=cloud_oauth_service,
     host_credentials_enabled=_host_credentials_enabled and _single_worker,
-    web_authorization_enabled=(_host_credentials_enabled or _container_web_enabled) and _single_worker,
+    web_authorization_enabled=(
+        (sys.platform == 'darwin' and _host_credentials_enabled) or _container_web_enabled
+    ) and _single_worker,
 )

@@ -337,6 +337,17 @@ const zhCN = {
         "skipped": "已跳过"
     }
 },
+
+  githubStar: {
+    title: '支持 LazyMind', message: '觉得 LazyMind 对你有帮助吗？欢迎为我们的 GitHub 项目点个 Star，支持我们持续改进。',
+    star: '为项目点 Star', close: '关闭', account: 'GitHub 账号', selectAccount: '选择 GitHub 账号',
+    localHint: '未找到可用的本机 GitHub 登录信息，请连接账号后继续。',
+    continueAuth: '继续连接 GitHub', success: '感谢支持，已点 Star', alreadyStarred: '你已为项目点过 Star，感谢支持',
+    permissionDenied: 'GitHub 权限不足，请重新授权', unknownResult: '暂未确认是否成功，请稍后查询',
+    rateLimited: 'GitHub 请求过于频繁，请等待后再试',
+    failed: '未能点 Star，请重试', accountChanged: 'GitHub 账号已变化，请重新确认',
+    reauthorize: 'GitHub 登录已失效，请重新授权', manageAccount: '管理 GitHub 账号',
+  },
   sourceImports: {
     "waitingRetryAt": "等待重试 · {{time}}",
     "waitingRetry": "等待重试",
@@ -10662,7 +10673,7 @@ const zhCN = {
       resourceConsequence: "已经发起的{{title}}调用不会被强制终止，另一组资源不受影响。",
       defaultConsequence: "已经发起的调用不会被强制终止。重新开启后恢复子项选择。",
       developerTitle: "{{action}}开发者模式",
-      developerEnableContent: "开启后将激活开发者模式相关功能",
+      developerEnableContent: "开启开发者模式前，需要有效的 GitHub 连接或本机 GitHub 凭证。确认后将自动检查。",
       developerDisableContent: "关闭后将停用开发者模式相关功能，但不会删除已有的自进化数据",
       mcpEnabledToast: "已启用 {{updated}} 个服务，{{skipped}} 个未验证服务保持停用",
       mcpToggledToast: "已{{state}} {{count}} 个 MCP 服务",
@@ -10999,6 +11010,11 @@ const zhCN = {
 
     developer: {
       description: "管理开发者模式，以及仅在该模式开启时生效的选项。",
+      githubGuideTitle: "暂时无法开启开发者模式",
+      githubGuideDescription: "未检测到可用的 GitHub 凭证。请检查本机凭证，或关联 GitHub 后重试。",
+      githubGuideConnect: "关联 GitHub",
+      githubGuideCancel: "取消开启",
+      githubCheckFailed: "暂时无法确认 GitHub 连接或本机 Git 凭证能力，开发者模式尚未开启。请重试。",
       inactiveNotice: "已保存的选项会保留，但当前暂停生效。开启开发者模式后即可使用。",
       optionsGroupAria: "依赖开发者模式的选项",
       enableTitle: "启用开发者模式",

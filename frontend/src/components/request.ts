@@ -327,7 +327,7 @@ function retryNewerCredentials(request: AuthRequest, failed: AuthSessionSnapshot
 }
 
 async function handleUnauthorized(error: AxiosError, request?: AuthRequest): Promise<any> {
-  if (!request || request._authManaged === false || extractErrorCode(error) === "2002920") return Promise.reject(error);
+  if (!request || request._authManaged === false || ["2002920", "1001306"].includes(extractErrorCode(error) ?? "")) return Promise.reject(error);
   const used = requestToken(request);
   const failed = request._authCredentials ?? { ...authSnapshot(), token: used || authSnapshot().token };
   const renewed = retryNewerCredentials(request, failed);

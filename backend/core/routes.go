@@ -654,6 +654,8 @@ func registerAllRoutes(r *mux.Router) {
 
 	// ----- Task Center -----
 	handleAPI(r, "GET", "/task-center/tasks", []string{"qa.read"}, taskcenter.ListTasks)
+	handleAPI(r, "POST", "/task-center/github-star-prompt/claim", []string{"qa.read"}, taskcenter.ClaimGitHubStarPrompt)
+	handleAPI(r, "PUT", "/user/github-star-prompt/support", []string{}, taskcenter.SupportGitHubStarPrompt)
 	handleAPI(r, "GET", "/task-center/workbench", []string{"qa.read"}, taskcenter.Workbench)
 	handleAPI(r, "GET", "/task-center/workflow-events", []string{"qa.read"}, taskcenter.WorkflowChanges)
 	handleAPI(r, "GET", "/user/notification-preferences", []string{"qa.read"}, taskcenter.NotificationPreferences)

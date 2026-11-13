@@ -28,6 +28,16 @@ func readInjectionMarker(ext map[string]any) injectionMarker {
 	return injectionMarker{BundleID: bundleID, InjectedAt: injectedAt, Fingerprint: fingerprint}
 }
 
+// InjectionTime returns the time from a valid history-injection marker.
+func InjectionTime(ext []byte) (time.Time, bool) {
+	decoded, err := decodeConversationExt(ext)
+	if err != nil {
+		return time.Time{}, false
+	}
+	injectedAt, err := time.Parse(time.RFC3339Nano, readInjectionMarker(decoded).InjectedAt)
+	return injectedAt, err == nil
+}
+
 type installedConversation struct {
 	ID        string `gorm:"column:id"`
 	OwnerID   string `gorm:"column:create_user_id"`

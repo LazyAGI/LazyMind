@@ -4,6 +4,12 @@ import "lazymind/core/chat"
 
 func manualOpenAPISpec() map[string]any {
 	schemas, paths := manualSchemas(), manualPaths()
+	for name, schema := range githubStarSchemas() {
+		schemas[name] = schema
+	}
+	for path, operations := range githubStarPaths() {
+		paths[path] = operations
+	}
 	for name, schema := range academicWorkflowSchemas() {
 		schemas[name] = schema
 	}
@@ -1231,6 +1237,7 @@ func manualPaths() map[string]any {
 		)},
 		"/task-center/tasks": map[string]any{"get": op(
 			"List task-center tasks", queryParams(
+				param("query", "conversation_id", false, strSchema()),
 				param("query", "status", false, strSchema()), param("query", "task_type", false, strSchema()),
 				param("query", "keyword", false, strSchema()), param("query", "page", false, intSchema()), param("query", "page_size", false, intSchema()),
 			), nil, response(200, "Task-center task page", refSchema("TaskCenterTaskListResponse")),

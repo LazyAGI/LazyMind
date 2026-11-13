@@ -1,20 +1,32 @@
 import { ConfigProvider } from "antd";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { SettingsChangeKey } from "./api";
 import { useSettingsChange } from "./useSettingsChange";
 
 const api = vi.hoisted(() => ({ applySettingsChange: vi.fn() }));
 const tasks = vi.hoisted(() => ({ listTasks: vi.fn() }));
+const github = vi.hoisted(() => ({ listConnections: vi.fn(), readLocalCapability: vi.fn(), writeEffect: vi.fn() }));
 vi.mock("./api", () => api);
 vi.mock("@/modules/taskCenter/api", () => tasks);
+vi.mock("@/modules/dataSource/api/clients", () => ({
+  dataSourceCloudOauthApi: { listConnectionsApiAuthserviceV1CloudConnectionsGet: github.listConnections },
+}));
+vi.mock("@/modules/githubStar/api", () => ({
+  readLocalGitHubStarCapability: github.readLocalCapability,
+  writeGitHubStar: github.writeEffect,
+  writeLocalGitHubStar: github.writeEffect,
+  claimGitHubStarPrompt: github.writeEffect,
+  markGitHubStarSupported: github.writeEffect,
+}));
 vi.mock("react-i18next", () => ({ useTranslation: () => ({ t: (key: string) => key }) }));
 
-function Fixture({ saved = vi.fn(), setting = "skills_enabled" }: {
+function Fixture({ saved = vi.fn(), setting = "skills_enabled", connect = vi.fn() }: {
   saved?: ReturnType<typeof vi.fn>;
   setting?: SettingsChangeKey;
+  connect?: ReturnType<typeof vi.fn>;
 }) {
-  const change = useSettingsChange(saved);
+  const change = useSettingsChange(saved, connect);
   return <ConfigProvider theme={{ token: { motion: false } }}><button onClick={() => change.requestChange(setting, false)}>disable</button>
     <button onClick={() => change.requestChange(setting, true)}>enable</button>{change.dialog}</ConfigProvider>;
 }
@@ -24,7 +36,10 @@ describe("settings disable confirmation", () => {
     vi.resetAllMocks();
     api.applySettingsChange.mockImplementation(async (change) => change);
     tasks.listTasks.mockResolvedValue({ items: [], total: 0 });
+    github.listConnections.mockResolvedValue({ data: { items: [{ provider: "github", status: "ACTIVE" }] } });
+    github.readLocalCapability.mockResolvedValue({ repository: "LazyAGI/LazyMind", eligible: false });
   });
+  afterEach(() => { expect(github.writeEffect).not.toHaveBeenCalled(); });
 
   it("enables other features directly and notifies the page after persistence", async () => {
     const setting = "skills_enabled";
@@ -36,27 +51,144 @@ describe("settings disable confirmation", () => {
     expect(api.applySettingsChange).toHaveBeenCalledTimes(1);
     expect(api.applySettingsChange).toHaveBeenCalledWith({ key: setting, enabled: true });
     expect(tasks.listTasks).not.toHaveBeenCalled();
+    expect(github.listConnections).not.toHaveBeenCalled();
+    expect(github.readLocalCapability).not.toHaveBeenCalled();
   });
 
-  it.each(["cancel", "confirm"])("requires confirmation before enabling developer mode: %s", async (action) => {
+  it("checks the existing connection and enables developer mode without a confirmation dialog", async () => {
     const saved = vi.fn();
     render(<Fixture saved={saved} setting="developer_mode_active" />);
     fireEvent.click(screen.getByText("enable"));
-    await screen.findByText("settingsPage.confirm.developerEnableContent");
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(github.listConnections).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(saved).toHaveBeenCalledWith({ key: "developer_mode_active", enabled: true }));
+    expect(api.applySettingsChange).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(tasks.listTasks).not.toHaveBeenCalled();
+    expect(github.readLocalCapability).not.toHaveBeenCalled();
+  });
+
+  it.each([null, "EXPIRED", "REVOKED"])("requires association when no connection or eligible local credential is available: %s", async status => {
+    github.listConnections.mockResolvedValue({ data: { items: status ? [{ provider: "github", status }] : [] } });
+    localStorage.setItem("lazymind:developer-github-guide-dismissed:user-1", "1");
+    const saved = vi.fn();
+    render(<Fixture saved={saved} setting="developer_mode_active" />);
+    fireEvent.click(screen.getByText("enable"));
+    await screen.findByText("settingsPage.developer.githubGuideDescription");
+    expect(github.listConnections).toHaveBeenCalledTimes(1);
+    expect(github.readLocalCapability).toHaveBeenCalledTimes(1);
+    expect(screen.queryByText("settingsPage.confirm.developerEnableContent")).not.toBeInTheDocument();
     expect(api.applySettingsChange).not.toHaveBeenCalled();
     expect(saved).not.toHaveBeenCalled();
-    expect(tasks.listTasks).not.toHaveBeenCalled();
-    if (action === "cancel") {
-      fireEvent.click(screen.getByText("settingsPage.cancel"));
-      await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
-      expect(api.applySettingsChange).not.toHaveBeenCalled();
-    } else {
-      const confirm = screen.getByText("settingsPage.confirmEnable");
-      fireEvent.click(confirm);
-      fireEvent.click(confirm);
-      await waitFor(() => expect(saved).toHaveBeenCalledWith({ key: "developer_mode_active", enabled: true }));
-      expect(api.applySettingsChange).toHaveBeenCalledTimes(1);
-    }
+    expect(screen.queryByText("settingsPage.developer.githubGuideSkip")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByText("settingsPage.developer.githubGuideCancel"));
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expect(api.applySettingsChange).not.toHaveBeenCalled();
+  });
+
+  it.each([null, "EXPIRED", "REVOKED"])("enables with read-only local capability when no active connection exists: %s", async status => {
+    github.listConnections.mockResolvedValue({ data: { items: status ? [{ provider: "github", status }] : [] } });
+    github.readLocalCapability.mockResolvedValue({ repository: "LazyAGI/LazyMind", eligible: true });
+    const saved = vi.fn();
+    const connect = vi.fn();
+    render(<Fixture saved={saved} connect={connect} setting="developer_mode_active" />);
+    fireEvent.click(screen.getByText("enable"));
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    await waitFor(() => expect(saved).toHaveBeenCalledWith({ key: "developer_mode_active", enabled: true }));
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(github.readLocalCapability).toHaveBeenCalledTimes(1);
+    expect(api.applySettingsChange).toHaveBeenCalledTimes(1);
+    expect(connect).not.toHaveBeenCalled();
+  });
+
+  it("allows independently verified local capability when the connection lookup fails", async () => {
+    github.listConnections.mockRejectedValue(new Error("connection lookup unavailable"));
+    github.readLocalCapability.mockResolvedValue({ repository: "LazyAGI/LazyMind", eligible: true });
+    const saved = vi.fn();
+    render(<Fixture saved={saved} setting="developer_mode_active" />);
+    fireEvent.click(screen.getByText("enable"));
+    await waitFor(() => expect(saved).toHaveBeenCalledWith({ key: "developer_mode_active", enabled: true }));
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(github.readLocalCapability).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps mode off on a local capability error and checks again on retry", async () => {
+    github.listConnections.mockResolvedValue({ data: { items: [] } });
+    github.readLocalCapability.mockRejectedValueOnce(new Error("read-only check unavailable"))
+      .mockResolvedValue({ repository: "LazyAGI/LazyMind", eligible: true });
+    const saved = vi.fn();
+    render(<Fixture saved={saved} setting="developer_mode_active" />);
+    fireEvent.click(screen.getByText("enable"));
+    await screen.findByText("settingsPage.developer.githubCheckFailed");
+    expect(api.applySettingsChange).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByText("settingsPage.retry"));
+    await waitFor(() => expect(saved).toHaveBeenCalledTimes(1));
+    expect(github.readLocalCapability).toHaveBeenCalledTimes(2);
+  });
+
+  it("deduplicates local checks and does not save after leaving during the check", async () => {
+    github.listConnections.mockResolvedValue({ data: { items: [] } });
+    let finish!: (response: unknown) => void;
+    github.readLocalCapability.mockReturnValue(new Promise(resolve => { finish = resolve; }));
+    const view = render(<Fixture setting="developer_mode_active" />);
+    const enable = screen.getByText("enable");
+    fireEvent.click(enable);
+    fireEvent.click(enable);
+    await waitFor(() => expect(github.readLocalCapability).toHaveBeenCalledTimes(1));
+    expect(github.listConnections).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(api.applySettingsChange).not.toHaveBeenCalled();
+    view.unmount();
+    await act(async () => finish({ repository: "LazyAGI/LazyMind", eligible: true }));
+    expect(api.applySettingsChange).not.toHaveBeenCalled();
+  });
+
+  it("keeps mode off when GitHub lookup fails and checks again before retrying", async () => {
+    github.listConnections.mockRejectedValueOnce(new Error("offline"));
+    const saved = vi.fn();
+    render(<Fixture saved={saved} setting="developer_mode_active" />);
+    fireEvent.click(screen.getByText("enable"));
+    await screen.findByText("settingsPage.developer.githubCheckFailed");
+    expect(api.applySettingsChange).not.toHaveBeenCalled();
+    expect(saved).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByText("settingsPage.retry"));
+    await waitFor(() => expect(saved).toHaveBeenCalledTimes(1));
+    expect(github.listConnections).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not enable on leaving for GitHub or returning without completing association", async () => {
+    github.listConnections.mockResolvedValue({ data: { items: [] } });
+    const saved = vi.fn();
+    const connect = vi.fn();
+    render(<Fixture saved={saved} connect={connect} setting="developer_mode_active" />);
+    fireEvent.click(screen.getByText("enable"));
+    fireEvent.click(await screen.findByText("settingsPage.developer.githubGuideConnect"));
+    expect(connect).toHaveBeenCalledTimes(1);
+    expect(api.applySettingsChange).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByText("enable"));
+    await screen.findByText("settingsPage.developer.githubGuideDescription");
+    expect(saved).not.toHaveBeenCalled();
+    github.listConnections.mockResolvedValue({ data: { items: [{ provider: "github", status: "ACTIVE" }] } });
+    fireEvent.click(screen.getByText("settingsPage.developer.githubGuideCancel"));
+    fireEvent.click(screen.getByText("enable"));
+    await waitFor(() => expect(saved).toHaveBeenCalledTimes(1));
+    expect(github.listConnections).toHaveBeenCalledTimes(3);
+    expect(api.applySettingsChange).toHaveBeenCalledTimes(1);
+  });
+
+  it("deduplicates GitHub checks and does not save after leaving during the lookup", async () => {
+    let finish!: (response: unknown) => void;
+    github.listConnections.mockReturnValue(new Promise(resolve => { finish = resolve; }));
+    const view = render(<Fixture setting="developer_mode_active" />);
+    const enable = screen.getByText("enable");
+    fireEvent.click(enable);
+    fireEvent.click(enable);
+    expect(github.listConnections).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(api.applySettingsChange).not.toHaveBeenCalled();
+    view.unmount();
+    await act(async () => finish({ data: { items: [{ provider: "github", status: "ACTIVE" }] } }));
+    expect(api.applySettingsChange).not.toHaveBeenCalled();
   });
 
   it.each<SettingsChangeKey>([
