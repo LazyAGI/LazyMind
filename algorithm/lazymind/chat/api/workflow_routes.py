@@ -5,6 +5,7 @@ Routes:
     POST /api/writer/documents:convert   Convert Writer document content.
     POST /api/document/actions:invoke    Invoke a shared built-in document action.
     POST /api/document:inspect           Inspect Markdown or Writer IR content.
+    POST /api/document:normalize-generated Normalize generated Markdown headings.
     GET  /api/document/providers         List registered document providers.
     POST /api/subagent/tasks:cancel      LazyMind task cancellation callback.
 """
@@ -38,6 +39,7 @@ from lazymind.document_tools import (
     list_document_providers,
     sync_writer_documents,
 )
+from lazymind.document_tools.artifacts import normalize_generated_markdown
 from lazymind.config import config
 from lazymind.model_config import inject_model_config
 from lazymind.workflow_sdk import WorkflowClient
@@ -216,6 +218,10 @@ class DocumentInspectRequest(BaseModel):
     document_schema: str = Field(default='', alias='schema')
 
 
+class GeneratedMarkdownRequest(BaseModel):
+    text: str
+
+
 @router.post(
     '/api/writer/documents:sync',
     summary='Deprecated: persist an edited bound WriterDocument',
@@ -322,6 +328,11 @@ def inspect_document_artifact(request: DocumentInspectRequest) -> Dict[str, Any]
         return inspect_document(request.artifact, request.document_schema)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.post('/api/document:normalize-generated', summary='Normalize generated Markdown headings')
+def normalize_generated_document(request: GeneratedMarkdownRequest) -> Dict[str, str]:
+    return {'text': normalize_generated_markdown(request.text)}
 
 
 @router.get('/api/document/providers', summary='List document providers')

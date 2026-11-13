@@ -226,7 +226,7 @@ func Register(server *mcp.Server, client *Client) {
 			return nil, value, nil
 		})
 	mcp.AddTool(server, &mcp.Tool{Name: "workflow.artifact.publish", Title: "Publish a Workflow artifact",
-		Description: "Publish one output to a declared slot. For legacy save_artifact/save_artifacts instructions, key maps to slot. Use local_path for binary files, value_file for text/JSON files, or value inline. Use a stable positive seq per slot and reuse it with the same payload on retry. Follow the contract publication order and await acknowledgements before completing the step. Publication alone does not complete a step.", Annotations: write},
+		Description: "Publish one output to a declared slot. For legacy save_artifact/save_artifacts instructions, key maps to slot. Use local_path for binary files, value_file for text/JSON files, or value inline. In Markdown documents, write section headings without numbering; the document editor supplies it. Use a stable positive seq per slot and reuse it with the same payload on retry. Follow the contract publication order and await acknowledgements before completing the step. Publication alone does not complete a step.", Annotations: write},
 		func(ctx context.Context, _ *mcp.CallToolRequest, input PublishInput) (*mcp.CallToolResult, map[string]any, error) {
 			artifact, err := encodeOutput(input.Output)
 			if err != nil {
