@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
@@ -108,6 +109,17 @@ func (s *DocumentService) EnsureDocumentParsed(r *http.Request, req EnsureDocume
 	}
 	// Native reader artifacts remain usable while deferred indexing runs or fails.
 	if artifact, err := readBaseArtifact(r.Context(), rec); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			// An active retry may be replacing the old artifact. Its task state is
+			// authoritative until it finishes; absence alone is not a terminal failure.
+			if rec.processing.ParseStatus == "running" || NormalizeTaskStateForUI(rec.taskStat) == "WORKING" || NormalizeTaskStateForUI(rec.taskStat) == "WAITING" {
+				return s.parseResultWithoutRoots(r.Context(), rec)
+			}
+			return failedDocumentParseResult(&ProcessingDiagnostic{
+				Stage: "parse", Code: "FILE_NOT_FOUND", Message: missingProcessingFileMessage,
+				Recovery: "检查原文件是否可读取；原文件存在时重新解析，原文件缺失时重新上传。",
+			}), nil
+		}
 		return EnsureDocumentParsedResult{}, err
 	} else if artifact != nil {
 		return EnsureDocumentParsedResult{Status: "parsed"}, nil
