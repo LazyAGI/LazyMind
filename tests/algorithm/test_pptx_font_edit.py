@@ -470,7 +470,7 @@ def test_html_font_subsets_page_glyphs_and_honors_no_subsetting(tmp_path, monkey
     assert local_font_css(html) == ''
 
 
-def test_generated_songti_page_contains_subset_font_before_publication(tmp_path, monkeypatch):
+def test_generated_songti_page_contains_subset_font_before_publication(tmp_path, monkeypatch, ppt_asset_library):
     import importlib.util
     from pathlib import Path
     from lazymind.chat.engine.tools.file_resources import font_library, presentation_edit

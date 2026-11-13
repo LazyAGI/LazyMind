@@ -9,7 +9,7 @@ vi.mock("../customLogo", async (original) => ({ ...await original<typeof import(
 const png = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLbtAAAAABJRU5ErkJggg==";
 const nextPng = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aRZkAAAAASUVORK5CYII=";
 const copy = {
-  label: "Logo", upload: "Upload logo", replace: "Replace logo", reset: "Restore default", hint: "PNG, JPEG or WebP, up to 2 MiB",
+  label: "Logo", preview: "View logo", upload: "Upload logo", replace: "Replace logo", reset: "Restore default", hint: "PNG, JPEG or WebP, up to 2 MiB",
   errors: { empty: "Choose a nonempty image", type: "Unsupported image format", size: "Image exceeds 2 MiB", decode: "Unable to decode image", output: "Converted PNG exceeds 96 KiB" },
 };
 const prepare = vi.mocked(prepareCustomLogo);
@@ -43,6 +43,21 @@ describe("custom logo picker", () => {
     expect(input.accept).toBe("image/png,image/jpeg,image/webp");
     const click = vi.spyOn(input, "click").mockImplementation(() => undefined);
     fireEvent.click(within(group).getByRole("button", { name: "Logo: Upload logo" }));
+    expect(click).toHaveBeenCalledOnce();
+  });
+
+  it("previews an existing logo without opening the file picker and keeps replacement explicit", async () => {
+    const { container, options } = view(props({ value: png }));
+    const input = container.querySelector('input[type="file"]') as HTMLInputElement;
+    const click = vi.spyOn(input, "click").mockImplementation(() => undefined);
+    fireEvent.click(container.querySelector(".custom-logo-picker-preview")!);
+    const dialog = await screen.findByRole("dialog", { name: "View logo" });
+    expect(within(dialog).getByRole("img", { name: "Logo" })).toHaveAttribute("src", png);
+    expect(click).not.toHaveBeenCalled();
+    expect(options.onChange).not.toHaveBeenCalled();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Close" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: "Replace logo" }));
     expect(click).toHaveBeenCalledOnce();
   });
 

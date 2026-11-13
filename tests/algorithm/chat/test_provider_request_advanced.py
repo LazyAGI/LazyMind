@@ -95,8 +95,8 @@ def test_chat_completions_compatibility_activates_without_advanced_settings(monk
         sent.append(json.loads(request.body))
         response = requests.Response()
         response.status_code = 200
-        response._content = json.dumps({'choices': [{'message': {'content': 'ok'},
-                                                      'finish_reason': 'stop'}]}).encode()
+        response._content = json.dumps({'choices': [{'message': {'role': 'assistant', 'content': 'ok'},
+                                                    'finish_reason': 'stop'}]}).encode()
         response._content_consumed = True
         response.raw = BytesIO()
         response.request = request
@@ -167,7 +167,8 @@ def test_dynamic_runtime_applies_options_per_role_without_changing_supplier(monk
         calls.append(request)
         response = requests.Response()
         response.status_code = 200
-        response._content = json.dumps({'choices': [{'message': {'content': 'ok'}, 'finish_reason': 'stop'}]}).encode()
+        response._content = json.dumps({'choices': [{'message': {'role': 'assistant', 'content': 'ok'},
+                                                    'finish_reason': 'stop'}]}).encode()
         response._content_consumed = True
         response.raw = BytesIO()
         response.request = request

@@ -578,6 +578,7 @@ func catalogSkillsEqual(left, right skillbuiltin.CatalogSkill) bool {
 		left.TreeSHA256 == right.TreeSHA256 &&
 		left.PackageFile == right.PackageFile &&
 		left.PatchSetSHA256 == right.PatchSetSHA256 &&
+		left.OriginVersion == right.OriginVersion &&
 		left.OriginTreeSHA256 == right.OriginTreeSHA256 &&
 		stringSliceEqual(left.Tags, right.Tags) &&
 		marketVisibleEqual(left.MarketVisible, right.MarketVisible) &&
@@ -1124,6 +1125,7 @@ func finalizeEntry(spec sourceSpec, origin originPackage, cacheDir string, patch
 		return skillbuiltin.CatalogSkill{}, "", nil, err
 	}
 	if len(patched.AppliedPatches) > 0 {
+		entry.OriginVersion = version
 		entry.OriginArchiveSHA256 = origin.ArchiveHash
 		entry.OriginTreeSHA256 = origin.TreeHash
 		entry.OriginArchiveSize = origin.ArchiveSize
@@ -1514,7 +1516,7 @@ func validateFrozenEntry(current, locked skillbuiltin.CatalogSkill) error {
 	if locked.Content != "" && current.Content != locked.Content {
 		return bundleFailure("SKILL.md preview metadata changed")
 	}
-	if current.OriginArchiveSHA256 != locked.OriginArchiveSHA256 || current.OriginTreeSHA256 != locked.OriginTreeSHA256 || current.OriginArchiveSize != locked.OriginArchiveSize || current.PatchSetSHA256 != locked.PatchSetSHA256 {
+	if current.OriginVersion != locked.OriginVersion || current.OriginArchiveSHA256 != locked.OriginArchiveSHA256 || current.OriginTreeSHA256 != locked.OriginTreeSHA256 || current.OriginArchiveSize != locked.OriginArchiveSize || current.PatchSetSHA256 != locked.PatchSetSHA256 {
 		return bundleFailure("patch provenance changed")
 	}
 	if len(current.AppliedPatches) != len(locked.AppliedPatches) {

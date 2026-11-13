@@ -30,7 +30,7 @@ def find_root():
 ROOT = find_root()
 MODELS_DEV_URL = 'https://models.dev/api.json?type=all'
 OPENROUTER_URL = 'https://openrouter.ai/api/v1/models?output_modalities=all'
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 
 PROVIDER_SOURCES = {
     'Claude': ['anthropic'],
@@ -237,6 +237,24 @@ def utc_now():
     return datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
 
 
+def apply_builtin_catalog(payload):
+    # Ark does not expose a compatible model discovery endpoint. Keep its
+    # reviewed official IDs available in both fresh and offline/cached builds.
+    with open(os.path.join(os.path.dirname(__file__), 'volcengine_models.json'), encoding='utf-8') as handle:
+        builtin = json.load(handle)
+    models = {model['name']: model for model in payload['providers'].get('Doubao', [])}
+    models.update((model['name'], model) for model in builtin['models'])
+    payload['providers']['Doubao'] = [models[name] for name in sorted(models)]
+    recognition = payload.setdefault('recognition_models', [])
+    for model in builtin['models']:
+        if model not in recognition:
+            recognition.append(model)
+    sources = payload.setdefault('sources', [])
+    if builtin['source'] not in sources:
+        sources.append(builtin['source'])
+    return payload
+
+
 def build_catalog(models_dev, openrouter):
     if not isinstance(models_dev, dict) or not models_dev:
         raise ValueError('models.dev returned an empty or invalid provider catalog')
@@ -269,13 +287,13 @@ def build_catalog(models_dev, openrouter):
 
     if not openrouter_models:
         raise ValueError('OpenRouter has no valid model IDs')
-    return {
+    return apply_builtin_catalog({
         'schema_version': SCHEMA_VERSION,
         'generated_at': utc_now(),
         'sources': [MODELS_DEV_URL, OPENROUTER_URL],
         'providers': providers,
         'recognition_models': collect_recognition_models(models_dev, openrouter_models),
-    }
+    })
 
 
 def read_snapshot(path):
@@ -283,7 +301,7 @@ def read_snapshot(path):
         with open(path, encoding='utf-8') as handle:
             payload = json.load(handle)
         version = payload.get('schema_version', 0)
-        if version not in (0, 1, 2, 3, SCHEMA_VERSION):
+        if version not in (0, 1, 2, 3, 4, SCHEMA_VERSION):
             return None
         payload['schema_version'] = version
         providers = payload['providers']
@@ -331,6 +349,7 @@ def read_snapshot(path):
 
 
 def write_snapshot(paths, payload):
+    payload = apply_builtin_catalog(payload)
     encoded = json.dumps(payload, ensure_ascii=False, indent=2) + '\n'
     for path in paths:
         directory = os.path.dirname(os.path.abspath(path))

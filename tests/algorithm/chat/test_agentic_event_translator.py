@@ -531,8 +531,9 @@ def test_workflow_rendering_normalizes_canonical_success_and_failure():
         },
     })
 
-    assert 'Result: **queued**. Reason: **accepted**.' in success_text
-    assert 'Result: **failed**. Reason: **Workflow service is unavailable**.' in failure_text
+    assert 'The workflow is queued and waiting to run.' in success_text
+    assert 'The workflow could not start. Please review the error details.' in failure_text
+    assert 'Workflow service is unavailable' in failure_text
     assert '{result.' not in success_text
     assert '{result.' not in failure_text
 
@@ -703,7 +704,9 @@ def test_translator_composite_ask_preserves_ordinary_question_and_latest_mail_ca
 
 def test_translator_recognizes_explicit_composite_ask_and_plain_asks():
     translator = AgentEventFrameTranslator(query='question')
-    plain = translator.feed({'tag': 'ask_pending', 'ask_id': 'plain', 'questions': [{'text': 'Question'}]})[0]['ask_pending']
+    plain = translator.feed({
+        'tag': 'ask_pending', 'ask_id': 'plain', 'questions': [{'text': 'Question'}],
+    })[0]['ask_pending']
     assert plain['mail_draft_only'] is False
     assert plain['mail_drafts'] == []
     composite = {

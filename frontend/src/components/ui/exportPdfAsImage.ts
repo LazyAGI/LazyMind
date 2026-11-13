@@ -1,5 +1,6 @@
 import { jsPDF } from "jspdf";
 import { pdfjs } from "react-pdf";
+import { pdfDocumentOptions } from "./pdfDocumentOptions";
 import i18n from "@/i18n";
 
 if (!pdfjs.GlobalWorkerOptions.workerSrc) {
@@ -82,7 +83,7 @@ export async function exportPdfAsImagePdf(
       ? { fileName: fileNameOrOptions }
       : fileNameOrOptions || {};
   const source = await resolvePdfSource(fileData, options);
-  const pdfDoc = await pdfjs.getDocument(source).promise;
+  const pdfDoc = await pdfjs.getDocument({ ...pdfDocumentOptions, ...(typeof source === "string" ? { url: source } : source) }).promise;
   try {
     let pdf: jsPDF | null = null;
 

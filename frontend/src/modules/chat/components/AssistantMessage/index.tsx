@@ -94,7 +94,7 @@ function ExternalExecutionSummary({
     >
       <summary>
         <span className="external-execution-dot" />
-        <span>{provider}</span>
+        <span>{execution.model ? `${provider} · ${execution.model}` : provider}</span>
         <span className="external-execution-status">{status}</span>
       </summary>
       <div className="external-execution-details">
@@ -911,6 +911,7 @@ const AssistantMessage = (props: any) => {
               <ChatExportActions
                 key={`${sessionId}:${answerHistoryId}`}
                 content={answer.content || ""}
+                rawContent={answer.raw_delta}
                 exports={answer.exports}
                 sources={answer.sources}
                 conversationId={sessionId}
@@ -1021,7 +1022,8 @@ const AssistantMessage = (props: any) => {
             {!item.fork_read_only && sessionId && item.exports?.length > 0 && (
               <ChatExportActions
                 key={`${sessionId}:${item.history_id || item.id}`}
-                content={item.display_delta || item.delta || ""}
+                content={item.delta || ""}
+                rawContent={item.raw_delta}
                 exports={item.exports}
                 sources={item.sources}
                 conversationId={sessionId}
@@ -1431,7 +1433,7 @@ const AssistantMessage = (props: any) => {
         <IdentityAvatar className="chat-avatar" kind="soul" size={32} />
         <div className="chat-bot-box-multi">
         <div className="chat-bot">
-            <ModelRouteSummary route={item.model_route} />
+            {!item.execution && <ModelRouteSummary route={item.model_route} />}
             <ExternalExecutionSummary execution={item.execution} />
             <RunStatusCard
               terminal={displayTerminal}
@@ -1537,7 +1539,7 @@ const AssistantMessage = (props: any) => {
       <IdentityAvatar className="chat-avatar" kind="soul" size={32} />
       <div className="chat-bot-box-single">
         <div className="chat-bot">
-          <ModelRouteSummary route={item.model_route} />
+          {!item.execution && <ModelRouteSummary route={item.model_route} />}
           <ExternalExecutionSummary execution={item.execution} />
           <RunStatusCard
             terminal={displayTerminal}

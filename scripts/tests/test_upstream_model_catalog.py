@@ -15,6 +15,45 @@ SPEC.loader.exec_module(catalog)
 
 
 class UpstreamCatalogTests(unittest.TestCase):
+    def assert_snapshot_retained_with_builtin_models(self, result, previous):
+        self.assertEqual(result['schema_version'], previous['schema_version'])
+        self.assertEqual(result['generated_at'], previous['generated_at'])
+        for provider, models in previous['providers'].items():
+            self.assertEqual(result['providers'][provider], models)
+        for model in previous.get('recognition_models', []):
+            self.assertIn(model, result['recognition_models'])
+        self.assertIn('doubao-seed-evolving', {model['name'] for model in result['providers']['Doubao']})
+
+    def test_volcengine_builtin_models_cover_official_tasks_without_discovery(self):
+        payload = catalog.build_catalog(
+            {'openai': {'models': {'chat': {'id': 'chat', 'modalities': {'input': ['text'], 'output': ['text']}}}}},
+            {'data': [{'id': 'router-chat', 'architecture': {'input_modalities': ['text'], 'output_modalities': ['text']}}]},
+        )
+        models = {model['name']: model for model in payload['providers']['Doubao']}
+        self.assertIn('doubao-seed-2-1-lite-260915', models)
+        self.assertEqual(models['doubao-seed-evolving']['context'], 1048576)
+        self.assertTrue(models['doubao-seed-evolving']['feature_support']['vision'])
+        self.assertEqual(models['doubao-seedream-5-5-261028']['model_type'], 'text2image')
+        self.assertEqual(models['doubao-seedance-2-0-mini-260615']['model_type'], 'text2video')
+        self.assertEqual(models['doubao-embedding-vision-251215']['model_type'], 'multimodal_embedding')
+        self.assertNotIn('doubao-seed3d-2-0-260328', models)
+        recognition = {model['name'] for model in payload['recognition_models']}
+        self.assertTrue(set(models).issubset(recognition))
+
+    def test_cached_catalog_gets_builtin_volcengine_models_even_offline(self):
+        for version in [4, catalog.SCHEMA_VERSION]:
+            with self.subTest(version=version), tempfile.TemporaryDirectory() as temp:
+                target = Path(temp) / 'catalog.json'
+                old = catalog.blank_model('existing-user-visible-model')
+                target.write_text(json.dumps({'schema_version': version, 'generated_at': catalog.utc_now(),
+                                             'providers': {'Doubao': [old]}, 'recognition_models': [old]}))
+                with patch.object(catalog, 'fetch_json', side_effect=OSError('offline')):
+                    catalog.generate([str(target)])
+                result = json.loads(target.read_text())
+                models = {model['name'] for model in result['providers']['Doubao']}
+                self.assertIn('doubao-seed-evolving', models)
+                self.assertIn('existing-user-visible-model', models)
+
     def test_models_dev_keeps_explicit_feature_booleans_and_missing_is_unknown(self):
         base = {'id': 'opaque', 'modalities': {'input': ['text', 'image'], 'output': ['text']}}
         model = catalog.from_models_dev(dict(base, tool_call=False, reasoning=True), 'fallback')
@@ -244,7 +283,7 @@ class UpstreamCatalogTests(unittest.TestCase):
                     with patch.object(catalog, 'fetch_json', side_effect=OSError('offline')) as fetch:
                         catalog.generate([str(path)])
                     fetch.assert_called_once()
-                    self.assertEqual(json.loads(path.read_text()), snapshot)
+                    self.assert_snapshot_retained_with_builtin_models(json.loads(path.read_text()), snapshot)
 
     def test_schema_two_is_refreshed_to_add_missing_recognition_models(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -263,7 +302,7 @@ class UpstreamCatalogTests(unittest.TestCase):
                 catalog.generate([str(path)])
             result = catalog.read_snapshot(str(path))
             self.assertEqual(result['schema_version'], catalog.SCHEMA_VERSION)
-            self.assertEqual({model['name'] for model in result['recognition_models']}, {'fresh', 'live'})
+            self.assertEqual({model['name'] for model in result['recognition_models']} - {model['name'] for model in result['providers']['Doubao']}, {'fresh', 'live'})
 
     def test_regional_fallback_does_not_merge_models_from_another_endpoint(self):
         data = {
@@ -318,7 +357,7 @@ class UpstreamCatalogTests(unittest.TestCase):
             path.write_text(json.dumps(snapshot), encoding='utf-8')
             with patch.object(catalog, 'fetch_json', side_effect=OSError('offline')):
                 catalog.generate([str(path)])
-            self.assertEqual(json.loads(path.read_text()), snapshot)
+            self.assert_snapshot_retained_with_builtin_models(json.loads(path.read_text()), snapshot)
 
     def test_network_failure_without_a_snapshot_fails(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -363,7 +402,7 @@ class UpstreamCatalogTests(unittest.TestCase):
             with patch.object(catalog.urllib.request, 'urlopen', side_effect=http.client.IncompleteRead(b'{', 2)):
                 with patch.object(catalog.time, 'sleep'):
                     catalog.generate([str(path)])
-            self.assertEqual(json.loads(path.read_text()), snapshot)
+            self.assert_snapshot_retained_with_builtin_models(json.loads(path.read_text()), snapshot)
 
 
 if __name__ == '__main__':

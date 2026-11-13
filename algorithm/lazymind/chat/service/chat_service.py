@@ -51,6 +51,7 @@ from lazymind.chat.service.document_selection import (
     resolve_document_selection_context,
 )
 from lazymind.chat.service.component.tool_policy import build_sidechat_tool_configs
+from lazymind.chat.service.component.tool_rendering import _preview_language
 from lazymind.chat.service.component import (
     AgentEventFrameTranslator,
     ASK_USER_TOOL_CONFIG,
@@ -965,7 +966,7 @@ async def _run_chat_with_parse_status(
     if not names or inspect:
         return await _handle_chat_impl(request, **kwargs)
 
-    query = str(request.message.query or '')
+    query = str(request.message.user_query or request.message.query or '')
     session_id = request.conversation.session_id
     started = time.time()
     translator = AgentEventFrameTranslator(query=query, run_id='parse-uploads')
@@ -1065,7 +1066,10 @@ async def handle_chat(request: ChatRequest) -> Union[Dict[str, Any], StreamingRe
                 ).strip(),
                 session_id=request.conversation.session_id,
             ))
-            for status_delta in ('正在', '分析', '用户意图', '，请稍后'):
+            status_deltas = (('正在', '分析', '用户意图', '，请稍后')
+                             if _preview_language(filter_query) == 'zh'
+                             else ('Analyzing ', 'your request', ', please wait…'))
+            for status_delta in status_deltas:
                 yield log_and_emit_frame(
                     {'think': status_delta, 'text': None, 'sources': []},
                     round(time.time() - started, 3),
@@ -1306,7 +1310,7 @@ async def _handle_chat_impl(
         agent_history, agent.loaded_skills, excluded=agent.excluded_skills,
     )
     translator = AgentEventFrameTranslator(
-        query=query,
+        query=user_input,
         run_id=run_id,
         started_at=metrics_started_at,
     )

@@ -119,7 +119,12 @@ def test_missing_rag_keeps_temporary_search_and_attachment_readers(monkeypatch, 
     lazyllm.globals['agentic_config'] = {'files': ['paper.pdf'], 'filters': {'kb_id': ['kb-1']}}
     configs = filter_tools([*DEFAULT_TOOLS, *USER_ATTACHMENT_TOOL_CONFIGS], include_unready=True)
     names = {cfg.name for cfg in configs}
-    assert 'kb' not in names
+    assert 'kb' in names
+    kb_config = next(cfg for cfg in configs if cfg.name == 'kb')
+    assert [d['function']['name'] for d in ToolManager([kb_config.tool]).tools_description] == [
+        'KBToolkit_read_document',
+    ]
+    assert [method['name'] for method in _tool_group('kb')['methods']] == ['read_document']
     assert 'temp_kb' in names
     assert {'read_user_attachment', 'find_user_attachment'} <= names
     assert _tool_group('temp_kb')['active'] is True

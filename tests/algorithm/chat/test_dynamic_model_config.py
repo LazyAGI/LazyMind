@@ -156,7 +156,7 @@ class TestAutoModelDynamic:
             response.encoding = 'utf-8'
             response.raw = BytesIO(json.dumps({
                 'choices': [{
-                    'message': {'content': 'ok'},
+                    'message': {'role': 'assistant', 'content': 'ok'},
                     'finish_reason': 'stop',
                 }],
                 'usage': {},

@@ -23,6 +23,28 @@ afterEach(async () => {
   await act(async () => { message.destroy(); });
 });
 
+describe("external execution identity", () => {
+  it.each([false, true])("shows the executor model rather than the configured chat model (multiple answers: %s)", (multiple) => {
+    const item = {
+      role: "assistant", delta: "answer",
+      model_route: { mode: "fixed", provider_name: "OpenAI", model_name: "qwen38-27b", reason: "fixed" },
+      execution: { provider: "codex", status: "running", run_id: "external-run", history_id: "external-history",
+        workflows: [], invocation: { total: 0, tools: [] }, recovery_count: 0 },
+      ...(multiple ? { answers: [{ content: "first" }, { content: "second" }] } : {}),
+    };
+    const props = { index: 0, length: 1, sendMessage: vi.fn(), regenerate: vi.fn(),
+      stopGeneration: vi.fn(), renderText: () => null, updateMessage: vi.fn() };
+    const { rerender } = render(<AssistantMessage {...props} item={item} />);
+    expect(screen.getByText("Codex")).toBeVisible();
+    expect(screen.queryByText(/qwen38-27b/)).not.toBeInTheDocument();
+    rerender(<AssistantMessage {...props} item={{ ...item, execution: { ...item.execution, status: "completed", model: "actual-codex-model" } }} />);
+    expect(screen.getByText("Codex · actual-codex-model")).toBeVisible();
+    expect(screen.getByText("chat.executionStatus.completed")).toBeVisible();
+    expect(screen.queryByText("chat.executionStatus.running")).not.toBeInTheDocument();
+    expect(screen.queryByText(/qwen38-27b/)).not.toBeInTheDocument();
+  });
+});
+
 describe("mail draft lifecycle", () => {
   const draft = { draft_id: "mail-one", revision: 1, status: "draft", to: ["test@example.com"],
     subject: "Mail receipt", body: "Review body", attachments: ["report.pdf"] };

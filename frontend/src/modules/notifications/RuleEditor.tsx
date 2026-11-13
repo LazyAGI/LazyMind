@@ -41,14 +41,15 @@ export default function RuleEditor({ value, onChange, disabled = false, variant 
   // describes only the browser consumer and cannot gate the native channel.
   const nativeDesktop = isDesktopRuntime();
   const desktopAvailable = nativeDesktop || desktopAuthorized;
-  const watchWechat = Boolean(value.channels.wechat?.enabled) && preferences?.enabled !== false
-    && (variant === 'settings' || !preferences || channelGateEnabled(preferences, 'wechat'));
+  // Recipient checks belong to the task editor. Settings always reads account
+  // connection state, independently of notification gates or selected recipients.
+  const watchWechat = variant === 'task' && Boolean(value.channels.wechat?.enabled) && preferences?.enabled !== false
+    && (!preferences || channelGateEnabled(preferences, 'wechat'));
   const wechat = useWeChatNotificationStatus({
     enabled: watchWechat, ready: !loading && !error,
     accountId: variant === 'task' ? value.channels.wechat?.account_id : undefined,
     recipientId: variant === 'task' ? value.channels.wechat?.recipient_id : undefined,
     refreshKey: JSON.stringify([refresh, accountsRefresh]),
-    aggregate: variant === 'settings',
   });
   const openConnection = (provider: ChannelProvider = 'feishu') => {
     if (connectionInPlace || variant === 'task') setConnectionProvider(provider);
@@ -64,8 +65,12 @@ export default function RuleEditor({ value, onChange, disabled = false, variant 
   useEffect(() => {
     const update = () => setRefresh(n => n + 1);
     window.addEventListener(CHANNEL_ACCOUNTS_CHANGED_EVENT, update);
-    return () => window.removeEventListener(CHANNEL_ACCOUNTS_CHANGED_EVENT, update);
-  }, []);
+    if (variant === 'settings') window.addEventListener('focus', update);
+    return () => {
+      window.removeEventListener(CHANNEL_ACCOUNTS_CHANGED_EVENT, update);
+      if (variant === 'settings') window.removeEventListener('focus', update);
+    };
+  }, [variant]);
   useEffect(() => {
     const updated = wechat.account;
     if (updated) setAccounts(old => old.map(account => account.id === updated.id ? updated : account));
@@ -100,9 +105,9 @@ export default function RuleEditor({ value, onChange, disabled = false, variant 
       const authorizationRequired = channel === 'wecom' && (Boolean(rule?.account_id && authorizationErrors[rule.account_id])
         || (variant === 'task' ? Boolean(account && isChannelAccountAuthorizationRequired(account))
           : !hasAvailableAccount && providerAccounts.some(isChannelAccountAuthorizationRequired)));
-      const wechatState = channel === 'wechat' ? wechatEditorStatus({
+      const wechatState = channel === 'wechat' && variant === 'task' ? wechatEditorStatus({
         accounts: providerAccounts, status: wechat.status, accountId: rule?.account_id,
-        recipientId: rule?.recipient_id, aggregate: variant === 'settings',
+        recipientId: rule?.recipient_id,
       }) : undefined;
       const wechatReauthorizationRequired = wechatState === 'reauthorization';
       const firstWechatConnection = wechatState === 'disconnected' && !rule?.account_id && providerAccounts.length === 0;
@@ -113,11 +118,11 @@ export default function RuleEditor({ value, onChange, disabled = false, variant 
         ? channelAccountStatusKey(account) : channelProviderStatusKey(providerAccounts);
       const desktopStatus = nativeDesktop || !browserNotificationsSupported() ? undefined
         : desktopAuthorized ? 'authorized' : 'notAuthorized';
-      const statusLabel = notificationOff ? 'off' : channel === 'desktop' ? desktopStatus
+      const statusLabel = channel === 'desktop' ? desktopStatus
         : loading ? undefined : error ? 'unavailable' : wechatState ? wechatStatusLabel(wechatState) : channelStatusLabelKey(connectionLabel);
-      const statusStyle = notificationOff ? 'off' : channel === 'desktop' ? nativeDesktop ? 'managed' : desktopAuthorized ? 'connected' : 'disconnected'
-        : loading ? 'pending' : error ? 'expired' : pendingActivation || statusLabel === 'connecting' || statusLabel === 'wechatChecking' ? 'pending'
-          : wechatNeedsAttention || authorizationRequired ? 'expired' : statusLabel === 'connected' ? 'connected' : 'disconnected';
+      const statusStyle = channel === 'desktop' ? nativeDesktop ? 'managed' : desktopAuthorized ? 'connected' : 'disconnected'
+        : loading ? 'pending' : error ? 'expired' : statusLabel === 'pendingActivation' || statusLabel === 'connecting' || statusLabel === 'wechatChecking' ? 'pending'
+          : wechatNeedsAttention || authorizationRequired || statusLabel === 'unavailable' ? 'expired' : statusLabel === 'connected' ? 'connected' : 'disconnected';
       return <div key={channel} className={`notification-channel-block is-${channel}${globallyDisabled ? ' is-globally-disabled' : ''}${highlightedChannel === channel ? ' is-requested' : ''}`}><div className="notification-row notification-channel">
         <ChannelBrand channel={channel} avatar={account?.avatar_url} />
         <div className="notification-grow"><strong>{t('notifications.' + channel)}</strong> {statusLabel === 'wechatChecking'

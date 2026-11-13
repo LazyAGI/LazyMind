@@ -57,13 +57,19 @@ def _build_reranker() -> Optional[Reranker]:
     )
 
 
-def _ensure_kb_search_runtime() -> tuple[List[Retriever], Optional[Reranker], Retriever]:
+def _ensure_kb_search_runtime(*, include_images: bool = True) -> tuple[
+    List[Retriever], Optional[Reranker], Optional[Retriever],
+]:
     global _kb_retrievers, _kb_image_retriever
-    if _kb_retrievers is None or _kb_image_retriever is None:
+    if _kb_retrievers is None:
         _kb_retrievers = [Retriever(DOCUMENT, **cfg) for cfg in _KB_RETRIEVER_CONFIGS]
-        _kb_image_retriever = Retriever(DOCUMENT, **_KB_IMAGE_RETRIEVER_CONFIG)
+    image_retriever = None
+    if include_images and is_model_role_available(EMBED_IMAGE):
+        if _kb_image_retriever is None:
+            _kb_image_retriever = Retriever(DOCUMENT, **_KB_IMAGE_RETRIEVER_CONFIG)
+        image_retriever = _kb_image_retriever
     # Model availability belongs to the current request, not the first search.
-    return _kb_retrievers, _build_reranker(), _kb_image_retriever
+    return _kb_retrievers, _build_reranker(), image_retriever
 
 
 def _serialize_doc_node_like(node: Any) -> Dict[str, Any]:
@@ -449,7 +455,7 @@ class KBToolkit:
             rerank_topk: Number of nodes the reranker keeps before adaptive-k
                 trimming. Defaults to 20.
             k_max: Hard upper bound on the adaptive-k stage. Defaults to 10.
-            image_topk: Top-k for the image retrieval branch. Defaults to 3.
+            image_topk: Top-k for the image retrieval branch. Defaults to 3; 0 disables it.
             filters: Metadata filters for retrieval, e.g.
                 {'file_name': 'report.pdf'}.
             kb_ids: Knowledge-base IDs. Overrides the knowledge bases selected
@@ -457,13 +463,19 @@ class KBToolkit:
         """
         agentic_config = lazyllm.globals['agentic_config']
         selected_ids = self._kb_ids(kb_ids)
-        retrievers, reranker, image_retriever = _ensure_kb_search_runtime()
+        if not is_model_role_available(EMBED_MAIN):
+            raise ToolExecutionError('知识库检索需要可用的文本向量模型，请在设置中的默认模型配置补全服务来源后重试。')
+        image_topk = _DEFAULT_IMAGE_TOPK if image_topk is None else image_topk
+        retrievers, reranker, image_retriever = _ensure_kb_search_runtime(include_images=image_topk > 0)
         effective_filters = dict(filters or agentic_config.get('filters') or {})
         effective_filters['kb_id'] = selected_ids
         payload = {
             'query': query.strip(),
             'filters': effective_filters,
             'user_id': agentic_config.get('user_id', ''),
+            'llm_config': lazyllm.globals.get(
+                'lazymind_request_model_config', agentic_config.get('llm_config') or {},
+            ),
         }
 
         result = search_kb(
@@ -474,7 +486,7 @@ class KBToolkit:
             retriever_topk=retriever_topk or _DEFAULT_RETRIEVER_TOPK,
             rerank_topk=rerank_topk or _DEFAULT_RERANK_TOPK,
             k_max=k_max or _DEFAULT_K_MAX,
-            image_topk=image_topk or _DEFAULT_IMAGE_TOPK,
+            image_topk=image_topk,
         )
         serialized = _serialize_kb_result(result)
         return serialized
