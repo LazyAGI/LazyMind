@@ -227,7 +227,7 @@ const ImportKnowledgeModal = (props: IProps, ref: Ref<unknown> | undefined) => {
         if (outcome.status === "CREATED") continue;
         const file = uploadedFiles[outcome.input_index];
         const partialNotice = outcome.status === "PARTIAL" ? "；部分成员已保存，请在知识库核对后仅重传失败成员" : "";
-        failures.push(`${file?.path || outcome.display_name}：${outcome.message || "导入失败"}${partialNotice}`);
+        failures.push(`${file?.path || outcome.display_name}：${getImportErrorMessage(outcome)}${partialNotice}`);
         if (file && outcome.target_pid) retryParents.current.set(file.originFile, outcome.target_pid);
         // A partially committed archive/input must be inspected, not re-uploaded wholesale.
         if (file && outcome.status === "FAILED" && !outcome.task_ids?.length) retryFiles.add(file.originFile);

@@ -179,3 +179,14 @@ it("reuses the created folder for a file that failed before task creation",async
   await waitFor(()=>expect(mocks.create).toHaveBeenCalledTimes(2));
   expect(mocks.create.mock.calls[1][1].items).toEqual([{upload_file_id:"early-upload",task:{display_name:"early.txt",relative_path:"shared/early.txt",document_pid:"existing-shared"}}]);
 });
+
+it("localizes duplicate-name failures returned in batch outcomes", async () => {
+  mocks.create.mockResolvedValueOnce({data:{tasks:[],outcomes:[{input_index:0,status:"FAILED",message:"target already contains this name"}]}});
+  const ref=createRef<IImportKnowledgeModalRef>();
+  render(<ImportKnowledgeModal ref={ref} onOk={vi.fn()} />);
+  await act(async()=>ref.current!.handleOpen({dataset_id:"papers"}));
+  fireEvent.click(screen.getByText("select PDF"));
+  fireEvent.click(screen.getByRole("button",{name:"上传并保存"}));
+  expect((await screen.findAllByText(/当前文件夹中已有同名文件/)).length).toBeGreaterThan(0);
+  expect(screen.queryByText(/target already contains this name/)).toBeNull();
+});
