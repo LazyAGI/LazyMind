@@ -159,82 +159,6 @@
   padding: 4px 4px 24px;
   color: #101828;
 
-  .knowledge-detail-header {
-    gap: 10px;
-
-    .ant-breadcrumb {
-      color: #667085;
-      font-size: 13px;
-    }
-
-    .detail-page-title {
-      min-height: 38px;
-    }
-
-    .detail-page-title-main {
-      gap: 10px;
-    }
-
-    .detail-page-title-main > .ant-btn {
-      width: 34px;
-      min-width: 34px;
-      height: 34px;
-      padding: 0;
-      border-radius: 6px;
-    }
-
-    .detail-title {
-      min-width: 0;
-      font-size: inherit;
-    }
-
-    .settings-menu > div {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-    }
-
-    .settings-menu button {
-      width: auto !important;
-      height: 30px !important;
-      padding: 0 10px;
-      border-radius: 6px;
-    }
-  }
-
-  > .toolbar {
-    width: 100%;
-    margin: 14px 0 16px;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 12px;
-    flex-wrap: wrap;
-
-    .search-input {
-      width: min(420px, 100%) !important;
-      height: 34px;
-      border-color: #d9d9d9;
-      background: #fff;
-    }
-
-    .toolbar-actions {
-      margin-left: auto;
-      gap: 8px;
-
-      .ant-btn {
-        height: 34px;
-        border-radius: 6px;
-      }
-
-      .knowledge-toolbar-dropdown-button {
-        display: inline-flex;
-        align-items: center;
-        gap: 6px;
-      }
-    }
-  }
-
   > div:last-of-type {
     min-width: 0;
   }
@@ -271,57 +195,145 @@
   }
 }
 
-.knowledge-detail-title-copy {
-  min-width: 0;
-  display: flex;
-  align-items: baseline;
-  gap: 14px;
-
-  strong {
-    min-width: 0;
-    overflow: hidden;
-    color: #101828;
-    font-size: 20px;
-    font-weight: 700;
-    line-height: 1.35;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  small {
-    min-width: 0;
-    max-width: 520px;
-    overflow: hidden;
-    color: #667085;
-    font-size: 13px;
-    font-weight: 400;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-}
-
 @media (max-width: 760px) {
   .knowledge-detail-page > .knowledge-import-error {
     grid-template-columns: 18px minmax(0, 1fr);
 
     .ant-alert-action { grid-column: 2; margin: 0; }
   }
-
-  .knowledge-detail-title-copy {
-    align-items: flex-start;
-    flex-direction: column;
-    gap: 2px;
-  }
-
-  .knowledge-detail-page > .toolbar {
-    align-items: stretch;
-    flex-direction: column;
-
-    .search-input { width: 100% !important; }
-    .toolbar-actions { width: 100%; margin-left: 0; }
-  }
 }
 
 .knowledge-detail-page--paper { flex: 1; min-height: 0; overflow: hidden; }
 .knowledge-detail-page--paper > .paper-library-page { flex: 1; min-height: 0; }
 .knowledge-detail-page--paper > .knowledge-parsing-notice { flex: none; max-height: 160px; overflow-y: auto; }
+
+// Match the paper collection's compact header, rail and bordered content surface.
+.knowledge-detail-page--documents {
+  flex: 1;
+  min-height: 0;
+  container-type: inline-size;
+  container-name: documentLibrary;
+
+  .document-library-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    min-height: 54px;
+    padding-bottom: 18px;
+  }
+
+  .document-library-heading,
+  .document-library-heading nav {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+  }
+
+  .document-library-heading {
+    > .ant-btn { flex: none; width: 32px; padding: 0; color: var(--color-text-secondary); }
+    nav > a { flex: none; color: var(--color-text-secondary); font-size: 14px; }
+    nav > span { flex: none; color: var(--color-text-secondary); }
+    h1 {
+      min-width: 0;
+      margin: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      color: var(--color-text);
+      font-size: 20px;
+      font-weight: 650;
+      line-height: 1.5;
+    }
+  }
+
+  .document-library-id {
+    display: flex;
+    align-items: center;
+    min-width: 0;
+    color: var(--color-text-secondary);
+    font-size: 12px;
+    span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  }
+
+  .document-library-layout {
+    display: grid;
+    grid-template-columns: 260px minmax(0, 1fr);
+    gap: 22px;
+    align-items: start;
+    min-height: 0;
+    margin-top: 0;
+    &.is-readonly { grid-template-columns: minmax(0, 1fr); }
+  }
+
+  > .knowledge-parsing-notice { margin: 0 0 16px; }
+
+  .document-library-rail { min-width: 0; padding: 0 2px; }
+  .document-library-description {
+    margin: 0 0 16px;
+    color: var(--color-text-secondary);
+    font-size: 13px;
+    line-height: 1.6;
+    overflow-wrap: anywhere;
+  }
+  .document-library-actions {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    > .ant-badge, > span { display: block !important; width: 100%; }
+    .ant-btn {
+      display: inline-flex;
+      justify-content: flex-start;
+      align-items: center;
+      gap: 8px;
+      width: 100%;
+      min-height: 36px;
+      height: auto;
+      padding: 8px 12px;
+      border-radius: 6px;
+      white-space: normal;
+      box-shadow: none;
+    }
+    .ant-btn .anticon-down { margin-left: auto; }
+  }
+
+  .document-library-board {
+    min-width: 0;
+    overflow: hidden;
+    border: 1px solid var(--color-border-secondary, #e6e9ef);
+    border-radius: 10px;
+    background: var(--color-bg-container, #fff);
+    > .document-library-description { padding: 0 24px; }
+    .ant-table-thead > tr > th { background: var(--color-bg-layout, #f5f7fa); }
+    .ant-table-pagination.ant-pagination { margin: 14px 16px; }
+  }
+  .document-library-toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 18px 24px;
+    h2 { margin: 0; font-size: 15px; font-weight: 600; white-space: nowrap; }
+    .search-input { width: min(300px, 100%); }
+  }
+}
+
+@container documentLibrary (max-width: 1100px) {
+  .knowledge-detail-page--documents .document-library-layout { grid-template-columns: 200px minmax(0, 1fr); gap: 16px; }
+}
+
+@container documentLibrary (max-width: 760px) {
+  .knowledge-detail-page--documents {
+    .document-library-header { flex-wrap: wrap; gap: 8px; }
+    .document-library-layout { grid-template-columns: minmax(0, 1fr); gap: 16px; }
+    .document-library-actions { flex-direction: row; flex-wrap: wrap; > * { flex: 1 1 140px; } }
+    .document-library-toolbar { flex-wrap: wrap; padding: 16px; .search-input { width: 100%; } }
+    .document-library-description { margin-bottom: 12px; }
+    // Keep the fixed action column from covering document names on small screens.
+    .document-library-board .ant-table-cell-fix-right {
+      position: static !important;
+      &::after { display: none; }
+    }
+  }
+}

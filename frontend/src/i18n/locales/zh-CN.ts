@@ -5886,6 +5886,7 @@ const zhCN = {
     importFolder: "导入文件夹",
     importZip: "导入压缩包",
     taskManageParse: "解析任务管理",
+    documentList: "全部文档",
     batchActions: "批量操作",
     batchDelete: "批量删除",
     batchReparse: "批量重解析",
