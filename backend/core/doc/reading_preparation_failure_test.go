@@ -136,6 +136,8 @@ func TestReadingPreparationModelFailureIsSafeAndScopeSpecific(t *testing.T) {
 			ticker := time.NewTicker(5 * time.Millisecond)
 			defer ticker.Stop()
 			for {
+				// GORM leaves an existing pointer unchanged when a SQL column becomes NULL.
+				job = orm.AsyncJob{}
 				if e := db.Where("id = ?", queued.ID).Take(&job).Error; e != nil {
 					t.Fatal(e)
 				}

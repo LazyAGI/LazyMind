@@ -2221,5 +2221,17 @@
   "2003184": {"en-US": "Node.js download failed. Check your network and retry", "zh-CN": "Node.js 下载失败，请检查网络后重试"},
   "2003185": {"en-US": "Node.js download integrity check failed. Please download it again", "zh-CN": "Node.js 下载文件完整性校验失败，请重新下载"},
   "2003186": {"en-US": "The downloaded Node.js could not be verified. Please retry installation", "zh-CN": "下载的 Node.js 验证失败，请重新安装"},
-  "2003187": {"en-US": "The Node.js download is incomplete. Please download it again", "zh-CN": "Node.js 下载内容不完整，请重新下载"}
+  "2003187": {"en-US": "The Node.js download is incomplete. Please download it again", "zh-CN": "Node.js 下载内容不完整，请重新下载"},
+  "2003220": {"en-US": "Failed to query external task states", "zh-CN": "读取外部任务状态失败，请重试"},
+  "2003221": {"en-US": "Failed to query local task states", "zh-CN": "读取本地任务状态失败，请重试"},
+  "2003222": {"en-US": "Failed to count tasks", "zh-CN": "统计任务失败，请重试"},
+  "2003223": {"en-US": "Unsupported PDF translation operation", "zh-CN": "不支持此 PDF 翻译操作"},
+  "2003224": {"en-US": "PDF translation service is not configured", "zh-CN": "尚未配置 PDF 翻译服务"},
+  "2003225": {"en-US": "Local PDF translation runtime is unavailable; repair or reinstall the desktop app", "zh-CN": "本地 PDF 翻译运行环境不可用，请修复或重新安装桌面应用后重试"},
+  "2003226": {"en-US": "Local PDF translation component is missing; repair or reinstall the desktop app", "zh-CN": "本地 PDF 翻译组件缺失，请修复或重新安装桌面应用后重试"},
+  "2003227": {"en-US": "PDF translation font preparation failed; check your network and retry", "zh-CN": "PDF 翻译字体准备失败，请检查网络后重试"},
+  "2003228": {"en-US": "Local PDF translation layout failed; retry or repair the desktop Python runtime", "zh-CN": "本地 PDF 翻译排版失败，请重试；若仍失败，请修复桌面应用的 Python 运行环境"},
+  "2003229": {"en-US": "Local PDF translation returned an invalid result", "zh-CN": "本地 PDF 翻译组件返回了无效结果，请重试"},
+  "2003230": {"en-US": "MinerU request cannot be replayed; retry the operation", "zh-CN": "MinerU 请求无法重放，请重新发起操作"},
+  "2003231": {"en-US": "PDF font preparation is only available in local mode", "zh-CN": "仅本地模式支持准备 PDF 字体"}
 }
