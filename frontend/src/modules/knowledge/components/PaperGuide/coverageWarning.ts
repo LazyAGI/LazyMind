@@ -1,4 +1,8 @@
 const labels: Record<string, string> = {
+  "Figure caption association is ambiguous or unavailable":
+    "图注与图像的对应关系不明确或不可用。",
+  "Caption association is ambiguous or unavailable":
+    "题注与内容的对应关系不明确或不可用。",
   "Formula transcription is unavailable; only original text and page are readable.":
     "公式转写不可用；目前只能读取原文文字和所在页。",
   "Figure pixels are not supplied to the guide model; captions and regions do not establish visual observations.":

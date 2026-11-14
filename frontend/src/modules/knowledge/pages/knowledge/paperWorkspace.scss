@@ -316,7 +316,7 @@
   }
 }
 
-.paper-guide-math { display: inline-block; max-width: 100%; overflow-x: auto; vertical-align: middle; padding-block: 2px; }
+.paper-guide-math { display: inline-block; max-width: 100%; overflow: auto hidden; vertical-align: middle; padding-block: 2px; }
 .paper-guide-math.is-display { display: block; margin-block: 1em; }
 .paper-guide-math .katex-display { margin: 0; }
 .paper-guide-selection-preview { flex: 1 0 100%; min-width: 0; max-height: 8em; overflow: auto; margin: 0; padding: 8px; box-sizing: border-box; white-space: pre-wrap; overflow-wrap: anywhere; }

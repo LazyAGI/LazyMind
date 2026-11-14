@@ -91,3 +91,37 @@ it("separates translated coverage warnings from coverage values and preserves un
     "解析提示：Custom parser diagnostic 42",
   );
 });
+
+it.each([
+  [
+    "Figure caption association is ambiguous or unavailable",
+    "图注与图像的对应关系不明确或不可用。",
+  ],
+  [
+    "Caption association is ambiguous or unavailable",
+    "题注与内容的对应关系不明确或不可用。",
+  ],
+])(
+  "localizes the known association warning without concealing ambiguity: %s",
+  (warning, localized) => {
+    const r = revision();
+    r.coverage.warnings = [warning];
+    const props = {
+      model: "",
+      setModel: () => {},
+      revision: r,
+      busy: false,
+      active: false,
+      canGenerate: true,
+      onRegenerate: () => {},
+    };
+    const view = render(<PaperGuideGenerationDetails {...props} zh />);
+    expect(screen.getByRole("listitem", { hidden: true }).textContent).toBe(
+      localized,
+    );
+    view.rerender(<PaperGuideGenerationDetails {...props} zh={false} />);
+    expect(screen.getByRole("listitem", { hidden: true }).textContent).toBe(
+      warning,
+    );
+  },
+);
