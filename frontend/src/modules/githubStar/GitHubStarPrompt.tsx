@@ -91,9 +91,11 @@ export default function GitHubStarPrompt({ userId, blocked, returnTo, conversati
       if (isPageHidden() || hasOpenDialog(Boolean(connectionId))) { setPending({ ...request }); return; }
       shown.current.add(owner);
       setInvitation({ opportunity, accounts, connectionId, scope });
-      setSelected(connectionId ? accounts.find(account => account.connection_id === connectionId)?.connection_id
+      const connectedAccount = accounts.find(account => account.connection_id === connectionId);
+      setSelected(connectionId ? connectedAccount?.connection_id
         : accounts.length === 1 ? accounts[0].connection_id : undefined);
-      setPhase('star'); setNotice(connectionId && !accounts.some(account => account.connection_id === connectionId) ? 'accountChanged' : '');
+      setPhase(connectionId && !connectedAccount ? 'retry' : 'star');
+      setNotice(connectionId && !connectedAccount ? 'accountChanged' : '');
     } catch {
       if (connectionId && valid(owner, version, identity, scope)) {
         if (isPageHidden() || hasOpenDialog(true)) { setPending({ ...request }); return; }
@@ -158,6 +160,7 @@ export default function GitHubStarPrompt({ userId, blocked, returnTo, conversati
   async function confirm() {
     if (!invitation || invitation.scope !== viewScope || busy.current || blocked) return;
     const account = invitation.accounts.find(item => item.connection_id === selected);
+    if (invitation.connectionId && !account) { setPhase('retry'); setNotice('accountChanged'); return; }
     if (invitation.accounts.length && !account) return;
     const version = generation.current, owner = userId, identity = AgentAppsAuth.getSessionIdentity(), scope = viewScope;
     busy.current = true; setWorking(true); setNotice('');
@@ -188,7 +191,7 @@ export default function GitHubStarPrompt({ userId, blocked, returnTo, conversati
   }
 
   function connect() {
-    const path = starReturnPath(returnTo);
+    const path = starReturnPath(location.pathname + location.search) || starReturnPath(returnTo);
     if (!path || !invitation || invitation.scope !== viewScope) return;
     const opportunity = invitation.opportunity; close();
     navigate('/cloud-documents/github', { state: { githubStarReturn: { userId, returnTo: path, opportunity } } });
