@@ -10930,9 +10930,8 @@ components:
         PaperGuideClaim:
             properties:
                 argument_type:
-                    allOf:
-                        - type: string
                     nullable: true
+                    type: string
                 attribution:
                     type: string
                 conditions:
@@ -11143,9 +11142,8 @@ components:
         PaperGuideProfiles:
             properties:
                 primary:
-                    allOf:
-                        - type: string
                     nullable: true
+                    type: string
                 secondary:
                     items:
                         type: string

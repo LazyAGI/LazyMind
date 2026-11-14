@@ -316,7 +316,7 @@ func TestWholeReviewCorrectionIsImmutableAndResumable(t *testing.T) {
 		t.Fatal(e)
 	}
 	final, e := service.Revision(t.Context(), scope, rev.ID, 0)
-	if e != nil || final.Run.Stage != "completed" || final.Sections[0].Version != 2 {
+	if e != nil || final.Run.Stage != "completed" || final.Sections[0].Version != 2 || final.Sections[0].PublicationStatus != "published" {
 		t.Fatalf("not corrected: %+v %v", final, e)
 	}
 	var old orm.PaperGuideStep
@@ -356,5 +356,82 @@ func TestInterruptedRequestKeepsReservedTimeAndCallsOnResume(t *testing.T) {
 	}
 	if resumed.CallsUsed != 1 || resumed.ActiveMillis != 2*callMillis {
 		t.Fatalf("lost uncertain spend: calls=%d ms=%d", resumed.CallsUsed, resumed.ActiveMillis)
+	}
+}
+
+func TestWholeReviewProjectsExactPublishedVersions(t *testing.T) {
+	for _, prepublishedV2 := range []bool{true, false} {
+		t.Run(fmt.Sprintf("prepublished_v2_%t", prepublishedV2), func(t *testing.T) {
+			d, id := fixture(t)
+			snap, _ := BuildSourceSnapshot(d, id)
+			repo := Repository{DB: guideDB(t)}
+			scope := Scope{OwnerID: id.OwnerID, DatasetID: id.DatasetID, DocumentID: id.DocumentID, Language: "zh"}
+			model := ModelIdentity{ID: "m", ContextTokens: 128000}
+			var before int64
+			whole := 0
+			service := Service{Repo: repo, Source: &fixtureSource{s: snap}, Authorize: func(context.Context, Scope, bool) error { return nil }, ResolveModel: func(context.Context, Scope, string) (ModelIdentity, map[string]any, error) { return model, nil, nil }}
+			service.Call = func(ctx context.Context, task string, input map[string]any, cfg map[string]any) (json.RawMessage, error) {
+				switch task {
+				case "paper.guide.plan":
+					return json.Marshal(baselinePlan(snap))
+				case "paper.guide.section":
+					section := teachingSection(input["role"].(Role))
+					if input["findings"] != nil {
+						section.Blocks[0].Text = "Corrected sample."
+					}
+					return json.Marshal(section)
+				case "paper.guide.review":
+					sections := input["sections"].([]GuideSection)
+					target := ""
+					if len(sections) == 1 && prepublishedV2 && sections[0].Role == RoleBackground && sections[0].Blocks[0].Text == "The measured sample." {
+						target = "b_background"
+					}
+					if len(sections) == 4 {
+						whole++
+						target = "b_background"
+						if whole == 2 {
+							target = "b_" + string(Roles()[1])
+						}
+						var current orm.PaperGuideRevision
+						repo.DB.Where("guide_id IN (?)", repo.DB.Model(&orm.PaperGuide{}).Select("id").Where("scope_key = ?", scope.Key())).Take(&current)
+						before = current.ChangeVersion
+					}
+					if target != "" {
+						return json.Marshal(GuideReview{Findings: []GuideFinding{{TargetID: target, TargetType: "block", IssueType: "coherence", Suggestion: "Clarify sample."}}})
+					}
+				}
+				return json.Marshal(GuideReview{Findings: []GuideFinding{}})
+			}
+			rev, err := repo.Create(t.Context(), CreateRevision{Scope: scope, SourceSHA256: id.SourceSHA256, IRDigest: snap.IRDigest, SnapshotPath: "test", Model: model})
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, err = service.Run(t.Context(), asyncjob.Job{ID: rev.JobID, PayloadJSON: mustJSON(JobPayload{rev.ID, rev.Epoch})}, testFence{repo.DB})
+			if !errors.Is(err, ErrQuality) {
+				t.Fatalf("expected quality pause: %v", err)
+			}
+			delta, err := service.Revision(t.Context(), scope, rev.ID, before)
+			if err != nil {
+				t.Fatal(err)
+			}
+			wantRole := RoleBackground
+			wantVersion := 2
+			if !prepublishedV2 {
+				wantRole = Roles()[1]
+				wantVersion = 1
+			}
+			found := false
+			for _, section := range delta.Sections {
+				if section.Role == wantRole {
+					found = true
+					if section.Version != wantVersion || section.PublicationStatus != "correction_required" || section.ChangeVersion <= before {
+						t.Fatalf("incorrect projection: %+v", section)
+					}
+				}
+			}
+			if !found {
+				t.Fatalf("incremental response omitted flagged version: %+v", delta.Sections)
+			}
+		})
 	}
 }

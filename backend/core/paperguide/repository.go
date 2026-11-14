@@ -63,8 +63,9 @@ type CreateRevision struct {
 	Regenerate                                                         bool
 }
 type Repository struct {
-	DB              *gorm.DB
-	CheckpointGuard func(context.Context, *gorm.DB, orm.PaperGuide) error
+	DB                *gorm.DB
+	PrepareCheckpoint func(context.Context, orm.PaperGuide) (context.Context, error)
+	CheckpointGuard   func(context.Context, *gorm.DB, orm.PaperGuide) error
 }
 type JobPayload struct {
 	RevisionID string `json:"revision_id"`
@@ -260,6 +261,19 @@ func (r Repository) Resume(ctx context.Context, s Scope, id string, m ModelIdent
 // Checkpoints lock the lease first, then domain rows. Creation/cancel use no
 // network calls inside their transactions; a conflicting operation is retried.
 func (r Repository) fenced(ctx context.Context, f asyncjob.FencedReporter, id string, epoch int64, fn func(*gorm.DB, *orm.PaperGuideRevision, *orm.PaperGuide) error) error {
+	// Membership/identity resolution must finish before acquiring the job lease.
+	// The guard below rechecks current local rows under the transaction locks.
+	if r.PrepareCheckpoint != nil {
+		var guide orm.PaperGuide
+		err := r.DB.WithContext(ctx).Where("id IN (?)", r.DB.Model(&orm.PaperGuideRevision{}).Select("guide_id").Where("id = ?", id)).Take(&guide).Error
+		if err != nil {
+			return err
+		}
+		ctx, err = r.PrepareCheckpoint(ctx, guide)
+		if err != nil {
+			return err
+		}
+	}
 	return f.WithLease(ctx, func(tx *gorm.DB) error {
 		var rev orm.PaperGuideRevision
 		if e := tx.Where("id = ?", id).Take(&rev).Error; e != nil {
@@ -296,7 +310,7 @@ func (r Repository) PutStep(ctx context.Context, f asyncjob.FencedReporter, id s
 		var old orm.PaperGuideStep
 		e := tx.Where("revision_id = ? AND step_key = ?", id, w.Key).Take(&old).Error
 		if e == nil {
-			if old.InputHash == w.InputHash && old.OutputJSON == string(w.Output) {
+			if old.InputHash == w.InputHash && old.OutputJSON == string(w.Output) && old.ReviewJSON == string(w.Review) && old.Published == w.Published {
 				return nil
 			}
 			return ErrConflict

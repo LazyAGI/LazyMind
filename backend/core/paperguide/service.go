@@ -271,18 +271,29 @@ func (s Service) Revision(ctx context.Context, scope Scope, id string, after int
 			}
 		}
 	}
-	// A late whole-paper finding does not mutate the immutable v1 artifact,
+	// A late whole-paper finding does not mutate any published artifact,
 	// but its display status must disclose the pending correction immediately.
 	for _, step := range steps {
-		if step.StepKey != "whole_review:1" {
+		if !strings.HasPrefix(step.StepKey, "whole_review:") {
 			continue
 		}
 		var review GuideReview
 		if json.Unmarshal([]byte(step.OutputJSON), &review) != nil {
 			continue
 		}
+		var bindings []reviewedSection
+		if json.Unmarshal([]byte(step.ReviewJSON), &bindings) != nil {
+			continue
+		}
 		for role, section := range latest {
-			if section.Version != 1 {
+			reviewed := false
+			for _, binding := range bindings {
+				if binding.Key == section.Key && binding.Version == section.Version {
+					reviewed = true
+					break
+				}
+			}
+			if !reviewed {
 				continue
 			}
 			for _, finding := range review.Findings {

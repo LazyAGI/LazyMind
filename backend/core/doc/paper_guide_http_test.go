@@ -1,9 +1,13 @@
 package doc
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"github.com/gorilla/mux"
+	"gorm.io/gorm"
 	"lazymind/core/acl"
+	"lazymind/core/asyncjob"
 	"lazymind/core/common/orm"
 	"lazymind/core/paperguide"
 	"lazymind/core/pdfir"
@@ -36,6 +40,7 @@ func guideHTTPFixture(t *testing.T) (*orm.DB, string, string) {
 		t.Fatal(e)
 	}
 	seedDocumentListDataset(t, db, "guide-ds", "owner")
+	db.Model(&orm.Dataset{}).Where("id = ?", "guide-ds").Update("scene", "academic_papers")
 	seedDocumentListDoc(t, db, "guide-ds", "guide-doc", "paper.pdf", time.Now(), "owner", nil)
 	source := filepath.Join(t.TempDir(), "paper.pdf")
 	if e := os.WriteFile(source, []byte("%PDF-guide-source"), 0600); e != nil {
@@ -206,5 +211,111 @@ func TestPaperGuideReaderCanGenerateButCannotPrepareMissingIR(t *testing.T) {
 	GetPaperGuide(response, guideRequest("GET", "", "reader", nil))
 	if response.Code != 404 {
 		t.Fatal("revoked reader still read the guide")
+	}
+}
+
+func TestPaperGuideGeneralPDFRejectsGenerationAndResume(t *testing.T) {
+	db, hash, _ := guideHTTPFixture(t)
+	t.Setenv("LAZYMIND_PAPER_GUIDE_ENABLED", "true")
+	db.Model(&orm.Dataset{}).Where("id = ?", "guide-ds").Update("scene", "general")
+	body := `{"expected_source_hash":"` + hash + `","model_ref":"own:a","idempotency_key":"general"}`
+	w := httptest.NewRecorder()
+	GeneratePaperGuide(w, guideRequest("POST", body, "owner", nil))
+	if w.Code != 403 {
+		t.Fatalf("general PDF generated: %d %s", w.Code, w.Body)
+	}
+	var count int64
+	db.Model(&orm.AsyncJob{}).Where("job_type = ?", paperguide.JobType).Count(&count)
+	if count != 0 {
+		t.Fatal("general PDF queued guide")
+	}
+	db.Model(&orm.Dataset{}).Where("id = ?", "guide-ds").Update("scene", "academic_papers")
+	w = httptest.NewRecorder()
+	GeneratePaperGuide(w, guideRequest("POST", body, "owner", nil))
+	if w.Code != 202 {
+		t.Fatalf("academic PDF rejected: %d %s", w.Code, w.Body)
+	}
+	var rev orm.PaperGuideRevision
+	db.Take(&rev)
+	db.Model(&orm.Dataset{}).Where("id = ?", "guide-ds").Update("scene", "general")
+	calls := 0
+	service := paperGuideService()
+	service.Call = func(context.Context, string, map[string]any, map[string]any) (json.RawMessage, error) {
+		calls++
+		return nil, nil
+	}
+	_, err := service.Run(t.Context(), asyncjob.Job{ID: rev.JobID, PayloadJSON: mustJSON(paperguide.JobPayload{RevisionID: rev.ID, Epoch: rev.Epoch})}, guideCheckpointFence{db: db.DB})
+	if err == nil || calls != 0 {
+		t.Fatalf("ineligible stage invoked model: %d %v", calls, err)
+	}
+	w = httptest.NewRecorder()
+	ResumePaperGuide(w, guideRequest("POST", "", "owner", map[string]string{"run": rev.ID}))
+	if w.Code != 403 {
+		t.Fatalf("ineligible resume: %d %s", w.Code, w.Body)
+	}
+	w = httptest.NewRecorder()
+	GetPaperGuide(w, guideRequest("GET", "", "owner", nil))
+	if w.Code != 200 {
+		t.Fatalf("historical read gated: %d %s", w.Code, w.Body)
+	}
+}
+
+type guideCheckpointFence struct {
+	db     *gorm.DB
+	inside *bool
+}
+
+func (f guideCheckpointFence) WithLease(ctx context.Context, fn func(*gorm.DB) error) error {
+	return f.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if f.inside != nil {
+			*f.inside = true
+			defer func() { *f.inside = false }()
+		}
+		return fn(tx)
+	})
+}
+func (guideCheckpointFence) SetProgress(context.Context, int64, int64) error { return nil }
+func (guideCheckpointFence) Heartbeat(context.Context) error                 { return nil }
+
+func TestPaperGuideSharedReaderCheckpointDoesNotResolveGroupsInTransaction(t *testing.T) {
+	db, hash, _ := guideHTTPFixture(t)
+	if err := db.AutoMigrate(&orm.ACLModel{}, &orm.UserGroupModel{}, &orm.ACLGroupModel{}); err != nil {
+		t.Fatal(err)
+	}
+	aclIndependenceGrant(t, db, "guide-ds", "reader", acl.PermissionDatasetRead)
+	t.Setenv("LAZYMIND_PAPER_GUIDE_ENABLED", "true")
+	service := paperGuideService()
+	scope := paperguide.Scope{OwnerID: "reader", DatasetID: "guide-ds", DocumentID: "guide-doc", Language: "zh"}
+	rev, err := service.Repo.Create(t.Context(), paperguide.CreateRevision{Scope: scope, SourceSHA256: hash, Model: paperguide.ModelIdentity{ID: "fixture"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	inside := false
+	type requestMarker struct{}
+	ctx := context.WithValue(t.Context(), requestMarker{}, true)
+	outsideAuth := 0
+	previous := http.DefaultTransport
+	http.DefaultTransport = roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		if inside {
+			t.Error("checkpoint made HTTP call while lease/domain transaction held")
+		}
+		outsideAuth++
+		if strings.HasSuffix(r.URL.Path, "/groups/internal") && r.Context().Value(requestMarker{}) != true {
+			t.Error("group resolution lost request context")
+		}
+		return previous.RoundTrip(r)
+	})
+	defer func() { http.DefaultTransport = previous }()
+	fence := guideCheckpointFence{db.DB, &inside}
+	if err = service.Repo.PutStep(ctx, fence, rev.ID, rev.Epoch, paperguide.StepWrite{Key: "fixture", InputHash: "h", Output: json.RawMessage(`{}`)}); err != nil {
+		t.Fatal(err)
+	}
+	if outsideAuth == 0 {
+		t.Fatal("group membership was not prepared outside checkpoint")
+	}
+	db.Delete(&orm.ACLModel{}, "resource_id = ? AND target_id = ?", "guide-ds", "reader")
+	err = service.Repo.PutStep(ctx, fence, rev.ID, rev.Epoch, paperguide.StepWrite{Key: "revoked", InputHash: "h", Output: json.RawMessage(`{}`)})
+	if !errors.Is(err, paperguide.ErrForbidden) {
+		t.Fatalf("revoked reader checkpoint: %v", err)
 	}
 }

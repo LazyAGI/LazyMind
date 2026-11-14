@@ -16,6 +16,10 @@ func paperGuideOpenAPISchemas() map[string]any {
 	schema = func(t reflect.Type) map[string]any {
 		if t.Kind() == reflect.Pointer {
 			inner := schema(t.Elem())
+			if _, primitive := inner["type"]; primitive {
+				inner["nullable"] = true
+				return inner
+			}
 			return map[string]any{"allOf": []any{inner}, "nullable": true}
 		}
 		if t == reflect.TypeOf(time.Time{}) {

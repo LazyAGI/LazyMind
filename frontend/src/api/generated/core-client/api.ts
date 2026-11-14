@@ -7260,7 +7260,7 @@ export interface PaperGuideCell {
     'row': number;
 }
 export interface PaperGuideClaim {
-    'argument_type': string;
+    'argument_type': string | null;
     'attribution': string;
     'conditions': Array<string>;
     'evidence_ids': Array<string>;
@@ -7329,7 +7329,7 @@ export interface PaperGuidePlan {
     'term_policy': Array<string>;
 }
 export interface PaperGuideProfiles {
-    'primary': string;
+    'primary': string | null;
     'secondary': Array<string>;
     'uncertainty_reason': string;
 }

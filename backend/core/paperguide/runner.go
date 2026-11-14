@@ -256,12 +256,12 @@ func (x *execution) execute(ctx context.Context) error {
 		var review GuideReview
 		key := "whole_review:" + stringInt(int64(round))
 		if saved, ok := x.steps[key]; ok && round == 1 {
-			// This review is bound to its immutable v1 inputs. Resume its remaining
+			// This review is bound to its original immutable section versions. Resume its remaining
 			// repairs before making a fresh whole review of the candidate v2 sections.
 			if e = decodeStrict([]byte(saved.OutputJSON), &review); e != nil {
 				return ErrEvidence
 			}
-		} else if e = x.task(ctx, key, "paper.guide.review", input, &review, func() error { return ValidateReview(plan, sections, review) }); e != nil {
+		} else if e = x.task(ctx, key, "paper.guide.review", input, &review, func() error { return ValidateReview(plan, sections, review) }, wholeReviewBindings(sections)); e != nil {
 			return e
 		}
 		if len(review.Findings) == 0 {
@@ -317,6 +317,23 @@ func (x *execution) execute(ctx context.Context) error {
 	}
 	return ErrQuality
 }
+
+// A whole review and its exact input versions are persisted in one checkpoint.
+// Bindings include unpublished correction drafts, so a finding on a draft can
+// never accidentally mark a different published version with the same block ID.
+type reviewedSection struct {
+	Key     string `json:"key"`
+	Version int    `json:"version"`
+}
+
+func wholeReviewBindings(sections []GuideSection) json.RawMessage {
+	bindings := make([]reviewedSection, 0, len(sections))
+	for _, section := range sections {
+		bindings = append(bindings, reviewedSection{Key: "section:" + string(section.Role) + ":v" + stringInt(int64(section.Version)), Version: section.Version})
+	}
+	return mustMarshal(bindings)
+}
+
 func sectionHasTarget(s GuideSection, p GuidePlan, f GuideFinding) bool {
 	if f.TargetType == "block" {
 		for _, b := range s.Blocks {
@@ -578,7 +595,7 @@ func (x *execution) reserveCorrections(ctx context.Context, repairKey string, fi
 		return tx.Model(r).Update("correction_count", r.CorrectionCount).Error
 	})
 }
-func (x *execution) task(ctx context.Context, key, task string, input map[string]any, out any, validate func() error) error {
+func (x *execution) task(ctx context.Context, key, task string, input map[string]any, out any, validate func() error, metadata ...json.RawMessage) error {
 	if !x.inputFits(input) {
 		return ErrContext
 	}
@@ -685,11 +702,15 @@ func (x *execution) task(ctx context.Context, key, task string, input map[string
 			}
 			return fmt.Errorf("%w: model output or request failed", ErrEvidence)
 		}
-		e = x.s.Repo.PutStep(ctx, x.f, x.rev.ID, x.rev.Epoch, StepWrite{Key: key, InputHash: hash, Output: raw})
+		var reviewMetadata json.RawMessage
+		if len(metadata) == 1 {
+			reviewMetadata = metadata[0]
+		}
+		e = x.s.Repo.PutStep(ctx, x.f, x.rev.ID, x.rev.Epoch, StepWrite{Key: key, InputHash: hash, Output: raw, Review: reviewMetadata})
 		if e != nil {
 			return e
 		}
-		x.steps[key] = orm.PaperGuideStep{StepKey: key, InputHash: hash, OutputJSON: string(raw)}
+		x.steps[key] = orm.PaperGuideStep{StepKey: key, InputHash: hash, OutputJSON: string(raw), ReviewJSON: string(reviewMetadata)}
 		return nil
 	}
 	return ErrEvidence

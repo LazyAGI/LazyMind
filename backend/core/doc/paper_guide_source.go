@@ -38,7 +38,8 @@ func authorizePaperGuide(ctx context.Context, scope paperguide.Scope, generate b
 	if e != nil {
 		return e
 	}
-	if _, e = ResolveResourceDataset(ctx, store.DB(), caller, scope.DatasetID, acl.PermissionDatasetRead); e != nil {
+	dataset, e := ResolveResourceDataset(ctx, store.DB(), caller, scope.DatasetID, acl.PermissionDatasetRead)
+	if e != nil {
 		return paperguide.ErrForbidden
 	}
 	var row orm.Document
@@ -46,6 +47,9 @@ func authorizePaperGuide(ctx context.Context, scope paperguide.Scope, generate b
 		return paperguide.ErrForbidden
 	}
 	if generate {
+		if !paperGuideEligible(dataset, row) {
+			return paperguide.ErrDisabled
+		}
 		if !PaperGuideEnabled() {
 			return paperguide.ErrDisabled
 		}
@@ -202,6 +206,46 @@ func resolvePaperGuideModel(ctx context.Context, scope paperguide.Scope, ref str
 // Network identity and filesystem checks run immediately before entering the
 // checkpoint. This second SQL check observes a deletion or ACL revocation
 // committed since that check, without holding a transaction across network I/O.
+
+// Eligibility is metadata-only here; Source.Load independently verifies the PDF
+// signature and source hash outside any checkpoint transaction.
+func paperGuideEligible(dataset orm.Dataset, row orm.Document) bool {
+	if dataset.Scene != "academic_papers" {
+		return false
+	}
+	var ext documentExt
+	if json.Unmarshal(row.Ext, &ext) != nil {
+		return false
+	}
+	filename := strings.ToLower(previewFilenameForContent(ext))
+	return strings.HasSuffix(filename, ".pdf") || strings.Contains(strings.ToLower(previewContentTypeForContent(ext)), "pdf")
+}
+
+type paperGuideCheckpointAuthorization struct {
+	user, tenant string
+	groups       []string
+}
+type paperGuideCheckpointAuthorizationKey struct{}
+
+func preparePaperGuideCheckpoint(ctx context.Context, guide orm.PaperGuide) (context.Context, error) {
+	caller, err := paperGuideCaller(ctx, guide.OwnerID)
+	if err != nil {
+		return ctx, err
+	}
+	var dataset orm.Dataset
+	if err = store.DB().WithContext(ctx).Where("id = ? AND deleted_at IS NULL", guide.DatasetID).Take(&dataset).Error; err != nil {
+		return ctx, paperguide.ErrForbidden
+	}
+	groups := []string{}
+	if dataset.CreateUserID != guide.OwnerID {
+		groups = append(groups, acl.ResolveUserGroupIDsContext(ctx, guide.OwnerID)...)
+	}
+	if err = ctx.Err(); err != nil {
+		return ctx, err
+	}
+	return context.WithValue(ctx, paperGuideCheckpointAuthorizationKey{}, paperGuideCheckpointAuthorization{guide.OwnerID, resourceTenant(caller.TenantID), groups}), nil
+}
+
 func paperGuideCheckpointGuard(ctx context.Context, tx *gorm.DB, guide orm.PaperGuide) error {
 	var row orm.Document
 	if err := tx.WithContext(ctx).Where("id = ? AND dataset_id = ? AND deleted_at IS NULL", guide.DocumentID, guide.DatasetID).Take(&row).Error; err != nil {
@@ -211,8 +255,15 @@ func paperGuideCheckpointGuard(ctx context.Context, tx *gorm.DB, guide orm.Paper
 	if err := tx.Where("id = ? AND deleted_at IS NULL", guide.DatasetID).Take(&dataset).Error; err != nil {
 		return paperguide.ErrForbidden
 	}
+	auth, ok := ctx.Value(paperGuideCheckpointAuthorizationKey{}).(paperGuideCheckpointAuthorization)
+	if !ok || auth.user != guide.OwnerID || auth.groups == nil || auth.tenant != resourceTenant(dataset.TenantID) {
+		return paperguide.ErrForbidden
+	}
+	if !paperGuideEligible(dataset, row) {
+		return paperguide.ErrDisabled
+	}
 	if dataset.CreateUserID != guide.OwnerID {
-		permissions, _ := acl.PermissionsForWithDB(tx, acl.ResourceTypeDB, guide.DatasetID, guide.OwnerID, nil)
+		permissions, _ := acl.PermissionsForWithDB(tx, acl.ResourceTypeDB, guide.DatasetID, guide.OwnerID, auth.groups)
 		allowed := false
 		for _, permission := range permissions {
 			if permission == acl.PermissionDatasetRead || permission == acl.PermissionDatasetWrite || permission == acl.PermissionDatasetUpload {

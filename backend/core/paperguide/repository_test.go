@@ -142,3 +142,24 @@ func TestDeletedDocumentCancelsOnlyGuideJobsAndHidesAllRevisions(t *testing.T) {
 		t.Fatal("unrelated job canceled")
 	}
 }
+
+func TestWholeReviewCheckpointBindingsAreImmutable(t *testing.T) {
+	repo := Repository{DB: guideDB(t)}
+	scope := Scope{OwnerID: "u", DatasetID: "ds", DocumentID: "doc", Language: "zh"}
+	rev, err := repo.Create(t.Context(), CreateRevision{Scope: scope, SourceSHA256: "hash", Model: ModelIdentity{ID: "m"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	write := StepWrite{Key: "whole_review:1", InputHash: "input", Output: mustJSON(GuideReview{Findings: []GuideFinding{}}), Review: wholeReviewBindings([]GuideSection{{Role: RoleBackground, Version: 2}})}
+	if err = repo.PutStep(t.Context(), testFence{repo.DB}, rev.ID, rev.Epoch, write); err != nil {
+		t.Fatal(err)
+	}
+	steps, err := repo.Steps(t.Context(), rev.ID)
+	if err != nil || len(steps) != 1 || steps[0].ReviewJSON != string(write.Review) {
+		t.Fatalf("missing atomic review bindings: %+v %v", steps, err)
+	}
+	write.Review = wholeReviewBindings([]GuideSection{{Role: RoleBackground, Version: 1}})
+	if err = repo.PutStep(t.Context(), testFence{repo.DB}, rev.ID, rev.Epoch, write); !errors.Is(err, ErrConflict) {
+		t.Fatalf("accepted different review bindings: %v", err)
+	}
+}
