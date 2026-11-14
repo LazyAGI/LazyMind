@@ -50,7 +50,7 @@ class WindowsGitHubCLIRunner(GitHubCLIRunner):
                         if len(value) > 8192:
                             raise ValueError()
                         payload.append(value)
-                    except (OSError, UnicodeError, ValueError):
+                    except (OSError, ValueError):
                         invalid.set()
                         if process.poll() is None:
                             process.kill()
