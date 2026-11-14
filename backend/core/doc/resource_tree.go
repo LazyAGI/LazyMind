@@ -6,6 +6,7 @@ import (
 	"gorm.io/gorm"
 	"lazymind/core/acl"
 	"lazymind/core/common/orm"
+	"lazymind/core/paperguide"
 	"sort"
 	"time"
 )
@@ -293,6 +294,9 @@ func deleteResourceRows(tx *gorm.DB, rows []orm.Document) error {
 		}
 		if r.RowsAffected != 1 {
 			return resourceErr("CONFLICT", "source changed during operation")
+		}
+		if err := paperguide.InvalidateDocumentTx(tx.Statement.Context, tx, row.DatasetID, row.ID); err != nil {
+			return err
 		}
 		if err := tx.Where("dataset_id = ? AND document_id = ?", row.DatasetID, row.ID).Delete(&orm.DocumentProcessingState{}).Error; err != nil {
 			return err

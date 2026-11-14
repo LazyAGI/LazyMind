@@ -75,3 +75,39 @@ func TestPolicyRangeChangesNeverEnrollPriorDocuments(t *testing.T) {
 		t.Fatal("expanded auto scope enrolled pre-change document")
 	}
 }
+
+func TestPaperGuideLegacyPolicyAndOldClientPreserveDisabled(t *testing.T) {
+	db := orm.MigrateTestDB(t, &orm.UserReadingPolicy{})
+	p := Defaults()
+	p.Preset = "custom"
+	delete(p.Modes, "paper_guide")
+	p.Modes[Formula] = Disabled
+	normalized, e := Normalize(p)
+	if e != nil || normalized.Modes["paper_guide"] != OnDemand || normalized.Modes[Formula] != Disabled {
+		t.Fatalf("legacy normalization: %+v %v", normalized, e)
+	}
+	p = Defaults()
+	p.Preset = "custom"
+	p.Modes["paper_guide"] = Disabled
+	if _, e = Save(context.Background(), db.DB, "owner", p); e != nil {
+		t.Fatal(e)
+	}
+	old := Defaults()
+	old.Preset = "full"
+	delete(old.Modes, "paper_guide")
+	saved, e := Save(context.Background(), db.DB, "owner", old)
+	if e != nil || saved.Modes["paper_guide"] != Disabled {
+		t.Fatalf("old client enabled new paid feature: %+v %v", saved, e)
+	}
+	p = Defaults()
+	p.Preset = "full"
+	p, e = Normalize(p)
+	if e != nil || p.Modes["paper_guide"] != OnDemand {
+		t.Fatal("full auto-enabled guide")
+	}
+	p.Preset = "custom"
+	p.Modes["paper_guide"] = Automatic
+	if _, e = Normalize(p); e == nil {
+		t.Fatal("guide must be on demand")
+	}
+}

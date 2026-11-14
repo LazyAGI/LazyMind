@@ -85,6 +85,12 @@ func manualOpenAPISpec() map[string]any {
 	for path, operations := range formulaExplanationOpenAPIPaths() {
 		paths[path] = operations
 	}
+	for name, schema := range paperGuideOpenAPISchemas() {
+		schemas[name] = schema
+	}
+	for path, operations := range paperGuideOpenAPIPaths() {
+		paths[path] = operations
+	}
 	for name, schema := range paperReadingOpenAPISchemas() {
 		schemas[name] = schema
 	}

@@ -23,6 +23,7 @@ const (
 	Formula     = "formula"
 	Figure      = "figure"
 	Table       = "table"
+	PaperGuide  = "paper_guide"
 )
 
 var Keys = configurableKeys()
@@ -63,6 +64,14 @@ func Normalize(p Policy) (Policy, error) {
 	case "custom":
 	default:
 		return p, errors.New("请选择有效的准备预设")
+	}
+	if p.Modes != nil {
+		if _, exists := p.Modes[PaperGuide]; !exists {
+			p.Modes[PaperGuide] = OnDemand
+		}
+	}
+	if p.Modes[PaperGuide] == Automatic {
+		return p, errors.New("整篇导读仅支持按需或禁用")
 	}
 	if len(p.Modes) != len(Keys) {
 		return p, errors.New("请提供所有阅读功能的准备方式")
@@ -110,13 +119,17 @@ func Eligible(p Policy, created time.Time) bool {
 	return HasAutomatic(p) && p.AutomaticEligibleAfter != nil && created.After(*p.AutomaticEligibleAfter)
 }
 func Save(ctx context.Context, db *gorm.DB, user string, p Policy) (Policy, error) {
-	p, e := Normalize(p)
-	if e != nil {
-		return p, e
-	}
+	_, includesGuide := p.Modes[PaperGuide]
 	old, e := Load(ctx, db, user)
 	if e != nil {
 		return p, e
+	}
+	p, e = Normalize(p)
+	if e != nil {
+		return p, e
+	}
+	if !includesGuide {
+		p.Modes[PaperGuide] = old.Modes[PaperGuide]
 	}
 	p.AutomaticEligibleAfter = old.AutomaticEligibleAfter
 	if HasAutomatic(p) && (!HasAutomatic(old) || !reflect.DeepEqual(p.Modes, old.Modes)) {
