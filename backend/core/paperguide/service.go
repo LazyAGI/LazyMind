@@ -68,6 +68,9 @@ type StatusResponse struct {
 	PublishedRevision *RevisionView    `json:"published_revision"`
 	CandidateRevision *RevisionView    `json:"candidate_revision"`
 	Progress          *ProgressRequest `json:"progress,omitempty"`
+	// CurrentIRDigest also invalidates status when revision currentness changes
+	// without any change to the public status representation.
+	CurrentIRDigest string `json:"-"`
 }
 type PublishedSection struct {
 	Key           string `json:"key"`
@@ -132,6 +135,9 @@ func (s Service) Status(ctx context.Context, scope Scope) (StatusResponse, error
 		return out, e
 	}
 	out.SourceSHA256 = source.Hash
+	if source.Snapshot != nil {
+		out.CurrentIRDigest = source.Snapshot.IRDigest
+	}
 	if source.Snapshot == nil && !source.CanPrepare {
 		out.CanGenerate = false
 		out.UnavailableReason = ErrPreparation.Error()

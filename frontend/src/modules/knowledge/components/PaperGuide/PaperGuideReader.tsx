@@ -11,11 +11,12 @@ import type { DocumentChatSelection } from "../PdfTemporaryChat/types";
 import { restoreTextPosition, visibleTextOffset } from "./readingPosition";
 import PaperGuideText from "./PaperGuideText";
 import { sourceBoundary } from "./sourceText";
+import { isGuideRunActive } from "./guideRunState";
 interface Props {
   revision: PaperGuideRevisionResponse;
   title: string;
   language: string;
-  onEvidence: (id: string) => void;
+  onEvidence: (id: string, opener: HTMLButtonElement) => void;
   onSelection: (selection: DocumentChatSelection) => void;
   progress?: PaperGuideProgressRequest | null;
   onProgress?: (progress: PaperGuideProgressRequest) => void;
@@ -363,7 +364,7 @@ export default function PaperGuideReader({
                       <button
                         key={id}
                         className="paper-guide-citation"
-                        onClick={() => onEvidence(id)}
+                        onClick={(event) => onEvidence(id, event.currentTarget)}
                       >
                         {zh ? "来源" : "Source"} {numbers.get(id)}
                       </button>
@@ -380,7 +381,9 @@ export default function PaperGuideReader({
                       </button>
                       {block.evidence_ids?.[0] && (
                         <button
-                          onClick={() => onEvidence(block.evidence_ids[0])}
+                          onClick={(event) =>
+                            onEvidence(block.evidence_ids[0], event.currentTarget)
+                          }
                         >
                           {zh ? "查看原文" : "View source"}
                         </button>
@@ -391,15 +394,14 @@ export default function PaperGuideReader({
               ))}
             </section>
           ))}
-          {!["complete", "limited", "failed", "canceled", "paused"].includes(
-            revision.status,
-          ) && (
-            <p className="paper-guide-next" role="status">
-              {zh
-                ? "下一节通过核验后会出现在这里。"
-                : "The next section will appear here after review."}
-            </p>
-          )}
+          {revision.status === "partial" &&
+            isGuideRunActive(revision.run.stage) && (
+              <p className="paper-guide-next" role="status">
+                {zh
+                  ? "下一节通过核验后会出现在这里。"
+                  : "The next section will appear here after review."}
+              </p>
+            )}
           {revision.coverage?.warnings?.length > 0 && (
             <aside className="paper-guide-warning">
               <h2>{zh ? "材料与覆盖范围" : "Materials and coverage"}</h2>
@@ -444,8 +446,8 @@ export default function PaperGuideReader({
           </button>
           {selected.block.evidence_ids?.[0] && (
             <button
-              onClick={() => {
-                onEvidence(selected.block.evidence_ids[0]);
+              onClick={(event) => {
+                onEvidence(selected.block.evidence_ids[0], event.currentTarget);
                 setSelected(undefined);
               }}
             >

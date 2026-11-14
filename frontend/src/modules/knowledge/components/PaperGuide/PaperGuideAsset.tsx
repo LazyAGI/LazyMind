@@ -13,7 +13,7 @@ export default function PaperGuideAsset({
 }: {
   evidence?: PaperGuideEvidence;
   unavailable?: boolean;
-  onEvidence?: (id: string) => void;
+  onEvidence?: (id: string, opener: HTMLButtonElement) => void;
   preview: GuidePreview;
   language: string;
 }) {
@@ -90,7 +90,11 @@ export default function PaperGuideAsset({
         <nav aria-label={zh ? "表格逐页来源" : "Physical table sources"}>
           <p>{zh ? "各片段打开其已核实的物理页，包含该页表体、题注或脚注。" : "Each fragment opens its verified physical page, including table rows, captions or notes."}</p>
           <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-            {evidence.fragment_evidence_ids.map((id, index) => <button key={id} onClick={() => onEvidence(id)}>{zh ? `表格来源片段 ${index + 1}` : `Table source fragment ${index + 1}`}</button>)}
+            {evidence.fragment_evidence_ids.map((id, index) => (
+              <button key={id} onClick={(event) => onEvidence(id, event.currentTarget)}>
+                {zh ? `表格来源片段 ${index + 1}` : `Table source fragment ${index + 1}`}
+              </button>
+            ))}
           </div>
         </nav>
       )}

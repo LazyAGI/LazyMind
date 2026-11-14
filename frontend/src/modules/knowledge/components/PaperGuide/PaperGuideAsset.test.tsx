@@ -44,6 +44,7 @@ it("labels the table start page and opens each physical evidence entry", async (
   const open = vi.fn();
   render(<PaperGuideAsset language="en" evidence={{ id: "parent", source_block_id: "table", source_type: "table", text: "Table 1", locator: { kind: "page", page: 2 }, fragment_evidence_ids: ["body-p3", "body-p4", "note-p4"] } as PaperGuideEvidence} preview={async () => undefined} onEvidence={open} />);
   expect(screen.getByText(/Table start page/)).toBeInTheDocument();
-  fireEvent.click(screen.getByRole("button", { name: "Table source fragment 2" }));
-  expect(open).toHaveBeenCalledWith("body-p4");
+  const fragment = screen.getByRole("button", { name: "Table source fragment 2" });
+  fireEvent.click(fragment);
+  expect(open).toHaveBeenCalledWith("body-p4", fragment);
 });

@@ -1,7 +1,8 @@
-import { act, renderHook, waitFor } from "@testing-library/react";
+import { act, render, renderHook, screen, waitFor } from "@testing-library/react";
 import { expect, it, vi, beforeEach } from "vitest";
 import { usePaperGuide, mergeRevision, unicodeRange } from "./usePaperGuide";
 import { revision, section, status } from "./fixtures";
+import PaperGuideReader from "./PaperGuideReader";
 const api = vi.hoisted(() => ({
   status: vi.fn(),
   revision: vi.fn(),
@@ -102,6 +103,45 @@ it("does not refetch unchanged revision content on a 304 status", async () => {
   api.status.mockResolvedValue({ etag: "a" });
   await act(() => h.result.current.refresh());
   expect(api.revision).toHaveBeenCalledTimes(1);
+});
+it("uses ordinary polling to refresh source currentness and keeps the same readable sections", async () => {
+  const old = revision();
+  const summaries = status();
+  api.status.mockResolvedValue({ data: summaries, etag: "before-ir-upgrade" });
+  api.revision.mockResolvedValue(old);
+  function Reader() {
+    const { revision } = usePaperGuide("ds", "doc", "en", true);
+    return revision && (
+      <PaperGuideReader revision={revision} title="Paper" language="en" onEvidence={() => {}} onSelection={() => {}} />
+    );
+  }
+  vi.useFakeTimers();
+  try {
+    const view = render(<Reader />);
+    await act(async () => {});
+    const article = screen.getByRole("article");
+    const body = screen.getAllByText(/A concrete explanation of the argument/)[0];
+    const followUps = () => screen.getAllByRole("button", { name: "Explain this passage", hidden: true });
+    expect(followUps()[0]).toBeEnabled();
+
+    api.status
+      .mockResolvedValueOnce({ data: summaries, etag: "after-ir-upgrade" })
+      .mockResolvedValue({ etag: "after-ir-upgrade" });
+    api.revision.mockResolvedValueOnce({ ...old, source_current: false, sections: [] });
+    await act(() => vi.advanceTimersByTimeAsync(4000));
+    expect(api.status).toHaveBeenLastCalledWith(expect.anything(), expect.objectContaining({ etag: "before-ir-upgrade" }));
+    expect(api.revision).toHaveBeenLastCalledWith(expect.anything(), old.id, old.version, expect.anything());
+    expect(screen.getByRole("article")).toBe(article);
+    expect(screen.getAllByText(/A concrete explanation of the argument/)[0]).toBe(body);
+    for (const button of followUps()) expect(button).toBeDisabled();
+
+    await act(() => vi.advanceTimersByTimeAsync(4000));
+    expect(api.status).toHaveBeenLastCalledWith(expect.anything(), expect.objectContaining({ etag: "after-ir-upgrade" }));
+    expect(api.revision).toHaveBeenCalledTimes(2);
+    view.unmount();
+  } finally {
+    vi.useRealTimers();
+  }
 });
 it("retries a failed revision behind a cached status ETag, keeping its error until corrections arrive", async () => {
   const h = renderHook(() => usePaperGuide("ds", "doc", "zh", true));

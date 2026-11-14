@@ -17,13 +17,19 @@ import (
 )
 
 func guidePrecisionFixture(t *testing.T, hash string) ([]byte, pdfir.Document) {
+	return guidePrecisionFixtureWithBodyBox(t, hash, "90")
+}
+
+func guidePrecisionFixtureWithBodyBox(t *testing.T, hash, bodyRight string) ([]byte, pdfir.Document) {
 	t.Helper()
 	var b bytes.Buffer
 	z := zip.NewWriter(&b)
 	f, _ := z.Create("fixture_content_list.json")
-	f.Write([]byte(`[{"type":"text","text":"Experimental study","page_idx":0,"bbox":[100,100,900,200]},{"type":"text","text":"The authors report an experiment with samples and specify the conditions.","page_idx":0,"bbox":[100,300,900,500]}]`))
+	content := `[{"type":"text","text":"Experimental study","page_idx":0,"bbox":[100,100,900,200]},{"type":"text","text":"The authors report an experiment with samples and specify the conditions.","page_idx":0,"bbox":[100,300,900,500]}]`
+	f.Write([]byte(strings.ReplaceAll(content, "900,500", bodyRight+"0,500")))
 	f, _ = z.Create("layout.json")
-	f.Write([]byte(`{"_backend":"hybrid","_version_name":"3.4.4","pdf_info":[{"page_idx":0,"page_size":[100,100],"preproc_blocks":[{"type":"text","bbox":[10,10,90,20],"lines":[{"spans":[{"type":"text","content":"Experimental study","bbox":[10,10,90,20]}]}]},{"type":"text","bbox":[10,30,90,50],"lines":[{"spans":[{"type":"text","content":"The authors report an experiment with samples and specify the conditions.","bbox":[10,30,90,50]}]}]}],"para_blocks":[{"type":"text","bbox":[10,10,90,20],"lines":[{"spans":[{"type":"text","content":"Experimental study","bbox":[10,10,90,20]}]}]},{"type":"text","bbox":[10,30,90,50],"lines":[{"spans":[{"type":"text","content":"The authors report an experiment with samples and specify the conditions.","bbox":[10,30,90,50]}]}]}]}]}`))
+	layout := `{"_backend":"hybrid","_version_name":"3.4.4","pdf_info":[{"page_idx":0,"page_size":[100,100],"preproc_blocks":[{"type":"text","bbox":[10,10,90,20],"lines":[{"spans":[{"type":"text","content":"Experimental study","bbox":[10,10,90,20]}]}]},{"type":"text","bbox":[10,30,90,50],"lines":[{"spans":[{"type":"text","content":"The authors report an experiment with samples and specify the conditions.","bbox":[10,30,90,50]}]}]}],"para_blocks":[{"type":"text","bbox":[10,10,90,20],"lines":[{"spans":[{"type":"text","content":"Experimental study","bbox":[10,10,90,20]}]}]},{"type":"text","bbox":[10,30,90,50],"lines":[{"spans":[{"type":"text","content":"The authors report an experiment with samples and specify the conditions.","bbox":[10,30,90,50]}]}]}]}]}`
+	f.Write([]byte(strings.ReplaceAll(layout, "90,50", bodyRight+",50")))
 	z.Close()
 	d, e := pdfir.AdaptZIP(b.Bytes(), hash, "vlm")
 	if e != nil {

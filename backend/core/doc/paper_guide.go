@@ -72,7 +72,7 @@ func GetPaperGuide(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	encoded, _ := json.Marshal(out)
-	etag := fmt.Sprintf("\"guide-%x\"", sha256.Sum256(encoded))
+	etag := fmt.Sprintf("\"guide-%x\"", sha256.Sum256(append(encoded, out.CurrentIRDigest...)))
 	w.Header().Set("ETag", etag)
 	w.Header().Set("Cache-Control", "private, no-cache")
 	if r.Header.Get("If-None-Match") == etag {

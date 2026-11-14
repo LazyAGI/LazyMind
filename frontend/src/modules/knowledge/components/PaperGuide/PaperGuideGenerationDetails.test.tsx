@@ -66,30 +66,31 @@ it("keeps model selection and regeneration reachable in the remaining reader hei
   expect(details.querySelector("summary")).toHaveFocus();
 });
 
-it("separates translated coverage warnings from coverage values and preserves unknown parser information", () => {
+it("shows source body availability independently of translated coverage warnings", () => {
   const r = revision();
   r.coverage.warnings = [
     "Formula transcription is unavailable; only original text and page are readable.",
     "Custom parser diagnostic 42",
   ];
-  render(
-    <PaperGuideGenerationDetails
-      zh
-      model=""
-      setModel={() => {}}
-      revision={r}
-      busy={false}
-      active={false}
-      canGenerate
-      onRegenerate={() => {}}
-    />,
-  );
+  const props = {
+    model: "",
+    setModel: () => {},
+    revision: r,
+    busy: false,
+    active: false,
+    canGenerate: true,
+    onRegenerate: () => {},
+  };
+  const view = render(<PaperGuideGenerationDetails {...props} zh />);
+  expect(screen.getByText(/原文正文可用: 是/)).toBeInTheDocument();
   const warnings = screen.getAllByRole("listitem", { hidden: true });
   expect(warnings).toHaveLength(2);
   expect(warnings[0]).toHaveTextContent("公式转写不可用");
   expect(warnings[1]).toHaveTextContent(
     "解析提示：Custom parser diagnostic 42",
   );
+  view.rerender(<PaperGuideGenerationDetails {...props} zh={false} />);
+  expect(screen.getByText(/Source body available: Yes/)).toBeInTheDocument();
 });
 
 it.each([

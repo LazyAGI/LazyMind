@@ -42,11 +42,22 @@ function cells(line: string): string[] | undefined {
 }
 export function parseGuideTable(text: string): GuideTable | undefined {
   if (text.length > 16000 || /```|~~~/.test(text)) return;
+  let runeOffset = 0;
   const lines = Array.from(text.matchAll(/[^\r\n]*(?:\r\n|\n|\r|$)/g))
     .filter((m) => m[0])
     .map((m) => {
       const content = m[0].replace(/(?:\r\n|\n|\r)$/, "");
-      return { text: content, start: m.index!, end: m.index! + content.length };
+      const runeStart = runeOffset;
+      const runeEnd = runeStart + Array.from(content).length;
+      // The remainder is CR, LF, or both, each one code point.
+      runeOffset = runeEnd + m[0].length - content.length;
+      return {
+        text: content,
+        start: m.index!,
+        end: m.index! + content.length,
+        runeStart,
+        runeEnd,
+      };
     });
   const separators = lines
     .map((line, index) => ({ index, columns: cells(line.text) }))
@@ -63,13 +74,14 @@ export function parseGuideTable(text: string): GuideTable | undefined {
     (segment) => segment.latex !== undefined,
   );
   const hasPipeOutsideMath = (line: (typeof lines)[number]) => {
-    const start = Array.from(text.slice(0, line.start)).length;
+    if (!line.text.includes("|")) return false;
     return Array.from(line.text).some(
       (char, offset) =>
         char === "|" &&
         !math.some(
           (segment) =>
-            segment.start <= start + offset && segment.end > start + offset,
+            segment.start <= line.runeStart + offset &&
+            segment.end > line.runeStart + offset,
         ),
     );
   };
@@ -95,8 +107,8 @@ export function parseGuideTable(text: string): GuideTable | undefined {
   if (!rows.length) return;
   const begin = lines[index - 1].start,
     end = lines[last].end;
-  const sourceStart = Array.from(text.slice(0, begin)).length,
-    sourceEnd = Array.from(text.slice(0, end)).length;
+  const sourceStart = lines[index - 1].runeStart,
+    sourceEnd = lines[last].runeEnd;
   // Per-line parsing cannot detect a table-shaped passage inside a multiline
   // formula. Check the complete immutable block before separating prose.
   if (

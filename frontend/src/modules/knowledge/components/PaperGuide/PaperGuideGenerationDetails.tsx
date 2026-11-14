@@ -108,7 +108,7 @@ export default function PaperGuideGenerationDetails({
             {zh ? "已发出模型请求" : "Model requests sent"}:{" "}
             {revision.run.calls_used} / {revision.run.call_limit}
             <br />
-            {zh ? "正文覆盖" : "Body covered"}:{" "}
+            {zh ? "原文正文可用" : "Source body available"}:{" "}
             {revision.coverage.body ? (zh ? "是" : "Yes") : zh ? "否" : "No"}
           </p>
         )}

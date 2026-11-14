@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { ConfigProvider } from "antd";
 import {
   act,
   render,
@@ -65,9 +66,13 @@ afterEach(() => vi.restoreAllMocks());
 function Harness({
   document = "doc",
   title = "Paper",
+  onNavigate = () => {},
+  withIR = false,
 }: {
   document?: string;
   title?: string;
+  onNavigate?: () => void;
+  withIR?: boolean;
 }) {
   const [tab, setTab] = useState<string>();
   return (
@@ -90,10 +95,91 @@ function Harness({
       dock={null}
       getPdfData={() => null}
       onSelection={() => {}}
-      onNavigate={() => {}}
+      onNavigate={onNavigate}
+      ir={withIR ? {
+        version: 1,
+        source_sha256: "hash",
+        parser: { name: "fixture", model: "fixture" },
+        coordinate_space: "normalized_top_left",
+        pages: [],
+        blocks: [],
+      } : undefined}
     />
   );
 }
+
+function SourcePreviewHarness(props: Parameters<typeof Harness>[0]) {
+  return (
+    <ConfigProvider theme={{ token: { motion: false } }}>
+      <Harness {...props} withIR />
+    </ConfigProvider>
+  );
+}
+
+async function openSourcePreview() {
+  api.evidence.mockResolvedValueOnce({
+    source_current: true,
+    evidence: {
+      id: "e1",
+      text: "Retained source evidence",
+      source_block_id: "source",
+      source_type: "body",
+      locator: { kind: "page", page: 2 },
+    },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Guide" }));
+  const opener = screen.getByRole("button", { name: "Source 1" });
+  vi.spyOn(opener, "getClientRects").mockReturnValue({ length: 1 } as DOMRectList);
+  // Pointer activation need not focus the button (e.g. macOS Safari).
+  fireEvent.click(opener);
+  await screen.findByText("Retained source evidence");
+  return opener;
+}
+
+it.each(["button", "Escape"])("returns focus to the source citation after closing with %s", async (action) => {
+  render(<SourcePreviewHarness />);
+  const opener = await openSourcePreview();
+  const close = screen.getByRole("button", { name: "Close source" });
+  close.focus();
+  if (action === "Escape") {
+    fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape", keyCode: 27 });
+  } else {
+    fireEvent.click(close);
+  }
+  await waitFor(() => expect(opener).toHaveFocus());
+});
+
+it("does not restore a source opener that is no longer visible", async () => {
+  render(<SourcePreviewHarness />);
+  const opener = await openSourcePreview();
+  vi.mocked(opener.getClientRects).mockReturnValue({ length: 0 } as DOMRectList);
+  const focus = vi.spyOn(opener, "focus");
+  fireEvent.click(screen.getByRole("button", { name: "Close source" }));
+  await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+  expect(focus).not.toHaveBeenCalled();
+});
+
+it("leaves focus at the destination when navigating from the source preview", async () => {
+  const navigate = vi.fn(() => screen.getByRole("button", { name: "Original" }).focus());
+  render(<SourcePreviewHarness onNavigate={navigate} />);
+  const opener = await openSourcePreview();
+  const focus = vi.spyOn(opener, "focus");
+  fireEvent.click(screen.getByRole("button", { name: "Open PDF page 3" }));
+  await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+  expect(navigate).toHaveBeenCalledTimes(1);
+  expect(screen.getByRole("button", { name: "Original" })).toHaveFocus();
+  expect(focus).not.toHaveBeenCalled();
+});
+
+it("keeps an open preview readable but disables its jump when refreshed source positioning is stale", async () => {
+  const view = render(<SourcePreviewHarness />);
+  await openSourcePreview();
+  expect(screen.getByRole("button", { name: "Open PDF page 3" })).toBeEnabled();
+  state.value.revision = { ...revision(), source_current: false };
+  view.rerender(<SourcePreviewHarness />);
+  expect(screen.getByText("Retained source evidence")).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Open PDF page 3" })).toBeDisabled();
+});
 it("defaults to original then keeps source and assistant mutually exclusive at narrow widths", async () => {
   render(<Harness />);
   expect(screen.getByText("PDF viewer")).toBeVisible();

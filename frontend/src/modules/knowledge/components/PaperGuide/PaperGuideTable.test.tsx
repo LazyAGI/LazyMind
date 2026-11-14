@@ -4,6 +4,7 @@ import PaperGuideReader from "./PaperGuideReader";
 import { revision } from "./fixtures";
 import { rangeAtUnicodeOffset, visibleTextOffset } from "./readingPosition";
 import { sourceTextLength } from "./sourceText";
+import { parseGuideTable } from "./guideTable";
 const table =
   "| 条目 | 催化剂／溶剂 | 转化率（%） | e.r. | d.r. |\n| --- | --- | ---: | :---: | --- |\n| 1 | B1／乙醚，基准条件 | >99 | 78.5:21.5 | 12:1 |\n| 2 | B2／乙醚 | 96 | 85:15 | >20:1 |\n| 3 | B3／乙醚 | >99 | 89:11 | 12:1 |\n| 4 | B4／乙醚 | >99 | 95:5 | >20:1 |\n| 5 | B4／甲苯 | >99 | 96:4 | >20:1 |\n| 6 | B4／叔丁基甲基醚（TBME） | >99 | 96.5:3.5 | >20:1 |";
 function renderTable(
@@ -287,8 +288,9 @@ it("preserves attribution, linked source assets, evidence and whole-block keyboa
     within(section).getByRole("figure", { name: "Original source table" }),
   ).toBeVisible();
   expect(renderAsset).toHaveBeenCalledWith(block);
-  fireEvent.click(within(section).getByRole("button", { name: /Source/ }));
-  expect(onEvidence).toHaveBeenCalledWith("table-evidence");
+  const citation = within(section).getByRole("button", { name: /Source/ });
+  fireEvent.click(citation);
+  expect(onEvidence).toHaveBeenCalledWith("table-evidence", citation);
   const menu = section.querySelector(".paper-guide-passage-actions")!;
   fireEvent.click(menu.querySelector("summary")!);
   fireEvent.click(
@@ -386,4 +388,22 @@ it("still rejects resumed table rows outside a complete formula after a broken r
   const { root } = renderTable(raw);
   expect(screen.queryByRole("table")).toBeNull();
   expect(root.textContent).toBe(raw);
+});
+
+it("preserves Unicode and CRLF intervals near the text limit through a long suffix scan", () => {
+  const prefix = "甲😀\r\n\r\n";
+  const grid = "😀 | B\r\n--- | ---\r\nA | 𐐀";
+  const longSuffix = "\r\n" + "x\n".repeat(7950) + "\\[\r\n𐐀|x|\r\n\\]";
+  const suffix = longSuffix.padEnd(16000 - prefix.length - grid.length, "x");
+  const raw = prefix + grid + suffix;
+  expect(parseGuideTable(raw)).toMatchObject({
+    start: 6,
+    end: 29,
+    prefix,
+    suffix,
+    headers: ["😀", "B"],
+    rows: [["A", "𐐀"]],
+  });
+  expect(parseGuideTable(prefix + grid + longSuffix + "\r\n| 5 | 6 |")).toBeUndefined();
+  expect(parseGuideTable(raw + "x")).toBeUndefined();
 });

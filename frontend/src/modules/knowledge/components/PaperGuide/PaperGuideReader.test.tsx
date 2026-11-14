@@ -2,6 +2,28 @@ import { act, render, screen, fireEvent } from "@testing-library/react";
 import { expect, it, vi } from "vitest";
 import PaperGuideReader from "./PaperGuideReader";
 import { revision } from "./fixtures";
+it.each([
+  ["partial", "writing", true],
+  ["partial", "paused", false],
+  ["partial", "canceled", false],
+  ["partial", "failed", false],
+  ["partial", "source_changed", false],
+  ["superseded", "completed", false],
+  ["complete", "completed", false],
+  ["limited", "completed", false],
+] as const)("shows the next-section notice only for eligible active revisions (%s, %s)", (status, stage, shown) => {
+  const r = revision();
+  render(<PaperGuideReader
+    revision={{ ...r, status, run: { ...r.run, stage }, sections: r.sections.slice(0, 1) }}
+    title="Paper"
+    language="en"
+    onEvidence={() => {}}
+    onSelection={() => {}}
+  />);
+  const hint = screen.queryByText("The next section will appear here after review.");
+  if (shown) expect(hint).toBeVisible();
+  else expect(hint).not.toBeInTheDocument();
+});
 it.each(["method", "theory", "normative", "review"])(
   "renders %s as a continuous article with concrete titles",
   (profile) => {

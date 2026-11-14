@@ -25,6 +25,7 @@ import {
 } from "../api/readingPreparation";
 import { paperGuideApi } from "../api/paperGuide";
 import { usePaperGuide } from "./PaperGuide/usePaperGuide";
+import { isGuideRunActive } from "./PaperGuide/guideRunState";
 import PaperGuideReader from "./PaperGuide/PaperGuideReader";
 import PaperGuideEvidencePreview from "./PaperGuide/PaperGuideEvidence";
 import PaperGuideAsset, {
@@ -53,13 +54,6 @@ interface Props {
   ir?: PdfIRDocument;
   onModeChange?: (guide: boolean) => void;
 }
-const activeStages = [
-  "queued",
-  "waiting_source",
-  "analyzing",
-  "writing",
-  "reviewing",
-];
 export default function PaperReadingWorkspace(p: Props) {
   const { i18n } = useTranslation();
   const language = i18n.language.startsWith("zh") ? "zh" : "en",
@@ -92,6 +86,7 @@ export default function PaperReadingWorkspace(p: Props) {
   const [evidence, setEvidence] = useState<PaperGuideEvidenceResponse>();
   const [evidenceLoading, setEvidenceLoading] = useState(false);
   const evidenceAbort = useRef<AbortController>();
+  const evidenceOpener = useRef<HTMLButtonElement>();
   const latest = useRef("");
   latest.current = storageKey;
   const progressTimer = useRef<ReturnType<typeof setTimeout>>();
@@ -107,11 +102,13 @@ export default function PaperReadingWorkspace(p: Props) {
       (guide.status.published_revision || guide.status.candidate_revision))
   );
   const showGuide = p.eligible && mode === "article" && canEnter;
+  const revisionId = guide.revision?.id;
+  const evidenceCurrent = !!(
+    evidence?.source_current && guide.revision?.source_current
+  );
   useEffect(() => {
     setMode(localStorage.getItem(storageKey) || "source");
     setSourceOpen(false);
-    setEvidence(undefined);
-    setEvidenceLoading(false);
     setError("");
     setBusy(false);
     setModel("");
@@ -193,7 +190,7 @@ export default function PaperReadingWorkspace(p: Props) {
   };
   const requestEvidence = useCallback(
     async (id: string) => {
-      if (!guide.revision) return;
+      if (!revisionId) return;
       const key = storageKey;
       evidenceAbort.current?.abort();
       const abort = new AbortController();
@@ -203,7 +200,7 @@ export default function PaperReadingWorkspace(p: Props) {
       try {
         const e = await paperGuideApi.evidence(
           target,
-          guide.revision.id,
+          revisionId,
           id,
           abort.signal,
         );
@@ -216,13 +213,21 @@ export default function PaperReadingWorkspace(p: Props) {
           setEvidenceLoading(false);
       }
     },
-    [storageKey, target, guide.revision?.id],
+    [storageKey, target, revisionId],
   );
-  useEffect(() => {
+  const openEvidence = (id: string, opener: HTMLButtonElement) => {
+    evidenceOpener.current = opener;
+    void requestEvidence(id);
+  };
+  const closeEvidence = useCallback(() => {
     evidenceAbort.current?.abort();
     setEvidence(undefined);
     setEvidenceLoading(false);
-  }, [guide.revision?.id]);
+  }, []);
+  useEffect(() => {
+    evidenceOpener.current = undefined;
+    closeEvidence();
+  }, [storageKey, target, revisionId, showGuide, closeEvidence]);
   const preview = useGuideSourcePreview(
     storageKey,
     guide.revision?.source_sha256,
@@ -242,7 +247,7 @@ export default function PaperReadingWorkspace(p: Props) {
   const dual = width >= 1100;
   const stage = candidate?.run.stage;
   const resumable = !!stage && ["paused", "failed", "canceled"].includes(stage);
-  const active = !!stage && activeStages.includes(stage);
+  const active = isGuideRunActive(stage);
   const errorNames = [
     "source_changed",
     "preparation_required",
@@ -307,7 +312,7 @@ export default function PaperReadingWorkspace(p: Props) {
         preview={preview}
         language={language}
         current={guide.revision!.source_current}
-        onEvidence={requestEvidence}
+        onEvidence={openEvidence}
       />
     );
   }
@@ -479,7 +484,7 @@ export default function PaperReadingWorkspace(p: Props) {
                 compact={sourceOpen || auxVisible || !dual}
                 progress={localProgress.current || guide.status?.progress}
                 onProgress={saveProgress}
-                onEvidence={requestEvidence}
+                onEvidence={openEvidence}
                 onSelection={(selection) => {
                   setSourceOpen(false);
                   p.onSelection(selection);
@@ -539,52 +544,56 @@ export default function PaperReadingWorkspace(p: Props) {
         </div>
       </div>
       {!showGuide && p.dock}
-      {(evidence || evidenceLoading) && (
-        <Modal
-          open
-          title={zh ? "来源预览" : "Source preview"}
-          footer={null}
-          onCancel={() => {
-            evidenceAbort.current?.abort();
-            setEvidence(undefined);
-            setEvidenceLoading(false);
-          }}
-          width={720}
-        >
-          {evidence ? (
-            <PaperGuideEvidencePreview
-              value={evidence}
-              currentSourceHash={p.ir?.source_sha256}
-              revisionSourceHash={guide.revision!.source_sha256}
-              language={language}
-              onClose={() => {
-                setEvidence(undefined);
-                setEvidenceLoading(false);
-              }}
-              onNavigate={(e) => {
-                setSourceOpen(true);
-                p.onAuxiliary(undefined);
-                setEvidence(undefined);
-                p.onNavigate(e);
-              }}
-            >
-              {["figure", "chart", "table", "formula", "image"].includes(
-                evidence.evidence.source_type,
-              ) &&
-                evidence.source_current && (
-                  <PaperGuideAsset
-                    onEvidence={requestEvidence}
-                    evidence={evidence.evidence}
-                    preview={preview}
-                    language={language}
-                  />
-                )}
-            </PaperGuideEvidencePreview>
-          ) : (
-            <p role="status">{zh ? "正在读取来源…" : "Loading source…"}</p>
-          )}
-        </Modal>
-      )}
+      <Modal
+        open={showGuide && !!revisionId && (!!evidence || evidenceLoading)}
+        title={zh ? "来源预览" : "Source preview"}
+        footer={null}
+        destroyOnHidden
+        focusTriggerAfterClose={false}
+        onCancel={closeEvidence}
+        afterClose={() => {
+          const opener = evidenceOpener.current;
+          evidenceOpener.current = undefined;
+          if (
+            opener?.isConnected &&
+            opener.getClientRects().length &&
+            getComputedStyle(opener).visibility === "visible"
+          ) {
+            opener.focus({ preventScroll: true });
+          }
+        }}
+        width={720}
+      >
+        {evidence && guide.revision ? (
+          <PaperGuideEvidencePreview
+            value={{ ...evidence, source_current: evidenceCurrent }}
+            currentSourceHash={p.ir?.source_sha256}
+            revisionSourceHash={guide.revision.source_sha256}
+            language={language}
+            onClose={closeEvidence}
+            onNavigate={(e) => {
+              evidenceOpener.current = undefined;
+              closeEvidence();
+              setSourceOpen(true);
+              p.onAuxiliary(undefined);
+              p.onNavigate(e);
+            }}
+          >
+            {["figure", "chart", "table", "formula", "image"].includes(
+              evidence.evidence.source_type,
+            ) && evidenceCurrent && (
+              <PaperGuideAsset
+                onEvidence={requestEvidence}
+                evidence={evidence.evidence}
+                preview={preview}
+                language={language}
+              />
+            )}
+          </PaperGuideEvidencePreview>
+        ) : evidenceLoading ? (
+          <p role="status">{zh ? "正在读取来源…" : "Loading source…"}</p>
+        ) : null}
+      </Modal>
     </div>
   );
 }
@@ -603,7 +612,7 @@ function GuideInlineAsset({
   preview: GuidePreview;
   language: string;
   current: boolean;
-  onEvidence: (id: string) => void;
+  onEvidence: (id: string, opener: HTMLButtonElement) => void;
 }) {
   const [e, setEvidence] = useState<PaperGuideEvidence>();
   const [failed, setFailed] = useState(false);

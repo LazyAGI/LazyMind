@@ -17,6 +17,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -139,6 +140,96 @@ func TestPaperGuideHTTPGateReuseModelOverrideAndACL(t *testing.T) {
 	GetPaperGuide(get, guideRequest("GET", "", "owner", nil))
 	if get.Code != 404 {
 		t.Fatal("deleted document readable")
+	}
+}
+
+func TestPaperGuideHTTPRevalidatesStatusWhenOnlyCurrentIRChanges(t *testing.T) {
+	db, hash, _ := guideHTTPFixture(t)
+	t.Setenv("LAZYMIND_PAPER_GUIDE_ENABLED", "true")
+	generated := httptest.NewRecorder()
+	GeneratePaperGuide(generated, guideRequest("POST", `{"expected_source_hash":"`+hash+`","model_ref":"own:a","idempotency_key":"revalidate"}`, "owner", nil))
+	var initial struct {
+		Data paperguide.RevisionView `json:"data"`
+	}
+	if e := json.Unmarshal(generated.Body.Bytes(), &initial); generated.Code != http.StatusAccepted || e != nil {
+		t.Fatalf("generate: %d %s", generated.Code, generated.Body)
+	}
+	if e := db.Model(&orm.PaperGuideRevision{}).Where("id = ?", initial.Data.ID).Updates(map[string]any{"status": "complete", "stage": "completed"}).Error; e != nil {
+		t.Fatal(e)
+	}
+	if e := db.Model(&orm.PaperGuide{}).Where("candidate_revision_id = ?", initial.Data.ID).Updates(map[string]any{"published_revision_id": initial.Data.ID, "candidate_revision_id": ""}).Error; e != nil {
+		t.Fatal(e)
+	}
+	revision := func() paperguide.RevisionResponse {
+		t.Helper()
+		r := guideRequest("GET", "", "owner", map[string]string{"revision": initial.Data.ID})
+		r.URL.RawQuery = "after_version=" + strconv.FormatInt(initial.Data.Version, 10)
+		w := httptest.NewRecorder()
+		GetPaperGuideRevision(w, r)
+		var out struct {
+			Data paperguide.RevisionResponse `json:"data"`
+		}
+		if e := json.Unmarshal(w.Body.Bytes(), &out); w.Code != http.StatusOK || e != nil {
+			t.Fatalf("revision: %d %s", w.Code, w.Body)
+		}
+		return out.Data
+	}
+	status := func(etag string) *httptest.ResponseRecorder {
+		r := guideRequest("GET", "", "owner", nil)
+		r.Header.Set("If-None-Match", etag)
+		w := httptest.NewRecorder()
+		GetPaperGuide(w, r)
+		return w
+	}
+	first := status("")
+	tag := first.Header().Get("ETag")
+	if first.Code != http.StatusOK || tag == "" || !revision().SourceCurrent {
+		t.Fatalf("initial current source: %d %s", first.Code, first.Body)
+	}
+	if unchanged := status(tag); unchanged.Code != http.StatusNotModified || unchanged.Body.Len() != 0 {
+		t.Fatalf("unchanged conditional status: %d %s", unchanged.Code, unchanged.Body)
+	}
+
+	// Point the synthetic parser job at a new verified projection for the same
+	// PDF. Neither the old artifacts nor the stored guide rows change.
+	var job orm.AsyncJob
+	if e := db.Where("id = ?", "guide-ir").Take(&job).Error; e != nil {
+		t.Fatal(e)
+	}
+	var artifact pdfIRResult
+	if e := json.Unmarshal(job.ResultJSON, &artifact); e != nil {
+		t.Fatal(e)
+	}
+	archive, ir := guidePrecisionFixtureWithBodyBox(t, hash, "85")
+	dir := t.TempDir()
+	artifact.IRPath = filepath.Join(dir, "ir.json")
+	artifact.RawPath = filepath.Join(dir, "verified-upgrade.zip")
+	if e := os.WriteFile(artifact.IRPath, mustJSON(ir), 0600); e != nil {
+		t.Fatal(e)
+	}
+	if e := os.WriteFile(artifact.RawPath, archive, 0600); e != nil {
+		t.Fatal(e)
+	}
+	if e := db.Model(&job).Update("result_json", mustJSON(artifact)).Error; e != nil {
+		t.Fatal(e)
+	}
+	source, e := (paperGuideSource{}).Load(t.Context(), paperguide.Scope{OwnerID: "owner", DatasetID: "guide-ds", DocumentID: "guide-doc", Language: "zh"}, false)
+	if e != nil || source.Hash != hash || source.Snapshot == nil || source.Snapshot.IRDigest == initial.Data.IRDigest {
+		t.Fatalf("fixture did not change only the current IR: %+v %v", source, e)
+	}
+	changed := status(tag)
+	newTag := changed.Header().Get("ETag")
+	if changed.Code != http.StatusOK || newTag == "" || newTag == tag {
+		t.Fatalf("conditional status hid the new IR: %d %s", changed.Code, changed.Body)
+	}
+	if changed.Body.String() != first.Body.String() {
+		t.Fatalf("the existing public status representation changed: %s", changed.Body)
+	}
+	if delta := revision(); delta.SourceCurrent || delta.ID != initial.Data.ID || delta.Version != initial.Data.Version || delta.Run.Stage != "completed" || len(delta.Sections) != 0 {
+		t.Fatalf("expected only stale currentness in the incremental revision: %+v", delta)
+	}
+	if unchanged := status(newTag); unchanged.Code != http.StatusNotModified || unchanged.Body.Len() != 0 {
+		t.Fatalf("unchanged upgraded conditional status: %d %s", unchanged.Code, unchanged.Body)
 	}
 }
 func TestPaperGuideReadOnlyMissingIRDoesNotEnqueueParse(t *testing.T) {
