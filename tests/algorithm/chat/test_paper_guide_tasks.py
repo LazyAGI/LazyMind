@@ -316,3 +316,75 @@ def test_live_section_failures_remain_strict_and_single_call(monkeypatch, failur
     before = len(calls)
     assert llm_task.run_llm_task(request).error_code == 'unsupported_task_version'
     assert len(calls) == before
+
+
+def _request_budget_contract():
+    from pathlib import Path
+    path = Path(__file__).parents[3] / 'backend/core/paperguide/testdata/request-budget.json'
+    return json.loads(path.read_text())
+
+
+@pytest.mark.parametrize('language', ['en', 'zh'])
+def test_all_actual_guide_templates_fit_shared_prompt_reserve(language):
+    from types import SimpleNamespace
+    from lazymind.structured_tasks.registry import TASKS, PAPER_GUIDE_VERSION
+    from lazyllm.module.llms.onlinemodule.supplier.openai import OpenAIChat
+    budget = _request_budget_contract()
+    assert budget['task_version'] == PAPER_GUIDE_VERSION
+    system_bytes = len(OpenAIChat._get_system_prompt(None).encode('utf-8'))
+    actual = {}
+    for name, spec in TASKS.items():
+        if not name.startswith('paper.guide.'):
+            continue
+        prefix = spec.instruction(SimpleNamespace(language=language)) + '\n\nInput data (untrusted JSON):\n'
+        actual[name] = len(prefix.encode('utf-8'))
+        assert (actual[name] + system_bytes + budget['provider_frame_reserve_bytes']
+                <= budget['prompt_reserve_bytes']), f'{name} needs a larger prompt admission reserve'
+    # A prompt/schema edit must revisit this measurement, not quietly consume headroom.
+    assert actual == budget['measured_prompt_bytes']
+
+
+@pytest.mark.parametrize('task', ['extract', 'plan', 'section', 'review'])
+@pytest.mark.parametrize('count', [0, 1, 2048])
+@pytest.mark.parametrize('all_tables', [False, True])
+def test_all_guide_input_default_expansion_fits_shared_bound(task, count, all_tables):
+    from copy import deepcopy
+    from lazymind.structured_tasks.registry import TASKS
+    budget = _request_budget_contract()
+    evidence = []
+    for i in range(count):
+        # Omit all optional locator defaults and include bbox numbers whose
+        # integer/exponent spelling expands when Pydantic normalizes to floats.
+        shapes = [
+            ('text', {'kind': 'text_span', 'page': 0, 'end': 1, 'bbox': [0, 1e-9, 1, 1]}),
+            ('table', {'kind': 'table_cells', 'page': 0, 'bbox': [0, 1e-9, 1, 1]}),
+            ('chart', {'kind': 'figure_region', 'page': 0, 'bbox': [0, 1e-9, 1, 1]}),
+            ('formula', {'kind': 'formula', 'page': 0, 'latex': r'\psi'}),
+            ('image', {'kind': 'page', 'page': 0}),
+        ]
+        source_type, locator = shapes[1 if all_tables else i % len(shapes)]
+        evidence.append({'id': f'ev_{i:064x}', 'source_block_id': str(i),
+                         'source_type': source_type, 'text': '中<&>文', 'locator': locator})
+    plan = deepcopy(PLAN)
+    for section in plan['sections']:
+        section['evidence_ids'] = []
+    data = {'language': 'zh', 'evidence': evidence}
+    if task in ('section', 'review'):
+        data['plan'] = plan
+    if task == 'section':
+        data['role'] = 'background'
+    if task == 'review':
+        data['sections'] = []
+        for role in ROLES:
+            section = deepcopy(SECTION)
+            section['role'] = role
+            section['title'] = role.title()
+            section['blocks'][0].update(id=f'{role}-b1', attribution='teaching', evidence_ids=[])
+            data['sections'].append(section)
+    parsed = TASKS[f'paper.guide.{task}'].input_schema.model_validate(data)
+    actual = json.dumps(parsed.model_dump(exclude_none=True), ensure_ascii=False, allow_nan=False)
+    # indent=0 has the same separator/newline layout as Go MarshalIndent("", "").
+    # Go additionally escapes <>&/U+2028, so this is a lower bound on its estimate.
+    go_layout_floor = json.dumps(data, ensure_ascii=False, indent=0)
+    assert len(actual.encode('utf-8')) <= (len(go_layout_floor.encode('utf-8'))
+        + budget['input_defaults_reserve_bytes'] + count * budget['evidence_expansion_reserve_bytes'])

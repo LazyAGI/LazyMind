@@ -365,7 +365,7 @@ func (x *execution) inputFits(input map[string]any) bool {
 	if evidence, ok := input["evidence"].([]GuideEvidence); ok && len(evidence) > 2048 {
 		return false
 	}
-	b, e := json.Marshal(input)
+	b, e := json.MarshalIndent(input, "", "")
 	limit := x.model.ContextTokens
 	if limit <= 0 {
 		limit = 32768
@@ -374,7 +374,12 @@ func (x *execution) inputFits(input map[string]any) bool {
 	if x.model.OutputReserveTokens > 0 && limit-x.model.OutputReserveTokens < budget {
 		budget = limit - x.model.OutputReserveTokens
 	}
-	return e == nil && budget > 0 && len(b) <= 1<<20 && estimatedTokens(b) <= budget
+	evidenceCount := 0
+	if evidence, ok := input["evidence"].([]GuideEvidence); ok {
+		evidenceCount = len(evidence)
+	}
+	inputBound := estimatedTokens(b) + guideInputDefaultsReserve + evidenceCount*guideEvidenceExpansionReserve
+	return e == nil && inputBound <= 1<<20 && inputBound+guidePromptReserve <= budget
 }
 
 // A UTF-8 byte bound also covers dense punctuation/formula tokenization.

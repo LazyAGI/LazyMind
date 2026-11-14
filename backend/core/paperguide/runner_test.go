@@ -207,15 +207,22 @@ func TestLongPlanExtractsCoverAllOriginalEvidenceAndRemainBounded(t *testing.T) 
 	}
 	repo := Repository{DB: guideDB(t)}
 	scope := Scope{OwnerID: id.OwnerID, DatasetID: id.DatasetID, DocumentID: id.DocumentID, Language: "en"}
-	model := ModelIdentity{ID: "m", ContextTokens: 24000, OutputReserveTokens: 8000}
+	model := ModelIdentity{ID: "m", ContextTokens: 40000, OutputReserveTokens: 16000}
 	seen := map[string]bool{}
 	extractCalls := 0
 	service := Service{Repo: repo, Source: &fixtureSource{s: snap}, Authorize: func(context.Context, Scope, bool) error { return nil }, ResolveModel: func(context.Context, Scope, string) (ModelIdentity, map[string]any, error) { return model, nil, nil }, Call: func(ctx context.Context, task string, input map[string]any, cfg map[string]any) (json.RawMessage, error) {
 		if task != "paper.guide.extract" {
 			t.Fatalf("unexpected task %s", task)
 		}
-		extractCalls++
+		encoded, err := json.MarshalIndent(input, "", "")
+		if err != nil {
+			t.Fatal(err)
+		}
 		evidence := input["evidence"].([]GuideEvidence)
+		if len(encoded)+guideInputDefaultsReserve+len(evidence)*guideEvidenceExpansionReserve+guidePromptReserve > model.ContextTokens-model.OutputReserveTokens {
+			t.Fatal("extract dispatched without full prompt reserve")
+		}
+		extractCalls++
 		chosen := evidence[0]
 		for _, ev := range evidence {
 			seen[ev.ID] = true
