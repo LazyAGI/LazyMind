@@ -42,7 +42,12 @@ export function guideTextSegments(text: string): Segment[] {
     let end = text.indexOf(close, i + open.length);
     while (end >= 0 && escaped[end])
       end = text.indexOf(close, end + close.length);
-    if (end < 0) continue;
+    if (end < 0) {
+      // An unclosed compound opener owns the remaining literal text. Never
+      // reinterpret its second dollar (or later inner math) as a new formula.
+      if (open.length > 1) break;
+      continue;
+    }
     const latex = text.slice(i + open.length, end);
     if (
       !latex.trim() ||

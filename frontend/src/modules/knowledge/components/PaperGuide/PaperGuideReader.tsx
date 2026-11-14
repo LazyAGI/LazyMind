@@ -177,11 +177,14 @@ export default function PaperGuideReader({
       return;
     }
     const blockId = element.dataset.guideText;
-    const section = revision.sections.find((s) =>
-      s.blocks.some((b) => b.id === blockId),
-    );
+    const sectionKey = element.closest<HTMLElement>("[data-guide-section]")
+      ?.dataset.guideSection;
+    const section = revision.sections.find((s) => s.key === sectionKey);
     const block = section?.blocks.find((b) => b.id === blockId);
-    if (!section || !block) return;
+    if (!section || !block) {
+      setSelected(undefined);
+      return;
+    }
     const start = sourceBoundary(
       element,
       range.startContainer,
@@ -224,7 +227,7 @@ export default function PaperGuideReader({
             <button
               key={s.role}
               aria-current={active === s.key ? "location" : undefined}
-              onClick={() => navigate(s.blocks[0]?.id || s.key)}
+              onClick={() => navigate(s.key)}
             >
               {s.title}
             </button>
@@ -254,8 +257,8 @@ export default function PaperGuideReader({
           const el = elements.find(
             (e) => e.getBoundingClientRect().bottom > top + 40,
           );
-          const section = revision.sections.find((s) =>
-            s.blocks.some((b) => b.id === el?.dataset.guideBlock),
+          const section = revision.sections.find(
+            (s) => s.key === el?.dataset.guideSection,
           );
           if (el && section) {
             setActive(section.key);
@@ -290,10 +293,7 @@ export default function PaperGuideReader({
           )}
           {revision.sections.map((section) => (
             <section key={section.role} aria-label={section.title}>
-              <h2
-                id={`guide-${revision.id}-${section.blocks[0]?.id || section.key}`}
-                tabIndex={-1}
-              >
+              <h2 id={`guide-${revision.id}-${section.key}`} tabIndex={-1}>
                 {section.title}
               </h2>
               {section.publication_status === "correction_required" && (

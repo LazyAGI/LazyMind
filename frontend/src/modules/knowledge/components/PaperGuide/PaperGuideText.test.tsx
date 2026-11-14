@@ -6,7 +6,7 @@ import {
   restoreTextPosition,
   visibleTextOffset,
 } from "./readingPosition";
-import { sourceTextLength } from "./sourceText";
+import { sourceTextLength, sourceBoundary } from "./sourceText";
 afterEach(() => vi.restoreAllMocks());
 it("preserves ordinary prose, escaped delimiters and malformed formulas exactly", () => {
   const text = String.raw`foo_bar costs \$5; escaped \\(x\\); unfinished \(x and 😀𐐀`;
@@ -103,3 +103,34 @@ it("maps progress inside a formula atom and after it without counting MathML or 
   expect(scroll.scrollTop).toBe(96);
   expect(rangeRect).toHaveBeenCalled();
 });
+
+it.each(["$$x$", "$$$x$", "甲😀 $$x$ tail", "$$x$ then $y$"])(
+  "preserves an unclosed display token and its original selection interval: %s",
+  (text) => {
+    const { container } = render(
+      <p>
+        <PaperGuideText text={text} />
+      </p>,
+    );
+    const root = container.querySelector("p")!;
+    expect(root.textContent).toBe(text);
+    expect(root.querySelector(".katex")).toBeNull();
+    expect(guideTextSegments(text)).toEqual([
+      {
+        text,
+        start: 0,
+        end: Array.from(text).length,
+        latex: undefined,
+        display: undefined,
+      },
+    ]);
+    const range = document.createRange();
+    range.selectNodeContents(root);
+    expect(
+      sourceBoundary(root, range.startContainer, range.startOffset, "start"),
+    ).toBe(0);
+    expect(
+      sourceBoundary(root, range.endContainer, range.endOffset, "end"),
+    ).toBe(Array.from(text).length);
+  },
+);

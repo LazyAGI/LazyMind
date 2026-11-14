@@ -426,3 +426,80 @@ it("discards a pending selection when its immutable section is replaced", () => 
   expect(screen.queryByRole("toolbar")).not.toBeInTheDocument();
   expect(choose).not.toHaveBeenCalled();
 });
+
+it("binds duplicate block IDs to the actual immutable section for selection, progress and navigation", () => {
+  const r = revision(),
+    choose = vi.fn(),
+    progress = vi.fn();
+  r.sections[0].blocks[0] = {
+    ...r.sections[0].blocks[0],
+    id: "same-block",
+    text: "First $a$ text",
+  };
+  r.sections[1].blocks[0] = {
+    ...r.sections[1].blocks[0],
+    id: "same-block",
+    text: "Second $b$ tail",
+  };
+  const rect = vi
+    .spyOn(Element.prototype, "getBoundingClientRect")
+    .mockImplementation(function (this: Element) {
+      if (this.classList.contains("paper-guide-scroll"))
+        return new DOMRect(0, 0, 800, 300);
+      return new DOMRect(
+        0,
+        0,
+        800,
+        this.getAttribute("data-guide-section") === "section:background:v1"
+          ? 20
+          : 120,
+      );
+    });
+  try {
+    const view = render(
+      <PaperGuideReader
+        revision={r}
+        title="Paper"
+        language="en"
+        onEvidence={() => {}}
+        onSelection={choose}
+        onProgress={progress}
+      />,
+    );
+    const block = view.container.querySelector(
+      '[data-guide-section="section:question:v1"] [data-guide-text]',
+    )!;
+    const range = document.createRange();
+    range.selectNodeContents(block);
+    window.getSelection()!.removeAllRanges();
+    window.getSelection()!.addRange(range);
+    fireEvent.mouseUp(block);
+    expect(screen.getByRole("toolbar").querySelector("p")?.textContent).toBe(
+      "Second $b$ tail",
+    );
+    fireEvent.click(screen.getByRole("toolbar").querySelector("button")!);
+    expect(choose.mock.calls[0][0]).toMatchObject({
+      text: "Second $b$ tail",
+      guideRef: {
+        revision_id: "r1",
+        section_key: "section:question:v1",
+        block_id: "same-block",
+        start: 0,
+        end: 15,
+      },
+    });
+    fireEvent.scroll(view.container.querySelector(".paper-guide-scroll")!);
+    expect(progress).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        section_key: "section:question:v1",
+        block_id: "same-block",
+      }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: r.sections[1].title }));
+    expect(
+      screen.getByRole("heading", { name: r.sections[1].title }),
+    ).toHaveFocus();
+  } finally {
+    rect.mockRestore();
+  }
+});
