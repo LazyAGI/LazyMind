@@ -232,3 +232,13 @@ def test_empty_pdf_requires_ocr_without_empty_text_advice(tmp_path, monkeypatch)
         base.prepare_document(source, tmp_path)
     assert failure.value.code == 'OCR_REQUIRED'
     assert not Path(str(source) + base.ARTIFACT_SUFFIX).exists()
+
+
+def test_content_error_can_be_copied_and_serialized():
+    import copy
+    import pickle
+
+    error = base.DocumentContentError('OCR_REQUIRED', 'OCR is required')
+    for restored in (copy.copy(error), pickle.loads(pickle.dumps(error))):
+        assert restored.code == 'OCR_REQUIRED'
+        assert str(restored) == 'OCR is required'

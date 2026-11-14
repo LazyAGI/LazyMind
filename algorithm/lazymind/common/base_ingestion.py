@@ -19,8 +19,11 @@ class DocumentContentError(ValueError):
     """A stable, safe content diagnostic, distinct from reader service failures."""
 
     def __init__(self, code, message):
-        super().__init__(message)
+        super().__init__(code, message)
         self.code = code
+
+    def __str__(self):
+        return str(self.args[1])
 
 
 def fingerprint(path):
