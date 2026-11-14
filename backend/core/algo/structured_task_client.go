@@ -17,7 +17,7 @@ const (
 	PaperGuidePlanTask            = "paper.guide.plan"
 	PaperGuideSectionTask         = "paper.guide.section"
 	PaperGuideReviewTask          = "paper.guide.review"
-	PaperGuideTaskVersion         = "paper-guide-v2"
+	PaperGuideTaskVersion         = "paper-guide-v3"
 	FormulaExplanationTask        = "paper.formula.explain"
 	FormulaExplanationTaskVersion = "formula-explanation-v7-low-latency"
 	VisualExplanationTask         = "paper.visual.explain"
@@ -80,7 +80,7 @@ func RunStructuredTask(ctx context.Context, req StructuredTaskRequest) (Structur
 			if json.Unmarshal(httpErr.Body, &body) == nil && body.Detail.Code != "" {
 				failure = &body.Detail
 				switch body.Detail.Code {
-				case "invalid_task_input", "invalid_task_config", "unsupported_task_type", "unsupported_task_version", "invalid_model_output", "model_configuration", "authentication_failed", "rate_limited", "request_timeout", "transport_error", "model_call_failed",
+				case "invalid_task_input", "invalid_task_config", "unsupported_task_type", "unsupported_task_version", "invalid_model_output", "model_configuration", "authentication_failed", "rate_limited", "request_timeout", "task_timeout", "transport_error", "model_call_failed",
 					"invalid_request", "permission_denied", "not_found", "usage_limit_exceeded", "concurrency_limited", "quota_exhausted", "balance_exhausted", "organization_spend_limit_exceeded", "project_spend_limit_exceeded", "input_filtered", "output_filtered", "token_limit", "provider_overloaded", "service_unavailable", "provider_internal_error", "provider_rejected", "conflict", "unprocessable_entity", "protocol_error":
 					// Public provider/task classification; never expose raw upstream messages.
 				default:

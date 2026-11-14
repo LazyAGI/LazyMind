@@ -19,6 +19,8 @@ import (
 const JobType = "document.paper_guide"
 
 var (
+	ErrModelTimeout  = errors.New("paper_guide_model_timeout")
+	ErrModelRequest  = errors.New("paper_guide_model_request_failed")
 	ErrRegenerate    = errors.New("paper_guide_regeneration_required")
 	ErrGeneration    = errors.New("paper_guide_generation_failed")
 	ErrConflict      = errors.New("paper_guide_conflict")

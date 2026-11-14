@@ -16,11 +16,21 @@ func paperGuideService() paperguide.Service {
 	return paperguide.Service{FeatureEnabled: PaperGuideEnabled, Repo: paperguide.Repository{DB: store.DB(), PrepareCheckpoint: preparePaperGuideCheckpoint, CheckpointGuard: paperGuideCheckpointGuard}, Source: paperGuideSource{}, Authorize: authorizePaperGuide, ResolveModel: resolvePaperGuideModel, Call: func(ctx context.Context, task string, input map[string]any, cfg map[string]any) (json.RawMessage, error) {
 		result, e := algo.RunStructuredTask(ctx, algo.StructuredTaskRequest{Task: task, Version: algo.PaperGuideTaskVersion, Input: input, LLMConfig: cfg})
 		if e != nil {
+			// Preserve only safe cancellation causes, never raw provider errors.
+			if ctx.Err() != nil {
+				return nil, ctx.Err()
+			}
+			if errors.Is(e, context.DeadlineExceeded) {
+				return nil, context.DeadlineExceeded
+			}
+			if errors.Is(e, context.Canceled) {
+				return nil, context.Canceled
+			}
 			class := "transport"
 			var structured *algo.StructuredTaskError
 			if errors.As(e, &structured) {
 				switch structured.Code {
-				case "request_timeout":
+				case "request_timeout", "task_timeout":
 					class = "timeout"
 				case "invalid_model_output":
 					class = "schema"

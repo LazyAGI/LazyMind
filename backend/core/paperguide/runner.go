@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"github.com/google/uuid"
 	"gorm.io/gorm"
 	"io"
@@ -106,7 +105,7 @@ func (s Service) Run(ctx context.Context, job asyncjob.Job, reporter asyncjob.Re
 }
 func errorCode(e error) string { return safeRunError(e).Error() }
 func safeRunError(e error) error {
-	for _, known := range []error{ErrRegenerate, ErrConflict, ErrModelChanged, ErrSourceChanged, ErrPreparation, ErrForbidden, ErrDisabled, ErrContext, ErrMaterial, ErrEvidence, ErrQuality, ErrBudget} {
+	for _, known := range []error{ErrModelTimeout, ErrModelRequest, ErrRegenerate, ErrConflict, ErrModelChanged, ErrSourceChanged, ErrPreparation, ErrForbidden, ErrDisabled, ErrContext, ErrMaterial, ErrEvidence, ErrQuality, ErrBudget} {
 		if errors.Is(e, known) {
 			return known
 		}
@@ -669,31 +668,24 @@ func (x *execution) task(ctx context.Context, key, task string, input map[string
 		}
 		callCtx, cancel := context.WithTimeout(ctx, 120*time.Second)
 		raw, callErr := x.s.Call(callCtx, task, input, cfg)
+		// Read the child's cause BEFORE our cleanup cancel; a transport wrapper may
+		// have hidden DeadlineExceeded. The parent identifies user/budget stops.
+		parentErr, callContextErr := ctx.Err(), callCtx.Err()
+		diagnostic, callErr := classifyModelCall(parentErr, callContextErr, callErr)
 		cancel()
 		elapsed := time.Since(started).Milliseconds()
 		x.callTime += elapsed
 		if elapsed > callMillis {
 			elapsed = callMillis
 		}
-		diagnostic := "success"
-		if callErr != nil {
-			diagnostic = "transport"
-			var classified *CallError
-			if errors.As(callErr, &classified) {
-				diagnostic = classified.Class
-			}
-			if errors.Is(callErr, context.DeadlineExceeded) {
-				diagnostic = "timeout"
-			}
-		} else {
-			callErr = decodeStrict(raw, out)
-			if callErr != nil {
-				diagnostic = "schema"
-			} else {
-				callErr = validate()
-				if callErr != nil {
-					diagnostic = "contract"
-				}
+		if parentErr != nil {
+			return callErr
+		}
+		if callErr == nil {
+			if err := decodeStrict(raw, out); err != nil {
+				diagnostic, callErr = "schema", ErrEvidence
+			} else if err = validate(); err != nil {
+				diagnostic, callErr = "contract", ErrEvidence
 			}
 		}
 		// Settle only this invocation, once. Unknown crashed requests retain
@@ -720,10 +712,13 @@ func (x *execution) task(ctx context.Context, key, task string, input map[string
 			if ctx.Err() != nil {
 				return ctx.Err()
 			}
+			if errors.Is(callErr, ErrBudget) || errors.Is(callErr, ErrConflict) || errors.Is(callErr, asyncjob.ErrLeaseLost) || errors.Is(callErr, context.Canceled) {
+				return callErr
+			}
 			if retry == 0 {
 				continue
 			}
-			return fmt.Errorf("%w: model output or request failed", ErrEvidence)
+			return callErr
 		}
 		var reviewMetadata json.RawMessage
 		if len(metadata) == 1 {

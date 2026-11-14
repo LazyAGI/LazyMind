@@ -2,7 +2,7 @@
 import re
 from typing import Annotated, Literal
 
-from pydantic import AfterValidator, BaseModel, ConfigDict, Field, StringConstraints, model_validator
+from pydantic import AfterValidator, BaseModel, ConfigDict, Field, StringConstraints, field_validator, model_validator
 
 
 Role = Literal['background', 'question', 'contribution', 'justification']
@@ -166,7 +166,16 @@ class SectionPlan(Shape):
     terms: Annotated[list[prose(220)], Field(max_length=32)]
     claim_ids: Annotated[list[ID], Field(max_length=96)]
     evidence_ids: Annotated[list[SourceID], Field(max_length=128)]
-    asset_ids: Annotated[list[SourceID], Field(max_length=32)]
+    asset_ids: Annotated[list[SourceID], Field(max_length=32, description=(
+        'Every ID must have exactly one required_assets decision with included=true. '
+        'Excluded or undecided assets cannot appear here.'))]
+
+    @field_validator('claim_ids', 'evidence_ids', 'asset_ids', mode='after')
+    @classmethod
+    def canonical_reference_sets(cls, values):
+        # Runs AFTER raw list length, strict element types and ID format checks.
+        # Preserve first-use order; this never merges source/claim definitions.
+        return list(dict.fromkeys(values))
 
 
 class AssetDecision(Shape):
@@ -181,7 +190,9 @@ class Plan(Shape):
     claims: Annotated[list[Claim], Field(max_length=96)]
     sections: Annotated[list[SectionPlan], Field(min_length=4, max_length=4)]
     term_policy: Annotated[list[prose(600)], Field(max_length=32)]
-    required_assets: Annotated[list[AssetDecision], Field(max_length=128)]
+    required_assets: Annotated[list[AssetDecision], Field(max_length=128, description=(
+        'One decision per asset ID. Every included=true ID must occur in a section asset_ids; '
+        'every section asset_ids entry must have an included=true decision here.'))]
 
     @model_validator(mode='after')
     def check_roles_and_coverage(self):

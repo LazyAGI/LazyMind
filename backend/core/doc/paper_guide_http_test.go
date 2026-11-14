@@ -393,3 +393,43 @@ func TestPaperGuideOldContractReportsRegenerationWithoutSourceChange(t *testing.
 		t.Fatal("old resume enqueued a new paid run")
 	}
 }
+
+func TestPaperGuideAdapterPreservesDeadlineAndCancellation(t *testing.T) {
+	guideHTTPFixture(t)
+	t.Setenv("LAZYMIND_CHAT_SERVICE_URL", "http://fixture.invalid")
+	for _, deadline := range []bool{true, false} {
+		var ctx context.Context
+		var cancel context.CancelFunc
+		want := context.Canceled
+		if deadline {
+			ctx, cancel = context.WithDeadline(t.Context(), time.Now().Add(-time.Second))
+			want = context.DeadlineExceeded
+		} else {
+			ctx, cancel = context.WithCancel(t.Context())
+			cancel()
+		}
+		_, err := paperGuideService().Call(ctx, "paper.guide.plan", map[string]any{}, map[string]any{})
+		cancel()
+		if !errors.Is(err, want) {
+			t.Fatalf("lost safe context cause: deadline=%t err=%v", deadline, err)
+		}
+	}
+}
+
+func TestPaperGuideModelFailureHTTPMapping(t *testing.T) {
+	for _, tc := range []struct {
+		err    error
+		status int
+		code   string
+	}{
+		{paperguide.ErrModelTimeout, 504, "2004414"},
+		{paperguide.ErrModelRequest, 502, "2004415"},
+		{paperguide.ErrEvidence, 422, "2004406"},
+	} {
+		w := httptest.NewRecorder()
+		paperGuideError(w, tc.err)
+		if w.Code != tc.status || !strings.Contains(w.Body.String(), tc.code) || !strings.Contains(w.Body.String(), tc.err.Error()) {
+			t.Fatalf("%d %s", w.Code, w.Body)
+		}
+	}
+}

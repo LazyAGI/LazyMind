@@ -43,6 +43,10 @@ func paperGuideError(w http.ResponseWriter, e error) {
 	case errors.Is(e, paperguide.ErrForbidden), errors.Is(e, gorm.ErrRecordNotFound):
 		status = 404
 		code = paperguide.ErrForbidden.Error()
+	case errors.Is(e, paperguide.ErrModelTimeout):
+		status = 504
+	case errors.Is(e, paperguide.ErrModelRequest):
+		status = 502
 	case errors.Is(e, paperguide.ErrDisabled):
 		status = 403
 	case errors.Is(e, paperguide.ErrRegenerate), errors.Is(e, paperguide.ErrConflict), errors.Is(e, paperguide.ErrPreparation), errors.Is(e, paperguide.ErrSourceChanged):

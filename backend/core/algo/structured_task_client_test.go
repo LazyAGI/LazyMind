@@ -97,7 +97,7 @@ func TestStructuredTaskPreservesSafeFailureClassificationAndUsage(t *testing.T) 
 }
 
 func TestStructuredTaskKeepsProviderAndUnknownFailureMetadata(t *testing.T) {
-	for _, code := range []string{"quota_exhausted", "permission_denied", "provider_overloaded", "service_unavailable", "unknown-private-provider-error"} {
+	for _, code := range []string{"task_timeout", "quota_exhausted", "permission_denied", "provider_overloaded", "service_unavailable", "unknown-private-provider-error"} {
 		t.Run(code, func(t *testing.T) {
 			endpoint := startGenerateTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				w.WriteHeader(502)
@@ -133,11 +133,11 @@ func TestPaperGuideStructuredTaskTransportPreservesBoundEvidence(t *testing.T) {
 		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
 			t.Errorf("decode structured task: %v", err)
 		}
-		if request.TaskType != "paper.guide.review" || request.Options["task_version"] != "paper-guide-v2" ||
+		if request.TaskType != "paper.guide.review" || request.Options["task_version"] != "paper-guide-v3" ||
 			len(request.Input.Data.Evidence) != 1 || request.Input.Data.Evidence[0].ID != "ev_fixture" {
 			t.Errorf("lost guide request metadata: %+v", request)
 		}
-		fmt.Fprint(w, `{"status":"succeeded","output":{"findings":[]},"usage":{"model_calls":1,"task_type":"paper.guide.review","task_version":"paper-guide-v2"}}`)
+		fmt.Fprint(w, `{"status":"succeeded","output":{"findings":[]},"usage":{"model_calls":1,"task_type":"paper.guide.review","task_version":"paper-guide-v3"}}`)
 	}))
 	t.Setenv("LAZYMIND_CHAT_SERVICE_URL", endpoint)
 	result, err := RunStructuredTask(context.Background(), StructuredTaskRequest{

@@ -28,6 +28,14 @@ Plan four ordered roles: background, question, contribution, justification. Give
 display title, focus, necessary terms, claim IDs, evidence IDs and asset IDs. Include all core
 claims in at least one section. For each key visual or formula, give the evidence ID and a reason
 for inclusion or exclusion; place every included object in at least one section.
+Asset cross-check: each section.asset_ids ID must have exactly one required_assets decision with
+included=true; every included=true decision must be used by at least one section. Excluded or
+undecided IDs must never appear in asset_ids. Citing a table as text in evidence_ids does not
+require displaying it as an asset. Example: to display an existing table T, first give T a decision
+with included=true and a reason, then put the SAME original ID in that section's asset_ids.
+T is notation, never an output ID. If T is excluded, do not put it in asset_ids.
+Plan section reference lists have set semantics: list each exact claim/evidence/asset ID once.
+Never duplicate a claim or asset-decision definition.
 
 Allow mixed argument types. Method/system: separate mechanism effects from added resources.
 Experiment/finding: distinguish observations from mechanisms. Observational quantitative: check

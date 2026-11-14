@@ -37,7 +37,7 @@ func TestOutputReserveStillLeavesPromptAndSchemaSpace(t *testing.T) {
 			t.Fatalf("accepted %d-byte input without template space", size)
 		}
 	}
-	if !x.inputFits(map[string]any{"text": strings.Repeat("x", 15000)}) {
+	if !x.inputFits(map[string]any{"text": strings.Repeat("x", 14000)}) {
 		t.Fatal("safe remaining space rejected")
 	}
 }

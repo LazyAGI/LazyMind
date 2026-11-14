@@ -1,0 +1,384 @@
+{
+  "provenance": "Minimized structural cases from Luna v2 actual-task-0 (real table missing asset decision) and actual-task-1 (repeated evidence ref). Original source IDs/types/block IDs/pages retained; source prose omitted and precise locators downgraded to real pages. Teaching-only plan scaffolding avoids factual claims.",
+  "input": {
+    "language": "en",
+    "evidence": [
+      {
+        "id": "ev_cc2694a32cfe9f0164ef2ce2a542c1439802b290725e5ba182d661fafb78f4dd",
+        "source_block_id": "2b97142a0c802cfa86feef95",
+        "source_type": "text",
+        "text": "",
+        "locator": {
+          "kind": "page",
+          "page": 2
+        }
+      },
+      {
+        "id": "ev_20f91fda0d3a602628e547e68ec2238d70b6bce57fd5edc33e0e1a572d6ba640",
+        "source_block_id": "cdc420f00dcdd5087d038f49",
+        "source_type": "text",
+        "text": "",
+        "locator": {
+          "kind": "page",
+          "page": 0
+        }
+      },
+      {
+        "id": "ev_e6c0d8f899b9466a78e0efd0579f55b192b88ddab37f2227e57a2025153a2202",
+        "source_block_id": "439d3ddacd8d0c9f41b7f87a",
+        "source_type": "text",
+        "text": "",
+        "locator": {
+          "kind": "page",
+          "page": 7
+        }
+      },
+      {
+        "id": "ev_bf70471e1a40e827955d2e7a4530a9bd7cf999ba5441d2040a06edfa4d4813fe",
+        "source_block_id": "7de9c7926d8c459f6c1dc5ab",
+        "source_type": "text",
+        "text": "",
+        "locator": {
+          "kind": "page",
+          "page": 7
+        }
+      },
+      {
+        "id": "ev_47d2a3f8a142b534f935b92543f7d9a352b4073bc61ee0469b7d197fa4a26ca2",
+        "source_block_id": "c672eeea432d53eb037a254b",
+        "source_type": "table",
+        "text": "",
+        "locator": {
+          "kind": "page",
+          "page": 7
+        }
+      },
+      {
+        "id": "ev_1dc5c91dc8a12791d18cf298d8e00b09c47e543eb0e65342bd83603639c711a9",
+        "source_block_id": "1530aa6e9149b479892ac5eb",
+        "source_type": "text",
+        "text": "",
+        "locator": {
+          "kind": "page",
+          "page": 6
+        }
+      },
+      {
+        "id": "ev_213eb1a4cfa151981e36b8689ce542b129b4ae30de9a47b01358b25ef221c5be",
+        "source_block_id": "916c10510e0d6c4bece7557e",
+        "source_type": "text",
+        "text": "",
+        "locator": {
+          "kind": "page",
+          "page": 7
+        }
+      },
+      {
+        "id": "ev_413f3e1c72ad3ecb1e0e417a6f365787e031e7f6a81839c68d0b2d5a9416a500",
+        "source_block_id": "5321608faf6c40b27ea040e8",
+        "source_type": "table",
+        "text": "",
+        "locator": {
+          "kind": "page",
+          "page": 8
+        }
+      },
+      {
+        "id": "ev_dade60a009b83b5ab0694bf9d4b81d453fe4405a2ce1e0b6019ebc81c7eeca09",
+        "source_block_id": "1793e14e9ebeea9f32c3994a",
+        "source_type": "text",
+        "text": "",
+        "locator": {
+          "kind": "page",
+          "page": 8
+        }
+      },
+      {
+        "id": "ev_6bf899d1942f1604cb145646393f76c25006b28522f5dfcc11734da1b9bf26b2",
+        "source_block_id": "f7052ce29dc08b691b30b075",
+        "source_type": "text",
+        "text": "",
+        "locator": {
+          "kind": "page",
+          "page": 8
+        }
+      },
+      {
+        "id": "ev_ff180da0c3748a4453d6bcecb0985fe222042fd460e872b0f01645ecc66f2dee",
+        "source_block_id": "68496cf103a1245188527384",
+        "source_type": "text",
+        "text": "",
+        "locator": {
+          "kind": "page",
+          "page": 8
+        }
+      },
+      {
+        "id": "ev_855955806164aa5a9fe5b6aeb38597a183a2c428b9b5a8125778a358cd1148cc",
+        "source_block_id": "e13e184b4afe90c3ff5014be",
+        "source_type": "text",
+        "text": "",
+        "locator": {
+          "kind": "page",
+          "page": 8
+        }
+      },
+      {
+        "id": "ev_ad1069ad73ecd88ce9080276796386418508fe5d37b9eb6606b77030e761e284",
+        "source_block_id": "03b7d532bfa1949ada889fe0",
+        "source_type": "table",
+        "text": "",
+        "locator": {
+          "kind": "page",
+          "page": 9
+        }
+      },
+      {
+        "id": "ev_9966c9eefad9982f47c8dfef0308afecb9af73a6f530b2d8727f6927159e7a9b",
+        "source_block_id": "d48c4f0680319680ec1d5c31",
+        "source_type": "text",
+        "text": "",
+        "locator": {
+          "kind": "page",
+          "page": 9
+        }
+      },
+      {
+        "id": "ev_9ebdc87783e70cd02bcf3bfea3f4081899145df063cf199f01786e44f0a32fa7",
+        "source_block_id": "1a12b10827bb7f2259147bc0",
+        "source_type": "text",
+        "text": "",
+        "locator": {
+          "kind": "page",
+          "page": 9
+        }
+      },
+      {
+        "id": "ev_fbbf7a7180d7c2ffc22f164a494c02e1817e94fbd23be6300b636e5b7af5bf70",
+        "source_block_id": "b8a4499328916e37d4713d04",
+        "source_type": "text",
+        "text": "",
+        "locator": {
+          "kind": "page",
+          "page": 6
+        }
+      },
+      {
+        "id": "ev_ae9383492b634f5deafd2dd095008f9894bed46f850b72f5f8ad0f2d0eb92b6f",
+        "source_block_id": "0c2d5b3e1982e3fe4248eb44",
+        "source_type": "text",
+        "text": "",
+        "locator": {
+          "kind": "page",
+          "page": 7
+        }
+      },
+      {
+        "id": "ev_658990d1441f012ef2cd5478a156fb686a525a4f8248563096d042b25e277ab4",
+        "source_block_id": "1e439b0de0daed992e9b0fec",
+        "source_type": "text",
+        "text": "",
+        "locator": {
+          "kind": "page",
+          "page": 7
+        }
+      }
+    ]
+  },
+  "missing_decision_asset_id": "ev_ad1069ad73ecd88ce9080276796386418508fe5d37b9eb6606b77030e761e284",
+  "raw_plan": {
+    "profiles": {
+      "primary": "method_system",
+      "secondary": [],
+      "uncertainty_reason": ""
+    },
+    "questions": [
+      "What supports the method?"
+    ],
+    "claims": [
+      {
+        "id": "existing_claim",
+        "statement": "A teaching example.",
+        "attribution": "teaching",
+        "evidence_ids": [],
+        "argument_type": null,
+        "conditions": [],
+        "support_status": "not_applicable"
+      }
+    ],
+    "sections": [
+      {
+        "role": "background",
+        "title": "Background",
+        "focus": "Explain the available material.",
+        "terms": [],
+        "claim_ids": [],
+        "evidence_ids": [
+          "ev_cc2694a32cfe9f0164ef2ce2a542c1439802b290725e5ba182d661fafb78f4dd"
+        ],
+        "asset_ids": []
+      },
+      {
+        "role": "question",
+        "title": "Question",
+        "focus": "Explain the available material.",
+        "terms": [],
+        "claim_ids": [],
+        "evidence_ids": [
+          "ev_cc2694a32cfe9f0164ef2ce2a542c1439802b290725e5ba182d661fafb78f4dd"
+        ],
+        "asset_ids": []
+      },
+      {
+        "role": "contribution",
+        "title": "Contribution",
+        "focus": "Explain the available material.",
+        "terms": [],
+        "claim_ids": [
+          "existing_claim",
+          "existing_claim"
+        ],
+        "evidence_ids": [
+          "ev_cc2694a32cfe9f0164ef2ce2a542c1439802b290725e5ba182d661fafb78f4dd",
+          "ev_20f91fda0d3a602628e547e68ec2238d70b6bce57fd5edc33e0e1a572d6ba640",
+          "ev_e6c0d8f899b9466a78e0efd0579f55b192b88ddab37f2227e57a2025153a2202",
+          "ev_bf70471e1a40e827955d2e7a4530a9bd7cf999ba5441d2040a06edfa4d4813fe",
+          "ev_47d2a3f8a142b534f935b92543f7d9a352b4073bc61ee0469b7d197fa4a26ca2",
+          "ev_1dc5c91dc8a12791d18cf298d8e00b09c47e543eb0e65342bd83603639c711a9",
+          "ev_213eb1a4cfa151981e36b8689ce542b129b4ae30de9a47b01358b25ef221c5be",
+          "ev_413f3e1c72ad3ecb1e0e417a6f365787e031e7f6a81839c68d0b2d5a9416a500",
+          "ev_dade60a009b83b5ab0694bf9d4b81d453fe4405a2ce1e0b6019ebc81c7eeca09",
+          "ev_6bf899d1942f1604cb145646393f76c25006b28522f5dfcc11734da1b9bf26b2",
+          "ev_ff180da0c3748a4453d6bcecb0985fe222042fd460e872b0f01645ecc66f2dee",
+          "ev_855955806164aa5a9fe5b6aeb38597a183a2c428b9b5a8125778a358cd1148cc",
+          "ev_ad1069ad73ecd88ce9080276796386418508fe5d37b9eb6606b77030e761e284",
+          "ev_9966c9eefad9982f47c8dfef0308afecb9af73a6f530b2d8727f6927159e7a9b",
+          "ev_9ebdc87783e70cd02bcf3bfea3f4081899145df063cf199f01786e44f0a32fa7",
+          "ev_fbbf7a7180d7c2ffc22f164a494c02e1817e94fbd23be6300b636e5b7af5bf70",
+          "ev_1dc5c91dc8a12791d18cf298d8e00b09c47e543eb0e65342bd83603639c711a9",
+          "ev_ae9383492b634f5deafd2dd095008f9894bed46f850b72f5f8ad0f2d0eb92b6f",
+          "ev_658990d1441f012ef2cd5478a156fb686a525a4f8248563096d042b25e277ab4"
+        ],
+        "asset_ids": [
+          "ev_ad1069ad73ecd88ce9080276796386418508fe5d37b9eb6606b77030e761e284",
+          "ev_ad1069ad73ecd88ce9080276796386418508fe5d37b9eb6606b77030e761e284"
+        ]
+      },
+      {
+        "role": "justification",
+        "title": "Justification",
+        "focus": "Explain the available material.",
+        "terms": [],
+        "claim_ids": [],
+        "evidence_ids": [
+          "ev_cc2694a32cfe9f0164ef2ce2a542c1439802b290725e5ba182d661fafb78f4dd"
+        ],
+        "asset_ids": []
+      }
+    ],
+    "term_policy": [],
+    "required_assets": [
+      {
+        "id": "ev_ad1069ad73ecd88ce9080276796386418508fe5d37b9eb6606b77030e761e284",
+        "included": true,
+        "reason": "Use the original table as a source object."
+      }
+    ]
+  },
+  "canonical_plan": {
+    "profiles": {
+      "primary": "method_system",
+      "secondary": [],
+      "uncertainty_reason": ""
+    },
+    "questions": [
+      "What supports the method?"
+    ],
+    "claims": [
+      {
+        "id": "existing_claim",
+        "statement": "A teaching example.",
+        "attribution": "teaching",
+        "evidence_ids": [],
+        "argument_type": null,
+        "conditions": [],
+        "support_status": "not_applicable"
+      }
+    ],
+    "sections": [
+      {
+        "role": "background",
+        "title": "Background",
+        "focus": "Explain the available material.",
+        "terms": [],
+        "claim_ids": [],
+        "evidence_ids": [
+          "ev_cc2694a32cfe9f0164ef2ce2a542c1439802b290725e5ba182d661fafb78f4dd"
+        ],
+        "asset_ids": []
+      },
+      {
+        "role": "question",
+        "title": "Question",
+        "focus": "Explain the available material.",
+        "terms": [],
+        "claim_ids": [],
+        "evidence_ids": [
+          "ev_cc2694a32cfe9f0164ef2ce2a542c1439802b290725e5ba182d661fafb78f4dd"
+        ],
+        "asset_ids": []
+      },
+      {
+        "role": "contribution",
+        "title": "Contribution",
+        "focus": "Explain the available material.",
+        "terms": [],
+        "claim_ids": [
+          "existing_claim"
+        ],
+        "evidence_ids": [
+          "ev_cc2694a32cfe9f0164ef2ce2a542c1439802b290725e5ba182d661fafb78f4dd",
+          "ev_20f91fda0d3a602628e547e68ec2238d70b6bce57fd5edc33e0e1a572d6ba640",
+          "ev_e6c0d8f899b9466a78e0efd0579f55b192b88ddab37f2227e57a2025153a2202",
+          "ev_bf70471e1a40e827955d2e7a4530a9bd7cf999ba5441d2040a06edfa4d4813fe",
+          "ev_47d2a3f8a142b534f935b92543f7d9a352b4073bc61ee0469b7d197fa4a26ca2",
+          "ev_1dc5c91dc8a12791d18cf298d8e00b09c47e543eb0e65342bd83603639c711a9",
+          "ev_213eb1a4cfa151981e36b8689ce542b129b4ae30de9a47b01358b25ef221c5be",
+          "ev_413f3e1c72ad3ecb1e0e417a6f365787e031e7f6a81839c68d0b2d5a9416a500",
+          "ev_dade60a009b83b5ab0694bf9d4b81d453fe4405a2ce1e0b6019ebc81c7eeca09",
+          "ev_6bf899d1942f1604cb145646393f76c25006b28522f5dfcc11734da1b9bf26b2",
+          "ev_ff180da0c3748a4453d6bcecb0985fe222042fd460e872b0f01645ecc66f2dee",
+          "ev_855955806164aa5a9fe5b6aeb38597a183a2c428b9b5a8125778a358cd1148cc",
+          "ev_ad1069ad73ecd88ce9080276796386418508fe5d37b9eb6606b77030e761e284",
+          "ev_9966c9eefad9982f47c8dfef0308afecb9af73a6f530b2d8727f6927159e7a9b",
+          "ev_9ebdc87783e70cd02bcf3bfea3f4081899145df063cf199f01786e44f0a32fa7",
+          "ev_fbbf7a7180d7c2ffc22f164a494c02e1817e94fbd23be6300b636e5b7af5bf70",
+          "ev_ae9383492b634f5deafd2dd095008f9894bed46f850b72f5f8ad0f2d0eb92b6f",
+          "ev_658990d1441f012ef2cd5478a156fb686a525a4f8248563096d042b25e277ab4"
+        ],
+        "asset_ids": [
+          "ev_ad1069ad73ecd88ce9080276796386418508fe5d37b9eb6606b77030e761e284"
+        ]
+      },
+      {
+        "role": "justification",
+        "title": "Justification",
+        "focus": "Explain the available material.",
+        "terms": [],
+        "claim_ids": [],
+        "evidence_ids": [
+          "ev_cc2694a32cfe9f0164ef2ce2a542c1439802b290725e5ba182d661fafb78f4dd"
+        ],
+        "asset_ids": []
+      }
+    ],
+    "term_policy": [],
+    "required_assets": [
+      {
+        "id": "ev_ad1069ad73ecd88ce9080276796386418508fe5d37b9eb6606b77030e761e284",
+        "included": true,
+        "reason": "Use the original table as a source object."
+      }
+    ]
+  }
+}

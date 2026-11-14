@@ -1,6 +1,8 @@
 package common
 
 func init() {
+	registerAdditionalError("paper_guide_model_timeout", 504, 2004414)
+	registerAdditionalError("paper_guide_model_request_failed", 502, 2004415)
 	registerAdditionalError("paper_guide_regeneration_required", 409, 2004413)
 	registerAdditionalErrorAlias("整篇导读仅支持按需或禁用", "paper_guide_disabled", 403, 2004410)
 	registerAdditionalError("paper_guide_source_changed", 409, 2004401)
