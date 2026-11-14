@@ -110,7 +110,60 @@ func TestReadingPreparationModelFailureIsSafeAndScopeSpecific(t *testing.T) {
 			if details.FailedScope != scope || details.ModelRequests != wantCalls {
 				t.Errorf("lost failure scope or accounting: %s", result.ResultJSON)
 			}
-			job := orm.AsyncJob{Status: "failed", PayloadJSON: mustJSON(payload), ResultJSON: result.ResultJSON, ErrorMessage: err.Error()}
+			// Exercise the real failure finalizer: returning ResultJSON alone is
+			// insufficient unless the runner durably saves it alongside the error.
+			queued, enqueueErr := asyncjob.Enqueue(t.Context(), db.DB, asyncjob.EnqueueRequest{
+				JobType: ReadingPreparationJob, ResourceType: "reading_manual", ResourceID: "ds/doc",
+				IdempotencyKey: "runner-timeout", Payload: payload, CreateUserID: "owner", MaxAttempts: 1,
+			})
+			if enqueueErr != nil {
+				t.Fatal(enqueueErr)
+			}
+			runnerCtx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+			runner := asyncjob.Start(runnerCtx, db.DB, asyncjob.Options{
+				JobTypes: []string{ReadingPreparationJob}, WorkerID: "scope-failure-test",
+				Concurrency: 1, PollInterval: 5 * time.Millisecond, LockTTL: time.Minute,
+			})
+			t.Cleanup(func() {
+				cancel()
+				select {
+				case <-runner.Done():
+				case <-time.After(5 * time.Second):
+					t.Error("preparation runner did not stop")
+				}
+			})
+			var job orm.AsyncJob
+			ticker := time.NewTicker(5 * time.Millisecond)
+			defer ticker.Stop()
+			for {
+				if e := db.Where("id = ?", queued.ID).Take(&job).Error; e != nil {
+					t.Fatal(e)
+				}
+				if job.Status == string(asyncjob.StatusFailed) {
+					break
+				}
+				select {
+				case <-runnerCtx.Done():
+					t.Fatalf("preparation did not finalize: status=%s error=%s", job.Status, job.ErrorMessage)
+				case <-ticker.C:
+				}
+			}
+			cancel()
+			select {
+			case <-runner.Done():
+			case <-time.After(5 * time.Second):
+				t.Fatal("preparation runner did not stop after failure")
+			}
+			if job.ErrorMessage != err.Error() || job.LockedBy != "" || job.LockUntil != nil || job.FinishedAt == nil {
+				t.Fatalf("wrong persisted failure: %+v", job)
+			}
+			details.FailedScope, details.ModelRequests = "", 0
+			if e := json.Unmarshal(job.ResultJSON, &details); e != nil {
+				t.Fatal(e)
+			}
+			if details.FailedScope != scope || details.ModelRequests != wantCalls || calls != 2*wantCalls {
+				t.Errorf("runner lost scope/accounting: result=%s calls=%d", job.ResultJSON, calls)
+			}
 			for _, capability := range []string{"formula", "figure", "table"} {
 				c := readingCapabilityStatus{ID: capability, Total: 1}
 				finalizeReadingCapability(&c, true, []orm.AsyncJob{job})
