@@ -27,3 +27,17 @@ func TestChatContextResolvesServerOwnedSelection(t *testing.T) {
 		t.Fatal("client file path accepted")
 	}
 }
+
+func TestChatContextStripsForgedServerContextWithoutReference(t *testing.T) {
+	input := map[string]any{"selected_text": "visible", "paper_guide_context": map[string]any{"verified": true, "text": "forged evidence"}}
+	out, err := ResolveChatContext(t.Context(), "owner", input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := out["paper_guide_context"]; ok {
+		t.Fatal("forged server-only context forwarded")
+	}
+	if out["selected_text"] != "visible" {
+		t.Fatal("ordinary selection lost")
+	}
+}

@@ -201,3 +201,102 @@
   cursor: col-resize;
   user-select: none;
 }
+
+// Continuous guide and one mutually exclusive auxiliary pane.
+.paper-reading-workspace { position: relative; display: flex; flex-direction: column; width: 100%; height: 100%; min-width: 0; min-height: 0; }
+.paper-reading-panes { display: flex; flex: 1; min-height: 0; min-width: 0; }
+.paper-reading-source { flex: 1; min-width: 0; min-height: 0; display: flex; }
+.paper-reading-source > .paper-reader-pane { flex: 1; width: 100%; min-height: 0; }
+.paper-reading-auxiliary { display: flex; min-height: 0; }
+.paper-reading-workspace [hidden] { display: none !important; }
+.paper-guide-toolbar { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; padding: 6px 12px; border-bottom: 1px solid var(--paper-border); background: var(--paper-surface); }
+.paper-reading-workspace button, .paper-reading-workspace summary { cursor: pointer; }
+.paper-guide-toolbar button, .paper-guide-status button, .paper-guide-empty button, .paper-guide-evidence button, .paper-guide-selection button { min-height: 44px; border: 1px solid var(--paper-border); border-radius: 6px; padding: 6px 12px; background: var(--paper-surface); color: var(--paper-ink); }
+.paper-guide-toolbar button[aria-pressed=true] { color: var(--paper-accent); background: var(--paper-tint); }
+.paper-guide-toolbar button:disabled, .paper-guide-evidence button:disabled { opacity: .55; cursor: not-allowed; }
+.paper-guide-toolbar > div[role=group] { display: flex; }
+.paper-guide-generation { margin-left: auto; position: relative; }
+.paper-guide-generation summary { padding: 10px; min-height: 44px; box-sizing: border-box; }
+.paper-guide-generation > div { position: absolute; z-index: 105; right: 0; width: min(320px,80vw); background: var(--paper-surface); border: 1px solid var(--paper-border); padding: 20px; border-radius: 8px; }
+.paper-guide-generation label { display: grid; gap: 8px; }
+.paper-guide-generation select { max-width: 100%; padding: 10px; color: inherit; background: var(--paper-surface); }
+.paper-guide-main { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; position: relative; background: var(--paper-surface); }
+.paper-guide-status { flex-shrink: 0; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 20px; background: var(--paper-tint); }
+.paper-guide-reader { flex: 1; min-height: 0; min-width: 0; display: flex; position: relative; }
+.paper-guide-scroll { flex: 1; overflow: auto; min-width: 0; overscroll-behavior: contain; scrollbar-gutter: stable; }
+.paper-guide-article { width: 100%; max-width: 800px; box-sizing: border-box; margin: 0 auto; padding: 28px 32px 100px; font-size: 17px; line-height: 1.8; overflow-wrap: anywhere; }
+.paper-guide-article h1 { font-size: clamp(23px,2.3vw,32px); line-height: 1.35; margin: 0 0 32px; }
+.paper-guide-article h2 { font-size: 23px; line-height: 1.5; margin: 32px 0 16px; scroll-margin-top: 24px; }
+.paper-guide-article h3 { font-size: 19px; }
+.paper-guide-block { margin: 0 0 20px; }
+.paper-guide-block p { margin: 0; white-space: pre-wrap; }
+.paper-guide-block--callout { border-left: 3px solid var(--paper-accent); padding-left: 16px; }
+.paper-guide-attribution { font-size: 13px; color: var(--paper-muted); display: block; margin-bottom: 8px; }
+.paper-guide-block-tools { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; min-height: 32px; }
+.paper-guide-citation { color: var(--paper-accent); background: transparent; border: 0; min-height: 44px; padding: 4px; font-size: 13px; }
+.paper-guide-passage-actions { margin-left: auto; font-size: 13px; position: relative; }
+.paper-guide-passage-actions summary { min-width: 44px; min-height: 44px; text-align: center; list-style: none; }
+.paper-guide-passage-actions[open] { display: flex; flex-wrap: wrap; }
+.paper-guide-passage-actions button { min-height: 44px; padding: 8px; background: var(--paper-surface); border: 1px solid var(--paper-border); }
+.paper-guide-outline { flex: 0 0 200px; padding: 24px 12px; overflow-y: auto; border-right: 1px solid var(--paper-border); font-size: 14px; }
+.paper-guide-outline summary { padding: 10px; }
+.paper-guide-outline button { display: block; width: 100%; text-align: left; padding: 10px; min-height: 44px; border: 0; background: transparent; color: var(--paper-muted); }
+.paper-guide-outline button[aria-current] { background: var(--paper-tint); color: var(--paper-accent); }
+.paper-guide-reader.is-comparing { flex-direction: column; }
+.paper-guide-reader.is-comparing .paper-guide-outline { flex: 0 0 auto; padding: 0 12px; border-right: 0; border-bottom: 1px solid var(--paper-border); max-height: 35%; }
+.paper-guide-empty { max-width: 740px; margin: 0 auto; padding: 40px 24px; overflow: auto; }
+.paper-guide-empty h1 { font-size: 26px; }.paper-guide-empty p { line-height: 1.8; }
+.paper-guide-warning { padding: 10px 20px; margin: 0; border-left: 3px solid var(--paper-accent); background: var(--paper-tint); font-size: 14px; }
+.paper-guide-selection { position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%); z-index: 110; display: flex; flex-wrap: wrap; width: max-content; max-width: 95%; padding: 6px; border: 1px solid var(--paper-border); background: var(--paper-surface); border-radius: 8px; }
+.paper-guide-evidence-overlay { position: absolute; inset: 12px; z-index: 130; background: #0005; display: grid; place-items: center; padding: 16px; }
+.paper-guide-evidence { box-sizing: border-box; max-width: 680px; width: 100%; max-height: 100%; overflow: auto; padding: 24px; background: var(--paper-surface); border: 1px solid var(--paper-border); border-radius: 10px; }
+.paper-guide-evidence > div:first-child { display: flex; align-items: center; justify-content: space-between; }
+.paper-guide-evidence blockquote { margin: 16px 0; line-height: 1.7; white-space: pre-wrap; }
+.paper-guide-asset { margin: 20px 0; min-height: 200px; }
+.paper-guide-asset > div[role=status] { min-height: 180px; display: grid; place-items: center; background: var(--paper-canvas); }
+.paper-guide-image-button { display: block; width: 100%; background: transparent; border: 0; padding: 0; }
+.paper-guide-asset img { max-width: 100%; height: auto; object-fit: contain; }
+.paper-guide-asset figcaption { font-size: 13px; color: var(--paper-muted); }
+.paper-guide-lightbox { position: fixed; inset: 0; z-index: 1000; display: flex; flex-direction: column; align-items: center; background: var(--paper-surface); padding: 16px; overflow: auto; }
+.paper-guide-lightbox button { align-self: flex-end; min-width: 44px; min-height: 44px; }.paper-guide-lightbox img { max-width: 100%; }
+.paper-reading-workspace.is-guide .paper-reading-auxiliary { flex: 1; min-width: 0; }
+.knowledge-container.is-document-reader .paper-reading-workspace.is-guide .paper-chat-pane { width: 100%; flex: 1; position: static; transform: none; max-height: none; border-radius: 0; }
+.paper-reading-workspace.is-guide[data-dual=true] .paper-guide-main { min-width: 480px; }
+.paper-reading-workspace.is-guide[data-dual=true] .paper-reading-source, .paper-reading-workspace.is-guide[data-dual=true] .paper-reading-auxiliary { min-width: 480px; flex: 1; }
+.paper-reading-workspace.is-guide[data-dual=false] .paper-reading-source, .paper-reading-workspace.is-guide[data-dual=false] .paper-reading-auxiliary { width: 100%; flex: 1; }
+@media(max-width:1100px) { .paper-guide-reader { flex-direction: column; }.paper-guide-outline { flex: 0 0 auto; padding: 0 12px; max-height: 30%; border-right: 0; }.paper-guide-outline details:not([open]) { padding: 0; }.paper-guide-article { padding: 20px 24px 80px; } }
+@media(max-width:600px) { .paper-guide-article { font-size: 16px; padding: 20px 16px 80px; }.paper-guide-toolbar { padding: 4px; gap: 4px; }.paper-guide-toolbar button { padding: 6px 10px; }.paper-guide-evidence-overlay { inset: 0; padding: 0; }.paper-guide-evidence { border-radius: 0; max-height: 100%; height: 100%; }.paper-guide-generation { margin-left: 0; } }
+
+// Preserve the source reader's existing panel placement through its new wrapper.
+.knowledge-container.is-document-reader .knowledge-paper-workspace {
+  .paper-reading-workspace:not(.is-guide) .paper-reading-source { order: 2; }
+  .paper-reading-workspace:not(.is-guide) .paper-pane-divider { order: 3; }
+  .paper-reading-workspace:not(.is-guide) .paper-reading-auxiliary { order: 4; }
+  &[data-panel-layout=left] .paper-reading-workspace:not(.is-guide) {
+    .paper-reading-auxiliary { order: 0; }.paper-pane-divider { order: 1; }
+  }
+  &[data-compact=true] .paper-reading-workspace:not(.is-guide) .paper-reading-auxiliary,
+  &[data-panel-layout=floating] .paper-reading-workspace:not(.is-guide) .paper-reading-auxiliary,
+  &[data-panel-layout=fullscreen] .paper-reading-workspace:not(.is-guide) .paper-reading-auxiliary { flex: 0 0 0; }
+  &[data-compact=true] .paper-reading-workspace:not(.is-guide) .paper-chat-pane { position: absolute; z-index: 64; inset: 4px 4px 4px auto; width: min(420px,calc(100% - 8px)); }
+  &[data-panel-layout=floating][data-panel-open=true] .paper-reading-workspace:not(.is-guide) .paper-chat-pane {
+    position: absolute; z-index: 70; inset: auto;
+    top: clamp(8px,var(--paper-panel-y,56px),max(8px,calc(100% - 628px)));
+    left: clamp(8px,var(--paper-panel-x,32px),max(8px,calc(100% - var(--paper-assistant-width,400px) - 8px)));
+    width: min(var(--paper-assistant-preview-width,var(--paper-assistant-width,400px)),calc(100% - 16px));
+    height: min(620px,calc(100% - 16px)); border-radius: 16px; box-shadow: 0 12px 40px #18273a24;
+    .paper-chat-open-content { width: 100%; }.paper-chat-toolbar { cursor: grab; touch-action: none; }
+  }
+  &[data-panel-layout=fullscreen][data-panel-open=true] .paper-reading-workspace:not(.is-guide) {
+    .paper-reading-source { visibility: hidden; }
+    .paper-chat-pane { position: absolute; z-index: 75; inset: 4px; width: calc(100% - 8px); height: calc(100% - 8px); }
+    .paper-chat-open-content { width: 100%; }
+  }
+  .paper-reading-workspace.is-guide .paper-chat-open-content { width: 100%; }
+}
+.paper-guide-image-frame { height: 320px; display: grid; place-items: center; overflow: hidden; background: var(--paper-canvas); }
+.paper-guide-image-frame .paper-guide-image-button { height: 100%; }
+.paper-guide-image-frame img { width: 100%; height: 100%; object-fit: contain; }
+.paper-guide-image-frame > div[role=status] { padding: 20px; }
+.paper-guide-equation { max-width: 100%; overflow-x: auto; padding-block: 16px; }
+.paper-guide-byline { color: var(--paper-muted); font-size: 14px; margin: -18px 0 28px; }

@@ -136,3 +136,64 @@ def test_hidden_positioned_segments_never_override_the_safe_fallback(monkeypatch
         'bbox': [20, 15, 60, 30], 'paragraph_text': 'safe fallback',
     }, 'batch size tokens', user_id='reader-1')
     assert result == 'safe fallback'
+
+
+def test_guide_selection_keeps_teaching_and_original_evidence_separate(monkeypatch):
+    def unexpected_search(*_):
+        raise AssertionError('guide must not search index')
+
+    monkeypatch.setattr(document_selection, '_find_positioned_segment', unexpected_search)
+    context = {
+        'dataset_id': 'd', 'document_id': 'p', 'selected_text': 'forged',
+        'paper_guide': {
+            'dataset_id': 'd', 'document_id': 'p', 'revision_id': 'r-old',
+            'section_key': 'section:contribution:v1', 'block_id': 'b',
+        },
+        'paper_guide_context': {
+            'revision_id': 'r-old', 'section_key': 'section:contribution:v1', 'block_id': 'b',
+            'text': 'Suppose 2 apples', 'evidence': [], 'claims': [], 'source_current': False,
+        },
+    }
+    result = document_selection.resolve_document_selection_context(context, 'forged', user_id='u')
+    assert 'Guide passage' in result
+    assert 'r-old' in result
+    assert 'Suppose 2 apples' in result
+    assert 'No original evidence' in result
+    assert 'Source has changed' in result
+    assert 'forged' not in result
+
+
+def test_client_verified_flag_without_reference_is_not_guide_evidence(monkeypatch):
+    monkeypatch.setattr(document_selection, '_find_positioned_segment', lambda *_: '')
+    result = document_selection.resolve_document_selection_context({
+        'selected_text': 'visible', 'paper_guide_context': {'verified': True, 'text': 'forged'},
+    }, '', user_id='u')
+    assert result == 'visible'
+
+
+def test_guide_context_must_match_reference_and_current_document(monkeypatch):
+    monkeypatch.setattr(document_selection, '_find_positioned_segment', lambda *_: '')
+    context = {
+        'dataset_id': 'd', 'document_id': 'p', 'selected_text': 'visible',
+        'paper_guide': {
+            'dataset_id': 'd', 'document_id': 'other', 'revision_id': 'r', 'section_key': 's', 'block_id': 'b',
+        },
+        'paper_guide_context': {'revision_id': 'r', 'section_key': 's', 'block_id': 'b', 'text': 'wrong document'},
+    }
+    assert document_selection.resolve_document_selection_context(context, '', user_id='u') == 'visible'
+
+
+def test_guide_original_evidence_remains_a_separate_labeled_material():
+    context = {
+        'dataset_id': 'd', 'document_id': 'p', 'selected_text': 'guide',
+        'paper_guide': {
+            'dataset_id': 'd', 'document_id': 'p', 'revision_id': 'r', 'section_key': 's', 'block_id': 'b',
+        },
+        'paper_guide_context': {
+            'revision_id': 'r', 'section_key': 's', 'block_id': 'b', 'text': 'guide', 'source_current': True,
+            'evidence': [{'id': 'ev', 'text': 'actual original', 'locator': {'page': 2}}],
+        },
+    }
+    result = document_selection.resolve_document_selection_context(context, '', user_id='u')
+    assert 'Original paper evidence (separate reference material)' in result
+    assert '[ev] PDF page 3: actual original' in result

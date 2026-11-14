@@ -70,3 +70,4 @@ it('places services above plans and restores expanded controls when reopened', a
  view.rerender(<ReadingPreferencesModal open onClose={() => {}} />);
  expect(await screen.findByRole('combobox',{name:'公式研读'})).toBeInTheDocument();
 });
+it('only offers on-demand or disabled guide generation even in the full preset',async()=>{render(<ReadingPreferencesModal open onClose={()=>{}}/>);const guide=await screen.findByRole('combobox',{name:'论文导读'});fireEvent.click(screen.getByRole('radio',{name:/充分准备/}));fireEvent.mouseDown(guide);expect(screen.getAllByRole('option').map(e=>e.textContent)).not.toContain('自动');});

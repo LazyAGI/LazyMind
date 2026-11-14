@@ -27,7 +27,14 @@ func SetChatSelectionResolver(fn func(context.Context, Scope, string, SelectionR
 func ResolveChatContext(ctx context.Context, user string, input map[string]any) (map[string]any, error) {
 	raw, ok := input["paper_guide"]
 	if !ok {
-		return input, nil
+		// This field is exclusively produced by the authenticated resolver.
+		clean := make(map[string]any, len(input))
+		for key, value := range input {
+			if key != "paper_guide_context" {
+				clean[key] = value
+			}
+		}
+		return clean, nil
 	}
 	b, e := json.Marshal(raw)
 	if e != nil {

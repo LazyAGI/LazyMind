@@ -1,6 +1,6 @@
 import { axiosInstance, BASE_URL } from '@/components/request';
 export type ReadingScope = 'pdf_parse' | 'formula' | 'figure' | 'table';
-export type ReadingCapabilityId = ReadingScope | 'chat_prepare';
+export type ReadingCapabilityId = ReadingScope | 'chat_prepare' | 'paper_guide';
 export type ReadingMode = 'on_demand' | 'automatic' | 'disabled';
 export type ReadingPreset = 'demand' | 'advance' | 'full' | 'custom';
 export interface ReadingPolicy {
@@ -42,7 +42,7 @@ export async function prepareReading(dataset: string, document: string, scopes: 
   return (await axiosInstance.post(`${documentPath(dataset, document)}:prepare-reading`, { scopes })).data.data;
 }
 export function presetModes(preset: Exclude<ReadingPreset, 'custom'>): ReadingPolicy['modes'] {
-  return { pdf_parse: preset === 'demand' ? 'on_demand' : 'automatic', chat_prepare: 'on_demand',
+  return { pdf_parse: preset === 'demand' ? 'on_demand' : 'automatic', chat_prepare: 'on_demand', paper_guide: 'on_demand',
     formula: preset === 'full' ? 'automatic' : 'on_demand', figure: preset === 'full' ? 'automatic' : 'on_demand', table: preset === 'full' ? 'automatic' : 'on_demand' };
 }
 export function readingDependencyError(policy: ReadingPolicy): string | undefined {

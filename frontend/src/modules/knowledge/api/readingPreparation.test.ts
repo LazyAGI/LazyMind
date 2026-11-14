@@ -29,3 +29,4 @@ it('persists source-scoped provider references and clears them to inherit', asyn
   await saveReadingPreferences({ ...policy, parser_ref: '', study_model_ref: '' });
   expect(http.put).toHaveBeenLastCalledWith('/api/core/user/reading-preferences', { ...policy, parser_ref: '', study_model_ref: '' });
 });
+it('never automatically generates paper guides, including full preparation',()=>{expect(presetModes('full').paper_guide).toBe('on_demand');});

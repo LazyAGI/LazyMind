@@ -4,7 +4,7 @@ import { Alert, Button, Collapse, InputNumber, Modal, Radio, Select, Space, Spin
 import { getLocalizedErrorMessage } from '@/components/request';
 import { getReadingPreferences, saveReadingPreferences, presetModes, readingDependencyError, type ReadingPreferences, type ReadingPreset, type ReadingCapabilityId } from '../api/readingPreparation';
 import './ReadingPreferencesModal.css';
-const names: Record<ReadingCapabilityId, string> = { pdf_parse: '结构解析', chat_prepare: '文档对话准备', formula: '公式研读', figure: '图片研读', table: '表格研读' };
+const names: Record<ReadingCapabilityId, string> = { paper_guide: '论文导读', pdf_parse: '结构解析', chat_prepare: '文档对话准备', formula: '公式研读', figure: '图片研读', table: '表格研读' };
 const presets = [ ['demand', '按需准备', '用到时再生成', '由你决定每一次 AI 调用'], ['advance', '提前准备', '先解析，后研读', '导入后解析，解读按需生成'], ['full', '充分准备', '让解读提前就绪', '自动解析并生成公式、图表解读'] ] as const;
 export default function ReadingPreferencesModal({ open, onClose }: { open: boolean; onClose: () => void }) {
   const { token } = theme.useToken();
@@ -58,9 +58,9 @@ export default function ReadingPreferencesModal({ open, onClose }: { open: boole
       {(detailsOpen) && <div className="reading-capabilities">
         {Object.entries(names).map(([key, name]) => {
           const id = key as ReadingCapabilityId; const capability = draft.capabilities.find(c => c.id === id);
-          return <div className="reading-capability" key={id}><div><strong>{name}</strong><p>{id === 'chat_prepare' ? '为文档对话准备可检索文本，与结构解析独立。' : id === 'pdf_parse' ? '识别正文、公式、图片与表格，供后续研读使用。' : '每个条目可能调用模型，已有结果优先复用。'}</p>
+          return <div className="reading-capability" key={id}><div><strong>{name}</strong><p>{id === 'paper_guide' ? '按需生成整篇导读；不会随自动准备发起。' : id === 'chat_prepare' ? '为文档对话准备可检索文本，与结构解析独立。' : id === 'pdf_parse' ? '识别正文、公式、图片与表格，供后续研读使用。' : '每个条目可能调用模型，已有结果优先复用。'}</p>
             {capability?.unavailable_reason && <Typography.Text type="warning">{capability.unavailable_reason}</Typography.Text>}</div>
-            <Select aria-label={name} value={draft.modes[id]} disabled={saving} options={[{ value: 'on_demand', label: '按需' }, { value: 'automatic', label: '自动' }, { value: 'disabled', label: '禁用生成' }]} onChange={mode => setDraft({ ...draft, preset: 'custom', modes: { ...draft.modes, [id]: mode } })} />
+            <Select aria-label={name} value={draft.modes[id]} disabled={saving} options={[{ value: 'on_demand', label: '按需' }, ...(id === 'paper_guide' ? [] : [{ value: 'automatic', label: '自动' }]), { value: 'disabled', label: '禁用生成' }]} onChange={mode => setDraft({ ...draft, preset: 'custom', modes: { ...draft.modes, [id]: mode } })} />
           </div>;
         })}
       </div>}
