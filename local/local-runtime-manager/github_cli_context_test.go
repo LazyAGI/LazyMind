@@ -36,3 +36,31 @@ func TestGitHubHostConfigSurvivesServiceEnvironmentScoping(t *testing.T) {
 		})
 	}
 }
+
+func TestHostGitXDGConfigSurvivesServiceEnvironmentScoping(t *testing.T) {
+	for _, source := range []string{"default", "custom"} {
+		t.Run(source, func(t *testing.T) {
+			home := t.TempDir()
+			t.Setenv(localHostHomeEnvVar, home)
+			t.Setenv("HOME", home)
+			t.Setenv("LAZYMIND_HOST_XDG_CONFIG_HOME", "")
+			t.Setenv("XDG_CONFIG_HOME", "")
+			t.Setenv("LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN", "fixture-internal-token")
+			t.Setenv("LAZYMIND_CLIENT_INSTANCE_ID", "fixture-client")
+			want := filepath.Join(home, ".config")
+			if source == "custom" {
+				want = filepath.Join(home, "custom-xdg")
+				t.Setenv("XDG_CONFIG_HOME", want)
+			}
+			paths := RuntimePaths{ConfigDir: filepath.Join(home, "runtime-config"), ProcessComposeHome: filepath.Join(home, "process-home"), ServiceHome: filepath.Join(home, "service-home")}
+			env := processComposeRuntimeEnv(paths)
+			assertEnvContains(t, env, "LAZYMIND_HOST_XDG_CONFIG_HOME="+want)
+			for _, item := range env {
+				key, value, _ := strings.Cut(item, "=")
+				t.Setenv(key, value)
+			}
+			assertEnvContains(t, serviceRuntimeEnv(paths), "LAZYMIND_HOST_XDG_CONFIG_HOME="+want)
+			assertEnvContains(t, serviceRuntimeEnv(paths), "XDG_CONFIG_HOME="+paths.ConfigDir)
+		})
+	}
+}
