@@ -16,6 +16,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -455,7 +456,7 @@ func TestPaperGuideClientContractFailuresReachRunnerAsEvidenceErrors(t *testing.
 				if kind == "timeout" {
 					return testJSONResponse(504, `{"detail":{"error_code":"task_timeout","usage":{"model_calls":1,"elapsed_ms":120000}}}`), nil
 				}
-				usage := map[string]any{"task_type": "paper.guide.plan", "task_version": "paper-guide-v6", "model_calls": 1, "elapsed_ms": 19}
+				usage := map[string]any{"task_type": "paper.guide.plan", "task_version": "paper-guide-v7", "model_calls": 1, "elapsed_ms": 19}
 				if kind == "model_calls" {
 					usage[kind] = 2
 				} else {
@@ -558,5 +559,51 @@ func TestPaperGuideServiceHTTPVersionMatchesDurableAndPythonContract(t *testing.
 				t.Fatalf("worker did not receive successful contract output: output=%s err=%v calls=%d", output, err, calls)
 			}
 		})
+	}
+}
+
+func TestPaperGuideFragmentFixtureUsesCurrentActualTransport(t *testing.T) {
+	guideHTTPFixture(t)
+	raw, err := os.ReadFile("../paperguide/testdata/table-fragment-transport.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var fixture struct {
+		Version string          `json:"task_version"`
+		Input   map[string]any  `json:"input"`
+		Output  json.RawMessage `json:"output"`
+	}
+	if err = json.Unmarshal(raw, &fixture); err != nil {
+		t.Fatal(err)
+	}
+	previous := http.DefaultTransport
+	t.Cleanup(func() { http.DefaultTransport = previous })
+	calls := 0
+	http.DefaultTransport = roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		calls++
+		var wire struct {
+			Options map[string]string `json:"options"`
+			Input   struct {
+				Data map[string]any `json:"data"`
+			} `json:"input"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&wire); err != nil {
+			t.Fatal(err)
+		}
+		if wire.Options["task_version"] != fixture.Version || fixture.Version != paperguide.TaskVersion || !reflect.DeepEqual(wire.Input.Data, fixture.Input) {
+			t.Fatalf("changed canonical physical transport %+v", wire)
+		}
+		return testJSONResponse(200, string(mustJSON(map[string]any{"status": "succeeded", "output": fixture.Output, "usage": map[string]any{"model_calls": 1, "task_type": "paper.guide.extract", "task_version": fixture.Version}}))), nil
+	})
+	t.Setenv("LAZYMIND_CHAT_SERVICE_URL", "http://fixture.invalid")
+	got, err := paperGuideService().Call(t.Context(), "paper.guide.extract", fixture.Input, map[string]any{})
+	if err != nil || calls != 1 {
+		t.Fatalf("calls=%d err=%v output=%s", calls, err, got)
+	}
+	var actual, expected any
+	json.Unmarshal(got, &actual)
+	json.Unmarshal(fixture.Output, &expected)
+	if !reflect.DeepEqual(actual, expected) {
+		t.Fatal("canonical output changed")
 	}
 }

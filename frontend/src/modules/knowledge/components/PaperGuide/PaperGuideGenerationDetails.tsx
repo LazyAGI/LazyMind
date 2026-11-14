@@ -1,5 +1,5 @@
 import { coverageWarning } from "./coverageWarning";
-import { useLayoutEffect, useRef, useState, type CSSProperties } from "react";
+import { useId, useLayoutEffect, useRef, useState, type CSSProperties } from "react";
 import type { PaperGuideRevisionResponse } from "@/api/generated/core-client";
 import type { ReadingProviderSelection } from "../../api/readingPreparation";
 export default function PaperGuideGenerationDetails({
@@ -10,6 +10,7 @@ export default function PaperGuideGenerationDetails({
   revision,
   busy,
   canGenerate,
+  unavailableReason,
   active,
   onRegenerate,
 }: {
@@ -20,9 +21,11 @@ export default function PaperGuideGenerationDetails({
   revision?: PaperGuideRevisionResponse;
   busy: boolean;
   canGenerate: boolean;
+  unavailableReason?: string;
   active: boolean;
   onRegenerate: () => void;
 }) {
+  const reasonId = useId();
   const details = useRef<HTMLDetailsElement>(null);
   const [open, setOpen] = useState(false);
   const [bounds, setBounds] = useState<CSSProperties>({});
@@ -116,7 +119,9 @@ export default function PaperGuideGenerationDetails({
             ))}
           </ul>
         )}
+        {!canGenerate && unavailableReason && <p id={reasonId} role="status">{unavailableReason}</p>}
         <button
+          aria-describedby={!canGenerate && unavailableReason ? reasonId : undefined}
           disabled={busy || !canGenerate || active}
           onClick={onRegenerate}
         >

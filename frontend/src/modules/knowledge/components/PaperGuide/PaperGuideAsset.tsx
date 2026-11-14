@@ -9,9 +9,11 @@ export default function PaperGuideAsset({
   preview,
   language,
   unavailable = false,
+  onEvidence,
 }: {
   evidence?: PaperGuideEvidence;
   unavailable?: boolean;
+  onEvidence?: (id: string) => void;
   preview: GuidePreview;
   language: string;
 }) {
@@ -81,9 +83,17 @@ export default function PaperGuideAsset({
         )}
       </div>
       <figcaption>
-        {zh ? "原文" : "Source"} · PDF{" "}
+        {evidence?.source_type === "table" ? (zh ? "表格起始页" : "Table start page") : (zh ? "原文" : "Source")} · PDF{" "}
         {evidence ? evidence.locator.page + 1 : "—"}
       </figcaption>
+      {!unavailable && onEvidence && !!evidence?.fragment_evidence_ids?.length && (
+        <nav aria-label={zh ? "表格逐页来源" : "Physical table sources"}>
+          <p>{zh ? "各片段打开其已核实的物理页，包含该页表体、题注或脚注。" : "Each fragment opens its verified physical page, including table rows, captions or notes."}</p>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+            {evidence.fragment_evidence_ids.map((id, index) => <button key={id} onClick={() => onEvidence(id)}>{zh ? `表格来源片段 ${index + 1}` : `Table source fragment ${index + 1}`}</button>)}
+          </div>
+        </nav>
+      )}
       {image && evidence && !unavailable && (
         <Modal
           open={large}

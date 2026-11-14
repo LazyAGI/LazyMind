@@ -259,6 +259,9 @@ func verifyPrecisionPayloads(items []contentItem, pages []precisionPage) error {
 					}
 				}
 			}
+			if len(bodies) == 0 && precisionDeletedTable(para) && item.Body == "" && precisionAssetStrings(item.Captions, para, "table_caption") && precisionAssetStrings(item.Footnotes, para, "table_footnote") {
+				continue // association to exactly one surviving parent is proved separately
+			}
 			if len(bodies) != 1 {
 				return bad("table requires one complete body")
 			}

@@ -3,8 +3,8 @@ package paperguide
 
 import "lazymind/core/pdfir"
 
-const TaskVersion = "paper-guide-v6"
-const SourceCatalogVersion = "paper-guide-source-v3"
+const TaskVersion = "paper-guide-v7"
+const SourceCatalogVersion = "paper-guide-source-v4"
 const legacySourceNamespace = "paper-guide-v1"
 
 type Role string
@@ -91,12 +91,13 @@ type SourceSection struct {
 }
 
 type GuideAsset struct {
-	ID            string                `json:"id"` // Same ID as its primary evidence entry.
-	BlockID       string                `json:"block_id"`
-	Kind          string                `json:"kind"`
-	Locator       GuideLocator          `json:"locator"`
-	RelatedBlocks []pdfir.TableRelation `json:"related_blocks"`
-	Warnings      []string              `json:"warnings"`
+	FragmentEvidenceIDs []string              `json:"fragment_evidence_ids,omitempty"`
+	ID                  string                `json:"id"` // Same ID as its primary evidence entry.
+	BlockID             string                `json:"block_id"`
+	Kind                string                `json:"kind"`
+	Locator             GuideLocator          `json:"locator"`
+	RelatedBlocks       []pdfir.TableRelation `json:"related_blocks"`
+	Warnings            []string              `json:"warnings"`
 }
 
 // GuideLocator is a tagged union. Pages are zero based; text ranges are half-open
@@ -117,12 +118,14 @@ type GuideCell struct {
 	Column int `json:"column"`
 }
 type GuideEvidence struct {
-	SourceRegionID string       `json:"source_region_id,omitempty"`
-	ID             string       `json:"id"`
-	SourceBlockID  string       `json:"source_block_id"`
-	SourceType     string       `json:"source_type"`
-	Text           string       `json:"text"`
-	Locator        GuideLocator `json:"locator"`
+	ParentAssetID       string       `json:"parent_asset_id,omitempty"`
+	FragmentEvidenceIDs []string     `json:"fragment_evidence_ids,omitempty"`
+	SourceRegionID      string       `json:"source_region_id,omitempty"`
+	ID                  string       `json:"id"`
+	SourceBlockID       string       `json:"source_block_id"`
+	SourceType          string       `json:"source_type"`
+	Text                string       `json:"text"`
+	Locator             GuideLocator `json:"locator"`
 }
 
 type GuideClaim struct {

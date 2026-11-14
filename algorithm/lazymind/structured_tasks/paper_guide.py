@@ -19,6 +19,8 @@ Use the evidence itself for paper facts; a prior summary, plan or extract is not
 Keep exact conditions, quantifiers, units, numerical sign and sample boundaries. Distinguish
 paper statements, teaching examples, interpretation and external background. A citation in a
 reference list does not establish the cited claim independently. A caption is not visual observation.
+Table parents identify the start page; cite physical text fragments for cell/footnote facts.
+parent_asset_id binds each fragment to the sole planned asset; fragment_evidence_ids lists its sources.
 """
 
 EXTRACT = """
@@ -44,9 +46,7 @@ readable contents; preserve those gaps and never invent the missing image, cells
 Asset cross-check: each section.asset_ids ID must have exactly one required_assets decision with
 included=true; every included=true decision must be used by at least one section. Excluded or
 undecided IDs must never appear in asset_ids. Citing a table as text in evidence_ids does not
-require displaying it as an asset. Example: to display an existing table T, first give T a decision
-with included=true and a reason, then put the SAME original ID in that section's asset_ids.
-T is notation, never an output ID. If T is excluded, do not put it in asset_ids.
+require displaying it as an asset.
 Plan section reference lists have set semantics: list each exact claim/evidence/asset ID once.
 Never duplicate a claim or asset-decision definition.
 Assign each central comparison and its qualifying conditions to a responsible section using

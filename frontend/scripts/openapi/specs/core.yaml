@@ -10992,10 +10992,16 @@ components:
             type: object
         PaperGuideEvidence:
             properties:
+                fragment_evidence_ids:
+                    items:
+                        type: string
+                    type: array
                 id:
                     type: string
                 locator:
                     $ref: '#/components/schemas/PaperGuideLocator'
+                parent_asset_id:
+                    type: string
                 source_block_id:
                     type: string
                 source_region_id:

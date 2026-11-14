@@ -520,3 +520,15 @@ it.each([
     expect(screen.getByRole("article")).toBeVisible();
   },
 );
+
+it("explains unavailable regeneration while a historical guide remains readable", async () => {
+  state.value = { ...state.value, status: { ...status(), can_generate: false, unavailable_reason: "paper_guide_source_precision_unavailable" }, revision: { ...revision(), source_current: false } };
+  render(<Harness />);
+  fireEvent.click(screen.getByRole("button", { name: "Guide" }));
+  fireEvent.click(screen.getByText("Generation details"));
+  const button = screen.getByRole("button", { name: "Regenerate" });
+  expect(button).toBeDisabled();
+  expect(button).toHaveAccessibleDescription(/Source pages could not be verified/);
+  expect(screen.getByText(/original paper and historical guides remain readable/)).toBeVisible();
+  expect(screen.queryByText("paper_guide_source_precision_unavailable")).not.toBeInTheDocument();
+});

@@ -466,6 +466,13 @@ func (x *execution) planInput(ctx context.Context) (map[string]any, GuideSourceS
 			}
 		}
 	}
+	// Extraction may summarize claims, but cannot remove the physical table
+	// group before its single parent asset decision is planned.
+	for _, asset := range x.snap.Assets {
+		if len(asset.FragmentEvidenceIDs) > 0 {
+			keep[asset.ID] = true
+		}
+	}
 	ids = []string{}
 	for _, ev := range x.snap.Evidence {
 		if keep[ev.ID] {

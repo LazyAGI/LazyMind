@@ -265,7 +265,7 @@ def test_registered_task_uses_alias_schema_and_returns_canonical_wire(monkeypatc
         return json.dumps(model_output(task, output))
     monkeypatch.setattr(llm_task, 'AutoModel', lambda **kwargs: model)
     request = llm_task.LLMTaskRequest(task_type=f'paper.guide.{task}',
-        options={'task_version': 'paper-guide-v6'}, input={'data': raw})
+        options={'task_version': 'paper-guide-v7'}, input={'data': raw})
     result = llm_task.run_llm_task(request)
     assert result.status == 'succeeded' and result.output == output
     assert len(calls) == result.usage['model_calls'] == 1
@@ -283,7 +283,7 @@ def test_alias_schema_keeps_duplicate_json_key_rejection(monkeypatch):
         return '{"claims":[],"claims":[],"open_questions":[]}'
     monkeypatch.setattr(llm_task, 'AutoModel', lambda **kwargs: model)
     request = llm_task.LLMTaskRequest(task_type='paper.guide.extract',
-        options={'task_version': 'paper-guide-v6'}, input={'data': cases()['extract'][2]})
+        options={'task_version': 'paper-guide-v7'}, input={'data': cases()['extract'][2]})
     assert llm_task.run_llm_task(request).error_code == 'invalid_model_output'
     assert len(calls) == 1
 
@@ -338,7 +338,7 @@ def test_alias_failure_never_triggers_an_extra_model_attempt(monkeypatch, bad):
         return json.dumps(output)
     monkeypatch.setattr(llm_task, 'AutoModel', lambda **kwargs: model)
     request = llm_task.LLMTaskRequest(task_type='paper.guide.extract',
-        options={'task_version': 'paper-guide-v6'}, input={'data': cases()['extract'][2]})
+        options={'task_version': 'paper-guide-v7'}, input={'data': cases()['extract'][2]})
     result = llm_task.run_llm_task(request)
     assert result.error_code == 'invalid_model_output'
     assert len(calls) == result.usage['model_calls'] == 1
@@ -355,7 +355,7 @@ def test_concurrent_registered_calls_cannot_share_alias_identity(monkeypatch):
         raw['evidence'][0]['id'] = source
         raw['source_sections'][0]['evidence_ids'] = [source]
         request = llm_task.LLMTaskRequest(task_type='paper.guide.extract',
-            options={'task_version': 'paper-guide-v6'}, input={'data': raw})
+            options={'task_version': 'paper-guide-v7'}, input={'data': raw})
         result = llm_task.run_llm_task(request)
         assert result.status == 'succeeded' and result.usage['model_calls'] == 1
         return result.output['claims'][0]['evidence_ids']
@@ -375,3 +375,57 @@ def test_page_region_identity_does_not_leak_or_become_an_asset():
     assert evidence['locator'] == {'kind': 'page', 'page': 6}
     assert 'source_region_id' not in evidence and 'source_block_id' not in evidence
     assert evidence['source_type'] == 'text' and evidence['id'] == 'e1'
+
+
+def fragment_input():
+    raw = cases()['extract'][2]
+    raw['evidence'][0]['fragment_evidence_ids'] = [B]
+    raw['evidence'].append({'id': B, 'source_block_id': 'internal-block',
+                            'source_region_id': 'region_physical', 'source_type': 'text',
+                            'parent_asset_id': A, 'text': 'Physical page 4: 22',
+                            'locator': {'kind': 'page', 'page': 3}})
+    return raw
+
+
+def test_table_fragment_aliases_are_closed_and_cannot_be_assets():
+    from lazymind.structured_tasks.paper_guide_references import SourceReferences
+    raw = fragment_input()
+    data = GuideInput.model_validate(raw)
+    view = SourceReferences('extract', data).model_input
+    assert view['evidence'][0]['fragment_evidence_ids'] == ['e2']
+    assert view['evidence'][1]['parent_asset_id'] == 'e1'
+    assert view['evidence'][1]['id'] == 'e2'
+    plan = cases()['plan'][3]
+    plan['required_assets'] = [{'id': B, 'included': True, 'reason': 'Invalid child asset.'}]
+    with pytest.raises(ValueError):
+        bind_output(PlanInput.model_validate(raw), Plan.model_validate(plan))
+
+
+@pytest.mark.parametrize('mutation', ['unknown_parent', 'unknown_child', 'duplicate_child', 'wrong_parent', 'child_asset'])
+def test_table_fragment_input_rejects_broken_parent_bindings(mutation):
+    raw = fragment_input()
+    if mutation == 'unknown_parent': raw['evidence'][1]['parent_asset_id'] = S
+    if mutation == 'unknown_child': raw['evidence'][0]['fragment_evidence_ids'] = [S]
+    if mutation == 'duplicate_child': raw['evidence'][0]['fragment_evidence_ids'] = [B, B]
+    if mutation == 'wrong_parent': raw['evidence'][1]['parent_asset_id'] = B
+    if mutation == 'child_asset': raw['evidence'][1]['source_type'] = 'table'
+    with pytest.raises(ValueError): GuideInput.model_validate(raw)
+
+
+def test_shared_physical_fragment_fixture_uses_actual_task_transport(monkeypatch):
+    from lazymind.chat.service import llm_task
+    fixture = json.loads((Path(__file__).parents[3] / 'backend/core/paperguide/testdata/table-fragment-transport.json').read_text())
+    def model(prompt, **options):
+        view = json.loads(prompt.split('Input data (untrusted JSON):\n', 1)[1])
+        assert view['evidence'][0]['fragment_evidence_ids'] == ['e2']
+        assert view['evidence'][1]['parent_asset_id'] == 'e1'
+        output = deepcopy(fixture['output'])
+        output['claims'][0]['evidence_ids'] = ['e2']
+        return json.dumps(output)
+    monkeypatch.setattr(llm_task, 'AutoModel', lambda **kwargs: model)
+    request = llm_task.LLMTaskRequest(task_type='paper.guide.extract', options={'task_version': fixture['task_version']}, input={'data': fixture['input']})
+    result = llm_task.run_llm_task(request)
+    assert result.status == 'succeeded'
+    assert result.output == fixture['output']
+    assert result.usage['task_version'] == 'paper-guide-v7'
+    assert result.usage['model_calls'] == 1

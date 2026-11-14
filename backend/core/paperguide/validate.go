@@ -19,7 +19,7 @@ func ValidateSnapshot(s GuideSourceSnapshot, identity SourceIdentity, irDigest s
 		return fmt.Errorf("%w: identity or digest mismatch", ErrInvalidSource)
 	}
 	warnings := s.Coverage.Warnings
-	if s.CatalogVersion == SourceCatalogVersion || s.CatalogVersion == "paper-guide-source-v2" {
+	if s.CatalogVersion == SourceCatalogVersion || s.CatalogVersion == "paper-guide-source-v2" || s.CatalogVersion == "paper-guide-source-v3" {
 		warnings = s.SourceWarnings
 	}
 	if len(warnings) == 0 {
@@ -119,6 +119,37 @@ func RestrictEvidence(s GuideSourceSnapshot, ids []string) (GuideSourceSnapshot,
 	for _, id := range ids {
 		if !addID(wanted, id) {
 			return GuideSourceSnapshot{}, invalid("duplicate packet ID")
+		}
+	}
+	known := map[string]GuideEvidence{}
+	for _, e := range s.Evidence {
+		known[e.ID] = e
+	}
+	for id := range wanted {
+		if _, ok := known[id]; !ok {
+			return GuideSourceSnapshot{}, invalid("unknown packet ID")
+		}
+	}
+	// A table is an indivisible source group for admission and extraction.
+	// Closure retains every physical row and ensures all model parent references
+	// are present even when a claim initially selected just one fragment.
+	for changed := true; changed; {
+		changed = false
+		for id := range wanted {
+			e := known[id]
+			refs := append([]string{}, e.FragmentEvidenceIDs...)
+			if e.ParentAssetID != "" {
+				refs = append(refs, e.ParentAssetID)
+			}
+			for _, ref := range refs {
+				if _, ok := known[ref]; !ok {
+					return GuideSourceSnapshot{}, invalid("unknown table reference")
+				}
+				if !wanted[ref] {
+					wanted[ref] = true
+					changed = true
+				}
+			}
 		}
 	}
 	selected := []GuideEvidence{}

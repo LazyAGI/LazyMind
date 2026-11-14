@@ -125,3 +125,11 @@ it.each([
     );
   },
 );
+
+it("explains why a readable historical guide cannot be regenerated", () => {
+  const r = revision(); r.source_current = false;
+  render(<PaperGuideGenerationDetails zh model="" setModel={() => {}} revision={r} busy={false} active={false} canGenerate={false} unavailableReason="来源定位暂无法核验，可继续查看原文。" onRegenerate={() => {}} />);
+  const button = screen.getByRole("button", { name: "重新生成", hidden: true });
+  expect(button).toBeDisabled();
+  expect(button).toHaveAccessibleDescription("来源定位暂无法核验，可继续查看原文。");
+});

@@ -1,6 +1,6 @@
 import { ConfigProvider } from "antd";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { expect, it } from "vitest";
+import { expect, it, vi } from "vitest";
 import PaperGuideAsset from "./PaperGuideAsset";
 import type { PaperGuideEvidence } from "@/api/generated/core-client";
 it("restores the enlarged figure opener after Escape closes the guide modal", async () => {
@@ -38,4 +38,12 @@ it("restores the enlarged figure opener after Escape closes the guide modal", as
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument(),
   );
   await waitFor(() => expect(opener).toHaveFocus());
+});
+
+it("labels the table start page and opens each physical evidence entry", async () => {
+  const open = vi.fn();
+  render(<PaperGuideAsset language="en" evidence={{ id: "parent", source_block_id: "table", source_type: "table", text: "Table 1", locator: { kind: "page", page: 2 }, fragment_evidence_ids: ["body-p3", "body-p4", "note-p4"] } as PaperGuideEvidence} preview={async () => undefined} onEvidence={open} />);
+  expect(screen.getByText(/Table start page/)).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Table source fragment 2" }));
+  expect(open).toHaveBeenCalledWith("body-p4");
 });

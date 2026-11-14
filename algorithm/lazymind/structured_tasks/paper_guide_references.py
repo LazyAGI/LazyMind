@@ -20,7 +20,9 @@ OUTPUT_PATHS = {
     'section': (CLAIM_REFS, ('blocks', '*', 'evidence_ids', '*'), ('blocks', '*', 'asset_id')),
     'review': (),
 }
-COMMON_INPUT_PATHS = (('evidence', '*', 'id'), ('source_sections', '*', 'evidence_ids', '*'))
+COMMON_INPUT_PATHS = (('evidence', '*', 'id'), ('evidence', '*', 'parent_asset_id'),
+                      ('evidence', '*', 'fragment_evidence_ids', '*'),
+                      ('source_sections', '*', 'evidence_ids', '*'))
 INPUT_PATHS = {
     'extract': COMMON_INPUT_PATHS,
     'plan': COMMON_INPUT_PATHS + (('extracts', '*') + CLAIM_REFS,),

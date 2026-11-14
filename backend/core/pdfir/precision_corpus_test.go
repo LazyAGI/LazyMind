@@ -6,6 +6,7 @@ import (
 	"lazymind/core/pdfir"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -47,6 +48,30 @@ func TestPrecisionRetainedCorpus(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	type fragmentTarget struct {
+		Page     int    `json:"page"`
+		HTMLHash string `json:"html_sha256"`
+		Rows     int    `json:"rows"`
+		First    string `json:"first_cell"`
+		Last     string `json:"last_cell"`
+	}
+	var targets []struct {
+		Paper     string           `json:"paper"`
+		ParentID  string           `json:"parent_id"`
+		Fragments []fragmentTarget `json:"fragments"`
+	}
+	if path := os.Getenv("LAZYMIND_TABLE_PROVENANCE_TARGETS"); path != "" {
+		data, e := os.ReadFile(path)
+		if e != nil {
+			t.Fatal(e)
+		}
+		if e = json.Unmarshal(data, &targets); e != nil {
+			t.Fatal(e)
+		}
+		if len(targets) != 13 {
+			t.Fatal("expected thirteen independently audited tables")
+		}
+	}
 	for key, x := range corpus {
 		t.Run(key, func(t *testing.T) {
 			data, e := os.ReadFile(x.IR)
@@ -66,15 +91,34 @@ func TestPrecisionRetainedCorpus(t *testing.T) {
 			}
 			started := time.Now()
 			enriched, e := pdfir.ProjectSourcePrecision(base, raw)
-			if key == "pantry" || key == "greenspace-review" || key == "dataset_resource" || key == "review_synthesis" || key == "react" {
-				if e == nil || !strings.Contains(e.Error(), "table requires one complete body") {
-					t.Fatalf("expected unresolved multi-page asset provenance, got %v", e)
-				}
-				t.Logf("explicit unavailable: %v", e)
-				return
-			}
+
 			if e != nil {
 				t.Fatal(e)
+			}
+			if !reflect.DeepEqual(base.Blocks, enriched.Blocks) {
+				t.Fatal("canonical blocks changed")
+			}
+			for _, target := range targets {
+				if target.Paper != key {
+					continue
+				}
+				actual := []pdfir.SourceRegion{}
+				for _, r := range enriched.Precision.Regions {
+					if r.ParentBlockID == target.ParentID && r.Kind == "table_body_fragment" {
+						actual = append(actual, r)
+					}
+				}
+				if len(actual) != len(target.Fragments) {
+					t.Fatalf("fragment count %s: %d", target.ParentID, len(actual))
+				}
+				for i, want := range target.Fragments {
+					got := actual[i]
+					rows := got.Table.Rows
+					if got.Page != want.Page || pdfir.Digest(got.Table.HTML) != want.HTMLHash || len(rows) != want.Rows || rows[0].Cells[0].Text != want.First || rows[len(rows)-1].Cells[len(rows[len(rows)-1].Cells)-1].Text != want.Last {
+						t.Fatalf("physical source mismatch parent=%s page=%d", target.ParentID, want.Page)
+					}
+				}
+				t.Logf("verified table %s physical fragments=%d", target.ParentID, len(actual))
 			}
 			s, e := paperguide.BuildSourceSnapshot(enriched, paperguide.SourceIdentity{SourceSHA256: x.Hash, OwnerID: "offline", DatasetID: "offline", DocumentID: x.Document})
 			if e != nil {

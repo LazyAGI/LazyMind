@@ -12,7 +12,7 @@ import (
 	"strings"
 )
 
-const SourcePrecisionVersion = 1
+const SourcePrecisionVersion = 2
 
 // SourcePrecision is a separately cached, immutable view. It never changes the
 // canonical blocks used by notes and ordinary reading. Regions bind to frozen
@@ -25,11 +25,13 @@ type SourcePrecision struct {
 	Regions       []SourceRegion `json:"regions"`
 }
 type SourceRegion struct {
-	ID            string       `json:"id"`
-	ParentBlockID string       `json:"parent_block_id"`
-	Page          int          `json:"page"`
-	Text          string       `json:"text"`
-	Spans         []SourceSpan `json:"spans"`
+	Kind          string               `json:"kind,omitempty"`
+	Table         *SourceTableFragment `json:"table,omitempty"`
+	ID            string               `json:"id"`
+	ParentBlockID string               `json:"parent_block_id"`
+	Page          int                  `json:"page"`
+	Text          string               `json:"text"`
+	Spans         []SourceSpan         `json:"spans"`
 }
 type SourceSpan struct {
 	Type    string    `json:"type"`
@@ -44,11 +46,13 @@ type precisionSpan struct {
 	CrossPage bool      `json:"cross_page"`
 }
 type precisionBlock struct {
-	Type   string           `json:"type"`
-	BBox   []float64        `json:"bbox"`
-	Angle  float64          `json:"angle"`
-	Blocks []precisionBlock `json:"blocks"`
-	Lines  []struct {
+	LinesDeleted bool             `json:"lines_deleted"`
+	CellMerge    []int            `json:"cell_merge"`
+	Type         string           `json:"type"`
+	BBox         []float64        `json:"bbox"`
+	Angle        float64          `json:"angle"`
+	Blocks       []precisionBlock `json:"blocks"`
+	Lines        []struct {
 		Spans []precisionSpan `json:"spans"`
 	} `json:"lines"`
 }
@@ -83,12 +87,18 @@ func precisionBox(box, size []float64) ([]float64, error) {
 	}
 	return out, nil
 }
+
+var errPrecisionSkip = errors.New("skip verified table descendants")
+
 func walkPrecision(bs []precisionBlock, depth int, visit func(precisionBlock) error) error {
 	if depth > 16 {
 		return precisionError("layout depth limit")
 	}
 	for _, b := range bs {
 		if err := visit(b); err != nil {
+			if err == errPrecisionSkip {
+				continue
+			}
 			return err
 		}
 		if err := walkPrecision(b.Blocks, depth+1, visit); err != nil {
@@ -228,52 +238,17 @@ func ProjectSourcePrecision(base Document, raw []byte) (Document, error) {
 		return fail(err)
 	}
 	projection := &SourcePrecision{Version: SourcePrecisionVersion, SourceSHA256: base.SourceSHA256, BaseIRDigest: Digest(string(baseJSON)), ArchiveDigest: Digest(string(raw)), Regions: []SourceRegion{}}
+	tableRegions, tableParents, err := projectPrecisionTables(base, l.Pages, index)
+	if err != nil {
+		return fail(err)
+	}
+	projection.Regions = append(projection.Regions, tableRegions...)
 	claimed := map[string]map[int]int{}
 	parents := map[string]bool{}
-	tableParents := map[string]bool{}
 	for _, p := range l.Pages {
 		err = walkPrecision(append(append([]precisionBlock(nil), p.Paras...), p.Discarded...), 0, func(para precisionBlock) error {
 			if para.Type == "table" {
-				norm, e := precisionBox(para.BBox, p.Size)
-				if e != nil {
-					return e
-				}
-				candidates := []Block{}
-				for _, b := range base.Blocks {
-					if b.Type != "table" || b.Page != *p.Index || len(b.BBox) != 4 {
-						continue
-					}
-					match := true
-					for i, v := range norm {
-						if math.Abs(v-b.BBox[i]) > .001001 {
-							match = false
-						}
-					}
-					if match {
-						candidates = append(candidates, b)
-					}
-				}
-				if len(candidates) != 1 || tableParents[candidates[0].ID] {
-					return precisionError("ambiguous table/parent association")
-				}
-				parent := candidates[0]
-				tableParents[parent.ID] = true
-				hasBody := false
-				if err := walkPrecision(para.Blocks, 0, func(child precisionBlock) error {
-					for _, line := range child.Lines {
-						for _, span := range line.Spans {
-							if span.Type == "table" {
-								hasBody = true
-							}
-						}
-					}
-					return nil
-				}); err != nil {
-					return err
-				}
-				if parent.Table != nil && len(parent.Table.Rows) > 0 && !hasBody {
-					return precisionError("table body provenance missing")
-				}
+				return errPrecisionSkip // tables are proved as complete physical chains below
 			}
 			spans := []precisionSpan{}
 			for _, line := range para.Lines {
@@ -361,7 +336,7 @@ func ProjectSourcePrecision(base Document, raw []byte) (Document, error) {
 				}
 				cross = cross || page != *p.Index
 				if len(regions) == 0 || regions[len(regions)-1].Page != page {
-					regions = append(regions, SourceRegion{ParentBlockID: parent.ID, Page: page, Spans: []SourceSpan{}})
+					regions = append(regions, SourceRegion{Kind: "body_text", ParentBlockID: parent.ID, Page: page, Spans: []SourceSpan{}})
 				}
 				r := &regions[len(regions)-1]
 				r.Spans = append(r.Spans, SourceSpan{Type: s.Type, Content: s.Content, BBox: box})

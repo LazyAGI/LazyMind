@@ -12,8 +12,15 @@ import (
 
 func TestPageRegionCatalogBindsFrozenRegionInsteadOfParent(t *testing.T) {
 	d, id := fixture(t)
+	blocks := []pdfir.Block{}
+	for _, b := range d.Blocks {
+		if b.Type != "table" {
+			blocks = append(blocks, b)
+		}
+	}
+	d.Blocks = blocks
 	parent := d.Blocks[1]
-	d.Precision = &pdfir.SourcePrecision{Version: 1, SourceSHA256: d.SourceSHA256, BaseIRDigest: pdfir.Digest("base"), ArchiveDigest: pdfir.Digest("zip"), Regions: []pdfir.SourceRegion{
+	d.Precision = &pdfir.SourcePrecision{Version: pdfir.SourcePrecisionVersion, SourceSHA256: d.SourceSHA256, BaseIRDigest: pdfir.Digest("base"), ArchiveDigest: pdfir.Digest("zip"), Regions: []pdfir.SourceRegion{
 		{ID: "region_a", ParentBlockID: parent.ID, Page: 0, Text: "First-page source", Spans: []pdfir.SourceSpan{{Type: "text", Content: "First-page source", BBox: []float64{.1, .1, .2, .2}}}},
 		{ID: "region_b", ParentBlockID: parent.ID, Page: 1, Text: "透明😀 hyphen-\nated $x_i$", Spans: []pdfir.SourceSpan{{Type: "text", Content: "透明😀 hyphen-\nated $x_i$", BBox: []float64{.1, .1, .2, .2}}}},
 	}}
@@ -64,19 +71,26 @@ func TestHistoricalV2CatalogReconstructsWithoutPrecision(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if current.CatalogVersion != "paper-guide-source-v3" || old.Evidence[0].ID == current.Evidence[0].ID {
+	if current.CatalogVersion != SourceCatalogVersion || old.Evidence[0].ID == current.Evidence[0].ID {
 		t.Fatal("catalog contracts mixed")
 	}
 }
 
 func TestPrecisionDigestDisablesHistoricalV2CoordinatesButKeepsBody(t *testing.T) {
 	d, id := fixture(t)
+	blocks := []pdfir.Block{}
+	for _, b := range d.Blocks {
+		if b.Type != "table" {
+			blocks = append(blocks, b)
+		}
+	}
+	d.Blocks = blocks
 	old, err := buildSourceSnapshot(d, id, "paper-guide-source-v2")
 	if err != nil {
 		t.Fatal(err)
 	}
 	raw, _ := json.Marshal(d)
-	d.Precision = &pdfir.SourcePrecision{Version: 1, SourceSHA256: d.SourceSHA256, BaseIRDigest: pdfir.Digest(string(raw)), ArchiveDigest: pdfir.Digest("retained"), Regions: []pdfir.SourceRegion{}}
+	d.Precision = &pdfir.SourcePrecision{Version: pdfir.SourcePrecisionVersion, SourceSHA256: d.SourceSHA256, BaseIRDigest: pdfir.Digest(string(raw)), ArchiveDigest: pdfir.Digest("retained"), Regions: []pdfir.SourceRegion{}}
 	current, err := BuildSourceSnapshot(d, id)
 	if err != nil {
 		t.Fatal(err)

@@ -307,6 +307,7 @@ export default function PaperReadingWorkspace(p: Props) {
         preview={preview}
         language={language}
         current={guide.revision!.source_current}
+        onEvidence={requestEvidence}
       />
     );
   }
@@ -381,6 +382,7 @@ export default function PaperReadingWorkspace(p: Props) {
                 revision={guide.revision}
                 busy={busy}
                 canGenerate={!!guide.status?.can_generate}
+                unavailableReason={reasonText(guide.status?.unavailable_reason)}
                 active={active}
                 onRegenerate={() => void run("regenerate")}
               />
@@ -571,6 +573,7 @@ export default function PaperReadingWorkspace(p: Props) {
               ) &&
                 evidence.source_current && (
                   <PaperGuideAsset
+                    onEvidence={requestEvidence}
                     evidence={evidence.evidence}
                     preview={preview}
                     language={language}
@@ -592,6 +595,7 @@ function GuideInlineAsset({
   preview,
   language,
   current,
+  onEvidence,
 }: {
   id?: string;
   revision: string;
@@ -599,6 +603,7 @@ function GuideInlineAsset({
   preview: GuidePreview;
   language: string;
   current: boolean;
+  onEvidence: (id: string) => void;
 }) {
   const [e, setEvidence] = useState<PaperGuideEvidence>();
   const [failed, setFailed] = useState(false);
@@ -623,6 +628,7 @@ function GuideInlineAsset({
   return (
     <PaperGuideAsset
       evidence={e}
+      onEvidence={onEvidence}
       unavailable={failed || !current || !id}
       preview={preview}
       language={language}

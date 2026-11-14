@@ -90,6 +90,8 @@ class Figure(Shape):
 
 
 class Evidence(Shape):
+    parent_asset_id: SourceID | None = None
+    fragment_evidence_ids: Annotated[list[SourceID], Field(max_length=2048)] | None = None
     source_region_id: Annotated[str, StringConstraints(max_length=80)] = ''
     id: SourceID
     source_block_id: Annotated[str, StringConstraints(min_length=1, max_length=256)]
@@ -260,6 +262,21 @@ class GuideInput(Shape):
     def check_evidence_catalog(self):
         unique(e.id for e in self.evidence)
         unique(s.id for s in self.source_sections)
+        catalog = {e.id: e for e in self.evidence}
+        for e in self.evidence:
+            unique(e.fragment_evidence_ids or [])
+            if e.fragment_evidence_ids and (e.source_type != 'table' or e.parent_asset_id):
+                raise ValueError('fragment list requires parent table')
+            for child_id in e.fragment_evidence_ids or []:
+                child = catalog.get(child_id)
+                if child is None or child.parent_asset_id != e.id or child.source_type != 'text':
+                    raise ValueError('unknown or cross-parent table fragment')
+            if e.parent_asset_id:
+                parent = catalog.get(e.parent_asset_id)
+                if (parent is None or parent.source_type != 'table' or e.source_type != 'text'
+                        or e.id not in (parent.fragment_evidence_ids or []) or e.locator.kind != 'page'
+                        or not e.source_region_id or e.source_block_id != parent.source_block_id):
+                    raise ValueError('invalid table fragment parent')
         return self
 
 

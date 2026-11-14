@@ -7279,8 +7279,10 @@ export interface PaperGuideCoverage {
     'warnings': Array<string>;
 }
 export interface PaperGuideEvidence {
+    'fragment_evidence_ids'?: Array<string>;
     'id': string;
     'locator': PaperGuideLocator;
+    'parent_asset_id'?: string;
     'source_block_id': string;
     'source_region_id'?: string;
     'source_type': string;
