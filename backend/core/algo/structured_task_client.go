@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"log"
 	"time"
 
@@ -96,7 +95,7 @@ func RunStructuredTask(ctx context.Context, req StructuredTaskRequest) (Structur
 		return result, &StructuredTaskError{Code: "invalid_model_output", Usage: response.Usage}
 	}
 	if response.Usage.Task != req.Task || response.Usage.Version != req.Version || response.Usage.ModelCalls != 1 {
-		return result, fmt.Errorf("structured task response contract mismatch")
+		return result, &StructuredTaskError{Code: "invalid_model_output", Usage: response.Usage}
 	}
 	log.Printf("structured_task task=%s version=%s model_calls=%d elapsed_ms=%d", req.Task, req.Version, response.Usage.ModelCalls, response.Usage.ElapsedMS)
 	return StructuredTaskResult{Output: output, Usage: response.Usage}, nil

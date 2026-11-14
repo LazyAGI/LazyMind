@@ -433,3 +433,77 @@ func TestPaperGuideModelFailureHTTPMapping(t *testing.T) {
 		}
 	}
 }
+
+func TestPaperGuideClientContractFailuresReachRunnerAsEvidenceErrors(t *testing.T) {
+	for _, kind := range []string{"task_type", "task_version", "model_calls", "transport", "timeout"} {
+		t.Run(kind, func(t *testing.T) {
+			db, hash, _ := guideHTTPFixture(t)
+			t.Setenv("LAZYMIND_PAPER_GUIDE_ENABLED", "true")
+			t.Setenv("LAZYMIND_CHAT_SERVICE_URL", "http://fixture.invalid")
+			previous := http.DefaultTransport
+			calls := 0
+			http.DefaultTransport = roundTripFunc(func(r *http.Request) (*http.Response, error) {
+				if r.URL.Path != "/api/chat/llm-task:run" {
+					return previous.RoundTrip(r)
+				}
+				calls++
+				if kind == "transport" {
+					return nil, errors.New("provider-secret")
+				}
+				if kind == "timeout" {
+					return testJSONResponse(504, `{"detail":{"error_code":"task_timeout","usage":{"model_calls":1,"elapsed_ms":120000}}}`), nil
+				}
+				usage := map[string]any{"task_type": "paper.guide.plan", "task_version": "paper-guide-v3", "model_calls": 1, "elapsed_ms": 19}
+				if kind == "model_calls" {
+					usage[kind] = 2
+				} else {
+					usage[kind] = "wrong"
+				}
+				return testJSONResponse(200, string(mustJSON(map[string]any{"status": "succeeded", "output": map[string]any{}, "usage": usage}))), nil
+			})
+			t.Cleanup(func() { http.DefaultTransport = previous })
+			w := httptest.NewRecorder()
+			GeneratePaperGuide(w, guideRequest("POST", `{"expected_source_hash":"`+hash+`","model_ref":"own:a","idempotency_key":"contract"}`, "owner", nil))
+			if w.Code != 202 {
+				t.Fatalf("generate: %d %s", w.Code, w.Body)
+			}
+			var rev orm.PaperGuideRevision
+			if err := db.Take(&rev).Error; err != nil {
+				t.Fatal(err)
+			}
+			service := paperGuideService()
+			result, err := service.Run(t.Context(), asyncjob.Job{ID: rev.JobID, PayloadJSON: mustJSON(paperguide.JobPayload{RevisionID: rev.ID, Epoch: rev.Epoch})}, guideCheckpointFence{db: db.DB})
+			want, class := paperguide.ErrEvidence, "schema"
+			if kind == "transport" {
+				want, class = paperguide.ErrModelRequest, "transport"
+			}
+			if kind == "timeout" {
+				want, class = paperguide.ErrModelTimeout, "timeout"
+			}
+			if !errors.Is(err, want) || result.ErrorCode != want.Error() || calls != 2 {
+				t.Fatalf("result=%+v err=%v calls=%d", result, err, calls)
+			}
+			if err = db.First(&rev, "id = ?", rev.ID).Error; err != nil {
+				t.Fatal(err)
+			}
+			if rev.ErrorCode != want.Error() || rev.CallsUsed != 2 || rev.RecoveryCalls != 1 {
+				t.Fatalf("bad persisted failure: %+v", rev)
+			}
+			var markers []orm.PaperGuideStep
+			if err = db.Where("revision_id = ? AND step_key LIKE ?", rev.ID, "request:%").Find(&markers).Error; err != nil {
+				t.Fatal(err)
+			}
+			if len(markers) != 2 {
+				t.Fatalf("markers=%d", len(markers))
+			}
+			for _, marker := range markers {
+				var diagnostic struct {
+					Class string `json:"error_class"`
+				}
+				if json.Unmarshal([]byte(marker.OutputJSON), &diagnostic) != nil || diagnostic.Class != class || strings.Contains(marker.OutputJSON, "provider-secret") {
+					t.Fatalf("wrong safe diagnostic: %s", marker.OutputJSON)
+				}
+			}
+		})
+	}
+}

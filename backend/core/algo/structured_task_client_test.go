@@ -3,8 +3,10 @@ package algo
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 	"testing"
 )
 
@@ -145,5 +147,35 @@ func TestPaperGuideStructuredTaskTransportPreservesBoundEvidence(t *testing.T) {
 	})
 	if err != nil || string(result.Output) != `{"findings":[]}` {
 		t.Fatalf("response %s: %v", result.Output, err)
+	}
+}
+
+func TestStructuredTaskSuccessContractMismatchRetainsSafeTypedUsage(t *testing.T) {
+	for _, field := range []string{"task_type", "task_version", "model_calls"} {
+		t.Run(field, func(t *testing.T) {
+			usage := StructuredTaskUsage{Task: PaperGuidePlanTask, Version: PaperGuideTaskVersion, ModelCalls: 1, ElapsedMS: 19}
+			switch field {
+			case "task_type":
+				usage.Task = PaperGuideReviewTask
+			case "task_version":
+				usage.Version = "paper-guide-v2"
+			case "model_calls":
+				usage.ModelCalls = 2
+			}
+			calls := 0
+			endpoint := startGenerateTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				calls++
+				json.NewEncoder(w).Encode(map[string]any{"status": "succeeded", "output": map[string]any{"private": "provider-secret"}, "usage": usage})
+			}))
+			t.Setenv("LAZYMIND_CHAT_SERVICE_URL", endpoint)
+			result, err := RunStructuredTask(t.Context(), StructuredTaskRequest{Task: PaperGuidePlanTask, Version: PaperGuideTaskVersion})
+			var failure *StructuredTaskError
+			if !errors.As(err, &failure) || failure.Code != "invalid_model_output" || failure.Usage != usage || failure.Retryable || len(result.Output) != 0 || calls != 1 {
+				t.Fatalf("wrong classification, usage or attempts: result=%+v err=%#v calls=%d", result, err, calls)
+			}
+			if strings.Contains(err.Error(), "provider-secret") {
+				t.Fatal("raw output leaked")
+			}
+		})
 	}
 }
