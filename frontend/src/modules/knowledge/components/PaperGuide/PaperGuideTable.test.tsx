@@ -339,3 +339,51 @@ it("keeps complete multiline mathematics outside a real table and its footnote",
     String(Array.from(prefix + table).length),
   );
 });
+
+it.each(["", "甲😀\n\n"])(
+  "preserves a table followed immediately by a footnote and complete pipe-containing formula (prefix=%s)",
+  (prefix) => {
+    const raw = "| A | B |\n| --- | --- |\n| 1 | 2 |",
+      formula = "\\[\n|x|\n\\]",
+      footnote = "\nFootnote.\n";
+    const { root, select } = renderTable(prefix + raw + footnote + formula);
+    expect(screen.getAllByRole("table")).toHaveLength(1);
+    const atom = root.querySelector('[data-guide-atomic="table"]')!;
+    expect(atom).toHaveAttribute(
+      "data-guide-source-start",
+      String(Array.from(prefix).length),
+    );
+    expect(atom).toHaveAttribute(
+      "data-guide-source-end",
+      String(Array.from(prefix + raw).length),
+    );
+    const math = root.querySelector("[data-guide-math]")!;
+    expect(math).not.toBeNull();
+    expect(root).toHaveTextContent("Footnote.");
+    const range = document.createRange();
+    range.selectNodeContents(math.querySelector(".katex-html")!);
+    window.getSelection()!.removeAllRanges();
+    window.getSelection()!.addRange(range);
+    fireEvent.mouseUp(root);
+    const toolbar = screen.getByRole("toolbar");
+    expect(
+      toolbar.querySelector(".paper-guide-selection-preview")?.textContent,
+    ).toBe(formula);
+    fireEvent.click(
+      within(toolbar).getByRole("button", { name: "Explain this passage" }),
+    );
+    const start = Array.from(prefix + raw + footnote).length;
+    expect(select.mock.calls[0][0]).toMatchObject({
+      text: formula,
+      guideRef: { start, end: start + Array.from(formula).length },
+    });
+  },
+);
+
+it("still rejects resumed table rows outside a complete formula after a broken row", () => {
+  const raw =
+    "| A | B |\n| --- | --- |\n| 1 | 2 |\n3\n\\[\n|x|\n\\]\n| 4 | 5 |";
+  const { root } = renderTable(raw);
+  expect(screen.queryByRole("table")).toBeNull();
+  expect(root.textContent).toBe(raw);
+});

@@ -59,6 +59,20 @@ export function parseGuideTable(text: string): GuideTable | undefined {
   const headers = cells(lines[index - 1].text);
   if (!headers || headers.length !== columns.length || !headers.some(Boolean))
     return;
+  const math = guideTextSegments(text).filter(
+    (segment) => segment.latex !== undefined,
+  );
+  const hasPipeOutsideMath = (line: (typeof lines)[number]) => {
+    const start = Array.from(text.slice(0, line.start)).length;
+    return Array.from(line.text).some(
+      (char, offset) =>
+        char === "|" &&
+        !math.some(
+          (segment) =>
+            segment.start <= start + offset && segment.end > start + offset,
+        ),
+    );
+  };
   const rows: string[][] = [];
   let last = index;
   for (let i = index + 1; i < lines.length; i++) {
@@ -67,7 +81,9 @@ export function parseGuideTable(text: string): GuideTable | undefined {
       // A non-pipe line is prose only when the same uninterrupted paragraph
       // does not resume table-shaped rows. Never silently publish a prefix.
       for (let j = i + 1; j < lines.length && lines[j].text.trim(); j++) {
-        if (lines[j].text.includes("|")) return;
+        // Complete formulas in the suffix are independent prose, not resumed
+        // table rows; only pipes outside their immutable intervals are ambiguous.
+        if (hasPipeOutsideMath(lines[j])) return;
       }
       break;
     }
@@ -84,10 +100,9 @@ export function parseGuideTable(text: string): GuideTable | undefined {
   // Per-line parsing cannot detect a table-shaped passage inside a multiline
   // formula. Check the complete immutable block before separating prose.
   if (
-    guideTextSegments(text).some(
+    math.some(
       (segment) =>
-        segment.latex !== undefined &&
-        /[\r\n]/.test(segment.latex) &&
+        /[\r\n]/.test(segment.latex!) &&
         segment.start < sourceEnd &&
         segment.end > sourceStart,
     )
