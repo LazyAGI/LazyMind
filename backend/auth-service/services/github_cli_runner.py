@@ -78,6 +78,9 @@ class GitHubCLIRunner:
         probe_env = dict(os.environ)
         if host_home:
             probe_env['HOME'] = host_home
+            if os.environ.get('LAZYMIND_HOST_HOME'):
+                probe_env['XDG_CONFIG_HOME'] = (os.environ.get('LAZYMIND_HOST_XDG_CONFIG_HOME')
+                                                or str(Path(host_home) / '.config'))
             if sys.platform == 'win32':
                 probe_env['USERPROFILE'] = host_home
         if sys.platform == 'win32':
@@ -130,22 +133,27 @@ class GitHubCLIRunner:
         return self._probe_git(probe_env)
 
     def _probe_git(self, probe_env):
-        if sys.platform == 'darwin':
-            args = ['/usr/bin/git', 'credential-osxkeychain', 'get']
-        else:
-            git = shutil.which('git')
-            if not git:
-                raise GitHubCLIError('GITHUB_CREDENTIAL_UNREADABLE')
-            probe_env.update(GIT_TERMINAL_PROMPT='0', GCM_INTERACTIVE='0')
-            for key in ('GIT_ASKPASS', 'SSH_ASKPASS'):
-                probe_env.pop(key, None)
-            args = [git, '-c', 'credential.interactive=false', '-c', 'core.askPass=', 'credential', 'fill']
+        git = shutil.which('git')
+        if not git:
+            raise GitHubCLIError('GITHUB_CREDENTIAL_UNREADABLE')
+        probe_env.update(GIT_TERMINAL_PROMPT='0', GCM_INTERACTIVE='0', LC_ALL='C')
+        for key in ('GIT_ASKPASS', 'SSH_ASKPASS'):
+            probe_env.pop(key, None)
+        args = [git, '-c', 'credential.interactive=false', '-c', 'core.askPass=', 'credential', 'fill']
         result = self._command(
             args,
             input='protocol=https\nhost=github.com\n\n',
             env=probe_env,
         )
         if result.returncode != 0:
+            # Git fill reports an unavailable username/password as fatal when prompting is disabled.
+            message = result.stderr.strip()
+            if result.returncode == 128 and not result.stdout and (
+                message == 'fatal: unable to get password from user' or re.fullmatch(
+                    r"fatal: could not read (?:Username|Password) for '[^\r\n]*': terminal prompts disabled", message,
+                )
+            ):
+                return None
             raise GitHubCLIError('GITHUB_CREDENTIAL_UNREADABLE')
         if not result.stdout.strip():
             return None

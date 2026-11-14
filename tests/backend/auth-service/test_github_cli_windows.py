@@ -19,7 +19,6 @@ from test_github_star import ROOT, TOKEN, star_env  # noqa: F401
 GIT = '/fixture/Git/cmd/git.exe'
 GIT_FILL = [GIT, '-c', 'credential.interactive=false', '-c', 'core.askPass=', 'credential', 'fill']
 GIT_QUERY = 'protocol=https\nhost=github.com\n\n'
-MAC_GIT_GET = ['/usr/bin/git', 'credential-osxkeychain', 'get']
 
 
 @pytest.fixture
@@ -36,11 +35,12 @@ def mac_absent_probe():
         if args == ['/usr/bin/security', 'find-generic-password', '-s', 'gh:github.com', '-wa', 'fixture-user']:
             probe_calls.append(args)
             return subprocess.CompletedProcess(args, 44, '', '')
-        if args == MAC_GIT_GET or args == GIT_FILL:
+        if args == GIT_FILL:
             assert kwargs['input'] == GIT_QUERY
             probe_calls.append(args)
-            # These distinct missing-credential results are part of the two external protocols.
-            return subprocess.CompletedProcess(args, 0 if args == MAC_GIT_GET else 128, '', '')
+            return subprocess.CompletedProcess(
+                args, 128, '', "fatal: could not read Username for 'https://github.com': terminal prompts disabled\n",
+            )
         result = case.run_command(args, **kwargs)
         if 'auth' in args and 'token' in args and case.started:
             result.stdout = TOKEN
@@ -59,9 +59,9 @@ def mac_absent_probe():
         case.doCleanups()
 
 
-def test_mac_missing_credentials_preserve_the_native_get_protocol(mac_absent_probe):
+def test_mac_missing_credentials_preserve_noninteractive_authorization_fallback(mac_absent_probe):
     assert mac_absent_probe.runner.probe() is None
-    assert mac_absent_probe.calls[-1] == MAC_GIT_GET
+    assert mac_absent_probe.calls[-1] == GIT_FILL
     assert mac_absent_probe.case.login_calls == []
 
 
@@ -97,6 +97,7 @@ def windows_probe(tmp_path):
         'HOME': str(service), 'USERPROFILE': str(host), 'LAZYMIND_HOST_HOME': str(host),
         'GH_CONFIG_DIR': str(gh_config), 'GIT_ASKPASS': 'fixture-askpass', 'SSH_ASKPASS': 'fixture-ssh-askpass',
         'GIT_TERMINAL_PROMPT': '1', 'GCM_INTERACTIVE': '1',
+        'LC_ALL': 'fixture-host-locale',
         'LAZYMIND_AUTH_CLOUD_SECRET_KEY': 'fixture-windows-encryption-key',
     }
     with patch.dict(os.environ, environment, clear=True), \
@@ -126,6 +127,7 @@ def test_windows_reuses_git_credentials_without_mac_commands(windows_probe, host
     assert child_env['HOME'] == child_env['USERPROFILE'] == str(windows_probe.host)
     assert child_env['GIT_TERMINAL_PROMPT'] == '0'
     assert child_env['GCM_INTERACTIVE'] == '0'
+    assert child_env['LC_ALL'] == 'C'
     assert 'GIT_ASKPASS' not in child_env and 'SSH_ASKPASS' not in child_env
 
 
@@ -161,6 +163,18 @@ def test_windows_missing_or_invalid_credentials_never_start_login(windows_probe,
         assert error.value.code == 'GITHUB_CREDENTIAL_UNREADABLE'
         assert TOKEN not in str(error.value)
     assert TOKEN not in caplog.text
+    assert len(windows_probe.calls) == 1
+
+
+@pytest.mark.parametrize('message', [
+    "fatal: could not read Username for 'https://github.com': terminal prompts disabled\n",
+    "fatal: could not read Password for 'https://fixture-user@github.com': terminal prompts disabled\n",
+    'fatal: unable to get password from user\n',
+])
+def test_git_missing_credential_protocols_return_absence_without_login(windows_probe, message):
+    windows_probe.returncode, windows_probe.stdout, windows_probe.stderr = 128, '', message
+    assert windows_probe.runner.probe() is None
+    windows_probe.login.assert_not_called()
     assert len(windows_probe.calls) == 1
 
 
@@ -243,7 +257,7 @@ def test_mac_missing_credentials_can_continue_with_explicit_authorization(
     executor.run()
     result = service.get(pending['session_id'], owner_user_id='star-owner')
     assert result['status'] == 'COMPLETED', result
-    assert mac_absent_probe.calls[-1] == MAC_GIT_GET
+    assert mac_absent_probe.calls[-1] == GIT_FILL
     assert len(mac_absent_probe.case.login_calls) == 1
     assert [(method, path) for method, path, _ in star_env.github.calls] == [('GET', '/user')]
     assert star_env.github.writes() == []

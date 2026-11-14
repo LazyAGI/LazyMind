@@ -16,10 +16,10 @@ from unittest.mock import patch
 TOKEN = 'fixture-runner-token-not-a-credential'
 CODE = 'ABCD-EFGH'
 GH_KEYCHAIN_READ = ['/usr/bin/security', 'find-generic-password', '-s', 'gh:github.com', '-wa', 'fixture-user']
-GIT_KEYCHAIN_READ = ['/usr/bin/git', 'credential-osxkeychain', 'get']
+GIT_KEYCHAIN_READ = ['/fixture/git', '-c', 'credential.interactive=false', '-c', 'core.askPass=', 'credential', 'fill']
 GIT_QUERY = 'protocol=https\nhost=github.com\n\n'
 GH_ABSENT = (44, '', 'fixture item not found')
-GIT_ABSENT = (0, '', '')
+GIT_ABSENT = (128, '', "fatal: could not read Username for 'https://github.com': terminal prompts disabled\n")
 
 
 class CredentialProbeCommands:
@@ -45,8 +45,8 @@ class CredentialProbeCommandsTest(unittest.TestCase):
         gh = commands(GH_KEYCHAIN_READ)
         git = commands(GIT_KEYCHAIN_READ, input=GIT_QUERY)
         self.assertEqual((gh.returncode, gh.stdout), (44, ''))
-        # git's osxkeychain get maps errSecItemNotFound to success with no fields.
-        self.assertEqual((git.returncode, git.stdout), (0, ''))
+        # Git fill cannot prompt for missing credentials in a background probe.
+        self.assertEqual((git.returncode, git.stdout), (128, ''))
 
     def test_git_store_and_erase_are_rejected_even_with_valid_target_input(self):
         commands = CredentialProbeCommands(git=(0, f'password={TOKEN}\n', ''))
@@ -313,6 +313,7 @@ class GitHubCLIRunnerTest(unittest.TestCase):
         read = CredentialProbeCommands(gh=gh, git=git)
         before = (config / 'hosts.yml').read_bytes()
         with patch.dict(os.environ, {'HOME': str(self.root), 'GH_CONFIG_DIR': str(config)}, clear=True), \
+                patch.object(self.module.shutil, 'which', return_value='/fixture/git'), \
                 patch.object(self.module.subprocess, 'run', side_effect=read):
             result = self.runner.probe()
         self.assertEqual((config / 'hosts.yml').read_bytes(), before)
@@ -325,7 +326,7 @@ class GitHubCLIRunnerTest(unittest.TestCase):
         self.assertEqual(result['access_token'], TOKEN)
         self.assertEqual(calls, [GH_KEYCHAIN_READ])
 
-    def test_git_osxkeychain_is_reused_when_gh_is_explicitly_absent(self):
+    def test_configured_git_credentials_are_reused_when_gh_is_explicitly_absent(self):
         result, calls = self.probe_sources(git=(0, f'username=fixture-user\npassword={TOKEN}\n', ''))
         self.assertEqual(result['access_token'], TOKEN)
         self.assertEqual(calls, [GH_KEYCHAIN_READ, GIT_KEYCHAIN_READ])
