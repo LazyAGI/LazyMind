@@ -462,3 +462,13 @@ it('resumes translation polling after cancellation fails and allows retry withou
  fireEvent.click(cancel);
  await waitFor(()=>expect(cancellationRequests).toBe(2));
 });
+
+it('provides document identity for unsupported notebook parsed previews without developer mode', async () => {
+  useDatasetPermissionStore.getState().setCurrentDataset({dataset_id:'library',scene:'general'} as Dataset);
+  axiosInstance.defaults.adapter = config => config.url?.endsWith('/documents/paper')
+    ? Promise.resolve({config,status:200,statusText:'OK',headers:{},data:{display_name:'Notebook.ipynb',file_url:'/files/Notebook.ipynb'}})
+    : new Promise(()=>{});
+  renderDocument();
+  await waitFor(()=>expect(surfaces.viewer.fileName).toBe('Notebook.ipynb'));
+  expect(surfaces.viewer.parsedFallbackTarget).toEqual({dataset:'library',document:'paper'});
+});

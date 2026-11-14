@@ -222,9 +222,13 @@ func savePaperReading(dir, path string, result any) error {
 	return os.Rename(f.Name(), path)
 }
 
-func replyReadingServiceError(w http.ResponseWriter, err error) {
+func isReadingModelTimeout(err error) bool {
 	var taskError *algo.StructuredTaskError
-	if errors.Is(err, context.DeadlineExceeded) || (errors.As(err, &taskError) && taskError.Code == "request_timeout") {
+	return errors.Is(err, context.DeadlineExceeded) || (errors.As(err, &taskError) && taskError.Code == "request_timeout")
+}
+
+func replyReadingServiceError(w http.ResponseWriter, err error) {
+	if isReadingModelTimeout(err) {
 		formulaExplanationError(w, 504, "The reading model did not finish within 2 minutes. Retry or choose another study model.")
 		return
 	}

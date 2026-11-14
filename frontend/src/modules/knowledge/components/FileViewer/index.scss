@@ -290,3 +290,16 @@
     cursor: not-allowed;
   }
 }
+
+.file-viewer-parsed-preview {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 20px;
+  pre {
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    padding: 12px 0;
+    margin: 0;
+  }
+}

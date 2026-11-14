@@ -150,6 +150,31 @@ const PdfTemporaryChat = forwardRef<PdfTemporaryChatHandle, PdfTemporaryChatProp
   const [parseAttempt, setParseAttempt] = useState(0);
   const [retrying, setRetrying] = useState(false);
 
+  const parseScopeRef = useRef(0);
+  useEffect(() => {
+    // Invalidate pending actions on document switches (including A → B → A)
+    // and unmount, without cancelling work already accepted by the server.
+    parseScopeRef.current += 1;
+    setRetrying(false);
+    return () => { parseScopeRef.current += 1; };
+  }, [datasetId, documentId]);
+
+  const requestParse = async (retry: boolean) => {
+    const scope = parseScopeRef.current;
+    setRetrying(true);
+    try {
+      await (retry ? retryDocumentParsed : ensureDocumentParsed)(datasetId, documentId);
+      if (scope !== parseScopeRef.current) return;
+      setParseAttempt(value => value + 1);
+    } catch (error) {
+      if (scope !== parseScopeRef.current) return;
+      setParseError(getLocalizedErrorMessage(error));
+      setParseAttempt(value => value + 1);
+    } finally {
+      if (scope === parseScopeRef.current) setRetrying(false);
+    }
+  };
+
   useEffect(() => {
     // Observation never creates paid parsing work.
     let cancelled = false;
@@ -244,13 +269,16 @@ const PdfTemporaryChat = forwardRef<PdfTemporaryChatHandle, PdfTemporaryChatProp
     };
     if (parseState === "not_requested" && requestedQuickParseRef.current !== request) {
       requestedQuickParseRef.current = request;
+      const scope = parseScopeRef.current;
       setParseState("parsing");
       void ensureDocumentParsed(datasetId, documentId).then(result => {
+        if (scope !== parseScopeRef.current) return;
         setParseState(result.status);
         setParseError(result.error?.message || "");
         if (result.status === "not_requested") prepareForRetry();
         if (result.status === "parsing") setParseAttempt(value => value + 1);
       }).catch(error => {
+        if (scope !== parseScopeRef.current) return;
         setParseError(getLocalizedErrorMessage(error));
         setParseState("failed");
         setParseAttempt(value => value + 1);
@@ -466,12 +494,7 @@ const PdfTemporaryChat = forwardRef<PdfTemporaryChatHandle, PdfTemporaryChatProp
           <Alert className="pdf-temporary-chat__parse-status" type="success" showIcon message={t("knowledge.pdfChatParsed")} />
         ) : null}
         {parseState === "failed" ? (
-          <Alert className="pdf-temporary-chat__parse-status" type="error" showIcon message={t("knowledge.pdfChatParseFailed")} description={parseErrorDescription} action={<Button size="small" loading={retrying} onClick={async () => {
-            setRetrying(true);
-            try { await retryDocumentParsed(datasetId, documentId); setParseAttempt(value => value + 1); }
-            catch (error) { setParseError(getLocalizedErrorMessage(error)); setParseAttempt(value => value + 1); }
-            finally { setRetrying(false); }
-          }}>{t("knowledge.pdfChatRetryParse")}</Button>} />
+          <Alert className="pdf-temporary-chat__parse-status" type="error" showIcon message={t("knowledge.pdfChatParseFailed")} description={parseErrorDescription} action={<Button size="small" loading={retrying} onClick={() => void requestParse(true)}>{t("knowledge.pdfChatRetryParse")}</Button>} />
         ) : null}
         {["loading", "unknown", "not_requested"].includes(parseState) && <Alert
           className="pdf-temporary-chat__parse-status"
@@ -479,12 +502,7 @@ const PdfTemporaryChat = forwardRef<PdfTemporaryChatHandle, PdfTemporaryChatProp
           showIcon
           message={t(parseState === "loading" ? "knowledge.pdfChatChecking" : parseState === "not_requested" ? "knowledge.pdfChatNotParsed" : "knowledge.pdfChatUnknown")}
           description={parseErrorDescription}
-          action={parseState !== "loading" ? <Space><Button size="small" onClick={() => setParseAttempt(value => value + 1)}>{t("knowledge.pdfChatRefreshStatus")}</Button><Button size="small" loading={retrying} onClick={async () => {
-            setRetrying(true);
-            try { await ensureDocumentParsed(datasetId, documentId); setParseAttempt(value => value + 1); }
-            catch (error) { setParseError(getLocalizedErrorMessage(error)); setParseAttempt(value => value + 1); }
-            finally { setRetrying(false); }
-          }}>{i18n.language.startsWith("zh") ? '准备文档' : 'Prepare document'}</Button></Space> : undefined}
+          action={parseState !== "loading" ? <Space><Button size="small" onClick={() => setParseAttempt(value => value + 1)}>{t("knowledge.pdfChatRefreshStatus")}</Button><Button size="small" loading={retrying} onClick={() => void requestParse(false)}>{i18n.language.startsWith("zh") ? '准备文档' : 'Prepare document'}</Button></Space> : undefined}
         />}
         <ChatContainerComponent
           ref={chatRef}

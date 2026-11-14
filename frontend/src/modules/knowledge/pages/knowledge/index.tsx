@@ -1074,6 +1074,7 @@ const KnowledgeDocumentContent = () => {
               pdfNavigateToPosition={pdfNavigateToPosition}
               pdfNoteHighlights={savedNotes?.key===`${knowledgeBaseId}/${knowledgeId}`?savedNotes.highlights:[]}
               onPdfNoteHighlightClick={id=>{setPaperNotesTab('notes');setSelectedNoteId(id);setPreviewSideTab('notes');setPreviewSideCollapsed(false);}}
+              parsedFallbackTarget={{dataset: knowledgeBaseId, document: knowledgeId}}
               file={previewFile}
               fileName={knowledgeDetail?.display_name || ""}
               segment={segmentDetail}

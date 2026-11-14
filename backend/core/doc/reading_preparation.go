@@ -470,7 +470,8 @@ func runReadingPreparation(ctx context.Context, job asyncjob.Job, reporter async
 				_, cache, e = defaultVisualHandler().read(rr, paperReadingRequest{Language: "zh"})
 			}
 			if e != nil {
-				return result, fmt.Errorf("%s 准备失败: %w", key, e)
+				result.ResultJSON = mustJSON(map[string]any{"failed_scope": key})
+				return result, readingPreparationModelError(key, e)
 			}
 			// Reusing a saved result spends no generation budget. A later
 			// explicit batch can therefore advance beyond a previous limit.
@@ -488,6 +489,27 @@ func runReadingPreparation(ctx context.Context, job asyncjob.Job, reporter async
 	result.ResultJSON = mustJSON(map[string]any{"study_items": count, "source_sha256": hash})
 	return result, nil
 }
+
+// The cause remains inspectable by errors.Is/As, but provider text must never
+// become the durable job error shown in preparation status.
+type readingPreparationFailure struct {
+	message string
+	cause   error
+}
+
+func (e *readingPreparationFailure) Error() string { return e.message }
+func (e *readingPreparationFailure) Unwrap() error { return e.cause }
+func readingPreparationModelError(scope string, err error) error {
+	name := map[string]string{readingpolicy.Formula: "公式", readingpolicy.Figure: "图片", readingpolicy.Table: "表格"}[scope]
+	message := name + "研读生成失败，请重试或在 AI 阅读准备中更换研读模型。"
+	if isReadingModelTimeout(err) {
+		message = name + "研读模型响应超时（单次请求上限为 2 分钟），请重试或在 AI 阅读准备中更换研读模型。"
+	} else if errors.Is(err, context.Canceled) {
+		message = name + "研读已中断，请重新发起准备。"
+	}
+	return &readingPreparationFailure{message: message, cause: err}
+}
+
 func defaultFormulaHandler() formulaExplanationHandler {
 	return formulaExplanationHandler{loadModel: loadFormulaExplanationModel, generate: func(ctx context.Context, content, instruction string, cfg map[string]any) (string, error) {
 		if err := recordReadingModelCall(ctx); err != nil {

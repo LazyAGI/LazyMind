@@ -260,7 +260,7 @@ func (s *DocumentService) EnsureDocumentParsed(r *http.Request, req EnsureDocume
 	if startErr != nil || len(results) == 0 || results[0].Status != "STARTED" {
 		var nativeFailure *nativeParseError
 		if errors.As(startErr, &nativeFailure) {
-			_ = s.updateParseState(r, req.DatasetID, req.DocumentID, "failed", nativeFailure.code, nativeFailure.message)
+			_ = s.updateParseFailure(r, req.DatasetID, req.DocumentID, rec.processing.Revision, nativeFailure.code, nativeFailure.message)
 			result := failedDocumentParseResult(&ProcessingDiagnostic{Stage: "parse", Code: nativeFailure.code, Message: nativeFailure.message, TaskID: taskID, Recovery: nativeFailure.message})
 			return result, nativeFailure
 		}
@@ -268,7 +268,7 @@ func (s *DocumentService) EnsureDocumentParsed(r *http.Request, req EnsureDocume
 		if startErr != nil {
 			message = startErr.Error()
 		}
-		_ = s.updateParseState(r, req.DatasetID, req.DocumentID, "failed", "READER_SUBMIT_FAILED", message)
+		_ = s.updateParseFailure(r, req.DatasetID, req.DocumentID, rec.processing.Revision, "READER_SUBMIT_FAILED", message)
 		return EnsureDocumentParsedResult{Status: "failed", TaskID: taskID}, &DocumentServiceError{Code: DocumentServiceUnavailable, Message: message, Err: startErr}
 	}
 	return EnsureDocumentParsedResult{Status: "parsing", TaskID: taskID}, nil
@@ -350,6 +350,15 @@ func (s *DocumentService) parseResultWithoutRoots(ctx context.Context, rec docum
 	default:
 		return EnsureDocumentParsedResult{Status: "unknown", TaskID: taskID}, nil
 	}
+}
+
+// Submission failures belong to the revision observed before submission.
+// A newer artifact is authoritative even when its revision has not changed.
+// Do not recreate a state removed while the request was in flight.
+func (s *DocumentService) updateParseFailure(r *http.Request, datasetID, documentID string, revision int64, code, message string) error {
+	return s.db.WithContext(r.Context()).Model(&orm.DocumentProcessingState{}).
+		Where("dataset_id = ? AND document_id = ? AND revision = ? AND parse_artifact_ref = ''", datasetID, documentID, revision).
+		Updates(map[string]any{"parse_status": "failed", "parse_error_code": code, "parse_error_message": message, "updated_at": time.Now().UTC()}).Error
 }
 
 func (s *DocumentService) updateParseState(r *http.Request, datasetID, documentID, status, code, message string) error {
