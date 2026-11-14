@@ -292,7 +292,7 @@ def test_windows_capability_uses_real_probe_and_read_only_verification(windows_s
 
 
 @pytest.mark.parametrize('platform,mode,workers,container,host,web', [
-    ('win32', 'local', '1', '0', True, False),
+    ('win32', 'local', '1', '0', True, True),
     ('win32', 'remote', '1', '0', False, False),
     ('win32', 'local', '2', '0', False, False),
     ('darwin', 'local', '1', '0', True, True),
