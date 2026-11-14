@@ -1,3 +1,4 @@
+import PaperGuideTableText from "./PaperGuideTableText";
 import { coverageWarning } from "./coverageWarning";
 import { useLayoutEffect, useRef, useState } from "react";
 import type {
@@ -38,6 +39,7 @@ export default function PaperGuideReader({
   const [active, setActive] = useState("");
   const [selected, setSelected] = useState<{
     revisionId: string;
+    includesTable: boolean;
     section: PaperGuidePublishedSection;
     block: PaperGuideBlock;
     start: number;
@@ -201,6 +203,13 @@ export default function PaperGuideReader({
     }
     setSelected({
       revisionId: revision.id,
+      includesTable: Array.from(
+        element.querySelectorAll<HTMLElement>('[data-guide-atomic="table"]'),
+      ).some(
+        (table) =>
+          Number(table.dataset.guideSourceStart) < end &&
+          Number(table.dataset.guideSourceEnd) > start,
+      ),
       section,
       block,
       start,
@@ -319,7 +328,17 @@ export default function PaperGuideReader({
                               ? "论文陈述 · 导读转述"
                               : "Paper statement · guide paraphrase"}
                   </strong>
-                  {block.kind === "detail" ? (
+                  {block.kind === "table" ? (
+                    <div
+                      className="paper-guide-table-text"
+                      data-guide-text={block.id}
+                    >
+                      <PaperGuideTableText
+                        text={block.text}
+                        language={language}
+                      />
+                    </div>
+                  ) : block.kind === "detail" ? (
                     <details>
                       <summary>
                         {zh ? "补充基础" : "Further background"}
@@ -398,6 +417,13 @@ export default function PaperGuideReader({
           role="toolbar"
           aria-label={zh ? "导读选段" : "Guide passage"}
         >
+          {selected.includesTable && (
+            <p className="paper-guide-table-selection-hint">
+              {zh
+                ? "表格选段将引用整表，以保留行列关系。"
+                : "The full table is included to preserve row and column context."}
+            </p>
+          )}
           <p className="paper-guide-selection-preview">{selected.text}</p>
           <button
             onClick={() =>

@@ -1,4 +1,4 @@
-/** Source intervals belong to immutable block.text, never to KaTeX's duplicate DOM. */
+/** Source intervals belong to immutable block.text, never to rendered math/table DOM. */
 function segments(element: HTMLElement) {
   return Array.from(
     element.querySelectorAll<HTMLElement>("[data-guide-source-start]"),
@@ -32,7 +32,10 @@ export function sourceBoundary(
     if (point.compareBoundaryPoints(Range.START_TO_START, first) <= 0)
       return start;
     if (point.compareBoundaryPoints(Range.START_TO_START, last) >= 0) continue;
-    if (part.hasAttribute("data-guide-math"))
+    if (
+      part.hasAttribute("data-guide-math") ||
+      part.hasAttribute("data-guide-atomic")
+    )
       return edge === "start" ? start : end;
     span.setEnd(node, offset);
     const prefix = span.toString();
@@ -66,7 +69,10 @@ export function mappedRangeAtOffset(
     const start = Number(part.dataset.guideSourceStart),
       end = Number(part.dataset.guideSourceEnd);
     if (offset >= end) continue;
-    if (part.hasAttribute("data-guide-math")) {
+    if (
+      part.hasAttribute("data-guide-math") ||
+      part.hasAttribute("data-guide-atomic")
+    ) {
       range.selectNode(part);
       return range;
     }

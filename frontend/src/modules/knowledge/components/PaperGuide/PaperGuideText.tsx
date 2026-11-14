@@ -61,7 +61,15 @@ export function guideTextSegments(text: string): Segment[] {
   if (cursor < text.length) append(text.length);
   return segments;
 }
-export default function PaperGuideText({ text }: { text: string }) {
+export default function PaperGuideText({
+  text,
+  sourceOffset = 0,
+  mapSource = true,
+}: {
+  text: string;
+  sourceOffset?: number;
+  mapSource?: boolean;
+}) {
   const segments = useMemo(
     () =>
       guideTextSegments(text).map((segment) => {
@@ -93,8 +101,12 @@ export default function PaperGuideText({ text }: { text: string }) {
       {segments.map((segment) => (
         <span
           key={segment.start}
-          data-guide-source-start={segment.start}
-          data-guide-source-end={segment.end}
+          data-guide-source-start={
+            mapSource ? sourceOffset + segment.start : undefined
+          }
+          data-guide-source-end={
+            mapSource ? sourceOffset + segment.end : undefined
+          }
           {...(segment.html
             ? {
                 "data-guide-math": true,
