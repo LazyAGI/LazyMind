@@ -2265,7 +2265,9 @@ async def _handle_chat_impl(
                 *workflow_contribution.required_tool_names,
                 *(('KBToolkit_read_document',) if (
                     any(cfg.name == 'kb' for cfg in active_configs)
-                    and (is_document_preview_chat or (has_document_selection and document_context.get('expand_paper_context') is True))
+                    and (is_document_preview_chat or (
+                        has_document_selection and document_context.get('expand_paper_context') is True
+                    ))
                 ) else ()),
                 *(getattr(tool, '__name__', '') for tool in [
                     *attachment_tools,
