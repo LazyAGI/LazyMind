@@ -133,11 +133,11 @@ func TestPaperGuideStructuredTaskTransportPreservesBoundEvidence(t *testing.T) {
 		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
 			t.Errorf("decode structured task: %v", err)
 		}
-		if request.TaskType != "paper.guide.review" || request.Options["task_version"] != "paper-guide-v1" ||
+		if request.TaskType != "paper.guide.review" || request.Options["task_version"] != "paper-guide-v2" ||
 			len(request.Input.Data.Evidence) != 1 || request.Input.Data.Evidence[0].ID != "ev_fixture" {
 			t.Errorf("lost guide request metadata: %+v", request)
 		}
-		fmt.Fprint(w, `{"status":"succeeded","output":{"findings":[]},"usage":{"model_calls":1,"task_type":"paper.guide.review","task_version":"paper-guide-v1"}}`)
+		fmt.Fprint(w, `{"status":"succeeded","output":{"findings":[]},"usage":{"model_calls":1,"task_type":"paper.guide.review","task_version":"paper-guide-v2"}}`)
 	}))
 	t.Setenv("LAZYMIND_CHAT_SERVICE_URL", endpoint)
 	result, err := RunStructuredTask(context.Background(), StructuredTaskRequest{

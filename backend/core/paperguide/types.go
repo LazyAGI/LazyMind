@@ -3,7 +3,9 @@ package paperguide
 
 import "lazymind/core/pdfir"
 
-const SchemaVersion = "paper-guide-v1"
+const TaskVersion = "paper-guide-v2"
+const SourceCatalogVersion = "paper-guide-source-v2"
+const legacySourceNamespace = "paper-guide-v1"
 
 type Role string
 
@@ -52,6 +54,8 @@ type SourceIdentity struct {
 }
 
 type GuideSourceSnapshot struct {
+	CatalogVersion    string          `json:"catalog_version,omitempty"`
+	SourceWarnings    []string        `json:"source_warnings,omitempty"`
 	Identity          SourceIdentity  `json:"identity"`
 	IRDigest          string          `json:"ir_digest"`
 	Parser            pdfir.Parser    `json:"parser"`

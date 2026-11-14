@@ -19,6 +19,7 @@ import (
 const JobType = "document.paper_guide"
 
 var (
+	ErrRegenerate    = errors.New("paper_guide_regeneration_required")
 	ErrGeneration    = errors.New("paper_guide_generation_failed")
 	ErrConflict      = errors.New("paper_guide_conflict")
 	ErrModelChanged  = errors.New("paper_guide_model_unavailable")
@@ -49,12 +50,13 @@ func digest(v any) string {
 }
 
 type ModelIdentity struct {
-	Ref            string `json:"ref"`
-	ID             string `json:"id"`
-	Name           string `json:"name"`
-	Protocol       string `json:"protocol"`
-	ParametersHash string `json:"parameters_hash"`
-	ContextTokens  int    `json:"context_tokens"`
+	Ref                 string `json:"ref"`
+	ID                  string `json:"id"`
+	Name                string `json:"name"`
+	Protocol            string `json:"protocol"`
+	ParametersHash      string `json:"parameters_hash"`
+	ContextTokens       int    `json:"context_tokens"`
+	OutputReserveTokens int    `json:"output_reserve_tokens,omitempty"`
 }
 type CreateRevision struct {
 	Scope                                                              Scope
@@ -70,6 +72,33 @@ type Repository struct {
 type JobPayload struct {
 	RevisionID string `json:"revision_id"`
 	Epoch      int64  `json:"epoch"`
+}
+
+// Contract identity is independent of PDF/IR identity. A software upgrade must
+// never make an old paid checkpoint appear to have used the new task contract.
+func contractFingerprint(sourceHash, irDigest string, model ModelIdentity) string {
+	return digest([]any{sourceHash, irDigest, SourceCatalogVersion, TaskVersion, model})
+}
+func (r Repository) CheckContract(ctx context.Context, rev orm.PaperGuideRevision) error {
+	var model ModelIdentity
+	if json.Unmarshal([]byte(rev.ModelJSON), &model) != nil {
+		return ErrRegenerate
+	}
+	if rev.Fingerprint == contractFingerprint(rev.SourceSHA256, rev.IRDigest, model) {
+		return nil
+	}
+	// A source dependency without any model attempt has no old generated contract
+	// to preserve. It adopts the current versions when its first snapshot freezes.
+	if rev.SnapshotPath == "" && rev.IRDigest == "" && rev.CallsUsed == 0 {
+		var count int64
+		if err := r.DB.WithContext(ctx).Model(&orm.PaperGuideStep{}).Where("revision_id = ?", rev.ID).Count(&count).Error; err != nil {
+			return err
+		}
+		if count == 0 {
+			return nil
+		}
+	}
+	return ErrRegenerate
 }
 
 func lock(db *gorm.DB) *gorm.DB {
@@ -156,7 +185,7 @@ func (r Repository) Create(ctx context.Context, in CreateRevision) (out orm.Pape
 		if in.SnapshotPath == "" {
 			stage = "waiting_source"
 		}
-		out = orm.PaperGuideRevision{ID: uuid.NewString(), GuideID: g.ID, Epoch: g.Epoch, IdempotencyKey: in.IdempotencyKey, SourceSHA256: in.SourceSHA256, IRDigest: in.IRDigest, SnapshotPath: in.SnapshotPath, ModelJSON: string(model), Fingerprint: digest([]any{in.SourceSHA256, in.IRDigest, SchemaVersion, in.Model}), Status: "draft", Stage: stage, DependencyID: in.DependencyID, CreatedAt: now, UpdatedAt: now}
+		out = orm.PaperGuideRevision{ID: uuid.NewString(), GuideID: g.ID, Epoch: g.Epoch, IdempotencyKey: in.IdempotencyKey, SourceSHA256: in.SourceSHA256, IRDigest: in.IRDigest, SnapshotPath: in.SnapshotPath, ModelJSON: string(model), Fingerprint: contractFingerprint(in.SourceSHA256, in.IRDigest, in.Model), Status: "draft", Stage: stage, DependencyID: in.DependencyID, CreatedAt: now, UpdatedAt: now}
 		if e := tx.Create(&out).Error; e != nil {
 			return e
 		}
@@ -221,6 +250,9 @@ func (r Repository) Resume(ctx context.Context, s Scope, id string, m ModelIdent
 		}
 		if rev.JobID != heldJob {
 			return ErrConflict
+		}
+		if e = rr.CheckContract(ctx, rev); e != nil {
+			return e
 		}
 		var old ModelIdentity
 		if json.Unmarshal([]byte(rev.ModelJSON), &old) != nil || old != m {

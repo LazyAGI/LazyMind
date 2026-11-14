@@ -2245,5 +2245,6 @@
   "2004409": { "en-US": "The guide run changed. Refresh and try again.", "zh-CN": "导读任务已变化，请刷新后重试。" },
   "2004410": { "en-US": "New guide generation is disabled. Existing authorized results remain readable.", "zh-CN": "新的整篇导读生成已禁用，已有结果仍可阅读。" },
   "2004411": { "en-US": "Some statements still need review. Generation is paused and published sections are preserved.", "zh-CN": "部分表述仍需检查，已暂停生成并保留已发布章节。" },
-  "2004412": { "en-US": "Guide generation failed. Resume later; used budget and published content are preserved.", "zh-CN": "导读生成失败，请稍后续跑；已用预算和已发布内容会保留。" }
+  "2004412": { "en-US": "Guide generation failed. Resume later; used budget and published content are preserved.", "zh-CN": "导读生成失败，请稍后续跑；已用预算和已发布内容会保留。" },
+  "2004413": { "en-US": "The guide format or generation instructions changed. Generate a new revision; existing content remains readable.", "zh-CN": "导读格式或生成规则已更新，请重新生成；已有内容仍可阅读。" }
 }

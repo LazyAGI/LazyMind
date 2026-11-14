@@ -58,6 +58,10 @@ func (s Service) Run(ctx context.Context, job asyncjob.Job, reporter asyncjob.Re
 	if json.Unmarshal([]byte(rev.ModelJSON), &x.model) != nil {
 		return asyncjob.Result{Permanent: true}, ErrModelChanged
 	}
+	if err := s.Repo.CheckContract(ctx, rev); err != nil {
+		_ = s.Repo.Transition(ctx, f, rev.ID, rev.Epoch, "paused", errorCode(err))
+		return asyncjob.Result{Permanent: true, ErrorCode: errorCode(err)}, safeRunError(err)
+	}
 	remaining := time.Duration(MaxActiveMillis-rev.ActiveMillis) * time.Millisecond
 	if remaining <= 0 {
 		return asyncjob.Result{Permanent: true, ErrorCode: ErrBudget.Error()}, ErrBudget
@@ -102,7 +106,7 @@ func (s Service) Run(ctx context.Context, job asyncjob.Job, reporter asyncjob.Re
 }
 func errorCode(e error) string { return safeRunError(e).Error() }
 func safeRunError(e error) error {
-	for _, known := range []error{ErrConflict, ErrModelChanged, ErrSourceChanged, ErrPreparation, ErrForbidden, ErrDisabled, ErrContext, ErrMaterial, ErrEvidence, ErrQuality, ErrBudget} {
+	for _, known := range []error{ErrRegenerate, ErrConflict, ErrModelChanged, ErrSourceChanged, ErrPreparation, ErrForbidden, ErrDisabled, ErrContext, ErrMaterial, ErrEvidence, ErrQuality, ErrBudget} {
 		if errors.Is(e, known) {
 			return known
 		}
@@ -114,6 +118,9 @@ func mustMarshal(v any) json.RawMessage { b, _ := json.Marshal(v); return b }
 func (x *execution) check(ctx context.Context) (map[string]any, error) {
 	if !x.started.IsZero() && time.Since(x.started).Milliseconds()-x.callTime >= callMillis {
 		return nil, ErrBudget
+	}
+	if e := x.s.Repo.CheckContract(ctx, x.rev); e != nil {
+		return nil, e
 	}
 	if e := x.s.Authorize(ctx, x.scope, true); e != nil {
 		return nil, e
@@ -127,6 +134,9 @@ func (x *execution) check(ctx context.Context) (map[string]any, error) {
 	}
 	if x.rev.IRDigest != "" && (state.Snapshot == nil || state.Snapshot.IRDigest != x.rev.IRDigest) {
 		return nil, ErrSourceChanged
+	}
+	if state.Snapshot != nil && state.Snapshot.CatalogVersion != SourceCatalogVersion {
+		return nil, ErrRegenerate
 	}
 	m, cfg, e := x.s.ResolveModel(ctx, x.scope, x.model.Ref)
 	if e != nil || m != x.model {
@@ -174,13 +184,14 @@ func (x *execution) execute(ctx context.Context) error {
 			return ErrMaterial
 		}
 		e = x.s.Repo.fenced(ctx, x.f, x.rev.ID, x.rev.Epoch, func(tx *gorm.DB, r *orm.PaperGuideRevision, g *orm.PaperGuide) error {
-			return tx.Model(r).Updates(map[string]any{"snapshot_path": state.Path, "ir_digest": state.Snapshot.IRDigest, "fingerprint": digest([]any{state.Hash, state.Snapshot.IRDigest, SchemaVersion, x.model})}).Error
+			return tx.Model(r).Updates(map[string]any{"snapshot_path": state.Path, "ir_digest": state.Snapshot.IRDigest, "fingerprint": contractFingerprint(state.Hash, state.Snapshot.IRDigest, x.model)}).Error
 		})
 		if e != nil {
 			return e
 		}
 		x.rev.SnapshotPath = state.Path
 		x.rev.IRDigest = state.Snapshot.IRDigest
+		x.rev.Fingerprint = contractFingerprint(state.Hash, state.Snapshot.IRDigest, x.model)
 	}
 	snap, e := x.s.Source.Read(ctx, x.rev.SnapshotPath)
 	if e != nil {
@@ -188,6 +199,9 @@ func (x *execution) execute(ctx context.Context) error {
 	}
 	if e = ValidateSnapshot(snap, SourceIdentity{x.rev.SourceSHA256, x.scope.DatasetID, x.scope.DocumentID, x.scope.OwnerID}, x.rev.IRDigest); e != nil {
 		return ErrEvidence
+	}
+	if snap.CatalogVersion != SourceCatalogVersion {
+		return ErrRegenerate
 	}
 	x.snap = snap
 	steps, e := x.s.Repo.Steps(ctx, x.rev.ID)
@@ -356,7 +370,11 @@ func (x *execution) inputFits(input map[string]any) bool {
 	if limit <= 0 {
 		limit = 32768
 	}
-	return e == nil && len(b) <= 1<<20 && estimatedTokens(b) <= limit*7/10
+	budget := limit / 10 * 7
+	if x.model.OutputReserveTokens > 0 && limit-x.model.OutputReserveTokens < budget {
+		budget = limit - x.model.OutputReserveTokens
+	}
+	return e == nil && budget > 0 && len(b) <= 1<<20 && estimatedTokens(b) <= budget
 }
 
 // A UTF-8 byte bound also covers dense punctuation/formula tokenization.
@@ -599,7 +617,7 @@ func (x *execution) task(ctx context.Context, key, task string, input map[string
 	if !x.inputFits(input) {
 		return ErrContext
 	}
-	hash := digest(input)
+	hash := digest([]any{TaskVersion, input})
 	if prior, ok := x.steps[key]; ok {
 		if prior.InputHash != hash {
 			return ErrConflict

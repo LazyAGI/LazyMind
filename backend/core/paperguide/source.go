@@ -18,6 +18,16 @@ var ErrInvalidGuide = errors.New("invalid paper guide output")
 // BuildSourceSnapshot binds the evidence catalog to the exact PDF, IR and
 // server-owned scope. Ownership checks happen before constructing the snapshot.
 func BuildSourceSnapshot(d pdfir.Document, identity SourceIdentity) (GuideSourceSnapshot, error) {
+	return buildSourceSnapshot(d, identity, SourceCatalogVersion)
+}
+
+// Empty catalogVersion is the original frozen catalog. Keep its construction
+// rules intact so existing guides and exact selections remain verifiable.
+func buildSourceSnapshot(d pdfir.Document, identity SourceIdentity, catalogVersion string) (GuideSourceSnapshot, error) {
+	if catalogVersion != "" && catalogVersion != SourceCatalogVersion {
+		return GuideSourceSnapshot{}, fmt.Errorf("%w: unknown catalog version", ErrInvalidSource)
+	}
+	current := catalogVersion == SourceCatalogVersion
 	var s GuideSourceSnapshot
 	if !validSHA(identity.SourceSHA256) || identity.SourceSHA256 != d.SourceSHA256 ||
 		identity.OwnerID == "" || identity.DocumentID == "" || identity.DatasetID == "" {
@@ -32,10 +42,13 @@ func BuildSourceSnapshot(d pdfir.Document, identity SourceIdentity) (GuideSource
 		return s, fmt.Errorf("%w: invalid IR", ErrInvalidSource)
 	}
 	s = GuideSourceSnapshot{
-		Identity: identity, IRDigest: pdfir.Digest(string(data)), Parser: d.Parser, IRVersion: d.Version,
+		CatalogVersion: catalogVersion, Identity: identity, IRDigest: pdfir.Digest(string(data)), Parser: d.Parser, IRVersion: d.Version,
 		ProjectionVersion: d.ProjectionVersion, CoordinateSpace: d.CoordinateSpace,
 		Pages: frozen.Pages, Blocks: frozen.Blocks, Assets: []GuideAsset{}, Sections: []SourceSection{}, Evidence: []GuideEvidence{},
 		Coverage: GuideCoverage{Warnings: append([]string{}, d.Warnings...), PageWarnings: []int{}},
+	}
+	if current {
+		s.SourceWarnings = append([]string(nil), d.Warnings...)
 	}
 	pages := make(map[int]bool, len(s.Pages))
 	for _, p := range s.Pages {
@@ -63,24 +76,41 @@ func BuildSourceSnapshot(d pdfir.Document, identity SourceIdentity) (GuideSource
 		e := GuideEvidence{SourceBlockID: b.ID, SourceType: b.Type, Text: b.Text}
 		var asset *GuideAsset
 		switch {
-		case b.Type == "formula" && b.Latex != "":
-			l.Kind, l.Latex, l.BBox = "formula", b.Latex, bbox
-			e.Text = b.Latex
+		case b.Type == "formula" && (current || b.Latex != ""):
 			asset = &GuideAsset{Kind: "formula"}
-		case b.Image != nil && b.Type == "image":
+			if b.Latex != "" {
+				l.Kind, l.Latex, l.BBox = "formula", b.Latex, bbox
+				e.Text = b.Latex
+			} else {
+				asset.Warnings = []string{"Formula transcription is unavailable; only original text and page are readable."}
+			}
+		case current && (b.Type == "image" || b.Type == "chart") || b.Image != nil && b.Type == "image":
 			if bbox != nil {
 				l.Kind, l.BBox = "figure_region", bbox
 			}
-			e.Text = joinSourceText(b.Text, b.Image.Captions, b.Image.Footnotes)
-			asset = &GuideAsset{Kind: "figure", RelatedBlocks: b.Image.RelatedBlocks, Warnings: b.Image.Warnings}
-		case b.Table != nil && b.Type == "table":
-			e.Text = joinSourceText(b.Text, b.Table.Captions, tableRows(b.Table), b.Table.Footnotes)
-			// Whole-table locators need no row/column claim. If bounds are
-			// unavailable, the page remains a truthful citation.
-			if bbox != nil && len(b.Table.Warnings) == 0 && len(b.Table.Rows) != 0 {
-				l.Kind, l.BBox = "table_cells", bbox
+			asset = &GuideAsset{Kind: "figure"}
+			if b.Image != nil {
+				e.Text = joinSourceText(b.Text, b.Image.Captions, b.Image.Footnotes)
+				asset.RelatedBlocks = b.Image.RelatedBlocks
+				asset.Warnings = b.Image.Warnings
 			}
-			asset = &GuideAsset{Kind: "table", RelatedBlocks: b.Table.RelatedBlocks, Warnings: b.Table.Warnings}
+			if current {
+				asset.Warnings = append(append([]string{}, asset.Warnings...), "Figure pixels are not supplied to the guide model; captions and regions do not establish visual observations.")
+			}
+		case b.Type == "table" && (current || b.Table != nil):
+			asset = &GuideAsset{Kind: "table"}
+			if b.Table != nil {
+				e.Text = joinSourceText(b.Text, b.Table.Captions, tableRows(b.Table), b.Table.Footnotes)
+				// Whole-table locators need no row/column claim. If bounds are
+				// unavailable, the page remains a truthful citation.
+				if bbox != nil && len(b.Table.Warnings) == 0 && len(b.Table.Rows) != 0 {
+					l.Kind, l.BBox = "table_cells", bbox
+				}
+				asset = &GuideAsset{Kind: "table", RelatedBlocks: b.Table.RelatedBlocks, Warnings: b.Table.Warnings}
+			}
+			if current && (b.Table == nil || len(b.Table.Rows) == 0) {
+				asset.Warnings = append(append([]string{}, asset.Warnings...), "Parsed table cells are unavailable; do not infer values or cell positions.")
+			}
 		case b.Text != "" && bbox != nil:
 			l.Kind, l.End, l.BBox = "text_span", len([]rune(b.Text)), bbox
 		}
@@ -91,6 +121,13 @@ func BuildSourceSnapshot(d pdfir.Document, identity SourceIdentity) (GuideSource
 			s.Assets = append(s.Assets, *asset)
 			if len(asset.Warnings) != 0 {
 				warnings[b.Page] = true
+				if current {
+					for _, warning := range asset.Warnings {
+						if !contains(s.Coverage.Warnings, warning) {
+							s.Coverage.Warnings = append(s.Coverage.Warnings, warning)
+						}
+					}
+				}
 			}
 		}
 		s.Evidence = append(s.Evidence, e)
@@ -141,7 +178,11 @@ func validSHA(s string) bool {
 	return len(s) == 64 && err == nil && strings.ToLower(s) == s
 }
 func (s GuideSourceSnapshot) sourceID(kind string, block string) string {
-	tuple, _ := json.Marshal([]string{SchemaVersion, s.Identity.SourceSHA256, s.Identity.OwnerID, s.Identity.DatasetID, s.Identity.DocumentID, s.IRDigest, kind, block})
+	namespace := s.CatalogVersion
+	if namespace == "" {
+		namespace = legacySourceNamespace
+	}
+	tuple, _ := json.Marshal([]string{namespace, s.Identity.SourceSHA256, s.Identity.OwnerID, s.Identity.DatasetID, s.Identity.DocumentID, s.IRDigest, kind, block})
 	return "ev_" + pdfir.Digest(string(tuple))
 }
 func validBBox(b []float64) bool {

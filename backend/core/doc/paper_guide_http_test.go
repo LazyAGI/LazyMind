@@ -319,3 +319,77 @@ func TestPaperGuideSharedReaderCheckpointDoesNotResolveGroupsInTransaction(t *te
 		t.Fatalf("revoked reader checkpoint: %v", err)
 	}
 }
+
+func TestPaperGuideModelTokenLimitsUseConfiguredUnitsAndMinimum(t *testing.T) {
+	db, _, _ := guideHTTPFixture(t)
+	scope := paperguide.Scope{OwnerID: "owner", DatasetID: "guide-ds", DocumentID: "guide-doc", Language: "zh"}
+	for _, tc := range []struct {
+		window, input string
+		want          int
+	}{{"1M", "128K", 131072}, {"128K", "1M", 131072}, {"32768", "128K", 32768}, {"invalid", "64K", 65536}, {"", "", 32768}, {"999999999999999999999M", "", 32768}} {
+		db.Model(&orm.UserModelProviderGroupModel{}).Where("id = ?", "a").Updates(map[string]any{"max_input_tokens": tc.window, "input_token_limit": tc.input})
+		model, _, err := resolvePaperGuideModel(t.Context(), scope, "own:a")
+		if err != nil || model.ContextTokens != tc.want {
+			t.Fatalf("%s/%s: got %d want %d (%v)", tc.window, tc.input, model.ContextTokens, tc.want, err)
+		}
+	}
+}
+
+func TestPaperGuideCatalogPathDoesNotReuseLegacySnapshot(t *testing.T) {
+	_, hash, _ := guideHTTPFixture(t)
+	scope := paperguide.Scope{OwnerID: "owner", DatasetID: "guide-ds", DocumentID: "guide-doc", Language: "zh"}
+	state, err := (paperGuideSource{}).Load(t.Context(), scope, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	legacyPath := filepath.Join(filepath.Dir(state.Path), hash+"-"+state.Snapshot.IRDigest+".json")
+	if err = os.MkdirAll(filepath.Dir(legacyPath), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err = os.WriteFile(legacyPath, []byte("legacy sentinel"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	state, err = (paperGuideSource{}).Load(t.Context(), scope, true)
+	if err != nil || state.Path == legacyPath || !strings.Contains(state.Path, paperguide.SourceCatalogVersion) {
+		t.Fatalf("snapshot cache mixed versions: %s %v", state.Path, err)
+	}
+	raw, err := os.ReadFile(legacyPath)
+	if err != nil || string(raw) != "legacy sentinel" {
+		t.Fatal("overwrote legacy file")
+	}
+	current, err := (paperGuideSource{}).Read(t.Context(), state.Path)
+	if err != nil || paperguide.ValidateSnapshot(current, current.Identity, current.IRDigest) != nil {
+		t.Fatal("new snapshot not verifiable")
+	}
+}
+
+func TestPaperGuideOldContractReportsRegenerationWithoutSourceChange(t *testing.T) {
+	db, hash, _ := guideHTTPFixture(t)
+	t.Setenv("LAZYMIND_PAPER_GUIDE_ENABLED", "true")
+	body := `{"expected_source_hash":"` + hash + `","model_ref":"own:a","idempotency_key":"old-contract"}`
+	w := httptest.NewRecorder()
+	GeneratePaperGuide(w, guideRequest("POST", body, "owner", nil))
+	if w.Code != 202 {
+		t.Fatalf("create: %d %s", w.Code, w.Body)
+	}
+	var rev orm.PaperGuideRevision
+	if err := db.Take(&rev).Error; err != nil {
+		t.Fatal(err)
+	}
+	db.Model(&rev).Update("fingerprint", "legacy-contract")
+	w = httptest.NewRecorder()
+	ResumePaperGuide(w, guideRequest("POST", "", "owner", map[string]string{"run": rev.ID}))
+	if w.Code != 409 || !strings.Contains(w.Body.String(), "paper_guide_regeneration_required") || !strings.Contains(w.Body.String(), "2004413") {
+		t.Fatalf("wrong version error: %d %s", w.Code, w.Body)
+	}
+	w = httptest.NewRecorder()
+	GetPaperGuide(w, guideRequest("GET", "", "owner", nil))
+	if w.Code != 200 || !strings.Contains(w.Body.String(), "paper_guide_regeneration_required") {
+		t.Fatalf("old candidate status: %d %s", w.Code, w.Body)
+	}
+	var jobs int64
+	db.Model(&orm.AsyncJob{}).Where("job_type = ?", paperguide.JobType).Count(&jobs)
+	if jobs != 1 {
+		t.Fatal("old resume enqueued a new paid run")
+	}
+}

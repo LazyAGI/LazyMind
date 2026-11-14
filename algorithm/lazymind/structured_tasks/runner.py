@@ -2,6 +2,7 @@
 import json
 import re
 import time
+from urllib.parse import urlsplit
 
 import lazyllm
 from pydantic import ValidationError
@@ -22,6 +23,27 @@ def _unique_object(pairs):
             raise ValueError('duplicate JSON key')
         result[key] = value
     return result
+
+
+def _native_json_options(spec, llm_config):
+    """Use only resolved, known official protocols; compatibility is not a capability claim."""
+    config = llm_config.get('llm')
+    if not spec.prefer_native_json or not isinstance(config, dict):
+        return {}
+    if config.get('source') not in {'openai', 'openai_responses'}:
+        return {}
+    # Both adapters use this official default when no base_url was resolved.
+    base = config.get('base_url') or 'https://api.openai.com/v1/'
+    if not isinstance(base, str):
+        return {}
+    try:
+        endpoint = urlsplit(base)
+        supported = (endpoint.scheme == 'https' and endpoint.hostname == 'api.openai.com'
+                     and endpoint.port in (None, 443) and endpoint.username is None
+                     and endpoint.password is None)
+    except ValueError:
+        return {}
+    return {'response_format': {'type': 'json_object'}} if supported else {}
 
 
 def run_registered_task(request, task_id, *, call_model, configure_model, call_error, result_type):
@@ -81,7 +103,8 @@ def run_registered_task(request, task_id, *, call_model, configure_model, call_e
         usage['model_calls'] = 1
         try:
             raw = call_model(request, prompt, stream_output=False, default_timeout=spec.timeout_seconds,
-                             deadline=started + spec.timeout_seconds)
+                             deadline=started + spec.timeout_seconds,
+                             **_native_json_options(spec, request.llm_config))
         except call_error as exc:
             usage['model_calls'] = exc.calls
             return result(exc.code, retryable=exc.retryable, diagnostic_id=exc.diagnostic_id)

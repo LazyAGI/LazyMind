@@ -460,6 +460,13 @@ func (s Service) readSnapshot(ctx context.Context, scope Scope, revision orm.Pap
 
 func (s Service) observedView(ctx context.Context, r orm.PaperGuideRevision) RevisionView {
 	out := view(r)
+	if r.Stage != "completed" && errors.Is(s.Repo.CheckContract(ctx, r), ErrRegenerate) {
+		out.Run.ErrorCode = ErrRegenerate.Error()
+		if r.Stage != "canceled" && r.Stage != "source_changed" {
+			out.Run.Stage = "paused"
+		}
+		return out
+	}
 	if r.Stage == "completed" || r.Stage == "canceled" || r.Stage == "source_changed" || r.Stage == "paused" || r.Stage == "failed" {
 		return out
 	}

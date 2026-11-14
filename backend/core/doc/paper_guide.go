@@ -45,7 +45,7 @@ func paperGuideError(w http.ResponseWriter, e error) {
 		code = paperguide.ErrForbidden.Error()
 	case errors.Is(e, paperguide.ErrDisabled):
 		status = 403
-	case errors.Is(e, paperguide.ErrConflict), errors.Is(e, paperguide.ErrPreparation), errors.Is(e, paperguide.ErrSourceChanged):
+	case errors.Is(e, paperguide.ErrRegenerate), errors.Is(e, paperguide.ErrConflict), errors.Is(e, paperguide.ErrPreparation), errors.Is(e, paperguide.ErrSourceChanged):
 		status = 409
 	case errors.Is(e, paperguide.ErrBudget), errors.Is(e, paperguide.ErrContext), errors.Is(e, paperguide.ErrMaterial), errors.Is(e, paperguide.ErrEvidence), errors.Is(e, paperguide.ErrModelChanged), errors.Is(e, paperguide.ErrQuality):
 		status = 422
@@ -168,6 +168,10 @@ func ResumePaperGuide(w http.ResponseWriter, r *http.Request) {
 	service := paperGuideService()
 	rev, e := service.Repo.Revision(r.Context(), scope, common.PathVar(r, "run"))
 	if e != nil {
+		paperGuideError(w, e)
+		return
+	}
+	if e = service.Repo.CheckContract(r.Context(), rev); e != nil {
 		paperGuideError(w, e)
 		return
 	}

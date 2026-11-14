@@ -211,7 +211,9 @@ class Section(Shape):
     role: Role
     title: prose(180)
     blocks: Annotated[list[Block], Field(min_length=1, max_length=64)]
-    claims: Annotated[list[Claim], Field(max_length=48)]
+    claims: Annotated[list[Claim], Field(max_length=48, description=(
+        'Definitions of NEW claims only. Never repeat or redefine a plan claim here. '
+        'Reference existing plan claims through claim_ids; use [] when no new claims are needed.'))]
     claim_ids: Annotated[list[ID], Field(max_length=96)]
     summary: prose(1200)
 
@@ -297,7 +299,7 @@ def bind_sections(sections, field, allowed):
 def bind_output(data, result):
     """Outputs bind only to the supplied packet; Core independently binds to the snapshot."""
     evidence = {item.id for item in data.evidence}
-    asset_kind = {'image': 'figure', 'formula': 'formula', 'table': 'table'}
+    asset_kind = {'chart': 'figure', 'image': 'figure', 'formula': 'formula', 'table': 'table'}
     assets = {item.id: asset_kind[item.source_type] for item in data.evidence if item.source_type in asset_kind}
     if isinstance(result, Review):
         claims = {c.id for c in data.plan.claims}

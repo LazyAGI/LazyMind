@@ -87,7 +87,7 @@ func (paperGuideSource) Load(ctx context.Context, scope paperguide.Scope, prepar
 			return out, paperguide.ErrEvidence
 		}
 		dir := filepath.Join(filepath.Dir(pdfIRSource(ext)), ".lazymind-artifacts", row.ID, "paper-guides", pdfir.Digest(scope.OwnerID))
-		path := filepath.Join(dir, hash+"-"+snapshot.IRDigest+".json")
+		path := filepath.Join(dir, hash+"-"+snapshot.IRDigest+"-"+snapshot.CatalogVersion+".json")
 		// This immutable personal snapshot is independent of the shared parser cache.
 		// It contains no original PDF copy or model credentials.
 		if _, e = os.Stat(path); prepare && errors.Is(e, os.ErrNotExist) {
@@ -184,13 +184,18 @@ func resolvePaperGuideModel(ctx context.Context, scope paperguide.Scope, ref str
 	if candidate == nil {
 		return paperguide.ModelIdentity{}, nil, paperguide.ErrModelChanged
 	}
-	tokens := 32768
+	tokens := 0
 	for _, value := range []*string{selected.MaxInputTokens, selected.InputTokenLimit} {
-		if value != nil {
-			if n, e := strconv.Atoi(strings.TrimSpace(*value)); e == nil && n > 0 && (tokens == 32768 || n < tokens) {
-				tokens = n
-			}
+		if n := modelconfig.ConfiguredChatWindow(value); n != nil && *n <= int64(int(^uint(0)>>1)) && (tokens == 0 || int(*n) < tokens) {
+			tokens = int(*n)
 		}
+	}
+	if tokens == 0 {
+		tokens = 32768
+	}
+	outputReserve := 0
+	if n := modelconfig.ConfiguredChatWindow(selected.MaxOutputTokens); n != nil && *n <= int64(int(^uint(0)>>1)) {
+		outputReserve = int(*n)
 	}
 	// Only a one-way hash of non-secret settings/endpoint enters persistence.
 	// Credential rotation alone does not change the frozen model identity.
@@ -199,7 +204,7 @@ func resolvePaperGuideModel(ctx context.Context, scope paperguide.Scope, ref str
 	if llm, ok := candidate.LLMConfig["llm"].(map[string]any); ok {
 		protocol, _ = llm["source"].(string)
 	}
-	identity := paperguide.ModelIdentity{Ref: modelconfig.ChatCandidateID(selected.Source, selected.ID), ID: selected.ID, Name: selected.ModelName, Protocol: protocol, ParametersHash: pdfir.Digest(string(parameters)), ContextTokens: tokens}
+	identity := paperguide.ModelIdentity{Ref: modelconfig.ChatCandidateID(selected.Source, selected.ID), ID: selected.ID, Name: selected.ModelName, Protocol: protocol, ParametersHash: pdfir.Digest(string(parameters)), ContextTokens: tokens, OutputReserveTokens: outputReserve}
 	return identity, candidate.LLMConfig, nil
 }
 

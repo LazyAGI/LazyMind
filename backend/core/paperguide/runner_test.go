@@ -207,7 +207,7 @@ func TestLongPlanExtractsCoverAllOriginalEvidenceAndRemainBounded(t *testing.T) 
 	}
 	repo := Repository{DB: guideDB(t)}
 	scope := Scope{OwnerID: id.OwnerID, DatasetID: id.DatasetID, DocumentID: id.DocumentID, Language: "en"}
-	model := ModelIdentity{ID: "m", ContextTokens: 24000}
+	model := ModelIdentity{ID: "m", ContextTokens: 24000, OutputReserveTokens: 8000}
 	seen := map[string]bool{}
 	extractCalls := 0
 	service := Service{Repo: repo, Source: &fixtureSource{s: snap}, Authorize: func(context.Context, Scope, bool) error { return nil }, ResolveModel: func(context.Context, Scope, string) (ModelIdentity, map[string]any, error) { return model, nil, nil }, Call: func(ctx context.Context, task string, input map[string]any, cfg map[string]any) (json.RawMessage, error) {
@@ -433,5 +433,35 @@ func TestWholeReviewProjectsExactPublishedVersions(t *testing.T) {
 				t.Fatalf("incremental response omitted flagged version: %+v", delta.Sections)
 			}
 		})
+	}
+}
+
+func TestLegacyCandidateCannotSpendOrResumeUnderNewContract(t *testing.T) {
+	d, id := fixture(t)
+	snap, _ := BuildSourceSnapshot(d, id)
+	repo := Repository{DB: guideDB(t)}
+	scope := Scope{OwnerID: id.OwnerID, DatasetID: id.DatasetID, DocumentID: id.DocumentID, Language: "zh"}
+	model := ModelIdentity{ID: "m", ContextTokens: 128000}
+	rev, err := repo.Create(t.Context(), CreateRevision{Scope: scope, SourceSHA256: id.SourceSHA256, IRDigest: snap.IRDigest, SnapshotPath: "legacy", Model: model})
+	if err != nil {
+		t.Fatal(err)
+	}
+	oldFingerprint := digest([]any{id.SourceSHA256, snap.IRDigest, "paper-guide-v1", model})
+	repo.DB.Model(&rev).Updates(map[string]any{"fingerprint": oldFingerprint, "stage": "paused", "calls_used": 1})
+	calls := 0
+	service := Service{Repo: repo, Source: &fixtureSource{s: snap}, Authorize: func(context.Context, Scope, bool) error { return nil }, ResolveModel: func(context.Context, Scope, string) (ModelIdentity, map[string]any, error) { return model, nil, nil }, Call: func(context.Context, string, map[string]any, map[string]any) (json.RawMessage, error) {
+		calls++
+		return nil, nil
+	}}
+	_, err = service.Run(t.Context(), asyncjob.Job{ID: rev.JobID, PayloadJSON: mustJSON(JobPayload{rev.ID, rev.Epoch})}, testFence{repo.DB})
+	if err == nil || err.Error() != "paper_guide_regeneration_required" || calls != 0 {
+		t.Fatalf("legacy candidate spent calls=%d err=%v", calls, err)
+	}
+	_, err = repo.Resume(t.Context(), scope, rev.ID, model)
+	if err == nil || err.Error() != "paper_guide_regeneration_required" {
+		t.Fatalf("mixed-contract resume: %v", err)
+	}
+	if err = repo.Cancel(t.Context(), scope, rev.ID); err != nil {
+		t.Fatalf("legacy candidate must remain cancellable: %v", err)
 	}
 }

@@ -7316,6 +7316,7 @@ export interface PaperGuideModelIdentity {
     'context_tokens': number;
     'id': string;
     'name': string;
+    'output_reserve_tokens'?: number;
     'parameters_hash': string;
     'protocol': string;
     'ref': string;

@@ -32,7 +32,7 @@ def test_extract_one_call_and_binds_evidence(monkeypatch, output, error):
     }]}
     request = llm_task.LLMTaskRequest(
         task_type='paper.guide.extract',
-        options={'task_version': 'paper-guide-v1'},
+        options={'task_version': 'paper-guide-v2'},
         input={'data': input_data})
     result = llm_task.run_llm_task(request)
     assert result.error_code == error
@@ -84,7 +84,7 @@ def test_guide_chain_accepts_versioned_shapes_and_rejects_invalid_bindings(monke
     monkeypatch.setattr(llm_task, 'AutoModel', lambda **kwargs: model)
     request = llm_task.LLMTaskRequest(
         task_type=f'paper.guide.{task}',
-        options={'task_version': 'paper-guide-v1'},
+        options={'task_version': 'paper-guide-v2'},
         input={'data': {'language': 'en', 'evidence': [EVIDENCE], **data}})
     good = llm_task.run_llm_task(request)
     assert good.status == 'succeeded'
@@ -99,7 +99,7 @@ def test_guide_rejects_tools_and_paths_before_model(monkeypatch):
     data = {'language': 'en', 'evidence': [EVIDENCE], 'output_path': '/tmp/override'}
     request = llm_task.LLMTaskRequest(
         task_type='paper.guide.extract',
-        options={'task_version': 'paper-guide-v1'},
+        options={'task_version': 'paper-guide-v2'},
         input={'data': data})
     assert llm_task.run_llm_task(request).error_code == 'invalid_task_input'
     request.input.data.pop('output_path')
@@ -121,7 +121,7 @@ def test_guide_rejects_duplicate_json_keys_with_one_call(monkeypatch, raw):
 
     monkeypatch.setattr(llm_task, 'AutoModel', lambda **kwargs: model)
     request = llm_task.LLMTaskRequest(
-        task_type='paper.guide.extract', options={'task_version': 'paper-guide-v1'},
+        task_type='paper.guide.extract', options={'task_version': 'paper-guide-v2'},
         input={'data': {'language': 'en', 'evidence': [EVIDENCE]}})
     result = llm_task.run_llm_task(request)
     assert result.error_code == 'invalid_model_output'
@@ -144,7 +144,7 @@ def test_section_requires_planned_claims_and_evidence_closure(monkeypatch):
     section['blocks'][0].update(claim_ids=['required'], evidence_ids=[])
     monkeypatch.setattr(llm_task, 'AutoModel', lambda **kwargs: lambda *a, **k: json.dumps(section))
     request = llm_task.LLMTaskRequest(
-        task_type='paper.guide.section', options={'task_version': 'paper-guide-v1'},
+        task_type='paper.guide.section', options={'task_version': 'paper-guide-v2'},
         input={'data': {'plan': plan, 'role': 'background', 'language': 'en', 'evidence': [EVIDENCE]}})
     assert llm_task.run_llm_task(request).status == 'succeeded'
     request.input.data['evidence'] = [other]
@@ -167,7 +167,7 @@ def test_full_review_validates_unique_targets_even_without_findings(monkeypatch,
                  'evidence_ids': [SOURCE_ID], 'argument_type': None, 'conditions': [], 'support_status': 'supported'}
         sections.append({**SECTION, 'role': role, 'title': role.title(), 'blocks': [block], 'claims': [claim]})
     request = llm_task.LLMTaskRequest(
-        task_type='paper.guide.review', options={'task_version': 'paper-guide-v1'},
+        task_type='paper.guide.review', options={'task_version': 'paper-guide-v2'},
         input={'data': {'plan': PLAN, 'sections': sections, 'language': 'en', 'evidence': [EVIDENCE]}})
     result = llm_task.run_llm_task(request)
     assert result.error_code == (None if collision == 'none' else 'invalid_task_input')
@@ -183,7 +183,7 @@ def test_guide_math_preserves_compact_comparisons_without_html(monkeypatch, body
     raw = {'claims': [], 'open_questions': [body]}
     monkeypatch.setattr(llm_task, 'AutoModel', lambda **kwargs: lambda *a, **k: json.dumps(raw))
     request = llm_task.LLMTaskRequest(
-        task_type='paper.guide.extract', options={'task_version': 'paper-guide-v1'},
+        task_type='paper.guide.extract', options={'task_version': 'paper-guide-v2'},
         input={'data': {'language': 'en', 'evidence': [EVIDENCE]}})
     assert llm_task.run_llm_task(request).error_code == error
 
@@ -197,3 +197,122 @@ def test_formula_retains_previous_json_decoding_behavior(monkeypatch):
     result = llm_task.run_llm_task(request)
     assert result.status == 'succeeded'
     assert result.output['summary'] == 'Final'
+
+
+def test_live_chart_exclusion_fixture_binds_without_inventing_content():
+    from pathlib import Path
+    from copy import deepcopy
+    from lazymind.structured_tasks.paper_guide_schemas import Plan, PlanInput, bind_output
+    fixture = json.loads((Path(__file__).parents[2] / 'fixtures/paper-guide-live-contract.json').read_text())
+    evidence = fixture['chart_evidence']
+    plan = deepcopy(PLAN)
+    plan['required_assets'] = fixture['chart_decisions']
+    for section in plan['sections']:
+        section['evidence_ids'] = [item['id'] for item in evidence]
+    bind_output(PlanInput.model_validate({'language':'en','evidence': evidence}), Plan.model_validate(plan))
+    assert all(not item['text'] for item in evidence)
+    assert all(not item['included'] for item in plan['required_assets'])
+
+
+@pytest.mark.parametrize('source', ['chart', 'image', 'table', 'formula'])
+def test_metadata_free_source_asset_can_be_explicitly_excluded(source):
+    from copy import deepcopy
+    from lazymind.structured_tasks.paper_guide_schemas import Plan, PlanInput, bind_output
+    evidence = {**EVIDENCE, 'source_type': source, 'text': '', 'locator': {'kind': 'page', 'page': 0}}
+    plan = deepcopy(PLAN)
+    plan['required_assets'] = [{'id': SOURCE_ID, 'included': False, 'reason': 'Readable material is missing.'}]
+    bind_output(PlanInput.model_validate({'language':'en','evidence': [evidence]}), Plan.model_validate(plan))
+
+
+@pytest.mark.parametrize(('source', 'url', 'enabled'), [
+    ('openai', 'https://api.openai.com/v1', True),
+    ('openai_responses', 'https://api.openai.com/v1', True),
+    ('openai_responses', None, True),
+    ('openai', 'https://compatible.example/v1', False),
+    ('openai_responses', 'https://compatible.example/v1', False),
+    ('openai', 'https://api.openai.com.evil.example/v1', False),
+    ('openai', 'http://api.openai.com/v1', False),
+    ('openai', 'https://user@api.openai.com/v1', False),
+    ('claude', 'https://api.openai.com/v1', False),
+])
+def test_native_json_is_server_owned_and_protocol_scoped(monkeypatch, source, url, enabled):
+    from lazymind.structured_tasks.registry import PAPER_GUIDE_VERSION
+    seen = []
+    def model(prompt, **options):
+        seen.append(options)
+        return '{"claims":[],"open_questions":[]}'
+    monkeypatch.setattr(llm_task, 'AutoModel', lambda **kwargs: model)
+    config = {'source': source, 'model': 'fixture', 'api_key': 'test-only'}
+    if url is not None:
+        config['base_url'] = url
+    request = llm_task.LLMTaskRequest(task_type='paper.guide.extract', llm_config={'llm': config},
+        options={'task_version': PAPER_GUIDE_VERSION}, input={'data': {'language':'en','evidence': [EVIDENCE]}})
+    result = llm_task.run_llm_task(request)
+    assert result.status == 'succeeded'
+    assert len(seen) == 1 and seen[0]['max_retries'] == 1
+    assert seen[0].get('response_format') == ({'type': 'json_object'} if enabled else None)
+    request.response_format = {'type': 'json_object'}
+    assert llm_task.run_llm_task(request).error_code == 'invalid_task_input'
+    assert len(seen) == 1
+
+
+def test_section_contract_explicitly_defines_only_new_claims():
+    from lazymind.structured_tasks.paper_guide_schemas import Section, SectionInput
+    from lazymind.structured_tasks.paper_guide import section_prompt
+    description = Section.model_json_schema()['properties']['claims'].get('description', '')
+    assert 'NEW' in description and 'plan' in description and '[]' in description
+    prompt = section_prompt(SectionInput.model_validate({'language':'en','plan': PLAN, 'role': 'background', 'evidence': [EVIDENCE]}))
+    assert 'claims=[]' in prompt and 'JSON' in prompt and 'backslash' in prompt
+
+
+def test_native_json_reaches_responses_adapter_without_schema_coercion():
+    from lazyllm.module.llms.onlinemodule.supplier.openai_responses import chat_to_responses_request
+    body = chat_to_responses_request({'model': 'fixture', 'messages': [{'role': 'user', 'content': 'JSON'}],
+                                      'response_format': {'type': 'json_object'}})
+    assert body['text']['format'] == {'type': 'json_object'}
+    assert 'response_format' not in body
+
+
+@pytest.mark.parametrize(('failure', 'claim_fixture_index'), [
+    ('invalid_json', 0), ('duplicate_claims', 0), ('duplicate_claims', 1), ('provider_error', 0),
+])
+def test_live_section_failures_remain_strict_and_single_call(monkeypatch, failure, claim_fixture_index):
+    from pathlib import Path
+    from copy import deepcopy
+    from lazymind.structured_tasks.registry import PAPER_GUIDE_VERSION
+    fixture = json.loads((Path(__file__).parents[2] / 'fixtures/paper-guide-live-contract.json').read_text())
+    plan, section = deepcopy(PLAN), deepcopy(SECTION)
+    claim_id = fixture['duplicate_claim_ids'][claim_fixture_index][0]
+    claim = {'id': claim_id, 'statement': 'Each sample was measured.', 'attribution': 'paper_statement',
+             'evidence_ids': [SOURCE_ID], 'argument_type': 'experiment_finding',
+             'conditions': [], 'support_status': 'supported'}
+    plan['claims'] = [claim]
+    plan['sections'][0]['claim_ids'] = [claim_id]
+    section['claim_ids'] = [claim_id]
+    section['blocks'][0]['claim_ids'] = [claim_id]
+    section['claims'] = [claim]
+    calls = []
+    def model(prompt, **options):
+        calls.append(options)
+        assert options['response_format'] == {'type': 'json_object'}
+        if failure == 'provider_error':
+            raise ValueError('fixture provider rejected format')
+        return fixture['invalid_latex_json'] if failure == 'invalid_json' else json.dumps(section)
+    monkeypatch.setattr(llm_task, 'AutoModel', lambda **kwargs: model)
+    request = llm_task.LLMTaskRequest(task_type='paper.guide.section',
+        llm_config={'llm': {'source': 'openai_responses', 'model': 'fixture', 'base_url': 'https://api.openai.com/v1'}},
+        options={'task_version': PAPER_GUIDE_VERSION},
+        input={'data': {'language': 'en', 'evidence': [EVIDENCE], 'plan': plan, 'role': 'background'}})
+    result = llm_task.run_llm_task(request)
+    assert result.status == 'failed'
+    assert result.error_code == ('model_call_failed' if failure == 'provider_error' else 'invalid_model_output')
+    assert len(calls) == result.usage['model_calls'] == 1
+    if failure == 'duplicate_claims':
+        # A valid reference-only section is accepted without redefining the plan.
+        section['claims'] = []
+        assert llm_task.run_llm_task(request).status == 'succeeded'
+        assert len(calls) == 2
+    request.options['task_version'] = 'paper-guide-v1'
+    before = len(calls)
+    assert llm_task.run_llm_task(request).error_code == 'unsupported_task_version'
+    assert len(calls) == before

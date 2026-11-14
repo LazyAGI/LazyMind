@@ -11093,6 +11093,9 @@ components:
                     type: string
                 name:
                     type: string
+                output_reserve_tokens:
+                    format: int64
+                    type: integer
                 parameters_hash:
                     type: string
                 protocol:

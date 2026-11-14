@@ -120,3 +120,104 @@ func TestPreserveAmbiguousHyphensAndExplicitSoftHyphen(t *testing.T) {
 		t.Fatalf("soft hyphen source span %d:%d: %v", start, end, err)
 	}
 }
+
+func TestCatalogAssetsWithoutOptionalMetadata(t *testing.T) {
+	for _, kind := range []string{"chart", "image", "table", "formula"} {
+		t.Run(kind, func(t *testing.T) {
+			d, id := fixture(t)
+			d.Blocks = []pdfir.Block{{ID: "bare", Type: kind, Page: 0, BBox: []float64{0.1, 0.2, 0.7, 0.8}}}
+			snap, err := BuildSourceSnapshot(d, id)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(snap.Assets) != 1 || snap.Assets[0].ID != snap.Evidence[0].ID {
+				t.Fatalf("lost real %s asset: %+v", kind, snap)
+			}
+			expected := "page"
+			if kind == "chart" || kind == "image" {
+				expected = "figure_region"
+			}
+			if snap.Evidence[0].Text != "" || snap.Evidence[0].Locator.Kind != expected || len(snap.Assets[0].Warnings) == 0 || len(snap.Coverage.PageWarnings) == 0 || len(snap.Coverage.Warnings) == 0 {
+				t.Fatalf("invented material or hidden gap: %+v", snap)
+			}
+			if err = ValidateSnapshot(snap, id, snap.IRDigest); err != nil {
+				t.Fatal(err)
+			}
+			plan := baselinePlan(snap)
+			plan.RequiredAssets = []GuideAssetDecision{{ID: snap.Assets[0].ID, Included: false, Reason: "Original region is present but readable content is missing."}}
+			if err = ValidatePlan(snap, plan); err != nil {
+				t.Fatalf("honest excluded asset rejected: %v", err)
+			}
+		})
+	}
+}
+
+func TestLegacySnapshotRemainsReadableAndCatalogIdentityChanges(t *testing.T) {
+	raw, err := os.ReadFile("testdata/legacy-snapshot-v1.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var legacy GuideSourceSnapshot
+	if err = json.Unmarshal(raw, &legacy); err != nil {
+		t.Fatal(err)
+	}
+	if err = ValidateSnapshot(legacy, legacy.Identity, legacy.IRDigest); err != nil {
+		t.Fatalf("legacy history unreadable: %v", err)
+	}
+	d, id := fixture(t)
+	current, err := BuildSourceSnapshot(d, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if current.IRDigest != legacy.IRDigest || current.Evidence[0].ID == legacy.Evidence[0].ID {
+		t.Fatal("catalog version failed to isolate identity or changed original IR")
+	}
+	var fields map[string]any
+	raw, _ = json.Marshal(current)
+	json.Unmarshal(raw, &fields)
+	if fields["catalog_version"] == nil {
+		t.Fatal("snapshot has no catalog version")
+	}
+	fields["catalog_version"] = "unknown"
+	raw, _ = json.Marshal(fields)
+	json.Unmarshal(raw, &current)
+	if ValidateSnapshot(current, id, current.IRDigest) == nil {
+		t.Fatal("unknown catalog accepted")
+	}
+}
+
+func TestLiveChartExclusionsBindToVersionedCanonicalCatalog(t *testing.T) {
+	raw, err := os.ReadFile("../../../tests/fixtures/paper-guide-live-contract.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var live struct {
+		Evidence  []GuideEvidence      `json:"chart_evidence"`
+		Decisions []GuideAssetDecision `json:"chart_decisions"`
+	}
+	if err = json.Unmarshal(raw, &live); err != nil {
+		t.Fatal(err)
+	}
+	d, id := fixture(t)
+	d.Blocks = nil
+	d.Pages = nil
+	for _, e := range live.Evidence {
+		d.Pages = append(d.Pages, pdfir.Page{Index: e.Locator.Page})
+		d.Blocks = append(d.Blocks, pdfir.Block{ID: e.SourceBlockID, Type: e.SourceType, Page: e.Locator.Page, Text: e.Text})
+	}
+	snap, err := BuildSourceSnapshot(d, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan := baselinePlan(snap)
+	for i, decision := range live.Decisions {
+		decision.ID = snap.Evidence[i].ID
+		plan.RequiredAssets = append(plan.RequiredAssets, decision)
+		if decision.Included || snap.Evidence[i].Text != "" || snap.Evidence[i].Locator.Kind != "page" {
+			t.Fatal("invented visual contents")
+		}
+	}
+	if err = ValidatePlan(snap, plan); err != nil {
+		t.Fatal(err)
+	}
+}

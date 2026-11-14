@@ -21,14 +21,15 @@ class TaskSpec:
     timeout_seconds: int = 120
     validate_output: Callable[[BaseModel, BaseModel], None] | None = None
     reject_duplicate_keys: bool = False
+    prefer_native_json: bool = False
 
 
-PAPER_GUIDE_VERSION = 'paper-guide-v1'
+PAPER_GUIDE_VERSION = 'paper-guide-v2'
 
 
 def _guide(input_schema, output_schema, prompt):
     return TaskSpec(PAPER_GUIDE_VERSION, input_schema, output_schema, prompt, validate_output=bind_output,
-                    reject_duplicate_keys=True)
+                    reject_duplicate_keys=True, prefer_native_json=True)
 
 
 TASKS = {
