@@ -45,6 +45,7 @@ export function usePaperGuide(
     key: string;
     etag?: string;
     selected?: string;
+    revisionPending?: boolean;
     revision?: PaperGuideRevisionResponse;
     status?: PaperGuideStatusResponse;
     controller?: AbortController;
@@ -62,7 +63,7 @@ export function usePaperGuide(
         { signal: controller.signal, etag: session.etag },
       );
       if (controller.signal.aborted || live.current !== session) return;
-      if (!response.data && session.revision) {
+      if (!response.data && session.revision && !session.revisionPending) {
         setState({ key, status: session.status, revision: session.revision });
         return;
       }
@@ -74,6 +75,7 @@ export function usePaperGuide(
         session.status?.candidate_revision?.id;
       if (selected) {
         session.selected = selected;
+        session.revisionPending = true;
         const delta = await paperGuideApi.revision(
           { dataset, document, language },
           selected,
@@ -82,6 +84,7 @@ export function usePaperGuide(
         );
         if (controller.signal.aborted || live.current !== session) return;
         session.revision = mergeRevision(session.revision, delta);
+        session.revisionPending = false;
       }
       setState({ key, status: session.status, revision: session.revision });
     } catch (error) {
@@ -93,6 +96,7 @@ export function usePaperGuide(
           session.revision = undefined;
           session.etag = undefined;
           session.selected = undefined;
+          session.revisionPending = false;
         }
         setState({
           key,

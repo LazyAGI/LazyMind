@@ -163,4 +163,75 @@ it("hides creation entry when capability is off but still exposes authorized exi
   expect(screen.getByRole("button", { name: "Guide" })).toBeInTheDocument();
 });
 
-it('shows linked author and year metadata without promoting an abstract to guide text',async()=>{api.metadata.mockResolvedValueOnce({title:'Actual paper title',authors:['A. Author'],year:2026});render(<Harness/>);fireEvent.click(screen.getByRole('button',{name:'Guide'}));expect(await screen.findByRole('heading',{name:'Actual paper title'})).toBeInTheDocument();expect(screen.getByText('A. Author · 2026')).toBeInTheDocument();});
+it("shows linked author and year metadata without promoting an abstract to guide text", async () => {
+  api.metadata.mockResolvedValueOnce({
+    title: "Actual paper title",
+    authors: ["A. Author"],
+    year: 2026,
+  });
+  render(<Harness />);
+  fireEvent.click(screen.getByRole("button", { name: "Guide" }));
+  expect(
+    await screen.findByRole("heading", { name: "Actual paper title" }),
+  ).toBeInTheDocument();
+  expect(screen.getByText("A. Author · 2026")).toBeInTheDocument();
+});
+it("reserves an inline figure frame before evidence arrives and retains it on failure", async () => {
+  let reject!: (reason: Error) => void;
+  api.evidence.mockImplementationOnce(
+    () =>
+      new Promise((_, r) => {
+        reject = r;
+      }),
+  );
+  const r = revision();
+  r.sections[0].blocks[0].asset_id = "figure-evidence";
+  state.value = { ...state.value, revision: r };
+  const view = render(<Harness />);
+  fireEvent.click(screen.getByRole("button", { name: "Guide" }));
+  const frame = view.container.querySelector(".paper-guide-image-frame");
+  expect(frame).not.toBeNull();
+  expect(screen.getByText("Loading original figure…")).toBeVisible();
+  await act(async () => reject(new Error("evidence unavailable")));
+  expect(view.container.querySelector(".paper-guide-image-frame")).toBe(frame);
+  expect(
+    screen.getByText(
+      "Preview unavailable. Open the PDF to inspect the original.",
+    ),
+  ).toBeVisible();
+});
+it("keeps the same reserved figure and caption rows through delayed evidence and PDF rendering", async () => {
+  let resolve!: (value: unknown) => void;
+  api.evidence.mockImplementationOnce(
+    () =>
+      new Promise((r) => {
+        resolve = r;
+      }),
+  );
+  const r = revision();
+  r.sections[0].blocks[0].asset_id = "figure-evidence";
+  state.value = { ...state.value, revision: r };
+  const view = render(<Harness />);
+  fireEvent.click(screen.getByRole("button", { name: "Guide" }));
+  const frame = view.container.querySelector(".paper-guide-image-frame");
+  const caption = view.container.querySelector(".paper-guide-asset figcaption");
+  expect(frame).not.toBeNull();
+  expect(caption).not.toBeNull();
+  await act(async () =>
+    resolve({
+      source_current: true,
+      evidence: {
+        id: "figure-evidence",
+        text: "Original figure",
+        source_block_id: "source",
+        source_type: "image",
+        locator: { kind: "bbox", page: 2 },
+      },
+    }),
+  );
+  expect(view.container.querySelector(".paper-guide-image-frame")).toBe(frame);
+  expect(view.container.querySelector(".paper-guide-asset figcaption")).toBe(
+    caption,
+  );
+  expect(caption).toHaveTextContent("PDF 3");
+});

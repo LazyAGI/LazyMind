@@ -573,18 +573,31 @@ function GuideInlineAsset({
   current: boolean;
 }) {
   const [e, setEvidence] = useState<PaperGuideEvidence>();
+  const [failed, setFailed] = useState(false);
   useEffect(() => {
+    setEvidence(undefined);
+    setFailed(false);
     if (!id || !current) return;
     const abort = new AbortController();
     void paperGuideApi
       .evidence(target, revision, id, abort.signal)
       .then((v) => {
-        if (!abort.signal.aborted && v.source_current) setEvidence(v.evidence);
+        if (!abort.signal.aborted) {
+          if (v.source_current) setEvidence(v.evidence);
+          else setFailed(true);
+        }
       })
-      .catch(() => {});
+      .catch(() => {
+        if (!abort.signal.aborted) setFailed(true);
+      });
     return () => abort.abort();
   }, [id, revision, target, current]);
-  return e ? (
-    <PaperGuideAsset evidence={e} preview={preview} language={language} />
-  ) : null;
+  return (
+    <PaperGuideAsset
+      evidence={e}
+      unavailable={failed || !current || !id}
+      preview={preview}
+      language={language}
+    />
+  );
 }

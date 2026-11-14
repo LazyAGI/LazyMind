@@ -103,3 +103,44 @@ it("does not refetch unchanged revision content on a 304 status", async () => {
   await act(() => h.result.current.refresh());
   expect(api.revision).toHaveBeenCalledTimes(1);
 });
+it("retries a failed revision behind a cached status ETag, keeping its error until corrections arrive", async () => {
+  const h = renderHook(() => usePaperGuide("ds", "doc", "zh", true));
+  await waitFor(() => expect(h.result.current.revision?.version).toBe(1));
+  const failure = new Error("revision temporarily unavailable");
+  api.status
+    .mockResolvedValueOnce({
+      data: {
+        ...status(),
+        version: 2,
+        published_revision: { ...revision(), version: 2 },
+      },
+      etag: "v2",
+    })
+    .mockResolvedValue({ etag: "v2" });
+  api.revision.mockRejectedValueOnce(failure).mockRejectedValueOnce(failure);
+  await act(() => h.result.current.refresh());
+  expect(h.result.current.error).toBe(failure);
+  await act(() => h.result.current.refresh());
+  expect(h.result.current.error).toBe(failure);
+  expect(api.revision).toHaveBeenCalledTimes(3);
+  const corrected = {
+    ...revision(),
+    version: 2,
+    sections: [
+      {
+        ...revision().sections[0],
+        change_version: 2,
+        publication_status: "correction_required",
+      },
+    ],
+  };
+  api.revision.mockResolvedValueOnce(corrected);
+  await act(() => h.result.current.refresh());
+  expect(h.result.current.revision?.sections[0].publication_status).toBe(
+    "correction_required",
+  );
+  expect(h.result.current.revision?.sections).toHaveLength(4);
+  expect(h.result.current.error).toBeUndefined();
+  await act(() => h.result.current.refresh());
+  expect(api.revision).toHaveBeenCalledTimes(4);
+});

@@ -31,7 +31,7 @@ export function visibleTextOffset(element: HTMLElement, top: number): number {
   while (low < high) {
     const mid = Math.floor((low + high) / 2);
     const rect = rangeAtUnicodeOffset(element, mid).getBoundingClientRect();
-    if (rect.bottom < top) low = mid + 1;
+    if (rect.bottom <= top) low = mid + 1;
     else high = mid;
   }
   return low;

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
 import type {
   PaperGuideBlock,
   PaperGuidePublishedSection,
@@ -48,17 +48,74 @@ export default function PaperGuideReader({
     for (const b of s.blocks)
       for (const id of b.evidence_ids || [])
         if (!numbers.has(id)) numbers.set(id, numbers.size + 1);
-  useEffect(() => {
+  const anchor = useRef<PaperGuideProgressRequest>();
+  const lastWidth = useRef(0);
+  const layoutPending = useRef(false);
+  const frame = useRef<number>();
+  const currentRevision = useRef(revision);
+  currentRevision.current = revision;
+  function restoreAnchor() {
+    const container = root.current;
+    const saved = anchor.current;
+    if (
+      !container ||
+      !saved ||
+      saved.revision_id !== currentRevision.current.id ||
+      container.getBoundingClientRect().width <= 0
+    )
+      return;
+    const block = Array.from(
+      container.querySelectorAll<HTMLElement>("[data-guide-block]"),
+    ).find(
+      (element) =>
+        element.dataset.guideBlock === saved.block_id &&
+        element.dataset.guideSection === saved.section_key,
+    );
+    const text = block?.querySelector<HTMLElement>("[data-guide-text]");
+    if (text) restoreTextPosition(container, text, saved.offset);
+  }
+  function scheduleLayoutRestore() {
+    layoutPending.current = true;
+    if (frame.current !== undefined) cancelAnimationFrame(frame.current);
+    frame.current = requestAnimationFrame(() => {
+      frame.current = undefined;
+      restoreAnchor();
+      layoutPending.current = false;
+    });
+  }
+  // Only initialize once per revision. Ordinary checkpoint appends do not move the reader.
+  useLayoutEffect(() => {
     if (restored.current === revision.id || !revision.sections.length) return;
     restored.current = revision.id;
-    if (progress?.revision_id !== revision.id) return;
-    const el = Array.from(
-      root.current?.querySelectorAll<HTMLElement>("[data-guide-block]") || [],
-    ).find((e) => e.dataset.guideBlock === progress.block_id);
-    const text = el?.querySelector<HTMLElement>("[data-guide-text]");
-    if (text && root.current)
-      restoreTextPosition(root.current, text, progress.offset);
+    anchor.current =
+      progress?.revision_id === revision.id ? progress : undefined;
+    lastWidth.current = root.current?.getBoundingClientRect().width || 0;
+    restoreAnchor();
   }, [revision, progress]);
+  useLayoutEffect(() => {
+    const container = root.current;
+    if (!container) return;
+    lastWidth.current = container.getBoundingClientRect().width;
+    const observer = new ResizeObserver(() => {
+      const width = container.getBoundingClientRect().width;
+      if (width === lastWidth.current) return;
+      lastWidth.current = width;
+      // The last scroll anchor was measured before reflow. Never capture from
+      // the newly wrapped lines (or a hidden zero-width pane) here.
+      scheduleLayoutRestore();
+    });
+    observer.observe(container);
+    return () => {
+      observer.disconnect();
+      if (frame.current !== undefined) cancelAnimationFrame(frame.current);
+    };
+  }, []);
+  const lastCompact = useRef(compact);
+  useLayoutEffect(() => {
+    if (lastCompact.current === compact) return;
+    lastCompact.current = compact;
+    scheduleLayoutRestore();
+  }, [compact]);
   function ask(
     section: PaperGuidePublishedSection,
     block: PaperGuideBlock,
@@ -150,7 +207,15 @@ export default function PaperGuideReader({
         onKeyUp={capture}
         onTouchEnd={capture}
         onScroll={() => {
-          const top = root.current?.getBoundingClientRect().top || 0;
+          const geometry = root.current?.getBoundingClientRect();
+          if (
+            !geometry ||
+            geometry.width <= 0 ||
+            layoutPending.current ||
+            geometry.width !== lastWidth.current
+          )
+            return;
+          const top = geometry.top;
           const elements = Array.from(
             root.current?.querySelectorAll<HTMLElement>("[data-guide-block]") ||
               [],
@@ -163,7 +228,7 @@ export default function PaperGuideReader({
           );
           if (el && section) {
             setActive(section.key);
-            onProgress?.({
+            const position: PaperGuideProgressRequest = {
               revision_id: revision.id,
               section_key: section.key,
               block_id: el.dataset.guideBlock!,
@@ -174,7 +239,9 @@ export default function PaperGuideReader({
                   )
                 : 0,
               mode: "article",
-            });
+            };
+            anchor.current = position;
+            onProgress?.(position);
           }
         }}
       >
@@ -209,16 +276,27 @@ export default function PaperGuideReader({
                 <div
                   key={`${section.key}/${block.id}`}
                   data-guide-block={block.id}
+                  data-guide-section={section.key}
                   className={`paper-guide-block paper-guide-block--${block.kind}`}
                 >
-                  {(block.kind === "example" ||
-                    block.attribution === "teaching") && (
-                    <strong className="paper-guide-attribution">
-                      {zh
-                        ? "教学例子 · 假设情境"
-                        : "Teaching example · hypothetical"}
-                    </strong>
-                  )}
+                  <strong className="paper-guide-attribution">
+                    {block.attribution === "external_background"
+                      ? zh
+                        ? "外部背景 · 未核实为本篇论文依据"
+                        : "External background · not verified as evidence from this paper"
+                      : block.attribution === "teaching" ||
+                          block.kind === "example"
+                        ? zh
+                          ? "教学例子 · 假设情境"
+                          : "Teaching example · hypothetical"
+                        : block.attribution === "interpretation"
+                          ? zh
+                            ? "导读解释 · 分析性说明"
+                            : "Guide interpretation"
+                          : zh
+                            ? "论文陈述 · 导读转述"
+                            : "Paper statement · guide paraphrase"}
+                  </strong>
                   {block.kind === "detail" ? (
                     <details>
                       <summary>

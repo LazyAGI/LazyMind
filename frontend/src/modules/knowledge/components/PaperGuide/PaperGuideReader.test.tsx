@@ -1,4 +1,4 @@
-import { render, screen, fireEvent } from "@testing-library/react";
+import { act, render, screen, fireEvent } from "@testing-library/react";
 import { expect, it, vi } from "vitest";
 import PaperGuideReader from "./PaperGuideReader";
 import { revision } from "./fixtures";
@@ -141,4 +141,149 @@ it("uses the real DOM selection and Unicode offsets rather than character search
     text: "😀乙𐐀",
     guideRef: { start: 1, end: 4, section_key: "section:background:v1" },
   });
+});
+it("visibly distinguishes paper paraphrase, interpretation, teaching and unverified external background", () => {
+  const r = revision();
+  r.sections.forEach((s, i) => {
+    s.blocks[0].kind = "paragraph";
+    s.blocks[0].attribution = [
+      "paper_statement",
+      "interpretation",
+      "teaching",
+      "external_background",
+    ][i];
+  });
+  render(
+    <PaperGuideReader
+      revision={r}
+      title="Paper"
+      language="en"
+      onEvidence={() => {}}
+      onSelection={() => {}}
+    />,
+  );
+  expect(screen.getByText("Paper statement · guide paraphrase")).toBeVisible();
+  expect(screen.getByText("Guide interpretation")).toBeVisible();
+  expect(screen.getByText("Teaching example · hypothetical")).toBeVisible();
+  expect(
+    screen.getByText(
+      "External background · not verified as evidence from this paper",
+    ),
+  ).toBeVisible();
+});
+it("restores a Unicode reading anchor after width reflow and hidden-panel return, but not section append", () => {
+  const resizeCallbacks: Array<() => void> = [];
+  const frames: Array<FrameRequestCallback> = [];
+  vi.stubGlobal(
+    "ResizeObserver",
+    class {
+      constructor(callback: () => void) {
+        resizeCallbacks.push(callback);
+      }
+      observe() {}
+      disconnect() {}
+    },
+  );
+  const raf = vi
+    .spyOn(window, "requestAnimationFrame")
+    .mockImplementation((cb) => {
+      frames.push(cb);
+      return frames.length;
+    });
+  const cancel = vi
+    .spyOn(window, "cancelAnimationFrame")
+    .mockImplementation(() => {});
+  let width = 800;
+  let scroll!: HTMLElement;
+  const rect = vi
+    .spyOn(Element.prototype, "getBoundingClientRect")
+    .mockImplementation(function (this: Element) {
+      if (this.classList.contains("paper-guide-scroll"))
+        return new DOMRect(0, 0, width, 300);
+      if (
+        this.hasAttribute("data-guide-block") ||
+        this.hasAttribute("data-guide-text")
+      )
+        return new DOMRect(
+          0,
+          100 - (scroll?.scrollTop || 0),
+          width,
+          width === 0 ? 0 : Math.ceil(40 / (width >= 600 ? 10 : 5)) * 20,
+        );
+      return new DOMRect();
+    });
+  const rangeRect = vi
+    .spyOn(Range.prototype, "getBoundingClientRect")
+    .mockImplementation(function (this: Range) {
+      const point = Array.from(
+        (this.startContainer.textContent || "").slice(0, this.startOffset),
+      ).length;
+      return new DOMRect(
+        0,
+        100 +
+          Math.floor(point / (width >= 600 ? 10 : 5)) * 20 -
+          scroll.scrollTop,
+        10,
+        20,
+      );
+    });
+  try {
+    const r = revision();
+    r.sections[0].blocks[0].text = "😀".repeat(40);
+    const onProgress = vi.fn();
+    const view = render(
+      <PaperGuideReader
+        revision={{ ...r, sections: r.sections.slice(0, 1) }}
+        title="Paper"
+        language="en"
+        onEvidence={() => {}}
+        onSelection={() => {}}
+        onProgress={onProgress}
+      />,
+    );
+    scroll = view.container.querySelector(".paper-guide-scroll")!;
+    scroll.scrollTop = 117;
+    fireEvent.scroll(scroll);
+    expect(onProgress.mock.calls[0][0]).toMatchObject({
+      offset: 20,
+      section_key: "section:background:v1",
+    });
+    width = 400;
+    act(() => resizeCallbacks.forEach((cb) => cb()));
+    act(() => frames.splice(0).forEach((cb) => cb(0)));
+    expect(scroll.scrollTop).toBe(156);
+    fireEvent.scroll(scroll);
+    expect(
+      onProgress.mock.calls[onProgress.mock.calls.length - 1][0].offset,
+    ).toBe(20);
+    // A zero-width hidden pane must not overwrite the character anchor.
+    width = 0;
+    act(() => resizeCallbacks.forEach((cb) => cb()));
+    fireEvent.scroll(scroll);
+    act(() => frames.splice(0).forEach((cb) => cb(0)));
+    width = 800;
+    act(() => resizeCallbacks.forEach((cb) => cb()));
+    act(() => frames.splice(0).forEach((cb) => cb(0)));
+    expect(scroll.scrollTop).toBe(116);
+    scroll.scrollTop = 160;
+    view.rerender(
+      <PaperGuideReader
+        revision={r}
+        title="Paper"
+        language="en"
+        onEvidence={() => {}}
+        onSelection={() => {}}
+        onProgress={onProgress}
+      />,
+    );
+    act(() => resizeCallbacks.forEach((cb) => cb()));
+    act(() => frames.splice(0).forEach((cb) => cb(0)));
+    expect(scroll.scrollTop).toBe(160);
+  } finally {
+    rect.mockRestore();
+    rangeRect.mockRestore();
+    raf.mockRestore();
+    cancel.mockRestore();
+    vi.unstubAllGlobals();
+  }
 });
