@@ -164,7 +164,7 @@ it("visibly distinguishes paper paraphrase, interpretation, teaching and unverif
   );
   expect(screen.getByText("Paper statement · guide paraphrase")).toBeVisible();
   expect(screen.getByText("Guide interpretation")).toBeVisible();
-  expect(screen.getByText("Teaching example · hypothetical")).toBeVisible();
+  expect(screen.getByText("Teaching explanation")).toBeVisible();
   expect(
     screen.getByText(
       "External background · not verified as evidence from this paper",
@@ -286,4 +286,143 @@ it("restores a Unicode reading anchor after width reflow and hidden-panel return
     cancel.mockRestore();
     vi.unstubAllGlobals();
   }
+});
+
+it.each(["after", "after-surrogate", "inside", "across", "mathml", "boundary"])(
+  "maps %s math selections to exact original Unicode intervals",
+  (choice) => {
+    const choose = vi.fn();
+    const r = revision();
+    r.sections[0].blocks[0].text = "甲😀 \\(x_1\\) 后 \\(x_1\\)𐐀尾";
+    const view = render(
+      <PaperGuideReader
+        revision={r}
+        title="Paper"
+        language="en"
+        onEvidence={() => {}}
+        onSelection={choose}
+      />,
+    );
+    const block = view.container.querySelector(
+      '[data-guide-text="background-block"]',
+    )!;
+    const maths = block.querySelectorAll("[data-guide-math]");
+    expect(maths).toHaveLength(2);
+    const range = document.createRange();
+    const walker = document.createTreeWalker(
+      maths[1].querySelector(".katex-html")!,
+      NodeFilter.SHOW_TEXT,
+    );
+    const formulaText = walker.nextNode()!;
+    const textAfter = block.lastChild!.firstChild!;
+    let start: number, end: number, text: string;
+    if (choice === "after" || choice === "after-surrogate") {
+      range.setStart(textAfter, choice === "after-surrogate" ? 1 : 0);
+      range.setEnd(textAfter, 2);
+      start = 20;
+      end = 21;
+      text = "𐐀";
+    } else if (choice === "across") {
+      range.setStart(block.firstChild!.firstChild!, 1);
+      range.setEnd(formulaText, 1);
+      start = 1;
+      end = 20;
+      text = "😀 \\(x_1\\) 后 \\(x_1\\)";
+    } else if (choice === "boundary") {
+      range.setStart(block, 2);
+      range.setEnd(block, 3);
+      start = 10;
+      end = 13;
+      text = " 后 ";
+    } else {
+      const node =
+        choice === "mathml"
+          ? maths[1].querySelector("annotation")!.firstChild!
+          : formulaText;
+      range.setStart(node, 0);
+      range.setEnd(node, 1);
+      start = 13;
+      end = 20;
+      text = "\\(x_1\\)";
+    }
+    window.getSelection()!.removeAllRanges();
+    window.getSelection()!.addRange(range);
+    fireEvent.mouseUp(block);
+    expect(screen.getByRole("toolbar").querySelector("p")?.textContent).toBe(
+      text,
+    );
+    fireEvent.click(screen.getByRole("toolbar").querySelector("button")!);
+    expect(choose.mock.calls[0][0]).toMatchObject({
+      text,
+      guideRef: {
+        revision_id: "r1",
+        section_key: "section:background:v1",
+        block_id: "background-block",
+        start,
+        end,
+      },
+    });
+  },
+);
+it("typesets display math without interpreting HTML and falls back exactly for invalid or unsafe TeX", () => {
+  const r = revision();
+  r.sections[0].blocks[0].text = "before \\[\\frac{1}{2}\\] after";
+  r.sections[1].blocks[0].text = String.raw`bad \(\frac{\) <img src=x onerror=alert(1)>`;
+  r.sections[2].blocks[0].text = String.raw`\(\href{https://bad.example}{click}\) \(\includegraphics{https://bad.example/a}\)`;
+  const view = render(
+    <PaperGuideReader
+      revision={r}
+      title="Paper"
+      language="en"
+      onEvidence={() => {}}
+      onSelection={() => {}}
+    />,
+  );
+  expect(view.container.querySelector(".katex-display")).not.toBeNull();
+  expect(
+    view.container.querySelector('[data-guide-text="question-block"]'),
+  ).toHaveTextContent(r.sections[1].blocks[0].text);
+  expect(
+    view.container.querySelector('[data-guide-text="contribution-block"]'),
+  ).toHaveTextContent(r.sections[2].blocks[0].text);
+  expect(view.container.querySelector("img,a,iframe,script")).toBeNull();
+});
+it("discards a pending selection when its immutable section is replaced", () => {
+  const r = revision(),
+    choose = vi.fn();
+  const view = render(
+    <PaperGuideReader
+      revision={r}
+      title="Paper"
+      language="en"
+      onEvidence={() => {}}
+      onSelection={choose}
+    />,
+  );
+  const text = view.container.querySelector(
+    '[data-guide-text="background-block"]',
+  )!;
+  const range = document.createRange();
+  range.selectNodeContents(text);
+  window.getSelection()!.removeAllRanges();
+  window.getSelection()!.addRange(range);
+  fireEvent.mouseUp(text);
+  expect(screen.getByRole("toolbar")).toBeInTheDocument();
+  const changed = {
+    ...r,
+    sections: r.sections.map((s, i) =>
+      i ? s : { ...s, key: "section:background:v2" },
+    ),
+  };
+  view.rerender(
+    <PaperGuideReader
+      revision={changed}
+      title="Paper"
+      language="en"
+      onEvidence={() => {}}
+      onSelection={choose}
+    />,
+  );
+  expect(screen.queryByRole("toolbar")).not.toBeInTheDocument();
+  expect(choose).not.toHaveBeenCalled();
 });

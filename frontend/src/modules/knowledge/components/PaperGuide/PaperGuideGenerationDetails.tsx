@@ -1,3 +1,4 @@
+import { coverageWarning } from "./coverageWarning";
 import { useLayoutEffect, useRef, useState, type CSSProperties } from "react";
 import type { PaperGuideRevisionResponse } from "@/api/generated/core-client";
 import type { ReadingProviderSelection } from "../../api/readingPreparation";
@@ -106,10 +107,14 @@ export default function PaperGuideGenerationDetails({
             <br />
             {zh ? "正文覆盖" : "Body covered"}:{" "}
             {revision.coverage.body ? (zh ? "是" : "Yes") : zh ? "否" : "No"}
-            {revision.coverage.warnings.length > 0 && (
-              <span>{revision.coverage.warnings.join(" · ")}</span>
-            )}
           </p>
+        )}
+        {!!revision?.coverage.warnings.length && (
+          <ul className="paper-guide-coverage-warnings">
+            {revision.coverage.warnings.map((warning, index) => (
+              <li key={index}>{coverageWarning(warning, zh)}</li>
+            ))}
+          </ul>
         )}
         <button
           disabled={busy || !canGenerate || active}

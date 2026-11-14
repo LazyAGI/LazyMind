@@ -1,8 +1,11 @@
+import { mappedRangeAtOffset, sourceTextLength } from "./sourceText";
 /** Offsets stored by Core are Unicode code points, while DOM Range uses UTF-16. */
 export function rangeAtUnicodeOffset(
   element: HTMLElement,
   offset: number,
 ): Range {
+  const mapped = mappedRangeAtOffset(element, offset);
+  if (mapped) return mapped;
   const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
   const range = document.createRange();
   let node = walker.nextNode();
@@ -24,7 +27,7 @@ export function rangeAtUnicodeOffset(
   return range;
 }
 export function visibleTextOffset(element: HTMLElement, top: number): number {
-  const length = Array.from(element.textContent || "").length;
+  const length = sourceTextLength(element);
   let low = 0,
     high = length;
   // A binary search over character line boxes avoids saving viewport-dependent pixels.

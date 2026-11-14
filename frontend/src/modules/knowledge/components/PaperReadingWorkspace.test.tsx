@@ -408,3 +408,20 @@ it.each(["candidate", "document", "identity"])(
     expect(screen.getByRole("status")).not.toHaveTextContent("errors.2004413");
   },
 );
+
+it.each([
+  ["paper_guide_model_timeout", "errors.2004414"],
+  ["paper_guide_model_request_failed", "errors.2004415"],
+])(
+  "explains %s without losing the published article",
+  async (code, message) => {
+    showPaused(code);
+    render(<Harness />);
+    await act(async () =>
+      fireEvent.click(screen.getByRole("button", { name: "Guide" })),
+    );
+    expect(screen.getByRole("status")).toHaveTextContent(message);
+    expect(screen.getByRole("button", { name: "Resume" })).toBeEnabled();
+    expect(screen.getByRole("article")).toBeVisible();
+  },
+);

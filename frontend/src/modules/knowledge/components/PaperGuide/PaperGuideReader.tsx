@@ -1,3 +1,4 @@
+import { coverageWarning } from "./coverageWarning";
 import { useLayoutEffect, useRef, useState } from "react";
 import type {
   PaperGuideBlock,
@@ -7,7 +8,8 @@ import type {
 } from "@/api/generated/core-client";
 import type { DocumentChatSelection } from "../PdfTemporaryChat/types";
 import { restoreTextPosition, visibleTextOffset } from "./readingPosition";
-import { unicodeRange } from "./usePaperGuide";
+import PaperGuideText from "./PaperGuideText";
+import { sourceBoundary } from "./sourceText";
 interface Props {
   revision: PaperGuideRevisionResponse;
   title: string;
@@ -37,12 +39,24 @@ export default function PaperGuideReader({
   const restored = useRef("");
   const [active, setActive] = useState("");
   const [selected, setSelected] = useState<{
+    revisionId: string;
     section: PaperGuidePublishedSection;
     block: PaperGuideBlock;
     start: number;
     end: number;
     text: string;
   }>();
+  useLayoutEffect(() => {
+    if (
+      selected &&
+      (selected.revisionId !== revision.id ||
+        !revision.sections.some(
+          (section) => section.key === selected.section.key,
+        ))
+    ) {
+      setSelected(undefined);
+    }
+  }, [revision, selected]);
   const numbers = new Map<string, number>();
   for (const s of revision.sections)
     for (const b of s.blocks)
@@ -136,7 +150,7 @@ export default function PaperGuideReader({
           : "Explain this guide passage, separating teaching from paper evidence.",
       quickExplain: true,
       guideRef: {
-        revision_id: revision.id,
+        revision_id: range?.revisionId ?? revision.id,
         section_key: section.key,
         block_id: block.id,
         start,
@@ -158,22 +172,39 @@ export default function PaperGuideReader({
         ? range.startContainer
         : range.startContainer.parentElement
     )?.closest<HTMLElement>("[data-guide-text]");
-    if (!element || !element.contains(range.endContainer)) return;
+    if (!element || !element.contains(range.endContainer)) {
+      setSelected(undefined);
+      return;
+    }
     const blockId = element.dataset.guideText;
     const section = revision.sections.find((s) =>
       s.blocks.some((b) => b.id === blockId),
     );
     const block = section?.blocks.find((b) => b.id === blockId);
     if (!section || !block) return;
-    const before = range.cloneRange();
-    before.selectNodeContents(element);
-    before.setEnd(range.startContainer, range.startOffset);
-    const start = before.toString().length;
+    const start = sourceBoundary(
+      element,
+      range.startContainer,
+      range.startOffset,
+      "start",
+    );
+    const end = sourceBoundary(
+      element,
+      range.endContainer,
+      range.endOffset,
+      "end",
+    );
+    if (start >= end) {
+      setSelected(undefined);
+      return;
+    }
     setSelected({
+      revisionId: revision.id,
       section,
       block,
-      ...unicodeRange(block.text, start, start + range.toString().length),
-      text: range.toString(),
+      start,
+      end,
+      text: Array.from(block.text).slice(start, end).join(""),
     });
   }
   function navigate(id: string) {
@@ -284,30 +315,39 @@ export default function PaperGuideReader({
                       ? zh
                         ? "外部背景 · 未核实为本篇论文依据"
                         : "External background · not verified as evidence from this paper"
-                      : block.attribution === "teaching" ||
-                          block.kind === "example"
+                      : block.kind === "example"
                         ? zh
                           ? "教学例子 · 假设情境"
                           : "Teaching example · hypothetical"
-                        : block.attribution === "interpretation"
+                        : block.attribution === "teaching"
                           ? zh
-                            ? "导读解释 · 分析性说明"
-                            : "Guide interpretation"
-                          : zh
-                            ? "论文陈述 · 导读转述"
-                            : "Paper statement · guide paraphrase"}
+                            ? "教学说明"
+                            : "Teaching explanation"
+                          : block.attribution === "interpretation"
+                            ? zh
+                              ? "导读解释 · 分析性说明"
+                              : "Guide interpretation"
+                            : zh
+                              ? "论文陈述 · 导读转述"
+                              : "Paper statement · guide paraphrase"}
                   </strong>
                   {block.kind === "detail" ? (
                     <details>
                       <summary>
                         {zh ? "补充基础" : "Further background"}
                       </summary>
-                      <p data-guide-text={block.id}>{block.text}</p>
+                      <p data-guide-text={block.id}>
+                        <PaperGuideText text={block.text} />
+                      </p>
                     </details>
                   ) : block.kind === "heading" ? (
-                    <h3 data-guide-text={block.id}>{block.text}</h3>
+                    <h3 data-guide-text={block.id}>
+                      <PaperGuideText text={block.text} />
+                    </h3>
                   ) : (
-                    <p data-guide-text={block.id}>{block.text}</p>
+                    <p data-guide-text={block.id}>
+                      <PaperGuideText text={block.text} />
+                    </p>
                   )}
                   {block.asset_id && renderAsset?.(block)}
                   <div className="paper-guide-block-tools">
@@ -357,7 +397,7 @@ export default function PaperGuideReader({
               <h2>{zh ? "材料与覆盖范围" : "Materials and coverage"}</h2>
               <ul>
                 {revision.coverage.warnings.map((warning, i) => (
-                  <li key={i}>{warning}</li>
+                  <li key={i}>{coverageWarning(warning, zh)}</li>
                 ))}
               </ul>
             </aside>
@@ -370,6 +410,7 @@ export default function PaperGuideReader({
           role="toolbar"
           aria-label={zh ? "导读选段" : "Guide passage"}
         >
+          <p className="paper-guide-selection-preview">{selected.text}</p>
           <button
             onClick={() =>
               ask(selected.section, selected.block, false, selected)

@@ -274,6 +274,8 @@ export default function PaperReadingWorkspace(p: Props) {
     "review_required",
     "generation_failed",
     "regeneration_required",
+    "model_timeout",
+    "model_request_failed",
   ];
   const reasonText = (value?: string) => {
     if (!value) return "";

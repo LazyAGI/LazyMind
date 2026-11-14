@@ -1,6 +1,7 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import PaperGuideGenerationDetails from "./PaperGuideGenerationDetails";
+import { revision } from "./fixtures";
 
 afterEach(() => vi.restoreAllMocks());
 it("keeps model selection and regeneration reachable in the remaining reader height", async () => {
@@ -63,4 +64,30 @@ it("keeps model selection and regeneration reachable in the remaining reader hei
   fireEvent.keyDown(screen.getByRole("combobox"), { key: "Escape" });
   expect(details.open).toBe(false);
   expect(details.querySelector("summary")).toHaveFocus();
+});
+
+it("separates translated coverage warnings from coverage values and preserves unknown parser information", () => {
+  const r = revision();
+  r.coverage.warnings = [
+    "Formula transcription is unavailable; only original text and page are readable.",
+    "Custom parser diagnostic 42",
+  ];
+  render(
+    <PaperGuideGenerationDetails
+      zh
+      model=""
+      setModel={() => {}}
+      revision={r}
+      busy={false}
+      active={false}
+      canGenerate
+      onRegenerate={() => {}}
+    />,
+  );
+  const warnings = screen.getAllByRole("listitem", { hidden: true });
+  expect(warnings).toHaveLength(2);
+  expect(warnings[0]).toHaveTextContent("公式转写不可用");
+  expect(warnings[1]).toHaveTextContent(
+    "解析提示：Custom parser diagnostic 42",
+  );
 });

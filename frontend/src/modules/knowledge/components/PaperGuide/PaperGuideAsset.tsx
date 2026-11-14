@@ -1,5 +1,5 @@
 import { Modal } from "antd";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { PaperGuideEvidence } from "@/api/generated/core-client";
 export type GuidePreview = (
   e: PaperGuideEvidence,
@@ -23,10 +23,13 @@ export default function PaperGuideAsset({
   }>();
   const [failed, setFailed] = useState(false);
   const [large, setLarge] = useState(false);
+  const opener = useRef<HTMLButtonElement>();
   useEffect(() => {
     let stale = false;
     setImage(undefined);
     setFailed(false);
+    setLarge(false);
+    opener.current = undefined;
     if (!evidence || unavailable) return;
     void preview(evidence)
       .then((v) => {
@@ -49,7 +52,10 @@ export default function PaperGuideAsset({
         {image && image.evidence === evidence && evidence && !unavailable ? (
           <button
             className="paper-guide-image-button"
-            onClick={() => setLarge(true)}
+            onClick={(event) => {
+              opener.current = event.currentTarget;
+              setLarge(true);
+            }}
             aria-label={zh ? "放大论文原图" : "Enlarge original figure"}
           >
             <img
@@ -78,9 +84,15 @@ export default function PaperGuideAsset({
         {zh ? "原文" : "Source"} · PDF{" "}
         {evidence ? evidence.locator.page + 1 : "—"}
       </figcaption>
-      {large && image && evidence && !unavailable && (
+      {image && evidence && !unavailable && (
         <Modal
-          open
+          open={large}
+          focusTriggerAfterClose={false}
+          afterClose={() => {
+            const button = opener.current;
+            if (button?.isConnected && !button.closest("[hidden]"))
+              button.focus({ preventScroll: true });
+          }}
           title={zh ? "论文原图" : "Original figure"}
           footer={null}
           onCancel={() => setLarge(false)}
