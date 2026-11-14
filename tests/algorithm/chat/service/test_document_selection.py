@@ -197,3 +197,7 @@ def test_guide_original_evidence_remains_a_separate_labeled_material():
     result = document_selection.resolve_document_selection_context(context, '', user_id='u')
     assert 'Original paper evidence (separate reference material)' in result
     assert '[ev] PDF page 3: actual original' in result
+    assert 'Use paper/source page labels' in result
+    assert 'unless the user explicitly asks' in result
+    assert 'revision, section, block or evidence IDs' in result
+    assert context['paper_guide_context']['evidence'][0]['id'] == 'ev'

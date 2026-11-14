@@ -82,6 +82,9 @@ def test_model_boundary_returns_only_canonical_wire_with_one_call(monkeypatch, m
     if mode == 'missing_decision':
         raw['required_assets'] = []
     output = json.dumps(raw)
+    # Synthetic v4 encoding of this structural fixture, not a repair of paid output.
+    for index, evidence in enumerate(case['input']['evidence'], 1):
+        output = output.replace(evidence['id'], f'e{index}')
     if mode == 'duplicate_json_key':
         output = output.replace('"questions":', '"questions": [], "questions":', 1)
     calls = []
@@ -92,7 +95,7 @@ def test_model_boundary_returns_only_canonical_wire_with_one_call(monkeypatch, m
 
     monkeypatch.setattr(llm_task, 'AutoModel', lambda **kwargs: model)
     request = llm_task.LLMTaskRequest(task_type='paper.guide.plan',
-        options={'task_version': 'paper-guide-v3'}, input={'data': case['input']})
+        options={'task_version': 'paper-guide-v4'}, input={'data': case['input']})
     result = llm_task.run_llm_task(request)
     assert len(calls) == result.usage['model_calls'] == 1
     if mode == 'canonical':
@@ -102,7 +105,7 @@ def test_model_boundary_returns_only_canonical_wire_with_one_call(monkeypatch, m
         assert result.error_code == 'invalid_model_output'
 
 
-@pytest.mark.parametrize('version', ['paper-guide-v1', 'paper-guide-v2'])
+@pytest.mark.parametrize('version', ['paper-guide-v1', 'paper-guide-v2', 'paper-guide-v3'])
 def test_old_task_versions_make_zero_model_calls(monkeypatch, version):
     from lazymind.chat.service import llm_task
     monkeypatch.setattr(llm_task, 'AutoModel', lambda **kwargs: pytest.fail('old contract must not call model'))

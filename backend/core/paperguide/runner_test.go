@@ -196,59 +196,69 @@ func runLateWorkerCannotPublish(t *testing.T, db *gorm.DB) {
 }
 
 func TestLongPlanExtractsCoverAllOriginalEvidenceAndRemainBounded(t *testing.T) {
-	d, id := fixture(t)
-	d.Blocks = []pdfir.Block{{ID: "title", Type: "title", Text: "Study", Page: 0}}
-	for i := 0; i < 30; i++ {
-		d.Blocks = append(d.Blocks, pdfir.Block{ID: fmt.Sprintf("text-%d", i), Type: "text", Text: strings.Repeat("Material and conditions. ", 80), Page: 0})
-	}
-	snap, e := BuildSourceSnapshot(d, id)
-	if e != nil {
-		t.Fatal(e)
-	}
-	repo := Repository{DB: guideDB(t)}
-	scope := Scope{OwnerID: id.OwnerID, DatasetID: id.DatasetID, DocumentID: id.DocumentID, Language: "en"}
-	model := ModelIdentity{ID: "m", ContextTokens: 40000, OutputReserveTokens: 16000}
-	seen := map[string]bool{}
-	extractCalls := 0
-	service := Service{Repo: repo, Source: &fixtureSource{s: snap}, Authorize: func(context.Context, Scope, bool) error { return nil }, ResolveModel: func(context.Context, Scope, string) (ModelIdentity, map[string]any, error) { return model, nil, nil }, Call: func(ctx context.Context, task string, input map[string]any, cfg map[string]any) (json.RawMessage, error) {
-		if task != "paper.guide.extract" {
-			t.Fatalf("unexpected task %s", task)
-		}
-		encoded, err := json.MarshalIndent(input, "", "")
-		if err != nil {
-			t.Fatal(err)
-		}
-		evidence := input["evidence"].([]GuideEvidence)
-		if len(encoded)+guideInputDefaultsReserve+len(evidence)*guideEvidenceExpansionReserve+guidePromptReserve > model.ContextTokens-model.OutputReserveTokens {
-			t.Fatal("extract dispatched without full prompt reserve")
-		}
-		extractCalls++
-		chosen := evidence[0]
-		for _, ev := range evidence {
-			seen[ev.ID] = true
-			if len(ev.Text) < len(chosen.Text) {
-				chosen = ev
+	for _, window := range []int{40000, 48000} {
+		t.Run(fmt.Sprint(window), func(t *testing.T) {
+			d, id := fixture(t)
+			d.Blocks = []pdfir.Block{{ID: "title", Type: "title", Text: "Study", Page: 0}}
+			for i := 0; i < 30; i++ {
+				d.Blocks = append(d.Blocks, pdfir.Block{ID: fmt.Sprintf("text-%d", i), Type: "text", Text: strings.Repeat("Material and conditions. ", 80), Page: 0})
 			}
-		}
-		return json.Marshal(GuideExtract{Claims: []GuideClaim{{ID: fmt.Sprintf("claim%d", extractCalls), Statement: "The source describes sample conditions.", Attribution: AttributionPaper, EvidenceIDs: []string{chosen.ID}, Conditions: []string{}, SupportStatus: SupportSupported}}, OpenQuestions: []string{}})
-	}}
-	rev, e := repo.Create(t.Context(), CreateRevision{Scope: scope, SourceSHA256: id.SourceSHA256, IRDigest: snap.IRDigest, SnapshotPath: "test", Model: model})
-	if e != nil {
-		t.Fatal(e)
-	}
-	x := execution{s: service, scope: scope, rev: rev, model: model, snap: snap, f: testFence{repo.DB}, steps: map[string]orm.PaperGuideStep{}}
-	input, _, e := x.planInput(t.Context())
-	if e != nil {
-		t.Fatal(e)
-	}
-	if extractCalls < 2 || extractCalls > 8 || len(seen) != len(snap.Evidence) || !x.inputFits(input) {
-		t.Fatalf("coverage=%d/%d calls=%d", len(seen), len(snap.Evidence), extractCalls)
-	}
-	model.ContextTokens = 100
-	x.model = model
-	before := extractCalls
-	if _, _, e = x.planInput(t.Context()); !errors.Is(e, ErrContext) || extractCalls != before {
-		t.Fatal("oversize source dispatched a partial plan")
+			snap, e := BuildSourceSnapshot(d, id)
+			if e != nil {
+				t.Fatal(e)
+			}
+			repo := Repository{DB: guideDB(t)}
+			scope := Scope{OwnerID: id.OwnerID, DatasetID: id.DatasetID, DocumentID: id.DocumentID, Language: "en"}
+			model := ModelIdentity{ID: "m", ContextTokens: window, OutputReserveTokens: window * 2 / 5}
+			seen := map[string]bool{}
+			extractCalls := 0
+			service := Service{Repo: repo, Source: &fixtureSource{s: snap}, Authorize: func(context.Context, Scope, bool) error { return nil }, ResolveModel: func(context.Context, Scope, string) (ModelIdentity, map[string]any, error) { return model, nil, nil }, Call: func(ctx context.Context, task string, input map[string]any, cfg map[string]any) (json.RawMessage, error) {
+				if task != "paper.guide.extract" {
+					t.Fatalf("unexpected task %s", task)
+				}
+				encoded, err := json.MarshalIndent(input, "", "")
+				if err != nil {
+					t.Fatal(err)
+				}
+				evidence := input["evidence"].([]GuideEvidence)
+				if len(encoded)+guideInputDefaultsReserve+len(evidence)*guideEvidenceExpansionReserve+guidePromptReserve > model.ContextTokens-model.OutputReserveTokens {
+					t.Fatal("extract dispatched without full prompt reserve")
+				}
+				extractCalls++
+				chosen := evidence[0]
+				for _, ev := range evidence {
+					seen[ev.ID] = true
+					if len(ev.Text) < len(chosen.Text) {
+						chosen = ev
+					}
+				}
+				return json.Marshal(GuideExtract{Claims: []GuideClaim{{ID: fmt.Sprintf("claim%d", extractCalls), Statement: "The source describes sample conditions.", Attribution: AttributionPaper, EvidenceIDs: []string{chosen.ID}, Conditions: []string{}, SupportStatus: SupportSupported}}, OpenQuestions: []string{}})
+			}}
+			rev, e := repo.Create(t.Context(), CreateRevision{Scope: scope, SourceSHA256: id.SourceSHA256, IRDigest: snap.IRDigest, SnapshotPath: "test", Model: model})
+			if e != nil {
+				t.Fatal(e)
+			}
+			x := execution{s: service, scope: scope, rev: rev, model: model, snap: snap, f: testFence{repo.DB}, steps: map[string]orm.PaperGuideStep{}}
+			input, _, e := x.planInput(t.Context())
+			if window == 40000 {
+				if !errors.Is(e, ErrContext) || extractCalls < 2 || extractCalls > 8 || len(seen) != len(snap.Evidence) {
+					t.Fatalf("bounded plan rejection: calls=%d seen=%d err=%v", extractCalls, len(seen), e)
+				}
+				return
+			}
+			if e != nil {
+				t.Fatal(e)
+			}
+			if extractCalls < 2 || extractCalls > 8 || len(seen) != len(snap.Evidence) || !x.inputFits(input) {
+				t.Fatalf("coverage=%d/%d calls=%d", len(seen), len(snap.Evidence), extractCalls)
+			}
+			model.ContextTokens = 100
+			x.model = model
+			before := extractCalls
+			if _, _, e = x.planInput(t.Context()); !errors.Is(e, ErrContext) || extractCalls != before {
+				t.Fatal("oversize source dispatched a partial plan")
+			}
+		})
 	}
 }
 
@@ -444,7 +454,7 @@ func TestWholeReviewProjectsExactPublishedVersions(t *testing.T) {
 }
 
 func TestLegacyCandidateCannotSpendOrResumeUnderNewContract(t *testing.T) {
-	for _, version := range []string{"paper-guide-v1", "paper-guide-v2"} {
+	for _, version := range []string{"paper-guide-v1", "paper-guide-v2", "paper-guide-v3"} {
 		t.Run(version, func(t *testing.T) {
 			d, id := fixture(t)
 			snap, _ := BuildSourceSnapshot(d, id)
@@ -456,7 +466,7 @@ func TestLegacyCandidateCannotSpendOrResumeUnderNewContract(t *testing.T) {
 				t.Fatal(err)
 			}
 			oldFingerprint := digest([]any{id.SourceSHA256, snap.IRDigest, version, model})
-			if version == "paper-guide-v2" {
+			if version != "paper-guide-v1" {
 				oldFingerprint = digest([]any{id.SourceSHA256, snap.IRDigest, SourceCatalogVersion, version, model})
 			}
 			repo.DB.Model(&rev).Updates(map[string]any{"fingerprint": oldFingerprint, "stage": "paused", "calls_used": 1})

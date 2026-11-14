@@ -136,37 +136,45 @@ func TestImpossibleOutputReserveMakesZeroModelCalls(t *testing.T) {
 	}
 }
 
-func TestV2PublishedGuideAndSelectionRemainReadable(t *testing.T) {
-	d, id := fixture(t)
-	current, _ := BuildSourceSnapshot(d, id)
-	old := current
-	repo := Repository{DB: guideDB(t)}
-	scope := Scope{OwnerID: id.OwnerID, DatasetID: id.DatasetID, DocumentID: id.DocumentID, Language: "zh"}
-	model := ModelIdentity{ID: "m"}
-	rev, err := repo.Create(t.Context(), CreateRevision{Scope: scope, SourceSHA256: id.SourceSHA256, IRDigest: old.IRDigest, SnapshotPath: "legacy", Model: model})
-	if err != nil {
-		t.Fatal(err)
-	}
-	section := teachingSection(RoleBackground)
-	section.Version = 1
-	section.PublicationStatus = "published"
-	section.Blocks[0].EvidenceIDs = []string{old.Evidence[1].ID}
-	for _, step := range []StepWrite{{Key: "plan", InputHash: "old-plan", Output: mustJSON(baselinePlan(old))}, {Key: "section:background:v1", InputHash: "old-section", Output: mustJSON(section), Published: true}} {
-		if err = repo.PutStep(t.Context(), testFence{repo.DB}, rev.ID, rev.Epoch, step); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if err = repo.Transition(t.Context(), testFence{repo.DB}, rev.ID, rev.Epoch, "completed", ""); err != nil {
-		t.Fatal(err)
-	}
-	repo.DB.Model(&rev).Update("fingerprint", digest([]any{id.SourceSHA256, old.IRDigest, SourceCatalogVersion, "paper-guide-v2", model}))
-	service := Service{Repo: repo, Source: &historicalSource{fixtureSource{current, nil}, old}, Authorize: func(context.Context, Scope, bool) error { return nil }}
-	got, err := service.Revision(t.Context(), scope, rev.ID, 0)
-	if err != nil || !got.SourceCurrent || len(got.Sections) != 1 {
-		t.Fatalf("legacy history: %+v %v", got, err)
-	}
-	selected, err := service.Selection(t.Context(), scope, rev.ID, SelectionRequest{SectionKey: "section:background:v1", BlockID: "b_background", Start: 0, End: 3})
-	if err != nil || selected.Text != "The" || len(selected.Evidence) != 1 || selected.Evidence[0].ID != old.Evidence[1].ID {
-		t.Fatalf("legacy selection: %+v %v", selected, err)
+func TestV2AndV3PublishedGuideAndSelectionRemainReadable(t *testing.T) {
+	for _, version := range []string{"paper-guide-v2", "paper-guide-v3"} {
+		t.Run(version, func(t *testing.T) {
+			d, id := fixture(t)
+			current, _ := BuildSourceSnapshot(d, id)
+			old := current
+			repo := Repository{DB: guideDB(t)}
+			scope := Scope{OwnerID: id.OwnerID, DatasetID: id.DatasetID, DocumentID: id.DocumentID, Language: "zh"}
+			model := ModelIdentity{ID: "m"}
+			rev, err := repo.Create(t.Context(), CreateRevision{Scope: scope, SourceSHA256: id.SourceSHA256, IRDigest: old.IRDigest, SnapshotPath: "legacy", Model: model})
+			if err != nil {
+				t.Fatal(err)
+			}
+			section := teachingSection(RoleBackground)
+			section.Version = 1
+			section.PublicationStatus = "published"
+			section.Blocks[0].EvidenceIDs = []string{old.Evidence[1].ID}
+			for _, step := range []StepWrite{{Key: "plan", InputHash: "old-plan", Output: mustJSON(baselinePlan(old))}, {Key: "section:background:v1", InputHash: "old-section", Output: mustJSON(section), Published: true}} {
+				if err = repo.PutStep(t.Context(), testFence{repo.DB}, rev.ID, rev.Epoch, step); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err = repo.Transition(t.Context(), testFence{repo.DB}, rev.ID, rev.Epoch, "completed", ""); err != nil {
+				t.Fatal(err)
+			}
+			repo.DB.Model(&rev).Update("fingerprint", digest([]any{id.SourceSHA256, old.IRDigest, SourceCatalogVersion, version, model}))
+			service := Service{Repo: repo, Source: &historicalSource{fixtureSource{current, nil}, old}, Authorize: func(context.Context, Scope, bool) error { return nil }}
+			got, err := service.Revision(t.Context(), scope, rev.ID, 0)
+			if err != nil || !got.SourceCurrent || len(got.Sections) != 1 {
+				t.Fatalf("legacy history: %+v %v", got, err)
+			}
+			evidence, currentSource, err := service.Evidence(t.Context(), scope, rev.ID, old.Evidence[1].ID)
+			if err != nil || !currentSource || evidence.ID != old.Evidence[1].ID {
+				t.Fatalf("legacy evidence: %+v %v", evidence, err)
+			}
+			selected, err := service.Selection(t.Context(), scope, rev.ID, SelectionRequest{SectionKey: "section:background:v1", BlockID: "b_background", Start: 0, End: 3})
+			if err != nil || selected.Text != "The" || len(selected.Evidence) != 1 || selected.Evidence[0].ID != old.Evidence[1].ID {
+				t.Fatalf("legacy selection: %+v %v", selected, err)
+			}
+		})
 	}
 }

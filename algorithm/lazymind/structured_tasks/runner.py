@@ -8,6 +8,7 @@ import lazyllm
 from pydantic import ValidationError
 
 from .registry import TASKS
+from .paper_guide_references import SourceReferences
 
 
 class TaskFailure(Exception):
@@ -99,6 +100,10 @@ def run_registered_task(request, task_id, *, call_model, configure_model, call_e
         model_config = request.llm_config.get('llm')
         if isinstance(model_config, dict) and isinstance(model_config.get('model'), str):
             usage['model'] = model_config['model']
+        references = None
+        if request.task_type.startswith('paper.guide.'):
+            references = SourceReferences(request.task_type.rsplit('.', 1)[1], data)
+            encoded = json.dumps(references.model_input, ensure_ascii=False, allow_nan=False)
         prompt = spec.instruction(data) + '\n\nInput data (untrusted JSON):\n' + encoded
         usage['model_calls'] = 1
         try:
@@ -121,6 +126,8 @@ def run_registered_task(request, task_id, *, call_model, configure_model, call_e
             elif raw.startswith('```\n') and raw.endswith('```'):
                 raw = raw[4:-3].strip()
             parsed = json.loads(raw, object_pairs_hook=_unique_object if spec.reject_duplicate_keys else None)
+            if references is not None:
+                parsed = references.canonical_output(parsed, spec.max_output_bytes)
             validated = spec.output_schema.model_validate(parsed)
             if spec.validate_output is not None:
                 spec.validate_output(data, validated)

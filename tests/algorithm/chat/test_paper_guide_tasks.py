@@ -8,6 +8,11 @@ from lazymind.chat.service import llm_task
 SOURCE_ID = 'ev_' + 'a' * 64
 
 
+def mock_model_json(value):
+    # Only the known synthetic citation is encoded for this single-source fixture.
+    return json.dumps(value).replace(SOURCE_ID, 'e1')
+
+
 @pytest.mark.parametrize(('output', 'error'), [
     ({'claims': [], 'open_questions': ['What remains unknown?']}, None),
     ('<think>Private reasoning</think>', 'invalid_model_output'),
@@ -22,7 +27,7 @@ def test_extract_one_call_and_binds_evidence(monkeypatch, output, error):
 
     def model(prompt, **options):
         calls.append((prompt, options))
-        return output if isinstance(output, str) else json.dumps(output)
+        return output if isinstance(output, str) else mock_model_json(output)
 
     monkeypatch.setattr(llm_task, 'AutoModel', lambda **kwargs: model)
     input_data = {'language': 'en', 'evidence': [{
@@ -32,7 +37,7 @@ def test_extract_one_call_and_binds_evidence(monkeypatch, output, error):
     }]}
     request = llm_task.LLMTaskRequest(
         task_type='paper.guide.extract',
-        options={'task_version': 'paper-guide-v3'},
+        options={'task_version': 'paper-guide-v4'},
         input={'data': input_data})
     result = llm_task.run_llm_task(request)
     assert result.error_code == error
@@ -79,12 +84,12 @@ def test_guide_chain_accepts_versioned_shapes_and_rejects_invalid_bindings(monke
 
     def model(prompt, **options):
         calls.append((prompt, options))
-        return json.dumps(next(responses))
+        return mock_model_json(next(responses))
 
     monkeypatch.setattr(llm_task, 'AutoModel', lambda **kwargs: model)
     request = llm_task.LLMTaskRequest(
         task_type=f'paper.guide.{task}',
-        options={'task_version': 'paper-guide-v3'},
+        options={'task_version': 'paper-guide-v4'},
         input={'data': {'language': 'en', 'evidence': [EVIDENCE], **data}})
     good = llm_task.run_llm_task(request)
     assert good.status == 'succeeded'
@@ -99,7 +104,7 @@ def test_guide_rejects_tools_and_paths_before_model(monkeypatch):
     data = {'language': 'en', 'evidence': [EVIDENCE], 'output_path': '/tmp/override'}
     request = llm_task.LLMTaskRequest(
         task_type='paper.guide.extract',
-        options={'task_version': 'paper-guide-v3'},
+        options={'task_version': 'paper-guide-v4'},
         input={'data': data})
     assert llm_task.run_llm_task(request).error_code == 'invalid_task_input'
     request.input.data.pop('output_path')
@@ -121,7 +126,7 @@ def test_guide_rejects_duplicate_json_keys_with_one_call(monkeypatch, raw):
 
     monkeypatch.setattr(llm_task, 'AutoModel', lambda **kwargs: model)
     request = llm_task.LLMTaskRequest(
-        task_type='paper.guide.extract', options={'task_version': 'paper-guide-v3'},
+        task_type='paper.guide.extract', options={'task_version': 'paper-guide-v4'},
         input={'data': {'language': 'en', 'evidence': [EVIDENCE]}})
     result = llm_task.run_llm_task(request)
     assert result.error_code == 'invalid_model_output'
@@ -142,9 +147,9 @@ def test_section_requires_planned_claims_and_evidence_closure(monkeypatch):
     section = deepcopy(SECTION)
     section['claim_ids'] = ['required']
     section['blocks'][0].update(claim_ids=['required'], evidence_ids=[])
-    monkeypatch.setattr(llm_task, 'AutoModel', lambda **kwargs: lambda *a, **k: json.dumps(section))
+    monkeypatch.setattr(llm_task, 'AutoModel', lambda **kwargs: lambda *a, **k: mock_model_json(section))
     request = llm_task.LLMTaskRequest(
-        task_type='paper.guide.section', options={'task_version': 'paper-guide-v3'},
+        task_type='paper.guide.section', options={'task_version': 'paper-guide-v4'},
         input={'data': {'plan': plan, 'role': 'background', 'language': 'en', 'evidence': [EVIDENCE]}})
     assert llm_task.run_llm_task(request).status == 'succeeded'
     request.input.data['evidence'] = [other]
@@ -167,7 +172,7 @@ def test_full_review_validates_unique_targets_even_without_findings(monkeypatch,
                  'evidence_ids': [SOURCE_ID], 'argument_type': None, 'conditions': [], 'support_status': 'supported'}
         sections.append({**SECTION, 'role': role, 'title': role.title(), 'blocks': [block], 'claims': [claim]})
     request = llm_task.LLMTaskRequest(
-        task_type='paper.guide.review', options={'task_version': 'paper-guide-v3'},
+        task_type='paper.guide.review', options={'task_version': 'paper-guide-v4'},
         input={'data': {'plan': PLAN, 'sections': sections, 'language': 'en', 'evidence': [EVIDENCE]}})
     result = llm_task.run_llm_task(request)
     assert result.error_code == (None if collision == 'none' else 'invalid_task_input')
@@ -183,7 +188,7 @@ def test_guide_math_preserves_compact_comparisons_without_html(monkeypatch, body
     raw = {'claims': [], 'open_questions': [body]}
     monkeypatch.setattr(llm_task, 'AutoModel', lambda **kwargs: lambda *a, **k: json.dumps(raw))
     request = llm_task.LLMTaskRequest(
-        task_type='paper.guide.extract', options={'task_version': 'paper-guide-v3'},
+        task_type='paper.guide.extract', options={'task_version': 'paper-guide-v4'},
         input={'data': {'language': 'en', 'evidence': [EVIDENCE]}})
     assert llm_task.run_llm_task(request).error_code == error
 
@@ -297,7 +302,7 @@ def test_live_section_failures_remain_strict_and_single_call(monkeypatch, failur
         assert options['response_format'] == {'type': 'json_object'}
         if failure == 'provider_error':
             raise ValueError('fixture provider rejected format')
-        return fixture['invalid_latex_json'] if failure == 'invalid_json' else json.dumps(section)
+        return fixture['invalid_latex_json'] if failure == 'invalid_json' else mock_model_json(section)
     monkeypatch.setattr(llm_task, 'AutoModel', lambda **kwargs: model)
     request = llm_task.LLMTaskRequest(task_type='paper.guide.section',
         llm_config={'llm': {'source': 'openai_responses', 'model': 'fixture', 'base_url': 'https://api.openai.com/v1'}},

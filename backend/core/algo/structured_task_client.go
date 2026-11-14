@@ -16,7 +16,7 @@ const (
 	PaperGuidePlanTask            = "paper.guide.plan"
 	PaperGuideSectionTask         = "paper.guide.section"
 	PaperGuideReviewTask          = "paper.guide.review"
-	PaperGuideTaskVersion         = "paper-guide-v3"
+	PaperGuideTaskVersion         = "paper-guide-v4"
 	FormulaExplanationTask        = "paper.formula.explain"
 	FormulaExplanationTaskVersion = "formula-explanation-v7-low-latency"
 	VisualExplanationTask         = "paper.visual.explain"

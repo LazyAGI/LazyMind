@@ -125,6 +125,9 @@ def resolve_document_selection_context(
             )
             missing = 'No original evidence is attached; teaching examples are hypothetical, not paper results.'
             return (
+                'Use paper/source page labels in user-facing prose. Do not print internal '
+                'revision, section, block or evidence IDs unless the user explicitly asks for them. '
+                'Keep authorized source references available for citation and verification.\n\n'
                 'Guide passage (AI explanation, not an original-paper quotation; '
                 f"revision {_text(guide.get('revision_id'), 256)}, "
                 f"section {_text(guide.get('section_key'), 256)}):\n"
