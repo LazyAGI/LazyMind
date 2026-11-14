@@ -24,7 +24,7 @@ class TaskSpec:
     prefer_native_json: bool = False
 
 
-PAPER_GUIDE_VERSION = 'paper-guide-v7'
+PAPER_GUIDE_VERSION = 'paper-guide-v8'
 
 
 def _guide(input_schema, output_schema, prompt):

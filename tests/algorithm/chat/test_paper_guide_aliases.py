@@ -265,7 +265,7 @@ def test_registered_task_uses_alias_schema_and_returns_canonical_wire(monkeypatc
         return json.dumps(model_output(task, output))
     monkeypatch.setattr(llm_task, 'AutoModel', lambda **kwargs: model)
     request = llm_task.LLMTaskRequest(task_type=f'paper.guide.{task}',
-        options={'task_version': 'paper-guide-v7'}, input={'data': raw})
+        options={'task_version': 'paper-guide-v8'}, input={'data': raw})
     result = llm_task.run_llm_task(request)
     assert result.status == 'succeeded' and result.output == output
     assert len(calls) == result.usage['model_calls'] == 1
@@ -283,23 +283,33 @@ def test_alias_schema_keeps_duplicate_json_key_rejection(monkeypatch):
         return '{"claims":[],"claims":[],"open_questions":[]}'
     monkeypatch.setattr(llm_task, 'AutoModel', lambda **kwargs: model)
     request = llm_task.LLMTaskRequest(task_type='paper.guide.extract',
-        options={'task_version': 'paper-guide-v7'}, input={'data': cases()['extract'][2]})
+        options={'task_version': 'paper-guide-v8'}, input={'data': cases()['extract'][2]})
     assert llm_task.run_llm_task(request).error_code == 'invalid_model_output'
     assert len(calls) == 1
 
 
-def test_material_review_and_comparison_responsibility_are_in_real_prompts():
-    from lazymind.structured_tasks.paper_guide import plan_prompt, section_prompt, review_prompt
-    for task, prompt in [('plan', plan_prompt), ('section', section_prompt), ('review', review_prompt)]:
-        I, _, raw, _ = cases()[task]
-        rendered = prompt(I.model_validate(raw))
-        assert 'central comparison' in rendered
-    review = review_prompt(ReviewInput.model_validate(cases()['review'][2]))
-    for requirement in ('necessary/sufficient-condition reversals', 'causal overreach',
-                        'incorrect numbers', 'important missing', 'only material defects',
-                        'nonexclusive', 'later section', 'complete guide'):
-        assert requirement in review
-    assert 'only if X holds' in review and 'when condition X holds' in review
+@pytest.mark.parametrize('issue', ['missing_explanation', 'overstatement', 'missing_condition',
+                                  'causal_overreach', 'unsupported', 'visual_inference', 'attribution'])
+@pytest.mark.parametrize('target_type', ['block', 'claim'])
+def test_review_keeps_teaching_and_factual_findings_bound_without_reclassification(monkeypatch, issue, target_type):
+    # Provider semantics require source-based trials. Here the actual registered
+    # pipeline must preserve the issue type and exact target, not alias or coerce it.
+    from lazymind.chat.service import llm_task
+    _, _, raw, output = cases()['review']
+    output['findings'][0].update(issue_type=issue, target_type=target_type)
+    monkeypatch.setattr(llm_task, 'AutoModel', lambda **kwargs: lambda *a, **k: json.dumps(output))
+    request = llm_task.LLMTaskRequest(task_type='paper.guide.review',
+        options={'task_version': 'paper-guide-v8'}, input={'data': raw})
+    result = llm_task.run_llm_task(request)
+    assert result.status == 'succeeded'
+    assert result.output == output
+    assert result.usage['model_calls'] == 1
+    # The canonical evidence ID is not a claim/block repair target, even when
+    # its request-local alias happens to match the valid target's literal ID.
+    output['findings'][0]['target_id'] = A
+    rejected = llm_task.run_llm_task(request)
+    assert rejected.error_code == 'invalid_model_output'
+    assert rejected.usage['model_calls'] == 1
 
 
 def test_shared_go_fixture_is_the_exact_canonical_model_response():
@@ -338,7 +348,7 @@ def test_alias_failure_never_triggers_an_extra_model_attempt(monkeypatch, bad):
         return json.dumps(output)
     monkeypatch.setattr(llm_task, 'AutoModel', lambda **kwargs: model)
     request = llm_task.LLMTaskRequest(task_type='paper.guide.extract',
-        options={'task_version': 'paper-guide-v7'}, input={'data': cases()['extract'][2]})
+        options={'task_version': 'paper-guide-v8'}, input={'data': cases()['extract'][2]})
     result = llm_task.run_llm_task(request)
     assert result.error_code == 'invalid_model_output'
     assert len(calls) == result.usage['model_calls'] == 1
@@ -355,7 +365,7 @@ def test_concurrent_registered_calls_cannot_share_alias_identity(monkeypatch):
         raw['evidence'][0]['id'] = source
         raw['source_sections'][0]['evidence_ids'] = [source]
         request = llm_task.LLMTaskRequest(task_type='paper.guide.extract',
-            options={'task_version': 'paper-guide-v7'}, input={'data': raw})
+            options={'task_version': 'paper-guide-v8'}, input={'data': raw})
         result = llm_task.run_llm_task(request)
         assert result.status == 'succeeded' and result.usage['model_calls'] == 1
         return result.output['claims'][0]['evidence_ids']
@@ -427,5 +437,5 @@ def test_shared_physical_fragment_fixture_uses_actual_task_transport(monkeypatch
     result = llm_task.run_llm_task(request)
     assert result.status == 'succeeded'
     assert result.output == fixture['output']
-    assert result.usage['task_version'] == 'paper-guide-v7'
+    assert result.usage['task_version'] == 'paper-guide-v8'
     assert result.usage['model_calls'] == 1

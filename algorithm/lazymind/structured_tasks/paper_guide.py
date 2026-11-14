@@ -34,25 +34,23 @@ Plan four ordered roles: background, question, contribution, justification. Give
 display title, focus, necessary terms, claim IDs, evidence IDs and asset IDs. Include all core
 claims in at least one section. For each key supplied catalog visual or formula, give the evidence ID and a reason
 for inclusion or exclusion; place every included object in at least one section.
-Asset eligibility: EVERY required_assets decision, whether included=true or false, must use
-supplied evidence whose source_type is image, chart, formula or table. false means a supplied
-catalog asset deliberately not displayed, not a missing external resource. Evidence of source_type=text,
-including captions or mentions, is ordinary evidence, never an asset: explain unavailable material in claims, conditions,
-section focus and prose, without required_assets or asset_ids entries. For example, a supplied
-table can have a true or false decision; text describing an unavailable supplement figure can
-support a claim about missing material, but cannot have either asset decision. Do not infer asset
-type from a figure/table label in text. Catalog eligibility does not establish visible pixels or
-readable contents; preserve those gaps and never invent the missing image, cells or formula.
-Asset cross-check: each section.asset_ids ID must have exactly one required_assets decision with
-included=true; every included=true decision must be used by at least one section. Excluded or
-undecided IDs must never appear in asset_ids. Citing a table as text in evidence_ids does not
-require displaying it as an asset.
-Plan section reference lists have set semantics: list each exact claim/evidence/asset ID once.
+Asset eligibility: every required_assets decision (included=true OR false) must reference supplied
+image/chart/formula/table evidence. false excludes a supplied catalog asset, not a missing resource.
+Text evidence, including captions or mentions of unavailable figures/tables, is never an asset:
+explain missing material in claims, conditions, focus and prose, never required_assets or asset_ids.
+Do not infer source_type from a figure/table label. Catalog eligibility proves neither visible
+pixels nor readable contents; preserve gaps without inventing images, cells or formulas.
+Each section.asset_ids ID needs exactly one included=true decision; every included asset must be
+used by a section. Excluded/undecided IDs cannot be in asset_ids. A textual table citation in
+evidence_ids need not display the asset. Section reference lists are sets: each exact ID once.
 Never duplicate a claim or asset-decision definition.
-Assign each central comparison and its qualifying conditions to a responsible section using
-focus/claims/asset decisions. Identify the rows, axes or contrasts that carry the paper's argument.
-Displaying an asset alone does not explain a comparison; plan a prose explanation of those
-central contrasts. Do not require every peripheral cell or repeat every baseline in every section.
+Assign central comparisons and conditions via focus/claims/asset decisions: identify load-bearing
+rows, axes or contrasts and plan prose explaining them, not just asset display or peripheral cells.
+Use terms for the few concepts needed to understand core operations, measures, premises or
+inferences, even if not named as terms in the source. In focus, assign the relationships to explain,
+including how a proposed framework's essential components work together and are used; labels alone
+do not reconstruct it. Use term_policy to assign main explanation roles and permit reuse elsewhere.
+Keep these responsibilities source-grounded and central, not an exhaustive glossary or appendix.
 
 Allow mixed argument types. Method/system: separate mechanism effects from added resources.
 Experiment/finding: distinguish observations from mechanisms. Observational quantitative: check
@@ -78,16 +76,17 @@ fresh introduction in each section. Keep background and question concise; give c
 justification enough space to explain the essential method, argument, or research design and
 walk through its strongest evidence. A standard Chinese guide often totals about 1,500 to 3,500
 characters across all four roles; let the argument and available evidence determine the length.
-Define essential terms on first use and show how the authors' choices answer
-the research question. For key evidence explain observation, premises, inference and limits.
-Explain the central comparison rows/axes and qualifying conditions assigned to this section,
-including why the contrasts support or limit the argument. Displaying a table/figure alone is not
-an explanation. Preserve missing-material warnings; do not invent unread cells or require all
-peripheral details. Respect the plan's division of work rather than repeating later sections. Choose
-teaching examples suited to the argument (worked example, counterexample, comparison, material
-analysis); mark them as teaching and label external background or interpretation clearly. Do not
-hide essential explanation in a detail block. Support every paper-statement block with its claim
-IDs or direct evidence. Section.claims defines ONLY NEW claims absent from plan.claims.
+Explain the concepts and framework relationships assigned to this role in visible prose: their
+plain meaning, how they work or are used here, and how they answer the question. Abbreviation
+expansion, translated labels or component lists alone are insufficient. Explain key evidence's
+observation, premises, inference and limits, including assigned central comparisons and conditions;
+asset display alone is not explanation. Preserve unread-material gaps without inventing details.
+Follow the plan's explanation roles: short overview glosses may precede fuller explanation;
+reuse explanations assigned elsewhere without repeating them. Add contrasts or teaching examples
+only to resolve material misunderstanding, in a form suited to the argument; no mandatory numeric
+example or uniform term length. Mark teaching, external background and interpretation distinctly
+from paper findings. Keep essential explanation out of detail blocks and summaries alone.
+Support every paper-statement block with its claim IDs or direct evidence. Section.claims defines ONLY NEW claims absent from plan.claims.
 Never copy, restate or redefine a plan claim in Section.claims, even with the same statement.
 Reference existing plan claims by ID in section claim_ids and block claim_ids. If no new claims
 are introduced, return claims=[]; these arrays of claim_ids can still contain existing plan IDs.
@@ -103,24 +102,27 @@ their concrete scope and preserve the rest of the section's commitments.
 """
 
 REVIEW = """
-Review the supplied section or the complete guide. Check whether cited material supports each
-claim's strength and attribution. Look for missing assumptions, units, quantifiers, exceptions,
-effect uncertainty, unsupported novelty, causal overreach and confusion of caption with visual
-observation. Check whether sections answer their plan, explain how evidence supports the claims,
-and remain mutually consistent. Return concrete findings only: exact claim or block ID, issue
-type, and a bounded correction suggestion in prose. Do not output code. If no issues are
-supported, return an empty findings list. This check does not verify external facts or proofs.
-Return only material defects requiring correction, not optional wording or extra detail.
-For a single section, assess its role, focus, actual assertions and assigned claims in the whole
-plan's division of work. Do not demand details assigned to a later section or treat a nonexclusive,
-source-equivalent high-level overview as an exhaustive list. A shared claim ID does not require
-every section to repeat all its details. Section scope never excuses an incorrect assertion:
-necessary/sufficient-condition reversals, causal overreach, incorrect numbers, important missing
-qualifications and unsupported assertions still require findings. For example, changing a source's
-"when condition X holds" into "only if X holds" is a material strengthening, even in background.
-For the complete guide, check material coverage across all sections: central comparisons and their
-qualifying conditions must be explained in prose by a responsible section, not merely included
-in an asset. Do not require peripheral cells or repeated baselines in every section.
+Review the supplied section or complete guide against its evidence and plan. Check claim strength
+and attribution, assumptions, units, quantifiers, exceptions, uncertainty, novelty, causal limits,
+caption versus visual observation, and mutual consistency. Return only material defects requiring
+correction: an existing claim/block ID, issue type and bounded prose suggestion; no code. Return
+findings=[] when none are supported. This does not verify external facts or proofs.
+For one section, check its assigned explanation responsibilities and actual assertions within the
+plan's division of work. Do not infer omissions in unseen sections, demand later explanations or
+mistake a nonexclusive source-equivalent overview for an exhaustive list. A shared claim or term
+requires no repeated explanation. Scope never excuses incorrect assertions: necessary/sufficient
+reversals, causal overreach, incorrect numbers, missing qualifications and unsupported assertions
+still require factual findings, not a downgrade to missing_explanation.
+For the complete guide, check actual prose somewhere for essential concepts, framework components'
+use/relationships, and central comparisons with their conditions; include Plan omissions only when
+needed to understand the central evidence or argument. Accept equivalent plain language and a
+reasonable relocated explanation. Names, abbreviations, Plan entries or asset display alone do not
+explain. Do not require peripheral cells, exhaustive appendices, optional background or repetition.
+Use missing_explanation only for a gap that prevents understanding a core operation, measure,
+premise, framework or inference. Prefer the nearest existing relevant block, otherwise its claim;
+state the missing relationship, why it matters and a concrete local repair. Group related gaps at
+one location, but never hide independent defects to fit a repair budget. Keep inadequate explanation,
+factual failures and unavailable source material distinct; do not invent facts to fill source gaps.
 """
 
 

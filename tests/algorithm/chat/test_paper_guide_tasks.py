@@ -37,7 +37,7 @@ def test_extract_one_call_and_binds_evidence(monkeypatch, output, error):
     }]}
     request = llm_task.LLMTaskRequest(
         task_type='paper.guide.extract',
-        options={'task_version': 'paper-guide-v7'},
+        options={'task_version': 'paper-guide-v8'},
         input={'data': input_data})
     result = llm_task.run_llm_task(request)
     assert result.error_code == error
@@ -89,7 +89,7 @@ def test_guide_chain_accepts_versioned_shapes_and_rejects_invalid_bindings(monke
     monkeypatch.setattr(llm_task, 'AutoModel', lambda **kwargs: model)
     request = llm_task.LLMTaskRequest(
         task_type=f'paper.guide.{task}',
-        options={'task_version': 'paper-guide-v7'},
+        options={'task_version': 'paper-guide-v8'},
         input={'data': {'language': 'en', 'evidence': [EVIDENCE], **data}})
     good = llm_task.run_llm_task(request)
     assert good.status == 'succeeded'
@@ -104,7 +104,7 @@ def test_guide_rejects_tools_and_paths_before_model(monkeypatch):
     data = {'language': 'en', 'evidence': [EVIDENCE], 'output_path': '/tmp/override'}
     request = llm_task.LLMTaskRequest(
         task_type='paper.guide.extract',
-        options={'task_version': 'paper-guide-v7'},
+        options={'task_version': 'paper-guide-v8'},
         input={'data': data})
     assert llm_task.run_llm_task(request).error_code == 'invalid_task_input'
     request.input.data.pop('output_path')
@@ -126,7 +126,7 @@ def test_guide_rejects_duplicate_json_keys_with_one_call(monkeypatch, raw):
 
     monkeypatch.setattr(llm_task, 'AutoModel', lambda **kwargs: model)
     request = llm_task.LLMTaskRequest(
-        task_type='paper.guide.extract', options={'task_version': 'paper-guide-v7'},
+        task_type='paper.guide.extract', options={'task_version': 'paper-guide-v8'},
         input={'data': {'language': 'en', 'evidence': [EVIDENCE]}})
     result = llm_task.run_llm_task(request)
     assert result.error_code == 'invalid_model_output'
@@ -149,7 +149,7 @@ def test_section_requires_planned_claims_and_evidence_closure(monkeypatch):
     section['blocks'][0].update(claim_ids=['required'], evidence_ids=[])
     monkeypatch.setattr(llm_task, 'AutoModel', lambda **kwargs: lambda *a, **k: mock_model_json(section))
     request = llm_task.LLMTaskRequest(
-        task_type='paper.guide.section', options={'task_version': 'paper-guide-v7'},
+        task_type='paper.guide.section', options={'task_version': 'paper-guide-v8'},
         input={'data': {'plan': plan, 'role': 'background', 'language': 'en', 'evidence': [EVIDENCE]}})
     assert llm_task.run_llm_task(request).status == 'succeeded'
     request.input.data['evidence'] = [other]
@@ -172,7 +172,7 @@ def test_full_review_validates_unique_targets_even_without_findings(monkeypatch,
                  'evidence_ids': [SOURCE_ID], 'argument_type': None, 'conditions': [], 'support_status': 'supported'}
         sections.append({**SECTION, 'role': role, 'title': role.title(), 'blocks': [block], 'claims': [claim]})
     request = llm_task.LLMTaskRequest(
-        task_type='paper.guide.review', options={'task_version': 'paper-guide-v7'},
+        task_type='paper.guide.review', options={'task_version': 'paper-guide-v8'},
         input={'data': {'plan': PLAN, 'sections': sections, 'language': 'en', 'evidence': [EVIDENCE]}})
     result = llm_task.run_llm_task(request)
     assert result.error_code == (None if collision == 'none' else 'invalid_task_input')
@@ -188,7 +188,7 @@ def test_guide_math_preserves_compact_comparisons_without_html(monkeypatch, body
     raw = {'claims': [], 'open_questions': [body]}
     monkeypatch.setattr(llm_task, 'AutoModel', lambda **kwargs: lambda *a, **k: json.dumps(raw))
     request = llm_task.LLMTaskRequest(
-        task_type='paper.guide.extract', options={'task_version': 'paper-guide-v7'},
+        task_type='paper.guide.extract', options={'task_version': 'paper-guide-v8'},
         input={'data': {'language': 'en', 'evidence': [EVIDENCE]}})
     assert llm_task.run_llm_task(request).error_code == error
 
@@ -393,3 +393,68 @@ def test_all_guide_input_default_expansion_fits_shared_bound(task, count, all_ta
     go_layout_floor = json.dumps(data, ensure_ascii=False, indent=0)
     assert len(actual.encode('utf-8')) <= (len(go_layout_floor.encode('utf-8'))
         + budget['input_defaults_reserve_bytes'] + count * budget['evidence_expansion_reserve_bytes'])
+
+
+@pytest.mark.parametrize('task', ['extract', 'plan', 'section', 'review'])
+def test_previous_guide_contract_rejected_before_provider_setup(monkeypatch, task):
+    monkeypatch.setattr(llm_task, 'AutoModel', lambda **kwargs: pytest.fail('old contract reached provider'))
+    request = llm_task.LLMTaskRequest(
+        task_type=f'paper.guide.{task}', options={'task_version': 'paper-guide-v7'},
+        input={'data': {'language': 'en', 'evidence': [EVIDENCE]}})
+    result = llm_task.run_llm_task(request)
+    assert result.error_code == 'unsupported_task_version'
+    assert result.usage['model_calls'] == 0
+
+
+@pytest.mark.parametrize('scope', ['section', 'single_review', 'whole_review'])
+def test_explanation_responsibilities_reach_model_with_actual_scope(monkeypatch, scope):
+    # Exercises the registered input/alias/output pipeline; the fake provider
+    # proves transport and target binding only, not the quality of an explanation.
+    from copy import deepcopy
+    plan = deepcopy(PLAN)
+    plan['term_policy'] = ['Contribution explains the selection rule; other roles reuse it.']
+    plan['sections'][2]['terms'] = ['selection rule']
+    plan['sections'][2]['focus'] = 'Explain how the selection rule connects material to inference.'
+    sections = []
+    for role in ROLES:
+        section = deepcopy(SECTION)
+        section.update(role=role, title=role.title())
+        section['blocks'][0]['id'] = f'{role}-b1'
+        sections.append(section)
+    seen = []
+    output = sections[2] if scope == 'section' else {'findings': [{
+        'target_id': 'contribution-b1', 'target_type': 'block',
+        'issue_type': 'missing_explanation',
+        'suggestion': 'Explain here how the selection rule limits which inferences follow.'}]}
+
+    def model(prompt, **options):
+        seen.append(json.loads(prompt.split('Input data (untrusted JSON):\n', 1)[1]))
+        return mock_model_json(output)
+
+    monkeypatch.setattr(llm_task, 'AutoModel', lambda **kwargs: model)
+    data = {'language': 'en', 'evidence': [EVIDENCE], 'plan': plan}
+    if scope == 'section':
+        data.update(role='contribution', prior_summary='The question was introduced; no full prior prose is available.')
+    else:
+        data['sections'] = sections if scope == 'whole_review' else [sections[2]]
+    request = llm_task.LLMTaskRequest(
+        task_type='paper.guide.section' if scope == 'section' else 'paper.guide.review',
+        options={'task_version': 'paper-guide-v8'}, input={'data': data})
+    result = llm_task.run_llm_task(request)
+    assert result.status == 'succeeded'
+    assert result.output == output
+    assert result.usage['model_calls'] == len(seen) == 1
+    packet = seen[0]
+    assert packet['plan']['term_policy'] == plan['term_policy']
+    assert packet['plan']['sections'][2]['focus'] == plan['sections'][2]['focus']
+    assert packet['plan']['sections'][2]['terms'] == ['selection rule']
+    assert packet['evidence'][0]['id'] == 'e1'
+    if scope == 'section':
+        assert packet['prior_summary'] == data['prior_summary']
+        assert 'sections' not in packet
+    else:
+        assert 'prior_summary' not in packet
+        assert [s['role'] for s in packet['sections']] == (list(ROLES) if scope == 'whole_review' else ['contribution'])
+        # A role is not an addressable repair location, even for pedagogy.
+        output['findings'][0]['target_id'] = 'contribution'
+        assert llm_task.run_llm_task(request).error_code == 'invalid_model_output'
