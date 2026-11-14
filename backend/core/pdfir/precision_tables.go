@@ -210,6 +210,41 @@ func producerPrefix(a, b []TableRow) int {
 	return n
 }
 
+// The supported producer table grammar is flat. Reject every recognized
+// payload channel we cannot consume; indexing nested spans alone is not proof
+// that the frozen projection preserves them.
+func validateFlatPrecisionTable(b precisionBlock) error {
+	if b.Type != "table" || len(b.Lines) != 0 {
+		return precisionError("unsupported table ancestor payload")
+	}
+	for _, c := range b.Blocks {
+		if e := validateFlatPrecisionTableChild(c); e != nil {
+			return e
+		}
+	}
+	return nil
+}
+func validateFlatPrecisionTableChild(c precisionBlock) error {
+	if len(c.Blocks) != 0 {
+		return precisionError("unsupported nested table child payload")
+	}
+	if c.Type != "table_body" && c.Type != "table_caption" && c.Type != "table_footnote" {
+		return precisionError("unsupported table child")
+	}
+	for _, l := range c.Lines {
+		for _, s := range l.Spans {
+			if c.Type == "table_body" {
+				if s.Type != "table" || s.Content != "" {
+					return precisionError("unsupported typed table body payload")
+				}
+			} else if (s.Type != "text" && s.Type != "inline_equation") || s.HTML != "" {
+				return precisionError("unsupported typed table text payload")
+			}
+		}
+	}
+	return nil
+}
+
 type physicalTable struct {
 	parent   Block
 	para     precisionBlock
@@ -228,6 +263,9 @@ func projectPrecisionTables(base Document, pages []precisionPage, index map[stri
 		err := walkPrecision(p.Paras, 0, func(b precisionBlock) error {
 			if b.Type != "table" {
 				return nil
+			}
+			if e := validateFlatPrecisionTable(b); e != nil {
+				return e
 			}
 			parent, e := precisionTableParent(base, p, b)
 			if e != nil {
@@ -266,6 +304,9 @@ func projectPrecisionTables(base Document, pages []precisionPage, index map[stri
 				for _, l := range c.Lines {
 					for _, s := range l.Spans {
 						if s.Type == "table" && reflect.DeepEqual(s.BBox, bodies[0].BBox) {
+							if e := validateFlatPrecisionTableChild(c); e != nil {
+								return e
+							}
 							candidates = append(candidates, s)
 						}
 					}
@@ -289,6 +330,9 @@ func projectPrecisionTables(base Document, pages []precisionPage, index map[stri
 			}
 			if len(ancestors) == 1 {
 				physical = &ancestors[0]
+				if e := validateFlatPrecisionTable(*physical); e != nil {
+					return e
+				}
 				count := 0
 				for _, child := range physical.Blocks {
 					if child.Type != "table_body" {
@@ -414,11 +458,18 @@ func projectPrecisionTables(base Document, pages []precisionPage, index map[stri
 			}
 			add(SourceRegion{Kind: "table_body_fragment", ParentBlockID: home.parent.ID, Page: f.parent.Page, Text: f.text, Table: payload})
 		}
-		grouped := true
+		grouped := 0
 		for _, f := range fragments {
-			grouped = grouped && f.physical != nil
+			if f.physical != nil {
+				grouped++
+			}
 		}
-		if grouped {
+		// Falling back for just one unwrapped fragment would discard proven
+		// original notes/captions from the other physical ancestors.
+		if grouped != 0 && grouped != len(fragments) {
+			return nil, nil, precisionError("mixed physical table ancestry")
+		}
+		if grouped == len(fragments) {
 			ancillary, err := physicalTableText(home, fragments)
 			if err != nil {
 				return nil, nil, err

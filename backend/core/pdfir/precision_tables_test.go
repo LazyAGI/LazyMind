@@ -227,3 +227,117 @@ func TestVerifiedIndependentEmptyTableIsNotAContinuation(t *testing.T) {
 		t.Fatal("independent empty table collapsed")
 	}
 }
+
+// Flat physical wrappers retain notes/captions omitted by producer merging.
+// The canonical merged parent remains the same as fragmentedTableFixture.
+func groupedAncillaryTableFixture(t *testing.T, mutate func(map[string]any)) ([]byte, Document) {
+	t.Helper()
+	return fragmentedTableFixture(t, func(layout map[string]any) {
+		for _, v := range layout["pdf_info"].([]any) {
+			p := v.(map[string]any)
+			children := p["preproc_blocks"].([]any)
+			body := children[0].(map[string]any)
+			text, kind := "Original omitted home note.", "table_footnote"
+			box := []int{10, 85, 90, 95}
+			if p["page_idx"].(float64) != 0 {
+				text = "Original continuation caption."
+				kind = "table_caption"
+				box = []int{20, 2, 180, 15}
+			}
+			children = append(children, map[string]any{"type": kind, "lines": []any{map[string]any{"spans": []any{map[string]any{"type": "text", "content": text, "bbox": box}}}}})
+			p["preproc_blocks"] = []any{map[string]any{"type": "table", "bbox": body["bbox"], "blocks": children}}
+		}
+		if mutate != nil {
+			mutate(layout)
+		}
+	})
+}
+
+func TestMixedTableAncestryCannotLoseProvenAncillary(t *testing.T) {
+	for _, ungroupedPage := range []int{0, 1} {
+		t.Run(fmt.Sprint(ungroupedPage), func(t *testing.T) {
+			raw, base := groupedAncillaryTableFixture(t, func(l map[string]any) {
+				p := l["pdf_info"].([]any)[ungroupedPage].(map[string]any)
+				wrapper := p["preproc_blocks"].([]any)[0].(map[string]any)
+				p["preproc_blocks"] = wrapper["blocks"]
+			})
+			if _, e := ProjectSourcePrecision(base, raw); e == nil || !strings.Contains(e.Error(), "mixed physical table ancestry") {
+				t.Fatalf("mixed ancestry must reject rather than omit proven note/caption: %v", e)
+			}
+		})
+	}
+}
+
+func TestFlatTableAncestryControlsPreserveAllProvenText(t *testing.T) {
+	raw, base := groupedAncillaryTableFixture(t, nil)
+	got, e := ProjectSourcePrecision(base, raw)
+	if e != nil {
+		t.Fatal(e)
+	}
+	want := map[string]int{"Original omitted home note.": 0, "Original continuation caption.": 3, "Footnote later.": 3}
+	for text, page := range want {
+		count := 0
+		for _, r := range got.Precision.Regions {
+			if r.Text == text {
+				count++
+				if r.Page != page {
+					t.Fatalf("wrong physical page for %q", text)
+				}
+			}
+		}
+		if count != 1 {
+			t.Fatalf("lost or duplicated physical text %q: %d", text, count)
+		}
+	}
+	raw, base = fragmentedTableFixture(t, nil)
+	got, e = ProjectSourcePrecision(base, raw)
+	if e != nil {
+		t.Fatal(e)
+	}
+	found := false
+	for _, r := range got.Precision.Regions {
+		if r.Text == "Footnote later." && r.Page == 3 {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("all-ungrouped exact-span control lost footnote")
+	}
+}
+
+func TestTableAncestryRejectsIgnoredNestedOrAncestorPayload(t *testing.T) {
+	for _, mode := range []string{"physical home footnote nested", "physical continuation caption nested", "physical ancestor lines", "canonical ancestor lines", "canonical footnote nested", "canonical body nested", "physical text HTML", "physical table content"} {
+		t.Run(mode, func(t *testing.T) {
+			raw, base := groupedAncillaryTableFixture(t, func(l map[string]any) {
+				pages := l["pdf_info"].([]any)
+				home := pages[0].(map[string]any)
+				later := pages[1].(map[string]any)
+				physical := home["preproc_blocks"].([]any)[0].(map[string]any)
+				canonical := home["para_blocks"].([]any)[0].(map[string]any)
+				extra := map[string]any{"type": "text", "bbox": []int{10, 85, 90, 95}, "lines": []any{map[string]any{"spans": []any{map[string]any{"type": "text", "content": "Nested unconsumed physical fact.", "bbox": []int{10, 85, 90, 95}}}}}}
+				switch mode {
+				case "physical home footnote nested":
+					physical["blocks"].([]any)[1].(map[string]any)["blocks"] = []any{extra}
+				case "physical continuation caption nested":
+					children := later["preproc_blocks"].([]any)[0].(map[string]any)["blocks"].([]any)
+					children[len(children)-1].(map[string]any)["blocks"] = []any{extra}
+				case "physical ancestor lines":
+					physical["lines"] = extra["lines"]
+				case "canonical ancestor lines":
+					canonical["lines"] = extra["lines"]
+				case "canonical footnote nested":
+					canonical["blocks"].([]any)[1].(map[string]any)["blocks"] = []any{extra}
+				case "canonical body nested":
+					canonical["blocks"].([]any)[0].(map[string]any)["blocks"] = []any{extra}
+				case "physical text HTML":
+					physical["blocks"].([]any)[1].(map[string]any)["lines"].([]any)[0].(map[string]any)["spans"].([]any)[0].(map[string]any)["html"] = "<b>Unconsumed HTML payload</b>"
+				case "physical table content":
+					physical["blocks"].([]any)[0].(map[string]any)["lines"].([]any)[0].(map[string]any)["spans"].([]any)[0].(map[string]any)["content"] = "Unconsumed table text payload"
+				}
+			})
+			if _, e := ProjectSourcePrecision(base, raw); e == nil {
+				t.Fatal("unsupported table payload silently omitted")
+			}
+		})
+	}
+}
