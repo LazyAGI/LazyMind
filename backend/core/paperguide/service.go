@@ -12,11 +12,12 @@ import (
 )
 
 type SourceState struct {
-	DependencyFailed   bool
-	CanPrepare         bool
-	Hash               string
-	Snapshot           *GuideSourceSnapshot
-	Path, DependencyID string
+	PrecisionUnavailable bool
+	DependencyFailed     bool
+	CanPrepare           bool
+	Hash                 string
+	Snapshot             *GuideSourceSnapshot
+	Path, DependencyID   string
 }
 type SourceLoader interface {
 	Load(context.Context, Scope, bool) (SourceState, error)
@@ -134,6 +135,9 @@ func (s Service) Status(ctx context.Context, scope Scope) (StatusResponse, error
 	if source.Snapshot == nil && !source.CanPrepare {
 		out.CanGenerate = false
 		out.UnavailableReason = ErrPreparation.Error()
+		if source.PrecisionUnavailable {
+			out.UnavailableReason = ErrPrecision.Error()
+		}
 	}
 	if errors.Is(e, ErrSourceChanged) {
 		out.CanGenerate = false

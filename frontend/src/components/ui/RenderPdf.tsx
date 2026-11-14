@@ -68,7 +68,7 @@ interface RenderPdfProps {
   onPdfOutlineChange?: (outline: PdfNativeOutlineItem[]) => void;
   pdfNavigateTo?: {id: string; requestId: number};
   pdfNavigateToPage?: {page:number;requestId:number};
-  pdfNavigateToPosition?: {page:number;progress:number;requestId:number};
+  pdfNavigateToPosition?: {page:number;progress:number;requestId:number;sourceLocator?:boolean;bbox?:number[]};
   savedNoteHighlights?: PdfNoteHighlight[];
   onNoteHighlightClick?: (id:string) => void;
   pdfIRTarget?: PdfIRTarget;
@@ -684,6 +684,10 @@ export default function RenderPdf({
     const key=`${request.requestId}:${request.page}:${request.progress}`;
     if(lastNoteNavigation.current===key)return;
     lastNoteNavigation.current=key;
+    if(request.sourceLocator){
+      setPendingStudyNavigation(undefined);
+      setStudyHighlight(request.bbox?.length===4?{id:`guide-${request.requestId}`,text:"",page:request.page-1,bbox:[request.bbox[0],request.bbox[1],request.bbox[2],request.bbox[3]]}:undefined);
+    }
     let originPage=0;
     for(let index=0;index<pageTops.length;index++)if(pageTops[index]<=scrollTop+1)originPage=index;else break;
     setNoteReturn({page:originPage+1,progress:Math.max(0,Math.min(1,(scrollTop-(pageTops[originPage]||0))/(pageHeightsPx[originPage]||1)))});

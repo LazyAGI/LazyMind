@@ -26,6 +26,7 @@ var (
 	ErrConflict      = errors.New("paper_guide_conflict")
 	ErrModelChanged  = errors.New("paper_guide_model_unavailable")
 	ErrSourceChanged = errors.New("paper_guide_source_changed")
+	ErrPrecision     = errors.New("paper_guide_source_precision_unavailable")
 	ErrPreparation   = errors.New("paper_guide_preparation_required")
 	ErrForbidden     = errors.New("paper_guide_permission_revoked")
 	ErrDisabled      = errors.New("paper_guide_disabled")

@@ -49,7 +49,7 @@ func paperGuideError(w http.ResponseWriter, e error) {
 		status = 502
 	case errors.Is(e, paperguide.ErrDisabled):
 		status = 403
-	case errors.Is(e, paperguide.ErrRegenerate), errors.Is(e, paperguide.ErrConflict), errors.Is(e, paperguide.ErrPreparation), errors.Is(e, paperguide.ErrSourceChanged):
+	case errors.Is(e, paperguide.ErrRegenerate), errors.Is(e, paperguide.ErrConflict), errors.Is(e, paperguide.ErrPreparation), errors.Is(e, paperguide.ErrPrecision), errors.Is(e, paperguide.ErrSourceChanged):
 		status = 409
 	case errors.Is(e, paperguide.ErrBudget), errors.Is(e, paperguide.ErrContext), errors.Is(e, paperguide.ErrMaterial), errors.Is(e, paperguide.ErrEvidence), errors.Is(e, paperguide.ErrModelChanged), errors.Is(e, paperguide.ErrQuality):
 		status = 422

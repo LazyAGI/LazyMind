@@ -136,6 +136,7 @@ export default function PaperGuideReader({
     example = false,
     range?: typeof selected,
   ) {
+    if (!revision.source_current) return;
     const start = range?.start ?? 0,
       end = range?.end ?? Array.from(block.text).length;
     onSelection({
@@ -371,10 +372,10 @@ export default function PaperGuideReader({
                       <summary aria-label={zh ? "选段操作" : "Passage actions"}>
                         …
                       </summary>
-                      <button onClick={() => ask(section, block)}>
+                      <button disabled={!revision.source_current} onClick={() => ask(section, block)}>
                         {zh ? "解释这段" : "Explain this passage"}
                       </button>
-                      <button onClick={() => ask(section, block, true)}>
+                      <button disabled={!revision.source_current} onClick={() => ask(section, block, true)}>
                         {zh ? "举个例子" : "Give an example"}
                       </button>
                       {block.evidence_ids?.[0] && (
@@ -426,6 +427,7 @@ export default function PaperGuideReader({
           )}
           <p className="paper-guide-selection-preview">{selected.text}</p>
           <button
+            disabled={!revision.source_current}
             onClick={() =>
               ask(selected.section, selected.block, false, selected)
             }
@@ -433,6 +435,7 @@ export default function PaperGuideReader({
             {zh ? "解释这段" : "Explain this passage"}
           </button>
           <button
+            disabled={!revision.source_current}
             onClick={() =>
               ask(selected.section, selected.block, true, selected)
             }

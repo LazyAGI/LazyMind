@@ -19,13 +19,13 @@ func ValidateSnapshot(s GuideSourceSnapshot, identity SourceIdentity, irDigest s
 		return fmt.Errorf("%w: identity or digest mismatch", ErrInvalidSource)
 	}
 	warnings := s.Coverage.Warnings
-	if s.CatalogVersion == SourceCatalogVersion {
+	if s.CatalogVersion == SourceCatalogVersion || s.CatalogVersion == "paper-guide-source-v2" {
 		warnings = s.SourceWarnings
 	}
 	if len(warnings) == 0 {
 		warnings = nil
 	}
-	d := pdfir.Document{Version: s.IRVersion, ProjectionVersion: s.ProjectionVersion, SourceSHA256: s.Identity.SourceSHA256,
+	d := pdfir.Document{Precision: s.Precision, Version: s.IRVersion, ProjectionVersion: s.ProjectionVersion, SourceSHA256: s.Identity.SourceSHA256,
 		Parser: s.Parser, CoordinateSpace: s.CoordinateSpace, Pages: s.Pages, Blocks: s.Blocks, Warnings: warnings}
 	original, err := buildSourceSnapshot(d, identity, s.CatalogVersion)
 	if err != nil || !reflect.DeepEqual(s, original) {

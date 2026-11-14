@@ -208,7 +208,7 @@ const KnowledgeDocumentContent = () => {
   const [paperIR, setPaperIR] = useState<PdfIRDocument>();
   const [pdfNavigateTo, setPdfNavigateTo] = useState<{id:string;requestId:number}>();
   const [pdfNavigateToPage, setPdfNavigateToPage] = useState<{page:number;requestId:number}>();
-  const [pdfNavigateToPosition,setPdfNavigateToPosition]=useState<{page:number;progress:number;requestId:number}>();
+  const [pdfNavigateToPosition,setPdfNavigateToPosition]=useState<{page:number;progress:number;requestId:number;sourceLocator?:boolean;bbox?:number[]}>();
   useEffect(()=>{
     if(!isPaperDocument)return;
     const key=`${knowledgeBaseId}/${knowledgeId}`;
@@ -1068,7 +1068,7 @@ const KnowledgeDocumentContent = () => {
           onAuxiliary={tab=>{setPreviewSideCollapsed(!tab);if(tab){setPreviewSideTab(tab);if(tab==="chat")setActivatedDocumentChatKey(documentKey);}}}
           onSelection={selection=>{setDocumentChatSelection(selection);setPreviewSideTab("chat");setPreviewSideCollapsed(false);}}
           onReturnSource={guidePreviousPdfPosition?()=>{setPdfNavigateToPosition({...guidePreviousPdfPosition,requestId:++navigationSequence.current});setGuidePreviousPdfPosition(undefined);}:undefined}
-          onNavigate={e=>{setGuidePreviousPdfPosition(pdfViewPosition);if(e.source_block_id&&paperIR?.blocks.some(b=>b.id===e.source_block_id))navigatePaperBlock(e.source_block_id);else setPdfNavigateToPosition({page:e.locator.page+1,progress:Math.max(0,(e.locator.bbox?.[1]||0)-.1),requestId:++navigationSequence.current});}}
+          onNavigate={e=>{setGuidePreviousPdfPosition(pdfViewPosition);setPdfNavigateTo(undefined);const bbox=e.locator.kind==="page"?undefined:e.locator.bbox;setPdfNavigateToPosition({page:e.locator.page+1,progress:Math.max(0,(bbox?.[1]||0)-.1),requestId:++navigationSequence.current,sourceLocator:true,bbox});}}
           source={<>        <div className="knowledge-preview-file-column paper-reader-pane">
           {!isPdfDocument && <header className="document-reader-header">{readerBackButton}<span title={knowledgeDetail?.display_name}>{knowledgeDetail?.display_name}</span>{readerDocumentActions()}</header>}
           {isPdfDocument && !guideMode && <PaperOutlineRail document={paperIR} nativeOutline={nativePdfOutline} currentPage={pdfViewPosition.page} onNavigate={navigatePaperBlock} onNavigatePage={navigatePaperPage}/> }

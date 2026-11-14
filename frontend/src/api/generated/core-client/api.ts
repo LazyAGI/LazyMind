@@ -7282,6 +7282,7 @@ export interface PaperGuideEvidence {
     'id': string;
     'locator': PaperGuideLocator;
     'source_block_id': string;
+    'source_region_id'?: string;
     'source_type': string;
     'text': string;
 }

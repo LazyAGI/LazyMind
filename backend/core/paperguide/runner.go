@@ -105,7 +105,7 @@ func (s Service) Run(ctx context.Context, job asyncjob.Job, reporter asyncjob.Re
 }
 func errorCode(e error) string { return safeRunError(e).Error() }
 func safeRunError(e error) error {
-	for _, known := range []error{ErrModelTimeout, ErrModelRequest, ErrRegenerate, ErrConflict, ErrModelChanged, ErrSourceChanged, ErrPreparation, ErrForbidden, ErrDisabled, ErrContext, ErrMaterial, ErrEvidence, ErrQuality, ErrBudget} {
+	for _, known := range []error{ErrModelTimeout, ErrModelRequest, ErrRegenerate, ErrConflict, ErrModelChanged, ErrSourceChanged, ErrPreparation, ErrPrecision, ErrForbidden, ErrDisabled, ErrContext, ErrMaterial, ErrEvidence, ErrQuality, ErrBudget} {
 		if errors.Is(e, known) {
 			return known
 		}
@@ -154,6 +154,9 @@ func (x *execution) execute(ctx context.Context) error {
 		}
 		if state.Snapshot == nil {
 			if state.DependencyFailed {
+				if state.PrecisionUnavailable {
+					return ErrPrecision
+				}
 				return ErrPreparation
 			}
 			e = x.s.Repo.fenced(ctx, x.f, x.rev.ID, x.rev.Epoch, func(tx *gorm.DB, r *orm.PaperGuideRevision, g *orm.PaperGuide) error {
@@ -385,6 +388,9 @@ func (x *execution) inputFits(input map[string]any) bool {
 // Metadata-free providers get a conservative 32k context.
 func estimatedTokens(raw []byte) int { return len(raw) }
 func (x *execution) planInput(ctx context.Context) (map[string]any, GuideSourceSnapshot, error) {
+	if len(x.snap.Sections) > 512 {
+		return nil, GuideSourceSnapshot{}, ErrContext
+	}
 	input := x.input(x.snap)
 	input["source_sections"] = x.snap.Sections
 	if x.inputFits(input) {

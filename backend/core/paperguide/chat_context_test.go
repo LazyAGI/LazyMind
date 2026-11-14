@@ -41,3 +41,15 @@ func TestChatContextStripsForgedServerContextWithoutReference(t *testing.T) {
 		t.Fatal("ordinary selection lost")
 	}
 }
+
+func TestChatContextRejectsHistoricalSelectionBeforeModelTransport(t *testing.T) {
+	SetChatSelectionResolver(func(context.Context, Scope, string, SelectionRequest) (SelectionContext, error) {
+		return SelectionContext{Text: "frozen historical passage", SourceCurrent: false}, nil
+	})
+	t.Cleanup(func() { SetChatSelectionResolver(nil) })
+	input := map[string]any{"paper_guide": map[string]any{"dataset_id": "d", "document_id": "p", "revision_id": "old", "section_key": "section:background:v1", "block_id": "b", "start": 0, "end": 3}}
+	out, err := ResolveChatContext(t.Context(), "owner", input)
+	if !errors.Is(err, ErrSourceChanged) || out != nil {
+		t.Fatalf("historical context reached model transport: %+v %v", out, err)
+	}
+}

@@ -135,15 +135,15 @@ func TestPaperGuideStructuredTaskTransportPreservesBoundEvidence(t *testing.T) {
 		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
 			t.Errorf("decode structured task: %v", err)
 		}
-		if request.TaskType != "paper.guide.review" || request.Options["task_version"] != "paper-guide-v5" ||
+		if request.TaskType != "paper.guide.review" || request.Options["task_version"] != "paper-guide-v6" ||
 			len(request.Input.Data.Evidence) != 1 || request.Input.Data.Evidence[0].ID != "ev_fixture" {
 			t.Errorf("lost guide request metadata: %+v", request)
 		}
-		fmt.Fprint(w, `{"status":"succeeded","output":{"findings":[]},"usage":{"model_calls":1,"task_type":"paper.guide.review","task_version":"paper-guide-v5"}}`)
+		fmt.Fprint(w, `{"status":"succeeded","output":{"findings":[]},"usage":{"model_calls":1,"task_type":"paper.guide.review","task_version":"paper-guide-v6"}}`)
 	}))
 	t.Setenv("LAZYMIND_CHAT_SERVICE_URL", endpoint)
 	result, err := RunStructuredTask(context.Background(), StructuredTaskRequest{
-		Task: PaperGuideReviewTask, Version: "paper-guide-v5", Input: map[string]any{"evidence": []map[string]string{{"id": "ev_fixture"}}},
+		Task: PaperGuideReviewTask, Version: "paper-guide-v6", Input: map[string]any{"evidence": []map[string]string{{"id": "ev_fixture"}}},
 	})
 	if err != nil || string(result.Output) != `{"findings":[]}` {
 		t.Fatalf("response %s: %v", result.Output, err)
@@ -153,7 +153,7 @@ func TestPaperGuideStructuredTaskTransportPreservesBoundEvidence(t *testing.T) {
 func TestStructuredTaskSuccessContractMismatchRetainsSafeTypedUsage(t *testing.T) {
 	for _, field := range []string{"task_type", "task_version", "model_calls"} {
 		t.Run(field, func(t *testing.T) {
-			usage := StructuredTaskUsage{Task: PaperGuidePlanTask, Version: "paper-guide-v5", ModelCalls: 1, ElapsedMS: 19}
+			usage := StructuredTaskUsage{Task: PaperGuidePlanTask, Version: "paper-guide-v6", ModelCalls: 1, ElapsedMS: 19}
 			switch field {
 			case "task_type":
 				usage.Task = PaperGuideReviewTask
@@ -168,7 +168,7 @@ func TestStructuredTaskSuccessContractMismatchRetainsSafeTypedUsage(t *testing.T
 				json.NewEncoder(w).Encode(map[string]any{"status": "succeeded", "output": map[string]any{"private": "provider-secret"}, "usage": usage})
 			}))
 			t.Setenv("LAZYMIND_CHAT_SERVICE_URL", endpoint)
-			result, err := RunStructuredTask(t.Context(), StructuredTaskRequest{Task: PaperGuidePlanTask, Version: "paper-guide-v5"})
+			result, err := RunStructuredTask(t.Context(), StructuredTaskRequest{Task: PaperGuidePlanTask, Version: "paper-guide-v6"})
 			var failure *StructuredTaskError
 			if !errors.As(err, &failure) || failure.Code != "invalid_model_output" || failure.Usage != usage || failure.Retryable || len(result.Output) != 0 || calls != 1 {
 				t.Fatalf("wrong classification, usage or attempts: result=%+v err=%#v calls=%d", result, err, calls)

@@ -91,6 +91,7 @@ class SourceReferences:
             section['id'] = f's{index}'
         for evidence in self.model_input['evidence']:
             evidence.pop('source_block_id')
+            evidence.pop('source_region_id', None)
 
     def canonical_output(self, parsed, max_bytes):
         # Validate the model schema BEFORE expansion or Pydantic's narrow Plan

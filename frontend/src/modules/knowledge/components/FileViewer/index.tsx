@@ -67,7 +67,7 @@ interface FileViewerProps {
   onPdfOutlineChange?: (outline: import("@/modules/knowledge/api/pdfOutline").PdfNativeOutlineItem[]) => void;
   pdfNavigateTo?: {id: string; requestId: number};
   pdfNavigateToPage?: {page: number; requestId: number};
-  pdfNavigateToPosition?: {page:number;progress:number;requestId:number};
+  pdfNavigateToPosition?: {page:number;progress:number;requestId:number;sourceLocator?:boolean;bbox?:number[]};
   pdfIRTarget?: import("@/modules/knowledge/api/pdfIR").PdfIRTarget;
   renderMarkdown?: (markdown: string) => ReactNode;
   data?: ArrayBuffer;

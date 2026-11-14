@@ -24,10 +24,10 @@ func BuildSourceSnapshot(d pdfir.Document, identity SourceIdentity) (GuideSource
 // Empty catalogVersion is the original frozen catalog. Keep its construction
 // rules intact so existing guides and exact selections remain verifiable.
 func buildSourceSnapshot(d pdfir.Document, identity SourceIdentity, catalogVersion string) (GuideSourceSnapshot, error) {
-	if catalogVersion != "" && catalogVersion != SourceCatalogVersion {
+	if catalogVersion != "" && catalogVersion != "paper-guide-source-v1" && catalogVersion != "paper-guide-source-v2" && catalogVersion != SourceCatalogVersion {
 		return GuideSourceSnapshot{}, fmt.Errorf("%w: unknown catalog version", ErrInvalidSource)
 	}
-	current := catalogVersion == SourceCatalogVersion
+	current := catalogVersion == SourceCatalogVersion || catalogVersion == "paper-guide-source-v2"
 	var s GuideSourceSnapshot
 	if !validSHA(identity.SourceSHA256) || identity.SourceSHA256 != d.SourceSHA256 ||
 		identity.OwnerID == "" || identity.DocumentID == "" || identity.DatasetID == "" {
@@ -42,7 +42,7 @@ func buildSourceSnapshot(d pdfir.Document, identity SourceIdentity, catalogVersi
 		return s, fmt.Errorf("%w: invalid IR", ErrInvalidSource)
 	}
 	s = GuideSourceSnapshot{
-		CatalogVersion: catalogVersion, Identity: identity, IRDigest: pdfir.Digest(string(data)), Parser: d.Parser, IRVersion: d.Version,
+		Precision: frozen.Precision, CatalogVersion: catalogVersion, Identity: identity, IRDigest: pdfir.Digest(string(data)), Parser: d.Parser, IRVersion: d.Version,
 		ProjectionVersion: d.ProjectionVersion, CoordinateSpace: d.CoordinateSpace,
 		Pages: frozen.Pages, Blocks: frozen.Blocks, Assets: []GuideAsset{}, Sections: []SourceSection{}, Evidence: []GuideEvidence{},
 		Coverage: GuideCoverage{Warnings: append([]string{}, d.Warnings...), PageWarnings: []int{}},
@@ -56,6 +56,35 @@ func buildSourceSnapshot(d pdfir.Document, identity SourceIdentity, catalogVersi
 			return GuideSourceSnapshot{}, fmt.Errorf("%w: page index", ErrInvalidSource)
 		}
 		pages[p.Index] = true
+	}
+	regions := map[string][]pdfir.SourceRegion{}
+	if frozen.Precision != nil {
+		p := frozen.Precision
+		if catalogVersion != SourceCatalogVersion || p.Version != pdfir.SourcePrecisionVersion || p.SourceSHA256 != d.SourceSHA256 || !validSHA(p.BaseIRDigest) || !validSHA(p.ArchiveDigest) {
+			return GuideSourceSnapshot{}, fmt.Errorf("%w: precision contract", ErrInvalidSource)
+		}
+		regionIDs := map[string]bool{}
+		for _, r := range p.Regions {
+			if r.ID == "" || regionIDs[r.ID] || !pages[r.Page] || len(r.Spans) == 0 {
+				return GuideSourceSnapshot{}, fmt.Errorf("%w: precision region", ErrInvalidSource)
+			}
+			regionIDs[r.ID] = true
+			parts := []string{}
+			for _, span := range r.Spans {
+				if !validBBox(span.BBox) || (span.Type != "text" && span.Type != "inline_equation") {
+					return GuideSourceSnapshot{}, fmt.Errorf("%w: precision span", ErrInvalidSource)
+				}
+				content := span.Content
+				if span.Type == "inline_equation" {
+					content = "$" + content + "$"
+				}
+				parts = append(parts, content)
+			}
+			if strings.Join(parts, "\n") != r.Text {
+				return GuideSourceSnapshot{}, fmt.Errorf("%w: precision text", ErrInvalidSource)
+			}
+			regions[r.ParentBlockID] = append(regions[r.ParentBlockID], r)
+		}
 	}
 	seen := make(map[string]bool, len(s.Blocks))
 	warnings := map[int]bool{}
@@ -130,7 +159,19 @@ func buildSourceSnapshot(d pdfir.Document, identity SourceIdentity, catalogVersi
 				}
 			}
 		}
-		s.Evidence = append(s.Evidence, e)
+		entries := []GuideEvidence{e}
+		if rs := regions[b.ID]; len(rs) > 0 {
+			if asset != nil || b.Text == "" {
+				return GuideSourceSnapshot{}, fmt.Errorf("%w: region parent", ErrInvalidSource)
+			}
+			entries = nil
+			for _, r := range rs {
+				entries = append(entries, GuideEvidence{ID: s.sourceID("evidence_region", r.ID), SourceBlockID: b.ID, SourceRegionID: r.ID, SourceType: b.Type, Text: r.Text, Locator: GuideLocator{Kind: "page", Page: r.Page}})
+				warnings[r.Page] = true
+			}
+			delete(regions, b.ID)
+		}
+		s.Evidence = append(s.Evidence, entries...)
 		title, kind := sourceHeading(b)
 		if kind != "" || section == -1 || (s.Sections[section].Kind == "page_group" && s.Sections[section].Pages[0] != b.Page) {
 			if kind == "" {
@@ -140,10 +181,12 @@ func buildSourceSnapshot(d pdfir.Document, identity SourceIdentity, catalogVersi
 			section++
 		}
 		current := &s.Sections[section]
-		if !containsPage(current.Pages, b.Page) {
-			current.Pages = append(current.Pages, b.Page)
+		for _, entry := range entries {
+			if !containsPage(current.Pages, entry.Locator.Page) {
+				current.Pages = append(current.Pages, entry.Locator.Page)
+			}
+			current.EvidenceIDs = append(current.EvidenceIDs, entry.ID)
 		}
-		current.EvidenceIDs = append(current.EvidenceIDs, e.ID)
 		if kind == "abstract" && inlineAbstract.MatchString(strings.TrimSpace(b.Text)) {
 			hasAbstract = true
 		}
@@ -163,6 +206,9 @@ func buildSourceSnapshot(d pdfir.Document, identity SourceIdentity, catalogVersi
 				s.Coverage.Body = true
 			}
 		}
+	}
+	if len(regions) > 0 {
+		return GuideSourceSnapshot{}, fmt.Errorf("%w: unknown region parent", ErrInvalidSource)
 	}
 	for _, p := range s.Pages {
 		if warnings[p.Index] {
@@ -335,12 +381,16 @@ func ResolveTextLocator(s GuideSourceSnapshot, evidenceID, quote string) (GuideL
 	if !ok || b.Text == "" || b.Image != nil || b.Table != nil || b.Type == "formula" {
 		return GuideLocator{}, invalid("text evidence ID")
 	}
-	start, end, ambiguous, err := findExcerpt(b.Text, quote)
+	text := b.Text
+	if e.SourceRegionID != "" {
+		text = e.Text
+	}
+	start, end, ambiguous, err := findExcerpt(text, quote)
 	if err != nil {
 		return GuideLocator{}, err
 	}
 	if ambiguous || e.Locator.Kind != "text_span" {
-		return GuideLocator{Kind: "page", Page: b.Page}, nil
+		return GuideLocator{Kind: "page", Page: e.Locator.Page}, nil
 	}
 	out := e.Locator
 	out.Start, out.End = start, end

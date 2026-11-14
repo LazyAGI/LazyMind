@@ -3,8 +3,8 @@ package paperguide
 
 import "lazymind/core/pdfir"
 
-const TaskVersion = "paper-guide-v5"
-const SourceCatalogVersion = "paper-guide-source-v2"
+const TaskVersion = "paper-guide-v6"
+const SourceCatalogVersion = "paper-guide-source-v3"
 const legacySourceNamespace = "paper-guide-v1"
 
 type Role string
@@ -54,20 +54,21 @@ type SourceIdentity struct {
 }
 
 type GuideSourceSnapshot struct {
-	CatalogVersion    string          `json:"catalog_version,omitempty"`
-	SourceWarnings    []string        `json:"source_warnings,omitempty"`
-	Identity          SourceIdentity  `json:"identity"`
-	IRDigest          string          `json:"ir_digest"`
-	Parser            pdfir.Parser    `json:"parser"`
-	IRVersion         int             `json:"ir_version"`
-	ProjectionVersion int             `json:"projection_version"`
-	CoordinateSpace   string          `json:"coordinate_space"`
-	Pages             []pdfir.Page    `json:"pages"`
-	Coverage          GuideCoverage   `json:"coverage"`
-	Blocks            []pdfir.Block   `json:"blocks"`
-	Assets            []GuideAsset    `json:"assets"`
-	Sections          []SourceSection `json:"sections"`
-	Evidence          []GuideEvidence `json:"evidence"`
+	Precision         *pdfir.SourcePrecision `json:"source_precision,omitempty"`
+	CatalogVersion    string                 `json:"catalog_version,omitempty"`
+	SourceWarnings    []string               `json:"source_warnings,omitempty"`
+	Identity          SourceIdentity         `json:"identity"`
+	IRDigest          string                 `json:"ir_digest"`
+	Parser            pdfir.Parser           `json:"parser"`
+	IRVersion         int                    `json:"ir_version"`
+	ProjectionVersion int                    `json:"projection_version"`
+	CoordinateSpace   string                 `json:"coordinate_space"`
+	Pages             []pdfir.Page           `json:"pages"`
+	Coverage          GuideCoverage          `json:"coverage"`
+	Blocks            []pdfir.Block          `json:"blocks"`
+	Assets            []GuideAsset           `json:"assets"`
+	Sections          []SourceSection        `json:"sections"`
+	Evidence          []GuideEvidence        `json:"evidence"`
 }
 
 type GuideCoverage struct {
@@ -116,11 +117,12 @@ type GuideCell struct {
 	Column int `json:"column"`
 }
 type GuideEvidence struct {
-	ID            string       `json:"id"`
-	SourceBlockID string       `json:"source_block_id"`
-	SourceType    string       `json:"source_type"`
-	Text          string       `json:"text"`
-	Locator       GuideLocator `json:"locator"`
+	SourceRegionID string       `json:"source_region_id,omitempty"`
+	ID             string       `json:"id"`
+	SourceBlockID  string       `json:"source_block_id"`
+	SourceType     string       `json:"source_type"`
+	Text           string       `json:"text"`
+	Locator        GuideLocator `json:"locator"`
 }
 
 type GuideClaim struct {

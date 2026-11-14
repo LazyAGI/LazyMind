@@ -10998,6 +10998,8 @@ components:
                     $ref: '#/components/schemas/PaperGuideLocator'
                 source_block_id:
                     type: string
+                source_region_id:
+                    type: string
                 source_type:
                     type: string
                 text:

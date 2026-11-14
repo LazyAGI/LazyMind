@@ -39,6 +39,7 @@ type pdfIRResult struct {
 	RawPath string `json:"raw_path"`
 }
 type pdfIRResponse struct {
+	Artifact     pdfIRResult     `json:"-"`
 	Status       string          `json:"status"`
 	SourceSHA256 string          `json:"source_sha256,omitempty"`
 	ErrorMessage string          `json:"error_message,omitempty"`
@@ -67,6 +68,9 @@ func pdfIRHash(ext documentExt) (string, error) {
 	return pdfir.SourceHash(p)
 }
 func pdfIRStatus(ctx context.Context, row orm.Document, hash string) (pdfIRResponse, error) {
+	return pdfIRStatusWithProjection(ctx, row, hash, true)
+}
+func pdfIRStatusWithProjection(ctx context.Context, row orm.Document, hash string, upgrade bool) (pdfIRResponse, error) {
 	s := pdfIRResponse{Status: "not_requested", SourceSHA256: hash}
 	var jobs []orm.AsyncJob
 	if e := store.DB().WithContext(ctx).Where("job_type = ? AND resource_type = ? AND resource_id = ?", pdfIRJobType, "document_pdf_ir", pdfIRResource(row.DatasetID, row.ID)).Order("created_at DESC").Find(&jobs).Error; e != nil {
@@ -113,7 +117,10 @@ func pdfIRStatus(ctx context.Context, row orm.Document, hash string) (pdfIRRespo
 				s.ErrorMessage = "PDF IR artifact is invalid; retry parsing"
 				return s, nil
 			}
-			upgradePDFIRProjection(&d, result)
+			if upgrade {
+				upgradePDFIRProjection(&d, result)
+			}
+			s.Artifact = result
 			s.Status = "ready"
 			s.Document = &d
 		}

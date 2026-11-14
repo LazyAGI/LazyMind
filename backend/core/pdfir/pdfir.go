@@ -42,14 +42,15 @@ type Block struct {
 	Text  string    `json:"text,omitempty"`
 }
 type Document struct {
-	ProjectionVersion int      `json:"projection_version,omitempty"`
-	Version           int      `json:"version"`
-	SourceSHA256      string   `json:"source_sha256"`
-	Parser            Parser   `json:"parser"`
-	CoordinateSpace   string   `json:"coordinate_space"`
-	Pages             []Page   `json:"pages"`
-	Blocks            []Block  `json:"blocks"`
-	Warnings          []string `json:"warnings,omitempty"`
+	Precision         *SourcePrecision `json:"source_precision,omitempty"`
+	ProjectionVersion int              `json:"projection_version,omitempty"`
+	Version           int              `json:"version"`
+	SourceSHA256      string           `json:"source_sha256"`
+	Parser            Parser           `json:"parser"`
+	CoordinateSpace   string           `json:"coordinate_space"`
+	Pages             []Page           `json:"pages"`
+	Blocks            []Block          `json:"blocks"`
+	Warnings          []string         `json:"warnings,omitempty"`
 }
 
 func Digest(v string) string { s := sha256.Sum256([]byte(v)); return hex.EncodeToString(s[:]) }

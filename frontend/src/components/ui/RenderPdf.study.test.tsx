@@ -669,3 +669,17 @@ it('paints imported PDF-space annotation geometry when highlights arrive after t
  view.rerender(<RenderPdf {...props} savedNoteHighlights={[{id:'zotero',page:1,color:'yellow',rects:[],pdfRects:[[60,600,180,640]]}]}/>);
  await waitFor(()=>expect(view.container.querySelector('[data-pdf-note-highlight="yellow"] path')).toHaveAttribute('d','M0.1 0.2H0.3V0.25H0.1Z'));
 });
+it('guide page-only navigation clears an old parent box and exact guide regions use their own page',async()=>{
+ const height=vi.spyOn(HTMLElement.prototype,'clientHeight','get').mockReturnValue(800);
+ const width=vi.spyOn(HTMLElement.prototype,'clientWidth','get').mockReturnValue(800);
+ const props={fileData:'guide.pdf',pdfIRTarget:target,pdfSourceHash:'hash'};
+ const view=render(<RenderPdf {...props}/>);await act(async()=>{});
+ view.rerender(<RenderPdf {...props} pdfNavigateTo={{id:'table',requestId:1}}/>);
+ await waitFor(()=>expect(view.container.querySelector('.pdf-study-highlight')).not.toBeNull());
+ view.rerender(<RenderPdf {...props} pdfNavigateToPosition={{page:2,progress:0,requestId:2,sourceLocator:true}}/>);
+ await waitFor(()=>expectPage(2));
+ expect(view.container.querySelector('.pdf-study-highlight')).toBeNull();
+ view.rerender(<RenderPdf {...props} pdfNavigateToPosition={{page:2,progress:.2,requestId:3,sourceLocator:true,bbox:[.1,.3,.7,.4]}}/>);
+ await waitFor(()=>expect(view.container.querySelector('.pdf-study-highlight')).toHaveStyle({left:'10%',top:'30%'}));
+ height.mockRestore();width.mockRestore();
+});

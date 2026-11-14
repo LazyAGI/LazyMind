@@ -48,12 +48,14 @@ func guideHTTPFixture(t *testing.T) (*orm.DB, string, string) {
 	}
 	db.Model(&orm.Document{}).Where("id = ?", "guide-doc").Update("ext", mustJSON(documentExt{StoredPath: source, OriginalFilename: "paper.pdf"}))
 	hash, _ := pdfir.SourceHash(source)
-	ir := pdfir.Document{Version: 1, SourceSHA256: hash, CoordinateSpace: "normalized_top_left", Pages: []pdfir.Page{{Index: 0}}, Blocks: []pdfir.Block{{ID: "title", Type: "title", Text: "Experimental study", Page: 0}, {ID: "body", Type: "text", Text: "The authors report an experiment with samples and specify the conditions.", Page: 0}}}
+	rawArchive, ir := guidePrecisionFixture(t, hash)
 	path := filepath.Join(t.TempDir(), "ir.json")
 	if e := os.WriteFile(path, mustJSON(ir), 0600); e != nil {
 		t.Fatal(e)
 	}
-	db.Create(&orm.AsyncJob{ID: "guide-ir", JobType: pdfIRJobType, ResourceType: "document_pdf_ir", ResourceID: pdfIRResource("guide-ds", "guide-doc"), Status: "succeeded", PayloadJSON: mustJSON(pdfIRPayload{Revision: pdfir.Revision, DatasetID: "guide-ds", DocumentID: "guide-doc", SourceSHA256: hash}), ResultJSON: mustJSON(pdfIRResult{IRPath: path}), CreatedAt: time.Now()})
+	rawPath := filepath.Join(filepath.Dir(path), "mineru-result.zip")
+	os.WriteFile(rawPath, rawArchive, 0600)
+	db.Create(&orm.AsyncJob{ID: "guide-ir", JobType: pdfIRJobType, ResourceType: "document_pdf_ir", ResourceID: pdfIRResource("guide-ds", "guide-doc"), Status: "succeeded", PayloadJSON: mustJSON(pdfIRPayload{Revision: pdfir.Revision, DatasetID: "guide-ds", DocumentID: "guide-doc", SourceSHA256: hash}), ResultJSON: mustJSON(pdfIRResult{IRPath: path, RawPath: rawPath}), CreatedAt: time.Now()})
 	for _, row := range []any{&orm.UserModelProvider{ID: "p", Name: "OpenAI", BaseModel: orm.BaseModel{CreateUserID: "owner"}}, &orm.UserModelProviderGroup{ID: "g", UserModelProviderID: "p", BaseURL: "https://fixture.invalid/v1", APIKey: "secret-do-not-persist", IsVerified: true, BaseModel: orm.BaseModel{CreateUserID: "owner"}}, &orm.UserModelProviderGroupModel{ID: "a", UserModelProviderID: "p", UserModelProviderGroupID: "g", ProviderName: "OpenAI", Name: "first", ModelType: "llm", BaseModel: orm.BaseModel{CreateUserID: "owner"}}, &orm.UserModelProviderGroupModel{ID: "b", UserModelProviderID: "p", UserModelProviderGroupID: "g", ProviderName: "OpenAI", Name: "second", ModelType: "llm", BaseModel: orm.BaseModel{CreateUserID: "owner"}}, &orm.UserSelectedModel{UserID: "owner", ModelKey: "llm", UserModelProviderGroupModelID: "a"}} {
 		if e := db.Create(row).Error; e != nil {
 			t.Fatal(e)
@@ -453,7 +455,7 @@ func TestPaperGuideClientContractFailuresReachRunnerAsEvidenceErrors(t *testing.
 				if kind == "timeout" {
 					return testJSONResponse(504, `{"detail":{"error_code":"task_timeout","usage":{"model_calls":1,"elapsed_ms":120000}}}`), nil
 				}
-				usage := map[string]any{"task_type": "paper.guide.plan", "task_version": "paper-guide-v5", "model_calls": 1, "elapsed_ms": 19}
+				usage := map[string]any{"task_type": "paper.guide.plan", "task_version": "paper-guide-v6", "model_calls": 1, "elapsed_ms": 19}
 				if kind == "model_calls" {
 					usage[kind] = 2
 				} else {

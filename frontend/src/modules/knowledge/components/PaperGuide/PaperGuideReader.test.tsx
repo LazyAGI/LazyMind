@@ -503,3 +503,11 @@ it("binds duplicate block IDs to the actual immutable section for selection, pro
     rect.mockRestore();
   }
 });
+it('keeps historical text readable but disables follow-up selection after positioning changes',()=>{
+ const r=revision();r.source_current=false;const choose=vi.fn();
+ render(<PaperGuideReader revision={r} title="Paper" language="en" onEvidence={()=>{}} onSelection={choose}/>);
+ expect(screen.getByRole('article')).toBeInTheDocument();
+ for(const button of screen.getAllByRole('button',{name:'Explain this passage'})){expect(button).toBeDisabled();fireEvent.click(button);}
+ for(const button of screen.getAllByRole('button',{name:'Give an example'}))expect(button).toBeDisabled();
+ expect(choose).not.toHaveBeenCalled();
+});

@@ -61,5 +61,10 @@ func ResolveChatContext(ctx context.Context, user string, input map[string]any) 
 	if e != nil {
 		return nil, e
 	}
+	// Read-only historical selections remain available, but they must not be
+	// attached to a new chat against the current source projection.
+	if !result.SourceCurrent {
+		return nil, ErrSourceChanged
+	}
 	return map[string]any{"dataset_id": ref.DatasetID, "document_id": ref.DocumentID, "selected_text": result.Text, "paragraph_text": result.Text, "paper_guide": ref, "paper_guide_context": result}, nil
 }

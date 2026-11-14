@@ -76,13 +76,22 @@ func (paperGuideSource) Load(ctx context.Context, scope paperguide.Scope, prepar
 		return out, paperguide.ErrSourceChanged
 	}
 	out.Hash = hash
-	status, e := pdfIRStatus(ctx, row, hash)
+	status, e := pdfIRStatusWithProjection(ctx, row, hash, false)
 	if e != nil {
 		return out, e
 	}
 	out.DependencyFailed = status.Status == "failed"
 	if status.Document != nil {
-		snapshot, e := paperguide.BuildSourceSnapshot(*status.Document, paperguide.SourceIdentity{SourceSHA256: hash, OwnerID: scope.OwnerID, DatasetID: scope.DatasetID, DocumentID: scope.DocumentID})
+		precise, _, err := loadGuidePrecision(*status.Document, status.Artifact, prepare)
+		if err != nil {
+			out.DependencyFailed = true
+			out.PrecisionUnavailable = true
+			if prepare {
+				return out, paperguide.ErrPrecision
+			}
+			return out, nil
+		}
+		snapshot, e := paperguide.BuildSourceSnapshot(precise, paperguide.SourceIdentity{SourceSHA256: hash, OwnerID: scope.OwnerID, DatasetID: scope.DatasetID, DocumentID: scope.DocumentID})
 		if e != nil {
 			return out, paperguide.ErrEvidence
 		}
@@ -120,6 +129,12 @@ func (paperGuideSource) Load(ctx context.Context, scope paperguide.Scope, prepar
 		}
 		out.Snapshot = &snapshot
 		out.Path = path
+		return out, nil
+	}
+	if out.DependencyFailed {
+		if prepare {
+			return out, paperguide.ErrPreparation
+		}
 		return out, nil
 	}
 	if !prepare {

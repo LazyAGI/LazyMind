@@ -40,3 +40,10 @@ it("disables historical coordinates after a source hash change", () => {
     screen.getByRole("button", { name: "Open PDF page 3" }),
   ).toBeDisabled();
 });
+it("disables old coordinates when the PDF hash is unchanged but positioning was updated",()=>{
+ const go=vi.fn();
+ render(<PaperGuideEvidence value={{evidence,source_current:false}} currentSourceHash="hash" revisionSourceHash="hash" language="en" onNavigate={go} onClose={()=>{}}/>);
+ expect(screen.getByRole('button',{name:'Open PDF page 3'})).toBeDisabled();
+ expect(screen.getByRole('status')).toHaveTextContent('positioning');
+ fireEvent.click(screen.getByRole('button',{name:'Open PDF page 3'}));expect(go).not.toHaveBeenCalled();
+});

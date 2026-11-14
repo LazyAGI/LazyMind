@@ -90,6 +90,7 @@ class Figure(Shape):
 
 
 class Evidence(Shape):
+    source_region_id: Annotated[str, StringConstraints(max_length=80)] = ''
     id: SourceID
     source_block_id: Annotated[str, StringConstraints(min_length=1, max_length=256)]
     source_type: Annotated[str, StringConstraints(max_length=80)]

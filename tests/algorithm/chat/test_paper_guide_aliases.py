@@ -265,7 +265,7 @@ def test_registered_task_uses_alias_schema_and_returns_canonical_wire(monkeypatc
         return json.dumps(model_output(task, output))
     monkeypatch.setattr(llm_task, 'AutoModel', lambda **kwargs: model)
     request = llm_task.LLMTaskRequest(task_type=f'paper.guide.{task}',
-        options={'task_version': 'paper-guide-v5'}, input={'data': raw})
+        options={'task_version': 'paper-guide-v6'}, input={'data': raw})
     result = llm_task.run_llm_task(request)
     assert result.status == 'succeeded' and result.output == output
     assert len(calls) == result.usage['model_calls'] == 1
@@ -283,7 +283,7 @@ def test_alias_schema_keeps_duplicate_json_key_rejection(monkeypatch):
         return '{"claims":[],"claims":[],"open_questions":[]}'
     monkeypatch.setattr(llm_task, 'AutoModel', lambda **kwargs: model)
     request = llm_task.LLMTaskRequest(task_type='paper.guide.extract',
-        options={'task_version': 'paper-guide-v5'}, input={'data': cases()['extract'][2]})
+        options={'task_version': 'paper-guide-v6'}, input={'data': cases()['extract'][2]})
     assert llm_task.run_llm_task(request).error_code == 'invalid_model_output'
     assert len(calls) == 1
 
@@ -338,7 +338,7 @@ def test_alias_failure_never_triggers_an_extra_model_attempt(monkeypatch, bad):
         return json.dumps(output)
     monkeypatch.setattr(llm_task, 'AutoModel', lambda **kwargs: model)
     request = llm_task.LLMTaskRequest(task_type='paper.guide.extract',
-        options={'task_version': 'paper-guide-v5'}, input={'data': cases()['extract'][2]})
+        options={'task_version': 'paper-guide-v6'}, input={'data': cases()['extract'][2]})
     result = llm_task.run_llm_task(request)
     assert result.error_code == 'invalid_model_output'
     assert len(calls) == result.usage['model_calls'] == 1
@@ -355,9 +355,23 @@ def test_concurrent_registered_calls_cannot_share_alias_identity(monkeypatch):
         raw['evidence'][0]['id'] = source
         raw['source_sections'][0]['evidence_ids'] = [source]
         request = llm_task.LLMTaskRequest(task_type='paper.guide.extract',
-            options={'task_version': 'paper-guide-v5'}, input={'data': raw})
+            options={'task_version': 'paper-guide-v6'}, input={'data': raw})
         result = llm_task.run_llm_task(request)
         assert result.status == 'succeeded' and result.usage['model_calls'] == 1
         return result.output['claims'][0]['evidence_ids']
     with ThreadPoolExecutor(max_workers=4) as pool:
         assert list(pool.map(run, [A, B] * 4)) == [[x] for x in [A, B] * 4]
+
+
+def test_page_region_identity_does_not_leak_or_become_an_asset():
+    from lazymind.structured_tasks.paper_guide_references import SourceReferences
+    raw = cases()['extract'][2]
+    raw['evidence'][0].update(source_region_id='region_' + 'f' * 64, source_type='text',
+                              text='Verified continuation on physical page seven.',
+                              locator={'kind': 'page', 'page': 6})
+    packet = GuideInput.model_validate(raw)
+    aliases = SourceReferences('extract', packet)
+    evidence = aliases.model_input['evidence'][0]
+    assert evidence['locator'] == {'kind': 'page', 'page': 6}
+    assert 'source_region_id' not in evidence and 'source_block_id' not in evidence
+    assert evidence['source_type'] == 'text' and evidence['id'] == 'e1'

@@ -262,6 +262,9 @@ export default function PaperReadingWorkspace(p: Props) {
   ];
   const reasonText = (value?: string) => {
     if (!value) return "";
+    if(value === "paper_guide_source_precision_unavailable") return zh
+      ? "无法从保留的解析文件核实来源物理页，暂不能生成新导读。原文及历史导读仍可阅读。"
+      : "Source pages could not be verified from the retained parse archive. New guides are unavailable; the original paper and historical guides remain readable.";
     const index = errorNames.indexOf(value.replace(/^paper_guide_/, ""));
     return index >= 0
       ? i18n.t(`errors.${2004401 + index}`)
@@ -455,8 +458,8 @@ export default function PaperReadingWorkspace(p: Props) {
             {guide.revision && !guide.revision.source_current && (
               <p className="paper-guide-warning">
                 {zh
-                  ? "历史版本：原文已变化，来源跳转已停用。"
-                  : "Historical version: source changed; source navigation is disabled."}
+                  ? "历史版本：原文或来源定位已更新，来源跳转和导读追问已停用。"
+                  : "Historical version: source content or positioning was updated; source navigation and guide follow-up are disabled."}
               </p>
             )}
             {guide.revision?.status === "limited" && (
