@@ -155,23 +155,24 @@ func ProjectSourcePrecision(base Document, raw []byte) (Document, error) {
 	if len(base.Blocks) != len(original.Blocks) {
 		return fail(precisionError("base block count mismatch"))
 	}
-	// Table/image enrichment can differ, but every original identity, text and
-	// coordinate must still match the producer archive at its exact item index.
+	// Bind every field consumed by the catalog, including canonical table rows,
+	// image/table captions and footnotes. Metadata is not a substitute for payload proof.
 	for i, b := range original.Blocks {
 		other := base.Blocks[i]
-		b.Table = nil
-		b.Image = nil
-		other.Table = nil
-		other.Image = nil
 		if !reflect.DeepEqual(b, other) {
 			return fail(precisionError("base/archive association mismatch"))
 		}
 	}
 	var l struct {
-		Pages []precisionPage `json:"pdf_info"`
+		Pages   []precisionPage `json:"pdf_info"`
+		Backend string          `json:"_backend"`
+		Version string          `json:"_version_name"`
 	}
 	if json.Unmarshal(layout, &l) != nil || len(l.Pages) == 0 || len(l.Pages) > 10000 {
 		return fail(precisionError("invalid layout pages"))
+	}
+	if l.Version != precisionProducerVersion || (l.Backend != "hybrid" && l.Backend != "vlm") {
+		return fail(precisionError("unsupported producer contract"))
 	}
 	pages := map[int]precisionPage{}
 	index := map[string]map[int]int{}
@@ -196,7 +197,7 @@ func ProjectSourcePrecision(base Document, raw []byte) (Document, error) {
 					if spanCount > 200000 {
 						return precisionError("span count limit")
 					}
-					if s.Type != "text" && s.Type != "inline_equation" && s.Type != "table" {
+					if s.Type != "text" && s.Type != "inline_equation" && s.Type != "interline_equation" && s.Type != "table" {
 						continue
 					}
 					if _, e := precisionBox(s.BBox, p.Size); e != nil {
@@ -215,6 +216,13 @@ func ProjectSourcePrecision(base Document, raw []byte) (Document, error) {
 			return fail(err)
 		}
 	}
+	items, e := precisionContentItems(raw)
+	if e != nil {
+		return fail(e)
+	}
+	if e = verifyPrecisionPayloads(items, l.Pages); e != nil {
+		return fail(e)
+	}
 	baseJSON, err := json.Marshal(base)
 	if err != nil {
 		return fail(err)
@@ -224,7 +232,7 @@ func ProjectSourcePrecision(base Document, raw []byte) (Document, error) {
 	parents := map[string]bool{}
 	tableParents := map[string]bool{}
 	for _, p := range l.Pages {
-		err = walkPrecision(p.Paras, 0, func(para precisionBlock) error {
+		err = walkPrecision(append(append([]precisionBlock(nil), p.Paras...), p.Discarded...), 0, func(para precisionBlock) error {
 			if para.Type == "table" {
 				norm, e := precisionBox(para.BBox, p.Size)
 				if e != nil {
@@ -276,10 +284,12 @@ func ProjectSourcePrecision(base Document, raw []byte) (Document, error) {
 					if s.CrossPage {
 						return precisionError("unsupported cross-page block")
 					}
-					if s.Type == "text" || s.Type == "inline_equation" || s.Type == "table" {
+					if s.Type == "text" || s.Type == "inline_equation" || s.Type == "interline_equation" || s.Type == "table" {
 						if index[precisionSpanKey(s)][*p.Index] == 0 {
 							return precisionError("asset or ancillary text has no proven home page")
 						}
+					} else if s.Content != "" || s.HTML != "" {
+						return precisionError("unsupported typed ancillary payload")
 					}
 				}
 				return nil

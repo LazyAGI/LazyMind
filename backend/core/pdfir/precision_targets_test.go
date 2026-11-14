@@ -90,3 +90,88 @@ func TestPrecisionAuditedPhysicalPageTargets(t *testing.T) {
 		})
 	}
 }
+
+// Exercises the actual adapter -> precision -> guide catalog path with entirely
+// synthetic assets, including every text field consumed by the guide catalog.
+func TestPrecisionVerifiedPayloadReachesGuideCatalog(t *testing.T) {
+	for _, kind := range []string{"text", "equation", "table", "image"} {
+		t.Run(kind, func(t *testing.T) {
+			box := []int{10, 10, 90, 80}
+			span := func(kind, text string) map[string]any {
+				return map[string]any{"type": kind, "content": text, "bbox": box}
+			}
+			block := func(kind string, s map[string]any) map[string]any {
+				return map[string]any{"type": kind, "bbox": box, "lines": []any{map[string]any{"spans": []any{s}}}}
+			}
+			item := map[string]any{"type": kind, "page_idx": 0, "bbox": []int{100, 100, 900, 800}}
+			para := block("text", span("text", "Synthetic proven statement"))
+			want := []string{"Synthetic proven statement"}
+			switch kind {
+			case "text":
+				item["text"] = want[0]
+			case "equation":
+				item["text"] = "$$\nx_{i}^2\n$$"
+				para = block("interline_equation", span("interline_equation", "x_{i}^2"))
+				want = []string{"x_{i}^2"}
+			case "table", "image":
+				label := "Figure 1: Synthetic proven caption"
+				if kind == "table" {
+					label = "Table 1: Synthetic proven caption"
+				}
+				item[kind+"_caption"] = []string{label}
+				item[kind+"_footnote"] = []string{"Synthetic proven footnote"}
+				captionSpan := span("text", label)
+				captionSpan["bbox"] = []int{10, 2, 90, 8}
+				caption := block(kind+"_caption", captionSpan)
+				caption["bbox"] = []int{10, 2, 90, 8}
+				children := []any{caption, block(kind+"_footnote", span("text", "Synthetic proven footnote"))}
+				want = []string{label, "Synthetic proven footnote"}
+				if kind == "table" {
+					body := "<table><tr><td>Synthetic proven cell</td><td><eq>x_i</eq></td></tr></table>"
+					item["table_body"] = "<table><tr><td>Synthetic proven cell</td><td> $x_i$ </td></tr></table>"
+					children = append(children, block("table_body", map[string]any{"type": "table", "html": body, "bbox": box}))
+					want = append(want, "Synthetic proven cell", "x_i")
+				}
+				para = map[string]any{"type": kind, "bbox": box, "blocks": children}
+			}
+			layout := map[string]any{"_backend": "hybrid", "_version_name": "3.4.4", "pdf_info": []any{map[string]any{"page_idx": 0, "page_size": []int{100, 100}, "para_blocks": []any{para}, "preproc_blocks": []any{para}}}}
+			var raw bytes.Buffer
+			z := zip.NewWriter(&raw)
+			for name, v := range map[string]any{"paper_content_list.json": []any{item}, "layout.json": layout} {
+				f, _ := z.Create(name)
+				data, _ := json.Marshal(v)
+				f.Write(data)
+			}
+			z.Close()
+			base, e := pdfir.AdaptZIP(raw.Bytes(), strings.Repeat("a", 64), "vlm")
+			if e != nil {
+				t.Fatal(e)
+			}
+			d, e := pdfir.ProjectSourcePrecision(base, raw.Bytes())
+			if e != nil {
+				t.Fatal(e)
+			}
+			s, e := paperguide.BuildSourceSnapshot(d, paperguide.SourceIdentity{SourceSHA256: base.SourceSHA256, OwnerID: "synthetic", DatasetID: "synthetic", DocumentID: "synthetic"})
+			if e != nil {
+				t.Fatal(e)
+			}
+			if e := paperguide.ValidateSnapshot(s, s.Identity, s.IRDigest); e != nil {
+				t.Fatal(e)
+			}
+			for _, phrase := range want {
+				found := false
+				for _, ev := range s.Evidence {
+					if strings.Contains(ev.Text, phrase) {
+						found = true
+						if ev.Locator.Page != 0 {
+							t.Fatal("payload acquired a foreign physical page")
+						}
+					}
+				}
+				if !found {
+					t.Fatalf("proven field missing from guide catalog: %q", phrase)
+				}
+			}
+		})
+	}
+}

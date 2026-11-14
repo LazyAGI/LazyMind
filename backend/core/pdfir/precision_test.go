@@ -14,9 +14,13 @@ import (
 // Synthetic producer archive: content_list contains only the parent's first
 // page rectangle, but physical preproc spans retain the continuation provenance.
 func precisionFixture(t *testing.T, mutate func(map[string]any)) ([]byte, Document) {
+	return precisionFixtureWithText(t, mutate, "第一页😀 hyphenated transparency $x_{i}^2$")
+}
+
+func precisionFixtureWithText(t *testing.T, mutate func(map[string]any), text string) ([]byte, Document) {
 	t.Helper()
 	var layout map[string]any
-	json.Unmarshal([]byte(`{"pdf_info":[{"page_idx":0,"page_size":[100,200],"preproc_blocks":[{"type":"text","bbox":[10,160,90,180],"lines":[{"spans":[{"type":"text","content":"第一页😀 hyphen-","bbox":[10,160,90,170]}]}]}],"para_blocks":[{"type":"text","bbox":[10,160,90,180],"lines":[{"spans":[{"type":"text","content":"第一页😀 hyphen-","bbox":[10,160,90,170]}]},{"spans":[{"type":"text","content":"ated transparency","bbox":[20,20,180,40],"cross_page":true},{"type":"inline_equation","content":"x_{i}^2","bbox":[20,40,100,60],"cross_page":true}]}]}]},{"page_idx":1,"page_size":[200,400],"preproc_blocks":[{"type":"text","bbox":[20,20,180,60],"lines":[{"spans":[{"type":"text","content":"ated transparency","bbox":[20,20,180,40]},{"type":"inline_equation","content":"x_{i}^2","bbox":[20,40,100,60]}]}]}],"para_blocks":[]}]}`), &layout)
+	json.Unmarshal([]byte(`{"_backend":"hybrid","_version_name":"3.4.4","pdf_info":[{"page_idx":0,"page_size":[100,200],"preproc_blocks":[{"type":"text","bbox":[10,160,90,180],"lines":[{"spans":[{"type":"text","content":"第一页😀 hyphen-","bbox":[10,160,90,170]}]}]}],"para_blocks":[{"type":"text","bbox":[10,160,90,180],"lines":[{"spans":[{"type":"text","content":"第一页😀 hyphen-","bbox":[10,160,90,170]}]},{"spans":[{"type":"text","content":"ated transparency","bbox":[20,20,180,40],"cross_page":true},{"type":"inline_equation","content":"x_{i}^2","bbox":[20,40,100,60],"cross_page":true}]}]}]},{"page_idx":1,"page_size":[200,400],"preproc_blocks":[{"type":"text","bbox":[20,20,180,60],"lines":[{"spans":[{"type":"text","content":"ated transparency","bbox":[20,20,180,40]},{"type":"inline_equation","content":"x_{i}^2","bbox":[20,40,100,60]}]}]}],"para_blocks":[]}]}`), &layout)
 	if mutate != nil {
 		mutate(layout)
 	}
@@ -26,7 +30,8 @@ func precisionFixture(t *testing.T, mutate func(map[string]any)) ([]byte, Docume
 	f, _ := w.Create("layout.json")
 	f.Write(raw)
 	f, _ = w.Create("fixture_content_list.json")
-	f.Write([]byte(`[{"type":"text","text":"第一页😀 hyphenated transparency $x_{i}^2$","page_idx":0,"bbox":[100,800,900,900]}]`))
+	items, _ := json.Marshal([]map[string]any{{"type": "text", "text": text, "page_idx": 0, "bbox": []int{100, 800, 900, 900}}})
+	f.Write(items)
 	w.Close()
 	d, err := AdaptZIP(out.Bytes(), strings.Repeat("a", 64), "vlm")
 	if err != nil {
@@ -127,7 +132,7 @@ func TestPrecisionRejectsMergedTableWithoutFootnote(t *testing.T) {
 }
 
 func TestPrecisionThreePhysicalPagesAndRepeatedHomeText(t *testing.T) {
-	raw, base := precisionFixture(t, func(l map[string]any) {
+	raw, base := precisionFixtureWithText(t, func(l map[string]any) {
 		ps := l["pdf_info"].([]any)
 		home := ps[0].(map[string]any)
 		next := ps[1].(map[string]any)
@@ -150,7 +155,7 @@ func TestPrecisionThreePhysicalPagesAndRepeatedHomeText(t *testing.T) {
 		// unflagged home occurrence, or consume the other page's occurrence.
 		third["preproc_blocks"] = append(third["preproc_blocks"].([]any), home["preproc_blocks"].([]any)[0])
 		l["pdf_info"] = append(ps, third)
-	})
+	}, "第一页😀 hyphenated transparency $x_{i}^2$ third physical region 😀")
 	d, err := ProjectSourcePrecision(base, raw)
 	if err != nil {
 		t.Fatal(err)
@@ -206,7 +211,7 @@ func TestPrecisionBoundsAndUnsafeArchives(t *testing.T) {
 					f.Write(bytes.Repeat([]byte(" "), int(maxJSONBytes+1)))
 				case "json":
 					f, _ := w.Create("layout.json")
-					f.Write([]byte(`{"pdf_info":`))
+					f.Write([]byte(`{"_backend":"hybrid","_version_name":"3.4.4","pdf_info":`))
 				}
 				w.Close()
 				raw = out.Bytes()
@@ -224,7 +229,7 @@ func TestPrecisionRejectsCanonicalTableMissingLayoutAssociation(t *testing.T) {
 	f, _ := z.Create("paper_content_list.json")
 	f.Write([]byte(`[{"type":"table","table_body":"<table><tr><td>A</td></tr></table>","page_idx":0,"bbox":[100,100,900,900]}]`))
 	f, _ = z.Create("layout.json")
-	f.Write([]byte(`{"pdf_info":[{"page_idx":0,"page_size":[100,100],"preproc_blocks":[],"para_blocks":[]}]}`))
+	f.Write([]byte(`{"_backend":"hybrid","_version_name":"3.4.4","pdf_info":[{"page_idx":0,"page_size":[100,100],"preproc_blocks":[],"para_blocks":[]}]}`))
 	z.Close()
 	d, err := AdaptZIP(raw.Bytes(), strings.Repeat("a", 64), "vlm")
 	if err != nil {

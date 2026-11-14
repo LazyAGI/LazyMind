@@ -5,12 +5,14 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"io"
 	"lazymind/core/common/orm"
 	"lazymind/core/paperguide"
 	"lazymind/core/pdfir"
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -21,7 +23,7 @@ func guidePrecisionFixture(t *testing.T, hash string) ([]byte, pdfir.Document) {
 	f, _ := z.Create("fixture_content_list.json")
 	f.Write([]byte(`[{"type":"text","text":"Experimental study","page_idx":0,"bbox":[100,100,900,200]},{"type":"text","text":"The authors report an experiment with samples and specify the conditions.","page_idx":0,"bbox":[100,300,900,500]}]`))
 	f, _ = z.Create("layout.json")
-	f.Write([]byte(`{"pdf_info":[{"page_idx":0,"page_size":[100,100],"preproc_blocks":[{"type":"text","bbox":[10,10,90,20],"lines":[{"spans":[{"type":"text","content":"Experimental study","bbox":[10,10,90,20]}]}]},{"type":"text","bbox":[10,30,90,50],"lines":[{"spans":[{"type":"text","content":"The authors report an experiment with samples and specify the conditions.","bbox":[10,30,90,50]}]}]}],"para_blocks":[{"type":"text","bbox":[10,10,90,20],"lines":[{"spans":[{"type":"text","content":"Experimental study","bbox":[10,10,90,20]}]}]},{"type":"text","bbox":[10,30,90,50],"lines":[{"spans":[{"type":"text","content":"The authors report an experiment with samples and specify the conditions.","bbox":[10,30,90,50]}]}]}]}]}`))
+	f.Write([]byte(`{"_backend":"hybrid","_version_name":"3.4.4","pdf_info":[{"page_idx":0,"page_size":[100,100],"preproc_blocks":[{"type":"text","bbox":[10,10,90,20],"lines":[{"spans":[{"type":"text","content":"Experimental study","bbox":[10,10,90,20]}]}]},{"type":"text","bbox":[10,30,90,50],"lines":[{"spans":[{"type":"text","content":"The authors report an experiment with samples and specify the conditions.","bbox":[10,30,90,50]}]}]}],"para_blocks":[{"type":"text","bbox":[10,10,90,20],"lines":[{"spans":[{"type":"text","content":"Experimental study","bbox":[10,10,90,20]}]}]},{"type":"text","bbox":[10,30,90,50],"lines":[{"spans":[{"type":"text","content":"The authors report an experiment with samples and specify the conditions.","bbox":[10,30,90,50]}]}]}]}]}`))
 	z.Close()
 	d, e := pdfir.AdaptZIP(b.Bytes(), hash, "vlm")
 	if e != nil {
@@ -97,5 +99,45 @@ func TestGuidePrecisionLoaderNeverReparsesMissingArchive(t *testing.T) {
 	later, _ := os.Stat(artifact.IRPath)
 	if !bytes.Equal(before, after) || !info.ModTime().Equal(later.ModTime()) {
 		t.Fatal("base artifact rewritten")
+	}
+}
+
+func TestGuidePrecisionLoaderRejectsUnboundCanonicalPayload(t *testing.T) {
+	raw, _ := guidePrecisionFixture(t, pdfir.Digest("source"))
+	z, _ := zip.NewReader(bytes.NewReader(raw), int64(len(raw)))
+	var changed bytes.Buffer
+	w := zip.NewWriter(&changed)
+	for _, f := range z.File {
+		r, _ := f.Open()
+		data, _ := io.ReadAll(r)
+		r.Close()
+		if strings.HasSuffix(f.Name, "_content_list.json") {
+			data = bytes.Replace(data, []byte("Experimental study"), []byte("Experimental study unproven continuation"), 1)
+		}
+		out, _ := w.Create(f.Name)
+		out.Write(data)
+	}
+	w.Close()
+	base, e := pdfir.AdaptZIP(changed.Bytes(), pdfir.Digest("source"), "vlm")
+	if e != nil {
+		t.Fatal(e)
+	}
+	dir := t.TempDir()
+	result := pdfIRResult{IRPath: filepath.Join(dir, "document-ir.json"), RawPath: filepath.Join(dir, "mineru-result.zip")}
+	before, _ := json.Marshal(base)
+	os.WriteFile(result.IRPath, before, 0600)
+	os.WriteFile(result.RawPath, changed.Bytes(), 0600)
+	for _, prepare := range []bool{false, true} {
+		if _, _, e := loadGuidePrecision(base, result, prepare); e == nil || !strings.Contains(e.Error(), "complete producer render") {
+			t.Fatalf("unproven payload reached precision cache: %v", e)
+		}
+	}
+	files, _ := os.ReadDir(dir)
+	if len(files) != 2 {
+		t.Fatal("failed preparation wrote precision artifact")
+	}
+	after, _ := os.ReadFile(result.IRPath)
+	if !bytes.Equal(before, after) {
+		t.Fatal("canonical source changed")
 	}
 }

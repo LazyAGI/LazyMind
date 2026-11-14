@@ -67,7 +67,7 @@ func TestPrecisionRetainedCorpus(t *testing.T) {
 			started := time.Now()
 			enriched, e := pdfir.ProjectSourcePrecision(base, raw)
 			if key == "pantry" || key == "greenspace-review" || key == "dataset_resource" || key == "review_synthesis" || key == "react" {
-				if e == nil || !strings.Contains(e.Error(), "asset or ancillary text has no proven home page") {
+				if e == nil || !strings.Contains(e.Error(), "table requires one complete body") {
 					t.Fatalf("expected unresolved multi-page asset provenance, got %v", e)
 				}
 				t.Logf("explicit unavailable: %v", e)
