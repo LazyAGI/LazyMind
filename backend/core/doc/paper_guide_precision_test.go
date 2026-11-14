@@ -38,8 +38,8 @@ func TestGuidePrecisionArtifactIsImmutableSibling(t *testing.T) {
 	before, _ := json.Marshal(base)
 	os.WriteFile(result.IRPath, before, 0600)
 	os.WriteFile(result.RawPath, raw, 0600)
-	legacy := filepath.Join(dir, "source-precision-v1-frozen.json")
-	legacyBody := []byte(`{"frozen":"historical precision v1"}`)
+	legacy := filepath.Join(dir, "source-precision-v2-frozen.json")
+	legacyBody := []byte(`{"frozen":"historical precision v2"}`)
 	if e := os.WriteFile(legacy, legacyBody, 0600); e != nil {
 		t.Fatal(e)
 	}
@@ -58,7 +58,7 @@ func TestGuidePrecisionArtifactIsImmutableSibling(t *testing.T) {
 	}
 	oldBody, _ := os.ReadFile(legacy)
 	oldInfo, _ := os.Stat(legacy)
-	if !strings.HasPrefix(filepath.Base(path), "source-precision-v2-") || !bytes.Equal(oldBody, legacyBody) || !oldInfo.ModTime().Equal(legacyInfo.ModTime()) {
+	if !strings.HasPrefix(filepath.Base(path), "source-precision-v3-") || !bytes.Equal(oldBody, legacyBody) || !oldInfo.ModTime().Equal(legacyInfo.ModTime()) {
 		t.Fatal("new projection overwrote historical sibling")
 	}
 	after, _ := os.ReadFile(result.IRPath)

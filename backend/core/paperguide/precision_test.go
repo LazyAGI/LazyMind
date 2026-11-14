@@ -76,7 +76,7 @@ func TestHistoricalV2CatalogReconstructsWithoutPrecision(t *testing.T) {
 	}
 }
 
-func TestPrecisionDigestDisablesHistoricalV2CoordinatesButKeepsBody(t *testing.T) {
+func TestPrecisionDigestDisablesHistoricalV4CoordinatesButKeepsBody(t *testing.T) {
 	d, id := fixture(t)
 	blocks := []pdfir.Block{}
 	for _, b := range d.Blocks {
@@ -85,7 +85,8 @@ func TestPrecisionDigestDisablesHistoricalV2CoordinatesButKeepsBody(t *testing.T
 		}
 	}
 	d.Blocks = blocks
-	old, err := buildSourceSnapshot(d, id, "paper-guide-source-v2")
+	d.Precision = &pdfir.SourcePrecision{Version: 2, SourceSHA256: d.SourceSHA256, BaseIRDigest: pdfir.Digest("base"), ArchiveDigest: pdfir.Digest("retained"), Regions: []pdfir.SourceRegion{}}
+	old, err := buildSourceSnapshot(d, id, "paper-guide-source-v4")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -168,5 +169,98 @@ func TestExpandedCatalogAdmissionNeverTruncatesEvidenceOrSections(t *testing.T) 
 	}
 	if len(x.snap.Sections) != 513 {
 		t.Fatal("source sections truncated")
+	}
+}
+
+func TestContainmentMetadataIsRequiredAndBound(t *testing.T) {
+	d, id := fixture(t)
+	d.Blocks = d.Blocks[:2]
+	for _, mode := range []string{"no precision", "absent set", "empty set", "page only", "unknown", "duplicate"} {
+		t.Run(mode, func(t *testing.T) {
+			doc := d
+			if mode != "no precision" {
+				doc.Precision = &pdfir.SourcePrecision{Version: pdfir.SourcePrecisionVersion, SourceSHA256: d.SourceSHA256, BaseIRDigest: pdfir.Digest("base"), ArchiveDigest: pdfir.Digest("zip")}
+			}
+			ids := []string{}
+			if mode == "page only" {
+				ids = append(ids, d.Blocks[1].ID)
+			}
+			if mode == "unknown" {
+				ids = append(ids, "foreign")
+			}
+			if mode == "duplicate" {
+				ids = append(ids, d.Blocks[1].ID, d.Blocks[1].ID)
+			}
+			if mode != "no precision" && mode != "absent set" {
+				doc.Precision.PageOnlyBlockIDs = &ids
+			}
+			snap, err := BuildSourceSnapshot(doc, id)
+			if mode == "unknown" || mode == "duplicate" {
+				if err == nil {
+					t.Fatal("invalid containment IDs accepted")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := "page"
+			if mode == "empty set" {
+				want = "text_span"
+			}
+			if snap.Evidence[1].Locator.Kind != want {
+				t.Fatalf("missing proof authorized geometry: %+v", snap.Evidence[1])
+			}
+			if err = ValidateSnapshot(snap, id, snap.IRDigest); err != nil {
+				t.Fatal(err)
+			}
+			if mode == "page only" {
+				doc.Precision.PageOnlyBlockIDs = &[]string{}
+				precise, err := BuildSourceSnapshot(doc, id)
+				if err != nil || precise.IRDigest == snap.IRDigest {
+					t.Fatal("permissions absent from digest")
+				}
+			}
+		})
+	}
+}
+
+func TestFrozenV4TableIdentityKeepsOriginalBoxAndIDs(t *testing.T) {
+	d, id := tableFragmentDocument(t)
+	d.Precision.Version = 2
+	d.Precision.Regions = append(d.Precision.Regions, pdfir.SourceRegion{ID: "identity", Kind: "table_identity", ParentBlockID: "physical-parent", Page: 0, Text: "Outside measurement note.", Spans: []pdfir.SourceSpan{{Type: "text", Content: "Outside measurement note.", BBox: []float64{.1, .85, .9, .9}}}})
+	old, err := buildSourceSnapshot(d, id, "paper-guide-source-v4")
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := json.Marshal(old)
+	var frozen GuideSourceSnapshot
+	if err = json.Unmarshal(raw, &frozen); err != nil {
+		t.Fatal(err)
+	}
+	if err = ValidateSnapshot(frozen, id, old.IRDigest); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(old.Evidence, frozen.Evidence) {
+		t.Fatal("old evidence reinterpreted")
+	}
+	for _, e := range frozen.Evidence {
+		if e.SourceBlockID == "physical-parent" && e.SourceType == "table" && e.Locator.Kind != "table_cells" {
+			t.Fatal("historical box changed")
+		}
+	}
+	d.Precision.Version = pdfir.SourcePrecisionVersion
+	d.Precision.PageOnlyBlockIDs = &[]string{"physical-parent"}
+	current, err := BuildSourceSnapshot(d, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if current.IRDigest == old.IRDigest {
+		t.Fatal("old source still current")
+	}
+	for _, e := range current.Evidence {
+		if e.SourceBlockID == "physical-parent" && e.SourceType == "table" && e.Locator.Kind != "page" {
+			t.Fatal("new source reused old geometry")
+		}
 	}
 }

@@ -127,6 +127,15 @@ func TestPrecisionRetainedCorpus(t *testing.T) {
 			if e = paperguide.ValidateSnapshot(s, s.Identity, s.IRDigest); e != nil {
 				t.Fatal(e)
 			}
+			pageOnly, precise := 0, 0
+			for _, e := range s.Evidence {
+				if e.Locator.Kind == "page" {
+					pageOnly++
+				} else {
+					precise++
+				}
+			}
+			t.Logf("containment_restrictions=%d page_only_evidence=%d precise_evidence=%d assets=%d", len(*enriched.Precision.PageOnlyBlockIDs), pageOnly, precise, len(s.Assets))
 			t.Logf("base=%d regions=%d evidence=%d sections=%d projection+catalog+validation=%s", len(base.Blocks), len(enriched.Precision.Regions), len(s.Evidence), len(s.Sections), time.Since(started))
 		})
 	}

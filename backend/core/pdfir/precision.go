@@ -12,17 +12,20 @@ import (
 	"strings"
 )
 
-const SourcePrecisionVersion = 2
+const SourcePrecisionVersion = 3
 
 // SourcePrecision is a separately cached, immutable view. It never changes the
 // canonical blocks used by notes and ordinary reading. Regions bind to frozen
 // producer spans, NOT to guessed offsets in a rendered parent paragraph.
 type SourcePrecision struct {
-	Version       int            `json:"version"`
-	SourceSHA256  string         `json:"source_sha256"`
-	BaseIRDigest  string         `json:"base_ir_digest"`
-	ArchiveDigest string         `json:"archive_digest"`
-	Regions       []SourceRegion `json:"regions"`
+	// Nil means no containment proof. A present (possibly empty) set binds the
+	// page-only restrictions to this immutable projection and its IR digest.
+	PageOnlyBlockIDs *[]string      `json:"page_only_block_ids,omitempty"`
+	Version          int            `json:"version"`
+	SourceSHA256     string         `json:"source_sha256"`
+	BaseIRDigest     string         `json:"base_ir_digest"`
+	ArchiveDigest    string         `json:"archive_digest"`
+	Regions          []SourceRegion `json:"regions"`
 }
 type SourceRegion struct {
 	Kind          string               `json:"kind,omitempty"`
@@ -230,7 +233,8 @@ func ProjectSourcePrecision(base Document, raw []byte) (Document, error) {
 	if e != nil {
 		return fail(e)
 	}
-	if e = verifyPrecisionPayloads(items, l.Pages); e != nil {
+	covered := make([]bool, len(items))
+	if e = verifyPrecisionPayloads(items, l.Pages, covered); e != nil {
 		return fail(e)
 	}
 	baseJSON, err := json.Marshal(base)
@@ -374,6 +378,32 @@ func ProjectSourcePrecision(base Document, raw []byte) (Document, error) {
 			return fail(precisionError("unassociated body text"))
 		}
 	}
+	// Only fully verified text can authorize the original box. Appended caption
+	// blocks have no canonical content-item proof and stay conservatively page-only.
+	pageOnly := []string{}
+	for i, b := range base.Blocks {
+		unsafe := (b.Text != "" || b.Latex != "") && (i >= len(covered) || !covered[i])
+		if b.Image != nil && strings.Join(append(append([]string{}, b.Image.Captions...), b.Image.Footnotes...), "") != "" {
+			unsafe = true // a body crop is not a proof for associated image text
+		}
+		if b.Type == "table" {
+			unsafe = false // empty identity retains the existing precise-body contract
+			for _, r := range tableRegions {
+				if r.ParentBlockID != b.ID || r.Kind != "table_identity" {
+					continue
+				}
+				for _, span := range r.Spans {
+					if r.Page != b.Page || !precisionContains(b.BBox, span.BBox) {
+						unsafe = true
+					}
+				}
+			}
+		}
+		if unsafe {
+			pageOnly = append(pageOnly, b.ID)
+		}
+	}
+	projection.PageOnlyBlockIDs = &pageOnly
 	out := base
 	out.Precision = projection
 	out.Pages = append([]Page(nil), base.Pages...)
@@ -392,4 +422,14 @@ func ProjectSourcePrecision(base Document, raw []byte) (Document, error) {
 		return fail(errors.New("source precision region limit"))
 	}
 	return out, nil
+}
+
+// MinerU's content-list coordinates are integer thousandths. The existing
+// association contract allows one unit of that quantization, never column gaps.
+func precisionContains(parent, span []float64) bool {
+	if len(parent) != 4 || len(span) != 4 {
+		return false
+	}
+	const rounding = .001001
+	return span[0] >= parent[0]-rounding && span[1] >= parent[1]-rounding && span[2] <= parent[2]+rounding && span[3] <= parent[3]+rounding
 }

@@ -65,3 +65,16 @@ it("falls back to the original whole page when its source region cannot render",
     { page: 3, bbox: [0, 0, 600, 800] },
   ]);
 });
+
+it("uses the full physical page for a page-only table identity", async () => {
+  previewMocks.get.mockReset().mockResolvedValue({ url: "blob:page", width: 600, height: 800 });
+  previewMocks.getDocument.mockReturnValue({ promise: Promise.resolve({
+    getPage: async () => ({ getViewport: () => ({ width: 600, height: 800 }) }),
+    destroy: async () => {},
+  }) });
+  const hook = renderHook(() => useGuideSourcePreview("table", "same", true, "same", () => new ArrayBuffer(4)));
+  await hook.result.current({ id: "table", source_block_id: "parent", source_type: "table",
+    text: "Measurement footnote outside the original body crop", locator: { kind: "page", page: 2 } });
+  expect(previewMocks.get).toHaveBeenCalledTimes(1);
+  expect(previewMocks.get.mock.calls[0][1].regions).toEqual([{ page: 3, bbox: [0, 0, 600, 800] }]);
+});

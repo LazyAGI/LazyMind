@@ -30,4 +30,12 @@ it('uses the guide locator even when the canonical parent still begins on page o
  act(()=>state.guide.onNavigate({...evidence,locator:{kind:'text_span',page:1,bbox:[.2,.3,.8,.5]}}));
  await waitFor(()=>expect(state.viewer.pdfNavigateToPosition).toMatchObject({page:2,bbox:[.2,.3,.8,.5]}));
  expect(state.viewer.pdfNavigateTo).toBeUndefined();
+ // Returning to the same canonical parent with a page-only guide locator must
+ // clear the earlier precise box, including repeated clicks on that page.
+ for (let click = 0; click < 2; click++) {
+  act(()=>state.guide.onNavigate({...evidence,locator:{kind:'page',page:0}}));
+  await waitFor(()=>expect(state.viewer.pdfNavigateToPosition).toMatchObject({page:1,progress:0,sourceLocator:true}));
+  expect(state.viewer.pdfNavigateToPosition.bbox).toBeUndefined();
+  expect(state.viewer.pdfNavigateTo).toBeUndefined();
+ }
 });

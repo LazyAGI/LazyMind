@@ -8,6 +8,7 @@ import (
 	"lazymind/core/pdfir"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strconv"
 	"strings"
 	"testing"
@@ -86,6 +87,35 @@ func TestPhysicalTableCorpusAdmission(t *testing.T) {
 			if e != nil {
 				t.Fatal(e)
 			}
+			// Frozen v4 catalog semantics over the same complete payload provide a
+			// locator/count control; this is not a replay of historical region IDs.
+			previous := d
+			precision := *d.Precision
+			precision.Version, precision.PageOnlyBlockIDs = 2, nil
+			previous.Precision = &precision
+			old, e := buildSourceSnapshot(previous, snap.Identity, "paper-guide-source-v4")
+			if e != nil {
+				t.Fatal(e)
+			}
+			if len(old.Evidence) != len(snap.Evidence) || len(old.Assets) != len(snap.Assets) || len(old.Sections) != len(snap.Sections) {
+				t.Fatal("catalog material count changed")
+			}
+			newPageOnly, unchangedPageOnly := 0, 0
+			for i, entry := range snap.Evidence {
+				prior := old.Evidence[i]
+				if entry.Text != prior.Text || entry.SourceBlockID != prior.SourceBlockID || entry.SourceType != prior.SourceType || entry.Locator.Page != prior.Locator.Page || len(entry.FragmentEvidenceIDs) != len(prior.FragmentEvidenceIDs) {
+					t.Fatal("catalog material changed")
+				}
+				if !reflect.DeepEqual(entry.Locator, prior.Locator) {
+					if !reflect.DeepEqual(entry.Locator, GuideLocator{Kind: "page", Page: prior.Locator.Page}) {
+						t.Fatal("unexpected locator mutation")
+					}
+					newPageOnly++
+				} else if entry.Locator.Kind == "page" {
+					unchangedPageOnly++
+				}
+			}
+			t.Logf("new_page_only=%d inherited_page_only=%d evidence_text_and_counts_unchanged=true", newPageOnly, unchangedPageOnly)
 			for _, m := range limits.Models {
 				context, e := strconv.Atoi(m.Context)
 				if e != nil {

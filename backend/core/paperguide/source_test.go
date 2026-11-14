@@ -81,10 +81,10 @@ func TestAbstractOnlyAndMathematicalMinus(t *testing.T) {
 	}
 }
 
-func TestResolversUseCanonicalSource(t *testing.T) {
+func TestHistoricalResolversUseCanonicalSource(t *testing.T) {
 	d, identity := fixture(t)
 	d.Blocks[5].BBox = []float64{0, 0, 1, 1}
-	s, err := BuildSourceSnapshot(d, identity)
+	s, err := buildSourceSnapshot(d, identity, "paper-guide-source-v4")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -134,9 +134,6 @@ func TestCatalogAssetsWithoutOptionalMetadata(t *testing.T) {
 				t.Fatalf("lost real %s asset: %+v", kind, snap)
 			}
 			expected := "page"
-			if kind == "chart" || kind == "image" {
-				expected = "figure_region"
-			}
 			if snap.Evidence[0].Text != "" || snap.Evidence[0].Locator.Kind != expected || len(snap.Assets[0].Warnings) == 0 || len(snap.Coverage.PageWarnings) == 0 || len(snap.Coverage.Warnings) == 0 {
 				t.Fatalf("invented material or hidden gap: %+v", snap)
 			}

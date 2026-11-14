@@ -194,7 +194,7 @@ func precisionItemType(item, para string) bool {
 	}
 	return item == para
 }
-func verifyPrecisionPayloads(items []contentItem, pages []precisionPage) error {
+func verifyPrecisionPayloads(items []contentItem, pages []precisionPage, covered []bool) error {
 	type placed struct {
 		page  int
 		size  []float64
@@ -233,6 +233,30 @@ func verifyPrecisionPayloads(items []contentItem, pages []precisionPage) error {
 			return bad("no unique layout association")
 		}
 		para := matches[0]
+		// This only records containment; physical attribution and full payload
+		// equality must still pass before any projection can be returned.
+		covered[i] = len(para.Lines) > 0
+		canonicalBox := make([]float64, len(item.BBox))
+		for j, v := range item.BBox {
+			canonicalBox[j] = v / 1000
+		}
+		var size []float64
+		for _, page := range pages {
+			if *page.Index == *item.Page {
+				size = page.Size
+			}
+		}
+		spanCount := 0
+		for _, line := range para.Lines {
+			for _, span := range line.Spans {
+				spanCount++
+				box, err := precisionBox(span.BBox, size)
+				if err != nil || span.CrossPage || !precisionContains(canonicalBox, box) {
+					covered[i] = false
+				}
+			}
+		}
+		covered[i] = covered[i] && spanCount > 0
 		if item.Latex != "" {
 			return bad("unsupported producer latex override")
 		}

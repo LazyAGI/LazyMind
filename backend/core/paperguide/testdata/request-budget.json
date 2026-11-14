@@ -1,5 +1,5 @@
 {
-  "task_version": "paper-guide-v8",
+  "task_version": "paper-guide-v9",
   "prompt_reserve_bytes": 10240,
   "provider_frame_reserve_bytes": 512,
   "input_defaults_reserve_bytes": 256,

@@ -25,10 +25,10 @@ func BuildSourceSnapshot(d pdfir.Document, identity SourceIdentity) (GuideSource
 // Empty catalogVersion is the original frozen catalog. Keep its construction
 // rules intact so existing guides and exact selections remain verifiable.
 func buildSourceSnapshot(d pdfir.Document, identity SourceIdentity, catalogVersion string) (GuideSourceSnapshot, error) {
-	if catalogVersion != "" && catalogVersion != "paper-guide-source-v1" && catalogVersion != "paper-guide-source-v2" && catalogVersion != "paper-guide-source-v3" && catalogVersion != SourceCatalogVersion {
+	if catalogVersion != "" && catalogVersion != "paper-guide-source-v1" && catalogVersion != "paper-guide-source-v2" && catalogVersion != "paper-guide-source-v3" && catalogVersion != "paper-guide-source-v4" && catalogVersion != SourceCatalogVersion {
 		return GuideSourceSnapshot{}, fmt.Errorf("%w: unknown catalog version", ErrInvalidSource)
 	}
-	current := catalogVersion == SourceCatalogVersion || catalogVersion == "paper-guide-source-v2" || catalogVersion == "paper-guide-source-v3"
+	current := catalogVersion == SourceCatalogVersion || catalogVersion == "paper-guide-source-v4" || catalogVersion == "paper-guide-source-v2" || catalogVersion == "paper-guide-source-v3"
 	var s GuideSourceSnapshot
 	if !validSHA(identity.SourceSHA256) || identity.SourceSHA256 != d.SourceSHA256 ||
 		identity.OwnerID == "" || identity.DocumentID == "" || identity.DatasetID == "" {
@@ -58,12 +58,24 @@ func buildSourceSnapshot(d pdfir.Document, identity SourceIdentity, catalogVersi
 		}
 		pages[p.Index] = true
 	}
+	pageOnly := map[string]bool{}
 	regions := map[string][]pdfir.SourceRegion{}
 	continuations := map[string]string{}
 	if frozen.Precision != nil {
 		p := frozen.Precision
-		if !((catalogVersion == SourceCatalogVersion && p.Version == pdfir.SourcePrecisionVersion) || (catalogVersion == "paper-guide-source-v3" && p.Version == 1)) || p.SourceSHA256 != d.SourceSHA256 || !validSHA(p.BaseIRDigest) || !validSHA(p.ArchiveDigest) {
+		if !((catalogVersion == SourceCatalogVersion && p.Version == pdfir.SourcePrecisionVersion) || (catalogVersion == "paper-guide-source-v3" && p.Version == 1) || (catalogVersion == "paper-guide-source-v4" && p.Version == 2)) || p.SourceSHA256 != d.SourceSHA256 || !validSHA(p.BaseIRDigest) || !validSHA(p.ArchiveDigest) {
 			return GuideSourceSnapshot{}, fmt.Errorf("%w: precision contract", ErrInvalidSource)
+		}
+		if p.PageOnlyBlockIDs != nil {
+			if catalogVersion != SourceCatalogVersion {
+				return GuideSourceSnapshot{}, fmt.Errorf("%w: historical containment metadata", ErrInvalidSource)
+			}
+			for _, id := range *p.PageOnlyBlockIDs {
+				if id == "" || pageOnly[id] {
+					return GuideSourceSnapshot{}, fmt.Errorf("%w: page-only block ID", ErrInvalidSource)
+				}
+				pageOnly[id] = true
+			}
 		}
 		regionIDs := map[string]bool{}
 		for _, r := range p.Regions {
@@ -72,7 +84,7 @@ func buildSourceSnapshot(d pdfir.Document, identity SourceIdentity, catalogVersi
 			}
 			regionIDs[r.ID] = true
 			if r.Kind == "table_body_fragment" {
-				if catalogVersion != SourceCatalogVersion || r.Table == nil || len(r.Spans) != 0 || !validBBox(r.Table.BBox) || len(r.Table.PageSize) != 2 {
+				if (catalogVersion != SourceCatalogVersion && catalogVersion != "paper-guide-source-v4") || r.Table == nil || len(r.Spans) != 0 || !validBBox(r.Table.BBox) || len(r.Table.PageSize) != 2 {
 					return GuideSourceSnapshot{}, fmt.Errorf("%w: table fragment payload", ErrInvalidSource)
 				}
 				rows, text, err := pdfir.ParseSourceTable(r.Table.HTML)
@@ -124,7 +136,7 @@ func buildSourceSnapshot(d pdfir.Document, identity SourceIdentity, catalogVersi
 			delete(continuations, b.ID)
 			continue
 		}
-		if frozen.Precision != nil && frozen.Precision.Version == 2 && b.Type == "table" {
+		if frozen.Precision != nil && frozen.Precision.Version >= 2 && b.Type == "table" {
 			if err := pdfir.ValidateTableFragments(b, regions[b.ID], s.Blocks); err != nil {
 				return GuideSourceSnapshot{}, fmt.Errorf("%w: %v", ErrInvalidSource, err)
 			}
@@ -192,6 +204,9 @@ func buildSourceSnapshot(d pdfir.Document, identity SourceIdentity, catalogVersi
 					e.Text = joinSourceText(e.Text, []string{r.Text})
 				}
 			}
+		}
+		if catalogVersion == SourceCatalogVersion && (frozen.Precision == nil || frozen.Precision.PageOnlyBlockIDs == nil || pageOnly[b.ID]) {
+			l = GuideLocator{Kind: "page", Page: b.Page}
 		}
 		e.Locator = l
 		e.ID = s.sourceID("evidence", b.ID)
@@ -274,6 +289,11 @@ func buildSourceSnapshot(d pdfir.Document, identity SourceIdentity, catalogVersi
 			case "section", "page_group":
 				s.Coverage.Body = true
 			}
+		}
+	}
+	for id := range pageOnly {
+		if !seen[id] {
+			return GuideSourceSnapshot{}, fmt.Errorf("%w: unknown page-only block", ErrInvalidSource)
 		}
 	}
 	if len(regions) > 0 || len(continuations) > 0 {
