@@ -70,11 +70,6 @@ export default function PaperReadingWorkspace(p: Props) {
   const [sourceOpen, setSourceOpen] = useState(false);
   const [width, setWidth] = useState(0);
   const container = useRef<HTMLDivElement>(null);
-  const [metadata, setMetadata] = useState<{
-    title: string;
-    authors: string[];
-    year: number;
-  }>();
   const [model, setModel] = useState("");
   const [models, setModels] = useState<ReadingProviderSelection>();
   const [busy, setBusy] = useState(false);
@@ -121,7 +116,6 @@ export default function PaperReadingWorkspace(p: Props) {
     setBusy(false);
     setModel("");
     setModels(undefined);
-    setMetadata(undefined);
     localProgress.current = undefined;
     opened.current = false;
     return () => {
@@ -155,17 +149,6 @@ export default function PaperReadingWorkspace(p: Props) {
       })
       .catch(() => {});
   }, [showGuide, storageKey]);
-  useEffect(() => {
-    if (!showGuide) return;
-    const abort = new AbortController();
-    void paperGuideApi
-      .metadata(target, abort.signal)
-      .then((value) => {
-        if (!abort.signal.aborted) setMetadata(value);
-      })
-      .catch(() => {});
-    return () => abort.abort();
-  }, [showGuide, target]);
   const setReadingMode = (value: string) => {
     setMode(value);
     localStorage.setItem(storageKey, value);
@@ -486,8 +469,7 @@ export default function PaperReadingWorkspace(p: Props) {
             {guide.revision?.sections.length ? (
               <PaperGuideReader
                 revision={guide.revision}
-                title={metadata?.title || p.title}
-                metadata={metadata}
+                title={p.title}
                 language={language}
                 compact={sourceOpen || auxVisible || !dual}
                 progress={localProgress.current || guide.status?.progress}

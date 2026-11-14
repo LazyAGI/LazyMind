@@ -6,12 +6,12 @@ import {
   fireEvent,
   waitFor,
 } from "@testing-library/react";
-import { it, expect, vi, beforeEach } from "vitest";
+import { it, expect, vi, beforeEach, afterEach } from "vitest";
+import { axiosInstance } from "@/components/request";
 import PaperReadingWorkspace from "./PaperReadingWorkspace";
 import { revision, status } from "./PaperGuide/fixtures";
 const state = vi.hoisted(() => ({ value: {} as Record<string, unknown> }));
 const api = vi.hoisted(() => ({
-  metadata: vi.fn().mockResolvedValue(undefined),
   generate: vi.fn(),
   cancel: vi.fn(),
   resume: vi.fn(),
@@ -23,7 +23,12 @@ vi.mock("./PaperGuide/usePaperGuide", async (original) => ({
   ...(await original<typeof import("./PaperGuide/usePaperGuide")>()),
   usePaperGuide: () => state.value,
 }));
-vi.mock("../api/paperGuide", () => ({ paperGuideApi: api }));
+vi.mock("../api/paperGuide", async (original) => ({
+  paperGuideApi: {
+    ...(await original<typeof import("../api/paperGuide")>()).paperGuideApi,
+    ...api,
+  },
+}));
 vi.mock("../api/readingPreparation", () => ({
   getReadingPreferences: api.prefs,
 }));
@@ -39,6 +44,9 @@ beforeEach(() => {
   localStorage.clear();
   localStorage.setItem("paper-guide-mode/u/ds/doc", "source");
   vi.clearAllMocks();
+  vi.spyOn(axiosInstance, "get").mockRejectedValue(
+    new Error("Unexpected GET"),
+  );
   state.value = {
     status: status(),
     revision: revision(),
@@ -52,13 +60,21 @@ beforeEach(() => {
     },
   });
 });
-function Harness({ document = "doc" }: { document?: string }) {
+afterEach(() => vi.restoreAllMocks());
+
+function Harness({
+  document = "doc",
+  title = "Paper",
+}: {
+  document?: string;
+  title?: string;
+}) {
   const [tab, setTab] = useState<string>();
   return (
     <PaperReadingWorkspace
       dataset="ds"
       document={document}
-      title="Paper"
+      title={title}
       eligible
       source={<div>PDF viewer</div>}
       auxiliary={
@@ -164,18 +180,97 @@ it("hides creation entry when capability is off but still exposes authorized exi
   expect(screen.getByRole("button", { name: "Guide" })).toBeInTheDocument();
 });
 
-it("shows linked author and year metadata without promoting an abstract to guide text", async () => {
-  api.metadata.mockResolvedValueOnce({
-    title: "Actual paper title",
-    authors: ["A. Author"],
-    year: 2026,
+it("keeps the document heading through delayed academic metadata and checkpoint appends", async () => {
+  const title =
+    "Angew Chem Int Ed - 2023 - Poh - Bifunctional Iminophosphorane Catalyzed Amide Enolization for Enantioselective.pdf";
+  const libraryResponse = {
+    data: {
+      can_write: true,
+      data: {
+        papers: [
+          {
+            id: "bimp",
+            revision: 3,
+            metadata: {
+              title: "Communications2323",
+              authors: ["Charmaine Y. X. Poh"],
+              year: 2015,
+              identifiers: { doi: "10.1002/anie.202315401" },
+            },
+            tags: [],
+            attachmentIds: ["attachment"],
+            noteIds: [],
+          },
+        ],
+        attachments: [{ id: "attachment", paperId: "bimp", contentRef: "doc" }],
+        folders: [],
+        notes: [],
+      },
+    },
+  };
+  let resolve!: (response: typeof libraryResponse) => void;
+  const pendingLibrary = new Promise<typeof libraryResponse>((done) => {
+    resolve = done;
   });
-  render(<Harness />);
-  fireEvent.click(screen.getByRole("button", { name: "Guide" }));
+  const request = vi.mocked(axiosInstance.get).mockImplementation((url) => {
+    if (url.endsWith("/api/core/academic/library")) return pendingLibrary;
+    throw new Error(`Unexpected GET: ${url}`);
+  });
+  const published = revision();
+  state.value.revision = {
+    ...published,
+    sections: published.sections.slice(0, 3),
+  };
+  const view = render(<Harness title={title} />);
+  await act(async () =>
+    fireEvent.click(screen.getByRole("button", { name: "Guide" })),
+  );
+  const heading = screen.getByRole("heading", { level: 1, name: title });
+  await act(async () => resolve(libraryResponse));
+  expect(heading).toHaveTextContent(title);
+  expect(screen.getByRole("article")).not.toHaveTextContent(
+    /Communications2323|Charmaine Y\. X\. Poh|2015/,
+  );
+  state.value.revision = published;
+  view.rerender(<Harness title={title} />);
   expect(
-    await screen.findByRole("heading", { name: "Actual paper title" }),
-  ).toBeInTheDocument();
-  expect(screen.getByText("A. Author · 2026")).toBeInTheDocument();
+    screen.getByRole("heading", { name: "Comparisons under matched conditions" }),
+  ).toBeVisible();
+  expect(screen.getByRole("heading", { level: 1, name: title })).toBe(heading);
+  expect(request).not.toHaveBeenCalled();
+});
+
+it("uses each document's own heading while guide content loads and across original mode", async () => {
+  state.value.revision = undefined;
+  const view = render(<Harness title="First document.pdf" />);
+  await act(async () =>
+    fireEvent.click(screen.getByRole("button", { name: "Guide" })),
+  );
+  expect(
+    screen.getByRole("heading", { level: 1, name: "First document.pdf" }),
+  ).toBeVisible();
+  expect(screen.queryByRole("article")).not.toBeInTheDocument();
+  state.value.revision = revision();
+  view.rerender(<Harness title="First document.pdf" />);
+  expect(screen.getByRole("article")).toContainElement(
+    screen.getByRole("heading", { level: 1, name: "First document.pdf" }),
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Original" }));
+  expect(screen.getByText("PDF viewer")).toBeVisible();
+  expect(screen.queryByRole("heading", { level: 1 })).not.toBeInTheDocument();
+  localStorage.setItem("paper-guide-mode/u/ds/doc2", "source");
+  state.value.revision = revision("theory");
+  view.rerender(<Harness document="doc2" title="Second document.pdf" />);
+  await act(async () =>
+    fireEvent.click(screen.getByRole("button", { name: "Guide" })),
+  );
+  expect(
+    screen.getByRole("heading", { level: 1, name: "Second document.pdf" }),
+  ).toBeVisible();
+  expect(screen.getByRole("heading", { name: "A question of convergence" })).toBeVisible();
+  expect(
+    screen.queryByRole("heading", { name: "First document.pdf" }),
+  ).not.toBeInTheDocument();
 });
 it("reserves an inline figure frame before evidence arrives and retains it on failure", async () => {
   let reject!: (reason: Error) => void;

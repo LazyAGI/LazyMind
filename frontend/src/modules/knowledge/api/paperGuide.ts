@@ -1,4 +1,3 @@
-import { decodePersistedLibrary } from "../paper/store";
 import { axiosInstance, BASE_URL } from "@/components/request";
 import type {
   PaperGuideStatusResponse,
@@ -20,29 +19,6 @@ const config = (t: GuideTarget, signal?: AbortSignal) => ({
   signal,
 });
 export const paperGuideApi = {
-  async metadata(t: GuideTarget, signal?: AbortSignal) {
-    const response = await axiosInstance.get(
-      `${BASE_URL}/api/core/academic/library`,
-      {
-        params: { target_dataset_id: t.dataset, include_processing: false },
-        signal,
-      },
-    );
-    const { data } = decodePersistedLibrary(response.data);
-    const ids = new Set(
-      data.attachments
-        .filter((a) => a.contentRef === t.document)
-        .map((a) => a.paperId),
-    );
-    if (ids.size !== 1) return;
-    const metadata = data.papers.find((p) => ids.has(p.id))?.metadata;
-    if (metadata)
-      return {
-        title: metadata.title,
-        authors: metadata.authors,
-        year: metadata.year,
-      };
-  },
   async status(
     t: GuideTarget,
     options: { signal?: AbortSignal; etag?: string } = {},

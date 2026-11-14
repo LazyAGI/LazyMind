@@ -13,7 +13,6 @@ import { sourceBoundary } from "./sourceText";
 interface Props {
   revision: PaperGuideRevisionResponse;
   title: string;
-  metadata?: { authors: string[]; year: number };
   language: string;
   onEvidence: (id: string) => void;
   onSelection: (selection: DocumentChatSelection) => void;
@@ -25,7 +24,6 @@ interface Props {
 export default function PaperGuideReader({
   revision,
   title,
-  metadata,
   language,
   onEvidence,
   onSelection,
@@ -281,16 +279,6 @@ export default function PaperGuideReader({
       >
         <article className="paper-guide-article">
           <h1>{title}</h1>
-          {metadata && (
-            <p className="paper-guide-byline">
-              {[
-                metadata.authors.join(", "),
-                metadata.year > 0 ? String(metadata.year) : "",
-              ]
-                .filter(Boolean)
-                .join(" · ")}
-            </p>
-          )}
           {revision.sections.map((section) => (
             <section key={section.role} aria-label={section.title}>
               <h2 id={`guide-${revision.id}-${section.key}`} tabIndex={-1}>

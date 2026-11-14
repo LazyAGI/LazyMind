@@ -300,7 +300,6 @@
 .paper-guide-image-frame img { width: 100%; height: 100%; object-fit: contain; }
 .paper-guide-image-frame > div[role=status] { padding: 20px; }
 .paper-guide-equation { max-width: 100%; overflow-x: auto; padding-block: 16px; }
-.paper-guide-byline { color: var(--paper-muted); font-size: 14px; margin: -18px 0 28px; }
 
 // Full PDF controls wrap within their source pane, independently of viewport
 // width. Translation's compact/navigation header keeps its existing layout.

@@ -36,38 +36,3 @@ it("requests corrections after the last change version using exact revision IDs"
     after_version: 17,
   });
 });
-it("reads linked paper metadata without presenting its abstract as a generated guide", async () => {
-  http.get.mockResolvedValue({
-    data: {
-      can_write: true,
-      data: {
-        papers: [
-          {
-            id: "p",
-            revision: 1,
-            metadata: {
-              title: "Real title",
-              authors: ["A. Author"],
-              year: 2026,
-              abstract: "Unreviewed abstract",
-              identifiers: {},
-            },
-            tags: [],
-            attachmentIds: ["a"],
-            noteIds: [],
-          },
-        ],
-        attachments: [{ id: "a", paperId: "p", contentRef: "doc" }],
-        folders: [],
-        notes: [],
-      },
-    },
-  });
-  expect(
-    await paperGuideApi.metadata({
-      dataset: "d",
-      document: "doc",
-      language: "en",
-    }),
-  ).toEqual({ title: "Real title", authors: ["A. Author"], year: 2026 });
-});
