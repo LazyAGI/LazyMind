@@ -15,6 +15,17 @@ MAX_SOURCE_BYTES = 64 * 1024 * 1024
 MAX_TEXT_CHARS = 16 * 1024 * 1024
 
 
+class DocumentContentError(ValueError):
+    """A stable, safe content diagnostic, distinct from reader service failures."""
+
+    def __init__(self, code, message):
+        super().__init__(code, message)
+        self.code = code
+
+    def __str__(self):
+        return str(self.args[1])
+
+
 def fingerprint(path):
     digest = hashlib.sha256()
     with open(path, 'rb') as stream:
@@ -63,7 +74,7 @@ def split_baseline(text, size=2048):
 def _read_nodes(path):
     suffix = path.suffix.lower()
     if suffix in ('.tif', '.tiff', '.png', '.jpg', '.jpeg', '.bmp', '.webp', '.gif'):
-        raise ValueError('图片文件需要 OCR 才能提取文字；原文件已保留，请配置 OCR 后重试。')
+        raise DocumentContentError('OCR_REQUIRED', 'Image documents require OCR; the original is retained.')
     if suffix == '.ipynb':
         notebook = json.loads(path.read_text(encoding='utf-8'))
         if not isinstance(notebook, dict) or notebook.get('nbformat') != 4:
@@ -121,7 +132,9 @@ def prepare_document(source_path, upload_root):
     if sum(len(node['text']) for node in nodes) > MAX_TEXT_CHARS:
         raise ValueError('extracted document exceeds native reader text limit')
     if not any(node['text'].strip() for node in nodes):
-        raise ValueError('No readable text; scanned or image-only documents require OCR')
+        if path.suffix.lower() == '.pdf':
+            raise DocumentContentError('OCR_REQUIRED', 'No readable text; scanned PDFs may require OCR.')
+        raise DocumentContentError('EMPTY_DOCUMENT', 'No readable text; add content and upload the document again.')
     chunks = []
     for index, node in enumerate(nodes):
         for start, end, text in split_baseline(node['text']):

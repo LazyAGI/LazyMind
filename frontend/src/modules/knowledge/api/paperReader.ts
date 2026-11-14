@@ -1,3 +1,4 @@
+import {paperReadingErrorMessage} from './paperReadingError';
 import {useCallback,useEffect,useRef,useState} from 'react';
 import {AgentAppsAuth,AUTH_USER_CHANGE_EVENT,AUTH_LOGOUT_EVENT} from '@/components/auth';
 import {axiosInstance,BASE_URL} from '@/components/request';
@@ -45,7 +46,7 @@ export function usePaperReaderResource<T extends {source_sha256:string}>(target:
    cacheReading(key,response.data.data);
    setState({key,status:'ready',data:response.data.data});
    onExplanationChangeRef.current?.(response.data.data);
-  }catch(error){if(!controller.signal.aborted&&AgentAppsAuth.getSessionIdentity()===identity){const detail=(error as {response?:{data?:{data?:{error_message?:string}}}})?.response?.data?.data?.error_message;setState(previous=>({key,status:'error',data:previous?.key===key?previous.data:undefined,error:typeof detail==='string'?detail:undefined}));}}
+  }catch(error){if(!controller.signal.aborted&&AgentAppsAuth.getSessionIdentity()===identity){const detail=paperReadingErrorMessage(error,language);setState(previous=>({key,status:'error',data:previous?.key===key?previous.data:undefined,error:typeof detail==='string'?detail:undefined}));}}
  },[key,target.dataset,target.document,sourceHash,resource,language,identity]);
  useEffect(()=>{
   if(saved){

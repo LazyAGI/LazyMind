@@ -9,6 +9,7 @@ and retry only the request that failed.
 import hashlib
 import io
 import json
+import ntpath
 import os
 import re
 import tempfile
@@ -27,6 +28,7 @@ from lazyllm.common import AllKeysExhaustedError, KeyAuthError, KeyPool
 from lazyllm.common.threading import ThreadPoolExecutor
 from lazyllm.tools.rag.readers.ocrReader.dynamic_pdf_reader import DynamicPDFReader as _DynamicPDFReader
 from lazyllm.tools.rag.readers.ocrReader.mineru_pdf_reader import MineruPDFReader as _MineruPDFReader
+from lazymind.common.mineru_transport import official_api_request
 
 
 _PENDING_STATES = frozenset({'waiting-file', 'uploading', 'pending', 'running', 'converting'})
@@ -40,6 +42,8 @@ def _safe_message(value) -> str:
 
 
 def _retryable_transport(error: requests.RequestException) -> bool:
+    if isinstance(error, requests.exceptions.SSLError):
+        return False
     if isinstance(error, (requests.Timeout, requests.ConnectionError)):
         return True
     if isinstance(error, requests.HTTPError):
@@ -62,6 +66,13 @@ class LazyMindMineruPDFReader(_MineruPDFReader):
         # LazyLLM derives the dynamic auth lookup from the concrete class
         # name. Preserve the configured `ocr_auth.mineru` contract.
         self._auth_source_key = 'mineru'
+
+    def _http_execute(self, method: str, url: str, **kwargs):
+        return official_api_request(super()._http_execute, method, url, **kwargs)
+
+    def _online_request_kwargs(self):
+        # Signed storage URLs must also validate their own host and trust chain.
+        return {'verify': True}
 
     def _get_active_pool(self):
         if not self._dynamic_auth:
@@ -194,8 +205,18 @@ class LazyMindMineruPDFReader(_MineruPDFReader):
 
     @staticmethod
     def _archive_cache_path(file_path: str, source_digest: str, model_version: str) -> Path:
-        return (Path(file_path).parent / '.lazymind-artifacts' / 'mineru-cache-v1'
+        path = (Path(file_path).parent / '.lazymind-artifacts' / 'mineru-cache-v1'
                 / f'{source_digest}-{model_version}.zip')
+        if os.name == 'nt':
+            # The shared sidecar exceeds MAX_PATH even for ordinary desktop
+            # uploads. Use Win32's extended namespace without relocating it:
+            # Go and Python must still lock and publish the same cache file.
+            absolute = ntpath.abspath(str(path))
+            if not absolute.startswith('\\\\?\\'):
+                absolute = ('\\\\?\\UNC\\' + absolute[2:] if absolute.startswith('\\\\')
+                            else '\\\\?\\' + absolute)
+            return Path(absolute)
+        return path
 
     def _batch_lock_path(self, file_path: str, source_digest: str, model_version: str) -> Path:
         # Go uses flock on this exact persistent sidecar; never unlink a lock file.

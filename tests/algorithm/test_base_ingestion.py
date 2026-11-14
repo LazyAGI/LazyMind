@@ -175,3 +175,70 @@ def test_prepare_endpoint_requires_internal_auth_and_upload_scope(tmp_path, monk
         response = client.post('/internal/documents:prepare', headers=headers, json={'source_path': str(source)})
         assert response.status_code == 200
         assert response.json()['artifact_ref'] == str(source) + base.ARTIFACT_SUFFIX
+
+
+@pytest.mark.parametrize('name,contents,code', [
+    ('blank.txt', b' \n\t ', 'EMPTY_DOCUMENT'),
+    ('scan.png', b'image', 'OCR_REQUIRED'),
+])
+def test_prepare_content_failures_have_safe_codes(tmp_path, monkeypatch, name, contents, code):
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from lazymind.chat.api.base_ingestion_routes import router
+    from lazymind.config import config
+    source = tmp_path / name
+    source.write_bytes(contents)
+    monkeypatch.setitem(config._impl, 'core_internal_token', 'internal-test-token')
+    monkeypatch.setitem(config._impl, 'shared_upload_dir', str(tmp_path))
+    app = FastAPI()
+    app.include_router(router)
+    with TestClient(app) as client:
+        response = client.post('/internal/documents:prepare',
+                               headers={'X-LazyMind-Internal-Token': 'internal-test-token'},
+                               json={'source_path': str(source)})
+    assert response.status_code == 422
+    assert isinstance(response.json()['detail'], dict)
+    assert response.json()['detail']['code'] == code
+    assert str(tmp_path) not in response.text
+    assert source.read_bytes() == contents
+    assert not Path(str(source) + base.ARTIFACT_SUFFIX).exists()
+
+
+def test_prepare_io_failure_is_safe_service_error(tmp_path, monkeypatch):
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from lazymind.chat.api import base_ingestion_routes as routes
+    from lazymind.config import config
+    monkeypatch.setitem(config._impl, 'core_internal_token', 'internal-test-token')
+    def fail(_):
+        raise OSError('/private/document token=secret')
+    monkeypatch.setattr(routes, '_prepare_guarded', fail)
+    app = FastAPI()
+    app.include_router(routes.router)
+    with TestClient(app) as client:
+        response = client.post('/internal/documents:prepare',
+                               headers={'X-LazyMind-Internal-Token': 'internal-test-token'},
+                               json={'source_path': str(tmp_path / 'blank.txt')})
+    assert response.status_code == 503
+    assert response.json()['detail']['code'] == 'READER_UNAVAILABLE'
+    assert '/private' not in response.text and 'secret' not in response.text
+
+
+def test_empty_pdf_requires_ocr_without_empty_text_advice(tmp_path, monkeypatch):
+    source = tmp_path / 'scan.pdf'
+    source.write_bytes(b'%PDF-1.7\n%%EOF')
+    monkeypatch.setattr(base, '_read_nodes', lambda _: [{'text': ' ', 'metadata': {}}])
+    with pytest.raises(base.DocumentContentError) as failure:
+        base.prepare_document(source, tmp_path)
+    assert failure.value.code == 'OCR_REQUIRED'
+    assert not Path(str(source) + base.ARTIFACT_SUFFIX).exists()
+
+
+def test_content_error_can_be_copied_and_serialized():
+    import copy
+    import pickle
+
+    error = base.DocumentContentError('OCR_REQUIRED', 'OCR is required')
+    for restored in (copy.copy(error), pickle.loads(pickle.dumps(error))):
+        assert restored.code == 'OCR_REQUIRED'
+        assert str(restored) == 'OCR is required'

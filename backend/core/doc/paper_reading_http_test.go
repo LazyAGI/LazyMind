@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"github.com/gorilla/mux"
+	"lazymind/core/algo"
 	"lazymind/core/common/orm"
 	"lazymind/core/pdfir"
 	"lazymind/core/readingpolicy"
@@ -31,6 +32,7 @@ func TestPaperReadingHTTPACLCacheAndSourceFreshness(t *testing.T) {
 	os.WriteFile(irpath, mustJSON(d), 0600)
 	db.Create(&orm.AsyncJob{ID: "job", JobType: pdfIRJobType, ResourceType: "document_pdf_ir", ResourceID: pdfIRResource("ds", "doc"), Status: "succeeded", PayloadJSON: mustJSON(pdfIRPayload{Revision: pdfir.Revision, SourceSHA256: hash}), ResultJSON: mustJSON(pdfIRResult{IRPath: irpath}), CreatedAt: time.Now()})
 	calls := 0
+	var generationErr error
 	modelLoads := 0
 	change := false
 	revoke := false
@@ -44,6 +46,9 @@ func TestPaperReadingHTTPACLCacheAndSourceFreshness(t *testing.T) {
 		return map[string]any{"llm": "selected"}, model, "selected", nil
 	}, generate: func(ctx context.Context, content, instruction string, cfg map[string]any) (string, error) {
 		calls++
+		if generationErr != nil {
+			return "", generationErr
+		}
 		if revoke {
 			db.Model(&orm.Dataset{}).Where("id = ?", "ds").Update("create_user_id", "other")
 		}
@@ -67,6 +72,14 @@ func TestPaperReadingHTTPACLCacheAndSourceFreshness(t *testing.T) {
 		h.ServeHTTP(w, r)
 		return w
 	}
+	for _, timeoutErr := range []error{context.DeadlineExceeded, &algo.StructuredTaskError{Code: "request_timeout"}} {
+		generationErr = timeoutErr
+		if w := call("owner", `{}`); w.Code != 504 || !strings.Contains(w.Body.String(), `"error_code":"request_timeout"`) {
+			t.Fatalf("visual generation timeout lost classification: %d %s", w.Code, w.Body)
+		}
+	}
+	generationErr = nil
+	calls, modelLoads = 0, 0
 	if w := call("stranger", `{}`); w.Code != 404 || calls != 0 {
 		t.Fatal("unauthorized generation")
 	}

@@ -45,6 +45,9 @@ def _export_prompt(
     current_turn_seq: int | None = None,
     plugin_context: dict | None = None,
     user_id: str = 'episode-prompt-user',
+    document_context: dict | None = None,
+    observed_plans: list | None = None,
+    observed_reader_schemas: list | None = None,
 ):
     monkeypatch.setattr(chat_service, 'AutoModel', lambda *_args, **_kwargs: object())
     monkeypatch.setattr(
@@ -58,6 +61,12 @@ def _export_prompt(
     )
 
     def create_agent(self, llm, plan):
+        if observed_plans is not None:
+            observed_plans.append(plan)
+        if observed_reader_schemas is not None:
+            from lazyllm.tools.agent.toolsManager import ToolManager
+            toolkit = next(tool for tool in plan.tools if type(tool).__name__ == "KBToolkit")
+            observed_reader_schemas.extend(ToolManager([toolkit]).tools_description)
         if observed_configs is not None:
             observed_configs.append(dict(chat_service.lazyllm.globals['agentic_config']))
         if observed_tool_types is not None:
@@ -82,8 +91,10 @@ def _export_prompt(
             'session_id': 'episode-prompt-session',
             'conversation_id': 'episode-prompt-conversation',
             'user_id': user_id,
+            'surface': 'knowledge_document_preview' if document_context else None,
         },
         retrieval={'filters': {}},
+        document_context=document_context,
         workspace_context=workspace_context,
         runtime={
             'llm_config': {},
@@ -426,3 +437,18 @@ def test_subagent_explicit_filesystem_capability(monkeypatch, trusted, snapshot,
     with runner._cfg.temp('trusted_local_mode', trusted):
         tools = runner._resolve_runtime_tools(['edit'], params)
     assert bool(tools) is exposed
+
+
+def test_no_rag_document_preview_plan_pins_actual_reader(monkeypatch):
+    monkeypatch.setenv('LAZYMIND_RAG_ENABLED', '0')
+    monkeypatch.setattr(chat_service, 'RAG_MODE', False)
+    plans, configs, schemas = [], [], []
+    document = {'dataset_id': 'paper-library', 'document_id': 'paper-1'}
+    _export_prompt(monkeypatch, query='How many ReasonSeg examples are in this paper?',
+                   history=[], use_memory=False, document_context=document,
+                   observed_plans=plans, observed_configs=configs, observed_reader_schemas=schemas)
+    assert configs[0]['filters'] == {}
+    assert configs[0]['document_context'] == document
+    plan = plans[0]
+    assert 'KBToolkit_read_document' in plan.execution_options.required_tool_names
+    assert [d['function']['name'] for d in schemas] == ['KBToolkit_read_document']

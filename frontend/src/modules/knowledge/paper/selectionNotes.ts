@@ -42,11 +42,14 @@ export async function savePdfSelectionNote(datasetId:string,documentId:string,co
 export async function listPdfDocumentHighlights(datasetId:string,documentId:string):Promise<PdfNoteHighlight[]>{
  const library=await loadLibrary(datasetId);
  const {paper,attachment}=linkedDocument(library.data,documentId);
- return library.data.notes.filter(note=>note.paperId===paper.id&&paper.noteIds.includes(note.id))
+ const notes = library.data.notes.filter(note=>note.paperId===paper.id&&paper.noteIds.includes(note.id))
   .flatMap(note=>{
    const source=note.source;
    return source?.attachmentId===attachment.id&&source.rects?.length&&source.color
     ?[{id:note.id,page:source.page,color:source.color,rects:source.rects}]
     :[];
   });
+ const annotations=(library.data.annotations||[]).filter(item=>item.paperId===paper.id&&item.attachmentId===attachment.id&&Number.isInteger(item.page)&&item.page!>0&&item.pdfRects?.length)
+  .map(item=>({id:item.id,page:item.page!,color:item.color,rects:[],pdfRects:item.pdfRects}));
+ return [...notes,...annotations];
 }

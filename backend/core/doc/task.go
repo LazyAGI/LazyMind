@@ -570,76 +570,53 @@ func ListTasks(w http.ResponseWriter, r *http.Request) {
 		query = query.Where("document_pid = ?", documentPID)
 	}
 
-	// task_state doubles as a UI-level filter when set to "running", "success", or "failed".
-	// These UI values are expanded into sets of internal lazyllm status strings so that
-	// filtering happens at the database level and pagination counts are accurate.
+	// Filter before pagination, combining optional RAG state with locally tracked tasks.
 	if uiStatus := strings.ToLower(strings.TrimSpace(q.Get("task_state"))); uiStatus != "" {
-		internalStates := uiTaskStatusToInternalStates(uiStatus)
-		if len(internalStates) > 0 {
+		if internalStates := uiTaskStatusToInternalStates(uiStatus); len(internalStates) > 0 {
 			var lazyllmTaskIDs []string
-			store.LazyLLMDB().WithContext(r.Context()).
-				Table((readonlyorm.LazyLLMDocServiceTaskRow{}).TableName()).
-				Select("task_id").
-				Where("kb_id = ? AND status IN ?", datasetID, internalStates).
-				Pluck("task_id", &lazyllmTaskIDs)
+			externalDB := store.LazyLLMDB().WithContext(r.Context())
+			if externalDB.Migrator().HasTable(&readonlyorm.LazyLLMDocServiceTaskRow{}) {
+				if err := externalDB.Table((readonlyorm.LazyLLMDocServiceTaskRow{}).TableName()).
+					Where("kb_id = ? AND status IN ?", datasetID, internalStates).
+					Pluck("task_id", &lazyllmTaskIDs).Error; err != nil {
+					common.ReplyErr(w, "query external task states failed", http.StatusInternalServerError)
+					return
+				}
+			}
 			if uiStatus == "running" {
-				// Deleted sources retain task history, but no longer represent active uploads.
-				// Require an explicit tombstone so unbound/new uploads remain visible.
+				// Deleted sources retain history but no longer represent active uploads.
 				query = query.Where(`NOT EXISTS (
 					SELECT 1 FROM documents
 					WHERE documents.id = tasks.doc_id AND documents.dataset_id = tasks.dataset_id
 					AND documents.deleted_at IS NOT NULL
 				)`)
-				// Tasks that have not yet been submitted to lazyllm have no lazyllm_task_id.
-				// Their state lives in ext and they are implicitly "running" only when their
-				// ext.task_state is a non-terminal value (CREATING / UPLOADING / UPLOADED / "").
-				// We must NOT include tasks whose ext.task_state is already SUCCEEDED/FAILED/etc.
-				// because those are historical completed tasks that happen to lack a lazyllm_task_id.
-				var noLazyllmIDs []string
-				{
-					var noLazyllmRows []orm.Task
-					noLazyllmQ := db.Where("dataset_id = ? AND deleted_at IS NULL AND lazyllm_task_id = ''", datasetID)
-					if taskType := strings.TrimSpace(q.Get("task_type")); taskType != "" {
-						noLazyllmQ = noLazyllmQ.Where("task_type = ?", taskType)
-					}
-					if documentID := strings.TrimSpace(q.Get("document_id")); documentID != "" {
-						noLazyllmQ = noLazyllmQ.Where("doc_id = ?", documentID)
-					}
-					if documentPID := strings.TrimSpace(q.Get("document_pid")); documentPID != "" {
-						noLazyllmQ = noLazyllmQ.Where("document_pid = ?", documentPID)
-					}
-					_ = noLazyllmQ.Select("id, ext").Find(&noLazyllmRows).Error
-					for _, row := range noLazyllmRows {
-						var ext taskExt
-						_ = json.Unmarshal(row.Ext, &ext)
-						s := strings.ToUpper(strings.TrimSpace(ext.TaskState))
-						if s == "" || s == string(TaskStateCreating) || s == string(TaskStateUploading) || s == string(TaskStateUploaded) {
-							noLazyllmIDs = append(noLazyllmIDs, row.ID)
-						}
-					}
-				}
-				if len(lazyllmTaskIDs) > 0 && len(noLazyllmIDs) > 0 {
-					query = query.Where("lazyllm_task_id IN ? OR id IN ?", lazyllmTaskIDs, noLazyllmIDs)
-				} else if len(lazyllmTaskIDs) > 0 {
-					query = query.Where("lazyllm_task_id IN ?", lazyllmTaskIDs)
-				} else if len(noLazyllmIDs) > 0 {
-					query = query.Where("id IN ?", noLazyllmIDs)
-				} else {
-					common.ReplyJSON(w, ListTasksResponse{Tasks: []TaskResponse{}, TotalSize: 0, NextPageToken: ""})
-					return
-				}
-			} else {
-				if len(lazyllmTaskIDs) == 0 {
-					common.ReplyJSON(w, ListTasksResponse{Tasks: []TaskResponse{}, TotalSize: 0, NextPageToken: ""})
-					return
-				}
-				query = query.Where("lazyllm_task_id IN ?", lazyllmTaskIDs)
 			}
+			var localRows []orm.Task
+			if err := query.Session(&gorm.Session{}).Where("lazyllm_task_id = ''").Select("id, ext").Find(&localRows).Error; err != nil {
+				common.ReplyErr(w, "query local task states failed", http.StatusInternalServerError)
+				return
+			}
+			var localIDs []string
+			for _, row := range localRows {
+				var ext taskExt
+				_ = json.Unmarshal(row.Ext, &ext)
+				state := strings.TrimSpace(ext.TaskState)
+				if state == "" {
+					state = string(TaskStateCreating)
+				}
+				if taskStateMatchesFilter(state, uiStatus) {
+					localIDs = append(localIDs, row.ID)
+				}
+			}
+			query = query.Where("lazyllm_task_id IN ? OR id IN ?", lazyllmTaskIDs, localIDs)
 		}
 	}
 
 	var total int64
-	_ = query.Model(&orm.Task{}).Count(&total).Error
+	if err := query.Model(&orm.Task{}).Count(&total).Error; err != nil {
+		common.ReplyErr(w, "count tasks failed", http.StatusInternalServerError)
+		return
+	}
 	var rows []orm.Task
 	if err := query.Order("created_at DESC").Offset(offset).Limit(pageSize).Find(&rows).Error; err != nil {
 		common.ReplyErr(w, fmt.Sprintf("%s: %v", "query tasks failed", err), http.StatusInternalServerError)
@@ -656,6 +633,8 @@ func ListTasks(w http.ResponseWriter, r *http.Request) {
 	}
 	common.ReplyJSON(w, ListTasksResponse{Tasks: out, TotalSize: int32(total), NextPageToken: next})
 }
+
+type partialTaskCreationKey struct{}
 
 func CreateTask(w http.ResponseWriter, r *http.Request) {
 	datasetID := datasetIDFromPath(r)
@@ -695,6 +674,7 @@ func CreateTask(w http.ResponseWriter, r *http.Request) {
 		common.ReplyJSON(w, CreateTasksResponse{Tasks: []TaskResponse{buildTaskResponse(r, *replay)}, PaperImportBatchID: batchID})
 		return
 	}
+	r = r.WithContext(context.WithValue(r.Context(), partialTaskCreationKey{}, req.AllowPartial))
 	resp := make([]TaskResponse, 0, len(req.Items))
 
 	// Pre-allocate one new folder per unique relative_path prefix across all items in
@@ -726,47 +706,63 @@ func CreateTask(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	for _, item := range req.Items {
+	var outcomes []CreateTaskOutcome
+	if req.AllowPartial {
+		outcomes = make([]CreateTaskOutcome, 0, len(req.Items))
+	}
+	for inputIndex, item := range req.Items {
 		tType := string(item.Task.TaskType)
 		if tType == "" {
 			tType = string(TaskTypeParseUploaded)
 		}
-		if err := validateCreateTaskItem(item, datasetID, tType); err != nil {
-			common.ReplyErr(w, fmt.Sprintf("%s: %v", "invalid request", err), http.StatusBadRequest)
-			return
-		}
-
-		expandedItems := expandCreateTaskItems(item, tType)
-		for _, expandedItem := range expandedItems {
-			if strings.TrimSpace(expandedItem.UploadFileID) != "" {
-				taskRows, err := createTaskFromUploadedFile(r, datasetID, userID, userName, expandedItem, tType)
-				if err != nil {
-					common.ReplyErr(w, fmt.Sprintf("%s: %v", "invalid request", err), http.StatusBadRequest)
-					return
+		outcome := CreateTaskOutcome{TargetPID: item.Task.DocumentPID, InputIndex: inputIndex, DisplayName: item.Task.DisplayName, Status: "CREATED", TaskIDs: []string{}}
+		itemErr := validateCreateTaskItem(item, datasetID, tType)
+		if itemErr == nil {
+			for _, expandedItem := range expandCreateTaskItems(item, tType) {
+				var taskRows []orm.Task
+				if strings.TrimSpace(expandedItem.UploadFileID) != "" {
+					taskRows, itemErr = createTaskFromUploadedFile(r, datasetID, userID, userName, expandedItem, tType)
+				} else if strings.TrimSpace(expandedItem.ContentHash) != "" {
+					taskRows, itemErr = createTaskFromContentHash(r, ds, datasetID, userID, userName, expandedItem, tType)
+				} else {
+					var taskRow orm.Task
+					taskRow, itemErr = createTaskFromExistingDocument(r, datasetID, userID, userName, expandedItem, tType)
+					if itemErr == nil {
+						taskRows = []orm.Task{taskRow}
+					}
 				}
-				for _, t := range taskRows {
-					resp = append(resp, buildTaskResponse(r, t))
+				for _, row := range taskRows {
+					resp = append(resp, buildTaskResponse(r, row))
+					outcome.TaskIDs = append(outcome.TaskIDs, row.ID)
+					if outcome.DisplayName == "" {
+						outcome.DisplayName = row.DisplayName
+					}
 				}
-			} else if strings.TrimSpace(expandedItem.ContentHash) != "" {
-				taskRows, err := createTaskFromContentHash(r, ds, datasetID, userID, userName, expandedItem, tType)
-				if err != nil {
-					common.ReplyErr(w, fmt.Sprintf("%s: %v", "invalid request", err), http.StatusBadRequest)
-					return
+				if itemErr != nil {
+					break
 				}
-				for _, t := range taskRows {
-					resp = append(resp, buildTaskResponse(r, t))
-				}
-			} else {
-				taskRow, err := createTaskFromExistingDocument(r, datasetID, userID, userName, expandedItem, tType)
-				if err != nil {
-					common.ReplyErr(w, fmt.Sprintf("%s: %v", "invalid request", err), http.StatusBadRequest)
-					return
-				}
-				resp = append(resp, buildTaskResponse(r, taskRow))
 			}
 		}
+		if itemErr != nil {
+			if !req.AllowPartial {
+				common.ReplyErr(w, fmt.Sprintf("invalid request: %v", itemErr), http.StatusBadRequest)
+				return
+			}
+			outcome.Status, outcome.Code, outcome.Message = "FAILED", "IMPORT_FAILED", SafeProcessingMessage(itemErr.Error())
+			var originalErr *DatasetServiceError
+			if errors.As(itemErr, &originalErr) {
+				outcome.Code = string(originalErr.Code)
+			}
+			// A committed prefix (e.g. ZIP members) must never be uploaded again blindly.
+			if len(outcome.TaskIDs) > 0 {
+				outcome.Status = "PARTIAL"
+			}
+		}
+		if req.AllowPartial {
+			outcomes = append(outcomes, outcome)
+		}
 	}
-	common.ReplyJSON(w, CreateTasksResponse{Tasks: resp, PaperImportBatchID: batchID})
+	common.ReplyJSON(w, CreateTasksResponse{Tasks: resp, Outcomes: outcomes, PaperImportBatchID: batchID})
 }
 
 func GetTask(w http.ResponseWriter, r *http.Request) {
@@ -1495,7 +1491,7 @@ func startTasksInternal(r *http.Request, datasetID string, taskIDs []string) ([]
 			}
 			copyTaskIDs = append(copyTaskIDs, taskID)
 		case TaskTypeMove:
-			if !systemdeps.PythonComponentActive("rag") {
+			if !systemdeps.PythonComponentActive("rag") && firstNonEmpty(taskRow.TargetDatasetID, datasetID) != datasetID {
 				resultsByTaskID[taskID] = StartTaskResult{TaskID: taskID, Status: "FAILED", SubmitStatus: "REJECTED", Message: "RAG component is required for this operation"}
 				continue
 			}
@@ -2640,11 +2636,7 @@ func createTaskFromContentHash(r *http.Request, ds *orm.Dataset, datasetID, user
 	next := item
 	next.ContentHash = ""
 	next.UploadFileID = uploadFileID
-	tasks, err := createTaskFromUploadedFile(r, datasetID, userID, userName, next, tType)
-	if err != nil {
-		return nil, err
-	}
-	return tasks, nil
+	return createTaskFromUploadedFile(r, datasetID, userID, userName, next, tType)
 }
 
 func createTaskFromUploadedFile(r *http.Request, datasetID, userID, userName string, item CreateTaskItem, tType string) ([]orm.Task, error) {
@@ -2695,11 +2687,7 @@ func createTaskFromUploadedFile(r *http.Request, datasetID, userID, userName str
 			virtualRelPath := zipFolderName + "/__placeholder__"
 			documentPID = createTopLevelFolder(r.Context(), datasetID, userID, userName, virtualRelPath)
 		}
-		tasks, err := createTasksFromZipUpload(r, datasetID, userID, userName, uploadFileID, upExt, documentPID, item.Task.DocumentTags)
-		if err != nil {
-			return nil, err
-		}
-		return tasks, nil
+		return createTasksFromZipUpload(r, datasetID, userID, userName, uploadFileID, upExt, documentPID, item.Task.DocumentTags)
 	}
 
 	documentID := strings.TrimSpace(item.Task.DocumentID)
@@ -2804,6 +2792,8 @@ func createTasksFromZipUpload(r *http.Request, datasetID, userID, userName, uplo
 
 	now := time.Now().UTC()
 	tasks := make([]orm.Task, 0)
+	var memberErrors []error
+	allowPartial, _ := r.Context().Value(partialTaskCreationKey{}).(bool)
 	defer func() {
 		if len(tasks) > 0 {
 			recalcAffectedFolderStats(r.Context(), datasetID, documentPID)
@@ -2826,6 +2816,10 @@ func createTasksFromZipUpload(r *http.Request, datasetID, userID, userName, uplo
 
 		rc, err := e.f.Open()
 		if err != nil {
+			memberErrors = append(memberErrors, fmt.Errorf("%s: %w", filename, err))
+			if !allowPartial {
+				return tasks, memberErrors[len(memberErrors)-1]
+			}
 			continue
 		}
 
@@ -2842,22 +2836,32 @@ func createTasksFromZipUpload(r *http.Request, datasetID, userID, userName, uplo
 		ref, err := originals.AcquireOriginal(r.Context(), caller, AcquireOriginalRequest{Filename: filename, Reader: rc})
 		_ = rc.Close()
 		if err != nil {
-			return tasks, err
+			memberErrors = append(memberErrors, fmt.Errorf("%s: %w", filename, err))
+			if !allowPartial {
+				return tasks, memberErrors[len(memberErrors)-1]
+			}
+			continue
 		}
 		bound, err := bindPageOriginal(r.Context(), caller, ImportOriginalRequest{FileRef: ref.FileRef, DatasetID: datasetID, ParentID: documentPID, Tags: tags})
 		if err != nil {
-			return tasks, err
+			memberErrors = append(memberErrors, fmt.Errorf("%s: %w", filename, err))
+			if !allowPartial {
+				return tasks, memberErrors[len(memberErrors)-1]
+			}
+			continue
 		}
 		tasks = append(tasks, bound.Task)
 	}
 
 	// mark original zip uploaded_file as BOUND
-	store.DB().WithContext(r.Context()).Model(&orm.UploadedFile{}).
-		Where("upload_file_id = ? AND deleted_at IS NULL", uploadFileID).
-		Updates(map[string]any{"status": UploadedFileStateBound, "updated_at": now})
+	if len(tasks) > 0 || len(memberErrors) == 0 {
+		store.DB().WithContext(r.Context()).Model(&orm.UploadedFile{}).
+			Where("upload_file_id = ? AND deleted_at IS NULL", uploadFileID).
+			Updates(map[string]any{"status": UploadedFileStateBound, "updated_at": now})
+	}
 
 	log.Printf("[zip] createTasksFromZipUpload done, created %d tasks", len(tasks))
-	return tasks, nil
+	return tasks, errors.Join(memberErrors...)
 }
 
 func createTaskFromExistingDocument(r *http.Request, datasetID, userID, userName string, item CreateTaskItem, tType string) (orm.Task, error) {

@@ -116,6 +116,21 @@ describe("document question context", () => {
     expect(screen.getByText("knowledge.pdfChatParsing")).toBeInTheDocument();
   });
 
+  it("refreshes authoritative failure after a rejected prepare without retrying", async () => {
+    getDocumentParseStatus.mockResolvedValueOnce({ status: "not_requested" })
+      .mockResolvedValueOnce({ status: "failed", error: { code: "EMPTY_DOCUMENT", message: "文档无可读正文，请补充内容后重新上传。" } });
+    ensureDocumentParsed.mockRejectedValueOnce(new Error("Invalid request"));
+    render(<PdfTemporaryChat datasetId="dataset-a" documentId="blank" fileName="blank.txt" onClose={() => {}} />);
+    await screen.findByText("knowledge.pdfChatNotParsed");
+    fireEvent.click(screen.getByRole("button", { name: "Prepare document" }));
+    await screen.findByText("文档无可读正文，请补充内容后重新上传。");
+    expect(screen.getByText("knowledge.pdfChatParseFailed")).toBeInTheDocument();
+    expect(screen.queryByText("knowledge.pdfChatNotParsed")).not.toBeInTheDocument();
+    expect(ensureDocumentParsed).toHaveBeenCalledTimes(1);
+    expect(getDocumentParseStatus).toHaveBeenCalledTimes(2);
+    expect(retryDocumentParsed).not.toHaveBeenCalled();
+  });
+
   it("shows a failed status with its reason without implicitly retrying", async () => {
     getDocumentParseStatus.mockResolvedValueOnce({ status: "failed", error: { message: "Reader could not decode the PDF" } });
     render(<PdfTemporaryChat datasetId="dataset-a" documentId="broken-pdf" fileName="broken.pdf" onClose={() => {}} />);
@@ -495,3 +510,86 @@ it('leaves a quick explanation as a draft when parsing cannot start',async()=>{
  expect(chatActions.prepareMessage).toHaveBeenLastCalledWith({citeMessage:'Additional quote',appendCitations:true});
  expect(chatActions.sendMessage).not.toHaveBeenCalled();
  });
+
+describe("parse actions across document switches", () => {
+  it.each([
+    ["prepare", "resolve"], ["prepare", "reject"],
+    ["retry", "resolve"], ["retry", "reject"],
+    ["quick explanation", "resolve"], ["quick explanation", "reject"],
+  ] as const)("ignores an old %s %s after switching documents", async (action, outcome) => {
+    let resolve!: (value: { status: string }) => void;
+    let reject!: (reason: Error) => void;
+    const pending = new Promise<{ status: string }>((accept, fail) => { resolve = accept; reject = fail; });
+    const request = action === "retry" ? retryDocumentParsed : ensureDocumentParsed;
+    request.mockReturnValueOnce(pending);
+    getDocumentParseStatus.mockResolvedValueOnce({ status: action === "retry" ? "failed" : "not_requested" })
+      .mockResolvedValueOnce({ status: "unknown", error: { message: "Document B status" } });
+    const props = { datasetId: "dataset-a", fileName: "source.pdf", onClose: vi.fn() };
+    const view = render(<PdfTemporaryChat {...props} documentId="document-a"
+      selection={action === "quick explanation" ? { source: "pdf", text: "A quote", quickExplain: true } : undefined} />);
+    await act(async () => { await Promise.resolve(); });
+    if (action !== "quick explanation") {
+      fireEvent.click(screen.getByRole("button", { name: action === "retry" ? "knowledge.pdfChatRetryParse" : "Prepare document" }));
+    }
+    expect(request).toHaveBeenCalledWith("dataset-a", "document-a");
+    view.rerender(<PdfTemporaryChat {...props} documentId="document-b" />);
+    await screen.findByText("Document B status");
+    await act(async () => {
+      if (outcome === "resolve") resolve({ status: "parsed" });
+      else reject(new Error("Document A failed"));
+    });
+    expect(screen.getByText("Document B status")).toBeInTheDocument();
+    expect(screen.getByText("knowledge.pdfChatUnknown")).toBeInTheDocument();
+    expect(chatActions.composer.canChat).toBe(false);
+    expect(getDocumentParseStatus).toHaveBeenCalledTimes(2);
+    expect(chatActions.sendMessage).not.toHaveBeenCalled();
+  });
+});
+
+it("ignores the first visit's quick parse result after returning A to B to A", async () => {
+  let resolve!: (value: { status: string }) => void;
+  ensureDocumentParsed.mockReturnValueOnce(new Promise(accept => { resolve = accept; }));
+  getDocumentParseStatus.mockResolvedValueOnce({ status: "not_requested" })
+    .mockResolvedValueOnce({ status: "parsed" })
+    .mockResolvedValueOnce({ status: "unknown", error: { message: "Current A status unavailable" } });
+  const props = { datasetId: "dataset-a", fileName: "source.pdf", onClose: vi.fn() };
+  const view = render(<PdfTemporaryChat {...props} documentId="document-a"
+    selection={{ source: "pdf", text: "First visit quote", quickExplain: true }} />);
+  await act(async () => { await Promise.resolve(); });
+  expect(ensureDocumentParsed).toHaveBeenCalledOnce();
+  view.rerender(<PdfTemporaryChat {...props} documentId="document-b" />);
+  await screen.findByText("knowledge.pdfChatParsed");
+  view.rerender(<PdfTemporaryChat {...props} documentId="document-a" />);
+  await screen.findByText("Current A status unavailable");
+  await act(async () => { resolve({ status: "parsed" }); });
+  expect(screen.getByText("Current A status unavailable")).toBeInTheDocument();
+  expect(chatActions.composer.canChat).toBe(false);
+  expect(getDocumentParseStatus).toHaveBeenCalledTimes(3);
+  expect(chatActions.sendMessage).not.toHaveBeenCalled();
+});
+
+it("keeps B's prepare busy until B settles after A's old request settles", async () => {
+  let resolveA!: (value: { status: string }) => void;
+  let resolveB!: (value: { status: string }) => void;
+  ensureDocumentParsed.mockReturnValueOnce(new Promise(accept => { resolveA = accept; }))
+    .mockReturnValueOnce(new Promise(accept => { resolveB = accept; }));
+  getDocumentParseStatus.mockResolvedValueOnce({ status: "not_requested" })
+    .mockResolvedValueOnce({ status: "not_requested" })
+    .mockResolvedValueOnce({ status: "not_requested" });
+  const props = { datasetId: "dataset-a", fileName: "source.pdf", onClose: vi.fn() };
+  const view = render(<PdfTemporaryChat {...props} documentId="document-a" />);
+  fireEvent.click(await screen.findByRole("button", { name: /Prepare document/ }));
+  expect(screen.getByRole("button", { name: /Prepare document/ })).toHaveClass("ant-btn-loading");
+  view.rerender(<PdfTemporaryChat {...props} documentId="document-b" />);
+  const prepareB = await screen.findByRole("button", { name: /Prepare document/ });
+  expect(prepareB).not.toHaveClass("ant-btn-loading");
+  fireEvent.click(prepareB);
+  expect(prepareB).toHaveClass("ant-btn-loading");
+  await act(async () => { resolveA({ status: "parsing" }); });
+  expect(screen.getByRole("button", { name: /Prepare document/ })).toHaveClass("ant-btn-loading");
+  expect(getDocumentParseStatus).toHaveBeenCalledTimes(2);
+  await act(async () => { resolveB({ status: "parsing" }); });
+  expect(screen.getByRole("button", { name: /Prepare document/ })).not.toHaveClass("ant-btn-loading");
+  expect(getDocumentParseStatus).toHaveBeenCalledTimes(3);
+  expect(ensureDocumentParsed).toHaveBeenNthCalledWith(2, "dataset-a", "document-b");
+});

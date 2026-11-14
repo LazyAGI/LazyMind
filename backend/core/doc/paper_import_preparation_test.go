@@ -3,6 +3,7 @@ package doc
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"github.com/gorilla/mux"
 	"lazymind/core/acl"
@@ -106,6 +107,39 @@ func TestPaperImportUsesOnlyBoundedReadingPreparation(t *testing.T) {
 		}
 	}
 }
+
+func TestPaperOriginalImportAndUploadWithoutRAG(t *testing.T) {
+	t.Setenv("LAZYMIND_RAG_ENABLED", "false")
+	for _, entry := range []string{"original_service", "page_upload"} {
+		t.Run(entry, func(t *testing.T) {
+			db, ds, document, task := seedPaperImportPreparation(t, "academic_papers", ProcessingLevelIndexed, "demand")
+			if entry == "original_service" {
+				svc, _ := NewOriginalService(OriginalServiceDeps{DB: db.DB})
+				result := svc.SubmitOriginalProcessing(context.Background(), DatasetCatalogCaller{UserID: "owner"}, OriginalImportResult{Document: document, Task: task})
+				if result.SubmissionStatus != "not_requested" || result.Start.Message != "document stored without parsing" {
+					t.Fatalf("paper original depended on RAG: %+v", result)
+				}
+			} else {
+				r := httptest.NewRequest("POST", "/tasks:start", nil)
+				r.Header.Set("X-User-Id", "owner")
+				result, err := startTasksInternal(r, ds.ID, []string{task.ID})
+				if err != nil || len(result) != 1 || result[0].Message != "document stored without parsing" {
+					t.Fatalf("paper upload depended on RAG: %+v %v", result, err)
+				}
+			}
+			var ext documentExt
+			json.Unmarshal(document.Ext, &ext)
+			if _, err := os.Stat(ext.StoredPath); err != nil {
+				t.Fatal("original is no longer readable", err)
+			}
+			var jobs int64
+			db.Model(&orm.AsyncJob{}).Count(&jobs)
+			if jobs != 0 {
+				t.Fatal("import unexpectedly enqueued parsing")
+			}
+		})
+	}
+}
 func TestPaperExplicitEnsureStillSubmitsAfterStoreOnlyImport(t *testing.T) {
 	installOriginalSourceTransport(t)
 	t.Setenv("LAZYMIND_RAG_ENABLED", "true")
@@ -143,9 +177,11 @@ func TestLegacyQueuedPaperImportSkipsUnboundedParsing(t *testing.T) {
 	t.Setenv("LAZYMIND_RAG_ENABLED", "false")
 	db, ds, _, task := seedPaperImportPreparation(t, "academic_papers", ProcessingLevelParsed, "demand")
 	db.Model(&orm.Dataset{}).Where("id=?", ds.ID).Update("tenant_id", "company")
+	parserCalls := 0
 	previous := http.DefaultTransport
 	http.DefaultTransport = roundTripFunc(func(r *http.Request) (*http.Response, error) {
 		if r.URL.Path == "/internal/documents:prepare" {
+			parserCalls++
 			return nil, fmt.Errorf("native parser test boundary")
 		}
 		if r.URL.Path == "/api/authservice/user/owner/identity/internal" {
@@ -158,7 +194,7 @@ func TestLegacyQueuedPaperImportSkipsUnboundedParsing(t *testing.T) {
 	t.Setenv("LAZYMIND_AUTH_SERVICE_URL", "http://auth.test")
 	payload := paperProcessingPayload{DatasetID: ds.ID, TaskID: task.ID, UserID: "owner"}
 	result, err := runPaperProcessing(t.Context(), asyncjob.Job{ID: "legacy-import", CreateUserID: "owner", PayloadJSON: mustJSON(payload)}, nil)
-	if err != nil || !strings.Contains(string(result.ResultJSON), "not_requested") {
+	if err != nil || parserCalls != 0 || !strings.Contains(string(result.ResultJSON), "not_requested") {
 		t.Fatalf("legacy import still parsed: %+v %v", result, err)
 	}
 	var saved orm.Task
@@ -172,7 +208,8 @@ func TestLegacyQueuedPaperImportSkipsUnboundedParsing(t *testing.T) {
 	// chat preparation. It must still enter the parser path, not be skipped.
 	payload.Level = ProcessingLevelParsed
 	result, err = runPaperProcessing(t.Context(), asyncjob.Job{ID: "explicit-parse", CreateUserID: "owner", PayloadJSON: mustJSON(payload)}, nil)
-	if err == nil || !strings.Contains(err.Error(), "native parser test boundary") || strings.Contains(string(result.ResultJSON), "not_requested") {
+	var failure *nativeParseError
+	if parserCalls != 1 || !errors.As(err, &failure) || failure.code != "READER_SUBMIT_FAILED" || failure.content || strings.Contains(err.Error(), "native parser test boundary") || strings.Contains(string(result.ResultJSON), "not_requested") {
 		t.Fatalf("explicit parse was skipped: %+v %v", result, err)
 	}
 }
@@ -249,9 +286,11 @@ func TestQueuedPaperPreparationRevalidatesReadPermissionAndClearsFailure(t *test
 			if revoked {
 				db.Where("target_id=?", "reader").Delete(&orm.ACLModel{})
 			}
+			parserCalls := 0
 			previous := http.DefaultTransport
 			http.DefaultTransport = roundTripFunc(func(req *http.Request) (*http.Response, error) {
 				if req.URL.Path == "/internal/documents:prepare" {
+					parserCalls++
 					return nil, fmt.Errorf("native parser test boundary")
 				}
 				if req.URL.Path == "/api/authservice/user/reader/identity/internal" {
@@ -272,10 +311,11 @@ func TestQueuedPaperPreparationRevalidatesReadPermissionAndClearsFailure(t *test
 			if err == nil {
 				t.Fatal("expected execution boundary failure")
 			}
-			if revoked && !strings.Contains(err.Error(), "权限") {
+			if revoked && (parserCalls != 0 || !strings.Contains(err.Error(), "权限")) {
 				t.Fatalf("revoked read reached parser: %v", err)
 			}
-			if !revoked && !strings.Contains(err.Error(), "native parser test boundary") {
+			var failure *nativeParseError
+			if !revoked && (parserCalls != 1 || !errors.As(err, &failure) || failure.code != "READER_SUBMIT_FAILED" || failure.content || strings.Contains(err.Error(), "native parser test boundary")) {
 				t.Fatalf("read-only collaborator blocked before parser: %v", err)
 			}
 			var saved orm.Task

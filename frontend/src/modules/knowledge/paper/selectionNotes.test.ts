@@ -40,3 +40,14 @@ it('restores only highlights saved for this PDF from the paper library',async()=
  api.get.mockResolvedValue({data:value});
  await expect(listPdfDocumentHighlights('dataset','doc-a')).resolves.toEqual([{id:'one',page:2,color:'green',rects:[[.2,.3,.4,.35]]}]);
 });
+
+it('restores imported Zotero geometry only for the current paper attachment',async()=>{
+ const value=savedLibrary() as any;
+ value.data.annotations=[
+  {id:'zotero',paperId:'paper',attachmentId:'pdf-a',page:2,color:'yellow',quote:'Source text',pdfRects:[[72,700,200,716]]},
+  {id:'other',paperId:'paper',attachmentId:'pdf-b',page:2,color:'yellow',pdfRects:[[72,700,200,716]]},
+  {id:'unbound',paperId:'paper',page:2,color:'yellow',pdfRects:[[72,700,200,716]]},
+ ];
+ api.get.mockResolvedValue({data:value});
+ await expect(listPdfDocumentHighlights('dataset','doc-a')).resolves.toEqual([{id:'zotero',page:2,color:'yellow',rects:[],pdfRects:[[72,700,200,716]]}]);
+});

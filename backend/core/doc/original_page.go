@@ -14,8 +14,11 @@ import (
 func validateKnowledgeUploadBatch(files []*multipart.FileHeader) error {
 	var total int64
 	for _, file := range files {
-		if file.Size <= 0 || file.Size > OriginalFileMaxBytes {
-			return fmt.Errorf("empty file or upload size limit exceeded")
+		if file.Size <= 0 {
+			return fmt.Errorf("invalid request: %s：空文件（0 字节），请添加内容后再上传", file.Filename)
+		}
+		if file.Size > OriginalFileMaxBytes {
+			return fmt.Errorf("invalid request: %s：文件超过上传大小限制", file.Filename)
 		}
 		total += file.Size
 		if total > OriginalBatchMaxBytes {

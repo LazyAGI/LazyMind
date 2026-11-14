@@ -103,6 +103,24 @@ func ensurePDFFont(ctx context.Context, root string, entry pdfFontDescriptor, cl
 	return target, nil
 }
 
+// EnsurePDFFont prepares the same verified font used by the desktop PDF viewer.
+func EnsurePDFFont(ctx context.Context) (string, error) {
+	if !IsLocalRuntime() {
+		return "", errors.New("PDF font preparation is only available in local mode")
+	}
+	entry, err := loadPDFFontDescriptor()
+	if err != nil {
+		return "", errors.New("PDF font catalog is unavailable")
+	}
+	root, err := RuntimeRootFromEnv()
+	if err != nil {
+		return "", err
+	}
+	prepareCtx, cancel := context.WithTimeout(ctx, 3*time.Minute)
+	defer cancel()
+	return ensurePDFFont(prepareCtx, root, entry, pdfFontClient)
+}
+
 func GetPDFFont(w http.ResponseWriter, r *http.Request) {
 	if !IsLocalRuntime() {
 		common.ReplyErr(w, "PDF font download is only available in local mode", http.StatusForbidden)

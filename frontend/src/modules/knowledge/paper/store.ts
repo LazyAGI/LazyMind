@@ -66,18 +66,25 @@ export function patchLibraryPaper(dataset: string, paper: PaperRecord, changes: 
     status?: PaperRecord['status'];
     tags?: string[];
     primary_attachment_id?: string;
-}) { return mutation(dataset, 'patch', `library/papers/${encodeURIComponent(paper.id)}`, { revision: paper.revision, ...changes }); }
+}) { return mutation(dataset, 'patch', `library/papers/${encodeURIComponent(paper.id)}`, { revision: paper.revision, ...changes, ...(changes.metadata ? { metadata: writableMetadata(changes.metadata) } : {}) }); }
 const targets = (papers: PaperRecord[]) => papers.map(p => ({ id: p.id, revision: p.revision }));
 export function moveLibraryPapers(dataset: string, papers: PaperRecord[], folderId: string | null) { return mutation(dataset, 'post', 'library/papers:move', { items: targets(papers), folder_id: folderId || '' }); }
 export function removeLibraryPapers(dataset: string, papers: PaperRecord[]) { return mutation(dataset, 'post', 'library/papers:remove', { items: targets(papers) }); }
 export function deleteLibraryPapers(dataset: string, papers: PaperRecord[]) { return mutation(dataset, 'post', 'library/papers:delete', { items: targets(papers) }); }
 export function detachLibraryAttachment(dataset: string, paper: PaperRecord, id: string) { return mutation(dataset, 'post', `library/papers/${encodeURIComponent(paper.id)}/attachments/${encodeURIComponent(id)}:detach`, { revision: paper.revision }); }
 export function addLibraryNote(dataset: string, paperId: string, id: string, content: string, source?: PdfNoteSource) { return mutation(dataset, 'post', `library/papers/${encodeURIComponent(paperId)}/notes`, { id, content, ...(source ? { source } : {}) }); }
+export function updateLibraryNote(dataset: string, paperId: string, id: string, content: string) { return mutation(dataset, 'patch', `library/papers/${encodeURIComponent(paperId)}/notes/${encodeURIComponent(id)}`, { content }); }
 export function deleteLibraryNote(dataset: string, paperId: string, id: string) { return mutation(dataset, 'post', `library/papers/${encodeURIComponent(paperId)}/notes/${encodeURIComponent(id)}:delete`, {}); }
 export function createLibraryFolder(dataset: string, id: string, name: string, parentId: string | null) { return mutation(dataset, 'post', 'library/folders', { id, name, parent_id: parentId || '' }); }
 export function renameLibraryFolder(dataset: string, folder: PaperFolder, name: string) { return mutation(dataset, 'patch', `library/folders/${encodeURIComponent(folder.id)}`, { revision: folder.revision, name }); }
 export function deleteLibraryFolder(dataset: string, folder: PaperFolder) { return mutation(dataset, 'post', `library/folders/${encodeURIComponent(folder.id)}:delete`, { revision: folder.revision }); }
-function importPaper(paper: PaperRecord) { const { id, metadata, folderId, source, sourceUrl, arxivVersion, tags } = paper; return { id, metadata, folderId, source, sourceUrl, arxivVersion, tags }; }
+// Backup graphs may contain auxiliary fields that the strict mutation API does
+// not accept. Project only writable metadata; the server retains graph extras.
+function writableMetadata(metadata: PaperMetadata): PaperMetadata {
+    const { title, authors, venue, year, abstract, citationCount, identifiers: { doi, arxiv } } = metadata;
+    return { title, authors, venue, year, abstract, citationCount, identifiers: { doi, arxiv } };
+}
+function importPaper(paper: PaperRecord) { const { id, metadata, folderId, source, sourceUrl, arxivVersion, tags } = paper; return { id, metadata: writableMetadata(metadata), folderId, source, sourceUrl, arxivVersion, tags }; }
 export function importLibraryPapers(dataset: string, papers: PaperRecord[], folders: PaperFolder[], key: string, format: 'bib' | 'ris' | 'csv', fileName?: string) { return mutation(dataset, 'post', 'imports', { entry_type: 'bibliography', target_dataset_id: dataset, idempotency_key: key, format, file_name: fileName, folders: folders.map(f => ({ id: f.id, name: f.name, parentId: f.parentId || null, revision: f.revision || 0 })), items: papers.map(paper => ({ paper: importPaper(paper) })) }); }
 export function confirmLibraryPdf(dataset: string, paper: PaperRecord, documentId: string, key: string, version?: string) { return mutation(dataset, 'post', 'imports', { entry_type: 'pdf_upload', target_dataset_id: dataset, idempotency_key: key, items: [{ paper: importPaper(paper), document_id: documentId, revision: paper.revision, confirmed: true, candidate: { version } }] }); }
 export function mergeLibraryChanges(current: PaperLibraryData, change: LibraryChanges): PaperLibraryData {

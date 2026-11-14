@@ -739,3 +739,31 @@ def test_vocabulary_queries_use_the_system_tool_controls():
     assert [method['name'] for method in group['methods']] == ['vocabulary.wordbook.list', 'vocabulary.word.list']
     lazyllm.globals['agentic_config']['system_mcp_config'][0]['allowed_tools'] = []
     assert _tool_group('vocabulary')['active'] is False
+
+
+def test_active_document_exposes_reader_without_rag_or_retrieval_filters(monkeypatch):
+    from lazyllm.tools.agent.toolsManager import ToolManager
+    from lazymind.chat.engine.tools.infra import core_api_client
+
+    monkeypatch.setenv('LAZYMIND_RAG_ENABLED', '0')
+    lazyllm.globals['agentic_config'] = {
+        'filters': {},
+        'document_context': {'dataset_id': 'paper-library', 'document_id': 'paper-1'},
+    }
+    configs = filter_tools(DEFAULT_TOOLS)
+    assert 'kb' in {cfg.name for cfg in configs}
+    toolkit = next(cfg.tool for cfg in configs if cfg.name == 'kb')
+    assert toolkit.__lazy_source__() is False
+    manager = ToolManager([toolkit])
+    assert [d['function']['name'] for d in manager.tools_description] == ['KBToolkit_read_document']
+    calls = []
+    monkeypatch.setattr(core_api_client, 'get_core_api', lambda path: calls.append(path) or {'text': 'ReasonSeg has 1218 pairs.'})
+    assert toolkit.read_document('paper-library', 'paper-1')['text'].startswith('ReasonSeg')
+    assert calls == ['/datasets/paper-library/documents/paper-1:read']
+    assert lazyllm.globals['agentic_config']['filters'] == {}
+
+
+@pytest.mark.parametrize('document', [{}, {'dataset_id': 'paper-library'}, {'document_id': 'paper-1'}, {'dataset_id': ' ', 'document_id': 'paper-1'}])
+def test_incomplete_document_does_not_activate_reader(document):
+    lazyllm.globals['agentic_config'] = {'filters': {}, 'document_context': document}
+    assert 'kb' not in _active_tool_names()

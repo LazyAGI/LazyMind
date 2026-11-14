@@ -1,7 +1,7 @@
 import {useEffect,useId,useRef,useState,type ReactNode} from 'react';
 import {useTranslation} from 'react-i18next';
 import {axiosInstance,BASE_URL} from '@/components/request';
-import {addLibraryNote,decodePersistedLibrary,deleteLibraryNote,mergeLibraryChanges,type PersistedPaperLibrary} from '@/modules/knowledge/paper/store';
+import {addLibraryNote,updateLibraryNote,decodePersistedLibrary,deleteLibraryNote,mergeLibraryChanges,type PersistedPaperLibrary} from '@/modules/knowledge/paper/store';
 import type {NoteColor,PdfNoteSource} from '@/modules/knowledge/paper/libraryModel';
 import {safePaperUrl,type PaperMetadata} from '@/modules/knowledge/paper/model';
 import {PDF_NOTE_COLORS} from '@/components/ui/pdfNoteHighlights';
@@ -12,7 +12,7 @@ function readableNote(content:string){
  while(lines[quoteLines]?.startsWith('> '))quoteLines++;
  const page=quoteLines?lines[quoteLines-1].match(/\((?:第\s*(\d+)\s*页|page\s*(\d+))\)\s*$/i):null;
  if(!page)return {body:content};
- return {body:lines.slice(quoteLines).join('\n').trim(),page:Number(page[1]||page[2])};
+ return {body:lines.slice(quoteLines).join('\n').trim(),prefix:lines.slice(0,quoteLines).join('\n'),page:Number(page[1]||page[2])};
 }
 const noteColorEnglish:Record<NoteColor,string>={red:'Red',orange:'Orange',yellow:'Yellow',green:'Green',blue:'Blue',indigo:'Indigo',purple:'Purple',rainbow:'Rainbow'};
 function bibEscape(value:string){return value.replace(/[\\{}&%$#_~^]/g,char=>char==='\\'?'\\textbackslash{}':char==='~'?'\\textasciitilde{}':char==='^'?'\\textasciicircum{}':`\\${char}`).replace(/[\r\n]+/g,' ');}
@@ -35,13 +35,14 @@ export default function PaperReaderDetails({datasetId,documentId,fileName,canWri
  useEffect(()=>{if(selectedNoteId)setNotesTab('notes');},[selectedNoteId]);
  const [result,setResult]=useState<{key:string;library?:PersistedPaperLibrary;error?:string}>();
  const [revision,setRevision]=useState(0);const [draft,setDraft]=useState('');const [saving,setSaving]=useState(false);const [saveError,setSaveError]=useState('');const [copyStatus,setCopyStatus]=useState('');const [deletingId,setDeletingId]=useState('');const [deleteError,setDeleteError]=useState<{id:string;message:string}>();
+ const [editing,setEditing]=useState<{id:string;body:string;prefix?:string}>();const [editSaving,setEditSaving]=useState(false);const [editError,setEditError]=useState('');
  const draftDocument=useRef<string>();const noteSources=useRef<string[]>([]);const editorRef=useRef<HTMLDetailsElement>(null);
  const generation=useRef(0);const noteId=useRef('');const key=`${datasetId}/${documentId}`;const currentKey=useRef(key);currentKey.current=key;const mounted=useRef(false);
  useEffect(()=>{mounted.current=true;return()=>{mounted.current=false;};},[]);
  useEffect(()=>{
   const controller=new AbortController();generation.current+=1;
-  if(draftDocument.current!==key){draftDocument.current=key;setDraft('');noteId.current='';noteSources.current=[];if(editorRef.current)editorRef.current.open=false;}
-  setSaveError('');setSaving(false);setCopyStatus('');
+  if(draftDocument.current!==key){draftDocument.current=key;setDraft('');setEditing(undefined);setEditError('');setEditSaving(false);noteId.current='';noteSources.current=[];if(editorRef.current)editorRef.current.open=false;}
+  setSaveError('');setSaving(false);setEditSaving(false);setCopyStatus('');
    axiosInstance.get(`${BASE_URL}/api/core/academic/library`,{params:{target_dataset_id:datasetId,include_processing:false},signal:controller.signal,timeout:30000,silentError:true} as never)
    .then(response=>{if(!controller.signal.aborted&&currentKey.current===key)setResult({key,library:decodePersistedLibrary(response.data)});})
    .catch(error=>{if(!controller.signal.aborted&&currentKey.current===key)setResult({key,error:error instanceof Error?error.message:label('Could not load paper details.','无法加载论文资料。')});});
@@ -69,12 +70,21 @@ export default function PaperReaderDetails({datasetId,documentId,fileName,canWri
  useEffect(()=>{if(tab!=='notes'||!selectedNoteId||!selectedNoteRef.current)return;selectedNoteRef.current.focus({preventScroll:true});selectedNoteRef.current.scrollIntoView?.({block:'nearest'});},[selectedNoteId,notes.length,tab]);
  const copy=async(text:string)=>{try{await navigator.clipboard.writeText(text);if(mounted.current&&currentKey.current===key)setCopyStatus(label('Copied','已复制'));}catch{if(mounted.current&&currentKey.current===key)setCopyStatus(label('Could not copy. Please try again.','复制失败，请重试。'));}};
  const save=async()=>{
-  if(!writable||!draft.trim()||saving||!paper||!library)return;
+  if(!writable||!draft.trim()||saving||editSaving||!paper||!library)return;
   const saveGeneration=generation.current;setSaving(true);setSaveError('');if(!noteId.current)noteId.current=crypto.randomUUID();
   try{const source=noteSources.current.join('\n');const content=source?`${source}\n\n${draft.trim()}`:draft.trim();const change=await addLibraryNote(datasetId,paper.id,noteId.current,content);if(!mounted.current||currentKey.current!==key||generation.current!==saveGeneration)return;
    setResult({key,library:{...library,data:mergeLibraryChanges(library.data,change)}});setDraft('');noteId.current='';noteSources.current=[];
   }catch(error){if(mounted.current&&currentKey.current===key&&generation.current===saveGeneration)setSaveError(error instanceof Error?error.message:label('Could not save note.','无法保存笔记。'));}
   finally{if(mounted.current&&currentKey.current===key&&generation.current===saveGeneration)setSaving(false);}
+ };
+ const saveEdit=async()=>{
+  if(!writable||!paper||!editing||!editing.body.trim()||editSaving||saving)return;
+  const saveGeneration=generation.current;const edit=editing;setEditSaving(true);setEditError('');
+  try{const content=edit.prefix?`${edit.prefix}\n\n${edit.body.trim()}`:edit.body.trim();const change=await updateLibraryNote(datasetId,paper.id,edit.id,content);
+   if(!mounted.current||currentKey.current!==key||generation.current!==saveGeneration)return;
+   setResult(current=>current?.key===key&&current.library?{key,library:{...current.library,data:mergeLibraryChanges(current.library.data,change)}}:current);setEditing(undefined);
+  }catch(error){if(mounted.current&&currentKey.current===key&&generation.current===saveGeneration)setEditError(error instanceof Error?error.message:label('Could not save note.','无法保存笔记。'));}
+  finally{if(mounted.current&&currentKey.current===key&&generation.current===saveGeneration)setEditSaving(false);}
  };
  const removeNote=async(id:string)=>{
   if(!writable||!paper||!library||deletingId)return;
@@ -128,14 +138,14 @@ export default function PaperReaderDetails({datasetId,documentId,fileName,canWri
          </span>}
        </>;
        const selected=note.id===selectedNoteId;
-       return <li ref={selected?selectedNoteRef:undefined} tabIndex={selected?-1:undefined} aria-current={selected?'true':undefined} className={`paper-reader-details__note${selected?' is-selected':''}`} key={note.id}><div className="paper-reader-details__note-row">{navigate&&!damaged?<button type="button" className="paper-reader-details__note-source" onClick={navigate}>{content}</button>:<div className="paper-reader-details__note-static">{content}</div>}{writable&&<button type="button" className="paper-reader-details__note-delete" aria-label={label('Delete note','删除笔记')} disabled={!!deletingId} onClick={()=>void removeNote(note.id)}>{deletingId===note.id?label('Deleting…','正在删除…'):label('Delete','删除')}</button>}</div>{deleteError?.id===note.id&&<p role="alert">{deleteError.message}</p>}</li>;
+       return <li ref={selected?selectedNoteRef:undefined} tabIndex={selected?-1:undefined} aria-current={selected?'true':undefined} className={`paper-reader-details__note${selected?' is-selected':''}`} key={note.id}><div className="paper-reader-details__note-row">{navigate&&!damaged?<button type="button" className="paper-reader-details__note-source" onClick={navigate}>{content}</button>:<div className="paper-reader-details__note-static">{content}</div>}{writable&&<button type="button" className="paper-reader-details__note-edit" aria-label={label('Edit note','编辑笔记')} disabled={!!editing||!!deletingId||saving} onClick={()=>{setEditing({id:note.id,body:readable.body,prefix:readable.prefix});setEditError('');}}>{label('Edit','编辑')}</button>}{writable&&<button type="button" className="paper-reader-details__note-delete" aria-label={label('Delete note','删除笔记')} disabled={!!deletingId||!!editing} onClick={()=>void removeNote(note.id)}>{deletingId===note.id?label('Deleting…','正在删除…'):label('Delete','删除')}</button>}</div>{writable&&editing?.id===note.id&&<form className="paper-reader-details__edit-note" onSubmit={event=>{event.preventDefault();void saveEdit();}}><label htmlFor={`${tabId}-edit-note`}>{label('Edit note','编辑笔记')}</label><textarea autoFocus id={`${tabId}-edit-note`} value={editing.body} disabled={editSaving} onChange={event=>setEditing({...editing,body:event.target.value})} rows={5}/>{editError&&<p role="alert">{editError}</p>}<button type="submit" disabled={editSaving||saving||!editing.body.trim()}>{editSaving?label('Saving…','正在保存…'):label('Save changes','保存修改')}</button><button type="button" className="paper-reader-details__edit-cancel" disabled={editSaving} onClick={()=>{setEditing(undefined);setEditError('');}}>{label('Cancel editing','取消编辑')}</button></form>}{deleteError?.id===note.id&&<p role="alert">{deleteError.message}</p>}</li>;
      })}</ol>}
      {!!annotations.length&&<section className="paper-reader-details__annotations"><h4>{label('Saved annotations','已保存的批注')}</h4><ol className="paper-reader-details__notes" aria-label={label('Saved annotations','已保存的批注')}>{annotations.map(item=>{
        const color=PDF_NOTE_COLORS.find(candidate=>candidate.key===item.color);
-       const content=<><span className="paper-reader-details__note-body">{item.comment||label('Highlighted passage','仅高亮')}</span>{(item.page!==undefined||color)&&<span className="paper-reader-details__note-meta">{color&&<span className="paper-reader-details__note-color" style={{background:color.swatch}} aria-label={label(noteColorEnglish[color.key],color.label)}/>} {item.page!==undefined&&<span>{label(`Page ${item.page}`,`第 ${item.page} 页`)}</span>}</span>}</>;
-       return <li className="paper-reader-details__note" key={item.id}>{item.page!==undefined&&onNavigatePage?<button type="button" className="paper-reader-details__note-source" onClick={()=>onNavigatePage(item.page!)}>{content}</button>:<div className="paper-reader-details__note-static">{content}</div>}</li>;
+       const content=<><span className="paper-reader-details__note-body">{item.quote||item.comment||label('Highlighted passage','仅高亮')}</span>{item.quote&&item.comment&&<span className="paper-reader-details__note-body">{item.comment}</span>}{!item.pdfRects?.length&&<span className="paper-reader-details__muted">{label('Highlight position unavailable; the page highlight cannot be displayed. Re-import from Zotero to restore its position.','缺少高亮位置，无法显示页面高亮；可重新从 Zotero 导入以恢复位置。')}</span>}{(item.page!==undefined||color)&&<span className="paper-reader-details__note-meta">{color&&<span className="paper-reader-details__note-color" style={{background:color.swatch}} aria-label={label(noteColorEnglish[color.key],color.label)}/>} {item.page!==undefined&&<span>{label(`Page ${item.page}`,`第 ${item.page} 页`)}</span>}</span>}</>;
+       return <li ref={item.id===selectedNoteId?selectedNoteRef:undefined} tabIndex={item.id===selectedNoteId?-1:undefined} aria-current={item.id===selectedNoteId?'true':undefined} className={`paper-reader-details__note${item.id===selectedNoteId?' is-selected':''}`} key={item.id}>{item.page!==undefined&&onNavigatePage?<button type="button" className="paper-reader-details__note-source" onClick={()=>onNavigatePage(item.page!)}>{content}</button>:<div className="paper-reader-details__note-static">{content}</div>}</li>;
      })}</ol></section>}
-     {writable?<details className="paper-reader-details__new-note" ref={editorRef}><summary>{label('Write a note','写笔记')}</summary><form onSubmit={event=>{event.preventDefault();void save();}}><label htmlFor="paper-reader-new-note">{label('New note','新笔记')}</label><textarea id="paper-reader-new-note" value={draft} disabled={saving} onChange={event=>{setDraft(event.target.value);noteId.current='';}} rows={5} placeholder={label('What would you like to remember?','想记住什么？')}/>{saveError&&<p role="alert">{saveError}</p>}<button type="submit" disabled={saving||!draft.trim()}>{saving?label('Saving…','正在保存…'):label('Save note','保存笔记')}</button></form></details>:<p className="paper-reader-details__muted">{label('You have read-only access to these notes.','你可以查看这些笔记，当前没有编辑权限。')}</p>}
+     {writable?<details className="paper-reader-details__new-note" ref={editorRef}><summary>{label('Write a note','写笔记')}</summary><form onSubmit={event=>{event.preventDefault();void save();}}><label htmlFor="paper-reader-new-note">{label('New note','新笔记')}</label><textarea id="paper-reader-new-note" value={draft} disabled={saving} onChange={event=>{setDraft(event.target.value);noteId.current='';}} rows={5} placeholder={label('What would you like to remember?','想记住什么？')}/>{saveError&&<p role="alert">{saveError}</p>}<button type="submit" disabled={saving||editSaving||!draft.trim()}>{saving?label('Saving…','正在保存…'):label('Save note','保存笔记')}</button></form></details>:<p className="paper-reader-details__muted">{label('You have read-only access to these notes.','你可以查看这些笔记，当前没有编辑权限。')}</p>}
     </>}
    </>}
    </div>

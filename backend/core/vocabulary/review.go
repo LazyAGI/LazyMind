@@ -21,9 +21,12 @@ func stateName(state fsrs.State) string {
 func (s *Service) addLocalWord(ctx context.Context, owner string, req AddWordRequest, mirrorAnki bool) (AddWordResult, error) {
 	now := time.Now().UTC()
 	normalized := normalizeTerm(req.Term)
+	// Resolve the selected dictionary before opening the write transaction.
+	// The desktop SQLite service serializes database access while a transaction
+	// is open, so a second lookup through s.db would wait on our own transaction.
+	var entry DictionaryEntry
 	if req.DictionaryEntryID != "" {
 		entries, _ := s.LookupDictionary(ctx, req.Language, req.Term)
-		var entry DictionaryEntry
 		for _, candidate := range entries {
 			if candidate.ID == req.DictionaryEntryID {
 				entry = candidate
@@ -59,21 +62,11 @@ func (s *Service) addLocalWord(ctx context.Context, owner string, req AddWordReq
 		word, err := lockWord()
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			word = Word{ID: uuid.NewString(), OwnerID: owner, Provider: "local", NormalizedTerm: normalized, Term: req.Term, Language: req.Language, Phonetic: req.Phonetic, PartOfSpeech: req.PartOfSpeech, Meaning: req.Meaning, Definition: req.Definition, UserNote: req.UserNote, OriginType: defaultString(req.OriginType, "user"), CreatedAt: now, UpdatedAt: now}
-			if req.DictionaryEntryID != "" {
-				entries, _ := s.LookupDictionary(ctx, req.Language, req.Term)
-				var entry DictionaryEntry
-				for _, candidate := range entries {
-					if candidate.ID == req.DictionaryEntryID {
-						entry = candidate
-						break
-					}
-				}
-				if entry.ID != "" {
-					word.SourceName = entry.SourceName
-					word.SourceVersion = entry.SourceVersion
-					word.LicenseID = entry.LicenseID
-					word.SourceLocator = entry.SourceLocator
-				}
+			if entry.ID != "" {
+				word.SourceName = entry.SourceName
+				word.SourceVersion = entry.SourceVersion
+				word.LicenseID = entry.LicenseID
+				word.SourceLocator = entry.SourceLocator
 			}
 			insert := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&word)
 			if insert.Error != nil {

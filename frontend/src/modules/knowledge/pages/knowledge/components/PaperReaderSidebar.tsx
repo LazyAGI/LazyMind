@@ -11,15 +11,15 @@ export function paperOutline(document?:PdfIRDocument):PdfIRBlock[]{
   return block.type==='text'&&(/^\d+(?:\.\d+){0,3}\.?\s+\S/.test(text)||/^(abstract|references|conclusions?|acknowledg(?:e)?ments?|appendix(?:\s+[A-Z])?|摘要|参考文献|结论|致谢)$/i.test(text));
  });
 }
-interface Props {paperMode?:boolean;currentPage?:number;isPdf?:boolean;document?:PdfIRDocument;nativeOutline?:PdfNativeOutlineItem[];activeTab:string;onTabChange:(tab:string)=>void;onNavigate:(id:string)=>void;onNavigatePage?:(page:number)=>void;onCollapse:()=>void;references:ReactNode;vocabulary?:ReactNode;segments?:ReactNode;referenceCount?:number}
+interface Props {paperMode?:boolean;currentPage?:number;isPdf?:boolean;document?:PdfIRDocument;nativeOutline?:PdfNativeOutlineItem[];activeTab:string;onTabChange:(tab:string)=>void;onNavigate:(id:string)=>void;onNavigatePage?:(page:number)=>void;onCollapse:()=>void;references?:ReactNode;vocabulary?:ReactNode;segments?:ReactNode;referenceCount?:number}
 export function PaperReaderSidebar({paperMode=false,currentPage=1,isPdf=true,document,nativeOutline=[],activeTab,onTabChange,onNavigate,onNavigatePage,onCollapse,references,vocabulary,segments,referenceCount}:Props){
  const {t}=useTranslation(),id=useId();const outline=nativeOutline.length?nativeOutline.map(item=>({id:item.id,text:item.title,page:item.page-1,depth:item.depth,native:true})):paperOutline(document).map(block=>({...block,depth:/^\d+\.\d+/.test(block.text||'')?1:0,native:false}));
  const {label}=usePaperReaderLabels();
  const visuals=paperMode?document?.blocks.filter(block=>['image','table','formula'].includes(block.type))||[]:[];
  const precedingSections=outline.filter(block=>block.page<currentPage);
  const currentSection=precedingSections[precedingSections.length-1]?.id;
- const vocabularyContent=vocabulary||(paperMode&&isPdf?<p className="paper-shell-empty">{t('paperShell.vocabularyUnavailable',{defaultValue:'Vocabulary is not enabled in this workspace. Contact your administrator to enable it.'})}</p>:undefined);
- const tabs=[...(paperMode||outline.length?[{key:'outline',label:t('paperShell.outline',{defaultValue:'Outline'})}]:[]),...(!paperMode&&segments?[{key:'segments',label:t('paperShell.segments',{defaultValue:'Document chunks'})}]:[]),{key:'references',label:t('paperShell.references',{defaultValue:'References'})},...(visuals.length?[{key:'visuals',label:label('visuals')}]:[]),...(vocabularyContent?[{key:'vocabulary',label:t('paperShell.vocabulary',{defaultValue:'Vocabulary'})}]:[])];
+ const vocabularyContent=paperMode&&(vocabulary||(paperMode&&isPdf?<p className="paper-shell-empty">{t('paperShell.vocabularyUnavailable',{defaultValue:'Vocabulary is not enabled in this workspace. Contact your administrator to enable it.'})}</p>:undefined));
+ const tabs=[...(paperMode||outline.length||!segments?[{key:'outline',label:t('paperShell.outline',{defaultValue:'Outline'})}]:[]),...(!paperMode&&segments?[{key:'segments',label:t('paperShell.segments',{defaultValue:'Document chunks'})}]:[]),...(paperMode?[{key:'references',label:t('paperShell.references',{defaultValue:'References'})}]:[]),...(visuals.length?[{key:'visuals',label:label('visuals')}]:[]),...(vocabularyContent?[{key:'vocabulary',label:t('paperShell.vocabulary',{defaultValue:'Vocabulary'})}]:[])];
  const visibleTab=tabs.some(tab=>tab.key===activeTab)?activeTab:tabs[0].key;
  return <aside className="paper-reader-sidebar" aria-label={paperMode?t('paperShell.navigation',{defaultValue:'Paper navigation'}):t('paperShell.documentNavigation',{defaultValue:'Document navigation'})}>
   <header><span className="paper-shell-eyebrow">{paperMode?t('paperShell.library',{defaultValue:'READING DESK'}):t('paperShell.document',{defaultValue:'Document'})}</span><button type="button" onClick={onCollapse} aria-label={paperMode?t('paperShell.collapseNavigation',{defaultValue:'Collapse paper navigation'}):t('paperShell.collapseDocumentNavigation',{defaultValue:'Collapse document navigation'})}>‹</button></header>
@@ -29,7 +29,7 @@ export function PaperReaderSidebar({paperMode=false,currentPage=1,isPdf=true,doc
    {paperMode&&segments&&<details className="paper-sidebar-segments"><summary>{t('paperShell.segments',{defaultValue:'Document chunks'})}</summary>{segments}</details>}
   </div>
   {!paperMode&&segments&&<div role="tabpanel" id={`${id}-segments-panel`} aria-labelledby={`${id}-segments`} hidden={visibleTab!=='segments'} className="paper-reader-sidebar__pane">{segments}</div>}
-  <div role="tabpanel" id={`${id}-references-panel`} aria-labelledby={`${id}-references`} hidden={visibleTab!=='references'} className="paper-reader-sidebar__pane">{references}</div>
+  {paperMode&&<div role="tabpanel" id={`${id}-references-panel`} aria-labelledby={`${id}-references`} hidden={visibleTab!=='references'} className="paper-reader-sidebar__pane">{references}</div>}
   {!!visuals.length&&<div role="tabpanel" id={`${id}-visuals-panel`} aria-labelledby={`${id}-visuals`} hidden={visibleTab!=='visuals'} className="paper-reader-sidebar__pane"><ol className="paper-outline">{visuals.map(block=><li key={block.id}><button type="button" onClick={()=>onNavigate(block.id)}><span>{paperVisualLabel(block,document!.blocks,label)}</span><small>{block.page+1}</small></button></li>)}</ol></div>}
   {vocabularyContent&&<div role="tabpanel" id={`${id}-vocabulary-panel`} aria-labelledby={`${id}-vocabulary`} hidden={visibleTab!=='vocabulary'} className="paper-reader-sidebar__pane">{vocabularyContent}</div>}
  </aside>;

@@ -1,0 +1,45 @@
+name: Windows Academic Regression
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - "backend/core/**"
+      - ".github/workflows/windows-academic-regression.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-pr-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  sqlite-zotero-import:
+    runs-on: windows-2025
+    timeout-minutes: 15
+    defaults:
+      run:
+        shell: pwsh
+        working-directory: backend/core
+    env:
+      CGO_ENABLED: "0"
+      TEST_DB_DRIVER: sqlite
+    steps:
+      # Default PR checkout tests the merge commit without executing a privileged
+      # pull_request_target workflow or persisting a write credential.
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25.11'
+          cache-dependency-path: backend/core/go.sum
+      - name: Verify native Windows SQLite paths, import locks, and Zotero attachments
+        # t.TempDir uses a real Windows drive path. These tests open the actual
+        # SQLite driver, acquire/release sidecar locks, read Zotero WAL data in
+        # read-only transactions, and persist a PDF attachment. No installer,
+        # external Zotero account, Docker service, or production DB is required.
+        run: >-
+          go test ./academic -count=1 -timeout=5m -v
+          -run '^(TestSQLiteFileURL.*|TestArxivImportLockCancellationAndMainDatabaseWrites|TestSQLiteArxivImportLockUsesProxyDatabaseFilesystem|TestZoteroDatabasePreviewReadsWALAndPreservesGraph|TestZoteroDatabaseReadTransactionIsReadOnlyAndConsistent|TestZoteroDatabaseTransferStreamsBoundedChunks|TestZoteroAttachmentStoresOriginalWithoutImplicitParsing)$'

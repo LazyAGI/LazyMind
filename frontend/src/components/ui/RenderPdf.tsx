@@ -28,7 +28,7 @@ import { createPdfCitationPreviewCache } from "./pdfCitationPreview";
 import { addCitationToPaperLibrary } from "@/modules/knowledge/api/academicReferences";
 import { getImportErrorMessage } from "@/modules/knowledge/utils/importError";
 import {PdfSelectionComposer, type PdfComposerAction} from "./PdfSelectionComposer";
-import {pdfNoteHighlightBackground,pdfNoteHighlightHitAreas,pdfNoteHighlightPaths,readPdfNoteHighlights,writePdfNoteHighlights,type PdfNoteColor,type PdfNoteHighlight} from "./pdfNoteHighlights";
+import {resolvePdfNoteHighlight,type PdfHighlightViewport,pdfNoteHighlightBackground,pdfNoteHighlightHitAreas,pdfNoteHighlightPaths,readPdfNoteHighlights,writePdfNoteHighlights,type PdfNoteColor,type PdfNoteHighlight} from "./pdfNoteHighlights";
 import {ControlOutlined, MinusOutlined, PlusOutlined, LeftOutlined, RightOutlined} from "@ant-design/icons";
 import "react-pdf/dist/Page/AnnotationLayer.css";
 import "react-pdf/dist/Page/TextLayer.css";
@@ -288,6 +288,8 @@ export default function RenderPdf({
   const [pageSizesMap, setPageSizesMap] = useState<
     Record<number, { width: number; height: number }>
   >({});
+  const [highlightViewports,setHighlightViewports]=useState<{source:RenderPdfProps["fileData"];pages:Record<number,PdfHighlightViewport>}>({source:fileData,pages:{}});
+  const resolvedSavedHighlights=useMemo(()=>savedNoteHighlights.map(note=>resolvePdfNoteHighlight(note,highlightViewports.source===fileData?highlightViewports.pages[note.page-1]:undefined)),[savedNoteHighlights,highlightViewports,fileData]);
   const pageRefs = useRef<(HTMLDivElement | null)[]>([]);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const handPan=usePdfHandPan(containerRef,fileData);
@@ -440,7 +442,11 @@ export default function RenderPdf({
       return;
     }
     setScrollTop(containerRef.current.scrollTop);
-    setSelectionAction(null);
+    // Focusing or typing in the note editor can scroll its caret into view.
+    // Keep the captured quote and draft while the user is editing the toolbar.
+    if (!containerRef.current.querySelector('[data-pdf-selection-toolbar]')?.contains(document.activeElement)) {
+      setSelectionAction(null);
+    }
     if (reportPosition.current && pageTops.length) {
       const currentTop = containerRef.current.scrollTop;
       let currentPage = 0;
@@ -1183,7 +1189,7 @@ export default function RenderPdf({
           if (!bounds.width || !bounds.height) return;
           const x = (event.clientX - bounds.left) / bounds.width;
           const y = (event.clientY - bounds.top) / bounds.height;
-          const hit = pdfNoteHighlightHitAreas(savedNoteHighlights,index+1).find(({rect}) => x >= rect[0] && x <= rect[2] && y >= rect[1] && y <= rect[3]);
+          const hit = pdfNoteHighlightHitAreas(resolvedSavedHighlights,index+1).find(({rect}) => x >= rect[0] && x <= rect[2] && y >= rect[1] && y <= rect[3]);
           if (hit) onNoteHighlightClick(hit.id);
         }}
         ref={(el) => (pageRefs.current[index] = el)}
@@ -1216,14 +1222,15 @@ export default function RenderPdf({
           onRenderTextLayerSuccess={() => tagReferenceTextLayer(index)}
           onLoadSuccess={(page) => {
             const viewport = page.getViewport({ scale: 1 });
+            setHighlightViewports(previous=>previous.source===fileData&&previous.pages[index]?.width===viewport.width&&previous.pages[index]?.height===viewport.height?previous:{source:fileData,pages:{...(previous.source===fileData?previous.pages:{}),[index]:viewport}});
             setPageSizesMap(prev => prev[index]?.width === viewport.width && prev[index]?.height === viewport.height ? prev : {
               ...prev,[index]:{width:viewport.width,height:viewport.height},
             });
           }}
         />
         </div>
-        {pdfNoteHighlightPaths([...noteHighlights,...savedNoteHighlights],index+1).map(({color,path})=><svg key={color} data-pdf-note-highlight={color} aria-hidden="true" viewBox="0 0 1 1" preserveAspectRatio="none" style={{position:'absolute',inset:0,width:'100%',height:'100%',mixBlendMode:'multiply',pointerEvents:'none',zIndex:5}}><path d={path} fill={pdfNoteHighlightBackground(color)} fillRule="nonzero"/></svg>)}
-        {onNoteHighlightClick&&savedNoteHighlights.filter(note=>note.page===index+1&&note.rects.length>0).map(note=><button key={note.id} type="button" className="pdf-note-highlight-marker" aria-label={readerLanguage==='zh'?'打开笔记':'Open note'} onClick={event=>{event.stopPropagation();onNoteHighlightClick(note.id);}} style={{top:`${note.rects[0][1]*100}%`}}>✎</button>)}
+        {pdfNoteHighlightPaths([...noteHighlights,...resolvedSavedHighlights],index+1).map(({color,path})=><svg key={color} data-pdf-note-highlight={color} aria-hidden="true" viewBox="0 0 1 1" preserveAspectRatio="none" style={{position:'absolute',inset:0,width:'100%',height:'100%',mixBlendMode:'multiply',pointerEvents:'none',zIndex:5}}><path d={path} fill={pdfNoteHighlightBackground(color)} fillRule="nonzero"/></svg>)}
+        {onNoteHighlightClick&&resolvedSavedHighlights.filter(note=>note.page===index+1&&note.rects.length>0).map(note=><button key={note.id} type="button" className="pdf-note-highlight-marker" aria-label={readerLanguage==='zh'?'打开笔记':'Open note'} onClick={event=>{event.stopPropagation();onNoteHighlightClick(note.id);}} style={{top:`${note.rects[0][1]*100}%`}}>✎</button>)}
         {studyHighlight?.page === index && <div className="pdf-study-highlight" style={(() => {
           const box = studyHighlight.bbox;
           const valid = box && box.length === 4 && box.every(value=>Number.isFinite(value)&&value>=0&&value<=1) && box[0]<box[2] && box[1]<box[3];

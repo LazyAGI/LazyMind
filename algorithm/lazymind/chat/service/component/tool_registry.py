@@ -42,7 +42,7 @@ from lazymind.chat.engine.tools.calculator import calculator
 from lazymind.chat.engine.tools.vocab_learn import vocab_learn
 from lazymind.chat.engine.tools.memory import MemoryTools
 from lazymind.chat.engine.tools.github_prs import GitHubPRToolkit, GITHUB_PR_POLICY
-from lazymind.chat.engine.tools.lazy_kb import KBToolkit, kb_tmp_search
+from lazymind.chat.engine.tools.lazy_kb import KBToolkit, kb_tmp_search, has_active_document
 from lazymind.model_config import get_model_role_runtime_identity, is_model_role_available
 from lazymind.chat.engine.tools.ask_user import ask_user
 from lazymind.chat.engine.agent_runtime.conversation_env import ConversationEnvLease, ConversationEnvStore
@@ -1074,7 +1074,7 @@ def _registration_key_source(tool: Any) -> Callable[[], Any] | None:
 def tool_is_active(cfg: ToolConfig) -> bool:
     if cfg.name == 'kb':
         context = lazyllm.globals.get('agentic_config') or {}
-        if not (context.get('filters') or {}).get('kb_id'):
+        if not (context.get('filters') or {}).get('kb_id') and not has_active_document(context):
             return False
     if cfg.model_role and not is_model_role_available(cfg.model_role):
         # Probe only when an image is actually read, never while enumerating tools.

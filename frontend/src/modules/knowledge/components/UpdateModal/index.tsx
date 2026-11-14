@@ -126,7 +126,7 @@ const UpdateAppModel = forwardRef<UpdateImperativeProps, ForwardProps>(
         });
       }
       // Show the modal only after the algo list is loaded so the selector
-      // visibility (algorithm.length !== 1) is evaluated with real data,
+      // visibility (algorithm.length > 1) is evaluated with real data,
       // not with the initial empty array.
       getAlgorithm(sourceData).finally(() => {
         setVisible(true);
@@ -254,14 +254,14 @@ const UpdateAppModel = forwardRef<UpdateImperativeProps, ForwardProps>(
               }))}
             />
           </Form.Item>
-          {algorithm.length !== 1 && (
+          {algorithm.length > 1 && (
             <Form.Item
               name="algo_id"
               label={t("knowledge.parseAlgorithm")}
               initialValue={null}
               rules={[
                 {
-                  required: true,
+                  required: !data?.dataset_id,
                   message: t("knowledge.selectParseAlgorithm"),
                 },
               ]}

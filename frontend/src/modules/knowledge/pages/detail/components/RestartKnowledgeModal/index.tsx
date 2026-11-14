@@ -69,6 +69,7 @@ const RestartKnowledgeModal = (
   const [runtimeWaiting, setRuntimeWaiting] = useState(false);
   const [submissionFailed, setSubmissionFailed] = useState(false);
   const [modalInfo, setModalInfo] = useState<IData>();
+  const ingestNeedsProcessing = modalInfo?.ingest && modalInfo.processingLevel === "stored";
   const runtimeWaitAbortRef = useRef<AbortController | null>(null);
   const [form] = Form.useForm();
 
@@ -99,7 +100,7 @@ const RestartKnowledgeModal = (
   };
 
   const onOk = async () => {
-    if (!modalInfo) {
+    if (!modalInfo || ingestNeedsProcessing) {
       return;
     }
     setLoading(true);
@@ -252,7 +253,7 @@ const RestartKnowledgeModal = (
       onCancel={onCancel}
       onOk={onOk}
       width={459}
-      okButtonProps={{ disabled: loading }}
+      okButtonProps={{ disabled: loading || ingestNeedsProcessing }}
     >
       {runtimeWaiting && (
         <Alert
@@ -264,7 +265,7 @@ const RestartKnowledgeModal = (
       )}
       <Form form={form} layout="vertical">
         {submissionFailed && <p role="status">解析任务尚未提交，请重试或查看通知。</p>}
-        {modalInfo?.ingest && <Alert type="info" showIcon message={t("knowledge.ingestRetainedHint")} />}
+        {modalInfo?.ingest && <Alert type={ingestNeedsProcessing ? "warning" : "info"} showIcon message={t(ingestNeedsProcessing ? "knowledge.ingestRetainedRequiresProcessing" : "knowledge.ingestRetainedHint")} />}
         {supportsSegments && (
           <>
             <Form.Item

@@ -18,9 +18,24 @@ var diagnosticURL = regexp.MustCompile(`(?i)https?://[^\s<>"']+`)
 var diagnosticBearer = regexp.MustCompile(`(?i)bearer\s+[^\s,;"']+`)
 var diagnosticSecret = regexp.MustCompile(`(?i)(authorization|bearer|api[_-]?key|token|password|secret|signature|sig)["']?\s*[:= ]\s*["']?[^\s,;"'}]+`)
 
+const missingProcessingFileMessage = "解析所需文件或目录不可用。请检查原文件是否仍可读取，再重试解析；若原文件缺失，请重新上传。"
+
+func isMissingProcessingFile(message string) bool {
+	lower := strings.ToLower(message)
+	for _, marker := range []string{"[winerror 2]", "[winerror 3]", "[errno 2]", "no such file or directory"} {
+		if strings.Contains(lower, marker) {
+			return true
+		}
+	}
+	return false
+}
+
 // UI/MCP diagnostics must not carry upstream signed URLs, credentials or tracebacks.
 func SafeProcessingMessage(raw string) string {
 	text := extractParseTaskErrorMessage(raw)
+	if isMissingProcessingFile(text) {
+		return missingProcessingFileMessage
+	}
 	if strings.Contains(text, "[_DocumentStore] Failed to upsert segment data for group") {
 		return "解析结果写入正文存储失败。请重新解析；若仍失败，请检查正文存储的格式兼容性与服务状态。"
 	}
@@ -63,6 +78,9 @@ func processingDiagnostic(state orm.DocumentProcessingState, task orm.Task, raw,
 	}
 	if d.Code == "" {
 		d.Code = "PROCESSING_FAILED"
+		if isMissingProcessingFile(d.Message) {
+			d.Code = "FILE_NOT_FOUND"
+		}
 	}
 	d.Message = SafeProcessingMessage(d.Message)
 	return d
