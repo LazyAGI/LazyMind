@@ -209,17 +209,18 @@
 .paper-reading-source > .paper-reader-pane { flex: 1; width: 100%; min-height: 0; }
 .paper-reading-auxiliary { display: flex; min-height: 0; }
 .paper-reading-workspace [hidden] { display: none !important; }
-.paper-guide-toolbar { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; padding: 6px 12px; border-bottom: 1px solid var(--paper-border); background: var(--paper-surface); }
+.paper-guide-toolbar { position: relative; flex-shrink: 0; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; padding: 6px 12px; border-bottom: 1px solid var(--paper-border); background: var(--paper-surface); }
 .paper-reading-workspace button, .paper-reading-workspace summary { cursor: pointer; }
 .paper-guide-toolbar button, .paper-guide-status button, .paper-guide-empty button, .paper-guide-evidence button, .paper-guide-selection button { min-height: 44px; border: 1px solid var(--paper-border); border-radius: 6px; padding: 6px 12px; background: var(--paper-surface); color: var(--paper-ink); }
 .paper-guide-toolbar button[aria-pressed=true] { color: var(--paper-accent); background: var(--paper-tint); }
 .paper-guide-toolbar button:disabled, .paper-guide-evidence button:disabled { opacity: .55; cursor: not-allowed; }
 .paper-guide-toolbar > div[role=group] { display: flex; }
-.paper-guide-generation { margin-left: auto; position: relative; }
+.paper-guide-generation { margin-left: auto; min-width: 0; }
 .paper-guide-generation summary { padding: 10px; min-height: 44px; box-sizing: border-box; }
-.paper-guide-generation > div { position: absolute; z-index: 105; right: 0; width: min(320px,80vw); background: var(--paper-surface); border: 1px solid var(--paper-border); padding: 20px; border-radius: 8px; }
-.paper-guide-generation label { display: grid; gap: 8px; }
-.paper-guide-generation select { max-width: 100%; padding: 10px; color: inherit; background: var(--paper-surface); }
+.paper-guide-generation > div { position: absolute; z-index: 105; top: 100%; right: 8px; width: min(320px,calc(100% - 16px)); min-width: 0; max-width: 100%; box-sizing: border-box; max-height: 50dvh; overflow: auto; overflow-wrap: anywhere; background: var(--paper-surface); border: 1px solid var(--paper-border); padding: 20px; border-radius: 8px; }
+.paper-guide-generation-close { display: block; margin: 0 0 12px auto; }
+.paper-guide-generation label { display: grid; grid-template-columns: minmax(0,1fr); min-width: 0; gap: 8px; }
+.paper-guide-generation select { width: 100%; min-width: 0; max-width: 100%; box-sizing: border-box; padding: 10px; color: inherit; background: var(--paper-surface); }
 .paper-guide-main { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; position: relative; background: var(--paper-surface); }
 .paper-guide-status { flex-shrink: 0; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 20px; background: var(--paper-tint); }
 .paper-guide-reader { flex: 1; min-height: 0; min-width: 0; display: flex; position: relative; }
@@ -300,3 +301,17 @@
 .paper-guide-image-frame > div[role=status] { padding: 20px; }
 .paper-guide-equation { max-width: 100%; overflow-x: auto; padding-block: 16px; }
 .paper-guide-byline { color: var(--paper-muted); font-size: 14px; margin: -18px 0 28px; }
+
+// Full PDF controls wrap within their source pane, independently of viewport
+// width. Translation's compact/navigation header keeps its existing layout.
+@container pdf-reader (max-width: 520px) {
+  .paper-reading-workspace .pdf-reader-header:not(.pdf-reader-header--compact) {
+    grid-template-columns: minmax(0, 1fr);
+    .pdf-reader-header-start { grid-column: 1; grid-row: 1; }
+    .pdf-reader-header-end {
+      grid-column: 1; grid-row: 2; width: 100%; min-width: 0;
+      justify-content: flex-start; flex-wrap: wrap;
+      > .pdf-reader-tools { flex: 1 1 100%; min-width: 0; flex-wrap: wrap; }
+    }
+  }
+}

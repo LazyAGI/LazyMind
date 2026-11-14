@@ -1,3 +1,4 @@
+import { useLayoutEffect, useRef, useState, type CSSProperties } from "react";
 import type { PaperGuideRevisionResponse } from "@/api/generated/core-client";
 import type { ReadingProviderSelection } from "../../api/readingPreparation";
 export default function PaperGuideGenerationDetails({
@@ -21,10 +22,62 @@ export default function PaperGuideGenerationDetails({
   active: boolean;
   onRegenerate: () => void;
 }) {
+  const details = useRef<HTMLDetailsElement>(null);
+  const [open, setOpen] = useState(false);
+  const [bounds, setBounds] = useState<CSSProperties>({});
+  useLayoutEffect(() => {
+    if (!open) return;
+    const toolbar = details.current?.closest<HTMLElement>(
+      ".paper-guide-toolbar",
+    );
+    const workspace = details.current?.closest<HTMLElement>(
+      ".paper-reading-workspace",
+    );
+    if (!toolbar || !workspace) return;
+    const fit = () => {
+      const bar = toolbar.getBoundingClientRect();
+      const bottom = Math.min(
+        window.innerHeight,
+        workspace.getBoundingClientRect().bottom,
+      );
+      // At high zoom, overlay the toolbar rather than place the actions below
+      // the visible reader. The panel itself scrolls; no actions are removed.
+      const top = bottom - bar.bottom >= 160 ? bar.height : 0;
+      setBounds({ top, maxHeight: Math.max(0, bottom - bar.top - top - 8) });
+    };
+    fit();
+    const observer = new ResizeObserver(fit);
+    observer.observe(toolbar);
+    observer.observe(workspace);
+    window.addEventListener("resize", fit);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener("resize", fit);
+    };
+  }, [open]);
+  const close = () => {
+    if (!details.current) return;
+    details.current.open = false;
+    setOpen(false);
+    details.current.querySelector("summary")?.focus();
+  };
   return (
-    <details className="paper-guide-generation">
+    <details
+      ref={details}
+      className="paper-guide-generation"
+      onToggle={(event) => setOpen(event.currentTarget.open)}
+      onKeyDown={(event) => {
+        if (event.key === "Escape") {
+          event.stopPropagation();
+          close();
+        }
+      }}
+    >
       <summary>{zh ? "生成详情" : "Generation details"}</summary>
-      <div>
+      <div style={bounds}>
+        <button className="paper-guide-generation-close" onClick={close}>
+          {zh ? "关闭详情" : "Close details"}
+        </button>
         <label>
           {zh ? "本次研读模型" : "Model for this run"}
           <select value={model} onChange={(e) => setModel(e.target.value)}>

@@ -8,7 +8,10 @@ import {
   type ReactNode,
 } from "react";
 import { useTranslation } from "react-i18next";
-import { getLocalizedErrorMessage } from "@/components/request";
+import {
+  extractErrorCode,
+  getLocalizedErrorMessage,
+} from "@/components/request";
 import type {
   PaperGuideEvidence,
   PaperGuideEvidenceResponse,
@@ -76,6 +79,21 @@ export default function PaperReadingWorkspace(p: Props) {
   const [models, setModels] = useState<ReadingProviderSelection>();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const candidate = guide.status?.candidate_revision || guide.revision;
+  const mutationScope = `${storageKey}/${language}/${candidate?.id || ""}`;
+  const latestMutationScope = useRef(mutationScope);
+  latestMutationScope.current = mutationScope;
+  const mutationSequence = useRef(0);
+  const [rejectedResume, setRejectedResume] = useState<string>();
+  const requiresRegeneration =
+    candidate?.run.error_code === "paper_guide_regeneration_required" ||
+    rejectedResume === mutationScope;
+  useEffect(() => {
+    mutationSequence.current += 1;
+    setRejectedResume(undefined);
+    setError("");
+    setBusy(false);
+  }, [mutationScope]);
   const [evidence, setEvidence] = useState<PaperGuideEvidenceResponse>();
   const [evidenceLoading, setEvidenceLoading] = useState(false);
   const evidenceAbort = useRef<AbortController>();
@@ -156,11 +174,13 @@ export default function PaperReadingWorkspace(p: Props) {
   const run = async (
     action: "generate" | "regenerate" | "cancel" | "resume",
   ) => {
-    const key = storageKey;
+    const sequence = ++mutationSequence.current;
+    const isCurrent = () =>
+      latestMutationScope.current === mutationScope &&
+      mutationSequence.current === sequence;
     setBusy(true);
     setError("");
     try {
-      const candidate = guide.status?.candidate_revision || guide.revision;
       if (action === "generate" || action === "regenerate") {
         await paperGuideApi.generate(target, {
           language,
@@ -172,11 +192,20 @@ export default function PaperReadingWorkspace(p: Props) {
       } else if (candidate) {
         await paperGuideApi[action](target, candidate.id);
       }
-      if (latest.current === key) await guide.refresh();
+      if (isCurrent()) await guide.refresh();
     } catch (e) {
-      if (latest.current === key) setError(getLocalizedErrorMessage(e));
+      if (isCurrent()) {
+        if (action === "resume" && extractErrorCode(e) === "2004413") {
+          // The response can precede status persistence. Keep this revision
+          // blocked even if the following status fetch fails or is stale.
+          setRejectedResume(mutationScope);
+          void guide.refresh().catch(() => {});
+        } else {
+          setError(getLocalizedErrorMessage(e));
+        }
+      }
     } finally {
-      if (latest.current === key) setBusy(false);
+      if (isCurrent()) setBusy(false);
     }
   };
   const requestEvidence = useCallback(
@@ -228,7 +257,8 @@ export default function PaperReadingWorkspace(p: Props) {
   const sourceVisible = !showGuide || sourceOpen;
   const auxVisible = p.auxiliaryOpen && !sourceOpen;
   const dual = width >= 1100;
-  const stage = (guide.status?.candidate_revision || guide.revision)?.run.stage;
+  const stage = candidate?.run.stage;
+  const resumable = !!stage && ["paused", "failed", "canceled"].includes(stage);
   const active = !!stage && activeStages.includes(stage);
   const errorNames = [
     "source_changed",
@@ -243,6 +273,7 @@ export default function PaperReadingWorkspace(p: Props) {
     "disabled",
     "review_required",
     "generation_failed",
+    "regeneration_required",
   ];
   const reasonText = (value?: string) => {
     if (!value) return "";
@@ -400,12 +431,12 @@ export default function PaperReadingWorkspace(p: Props) {
               <div className="paper-guide-status" role="status">
                 <span>
                   {labels[stage] || (zh ? "正在准备" : "Preparing")}{" "}
-                  {(guide.status?.candidate_revision || guide.revision)?.run
-                    .error_code && (
+                  {(requiresRegeneration || candidate?.run.error_code) && (
                     <span>
                       {reasonText(
-                        (guide.status?.candidate_revision || guide.revision)
-                          ?.run.error_code,
+                        requiresRegeneration
+                          ? "paper_guide_regeneration_required"
+                          : candidate?.run.error_code,
                       )}
                     </span>
                   )}
@@ -415,13 +446,23 @@ export default function PaperReadingWorkspace(p: Props) {
                     {zh ? "取消后续生成" : "Cancel remaining generation"}
                   </button>
                 ) : (
-                  ["paused", "failed", "canceled"].includes(stage) && (
-                    <button
-                      disabled={busy || !guide.status?.can_generate}
-                      onClick={() => void run("resume")}
-                    >
-                      {zh ? "继续生成" : "Resume"}
-                    </button>
+                  (requiresRegeneration || resumable) && (
+                    <>
+                      {!requiresRegeneration && (
+                        <button
+                          disabled={busy || !guide.status?.can_generate}
+                          onClick={() => void run("resume")}
+                        >
+                          {zh ? "继续生成" : "Resume"}
+                        </button>
+                      )}
+                      <button
+                        disabled={busy || !guide.status?.can_generate}
+                        onClick={() => void run("regenerate")}
+                      >
+                        {zh ? "重新生成导读" : "Generate a new guide"}
+                      </button>
+                    </>
                   )
                 )}
               </div>
@@ -470,7 +511,7 @@ export default function PaperReadingWorkspace(p: Props) {
                     ? "从研究背景与核心问题开始，理解主要贡献，并逐项对照原文依据。"
                     : "Understand the background, central question, contribution, and supporting evidence."}
                 </p>
-                {!active && (
+                {!active && !candidate && (
                   <>
                     <button
                       disabled={busy || !guide.status?.can_generate}

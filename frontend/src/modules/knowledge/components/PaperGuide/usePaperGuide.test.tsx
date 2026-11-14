@@ -144,3 +144,78 @@ it("retries a failed revision behind a cached status ETag, keeping its error unt
   await act(() => h.result.current.refresh());
   expect(api.revision).toHaveBeenCalledTimes(4);
 });
+
+it.each([false, true])(
+  "follows a new candidate from an empty unpublished run (newly completed: %s)",
+  async (completed) => {
+    const empty = {
+      ...revision(),
+      sections: [],
+      run: { ...revision().run, stage: "paused" },
+    };
+    const next = { ...revision(), id: "r2" };
+    api.status.mockResolvedValue({
+      data: {
+        ...status(),
+        published_revision: null,
+        candidate_revision: empty,
+      },
+      etag: "empty",
+    });
+    api.revision.mockImplementation(async (_, id) =>
+      id === "r2" ? next : empty,
+    );
+    const h = renderHook(() => usePaperGuide("ds", "doc", "zh", true));
+    await waitFor(() =>
+      expect(h.result.current.revision?.sections).toEqual([]),
+    );
+    api.status.mockResolvedValue({
+      data: {
+        ...status(),
+        published_revision: completed ? next : null,
+        candidate_revision: completed ? null : next,
+      },
+      etag: "new",
+    });
+    await act(() => h.result.current.refresh());
+    expect(h.result.current.revision?.id).toBe("r2");
+    expect(h.result.current.revision?.sections).toHaveLength(4);
+    expect(api.revision).toHaveBeenLastCalledWith(
+      expect.anything(),
+      "r2",
+      0,
+      expect.anything(),
+    );
+  },
+);
+it("preserves an unfinished candidate with readable passages when another candidate starts", async () => {
+  const partial = {
+    ...revision(),
+    sections: [section("background")],
+    run: { ...revision().run, stage: "paused" },
+  };
+  api.status.mockResolvedValue({
+    data: {
+      ...status(),
+      published_revision: null,
+      candidate_revision: partial,
+    },
+    etag: "partial",
+  });
+  api.revision.mockResolvedValue(partial);
+  const h = renderHook(() => usePaperGuide("ds", "doc", "zh", true));
+  await waitFor(() =>
+    expect(h.result.current.revision?.sections).toHaveLength(1),
+  );
+  api.status.mockResolvedValue({
+    data: {
+      ...status(),
+      published_revision: null,
+      candidate_revision: { ...revision(), id: "r2" },
+    },
+    etag: "new",
+  });
+  await act(() => h.result.current.refresh());
+  expect(h.result.current.revision?.id).toBe("r1");
+  expect(h.result.current.revision?.sections).toHaveLength(1);
+});

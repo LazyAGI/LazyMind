@@ -27,7 +27,8 @@ vi.mock("../api/paperGuide", () => ({ paperGuideApi: api }));
 vi.mock("../api/readingPreparation", () => ({
   getReadingPreferences: api.prefs,
 }));
-vi.mock("@/components/request", () => ({
+vi.mock("@/components/request", async (original) => ({
+  ...(await original<typeof import("@/components/request")>()),
   getLocalizedErrorMessage: (e: Error) => e.message,
 }));
 vi.mock("react-i18next", async (original) => ({
@@ -42,7 +43,7 @@ beforeEach(() => {
     status: status(),
     revision: revision(),
     identity: "u",
-    refresh: vi.fn(),
+    refresh: vi.fn().mockResolvedValue(undefined),
     selectRevision: vi.fn(),
   };
   api.prefs.mockResolvedValue({
@@ -51,12 +52,12 @@ beforeEach(() => {
     },
   });
 });
-function Harness() {
+function Harness({ document = "doc" }: { document?: string }) {
   const [tab, setTab] = useState<string>();
   return (
     <PaperReadingWorkspace
       dataset="ds"
-      document="doc"
+      document={document}
       title="Paper"
       eligible
       source={<div>PDF viewer</div>}
@@ -235,3 +236,175 @@ it("keeps the same reserved figure and caption rows through delayed evidence and
   );
   expect(caption).toHaveTextContent("PDF 3");
 });
+
+function pausedCandidate(
+  errorCode = "paper_guide_invalid_evidence",
+  id = "r2",
+) {
+  return {
+    ...revision(),
+    id,
+    sections: [],
+    run: { ...revision().run, id, stage: "paused", error_code: errorCode },
+  };
+}
+function showPaused(errorCode?: string, empty = false) {
+  state.value = {
+    ...state.value,
+    status: { ...status(), candidate_revision: pausedCandidate(errorCode) },
+    ...(empty ? { revision: undefined } : {}),
+  };
+}
+const regenerationError = () =>
+  Object.assign(new Error("regeneration required"), {
+    response: { status: 409, data: { code: 2004413 } },
+  });
+
+it("replaces incompatible resume with an explicit new revision while preserving the open article", async () => {
+  showPaused("paper_guide_regeneration_required");
+  render(<Harness />);
+  fireEvent.click(screen.getByRole("button", { name: "Guide" }));
+  expect(
+    screen.queryByRole("button", { name: "Resume" }),
+  ).not.toBeInTheDocument();
+  expect(screen.getByRole("status")).toHaveTextContent("errors.2004413");
+  await screen.findByRole("option", { name: "Per-run model" });
+  fireEvent.change(screen.getByLabelText("Model for this run"), {
+    target: { value: "own:run" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Generate a new guide" }));
+  await waitFor(() =>
+    expect(api.generate).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        regenerate: true,
+        expected_source_hash: "hash",
+        model_ref: "own:run",
+      }),
+    ),
+  );
+  expect(screen.getByRole("article")).toBeVisible();
+});
+it("remembers a rejected resume immediately through stale status and failed refresh", async () => {
+  showPaused();
+  api.resume.mockRejectedValueOnce(regenerationError());
+  state.value.refresh = vi.fn().mockRejectedValue(new Error("offline"));
+  const view = render(<Harness />);
+  fireEvent.click(screen.getByRole("button", { name: "Guide" }));
+  fireEvent.click(screen.getByRole("button", { name: "Resume" }));
+  await screen.findByRole("button", { name: "Generate a new guide" });
+  expect(
+    screen.queryByRole("button", { name: "Resume" }),
+  ).not.toBeInTheDocument();
+  view.rerender(<Harness />);
+  expect(screen.getByRole("status")).toHaveTextContent("errors.2004413");
+  expect(api.resume).toHaveBeenCalledTimes(1);
+});
+it.each(["paper_guide_invalid_evidence", "paper_guide_regeneration_required"])(
+  "never offers initial generation for an empty paused %s candidate",
+  async (code) => {
+    showPaused(code, true);
+    render(<Harness />);
+    fireEvent.click(screen.getByRole("button", { name: "Guide" }));
+    expect(
+      screen.queryByRole("button", {
+        name: /Prepare paper and generate guide|Generate paper guide/,
+      }),
+    ).not.toBeInTheDocument();
+    const incompatible = code === "paper_guide_regeneration_required";
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: incompatible ? "Generate a new guide" : "Resume",
+      }),
+    );
+    await waitFor(() =>
+      incompatible
+        ? expect(api.generate).toHaveBeenCalledWith(
+            expect.anything(),
+            expect.objectContaining({ regenerate: true }),
+          )
+        : expect(api.resume).toHaveBeenCalledWith(expect.anything(), "r2"),
+    );
+    if (!incompatible) expect(api.generate).not.toHaveBeenCalled();
+  },
+);
+it("does not treat unrelated conflicts as an incompatible generation format", async () => {
+  showPaused();
+  api.resume.mockRejectedValueOnce(
+    Object.assign(new Error("source changed"), {
+      response: { status: 409, data: { code: 2004401 } },
+    }),
+  );
+  render(<Harness />);
+  fireEvent.click(screen.getByRole("button", { name: "Guide" }));
+  fireEvent.click(screen.getByRole("button", { name: "Resume" }));
+  await screen.findByRole("alert");
+  expect(screen.getByRole("button", { name: "Resume" })).toBeEnabled();
+  expect(screen.getByRole("status")).not.toHaveTextContent("errors.2004413");
+});
+it.each(["candidate", "document", "identity"])(
+  "does not apply a late resume rejection after switching %s",
+  async (scope) => {
+    showPaused();
+    let reject!: (reason: unknown) => void;
+    api.resume.mockImplementationOnce(
+      () =>
+        new Promise((_, r) => {
+          reject = r;
+        }),
+    );
+    const view = render(<Harness />);
+    fireEvent.click(screen.getByRole("button", { name: "Guide" }));
+    fireEvent.click(screen.getByRole("button", { name: "Resume" }));
+    if (scope === "candidate")
+      state.value = {
+        ...state.value,
+        status: {
+          ...status(),
+          candidate_revision: pausedCandidate(undefined, "r3"),
+        },
+      };
+    if (scope === "identity")
+      state.value = { ...state.value, identity: "other" };
+    view.rerender(<Harness document={scope === "document" ? "doc2" : "doc"} />);
+    await act(async () => reject(regenerationError()));
+    await act(async () =>
+      fireEvent.click(screen.getByRole("button", { name: "Guide" })),
+    );
+    expect(screen.getByRole("button", { name: "Resume" })).toBeEnabled();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(screen.getByRole("status")).not.toHaveTextContent("errors.2004413");
+  },
+);
+
+it.each(["candidate", "document", "identity"])(
+  "clears a known incompatible resume when switching %s",
+  async (scope) => {
+    showPaused();
+    api.resume.mockRejectedValueOnce(regenerationError());
+    const view = render(<Harness />);
+    fireEvent.click(screen.getByRole("button", { name: "Guide" }));
+    fireEvent.click(screen.getByRole("button", { name: "Resume" }));
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("button", { name: "Resume" }),
+      ).not.toBeInTheDocument(),
+    );
+    if (scope === "candidate")
+      state.value = {
+        ...state.value,
+        status: {
+          ...status(),
+          candidate_revision: pausedCandidate(undefined, "r3"),
+        },
+      };
+    if (scope === "identity")
+      state.value = { ...state.value, identity: "other" };
+    view.rerender(<Harness document={scope === "document" ? "doc2" : "doc"} />);
+    await act(async () =>
+      fireEvent.click(screen.getByRole("button", { name: "Guide" })),
+    );
+    expect(screen.getByRole("button", { name: "Resume" })).toBeEnabled();
+    expect(screen.getByRole("status")).not.toHaveTextContent("errors.2004413");
+  },
+);

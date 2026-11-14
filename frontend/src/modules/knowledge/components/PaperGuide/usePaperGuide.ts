@@ -67,12 +67,19 @@ export function usePaperGuide(
         setState({ key, status: session.status, revision: session.revision });
         return;
       }
+      const followLatest =
+        !session.revision?.sections.length &&
+        !session.status?.published_revision;
       session.etag = response.etag || session.etag;
       session.status = response.data || session.status;
-      const selected =
-        session.selected ||
+      const newest =
         session.status?.published_revision?.id ||
         session.status?.candidate_revision?.id;
+      // An empty, unpublished failed attempt is not a reading position to
+      // preserve. Follow its replacement without disturbing any readable draft.
+      const selected = followLatest
+        ? newest || session.selected
+        : session.selected || newest;
       if (selected) {
         session.selected = selected;
         session.revisionPending = true;
