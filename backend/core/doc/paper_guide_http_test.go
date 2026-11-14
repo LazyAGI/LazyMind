@@ -453,7 +453,7 @@ func TestPaperGuideClientContractFailuresReachRunnerAsEvidenceErrors(t *testing.
 				if kind == "timeout" {
 					return testJSONResponse(504, `{"detail":{"error_code":"task_timeout","usage":{"model_calls":1,"elapsed_ms":120000}}}`), nil
 				}
-				usage := map[string]any{"task_type": "paper.guide.plan", "task_version": "paper-guide-v4", "model_calls": 1, "elapsed_ms": 19}
+				usage := map[string]any{"task_type": "paper.guide.plan", "task_version": "paper-guide-v5", "model_calls": 1, "elapsed_ms": 19}
 				if kind == "model_calls" {
 					usage[kind] = 2
 				} else {
@@ -503,6 +503,57 @@ func TestPaperGuideClientContractFailuresReachRunnerAsEvidenceErrors(t *testing.
 				if json.Unmarshal([]byte(marker.OutputJSON), &diagnostic) != nil || diagnostic.Class != class || strings.Contains(marker.OutputJSON, "provider-secret") {
 					t.Fatalf("wrong safe diagnostic: %s", marker.OutputJSON)
 				}
+			}
+		})
+	}
+}
+
+func TestPaperGuideServiceHTTPVersionMatchesDurableAndPythonContract(t *testing.T) {
+	// This fixture is independently checked against the real Python registry and
+	// measured task templates. Never derive the server response from the request:
+	// echoing it would accept an obsolete Go adapter version on both sides.
+	raw, err := os.ReadFile("../paperguide/testdata/request-budget.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var expected struct {
+		Version string `json:"task_version"`
+	}
+	if err := json.Unmarshal(raw, &expected); err != nil {
+		t.Fatal(err)
+	}
+	if expected.Version == "" || expected.Version != paperguide.TaskVersion {
+		t.Fatalf("durable/Python contract mismatch: fixture=%s durable=%s", expected.Version, paperguide.TaskVersion)
+	}
+	for _, task := range []string{"paper.guide.extract", "paper.guide.plan", "paper.guide.section", "paper.guide.review"} {
+		t.Run(task, func(t *testing.T) {
+			calls := 0
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				calls++
+				var request struct {
+					Task    string `json:"task_type"`
+					Options struct {
+						Version string `json:"task_version"`
+					} `json:"options"`
+				}
+				if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+					t.Errorf("decode actual HTTP request: %v", err)
+				}
+				if r.URL.Path != "/api/chat/llm-task:run" || request.Task != task || request.Options.Version != expected.Version {
+					t.Errorf("worker HTTP contract: task=%s version=%s; want %s %s", request.Task, request.Options.Version, task, expected.Version)
+				}
+				w.Header().Set("Content-Type", "application/json")
+				_ = json.NewEncoder(w).Encode(map[string]any{
+					"status": "succeeded", "output": map[string]any{"accepted": true},
+					"usage": map[string]any{"task_type": task, "task_version": expected.Version, "model_calls": 1},
+				})
+			}))
+			defer server.Close()
+			t.Setenv("LAZYMIND_CHAT_SERVICE_URL", server.URL)
+			// Exercise the actual worker callback, not a hand-built client request.
+			output, err := paperGuideService().Call(t.Context(), task, map[string]any{"language": "en"}, nil)
+			if err != nil || string(output) != `{"accepted":true}` || calls != 1 {
+				t.Fatalf("worker did not receive successful contract output: output=%s err=%v calls=%d", output, err, calls)
 			}
 		})
 	}

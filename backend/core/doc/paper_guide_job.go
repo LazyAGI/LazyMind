@@ -14,7 +14,7 @@ const PaperGuideJobType = paperguide.JobType
 
 func paperGuideService() paperguide.Service {
 	return paperguide.Service{FeatureEnabled: PaperGuideEnabled, Repo: paperguide.Repository{DB: store.DB(), PrepareCheckpoint: preparePaperGuideCheckpoint, CheckpointGuard: paperGuideCheckpointGuard}, Source: paperGuideSource{}, Authorize: authorizePaperGuide, ResolveModel: resolvePaperGuideModel, Call: func(ctx context.Context, task string, input map[string]any, cfg map[string]any) (json.RawMessage, error) {
-		result, e := algo.RunStructuredTask(ctx, algo.StructuredTaskRequest{Task: task, Version: algo.PaperGuideTaskVersion, Input: input, LLMConfig: cfg})
+		result, e := algo.RunStructuredTask(ctx, algo.StructuredTaskRequest{Task: task, Version: paperguide.TaskVersion, Input: input, LLMConfig: cfg})
 		if e != nil {
 			// Preserve only safe cancellation causes, never raw provider errors.
 			if ctx.Err() != nil {
