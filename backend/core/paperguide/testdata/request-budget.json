@@ -1,5 +1,5 @@
 {
-  "task_version": "paper-guide-v9",
+  "task_version": "paper-guide-v10",
   "prompt_reserve_bytes": 10240,
   "provider_frame_reserve_bytes": 512,
   "input_defaults_reserve_bytes": 256,
@@ -7,7 +7,7 @@
   "measured_prompt_bytes": {
     "paper.guide.extract": 3232,
     "paper.guide.plan": 9220,
-    "paper.guide.section": 7143,
-    "paper.guide.review": 4341
+    "paper.guide.section": 7344,
+    "paper.guide.review": 4930
   }
 }

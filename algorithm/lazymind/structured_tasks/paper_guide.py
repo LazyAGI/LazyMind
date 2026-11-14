@@ -98,7 +98,9 @@ role, and only use claims whose evidence is in this packet. For compact angle no
 LaTeX \\langle and \\rangle within math. For visual assets use only planned
 IDs from the packet with a matching block kind. Give section-specific block and new-claim IDs
 (e.g. contribution-b1), and provide a short continuity summary. If findings are present, repair
-their concrete scope and preserve the rest of the section's commitments.
+their concrete scope and preserve the rest of the section's commitments. Whole-guide corrections
+receive the independent planning source packet: newly needed paper facts must cite actual evidence
+from this packet, with new claims as above; a finding is not itself evidence.
 """
 
 REVIEW = """
@@ -113,6 +115,12 @@ mistake a nonexclusive source-equivalent overview for an exhaustive list. A shar
 requires no repeated explanation. Scope never excuses incorrect assertions: necessary/sufficient
 reversals, causal overreach, incorrect numbers, missing qualifications and unsupported assertions
 still require factual findings, not a downgrade to missing_explanation.
+For the complete guide, evidence is the independent source packet available before Plan selection.
+Check it for central omissions even when Plan and prose selected no reference to that material.
+An extraction-scoped packet contains retained original evidence and complete table groups, not every
+original span; source_sections is a directory, not missing source text. Respect coverage warnings.
+Use semantic prose in suggestions, never request-local source aliases or canonical source IDs as
+cross-call references; the repairer must choose structured citations from its supplied evidence.
 For the complete guide, check actual prose somewhere for essential concepts, framework components'
 use/relationships, and central comparisons with their conditions; include Plan omissions only when
 needed to understand the central evidence or argument. Accept equivalent plain language and a

@@ -252,6 +252,39 @@ func TestLongPlanExtractsCoverAllOriginalEvidenceAndRemainBounded(t *testing.T) 
 			if extractCalls < 2 || extractCalls > 8 || len(seen) != len(snap.Evidence) || !x.inputFits(input) {
 				t.Fatalf("coverage=%d/%d calls=%d", len(seen), len(snap.Evidence), extractCalls)
 			}
+			// A saved Plan fixes extraction provenance. Reconstruction must have
+			// byte-identical input/hash and must never call the model again.
+			x.steps["plan"] = orm.PaperGuideStep{}
+			beforeResume := extractCalls
+			rebuilt, rebuiltPacket, err := x.planInput(t.Context())
+			if err != nil || digest(rebuilt) != digest(input) || extractCalls != beforeResume {
+				t.Fatalf("reconstruction changed input or replayed extract: %v", err)
+			}
+			if digest(rebuilt["evidence"]) != digest(rebuiltPacket.Evidence) {
+				t.Fatal("packet/input differ")
+			}
+			original := x.steps["extract:1"]
+			for _, mutation := range []string{"missing", "hash", "json", "unknown_evidence"} {
+				bad := original
+				switch mutation {
+				case "missing":
+					delete(x.steps, "extract:1")
+				case "hash":
+					bad.InputHash = "wrong"
+					x.steps["extract:1"] = bad
+				case "json":
+					bad.OutputJSON = "{corrupt"
+					x.steps["extract:1"] = bad
+				case "unknown_evidence":
+					bad.OutputJSON = string(mustJSON(GuideExtract{Claims: []GuideClaim{{ID: "c", Statement: "Unknown", Attribution: AttributionPaper, EvidenceIDs: []string{"unknown"}, SupportStatus: SupportSupported}}}))
+					x.steps["extract:1"] = bad
+				}
+				if _, _, err := x.planInput(t.Context()); err == nil || extractCalls != beforeResume {
+					t.Fatalf("accepted/replayed corrupt checkpoint %s: %v", mutation, err)
+				}
+				x.steps["extract:1"] = original
+			}
+			delete(x.steps, "plan")
 			model.ContextTokens = 100
 			x.model = model
 			before := extractCalls
@@ -454,7 +487,7 @@ func TestWholeReviewProjectsExactPublishedVersions(t *testing.T) {
 }
 
 func TestLegacyCandidateCannotSpendOrResumeUnderNewContract(t *testing.T) {
-	for _, version := range []string{"paper-guide-v1", "paper-guide-v2", "paper-guide-v3", "paper-guide-v4", "paper-guide-v5", "paper-guide-v6", "paper-guide-v7", "paper-guide-v8"} {
+	for _, version := range []string{"paper-guide-v1", "paper-guide-v2", "paper-guide-v3", "paper-guide-v4", "paper-guide-v5", "paper-guide-v6", "paper-guide-v7", "paper-guide-v8", "paper-guide-v9"} {
 		t.Run(version, func(t *testing.T) {
 			d, id := fixture(t)
 			snap, _ := BuildSourceSnapshot(d, id)

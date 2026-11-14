@@ -186,6 +186,17 @@ func TestExtractPlanningRetainsCompletePhysicalTableEvenWithoutExtractClaim(t *t
 	if count != 3 {
 		t.Fatalf("planning dropped physical table: %d", count)
 	}
+	before := calls
+	x.steps["plan"] = orm.PaperGuideStep{}
+	_, rebuilt, e := x.planInput(t.Context())
+	if e != nil || calls != before || digest(rebuilt.Evidence) != digest(packet.Evidence) {
+		t.Fatalf("resume lost physical table or replayed extraction: %v", e)
+	}
+	x.planningPacket, x.extractedScope = rebuilt, true
+	input := x.independentInput()
+	if digest(input["evidence"]) != digest(packet.Evidence) || digest(input["source_sections"]) != digest(snap.Sections) {
+		t.Fatal("independent review/repair packet lost table closure or original directory")
+	}
 }
 
 func TestMockGuidePlansParentOnceAndCitesPhysicalPage(t *testing.T) {

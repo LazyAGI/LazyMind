@@ -27,6 +27,8 @@ type execution struct {
 	snap             GuideSourceSnapshot
 	f                asyncjob.FencedReporter
 	steps            map[string]orm.PaperGuideStep
+	planningPacket   GuideSourceSnapshot
+	extractedScope   bool
 }
 
 func (s Service) Run(ctx context.Context, job asyncjob.Job, reporter asyncjob.Reporter) (asyncjob.Result, error) {
@@ -216,20 +218,18 @@ func (x *execution) execute(ctx context.Context) error {
 	if e = x.s.Repo.Transition(ctx, x.f, x.rev.ID, x.rev.Epoch, "analyzing", ""); e != nil {
 		return e
 	}
+	// Retain the independent packet before Plan selects claims. On resume this
+	// reconstructs only from immutable, validated extraction checkpoints.
+	input, packet, e := x.planInput(ctx)
+	if e != nil {
+		return e
+	}
+	x.planningPacket = packet
+	_, x.extractedScope = input["extracts"]
 	var plan GuidePlan
-	if saved, ok := x.steps["plan"]; ok {
-		if e = json.Unmarshal([]byte(saved.OutputJSON), &plan); e != nil {
-			return e
-		}
-	} else {
-		input, packet, e := x.planInput(ctx)
-		if e != nil {
-			return e
-		}
-		e = x.task(ctx, "plan", "paper.guide.plan", input, &plan, func() error { return ValidatePlan(packet, plan) })
-		if e != nil {
-			return e
-		}
+	metadata := mustMarshal(planningScope{Extracted: x.extractedScope})
+	if e = x.task(ctx, "plan", "paper.guide.plan", input, &plan, func() error { return ValidatePlan(packet, plan) }, metadata); e != nil {
+		return e
 	}
 	sections := []GuideSection{}
 	for _, sp := range plan.Sections {
@@ -262,11 +262,7 @@ func (x *execution) execute(ctx context.Context) error {
 	// Whole review may produce at most one correction for each of at most two
 	// locations. Every corrected section is checked again and appended as v2.
 	for round := 1; round <= 2; round++ {
-		packet, e := sectionPacket(x.snap, plan, sections)
-		if e != nil {
-			return e
-		}
-		input := x.input(packet)
+		input := x.independentInput()
 		input["plan"] = plan
 		input["sections"] = reviewSections(sections)
 		var review GuideReview
@@ -297,7 +293,7 @@ func (x *execution) execute(ctx context.Context) error {
 				return e
 			}
 			finalStatus := "complete"
-			if len(x.snap.Coverage.PageWarnings) > 0 || len(x.snap.Coverage.Warnings) > 0 {
+			if x.extractedScope || len(x.snap.Coverage.PageWarnings) > 0 || len(x.snap.Coverage.Warnings) > 0 {
 				finalStatus = "limited"
 			}
 			if e = x.settleOverhead(ctx); e != nil {
@@ -455,7 +451,25 @@ func (x *execution) planInput(ctx context.Context) (map[string]any, GuideSourceS
 	keep := map[string]bool{}
 	for i, packet := range packets {
 		var out GuideExtract
-		e := x.task(ctx, "extract:"+stringInt(int64(i+1)), "paper.guide.extract", x.input(packet), &out, func() error { return ValidateExtract(packet, out) })
+		key := "extract:" + stringInt(int64(i+1))
+		extractInput := x.input(packet)
+		var e error
+		if _, savedPlan := x.steps["plan"]; savedPlan {
+			// A saved Plan fixes provenance: never spend to recreate a missing,
+			// corrupt or differently partitioned extract checkpoint.
+			saved, ok := x.steps[key]
+			if !ok {
+				return nil, GuideSourceSnapshot{}, ErrEvidence
+			}
+			if saved.InputHash != digest([]any{TaskVersion, extractInput}) {
+				return nil, GuideSourceSnapshot{}, ErrConflict
+			}
+			if decodeStrict([]byte(saved.OutputJSON), &out) != nil || ValidateExtract(packet, out) != nil {
+				return nil, GuideSourceSnapshot{}, ErrEvidence
+			}
+		} else {
+			e = x.task(ctx, key, "paper.guide.extract", extractInput, &out, func() error { return ValidateExtract(packet, out) })
+		}
 		if e != nil {
 			return nil, GuideSourceSnapshot{}, e
 		}
@@ -494,23 +508,27 @@ func (x *execution) planInput(ctx context.Context) (map[string]any, GuideSourceS
 	}
 	return input, packet, nil
 }
-func sectionPacket(snap GuideSourceSnapshot, plan GuidePlan, sections []GuideSection) (GuideSourceSnapshot, error) {
-	ids := []string{}
-	for _, s := range sections {
-		for _, c := range append(append([]GuideClaim{}, plan.Claims...), s.Claims...) {
-			if contains(s.ClaimIDs, c.ID) {
-				ids = append(ids, c.EvidenceIDs...)
-			}
-		}
-		for _, b := range s.Blocks {
-			ids = append(ids, b.EvidenceIDs...)
-			if b.AssetID != "" {
-				ids = append(ids, b.AssetID)
-			}
-		}
-	}
-	return RestrictEvidence(snap, unique(ids))
+
+// This diagnostic describes evidence availability, not source unavailability or
+// a quality waiver. It is copied into requests and the existing public coverage
+// warnings; neither the frozen snapshot nor published artifacts are rewritten.
+const extractedReviewWarning = "全篇审核覆盖独立抽取保留的原文证据及完整表格组，不是全部原文逐段审核；抽取未保留的内容可能未被检查。这不代表原文缺失，也不豁免已发现的事实或解释缺陷。"
+
+type planningScope struct {
+	Extracted bool `json:"independent_extracted_scope"`
 }
+
+func (x *execution) independentInput() map[string]any {
+	packet := x.planningPacket
+	if x.extractedScope {
+		packet.Coverage.Warnings = append(append([]string{}, packet.Coverage.Warnings...), extractedReviewWarning)
+	}
+	input := x.input(packet)
+	input["coverage"] = packet.Coverage
+	input["source_sections"] = x.snap.Sections
+	return input
+}
+
 func unique(ids []string) []string {
 	out := []string{}
 	seen := map[string]bool{}
@@ -542,6 +560,10 @@ func (x *execution) writeSection(ctx context.Context, p GuidePlan, sp GuideSecti
 		return GuideSection{}, "", e
 	}
 	input := x.input(packet)
+	if deferReview {
+		packet = x.planningPacket
+		input = x.independentInput()
+	}
 	input["plan"] = p
 	input["role"] = sp.Role
 	if len(prior) > 0 {

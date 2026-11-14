@@ -137,7 +137,7 @@ func TestImpossibleOutputReserveMakesZeroModelCalls(t *testing.T) {
 }
 
 func TestV2ThroughV8PublishedGuideAndSelectionRemainReadable(t *testing.T) {
-	for _, version := range []string{"paper-guide-v2", "paper-guide-v3", "paper-guide-v4", "paper-guide-v5", "paper-guide-v6", "paper-guide-v7", "paper-guide-v8"} {
+	for _, version := range []string{"paper-guide-v2", "paper-guide-v3", "paper-guide-v4", "paper-guide-v5", "paper-guide-v6", "paper-guide-v7", "paper-guide-v8", "paper-guide-v9"} {
 		t.Run(version, func(t *testing.T) {
 			d, id := fixture(t)
 			current, _ := BuildSourceSnapshot(d, id)

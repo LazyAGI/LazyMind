@@ -256,6 +256,10 @@ func (s Service) Revision(ctx context.Context, scope Scope, id string, after int
 	latest := map[Role]PublishedSection{}
 	for _, step := range steps {
 		if step.StepKey == "plan" {
+			var scope planningScope
+			if json.Unmarshal([]byte(step.ReviewJSON), &scope) == nil && scope.Extracted {
+				out.Coverage.Warnings = append(append([]string{}, out.Coverage.Warnings...), extractedReviewWarning)
+			}
 			var p GuidePlan
 			if json.Unmarshal([]byte(step.OutputJSON), &p) == nil {
 				out.Plan = &p

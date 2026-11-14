@@ -265,7 +265,7 @@ def test_registered_task_uses_alias_schema_and_returns_canonical_wire(monkeypatc
         return json.dumps(model_output(task, output))
     monkeypatch.setattr(llm_task, 'AutoModel', lambda **kwargs: model)
     request = llm_task.LLMTaskRequest(task_type=f'paper.guide.{task}',
-        options={'task_version': 'paper-guide-v9'}, input={'data': raw})
+        options={'task_version': 'paper-guide-v10'}, input={'data': raw})
     result = llm_task.run_llm_task(request)
     assert result.status == 'succeeded' and result.output == output
     assert len(calls) == result.usage['model_calls'] == 1
@@ -283,7 +283,7 @@ def test_alias_schema_keeps_duplicate_json_key_rejection(monkeypatch):
         return '{"claims":[],"claims":[],"open_questions":[]}'
     monkeypatch.setattr(llm_task, 'AutoModel', lambda **kwargs: model)
     request = llm_task.LLMTaskRequest(task_type='paper.guide.extract',
-        options={'task_version': 'paper-guide-v9'}, input={'data': cases()['extract'][2]})
+        options={'task_version': 'paper-guide-v10'}, input={'data': cases()['extract'][2]})
     assert llm_task.run_llm_task(request).error_code == 'invalid_model_output'
     assert len(calls) == 1
 
@@ -299,7 +299,7 @@ def test_review_keeps_teaching_and_factual_findings_bound_without_reclassificati
     output['findings'][0].update(issue_type=issue, target_type=target_type)
     monkeypatch.setattr(llm_task, 'AutoModel', lambda **kwargs: lambda *a, **k: json.dumps(output))
     request = llm_task.LLMTaskRequest(task_type='paper.guide.review',
-        options={'task_version': 'paper-guide-v9'}, input={'data': raw})
+        options={'task_version': 'paper-guide-v10'}, input={'data': raw})
     result = llm_task.run_llm_task(request)
     assert result.status == 'succeeded'
     assert result.output == output
@@ -348,7 +348,7 @@ def test_alias_failure_never_triggers_an_extra_model_attempt(monkeypatch, bad):
         return json.dumps(output)
     monkeypatch.setattr(llm_task, 'AutoModel', lambda **kwargs: model)
     request = llm_task.LLMTaskRequest(task_type='paper.guide.extract',
-        options={'task_version': 'paper-guide-v9'}, input={'data': cases()['extract'][2]})
+        options={'task_version': 'paper-guide-v10'}, input={'data': cases()['extract'][2]})
     result = llm_task.run_llm_task(request)
     assert result.error_code == 'invalid_model_output'
     assert len(calls) == result.usage['model_calls'] == 1
@@ -365,7 +365,7 @@ def test_concurrent_registered_calls_cannot_share_alias_identity(monkeypatch):
         raw['evidence'][0]['id'] = source
         raw['source_sections'][0]['evidence_ids'] = [source]
         request = llm_task.LLMTaskRequest(task_type='paper.guide.extract',
-            options={'task_version': 'paper-guide-v9'}, input={'data': raw})
+            options={'task_version': 'paper-guide-v10'}, input={'data': raw})
         result = llm_task.run_llm_task(request)
         assert result.status == 'succeeded' and result.usage['model_calls'] == 1
         return result.output['claims'][0]['evidence_ids']
@@ -437,5 +437,50 @@ def test_shared_physical_fragment_fixture_uses_actual_task_transport(monkeypatch
     result = llm_task.run_llm_task(request)
     assert result.status == 'succeeded'
     assert result.output == fixture['output']
-    assert result.usage['task_version'] == 'paper-guide-v9'
+    assert result.usage['task_version'] == 'paper-guide-v10'
     assert result.usage['model_calls'] == 1
+
+
+def test_independent_review_packet_allows_new_repair_citations_only_from_actual_evidence():
+    from lazymind.structured_tasks.paper_guide_references import SourceReferences
+    I, _, raw, output = cases()['section']
+    raw['evidence'].append({'id': B, 'source_block_id': 'independent-source', 'source_type': 'text',
+                            'text': 'The collection process was validated independently.',
+                            'locator': {'kind': 'page', 'page': 1}})
+    raw['source_sections'][0]['evidence_ids'].append(B)
+    raw['findings'] = [{'target_id': 'e1', 'target_type': 'block',
+                       'issue_type': 'missing_explanation',
+                       'suggestion': 'Explain how collection-process validation supports reliability.'}]
+    data = I.model_validate(raw)
+    refs = SourceReferences('section', data)
+    assert refs.model_input['evidence'][1]['id'] == 'e2'
+    assert refs.model_input['findings'] == raw['findings']
+    assert refs.model_input['source_sections'][0]['evidence_ids'] == ['e1', 'e2']
+    repaired = model_output('section', output)
+    repaired['claims'] = [{'id': 'background-new', 'statement': raw['evidence'][1]['text'],
+                           'attribution': 'paper_statement', 'evidence_ids': ['e2'],
+                           'argument_type': None, 'conditions': [], 'support_status': 'supported'}]
+    repaired['claim_ids'].append('background-new')
+    repaired['blocks'].append({'id': 'background-validation', 'kind': 'paragraph',
+                               'text': raw['evidence'][1]['text'], 'attribution': 'paper_statement',
+                               'claim_ids': ['background-new'], 'evidence_ids': []})
+    canonical = Section.model_validate(refs.canonical_output(repaired, 256 << 10))
+    bind_output(data, canonical)
+    assert canonical.claims[0].evidence_ids == [B]
+    review_data = ReviewInput.model_validate(
+        {k: v for k, v in {**raw, 'sections': [canonical.model_dump()]}.items()
+         if k not in ('role', 'findings')})
+    view = SourceReferences('review', review_data).model_input
+    assert view['evidence'][1]['text'] == raw['evidence'][1]['text']
+    assert view['sections'][0]['claims'][0]['evidence_ids'] == ['e2']
+    assert view['plan']['claims'][0]['evidence_ids'] == ['e1']
+    # A directory reference and a suggestion cannot authorize an absent source.
+    narrowed = deepcopy(raw)
+    narrowed['evidence'] = narrowed['evidence'][:1]
+    narrow_data = I.model_validate(narrowed)
+    narrow_refs = SourceReferences('section', narrow_data)
+    with pytest.raises(ValueError, match='unknown ID'):
+        bind_output(narrow_data, Section.model_validate(narrow_refs.canonical_output(repaired, 256 << 10)))
+    repaired['claims'][0]['evidence_ids'] = ['e9999']
+    with pytest.raises(ValueError):
+        refs.canonical_output(repaired, 256 << 10)

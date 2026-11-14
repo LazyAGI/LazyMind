@@ -28,7 +28,7 @@ def mixed_material():
     return source, output, encoded
 
 
-def invoke(monkeypatch, source, output, version='paper-guide-v9'):
+def invoke(monkeypatch, source, output, version='paper-guide-v10'):
     from lazymind.chat.service import llm_task
     calls = []
     def model(prompt, **options):
@@ -81,7 +81,7 @@ def test_unknown_excluded_asset_is_not_a_missing_resource_escape_hatch(monkeypat
     assert result.error_code == 'invalid_model_output' and len(calls) == 1
 
 
-@pytest.mark.parametrize('version', ['paper-guide-v4', 'paper-guide-v5', 'paper-guide-v6', 'paper-guide-v7', 'paper-guide-v8'])
+@pytest.mark.parametrize('version', ['paper-guide-v4', 'paper-guide-v5', 'paper-guide-v6', 'paper-guide-v7', 'paper-guide-v8', 'paper-guide-v9'])
 def test_old_request_cannot_spend_under_precision_contract(monkeypatch, version):
     source, _, encoded = mixed_material()
     result, calls = invoke(monkeypatch, source, encoded, version=version)

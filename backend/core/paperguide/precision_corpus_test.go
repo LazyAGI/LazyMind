@@ -135,7 +135,9 @@ func TestPhysicalTableCorpusAdmission(t *testing.T) {
 				bound := len(raw) + guideInputDefaultsReserve + len(snap.Evidence)*guideEvidenceExpansionReserve + guidePromptReserve
 				fit := len(snap.Sections) <= 512 && x.inputFits(input)
 				t.Logf("model=%s full_input_upper_bound=%d evidence=%d sections=%d direct_admission=%t", m.Name, bound, len(snap.Evidence), len(snap.Sections), fit)
-				if !fit {
+				if fit {
+					measureIndependentReviewEnvelope(t, &x, snap, false)
+				} else {
 					calls, err := offlineMockAdmission(t, snap, x.model)
 					t.Logf("model=%s bounded_extract_mock_calls=%d final_plan_admission=%t", m.Name, calls, err == nil)
 					if err != nil {
@@ -175,9 +177,73 @@ func offlineMockAdmission(t *testing.T, snap GuideSourceSnapshot, model ModelIde
 		return 0, e
 	}
 	x := execution{s: service, scope: scope, rev: rev, model: model, snap: snap, f: testFence{repo.DB}, steps: map[string]orm.PaperGuideStep{}}
-	_, _, e = x.planInput(t.Context())
+	input, packet, e := x.planInput(t.Context())
+	if e == nil {
+		measureIndependentReviewEnvelope(t, &x, packet, true)
+		x.steps["plan"] = orm.PaperGuideStep{}
+		rebuilt, _, err := x.planInput(t.Context())
+		if err != nil || digest(rebuilt) != digest(input) {
+			t.Fatalf("offline immutable reconstruction differs: %v", err)
+		}
+	}
 	if e == nil && len(seen) != len(snap.Evidence) {
 		return calls, fmt.Errorf("lost extract evidence %d/%d", len(seen), len(snap.Evidence))
 	}
 	return calls, e
+}
+
+// A declared realistic synthetic envelope, not a guarantee for every legal
+// model output: 16 claims, 32 prose blocks of 300 CJK characters, four roles.
+// Correction additionally stresses schema maxima of 48 suggestions and summary.
+func measureIndependentReviewEnvelope(t *testing.T, x *execution, packet GuideSourceSnapshot, extracted bool) {
+	t.Helper()
+	x.planningPacket, x.extractedScope = packet, extracted
+	p := baselinePlan(packet)
+	for i := 0; i < 16; i++ {
+		c := GuideClaim{ID: fmt.Sprintf("envelope-c%d", i), Statement: strings.Repeat("陈述", 75), Attribution: AttributionPaper, EvidenceIDs: []string{packet.Evidence[0].ID}, Conditions: []string{strings.Repeat("条件", 25)}, SupportStatus: SupportSupported}
+		p.Claims = append(p.Claims, c)
+		p.Sections[i%4].ClaimIDs = append(p.Sections[i%4].ClaimIDs, c.ID)
+	}
+	sections := []GuideSection{}
+	for i, role := range Roles() {
+		s := teachingSection(role)
+		s.Blocks = nil
+		s.ClaimIDs = append([]string{}, p.Sections[i].ClaimIDs...)
+		s.Summary = strings.Repeat("总结", 150)
+		for j := 0; j < 8; j++ {
+			s.Blocks = append(s.Blocks, GuideBlock{ID: fmt.Sprintf("%s-b%d", role, j), Kind: "paragraph", Text: strings.Repeat("解释", 150), Attribution: AttributionTeaching, ClaimIDs: []string{}, EvidenceIDs: []string{}})
+		}
+		s.Blocks[0].ClaimIDs = append([]string{}, s.ClaimIDs...)
+		s.Blocks[0].Attribution = AttributionPaper
+		if err := ValidateSection(packet, p, role, s); err != nil {
+			t.Fatal(err)
+		}
+		sections = append(sections, s)
+	}
+	if err := ValidatePlan(packet, p); err != nil {
+		t.Fatal(err)
+	}
+	review := x.independentInput()
+	review["plan"] = p
+	review["sections"] = sections
+	correction := x.independentInput()
+	correction["plan"] = p
+	correction["role"] = RoleBackground
+	correction["prior_summary"] = strings.Repeat("𐐀", 4096)
+	findings := []GuideFinding{}
+	for i := 0; i < 48; i++ {
+		findings = append(findings, GuideFinding{TargetType: "block", TargetID: "background-b0", IssueType: "missing_explanation", Suggestion: strings.Repeat("𐐀", 800)})
+	}
+	correction["findings"] = findings
+	if err := ValidateReview(p, sections, GuideReview{Findings: findings}); err != nil {
+		t.Fatal(err)
+	}
+	bound := func(in map[string]any) int {
+		b, _ := json.MarshalIndent(in, "", "")
+		return len(b) + guideInputDefaultsReserve + len(packet.Evidence)*guideEvidenceExpansionReserve + guidePromptReserve
+	}
+	t.Logf("independent_review evidence=%d extracted=%t realistic_review_bound=%d correction_stress_bound=%d review_fits=%t correction_fits=%t", len(packet.Evidence), extracted, bound(review), bound(correction), x.inputFits(review), x.inputFits(correction))
+	if !x.inputFits(review) || !x.inputFits(correction) {
+		t.Fatal("declared independent envelope does not fit")
+	}
 }
