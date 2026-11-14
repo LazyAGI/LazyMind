@@ -36,6 +36,13 @@ test('portable font package rejects corruption and preview-only embedding', () =
     '/*lazymind-font:broken*/@font-face{src:url(missing.ttf)}</style>')), /empty or invalid/);
 });
 
+test('inline OpenType resources preserve full verified font bytes', () => {
+  const data = makeTestTtf();
+  const html = portableHtml(data).replace('data:font/ttf', 'data:font/otf');
+  assert.ok(portableFontFaces(html)[0].data.equals(data));
+  assert.throws(() => portableFontFaces(html.replace(data.toString('base64'), Buffer.from('corrupt').toString('base64'))), /corrupted/);
+});
+
 test('subset HTML embeds verified original bytes and fails when the original is missing', async () => {
   const folder = await mkdtemp(path.join(os.tmpdir(), 'subset-export-'));
   const previous = process.env.LAZYMIND_FONT_DIR;

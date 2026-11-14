@@ -90,7 +90,7 @@ export function PreviewContent({ target, close, onVersions, inline = false }: { 
     {content}
     <div className="chat-assistant-msg-tool-actions"><ReferenceSourcesButton sources={sourceContext.sources} /></div>
   </SourceImportProvider>;
-  return <section className={`artifact-preview${inlineHtml ? ' artifact-preview--inline-html' : ''}`} aria-label={t('chat.previewNamedFile', { name: target.filename })}>
+  return <section className={`artifact-preview${inlineHtml ? ' artifact-preview--inline-html' : ''}`} data-inline={inline || undefined} aria-label={t('chat.previewNamedFile', { name: target.filename })}>
     {!inlineHtml && <header className="artifact-preview__header">
       <Tooltip title={target.filename} mouseEnterDelay={1.5}><strong>{target.filename}</strong></Tooltip>
       {onVersions && <Button size="small" onClick={() => { close?.(); onVersions(); }}>{t('chat.preview.versions')}</Button>}

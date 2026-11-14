@@ -94,6 +94,7 @@ func AllModelsForDDL() []interface{} {
 		&TaskNotification{},
 		&DesktopNotificationReceipt{},
 		&TaskCenterTask{},
+		&UserGitHubStarPrompt{},
 		&TaskExecutionTiming{},
 		&TaskAttemptTiming{},
 		&UserSchedule{},

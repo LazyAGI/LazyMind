@@ -232,11 +232,10 @@ slots:
     ordered: true
 
   - id: enhancement_status
-    user_visible: true
+    user_visible: false
     label: Enhancement Status
     type: json
     cardinality: single
-    exposed: true
 
   - id: meme_static_output
     user_visible: true
@@ -323,7 +322,6 @@ ui:
       slot_scope: selected
       composite_tab_position: left
       slots:
-        - {id: enhancement_status}
         - id: generated_first_frame
         - id: generated_last_frame
         - id: material_images
@@ -334,7 +332,6 @@ ui:
       composite_layout:
         direction: row
         children:
-          - {slot: enhancement_status}
           - weight: 1
             slot: generated_first_frame
           - weight: 1
@@ -353,7 +350,6 @@ ui:
         hide_empty_columns: true
         empty_column_scope: selected
         repeat_single_slots:
-          - enhancement_status
           - generated_first_frame
           - generated_last_frame
           - material_images

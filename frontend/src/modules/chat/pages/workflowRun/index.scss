@@ -135,3 +135,65 @@ html.workflow-run-embed #app {
     .chat-time { order: 1; }
   }
 }
+
+.workflow-run__content,
+.workflow-run__canvas {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+
+.workflow-run__canvas > .ask-wizard {
+  flex: 0 1 auto;
+  max-height: 45%;
+  overflow: auto;
+}
+
+.workflow-run__workspace {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) clamp(280px, 28%, 380px);
+  flex: 1 1 0;
+  min-height: 0;
+  gap: 12px;
+}
+
+.workflow-run.workflow-run--workbench {
+  padding: 12px;
+
+  .workflow-run__canvas {
+    overflow: hidden;
+  }
+
+  .workflow-run__rail {
+    min-width: 0;
+    min-height: 0;
+    overflow: hidden;
+    border: 1px solid #e3e9f3;
+    border-radius: 12px;
+    background: #fff;
+
+    > .ant-tabs { height: 100%; }
+    .ant-tabs-nav { flex: none; margin: 0; padding: 0 16px; }
+    .ant-tabs-content-holder,
+    .ant-tabs-content,
+    .ant-tabs-tabpane { min-height: 0; height: 100%; }
+    .ant-tabs-tabpane { overflow: auto; padding: 12px; }
+  }
+
+  .workflow-request-message.chat-chat-container {
+    height: auto;
+    min-height: 0;
+    max-height: none;
+    padding: 0;
+    overflow: visible;
+  }
+}
+
+@media (max-width: 760px) {
+  .workflow-run__workspace {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(260px, 1fr) minmax(160px, 35%);
+  }
+}

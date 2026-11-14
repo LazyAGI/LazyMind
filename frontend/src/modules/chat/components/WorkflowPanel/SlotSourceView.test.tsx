@@ -112,3 +112,19 @@ it('opens the complete PPT design source for editing without treating section to
   fireEvent.click(screen.getByRole('button', { name: '编辑文本' }));
   expect(await screen.findByRole('textbox', { name: '编辑文本' })).toHaveValue(text);
 });
+
+it.each([false, true])('shows reserved PPT notes as status without document actions (descriptor: %s)', (withDocument) => {
+  const text = '<!-- lazymind-ppt-placeholder -->\n第 1 页尚未生成或发布成功，请重试该页。';
+  const slot = { slot_id: 'notes', slot: 'notes', selected: true,
+    revision: 1, created_at: '', content_type: 'text', artifact_value: { text },
+    ...(withDocument ? { artifact_id: 'reserved-notes', document: {
+      representation: 'markdown', editable: true, capabilities: ['save', 'download', 'publish'],
+    } } : {}),
+  } as SlotRevision;
+  const { container } = render(<SlotRenderer slot={slot} sessionId='ppt-session' widget={{ widgetType: 'text-markdown' }} />);
+  expect(screen.getByRole('alert')).toHaveTextContent('第 1 页尚未生成或发布成功，请重试该页。');
+  expect(container.querySelector('.writer-markdown-editor')).toBeNull();
+  expect(screen.queryByText(/文档格式暂时无法解析/)).not.toBeInTheDocument();
+  expect(screen.queryByText(/lazymind-ppt-placeholder/)).not.toBeInTheDocument();
+  expect(screen.queryAllByRole('button')).toHaveLength(0);
+});

@@ -507,7 +507,7 @@ export function portableFontFaces(html, localFaces = [], { resourceUrlsOnly = fa
       let record;
       try { record = JSON.parse(Buffer.from(token, 'base64').toString('utf8')); }
       catch { throw new Error('Required portable font package is empty or invalid'); }
-      const inline = source.match(/^data:font\/(ttf|woff);base64,([A-Za-z0-9+/=]+)$/);
+      const inline = source.match(/^data:font\/(ttf|otf|woff);base64,([A-Za-z0-9+/=]+)$/);
       if (!record || !record.family || typeof record.family !== 'string' || !Number.isFinite(record.weight)
           || !['normal', 'italic'].includes(record.style) || !/^[a-f0-9]{64}$/.test(record.sha256)) {
         throw new Error('Required portable font resource is missing or corrupted');
@@ -524,7 +524,7 @@ export function portableFontFaces(html, localFaces = [], { resourceUrlsOnly = fa
           throw new Error('Required portable font declarations do not match its resource identity');
         }
       }
-      const data = inline?.[1] !== 'ttf'
+      const data = !['ttf', 'otf'].includes(inline?.[1])
         ? localFaces.find(face => face.id === record.sha256
           && normalizeFamily(face.family) === normalizeFamily(record.family)
           && face.weight === record.weight && face.style === record.style)?.data

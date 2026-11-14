@@ -521,6 +521,7 @@ steps:
     outputs:
       - material: slide_outline
       - material: speaker_notes_source
+        required: false
     acceptance_criteria: |
       slide_outline must contain exactly one non-empty, editable generation
       prompt per requested page with aligned sort_order. Each slide_outline is one
@@ -659,7 +660,9 @@ steps:
       {{runtime_instruction}}
 
       Resolve the bound slide_outline, background_images, material_images and
-      speaker_notes_source revisions. Use each complete page prompt directly; do not
+      any available speaker_notes_source revisions. This source artifact is optional;
+      non-empty per-page scripts are sufficient, with no provenance requirement.
+      Use each complete page prompt directly; do not
       regenerate the outline/style or rewrite the saved scripts. Preserve requested
       content, approved order, exact page count and all source-backed values. Technical
       mechanisms must remain visible as explanations, formulas, labelled diagrams or
@@ -692,6 +695,12 @@ steps:
       downloadable/editable file, using the completed pages and scripts. HTML
       previews or an export button do not satisfy that explicit request. Otherwise
       the HTML pages and notes are the deliverable; no automatic export is needed.
+
+      Export recovery: use ppt_export_deck to convert existing HTML and notes to PPTX.
+      On font/asset/export failures preserve all pages and scripts and retry export
+      after fixing the resource. Never switch to ppt_generate_native_pptx or
+      ppt_fill_template, change presentation_output_format, or restart planning
+      merely to work around an export failure.
 
       Native route (presentation_output_format=native_pptx):
       - Inspect/reuse the uploaded template's actual source pages, editable slots,
@@ -766,7 +775,7 @@ steps:
       - ppt_replace_page_background
     inputs:
       - material: speaker_notes_source
-        required: true
+        required: false
       - material: presentation_timing
         required: false
       - material: material_clarification

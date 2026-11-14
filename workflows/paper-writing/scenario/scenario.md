@@ -4,7 +4,15 @@ Start when the user explicitly requests paper writing or academic manuscript rev
 For uploaded manuscripts, bind the exact attachment filename to manuscript_file; do not transcribe the manuscript.
 Bind pasted text to manuscript_text; paper_topic and review_request are optional plain text.
 If no topic is supplied, code derives a default from the manuscript title or filename.
-For new writing, use uploaded Markdown materials/outlines and SVG/PNG/JPG images; write_outline reads the attachments directly.
+Select the earliest unfinished requested stage, not a stage inferred from the attachment format.
+A new paper requiring literature retrieval and analysis of supplied observations starts at literature_review,
+then experiment (organize the supplied results), data_analysis, write_outline and write_document.
+Use research_topic for requested topic development. Enter write_outline directly only for an outline-only
+request, or when earlier requested research and analysis are complete or explicitly out of scope.
+Bind raw Markdown/TXT/PDF/DOCX research attachments to research_materials. seed_pool is reserved for an
+existing paper-material-pool.v2 JSON pool; manuscript_file is for the manuscript to review or edit.
+Do not represent an attachment by a local path in paper_input.writing_materials.
+For new writing, SVG/PNG/JPG images remain supported through the existing uploaded-attachment path.
 Run write_outline and stop for user confirmation of its editable artifact.
 Only after confirmation run write_document using the selected outline revision. Choose peer_review only when the user requests a review; uploading or having a manuscript does not request review.
 Use write_document only to draft from the confirmed outline. Use revise_document for all existing-manuscript edits.
@@ -18,14 +26,13 @@ If the request does not distinguish review from editing, clarify the intended ac
 review_request remains a peer-review requirement.
 Never treat filenames, paths, or summaries as manuscript text. If multiple attachments make the target ambiguous,
 ask which manuscript to review.
-Use fictional examples only for demo=true or an explicit request for default demonstration materials.
-Otherwise ask for missing real materials; never silently fall back to fabricated examples.
-Use the package's framework ask_user execution preference before startup unless the user has
-already answered it for this task. Reuse the declared experiment_execution field with its two
-fixed choices, preserve the original research goal after the answer, and bind simulate_only or
-allow_local through the existing trigger. Honor the explicit choice to generate labeled simulation
-when real user data is absent. Only explicit consent permits bounded CPU execution, with no
-network, dependency installation or GPU and at most 30 seconds. Existing user observations remain
+Never fabricate missing source papers or observed measurements. Clearly label simulated experiments.
+Do not ask a fixed experiment-execution question before startup or F3. Decide from the user's
+request, actual materials and current environment. Honor an explicit refusal to run code.
+The experiment tool may run bounded CPU computations with no network, dependency installation
+or GPU and at most 30 seconds. With no observations, use clearly labeled simulation only when
+it fits the goal; if actual empirical results are required, explain the missing data.
+Existing user observations remain
 the data source; failed computations on real data report missing results rather than fabricated
 replacements. The experiment tool owns execution and status; never run its code through Chat tools.
 For direct new experiments, bind experiment_question from the user's goal; ask if it is missing.

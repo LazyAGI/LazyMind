@@ -20,6 +20,7 @@ import (
 	"gorm.io/gorm/clause"
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
+	"lazymind/core/exporter"
 	"lazymind/core/taskcenter"
 	"lazymind/core/tasktiming"
 	"lazymind/core/workflow/artifactgraph"
@@ -815,6 +816,7 @@ func (r *Repository) createHostSession(ctx context.Context, owner, sessionID, co
 	if !createdNow {
 		return created, false, nil
 	}
+	exporter.PrewarmWorkflow(workflow.Files["workflow.yaml"])
 	payload, _ := json.Marshal(map[string]any{"session_id": created.ID, "status": "active", "state_version": 1})
 	_ = r.AppendEvent(ctx, &Event{SessionID: created.ID, OwnerUserID: owner, EventType: "workflow.snapshot",
 		EntityID: created.ID, StateVersion: 1, PayloadJSON: payload})

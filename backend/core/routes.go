@@ -354,6 +354,8 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "GET", "/system-dependencies/pdf-font", []string{"document.read"}, systemdeps.GetPDFFont)
 	handleAPI(r, "GET", "/system-dependencies/python", []string{"document.read"}, systemdeps.GetPythonComponents)
 	handleAPI(r, "POST", "/system-dependencies/python:install", []string{"document.write"}, systemdeps.InstallPythonComponent)
+	handleAPI(r, "GET", "/system-dependencies/node", []string{"document.read"}, systemdeps.GetNodeDependency)
+	handleAPI(r, "POST", "/system-dependencies/node:install", []string{"document.write"}, systemdeps.InstallNodeDependency)
 	handleAPI(r, "GET", "/system-dependencies/ffmpeg", []string{"document.read"}, systemdeps.GetFFmpegDependency)
 	handleAPI(r, "PUT", "/system-dependencies/ffmpeg", []string{"document.write"}, systemdeps.UpdateFFmpegDependency)
 	handleAPI(r, "POST", "/system-dependencies/ffmpeg:check", []string{"document.read"}, systemdeps.CheckFFmpegDependency)
@@ -653,6 +655,8 @@ func registerAllRoutes(r *mux.Router) {
 
 	// ----- Task Center -----
 	handleAPI(r, "GET", "/task-center/tasks", []string{"qa.read"}, taskcenter.ListTasks)
+	handleAPI(r, "POST", "/task-center/github-star-prompt/claim", []string{"qa.read"}, taskcenter.ClaimGitHubStarPrompt)
+	handleAPI(r, "PUT", "/user/github-star-prompt/support", []string{}, taskcenter.SupportGitHubStarPrompt)
 	handleAPI(r, "GET", "/task-center/workbench", []string{"qa.read"}, taskcenter.Workbench)
 	handleAPI(r, "GET", "/task-center/workflow-events", []string{"qa.read"}, taskcenter.WorkflowChanges)
 	handleAPI(r, "GET", "/user/notification-preferences", []string{"qa.read"}, taskcenter.NotificationPreferences)

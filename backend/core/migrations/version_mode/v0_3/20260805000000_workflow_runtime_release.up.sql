@@ -701,7 +701,7 @@ ALTER TABLE conversations ADD COLUMN pinned_at DATETIME NULL;
 ALTER TABLE conversations ADD COLUMN history_order INTEGER NULL;
 ALTER TABLE conversations ADD COLUMN unpinned_history_order BIGINT NULL;
 ALTER TABLE conversations ADD COLUMN chat_model_mode VARCHAR(16) NULL;
-ALTER TABLE conversations ADD COLUMN chat_model_id VARCHAR(128) NULL;
+ALTER TABLE conversations ADD COLUMN chat_model_id VARCHAR(64) NULL;
 ALTER TABLE conversations ADD COLUMN chat_model_source VARCHAR(16) NULL;
 ALTER TABLE conversations ADD COLUMN chat_model_snapshot JSON NULL;
 ALTER TABLE conversations ADD COLUMN chat_model_version INTEGER NOT NULL DEFAULT 0;
@@ -1302,23 +1302,21 @@ CREATE TABLE IF NOT EXISTS external_agent_bindings (
     id VARCHAR(36) PRIMARY KEY,
     conversation_id VARCHAR(36) NOT NULL,
     provider VARCHAR(32) NOT NULL,
-    host_id VARCHAR(128) NOT NULL DEFAULT 'host-legacy',
+    host_id VARCHAR(128) NOT NULL,
     provider_thread_id VARCHAR(128) NOT NULL,
     managed_by_lazymind BOOLEAN NOT NULL DEFAULT FALSE,
     created_by_user_id VARCHAR(255) NOT NULL,
-    created_at TIMESTAMP NOT NULL,
-    updated_at TIMESTAMP NOT NULL
+    created_at DATETIME NOT NULL,
+    updated_at DATETIME NOT NULL,
+    CONSTRAINT uk_external_agent_binding_conversation_provider UNIQUE (conversation_id, provider),
+    CONSTRAINT uk_external_agent_binding_thread UNIQUE (provider, host_id, provider_thread_id)
 );
-CREATE UNIQUE INDEX IF NOT EXISTS uk_external_agent_binding_conversation_provider
-    ON external_agent_bindings(conversation_id, provider);
-CREATE UNIQUE INDEX IF NOT EXISTS uk_external_agent_binding_thread
-    ON external_agent_bindings(provider, host_id, provider_thread_id);
 
 CREATE TABLE IF NOT EXISTS external_agent_sessions (
     id VARCHAR(36) PRIMARY KEY,
     owner_user_id VARCHAR(255) NOT NULL,
     provider VARCHAR(32) NOT NULL,
-    host_id VARCHAR(128) NOT NULL DEFAULT 'host-legacy',
+    host_id VARCHAR(128) NOT NULL,
     provider_thread_id VARCHAR(128) NOT NULL,
     project_key VARCHAR(128) NOT NULL DEFAULT '',
     project_name VARCHAR(200) NOT NULL DEFAULT '',
@@ -1328,10 +1326,9 @@ CREATE TABLE IF NOT EXISTS external_agent_sessions (
     native_updated_at DATETIME,
     last_seen_at DATETIME NOT NULL,
     created_at DATETIME NOT NULL,
-    updated_at DATETIME NOT NULL
+    updated_at DATETIME NOT NULL,
+    CONSTRAINT uk_external_agent_session UNIQUE (owner_user_id, provider, host_id, provider_thread_id)
 );
-CREATE UNIQUE INDEX IF NOT EXISTS uk_external_agent_session
-    ON external_agent_sessions(owner_user_id, provider, host_id, provider_thread_id);
 CREATE INDEX IF NOT EXISTS idx_external_agent_session_catalog
     ON external_agent_sessions(owner_user_id, provider, host_id, active, native_updated_at DESC);
 CREATE INDEX IF NOT EXISTS idx_external_agent_session_last_seen ON external_agent_sessions(last_seen_at);
@@ -1407,11 +1404,11 @@ CREATE TABLE IF NOT EXISTS external_agent_operations (
     actor_user_id VARCHAR(255) NOT NULL,
     operation_id VARCHAR(255) NOT NULL,
     kind VARCHAR(64) NOT NULL,
-    request_hash VARCHAR(64) NOT NULL,
+    request_hash VARCHAR(64) NOT NULL DEFAULT '',
     status VARCHAR(32) NOT NULL,
     result TEXT,
-    created_at TIMESTAMP NOT NULL,
-    updated_at TIMESTAMP NOT NULL,
+    created_at DATETIME NOT NULL,
+    updated_at DATETIME NOT NULL,
     CONSTRAINT uk_external_agent_operation UNIQUE
         (actor_user_id, operation_id, kind)
 );
@@ -1486,7 +1483,7 @@ CREATE INDEX IF NOT EXISTS idx_knowledge_market_installs_user
 
 -- +migrate Dialect sqlite
 CREATE TABLE IF NOT EXISTS `knowledge_market_items` (
-    `id` varchar(64) NOT NULL,
+    `id` varchar(64),
     `category` varchar(32) NOT NULL,
     `name` varchar(255) NOT NULL,
     `description` text NOT NULL DEFAULT "",
@@ -2256,33 +2253,33 @@ ALTER TABLE vocabulary_examples ADD COLUMN source_name TEXT NOT NULL DEFAULT '';
 ALTER TABLE vocabulary_source_refs ADD COLUMN document_revision TEXT NOT NULL DEFAULT ''; ALTER TABLE vocabulary_provider_operations ADD COLUMN entity_id TEXT NOT NULL DEFAULT '';
 CREATE TABLE vocabulary_wordbooks (id TEXT PRIMARY KEY, owner_id TEXT NOT NULL, name TEXT NOT NULL, description TEXT NOT NULL DEFAULT '', capability_key TEXT NOT NULL DEFAULT 'english_definition', question_types_json TEXT NOT NULL DEFAULT '["single_choice","text_input","cloze"]', archived_at DATETIME NULL, created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, UNIQUE(owner_id,name));
 CREATE INDEX idx_vocabulary_wordbook_capability ON vocabulary_wordbooks(owner_id, capability_key);
-CREATE TABLE learning_capability_profiles (id TEXT PRIMARY KEY, owner_id TEXT NOT NULL DEFAULT '', profile_key TEXT NOT NULL DEFAULT '', custom_name TEXT NOT NULL DEFAULT '', description TEXT NOT NULL DEFAULT '', capability_refs_json TEXT NOT NULL DEFAULT '[]', builtin BOOLEAN NOT NULL DEFAULT FALSE, created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP);
+CREATE TABLE learning_capability_profiles (id TEXT PRIMARY KEY, owner_id TEXT NOT NULL DEFAULT '', profile_key TEXT NOT NULL DEFAULT '', custom_name TEXT NOT NULL DEFAULT '', description TEXT NOT NULL DEFAULT '', capability_refs_json TEXT NOT NULL DEFAULT '[]', builtin BOOLEAN NOT NULL DEFAULT FALSE, created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP);
 CREATE INDEX idx_learning_profiles_owner ON learning_capability_profiles(owner_id, created_at);
-CREATE TABLE learning_knowledge_base_capabilities (id TEXT PRIMARY KEY, owner_id TEXT NOT NULL, dataset_id TEXT NOT NULL, capability_key TEXT NOT NULL, capability_version INTEGER NOT NULL DEFAULT 1, enabled BOOLEAN NOT NULL DEFAULT TRUE, display_order INTEGER NOT NULL DEFAULT 0, settings_json TEXT NOT NULL DEFAULT '{}', created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, UNIQUE(dataset_id, capability_key));
+CREATE TABLE learning_knowledge_base_capabilities (id TEXT PRIMARY KEY, owner_id TEXT NOT NULL, dataset_id TEXT NOT NULL, capability_key TEXT NOT NULL, capability_version INTEGER NOT NULL DEFAULT 1, enabled BOOLEAN NOT NULL DEFAULT TRUE, display_order INTEGER NOT NULL DEFAULT 0, settings_json TEXT NOT NULL DEFAULT '{}', created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, UNIQUE(dataset_id, capability_key));
 CREATE INDEX idx_learning_kb_cap_owner_dataset ON learning_knowledge_base_capabilities(owner_id, dataset_id);
-CREATE TABLE learning_subjects (id TEXT PRIMARY KEY, owner_id TEXT NOT NULL, subject_kind TEXT NOT NULL, normalized_text TEXT NOT NULL, display_text TEXT NOT NULL, language TEXT NOT NULL, created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, UNIQUE(owner_id, subject_kind, language, normalized_text));
-CREATE TABLE learning_occurrences (id TEXT PRIMARY KEY, owner_id TEXT NOT NULL, subject_id TEXT NOT NULL, dataset_id TEXT NOT NULL DEFAULT '', document_id TEXT NOT NULL DEFAULT '', segment_id TEXT NOT NULL DEFAULT '', page INTEGER NULL, bbox_json TEXT NOT NULL DEFAULT '[]', selected_text TEXT NOT NULL, context_text TEXT NOT NULL DEFAULT '', start_offset INTEGER NOT NULL DEFAULT 0, end_offset INTEGER NOT NULL DEFAULT 0, document_revision TEXT NOT NULL DEFAULT '', created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP);
+CREATE TABLE learning_subjects (id TEXT PRIMARY KEY, owner_id TEXT NOT NULL, subject_kind TEXT NOT NULL, normalized_text TEXT NOT NULL, display_text TEXT NOT NULL, language TEXT NOT NULL, created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, UNIQUE(owner_id, subject_kind, language, normalized_text));
+CREATE TABLE learning_occurrences (id TEXT PRIMARY KEY, owner_id TEXT NOT NULL, subject_id TEXT NOT NULL, dataset_id TEXT NOT NULL DEFAULT '', document_id TEXT NOT NULL DEFAULT '', segment_id TEXT NOT NULL DEFAULT '', page INTEGER NULL, bbox_json TEXT NOT NULL DEFAULT '[]', selected_text TEXT NOT NULL, context_text TEXT NOT NULL DEFAULT '', start_offset INTEGER NOT NULL DEFAULT 0, end_offset INTEGER NOT NULL DEFAULT 0, document_revision TEXT NOT NULL DEFAULT '', created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP);
 CREATE INDEX idx_learning_occurrence_document ON learning_occurrences(owner_id, document_id, subject_id);
 CREATE UNIQUE INDEX uk_learning_occurrence ON learning_occurrences(owner_id,subject_id,document_id,document_revision,start_offset,end_offset);
-CREATE TABLE learning_contents (id TEXT PRIMARY KEY, owner_id TEXT NOT NULL, subject_id TEXT NOT NULL, occurrence_id TEXT NOT NULL DEFAULT '', capability_key TEXT NOT NULL, capability_version INTEGER NOT NULL DEFAULT 1, schema_version INTEGER NOT NULL DEFAULT 1, content_json TEXT NOT NULL DEFAULT '{}', origin TEXT NOT NULL DEFAULT 'user', status TEXT NOT NULL DEFAULT 'published', provider_trace_id TEXT NOT NULL DEFAULT '', model_config_id TEXT NOT NULL DEFAULT '', generator_version TEXT NOT NULL DEFAULT '', user_edited BOOLEAN NOT NULL DEFAULT FALSE, created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP);
+CREATE TABLE learning_contents (id TEXT PRIMARY KEY, owner_id TEXT NOT NULL, subject_id TEXT NOT NULL, occurrence_id TEXT NOT NULL DEFAULT '', capability_key TEXT NOT NULL, capability_version INTEGER NOT NULL DEFAULT 1, schema_version INTEGER NOT NULL DEFAULT 1, content_json TEXT NOT NULL DEFAULT '{}', origin TEXT NOT NULL DEFAULT 'user', status TEXT NOT NULL DEFAULT 'published', provider_trace_id TEXT NOT NULL DEFAULT '', model_config_id TEXT NOT NULL DEFAULT '', generator_version TEXT NOT NULL DEFAULT '', user_edited BOOLEAN NOT NULL DEFAULT FALSE, created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP);
 CREATE INDEX idx_learning_content_subject ON learning_contents(owner_id, capability_key, subject_id);
 CREATE UNIQUE INDEX uk_learning_content ON learning_contents(owner_id,subject_id,occurrence_id,capability_key,schema_version);
-CREATE TABLE learning_books (id TEXT PRIMARY KEY, owner_id TEXT NOT NULL, name TEXT NOT NULL, description TEXT NOT NULL DEFAULT '', capability_key TEXT NOT NULL, capability_version INTEGER NOT NULL DEFAULT 1, schema_version INTEGER NOT NULL DEFAULT 1, question_types_json TEXT NOT NULL DEFAULT '[]', generation_policy_json TEXT NOT NULL DEFAULT '{}', archived_at DATETIME NULL, created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, UNIQUE(owner_id, name));
-CREATE TABLE learning_book_entries (id TEXT PRIMARY KEY, owner_id TEXT NOT NULL, book_id TEXT NOT NULL, content_id TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'active', created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, UNIQUE(book_id, content_id));
-CREATE TABLE learning_presets (id TEXT PRIMARY KEY, owner_id TEXT NOT NULL, scope_type TEXT NOT NULL, scope_id TEXT NOT NULL DEFAULT '', document_revision TEXT NOT NULL DEFAULT '', capability_key TEXT NOT NULL, capability_version INTEGER NOT NULL DEFAULT 1, normalized_key TEXT NOT NULL, value_json TEXT NOT NULL DEFAULT '{}', schema_version INTEGER NOT NULL DEFAULT 1, origin TEXT NOT NULL DEFAULT 'user', status TEXT NOT NULL DEFAULT 'published', priority INTEGER NOT NULL DEFAULT 0, user_edited BOOLEAN NOT NULL DEFAULT FALSE, created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, UNIQUE(owner_id, scope_type, scope_id, capability_key, normalized_key, schema_version));
+CREATE TABLE learning_books (id TEXT PRIMARY KEY, owner_id TEXT NOT NULL, name TEXT NOT NULL, description TEXT NOT NULL DEFAULT '', capability_key TEXT NOT NULL, capability_version INTEGER NOT NULL DEFAULT 1, schema_version INTEGER NOT NULL DEFAULT 1, question_types_json TEXT NOT NULL DEFAULT '[]', generation_policy_json TEXT NOT NULL DEFAULT '{}', archived_at TIMESTAMP NULL, created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, UNIQUE(owner_id, name));
+CREATE TABLE learning_book_entries (id TEXT PRIMARY KEY, owner_id TEXT NOT NULL, book_id TEXT NOT NULL, content_id TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'active', created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, UNIQUE(book_id, content_id));
+CREATE TABLE learning_presets (id TEXT PRIMARY KEY, owner_id TEXT NOT NULL, scope_type TEXT NOT NULL, scope_id TEXT NOT NULL DEFAULT '', document_revision TEXT NOT NULL DEFAULT '', capability_key TEXT NOT NULL, capability_version INTEGER NOT NULL DEFAULT 1, normalized_key TEXT NOT NULL, value_json TEXT NOT NULL DEFAULT '{}', schema_version INTEGER NOT NULL DEFAULT 1, origin TEXT NOT NULL DEFAULT 'user', status TEXT NOT NULL DEFAULT 'published', priority INTEGER NOT NULL DEFAULT 0, user_edited BOOLEAN NOT NULL DEFAULT FALSE, created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, UNIQUE(owner_id, scope_type, scope_id, capability_key, normalized_key, schema_version));
 CREATE INDEX idx_learning_preset_lookup ON learning_presets(owner_id, capability_key, normalized_key, scope_type, scope_id);
-CREATE TABLE learning_dictionary_imports (id TEXT PRIMARY KEY, provider_key TEXT NOT NULL, source_name TEXT NOT NULL, source_version TEXT NOT NULL, license_id TEXT NOT NULL, source_url TEXT NOT NULL DEFAULT '', checksum TEXT NOT NULL, imported_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, UNIQUE(provider_key,source_name,source_version));
+CREATE TABLE learning_dictionary_imports (id TEXT PRIMARY KEY, provider_key TEXT NOT NULL, source_name TEXT NOT NULL, source_version TEXT NOT NULL, license_id TEXT NOT NULL, source_url TEXT NOT NULL DEFAULT '', checksum TEXT NOT NULL, imported_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, UNIQUE(provider_key,source_name,source_version));
 CREATE TABLE learning_dictionary_entries (id TEXT PRIMARY KEY, provider_key TEXT NOT NULL, language TEXT NOT NULL, normalized_headword TEXT NOT NULL, display_headword TEXT NOT NULL, payload_json TEXT NOT NULL DEFAULT '{}', priority INTEGER NOT NULL DEFAULT 100, source_name TEXT NOT NULL, source_version TEXT NOT NULL, license_id TEXT NOT NULL, source_locator TEXT NOT NULL DEFAULT '', UNIQUE(provider_key, language, normalized_headword, source_name, source_version));
 CREATE INDEX idx_learning_dictionary_lookup ON learning_dictionary_entries(provider_key, language, normalized_headword, priority);
-CREATE TABLE learning_question_instances (id TEXT PRIMARY KEY, owner_id TEXT NOT NULL, card_id TEXT NOT NULL, session_id TEXT NOT NULL, question_type TEXT NOT NULL, question_type_version INTEGER NOT NULL DEFAULT 1, payload_json TEXT NOT NULL DEFAULT '{}', answer_spec_json TEXT NOT NULL DEFAULT '{}', explanation_json TEXT NOT NULL DEFAULT '{}', locale TEXT NOT NULL DEFAULT 'zh-CN', generator_type TEXT NOT NULL, generator_version TEXT NOT NULL DEFAULT '', model_config_id TEXT NOT NULL DEFAULT '', content_version TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT 'ready', created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP);
+CREATE TABLE learning_question_instances (id TEXT PRIMARY KEY, owner_id TEXT NOT NULL, card_id TEXT NOT NULL, session_id TEXT NOT NULL, question_type TEXT NOT NULL, question_type_version INTEGER NOT NULL DEFAULT 1, payload_json TEXT NOT NULL DEFAULT '{}', answer_spec_json TEXT NOT NULL DEFAULT '{}', explanation_json TEXT NOT NULL DEFAULT '{}', locale TEXT NOT NULL DEFAULT 'zh-CN', generator_type TEXT NOT NULL, generator_version TEXT NOT NULL DEFAULT '', model_config_id TEXT NOT NULL DEFAULT '', content_version TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT 'ready', created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP);
 CREATE INDEX idx_learning_question_session ON learning_question_instances(owner_id, session_id, created_at);
-CREATE TABLE learning_cards (id TEXT PRIMARY KEY, owner_id TEXT NOT NULL, book_id TEXT NOT NULL, book_entry_id TEXT NOT NULL, content_id TEXT NOT NULL, question_type TEXT NOT NULL, fsrs_card_json TEXT NOT NULL, scheduler_version TEXT NOT NULL, row_version INTEGER NOT NULL DEFAULT 1, suspended INTEGER NOT NULL DEFAULT 0, created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, UNIQUE(owner_id,book_entry_id,question_type));
+CREATE TABLE learning_cards (id TEXT PRIMARY KEY, owner_id TEXT NOT NULL, book_id TEXT NOT NULL, book_entry_id TEXT NOT NULL, content_id TEXT NOT NULL, question_type TEXT NOT NULL, fsrs_card_json TEXT NOT NULL, scheduler_version TEXT NOT NULL, row_version INTEGER NOT NULL DEFAULT 1, suspended BOOLEAN NOT NULL DEFAULT FALSE, created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, UNIQUE(owner_id,book_entry_id,question_type));
 CREATE INDEX idx_learning_cards_due ON learning_cards(owner_id,book_id,suspended);
-CREATE TABLE learning_review_sessions (id TEXT PRIMARY KEY, owner_id TEXT NOT NULL, book_id TEXT NOT NULL, locale TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'active', total INTEGER NOT NULL DEFAULT 0, answered INTEGER NOT NULL DEFAULT 0, correct INTEGER NOT NULL DEFAULT 0, created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, completed_at DATETIME NULL);
-CREATE TABLE learning_review_session_items (id TEXT PRIMARY KEY, owner_id TEXT NOT NULL, session_id TEXT NOT NULL, card_id TEXT NOT NULL, question_instance_id TEXT NOT NULL, position INTEGER NOT NULL, answered_at DATETIME NULL, created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, UNIQUE(session_id,card_id));
-CREATE TABLE learning_review_answers (id TEXT PRIMARY KEY, owner_id TEXT NOT NULL, session_id TEXT NOT NULL, question_instance_id TEXT NOT NULL, answer_json TEXT NOT NULL DEFAULT '{}', feedback_json TEXT NOT NULL DEFAULT '{}', rating TEXT NOT NULL, idempotency_key TEXT NOT NULL DEFAULT '', score REAL NOT NULL DEFAULT 0, correct INTEGER NOT NULL DEFAULT 0, answered_at DATETIME NOT NULL, UNIQUE(owner_id,idempotency_key));
-CREATE TABLE learning_review_logs (id TEXT PRIMARY KEY, owner_id TEXT NOT NULL, card_id TEXT NOT NULL, rating TEXT NOT NULL, fsrs_log_json TEXT NOT NULL, idempotency_key TEXT NOT NULL DEFAULT '', reviewed_at DATETIME NOT NULL, UNIQUE(owner_id,idempotency_key));
-CREATE TABLE learning_preanalysis_tasks (id TEXT PRIMARY KEY, owner_id TEXT NOT NULL, dataset_id TEXT NOT NULL, document_id TEXT NOT NULL, document_revision TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT 'queued', capability_keys_json TEXT NOT NULL DEFAULT '[]', request_json TEXT NOT NULL DEFAULT '{}', result_json TEXT NOT NULL DEFAULT '[]', error_message TEXT NOT NULL DEFAULT '', total INTEGER NOT NULL DEFAULT 0, completed INTEGER NOT NULL DEFAULT 0, failed INTEGER NOT NULL DEFAULT 0, created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, started_at DATETIME NULL, completed_at DATETIME NULL, updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP);
+CREATE TABLE learning_review_sessions (id TEXT PRIMARY KEY, owner_id TEXT NOT NULL, book_id TEXT NOT NULL, locale TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'active', total INTEGER NOT NULL DEFAULT 0, answered INTEGER NOT NULL DEFAULT 0, correct INTEGER NOT NULL DEFAULT 0, created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, completed_at TIMESTAMP NULL);
+CREATE TABLE learning_review_session_items (id TEXT PRIMARY KEY, owner_id TEXT NOT NULL, session_id TEXT NOT NULL, card_id TEXT NOT NULL, question_instance_id TEXT NOT NULL, position INTEGER NOT NULL, answered_at TIMESTAMP NULL, created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, UNIQUE(session_id,card_id));
+CREATE TABLE learning_review_answers (id TEXT PRIMARY KEY, owner_id TEXT NOT NULL, session_id TEXT NOT NULL, question_instance_id TEXT NOT NULL, answer_json TEXT NOT NULL DEFAULT '{}', feedback_json TEXT NOT NULL DEFAULT '{}', rating TEXT NOT NULL, idempotency_key TEXT NOT NULL DEFAULT '', score REAL NOT NULL DEFAULT 0, correct BOOLEAN NOT NULL DEFAULT FALSE, answered_at TIMESTAMP NOT NULL, UNIQUE(owner_id,idempotency_key));
+CREATE TABLE learning_review_logs (id TEXT PRIMARY KEY, owner_id TEXT NOT NULL, card_id TEXT NOT NULL, rating TEXT NOT NULL, fsrs_log_json TEXT NOT NULL, idempotency_key TEXT NOT NULL DEFAULT '', reviewed_at TIMESTAMP NOT NULL, UNIQUE(owner_id,idempotency_key));
+CREATE TABLE learning_preanalysis_tasks (id TEXT PRIMARY KEY, owner_id TEXT NOT NULL, dataset_id TEXT NOT NULL, document_id TEXT NOT NULL, document_revision TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT 'queued', capability_keys_json TEXT NOT NULL DEFAULT '[]', request_json TEXT NOT NULL DEFAULT '{}', result_json TEXT NOT NULL DEFAULT '[]', error_message TEXT NOT NULL DEFAULT '', total INTEGER NOT NULL DEFAULT 0, completed INTEGER NOT NULL DEFAULT 0, failed INTEGER NOT NULL DEFAULT 0, created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, started_at TIMESTAMP NULL, completed_at TIMESTAMP NULL, updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP);
 CREATE INDEX idx_learning_preanalysis_document ON learning_preanalysis_tasks(owner_id,dataset_id,document_id,created_at);
 CREATE TABLE vocabulary_wordbook_entries (owner_id TEXT NOT NULL, wordbook_id TEXT NOT NULL, word_id TEXT NOT NULL, created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, PRIMARY KEY(owner_id,wordbook_id,word_id));
 CREATE TABLE vocabulary_tags (id TEXT PRIMARY KEY, owner_id TEXT NOT NULL, name TEXT NOT NULL, created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, UNIQUE(owner_id,name));
@@ -2313,7 +2310,7 @@ ALTER TABLE datasets ADD COLUMN transition_status TEXT NOT NULL DEFAULT 'idle';
 ALTER TABLE datasets ADD COLUMN reader_fallback_accepted INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE datasets ADD COLUMN processing_config TEXT;
 CREATE INDEX IF NOT EXISTS idx_datasets_processing_level ON datasets(processing_level);
-CREATE TABLE IF NOT EXISTS document_processing_states (dataset_id VARCHAR(255) NOT NULL, document_id VARCHAR(128) NOT NULL, parse_status VARCHAR(16) NOT NULL DEFAULT 'pending', chunk_status VARCHAR(16) NOT NULL DEFAULT 'pending', index_status VARCHAR(16) NOT NULL DEFAULT 'pending', parse_error_code VARCHAR(64) NOT NULL DEFAULT '', parse_error_message TEXT NOT NULL DEFAULT '', chunk_error_code VARCHAR(64) NOT NULL DEFAULT '', chunk_error_message TEXT NOT NULL DEFAULT '', index_error_code VARCHAR(64) NOT NULL DEFAULT '', index_error_message TEXT NOT NULL DEFAULT '', source_fingerprint VARCHAR(128) NOT NULL DEFAULT '', parse_fingerprint VARCHAR(128) NOT NULL DEFAULT '', chunk_fingerprint VARCHAR(128) NOT NULL DEFAULT '', index_fingerprint VARCHAR(128) NOT NULL DEFAULT '', parser_version VARCHAR(128) NOT NULL DEFAULT '', chunker_version VARCHAR(128) NOT NULL DEFAULT '', embedding_version VARCHAR(128) NOT NULL DEFAULT '', parse_artifact_ref TEXT NOT NULL DEFAULT '', chunk_artifact_ref TEXT NOT NULL DEFAULT '', index_artifact_ref TEXT NOT NULL DEFAULT '', revision INTEGER NOT NULL DEFAULT 1, updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, PRIMARY KEY(dataset_id,document_id));
+CREATE TABLE IF NOT EXISTS document_processing_states (dataset_id VARCHAR(255) NOT NULL, document_id VARCHAR(128) NOT NULL, parse_status VARCHAR(16) NOT NULL DEFAULT 'pending', chunk_status VARCHAR(16) NOT NULL DEFAULT 'pending', index_status VARCHAR(16) NOT NULL DEFAULT 'pending', parse_error_code VARCHAR(64) NOT NULL DEFAULT '', parse_error_message TEXT NOT NULL DEFAULT '', chunk_error_code VARCHAR(64) NOT NULL DEFAULT '', chunk_error_message TEXT NOT NULL DEFAULT '', index_error_code VARCHAR(64) NOT NULL DEFAULT '', index_error_message TEXT NOT NULL DEFAULT '', source_fingerprint VARCHAR(128) NOT NULL DEFAULT '', parse_fingerprint VARCHAR(128) NOT NULL DEFAULT '', chunk_fingerprint VARCHAR(128) NOT NULL DEFAULT '', index_fingerprint VARCHAR(128) NOT NULL DEFAULT '', parser_version VARCHAR(128) NOT NULL DEFAULT '', chunker_version VARCHAR(128) NOT NULL DEFAULT '', embedding_version VARCHAR(128) NOT NULL DEFAULT '', parse_artifact_ref TEXT NOT NULL DEFAULT '', chunk_artifact_ref TEXT NOT NULL DEFAULT '', index_artifact_ref TEXT NOT NULL DEFAULT '', revision BIGINT NOT NULL DEFAULT 1, updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, PRIMARY KEY(dataset_id,document_id));
 CREATE INDEX IF NOT EXISTS idx_document_processing_status ON document_processing_states(dataset_id,parse_status,chunk_status,index_status);
 
 -- Artifact V2 metadata baseline. Product write paths stay behind feature flags.
@@ -3809,6 +3806,27 @@ CREATE INDEX idx_reading_job_enrollment ON async_jobs
     WHERE job_type = 'document_reading_preparation';
 CREATE INDEX idx_reading_job_daily ON async_jobs (job_type, resource_type, create_user_id, created_at);
 CREATE INDEX idx_reading_document_candidates ON documents (create_user_id, created_at, id) WHERE deleted_at IS NULL;
+
+-- GitHub Star invitation state.
+-- +migrate Dialect postgres
+CREATE TABLE IF NOT EXISTS user_github_star_prompts (
+    user_id VARCHAR(255) PRIMARY KEY,
+    prompted_task_ids TEXT NOT NULL DEFAULT '[]',
+    last_prompt_at TIMESTAMP WITH TIME ZONE NULL,
+    supported BOOLEAN NOT NULL DEFAULT FALSE,
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL,
+    updated_at TIMESTAMP WITH TIME ZONE NOT NULL
+);
+
+-- +migrate Dialect sqlite
+CREATE TABLE IF NOT EXISTS user_github_star_prompts (
+    user_id VARCHAR(255) PRIMARY KEY,
+    prompted_task_ids TEXT NOT NULL DEFAULT '[]',
+    last_prompt_at DATETIME NULL,
+    supported BOOLEAN NOT NULL DEFAULT FALSE,
+    created_at DATETIME NOT NULL,
+    updated_at DATETIME NOT NULL
+);
 
 -- One durable identity and transition state for the shared text-vector space.
 -- +migrate Dialect postgres,sqlite

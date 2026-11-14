@@ -1754,6 +1754,103 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /api/authservice/v1/cloud/github/star:
+    get:
+      tags:
+      - cloud-oauth
+      summary: Github Star Status
+      operationId: github_star_status_api_authservice_v1_cloud_github_star_get
+      security:
+      - HTTPBearer: []
+      parameters:
+      - name: connection_id
+        in: query
+        required: false
+        schema:
+          type: string
+          maxLength: 64
+          default: ''
+          title: Connection Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GitHubStarStatus'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    put:
+      tags:
+      - cloud-oauth
+      summary: Github Star
+      operationId: github_star_api_authservice_v1_cloud_github_star_put
+      security:
+      - HTTPBearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GitHubStarBody'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GitHubStarResult'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/authservice/v1/cloud/github/star/local:
+    get:
+      tags:
+      - cloud-oauth
+      summary: Github Star Local Capability
+      operationId: github_star_local_capability_api_authservice_v1_cloud_github_star_local_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GitHubStarLocalCapability'
+      security:
+      - HTTPBearer: []
+    put:
+      tags:
+      - cloud-oauth
+      summary: Github Star Local
+      operationId: github_star_local_api_authservice_v1_cloud_github_star_local_put
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GitHubStarLocalBody'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GitHubStarLocalResult'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+      security:
+      - HTTPBearer: []
 components:
   schemas:
     AuthorizeBody:
@@ -3384,6 +3481,160 @@ components:
       - session_id
       - status
       title: GitHubCLISessionResponse
+    GitHubStarAccount:
+      properties:
+        connection_id:
+          type: string
+          title: Connection Id
+        account_id:
+          type: string
+          title: Account Id
+        login:
+          type: string
+          title: Login
+        state:
+          type: string
+          enum:
+          - starred
+          - not_starred
+          - unknown
+          title: State
+        eligible:
+          type: boolean
+          title: Eligible
+      type: object
+      required:
+      - connection_id
+      - account_id
+      - login
+      - state
+      - eligible
+      title: GitHubStarAccount
+    GitHubStarBody:
+      properties:
+        connection_id:
+          type: string
+          maxLength: 64
+          minLength: 1
+          title: Connection Id
+        expected_account_id:
+          type: string
+          maxLength: 64
+          minLength: 1
+          pattern: ^[0-9]+$
+          title: Expected Account Id
+        confirmed:
+          type: boolean
+          const: true
+          title: Confirmed
+      additionalProperties: false
+      type: object
+      required:
+      - connection_id
+      - expected_account_id
+      - confirmed
+      title: GitHubStarBody
+    GitHubStarResult:
+      properties:
+        repository:
+          type: string
+          title: Repository
+        connection_id:
+          type: string
+          title: Connection Id
+        account_id:
+          type: string
+          title: Account Id
+        login:
+          type: string
+          title: Login
+        state:
+          type: string
+          const: starred
+          title: State
+        write_performed:
+          type: boolean
+          title: Write Performed
+      type: object
+      required:
+      - repository
+      - connection_id
+      - account_id
+      - login
+      - state
+      - write_performed
+      title: GitHubStarResult
+    GitHubStarStatus:
+      properties:
+        repository:
+          type: string
+          title: Repository
+        accounts:
+          items:
+            $ref: '#/components/schemas/GitHubStarAccount'
+          type: array
+          title: Accounts
+        can_star:
+          type: boolean
+          title: Can Star
+          default: false
+      type: object
+      required:
+      - repository
+      - accounts
+      title: GitHubStarStatus
+    GitHubStarLocalBody:
+      properties:
+        confirmed:
+          type: boolean
+          const: true
+          title: Confirmed
+      additionalProperties: false
+      type: object
+      required:
+      - confirmed
+      title: GitHubStarLocalBody
+    GitHubStarLocalCapability:
+      properties:
+        repository:
+          type: string
+          title: Repository
+        eligible:
+          type: boolean
+          title: Eligible
+      type: object
+      required:
+      - repository
+      - eligible
+      title: GitHubStarLocalCapability
+    GitHubStarLocalResult:
+      properties:
+        repository:
+          type: string
+          title: Repository
+        state:
+          type: string
+          enum:
+          - starred
+          - connection_required
+          title: State
+        account_id:
+          type: string
+          title: Account Id
+        login:
+          type: string
+          title: Login
+        write_performed:
+          type: boolean
+          title: Write Performed
+      type: object
+      required:
+      - repository
+      - state
+      - account_id
+      - login
+      - write_performed
+      title: GitHubStarLocalResult
   securitySchemes:
     HTTPBearer:
       type: http

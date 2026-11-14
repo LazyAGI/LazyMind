@@ -72,7 +72,7 @@ func TestHTMLPresentationCapabilitiesComeFromChat(t *testing.T) {
 	}
 }
 
-func TestHTMLPresentationCapabilitiesReportDependency(t *testing.T) {
+func TestHTMLPresentationCapabilitiesDoNotRedirectToSettings(t *testing.T) {
 	t.Setenv("LAZYMIND_RUNTIME_MODE", "local")
 	t.Setenv("LAZYMIND_RUNTIME_ROOT", t.TempDir())
 	recorder := httptest.NewRecorder()
@@ -82,11 +82,23 @@ func TestHTMLPresentationCapabilitiesReportDependency(t *testing.T) {
 	if available, _ := format["available"].(bool); available {
 		t.Fatal("editable-pptx should be unavailable")
 	}
-	dependency, _ := format["dependency"].(map[string]any)
-	if dependency["id"] != "editable-ppt-dependency" {
-		t.Fatalf("dependency = %#v", dependency)
+	if _, exists := format["dependency"]; exists {
+		t.Fatalf("automatic export preparation must not direct users to settings: %#v", format)
 	}
-	if dependency["settings_url"] != "/settings?section=system_tools#editable-ppt-dependency" {
-		t.Fatalf("dependency = %#v", dependency)
+}
+
+func TestExportPreparationFailureStaysInRequestAndCanRetry(t *testing.T) {
+	t.Setenv("LAZYMIND_RUNTIME_MODE", "local")
+	t.Setenv("LAZYMIND_RUNTIME_ROOT", t.TempDir())
+	t.Setenv("LAZYMIND_NODE_EXECUTABLE", "/nonexistent/presentation-node")
+	for attempt := 0; attempt < 2; attempt++ {
+		recorder := httptest.NewRecorder()
+		Export(recorder, exporterRequest(http.MethodPost, "/exporters/html-presentation:export"))
+		if recorder.Code != http.StatusServiceUnavailable {
+			t.Fatalf("status=%d body=%s", recorder.Code, recorder.Body.String())
+		}
+		if recorder.Header().Get("Location") != "" {
+			t.Fatal("preparation failure must not navigate away")
+		}
 	}
 }

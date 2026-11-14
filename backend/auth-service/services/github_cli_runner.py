@@ -66,21 +66,27 @@ class GitHubCLIRunner:
         token = os.environ.get('GH_TOKEN') or os.environ.get('GITHUB_TOKEN')
         if token:
             return {'access_token': token}
-        if sys.platform != 'darwin':
+        if sys.platform not in ('darwin', 'win32'):
             raise GitHubCLIError('GITHUB_CLI_PLATFORM_UNSUPPORTED')
-        host_home = os.environ.get('LAZYMIND_HOST_HOME') or os.environ.get('HOME')
+        host_home = (os.environ.get('LAZYMIND_HOST_HOME')
+                     or (os.environ.get('USERPROFILE') if sys.platform == 'win32' else None)
+                     or os.environ.get('HOME'))
         if not host_home and not os.environ.get('GH_CONFIG_DIR'):
             raise GitHubCLIError('GITHUB_CREDENTIAL_UNREADABLE')
-        config_dir = Path(os.environ.get('LAZYMIND_GITHUB_HOST_CONFIG_DIR') or os.environ.get('GH_CONFIG_DIR') or (
-            Path(os.environ['XDG_CONFIG_HOME']) / 'gh'
-            if os.environ.get('XDG_CONFIG_HOME') and not os.environ.get('LAZYMIND_HOST_HOME')
-            else Path(host_home or Path.home()) / '.config/gh'
-        ))
         # Runtime services have a private HOME. Only read-only credential probes use the host HOME;
         # the isolated authorization process keeps its service HOME and RAM-backed GH_CONFIG_DIR.
         probe_env = dict(os.environ)
         if host_home:
             probe_env['HOME'] = host_home
+            if sys.platform == 'win32':
+                probe_env['USERPROFILE'] = host_home
+        if sys.platform == 'win32':
+            return self._probe_git(probe_env)
+        config_dir = Path(os.environ.get('LAZYMIND_GITHUB_HOST_CONFIG_DIR') or os.environ.get('GH_CONFIG_DIR') or (
+            Path(os.environ['XDG_CONFIG_HOME']) / 'gh'
+            if os.environ.get('XDG_CONFIG_HOME') and not os.environ.get('LAZYMIND_HOST_HOME')
+            else Path(host_home or Path.home()) / '.config/gh'
+        ))
         try:
             path = config_dir / 'hosts.yml'
             config = yaml.safe_load(path.read_text()) if path.exists() else {}
@@ -121,8 +127,21 @@ class GitHubCLIRunner:
                 raise GitHubCLIError('GITHUB_CREDENTIAL_UNREADABLE') from None
         if result.returncode != 44:
             raise GitHubCLIError('GITHUB_CREDENTIAL_UNREADABLE')
+        return self._probe_git(probe_env)
+
+    def _probe_git(self, probe_env):
+        if sys.platform == 'darwin':
+            args = ['/usr/bin/git', 'credential-osxkeychain', 'get']
+        else:
+            git = shutil.which('git')
+            if not git:
+                raise GitHubCLIError('GITHUB_CREDENTIAL_UNREADABLE')
+            probe_env.update(GIT_TERMINAL_PROMPT='0', GCM_INTERACTIVE='0')
+            for key in ('GIT_ASKPASS', 'SSH_ASKPASS'):
+                probe_env.pop(key, None)
+            args = [git, '-c', 'credential.interactive=false', '-c', 'core.askPass=', 'credential', 'fill']
         result = self._command(
-            ['/usr/bin/git', 'credential-osxkeychain', 'get'],
+            args,
             input='protocol=https\nhost=github.com\n\n',
             env=probe_env,
         )

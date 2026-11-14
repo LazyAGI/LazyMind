@@ -1,28 +1,29 @@
 id: paper-writing
 name: 论文写作
-description: 支持选题、综述、实验、分析、写作、审稿与阅读心得；轻量实验可授权运行，复杂实验提供模拟数据，结果可继续分析绘图。
+description: 支持选题、综述、实验、分析、写作、审稿与阅读心得；轻量实验按环境受限运行，按研究目标准备数据，结果可继续分析绘图。
 when_to_use: >
   按用户明确要求且尚未完成的工作选择入口；同时要求检索、分析与写作时，先综述，再 F3 数据准备、F4 分析、论文大纲与成稿。
   仅要求实验或数据分析时，先选择 experiment（F3 实验与数据准备），再按阶段确认规则进入 data_analysis。
   F3 从材料池中读取已提取的依据和完整数据表；已有结果仅整理展示，需要新计算时才运行实验。
   补传附件先提取有效信息入池，已处理的附件不重复读取，不将原文全文复制到后续上下文。
   Use when the user requests the paper-writing workflow or review of an uploaded academic manuscript.
-  Start broad paper-writing requests at research_topic, retaining the supplied study methods and results.
+  Select the earliest unfinished stage explicitly requested by the user. For a new paper requiring
+  literature retrieval, start at literature_review, even with research notes, data or a tentative title.
+  Use research_topic for requested topic development, not as a mandatory first step.
   Literature reviews retain supplied papers and expand references through available academic sources and knowledge bases.
   Honor explicit source restrictions, dates, counts and focus. Frozen review handoffs use only their selection
   unless the user explicitly asks to expand it. Never substitute model knowledge for missing literature.
   Start review handoffs at literature_review with the frozen selection.
-  Before starting, use the framework ask_user clarification card for the declared execution
-  preference unless the user has explicitly answered it for this task. A request to do only
-  literature review this turn is NOT an answer about execution of later experiment steps.
-  Never infer consent from an attachment, a request to write a paper, an old task, or a preselected option. Do not create another
-  questionnaire or preparation step. Preserve the original research/review request after the answer.
-  Bind experiment_execution to simulate_only for refusal/no answer, or allow_local for explicit agreement.
-  Bind allow_local only after explicit consent for this task. The experiment tool applies the
-  bounded CPU execution policy; computations using real user data that cannot run must report missing results, not synthetic replacements.
-  If ask_user is not registered, use simulate_only. A registered tool's validation failure is NOT
-  unavailability or a user answer: report that failure and stop rather than bypassing the question.
-  Execution takes place in the current LazyMind service container, not on the browser user's computer.
+  Do not ask a fixed experiment-execution question before startup or when entering F3.
+  Decide from the current request, supplied materials and available execution environment.
+  Use existing observations directly; run new computations only within the experiment tool's
+  bounded CPU policy (no network, dependency installation or GPU, at most 30 seconds).
+  Honor an explicit user refusal to run code by binding experiment_execution to simulate_only;
+  otherwise leave it unbound and let the experiment tool assess execution. Do not ask for this field.
+  With no observations, generate clearly labeled simulation only when it fits the user's goal;
+  if actual empirical results are required, explain the missing data instead of fabricating findings.
+  Failed computations on real user data must report missing results, never synthetic replacements.
+  Execution takes place in the current LazyMind deployment, not necessarily the browser user's computer.
   For direct experiment entry, bind the user's stated goal to experiment_question; ask if missing for
   a new experiment. Existing data does not require a new experimental question.
   F1/F2 entries reuse the accumulated question and evidence. F3 returns final results for F4.
@@ -37,8 +38,10 @@ when_to_use: >
   Markdown materials, images or existing data do not establish that literature retrieval or analysis is complete.
   Enter write_outline directly only for an outline-only request, or when required earlier work is complete
   or explicitly out of scope. Do not skip requested research or analysis just because the final deliverable is a paper.
-  Bind existing manuscripts to manuscript_file, regardless of format. Do not bind background/data/outline materials
-  as manuscripts or transcribe them into paper_input; steps read actual attachments and initialize their pool.
+  Bind existing manuscripts to manuscript_file, regardless of format. Bind raw research notes,
+  background and measurement attachments to research_materials, not seed_pool or manuscript_file.
+  Do not put local file paths in paper_input.writing_materials. seed_pool accepts only an existing
+  paper-material-pool.v2 JSON pool. Steps extract research_materials into source passages and complete tables.
   write_outline publishes an editable outline and
   requires user confirmation before write_document. Stop after the outline even when the launch request
   also asks for a complete manuscript or peer review. Continue only after the user confirms the outline.
@@ -174,17 +177,78 @@ runtime:
           source: package
         - name: academic_read_paper
           source: package
-  trigger_inputs: [manuscript_file, manuscript_text, paper_topic, review_request, paper_input, experiment_execution, experiment_question]
+  trigger_inputs: [research_materials, manuscript_file, manuscript_text, paper_topic, review_request, paper_input, experiment_execution, experiment_question]
   input_contracts:
+    research_materials:
+      description: >
+        Raw research/background/data attachments (Markdown, TXT, PDF or DOCX), in source order.
+        Steps preserve source identities, selected passages and complete tables. An attachment does not
+        mean literature retrieval or data analysis is complete. Do not use seed_pool or manuscript_file
+        for these materials, or put local file paths in paper_input.writing_materials.
+    seed_pool:
+      description: >
+        Existing structured paper-material-pool.v2 JSON pool, not a raw attachment.
+        For Markdown research notes and supplied observations use research_materials instead.
+      schema:
+        $defs:
+          ref:
+            type: object
+            required: [id, version]
+            properties:
+              id: {type: string, minLength: 1}
+              version: {type: integer, minimum: 1}
+          pool:
+            type: object
+            required: [schema, topic, sequence, materials, current, history]
+            properties:
+              schema: {const: paper-material-pool.v2}
+              topic: {type: string, pattern: '\S'}
+              sequence: {type: integer, minimum: 0}
+              materials:
+                type: array
+                items:
+                  type: object
+                  required: [id, kind, version, content, source_refs, derived_from, mock]
+                  properties:
+                    id: {type: string, minLength: 1}
+                    kind: {enum: [papers, question, evidence, writing_materials, data, source_data, experiment, code_files, result_meta, data_context, study_design, analysis, charts, outline, manuscript, review, review_data, media_assets, reflection]}
+                    version: {type: integer, minimum: 1}
+                    content: {}
+                    source_refs: {type: array, items: {type: string, minLength: 1}}
+                    derived_from: {type: array, items: {$ref: '#/$defs/ref'}}
+                    mock: {type: boolean}
+              current: {type: object, additionalProperties: {$ref: '#/$defs/ref'}}
+              history:
+                type: array
+                items:
+                  type: object
+                  required: [node, inputs, outputs]
+                  properties:
+                    node: {enum: [F1, F2, F3, F4, F5, F6, F7]}
+                    inputs: {type: array, items: {$ref: '#/$defs/ref'}}
+                    outputs: {type: array, items: {$ref: '#/$defs/ref'}}
+        anyOf:
+          - {$ref: '#/$defs/pool'}
+          - type: object
+            not: {required: [topic]}
+            anyOf:
+              - required: [data]
+                properties: {data: {$ref: '#'}}
+              - required: [text]
+                properties: {text: {$ref: '#'}}
     paper_topic:
       description: >
         Plain-text research topic. For research_topic, bind the user's topic here and retain
         the full requirements in request_context. This input can be used on its own.
+        If paper_input.topic is also supplied, equivalent topics are accepted after ignoring
+        whitespace, case, character width and common quote differences. Different topics conflict.
     paper_input:
       description: >
         Optional structured business JSON matching this schema. For a plain-text topic,
         use paper_topic and request_context. Writing preferences belong in constraints.
-        Pass the user's experiment choice through clarification_values.experiment_execution.
+        Experiment execution is decided from the request, materials and current environment.
+        constraints.citation_style must be one of APA 7, Chicago Author-Date, MLA 9, IEEE,
+        Vancouver or GB/T 7714; abbreviations such as APA are not accepted.
       schema:
         $defs:
           business:
@@ -206,7 +270,7 @@ runtime:
                   paper_language: {enum: [zh-CN, en]}
                   word_target: {type: [integer, 'null'], minimum: 1}
                   paper_type: {enum: [null, research, empirical, literature_review, theoretical, case_study, conference]}
-                  citation_style: {type: string, minLength: 1}
+                  citation_style: {enum: ['APA 7', 'Chicago Author-Date', 'MLA 9', IEEE, Vancouver, 'GB/T 7714']}
                   focus: {type: array, items: {type: string, minLength: 1}}
                   required_sections:
                     type: array
@@ -246,20 +310,6 @@ runtime:
                 properties: {data: {$ref: '#'}}
               - required: [text]
                 properties: {text: {$ref: '#'}}
-  clarification_fields:
-    - id: experiment_execution
-      label: 实验运行方式
-      question: >
-        是否允许本次论文任务在当前 LazyMind 部署环境受限运行轻量实验？
-        部署环境不一定是你打开浏览器的电脑。仅使用所选数据，不联网、不安装依赖、不使用 GPU。
-        简单实验的代码执行最多 30 秒；方案和代码生成可能耗时数分钟。
-        复杂实验或执行失败时提供明确标记的模拟数据。
-      type: single
-      choice_policy: fixed
-      allow_other: false
-      choices:
-        - 不允许，仅生成代码和模拟数据
-        - 允许受限运行，条件不足时使用模拟数据
   transactional_outputs: true
   recovery_inputs:
     experiment:
@@ -330,7 +380,8 @@ slots:
   - {id: recovery_research_document, type: file, cardinality: single, external: true, exposed: false}
   - {id: recovery_review_pool, type: file, cardinality: single, external: true, exposed: false}
   - {id: recovery_review_document, type: file, cardinality: single, external: true, exposed: false}
-  - {id: seed_pool, label: 输入材料池, type: file, cardinality: single, external: true, exposed: false}
+  - {id: research_materials, label: 原始研究材料, type: file, cardinality: list, external: true}
+  - {id: seed_pool, label: 输入材料池, type: json, cardinality: single, external: true, exposed: false}
   - {id: research_topic_pool, label: "研究选题材料池", type: file, cardinality: single, exposed: false}
   - {id: research_topic_document, label: "研究选题", type: file, cardinality: single}
   - {id: literature_review_pool, label: "文献综述材料池", type: file, cardinality: single, exposed: false}

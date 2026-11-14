@@ -25,7 +25,8 @@ def tools(monkeypatch, tmp_path):
 
 @pytest.mark.parametrize('outcome', ['ok', 'missing_page', 'failed'])
 def test_requested_pptx_exports_selected_order_and_notes_before_publication(tools, monkeypatch, tmp_path, outcome):
-    monkeypatch.setattr(tools, '_ui_slot_order_list', lambda slot: [4, 2])
+    monkeypatch.setattr(tools, '_ui_slot_order_list',
+                        lambda slot: [4, 2] if slot in {'preview_html', 'preview_notes'} else [])
     current = {
         'preview_html': ['<html><body>Current first</body></html>', '<html><body>Current second</body></html>'],
         'preview_notes': ['Saved first script', 'Saved second script'],
@@ -112,3 +113,63 @@ def test_native_tool_schema_requires_authored_outline_and_exports_without_model_
                ToolManager([tools.ppt_build_outline, tools.ppt_export_deck]).tools_description}
     assert set(schemas['ppt_build_outline']['required']) == {'user_query', 'outline_markdown'}
     assert schemas['ppt_export_deck']['properties'] == {}
+
+
+@pytest.mark.parametrize('extension', ['ttf', 'otf'])
+def test_export_embeds_shared_fonts_outside_deck(tools, monkeypatch, tmp_path, extension):
+    import hashlib
+    import base64
+    upload = tmp_path / 'uploads'
+    library = upload / 'presentation-fonts'
+    library.mkdir(parents=True)
+    deck = tmp_path / 'deck'
+    deck.mkdir()
+    payload = b'font fixture bytes'
+    name = hashlib.sha256(payload).hexdigest() + '.' + extension
+    (library / name).write_bytes(payload)
+    monkeypatch.setenv('LAZYMIND_UPLOAD_ROOT', str(upload))
+    original = ('<html><head><style id="lazymind-local-fonts">@font-face{src:url("/static-files/'
+                'presentation-fonts/' + name + '")}</style></head><body>Slide</body></html>')
+    exported, count = tools._inline_preview_images(original, deck, deck / 'page.html', inline_assets=True)
+    assert count == 1
+    assert f'data:font/{extension};base64,' + base64.b64encode(payload).decode() in exported
+    assert '/static-files/' not in exported
+    assert tools._inline_preview_images(original, deck, deck / 'page.html')[0] == original
+
+
+@pytest.mark.parametrize('case', ['traversal', 'symlink', 'corrupt', 'missing'])
+def test_shared_font_export_keeps_resource_boundary(tools, monkeypatch, tmp_path, case):
+    import hashlib
+    upload = tmp_path / 'uploads'
+    library = upload / 'presentation-fonts'
+    library.mkdir(parents=True)
+    payload = b'font fixture'
+    name = hashlib.sha256(payload).hexdigest() + '.ttf'
+    if case == 'symlink':
+        outside = tmp_path / 'private.ttf'
+        outside.write_bytes(payload)
+        (library / name).symlink_to(outside)
+    elif case == 'corrupt':
+        (library / name).write_bytes(b'wrong bytes')
+    elif case == 'traversal':
+        name = '../private.ttf'
+    monkeypatch.setenv('LAZYMIND_UPLOAD_ROOT', str(upload))
+    html = ('<html><style id="lazymind-local-fonts">@font-face{src:url(/static-files/'
+            'presentation-fonts/' + name + ')}</style></html>')
+    with pytest.raises(ValueError, match='font'):
+        tools._inline_preview_images(html, tmp_path / 'deck', tmp_path / 'deck/page.html', inline_assets=True)
+
+
+def test_export_resource_failure_preserves_pages_and_reports_same_route_retry(tools, monkeypatch):
+    monkeypatch.setattr(tools, '_ui_slot_order_list', lambda _: [0])
+    current = {'preview_html': '<html><body>Existing page</body></html>', 'preview_notes': 'Existing script'}
+    monkeypatch.setattr(tools, '_resolve_artifact_text', lambda _, slot, **kw: (current[slot], 'text'))
+
+    def fail_resource(*args, **kwargs):
+        raise ValueError('Shared presentation font is missing')
+    monkeypatch.setattr(tools, '_inline_preview_images', fail_resource)
+    monkeypatch.setattr(tools, '_save_artifact', lambda **kw: pytest.fail('must not overwrite existing artifacts'))
+    monkeypatch.setattr(external_ppt_tools, '_cli', lambda: pytest.fail('must not start exporter'))
+    with pytest.raises(tools.ToolExecutionError, match='retry ppt_export_deck; do not switch'):
+        tools.ppt_export_deck()
+    assert current['preview_notes'] == 'Existing script'

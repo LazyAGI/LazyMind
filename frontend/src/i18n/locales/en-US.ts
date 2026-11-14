@@ -3,6 +3,22 @@ import { evolutionControlsEn } from "@/modules/selfEvolution/shared/controlTrans
 import { enUSErrorMessages } from "./error-codes";
 
 const enUS = {
+
+  nodeDependency: {
+    "guidePrerequisite": "Requires Node.js 22.19 or later. An existing compatible version can be used directly.",
+    "title": "Node.js runtime",
+    "summary": "Connect Codex desktop to LazyMind.",
+    "ready": "Ready",
+    "missing": "Not ready",
+    "checking": "Checking",
+    "failed": "Operation failed. Please retry.",
+    "description": "Requires Node.js 22.19 or later. Installs into a LazyMind-managed directory without replacing your system runtime.",
+    "install": "Install Node.js",
+    "refresh": "Check again",
+    "unsupported": "Automatic installation is unavailable for this platform or custom Node path. Configure it manually.",
+    "required": "Install Node.js, then return here to connect.",
+    "goto": "Open dependency installation"
+},
   pdfReader: {
   "timeout": "The reading model did not finish within 2 minutes. Retry or choose another study model.",
   "displaySettings": "Display & parsing",
@@ -322,6 +338,19 @@ const enUS = {
         "skipped": "Skipped"
     }
 },
+
+  githubStar: {
+    title: 'Support LazyMind', message: 'Has LazyMind been helpful? Star our GitHub project to support continued improvements.',
+    star: 'Star the project', close: 'Close', account: 'GitHub account', selectAccount: 'Choose a GitHub account',
+    localHint: 'No usable local GitHub sign-in was found. Connect an account to continue.',
+    continueAuth: 'Continue to GitHub connection', success: 'Thank you for your support. Project starred.',
+    alreadyStarred: 'You have already starred the project. Thank you!',
+    permissionDenied: 'GitHub permission is missing. Please authorize again.',
+    rateLimited: 'GitHub is rate limiting requests. Please wait before trying again.',
+    unknownResult: 'The result could not be confirmed. Please check again later.',
+    failed: 'Could not star the project. Please try again.', accountChanged: 'Your GitHub account changed. Please confirm it again.',
+    reauthorize: 'Your GitHub sign-in expired. Please authorize again.', manageAccount: 'Manage GitHub account',
+  },
   sourceImports: {
     "waitingRetryAt": "Waiting to retry · {{time}}",
     "waitingRetry": "Waiting to retry",
@@ -10916,7 +10945,7 @@ const enUS = {
       resourceConsequence: "{{title}} calls already in flight are not force-stopped; the other resource group is unaffected.",
       defaultConsequence: "Calls already in flight are not force-stopped. Re-enabling restores child selections.",
       developerTitle: "{{action}} developer mode",
-      developerEnableContent: "Turning this on activates developer-mode features.",
+      developerEnableContent: "Before enabling Developer Mode, you need a valid GitHub connection or local GitHub credentials. Confirm to check automatically.",
       developerDisableContent: "Turning this off disables developer-mode features but does not delete existing self-evolution data.",
       mcpEnabledToast: "Enabled {{updated}} services; {{skipped}} unverified services stay disabled",
       mcpToggledToast: "{{state}} {{count}} MCP services",
@@ -11253,6 +11282,11 @@ const enUS = {
 
     developer: {
       description: "Manage Developer Mode and the options that take effect only while it is on.",
+      githubGuideTitle: "Cannot enable Developer Mode yet",
+      githubGuideDescription: "No usable GitHub credentials were found. Check your local credentials or connect GitHub, then try again.",
+      githubGuideConnect: "Connect GitHub",
+      githubGuideCancel: "Cancel enabling",
+      githubCheckFailed: "Could not check your GitHub connection or local Git credential capability. Developer Mode is still off. Please retry.",
       inactiveNotice: "Your saved options are preserved but currently inactive. Enable Developer Mode to use them.",
       optionsGroupAria: "Dependent Developer Mode options",
       enableTitle: "Enable developer mode",

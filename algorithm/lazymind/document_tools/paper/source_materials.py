@@ -196,6 +196,26 @@ def sync_attachments(pool, history, request, *, read_papers):
     return bool(imported)
 
 
+def sync_bound_materials(pool, paths, request):
+    """Import Runtime-bound research files through the same evidence/table extractor."""
+    from .entry import read_manuscript
+
+    paths = [paths] if isinstance(paths, str) else paths
+    if not isinstance(paths, list) or not paths or any(not isinstance(path, str) for path in paths):
+        raise ValueError('research_materials 必须是已绑定的研究附件路径列表')
+    papers = {}
+    for path in paths:
+        text = read_manuscript(path)
+        name = Path(path).name
+        digest = text_digest(text)
+        # Attempt workspaces change on retry; source identity follows the source content.
+        key = f'bound:{digest}:{name}'
+        papers[key] = {'id': f'upload-{digest}', 'title': Path(name).stem, 'filename': name,
+                       'text': text, 'attachment_key': text_digest(key), 'review_role': 'background'}
+    return sync_attachments(pool, {'0': list(papers)}, request,
+                            read_papers=lambda history: [papers[key] for keys in history.values() for key in keys])
+
+
 def read_tabular(path):
     """Tabular uploads enter the same pool once; no model transcription of cells."""
     from lazymind.chat.engine.tools.file_resources.resolver import resolve_text_target
