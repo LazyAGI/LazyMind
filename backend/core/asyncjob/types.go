@@ -3,6 +3,7 @@ package asyncjob
 import (
 	"context"
 	"encoding/json"
+	"gorm.io/gorm"
 	"time"
 )
 
@@ -86,4 +87,11 @@ type Options struct {
 	Concurrency  int
 	PollInterval time.Duration
 	LockTTL      time.Duration
+}
+
+// FencedReporter serializes a short domain checkpoint with cancellation and
+// lease takeover. Callbacks must not perform network or filesystem work.
+type FencedReporter interface {
+	Reporter
+	WithLease(context.Context, func(*gorm.DB) error) error
 }
