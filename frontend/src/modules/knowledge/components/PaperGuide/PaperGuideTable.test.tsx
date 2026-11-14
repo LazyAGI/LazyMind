@@ -303,3 +303,39 @@ it("preserves attribution, linked source assets, evidence and whole-block keyboa
     },
   });
 });
+
+it.each([
+  "\\[\n| A | B |\n| --- | --- |\n| 1 | 2 |\n\\]",
+  "$$\n| A | B |\n| --- | --- |\n| 1 | 2 |\n$$",
+  "说明\n\n    | A | B |\n    | --- | --- |\n    | 1 | 2 |",
+  "\t| A | B |\n\t| --- | --- |\n\t| 1 | 2 |",
+  "| A | B |\n| --- | --- |\n| 1 | 2 |\n    | 3 | 4 |",
+  "| A | B |\n| --- | --- |\n| 1 | 2 |\n3\n| 4 | 5 |",
+  "| A | B |\n| --- | --- |\n| 1 | 2 |\n3\nextra\n4 | 5",
+])(
+  "preserves the entire raw candidate when its context or body is ambiguous: %s",
+  (raw) => {
+    const { root } = renderTable(raw);
+    expect(screen.queryByRole("table")).toBeNull();
+    expect(root.textContent).toBe(raw);
+    expect(sourceTextLength(root)).toBe(Array.from(raw).length);
+  },
+);
+
+it("keeps complete multiline mathematics outside a real table and its footnote", () => {
+  const prefix = "\\[\na+b\n\\]\n\n",
+    suffix = "\n脚注保持原文。\n\n\\[\nc+d\n\\]";
+  const { root } = renderTable(prefix + table + suffix);
+  expect(screen.getAllByRole("row")).toHaveLength(7);
+  expect(root.querySelectorAll("[data-guide-math]")).toHaveLength(2);
+  expect(root).toHaveTextContent("脚注保持原文。");
+  const atom = root.querySelector('[data-guide-atomic="table"]')!;
+  expect(atom).toHaveAttribute(
+    "data-guide-source-start",
+    String(Array.from(prefix).length),
+  );
+  expect(atom).toHaveAttribute(
+    "data-guide-source-end",
+    String(Array.from(prefix + table).length),
+  );
+});

@@ -11,6 +11,8 @@ export interface GuideTable {
 }
 /** A deliberately bounded table grammar, not a Markdown/HTML interpreter. */
 function cells(line: string): string[] | undefined {
+  // Preserve Markdown code indentation before normalizing table-cell whitespace.
+  if (/^(?: {4}| {0,3}\t)/.test(line)) return;
   const value = line.trim();
   if (
     !value.includes("|") ||
@@ -60,7 +62,15 @@ export function parseGuideTable(text: string): GuideTable | undefined {
   const rows: string[][] = [];
   let last = index;
   for (let i = index + 1; i < lines.length; i++) {
-    if (!lines[i].text.trim() || !lines[i].text.includes("|")) break;
+    if (!lines[i].text.trim()) break;
+    if (!lines[i].text.includes("|")) {
+      // A non-pipe line is prose only when the same uninterrupted paragraph
+      // does not resume table-shaped rows. Never silently publish a prefix.
+      for (let j = i + 1; j < lines.length && lines[j].text.trim(); j++) {
+        if (lines[j].text.includes("|")) return;
+      }
+      break;
+    }
     const row = cells(lines[i].text);
     if (!row || row.length !== headers.length || rows.length >= 100) return;
     rows.push(row);
@@ -69,9 +79,23 @@ export function parseGuideTable(text: string): GuideTable | undefined {
   if (!rows.length) return;
   const begin = lines[index - 1].start,
     end = lines[last].end;
+  const sourceStart = Array.from(text.slice(0, begin)).length,
+    sourceEnd = Array.from(text.slice(0, end)).length;
+  // Per-line parsing cannot detect a table-shaped passage inside a multiline
+  // formula. Check the complete immutable block before separating prose.
+  if (
+    guideTextSegments(text).some(
+      (segment) =>
+        segment.latex !== undefined &&
+        /[\r\n]/.test(segment.latex) &&
+        segment.start < sourceEnd &&
+        segment.end > sourceStart,
+    )
+  )
+    return;
   return {
-    start: Array.from(text.slice(0, begin)).length,
-    end: Array.from(text.slice(0, end)).length,
+    start: sourceStart,
+    end: sourceEnd,
     prefix: text.slice(0, begin),
     suffix: text.slice(end),
     headers,
