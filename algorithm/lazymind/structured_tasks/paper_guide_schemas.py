@@ -179,8 +179,11 @@ class SectionPlan(Shape):
 
 
 class AssetDecision(Shape):
-    id: SourceID
-    included: bool
+    id: Annotated[SourceID, Field(description=(
+        'Supplied evidence with source_type image/chart/formula/table only, even when excluded; '
+        'never a text-only caption or mention.'))]
+    included: Annotated[bool, Field(description=(
+        'False means a supplied catalog asset is not displayed, not an unavailable external resource.'))]
     reason: prose(500)
 
 

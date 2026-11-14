@@ -30,8 +30,17 @@ clear, otherwise null. Attribution and support status describe what this materia
 PLAN = """
 Plan four ordered roles: background, question, contribution, justification. Give each a concrete
 display title, focus, necessary terms, claim IDs, evidence IDs and asset IDs. Include all core
-claims in at least one section. For each key visual or formula, give the evidence ID and a reason
+claims in at least one section. For each key supplied catalog visual or formula, give the evidence ID and a reason
 for inclusion or exclusion; place every included object in at least one section.
+Asset eligibility: EVERY required_assets decision, whether included=true or false, must use
+supplied evidence whose source_type is image, chart, formula or table. false means a supplied
+catalog asset deliberately not displayed, not a missing external resource. Evidence of source_type=text,
+including captions or mentions, is ordinary evidence, never an asset: explain unavailable material in claims, conditions,
+section focus and prose, without required_assets or asset_ids entries. For example, a supplied
+table can have a true or false decision; text describing an unavailable supplement figure can
+support a claim about missing material, but cannot have either asset decision. Do not infer asset
+type from a figure/table label in text. Catalog eligibility does not establish visible pixels or
+readable contents; preserve those gaps and never invent the missing image, cells or formula.
 Asset cross-check: each section.asset_ids ID must have exactly one required_assets decision with
 included=true; every included=true decision must be used by at least one section. Excluded or
 undecided IDs must never appear in asset_ids. Citing a table as text in evidence_ids does not

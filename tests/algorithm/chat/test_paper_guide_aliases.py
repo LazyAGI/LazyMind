@@ -265,7 +265,7 @@ def test_registered_task_uses_alias_schema_and_returns_canonical_wire(monkeypatc
         return json.dumps(model_output(task, output))
     monkeypatch.setattr(llm_task, 'AutoModel', lambda **kwargs: model)
     request = llm_task.LLMTaskRequest(task_type=f'paper.guide.{task}',
-        options={'task_version': 'paper-guide-v4'}, input={'data': raw})
+        options={'task_version': 'paper-guide-v5'}, input={'data': raw})
     result = llm_task.run_llm_task(request)
     assert result.status == 'succeeded' and result.output == output
     assert len(calls) == result.usage['model_calls'] == 1
@@ -283,7 +283,7 @@ def test_alias_schema_keeps_duplicate_json_key_rejection(monkeypatch):
         return '{"claims":[],"claims":[],"open_questions":[]}'
     monkeypatch.setattr(llm_task, 'AutoModel', lambda **kwargs: model)
     request = llm_task.LLMTaskRequest(task_type='paper.guide.extract',
-        options={'task_version': 'paper-guide-v4'}, input={'data': cases()['extract'][2]})
+        options={'task_version': 'paper-guide-v5'}, input={'data': cases()['extract'][2]})
     assert llm_task.run_llm_task(request).error_code == 'invalid_model_output'
     assert len(calls) == 1
 
@@ -338,7 +338,7 @@ def test_alias_failure_never_triggers_an_extra_model_attempt(monkeypatch, bad):
         return json.dumps(output)
     monkeypatch.setattr(llm_task, 'AutoModel', lambda **kwargs: model)
     request = llm_task.LLMTaskRequest(task_type='paper.guide.extract',
-        options={'task_version': 'paper-guide-v4'}, input={'data': cases()['extract'][2]})
+        options={'task_version': 'paper-guide-v5'}, input={'data': cases()['extract'][2]})
     result = llm_task.run_llm_task(request)
     assert result.error_code == 'invalid_model_output'
     assert len(calls) == result.usage['model_calls'] == 1
@@ -355,7 +355,7 @@ def test_concurrent_registered_calls_cannot_share_alias_identity(monkeypatch):
         raw['evidence'][0]['id'] = source
         raw['source_sections'][0]['evidence_ids'] = [source]
         request = llm_task.LLMTaskRequest(task_type='paper.guide.extract',
-            options={'task_version': 'paper-guide-v4'}, input={'data': raw})
+            options={'task_version': 'paper-guide-v5'}, input={'data': raw})
         result = llm_task.run_llm_task(request)
         assert result.status == 'succeeded' and result.usage['model_calls'] == 1
         return result.output['claims'][0]['evidence_ids']

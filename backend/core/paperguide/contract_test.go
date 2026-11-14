@@ -136,8 +136,8 @@ func TestImpossibleOutputReserveMakesZeroModelCalls(t *testing.T) {
 	}
 }
 
-func TestV2AndV3PublishedGuideAndSelectionRemainReadable(t *testing.T) {
-	for _, version := range []string{"paper-guide-v2", "paper-guide-v3"} {
+func TestV2ThroughV4PublishedGuideAndSelectionRemainReadable(t *testing.T) {
+	for _, version := range []string{"paper-guide-v2", "paper-guide-v3", "paper-guide-v4"} {
 		t.Run(version, func(t *testing.T) {
 			d, id := fixture(t)
 			current, _ := BuildSourceSnapshot(d, id)

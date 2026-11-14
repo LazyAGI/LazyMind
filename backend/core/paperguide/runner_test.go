@@ -454,7 +454,7 @@ func TestWholeReviewProjectsExactPublishedVersions(t *testing.T) {
 }
 
 func TestLegacyCandidateCannotSpendOrResumeUnderNewContract(t *testing.T) {
-	for _, version := range []string{"paper-guide-v1", "paper-guide-v2", "paper-guide-v3"} {
+	for _, version := range []string{"paper-guide-v1", "paper-guide-v2", "paper-guide-v3", "paper-guide-v4"} {
 		t.Run(version, func(t *testing.T) {
 			d, id := fixture(t)
 			snap, _ := BuildSourceSnapshot(d, id)
