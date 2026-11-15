@@ -28,7 +28,7 @@ def mixed_material():
     return source, output, encoded
 
 
-def invoke(monkeypatch, source, output, version='paper-guide-v10'):
+def invoke(monkeypatch, source, output, version='paper-guide-v11'):
     from lazymind.chat.service import llm_task
     calls = []
     def model(prompt, **options):

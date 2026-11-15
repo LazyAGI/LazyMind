@@ -487,7 +487,7 @@ func TestWholeReviewProjectsExactPublishedVersions(t *testing.T) {
 }
 
 func TestLegacyCandidateCannotSpendOrResumeUnderNewContract(t *testing.T) {
-	for _, version := range []string{"paper-guide-v1", "paper-guide-v2", "paper-guide-v3", "paper-guide-v4", "paper-guide-v5", "paper-guide-v6", "paper-guide-v7", "paper-guide-v8", "paper-guide-v9"} {
+	for _, version := range []string{"paper-guide-v1", "paper-guide-v2", "paper-guide-v3", "paper-guide-v4", "paper-guide-v5", "paper-guide-v6", "paper-guide-v7", "paper-guide-v8", "paper-guide-v9", "paper-guide-v10"} {
 		t.Run(version, func(t *testing.T) {
 			d, id := fixture(t)
 			snap, _ := BuildSourceSnapshot(d, id)
@@ -502,7 +502,17 @@ func TestLegacyCandidateCannotSpendOrResumeUnderNewContract(t *testing.T) {
 			if version != "paper-guide-v1" {
 				oldFingerprint = digest([]any{id.SourceSHA256, snap.IRDigest, SourceCatalogVersion, version, model})
 			}
-			repo.DB.Model(&rev).Updates(map[string]any{"fingerprint": oldFingerprint, "stage": "paused", "calls_used": 1})
+			planInput := map[string]any{
+				"language": scope.Language, "evidence": snap.Evidence, "coverage": snap.Coverage,
+				"source_sections": snap.Sections,
+			}
+			checkpoint := StepWrite{Key: "plan", InputHash: digest([]any{version, planInput}), Output: mustJSON(baselinePlan(snap))}
+			if err = repo.PutStep(t.Context(), testFence{repo.DB}, rev.ID, rev.Epoch, checkpoint); err != nil {
+				t.Fatal(err)
+			}
+			if err = repo.DB.Model(&rev).Updates(map[string]any{"fingerprint": oldFingerprint, "stage": "paused", "calls_used": 1}).Error; err != nil {
+				t.Fatal(err)
+			}
 			calls := 0
 			service := Service{Repo: repo, Source: &fixtureSource{s: snap}, Authorize: func(context.Context, Scope, bool) error { return nil }, ResolveModel: func(context.Context, Scope, string) (ModelIdentity, map[string]any, error) { return model, nil, nil }, Call: func(context.Context, string, map[string]any, map[string]any) (json.RawMessage, error) {
 				calls++
@@ -515,6 +525,11 @@ func TestLegacyCandidateCannotSpendOrResumeUnderNewContract(t *testing.T) {
 			_, err = repo.Resume(t.Context(), scope, rev.ID, model)
 			if err == nil || err.Error() != "paper_guide_regeneration_required" {
 				t.Fatalf("mixed-contract resume: %v", err)
+			}
+			steps, err := repo.Steps(t.Context(), rev.ID)
+			if err != nil || len(steps) != 1 || steps[0].StepKey != checkpoint.Key ||
+				steps[0].InputHash != checkpoint.InputHash || steps[0].OutputJSON != string(checkpoint.Output) {
+				t.Fatalf("legacy checkpoint changed: %+v %v", steps, err)
 			}
 			if err = repo.Cancel(t.Context(), scope, rev.ID); err != nil {
 				t.Fatalf("legacy candidate must remain cancellable: %v", err)

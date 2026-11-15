@@ -2,7 +2,7 @@ package paperguide
 
 // Shared cross-language guards in testdata/request-budget.json and the Python
 // tests measure all four real instructions, output schemas and input wrappers.
-// The largest prefix is 9220 UTF-8 bytes; 10240 also covers the 87-byte default
+// The largest prefix is 9420 UTF-8 bytes; 10240 also covers the 87-byte default
 // system prompt and 512 bytes of provider/message framing, with headroom.
 // As elsewhere in this runner, one UTF-8 byte is conservatively one token.
 const guidePromptReserve = 10240

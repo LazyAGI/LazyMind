@@ -136,8 +136,8 @@ func TestImpossibleOutputReserveMakesZeroModelCalls(t *testing.T) {
 	}
 }
 
-func TestV2ThroughV8PublishedGuideAndSelectionRemainReadable(t *testing.T) {
-	for _, version := range []string{"paper-guide-v2", "paper-guide-v3", "paper-guide-v4", "paper-guide-v5", "paper-guide-v6", "paper-guide-v7", "paper-guide-v8", "paper-guide-v9"} {
+func TestPublishedGuideAndSelectionRemainReadableAcrossTaskVersions(t *testing.T) {
+	for _, version := range []string{"paper-guide-v2", "paper-guide-v3", "paper-guide-v4", "paper-guide-v5", "paper-guide-v6", "paper-guide-v7", "paper-guide-v8", "paper-guide-v9", "paper-guide-v10"} {
 		t.Run(version, func(t *testing.T) {
 			d, id := fixture(t)
 			current, _ := BuildSourceSnapshot(d, id)
@@ -166,6 +166,9 @@ func TestV2ThroughV8PublishedGuideAndSelectionRemainReadable(t *testing.T) {
 			got, err := service.Revision(t.Context(), scope, rev.ID, 0)
 			if err != nil || !got.SourceCurrent || len(got.Sections) != 1 {
 				t.Fatalf("legacy history: %+v %v", got, err)
+			}
+			if blocks := got.Sections[0].Blocks; len(blocks) != 1 || blocks[0].Text != section.Blocks[0].Text {
+				t.Fatalf("legacy body changed: %+v", blocks)
 			}
 			evidence, currentSource, err := service.Evidence(t.Context(), scope, rev.ID, old.Evidence[1].ID)
 			if err != nil || !currentSource || evidence.ID != old.Evidence[1].ID {

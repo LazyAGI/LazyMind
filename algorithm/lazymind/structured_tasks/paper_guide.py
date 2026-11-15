@@ -30,6 +30,8 @@ clear, otherwise null. Attribution and support status describe what this materia
 """
 
 PLAN = """
+Use compact JSON and concise internal planning notes. Keep every core claim, condition, asset
+decision and explanation responsibility; remove repeated wording. Sections must still explain them fully.
 Plan four ordered roles: background, question, contribution, justification. Give each a concrete
 display title, focus, necessary terms, claim IDs, evidence IDs and asset IDs. Include all core
 claims in at least one section. For each key supplied catalog visual or formula, give the evidence ID and a reason
@@ -78,14 +80,18 @@ walk through its strongest evidence. A standard Chinese guide often totals about
 characters across all four roles; let the argument and available evidence determine the length.
 Explain the concepts and framework relationships assigned to this role in visible prose: their
 plain meaning, how they work or are used here, and how they answer the question. Abbreviation
-expansion, translated labels or component lists alone are insufficient. Explain key evidence's
-observation, premises, inference and limits, including assigned central comparisons and conditions;
-asset display alone is not explanation. Preserve unread-material gaps without inventing details.
+expansion, translated labels or component lists alone are insufficient. Give the domain meaning
+and role of load-bearing notation; names, indices and algebra alone do not explain it. Connect
+each decisive prerequisite to when its result is usable and what it does not establish. Explain
+key evidence's observation, premises, inference and limits, including assigned central comparisons
+and conditions. Asset display alone is not explanation. State source gaps or unknown meanings
+without inventing details or demanding peripheral caveats.
 Follow the plan's explanation roles: short overview glosses may precede fuller explanation;
 reuse explanations assigned elsewhere without repeating them. Add contrasts or teaching examples
 only to resolve material misunderstanding, in a form suited to the argument; no mandatory numeric
-example or uniform term length. Mark teaching, external background and interpretation distinctly
-from paper findings. Keep essential explanation out of detail blocks and summaries alone.
+example or uniform term length. Use concise, accurate ordinary glosses without attributing them
+as novel definitions or findings. Mark substantive teaching, external background and interpretation
+distinctly from paper findings. Keep essential explanation out of detail blocks and summaries alone.
 Support every paper-statement block with its claim IDs or direct evidence. Section.claims defines ONLY NEW claims absent from plan.claims.
 Never copy, restate or redefine a plan claim in Section.claims, even with the same statement.
 Reference existing plan claims by ID in section claim_ids and block claim_ids. If no new claims
@@ -97,18 +103,28 @@ all used claim IDs at section level and use each in a block. Cover every claim a
 role, and only use claims whose evidence is in this packet. For compact angle notation prefer
 LaTeX \\langle and \\rangle within math. For visual assets use only planned
 IDs from the packet with a matching block kind. Give section-specific block and new-claim IDs
-(e.g. contribution-b1), and provide a short continuity summary. If findings are present, repair
-their concrete scope and preserve the rest of the section's commitments. Whole-guide corrections
-receive the independent planning source packet: newly needed paper facts must cite actual evidence
-from this packet, with new claims as above; a finding is not itself evidence.
+(e.g. contribution-b1), and provide a short continuity summary. For findings, rewrite the
+substantive explanation against the supplied sources and preserve unaffected supported content
+and commitments available here. Treat suggestions as hypotheses to check, not source evidence.
+Do not narrate the editing dispute or turn a suggestion into a new exclusion, rule or finding.
+Preserve genuine uncertainty and limitations. Whole-guide corrections receive the independent
+planning source packet; cite actual evidence for new paper facts and add new claims as above.
 """
 
 REVIEW = """
-Review the supplied section or complete guide against its evidence and plan. Check claim strength
-and attribution, assumptions, units, quantifiers, exceptions, uncertainty, novelty, causal limits,
-caption versus visual observation, and mutual consistency. Return only material defects requiring
-correction: an existing claim/block ID, issue type and bounded prose suggestion; no code. Return
-findings=[] when none are supported. This does not verify external facts or proofs.
+Review the supplied section or complete guide against its evidence and plan. Read each assertion
+with its full block and the surrounding prose actually supplied. Resolve ordinary references,
+omitted repeated nouns and compatible qualifications from explicit context. Accept an accurate
+elementary gloss that adds no substantive fact, condition or novelty claim, even if the source
+does not define the term verbatim. Block attribution does not make each explanatory word a quote.
+Context may qualify a compatible assertion; it cannot cancel a direct contradiction, invented
+result or explicit scope expansion. Check claim strength and attribution, assumptions, units,
+quantifiers, exceptions, uncertainty, novelty, causal limits and caption versus visual observation.
+Return a finding only if the issue materially changes the reader's understanding of the object,
+scope, strength, attribution, practical consequence or core relationship. Omit optional rewording.
+Use an existing claim/block ID, issue type and a bounded prose suggestion naming the difference
+and a local repair; no code. Return findings=[] when none are supported. This does not verify
+external facts or proofs.
 For one section, check its assigned explanation responsibilities and actual assertions within the
 plan's division of work. Do not infer omissions in unseen sections, demand later explanations or
 mistake a nonexclusive source-equivalent overview for an exhaustive list. A shared claim or term
@@ -127,10 +143,11 @@ needed to understand the central evidence or argument. Accept equivalent plain l
 reasonable relocated explanation. Names, abbreviations, Plan entries or asset display alone do not
 explain. Do not require peripheral cells, exhaustive appendices, optional background or repetition.
 Use missing_explanation only for a gap that prevents understanding a core operation, measure,
-premise, framework or inference. Prefer the nearest existing relevant block, otherwise its claim;
-state the missing relationship, why it matters and a concrete local repair. Group related gaps at
-one location, but never hide independent defects to fit a repair budget. Keep inadequate explanation,
-factual failures and unavailable source material distinct; do not invent facts to fill source gaps.
+premise, framework or inference, including the domain meaning of load-bearing notation or how a
+decisive prerequisite governs use. Prefer the nearest existing relevant block, otherwise its claim;
+name the missing relationship and why it matters. Group related gaps at one location, but never hide
+independent defects to fit a repair budget. Keep inadequate explanation, factual failures and
+unavailable source material distinct; do not invent facts to fill source gaps.
 """
 
 
