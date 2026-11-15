@@ -101,8 +101,10 @@ claim_ids=["c1"]. Only define a section-prefixed NEW ID in claims for a newly in
 Add and cite a new claim for newly introduced important paper facts. List
 all used claim IDs at section level and use each in a block. Cover every claim assigned to this
 role, and only use claims whose evidence is in this packet. For compact angle notation prefer
-LaTeX \\langle and \\rangle within math. For visual assets use only planned
-IDs from the packet with a matching block kind. Give section-specific block and new-claim IDs
+LaTeX \\langle and \\rangle within math. For visual blocks use only exact asset_id/kind pairs
+from the allowed visual blocks map for this role. An empty map permits no asset blocks.
+Captions cannot override source type. Sources outside the map can still support prose.
+Give section-specific block and new-claim IDs
 (e.g. contribution-b1), and provide a short continuity summary. For findings, rewrite the
 substantive explanation against the supplied sources and preserve unaffected supported content
 and commitments available here. Treat suggestions as hypotheses to check, not source evidence.

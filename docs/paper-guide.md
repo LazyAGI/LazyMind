@@ -42,6 +42,8 @@ When the full source evidence fits, planning and whole-guide review receive the 
 | Model request timeout | 120 seconds per attempt, subject to the remaining run deadline |
 | Active work | 30 minutes across executions, including model calls and local processing; queueing and time between parser dependency checks are excluded |
 
+An initial section review can spend both correction targets on that section if it finds two distinct problems in succession. Each draft in that chain receives its own review before publication, and whole-guide review uses the latest reviewed section. Each section request lists the exact source aliases and visual block kinds it may use for that role. Other supplied sources can still support prose.
+
 The guide worker runs at most two jobs concurrently per Core process. The database serializes guide execution for the same user, including requests for different papers or languages. A worker restart can reuse saved steps whose inputs and outputs still validate; a saved Plan also requires its original extraction checkpoints when applicable. Lease and revision checks prevent an old worker from publishing after its run has been replaced or canceled.
 
 Each outbound attempt is reserved durably before dispatch. An interrupted attempt with an unknown outcome keeps its attempt count and time reservation. Resuming does not reset any budget, and may call the model again for work that never reached a validated checkpoint. The count describes reserved attempts and may include one whose dispatch could not be confirmed. Cancellation and local timeout do not guarantee that a provider stopped processing or billing. The limits are not a monetary cap or a guarantee of exactly-once provider execution.

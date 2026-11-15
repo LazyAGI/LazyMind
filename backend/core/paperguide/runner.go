@@ -259,8 +259,9 @@ func (x *execution) execute(ctx context.Context) error {
 	if e = x.s.Repo.Transition(ctx, x.f, x.rev.ID, x.rev.Epoch, "reviewing", ""); e != nil {
 		return e
 	}
-	// Whole review may produce at most one correction for each of at most two
-	// locations. Every corrected section is checked again and appended as v2.
+	// Whole review may correct a v1 section, recheck it, and append v2.
+	// Sections already repaired by their single-section review stay at their
+	// published versions; findings on those versions pause the run.
 	for round := 1; round <= 2; round++ {
 		input := x.independentInput()
 		input["plan"] = plan
@@ -600,10 +601,13 @@ func (x *execution) writeSection(ctx context.Context, p GuidePlan, sp GuideSecti
 		return section, key, e
 	}
 	if len(review.Findings) > 0 {
-		if version >= 2 {
+		// The initial section review can use both global correction targets.
+		// Before any new call, reserveCorrections rejects reused targets
+		// and requests that exceed the remaining budget.
+		if version >= 3 {
 			return section, key, ErrQuality
 		}
-		return x.writeSection(ctx, p, sp, prior, 2, review.Findings, false)
+		return x.writeSection(ctx, p, sp, prior, version+1, review.Findings, false)
 	}
 	// Cross-section IDs must be unique before publication, not just at final review.
 	if e = ValidateReview(p, append(append([]GuideSection{}, prior...), section), GuideReview{}); e != nil {

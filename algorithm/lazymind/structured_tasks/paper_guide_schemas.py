@@ -328,11 +328,23 @@ def bind_sections(sections, field, allowed):
     return used
 
 
+ASSET_KINDS = {'chart': 'figure', 'image': 'figure', 'formula': 'formula', 'table': 'table'}
+
+
+def _asset_kinds(evidence):
+    return {item.id: ASSET_KINDS[item.source_type] for item in evidence if item.source_type in ASSET_KINDS}
+
+
+def section_asset_kinds(data: SectionInput) -> dict[str, str]:
+    """Current role's catalog decisions, intersected with actual packet assets."""
+    expected = next(s for s in data.plan.sections if s.role == data.role)
+    assets = _asset_kinds(data.evidence)
+    return {source_id: assets[source_id] for source_id in expected.asset_ids if source_id in assets}
+
+
 def bind_output(data, result):
     """Outputs bind only to the supplied packet; Core independently binds to the snapshot."""
     evidence = {item.id for item in data.evidence}
-    asset_kind = {'chart': 'figure', 'image': 'figure', 'formula': 'formula', 'table': 'table'}
-    assets = {item.id: asset_kind[item.source_type] for item in data.evidence if item.source_type in asset_kind}
     if isinstance(result, Review):
         claims = {c.id for c in data.plan.claims}
         claims.update(c.id for s in data.sections for c in s.claims)
@@ -345,10 +357,11 @@ def bind_output(data, result):
     for claim in result.claims:
         refs(claim.evidence_ids, evidence)
     if isinstance(result, Plan):
-        refs([a.id for a in result.required_assets], assets.keys())
+        refs([a.id for a in result.required_assets], _asset_kinds(data.evidence).keys())
         bind_sections(result.sections, 'evidence_ids', evidence)
     if isinstance(result, Section):
         expected = next(s for s in data.plan.sections if s.role == data.role)
+        allowed_assets = section_asset_kinds(data)
         if result.role != data.role or result.title != expected.title:
             raise ValueError('wrong role or title')
         plan_claims = {c.id for c in data.plan.claims}
@@ -368,8 +381,8 @@ def bind_output(data, result):
         for block in result.blocks:
             if block.attribution == 'paper_statement' and not (block.claim_ids or block.evidence_ids):
                 raise ValueError('unbound paper block')
-            if block.kind in asset_kind.values():
-                if assets.get(block.asset_id) != block.kind or block.asset_id not in expected.asset_ids:
+            if block.kind in ASSET_KINDS.values():
+                if allowed_assets.get(block.asset_id) != block.kind:
                     raise ValueError('wrong or unplanned asset')
             elif block.asset_id is not None:
                 raise ValueError('asset on text block')

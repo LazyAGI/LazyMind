@@ -1,6 +1,7 @@
 package paperguide
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -46,4 +47,82 @@ func TestPlanAssetDecisionsDoNotPromoteMissingCaptionText(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestSectionOutputKeepsStrictAssetAndClaimBinding(t *testing.T) {
+	doc, id := fixture(t)
+	doc.Blocks = []pdfir.Block{
+		{ID: "actual", Type: "table", Page: 0, Text: "Fig. 1. Synthetic measurements."},
+		{ID: "other-role", Type: "table", Page: 0, Text: "Synthetic comparison."},
+		{ID: "missing", Type: "image", Page: 0, Text: "Synthetic illustration."},
+		{ID: "caption", Type: "text", Page: 0, Text: "Caption text without an asset."},
+	}
+	snap, err := BuildSourceSnapshot(doc, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ids := map[string]string{}
+	for _, e := range snap.Evidence {
+		ids[e.SourceBlockID] = e.ID
+	}
+	p := baselinePlan(snap)
+	p.Sections[0].AssetIDs = []string{ids["actual"], ids["missing"]}
+	p.Sections[1].AssetIDs = []string{ids["other-role"]}
+	for _, name := range []string{"actual", "other-role", "missing"} {
+		p.RequiredAssets = append(p.RequiredAssets, GuideAssetDecision{ids[name], true, "Supports the explanation."})
+	}
+	if err := ValidatePlan(snap, p); err != nil {
+		t.Fatal(err)
+	}
+	packet, err := RestrictEvidence(snap, []string{ids["actual"], ids["other-role"], ids["caption"]})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name, asset, kind, wantError string
+	}{
+		{"caption does not determine kind", ids["actual"], "figure", "wrong or unplanned asset"},
+		{"non-role asset", ids["other-role"], "table", "wrong or unplanned asset"},
+		{"nonasset source", ids["caption"], "table", "wrong or unplanned asset"},
+		{"allowed but absent from packet", ids["missing"], "figure", "wrong or unplanned asset"},
+		{"unknown source", "ev_" + strings.Repeat("0", 64), "table", "wrong or unplanned asset"},
+		{"unbound claim", ids["actual"], "table", "orphan section claims"},
+		{"valid asset and other-role citation", ids["actual"], "table", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := teachingSection(RoleBackground)
+			s.Blocks[0].Kind, s.Blocks[0].AssetID = tc.kind, tc.asset
+			s.Blocks[0].EvidenceIDs = []string{ids["other-role"]}
+			if tc.name == "unbound claim" {
+				s.Claims = []GuideClaim{{ID: "orphan", Statement: "A supported measurement.", Attribution: AttributionPaper,
+					EvidenceIDs: []string{ids["caption"]}, Conditions: []string{}, SupportStatus: "supported"}}
+				s.ClaimIDs = []string{"orphan"}
+			}
+			var section GuideSection
+			if err := decodeStrict(mustJSON(s), &section); err != nil {
+				t.Fatal(err)
+			}
+			err := ValidateSection(packet, p, RoleBackground, section)
+			if tc.wantError == "" {
+				if err != nil {
+					t.Fatal(err)
+				}
+			} else if err == nil || !strings.Contains(err.Error(), tc.wantError) {
+				t.Fatalf("want validation failure %q, got %v", tc.wantError, err)
+			}
+		})
+	}
+	t.Run("forged source field", func(t *testing.T) {
+		s := teachingSection(RoleBackground)
+		s.Blocks[0].Kind, s.Blocks[0].AssetID = "table", ids["actual"]
+		var wire map[string]json.RawMessage
+		if err := json.Unmarshal(mustJSON(s), &wire); err != nil {
+			t.Fatal(err)
+		}
+		wire["allowed_asset_override"] = mustJSON(ids["other-role"])
+		var section GuideSection
+		if err := decodeStrict(mustJSON(wire), &section); err == nil {
+			t.Fatal("accepted forged output field")
+		}
+	})
 }

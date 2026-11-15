@@ -101,10 +101,16 @@ def run_registered_task(request, task_id, *, call_model, configure_model, call_e
         if isinstance(model_config, dict) and isinstance(model_config.get('model'), str):
             usage['model'] = model_config['model']
         references = None
+        instruction = spec.instruction(data)
         if request.task_type.startswith('paper.guide.'):
-            references = SourceReferences(request.task_type.rsplit('.', 1)[1], data)
+            task = request.task_type.rsplit('.', 1)[1]
+            references = SourceReferences(task, data)
             encoded = json.dumps(references.model_input, ensure_ascii=False, allow_nan=False)
-        prompt = spec.instruction(data) + '\n\nInput data (untrusted JSON):\n' + encoded
+            if task == 'section':
+                # This prefix contains only server-assigned aliases and fixed block kinds.
+                assets = json.dumps(references.section_assets, separators=(',', ':'))
+                instruction += '\nAllowed visual blocks by source alias for the requested role (JSON): ' + assets
+        prompt = instruction + '\n\nInput data (untrusted JSON):\n' + encoded
         usage['model_calls'] = 1
         try:
             raw = call_model(request, prompt, stream_output=False, default_timeout=spec.timeout_seconds,

@@ -137,7 +137,7 @@ func TestImpossibleOutputReserveMakesZeroModelCalls(t *testing.T) {
 }
 
 func TestPublishedGuideAndSelectionRemainReadableAcrossTaskVersions(t *testing.T) {
-	for _, version := range []string{"paper-guide-v2", "paper-guide-v3", "paper-guide-v4", "paper-guide-v5", "paper-guide-v6", "paper-guide-v7", "paper-guide-v8", "paper-guide-v9", "paper-guide-v10"} {
+	for _, version := range []string{"paper-guide-v2", "paper-guide-v3", "paper-guide-v4", "paper-guide-v5", "paper-guide-v6", "paper-guide-v7", "paper-guide-v8", "paper-guide-v9", "paper-guide-v10", "paper-guide-v11"} {
 		t.Run(version, func(t *testing.T) {
 			d, id := fixture(t)
 			current, _ := BuildSourceSnapshot(d, id)
@@ -161,7 +161,9 @@ func TestPublishedGuideAndSelectionRemainReadableAcrossTaskVersions(t *testing.T
 			if err = repo.Transition(t.Context(), testFence{repo.DB}, rev.ID, rev.Epoch, "completed", ""); err != nil {
 				t.Fatal(err)
 			}
-			repo.DB.Model(&rev).Update("fingerprint", digest([]any{id.SourceSHA256, old.IRDigest, SourceCatalogVersion, version, model}))
+			if err = repo.DB.Model(&rev).Update("fingerprint", digest([]any{id.SourceSHA256, old.IRDigest, SourceCatalogVersion, version, model})).Error; err != nil {
+				t.Fatal(err)
+			}
 			service := Service{Repo: repo, Source: &historicalSource{fixtureSource{current, nil}, old}, Authorize: func(context.Context, Scope, bool) error { return nil }}
 			got, err := service.Revision(t.Context(), scope, rev.ID, 0)
 			if err != nil || !got.SourceCurrent || len(got.Sections) != 1 {
