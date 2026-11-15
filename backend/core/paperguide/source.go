@@ -94,6 +94,9 @@ func buildSourceSnapshot(d pdfir.Document, identity SourceIdentity, catalogVersi
 				if (!v3Precision && catalogVersion != "paper-guide-source-v4") || r.Table == nil || len(r.Spans) != 0 || !validBBox(r.Table.BBox) || len(r.Table.PageSize) != 2 {
 					return GuideSourceSnapshot{}, fmt.Errorf("%w: table fragment payload", ErrInvalidSource)
 				}
+				if len(r.Table.CellMerge) != 0 && catalogVersion != SourceCatalogVersion {
+					return GuideSourceSnapshot{}, fmt.Errorf("%w: historical table fragment cell merge", ErrInvalidSource)
+				}
 				rows, text, err := pdfir.ParseSourceTable(r.Table.HTML)
 				if err != nil || !reflect.DeepEqual(rows, r.Table.Rows) || text != r.Text || r.Table.OmittedPrefixRows < 0 || (r.Table.OmittedPrefixRows > 0 && r.Table.OmittedPrefixRows >= len(rows)) {
 					return GuideSourceSnapshot{}, fmt.Errorf("%w: table fragment rendering", ErrInvalidSource)
@@ -216,6 +219,9 @@ func buildSourceSnapshot(d pdfir.Document, identity SourceIdentity, catalogVersi
 				l.BBox = bbox
 			}
 			for _, r := range regions[b.ID] {
+				if r.Table != nil && len(r.Table.CellMerge) != 0 {
+					l = GuideLocator{Kind: "page", Page: b.Page}
+				}
 				if r.Kind == "table_identity" {
 					if r.Page != b.Page {
 						return GuideSourceSnapshot{}, fmt.Errorf("%w: identity page", ErrInvalidSource)

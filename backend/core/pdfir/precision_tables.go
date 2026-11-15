@@ -22,6 +22,9 @@ type SourceTableFragment struct {
 	PageSize            []float64  `json:"page_size"`
 	ContinuationBlockID string     `json:"continuation_block_id,omitempty"`
 	OmittedPrefixRows   int        `json:"omitted_prefix_rows,omitempty"`
+	// CellMerge is an all-one visual-column proof on a deleted continuation.
+	// It changes only the canonical replay, never the frozen physical rows.
+	CellMerge []int `json:"cell_merge,omitempty"`
 }
 
 // ParseSourceTable rejects any representation that parseTable would repair,
@@ -246,20 +249,22 @@ func validateFlatPrecisionTableChild(c precisionBlock) error {
 }
 
 type physicalTable struct {
-	parent   Block
-	para     precisionBlock
-	page     precisionPage
-	span     precisionSpan
-	rows     []TableRow
-	text     string
-	deleted  bool
-	physical *precisionBlock
+	parent    Block
+	para      precisionBlock
+	page      precisionPage
+	pageOrder int
+	span      precisionSpan
+	rows      []TableRow
+	text      string
+	deleted   bool
+	physical  *precisionBlock
+	cellMerge []int
 }
 
 func projectPrecisionTables(base Document, pages []precisionPage, index map[string]map[int]int) ([]SourceRegion, map[string]bool, error) {
 	all := []physicalTable{}
 	seen := map[string]bool{}
-	for _, p := range pages {
+	for pageOrder, p := range pages {
 		err := walkPrecision(p.Paras, 0, func(b precisionBlock) error {
 			if b.Type != "table" {
 				return nil
@@ -281,21 +286,12 @@ func projectPrecisionTables(base Document, pages []precisionPage, index map[stri
 				if c.Type == "table_body" {
 					bodies = append(bodies, c)
 				}
-				for _, v := range c.CellMerge {
-					if v != 0 {
-						return precisionError("unsupported cross-page cell merge")
-					}
-				}
-			}
-			for _, v := range b.CellMerge {
-				if v != 0 {
-					return precisionError("unsupported cross-page cell merge")
-				}
 			}
 			if len(bodies) != 1 {
 				return precisionError("table requires one physical body")
 			}
 			candidates := []precisionSpan{}
+			var physicalBody precisionBlock
 			ancestors := []precisionBlock{}
 			e = walkPrecision(p.Preproc, 0, func(c precisionBlock) error {
 				if c.Type == "table" && reflect.DeepEqual(c.BBox, b.BBox) {
@@ -308,6 +304,7 @@ func projectPrecisionTables(base Document, pages []precisionPage, index map[stri
 								return e
 							}
 							candidates = append(candidates, s)
+							physicalBody = c
 						}
 					}
 				}
@@ -354,7 +351,11 @@ func projectPrecisionTables(base Document, pages []precisionPage, index map[stri
 					return precisionError("missing physical table body ancestor")
 				}
 			}
-			all = append(all, physicalTable{parent: parent, para: b, page: p, span: s, rows: rows, text: text, deleted: deleted, physical: physical})
+			marker, e := tableCellMergeMarker(b, physical, physicalBody, deleted)
+			if e != nil {
+				return e
+			}
+			all = append(all, physicalTable{parent: parent, para: b, page: p, pageOrder: pageOrder, span: s, rows: rows, text: text, deleted: deleted, physical: physical, cellMerge: marker})
 			return errPrecisionSkip
 		})
 		if err != nil {
@@ -367,6 +368,10 @@ func projectPrecisionTables(base Document, pages []precisionPage, index map[stri
 		}
 		return all[i].parent.Page < all[j].parent.Page
 	})
+	mergedAt, err := physicalCellMergeChains(all)
+	if err != nil {
+		return nil, nil, err
+	}
 	regions := []SourceRegion{}
 	used := map[string]bool{}
 	add := func(r SourceRegion) {
@@ -394,51 +399,29 @@ func projectPrecisionTables(base Document, pages []precisionPage, index map[stri
 		if e != nil {
 			return nil, nil, e
 		}
-		if len(home.rows) > len(merged) || !reflect.DeepEqual(home.rows, merged[:len(home.rows)]) {
-			return nil, nil, precisionError("home table rows differ from merged prefix")
-		}
-		type choice struct{ idx, skip int }
-		solutions := [][]choice{}
-		steps := 0
-		var search func(int, int, []choice) error
-		search = func(offset, last int, chain []choice) error {
-			steps++
-			if steps > 20000 {
-				return precisionError("table association search limit")
+		var chain []tableFragmentChoice
+		if next, ok := mergedAt[home.parent.ID]; ok {
+			f := all[next]
+			replayed, err := replayTableCellMerge(home.span.HTML, home.rows, f.span.HTML, f.rows, f.cellMerge)
+			if err != nil {
+				return nil, nil, err
 			}
-			if offset == len(merged) {
-				solutions = append(solutions, append([]choice(nil), chain...))
-				return nil
+			if !reflect.DeepEqual(replayed, merged) {
+				return nil, nil, precisionError("canonical cell merge differs from complete physical replay")
 			}
-			if len(solutions) > 1 {
-				return nil
+			if _, err = plainCellMergeRow(mergedHTML, len(home.rows)-1); err != nil {
+				return nil, nil, err
 			}
-			for i, c := range all {
-				if !c.deleted || c.parent.Page <= last {
-					continue
-				}
-				skip := producerPrefix(home.rows, c.rows)
-				if skip < 0 || skip >= len(c.rows) {
-					continue
-				}
-				tail := c.rows[skip:]
-				if offset+len(tail) <= len(merged) && reflect.DeepEqual(tail, merged[offset:offset+len(tail)]) {
-					if e := search(offset+len(tail), c.parent.Page, append(chain, choice{i, skip})); e != nil {
-						return e
-					}
-				}
+			chain = []tableFragmentChoice{{idx: next}}
+		} else {
+			chain, e = ordinaryTableChain(all, home, merged)
+			if e != nil {
+				return nil, nil, e
 			}
-			return nil
-		}
-		if e = search(len(home.rows), home.parent.Page, nil); e != nil {
-			return nil, nil, e
-		}
-		if len(solutions) != 1 {
-			return nil, nil, precisionError("no unique complete physical table chain")
 		}
 		fragments := []physicalTable{home}
 		skips := []int{0}
-		for _, c := range solutions[0] {
+		for _, c := range chain {
 			f := all[c.idx]
 			if used[f.parent.ID] {
 				return nil, nil, precisionError("continuation claimed by multiple parents")
@@ -452,7 +435,7 @@ func projectPrecisionTables(base Document, pages []precisionPage, index map[stri
 			if e != nil {
 				return nil, nil, e
 			}
-			payload := &SourceTableFragment{HTML: f.span.HTML, Rows: f.rows, BBox: box, PageSize: f.page.Size, OmittedPrefixRows: skips[i]}
+			payload := &SourceTableFragment{HTML: f.span.HTML, Rows: f.rows, BBox: box, PageSize: f.page.Size, OmittedPrefixRows: skips[i], CellMerge: f.cellMerge}
 			if f.deleted {
 				payload.ContinuationBlockID = f.parent.ID
 			}
@@ -551,6 +534,53 @@ func projectPrecisionTables(base Document, pages []precisionPage, index map[stri
 		}
 	}
 	return regions, seen, nil
+}
+
+type tableFragmentChoice struct{ idx, skip int }
+
+func ordinaryTableChain(all []physicalTable, home physicalTable, merged []TableRow) ([]tableFragmentChoice, error) {
+	if len(home.rows) > len(merged) || !reflect.DeepEqual(home.rows, merged[:len(home.rows)]) {
+		return nil, precisionError("home table rows differ from merged prefix")
+	}
+	solutions := [][]tableFragmentChoice{}
+	steps := 0
+	var search func(int, int, []tableFragmentChoice) error
+	search = func(offset, last int, chain []tableFragmentChoice) error {
+		steps++
+		if steps > 20000 {
+			return precisionError("table association search limit")
+		}
+		if offset == len(merged) {
+			solutions = append(solutions, append([]tableFragmentChoice(nil), chain...))
+			return nil
+		}
+		if len(solutions) > 1 {
+			return nil
+		}
+		for i, c := range all {
+			if !c.deleted || len(c.cellMerge) > 0 || c.parent.Page <= last {
+				continue
+			}
+			skip := producerPrefix(home.rows, c.rows)
+			if skip < 0 || skip >= len(c.rows) {
+				continue
+			}
+			tail := c.rows[skip:]
+			if offset+len(tail) <= len(merged) && reflect.DeepEqual(tail, merged[offset:offset+len(tail)]) {
+				if e := search(offset+len(tail), c.parent.Page, append(chain, tableFragmentChoice{i, skip})); e != nil {
+					return e
+				}
+			}
+		}
+		return nil
+	}
+	if err := search(len(home.rows), home.parent.Page, nil); err != nil {
+		return nil, err
+	}
+	if len(solutions) != 1 {
+		return nil, precisionError("no unique complete physical table chain")
+	}
+	return solutions[0], nil
 }
 
 // Full preproc table ancestry preserves captions/notes dropped by producer
@@ -656,22 +686,36 @@ func ValidateTableFragments(parent Block, regions []SourceRegion, blocks []Block
 		}
 		previous = r.Page
 		if i == 0 {
-			if r.Page != parent.Page || f.ContinuationBlockID != "" || f.OmittedPrefixRows != 0 {
+			if r.Page != parent.Page || f.ContinuationBlockID != "" || f.OmittedPrefixRows != 0 || len(f.CellMerge) != 0 {
 				return precisionError("missing table start fragment")
 			}
 			first = f.Rows
 		} else {
-			if f.ContinuationBlockID == "" || f.OmittedPrefixRows != producerPrefix(first, f.Rows) {
+			cellMerge := len(f.CellMerge) != 0
+			if cellMerge {
+				if i != 1 || len(fragments) != 2 || r.Page != parent.Page+1 || f.OmittedPrefixRows != 0 {
+					return precisionError("cell merge requires two adjacent fragments without omitted headers")
+				}
+			} else if f.ContinuationBlockID == "" || f.OmittedPrefixRows != producerPrefix(first, f.Rows) {
 				return precisionError("unproven continuation prefix")
 			}
-			found := false
+			var placeholder *Block
+			matches := 0
 			for _, b := range blocks {
 				if b.ID == f.ContinuationBlockID {
-					found = b.Type == "table" && b.Page == r.Page && b.Text == "" && b.Table != nil && len(b.Table.Rows) == 0 && strings.Join(b.Table.Captions, "") == "" && strings.Join(b.Table.Footnotes, "") == ""
+					matches++
+					placeholder = nil
+					if b.Type == "table" && b.Page == r.Page && b.Text == "" && b.Table != nil &&
+						len(b.Table.Rows) == 0 && strings.Join(b.Table.Captions, "") == "" && strings.Join(b.Table.Footnotes, "") == "" {
+						placeholder = &b
+					}
 				}
 			}
-			if !found {
+			if placeholder == nil || cellMerge && (f.ContinuationBlockID == "" || matches != 1) {
 				return precisionError("unproven continuation placeholder")
+			}
+			if cellMerge && (!precisionContains(parent.BBox, fragments[0].Table.BBox) || !precisionContains(placeholder.BBox, f.BBox)) {
+				return precisionError("unproven cell merge fragment geometry")
 			}
 		}
 		body, e := precisionFormattedTable(f.HTML)
@@ -685,7 +729,14 @@ func ValidateTableFragments(parent Block, regions []SourceRegion, blocks []Block
 		if f.OmittedPrefixRows < 0 || (f.OmittedPrefixRows > 0 && f.OmittedPrefixRows >= len(rows)) {
 			return precisionError("invalid omitted prefix")
 		}
-		merged = append(merged, rows[f.OmittedPrefixRows:]...)
+		if len(f.CellMerge) != 0 {
+			merged, e = replayTableCellMerge(fragments[0].Table.HTML, merged, f.HTML, rows, f.CellMerge)
+			if e != nil {
+				return e
+			}
+		} else {
+			merged = append(merged, rows[f.OmittedPrefixRows:]...)
+		}
 	}
 	if !reflect.DeepEqual(merged, parent.Table.Rows) {
 		return precisionError("canonical table cells not completely covered")
