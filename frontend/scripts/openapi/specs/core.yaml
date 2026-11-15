@@ -11382,6 +11382,8 @@ components:
                     type: string
                 job_id:
                     type: string
+                resume_block_reason:
+                    type: string
                 stage:
                     type: string
             required:

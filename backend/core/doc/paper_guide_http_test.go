@@ -2,8 +2,10 @@ package doc
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"github.com/gorilla/mux"
 	"gorm.io/gorm"
 	"lazymind/core/acl"
@@ -485,6 +487,238 @@ func TestPaperGuideOldContractReportsRegenerationWithoutSourceChange(t *testing.
 	db.Model(&orm.AsyncJob{}).Where("job_type = ?", paperguide.JobType).Count(&jobs)
 	if jobs != 1 {
 		t.Fatal("old resume enqueued a new paid run")
+	}
+}
+
+func TestPaperGuideHTTPQualityStopPreservesPublishedCheckpoints(t *testing.T) {
+	const qualityCode = "paper_guide_review_required"
+	for _, stage := range []string{"paused", "canceled"} {
+		t.Run(stage, func(t *testing.T) {
+			db, hash, _ := guideHTTPFixture(t)
+			t.Setenv("LAZYMIND_PAPER_GUIDE_ENABLED", "true")
+			t.Setenv("LAZYMIND_CHAT_SERVICE_URL", "http://fixture.invalid")
+			providerCalls := 0
+			previous := http.DefaultTransport
+			http.DefaultTransport = roundTripFunc(func(r *http.Request) (*http.Response, error) {
+				if r.URL.Hostname() == "fixture.invalid" {
+					providerCalls++
+					return nil, errors.New("unexpected model request")
+				}
+				return previous.RoundTrip(r)
+			})
+			t.Cleanup(func() { http.DefaultTransport = previous })
+			call := func(handler http.HandlerFunc, method, body, user string, vars map[string]string) *httptest.ResponseRecorder {
+				t.Helper()
+				w := httptest.NewRecorder()
+				handler(w, guideRequest(method, body, user, vars))
+				return w
+			}
+			generate := func(key string, regenerate bool) {
+				t.Helper()
+				body := fmt.Sprintf(`{"expected_source_hash":%q,"model_ref":"own:a","idempotency_key":%q,"regenerate":%t}`, hash, key, regenerate)
+				if w := call(GeneratePaperGuide, "POST", body, "owner", nil); w.Code != http.StatusAccepted {
+					t.Fatalf("generate: %d %s", w.Code, w.Body)
+				}
+			}
+			check := func(err error) {
+				t.Helper()
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+			generate("quality", false)
+			var rev orm.PaperGuideRevision
+			check(db.Take(&rev).Error)
+			check(db.Model(&rev).Updates(map[string]any{
+				"stage": "paused", "status": "partial", "error_code": qualityCode,
+				"calls_used": 12, "planned_calls": 12, "correction_count": 1, "active_millis": 15000,
+				"change_version": 6,
+			}).Error)
+			check(db.Model(&orm.AsyncJob{}).Where("id = ?", rev.JobID).Update("status", "failed").Error)
+			check(db.Create(&orm.PaperGuideStep{
+				ID: "plan", RevisionID: rev.ID, StepKey: "plan", InputHash: "frozen-plan", Epoch: rev.Epoch, Version: 1,
+				OutputJSON: `{"questions":["Which result follows?"],"claims":[]}`,
+			}).Error)
+			bindings := []map[string]any{}
+			for i, role := range paperguide.Roles() {
+				version := 1
+				if role == paperguide.RoleQuestion {
+					version = 2
+				}
+				key := fmt.Sprintf("section:%s:v%d", role, version)
+				block := paperguide.GuideBlock{
+					ID: string(role) + "-block", Kind: "paragraph", Text: "Synthetic passage for " + string(role) + ".",
+					Attribution: paperguide.AttributionPaper, ClaimIDs: []string{}, EvidenceIDs: []string{},
+				}
+				section := paperguide.GuideSection{
+					Role: role, Title: string(role), Version: version, PublicationStatus: "published",
+					Blocks: []paperguide.GuideBlock{block}, Claims: []paperguide.GuideClaim{}, ClaimIDs: []string{},
+				}
+				check(db.Create(&orm.PaperGuideStep{
+					ID: key, RevisionID: rev.ID, StepKey: key, InputHash: "frozen-" + key, Epoch: rev.Epoch,
+					OutputJSON: string(mustJSON(section)), Version: int64(i + 2), Published: true,
+				}).Error)
+				bindings = append(bindings, map[string]any{"key": key, "version": version})
+			}
+			check(db.Create(&orm.PaperGuideStep{
+				ID: "whole-review", RevisionID: rev.ID, StepKey: "whole_review:1", InputHash: "frozen-review", Epoch: rev.Epoch,
+				OutputJSON: `{"findings":[{"target_type":"block","target_id":"question-block","issue_type":"coherence","suggestion":"Clarify the result."}]}`,
+				ReviewJSON: string(mustJSON(bindings)), Version: 6,
+			}).Error)
+			if stage == "canceled" {
+				if w := call(CancelPaperGuide, "POST", "", "owner", map[string]string{"run": rev.ID}); w.Code != http.StatusOK {
+					t.Fatalf("cancel: %d %s", w.Code, w.Body)
+				}
+			}
+			type persisted struct {
+				Guide    orm.PaperGuide
+				Revision orm.PaperGuideRevision
+				Steps    []orm.PaperGuideStep
+				Jobs     []orm.AsyncJob
+			}
+			readPersisted := func() (got persisted) {
+				t.Helper()
+				check(db.Take(&got.Guide, "id = ?", rev.GuideID).Error)
+				check(db.Take(&got.Revision, "id = ?", rev.ID).Error)
+				check(db.Order("step_key").Find(&got.Steps, "revision_id = ?", rev.ID).Error)
+				check(db.Order("id").Find(&got.Jobs).Error)
+				return got
+			}
+			vars := map[string]string{"revision": rev.ID, "run": rev.ID}
+			readRevision := func() paperguide.RevisionResponse {
+				t.Helper()
+				w := call(GetPaperGuideRevision, "GET", "", "owner", vars)
+				var payload struct {
+					Data paperguide.RevisionResponse `json:"data"`
+				}
+				if err := json.Unmarshal(w.Body.Bytes(), &payload); w.Code != http.StatusOK || err != nil {
+					t.Fatalf("revision response: %d %s", w.Code, w.Body)
+				}
+				if !strings.Contains(w.Body.String(), `"resume_block_reason":"`+qualityCode+`"`) {
+					t.Errorf("revision omitted the quality resume block")
+				}
+				return payload.Data
+			}
+			readSelection := func() string {
+				t.Helper()
+				w := call(PaperGuideSelectionContext, "POST", `{"section_key":"section:question:v2","block_id":"question-block","start":0,"end":9}`, "owner", vars)
+				if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"text":"Synthetic"`) {
+					t.Fatalf("selection response: %d %s", w.Code, w.Body)
+				}
+				return w.Body.String()
+			}
+			before := readPersisted()
+			status := call(GetPaperGuide, "GET", "", "owner", nil)
+			if status.Code != http.StatusOK || !strings.Contains(status.Body.String(), `"can_generate":true`) ||
+				!strings.Contains(status.Body.String(), `"resume_block_reason":"`+qualityCode+`"`) {
+				t.Errorf("status omitted the quality resume block or generation availability: %d %s", status.Code, status.Body)
+			}
+			revision, selection := readRevision(), readSelection()
+			if len(revision.Sections) != 4 || !revision.SourceCurrent || revision.Plan == nil || revision.ReviewSummary == nil ||
+				revision.Sections[1].Key != "section:question:v2" || revision.Sections[1].PublicationStatus != "correction_required" ||
+				revision.Run.Stage != stage || revision.Run.ErrorCode != qualityCode {
+				t.Fatalf("incorrect quality-stop fixture: %+v", revision)
+			}
+			w := call(ResumePaperGuide, "POST", "", "stranger", vars)
+			if w.Code != http.StatusNotFound || strings.Contains(w.Body.String(), qualityCode) {
+				t.Errorf("resume bypassed access check: %d %s", w.Code, w.Body)
+			}
+			w = call(ResumePaperGuide, "POST", "", "owner", vars)
+			if w.Code != http.StatusUnprocessableEntity || !strings.Contains(w.Body.String(), `"code":2004411`) ||
+				!strings.Contains(w.Body.String(), `"error_code":"`+qualityCode+`"`) {
+				t.Errorf("quality stop accepted or misclassified: %d %s", w.Code, w.Body)
+			}
+			if after := readPersisted(); !reflect.DeepEqual(before, after) {
+				t.Errorf("rejected resume changed persisted state: guide epoch %d -> %d, revision epoch %d -> %d, jobs %d -> %d",
+					before.Guide.Epoch, after.Guide.Epoch, before.Revision.Epoch, after.Revision.Epoch, len(before.Jobs), len(after.Jobs))
+			}
+			if after := readRevision(); !reflect.DeepEqual(revision, after) || selection != readSelection() {
+				t.Error("resume changed the readable revision or selection")
+			}
+			if providerCalls != 0 {
+				t.Errorf("resume dispatched %d provider requests", providerCalls)
+			}
+		})
+	}
+}
+
+func TestPaperGuideHTTPResumePreservesExistingEligibility(t *testing.T) {
+	for _, tc := range []struct {
+		name, stage, code, change string
+		status                    int
+		wantCode                  string
+	}{
+		{"ordinary cancel", "canceled", "", "", 200, ""},
+		{"transient timeout", "paused", "paper_guide_model_timeout", "", 200, ""},
+		{"transient request failure", "paused", "paper_guide_model_request_failed", "", 200, ""},
+		{"unknown error", "paused", "unknown_failure", "", 200, ""},
+		{"changed model", "paused", "paper_guide_review_required", "model", 422, "paper_guide_model_unavailable"},
+		{"changed source", "paused", "paper_guide_review_required", "source", 409, "paper_guide_source_changed"},
+		{"old contract", "paused", "paper_guide_review_required", "contract", 409, "paper_guide_regeneration_required"},
+		{"superseded candidate", "paused", "paper_guide_review_required", "candidate", 409, "paper_guide_conflict"},
+		{"exhausted budget", "paused", "paper_guide_review_required", "budget", 422, "paper_guide_budget_exhausted"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			db, hash, source := guideHTTPFixture(t)
+			t.Setenv("LAZYMIND_PAPER_GUIDE_ENABLED", "true")
+			generate := func(key string, regenerate bool) {
+				t.Helper()
+				w := httptest.NewRecorder()
+				body := fmt.Sprintf(`{"expected_source_hash":%q,"model_ref":"own:a","idempotency_key":%q,"regenerate":%t}`, hash, key, regenerate)
+				GeneratePaperGuide(w, guideRequest("POST", body, "owner", nil))
+				if w.Code != http.StatusAccepted {
+					t.Fatalf("generate: %d %s", w.Code, w.Body)
+				}
+			}
+			check := func(err error) {
+				t.Helper()
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+			generate("resume-control", false)
+			var rev orm.PaperGuideRevision
+			check(db.Take(&rev).Error)
+			check(db.Model(&rev).Updates(map[string]any{"stage": tc.stage, "error_code": tc.code, "calls_used": 1}).Error)
+			check(db.Model(&orm.AsyncJob{}).Where("id = ?", rev.JobID).Update("status", "failed").Error)
+			switch tc.change {
+			case "model":
+				check(db.Model(&orm.UserModelProviderGroup{}).Where("id = ?", "g").Update("base_url", "https://changed.invalid/v1").Error)
+			case "source":
+				check(os.WriteFile(source, []byte("%PDF-new-synthetic-source"), 0600))
+			case "contract":
+				fingerprint := sha256.Sum256(mustJSON([]any{rev.SourceSHA256, rev.IRDigest, paperguide.SourceCatalogVersion, "paper-guide-v14", json.RawMessage(rev.ModelJSON)}))
+				check(db.Model(&rev).Update("fingerprint", fmt.Sprintf("%x", fingerprint)).Error)
+			case "candidate":
+				generate("replacement", true)
+			case "budget":
+				check(db.Model(&rev).Update("calls_used", paperguide.MaxCalls).Error)
+			}
+			var beforeJobs, afterJobs int64
+			check(db.Model(&orm.AsyncJob{}).Where("job_type = ?", paperguide.JobType).Count(&beforeJobs).Error)
+			if tc.status == http.StatusOK {
+				w := httptest.NewRecorder()
+				GetPaperGuide(w, guideRequest("GET", "", "owner", nil))
+				if w.Code != http.StatusOK || strings.Contains(w.Body.String(), "resume_block_reason") {
+					t.Fatalf("ordinary resume projected a blocker: %d %s", w.Code, w.Body)
+				}
+			}
+			w := httptest.NewRecorder()
+			ResumePaperGuide(w, guideRequest("POST", "", "owner", map[string]string{"run": rev.ID}))
+			if w.Code != tc.status || tc.wantCode != "" && !strings.Contains(w.Body.String(), tc.wantCode) {
+				t.Fatalf("resume: got %d %s, want %d %s", w.Code, w.Body, tc.status, tc.wantCode)
+			}
+			check(db.Model(&orm.AsyncJob{}).Where("job_type = ?", paperguide.JobType).Count(&afterJobs).Error)
+			if tc.status == http.StatusOK {
+				var queued orm.PaperGuideRevision
+				check(db.Take(&queued, "id = ?", rev.ID).Error)
+				if afterJobs != beforeJobs+1 || queued.Stage != "queued" || queued.ErrorCode != "" || queued.Epoch != rev.Epoch+1 || queued.CallsUsed != 1 || queued.JobID == rev.JobID {
+					t.Fatalf("ordinary resume did not requeue with preserved spend: %+v (jobs %d -> %d)", queued, beforeJobs, afterJobs)
+				}
+			} else if afterJobs != beforeJobs {
+				t.Fatalf("rejected resume enqueued a new job: %d -> %d", beforeJobs, afterJobs)
+			}
+		})
 	}
 }
 

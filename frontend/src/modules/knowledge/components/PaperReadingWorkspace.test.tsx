@@ -12,6 +12,7 @@ import { axiosInstance } from "@/components/request";
 import PaperReadingWorkspace from "./PaperReadingWorkspace";
 import { revision, status } from "./PaperGuide/fixtures";
 const state = vi.hoisted(() => ({ value: {} as Record<string, unknown> }));
+const locale = vi.hoisted(() => ({ language: "en" }));
 const api = vi.hoisted(() => ({
   generate: vi.fn(),
   cancel: vi.fn(),
@@ -39,9 +40,10 @@ vi.mock("@/components/request", async (original) => ({
 }));
 vi.mock("react-i18next", async (original) => ({
   ...(await original<typeof import("react-i18next")>()),
-  useTranslation: () => ({ i18n: { language: "en", t: (s: string) => s } }),
+  useTranslation: () => ({ i18n: { language: locale.language, t: (s: string) => s } }),
 }));
 beforeEach(() => {
+  locale.language = "en";
   localStorage.clear();
   localStorage.setItem("paper-guide-mode/u/ds/doc", "source");
   vi.clearAllMocks();
@@ -440,6 +442,113 @@ const regenerationError = () =>
   Object.assign(new Error("regeneration required"), {
     response: { status: 409, data: { code: 2004413 } },
   });
+const qualityCode = "paper_guide_review_required";
+const qualityHelp = "This revision can’t continue. Generate a new guide.";
+const qualityHelpZh = "当前版本无法继续生成，请重新生成导读。";
+
+it.each([
+  { stage: "paused", language: "en", projected: true, canGenerate: true },
+  { stage: "canceled", language: "zh", projected: false, canGenerate: false },
+])("keeps four readable sections and blocks resume for a $stage quality stop", async ({
+  stage, language, projected, canGenerate,
+}) => {
+  locale.language = language;
+  const article = revision();
+  article.sections[1] = {
+    ...article.sections[1], key: "section:question:v2", version: 2,
+    publication_status: "correction_required",
+  };
+  const candidate = {
+    ...article, id: "r2", status: "partial",
+    run: {
+      ...article.run, id: "r2", stage,
+      ...(projected ? { resume_block_reason: qualityCode } : { error_code: qualityCode }),
+    },
+  };
+  state.value = {
+    ...state.value,
+    status: { ...status(), can_generate: canGenerate, candidate_revision: candidate },
+    revision: candidate,
+  };
+  render(<Harness />);
+  await act(async () =>
+    fireEvent.click(screen.getByRole("button", { name: language === "zh" ? "导读" : "Guide" })),
+  );
+  expect(screen.queryByRole("button", { name: /^(Resume|继续生成)$/ })).not.toBeInTheDocument();
+  expect(screen.getByText(language === "zh" ? qualityHelpZh : qualityHelp)).toBeVisible();
+  for (const section of article.sections)
+    expect(screen.getByRole("heading", { name: section.title })).toBeVisible();
+  expect(screen.getByText(language === "zh" ? /待更正/ : "Correction pending")).toBeVisible();
+  const regenerate = screen.getByRole("button", { name: language === "zh" ? "重新生成导读" : "Generate a new guide" });
+  if (canGenerate) {
+    expect(regenerate).toBeEnabled();
+    await act(async () => fireEvent.click(regenerate));
+    expect(api.generate).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ regenerate: true }));
+  } else {
+    expect(regenerate).toBeDisabled();
+  }
+});
+
+it("shows the old-contract explanation when the candidate also has a saved quality stop", async () => {
+  const candidate = pausedCandidate("paper_guide_regeneration_required");
+  state.value.status = {
+    ...status(),
+    candidate_revision: {
+      ...candidate,
+      run: { ...candidate.run, resume_block_reason: qualityCode },
+    },
+  };
+  render(<Harness />);
+  await act(async () => fireEvent.click(screen.getByRole("button", { name: "Guide" })));
+  expect(screen.getByText("errors.2004413")).toBeVisible();
+  expect(screen.queryByText(qualityHelp)).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "Resume" })).not.toBeInTheDocument();
+});
+
+it.each([
+  { stage: "canceled" },
+  { stage: "paused", error_code: "paper_guide_model_timeout" },
+  { stage: "paused", error_code: "paper_guide_model_request_failed" },
+])("continues offering resume for $stage $error_code", async (run) => {
+  const candidate = pausedCandidate();
+  state.value.status = {
+    ...status(),
+    candidate_revision: { ...candidate, run: { ...candidate.run, error_code: undefined, ...run } },
+  };
+  render(<Harness />);
+  await act(async () => fireEvent.click(screen.getByRole("button", { name: "Guide" })));
+  expect(screen.getByRole("button", { name: "Resume" })).toBeEnabled();
+});
+
+it("keeps a stale candidate blocked after receiving the quality 422 and refreshes", async () => {
+  showPaused();
+  api.resume.mockRejectedValueOnce(Object.assign(new Error("quality rejected"), {
+    response: { status: 422, data: { code: 2004411, data: { error_code: qualityCode } } },
+  }));
+  state.value.refresh = vi.fn().mockRejectedValue(new Error("offline"));
+  const view = render(<Harness />);
+  await act(async () => fireEvent.click(screen.getByRole("button", { name: "Guide" })));
+  fireEvent.click(screen.getByRole("button", { name: "Resume" }));
+  await screen.findByText(qualityHelp);
+  expect(state.value.refresh).toHaveBeenCalledTimes(1);
+  view.rerender(<Harness />);
+  expect(screen.queryByRole("button", { name: "Resume" })).not.toBeInTheDocument();
+  expect(screen.getByRole("article")).toBeVisible();
+  expect(screen.getByRole("button", { name: "Generate a new guide" })).toBeEnabled();
+});
+
+it("keeps resume available after an unrelated 422", async () => {
+  showPaused();
+  api.resume.mockRejectedValueOnce(Object.assign(new Error("model unavailable"), {
+    response: { status: 422, data: { code: 2004403 } },
+  }));
+  render(<Harness />);
+  await act(async () => fireEvent.click(screen.getByRole("button", { name: "Guide" })));
+  fireEvent.click(screen.getByRole("button", { name: "Resume" }));
+  expect(await screen.findByRole("alert")).toHaveTextContent("model unavailable");
+  expect(screen.getByRole("button", { name: "Resume" })).toBeEnabled();
+  expect(screen.queryByText(qualityHelp)).not.toBeInTheDocument();
+});
 
 it("replaces incompatible resume with an explicit new revision while preserving the open article", async () => {
   showPaused("paper_guide_regeneration_required");

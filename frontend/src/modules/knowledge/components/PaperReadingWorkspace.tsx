@@ -34,6 +34,10 @@ import PaperGuideAsset, {
 import { useGuideSourcePreview } from "./PaperGuide/useGuideSourcePreview";
 import PaperGuideGenerationDetails from "./PaperGuide/PaperGuideGenerationDetails";
 import type { PdfIRDocument } from "../api/pdfIR";
+
+const qualityStopCode = "paper_guide_review_required";
+const regenerationCode = "paper_guide_regeneration_required";
+
 interface Props {
   dataset: string;
   document: string;
@@ -73,10 +77,19 @@ export default function PaperReadingWorkspace(p: Props) {
   const latestMutationScope = useRef(mutationScope);
   latestMutationScope.current = mutationScope;
   const mutationSequence = useRef(0);
-  const [rejectedResume, setRejectedResume] = useState<string>();
+  const [rejectedResume, setRejectedResume] = useState<{
+    scope: string;
+    reason: typeof qualityStopCode | typeof regenerationCode;
+  }>();
+  const resumeRejection =
+    rejectedResume?.scope === mutationScope ? rejectedResume.reason : undefined;
   const requiresRegeneration =
-    candidate?.run.error_code === "paper_guide_regeneration_required" ||
-    rejectedResume === mutationScope;
+    candidate?.run.error_code === regenerationCode ||
+    resumeRejection === regenerationCode;
+  const qualityBlocked =
+    candidate?.run.resume_block_reason === qualityStopCode ||
+    candidate?.run.error_code === qualityStopCode ||
+    resumeRejection === qualityStopCode;
   useEffect(() => {
     mutationSequence.current += 1;
     setRejectedResume(undefined);
@@ -175,10 +188,16 @@ export default function PaperReadingWorkspace(p: Props) {
       if (isCurrent()) await guide.refresh();
     } catch (e) {
       if (isCurrent()) {
-        if (action === "resume" && extractErrorCode(e) === "2004413") {
-          // The response can precede status persistence. Keep this revision
-          // blocked even if the following status fetch fails or is stale.
-          setRejectedResume(mutationScope);
+        const code = action === "resume" ? extractErrorCode(e) : undefined;
+        const reason =
+          code === "2004413"
+            ? regenerationCode
+            : code === "2004411" || code === qualityStopCode
+              ? qualityStopCode
+              : undefined;
+        if (reason) {
+          // Keep this revision blocked if the next status fetch fails or is stale.
+          setRejectedResume({ scope: mutationScope, reason });
           void guide.refresh().catch(() => {});
         } else {
           setError(getLocalizedErrorMessage(e));
@@ -277,6 +296,14 @@ export default function PaperReadingWorkspace(p: Props) {
         ? "暂时无法完成，请重试或调整模型。"
         : "Unable to complete this run. Retry or choose another model.";
   };
+  const qualityHelp = zh
+    ? "当前版本无法继续生成，请重新生成导读。"
+    : "This revision can’t continue. Generate a new guide.";
+  const runReason = requiresRegeneration
+    ? reasonText(regenerationCode)
+    : qualityBlocked
+      ? qualityHelp
+      : reasonText(candidate?.run.error_code);
   const labels: Record<string, string> = zh
     ? {
         queued: "正在排队",
@@ -426,24 +453,16 @@ export default function PaperReadingWorkspace(p: Props) {
               <div className="paper-guide-status" role="status">
                 <span>
                   {labels[stage] || (zh ? "正在准备" : "Preparing")}{" "}
-                  {(requiresRegeneration || candidate?.run.error_code) && (
-                    <span>
-                      {reasonText(
-                        requiresRegeneration
-                          ? "paper_guide_regeneration_required"
-                          : candidate?.run.error_code,
-                      )}
-                    </span>
-                  )}
+                  {runReason && <span>{runReason}</span>}
                 </span>
                 {active ? (
                   <button disabled={busy} onClick={() => void run("cancel")}>
                     {zh ? "取消后续生成" : "Cancel remaining generation"}
                   </button>
                 ) : (
-                  (requiresRegeneration || resumable) && (
+                  (requiresRegeneration || qualityBlocked || resumable) && (
                     <>
-                      {!requiresRegeneration && (
+                      {!requiresRegeneration && !qualityBlocked && (
                         <button
                           disabled={busy || !guide.status?.can_generate}
                           onClick={() => void run("resume")}

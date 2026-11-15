@@ -39,14 +39,15 @@ type GenerateRequest struct {
 	ModelRef           string `json:"model_ref,omitempty"`
 }
 type RunView struct {
-	ID           string `json:"id"`
-	Stage        string `json:"stage"`
-	JobID        string `json:"job_id"`
-	ErrorCode    string `json:"error_code,omitempty"`
-	CallsUsed    int    `json:"calls_used"`
-	CallLimit    int    `json:"call_limit"`
-	ActiveMillis int64  `json:"active_millis"`
-	CostKnown    bool   `json:"cost_known"`
+	ID                string `json:"id"`
+	Stage             string `json:"stage"`
+	JobID             string `json:"job_id"`
+	ErrorCode         string `json:"error_code,omitempty"`
+	ResumeBlockReason string `json:"resume_block_reason,omitempty"`
+	CallsUsed         int    `json:"calls_used"`
+	CallLimit         int    `json:"call_limit"`
+	ActiveMillis      int64  `json:"active_millis"`
+	CostKnown         bool   `json:"cost_known"`
 }
 type RevisionView struct {
 	ID           string        `json:"id"`
@@ -113,7 +114,15 @@ type SelectionContext struct {
 func view(r orm.PaperGuideRevision) RevisionView {
 	var m ModelIdentity
 	_ = json.Unmarshal([]byte(r.ModelJSON), &m)
-	return RevisionView{ID: r.ID, Status: r.Status, SourceSHA256: r.SourceSHA256, IRDigest: r.IRDigest, Version: r.ChangeVersion, Model: m, Run: RunView{ID: r.ID, Stage: r.Stage, JobID: r.JobID, ErrorCode: r.ErrorCode, CallsUsed: r.CallsUsed, CallLimit: MaxCalls, ActiveMillis: r.ActiveMillis}, CreatedAt: r.CreatedAt}
+	return RevisionView{
+		ID: r.ID, Status: r.Status, SourceSHA256: r.SourceSHA256, IRDigest: r.IRDigest, Version: r.ChangeVersion,
+		Model: m, CreatedAt: r.CreatedAt,
+		Run: RunView{
+			ID: r.ID, Stage: r.Stage, JobID: r.JobID, ErrorCode: r.ErrorCode,
+			ResumeBlockReason: resumeBlockReason(r),
+			CallsUsed:         r.CallsUsed, CallLimit: MaxCalls, ActiveMillis: r.ActiveMillis,
+		},
+	}
 }
 func (s Service) Status(ctx context.Context, scope Scope) (StatusResponse, error) {
 	out := StatusResponse{}

@@ -7407,6 +7407,7 @@ export interface PaperGuideRunView {
     'error_code'?: string;
     'id': string;
     'job_id': string;
+    'resume_block_reason'?: string;
     'stage': string;
 }
 export interface PaperGuideSection {

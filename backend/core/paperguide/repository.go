@@ -240,6 +240,14 @@ func (r Repository) Cancel(ctx context.Context, s Scope, id string) error {
 		return tx.Model(&orm.PaperGuide{}).Where("id = ?", rev.GuideID).Updates(map[string]any{"epoch": gorm.Expr("epoch + 1"), "change_version": gorm.Expr("change_version + 1")}).Error
 	})
 }
+
+func resumeBlockReason(rev orm.PaperGuideRevision) string {
+	if rev.ErrorCode == ErrQuality.Error() {
+		return rev.ErrorCode
+	}
+	return ""
+}
+
 func (r Repository) Resume(ctx context.Context, s Scope, id string, m ModelIdentity) (out orm.PaperGuideRevision, err error) {
 	err = domainTransaction(ctx, r.DB, func(tx *gorm.DB) error {
 		heldJob, err := lockActiveExecution(tx, s.Key())
@@ -276,6 +284,9 @@ func (r Repository) Resume(ctx context.Context, s Scope, id string, m ModelIdent
 		}
 		if rev.CallsUsed >= MaxCalls || rev.ActiveMillis >= MaxActiveMillis {
 			return ErrBudget
+		}
+		if resumeBlockReason(rev) != "" {
+			return ErrQuality
 		}
 		g.Epoch++
 		rev.Epoch = g.Epoch

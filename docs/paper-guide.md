@@ -52,6 +52,8 @@ The guide worker runs at most two jobs concurrently per Core process. The databa
 
 Each outbound attempt is reserved durably before dispatch. An interrupted attempt with an unknown outcome keeps its attempt count and time reservation. Resuming does not reset any budget, and may call the model again for work that never reached a validated checkpoint. The count describes reserved attempts and may include one whose dispatch could not be confirmed. Cancellation and local timeout do not guarantee that a provider stopped processing or billing. The limits are not a monetary cap or a guarantee of exactly-once provider execution.
 
+A revision that stops with `paper_guide_review_required` cannot resume, including after cancellation. The reading workspace keeps the published sections and their correction warnings visible, and offers a new guide when generation is available. Ordinary cancellation and transient model failures can still be resumed if the candidate passes the existing checks.
+
 ## API
 
 See the [Core OpenAPI specification](../api/backend/core/openapi.yml) for request and response schemas. Paths below are relative to `/api/core/datasets/{dataset}/documents/{document}`. Normal responses use the Core `data` envelope. Use `language=zh` or `language=en` on routes other than generation; generation takes `language` in its JSON body. Core defaults to `zh` when language is omitted. The routes use the existing Core authentication and document authorization, with revisions scoped to the authenticated owner.
@@ -63,6 +65,8 @@ See the [Core OpenAPI specification](../api/backend/core/openapi.yml) for reques
 | `GET /paper-guide/revisions/{revision}` | Returns run state, source currentness, coverage, reviewed sections and any available plan and review summary. `after_version` restricts returned sections to changes after that revision change version. |
 | `GET /paper-guide/revisions/{revision}/evidence/{evidence}` | Returns stored evidence and `source_current`. Page indices are zero-based; boxes use the PDF IR's normalized top-left coordinates. Evidence drops precise coordinates when `source_current=false`. Superseded revisions still retain their locators while their source remains current. |
 | `POST /paper-guide/runs/{run}:cancel` | Cancels remaining work and preserves released sections. The run ID is the candidate revision ID. |
-| `POST /paper-guide/runs/{run}:resume` | Requeues the same eligible candidate with its frozen identity and remaining budget. |
+| `POST /paper-guide/runs/{run}:resume` | Requeues the same eligible candidate with its frozen identity and remaining budget. A saved quality stop on a candidate that passes the existing checks returns `422 paper_guide_review_required` before enqueueing work. A mismatched task contract returns `409 paper_guide_regeneration_required`. |
 | `PUT /paper-guide/progress` | Saves `revision_id`, `section_key`, `block_id`, Unicode code point `offset`, and `mode` (`article` or `source`). |
 | `POST /paper-guide/revisions/{revision}:selection-context` | Takes `section_key`, `block_id`, and half-open Unicode code point offsets `start` and `end` in the stored block text. Returns server-resolved text, claims, evidence, and source currentness. Assistant follow-ups re-resolve the reference with the conversation user's access and reject stale source context. |
+
+Status and revision responses include `run.resume_block_reason` when the revision has the stored quality stop. The field is optional and conveys a known block. Resume still checks access, the source and frozen model, candidate identity, the task contract, and the remaining run budget.
