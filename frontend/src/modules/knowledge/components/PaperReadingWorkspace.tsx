@@ -248,7 +248,7 @@ export default function PaperReadingWorkspace(p: Props) {
     closeEvidence();
   }, [storageKey, target, revisionId, showGuide, closeEvidence]);
   const preview = useGuideSourcePreview(
-    storageKey,
+    `${storageKey}/${revisionId ?? ""}`,
     guide.revision?.source_sha256,
     !!guide.revision?.source_current,
     p.ir?.source_sha256,
@@ -329,6 +329,12 @@ export default function PaperReadingWorkspace(p: Props) {
         failed: "Generation failed; published passages remain available",
         source_changed: "Source changed; generate from the new paper",
       };
+  function openAssetPage(evidence: PaperGuideEvidence) {
+    if (!guide.revision?.source_current || p.ir?.source_sha256 !== guide.revision.source_sha256) return;
+    setSourceOpen(true);
+    p.onAuxiliary(undefined);
+    p.onNavigate(evidence);
+  }
   function renderAsset(block: PaperGuideBlock) {
     return (
       <GuideInlineAsset
@@ -340,6 +346,7 @@ export default function PaperReadingWorkspace(p: Props) {
         language={language}
         current={guide.revision!.source_current}
         onEvidence={openEvidence}
+        onOpenPage={p.ir?.source_sha256 === guide.revision?.source_sha256 ? openAssetPage : undefined}
       />
     );
   }
@@ -624,6 +631,7 @@ function GuideInlineAsset({
   language,
   current,
   onEvidence,
+  onOpenPage,
 }: {
   id?: string;
   revision: string;
@@ -632,8 +640,16 @@ function GuideInlineAsset({
   language: string;
   current: boolean;
   onEvidence: (id: string, opener: HTMLButtonElement) => void;
+  onOpenPage?: (evidence: PaperGuideEvidence) => void;
 }) {
-  const [e, setEvidence] = useState<PaperGuideEvidence>();
+  const [loaded, setEvidence] = useState<{
+    id: string;
+    revision: string;
+    target: typeof target;
+    value: PaperGuideEvidenceResponse;
+  }>();
+  const value = current && loaded?.id === id && loaded?.revision === revision && loaded?.target === target
+    ? loaded.value : undefined;
   const [failed, setFailed] = useState(false);
   useEffect(() => {
     setEvidence(undefined);
@@ -644,7 +660,7 @@ function GuideInlineAsset({
       .evidence(target, revision, id, abort.signal)
       .then((v) => {
         if (!abort.signal.aborted) {
-          if (v.source_current) setEvidence(v.evidence);
+          if (v.source_current && v.evidence.id === id) setEvidence({ id, revision, target, value: v });
           else setFailed(true);
         }
       })
@@ -655,8 +671,10 @@ function GuideInlineAsset({
   }, [id, revision, target, current]);
   return (
     <PaperGuideAsset
-      evidence={e}
+      evidence={value?.evidence}
+      originalDisplay={value?.original_display}
       onEvidence={onEvidence}
+      onOpenPage={onOpenPage}
       unavailable={failed || !current || !id}
       preview={preview}
       language={language}

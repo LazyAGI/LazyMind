@@ -73,7 +73,7 @@ function Harness({
 }: {
   document?: string;
   title?: string;
-  onNavigate?: () => void;
+  onNavigate?: Parameters<typeof PaperReadingWorkspace>[0]["onNavigate"];
   withIR?: boolean;
 }) {
   const [tab, setTab] = useState<string>();
@@ -375,7 +375,7 @@ it("reserves an inline figure frame before evidence arrives and retains it on fa
   fireEvent.click(screen.getByRole("button", { name: "Guide" }));
   const frame = view.container.querySelector(".paper-guide-image-frame");
   expect(frame).not.toBeNull();
-  expect(screen.getByText("Loading original figure…")).toBeVisible();
+  expect(screen.getByText("Loading original…")).toBeVisible();
   await act(async () => reject(new Error("evidence unavailable")));
   expect(view.container.querySelector(".paper-guide-image-frame")).toBe(frame);
   expect(
@@ -417,7 +417,7 @@ it("keeps the same reserved figure and caption rows through delayed evidence and
   expect(view.container.querySelector(".paper-guide-asset figcaption")).toBe(
     caption,
   );
-  expect(caption).toHaveTextContent("PDF 3");
+  expect(caption).toHaveTextContent("PDF page 3");
 });
 
 function pausedCandidate(
@@ -726,4 +726,34 @@ it("explains unavailable regeneration while a historical guide remains readable"
   expect(button).toHaveAccessibleDescription(/Source pages could not be verified/);
   expect(screen.getByText(/original paper and historical guides remain readable/)).toBeVisible();
   expect(screen.queryByText("paper_guide_source_precision_unavailable")).not.toBeInTheDocument();
+});
+
+it("opens the authorized original page from the formula block and hides an older request on revision change", async () => {
+  const navigate = vi.fn();
+  const old = revision();
+  old.sections[0].blocks[0] = { ...old.sections[0].blocks[0], kind: "formula",
+    asset_id: "old-formula", text: "Compare $x=y$ in the guide." };
+  let finishOld!: (response: unknown) => void;
+  api.evidence.mockImplementationOnce(() => new Promise(resolve => { finishOld = resolve; }));
+  state.value = { ...state.value, revision: old };
+  const view = render(<Harness withIR onNavigate={navigate} />);
+  fireEvent.click(screen.getByRole("button", { name: "Guide" }));
+  const formula = { id: "new-formula", text: "x=y", source_block_id: "original-formula", source_type: "formula",
+    locator: { kind: "formula", page: 3, bbox: [.1, .2, .3, .4], latex: "x=y" } };
+  api.evidence.mockResolvedValueOnce({ evidence: formula, source_current: true,
+    original_display: { kind: "formula", page: 3, bbox: [.1, .2, .3, .4], number: "7" } });
+  const next = { ...revision(), id: "new-revision" };
+  next.sections[0].blocks[0] = { ...next.sections[0].blocks[0], kind: "formula",
+    asset_id: formula.id, text: "Compare $x=y$ in the guide." };
+  state.value = { ...state.value, revision: next };
+  view.rerender(<Harness withIR onNavigate={navigate} />);
+  await act(async () => finishOld({
+    source_current: true, evidence: { ...formula, id: "old-formula", locator: { kind: "page", page: 9 } },
+  }));
+  expect(view.container.querySelector(".paper-guide-block .katex")).not.toBeNull();
+  expect(screen.queryByRole("button", { name: "Open PDF page 10" })).not.toBeInTheDocument();
+  fireEvent.click(await screen.findByRole("button", { name: "Open PDF page 4" }));
+  expect(navigate).toHaveBeenCalledWith(expect.objectContaining({
+    id: "new-formula", locator: { kind: "page", page: 3 },
+  }));
 });

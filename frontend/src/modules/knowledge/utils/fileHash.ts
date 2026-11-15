@@ -161,6 +161,16 @@ export async function computeFileSha256(file: File): Promise<string> {
   return bytesToHex(hasher.digest());
 }
 
+/** Byte fingerprint for an already-loaded file, including non-secure HTTP origins. */
+export async function computeBufferSha256(buffer: ArrayBuffer): Promise<string> {
+  if (globalThis.crypto?.subtle) {
+    return bytesToHex(new Uint8Array(await crypto.subtle.digest("SHA-256", buffer)));
+  }
+  const hasher = new Sha256Hasher();
+  hasher.update(new Uint8Array(buffer));
+  return bytesToHex(hasher.digest());
+}
+
 /** Stable text fingerprint, also available on HTTP origins without Web Crypto. */
 export function computeTextSha256(text: string): string {
   const hasher = new Sha256Hasher();

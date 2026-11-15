@@ -171,7 +171,7 @@ async function findFallbackRegion(
   return weakMatch;
 }
 
-async function renderPreview(pdf: PdfCitationPreviewDocument, target: PdfCitationTarget): Promise<RenderedPreview | undefined> {
+async function renderPreview(pdf: PdfCitationPreviewDocument, target: PdfCitationTarget, padding: number): Promise<RenderedPreview | undefined> {
   const pages = new Map<number, { page: PreviewPage; base: PreviewViewport; viewport: PreviewViewport; scale: number }>();
   for (const region of target.regions) {
     if (pages.has(region.page)) continue;
@@ -199,10 +199,10 @@ async function renderPreview(pdf: PdfCitationPreviewDocument, target: PdfCitatio
     const top = Math.min(...corners.map(point => point[1]));
     const right = Math.max(...corners.map(point => point[0]));
     const bottom = Math.max(...corners.map(point => point[1]));
-    const x = Math.max(0, Math.floor((left - PADDING) * scale));
-    const y = Math.max(0, Math.floor((top - PADDING) * scale));
-    const width = Math.min(Math.ceil(viewport.width), Math.ceil((right + PADDING) * scale)) - x;
-    const height = Math.min(Math.ceil(viewport.height), Math.ceil((bottom + PADDING) * scale)) - y;
+    const x = Math.max(0, Math.floor((left - padding) * scale));
+    const y = Math.max(0, Math.floor((top - padding) * scale));
+    const width = Math.min(Math.ceil(viewport.width), Math.ceil((right + padding) * scale)) - x;
+    const height = Math.min(Math.ceil(viewport.height), Math.ceil((bottom + padding) * scale)) - y;
     return { page: region.page, x, y, width, height, destinationY: 0 };
   }).filter(crop => crop.width > 0 && crop.height > 0);
   if (!crops.length) return undefined;
@@ -301,14 +301,14 @@ export function createPdfCitationPreviewCache(options: PdfCitationPreviewOptions
     disposed = true;
     for (const state of liveStates) disposeState(state);
   }
-  function get(pdf: PdfCitationPreviewDocument, target: PdfCitationTarget): Promise<PdfCitationPreview | undefined> {
+  function get(pdf: PdfCitationPreviewDocument, target: PdfCitationTarget, options?: { exact?: boolean }): Promise<PdfCitationPreview | undefined> {
     if (disposed || (!target.regions.length && !/^\d{1,4}$/.test(target.referenceKey))) return Promise.resolve(undefined);
     let state = documents.get(pdf);
     if (!state) {
       state = { active: true, resolved: new Map(), inflight: new Map(), missing: new Set(), fallbackPages: new Map() };
       documents.set(pdf, state);
     }
-    const key = JSON.stringify([target.referenceKey, target.regions, target.regions.length ? undefined : target.rawText, target.fallbackPage]);
+    const key = JSON.stringify([target.referenceKey, target.regions, target.regions.length ? undefined : target.rawText, target.fallbackPage, options?.exact === true]);
     if (state.missing.has(key)) return Promise.resolve(undefined);
     const existing = state.resolved.get(key);
     if (existing) {
@@ -341,7 +341,7 @@ export function createPdfCitationPreviewCache(options: PdfCitationPreviewOptions
         requestState.missing.add(key);
         return undefined;
       }
-      const rendered = await renderPreview(pdf, region ? { ...target, regions: [region] } : target);
+      const rendered = await renderPreview(pdf, region ? { ...target, regions: [region] } : target, options?.exact ? 0 : PADDING);
       return rendered && region ? { ...rendered, region } : rendered;
     })().then(rendered => {
       try {

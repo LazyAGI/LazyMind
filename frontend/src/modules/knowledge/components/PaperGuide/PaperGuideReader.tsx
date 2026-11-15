@@ -9,7 +9,7 @@ import type {
 } from "@/api/generated/core-client";
 import type { DocumentChatSelection } from "../PdfTemporaryChat/types";
 import { restoreTextPosition, visibleTextOffset } from "./readingPosition";
-import PaperGuideText from "./PaperGuideText";
+import PaperGuideText, { guideTextSegments } from "./PaperGuideText";
 import { sourceBoundary } from "./sourceText";
 import { isGuideRunActive } from "./guideRunState";
 interface Props {
@@ -359,6 +359,17 @@ export default function PaperGuideReader({
                     </p>
                   )}
                   {block.asset_id && renderAsset?.(block)}
+                  {!block.asset_id && !!block.evidence_ids?.length &&
+                    (block.kind === "paragraph" || block.kind === "callout") &&
+                    guideTextSegments(block.text).some(segment =>
+                      segment.display || segment.latex?.includes("=")
+                    ) && (
+                    <small className="paper-guide-attribution">
+                      {zh
+                        ? "导读公式说明 · 无单独原式预览，可从来源打开原文。"
+                        : "Guide equation explanation · Open the source to see the original in context."}
+                    </small>
+                  )}
                   <div className="paper-guide-block-tools">
                     {(block.evidence_ids || []).map((id) => (
                       <button

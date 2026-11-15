@@ -21,6 +21,7 @@ it("restores the enlarged figure opener after Escape closes the guide modal", as
           url: "data:image/png;base64,AA==",
           width: 100,
           height: 100,
+          mode: "page",
         })}
       />
     </ConfigProvider>,
@@ -47,4 +48,23 @@ it("labels the table start page and opens each physical evidence entry", async (
   const fragment = screen.getByRole("button", { name: "Table source fragment 2" });
   fireEvent.click(fragment);
   expect(open).toHaveBeenCalledWith("body-p4", fragment);
+});
+
+it("labels a rendered formula fallback as a source page, while retaining its authorized page action", async () => {
+  const open = vi.fn();
+  render(
+    <PaperGuideAsset
+      language="en"
+      evidence={{ id: "formula", source_type: "formula", source_block_id: "eq",
+        text: "x^2", locator: { kind: "page", page: 3 } }}
+      originalDisplay={{ kind: "formula", page: 3, bbox: [.1,.2,.3,.4], number: "7" }}
+      onOpenPage={open}
+      preview={async () => ({ url: "blob:original-page", width: 100, height: 100, mode: "page" })}
+    />,
+  );
+  expect(await screen.findByText(/Source page · PDF page 4/)).toBeInTheDocument();
+  expect(screen.getByText(/No separate formula region/)).toBeInTheDocument();
+  expect(screen.getByText(/Equation \(7\)/)).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Open PDF page 4" }));
+  expect(open).toHaveBeenCalledWith(expect.objectContaining({ locator: { kind: "page", page: 3 } }));
 });
