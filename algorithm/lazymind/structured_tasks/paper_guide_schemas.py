@@ -386,14 +386,20 @@ def _protected_sentence_end(prefix: str) -> bool:
 
 def _soft_wrap_continues_sentence(inline: Token) -> bool:
     children = inline.children or []
-    breaks = [i for i, child in enumerate(children) if child.type in ('softbreak', 'hardbreak')]
-    # A newline inside an inline literal may not produce a break token.
-    if not breaks or len(breaks) != inline.content.count('\n') or children[breaks[-1]].type != 'softbreak':
+    final_line = inline.content.rsplit('\n', 1)[-1].lstrip(' \t')
+    # Require the soft break immediately before the literal source line of the tail.
+    # An earlier soft break cannot stand in for a newline consumed by inline code.
+    if (len(children) < 2 or children[-2].type != 'softbreak' or
+            children[-1].type != 'text' or children[-1].content != final_line):
         return False
-    previous_start = breaks[-2] + 1 if len(breaks) > 1 else 0
-    previous_line = ''.join(child.content for child in children[previous_start:breaks[-1]])
-    previous_line = previous_line.rstrip(_ASCII_SPACE + ''.join(_QUOTE_END.values()))
-    return not previous_line.endswith(tuple(_SENTENCE_END)) and any(ch.isalnum() for ch in previous_line)
+    prose_parts = []
+    for child in reversed(children[:-2]):
+        if child.type in ('softbreak', 'hardbreak'):
+            break
+        if child.type == 'text':
+            prose_parts.append(child.content)
+    previous_prose = ''.join(reversed(prose_parts)).rstrip(_ASCII_SPACE + ''.join(_QUOTE_END.values()))
+    return not previous_prose.endswith(tuple(_SENTENCE_END)) and any(ch.isalnum() for ch in previous_prose)
 
 
 def _citation_tail_line(text: str) -> str | None:

@@ -91,6 +91,8 @@ def test_reader_citation_tail_rejects_entire_registered_section(monkeypatch, mod
                  2, id='after-quoted-heading'),
     pytest.param('The measurement was limited\n.〔e2〕', 2, id='soft-wrapped-punctuation'),
     pytest.param('The measurement was **limited**\n.〔e2〕', 2, id='soft-wrapped-emphasis'),
+    pytest.param('Run `ls .`\n.〔e2〕', 2, id='soft-wrap-after-period-in-code'),
+    pytest.param('The `sample\nfragment` was accepted\n.〔e2〕', 2, id='soft-wrap-after-multiline-code'),
 ])
 def test_clear_paragraph_tail_cannot_pass_as_provenance(monkeypatch, prose, bound_row):
     data, response = writing_case('normal', marked=False)
@@ -117,6 +119,9 @@ def test_clear_paragraph_tail_cannot_pass_as_provenance(monkeypatch, prose, boun
     pytest.param('paragraph', 'The instrument is stable\\\n.〔e2〕', id='backslash-hard-break-unfinished'),
     pytest.param('paragraph', 'The instrument is stable.\n.〔e2〕', id='soft-break-after-complete-sentence'),
     pytest.param('paragraph', 'The instrument is **stable.**\n.〔e2〕', id='soft-break-after-formatted-sentence'),
+    pytest.param('paragraph', '`sample`\n.〔e2〕', id='soft-break-after-code-only'),
+    pytest.param('paragraph', 'Prose above\n`sample\n` .〔e2〕', id='final-newline-inside-code'),
+    pytest.param('paragraph', 'The sample was `calibrated`.\n.〔e2〕', id='soft-break-after-outside-period'),
     ('paragraph', 'The result.〔e1–e3〕'),
     ('paragraph', 'The result.〔e2, see table〕'),
     ('paragraph', 'The result.〔e0〕'),
