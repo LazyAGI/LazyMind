@@ -181,23 +181,26 @@ unavailable source material distinct; do not invent facts to fill source gaps.
 """
 
 
-def _prompt(data, instruction, schema):
+def _prompt(data, instruction, schema, *, include_schema):
     language = 'English' if data.language == 'en' else 'Chinese'
-    contract = json.dumps(model_output_schema(schema), ensure_ascii=False, separators=(',', ':'))
-    return f'{COMMON}\nWrite the response in {language}.\n{instruction}\nOutput schema:\n{contract}'
+    prompt = f'{COMMON}\nWrite the response in {language}.\n{instruction}'
+    if include_schema:
+        contract = json.dumps(model_output_schema(schema), ensure_ascii=False, separators=(',', ':'))
+        prompt += f'\nOutput schema:\n{contract}'
+    return prompt
 
 
-def extract_prompt(data):
-    return _prompt(data, EXTRACT, Extract)
+def extract_prompt(data, *, include_schema=True):
+    return _prompt(data, EXTRACT, Extract, include_schema=include_schema)
 
 
-def plan_prompt(data):
-    return _prompt(data, PLAN, Plan)
+def plan_prompt(data, *, include_schema=True):
+    return _prompt(data, PLAN, Plan, include_schema=include_schema)
 
 
-def section_prompt(data):
-    return _prompt(data, SECTION, Section)
+def section_prompt(data, *, include_schema=True):
+    return _prompt(data, SECTION, Section, include_schema=include_schema)
 
 
-def review_prompt(data):
-    return _prompt(data, REVIEW, Review)
+def review_prompt(data, *, include_schema=True):
+    return _prompt(data, REVIEW, Review, include_schema=include_schema)

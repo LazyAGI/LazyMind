@@ -17,16 +17,33 @@ func TestRequestBudgetSharedWithActualPythonTemplates(t *testing.T) {
 		t.Fatal(err)
 	}
 	var limits struct {
-		TaskVersion string `json:"task_version"`
-		Prompt      int    `json:"prompt_reserve_bytes"`
-		Defaults    int    `json:"input_defaults_reserve_bytes"`
-		Evidence    int    `json:"evidence_expansion_reserve_bytes"`
+		TaskVersion string         `json:"task_version"`
+		Frame       int            `json:"provider_frame_reserve_bytes"`
+		System      int            `json:"provider_system_bytes"`
+		JSONMode    int            `json:"provider_json_mode_text_bytes"`
+		Legacy      map[string]int `json:"measured_prompt_bytes"`
+		Native      map[string]int `json:"measured_native_prompt_bytes"`
+		NativeText  map[string]int `json:"measured_native_text_bytes"`
+		Prompt      int            `json:"prompt_reserve_bytes"`
+		Defaults    int            `json:"input_defaults_reserve_bytes"`
+		Evidence    int            `json:"evidence_expansion_reserve_bytes"`
 	}
 	if err = json.Unmarshal(raw, &limits); err != nil {
 		t.Fatal(err)
 	}
 	if limits.TaskVersion != TaskVersion || limits.Prompt != guidePromptReserve || limits.Defaults != guideInputDefaultsReserve || limits.Evidence != guideEvidenceExpansionReserve {
 		t.Fatalf("budget fixture must match the verified Go admission constants: %+v", limits)
+	}
+	for _, task := range []string{"paper.guide.extract", "paper.guide.plan", "paper.guide.section", "paper.guide.review"} {
+		legacy, native, text := limits.Legacy[task], limits.Native[task], limits.NativeText[task]
+		if legacy <= 0 || native <= 0 || text <= 0 || limits.System <= 0 || limits.Frame <= 0 || limits.JSONMode <= 0 {
+			t.Fatalf("missing measured provider input sizes for %s", task)
+		}
+		overhead := limits.System + limits.Frame
+		legacyTotal, nativeTotal := legacy+limits.JSONMode+overhead, native+text+overhead
+		if legacyTotal > guidePromptReserve || nativeTotal > guidePromptReserve {
+			t.Fatalf("%s exceeds the existing fixed prompt reserve: inline=%d native=%d", task, legacyTotal, nativeTotal)
+		}
 	}
 }
 

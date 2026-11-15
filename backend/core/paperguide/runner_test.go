@@ -552,7 +552,7 @@ func TestWholeReviewProjectsExactPublishedVersions(t *testing.T) {
 }
 
 func TestLegacyCandidateCannotSpendOrResumeUnderNewContract(t *testing.T) {
-	for _, version := range []string{"paper-guide-v1", "paper-guide-v2", "paper-guide-v3", "paper-guide-v4", "paper-guide-v5", "paper-guide-v6", "paper-guide-v7", "paper-guide-v8", "paper-guide-v9", "paper-guide-v10", "paper-guide-v11", "paper-guide-v12", "paper-guide-v13", "paper-guide-v14", "paper-guide-v15", "paper-guide-v16", "paper-guide-v17"} {
+	for _, version := range []string{"paper-guide-v1", "paper-guide-v2", "paper-guide-v3", "paper-guide-v4", "paper-guide-v5", "paper-guide-v6", "paper-guide-v7", "paper-guide-v8", "paper-guide-v9", "paper-guide-v10", "paper-guide-v11", "paper-guide-v12", "paper-guide-v13", "paper-guide-v14", "paper-guide-v15", "paper-guide-v16", "paper-guide-v17", "paper-guide-v18"} {
 		t.Run(version, func(t *testing.T) {
 			d, id := fixture(t)
 			snap, _ := BuildSourceSnapshot(d, id)
@@ -578,14 +578,17 @@ func TestLegacyCandidateCannotSpendOrResumeUnderNewContract(t *testing.T) {
 			if err = repo.DB.Model(&rev).Updates(map[string]any{"fingerprint": oldFingerprint, "stage": "paused", "calls_used": 1}).Error; err != nil {
 				t.Fatal(err)
 			}
-			calls := 0
-			service := Service{Repo: repo, Source: &fixtureSource{s: snap}, Authorize: func(context.Context, Scope, bool) error { return nil }, ResolveModel: func(context.Context, Scope, string) (ModelIdentity, map[string]any, error) { return model, nil, nil }, Call: func(context.Context, string, map[string]any, map[string]any) (json.RawMessage, error) {
+			calls, resolutions := 0, 0
+			service := Service{Repo: repo, Source: &fixtureSource{s: snap}, Authorize: func(context.Context, Scope, bool) error { return nil }, ResolveModel: func(context.Context, Scope, string) (ModelIdentity, map[string]any, error) {
+				resolutions++
+				return model, nil, nil
+			}, Call: func(context.Context, string, map[string]any, map[string]any) (json.RawMessage, error) {
 				calls++
 				return nil, nil
 			}}
 			_, err = service.Run(t.Context(), asyncjob.Job{ID: rev.JobID, PayloadJSON: mustJSON(JobPayload{rev.ID, rev.Epoch})}, testFence{repo.DB})
-			if err == nil || err.Error() != "paper_guide_regeneration_required" || calls != 0 {
-				t.Fatalf("legacy candidate spent calls=%d err=%v", calls, err)
+			if err == nil || err.Error() != "paper_guide_regeneration_required" || calls != 0 || resolutions != 0 {
+				t.Fatalf("legacy candidate reached model resolution or call: resolutions=%d calls=%d err=%v", resolutions, calls, err)
 			}
 			_, err = repo.Resume(t.Context(), scope, rev.ID, model)
 			if err == nil || err.Error() != "paper_guide_regeneration_required" {

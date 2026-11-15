@@ -74,6 +74,28 @@ def model_output_schema(schema):
     return contract
 
 
+def strict_model_output_schema(schema):
+    """Project a fresh model-view schema to the provider's strict object rules."""
+    contract = model_output_schema(schema)
+
+    def visit(node):
+        node.pop('title', None)
+        node.pop('default', None)
+        if node.get('type') == 'object':
+            # SECTION's asset_id stays nullable even though the provider must emit it.
+            node['required'] = list(node['properties'])
+        for keyword in ('$defs', 'properties'):
+            for child in node.get(keyword, {}).values():
+                visit(child)
+        for child in node.get('anyOf', ()):
+            visit(child)
+        if 'items' in node:
+            visit(node['items'])
+
+    visit(contract)
+    return contract
+
+
 class SourceReferences:
     def __init__(self, task, canonical_input):
         self.task = task

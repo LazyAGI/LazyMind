@@ -16,7 +16,7 @@ class TaskSpec:
     version: str
     input_schema: type[BaseModel]
     output_schema: type[BaseModel]
-    instruction: Callable[[BaseModel], str]
+    instruction: Callable[..., str]
     max_output_bytes: int = 256 << 10
     timeout_seconds: int = 120
     validate_output: Callable[[BaseModel, BaseModel], None] | None = None
@@ -24,7 +24,7 @@ class TaskSpec:
     prefer_native_json: bool = False
 
 
-PAPER_GUIDE_VERSION = 'paper-guide-v18'
+PAPER_GUIDE_VERSION = 'paper-guide-v19'
 
 
 def _guide(input_schema, output_schema, prompt, *, timeout_seconds=120):

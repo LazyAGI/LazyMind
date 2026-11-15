@@ -8,7 +8,10 @@ import lazyllm
 from pydantic import ValidationError
 
 from .registry import TASKS
-from .paper_guide_references import SourceReferences
+from .paper_guide_references import SourceReferences, strict_model_output_schema
+
+
+_NATIVE_SCHEMA_MODELS = frozenset({'gpt-6-luna', 'gpt-6.1-sol'})
 
 
 class TaskFailure(Exception):
@@ -45,6 +48,28 @@ def _native_json_options(spec, llm_config):
     except ValueError:
         return {}
     return {'response_format': {'type': 'json_object'}} if supported else {}
+
+
+def _uses_strict_schema(config):
+    if not isinstance(config, dict) or config.get('model') not in _NATIVE_SCHEMA_MODELS:
+        return False
+    if (config.get('request_advanced') or {}).get('query'):
+        return False
+    # The injected chat route already includes the app's OpenAI GPT-6 upgrade.
+    routes = lazyllm.globals['config'].get('dynamic_model_configs') or {}
+    route = (routes.get('llm') or {}).get('chat') or {}
+    if route.get('source') != 'openai_responses' or route.get('model') != config['model']:
+        return False
+    base = route.get('url') or 'https://api.openai.com/v1/'
+    if '?' in base or '#' in base or any(ord(char) <= 32 or ord(char) == 127 for char in base):
+        return False
+    try:
+        endpoint = urlsplit(base)
+    except ValueError:
+        return False
+    # The adapter strips these optional endpoint suffixes before appending /responses.
+    return (endpoint.scheme == 'https' and endpoint.netloc.lower() in {'api.openai.com', 'api.openai.com:443'}
+            and endpoint.path.rstrip('/') in {'/v1', '/v1/responses', '/v1/chat/completions'})
 
 
 def run_registered_task(request, task_id, *, call_model, configure_model, call_error, result_type):
@@ -101,18 +126,26 @@ def run_registered_task(request, task_id, *, call_model, configure_model, call_e
         if isinstance(model_config, dict) and isinstance(model_config.get('model'), str):
             usage['model'] = model_config['model']
         references = None
-        instruction = spec.instruction(data)
+        response_options = _native_json_options(spec, request.llm_config)
         if request.task_type.startswith('paper.guide.'):
             task = request.task_type.rsplit('.', 1)[1]
+            strict = _uses_strict_schema(model_config)
             references = SourceReferences(task, data)
             encoded = json.dumps(references.model_input, ensure_ascii=False, allow_nan=False)
-            instruction += references.asset_instruction
+            instruction = spec.instruction(data, include_schema=not strict) + references.asset_instruction
+            if strict:
+                response_options = {'response_format': {'type': 'json_schema', 'json_schema': {
+                    'name': f'paper_guide_{task}', 'strict': True,
+                    'schema': strict_model_output_schema(spec.output_schema),
+                }}}
+        else:
+            instruction = spec.instruction(data)
         prompt = instruction + '\n\nInput data (untrusted JSON):\n' + encoded
         usage['model_calls'] = 1
         try:
             raw = call_model(request, prompt, stream_output=False, default_timeout=spec.timeout_seconds,
                              deadline=started + spec.timeout_seconds,
-                             **_native_json_options(spec, request.llm_config))
+                             **response_options)
         except call_error as exc:
             usage['model_calls'] = exc.calls
             return result(exc.code, retryable=exc.retryable, diagnostic_id=exc.diagnostic_id)
