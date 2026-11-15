@@ -243,6 +243,11 @@ def test_schema_source_paths_match_complete_explicit_mapping(task):
         INPUT_PATHS, OUTPUT_PATHS, ALIAS_PATTERN, CANONICAL_PATTERN, model_output_schema,
     )
     I, O, _, _ = cases()[task]
+    shared = (Path(__file__).resolve().parents[3] / 'backend/core/paperguide/testdata'
+              / 'source-alias-budget-paths.json')
+    budget_paths = tuple(tuple(path.split('.')) for path in json.loads(shared.read_text())[f'paper.guide.{task}'])
+    assert budget_paths == INPUT_PATHS[task]
+    assert budget_paths[0] == ('evidence', '*', 'id') and len(set(budget_paths)) == len(budget_paths)
     assert schema_source_paths(I.model_json_schema(), CANONICAL_PATTERN) == (
         set(INPUT_PATHS[task]) | {('source_sections', '*', 'id')})
     assert schema_source_paths(O.model_json_schema(), CANONICAL_PATTERN) == set(OUTPUT_PATHS[task])

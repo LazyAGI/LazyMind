@@ -367,30 +367,26 @@ func sectionHasTarget(s GuideSection, p GuidePlan, f GuideFinding) bool {
 func (x *execution) input(packet GuideSourceSnapshot) map[string]any {
 	return map[string]any{"language": x.scope.Language, "evidence": packet.Evidence, "coverage": x.snap.Coverage}
 }
-func (x *execution) inputFits(input map[string]any) bool {
-	if evidence, ok := input["evidence"].([]GuideEvidence); ok && len(evidence) > 2048 {
+func (x *execution) inputFits(task string, input map[string]any) bool {
+	raw, err := json.MarshalIndent(input, "", "")
+	if err != nil {
 		return false
 	}
-	b, e := json.MarshalIndent(input, "", "")
+	bound, ok := guideInputBound(task, raw)
+	if !ok {
+		return false
+	}
 	limit := x.model.ContextTokens
 	if limit <= 0 {
 		limit = 32768
 	}
 	budget := limit / 10 * 7
-	if x.model.OutputReserveTokens > 0 && limit-x.model.OutputReserveTokens < budget {
-		budget = limit - x.model.OutputReserveTokens
+	if x.model.OutputReserveTokens > 0 {
+		budget = min(budget, limit-x.model.OutputReserveTokens)
 	}
-	evidenceCount := 0
-	if evidence, ok := input["evidence"].([]GuideEvidence); ok {
-		evidenceCount = len(evidence)
-	}
-	inputBound := estimatedTokens(b) + guideInputDefaultsReserve + evidenceCount*guideEvidenceExpansionReserve
-	return e == nil && inputBound <= 1<<20 && inputBound+guidePromptReserve <= budget
+	return bound <= budget
 }
 
-// A UTF-8 byte bound also covers dense punctuation/formula tokenization.
-// Metadata-free providers get a conservative 32k context.
-func estimatedTokens(raw []byte) int { return len(raw) }
 func (x *execution) planningInput(packet GuideSourceSnapshot) map[string]any {
 	input := x.input(packet)
 	input["source_sections"] = x.snap.Sections
@@ -408,7 +404,7 @@ func (x *execution) planInput(ctx context.Context) (map[string]any, GuideSourceS
 	candidates := selectOriginalAssets(short, nil)
 	short.originalCandidates = &candidates
 	input := x.planningInput(short)
-	if x.inputFits(input) {
+	if x.inputFits("paper.guide.plan", input) {
 		return input, short, nil
 	}
 	// Keep original reading order and cover every evidence item. Section
@@ -432,7 +428,7 @@ func (x *execution) planInput(ctx context.Context) (map[string]any, GuideSourceS
 			if err != nil {
 				return nil, GuideSourceSnapshot{}, err
 			}
-			if x.inputFits(x.input(whole)) && !x.inputFits(x.input(combined)) {
+			if x.inputFits("paper.guide.extract", x.input(whole)) && !x.inputFits("paper.guide.extract", x.input(combined)) {
 				prior, _ := RestrictEvidence(x.snap, ids)
 				packets = append(packets, prior)
 				ids = []string{}
@@ -444,7 +440,7 @@ func (x *execution) planInput(ctx context.Context) (map[string]any, GuideSourceS
 		if e != nil {
 			return nil, GuideSourceSnapshot{}, e
 		}
-		if !x.inputFits(x.input(packet)) {
+		if !x.inputFits("paper.guide.extract", x.input(packet)) {
 			if len(ids) == 0 {
 				return nil, GuideSourceSnapshot{}, ErrContext
 			}
@@ -452,7 +448,7 @@ func (x *execution) planInput(ctx context.Context) (map[string]any, GuideSourceS
 			packets = append(packets, prior)
 			ids = []string{ev.ID}
 			single, _ := RestrictEvidence(x.snap, ids)
-			if !x.inputFits(x.input(single)) {
+			if !x.inputFits("paper.guide.extract", x.input(single)) {
 				return nil, GuideSourceSnapshot{}, ErrContext
 			}
 		} else {
@@ -534,7 +530,7 @@ func (x *execution) planInput(ctx context.Context) (map[string]any, GuideSourceS
 		packet.originalCandidates = &candidates
 		input = x.planningInput(packet)
 		input["extracts"] = extracts
-		if x.inputFits(input) {
+		if x.inputFits("paper.guide.plan", input) {
 			return input, packet, nil
 		}
 		if !candidates.trim() {
@@ -580,11 +576,11 @@ func unique(ids []string) []string {
 // sectionInput measures the complete request for the current stage. Local stages
 // may narrow to the role and actual draft's source dependencies. A deferred
 // whole-guide correction still requires the independent packet.
-func (x *execution) sectionInput(p GuidePlan, sp GuideSectionPlan, fields map[string]any, draft *GuideSection, independentOnly bool) (map[string]any, GuideSourceSnapshot, error) {
+func (x *execution) sectionInput(task string, p GuidePlan, sp GuideSectionPlan, fields map[string]any, draft *GuideSection, independentOnly bool) (map[string]any, GuideSourceSnapshot, error) {
 	input := x.independentInput()
 	input["plan"] = p
 	maps.Copy(input, fields)
-	if x.inputFits(input) {
+	if x.inputFits(task, input) {
 		return input, x.planningPacket, nil
 	}
 	if independentOnly {
@@ -615,7 +611,7 @@ func (x *execution) sectionInput(p GuidePlan, sp GuideSectionPlan, fields map[st
 	input = x.input(packet)
 	input["plan"] = p
 	maps.Copy(input, fields)
-	if !x.inputFits(input) {
+	if !x.inputFits(task, input) {
 		return nil, GuideSourceSnapshot{}, ErrContext
 	}
 	return input, packet, nil
@@ -642,7 +638,7 @@ func (x *execution) writeSection(ctx context.Context, p GuidePlan, sp GuideSecti
 	if len(findings) > 0 {
 		fields["findings"] = findings
 	}
-	input, packet, e := x.sectionInput(p, sp, fields, previous, deferReview)
+	input, packet, e := x.sectionInput("paper.guide.section", p, sp, fields, previous, deferReview)
 	if e != nil {
 		return GuideSection{}, "", e
 	}
@@ -662,7 +658,7 @@ func (x *execution) writeSection(ctx context.Context, p GuidePlan, sp GuideSecti
 		return section, key, nil
 	}
 	reviewed := []GuideSection{section}
-	reviewInput, _, e := x.sectionInput(p, sp, map[string]any{"sections": reviewed}, &section, false)
+	reviewInput, _, e := x.sectionInput("paper.guide.review", p, sp, map[string]any{"sections": reviewed}, &section, false)
 	if e != nil {
 		return section, key, e
 	}
@@ -738,7 +734,7 @@ func (x *execution) reserveCorrections(ctx context.Context, repairKey string, fi
 	})
 }
 func (x *execution) task(ctx context.Context, key, task string, input map[string]any, out any, validate func() error, metadata ...json.RawMessage) error {
-	if !x.inputFits(input) {
+	if !x.inputFits(task, input) {
 		return ErrContext
 	}
 	hash := digest([]any{TaskVersion, input})

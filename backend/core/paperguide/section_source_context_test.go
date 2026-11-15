@@ -24,7 +24,7 @@ func TestSectionSourceContextUsesExactPriorSummaryBudget(t *testing.T) {
 			sp := plan.Sections[1]
 			data := fullSectionSourceInput(snap, plan)
 			data["role"], data["prior_summary"] = sp.Role, "Previous explanation."
-			x := newSectionSourceExecution(t, snap, sectionSourceBound(t, data))
+			x := newSectionSourceExecution(t, snap, sectionSourceBound(t, "paper.guide.section", data))
 			prior := teachingSection(RoleBackground)
 			prior.Summary = data["prior_summary"].(string) + extra
 			calls := 0
@@ -50,6 +50,53 @@ func TestSectionSourceContextUsesExactPriorSummaryBudget(t *testing.T) {
 				t.Fatalf("section calls=%d, error=%v", calls, err)
 			}
 		})
+	}
+}
+
+func TestSectionSourceContextUsesActualReviewTaskAtExactBoundary(t *testing.T) {
+	for _, extra := range []string{"", "x"} {
+		snap, ids, plan := sectionSourceFixture(t)
+		sp := plan.Sections[1]
+		draft := teachingSection(sp.Role)
+		draft.ClaimIDs = []string{"cross-role"}
+		draft.Blocks[0].ClaimIDs = draft.ClaimIDs
+		draft.Blocks[0].EvidenceIDs = []string{ids["draft-block"]}
+		reviewInput := fullSectionSourceInput(snap, plan)
+		reviewInput["sections"] = []GuideSection{draft}
+		budget := sectionSourceBound(t, "paper.guide.review", reviewInput)
+		// The only extra typed occurrence from the actual draft is its direct
+		// reference. At the REVIEW limit it is needed to admit the full packet.
+		if saved := sectionSourceBound(t, "paper.guide.section", reviewInput) - budget; saved != 64 {
+			t.Fatalf("want 64 bytes of draft-only credit, got %d", saved)
+		}
+		x := newSectionSourceExecution(t, snap, budget)
+		draft.Blocks[0].Text += extra
+		calls := 0
+		x.s.Call = func(_ context.Context, task string, input map[string]any, _ map[string]any) (json.RawMessage, error) {
+			calls++
+			evidence := input["evidence"].([]GuideEvidence)
+			switch task {
+			case "paper.guide.section":
+				if len(evidence) != len(snap.Evidence) {
+					t.Fatal("initial draft should use the full planning packet")
+				}
+				return json.Marshal(draft)
+			case "paper.guide.review":
+				if full := len(evidence) == len(snap.Evidence); full != (extra == "") {
+					t.Fatalf("draft extra=%q: review selected %d sources", extra, len(evidence))
+				}
+				if !slices.ContainsFunc(evidence, func(ev GuideEvidence) bool { return ev.ID == ids["draft-block"] }) {
+					t.Fatal("review dropped the actual draft's direct source")
+				}
+				return json.Marshal(GuideReview{Findings: []GuideFinding{}})
+			default:
+				t.Fatalf("unexpected task %s", task)
+				return nil, nil
+			}
+		}
+		if _, _, err := x.writeSection(t.Context(), plan, sp, nil, 1, nil, false, nil); err != nil || calls != 2 {
+			t.Fatalf("draft extra=%q review calls=%d err=%v", extra, calls, err)
+		}
 	}
 }
 
@@ -82,7 +129,7 @@ func TestSectionSourceContextReviewAndRepairRetainDraftDependenciesOnResume(t *t
 	}
 	fullDraftInput := fullSectionSourceInput(snap, plan)
 	fullDraftInput["role"] = RoleBackground
-	budget := sectionSourceBound(t, fullDraftInput) + 4800
+	budget := sectionSourceBound(t, "paper.guide.section", fullDraftInput) + 4800
 	x := newSectionSourceExecution(t, snap, budget)
 	assertClosed := func(in map[string]any) {
 		t.Helper()
@@ -189,7 +236,7 @@ func TestSectionSourceContextTooLargeDraftNeverReservesReviewTicket(t *testing.T
 	p := baselinePlan(snap)
 	data := fullSectionSourceInput(snap, p)
 	data["role"] = RoleBackground
-	x := newSectionSourceExecution(t, snap, sectionSourceBound(t, data))
+	x := newSectionSourceExecution(t, snap, sectionSourceBound(t, "paper.guide.section", data))
 	calls := 0
 	x.s.Call = func(_ context.Context, task string, _ map[string]any, _ map[string]any) (json.RawMessage, error) {
 		calls++
@@ -233,7 +280,7 @@ func TestSectionSourceContextMissingRetainedDependencyDoesNotReserveTicket(t *te
 	sp := plan.Sections[1]
 	data := fullSectionSourceInput(retained, plan)
 	data["role"] = sp.Role
-	x := newSectionSourceExecution(t, snap, sectionSourceBound(t, data)-1)
+	x := newSectionSourceExecution(t, snap, sectionSourceBound(t, "paper.guide.section", data)-1)
 	x.planningPacket = retained
 	calls := 0
 	x.s.Call = func(context.Context, string, map[string]any, map[string]any) (json.RawMessage, error) {
@@ -288,13 +335,17 @@ func fullSectionSourceInput(snap GuideSourceSnapshot, plan GuidePlan) map[string
 	return map[string]any{"language": "en", "evidence": snap.Evidence, "coverage": snap.Coverage, "source_sections": snap.Sections, "plan": plan}
 }
 
-func sectionSourceBound(t *testing.T, input map[string]any) int {
+func sectionSourceBound(t *testing.T, task string, input map[string]any) int {
 	t.Helper()
 	data, err := json.MarshalIndent(input, "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	return len(data) + guideInputDefaultsReserve + len(input["evidence"].([]GuideEvidence))*guideEvidenceExpansionReserve + guidePromptReserve
+	bound, ok := guideInputBound(task, data)
+	if !ok {
+		t.Fatal("test input exceeds transport budget")
+	}
+	return bound
 }
 
 func newSectionSourceExecution(t *testing.T, snap GuideSourceSnapshot, budget int) execution {

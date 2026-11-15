@@ -158,10 +158,10 @@ func TestV5CandidateCannotSpendAfterPrecisionContractChange(t *testing.T) {
 func TestExpandedCatalogAdmissionNeverTruncatesEvidenceOrSections(t *testing.T) {
 	x := execution{model: ModelIdentity{ContextTokens: 10000000}}
 	evidence := make([]GuideEvidence, 2049)
-	if x.inputFits(map[string]any{"evidence": evidence}) {
+	if x.inputFits("paper.guide.extract", map[string]any{"evidence": evidence}) {
 		t.Fatal("2049 page entries silently admitted")
 	}
-	if !x.inputFits(map[string]any{"evidence": evidence[:2048]}) {
+	if !x.inputFits("paper.guide.extract", map[string]any{"evidence": evidence[:2048]}) {
 		t.Fatal("2048 evidence contract changed")
 	}
 	x.snap.Sections = make([]SourceSection, 513)

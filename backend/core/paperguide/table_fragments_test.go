@@ -201,7 +201,7 @@ func TestExtractPlanningRetainsCompletePhysicalTableEvenWithoutExtractClaim(t *t
 		}
 	}
 	if strings.Join(originals, ",") != "late-fig,late-eq" || planPacket["original_asset_candidates"] == nil ||
-		calls != 2 || !x.inputFits(planPacket) {
+		calls != 2 || !x.inputFits("paper.guide.plan", planPacket) {
 		t.Fatalf("planning lost late original material or changed extract budget: %v, %d calls", originals, calls)
 	}
 	before := calls

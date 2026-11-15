@@ -1,0 +1,46 @@
+{
+  "paper.guide.extract": [
+    "evidence.*.id",
+    "evidence.*.parent_asset_id",
+    "evidence.*.fragment_evidence_ids.*",
+    "source_sections.*.evidence_ids.*",
+    "original_asset_candidates.figure.*.id",
+    "original_asset_candidates.formula.*.id"
+  ],
+  "paper.guide.plan": [
+    "evidence.*.id",
+    "evidence.*.parent_asset_id",
+    "evidence.*.fragment_evidence_ids.*",
+    "source_sections.*.evidence_ids.*",
+    "original_asset_candidates.figure.*.id",
+    "original_asset_candidates.formula.*.id",
+    "extracts.*.claims.*.evidence_ids.*"
+  ],
+  "paper.guide.section": [
+    "evidence.*.id",
+    "evidence.*.parent_asset_id",
+    "evidence.*.fragment_evidence_ids.*",
+    "source_sections.*.evidence_ids.*",
+    "original_asset_candidates.figure.*.id",
+    "original_asset_candidates.formula.*.id",
+    "plan.claims.*.evidence_ids.*",
+    "plan.sections.*.evidence_ids.*",
+    "plan.sections.*.asset_ids.*",
+    "plan.required_assets.*.id"
+  ],
+  "paper.guide.review": [
+    "evidence.*.id",
+    "evidence.*.parent_asset_id",
+    "evidence.*.fragment_evidence_ids.*",
+    "source_sections.*.evidence_ids.*",
+    "original_asset_candidates.figure.*.id",
+    "original_asset_candidates.formula.*.id",
+    "plan.claims.*.evidence_ids.*",
+    "plan.sections.*.evidence_ids.*",
+    "plan.sections.*.asset_ids.*",
+    "plan.required_assets.*.id",
+    "sections.*.claims.*.evidence_ids.*",
+    "sections.*.blocks.*.evidence_ids.*",
+    "sections.*.blocks.*.asset_id"
+  ]
+}

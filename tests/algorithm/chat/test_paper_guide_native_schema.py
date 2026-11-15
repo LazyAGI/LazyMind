@@ -495,10 +495,8 @@ def test_plan_accepts_a_counterexample_and_proof_without_originals_in_both_forma
     assert strict_instructions.endswith('Allowed required_assets decisions by source alias (JSON): {}')
 
 
-@pytest.mark.parametrize('language', ['en', 'zh'])
-@pytest.mark.parametrize('model', ['gpt-6-luna', 'unknown-model'])
-def test_section_keeps_maximum_claim_ids_and_visual_map_within_fixed_budget(http, language, model):
-    from test_paper_guide_asset_boundary import split_visual_prefix, synthetic_evidence
+def section_maximum_asset_case(language):
+    from test_paper_guide_asset_boundary import synthetic_evidence
 
     _, _, data, canonical = cases()['section']
     data['language'] = language
@@ -521,6 +519,15 @@ def test_section_keeps_maximum_claim_ids_and_visual_map_within_fixed_budget(http
                            for i, ev in enumerate(evidence[-32:], 1)]
     canonical['blocks'][0]['claim_ids'] = ids[:48]
     canonical['blocks'][1]['claim_ids'] = ids[48:]
+    return data, canonical, ids
+
+
+@pytest.mark.parametrize('language', ['en', 'zh'])
+@pytest.mark.parametrize('model', ['gpt-6-luna', 'unknown-model'])
+def test_section_keeps_maximum_claim_ids_and_visual_map_within_fixed_budget(http, language, model):
+    from test_paper_guide_asset_boundary import split_visual_prefix
+
+    data, canonical, ids = section_maximum_asset_case(language)
     output = deepcopy(canonical)
     for i, block in enumerate(output['blocks'], 2017):
         block.update(evidence_ids=[f'e{i}'], asset_id=f'e{i}')

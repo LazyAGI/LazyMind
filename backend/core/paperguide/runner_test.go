@@ -276,7 +276,7 @@ func TestLongPlanExtractsCoverAllOriginalEvidenceAndRemainBounded(t *testing.T) 
 			if e != nil {
 				t.Fatal(e)
 			}
-			if extractCalls < 2 || extractCalls > 8 || len(seen) != len(snap.Evidence) || !x.inputFits(input) {
+			if extractCalls < 2 || extractCalls > 8 || len(seen) != len(snap.Evidence) || !x.inputFits("paper.guide.plan", input) {
 				t.Fatalf("coverage=%d/%d calls=%d", len(seen), len(snap.Evidence), extractCalls)
 			}
 			// A saved Plan fixes extraction provenance. Reconstruction must have

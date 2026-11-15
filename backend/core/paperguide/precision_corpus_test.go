@@ -132,8 +132,8 @@ func TestPhysicalTableCorpusAdmission(t *testing.T) {
 				input := x.input(snap)
 				input["source_sections"] = snap.Sections
 				raw, _ := json.MarshalIndent(input, "", "")
-				bound := len(raw) + guideInputDefaultsReserve + len(snap.Evidence)*guideEvidenceExpansionReserve + guidePromptReserve
-				fit := len(snap.Sections) <= 512 && x.inputFits(input)
+				bound, _ := guideInputBound("paper.guide.plan", raw)
+				fit := len(snap.Sections) <= 512 && x.inputFits("paper.guide.plan", input)
 				t.Logf("model=%s full_input_upper_bound=%d evidence=%d sections=%d direct_admission=%t", m.Name, bound, len(snap.Evidence), len(snap.Sections), fit)
 				if fit {
 					measureIndependentReviewEnvelope(t, &x, snap, false)
@@ -238,12 +238,13 @@ func measureIndependentReviewEnvelope(t *testing.T, x *execution, packet GuideSo
 	if err := ValidateReview(p, sections, GuideReview{Findings: findings}); err != nil {
 		t.Fatal(err)
 	}
-	bound := func(in map[string]any) int {
+	bound := func(task string, in map[string]any) int {
 		b, _ := json.MarshalIndent(in, "", "")
-		return len(b) + guideInputDefaultsReserve + len(packet.Evidence)*guideEvidenceExpansionReserve + guidePromptReserve
+		n, _ := guideInputBound(task, b)
+		return n
 	}
-	t.Logf("independent_review evidence=%d extracted=%t realistic_review_bound=%d correction_stress_bound=%d review_fits=%t correction_fits=%t", len(packet.Evidence), extracted, bound(review), bound(correction), x.inputFits(review), x.inputFits(correction))
-	if !x.inputFits(review) || !x.inputFits(correction) {
+	t.Logf("independent_review evidence=%d extracted=%t realistic_review_bound=%d correction_stress_bound=%d review_fits=%t correction_fits=%t", len(packet.Evidence), extracted, bound("paper.guide.review", review), bound("paper.guide.section", correction), x.inputFits("paper.guide.review", review), x.inputFits("paper.guide.section", correction))
+	if !x.inputFits("paper.guide.review", review) || !x.inputFits("paper.guide.section", correction) {
 		t.Fatal("declared independent envelope does not fit")
 	}
 }
