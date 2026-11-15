@@ -39,7 +39,7 @@ def test_extract_one_call_and_binds_evidence(monkeypatch, output, error):
     }]}
     request = llm_task.LLMTaskRequest(
         task_type='paper.guide.extract',
-        options={'task_version': 'paper-guide-v15'},
+        options={'task_version': 'paper-guide-v16'},
         input={'data': input_data})
     result = llm_task.run_llm_task(request)
     assert result.error_code == error
@@ -70,6 +70,115 @@ SECTION = {
 }
 
 
+EXTRACT_PRODUCT = '(p/(p+1))×(q+1)'
+EXTRACT_EXAMPLE = {**EVIDENCE, 'locator': {'kind': 'page', 'page': 0},
+                   'text': f'The authors construct an illustration with gain {EXTRACT_PRODUCT} for q > 0.'}
+EXTRACT_CLAIM = {
+    'id': 'c1', 'statement': f'The authors illustrate gain {EXTRACT_PRODUCT}.',
+    'attribution': 'paper_statement', 'evidence_ids': [SOURCE_ID], 'argument_type': None,
+    'conditions': [f'{EXTRACT_PRODUCT} applies for q > 0.'], 'support_status': 'supported',
+}
+
+
+@pytest.mark.parametrize('language', ['en', 'zh'])
+def test_registered_extract_explains_author_examples_support_and_safe_math(monkeypatch, language):
+    from lazymind.structured_tasks.registry import PAPER_GUIDE_VERSION
+
+    seen = []
+
+    def model(prompt, **options):
+        seen.append(prompt.split('\n\nInput data (untrusted JSON):\n', 1))
+        return mock_model_json({'claims': [EXTRACT_CLAIM], 'open_questions': []})
+
+    monkeypatch.setattr(llm_task, 'AutoModel', lambda **kwargs: model)
+    result = llm_task.run_llm_task(llm_task.LLMTaskRequest(
+        task_type='paper.guide.extract', options={'task_version': PAPER_GUIDE_VERSION},
+        input={'data': {'language': language, 'evidence': [EXTRACT_EXAMPLE]}}))
+    assert result.status == 'succeeded'
+    assert len(seen) == result.usage['model_calls'] == 1
+    assert result.output == {'claims': [EXTRACT_CLAIM], 'open_questions': []}
+    instructions, encoded = seen[0]
+    packet = json.loads(encoded)
+    assert [(row['id'], row['text']) for row in packet['evidence']] == [('e1', EXTRACT_EXAMPLE['text'])]
+    guidance = ' '.join(instructions.split())
+    for rule in (
+        "examples constructed by the paper's authors are paper_statement",
+        'Do not add teaching examples, new teaching facts, or external background',
+        'For both supported and partial, include nonempty evidence_ids and use only paper_statement or interpretation',
+        'teaching and external_background cannot be supported or partial',
+        'paper_statement cannot be not_applicable',
+        'Only unavailable paper_statement claims may have empty evidence_ids',
+        'Do not infer that the paper did not report something because this packet omits it',
+        'statements, conditions and open questions',
+        'avoid link-shaped math such as [expr](expr)',
+        'Use parentheses with explicit multiplication or correctly escaped LaTeX',
+        'Preserve the mathematical conditions',
+    ):
+        assert rule in guidance
+
+
+@pytest.mark.parametrize(('attribution', 'status', 'evidence', 'accepted'), [
+    ('paper_statement', 'supported', [SOURCE_ID], True),
+    ('paper_statement', 'partial', [SOURCE_ID], True),
+    ('paper_statement', 'unsupported', [SOURCE_ID], True),
+    ('paper_statement', 'unsupported', [], False),
+    ('paper_statement', 'unavailable', [], True),
+    ('paper_statement', 'not_applicable', [SOURCE_ID], False),
+    ('interpretation', 'supported', [SOURCE_ID], True),
+    ('interpretation', 'partial', [SOURCE_ID], True),
+    ('interpretation', 'supported', [], False),
+    ('interpretation', 'partial', [], False),
+    ('interpretation', 'unsupported', [], True),
+    ('interpretation', 'unavailable', [], True),
+    ('interpretation', 'not_applicable', [], True),
+    ('teaching', 'supported', [SOURCE_ID], False),
+    ('teaching', 'partial', [SOURCE_ID], False),
+    ('external_background', 'supported', [SOURCE_ID], False),
+    ('external_background', 'partial', [SOURCE_ID], False),
+    ('paper_statement', 'supported', [], False),
+    ('paper_statement', 'supported', [SOURCE_ID, SOURCE_ID], False),
+    ('paper_statement', 'supported', ['e2'], False),
+])
+def test_extract_keeps_support_and_packet_binding_strict(monkeypatch, attribution, status, evidence, accepted):
+    from lazymind.structured_tasks.registry import PAPER_GUIDE_VERSION
+
+    claim = {**EXTRACT_CLAIM, 'attribution': attribution, 'support_status': status, 'evidence_ids': evidence}
+    output = {'claims': [claim], 'open_questions': []}
+    monkeypatch.setattr(llm_task, 'AutoModel', lambda **kwargs: lambda *a, **k: mock_model_json(output))
+    result = llm_task.run_llm_task(llm_task.LLMTaskRequest(
+        task_type='paper.guide.extract', options={'task_version': PAPER_GUIDE_VERSION},
+        input={'data': {'language': 'en', 'evidence': [EXTRACT_EXAMPLE]}}))
+    assert result.usage['model_calls'] == 1
+    assert result.error_code == (None if accepted else 'invalid_model_output')
+    assert result.output == (output if accepted else {})
+
+
+@pytest.mark.parametrize('field', ['statement', 'conditions', 'open_questions'])
+@pytest.mark.parametrize(('text', 'accepted'), [
+    (EXTRACT_PRODUCT, True),
+    (r'$\frac{p}{p+1}\cdot(q+1)$', True),
+    ('[p/(p+1)](q+1)', False),
+    ('[label](target)', False),
+])
+def test_extract_rejects_link_shapes_without_rewriting_math(monkeypatch, field, text, accepted):
+    from lazymind.structured_tasks.registry import PAPER_GUIDE_VERSION
+
+    prose = f'Check {text} for q > 0.'
+    claim = dict(EXTRACT_CLAIM)
+    output = {'claims': [claim], 'open_questions': []}
+    if field == 'open_questions':
+        output[field] = [prose]
+    else:
+        claim[field] = [prose] if field == 'conditions' else prose
+    monkeypatch.setattr(llm_task, 'AutoModel', lambda **kwargs: lambda *a, **k: mock_model_json(output))
+    result = llm_task.run_llm_task(llm_task.LLMTaskRequest(
+        task_type='paper.guide.extract', options={'task_version': PAPER_GUIDE_VERSION},
+        input={'data': {'language': 'en', 'evidence': [EXTRACT_EXAMPLE]}}))
+    assert result.usage['model_calls'] == 1
+    assert result.error_code == (None if accepted else 'invalid_model_output')
+    assert result.output == (output if accepted else {})
+
+
 @pytest.mark.parametrize(('task', 'data', 'valid', 'invalid'), [
     ('plan', {}, PLAN, {**PLAN, 'sections': PLAN['sections'][::-1]}),
     ('section', {'plan': PLAN, 'role': 'background', 'prior_summary': ''}, SECTION,
@@ -91,7 +200,7 @@ def test_guide_chain_accepts_versioned_shapes_and_rejects_invalid_bindings(monke
     monkeypatch.setattr(llm_task, 'AutoModel', lambda **kwargs: model)
     request = llm_task.LLMTaskRequest(
         task_type=f'paper.guide.{task}',
-        options={'task_version': 'paper-guide-v15'},
+        options={'task_version': 'paper-guide-v16'},
         input={'data': {'language': 'en', 'evidence': [EVIDENCE], **data}})
     good = llm_task.run_llm_task(request)
     assert good.status == 'succeeded'
@@ -115,7 +224,7 @@ def test_registered_guide_uses_remaining_model_time_and_rejects_late_success(
     monkeypatch.setattr(runner, 'time', clock)
     monkeypatch.setattr(llm_task, 'time', clock)
     request = llm_task.LLMTaskRequest(
-        task_type=f'paper.guide.{task}', options={'task_version': 'paper-guide-v15'},
+        task_type=f'paper.guide.{task}', options={'task_version': 'paper-guide-v16'},
         input={'data': {'language': 'en', 'evidence': [EVIDENCE], **data}})
     attempts = []
     actual_call = llm_task._call_model
@@ -160,7 +269,7 @@ def test_guide_rejects_tools_and_paths_before_model(monkeypatch):
     data = {'language': 'en', 'evidence': [EVIDENCE], 'output_path': '/tmp/override'}
     request = llm_task.LLMTaskRequest(
         task_type='paper.guide.extract',
-        options={'task_version': 'paper-guide-v15'},
+        options={'task_version': 'paper-guide-v16'},
         input={'data': data})
     assert llm_task.run_llm_task(request).error_code == 'invalid_task_input'
     request.input.data.pop('output_path')
@@ -182,7 +291,7 @@ def test_guide_rejects_duplicate_json_keys_with_one_call(monkeypatch, raw):
 
     monkeypatch.setattr(llm_task, 'AutoModel', lambda **kwargs: model)
     request = llm_task.LLMTaskRequest(
-        task_type='paper.guide.extract', options={'task_version': 'paper-guide-v15'},
+        task_type='paper.guide.extract', options={'task_version': 'paper-guide-v16'},
         input={'data': {'language': 'en', 'evidence': [EVIDENCE]}})
     result = llm_task.run_llm_task(request)
     assert result.error_code == 'invalid_model_output'
@@ -205,7 +314,7 @@ def test_section_requires_planned_claims_and_evidence_closure(monkeypatch):
     section['blocks'][0].update(claim_ids=['required'], evidence_ids=[])
     monkeypatch.setattr(llm_task, 'AutoModel', lambda **kwargs: lambda *a, **k: mock_model_json(section))
     request = llm_task.LLMTaskRequest(
-        task_type='paper.guide.section', options={'task_version': 'paper-guide-v15'},
+        task_type='paper.guide.section', options={'task_version': 'paper-guide-v16'},
         input={'data': {'plan': plan, 'role': 'background', 'language': 'en', 'evidence': [EVIDENCE]}})
     assert llm_task.run_llm_task(request).status == 'succeeded'
     request.input.data['evidence'] = [other]
@@ -228,7 +337,7 @@ def test_full_review_validates_unique_targets_even_without_findings(monkeypatch,
                  'evidence_ids': [SOURCE_ID], 'argument_type': None, 'conditions': [], 'support_status': 'supported'}
         sections.append({**SECTION, 'role': role, 'title': role.title(), 'blocks': [block], 'claims': [claim]})
     request = llm_task.LLMTaskRequest(
-        task_type='paper.guide.review', options={'task_version': 'paper-guide-v15'},
+        task_type='paper.guide.review', options={'task_version': 'paper-guide-v16'},
         input={'data': {'plan': PLAN, 'sections': sections, 'language': 'en', 'evidence': [EVIDENCE]}})
     result = llm_task.run_llm_task(request)
     assert result.error_code == (None if collision == 'none' else 'invalid_task_input')
@@ -244,7 +353,7 @@ def test_guide_math_preserves_compact_comparisons_without_html(monkeypatch, body
     raw = {'claims': [], 'open_questions': [body]}
     monkeypatch.setattr(llm_task, 'AutoModel', lambda **kwargs: lambda *a, **k: json.dumps(raw))
     request = llm_task.LLMTaskRequest(
-        task_type='paper.guide.extract', options={'task_version': 'paper-guide-v15'},
+        task_type='paper.guide.extract', options={'task_version': 'paper-guide-v16'},
         input={'data': {'language': 'en', 'evidence': [EVIDENCE]}})
     assert llm_task.run_llm_task(request).error_code == error
 
@@ -469,7 +578,8 @@ def test_all_guide_input_default_expansion_fits_shared_bound(task, count, all_ta
 
 
 @pytest.mark.parametrize('task', ['extract', 'plan', 'section', 'review'])
-@pytest.mark.parametrize('version', ['paper-guide-v7', 'paper-guide-v10', 'paper-guide-v11', 'paper-guide-v12', 'paper-guide-v13', 'paper-guide-v14'])
+@pytest.mark.parametrize('version', ['paper-guide-v7', 'paper-guide-v10', 'paper-guide-v11', 'paper-guide-v12',
+                                     'paper-guide-v13', 'paper-guide-v14', 'paper-guide-v15'])
 def test_previous_guide_contract_rejected_before_provider_setup(monkeypatch, task, version):
     monkeypatch.setattr(llm_task, 'AutoModel', lambda **kwargs: pytest.fail('old contract reached provider'))
     monkeypatch.setattr(llm_task, 'inject_model_config', lambda *_: pytest.fail('old contract configured provider'))
@@ -532,7 +642,7 @@ def test_explanation_responsibilities_reach_model_with_actual_scope(monkeypatch,
         data['sections'] = sections if scope == 'whole_review' else [sections[2]]
     request = llm_task.LLMTaskRequest(
         task_type=f'paper.guide.{task}',
-        options={'task_version': 'paper-guide-v15'}, input={'data': data})
+        options={'task_version': 'paper-guide-v16'}, input={'data': data})
     result = llm_task.run_llm_task(request)
     assert result.status == 'succeeded'
     assert result.output == output

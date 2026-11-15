@@ -24,9 +24,24 @@ parent_asset_id binds each fragment to the sole planned asset; fragment_evidence
 """
 
 EXTRACT = """
-Extract the load-bearing claims, observations, original conditions and unresolved questions from
-this packet. Use empty arrays where there is no evidence. Label the argument type per claim where
-clear, otherwise null. Attribution and support status describe what this material supports.
+Extract only the load-bearing claims, observations, original conditions and unresolved questions
+grounded in this packet. Use empty arrays for claims or open_questions if none apply. Label the
+argument type per claim where clear, otherwise null. Restatements of examples constructed by the
+paper's authors are paper_statement claims; cite the packet evidence. Do not add teaching examples,
+new teaching facts, or external background in EXTRACT. Leave teaching to SECTION.
+
+For both supported and partial, include nonempty evidence_ids and use only paper_statement or
+interpretation attribution. Cite unique IDs of actual supporting evidence in this packet.
+teaching and external_background cannot be supported or partial, even with evidence_ids.
+paper_statement cannot be not_applicable. Only unavailable paper_statement claims may have empty
+evidence_ids; unsupported paper_statement claims still need evidence_ids for the statement's source.
+Use unavailable for source material that cannot be inspected, and not_applicable only when source
+support does not apply. Do not infer that the paper did not report something because this packet
+omits it. Describe an evidenced gap or leave an open question when appropriate.
+
+In statements, conditions and open questions, avoid link-shaped math such as [expr](expr).
+Use parentheses with explicit multiplication or correctly escaped LaTeX without link syntax.
+Preserve the mathematical conditions, signs and grouping.
 """
 
 PLAN = """
