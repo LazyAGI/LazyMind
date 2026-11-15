@@ -12,12 +12,8 @@ export default function PaperGuideTableText({
   const zh = language === "zh";
   if (!table)
     return (
-      <span
-        className="paper-guide-table-fallback"
-        data-guide-source-start={0}
-        data-guide-source-end={Array.from(text).length}
-      >
-        {text}
+      <span className="paper-guide-table-fallback">
+        <PaperGuideText text={text} />
       </span>
     );
   return (

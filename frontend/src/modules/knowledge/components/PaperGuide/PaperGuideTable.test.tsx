@@ -162,7 +162,6 @@ it("renders HTML and link-like table content as inert text and keeps an escaped 
 it.each([
   "| A | B |\n| -- | --- |\n| 1 | 2 |",
   "| A | B |\n| --- | --- |\n| 1 |",
-  "| A | B | C |\n| --- | --- | --- |\n| $|x|$ | 1 |",
   "| A | B |\n| --- | --- |\n| `x|y` | 1 |",
   "```\n| A | B |\n| --- | --- |\n| 1 | 2 |\n```",
 ])(
@@ -173,6 +172,123 @@ it.each([
     expect(root.textContent).toBe(raw);
   },
 );
+const fallbackPrefix = " 样😀｜分值\r\n甲｜7 \r\n\r\n前😀 ";
+const fallbackFormula = String.raw`\(p^2\)`;
+const fallbackSuffix = " 𐐀后 \r\n";
+const fallbackText = fallbackPrefix + fallbackFormula + fallbackSuffix;
+
+it("renders math after an unparsed full-width grid and preserves its literal rows and newlines", () => {
+  const { root } = renderTable(fallbackText);
+  expect(screen.queryByRole("table")).toBeNull();
+  expect(root.querySelector("[data-guide-atomic]")).toBeNull();
+  const fallback = root.firstElementChild!;
+  expect(fallback).toHaveClass("paper-guide-table-fallback");
+  const math = fallback.querySelector("[data-guide-math]")!;
+  expect(math).toBeVisible();
+  expect(math.querySelector(".katex-html")).toBeVisible();
+  expect(
+    math.querySelector('annotation[encoding="application/x-tex"]')?.textContent,
+  ).toBe("p^2");
+  expect(math.previousSibling?.textContent).toBe(fallbackPrefix);
+  expect(math.nextSibling?.textContent).toBe(fallbackSuffix);
+  expect(math).toHaveAttribute("data-guide-source-start", "19");
+  expect(math).toHaveAttribute("data-guide-source-end", "26");
+  expect(sourceTextLength(root)).toBe(32);
+});
+
+function explainRange(root: HTMLElement, range: Range, raw: string) {
+  window.getSelection()!.removeAllRanges();
+  window.getSelection()!.addRange(range);
+  fireEvent.mouseUp(root);
+  const toolbar = screen.getByRole("toolbar");
+  expect(
+    toolbar.querySelector(".paper-guide-selection-preview")?.textContent,
+  ).toBe(raw);
+  expect(toolbar).not.toHaveTextContent("The full table is included");
+  fireEvent.click(
+    within(toolbar).getByRole("button", { name: "Explain this passage" }),
+  );
+}
+
+it.each([
+  { choice: "before", start: 16, end: 18, expected: "前😀" },
+  { choice: "math", start: 19, end: 26, expected: fallbackFormula },
+  { choice: "after", start: 27, end: 28, expected: "𐐀" },
+  {
+    choice: "across",
+    start: 17,
+    end: 28,
+    expected: "😀 " + fallbackFormula + " 𐐀",
+  },
+  { choice: "whole", start: 0, end: 32, expected: fallbackText },
+])(
+  "sends exact raw Unicode selection from fallback ($choice)",
+  ({ choice, start, end, expected }) => {
+    const { root, select } = renderTable(fallbackText);
+    const range = document.createRange();
+    if (choice === "whole") {
+      range.selectNodeContents(root);
+    } else if (choice === "math") {
+      const math = root.querySelector(".katex-html");
+      expect(math).toBeVisible();
+      const glyph = document.createTreeWalker(math!, NodeFilter.SHOW_TEXT)
+        .nextNode()!;
+      range.setStart(glyph, 0);
+      range.setEnd(glyph, 1);
+    } else {
+      const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+      let before: Node | undefined;
+      let after: Node | undefined;
+      for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+        if (node.textContent?.includes("前😀")) before = node;
+        if (node.textContent?.includes("𐐀后")) after = node;
+      }
+      const front = before!.textContent!.indexOf("前😀");
+      const back = after!.textContent!.indexOf("𐐀后");
+      range.setStart(
+        choice === "after" ? after! : before!,
+        choice === "after" ? back : front + (choice === "across" ? 1 : 0),
+      );
+      range.setEnd(
+        choice === "before" ? before! : after!,
+        choice === "before" ? front + 3 : back + 2,
+      );
+    }
+    explainRange(root, range, expected);
+    expect(select.mock.calls[0][0]).toMatchObject({
+      text: expected,
+      guideRef: {
+        revision_id: "r1",
+        section_key: "section:question:v1",
+        block_id: "background-block",
+        start,
+        end,
+      },
+    });
+  },
+);
+
+it("keeps HTML, link syntax, unsafe and invalid TeX literal beside safe fallback math", () => {
+  const start = String.raw`列｜值
+甲｜<img src="https://bad.example" onerror="alert(1)">
+[click](https://bad.example)
+\(\href{https://bad.example}{x}\)
+`;
+  const end = String.raw`
+\(\unsupportedcommand{x}\)
+unfinished \(x`;
+  const { root } = renderTable(start + fallbackFormula + end);
+  expect(screen.queryByRole("table")).toBeNull();
+  expect(root.querySelector("a,img,script,iframe,[onerror]")).toBeNull();
+  const fallback = root.firstElementChild!;
+  expect(fallback.querySelectorAll("[data-guide-math]")).toHaveLength(1);
+  const literalText = Array.from(fallback.children)
+    .filter((child) => !child.hasAttribute("data-guide-math"))
+    .map((child) => child.textContent)
+    .join("");
+  expect(literalText).toBe(start + end);
+});
+
 it("does not reinterpret pipes in ordinary paragraph blocks", () => {
   renderTable(table, "paragraph");
   expect(screen.queryByRole("table")).toBeNull();
@@ -307,8 +423,6 @@ it("preserves attribution, linked source assets, evidence and whole-block keyboa
 });
 
 it.each([
-  "\\[\n| A | B |\n| --- | --- |\n| 1 | 2 |\n\\]",
-  "$$\n| A | B |\n| --- | --- |\n| 1 | 2 |\n$$",
   "说明\n\n    | A | B |\n    | --- | --- |\n    | 1 | 2 |",
   "\t| A | B |\n\t| --- | --- |\n\t| 1 | 2 |",
   "| A | B |\n| --- | --- |\n| 1 | 2 |\n    | 3 | 4 |",
@@ -382,13 +496,54 @@ it.each(["", "甲😀\n\n"])(
   },
 );
 
-it("still rejects resumed table rows outside a complete formula after a broken row", () => {
-  const raw =
-    "| A | B |\n| --- | --- |\n| 1 | 2 |\n3\n\\[\n|x|\n\\]\n| 4 | 5 |";
-  const { root } = renderTable(raw);
-  expect(screen.queryByRole("table")).toBeNull();
-  expect(root.textContent).toBe(raw);
-});
+it.each([
+  {
+    context: "a math pipe makes cell boundaries ambiguous",
+    prefix: "| A | B | C |\n| --- | --- | --- |\n| ",
+    formula: "$|x|$",
+    latex: "|x|",
+    suffix: " | 1 |",
+  },
+  {
+    context: "a complete bracket display wraps the table-shaped lines",
+    prefix: "",
+    formula: "\\[\n| A | B |\n| --- | --- |\n| 1 | 2 |\n\\]",
+    latex: "\n| A | B |\n| --- | --- |\n| 1 | 2 |\n",
+    suffix: "",
+  },
+  {
+    context: "a complete dollar display wraps the table-shaped lines",
+    prefix: "",
+    formula: "$$\n| A | B |\n| --- | --- |\n| 1 | 2 |\n$$",
+    latex: "\n| A | B |\n| --- | --- |\n| 1 | 2 |\n",
+    suffix: "",
+  },
+  {
+    context: "a broken row resumes outside a complete formula",
+    prefix: "| A | B |\n| --- | --- |\n| 1 | 2 |\n3\n",
+    formula: "\\[\n|x|\n\\]",
+    latex: "\n|x|\n",
+    suffix: "\n| 4 | 5 |",
+  },
+])(
+  "preserves the exact rejected table source when $context",
+  ({ prefix, formula, latex, suffix }) => {
+    const raw = prefix + formula + suffix;
+    const { root, select } = renderTable(raw);
+    expect(screen.queryByRole("table")).toBeNull();
+    const math = root.querySelector("[data-guide-math]")!;
+    expect(math.querySelector("annotation")?.textContent).toBe(latex);
+    expect(math.previousSibling?.textContent ?? "").toBe(prefix);
+    expect(math.nextSibling?.textContent ?? "").toBe(suffix);
+    const range = document.createRange();
+    range.selectNodeContents(root);
+    explainRange(root, range, raw);
+    expect(select.mock.calls[0][0]).toMatchObject({
+      text: raw,
+      guideRef: { start: 0, end: raw.length },
+    });
+  },
+);
 
 it("preserves Unicode and CRLF intervals near the text limit through a long suffix scan", () => {
   const prefix = "甲😀\r\n\r\n";
