@@ -93,6 +93,12 @@ def test_reader_citation_tail_rejects_entire_registered_section(monkeypatch, mod
     pytest.param('The measurement was **limited**\n.〔e2〕', 2, id='soft-wrapped-emphasis'),
     pytest.param('Run `ls .`\n.〔e2〕', 2, id='soft-wrap-after-period-in-code'),
     pytest.param('The `sample\nfragment` was accepted\n.〔e2〕', 2, id='soft-wrap-after-multiline-code'),
+    pytest.param('Both runs used the identifier\n`model_2`\n.〔e2〕',
+                 2, id='soft-wrap-through-code-line'),
+    pytest.param('Both runs used\n`model_2`\n`model_3`\n.〔e2〕',
+                 2, id='soft-wrap-through-consecutive-code-lines'),
+    pytest.param('Both runs used\n`model.\n2`\n.〔e2〕',
+                 2, id='soft-wrap-through-multiline-code'),
 ])
 def test_clear_paragraph_tail_cannot_pass_as_provenance(monkeypatch, prose, bound_row):
     data, response = writing_case('normal', marked=False)
@@ -102,7 +108,8 @@ def test_clear_paragraph_tail_cannot_pass_as_provenance(monkeypatch, prose, boun
     result, prompt = invoke_section(monkeypatch, data, response)
     view = json.loads(prompt.split(PROMPT_FENCE)[1])
     assert view['plan']['sections'][0]['evidence_ids'] == ['e2', 'e5']
-    assert result.error_code == 'invalid_model_output' and result.output == {}
+    assert result.status == 'failed' and result.error_code == 'invalid_model_output'
+    assert result.output == {} and result.text == ''
 
 
 @pytest.mark.parametrize(('kind', 'prose'), [
@@ -120,6 +127,17 @@ def test_clear_paragraph_tail_cannot_pass_as_provenance(monkeypatch, prose, boun
     pytest.param('paragraph', 'The instrument is stable.\n.〔e2〕', id='soft-break-after-complete-sentence'),
     pytest.param('paragraph', 'The instrument is **stable.**\n.〔e2〕', id='soft-break-after-formatted-sentence'),
     pytest.param('paragraph', '`sample`\n.〔e2〕', id='soft-break-after-code-only'),
+    pytest.param('paragraph', '`model_2`\n`model_3`\n.〔e2〕', id='soft-break-after-code-only-lines'),
+    pytest.param('paragraph', 'Both runs used  \n`model_2`\n.〔e2〕', id='hard-break-before-code-line'),
+    pytest.param('paragraph', 'Both runs used\\\n`model_2`\n.〔e2〕', id='escaped-break-before-code-line'),
+    pytest.param('paragraph', 'Both runs used the same identifier.\n`model_2`\n.〔e2〕',
+                 id='complete-sentence-before-code-line'),
+    pytest.param('paragraph', 'Both runs used the **same identifier.**\n`model_2`\n.〔e2〕',
+                 id='formatted-complete-sentence-before-code-line'),
+    pytest.param('paragraph', 'Both runs used the same identifier.\n:\n`model_2`\n.〔e2〕',
+                 id='symbol-line-before-code-line'),
+    pytest.param('paragraph', '> Both runs used\n`model_2`\n.〔e2〕', id='quoted-code-line-continuation'),
+    pytest.param('paragraph', 'Both runs used\n\n`model_2`\n.〔e2〕', id='paragraph-before-code-line'),
     pytest.param('paragraph', 'Prose above\n`sample\n` .〔e2〕', id='final-newline-inside-code'),
     pytest.param('paragraph', 'The sample was `calibrated`.\n.〔e2〕', id='soft-break-after-outside-period'),
     ('paragraph', 'The result.〔e1–e3〕'),

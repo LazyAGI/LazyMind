@@ -393,9 +393,19 @@ def _soft_wrap_continues_sentence(inline: Token) -> bool:
             children[-1].type != 'text' or children[-1].content != final_line):
         return False
     prose_parts = []
+    line_content_types = set()
     for child in reversed(children[:-2]):
-        if child.type in ('softbreak', 'hardbreak'):
+        if child.type == 'hardbreak':
             break
+        if child.type == 'softbreak':
+            # A closed code term may occupy a whole soft-wrapped line of the
+            # same sentence. Cross only those literal lines to reach its prose.
+            if line_content_types != {'code_inline'}:
+                break
+            line_content_types.clear()
+            continue
+        if child.type != 'text' or child.content.strip(_ASCII_SPACE):
+            line_content_types.add(child.type)
         if child.type == 'text':
             prose_parts.append(child.content)
     previous_prose = ''.join(reversed(prose_parts)).rstrip(_ASCII_SPACE + ''.join(_QUOTE_END.values()))
