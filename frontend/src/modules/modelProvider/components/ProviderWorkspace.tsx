@@ -1076,6 +1076,10 @@ export function ProviderWorkspace(props: Props) {
                       groupId: group.id,
                       configurationKey: JSON.stringify([provider.protocolName || provider.source, endpointBaseline, group.baseUrl, group.keys.map((key) => [key.id, key.enabled]), requestConfigRevision]),
                       disabledReason: endpointDirty || endpointSaving ? t("modelProvider.probe.saveAddressFirst") : hasSavedKeys && !hasEnabledKey ? t("modelProvider.probe.reason.key_disabled") : undefined,
+                      onVerified: group.verified ? undefined : () => {
+                        message.success(t("modelProvider.message.groupVerified"));
+                        void props.onReload().catch(() => message.error(label("savedRefreshFailed")));
+                      },
                     } : undefined}
                     capabilityLabel={props.capabilityLabel}
                     onEdit={(model) => {

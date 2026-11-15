@@ -11,10 +11,11 @@ interface ModelProbeButtonProps extends ModelProbeIdentity {
   configurationKey: string;
   disabledReason?: string;
   disabled?: boolean;
+  onVerified?: () => void;
   onPendingChange?: (pending: boolean) => void;
 }
 
-/** Ephemeral inference health only; it never writes provider verification or selection. */
+/** Runs a saved model test or explicitly verifies its connection group. */
 export function ModelProbeButton(props: ModelProbeButtonProps) {
   const { t } = useTranslation();
   const [pending, setPending] = useState(false);
@@ -24,10 +25,10 @@ export function ModelProbeButton(props: ModelProbeButtonProps) {
   const controller = useRef<AbortController>();
   const reportPending = useRef(props.onPendingChange);
   reportPending.current = props.onPendingChange;
-  const requestKey = JSON.stringify([props.providerId, props.groupId, props.modelId, props.modelName, props.configurationKey]);
+  const requestKey = JSON.stringify([props.providerId, props.groupId, props.modelId, props.modelName, props.configurationKey, props.verify]);
 
   useEffect(() => {
-    setResult(takeProbeHealth(props.modelId, props.configurationKey));
+    setResult(props.verify ? undefined : takeProbeHealth(props.modelId, props.configurationKey));
     setPending(false);
     return () => {
       sequence.current += 1;
@@ -48,15 +49,16 @@ export function ModelProbeButton(props: ModelProbeButtonProps) {
     setResult(undefined);
     reportPending.current?.(true);
     try {
-      const next = await probeModel({ providerId: props.providerId, groupId: props.groupId, modelId: props.modelId }, abort.signal);
+      const next = await probeModel({ providerId: props.providerId, groupId: props.groupId, modelId: props.modelId, ...(props.verify ? { verify: true } : {}) }, abort.signal);
       if (request === sequence.current && !abort.signal.aborted) {
-        saveProbeHealth(props.modelId, props.configurationKey, next);
+        if (!props.verify) saveProbeHealth(props.modelId, props.configurationKey, next);
         setResult(next);
+        if (props.verify && next.status === "passed") props.onVerified?.();
       }
     } catch (error) {
       if (request === sequence.current && !abort.signal.aborted) {
         const failed: ModelProbeResult = { status: "failed", code: probeFailureCode(error), elapsed_ms: Math.max(0, Date.now() - started), model_type: "" };
-        saveProbeHealth(props.modelId, props.configurationKey, failed);
+        if (!props.verify) saveProbeHealth(props.modelId, props.configurationKey, failed);
         setResult(failed);
       }
     } finally {
@@ -71,7 +73,8 @@ export function ModelProbeButton(props: ModelProbeButtonProps) {
   const status = result?.status;
   const latency = result?.status === "passed" ? result.elapsed_ms >= 3000 ? "slow" : "normal" : undefined;
   const Icon = status === "passed" ? CheckCircleOutlined : status === "failed" ? CloseCircleOutlined : status === "accepted" ? ClockCircleOutlined : status === "unsupported" ? MinusCircleOutlined : ApiOutlined;
-  const name = t(`modelProvider.probe.${pending ? "running" : status || "action"}`, { name: props.modelName });
+  const action = props.verify ? "verifyAction" : "action";
+  const name = t(`modelProvider.probe.${pending ? "running" : status || action}`, { name: props.modelName });
   const title = props.disabledReason || (pending ? t("modelProvider.probe.running", { name: props.modelName }) : result ? (
     <div className="model-probe-result">
       <strong>{t(`modelProvider.probe.${result.status}`, { name: props.modelName })}</strong>
@@ -79,11 +82,14 @@ export function ModelProbeButton(props: ModelProbeButtonProps) {
       {result.embedding_dimensions ? <span>{t("modelProvider.probe.embeddingDimensions", { dimensions: result.embedding_dimensions })}</span> : null}
       <small>{t("modelProvider.probe.elapsed", { elapsed: result.elapsed_ms })}</small>
     </div>
-  ) : t("modelProvider.probe.hint"));
+  ) : t(props.verify ? "modelProvider.probe.verifyHint" : "modelProvider.probe.hint"));
   return <Tooltip title={title} trigger={["hover", "focus"]}>
     <span className="model-probe-control" tabIndex={props.disabledReason ? 0 : undefined} aria-label={props.disabledReason ? `${name} · ${props.disabledReason}` : undefined}>
-      <Button type="text" aria-label={name} aria-busy={pending} data-probe-status={status} data-probe-latency={latency}
-        icon={<Icon aria-hidden="true" />} loading={pending} disabled={pending || props.disabled || Boolean(props.disabledReason)} onClick={() => void run()} />
+      <Button type="text" className={props.verify ? "saved-provider-model-verify" : undefined} aria-label={name} aria-busy={pending} data-probe-status={status} data-probe-latency={latency}
+        icon={props.verify && !status ? undefined : <Icon aria-hidden="true" />} loading={pending}
+        disabled={pending || props.disabled || Boolean(props.disabledReason)} onClick={() => void run()}>
+        {props.verify ? t("modelProvider.probe.verifyButton") : null}
+      </Button>
       <span className="model-probe-announcement" role="status" aria-live="polite">{status ? name : ""}</span>
     </span>
   </Tooltip>;

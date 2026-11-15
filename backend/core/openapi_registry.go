@@ -1522,6 +1522,10 @@ type modelProviderGroupModelPathParams struct {
 	ModelID         string `path:"model_id"`
 }
 
+type probeGroupModelQueryParams struct {
+	Verify bool `query:"verify" desc:"Explicitly verify the connection group using a saved chat model. Only a successful inference against the current saved configuration records verification."`
+}
+
 type deleteModelProviderGroupModelOpenAPIResponse struct {
 	ID string `json:"id"`
 }
@@ -4833,9 +4837,10 @@ func registeredCoreOperations() []openAPIOperation {
 			Method:      "POST",
 			Path:        "/model_providers/{model_provider_id}/groups/{group_id}/models/{model_id}:probe",
 			Summary:     "Test one saved model with a minimal inference request",
-			Description: "Tests an owned model with its saved supplier protocol, shared API address and currently enabled key. No credential or metadata overrides are accepted. Does not modify verification, credentials, models or default selections. Media probes do not download output; accepted video tasks are distinct from completed inference.",
+			Description: "Tests an owned model with its saved supplier protocol, shared API address and currently enabled key. No credential or metadata overrides are accepted. Ordinary tests are read-only. With verify=true, a successful chat inference verifies the model’s connection group without changing credentials, models or default selections. Media probes do not download output; accepted video tasks are distinct from completed inference.",
 			Tags:        []string{"model_providers"},
 			PathParams:  modelProviderGroupModelPathParams{},
+			QueryParams: probeGroupModelQueryParams{},
 			Responses:   map[int]openAPIResponse{200: resp("Bounded model availability result without provider text or secrets", modelprovider.ModelProbeResponse{})},
 		},
 		{

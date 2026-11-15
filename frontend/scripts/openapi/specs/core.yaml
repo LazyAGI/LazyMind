@@ -34459,7 +34459,7 @@ paths:
                 - model_providers
     /api/core/model_providers/{model_provider_id}/groups/{group_id}/models/{model_id}:probe:
         post:
-            description: Tests an owned model with its saved supplier protocol, shared API address and currently enabled key. No credential or metadata overrides are accepted. Does not modify verification, credentials, models or default selections. Media probes do not download output; accepted video tasks are distinct from completed inference.
+            description: Tests an owned model with its saved supplier protocol, shared API address and currently enabled key. No credential or metadata overrides are accepted. Ordinary tests are read-only. With verify=true, a successful chat inference verifies the model’s connection group without changing credentials, models or default selections. Media probes do not download output; accepted video tasks are distinct from completed inference.
             parameters:
                 - in: path
                   name: model_provider_id
@@ -34476,6 +34476,12 @@ paths:
                   required: true
                   schema:
                     type: string
+                - description: Explicitly verify the connection group using a saved chat model. Only a successful inference against the current saved configuration records verification.
+                  in: query
+                  name: verify
+                  required: false
+                  schema:
+                    type: boolean
             responses:
                 "200":
                     content:

@@ -61570,15 +61570,16 @@ export const ModelProvidersApiAxiosParamCreator = function (configuration?: Conf
             };
         },
         /**
-         * Tests an owned model with its saved supplier protocol, shared API address and currently enabled key. No credential or metadata overrides are accepted. Does not modify verification, credentials, models or default selections. Media probes do not download output; accepted video tasks are distinct from completed inference.
+         * Tests an owned model with its saved supplier protocol, shared API address and currently enabled key. No credential or metadata overrides are accepted. Ordinary tests are read-only. With verify=true, a successful chat inference verifies the model’s connection group without changing credentials, models or default selections. Media probes do not download output; accepted video tasks are distinct from completed inference.
          * @summary Test one saved model with a minimal inference request
          * @param {string} modelProviderId
          * @param {string} groupId
          * @param {string} modelId
+         * @param {boolean} [verify] Explicitly verify the connection group using a saved chat model. Only a successful inference against the current saved configuration records verification.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdProbePost: async (modelProviderId: string, groupId: string, modelId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+        apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdProbePost: async (modelProviderId: string, groupId: string, modelId: string, verify?: boolean, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
             // verify required parameter 'modelProviderId' is not null or undefined
             assertParamExists('apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdProbePost', 'modelProviderId', modelProviderId)
             // verify required parameter 'groupId' is not null or undefined
@@ -61599,6 +61600,10 @@ export const ModelProvidersApiAxiosParamCreator = function (configuration?: Conf
             const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
             const localVarHeaderParameter = {} as any;
             const localVarQueryParameter = {} as any;
+
+            if (verify !== undefined) {
+                localVarQueryParameter['verify'] = verify;
+            }
 
             localVarHeaderParameter['Accept'] = 'application/json';
 
@@ -62550,16 +62555,17 @@ export const ModelProvidersApiFp = function(configuration?: Configuration) {
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
-         * Tests an owned model with its saved supplier protocol, shared API address and currently enabled key. No credential or metadata overrides are accepted. Does not modify verification, credentials, models or default selections. Media probes do not download output; accepted video tasks are distinct from completed inference.
+         * Tests an owned model with its saved supplier protocol, shared API address and currently enabled key. No credential or metadata overrides are accepted. Ordinary tests are read-only. With verify=true, a successful chat inference verifies the model’s connection group without changing credentials, models or default selections. Media probes do not download output; accepted video tasks are distinct from completed inference.
          * @summary Test one saved model with a minimal inference request
          * @param {string} modelProviderId
          * @param {string} groupId
          * @param {string} modelId
+         * @param {boolean} [verify] Explicitly verify the connection group using a saved chat model. Only a successful inference against the current saved configuration records verification.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        async apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdProbePost(modelProviderId: string, groupId: string, modelId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ModelProbeResponse>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdProbePost(modelProviderId, groupId, modelId, options);
+        async apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdProbePost(modelProviderId: string, groupId: string, modelId: string, verify?: boolean, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ModelProbeResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdProbePost(modelProviderId, groupId, modelId, verify, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['ModelProvidersApi.apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdProbePost']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
@@ -62996,14 +63002,14 @@ export const ModelProvidersApiFactory = function (configuration?: Configuration,
             return localVarFp.apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdPatch(requestParameters.modelProviderId, requestParameters.groupId, requestParameters.modelId, requestParameters.updateModelProviderGroupModelOpenAPIRequest, options).then((request) => request(axios, basePath));
         },
         /**
-         * Tests an owned model with its saved supplier protocol, shared API address and currently enabled key. No credential or metadata overrides are accepted. Does not modify verification, credentials, models or default selections. Media probes do not download output; accepted video tasks are distinct from completed inference.
+         * Tests an owned model with its saved supplier protocol, shared API address and currently enabled key. No credential or metadata overrides are accepted. Ordinary tests are read-only. With verify=true, a successful chat inference verifies the model’s connection group without changing credentials, models or default selections. Media probes do not download output; accepted video tasks are distinct from completed inference.
          * @summary Test one saved model with a minimal inference request
          * @param {ModelProvidersApiApiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdProbePostRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
         apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdProbePost(requestParameters: ModelProvidersApiApiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdProbePostRequest, options?: RawAxiosRequestConfig): AxiosPromise<ModelProbeResponse> {
-            return localVarFp.apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdProbePost(requestParameters.modelProviderId, requestParameters.groupId, requestParameters.modelId, options).then((request) => request(axios, basePath));
+            return localVarFp.apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdProbePost(requestParameters.modelProviderId, requestParameters.groupId, requestParameters.modelId, requestParameters.verify, options).then((request) => request(axios, basePath));
         },
         /**
          * Creates a user_model_provider_group_models row with is_default false. An empty model_type saves an unclassified model without inferring a runtime capability. Name must be unique within the group among active rows. Explicit max_input_tokens is retained for unclassified and LLM/VLM models; when omitted for llm or vlm, resolves from config/model_context_windows.yaml by model name with a 128K fallback. Unclassified models cannot be selected or probed until assigned a supported type. provider_name and base_url are taken from the user provider and group. Response group_name is user_model_provider_groups.name (not stored on the model row).
@@ -63362,6 +63368,11 @@ export interface ModelProvidersApiApiCoreModelProvidersModelProviderIdGroupsGrou
     readonly groupId: string
 
     readonly modelId: string
+
+    /**
+     * Explicitly verify the connection group using a saved chat model. Only a successful inference against the current saved configuration records verification.
+     */
+    readonly verify?: boolean
 }
 
 /**
@@ -63694,14 +63705,14 @@ export class ModelProvidersApi extends BaseAPI {
     }
 
     /**
-     * Tests an owned model with its saved supplier protocol, shared API address and currently enabled key. No credential or metadata overrides are accepted. Does not modify verification, credentials, models or default selections. Media probes do not download output; accepted video tasks are distinct from completed inference.
+     * Tests an owned model with its saved supplier protocol, shared API address and currently enabled key. No credential or metadata overrides are accepted. Ordinary tests are read-only. With verify=true, a successful chat inference verifies the model’s connection group without changing credentials, models or default selections. Media probes do not download output; accepted video tasks are distinct from completed inference.
      * @summary Test one saved model with a minimal inference request
      * @param {ModelProvidersApiApiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdProbePostRequest} requestParameters Request parameters.
      * @param {*} [options] Override http request option.
      * @throws {RequiredError}
      */
     public apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdProbePost(requestParameters: ModelProvidersApiApiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdProbePostRequest, options?: RawAxiosRequestConfig) {
-        return ModelProvidersApiFp(this.configuration).apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdProbePost(requestParameters.modelProviderId, requestParameters.groupId, requestParameters.modelId, options).then((request) => request(this.axios, this.basePath));
+        return ModelProvidersApiFp(this.configuration).apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdProbePost(requestParameters.modelProviderId, requestParameters.groupId, requestParameters.modelId, requestParameters.verify, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**
