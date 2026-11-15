@@ -3,6 +3,7 @@ import re
 from typing import Annotated, Literal
 
 from markdown_it import MarkdownIt
+from markdown_it.token import Token
 from pydantic import AfterValidator, BaseModel, ConfigDict, Field, StringConstraints, field_validator, model_validator
 
 
@@ -383,6 +384,18 @@ def _protected_sentence_end(prefix: str) -> bool:
     return bool(closer)
 
 
+def _soft_wrap_continues_sentence(inline: Token) -> bool:
+    children = inline.children or []
+    breaks = [i for i, child in enumerate(children) if child.type in ('softbreak', 'hardbreak')]
+    # A newline inside an inline literal may not produce a break token.
+    if not breaks or len(breaks) != inline.content.count('\n') or children[breaks[-1]].type != 'softbreak':
+        return False
+    previous_start = breaks[-2] + 1 if len(breaks) > 1 else 0
+    previous_line = ''.join(child.content for child in children[previous_start:breaks[-1]])
+    previous_line = previous_line.rstrip(_ASCII_SPACE + ''.join(_QUOTE_END.values()))
+    return not previous_line.endswith(tuple(_SENTENCE_END)) and any(ch.isalnum() for ch in previous_line)
+
+
 def _citation_tail_line(text: str) -> str | None:
     end = text.rstrip(_ASCII_SPACE)
     candidate = _CITATION_TAIL.search(end)
@@ -391,20 +404,22 @@ def _citation_tail_line(text: str) -> str | None:
     lines = _LINE_END.split(end)
     line = lines[-1]
     last_line = len(lines) - 1
-    paragraph_start = last_line
+    before_punctuation = line[:len(line) - len(candidate[0])]
+    has_sentence = any(ch.isalnum() for ch in before_punctuation)
     # Use source ranges so a lazy continuation stays quoted, while a
     # heading or a quoted blank line can start a different paragraph.
-    for token in _CITATION_MARKDOWN.parse(end):
+    tokens = _CITATION_MARKDOWN.parse(end)
+    for index, token in enumerate(tokens):
         if token.map is None or not token.map[0] <= last_line < token.map[1]:
             continue
         if token.type == 'blockquote_open':
             return None
         if token.type == 'paragraph_open':
-            paragraph_start = token.map[0]
+            if not has_sentence and token.map[0] < last_line:
+                # The paragraph rule emits its inline content immediately after the opening token.
+                has_sentence = _soft_wrap_continues_sentence(tokens[index + 1])
             break
-    before_punctuation = line[:len(line) - len(candidate[0])]
-    sentence = ''.join(lines[paragraph_start:last_line]) + before_punctuation
-    if not any(ch.isalnum() for ch in sentence):
+    if not has_sentence:
         return None
     if _protected_sentence_end(end[:candidate.start() + 1]):
         return None
