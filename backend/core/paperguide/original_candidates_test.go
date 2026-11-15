@@ -236,3 +236,24 @@ func TestOriginalCandidatesPrioritizeRetainedAssociationOverUnusedPage(t *testin
 		t.Fatalf("a retained figure association lost its slot to unclassified pages: %+v", got.Figure)
 	}
 }
+
+func TestOriginalCandidatesReserveFormulaSlotForAnotherBodyPage(t *testing.T) {
+	s := GuideSourceSnapshot{}
+	retained := map[string]bool{"explanation": true}
+	early := SourceSection{Kind: "section"}
+	const late = "later-formula"
+	for i := range maxOriginalFormulas {
+		id := fmt.Sprintf("early-formula-%d", i)
+		early.EvidenceIDs = append(early.EvidenceIDs, id)
+		retained[id] = true
+		s.Evidence = append(s.Evidence, GuideEvidence{ID: id, Locator: GuideLocator{Page: 0}})
+		s.Assets = append(s.Assets, GuideAsset{ID: id, Kind: "formula", OriginalDisplay: &GuideOriginalDisplay{Kind: "formula", Page: 0, BBox: []float64{.1, .1, .2, .2}}})
+	}
+	s.Sections = []SourceSection{early, {Kind: "section", EvidenceIDs: []string{late, "explanation"}}}
+	s.Evidence = append(s.Evidence, GuideEvidence{ID: late, Locator: GuideLocator{Page: 9}}, GuideEvidence{ID: "explanation", Text: "This explains the later result.", Locator: GuideLocator{Page: 9}})
+	s.Assets = append(s.Assets, GuideAsset{ID: late, Kind: "formula", OriginalDisplay: &GuideOriginalDisplay{Kind: "formula", Page: 9, BBox: []float64{.1, .1, .2, .2}}})
+	got := selectOriginalAssets(s, retained)
+	if len(got.Formula) != maxOriginalFormulas || got.Formula[1].ID != late {
+		t.Fatalf("early citations crowded out a distinct body page: %+v", got.Formula)
+	}
+}

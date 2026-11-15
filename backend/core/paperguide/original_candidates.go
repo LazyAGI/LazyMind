@@ -116,14 +116,17 @@ func selectOriginalAssets(s GuideSourceSnapshot, retained map[string]bool) origi
 				if (a.Mode == mode) != (b.Mode == mode) {
 					return a.Mode == mode
 				}
-				if a.association != b.association {
-					return a.association > b.association
+				if (a.association > 0) != (b.association > 0) {
+					return a.association > 0
 				}
 				if usedPages[a.page] != usedPages[b.page] {
 					return usedPages[a.page] < usedPages[b.page]
 				}
 				if usedSections[a.section] != usedSections[b.section] {
 					return usedSections[a.section] < usedSections[b.section]
+				}
+				if a.association != b.association {
+					return a.association > b.association
 				}
 				if a.context != b.context {
 					return a.context > b.context

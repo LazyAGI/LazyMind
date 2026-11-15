@@ -18,12 +18,20 @@ func TestOriginalFigureProofUsesCompleteBodyAndOwnCanonicalCaption(t *testing.T)
 		leftParts                       [][]int
 		swapCaptions, duplicateCaptions bool
 		wantBox                         []float64
+		footnoteSpan                    []int
+		leftTitle                       string
+		leftCaptionBox                  []int
 	}{
-		{"two adjacent figures", [][]int{{5, 10, 20, 40}, {20, 10, 40, 40}}, false, false, []float64{.05, .1, .4, .4}},
-		{"no body", nil, false, false, nil},
-		{"second panel outside parent", [][]int{{5, 10, 20, 40}, {20, 10, 45, 40}}, false, false, nil},
-		{"swapped caption geometry", [][]int{{5, 10, 40, 40}}, true, false, []float64{.05, .1, .4, .4}},
-		{"duplicate caption", [][]int{{5, 10, 40, 40}}, false, true, []float64{.05, .1, .4, .4}},
+		{"two adjacent figures", [][]int{{5, 10, 20, 40}, {20, 10, 40, 40}}, false, false, []float64{.05, .1, .4, .4}, nil, "", nil},
+		{"no body", nil, false, false, nil, nil, "", nil},
+		{"second panel outside parent", [][]int{{5, 10, 20, 40}, {20, 10, 45, 40}}, false, false, nil, nil, "", nil},
+		{"swapped caption geometry", [][]int{{5, 10, 40, 40}}, true, false, []float64{.05, .1, .4, .4}, nil, "", nil},
+		{"duplicate caption", [][]int{{5, 10, 40, 40}}, false, true, []float64{.05, .1, .4, .4}, nil, "", nil},
+		{"footnote span crosses into the figure", [][]int{{5, 10, 40, 40}}, false, false, nil, []int{8, 35, 30, 38}, "", nil},
+		{"footnote span leaves its outer box without overlapping the crop", [][]int{{5, 10, 40, 40}}, false, false, nil, []int{8, 55, 30, 58}, "", nil},
+		{"caption naming cannot downgrade complete geometry", [][]int{{5, 10, 40, 40}}, false, false, []float64{.05, .1, .4, .4}, nil, "Abbildung 1: Linkes Exemplar", nil},
+		{"wide caption leaves side label extent unresolved", [][]int{{8, 10, 36, 40}}, false, false, nil, nil, "", []int{2, 43, 42, 48}},
+		{"small caption overhang preserves a complete body", [][]int{{8, 10, 36, 40}}, false, false, []float64{.08, .1, .36, .4}, nil, "", []int{5, 43, 40, 48}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			bbox := func(x1, y1, x2, y2 int) []int { return []int{x1, y1, x2, y2} }
@@ -36,10 +44,16 @@ func TestOriginalFigureProofUsesCompleteBodyAndOwnCanonicalCaption(t *testing.T)
 			}
 			leftBox, rightBox := bbox(5, 10, 40, 40), bbox(55, 10, 90, 40)
 			leftCaption, rightCaption := "Figure 1: Left specimen", "Figure 2: Right specimen"
+			if tc.leftTitle != "" {
+				leftCaption = tc.leftTitle
+			}
 			if tc.duplicateCaptions {
 				rightCaption = leftCaption
 			}
 			leftCaptionBox, rightCaptionBox := bbox(5, 43, 40, 48), bbox(55, 43, 90, 48)
+			if tc.leftCaptionBox != nil {
+				leftCaptionBox = tc.leftCaptionBox
+			}
 			if tc.swapCaptions {
 				leftCaptionBox, rightCaptionBox = rightCaptionBox, leftCaptionBox
 			}
@@ -49,7 +63,14 @@ func TestOriginalFigureProofUsesCompleteBodyAndOwnCanonicalCaption(t *testing.T)
 					children = append(children, leaf("image_body", "image", "", part))
 				}
 				// A nearby footnote is explicitly ancillary and excluded from the body crop.
-				children = append(children, leaf("image_footnote", "text", "Physical footnote", bbox(box[0], 50, box[2], 54)))
+				noteBox := bbox(box[0], 50, box[2], 54)
+				spanBox := noteBox
+				if caption == leftCaption && len(tc.footnoteSpan) > 0 {
+					spanBox = tc.footnoteSpan
+				}
+				note := leaf("image_footnote", "text", "Physical footnote", spanBox)
+				note["bbox"] = noteBox
+				children = append(children, note)
 				scaled := []int{box[0] * 10, box[1] * 10, box[2] * 10, box[3] * 10}
 				return map[string]any{"type": "image", "page_idx": 0, "bbox": scaled, "image_caption": []string{caption}, "image_footnote": []string{"Physical footnote"}},
 					map[string]any{"type": "image", "bbox": box, "blocks": children}

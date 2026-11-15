@@ -27,7 +27,8 @@ func proveOriginalFigure(block Block, item contentItem, parent precisionBlock, s
 		return proof
 	}
 	var parts [][]float64
-	var ancillary [][]float64
+	var ancillary, captions [][]float64
+	var captionLineHeight float64
 	for _, child := range parent.Blocks {
 		box, err := precisionBox(child.BBox, size)
 		if err != nil || child.Angle != 0 || len(child.Blocks) != 0 {
@@ -35,6 +36,21 @@ func proveOriginalFigure(block Block, item contentItem, parent precisionBlock, s
 		}
 		if child.Type == item.Type+"_caption" || child.Type == item.Type+"_footnote" {
 			ancillary = append(ancillary, box)
+			for _, line := range child.Lines {
+				for _, span := range line.Spans {
+					bounds, err := precisionBox(span.BBox, size)
+					if err != nil || span.CrossPage || !originalBoxContains(box, bounds) {
+						return proof
+					}
+					ancillary = append(ancillary, bounds)
+					if child.Type == item.Type+"_caption" {
+						captions = append(captions, bounds)
+						// Compare in native page units because the normalization
+						// scales horizontal and vertical distances differently.
+						captionLineHeight = max(captionLineHeight, (bounds[3]-bounds[1])*size[1])
+					}
+				}
+			}
 			continue
 		}
 		if child.Type != item.Type+"_body" || !originalBoxContains(group, box) || !precisionContains(block.BBox, box) {
@@ -64,12 +80,14 @@ func proveOriginalFigure(block Block, item contentItem, parent precisionBlock, s
 			return proof
 		}
 	}
-	// An archive caption with unresolved attribution in the frozen projection
-	// leaves the extent uncertain. Keep the page available in that case. An
-	// uncaptioned body or a duplicate figure number does not imply truncation.
-	if proof.Caption == "" || block.Image == nil || len(block.Image.Captions) > 0 || len(block.Image.Warnings) == 0 {
-		proof.Parts = parts
+	// Keep the page when the same group's caption extends a full text height
+	// beyond both sides of its body. Those margins are wide enough to hold
+	// labels whose extent the producer's narrower media box does not establish.
+	if text := originalEnvelope(captions); len(text) == 4 &&
+		(crop[0]-text[0])*size[0] >= captionLineHeight && (text[2]-crop[2])*size[0] >= captionLineHeight {
+		return proof
 	}
+	proof.Parts = parts
 	return proof
 }
 
