@@ -1,5 +1,5 @@
 {
-  "task_version": "paper-guide-v20",
+  "task_version": "paper-guide-v21",
   "prompt_reserve_bytes": 10240,
   "provider_frame_reserve_bytes": 512,
   "provider_system_bytes": 87,

@@ -10,6 +10,7 @@ import (
 	"io"
 	"lazymind/core/asyncjob"
 	"lazymind/core/common/orm"
+	"maps"
 	"strings"
 	"time"
 )
@@ -251,7 +252,7 @@ func (x *execution) execute(ctx context.Context) error {
 		}
 		if section.PublicationStatus != "published" {
 			var e error
-			section, key, e = x.writeSection(ctx, plan, sp, sections, 1, nil, false)
+			section, key, e = x.writeSection(ctx, plan, sp, sections, 1, nil, false, nil)
 			if e != nil {
 				return e
 			}
@@ -327,7 +328,7 @@ func (x *execution) execute(ctx context.Context) error {
 				}
 				return ErrQuality
 			}
-			updated, _, e := x.writeSection(ctx, plan, plan.Sections[i], sections[:i], 2, findings, true)
+			updated, _, e := x.writeSection(ctx, plan, plan.Sections[i], sections[:i], 2, findings, true, nil)
 			if e != nil {
 				return e
 			}
@@ -575,7 +576,52 @@ func unique(ids []string) []string {
 	}
 	return out
 }
-func (x *execution) writeSection(ctx context.Context, p GuidePlan, sp GuideSectionPlan, prior []GuideSection, version int, findings []GuideFinding, deferReview bool) (GuideSection, string, error) {
+
+// sectionInput measures the complete request for the current stage. Local stages
+// may narrow to the role and actual draft's source dependencies. A deferred
+// whole-guide correction still requires the independent packet.
+func (x *execution) sectionInput(p GuidePlan, sp GuideSectionPlan, fields map[string]any, draft *GuideSection, independentOnly bool) (map[string]any, GuideSourceSnapshot, error) {
+	input := x.independentInput()
+	input["plan"] = p
+	maps.Copy(input, fields)
+	if x.inputFits(input) {
+		return input, x.planningPacket, nil
+	}
+	if independentOnly {
+		return nil, GuideSourceSnapshot{}, ErrContext
+	}
+
+	ids := append(append([]string{}, sp.EvidenceIDs...), sp.AssetIDs...)
+	for _, claim := range p.Claims {
+		if contains(sp.ClaimIDs, claim.ID) || (draft != nil && contains(draft.ClaimIDs, claim.ID)) {
+			ids = append(ids, claim.EvidenceIDs...)
+		}
+	}
+	if draft != nil {
+		for _, claim := range draft.Claims {
+			ids = append(ids, claim.EvidenceIDs...)
+		}
+		for _, block := range draft.Blocks {
+			ids = append(ids, block.EvidenceIDs...)
+			if block.AssetID != "" {
+				ids = append(ids, block.AssetID)
+			}
+		}
+	}
+	packet, err := RestrictEvidence(x.planningPacket, unique(ids))
+	if err != nil {
+		return nil, GuideSourceSnapshot{}, ErrEvidence
+	}
+	input = x.input(packet)
+	input["plan"] = p
+	maps.Copy(input, fields)
+	if !x.inputFits(input) {
+		return nil, GuideSourceSnapshot{}, ErrContext
+	}
+	return input, packet, nil
+}
+
+func (x *execution) writeSection(ctx context.Context, p GuidePlan, sp GuideSectionPlan, prior []GuideSection, version int, findings []GuideFinding, deferReview bool, previous *GuideSection) (GuideSection, string, error) {
 	key := "section:" + string(sp.Role) + ":v" + stringInt(int64(version))
 	if len(findings) > 0 {
 		if e := x.reserveCorrections(ctx, key, findings, deferReview); e != nil {
@@ -585,32 +631,20 @@ func (x *execution) writeSection(ctx context.Context, p GuidePlan, sp GuideSecti
 	if e := x.s.Repo.Transition(ctx, x.f, x.rev.ID, x.rev.Epoch, "writing", ""); e != nil {
 		return GuideSection{}, "", e
 	}
-	ids := append(append([]string{}, sp.EvidenceIDs...), sp.AssetIDs...)
-	for _, c := range p.Claims {
-		if contains(sp.ClaimIDs, c.ID) {
-			ids = append(ids, c.EvidenceIDs...)
-		}
-	}
-	packet, e := RestrictEvidence(x.snap, unique(ids))
-	if e != nil {
-		return GuideSection{}, "", e
-	}
-	input := x.input(packet)
-	if deferReview {
-		packet = x.planningPacket
-		input = x.independentInput()
-	}
-	input["plan"] = p
-	input["role"] = sp.Role
+	fields := map[string]any{"role": sp.Role}
 	if len(prior) > 0 {
 		summary := []rune(prior[len(prior)-1].Summary)
 		if len(summary) > 4096 {
 			summary = summary[:4096]
 		}
-		input["prior_summary"] = string(summary)
+		fields["prior_summary"] = string(summary)
 	}
 	if len(findings) > 0 {
-		input["findings"] = findings
+		fields["findings"] = findings
+	}
+	input, packet, e := x.sectionInput(p, sp, fields, previous, deferReview)
+	if e != nil {
+		return GuideSection{}, "", e
 	}
 	var section GuideSection
 	e = x.task(ctx, key+":draft", "paper.guide.section", input, &section, func() error {
@@ -627,11 +661,13 @@ func (x *execution) writeSection(ctx context.Context, p GuidePlan, sp GuideSecti
 		section.PublicationStatus = "checking"
 		return section, key, nil
 	}
-	reviewInput := x.input(packet)
-	reviewInput["plan"] = p
-	reviewInput["sections"] = []GuideSection{section}
+	reviewed := []GuideSection{section}
+	reviewInput, _, e := x.sectionInput(p, sp, map[string]any{"sections": reviewed}, &section, false)
+	if e != nil {
+		return section, key, e
+	}
 	var review GuideReview
-	if e = x.task(ctx, key+":review", "paper.guide.review", reviewInput, &review, func() error { return ValidateReview(p, []GuideSection{section}, review) }); e != nil {
+	if e = x.task(ctx, key+":review", "paper.guide.review", reviewInput, &review, func() error { return ValidateReview(p, reviewed, review) }); e != nil {
 		return section, key, e
 	}
 	if len(review.Findings) > 0 {
@@ -641,7 +677,7 @@ func (x *execution) writeSection(ctx context.Context, p GuidePlan, sp GuideSecti
 		if version >= 3 {
 			return section, key, ErrQuality
 		}
-		return x.writeSection(ctx, p, sp, prior, version+1, review.Findings, false)
+		return x.writeSection(ctx, p, sp, prior, version+1, review.Findings, false, &section)
 	}
 	// Cross-section IDs must be unique before publication, not just at final review.
 	if e = ValidateReview(p, append(append([]GuideSection{}, prior...), section), GuideReview{}); e != nil {

@@ -67,6 +67,9 @@ func TestIndependentReviewScopeRepairsPlanOmission(t *testing.T) {
 					ev := in["evidence"].([]GuideEvidence)
 					has := false
 					for _, e := range ev {
+						if extracted && task != "paper.guide.extract" && strings.HasPrefix(e.SourceBlockID, "filler") {
+							t.Fatalf("%s read evidence that EXTRACT did not retain", key)
+						}
 						if e.ID == missing {
 							has = true
 						}
@@ -85,41 +88,27 @@ func TestIndependentReviewScopeRepairsPlanOmission(t *testing.T) {
 						return json.Marshal(baselinePlan(snap))
 					case "paper.guide.section":
 						s := teachingSection(in["role"].(Role))
+						if !has || digest(ev) != planSources || digest(in["source_sections"]) != digest(snap.Sections) {
+							t.Fatalf("%s lost independent planning evidence or source directory", key)
+						}
 						if in["findings"] != nil {
-							if !has || digest(ev) != planSources {
-								t.Fatal("repair lost independent planning evidence")
-							}
-							if digest(in["source_sections"]) != digest(snap.Sections) {
-								t.Fatal("repair lost original source directory")
-							}
 							s.Claims = []GuideClaim{{ID: "background-new", Statement: "The collection process was independently validated.", Attribution: AttributionPaper, EvidenceIDs: []string{missing}, Conditions: []string{}, SupportStatus: SupportSupported}}
 							s.ClaimIDs = []string{"background-new"}
 							s.Blocks[0].Attribution = AttributionPaper
 							s.Blocks[0].ClaimIDs = s.ClaimIDs
 							s.Blocks[0].Text = s.Claims[0].Statement
-						} else if has {
-							t.Fatal("initial section unexpectedly widened")
 						}
 						return json.Marshal(s)
 					case "paper.guide.review":
 						ss := in["sections"].([]GuideSection)
-						if len(ss) == 1 {
-							if has {
-								t.Fatal("single review unexpectedly widened")
-							}
-						} else {
-							if !has || digest(ev) != planSources {
-								t.Fatal("whole review lost Plan-independent source")
-							}
-							if extracted && len(in["coverage"].(GuideCoverage).Warnings) == 0 {
-								t.Fatal("review scope warning missing")
-							}
-							if digest(in["source_sections"]) != digest(snap.Sections) {
-								t.Fatal("review lost original source directory")
-							}
-							if len(ss[0].Claims) == 0 {
-								return json.Marshal(GuideReview{Findings: []GuideFinding{{TargetType: "block", TargetID: "b_background", IssueType: "missing_explanation", Suggestion: "Explain how validation of the collection process supports reliability."}}})
-							}
+						if !has || digest(ev) != planSources || digest(in["source_sections"]) != digest(snap.Sections) {
+							t.Fatalf("%s lost independent planning evidence or source directory", key)
+						}
+						if extracted && len(in["coverage"].(GuideCoverage).Warnings) == 0 {
+							t.Fatalf("%s omitted the extraction scope warning", key)
+						}
+						if len(ss) == 4 && len(ss[0].Claims) == 0 {
+							return json.Marshal(GuideReview{Findings: []GuideFinding{{TargetType: "block", TargetID: "b_background", IssueType: "missing_explanation", Suggestion: "Explain how validation of the collection process supports reliability."}}})
 						}
 						return json.Marshal(GuideReview{Findings: []GuideFinding{}})
 					}
