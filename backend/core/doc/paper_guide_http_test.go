@@ -529,25 +529,54 @@ func TestPaperGuideModelFailureHTTPMapping(t *testing.T) {
 }
 
 func TestPaperGuideClientContractFailuresReachRunnerAsEvidenceErrors(t *testing.T) {
-	for _, kind := range []string{"task_type", "task_version", "model_calls", "transport", "timeout"} {
+	for _, kind := range []string{"task_type", "task_version", "model_calls", "transport", "timeout", "section_schema"} {
 		t.Run(kind, func(t *testing.T) {
 			db, hash, _ := guideHTTPFixture(t)
 			t.Setenv("LAZYMIND_PAPER_GUIDE_ENABLED", "true")
 			t.Setenv("LAZYMIND_CHAT_SERVICE_URL", "http://fixture.invalid")
 			previous := http.DefaultTransport
 			calls := 0
+			var tasks []string
 			http.DefaultTransport = roundTripFunc(func(r *http.Request) (*http.Response, error) {
 				if r.URL.Path != "/api/chat/llm-task:run" {
 					return previous.RoundTrip(r)
 				}
 				calls++
+				if kind == "section_schema" {
+					var request struct {
+						Task string `json:"task_type"`
+					}
+					if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+						t.Fatal(err)
+					}
+					tasks = append(tasks, request.Task)
+					switch request.Task {
+					case "paper.guide.plan":
+						plan := paperguide.GuidePlan{
+							Profiles:  paperguide.GuideProfiles{Secondary: []paperguide.ArgumentType{}, UncertaintyReason: "Synthetic material."},
+							Questions: []string{"What was measured?"}, TermPolicy: []string{},
+							Claims: []paperguide.GuideClaim{}, RequiredAssets: []paperguide.GuideAssetDecision{},
+						}
+						for _, role := range paperguide.Roles() {
+							plan.Sections = append(plan.Sections, paperguide.GuideSectionPlan{Role: role, Title: string(role), Focus: "Explain the measurement.",
+								Terms: []string{}, ClaimIDs: []string{}, EvidenceIDs: []string{}, AssetIDs: []string{}})
+						}
+						return testJSONResponse(200, string(mustJSON(map[string]any{"status": "succeeded", "output": plan,
+							"usage": map[string]any{"task_type": request.Task, "task_version": paperguide.TaskVersion, "model_calls": 1}}))), nil
+					case "paper.guide.section":
+						// The registered Algorithm task rejects the entire marked response.
+						return testJSONResponse(502, `{"detail":{"error_code":"invalid_model_output","usage":{"model_calls":1,"elapsed_ms":19}}}`), nil
+					default:
+						t.Fatalf("unexpected task after rejected SECTION: %s", request.Task)
+					}
+				}
 				if kind == "transport" {
 					return nil, errors.New("provider-secret")
 				}
 				if kind == "timeout" {
 					return testJSONResponse(504, `{"detail":{"error_code":"task_timeout","usage":{"model_calls":1,"elapsed_ms":120000}}}`), nil
 				}
-				usage := map[string]any{"task_type": "paper.guide.plan", "task_version": "paper-guide-v13", "model_calls": 1, "elapsed_ms": 19}
+				usage := map[string]any{"task_type": "paper.guide.plan", "task_version": "paper-guide-v14", "model_calls": 1, "elapsed_ms": 19}
 				if kind == "model_calls" {
 					usage[kind] = 2
 				} else {
@@ -568,33 +597,51 @@ func TestPaperGuideClientContractFailuresReachRunnerAsEvidenceErrors(t *testing.
 			service := paperGuideService()
 			result, err := service.Run(t.Context(), asyncjob.Job{ID: rev.JobID, PayloadJSON: mustJSON(paperguide.JobPayload{RevisionID: rev.ID, Epoch: rev.Epoch})}, guideCheckpointFence{db: db.DB})
 			want, class := paperguide.ErrEvidence, "schema"
+			wantCalls := 2
+			if kind == "section_schema" {
+				wantCalls = 3
+				if !reflect.DeepEqual(tasks, []string{"paper.guide.plan", "paper.guide.section", "paper.guide.section"}) {
+					t.Fatalf("wrong SECTION retry sequence: %v", tasks)
+				}
+			}
 			if kind == "transport" {
 				want, class = paperguide.ErrModelRequest, "transport"
 			}
 			if kind == "timeout" {
 				want, class = paperguide.ErrModelTimeout, "timeout"
 			}
-			if !errors.Is(err, want) || result.ErrorCode != want.Error() || calls != 2 {
+			if !errors.Is(err, want) || result.ErrorCode != want.Error() || calls != wantCalls {
 				t.Fatalf("result=%+v err=%v calls=%d", result, err, calls)
 			}
 			if err = db.First(&rev, "id = ?", rev.ID).Error; err != nil {
 				t.Fatal(err)
 			}
-			if rev.ErrorCode != want.Error() || rev.CallsUsed != 2 || rev.RecoveryCalls != 1 {
+			if rev.ErrorCode != want.Error() || rev.Stage != "paused" || rev.CallsUsed != wantCalls || rev.RecoveryCalls != 1 {
 				t.Fatalf("bad persisted failure: %+v", rev)
+			}
+			if kind == "section_schema" {
+				var written int64
+				if err = db.Model(&orm.PaperGuideStep{}).Where("revision_id = ? AND (step_key LIKE ? OR published = ?)", rev.ID, "section:%", true).Count(&written).Error; err != nil || written != 0 ||
+					rev.PlannedCalls != 2 || rev.CorrectionCount != 0 {
+					t.Fatalf("rejected SECTION left a draft/publication or changed repair counters: written=%d rev=%+v err=%v", written, rev, err)
+				}
 			}
 			var markers []orm.PaperGuideStep
 			if err = db.Where("revision_id = ? AND step_key LIKE ?", rev.ID, "request:%").Find(&markers).Error; err != nil {
 				t.Fatal(err)
 			}
-			if len(markers) != 2 {
+			if len(markers) != wantCalls {
 				t.Fatalf("markers=%d", len(markers))
 			}
 			for _, marker := range markers {
 				var diagnostic struct {
 					Class string `json:"error_class"`
 				}
-				if json.Unmarshal([]byte(marker.OutputJSON), &diagnostic) != nil || diagnostic.Class != class || strings.Contains(marker.OutputJSON, "provider-secret") {
+				wantMarkerClass := class
+				if kind == "section_schema" && strings.HasPrefix(marker.StepKey, "request:plan:") {
+					wantMarkerClass = "success"
+				}
+				if json.Unmarshal([]byte(marker.OutputJSON), &diagnostic) != nil || diagnostic.Class != wantMarkerClass || strings.Contains(marker.OutputJSON, "provider-secret") {
 					t.Fatalf("wrong safe diagnostic: %s", marker.OutputJSON)
 				}
 			}

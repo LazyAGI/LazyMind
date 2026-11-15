@@ -9,6 +9,7 @@ import (
 	"lazymind/core/asyncjob"
 	"lazymind/core/common/orm"
 	"lazymind/core/pdfir"
+	"reflect"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -463,6 +464,8 @@ func TestWholeReviewProjectsExactPublishedVersions(t *testing.T) {
 			model := ModelIdentity{ID: "m", ContextTokens: 128000}
 			var before int64
 			whole := 0
+			var wholeFinding GuideFinding
+			const originalNotation = "> The original notation.〔e1〕"
 			service := Service{Repo: repo, Source: &fixtureSource{s: snap}, Authorize: func(context.Context, Scope, bool) error { return nil }, ResolveModel: func(context.Context, Scope, string) (ModelIdentity, map[string]any, error) { return model, nil, nil }}
 			service.Call = func(ctx context.Context, task string, input map[string]any, cfg map[string]any) (json.RawMessage, error) {
 				switch task {
@@ -473,6 +476,10 @@ func TestWholeReviewProjectsExactPublishedVersions(t *testing.T) {
 					if input["findings"] != nil {
 						section.Blocks[0].Text = "Corrected sample."
 					}
+					quote := section.Blocks[0]
+					quote.ID += "_quote"
+					quote.Text = originalNotation
+					section.Blocks = append(section.Blocks, quote)
 					return json.Marshal(section)
 				case "paper.guide.review":
 					sections := input["sections"].([]GuideSection)
@@ -489,6 +496,8 @@ func TestWholeReviewProjectsExactPublishedVersions(t *testing.T) {
 						var current orm.PaperGuideRevision
 						repo.DB.Where("guide_id IN (?)", repo.DB.Model(&orm.PaperGuide{}).Select("id").Where("scope_key = ?", scope.Key())).Take(&current)
 						before = current.ChangeVersion
+						wholeFinding = GuideFinding{TargetID: target, TargetType: "block", IssueType: "missing_condition", Suggestion: "State that the measurement applies only to dry samples."}
+						return json.Marshal(GuideReview{Findings: []GuideFinding{wholeFinding}})
 					}
 					if target != "" {
 						return json.Marshal(GuideReview{Findings: []GuideFinding{{TargetID: target, TargetType: "block", IssueType: "coherence", Suggestion: "Clarify sample."}}})
@@ -508,6 +517,17 @@ func TestWholeReviewProjectsExactPublishedVersions(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			var stored orm.PaperGuideStep
+			var review GuideReview
+			reviewKey := "whole_review:2"
+			if prepublishedV2 {
+				reviewKey = "whole_review:1"
+			}
+			if err = repo.DB.Where("revision_id = ? AND step_key = ?", rev.ID, reviewKey).Take(&stored).Error; err != nil ||
+				json.Unmarshal([]byte(stored.OutputJSON), &review) != nil || !reflect.DeepEqual(review.Findings, []GuideFinding{wholeFinding}) ||
+				delta.ReviewSummary == nil || !reflect.DeepEqual(delta.ReviewSummary.Findings, review.Findings) {
+				t.Fatalf("substantive finding changed in storage or projection: stored=%+v projected=%+v err=%v", review, delta.ReviewSummary, err)
+			}
 			wantRole := RoleBackground
 			wantVersion := 2
 			if !prepublishedV2 {
@@ -518,7 +538,8 @@ func TestWholeReviewProjectsExactPublishedVersions(t *testing.T) {
 			for _, section := range delta.Sections {
 				if section.Role == wantRole {
 					found = true
-					if section.Version != wantVersion || section.PublicationStatus != "correction_required" || section.ChangeVersion <= before {
+					if section.Version != wantVersion || section.PublicationStatus != "correction_required" || section.ChangeVersion <= before ||
+						len(section.Blocks) != 2 || section.Blocks[1].Text != originalNotation {
 						t.Fatalf("incorrect projection: %+v", section)
 					}
 				}
@@ -531,7 +552,7 @@ func TestWholeReviewProjectsExactPublishedVersions(t *testing.T) {
 }
 
 func TestLegacyCandidateCannotSpendOrResumeUnderNewContract(t *testing.T) {
-	for _, version := range []string{"paper-guide-v1", "paper-guide-v2", "paper-guide-v3", "paper-guide-v4", "paper-guide-v5", "paper-guide-v6", "paper-guide-v7", "paper-guide-v8", "paper-guide-v9", "paper-guide-v10", "paper-guide-v11", "paper-guide-v12"} {
+	for _, version := range []string{"paper-guide-v1", "paper-guide-v2", "paper-guide-v3", "paper-guide-v4", "paper-guide-v5", "paper-guide-v6", "paper-guide-v7", "paper-guide-v8", "paper-guide-v9", "paper-guide-v10", "paper-guide-v11", "paper-guide-v12", "paper-guide-v13"} {
 		t.Run(version, func(t *testing.T) {
 			d, id := fixture(t)
 			snap, _ := BuildSourceSnapshot(d, id)

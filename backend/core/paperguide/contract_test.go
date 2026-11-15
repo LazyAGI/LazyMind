@@ -137,7 +137,7 @@ func TestImpossibleOutputReserveMakesZeroModelCalls(t *testing.T) {
 }
 
 func TestPublishedGuideAndSelectionRemainReadableAcrossTaskVersions(t *testing.T) {
-	for _, version := range []string{"paper-guide-v2", "paper-guide-v3", "paper-guide-v4", "paper-guide-v5", "paper-guide-v6", "paper-guide-v7", "paper-guide-v8", "paper-guide-v9", "paper-guide-v10", "paper-guide-v11", "paper-guide-v12"} {
+	for _, version := range []string{"paper-guide-v2", "paper-guide-v3", "paper-guide-v4", "paper-guide-v5", "paper-guide-v6", "paper-guide-v7", "paper-guide-v8", "paper-guide-v9", "paper-guide-v10", "paper-guide-v11", "paper-guide-v12", "paper-guide-v13"} {
 		t.Run(version, func(t *testing.T) {
 			d, id := fixture(t)
 			current, _ := BuildSourceSnapshot(d, id)
@@ -153,7 +153,13 @@ func TestPublishedGuideAndSelectionRemainReadableAcrossTaskVersions(t *testing.T
 			section.Version = 1
 			section.PublicationStatus = "published"
 			section.Blocks[0].EvidenceIDs = []string{old.Evidence[1].ID}
-			for _, step := range []StepWrite{{Key: "plan", InputHash: "old-plan", Output: mustJSON(baselinePlan(old))}, {Key: "section:background:v1", InputHash: "old-section", Output: mustJSON(section), Published: true}} {
+			start, end, wantSelection := 0, 3, "The"
+			if version == "paper-guide-v13" {
+				section.Blocks[0].Text = "样本范围。〔e2〕"
+				start, end, wantSelection = 2, 9, "范围。〔e2〕"
+			}
+			storedSection := mustJSON(section)
+			for _, step := range []StepWrite{{Key: "plan", InputHash: "old-plan", Output: mustJSON(baselinePlan(old))}, {Key: "section:background:v1", InputHash: "old-section", Output: storedSection, Published: true}} {
 				if err = repo.PutStep(t.Context(), testFence{repo.DB}, rev.ID, rev.Epoch, step); err != nil {
 					t.Fatal(err)
 				}
@@ -164,7 +170,7 @@ func TestPublishedGuideAndSelectionRemainReadableAcrossTaskVersions(t *testing.T
 			if err = repo.DB.Model(&rev).Update("fingerprint", digest([]any{id.SourceSHA256, old.IRDigest, SourceCatalogVersion, version, model})).Error; err != nil {
 				t.Fatal(err)
 			}
-			if version == "paper-guide-v12" {
+			if version == "paper-guide-v12" || version == "paper-guide-v13" {
 				newer, err := repo.Create(t.Context(), CreateRevision{Scope: scope, SourceSHA256: id.SourceSHA256, IRDigest: old.IRDigest, SnapshotPath: "new", Model: model, Regenerate: true})
 				if err != nil {
 					t.Fatal(err)
@@ -189,9 +195,15 @@ func TestPublishedGuideAndSelectionRemainReadableAcrossTaskVersions(t *testing.T
 			if err != nil || !currentSource || evidence.ID != old.Evidence[1].ID {
 				t.Fatalf("legacy evidence: %+v %v", evidence, err)
 			}
-			selected, err := service.Selection(t.Context(), scope, rev.ID, SelectionRequest{SectionKey: "section:background:v1", BlockID: "b_background", Start: 0, End: 3})
-			if err != nil || selected.Text != "The" || len(selected.Evidence) != 1 || selected.Evidence[0].ID != old.Evidence[1].ID {
+			selected, err := service.Selection(t.Context(), scope, rev.ID, SelectionRequest{SectionKey: "section:background:v1", BlockID: "b_background", Start: start, End: end})
+			if err != nil || !selected.SourceCurrent || selected.Text != wantSelection || len(selected.Evidence) != 1 || selected.Evidence[0].ID != old.Evidence[1].ID ||
+				selected.Evidence[0].Locator.Page != old.Evidence[1].Locator.Page {
 				t.Fatalf("legacy selection: %+v %v", selected, err)
+			}
+			var original orm.PaperGuideStep
+			if err = repo.DB.Where("revision_id = ? AND step_key = ?", rev.ID, "section:background:v1").Take(&original).Error; err != nil ||
+				!original.Published || original.OutputJSON != string(storedSection) {
+				t.Fatalf("legacy publication was rewritten: %+v %v", original, err)
 			}
 		})
 	}

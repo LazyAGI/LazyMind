@@ -92,6 +92,8 @@ only to resolve material misunderstanding, in a form suited to the argument; no 
 example or uniform term length. Use concise, accurate ordinary glosses without attributing them
 as novel definitions or findings. Mark substantive teaching, external background and interpretation
 distinctly from paper findings. Keep essential explanation out of detail blocks and summaries alone.
+Use source IDs only in structured reference fields. Never add internal IDs as citations in the
+body, titles, summaries, or claim prose.
 Support every paper-statement block with its claim IDs or direct evidence. Section.claims defines ONLY NEW claims absent from plan.claims.
 Never copy, restate or redefine a plan claim in Section.claims, even with the same statement.
 Reference existing plan claims by ID in section claim_ids and block claim_ids. If no new claims
@@ -119,6 +121,8 @@ with its full block and the surrounding prose actually supplied. Resolve ordinar
 omitted repeated nouns and compatible qualifications from explicit context. Accept an accurate
 elementary gloss that adds no substantive fact, condition or novelty claim, even if the source
 does not define the term verbatim. Block attribution does not make each explanatory word a quote.
+Use this request's evidence catalog for structured references; short IDs in inherited prose are not source anchors.
+Treat misleading inline markers as attribution issues and report independent substantive defects.
 Context may qualify a compatible assertion; it cannot cancel a direct contradiction, invented
 result or explicit scope expansion. Check claim strength and attribution, assumptions, units,
 quantifiers, exceptions, uncertainty, novelty, causal limits and caption versus visual observation.

@@ -3,7 +3,7 @@ package paperguide
 
 import "lazymind/core/pdfir"
 
-const TaskVersion = "paper-guide-v13"
+const TaskVersion = "paper-guide-v14"
 const SourceCatalogVersion = "paper-guide-source-v5"
 const legacySourceNamespace = "paper-guide-v1"
 

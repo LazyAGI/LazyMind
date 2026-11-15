@@ -342,6 +342,83 @@ def section_asset_kinds(data: SectionInput) -> dict[str, str]:
     return {source_id: assets[source_id] for source_id in expected.asset_ids if source_id in assets}
 
 
+_ASCII_SPACE = ' \t\r\n\v\f'
+_LINE_END = re.compile(r'\r\n?|\n')
+_SENTENCE_END = '。！？.!?'
+_ALIAS_GROUP = r'〔[ \t]*e[1-9][0-9]*(?:[ \t]*[、，,][ \t]*e[1-9][0-9]*)*[ \t]*〕'
+_CITATION_TAIL = re.compile(rf'[{_SENTENCE_END}](?:[ \t]*{_ALIAS_GROUP})+\Z')
+_QUOTE_LINE = re.compile(r'^[ \t]*(?:(?:[-+*]|[0-9]{1,9}[.)])[ \t]+)*>')
+_QUOTE_END = {'"': '"', "'": "'", '“': '”', '‘': '’', '「': '」', '『': '』', '«': '»', '‹': '›'}
+_DELIMITER = re.compile(r'''\\.|[$]+|`+|["'“”‘’「」『』«»‹›]''')
+_PRICE_BEFORE_SENTENCE = re.compile(r'[0-9][0-9,.]*[.!?][ \t]+[^\W\d_]')
+
+
+def _protected_sentence_end(prefix: str) -> bool:
+    """Recognize literals and leave an unresolved delimiter to semantic review."""
+    closer = ''
+    for match in _DELIMITER.finditer(prefix):
+        token = match[0]
+        prev = prefix[match.start() - 1] if match.start() else ''
+        following = prefix[match.end():match.end() + 1]
+        if token in ("'", '’') and prev.isalnum() and following.isalnum():
+            continue  # Apostrophe within a word.
+        if closer:
+            if token == closer:
+                closer = ''
+            continue
+        if token == "'" and prev.isalnum():
+            continue  # A trailing possessive apostrophe.
+        if token in (r'\(', r'\['):
+            closer = r'\)' if token == r'\(' else r'\]'
+        elif token[0] in ('$', '`'):
+            if (token == '$' and _PRICE_BEFORE_SENTENCE.match(prefix, match.end())
+                    and prefix.find('$', match.end()) == -1):
+                continue  # An isolated price in an earlier sentence.
+            closer = token
+        elif token in _QUOTE_END:
+            closer = _QUOTE_END[token]
+        elif token.startswith('\\') and match.end() == len(prefix) and token[-1] in _SENTENCE_END:
+            return True  # Escaped punctuation is not an ordinary sentence boundary.
+    return bool(closer)
+
+
+def _citation_tail_line(text: str) -> str | None:
+    end = text.rstrip(_ASCII_SPACE)
+    candidate = _CITATION_TAIL.search(end)
+    if candidate is None:
+        return None
+    lines = _LINE_END.split(end)
+    line = lines[-1]
+    before_punctuation = line[:len(line) - len(candidate[0])]
+    if not any(ch.isalnum() for ch in before_punctuation):
+        return None
+    # A Markdown quote may continue on unprefixed lines until a blank line.
+    for prior in reversed(lines):
+        if not prior.strip(_ASCII_SPACE):
+            break
+        if _QUOTE_LINE.match(prior):
+            return None
+    if _protected_sentence_end(end[:candidate.start() + 1]):
+        return None
+    return line.strip(_ASCII_SPACE)
+
+
+def _reject_section_citation_tails(data: SectionInput, result: Section) -> None:
+    evidence = {item.id: item.text for item in data.evidence}
+    for block in result.blocks:
+        if block.kind != 'paragraph':
+            continue
+        line = _citation_tail_line(block.text)
+        if line is None:
+            continue
+        # Match only raw, explicitly bound evidence, never Plan context or
+        # another block's bindings. A verbatim source line is not a new citation.
+        if any(source_line.strip(_ASCII_SPACE) == line
+               for source in block.evidence_ids for source_line in _LINE_END.split(evidence[source])):
+            continue
+        raise ValueError('request-local source alias in paragraph citation tail')
+
+
 def bind_output(data, result):
     """Outputs bind only to the supplied packet; Core independently binds to the snapshot."""
     evidence = {item.id for item in data.evidence}
@@ -386,3 +463,4 @@ def bind_output(data, result):
                     raise ValueError('wrong or unplanned asset')
             elif block.asset_id is not None:
                 raise ValueError('asset on text block')
+        _reject_section_citation_tails(data, result)
