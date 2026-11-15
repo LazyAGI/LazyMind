@@ -5,9 +5,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestStructuredTaskPreservesObjectAndSingleAttemptContract(t *testing.T) {
@@ -135,15 +137,15 @@ func TestPaperGuideStructuredTaskTransportPreservesBoundEvidence(t *testing.T) {
 		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
 			t.Errorf("decode structured task: %v", err)
 		}
-		if request.TaskType != "paper.guide.review" || request.Options["task_version"] != "paper-guide-v12" ||
+		if request.TaskType != "paper.guide.review" || request.Options["task_version"] != "paper-guide-v13" ||
 			len(request.Input.Data.Evidence) != 1 || request.Input.Data.Evidence[0].ID != "ev_fixture" {
 			t.Errorf("lost guide request metadata: %+v", request)
 		}
-		fmt.Fprint(w, `{"status":"succeeded","output":{"findings":[]},"usage":{"model_calls":1,"task_type":"paper.guide.review","task_version":"paper-guide-v12"}}`)
+		fmt.Fprint(w, `{"status":"succeeded","output":{"findings":[]},"usage":{"model_calls":1,"task_type":"paper.guide.review","task_version":"paper-guide-v13"}}`)
 	}))
 	t.Setenv("LAZYMIND_CHAT_SERVICE_URL", endpoint)
 	result, err := RunStructuredTask(context.Background(), StructuredTaskRequest{
-		Task: PaperGuideReviewTask, Version: "paper-guide-v12", Input: map[string]any{"evidence": []map[string]string{{"id": "ev_fixture"}}},
+		Task: PaperGuideReviewTask, Version: "paper-guide-v13", Input: map[string]any{"evidence": []map[string]string{{"id": "ev_fixture"}}},
 	})
 	if err != nil || string(result.Output) != `{"findings":[]}` {
 		t.Fatalf("response %s: %v", result.Output, err)
@@ -153,7 +155,7 @@ func TestPaperGuideStructuredTaskTransportPreservesBoundEvidence(t *testing.T) {
 func TestStructuredTaskSuccessContractMismatchRetainsSafeTypedUsage(t *testing.T) {
 	for _, field := range []string{"task_type", "task_version", "model_calls"} {
 		t.Run(field, func(t *testing.T) {
-			usage := StructuredTaskUsage{Task: PaperGuidePlanTask, Version: "paper-guide-v12", ModelCalls: 1, ElapsedMS: 19}
+			usage := StructuredTaskUsage{Task: PaperGuidePlanTask, Version: "paper-guide-v13", ModelCalls: 1, ElapsedMS: 19}
 			switch field {
 			case "task_type":
 				usage.Task = PaperGuideReviewTask
@@ -168,7 +170,7 @@ func TestStructuredTaskSuccessContractMismatchRetainsSafeTypedUsage(t *testing.T
 				json.NewEncoder(w).Encode(map[string]any{"status": "succeeded", "output": map[string]any{"private": "provider-secret"}, "usage": usage})
 			}))
 			t.Setenv("LAZYMIND_CHAT_SERVICE_URL", endpoint)
-			result, err := RunStructuredTask(t.Context(), StructuredTaskRequest{Task: PaperGuidePlanTask, Version: "paper-guide-v12"})
+			result, err := RunStructuredTask(t.Context(), StructuredTaskRequest{Task: PaperGuidePlanTask, Version: "paper-guide-v13"})
 			var failure *StructuredTaskError
 			if !errors.As(err, &failure) || failure.Code != "invalid_model_output" || failure.Usage != usage || failure.Retryable || len(result.Output) != 0 || calls != 1 {
 				t.Fatalf("wrong classification, usage or attempts: result=%+v err=%#v calls=%d", result, err, calls)
@@ -177,5 +179,35 @@ func TestStructuredTaskSuccessContractMismatchRetainsSafeTypedUsage(t *testing.T
 				t.Fatal("raw output leaked")
 			}
 		})
+	}
+}
+
+type structuredTaskTrip func(*http.Request) (*http.Response, error)
+
+func (trip structuredTaskTrip) RoundTrip(r *http.Request) (*http.Response, error) { return trip(r) }
+
+func TestStructuredTaskTransportTimeoutDefaultsAndRejectsNegative(t *testing.T) {
+	t.Setenv("LAZYMIND_CHAT_SERVICE_URL", "http://fixture.invalid")
+	previous := http.DefaultTransport
+	t.Cleanup(func() { http.DefaultTransport = previous })
+	calls := 0
+	http.DefaultTransport = structuredTaskTrip(func(r *http.Request) (*http.Response, error) {
+		calls++
+		deadline, ok := r.Context().Deadline()
+		if remaining := time.Until(deadline); !ok || remaining > 120*time.Second || remaining < 119*time.Second {
+			t.Errorf("default HTTP deadline %v (present=%t)", remaining, ok)
+		}
+		body := `{"status":"succeeded","output":{},"usage":{"model_calls":1,"task_type":"paper.formula.explain","task_version":"formula-explanation-v7-low-latency"}}`
+		return &http.Response{StatusCode: http.StatusOK, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(body))}, nil
+	})
+	req := StructuredTaskRequest{Task: FormulaExplanationTask, Version: FormulaExplanationTaskVersion}
+	if _, err := RunStructuredTask(context.Background(), req); err != nil || calls != 1 {
+		t.Fatalf("default call: calls=%d err=%v", calls, err)
+	}
+	req.TransportTimeout = -time.Second
+	_, err := RunStructuredTask(context.Background(), req)
+	var taskErr *StructuredTaskError
+	if !errors.As(err, &taskErr) || taskErr.Code != "invalid_task_config" || calls != 1 {
+		t.Fatalf("negative timeout reached transport: calls=%d err=%v", calls, err)
 	}
 }

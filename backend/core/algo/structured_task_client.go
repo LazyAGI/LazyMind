@@ -27,6 +27,8 @@ type StructuredTaskRequest struct {
 	Version   string
 	Input     map[string]any
 	LLMConfig map[string]any
+	// TransportTimeout is set by the server; zero retains the default.
+	TransportTimeout time.Duration
 }
 
 type StructuredTaskUsage struct {
@@ -54,8 +56,12 @@ func (e *StructuredTaskError) Error() string { return "structured task: " + e.Co
 // The caller owns retries and business validation; never fall back to rewrite.
 func RunStructuredTask(ctx context.Context, req StructuredTaskRequest) (StructuredTaskResult, error) {
 	var result StructuredTaskResult
-	if req.Task == "" || req.Version == "" {
+	if req.Task == "" || req.Version == "" || req.TransportTimeout < 0 {
 		return result, &StructuredTaskError{Code: "invalid_task_config"}
+	}
+	timeout := req.TransportTimeout
+	if timeout == 0 {
+		timeout = 2 * time.Minute
 	}
 	payload := llmTaskRequest{Mode: "llm", TaskType: req.Task, Input: llmTaskInput{Data: req.Input}, LLMConfig: ensureLLMConfig(req.LLMConfig), Options: map[string]any{"task_version": req.Version}}
 	var response struct {
@@ -63,7 +69,7 @@ func RunStructuredTask(ctx context.Context, req StructuredTaskRequest) (Structur
 		Output json.RawMessage     `json:"output"`
 		Usage  StructuredTaskUsage `json:"usage"`
 	}
-	if err := common.ApiPost(ctx, generateURL(llmTaskRunPath), payload, nil, &response, 2*time.Minute); err != nil {
+	if err := common.ApiPost(ctx, generateURL(llmTaskRunPath), payload, nil, &response, timeout); err != nil {
 		if ctx.Err() != nil {
 			return result, ctx.Err()
 		}

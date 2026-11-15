@@ -153,8 +153,16 @@ func runLateWorkerCannotPublish(t *testing.T, db *gorm.DB) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	asyncjob.Register(JobType, service.Run)
+	oldOutcome := make(chan error, 1)
+	asyncjob.Register(JobType, func(ctx context.Context, job asyncjob.Job, reporter asyncjob.Reporter) (asyncjob.Result, error) {
+		result, err := service.Run(ctx, job, reporter)
+		if job.ID == first.JobID {
+			oldOutcome <- err
+		}
+		return result, err
+	})
 	ctx1, cancel1 := context.WithCancel(context.Background())
+	defer cancel1()
 	worker1 := asyncjob.Start(ctx1, repo.DB, asyncjob.Options{JobTypes: []string{JobType}, WorkerID: "old", Concurrency: 1, PollInterval: time.Millisecond, LockTTL: time.Minute, SerializeResources: true})
 	<-started
 	if e = repo.Cancel(t.Context(), scope, first.ID); e != nil {
@@ -165,6 +173,7 @@ func runLateWorkerCannotPublish(t *testing.T, db *gorm.DB) {
 		t.Fatal(e)
 	}
 	ctx2, cancel2 := context.WithCancel(context.Background())
+	defer cancel2()
 	worker2 := asyncjob.Start(ctx2, repo.DB, asyncjob.Options{JobTypes: []string{JobType}, WorkerID: "new", Concurrency: 1, PollInterval: time.Millisecond, LockTTL: time.Minute, SerializeResources: true})
 	deadline := time.Now().Add(5 * time.Second)
 	complete := false
@@ -177,6 +186,15 @@ func runLateWorkerCannotPublish(t *testing.T, db *gorm.DB) {
 		time.Sleep(5 * time.Millisecond)
 	}
 	close(release)
+	// Observe the old handler's outcome while its worker context is active.
+	select {
+	case err := <-oldOutcome:
+		if err == nil {
+			t.Error("stale worker accepted late PLAN")
+		}
+	case <-time.After(5 * time.Second):
+		t.Error("stale worker did not return from its late PLAN")
+	}
 	cancel1()
 	cancel2()
 	<-worker1.Done()
@@ -188,6 +206,14 @@ func runLateWorkerCannotPublish(t *testing.T, db *gorm.DB) {
 	repo.DB.Model(&orm.PaperGuideStep{}).Where("revision_id = ? AND published = ?", first.ID, true).Count(&n)
 	if n != 0 {
 		t.Fatal("late response published")
+	}
+	old, e := repo.Revision(t.Context(), scope, first.ID)
+	if e != nil || old.CallsUsed != 1 || old.ActiveMillis != 300000 {
+		t.Fatalf("stale worker changed reservation: calls=%d active=%d err=%v", old.CallsUsed, old.ActiveMillis, e)
+	}
+	steps, e := repo.Steps(t.Context(), first.ID)
+	if e != nil || len(steps) != 1 || !strings.HasPrefix(steps[0].StepKey, "request:plan:") || steps[0].OutputJSON != "" {
+		t.Fatalf("stale worker settled or wrote a checkpoint: %+v %v", steps, e)
 	}
 	g, e := repo.Guide(t.Context(), scope)
 	if e != nil || g.PublishedRevisionID != second.ID {
@@ -380,32 +406,50 @@ func TestWholeReviewCorrectionIsImmutableAndResumable(t *testing.T) {
 }
 
 func TestInterruptedRequestKeepsReservedTimeAndCallsOnResume(t *testing.T) {
-	d, id := fixture(t)
-	snap, _ := BuildSourceSnapshot(d, id)
-	repo := Repository{DB: guideDB(t)}
-	scope := Scope{OwnerID: id.OwnerID, DatasetID: id.DatasetID, DocumentID: id.DocumentID, Language: "en"}
-	model := ModelIdentity{ID: "m", ContextTokens: 128000}
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	service := Service{Repo: repo, Source: &fixtureSource{s: snap}, Authorize: func(context.Context, Scope, bool) error { return nil }, ResolveModel: func(context.Context, Scope, string) (ModelIdentity, map[string]any, error) { return model, nil, nil }, Call: func(context.Context, string, map[string]any, map[string]any) (json.RawMessage, error) {
+	h := newDeadlineGuide(t, false)
+	var inputHash string
+	calls := 0
+	for attempt := 0; attempt < 3; attempt++ {
+		ctx, cancel := context.WithCancel(t.Context())
+		h.Call = func(_ context.Context, task string, input map[string]any, _ map[string]any) (json.RawMessage, error) {
+			calls++
+			if task != "paper.guide.plan" {
+				t.Fatalf("unexpected recovery task: %s", task)
+			}
+			currentHash := digest([]any{TaskVersion, input})
+			if attempt == 0 {
+				inputHash = currentHash
+			} else if currentHash != inputHash {
+				t.Fatal("recovery changed the original PLAN request")
+			}
+			cancel()
+			return mustJSON(baselinePlan(h.snap)), nil
+		}
+		_, err := h.run(ctx)
 		cancel()
-		return nil, context.Canceled
-	}}
-	rev, e := repo.Create(t.Context(), CreateRevision{Scope: scope, SourceSHA256: id.SourceSHA256, IRDigest: snap.IRDigest, SnapshotPath: "test", Model: model})
-	if e != nil {
-		t.Fatal(e)
+		if err == nil || calls != attempt+1 {
+			t.Fatalf("interrupted execution %d completed: calls=%d err=%v", attempt, calls, err)
+		}
+		if err = h.Repo.DB.Model(&orm.AsyncJob{}).Where("id = ?", h.rev.JobID).Update("status", "failed").Error; err != nil {
+			t.Fatal(err)
+		}
+		h.rev, err = h.Repo.Resume(t.Context(), h.scope, h.rev.ID, h.model)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if h.rev.CallsUsed != attempt+1 || h.rev.RecoveryCalls != attempt || h.rev.PlannedCalls != 1 ||
+			h.rev.ActiveMillis != int64(attempt+1)*300000 {
+			t.Fatalf("lost uncertain spend: %+v", h.rev)
+		}
+		for _, step := range h.checkpoints() {
+			if !strings.HasPrefix(step.StepKey, "request:plan:") || step.OutputJSON != "" || step.InputHash != inputHash {
+				t.Fatalf("recovery changed the unconfirmed ticket: %+v", step)
+			}
+		}
 	}
-	_, e = service.Run(ctx, asyncjob.Job{ID: rev.JobID, PayloadJSON: mustJSON(JobPayload{rev.ID, rev.Epoch})}, testFence{repo.DB})
-	if e == nil {
-		t.Fatal("interrupted request completed")
-	}
-	repo.DB.Model(&orm.AsyncJob{}).Where("id = ?", rev.JobID).Update("status", "failed")
-	resumed, e := repo.Resume(t.Context(), scope, rev.ID, model)
-	if e != nil {
-		t.Fatal(e)
-	}
-	if resumed.CallsUsed != 1 || resumed.ActiveMillis != 2*callMillis {
-		t.Fatalf("lost uncertain spend: calls=%d ms=%d", resumed.CallsUsed, resumed.ActiveMillis)
+	_, err := h.run(t.Context())
+	if row := h.row(); !errors.Is(err, ErrBudget) || calls != 3 || row.CallsUsed != 3 || row.RecoveryCalls != 2 || len(h.checkpoints()) != 3 {
+		t.Fatalf("third recovery was dispatched: calls=%d total=%d recovery=%d err=%v", calls, row.CallsUsed, row.RecoveryCalls, err)
 	}
 }
 
@@ -487,7 +531,7 @@ func TestWholeReviewProjectsExactPublishedVersions(t *testing.T) {
 }
 
 func TestLegacyCandidateCannotSpendOrResumeUnderNewContract(t *testing.T) {
-	for _, version := range []string{"paper-guide-v1", "paper-guide-v2", "paper-guide-v3", "paper-guide-v4", "paper-guide-v5", "paper-guide-v6", "paper-guide-v7", "paper-guide-v8", "paper-guide-v9", "paper-guide-v10", "paper-guide-v11"} {
+	for _, version := range []string{"paper-guide-v1", "paper-guide-v2", "paper-guide-v3", "paper-guide-v4", "paper-guide-v5", "paper-guide-v6", "paper-guide-v7", "paper-guide-v8", "paper-guide-v9", "paper-guide-v10", "paper-guide-v11", "paper-guide-v12"} {
 		t.Run(version, func(t *testing.T) {
 			d, id := fixture(t)
 			snap, _ := BuildSourceSnapshot(d, id)

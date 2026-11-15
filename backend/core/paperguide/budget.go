@@ -7,6 +7,7 @@ import (
 	"lazymind/core/asyncjob"
 	"lazymind/core/common/orm"
 	"strconv"
+	"time"
 )
 
 const (
@@ -14,7 +15,17 @@ const (
 	MaxExtractCalls  = 8
 	MaxRecoveryCalls = 2
 	MaxActiveMillis  = int64(30 * 60 * 1000)
+
+	localProcessingReserveMillis = int64(120000)
 )
+
+// ModelAttemptTimeout is the server-owned per-attempt limit for Guide tasks.
+func ModelAttemptTimeout(task string) time.Duration {
+	if task == "paper.guide.plan" {
+		return 180 * time.Second
+	}
+	return 120 * time.Second
+}
 
 var ErrBudget = errors.New("paper_guide_budget_exhausted")
 

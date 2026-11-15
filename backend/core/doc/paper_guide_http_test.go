@@ -547,7 +547,7 @@ func TestPaperGuideClientContractFailuresReachRunnerAsEvidenceErrors(t *testing.
 				if kind == "timeout" {
 					return testJSONResponse(504, `{"detail":{"error_code":"task_timeout","usage":{"model_calls":1,"elapsed_ms":120000}}}`), nil
 				}
-				usage := map[string]any{"task_type": "paper.guide.plan", "task_version": "paper-guide-v12", "model_calls": 1, "elapsed_ms": 19}
+				usage := map[string]any{"task_type": "paper.guide.plan", "task_version": "paper-guide-v13", "model_calls": 1, "elapsed_ms": 19}
 				if kind == "model_calls" {
 					usage[kind] = 2
 				} else {
@@ -696,5 +696,56 @@ func TestPaperGuideFragmentFixtureUsesCurrentActualTransport(t *testing.T) {
 	json.Unmarshal(fixture.Output, &expected)
 	if !reflect.DeepEqual(actual, expected) {
 		t.Fatal("canonical output changed")
+	}
+}
+
+func TestPaperGuideAdapterSelectsHTTPDeadlineWithoutChangingOptions(t *testing.T) {
+	guideHTTPFixture(t)
+	t.Setenv("LAZYMIND_CHAT_SERVICE_URL", "http://fixture.invalid")
+	for _, tc := range []struct {
+		task  string
+		limit time.Duration
+	}{
+		{"paper.guide.plan", 180 * time.Second},
+		{"paper.guide.extract", 120 * time.Second},
+		{"paper.guide.section", 120 * time.Second},
+		{"paper.guide.review", 120 * time.Second},
+		{"paper.guide.plan", 2 * time.Second},
+	} {
+		t.Run(tc.task+"/"+tc.limit.String(), func(t *testing.T) {
+			previous := http.DefaultTransport
+			t.Cleanup(func() { http.DefaultTransport = previous })
+			ctx := context.Background()
+			var parent time.Time
+			if tc.limit == 2*time.Second {
+				var cancel context.CancelFunc
+				ctx, cancel = context.WithTimeout(ctx, tc.limit)
+				defer cancel()
+				parent, _ = ctx.Deadline()
+			}
+			calls := 0
+			http.DefaultTransport = roundTripFunc(func(r *http.Request) (*http.Response, error) {
+				calls++
+				deadline, ok := r.Context().Deadline()
+				remaining := time.Until(deadline)
+				if !ok || remaining > tc.limit || remaining < tc.limit-time.Second || !parent.IsZero() && !deadline.Equal(parent) {
+					t.Errorf("transport deadline=%v remaining=%v, want %v (parent=%v)", deadline, remaining, tc.limit, parent)
+				}
+				var request struct {
+					TaskType string            `json:"task_type"`
+					Options  map[string]string `json:"options"`
+				}
+				if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+					t.Fatal(err)
+				}
+				if request.TaskType != tc.task || !reflect.DeepEqual(request.Options, map[string]string{"task_version": paperguide.TaskVersion}) {
+					t.Fatalf("wire contract changed: %+v", request)
+				}
+				return testJSONResponse(200, string(mustJSON(map[string]any{"status": "succeeded", "output": map[string]any{"accepted": true}, "usage": map[string]any{"model_calls": 1, "task_type": tc.task, "task_version": paperguide.TaskVersion}}))), nil
+			})
+			if _, err := paperGuideService().Call(ctx, tc.task, map[string]any{}, nil); err != nil || calls != 1 {
+				t.Fatalf("calls=%d err=%v", calls, err)
+			}
+		})
 	}
 }

@@ -1,8 +1,10 @@
 import json
+from types import SimpleNamespace
 
 import pytest
 
 from lazymind.chat.service import llm_task
+from lazymind.structured_tasks import runner
 
 
 SOURCE_ID = 'ev_' + 'a' * 64
@@ -37,7 +39,7 @@ def test_extract_one_call_and_binds_evidence(monkeypatch, output, error):
     }]}
     request = llm_task.LLMTaskRequest(
         task_type='paper.guide.extract',
-        options={'task_version': 'paper-guide-v12'},
+        options={'task_version': 'paper-guide-v13'},
         input={'data': input_data})
     result = llm_task.run_llm_task(request)
     assert result.error_code == error
@@ -89,7 +91,7 @@ def test_guide_chain_accepts_versioned_shapes_and_rejects_invalid_bindings(monke
     monkeypatch.setattr(llm_task, 'AutoModel', lambda **kwargs: model)
     request = llm_task.LLMTaskRequest(
         task_type=f'paper.guide.{task}',
-        options={'task_version': 'paper-guide-v12'},
+        options={'task_version': 'paper-guide-v13'},
         input={'data': {'language': 'en', 'evidence': [EVIDENCE], **data}})
     good = llm_task.run_llm_task(request)
     assert good.status == 'succeeded'
@@ -99,12 +101,66 @@ def test_guide_chain_accepts_versioned_shapes_and_rejects_invalid_bindings(monke
     assert len(calls) == 2
 
 
+@pytest.mark.parametrize(('task', 'data', 'output', 'window', 'finished', 'error'), [
+    ('plan', {}, PLAN, 180, 150, None),
+    ('plan', {}, PLAN, 180, 180, 'request_timeout'),
+    ('extract', {}, {'claims': [], 'open_questions': []}, 120, 120, 'request_timeout'),
+    ('section', {'plan': PLAN, 'role': 'background'}, SECTION, 120, 120, 'request_timeout'),
+    ('review', {'plan': PLAN, 'sections': [SECTION]}, {'findings': []}, 120, 120, 'request_timeout'),
+])
+def test_registered_guide_uses_remaining_model_time_and_rejects_late_success(
+        monkeypatch, task, data, output, window, finished, error):
+    started = now = 100
+    clock = SimpleNamespace(monotonic=lambda: now)
+    monkeypatch.setattr(runner, 'time', clock)
+    monkeypatch.setattr(llm_task, 'time', clock)
+    request = llm_task.LLMTaskRequest(
+        task_type=f'paper.guide.{task}', options={'task_version': 'paper-guide-v13'},
+        input={'data': {'language': 'en', 'evidence': [EVIDENCE], **data}})
+    attempts = []
+    actual_call = llm_task._call_model
+
+    def call(request, prompt, **options):
+        assert options['default_timeout'] == window
+        assert options['deadline'] == started + window
+        return actual_call(request, prompt, **options)
+
+    def make_model(**_kwargs):
+        nonlocal now
+        now += 7
+
+        def model(_prompt, **options):
+            nonlocal now
+            attempts.append(options)
+            assert options['timeout'] == window - 7
+            assert options['max_retries'] == 1
+            assert options['stream_output'] is False
+            assert not options['call_control'].cancel_check()
+            now = started + finished
+            assert options['call_control'].cancel_check() == (finished >= window)
+            # An integration can return a full response after the deadline.
+            return mock_model_json(output)
+
+        return model
+
+    monkeypatch.setattr(llm_task, '_call_model', call)
+    monkeypatch.setattr(llm_task, 'AutoModel', make_model)
+    result = llm_task.run_llm_task(request)
+    assert result.error_code == error
+    assert result.output == (output if error is None else {})
+    assert len(attempts) == result.usage['model_calls'] == 1
+
+    request.options['timeout_seconds'] = 900
+    assert llm_task.run_llm_task(request).error_code == 'invalid_task_input'
+    assert len(attempts) == 1
+
+
 def test_guide_rejects_tools_and_paths_before_model(monkeypatch):
     monkeypatch.setattr(llm_task, 'AutoModel', lambda **kwargs: pytest.fail('must not reach model'))
     data = {'language': 'en', 'evidence': [EVIDENCE], 'output_path': '/tmp/override'}
     request = llm_task.LLMTaskRequest(
         task_type='paper.guide.extract',
-        options={'task_version': 'paper-guide-v12'},
+        options={'task_version': 'paper-guide-v13'},
         input={'data': data})
     assert llm_task.run_llm_task(request).error_code == 'invalid_task_input'
     request.input.data.pop('output_path')
@@ -126,7 +182,7 @@ def test_guide_rejects_duplicate_json_keys_with_one_call(monkeypatch, raw):
 
     monkeypatch.setattr(llm_task, 'AutoModel', lambda **kwargs: model)
     request = llm_task.LLMTaskRequest(
-        task_type='paper.guide.extract', options={'task_version': 'paper-guide-v12'},
+        task_type='paper.guide.extract', options={'task_version': 'paper-guide-v13'},
         input={'data': {'language': 'en', 'evidence': [EVIDENCE]}})
     result = llm_task.run_llm_task(request)
     assert result.error_code == 'invalid_model_output'
@@ -149,7 +205,7 @@ def test_section_requires_planned_claims_and_evidence_closure(monkeypatch):
     section['blocks'][0].update(claim_ids=['required'], evidence_ids=[])
     monkeypatch.setattr(llm_task, 'AutoModel', lambda **kwargs: lambda *a, **k: mock_model_json(section))
     request = llm_task.LLMTaskRequest(
-        task_type='paper.guide.section', options={'task_version': 'paper-guide-v12'},
+        task_type='paper.guide.section', options={'task_version': 'paper-guide-v13'},
         input={'data': {'plan': plan, 'role': 'background', 'language': 'en', 'evidence': [EVIDENCE]}})
     assert llm_task.run_llm_task(request).status == 'succeeded'
     request.input.data['evidence'] = [other]
@@ -172,7 +228,7 @@ def test_full_review_validates_unique_targets_even_without_findings(monkeypatch,
                  'evidence_ids': [SOURCE_ID], 'argument_type': None, 'conditions': [], 'support_status': 'supported'}
         sections.append({**SECTION, 'role': role, 'title': role.title(), 'blocks': [block], 'claims': [claim]})
     request = llm_task.LLMTaskRequest(
-        task_type='paper.guide.review', options={'task_version': 'paper-guide-v12'},
+        task_type='paper.guide.review', options={'task_version': 'paper-guide-v13'},
         input={'data': {'plan': PLAN, 'sections': sections, 'language': 'en', 'evidence': [EVIDENCE]}})
     result = llm_task.run_llm_task(request)
     assert result.error_code == (None if collision == 'none' else 'invalid_task_input')
@@ -188,7 +244,7 @@ def test_guide_math_preserves_compact_comparisons_without_html(monkeypatch, body
     raw = {'claims': [], 'open_questions': [body]}
     monkeypatch.setattr(llm_task, 'AutoModel', lambda **kwargs: lambda *a, **k: json.dumps(raw))
     request = llm_task.LLMTaskRequest(
-        task_type='paper.guide.extract', options={'task_version': 'paper-guide-v12'},
+        task_type='paper.guide.extract', options={'task_version': 'paper-guide-v13'},
         input={'data': {'language': 'en', 'evidence': [EVIDENCE]}})
     assert llm_task.run_llm_task(request).error_code == error
 
@@ -331,7 +387,6 @@ def _request_budget_contract():
 
 @pytest.mark.parametrize('language', ['en', 'zh'])
 def test_all_actual_guide_templates_fit_shared_prompt_reserve(language):
-    from types import SimpleNamespace
     from lazymind.structured_tasks.registry import TASKS, PAPER_GUIDE_VERSION
     from lazyllm.module.llms.onlinemodule.supplier.openai import OpenAIChat
     budget = _request_budget_contract()
@@ -399,7 +454,7 @@ def test_all_guide_input_default_expansion_fits_shared_bound(task, count, all_ta
 
 
 @pytest.mark.parametrize('task', ['extract', 'plan', 'section', 'review'])
-@pytest.mark.parametrize('version', ['paper-guide-v7', 'paper-guide-v10', 'paper-guide-v11'])
+@pytest.mark.parametrize('version', ['paper-guide-v7', 'paper-guide-v10', 'paper-guide-v11', 'paper-guide-v12'])
 def test_previous_guide_contract_rejected_before_provider_setup(monkeypatch, task, version):
     monkeypatch.setattr(llm_task, 'AutoModel', lambda **kwargs: pytest.fail('old contract reached provider'))
     request = llm_task.LLMTaskRequest(
@@ -454,7 +509,7 @@ def test_explanation_responsibilities_reach_model_with_actual_scope(monkeypatch,
         data['sections'] = sections if scope == 'whole_review' else [sections[2]]
     request = llm_task.LLMTaskRequest(
         task_type=f'paper.guide.{task}',
-        options={'task_version': 'paper-guide-v12'}, input={'data': data})
+        options={'task_version': 'paper-guide-v13'}, input={'data': data})
     result = llm_task.run_llm_task(request)
     assert result.status == 'succeeded'
     assert result.output == output

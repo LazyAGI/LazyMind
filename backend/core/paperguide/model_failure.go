@@ -3,8 +3,22 @@ package paperguide
 import (
 	"context"
 	"errors"
+	"time"
+
 	"lazymind/core/asyncjob"
 )
+
+// A deadline already passed at observation even if cancellation has not
+// propagated yet. time.Time preserves the monotonic comparison.
+func contextErrorAt(ctx context.Context, observed time.Time) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if deadline, ok := ctx.Deadline(); ok && !observed.Before(deadline) {
+		return context.DeadlineExceeded
+	}
+	return nil
+}
 
 // Classify only safe causes/classes. Parent cancellation or the run's active
 // deadline takes precedence over the child model-call deadline.

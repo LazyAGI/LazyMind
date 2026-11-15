@@ -403,7 +403,7 @@ func TestLocalRepairKeepsUnknownV3AttemptChargedOnResume(t *testing.T) {
 		t.Fatal("interrupted v3 call finished")
 	}
 	row := h.row()
-	if row.CallsUsed != 6 || row.RecoveryCalls != 0 || row.CorrectionCount != 2 || row.ActiveMillis < callMillis || h.checkpoints()[localV3+":draft"].ID != "" {
+	if row.CallsUsed != 6 || row.RecoveryCalls != 0 || row.CorrectionCount != 2 || row.ActiveMillis < 120000 || h.checkpoints()[localV3+":draft"].ID != "" {
 		t.Fatalf("lost unknown reservation: %+v", row)
 	}
 	h.onV3 = nil
@@ -418,7 +418,7 @@ func TestLocalRepairKeepsUnknownV3AttemptChargedOnResume(t *testing.T) {
 			unknown++
 		}
 	}
-	if after := h.row(); unknown != 1 || after.ActiveMillis < callMillis {
+	if after := h.row(); unknown != 1 || after.ActiveMillis < 120000 {
 		t.Fatalf("unknown request refunded: unknown=%d active=%d", unknown, after.ActiveMillis)
 	}
 }

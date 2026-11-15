@@ -14,8 +14,6 @@ import (
 	"time"
 )
 
-const callMillis = int64(120000)
-
 type execution struct {
 	started          time.Time
 	callTime         int64
@@ -71,10 +69,10 @@ func (s Service) Run(ctx context.Context, job asyncjob.Job, reporter asyncjob.Re
 	defer cancelRun()
 	x.started = time.Now()
 	err := s.Repo.fenced(runCtx, f, rev.ID, rev.Epoch, func(tx *gorm.DB, r *orm.PaperGuideRevision, g *orm.PaperGuide) error {
-		if r.ActiveMillis+callMillis > MaxActiveMillis {
+		if r.ActiveMillis+localProcessingReserveMillis > MaxActiveMillis {
 			return ErrBudget
 		}
-		return tx.Model(r).Update("active_millis", gorm.Expr("active_millis + ?", callMillis)).Error
+		return tx.Model(r).Update("active_millis", gorm.Expr("active_millis + ?", localProcessingReserveMillis)).Error
 	})
 	if err == nil {
 		x.overheadReserved = true
@@ -117,7 +115,7 @@ func safeRunError(e error) error {
 
 func mustMarshal(v any) json.RawMessage { b, _ := json.Marshal(v); return b }
 func (x *execution) check(ctx context.Context) (map[string]any, error) {
-	if !x.started.IsZero() && time.Since(x.started).Milliseconds()-x.callTime >= callMillis {
+	if !x.started.IsZero() && time.Since(x.started).Milliseconds()-x.callTime >= localProcessingReserveMillis {
 		return nil, ErrBudget
 	}
 	if e := x.s.Repo.CheckContract(ctx, x.rev); e != nil {
@@ -681,6 +679,8 @@ func (x *execution) task(ctx context.Context, key, task string, input map[string
 		}
 		return validate()
 	}
+	attemptTimeout := ModelAttemptTimeout(task)
+	attemptMillis := attemptTimeout.Milliseconds()
 	for retry := 0; retry < 2; retry++ {
 		cfg, e := x.check(ctx)
 		if e != nil {
@@ -695,10 +695,10 @@ func (x *execution) task(ctx context.Context, key, task string, input map[string
 			}
 			recovery := attempts > 0
 			extract := task == "paper.guide.extract"
-			if r.CallsUsed >= 24 || r.ActiveMillis+callMillis > MaxActiveMillis || recovery && r.RecoveryCalls >= 2 || !recovery && !extract && r.PlannedCalls >= 14 || extract && !recovery && r.ExtractCalls >= 8 {
+			if r.CallsUsed >= 24 || r.ActiveMillis+attemptMillis > MaxActiveMillis || recovery && r.RecoveryCalls >= 2 || !recovery && !extract && r.PlannedCalls >= 14 || extract && !recovery && r.ExtractCalls >= 8 {
 				return ErrBudget
 			}
-			updates := map[string]any{"calls_used": gorm.Expr("calls_used + 1"), "active_millis": gorm.Expr("active_millis + ?", callMillis)}
+			updates := map[string]any{"calls_used": gorm.Expr("calls_used + 1"), "active_millis": gorm.Expr("active_millis + ?", attemptMillis)}
 			if !recovery && !extract {
 				updates["planned_calls"] = gorm.Expr("planned_calls + 1")
 			}
@@ -716,20 +716,22 @@ func (x *execution) task(ctx context.Context, key, task string, input map[string
 		if e != nil {
 			return e
 		}
-		callCtx, cancel := context.WithTimeout(ctx, 120*time.Second)
+		callCtx, cancel := context.WithTimeout(ctx, attemptTimeout)
 		raw, callErr := x.s.Call(callCtx, task, input, cfg)
-		// Read the child's cause BEFORE our cleanup cancel; a transport wrapper may
-		// have hidden DeadlineExceeded. The parent identifies user/budget stops.
-		parentErr, callContextErr := ctx.Err(), callCtx.Err()
+		// Observe both contexts before our cleanup cancel. Parent stops take
+		// precedence, and a returned result can race the timer's cancellation.
+		finished := time.Now()
+		parentErr, callContextErr := contextErrorAt(ctx, finished), contextErrorAt(callCtx, finished)
 		diagnostic, callErr := classifyModelCall(parentErr, callContextErr, callErr)
 		cancel()
-		elapsed := time.Since(started).Milliseconds()
-		x.callTime += elapsed
-		if elapsed > callMillis {
-			elapsed = callMillis
-		}
+		observedMillis := finished.Sub(started).Milliseconds()
+		x.callTime += observedMillis
 		if parentErr != nil {
 			return callErr
+		}
+		elapsed := min(observedMillis, attemptMillis)
+		if errors.Is(callContextErr, context.DeadlineExceeded) {
+			elapsed = attemptMillis
 		}
 		if callErr == nil {
 			if err := decodeStrict(raw, out); err != nil {
@@ -739,7 +741,7 @@ func (x *execution) task(ctx context.Context, key, task string, input map[string
 			}
 		}
 		// Settle only this invocation, once. Unknown crashed requests retain
-		// the 120-second reservation; diagnostic metadata never includes raw
+		// the full attempt reservation; diagnostic metadata never includes raw
 		// provider errors, model config or private source text.
 		e = x.s.Repo.fenced(ctx, x.f, x.rev.ID, x.rev.Epoch, func(tx *gorm.DB, r *orm.PaperGuideRevision, g *orm.PaperGuide) error {
 			marker := tx.Model(&orm.PaperGuideStep{}).Where("revision_id = ? AND step_key = ? AND output_json = ?", r.ID, ticket, "").Update("output_json", string(mustMarshal(map[string]any{"task": task, "error_class": diagnostic, "elapsed_ms": elapsed})))
@@ -749,7 +751,7 @@ func (x *execution) task(ctx context.Context, key, task string, input map[string
 			if marker.RowsAffected != 1 {
 				return ErrConflict
 			}
-			return tx.Model(r).Update("active_millis", gorm.Expr("active_millis - ?", callMillis-elapsed)).Error
+			return tx.Model(r).Update("active_millis", gorm.Expr("active_millis - ?", attemptMillis-elapsed)).Error
 		})
 		if e != nil {
 			return e
@@ -825,7 +827,7 @@ func (x *execution) settleOverhead(ctx context.Context) error {
 		elapsed = 0
 	}
 	err := x.s.Repo.fenced(ctx, x.f, x.rev.ID, x.rev.Epoch, func(tx *gorm.DB, r *orm.PaperGuideRevision, g *orm.PaperGuide) error {
-		return tx.Model(r).Update("active_millis", gorm.Expr("active_millis - ?", callMillis-elapsed)).Error
+		return tx.Model(r).Update("active_millis", gorm.Expr("active_millis - ?", localProcessingReserveMillis-elapsed)).Error
 	})
 	if err == nil {
 		x.overheadReserved = false
