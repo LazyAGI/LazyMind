@@ -143,7 +143,9 @@ func TestExtractPlanningRetainsCompletePhysicalTableEvenWithoutExtractClaim(t *t
 		pdfir.Block{ID: "late-eq", Type: "formula", Page: 1, BBox: []float64{.3, .6, .6, .8}, Latex: "y = x^2"})
 	contained := []string{}
 	d.Precision.PageOnlyBlockIDs = &contained
-	snap, e := BuildSourceSnapshot(d, id)
+	snap, e := BuildSourceSnapshotWithFigureProofs(d, id, []pdfir.OriginalFigureProof{
+		{BlockID: "late-fig", Type: "chart", Page: 1, Parts: [][]float64{{.3, .2, .6, .5}}},
+	})
 	if e != nil {
 		t.Fatal(e)
 	}

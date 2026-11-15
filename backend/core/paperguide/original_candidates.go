@@ -27,8 +27,8 @@ func originalDisplayMode(o *GuideOriginalDisplay) string {
 func selectOriginalAssets(s GuideSourceSnapshot, retained map[string]bool) originalAssetCandidates {
 	type ranked struct {
 		originalAssetCandidate
-		section, page, order int
-		context, identity    int
+		section, page, order           int
+		association, context, identity int
 	}
 	ranks := map[string][]ranked{}
 	order := map[string]int{}
@@ -63,9 +63,9 @@ func selectOriginalAssets(s GuideSourceSnapshot, retained map[string]bool) origi
 				continue
 			}
 		}
-		context := 0
+		context, association := 0, 0
 		if index >= 0 && s.Sections[index].Kind != "page_group" {
-			context++
+			association = 1
 		}
 		if keptSection[index] {
 			context++
@@ -74,7 +74,7 @@ func selectOriginalAssets(s GuideSourceSnapshot, retained map[string]bool) origi
 			context++
 		}
 		if retained[a.ID] {
-			context += 3
+			association = 3
 		}
 		signals := 0
 		if o.Caption != "" || o.Number != "" {
@@ -86,11 +86,11 @@ func selectOriginalAssets(s GuideSourceSnapshot, retained map[string]bool) origi
 			}
 			for _, id := range blockEvidence[related.BlockID] {
 				if retained[id] {
-					signals = 2
+					association = max(association, 2)
 				}
 			}
 		}
-		ranks[a.Kind] = append(ranks[a.Kind], ranked{originalAssetCandidate{a.ID, originalDisplayMode(o)}, index, o.Page, order[a.ID], context, signals})
+		ranks[a.Kind] = append(ranks[a.Kind], ranked{originalAssetCandidate{a.ID, originalDisplayMode(o)}, index, o.Page, order[a.ID], association, context, signals})
 	}
 	pick := func(items []ranked, limit int) []originalAssetCandidate {
 		out := make([]originalAssetCandidate, 0, limit)
@@ -115,6 +115,9 @@ func selectOriginalAssets(s GuideSourceSnapshot, retained map[string]bool) origi
 				a, b := items[i], items[j]
 				if (a.Mode == mode) != (b.Mode == mode) {
 					return a.Mode == mode
+				}
+				if a.association != b.association {
+					return a.association > b.association
 				}
 				if usedPages[a.page] != usedPages[b.page] {
 					return usedPages[a.page] < usedPages[b.page]

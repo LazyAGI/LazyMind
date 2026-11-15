@@ -125,7 +125,14 @@ func TestPrecisionVerifiedPayloadReachesGuideCatalog(t *testing.T) {
 				captionSpan["bbox"] = []int{10, 2, 90, 8}
 				caption := block(kind+"_caption", captionSpan)
 				caption["bbox"] = []int{10, 2, 90, 8}
-				children := []any{caption, block(kind+"_footnote", span("text", "Synthetic proven footnote"))}
+				noteSpan := span("text", "Synthetic proven footnote")
+				noteSpan["bbox"] = []int{10, 81, 90, 86}
+				note := block(kind+"_footnote", noteSpan)
+				note["bbox"] = noteSpan["bbox"]
+				children := []any{caption, note}
+				if kind == "image" {
+					children = append(children, block("image_body", span("image", "")))
+				}
 				want = []string{label, "Synthetic proven footnote"}
 				if kind == "table" {
 					body := "<table><tr><td>Synthetic proven cell</td><td><eq>x_i</eq></td></tr></table>"
@@ -148,11 +155,11 @@ func TestPrecisionVerifiedPayloadReachesGuideCatalog(t *testing.T) {
 			if e != nil {
 				t.Fatal(e)
 			}
-			d, e := pdfir.ProjectSourcePrecision(base, raw.Bytes())
+			d, proofs, e := pdfir.ProjectGuideSourcePrecision(base, raw.Bytes())
 			if e != nil {
 				t.Fatal(e)
 			}
-			s, e := paperguide.BuildSourceSnapshot(d, paperguide.SourceIdentity{SourceSHA256: base.SourceSHA256, OwnerID: "synthetic", DatasetID: "synthetic", DocumentID: "synthetic"})
+			s, e := paperguide.BuildSourceSnapshotWithFigureProofs(d, paperguide.SourceIdentity{SourceSHA256: base.SourceSHA256, OwnerID: "synthetic", DatasetID: "synthetic", DocumentID: "synthetic"}, proofs)
 			if e != nil {
 				t.Fatal(e)
 			}

@@ -8,7 +8,7 @@ import { useGuideSourcePreview } from "./useGuideSourcePreview";
 
 vi.mock("react-pdf", async () => ({ pdfjs: await import("pdfjs-dist/legacy/build/pdf.mjs") }));
 
-it("renders pixels from only the chosen physical figure on page 2 of an authenticated PDF", async () => {
+it("renders exact figure and equation pixels on their own pages of an authenticated PDF", async () => {
   const require = createRequire(import.meta.url);
   // PDF.js already supplies this native Node canvas dependency. Reuse it so
   // the test checks final PNG pixels rather than a mocked draw call or <img>.
@@ -28,6 +28,16 @@ it("renders pixels from only the chosen physical figure on page 2 of an authenti
   source.rect(50, 94, 40, 6, "F"); // independent footnote, within prior padding
   source.setFillColor(255, 0, 255);
   source.rect(101, 50, 40, 40, "F"); // distinct adjacent chart
+  source.addPage();
+  source.setDrawColor(255, 255, 0);
+  source.setLineWidth(3);
+  // A vector x = y in the original PDF, separate from the figure pixels.
+  source.line(40, 50, 53, 70);
+  source.line(53, 50, 40, 70);
+  source.line(61, 57, 77, 57);
+  source.line(61, 63, 77, 63);
+  source.line(85, 50, 93, 61);
+  source.line(101, 50, 89, 73);
   const data = source.output("arraybuffer");
   const sha256 = createHash("sha256").update(new Uint8Array(data)).digest("hex");
 
@@ -56,8 +66,9 @@ it("renders pixels from only the chosen physical figure on page 2 of an authenti
     },
     revokeObjectURL(url: string) { images.delete(url); },
   }));
+  const fileBytes = () => data.slice(0);
   const hook = renderHook(() =>
-    useGuideSourcePreview("paper/revision/v17", sha256, true, sha256, () => data.slice(0)),
+    useGuideSourcePreview("paper/revision/v17", sha256, true, sha256, fileBytes),
   );
   const evidence = {
     id: "f", source_block_id: "figure", source_type: "chart", text: "Figure synthetic blue marker",
@@ -72,14 +83,19 @@ it("renders pixels from only the chosen physical figure on page 2 of an authenti
     return [...ctx.getImageData(x, y, 1, 1).data];
   };
   try {
-    const crop = await hook.result.current(evidence, { kind: "figure", page: 1, bbox: [.25, .25, .45, .45] });
+    const crop = await hook.result.current.preview(evidence, { kind: "figure", page: 1, bbox: [.25, .25, .45, .45] });
     expect(crop).toMatchObject({ mode: "region", width: 60, height: 60 });
     expect(await pixels(crop!.url, 30, 30)).toEqual([0, 0, 255, 255]);
-    const full = await hook.result.current(evidence, { kind: "figure", page: 1 });
+    const full = await hook.result.current.preview(evidence, { kind: "figure", page: 1 });
     expect(full).toMatchObject({ mode: "page", width: 300, height: 300 });
     expect(await pixels(full!.url, 90, 90)).toEqual([0, 0, 255, 255]);
     expect(await pixels(full!.url, 90, 145)).toEqual([0, 255, 0, 255]);
     expect(await pixels(full!.url, 160, 90)).toEqual([255, 0, 255, 255]);
+    const eq = await hook.result.current.preview({
+      ...evidence, id: "eq", source_type: "formula", locator: { kind: "page", page: 2 },
+    }, { kind: "formula", page: 2, bbox: [.19,.23,.53,.39] });
+    expect(eq).toMatchObject({ mode: "region", width: 102, height: 48 });
+    expect(await pixels(eq!.url, 43, 16)).toEqual([255, 255, 0, 255]);
   } finally {
     hook.unmount();
     vi.restoreAllMocks();

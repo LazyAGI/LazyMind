@@ -153,6 +153,21 @@ func readPrecisionLayout(raw []byte) ([]byte, error) {
 // ProjectSourcePrecision uses only a retained source-matched producer archive.
 // It has no parser/network dependency and either covers all merged text or fails.
 func ProjectSourcePrecision(base Document, raw []byte) (Document, error) {
+	return projectSourcePrecision(base, raw, nil)
+}
+
+// ProjectGuideSourcePrecision obtains figure proofs from the same archive
+// verification pass. The returned Document is byte-identical to the v3 IR.
+func ProjectGuideSourcePrecision(base Document, raw []byte) (Document, []OriginalFigureProof, error) {
+	proofs := []OriginalFigureProof{}
+	d, err := projectSourcePrecision(base, raw, &proofs)
+	if err != nil {
+		return Document{}, nil, err
+	}
+	return d, uniqueOriginalFigureProofs(proofs, base.Blocks), nil
+}
+
+func projectSourcePrecision(base Document, raw []byte, figures *[]OriginalFigureProof) (Document, error) {
 	fail := func(e error) (Document, error) { return Document{}, e }
 	if base.Precision != nil {
 		return fail(precisionError("expected base IR"))
@@ -234,7 +249,15 @@ func ProjectSourcePrecision(base Document, raw []byte) (Document, error) {
 		return fail(e)
 	}
 	covered := make([]bool, len(items))
-	if e = verifyPrecisionPayloads(items, l.Pages, covered); e != nil {
+	var collectFigure func(int, contentItem, precisionBlock, []float64)
+	if figures != nil {
+		collectFigure = func(i int, item contentItem, parent precisionBlock, size []float64) {
+			if item.Type == "image" || item.Type == "chart" {
+				*figures = append(*figures, proveOriginalFigure(base.Blocks[i], item, parent, size))
+			}
+		}
+	}
+	if e = verifyPrecisionPayloads(items, l.Pages, covered, collectFigure); e != nil {
 		return fail(e)
 	}
 	baseJSON, err := json.Marshal(base)

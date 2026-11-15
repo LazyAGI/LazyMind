@@ -82,7 +82,8 @@ func (paperGuideSource) Load(ctx context.Context, scope paperguide.Scope, prepar
 	}
 	out.DependencyFailed = status.Status == "failed"
 	if status.Document != nil {
-		precise, _, err := loadGuidePrecision(*status.Document, status.Artifact, prepare)
+		var figures []pdfir.OriginalFigureProof
+		precise, _, err := loadGuidePrecisionWithFigures(*status.Document, status.Artifact, prepare, &figures)
 		if err != nil {
 			out.DependencyFailed = true
 			out.PrecisionUnavailable = true
@@ -91,12 +92,12 @@ func (paperGuideSource) Load(ctx context.Context, scope paperguide.Scope, prepar
 			}
 			return out, nil
 		}
-		snapshot, e := paperguide.BuildSourceSnapshot(precise, paperguide.SourceIdentity{SourceSHA256: hash, OwnerID: scope.OwnerID, DatasetID: scope.DatasetID, DocumentID: scope.DocumentID})
+		snapshot, e := paperguide.BuildSourceSnapshotWithFigureProofs(precise, paperguide.SourceIdentity{SourceSHA256: hash, OwnerID: scope.OwnerID, DatasetID: scope.DatasetID, DocumentID: scope.DocumentID}, figures)
 		if e != nil {
 			return out, paperguide.ErrEvidence
 		}
 		dir := filepath.Join(filepath.Dir(pdfIRSource(ext)), ".lazymind-artifacts", row.ID, "paper-guides", pdfir.Digest(scope.OwnerID))
-		path := filepath.Join(dir, hash+"-"+snapshot.IRDigest+"-"+snapshot.CatalogVersion+".json")
+		path := filepath.Join(dir, snapshot.SnapshotFilename())
 		// This immutable personal snapshot is independent of the shared parser cache.
 		// It contains no original PDF copy or model credentials.
 		if _, e = os.Stat(path); prepare && errors.Is(e, os.ErrNotExist) {
@@ -181,6 +182,11 @@ func (paperGuideSource) Read(ctx context.Context, path string) (paperguide.Guide
 	}
 	defer f.Close()
 	e = json.NewDecoder(io.LimitReader(f, 64<<20)).Decode(&snap)
+	name := filepath.Base(path)
+	boundPath := strings.Contains(name, "-"+paperguide.SourceCatalogVersion+"-")
+	if e == nil && (boundPath || snap.CatalogVersion == paperguide.SourceCatalogVersion) && name != snap.SnapshotFilename() {
+		return paperguide.GuideSourceSnapshot{}, paperguide.ErrEvidence
+	}
 	return snap, e
 }
 func resolvePaperGuideModel(ctx context.Context, scope paperguide.Scope, ref string) (paperguide.ModelIdentity, map[string]any, error) {

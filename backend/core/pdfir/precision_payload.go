@@ -194,7 +194,7 @@ func precisionItemType(item, para string) bool {
 	}
 	return item == para
 }
-func verifyPrecisionPayloads(items []contentItem, pages []precisionPage, covered []bool) error {
+func verifyPrecisionPayloads(items []contentItem, pages []precisionPage, covered []bool, collectFigure func(int, contentItem, precisionBlock, []float64)) error {
 	type placed struct {
 		page  int
 		size  []float64
@@ -302,6 +302,9 @@ func verifyPrecisionPayloads(items []contentItem, pages []precisionPage, covered
 		}
 		if item.Type == "image" && (!precisionAssetStrings(item.ImageCaptions, para, "image_caption") || !precisionAssetStrings(item.ImageFootnotes, para, "image_footnote")) {
 			return bad("image caption or footnote differs from complete producer render")
+		}
+		if collectFigure != nil {
+			collectFigure(i, item, para, size)
 		}
 	}
 	return nil

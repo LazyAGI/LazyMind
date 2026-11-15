@@ -158,3 +158,47 @@ func TestGuidePrecisionLoaderRejectsUnboundCanonicalPayload(t *testing.T) {
 		t.Fatal("canonical source changed")
 	}
 }
+
+func TestGuideSnapshotPathBindsOriginalFigureProofEvenIfArtifactRehashesIt(t *testing.T) {
+	hash := strings.Repeat("a", 64)
+	raw, base := guidePrecisionFixture(t, hash)
+	projected, err := pdfir.ProjectSourcePrecision(base, raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	block := pdfir.Block{ID: "test-chart", Type: "chart", Page: 0, BBox: []float64{.1, .2, .3, .4}}
+	projected.Blocks = append(projected.Blocks, block)
+	id := paperguide.SourceIdentity{SourceSHA256: hash, DatasetID: "data", DocumentID: "paper", OwnerID: "owner"}
+	proof := pdfir.OriginalFigureProof{BlockID: block.ID, Type: block.Type, Page: block.Page, Parts: [][]float64{block.BBox}}
+	s, err := paperguide.BuildSourceSnapshotWithFigureProofs(projected, id, []pdfir.OriginalFigureProof{proof})
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), s.SnapshotFilename())
+	write := func(snapshot paperguide.GuideSourceSnapshot) {
+		data, err := json.Marshal(snapshot)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err = os.WriteFile(path, data, 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write(s)
+	source := paperGuideSource{}
+	if _, err = source.Read(t.Context(), path); err != nil {
+		t.Fatal(err)
+	}
+	proof.Parts = [][]float64{{.15, .2, .3, .4}}
+	forged, err := paperguide.BuildSourceSnapshotWithFigureProofs(projected, id, []pdfir.OriginalFigureProof{proof})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = paperguide.ValidateSnapshot(forged, id, s.IRDigest); err != nil {
+		t.Fatal("fixture should be internally consistent", err)
+	}
+	write(forged)
+	if _, err = source.Read(t.Context(), path); !errors.Is(err, paperguide.ErrEvidence) {
+		t.Fatalf("rehashed proof replaced the path commitment: %v", err)
+	}
+}

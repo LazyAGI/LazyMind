@@ -27,7 +27,7 @@ func ValidateSnapshot(s GuideSourceSnapshot, identity SourceIdentity, irDigest s
 	}
 	d := pdfir.Document{Precision: s.Precision, Version: s.IRVersion, ProjectionVersion: s.ProjectionVersion, SourceSHA256: s.Identity.SourceSHA256,
 		Parser: s.Parser, CoordinateSpace: s.CoordinateSpace, Pages: s.Pages, Blocks: s.Blocks, Warnings: warnings}
-	original, err := buildSourceSnapshot(d, identity, s.CatalogVersion)
+	original, err := buildSourceSnapshot(d, identity, s.CatalogVersion, s.FigureProofs...)
 	if err != nil || !reflect.DeepEqual(s, original) {
 		return fmt.Errorf("%w: catalog mismatch", ErrInvalidSource)
 	}

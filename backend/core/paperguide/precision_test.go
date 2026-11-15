@@ -281,7 +281,9 @@ func TestOriginalDisplayEvidenceIsCurrentAndRevisionScoped(t *testing.T) {
 	}
 	contained := []string{}
 	d.Precision = &pdfir.SourcePrecision{Version: 3, SourceSHA256: identity.SourceSHA256, BaseIRDigest: pdfir.Digest("synthetic-base"), ArchiveDigest: pdfir.Digest("synthetic-archive"), PageOnlyBlockIDs: &contained}
-	current, err := BuildSourceSnapshot(d, identity)
+	current, err := BuildSourceSnapshotWithFigureProofs(d, identity, []pdfir.OriginalFigureProof{
+		{BlockID: "synthetic-chart", Type: "chart", Page: 1, Parts: [][]float64{{.1, .2, .3, .4}}},
+	})
 	if err != nil {
 		t.Fatal(err)
 	}

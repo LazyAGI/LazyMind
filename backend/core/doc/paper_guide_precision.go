@@ -15,6 +15,10 @@ import (
 // upgrade path. Neither the base IR nor its retained ZIP is ever rewritten.
 // prepare=false is read-only, including when the immutable sibling is absent.
 func loadGuidePrecision(base pdfir.Document, result pdfIRResult, prepare bool) (pdfir.Document, string, error) {
+	return loadGuidePrecisionWithFigures(base, result, prepare, nil)
+}
+
+func loadGuidePrecisionWithFigures(base pdfir.Document, result pdfIRResult, prepare bool, figures *[]pdfir.OriginalFigureProof) (pdfir.Document, string, error) {
 	f, err := os.Open(result.RawPath)
 	if err != nil {
 		return pdfir.Document{}, "", err
@@ -24,7 +28,12 @@ func loadGuidePrecision(base pdfir.Document, result pdfIRResult, prepare bool) (
 	if err != nil {
 		return pdfir.Document{}, "", err
 	}
-	enriched, err := pdfir.ProjectSourcePrecision(base, raw)
+	var enriched pdfir.Document
+	if figures == nil {
+		enriched, err = pdfir.ProjectSourcePrecision(base, raw)
+	} else {
+		enriched, *figures, err = pdfir.ProjectGuideSourcePrecision(base, raw)
+	}
 	if err != nil {
 		return pdfir.Document{}, "", err
 	}

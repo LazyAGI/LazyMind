@@ -22,9 +22,15 @@ func BuildSourceSnapshot(d pdfir.Document, identity SourceIdentity) (GuideSource
 	return buildSourceSnapshot(d, identity, SourceCatalogVersion)
 }
 
+// BuildSourceSnapshotWithFigureProofs consumes the independent proof returned
+// alongside the verified v3 document by pdfir.ProjectGuideSourcePrecision.
+func BuildSourceSnapshotWithFigureProofs(d pdfir.Document, identity SourceIdentity, proofs []pdfir.OriginalFigureProof) (GuideSourceSnapshot, error) {
+	return buildSourceSnapshot(d, identity, SourceCatalogVersion, proofs...)
+}
+
 // Empty catalogVersion is the original frozen catalog. Keep its construction
 // rules intact so existing guides and exact selections remain verifiable.
-func buildSourceSnapshot(d pdfir.Document, identity SourceIdentity, catalogVersion string) (GuideSourceSnapshot, error) {
+func buildSourceSnapshot(d pdfir.Document, identity SourceIdentity, catalogVersion string, proofs ...pdfir.OriginalFigureProof) (GuideSourceSnapshot, error) {
 	if catalogVersion != "" && catalogVersion != "paper-guide-source-v1" && catalogVersion != "paper-guide-source-v2" && catalogVersion != "paper-guide-source-v3" && catalogVersion != "paper-guide-source-v4" && catalogVersion != sourceCatalogV5 && catalogVersion != SourceCatalogVersion {
 		return GuideSourceSnapshot{}, fmt.Errorf("%w: unknown catalog version", ErrInvalidSource)
 	}
@@ -124,7 +130,15 @@ func buildSourceSnapshot(d pdfir.Document, identity SourceIdentity, catalogVersi
 	seen := make(map[string]bool, len(s.Blocks))
 	var original func(pdfir.Block, string, bool) *GuideOriginalDisplay
 	if catalogVersion == SourceCatalogVersion {
-		original = originalDisplayBuilder(frozen)
+		var err error
+		original, err = originalDisplayBuilder(frozen, proofs)
+		if err != nil {
+			return GuideSourceSnapshot{}, err
+		}
+		if len(proofs) > 0 {
+			s.FigureProofs = proofs
+			s.FigureProofDigest = digest([]any{identity, s.IRDigest, proofs})
+		}
 	}
 	warnings := map[int]bool{}
 	section := -1

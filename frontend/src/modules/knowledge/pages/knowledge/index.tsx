@@ -179,6 +179,7 @@ const KnowledgeDocumentContent = () => {
   const [guidePreviousPdfPosition,setGuidePreviousPdfPosition]=useState<{page:number;progress:number}>();
   useEffect(()=>setGuidePreviousPdfPosition(undefined),[knowledgeBaseId,knowledgeId]);
   const getGuidePdfData = useCallback(() => fileViewerRef.current?.getPdfData() || null, []);
+  const getGuidePdfVersion = useCallback(() => fileViewerRef.current?.getPdfVersion() ?? null, []);
   const paperChatRef = useRef<PdfTemporaryChatHandle>(null);
   const [canExportImagePdf, setCanExportImagePdf] = useState(false);
   const [exportingImagePdf, setExportingImagePdf] = useState(false);
@@ -1063,7 +1064,7 @@ const KnowledgeDocumentContent = () => {
     <div className={`knowledge-container is-document-reader !h-full !items-start${isPaperDocument ? " is-paper-document" : ""}`}>
       <div ref={workspaceRef} className="knowledge-preview-layout knowledge-paper-workspace" data-panel-layout={panelLayout} data-panel-open={!previewSideCollapsed} data-narrow={workspaceWidth<1100} data-compact={workspaceWidth<900} style={{"--paper-assistant-width": `${Math.min(paperAssistantWidth, Math.max(320, workspaceWidth * .5))}px`} as React.CSSProperties}>
         <PaperReadingWorkspace dataset={knowledgeBaseId} document={knowledgeId} title={knowledgeDetail?.display_name || ""} eligible={isPaperDocument} back={readerBackButton}
-          ir={paperIR} getPdfData={getGuidePdfData} onModeChange={setGuideMode}
+          ir={paperIR} getPdfData={getGuidePdfData} getPdfVersion={getGuidePdfVersion} onModeChange={setGuideMode}
           auxiliaryOpen={!previewSideCollapsed} auxiliaryTab={previewSideTab}
           onAuxiliary={tab=>{setPreviewSideCollapsed(!tab);if(tab){setPreviewSideTab(tab);if(tab==="chat")setActivatedDocumentChatKey(documentKey);}}}
           onSelection={selection=>{setDocumentChatSelection(selection);setPreviewSideTab("chat");setPreviewSideCollapsed(false);}}

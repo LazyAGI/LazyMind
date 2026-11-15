@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   createPdfCitationPreviewCache,
   type PdfCitationPreviewDocument,
@@ -7,6 +7,7 @@ import { computeBufferSha256 } from "../../utils/fileHash";
 import type { GuidePreview } from "./PaperGuideAsset";
 
 type GuidePdf = PdfCitationPreviewDocument & { destroy: () => Promise<void> };
+type VerifiedBytes = { version: object | null | undefined; verified: Promise<ArrayBuffer | undefined> };
 
 export function useGuideSourcePreview(
   scopeKey: string,
@@ -14,16 +15,20 @@ export function useGuideSourcePreview(
   sourceCurrent: boolean,
   currentHash: string | undefined,
   getPdfData: () => ArrayBuffer | null,
-): GuidePreview {
+  getPdfVersion?: () => object | null,
+) {
+  const versionAtRender = getPdfVersion?.();
   const scope = useMemo(
-    () => ({ scopeKey, revisionHash, sourceCurrent, currentHash, getPdfData }),
-    [scopeKey, revisionHash, sourceCurrent, currentHash, getPdfData],
+    () => ({ scopeKey, revisionHash, sourceCurrent, currentHash, getPdfData, getPdfVersion, versionAtRender }),
+    [scopeKey, revisionHash, sourceCurrent, currentHash, getPdfData, getPdfVersion, versionAtRender],
   );
   const active = useRef<{
     scope: typeof scope;
     cache: ReturnType<typeof createPdfCitationPreviewCache>;
-    pdf?: Promise<GuidePdf | undefined>;
+    bytes?: VerifiedBytes;
+    pdf?: { bytes: VerifiedBytes; document: Promise<GuidePdf | undefined> };
   }>();
+  const [verified, setVerified] = useState<{ scope: typeof scope; version: object | null | undefined }>();
   useEffect(() => {
     const session: NonNullable<typeof active.current> = {
       scope,
@@ -33,37 +38,61 @@ export function useGuideSourcePreview(
     return () => {
       active.current = undefined;
       session.cache.dispose();
-      void session.pdf?.then((d) => d?.destroy()).catch(() => {});
+      void session.pdf?.document.then((d) => d?.destroy()).catch(() => {});
     };
   }, [scope]);
 
-  return useCallback<GuidePreview>(
+  const verifiedBytes = useCallback(async (fresh = false) => {
+    await Promise.resolve();
+    const session = active.current;
+    if (!session || session.scope !== scope || !revisionHash ||
+        !sourceCurrent || revisionHash !== currentHash) return;
+    const version = getPdfVersion?.();
+    if (version === null) return;
+    if (!session.bytes || session.bytes.version !== version || (fresh && !getPdfVersion)) {
+      const data = getPdfData();
+      if (!data) return;
+      session.bytes = { version, verified: computeBufferSha256(data).then(hash => hash === revisionHash ? data : undefined) };
+    }
+    const result = session.bytes;
+    const data = await result.verified;
+    if (active.current !== session || session.bytes !== result || getPdfVersion?.() !== version) return;
+    if (data) setVerified(previous => previous?.scope === scope && previous.version === version ? previous : { scope, version });
+    else setVerified(previous => previous?.scope === scope ? undefined : previous);
+    return data ? { session, result, data } : undefined;
+  }, [scope, revisionHash, sourceCurrent, currentHash, getPdfData, getPdfVersion]);
+
+  const verifyCurrentSource = useCallback(async () => {
+    const verified = await verifiedBytes(true);
+    return verified && (() => active.current === verified.session && getPdfVersion?.() === verified.result.version);
+  }, [verifiedBytes, getPdfVersion]);
+  const preview = useCallback<GuidePreview>(
     async (e, original) => {
-      // Children can mount before their parent's passive effects have run.
-      await Promise.resolve();
-      const session = active.current;
-      if (!session || session.scope !== scope || !revisionHash ||
-          !sourceCurrent || revisionHash !== currentHash) return;
       if (original && (original.page !== e.locator.page ||
           (original.kind === "formula" ? e.source_type !== "formula" :
            original.kind !== "figure" || !["image", "chart"].includes(e.source_type)))) return;
 
-      if (!session.pdf) {
-        const data = getPdfData();
-        if (!data) return;
-        session.pdf = (async () => {
-          const hash = await computeBufferSha256(data);
-          if (hash !== revisionHash || active.current !== session) return;
+      const bytes = await verifiedBytes();
+      if (!bytes) return;
+      const { session, result, data } = bytes;
+      const isCurrent = () => active.current === session && getPdfVersion?.() === result.version;
+      if (!session.pdf || session.pdf.bytes !== result) {
+        const old = session.pdf;
+        void old?.document.then(doc => {
+          if (doc) session.cache.disposeDocument(doc);
+          return doc?.destroy();
+        }).catch(() => {});
+        session.pdf = { bytes: result, document: (async () => {
           const { pdfjs } = await import("react-pdf");
-          if (active.current !== session) return;
+          if (!isCurrent()) return;
           return pdfjs.getDocument({ data }).promise;
-        })();
+        })() };
       }
-      const doc = await session.pdf;
-      if (!doc || active.current !== session) return;
+      const doc = await session.pdf.document;
+      if (!doc || !isCurrent()) return;
       const pageNumber = (original?.page ?? e.locator.page) + 1;
       const page = await doc.getPage(pageNumber);
-      if (active.current !== session) return;
+      if (!isCurrent()) return;
       const viewport = page.getViewport({ scale: 1, rotation: 0 });
       const { width, height } = viewport;
       const b = original ? original.bbox : e.locator.bbox;
@@ -74,18 +103,23 @@ export function useGuideSourcePreview(
           const crop = await session.cache.get(doc, {
             ...target, regions: [{ page: pageNumber, bbox: [b[0] * width, b[1] * height, b[2] * width, b[3] * height] }],
           }, { exact: !!original });
-          if (active.current !== session) return;
+          if (!isCurrent()) return;
           if (crop) return { ...crop, mode: "region" };
         } catch {
           // Keep the original page available if its individual crop fails.
-          if (active.current !== session) return;
+          if (!isCurrent()) return;
         }
       }
       const pagePreview = await session.cache.get(doc, {
         ...target, regions: [{ page: pageNumber, bbox: [0, 0, width, height] }],
       });
-      if (pagePreview && active.current === session) return { ...pagePreview, mode: "page" };
+      if (pagePreview && isCurrent()) return { ...pagePreview, mode: "page" };
     },
-    [scope, revisionHash, sourceCurrent, currentHash, getPdfData],
+    [verifiedBytes, getPdfVersion],
   );
+  return {
+    preview,
+    verifyCurrentSource,
+    sourceVerified: !!verified && verified.scope === scope && verified.version === versionAtRender,
+  };
 }

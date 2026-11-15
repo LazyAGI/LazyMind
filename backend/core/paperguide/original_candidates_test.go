@@ -34,7 +34,13 @@ func TestOriginalCandidatesDiversifyBodyAndRejectSupplementOnlyMaterial(t *testi
 	)
 	contained := []string{}
 	d.Precision = &pdfir.SourcePrecision{Version: 3, SourceSHA256: id.SourceSHA256, BaseIRDigest: pdfir.Digest("synthetic-base"), ArchiveDigest: pdfir.Digest("synthetic-archive"), PageOnlyBlockIDs: &contained}
-	s, err := BuildSourceSnapshot(d, id)
+	var proofs []pdfir.OriginalFigureProof
+	for _, b := range d.Blocks {
+		if b.Type == "chart" && len(b.BBox) == 4 {
+			proofs = append(proofs, pdfir.OriginalFigureProof{BlockID: b.ID, Type: b.Type, Page: b.Page, Parts: [][]float64{b.BBox}})
+		}
+	}
+	s, err := BuildSourceSnapshotWithFigureProofs(d, id, proofs)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -208,5 +214,25 @@ func TestRunnerRejectsOriginalDropAcrossDraftAndRepairs(t *testing.T) {
 				t.Fatalf("valid original publication was lost: %+v", section)
 			}
 		})
+	}
+}
+
+func TestOriginalCandidatesPrioritizeRetainedAssociationOverUnusedPage(t *testing.T) {
+	s := GuideSourceSnapshot{}
+	for i := 0; i < 5; i++ {
+		page := min(i, 3)
+		id := fmt.Sprintf("figure-%d", i)
+		s.Evidence = append(s.Evidence, GuideEvidence{ID: id, Locator: GuideLocator{Page: page}})
+		s.Assets = append(s.Assets, GuideAsset{ID: id, Kind: "figure", OriginalDisplay: &GuideOriginalDisplay{Page: page, Kind: "figure", BBox: []float64{.1, .1, .2, .2}}})
+		if i < 3 {
+			s.Sections = append(s.Sections, SourceSection{Kind: "page_group", EvidenceIDs: []string{id}})
+		}
+	}
+	s.Evidence = append(s.Evidence, GuideEvidence{ID: "reported", SourceBlockID: "paragraph", Text: "The results use a second comparison.", Locator: GuideLocator{Page: 3}})
+	s.Assets[4].RelatedBlocks = []pdfir.TableRelation{{BlockID: "paragraph", Relation: "mention"}}
+	s.Sections = append(s.Sections, SourceSection{Kind: "section", EvidenceIDs: []string{"figure-3", "figure-4", "reported"}})
+	got := selectOriginalAssets(s, map[string]bool{"figure-3": true, "reported": true})
+	if len(got.Figure) != 4 || got.Figure[0].ID != "figure-3" || got.Figure[1].ID != "figure-4" {
+		t.Fatalf("a retained figure association lost its slot to unclassified pages: %+v", got.Figure)
 	}
 }

@@ -1,4 +1,6 @@
 import { useState } from "react";
+import { createHash } from "node:crypto";
+import { jsPDF } from "jspdf";
 import { ConfigProvider } from "antd";
 import {
   act,
@@ -11,6 +13,14 @@ import { it, expect, vi, beforeEach, afterEach } from "vitest";
 import { axiosInstance } from "@/components/request";
 import PaperReadingWorkspace from "./PaperReadingWorkspace";
 import { revision, status } from "./PaperGuide/fixtures";
+vi.mock("react-pdf", () => ({
+  pdfjs: {
+    getDocument: () => ({ promise: Promise.resolve({
+      getPage: () => Promise.reject(new Error("Synthetic preview render failure")),
+      destroy: () => Promise.resolve(),
+    }) }),
+  },
+}));
 const state = vi.hoisted(() => ({ value: {} as Record<string, unknown> }));
 const locale = vi.hoisted(() => ({ language: "en" }));
 const api = vi.hoisted(() => ({
@@ -65,16 +75,30 @@ beforeEach(() => {
 });
 afterEach(() => vi.restoreAllMocks());
 
+const noPdfData = () => null;
+const fixturePdf = new jsPDF();
+fixturePdf.text("A source equation.", 10, 10);
+const fixturePdfData = fixturePdf.output("arraybuffer");
+const fixturePdfHash = createHash("sha256").update(new Uint8Array(fixturePdfData)).digest("hex");
+const getFixturePdf = () => fixturePdfData.slice(0);
+const getDifferentPdf = () => Uint8Array.of(1,2,3,4).buffer;
+
 function Harness({
   document = "doc",
   title = "Paper",
   onNavigate = () => {},
   withIR = false,
+  getPdfData = noPdfData,
+  getPdfVersion,
+  sourceHash = "hash",
 }: {
   document?: string;
   title?: string;
   onNavigate?: Parameters<typeof PaperReadingWorkspace>[0]["onNavigate"];
   withIR?: boolean;
+  getPdfData?: () => ArrayBuffer | null;
+  getPdfVersion?: () => object | null;
+  sourceHash?: string;
 }) {
   const [tab, setTab] = useState<string>();
   return (
@@ -95,12 +119,13 @@ function Harness({
       onAuxiliary={setTab}
       back={<span>Back</span>}
       dock={null}
-      getPdfData={() => null}
+      getPdfData={getPdfData}
+      getPdfVersion={getPdfVersion}
       onSelection={() => {}}
       onNavigate={onNavigate}
       ir={withIR ? {
         version: 1,
-        source_sha256: "hash",
+        source_sha256: sourceHash,
         parser: { name: "fixture", model: "fixture" },
         coordinate_space: "normalized_top_left",
         pages: [],
@@ -730,30 +755,71 @@ it("explains unavailable regeneration while a historical guide remains readable"
 
 it("opens the authorized original page from the formula block and hides an older request on revision change", async () => {
   const navigate = vi.fn();
-  const old = revision();
+  const old = { ...revision(), source_sha256: fixturePdfHash };
   old.sections[0].blocks[0] = { ...old.sections[0].blocks[0], kind: "formula",
     asset_id: "old-formula", text: "Compare $x=y$ in the guide." };
   let finishOld!: (response: unknown) => void;
   api.evidence.mockImplementationOnce(() => new Promise(resolve => { finishOld = resolve; }));
   state.value = { ...state.value, revision: old };
-  const view = render(<Harness withIR onNavigate={navigate} />);
+  const view = render(<Harness withIR onNavigate={navigate} sourceHash={fixturePdfHash} getPdfData={getFixturePdf} />);
   fireEvent.click(screen.getByRole("button", { name: "Guide" }));
   const formula = { id: "new-formula", text: "x=y", source_block_id: "original-formula", source_type: "formula",
     locator: { kind: "formula", page: 3, bbox: [.1, .2, .3, .4], latex: "x=y" } };
   api.evidence.mockResolvedValueOnce({ evidence: formula, source_current: true,
     original_display: { kind: "formula", page: 3, bbox: [.1, .2, .3, .4], number: "7" } });
-  const next = { ...revision(), id: "new-revision" };
+  const next = { ...revision(), source_sha256: fixturePdfHash, id: "new-revision" };
   next.sections[0].blocks[0] = { ...next.sections[0].blocks[0], kind: "formula",
     asset_id: formula.id, text: "Compare $x=y$ in the guide." };
   state.value = { ...state.value, revision: next };
-  view.rerender(<Harness withIR onNavigate={navigate} />);
+  view.rerender(<Harness withIR onNavigate={navigate} sourceHash={fixturePdfHash} getPdfData={getFixturePdf} />);
   await act(async () => finishOld({
     source_current: true, evidence: { ...formula, id: "old-formula", locator: { kind: "page", page: 9 } },
   }));
   expect(view.container.querySelector(".paper-guide-block .katex")).not.toBeNull();
   expect(screen.queryByRole("button", { name: "Open PDF page 10" })).not.toBeInTheDocument();
+  await screen.findByText("Preview unavailable. Open the PDF to inspect the original.");
   fireEvent.click(await screen.findByRole("button", { name: "Open PDF page 4" }));
-  expect(navigate).toHaveBeenCalledWith(expect.objectContaining({
+  await waitFor(() => expect(navigate).toHaveBeenCalledWith(expect.objectContaining({
     id: "new-formula", locator: { kind: "page", page: 3 },
-  }));
+  })));
+});
+
+it("does not offer direct original navigation when file bytes disagree with matching guide and IR metadata", async () => {
+  const original = { ...revision(), source_sha256: fixturePdfHash };
+  original.sections[0].blocks[0].asset_id = "original";
+  state.value = { ...state.value, revision: original };
+  api.evidence.mockResolvedValueOnce({ source_current: true,
+    evidence: { id: "original", source_block_id: "f", source_type: "image", text: "",
+      locator: { kind: "page", page: 2 } },
+    original_display: { kind: "figure", page: 2, bbox: [.1,.2,.3,.4] },
+  });
+  const navigate = vi.fn();
+  const wrongVersion = {};
+  render(<Harness withIR onNavigate={navigate} sourceHash={fixturePdfHash} getPdfData={getDifferentPdf}
+    getPdfVersion={() => wrongVersion} />);
+  fireEvent.click(screen.getByRole("button", { name: "Guide" }));
+  await screen.findByText("Preview unavailable. Open the PDF to inspect the original.");
+  expect(screen.queryByRole("button", { name: "Open PDF page 3" })).not.toBeInTheDocument();
+  expect(navigate).not.toHaveBeenCalled();
+});
+
+it("checks the FileViewer version again before using a previously verified original page button", async () => {
+  const original = { ...revision(), source_sha256: fixturePdfHash };
+  original.sections[0].blocks[0].asset_id = "original";
+  state.value = { ...state.value, revision: original };
+  api.evidence.mockResolvedValueOnce({ source_current: true,
+    evidence: { id: "original", source_block_id: "f", source_type: "image", text: "",
+      locator: { kind: "page", page: 2 } },
+    original_display: { kind: "figure", page: 2, bbox: [.1,.2,.3,.4] },
+  });
+  const navigate = vi.fn();
+  let bytes = fixturePdfData;
+  render(<Harness withIR onNavigate={navigate} sourceHash={fixturePdfHash} getPdfData={() => bytes.slice(0)}
+    getPdfVersion={() => bytes} />);
+  fireEvent.click(screen.getByRole("button", { name: "Guide" }));
+  const open = await screen.findByRole("button", { name: "Open PDF page 3" });
+  bytes = getDifferentPdf();
+  fireEvent.click(open);
+  await waitFor(() => expect(open).not.toBeInTheDocument());
+  expect(navigate).not.toHaveBeenCalled();
 });

@@ -55,6 +55,7 @@ interface Props {
   onNavigate: (e: PaperGuideEvidence) => void;
   onReturnSource?: () => void;
   getPdfData: () => ArrayBuffer | null;
+  getPdfVersion?: () => object | null;
   ir?: PdfIRDocument;
   onModeChange?: (guide: boolean) => void;
 }
@@ -247,12 +248,13 @@ export default function PaperReadingWorkspace(p: Props) {
     evidenceOpener.current = undefined;
     closeEvidence();
   }, [storageKey, target, revisionId, showGuide, closeEvidence]);
-  const preview = useGuideSourcePreview(
+  const { preview, sourceVerified, verifyCurrentSource } = useGuideSourcePreview(
     `${storageKey}/${revisionId ?? ""}`,
     guide.revision?.source_sha256,
     !!guide.revision?.source_current,
     p.ir?.source_sha256,
     p.getPdfData,
+    p.getPdfVersion,
   );
   const saveProgress = (progress: PaperGuideProgressRequest) => {
     localProgress.current = progress;
@@ -330,10 +332,12 @@ export default function PaperReadingWorkspace(p: Props) {
         source_changed: "Source changed; generate from the new paper",
       };
   function openAssetPage(evidence: PaperGuideEvidence) {
-    if (!guide.revision?.source_current || p.ir?.source_sha256 !== guide.revision.source_sha256) return;
-    setSourceOpen(true);
-    p.onAuxiliary(undefined);
-    p.onNavigate(evidence);
+    void verifyCurrentSource().then(current => {
+      if (!current?.()) return;
+      setSourceOpen(true);
+      p.onAuxiliary(undefined);
+      p.onNavigate(evidence);
+    }).catch(() => {});
   }
   function renderAsset(block: PaperGuideBlock) {
     return (
@@ -346,7 +350,7 @@ export default function PaperReadingWorkspace(p: Props) {
         language={language}
         current={guide.revision!.source_current}
         onEvidence={openEvidence}
-        onOpenPage={p.ir?.source_sha256 === guide.revision?.source_sha256 ? openAssetPage : undefined}
+        onOpenPage={sourceVerified ? openAssetPage : undefined}
       />
     );
   }

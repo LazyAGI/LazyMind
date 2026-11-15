@@ -12,7 +12,7 @@ it("never opens current PDF bytes for a historical source hash", async () => {
     useGuideSourcePreview("u/d/p", "old", true, "new", read),
   );
   expect(
-    await hook.result.current({
+    await hook.result.current.preview({
       id: "e",
       text: "",
       source_block_id: "b",
@@ -55,7 +55,7 @@ it("falls back to the original whole page when its source region cannot render",
       () => new ArrayBuffer(4),
     ),
   );
-  const result = await hook.result.current({
+  const result = await hook.result.current.preview({
     id: "e",
     text: "original",
     source_block_id: "b",
@@ -78,7 +78,7 @@ it("uses the full physical page for a page-only table identity", async () => {
     destroy: async () => {},
   }) });
   const hook = renderHook(() => useGuideSourcePreview("table", hash, true, hash, () => new ArrayBuffer(4)));
-  await hook.result.current({ id: "table", source_block_id: "parent", source_type: "table",
+  await hook.result.current.preview({ id: "table", source_block_id: "parent", source_type: "table",
     text: "Measurement footnote outside the original body crop", locator: { kind: "page", page: 2 } });
   expect(previewMocks.get).toHaveBeenCalledTimes(1);
   expect(previewMocks.get.mock.calls[0][1].regions).toEqual([{ page: 3, bbox: [0, 0, 600, 800] }]);
@@ -91,7 +91,7 @@ it("uses the authorized original bounds independently from the citation and repo
     destroy: async () => {},
   }) });
   const hook = renderHook(() => useGuideSourcePreview("asset", hash, true, hash, () => new ArrayBuffer(4)));
-  const result = await hook.result.current({
+  const result = await hook.result.current.preview({
     id: "figure", source_block_id: "image", source_type: "image", text: "A separate legend.",
     locator: { kind: "page", page: 2 },
   }, { kind: "figure", page: 2, bbox: [.2,.1,.4,.3] });
@@ -104,7 +104,7 @@ it("does not pass different bytes to PDF.js even when revision metadata claims t
   const hook = renderHook(() =>
     useGuideSourcePreview("wrong-bytes", hash, true, hash, () => Uint8Array.of(1, 2, 3).buffer),
   );
-  expect(await hook.result.current({
+  expect(await hook.result.current.preview({
     id: "formula", source_block_id: "eq", source_type: "formula", text: "x = y",
     locator: { kind: "page", page: 2 },
   })).toBeUndefined();
@@ -127,7 +127,7 @@ it("does not surface a completed render from an old revision sharing the same PD
   }) });
   const hook = renderHook(({ revision }) => useGuideSourcePreview(revision, hash, true, hash, getPdf),
     { initialProps: { revision: "old-revision" } });
-  const old = hook.result.current({
+  const old = hook.result.current.preview({
     id: "formula", source_block_id: "eq", source_type: "formula", text: "x = y",
     locator: { kind: "page", page: 2 },
   });
@@ -145,7 +145,7 @@ it("preserves the legacy evidence region and reports unavailable when both paths
     destroy: async () => {},
   }) });
   const hook = renderHook(() => useGuideSourcePreview("legacy-v5", hash, true, hash, () => new ArrayBuffer(4)));
-  const result = await hook.result.current({
+  const result = await hook.result.current.preview({
     id: "historical", source_block_id: "image", source_type: "image", text: "",
     locator: { kind: "figure_region", page: 2, bbox: [.2,.1,.4,.3] },
   });

@@ -49,6 +49,7 @@ import type { ExcelSelection } from "./renderers/render-excel";
 export interface FileViewerRef {
   exportImagePdf: () => Promise<void>;
   getPdfData: () => ArrayBuffer | null;
+  getPdfVersion: () => object | null;
 }
 
 interface FileViewerProps {
@@ -614,6 +615,7 @@ const FileViewer = forwardRef<FileViewerRef, FileViewerProps>((props, ref) => {
     () => ({
       exportImagePdf,
       getPdfData: () => fileData && fileType === "pdf" ? fileData.slice(0) : null,
+      getPdfVersion: () => fileType === "pdf" ? fileData ?? null : null,
     }),
     [exportImagePdf, fileData, fileType],
   );
