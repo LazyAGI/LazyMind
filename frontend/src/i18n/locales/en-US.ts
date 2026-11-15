@@ -1317,7 +1317,7 @@ const enUS = {
       githubCli: {
         quickMode: "Quick authorization",
         quickHint: "Connect GitHub without OAuth App credentials. Adding an account starts a new browser authorization.",
-        quickAvailability: "Docker connects through browser authorization. macOS Desktop can also reuse a local login. Use manual OAuth in other environments.",
+        quickAvailability: "Windows Desktop, macOS Desktop and Docker support browser authorization. Desktop can also reuse a local login.",
         start: "Start connecting",
         notConnected: "Not connected",
         accountManagementTitle: "GitHub account management",

@@ -1297,7 +1297,7 @@ const zhCN = {
       githubCli: {
         quickMode: "快捷授权",
         quickHint: "连接 GitHub，无需填写 OAuth App 凭据。添加账号时会发起新的网页授权。",
-        quickAvailability: "Docker 通过网页授权连接；macOS Desktop 还可复用本机登录。其他环境可使用手动 OAuth。",
+        quickAvailability: "Windows、macOS Desktop 和 Docker 均支持网页授权；Desktop 还可复用本机登录。",
         start: "开始连接",
         notConnected: "未连接",
         accountManagementTitle: "GitHub 账号管理",

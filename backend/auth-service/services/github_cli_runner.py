@@ -31,6 +31,7 @@ class GitHubCLIError(RuntimeError):
 
 class GitHubCLIRunner:
     supported_platform = 'darwin'
+    version_prefix = 'gh version'
 
     def __init__(self, *, binary_path, expected_sha256, runtime_dir):
         self.binary = Path(binary_path)
@@ -43,9 +44,11 @@ class GitHubCLIRunner:
         # Walking parents also handles Docker's shallow /app layout without indexing past the root.
         runtime = Path(os.environ.get('LAZYMIND_RUNTIME_RESOURCES_ROOT')
                        or Path(__file__).resolve().parent.parent.parent.parent.parent)
-        binary = Path(os.environ.get('LAZYMIND_GITHUB_CLI_PATH') or runtime / 'bin/gh')
+        executable = 'github-auth-helper.exe' if sys.platform == 'win32' else 'gh'
+        binary = Path(os.environ.get('LAZYMIND_GITHUB_CLI_PATH') or runtime / 'bin' / executable)
         try:
-            digest = binary.with_name('gh.sha256').read_text().strip()
+            digest_file = binary.with_suffix('.sha256') if sys.platform == 'win32' else binary.with_name('gh.sha256')
+            digest = digest_file.read_text().strip()
         except OSError:
             digest = ''
         if sys.platform == 'linux' and os.environ.get('LAZYMIND_GITHUB_CLI_CONTAINER_ENABLED') == '1':
@@ -53,6 +56,10 @@ class GitHubCLIRunner:
             return LinuxGitHubCLIRunner(binary_path=binary, expected_sha256=digest,
                                         runtime_dir=Path('/run/lazymind-github-cli'))
         state = Path(os.environ.get('LAZYMIND_STATE_SQLITE_DIR') or Path.home() / '.lazymind/auth-state')
+        if sys.platform == 'win32':
+            from services.github_cli_windows_runner import WindowsGitHubCLIRunner
+            return WindowsGitHubCLIRunner(binary_path=binary, expected_sha256=digest,
+                                          runtime_dir=state / 'github-cli')
         return cls(binary_path=binary, expected_sha256=digest, runtime_dir=state / 'github-cli')
 
     @staticmethod
@@ -78,6 +85,9 @@ class GitHubCLIRunner:
         probe_env = dict(os.environ)
         if host_home:
             probe_env['HOME'] = host_home
+            if os.environ.get('LAZYMIND_HOST_HOME'):
+                probe_env['XDG_CONFIG_HOME'] = (os.environ.get('LAZYMIND_HOST_XDG_CONFIG_HOME')
+                                                or str(Path(host_home) / '.config'))
             if sys.platform == 'win32':
                 probe_env['USERPROFILE'] = host_home
         if sys.platform == 'win32':
@@ -130,22 +140,27 @@ class GitHubCLIRunner:
         return self._probe_git(probe_env)
 
     def _probe_git(self, probe_env):
-        if sys.platform == 'darwin':
-            args = ['/usr/bin/git', 'credential-osxkeychain', 'get']
-        else:
-            git = shutil.which('git')
-            if not git:
-                raise GitHubCLIError('GITHUB_CREDENTIAL_UNREADABLE')
-            probe_env.update(GIT_TERMINAL_PROMPT='0', GCM_INTERACTIVE='0')
-            for key in ('GIT_ASKPASS', 'SSH_ASKPASS'):
-                probe_env.pop(key, None)
-            args = [git, '-c', 'credential.interactive=false', '-c', 'core.askPass=', 'credential', 'fill']
+        git = shutil.which('git')
+        if not git:
+            raise GitHubCLIError('GITHUB_CREDENTIAL_UNREADABLE')
+        probe_env.update(GIT_TERMINAL_PROMPT='0', GCM_INTERACTIVE='0', LC_ALL='C')
+        for key in ('GIT_ASKPASS', 'SSH_ASKPASS'):
+            probe_env.pop(key, None)
+        args = [git, '-c', 'credential.interactive=false', '-c', 'core.askPass=', 'credential', 'fill']
         result = self._command(
             args,
             input='protocol=https\nhost=github.com\n\n',
             env=probe_env,
         )
         if result.returncode != 0:
+            # Git fill reports an unavailable username/password as fatal when prompting is disabled.
+            message = result.stderr.strip()
+            if result.returncode == 128 and not result.stdout and (
+                message == 'fatal: unable to get password from user' or re.fullmatch(
+                    r"fatal: could not read (?:Username|Password) for '[^\r\n]*': terminal prompts disabled", message,
+                )
+            ):
+                return None
             raise GitHubCLIError('GITHUB_CREDENTIAL_UNREADABLE')
         if not result.stdout.strip():
             return None
@@ -173,7 +188,7 @@ class GitHubCLIRunner:
         if pass_fds:
             options['pass_fds'] = pass_fds
         result = self._command([str(self.binary), '--version'], **options)
-        if result.returncode or not result.stdout.startswith(f'gh version {GH_VERSION} '):
+        if result.returncode or not result.stdout.startswith(f'{self.version_prefix} {GH_VERSION} '):
             raise GitHubCLIError('GITHUB_CLI_VERSION_UNSUPPORTED')
 
     @staticmethod
@@ -360,14 +375,15 @@ class GitHubCLIRunner:
         return {'access_token': token}
 
     @staticmethod
-    def _wait_login(process, cancel_event, on_device):
+    def _wait_login(process, cancel_event, on_device, output=None):
+        output = process.stdout if output is None else output
         deadline = time.monotonic() + AUTH_TIMEOUT
         stopped = threading.Event()
         lines = queue.Queue(maxsize=32)
 
         def read_lines():
             while not stopped.is_set():
-                line = process.stdout.readline(4097)
+                line = output.readline(4097)
                 while not stopped.is_set():
                     try:
                         lines.put(line, timeout=0.1)
@@ -417,4 +433,4 @@ class GitHubCLIRunner:
                 process.wait(timeout=15)
             reader.join(timeout=1)
             watcher.join(timeout=1)
-            process.stdout.close()
+            output.close()
