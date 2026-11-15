@@ -1,9 +1,10 @@
 import { Blob as NodeBlob } from "node:buffer";
 import { createHash } from "node:crypto";
 import { createRequire } from "node:module";
-import { renderHook } from "@testing-library/react";
+import { fireEvent, render, renderHook, screen } from "@testing-library/react";
 import { jsPDF } from "jspdf";
 import { expect, it, vi } from "vitest";
+import PaperGuideAsset from "./PaperGuideAsset";
 import { useGuideSourcePreview } from "./useGuideSourcePreview";
 
 vi.mock("react-pdf", async () => ({ pdfjs: await import("pdfjs-dist/legacy/build/pdf.mjs") }));
@@ -38,6 +39,9 @@ it("renders exact figure and equation pixels on their own pages of an authentica
   source.line(61, 63, 77, 63);
   source.line(85, 50, 93, 61);
   source.line(101, 50, 89, 73);
+  source.setTextColor(0, 0, 0);
+  source.setFontSize(14);
+  source.text("(3)", 20, 64); // physical equation number, outside the equation crop
   const data = source.output("arraybuffer");
   const sha256 = createHash("sha256").update(new Uint8Array(data)).digest("hex");
 
@@ -91,11 +95,43 @@ it("renders exact figure and equation pixels on their own pages of an authentica
     expect(await pixels(full!.url, 90, 90)).toEqual([0, 0, 255, 255]);
     expect(await pixels(full!.url, 90, 145)).toEqual([0, 255, 0, 255]);
     expect(await pixels(full!.url, 160, 90)).toEqual([255, 0, 255, 255]);
-    const eq = await hook.result.current.preview({
-      ...evidence, id: "eq", source_type: "formula", locator: { kind: "page", page: 2 },
-    }, { kind: "formula", page: 2, bbox: [.19,.23,.53,.39] });
+    const equation = {
+      ...evidence, id: "eq", source_type: "formula", text: "x = y", locator: { kind: "page" as const, page: 2 },
+    };
+    const originalDisplay = { kind: "formula" as const, page: 2, bbox: [.19,.23,.53,.39], number: "4" };
+    const eq = await hook.result.current.preview(equation, originalDisplay);
     expect(eq).toMatchObject({ mode: "region", width: 102, height: 48 });
     expect(await pixels(eq!.url, 43, 16)).toEqual([255, 255, 0, 255]);
+    expect(await pixels(eq!.url, 0, 16)).not.toEqual([0, 0, 0, 255]); // printed (3) is not in the crop
+
+    const wholeEquationPage = await hook.result.current.preview(equation);
+    expect(wholeEquationPage).toMatchObject({ mode: "page", width: 300, height: 300 });
+    const pageBytes = Buffer.from(await images.get(wholeEquationPage!.url)!.arrayBuffer());
+    const pageImage = await loadImage(pageBytes);
+    const pageCanvas = createCanvas(pageImage.width, pageImage.height);
+    const pageContext = pageCanvas.getContext("2d");
+    pageContext.drawImage(pageImage, 0, 0);
+    const numberPixels = pageContext.getImageData(24, 78, 45, 30).data;
+    expect(Array.from(numberPixels as Uint8ClampedArray)
+      .some((value, index) => index % 4 === 0 && value < 80)).toBe(true);
+
+    const onOpenPage = vi.fn();
+    render(
+      <PaperGuideAsset
+        language="en"
+        evidence={equation}
+        originalDisplay={originalDisplay}
+        preview={hook.result.current.preview}
+        onOpenPage={onOpenPage}
+      />,
+    );
+    const equationImage = await screen.findByRole("img", { name: /PDF page 3/ });
+    expect(equationImage).toHaveAttribute("src", eq!.url);
+    expect(screen.queryByText(/Equation \(4\)/)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Open PDF page 3" }));
+    expect(onOpenPage).toHaveBeenCalledWith(expect.objectContaining({
+      source_type: "formula", locator: { kind: "page", page: 2 },
+    }));
   } finally {
     hook.unmount();
     vi.restoreAllMocks();
