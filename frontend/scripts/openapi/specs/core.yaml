@@ -11021,6 +11021,10 @@ components:
             properties:
                 evidence:
                     $ref: '#/components/schemas/PaperGuideEvidence'
+                original_display:
+                    allOf:
+                        - $ref: '#/components/schemas/PaperGuideOriginalDisplay'
+                    nullable: true
                 source_current:
                     type: boolean
             required:
@@ -11117,6 +11121,25 @@ components:
                 - protocol
                 - parameters_hash
                 - context_tokens
+            type: object
+        PaperGuideOriginalDisplay:
+            properties:
+                bbox:
+                    items:
+                        type: number
+                    type: array
+                caption:
+                    type: string
+                kind:
+                    type: string
+                number:
+                    type: string
+                page:
+                    format: int64
+                    type: integer
+            required:
+                - kind
+                - page
             type: object
         PaperGuidePlan:
             properties:

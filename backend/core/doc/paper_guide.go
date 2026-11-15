@@ -136,15 +136,12 @@ func GetPaperGuideEvidence(w http.ResponseWriter, r *http.Request) {
 		paperGuideError(w, e)
 		return
 	}
-	ev, current, e := paperGuideService().Evidence(r.Context(), scope, common.PathVar(r, "revision"), common.PathVar(r, "evidence"))
+	out, e := paperGuideService().Evidence(r.Context(), scope, common.PathVar(r, "revision"), common.PathVar(r, "evidence"))
 	if e != nil {
 		paperGuideError(w, e)
 		return
 	}
-	common.ReplyOK(w, struct {
-		Evidence      paperguide.GuideEvidence `json:"evidence"`
-		SourceCurrent bool                     `json:"source_current"`
-	}{ev, current})
+	common.ReplyOK(w, out)
 }
 func CancelPaperGuide(w http.ResponseWriter, r *http.Request) {
 	scope, e := guideScope(r, r.URL.Query().Get("language"))

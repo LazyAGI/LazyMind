@@ -25,10 +25,11 @@ func BuildSourceSnapshot(d pdfir.Document, identity SourceIdentity) (GuideSource
 // Empty catalogVersion is the original frozen catalog. Keep its construction
 // rules intact so existing guides and exact selections remain verifiable.
 func buildSourceSnapshot(d pdfir.Document, identity SourceIdentity, catalogVersion string) (GuideSourceSnapshot, error) {
-	if catalogVersion != "" && catalogVersion != "paper-guide-source-v1" && catalogVersion != "paper-guide-source-v2" && catalogVersion != "paper-guide-source-v3" && catalogVersion != "paper-guide-source-v4" && catalogVersion != SourceCatalogVersion {
+	if catalogVersion != "" && catalogVersion != "paper-guide-source-v1" && catalogVersion != "paper-guide-source-v2" && catalogVersion != "paper-guide-source-v3" && catalogVersion != "paper-guide-source-v4" && catalogVersion != sourceCatalogV5 && catalogVersion != SourceCatalogVersion {
 		return GuideSourceSnapshot{}, fmt.Errorf("%w: unknown catalog version", ErrInvalidSource)
 	}
-	current := catalogVersion == SourceCatalogVersion || catalogVersion == "paper-guide-source-v4" || catalogVersion == "paper-guide-source-v2" || catalogVersion == "paper-guide-source-v3"
+	v3Precision := catalogVersion == sourceCatalogV5 || catalogVersion == SourceCatalogVersion
+	current := v3Precision || catalogVersion == "paper-guide-source-v4" || catalogVersion == "paper-guide-source-v2" || catalogVersion == "paper-guide-source-v3"
 	var s GuideSourceSnapshot
 	if !validSHA(identity.SourceSHA256) || identity.SourceSHA256 != d.SourceSHA256 ||
 		identity.OwnerID == "" || identity.DocumentID == "" || identity.DatasetID == "" {
@@ -63,11 +64,11 @@ func buildSourceSnapshot(d pdfir.Document, identity SourceIdentity, catalogVersi
 	continuations := map[string]string{}
 	if frozen.Precision != nil {
 		p := frozen.Precision
-		if !((catalogVersion == SourceCatalogVersion && p.Version == pdfir.SourcePrecisionVersion) || (catalogVersion == "paper-guide-source-v3" && p.Version == 1) || (catalogVersion == "paper-guide-source-v4" && p.Version == 2)) || p.SourceSHA256 != d.SourceSHA256 || !validSHA(p.BaseIRDigest) || !validSHA(p.ArchiveDigest) {
+		if !((v3Precision && p.Version == pdfir.SourcePrecisionVersion) || (catalogVersion == "paper-guide-source-v3" && p.Version == 1) || (catalogVersion == "paper-guide-source-v4" && p.Version == 2)) || p.SourceSHA256 != d.SourceSHA256 || !validSHA(p.BaseIRDigest) || !validSHA(p.ArchiveDigest) {
 			return GuideSourceSnapshot{}, fmt.Errorf("%w: precision contract", ErrInvalidSource)
 		}
 		if p.PageOnlyBlockIDs != nil {
-			if catalogVersion != SourceCatalogVersion {
+			if !v3Precision {
 				return GuideSourceSnapshot{}, fmt.Errorf("%w: historical containment metadata", ErrInvalidSource)
 			}
 			for _, id := range *p.PageOnlyBlockIDs {
@@ -84,7 +85,7 @@ func buildSourceSnapshot(d pdfir.Document, identity SourceIdentity, catalogVersi
 			}
 			regionIDs[r.ID] = true
 			if r.Kind == "table_body_fragment" {
-				if (catalogVersion != SourceCatalogVersion && catalogVersion != "paper-guide-source-v4") || r.Table == nil || len(r.Spans) != 0 || !validBBox(r.Table.BBox) || len(r.Table.PageSize) != 2 {
+				if (!v3Precision && catalogVersion != "paper-guide-source-v4") || r.Table == nil || len(r.Spans) != 0 || !validBBox(r.Table.BBox) || len(r.Table.PageSize) != 2 {
 					return GuideSourceSnapshot{}, fmt.Errorf("%w: table fragment payload", ErrInvalidSource)
 				}
 				rows, text, err := pdfir.ParseSourceTable(r.Table.HTML)
@@ -121,6 +122,10 @@ func buildSourceSnapshot(d pdfir.Document, identity SourceIdentity, catalogVersi
 		}
 	}
 	seen := make(map[string]bool, len(s.Blocks))
+	var original func(pdfir.Block, string, bool) *GuideOriginalDisplay
+	if catalogVersion == SourceCatalogVersion {
+		original = originalDisplayBuilder(frozen)
+	}
 	warnings := map[int]bool{}
 	section := -1
 	hasAbstract := false
@@ -205,13 +210,16 @@ func buildSourceSnapshot(d pdfir.Document, identity SourceIdentity, catalogVersi
 				}
 			}
 		}
-		if catalogVersion == SourceCatalogVersion && (frozen.Precision == nil || frozen.Precision.PageOnlyBlockIDs == nil || pageOnly[b.ID]) {
+		if v3Precision && (frozen.Precision == nil || frozen.Precision.PageOnlyBlockIDs == nil || pageOnly[b.ID]) {
 			l = GuideLocator{Kind: "page", Page: b.Page}
 		}
 		e.Locator = l
 		e.ID = s.sourceID("evidence", b.ID)
 		if asset != nil {
 			asset.ID, asset.BlockID, asset.Locator = e.ID, b.ID, l
+			if original != nil && asset.Kind != "table" {
+				asset.OriginalDisplay = original(b, asset.Kind, pageOnly[b.ID])
+			}
 			s.Assets = append(s.Assets, *asset)
 			if len(asset.Warnings) != 0 {
 				warnings[b.Page] = true

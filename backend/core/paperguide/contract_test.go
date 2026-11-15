@@ -197,7 +197,8 @@ func TestPublishedGuideAndSelectionRemainReadableAcrossTaskVersions(t *testing.T
 			if blocks := got.Sections[0].Blocks; len(blocks) != 1 || blocks[0].Text != section.Blocks[0].Text {
 				t.Fatalf("legacy body changed: %+v", blocks)
 			}
-			evidence, currentSource, err := service.Evidence(t.Context(), scope, rev.ID, old.Evidence[1].ID)
+			response, err := service.Evidence(t.Context(), scope, rev.ID, old.Evidence[1].ID)
+			evidence, currentSource := response.Evidence, response.SourceCurrent
 			if err != nil || !currentSource || evidence.ID != old.Evidence[1].ID {
 				t.Fatalf("legacy evidence: %+v %v", evidence, err)
 			}

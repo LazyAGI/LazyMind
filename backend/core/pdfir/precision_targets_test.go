@@ -8,6 +8,7 @@ import (
 	"lazymind/core/pdfir"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -110,8 +111,8 @@ func TestPrecisionVerifiedPayloadReachesGuideCatalog(t *testing.T) {
 			case "text":
 				item["text"] = want[0]
 			case "equation":
-				item["text"] = "$$\nx_{i}^2\n$$"
-				para = block("interline_equation", span("interline_equation", "x_{i}^2"))
+				item["text"] = "$$\nx_{i}^2 \\tag{7}\n$$"
+				para = block("interline_equation", span("interline_equation", "x_{i}^2 \\tag{7}"))
 				want = []string{"x_{i}^2"}
 			case "table", "image":
 				label := "Figure 1: Synthetic proven caption"
@@ -157,6 +158,42 @@ func TestPrecisionVerifiedPayloadReachesGuideCatalog(t *testing.T) {
 			}
 			if e := paperguide.ValidateSnapshot(s, s.Identity, s.IRDigest); e != nil {
 				t.Fatal(e)
+			}
+			if kind == "image" || kind == "equation" {
+				// Assert on the wire so this regression also catches omission of the optional API data.
+				var display struct {
+					Original *struct {
+						Kind, Caption, Number string
+						Page                  int
+						BBox                  []float64
+					} `json:"original_display"`
+				}
+				asset := s.Assets[0]
+				encoded, _ := json.Marshal(asset)
+				if err := json.Unmarshal(encoded, &display); err != nil || display.Original == nil {
+					t.Fatalf("original display missing: %s", encoded)
+				}
+				wantKind, wantNumber, wantCaption := "formula", "7", ""
+				if kind == "image" {
+					wantKind, wantNumber, wantCaption = "figure", "", "Figure 1: Synthetic proven caption"
+					if asset.Locator.Kind != "page" || len(asset.Locator.BBox) != 0 {
+						t.Fatal("figure body changed the caption citation")
+					}
+				}
+				o := display.Original
+				if o.Kind != wantKind || o.Number != wantNumber || o.Caption != wantCaption || o.Page != 0 || !reflect.DeepEqual(o.BBox, []float64{.1, .1, .9, .8}) {
+					t.Fatalf("wrong original location: %+v", o)
+				}
+				tampered := bytes.Replace(encoded, []byte(`"original_display":{"kind":"`+wantKind+`","page":0`), []byte(`"original_display":{"kind":"`+wantKind+`","page":999`), 1)
+				if bytes.Equal(encoded, tampered) {
+					t.Fatal("wrong page mutation did not apply")
+				}
+				if err := json.Unmarshal(tampered, &s.Assets[0]); err != nil {
+					t.Fatal(err)
+				}
+				if err := paperguide.ValidateSnapshot(s, s.Identity, s.IRDigest); err == nil {
+					t.Fatal("tampered physical page survived snapshot verification")
+				}
 			}
 			for _, phrase := range want {
 				found := false

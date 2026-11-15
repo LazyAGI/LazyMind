@@ -263,7 +263,8 @@ func TestMockGuidePlansParentOnceAndCitesPhysicalPage(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	got, current, e := service.Evidence(t.Context(), scope, rev.ID, child.ID)
+	response, e := service.Evidence(t.Context(), scope, rev.ID, child.ID)
+	got, current := response.Evidence, response.SourceCurrent
 	if e != nil || !current || got.Locator.Page != 1 || got.Locator.Kind != "page" || len(got.Locator.BBox) != 0 {
 		t.Fatalf("wrong physical evidence %+v %v", got, e)
 	}

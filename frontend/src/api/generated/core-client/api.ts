@@ -7290,6 +7290,7 @@ export interface PaperGuideEvidence {
 }
 export interface PaperGuideEvidenceResponse {
     'evidence': PaperGuideEvidence;
+    'original_display'?: PaperGuideOriginalDisplay | null;
     'source_current': boolean;
 }
 export interface PaperGuideFinding {
@@ -7323,6 +7324,13 @@ export interface PaperGuideModelIdentity {
     'parameters_hash': string;
     'protocol': string;
     'ref': string;
+}
+export interface PaperGuideOriginalDisplay {
+    'bbox'?: Array<number>;
+    'caption'?: string;
+    'kind': string;
+    'number'?: string;
+    'page': number;
 }
 export interface PaperGuidePlan {
     'claims': Array<PaperGuideClaim>;

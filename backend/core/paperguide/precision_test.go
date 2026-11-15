@@ -123,7 +123,8 @@ func TestPrecisionDigestDisablesHistoricalV4CoordinatesButKeepsBody(t *testing.T
 	if err != nil || got.SourceCurrent || len(got.Sections) != 1 {
 		t.Fatalf("history lost: %+v %v", got, err)
 	}
-	ev, same, err := service.Evidence(t.Context(), scope, rev.ID, old.Evidence[1].ID)
+	response, err := service.Evidence(t.Context(), scope, rev.ID, old.Evidence[1].ID)
+	ev, same := response.Evidence, response.SourceCurrent
 	if err != nil || same || ev.Text != old.Evidence[1].Text || ev.ID != old.Evidence[1].ID || len(ev.Locator.BBox) != 0 {
 		t.Fatalf("old source reused: %+v %v", ev, err)
 	}

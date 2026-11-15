@@ -19,7 +19,7 @@ func ValidateSnapshot(s GuideSourceSnapshot, identity SourceIdentity, irDigest s
 		return fmt.Errorf("%w: identity or digest mismatch", ErrInvalidSource)
 	}
 	warnings := s.Coverage.Warnings
-	if s.CatalogVersion == SourceCatalogVersion || s.CatalogVersion == "paper-guide-source-v2" || s.CatalogVersion == "paper-guide-source-v3" || s.CatalogVersion == "paper-guide-source-v4" {
+	if s.CatalogVersion == SourceCatalogVersion || s.CatalogVersion == sourceCatalogV5 || s.CatalogVersion == "paper-guide-source-v2" || s.CatalogVersion == "paper-guide-source-v3" || s.CatalogVersion == "paper-guide-source-v4" {
 		warnings = s.SourceWarnings
 	}
 	if len(warnings) == 0 {

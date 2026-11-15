@@ -338,21 +338,21 @@ func (s Service) Revision(ctx context.Context, scope Scope, id string, after int
 	}
 	return out, nil
 }
-func (s Service) Evidence(ctx context.Context, scope Scope, id, evidenceID string) (GuideEvidence, bool, error) {
+func (s Service) Evidence(ctx context.Context, scope Scope, id, evidenceID string) (EvidenceResponse, error) {
 	if e := s.Authorize(ctx, scope, false); e != nil {
-		return GuideEvidence{}, false, e
+		return EvidenceResponse{}, e
 	}
 	rev, e := s.Repo.Revision(ctx, scope, id)
 	if e != nil {
-		return GuideEvidence{}, false, e
+		return EvidenceResponse{}, e
 	}
 	snap, e := s.readSnapshot(ctx, scope, rev)
 	if e != nil {
-		return GuideEvidence{}, false, e
+		return EvidenceResponse{}, e
 	}
 	current, e := s.Source.Load(ctx, scope, false)
 	if e != nil && !errors.Is(e, ErrSourceChanged) {
-		return GuideEvidence{}, false, e
+		return EvidenceResponse{}, e
 	}
 	same := current.Hash == rev.SourceSHA256 && current.Snapshot != nil && current.Snapshot.IRDigest == rev.IRDigest
 	for _, ev := range snap.Evidence {
@@ -360,10 +360,19 @@ func (s Service) Evidence(ctx context.Context, scope Scope, id, evidenceID strin
 			if !same {
 				ev.Locator = GuideLocator{Kind: "page", Page: ev.Locator.Page}
 			}
-			return ev, same, nil
+			out := EvidenceResponse{Evidence: ev, SourceCurrent: same}
+			if same {
+				for _, asset := range snap.Assets {
+					if asset.ID == ev.ID {
+						out.OriginalDisplay = asset.OriginalDisplay
+						break
+					}
+				}
+			}
+			return out, nil
 		}
 	}
-	return GuideEvidence{}, same, ErrEvidence
+	return EvidenceResponse{}, ErrEvidence
 }
 func (s Service) Selection(ctx context.Context, scope Scope, id string, in SelectionRequest) (SelectionContext, error) {
 	out := SelectionContext{RevisionID: id, SectionKey: in.SectionKey, BlockID: in.BlockID, Evidence: []GuideEvidence{}, Claims: []GuideClaim{}}

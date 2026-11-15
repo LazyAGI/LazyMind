@@ -4,7 +4,8 @@ package paperguide
 import "lazymind/core/pdfir"
 
 const TaskVersion = "paper-guide-v16"
-const SourceCatalogVersion = "paper-guide-source-v5"
+const SourceCatalogVersion = "paper-guide-source-v6"
+const sourceCatalogV5 = "paper-guide-source-v5"
 const legacySourceNamespace = "paper-guide-v1"
 
 type Role string
@@ -90,7 +91,24 @@ type SourceSection struct {
 	EvidenceIDs []string `json:"evidence_ids"`
 }
 
+// GuideOriginalDisplay is a source-owned location for displaying paper pixels.
+// It does not change what text or region supports a citation.
+type GuideOriginalDisplay struct {
+	Kind    string    `json:"kind"`
+	Page    int       `json:"page"`
+	BBox    []float64 `json:"bbox,omitempty"`
+	Caption string    `json:"caption,omitempty"`
+	Number  string    `json:"number,omitempty"`
+}
+
+type EvidenceResponse struct {
+	Evidence        GuideEvidence         `json:"evidence"`
+	SourceCurrent   bool                  `json:"source_current"`
+	OriginalDisplay *GuideOriginalDisplay `json:"original_display,omitempty"`
+}
+
 type GuideAsset struct {
+	OriginalDisplay     *GuideOriginalDisplay `json:"original_display,omitempty"`
 	FragmentEvidenceIDs []string              `json:"fragment_evidence_ids,omitempty"`
 	ID                  string                `json:"id"` // Same ID as its primary evidence entry.
 	BlockID             string                `json:"block_id"`

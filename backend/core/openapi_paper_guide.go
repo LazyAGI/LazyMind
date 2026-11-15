@@ -81,10 +81,7 @@ func paperGuideOpenAPISchemas() map[string]any {
 		}
 		return map[string]any{"type": "object"}
 	}
-	roots := map[string]any{"PaperGuideStatus": paperguide.StatusResponse{}, "PaperGuideRevision": paperguide.RevisionResponse{}, "PaperGuideGenerateRequest": paperguide.GenerateRequest{}, "PaperGuideProgressRequest": paperguide.ProgressRequest{}, "PaperGuideSelectionRequest": paperguide.SelectionRequest{}, "PaperGuideSelectionContext": paperguide.SelectionContext{}, "PaperGuideRevisionView": paperguide.RevisionView{}, "PaperGuideEvidenceResponse": struct {
-		Evidence      paperguide.GuideEvidence `json:"evidence"`
-		SourceCurrent bool                     `json:"source_current"`
-	}{}}
+	roots := map[string]any{"PaperGuideStatus": paperguide.StatusResponse{}, "PaperGuideRevision": paperguide.RevisionResponse{}, "PaperGuideGenerateRequest": paperguide.GenerateRequest{}, "PaperGuideProgressRequest": paperguide.ProgressRequest{}, "PaperGuideSelectionRequest": paperguide.SelectionRequest{}, "PaperGuideSelectionContext": paperguide.SelectionContext{}, "PaperGuideRevisionView": paperguide.RevisionView{}, "PaperGuideEvidenceResponse": paperguide.EvidenceResponse{}}
 	for name, value := range roots {
 		r := schema(reflect.TypeOf(value))
 		ref, _ := r["$ref"].(string)
