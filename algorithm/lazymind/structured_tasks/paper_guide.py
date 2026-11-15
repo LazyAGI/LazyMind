@@ -16,8 +16,9 @@ references only from evidence[].id: exact short IDs e1, e2, etc. Section identit
 NOT evidence. Never construct IDs, use internal block IDs, or copy references only visible in
 plan/context but absent from evidence. Claim/block IDs have their own namespace; do not change
 them. Do not invent pages, coordinates, sources or citations.
-Ground paper facts in evidence. Use summaries, plans and extracts only as context. Preserve exact
-conditions, quantifiers, units, signs and sample boundaries. Distinguish paper statements, teaching
+Ground facts in evidence. Prior outputs are context. Keep exact conditions, quantifiers,
+signs, sample bounds, units (scale, powers, denominators) and uncertainty. Pair unit
+translations with source symbols. State justified conversions. Never guess percentage points or controls. Distinguish paper statements, teaching
 examples, interpretation and external background. A reference list alone does not establish the
 cited claim. A caption is not visual observation.
 Exact families for argument_type and profiles.primary/secondary:
@@ -143,8 +144,12 @@ does not define the term verbatim. Block attribution does not make each explanat
 Use this request's evidence catalog for structured references; short IDs in inherited prose are not source anchors.
 Treat misleading inline markers as attribution issues and report independent substantive defects.
 Context may qualify a compatible assertion; it cannot cancel a direct contradiction, invented
-result or explicit scope expansion. Check claim strength and attribution, assumptions, units,
+result or explicit scope expansion. Check claim strength and attribution, assumptions,
 quantifiers, exceptions, uncertainty, novelty, causal limits and caption versus visual observation.
+Match each substantive quantity/comparison to its source: value/range, unit prefix/power,
+denominator, uncertainty, percent versus percentage points, and held/changed conditions.
+Check translated glosses against source symbols and verify stated conversions; unchanged digits
+do not ensure unchanged meaning. Preserve source ambiguity rather than inventing a distinction.
 Return a finding only if the issue materially changes the reader's understanding of the object,
 scope, strength, attribution, practical consequence or core relationship. Omit optional rewording.
 Use an existing claim/block ID, issue type and a bounded prose suggestion naming the difference
