@@ -33,8 +33,9 @@ new teaching facts, or external background in EXTRACT. Leave teaching to SECTION
 For both supported and partial, include nonempty evidence_ids and use only paper_statement or
 interpretation attribution. Cite unique IDs of actual supporting evidence in this packet.
 teaching and external_background cannot be supported or partial, even with evidence_ids.
-paper_statement cannot be not_applicable. Only unavailable paper_statement claims may have empty
-evidence_ids; unsupported paper_statement claims still need evidence_ids for the statement's source.
+paper_statement cannot be not_applicable. For paper_statement claims, evidence_ids may be empty
+only when support_status is unavailable. An unsupported paper_statement claim still needs
+evidence_ids for the statement's source.
 Use unavailable for source material that cannot be inspected, and not_applicable only when source
 support does not apply. Do not infer that the paper did not report something because this packet
 omits it. Describe an evidenced gap or leave an open question when appropriate.

@@ -5,7 +5,7 @@
   "input_defaults_reserve_bytes": 256,
   "evidence_expansion_reserve_bytes": 64,
   "measured_prompt_bytes": {
-    "paper.guide.extract": 4407,
+    "paper.guide.extract": 4436,
     "paper.guide.plan": 9420,
     "paper.guide.section": 9203,
     "paper.guide.review": 6304

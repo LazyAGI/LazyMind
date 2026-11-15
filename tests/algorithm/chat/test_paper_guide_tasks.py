@@ -107,7 +107,7 @@ def test_registered_extract_explains_author_examples_support_and_safe_math(monke
         'For both supported and partial, include nonempty evidence_ids and use only paper_statement or interpretation',
         'teaching and external_background cannot be supported or partial',
         'paper_statement cannot be not_applicable',
-        'Only unavailable paper_statement claims may have empty evidence_ids',
+        'For paper_statement claims, evidence_ids may be empty only when support_status is unavailable.',
         'Do not infer that the paper did not report something because this packet omits it',
         'statements, conditions and open questions',
         'avoid link-shaped math such as [expr](expr)',
