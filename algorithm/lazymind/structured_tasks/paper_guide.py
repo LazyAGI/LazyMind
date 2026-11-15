@@ -86,6 +86,10 @@ each decisive prerequisite to when its result is usable and what it does not est
 key evidence's observation, premises, inference and limits, including assigned central comparisons
 and conditions. Asset display alone is not explanation. State source gaps or unknown meanings
 without inventing details or demanding peripheral caveats.
+This role's evidence is a selection. Missing support here does not show that the paper or full
+source lacks it. Keep unsupported mechanisms as neutral questions for their assigned later role;
+do not turn not yet explained into unreported. Apply this to body and summary. State only
+evidenced gaps, distinguishing unavailable parsed content or pixels from absent original material.
 Follow the plan's explanation roles: short overview glosses may precede fuller explanation;
 reuse explanations assigned elsewhere without repeating them. Add contrasts or teaching examples
 only to resolve material misunderstanding, in a form suited to the argument; no mandatory numeric
@@ -137,6 +141,10 @@ mistake a nonexclusive source-equivalent overview for an exhaustive list. A shar
 requires no repeated explanation. Scope never excuses incorrect assertions: necessary/sufficient
 reversals, causal overreach, incorrect numbers, missing qualifications and unsupported assertions
 still require factual findings, not a downgrade to missing_explanation.
+Missing evidence in a section packet supports removing or narrowing a local assertion, not
+declaring paper-wide absence. Propose a neutral transition when a mechanism belongs to a later
+role. Check body and summary for scope escalation. Teaching attribution does not excuse an
+unsupported absence claim. Preserve evidenced parser or pixel gaps without claiming the original is missing.
 For the complete guide, evidence is the independent source packet available before Plan selection.
 Check it for central omissions even when Plan and prose selected no reference to that material.
 An extraction-scoped packet contains retained original evidence and complete table groups, not every
