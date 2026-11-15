@@ -80,6 +80,11 @@ func (s Service) Run(ctx context.Context, job asyncjob.Job, reporter asyncjob.Re
 	}
 	if err != nil {
 		_ = x.settleOverhead(runCtx)
+		// A checkpoint query can report an expired run as a permission error.
+		// Classify from the run context before choosing a stage or retry.
+		if errors.Is(contextErrorAt(runCtx, time.Now()), context.DeadlineExceeded) {
+			err = ErrBudget
+		}
 	}
 
 	var waiting *dependencyWaitError

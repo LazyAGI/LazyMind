@@ -286,3 +286,84 @@ func TestRunnerSavesPLANAfterOldDeadlineAndSettlesLocalWork(t *testing.T) {
 		}
 	})
 }
+
+func TestRunnerClassifiesPLANSettlementFailureByRunDeadline(t *testing.T) {
+	for _, tc := range []struct {
+		name           string
+		parentDeadline bool
+		activeMillis   int64
+		stop           string
+		masked         bool
+		wantErr        error
+		wantStage      string
+	}{
+		{"parent_deadline_raw", true, 0, "deadline", false, ErrBudget, "analyzing"},
+		{"parent_deadline_masked", true, 0, "deadline", true, ErrBudget, "analyzing"},
+		{"run_budget_deadline_masked", false, 1500000, "deadline", true, ErrBudget, "paused"},
+		{"permission_before_deadline", false, 0, "", true, ErrForbidden, "failed"},
+		{"parent_cancel_before_deadline", false, 0, "cancel", false, ErrGeneration, "analyzing"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newDeadlineGuide(t, false)
+			if tc.activeMillis > 0 {
+				if err := h.Repo.DB.Model(&h.rev).Update("active_millis", tc.activeMillis).Error; err != nil {
+					t.Fatal(err)
+				}
+			}
+			synctest.Test(t, func(t *testing.T) {
+				h.T = t
+				var ctx context.Context
+				var cancel context.CancelFunc
+				if tc.parentDeadline {
+					ctx, cancel = context.WithTimeout(t.Context(), 2*time.Second)
+				} else {
+					ctx, cancel = context.WithCancel(t.Context())
+				}
+				defer cancel()
+
+				calls := 0
+				h.Call = func(ctx context.Context, task string, _ map[string]any, _ map[string]any) (json.RawMessage, error) {
+					if task != "paper.guide.plan" || ctx.Err() != nil {
+						t.Fatalf("expected valid PLAN before the cutoff, task=%s error=%v", task, ctx.Err())
+					}
+					calls++
+					return mustJSON(baselinePlan(h.snap)), nil
+				}
+				h.Repo.PrepareCheckpoint = func(ctx context.Context, _ orm.PaperGuide) (context.Context, error) {
+					// Only post-return checkpoint preparation under the run's
+					// deadline fails. The final transition uses the caller context.
+					if _, hasDeadline := ctx.Deadline(); calls == 0 || !hasDeadline {
+						return ctx, nil
+					}
+					switch tc.stop {
+					case "deadline":
+						<-ctx.Done()
+					case "cancel":
+						cancel()
+					}
+					if tc.masked {
+						return ctx, ErrForbidden
+					}
+					return ctx, ctx.Err()
+				}
+
+				result, err := h.run(ctx)
+				row, steps := h.row(), h.checkpoints()
+				if calls != 1 || row.CallsUsed != 1 || row.RecoveryCalls != 0 || row.ActiveMillis != tc.activeMillis+300000 ||
+					len(steps) != 1 || !strings.HasPrefix(steps[0].StepKey, "request:plan:") || steps[0].OutputJSON != "" {
+					t.Fatalf("expected one unknown PLAN reservation and no checkpoint: calls=%d counted=%d recovery=%d active=%d steps=%+v",
+						calls, row.CallsUsed, row.RecoveryCalls, row.ActiveMillis, steps)
+				}
+				wantRowError := tc.wantErr.Error()
+				if tc.wantStage == "analyzing" {
+					// An already stopped caller cannot commit the final transition.
+					wantRowError = ""
+				}
+				if !errors.Is(err, tc.wantErr) || result.ErrorCode != tc.wantErr.Error() || row.Stage != tc.wantStage || row.ErrorCode != wantRowError {
+					t.Fatalf("result=%q error=%v stage=%q row error=%q, want %v / %q / %q",
+						result.ErrorCode, err, row.Stage, row.ErrorCode, tc.wantErr, tc.wantStage, wantRowError)
+				}
+			})
+		})
+	}
+}
