@@ -92,14 +92,6 @@ def test_query_count_normalization_still_rejects_invalid_or_ambiguous_values(cou
         review_materials.SearchPlan.model_validate({'queries': {'related': count}})
 
 
-def test_fixed_scope_preserves_exact_selection_without_model_or_kb(paper, monkeypatch):
-    monkeypatch.setattr(review_materials, '_select', lambda *_: pytest.fail('frozen papers were reselected'))
-    result = review_materials.prepare({'papers': [paper]}, ['other-library'], fixed_scope=True)
-    assert result == [paper]
-    result[0]['user_annotations']['focus'] = 'changed'
-    assert paper['user_annotations']['focus'] == 'composition'
-
-
 def test_scope_cannot_add_unavailable_material(paper, selection):
     selection({'material_roles': {'M1': 'paper', 'M2': 'paper'}, 'queries': {}})
     with pytest.raises(ValueError):
@@ -341,16 +333,6 @@ def test_only_supplied_scope_never_calls_retrieval(paper, sciverse, selection, m
     sciverse.meta_search.assert_not_called()
 
 
-def test_explicit_expansion_can_extend_a_frozen_selection(paper, sciverse, selection):
-    calls = selection({'material_roles': {'M1': 'paper'}, 'queries': {}, 'external_query': 'related'},
-                      {'material_roles': {'M1': 'paper'}, 'queries': {}})
-    result = review_materials.prepare(
-        {'papers': [paper], 'request': 'Add related Sciverse papers'}, [], fixed_scope=True)
-    assert calls[0]['fixed_scope'] is True
-    assert result[0]['id'] == paper['id'] and len(result) == 2
-    assert sciverse.meta_search.call_count == 1
-
-
 def test_sciverse_duplicate_preserves_uploaded_identity_and_skips_read(paper, sciverse, selection):
     paper['doi'] = 'https://doi.org/10.1/RELATED'
     before = copy.deepcopy(paper)
@@ -564,11 +546,13 @@ def test_handoff_lookup_distinguishes_ordinary_chat_from_denied_access(monkeypat
 
 
 @pytest.mark.parametrize('resume', [False, True], ids=['first-entry', 'saved-pool'])
-def test_handoff_enters_f2_and_publishes_reusable_artifacts(handoff, tmp_path, monkeypatch, resume, selection):
+def test_handoff_enters_f2_and_publishes_reusable_artifacts(handoff, tmp_path, monkeypatch, resume):
     from lazymind.chat.engine.subagent.context import SubAgentContext
 
     monkeypatch.setattr(workflow, '_conversation_papers', lambda *_: pytest.fail('handoff read other attachments'))
-    plans = selection({'material_roles': {'M1': 'paper'}, 'queries': {}})
+    monkeypatch.setattr(review_materials, 'prepare',
+                        lambda *_, **__: pytest.fail('handoff entered material selection and retrieval'))
+    handoff[0]['input']['user_instruction'] = 'Search for more papers and compare them'
     received = []
 
     def review(inputs):
@@ -594,12 +578,11 @@ def test_handoff_enters_f2_and_publishes_reusable_artifacts(handoff, tmp_path, m
         task_id='handoff-review', conversation_id='test', agent_type='workflow_step',
         objective='Review selected papers', workspace_path=str(tmp_path), input_slots=[],
         output_slots=slots, db=None, emit=events.append,
-        params={'step_id': 'literature_review', 'user_input': 'Generate the review',
+        params={'step_id': 'literature_review', 'user_input': 'Search for more papers and generate the review',
                 'remote_inputs': bound, 'output_slot_types': dict.fromkeys(slots, 'file')},
     )
     assert workflow.run_paper_step()['status'] == 'completed'
     assert [paper['id'] for paper in received[0]['papers']] == ['global-paper']
-    assert plans[0]['fixed_scope'] is True
     saved = next(e for e in events if e['type'] == 'artifact' and e['slot'] == slots[0])
     pool = workflow._read_bound(saved['value']['path'])
     if resume:

@@ -618,7 +618,7 @@ export interface WorkflowUI {
   tab_visibility_ready_material?: string;
   /** Opt in to hiding tabs whose runtime steps were explicitly skipped. */
   hide_skipped_steps?: boolean;
-  /** In dynamic sessions, show started steps and existing results once execution begins. */
+  /** Show started steps and existing results once execution begins. */
   hide_unstarted_steps?: boolean;
   /** Global widget config keyed by slot id. */
   slots?: Record<string, Record<string, unknown>>;

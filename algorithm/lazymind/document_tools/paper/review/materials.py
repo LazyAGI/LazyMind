@@ -102,7 +102,7 @@ def handoff_input(context: dict) -> dict:
             'request': request + json.dumps(directions, ensure_ascii=False), 'papers': papers}
 
 
-def _select(papers: list[dict], inputs: dict, knowledge_bases: list[str], *, fixed_scope=False,
+def _select(papers: list[dict], inputs: dict, knowledge_bases: list[str], *,
             plan_search=True, retained=(), count_range=None):
     minimum, maximum = count_range or (config['paper_review_min_paper_count'], config['paper_review_max_paper_count'])
     if minimum > maximum:
@@ -117,7 +117,7 @@ def _select(papers: list[dict], inputs: dict, knowledge_bases: list[str], *, fix
             'research': {key: inputs.get(key) for key in ('topic', 'request', 'question')},
             'knowledge_bases': knowledge_bases,
             'external_sources': search.external_sources(_api_keys()),
-            'fixed_scope': fixed_scope, 'plan_search': plan_search,
+            'plan_search': plan_search,
             'paper_count_range': {'min': minimum, 'max': maximum},
             'material_role_keys': list(bindings.materials),
             'retained_papers': [{'title': paper['title'], 'review_role': paper.get('review_role', 'paper')}
@@ -246,20 +246,18 @@ def _external_candidates(inputs, plan, retained, target_count, warnings):
     return selected
 
 
-def prepare(inputs: dict, knowledge_bases: list[str], *, fixed_scope: bool = False) -> list[dict]:
+def prepare(inputs: dict, knowledge_bases: list[str]) -> list[dict]:
     papers = copy.deepcopy(inputs.get('papers') or [])
-    if fixed_scope and not inputs.get('request'):
-        return papers
     for paper in papers:
         paper.pop('retrieval_warnings', None)
     report_progress(10, '正在选择本轮综述材料')
-    selected, plan = _select(papers, inputs, knowledge_bases, fixed_scope=fixed_scope)
+    selected, plan = _select(papers, inputs, knowledge_bases)
     selected = unique_candidates([], selected)
     target_count = plan.requested_paper_count or config['paper_review_max_paper_count']
     minimum_count = plan.requested_paper_count or config['paper_review_min_paper_count']
     if plan.requested_paper_count is not None:
         selected = selected[:target_count]
-    elif not fixed_scope:
+    else:
         retrieved_sources = {'arxiv', 'crossref', *search.KEY_NAMES, 'knowledge_base'}
         supplied = [paper for paper in selected
                     if paper.get('source') not in retrieved_sources]

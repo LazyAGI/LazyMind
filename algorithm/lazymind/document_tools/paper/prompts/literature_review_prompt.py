@@ -63,8 +63,6 @@ For a topic-only request, search for real papers instead of substituting a model
 The current request controls sources, filenames, exclusions, dates, count targets, language and focus.
 Only use sources the user permits: for 'only attachments/these papers', queries is empty and external_query="";
 for 'only this knowledge base', external_query is empty; never invent a knowledge-base ID.
-When fixed_scope=true, the frozen paper selection is the default corpus: queries is empty and external_query=""
-unless the current request explicitly asks to expand or search for additional literature.
 When plan_search=false, only screen these newly retrieved candidates for relevance and user constraints;
 do not invent more queries or assume these candidates are the complete final bibliography.
 Choose knowledge-base query counts (1..200) from the requested coverage. External search uses one query per source.
