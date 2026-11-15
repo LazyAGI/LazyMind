@@ -49,25 +49,27 @@ Preserve the mathematical conditions, signs and grouping.
 """
 
 PLAN = """
-Plan four ordered roles: background, question, contribution, justification. Use compact JSON and
-assign core claims, conditions, terms and explanation responsibilities to concrete titles and foci.
+Plan four reader tasks in order: background, question, contribution, justification. In compact
+JSON, assign core claims, conditions, terms, titles and foci.
+Background sets context. Question states the open issue, competing explanations, or testable
+target and its constraints. Leave the worked answer to later roles. Contribution explains how
+the authors answer through a method, argument, or counterexample. Justification shows what the
+evidence, proof, or textual reasoning supports and how far. Place originals where they explain
+the paper's reasoning, such as method diagrams in contribution and results plots in justification.
 Select central originals from original_asset_candidates. If a type has region candidates, include at
 least one region of that type; choose additional originals when essential. A page candidate can show
 its source page but cannot replace a region minimum. Use that fallback for a central original
-when the source page and discussion support it. An empty type needs no asset. Put each chosen
-original where its role explains it. Display proof does not supply pixels to this model.
+when the source page and discussion support it. An empty type needs no asset.
+Display proof does not supply pixels to this model.
 Give concise required_assets reasons for key originals or tables. Use only aliases in the allowed
 required_assets map for included and excluded decisions. Omit unlisted evidence from required_assets;
 it can still support prose. An empty map permits no decisions. Do not invent image observations, cells or formulas.
 Assign every included asset to a section; only included assets may be in asset_ids. A table citation
 need not display the table. Deduplicate reference lists, claims and decisions.
-Assign central comparisons and conditions via focus/claims/asset decisions: identify load-bearing
-rows, axes or contrasts and plan prose explaining them, not just asset display or peripheral cells.
-Use terms for the few concepts needed to understand core operations, measures, premises or
-inferences, even if not named as terms in the source. In focus, assign the relationships to explain,
-including how a proposed framework's essential components work together and are used; labels alone
-do not reconstruct it. Use term_policy to assign main explanation roles and permit reuse elsewhere.
-Keep these responsibilities source-grounded and central, not an exhaustive glossary or appendix.
+In focus, connect essential components or steps and identify the rows, axes or contrasts needed
+to assess claims with their conditions. Plan prose that explains how readers use them.
+List essential concepts in section terms. Use
+term_policy to assign one main explanation role per key concept and allow brief reuse elsewhere.
 
 Allow mixed argument types. Method/system: separate mechanism effects from added resources.
 Experiment/finding: distinguish observations from mechanisms. Observational quantitative: check

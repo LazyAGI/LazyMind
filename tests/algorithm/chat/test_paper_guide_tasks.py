@@ -728,7 +728,7 @@ def test_explanation_responsibilities_reach_model_with_actual_scope(monkeypatch,
     assert [(e['id'], e['text']) for e in packet['evidence']] == [
         (f'e{i}', item['text']) for i, item in enumerate(evidence, 1)]
     if task == 'plan':
-        assert 'compact JSON' in instructions
+        assert 'compact JSON' in ' '.join(instructions.split())
         assert 'plan' not in packet and 'sections' not in packet
         return
     assert packet['plan']['term_policy'] == plan['term_policy']

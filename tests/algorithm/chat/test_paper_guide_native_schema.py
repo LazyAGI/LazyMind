@@ -410,7 +410,8 @@ def test_native_and_legacy_fixed_bytes_match_budget_at_small_packet_boundary(htt
 
 
 @pytest.mark.parametrize('language', ['en', 'zh'])
-def test_native_plan_maximum_dynamic_map_fits_existing_packet_budget(http, language):
+@pytest.mark.parametrize('model', ['gpt-6-luna', 'unknown-model'])
+def test_plan_maximum_dynamic_map_fits_existing_packet_budget(http, language, model):
     from test_paper_guide_asset_boundary import split_plan_asset_prefix, synthetic_evidence
 
     evidence = [synthetic_evidence(i, 'table', '测量 <2, 每组。') for i in range(1, 2039)]
@@ -424,7 +425,7 @@ def test_native_plan_maximum_dynamic_map_fits_existing_packet_budget(http, langu
     for section in output['sections']:
         section['evidence_ids'] = ['e2048']
     sent = http(output)
-    result = execute('plan', data, config())
+    result = execute('plan', data, config(model=model))
     assert result.status == 'succeeded' and len(sent) == result.usage['model_calls'] == 1
 
     _, body = sent[0]
@@ -440,17 +441,58 @@ def test_native_plan_maximum_dynamic_map_fits_existing_packet_budget(http, langu
     id_savings = sum(len(original['id']) - len(aliased['id'])
                      for original, aliased in zip(evidence, packet['evidence']))
     assert growth <= 18 * len(evidence) <= 62 * len(evidence) <= id_savings == 128083
+    native = model == 'gpt-6-luna'
+    prompt_key = 'measured_native_prompt_bytes' if native else 'measured_prompt_bytes'
     text_bytes = compact_bytes(body['text'])
-    assert text_bytes == budget['measured_native_text_bytes']['paper.guide.plan']
+    assert text_bytes == (budget['measured_native_text_bytes']['paper.guide.plan'] if native
+                          else budget['provider_json_mode_text_bytes'])
     frame_bytes = budget['provider_system_bytes'] + budget['provider_frame_reserve_bytes']
-    assert prefix_bytes - growth == budget['measured_native_prompt_bytes']['paper.guide.plan']
-    assert prefix_bytes - growth + text_bytes + frame_bytes <= budget['prompt_reserve_bytes']
+    assert prefix_bytes - growth == budget[prompt_key]['paper.guide.plan']
+    assert prefix_bytes - growth + compact_bytes({'text': body['text']}) + frame_bytes <= budget['prompt_reserve_bytes']
 
     # indent=0 matches Go MarshalIndent layout before its additional escaping.
     go_layout_floor = len(json.dumps(data, ensure_ascii=False, indent=0).encode('utf-8'))
     actual = prefix_bytes + len(encoded.encode('utf-8')) + text_bytes + frame_bytes
     assert actual <= (go_layout_floor + budget['input_defaults_reserve_bytes'] + budget['prompt_reserve_bytes']
                       + len(evidence) * budget['evidence_expansion_reserve_bytes'])
+
+
+def test_plan_accepts_a_counterexample_and_proof_without_originals_in_both_formats(http):
+    _, _, data, _ = cases()['plan']
+    data['evidence'][0].update(source_type='text', text='Take the nonzero integer 2. Its square is 4, which is even.')
+    data.update(extracts=[], original_asset_candidates={'figure': [], 'formula': []})
+    output = deepcopy(PLAN)
+    output['profiles'] = {'primary': 'theory_mathematics', 'secondary': [], 'uncertainty_reason': ''}
+    output['questions'] = ['Must every nonzero integer have an odd square?']
+    output['term_policy'] = ['Explain counterexample in contribution; reuse it in justification.']
+    output['claims'] = [
+        {'id': 'c1', 'statement': 'The paper chooses 2 as a counterexample.', 'attribution': 'paper_statement',
+         'argument_type': 'theory_mathematics', 'conditions': [], 'support_status': 'supported',
+         'evidence_ids': ['e1']},
+        {'id': 'c2', 'statement': 'The square is even, so the universal claim fails.',
+         'attribution': 'interpretation', 'argument_type': 'theory_mathematics', 'conditions': [],
+         'support_status': 'supported', 'evidence_ids': ['e1']},
+    ]
+    for section, focus, claims, terms in zip(output['sections'], (
+        'Introduce nonzero integers and parity.',
+        'State the proposed universal claim and its domain.',
+        'Introduce 2 as the counterexample.',
+        'Show how its even square refutes the claim; one case suffices for a universal claim.',
+    ), ([], [], ['c1'], ['c2']), (['parity'], [], ['counterexample'], [])):
+        section.update(focus=focus, terms=terms, claim_ids=claims, evidence_ids=['e1'])
+    sent = http(output)
+
+    for model in ('gpt-6-luna', 'unknown-model'):
+        result = execute('plan', data, config(model=model))
+        assert result.status == 'succeeded' and result.usage['model_calls'] == 1
+        assert result.output == json.loads(json.dumps(output).replace('"e1"', f'"{A}"'))
+
+    strict, legacy = (response_prompt(body) for _, body in sent)
+    strict_instructions, _, strict_input = strict.partition(INPUT_MARKER)
+    legacy_prefix, _, legacy_input = legacy.partition(INPUT_MARKER)
+    assert strict_input == legacy_input
+    assert SCHEMA_MARKER not in strict_instructions and SCHEMA_MARKER in legacy_prefix
+    assert strict_instructions.endswith('Allowed required_assets decisions by source alias (JSON): {}')
 
 
 @pytest.mark.parametrize('language', ['en', 'zh'])
