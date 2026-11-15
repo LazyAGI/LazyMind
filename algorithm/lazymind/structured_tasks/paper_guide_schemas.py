@@ -2,6 +2,7 @@
 import re
 from typing import Annotated, Literal
 
+from markdown_it import MarkdownIt
 from pydantic import AfterValidator, BaseModel, ConfigDict, Field, StringConstraints, field_validator, model_validator
 
 
@@ -347,7 +348,7 @@ _LINE_END = re.compile(r'\r\n?|\n')
 _SENTENCE_END = '。！？.!?'
 _ALIAS_GROUP = r'〔[ \t]*e[1-9][0-9]*(?:[ \t]*[、，,][ \t]*e[1-9][0-9]*)*[ \t]*〕'
 _CITATION_TAIL = re.compile(rf'[{_SENTENCE_END}](?:[ \t]*{_ALIAS_GROUP})+\Z')
-_QUOTE_LINE = re.compile(r'^[ \t]*(?:(?:[-+*]|[0-9]{1,9}[.)])[ \t]+)*>')
+_CITATION_MARKDOWN = MarkdownIt()
 _QUOTE_END = {'"': '"', "'": "'", '“': '”', '‘': '’', '「': '」', '『': '』', '«': '»', '‹': '›'}
 _DELIMITER = re.compile(r'''\\.|[$]+|`+|["'“”‘’「」『』«»‹›]''')
 _PRICE_BEFORE_SENTENCE = re.compile(r'[0-9][0-9,.]*[.!?][ \t]+[^\W\d_]')
@@ -389,15 +390,22 @@ def _citation_tail_line(text: str) -> str | None:
         return None
     lines = _LINE_END.split(end)
     line = lines[-1]
-    before_punctuation = line[:len(line) - len(candidate[0])]
-    if not any(ch.isalnum() for ch in before_punctuation):
-        return None
-    # A Markdown quote may continue on unprefixed lines until a blank line.
-    for prior in reversed(lines):
-        if not prior.strip(_ASCII_SPACE):
-            break
-        if _QUOTE_LINE.match(prior):
+    last_line = len(lines) - 1
+    paragraph_start = last_line
+    # Use source ranges so a lazy continuation stays quoted, while a
+    # heading or a quoted blank line can start a different paragraph.
+    for token in _CITATION_MARKDOWN.parse(end):
+        if token.map is None or not token.map[0] <= last_line < token.map[1]:
+            continue
+        if token.type == 'blockquote_open':
             return None
+        if token.type == 'paragraph_open':
+            paragraph_start = token.map[0]
+            break
+    before_punctuation = line[:len(line) - len(candidate[0])]
+    sentence = ''.join(lines[paragraph_start:last_line]) + before_punctuation
+    if not any(ch.isalnum() for ch in sentence):
+        return None
     if _protected_sentence_end(end[:candidate.start() + 1]):
         return None
     return line.strip(_ASCII_SPACE)

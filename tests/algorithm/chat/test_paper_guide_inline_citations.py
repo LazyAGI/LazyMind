@@ -85,6 +85,11 @@ def test_reader_citation_tail_rejects_entire_registered_section(monkeypatch, mod
     ('Use $e1$ or `e1`. This was measured.〔e2〕', 2),
     ('They used “dry” samples.〔e2〕', 2),
     ('> A quotation.\n\nThe measurement was limited.〔e2〕', 2),
+    pytest.param('> The source notation.\n>\nThe measurement was limited.〔e2〕', 2, id='after-quoted-blank'),
+    pytest.param('> The source notation.\n# Results\nThe measurement was limited.〔e2〕', 2, id='after-heading'),
+    pytest.param('> The source notation.\n> # Results\nThe measurement was limited.〔e2〕',
+                 2, id='after-quoted-heading'),
+    pytest.param('The measurement was limited\n.〔e2〕', 2, id='soft-wrapped-punctuation'),
 ])
 def test_clear_paragraph_tail_cannot_pass_as_provenance(monkeypatch, prose, bound_row):
     data, response = writing_case('normal', marked=False)
@@ -103,6 +108,8 @@ def test_clear_paragraph_tail_cannot_pass_as_provenance(monkeypatch, prose, boun
     ('paragraph', 'Use $e_1$ or $e1$.'),
     ('paragraph', '〔e1〕'),
     ('paragraph', '。〔e1〕'),
+    ('paragraph', 'The measurement was limited\n\n.〔e2〕'),
+    ('paragraph', '# Results\n.〔e2〕'),
     ('paragraph', 'The result.〔e1–e3〕'),
     ('paragraph', 'The result.〔e2, see table〕'),
     ('paragraph', 'The result.〔e0〕'),
@@ -125,6 +132,7 @@ def test_clear_paragraph_tail_cannot_pass_as_provenance(monkeypatch, prose, boun
     ('paragraph', 'The source begins “The result.〔e2〕'),
     ('paragraph', '> The original notation ends here.〔e2〕'),
     ('paragraph', '> Original notation:\nThe result.〔e2〕'),
+    ('paragraph', '> Original notation\n.〔e2〕'),
     ('paragraph', r'The notation is escaped.\〔e2〕'),
     ('paragraph', r'The punctuation is escaped\.〔e2〕'),
     ('paragraph', ROW + '\t \r\n'),
