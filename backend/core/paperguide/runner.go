@@ -230,7 +230,7 @@ func (x *execution) execute(ctx context.Context) error {
 	x.planningPacket = packet
 	_, x.extractedScope = input["extracts"]
 	var plan GuidePlan
-	metadata := mustMarshal(planningScope{Extracted: x.extractedScope})
+	metadata := mustMarshal(planningScope{Extracted: x.extractedScope, OriginalAssets: x.extractedScope})
 	if e = x.task(ctx, "plan", "paper.guide.plan", input, &plan, func() error { return ValidatePlan(packet, plan) }, metadata); e != nil {
 		return e
 	}
@@ -255,6 +255,9 @@ func (x *execution) execute(ctx context.Context) error {
 			if e != nil {
 				return e
 			}
+		}
+		if e = ValidateSection(packet, plan, sp.Role, section); e != nil {
+			return ErrEvidence
 		}
 		sections = append(sections, section)
 		_ = key
@@ -387,14 +390,25 @@ func (x *execution) inputFits(input map[string]any) bool {
 // A UTF-8 byte bound also covers dense punctuation/formula tokenization.
 // Metadata-free providers get a conservative 32k context.
 func estimatedTokens(raw []byte) int { return len(raw) }
+func (x *execution) planningInput(packet GuideSourceSnapshot) map[string]any {
+	input := x.input(packet)
+	input["source_sections"] = x.snap.Sections
+	if c := packet.originalCandidates; c != nil && !c.empty() {
+		input["original_asset_candidates"] = c
+	}
+	return input
+}
+
 func (x *execution) planInput(ctx context.Context) (map[string]any, GuideSourceSnapshot, error) {
 	if len(x.snap.Sections) > 512 {
 		return nil, GuideSourceSnapshot{}, ErrContext
 	}
-	input := x.input(x.snap)
-	input["source_sections"] = x.snap.Sections
+	short := x.snap
+	candidates := selectOriginalAssets(short, nil)
+	short.originalCandidates = &candidates
+	input := x.planningInput(short)
 	if x.inputFits(input) {
-		return input, x.snap, nil
+		return input, short, nil
 	}
 	// Keep original reading order and cover every evidence item. Section
 	// boundaries are preferred; an oversized section is split into page/block
@@ -491,26 +505,41 @@ func (x *execution) planInput(ctx context.Context) (map[string]any, GuideSourceS
 			keep[asset.ID] = true
 		}
 	}
-	ids = []string{}
-	for _, ev := range x.snap.Evidence {
-		if keep[ev.ID] {
-			ids = append(ids, ev.ID)
+	candidates = selectOriginalAssets(x.snap, keep)
+	for {
+		wanted := make(map[string]bool, len(keep)+len(candidates.Figure)+len(candidates.Formula))
+		for id := range keep {
+			wanted[id] = true
+		}
+		for _, c := range candidates.Figure {
+			wanted[c.ID] = true
+		}
+		for _, c := range candidates.Formula {
+			wanted[c.ID] = true
+		}
+		ids = ids[:0]
+		for _, ev := range x.snap.Evidence {
+			if wanted[ev.ID] {
+				ids = append(ids, ev.ID)
+			}
+		}
+		if len(ids) == 0 {
+			return nil, GuideSourceSnapshot{}, ErrMaterial
+		}
+		packet, e := RestrictEvidence(x.snap, ids)
+		if e != nil {
+			return nil, GuideSourceSnapshot{}, e
+		}
+		packet.originalCandidates = &candidates
+		input = x.planningInput(packet)
+		input["extracts"] = extracts
+		if x.inputFits(input) {
+			return input, packet, nil
+		}
+		if !candidates.trim() {
+			return nil, GuideSourceSnapshot{}, ErrContext
 		}
 	}
-	if len(ids) == 0 {
-		return nil, GuideSourceSnapshot{}, ErrMaterial
-	}
-	packet, e := RestrictEvidence(x.snap, ids)
-	if e != nil {
-		return nil, GuideSourceSnapshot{}, e
-	}
-	input = x.input(packet)
-	input["source_sections"] = x.snap.Sections
-	input["extracts"] = extracts
-	if !x.inputFits(input) {
-		return nil, GuideSourceSnapshot{}, ErrContext
-	}
-	return input, packet, nil
 }
 
 // This diagnostic describes evidence availability, not source unavailability or
@@ -518,18 +547,20 @@ func (x *execution) planInput(ctx context.Context) (map[string]any, GuideSourceS
 // warnings; neither the frozen snapshot nor published artifacts are rewritten.
 const extractedReviewWarning = "全篇审核覆盖独立抽取保留的原文证据及完整表格组，不是全部原文逐段审核；抽取未保留的内容可能未被检查。这不代表原文缺失，也不豁免已发现的事实或解释缺陷。"
 
+const originalAssetsReviewWarning = "全篇审核覆盖抽取证据、完整表格和预选原件，并非逐段审核全部原文；其他原件和内容可能未被检查。范围限制不豁免已发现的缺陷。"
+
 type planningScope struct {
-	Extracted bool `json:"independent_extracted_scope"`
+	Extracted      bool `json:"independent_extracted_scope"`
+	OriginalAssets bool `json:"original_assets_scope,omitempty"`
 }
 
 func (x *execution) independentInput() map[string]any {
 	packet := x.planningPacket
 	if x.extractedScope {
-		packet.Coverage.Warnings = append(append([]string{}, packet.Coverage.Warnings...), extractedReviewWarning)
+		packet.Coverage.Warnings = append(append([]string{}, packet.Coverage.Warnings...), originalAssetsReviewWarning)
 	}
-	input := x.input(packet)
+	input := x.planningInput(packet)
 	input["coverage"] = packet.Coverage
-	input["source_sections"] = x.snap.Sections
 	return input
 }
 

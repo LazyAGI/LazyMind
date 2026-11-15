@@ -3,7 +3,7 @@ package paperguide
 
 import "lazymind/core/pdfir"
 
-const TaskVersion = "paper-guide-v16"
+const TaskVersion = "paper-guide-v17"
 const SourceCatalogVersion = "paper-guide-source-v6"
 const sourceCatalogV5 = "paper-guide-source-v5"
 const legacySourceNamespace = "paper-guide-v1"
@@ -55,21 +55,23 @@ type SourceIdentity struct {
 }
 
 type GuideSourceSnapshot struct {
-	Precision         *pdfir.SourcePrecision `json:"source_precision,omitempty"`
-	CatalogVersion    string                 `json:"catalog_version,omitempty"`
-	SourceWarnings    []string               `json:"source_warnings,omitempty"`
-	Identity          SourceIdentity         `json:"identity"`
-	IRDigest          string                 `json:"ir_digest"`
-	Parser            pdfir.Parser           `json:"parser"`
-	IRVersion         int                    `json:"ir_version"`
-	ProjectionVersion int                    `json:"projection_version"`
-	CoordinateSpace   string                 `json:"coordinate_space"`
-	Pages             []pdfir.Page           `json:"pages"`
-	Coverage          GuideCoverage          `json:"coverage"`
-	Blocks            []pdfir.Block          `json:"blocks"`
-	Assets            []GuideAsset           `json:"assets"`
-	Sections          []SourceSection        `json:"sections"`
-	Evidence          []GuideEvidence        `json:"evidence"`
+	// originalCandidates is populated only on a scoped Plan input, never in the frozen artifact.
+	originalCandidates *originalAssetCandidates
+	Precision          *pdfir.SourcePrecision `json:"source_precision,omitempty"`
+	CatalogVersion     string                 `json:"catalog_version,omitempty"`
+	SourceWarnings     []string               `json:"source_warnings,omitempty"`
+	Identity           SourceIdentity         `json:"identity"`
+	IRDigest           string                 `json:"ir_digest"`
+	Parser             pdfir.Parser           `json:"parser"`
+	IRVersion          int                    `json:"ir_version"`
+	ProjectionVersion  int                    `json:"projection_version"`
+	CoordinateSpace    string                 `json:"coordinate_space"`
+	Pages              []pdfir.Page           `json:"pages"`
+	Coverage           GuideCoverage          `json:"coverage"`
+	Blocks             []pdfir.Block          `json:"blocks"`
+	Assets             []GuideAsset           `json:"assets"`
+	Sections           []SourceSection        `json:"sections"`
+	Evidence           []GuideEvidence        `json:"evidence"`
 }
 
 type GuideCoverage struct {

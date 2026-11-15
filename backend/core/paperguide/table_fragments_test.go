@@ -134,9 +134,15 @@ func TestSnapshotRejectsForgedTableFragmentAssociation(t *testing.T) {
 
 func TestExtractPlanningRetainsCompletePhysicalTableEvenWithoutExtractClaim(t *testing.T) {
 	d, id := tableFragmentDocument(t)
-	for i := 0; i < 30; i++ {
+	for i := 0; i < 25; i++ {
 		d.Blocks = append(d.Blocks, pdfir.Block{ID: fmt.Sprintf("appendix-%d", i), Type: "text", Page: 0, Text: strings.Repeat("Original appendix conditions. ", 70)})
 	}
+	// FIG and display equation are late; EXTRACT deliberately cites only text.
+	d.Blocks = append(d.Blocks,
+		pdfir.Block{ID: "late-fig", Type: "chart", Page: 1, BBox: []float64{.3, .2, .6, .5}},
+		pdfir.Block{ID: "late-eq", Type: "formula", Page: 1, BBox: []float64{.3, .6, .6, .8}, Latex: "y = x^2"})
+	contained := []string{}
+	d.Precision.PageOnlyBlockIDs = &contained
 	snap, e := BuildSourceSnapshot(d, id)
 	if e != nil {
 		t.Fatal(e)
@@ -170,7 +176,7 @@ func TestExtractPlanningRetainsCompletePhysicalTableEvenWithoutExtractClaim(t *t
 		t.Fatal(e)
 	}
 	x := execution{s: service, scope: scope, rev: rev, model: model, snap: snap, f: testFence{repo.DB}, steps: map[string]orm.PaperGuideStep{}}
-	_, packet, e := x.planInput(t.Context())
+	planPacket, packet, e := x.planInput(t.Context())
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -186,10 +192,20 @@ func TestExtractPlanningRetainsCompletePhysicalTableEvenWithoutExtractClaim(t *t
 	if count != 3 {
 		t.Fatalf("planning dropped physical table: %d", count)
 	}
+	var originals []string
+	for _, ev := range packet.Evidence {
+		if ev.SourceBlockID == "late-fig" || ev.SourceBlockID == "late-eq" {
+			originals = append(originals, ev.SourceBlockID)
+		}
+	}
+	if strings.Join(originals, ",") != "late-fig,late-eq" || planPacket["original_asset_candidates"] == nil ||
+		calls != 2 || !x.inputFits(planPacket) {
+		t.Fatalf("planning lost late original material or changed extract budget: %v, %d calls", originals, calls)
+	}
 	before := calls
 	x.steps["plan"] = orm.PaperGuideStep{}
-	_, rebuilt, e := x.planInput(t.Context())
-	if e != nil || calls != before || digest(rebuilt.Evidence) != digest(packet.Evidence) {
+	replay, rebuilt, e := x.planInput(t.Context())
+	if e != nil || digest(replay) != digest(planPacket) || calls != before || digest(rebuilt.Evidence) != digest(packet.Evidence) {
 		t.Fatalf("resume lost physical table or replayed extraction: %v", e)
 	}
 	x.planningPacket, x.extractedScope = rebuilt, true

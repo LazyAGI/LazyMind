@@ -265,3 +265,52 @@ func TestFrozenV4TableIdentityKeepsOriginalBoxAndIDs(t *testing.T) {
 		}
 	}
 }
+
+func TestOriginalDisplayEvidenceIsCurrentAndRevisionScoped(t *testing.T) {
+	d, identity := fixture(t)
+	d.Blocks = []pdfir.Block{
+		{ID: "synthetic-chart", Type: "chart", Page: 1, BBox: []float64{.1, .2, .3, .4}},
+		{ID: "inline", Type: "text", Page: 0, Text: "The estimate $y=x+1$ is inline.", BBox: []float64{.2, .2, .8, .25}},
+	}
+	unverified, err := BuildSourceSnapshot(d, identity)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(unverified.Assets) != 1 || unverified.Assets[0].OriginalDisplay == nil || len(unverified.Assets[0].OriginalDisplay.BBox) != 0 {
+		t.Fatal("an unverified box or inline expression was upgraded to a displayed original")
+	}
+	contained := []string{}
+	d.Precision = &pdfir.SourcePrecision{Version: 3, SourceSHA256: identity.SourceSHA256, BaseIRDigest: pdfir.Digest("synthetic-base"), ArchiveDigest: pdfir.Digest("synthetic-archive"), PageOnlyBlockIDs: &contained}
+	current, err := BuildSourceSnapshot(d, identity)
+	if err != nil {
+		t.Fatal(err)
+	}
+	repo := Repository{DB: guideDB(t)}
+	scope := Scope{OwnerID: identity.OwnerID, DatasetID: identity.DatasetID, DocumentID: identity.DocumentID, Language: "en"}
+	rev, err := repo.Create(t.Context(), CreateRevision{Scope: scope, SourceSHA256: identity.SourceSHA256, IRDigest: current.IRDigest, SnapshotPath: "old", Model: ModelIdentity{ID: "synthetic"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := &historicalSource{fixtureSource{current, nil}, current}
+	service := Service{Repo: repo, Source: source, Authorize: func(_ context.Context, s Scope, _ bool) error {
+		if s != scope {
+			return ErrForbidden
+		}
+		return nil
+	}}
+	id := current.Assets[0].ID
+	got, err := service.Evidence(t.Context(), scope, rev.ID, id)
+	if err != nil || !got.SourceCurrent || got.OriginalDisplay == nil || !reflect.DeepEqual(got.OriginalDisplay.BBox, []float64{.1, .2, .3, .4}) {
+		t.Fatalf("current ACL could not resolve frozen original: %+v %v", got, err)
+	}
+	foreign := scope
+	foreign.DocumentID = "other-document"
+	if _, err = service.Evidence(t.Context(), foreign, rev.ID, id); !errors.Is(err, ErrForbidden) {
+		t.Fatalf("foreign revision supplied an original: %v", err)
+	}
+	source.fixtureSource.s = unverified
+	got, err = service.Evidence(t.Context(), scope, rev.ID, id)
+	if err != nil || got.SourceCurrent || got.OriginalDisplay != nil || got.Evidence.Locator.Kind != "page" || got.Evidence.Locator.Page != 1 {
+		t.Fatalf("stale IR with same PDF reused display: %+v %v", got, err)
+	}
+}

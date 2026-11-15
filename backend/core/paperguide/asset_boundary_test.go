@@ -66,7 +66,8 @@ func TestSectionOutputKeepsStrictAssetAndClaimBinding(t *testing.T) {
 		ids[e.SourceBlockID] = e.ID
 	}
 	p := baselinePlan(snap)
-	p.Sections[0].AssetIDs = []string{ids["actual"], ids["missing"]}
+	p.Sections[0].AssetIDs = []string{ids["actual"]}
+	p.Sections[2].AssetIDs = []string{ids["missing"]}
 	p.Sections[1].AssetIDs = []string{ids["other-role"]}
 	for _, name := range []string{"actual", "other-role", "missing"} {
 		p.RequiredAssets = append(p.RequiredAssets, GuideAssetDecision{ids[name], true, "Supports the explanation."})
@@ -84,7 +85,7 @@ func TestSectionOutputKeepsStrictAssetAndClaimBinding(t *testing.T) {
 		{"caption does not determine kind", ids["actual"], "figure", "wrong or unplanned asset"},
 		{"non-role asset", ids["other-role"], "table", "wrong or unplanned asset"},
 		{"nonasset source", ids["caption"], "table", "wrong or unplanned asset"},
-		{"allowed but absent from packet", ids["missing"], "figure", "wrong or unplanned asset"},
+		{"planned original missing from packet", ids["missing"], "figure", "planned original missing from role packet"},
 		{"unknown source", "ev_" + strings.Repeat("0", 64), "table", "wrong or unplanned asset"},
 		{"unbound claim", ids["actual"], "table", "orphan section claims"},
 		{"valid asset and other-role citation", ids["actual"], "table", ""},
@@ -101,6 +102,15 @@ func TestSectionOutputKeepsStrictAssetAndClaimBinding(t *testing.T) {
 			var section GuideSection
 			if err := decodeStrict(mustJSON(s), &section); err != nil {
 				t.Fatal(err)
+			}
+			if tc.name == "planned original missing from packet" {
+				modified := p
+				modified.Sections = append([]GuideSectionPlan{}, p.Sections...)
+				modified.Sections[0].AssetIDs = []string{ids["actual"], ids["missing"]}
+				if err := ValidateSection(packet, modified, RoleBackground, section); err == nil || !strings.Contains(err.Error(), tc.wantError) {
+					t.Fatalf("want validation failure %q, got %v", tc.wantError, err)
+				}
+				return
 			}
 			err := ValidateSection(packet, p, RoleBackground, section)
 			if tc.wantError == "" {

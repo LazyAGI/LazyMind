@@ -273,7 +273,11 @@ func (s Service) Revision(ctx context.Context, scope Scope, id string, after int
 		if step.StepKey == "plan" {
 			var scope planningScope
 			if json.Unmarshal([]byte(step.ReviewJSON), &scope) == nil && scope.Extracted {
-				out.Coverage.Warnings = append(append([]string{}, out.Coverage.Warnings...), extractedReviewWarning)
+				warning := extractedReviewWarning
+				if scope.OriginalAssets {
+					warning = originalAssetsReviewWarning
+				}
+				out.Coverage.Warnings = append(append([]string{}, out.Coverage.Warnings...), warning)
 			}
 			var p GuidePlan
 			if json.Unmarshal([]byte(step.OutputJSON), &p) == nil {

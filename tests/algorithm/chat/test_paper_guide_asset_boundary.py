@@ -28,7 +28,7 @@ def mixed_material():
     return source, output, encoded
 
 
-def invoke(monkeypatch, source, output, version='paper-guide-v16'):
+def invoke(monkeypatch, source, output, version='paper-guide-v17'):
     from lazymind.chat.service import llm_task
     calls = []
     def model(prompt, **options):
@@ -46,6 +46,10 @@ def test_supplied_asset_and_missing_caption_keep_distinct_roles(monkeypatch, kin
     source, canonical, encoded = mixed_material()
     # No pixels/table cells/LaTeX metadata: eligibility follows the real source type.
     source['evidence'][0]['source_type'] = kind
+    if kind != 'table':
+        source['original_asset_candidates'] = {
+            'figure': [{'id': A, 'mode': 'page'}] if kind in ('image', 'chart') else [],
+            'formula': [{'id': A, 'mode': 'page'}] if kind == 'formula' else []}
     for plan in (canonical, encoded):
         plan['required_assets'][0]['included'] = included
         if not included:
@@ -81,7 +85,7 @@ def test_unknown_excluded_asset_is_not_a_missing_resource_escape_hatch(monkeypat
     assert result.error_code == 'invalid_model_output' and len(calls) == 1
 
 
-@pytest.mark.parametrize('version', ['paper-guide-v4', 'paper-guide-v5', 'paper-guide-v6', 'paper-guide-v7', 'paper-guide-v8', 'paper-guide-v9'])
+@pytest.mark.parametrize('version', ['paper-guide-v4', 'paper-guide-v5', 'paper-guide-v6', 'paper-guide-v7', 'paper-guide-v8', 'paper-guide-v9', 'paper-guide-v16'])
 def test_old_request_cannot_spend_under_precision_contract(monkeypatch, version):
     source, _, encoded = mixed_material()
     result, calls = invoke(monkeypatch, source, encoded, version=version)
@@ -174,7 +178,13 @@ def split_visual_prefix(prompt):
 ])
 def test_section_model_receives_only_current_roles_present_asset_pairs(monkeypatch, mode, allowed, asset, kind):
     data = visual_section_input(mode)
-    result, prompt = invoke_section(monkeypatch, data, section_output(data['role'], asset, kind))
+    output = section_output(data['role'], asset, kind, evidence=('e2', 'e6') if kind == 'table' else (asset, 'e2', 'e6'))
+    if data['role'] == 'background':
+        for alias, original_kind in [('e3', 'figure'), ('e4', 'figure'), ('e5', 'formula')]:
+            if alias != asset:
+                b = section_output('background', alias, original_kind, evidence=[alias])['blocks'][0]
+                output['blocks'].append({**b, 'id': 'original-' + alias})
+    result, prompt = invoke_section(monkeypatch, data, output)
     assert result.status == 'succeeded'
     _, mapping, encoded, _ = split_visual_prefix(prompt)
     assert mapping == allowed
@@ -183,7 +193,9 @@ def test_section_model_receives_only_current_roles_present_asset_pairs(monkeypat
     assert view['evidence'][1]['parent_asset_id'] == 'e1'
     assert view['plan']['sections'][0]['asset_ids'] == ['e3', 'e1', 'e5', 'e4', 'e8']
     assert result.output['blocks'][0]['asset_id'] == data['evidence'][int(asset[1:]) - 1]['id']
-    assert result.output['blocks'][0]['evidence_ids'] == [data['evidence'][1]['id'], data['evidence'][5]['id']]
+    self_evidence = [] if kind == 'table' else [result.output['blocks'][0]['asset_id']]
+    assert result.output['blocks'][0]['evidence_ids'] == self_evidence + [
+        data['evidence'][1]['id'], data['evidence'][5]['id']]
 
 
 @pytest.mark.parametrize(('mutation', 'asset', 'kind'), [
@@ -239,7 +251,13 @@ def test_maximum_actual_section_prefix_fits_shared_reserve(monkeypatch, language
         data['source_sections'] = [{'id': synthetic_evidence(2051)['id'], 'title': 'Source directory',
                                     'kind': 'section', 'pages': [1], 'evidence_ids': [context_only]}]
 
-    result, prompt = invoke_section(monkeypatch, data, section_output('background', evidence=()))
+    output = section_output('background', evidence=())
+    if allow_assets:
+        for i in range(2017, 2049):
+            alias = f'e{i}'
+            b = section_output('background', alias, 'formula', evidence=[alias])['blocks'][0]
+            output['blocks'].append({**b, 'id': 'original-' + alias})
+    result, prompt = invoke_section(monkeypatch, data, output)
     assert result.status == 'succeeded'
     instruction, mapping, encoded, prefix_bytes = split_visual_prefix(prompt)
     budget = _request_budget_contract()
@@ -262,3 +280,59 @@ def test_maximum_actual_section_prefix_fits_shared_reserve(monkeypatch, language
     system_bytes = len(OpenAIChat._get_system_prompt(None).encode('utf-8'))
     assert prefix_bytes + system_bytes + budget['provider_frame_reserve_bytes'] <= budget['prompt_reserve_bytes']
     assert prefix_bytes == budget['measured_prompt_bytes']['paper.guide.section'] - (0 if allow_assets else 575)
+
+
+@pytest.mark.parametrize(('candidate', 'include', 'expected'), [
+    ('region', False, 'invalid_model_output'),
+    ('region', True, ''),
+    ('page', False, ''),
+    ('unlisted', True, 'invalid_model_output'),
+    ('wrong kind', True, 'invalid_task_input'),
+    ('forged', True, 'invalid_task_input'),
+])
+def test_plan_region_original_selection_through_registry(monkeypatch, candidate, include, expected):
+    source, _, encoded = mixed_material()
+    source['evidence'][0]['source_type'] = 'image'
+    source['original_asset_candidates'] = {'figure': [], 'formula': []}
+    if candidate in ('page', 'region'):
+        source['original_asset_candidates']['figure'] = [{'id': A, 'mode': candidate}]
+    if candidate == 'wrong kind':
+        source['original_asset_candidates']['formula'] = [{'id': A, 'mode': 'region'}]
+    if candidate == 'forged':
+        source['original_asset_candidates']['figure'] = [{'id': B, 'mode': 'region'}]
+    encoded['required_assets'][0]['included'] = include
+    if not include:
+        for s in encoded['sections']:
+            s['asset_ids'] = []
+    result, calls = invoke(monkeypatch, source, encoded)
+    if expected:
+        assert result.error_code == expected
+    else:
+        assert result.status == 'succeeded'
+        mode = f'"mode": "{candidate}"'
+        assert '"original_asset_candidates":' in calls[0] and mode in calls[0]
+        assert '"id": "e1"' in calls[0]
+
+
+@pytest.mark.parametrize('failure', ['omitted', 'wrong evidence', 'duplicate'])
+def test_section_requires_every_original_in_its_own_bound_block(monkeypatch, failure):
+    data = visual_section_input('normal')
+    data['plan']['required_assets'] = [d for d in data['plan']['required_assets']
+                                      if d['id'] != synthetic_evidence(7)['id']]
+    data['plan']['sections'][0]['asset_ids'].remove(synthetic_evidence(7)['id'])
+    output = section_output('background', 'e3', 'figure', evidence=['e3'])
+    for alias, kind in [('e4', 'figure'), ('e5', 'formula')]:
+        block = section_output('background', alias, kind, evidence=[alias])['blocks'][0]
+        block['id'] = 'original-' + alias
+        output['blocks'].append(block)
+    if failure == 'omitted':
+        output['blocks'].pop()
+        output['blocks'][0]['evidence_ids'].append('e5')
+    elif failure == 'wrong evidence':
+        output['blocks'][0]['evidence_ids'] = ['e4']
+    else:
+        dup = deepcopy(output['blocks'][0])
+        dup['id'] = 'duplicated-original'
+        output['blocks'].append(dup)
+    result, _ = invoke_section(monkeypatch, data, output)
+    assert result.error_code == 'invalid_model_output'

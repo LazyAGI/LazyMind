@@ -258,6 +258,9 @@ func ValidatePlan(s GuideSourceSnapshot, out GuidePlan) error {
 			included[a.ID] = true
 		}
 	}
+	if err := validateOriginalPlan(s, out, kinds, included); err != nil {
+		return err
+	}
 	usedClaims, usedAssets := map[string]bool{}, map[string]bool{}
 	for i, r := range Roles() {
 		p := out.Sections[i]
@@ -305,9 +308,17 @@ func ValidateSection(s GuideSourceSnapshot, p GuidePlan, role Role, out GuideSec
 	for _, id := range out.ClaimIDs {
 		sectionClaims[id] = true
 	}
-	allowedAssets := map[string]bool{}
+	allowedAssets, remainingOriginals := map[string]bool{}, map[string]bool{}
 	for _, id := range expected.AssetIDs {
 		allowedAssets[id] = true
+	}
+	for _, a := range s.Assets {
+		if allowedAssets[a.ID] && (a.Kind == "figure" || a.Kind == "formula") {
+			if !ev[a.ID] {
+				return invalid("planned original missing from role packet")
+			}
+			remainingOriginals[a.ID] = true
+		}
 	}
 	seen, used := map[string]bool{}, map[string]bool{}
 	for _, b := range out.Blocks {
@@ -330,9 +341,18 @@ func ValidateSection(s GuideSourceSnapshot, p GuidePlan, role Role, out GuideSec
 			if kinds[b.AssetID] != b.Kind || !allowedAssets[b.AssetID] {
 				return invalid("wrong or unplanned asset")
 			}
+			if b.Kind != "table" {
+				if !remainingOriginals[b.AssetID] || !contains(b.EvidenceIDs, b.AssetID) {
+					return invalid("duplicate original or missing self evidence")
+				}
+				delete(remainingOriginals, b.AssetID)
+			}
 		default:
 			return invalid("block kind")
 		}
+	}
+	if len(remainingOriginals) != 0 {
+		return invalid("missing planned original")
 	}
 	if len(used) != len(sectionClaims) {
 		return invalid("orphan section claims")

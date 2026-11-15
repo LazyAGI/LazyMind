@@ -139,11 +139,14 @@ func TestImpossibleOutputReserveMakesZeroModelCalls(t *testing.T) {
 }
 
 func TestPublishedGuideAndSelectionRemainReadableAcrossTaskVersions(t *testing.T) {
-	for _, version := range []string{"paper-guide-v2", "paper-guide-v3", "paper-guide-v4", "paper-guide-v5", "paper-guide-v6", "paper-guide-v7", "paper-guide-v8", "paper-guide-v9", "paper-guide-v10", "paper-guide-v11", "paper-guide-v12", "paper-guide-v13", "paper-guide-v14", "paper-guide-v15"} {
+	for _, version := range []string{"paper-guide-v2", "paper-guide-v3", "paper-guide-v4", "paper-guide-v5", "paper-guide-v6", "paper-guide-v7", "paper-guide-v8", "paper-guide-v9", "paper-guide-v10", "paper-guide-v11", "paper-guide-v12", "paper-guide-v13", "paper-guide-v14", "paper-guide-v15", "paper-guide-v16"} {
 		t.Run(version, func(t *testing.T) {
 			d, id := fixture(t)
 			current, _ := BuildSourceSnapshot(d, id)
 			old := current
+			if version == "paper-guide-v16" {
+				old, _ = buildSourceSnapshot(d, id, sourceCatalogV5)
+			}
 			repo := Repository{DB: guideDB(t)}
 			scope := Scope{OwnerID: id.OwnerID, DatasetID: id.DatasetID, DocumentID: id.DocumentID, Language: "zh"}
 			model := ModelIdentity{ID: "m"}
@@ -160,7 +163,7 @@ func TestPublishedGuideAndSelectionRemainReadableAcrossTaskVersions(t *testing.T
 			case "paper-guide-v13":
 				section.Blocks[0].Text = "样本范围。〔e2〕"
 				start, end, wantSelection = 2, 9, "范围。〔e2〕"
-			case "paper-guide-v14", "paper-guide-v15":
+			case "paper-guide-v14", "paper-guide-v15", "paper-guide-v16":
 				section.Blocks[0].Text = "样本范围。校准值"
 				start, end, wantSelection = 2, 8, "范围。校准值"
 			}
@@ -173,10 +176,10 @@ func TestPublishedGuideAndSelectionRemainReadableAcrossTaskVersions(t *testing.T
 			if err = repo.Transition(t.Context(), testFence{repo.DB}, rev.ID, rev.Epoch, "completed", ""); err != nil {
 				t.Fatal(err)
 			}
-			if err = repo.DB.Model(&rev).Update("fingerprint", digest([]any{id.SourceSHA256, old.IRDigest, SourceCatalogVersion, version, model})).Error; err != nil {
+			if err = repo.DB.Model(&rev).Update("fingerprint", digest([]any{id.SourceSHA256, old.IRDigest, old.CatalogVersion, version, model})).Error; err != nil {
 				t.Fatal(err)
 			}
-			if version == "paper-guide-v12" || version == "paper-guide-v13" || version == "paper-guide-v14" || version == "paper-guide-v15" {
+			if version == "paper-guide-v12" || version == "paper-guide-v13" || version == "paper-guide-v14" || version == "paper-guide-v15" || version == "paper-guide-v16" {
 				newer, err := repo.Create(t.Context(), CreateRevision{Scope: scope, SourceSHA256: id.SourceSHA256, IRDigest: old.IRDigest, SnapshotPath: "new", Model: model, Regenerate: true})
 				if err != nil {
 					t.Fatal(err)

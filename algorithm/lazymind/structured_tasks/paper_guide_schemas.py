@@ -253,12 +253,23 @@ class Review(Shape):
     findings: Annotated[list[Finding], Field(max_length=48)]
 
 
+class OriginalAssetCandidate(Shape):
+    id: SourceID
+    mode: Literal['region', 'page']
+
+
+class OriginalAssetCandidates(Shape):
+    figure: Annotated[list[OriginalAssetCandidate], Field(max_length=4)]
+    formula: Annotated[list[OriginalAssetCandidate], Field(max_length=6)]
+
+
 class GuideInput(Shape):
     language: Literal['en', 'zh']
     evidence: Annotated[list[Evidence], Field(max_length=2048)]
     coverage: Coverage | None = None
     source_sections: Annotated[list[SourceSection], Field(max_length=512)] = Field(default_factory=list)
     findings: Annotated[list[Finding], Field(max_length=48)] = Field(default_factory=list)
+    original_asset_candidates: OriginalAssetCandidates | None = None
 
     @model_validator(mode='after')
     def check_evidence_catalog(self):
@@ -279,6 +290,13 @@ class GuideInput(Shape):
                         or e.id not in (parent.fragment_evidence_ids or []) or e.locator.kind != 'page'
                         or not e.source_region_id or e.source_block_id != parent.source_block_id):
                     raise ValueError('invalid table fragment parent')
+        candidates = self.original_asset_candidates
+        if candidates is not None:
+            kinds = _asset_kinds(self.evidence)
+            unique(c.id for c in candidates.figure + candidates.formula)
+            for kind in ('figure', 'formula'):
+                if any(kinds.get(c.id) != kind for c in getattr(candidates, kind)):
+                    raise ValueError('original asset candidate outside packet or kind')
         return self
 
 
@@ -473,7 +491,17 @@ def bind_output(data, result):
     for claim in result.claims:
         refs(claim.evidence_ids, evidence)
     if isinstance(result, Plan):
-        refs([a.id for a in result.required_assets], _asset_kinds(data.evidence).keys())
+        kinds = _asset_kinds(data.evidence)
+        candidates = data.original_asset_candidates
+        allowed = {id_ for id_, kind in kinds.items() if kind == 'table'}
+        chosen = {a.id for a in result.required_assets if a.included}
+        for kind in ('figure', 'formula'):
+            choices = getattr(candidates, kind) if candidates else []
+            allowed.update(c.id for c in choices)
+            regions = {c.id for c in choices if c.mode == 'region'}
+            if regions and not regions & chosen:
+                raise ValueError(f'missing planned original region: {kind}')
+        refs([a.id for a in result.required_assets], allowed)
         bind_sections(result.sections, 'evidence_ids', evidence)
     if isinstance(result, Section):
         expected = next(s for s in data.plan.sections if s.role == data.role)
@@ -494,12 +522,19 @@ def bind_output(data, result):
             if claim.id in used:
                 refs(claim.evidence_ids, evidence)
         bind_sections(result.blocks, 'evidence_ids', evidence)
+        remaining_originals = {id_ for id_, kind in allowed_assets.items() if kind != 'table'}
         for block in result.blocks:
             if block.attribution == 'paper_statement' and not (block.claim_ids or block.evidence_ids):
                 raise ValueError('unbound paper block')
             if block.kind in ASSET_KINDS.values():
                 if allowed_assets.get(block.asset_id) != block.kind:
                     raise ValueError('wrong or unplanned asset')
+                if block.kind != 'table':
+                    if block.asset_id not in remaining_originals or block.asset_id not in block.evidence_ids:
+                        raise ValueError('duplicate original or missing self evidence')
+                    remaining_originals.remove(block.asset_id)
             elif block.asset_id is not None:
                 raise ValueError('asset on text block')
+        if remaining_originals:
+            raise ValueError('missing planned original')
         _reject_section_citation_tails(data, result)

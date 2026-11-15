@@ -39,7 +39,7 @@ def test_extract_one_call_and_binds_evidence(monkeypatch, output, error):
     }]}
     request = llm_task.LLMTaskRequest(
         task_type='paper.guide.extract',
-        options={'task_version': 'paper-guide-v16'},
+        options={'task_version': 'paper-guide-v17'},
         input={'data': input_data})
     result = llm_task.run_llm_task(request)
     assert result.error_code == error
@@ -200,7 +200,7 @@ def test_guide_chain_accepts_versioned_shapes_and_rejects_invalid_bindings(monke
     monkeypatch.setattr(llm_task, 'AutoModel', lambda **kwargs: model)
     request = llm_task.LLMTaskRequest(
         task_type=f'paper.guide.{task}',
-        options={'task_version': 'paper-guide-v16'},
+        options={'task_version': 'paper-guide-v17'},
         input={'data': {'language': 'en', 'evidence': [EVIDENCE], **data}})
     good = llm_task.run_llm_task(request)
     assert good.status == 'succeeded'
@@ -224,7 +224,7 @@ def test_registered_guide_uses_remaining_model_time_and_rejects_late_success(
     monkeypatch.setattr(runner, 'time', clock)
     monkeypatch.setattr(llm_task, 'time', clock)
     request = llm_task.LLMTaskRequest(
-        task_type=f'paper.guide.{task}', options={'task_version': 'paper-guide-v16'},
+        task_type=f'paper.guide.{task}', options={'task_version': 'paper-guide-v17'},
         input={'data': {'language': 'en', 'evidence': [EVIDENCE], **data}})
     attempts = []
     actual_call = llm_task._call_model
@@ -269,7 +269,7 @@ def test_guide_rejects_tools_and_paths_before_model(monkeypatch):
     data = {'language': 'en', 'evidence': [EVIDENCE], 'output_path': '/tmp/override'}
     request = llm_task.LLMTaskRequest(
         task_type='paper.guide.extract',
-        options={'task_version': 'paper-guide-v16'},
+        options={'task_version': 'paper-guide-v17'},
         input={'data': data})
     assert llm_task.run_llm_task(request).error_code == 'invalid_task_input'
     request.input.data.pop('output_path')
@@ -291,7 +291,7 @@ def test_guide_rejects_duplicate_json_keys_with_one_call(monkeypatch, raw):
 
     monkeypatch.setattr(llm_task, 'AutoModel', lambda **kwargs: model)
     request = llm_task.LLMTaskRequest(
-        task_type='paper.guide.extract', options={'task_version': 'paper-guide-v16'},
+        task_type='paper.guide.extract', options={'task_version': 'paper-guide-v17'},
         input={'data': {'language': 'en', 'evidence': [EVIDENCE]}})
     result = llm_task.run_llm_task(request)
     assert result.error_code == 'invalid_model_output'
@@ -314,7 +314,7 @@ def test_section_requires_planned_claims_and_evidence_closure(monkeypatch):
     section['blocks'][0].update(claim_ids=['required'], evidence_ids=[])
     monkeypatch.setattr(llm_task, 'AutoModel', lambda **kwargs: lambda *a, **k: mock_model_json(section))
     request = llm_task.LLMTaskRequest(
-        task_type='paper.guide.section', options={'task_version': 'paper-guide-v16'},
+        task_type='paper.guide.section', options={'task_version': 'paper-guide-v17'},
         input={'data': {'plan': plan, 'role': 'background', 'language': 'en', 'evidence': [EVIDENCE]}})
     assert llm_task.run_llm_task(request).status == 'succeeded'
     request.input.data['evidence'] = [other]
@@ -337,7 +337,7 @@ def test_full_review_validates_unique_targets_even_without_findings(monkeypatch,
                  'evidence_ids': [SOURCE_ID], 'argument_type': None, 'conditions': [], 'support_status': 'supported'}
         sections.append({**SECTION, 'role': role, 'title': role.title(), 'blocks': [block], 'claims': [claim]})
     request = llm_task.LLMTaskRequest(
-        task_type='paper.guide.review', options={'task_version': 'paper-guide-v16'},
+        task_type='paper.guide.review', options={'task_version': 'paper-guide-v17'},
         input={'data': {'plan': PLAN, 'sections': sections, 'language': 'en', 'evidence': [EVIDENCE]}})
     result = llm_task.run_llm_task(request)
     assert result.error_code == (None if collision == 'none' else 'invalid_task_input')
@@ -353,7 +353,7 @@ def test_guide_math_preserves_compact_comparisons_without_html(monkeypatch, body
     raw = {'claims': [], 'open_questions': [body]}
     monkeypatch.setattr(llm_task, 'AutoModel', lambda **kwargs: lambda *a, **k: json.dumps(raw))
     request = llm_task.LLMTaskRequest(
-        task_type='paper.guide.extract', options={'task_version': 'paper-guide-v16'},
+        task_type='paper.guide.extract', options={'task_version': 'paper-guide-v17'},
         input={'data': {'language': 'en', 'evidence': [EVIDENCE]}})
     assert llm_task.run_llm_task(request).error_code == error
 
@@ -379,7 +379,12 @@ def test_live_chart_exclusion_fixture_binds_without_inventing_content():
     plan['required_assets'] = fixture['chart_decisions']
     for section in plan['sections']:
         section['evidence_ids'] = [item['id'] for item in evidence]
-    bind_output(PlanInput.model_validate({'language':'en','evidence': evidence}), Plan.model_validate(plan))
+    # The old fixture supplies only page-level originals under the new contract.
+    candidates = {'figure': [{'id': e['id'], 'mode': 'page'} for e in evidence[:4]], 'formula': []}
+    eligible = {candidate['id'] for candidate in candidates['figure']}
+    plan['required_assets'] = [decision for decision in plan['required_assets'] if decision['id'] in eligible]
+    bind_output(PlanInput.model_validate({'language': 'en', 'evidence': evidence,
+                                         'original_asset_candidates': candidates}), Plan.model_validate(plan))
     assert all(not item['text'] for item in evidence)
     assert all(not item['included'] for item in plan['required_assets'])
 
@@ -391,7 +396,11 @@ def test_metadata_free_source_asset_can_be_explicitly_excluded(source):
     evidence = {**EVIDENCE, 'source_type': source, 'text': '', 'locator': {'kind': 'page', 'page': 0}}
     plan = deepcopy(PLAN)
     plan['required_assets'] = [{'id': SOURCE_ID, 'included': False, 'reason': 'Readable material is missing.'}]
-    bind_output(PlanInput.model_validate({'language':'en','evidence': [evidence]}), Plan.model_validate(plan))
+    candidates = {'figure': [], 'formula': []}
+    if source != 'table':
+        candidates['formula' if source == 'formula' else 'figure'].append({'id': SOURCE_ID, 'mode': 'page'})
+    bind_output(PlanInput.model_validate({'language': 'en', 'evidence': [evidence],
+                                         'original_asset_candidates': candidates}), Plan.model_validate(plan))
 
 
 @pytest.mark.parametrize(('source', 'url', 'enabled'), [
@@ -507,6 +516,12 @@ def test_all_actual_guide_templates_fit_shared_prompt_reserve(monkeypatch, langu
         {**EVIDENCE, 'id': f'ev_{i:064x}', 'source_block_id': f'block-{i}'}
         for i in range(2, 2049)]]
     data = {'language': language, 'evidence': evidence}
+    if task in ('plan', 'review'):
+        candidates = {'figure': [], 'formula': []}
+        for i, kind in enumerate(['figure'] * 4 + ['formula'] * 6, 1):
+            evidence[-i]['source_type'] = 'chart' if kind == 'figure' else kind
+            candidates[kind].append({'id': evidence[-i]['id'], 'mode': 'page'})
+        data['original_asset_candidates'] = candidates
     if task == 'review':
         data.update(plan=PLAN, sections=[SECTION])
     output = {'extract': {'claims': [], 'open_questions': []}, 'plan': PLAN,
@@ -556,6 +571,11 @@ def test_all_guide_input_default_expansion_fits_shared_bound(task, count, all_ta
     for section in plan['sections']:
         section['evidence_ids'] = []
     data = {'language': 'zh', 'evidence': evidence}
+    if not all_tables and count >= 2048:
+        data['original_asset_candidates'] = {
+            'figure': [{'id': ev['id'], 'mode': 'region'} for ev in evidence if ev['source_type'] == 'chart'][:4],
+            'formula': [{'id': ev['id'], 'mode': 'page'} for ev in evidence if ev['source_type'] == 'formula'][:6],
+        }
     if task in ('section', 'review'):
         data['plan'] = plan
     if task == 'section':
@@ -579,7 +599,7 @@ def test_all_guide_input_default_expansion_fits_shared_bound(task, count, all_ta
 
 @pytest.mark.parametrize('task', ['extract', 'plan', 'section', 'review'])
 @pytest.mark.parametrize('version', ['paper-guide-v7', 'paper-guide-v10', 'paper-guide-v11', 'paper-guide-v12',
-                                     'paper-guide-v13', 'paper-guide-v14', 'paper-guide-v15'])
+                                     'paper-guide-v13', 'paper-guide-v14', 'paper-guide-v15', 'paper-guide-v16'])
 def test_previous_guide_contract_rejected_before_provider_setup(monkeypatch, task, version):
     monkeypatch.setattr(llm_task, 'AutoModel', lambda **kwargs: pytest.fail('old contract reached provider'))
     monkeypatch.setattr(llm_task, 'inject_model_config', lambda *_: pytest.fail('old contract configured provider'))
@@ -642,7 +662,7 @@ def test_explanation_responsibilities_reach_model_with_actual_scope(monkeypatch,
         data['sections'] = sections if scope == 'whole_review' else [sections[2]]
     request = llm_task.LLMTaskRequest(
         task_type=f'paper.guide.{task}',
-        options={'task_version': 'paper-guide-v16'}, input={'data': data})
+        options={'task_version': 'paper-guide-v17'}, input={'data': data})
     result = llm_task.run_llm_task(request)
     assert result.status == 'succeeded'
     assert result.output == output

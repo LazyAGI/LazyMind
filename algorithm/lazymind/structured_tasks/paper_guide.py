@@ -46,22 +46,18 @@ Preserve the mathematical conditions, signs and grouping.
 """
 
 PLAN = """
-Use compact JSON and concise internal planning notes. Keep every core claim, condition, asset
-decision and explanation responsibility; remove repeated wording. Sections must still explain them fully.
-Plan four ordered roles: background, question, contribution, justification. Give each a concrete
-display title, focus, necessary terms, claim IDs, evidence IDs and asset IDs. Include all core
-claims in at least one section. For each key supplied catalog visual or formula, give the evidence ID and a reason
-for inclusion or exclusion; place every included object in at least one section.
-Asset eligibility: every required_assets decision (included=true OR false) must reference supplied
-image/chart/formula/table evidence. false excludes a supplied catalog asset, not a missing resource.
-Text evidence, including captions or mentions of unavailable figures/tables, is never an asset:
-explain missing material in claims, conditions, focus and prose, never required_assets or asset_ids.
-Do not infer source_type from a figure/table label. Catalog eligibility proves neither visible
-pixels nor readable contents; preserve gaps without inventing images, cells or formulas.
-Each section.asset_ids ID needs exactly one included=true decision; every included asset must be
-used by a section. Excluded/undecided IDs cannot be in asset_ids. A textual table citation in
-evidence_ids need not display the asset. Section reference lists are sets: each exact ID once.
-Never duplicate a claim or asset-decision definition.
+Plan four ordered roles: background, question, contribution, justification. Use compact JSON and
+assign core claims, conditions, terms and explanation responsibilities to concrete titles and foci.
+Select central originals from original_asset_candidates. If a type has region candidates, include at
+least one region of that type; choose additional originals when essential. A page candidate can show
+its source page but cannot replace a region minimum. Use that fallback for a central original
+when the source page and discussion support it. An empty type needs no asset. Put each chosen
+original where its role explains it. Display proof does not supply pixels to this model.
+For key originals or supplied tables give required_assets decisions with concise reasons. Use only
+listed originals and actual table IDs, even for excluded decisions; missing items and text captions
+are prose/evidence, never assets. Do not invent image observations, cells or formulas.
+Assign every included asset to a section; only included assets may be in asset_ids. A table citation
+need not display the table. Deduplicate reference lists, claims and decisions.
 Assign central comparisons and conditions via focus/claims/asset decisions: identify load-bearing
 rows, axes or contrasts and plan prose explaining them, not just asset display or peripheral cells.
 Use terms for the few concepts needed to understand core operations, measures, premises or
@@ -125,7 +121,8 @@ all used claim IDs at section level and use each in a block. Cover every claim a
 role, and only use claims whose evidence is in this packet. For compact angle notation prefer
 LaTeX \\langle and \\rangle within math. For visual blocks use only exact asset_id/kind pairs
 from the allowed visual blocks map for this role. An empty map permits no asset blocks.
-Captions cannot override source type. Sources outside the map can still support prose.
+Show each planned figure/formula once in its own block, include its asset_id among that block's
+evidence_ids, and explain its role nearby. Keep originals in repairs. Captions are not visual proof.
 Give section-specific block and new-claim IDs
 (e.g. contribution-b1), and provide a short continuity summary. For findings, rewrite the
 substantive explanation against the supplied sources and preserve unaffected supported content
