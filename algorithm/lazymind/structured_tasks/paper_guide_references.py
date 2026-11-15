@@ -96,6 +96,19 @@ def strict_model_output_schema(schema):
     return contract
 
 
+def _project_section_claims(model_input):
+    packet = {evidence['id'] for evidence in model_input['evidence']}
+    plan = model_input['plan']
+    claims = [claim for claim in plan['claims'] if packet.issuperset(claim['evidence_ids'])]
+    eligible = {claim['id'] for claim in claims}
+    required = next(section['claim_ids'] for section in plan['sections'] if section['role'] == model_input['role'])
+    if not eligible.issuperset(required):
+        raise ValueError('required plan claim evidence outside packet')
+    plan['claims'] = claims
+    for section in plan['sections']:
+        section['claim_ids'] = [claim_id for claim_id in section['claim_ids'] if claim_id in eligible]
+
+
 class SourceReferences:
     def __init__(self, task, canonical_input):
         self.task = task
@@ -113,6 +126,9 @@ class SourceReferences:
                     canonical_to_alias[canonical] = alias
                     self._alias_to_canonical[alias] = canonical
                 parent[key] = canonical_to_alias[canonical]
+        # Keep alias assignment and canonical validation independent of the SECTION view.
+        if task == 'section':
+            _project_section_claims(self.model_input)
         for index, section in enumerate(self.model_input.get('source_sections', []), 1):
             section['id'] = f's{index}'
         for evidence in self.model_input['evidence']:

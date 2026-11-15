@@ -98,17 +98,81 @@ def test_invalid_alias_never_recovers_or_infers_a_source(bad):
         refs.canonical_output(encoded, 256 << 10)
 
 
-def test_visible_context_outside_packet_does_not_authorize_citation():
+def section_claim_case():
+    _, _, raw, output = cases()['section']
+    plan = raw['plan']
+    template = plan['claims'][0]
+    plan['claims'] = [
+        {**template, 'id': 'c2', 'evidence_ids': [A, B]},
+        {**template, 'id': 'c3'},
+        {**template, 'id': 'c4', 'evidence_ids': [], 'attribution': 'teaching',
+         'support_status': 'not_applicable'},
+        {**template, 'id': 'c5', 'evidence_ids': [], 'support_status': 'unavailable'},
+        *({**template, 'id': id_} for id_ in ('c8', 'c9', 'c10')),
+    ]
+    for section, claim_ids in zip(plan['sections'], (
+        ['c4', 'c2', 'c3'], ['c3'], ['c8', 'c9', 'c10'], ['c5', 'c2'],
+    )):
+        section['claim_ids'] = claim_ids
+    plan['sections'][3]['evidence_ids'].append('ev_' + 'd' * 64)
+    raw.update(role='contribution', prior_summary='The comparison has been introduced.')
+    output.update(role='contribution', title='Contribution', claim_ids=['c8', 'c9', 'c10'])
+    output['blocks'][0].update(id='contribution-b1', claim_ids=output['claim_ids'][:])
+    return raw, output
+
+
+def test_section_model_view_keeps_only_packet_closed_claims_and_every_other_reference():
     from lazymind.structured_tasks.paper_guide_references import SourceReferences
-    I, O, raw, output = cases()['section']
-    raw['plan']['claims'][0]['evidence_ids'].append(B)
-    data = I.model_validate(raw)
+    raw, output = section_claim_case()
+    data = SectionInput.model_validate(raw)
+    before = data.model_dump(exclude_none=True)
     refs = SourceReferences('section', data)
-    assert refs.model_input['plan']['claims'][0]['evidence_ids'] == ['e1', 'e2']
+
+    # The context-only c2 evidence still reserves e2 before the later e3.
+    expected = deepcopy(before)
+    expected['evidence'][0]['id'] = 'e1'
+    del expected['evidence'][0]['source_block_id']
+    del expected['evidence'][0]['source_region_id']
+    expected['source_sections'][0].update(id='s1', evidence_ids=['e1'])
+    expected['plan']['claims'].pop(0)
+    for claim, evidence_ids in zip(expected['plan']['claims'], [['e1'], [], [], ['e1'], ['e1'], ['e1']]):
+        claim['evidence_ids'] = evidence_ids
+    for section, claim_ids in zip(expected['plan']['sections'], (
+        ['c4', 'c3'], ['c3'], ['c8', 'c9', 'c10'], ['c5'],
+    )):
+        section.update(claim_ids=claim_ids, evidence_ids=['e1'], asset_ids=['e1'])
+    expected['plan']['sections'][3]['evidence_ids'].append('e3')
+    expected['plan']['required_assets'][0]['id'] = 'e1'
+    assert refs.model_input == expected
+    assert refs.asset_instruction.endswith(
+        'Allowed visual blocks by source alias for the requested role (JSON): {"e1":"table"}')
+    assert data.model_dump(exclude_none=True) == before
+
     encoded = model_output('section', output)
     encoded['blocks'][0]['evidence_ids'].append('e2')
+    expanded = Section.model_validate(refs.canonical_output(encoded, 256 << 10))
+    assert expanded.blocks[0].evidence_ids == [A, B]
     with pytest.raises(ValueError, match='unknown ID'):
-        bind_output(data, O.model_validate(refs.canonical_output(encoded, 256 << 10)))
+        bind_output(data, expanded)
+
+
+def test_only_section_projects_plan_claims():
+    from lazymind.structured_tasks.paper_guide_references import SourceReferences
+    raw, section = section_claim_case()
+    data = ReviewInput.model_validate({**{key: raw[key] for key in ('language', 'evidence', 'plan')},
+                                       'sections': [section]})
+    review = SourceReferences('review', data).model_input
+    assert review['plan']['claims'][0]['id'] == 'c2'
+    assert review['plan']['claims'][0]['evidence_ids'] == ['e1', 'e2']
+    assert review['plan']['sections'][0]['claim_ids'] == ['c4', 'c2', 'c3']
+    context = {'claims': raw['plan']['claims'], 'open_questions': []}
+    data = PlanInput.model_validate({'language': raw['language'], 'evidence': raw['evidence'],
+                                     'extracts': [context]})
+    plan = SourceReferences('plan', data).model_input
+    assert plan['extracts'][0]['claims'][0]['id'] == 'c2'
+    assert plan['extracts'][0]['claims'][0]['evidence_ids'] == ['e1', 'e2']
+    extract = GuideInput.model_validate({'language': raw['language'], 'evidence': raw['evidence']})
+    assert SourceReferences('extract', extract).model_input['evidence'] == plan['evidence']
 
 
 @pytest.mark.parametrize(('field', 'limit'), [('claim_ids', 96), ('evidence_ids', 128), ('asset_ids', 32)])
@@ -196,6 +260,8 @@ def test_max_catalog_and_section_view_remains_bounded_and_complete(task):
     raw['evidence'] = [{**raw['evidence'][0], 'id': f'ev_{n:064x}'} for n in range(2048)]
     raw['source_sections'] = [{**raw['source_sections'][0], 'id': f'ev_{n + 3000:064x}',
                                'evidence_ids': [raw['evidence'][n]['id']]} for n in range(512)]
+    if task == 'section':
+        raw['plan']['claims'][0]['evidence_ids'] = [raw['evidence'][0]['id']]
     data = I.model_validate(raw)
     view = SourceReferences(task, data).model_input
     assert len(view['evidence']) == 2048 and len(view['source_sections']) == 512
@@ -265,7 +331,7 @@ def test_registered_task_uses_alias_schema_and_returns_canonical_wire(monkeypatc
         return json.dumps(model_output(task, output))
     monkeypatch.setattr(llm_task, 'AutoModel', lambda **kwargs: model)
     request = llm_task.LLMTaskRequest(task_type=f'paper.guide.{task}',
-        options={'task_version': 'paper-guide-v19'}, input={'data': raw})
+        options={'task_version': 'paper-guide-v20'}, input={'data': raw})
     result = llm_task.run_llm_task(request)
     assert result.status == 'succeeded' and result.output == output
     assert len(calls) == result.usage['model_calls'] == 1
@@ -283,7 +349,7 @@ def test_alias_schema_keeps_duplicate_json_key_rejection(monkeypatch):
         return '{"claims":[],"claims":[],"open_questions":[]}'
     monkeypatch.setattr(llm_task, 'AutoModel', lambda **kwargs: model)
     request = llm_task.LLMTaskRequest(task_type='paper.guide.extract',
-        options={'task_version': 'paper-guide-v19'}, input={'data': cases()['extract'][2]})
+        options={'task_version': 'paper-guide-v20'}, input={'data': cases()['extract'][2]})
     assert llm_task.run_llm_task(request).error_code == 'invalid_model_output'
     assert len(calls) == 1
 
@@ -299,7 +365,7 @@ def test_review_keeps_teaching_and_factual_findings_bound_without_reclassificati
     output['findings'][0].update(issue_type=issue, target_type=target_type)
     monkeypatch.setattr(llm_task, 'AutoModel', lambda **kwargs: lambda *a, **k: json.dumps(output))
     request = llm_task.LLMTaskRequest(task_type='paper.guide.review',
-        options={'task_version': 'paper-guide-v19'}, input={'data': raw})
+        options={'task_version': 'paper-guide-v20'}, input={'data': raw})
     result = llm_task.run_llm_task(request)
     assert result.status == 'succeeded'
     assert result.output == output
@@ -348,7 +414,7 @@ def test_alias_failure_never_triggers_an_extra_model_attempt(monkeypatch, bad):
         return json.dumps(output)
     monkeypatch.setattr(llm_task, 'AutoModel', lambda **kwargs: model)
     request = llm_task.LLMTaskRequest(task_type='paper.guide.extract',
-        options={'task_version': 'paper-guide-v19'}, input={'data': cases()['extract'][2]})
+        options={'task_version': 'paper-guide-v20'}, input={'data': cases()['extract'][2]})
     result = llm_task.run_llm_task(request)
     assert result.error_code == 'invalid_model_output'
     assert len(calls) == result.usage['model_calls'] == 1
@@ -365,7 +431,7 @@ def test_concurrent_registered_calls_cannot_share_alias_identity(monkeypatch):
         raw['evidence'][0]['id'] = source
         raw['source_sections'][0]['evidence_ids'] = [source]
         request = llm_task.LLMTaskRequest(task_type='paper.guide.extract',
-            options={'task_version': 'paper-guide-v19'}, input={'data': raw})
+            options={'task_version': 'paper-guide-v20'}, input={'data': raw})
         result = llm_task.run_llm_task(request)
         assert result.status == 'succeeded' and result.usage['model_calls'] == 1
         return result.output['claims'][0]['evidence_ids']
@@ -437,7 +503,7 @@ def test_shared_physical_fragment_fixture_uses_actual_task_transport(monkeypatch
     result = llm_task.run_llm_task(request)
     assert result.status == 'succeeded'
     assert result.output == fixture['output']
-    assert result.usage['task_version'] == 'paper-guide-v19'
+    assert result.usage['task_version'] == 'paper-guide-v20'
     assert result.usage['model_calls'] == 1
 
 

@@ -10,7 +10,7 @@ import requests
 from lazyllm.module.llms.onlinemodule.supplier.openai import OpenAIChat
 from lazymind.chat.service.llm_task import LLMTaskRequest, run_llm_task
 from lazymind.structured_tasks.registry import PAPER_GUIDE_VERSION
-from test_paper_guide_aliases import A, B, cases, model_output
+from test_paper_guide_aliases import A, B, cases, model_output, section_claim_case
 from test_paper_guide_tasks import PLAN, _request_budget_contract
 
 
@@ -258,6 +258,90 @@ def test_native_output_still_requires_valid_json_schema_and_evidence_binding(htt
     assert sent[0][1]['text']['format']['type'] == 'json_schema'
 
 
+@pytest.mark.parametrize('mode', ['draft', 'local_repair', 'whole_repair'])
+@pytest.mark.parametrize('model', ['gpt-6-luna', 'unknown-model'])
+def test_section_request_shows_reusable_claims_for_its_actual_packet(http, mode, model):
+    from test_paper_guide_asset_boundary import synthetic_evidence
+
+    data, canonical = section_claim_case()
+    if mode != 'draft':
+        data['findings'] = [{'target_id': 'contribution-b1', 'target_type': 'block',
+                             'issue_type': 'coverage', 'suggestion': 'Explain the comparison.'}]
+    if mode == 'whole_repair':
+        independent = synthetic_evidence(2, text='An independent source from the planning packet.')
+        data['evidence'].append(independent)
+        data['source_sections'][0]['evidence_ids'].append(independent['id'])
+    sent = http(model_output('section', canonical))
+
+    result = execute('section', data, config(model=model))
+
+    assert result.status == 'succeeded' and result.output == canonical
+    assert len(sent) == result.usage['model_calls'] == 1
+    body = sent[0][1]
+    prefix, encoded = response_prompt(body).split(INPUT_MARKER)
+    view = json.loads(encoded)
+    assert [claim['id'] for claim in view['plan']['claims']] == ['c3', 'c4', 'c5', 'c8', 'c9', 'c10']
+    assert [section['claim_ids'] for section in view['plan']['sections']] == [
+        ['c4', 'c3'], ['c3'], ['c8', 'c9', 'c10'], ['c5'],
+    ]
+    assert [(e['id'], e['text']) for e in view['evidence']] == [
+        (f'e{i}', item['text']) for i, item in enumerate(data['evidence'], 1)]
+    assert view['source_sections'][0]['evidence_ids'] == [e['id'] for e in view['evidence']]
+    assert view['findings'] == data.get('findings', [])
+    assert view['prior_summary'] == data['prior_summary']
+    assert 'Use plan.claims as the list of existing claims this packet can cite.' in prefix
+
+
+@pytest.mark.parametrize(('mutation', 'valid'), [
+    ('outside_packet', False), ('redefine_hidden', False), ('missing_required', False),
+    ('optional_and_new', True),
+])
+def test_section_output_binding_keeps_full_canonical_plan(http, mutation, valid):
+    data, canonical = section_claim_case()
+    default_claim = data['plan']['claims'][1]
+    if mutation == 'missing_required':
+        canonical['claim_ids'].remove('c10')
+    elif mutation == 'optional_and_new':
+        canonical['claim_ids'] += ['c3', 'c4', 'c5', 'contribution-new']
+        canonical['claims'] = [{**default_claim, 'id': 'contribution-new', 'statement': 'Both groups were measured.'}]
+    else:
+        canonical['claim_ids'].append('c2')
+        if mutation == 'redefine_hidden':
+            canonical['claims'] = [{**default_claim, 'id': 'c2', 'statement': 'Both groups were measured.'}]
+    canonical['blocks'][0]['claim_ids'] = canonical['claim_ids'][:]
+    output = model_output('section', canonical)
+    sent = http(output)
+
+    result = execute('section', data, config())
+
+    assert len(sent) == result.usage['model_calls'] == 1
+    Draft202012Validator(sent[0][1]['text']['format']['schema']).validate(output)
+    assert result.error_code == (None if valid else 'invalid_model_output')
+    assert result.output == (canonical if valid else {})
+
+
+def test_section_with_required_claim_outside_packet_fails_before_configuration(http, monkeypatch):
+    from lazymind.chat.service import llm_task
+
+    configured = []
+    inject = llm_task.inject_model_config
+
+    def configure(settings):
+        configured.append(True)
+        inject(settings)
+
+    monkeypatch.setattr(llm_task, 'inject_model_config', configure)
+    data, canonical = section_claim_case()
+    data['plan']['sections'][2]['claim_ids'].append('c2')
+    sent = http(model_output('section', canonical))
+
+    result = execute('section', data, config())
+
+    assert result.error_code == 'invalid_task_input' and result.output == {}
+    assert result.usage['model_calls'] == 0
+    assert not configured and not sent
+
+
 def test_caller_cannot_override_native_schema(http):
     sent = http()
     result = execute('extract', {'language': 'en', 'evidence': []}, config(),
@@ -278,11 +362,21 @@ def test_native_and_legacy_fixed_bytes_match_budget_at_small_packet_boundary(htt
     data['language'] = language
     if count == 0:
         data['evidence'] = []
+        if task == 'section':
+            data['plan']['sections'][0]['claim_ids'] = []
+            canonical['claim_ids'] = []
+            canonical['blocks'][0].update(kind='paragraph', attribution='teaching',
+                                          claim_ids=[], evidence_ids=[], asset_id=None)
     if task == 'plan':
         data['evidence'] = [{**ev, 'source_type': 'text'} for ev in data['evidence']]
-    sent = http(model_output(task, canonical))
+    output = model_output(task, canonical)
+    if task == 'section' and not count:
+        output['blocks'][0].update(evidence_ids=[], asset_id=None)
+    sent = http(output)
     for model in ('gpt-6-luna', 'unknown-model'):
-        execute(task, data, config(model=model))
+        result = execute(task, data, config(model=model))
+        if task == 'section':
+            assert result.status == 'succeeded' and result.output == canonical
     assert len(sent) == 2
     strict, legacy = (request for _, request in sent)
     budget = _request_budget_contract()
@@ -306,6 +400,13 @@ def test_native_and_legacy_fixed_bytes_match_budget_at_small_packet_boundary(htt
     assert compact_bytes(strict['text']) == budget['measured_native_text_bytes'][name]
     assert prefix_bytes(legacy) + compact_bytes(legacy['text']) + frame <= budget['prompt_reserve_bytes']
     assert prefix_bytes(strict) + compact_bytes(strict['text']) + frame <= budget['prompt_reserve_bytes']
+    if task == 'section' and not count:
+        for body in (strict, legacy):
+            encoded = response_prompt(body).split(INPUT_MARKER)[1]
+            view = json.loads(encoded)
+            assert view['plan']['claims'] == []
+            assert all(section['claim_ids'] == [] for section in view['plan']['sections'])
+            assert len(encoded.encode('utf-8')) < len(json.dumps(data, ensure_ascii=False).encode('utf-8'))
 
 
 @pytest.mark.parametrize('language', ['en', 'zh'])
@@ -353,7 +454,8 @@ def test_native_plan_maximum_dynamic_map_fits_existing_packet_budget(http, langu
 
 
 @pytest.mark.parametrize('language', ['en', 'zh'])
-def test_native_section_keeps_maximum_visual_map_within_fixed_budget(http, language):
+@pytest.mark.parametrize('model', ['gpt-6-luna', 'unknown-model'])
+def test_section_keeps_maximum_claim_ids_and_visual_map_within_fixed_budget(http, language, model):
     from test_paper_guide_asset_boundary import split_visual_prefix, synthetic_evidence
 
     _, _, data, canonical = cases()['section']
@@ -362,33 +464,45 @@ def test_native_section_keeps_maximum_visual_map_within_fixed_budget(http, langu
     evidence += [synthetic_evidence(i, 'formula') for i in range(2017, 2049)]
     data['evidence'] = evidence
     plan = data['plan']
-    plan['claims'] = []
+    ids = [f'claim{i:02d}' + 'x' * 73 for i in range(96)]
+    plan['claims'] = [{**plan['claims'][0], 'id': id_, 'evidence_ids': [evidence[0]['id']]} for id_ in ids]
     plan['required_assets'] = [{'id': ev['id'], 'included': True, 'reason': 'Explain each notation.'}
                                for ev in evidence[-32:]]
     for section in plan['sections']:
-        section.update(evidence_ids=[], claim_ids=[], asset_ids=[])
+        section.update(evidence_ids=[], claim_ids=ids, asset_ids=[])
     plan['sections'][0]['asset_ids'] = [ev['id'] for ev in evidence[-32:]]
     data.pop('source_sections')
-    canonical['claim_ids'] = []
+    canonical['claim_ids'] = ids
     canonical['blocks'] = [{'id': f'background-b{i}', 'kind': 'formula', 'text': 'A source formula.',
                             'attribution': 'paper_statement', 'claim_ids': [],
                             'evidence_ids': [ev['id']], 'asset_id': ev['id']}
                            for i, ev in enumerate(evidence[-32:], 1)]
+    canonical['blocks'][0]['claim_ids'] = ids[:48]
+    canonical['blocks'][1]['claim_ids'] = ids[48:]
     output = deepcopy(canonical)
     for i, block in enumerate(output['blocks'], 2017):
         block.update(evidence_ids=[f'e{i}'], asset_id=f'e{i}')
     sent = http(output)
 
-    result = execute('section', data, config())
+    result = execute('section', data, config(model=model))
     assert result.status == 'succeeded' and result.output == canonical
     assert len(sent) == result.usage['model_calls'] == 1
     _, body = sent[0]
-    _, mapping, _, prefix_bytes = split_visual_prefix(response_prompt(body))
+    _, mapping, encoded, prefix_bytes = split_visual_prefix(response_prompt(body))
     assert mapping == json.dumps({f'e{i}': 'formula' for i in range(2017, 2049)}, separators=(',', ':'))
     assert len(mapping.encode('utf-8')) == 577
     budget = _request_budget_contract()
-    assert prefix_bytes == budget['measured_native_prompt_bytes']['paper.guide.section']
+    native = model == 'gpt-6-luna'
+    prompt_key = 'measured_native_prompt_bytes' if native else 'measured_prompt_bytes'
+    assert prefix_bytes == budget[prompt_key]['paper.guide.section']
     text_bytes = compact_bytes(body['text'])
-    assert text_bytes == budget['measured_native_text_bytes']['paper.guide.section']
-    assert (prefix_bytes + text_bytes + budget['provider_system_bytes']
+    assert text_bytes == (budget['measured_native_text_bytes']['paper.guide.section'] if native
+                          else budget['provider_json_mode_text_bytes'])
+    view = json.loads(encoded)
+    assert len(view['evidence']) == 2048 and view['evidence'][-1]['id'] == 'e2048'
+    assert all(len(id_.encode('utf-8')) == 80 for id_ in ids)
+    assert [claim['id'] for claim in view['plan']['claims']] == ids
+    assert all(section['claim_ids'] == ids for section in view['plan']['sections'])
+    assert len(encoded.encode('utf-8')) <= len(json.dumps(data, ensure_ascii=False).encode('utf-8'))
+    assert (prefix_bytes + compact_bytes({'text': body['text']}) + budget['provider_system_bytes']
             + budget['provider_frame_reserve_bytes']) <= budget['prompt_reserve_bytes']

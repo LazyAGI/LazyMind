@@ -113,15 +113,12 @@ as novel definitions or findings. Mark substantive teaching, external background
 distinctly from paper findings. Keep essential explanation out of detail blocks and summaries alone.
 Use source IDs only in structured reference fields. Never add internal IDs as citations in the
 body, titles, summaries, or claim prose.
-Support every paper-statement block with its claim IDs or direct evidence. Section.claims defines ONLY NEW claims absent from plan.claims.
-Never copy, restate or redefine a plan claim in Section.claims, even with the same statement.
-Reference existing plan claims by ID in section claim_ids and block claim_ids. If no new claims
-are introduced, return claims=[]; these arrays of claim_ids can still contain existing plan IDs.
-For example, when plan.claims contains c1, use claims=[], claim_ids=["c1"] and a block whose
-claim_ids=["c1"]. Only define a section-prefixed NEW ID in claims for a newly introduced fact.
-Add and cite a new claim for newly introduced important paper facts. List
-all used claim IDs at section level and use each in a block. Cover every claim assigned to this
-role, and only use claims whose evidence is in this packet. For compact angle notation prefer
+Support every paper-statement block with claim IDs or direct evidence.
+Use plan.claims as the list of existing claims this packet can cite. Use only those IDs or
+new section claim IDs in section and block claim_ids. Cover every claim assigned to this role.
+Section.claims defines only new claims grounded in this packet. Never copy or redefine a
+plan claim. Use claims=[] when no new claims are needed. List all used claim IDs at section
+level and use each in a block. For compact angle notation prefer
 LaTeX \\langle and \\rangle within math. For visual blocks use only exact asset_id/kind pairs
 from the allowed visual blocks map for this role. An empty map permits no asset blocks.
 Show each planned figure/formula once in its own block, include its asset_id among that block's

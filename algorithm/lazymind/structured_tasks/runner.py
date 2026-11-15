@@ -109,11 +109,13 @@ def run_registered_task(request, task_id, *, call_model, configure_model, call_e
                 or request.input.text or request.input.messages or request.input.files or request.tool_config
                 or request.response_format):
             raise TaskFailure('invalid_task_input')
+        task = request.task_type.rsplit('.', 1)[1] if request.task_type.startswith('paper.guide.') else None
         try:
             data = spec.input_schema.model_validate(request.input.data)
             encoded = json.dumps(data.model_dump(exclude_none=True), ensure_ascii=False, allow_nan=False)
             if len(encoded.encode('utf-8')) > 1 << 20:
                 raise ValueError('input size')
+            references = SourceReferences(task, data) if task is not None else None
         except (ValidationError, ValueError, TypeError):
             raise TaskFailure('invalid_task_input') from None
         lazyllm.globals._init_sid(sid=f'llm_task_{task_id}')
@@ -125,12 +127,9 @@ def run_registered_task(request, task_id, *, call_model, configure_model, call_e
         model_config = request.llm_config.get('llm')
         if isinstance(model_config, dict) and isinstance(model_config.get('model'), str):
             usage['model'] = model_config['model']
-        references = None
         response_options = _native_json_options(spec, request.llm_config)
-        if request.task_type.startswith('paper.guide.'):
-            task = request.task_type.rsplit('.', 1)[1]
+        if references is not None:
             strict = _uses_strict_schema(model_config)
-            references = SourceReferences(task, data)
             encoded = json.dumps(references.model_input, ensure_ascii=False, allow_nan=False)
             instruction = spec.instruction(data, include_schema=not strict) + references.asset_instruction
             if strict:
