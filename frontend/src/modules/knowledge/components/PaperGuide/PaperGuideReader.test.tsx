@@ -1,7 +1,173 @@
-import { act, render, screen, fireEvent } from "@testing-library/react";
+import { act, render, screen, fireEvent, within } from "@testing-library/react";
+import type { PaperGuideClaim, PaperGuidePlan } from "@/api/generated/core-client";
 import { expect, it, vi } from "vitest";
 import PaperGuideReader from "./PaperGuideReader";
 import { revision } from "./fixtures";
+
+function groundedClaim(id: string, ...evidenceIds: string[]): PaperGuideClaim {
+  return {
+    id,
+    argument_type: null,
+    attribution: "paper_statement",
+    conditions: [],
+    evidence_ids: evidenceIds,
+    statement: "The paper supports this statement.",
+    support_status: "supported",
+  };
+}
+
+function planWithClaims(...claims: PaperGuideClaim[]): PaperGuidePlan {
+  return {
+    claims,
+    profiles: { primary: "method", secondary: [], uncertainty_reason: "" },
+    questions: [],
+    required_assets: [],
+    sections: [],
+    term_policy: [],
+  };
+}
+
+it.each([
+  { origin: "plan", historical: false },
+  { origin: "section", historical: false },
+  { origin: "section", historical: true },
+])("opens claim-only sources from the $origin (historical: $historical)", ({ origin, historical }) => {
+  const r = revision();
+  const section = r.sections[0];
+  const block = section.blocks[0];
+  const claim = groundedClaim("c1", "claim-evidence");
+  block.claim_ids = [claim.id];
+  block.evidence_ids = [];
+  block.text = String.raw`The paper gives \(a = b\).`;
+  section.claim_ids = [claim.id];
+  if (origin === "plan") r.plan = planWithClaims(claim);
+  else section.claims = [claim];
+  if (historical) {
+    r.status = "superseded";
+    r.source_current = false;
+  }
+  const open = vi.fn();
+  render(
+    <PaperGuideReader revision={r} title="Paper" language="en" onEvidence={open} onSelection={() => {}} />,
+  );
+
+  const passage = within(screen.getByRole("region", { name: section.title }));
+  const citation = passage.queryByRole("button", { name: "Source 1" });
+  expect(citation).toBeVisible();
+  fireEvent.click(citation!);
+  expect(open).toHaveBeenLastCalledWith("claim-evidence", citation);
+  fireEvent.click(passage.getByLabelText("Passage actions"));
+  const viewSource = passage.getByRole("button", { name: "View source" });
+  fireEvent.click(viewSource);
+  expect(open).toHaveBeenLastCalledWith("claim-evidence", viewSource);
+  expect(passage.getByText(/Guide equation explanation/)).toBeVisible();
+});
+
+it("numbers direct and inherited sources once and only inherits referenced claims from the plan or current section", () => {
+  const r = revision();
+  const [first, second] = r.sections;
+  r.plan = planWithClaims(
+    groundedClaim("p1", "shared", "plan-first"),
+    groundedClaim("p2", "plan-second"),
+    groundedClaim("unreferenced", "unused-evidence"),
+  );
+  first.claim_ids = ["p2", "local", "p1"];
+  first.claims = [groundedClaim("local", "plan-first", "local-evidence")];
+  first.blocks[0].claim_ids = ["p2", "missing", "local", "p1", "other-section"];
+  first.blocks[0].evidence_ids = ["direct", "shared"];
+  second.claim_ids = ["p1", "other-section"];
+  second.claims = [groundedClaim("other-section", "other-evidence")];
+  second.blocks[0].claim_ids = ["p1", "other-section"];
+  const beforeRender = JSON.stringify(r);
+  const open = vi.fn();
+  render(
+    <PaperGuideReader revision={r} title="Paper" language="en" onEvidence={open} onSelection={() => {}} />,
+  );
+
+  const citationsIn = (name: string) => within(screen.getByRole("region", { name }))
+    .queryAllByRole("button", { name: /^Source \d+$/ });
+  const firstCitations = citationsIn(first.title);
+  const secondCitations = citationsIn(second.title);
+  expect(firstCitations.map((button) => button.textContent)).toEqual([
+    "Source 1", "Source 2", "Source 3", "Source 4", "Source 5",
+  ]);
+  expect(secondCitations.map((button) => button.textContent)).toEqual([
+    "Source 2", "Source 3", "Source 6",
+  ]);
+  [...firstCitations, ...secondCitations].forEach((button) => fireEvent.click(button));
+  expect(open.mock.calls.map(([id]) => id)).toEqual([
+    "direct", "shared", "plan-first", "plan-second", "local-evidence",
+    "shared", "plan-first", "other-evidence",
+  ]);
+  expect(JSON.stringify(r)).toBe(beforeRender);
+});
+
+it("keeps a paragraph readable when its referenced claim has no available evidence", () => {
+  const r = revision();
+  const section = r.sections[0];
+  const block = section.blocks[0];
+  block.claim_ids = ["unavailable"];
+  block.evidence_ids = [];
+  section.claim_ids = ["unavailable"];
+  // An empty Go slice can arrive as null in a historical payload.
+  section.claims = JSON.parse(JSON.stringify([{
+    ...groundedClaim("unavailable"),
+    support_status: "unavailable",
+    evidence_ids: null,
+  }]));
+  render(
+    <PaperGuideReader revision={r} title="Paper" language="en" onEvidence={() => {}} onSelection={() => {}} />,
+  );
+
+  const passage = within(screen.getByRole("region", { name: section.title }));
+  expect(passage.getByText(block.text)).toBeVisible();
+  expect(passage.queryByRole("button", { name: /^Source \d+$/ })).not.toBeInTheDocument();
+  fireEvent.click(passage.getByLabelText("Passage actions"));
+  expect(passage.queryByRole("button", { name: "View source" })).not.toBeInTheDocument();
+});
+
+it("opens inherited evidence from a Unicode selection and sends the original passage reference to chat", () => {
+  const r = revision();
+  const section = r.sections[0];
+  const block = section.blocks[0];
+  block.claim_ids = ["c1"];
+  block.evidence_ids = [];
+  block.text = "甲😀乙𐐀丙";
+  section.claim_ids = ["c1"];
+  section.claims = [groundedClaim("c1", "selection-evidence")];
+  const open = vi.fn();
+  const choose = vi.fn();
+  render(
+    <PaperGuideReader revision={r} title="Paper" language="en" onEvidence={open} onSelection={choose} />,
+  );
+
+  const text = screen.getByText("甲😀乙𐐀丙");
+  const range = document.createRange();
+  range.setStart(text.firstChild!, 1);
+  range.setEnd(text.firstChild!, 6);
+  window.getSelection()!.removeAllRanges();
+  window.getSelection()!.addRange(range);
+  fireEvent.mouseUp(text);
+  const source = within(screen.getByRole("toolbar")).getByRole("button", { name: "View source" });
+  fireEvent.click(source);
+  expect(open).toHaveBeenCalledWith("selection-evidence", source);
+
+  fireEvent.mouseUp(text);
+  fireEvent.click(within(screen.getByRole("toolbar")).getByRole("button", { name: "Explain this passage" }));
+  expect(choose).toHaveBeenCalledWith(expect.objectContaining({
+    source: "paper_guide",
+    text: "😀乙𐐀",
+    guideRef: {
+      revision_id: "r1",
+      section_key: "section:background:v1",
+      block_id: "background-block",
+      start: 1,
+      end: 4,
+      language: "en",
+    },
+  }));
+});
+
 it.each([
   ["partial", "writing", true],
   ["partial", "paused", false],

@@ -3,6 +3,7 @@ import { coverageWarning } from "./coverageWarning";
 import { useLayoutEffect, useRef, useState } from "react";
 import type {
   PaperGuideBlock,
+  PaperGuideClaim,
   PaperGuidePublishedSection,
   PaperGuideRevisionResponse,
   PaperGuideProgressRequest,
@@ -12,6 +13,18 @@ import { restoreTextPosition, visibleTextOffset } from "./readingPosition";
 import PaperGuideText, { guideTextSegments } from "./PaperGuideText";
 import { sourceBoundary } from "./sourceText";
 import { isGuideRunActive } from "./guideRunState";
+
+function blockEvidenceIds(block: PaperGuideBlock, claims: readonly PaperGuideClaim[]) {
+  const ids = new Set(block.evidence_ids);
+  const referenced = new Set(block.claim_ids);
+  for (const claim of claims) {
+    if (referenced.has(claim.id)) {
+      for (const id of claim.evidence_ids ?? []) ids.add(id);
+    }
+  }
+  return [...ids];
+}
+
 interface Props {
   revision: PaperGuideRevisionResponse;
   title: string;
@@ -59,10 +72,23 @@ export default function PaperGuideReader({
     }
   }, [revision, selected]);
   const numbers = new Map<string, number>();
-  for (const s of revision.sections)
-    for (const b of s.blocks)
-      for (const id of b.evidence_ids || [])
+  const sectionsWithSources = revision.sections.map((section) => {
+    // Match server selection context: direct sources, then plan and local claims.
+    const claims = [...(revision.plan?.claims ?? []), ...(section.claims ?? [])];
+    const blocks = section.blocks.map((block) => {
+      const sources = blockEvidenceIds(block, claims);
+      for (const id of sources)
         if (!numbers.has(id)) numbers.set(id, numbers.size + 1);
+      return { block, sources };
+    });
+    return { section, blocks };
+  });
+  const selectedSourceId =
+    selected && selected.revisionId === revision.id
+      ? sectionsWithSources
+          .find(({ section }) => section.key === selected.section.key)
+          ?.blocks.find(({ block }) => block.id === selected.block.id)?.sources[0]
+      : undefined;
   const anchor = useRef<PaperGuideProgressRequest>();
   const lastWidth = useRef(0);
   const layoutPending = useRef(false);
@@ -290,7 +316,7 @@ export default function PaperGuideReader({
       >
         <article className="paper-guide-article">
           <h1>{title}</h1>
-          {revision.sections.map((section) => (
+          {sectionsWithSources.map(({ section, blocks }) => (
             <section key={section.role} aria-label={section.title}>
               <h2 id={`guide-${revision.id}-${section.key}`} tabIndex={-1}>
                 {section.title}
@@ -302,7 +328,7 @@ export default function PaperGuideReader({
                     : "Correction pending"}
                 </p>
               )}
-              {section.blocks.map((block) => (
+              {blocks.map(({ block, sources }) => (
                 <div
                   key={`${section.key}/${block.id}`}
                   data-guide-block={block.id}
@@ -359,7 +385,7 @@ export default function PaperGuideReader({
                     </p>
                   )}
                   {block.asset_id && renderAsset?.(block)}
-                  {!block.asset_id && !!block.evidence_ids?.length &&
+                  {!block.asset_id && sources.length > 0 &&
                     (block.kind === "paragraph" || block.kind === "callout") &&
                     guideTextSegments(block.text).some(segment =>
                       segment.display || segment.latex?.includes("=")
@@ -371,7 +397,7 @@ export default function PaperGuideReader({
                     </small>
                   )}
                   <div className="paper-guide-block-tools">
-                    {(block.evidence_ids || []).map((id) => (
+                    {sources.map((id) => (
                       <button
                         key={id}
                         className="paper-guide-citation"
@@ -390,10 +416,10 @@ export default function PaperGuideReader({
                       <button disabled={!revision.source_current} onClick={() => ask(section, block, true)}>
                         {zh ? "举个例子" : "Give an example"}
                       </button>
-                      {block.evidence_ids?.[0] && (
+                      {sources[0] && (
                         <button
                           onClick={(event) =>
-                            onEvidence(block.evidence_ids[0], event.currentTarget)
+                            onEvidence(sources[0], event.currentTarget)
                           }
                         >
                           {zh ? "查看原文" : "View source"}
@@ -455,10 +481,10 @@ export default function PaperGuideReader({
           >
             {zh ? "举个例子" : "Give an example"}
           </button>
-          {selected.block.evidence_ids?.[0] && (
+          {selectedSourceId && (
             <button
               onClick={(event) => {
-                onEvidence(selected.block.evidence_ids[0], event.currentTarget);
+                onEvidence(selectedSourceId, event.currentTarget);
                 setSelected(undefined);
               }}
             >
