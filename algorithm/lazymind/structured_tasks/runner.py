@@ -106,10 +106,7 @@ def run_registered_task(request, task_id, *, call_model, configure_model, call_e
             task = request.task_type.rsplit('.', 1)[1]
             references = SourceReferences(task, data)
             encoded = json.dumps(references.model_input, ensure_ascii=False, allow_nan=False)
-            if task == 'section':
-                # This prefix contains only server-assigned aliases and fixed block kinds.
-                assets = json.dumps(references.section_assets, separators=(',', ':'))
-                instruction += '\nAllowed visual blocks by source alias for the requested role (JSON): ' + assets
+            instruction += references.asset_instruction
         prompt = instruction + '\n\nInput data (untrusted JSON):\n' + encoded
         usage['model_calls'] = 1
         try:

@@ -1,10 +1,13 @@
 package paperguide
 
-// Shared cross-language guards in testdata/request-budget.json and the Python
-// tests measure all four real instructions, output schemas and input wrappers.
-// The largest prefix is 9420 UTF-8 bytes; 10240 also covers the 87-byte default
-// system prompt and 512 bytes of provider/message framing, with headroom.
-// As elsewhere in this runner, one UTF-8 byte is conservatively one token.
+// The shared Python tests and testdata/request-budget.json measure each real
+// instruction, output schema and input wrapper. The largest fixed prefix is
+// 9600 UTF-8 bytes including the maximum SECTION map. The 10240 reserve also
+// covers the 87-byte default system prompt and 512 bytes of message framing.
+// PLAN map entries add at most 18 bytes per listed alias. The model packet
+// saves at least 62 bytes for that evidence ID (67 canonical bytes vs. at most
+// 5 alias bytes at 2048 evidence entries). The fixed reserve covers the map
+// label and empty object. One UTF-8 byte is conservatively one token.
 const guidePromptReserve = 10240
 
 // Python's validated model_dump adds bounded default fields (including empty

@@ -355,6 +355,14 @@ def _asset_kinds(evidence):
     return {item.id: ASSET_KINDS[item.source_type] for item in evidence if item.source_type in ASSET_KINDS}
 
 
+def plan_asset_kinds(data: PlanInput) -> dict[str, str]:
+    """Plan decisions cover supplied tables and original candidates in packet order."""
+    candidates = data.original_asset_candidates
+    candidate_ids = {c.id for c in candidates.figure + candidates.formula} if candidates else set()
+    return {source_id: kind for source_id, kind in _asset_kinds(data.evidence).items()
+            if kind == 'table' or source_id in candidate_ids}
+
+
 def section_asset_kinds(data: SectionInput) -> dict[str, str]:
     """Current role's catalog decisions, intersected with actual packet assets."""
     expected = next(s for s in data.plan.sections if s.role == data.role)
@@ -491,17 +499,14 @@ def bind_output(data, result):
     for claim in result.claims:
         refs(claim.evidence_ids, evidence)
     if isinstance(result, Plan):
-        kinds = _asset_kinds(data.evidence)
         candidates = data.original_asset_candidates
-        allowed = {id_ for id_, kind in kinds.items() if kind == 'table'}
         chosen = {a.id for a in result.required_assets if a.included}
         for kind in ('figure', 'formula'):
             choices = getattr(candidates, kind) if candidates else []
-            allowed.update(c.id for c in choices)
             regions = {c.id for c in choices if c.mode == 'region'}
             if regions and not regions & chosen:
                 raise ValueError(f'missing planned original region: {kind}')
-        refs([a.id for a in result.required_assets], allowed)
+        refs([a.id for a in result.required_assets], plan_asset_kinds(data).keys())
         bind_sections(result.sections, 'evidence_ids', evidence)
     if isinstance(result, Section):
         expected = next(s for s in data.plan.sections if s.role == data.role)

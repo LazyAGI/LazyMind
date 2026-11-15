@@ -1,11 +1,12 @@
 """Versioned prompts for the bounded paper-guide tasks."""
 import json
+from typing import get_args
 
-from .paper_guide_schemas import Extract, Plan, Review, Section
+from .paper_guide_schemas import Argument, Extract, Plan, Review, Section
 from .paper_guide_references import model_output_schema
 
 
-COMMON = """
+COMMON = f"""
 Return one JSON object matching the output schema. Encode JSON strings correctly: escape every
 LaTeX backslash as a doubled backslash in JSON, and escape quotes and newlines. Never use invalid
 JSON escapes such as a single backslash followed by psi or frac. Return no reasoning transcript, tool calls,
@@ -15,20 +16,22 @@ references only from evidence[].id: exact short IDs e1, e2, etc. Section identit
 NOT evidence. Never construct IDs, use internal block IDs, or copy references only visible in
 plan/context but absent from evidence. Claim/block IDs have their own namespace; do not change
 them. Do not invent pages, coordinates, sources or citations.
-Use the evidence itself for paper facts; a prior summary, plan or extract is not original evidence.
-Keep exact conditions, quantifiers, units, numerical sign and sample boundaries. Distinguish
-paper statements, teaching examples, interpretation and external background. A citation in a
-reference list does not establish the cited claim independently. A caption is not visual observation.
+Ground paper facts in evidence. Use summaries, plans and extracts only as context. Preserve exact
+conditions, quantifiers, units, signs and sample boundaries. Distinguish paper statements, teaching
+examples, interpretation and external background. A reference list alone does not establish the
+cited claim. A caption is not visual observation.
+Exact families for argument_type and profiles.primary/secondary:
+{','.join(get_args(Argument))}.
+Keep attribution and support_status separate. Use null for an unclear claim type or primary.
 Table parents identify the start page; cite physical text fragments for cell/footnote facts.
 parent_asset_id binds each fragment to the sole planned asset; fragment_evidence_ids lists its sources.
 """
 
 EXTRACT = """
 Extract only the load-bearing claims, observations, original conditions and unresolved questions
-grounded in this packet. Use empty arrays for claims or open_questions if none apply. Label the
-argument type per claim where clear, otherwise null. Restatements of examples constructed by the
-paper's authors are paper_statement claims; cite the packet evidence. Do not add teaching examples,
-new teaching facts, or external background in EXTRACT. Leave teaching to SECTION.
+grounded in this packet. Use empty arrays for claims or open_questions if none apply. Restatements
+of examples constructed by the paper's authors are paper_statement claims; cite the packet evidence.
+Do not add teaching examples, new teaching facts, or external background in EXTRACT. Leave teaching to SECTION.
 
 For both supported and partial, include nonempty evidence_ids and use only paper_statement or
 interpretation attribution. Cite unique IDs of actual supporting evidence in this packet.
@@ -53,9 +56,9 @@ least one region of that type; choose additional originals when essential. A pag
 its source page but cannot replace a region minimum. Use that fallback for a central original
 when the source page and discussion support it. An empty type needs no asset. Put each chosen
 original where its role explains it. Display proof does not supply pixels to this model.
-For key originals or supplied tables give required_assets decisions with concise reasons. Use only
-listed originals and actual table IDs, even for excluded decisions; missing items and text captions
-are prose/evidence, never assets. Do not invent image observations, cells or formulas.
+Give concise required_assets reasons for key originals or tables. Use only aliases in the allowed
+required_assets map for included and excluded decisions. Omit unlisted evidence from required_assets;
+it can still support prose. An empty map permits no decisions. Do not invent image observations, cells or formulas.
 Assign every included asset to a section; only included assets may be in asset_ids. A table citation
 need not display the table. Deduplicate reference lists, claims and decisions.
 Assign central comparisons and conditions via focus/claims/asset decisions: identify load-bearing

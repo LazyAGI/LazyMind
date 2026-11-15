@@ -4,7 +4,7 @@ import json
 
 from jsonschema import Draft202012Validator, ValidationError
 
-from .paper_guide_schemas import Extract, Plan, Review, Section, section_asset_kinds
+from .paper_guide_schemas import Extract, Plan, Review, Section, plan_asset_kinds, section_asset_kinds
 
 CANONICAL_PATTERN = r'^ev_[a-f0-9]{64}$'
 ALIAS_PATTERN = r'^e[1-9][0-9]*$'
@@ -96,11 +96,17 @@ class SourceReferences:
         for evidence in self.model_input['evidence']:
             evidence.pop('source_block_id')
             evidence.pop('source_region_id', None)
-        if task == 'section':
-            # Only actual evidence IDs qualify, so every alias here was
-            # allocated in the first path, before any context-only references.
-            self.section_assets = {canonical_to_alias[source_id]: kind
-                                   for source_id, kind in section_asset_kinds(canonical_input).items()}
+        self.asset_instruction = ''
+        if task in ('plan', 'section'):
+            if task == 'plan':
+                kinds = plan_asset_kinds(canonical_input)
+                label = 'Allowed required_assets decisions by source alias (JSON): '
+            else:
+                kinds = section_asset_kinds(canonical_input)
+                label = 'Allowed visual blocks by source alias for the requested role (JSON): '
+            # The instruction contains only actual evidence aliases and fixed kinds.
+            assets = {canonical_to_alias[source_id]: kind for source_id, kind in kinds.items()}
+            self.asset_instruction = '\n' + label + json.dumps(assets, separators=(',', ':'))
 
     def canonical_output(self, parsed, max_bytes):
         # Validate the model schema BEFORE expansion or Pydantic's narrow Plan

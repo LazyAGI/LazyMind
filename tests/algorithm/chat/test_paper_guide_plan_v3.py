@@ -95,7 +95,7 @@ def test_model_boundary_returns_only_canonical_wire_with_one_call(monkeypatch, m
 
     monkeypatch.setattr(llm_task, 'AutoModel', lambda **kwargs: model)
     request = llm_task.LLMTaskRequest(task_type='paper.guide.plan',
-        options={'task_version': 'paper-guide-v17'}, input={'data': case['input']})
+        options={'task_version': 'paper-guide-v18'}, input={'data': case['input']})
     result = llm_task.run_llm_task(request)
     assert len(calls) == result.usage['model_calls'] == 1
     if mode == 'canonical':
