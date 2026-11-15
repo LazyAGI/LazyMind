@@ -313,6 +313,22 @@ describe("model discovery after verified key save", () => {
     expect(screen.queryByText("gpt-4")).not.toBeInTheDocument();
   });
 
+  it("keeps server-confirmed verification when the directory check is unavailable", async () => {
+    mocks.models.mockResolvedValue({ data: { models: [{ id: "catalog-default", name: "catalog-default", model_type: "llm", is_default: true }] } });
+    mocks.check.mockResolvedValue({ data: { success: false, reason: "model_list_unavailable" } });
+    render(<ConfigProvider theme={{ token: { motion: false } }}><ModelProviderPage /></ConfigProvider>);
+    const load = await screen.findByRole("button", { name: "Load models" });
+    await waitFor(() => expect(load).toBeEnabled());
+    fireEvent.click(load);
+    await waitFor(() => expect(screen.getByTestId("group-models")).toHaveTextContent("catalog-default"));
+
+    fireEvent.click(screen.getByRole("button", { name: "Check connection" }));
+
+    expect(await screen.findByText("modelProvider.connection.reason.model_list_unavailable")).toBeVisible();
+    expect(mocks.groups).toHaveBeenCalledTimes(2);
+    expect(screen.getByTestId("group-models")).toHaveTextContent("catalog-default");
+  });
+
   it("hides cached catalog defaults after a custom supplier fails verification", async () => {
     mocks.models.mockResolvedValue({ data: { models: [
       { id: "catalog-default", name: "catalog-default", model_type: "llm", is_default: true },

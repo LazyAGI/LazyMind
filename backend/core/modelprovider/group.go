@@ -616,8 +616,9 @@ func UpdateGroup(w http.ResponseWriter, r *http.Request) {
 
 	skipVerify := false
 	if baseURLChanged {
-		updates["is_verified"] = false
-		// Address edits invalidate verification, never the saved key pool.
+		if !hasSharedProviderEndpoint(parent) || normalizeBaseURLForCompare(connectionBaseURL(parent, row.BaseURL)) != normalizeBaseURLForCompare(baseURL) {
+			updates["is_verified"] = false
+		}
 		// Re-encrypt for the new revision so V2 AAD stays bound to this row.
 		preserved, err := encryptedAPIKeyUpdates(userID, row.ID, nextCredentialRevision, storedAPIKey, row.CredentialVersion)
 		if err != nil {
@@ -1188,7 +1189,9 @@ func AddKey(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	now := time.Now()
-	encryptedUpdates["is_verified"] = row.IsVerified || !hasSharedProviderEndpoint(parent)
+	if !hasSharedProviderEndpoint(parent) {
+		encryptedUpdates["is_verified"] = true
+	}
 	encryptedUpdates["updated_at"] = now
 	if err := db.WithContext(r.Context()).Transaction(func(tx *gorm.DB) error {
 		// Read the supplier-wide pool under the same lock as the credential
@@ -1330,7 +1333,11 @@ func RemoveKey(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "encrypt api key failed", http.StatusInternalServerError)
 		return
 	}
-	encryptedUpdates["is_verified"] = row.IsVerified && len(filtered) > 0
+	// Reconciliation invalidates shared verification if the active key
+	// was removed. Editing an inactive key leaves verification untouched.
+	if !hasSharedProviderEndpoint(parent) {
+		encryptedUpdates["is_verified"] = row.IsVerified && len(filtered) > 0
+	}
 	encryptedUpdates["updated_at"] = now
 	var removedMultimodal bool
 	if err := db.WithContext(r.Context()).Transaction(func(tx *gorm.DB) error {
