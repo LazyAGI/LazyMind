@@ -542,8 +542,9 @@ func unique(ids []string) []string {
 	return out
 }
 func (x *execution) writeSection(ctx context.Context, p GuidePlan, sp GuideSectionPlan, prior []GuideSection, version int, findings []GuideFinding, deferReview bool) (GuideSection, string, error) {
+	key := "section:" + string(sp.Role) + ":v" + stringInt(int64(version))
 	if len(findings) > 0 {
-		if e := x.reserveCorrections(ctx, "section:"+string(sp.Role)+":v"+stringInt(int64(version)), findings); e != nil {
+		if e := x.reserveCorrections(ctx, key, findings, deferReview); e != nil {
 			return GuideSection{}, "", e
 		}
 	}
@@ -577,7 +578,6 @@ func (x *execution) writeSection(ctx context.Context, p GuidePlan, sp GuideSecti
 	if len(findings) > 0 {
 		input["findings"] = findings
 	}
-	key := "section:" + string(sp.Role) + ":v" + stringInt(int64(version))
 	var section GuideSection
 	e = x.task(ctx, key+":draft", "paper.guide.section", input, &section, func() error {
 		if section.Version != 0 || section.PublicationStatus != "" {
@@ -625,7 +625,13 @@ func (x *execution) writeSection(ctx context.Context, p GuidePlan, sp GuideSecti
 	}
 	return section, key, e
 }
-func (x *execution) reserveCorrections(ctx context.Context, repairKey string, findings []GuideFinding) error {
+func (x *execution) reserveCorrections(ctx context.Context, repairKey string, findings []GuideFinding, wholeReviewRepair bool) error {
+	// A single-section repair must replay all findings in the original order.
+	// Its markers still count one reservation per distinct target.
+	var localHash string
+	if !wholeReviewRepair {
+		localHash = digest([]any{repairKey, findings})
+	}
 	return x.s.Repo.fenced(ctx, x.f, x.rev.ID, x.rev.Epoch, func(tx *gorm.DB, r *orm.PaperGuideRevision, g *orm.PaperGuide) error {
 		seen := map[string]bool{}
 		for _, f := range findings {
@@ -634,10 +640,15 @@ func (x *execution) reserveCorrections(ctx context.Context, repairKey string, fi
 				continue
 			}
 			seen[key] = true
+			hash := localHash
+			if wholeReviewRepair {
+				// Whole-review repair retains its existing per-target checkpoint hash.
+				hash = digest([]any{repairKey, f})
+			}
 			var existing orm.PaperGuideStep
 			e := tx.Where("revision_id = ? AND step_key = ?", r.ID, key).Take(&existing).Error
 			if e == nil {
-				if existing.InputHash != digest([]any{repairKey, f}) {
+				if existing.InputHash != hash {
 					return ErrQuality
 				}
 				continue
@@ -649,7 +660,7 @@ func (x *execution) reserveCorrections(ctx context.Context, repairKey string, fi
 				return ErrQuality
 			}
 			r.CorrectionCount++
-			if e := tx.Create(&orm.PaperGuideStep{ID: uuid.NewString(), RevisionID: r.ID, StepKey: key, InputHash: digest([]any{repairKey, f}), OutputJSON: string(mustMarshal(f)), Epoch: r.Epoch, CreatedAt: time.Now().UTC()}).Error; e != nil {
+			if e := tx.Create(&orm.PaperGuideStep{ID: uuid.NewString(), RevisionID: r.ID, StepKey: key, InputHash: hash, OutputJSON: string(mustMarshal(f)), Epoch: r.Epoch, CreatedAt: time.Now().UTC()}).Error; e != nil {
 				return e
 			}
 		}

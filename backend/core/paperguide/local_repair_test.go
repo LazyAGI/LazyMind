@@ -20,9 +20,10 @@ const (
 )
 
 var (
-	localA = GuideFinding{TargetType: "block", TargetID: "b_background", IssueType: "unsupported", Suggestion: "Verify the measured result."}
-	localB = GuideFinding{TargetType: "block", TargetID: "background-condition", IssueType: "missing_condition", Suggestion: "Restore the sampling condition."}
-	localC = GuideFinding{TargetType: "block", TargetID: "background-unit", IssueType: "coherence", Suggestion: "Explain the units."}
+	localA         = GuideFinding{TargetType: "block", TargetID: "b_background", IssueType: "unsupported", Suggestion: "Verify the measured result."}
+	localB         = GuideFinding{TargetType: "block", TargetID: "background-condition", IssueType: "missing_condition", Suggestion: "Restore the sampling condition."}
+	localBFollowup = GuideFinding{TargetType: "block", TargetID: "background-condition", IssueType: "coherence", Suggestion: "Explain when that condition applies."}
+	localC         = GuideFinding{TargetType: "block", TargetID: "background-unit", IssueType: "coherence", Suggestion: "Explain the units."}
 )
 
 type localRepairRun struct {
@@ -67,7 +68,7 @@ func newLocalRepairRun(t *testing.T) *localRepairRun {
 		case "Initial draft.":
 			return []GuideFinding{localA}
 		case "First repair.":
-			return []GuideFinding{localB}
+			return []GuideFinding{localB, localBFollowup}
 		default:
 			return nil
 		}
@@ -92,7 +93,7 @@ func newLocalRepairRun(t *testing.T) *localRepairRun {
 			}
 			s.Summary = "Initial draft."
 			if findings, ok := input["findings"].([]GuideFinding); ok {
-				if s.Role == RoleBackground && reflect.DeepEqual(findings, []GuideFinding{localB}) {
+				if s.Role == RoleBackground && reflect.DeepEqual(findings, []GuideFinding{localB, localBFollowup}) {
 					s.Summary = "Second repair."
 					s.Blocks[0].Text = "Final measurement."
 				} else {
@@ -264,9 +265,9 @@ func TestLocalRepairRefusesRepeatedMixedExhaustedAndFourthTargets(t *testing.T) 
 		rejected           string
 	}{
 		{"repeated", []GuideFinding{localA}, []GuideFinding{localA}, nil, false, 5, 1, "block:background-condition"},
-		{"mixed transaction rolls back new marker", []GuideFinding{localA}, []GuideFinding{localB, localA}, nil, false, 5, 1, "block:background-condition"},
+		{"mixed transaction rolls back new marker", []GuideFinding{localA}, []GuideFinding{localB, localA, localBFollowup}, nil, false, 5, 1, "block:background-condition"},
 		{"both already reserved", []GuideFinding{localA, localC}, []GuideFinding{localB}, nil, false, 5, 2, "block:background-condition"},
-		{"v3 still has a finding", []GuideFinding{localA}, []GuideFinding{localB}, []GuideFinding{localC}, false, 7, 2, "block:background-unit"},
+		{"v3 still has a finding", []GuideFinding{localA}, []GuideFinding{localB, localBFollowup}, []GuideFinding{localC}, false, 7, 2, "block:background-unit"},
 		{"shared claim across roles", nil, nil, nil, true, 7, 1, "block:background-condition"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -438,27 +439,59 @@ func TestLocalRepairCancellationFencesLateV3(t *testing.T) {
 	}
 }
 
-func TestLocalRepairReservationRejectsChangedFindingsAndKeys(t *testing.T) {
+func TestLocalRepairReservationBindsAllFindingsOnReplay(t *testing.T) {
 	h := newLocalRepairRun(t)
 	x := execution{s: h.service, rev: h.rev, f: testFence{h.service.Repo.DB}}
-	if err := x.reserveCorrections(t.Context(), localV2, []GuideFinding{localA}); err != nil {
+	findings := []GuideFinding{localB, localBFollowup}
+	if err := x.reserveCorrections(t.Context(), localV3, findings, false); err != nil {
 		t.Fatal(err)
 	}
-	before := h.checkpoints()["correction:block:b_background"]
-	if err := x.reserveCorrections(t.Context(), localV2, []GuideFinding{localA}); err != nil {
-		t.Fatalf("exact replay: %v", err)
-	}
-	changed := localA
-	changed.Suggestion = "Change the supported measurement."
+	before := h.checkpoints()
+	changedFirst, changedSecond := localB, localBFollowup
+	changedFirst.Suggestion = "Put the sampling condition in the heading."
+	changedSecond.Suggestion = "Describe a different interpretation."
 	for _, tc := range []struct {
-		key     string
-		finding GuideFinding
-	}{{localV2, changed}, {localV3, localA}} {
-		if err := x.reserveCorrections(t.Context(), tc.key, []GuideFinding{tc.finding}); !errors.Is(err, ErrQuality) {
-			t.Fatalf("changed reservation accepted: %+v %v", tc, err)
-		}
+		name, key string
+		findings  []GuideFinding
+		want      error
+	}{
+		{"exact", localV3, findings, nil},
+		{"changed first", localV3, []GuideFinding{changedFirst, localBFollowup}, ErrQuality},
+		{"changed second", localV3, []GuideFinding{localB, changedSecond}, ErrQuality},
+		{"omitted second", localV3, []GuideFinding{localB}, ErrQuality},
+		{"reordered", localV3, []GuideFinding{localBFollowup, localB}, ErrQuality},
+		{"different key", localV2, findings, ErrQuality},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := x.reserveCorrections(t.Context(), tc.key, tc.findings, false); !errors.Is(err, tc.want) {
+				t.Fatalf("want %v, got %v", tc.want, err)
+			}
+			if !reflect.DeepEqual(before, h.checkpoints()) || h.row().CorrectionCount != 1 {
+				t.Fatal("reservation replay changed the target record or count")
+			}
+		})
 	}
-	if after := h.checkpoints()["correction:block:b_background"]; !reflect.DeepEqual(before, after) || h.row().CorrectionCount != 1 {
-		t.Fatal("reservation replay overwrote the target record")
+}
+
+func TestWholeRepairReservationReplaysExistingMarker(t *testing.T) {
+	h := newLocalRepairRun(t)
+	repo := h.service.Repo
+	f := testFence{repo.DB}
+	marker := StepWrite{
+		Key: "correction:block:background-condition", InputHash: digest([]any{localV2, localB}), Output: mustJSON(localB),
+	}
+	if err := repo.PutStep(t.Context(), f, h.rev.ID, h.rev.Epoch, marker); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.DB.Model(&h.rev).Update("correction_count", 1).Error; err != nil {
+		t.Fatal(err)
+	}
+	before := h.checkpoints()
+	x := execution{s: h.service, rev: h.rev, f: f}
+	if err := x.reserveCorrections(t.Context(), localV2, []GuideFinding{localB, localBFollowup}, true); err != nil {
+		t.Fatalf("saved whole-review repair marker could not be replayed: %v", err)
+	}
+	if !reflect.DeepEqual(before, h.checkpoints()) || h.row().CorrectionCount != 1 {
+		t.Fatal("whole-review replay changed the target record or count")
 	}
 }
