@@ -64,7 +64,27 @@ it("labels a rendered formula fallback as a source page, while retaining its aut
   );
   expect(await screen.findByText(/Source page · PDF page 4/)).toBeInTheDocument();
   expect(screen.getByText(/No separate formula region/)).toBeInTheDocument();
-  expect(screen.getByText(/Equation \(7\)/)).toBeInTheDocument();
+  expect(screen.queryByText(/Equation \(7\)/)).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Open PDF page 4" }));
+  expect(open).toHaveBeenCalledWith(expect.objectContaining({ locator: { kind: "page", page: 3 } }));
+});
+
+it("keeps the formula crop and physical page action without labeling an unverified number", async () => {
+  const open = vi.fn();
+  const crop = "blob:formula-crop";
+  render(
+    <PaperGuideAsset
+      language="en"
+      evidence={{ id: "formula", source_type: "formula", source_block_id: "eq",
+        text: "x^2", locator: { kind: "bbox", page: 3 } } as PaperGuideEvidence}
+      originalDisplay={{ kind: "formula", page: 3, bbox: [.1,.2,.3,.4], number: "4" }}
+      onOpenPage={open}
+      preview={async () => ({ url: crop, width: 100, height: 100, mode: "region" })}
+    />,
+  );
+  expect(await screen.findByRole("img", { name: /PDF page 4/ })).toHaveAttribute("src", crop);
+  expect(screen.queryByText(/Equation \(4\)/)).not.toBeInTheDocument();
+  expect(screen.getByText(/Original formula · PDF page 4/)).toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", { name: "Open PDF page 4" }));
   expect(open).toHaveBeenCalledWith(expect.objectContaining({ locator: { kind: "page", page: 3 } }));
 });

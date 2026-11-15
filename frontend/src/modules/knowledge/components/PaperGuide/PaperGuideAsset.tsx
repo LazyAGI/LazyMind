@@ -106,7 +106,6 @@ export default function PaperGuideAsset({
           ? (zh ? "未定位到单独公式区域。" : "No separate formula region is available.")
           : (zh ? "未定位到单独原图区域。" : "No separate figure region is available.")}</p>}
         {originalDisplay?.caption && <p>{originalDisplay.caption}</p>}
-        {originalDisplay?.number && formula && <p>{zh ? "原式" : "Equation"} ({originalDisplay.number})</p>}
         {!unavailable && evidence && onOpenPage && (
           <button type="button" className="paper-guide-citation"
             onClick={() => onOpenPage({ ...evidence, locator: { kind: "page", page: evidence.locator.page } })}>
