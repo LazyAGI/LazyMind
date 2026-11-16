@@ -139,6 +139,12 @@ export default function WorkBuddyInstallationGuide({ status, onConnect, onLogin,
       if (!result.ok) { checkFailed(); return; }
       const current = result.data[agent];
       if (current) onStatus(current);
+      if (automatic && current?.issue?.code === "pairing_account_mismatch") {
+        setDiagnostic(current.diagnostic_id || current.issue.operation_id || "");
+        setError(agent === "codex" ? codexErrorMessage(current, t) : workbuddyErrorMessage(current, t));
+        setStage("notReady");
+        return;
+      }
       const connection = current?.connection;
       const configured = current?.state === "enabled" && connection?.mcp_configured;
       const connectorReady = configured && connection?.mcp_enabled && connection.mcp_trusted;

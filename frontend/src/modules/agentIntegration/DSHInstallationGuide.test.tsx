@@ -20,6 +20,35 @@ beforeEach(() => vi.clearAllMocks());
 afterEach(() => { cleanup(); vi.useRealTimers(); });
 
 describe("DeepSeek Harness connection verification", () => {
+  it.each([configured.connection, undefined])("shows account mismatch immediately regardless of connection details (%j)", async (connection) => {
+    const mismatch: DesktopAgentIntegrationStatus = { ...configured, connection, issue: { code: "pairing_account_mismatch" } };
+    mocks.statuses.mockResolvedValue({ ok: true, data: { "deepseek-harness": mismatch } });
+    const connect = vi.fn();
+    render(<DSHInstallationGuide status={mismatch} onConnect={connect} onStatus={vi.fn()} onClose={vi.fn()} />);
+    expect(screen.getByText(zhCN.agentIntegration.dshErrors.pairing_account_mismatch)).toBeInTheDocument();
+    expect(screen.queryByText(copy.installedTitle)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: copy.retryCheck }));
+    expect(await screen.findByText(zhCN.agentIntegration.dshErrors.pairing_account_mismatch)).toBeInTheDocument();
+    expect(screen.queryByText(copy.waitingDescription)).not.toBeInTheDocument();
+    expect(connect).not.toHaveBeenCalled();
+  });
+
+  it("replaces waiting feedback with an account mismatch discovered by a background check", async () => {
+    const connect = vi.fn();
+    mocks.statuses.mockResolvedValue({ ok: true, data: { "deepseek-harness": configured } });
+    render(<DSHInstallationGuide status={configured} onConnect={connect} onStatus={vi.fn()} onClose={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: copy.check }));
+    await screen.findByText(copy.waitingDescription);
+    const mismatch: DesktopAgentIntegrationStatus = { ...configured, diagnostic_id: "account-check", issue: { code: "pairing_account_mismatch" } };
+    mocks.statuses.mockResolvedValue({ ok: true, data: { "deepseek-harness": mismatch } });
+    fireEvent.focus(window);
+    expect(await screen.findByText(zhCN.agentIntegration.dshErrors.pairing_account_mismatch)).toBeInTheDocument();
+    expect(screen.queryByText(copy.waitingDescription)).not.toBeInTheDocument();
+    expect(screen.queryByText(copy.checkingDescription)).not.toBeInTheDocument();
+    expect(screen.getByText(/account-check/)).toBeInTheDocument();
+    expect(connect).not.toHaveBeenCalled();
+  });
+
   it("shows the plugin image only after installation reaches the third step", async () => {
     let finish!: (status: DesktopAgentIntegrationStatus) => void;
     const connect = vi.fn(() => new Promise<DesktopAgentIntegrationStatus>(resolve => { finish = resolve; }));

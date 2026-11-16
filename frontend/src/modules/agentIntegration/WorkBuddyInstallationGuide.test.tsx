@@ -99,25 +99,18 @@ describe("Codex connection diagnostics", () => {
     await screen.findByText(labels.notReadyTitle);
   };
 
-  it.each([
-    ["control_port_conflict", "Codex 控制端口被其他服务占用。请处理端口冲突后重新连接。"],
-    ["control_window_unavailable", "未找到 Codex 会话窗口。请打开会话窗口后重新检查连接。"],
-    ["pairing_credential_mismatch", "Codex 正在使用旧配对凭据，请重新连接以加载当前配对。"],
-  ] as const)("shows the specific %s failure and current diagnostic ID", async (code, expected) => {
+  it.each(["control_port_conflict", "control_window_unavailable", "pairing_credential_mismatch"] as const)("shows the specific %s failure and current diagnostic ID", async (code) => {
     await beginCheck({ ...connected, diagnostic_id: "latest-inspection", issue: { code, operation_id: "older-operation" },
       connection: { ...connected.connection!, control_ready: false, runtime_state: "unavailable" } });
-    expect(screen.getByText(expected)).toBeInTheDocument();
+    expect(screen.getByText(zhCN.agentIntegration.connectionErrors[code])).toBeInTheDocument();
     expect(screen.getByText(/诊断编号: latest-inspection/)).toBeInTheDocument();
     expect(screen.queryByText(/older-operation/)).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: labels.done })).not.toBeInTheDocument();
   });
 
-  it.each([
-    ["connection_required", "Codex 尚未建立会话控制连接。请点击「重新连接」，保存工作后确认启动或重启。"],
-    ["waiting", "Codex 尚未运行。请点击「重新连接」，由 LazyMind 启动并建立会话控制连接。"],
-  ] as const)("explains the %s runtime state", async (runtime_state, expected) => {
+  it.each(["connection_required", "waiting"] as const)("explains the %s runtime state", async (runtime_state) => {
     await beginCheck({ ...connected, connection: { ...connected.connection!, control_ready: false, runtime_state } });
-    expect(screen.getByText(expected)).toBeInTheDocument();
+    expect(screen.getByText(zhCN.agentIntegration.connectionErrors[runtime_state])).toBeInTheDocument();
   });
 
   it("updates a changed failure and diagnostics during automatic checks without showing a loading step", async () => {
@@ -148,7 +141,7 @@ describe("Codex connection diagnostics", () => {
     render(<WorkBuddyInstallationGuide agent="codex" onConnect={onConnect} onStatus={vi.fn()} onClose={vi.fn()} />);
     fireEvent.click(screen.getByRole("button", { name: labels.saveAndContinue }));
     await screen.findByText(labels.installFailedTitle);
-    expect(screen.getByText("Codex 启动失败。请确认应用可以正常打开，然后重新连接。")).toBeInTheDocument();
+    expect(screen.getByText(zhCN.agentIntegration.connectionErrors.launch_failed)).toBeInTheDocument();
     expect(screen.queryByText("private executable path")).not.toBeInTheDocument();
   });
 
@@ -160,6 +153,104 @@ describe("Codex connection diagnostics", () => {
     await screen.findByRole("button", { name: labels.enabledConfirmation });
     expect(screen.queryByText(labels.installFailedTitle)).not.toBeInTheDocument();
     expect(screen.queryByText(labels.successTitle)).not.toBeInTheDocument();
+  });
+});
+
+describe("account pairing diagnostics", () => {
+  it.each(["codex", "workbuddy"] as const)("prioritizes account mismatch during %s connection checks without repeating its name", async (agent) => {
+    const labels = agent === "codex" ? zhCN.agentIntegration.codexInstallGuide : copy;
+    const healthy: DesktopAgentIntegrationStatus = { ...installed, agent,
+      display_name: agent === "codex" ? "Codex" : "WorkBuddy",
+      connection: { ...installed.connection!, mcp_enabled: true, mcp_trusted: true, control_ready: true, runtime_state: "connected" } };
+    const mismatch: DesktopAgentIntegrationStatus = { ...healthy,
+      issue: { code: "pairing_account_mismatch" }, message: "private native pairing details",
+      connection: { ...healthy.connection!, control_ready: false, runtime_state: "waiting" } };
+    mocks.statuses.mockResolvedValue({ ok: true, data: { [agent]: mismatch } });
+    const connect = vi.fn();
+    render(<WorkBuddyInstallationGuide agent={agent} status={healthy} onConnect={connect} onStatus={vi.fn()} onClose={vi.fn()} />);
+    if (agent === "workbuddy") {
+      fireEvent.click(screen.getByRole("button", { name: copy.next }));
+      fireEvent.click(screen.getByRole("button", { name: copy.trustConfirmation }));
+    }
+    fireEvent.click(screen.getByRole("button", { name: labels.enabledConfirmation }));
+    fireEvent.click(screen.getByRole("button", { name: labels.check }));
+    await screen.findByText(labels.notReadyTitle);
+    const expected = agent === "codex" ? zhCN.agentIntegration.connectionErrors.pairing_account_mismatch
+      : zhCN.agentIntegration.workbuddyErrors.pairing_account_mismatch;
+    expect(screen.getByText(expected)).not.toHaveTextContent(/Codex|WorkBuddy|DeepSeek Harness|\bDSH\b/i);
+    expect(screen.queryByText(zhCN.agentIntegration.connectionErrors.waiting)).not.toBeInTheDocument();
+    expect(screen.queryByText("private native pairing details")).not.toBeInTheDocument();
+    expect(screen.queryByText(labels.successTitle)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: labels.reconnect }));
+    expect(screen.getByRole("button", { name: labels.saveAndContinue })).toBeInTheDocument();
+    expect(connect).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["workbuddy", "focus", "entry"],
+    ["codex", "poll", "enable"],
+    ["workbuddy", "poll", "waiting"],
+    ["codex", "focus", "waiting"],
+  ] as const)("shows account mismatch from a background %s %s check while in %s", async (agent, trigger, initialStage) => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const labels = agent === "codex" ? zhCN.agentIntegration.codexInstallGuide : copy;
+    const healthy: DesktopAgentIntegrationStatus = { ...installed, agent,
+      display_name: agent === "codex" ? "Codex" : "WorkBuddy",
+      connection: { ...installed.connection!, mcp_enabled: true, mcp_trusted: true, control_ready: true, runtime_state: "connected" } };
+    const waiting: DesktopAgentIntegrationStatus = { ...healthy,
+      connection: { ...healthy.connection!, control_ready: false, runtime_state: "waiting" } };
+    const mismatch: DesktopAgentIntegrationStatus = { ...waiting, diagnostic_id: "account-background-check",
+      issue: { code: "pairing_account_mismatch", operation_id: "older-account-operation" },
+      message: "private native pairing details" };
+    const connect = vi.fn();
+    const update = vi.fn();
+    mocks.statuses.mockResolvedValue({ ok: true, data: { [agent]: waiting } });
+    render(<WorkBuddyInstallationGuide agent={agent} status={healthy} onConnect={connect} onStatus={update} onClose={vi.fn()} />);
+    if (initialStage === "waiting") {
+      if (agent === "workbuddy") {
+        fireEvent.click(screen.getByRole("button", { name: copy.next }));
+        fireEvent.click(screen.getByRole("button", { name: copy.trustConfirmation }));
+      }
+      fireEvent.click(screen.getByRole("button", { name: labels.enabledConfirmation }));
+      fireEvent.click(screen.getByRole("button", { name: labels.check }));
+      await screen.findByText(labels.notReadyTitle);
+    }
+    mocks.statuses.mockResolvedValue({ ok: true, data: { [agent]: mismatch } });
+    await act(async () => {
+      if (trigger === "focus") fireEvent(window, new Event("focus"));
+      else await vi.advanceTimersByTimeAsync(3000);
+    });
+    const expected = agent === "codex" ? zhCN.agentIntegration.connectionErrors.pairing_account_mismatch
+      : zhCN.agentIntegration.workbuddyErrors.pairing_account_mismatch;
+    expect(await screen.findByText(expected)).toBeInTheDocument();
+    expect(screen.getByText(labels.notReadyTitle)).toBeInTheDocument();
+    expect(screen.getByText(/诊断编号: account-background-check/)).toBeInTheDocument();
+    expect(screen.queryByText(/older-account-operation/)).not.toBeInTheDocument();
+    expect(screen.queryByText(zhCN.agentIntegration.connectionErrors.waiting)).not.toBeInTheDocument();
+    expect(screen.queryByText("private native pairing details")).not.toBeInTheDocument();
+    expect(screen.queryByText(labels.installedTitle)).not.toBeInTheDocument();
+    expect(screen.queryByText(labels.checkingDescription)).not.toBeInTheDocument();
+    expect(update).toHaveBeenCalledWith(mismatch);
+    expect(connect).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: labels.reconnect }));
+    expect(screen.getByRole("button", { name: labels.saveAndContinue })).toBeInTheDocument();
+    expect(connect).not.toHaveBeenCalled();
+  });
+
+  it.each(["workbuddy", "codex"] as const)("keeps the %s trust or enable step during other background failures", async (agent) => {
+    const labels = agent === "codex" ? zhCN.agentIntegration.codexInstallGuide : copy;
+    const healthy: DesktopAgentIntegrationStatus = { ...installed, agent,
+      display_name: agent === "codex" ? "Codex" : "WorkBuddy",
+      connection: { ...installed.connection!, mcp_enabled: true, mcp_trusted: true, control_ready: true } };
+    const disabled: DesktopAgentIntegrationStatus = { ...healthy, issue: { code: "mcp_enable_required" },
+      connection: { ...healthy.connection!, mcp_enabled: false, control_ready: false } };
+    mocks.statuses.mockResolvedValue({ ok: true, data: { [agent]: disabled } });
+    const connect = vi.fn();
+    render(<WorkBuddyInstallationGuide agent={agent} status={healthy} onConnect={connect} onStatus={vi.fn()} onClose={vi.fn()} />);
+    await act(async () => { fireEvent(window, new Event("focus")); });
+    expect(screen.getByRole("button", { name: agent === "codex" ? labels.enabledConfirmation : labels.next })).toBeInTheDocument();
+    expect(screen.queryByText(labels.notReadyTitle)).not.toBeInTheDocument();
+    expect(connect).not.toHaveBeenCalled();
   });
 });
 

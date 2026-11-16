@@ -43,6 +43,8 @@ import WorkBuddyInstallationGuide from "./WorkBuddyInstallationGuide";
 import DSHInstallationGuide from "./DSHInstallationGuide";
 import { isDisconnectPending, requiresAgentQuit } from "./agentActions";
 import { dshConnectionReady, dshErrorMessage } from "./dshConnection";
+import { codexErrorMessage } from "./codexErrors";
+import { workbuddyErrorMessage } from "./workbuddyErrors";
 
 interface AgentDefinition {
   id: DesktopAgent;
@@ -259,8 +261,8 @@ export default function AgentIntegrationPage() {
         if (!status || !(status.enabled ?? status.state === "enabled")) continue;
         const waitingForAction = requiresAgentQuit(status) || isDisconnectPending(status);
         next[agent] = { ...status,
-          issue: waitingForAction ? status.issue : { code: "host_unavailable" },
-          message: waitingForAction ? status.message : "Connection status is unavailable.",
+          issue: waitingForAction || status.issue ? status.issue : { code: "host_unavailable" },
+          message: waitingForAction || status.issue ? status.message : "Connection status is unavailable.",
           connection: { ...status.connection, mcp_configured: status.connection?.mcp_configured ?? false,
             control_ready: false, presentation_status: "host-offline", runtime_state: "unavailable" } };
       }
@@ -608,14 +610,14 @@ function executablePathPlaceholderKey(target: DesktopAgentBindingTarget | null):
 function integrationErrorMessage(agent: DesktopAgent, status: DesktopAgentIntegrationStatus, t: TFunction): string {
   if (requiresAgentQuit(status)) return t("agentIntegration.quitRequired.description", { agent: status.display_name });
   if (isDisconnectPending(status)) return t("agentIntegration.quitRequired.exitedDescription", { agent: status.display_name });
-  if (agent === "deepseek-harness" && status.retry_action !== "disconnect") return dshErrorMessage(status, t);
-  if (agent === "workbuddy" && status.issue && ["mcp_trust_required", "mcp_enable_required"].includes(status.issue.code)) {
-    return t(`agentIntegration.workbuddyErrors.${status.issue.code}`);
-  }
-  const key = status.issue?.code === "configuration_unreadable" ? "readFailed"
-    : status.state === "error" ? status.retry_action === "disconnect" ? "disableFailed" : "enableFailed"
-      : status.state === "conflict" || status.issue?.code === "environment_mismatch" ? "environmentMismatch"
-        : "connectionUnavailable";
+  if (status.issue?.code === "configuration_unreadable") return t("agentIntegration.setupFeedback.readFailed");
+  if (status.state === "conflict" || status.issue?.code === "environment_mismatch") return t("agentIntegration.setupFeedback.environmentMismatch");
+  if (status.retry_action === "disconnect") return t("agentIntegration.setupFeedback.disableFailed");
+  if (status.state === "error" && !status.issue) return t("agentIntegration.setupFeedback.enableFailed");
+  if (agent === "deepseek-harness") return dshErrorMessage(status, t);
+  if (agent === "codex") return codexErrorMessage(status, t);
+  if (agent === "workbuddy") return workbuddyErrorMessage(status, t);
+  const key = status.state === "error" ? "enableFailed" : "connectionUnavailable";
   return t(`agentIntegration.setupFeedback.${key}`);
 }
 
@@ -1028,9 +1030,10 @@ function AgentConfigurationFlow({
 
   const mcpActions = (
     <Space wrap size={8}>
-      {["workbuddy", "deepseek-harness"].includes(agent.id) && !retryDisconnect && mcpStatus?.issue && mcpStatus?.can_connect && (
+      {["workbuddy", "codex", "deepseek-harness"].includes(agent.id) && !retryDisconnect && !waitingForAction
+        && (mcpStatus?.issue || mcpStatus?.connection?.runtime_state === "connection_required") && mcpStatus?.can_connect && (
         <Button size="small" disabled={busyAction !== ""} onClick={onOpenInstallationGuide}>
-          {t(`agentIntegration.${agent.id === "deepseek-harness" ? "dshInstallGuide" : "workbuddyInstallGuide"}.reconnect`)}
+          {t(`agentIntegration.${agent.id === "deepseek-harness" ? "dshInstallGuide" : agent.id === "codex" ? "codexInstallGuide" : "workbuddyInstallGuide"}.reconnect`)}
         </Button>
       )}
       {!mcpPrepared && !mcpEnabled && (
@@ -1237,9 +1240,10 @@ function AgentConfigurationFlow({
             status={mcpStatus?.issue?.code === "configuration_unreadable" ? t("agentIntegration.setupFeedback.unknown")
               : quitRequired ? t("agentIntegration.quitRequired.waiting", { agent: mcpStatus?.display_name || agent.name })
               : disconnectPending ? t("agentIntegration.quitRequired.pendingDisconnect")
-              : mcpStatus?.connection?.runtime_state === "waiting" ? t("agentIntegration.waitingForApplication")
-              : mcpStatus?.connection?.runtime_state === "connection_required" ? t("agentIntegration.connectionRequired")
+              : mcpChecked && mcpStatus?.issue?.code === "pairing_account_mismatch" ? t("agentIntegration.setupFeedback.pairingAccountMismatchTitle")
               : mcpChecked && mcpStatus?.issue ? t("agentIntegration.configurationIssue")
+              : mcpStatus?.connection?.runtime_state === "waiting" ? t("agentIntegration.waitingForApplication")
+              : mcpStatus?.connection?.runtime_state === "connection_required" ? t("agentIntegration.setupFeedback.connectionRequiredTitle")
               : agent.id === "deepseek-harness" && mcpChecked ? t(`agentIntegration.dshInstallGuide.${dshConnectionReady(mcpStatus) ? "connected" : "pendingCheck"}`)
                 : mcpStatus?.enabled ? t("agentIntegration.enabled") : mcpCapabilityStatus(mcpState, t)}
             ready={agent.id === "deepseek-harness" ? dshConnectionReady(mcpStatus)
@@ -1269,11 +1273,11 @@ function AgentConfigurationFlow({
             />
           )}
         </div>
-        {mcpChecked && mcpStatus?.connection?.runtime_state === "waiting" && (
+        {mcpChecked && !mcpStatus?.issue && mcpStatus?.connection?.runtime_state === "waiting" && (
           <div className="agent-integration-stage-hint" role="status"><InfoCircleFilled />{t("agentIntegration.waitingForApplicationDescription", { agent: agent.name })}</div>
         )}
-        {mcpChecked && mcpStatus?.connection?.runtime_state === "connection_required" && (
-          <div className="agent-integration-stage-hint" role="status"><InfoCircleFilled />{t("agentIntegration.setupFeedback.connectionUnavailable")}</div>
+        {mcpChecked && !mcpStatus?.issue && mcpStatus?.connection?.runtime_state === "connection_required" && (
+          <div className="agent-integration-stage-hint" role="status"><InfoCircleFilled />{t("agentIntegration.connectionErrors.connection_required")}</div>
         )}
         {mcpStatus && (mcpStatus.message || mcpStatus.issue) && (["error", "conflict"].includes(mcpState) || Boolean(mcpStatus.issue)) && (
           <div className={`agent-integration-stage-hint ${waitingForAction ? "is-warning" : "is-error"}`} role={waitingForAction ? "status" : "alert"}>
