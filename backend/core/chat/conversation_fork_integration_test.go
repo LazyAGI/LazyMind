@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -84,7 +85,7 @@ func TestForkFirstActualRequestUsesNodeConfigurationAndOnlyItsPrefix(t *testing.
 			t.Fatalf("fork history = %#v, want %#v", request.Message.History, wantHistory)
 		}
 		for i, want := range wantHistory {
-			if got := request.Message.History[i]; got != want {
+			if got := request.Message.History[i]; !reflect.DeepEqual(got, want) {
 				t.Fatalf("fork history[%d] = %#v, want %#v", i, got, want)
 			}
 		}
