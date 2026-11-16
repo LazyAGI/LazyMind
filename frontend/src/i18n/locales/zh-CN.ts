@@ -2569,7 +2569,7 @@ const zhCN = {
       trustConfirmation: "已信任或无需信任，继续",
       configurationMissingDescription: "连接配置已变更或失效。请在本引导中重新连接。",
       trustRequiredDescription: "尚未检测到当前连接器的信任记录。请点击「信任」，然后重新检查。",
-      enableRequiredDescription: "已检测到信任记录，但连接器开关仍关闭。请在连接器设置中开启 lazymind。",
+      enableRequiredDescription: "请确认 LazyMind Workflow 插件已开启",
       controlUnavailableTitle: "会话控制暂不可用",
       controlUnavailableDescription: "会话控制暂不可用。请先重新检查；若仍未恢复，请点击「重新连接」，保存当前工作后按引导继续。",
     },

@@ -2606,7 +2606,7 @@ const enUS = {
       trustConfirmation: "Trusted or no prompt, continue",
       configurationMissingDescription: "The connection configuration has changed or is invalid. Reconnect in this guide.",
       trustRequiredDescription: "No approval was found for the current connector. Click Trust, then check again.",
-      enableRequiredDescription: "The connector is trusted, but its toggle is off. Enable lazymind in connector settings.",
+      enableRequiredDescription: "Please confirm that the LazyMind Workflow plugin is enabled.",
       controlUnavailableTitle: "Session control temporarily unavailable",
       controlUnavailableDescription: "Session control is temporarily unavailable. Check again first. If it does not recover, choose Reconnect, save your work, and continue through this guide.",
     },

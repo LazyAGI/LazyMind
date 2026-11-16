@@ -63,7 +63,7 @@ export default function WorkBuddyInstallationGuide({ status, onConnect, onLogin,
   const install = async () => {
     if (busy.current) return;
     busy.current = true;
-    setStage("installing"); setError("");
+    setStage("installing"); setError(""); setDiagnostic("");
     try {
       if (checkLocalNode) {
         const node = await getNodeDependencyStatus();
@@ -128,7 +128,7 @@ export default function WorkBuddyInstallationGuide({ status, onConnect, onLogin,
     busy.current = true;
     if (!automatic) { setStage("checking"); setError(""); }
     const checkFailed = () => {
-      if (!automatic || agent === "codex" && ["notReady", "installFailed"].includes(stage)) {
+      if (!automatic || agent === "codex" && stage === "notReady") {
         setError(text("checkFailedDescription")); setDiagnostic("");
         if (!automatic) setStage("notReady");
       }
@@ -139,19 +139,21 @@ export default function WorkBuddyInstallationGuide({ status, onConnect, onLogin,
       if (!result.ok) { checkFailed(); return; }
       const current = result.data[agent];
       if (current) onStatus(current);
+      const connection = current?.connection;
+      const configured = current?.state === "enabled" && connection?.mcp_configured;
+      const connectorReady = configured && connection?.mcp_enabled && connection.mcp_trusted;
+      const ready = connectorReady && connection.control_ready && !current?.issue;
+      // Keep the failed operation and its diagnostic together until retry or recovery.
+      if (automatic && stage === "installFailed" && !ready) return;
       if (automatic && current?.issue?.code === "pairing_account_mismatch") {
         setDiagnostic(current.diagnostic_id || current.issue.operation_id || "");
         setError(agent === "codex" ? codexErrorMessage(current, t) : workbuddyErrorMessage(current, t));
         setStage("notReady");
         return;
       }
-      const connection = current?.connection;
-      const configured = current?.state === "enabled" && connection?.mcp_configured;
-      const connectorReady = configured && connection?.mcp_enabled && connection.mcp_trusted;
-      const ready = connectorReady && connection.control_ready && !current?.issue;
       if (!automatic || agent === "codex" || ready) setDiagnostic(current?.diagnostic_id || current?.issue?.operation_id || "");
       if (automatic && !ready) {
-        if (agent === "codex" && ["notReady", "installFailed"].includes(stage)) {
+        if (agent === "codex" && stage === "notReady") {
           setError(codexErrorMessage(current, t, connectorReady ? "controlUnavailableDescription" : "notReadyDescription"));
         }
         return;

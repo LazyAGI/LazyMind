@@ -156,6 +156,105 @@ describe("Codex connection diagnostics", () => {
   });
 });
 
+describe("explicit Codex connection failure stability", () => {
+  const labels = zhCN.agentIntegration.codexInstallGuide;
+  const healthy: DesktopAgentIntegrationStatus = { ...installed, agent: "codex", display_name: "Codex",
+    connection: { ...installed.connection!, mcp_trusted: true, mcp_enabled: true, control_ready: true, runtime_state: "connected" } };
+
+  it.each(["poll", "focus"] as const)("preserves the failed connect message and empty diagnostics through ordinary %s updates", async (trigger) => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const operationError = zhCN.agentIntegration.setupFeedback.enableFailed;
+    const connect = vi.fn().mockRejectedValue(new Error(operationError));
+    const update = vi.fn();
+    render(<WorkBuddyInstallationGuide agent="codex" onConnect={connect} onStatus={update} onClose={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: labels.saveAndContinue }));
+    await screen.findByText(labels.installFailedTitle);
+    expect(screen.getByText(operationError)).toBeInTheDocument();
+    expect(screen.queryByText(/诊断编号:/)).not.toBeInTheDocument();
+
+    const disabled: DesktopAgentIntegrationStatus = { ...healthy, diagnostic_id: "background-disabled-check",
+      issue: { code: "mcp_enable_required" },
+      connection: { ...healthy.connection!, mcp_enabled: false, control_ready: false, runtime_state: "unavailable" } };
+    const unready: DesktopAgentIntegrationStatus = { ...healthy, diagnostic_id: "background-waiting-check",
+      connection: { ...healthy.connection!, control_ready: false, runtime_state: "connection_required" } };
+    for (const current of [disabled, unready, undefined, "unavailable", "rejected"] as const) {
+      if (current === "unavailable") mocks.statuses.mockResolvedValue({ ok: false, reason: "unavailable" });
+      else if (current === "rejected") mocks.statuses.mockRejectedValue(new Error("Background inspection unavailable"));
+      else mocks.statuses.mockResolvedValue({ ok: true, data: current ? { codex: current } : {} });
+      await act(async () => {
+        if (trigger === "focus") fireEvent(window, new Event("focus"));
+        else await vi.advanceTimersByTimeAsync(3000);
+      });
+      expect(screen.getByText(labels.installFailedTitle)).toBeInTheDocument();
+      expect(screen.getByText(operationError)).toBeInTheDocument();
+      expect(screen.queryByText(/诊断编号:/)).not.toBeInTheDocument();
+      expect(screen.queryByText(labels.enableRequiredDescription)).not.toBeInTheDocument();
+      expect(screen.queryByText(labels.notReadyTitle)).not.toBeInTheDocument();
+      expect(screen.queryByText(labels.checkingDescription)).not.toBeInTheDocument();
+      expect(connect).toHaveBeenCalledTimes(1);
+    }
+
+    mocks.statuses.mockResolvedValue({ ok: true, data: { codex: healthy } });
+    await act(async () => {
+      if (trigger === "focus") fireEvent(window, new Event("focus"));
+      else await vi.advanceTimersByTimeAsync(3000);
+    });
+    expect(await screen.findByText(labels.successTitle)).toBeInTheDocument();
+    expect(screen.queryByText(labels.installFailedTitle)).not.toBeInTheDocument();
+    expect(screen.queryByText(operationError)).not.toBeInTheDocument();
+    expect(update).toHaveBeenCalledWith(healthy);
+    expect(connect).toHaveBeenCalledTimes(1);
+  });
+
+  it("preserves the failed connect diagnostic instead of replacing it with a background inspection", async () => {
+    const failed: DesktopAgentIntegrationStatus = { ...healthy, state: "error", diagnostic_id: "explicit-connect-failure",
+      issue: { code: "launch_failed", operation_id: "connect-operation" } };
+    const ordinary: DesktopAgentIntegrationStatus = { ...healthy, diagnostic_id: "background-inspection",
+      connection: { ...healthy.connection!, control_ready: false, runtime_state: "unavailable" } };
+    const connect = vi.fn().mockResolvedValue(failed);
+    mocks.statuses.mockResolvedValue({ ok: true, data: { codex: ordinary } });
+    render(<WorkBuddyInstallationGuide agent="codex" onConnect={connect} onStatus={vi.fn()} onClose={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: labels.saveAndContinue }));
+    await screen.findByText(labels.installFailedTitle);
+    expect(screen.getByText(zhCN.agentIntegration.connectionErrors.launch_failed)).toBeInTheDocument();
+    expect(screen.getByText(/诊断编号: explicit-connect-failure/)).toBeInTheDocument();
+    await act(async () => { fireEvent(window, new Event("focus")); });
+    expect(screen.getByText(labels.installFailedTitle)).toBeInTheDocument();
+    expect(screen.getByText(zhCN.agentIntegration.connectionErrors.launch_failed)).toBeInTheDocument();
+    expect(screen.getByText(/诊断编号: explicit-connect-failure/)).toBeInTheDocument();
+    expect(screen.queryByText(/background-inspection/)).not.toBeInTheDocument();
+    expect(screen.queryByText(labels.notReadyTitle)).not.toBeInTheDocument();
+    expect(connect).toHaveBeenCalledTimes(1);
+  });
+
+  it("clears the previous operation diagnostic when an explicit retry fails without an ID", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const failed: DesktopAgentIntegrationStatus = { ...healthy, state: "error", diagnostic_id: "previous-connect-failure",
+      issue: { code: "launch_failed" } };
+    const operationError = zhCN.agentIntegration.setupFeedback.enableFailed;
+    const connect = vi.fn().mockResolvedValueOnce(failed).mockRejectedValue(new Error(operationError));
+    const mismatch: DesktopAgentIntegrationStatus = { ...healthy, diagnostic_id: "unrelated-background-inspection",
+      issue: { code: "pairing_account_mismatch" },
+      connection: { ...healthy.connection!, control_ready: false, runtime_state: "waiting" } };
+    mocks.statuses.mockResolvedValue({ ok: true, data: { codex: mismatch } });
+    render(<WorkBuddyInstallationGuide agent="codex" onConnect={connect} onStatus={vi.fn()} onClose={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: labels.saveAndContinue }));
+    await screen.findByText(labels.installFailedTitle);
+    expect(screen.getByText(/诊断编号: previous-connect-failure/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: labels.retryInstall }));
+    expect(await screen.findByText(operationError)).toBeInTheDocument();
+    expect(screen.getByText(labels.installFailedTitle)).toBeInTheDocument();
+    expect(screen.queryByText(/诊断编号:/)).not.toBeInTheDocument();
+    await act(async () => { await vi.advanceTimersByTimeAsync(3000); });
+    expect(screen.getByText(labels.installFailedTitle)).toBeInTheDocument();
+    expect(screen.getByText(operationError)).toBeInTheDocument();
+    expect(screen.queryByText(/诊断编号:/)).not.toBeInTheDocument();
+    expect(screen.queryByText(zhCN.agentIntegration.connectionErrors.pairing_account_mismatch)).not.toBeInTheDocument();
+    expect(screen.queryByText(labels.notReadyTitle)).not.toBeInTheDocument();
+    expect(connect).toHaveBeenCalledTimes(2);
+  });
+});
+
 describe("account pairing diagnostics", () => {
   it.each(["codex", "workbuddy"] as const)("prioritizes account mismatch during %s connection checks without repeating its name", async (agent) => {
     const labels = agent === "codex" ? zhCN.agentIntegration.codexInstallGuide : copy;
