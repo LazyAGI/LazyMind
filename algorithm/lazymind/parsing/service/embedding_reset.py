@@ -85,10 +85,10 @@ def index_lock(*, exclusive=False):
 
 
 @contextmanager
-def index_operation(expected_generation=None):
+def index_operation(expected_generation=None, *, initializing=False):
     with index_lock():
         state = index_state()
-        if state['phase'] in ('clearing', 'cleanup_failed', 'cleared', 'detached'):
+        if not initializing and state['phase'] in ('clearing', 'cleanup_failed', 'cleared', 'detached'):
             raise IndexBusy('knowledge index is being cleared')
         if expected_generation is not None and expected_generation != state['generation']:
             raise IndexBusy('document task belongs to an earlier index generation')

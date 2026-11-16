@@ -239,3 +239,81 @@ func TestPythonComponentOnlineReceiptSurvivesOfflineRestart(t *testing.T) {
 		t.Fatal("accepted incompatible receipt")
 	}
 }
+
+func TestDesktopRAGUpgradeRequiresFreshInstallation(t *testing.T) {
+	root := t.TempDir()
+	paths := RuntimePaths{ResourcesRoot: t.TempDir(), RuntimeRoot: root, StateDir: root}
+	cfg := RuntimeConfig{Profile: "desktop"}
+	rag := pythonComponent{ID: "rag", Revision: strings.Repeat("a", 64),
+		SHA256: strings.Repeat("b", 64), BaseFingerprint: strings.Repeat("c", 64)}
+	catalog := pythonComponentCatalog{SchemaVersion: 1, Platform: runtime.GOOS, Arch: runtime.GOARCH,
+		Components: map[string]pythonComponent{"rag": rag}}
+	write := func(path string, data []byte) {
+		t.Helper()
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, data, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	catalogData, err := json.Marshal(catalog)
+	if err != nil {
+		t.Fatal(err)
+	}
+	write(filepath.Join(paths.ResourcesRoot, "config", "python-components.json"), catalogData)
+	manifest, err := json.Marshal(rag)
+	if err != nil {
+		t.Fatal(err)
+	}
+	deps := filepath.Join(root, "deps", "python-components")
+	ragDir := filepath.Join(deps, "rag")
+	revision := filepath.Join(ragDir, rag.Revision)
+	install := func() {
+		t.Helper()
+		write(filepath.Join(revision, "bundle-manifest.json"), manifest)
+		write(filepath.Join(revision, "site-packages", "test.py"), nil)
+		write(filepath.Join(revision, ".ready"), []byte(rag.SHA256))
+	}
+	prepare := func(version string) {
+		t.Helper()
+		t.Setenv(desktopAppVersionEnvVar, version)
+		if err := prepareDesktopRAG(context.Background(), cfg, paths); err != nil {
+			t.Fatal(err)
+		}
+	}
+	install()
+	prepare("0.5.0")
+	if sites := pythonComponentSites(paths); len(sites) != 0 {
+		t.Fatalf("installation from a legacy build was reused: %v", sites)
+	}
+	install()
+	receipt := filepath.Join(ragDir, "catalog-"+rag.Revision+".json")
+	cluster := filepath.Join(deps, "cluster", ".ready")
+	data := filepath.Join(root, "data", "knowledge.db")
+	write(receipt, manifest)
+	write(cluster, nil)
+	write(data, nil)
+
+	prepare("0.5.0")
+	if sites := pythonComponentSites(paths); len(sites) != 1 {
+		t.Fatalf("same-version restart discarded the installation: %v", sites)
+	}
+	prepare("0.5.1")
+	if sites := pythonComponentSites(paths); len(sites) != 0 {
+		t.Fatalf("upgrade reused the old installation: %v", sites)
+	}
+	if _, err := os.Stat(ragDir); !os.IsNotExist(err) {
+		t.Fatalf("upgrade left old RAG files or receipts: %v", err)
+	}
+	for _, path := range []string{cluster, data} {
+		if _, err := os.Stat(path); err != nil {
+			t.Fatal(err)
+		}
+	}
+	install()
+	prepare("0.5.1")
+	if sites := pythonComponentSites(paths); len(sites) != 1 {
+		t.Fatalf("restart discarded newly installed RAG: %v", sites)
+	}
+}

@@ -431,6 +431,10 @@ func (m *RuntimeManager) Up(ctx context.Context, cfg RuntimeConfig, paths Runtim
 	if err := m.killStaleRuntimeProcesses(ctx, stateCfg, paths); err != nil {
 		return err
 	}
+	failureContext.Phase = runtimeDiagnosticPhaseConfiguration
+	if err := prepareDesktopRAG(ctx, cfg, paths); err != nil {
+		return err
+	}
 	state.Runtime = cfg.Profile
 	state.Profile = cfg.Profile
 	state.OwnerToken = cfg.OwnerToken

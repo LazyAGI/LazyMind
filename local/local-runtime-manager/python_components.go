@@ -11,6 +11,8 @@ import (
 	"runtime"
 	"strings"
 	"time"
+
+	"github.com/mesotron7x/LazyMind/local/local-runtime-manager/internal/winfile"
 )
 
 type pythonComponent struct {
@@ -35,6 +37,34 @@ type pythonComponentCatalog struct {
 
 var componentDigestPattern = regexp.MustCompile(`^[a-f0-9]{64}$`)
 var pythonComponentIDs = []string{"rag", "cluster"}
+
+// Run with the startup lock held after stopping the previous runtime. Upgrades
+// must re-download RAG even if the new installer pins the same component.
+func prepareDesktopRAG(ctx context.Context, cfg RuntimeConfig, paths RuntimePaths) error {
+	version := strings.TrimSpace(os.Getenv(desktopAppVersionEnvVar))
+	if cfg.Profile != "desktop" || version == "" {
+		return nil
+	}
+	catalog, err := loadPythonComponentCatalog(paths)
+	if err != nil || catalog == nil {
+		return err
+	}
+	marker := filepath.Join(paths.StateDir, "rag-component-app-version")
+	previous, err := os.ReadFile(marker)
+	if err == nil && strings.TrimSpace(string(previous)) == version {
+		return nil
+	}
+	if err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("read RAG component app version: %w", err)
+	}
+	ragDir := filepath.Join(paths.RuntimeRoot, "deps", "python-components", "rag")
+	if err := winfile.RetryOperation(ctx, func() error {
+		return os.RemoveAll(ragDir)
+	}, winfile.RetryOptions{MaxWait: pythonPayloadRenameWait}); err != nil {
+		return fmt.Errorf("remove previous RAG component: %w", err)
+	}
+	return writeFileAtomically(ctx, marker, []byte(version+"\n"), 0o644, nil)
+}
 
 func sourceRAGInstalled(paths RuntimePaths) bool {
 	data, err := os.ReadFile(filepath.Join(paths.RuntimeRoot, "deps", "python-components", "rag", "source.ready"))
