@@ -189,3 +189,29 @@ func TestFailedInstallRemainsRetryable(t *testing.T) {
 		})
 	}
 }
+
+func TestFindNodeInLegacyServiceHome(t *testing.T) {
+	if runtime.GOOS != "darwin" {
+		t.Skip("macOS service-home layout")
+	}
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("LAZYMIND_HOST_HOME", "")
+	t.Setenv("LAZYMIND_NODE_BIN", "")
+	t.Setenv("PATH", t.TempDir())
+	t.Setenv("LAZYMIND_RUNTIME_STATE_FILE", "")
+	t.Setenv(connectorconfig.EnvironmentKey, "")
+	dir := filepath.Join(home, "Library", "Application Support", "LazyMind", "data", "homes", "services", ".lazymind", "deps", "node", "bin")
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	node := executable(t, dir, "node", "#!/bin/sh\necho v24.22.3\n")
+	node, err := filepath.EvalSymlinks(node)
+	if err != nil {
+		t.Fatal(err)
+	}
+	found, err := FindNode(t.Context())
+	if err != nil || found != node {
+		t.Fatalf("legacy Node not discovered: %q %v", found, err)
+	}
+}
