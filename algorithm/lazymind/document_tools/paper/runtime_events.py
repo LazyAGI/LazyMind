@@ -73,8 +73,9 @@ class PaperRuntimeEvents:
     def _send(self, percent, phase, stages):
         self._sequence += 1
         event = {'type': 'progress', 'progress': percent, 'current_phase': phase,
-                 'public_display': {'schema_version': 1, 'event_key': f'paper-{self._sequence}',
+                 'public_display': {'schema_version': 1, 'event_key': 'paper:auto',
                                     'process_steps': stages}}
+        # Core assigns the persisted event key and stage order within the attempt.
         # One source supplies both the public timeline and legacy execution text.
         try:
             self._emit({'type': 'text', 'text': phase + '\n'})
