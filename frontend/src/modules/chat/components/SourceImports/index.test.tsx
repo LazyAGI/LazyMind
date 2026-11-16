@@ -223,7 +223,15 @@ describe("source imports", () => {
     expect(api.submitSourceImport).not.toHaveBeenCalled();
   });
   it("submits the shared creation defaults and enforces the description limit", async () => {
-    vi.mocked(api.submitSourceImport).mockResolvedValue({ batch_id: "created", target_dataset_id: "new-library" });
+    const created: api.ImportItem = {
+      item_id: "created-item", batch_id: "created", batch_created_at: "2026-11-16T02:30:00Z",
+      title: "Paper abstract", paper_key: "arxiv:2210.03629", target_dataset_id: "new-library",
+      target_name: "Shared_papers", created_library: true, status: "pending", stage: "download", retryable: false,
+    };
+    vi.mocked(api.submitSourceImport).mockImplementation(async () => {
+      vi.mocked(api.listSourceImports).mockResolvedValue([created]);
+      return { batch_id: "created", target_dataset_id: "new-library" };
+    });
     view(<ChatSourcePanel sources={[sources[0]]} onClose={() => {}} embedded />);
     fireEvent.click(await screen.findByRole("button", { name: "加入知识库" }));
     fireEvent.click(await screen.findByRole("radio", { name: "新建论文集" }));
@@ -235,6 +243,18 @@ describe("source imports", () => {
     await waitFor(() => expect(api.submitSourceImport).toHaveBeenCalledWith(expect.objectContaining({
       new_knowledge_base: { name: "Shared_papers", description: "", tags: ["论文"], scene: "academic_papers", processing_level: "stored", algo_id: "test" },
     })));
+    const history = await screen.findByRole("dialog", { name: "文献入库记录" });
+    expect(await within(history).findByRole("button", { name: /Shared_papers/ })).toHaveAttribute("aria-expanded", "true");
+    expect(within(history).getByText("Paper abstract")).toBeInTheDocument();
+
+    vi.mocked(api.listSourceImports).mockResolvedValue([{
+      ...created, status: "failed", error_message: "论文来源请求受限",
+    }]);
+    fireEvent.click(within(history).getByRole("button", { name: "刷新当前状态" }));
+    const failure = await within(history).findByRole("button", { name: /论文来源请求受限/ });
+    expect(failure).toHaveAttribute("aria-expanded", "false");
+    expect(screen.getAllByRole("dialog")).toEqual([history]);
+    expect(within(history).getByRole("button", { name: "仅重试失败项" })).toBeDisabled();
   });
   it("does not offer an import action for a normal webpage", async () => {
     view(<ChatSourcePanel sources={[sources[2]]} onClose={() => {}} embedded />);
@@ -330,10 +350,12 @@ describe("source imports", () => {
     vi.mocked(api.retrySourceImport).mockResolvedValue();
     view(<ChatSourcePanel sources={sources} onClose={() => {}} />);
     fireEvent.click(await screen.findByRole("button", { name: "入库记录" }));
-    expect(screen.getByRole("dialog", { name: "文献入库记录" })).toBeInTheDocument();
+    const history = within(screen.getByRole("dialog", { name: "文献入库记录" }));
+    fireEvent.click(history.getByRole("button", { name: /Papers/ }));
     expect(screen.getByText("HTTP 404")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "仅重试失败项" }));
     await waitFor(() => expect(api.retrySourceImport).toHaveBeenCalledWith("batch", ["bad"], expect.any(String)));
+    expect(history.getByRole("button", { name: /^关\s*闭$/ })).toBeEnabled();
   });
 
   it("looks up bounded batches and separates failed queries from papers without full text", async () => {

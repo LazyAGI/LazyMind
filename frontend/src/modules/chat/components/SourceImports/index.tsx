@@ -2,6 +2,7 @@ import { tr } from "./translations";
 import { knowledgeCreationDefaults, knowledgeCreationMetadata } from "@/modules/knowledge/utils/creation";
 import { sourceContextKey, useSourceImportState } from "./state";
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode } from "react";
+import { useTranslation } from "react-i18next";
 import { Alert, Button, Checkbox, Form, Input, Modal, Pagination, Progress, Radio, Select, Space, Tag, message, theme } from "antd";
 import type { CheckboxChangeEvent } from "antd/es/checkbox";
 import { ExportOutlined, PlusOutlined, SearchOutlined } from "@ant-design/icons";
@@ -64,8 +65,12 @@ export function SourceImportProvider({ context, sources, children }: { context: 
     if (!enabled) return;
     await Promise.all([inspect(sourceKey), refresh()]);
   }, [enabled, sourceKey, inspect, refresh]);
+  const changeHistoryOpen = (open: boolean) => {
+    setOpened(open);
+    if (!open) setSubmittedBatch("");
+  };
   useEffect(() => { setSelection(null); setOpened(false); setSubmittedBatch(""); }, [key]);
-  return <Context.Provider value={{ inspections, inspectError, load, items, queryError, choose: rows => setSelection(uniquePapers(rows)), refresh, submittedBatch, opened, choosing: selection !== null, setOpened }}>
+  return <Context.Provider value={{ inspections, inspectError, load, items, queryError, choose: rows => setSelection(uniquePapers(rows)), refresh, submittedBatch, opened, choosing: selection !== null, setOpened: changeHistoryOpen }}>
     {children}
     <SourceImportResults />
     {selection && <TargetModal rows={selection} context={stableContext} onFound={recordFulltext} onCancel={() => setSelection(null)} onSubmitted={batch => { setSelection(null); setSubmittedBatch(batch); setOpened(true); void refresh(); }} />}
@@ -358,21 +363,14 @@ export function SourceImportActions({ source, inline = false }: { source: ChatSo
 
 function SourceImportResults() {
   const ctx = useSourceImports();
+  const { t } = useTranslation();
   const [retrying, setRetrying] = useState(false);
   const retryKey = useRef<Map<string, string>>(new Map());
   const opened = ctx?.opened ?? false;
   const items = ctx?.items ?? [];
-  const observed = useRef(new Set<string>());
-  const submitted = useRef("");
-  useEffect(() => {
-    if (!opened || document.hidden) { observed.current.clear(); return; }
-    if (ctx?.submittedBatch && submitted.current !== ctx.submittedBatch) { observed.current.add(ctx.submittedBatch); submitted.current = ctx.submittedBatch; }
-    for (const row of items) if (["pending", "running", "waiting_retry"].includes(row.status)) observed.current.add(row.batch_id);
-    const finished = [...observed.current].filter(batch => items.some(row => row.batch_id === batch) && !items.some(row => row.batch_id === batch && ["pending", "running", "waiting_retry", "unknown"].includes(row.status)));
-    finished.forEach(batch => observed.current.delete(batch));
-    const failures = items.filter(row => finished.includes(row.batch_id) && row.status === "failed");
-    if (failures.length) Modal.error({ title: tr("importFailed"), content: <ul>{failures.map(row => <li key={row.item_id}>{row.title}：{row.error_message || tr("processingFailed")}</li>)}</ul> });
-  }, [opened, items, ctx?.submittedBatch]);
+  const canRetry = items.some(row => row.retryable);
+  const showRetry = canRetry || items.some(row => row.status === "failed" || row.processing_status === "failed");
+  const close = () => ctx?.setOpened(false);
 
   const retry = async (rows: api.ImportItem[]) => {
     if (retrying) return;
@@ -390,9 +388,28 @@ function SourceImportResults() {
       await ctx?.refresh();
     } finally { setRetrying(false); }
   };
-  return <Modal title={tr("paperHistory")} open={opened} onCancel={() => ctx?.setOpened(false)} footer={null} width={480} destroyOnHidden>
-    {ctx?.queryError && <Alert type="warning" message={tr("keepLastStatus")} action={<Button size="small" onClick={() => void ctx.refresh()}>{tr("retryQuery")}</Button>} />}
-    <ImportHistoryCards imports={items} onRetry={rows => void retry(rows)} retrying={retrying} onRefreshImports={ctx?.refresh} />
-    {items.some(row => row.retryable) && <Space className="import-history-footer"><Button loading={retrying} onClick={() => void retry(items)}>{tr("retryFailedOnly")}</Button><Button onClick={() => Modal.error({ title: tr("failureDetails"), content: <ul>{items.filter(row => row.status === "failed" || row.processing_status === "failed").map(row => <li key={row.item_id}>{row.title}：{row.error_message || tr("processingFailed")}</li>)}</ul> })}>{tr("failureDetails")}</Button></Space>}
-  </Modal>;
+  return (
+    <Modal
+      title={tr("paperHistory")}
+      open={opened}
+      onCancel={close}
+      width={560}
+      centered
+      destroyOnHidden
+      classNames={{ body: "import-history-scroll" }}
+      footer={
+        <Space wrap>
+          <Button onClick={close}>{t("common.close")}</Button>
+          {showRetry && (
+            <Button type="primary" loading={retrying} disabled={!canRetry} onClick={() => void retry(items)}>
+              {tr("retryFailedOnly")}
+            </Button>
+          )}
+        </Space>
+      }
+    >
+      {ctx?.queryError && <Alert type="warning" message={tr("keepLastStatus")} action={<Button size="small" onClick={() => void ctx.refresh()}>{tr("retryQuery")}</Button>} />}
+      <ImportHistoryCards imports={items} initialOpenBatchId={ctx?.submittedBatch} onRetry={rows => void retry(rows)} retrying={retrying} onRefreshImports={ctx?.refresh} />
+    </Modal>
+  );
 }
