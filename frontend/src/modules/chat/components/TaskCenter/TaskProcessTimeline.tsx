@@ -51,9 +51,11 @@ export function TaskProcessTimeline({ steps, legacyPlan = [], state, progress }:
       {sorted.length === 0 ? (legacyPlan.length === 0 && <p className="ordinary-process-empty">{t("taskCenter.ordinaryNoProcessSteps")}</p>) : (
         <ol className="ordinary-thinking-list">
           {sorted.map(step => {
-            const status = workflowTaskDisplayStatus(step.status, state === 'paused' ? 'paused' : undefined);
+            // A stopped task may retain the last running progress event.
+            const status = state === 'paused' && ['running', 'pending'].includes(step.status)
+              ? 'paused' : workflowTaskDisplayStatus(step.status, state === 'paused' ? 'paused' : undefined);
             return <li className={`ordinary-thinking-item is-${statusClass(status)}`} key={step.step_id}
-              aria-current={step.status === "running" ? "step" : undefined}>
+              aria-current={status === "running" ? "step" : undefined}>
               <span className="ordinary-thinking-marker" aria-hidden="true">
                 {status === "succeeded" ? <CheckOutlined /> : status === "paused" ? <PauseCircleFilled /> : status === "running"
                   ? <span className="ordinary-task-spinner" /> : status === "failed"
