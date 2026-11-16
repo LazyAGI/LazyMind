@@ -51,9 +51,13 @@ func nodePlatform() string {
 }
 
 func managedNodePath() (string, error) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", err
+	home := strings.TrimSpace(os.Getenv("LAZYMIND_HOST_HOME"))
+	if home == "" {
+		var err error
+		home, err = os.UserHomeDir()
+		if err != nil {
+			return "", err
+		}
 	}
 	name := "node"
 	if runtime.GOOS == "windows" {
@@ -74,6 +78,10 @@ func detectNode(ctx context.Context) NodeDependencyStatus {
 	// LAZYMIND_NODE_EXECUTABLE may be Electron for PPT export. The connector
 	// needs a standalone Node.js executable and cannot use that desktop runtime.
 	candidates := []string{"node", managed}
+	// Older releases installed under the isolated service HOME.
+	if home, err := os.UserHomeDir(); err == nil {
+		candidates = append(candidates, filepath.Join(home, ".lazymind", "deps", "node", "bin", filepath.Base(managed)))
+	}
 	// Match the connector's explicit override: installation cannot fix an invalid override.
 	if override := strings.TrimSpace(os.Getenv("LAZYMIND_NODE_BIN")); override != "" {
 		candidates = []string{override}
