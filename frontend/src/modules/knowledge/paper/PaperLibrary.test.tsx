@@ -195,6 +195,22 @@ describe('paper library behavior', () => {
         fireEvent.click(detail.getByRole('button', { name: '关闭' }));
         expect(screen.getByRole('combobox', { name: 'Folder paper 的阅读状态' })).toBeEnabled();
     });
+    it('marks an unread paper as reading when its detail opens and keeps a read paper unchanged', async () => {
+        vi.mocked(loadPersistedPaperLibrary).mockImplementation(async id => snapshot(readLibrary(id), false));
+        await renderLibrary();
+        fireEvent.click(screen.getByRole('button', { name: 'Folder paper' }));
+        await waitFor(() => expect(readLibrary(datasetId).papers[0].status).toBe('reading'));
+        expect(patchLibraryPaper).toHaveBeenCalledWith(datasetId, expect.objectContaining({ id: 'a' }), { status: 'reading', status_if_unread: true });
+        const detail = within(await screen.findByRole('dialog', { name: '文献详情' }));
+        fireEvent.mouseDown(detail.getByRole('combobox', { name: '论文阅读状态' }));
+        fireEvent.click(await screen.findByText('已读', { selector: '.ant-select-dropdown:not(.ant-select-dropdown-hidden) .ant-select-item-option-content' }));
+        await waitFor(() => expect(readLibrary(datasetId).papers[0].status).toBe('read'));
+        fireEvent.click(detail.getByRole('button', { name: '关闭' }));
+        vi.mocked(patchLibraryPaper).mockClear();
+        fireEvent.click(screen.getByRole('button', { name: 'Folder paper' }));
+        expect(patchLibraryPaper).not.toHaveBeenCalled();
+        expect(readLibrary(datasetId).papers[0].status).toBe('read');
+    });
     it('applies batch successes immediately and retries only the failed papers', async () => {
         const original = vi.mocked(patchLibraryPaper).getMockImplementation()!;
         let attempts = 0;
@@ -918,7 +934,11 @@ describe('paper library behavior', () => {
     });
     it("protects an edit draft while saving and restores editing after a failed write", async () => {
         let fail!: (error: Error) => void;
-        vi.mocked(patchLibraryPaper).mockImplementationOnce(() => new Promise((_, reject) => { fail = reject; }));
+        const patch = vi.mocked(patchLibraryPaper).getMockImplementation()!;
+        vi.mocked(patchLibraryPaper).mockImplementation(async (...args) => {
+            if (args[2].metadata && !fail) return new Promise((_, reject) => { fail = reject; });
+            return patch(...args);
+        });
         await renderLibrary();
         const notificationButton = libraryTools().getByRole("button", { name: /^通知：/ });
         fireEvent.mouseEnter(screen.getByRole("button", { name: "Folder paper 的更多操作" }));
@@ -932,7 +952,7 @@ describe('paper library behavior', () => {
         const closeButton = details.getByRole("button", { name: "关闭" });
         fireEvent.change(titleInput, { target: { value: "Keep this draft" } });
         fireEvent.click(saveButton);
-        await waitFor(() => expect(patchLibraryPaper).toHaveBeenCalledOnce());
+        await waitFor(() => expect(vi.mocked(patchLibraryPaper).mock.calls.filter(([, , patch]) => patch.metadata)).toHaveLength(1));
         for (const input of details.getAllByRole("textbox"))
             expect(input).toBeDisabled();
         expect(closeButton).toBeDisabled();
@@ -1091,6 +1111,7 @@ it('opens the PDF using app navigation instead of document navigation', async ()
   await renderLibrary({ onOpenAttachment: open });
   fireEvent.click(screen.getByRole('link', { name: 'Folder paper' }));
   expect(open).toHaveBeenCalledOnce();
+  await waitFor(() => expect(readLibrary(datasetId).papers[0].status).toBe('reading'));
 });
 
 it('keeps the cached library visible while revalidating after returning from a reader', async () => {

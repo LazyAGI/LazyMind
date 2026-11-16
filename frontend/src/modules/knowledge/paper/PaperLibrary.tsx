@@ -119,8 +119,10 @@ function PaperLibraryContent({ userId, datasetId, onUploadPdf, title = "论文�
     const [detailEditing, setDetailEditing] = useState(false);
     const [detailPresentation, setDetailPresentation] = useState<'drawer' | 'page'>('drawer');
     const submittingParses = useRef(new Set<string>());
+    const openingPapers = useMemo(() => new Set<string>(), [datasetScope]);
     const [pendingParses, setPendingParses] = useState(new Set<string>());
     const openDetail = (id: string, tab: PaperDetailTab = "overview", presentation: 'drawer' | 'page' = 'drawer') => {
+        void markPaperOpened(id);
         setActiveTool(null); setDetailEditing(false); setDetailTab(tab); setDetailPaperId(id); setDetailPresentation(presentation);
         if (presentation === 'page') { setFolderId(dataRef.current.papers.find(paper => paper.id === id)?.folderId || null); setLibraryView('directory'); }
     };
@@ -338,6 +340,27 @@ function PaperLibraryContent({ userId, datasetId, onUploadPdf, title = "论文�
             await mutate(() => patchLibraryPaper(datasetId, current, changes), { id: `paper-status:${id}`, title: `《${current.metadata.title}》阅读状态保存失败`, action: { label: "查看论文", onClick: () => openDetail(id) } }, true);
         }
         catch { /* Preserve the server state and visible error. */ }
+    };
+    const markPaperOpened = async (id: string) => {
+        const paper = dataRef.current.papers.find(item => item.id === id);
+        if (paper?.status !== 'unread' || !isCurrentScope() || openingPapers.has(id)) return;
+        openingPapers.add(id);
+        const generation = syncGeneration.current;
+        try {
+            const changes = await patchLibraryPaper(datasetId, paper, { status: 'reading', status_if_unread: true });
+            if (!isCurrentScope()) return;
+            if (generation !== syncGeneration.current || busyRef.current || reloadPromiseRef.current) {
+                void (reloadPromiseRef.current || Promise.resolve()).then(() => { void reload(); });
+                return;
+            }
+            const status = changes.data.papers.find(item => item.id === id)?.status;
+            if (status) applySnapshot({ ...dataRef.current, papers: dataRef.current.papers.map(item => item.id === id ? { ...item, status } : item) });
+            resolve(`paper-status:${id}`);
+        } catch (error) {
+            if (isCurrentScope()) notify({ id: `paper-status:${id}`, title: `《${paper.metadata.title}》阅读状态保存失败`, message: error instanceof Error ? error.message : '保存失败，请重试' });
+        } finally {
+            openingPapers.delete(id);
+        }
     };
     const updatePaperTags = (paper: PaperRecord, change: PaperTagChange) => mutate(() => {
         const current = dataRef.current.papers.find(item => item.id === paper.id);
@@ -746,7 +769,7 @@ function PaperLibraryContent({ userId, datasetId, onUploadPdf, title = "论文�
               <td className="paper-library-main">
                   <div className="paper-library-title-line"><h2 className="paper-library-title">{(() => {
                     const primary = materialByPaper.get(item.id)?.pdfs.find(attachment => attachment.isPrimary) || materialByPaper.get(item.id)?.pdfs[0];
-                    return onOpenAttachment && primary?.contentRef ? <a className="paper-library-title-button" href={`/lib/knowledge/knowledge/${encodeURIComponent(datasetId)}/${encodeURIComponent(primary.contentRef)}`} onClick={event => { if (!event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey) { event.preventDefault(); onOpenAttachment(primary.contentRef!); } }}>{item.metadata.title}</a> : <button type="button" className="paper-library-title-button" onClick={() => openDetail(item.id)}>{item.metadata.title}</button>;
+                    return onOpenAttachment && primary?.contentRef ? <a className="paper-library-title-button" href={`/lib/knowledge/knowledge/${encodeURIComponent(datasetId)}/${encodeURIComponent(primary.contentRef)}`} onClick={event => { void markPaperOpened(item.id); if (!event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey) { event.preventDefault(); onOpenAttachment(primary.contentRef!); } }}>{item.metadata.title}</a> : <button type="button" className="paper-library-title-button" onClick={() => openDetail(item.id)}>{item.metadata.title}</button>;
                   })()}</h2>
                     {renderImportance(item)}
 

@@ -85,6 +85,27 @@ func TestPersonalReadingStatusPermissionsAndIsolation(t *testing.T) {
 	if current := read("owner"); current.Status != "unread" || current.Important {
 		t.Fatal("personal fields leaked", current)
 	}
+	// A stale client opening the paper must not overwrite a manual read mark.
+	openPaper := map[string]any{"status": "reading", "status_if_unread": true}
+	if w := libraryRequest(t, "PATCH", "/library/papers/a", "papers", "reader", openPaper); w.Code != 200 {
+		t.Fatal(w.Code, w.Body.String())
+	}
+	if current := read("reader"); current.Status != "read" || !current.Important {
+		t.Fatal("opening overwrote a manual status", current)
+	}
+	for _, user := range []string{"reader", "owner"} {
+		if user == "reader" {
+			if w := libraryRequest(t, "PATCH", "/library/papers/a", "papers", user, map[string]any{"status": "unread"}); w.Code != 200 {
+				t.Fatal(w.Code, w.Body.String())
+			}
+		}
+		if w := libraryRequest(t, "PATCH", "/library/papers/a", "papers", user, openPaper); w.Code != 200 {
+			t.Fatal(w.Code, w.Body.String())
+		}
+		if current := read(user); current.Status != "reading" || current.Revision != paper.Revision {
+			t.Fatal("opening did not advance unread state", current)
+		}
+	}
 	// The same scholarly work in another collection has separate personal state.
 	importDraft(t, "other", "other-seed", libraryDraft("b", "A", "10.1234/a"))
 	if current := readLibrary(t, "other").Data.Papers[0]; current.Status != "unread" || current.Important {

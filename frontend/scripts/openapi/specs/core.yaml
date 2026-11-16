@@ -20957,6 +20957,9 @@ paths:
                                         - reading
                                         - read
                                     type: string
+                                status_if_unread:
+                                    description: Set reading status only if the current status is unread. Requires status=reading.
+                                    type: boolean
                                 tags:
                                     items:
                                         type: string

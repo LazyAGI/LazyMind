@@ -1555,6 +1555,10 @@ export interface ApiCoreAcademicLibraryPapersLibraryPaperIdPatchRequest {
     'metadata'?: PaperLibraryMetadata;
     'revision'?: number;
     'status'?: ApiCoreAcademicLibraryPapersLibraryPaperIdPatchRequestStatusEnum;
+    /**
+     * Set reading status only if the current status is unread. Requires status=reading.
+     */
+    'status_if_unread'?: boolean;
     'tags'?: Array<string>;
 }
 
