@@ -3513,6 +3513,10 @@ const enUS = {
       reason: { approval_capacity: "Too many workspace requests are waiting. Finish an existing request before trying again.", operation_uncertain: "The result is unknown. Check the file before trying again.", execution_inactive: "This execution has ended or is no longer current.", unsupported_file: "This file type cannot be read by this tool.", search_limit: "The search reached its limit. Narrow the folder or search pattern.", mode_forbidden: "Local workspaces are unavailable in this mode", selection_forbidden: "Workspace selection is unavailable", selection_expired: "The workspace selection expired. Select the folder again.", invalid_selection: "The workspace selection is invalid", workspace_not_found: "The workspace was not found", binding_conflict: "The state changed. Try again.", binding_locked: "This Work folder is locked", revoked: "Access was revoked", path_unavailable: "The folder is unavailable", path_invalid: "The folder path is invalid", unknown: "An unknown error occurred" },
     },
     publication: {
+      warnings: {
+        WECHAT_IMAGES_COMPRESSED: 'Images were compressed to fit WeChat’s upload limit. Local originals are preserved.',
+        WECHAT_HTML_TRUNCATED: 'The article exceeded WeChat’s length limit and its ending was truncated. The complete local article is preserved.',
+      },
       wechatTemplate: 'WeChat article template',
       wechatTemplatePreview: 'Preview template style',
       wechatTemplateDescriptions: {
@@ -3529,9 +3533,8 @@ const enUS = {
       notePathPlaceholder: 'For example: Articles/Note.md',
       githubDestination: 'GitHub repository, branch or directory',
       targetErrors: {
-        WECHAT_BODY_IMAGE_TOO_LARGE: 'An article image exceeds 1 MB. Compress the image and publish again.',
         WECHAT_IMAGE_FORMAT_UNSUPPORTED: 'WeChat does not support this image format. Convert it to JPG or PNG and publish again.',
-        WECHAT_HTML_TOO_LARGE: 'The article HTML exceeds WeChat’s size limit. Reduce the content or formatting and publish again.',
+        WECHAT_WRITE_REJECTED: 'WeChat rejected this write. Check the account permissions and content requirements.',
         PUBLICATION_TARGET_EXISTS: 'A document already exists at this destination. Choose another destination.', PUBLICATION_PERMISSION_REQUIRED: 'This account lacks write access to the target repository. Grant access and retry.',
         OBSIDIAN_NOT_CONFIGURED: 'Connect an accessible Obsidian vault first.',
         OBSIDIAN_VAULT_REQUIRED: 'Select an unambiguous destination vault.',

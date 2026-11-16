@@ -58,6 +58,7 @@ func publicationStatus(op *DocumentPublicationOperation, now time.Time) Document
 		var receipt DocumentPublicationReceipt
 		if json.Unmarshal(op.ReceiptJSON, &receipt) == nil {
 			target = receipt.TargetDocument
+			result.Warnings = receipt.Warnings
 		}
 	}
 	if op.PublicationID != "" {

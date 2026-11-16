@@ -16,6 +16,12 @@ export function startWriterImageDrag(
   let frame = 0;
   let offsetX = 0, offsetY = 0;
   let finished = false;
+  let lastFrame: number | undefined;
+  const scrollParents: HTMLElement[] = [];
+  for (let element = image.parentElement; element; element = element.parentElement) {
+    const style = window.getComputedStyle(element);
+    if (/auto|scroll/.test(`${style.overflowX} ${style.overflowY}`)) scrollParents.push(element);
+  }
 
   const preventNativeDrag = (nativeEvent: DragEvent) => nativeEvent.preventDefault();
   const suppressClick = (click: MouseEvent) => { click.preventDefault(); click.stopPropagation(); };
@@ -34,28 +40,34 @@ export function startWriterImageDrag(
     preview?.remove(); indicator?.remove();
   };
 
-  const update = () => {
+  const update = (time?: number) => {
     if (!image.isConnected || !root.isConnected) { cancel(); return; }
+    const elapsed = time !== undefined && lastFrame !== undefined ? Math.min(32, Math.max(0, time - lastFrame)) : 16;
+    lastFrame = time;
     preview!.style.transform = `translate3d(${x - offsetX}px, ${y - offsetY}px, 0)`;
-    const hovered = document.elementFromPoint(x, y);
-    if (hovered && root.contains(hovered)) {
-      let scrolledX = false, scrolledY = false;
-      for (let element: Element | null = hovered; element; element = element.parentElement) {
-        if (!(element instanceof HTMLElement)) continue;
-        const rect = element.getBoundingClientRect(), style = window.getComputedStyle(element);
-        const speed = (point: number, start: number, end: number) =>
-          point < start + 36 ? -12 * Math.min(1, (start + 36 - point) / 36)
-            : point > end - 36 ? 12 * Math.min(1, (point - end + 36) / 36) : 0;
-        if (!scrolledX && /auto|scroll/.test(style.overflowX) && element.scrollWidth > element.clientWidth) {
-          const previous = element.scrollLeft;
-          element.scrollLeft += speed(x, rect.left, rect.right);
-          scrolledX = element.scrollLeft !== previous;
-        }
-        if (!scrolledY && /auto|scroll/.test(style.overflowY) && element.scrollHeight > element.clientHeight) {
-          const previous = element.scrollTop;
-          element.scrollTop += speed(y, rect.top, rect.bottom);
-          scrolledY = element.scrollTop !== previous;
-        }
+    let scrolledX = false, scrolledY = false;
+    for (let index = 0; index < scrollParents.length; index++) {
+      const element = scrollParents[index], style = window.getComputedStyle(element);
+      const rects = scrollParents.slice(index).map(parent => parent.getBoundingClientRect());
+      const left = Math.max(0, ...rects.map(rect => rect.left));
+      const right = Math.min(window.innerWidth, ...rects.map(rect => rect.right));
+      const top = Math.max(0, ...rects.map(rect => rect.top));
+      const bottom = Math.min(window.innerHeight, ...rects.map(rect => rect.bottom));
+      if (right <= left || bottom <= top) continue;
+      const speed = (point: number, start: number, end: number, range: number, maxSpeed: number) => {
+        const edge = Math.min(range, (end - start) / 2);
+        return point < start + edge ? -maxSpeed * elapsed * Math.min(1, (start + edge - point) / edge)
+          : point > end - edge ? maxSpeed * elapsed * Math.min(1, (point - end + edge) / edge) : 0;
+      };
+      if (!scrolledX && y >= top - 64 && y <= bottom + 64 && /auto|scroll/.test(style.overflowX) && element.scrollWidth > element.clientWidth) {
+        const previous = element.scrollLeft;
+        element.scrollLeft += speed(x, left, right, 64, .72);
+        scrolledX = element.scrollLeft !== previous;
+      }
+      if (!scrolledY && x >= left - 64 && x <= right + 64 && /auto|scroll/.test(style.overflowY) && element.scrollHeight > element.clientHeight) {
+        const previous = element.scrollTop;
+        element.scrollTop += speed(y, top, bottom, 96, 1.2);
+        scrolledY = element.scrollTop !== previous;
       }
     }
     const target = resolveTarget(x, y);

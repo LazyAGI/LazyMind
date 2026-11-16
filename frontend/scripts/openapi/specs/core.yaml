@@ -7676,6 +7676,10 @@ components:
                 updated_at:
                     format: date-time
                     type: string
+                warnings:
+                    items:
+                        type: string
+                    type: array
             required:
                 - actions
                 - item_index
@@ -7798,6 +7802,10 @@ components:
                 status:
                     type: string
                 target_document: {}
+                warnings:
+                    items:
+                        type: string
+                    type: array
             required:
                 - artifact_id
                 - artifact_saved

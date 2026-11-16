@@ -248,6 +248,7 @@ class SyncDocumentResult(_StrictModel):
     provider: str | None = None
     write_result: dict[str, Any] | None = None
     target_document: dict[str, Any] | None = None
+    warnings: list[str] = Field(default_factory=list)
 
 
 class ConvertDocumentResult(_StrictModel):

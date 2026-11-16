@@ -291,6 +291,9 @@ export function DocumentPublicationDialog({ artifactId, sourceSignature, provide
         </div>
         {item.provider === 'wechat' && status === 'succeeded' && !item.operation?.target_url && <p className='document-publication-result-note'>{t('chat.writerIR.wechatDraftLinkUnavailable')}</p>}
         {item.operation?.error_code && <p className='document-publication-error'>{documentPublicationErrorMessage(item.operation.error_code, item.provider)}</p>}
+        {item.operation?.warnings?.map(warning => <p className='document-publication-warning' key={warning}>
+          {t(`chat.publication.warnings.${warning}`, { defaultValue: warning })}
+        </p>)}
         {status === 'outcome_unknown' && <p className='document-publication-error'>{t('chat.publication.unknownHelp')}</p>}
       </li>;
       })}

@@ -47,6 +47,10 @@
   align-items: flex-start;
 }
 
+.writer-image-dragging .writer-image-group[data-layout='sliding'] > .writer-image-group-images {
+  scroll-snap-type: none;
+}
+
 .writer-image-group[data-layout='sliding'] > .writer-image-group-images > * {
   flex: 0 0 auto;
   width: max-content;

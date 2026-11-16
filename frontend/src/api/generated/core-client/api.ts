@@ -5149,6 +5149,7 @@ export interface DocumentPublicationStatus {
     'status': string;
     'target_url'?: string;
     'updated_at': string;
+    'warnings'?: Array<string>;
 }
 export interface DocumentPublicationTargetInput {
     'connection_id'?: string;
@@ -5212,6 +5213,7 @@ export interface DocumentPublishResult {
     'revision': number;
     'status': string;
     'target_document'?: any;
+    'warnings'?: Array<string>;
 }
 export interface DocumentRenderContext {
     'code_fences': Array<DocumentCodeFenceDisplay>;
