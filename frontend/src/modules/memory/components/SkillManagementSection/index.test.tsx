@@ -135,7 +135,11 @@ describe("SkillManagementSection organize task recovery", () => {
     expect(screen.queryByText("organize-approval")).toBeNull();
     fireEvent.click(screen.getByRole("button", {name: "admin.memorySkillDraftReviewTitle"}));
     expect(screen.getByText("organize-approval")).toBeVisible();
-    act(() => viewMocks.approval.onExpandedChange(false));
+    expect(screen.queryByText("draft-review")).toBeNull();
+    fireEvent.click(screen.getByText("admin.memorySkillDraftReviewTitle"));
+    expect(screen.getByText("draft-review")).toBeVisible();
+    expect(screen.queryByText("organize-approval")).toBeNull();
+    act(() => viewMocks.review.onClose());
     expect(screen.queryByText("organize-approval")).toBeNull();
     expect(screen.getByTestId("pending-count")).toHaveTextContent("2");
   });
@@ -353,9 +357,10 @@ describe("SkillManagementSection organize task recovery", () => {
       expect(screen.getByTestId("organize-disabled")).toHaveTextContent("false");
       expect(screen.queryByText("organize-approval")).toBeNull();
     });
+    act(() => viewMocks.approval.onPendingCountChange(2));
     fireEvent.click(screen.getByRole("button", { name: "admin.memorySkillDraftReviewTitle" }));
     expect(screen.getByText("organize-approval")).toBeVisible();
-    expect(screen.getByText("draft-review")).toBeVisible();
+    expect(screen.queryByText("draft-review")).toBeNull();
     expect(viewMocks.approval.hiddenRequestId).toBe("");
     expect(refreshSkillAssets).toHaveBeenCalledWith({ page: 1 });
   });
