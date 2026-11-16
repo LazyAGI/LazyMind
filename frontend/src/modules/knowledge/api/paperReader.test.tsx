@@ -65,3 +65,15 @@ it('clears saved browser explanations on logout',async()=>{
  await waitFor(()=>expect(second.result.current.data).toEqual(old));
  expect(mocks.post).toHaveBeenCalledTimes(2);
 });
+
+it.each([{code:'ECONNABORTED'},{code:'ETIMEDOUT'},{response:{status:504}},{response:{status:502,data:{data:{error_code:'request_timeout'}}}}])('reports a reading timeout and retains the previous result: %j',async failure=>{
+ mocks.post.mockResolvedValueOnce({data:{data:old}});
+ const {result}=renderHook(()=>useResource());
+ await waitFor(()=>expect(result.current.status).toBe('ready'));
+ mocks.post.mockRejectedValueOnce(failure);
+ await act(async()=>{await result.current.load(true);});
+ expect(result.current.status).toBe('error');
+ expect(result.current.error).toMatch(/2 minutes/);
+ expect(result.current.error).not.toMatch(/configuration/);
+ expect(result.current.data).toEqual(old);
+});

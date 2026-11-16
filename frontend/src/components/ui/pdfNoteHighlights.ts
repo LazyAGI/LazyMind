@@ -10,7 +10,7 @@ export const PDF_NOTE_COLORS = [
 ] as const;
 
 export type PdfNoteColor = typeof PDF_NOTE_COLORS[number]['key'];
-export type PdfNoteHighlight = {id:string;page:number;color:PdfNoteColor;rects:Array<[number,number,number,number]>};
+export type PdfNoteHighlight = {id:string;page:number;color:PdfNoteColor;rects:Array<[number,number,number,number]>;pdfRects?:Array<[number,number,number,number]>};
 export type PdfHighlightRect = [number,number,number,number];
 
 // A single SVG path paints overlapping subpaths once. Separate translucent
@@ -61,4 +61,18 @@ export function writePdfNoteHighlights(key:string|undefined,highlights:PdfNoteHi
 export function pdfNoteHighlightBackground(color:PdfNoteColor) {
   const swatch=PDF_NOTE_COLORS.find(item=>item.key===color)?.swatch || PDF_NOTE_COLORS[2].swatch;
   return color==='rainbow' ? 'linear-gradient(90deg,#ed433766,#ecb52e66,#37b85a66,#2b88df66,#892dbe66)' : `color-mix(in srgb, ${swatch} 32%, transparent)`;
+}
+
+export type PdfHighlightViewport = {width:number;height:number;convertToViewportPoint:(x:number,y:number)=>number[]};
+/** Zotero rectangles are PDF user-space coordinates, including the crop/rotation transform. */
+export function resolvePdfNoteHighlight(highlight:PdfNoteHighlight,viewport?:PdfHighlightViewport):PdfNoteHighlight {
+ if(!Array.isArray(highlight.pdfRects)||!highlight.pdfRects.length||!viewport||!viewport.convertToViewportPoint)return highlight;
+ const rects=highlight.pdfRects.flatMap(rect=>{
+  if(!Array.isArray(rect)||rect.length!==4||!rect.every(value=>typeof value==='number'&&Number.isFinite(value)))return [];
+  const points=[[rect[0],rect[1]],[rect[2],rect[1]],[rect[2],rect[3]],[rect[0],rect[3]]].map(([x,y])=>viewport.convertToViewportPoint(x,y));
+  const xs=points.map(point=>point[0]/viewport.width),ys=points.map(point=>point[1]/viewport.height);
+  const result:PdfHighlightRect=[Math.max(0,Math.min(...xs)),Math.max(0,Math.min(...ys)),Math.min(1,Math.max(...xs)),Math.min(1,Math.max(...ys))];
+  return validRect(result)?[result]:[];
+ });
+ return {...highlight,rects};
 }

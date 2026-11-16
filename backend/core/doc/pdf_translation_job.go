@@ -589,19 +589,14 @@ func handlePDFTranslationJob(ctx context.Context, job asyncjob.Job, reporter asy
 		}
 		return result, nil
 	}
-	layoutServiceURL := strings.Replace(strings.TrimSpace(os.Getenv("LAZYMIND_OFFICE_CONVERT_URL")),
-		"/v1/office/to-pdf", "/v1/pdf/extract-translation-layout", 1)
-	if layoutServiceURL == "" {
-		return fail(errors.New("PDF translation layout extractor is not configured"))
-	}
 	var layoutResult struct {
 		OutputPath string `json:"output_path"`
 		BlockCount int    `json:"block_count"`
 	}
-	if err := common.ApiPost(ctx, layoutServiceURL, map[string]string{
+	if err := callPDFTranslationOperation(ctx, "extract-translation-layout", map[string]string{
 		"source_path": payload.SourcePath,
 		"output_path": payload.LayoutPath,
-	}, nil, &layoutResult, 5*time.Minute); err != nil {
+	}, &layoutResult, 5*time.Minute); err != nil {
 		return fail(fmt.Errorf("extract PDF translation blocks: %w", err))
 	}
 	if layoutResult.BlockCount == 0 {
@@ -663,10 +658,6 @@ func handlePDFTranslationJob(ctx context.Context, job asyncjob.Job, reporter asy
 		record.Stage, record.Progress, record.UpdatedAt = "RENDERING", 72, time.Now().UTC().Format(time.RFC3339)
 		return nil
 	})
-	serviceURL := strings.Replace(strings.TrimSpace(os.Getenv("LAZYMIND_OFFICE_CONVERT_URL")), "/v1/office/to-pdf", "/v1/pdf/render-translation", 1)
-	if serviceURL == "" {
-		return fail(errors.New("PDF translation renderer is not configured"))
-	}
 	var renderResult struct {
 		OutputPath             string                     `json:"output_path"`
 		WarningCount           int                        `json:"warning_count"`
@@ -676,8 +667,8 @@ func handlePDFTranslationJob(ctx context.Context, job asyncjob.Job, reporter asy
 		RenderedBlockCount     int                        `json:"rendered_block_count"`
 		RequestedBlockCount    int                        `json:"requested_block_count"`
 	}
-	if err := common.ApiPost(ctx, serviceURL, map[string]string{"source_path": payload.SourcePath, "layout_path": payload.LayoutPath,
-		"translations_path": translationPath, "output_path": outputPath, "target_language": payload.TargetLanguage}, nil, &renderResult, 15*time.Minute); err != nil {
+	if err := callPDFTranslationOperation(ctx, "render-translation", map[string]string{"source_path": payload.SourcePath, "layout_path": payload.LayoutPath,
+		"translations_path": translationPath, "output_path": outputPath, "target_language": payload.TargetLanguage}, &renderResult, 15*time.Minute); err != nil {
 		return fail(err)
 	}
 	if renderResult.RequestedBlockCount == 0 || renderResult.RenderedBlockCount != renderResult.RequestedBlockCount {

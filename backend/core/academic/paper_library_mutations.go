@@ -445,6 +445,34 @@ func AddLibraryNote(w http.ResponseWriter, r *http.Request) {
 	replyLibraryNoteChanges(w, r, dataset, id, err)
 }
 
+// UpdateLibraryNote changes only the note body; its original PDF anchor remains immutable.
+func UpdateLibraryNote(w http.ResponseWriter, r *http.Request) {
+	dataset, _, ok := libraryAccess(w, r, true)
+	if !ok {
+		return
+	}
+	paperID, noteID := mux.Vars(r)["library_paper_id"], mux.Vars(r)["note_id"]
+	var input struct {
+		Content string `json:"content"`
+	}
+	if !paperlibrary.ValidID(paperID) || !paperlibrary.ValidID(noteID) || !parseJSON(r, &input) || strings.TrimSpace(input.Content) == "" || len(input.Content) > 2<<20 {
+		replyError(w, http.StatusBadRequest, "INVALID_REQUEST", "笔记标识无效、内容为空或过长")
+		return
+	}
+	err := store.DB().WithContext(r.Context()).Transaction(func(tx *gorm.DB) error {
+		var entry orm.PaperLibraryEntry
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("dataset_id=? AND id=? AND removed_at IS NULL", dataset, paperID).Take(&entry).Error; err != nil {
+			return err
+		}
+		var note orm.PaperLibraryNote
+		if err := tx.Where("dataset_id=? AND paper_id=? AND id=?", dataset, paperID, noteID).Take(&note).Error; err != nil {
+			return err
+		}
+		return tx.Model(&note).Updates(map[string]any{"content": input.Content, "updated_at": time.Now().UTC()}).Error
+	})
+	replyLibraryNoteChanges(w, r, dataset, paperID, err)
+}
+
 func DeleteLibraryNote(w http.ResponseWriter, r *http.Request) {
 	dataset, _, ok := libraryAccess(w, r, true)
 	if !ok {

@@ -3,7 +3,7 @@ import { useEffect, useRef, useState, type MutableRefObject, type Dispatch, type
 import { Alert, Button, Input, Modal, Radio, Tooltip, Upload, message, type RadioChangeEvent } from 'antd';
 import { InfoCircleOutlined, UploadOutlined } from '@ant-design/icons';
 import { v4 as uuidv4 } from 'uuid';
-import { assignFolders, classifyIdentifier, parseAuthorInput, parseBibTeX, parseCSV, parseRIS, planImport, paperSourceVersionLabels, type LibraryView, type PaperLibraryData, type PaperRecord } from './model';
+import { assignFolders, classifyIdentifier, parseAuthorInput, parseBibTeX, parseCSV, parseRIS, planImport, paperSourceVersionLabels, type LibraryView, type PaperLibraryData, type PaperRecord, type PaperMetadata } from './model';
 import { mergeLibraryChanges, previewLibraryPapers, confirmLibraryPdf, importLibraryPapers, type LibraryChanges } from './store';
 import { previewPaperLink, previewPaperPDF, importPaperLink, isImportPreviewExpired, type PaperUploadContext, type ImportPreviewItem, type ImportOperationItem } from '../api/academicReferences';
 import { paperFromPdf } from './pdfMeta';
@@ -69,6 +69,7 @@ export function usePaperImports(options: ImportOptions) {
         documentId?: string;
         file?: File;
         metadata: PdfPaper;
+        draft?: PaperRecord;
         contentHash: string;
     } | null>(null);
     const [pdfConfirmed, setPdfConfirmed] = useState(false);
@@ -93,17 +94,25 @@ export function usePaperImports(options: ImportOptions) {
     const pdfConflict = !!pendingPdf && !!pdfTarget && pdfIdentityMatch(pdfTarget, pendingPdf.metadata) === 'conflict';
     const pdfRequiresConfirmation = !!pendingPdf && !!pdfTarget && pdfIdentityMatch(pdfTarget, pendingPdf.metadata) !== 'matched';
     const samePdfVersion = !!pendingPdf?.metadata.arxivVersion && !!pdfTarget && dataState.attachments.some(attachment => dataState.papers.find(paper => paper.id === pdfTarget.id)?.attachmentIds.includes(attachment.id) && attachment.sourceVersion === pendingPdf.metadata.arxivVersion && attachment.contentHash !== pendingPdf.contentHash);
-    const pdfReviewComplete = !pdfConflict && (!(pdfRequiresConfirmation || samePdfVersion) || pdfConfirmed);
+    const pdfReviewComplete = !!(pending?.attachTo || pending?.fresh[0]?.metadata.title.trim()) && !pdfConflict && (!(pdfRequiresConfirmation || samePdfVersion) || pdfConfirmed);
     const selectPdfTarget = (paperId: string | null) => {
         if (!pendingPdf)
             return;
         const current = dataRef.current;
         const target = current.papers.find(paper => paper.id === paperId);
-        const candidate = { ...pendingPdf.metadata, folderId: libraryView === 'directory' ? folderId : null };
+        const candidate = { ...(pendingPdf.draft || pendingPdf.metadata), folderId: libraryView === 'directory' ? folderId : null };
         setPending({ fresh: target ? [] : [candidate], skipped: [], folders: current.folders, attachTo: target });
         setPendingPdf({ ...pendingPdf });
         setPdfConfirmed(false);
         setImportError(null);
+    };
+    const updatePdfMetadata = (metadata: PaperMetadata) => {
+        if (!pendingPdf || !pending || pending.attachTo || pendingPdf.documentId || busyRef.current) return;
+        const draft = { ...(pendingPdf.draft || pending.fresh[0]), metadata };
+        // Keep recognition evidence immutable so edits cannot bypass identity checks.
+        setPendingPdf({ ...pendingPdf, draft });
+        setPending({ ...pending, fresh: [draft] });
+        setPdfConfirmed(false);
     };
     const showImportError = (error: unknown, fallback: string) => {
         setImportError(error instanceof Error && error.message ? error.message : fallback);
@@ -147,9 +156,14 @@ export function usePaperImports(options: ImportOptions) {
         try {
             const current = dataRef.current;
             if (pendingPdf) {
-                const target = pending.attachTo ? current.papers.find(p => p.id === pending.attachTo!.id) : pending.fresh[0];
-                if (!target)
+                const selected = pending.attachTo ? current.papers.find(p => p.id === pending.attachTo!.id) : pending.fresh[0];
+                if (!selected)
                     throw new Error('目标文献已被移除，请重新核对后导入');
+                // The upload API normalizes its title before comparing the paper
+                // snapshot. Use one normalized draft for upload and confirmation.
+                const target = pending.attachTo ? selected : {
+                    ...selected, metadata: { ...selected.metadata, title: selected.metadata.title.trim() },
+                };
                 if (pending.attachTo && target.revision !== pending.attachTo.revision)
                     throw new Error('目标题录已更新，请重新核对 PDF 关联');
                 if (pdfIdentityMatch(target, pendingPdf.metadata) === 'conflict')
@@ -425,7 +439,7 @@ export function usePaperImports(options: ImportOptions) {
                 setSearching(false);
         }
     };
-    return { linkPhase, linkFailurePhase, pdfWarnings, openImport, resumeAssociation, importMethod, setImportMethod, clearImportResult, importError, selectedFile, pending, importFile, importTargetPaperId, searching, identifier, setIdentifier, importIdentifier, format, setFormat, fileRef, bibliography, setBibliography, importBibliography, pendingArxiv, linkPreview, commitArxiv, pendingPdf, pdfConflict, pdfRequiresConfirmation, samePdfVersion, pdfConfirmed, setPdfConfirmed, selectPdfTarget, setImportTargetPaperId, pdfReviewComplete, commit };
+    return { linkPhase, linkFailurePhase, pdfWarnings, openImport, resumeAssociation, importMethod, setImportMethod, clearImportResult, importError, selectedFile, pending, importFile, importTargetPaperId, searching, identifier, setIdentifier, importIdentifier, format, setFormat, fileRef, bibliography, setBibliography, importBibliography, pendingArxiv, linkPreview, commitArxiv, pendingPdf, pdfConflict, pdfRequiresConfirmation, samePdfVersion, pdfConfirmed, setPdfConfirmed, selectPdfTarget, updatePdfMetadata, setImportTargetPaperId, pdfReviewComplete, commit };
 }
 interface DialogProps {
     imports: ReturnType<typeof usePaperImports>;
@@ -437,7 +451,7 @@ interface DialogProps {
     fileImportDisabled: boolean;
 }
 export function PaperImportDialog({ imports, data, disabled, loading, saving, confirmingImport, fileImportDisabled }: DialogProps) {
-    const { linkPhase, linkFailurePhase, pdfWarnings, importMethod, setImportMethod, clearImportResult, importError, selectedFile, pending, importFile, importTargetPaperId, searching, identifier, setIdentifier, importIdentifier, format, setFormat, fileRef, bibliography, setBibliography, importBibliography, pendingArxiv, linkPreview, commitArxiv, pendingPdf, pdfConflict, pdfRequiresConfirmation, samePdfVersion, pdfConfirmed, setPdfConfirmed, selectPdfTarget, setImportTargetPaperId, pdfReviewComplete, commit } = imports;
+    const { linkPhase, linkFailurePhase, pdfWarnings, importMethod, setImportMethod, clearImportResult, importError, selectedFile, pending, importFile, importTargetPaperId, searching, identifier, setIdentifier, importIdentifier, format, setFormat, fileRef, bibliography, setBibliography, importBibliography, pendingArxiv, linkPreview, commitArxiv, pendingPdf, pdfConflict, pdfRequiresConfirmation, samePdfVersion, pdfConfirmed, setPdfConfirmed, selectPdfTarget, updatePdfMetadata, setImportTargetPaperId, pdfReviewComplete, commit } = imports;
     return <Modal title={importMethod ? importTitles[importMethod] : "导入文献"} open={!!importMethod} onCancel={() => {
             if (!searching && !saving && !confirmingImport) {
                 setImportMethod(null);
@@ -507,7 +521,7 @@ export function PaperImportDialog({ imports, data, disabled, loading, saving, co
               {pending.fresh.map((item) => <p key={item.id}>{item.metadata.title}{item.incomplete && <small>题录待补全</small>}</p>)}
               {pending.skipped.map((item, index) => <p key={`${item.id}-${index}`} className="paper-library-import-skipped">已跳过重复：{item.metadata.title}</p>)}
             </div>
-            {pendingPdf && <PdfImportReview metadata={pendingPdf.metadata} target={pending.attachTo} papers={data.papers} candidateIds={pdfTargetCandidates(data.papers, pendingPdf.metadata).map(paper => paper.id)} file={pendingPdf.file} fixedTarget={!!importTargetPaperId} conflict={pdfConflict} requiresConfirmation={pdfRequiresConfirmation} sameVersion={samePdfVersion} confirmed={pdfConfirmed} disabled={disabled || searching || !!pendingPdf.documentId} onTargetChange={selectPdfTarget} onConfirmedChange={setPdfConfirmed}/>}
+            {pendingPdf && <PdfImportReview metadata={pendingPdf.metadata} draftMetadata={pending.fresh[0]?.metadata} onMetadataChange={updatePdfMetadata} target={pending.attachTo} papers={data.papers} candidateIds={pdfTargetCandidates(data.papers, pendingPdf.metadata).map(paper => paper.id)} file={pendingPdf.file} fixedTarget={!!importTargetPaperId} conflict={pdfConflict} requiresConfirmation={pdfRequiresConfirmation} sameVersion={samePdfVersion} confirmed={pdfConfirmed} disabled={disabled || searching || saving || confirmingImport || !!pendingPdf.documentId} onTargetChange={selectPdfTarget} onConfirmedChange={setPdfConfirmed}/>}
             {pendingPdf && pdfConflict && <Button disabled={disabled || searching} onClick={() => { setImportTargetPaperId(null); selectPdfTarget(null); }}>作为新论文导入</Button>}
             {(!!pending.fresh.length || !!pending.skipped.length || pending.attachTo) && <div className="paper-library-modal-actions"><Button type="primary" className={!pendingPdf && !confirmingImport && !saving && pending.fresh.length ? 'paper-import-unlocked' : undefined} loading={saving || confirmingImport} disabled={disabled || searching || (!!pendingPdf && !pdfReviewComplete)} onClick={commit}>{pending.attachTo ? "添加 PDF" : pending.fresh.length ? "加入论文库" : "确认导入"}</Button></div>}
           </section>}

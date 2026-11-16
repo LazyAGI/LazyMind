@@ -325,12 +325,23 @@ export function buildZoteroImport(preview: ZoteroPreview, current: PaperLibraryD
     const attachment = attachmentsByID.get(attachmentId)!;
     const paper = papersByID.get(attachment.paperId)!;
     const id = recordID(preview.source_id, 'annotation', key);
+    let position: ObjectValue | undefined;
+    if (text(data.annotationPosition)) { try { position = object(JSON.parse(text(data.annotationPosition))); } catch { throw new Error('Zotero 批注位置信息无效，未导入'); } }
+    const pdfRects = Array.isArray(position?.rects) ? position.rects.filter((rect):rect is [number,number,number,number] => Array.isArray(rect) && rect.length===4 && rect.every(value=>typeof value==='number'&&Number.isFinite(value)) && rect[0]<rect[2] && rect[1]<rect[3]).slice(0,1000) : [];
+    const page = typeof position?.pageIndex === 'number' && Number.isInteger(position.pageIndex) && position.pageIndex >= 0 ? position.pageIndex + 1 : undefined;
     if (!annotationIDs.has(id)) {
-      let position: ObjectValue | undefined;
-      if (text(data.annotationPosition)) { try { position = object(JSON.parse(text(data.annotationPosition))); } catch { throw new Error('Zotero 批注位置信息无效，未导入'); } }
       const color: Annotation['color'] = ({ '#ffd400': 'yellow', '#2ea8e5': 'blue', '#ff6666': 'red', '#5fb236': 'green' } as Record<string, Annotation['color']>)[text(data.annotationColor)] || 'yellow';
-      library.annotations.push({ id, paperId: paper.id, attachmentId, quote: text(data.annotationText), comment: text(data.annotationComment), color, page: typeof position?.pageIndex === 'number' && position.pageIndex >= 0 ? position.pageIndex + 1 : undefined, createdAt: timestamp(data.dateAdded, now) });
+      library.annotations.push({ id, paperId: paper.id, attachmentId, quote: text(data.annotationText), comment: text(data.annotationComment), color, page, ...(pdfRects.length ? {pdfRects} : {}), createdAt: timestamp(data.dateAdded, now) });
       annotationIDs.add(id); counts.annotations++;
+    } else {
+      // Re-import repairs the geometry dropped by older clients without
+      // overwriting the user's annotation text or creating another annotation.
+      const existing = library.annotations.find(annotation=>annotation.id===id)!;
+      if (existing.paperId===paper.id && existing.attachmentId===attachmentId) {
+        if (!existing.pdfRects?.length && pdfRects.length && page!==undefined && (existing.page===undefined || existing.page===page)) existing.pdfRects=pdfRects;
+        if (existing.page===undefined && page!==undefined) existing.page=page;
+        if (!existing.quote && text(data.annotationText)) existing.quote=text(data.annotationText);
+      }
     }
     paper.annotationIds = unique([...(paper.annotationIds || []), id]);
   });

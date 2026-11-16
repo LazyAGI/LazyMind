@@ -1678,9 +1678,13 @@ func buildChatRequestBody(ctx context.Context, db *gorm.DB, convID, sessionID, q
 		body["excluded_skills"] = resourceContext.ExcludedSkills
 		body["loaded_skills"] = resourceContext.LoadedSkills
 	}
+	// Preview identity is also needed by the authorized full-text read tool,
+	// which works without the optional retrieval component or vector index.
+	if documentContext, ok := raw["document_context"].(map[string]any); ok && len(documentContext) > 0 {
+		body["document_context"] = documentContext
+	}
 	if !systemdeps.PythonComponentActive("rag") {
 		body["filters"] = nil
-		delete(body, "document_context")
 		return body
 	}
 	if body["filters"] == nil {
@@ -1703,9 +1707,6 @@ func buildChatRequestBody(ctx context.Context, db *gorm.DB, convID, sessionID, q
 		}
 	}
 	applyDocumentContextFilter(body, raw)
-	if documentContext, ok := raw["document_context"].(map[string]any); ok && len(documentContext) > 0 {
-		body["document_context"] = documentContext
-	}
 	return body
 }
 

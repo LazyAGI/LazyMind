@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"github.com/gorilla/mux"
+	"lazymind/core/algo"
 	"lazymind/core/common/orm"
 	"lazymind/core/pdfir"
 	"lazymind/core/readingpolicy"
@@ -103,12 +104,16 @@ func TestFormulaExplanationRequiresReadingOnlyForNewWholeFormula(t *testing.T) {
 	db.Create(&orm.AsyncJob{ID: "reading-job", JobType: pdfIRJobType, ResourceType: "document_pdf_ir", ResourceID: pdfIRResource("reading-ds", "reading-doc"), Status: "succeeded", PayloadJSON: mustJSON(pdfIRPayload{Revision: pdfir.Revision, DatasetID: "reading-ds", DocumentID: "reading-doc", SourceSHA256: hash}), ResultJSON: mustJSON(pdfIRResult{IRPath: irPath}), CreatedAt: time.Now()})
 	var calls atomic.Int32
 	mode := "missing"
+	var generationErr error
 	handler := formulaExplanationHandler{
 		loadModel: func(context.Context, string) (map[string]any, string, string, error) {
 			return map[string]any{"llm": map[string]any{"model": "test-model"}}, "test-model", "test-model", nil
 		},
 		generate: func(_ context.Context, content, _ string, _ map[string]any) (string, error) {
 			calls.Add(1)
+			if generationErr != nil {
+				return "", generationErr
+			}
 			if strings.Contains(content, `"target_symbol"`) {
 				return `{"summary":"A focused definition","symbols":[{"symbol":"x","meaning":"The input variable."}]}`, nil
 			}
@@ -126,6 +131,14 @@ func TestFormulaExplanationRequiresReadingOnlyForNewWholeFormula(t *testing.T) {
 		handler.ServeHTTP(w, r)
 		return w
 	}
+	for _, timeoutErr := range []error{context.DeadlineExceeded, &algo.StructuredTaskError{Code: "request_timeout"}} {
+		generationErr = timeoutErr
+		if w := call(`{}`); w.Code != 504 || !strings.Contains(w.Body.String(), `"error_code":"request_timeout"`) {
+			t.Fatalf("formula generation timeout lost classification: %d %s", w.Code, w.Body)
+		}
+	}
+	generationErr = nil
+	calls.Store(0)
 	if w := call(`{}`); w.Code != 502 || calls.Load() != 2 {
 		t.Fatalf("short generated explanation accepted or retries unbounded: status=%d calls=%d body=%s", w.Code, calls.Load(), w.Body)
 	}

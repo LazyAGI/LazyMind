@@ -45,7 +45,7 @@ it('uses document navigation for ordinary knowledge files and keeps chunks acces
  render(<PaperReaderSidebar paperMode={false} isPdf activeTab="references" onTabChange={change} onNavigate={vi.fn()} onCollapse={vi.fn()} references={<div>Reference importer</div>} segments={<div>Existing document chunks</div>}/>);
  expect(screen.getByRole('complementary',{name:'Document navigation'})).toBeInTheDocument();
  expect(screen.queryByRole('tab',{name:'Outline'})).toBeNull();
- expect(screen.getByRole('tab',{name:'References'})).toBeInTheDocument();
+ expect(screen.queryByRole('tab',{name:'References'})).not.toBeInTheDocument();
  fireEvent.click(screen.getByRole('tab',{name:'Document chunks'}));
  expect(change).toHaveBeenCalledWith('segments');
 });
@@ -59,3 +59,16 @@ it('offers source-backed figures and tables and highlights the current section',
  fireEvent.click(screen.getByRole('button',{name:/Figure 1/}));
  expect(navigate).toHaveBeenCalledWith('figure');
 });
+
+ it('keeps ordinary PDF navigation to outline and chunks without mounting paper tools',()=>{
+  render(<PaperReaderSidebar paperMode={false} document={doc} activeTab="references" onTabChange={vi.fn()} onNavigate={vi.fn()} onCollapse={vi.fn()} references={<div data-testid="unneeded-references"/>} vocabulary={<div data-testid="unneeded-vocabulary"/>} segments={<div>Document chunks content</div>}/>);
+  expect(screen.getAllByRole('tab').map(tab=>tab.textContent)).toEqual(['Outline','Document chunks']);
+  expect(screen.queryByTestId('unneeded-references')).toBeNull();
+  expect(screen.queryByTestId('unneeded-vocabulary')).toBeNull();
+  expect(screen.getByRole('button',{name:/3.2. The Model/})).toBeVisible();
+ });
+ it('has a useful empty outline when an ordinary document has neither outline nor chunks',()=>{
+  render(<PaperReaderSidebar paperMode={false} isPdf={false} activeTab="references" onTabChange={vi.fn()} onNavigate={vi.fn()} onCollapse={vi.fn()} references={<div/>}/>);
+  expect(screen.getByRole('tab',{name:'Outline'})).toHaveAttribute('aria-selected','true');
+  expect(screen.getByText('An outline is not available for this document.')).toBeVisible();
+ });

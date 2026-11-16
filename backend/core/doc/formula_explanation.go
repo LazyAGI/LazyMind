@@ -123,7 +123,11 @@ func formulaExplanationError(w http.ResponseWriter, status int, message string) 
 	case 502, 503, 504:
 		kind = "Upstream service error"
 	}
-	common.ReplyErrWithData(w, kind, map[string]any{"error_message": message}, status)
+	data := map[string]any{"error_message": message}
+	if status == http.StatusGatewayTimeout {
+		data["error_code"] = "request_timeout"
+	}
+	common.ReplyErrWithData(w, kind, data, status)
 }
 
 func (h formulaExplanationHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -282,7 +286,7 @@ func (h formulaExplanationHandler) explain(r *http.Request, request formulaReadi
 			}
 			raw, err := h.generate(attemptCtx, string(input), task, config)
 			if err != nil {
-				return formulaExplanation{}, formulaExplanationFailure{502, "The selected model could not explain this formula. Check the model connection and retry."}
+				return formulaExplanation{}, err
 			}
 			result, err := validateFormulaExplanation(raw, evidence)
 			if err == nil && request.FocusSymbol == nil && !hasSubstantiveFormulaReading(result) {

@@ -109,7 +109,7 @@ export async function getDocumentParseStatus(datasetId: string, documentId: stri
   return response.data.data || response.data as unknown as DocumentParseResult;
 }
 export async function ensureDocumentParsed(datasetId: string, documentId: string): Promise<DocumentParseResult> {
-  const response = await axiosInstance.post<Envelope<DocumentParseResult>>(`${documentBase(datasetId, documentId)}:ensure-parsed`, {});
+  const response = await axiosInstance.post<Envelope<DocumentParseResult>>(`${documentBase(datasetId, documentId)}:ensure-parsed`, {}, { silentError: true } as never);
   return response.data.data || response.data as unknown as DocumentParseResult;
 }
 export async function retryDocumentParsed(datasetId: string, documentId: string): Promise<void> {

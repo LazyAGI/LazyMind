@@ -3,10 +3,17 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn(), patch: vi.fn(), delete: vi.fn() }));
 vi.mock("@/components/request", () => ({ BASE_URL: "", axiosInstance: mocks }));
 
-import { completePdfRenderJob, createSearchablePdfJob, createTranslationPdfJob, deletePdfArtifact, getPdfArtifactData, getPdfArtifactLayout, isActivePdfJob, isRasterLayoutBlock, latestActiveTranslationJob, latestTranslationJob, listPdfLayoutBlocks, matchPdfTranslationDraftBlock, pdfArtifactContentUrl, retranslatePdfDraftBlock, revisePdfTranslation, splitTranslationText, translateTextWithLLM, validatePdfLayoutBlocks } from "./pdfArtifacts";
+import { ensureDocumentParsed, completePdfRenderJob, createSearchablePdfJob, createTranslationPdfJob, deletePdfArtifact, getPdfArtifactData, getPdfArtifactLayout, isActivePdfJob, isRasterLayoutBlock, latestActiveTranslationJob, latestTranslationJob, listPdfLayoutBlocks, matchPdfTranslationDraftBlock, pdfArtifactContentUrl, retranslatePdfDraftBlock, revisePdfTranslation, splitTranslationText, translateTextWithLLM, validatePdfLayoutBlocks } from "./pdfArtifacts";
 
 describe("PDF artifacts API", () => {
   beforeEach(() => vi.clearAllMocks());
+
+  it("leaves prepare failures to the authoritative status UI without a generic toast", async () => {
+    const failure = new Error("content rejected");
+    mocks.post.mockRejectedValueOnce(failure);
+    await expect(ensureDocumentParsed("d", "blank")).rejects.toBe(failure);
+    expect(mocks.post).toHaveBeenCalledWith(expect.stringContaining(":ensure-parsed"), {}, { silentError: true });
+  });
 
   it("normalizes MinerU zero-based pages and preserves bbox dimensions", async () => {
     mocks.get.mockResolvedValueOnce({ data: { data: { segments: [{

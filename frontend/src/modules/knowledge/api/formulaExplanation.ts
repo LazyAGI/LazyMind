@@ -1,3 +1,4 @@
+import {paperReadingErrorMessage} from './paperReadingError';
 import {useTranslation} from 'react-i18next';
 import {useCallback, useEffect, useRef, useState} from 'react';
 import {axiosInstance, BASE_URL} from '@/components/request';
@@ -60,7 +61,7 @@ export function useFormulaExplanation(target:PdfIRTarget, sourceKey:string, bloc
       setState({key,status:'ready',data:response.data.data});
       onExplanationChangeRef.current?.(response.data.data);
     } catch(error) {
-      const detail=(error as {response?:{data?:{data?:{error_message?:string}}}})?.response?.data?.data?.error_message;
+      const detail=paperReadingErrorMessage(error,language);
       if(!request.signal.aborted && AgentAppsAuth.getSessionIdentity()===identity)setState(previous=>({key,status:'error',data:previous.key===key?previous.data:undefined,error:typeof detail==='string'?detail:undefined}));
     }
   },[target.dataset,target.document,blockId,key,language,identity]);
