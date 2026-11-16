@@ -63,6 +63,8 @@ type AcademicState struct {
 	Error      string `json:"error,omitempty"`
 }
 type Attachment struct {
+	Parse            string         `json:"parse,omitempty"`
+	ProcessingError  string         `json:"processingError,omitempty"`
 	AcademicState    *AcademicState `json:"academicState,omitempty"`
 	ID               string         `json:"id"`
 	PaperID          string         `json:"paperId"`

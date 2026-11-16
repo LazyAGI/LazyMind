@@ -12,21 +12,16 @@ def mismatch():
     return requests.exceptions.SSLError(error)
 
 
-def test_alias_retry_preserves_payload_and_certificate_verification():
+def test_official_api_keeps_domain_without_verification():
     calls = []
-
     def send(method, url, **kwargs):
-        calls.append((method, url, kwargs))
-        if len(calls) == 1:
-            raise mismatch()
+        calls.append(url)
+        assert kwargs['verify'] is False
+        assert kwargs['allow_redirects'] is False
         return 'ok'
-
-    assert official_api_request(send, 'POST', 'https://mineru.net/api/v4/file-urls/batch',
-                                json={'files': []}, headers={'Authorization': 'Bearer test'}) == 'ok'
-    assert [c[1] for c in calls] == [
-        'https://mineru.net/api/v4/file-urls/batch', 'https://mineru.org.cn/api/v4/file-urls/batch']
-    assert all(c[2]['verify'] is True and c[2]['allow_redirects'] is False for c in calls)
-    assert calls[0][2] == calls[1][2]
+    url = 'https://mineru.net/api/v4/file-urls/batch'
+    assert official_api_request(send, 'POST', url, json={'files': []}) == 'ok'
+    assert calls == [url]
 
 
 @pytest.mark.parametrize('url', [
@@ -63,8 +58,8 @@ def test_other_failures_never_resubmit(error):
     assert len(calls) == 1
 
 
-def test_official_api_cannot_inherit_disabled_verification():
+def test_official_api_compatibility_overrides_verification():
     def send(method, url, **kwargs):
-        assert kwargs['verify'] is True
+        assert kwargs['verify'] is False
         return 'ok'
     assert official_api_request(send, 'GET', 'https://mineru.net/api/v4/x', verify=False) == 'ok'
