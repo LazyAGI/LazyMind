@@ -27,17 +27,18 @@ var (
 )
 
 type localRepairRun struct {
-	t       *testing.T
-	service Service
-	scope   Scope
-	model   ModelIdentity
-	rev     orm.PaperGuideRevision
-	seen    []string
-	review  func([]GuideSection) []GuideFinding
-	onV3    func()
-	v3Input map[string]any
-	shared  bool
-	wholeAt int64
+	t                      *testing.T
+	service                Service
+	scope                  Scope
+	model                  ModelIdentity
+	rev                    orm.PaperGuideRevision
+	seen                   []string
+	review                 func([]GuideSection) []GuideFinding
+	onV3                   func()
+	v3Input                map[string]any
+	shared                 bool
+	requireFinalBackground bool
+	wholeAt                int64
 }
 
 func newLocalRepairRun(t *testing.T) *localRepairRun {
@@ -47,15 +48,22 @@ func newLocalRepairRun(t *testing.T) *localRepairRun {
 	if err != nil {
 		t.Fatal(err)
 	}
+	return newLocalRepairRunWithSource(t, snap, 128000)
+}
+
+func newLocalRepairRunWithSource(t *testing.T, snap GuideSourceSnapshot, window int) *localRepairRun {
+	t.Helper()
+	id := snap.Identity
 	h := &localRepairRun{
-		t: t, scope: Scope{id.OwnerID, id.DatasetID, id.DocumentID, "en"},
-		model: ModelIdentity{ID: "m", ContextTokens: 128000},
+		t: t, requireFinalBackground: true, scope: Scope{id.OwnerID, id.DatasetID, id.DocumentID, "en"},
+		model: ModelIdentity{ID: "m", ContextTokens: window},
 	}
 	h.service = Service{
 		Repo: Repository{DB: guideDB(t)}, Source: &fixtureSource{s: snap},
 		Authorize:    func(context.Context, Scope, bool) error { return nil },
 		ResolveModel: func(context.Context, Scope, string) (ModelIdentity, map[string]any, error) { return h.model, nil, nil },
 	}
+	var err error
 	h.rev, err = h.service.Repo.Create(t.Context(), CreateRevision{Scope: h.scope, SourceSHA256: id.SourceSHA256, IRDigest: snap.IRDigest, SnapshotPath: "test", Model: h.model})
 	if err != nil {
 		t.Fatal(err)
@@ -126,7 +134,7 @@ func newLocalRepairRun(t *testing.T) *localRepairRun {
 					}
 				}
 				background := sections[0]
-				if background.Blocks[0].ID != "b_background" || background.Blocks[0].Text != "Final measurement." {
+				if h.requireFinalBackground && (background.Blocks[0].ID != "b_background" || background.Blocks[0].Text != "Final measurement.") {
 					t.Fatalf("whole review received stale background text: %+v", background.Blocks)
 				}
 				h.wholeAt = h.row().ChangeVersion
@@ -256,7 +264,7 @@ func (h *localRepairRun) assertCompletedLocalChain(calls, recovery int, stage st
 	}
 }
 
-func TestLocalRepairRefusesRepeatedMixedExhaustedAndFourthTargets(t *testing.T) {
+func TestLocalRepairRefusesRepeatedTargetsAndFourthVersion(t *testing.T) {
 	for _, tc := range []struct {
 		name               string
 		first, second, v3  []GuideFinding
@@ -266,7 +274,6 @@ func TestLocalRepairRefusesRepeatedMixedExhaustedAndFourthTargets(t *testing.T) 
 	}{
 		{"repeated", []GuideFinding{localA}, []GuideFinding{localA}, nil, false, 5, 1, "block:background-condition"},
 		{"mixed transaction rolls back new marker", []GuideFinding{localA}, []GuideFinding{localB, localA, localBFollowup}, nil, false, 5, 1, "block:background-condition"},
-		{"both already reserved", []GuideFinding{localA, localC}, []GuideFinding{localB}, nil, false, 5, 2, "block:background-condition"},
 		{"v3 still has a finding", []GuideFinding{localA}, []GuideFinding{localB, localBFollowup}, []GuideFinding{localC}, false, 7, 2, "block:background-unit"},
 		{"shared claim across roles", nil, nil, nil, true, 7, 1, "block:background-condition"},
 	} {
@@ -347,12 +354,12 @@ func (f localCheckpointFence) WithLease(ctx context.Context, cb func(*gorm.DB) e
 	return f.testFence.WithLease(ctx, cb)
 }
 
-func TestLocalRepairResumesFromEverySecondTargetCheckpoint(t *testing.T) {
+func TestLocalRepairResumesFromEachV3Checkpoint(t *testing.T) {
 	for _, tc := range []struct {
 		stop          string
 		providerCalls int
 	}{
-		{"correction:block:background-condition", 5},
+		{"repair-reservation:" + localV3, 5},
 		{localV3 + ":draft", 6},
 		{localV3 + ":review", 7},
 		{localV3, 7},
@@ -376,7 +383,7 @@ func TestLocalRepairResumesFromEverySecondTargetCheckpoint(t *testing.T) {
 					t.Fatalf("resume rewrote checkpoint %s", key)
 				}
 			}
-			if got := len(after); got != 14+14+4+2 {
+			if got := len(after); got != 14+14+4+2+2 {
 				t.Fatalf("duplicate or missing checkpoint after resume: %d", got)
 			}
 			if tc.stop == localV3+":draft" {
@@ -436,62 +443,5 @@ func TestLocalRepairCancellationFencesLateV3(t *testing.T) {
 	if !errors.Is(err, ErrConflict) || row.Stage != "canceled" || row.CallsUsed != 6 || len(h.seen) != 6 || row.CorrectionCount != 2 ||
 		steps[localV3+":draft"].ID != "" || steps[localV3].ID != "" {
 		t.Fatalf("late v3 bypassed cancellation: err=%v row=%+v calls=%v", err, row, h.seen)
-	}
-}
-
-func TestLocalRepairReservationBindsAllFindingsOnReplay(t *testing.T) {
-	h := newLocalRepairRun(t)
-	x := execution{s: h.service, rev: h.rev, f: testFence{h.service.Repo.DB}}
-	findings := []GuideFinding{localB, localBFollowup}
-	if err := x.reserveCorrections(t.Context(), localV3, findings, false); err != nil {
-		t.Fatal(err)
-	}
-	before := h.checkpoints()
-	changedFirst, changedSecond := localB, localBFollowup
-	changedFirst.Suggestion = "Put the sampling condition in the heading."
-	changedSecond.Suggestion = "Describe a different interpretation."
-	for _, tc := range []struct {
-		name, key string
-		findings  []GuideFinding
-		want      error
-	}{
-		{"exact", localV3, findings, nil},
-		{"changed first", localV3, []GuideFinding{changedFirst, localBFollowup}, ErrQuality},
-		{"changed second", localV3, []GuideFinding{localB, changedSecond}, ErrQuality},
-		{"omitted second", localV3, []GuideFinding{localB}, ErrQuality},
-		{"reordered", localV3, []GuideFinding{localBFollowup, localB}, ErrQuality},
-		{"different key", localV2, findings, ErrQuality},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			if err := x.reserveCorrections(t.Context(), tc.key, tc.findings, false); !errors.Is(err, tc.want) {
-				t.Fatalf("want %v, got %v", tc.want, err)
-			}
-			if !reflect.DeepEqual(before, h.checkpoints()) || h.row().CorrectionCount != 1 {
-				t.Fatal("reservation replay changed the target record or count")
-			}
-		})
-	}
-}
-
-func TestWholeRepairReservationReplaysExistingMarker(t *testing.T) {
-	h := newLocalRepairRun(t)
-	repo := h.service.Repo
-	f := testFence{repo.DB}
-	marker := StepWrite{
-		Key: "correction:block:background-condition", InputHash: digest([]any{localV2, localB}), Output: mustJSON(localB),
-	}
-	if err := repo.PutStep(t.Context(), f, h.rev.ID, h.rev.Epoch, marker); err != nil {
-		t.Fatal(err)
-	}
-	if err := repo.DB.Model(&h.rev).Update("correction_count", 1).Error; err != nil {
-		t.Fatal(err)
-	}
-	before := h.checkpoints()
-	x := execution{s: h.service, rev: h.rev, f: f}
-	if err := x.reserveCorrections(t.Context(), localV2, []GuideFinding{localB, localBFollowup}, true); err != nil {
-		t.Fatalf("saved whole-review repair marker could not be replayed: %v", err)
-	}
-	if !reflect.DeepEqual(before, h.checkpoints()) || h.row().CorrectionCount != 1 {
-		t.Fatal("whole-review replay changed the target record or count")
 	}
 }

@@ -810,7 +810,7 @@ func TestPaperGuideClientContractFailuresReachRunnerAsEvidenceErrors(t *testing.
 				if kind == "timeout" {
 					return testJSONResponse(504, `{"detail":{"error_code":"task_timeout","usage":{"model_calls":1,"elapsed_ms":120000}}}`), nil
 				}
-				usage := map[string]any{"task_type": "paper.guide.plan", "task_version": "paper-guide-v21", "model_calls": 1, "elapsed_ms": 19}
+				usage := map[string]any{"task_type": "paper.guide.plan", "task_version": paperguide.TaskVersion, "model_calls": 1, "elapsed_ms": 19}
 				if kind == "model_calls" {
 					usage[kind] = 2
 				} else {
@@ -941,9 +941,8 @@ func TestPaperGuideFragmentFixtureUsesCurrentActualTransport(t *testing.T) {
 		t.Fatal(err)
 	}
 	var fixture struct {
-		Version string          `json:"task_version"`
-		Input   map[string]any  `json:"input"`
-		Output  json.RawMessage `json:"output"`
+		Input  map[string]any  `json:"input"`
+		Output json.RawMessage `json:"output"`
 	}
 	if err = json.Unmarshal(raw, &fixture); err != nil {
 		t.Fatal(err)
@@ -962,10 +961,10 @@ func TestPaperGuideFragmentFixtureUsesCurrentActualTransport(t *testing.T) {
 		if err := json.NewDecoder(r.Body).Decode(&wire); err != nil {
 			t.Fatal(err)
 		}
-		if wire.Options["task_version"] != fixture.Version || fixture.Version != paperguide.TaskVersion || !reflect.DeepEqual(wire.Input.Data, fixture.Input) {
+		if wire.Options["task_version"] != paperguide.TaskVersion || !reflect.DeepEqual(wire.Input.Data, fixture.Input) {
 			t.Fatalf("changed canonical physical transport %+v", wire)
 		}
-		return testJSONResponse(200, string(mustJSON(map[string]any{"status": "succeeded", "output": fixture.Output, "usage": map[string]any{"model_calls": 1, "task_type": "paper.guide.extract", "task_version": fixture.Version}}))), nil
+		return testJSONResponse(200, string(mustJSON(map[string]any{"status": "succeeded", "output": fixture.Output, "usage": map[string]any{"model_calls": 1, "task_type": "paper.guide.extract", "task_version": paperguide.TaskVersion}}))), nil
 	})
 	t.Setenv("LAZYMIND_CHAT_SERVICE_URL", "http://fixture.invalid")
 	got, err := paperGuideService().Call(t.Context(), "paper.guide.extract", fixture.Input, map[string]any{})

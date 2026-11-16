@@ -45,7 +45,7 @@ func TestSectionSourceContextUsesExactPriorSummaryBudget(t *testing.T) {
 				}
 				return nil, context.Canceled
 			}
-			_, _, err := x.writeSection(t.Context(), plan, sp, []GuideSection{prior}, 1, nil, false, nil)
+			_, _, err := x.writeSection(t.Context(), plan, sp, []GuideSection{prior}, 1, nil)
 			if !errors.Is(err, context.Canceled) || calls != 1 {
 				t.Fatalf("section calls=%d, error=%v", calls, err)
 			}
@@ -94,7 +94,7 @@ func TestSectionSourceContextUsesActualReviewTaskAtExactBoundary(t *testing.T) {
 				return nil, nil
 			}
 		}
-		if _, _, err := x.writeSection(t.Context(), plan, sp, nil, 1, nil, false, nil); err != nil || calls != 2 {
+		if _, _, err := x.writeSection(t.Context(), plan, sp, nil, 1, nil); err != nil || calls != 2 {
 			t.Fatalf("draft extra=%q review calls=%d err=%v", extra, calls, err)
 		}
 	}
@@ -252,7 +252,7 @@ func TestSectionSourceContextTooLargeDraftNeverReservesReviewTicket(t *testing.T
 		}
 		return json.Marshal(out)
 	}
-	_, _, err := x.writeSection(t.Context(), p, p.Sections[0], nil, 1, nil, false, nil)
+	_, _, err := x.writeSection(t.Context(), p, p.Sections[0], nil, 1, nil)
 	steps := sourceContextSteps(t, x)
 	rev, revErr := x.s.Repo.Revision(t.Context(), x.scope, x.rev.ID)
 	if !errors.Is(err, ErrContext) || calls != 1 || len(steps) != 2 || revErr != nil || rev.CallsUsed != 1 {
@@ -287,7 +287,7 @@ func TestSectionSourceContextMissingRetainedDependencyDoesNotReserveTicket(t *te
 		calls++
 		return nil, context.Canceled
 	}
-	_, _, err = x.writeSection(t.Context(), plan, sp, nil, 1, nil, false, nil)
+	_, _, err = x.writeSection(t.Context(), plan, sp, nil, 1, nil)
 	rev, revErr := x.s.Repo.Revision(t.Context(), x.scope, x.rev.ID)
 	if !errors.Is(err, ErrEvidence) || calls != 0 || len(sourceContextSteps(t, x)) != 0 || revErr != nil || rev.CallsUsed != 0 {
 		t.Fatalf("missing retained source got calls=%d, ledger=%d, error=%v/%v", calls, rev.CallsUsed, err, revErr)

@@ -219,6 +219,12 @@ func (x *execution) execute(ctx context.Context) error {
 	for _, step := range steps {
 		x.steps[step.StepKey] = step
 	}
+	_, hasPlan := x.steps["plan"]
+	whole1, hasWhole1 := x.steps["whole_review:1"]
+	_, hasWhole2 := x.steps["whole_review:2"]
+	if hasWhole2 && !hasWhole1 || hasWhole1 && !hasPlan {
+		return ErrEvidence
+	}
 	if e = x.s.Repo.Transition(ctx, x.f, x.rev.ID, x.rev.Epoch, "analyzing", ""); e != nil {
 		return e
 	}
@@ -235,33 +241,34 @@ func (x *execution) execute(ctx context.Context) error {
 	if e = x.task(ctx, "plan", "paper.guide.plan", input, &plan, func() error { return ValidatePlan(packet, plan) }, metadata); e != nil {
 		return e
 	}
-	sections := []GuideSection{}
-	for _, sp := range plan.Sections {
-		var section GuideSection
-		version := 1
-		key := "section:" + string(sp.Role) + ":v1"
-		for _, step := range x.steps {
-			if step.Published && strings.HasPrefix(step.StepKey, "section:"+string(sp.Role)+":v") {
-				var candidate GuideSection
-				if json.Unmarshal([]byte(step.OutputJSON), &candidate) == nil && candidate.Version >= version {
-					section = candidate
-					version = candidate.Version
-					key = step.StepKey
+	sections := make([]GuideSection, 0, len(plan.Sections))
+	if hasWhole1 {
+		sections, e = x.originalWholeSections(plan, whole1)
+		if e != nil {
+			return e
+		}
+	} else {
+		for _, sp := range plan.Sections {
+			var section GuideSection
+			for _, step := range x.steps {
+				if step.Published && strings.HasPrefix(step.StepKey, "section:"+string(sp.Role)+":v") {
+					var candidate GuideSection
+					if json.Unmarshal([]byte(step.OutputJSON), &candidate) == nil && candidate.Version > section.Version {
+						section = candidate
+					}
 				}
 			}
-		}
-		if section.PublicationStatus != "published" {
-			var e error
-			section, key, e = x.writeSection(ctx, plan, sp, sections, 1, nil, false, nil)
-			if e != nil {
-				return e
+			if section.PublicationStatus != "published" {
+				section, _, e = x.writeSection(ctx, plan, sp, sections, 1, nil)
+				if e != nil {
+					return e
+				}
 			}
+			if e = ValidateSection(packet, plan, sp.Role, section); e != nil {
+				return ErrEvidence
+			}
+			sections = append(sections, section)
 		}
-		if e = ValidateSection(packet, plan, sp.Role, section); e != nil {
-			return ErrEvidence
-		}
-		sections = append(sections, section)
-		_ = key
 	}
 	if e = x.s.Repo.Transition(ctx, x.f, x.rev.ID, x.rev.Epoch, "reviewing", ""); e != nil {
 		return e
@@ -275,25 +282,33 @@ func (x *execution) execute(ctx context.Context) error {
 		input["sections"] = reviewSections(sections)
 		var review GuideReview
 		key := "whole_review:" + stringInt(int64(round))
-		if saved, ok := x.steps[key]; ok && round == 1 {
-			// This review is bound to its original immutable section versions. Resume its remaining
-			// repairs before making a fresh whole review of the candidate v2 sections.
-			if e = decodeStrict([]byte(saved.OutputJSON), &review); e != nil {
-				return ErrEvidence
-			}
-		} else if e = x.task(ctx, key, "paper.guide.review", input, &review, func() error { return ValidateReview(plan, sections, review) }, wholeReviewBindings(sections)); e != nil {
+		bindings := wholeReviewBindings(sections)
+		if saved, ok := x.steps[key]; ok && saved.ReviewJSON != string(bindings) {
+			return ErrEvidence
+		}
+		if e = x.task(ctx, key, "paper.guide.review", input, &review, func() error { return ValidateReview(plan, sections, review) }, bindings); e != nil {
 			return e
 		}
 		if len(review.Findings) == 0 {
+			if round == 1 && hasWhole2 {
+				return ErrEvidence
+			}
 			for _, section := range sections {
 				if section.PublicationStatus != "checking" {
 					continue
 				}
 				section.PublicationStatus = "published"
+				write := StepWrite{Key: sectionKey(section.Role, section.Version), InputHash: digest(input), Output: mustMarshal(section), Review: mustMarshal(review), Published: true}
+				if saved, ok := x.steps[write.Key]; ok {
+					if !saved.Published || saved.InputHash != write.InputHash || saved.OutputJSON != string(write.Output) || saved.ReviewJSON != string(write.Review) {
+						return ErrConflict
+					}
+					continue
+				}
 				if _, e = x.check(ctx); e != nil {
 					return e
 				}
-				if e = x.s.Repo.PutStep(ctx, x.f, x.rev.ID, x.rev.Epoch, StepWrite{Key: "section:" + string(section.Role) + ":v" + stringInt(int64(section.Version)), InputHash: digest(input), Output: mustMarshal(section), Review: mustMarshal(review), Published: true}); e != nil {
+				if e = x.s.Repo.PutStep(ctx, x.f, x.rev.ID, x.rev.Epoch, write); e != nil {
 					return e
 				}
 			}
@@ -313,22 +328,17 @@ func (x *execution) execute(ctx context.Context) error {
 			return ErrQuality
 		}
 		for i, section := range sections {
-			findings := []GuideFinding{}
-			for _, finding := range review.Findings {
-				if sectionHasTarget(section, plan, finding) {
-					findings = append(findings, finding)
-				}
-			}
+			findings := sectionFindings(section, review.Findings)
 			if len(findings) == 0 {
 				continue
 			}
-			if section.Version >= 2 {
-				if _, reviewed := x.steps["whole_review:2"]; reviewed {
-					continue
-				}
+			if section.Version != 1 {
 				return ErrQuality
 			}
-			updated, _, e := x.writeSection(ctx, plan, plan.Sections[i], sections[:i], 2, findings, true, nil)
+			if _, promoted := x.steps[sectionKey(section.Role, 2)]; promoted && !hasWhole2 {
+				return ErrEvidence
+			}
+			updated, _, e := x.writeSection(ctx, plan, plan.Sections[i], sections[:i], 2, &sectionRepair{base: section, findings: findings, whole: true})
 			if e != nil {
 				return e
 			}
@@ -336,6 +346,33 @@ func (x *execution) execute(ctx context.Context) error {
 		}
 	}
 	return ErrQuality
+}
+
+// The first whole review fixes the original published versions. On restart,
+// use those checkpoints even when some replacements are already published.
+func (x *execution) originalWholeSections(plan GuidePlan, saved orm.PaperGuideStep) ([]GuideSection, error) {
+	var bindings []reviewedSection
+	if decodeStrict([]byte(saved.ReviewJSON), &bindings) != nil || len(bindings) != len(plan.Sections) {
+		return nil, ErrEvidence
+	}
+	sections := make([]GuideSection, 0, len(bindings))
+	for i, binding := range bindings {
+		role := plan.Sections[i].Role
+		step, ok := x.steps[binding.Key]
+		var section GuideSection
+		if !ok || !step.Published || binding.Version < 1 || binding.Version > 3 ||
+			binding.Key != sectionKey(role, binding.Version) ||
+			decodeStrict([]byte(step.OutputJSON), &section) != nil || section.Version != binding.Version ||
+			section.PublicationStatus != "published" || ValidateSection(x.planningPacket, plan, role, section) != nil {
+			return nil, ErrEvidence
+		}
+		sections = append(sections, section)
+	}
+	return sections, nil
+}
+
+func sectionKey(role Role, version int) string {
+	return "section:" + string(role) + ":v" + stringInt(int64(version))
 }
 
 // A whole review and its exact input versions are persisted in one checkpoint.
@@ -349,7 +386,7 @@ type reviewedSection struct {
 func wholeReviewBindings(sections []GuideSection) json.RawMessage {
 	bindings := make([]reviewedSection, 0, len(sections))
 	for _, section := range sections {
-		bindings = append(bindings, reviewedSection{Key: "section:" + string(section.Role) + ":v" + stringInt(int64(section.Version)), Version: section.Version})
+		bindings = append(bindings, reviewedSection{Key: sectionKey(section.Role, section.Version), Version: section.Version})
 	}
 	return mustMarshal(bindings)
 }
@@ -617,15 +654,34 @@ func (x *execution) sectionInput(task string, p GuidePlan, sp GuideSectionPlan, 
 	return input, packet, nil
 }
 
-func (x *execution) writeSection(ctx context.Context, p GuidePlan, sp GuideSectionPlan, prior []GuideSection, version int, findings []GuideFinding, deferReview bool, previous *GuideSection) (GuideSection, string, error) {
-	key := "section:" + string(sp.Role) + ":v" + stringInt(int64(version))
-	if len(findings) > 0 {
-		if e := x.reserveCorrections(ctx, key, findings, deferReview); e != nil {
-			return GuideSection{}, "", e
+func (x *execution) writeSection(ctx context.Context, p GuidePlan, sp GuideSectionPlan, prior []GuideSection, version int, repair *sectionRepair) (GuideSection, string, error) {
+	key := sectionKey(sp.Role, version)
+	var findings []GuideFinding
+	var previous *GuideSection
+	deferred := repair != nil && repair.whole
+	_, wholeReviewed := x.steps["whole_review:2"]
+	replayOnly := deferred && wholeReviewed
+	if repair != nil {
+		if replayOnly {
+			if _, ok := x.steps[key+":draft"]; !ok {
+				return GuideSection{}, key, ErrEvidence
+			}
+		}
+		if _, e := x.check(ctx); e != nil {
+			return GuideSection{}, key, e
+		}
+		if e := x.reserveRepair(ctx, p, sp.Role, version, *repair, replayOnly); e != nil {
+			return GuideSection{}, key, e
+		}
+		findings = repair.findings
+		if !deferred {
+			previous = &repair.base
 		}
 	}
-	if e := x.s.Repo.Transition(ctx, x.f, x.rev.ID, x.rev.Epoch, "writing", ""); e != nil {
-		return GuideSection{}, "", e
+	if !replayOnly {
+		if e := x.s.Repo.Transition(ctx, x.f, x.rev.ID, x.rev.Epoch, "writing", ""); e != nil {
+			return GuideSection{}, key, e
+		}
 	}
 	fields := map[string]any{"role": sp.Role}
 	if len(prior) > 0 {
@@ -638,7 +694,7 @@ func (x *execution) writeSection(ctx context.Context, p GuidePlan, sp GuideSecti
 	if len(findings) > 0 {
 		fields["findings"] = findings
 	}
-	input, packet, e := x.sectionInput("paper.guide.section", p, sp, fields, previous, deferReview)
+	input, packet, e := x.sectionInput("paper.guide.section", p, sp, fields, previous, deferred)
 	if e != nil {
 		return GuideSection{}, "", e
 	}
@@ -652,7 +708,7 @@ func (x *execution) writeSection(ctx context.Context, p GuidePlan, sp GuideSecti
 	if e != nil {
 		return section, key, e
 	}
-	if deferReview {
+	if deferred {
 		section.Version = version
 		section.PublicationStatus = "checking"
 		return section, key, nil
@@ -667,13 +723,10 @@ func (x *execution) writeSection(ctx context.Context, p GuidePlan, sp GuideSecti
 		return section, key, e
 	}
 	if len(review.Findings) > 0 {
-		// The initial section review can use both global correction targets.
-		// Before any new call, reserveCorrections rejects reused targets
-		// and requests that exceed the remaining budget.
 		if version >= 3 {
 			return section, key, ErrQuality
 		}
-		return x.writeSection(ctx, p, sp, prior, version+1, review.Findings, false, &section)
+		return x.writeSection(ctx, p, sp, prior, version+1, &sectionRepair{base: section, findings: review.Findings})
 	}
 	// Cross-section IDs must be unique before publication, not just at final review.
 	if e = ValidateReview(p, append(append([]GuideSection{}, prior...), section), GuideReview{}); e != nil {
@@ -691,48 +744,14 @@ func (x *execution) writeSection(ctx context.Context, p GuidePlan, sp GuideSecti
 	}
 	return section, key, e
 }
-func (x *execution) reserveCorrections(ctx context.Context, repairKey string, findings []GuideFinding, wholeReviewRepair bool) error {
-	// A single-section repair must replay all findings in the original order.
-	// Its markers still count one reservation per distinct target.
-	var localHash string
-	if !wholeReviewRepair {
-		localHash = digest([]any{repairKey, findings})
-	}
-	return x.s.Repo.fenced(ctx, x.f, x.rev.ID, x.rev.Epoch, func(tx *gorm.DB, r *orm.PaperGuideRevision, g *orm.PaperGuide) error {
-		seen := map[string]bool{}
-		for _, f := range findings {
-			key := "correction:" + f.TargetType + ":" + f.TargetID
-			if seen[key] {
-				continue
-			}
-			seen[key] = true
-			hash := localHash
-			if wholeReviewRepair {
-				// Whole-review repair retains its existing per-target checkpoint hash.
-				hash = digest([]any{repairKey, f})
-			}
-			var existing orm.PaperGuideStep
-			e := tx.Where("revision_id = ? AND step_key = ?", r.ID, key).Take(&existing).Error
-			if e == nil {
-				if existing.InputHash != hash {
-					return ErrQuality
-				}
-				continue
-			}
-			if !errors.Is(e, gorm.ErrRecordNotFound) {
-				return e
-			}
-			if r.CorrectionCount >= 2 {
-				return ErrQuality
-			}
-			r.CorrectionCount++
-			if e := tx.Create(&orm.PaperGuideStep{ID: uuid.NewString(), RevisionID: r.ID, StepKey: key, InputHash: hash, OutputJSON: string(mustMarshal(f)), Epoch: r.Epoch, CreatedAt: time.Now().UTC()}).Error; e != nil {
-				return e
-			}
-		}
-		return tx.Model(r).Update("correction_count", r.CorrectionCount).Error
-	})
+func requestHashes(tx *gorm.DB, revisionID, key string) ([]string, error) {
+	var hashes []string
+	prefix := strings.NewReplacer("!", "!!", "%", "!%", "_", "!_").Replace("request:" + key + ":")
+	err := tx.Model(&orm.PaperGuideStep{}).Where("revision_id = ? AND step_key LIKE ? ESCAPE '!'", revisionID, prefix+"%").
+		Distinct("input_hash").Pluck("input_hash", &hashes).Error
+	return hashes, err
 }
+
 func (x *execution) task(ctx context.Context, key, task string, input map[string]any, out any, validate func() error, metadata ...json.RawMessage) error {
 	if !x.inputFits(task, input) {
 		return ErrContext
@@ -757,11 +776,16 @@ func (x *execution) task(ctx context.Context, key, task string, input map[string
 		started := time.Now()
 		ticket := "request:" + key + ":" + uuid.NewString()
 		e = x.s.Repo.fenced(ctx, x.f, x.rev.ID, x.rev.Epoch, func(tx *gorm.DB, r *orm.PaperGuideRevision, g *orm.PaperGuide) error {
-			var attempts int64
-			if e := tx.Model(&orm.PaperGuideStep{}).Where("revision_id = ? AND input_hash = ? AND step_key LIKE ?", r.ID, hash, "request:"+key+":%").Count(&attempts).Error; e != nil {
+			hashes, e := requestHashes(tx, r.ID, key)
+			if e != nil {
 				return e
 			}
-			recovery := attempts > 0
+			for _, seen := range hashes {
+				if seen != hash {
+					return ErrConflict
+				}
+			}
+			recovery := len(hashes) > 0
 			extract := task == "paper.guide.extract"
 			if r.CallsUsed >= 24 || r.ActiveMillis+attemptMillis > MaxActiveMillis || recovery && r.RecoveryCalls >= 2 || !recovery && !extract && r.PlannedCalls >= 14 || extract && !recovery && r.ExtractCalls >= 8 {
 				return ErrBudget

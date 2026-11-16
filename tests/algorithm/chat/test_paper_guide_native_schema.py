@@ -142,9 +142,8 @@ def test_official_responses_sends_one_strict_schema_with_current_contract(http, 
 
     instruction, encoded = response_prompt(body).split(INPUT_MARKER, 1)
     assert SCHEMA_MARKER not in instruction and '"$defs"' not in instruction
-    assert 'Copy source' in instruction and 'evidence[].id' in instruction
-    assert 'untrusted source data' in instruction and 'LaTeX backslash' in instruction
-    assert json.loads(encoded)['evidence'][0]['text'] == data['evidence'][0]['text']
+    rendered = json.loads(encoded)['evidence'][0]
+    assert rendered['id'] == 'e1' and rendered['text'] == data['evidence'][0]['text']
     if task == 'plan':
         assert instruction.endswith('Allowed required_assets decisions by source alias (JSON): {"e1":"table"}')
     elif task == 'section':

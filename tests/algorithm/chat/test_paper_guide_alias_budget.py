@@ -27,7 +27,7 @@ def packet_cases():
         locator={'kind': 'table_cells', 'page': 0, 'bbox': [0, -0.0, 1e-9, sys.float_info.max]})
     extract['evidence'] += [
         dict(id=B, source_block_id='internal-block', source_region_id='span', source_type='text',
-             parent_asset_id=A, text=literal, locator={'kind': 'page', 'page': 0}),
+             parent_asset_id=A, text=literal + ' Printed page iv.', locator={'kind': 'page', 'page': 6}),
         dict(id='ev_' + 'd' * 64, source_block_id='text', source_type='text', text=literal,
              locator={'kind': 'text_span', 'page': 0, 'bbox': [0, 1, 5e-324, 1e20], 'end': 1}),
         dict(id='ev_' + 'e' * 64, source_block_id='formula', source_type='formula', text=literal,
@@ -146,6 +146,7 @@ def test_alias_bound_with_actual_wire_and_go_bytes(go_packets, http, case):
     if case in ('extract_defaults', 'review_actual_draft'):
         for original, aliased in zip(data['evidence'], refs.model_input['evidence']):
             assert original['text'] == aliased['text']
+            assert original['locator']['page'] == aliased['locator']['page']
             if 'latex' in original['locator']:
                 assert original['locator']['latex'] == aliased['locator']['latex']
     if case == 'review_actual_draft':

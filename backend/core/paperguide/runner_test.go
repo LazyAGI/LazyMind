@@ -552,7 +552,7 @@ func TestWholeReviewProjectsExactPublishedVersions(t *testing.T) {
 }
 
 func TestLegacyCandidateCannotSpendOrResumeUnderNewContract(t *testing.T) {
-	for _, version := range []string{"paper-guide-v1", "paper-guide-v2", "paper-guide-v3", "paper-guide-v4", "paper-guide-v5", "paper-guide-v6", "paper-guide-v7", "paper-guide-v8", "paper-guide-v9", "paper-guide-v10", "paper-guide-v11", "paper-guide-v12", "paper-guide-v13", "paper-guide-v14", "paper-guide-v15", "paper-guide-v16", "paper-guide-v17", "paper-guide-v18", "paper-guide-v19", "paper-guide-v20"} {
+	for _, version := range []string{"paper-guide-v1", "paper-guide-v2", "paper-guide-v3", "paper-guide-v4", "paper-guide-v5", "paper-guide-v6", "paper-guide-v7", "paper-guide-v8", "paper-guide-v9", "paper-guide-v10", "paper-guide-v11", "paper-guide-v12", "paper-guide-v13", "paper-guide-v14", "paper-guide-v15", "paper-guide-v16", "paper-guide-v17", "paper-guide-v18", "paper-guide-v19", "paper-guide-v20", "paper-guide-v21"} {
 		t.Run(version, func(t *testing.T) {
 			d, id := fixture(t)
 			snap, _ := BuildSourceSnapshot(d, id)
@@ -575,7 +575,22 @@ func TestLegacyCandidateCannotSpendOrResumeUnderNewContract(t *testing.T) {
 			if err = repo.PutStep(t.Context(), testFence{repo.DB}, rev.ID, rev.Epoch, checkpoint); err != nil {
 				t.Fatal(err)
 			}
-			if err = repo.DB.Model(&rev).Updates(map[string]any{"fingerprint": oldFingerprint, "stage": "paused", "calls_used": 1}).Error; err != nil {
+			updates := map[string]any{"fingerprint": oldFingerprint, "stage": "paused", "calls_used": 1}
+			if version == "paper-guide-v21" {
+				// Preserve the legacy per-target count, marker payload, and its
+				// batch hash; none of these may become a v22 reservation.
+				marker := StepWrite{Key: "correction:block:b_background",
+					InputHash: digest([]any{localV2, []GuideFinding{localA}}), Output: mustJSON(localA)}
+				if err = repo.PutStep(t.Context(), testFence{repo.DB}, rev.ID, rev.Epoch, marker); err != nil {
+					t.Fatal(err)
+				}
+				updates["correction_count"] = 1
+			}
+			if err = repo.DB.Model(&rev).Updates(updates).Error; err != nil {
+				t.Fatal(err)
+			}
+			before, err := repo.Steps(t.Context(), rev.ID)
+			if err != nil {
 				t.Fatal(err)
 			}
 			calls, resolutions := 0, 0
@@ -595,9 +610,13 @@ func TestLegacyCandidateCannotSpendOrResumeUnderNewContract(t *testing.T) {
 				t.Fatalf("mixed-contract resume: %v", err)
 			}
 			steps, err := repo.Steps(t.Context(), rev.ID)
-			if err != nil || len(steps) != 1 || steps[0].StepKey != checkpoint.Key ||
-				steps[0].InputHash != checkpoint.InputHash || steps[0].OutputJSON != string(checkpoint.Output) {
+			if err != nil || !reflect.DeepEqual(steps, before) {
 				t.Fatalf("legacy checkpoint changed: %+v %v", steps, err)
+			}
+			after, err := repo.Revision(t.Context(), scope, rev.ID)
+			if err != nil || after.Fingerprint != oldFingerprint || after.Epoch != rev.Epoch || after.CallsUsed != 1 ||
+				(version == "paper-guide-v21" && after.CorrectionCount != 1) {
+				t.Fatalf("legacy execution reinterpreted its ledger: %+v %v", after, err)
 			}
 			if err = repo.Cancel(t.Context(), scope, rev.ID); err != nil {
 				t.Fatalf("legacy candidate must remain cancellable: %v", err)

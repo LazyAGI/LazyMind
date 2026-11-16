@@ -1,5 +1,5 @@
 {
-  "task_version": "paper-guide-v21",
+  "task_version": "paper-guide-v22",
   "prompt_reserve_bytes": 10240,
   "provider_frame_reserve_bytes": 512,
   "provider_system_bytes": 87,
@@ -7,16 +7,16 @@
   "input_defaults_reserve_bytes": 256,
   "evidence_expansion_reserve_bytes": 64,
   "measured_prompt_bytes": {
-    "paper.guide.extract": 4781,
-    "paper.guide.plan": 9575,
-    "paper.guide.section": 9346,
-    "paper.guide.review": 7076
+    "paper.guide.extract": 5080,
+    "paper.guide.plan": 9259,
+    "paper.guide.section": 9201,
+    "paper.guide.review": 7371
   },
   "measured_native_prompt_bytes": {
-    "paper.guide.extract": 3325,
-    "paper.guide.plan": 5168,
-    "paper.guide.section": 6431,
-    "paper.guide.review": 6242
+    "paper.guide.extract": 3624,
+    "paper.guide.plan": 4852,
+    "paper.guide.section": 6286,
+    "paper.guide.review": 6537
   },
   "measured_native_text_bytes": {
     "paper.guide.extract": 1302,
