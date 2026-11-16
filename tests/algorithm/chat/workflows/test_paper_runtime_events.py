@@ -79,10 +79,28 @@ def test_stage_failure_and_retry_keep_independent_public_records():
     snapshots = [e for e in emitted if e['type'] == 'progress']
     assert [e['progress'] for e in snapshots] == sorted(e['progress'] for e in snapshots)
     assert max(e['progress'] for e in snapshots) == 99  # Core owns authoritative success.
+    prefix = snapshots[0]['public_display']['event_key'].rsplit('-', 1)[0]
     stages = {s['step_id']: s for event in snapshots for s in event['public_display']['process_steps']}
-    assert stages['paper-first']['status'] == 'failed'
-    assert stages['paper-second']['status'] == stages['paper-figure']['status'] == 'succeeded'
-    assert stages['paper-first']['finished_at'] and stages['paper-first']['elapsed_ms'] >= 0
+    assert stages[f'{prefix}-first']['status'] == 'failed'
+    assert stages[f'{prefix}-second']['status'] == stages[f'{prefix}-figure']['status'] == 'succeeded'
+    assert stages[f'{prefix}-first']['finished_at'] and stages[f'{prefix}-first']['elapsed_ms'] >= 0
+
+
+def test_public_event_and_stage_ids_are_scoped_to_each_tool_invocation():
+    invocations = []
+    for _ in range(2):
+        emitted = []
+        with bind_runtime_events(emitted.append, 'literature_review_document') as events:
+            events.progress(10, '读取材料')
+            events.begin_stage('read', '整理文献', 20)
+            events.end_stage('read')
+            events.complete()
+        invocations.append([event['public_display'] for event in emitted if event['type'] == 'progress'])
+    first, second = invocations
+    first_keys = {event['event_key'] for event in first}
+    first_stages = {step['step_id'] for event in first for step in event['process_steps']}
+    assert first_keys.isdisjoint(event['event_key'] for event in second)
+    assert first_stages.isdisjoint(step['step_id'] for event in second for step in event['process_steps'])
 
 
 def test_structured_preview_replaces_revised_fields_and_does_not_emit_raw_json():
@@ -269,13 +287,14 @@ def test_f4_parallel_stages_and_retry_reach_shared_execution_log(tmp_path):
         events.complete()
 
     phases = [e for e in emitted if e['type'] == 'progress']
+    prefix = phases[0]['public_display']['event_key'].rsplit('-', 1)[0]
     shared = {}
     for event in phases:
         for step in event.get('public_display', {}).get('process_steps', []):
             shared.setdefault(step['step_id'], []).append(step)
     assert len(shared) == 4  # Three drawing attempts and the final publication phase.
     for stage in recorder.summary['stages']:
-        key = 'paper-' + stage['id']
+        key = f"{prefix}-{stage['id']}"
         if stage['stage'] == 'model_request':
             assert key not in shared  # Internal model calls stay in F4 diagnostics.
             continue

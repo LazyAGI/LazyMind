@@ -26,6 +26,8 @@ class PaperRuntimeEvents:
     def __init__(self, emit, slot):
         self._emit = emit
         self._slot = slot
+        # Core retains progress across resumed and repeated tool invocations.
+        self._invocation_id = uuid.uuid4().hex
         self._previews = {}
         self._contents = {}
         self._progress = 0
@@ -42,7 +44,7 @@ class PaperRuntimeEvents:
             if self._closed:
                 return
             previous = self._finish_stage('succeeded')
-            item = {'step_id': 'paper-' + identifier, 'revision': 1, 'order': self._sequence,
+            item = {'step_id': f'paper-{self._invocation_id}-{identifier}', 'revision': 1, 'order': self._sequence,
                     'title': title[:100], 'status': 'running',
                     'started_at': datetime.now(timezone.utc).isoformat(),
                     'finished_at': None, 'elapsed_ms': None}
@@ -73,7 +75,7 @@ class PaperRuntimeEvents:
     def _send(self, percent, phase, stages):
         self._sequence += 1
         event = {'type': 'progress', 'progress': percent, 'current_phase': phase,
-                 'public_display': {'schema_version': 1, 'event_key': f'paper-{self._sequence}',
+                 'public_display': {'schema_version': 1, 'event_key': f'paper-{self._invocation_id}-{self._sequence}',
                                     'process_steps': stages}}
         # One source supplies both the public timeline and legacy execution text.
         try:
@@ -93,7 +95,7 @@ class PaperRuntimeEvents:
                 return
             previous = self._finish_stage('succeeded') if self._last is None or phase != self._last[1] else None
             if self._stage is None:
-                self._stage = {'step_id': 'paper-' + uuid.uuid4().hex, 'revision': 1,
+                self._stage = {'step_id': f'paper-{self._invocation_id}-{uuid.uuid4().hex}', 'revision': 1,
                                'order': self._sequence, 'title': phase[:100], 'status': 'running',
                                'started_at': datetime.now(timezone.utc).isoformat(),
                                'finished_at': None, 'elapsed_ms': None}
