@@ -378,9 +378,11 @@ func executeDocumentPublication(ctx context.Context, db *gorm.DB, owner string, 
 			return failBefore(documentFailure("DOCUMENT_CONVERSION_FAILED", 502))
 		}
 		if op.Provider == "wechat" && !sameProvider && len(value.MediaReferences) == 0 {
-			request.LLMConfig, err = modelconfig.LoadLLMConfig(ctx, db, owner)
-			if err != nil {
+			coverConfig, configErr := modelconfig.LoadLLMConfig(ctx, db, owner)
+			if configErr != nil {
 				appLog.Logger.Warn().Str("operation_id", op.ID).Msg("WeChat cover model configuration unavailable; using placeholder cover")
+			} else if imageModel, ok := coverConfig["text2image"]; ok {
+				request.LLMConfig = map[string]any{"text2image": imageModel}
 			}
 		}
 		if op.Provider == "obsidian" || op.Provider == "github" && len(target) == 0 {

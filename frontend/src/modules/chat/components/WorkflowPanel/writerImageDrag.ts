@@ -74,7 +74,7 @@ export function startWriterImageDrag(
     indicator!.hidden = !target;
     if (target) {
       const rect = target.element.getBoundingClientRect();
-      const horizontal = Boolean(target.element.closest('.writer-image-group[data-layout="sliding"]'));
+      const horizontal = Boolean(target.element.parentElement?.closest('.writer-image-group[data-layout="sliding"]'));
       const child = target.position === 'child', after = target.position === 'after';
       indicator!.dataset.position = target.position;
       Object.assign(indicator!.style, {

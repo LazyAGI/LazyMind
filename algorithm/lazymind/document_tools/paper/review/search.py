@@ -41,7 +41,7 @@ def _text(value):
 
 
 def _fingerprint(value):
-    return ''.join(c for c in unicodedata.normalize('NFKC', value).casefold() if c.isalnum())
+    return ''.join(c for c in unicodedata.normalize('NFKC', value or '').casefold() if c.isalnum())
 
 
 def _same_text(left, right):

@@ -140,7 +140,7 @@ function GroupControls() {
         if (!(hovered instanceof HTMLElement) || !root.contains(hovered) || hovered.closest('.writer-image-group-host')) return null;
         let target: HTMLElement | null = hovered;
         const targetGroup = hovered.closest('.writer-image-group');
-        const horizontal = targetGroup?.getAttribute('data-layout') === 'sliding';
+        const horizontal = canJoinGroup && targetGroup?.getAttribute('data-layout') === 'sliding';
         if (targetGroup && canJoinGroup) {
           target = hovered.closest('[data-editor-block-type="image"]')?.querySelector('img') ?? null;
           if (!target) target = nearestDropElement(
