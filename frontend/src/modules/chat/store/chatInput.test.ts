@@ -19,4 +19,21 @@ describe('chat input drafts', () => {
     expect(store.getInputMentions('a')).toEqual([]);
     expect(store.getInputContent('b')).toBe('另一条消息');
   });
+
+  it('persists attachments independently of draft text and clears them with the draft', async () => {
+    const store = useChatInputStore.getState();
+    const files = [{ id: 'upload:report', name: 'report.pdf', input: {
+      input_type: 'file' as const, uri: '/uploads/report.pdf', filename: 'report.pdf',
+    } }];
+    store.saveInputFiles('a', files);
+    store.saveInputFiles('b', files);
+    store.saveInputContent('a', '');
+    await useChatInputStore.persist.rehydrate();
+    expect(useChatInputStore.getState().inputFiles.a).toEqual(files);
+    store.clearInputContent('a');
+    expect(useChatInputStore.getState().inputFiles.a).toBeUndefined();
+    expect(useChatInputStore.getState().inputFiles.b).toEqual(files);
+    store.clearAllInputContents();
+    expect(useChatInputStore.getState().inputFiles).toEqual({});
+  });
 });

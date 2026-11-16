@@ -6,6 +6,8 @@ import type { WorkflowSessionStep } from '../store/workflowPanel';
  * Keep persisted execution statuses unchanged so retries and history retain their meaning.
  */
 export function workflowTaskDisplayStatus(status: string, workflowStatus?: string): string {
+  // Queueing and claiming are internal phases of an admitted execution.
+  if (status === 'queued' || status === 'claimed') return 'running';
   if (status !== 'interrupted') return status;
   return workflowStatus === 'paused' ? 'paused' : 'failed';
 }
@@ -20,7 +22,7 @@ export function reconcileWorkflowTasks<T extends { task_id: string; status: Task
     if (task.agent_type !== 'workflow_step') return task;
     const attempt = attempts.get(task.task_id);
     if (!attempt) return task;
-    const normalized = attempt.status === 'queued' || attempt.status === 'claimed' ? 'pending'
+    const normalized = attempt.status === 'queued' || attempt.status === 'claimed' ? 'running'
       : attempt.status === 'cancelled' ? 'canceled' : attempt.status;
     if (!['pending', 'running', 'succeeded', 'failed', 'interrupted', 'canceled'].includes(normalized)) return task;
     return normalized === task.status ? task : { ...task, status: normalized as TaskStatus };

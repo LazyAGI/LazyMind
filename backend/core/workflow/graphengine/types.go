@@ -314,6 +314,8 @@ type Projection struct {
 	Edges      []ProjectedEdge           `json:"edges"`
 	EndReached bool                      `json:"end_reached"`
 	Completed  bool                      `json:"completed"`
+
+	DecidedRoutes []string `json:"decided_routes"`
 }
 
 type ProjectedEdge struct {

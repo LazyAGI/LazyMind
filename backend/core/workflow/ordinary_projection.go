@@ -242,7 +242,8 @@ func ordinaryAttemptStatus(row orm.WorkflowSessionStep) string {
 	}
 	switch row.Status {
 	case "queued", "claimed":
-		return "pending"
+		// Admission starts user-visible execution, including queueing and setup.
+		return "running"
 	case "cancelled":
 		return "canceled"
 	}

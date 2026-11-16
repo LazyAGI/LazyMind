@@ -40,6 +40,36 @@ func ordinaryFixture(t *testing.T) (*orm.DB, orm.WorkflowSession, time.Time) {
 	return db, session, now
 }
 
+func TestOrdinaryWorkflowAdmittedAttemptsDisplayRunning(t *testing.T) {
+	for _, status := range []string{"queued", "claimed"} {
+		t.Run(status, func(t *testing.T) {
+			db, session, now := ordinaryFixture(t)
+			row := orm.WorkflowSessionStep{ID: "current", SessionID: session.ID, StepID: "write", Attempt: 1,
+				Status: status, Validity: "effective", CreatedAt: now, UpdatedAt: now}
+			if err := db.Create(&row).Error; err != nil {
+				t.Fatal(err)
+			}
+			view, err := projectOrdinarySession(t.Context(), db.DB, &session)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(view.Tasks) != 2 || view.Tasks[0].Status != "running" || view.Tasks[1].Status != "pending" {
+				t.Fatalf("admitted execution must run while its future step remains pending: %#v", view.Tasks)
+			}
+			if view.Tasks[0].Timing.ExecutionElapsedMS != nil {
+				t.Fatal("display status must not invent execution timing")
+			}
+			var stored orm.WorkflowSessionStep
+			if err := db.First(&stored, "id = ?", row.ID).Error; err != nil {
+				t.Fatal(err)
+			}
+			if stored.Status != status {
+				t.Fatalf("display projection changed execution state: %s", stored.Status)
+			}
+		})
+	}
+}
+
 func TestOrdinaryWorkflowHostedAttemptIdentityAndPublicReplay(t *testing.T) {
 	db, session, now := ordinaryFixture(t)
 	for _, row := range []orm.WorkflowSessionStep{
