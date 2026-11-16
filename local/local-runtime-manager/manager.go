@@ -491,6 +491,9 @@ func (m *RuntimeManager) Up(ctx context.Context, cfg RuntimeConfig, paths Runtim
 		return err
 	}
 	failureContext.Phase = runtimeDiagnosticPhaseConfiguration
+	if err := m.prepareStartupGitHubCLI(ctx, freshCfg, paths); err != nil {
+		return err
+	}
 	if err := m.prepareStartupHistoryInjection(ctx, paths); err != nil {
 		return err
 	}
