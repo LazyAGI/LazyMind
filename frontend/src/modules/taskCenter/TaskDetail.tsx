@@ -238,7 +238,7 @@ function resolveFocusedStepIndex(steps: PlannedStep[], tone: TaskStepTone) {
   const current = steps.findIndex(step => step.current && !isDone(step.status));
   if (current >= 0) return current;
   for (const status of expected) {
-    const focused = steps.findIndex(step => step.status === status);
+    const focused = steps.findIndex(step => workflowTaskDisplayStatus(step.status) === status);
     if (focused >= 0) return focused;
   }
   if (!['attention', 'running', 'paused'].includes(tone)) return -1;

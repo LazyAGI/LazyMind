@@ -254,6 +254,7 @@ ASK_USER_TOOL_POLICY_APPENDIX: SystemPromptAppendix = {
         'an already feasible answer. Respect "you decide" for optional preferences. Choose the number of separate '
         'decision dimensions based on the task; there is no fixed question-count limit. Follow the ask_user parameter schema: every question needs id, text, type, '
         'reason and required. The text is the question body, not title or description. '
+        'Ordinary chat questions are skippable; use required=false. Workflow input contracts may require answers. '
         'Suggested single choices have at most 3 options; multiple choices at most 4; do not pad them. '
         'The system adds Other for free input. Multiple allows one selection. Fixed business '
         'enums remain complete and declare choice_policy=fixed; never use fixed to evade suggestion limits. '

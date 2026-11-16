@@ -148,7 +148,8 @@ const NewChatPage = () => {
   const preservingModeDraft = useRef(Boolean(
     incomingModeDraft.current
     || pendingConversationPrompt
-    || savedWelcomeDraft.current,
+    || savedWelcomeDraft.current
+    || useChatInputStore.getState().inputFiles[NEW_CHAT_INPUT_DRAFT_KEY]?.length,
   ));
   const [transferredDraft, setTransferredDraft] = useState<Omit<ChatModeDraft, "text"> | undefined>(incomingModeDraft.current);
   const entryModeRef = useRef(runInBackground);
@@ -348,7 +349,8 @@ const NewChatPage = () => {
   }, [showcaseCapabilityStatus, t]);
 
   useEffect(() => {
-    if (!isChatContent && !preservingModeDraft.current) {
+    if (!isChatContent && !preservingModeDraft.current
+      && !useChatInputStore.getState().inputFiles[NEW_CHAT_INPUT_DRAFT_KEY]?.length) {
       newChatInputRef.current?.clearFiles();
       setInputValue("");
     }
@@ -459,14 +461,10 @@ const NewChatPage = () => {
 
   const handleWelcomeInputChange = (value: string) => {
     preservingModeDraft.current = Boolean(value);
-    if (value.trim()) {
-      useChatInputStore.getState().saveInputContent(
-        NEW_CHAT_INPUT_DRAFT_KEY,
-        value,
-      );
-    } else {
-      useChatInputStore.getState().clearInputContent(NEW_CHAT_INPUT_DRAFT_KEY);
-    }
+    useChatInputStore.getState().saveInputContent(
+      NEW_CHAT_INPUT_DRAFT_KEY,
+      value,
+    );
     setInputValue(value);
   };
 
@@ -563,9 +561,9 @@ const NewChatPage = () => {
         const savedDraft = useChatInputStore.getState().getInputContent(
           NEW_CHAT_INPUT_DRAFT_KEY,
         );
-        preservingModeDraft.current = Boolean(savedDraft);
+        preservingModeDraft.current = Boolean(savedDraft
+          || useChatInputStore.getState().inputFiles[NEW_CHAT_INPUT_DRAFT_KEY]?.length);
         setInputValue(savedDraft);
-        newChatInputRef.current?.clearFiles();
         useChatInputStore.getState().setModeDraft();
         setTransferredDraft(undefined);
         useModelSelectionStore.getState().resetForNewChat();

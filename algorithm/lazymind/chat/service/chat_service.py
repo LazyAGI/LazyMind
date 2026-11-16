@@ -681,18 +681,22 @@ def _build_ask_user_tool(
     from lazymind.chat.engine.tools.ask_user import ask_user
     from lazymind.chat.workflow.workflow_manager import enforce_startup_clarification_policy
 
-    if not runtime_policy and not (discovery_mode and workflow_catalog):
-        return [ask_user]
-
     @wraps(ask_user)
     def governed_ask_user(questions, title=None, description=None):
-        return ask_user(
-            enforce_startup_clarification_policy(
-                questions, runtime_policy, workflow_catalog, discovery_mode=discovery_mode,
-            ),
-            title=title,
-            description=description,
+        questions = enforce_startup_clarification_policy(
+            questions, runtime_policy, workflow_catalog, discovery_mode=discovery_mode,
         )
+        if (discovery_mode or not runtime_policy) and isinstance(questions, list):
+            # A discoverable workflow is not an active workflow. Generic chat
+            # questions are skippable; host-issued workflow cards retain their
+            # required fields. Preserve malformed values for schema validation.
+            questions = [
+                {**question, 'required': False}
+                if isinstance(question, dict) and isinstance(question.get('required'), bool)
+                else question
+                for question in questions
+            ]
+        return ask_user(questions, title=title, description=description)
 
     return [governed_ask_user]
 
