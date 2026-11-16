@@ -5139,6 +5139,7 @@ export interface DocumentPublicationResultResponse {
 export interface DocumentPublicationStatus {
     'actions': Array<string>;
     'artifact_id'?: string;
+    'current'?: number;
     'error_code'?: string;
     'item_index': number;
     'operation_id': string;
@@ -5146,8 +5147,10 @@ export interface DocumentPublicationStatus {
     'provider_synced': boolean;
     'recovery_after'?: string;
     'source_slot_id': string;
+    'stage'?: string;
     'status': string;
     'target_url'?: string;
+    'total'?: number;
     'updated_at': string;
     'warnings'?: Array<string>;
 }

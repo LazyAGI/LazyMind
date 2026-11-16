@@ -273,6 +273,10 @@ export function DocumentPublicationDialog({ artifactId, sourceSignature, provide
             <Tag className='document-publication-result-status' bordered={false} color={statusColor} icon={status === 'succeeded' ? <CheckCircleOutlined aria-hidden='true' /> : undefined}>
               {status === 'succeeded' && item.provider === 'github' && (item.operation?.target_url || item.target_url)?.includes('/pull/') ? t('chat.publication.pullRequestCreated') : status ? statusLabel(status) : t('chat.publication.bound')}
             </Tag>
+            {item.operation?.stage && <span>
+              {t(`chat.publication.progress.${item.operation.stage}`)}
+              {!!item.operation.current && t('chat.publication.progress.imageIndex', { current: item.operation.current, total: item.operation.total })}
+            </span>}
             {item.last_success_hash && (dirty || item.last_success_hash !== state?.current_hash) && <Tag bordered={false} color='warning'>{t('chat.publication.newEdits')}</Tag>}
           </div>
         </div>

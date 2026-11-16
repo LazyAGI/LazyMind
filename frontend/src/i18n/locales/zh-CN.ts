@@ -3456,6 +3456,12 @@ const zhCN = {
       reason: { approval_capacity: "等待中的工作区请求过多，请先处理已有请求后再试。", operation_uncertain: "执行结果未知，请先核对文件再决定是否重试。", execution_inactive: "本次执行已结束或已被新的执行替代。", unsupported_file: "此工具无法读取该文件类型。", search_limit: "搜索已达到限制，请缩小目录或搜索范围。", mode_forbidden: "当前模式不支持本地工作区", selection_forbidden: "当前无法选择工作区", selection_expired: "工作区选择已过期，请重新选择", invalid_selection: "工作区选择无效", workspace_not_found: "工作区不存在", binding_conflict: "状态已变化，请重试", binding_locked: "任务工作区已锁定", revoked: "授权已撤销", path_unavailable: "目录当前不可用", path_invalid: "目录路径无效", unknown: "发生未知错误" },
     },
     publication: {
+      progress: {
+        cover_generate: '正在生成封面图片', cover_crop: '正在裁剪封面',
+        cover_placeholder: '正在使用“暂无封面”图片', cover_upload: '正在上传封面',
+        image_compress: '正在压缩图片', image_upload: '正在上传图片',
+        draft_write: '正在写入公众号草稿箱', imageIndex: '（第 {{current}}/{{total}} 张）',
+      },
       warnings: {
         WECHAT_IMAGES_COMPRESSED: '图片已自动压缩至公众号上传限制内，本地原图已保留。',
         WECHAT_HTML_TRUNCATED: '正文超过公众号长度限制，已截断末尾内容，本地原文已完整保留。',

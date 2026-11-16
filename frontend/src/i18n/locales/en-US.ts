@@ -3513,6 +3513,12 @@ const enUS = {
       reason: { approval_capacity: "Too many workspace requests are waiting. Finish an existing request before trying again.", operation_uncertain: "The result is unknown. Check the file before trying again.", execution_inactive: "This execution has ended or is no longer current.", unsupported_file: "This file type cannot be read by this tool.", search_limit: "The search reached its limit. Narrow the folder or search pattern.", mode_forbidden: "Local workspaces are unavailable in this mode", selection_forbidden: "Workspace selection is unavailable", selection_expired: "The workspace selection expired. Select the folder again.", invalid_selection: "The workspace selection is invalid", workspace_not_found: "The workspace was not found", binding_conflict: "The state changed. Try again.", binding_locked: "This Work folder is locked", revoked: "Access was revoked", path_unavailable: "The folder is unavailable", path_invalid: "The folder path is invalid", unknown: "An unknown error occurred" },
     },
     publication: {
+      progress: {
+        cover_generate: 'Generating cover image', cover_crop: 'Cropping cover',
+        cover_placeholder: 'Using the “No cover” image', cover_upload: 'Uploading cover',
+        image_compress: 'Compressing image', image_upload: 'Uploading image',
+        draft_write: 'Writing to WeChat drafts', imageIndex: ' {{current}} of {{total}}',
+      },
       warnings: {
         WECHAT_IMAGES_COMPRESSED: 'Images were compressed to fit WeChat’s upload limit. Local originals are preserved.',
         WECHAT_HTML_TRUNCATED: 'The article exceeded WeChat’s length limit and its ending was truncated. The complete local article is preserved.',

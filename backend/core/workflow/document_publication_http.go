@@ -59,6 +59,9 @@ type DocumentPublicationStatus struct {
 	ArtifactID     string     `json:"artifact_id,omitempty"`
 	ErrorCode      string     `json:"error_code,omitempty"`
 	Warnings       []string   `json:"warnings,omitempty"`
+	Stage          string     `json:"stage,omitempty"`
+	Current        int        `json:"current,omitempty"`
+	Total          int        `json:"total,omitempty"`
 	UpdatedAt      time.Time  `json:"updated_at" required:"true"`
 	RecoveryAfter  *time.Time `json:"recovery_after,omitempty"`
 	ProviderSynced bool       `json:"provider_synced" required:"true"`
