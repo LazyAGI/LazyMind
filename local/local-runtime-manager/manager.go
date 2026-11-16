@@ -432,7 +432,7 @@ func (m *RuntimeManager) Up(ctx context.Context, cfg RuntimeConfig, paths Runtim
 		return err
 	}
 	failureContext.Phase = runtimeDiagnosticPhaseConfiguration
-	if err := prepareDesktopRAG(ctx, cfg, paths); err != nil {
+	if err := prepareDesktopPythonComponents(ctx, cfg, paths); err != nil {
 		return err
 	}
 	state.Runtime = cfg.Profile

@@ -74,6 +74,8 @@ func TestPythonComponentEnvironmentRequiresAtomicCompatibleInstallation(t *testi
 
 func TestPythonClusterComponentActivatesIndependentlyOfRAG(t *testing.T) {
 	paths := RuntimePaths{ResourcesRoot: t.TempDir(), RuntimeRoot: t.TempDir(), RepoRoot: t.TempDir(), CoreBin: "bundled-core"}
+	paths.StateDir = t.TempDir()
+	t.Setenv(desktopAppVersionEnvVar, "0.5.0")
 	cfg := RuntimeConfig{Profile: "desktop", Algorithm: AlgorithmConfig{RAGDisabled: true}}
 	runner := &fakeRunner{handlers: []func(Command) (CommandResult, error){
 		func(cmd Command) (CommandResult, error) {
@@ -116,6 +118,9 @@ func TestPythonClusterComponentActivatesIndependentlyOfRAG(t *testing.T) {
 	}
 	catalog.Components[cluster.ID] = cluster
 	writeJSON(catalogPath, catalog)
+	if err := prepareDesktopPythonComponents(context.Background(), cfg, paths); err != nil {
+		t.Fatal(err)
+	}
 	manager.prepareDesktopCluster(context.Background(), cfg, paths)
 	if len(runner.calls) != 1 {
 		t.Fatal("missing clustering must be prepared at Desktop startup")
@@ -132,11 +137,15 @@ func TestPythonClusterComponentActivatesIndependentlyOfRAG(t *testing.T) {
 		t.Fatal(err)
 	}
 	writeJSON(filepath.Join(root, "bundle-manifest.json"), selected)
-	writeJSON(filepath.Join(filepath.Dir(root), "catalog-"+selected.Tag+".json"), selected)
+	receipt := filepath.Join(filepath.Dir(root), "catalog-"+selected.Tag+".json")
+	writeJSON(receipt, selected)
 	if sites := pythonComponentSites(paths); len(sites) != 0 {
 		t.Fatalf("partial install added to import path: %v", sites)
 	}
 	if err := os.WriteFile(filepath.Join(root, ".ready"), []byte(selected.SHA256), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := prepareDesktopPythonComponents(context.Background(), cfg, paths); err != nil {
 		t.Fatal(err)
 	}
 	manager.prepareDesktopCluster(context.Background(), cfg, paths)
@@ -151,6 +160,22 @@ func TestPythonClusterComponentActivatesIndependentlyOfRAG(t *testing.T) {
 	}
 	if sites := pythonComponentSites(paths); len(sites) != 1 || sites[0] != site {
 		t.Fatalf("unexpected Python import paths: %v", sites)
+	}
+
+	// The installer still pins the same bundle channel after the app upgrade.
+	t.Setenv(desktopAppVersionEnvVar, "0.5.1")
+	if err := prepareDesktopPythonComponents(context.Background(), cfg, paths); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(receipt); !os.IsNotExist(err) {
+		t.Fatalf("old clustering receipt survived upgrade: %v", err)
+	}
+	if sites := pythonComponentSites(paths); len(sites) != 0 {
+		t.Fatalf("old clustering bundle was reused after upgrade: %v", sites)
+	}
+	manager.prepareDesktopCluster(context.Background(), cfg, paths)
+	if len(runner.calls) != 2 || !slices.Equal(runner.calls[1].Args, []string{"--prepare-cluster-component"}) {
+		t.Fatal("upgraded desktop did not run the clustering installer again")
 	}
 }
 
@@ -278,7 +303,7 @@ func TestDesktopRAGUpgradeRequiresFreshInstallation(t *testing.T) {
 	prepare := func(version string) {
 		t.Helper()
 		t.Setenv(desktopAppVersionEnvVar, version)
-		if err := prepareDesktopRAG(context.Background(), cfg, paths); err != nil {
+		if err := prepareDesktopPythonComponents(context.Background(), cfg, paths); err != nil {
 			t.Fatal(err)
 		}
 	}

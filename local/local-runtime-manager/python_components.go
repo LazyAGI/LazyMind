@@ -39,8 +39,8 @@ var componentDigestPattern = regexp.MustCompile(`^[a-f0-9]{64}$`)
 var pythonComponentIDs = []string{"rag", "cluster"}
 
 // Run with the startup lock held after stopping the previous runtime. Upgrades
-// must re-download RAG even if the new installer pins the same component.
-func prepareDesktopRAG(ctx context.Context, cfg RuntimeConfig, paths RuntimePaths) error {
+// must re-download deferred Python components even when their pins are unchanged.
+func prepareDesktopPythonComponents(ctx context.Context, cfg RuntimeConfig, paths RuntimePaths) error {
 	version := strings.TrimSpace(os.Getenv(desktopAppVersionEnvVar))
 	if cfg.Profile != "desktop" || version == "" {
 		return nil
@@ -49,19 +49,31 @@ func prepareDesktopRAG(ctx context.Context, cfg RuntimeConfig, paths RuntimePath
 	if err != nil || catalog == nil {
 		return err
 	}
-	marker := filepath.Join(paths.StateDir, "rag-component-app-version")
+	for _, id := range pythonComponentIDs {
+		if _, deferred := catalog.Components[id]; !deferred {
+			continue
+		}
+		if err := resetDesktopPythonComponent(ctx, paths, id, version); err != nil {
+			return fmt.Errorf("reset Python component %s for app version %s: %w", id, version, err)
+		}
+	}
+	return nil
+}
+
+func resetDesktopPythonComponent(ctx context.Context, paths RuntimePaths, id, version string) error {
+	marker := filepath.Join(paths.StateDir, id+"-component-app-version")
 	previous, err := os.ReadFile(marker)
 	if err == nil && strings.TrimSpace(string(previous)) == version {
 		return nil
 	}
 	if err != nil && !os.IsNotExist(err) {
-		return fmt.Errorf("read RAG component app version: %w", err)
+		return err
 	}
-	ragDir := filepath.Join(paths.RuntimeRoot, "deps", "python-components", "rag")
+	componentDir := filepath.Join(paths.RuntimeRoot, "deps", "python-components", id)
 	if err := winfile.RetryOperation(ctx, func() error {
-		return os.RemoveAll(ragDir)
+		return os.RemoveAll(componentDir)
 	}, winfile.RetryOptions{MaxWait: pythonPayloadRenameWait}); err != nil {
-		return fmt.Errorf("remove previous RAG component: %w", err)
+		return err
 	}
 	return writeFileAtomically(ctx, marker, []byte(version+"\n"), 0o644, nil)
 }
