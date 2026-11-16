@@ -28,7 +28,11 @@ func newPathRepairAdapter(t *testing.T) (*Adapter, string) {
 	if err := os.MkdirAll(profile, 0700); err != nil {
 		t.Fatal(err)
 	}
-	self := writeExecutable(t, root, "new-installation/lazymind", "unused executable fixture")
+	executableName := "lazymind"
+	if runtime.GOOS == "windows" {
+		executableName += ".exe"
+	}
+	self := writeExecutable(t, root, filepath.Join("new-installation", executableName), "unused executable fixture")
 	// Discovery can fail: path repair must work without a usable Codex CLI.
 	adapter, err := New(filepath.Join(root, "missing-codex"), self, &mcpbridge.Bridge{})
 	if err != nil {
