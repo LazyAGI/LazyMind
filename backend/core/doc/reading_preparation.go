@@ -401,7 +401,7 @@ func runReadingPreparation(ctx context.Context, job asyncjob.Job, reporter async
 					return result, e
 				}
 				if current.ErrorCode == readingpolicy.QuotaErrorCode && current.Status == "pending" {
-					return result, fmt.Errorf("%w：%s", readingpolicy.ErrQuotaExceeded, current.ErrorMessage)
+					return result, fmt.Errorf("等待 PDF 解析自动额度：%s（%w）", current.ErrorMessage, readingpolicy.ErrQuotaExceeded)
 				}
 				if current.Status == "succeeded" {
 					break
