@@ -37,7 +37,7 @@ def _record_tool_step(step: dict[str, Any], state: dict[str, Any]) -> None:
                 target = (name, stage, str(args.get('start_page') or 0), str(args.get('end_page') or 0))
             else:
                 continue
-        elif name == 'ppt_generate_pages':
+        elif name in ('ppt_generate_pages', 'ppt_plan_page_prompts'):
             target = (name,)
         else:
             continue
@@ -47,15 +47,25 @@ def _record_tool_step(step: dict[str, Any], state: dict[str, Any]) -> None:
         if not isinstance(result, dict):
             continue
         name = result.get('name')
-        if name not in ('ppt_generate_pages', 'ppt_run_stage'):
+        if name not in ('ppt_generate_pages', 'ppt_run_stage', 'ppt_plan_page_prompts'):
             continue
         call_id = str(result.get('tool_call_id') or result.get('id') or '')
         target = pending.pop(call_id, None)
-        if target is None and name == 'ppt_generate_pages':
+        if target is None and name in ('ppt_generate_pages', 'ppt_plan_page_prompts'):
             target = (name,)
         if target is None or target[0] != name:
             continue
         payload = _json_object(result.get('result', result.get('content')))
+        if name == 'ppt_plan_page_prompts':
+            # Raised tool errors are serialized as {error: ...}; successful
+            # planning returns counts without a status or ok flag.
+            value = _json_object(payload.get('value')) if payload.get('ok') is True else payload
+            reason = value.get('error') or (payload.get('value') if payload.get('ok') is False else None)
+            if reason:
+                failures[target] = f'{name}: {reason}'[:2000]
+            elif isinstance(value.get('page_count'), int) and value['page_count'] > 0:
+                failures.pop(target, None)
+            continue
         if payload.get('ok') is False:
             reason = payload.get('value') or payload.get('error') or 'generation failed'
         else:
@@ -78,7 +88,7 @@ def _completion_failure(state: dict[str, Any]) -> tuple[str, str] | None:
 
 
 def runtime_extension(params: dict[str, Any]) -> RuntimeExtension:
-    checks_generation = params.get('step_id') == 'generate_ppt'
+    checks_generation = params.get('step_id') in ('generate_ppt', 'plan_page_prompts')
     return RuntimeExtension(
         tool_call_limits={'ppt_generate_background_images': 1},
         on_tool_step=_record_tool_step if checks_generation else None,

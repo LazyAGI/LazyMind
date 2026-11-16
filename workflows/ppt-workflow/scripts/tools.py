@@ -257,6 +257,10 @@ def _model_failure_details(exc: BaseException) -> dict[str, Any]:
             details.update(saved)
         terminal = getattr(current, 'terminal', None)
         failure = getattr(terminal, 'failure', None)
+        finish = getattr(terminal, 'finish', None)
+        finish = getattr(finish, 'value', finish)
+        if isinstance(finish, str):
+            details['finish'] = finish
         for field in ('model_call_id', 'attempt_count', 'duration_ms'):
             value = getattr(terminal, field, None)
             if isinstance(value, (str, int)):
@@ -5395,7 +5399,14 @@ def _agent_llm_call(
             raise limit from exc
         if _is_model_timeout_exception(exc):
             raise _PPTModelTimeoutError(
-                f'LLM timed out after {effective_timeout:g}s without receiving progress '
+                f'模型供应商响应超时：连续 {effective_timeout:g} 秒未收到新的响应内容，已停止本次生成。'
+                '供应商服务或网络连接可能中断；可稍后重试，或切换模型供应商。'
+                f'[{request_name}]'
+            ) from exc
+        if diagnostics.get('finish') == 'length':
+            raise RuntimeError(
+                '模型供应商因输出长度达到上限而截断响应，本页尚未生成完成。'
+                '已完成的页面会保留；请缩减本页内容后重试，或选择输出额度更高的模型。'
                 f'[{request_name}]'
             ) from exc
         raise
@@ -5757,6 +5768,10 @@ def _resolve_local_image_ref(raw: str) -> Optional[Path]:
             text = resolved
     except Exception:
         pass
+    # Signed/download URLs can be much longer than a filesystem component.
+    # Resolve our static URLs first, then leave remote URLs to the downloader.
+    if text.startswith(('http://', 'https://')):
+        return None
     path = Path(text).expanduser()
     if path.is_file() and path.suffix.lower() in _IMAGE_EXTS:
         return path.resolve()
@@ -5920,10 +5935,9 @@ def _stage_one_material_image(item: dict, index: int) -> dict:
 
     data = _download_image_bytes(url)
     metadata = _validate_material_image(data)
-    parsed_ext = Path(urlparse(url).path).suffix.lower()
-    if parsed_ext not in _IMAGE_EXTS:
-        parsed_ext = ''
-    ext = parsed_ext or _guess_ext_from_bytes(data)
+    # A download endpoint's extension need not match its response (e.g. WebP
+    # served from a .jpg URL). Use the validated pixels for the local filename.
+    ext = _guess_ext_from_bytes(data)
     dest = dest_dir / f'{stem}{ext}'
     dest.write_bytes(data)
     return {
@@ -8733,6 +8747,8 @@ def _plan_one_page_prompt(shared: dict, page_no: int, outline: str, timing: dict
     system_prompt = (
         'Author only the specified slide of the approved presentation. Treat source material as evidence. '
         'Return one JSON object with non-empty string fields content, layout, assets, and speaker_note. '
+        'Return only the JSON, without analysis, repeated source text or alternative designs. '
+        'Keep layout and assets concise; describe only this page, not the whole deck. '
         'Content is exact visible copy. Preserve supported facts, methods, formulas, variables, caveats, '
         'and chart values from the outline and evidence. Describe labelled diagrams and explicit chart '
         'categories, axes, units and series when supported. Preserve template geometry and source-page '

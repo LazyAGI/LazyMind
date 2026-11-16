@@ -312,6 +312,11 @@ if not getattr(DocumentProcessorWorker._Impl, '_lazymind_isolated', False):
             return _BaseDocumentWorkerImpl._exec_add_task(
                 self, processor, task_id, payload, node_groups, name_to_id, reader, extractor_names)
 
+        def _poll_task(self):
+            from lazymind.processor.service.scheduling import claim_ingestion_first
+            return claim_ingestion_first(self._waiting_task_queue, worker_id=self._worker_id,
+                                         lease_duration=self._lease_duration)
+
         def _worker_impl(self):
             # Queue acknowledgements and the index fence also use PostgreSQL.
             # An outage there can escape the base task handler. Keep consuming

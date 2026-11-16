@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import importlib.util
+import io
 from pathlib import Path
+from unittest.mock import Mock
 
 import yaml
 import pytest
@@ -18,6 +20,52 @@ def _load_ppt_tools():
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
+
+
+@pytest.mark.parametrize('response_kind', ['image', 'html', 'forbidden'])
+def test_remote_registration_downloads_and_validates_bytes_before_publishing(monkeypatch, tmp_path, response_kind):
+    import requests
+    from PIL import Image, ImageDraw
+
+    tools = _load_ppt_tools()
+    image = Image.new('RGB', (128, 128), 'white')
+    ImageDraw.Draw(image).rectangle((10, 10, 90, 90), fill='blue')
+    buffer = io.BytesIO()
+    image.save(buffer, format='PNG')
+    data = buffer.getvalue() if response_kind == 'image' else b'<html>Access denied</html>' * 10
+    response = requests.Response()
+    response.status_code = 403 if response_kind == 'forbidden' else 200
+    response.raw = io.BytesIO(data)
+    response.close = Mock(wraps=response.close)
+    # Exercise a long, extension-mismatched signed URL in the path field, too.
+    origin = 'https://example.org/photo.jpg?token=' + 'x' * 1000
+    requested = []
+
+    def get(url, **options):
+        requested.append((url, options))
+        return response
+
+    monkeypatch.setattr(tools.requests, 'get', get)
+    monkeypatch.setattr(tools, '_material_root', lambda: tmp_path)
+    monkeypatch.setattr(tools, 'select_vision_model_role', lambda: 'vlm')
+    monkeypatch.setattr(tools, '_inspect_material_image', lambda path, role: {
+        'status': 'inspected', 'description': 'A blue figure',
+    })
+    monkeypatch.setattr(tools, '_ui_slot_order_list', lambda slot: [])
+    published = []
+    monkeypatch.setattr(tools, '_save_artifact', lambda **item: published.append(item) or {'ok': True})
+    if response_kind != 'image':
+        with pytest.raises(tools.ToolExecutionError):
+            tools.ppt_register_material_images([{'path': origin}])
+        assert published == [] and not tools._material_manifest_path().exists()
+    else:
+        result = tools.ppt_register_material_images([{'path': origin}])
+        assert result['count'] == result['ui_published'] == 1
+        path = Path(published[0]['value'])
+        assert path.suffix == '.png' and path.read_bytes() == data
+        assert tools._load_material_manifest()['images'][0]['origin'] == origin
+    assert requested[0][0] == origin and requested[0][1]['stream'] is True
+    response.close.assert_called_once()
 
 
 def test_ppt_material_slot_uses_same_image_list_contract_as_image_workflow():

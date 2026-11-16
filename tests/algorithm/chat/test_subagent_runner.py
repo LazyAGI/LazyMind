@@ -2789,6 +2789,31 @@ async def test_ppt_completion_preserves_page_generation_failure(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize('recovered', [True, False])
+async def test_ppt_prompt_planning_preserves_provider_error_before_delivery_checks(monkeypatch, tmp_path, recovered):
+    reason = 'Page 2 prompt failed: 模型供应商响应超时，连续 90 秒未收到新的响应内容。'
+    events = [{'tag': 'tool_results', 'tool_results': [
+        {'name': 'ppt_plan_page_prompts', 'result': {'error': reason}},
+    ]}]
+    if recovered:
+        events.append({'tag': 'tool_results', 'tool_results': [
+            {'name': 'ppt_plan_page_prompts', 'result': {'page_count': 4, 'published_count': 3}},
+        ]})
+    _, output = await _run_completion_review_scenario(
+        monkeypatch, tmp_path, MagicMock(), agent_type='workflow_step',
+        params={'workflow_id': 'ppt-workflow', 'step_id': 'plan_page_prompts',
+                'required_output_artifact_keys': ['slide_outline'] if not recovered else [],
+                'output_slot_types': {'slide_outline': 'text'}},
+        output_slots=['slide_outline'], artifacts=[], tool_events=events, final='本步骤已完成。',
+    )
+    terminal = _terminal(output)
+    assert terminal['status'] == ('succeeded' if recovered else 'failed')
+    if not recovered:
+        assert reason in terminal['summary']
+        assert terminal['current_phase'] == 'ppt_generation_incomplete'
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize('saved', [True, False])
 async def test_workflow_refinements_preserve_record_acceptance(monkeypatch, tmp_path, saved):
     """A current-step amendment changes execution intent, not main's acceptance gate."""
