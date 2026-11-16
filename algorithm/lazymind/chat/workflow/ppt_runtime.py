@@ -7,6 +7,9 @@ from typing import Any
 from lazymind.chat.engine.subagent.extensions import RuntimeExtension
 
 
+_FONT_UNAVAILABLE_PREFIX = '请求的字体不可用：'
+
+
 def _json_object(value: Any) -> dict[str, Any]:
     if isinstance(value, dict):
         return value
@@ -47,7 +50,21 @@ def _record_tool_step(step: dict[str, Any], state: dict[str, Any]) -> None:
         if not isinstance(result, dict):
             continue
         name = result.get('name')
-        if name not in ('ppt_generate_pages', 'ppt_run_stage', 'ppt_plan_page_prompts'):
+        if name not in ('ppt_generate_pages', 'ppt_run_stage', 'ppt_plan_page_prompts', 'ppt_replace_deck_fonts'):
+            continue
+        payload = _json_object(result.get('result', result.get('content')))
+        if name == 'ppt_replace_deck_fonts':
+            reason = payload.get('error') or (payload.get('value') if payload.get('ok') is False else None)
+            if reason:
+                reason = str(reason)
+                if reason.startswith(_FONT_UNAVAILABLE_PREFIX):
+                    reason += '。请安装或导入相应字体，或选择当前可用的字体。'
+                state['font_edit_failure'] = reason[:2000]
+            elif payload.get('ok') is True:
+                edit = _json_object(payload.get('value'))
+                missing_font = state.get('font_edit_failure', '').startswith(_FONT_UNAVAILABLE_PREFIX)
+                if edit.get('published_count') and (edit.get('target_font') or not missing_font):
+                    state.pop('font_edit_failure', None)
             continue
         call_id = str(result.get('tool_call_id') or result.get('id') or '')
         target = pending.pop(call_id, None)
@@ -55,7 +72,6 @@ def _record_tool_step(step: dict[str, Any], state: dict[str, Any]) -> None:
             target = (name,)
         if target is None or target[0] != name:
             continue
-        payload = _json_object(result.get('result', result.get('content')))
         if name == 'ppt_plan_page_prompts':
             # Raised tool errors are serialized as {error: ...}; successful
             # planning returns counts without a status or ok flag.
@@ -81,6 +97,8 @@ def _record_tool_step(step: dict[str, Any], state: dict[str, Any]) -> None:
 
 
 def _completion_failure(state: dict[str, Any]) -> tuple[str, str] | None:
+    if font_failure := state.get('font_edit_failure'):
+        return 'ppt_font_edit_failed', font_failure
     failures = state.get('failures')
     if failures:
         return 'ppt_generation_incomplete', '\n'.join(failures.values())

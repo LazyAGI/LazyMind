@@ -82,6 +82,45 @@ def test_whole_deck_missing_exact_font_is_rejected(tools, monkeypatch):
         tools._resolve_requested_font('SimSun', False)
 
 
+def test_yahei_locale_alias_only_resolves_when_family_is_installed(tools, monkeypatch):
+    from lazymind.chat.engine.tools.file_resources import font_library
+
+    monkeypatch.setattr(tools, '_agent_llm_call', lambda *a, **kw: pytest.fail('Exact family needs no model'))
+    with pytest.raises(font_library.FontUnavailableError, match='微软雅黑'):
+        tools._resolve_requested_font('微软雅黑', False)
+    tools.available_font_families = lambda: {'Microsoft YaHei'}
+    monkeypatch.setattr(font_library, 'ensure_font', lambda family, _allow: family)
+    assert tools._resolve_requested_font('微软雅黑', False) == 'Microsoft YaHei'
+
+
+def test_installed_font_with_restricted_embedding_can_be_used_locally(monkeypatch, tmp_path):
+    from types import SimpleNamespace
+    from lazymind.chat.engine.tools.file_resources import portable_fonts
+
+    class RestrictedFace:
+        def __getitem__(self, key):
+            assert key == 'name'
+            name = SimpleNamespace(nameID=1, toUnicode=lambda: 'Installed Font')
+            return SimpleNamespace(names=[name])
+
+        def get(self, key):
+            assert key == 'OS/2'
+            return SimpleNamespace(fsType=2)
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(portable_fonts, '_system_font_paths', lambda: [tmp_path / 'installed.ttf'])
+    monkeypatch.setattr(portable_fonts, 'TTFont', lambda path: RestrictedFace())
+    monkeypatch.setattr(portable_fonts, 'local_fonts', lambda: [])
+    monkeypatch.setattr(portable_fonts, 'ensure_font', lambda family, _download: family)
+    monkeypatch.setenv('LAZYMIND_RUNTIME_MODE', 'local')
+    assert portable_fonts.portable_font_faces('Installed Font', allow_system_only=True) == ('Installed Font', [])
+    monkeypatch.setenv('LAZYMIND_RUNTIME_MODE', 'online')
+    with pytest.raises(ValueError, match='没有可嵌入'):
+        portable_fonts.portable_font_faces('Installed Font', allow_system_only=True)
+
+
 def test_whole_deck_request_persists_and_publishes_resolved_font(tools, monkeypatch, tmp_path):
     from lazymind.chat.engine.tools.file_resources import font_library
     pages = tmp_path / 'pages'
@@ -136,6 +175,7 @@ def test_redraw_preserves_deck_and_page_font_choices(tools, monkeypatch, tmp_pat
     tools.ppt_replace_deck_fonts(str(tmp_path), target_font='Arial', allow_font_download=False)
     tools.ppt_replace_deck_fonts(
         str(tmp_path), target_font='Songti SC', pages=2, text_scope='titles', allow_font_download=False,
+        font_size_pt=30, bold=True, text_color='#123456',
     )
     original_first_page = (pages / 'page_001.html').read_text()
 
@@ -153,6 +193,8 @@ def test_redraw_preserves_deck_and_page_font_choices(tools, monkeypatch, tmp_pat
     assert tools._read_page_font_overrides(second) == {'all': 'Arial', 'titles': 'Songti SC'}
     title, body = (next(n for n in tools._HtmlTree(second).nodes if n['tag'] == tag) for tag in ('h1', 'p'))
     assert 'Songti SC' in title['attrs']['style']
+    assert '30pt' in title['attrs']['style'] and '#123456' in title['attrs']['style']
+    assert '700' in title['attrs']['style'] and '#123456' not in body['attrs']['style']
     assert 'Arial' in body['attrs']['style']
     first = (pages / 'page_001.html').read_text()
     if stage == 'page-html':

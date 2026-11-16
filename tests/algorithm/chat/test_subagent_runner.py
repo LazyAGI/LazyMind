@@ -2814,6 +2814,29 @@ async def test_ppt_prompt_planning_preserves_provider_error_before_delivery_chec
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize('retry', [None, 'formatting', 'font'])
+async def test_missing_ppt_font_is_reported_before_delivery_check(monkeypatch, tmp_path, retry):
+    reason = '请求的字体不可用：微软雅黑'
+    tool_name = 'ppt_replace_deck_fonts'
+    events = [{'tag': 'tool_results', 'tool_results': [{'name': tool_name, 'result': {'ok': False, 'value': reason}}]}]
+    if retry:
+        events.append({'tag': 'tool_results', 'tool_results': [{'name': tool_name, 'result': {
+            'ok': True, 'value': {'target_font': 'PingFang SC' if retry == 'font' else None, 'published_count': 4},
+        }}]})
+    _, output = await _run_completion_review_scenario(
+        monkeypatch, tmp_path, MagicMock(), agent_type='workflow_step',
+        params={'workflow_id': 'ppt-workflow', 'step_id': 'generate_ppt',
+                'required_output_artifact_keys': ['preview_html'] if retry != 'font' else []},
+        output_slots=['preview_html'], artifacts=[], tool_events=events, final='完成处理。',
+    )
+    terminal = _terminal(output)
+    assert terminal['status'] == ('succeeded' if retry == 'font' else 'failed')
+    if retry != 'font':
+        assert terminal['current_phase'] == 'ppt_font_edit_failed'
+        assert reason in terminal['summary'] and '安装或导入' in terminal['summary']
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize('saved', [True, False])
 async def test_workflow_refinements_preserve_record_acceptance(monkeypatch, tmp_path, saved):
     """A current-step amendment changes execution intent, not main's acceptance gate."""
