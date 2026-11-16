@@ -1708,6 +1708,9 @@ components:
             type: object
         AcademicSourceImportItem:
             properties:
+                batch_created_at:
+                    format: date-time
+                    type: string
                 batch_id:
                     type: string
                 created_library:

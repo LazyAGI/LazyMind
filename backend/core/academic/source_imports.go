@@ -326,6 +326,7 @@ type SourceImportView struct {
 	RetryAt          *time.Time `json:"retry_at,omitempty"`
 	ItemID           string     `json:"item_id"`
 	BatchID          string     `json:"batch_id"`
+	BatchCreatedAt   time.Time  `json:"batch_created_at"`
 	Title            string     `json:"title"`
 	PaperKey         string     `json:"paper_key"`
 	TargetDatasetID  string     `json:"target_dataset_id"`
@@ -347,7 +348,11 @@ type SourceImportView struct {
 }
 
 func sourceItemView(ctx context.Context, b orm.PaperImportBatch, item orm.PaperImportItem, c doc.DatasetCatalogCaller, cached ...map[string]map[string]doc.DocumentMetadata) (SourceImportView, error) {
-	v := SourceImportView{ItemID: item.ID, BatchID: b.ID, TargetDatasetID: b.TargetDatasetID, CreatedLibrary: sourcePolicy(b).CreatedLibrary, Status: item.Status, Stage: item.Stage, DocumentID: item.DocumentID, ErrorCode: item.ErrorCode}
+	v := SourceImportView{
+		ItemID: item.ID, BatchID: b.ID, BatchCreatedAt: b.CreatedAt,
+		TargetDatasetID: b.TargetDatasetID, CreatedLibrary: sourcePolicy(b).CreatedLibrary,
+		Status: item.Status, Stage: item.Stage, DocumentID: item.DocumentID, ErrorCode: item.ErrorCode,
+	}
 	var ds orm.Dataset
 	if e := store.DB().Where("id = ?", b.TargetDatasetID).Take(&ds).Error; e != nil {
 		return v, e
@@ -378,6 +383,7 @@ func sourceItemView(ctx context.Context, b orm.PaperImportBatch, item orm.PaperI
 		}
 		originalView.ItemID = item.ID
 		originalView.BatchID = b.ID
+		originalView.BatchCreatedAt = v.BatchCreatedAt
 		originalView.CreatedLibrary = v.CreatedLibrary
 		if originalBatch.CreatedBy != b.CreatedBy {
 			originalView.Retryable = false
