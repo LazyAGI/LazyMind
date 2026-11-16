@@ -659,12 +659,19 @@ func completedOrganizeSummary(ctx context.Context, db *gorm.DB, userID, requestI
 func parseOrganizeApprovalItems(summary string) ([]organizeApprovalItem, error) {
 	var payload struct {
 		ApprovalItems []organizeApprovalItem `json:"approval_items"`
+		FSApply       struct {
+			ApprovalItems []organizeApprovalItem `json:"approval_items"`
+		} `json:"fs_apply"`
 	}
 	if strings.TrimSpace(summary) == "" {
 		return nil, nil
 	}
 	if err := json.Unmarshal([]byte(summary), &payload); err != nil {
 		return nil, err
+	}
+	// Current organizers stage proposals under fs_apply; retain legacy summaries.
+	if payload.FSApply.ApprovalItems != nil {
+		payload.ApprovalItems = payload.FSApply.ApprovalItems
 	}
 	items := make([]organizeApprovalItem, 0, len(payload.ApprovalItems))
 	for _, item := range payload.ApprovalItems {
