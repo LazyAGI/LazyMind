@@ -9,7 +9,7 @@ const connectionIssueCodes = new Set([
   "pairing_disabled", "pairing_account_mismatch", "pairing_credential_mismatch", "pairing_invalid",
   "pairing_unreadable", "mcp_trust_required", "mcp_enable_required", "unsupported_version", "dependency_environment",
   "operation_failed", "version_unreadable", "capability_unavailable", "host_unavailable", "installation_unavailable",
-  "plugin_update_required", "mcp_unavailable",
+  "plugin_update_required", "mcp_unavailable", // workflow-naming: dsh-external
 ]);
 
 export function agentConnectionReady(status?: DesktopAgentIntegrationStatus): boolean {

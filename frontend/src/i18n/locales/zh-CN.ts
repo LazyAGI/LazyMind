@@ -2635,7 +2635,7 @@ const zhCN = {
       capability_unavailable: "接入能力不可用",
       host_unavailable: "会话控制不可用",
       installation_unavailable: "安装组件不可用",
-      plugin_update_required: "连接插件待更新",
+      plugin_update_required: "连接插件待更新", // workflow-naming: dsh-external
       mcp_unavailable: "工具连接不可用",
     },
     loginStates: {

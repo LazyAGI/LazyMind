@@ -2582,10 +2582,10 @@ const enUS = {
       installedTitle: "Components installed",
       installedDescription: "Confirm that LazyMind Workflow is enabled. The switch and plugin stay enabled. If a later app launch is disconnected, return to this installation guide to confirm connecting.",
       entryTitle: "Open plugin settings",
-      entryDescription: "Open Settings → Plugins and find LazyMind Workflow.",
+      entryDescription: "Open plugin settings and find LazyMind Workflow.",
       entryImageAlt: "The plugin settings entry",
       enableTitle: "Confirm LazyMind Workflow is enabled",
-      enableDescription: "In Settings → Plugins, find LazyMind Workflow and confirm that its blue toggle is on.",
+      enableDescription: "In plugin settings, find LazyMind Workflow and confirm that its blue toggle is on.",
       enableImageAlt: "LazyMind Workflow installed and enabled in plugin settings",
       enabledConfirmation: "I have confirmed it is enabled",
       imageNote: "The images show the Chinese interface. The interface and tool count may vary by version. Click an image to enlarge it.",
@@ -2672,7 +2672,7 @@ const enUS = {
       capability_unavailable: "Connection capability unavailable",
       host_unavailable: "Session control unavailable",
       installation_unavailable: "Installation components unavailable",
-      plugin_update_required: "Connection plugin update pending",
+      plugin_update_required: "Connection plugin update pending", // workflow-naming: dsh-external
       mcp_unavailable: "Tool connection unavailable",
     },
     loginStates: {
