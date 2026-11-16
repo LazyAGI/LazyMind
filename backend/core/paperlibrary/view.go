@@ -61,9 +61,10 @@ func Load(ctx context.Context, db *gorm.DB, dataset, user string, ids []string, 
 	// bibliography. Preserve that provenance before projecting typed fields.
 	var auxiliary struct {
 		Attachments []struct {
-			ID      string `json:"id"`
-			PaperID string `json:"paperId"`
-			Source  string `json:"source"`
+			ID              string `json:"id"`
+			PaperID         string `json:"paperId"`
+			Source          string `json:"source"`
+			ProcessingError string `json:"processingError"`
 		} `json:"attachments"`
 	}
 	if len(view.Data.Extra) > 0 {
@@ -72,7 +73,9 @@ func Load(ctx context.Context, db *gorm.DB, dataset, user string, ids []string, 
 		}
 	}
 	attachmentSources := map[string]map[string]string{}
+	attachmentErrors := map[string]string{}
 	for _, attachment := range auxiliary.Attachments {
+		attachmentErrors[attachment.ID] = attachment.ProcessingError
 		if attachmentSources[attachment.PaperID] == nil {
 			attachmentSources[attachment.PaperID] = map[string]string{}
 		}
@@ -252,7 +255,7 @@ func Load(ctx context.Context, db *gorm.DB, dataset, user string, ids []string, 
 		document, available := docByID[a.DocumentID]
 		available = available && availability[document.ID]
 		source := defaultText(attachmentSources[a.PaperID][a.ID], defaultText(link.SourceProvider, p.Source))
-		attachment := Attachment{ID: a.ID, PaperID: a.PaperID, Name: a.Name, Kind: a.Kind, ContentRef: a.DocumentID, Source: source, SourceProvider: link.SourceProvider, SourceVersion: link.SourceVersion, SourceURL: link.SourceLocator, ContentHash: link.ContentSHA256, IsPrimary: a.IsPrimary, Available: a.DocumentID == "" || available, AddedAt: a.CreatedAt}
+		attachment := Attachment{ProcessingError: attachmentErrors[a.ID], ID: a.ID, PaperID: a.PaperID, Name: a.Name, Kind: a.Kind, ContentRef: a.DocumentID, Source: source, SourceProvider: link.SourceProvider, SourceVersion: link.SourceVersion, SourceURL: link.SourceLocator, ContentHash: link.ContentSHA256, IsPrimary: a.IsPrimary, Available: a.DocumentID == "" || available, AddedAt: a.CreatedAt}
 		if link.SourceProvider == "upload" {
 			attachment.ImportMethod = "upload"
 		}

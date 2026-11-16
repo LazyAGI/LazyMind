@@ -63,6 +63,13 @@ func loadLibraryView(r *http.Request, db *gorm.DB, dataset string, ids []string,
 				attachment.ProcessingError = current.ProcessingError.Message
 			}
 		}
+		// Preserve original import/submission failures stored in attachment extras.
+		// A proven newer success or active task supersedes the old diagnostic.
+		if attachment.Parse == "ready" || attachment.Parse == "queued" || attachment.Parse == "parsing" {
+			attachment.ProcessingError = ""
+		} else if attachment.ProcessingError != "" {
+			attachment.Parse = "failed"
+		}
 		if attachment.Parse == "parsing" || attachment.Parse == "queued" {
 			view.Active = true
 		}
