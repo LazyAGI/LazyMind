@@ -218,7 +218,7 @@ func Load(ctx context.Context, db *gorm.DB, dataset, user string, ids []string, 
 		if err != nil {
 			return view, err
 		}
-		p := Paper{ID: e.ID, AcademicWorkID: e.AcademicWorkID, Revision: e.Revision, Metadata: metadata, FolderID: Pointer(e.FolderID), Status: states[e.AcademicWorkID].ReadingStatus, Tags: []string{}, Important: states[e.AcademicWorkID].IsImportant, Source: e.Source, ImportMethod: e.ImportMethod, SourceURL: e.SourceURL, ArxivVersion: e.ArxivVersion, Parse: "ready", AttachmentIDs: []string{}, NoteIDs: []string{}, Incomplete: metadata.Title == "" || len(metadata.Authors) == 0}
+		p := Paper{ID: e.ID, AcademicWorkID: e.AcademicWorkID, Revision: e.Revision, Metadata: metadata, FolderID: Pointer(e.FolderID), Status: states[e.AcademicWorkID].ReadingStatus, Tags: []string{}, Important: states[e.AcademicWorkID].IsImportant, Source: e.Source, ImportMethod: e.ImportMethod, SourceURL: e.SourceURL, ArxivVersion: e.ArxivVersion, Parse: "unknown", AttachmentIDs: []string{}, NoteIDs: []string{}, Incomplete: metadata.Title == "" || len(metadata.Authors) == 0}
 		if p.Status == "" {
 			p.Status = "unread"
 		}

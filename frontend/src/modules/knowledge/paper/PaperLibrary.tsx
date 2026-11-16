@@ -1,3 +1,4 @@
+import PdfParseStatus from './PdfParseStatus';
 import ReadingPreferencesModal from "./ReadingPreferencesModal";
 import { readLibraryViewCache, writeLibraryViewCache } from "./libraryViewCache";
 import { usePaperImports, PaperImportDialog } from './usePaperImports';
@@ -387,7 +388,7 @@ function PaperLibraryContent({ userId, datasetId, onUploadPdf, title = "论文�
     }, [saving, confirmingImport, reload]);
     useEffect(() => {
         const active = libraryActive || importPage.notification.active > 0
-            || dataState.papers.some(paper => paper.parse === 'parsing')
+            || dataState.papers.some(paper => ['parsing', 'queued'].includes(paper.parse))
             || dataState.attachments.some(attachment => ['pending', 'processing'].includes(attachment.academicState?.status || ''));
         if (!snapshotReady || loading || saving || confirmingImport || !active)
             return;
@@ -545,7 +546,7 @@ function PaperLibraryContent({ userId, datasetId, onUploadPdf, title = "论文�
     const reparseDisabledReason = (item: PaperRecord) => !canParse ? '文档解析服务当前不可用'
         : !primaryDocument(item.id) ? '请先添加 PDF 附件'
             : processingLevel === 'stored' ? '请先提高知识库处理级别'
-                : item.parse === 'parsing' ? '正文正在解析中' : undefined;
+                : ['parsing', 'queued'].includes(item.parse) ? '正文正在解析中' : undefined;
     const openReparse = (item: PaperRecord) => {
         const document = primaryDocument(item.id);
         if (disabled || reparseDisabledReason(item) || !document)
@@ -579,7 +580,7 @@ function PaperLibraryContent({ userId, datasetId, onUploadPdf, title = "论文�
                     syncGeneration.current += 1;
                     setSyncRevision(value => value + 1);
                 }
-            }} onOpenAttachment={onOpenAttachment} paper={detailPaper} onReparse={() => openReparse(detailPaper)} reparseDisabledReason={reparseDisabledReason(detailPaper)} data={dataState} onNotification={notify} onNotificationResolved={resolve} onClose={() => setDetailPaperId(null)} onAddNote={async (id, content) => { await mutate(() => addLibraryNote(datasetId, detailPaper.id, id, content), { id: `paper-note:${detailPaper.id}`, title: `《${detailPaper.metadata.title}》笔记保存失败`, action: { label: "查看笔记", onClick: () => openDetail(detailPaper.id, "notes") } }); }} disabled={disabled} personalDisabled={personalDisabled} onStatusChange={status => updatePaper(detailPaper.id, { status })} onSetPrimaryAttachment={async attachment => {
+            }} onOpenAttachment={onOpenAttachment} paper={detailPaper} onRefresh={async () => { await reload(); }} onReparse={() => openReparse(detailPaper)} reparseDisabledReason={reparseDisabledReason(detailPaper)} data={dataState} onNotification={notify} onNotificationResolved={resolve} onClose={() => setDetailPaperId(null)} onAddNote={async (id, content) => { await mutate(() => addLibraryNote(datasetId, detailPaper.id, id, content), { id: `paper-note:${detailPaper.id}`, title: `《${detailPaper.metadata.title}》笔记保存失败`, action: { label: "查看笔记", onClick: () => openDetail(detailPaper.id, "notes") } }); }} disabled={disabled} personalDisabled={personalDisabled} onStatusChange={status => updatePaper(detailPaper.id, { status })} onSetPrimaryAttachment={async attachment => {
                 await mutate(() => patchLibraryPaper(datasetId, detailPaper, { primary_attachment_id: attachment.id }), { id: `paper-primary:${detailPaper.id}`, title: '主附件设置失败', action: { label: '查看附件', onClick: () => openDetail(detailPaper.id, 'attachments', detailPresentation) } });
             }} onOpenPaper={id => openDetail(id, 'relations', detailPresentation)} onAddPdf={() => openImport('upload', detailPaper.id)} onDetachAttachment={async (attachment) => { await mutate(() => detachLibraryAttachment(datasetId, detailPaper, attachment.id), { id: `paper-attachment:${attachment.id}`, title: `附件「${attachment.name}」移除关联失败`, action: { label: "查看附件", onClick: () => openDetail(detailPaper.id, "attachments") } }); }}/>);
     const libraryNotices: PaperNotification[] = [
@@ -742,10 +743,11 @@ function PaperLibraryContent({ userId, datasetId, onUploadPdf, title = "论文�
                     setEditing(item);
                     setEditError(null);
                 }}>题录待补全</button></Tooltip>}
-                  {item.parse === "failed" && <Tooltip title={item.processingError || "正文解析失败，请检查导入任务"}><span className="paper-library-warn">正文解析失败</span></Tooltip>}
-                  {item.parse === "parsing" && <span className="paper-library-source">正文解析中</span>}
                   {item.associationConflict && <button type="button" className="paper-library-warn" onClick={() => openDetail(item.id, 'attachments')}>附件归属待核对</button>}
+                </div>
+                <div className="paper-library-materials">
                   <button type="button" className="paper-library-material" onClick={() => openDetail(item.id, "attachments")}>{materialByPaper.get(item.id)?.pdfs.length ? `PDF · ${materialByPaper.get(item.id)!.pdfs.length} 份` : materialByPaper.get(item.id)?.links.length ? '原文链接' : materialByPaper.get(item.id)?.supplements.length ? '无 PDF' : '暂无 PDF'}</button>
+                  {!!materialByPaper.get(item.id)?.pdfs.length && <PdfParseStatus status={item.parse} error={item.processingError} onRefresh={async () => { await reload(); }} onParse={canWrite ? () => openReparse(item) : undefined} disabledReason={disabled ? '暂不可操作' : reparseDisabledReason(item)} />}
                   {!!materialByPaper.get(item.id)?.supplements.length && <button type="button" className="paper-library-material" onClick={() => openDetail(item.id, 'attachments')}>补充材料 · {materialByPaper.get(item.id)!.supplements.length} 份</button>}
                   {!!materialByPaper.get(item.id)?.notes && <button type="button" className="paper-library-material" onClick={() => openDetail(item.id, "notes")}>{materialByPaper.get(item.id)?.notes} 条笔记</button>}
                   <PaperTags paper={item} collectionTags={collectionTags} canWrite={canWrite} disabled={disabled} onChange={change => updatePaperTags(item, change)} />

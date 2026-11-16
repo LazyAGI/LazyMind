@@ -15,10 +15,10 @@ func TestPaperViewsUseRequestedProcessingInsteadOfDatasetDefault(t *testing.T) {
 		name, level, taskState, wantParse, wantOperation, wantDocument string
 		active                                                         int
 	}{
-		{"legacy_original_only", "", "SUCCEEDED", "ready", "ready", "ready", 0},
-		{"explicit_stored", "stored", "SUCCEEDED", "ready", "ready", "ready", 0},
+		{"legacy_original_only", "", "SUCCEEDED", "not_requested", "ready", "ready", 0},
+		{"explicit_stored", "stored", "SUCCEEDED", "not_requested", "ready", "ready", 0},
 		{"parse_only_completed", "parsed", "SUCCEEDED", "ready", "ready", "ready", 0},
-		{"queued_parse", "parsed", "UPLOADED", "parsing", "processing", "running", 1},
+		{"queued_parse", "parsed", "UPLOADED", "queued", "processing", "running", 1},
 		{"running_parse", "parsed", "RUNNING", "parsing", "processing", "running", 1},
 		{"failed_parse", "parsed", "FAILED", "failed", "processing_failed", "failed", 0},
 	} {
@@ -47,6 +47,9 @@ func TestPaperViewsUseRequestedProcessingInsteadOfDatasetDefault(t *testing.T) {
 				}
 			}
 			view := readLibrary(t, "papers")
+			if view.Data.Attachments[0].Parse != test.wantParse {
+				t.Errorf("attachment parse=%s; want %s", view.Data.Attachments[0].Parse, test.wantParse)
+			}
 			if view.Data.Papers[0].Parse != test.wantParse || view.Active != (test.active > 0) {
 				t.Errorf("library parse=%s active=%v; want %s/%v", view.Data.Papers[0].Parse, view.Active, test.wantParse, test.active > 0)
 			}
@@ -67,6 +70,47 @@ func TestPaperViewsUseRequestedProcessingInsteadOfDatasetDefault(t *testing.T) {
 			item := detail.Items[0]
 			if item.CurrentState != test.wantOperation || item.CurrentDocument == nil || item.CurrentDocument.ProcessingStatus != test.wantDocument {
 				t.Errorf("operation state=%s document=%+v; want %s/%s", item.CurrentState, item.CurrentDocument, test.wantOperation, test.wantDocument)
+			}
+		})
+	}
+}
+
+func TestPaperLibraryDoesNotInventActiveParsing(t *testing.T) {
+	for _, test := range []struct{ name, stage, taskState string }{
+		{"missing_stage_and_task", "", ""},
+		{"seeded_pending_without_task", "pending", ""},
+		{"stale_running_without_task", "running", ""},
+		{"unknown_task", "pending", "UNKNOWN"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			db := paperLibraryTestDB(t)
+			paper := importDraft(t, "papers", "metadata", libraryDraft("paper", "Paper", "10.1234/unknown")).Data.Papers[0]
+			db.Model(&orm.PaperImportItem{}).Where("library_paper_id=?", paper.ID).Updates(map[string]any{"status": "succeeded", "stage": "done", "result_kind": "metadata_only"})
+			path := filepath.Join(t.TempDir(), "paper.pdf")
+			if err := os.WriteFile(path, []byte("%PDF original"), 0600); err != nil {
+				t.Fatal(err)
+			}
+			for _, row := range []any{
+				&orm.Document{ID: "pdf", DatasetID: "papers", DisplayName: "paper.pdf", Ext: marshal(map[string]string{"stored_path": path})},
+				&orm.PaperLibraryAttachment{DatasetID: "papers", PaperID: paper.ID, ID: "attachment", DocumentID: "pdf", Name: "paper.pdf", Kind: "pdf", IsPrimary: true},
+			} {
+				if err := db.Create(row).Error; err != nil {
+					t.Fatal(err)
+				}
+			}
+			if test.stage != "" {
+				if err := db.Create(&orm.DocumentProcessingState{DatasetID: "papers", DocumentID: "pdf", ParseStatus: test.stage}).Error; err != nil {
+					t.Fatal(err)
+				}
+			}
+			if test.taskState != "" {
+				if err := db.Create(&orm.Task{ID: "task", DatasetID: "papers", DocID: "pdf", TaskType: "TASK_TYPE_PARSE_UPLOADED", Ext: marshal(map[string]any{"task_state": test.taskState, "processing_level": "parsed"})}).Error; err != nil {
+					t.Fatal(err)
+				}
+			}
+			view := readLibrary(t, "papers")
+			if view.Data.Papers[0].Parse == "parsing" || view.Active {
+				t.Fatalf("unproven parsing: parse=%s active=%v", view.Data.Papers[0].Parse, view.Active)
 			}
 		})
 	}

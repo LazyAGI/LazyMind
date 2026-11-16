@@ -841,6 +841,7 @@ func (s *DocumentService) GetProcessingMetadata(ctx context.Context, caller Data
 			detail[1] = ext.ErrorMessage
 		}
 		out[row.ID] = DocumentMetadata{ID: row.ID, DatasetID: datasetID, ProcessingLevel: ds.ProcessingLevel, ProcessingState: state,
+			ParseStatus:             raw, // Observed current task status, not a seeded processing stage.
 			ObservedProcessingLevel: snapshot.observedProcessingLevel(task, state), OriginalAvailable: paperlibrary.OriginalAvailable(row),
 			ProcessingError: processingDiagnostic(state, task, raw, detail[0], detail[1])}
 	}

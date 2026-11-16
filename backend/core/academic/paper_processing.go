@@ -25,11 +25,9 @@ func loadLibraryView(r *http.Request, db *gorm.DB, dataset string, ids []string,
 		return view, err
 	}
 	documents := []string{}
-	primary := map[string]string{}
 	for _, attachment := range view.Data.Attachments {
-		if attachment.IsPrimary && attachment.Kind == "pdf" && attachment.Available && attachment.ContentRef != "" {
+		if attachment.Kind == "pdf" && attachment.Available && attachment.ContentRef != "" {
 			documents = append(documents, attachment.ContentRef)
-			primary[attachment.PaperID] = attachment.ContentRef
 		}
 	}
 	metadata, err := processingMetadata(r, db, dataset, documents)
@@ -37,30 +35,45 @@ func loadLibraryView(r *http.Request, db *gorm.DB, dataset string, ids []string,
 		return view, err
 	}
 	for i := range view.Data.Papers {
-		paper := &view.Data.Papers[i]
-		id := primary[paper.ID]
-		if id == "" {
+		view.Data.Papers[i].Parse = "unknown"
+	}
+	for i := range view.Data.Attachments {
+		attachment := &view.Data.Attachments[i]
+		if attachment.Kind != "pdf" {
 			continue
 		}
-		current, exists := metadata[id]
-		status := doc.DocumentProcessingStatus(doc.ProcessingLevelParsed, current.ProcessingState)
-		// Saving an original does not request parsing. Seeded pending stages
-		// and today's collection default must not make it look like an active
-		// parser task. Explicitly queued/running tasks retain their observed level.
-		if current.ObservedProcessingLevel == doc.ProcessingLevelStored {
-			status = "not_requested"
-		}
-		switch {
-		case exists && (status == "ready" || status == "not_requested"):
-			paper.Parse = "ready"
-		case exists && status == "failed":
-			paper.Parse = "failed"
-			if current.ProcessingError != nil {
-				paper.ProcessingError = current.ProcessingError.Message
+		current, exists := metadata[attachment.ContentRef]
+		attachment.Parse = "unknown"
+		if exists {
+			status := doc.DocumentProcessingStatus(doc.ProcessingLevelParsed, current.ProcessingState)
+			taskStatus := doc.NormalizeTaskStateForUI(current.ParseStatus)
+			switch {
+			case status == "ready":
+				attachment.Parse = "ready"
+			case status == "failed":
+				attachment.Parse = "failed"
+			case (status == "pending" || status == "running") && taskStatus == "WAITING":
+				attachment.Parse = "queued"
+			case (status == "pending" || status == "running") && taskStatus == "WORKING":
+				attachment.Parse = "parsing"
+			case current.ObservedProcessingLevel == doc.ProcessingLevelStored && current.ParseStatus == "" && current.ProcessingState.ParseStatus == "pending":
+				attachment.Parse = "not_requested"
 			}
-		default:
-			paper.Parse = "parsing"
+			if current.ProcessingError != nil && attachment.Parse == "failed" {
+				attachment.ProcessingError = current.ProcessingError.Message
+			}
+		}
+		if attachment.Parse == "parsing" || attachment.Parse == "queued" {
 			view.Active = true
+		}
+		if attachment.IsPrimary {
+			for j := range view.Data.Papers {
+				paper := &view.Data.Papers[j]
+				if paper.ID == attachment.PaperID {
+					paper.Parse = attachment.Parse
+					paper.ProcessingError = attachment.ProcessingError
+				}
+			}
 		}
 	}
 	return view, nil

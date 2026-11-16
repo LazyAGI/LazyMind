@@ -13,7 +13,7 @@ Selecting PDF text opens a compact question/note composer with translation and e
 
 ## Enable and use
 
-Configure and select an official MinerU OCR credential in external-service settings. Open an original PDF in a knowledge document or paper attachment and enable formula parsing. Browser fingerprint validation requires HTTPS or localhost; insecure remote HTTP displays an explicit unsupported-context message. Parsing runs as a durable background job; the reader polls its status. Once ready, hover over an equation or activate its formula marker. Dragging to select document text keeps the existing text-selection behavior. Escape dismisses the formula card.
+Configure and select an official MinerU OCR credential in external-service settings. Official MinerU API requests skip TLS certificate verification for regional endpoint compatibility and keep the configured domain; they do not fall back to another domain. This retains encryption but does not authenticate the API server certificate. Signed artifact uploads and downloads still verify TLS certificates. Open an original PDF in a knowledge document or paper attachment and enable formula parsing. Browser fingerprint validation requires HTTPS or localhost; insecure remote HTTP displays an explicit unsupported-context message. Parsing runs as a durable background job; the reader polls its status. Once ready, hover over an equation or activate its formula marker. Dragging to select document text keeps the existing text-selection behavior. Escape dismisses the formula card.
 
 Parsing requires document write permission; existing results require read permission. The initial read does not upload the document. Local or custom MinerU services are currently reported as unavailable for this feature and are never silently redirected to the official service. Only the original PDF is supported; translated or regenerated PDFs must not reuse original coordinates.
 
@@ -133,3 +133,11 @@ Opening figure or table study preserves the current PDF scroll position. An offs
 切换服务不会重新生成已有结果；已删除或撤销共享的选择会显示不可用，已有缓存仍可阅读，新的生成须重新选择。可继续保存其他准备设置，或改回「跟随默认」。服务配置入口分别为 `/settings?section=model_defaults&service=parsing` 与 `/settings?section=models`。接口 `parser_ref`、`study_model_ref` 只接受服务端发出的来源限定引用，空字符串表示继承；`provider_selections` 仅提供候选 ID、显示名称及可用性说明，不返回密钥或连接配置。
 
 Preparation status queries select only the current user, document, and source fingerprint in the database. Automatic enrollment excludes all previously enrolled documents (including failed jobs), reads at most 100 candidates per user per pass, and advances a scheduler-owned keyset cursor past unavailable sources. At exhaustion it wraps to retry sources that may have become available. Indexed queries preserve the user-scoped automatic concurrency lock. Document-chat parsing permits read-only collaborators, consistent with its entry point; explicit AI preparation still requires write access. Worker failures update both task and document parsing state.
+
+## Paper library PDF status
+
+Each PDF attachment reports its own parsing status. The primary attachment supplies the paper-list summary: `not_requested` (original saved, parsing not requested), `queued` (confirmed waiting task), `parsing` (confirmed running task), `ready` (observed parsing success), `failed`, or `unknown`. Missing task observations never imply active parsing. The list and attachment view use the same labeled status control; unknown is visible and offers refresh, while failed and unrequested primary PDFs offer the existing explicit parse action when permitted. Errors are available in a collapsed details section, and the original PDF remains readable.
+
+![PDF status and refresh](images/pdf-parse-status.png)
+
+The MinerU transport change is shared by Docker and desktop runtimes: both package the Python `algorithm/lazymind` implementation and build the Go Core client from `backend/core`. Existing installed desktop versions require an updated build to receive it. OCR settings select exactly one verified provider; saving another provider's credentials does not implicitly activate it.
