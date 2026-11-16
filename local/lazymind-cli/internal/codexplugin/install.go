@@ -110,9 +110,9 @@ func findNode(ctx context.Context, preferred string) (string, error) {
 		return node, nil
 	}
 	candidates := []string{preferred}
-	if path, err := agentexec.FindExecutable("", []string{"node"}); err == nil {
-		candidates = append(candidates, path)
-	}
+	// Validate every discovered installation: an old or broken Node earlier in
+	// PATH must not hide a compatible Homebrew or Windows installation.
+	candidates = append(candidates, agentexec.FindExecutables([]string{"node"})...)
 	if home, err := os.UserHomeDir(); err == nil {
 		if host := strings.TrimSpace(os.Getenv("LAZYMIND_HOST_HOME")); host != "" {
 			home = host
