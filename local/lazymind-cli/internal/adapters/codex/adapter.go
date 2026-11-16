@@ -239,6 +239,10 @@ func (a *Adapter) Connect(ctx context.Context) (result agentintegration.Status) 
 	// also requires an enabled pairing for the currently signed-in account.
 	if status.State == agentintegration.Enabled {
 		if record, e := codexplugin.Read(); e == nil && record.BuildID == codexplugin.BuildID() && workflowhost.Configured(a.home, record.ConnectorID, account) {
+			record, e = codexplugin.RefreshNode(ctx)
+			if e != nil {
+				return agentintegration.FailError(status, e)
+			}
 			if e = codexhost.Configure(a.home, record.Node, record.PairingFile); e != nil {
 				return agentintegration.Fail(status, e.Error())
 			}

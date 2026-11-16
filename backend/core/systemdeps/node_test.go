@@ -110,3 +110,37 @@ func TestExtractNodeExecutable(t *testing.T) {
 		}
 	}
 }
+
+func TestManagedNodeUsesHostHomeAndDetectsLegacyServiceNode(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX executable fixture")
+	}
+	host, service := t.TempDir(), t.TempDir()
+	t.Setenv("HOME", service)
+	t.Setenv("LAZYMIND_HOST_HOME", host)
+	t.Setenv("LAZYMIND_NODE_BIN", "")
+	t.Setenv("PATH", t.TempDir())
+	target, err := managedNodePath()
+	if err != nil || target != filepath.Join(host, ".lazymind", "deps", "node", "bin", "node") {
+		t.Fatalf("unexpected install path %q: %v", target, err)
+	}
+	legacy := filepath.Join(service, ".lazymind", "deps", "node", "bin", "node")
+	if err := os.MkdirAll(filepath.Dir(legacy), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(legacy, []byte("#!/bin/sh\necho v24.22.3\n"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if status := detectNode(t.Context()); !status.Installed || status.Path != legacy {
+		t.Fatalf("legacy runtime unavailable: %+v", status)
+	}
+	if err := os.MkdirAll(filepath.Dir(target), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(target, []byte("#!/bin/sh\necho v24.22.3\n"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if status := detectNode(t.Context()); status.Path != target {
+		t.Fatalf("canonical runtime not preferred: %+v", status)
+	}
+}
