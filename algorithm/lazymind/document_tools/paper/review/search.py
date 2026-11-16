@@ -171,6 +171,9 @@ def _fetch(source, query, limit, key, year_from=None, year_to=None):
         url = 'https://api.openalex.org/works'
         params = {'search.title_and_abstract': query, 'per_page': limit, 'api_key': key}
     elif source == 'sciverse':
+        if isinstance(key, (list, tuple)):
+            from lazyllm.common import KeyPool, KeySelectPolicy
+            key = KeyPool(list(key), KeySelectPolicy.RANDOM).ordered_keys()[0]
         url, method = 'https://api.sciverse.space/meta-search', 'POST'
         headers['Authorization'] = 'Bearer ' + key
         params = None

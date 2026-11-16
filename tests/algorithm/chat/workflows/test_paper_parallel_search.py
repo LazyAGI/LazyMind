@@ -13,7 +13,8 @@ search = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(search)
 
 
-def test_parallel_sources_deduplicate(monkeypatch):
+@pytest.mark.parametrize('sciverse_key', ['secret', ['first-key', 'second-key']])
+def test_parallel_sources_deduplicate(monkeypatch, sciverse_key):
     barrier = threading.Barrier(5, timeout=3)
     monkeypatch.setattr(search, '_ARXIV_LAST', 0)
 
@@ -35,13 +36,17 @@ def test_parallel_sources_deduplicate(monkeypatch):
             payload = {'results': [{'title': 'Shared paper', 'doi': 'https://doi.org/10.1/shared'}]}
         elif 'sciverse' in url:
             assert kwargs['json']['query'] == 'shared paper'
+            keys = sciverse_key if isinstance(sciverse_key, list) else [sciverse_key]
+            assert kwargs['headers']['Authorization'] in {'Bearer ' + key for key in keys}
             payload = {'items': [{'title': 'Shared paper', 'doi': '10.1/shared'}], 'api_key': 'secret'}
         else:
             payload = {'organic_results': [{'title': 'Shared paper', 'link': 'https://doi.org/10.1/shared'}]}
         return httpx.Response(200, json=payload, request=httpx.Request(method, url))
 
     monkeypatch.setattr(search.httpx, 'request', request)
-    result = search.search_papers('shared paper', api_keys={source: 'secret' for source in search.KEY_NAMES},
+    api_keys = {source: 'secret' for source in search.KEY_NAMES}
+    api_keys['sciverse'] = sciverse_key
+    result = search.search_papers('shared paper', api_keys=api_keys,
                                   arxiv_terms=['shared paper', 'reference paper'])
     assert len(result['papers']) == 2
     assert all(row['status'] == 'ok' for row in result['sources'])

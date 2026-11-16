@@ -24,7 +24,7 @@ def unique_candidates(existing, candidates):
 def sciverse_provider():
     from lazyllm.tools.tools.search import SciverseSearch
     dynamic = runtime_globals.config['dynamic_tool_auth'] or {}
-    return SciverseSearch(api_key=dynamic.get('sciverse') or os.environ.get('SCIVERSE_API_KEY') or None)
+    return SciverseSearch(api_key=None if dynamic.get('sciverse') else os.environ.get('SCIVERSE_API_KEY') or None)
 
 
 def read_sciverse(provider, paper, warnings):
