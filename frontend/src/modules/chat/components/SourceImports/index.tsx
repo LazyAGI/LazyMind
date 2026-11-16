@@ -89,6 +89,7 @@ function TargetModal({ rows, context, onFound, onCancel, onSubmitted }: {
   const ready = rows.filter(row => !row.needs_pdf_lookup);
   const candidates = rows.filter(row => row.needs_pdf_lookup);
   const [checked, setChecked] = useState(() => new Set(ready.map(row => row.source_id)));
+  const selectNewFulltext = useRef(true);
   const [outcomes, setOutcomes] = useState<api.InspectedSource[]>([]);
   const [page, setPage] = useState(1);
   const [lookupProgress, setLookupProgress] = useState<{ done: number; total: number }>();
@@ -107,6 +108,7 @@ function TargetModal({ rows, context, onFound, onCancel, onSubmitted }: {
   const fulltexts = [...found, ...ready];
   const available = fulltexts.filter(row => !present.has(row.source_id));
   const selected = available.filter(row => checked.has(row.source_id));
+  const selectionDisabled = busy || Boolean(createdTarget);
   const displayed = [...fulltexts, ...candidates.filter(row =>
     present.has(row.source_id) && !found.some(result => result.source_id === row.source_id))];
   const currentPage = Math.min(page, Math.max(1, Math.ceil(displayed.length / fulltextPageSize)));
@@ -192,7 +194,9 @@ function TargetModal({ rows, context, onFound, onCancel, onSubmitted }: {
         summary.notFound += results.length - added.length - failed;
         onFound(added);
         setOutcomes(current => [...current.filter(row => !ids.includes(row.source_id)), ...results]);
-        setChecked(current => new Set([...current, ...added.map(row => row.source_id)]));
+        if (selectNewFulltext.current) {
+          setChecked(current => new Set([...current, ...added.map(row => row.source_id)]));
+        }
         setLookupProgress({ done: i + ids.length, total: pending.length });
       }
     } catch (e) {
@@ -282,7 +286,19 @@ function TargetModal({ rows, context, onFound, onCancel, onSubmitted }: {
     </div>
     <section className="source-fulltext-list" aria-label={tr("availableFulltext", { count: available.length })} style={{ borderColor: token.colorBorderSecondary, borderRadius: token.borderRadius }}>
       <div className="source-fulltext-heading">
-        <strong>{tr("availableFulltext", { count: available.length })}</strong>
+        <Checkbox
+          aria-label={tr("selectAllFulltext")}
+          checked={available.length > 0 && selected.length === available.length}
+          indeterminate={selected.length > 0 && selected.length < available.length}
+          disabled={selectionDisabled || available.length === 0}
+          onChange={event => {
+            const selectAll = event.target.checked;
+            selectNewFulltext.current = selectAll;
+            setChecked(new Set(selectAll ? available.map(row => row.source_id) : []));
+          }}
+        >
+          <strong>{tr("availableFulltext", { count: available.length })}</strong>
+        </Checkbox>
         <span role="status" style={{ color: token.colorTextSecondary }}>{tr("selectedFulltext", { count: selected.length })}</span>
       </div>
       <ul className="source-fulltext-rows" style={displayed.length > fulltextPageSize ? { height: `calc(${fulltextPageSize} * var(--source-fulltext-row-height))` } : undefined}>
@@ -291,7 +307,7 @@ function TargetModal({ rows, context, onFound, onCancel, onSubmitted }: {
           const inTarget = present.has(row.source_id);
           const canSelect = !inTarget && !row.needs_pdf_lookup;
           return <li key={row.source_id} style={{ borderColor: token.colorBorderSecondary }}>
-            <Checkbox checked={canSelect && checked.has(row.source_id)} disabled={!canSelect || busy || Boolean(createdTarget)} onChange={(event: CheckboxChangeEvent) => {
+            <Checkbox checked={canSelect && checked.has(row.source_id)} disabled={!canSelect || selectionDisabled} onChange={(event: CheckboxChangeEvent) => {
               const isChecked = event.target.checked;
               setChecked(current => {
                 const next = new Set(current);

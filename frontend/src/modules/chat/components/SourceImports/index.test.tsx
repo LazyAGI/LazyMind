@@ -46,6 +46,9 @@ describe("source imports", () => {
     fireEvent.mouseDown(dialog.getByRole("combobox", { name: "选择论文集" }));
     fireEvent.click(await screen.findByText("My papers"));
     await dialog.findByText("已在此论文集");
+    const selectAll = dialog.getByRole("checkbox", { name: "全选可入库论文" });
+    fireEvent.click(selectAll);
+    fireEvent.click(selectAll);
     expect(dialog.getByRole("checkbox", { name: "Paper abstract" })).toBeDisabled();
     expect(dialog.getByRole("checkbox", { name: "Paper abstract" })).not.toBeChecked();
     expect(dialog.getByRole("checkbox", { name: "Paper PDF" })).toBeChecked();
@@ -273,7 +276,7 @@ describe("source imports", () => {
     expect(dialog.getByText("可入库论文 6 篇")).toBeInTheDocument();
     expect(dialog.getByRole("button", { name: "补查 PDF" })).toBeDisabled();
     const found = dialog.getByRole("checkbox", { name: "Paper-5" });
-    expect(dialog.getAllByRole("checkbox")[0]).toBe(found);
+    expect(within(found.closest("ul")!).getAllByRole("checkbox")[0]).toBe(found);
     expect(found).toBeChecked();
     expect(within(found.closest("li")!).getByText("补查")).toBeInTheDocument();
     expect(dialog.getByRole("checkbox", { name: "Paper-0" })).not.toBeChecked();
@@ -286,6 +289,38 @@ describe("source imports", () => {
     fireEvent.change(dialog.getByLabelText("名称"), { target: { value: "Shared_papers" } });
     fireEvent.click(dialog.getByRole("button", { name: "加入 4 篇" }));
     await waitFor(() => expect(api.submitSourceImport).toHaveBeenCalledWith(expect.objectContaining({ source_ids: ["5", "1", "2", "4"] })));
+  });
+  it("toggles selection across pages and keeps lookup results unchecked after clearing", async () => {
+    const many: ChatSource[] = Array.from({ length: 6 }, (_, i) => ({ source_type: "external", citation_id: String(i), title: `Paper-${i}`, url: `https://doi.org/10.1234/${i}` }));
+    const rows = many.map((row, i) => ({ source_id: row.citation_id!, title: row.title!, url: row.url!, eligible: true, paper_key: row.citation_id!, needs_pdf_lookup: i === 5 }));
+    vi.mocked(api.inspectSources).mockResolvedValue(rows);
+    let resolveLookup!: (results: api.InspectedSource[]) => void;
+    vi.mocked(api.lookupSourcePDFs).mockReturnValue(new Promise(resolve => { resolveLookup = resolve; }));
+    view(<ChatSourcePanel sources={many} onClose={() => {}} embedded />, many);
+    fireEvent.click(await screen.findByRole("button", { name: "加入知识库" }));
+    const dialog = within(screen.getByRole("dialog", { name: "加入知识库" }));
+    const selectAll = dialog.getByRole("checkbox", { name: "全选可入库论文" });
+    expect(selectAll).toBeChecked();
+
+    fireEvent.click(dialog.getByTitle("2"));
+    fireEvent.click(dialog.getByRole("checkbox", { name: "Paper-4" }));
+    expect(selectAll).toBePartiallyChecked();
+    fireEvent.click(selectAll);
+    expect(dialog.getByRole("checkbox", { name: "Paper-4" })).toBeChecked();
+    expect(dialog.getByText("已选 5 篇")).toBeInTheDocument();
+
+    fireEvent.click(dialog.getByRole("button", { name: "补查 PDF" }));
+    fireEvent.click(selectAll);
+    expect(dialog.getByRole("checkbox", { name: "Paper-4" })).not.toBeChecked();
+    await act(async () => resolveLookup([{ ...rows[5], needs_pdf_lookup: false }]));
+    expect(await dialog.findByRole("checkbox", { name: "Paper-5" })).not.toBeChecked();
+    expect(dialog.getByRole("checkbox", { name: "Paper-0" })).not.toBeChecked();
+    expect(dialog.getByText("已选 0 篇")).toBeInTheDocument();
+    expect(dialog.getByRole("button", { name: "加入 0 篇" })).toBeDisabled();
+
+    fireEvent.click(selectAll);
+    expect(selectAll).toBeChecked();
+    expect(dialog.getByText("已选 6 篇")).toBeInTheDocument();
   });
   it("retries only failed items and restores persisted results", async () => {
     vi.mocked(api.listSourceImports).mockResolvedValue([

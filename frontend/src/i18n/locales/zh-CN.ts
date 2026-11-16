@@ -416,6 +416,7 @@ const zhCN = {
     "lookupNotFound": "{{count}} 篇未找到可用全文。",
     "lookupFailedCount": "{{count}} 篇查询失败。",
     "availableFulltext": "可入库论文 {{count}} 篇",
+    "selectAllFulltext": "全选可入库论文",
     "selectedFulltext": "已选 {{count}} 篇",
     "newFulltext": "补查",
     "addCount": "加入 {{count}} 篇",

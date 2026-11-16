@@ -418,6 +418,7 @@ const enUS = {
     "lookupNotFound": "No available full text found for {{count}} papers.",
     "lookupFailedCount": "{{count}} lookups failed.",
     "availableFulltext": "Importable papers ({{count}})",
+    "selectAllFulltext": "Select all importable papers",
     "selectedFulltext": "{{count}} selected",
     "newFulltext": "Found by lookup",
     "addCount": "Add {{count}}",
