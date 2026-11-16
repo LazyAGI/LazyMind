@@ -202,6 +202,7 @@ func TestFindNodeInLegacyServiceHome(t *testing.T) {
 	bin := t.TempDir()
 	executable(t, bin, "node", "#!/bin/sh\necho v20.19.0\n")
 	t.Setenv("PATH", bin)
+	t.Setenv("SHELL", "")
 	t.Setenv("LAZYMIND_RUNTIME_STATE_FILE", "")
 	t.Setenv(connectorconfig.EnvironmentKey, "")
 	dir := filepath.Join(home, "Library", "Application Support", "LazyMind", "data", "homes", "services", ".lazymind", "deps", "node", "bin")
