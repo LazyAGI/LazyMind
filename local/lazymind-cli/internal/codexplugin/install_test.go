@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"lazymind/agentconnector/internal/connectorconfig"
+	"lazymind/agentconnector/internal/connectorlauncher"
 	"lazymind/agentconnector/internal/credentials"
 	"lazymind/agentconnector/internal/workflowhost"
 )
@@ -95,7 +96,7 @@ func TestInstallPairsConfiguresAndReinstallsWithoutDuplicates(t *testing.T) {
 	if loadErr != nil {
 		t.Fatal(loadErr)
 	}
-	if server["command"] != self || server["args"].([]any)[1] != "codex-workflow" || connection.PairingFile != first.PairingFile || len(env) != 1 || len(connection.Overrides) != 0 {
+	if server["command"] != connectorlauncher.Path(home) || first.Self != connectorlauncher.Path(home) || server["args"].([]any)[1] != "codex-workflow" || connection.PairingFile != first.PairingFile || len(env) != 1 || len(connection.Overrides) != 0 {
 		t.Fatal("incomplete plugin configuration")
 	}
 	store, _ := credentials.NewStore(home, "")
@@ -112,6 +113,9 @@ func TestInstallPairsConfiguresAndReinstallsWithoutDuplicates(t *testing.T) {
 	record, err := Read()
 	if err != nil || record.BuildID != BuildID() {
 		t.Fatalf("missing installation record: %v", err)
+	}
+	if !Registered(home) {
+		t.Fatal("stable launcher registration was not recognised by the host")
 	}
 }
 
