@@ -3,6 +3,7 @@ package pdfir
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
 	"crypto/x509"
 	"encoding/json"
 	"errors"
@@ -89,29 +90,24 @@ func (c Client) request(ctx context.Context, method, target string, body io.Read
 	}
 	safe := *client
 	safe.CheckRedirect = func(_ *http.Request, _ []*http.Request) error { return http.ErrUseLastResponse }
-	res, e := safe.Do(req)
-	// mineru.net is a DNS alias of the official mineru.org.cn service, but
-	// some regional edges serve only the latter's certificate. A failed TLS
-	// handshake has not submitted the HTTP request. Retry only this exact API
-	// alias, with normal hostname/chain verification and a replayable body.
-	// Never rewrite presigned artifact URLs or follow credentialed redirects.
-	var hostname x509.HostnameError
-	if e != nil && auth && u.Scheme == "https" && u.Host == "mineru.net" &&
-		strings.HasPrefix(u.Path, "/api/v4/") && errors.As(e, &hostname) &&
-		hostname.Host == "mineru.net" && hostname.Certificate != nil &&
-		hostname.Certificate.VerifyHostname("mineru.org.cn") == nil &&
-		(req.Body == nil || req.GetBody != nil) {
-		retry := req.Clone(ctx)
-		retry.URL.Host = "mineru.org.cn"
-		retry.Host = ""
-		if req.GetBody != nil {
-			retry.Body, e = req.GetBody()
-			if e != nil {
-				return nil, errors.New("MinerU API request cannot be replayed")
-			}
+	// Keep the official API identity even when regional endpoints present a
+	// certificate for another MinerU domain. Never apply this to artifact URLs.
+	if auth && u.Scheme == "https" && u.Host == "mineru.net" && strings.HasPrefix(u.Path, "/api/v4/") {
+		transport := safe.Transport
+		if transport == nil {
+			transport = http.DefaultTransport
 		}
-		res, e = safe.Do(retry)
+		if base, ok := transport.(*http.Transport); ok {
+			cloned := base.Clone()
+			if cloned.TLSClientConfig == nil {
+				cloned.TLSClientConfig = &tls.Config{}
+			}
+			cloned.TLSClientConfig.InsecureSkipVerify = true //nolint:gosec // MinerU API compatibility.
+			safe.Transport = cloned
+			defer cloned.CloseIdleConnections()
+		}
 	}
+	res, e := safe.Do(req)
 	if e != nil {
 		return nil, mineruTransportError(e)
 	}

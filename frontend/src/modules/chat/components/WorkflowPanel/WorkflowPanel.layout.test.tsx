@@ -207,6 +207,78 @@ describe('shared workflow compact layout', () => {
     expect(within(screen.getByRole('tabpanel', { name: /可选步骤/ })).getByText('本次流程的分支决策跳过了此步骤，无需等待执行结果。')).toBeVisible();
   });
 
+  it('reveals the full Writer path only after preparation has a committed route', async () => {
+    const spec = load(readFileSync(resolve(process.cwd(), '../workflows/writer-workflow/workflow.yaml'), 'utf8')) as object;
+    fixture.ui = hydrateWorkflowUI({ ...spec, source_type: 'builtin' });
+    fixture.session = { ...fixture.session, workflow_id: 'writer-workflow', workflow_mode: 'dynamic',
+      status: 'active', current_step_id: 'prepare', steps: [], slots: [], projection: {
+        display: { status: 'running', reason: 'running', approval_step_id: '' }, current: ['prepare'],
+      } };
+    const view = render(<WorkflowPanel conversationId='layout-test' />);
+    await screen.findByRole('tab', { name: /Preparation/ });
+    expect(screen.getAllByRole('tab')).toHaveLength(1);
+    // Finishing preparation does not mean its outgoing choice is committed yet.
+    fixture.session = { ...fixture.session, projection: { ...fixture.session.projection, current: [], past: ['prepare'] } };
+    view.rerender(<WorkflowPanel conversationId='layout-test' />);
+    expect(screen.getAllByRole('tab')).toHaveLength(1);
+    // Reveal the whole chosen path, including steps with no execution attempt.
+    fixture.session = { ...fixture.session, projection: {
+      ...fixture.session.projection, decided_routes: ['prepare'], pruned: ['write_flat_document'],
+    } };
+    view.rerender(<WorkflowPanel conversationId='layout-test' />);
+    expect(screen.getAllByRole('tab').map(tab => tab.textContent)).toEqual(['1Preparation', '2Outline', '3Final Document']);
+    fixture.session = { ...fixture.session, projection: { ...fixture.session.projection, decided_routes: [], pruned: [] } };
+    view.rerender(<WorkflowPanel conversationId='layout-test' />);
+    expect(screen.getAllByRole('tab')).toHaveLength(1);
+  });
+
+  it.each([
+    ['write_document', 'write_flat_document', 'outline', 'draft_document'],
+    ['write_flat_document', 'write_document', 'prepare', 'flat_draft_document'],
+  ])('keeps the future Writer %s stage visible, hides the skipped branch, and shows its own output', async (stepId, otherId, previousId, slotId) => {
+    const spec = load(readFileSync(resolve(process.cwd(), '../workflows/writer-workflow/workflow.yaml'), 'utf8')) as object;
+    fixture.ui = hydrateWorkflowUI({ ...spec, source_type: 'builtin' });
+    const resultTab = fixture.ui.tabs!.find(tab => tab.step_id === stepId)!;
+    const otherTab = fixture.ui.tabs!.find(tab => tab.step_id === otherId)!;
+    const base = { validity: 'effective', requires_approval: false, reachability: 'unreachable', readiness: 'not_applicable' };
+    fixture.session = { ...fixture.session, workflow_id: 'writer-workflow', workflow_mode: 'dynamic',
+      status: 'active', current_step_id: previousId, steps: [], slots: [], projection: {
+        display: { status: 'running', reason: 'running', approval_step_id: '' },
+        decided_routes: ['prepare'],
+        current: [previousId], nodes: {
+          [previousId]: { ...base, execution: 'running', branch: 'active' },
+          [stepId]: { ...base, execution: 'none', branch: 'active' },
+          [otherId]: { ...base, execution: 'none', branch: 'pruned' },
+        },
+      } };
+    const view = render(<WorkflowPanel conversationId='layout-test' />);
+    await screen.findByRole('tab', { name: new RegExp(fixture.ui.tabs!.find(tab => tab.step_id === previousId)!.label), selected: true });
+    expect(screen.getByRole('tab', { name: new RegExp(resultTab.label) })).toBeVisible();
+    expect(screen.queryByRole('tab', { name: new RegExp(otherTab.label) })).not.toBeInTheDocument();
+
+    fixture.session = { ...fixture.session, current_step_id: stepId, projection: {
+      ...fixture.session.projection, current: [stepId], past: [previousId], nodes: {
+        ...fixture.session.projection!.nodes,
+        [previousId]: { ...base, execution: 'succeeded', branch: 'active' },
+        [stepId]: { ...base, execution: 'running', branch: 'active' },
+      },
+    } };
+    view.rerender(<WorkflowPanel conversationId='layout-test' />);
+    await screen.findByRole('tab', { name: new RegExp(resultTab.label), selected: true });
+    expect(screen.queryByRole('tab', { name: new RegExp(otherTab.label) })).not.toBeInTheDocument();
+    expect(screen.queryByText('已跳过')).not.toBeInTheDocument();
+
+    fixture.session = { ...fixture.session, status: 'completed', projection: {
+      ...fixture.session.projection, completed: true, current: [], past: [previousId, stepId],
+      display: { status: 'completed', reason: 'completed', approval_step_id: '' },
+      nodes: { ...fixture.session.projection!.nodes, [stepId]: { ...base, execution: 'succeeded', branch: 'active' } },
+    }, slots: [{ slot_id: slotId, slot: slotId, step_id: stepId, selected: true, revision: 1, artifact_value: { text: '正文' } }] as WorkflowSession['slots'] };
+    view.rerender(<WorkflowPanel conversationId='layout-test' />);
+    const panel = screen.getByRole('tabpanel', { name: new RegExp(resultTab.label) });
+    expect(within(panel).getByText(`正文 ${slotId}`)).toBeVisible();
+    expect(screen.queryByRole('tab', { name: new RegExp(otherTab.label) })).not.toBeInTheDocument();
+  });
+
   it('replaces the UI for a new pinned version of the same workflow without displaying the old tabs', async () => {
     fixture.session.pinned_revision_id = 'v1';
     const view = render(<WorkflowPanel conversationId='layout-test' />);

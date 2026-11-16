@@ -1,8 +1,9 @@
+import PdfParseStatus from './PdfParseStatus';
 import PaperAuthors from './PaperAuthors';
 import {v4 as uuidv4} from 'uuid';
 import { useMemo, useRef, useState, type ChangeEvent, type ReactNode } from 'react';
 import { Alert, Button, Dropdown, Input, message, Modal, Select, Tabs, Tag, Tooltip } from 'antd';
-import { EditOutlined, ArrowLeftOutlined, CloseOutlined, DownOutlined, EllipsisOutlined, ExclamationCircleOutlined, FilePdfOutlined, InfoCircleOutlined, PlusOutlined, PushpinOutlined, ReadOutlined } from '@ant-design/icons';
+import { EditOutlined, ArrowLeftOutlined, CloseOutlined, DownOutlined, EllipsisOutlined, FilePdfOutlined, InfoCircleOutlined, PlusOutlined, PushpinOutlined, ReadOutlined } from '@ant-design/icons';
 import type { PaperLibraryData, PaperRecord, Attachment } from './libraryModel';
 import { readingSummary } from './libraryModel';
 import { getPaperTags, paperImportMethodName, paperSourceProviderLabels, safePaperUrl, sourceLabel, statusLabel, type PaperEdits } from './model';
@@ -37,6 +38,7 @@ interface Props {
     editError?: string | null;
     onRetryIdentification?: () => Promise<void>;
     onReparse?: () => void;
+    onRefresh?: () => Promise<void>;
     reparseDisabledReason?: string;
     onAddPdf?: () => void;
     onDetachAttachment?: (attachment: Attachment) => Promise<void>;
@@ -55,7 +57,7 @@ function sourceName(attachment?: Attachment) {
         return new URL(url).hostname;
     return '未记录';
 }
-export default function PaperDetailDrawer({ datasetId, paper, data, initialTab = 'overview', initialEditing = false, mode = 'drawer', importanceControl, onStatusChange, onSetPrimaryAttachment, academic, onClose, onAddNote, onOpenAttachment, onOpenPaper, onEdit, onSave, editError, onRetryIdentification, onReparse, reparseDisabledReason, onAddPdf, onDetachAttachment, onNotification, onNotificationResolved, disabled = false, personalDisabled = disabled }: Props) {
+export default function PaperDetailDrawer({ datasetId, paper, data, initialTab = 'overview', initialEditing = false, mode = 'drawer', importanceControl, onStatusChange, onSetPrimaryAttachment, academic, onClose, onAddNote, onOpenAttachment, onOpenPaper, onEdit, onSave, editError, onRetryIdentification, onReparse, onRefresh, reparseDisabledReason, onAddPdf, onDetachAttachment, onNotification, onNotificationResolved, disabled = false, personalDisabled = disabled }: Props) {
     const [tab, setTab] = useState<PaperDetailTab>(initialEditing ? 'overview' : initialTab);
     const [editing, setEditing] = useState(initialEditing);
     const [messageApi, messageHolder] = message.useMessage();
@@ -148,16 +150,6 @@ export default function PaperDetailDrawer({ datasetId, paper, data, initialTab =
         </div>
       </header>
       {!pdfs.length && <p className="paper-detail-read-hint"><InfoCircleOutlined /><span>请先在<button type="button" className="paper-detail-tab-link" disabled={saving || editing} onClick={() => changeTab('attachments')}>附件</button>中添加 PDF</span></p>}
-      {(current.parse === 'failed' || current.parse === 'parsing') && <div className="paper-detail-summary">
-        <div className="paper-detail-attachment-summary">
-          {current.parse === 'failed' && <>
-            <span className="paper-detail-status-failed" role="status" aria-label="正文解析状态"><ExclamationCircleOutlined />正文解析失败</span>
-            {onReparse && <Tooltip title={reparseDisabledReason}><Button size="small" disabled={disabled || saving || editing || !!reparseDisabledReason} onClick={onReparse}>重新解析</Button></Tooltip>}
-          </>}
-          {current.parse === 'parsing' && <span role="status" aria-label="正文解析状态">正文解析中</span>}
-        </div>
-
-      </div>}
       {error && (onNotification ? <p className="paper-detail-error" role="status">{error}</p> : <Alert className="paper-detail-error" type="error" showIcon message="操作未完成" description={error}/>)}
       {current.associationConflict && <Alert type="warning" showIcon message="附件归属待核对" description={current.associationConflict}/>}
       <Tabs activeKey={tab} onChange={(next: string) => changeTab(next as PaperDetailTab)} items={[
@@ -193,6 +185,7 @@ export default function PaperDetailDrawer({ datasetId, paper, data, initialTab =
                 <div className="paper-attachment-identity"><span className="paper-attachment-icon"><FilePdfOutlined /></span><div className="paper-attachment-name">
                   <div className="paper-attachment-name-line">{attachments.length > 1 ? <label className="paper-attachment-selector"><select aria-label="选择预览附件与版本" disabled={saving || editing} value={selectedAttachment.id} onChange={event => setSelectedAttachmentId(event.target.value)}>{attachments.map(item => <option key={item.id} value={item.id}>{attachmentLabel(item)}</option>)}</select><DownOutlined /></label> : <strong>{attachmentLabel(selectedAttachment)}</strong>}{selectedAttachment.id === primaryPdf?.id && <span className="paper-attachment-primary"><PushpinOutlined />主附件</span>}</div>
                   <span className="paper-attachment-meta">{[paperImportMethodName(selectedAttachment.importMethod), sourceName(selectedAttachment), !selectedAttachment.sourceVersion ? '版本未标注' : '', selectedAttachment.size ? `${(selectedAttachment.size / 1024 / 1024).toFixed(1)} MB` : ''].filter(Boolean).join(' · ')}</span>
+                  {isStoredPdfAttachment(selectedAttachment) && <div><PdfParseStatus status={selectedAttachment.parse || (selectedAttachment.id === primaryPdf?.id ? current.parse : 'unknown')} error={selectedAttachment.processingError || (selectedAttachment.id === primaryPdf?.id ? current.processingError : undefined)} onRefresh={onRefresh} onParse={selectedAttachment.id === primaryPdf?.id ? onReparse : undefined} disabledReason={disabled || saving || editing ? '暂不可操作' : reparseDisabledReason} /></div>}
                 </div></div>
                 <div className="paper-attachment-controls">
                   {selectedAttachment.contentRef ? <Button href={onOpenAttachment ? undefined : `/lib/knowledge/knowledge/${encodeURIComponent(datasetId)}/${encodeURIComponent(selectedAttachment.contentRef)}`} onClick={onOpenAttachment ? () => onOpenAttachment(selectedAttachment.contentRef!) : undefined}>阅读此附件</Button> : safePaperUrl(selectedAttachment.sourceUrl) ? <Button href={safePaperUrl(selectedAttachment.sourceUrl)} target="_blank" rel="noopener noreferrer">打开原文 ↗</Button> : null}

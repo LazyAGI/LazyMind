@@ -40,6 +40,7 @@ const translations: Record<string, string> = {
   'taskCenter.statusSucceeded': '已完成',
   'taskCenter.statusWaiting': '等待审批',
   'taskCenter.statusWaitingInput': '等待输入',
+  'taskCenter.statusUnknown': '状态待确认',
   'taskCenter.stepFallback': '执行步骤 {{index}}',
   'taskCenter.stepPrepare': '准备任务',
   'taskCenter.taskGoal': '任务目标',
@@ -195,6 +196,31 @@ describe('TaskDetail', () => {
     act(() => window.dispatchEvent(new CustomEvent(DEVELOPER_ACTIVE_EVENT)));
     await waitFor(() => expect(screen.queryByText('每页提示词')).not.toBeInTheDocument());
     expect(screen.getByText('幻灯片')).toBeInTheDocument();
+  });
+
+  it.each(['queued', 'claimed'])('shows the current PPT %s attempt as running', async status => {
+    const { pptTask, projection } = mockPptWorkflow();
+    projection.attempt_history.generate_ppt[0].status = status;
+    render(<TaskDetail task={pptTask} onClose={vi.fn()} onOpenConversation={vi.fn()} />);
+
+    const step = (await screen.findByText('幻灯片')).closest('.task-step');
+    expect(step).toHaveTextContent('进行中');
+    expect(step).toHaveTextContent('当前步骤');
+    expect(step).toHaveClass('is-running', 'is-current');
+    expect(step?.querySelector('.anticon-sync')).toBeInTheDocument();
+    expect(screen.queryByText('状态待确认')).not.toBeInTheDocument();
+  });
+
+  it.each(['queued', 'claimed'])('focuses a %s execution before a future pending step', async status => {
+    const current = { ...task, steps: [
+      { step_id: 'prepare', status: 'pending' },
+      { step_id: 'write', status },
+    ] };
+    vi.mocked(getTask).mockResolvedValue(current);
+    render(<TaskDetail task={current} onClose={vi.fn()} onOpenConversation={vi.fn()} />);
+
+    expect((await screen.findByText('准备任务')).closest('.task-step')).not.toHaveClass('is-current');
+    expect(document.querySelector('.task-step.is-current')).toHaveTextContent('进行中');
   });
 
   it('keeps a visible but bypassed prompt-planning step and labels it as skipped', async () => {

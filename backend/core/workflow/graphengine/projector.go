@@ -128,6 +128,10 @@ func Project(graph *CompiledStateGraph, snapshot RuntimeSnapshot) Projection {
 			routes[route.From] = route
 		}
 	}
+	// Candidate exits are not a selected route until its decision is persisted.
+	for from := range routes {
+		projection.DecidedRoutes = append(projection.DecidedRoutes, from)
+	}
 	edgesByFrom := map[string][]CompiledEdge{}
 	for _, edge := range graph.ControlEdges {
 		edgesByFrom[edge.From] = append(edgesByFrom[edge.From], edge)
@@ -280,7 +284,7 @@ func projectedEdgeKey(edge CompiledEdge) string {
 }
 
 func sortProjection(p *Projection) {
-	for _, values := range []*[]string{&p.Past, &p.Current, &p.Reachable, &p.Ready, &p.Retryable, &p.Rewindable, &p.Continue, &p.Blocked, &p.Stale, &p.Pruned, &p.Bypassed} {
+	for _, values := range []*[]string{&p.DecidedRoutes, &p.Past, &p.Current, &p.Reachable, &p.Ready, &p.Retryable, &p.Rewindable, &p.Continue, &p.Blocked, &p.Stale, &p.Pruned, &p.Bypassed} {
 		sort.Strings(*values)
 	}
 }

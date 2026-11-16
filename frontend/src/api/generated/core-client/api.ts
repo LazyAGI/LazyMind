@@ -891,6 +891,7 @@ export interface AcademicSourceEvidence {
     'source_version'?: string;
 }
 export interface AcademicSourceImportItem {
+    'batch_created_at'?: string;
     'batch_id': string;
     'created_library': boolean;
     'document_id'?: string;

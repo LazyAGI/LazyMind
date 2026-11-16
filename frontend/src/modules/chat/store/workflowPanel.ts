@@ -365,6 +365,7 @@ export function applyOrdinaryWorkflowSnapshot(session: WorkflowSession, snapshot
 }
 
 export interface WorkflowRuntimeProjection {
+  decided_routes?: string[];
   display?: WorkflowDisplayState;
   status?: string;
   current_step_id?: string;
@@ -498,6 +499,8 @@ export interface TabDef {
   hide_when_material?: string;
   /** Hide an unexecuted dependent tab when its prerequisite branch was skipped. */
   hide_when_step_skipped?: string;
+  /** Defer this conditional tab until the named step has a persisted route decision. */
+  show_after_route?: string;
   /** Explicitly enable or disable artifact downloads for this tab. */
   allow_download?: boolean;
   /** Actions are rendered through provider modules; the composite stays domain-neutral. */
@@ -552,6 +555,7 @@ export function filterWorkflowTabs(
   const executionStarted = retained.size > 0 || Object.keys(projection?.nodes ?? {}).some(wasExecuted);
   return tabs.filter((tab) => {
     const steps = tab.status_step_ids?.length ? tab.status_step_ids : [tab.step_id || tab.id];
+    if (tab.show_after_route && !projection?.decided_routes?.includes(tab.show_after_route)) return false;
     if (hideUnstartedSteps && executionStarted && !steps.some(wasExecuted)
         && !tab.slots.some((slot) => present.has(slot.id))) return false;
     if (hideSkippedSteps) {

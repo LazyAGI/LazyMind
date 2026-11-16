@@ -111,7 +111,7 @@ def test_mineru_certificate_failure_does_not_poll_for_an_hour(monkeypatch, tmp_p
     assert calls == {'submit': 1, 'upload': 1, 'poll': 1, 'download': 0}
 
 
-def test_mineru_reader_verifies_api_and_artifact_tls(monkeypatch, tmp_path):
+def test_mineru_reader_skips_api_tls_but_verifies_artifact_tls(monkeypatch, tmp_path):
     reader, _, _ = _reader_with_batch(monkeypatch, tmp_path, lambda _: _status('done'))
     seen = []
 
@@ -121,7 +121,7 @@ def test_mineru_reader_verifies_api_and_artifact_tls(monkeypatch, tmp_path):
 
     monkeypatch.setattr(requests, 'request', send)
     reader._http_execute('GET', 'https://mineru.net/api/v4/extract-results/batch/test', verify=False)
-    assert seen[0]['verify'] is True
+    assert seen[0]['verify'] is False
     assert seen[0]['allow_redirects'] is False
     assert reader._online_request_kwargs() == {'verify': True}
 

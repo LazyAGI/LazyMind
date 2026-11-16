@@ -29,6 +29,7 @@ import {
   withModelProviderJsonOptions,
   type StoredProviderKey,
 } from "../api";
+import ParsingServiceSelection from "../components/ParsingServiceSelection";
 import ToolManagementSection from "../components/ToolManagementSection";
 import DependencyInstallSection from "../components/DependencyInstallSection";
 import { sortTranslationProviders, translationProviderDisplayName } from "../translationProviderNames";
@@ -747,6 +748,7 @@ export default function ExternalServicesPage({
   const [form] = Form.useForm<Record<string, ExternalServiceFormValues>>();
   const configLocation = useSettingsEditor("service");
   const [activeService, setActiveService] = useState<ExternalServiceConfig | null>(null);
+  const [selectionRevision, setSelectionRevision] = useState(0);
   const [services, setServices] = useState<ExternalServiceConfig[]>([]);
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -793,6 +795,7 @@ export default function ExternalServicesPage({
           return;
         }
         setServices(providers.map((provider) => mapApiProviderToService(provider, t)));
+        setSelectionRevision(value => value + 1);
       })
       .catch((error) => {
         if (controller.signal.aborted || requestIdRef.current !== requestId) {
@@ -905,7 +908,7 @@ export default function ExternalServicesPage({
         }
         setGroupForActiveService(savedGroup);
 
-        if (!isTranslation) await selectServiceProvider(activeService, savedGroup.id);
+        if (!isTranslation && activeService.category !== "parsing") await selectServiceProvider(activeService, savedGroup.id);
       } else if (isTranslation) {
         const savedGroup = await replaceProviderCredential(activeService, groupForActiveService, apiKey);
         setGroupForActiveService(savedGroup);
@@ -993,7 +996,7 @@ export default function ExternalServicesPage({
       }
 
       const hasSavedKeys = savedGroup?.has_api_key || Boolean(savedGroup?.keys?.length) || keyList.length > 0;
-      if (activeService.category !== "translation" && savedGroup && (hasSavedKeys || isCustomServiceBaseUrl(activeService, normalizedBaseUrl))) {
+      if (activeService.category !== "translation" && activeService.category !== "parsing" && savedGroup && (hasSavedKeys || isCustomServiceBaseUrl(activeService, normalizedBaseUrl))) {
         await selectServiceProvider(activeService, savedGroup.id);
       }
 
@@ -1185,6 +1188,7 @@ export default function ExternalServicesPage({
             {category.key === "parsing" && parsingControl ? (
               <div className="model-provider-default-parsing-control">{parsingControl}</div>
             ) : null}
+            {category.key === "parsing" && <ParsingServiceSelection revision={selectionRevision} onChanged={onConfigurationChanged} />}
             {category.key === "translation" ? (
               <div className="model-provider-translation-tiers">
                 {[
@@ -1230,6 +1234,7 @@ export default function ExternalServicesPage({
           </div>
         </div>
 
+        {category.key === "parsing" && <ParsingServiceSelection revision={selectionRevision} onChanged={onConfigurationChanged} />}
         {renderServiceCards(visibleServices)}
       </section>
     );
