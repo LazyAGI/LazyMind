@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import { Button, Tag, Typography, theme } from 'antd';
 import { ReloadOutlined } from '@ant-design/icons';
-import { usePdfIR, type PdfIRTarget } from '../api/pdfIR';
+import { usePdfIR, pdfIRQuotaWaiting, type PdfIRTarget } from '../api/pdfIR';
 import { getDocumentParseStatus, type DocumentParseResult } from '../api/pdfArtifacts';
 import type { ReadingCapabilityStatus, ReadingPreparation } from '../api/readingPreparation';
 import './PaperPreparationStatus.css';
@@ -33,12 +33,14 @@ export default function PaperPreparationStatus({ target, onRefresh, capabilities
     return () => { stale = true; clearTimeout(timer); };
   }, [target.dataset, target.document, revision, batchStatus]);
   const ready = !ir.loading && ir.state.status === 'ready';
-  const busy = ['queued', 'running'].includes(ir.state.status);
+  const hasStructure = !!ir.state.document;
+  const quotaWaiting = pdfIRQuotaWaiting(ir.state);
+  const busy = !quotaWaiting && ['queued', 'running'].includes(ir.state.status);
   const blocks = ir.state.document?.blocks || [];
   return <section className="paper-preparation-status" style={{ "--paper-secondary": token.colorTextSecondary } as CSSProperties} aria-label="论文解析状态">
     <div className="paper-preparation-heading"><strong>本篇准备状态</strong><Button type="text" size="small" icon={<ReloadOutlined />} onClick={() => { ir.refresh(); setRevision(v => v + 1); onRefresh?.(); }}>刷新状态</Button></div>
-    <div className="paper-preparation-stage"><div><strong>文档结构解析</strong><p>{ready ? `识别到 ${blocks.filter(b => b.type === 'formula').length} 个公式、${blocks.filter(b => b.type === 'image').length} 张图片、${blocks.filter(b => b.type === 'table').length} 个表格` : '与知识库共用 MinerU 解析结果，识别正文、公式与图表'}</p></div><Tag color={ready ? 'success' : busy ? 'processing' : ir.state.status === 'failed' ? 'error' : 'default'}>{ir.loading ? '读取中' : structureLabels[ir.state.status]}</Tag></div>
-    {ir.state.error_message && <Typography.Paragraph type="danger">{ir.state.error_message}</Typography.Paragraph>}
+    <div className="paper-preparation-stage"><div><strong>文档结构解析</strong><p>{hasStructure ? `识别到 ${blocks.filter(b => b.type === 'formula').length} 个公式、${blocks.filter(b => b.type === 'image').length} 张图片、${blocks.filter(b => b.type === 'table').length} 个表格${ready ? '' : '（保留的解析结果）'}` : '与知识库共用 MinerU 解析结果，识别正文、公式与图表'}</p></div><Tag color={ready ? 'success' : busy ? 'processing' : quotaWaiting ? 'warning' : ir.state.status === 'failed' ? 'error' : 'default'}>{ir.loading ? '读取中' : quotaWaiting ? '等待自动额度' : structureLabels[ir.state.status]}</Tag></div>
+    {ir.state.error_message && <Typography.Paragraph type={quotaWaiting ? "warning" : "danger"}>{ir.state.error_message}</Typography.Paragraph>}
     {studyScopes.map(scope => {
       const capability = capabilities?.find(item => item.id === scope.id);
       const status = capability?.status;
@@ -46,13 +48,13 @@ export default function PaperPreparationStatus({ target, onRefresh, capabilities
       return <div className="paper-preparation-study" key={scope.id}>
         <div className="paper-preparation-stage">
           <div><strong>{scope.name}</strong>
-            <p>{ready && capability && status !== 'unavailable' ? `已完成 ${capability.completed} / ${capability.total} 项` : '结构就绪后，按本文内容统计研读结果'}</p>
+            <p>{hasStructure && capability && status !== 'unavailable' ? `已完成 ${capability.completed} / ${capability.total} 项` : '结构就绪后，按本文内容统计研读结果'}</p>
             {!!capability?.running && <p>正在处理 {capability.running} 项</p>}
             {!!capability?.failed && <p>失败 {capability.failed} 项，可重新准备</p>}
           </div>
           <Tag color={color}>{status ? studyLabels[status] : '等待状态'}</Tag>
         </div>
-        {status === 'partial' && <Typography.Paragraph type="secondary">已有结果可直接使用；未完成内容可继续准备，生成数量受个人预设限额约束。</Typography.Paragraph>}
+        {status === 'partial' && <Typography.Paragraph type="secondary">已有结果可直接使用；未完成内容可继续准备，手动准备不占每日自动额度。</Typography.Paragraph>}
         {capability?.error_message && <Typography.Paragraph type="danger">{capability.error_message}</Typography.Paragraph>}
       </div>;
     })}

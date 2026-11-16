@@ -971,3 +971,4 @@ DROP TABLE IF EXISTS user_github_star_prompts;
 DROP TABLE IF EXISTS embedding_index_states;
 
 DROP TABLE IF EXISTS workflow_action_jobs;
+DROP TABLE IF EXISTS reading_usage;

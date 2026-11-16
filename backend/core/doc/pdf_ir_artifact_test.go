@@ -1,12 +1,15 @@
 package doc
 
 import (
+	"archive/zip"
 	"bytes"
 	"encoding/json"
 	"errors"
+	"lazymind/core/common/orm"
 	"lazymind/core/pdfir"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -39,5 +42,24 @@ func TestPDFIRArtifactSerializedBudgetAndPreservation(t *testing.T) {
 	}
 	if _, err := os.Stat(absent); !os.IsNotExist(err) {
 		t.Fatalf("oversized new artifact was published: %v", err)
+	}
+}
+
+func TestSharedArchiveCannotBypassSerializedIRBudget(t *testing.T) {
+	source := filepath.Join(t.TempDir(), "source.pdf")
+	os.WriteFile(source, []byte("%PDF-shared-large"), 0600)
+	hash, _ := pdfir.SourceHash(source)
+	var archive bytes.Buffer
+	zw := zip.NewWriter(&archive)
+	f, _ := zw.Create("paper_content_list.json")
+	// Raw '<' is legal JSON but expands sixfold when serving a Go JSON object.
+	f.Write([]byte(`[{"type":"text","text":"` + strings.Repeat("<", 6<<20) + `","page_idx":0,"bbox":[0,0,100,100]}]`))
+	zw.Close()
+	path := pdfir.CachePath(source, hash, "vlm")
+	os.MkdirAll(filepath.Dir(path), 0700)
+	os.WriteFile(path, archive.Bytes(), 0600)
+	state := pdfIRStatusFromJobs(orm.Document{Ext: mustJSON(documentExt{StoredPath: source})}, hash, nil)
+	if state.Document != nil || state.Status != "failed" || state.ErrorMessage != pdfIRTooLargeMessage {
+		t.Fatalf("oversized shared IR was exposed: status=%s doc=%v error=%s", state.Status, state.Document != nil, state.ErrorMessage)
 	}
 }

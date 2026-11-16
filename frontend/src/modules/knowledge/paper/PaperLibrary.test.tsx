@@ -13,9 +13,9 @@ import * as paperModel from './model';
 import { importLibraryPapers, loadPersistedPaperLibrary, previewLibraryPapers, patchLibraryPaper, confirmLibraryPdf, createLibraryFolder, moveLibraryPapers, deleteLibraryPapers, deleteLibraryFolder } from './store';
 import { paperFromPdf } from './pdfMeta';
 import { setPaperImportance } from '../api/paperWorkflows';
-import { TaskServiceApi } from '../utils/request';
+import { requestPdfIR } from '../api/pdfIR';
 import { previewPaperLink, previewPaperPDF, importPaperLink, type ImportPreviewItem, getAcademicImportBatch, listAcademicImportBatches, type ImportOperation } from '../api/academicReferences';
-vi.mock('../utils/request', async original => ({ ...await original<typeof import('../utils/request')>(), TaskServiceApi: vi.fn() }));
+vi.mock('../api/pdfIR', async original => ({ ...await original<typeof import('../api/pdfIR')>(), requestPdfIR: vi.fn() }));
 vi.mock('@/runtime/readiness', () => ({ waitForRuntimeCapability: vi.fn().mockResolvedValue(undefined) }));
 vi.mock('../components/PaperTasks', () => ({ default: vi.fn(() => null) }));
 vi.mock('./pdfMeta', () => ({ paperFromPdf: vi.fn() }));
@@ -426,25 +426,20 @@ describe('paper library behavior', () => {
         await act(async () => focusAfterIdle());
         await waitFor(() => expect(bell).toHaveAccessibleName(/0 条待处理/));
     });
-    it('keeps a failed reparse submission in the modal and clears its notice after retry', async () => {
-        vi.spyOn(console, 'error').mockImplementation(() => {});
-        const createTasks = vi.fn().mockRejectedValueOnce(new Error('parser unavailable')).mockResolvedValue({ data: { tasks: [{ task_id: 'parse-task' }] } });
-        const startTasks = vi.fn().mockResolvedValue({ data: { started_count: 1 } });
-        vi.mocked(TaskServiceApi).mockReturnValue({ createTasks, startTasks } as unknown as ReturnType<typeof TaskServiceApi>);
+    it('submits reparse from the overflow directly and clears its failure notice on retry', async () => {
+        vi.mocked(requestPdfIR).mockRejectedValueOnce(new Error('parser unavailable')).mockResolvedValueOnce({ status: 'queued' });
         await renderLibrary();
-        fireEvent.mouseEnter(screen.getByRole('button', { name: 'Folder paper 的更多操作' }));
-        fireEvent.click(await screen.findByRole('menuitem', { name: '重新解析' }));
-        const dialog = await screen.findByRole('dialog', { name: '重新解析' });
-        const confirm = within(dialog).getByRole('button', { name: /确\s*定|OK/ });
-        fireEvent.click(confirm);
-        expect(await within(dialog).findByText('解析任务尚未提交，请重试或查看通知。')).toBeInTheDocument();
-        expect(screen.getByRole('button', { name: /通知：.*1 条待处理/ })).toBeInTheDocument();
-        expect(startTasks).not.toHaveBeenCalled();
-        await waitFor(() => expect(confirm).toBeEnabled());
-        fireEvent.click(confirm);
-        await waitFor(() => expect(screen.queryByRole('dialog', { name: '重新解析' })).not.toBeInTheDocument());
-        expect(startTasks).toHaveBeenCalledOnce();
-        expect(screen.getByRole('button', { name: /通知：.*0 条待处理/ })).toBeInTheDocument();
+        async function reparse() {
+            fireEvent.mouseEnter(screen.getByRole('button', { name: 'Folder paper 的更多操作' }));
+            fireEvent.click(await screen.findByRole('menuitem', { name: '重新解析' }));
+        }
+        await reparse();
+        expect(await screen.findByRole('button', { name: /通知：.*1 条待处理/ })).toBeInTheDocument();
+        expect(screen.queryByRole('dialog', { name: '重新解析' })).not.toBeInTheDocument();
+        await reparse();
+        await waitFor(() => expect(screen.getByRole('button', { name: /通知：.*0 条待处理/ })).toBeInTheDocument());
+        expect(requestPdfIR).toHaveBeenCalledTimes(2);
+        expect(requestPdfIR).toHaveBeenLastCalledWith(datasetId, 'stored-pdf-a', true);
     });
     it('defers a focus refresh until the active write finishes', async () => {
         let finish!: (value: Awaited<ReturnType<typeof patchLibraryPaper>>) => void;

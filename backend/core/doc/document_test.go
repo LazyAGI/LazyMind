@@ -163,6 +163,7 @@ func newDocumentTestDB(t *testing.T) *orm.DB {
 	if err := db.AutoMigrate(
 		&orm.Dataset{},
 		&orm.UserReadingPolicy{},
+		&orm.ReadingUsage{},
 		&learning.KnowledgeBaseCapability{}, &learning.CapabilityProfile{},
 		&orm.Document{},
 		&orm.Task{},
