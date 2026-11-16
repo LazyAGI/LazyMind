@@ -29,7 +29,8 @@ describe('confirmed Zotero imports', () => {
       if (reject) throw new Error('storage unavailable');
       current = { ...current, attachments: current.attachments.map(item => item.id === candidate.id ? { ...item, contentRef: 'durable-document' } : item) };
     });
-    const input = { datasetId: 'ds', preview, config, options, getLibrary: () => current,
+    const onProgress = vi.fn();
+    const input = { datasetId: 'ds', preview, config, options: {...options,onProgress}, getLibrary: () => current,
       saveLibrary: async (data: typeof current) => { current = data; }, storeAttachment };
     const first = await executeZoteroImport(input);
     expect(current.papers).toHaveLength(1);
@@ -37,6 +38,7 @@ describe('confirmed Zotero imports', () => {
     expect(first.failures).toEqual(['article.pdf：storage unavailable']);
     reject = false;
     expect((await executeZoteroImport(input)).failures).toEqual([]);
+    expect(onProgress).toHaveBeenCalledWith('正在保存 1 篇文献（新增 0 篇，更新 1 篇）');
     expect(current.papers).toHaveLength(1);
     expect(current.attachments).toHaveLength(1);
     expect(current.attachments[0].contentRef).toBe('durable-document');

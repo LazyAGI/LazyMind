@@ -157,7 +157,57 @@ export function waitForRuntimeCapability(
   if (!shouldWaitForRuntimeCapability(getRuntimeMode())) {
     return Promise.resolve();
   }
-  return waitForCapability(capability, runtimeStatus, options);
+  return waitForCapability(capability, async () => {
+    const result = await runtimeStatus();
+    // External browsers can load the desktop bundle but have no Electron IPC.
+    // Keep IPC authoritative when present, including when it reports a failure.
+    if (result.ok || result.reason !== "unavailable" || capability === "parser") {
+      return result;
+    }
+    return browserRuntimeStatus(options.signal);
+  }, options);
+}
+
+async function browserRuntimeStatus(signal?: AbortSignal): Promise<DesktopRuntimeStatusResult> {
+  const controller = new AbortController();
+  const abort = () => controller.abort();
+  signal?.addEventListener("abort", abort, { once: true });
+  if (signal?.aborted) controller.abort();
+  const timer = setTimeout(abort, 15_000);
+  try {
+    const response = await fetch("/_local/status", {
+      cache: "no-store",
+      signal: controller.signal,
+    });
+    if (!response.ok) throw new Error("Local runtime health request failed");
+    const payload = await response.json();
+    if (payload?.status !== "ok" || !Array.isArray(payload.routes)) {
+      throw new Error("Invalid local runtime health response");
+    }
+    // Reaching this same-origin endpoint verifies the frontend proxy. Upstream
+    // services must each report a successful health probe; absent routes stay unready.
+    const services: NonNullable<DesktopRuntimeStatus["services"]> = {
+      frontend: { status: "ready" },
+      "local-proxy": { status: "ready" },
+    };
+    for (const [service, routeName] of Object.entries({
+      "auth-service": "authservice-route",
+      core: "core-route",
+      chat: "chat-route",
+    })) {
+      const route = payload.routes.find((item: { name?: string } | null) => item?.name === routeName);
+      services[service] = {
+        status: route?.enabled === true && route.health === "healthy"
+          && route.healthCode >= 200 && route.healthCode < 300 ? "ready" : "starting",
+      };
+    }
+    return { ok: true, data: { services } };
+  } catch (error) {
+    return { ok: false, reason: "failed", error };
+  } finally {
+    clearTimeout(timer);
+    signal?.removeEventListener("abort", abort);
+  }
 }
 
 export function shouldWaitForRuntimeCapability(mode: RuntimeMode): boolean {

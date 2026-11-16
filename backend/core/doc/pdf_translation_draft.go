@@ -274,7 +274,6 @@ func RevisePDFTranslation(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "save translation draft failed", http.StatusInternalServerError)
 		return
 	}
-	serviceURL := strings.Replace(strings.TrimSpace(os.Getenv("LAZYMIND_OFFICE_CONVERT_URL")), "/v1/office/to-pdf", "/v1/pdf/render-translation", 1)
 	var renderResult struct {
 		WarningCount           int                        `json:"warning_count"`
 		SupplementalBlockCount int                        `json:"supplemental_block_count"`
@@ -283,13 +282,8 @@ func RevisePDFTranslation(w http.ResponseWriter, r *http.Request) {
 		RenderedBlockCount     int                        `json:"rendered_block_count"`
 		RequestedBlockCount    int                        `json:"requested_block_count"`
 	}
-	if serviceURL == "" {
-		cleanup()
-		common.ReplyErr(w, "PDF translation renderer is not configured", http.StatusServiceUnavailable)
-		return
-	}
-	if err := common.ApiPost(r.Context(), serviceURL, map[string]string{"source_path": sourcePath, "layout_path": layoutPath,
-		"translations_path": translationsPath, "output_path": outputPath, "target_language": draft.TargetLanguage}, nil, &renderResult, 15*time.Minute); err != nil {
+	if err := callPDFTranslationOperation(r.Context(), "render-translation", map[string]string{"source_path": sourcePath, "layout_path": layoutPath,
+		"translations_path": translationsPath, "output_path": outputPath, "target_language": draft.TargetLanguage}, &renderResult, 15*time.Minute); err != nil {
 		cleanup()
 		common.ReplyErr(w, err.Error(), http.StatusBadGateway)
 		return

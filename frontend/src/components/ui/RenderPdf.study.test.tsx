@@ -8,7 +8,7 @@ import type {PdfIRDocument} from '@/modules/knowledge/api/pdfIR';
 const returnPositionI18n=createInstance();
 const state=vi.hoisted(()=>({externalLinkTarget:undefined as string|undefined,externalLinkRel:undefined as string|undefined,nativeClick:undefined as undefined|((item:{pageNumber:number;dest?:unknown[]})=>void),pageLoads:new Map<number,(width:number,height:number)=>void>(),document:undefined as unknown,status:'ready',failLoad:false,deferLoad:false,load:undefined as undefined|(()=>void),pdfFile:undefined as unknown,text:undefined as undefined|((page:number)=>Promise<{items:Array<{str:string}>}>)}));
 vi.mock('react-i18next',async original=>({...await original<typeof import('react-i18next')>(),useTranslation:()=>({t:(key:string)=>key==='pdfReader.returnPosition'?returnPositionI18n.t(key):key})}));
-vi.mock('react-pdf',()=>({pdfjs:{GlobalWorkerOptions:{}},Document:({children,onLoadSuccess,onLoadError,file,onItemClick,externalLinkTarget,externalLinkRel}:{externalLinkTarget?:string;externalLinkRel?:string;file:unknown;onItemClick?:typeof state.nativeClick;children:ReactNode;onLoadSuccess:(value:unknown)=>void;onLoadError:(error:Error)=>void})=>{state.externalLinkTarget=externalLinkTarget;state.externalLinkRel=externalLinkRel;state.pdfFile=file;state.nativeClick=onItemClick;useEffect(()=>{if(state.failLoad){onLoadError(new Error("Invalid PDF"));return;}state.load=()=>onLoadSuccess({numPages:3,getPage:async(page:number)=>({view:[0,0,600,800],getViewport:()=>({width:600,height:800,convertToViewportPoint:(x:number,y:number)=>[x,800-y]}),getTextContent:()=>state.text?state.text(page):Promise.resolve({items:[{str:page===3?'needle result':'ordinary text'}]})})});if(!state.deferLoad)state.load();},[file]);return <>{children}</>;},Page:({width,pageNumber,onLoadSuccess,devicePixelRatio,renderTextLayer}:{width:number;pageNumber:number;onLoadSuccess:(page:unknown)=>void;devicePixelRatio?:number;renderTextLayer?:boolean})=> {state.pageLoads.set(pageNumber,(w,h)=>onLoadSuccess({getViewport:()=>({width:w,height:h})}));return <div data-testid="rendered-pdf-page" data-width={width} data-pixel-ratio={devicePixelRatio}>{renderTextLayer&&<span data-testid="pdf-text-layer">Selectable PDF sentence</span>}</div>;}}));
+vi.mock('react-pdf',()=>({pdfjs:{GlobalWorkerOptions:{}},Document:({children,onLoadSuccess,onLoadError,file,onItemClick,externalLinkTarget,externalLinkRel}:{externalLinkTarget?:string;externalLinkRel?:string;file:unknown;onItemClick?:typeof state.nativeClick;children:ReactNode;onLoadSuccess:(value:unknown)=>void;onLoadError:(error:Error)=>void})=>{state.externalLinkTarget=externalLinkTarget;state.externalLinkRel=externalLinkRel;state.pdfFile=file;state.nativeClick=onItemClick;useEffect(()=>{if(state.failLoad){onLoadError(new Error("Invalid PDF"));return;}state.load=()=>onLoadSuccess({numPages:3,getPage:async(page:number)=>({view:[0,0,600,800],getViewport:()=>({width:600,height:800,convertToViewportPoint:(x:number,y:number)=>[x,800-y]}),getTextContent:()=>state.text?state.text(page):Promise.resolve({items:[{str:page===3?'needle result':'ordinary text'}]})})});if(!state.deferLoad)state.load();},[file]);return <>{children}</>;},Page:({width,pageNumber,onLoadSuccess,devicePixelRatio,renderTextLayer}:{width:number;pageNumber:number;onLoadSuccess:(page:unknown)=>void;devicePixelRatio?:number;renderTextLayer?:boolean})=> {state.pageLoads.set(pageNumber,(w,h)=>onLoadSuccess({getViewport:()=>({width:w,height:h,convertToViewportPoint:(x:number,y:number)=>[x,h-y]})}));return <div data-testid="rendered-pdf-page" data-width={width} data-pixel-ratio={devicePixelRatio}>{renderTextLayer&&<span data-testid="pdf-text-layer">Selectable PDF sentence</span>}</div>;}}));
 vi.mock('@/modules/knowledge/api/pdfIR',async original=>({...await original<typeof import('@/modules/knowledge/api/pdfIR')>(),usePdfIR:()=>({state,starting:false,start:vi.fn()})}));
 vi.mock('./pdfPinStore',async original=>({...await original<typeof import('./pdfPinStore')>(),readPdfPinBoard:vi.fn().mockResolvedValue([]),writePdfPinBoard:vi.fn().mockResolvedValue(true)}));
 vi.mock('./PdfVisualStudy',()=>({PdfVisualStudy:({autoExplain}:{autoExplain:boolean})=> <aside aria-label="visual-study" data-auto-explain={String(autoExplain)}/> }));
@@ -634,4 +634,38 @@ it('omits redundant study catalog controls while keeping direct PDF study target
  expect(view.container.querySelector('.pdf-formula-trigger')).toBeInTheDocument();
  expect(view.container.querySelector('.pdf-table-marker')).toBeInTheDocument();
  expect(view.container.querySelector('.pdf-figure-layer button')).toBeInTheDocument();
+});
+
+it.each([true,false])('keeps the note composer on viewport scroll only while editing (focused: %s)',async(focused)=>{
+ const note=vi.fn().mockResolvedValue(undefined);
+ const view=renderView(<RenderPdf fileData="caption-note.pdf" className="caption-note-viewport" onAskSelection={vi.fn()} onNoteSelection={note}/>);
+ await act(async()=>{});
+ const page=screen.getAllByTestId('rendered-pdf-page')[0];
+ const caption=window.document.createElement('span');caption.textContent='Figure 1: Original caption';page.append(caption);
+ const range=window.document.createRange();range.selectNodeContents(caption);
+ Object.defineProperty(range,'getBoundingClientRect',{value:()=>({left:100,top:200,right:300,bottom:220,width:200,height:20})});
+ Object.defineProperty(range,'getClientRects',{value:()=>[]});
+ window.getSelection()?.removeAllRanges();window.getSelection()?.addRange(range);fireEvent.mouseUp(caption);
+ fireEvent.click(screen.getByRole('button',{name:'笔记'}));
+ const input=screen.getByRole('textbox',{name:'向 AI 提问或记笔记'});input.focus();
+ fireEvent.change(input,{target:{value:'Keep this caption insight'}});
+ window.getSelection()?.removeAllRanges();window.document.dispatchEvent(new Event('selectionchange'));
+ const viewport=view.container.querySelector('.caption-note-viewport')!;
+ // Browsers can scroll a focused textarea/caret into view after an input event.
+ if(!focused)input.blur();
+ fireEvent.scroll(viewport);
+ if(!focused){expect(screen.queryByRole('dialog',{name:'选中文本操作'})).toBeNull();expect(note).not.toHaveBeenCalled();return;}
+ expect(screen.getByRole('textbox',{name:'向 AI 提问或记笔记'})).toHaveValue('Keep this caption insight');
+ fireEvent.click(screen.getByRole('button',{name:'保存笔记'}));
+ await waitFor(()=>expect(note).toHaveBeenCalledWith(expect.objectContaining({text:'Figure 1: Original caption',page:1}),'Keep this caption insight','yellow',expect.any(String)));
+ await waitFor(()=>expect(screen.queryByRole('dialog',{name:'选中文本操作'})).toBeNull());
+});
+
+it('paints imported PDF-space annotation geometry when highlights arrive after the page loads',async()=>{
+ const props={fileData:'zotero-annotation.pdf',pdfIRTarget:target,pdfSourceHash:'hash'};
+ const view=render(<RenderPdf {...props}/>);
+ await act(async()=>{});
+ act(()=>{state.pageLoads.get(1)?.(600,800);});
+ view.rerender(<RenderPdf {...props} savedNoteHighlights={[{id:'zotero',page:1,color:'yellow',rects:[],pdfRects:[[60,600,180,640]]}]}/>);
+ await waitFor(()=>expect(view.container.querySelector('[data-pdf-note-highlight="yellow"] path')).toHaveAttribute('d','M0.1 0.2H0.3V0.25H0.1Z'));
 });

@@ -44,6 +44,12 @@ func loadLibraryView(r *http.Request, db *gorm.DB, dataset string, ids []string,
 		}
 		current, exists := metadata[id]
 		status := doc.DocumentProcessingStatus(doc.ProcessingLevelParsed, current.ProcessingState)
+		// Saving an original does not request parsing. Seeded pending stages
+		// and today's collection default must not make it look like an active
+		// parser task. Explicitly queued/running tasks retain their observed level.
+		if current.ObservedProcessingLevel == doc.ProcessingLevelStored {
+			status = "not_requested"
+		}
 		switch {
 		case exists && (status == "ready" || status == "not_requested"):
 			paper.Parse = "ready"

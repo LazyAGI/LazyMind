@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
@@ -108,6 +109,17 @@ func (s *DocumentService) EnsureDocumentParsed(r *http.Request, req EnsureDocume
 	}
 	// Native reader artifacts remain usable while deferred indexing runs or fails.
 	if artifact, err := readBaseArtifact(r.Context(), rec); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			// An active retry may be replacing the old artifact. Its task state is
+			// authoritative until it finishes; absence alone is not a terminal failure.
+			if rec.processing.ParseStatus == "running" || NormalizeTaskStateForUI(rec.taskStat) == "WORKING" || NormalizeTaskStateForUI(rec.taskStat) == "WAITING" {
+				return s.parseResultWithoutRoots(r.Context(), rec)
+			}
+			return failedDocumentParseResult(&ProcessingDiagnostic{
+				Stage: "parse", Code: "FILE_NOT_FOUND", Message: missingProcessingFileMessage,
+				Recovery: "检查原文件是否可读取；原文件存在时重新解析，原文件缺失时重新上传。",
+			}), nil
+		}
 		return EnsureDocumentParsedResult{}, err
 	} else if artifact != nil {
 		return EnsureDocumentParsedResult{Status: "parsed"}, nil
@@ -246,11 +258,17 @@ func (s *DocumentService) EnsureDocumentParsed(r *http.Request, req EnsureDocume
 	}
 	results, startErr := startParseTasksInternalAtLevel(r, req.DatasetID, []string{taskID}, ProcessingLevelParsed)
 	if startErr != nil || len(results) == 0 || results[0].Status != "STARTED" {
+		var nativeFailure *nativeParseError
+		if errors.As(startErr, &nativeFailure) {
+			_ = s.updateParseFailure(r, req.DatasetID, req.DocumentID, rec.processing.Revision, nativeFailure.code, nativeFailure.message)
+			result := failedDocumentParseResult(&ProcessingDiagnostic{Stage: "parse", Code: nativeFailure.code, Message: nativeFailure.message, TaskID: taskID, Recovery: nativeFailure.message})
+			return result, nativeFailure
+		}
 		message := "submit document Reader parsing failed"
 		if startErr != nil {
 			message = startErr.Error()
 		}
-		_ = s.updateParseState(r, req.DatasetID, req.DocumentID, "failed", "READER_SUBMIT_FAILED", message)
+		_ = s.updateParseFailure(r, req.DatasetID, req.DocumentID, rec.processing.Revision, "READER_SUBMIT_FAILED", message)
 		return EnsureDocumentParsedResult{Status: "failed", TaskID: taskID}, &DocumentServiceError{Code: DocumentServiceUnavailable, Message: message, Err: startErr}
 	}
 	return EnsureDocumentParsedResult{Status: "parsing", TaskID: taskID}, nil
@@ -332,6 +350,15 @@ func (s *DocumentService) parseResultWithoutRoots(ctx context.Context, rec docum
 	default:
 		return EnsureDocumentParsedResult{Status: "unknown", TaskID: taskID}, nil
 	}
+}
+
+// Submission failures belong to the revision observed before submission.
+// A newer artifact is authoritative even when its revision has not changed.
+// Do not recreate a state removed while the request was in flight.
+func (s *DocumentService) updateParseFailure(r *http.Request, datasetID, documentID string, revision int64, code, message string) error {
+	return s.db.WithContext(r.Context()).Model(&orm.DocumentProcessingState{}).
+		Where("dataset_id = ? AND document_id = ? AND revision = ? AND parse_artifact_ref = ''", datasetID, documentID, revision).
+		Updates(map[string]any{"parse_status": "failed", "parse_error_code": code, "parse_error_message": message, "updated_at": time.Now().UTC()}).Error
 }
 
 func (s *DocumentService) updateParseState(r *http.Request, datasetID, documentID, status, code, message string) error {

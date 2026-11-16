@@ -78,14 +78,27 @@ type CreateTaskItem struct {
 }
 
 type CreateTaskRequest struct {
-	PaperImport *PaperUploadContext `json:"paper_import,omitempty"`
-	Parent      string              `json:"parent,omitempty"`
-	Items       []CreateTaskItem    `json:"items"`
+	// AllowPartial returns a per-input outcome and continues independent uploads.
+	AllowPartial bool                `json:"allow_partial,omitempty"`
+	PaperImport  *PaperUploadContext `json:"paper_import,omitempty"`
+	Parent       string              `json:"parent,omitempty"`
+	Items        []CreateTaskItem    `json:"items"`
+}
+
+type CreateTaskOutcome struct {
+	TargetPID   string   `json:"target_pid,omitempty"`
+	InputIndex  int      `json:"input_index"`
+	DisplayName string   `json:"display_name"`
+	Status      string   `json:"status"`
+	TaskIDs     []string `json:"task_ids"`
+	Code        string   `json:"code,omitempty"`
+	Message     string   `json:"message,omitempty"`
 }
 
 type CreateTasksResponse struct {
-	PaperImportBatchID string         `json:"paper_import_batch_id,omitempty"`
-	Tasks              []TaskResponse `json:"tasks"`
+	Outcomes           []CreateTaskOutcome `json:"outcomes,omitempty"`
+	PaperImportBatchID string              `json:"paper_import_batch_id,omitempty"`
+	Tasks              []TaskResponse      `json:"tasks"`
 }
 
 type StartTaskRequest struct {

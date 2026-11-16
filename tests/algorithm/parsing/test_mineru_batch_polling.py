@@ -101,6 +101,31 @@ def test_mineru_transient_result_download_retries_same_batch(monkeypatch, tmp_pa
     assert calls == {'submit': 1, 'upload': 1, 'poll': 1, 'download': 2}
 
 
+def test_mineru_certificate_failure_does_not_poll_for_an_hour(monkeypatch, tmp_path):
+    def poll(_):
+        raise requests.exceptions.SSLError('untrusted certificate')
+
+    reader, source, calls = _reader_with_batch(monkeypatch, tmp_path, poll)
+    with pytest.raises(RuntimeError, match='status request failed.*SSLError'):
+        reader._fetch_async(source)
+    assert calls == {'submit': 1, 'upload': 1, 'poll': 1, 'download': 0}
+
+
+def test_mineru_reader_verifies_api_and_artifact_tls(monkeypatch, tmp_path):
+    reader, _, _ = _reader_with_batch(monkeypatch, tmp_path, lambda _: _status('done'))
+    seen = []
+
+    def send(method, url, **kwargs):
+        seen.append(kwargs)
+        return SimpleNamespace(status_code=200, ok=True)
+
+    monkeypatch.setattr(requests, 'request', send)
+    reader._http_execute('GET', 'https://mineru.net/api/v4/extract-results/batch/test', verify=False)
+    assert seen[0]['verify'] is True
+    assert seen[0]['allow_redirects'] is False
+    assert reader._online_request_kwargs() == {'verify': True}
+
+
 def test_mineru_reports_api_error_instead_of_pretending_it_is_pending(monkeypatch, tmp_path):
     reader, source, calls = _reader_with_batch(
         monkeypatch, tmp_path, lambda _: _response({'code': 10017, 'msg': 'quota exhausted', 'data': None}))
@@ -505,7 +530,8 @@ def _shared_fixture(reader, source, content=None):
     data = io.BytesIO()
     with zipfile.ZipFile(data, 'w') as archive:
         archive.writestr('paper_content_list.json', content or '[{"type":"text","text":"cached","page_idx":0}]')
-    cache = source.parent / '.lazymind-artifacts' / 'mineru-cache-v1' / f'{reader._source_digest(source)}-{reader._online_model_version()}.zip'
+    cache = (source.parent / '.lazymind-artifacts' / 'mineru-cache-v1'
+             / f'{reader._source_digest(source)}-{reader._online_model_version()}.zip')
     cache.parent.mkdir(parents=True, exist_ok=True)
     cache.write_bytes(data.getvalue())
     return cache
@@ -618,3 +644,53 @@ def test_shared_archive_malformed_layout_falls_back(monkeypatch, tmp_path):
                         else real_extract(data, task_dir=task_dir))
     assert reader._fetch_async(source)[0] == '[]'
     assert calls['upload'] == 1
+
+
+@pytest.mark.parametrize('root', [
+    r'C:\Users\Administrator\AppData\Local\LazyMind\data\core\uploads',
+    r'\\server\share\LazyMind\data\core\uploads',
+    r'\\?\C:\Users\Administrator\AppData\Local\LazyMind\data\core\uploads',
+])
+def test_windows_shared_cache_uses_extended_path_without_changing_location(monkeypatch, root):
+    import ntpath
+    from pathlib import PureWindowsPath
+    from lazymind.parsing.engine.readers import mineru_online as module
+
+    monkeypatch.setattr(module, 'os', SimpleNamespace(name='nt'))
+    monkeypatch.setattr(module, 'Path', PureWindowsPath)
+    source = (PureWindowsPath(root) / 'tenants' / 'default' / 'datasets'
+              / ('ds_' + 'a' * 32) / 'docs' / 'files' / ('upload_' + 'b' * 32) / 'paper.pdf')
+    expected = source.parent / '.lazymind-artifacts' / 'mineru-cache-v1' / ('f' * 64 + '-vlm.zip')
+    cache = module.LazyMindMineruPDFReader._archive_cache_path(str(source), 'f' * 64, 'vlm')
+    assert str(cache).startswith('\\\\?\\')
+    # The namespace prefix must still address the exact file used by Go.
+    def without_namespace(path):
+        if path.startswith('\\\\?\\UNC\\'):
+            return '\\\\' + path[8:]
+        return path[4:] if path.startswith('\\\\?\\') else path
+    assert ntpath.normcase(without_namespace(str(cache))) == ntpath.normcase(without_namespace(str(expected)))
+    assert str(cache).count('\\\\?\\') == 1
+    reader = object.__new__(module.LazyMindMineruPDFReader)
+    assert str(reader._batch_lock_path(str(source), 'f' * 64, 'vlm')) == str(cache) + '.lock'
+
+
+def test_windows_shared_cache_can_lock_and_publish_beyond_max_path(tmp_path):
+    import os
+    if os.name != 'nt':
+        pytest.skip('Windows filesystem long-path behavior requires Windows')
+    from filelock import FileLock
+    from lazymind.parsing.engine.readers.mineru_online import LazyMindMineruPDFReader
+
+    # Only the derived cache exceeds MAX_PATH; this mirrors ordinary uploads.
+    directory = tmp_path
+    while len(str(directory)) < 175:
+        directory /= 'document-directory'
+    source = directory / 'paper.pdf'
+    cache = LazyMindMineruPDFReader._archive_cache_path(str(source), 'f' * 64, 'vlm')
+    assert len(str(cache)) > 260
+    cache.parent.mkdir(parents=True, exist_ok=True)
+    with FileLock(str(cache) + '.lock'):
+        temporary = cache.with_suffix('.tmp')
+        temporary.write_bytes(b'cached archive')
+        temporary.replace(cache)
+        assert cache.read_bytes() == b'cached archive'

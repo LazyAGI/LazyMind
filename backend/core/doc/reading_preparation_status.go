@@ -186,6 +186,18 @@ func finalizeReadingCapability(c *readingCapabilityStatus, ready bool, jobs []or
 		if json.Unmarshal(jobs[i].PayloadJSON, &p) != nil {
 			continue
 		}
+		// A batch stops at its first failed item. Only that capability failed;
+		// other requested scopes may not have started. Older rows without this
+		// evidence retain their existing conservative interpretation.
+		if jobs[i].Status == "failed" {
+			var outcome struct {
+				FailedScope string `json:"failed_scope"`
+			}
+			_ = json.Unmarshal(jobs[i].ResultJSON, &outcome)
+			if (outcome.FailedScope == "formula" || outcome.FailedScope == "figure" || outcome.FailedScope == "table") && outcome.FailedScope != c.ID {
+				continue
+			}
+		}
 		for _, scope := range p.Scopes {
 			if scope != c.ID {
 				continue

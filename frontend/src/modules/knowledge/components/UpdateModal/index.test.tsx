@@ -2,6 +2,7 @@ import { createRef } from "react";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { ConfigProvider } from "antd";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { getKnowledgeOptions } from "@/modules/knowledge/utils/request";
 import UpdateModal, { type UpdateImperativeProps } from "./index";
 import { getKnowledgeBaseCapabilities, getLearningCatalog, saveKnowledgeBaseCapabilities } from "@/modules/learning/api";
 
@@ -33,6 +34,36 @@ async function open(reject = false, tags: string[] = ["test"]) {
 }
 
 describe("metadata-only library editing", () => {
+  it.each(["general", "academic_papers"])("saves a %s library without unavailable algorithms", async (scene) => {
+    vi.mocked(getKnowledgeOptions).mockResolvedValueOnce({ capabilities: [], algorithms: [] });
+    const ref = createRef<UpdateImperativeProps>();
+    const onUpdate = vi.fn().mockResolvedValue(undefined);
+    render(<ConfigProvider theme={{ token: { motion: false } }}><UpdateModal ref={ref} onUpdate={onUpdate} /></ConfigProvider>);
+    await act(async () => ref.current!.onOpen({ dataset_id: "no-rag", display_name: "library", scene } as Parameters<UpdateImperativeProps["onOpen"]>[0]));
+    await screen.findByRole("dialog");
+    expect(screen.queryByLabelText("knowledge.parseAlgorithm")).not.toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("knowledge.knowledgeBaseName"), { target: { value: "renamed" } });
+    fireEvent.click(screen.getByRole("button", { name: "OK" }));
+    await waitFor(() => expect(onUpdate).toHaveBeenCalledWith(expect.objectContaining({ dataset_id: "no-rag", display_name: "renamed" })));
+    expect(onUpdate.mock.calls[0][0].algo).toBeUndefined();
+  });
+
+  it("preserves an existing algorithm when RAG options are unavailable", async () => {
+    vi.mocked(getKnowledgeOptions).mockResolvedValueOnce({ capabilities: [], algorithms: [] });
+    const onUpdate = await open();
+    fireEvent.click(screen.getByRole("button", { name: "OK" }));
+    await waitFor(() => expect(onUpdate).toHaveBeenCalledWith(expect.objectContaining({ algo: { algo_id: "general_algo" } })));
+  });
+  it("allows editing a library without an algorithm when multiple algorithms are available", async () => {
+    vi.mocked(getKnowledgeOptions).mockResolvedValueOnce({ capabilities: [], algorithms: [{ algo_id: "one" }, { algo_id: "two" }] });
+    const ref = createRef<UpdateImperativeProps>();
+    const onUpdate = vi.fn().mockResolvedValue(undefined);
+    render(<ConfigProvider theme={{ token: { motion: false } }}><UpdateModal ref={ref} onUpdate={onUpdate} /></ConfigProvider>);
+    await act(async () => ref.current!.onOpen({ dataset_id: "no-algorithm", display_name: "library" }));
+    await screen.findByRole("dialog");
+    fireEvent.click(screen.getByRole("button", { name: "OK" }));
+    await waitFor(() => expect(onUpdate).toHaveBeenCalledWith(expect.objectContaining({ dataset_id: "no-algorithm" })));
+  });
   it("saves a library without tags", async () => {
     const onUpdate = await open(false, []);
     fireEvent.click(screen.getByRole("button", { name: "OK" }));
