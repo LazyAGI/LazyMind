@@ -10692,6 +10692,8 @@ components:
             properties:
                 document:
                     $ref: '#/components/schemas/PDFIRDocument'
+                error_code:
+                    type: string
                 error_message:
                     type: string
                 source_sha256:
@@ -10721,6 +10723,26 @@ components:
                     description: Original PDF SHA-256; a supplied request hash must match the current source or the server returns409 before cache/model access.
                     pattern: ^[a-fA-F0-9]{64}$
                     type: string
+            type: object
+        PDFStructureStatus:
+            properties:
+                available:
+                    type: boolean
+                error_code:
+                    type: string
+                error_message:
+                    type: string
+                model:
+                    type: string
+                source_sha256:
+                    description: Original PDF SHA-256; a supplied request hash must match the current source or the server returns409 before cache/model access.
+                    pattern: ^[a-fA-F0-9]{64}$
+                    type: string
+                status:
+                    type: string
+            required:
+                - status
+                - available
             type: object
         PDFVisualExplanation:
             properties:
@@ -11990,6 +12012,18 @@ components:
                 - completed
                 - total
             type: object
+        ReadingDailyUsage:
+            properties:
+                limit:
+                    minimum: 1
+                    type: integer
+                used:
+                    minimum: 0
+                    type: integer
+            required:
+                - used
+                - limit
+            type: object
         ReadingPreparationPolicy:
             properties:
                 automatic_eligible_after:
@@ -12000,26 +12034,36 @@ components:
                             enum:
                                 - 1
                             type: integer
-                        daily_documents:
-                            maximum: 100
+                        daily_pdf_documents:
+                            maximum: 10000
                             minimum: 1
                             type: integer
-                        study_items_per_document:
-                            maximum: 100
+                        daily_study_documents:
+                            maximum: 10000
                             minimum: 1
                             type: integer
                     required:
-                        - daily_documents
-                        - study_items_per_document
+                        - daily_pdf_documents
+                        - daily_study_documents
                         - automatic_concurrency
                     type: object
                 modes:
-                    additionalProperties:
-                        enum:
-                            - on_demand
-                            - automatic
-                            - disabled
-                        type: string
+                    properties:
+                        ai_study:
+                            enum:
+                                - on_demand
+                                - automatic
+                                - disabled
+                            type: string
+                        pdf_parse:
+                            enum:
+                                - on_demand
+                                - automatic
+                                - disabled
+                            type: string
+                    required:
+                        - pdf_parse
+                        - ai_study
                     type: object
                 parser_ref:
                     type: string
@@ -12039,6 +12083,13 @@ components:
                     type: object
                 study_model_ref:
                     type: string
+                usage:
+                    properties:
+                        ai_study:
+                            $ref: '#/components/schemas/ReadingDailyUsage'
+                        pdf_parse:
+                            $ref: '#/components/schemas/ReadingDailyUsage'
+                    type: object
             required:
                 - preset
                 - modes
@@ -12050,6 +12101,7 @@ components:
                     items:
                         enum:
                             - pdf_parse
+                            - ai_study
                             - formula
                             - figure
                             - table
@@ -12064,6 +12116,8 @@ components:
                     items:
                         $ref: '#/components/schemas/ReadingCapabilityStatus'
                     type: array
+                error_code:
+                    type: string
                 error_message:
                     type: string
                 job_id:
@@ -20917,6 +20971,9 @@ paths:
                                         - reading
                                         - read
                                     type: string
+                                status_if_unread:
+                                    description: Set reading status only if the current status is unread. Requires status=reading.
+                                    type: boolean
                                 tags:
                                     items:
                                         type: string
@@ -27161,6 +27218,8 @@ paths:
                         application/json:
                             schema:
                                 properties:
+                                    pdf_structure:
+                                        $ref: '#/components/schemas/PDFStructureStatus'
                                     status:
                                         enum:
                                             - not_requested
@@ -27178,11 +27237,13 @@ paths:
                         application/json:
                             schema:
                                 properties:
+                                    pdf_structure:
+                                        $ref: '#/components/schemas/PDFStructureStatus'
                                     status:
                                         type: string
                                 type: object
                     description: Existing parsing in progress
-            summary: Observe chat parsing without submitting new work
+            summary: Observe shared PDF structure and retrieval readiness without submitting new work
     /api/core/datasets/{dataset}/documents/{document}/pdf-artifacts/{artifact}:
         delete:
             parameters:

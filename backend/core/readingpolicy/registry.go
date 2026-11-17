@@ -15,11 +15,8 @@ type Capability struct {
 // automatically enabled by existing presets.
 func Registry() []Capability {
 	return []Capability{
-		{PDFParse, "结构化 PDF 解析", []string{}, []string{OnDemand, Automatic, Disabled}, []string{"explicit", "future_document"}, "document", "parser_attempt", "mineru-vlm-ir-v1"},
-		{ChatPrepare, "聊天文档准备", []string{}, []string{OnDemand, Automatic, Disabled}, []string{"explicit", "chat", "future_document"}, "document", "document_parse", "reader-artifact-v1"},
-		{Formula, "公式研读", []string{PDFParse}, []string{OnDemand, Automatic, Disabled}, []string{"explicit", "future_document"}, "block", "model_request", "formula-explanation-v7-low-latency"},
-		{Figure, "图片研读", []string{PDFParse}, []string{OnDemand, Automatic, Disabled}, []string{"explicit", "future_document"}, "block", "model_request", "paper-reading-v2-grounded-findings"},
-		{Table, "表格研读", []string{PDFParse}, []string{OnDemand, Automatic, Disabled}, []string{"explicit", "future_document"}, "block", "model_request", "paper-reading-v2-grounded-findings"},
+		{PDFParse, "结构化 PDF 解析", []string{}, []string{OnDemand, Automatic, Disabled}, []string{"explicit", "future_document"}, "document", "paper", "mineru-vlm-ir-v1"},
+		{AIStudy, "AI 论文精读", []string{PDFParse}, []string{OnDemand, Automatic, Disabled}, []string{"explicit", "future_document"}, "document", "paper", "paper-reading-v2-grounded-findings"},
 	}
 }
 func configurableKeys() []string {

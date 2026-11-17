@@ -404,6 +404,9 @@ func EnsureParsed(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, err.Error(), http.StatusBadGateway)
 		return
 	}
+	if r.Method == http.MethodGet {
+		result.PDFStructure = observePDFStructure(r.Context(), datasetID, documentID)
+	}
 	if result.Status == "parsing" {
 		w.WriteHeader(http.StatusAccepted)
 	}

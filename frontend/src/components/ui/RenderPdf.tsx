@@ -47,7 +47,7 @@ import { formulaNumberMap, formulaReferenceForClick } from "./pdfFormulaReferenc
 import type { FormulaEvidence,FormulaExplanation } from "@/modules/knowledge/api/formulaExplanation";
 import type { PdfIRBlock, PdfIRDocument } from "@/modules/knowledge/api/pdfIR";
 import { PdfFormulaLayer, hasFormulaGeometry } from "./PdfFormulaLayer";
-import { usePdfIR, usablePdfIR, type PdfIRTarget } from "@/modules/knowledge/api/pdfIR";
+import { usePdfIR, usablePdfIR, pdfIRQuotaWaiting, type PdfIRTarget } from "@/modules/knowledge/api/pdfIR";
 import {readNativePdfOutline,type PdfNativeOutlineItem} from "@/modules/knowledge/api/pdfOutline";
 import pdfWorkerUrl from "@react-pdf-worker/pdf.worker.min.mjs?url";
 export type { LearningSelectionAction } from "./learningSelection";
@@ -270,7 +270,8 @@ export default function RenderPdf({
     return pages;
   }, [formulaDocument]);
   const formulaCount = Array.from(formulaPages.values()).reduce((count, blocks) => count + blocks.length, 0);
-  const formulaBusy = pdfIR.starting || pdfIR.state.status === "queued" || pdfIR.state.status === "running";
+  const quotaWaiting = pdfIRQuotaWaiting(pdfIR.state);
+  const formulaBusy = pdfIR.starting || (pdfIR.state.status === "queued" && !quotaWaiting) || pdfIR.state.status === "running";
   const [toolsOpen,setToolsOpen] = useState(false);
   const toolsRef = useRef<HTMLDivElement>(null);
   useEffect(()=>{
@@ -1254,11 +1255,11 @@ export default function RenderPdf({
     <div className="pdf-reader-modebar pdf-reader-toolbar" hidden={typeof pdfHeaderEnd !== "function" && !toolsOpen} style={{maxWidth:containerWidth ? Math.max(180,containerWidth-24) : undefined}}>
       {pdfIRTarget && <div className="pdf-formula-controls" onMouseUp={event => event.stopPropagation()}>
 
-        {!formulaDocument && !formulaBusy && <div className="pdf-reader-service-notice"><span>{t("pdfFormula.serviceRequired")}</span><a href={`/settings?section=model_defaults&service=parsing&return_to=${encodeURIComponent(window.location.pathname+window.location.search)}`}>{t("pdfFormula.configureService")}</a></div>}
+        {!formulaDocument && !formulaBusy && !quotaWaiting && <div className="pdf-reader-service-notice"><span>{t("pdfFormula.serviceRequired")}</span><a href={`/settings?section=model_defaults&service=parsing&return_to=${encodeURIComponent(window.location.pathname+window.location.search)}`}>{t("pdfFormula.configureService")}</a></div>}
         <details className="pdf-reader-parser-details"><summary>{readerLabel("displaySettings")}</summary><div><span role="status">{formulaBusy ? t("pdfFormula.processing") : pdfIR.state.status === "ready" ? !globalThis.crypto?.subtle ? t("pdfFormula.insecure") : !pdfSourceHash ? t("pdfFormula.checking") : formulaDocument ? formulaCount ? t("pdfFormula.count", {count:formulaCount}) : t("pdfFormula.empty") : t("pdfFormula.mismatch") : pdfIR.state.error_message || t("pdfFormula.intro")}</span>
         {formulaDocument && formulaCount > 0 && <button onClick={() => setFormulasEnabled(value => !value)} aria-pressed={formulasEnabled}>{formulasEnabled ? t("pdfFormula.hide") : t("pdfFormula.show")}</button>}
         {tableBlocks.length > 0 && <button onClick={() => setTablesEnabled(value => !value)} aria-pressed={tablesEnabled}>{t(tablesEnabled ? "pdfTable.hide" : "pdfTable.show")}</button>}
-        {!formulaBusy && pdfIRTarget.canWrite !== false && <button onClick={() => void pdfIR.start(pdfIR.state.status === "ready" || pdfIR.state.status === "failed")}>{pdfIR.state.status === "not_requested" ? t("pdfFormula.enable") : t("pdfFormula.retry")}</button>}
+        {!formulaBusy && pdfIRTarget.canWrite !== false && <button onClick={() => void pdfIR.start(pdfIR.state.status === "ready" || pdfIR.state.status === "failed" || (quotaWaiting && !!formulaDocument))}>{pdfIR.state.status === "not_requested" ? t("pdfFormula.enable") : t("pdfFormula.retry")}</button>}
         </div></details>
 
       </div>}

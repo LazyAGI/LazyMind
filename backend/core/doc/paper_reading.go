@@ -91,7 +91,7 @@ func (h paperReadingHandler) read(r *http.Request, request paperReadingRequest) 
 	if err != nil {
 		return nil, "", formulaExplanationFailure{500, "Cannot read the PDF structure. Retry later."}
 	}
-	if state.Status != "ready" || state.Document == nil || state.Document.Version != 1 || state.Document.CoordinateSpace != "normalized_top_left" {
+	if state.Document == nil || state.Document.Version != 1 || state.Document.CoordinateSpace != "normalized_top_left" {
 		return nil, "", formulaExplanationFailure{409, "Parse the original PDF before using the paper reader."}
 	}
 	d := *state.Document

@@ -34,6 +34,10 @@ func loadLibraryView(r *http.Request, db *gorm.DB, dataset string, ids []string,
 	if err != nil {
 		return view, err
 	}
+	structures, err := doc.ObservePDFStructures(r.Context(), db, dataset, documents)
+	if err != nil {
+		return view, err
+	}
 	for i := range view.Data.Papers {
 		view.Data.Papers[i].Parse = "unknown"
 	}
@@ -69,6 +73,17 @@ func loadLibraryView(r *http.Request, db *gorm.DB, dataset string, ids []string,
 			attachment.ProcessingError = ""
 		} else if attachment.ProcessingError != "" {
 			attachment.Parse = "failed"
+		}
+		if structure, ok := structures[attachment.ContentRef]; ok {
+			if structure.Status == "not_requested" && attachment.ProcessingError != "" {
+				structure.Status, structure.ErrorMessage = "failed", attachment.ProcessingError
+			}
+			attachment.PDFStructure = &structure
+			attachment.Parse = structure.Status
+			if attachment.Parse == "running" {
+				attachment.Parse = "parsing"
+			}
+			attachment.ProcessingError = structure.ErrorMessage
 		}
 		if attachment.Parse == "parsing" || attachment.Parse == "queued" {
 			view.Active = true

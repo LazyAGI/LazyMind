@@ -785,9 +785,8 @@ slots:
     summary_max_chars: 2700
 
   - id: material_images
-    user_visible: false
+    user_visible: true
     label: Material Images
-    exposed: false
     type: image
     cardinality: list
     ordered: true
@@ -854,6 +853,8 @@ ui:
       widgetType: text-markdown
     material_summary:
       widgetType: text-markdown
+    material_images:
+      widgetType: image-gallery
     background_prompts:
       widgetType: text-markdown
       maxHeight: 420
@@ -888,6 +889,7 @@ ui:
       layout: list
       slots:
         - id: material_summary
+        - id: material_images
 
     - id: background_prompts
       step_id: plan_background_prompts

@@ -2134,7 +2134,7 @@
   "2005406": {"en-US": "The original document is unavailable or changed; prepare its current version", "zh-CN": "原始文档不可用或已变化，请准备当前版本"},
   "2005407": {"en-US": "Automatic reading preparation stopped because its policy changed", "zh-CN": "自动准备已因策略变化停止"},
   "2005408": {"en-US": "The daily automatic reading preparation limit has been reached", "zh-CN": "已达到每日自动准备文档上限"},
-  "2005409": {"en-US": "Preparation limits must be 1–100 items/documents and automatic concurrency must be 1", "zh-CN": "自动文档数和研读数量须为 1–100，自动并发目前为 1"},
+  "2005409": {"en-US": "Daily automatic PDF parsing and study limits must be 1–10000 papers; automatic concurrency must be 1", "zh-CN": "每日自动解析和精读额度须为 1–10000 篇，自动并发目前固定为 1"},
   "2005410": {"en-US": "Reading preparation failed; existing results are preserved", "zh-CN": "阅读准备失败，已有结果仍保留"},
   "2005411": {"en-US": "The PDF structure is not ready", "zh-CN": "PDF 结构尚未就绪"},
   "2005412": {"en-US": "Automatic study requires automatic PDF structure parsing", "zh-CN": "提前研读需要先自动解析 PDF 结构"},

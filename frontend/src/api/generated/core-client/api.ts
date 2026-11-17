@@ -1555,6 +1555,10 @@ export interface ApiCoreAcademicLibraryPapersLibraryPaperIdPatchRequest {
     'metadata'?: PaperLibraryMetadata;
     'revision'?: number;
     'status'?: ApiCoreAcademicLibraryPapersLibraryPaperIdPatchRequestStatusEnum;
+    /**
+     * Set reading status only if the current status is unread. Requires status=reading.
+     */
+    'status_if_unread'?: boolean;
     'tags'?: Array<string>;
 }
 
@@ -1750,6 +1754,7 @@ export interface ApiCoreConversationsNameTitlePatchRequest {
     'title_revision': number;
 }
 export interface ApiCoreDatasetsDatasetDocumentsDocumentParseStatusGet200Response {
+    'pdf_structure'?: PDFStructureStatus;
     'status'?: ApiCoreDatasetsDatasetDocumentsDocumentParseStatusGet200ResponseStatusEnum;
     'task_id'?: string;
 }
@@ -1764,6 +1769,10 @@ export const ApiCoreDatasetsDatasetDocumentsDocumentParseStatusGet200ResponseSta
 
 export type ApiCoreDatasetsDatasetDocumentsDocumentParseStatusGet200ResponseStatusEnum = typeof ApiCoreDatasetsDatasetDocumentsDocumentParseStatusGet200ResponseStatusEnum[keyof typeof ApiCoreDatasetsDatasetDocumentsDocumentParseStatusGet200ResponseStatusEnum];
 
+export interface ApiCoreDatasetsDatasetDocumentsDocumentParseStatusGet202Response {
+    'pdf_structure'?: PDFStructureStatus;
+    'status'?: string;
+}
 export interface ApiCoreDatasetsDatasetDocumentsDocumentReadingPreparationGet200Response {
     'data'?: ReadingPreparationStatus;
 }
@@ -7135,6 +7144,7 @@ export interface PDFIRRequest {
 }
 export interface PDFIRState {
     'document'?: PDFIRDocument;
+    'error_code'?: string;
     'error_message'?: string;
     'source_sha256'?: string;
     'status': PDFIRStateStatusEnum;
@@ -7167,6 +7177,17 @@ export const PDFPaperReadingRequestLanguageEnum = {
 
 export type PDFPaperReadingRequestLanguageEnum = typeof PDFPaperReadingRequestLanguageEnum[keyof typeof PDFPaperReadingRequestLanguageEnum];
 
+export interface PDFStructureStatus {
+    'available': boolean;
+    'error_code'?: string;
+    'error_message'?: string;
+    'model'?: string;
+    /**
+     * Original PDF SHA-256; a supplied request hash must match the current source or the server returns409 before cache/model access.
+     */
+    'source_sha256'?: string;
+    'status': string;
+}
 export interface PDFVisualExplanation {
     'evidence': Array<PDFFormulaEvidence>;
     'model': string;
@@ -7886,23 +7907,21 @@ export const ReadingCapabilityStatusStatusEnum = {
 
 export type ReadingCapabilityStatusStatusEnum = typeof ReadingCapabilityStatusStatusEnum[keyof typeof ReadingCapabilityStatusStatusEnum];
 
+export interface ReadingDailyUsage {
+    'limit': number;
+    'used': number;
+}
 export interface ReadingPreparationPolicy {
     'automatic_eligible_after'?: string;
     'limits': ReadingPreparationPolicyLimits;
-    'modes': { [key: string]: ReadingPreparationPolicyModesEnum; };
+    'modes': ReadingPreparationPolicyModes;
     'parser_ref'?: string;
     'preset': ReadingPreparationPolicyPresetEnum;
     'provider_selections'?: ReadingPreparationPolicyProviderSelections;
     'study_model_ref'?: string;
+    'usage'?: ReadingPreparationPolicyUsage;
 }
 
-export const ReadingPreparationPolicyModesEnum = {
-    OnDemand: 'on_demand',
-    Automatic: 'automatic',
-    Disabled: 'disabled'
-} as const;
-
-export type ReadingPreparationPolicyModesEnum = typeof ReadingPreparationPolicyModesEnum[keyof typeof ReadingPreparationPolicyModesEnum];
 export const ReadingPreparationPolicyPresetEnum = {
     Demand: 'demand',
     Advance: 'advance',
@@ -7914,8 +7933,8 @@ export type ReadingPreparationPolicyPresetEnum = typeof ReadingPreparationPolicy
 
 export interface ReadingPreparationPolicyLimits {
     'automatic_concurrency': ReadingPreparationPolicyLimitsAutomaticConcurrencyEnum;
-    'daily_documents': number;
-    'study_items_per_document': number;
+    'daily_pdf_documents': number;
+    'daily_study_documents': number;
 }
 
 export const ReadingPreparationPolicyLimitsAutomaticConcurrencyEnum = {
@@ -7924,9 +7943,33 @@ export const ReadingPreparationPolicyLimitsAutomaticConcurrencyEnum = {
 
 export type ReadingPreparationPolicyLimitsAutomaticConcurrencyEnum = typeof ReadingPreparationPolicyLimitsAutomaticConcurrencyEnum[keyof typeof ReadingPreparationPolicyLimitsAutomaticConcurrencyEnum];
 
+export interface ReadingPreparationPolicyModes {
+    'ai_study': ReadingPreparationPolicyModesAiStudyEnum;
+    'pdf_parse': ReadingPreparationPolicyModesPdfParseEnum;
+}
+
+export const ReadingPreparationPolicyModesAiStudyEnum = {
+    OnDemand: 'on_demand',
+    Automatic: 'automatic',
+    Disabled: 'disabled'
+} as const;
+
+export type ReadingPreparationPolicyModesAiStudyEnum = typeof ReadingPreparationPolicyModesAiStudyEnum[keyof typeof ReadingPreparationPolicyModesAiStudyEnum];
+export const ReadingPreparationPolicyModesPdfParseEnum = {
+    OnDemand: 'on_demand',
+    Automatic: 'automatic',
+    Disabled: 'disabled'
+} as const;
+
+export type ReadingPreparationPolicyModesPdfParseEnum = typeof ReadingPreparationPolicyModesPdfParseEnum[keyof typeof ReadingPreparationPolicyModesPdfParseEnum];
+
 export interface ReadingPreparationPolicyProviderSelections {
     'parser'?: ReadingProviderSelection;
     'study'?: ReadingProviderSelection;
+}
+export interface ReadingPreparationPolicyUsage {
+    'ai_study'?: ReadingDailyUsage;
+    'pdf_parse'?: ReadingDailyUsage;
 }
 export interface ReadingPreparationRequest {
     'scopes': Array<ReadingPreparationRequestScopesEnum>;
@@ -7934,6 +7977,7 @@ export interface ReadingPreparationRequest {
 
 export const ReadingPreparationRequestScopesEnum = {
     PdfParse: 'pdf_parse',
+    AiStudy: 'ai_study',
     Formula: 'formula',
     Figure: 'figure',
     Table: 'table'
@@ -7943,6 +7987,7 @@ export type ReadingPreparationRequestScopesEnum = typeof ReadingPreparationReque
 
 export interface ReadingPreparationStatus {
     'capabilities'?: Array<ReadingCapabilityStatus>;
+    'error_code'?: string;
     'error_message'?: string;
     'job_id'?: string;
     'model_requests'?: number;
@@ -24364,7 +24409,7 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
         },
         /**
          *
-         * @summary Observe chat parsing without submitting new work
+         * @summary Observe shared PDF structure and retrieval readiness without submitting new work
          * @param {string} dataset
          * @param {string} document
          * @param {*} [options] Override http request option.
@@ -37027,7 +37072,7 @@ export const DefaultApiFp = function(configuration?: Configuration) {
         },
         /**
          *
-         * @summary Observe chat parsing without submitting new work
+         * @summary Observe shared PDF structure and retrieval readiness without submitting new work
          * @param {string} dataset
          * @param {string} document
          * @param {*} [options] Override http request option.
@@ -42490,7 +42535,7 @@ export const DefaultApiFactory = function (configuration?: Configuration, basePa
         },
         /**
          *
-         * @summary Observe chat parsing without submitting new work
+         * @summary Observe shared PDF structure and retrieval readiness without submitting new work
          * @param {DefaultApiApiCoreDatasetsDatasetDocumentsDocumentParseStatusGetRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
@@ -49499,7 +49544,7 @@ export class DefaultApi extends BaseAPI {
 
     /**
      *
-     * @summary Observe chat parsing without submitting new work
+     * @summary Observe shared PDF structure and retrieval readiness without submitting new work
      * @param {DefaultApiApiCoreDatasetsDatasetDocumentsDocumentParseStatusGetRequest} requestParameters Request parameters.
      * @param {*} [options] Override http request option.
      * @throws {RequiredError}

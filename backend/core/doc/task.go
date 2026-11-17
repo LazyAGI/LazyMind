@@ -28,7 +28,6 @@ import (
 	"lazymind/core/common/orm"
 	"lazymind/core/common/readonlyorm"
 	applog "lazymind/core/log"
-	"lazymind/core/modelconfig"
 	"lazymind/core/modelprovider"
 	"lazymind/core/readingpolicy"
 	"lazymind/core/settings"
@@ -1636,24 +1635,9 @@ func startParseTasksAtLevel(ctx context.Context, userID, datasetID string, taskI
 		log.Printf("[startParseTasksInternal] failed to load llm_config for user=%s: %v", userID, err)
 	}
 	llmConfig = normalizeParsingLLMConfig(llmConfig)
-	ocrConfig, err := modelconfig.LoadOCRConfig(ctx, store.DB(), userID)
-	if dataset.Scene == "academic_papers" {
-		policy, policyErr := readingpolicy.Load(ctx, store.DB(), userID)
-		if policyErr != nil {
-			return nil, policyErr
-		}
-		// Inherited parsing retains the existing optional OCR fallback. An
-		// explicit reading override must never silently use that fallback.
-		if policy.ParserRef != "" {
-			ocrConfig, err = modelconfig.ResolveReadingParser(ctx, store.DB(), userID, policy.ParserRef)
-			if err != nil {
-				return nil, err
-			}
-		}
-	}
+	ocrConfig, err := loadIngestionParser(ctx, userID)
 	if err != nil {
-		log.Printf("[startParseTasksInternal] failed to load ocr_config for user=%s: %v", userID, err)
-		ocrConfig = nil
+		return nil, err
 	}
 	parseProfile := resolveDocumentParseProfile()
 	applog.Logger.Info().
@@ -2958,24 +2942,9 @@ func startReparseTasksInternalAtLevel(r *http.Request, datasetID string, taskIDs
 		log.Printf("[startReparseTasksInternal] failed to load llm_config for user=%s: %v", userID, err)
 	}
 	llmConfig = normalizeParsingLLMConfig(llmConfig)
-	ocrConfig, err := modelconfig.LoadOCRConfig(r.Context(), store.DB(), userID)
-	if dataset.Scene == "academic_papers" {
-		policy, policyErr := readingpolicy.Load(r.Context(), store.DB(), userID)
-		if policyErr != nil {
-			return nil, policyErr
-		}
-		// Inherited parsing retains the existing optional OCR fallback. An
-		// explicit reading override must never silently use that fallback.
-		if policy.ParserRef != "" {
-			ocrConfig, err = modelconfig.ResolveReadingParser(r.Context(), store.DB(), userID, policy.ParserRef)
-			if err != nil {
-				return nil, err
-			}
-		}
-	}
+	ocrConfig, err := loadIngestionParser(r.Context(), userID)
 	if err != nil {
-		log.Printf("[startReparseTasksInternal] failed to load ocr_config for user=%s: %v", userID, err)
-		ocrConfig = nil
+		return nil, err
 	}
 	docIDs := make([]string, 0, len(taskIDs))
 	taskRows := make([]orm.Task, 0, len(taskIDs))
