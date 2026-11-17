@@ -1,7 +1,13 @@
 import type { TFunction } from "i18next";
 import type { DesktopAgent, DesktopAgentIntegrationStatus } from "@/runtime/desktopBridge";
 
-export const AGENT_REPAIR_GUIDE_URL = "https://raw.githubusercontent.com/ADAM-CHENG666/LazyRAG/main/docs/external-agent-troubleshooting.md";
+export const AGENT_REPAIR_GUIDE_URL = "https://modelscope.cn/datasets/CarlosShaoting/lazymind-cst/resolve/master/docs/external-agent-troubleshooting.md";
+
+const CHECK_ENVIRONMENT_KEYS = [
+  "LAZYMIND_HOME", "LAZYMIND_RUNTIME_PROFILE", "LAZYMIND_CONNECTOR_CONFIG",
+  "CODEX_HOME", "LAZYMIND_HOST_HOME", "DSH_HOME", "LAZYMIND_DSH_PROFILE",
+  "LAZYMIND_CODEX_BIN", "LAZYMIND_DSH_PATH", "LAZYMIND_DSH_DESKTOP_PATH",
+] as const;
 
 export interface AgentRepairContext {
   agent: DesktopAgent;
@@ -26,17 +32,26 @@ export function buildAgentRepairRequest({ agent, status, error, stage }: AgentRe
   const text = (key: string) => t(`agentIntegration.repairRequest.${key}`);
   const field = (key: string, value: string | boolean | undefined) =>
     `${text(key)}: ${value === undefined || value === "" ? text("unknown") : String(value)}`;
-  const connection = status?.connection;
   const diagnostic = status?.diagnostic_context;
+  const environment = Object.fromEntries(CHECK_ENVIRONMENT_KEYS.flatMap(key => {
+    const value = diagnostic?.environment?.[key];
+    return typeof value === "string" ? [[key, value]] : [];
+  }));
+  const logPath = status?.diagnostic_log;
+  if (status?.inspection_unavailable) {
+    error = text("inspectionUnavailable");
+    status = undefined;
+  }
+  const connection = status?.connection;
   const noErrorReported = status && !status.issue && !["error", "conflict", "action_required"].includes(status.state);
   const configuration = status?.issue?.code === "configuration_unreadable" ? text("configurationUnreadable")
     : status?.enabled === true ? text("configurationPresent")
       : status?.enabled === false ? text("configurationAbsent") : undefined;
   const state = status ? `${status.state} (${text(`states.${status.state}`)})` : undefined;
-  const action = diagnostic?.action;
+  const action = status?.diagnostic_context?.action;
   const actionLabel = action && ["inspect", "connect", "disconnect", "refresh"].includes(action)
     ? `${action} (${text(`actions.${action}`)})` : action;
-  const configurationDetails = (diagnostic?.configuration || []).flatMap(item => [
+  const configurationDetails = (status?.diagnostic_context?.configuration || []).flatMap(item => [
     field("configPath", item.config_path),
     ...(item.configured_cli ? [field("configuredCLI", item.configured_cli)] : []),
     ...(item.reason ? [field("configurationReason", item.reason)] : []),
@@ -54,7 +69,7 @@ export function buildAgentRepairRequest({ agent, status, error, stage }: AgentRe
     field("operation", actionLabel),
     field("error", error || (noErrorReported ? text("noErrorReported") : undefined)),
     field("code", status?.issue?.code || (noErrorReported ? text("noErrorReported") : undefined)),
-    field("stage", diagnostic?.stage || status?.issue?.stage || stage),
+    field("stage", status?.diagnostic_context?.stage || status?.issue?.stage || stage),
     field("retryAction", status?.retry_action),
     field("runtime", connection?.runtime_state || (status ? text("runtimeUnverified") : undefined)),
     field("mcpConfigured", connection?.mcp_configured),
@@ -64,9 +79,10 @@ export function buildAgentRepairRequest({ agent, status, error, stage }: AgentRe
     field("presentation", connection?.presentation_status),
     field("page", connection?.page_status),
     field("diagnosticID", status?.diagnostic_id || status?.issue?.operation_id),
-    field("logPath", status?.diagnostic_log),
+    field("logPath", logPath),
     field("currentCLI", diagnostic?.current_cli),
     field("checkArguments", `internal agent ${agent} status`),
+    field("checkEnvironment", Object.keys(environment).length ? JSON.stringify(environment, null, 2) : undefined),
     ...configurationDetails,
     "",
     field("firstAction", text(`hints.${recoveryHint(status)}`)),

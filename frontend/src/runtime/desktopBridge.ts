@@ -110,6 +110,8 @@ export interface DesktopAgentConnectionStatus {
 }
 
 export interface DesktopAgentIntegrationStatus {
+  // Client-only: the latest inspection failed; retained fields are historical.
+  inspection_unavailable?: boolean;
   diagnostic_id?: string;
   diagnostic_log?: string;
   diagnostic_context?: {
@@ -117,6 +119,7 @@ export interface DesktopAgentIntegrationStatus {
     stage?: string;
     current_cli?: string;
     app_version?: string;
+    environment?: Record<string, string>;
     configuration?: Array<{ config_path: string; configured_cli?: string; connection_file?: string; reason?: string }>;
   };
   enabled?: boolean;

@@ -13,6 +13,8 @@ func TestInspectionLogReusesIdentifierAndRecordsChangedConfiguration(t *testing.
 	t.Setenv("HOME", root)
 	t.Setenv("USERPROFILE", root)
 	t.Setenv("LAZYMIND_DESKTOP_APP_VERSION", "test-app-version")
+	t.Setenv("LAZYMIND_RUNTIME_PROFILE", "desktop")
+	t.Setenv("LAZYMIND_CONNECTOR_CONFIG", "")
 	configured := true
 	status := Status{Agent: "raccoon", State: Conflict, Enabled: &configured, Issue: &Issue{Code: "environment_mismatch"}}
 	items := []Inspection{{Path: filepath.Join(root, "agent", "mcp.json"), Command: filepath.Join(root, "old", "lazymind"), Reason: "installation_mismatch"}}
@@ -30,6 +32,7 @@ func TestInspectionLogReusesIdentifierAndRecordsChangedConfiguration(t *testing.
 	}
 	if status.DiagnosticContext == nil || status.DiagnosticContext.Action != "inspect" ||
 		status.DiagnosticContext.CurrentCLI != "~/current/lazymind" || status.DiagnosticContext.AppVersion != "test-app-version" ||
+		status.DiagnosticContext.Environment["LAZYMIND_HOME"] != "~" || status.DiagnosticContext.Environment["LAZYMIND_RUNTIME_PROFILE"] != "desktop" ||
 		len(status.DiagnosticContext.Configuration) != 1 || status.DiagnosticContext.Configuration[0].Command != "~/old/lazymind" ||
 		status.Issue.OperationID != id || status.Issue.Stage != "inspect" {
 		t.Fatalf("cached inspection lost current context: %+v", status)
@@ -76,5 +79,35 @@ func TestInspectionContextDoesNotConvertMissingConfigurationEvidenceToFalse(t *t
 	RecordInspection(root, "/current/lazymind", items, &status)
 	if status.Enabled != nil || status.Connection != nil || status.DiagnosticContext.Configuration[0].Reason != "permission_denied" {
 		t.Fatalf("unreadable state became known or lost its reason: %+v", status)
+	}
+}
+
+func TestDiagnosticEnvironmentPreservesBootstrapWithoutCredentials(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("HOME", root)
+	t.Setenv("USERPROFILE", root)
+	t.Setenv("LAZYMIND_HOME", filepath.Join(root, "unrelated"))
+	t.Setenv("LAZYMIND_RUNTIME_PROFILE", "desktop")
+	t.Setenv("LAZYMIND_CONNECTOR_CONFIG", "")
+	t.Setenv("CODEX_HOME", filepath.Join(root, "codex profile"))
+	t.Setenv("LAZYMIND_ACCESS_TOKEN", "private-token-for-test")
+	status := Status{Agent: "codex", State: Ready}
+	RecordInspection(filepath.Join(root, "installed"), "/current/lazymind", nil, &status)
+	env := status.DiagnosticContext.Environment
+	if env["LAZYMIND_HOME"] != "~/installed" || env["CODEX_HOME"] != "~/codex profile" {
+		t.Fatal("lost the resolved installation home or selected profile")
+	}
+	if value, present := env["LAZYMIND_CONNECTOR_CONFIG"]; !present || value != "" {
+		t.Fatal("missing instruction to clear an inherited connection record")
+	}
+	body, err := json.Marshal(status.DiagnosticContext)
+	if err != nil || bytes.Contains(body, []byte(root)) || bytes.Contains(body, []byte("private-token-for-test")) || bytes.Contains(body, []byte("LAZYMIND_ACCESS_TOKEN")) {
+		t.Fatal("diagnostic context contains an absolute user path or credentials")
+	}
+	id := status.DiagnosticID
+	t.Setenv("CODEX_HOME", filepath.Join(root, "another profile"))
+	RecordInspection(filepath.Join(root, "installed"), "/current/lazymind", nil, &status)
+	if status.DiagnosticID == id || status.DiagnosticContext.Environment["CODEX_HOME"] != "~/another profile" {
+		t.Fatal("a changed inspection environment reused the previous diagnostic")
 	}
 }

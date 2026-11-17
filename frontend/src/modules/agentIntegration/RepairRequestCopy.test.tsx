@@ -33,6 +33,8 @@ describe("copying an Agent repair request", () => {
       agent: "codex", display_name: "Codex", state: "error", version: "test-version",
       diagnostic_id: "latest-check", diagnostic_log: "~/logs/agent-setup.log",
       diagnostic_context: { action: "inspect", stage: "control", current_cli: "/current/lazymind", app_version: "test-app-version",
+        environment: { LAZYMIND_HOME: "~/LazyMind data", LAZYMIND_RUNTIME_PROFILE: "desktop",
+          LAZYMIND_CONNECTOR_CONFIG: "", CODEX_HOME: "~/Codex profile", ACCESS_TOKEN: "private-environment-token" },
         configuration: [{ config_path: "~/agent/config.json", configured_cli: "/previous/lazymind", connection_file: "~/private-connection.json" }] },
       issue: { code: "capability_unavailable", operation_id: "old-operation", stage: "control" },
       connection: { mcp_configured: true, mcp_enabled: true, mcp_trusted: false,
@@ -50,8 +52,12 @@ describe("copying an Agent repair request", () => {
     expect(copied).toContain("capability_unavailable");
     expect(copied).toContain("~/logs/agent-setup.log");
     expect(copied).toContain(`${labels.currentCLI}: /current/lazymind`);
+    expect(copied).toContain('"LAZYMIND_HOME": "~/LazyMind data"');
+    expect(copied).toContain('"LAZYMIND_RUNTIME_PROFILE": "desktop"');
+    expect(copied).toContain('"LAZYMIND_CONNECTOR_CONFIG": ""');
+    expect(copied).toContain('"CODEX_HOME": "~/Codex profile"');
     expect(copied).toContain(`${labels.configuredCLI}: /previous/lazymind`);
-    expect(copied).not.toMatch(/old-operation|raw backend|token=private|private-connection|agentIntegration\./);
+    expect(copied).not.toMatch(/old-operation|raw backend|token=private|private-connection|private-environment-token|ACCESS_TOKEN|agentIntegration\./);
 
     // A failed recheck must not send a previous successful/failed snapshot.
     view.rerender(<I18nextProvider i18n={i18n}><RepairRequestCopy agent="codex" stage="notReady" error="Check failed" /></I18nextProvider>);
@@ -60,7 +66,36 @@ describe("copying an Agent repair request", () => {
     expect(copied).toContain(`${labels.mcpConfigured}: ${labels.unknown}`);
     expect(copied).toContain(`${labels.diagnosticID}: ${labels.unknown}`);
     expect(copied).toContain(`${labels.stage}: notReady`);
+    expect(copied).toContain(`${labels.checkEnvironment}: ${labels.unknown}`);
     expect(copied).not.toMatch(/latest-check|host-offline|test-version|test-app-version|\/current\/lazymind|\/previous\/lazymind/);
+  });
+
+  it.each(["zh-CN", "en-US"])("does not turn an unavailable inspection into current evidence (%s)", async language => {
+    const i18n = createInstance();
+    await i18n.init({ lng: language, fallbackLng: false,
+      resources: { "zh-CN": { translation: zhCN }, "en-US": { translation: enUS } } });
+    const labels = (language === "zh-CN" ? zhCN : enUS).agentIntegration.repairRequest;
+    const previous: DesktopAgentIntegrationStatus = {
+      agent: "codex", display_name: "Codex", state: "enabled", enabled: true,
+      inspection_unavailable: true, diagnostic_id: "previous-check", diagnostic_log: "~/logs/agent-setup.log",
+      issue: { code: "host_unavailable", operation_id: "previous-operation" },
+      diagnostic_context: { action: "inspect", stage: "inspect", current_cli: "/installed/lazymind",
+        environment: { LAZYMIND_HOME: "~/installed-home", LAZYMIND_CONNECTOR_CONFIG: "" },
+        configuration: [{ config_path: "~/old-config", reason: "installation_mismatch" }] },
+      connection: { mcp_configured: true, mcp_enabled: true, mcp_trusted: true, control_ready: false,
+        presentation_status: "host-offline", runtime_state: "unavailable" },
+    };
+    render(<I18nextProvider i18n={i18n}><RepairRequestCopy agent="codex" status={previous} /></I18nextProvider>);
+    fireEvent.click(screen.getByRole("button", { name: labels.copyHint }));
+    await waitFor(() => expect(copied).toContain(labels.inspectionUnavailable));
+    for (const key of ["configuration", "state", "code", "operation", "stage", "mcpConfigured", "mcpEnabled", "mcpTrusted", "control", "runtime", "diagnosticID"] as const) {
+      expect(copied).toContain(`${labels[key]}: ${labels.unknown}`);
+    }
+    expect(copied).toContain(labels.hints.check);
+    expect(copied).toContain("/installed/lazymind");
+    expect(copied).toContain('"LAZYMIND_HOME": "~/installed-home"');
+    expect(copied).toContain("~/logs/agent-setup.log");
+    expect(copied).not.toMatch(/previous-check|previous-operation|host_unavailable|host-offline|old-config|installation_mismatch/);
   });
 
   const dsh: DesktopAgentIntegrationStatus = { agent: "deepseek-harness", display_name: "DeepSeek Harness", state: "ready" };

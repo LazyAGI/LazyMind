@@ -52,13 +52,25 @@ func (o *Operation) Finish(status *Status) {
 		code = status.Issue.Code
 	}
 	status.DiagnosticID, status.DiagnosticLog = o.id, diagnosticPath(o.home)
-	status.DiagnosticContext = diagnosticContext(o.action, o.Stage, o.CLI, o.After)
+	status.DiagnosticContext = diagnosticContext(o.home, o.action, o.Stage, o.CLI, o.After)
 	o.record(string(status.State), code, status.Enabled)
 }
 
-func diagnosticContext(action, stage, cli string, inspections []Inspection) *DiagnosticContext {
+func diagnosticContext(home, action, stage, cli string, inspections []Inspection) *DiagnosticContext {
 	return &DiagnosticContext{Action: action, Stage: stage, CurrentCLI: safePath(cli),
-		AppVersion: os.Getenv("LAZYMIND_DESKTOP_APP_VERSION"), Configuration: safeInspections(inspections)}
+		AppVersion: os.Getenv("LAZYMIND_DESKTOP_APP_VERSION"), Environment: diagnosticEnvironment(home), Configuration: safeInspections(inspections)}
+}
+
+// Only bootstrap paths and profiles are copied. Empty values must also be
+// applied when rechecking, so the caller cannot inherit another installation.
+func diagnosticEnvironment(home string) map[string]string {
+	env := map[string]string{"LAZYMIND_HOME": safePath(home)}
+	for _, name := range []string{"LAZYMIND_RUNTIME_PROFILE", "LAZYMIND_CONNECTOR_CONFIG",
+		"CODEX_HOME", "LAZYMIND_HOST_HOME", "DSH_HOME", "LAZYMIND_DSH_PROFILE",
+		"LAZYMIND_CODEX_BIN", "LAZYMIND_DSH_PATH", "LAZYMIND_DSH_DESKTOP_PATH"} {
+		env[name] = safePath(strings.TrimSpace(os.Getenv(name)))
+	}
+	return env
 }
 
 func (o *Operation) record(state, code string, configured *bool) {
@@ -113,7 +125,7 @@ func appendDiagnostic(home string, row any) {
 // RecordInspection reuses the diagnostic ID while a polled configuration stays unchanged.
 // The small cache is diagnostic metadata, never an input to installation or authorization.
 func RecordInspection(home, cli string, inspections []Inspection, status *Status) {
-	status.DiagnosticContext = diagnosticContext("inspect", "inspect", cli, inspections)
+	status.DiagnosticContext = diagnosticContext(home, "inspect", "inspect", cli, inspections)
 	if os.MkdirAll(filepath.Join(home, "logs"), 0700) != nil {
 		return
 	}
@@ -130,14 +142,15 @@ func RecordInspection(home, cli string, inspections []Inspection, status *Status
 		code = status.Issue.Code
 	}
 	body, _ := json.Marshal(struct {
-		CLI        string
-		Items      []Inspection
-		Enabled    *bool
-		State      State
-		Code       string
-		Connection *ConnectionStatus
-		AppVersion string
-	}{cli, inspections, status.Enabled, status.State, code, status.Connection, status.DiagnosticContext.AppVersion})
+		CLI         string
+		Items       []Inspection
+		Enabled     *bool
+		State       State
+		Code        string
+		Connection  *ConnectionStatus
+		AppVersion  string
+		Environment map[string]string
+	}{cli, inspections, status.Enabled, status.State, code, status.Connection, status.DiagnosticContext.AppVersion, status.DiagnosticContext.Environment})
 	hash := sha256.Sum256(body)
 	fingerprint := hex.EncodeToString(hash[:])
 	var previous struct {

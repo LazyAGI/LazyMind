@@ -63,11 +63,12 @@ type Status struct {
 // DiagnosticContext describes this status snapshot, not an inferred last repair.
 // It reuses allowlisted inspection data; no log contents or credentials are read.
 type DiagnosticContext struct {
-	Action        string       `json:"action"`
-	Stage         string       `json:"stage,omitempty"`
-	CurrentCLI    string       `json:"current_cli,omitempty"`
-	AppVersion    string       `json:"app_version,omitempty"`
-	Configuration []Inspection `json:"configuration,omitempty"`
+	Action        string            `json:"action"`
+	Stage         string            `json:"stage,omitempty"`
+	CurrentCLI    string            `json:"current_cli,omitempty"`
+	AppVersion    string            `json:"app_version,omitempty"`
+	Environment   map[string]string `json:"environment,omitempty"`
+	Configuration []Inspection      `json:"configuration,omitempty"`
 }
 
 type ProfileStatus struct {
