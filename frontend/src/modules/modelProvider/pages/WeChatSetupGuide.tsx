@@ -1,3 +1,4 @@
+import ExternalLink from '@/components/ExternalLink';
 import { useRef, useState } from "react";
 import { Button, Image, Typography } from "antd";
 import {
@@ -188,14 +189,14 @@ export default function WeChatSetupGuide() {
                   <Paragraph>
                     {step.linkLabel ? (
                       <>
-                        <a
+                        <ExternalLink
                           className="feishu-setup-guide-inline-link"
                           href={step.linkHref}
                           target="_blank"
                           rel="noreferrer"
                         >
                           {step.linkLabel}
-                        </a>
+                        </ExternalLink>
                         {t("modelProvider.wechatOfficialAccountSetupGuide.linkSeparator")}
                       </>
                     ) : null}

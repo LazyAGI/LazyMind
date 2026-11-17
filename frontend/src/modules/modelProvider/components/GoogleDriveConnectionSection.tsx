@@ -1,3 +1,4 @@
+import ExternalLink from '@/components/ExternalLink';
 import { useCallback, useEffect, useState } from "react";
 import { Alert, Button, Form, Input, Modal, Space, Tag, message } from "antd";
 import { DeleteOutlined, FileTextOutlined, GoogleOutlined, LinkOutlined, SettingOutlined } from "@ant-design/icons";
@@ -258,13 +259,13 @@ export default function GoogleDriveConnectionSection() {
               : t("modelProvider.external.googleDriveInvalidRedirectHint", { callbackUrl })}
           />
           <p className="google-drive-connection-guide">
-            <a
+            <ExternalLink
               href={`${CLOUD_DOCUMENTS_GOOGLE_DRIVE_SETUP_PATH}?from=google-drive-provider`}
               target="_blank"
               rel="noreferrer"
             >
               <FileTextOutlined /> {t("modelProvider.external.googleDriveSetupGuideAction")}
-            </a>
+            </ExternalLink>
           </p>
         </Form>
       </Modal>

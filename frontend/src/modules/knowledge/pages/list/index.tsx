@@ -1,3 +1,4 @@
+import { externalWebURL, openExternalUrl } from '@/runtime/externalNavigation';
 import { DatasetDeletionProgressList, useDatasetDeletions } from "./DatasetDeletionProgress";
 import { useRAGComponent } from "@/modules/modelProvider/contexts/RAGComponentContext";
 import {
@@ -1094,7 +1095,10 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
       if (item.catalogSource === "cloud") {
         try {
           const url = new URL(item.onlineAccessUrl);
-          if (["https:", "http:"].includes(url.protocol) && !url.username && !url.password) window.open(url.href, "_blank", "noopener,noreferrer");
+          if (["https:", "http:"].includes(url.protocol) && !url.username && !url.password) {
+            if (externalWebURL(url.href)) void openExternalUrl(url.href);
+            else window.open(url.href, "_blank", "noopener,noreferrer");
+          }
         } catch { message.info(t("knowledge.onlineQueryUnavailable")) }
         return;
       }

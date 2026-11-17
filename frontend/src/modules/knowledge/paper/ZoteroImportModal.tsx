@@ -1,3 +1,4 @@
+import ExternalLink from '@/components/ExternalLink';
 import { getRuntimeMode, isLocalLikeRuntimeMode } from '@/runtime/mode';
 import ZoteroWebDAVAddress from './ZoteroWebDAVAddress';
 import PaperAuthors from './PaperAuthors';
@@ -224,13 +225,13 @@ export default function ZoteroImportModal({ open, datasetId, canWrite, initialFo
 
     <Drawer title="Zotero 接入指引" placement="right" width={420} open={open && showGuide} onClose={() => setShowGuide(false)} zIndex={1100} rootClassName="zotero-connection-guide">
       <section><h3>用户数字 ID 与 API Key</h3><ol>
-        <li>登录 <a href="https://www.zotero.org/settings/keys" target="_blank" rel="noreferrer">Zotero API Keys 页面</a>（官网 Settings → Feeds/API → API Keys）。</li>
+        <li>登录 <ExternalLink href="https://www.zotero.org/settings/keys" target="_blank" rel="noreferrer">Zotero API Keys 页面</ExternalLink>（官网 Settings → Feeds/API → API Keys）。</li>
         <li>找到 <code>Your userID for use in API calls is …</code>，将后面的数字填入「用户 ID」。这不是用户名，也不是邮箱。</li>
         <li>点击 <strong>Create new private key</strong>，为 LazyMind 创建专用密钥，授予所需文献库的读取权限；读取 Zotero 云端附件时还需允许读取文件。复制到「API Key」。公开题录可不填密钥。</li>
       </ol><p>Security 页面中的 <strong>Register a new key</strong> 是登录用的 Passkey，不是 API Key。请使用上面的直达链接。</p><p>群组文献库请填写群组的数字 ID，并为密钥授权相应群组的读取权限。</p></section>
       <section><h3>WebDAV：与 Zotero 保持一致</h3><ol><li>打开 Zotero「设置 → 账户／同步 → 文件同步」，查看 WebDAV 设置。</li><li>分别选择协议、填写地址主体和 WebDAV 用户名／密码。右侧固定的 <code>/zotero/</code> 会自动补上；粘贴完整 URL 也会自动拆分。</li><li>例如 Zotero 中填写 <code>https</code> 和 <code>dav.example.com/dav</code>，实际目录是 <code>https://dav.example.com/dav/zotero/</code>。</li></ol><p>WebDAV 只提供附件，题录和文件夹仍从上面的 Zotero 文献库读取，因此仍需数字用户 ID 和必要的 API Key。WebDAV 账号不一定与 Zotero 账号相同；群组文献库不支持 WebDAV。</p></section>
       <section><h3>本地客户端</h3><ol><li>打开 Zotero「设置 → 高级」，勾选「允许此计算机上的其他应用程序与 Zotero 通讯」。</li><li>保持 Zotero 运行。个人文献库 ID 填 <code>0</code>，读取不需要 API Key。</li><li>LazyMind 容器部署选择「Docker 连接」，直接运行选择「本机直连」。</li></ol><p>如果需要本地 PDF，选择 Zotero 数据目录中的 <code>storage</code> 文件夹。可在「设置 → 高级 → 文件和文件夹」查看数据目录。</p></section>
-      <p className="zotero-guide-links"><a href="https://www.zotero.org/support/dev/web_api/v3/basics" target="_blank" rel="noreferrer">官方 API 说明</a> · <a href="https://www.zotero.org/support/sync" target="_blank" rel="noreferrer">官方同步说明</a></p>
+      <p className="zotero-guide-links"><ExternalLink href="https://www.zotero.org/support/dev/web_api/v3/basics" target="_blank" rel="noreferrer">官方 API 说明</ExternalLink> · <ExternalLink href="https://www.zotero.org/support/sync" target="_blank" rel="noreferrer">官方同步说明</ExternalLink></p>
     </Drawer>
   </Modal>;
 }

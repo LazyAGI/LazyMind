@@ -1,3 +1,4 @@
+import { externalLinkProps } from '@/runtime/externalNavigation';
 import { useCallback, useEffect, useId, useRef, useState, type ChangeEvent, type Key } from 'react';
 import { createPortal } from 'react-dom';
 import { Alert, Button, Drawer, Dropdown, Input, List, Modal, Space, Switch, Table, Tag, Tooltip, Typography, message } from 'antd';
@@ -754,7 +755,7 @@ export default function PaperTasks({ dataset, selected, selectedTitles = [], sel
                                 try {
                                     const url = new URL(candidate);
                                     if (['https:', 'http:'].includes(url.protocol) && !url.username && !url.password) {
-                                        return <Typography.Link href={url.href} target="_blank" rel="noopener noreferrer">{title}</Typography.Link>;
+                                        return <Typography.Link {...externalLinkProps(url.href)} target="_blank" rel="noopener noreferrer">{title}</Typography.Link>;
                                     }
                                 } catch {
                                     // Keep looking for a valid paper destination.

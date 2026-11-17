@@ -48,6 +48,7 @@ const {
 const { clearFrontendCaches } = require("./frontend-cache");
 const {
   installExternalNavigationHandler,
+  canOpenWebURL,
   isTrustedCloudNavigation,
   isTrustedFeishuCLINavigation,
   isTrustedGitHubCLINavigation,
@@ -60,6 +61,7 @@ const { createDesktopNotifications, isTrustedNotificationSender } = require("./n
 const { createNotificationRuntimeReader } = require("./notification-runtime.js");
 const { createNotificationSession } = require("./notification-session.js");
 const { createAgentRecovery, runRecoveryCommand } = require("./agent-recovery.js");
+const { createPageRecovery } = require("./page-recovery.js");
 const { registerNotificationSettingsIPC } = require("./notification-settings.js");
 const {
   desktopNotificationAPIOrigin,
@@ -2117,13 +2119,39 @@ function browserWindowOptions(show = true) {
   };
 }
 
-function attachExternalNavigationHandler(window) {
+const pageRecovery = createPageRecovery({
+  BrowserWindow, ipcMain, dialog, locale: () => app.getLocale(),
+  enabled: () => !isQuitting && startupState.status === 'ready',
+  report: code => appendStartupLog('error', code),
+});
+
+async function showExternalNavigationFailure(window, url) {
+  appendStartupLog('error', 'EXTERNAL_BROWSER_OPEN_FAILED');
+  const zh = /^zh/i.test(app.getLocale());
+  while (!isQuitting && !window.isDestroyed()) {
+    const { response } = await dialog.showMessageBox(window, {
+      type: 'error', message: zh ? '无法打开浏览器，请重试' : 'Unable to open the browser. Please try again.',
+      buttons: zh ? ['重试', '复制链接', '取消'] : ['Retry', 'Copy link', 'Cancel'], defaultId: 0, cancelId: 2,
+    });
+    if (response === 1) clipboard.writeText(url);
+    if (response !== 0) return;
+    try { await shell.openExternal(url); return; } catch { /* Keep explicit recovery available. */ }
+  }
+}
+
+function attachExternalNavigationHandler(window, frontendURL) {
   installExternalNavigationHandler(
     window.webContents,
     (url) => shell.openExternal(url),
-    (error) => appendStartupLog("error", `failed to open external URL: ${serializeError(error)}`),
+    (_error, url) => { void showExternalNavigationFailure(window, url).catch(() => {}); },
     { icon: windowsDesktopIconPath(), webPreferences: { preload: path.join(__dirname, "preload.js") } },
+    frontendURL,
   );
+  pageRecovery.attach(window, frontendURL);
+  window.webContents.on('did-create-window', (child, details) => {
+    try { if (new URL(details.url).origin === new URL(frontendURL).origin) pageRecovery.attach(child, frontendURL); }
+    catch { /* External popups have no application recovery target. */ }
+  });
 }
 
 function configuredCloudOrigin() {
@@ -2360,7 +2388,7 @@ function createRendererReadyWait(window) {
 
 function createHiddenRendererAttempt(frontendPort) {
   const window = new BrowserWindow(browserWindowOptions(false));
-  attachExternalNavigationHandler(window);
+  attachExternalNavigationHandler(window, `${desktopFrontendOrigin(frontendPort)}/agent/chat/home`);
   mainWindow = window;
   window.once("closed", () => {
     if (mainWindow === window) {
@@ -2399,7 +2427,7 @@ function createHiddenRendererAttempt(frontendPort) {
 
 async function createDesktopDevWindow() {
   const window = new BrowserWindow(browserWindowOptions(false));
-  attachExternalNavigationHandler(window);
+  attachExternalNavigationHandler(window, desktopDevRendererURL(desktopDevURL));
   mainWindow = window;
   window.once("closed", () => {
     if (mainWindow === window) {
@@ -2544,6 +2572,14 @@ ipcMain.on("lazymind:renderer-ready", (event) => {
 });
 
 ipcMain.handle("lazymind:runtimeStatus", () => readStatus());
+ipcMain.handle('lazymind:openExternal', async (event, url) => {
+  const owner = BrowserWindow.fromWebContents(event.sender);
+  if (isQuitting || !isTrustedNotificationSender(event, owner, notificationFrontendOrigin()) || !canOpenWebURL(url)) {
+    throw new Error('EXTERNAL_NAVIGATION_REJECTED');
+  }
+  try { await shell.openExternal(url); }
+  catch { throw new Error('EXTERNAL_BROWSER_OPEN_FAILED'); }
+});
 ipcMain.handle("lazymind:appVersion", () => app.getVersion());
 ipcMain.handle("lazymind:agentIntegrationStatuses", (_event, refreshInstallations) => runAgentConnector("all", "status", refreshInstallations === true));
 ipcMain.handle("lazymind:agentIntegrationAction", (_event, agent, action) => runAgentConnector(agent, action));

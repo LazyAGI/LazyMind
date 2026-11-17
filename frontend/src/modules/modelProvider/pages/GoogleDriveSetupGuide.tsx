@@ -1,3 +1,4 @@
+import ExternalLink from '@/components/ExternalLink';
 import { useRef } from "react";
 import { Button, Typography } from "antd";
 import {
@@ -210,14 +211,14 @@ export default function GoogleDriveSetupGuide() {
                   <Paragraph>
                     {"linkLabel" in step && step.linkLabel ? (
                       <>
-                        <a
+                        <ExternalLink
                           className="feishu-setup-guide-inline-link"
                           href={step.linkHref}
                           target="_blank"
                           rel="noreferrer"
                         >
                           {step.linkLabel}
-                        </a>
+                        </ExternalLink>
                         ，
                       </>
                     ) : null}

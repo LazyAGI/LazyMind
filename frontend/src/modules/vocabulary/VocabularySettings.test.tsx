@@ -14,6 +14,7 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("@/runtime/desktopBridge", () => ({
+  getExternalBrowserBridge: () => undefined,
   ankiIntegrationStatus: mocks.desktop,
   openAnki: vi.fn(),
 }));

@@ -1,3 +1,4 @@
+import ExternalLink from '@/components/ExternalLink';
 import ReactMarkdown from "react-markdown";
 import rehypeSanitize from "rehype-sanitize";
 import remarkGfm from "remark-gfm";
@@ -17,9 +18,9 @@ export default function SafeReferenceMarkdown({
         skipHtml
         components={{
           a: ({ children, ...props }) => (
-            <a {...props} rel="noreferrer noopener" target="_blank">
+            <ExternalLink {...props} rel="noreferrer noopener" target="_blank">
               {children}
-            </a>
+            </ExternalLink>
           ),
         }}
       >
