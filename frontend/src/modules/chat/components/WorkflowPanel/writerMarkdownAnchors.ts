@@ -9,6 +9,15 @@ const SOURCE_PAGE_MARKER_RE = /^([ \t]*)<!--[ \t]*第[ \t]*(\d+)[ \t]*页[ \t]*-
 const EDITOR_PAGE_MARKER_RE = /^([ \t]*)<a\s+id=(["'])writer-page-marker-(\d+)\2\s*(?:\/>|>\s*<\/a>)[ \t]*$/i;
 const HEADING_LINE_RE = /^(#{1,6})(?:[ \t]+(.*?))?(?:[ \t]+#+[ \t]*)?$/;
 
+/** Paper output uses the Writer sidecar for section numbers; keep research quantities intact. */
+export function normalizePaperHeadingNumbers(markdown: string): string {
+  const prefix = /^(?:[0-9]+(?:\.[0-9]+)*\.\s+|[0-9]+(?:\.[0-9]+)+\s+|[零一二三四五六七八九十百千]+、\s*|（[零一二三四五六七八九十百千0-9]+）\s*|\((?:[0-9]+|[a-z]+|[A-Z]+)\)\s*|[①-⑳]\s*)/;
+  return mapMarkdownLinesOutsideFences(markdown, line => line.replace(
+    /^( {0,3}#{2,6}[ \t]+)(.*?)([ \t]+#+[ \t]*)?$/,
+    (_line, marks: string, title: string, closing: string | undefined) => `${marks}${title.replace(prefix, '')}${closing ?? ''}`,
+  ));
+}
+
 export interface WriterMarkdownOutlineInstruction {
   node_id: string;
   outline_description?: string;

@@ -513,5 +513,8 @@ func ValidateRequiredOutputs(ctx context.Context, db *gorm.DB, attempt AttemptCo
 	if validatePPT {
 		return validatePPTCompletion(db.WithContext(ctx), attempt, rows)
 	}
+	if UsesPaperAgentContract(attempt) {
+		return validatePaperCompletion(ctx, db, attempt, rows)
+	}
 	return nil
 }

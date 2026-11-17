@@ -38,6 +38,7 @@ type protocolError string
 func (e protocolError) Error() string { return string(e) }
 
 type Config struct {
+	OnClaim       func(context.Context, *gorm.DB, string) error
 	LeaseDuration time.Duration
 }
 
@@ -282,6 +283,11 @@ func (s *Service) claimCandidate(ctx context.Context, candidate orm.WorkflowSess
 		if err := tx.Model(&orm.WorkflowOutbox{}).Where("attempt_id = ? AND status IN ('pending','claimed')", candidate.ID).
 			Updates(map[string]any{"status": "claimed", "updated_at": now}).Error; err != nil {
 			return err
+		}
+		if s.config.OnClaim != nil {
+			if err := s.config.OnClaim(ctx, tx, candidate.ID); err != nil {
+				return err
+			}
 		}
 		// A worker claim is not receipt by the external controller. Keep its
 		// notification pending until the controller observes it through MCP.

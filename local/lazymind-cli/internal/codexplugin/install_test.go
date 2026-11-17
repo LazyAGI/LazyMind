@@ -114,6 +114,19 @@ func TestInstallPairsConfiguresAndReinstallsWithoutDuplicates(t *testing.T) {
 	if err != nil || record.BuildID != BuildID() {
 		t.Fatalf("missing installation record: %v", err)
 	}
+	skill, err := os.ReadFile(filepath.Join(root, "skills", "workflow", "SKILL.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	skillText := strings.Join(strings.Fields(string(skill)), " ")
+	for _, guidance := range []string{"delegate each step to a fresh subagent by default", "Execute directly", "including for paper-agent-v1", "proxy declared tool calls through the root", "Do not stop solely"} {
+		if !strings.Contains(skillText, guidance) {
+			t.Fatalf("installed Skill lost optional delegation guidance %q", guidance)
+		}
+	}
+	if strings.Contains(string(skill), "stop that execution") {
+		t.Fatal("installed Skill still blocks hosts without isolated worker MCP")
+	}
 	if !Registered(home) {
 		t.Fatal("stable launcher registration was not recognised by the host")
 	}

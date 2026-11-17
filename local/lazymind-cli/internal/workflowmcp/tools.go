@@ -20,6 +20,7 @@ import (
 const maxLocalArtifactBytes = 20 << 20
 
 var ToolNames = []string{
+	"workflow.worker.grant",
 	"workflow.generation.claim", "workflow.generation.respond",
 	"workflow.action.get", "workflow.action.respond", "workflow.action.cancel", "workflow.edit.context", "workflow.edit.commit",
 	"workflow.list",
@@ -39,6 +40,7 @@ var ToolNames = []string{
 	"workflow.tool.list",
 	"workflow.tool.call",
 	"workflow.artifact.publish",
+	"workflow.artifact.preview",
 	"workflow.artifact.list",
 	"workflow.artifact.get",
 }
@@ -113,6 +115,8 @@ const workflowStartDescription = "Start a revision-bound Workflow with request_c
 func Register(server *mcp.Server, client *Client) {
 	readOnly, write := annotations(true), annotations(false)
 	registerExecutionTools(server, client)
+	registerWorkerGrant(server, client)
+	registerPreview(server, client)
 	registerActionTools(server, client)
 	registerGenerationTools(server, client)
 	registerEditTools(server, client)

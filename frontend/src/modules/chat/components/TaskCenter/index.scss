@@ -1539,10 +1539,11 @@
     &::-webkit-progress-value { background: #2f6bff; transition: width 300ms ease; }
     &::-moz-progress-bar { background: #2f6bff; }
     &:indeterminate::-webkit-progress-bar { background: #edf1f7; }
-    &.is-indeterminate::-webkit-progress-bar {
+    &.is-indeterminate {
       background: linear-gradient(90deg, #edf1f7 25%, #2f6bff 50%, #edf1f7 75%);
       background-size: 200% 100%;
       animation: ordinary-plan-loading 1.5s linear infinite;
+      &::-webkit-progress-bar { background: transparent; }
     }
   }
 }
@@ -1582,7 +1583,7 @@
 @media (prefers-reduced-motion: reduce) {
   .ordinary-plan-active-dot { animation: none; }
   .ordinary-plan-progress progress::-webkit-progress-value { transition: none; }
-  .ordinary-plan-progress progress.is-indeterminate::-webkit-progress-bar { animation: none; }
+  .ordinary-plan-progress progress.is-indeterminate { animation: none; }
 }
 
 .task-center--ordinary {

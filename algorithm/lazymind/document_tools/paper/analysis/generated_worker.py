@@ -31,15 +31,17 @@ def check_coordinate_snapshots(output):
 
 def run(payload):
     import numpy as np
-    original = json.dumps(payload['tables'], sort_keys=True, allow_nan=False)
+    tables = {identifier: dict(table, id=identifier, table_id=identifier)
+              for identifier, table in payload['tables'].items()}
+    original = json.dumps(tables, sort_keys=True, allow_nan=False)
     plan = json.dumps(payload['plan'], sort_keys=True, allow_nan=False)
     namespace = {'__name__': 'generated_analysis'}
     with contextlib.redirect_stdout(io.StringIO()):
         exec(compile(payload['code'], '<generated-analysis>', 'exec',
                      flags=__future__.annotations.compiler_flag, dont_inherit=True), namespace)
-        results = namespace['analyze'](payload['tables'], payload['plan'], np.random.default_rng(payload['seed']))
+        results = namespace['analyze'](tables, payload['plan'], np.random.default_rng(payload['seed']))
         check_coordinate_snapshots(results)
-    if (original != json.dumps(payload['tables'], sort_keys=True, allow_nan=False)
+    if (original != json.dumps(tables, sort_keys=True, allow_nan=False)
             or plan != json.dumps(payload['plan'], sort_keys=True, allow_nan=False)):
         raise ValueError('生成代码修改了原始数据或锁定计划')
     versions = {}
@@ -48,6 +50,15 @@ def run(payload):
             versions[name] = importlib.metadata.version(name)
         except importlib.metadata.PackageNotFoundError:
             pass
+
+    def scientific_json(value):
+        if isinstance(value, np.ndarray):
+            return value.tolist()
+        if isinstance(value, np.generic):
+            return value.item()
+        raise TypeError(f'统计结果包含非 JSON 类型: {type(value).__name__}')
+
+    results = json.loads(json.dumps(results, default=scientific_json, allow_nan=False))
     return {'results': results, 'versions': versions, 'seed': payload['seed']}
 
 

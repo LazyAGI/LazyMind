@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -336,5 +338,50 @@ func TestNativeRoutingIgnoresExternalExecutorOverride(t *testing.T) {
 	claim, err := service.ClaimForHost(t.Context(), "native-worker", "lazymind")
 	if err != nil || claim.AttemptID != "native-attempt" {
 		t.Fatalf("native routing changed: %+v %v", claim, err)
+	}
+}
+
+func TestClaimHookSharesTheLeaseTransaction(t *testing.T) {
+	for _, fail := range []bool{false, true} {
+		t.Run(fmt.Sprint(fail), func(t *testing.T) {
+			service, db := testService(t)
+			queue(t, service, "hook-attempt", "hook-session", "step")
+			calls := 0
+			service.config.OnClaim = func(ctx context.Context, tx *gorm.DB, id string) error {
+				calls++
+				var row orm.WorkflowSessionStep
+				if err := tx.First(&row, "id = ?", id).Error; err != nil {
+					return err
+				}
+				if row.LeaseToken == "" || row.Status != "claimed" {
+					t.Fatal("hook ran before lease assignment")
+				}
+				if err := tx.Model(&orm.WorkflowOutbox{}).Where("attempt_id = ?", id).Update("payload_json", json.RawMessage(`{"frozen":true}`)).Error; err != nil {
+					return err
+				}
+				if fail {
+					return errors.New("freeze failed")
+				}
+				return nil
+			}
+			_, err := service.Claim(t.Context(), "native-worker")
+			if (err != nil) != fail || calls != 1 {
+				t.Fatalf("claim=%v calls=%d", err, calls)
+			}
+			var row orm.WorkflowSessionStep
+			if err := db.First(&row, "id = ?", "hook-attempt").Error; err != nil {
+				t.Fatal(err)
+			}
+			var outbox orm.WorkflowOutbox
+			if err := db.First(&outbox, "attempt_id = ?", row.ID).Error; err != nil {
+				t.Fatal(err)
+			}
+			if fail && (row.Status != "queued" || row.LeaseToken != "" || strings.Contains(string(outbox.PayloadJSON), "frozen")) {
+				t.Fatal("failed snapshot did not roll back claim")
+			}
+			if !fail && !strings.Contains(string(outbox.PayloadJSON), "frozen") {
+				t.Fatal("snapshot did not commit with lease")
+			}
+		})
 	}
 }
