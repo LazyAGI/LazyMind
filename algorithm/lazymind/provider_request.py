@@ -311,36 +311,6 @@ def request_read_timeout(role='llm'):
     return timeout[1] if timeout is not None else None
 
 
-def _log_deepseek_image_input(url, body):
-    if not isinstance(body, dict) or not str(body.get('model', '')).lower().startswith('deepseek'):
-        return
-    endpoint = urlsplit(str(url))
-    if (endpoint.hostname not in {'api.deepseek.com', 'ark.cn-beijing.volces.com'}
-            or not endpoint.path.rstrip('/').endswith('/chat/completions')):
-        return
-    messages = body.get('messages')
-    if not isinstance(messages, list):
-        return
-    import lazyllm
-
-    images = []
-    for message_index, message in enumerate(messages):
-        content = message.get('content') if isinstance(message, dict) else None
-        if not isinstance(content, list):
-            continue
-        for part_index, part in enumerate(content):
-            if not isinstance(part, dict) or part.get('type') != 'image_url':
-                continue
-            image = part.get('image_url')
-            image_url = image.get('url') if isinstance(image, dict) else None
-            header, separator, payload = image_url.partition(',') if isinstance(image_url, str) else ('', '', '')
-            is_inline_image = separator and header.startswith('data:image/') and header.endswith(';base64')
-            images.append({'message': message_index, 'part': part_index, 'type': 'image_url',
-                           'base64_chars': len(payload) if is_inline_image else None})
-    lazyllm.LOG.info(f'[DEEPSEEK_IMAGE_REQUEST] [sid={lazyllm.globals._sid}] [host={endpoint.hostname}] '
-                     f'[message_count={len(messages)}] [images={images}]')
-
-
 def _install_runtime_hooks():
     global _INSTALLED
     with _HOOK_LOCK:
@@ -368,8 +338,6 @@ def _install_runtime_hooks():
                 if str(method).upper() not in {'GET', 'HEAD', 'OPTIONS'}:
                     policy['calls'] += 1
             try:
-                if str(method).upper() == 'POST':
-                    _log_deepseek_image_input(url, kwargs.get('json'))
                 response = original_request(session, method, url, **kwargs)
                 return _sanitize_failed_response(response, policy) if policy is not None else response
             except requests.RequestException as exc:
