@@ -697,7 +697,7 @@ function readCodexView() {
 	const transcript = scroller.querySelector("[data-thread-user-message-navigation-content]");
 	const content = transcript?.parentElement;
 	if (!transcript || !content || content.parentElement !== scroller) return null;
-	const spacer = Array.from(content.children).find((element) => element !== transcript && element.classList.contains("sticky")) ?? null;
+	const spacer = content.querySelector(":scope > [aria-hidden=\"true\"][class*=\"--thread-scroll-padding-bottom\"]") ?? Array.from(content.children).find((element) => element !== transcript && element.classList.contains("sticky")) ?? null;
 	return {
 		session,
 		scroller,
@@ -1038,7 +1038,7 @@ function createCodexSurface(target, url, receive, changed) {
 //#region src/presentation.ts
 /** Serialized with its two helpers; mutates presentation only. */
 function mountPresentation(target, readView = readCodexView, followTail = installTailFollow, makeSurface = createCodexSurface) {
-	const host = window, key = "__lazymindCodexWorkflowTail", version = "codex-tail-v4-clearance";
+	const host = window, key = "__lazymindCodexWorkflowTail", version = "codex-tail-v5-composer-spacer";
 	const gate = host.__lazymindCodexPresentationSession;
 	if (!gate || gate.read().epoch !== target.epoch || gate.read().session_id !== target.session_id) return { status: "stale" };
 	const previous = host[key];

@@ -19,9 +19,10 @@ export function readCodexView() {
   const transcript = scroller.querySelector<HTMLElement>('[data-thread-user-message-navigation-content]')
   const content = transcript?.parentElement
   if (!transcript || !content || content.parentElement !== scroller) return null
-  // The last native child reserves space for the absolutely-positioned composer.
-  // Insert before it, outside the message list and any virtualized turn.
-  const spacer = Array.from(content.children).find(element => element !== transcript && element.classList.contains('sticky')) ?? null
+  // Codex sizes its composer spacer with this variable in both chat layouts.
+  // Older versions also mark it as sticky.
+  const spacer = content.querySelector(':scope > [aria-hidden="true"][class*="--thread-scroll-padding-bottom"]')
+    ?? Array.from(content.children).find(element => element !== transcript && element.classList.contains('sticky')) ?? null
   return { session, scroller, content, transcript, spacer }
 }
 

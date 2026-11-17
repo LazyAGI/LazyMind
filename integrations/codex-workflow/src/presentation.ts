@@ -10,7 +10,7 @@ export interface PresentationStatus { status: string; page_status?: string; chec
 
 /** Serialized with its two helpers; mutates presentation only. */
 export function mountPresentation(target: PresentationTarget, readView = readCodexView, followTail = installTailFollow, makeSurface = createCodexSurface) {
-  const host = window as any, key = '__lazymindCodexWorkflowTail', version = 'codex-tail-v4-clearance'
+  const host = window as any, key = '__lazymindCodexWorkflowTail', version = 'codex-tail-v5-composer-spacer'
   const gate = host.__lazymindCodexPresentationSession
   if (!gate || gate.read().epoch !== target.epoch || gate.read().session_id !== target.session_id) return { status: 'stale' }
   const previous = host[key]

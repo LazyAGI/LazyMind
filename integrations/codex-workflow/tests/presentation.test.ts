@@ -10,8 +10,8 @@ afterEach(() => {
   host?.__lazymindCodexWorkflowTail?.dispose(); host?.__lazymindCodexPresentationSession?.dispose()
   dom?.window.close(); vi.unstubAllGlobals()
 })
-function fixture() {
-  dom = new JSDOM('<main><div data-app-action-timeline-scroll data-pip-anchor-host="codex-main-thread"><div id="content"><div data-thread-user-message-navigation-content><div id="messages"></div></div><div class="sticky"></div></div><div data-thread-scroll-footer><button class="group/scroll-to-bottom"></button></div></div></main>', {url:'app://-/index.html'})
+function fixture(trailingMarkup = '<div class="sticky"></div>') {
+  dom = new JSDOM(`<main><div data-app-action-timeline-scroll data-pip-anchor-host="codex-main-thread"><div id="content"><div data-thread-user-message-navigation-content><div id="messages"></div></div>${trailingMarkup}</div><div data-thread-scroll-footer><button class="group/scroll-to-bottom"></button></div></div></main>`, {url:'app://-/index.html'})
   const window = dom.window as any
   for (const key of ['window','document','Element','HTMLElement','Node','MutationObserver','getComputedStyle']) vi.stubGlobal(key,window[key])
   const scroller = document.querySelector<HTMLElement>('[data-app-action-timeline-scroll]')!
@@ -42,6 +42,20 @@ it('keeps one live iframe after new messages and before composer clearance',asyn
   expect(document.querySelector('iframe')).toBe(f.frame)
   expect(panel.previousElementSibling).toBe(document.querySelector('[data-thread-user-message-navigation-content]'))
   expect(panel.nextElementSibling?.className).toBe('sticky')
+})
+
+it.each([
+  ['default', 'h-[calc(var(--thread-scroll-padding-bottom)-var(--spacing)*4)]'],
+  ['compact', 'h-(--thread-scroll-padding-bottom)'],
+])('mounts before the non-sticky composer spacer in the %s layout', (_layout, heightClass) => {
+  const { surface } = fixture(`
+    <div id="status" class="z-20 mt-auto grid"><div class="sticky bottom-0"></div></div>
+    <div id="composer-spacer" aria-hidden="true" class="pointer-events-none mt-auto w-full shrink-0 ${heightClass}"></div>
+    <div aria-hidden="true" data-thread-end-snap-target></div>
+  `)
+  const panel = surface.element.parentElement!
+  expect(panel.previousElementSibling).toBe(document.querySelector('#status'))
+  expect(panel.nextElementSibling).toBe(document.querySelector('#composer-spacer'))
 })
 
 it('keeps the panel bottom above a growing composer even before the native spacer updates', () => {
