@@ -90,6 +90,9 @@ exit 1
 	if err := os.WriteFile(filepath.Join(pluginRoot, ".lazymind-installation.json"), previous, 0600); err != nil {
 		t.Fatal(err)
 	}
+	if !adapter.pluginEnabled() {
+		t.Fatal("an enabled registration with older resources was treated as uninstalled")
+	}
 	if result := adapter.Refresh(t.Context()); result.State != agentintegration.Enabled || result.Enabled == nil || !*result.Enabled || !strings.Contains(result.Message, "without restarting Codex") {
 		t.Fatalf("refresh failed: %+v", result)
 	}

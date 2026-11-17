@@ -304,7 +304,7 @@ def test_four_registered_backgrounds_bind_without_foreground_images(runtime, dec
         snapshot = background_snapshot(deck, path)
         calls = []
 
-        def llm(_system, query, **_kwargs):
+        def llm(_system, query, calls=calls, **_kwargs):
             calls.append(query)
             return ('<!doctype html><html><head></head><body>'
                     '<div id="bg"></div><h1>Slide content</h1></body></html>')
@@ -313,10 +313,34 @@ def test_four_registered_backgrounds_bind_without_foreground_images(runtime, dec
             runtime.cmd_page_html_from_brief, deck, page, f'Use `{snapshot}` as the background', llm_call=llm,
         )
         assert code == 0 and result['background_restored']
-        assert calls == [f'Use `../{path}` as the background']
+        assert len(calls) == 1
+        assert calls[0].startswith(f'Use `../{path}` as the background')
+        assert f'url("../{path}"). Copy the path and extension exactly.' in calls[0]
         output = (deck / f'pages/page_{page:03d}.html').read_text()
         assert f'background-image:url("../{path}")' in output
         assert '<img' not in output
+
+
+@pytest.mark.parametrize('already_has_png', [False, True])
+def test_generated_background_corrects_model_suffix_without_regenerating(runtime, deck, already_has_png):
+    background = 'images/page_001_background.png'
+    Image.new('RGB', (8, 8), 'black').save(deck / background)
+    set_backgrounds(deck, [background])
+    css = '#bg{background:center/cover url(../images/page_001_background.jpg)}'
+    if already_has_png:
+        css += f'#bg{{background-image:url("../{background}")}}'
+    response = (f'<html><head><style>{css}</style></head>'
+                '<body><div id="bg"></div><h1>Slide content</h1></body></html>')
+
+    code, result, calls = generate(runtime, deck, 'Write the approved slide', [response])
+
+    assert code == 0 and result['background_restored']
+    assert len(calls) == 1 and f'url("../{background}")' in calls[0]
+    output = (deck / 'pages/page_001.html').read_text()
+    assert f'background:center/cover url("../{background}")' in output
+    assert 'page_001_background.jpg' not in output
+    assert 'data-lazymind-background' not in output
+    assert '<h1>Slide content</h1>' in output
 
 
 def test_background_snapshot_remains_distinct_from_identical_foreground(runtime, deck):

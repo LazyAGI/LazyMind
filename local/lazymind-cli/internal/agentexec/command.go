@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"lazymind/agentconnector/internal/connectorconfig"
+	"lazymind/agentconnector/internal/connectorlauncher"
 )
 
 type cappedBuffer struct {
@@ -340,7 +341,11 @@ func ConnectorRuntime() (string, string, error) {
 	if err != nil {
 		return "", "", err
 	}
-	return self, home, nil
+	launcher, err := connectorlauncher.Ensure(context.Background(), home, self)
+	if err != nil {
+		return "", "", err
+	}
+	return launcher, home, nil
 }
 
 func LazyMindHome() (string, error) { return lazyMindHome() }

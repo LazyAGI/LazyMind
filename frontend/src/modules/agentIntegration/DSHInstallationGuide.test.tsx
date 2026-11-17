@@ -1,13 +1,17 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { createInstance } from "i18next";
 import type { DesktopAgentIntegrationStatus } from "@/runtime/desktopBridge";
 import zhCN from "@/i18n/locales/zh-CN";
 import DSHInstallationGuide from "./DSHInstallationGuide";
 
+const guideI18n = createInstance();
+void guideI18n.init({ lng: "zh-CN", fallbackLng: false, initImmediate: false,
+  resources: { "zh-CN": { translation: zhCN } } });
+
 const mocks = vi.hoisted(() => ({ statuses: vi.fn() }));
 vi.mock("@/runtime/desktopBridge", () => ({ agentIntegrationStatuses: mocks.statuses }));
-vi.mock("react-i18next", () => ({ useTranslation: () => ({ t: (key: string, values?: { agent?: string }) =>
-  String(key.split(".").reduce((value: any, part) => value?.[part], zhCN) || key).replaceAll("{{agent}}", values?.agent || "Agent") }) }));
+vi.mock("react-i18next", () => ({ useTranslation: () => ({ t: (key: string, values?: { agent?: string }) => guideI18n.t(key, values) }) }));
 const copy = zhCN.agentIntegration.dshInstallGuide;
 const configured: DesktopAgentIntegrationStatus = {
   agent: "deepseek-harness", display_name: "DeepSeek Harness", state: "enabled", enabled: true,
@@ -20,6 +24,35 @@ beforeEach(() => vi.clearAllMocks());
 afterEach(() => { cleanup(); vi.useRealTimers(); });
 
 describe("DeepSeek Harness connection verification", () => {
+  it.each([configured.connection, undefined])("shows account mismatch immediately regardless of connection details (%j)", async (connection) => {
+    const mismatch: DesktopAgentIntegrationStatus = { ...configured, connection, issue: { code: "pairing_account_mismatch" } };
+    mocks.statuses.mockResolvedValue({ ok: true, data: { "deepseek-harness": mismatch } });
+    const connect = vi.fn();
+    render(<DSHInstallationGuide status={mismatch} onConnect={connect} onStatus={vi.fn()} onClose={vi.fn()} />);
+    expect(screen.getByText(zhCN.agentIntegration.dshErrors.pairing_account_mismatch)).toBeInTheDocument();
+    expect(screen.queryByText(copy.installedTitle)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: copy.retryCheck }));
+    expect(await screen.findByText(zhCN.agentIntegration.dshErrors.pairing_account_mismatch)).toBeInTheDocument();
+    expect(screen.queryByText(copy.waitingDescription)).not.toBeInTheDocument();
+    expect(connect).not.toHaveBeenCalled();
+  });
+
+  it("replaces waiting feedback with an account mismatch discovered by a background check", async () => {
+    const connect = vi.fn();
+    mocks.statuses.mockResolvedValue({ ok: true, data: { "deepseek-harness": configured } });
+    render(<DSHInstallationGuide status={configured} onConnect={connect} onStatus={vi.fn()} onClose={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: copy.check }));
+    await screen.findByText(copy.waitingDescription);
+    const mismatch: DesktopAgentIntegrationStatus = { ...configured, diagnostic_id: "account-check", issue: { code: "pairing_account_mismatch" } };
+    mocks.statuses.mockResolvedValue({ ok: true, data: { "deepseek-harness": mismatch } });
+    fireEvent.focus(window);
+    expect(await screen.findByText(zhCN.agentIntegration.dshErrors.pairing_account_mismatch)).toBeInTheDocument();
+    expect(screen.queryByText(copy.waitingDescription)).not.toBeInTheDocument();
+    expect(screen.queryByText(copy.checkingDescription)).not.toBeInTheDocument();
+    expect(screen.getByText(/account-check/)).toBeInTheDocument();
+    expect(connect).not.toHaveBeenCalled();
+  });
+
   it("shows the plugin image only after installation reaches the third step", async () => {
     let finish!: (status: DesktopAgentIntegrationStatus) => void;
     const connect = vi.fn(() => new Promise<DesktopAgentIntegrationStatus>(resolve => { finish = resolve; }));
@@ -37,7 +70,8 @@ describe("DeepSeek Harness connection verification", () => {
     const connect = vi.fn().mockResolvedValue(quit);
     render(<DSHInstallationGuide onConnect={connect} onStatus={vi.fn()} onClose={vi.fn()} />);
     fireEvent.click(screen.getByRole("button", { name: copy.continue }));
-    await screen.findByText(zhCN.agentIntegration.quitRequired.title.replace("{{agent}}", "DeepSeek Harness"));
+    await screen.findByText(guideI18n.t("agentIntegration.quitRequired.title", { agent: "DeepSeek Harness" }));
+    expect(screen.getByText(guideI18n.t("agentIntegration.quitRequired.description", { agent: "DeepSeek Harness" }))).toBeInTheDocument();
     expect(screen.getByText(copy.prepareStep).closest(".ant-steps-item")).toHaveClass("ant-steps-item-process");
     expect(screen.queryByRole("img", { name: copy.imageAlt })).not.toBeInTheDocument();
     expect(screen.queryByText(copy.installedTitle)).not.toBeInTheDocument();

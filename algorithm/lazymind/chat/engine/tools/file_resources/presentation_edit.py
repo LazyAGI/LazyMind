@@ -8,6 +8,7 @@ from pathlib import Path
 import re
 import shutil
 import subprocess
+import sys
 from typing import Any
 from xml.etree import ElementTree as ET
 import zipfile
@@ -160,12 +161,52 @@ def _set_scoped_shape_font(
     return replacements
 
 
+def office_yahei_font_paths() -> tuple[Path, ...]:
+    """Locate YaHei collections shipped by an installed Office app on macOS."""
+    if sys.platform != 'darwin':
+        return ()
+    paths: dict[str, Path] = {}
+    for applications in (Path('/Applications'), Path.home() / 'Applications'):
+        for app in ('Microsoft PowerPoint.app', 'Microsoft Word.app', 'Microsoft Excel.app'):
+            fonts = applications / app / 'Contents/Resources/DFonts'
+            for name in ('msyh.ttc', 'msyhbd.ttc', 'msyhl.ttc'):
+                source = fonts / name
+                if name not in paths and source.is_file():
+                    paths[name] = source
+    return tuple(paths.values())
+
+
+def _font_file_families(paths) -> set[str]:
+    try:
+        from fontTools.ttLib import TTCollection, TTFont
+    except ImportError:
+        return set()
+    families: set[str] = set()
+    for path in paths:
+        if path.suffix.lower() not in {'.ttf', '.otf', '.ttc'}:
+            continue
+        try:
+            fonts = TTCollection(path, lazy=True).fonts if path.suffix.lower() == '.ttc' else [TTFont(path, lazy=True)]
+            try:
+                for font in fonts:
+                    names = font['name'].names
+                    families.update(record.toUnicode().strip() for record in names if record.nameID in {1, 16})
+            finally:
+                for font in fonts:
+                    font.close()
+        except Exception:
+            continue
+    families.discard('')
+    return families
+
+
 def available_font_families(*, include_managed: bool = True) -> set[str]:
-    """Return installed font family names without guessing a fallback font."""
+    """Return selectable font families without guessing a fallback font."""
     from lazymind.chat.engine.tools.file_resources.font_library import local_fonts
     managed = set()
     if include_managed:
         managed = {alias for font in local_fonts() if font['embeddable'] for alias in font['aliases']}
+        managed.update(_font_file_families(office_yahei_font_paths()))
     fc_list = shutil.which('fc-list')
     if fc_list:
         try:
@@ -194,32 +235,7 @@ def available_font_families(*, include_managed: bool = True) -> set[str]:
     ]
     if user_fonts := os.environ.get('LOCALAPPDATA'):
         roots.append(Path(user_fonts) / 'Microsoft/Windows/Fonts')
-    families: set[str] = set(managed)
-    try:
-        from fontTools.ttLib import TTCollection, TTFont
-    except ImportError:
-        TTFont = None  # type: ignore[assignment,misc]
-    if TTFont is not None:
-        for root in roots:
-            if not root.is_dir():
-                continue
-            for path in root.rglob('*'):
-                if path.suffix.lower() not in {'.ttf', '.otf', '.ttc'}:
-                    continue
-                try:
-                    fonts = (TTCollection(path, lazy=True).fonts if path.suffix.lower() == '.ttc'
-                             else [TTFont(path, lazy=True)])
-                    try:
-                        for font in fonts:
-                            for record in font['name'].names:
-                                if record.nameID in {1, 16}:
-                                    families.add(record.toUnicode().strip())
-                    finally:
-                        for font in fonts:
-                            font.close()
-                except Exception:
-                    continue
-    return {family for family in families if family}
+    return managed | _font_file_families(path for root in roots if root.is_dir() for path in root.rglob('*'))
 
 
 def inspect_pptx(path: str | Path, installed_fonts: set[str] | None = None) -> dict[str, Any]:

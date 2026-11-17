@@ -21,6 +21,7 @@ import (
 
 	"lazymind/agentconnector/internal/agentexec"
 	"lazymind/agentconnector/internal/connectorconfig"
+	"lazymind/agentconnector/internal/connectorlauncher"
 	"lazymind/agentconnector/internal/credentials"
 	"lazymind/agentconnector/internal/localfile"
 	"lazymind/agentconnector/internal/workflowhost"
@@ -151,6 +152,10 @@ func findNode(ctx context.Context, preferred string) (string, error) {
 // Install uses the personal marketplace. The marker prevents replacing a
 // different plugin; atomic writes preserve other personal marketplace entries.
 func Install(ctx context.Context, home, self, binary, profile, hostID string) (Installation, error) {
+	launcher, err := connectorlauncher.Publish(ctx, home, self)
+	if err != nil {
+		return Installation{}, err
+	}
 	root, marketPath, err := Paths()
 	if err != nil {
 		return Installation{}, err
@@ -191,7 +196,7 @@ func Install(ctx context.Context, home, self, binary, profile, hostID string) (I
 	if err != nil {
 		return Installation{}, err
 	}
-	record := Installation{BuildID: BuildID(), Home: home, Self: self, Profile: profile, Binary: binary, Node: node,
+	record := Installation{BuildID: BuildID(), Home: home, Self: launcher, Profile: profile, Binary: binary, Node: node,
 		Marketplace: market["name"].(string), ConnectorID: pair.ConnectorID,
 		PairingFile: filepath.Join(home, "workflow-hosts", pair.ConnectorID+".json")}
 	configPath, err := connectorconfig.Save(connectorconfig.Config{Home: home, Provider: "codex", HostID: hostID, Profile: profile, PairingFile: record.PairingFile, Controlled: true})
@@ -200,7 +205,7 @@ func Install(ctx context.Context, home, self, binary, profile, hostID string) (I
 	}
 	env := connectorconfig.Environment(configPath)
 	mcp := map[string]any{"mcpServers": map[string]any{"lazymind": map[string]any{
-		"command": self, "args": []string{"mcp", "codex-workflow"}, "env": env}}}
+		"command": launcher, "args": []string{"mcp", "codex-workflow"}, "env": env}}}
 	mcpBytes, _ := json.MarshalIndent(mcp, "", "  ")
 
 	manifestBytes, _ := assets.ReadFile("assets/lazymind-workflow/.codex-plugin/plugin.json")
@@ -341,7 +346,7 @@ func Registered(home string) bool {
 		return false
 	}
 	self, err := os.Executable()
-	if err != nil || !agentexec.SameExecutable(self, record.Self) {
+	if err != nil || (filepath.Clean(record.Self) != connectorlauncher.Path(home) && !agentexec.SameExecutable(self, record.Self)) {
 		return false
 	}
 	enabled, err := Enabled(record.Profile, record.Marketplace)

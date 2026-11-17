@@ -133,7 +133,7 @@ export default function WorkBuddyInstallationGuide({ status, onConnect, onLogin,
     busy.current = true;
     if (!automatic) { setStage("checking"); setError(""); }
     const checkFailed = () => {
-      if (!automatic || agent === "codex" && ["notReady", "installFailed"].includes(stage)) {
+      if (!automatic || agent === "codex" && stage === "notReady") {
         setError(text("checkFailedDescription")); setDiagnostics(undefined);
         if (!automatic) setStage("notReady");
       }
@@ -148,9 +148,17 @@ export default function WorkBuddyInstallationGuide({ status, onConnect, onLogin,
       const configured = current?.state === "enabled" && connection?.mcp_configured;
       const connectorReady = configured && connection?.mcp_enabled && connection.mcp_trusted;
       const ready = connectorReady && connection.control_ready && !current?.issue;
+      // Keep the failed operation and its diagnostic together until retry or recovery.
+      if (automatic && stage === "installFailed" && !ready) return;
+      if (automatic && current?.issue?.code === "pairing_account_mismatch") {
+        setDiagnostics(current);
+        setError(agent === "codex" ? codexErrorMessage(current, t) : workbuddyErrorMessage(current, t));
+        setStage("notReady");
+        return;
+      }
       if (!automatic || agent === "codex" || ready) setDiagnostics(current);
       if (automatic && !ready) {
-        if (agent === "codex" && ["notReady", "installFailed"].includes(stage)) {
+        if (agent === "codex" && stage === "notReady") {
           setError(codexErrorMessage(current, t, connectorReady ? "controlUnavailableDescription" : "notReadyDescription"));
         }
         return;
