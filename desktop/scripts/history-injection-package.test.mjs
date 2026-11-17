@@ -16,10 +16,10 @@ test("repository history injection metadata points to the verified ModelScope as
   const config = JSON.parse(readFileSync(repositoryConfig, "utf8"));
   assert.equal(
     config.url,
-    "https://modelscope.cn/datasets/CarlosShaoting/lazymind-cst/resolve/master/lazymind-history-injection-five-samples-20261112-cdff88d0ca65.zip",
+    "https://modelscope.cn/datasets/CarlosShaoting/lazymind-cst/resolve/master/lazymind-history-injection-five-samples-20261117-4cfd448beabb.zip",
   );
-  assert.equal(config.sha256, "cdff88d0ca65867842ea12d71f08569ab1f8f37b5512ecb06c505657d0d06c31");
-  assert.equal(config.size, 52060542);
+  assert.equal(config.sha256, "4cfd448beabb05cb9894af3c28158a953e095d8e07df94b561015df7ba75559e");
+  assert.equal(config.size, 51993051);
   assert.equal(config.runtimeFileName, "history-injection.zip");
   assert.deepEqual(config.conversationIds, [
     "5bea5b4c-081d-5f9a-9017-b53f674fcc03",
