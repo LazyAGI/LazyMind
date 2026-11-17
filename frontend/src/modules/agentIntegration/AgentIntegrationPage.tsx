@@ -1279,7 +1279,7 @@ function AgentConfigurationFlow({
           <div className="agent-integration-stage-hint" role="status"><InfoCircleFilled />{t("agentIntegration.waitingForApplicationDescription", { agent: agent.name })}</div>
         )}
         {mcpChecked && !mcpStatus?.issue && mcpStatus?.connection?.runtime_state === "connection_required" && (
-          <div className="agent-integration-stage-hint" role="status"><InfoCircleFilled />{t("agentIntegration.connectionErrors.connection_required")}</div>
+          <div className="agent-integration-stage-hint" role="status"><InfoCircleFilled />{t("agentIntegration.connectionErrors.connection_required", { agent: mcpClientName })}</div>
         )}
         {mcpStatus && (mcpStatus.message || mcpStatus.issue) && (["error", "conflict"].includes(mcpState) || Boolean(mcpStatus.issue)) && (
           <div className={`agent-integration-stage-hint ${waitingForAction ? "is-warning" : "is-error"}`} role={waitingForAction ? "status" : "alert"}>

@@ -1,13 +1,17 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { createInstance } from "i18next";
 import type { DesktopAgentIntegrationStatus } from "@/runtime/desktopBridge";
 import zhCN from "@/i18n/locales/zh-CN";
 import DSHInstallationGuide from "./DSHInstallationGuide";
 
+const guideI18n = createInstance();
+void guideI18n.init({ lng: "zh-CN", fallbackLng: false, initImmediate: false,
+  resources: { "zh-CN": { translation: zhCN } } });
+
 const mocks = vi.hoisted(() => ({ statuses: vi.fn() }));
 vi.mock("@/runtime/desktopBridge", () => ({ agentIntegrationStatuses: mocks.statuses }));
-vi.mock("react-i18next", () => ({ useTranslation: () => ({ t: (key: string, values?: { agent?: string }) =>
-  String(key.split(".").reduce((value: any, part) => value?.[part], zhCN) || key).replaceAll("{{agent}}", values?.agent || "Agent") }) }));
+vi.mock("react-i18next", () => ({ useTranslation: () => ({ t: (key: string, values?: { agent?: string }) => guideI18n.t(key, values) }) }));
 const copy = zhCN.agentIntegration.dshInstallGuide;
 const configured: DesktopAgentIntegrationStatus = {
   agent: "deepseek-harness", display_name: "DeepSeek Harness", state: "enabled", enabled: true,
@@ -66,7 +70,8 @@ describe("DeepSeek Harness connection verification", () => {
     const connect = vi.fn().mockResolvedValue(quit);
     render(<DSHInstallationGuide onConnect={connect} onStatus={vi.fn()} onClose={vi.fn()} />);
     fireEvent.click(screen.getByRole("button", { name: copy.continue }));
-    await screen.findByText(zhCN.agentIntegration.quitRequired.title.replace("{{agent}}", "DeepSeek Harness"));
+    await screen.findByText(guideI18n.t("agentIntegration.quitRequired.title", { agent: "DeepSeek Harness" }));
+    expect(screen.getByText(guideI18n.t("agentIntegration.quitRequired.description", { agent: "DeepSeek Harness" }))).toBeInTheDocument();
     expect(screen.getByText(copy.prepareStep).closest(".ant-steps-item")).toHaveClass("ant-steps-item-process");
     expect(screen.queryByRole("img", { name: copy.imageAlt })).not.toBeInTheDocument();
     expect(screen.queryByText(copy.installedTitle)).not.toBeInTheDocument();

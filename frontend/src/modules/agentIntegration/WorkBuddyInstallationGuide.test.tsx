@@ -1,14 +1,18 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { createInstance } from "i18next";
 import type { DesktopAgentIntegrationStatus } from "@/runtime/desktopBridge";
 import zhCN from "@/i18n/locales/zh-CN";
 import WorkBuddyInstallationGuide from "./WorkBuddyInstallationGuide";
 
+const guideI18n = createInstance();
+void guideI18n.init({ lng: "zh-CN", fallbackLng: false, initImmediate: false,
+  resources: { "zh-CN": { translation: zhCN } } });
+
 const mocks = vi.hoisted(() => ({ statuses: vi.fn(), node: vi.fn(), local: vi.fn(), desktop: vi.fn() }));
 vi.mock("@/runtime/mode", () => ({ isLocalRuntime: mocks.local, isDesktopRuntime: mocks.desktop }));
 vi.mock("@/runtime/desktopBridge", () => ({ agentIntegrationStatuses: mocks.statuses }));
-vi.mock("react-i18next", () => ({ useTranslation: () => ({ t: (key: string, values?: { agent?: string }) =>
-  String(key.split(".").reduce((value: any, part) => value?.[part], zhCN) || key).replaceAll("{{agent}}", values?.agent || "Agent") }) }));
+vi.mock("react-i18next", () => ({ useTranslation: () => ({ t: (key: string, values?: { agent?: string }) => guideI18n.t(key, values) }) }));
 vi.mock("@/modules/modelProvider/api/systemDependencies", () => ({ getNodeDependencyStatus: mocks.node }));
 const copy = zhCN.agentIntegration.workbuddyInstallGuide;
 const installed: DesktopAgentIntegrationStatus = {
@@ -38,6 +42,7 @@ describe("manual agent shutdown", () => {
     render(<WorkBuddyInstallationGuide agent={agent} onConnect={connect} onStatus={vi.fn()} onClose={vi.fn()} />);
     fireEvent.click(screen.getByRole("button", { name: labels.saveAndContinue }));
     await screen.findByRole("button", { name: zhCN.agentIntegration.quitRequired.retryInstall });
+    expect(screen.getByText(guideI18n.t("agentIntegration.quitRequired.description", { agent: quit.display_name }))).toBeInTheDocument();
     expect(screen.queryByText(labels.installFailedTitle)).not.toBeInTheDocument();
     expect(screen.getByText(/quit-test/)).toBeInTheDocument();
     await act(async () => { fireEvent(window, new Event("focus")); await vi.advanceTimersByTimeAsync(10000); });
@@ -102,7 +107,7 @@ describe("Codex connection diagnostics", () => {
   it.each(["control_port_conflict", "control_window_unavailable", "pairing_credential_mismatch"] as const)("shows the specific %s failure and current diagnostic ID", async (code) => {
     await beginCheck({ ...connected, diagnostic_id: "latest-inspection", issue: { code, operation_id: "older-operation" },
       connection: { ...connected.connection!, control_ready: false, runtime_state: "unavailable" } });
-    expect(screen.getByText(zhCN.agentIntegration.connectionErrors[code])).toBeInTheDocument();
+    expect(screen.getByText(guideI18n.t(`agentIntegration.connectionErrors.${code}`, { agent: "Codex" }))).toBeInTheDocument();
     expect(screen.getByText(/诊断编号: latest-inspection/)).toBeInTheDocument();
     expect(screen.queryByText(/older-operation/)).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: labels.done })).not.toBeInTheDocument();
@@ -110,7 +115,7 @@ describe("Codex connection diagnostics", () => {
 
   it.each(["connection_required", "waiting"] as const)("explains the %s runtime state", async (runtime_state) => {
     await beginCheck({ ...connected, connection: { ...connected.connection!, control_ready: false, runtime_state } });
-    expect(screen.getByText(zhCN.agentIntegration.connectionErrors[runtime_state])).toBeInTheDocument();
+    expect(screen.getByText(guideI18n.t(`agentIntegration.connectionErrors.${runtime_state}`, { agent: "Codex" }))).toBeInTheDocument();
   });
 
   it("updates a changed failure and diagnostics during automatic checks without showing a loading step", async () => {
@@ -124,7 +129,7 @@ describe("Codex connection diagnostics", () => {
     expect(screen.queryByText(labels.checkingDescription)).not.toBeInTheDocument();
     await act(async () => { finishCheck?.({ ok: true, data: { codex: { ...connected, diagnostic_id: "latest-check",
       issue: { code: "capability_unavailable" }, connection: { ...connected.connection!, control_ready: false } } } }); });
-    expect(screen.getByText(zhCN.agentIntegration.connectionErrors.capability_unavailable)).toBeInTheDocument();
+    expect(screen.getByText(guideI18n.t("agentIntegration.connectionErrors.capability_unavailable", { agent: "Codex" }))).toBeInTheDocument();
     expect(screen.getByText(/诊断编号: latest-check/)).toBeInTheDocument();
     expect(screen.queryByText(/first-check/)).not.toBeInTheDocument();
     expect(screen.queryByText(labels.successTitle)).not.toBeInTheDocument();
@@ -141,7 +146,7 @@ describe("Codex connection diagnostics", () => {
     render(<WorkBuddyInstallationGuide agent="codex" onConnect={onConnect} onStatus={vi.fn()} onClose={vi.fn()} />);
     fireEvent.click(screen.getByRole("button", { name: labels.saveAndContinue }));
     await screen.findByText(labels.installFailedTitle);
-    expect(screen.getByText(zhCN.agentIntegration.connectionErrors.launch_failed)).toBeInTheDocument();
+    expect(screen.getByText(guideI18n.t("agentIntegration.connectionErrors.launch_failed", { agent: "Codex" }))).toBeInTheDocument();
     expect(screen.queryByText("private executable path")).not.toBeInTheDocument();
   });
 
@@ -216,11 +221,11 @@ describe("explicit Codex connection failure stability", () => {
     render(<WorkBuddyInstallationGuide agent="codex" onConnect={connect} onStatus={vi.fn()} onClose={vi.fn()} />);
     fireEvent.click(screen.getByRole("button", { name: labels.saveAndContinue }));
     await screen.findByText(labels.installFailedTitle);
-    expect(screen.getByText(zhCN.agentIntegration.connectionErrors.launch_failed)).toBeInTheDocument();
+    expect(screen.getByText(guideI18n.t("agentIntegration.connectionErrors.launch_failed", { agent: "Codex" }))).toBeInTheDocument();
     expect(screen.getByText(/诊断编号: explicit-connect-failure/)).toBeInTheDocument();
     await act(async () => { fireEvent(window, new Event("focus")); });
     expect(screen.getByText(labels.installFailedTitle)).toBeInTheDocument();
-    expect(screen.getByText(zhCN.agentIntegration.connectionErrors.launch_failed)).toBeInTheDocument();
+    expect(screen.getByText(guideI18n.t("agentIntegration.connectionErrors.launch_failed", { agent: "Codex" }))).toBeInTheDocument();
     expect(screen.getByText(/诊断编号: explicit-connect-failure/)).toBeInTheDocument();
     expect(screen.queryByText(/background-inspection/)).not.toBeInTheDocument();
     expect(screen.queryByText(labels.notReadyTitle)).not.toBeInTheDocument();
@@ -249,14 +254,14 @@ describe("explicit Codex connection failure stability", () => {
     expect(screen.getByText(labels.installFailedTitle)).toBeInTheDocument();
     expect(screen.getByText(operationError)).toBeInTheDocument();
     expect(screen.queryByText(/诊断编号:/)).not.toBeInTheDocument();
-    expect(screen.queryByText(zhCN.agentIntegration.connectionErrors.pairing_account_mismatch)).not.toBeInTheDocument();
+    expect(screen.queryByText(guideI18n.t("agentIntegration.connectionErrors.pairing_account_mismatch", { agent: "Codex" }))).not.toBeInTheDocument();
     expect(screen.queryByText(labels.notReadyTitle)).not.toBeInTheDocument();
     expect(connect).toHaveBeenCalledTimes(2);
   });
 });
 
 describe("account pairing diagnostics", () => {
-  it.each(["codex", "workbuddy"] as const)("prioritizes account mismatch during %s connection checks without repeating its name", async (agent) => {
+  it.each(["codex", "workbuddy"] as const)("prioritizes account mismatch during %s connection checks", async (agent) => {
     const labels = agent === "codex" ? zhCN.agentIntegration.codexInstallGuide : copy;
     const healthy: DesktopAgentIntegrationStatus = { ...installed, agent,
       display_name: agent === "codex" ? "Codex" : "WorkBuddy",
@@ -274,10 +279,9 @@ describe("account pairing diagnostics", () => {
     fireEvent.click(screen.getByRole("button", { name: labels.enabledConfirmation }));
     fireEvent.click(screen.getByRole("button", { name: labels.check }));
     await screen.findByText(labels.notReadyTitle);
-    const expected = agent === "codex" ? zhCN.agentIntegration.connectionErrors.pairing_account_mismatch
-      : zhCN.agentIntegration.workbuddyErrors.pairing_account_mismatch;
-    expect(screen.getByText(expected)).not.toHaveTextContent(/Codex|WorkBuddy|DeepSeek Harness|\bDSH\b/i);
-    expect(screen.queryByText(zhCN.agentIntegration.connectionErrors.waiting)).not.toBeInTheDocument();
+    const expected = guideI18n.t(`agentIntegration.${agent === "codex" ? "connectionErrors" : "workbuddyErrors"}.pairing_account_mismatch`, { agent: healthy.display_name });
+    expect(screen.getByText(expected)).toBeInTheDocument();
+    expect(screen.queryByText(guideI18n.t("agentIntegration.connectionErrors.waiting", { agent: healthy.display_name }))).not.toBeInTheDocument();
     expect(screen.queryByText("private native pairing details")).not.toBeInTheDocument();
     expect(screen.queryByText(labels.successTitle)).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: labels.reconnect }));
@@ -319,13 +323,12 @@ describe("account pairing diagnostics", () => {
       if (trigger === "focus") fireEvent(window, new Event("focus"));
       else await vi.advanceTimersByTimeAsync(3000);
     });
-    const expected = agent === "codex" ? zhCN.agentIntegration.connectionErrors.pairing_account_mismatch
-      : zhCN.agentIntegration.workbuddyErrors.pairing_account_mismatch;
+    const expected = guideI18n.t(`agentIntegration.${agent === "codex" ? "connectionErrors" : "workbuddyErrors"}.pairing_account_mismatch`, { agent: healthy.display_name });
     expect(await screen.findByText(expected)).toBeInTheDocument();
     expect(screen.getByText(labels.notReadyTitle)).toBeInTheDocument();
     expect(screen.getByText(/诊断编号: account-background-check/)).toBeInTheDocument();
     expect(screen.queryByText(/older-account-operation/)).not.toBeInTheDocument();
-    expect(screen.queryByText(zhCN.agentIntegration.connectionErrors.waiting)).not.toBeInTheDocument();
+    expect(screen.queryByText(guideI18n.t("agentIntegration.connectionErrors.waiting", { agent: healthy.display_name }))).not.toBeInTheDocument();
     expect(screen.queryByText("private native pairing details")).not.toBeInTheDocument();
     expect(screen.queryByText(labels.installedTitle)).not.toBeInTheDocument();
     expect(screen.queryByText(labels.checkingDescription)).not.toBeInTheDocument();
