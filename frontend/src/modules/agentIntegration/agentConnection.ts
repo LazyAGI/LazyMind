@@ -15,7 +15,7 @@ const connectionIssueCodes = new Set([
 export function agentConnectionReady(status?: DesktopAgentIntegrationStatus): boolean {
   const connection = status?.connection;
   // A saved configuration or enabled switch is not evidence of a live connection.
-  return status?.state === "enabled" && status.enabled !== false && status.retry_action !== "disconnect"
+  return status?.state === "enabled" && !status.inspection_unavailable && status.enabled !== false && status.retry_action !== "disconnect"
     && !status.issue && !requiresAgentQuit(status) && connection?.mcp_configured === true
     && connection.mcp_enabled === true && connection.mcp_trusted === true
     && connection.control_ready === true && connection.runtime_state === "connected";
@@ -24,6 +24,7 @@ export function agentConnectionReady(status?: DesktopAgentIntegrationStatus): bo
 export function agentConnectionStatusKey(status: DesktopAgentIntegrationStatus | undefined, enabled: boolean): string {
   if (requiresAgentQuit(status)) return "agentIntegration.quitRequired.waiting";
   if (isDisconnectPending(status)) return "agentIntegration.quitRequired.pendingDisconnect";
+  if (status?.inspection_unavailable) return "agentIntegration.setupFeedback.unknown";
   if (status?.issue) {
     const code = status.issue.code;
     return `agentIntegration.connectionIssues.${connectionIssueCodes.has(code) ? code : "operation_failed"}`;

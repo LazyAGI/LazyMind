@@ -8,6 +8,7 @@ import { agentIntegrationStatuses, type DesktopAgentIntegrationStatus } from "@/
 import { workbuddyErrorMessage } from "./workbuddyErrors";
 import { codexErrorMessage } from "./codexErrors";
 import { requiresAgentQuit } from "./agentActions";
+import RepairRequestCopy from "./RepairRequestCopy";
 
 type Stage = "nodeRequired" | "prepare" | "installing" | "login" | "quitRequired" | "installFailed" | "entry" | "trust" | "enable" | "verify" | "checking" | "notReady" | "success";
 
@@ -55,7 +56,8 @@ export default function WorkBuddyInstallationGuide({ status, onConnect, onLogin,
       : !status.issue || ["mcp_trust_required", "mcp_enable_required"].includes(status.issue.code)) ? confirmationStage : "prepare");
   const [error, setError] = useState("");
   const [zoomed, setZoomed] = useState(false);
-  const [diagnostic, setDiagnostic] = useState("");
+  const [diagnostics, setDiagnostics] = useState(status);
+  const diagnostic = diagnostics?.diagnostic_id || diagnostics?.issue?.operation_id;
   const mounted = useRef(true);
   const busy = useRef(false);
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
@@ -63,7 +65,8 @@ export default function WorkBuddyInstallationGuide({ status, onConnect, onLogin,
   const install = async () => {
     if (busy.current) return;
     busy.current = true;
-    setStage("installing"); setError(""); setDiagnostic("");
+    setStage("installing"); setError("");
+    setDiagnostics(undefined);
     try {
       if (checkLocalNode) {
         const node = await getNodeDependencyStatus();
@@ -72,7 +75,7 @@ export default function WorkBuddyInstallationGuide({ status, onConnect, onLogin,
       }
       const result = await onConnect();
       if (!mounted.current) return;
-      setDiagnostic(result?.diagnostic_id || result?.issue?.operation_id || "");
+      setDiagnostics(result);
       if (requiresAgentQuit(result)) {
         setStage("quitRequired"); return;
       }
@@ -80,6 +83,7 @@ export default function WorkBuddyInstallationGuide({ status, onConnect, onLogin,
         setStage("login");
         const login = await onLogin();
         if (!mounted.current) return;
+        setDiagnostics(login);
         if (!login) { setError(text("loginFailed")); setStage("installFailed"); }
         return;
       }
@@ -108,6 +112,7 @@ export default function WorkBuddyInstallationGuide({ status, onConnect, onLogin,
         const result = await agentIntegrationStatuses();
         if (stopped || !mounted.current || !result.ok) return;
         const current = result.data[agent];
+        setDiagnostics(current);
         if (current) onStatus(current);
         if (current?.login?.state === "succeeded") { stopped = true; await install(); }
         else if (current?.login && ["failed", "cancelled"].includes(current.login.state)) {
@@ -129,7 +134,7 @@ export default function WorkBuddyInstallationGuide({ status, onConnect, onLogin,
     if (!automatic) { setStage("checking"); setError(""); }
     const checkFailed = () => {
       if (!automatic || agent === "codex" && stage === "notReady") {
-        setError(text("checkFailedDescription")); setDiagnostic("");
+        setError(text("checkFailedDescription")); setDiagnostics(undefined);
         if (!automatic) setStage("notReady");
       }
     };
@@ -146,12 +151,12 @@ export default function WorkBuddyInstallationGuide({ status, onConnect, onLogin,
       // Keep the failed operation and its diagnostic together until retry or recovery.
       if (automatic && stage === "installFailed" && !ready) return;
       if (automatic && current?.issue?.code === "pairing_account_mismatch") {
-        setDiagnostic(current.diagnostic_id || current.issue.operation_id || "");
+        setDiagnostics(current);
         setError(agent === "codex" ? codexErrorMessage(current, t) : workbuddyErrorMessage(current, t));
         setStage("notReady");
         return;
       }
-      if (!automatic || agent === "codex" || ready) setDiagnostic(current?.diagnostic_id || current?.issue?.operation_id || "");
+      if (!automatic || agent === "codex" || ready) setDiagnostics(current);
       if (automatic && !ready) {
         if (agent === "codex" && stage === "notReady") {
           setError(codexErrorMessage(current, t, connectorReady ? "controlUnavailableDescription" : "notReadyDescription"));
@@ -221,6 +226,10 @@ export default function WorkBuddyInstallationGuide({ status, onConnect, onLogin,
       {(installing || checking) && <Space direction="vertical" align="center" className="agent-integration-installation-progress"><Spin /><Typography.Text>{text(installing ? "installingDescription" : "checkingDescription")}</Typography.Text></Space>}
       {stage === "installFailed" && <Alert type="error" showIcon message={text("installFailedTitle")} description={error} />}
       {["installFailed", "quitRequired", "notReady"].includes(stage) && diagnostic && <Typography.Text type="secondary" copyable>{t("agentIntegration.setupFeedback.diagnosticID")}: {diagnostic}</Typography.Text>}
+      {["nodeRequired", "installFailed", "quitRequired", "notReady"].includes(stage) &&
+        <RepairRequestCopy agent={agent} status={diagnostics} stage={stage}
+          error={error || (stage === "nodeRequired" ? t("nodeDependency.required")
+            : stage === "quitRequired" ? t("agentIntegration.quitRequired.description", { agent: diagnostics?.display_name || agent }) : "")} />}
       {(stage === "entry" || stage === "trust" || stage === "enable") &&
         <Alert type="success" showIcon message={text("installedTitle")} description={text("installedDescription")} />
       }
