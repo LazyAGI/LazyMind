@@ -1763,9 +1763,11 @@ def test_run_subagent_stream_task_not_found(monkeypatch):
 # ---------------------------------------------------------------------------
 
 @pytest.mark.parametrize("display_plan", [["Read inputs", "Analyze data", "Write result"], None])
-@pytest.mark.parametrize('agent_type', ['test', 'workflow_step'])
-def test_run_subagent_stream_happy_path(monkeypatch, display_plan, agent_type):
-    task = {**_DEFAULT_TASK, 'agent_type': agent_type}
+@pytest.mark.parametrize('workflow', [None, 'paper-writing', 'ppt-workflow', 'writer-workflow'])
+def test_run_subagent_stream_happy_path(monkeypatch, display_plan, workflow):
+    task = {**_DEFAULT_TASK, 'agent_type': 'workflow_step' if workflow else 'test'}
+    if workflow:
+        task['params'] = {**task.get('params', {}), 'workflow_ref': 'builtin:' + workflow}
     db = _install_fake_db(monkeypatch, task)
     _install_fake_lazyllm(monkeypatch)
     _install_fake_build(monkeypatch)
@@ -1823,7 +1825,7 @@ def test_run_subagent_stream_happy_path(monkeypatch, display_plan, agent_type):
 
     assert 'text' in types_out
     progress = [event['progress'] for event in events_out if event['type'] == 'progress']
-    assert progress == ([0] if agent_type == 'workflow_step' else [5, 20])
+    assert progress == [5, 20]
     assert 'done' in types_out
     assert raw.endswith('data: [DONE]\n\n')
 

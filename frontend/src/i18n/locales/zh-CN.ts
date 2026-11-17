@@ -5352,7 +5352,6 @@ const zhCN = {
     ordinaryStatusRunning: "执行中",
     ordinaryStatusOutdated: "已失效",
     ordinaryNoProcessSteps: "暂无执行步骤",
-    ordinaryProcessingWithoutProgress: "正在处理，暂未收到详细进度。",
     ordinaryLegacyPlanDescription: "以下为任务计划，不代表已经发生的执行步骤。",
     ordinaryStageArtifacts: "阶段产物",
     ordinaryFinalArtifacts: "最终产物",

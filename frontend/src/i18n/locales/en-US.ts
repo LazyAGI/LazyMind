@@ -5439,7 +5439,6 @@ const enUS = {
     ordinaryStatusRunning: "Running",
     ordinaryStatusOutdated: "Outdated",
     ordinaryNoProcessSteps: "No execution steps are available.",
-    ordinaryProcessingWithoutProgress: "Processing; detailed progress is not yet available.",
     ordinaryLegacyPlanDescription: "This is the task plan; it does not indicate which steps have executed.",
     ordinaryStageArtifacts: "Stage artifacts",
     ordinaryFinalArtifacts: "Final artifacts",

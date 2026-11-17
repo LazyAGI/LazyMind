@@ -26,16 +26,6 @@ it("stops stale process spinners on pause, preserves finished steps and resumes 
   expect(steps[0].status).toBe("running");
 });
 
-it.each(["running", "paused", "failed", "canceled"] as const)("keeps an unmeasured plan neutral while %s", state => {
-  const view = render(<TaskProcessTimeline steps={[]} legacyPlan={["Read", "Check", "Write"]} state={state} />);
-  expect(view.container.querySelector('[aria-current="step"]')).toBeNull();
-  expect(view.container.querySelectorAll(".ordinary-plan-item.is-waiting")).toHaveLength(3);
-  expect(view.queryByText("taskCenter.ordinaryPlanProgress")).not.toBeInTheDocument();
-  expect(view.getByText("taskCenter.ordinaryLegacyPlanDescription")).toBeInTheDocument();
-  expect(view.getByRole("progressbar")).not.toHaveAttribute("value");
-  expect(view.queryByText("100%")).not.toBeInTheDocument();
-});
-
 it("keeps measured estimates for ordinary tasks and completes only on success", () => {
   const plan = ["Read", "Check", "Write", "Publish"];
   const view = render(<TaskProcessTimeline steps={[]} legacyPlan={plan} state="running" progress={25} />);

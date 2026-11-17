@@ -588,12 +588,7 @@ function TaskCard({ task, workflowPaused }: { task: SubAgentTask; workflowPaused
               <div className="task-card-instruction-content">{runInstruction}</div>
             </CollapsibleSection>
           )}
-          {isRunning && task.agent_type === "workflow_step" && (
-            <div className="ordinary-plan-progress">
-              <progress className="is-indeterminate" aria-label={t("taskCenter.ordinaryStatusRunning")} />
-            </div>
-          )}
-          {isRunning && task.agent_type !== "workflow_step" && (
+          {isRunning && (
           <Progress
             percent={task.progress_pct}
             size="small"
@@ -716,8 +711,7 @@ function OrdinaryTaskDetails({ item }: { item: OrdinaryTaskItem }) {
     )}
     {view?.input_required && <div role="status">{view.input_required}</div>}
     <TaskProcessTimeline steps={view?.process_steps ?? []} legacyPlan={view ? view.plan_steps : item.task?.plan_steps}
-      state={item.state} progress={view?.workflow_step_id || item.step || item.task?.agent_type === "workflow_step"
-        ? undefined : view ? view.progress_pct : item.task?.progress_pct} />
+      state={item.state} progress={view ? view.progress_pct : item.task?.progress_pct} />
     {more("process_steps")}
     <div className={`ordinary-process-timing ordinary-thinking-terminal is-${item.state}`}>
       <span className="ordinary-thinking-marker" aria-hidden="true"><StateMarker state={item.state} /></span>

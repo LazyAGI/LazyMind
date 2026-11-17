@@ -1593,7 +1593,7 @@ async def run_subagent_stream(
                 .current_input
             )
             plan.history = [{'role': 'user', 'content': objective_message}, *(resume_history or [])]
-        progress = 0 if ctx.agent_type == 'workflow_step' else 5
+        progress = 5
         yield _sse({'type': 'progress', 'task_id': task_id, 'progress': progress,
                     'current_phase': '恢复执行...' if resume else '开始执行...'})
 
@@ -1806,7 +1806,7 @@ async def run_subagent_stream(
                             ev = emitted.pop(0)
                             ev['task_id'] = task_id
                             yield _sse(ev)
-                        if tag == 'tool_results' and ctx.agent_type != 'workflow_step' and progress < 90:
+                        if tag == 'tool_results' and progress < 90:
                             progress = min(90, progress + 15)
                             yield _sse({'type': 'progress', 'task_id': task_id, 'progress': progress,
                                         'current_phase': '执行中...'})
