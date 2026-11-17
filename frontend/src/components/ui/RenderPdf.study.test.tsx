@@ -6,10 +6,10 @@ import zhCN from '@/i18n/locales/zh-CN';
 import enUS from '@/i18n/locales/en-US';
 import type {PdfIRDocument} from '@/modules/knowledge/api/pdfIR';
 const returnPositionI18n=createInstance();
-const state=vi.hoisted(()=>({externalLinkTarget:undefined as string|undefined,externalLinkRel:undefined as string|undefined,nativeClick:undefined as undefined|((item:{pageNumber:number;dest?:unknown[]})=>void),pageLoads:new Map<number,(width:number,height:number)=>void>(),document:undefined as unknown,status:'ready',failLoad:false,deferLoad:false,load:undefined as undefined|(()=>void),pdfFile:undefined as unknown,text:undefined as undefined|((page:number)=>Promise<{items:Array<{str:string}>}>)}));
+const state=vi.hoisted(()=>({externalLinkTarget:undefined as string|undefined,externalLinkRel:undefined as string|undefined,nativeClick:undefined as undefined|((item:{pageNumber:number;dest?:unknown[]})=>void),pageLoads:new Map<number,(width:number,height:number)=>void>(),document:undefined as unknown,status:'ready',error_code:undefined as string|undefined,error_message:undefined as string|undefined,start:vi.fn(),failLoad:false,deferLoad:false,load:undefined as undefined|(()=>void),pdfFile:undefined as unknown,text:undefined as undefined|((page:number)=>Promise<{items:Array<{str:string}>}>)}));
 vi.mock('react-i18next',async original=>({...await original<typeof import('react-i18next')>(),useTranslation:()=>({t:(key:string)=>key==='pdfReader.returnPosition'?returnPositionI18n.t(key):key})}));
 vi.mock('react-pdf',()=>({pdfjs:{GlobalWorkerOptions:{}},Document:({children,onLoadSuccess,onLoadError,file,onItemClick,externalLinkTarget,externalLinkRel}:{externalLinkTarget?:string;externalLinkRel?:string;file:unknown;onItemClick?:typeof state.nativeClick;children:ReactNode;onLoadSuccess:(value:unknown)=>void;onLoadError:(error:Error)=>void})=>{state.externalLinkTarget=externalLinkTarget;state.externalLinkRel=externalLinkRel;state.pdfFile=file;state.nativeClick=onItemClick;useEffect(()=>{if(state.failLoad){onLoadError(new Error("Invalid PDF"));return;}state.load=()=>onLoadSuccess({numPages:3,getPage:async(page:number)=>({view:[0,0,600,800],getViewport:()=>({width:600,height:800,convertToViewportPoint:(x:number,y:number)=>[x,800-y]}),getTextContent:()=>state.text?state.text(page):Promise.resolve({items:[{str:page===3?'needle result':'ordinary text'}]})})});if(!state.deferLoad)state.load();},[file]);return <>{children}</>;},Page:({width,pageNumber,onLoadSuccess,devicePixelRatio,renderTextLayer}:{width:number;pageNumber:number;onLoadSuccess:(page:unknown)=>void;devicePixelRatio?:number;renderTextLayer?:boolean})=> {state.pageLoads.set(pageNumber,(w,h)=>onLoadSuccess({getViewport:()=>({width:w,height:h,convertToViewportPoint:(x:number,y:number)=>[x,h-y]})}));return <div data-testid="rendered-pdf-page" data-width={width} data-pixel-ratio={devicePixelRatio}>{renderTextLayer&&<span data-testid="pdf-text-layer">Selectable PDF sentence</span>}</div>;}}));
-vi.mock('@/modules/knowledge/api/pdfIR',async original=>({...await original<typeof import('@/modules/knowledge/api/pdfIR')>(),usePdfIR:()=>({state,starting:false,start:vi.fn()})}));
+vi.mock('@/modules/knowledge/api/pdfIR',async original=>({...await original<typeof import('@/modules/knowledge/api/pdfIR')>(),usePdfIR:()=>({state,starting:false,start:state.start})}));
 vi.mock('./pdfPinStore',async original=>({...await original<typeof import('./pdfPinStore')>(),readPdfPinBoard:vi.fn().mockResolvedValue([]),writePdfPinBoard:vi.fn().mockResolvedValue(true)}));
 vi.mock('./PdfVisualStudy',()=>({PdfVisualStudy:({autoExplain}:{autoExplain:boolean})=> <aside aria-label="visual-study" data-auto-explain={String(autoExplain)}/> }));
 vi.mock('./PdfFormulaStudy',()=>({PdfFormulaStudy:()=> <aside aria-label="formula-study"/>}));
@@ -22,7 +22,7 @@ function document(hash='hash'):PdfIRDocument{return {version:1,projection_versio
 function pageButton(page:number){return screen.getByRole('button',{name:`pdfReader.page ${page} / 3`});}
 function expectPage(page:number){expect(pageButton(page)).toBeInTheDocument();}
 
-beforeEach(()=>{vi.mocked(readPdfPinBoard).mockClear().mockResolvedValue([]);vi.mocked(writePdfPinBoard).mockClear().mockResolvedValue(true);state.pageLoads.clear();state.failLoad=false;state.text=undefined;state.deferLoad=false;sessionStorage.clear();state.document=document();state.status='ready';});
+beforeEach(()=>{vi.mocked(readPdfPinBoard).mockClear().mockResolvedValue([]);vi.mocked(writePdfPinBoard).mockClear().mockResolvedValue(true);state.pageLoads.clear();state.failLoad=false;state.text=undefined;state.deferLoad=false;sessionStorage.clear();state.document=document();state.status='ready';state.error_code=undefined;state.error_message=undefined;state.start.mockClear();});
 beforeEach(async()=>{await returnPositionI18n.init({lng:'zh-CN',fallbackLng:false,resources:{'zh-CN':{translation:zhCN},'en-US':{translation:enUS}}});});
 
 it('keeps the paper reader on the original document without an overview mode',async()=>{
@@ -108,6 +108,18 @@ describe('reader study integration',()=>{
   expect(screen.getByText('pdfFormula.serviceRequired')).toBeInTheDocument();
   expect(screen.getByRole('link',{name:'pdfFormula.configureService'})).toHaveAttribute('href',expect.stringContaining('section=model_defaults&service=parsing'));
   await act(async()=>{});
+ });
+ it('offers direct manual parsing while automatic quota is exhausted without hiding retained formulas',async()=>{
+  state.status='queued';state.error_code='reading_quota_exhausted';state.error_message='PDF 解析额度已用尽';
+  const view=render(<RenderPdf fileData="quota.pdf" pdfIRTarget={target} pdfSourceHash="hash"/>);
+  await act(async()=>{});
+  expect(view.container.querySelector('.pdf-formula-trigger')).not.toBeNull();
+  const display=screen.getByText('pdfReader.displaySettings').closest('details')!;
+  display.open=true;
+  expect(screen.getByText('PDF 解析额度已用尽')).toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button',{name:'pdfFormula.retry'}));
+  expect(state.start).toHaveBeenCalledOnce();
+  expect(state.start).toHaveBeenCalledWith(true);
  });
  it('switches between formula and table studies instead of opening two panels',async()=>{
   render(<RenderPdf fileData="test.pdf" pdfIRTarget={target} pdfSourceHash="hash"/>);

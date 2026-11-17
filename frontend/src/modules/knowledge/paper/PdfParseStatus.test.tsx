@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { describe, it, expect, vi } from 'vitest';
 import PdfParseStatus from './PdfParseStatus';
 describe('PDF parse status', () => {
@@ -8,8 +8,21 @@ describe('PDF parse status', () => {
     fireEvent.click(screen.getByRole('button', { name: 'PDF 解析：状态未知' }));
     fireEvent.click(await screen.findByRole('button', { name: '刷新状态' }));
     await waitFor(() => expect(refresh).toHaveBeenCalledOnce());
-    expect(screen.queryByRole('button', { name: /开始解析|重试解析/ })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '重新解析' })).toBeEnabled();
     expect(parse).not.toHaveBeenCalled();
+  });
+  it('submits from ready without a dialog and prevents repeat clicks before the response', async () => {
+    let finish!: () => void;
+    const parse = vi.fn(() => new Promise<void>(resolve => { finish = resolve; }));
+    render(<PdfParseStatus status="ready" onParse={parse} />);
+    fireEvent.click(screen.getByRole('button', { name: 'PDF 解析：已解析' }));
+    const action = await screen.findByRole('button', { name: '重新解析' });
+    fireEvent.click(action);
+    fireEvent.click(action);
+    expect(parse).toHaveBeenCalledOnce();
+    expect(action).toBeDisabled();
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    await act(async () => finish());
   });
   it('distinguishes stored and parsed', () => {
     const { rerender } = render(<PdfParseStatus status="not_requested" />);

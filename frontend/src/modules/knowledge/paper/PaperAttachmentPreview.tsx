@@ -10,10 +10,11 @@ interface Props {
     datasetId: string;
     attachment: Attachment;
     position?: PdfViewPosition;
+    canWrite?: boolean;
     onPositionChange: (position: PdfViewPosition) => void;
 }
 
-export default function PaperAttachmentPreview({ datasetId, attachment, position, onPositionChange }: Props) {
+export default function PaperAttachmentPreview({ datasetId, attachment, position, canWrite, onPositionChange }: Props) {
     const [file, setFile] = useState('');
     const [loading, setLoading] = useState(true);
     const [failed, setFailed] = useState(false);
@@ -33,5 +34,5 @@ export default function PaperAttachmentPreview({ datasetId, attachment, position
     }, [datasetId, attachment.contentRef, attachment.name, retry]);
     if (loading) return <div className="paper-attachment-preview-status" role="status"><Spin />正在加载附件预览…</div>;
     if (failed) return <Alert type="warning" showIcon message="附件预览暂时无法加载" description="可以重试，或通过阅读入口打开原文件。" action={<Button size="small" onClick={() => setRetry(value => value + 1)}>重试</Button>} />;
-    return <div className="paper-attachment-preview"><Suspense fallback={<div className="paper-attachment-preview-status"><Spin />正在加载附件预览…</div>}><FileViewer pdfIRTarget={{dataset: datasetId, document: attachment.contentRef!}} file={file} fileName={attachment.name} pdfViewPosition={position} onPdfViewPositionChange={onPositionChange} /></Suspense></div>;
+    return <div className="paper-attachment-preview"><Suspense fallback={<div className="paper-attachment-preview-status"><Spin />正在加载附件预览…</div>}><FileViewer pdfIRTarget={attachment.kind === 'pdf' ? { dataset: datasetId, document: attachment.contentRef!, canWrite } : undefined} file={file} fileName={attachment.name} pdfViewPosition={position} onPdfViewPositionChange={onPositionChange} /></Suspense></div>;
 }

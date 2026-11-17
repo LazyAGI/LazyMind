@@ -10,3 +10,5 @@
 .paper-attachment-name .pdf-parse-status { margin-top: 8px; }
 @media (pointer: coarse) { .pdf-parse-status { min-height: 44px; } }
 @media (prefers-reduced-motion: reduce) { .pdf-parse-status .anticon-spin { animation: none; } }
+
+.knowledge-pdf-processing { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; }

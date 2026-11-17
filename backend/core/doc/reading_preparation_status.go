@@ -13,6 +13,7 @@ import (
 
 	"lazymind/core/common/orm"
 	"lazymind/core/pdfir"
+	"lazymind/core/readingpolicy"
 )
 
 type readingCapabilityStatus struct {
@@ -97,7 +98,7 @@ func readReadingArtifact(path string, max int64) (string, error) {
 }
 func readReadingCapabilities(state pdfIRResponse, source, dataset, document, user string, jobs []orm.AsyncJob) ([]readingCapabilityStatus, error) {
 	caps := []readingCapabilityStatus{{ID: "formula"}, {ID: "figure"}, {ID: "table"}}
-	ready := state.Status == "ready" && state.Document != nil && state.Document.Version == 1 && state.Document.CoordinateSpace == "normalized_top_left"
+	ready := state.Document != nil && state.Document.Version == 1 && state.Document.CoordinateSpace == "normalized_top_left"
 	if ready {
 		d := *state.Document
 		for _, block := range d.Blocks {
@@ -237,6 +238,9 @@ func finalizeReadingCapability(c *readingCapabilityStatus, ready bool, jobs []or
 	}
 	if c.Failed > 0 && c.ErrorMessage == "" && c.Status == "partial" {
 		c.ErrorMessage = "部分研读生成失败，请重试"
+	}
+	if latest != nil && latest.ErrorCode == readingpolicy.QuotaErrorCode && c.Status == "pending" {
+		c.ErrorMessage = latest.ErrorMessage
 	}
 	if latest != nil && latest.Status == "failed" && latest.ErrorMessage != "" && c.Status != "succeeded" && c.Status != "empty" && active == "" {
 		c.ErrorMessage = latest.ErrorMessage

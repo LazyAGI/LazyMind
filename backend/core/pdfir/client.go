@@ -31,7 +31,11 @@ func FromConfig(cfg map[string]any) (Client, error) {
 		return c, errors.New("Select a MinerU OCR credential in model settings")
 	}
 	endpoint, _ := cfg["ocr_url"].(string)
-	u, e := url.Parse(strings.TrimSpace(endpoint))
+	endpoint = strings.TrimSpace(endpoint)
+	if endpoint == "" {
+		endpoint = c.BaseURL
+	}
+	u, e := url.Parse(endpoint)
 	if e != nil || u.Scheme != "https" || u.Host != "mineru.net" || u.User != nil {
 		return c, errors.New("Selected local/custom MinerU service does not support PDF IR; no cloud upload was performed")
 	}
