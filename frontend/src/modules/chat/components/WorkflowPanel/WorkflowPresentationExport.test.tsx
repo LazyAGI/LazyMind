@@ -8,7 +8,7 @@ vi.mock('@/components/request', () => ({ axiosInstance: api, BASE_URL: '' }));
 vi.mock('react-i18next', () => ({ useTranslation: () => ({ t: (key: string) => key }) }));
 vi.mock('./ppt/slideAssets', () => ({ embedSlideAssetsForExport: async (html: string) => html }));
 vi.mock('./ppt/exportHtmlToPptx', () => ({
-  extractHtmlFromArtifact: (value: any) => value.text,
+  extractHtmlFromArtifact: (value: any) => typeof value === 'string' ? value : value.text,
   declaredSlideFontFamilies: () => [],
   exportHtmlSlidesAsRasterPdf: vi.fn(), exportHtmlSlidesAsRasterPptx: vi.fn(),
 }));

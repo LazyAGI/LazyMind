@@ -41,9 +41,9 @@ function findSlotRevision(
   slotId: string,
   sortOrder: number,
 ): SlotRevision | undefined {
-  return getTabSlotRevisions(session, tab, slotId).find(
-    (slot) => slot.sort_order === sortOrder,
-  );
+  const revisions = getTabSlotRevisions(session, tab, slotId);
+  return revisions.find(slot => slot.selected && slot.sort_order === sortOrder)
+    ?? revisions.find(slot => slot.sort_order === sortOrder);
 }
 
 // Prefer the selected native delivery when it represents the complete visible
@@ -64,14 +64,19 @@ export function selectedNativePresentation(action: WorkflowTabAction, tab: TabDe
   return native;
 }
 
-async function loadHtmlArtifact(raw: unknown): Promise<string> {
-  const inline = extractHtmlFromArtifact(raw);
-  if (inline) return inline;
+async function loadExportText(raw: unknown): Promise<string> {
+  if (typeof raw === 'string') return raw;
   if (!raw || typeof raw !== 'object') return '';
   const value = raw as Record<string, unknown>;
   if (typeof value.text === 'string') return value.text;
+  // Completed edits from older Connectors uploaded text files in the same
+  // envelope as binary artifacts. Decode their bytes, not their metadata.
+  if (value.storage === 'inline_base64' && typeof value.content_base64 === 'string') {
+    const bytes = Uint8Array.from(atob(value.content_base64), char => char.charCodeAt(0));
+    return new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+  }
   const path = String(value.path ?? value.url ?? '').trim();
-  if (!path) return '';
+  if (!path) return artifactText(raw);
   const direct = value.url ? resolveCoreAssetUrl(String(value.url)) : '';
   const url = direct && !isExpiredSignedUrl(direct)
     ? direct
@@ -79,6 +84,19 @@ async function loadHtmlArtifact(raw: unknown): Promise<string> {
   const response = await fetch(url);
   if (!response.ok) throw Object.assign(new Error("Failed to load export input"), { response });
   return response.text();
+}
+
+class ExportPageError extends Error {
+  constructor(readonly page: number, readonly cause?: unknown) {
+    super('Export page unavailable');
+  }
+}
+
+function isApplicationShell(html: string): boolean {
+  const document = new DOMParser().parseFromString(html, 'text/html');
+  const root = document.querySelector('body > #root, body > #app');
+  return Boolean(root && !root.children.length && !root.textContent?.trim()
+    && document.querySelector('script[type="module"][src]'));
 }
 
 function artifactText(raw: unknown): string {
@@ -97,17 +115,24 @@ async function collectPresentationPages(
   const pageSlotId = action.inputs.pages;
   if (!pageSlotId) return [];
   const notesSlotId = action.inputs.notes;
-  const pages = await Promise.all(rows.map(async (sortOrder) => {
+  return Promise.all(rows.map(async (sortOrder, index) => {
     const pageRevision = findSlotRevision(session, tab, pageSlotId, sortOrder);
     const notesRevision = notesSlotId
       ? findSlotRevision(session, tab, notesSlotId, sortOrder)
       : undefined;
-    return {
-      html: await loadHtmlArtifact(pageRevision?.artifact_value),
-      notes: artifactText(notesRevision?.artifact_value),
-    };
+    try {
+      const text = await loadExportText(pageRevision?.artifact_value);
+      const html = extractHtmlFromArtifact(text);
+      // Never silently drop a missing/invalid page or export an SPA fallback
+      // returned with HTTP 200 in place of the requested artifact.
+      if (!html || isApplicationShell(html)) {
+        throw new ExportPageError(index + 1);
+      }
+      return { html, notes: await loadExportText(notesRevision?.artifact_value) };
+    } catch (error) {
+      throw error instanceof ExportPageError ? error : new ExportPageError(index + 1, error);
+    }
   }));
-  return pages.filter((page) => page.html.trim());
 }
 
 function downloadBlob(blob: Blob, filename: string): void {
@@ -210,7 +235,10 @@ export function PresentationExportAction({
         downloadBlob(response.data as Blob, filename);
       }
     } catch (error) {
-      setExportError(await resolveExportError(error, t('chat.workflowExportFailed')));
+      setExportError(error instanceof ExportPageError
+        ? t('chat.workflowExportPageFailed', { page: error.page }) + ' ' +
+          await resolveExportError(error.cause, t('chat.workflowExportInvalidHtml'))
+        : await resolveExportError(error, t('chat.workflowExportFailed')));
     } finally {
       setExporting(false);
     }

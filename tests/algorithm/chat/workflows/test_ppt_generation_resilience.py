@@ -10,7 +10,7 @@ from PIL import Image
 from lazyllm.tools.agent import ToolExecutionError
 
 from lazyllm.module.llms.onlinemodule.base.model_outcome import (
-    ModelCallError, ModelCallTerminal, ModelFailure, ModelFailureCode, ModelFailureOrigin,
+    ModelCallError, ModelCallTerminal, ModelFailure, ModelFailureCode, ModelFailureOrigin, ModelFinish,
 )
 
 
@@ -53,6 +53,31 @@ class AdapterModel:
             control.validate_request(SimpleNamespace(payload={'messages': [], **options}))
         self.calls.append(options)
         return self.respond(prompt, control)
+
+
+@pytest.mark.parametrize('kind', ['timeout', 'length'])
+def test_provider_failure_explains_original_cause_and_keeps_safe_diagnostics(monkeypatch, tools, kind):
+    def respond(*_):
+        if kind == 'timeout':
+            raise transport_failure()
+        raise ModelCallError('Model call ended without a complete answer.', ModelCallTerminal(
+            model_call_id='length-1', attempt_count=1, kind='finish', finish=ModelFinish.LENGTH,
+            has_semantic_output=True,
+        ))
+    model = AdapterModel(respond)
+    monkeypatch.setattr(lazyllm, 'AutoModel', lambda **_: model)
+    with pytest.raises(RuntimeError) as failure:
+        tools._agent_llm_call('system', 'page 2', request_name='ppt_page_prompt')
+    message = str(failure.value)
+    assert ('模型供应商响应超时' if kind == 'timeout' else '输出长度达到上限') in message
+    assert 'ppt_page_prompt' in message and 'DO-NOT-LOG' not in message
+    diagnostics = tools._model_failure_details(failure.value)
+    assert diagnostics['source'] == 'test-provider'
+    if kind == 'length':
+        assert diagnostics['finish'] == 'length'
+    else:
+        assert diagnostics['code'] == 'request_timeout'
+    assert len(model.calls) == 1
 
 
 def prepare_batch(monkeypatch, tmp_path, tools, pages, respond):

@@ -48,13 +48,13 @@ func TestAutomaticReadingEnrollmentFutureOnlyDurableAndBounded(t *testing.T) {
 	}
 	var jobs []orm.AsyncJob
 	db.Where("job_type=?", ReadingPreparationJob).Find(&jobs)
-	if len(jobs) != 2 {
+	if len(jobs) != 6 {
 		t.Fatalf("quota/dedupe: %d", len(jobs))
 	}
 	for _, j := range jobs {
 		var payload readingPreparationPayload
 		json.Unmarshal(j.PayloadJSON, &payload)
-		if payload.DocumentID == "old" || payload.ItemLimit != 3 || !payload.Automatic || len(payload.Scopes) != 4 || j.MaxAttempts != 1 {
+		if payload.DocumentID == "old" || payload.ItemLimit != 0 || !payload.Automatic || (len(payload.Scopes) != 1 && len(payload.Scopes) != 3) || j.MaxAttempts != 1 {
 			t.Fatalf("bad enrollment: %+v %+v", j, payload)
 		}
 	}
@@ -65,7 +65,7 @@ func TestAutomaticReadingEnrollmentFutureOnlyDurableAndBounded(t *testing.T) {
 	}
 	var count int64
 	db.Model(&orm.AsyncJob{}).Count(&count)
-	if count != 2 {
+	if count != 6 {
 		t.Fatal("failed job retried automatically")
 	}
 	p.Preset = "demand"
@@ -174,6 +174,8 @@ func TestReadingPreparationStatusMatchesCurrentSource(t *testing.T) {
 	assertStatus("not_requested", "")
 	addJob("current", "owner", "succeeded", hash, 0)
 	assertStatus("succeeded", "current")
+	addJob("waiting-study", "owner", "pending", hash, -time.Second)
+	assertStatus("pending", "waiting-study")
 	if w := call("outsider"); w.Code != http.StatusNotFound {
 		t.Fatalf("unauthorized status: %d %s", w.Code, w.Body)
 	}
@@ -184,7 +186,7 @@ func TestReadingPreparationStatusMatchesCurrentSource(t *testing.T) {
 		t.Fatalf("unavailable source status: %d %s", w.Code, w.Body)
 	}
 	var count int64
-	if err := db.Model(&orm.AsyncJob{}).Count(&count).Error; err != nil || count != 4 {
+	if err := db.Model(&orm.AsyncJob{}).Count(&count).Error; err != nil || count != 5 {
 		t.Fatalf("status poll changed jobs: count=%d err=%v", count, err)
 	}
 }

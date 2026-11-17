@@ -160,10 +160,12 @@ def _set_scoped_shape_font(
     return replacements
 
 
-def available_font_families() -> set[str]:
+def available_font_families(*, include_managed: bool = True) -> set[str]:
     """Return installed font family names without guessing a fallback font."""
     from lazymind.chat.engine.tools.file_resources.font_library import local_fonts
-    managed = {alias for font in local_fonts() if font['embeddable'] for alias in font['aliases']}
+    managed = set()
+    if include_managed:
+        managed = {alias for font in local_fonts() if font['embeddable'] for alias in font['aliases']}
     fc_list = shutil.which('fc-list')
     if fc_list:
         try:
@@ -179,7 +181,9 @@ def available_font_families() -> set[str]:
                 if family.strip() and '\ufffd' not in family
             }
             if discovered:
-                return managed | discovered
+                managed.update(discovered)
+                if not os.environ.get('LOCALAPPDATA'):
+                    return managed
         except (OSError, subprocess.SubprocessError, UnicodeError):
             pass
 
@@ -188,9 +192,11 @@ def available_font_families() -> set[str]:
         Path.home() / 'Library' / 'Fonts', Path('/usr/share/fonts'),
         Path('/usr/local/share/fonts'), Path(os.environ.get('WINDIR', 'C:/Windows')) / 'Fonts',
     ]
+    if user_fonts := os.environ.get('LOCALAPPDATA'):
+        roots.append(Path(user_fonts) / 'Microsoft/Windows/Fonts')
     families: set[str] = set(managed)
     try:
-        from fontTools.ttLib import TTFont
+        from fontTools.ttLib import TTCollection, TTFont
     except ImportError:
         TTFont = None  # type: ignore[assignment,misc]
     if TTFont is not None:
@@ -201,11 +207,16 @@ def available_font_families() -> set[str]:
                 if path.suffix.lower() not in {'.ttf', '.otf', '.ttc'}:
                     continue
                 try:
-                    font = TTFont(str(path), lazy=True, fontNumber=0)
-                    for record in font['name'].names:
-                        if record.nameID in {1, 16}:
-                            families.add(record.toUnicode().strip())
-                    font.close()
+                    fonts = (TTCollection(path, lazy=True).fonts if path.suffix.lower() == '.ttc'
+                             else [TTFont(path, lazy=True)])
+                    try:
+                        for font in fonts:
+                            for record in font['name'].names:
+                                if record.nameID in {1, 16}:
+                                    families.add(record.toUnicode().strip())
+                    finally:
+                        for font in fonts:
+                            font.close()
                 except Exception:
                     continue
     return {family for family in families if family}

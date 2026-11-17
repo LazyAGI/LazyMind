@@ -45,9 +45,10 @@ func upstreamTotalTimeout() time.Duration {
 }
 
 type ChatMessage struct {
-	Role       string `json:"role"`
-	Content    string `json:"content"`
-	HistorySeq int    `json:"history_seq,omitempty"`
+	Role              string           `json:"role"`
+	Content           string           `json:"content"`
+	HistorySeq        int              `json:"history_seq,omitempty"`
+	CanonicalMessages []map[string]any `json:"canonical_messages,omitempty"`
 }
 
 type DatasetFilters struct {
@@ -845,6 +846,16 @@ func chatMessageFromMap(m map[string]any) ChatMessage {
 	role, _ := m["role"].(string)
 	content, _ := m["content"].(string)
 	msg := ChatMessage{Role: role, Content: content}
+	switch canonical := m["canonical_messages"].(type) {
+	case []map[string]any:
+		msg.CanonicalMessages = canonical
+	case []any:
+		for _, entry := range canonical {
+			if message, ok := entry.(map[string]any); ok {
+				msg.CanonicalMessages = append(msg.CanonicalMessages, message)
+			}
+		}
+	}
 	switch seq := m["history_seq"].(type) {
 	case int:
 		msg.HistorySeq = seq

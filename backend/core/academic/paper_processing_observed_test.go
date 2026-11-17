@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"lazymind/core/common/orm"
+	"lazymind/core/pdfir"
 )
 
 func TestPaperViewsUseRequestedProcessingInsteadOfDatasetDefault(t *testing.T) {
@@ -113,5 +114,29 @@ func TestPaperLibraryDoesNotInventActiveParsing(t *testing.T) {
 				t.Fatalf("unproven parsing: parse=%s active=%v", view.Data.Papers[0].Parse, view.Active)
 			}
 		})
+	}
+}
+
+func TestPaperLibraryUsesSharedStructureWithoutRetrievalTask(t *testing.T) {
+	db := paperLibraryTestDB(t)
+	paper := importDraft(t, "papers", "metadata", libraryDraft("shared", "Shared structure", "10.1234/shared")).Data.Papers[0]
+	source := filepath.Join(t.TempDir(), "paper.pdf")
+	os.WriteFile(source, []byte("%PDF-shared"), 0600)
+	hash, _ := pdfir.SourceHash(source)
+	irpath := filepath.Join(t.TempDir(), "ir.json")
+	os.WriteFile(irpath, marshal(pdfir.Document{Version: 1, SourceSHA256: hash, CoordinateSpace: "normalized_top_left", Blocks: []pdfir.Block{{ID: "p", Type: "text", Text: "Shared content"}}}), 0600)
+	db.AutoMigrate(&orm.AsyncJob{})
+	for _, row := range []any{
+		&orm.Document{ID: "pdf", DatasetID: "papers", DisplayName: "paper.pdf", Ext: marshal(map[string]string{"stored_path": source})},
+		&orm.PaperLibraryAttachment{DatasetID: "papers", PaperID: paper.ID, ID: "attachment", DocumentID: "pdf", Kind: "pdf", IsPrimary: true},
+		&orm.AsyncJob{ID: "shared-ir", JobType: "document_pdf_ir", ResourceType: "document_pdf_ir", ResourceID: pdfir.Digest("papers\x00pdf"), Status: "succeeded", PayloadJSON: marshal(map[string]string{"source_sha256": hash, "revision": pdfir.Revision}), ResultJSON: marshal(map[string]string{"ir_path": irpath}), CreatedAt: time.Now()},
+	} {
+		if err := db.Create(row).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	view := readLibrary(t, "papers")
+	if view.Data.Papers[0].Parse != "ready" || view.Data.Attachments[0].Parse != "ready" {
+		t.Fatalf("shared result hidden: %+v", view.Data.Papers[0])
 	}
 }
