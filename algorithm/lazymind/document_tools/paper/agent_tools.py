@@ -345,14 +345,14 @@ def unseal(ctx, receipt, kind):
     return copy.deepcopy(payload['value'])
 
 
-def _prepared_inputs(ctx, pool=None) -> dict:
+def _prepared_inputs(ctx, pool=None, value=None) -> dict:
     """Build the complete input and schemas for scoped, lossless paging."""
     if ctx.step_id == 'finish':
         return {'step': 'finish', 'input': {}, 'expected_output_fields': [],
                 'inputs_digest': digest(ctx.scope), 'launch_request': ctx.launch_request,
                 'current_request': ctx.request}
     pool = base_pool(ctx) if pool is None else pool
-    value = step_inputs(ctx, pool)
+    value = step_inputs(ctx, pool) if value is None else value
     result = {'step': ctx.step_id, 'input': value, 'pool_sequence': pool['sequence'],
               'expected_output_fields': list(contracts.OUTPUTS.get(contracts.ALIASES.get(ctx.step_id, ctx.step_id), ())),
               'launch_request': ctx.launch_request, 'current_request': ctx.request,
@@ -368,6 +368,22 @@ def _prepared_inputs(ctx, pool=None) -> dict:
                                  'in literature_review omit papers to resolve selected IDs from their actual receipts. '
                                  'Never change source facts.'),
               'inputs_digest': digest(ctx.scope), 'checks': 'Program checks do not establish scientific correctness.'}
+    if ctx.step_id == 'literature_review':
+        from .review.materials import SearchPlan
+        from .prompts.literature_review_prompt import MATERIAL_SELECTION_PROMPT
+        from lazymind.config import config
+        result['search_plan_schema'] = SearchPlan.model_json_schema()
+        result['search_guidance'] = ('Use short, complementary'
+                                     + MATERIAL_SELECTION_PROMPT.split('Use short, complementary', 1)[1])
+        result['paper_count_range'] = {'min': config['paper_review_min_paper_count'],
+                                       'max': config['paper_review_max_paper_count']}
+        result['retrieval_contract'] = (
+            'Plan before searching. Return output.search_plan with requested_paper_count set to the actual '
+            'user-requested FINAL total, including retained academic papers, or null when unspecified. '
+            'Background does not count. Use concise complementary queries and page the returned snapshots. '
+            'Fill the shortfall with relevant readable papers, never weak padding. A requested total is '
+            'reported at publication. Preserve real sources and disclose an unattainable shortfall without '
+            'blocking publication or subsequent workflow steps.')
     if ctx.step_id == 'write_outline':
         result['candidate_example'] = {
             'output': {'outline': '# Paper title\n\n## Introduction\nArgument and budget.'
@@ -441,6 +457,14 @@ def _prepared_inputs(ctx, pool=None) -> dict:
             'specification_schema': Chart.model_json_schema(), 'allowed_import_roots': sorted(ALLOWED_IMPORTS),
             'forbidden_names': sorted(FORBIDDEN), 'forbidden_attributes': sorted(FORBIDDEN_ATTRIBUTES),
             'rules': 'Keep original data and statistics unchanged; no savefig/show/network/filesystem access.'}
+        from .analysis.figure_plan import FigureArrangement, FIGURE_PLANNING_PROMPT
+        from .plotting.skills import PlotSkills
+        result['figure_planning_contract'] = {
+            'rules': FIGURE_PLANNING_PROMPT, 'schema': FigureArrangement.model_json_schema(),
+            'styles': PlotSkills().catalog(),
+            'style_references': 'Read plot_style:STYLE with paper_read_material for the exact style rules/helpers. '
+                                'For custom, read the named base_style. Pass style, purpose and finding_ids '
+                                'in paper_plot.specification. Standard styles render deterministically with code="".'}
         result['candidate_analysis_shape'] = (
             'Use output.analysis={receipt: actual paper_analyze receipt, summary: your evidence-based interpretation, '
             'limitations: your honest limitations}. All numerical findings are restored exactly; never retype them.')
@@ -481,7 +505,7 @@ def _input_reference(identifier, value):
 
 
 def paper_prepare_inputs() -> dict:
-    """Read the compact input/schema index. Resolve material_id references with paper_read_material."""
+    """Read the working inputs and required schemas together; only large values need further reading."""
     result = _prepared_inputs(context())
     compact = {}
     for key, value in result.items():
@@ -495,23 +519,56 @@ def paper_prepare_inputs() -> dict:
         else:
             compact[key] = value
     compact['reference_reading'] = (
-        'Objects with material_id are exact bound references, not the material/schema itself. '
-        'Read them with paper_read_material(material_id=the returned ID, offset=0, limit=4000), '
-        'continuing next_offset until null. Parse json references only after reading all pages. '
-        'Read the required field schemas and actual evidence before submitting.')
+        'Inline values and schemas are complete: do not fetch them again. '
+        'For remaining material_id references, call paper_read_material with a list of IDs or '
+        '{material_id, offset, limit} objects to read several in one call. The outer limit is the '
+        'combined text budget, at most 64000 characters. Continue each next_offset until null; '
+        'parse JSON only after all its pages are read. Computation tools receive complete bound '
+        'tables: use table_catalog and table IDs without paging raw rows merely to copy them into code.')
+    # Fit exact schemas and short evidence into one native-safe response instead of compulsory schema paging.
+    for key, value in result.items():
+        if key == 'input':
+            continue
+        if isinstance(compact.get(key), dict) and 'material_id' in compact[key]:
+            candidate = {**compact, key: value}
+            if len(canonical(candidate)) <= 9500:
+                compact = candidate
+    for name, value in result.get('input', {}).items():
+        if isinstance(compact['input'].get(name), dict) and 'material_id' in compact['input'][name]:
+            candidate = {**compact, 'input': {**compact['input'], name: value}}
+            if len(canonical(candidate)) <= 9500:
+                compact = candidate
     return compact
 
 
-@json_arguments
-def paper_read_material(material_id: str, offset: int = 0, limit: int = 16000) -> dict:
-    """Read a bound material or returned input:/contract: reference. Continue until next_offset is null."""
-    if offset < 0 or not 1 <= limit <= 64000:
-        raise ValueError('读取范围不合法')
-    ctx = context()
-    pool = base_pool(ctx)
+def prepared_inputs(ctx, pool, cache):
+    if 'input' not in cache:
+        cache['input'] = step_inputs(ctx, pool)
+    return cache['input']
+
+
+def prepared_contract(ctx, pool, cache):
+    if 'contract' not in cache:
+        cache['contract'] = _prepared_inputs(ctx, pool, prepared_inputs(ctx, pool, cache))
+    return cache['contract']
+
+
+def _read_material(ctx, pool, cache, material_id, offset, limit):
+    if material_id.startswith('plot_style:'):
+        if ctx.step_id != 'data_analysis':
+            raise ValueError('绘图参考仅供数据分析步骤读取')
+        from .plotting.skills import PlotSkills
+        style = material_id.removeprefix('plot_style:')
+        skills = PlotSkills()
+        value = {'style_contract': skills.style_contract(style), 'reference': skills.reference(style)}
+        text = _material_text(value)
+        return {'source': {'material_id': material_id, 'inputs_digest': digest(ctx.scope)},
+                'offset': offset, 'text': text[offset:offset + limit],
+                'next_offset': offset + limit if offset + limit < len(text) else None,
+                'total_characters': len(text), 'source_sha256': hashlib.sha256(text.encode()).hexdigest()}
     if material_id.startswith(('input:', 'contract:')):
         namespace, key = material_id.split(':', 1)
-        values = step_inputs(ctx, pool) if namespace == 'input' else _prepared_inputs(ctx, pool)
+        values = prepared_inputs(ctx, pool, cache) if namespace == 'input' else prepared_contract(ctx, pool, cache)
         if key not in values:
             raise ValueError('只能读取本步骤绑定的输入或契约引用')
         value = values[key]
@@ -521,7 +578,7 @@ def paper_read_material(material_id: str, offset: int = 0, limit: int = 16000) -
                 'next_offset': offset + limit if offset + limit < len(text) else None,
                 'total_characters': len(text), 'source_sha256': hashlib.sha256(text.encode()).hexdigest()}
     # A reviewer sees the submitted manuscript and its references/figures, not upstream research.
-    visible = step_inputs(ctx, pool) if ctx.step_id == 'peer_review' else None
+    visible = prepared_inputs(ctx, pool, cache) if ctx.step_id == 'peer_review' else None
     papers = (visible.get('papers', []) if visible is not None
               else (material(pool, 'papers') or {}).get('content', []))
     source = next((paper for paper in papers if paper['id'] == material_id), None)
@@ -541,13 +598,78 @@ def paper_read_material(material_id: str, offset: int = 0, limit: int = 16000) -
 
 
 @json_arguments
-def paper_search(query: str, count: int = 20, page: int = 1,
-                 year_from: int | None = None, year_to: int | None = None) -> dict:
-    """Search real academic sources. Returns signed source facts, not a model-written plan."""
+def paper_read_material(material_id: str | list[str | dict], offset: int = 0, limit: int = 16000) -> dict:
+    """Read one exact material or up to eight IDs/{material_id,offset,limit} requests together.
+
+    For batches, limit caps total returned text. Each item retains its own exact hash and next_offset.
+    """
+    if type(offset) is not int or offset < 0 or type(limit) is not int or not 1 <= limit <= 64000:
+        raise ValueError('读取范围不合法')
+    if isinstance(material_id, str):
+        requests = [(material_id, offset, limit)]
+    elif isinstance(material_id, list) and 1 <= len(material_id) <= 8:
+        requests = []
+        for item in material_id:
+            item = {'material_id': item} if isinstance(item, str) else item
+            if (not isinstance(item, dict) or set(item) - {'material_id', 'offset', 'limit'}
+                    or not isinstance(item.get('material_id'), str)):
+                raise ValueError('批量读取必须提供实际 material_id 和可选 offset/limit')
+            position, size = item.get('offset', offset), item.get('limit', limit)
+            if type(position) is not int or position < 0 or type(size) is not int or not 1 <= size <= 64000:
+                raise ValueError('读取范围不合法')
+            requests.append((item['material_id'], position, size))
+    else:
+        raise ValueError('一次只能读取 1–8 个实际材料引用')
+    ctx = context()
+    pool, cache = base_pool(ctx), {}
+    if isinstance(material_id, str):
+        return _read_material(ctx, pool, cache, *requests[0])
+    remaining, materials = limit, []
+    for identifier, position, size in requests:
+        page = _read_material(ctx, pool, cache, identifier, position, min(size, remaining))
+        remaining -= len(page['text'])
+        materials.append({'material_id': identifier, **page})
+    return {'materials': materials, 'total_characters_returned': limit - remaining}
+
+
+def _search_papers(papers):
+    papers = copy.deepcopy(papers)
+    for paper in papers:
+        paper.update(text=paper.get('abstract') or '', reading={
+            'content_type': 'search_preview' if paper['source'] == 'google_scholar' else 'abstract',
+            'truncated': False, 'more': False})
+    return papers
+
+
+def _source_papers(ctx, receipt):
+    signed = resolve_receipt(receipt)
+    kind = signed.get('payload', {}).get('kind') if isinstance(signed, dict) else None
+    if kind == 'search':
+        # Previously exposed pagination receipts contain genuine source facts too; verify before adapting.
+        return _search_papers(unseal(ctx, signed, 'search')['result']['papers'])
+    return unseal(ctx, signed, 'papers')
+
+
+def _search_snapshot_path(ctx, identity, receipt):
+    return execution_directory() / ('search-' + digest({'scope': ctx.scope, 'identity': identity,
+                                                        'receipt': receipt}) + '.json')
+
+
+@json_arguments
+def paper_search(query: str | list[str], count: int = 20, page: int = 1,
+                 year_from: int | None = None, year_to: int | None = None,
+                 search_receipt: dict | None = None, arxiv_terms: list[str] | None = None) -> dict:
+    """Search one or up to three complementary queries in parallel within a shared 25-second wait.
+
+    Pass a string or list of short queries. Batch queries derive arXiv terms from each query;
+    use arxiv_terms only with a single query. count caps the merged page, not each query.
+    Each read_requests[paper_id] is ready to pass to paper_read_paper; reuse receipt for submissions.
+    Timed-out sources are explicit; report shortages honestly and search again only for actual gaps.
+    """
     ctx = context()
     if ctx.step_id not in {'research_topic', 'refine_topic', 'literature_review', 'reading_reflection'}:
         raise ValueError('当前步骤不允许扩展检索')
-    if not query.strip() or not 1 <= count <= 50 or not 1 <= page <= 3:
+    if not 1 <= count <= 50 or not 1 <= page <= 3:
         raise ValueError('检索 query/count/page 超出范围')
     if year_from is not None and year_to is not None and year_from > year_to:
         raise ValueError('检索年份范围不合法')
@@ -567,32 +689,62 @@ def paper_search(query: str, count: int = 20, page: int = 1,
         raise ValueError('检索年份与固定来源范围冲突')
     from .review.materials import _api_keys
     from .review.retrieval import unique_candidates
-    from .review.search import search_papers
-    result = search_papers(query, limit=min(count, 20), api_keys=_api_keys(),
-                           year_from=year_from, year_to=year_to)
+    from .review.search import search_papers, validate_query, validate_arxiv_terms
+    queries = [query] if isinstance(query, str) else query
+    if (not isinstance(queries, list) or not 1 <= len(queries) <= 3
+            or any(not isinstance(q, str) for q in queries) or len(set(queries)) != len(queries)):
+        raise ValueError('一次提供 1–3 组不重复的英文检索词')
+    for item in queries:
+        validate_query(item)
+    if isinstance(query, list) and arxiv_terms is not None:
+        raise ValueError('批量检索按每组 query 生成 arXiv 词组；自定义 arxiv_terms 请使用单组 query')
+    arxiv_terms = None if isinstance(query, list) else validate_arxiv_terms(arxiv_terms or [query])
+    identity = {'query': query, 'count': count, 'year_from': year_from, 'year_to': year_to,
+                'arxiv_terms': arxiv_terms}
+    if search_receipt is not None:
+        signed = resolve_receipt(search_receipt)
+        if signed.get('payload', {}).get('kind') == 'search':
+            snapshot = unseal(ctx, signed, 'search')
+        else:
+            unseal(ctx, signed, 'papers')
+            path = _search_snapshot_path(ctx, identity, search_receipt)
+            if path.is_symlink() or not path.is_file():
+                raise ValueError('检索翻页必须保持原始 query/count/年份范围并使用原始回执')
+            snapshot = unseal(ctx, json.loads(path.read_bytes()), 'search')
+        if snapshot['identity'] != identity:
+            raise ValueError('检索翻页必须保持原始 query/count/年份范围')
+        result = snapshot['result']
+    else:
+        result = search_papers(query, limit=20, api_keys=_api_keys(), arxiv_terms=arxiv_terms,
+                               year_from=year_from, year_to=year_to, time_budget=25)
+        # A preview page must not hide every later provider behind the first provider's results.
+        from itertools import zip_longest
+        sources = {}
+        for paper in result['papers']:
+            sources.setdefault(paper['source'], []).append(paper)
+        result['papers'] = [paper for group in zip_longest(*sources.values()) for paper in group if paper]
+    source_receipt = receipt_reference(ctx, 'papers', _search_papers(result['papers']))
+    save_operation(_search_snapshot_path(ctx, identity, source_receipt),
+                   seal(ctx, 'search', {'identity': identity, 'result': result}))
     warnings = [f'{run["source"]} 检索状态：{run["status"]}，仅使用实际返回的来源。'
                 for run in result['sources'] if run['status'] != 'ok']
     start = (page - 1) * count
     more = len(result['papers']) > start + count
-    papers = copy.deepcopy(result['papers'][start:start + count])
-    for paper in papers:
-        paper.update(text=paper.get('abstract') or '', reading={
-            'content_type': 'search_preview' if paper['source'] == 'google_scholar' else 'abstract',
-            'truncated': False, 'more': False})
+    papers = _search_papers(result['papers'][start:start + count])
     existing = (material(base_pool(ctx), 'papers') or {}).get('content', [])
     papers = unique_candidates(existing, papers)
     return {'papers': papers, 'warnings': warnings, 'more': bool(more),
-            'receipt': receipt_reference(ctx, 'papers', papers)}
+            'sources': [{key: run[key] for key in ('source', 'query', 'status') if key in run}
+                        for run in result['sources']],
+            'read_requests': {paper['id']: {'source_receipt': source_receipt, 'paper_id': paper['id']}
+                              for paper in papers},
+            'receipt': source_receipt, 'search_receipt': source_receipt,
+            'receipt_usage': ('receipt and search_receipt are the SAME source receipt. '
+                              'Use receipt for paper_read_paper and candidate receipts; '
+                              'reuse it as search_receipt only when paging the same query. Never rewrite its ID.')}
 
 
-@json_arguments
-def paper_read_paper(source_receipt: dict, paper_id: str) -> dict:
-    """Fetch actual content for a source registered by paper_search, preserving reading scope."""
-    ctx = context()
-    papers = unseal(ctx, source_receipt, 'papers')
-    paper = next((paper for paper in papers if paper['id'] == paper_id), None)
-    if paper is None:
-        raise ValueError('论文不属于本次检索回执')
+def _read_paper(paper):
     from .review.retrieval import sciverse_provider, read_sciverse
     warnings = []
     if paper.get('doc_id') or (paper.get('extra') or {}).get('doc_id'):
@@ -604,7 +756,42 @@ def paper_read_paper(source_receipt: dict, paper_id: str) -> dict:
             result.setdefault('reading', {'content_type': 'abstract', 'truncated': False, 'more': False})
     if result is None:
         raise contracts.MissingMaterials('未取得可读正文或摘要')
-    return {'paper': result, 'warnings': warnings, 'receipt': receipt_reference(ctx, 'papers', [result])}
+    return result, warnings
+
+
+@json_arguments
+def paper_read_paper(source_receipt: dict, paper_id: str | list[str]) -> dict:
+    """Read one or up to eight selected sources from the same signed search receipt.
+
+    Existing returned abstracts do not need another read. Request this for additional content/full text.
+    """
+    ctx = context()
+    papers = _source_papers(ctx, source_receipt)
+    identifiers = [paper_id] if isinstance(paper_id, str) else paper_id
+    if (not isinstance(identifiers, list) or not 1 <= len(identifiers) <= 8
+            or any(not isinstance(item, str) for item in identifiers) or len(set(identifiers)) != len(identifiers)):
+        raise ValueError('一次只能读取 1–8 个不重复的真实论文 ID')
+    selected = {paper['id']: paper for paper in papers}
+    if any(identifier not in selected for identifier in identifiers):
+        raise ValueError('论文不属于本次检索回执')
+    if isinstance(paper_id, str):
+        result, warnings = _read_paper(selected[paper_id])
+        return {'paper': result, 'warnings': warnings, 'receipt': receipt_reference(ctx, 'papers', [result])}
+    results, warnings, failed = [], [], []
+    cancelled = cancellation_check(ctx)
+    for identifier in identifiers:
+        if cancelled():
+            from concurrent.futures import CancelledError
+            raise CancelledError('执行已停止或授权失效')
+        try:
+            result, notices = _read_paper(selected[identifier])
+        except contracts.MissingMaterials as exc:
+            failed.append({'paper_id': identifier, 'message': str(exc)})
+        else:
+            results.append(result)
+            warnings.extend(notices)
+    return {'papers': results, 'warnings': warnings, 'failed': failed,
+            'receipt': receipt_reference(ctx, 'papers', results)}
 
 
 def _knowledge_call(name, arguments):
@@ -852,7 +1039,6 @@ def paper_plot(code: str, specification: dict, analysis_receipt: dict) -> dict:
     from .analysis.schema import table_map, Chart
     from .plotting.code import validate_code
     from .plotting.executor import execute_plot
-    validate_code(code)
     columns = specification.get('columns') or []
     tables = table_map(inputs)
     table_id = columns[0]['table_id'] if columns else None
@@ -864,9 +1050,33 @@ def paper_plot(code: str, specification: dict, analysis_receipt: dict) -> dict:
         rows = result_rows(record['analysis'])
     except (json.JSONDecodeError, KeyError, TypeError):
         rows = []
+    from .analysis.figure_plan import bind_figures
+    from .plotting.analysis import prepare_figures
+    from .plotting.standard import STANDARD_STYLES, generate_standard_code, generate_stacked_code
+    from .plotting.templates import compose_native_program
+    draft = {key: specification[key] for key in (
+        'title', 'purpose', 'style', 'base_style', 'finding_ids', 'category', 'series', 'facet',
+        'normalize', 'value_format', 'annotation', 'numerator', 'denominator', 'sort', 'caption',
+        'requirements', 'data_status') if key in specification}
+    draft.setdefault('purpose', specification.get('title'))
+    bound = bind_figures({'figures': [draft],
+                          'terminology': specification.get('terminology', {}),
+                          'series_order': specification.get('series_order', [])}, record['analysis'])
+    if len(bound['figures']) != 1:
+        raise ValueError('单次绘图需要一个可读图幅，请拆分过密的图表后分别调用')
+    figure = {**bound['figures'][0], 'id': specification['id']}
+    _, data, measured, spec, reference, _ = prepare_figures(record['analysis'], [figure], inputs, bound)[0]
+    if figure['style'] in STANDARD_STYLES or figure['style'] == 'bar_stacked':
+        generator = generate_stacked_code if figure['style'] == 'bar_stacked' else generate_standard_code
+        code = generator(data, measured, spec, reference, '', '')
+    validate_code(code)
+    code = compose_native_program(code, reference, spec)
+    # Preserve the single-table contract while exposing the shared complete tables/style to skill helpers.
+    data = {**tables[table_id], **data}
     statistics = {**record['analysis'], 'results': rows}
-    raw = execute_plot({'code': code, 'table': tables[table_id], 'statistics': statistics,
-                        'spec': specification, 'data_sha256': record['analysis']['data_sha256']},
+    specification = {**specification, **figure, 'style_contract': spec['style_contract']}
+    raw = execute_plot({'code': code, 'table': data, 'statistics': statistics,
+                        'spec': {**spec, **specification}, 'data_sha256': record['analysis']['data_sha256']},
                        cancelled=cancellation_check(ctx))
     chart_fields = {key: specification[key] for key in Chart.model_fields if key in specification}
     chart = Chart.model_validate({**chart_fields, 'svg': raw['svg']}).model_dump()
@@ -878,6 +1088,10 @@ def paper_plot(code: str, specification: dict, analysis_receipt: dict) -> dict:
         preview = Path(directory) / (chart['id'] + '.png')
         preview.write_bytes(base64.b64decode(result['exports']['png'], validate=True))
         result['native_preview_path'] = str(preview)
+        import lazyllm
+        citation = (lazyllm.globals.get('agentic_config') or {}).get('citation_state')
+        if isinstance(citation, dict):
+            citation.setdefault('_image_url_registry', {})[preview.name] = str(preview)
     receipt = receipt_reference(ctx, 'chart', result)
     public = {'chart': {key: value for key, value in chart.items() if key != 'svg'}, 'receipt': receipt,
               'candidate_handoff': ('Pass this exact receipt object in output.charts and receipts; '
@@ -919,8 +1133,8 @@ def _manifest(artifacts):
 def _accepted_papers(pool, receipts):
     known = {paper['id']: copy.deepcopy(paper) for paper in (material(pool, 'papers') or {}).get('content', [])}
     for receipt in receipts:
-        if receipt.get('payload', {}).get('kind') == 'papers':
-            for paper in unseal(context(), receipt, 'papers'):
+        if receipt.get('payload', {}).get('kind') in {'papers', 'search'}:
+            for paper in _source_papers(context(), receipt):
                 known[paper['id']] = paper
     return known
 
@@ -1203,12 +1417,28 @@ def paper_prepare_candidate(output: dict, receipts: list[dict]) -> dict:
                     charts.add((chart['id'], digest(chart)))
             if any((chart['id'], digest(chart)) not in charts for chart in generated['charts']):
                 raise ValueError('图表必须来自真实绘图回执或未修改的已有图表')
+        review_plan = generated.pop('search_plan', None) if module == 'literature_review' else None
+        if module == 'literature_review' and 'paper_source_policy' in generated:
+            generated.pop('paper_source_policy')
+            quality_warnings.append('来源范围沿用服务端绑定；未采用候选中重复填写的来源策略。')
         contracts.validate_output(module, generated, inputs=None if redraw_only else inputs)
         if module in {'research_topic', 'reading_reflection'}:
             from .publication import validate_citations
             field = 'question' if module == 'research_topic' else 'reflection'
             validate_citations(generated[field], inputs.get('papers', []))
         if module == 'literature_review':
+            from .review.materials import SearchPlan, _paper_count
+            try:
+                search_plan = SearchPlan.model_validate(review_plan or {})
+            except ValueError:
+                search_plan = SearchPlan()
+                quality_warnings.append('检索计划格式未完整记录，已保留实际取得的文献继续流程。')
+            requested = search_plan.requested_paper_count
+            actual = _paper_count(generated['papers'])
+            if requested is not None and actual < requested:
+                quality_warnings.append(
+                    f'目标约 {requested} 篇文献，实际取得 {actual} 篇；已保留真实材料继续流程，未补造来源。')
+            pool['review_search_plan'] = search_plan.model_dump()
             from .publication import normalize_source_citations, validate_citations, publish_citations
             papers = [paper for paper in generated['papers'] if paper.get('review_role') != 'background']
             body = normalize_source_citations(generated['evidence'], papers,

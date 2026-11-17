@@ -449,7 +449,7 @@ runtime:
         paper_prepare_candidate: 3
         paper_submit_candidate: 3
         paper_read_material: 80
-        paper_search: 6
+        paper_search: 12
         paper_read_paper: 32
     refine_topic:
       rounds: 32

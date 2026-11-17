@@ -220,9 +220,11 @@ def test_all_step_inputs_are_model_free_and_versioned(paper_context, monkeypatch
     if step == 'data_analysis':
         import json
         with tools.paper_scope(ctx):
-            code = json.loads(tools.paper_read_material(prepared['code_contract']['material_id'], limit=64000)['text'])
-            plot = json.loads(tools.paper_read_material(
-                prepared['plot_code_contract']['material_id'], limit=64000)['text'])
+            def contract(name):
+                value = prepared[name]
+                return (json.loads(tools.paper_read_material(value['material_id'], limit=64000)['text'])
+                        if 'material_id' in value else value)
+            code, plot = contract('code_contract'), contract('plot_code_contract')
         assert 'results' in code['return_schema']['properties']
         assert plot['required_function'] == 'draw(data, statistics, spec)'
         assert 'never default' in plot['finding_metadata']
@@ -568,6 +570,10 @@ def test_native_plot_handoff_materializes_the_returned_png(paper_context, prepar
     fixture = json.loads((Path(__file__).resolve().parents[4]
                           / 'tests/fixtures/paper-writing/data_analysis.json').read_text())
     pool = prepared_analysis_pool(fixture['input'])
+    finding = fixture['output']['analysis']['findings'][0]
+    finding['calculation'] = json.dumps({'label': 'Score difference', 'metric': 'Score',
+                                       'method': 'Difference', 'scope': 'Two supplied records',
+                                       'coordinates': {}, 'comparison': 'evidence - baseline'})
     add_material(pool, 'analysis', fixture['output']['analysis'], [], [])
     source = tmp_path / 'pool.json'
     source.write_text(json.dumps(pool))
@@ -579,12 +585,14 @@ def test_native_plot_handoff_materializes_the_returned_png(paper_context, prepar
                              params={'_paper_execution': identity,
                                                       'remote_inputs': {'seed_pool': str(source)}})
     png = b'\x89PNG\r\n\x1a\ncontrolled-image-bytes'
-    chart = fixture['output']['charts'][0]
+    chart = {**fixture['output']['charts'][0], 'style': 'point_interval'}
     def executed(payload, **kwargs):
         assert payload['table']['rows'] == fixture['input']['data']['rows']
         return {'svg': chart['svg'], 'exports': {'png': base64.b64encode(png).decode()}}
     monkeypatch.setattr('lazymind.document_tools.paper.plotting.executor.execute_plot', executed)
     previous = lazyllm.globals.get('subagent_ctx')
+    previous_config = lazyllm.globals.get('agentic_config')
+    lazyllm.globals['agentic_config'] = {'citation_state': {}}
     lazyllm.globals['subagent_ctx'] = native
     try:
         prepared = tools.paper_prepare_inputs()
@@ -593,8 +601,11 @@ def test_native_plot_handoff_materializes_the_returned_png(paper_context, prepar
                                   prepared['existing_analysis_receipt'])
         path = Path(result['native_preview_path'])
         assert path.is_relative_to(tmp_path) and path.read_bytes() == png
+        registry = lazyllm.globals['agentic_config']['citation_state']['_image_url_registry']
+        assert registry[path.name] == str(path)
     finally:
         lazyllm.globals['subagent_ctx'] = previous
+        lazyllm.globals['agentic_config'] = previous_config
 
 
 def test_native_frozen_json_arguments_preserve_source_signatures(paper_context, monkeypatch):
@@ -863,7 +874,9 @@ def test_compact_contract_preserves_full_materials_and_schema_pages(paper_contex
         assert json.loads(text)[0]['text'] == papers[0]['text']
         assert hashlib.sha256(text.encode()).hexdigest() == ref['source_sha256']
         schema_key = 'result_meta_schema' if step == 'experiment' else 'review_schema'
-        schema = json.loads(tools.paper_read_material(prepared[schema_key]['material_id'], limit=64000)['text'])
+        schema = prepared[schema_key]
+        if 'material_id' in schema:
+            schema = json.loads(tools.paper_read_material(schema['material_id'], limit=64000)['text'])
         assert schema['type'] == 'object'
         with pytest.raises(ValueError, match='绑定'):
             tools.paper_read_material('contract:execution_handle')
@@ -956,7 +969,7 @@ def test_search_uses_shared_multi_source_api_and_reads_actual_abstract(paper_con
         assert read['paper']['text'] == 'Actual abstract 2'
         assert read['paper']['reading']['content_type'] == 'abstract'
         assert tools.unseal(ctx, read['receipt'], 'papers')[0] == read['paper']
-    assert all(kwargs['limit'] == 2 for _, kwargs in calls)
+    assert all(kwargs['limit'] == 20 for _, kwargs in calls)
 
 
 def test_paper_candidate_uses_existing_heading_normalization_before_publication(paper_context):
