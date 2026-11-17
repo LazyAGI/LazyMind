@@ -73,7 +73,7 @@ export default function ReadingPreferencesModal({ open, onClose }: { open: boole
         {([['pdf_parse', 'daily_pdf_documents'], ['ai_study', 'daily_study_documents']] as const).map(([id, field]) => <label key={id}>{names[id]}每日额度<InputNumber aria-label={`${names[id]}每日额度`} disabled={saving} min={1} max={10000} precision={0} value={draft.limits[field]} onChange={(value: number | null) => value != null && setDraft({ ...draft, limits: { ...draft.limits, [field]: value } })} />篇</label>)}
         <Typography.Text type="secondary">两类额度分别按论文计数。缓存复用和按需准备不占自动额度。自动任务串行执行（并发 1）。</Typography.Text>
       </div> }]} />
-      <Typography.Paragraph className="reading-cost-note" type="secondary">自动准备适用于之后导入的论文，可能产生费用。禁用后保留已有结果，已发出的请求可能继续计费。</Typography.Paragraph>
+      <Typography.Paragraph className="reading-cost-note" type="secondary">自动准备覆盖论文集中已有和新加入且已取得 PDF 的论文，按每日额度处理，可能产生费用。失败任务需手动重试。禁用后保留已有结果，已发出的请求可能继续计费。</Typography.Paragraph>
     </div>}
   </Modal>;
 }

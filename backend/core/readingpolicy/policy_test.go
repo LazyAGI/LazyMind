@@ -34,8 +34,8 @@ func TestDefaultsValidationAndIsolation(t *testing.T) {
 	if _, e = Save(ctx, db.DB, "one", p); e == nil {
 		t.Fatal("unbounded concurrency")
 	}
-	if Eligible(saved, time.Now().Add(-time.Hour)) {
-		t.Fatal("historical document eligible")
+	if !Eligible(saved, time.Now().Add(-time.Hour)) {
+		t.Fatal("historical document ineligible")
 	}
 	if !Eligible(saved, time.Now().Add(time.Second)) {
 		t.Fatal("new document ineligible")
@@ -56,7 +56,7 @@ func TestRegistryDoesNotAdvertiseRemovedPaperOverview(t *testing.T) {
 	}
 }
 
-func TestPolicyRangeChangesNeverEnrollPriorDocuments(t *testing.T) {
+func TestPolicyRangeChangesIncludePriorDocuments(t *testing.T) {
 	db := orm.MigrateTestDB(t, &orm.UserReadingPolicy{})
 	ctx := context.Background()
 	p := Defaults()
@@ -71,7 +71,15 @@ func TestPolicyRangeChangesNeverEnrollPriorDocuments(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	if Eligible(p, created) {
-		t.Fatal("expanded auto scope enrolled pre-change document")
+	if !Eligible(p, created) {
+		t.Fatal("expanded auto scope excluded pre-change document")
+	}
+}
+
+func TestEligibleAutomaticWithoutEpoch(t *testing.T) {
+	p := Defaults()
+	p.Modes[PDFParse] = Automatic
+	if !Eligible(p, time.Time{}) {
+		t.Fatal("automatic policy without epoch excluded historical document")
 	}
 }

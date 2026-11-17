@@ -176,8 +176,8 @@ func enqueueReadingPreparation(ctx context.Context, db *gorm.DB, row orm.Documen
 	return enqueue(ctx, db, asyncjob.EnqueueRequest{JobType: ReadingPreparationJob, ResourceType: kind, ResourceID: user, IdempotencyKey: pdfir.Digest(key), Payload: readingPreparationPayload{row.DatasetID, row.ID, scopes, automatic, hash, limit}, MaxAttempts: 1, SkipSucceeded: !automatic, CreateUserID: user})
 }
 
-// Enrollment is durable and bounded. Only documents newer than the saved policy
-// epoch are considered. Existing job rows (including failures) never reenroll.
+// Enrollment covers all available PDFs in bounded batches. History is checked
+// by category before hashing; failed/canceled automatic work never reenrolls.
 const readingEnrollmentBatch = 100
 
 type readingEnrollmentCursor struct {
@@ -186,8 +186,8 @@ type readingEnrollmentCursor struct {
 	ID        string
 }
 
-// The scheduler owns these cursors. Restarting only rechecks unqueued candidates;
-// durable job exclusion prevents duplicate generation, regardless of job status.
+// The scheduler owns these cursors. Restarting rechecks candidates; durable
+// category coverage and terminal failure checks prevent duplicate generation.
 func enrollReadingPreparation(ctx context.Context, db *gorm.DB, cursors map[string]readingEnrollmentCursor) error {
 	if cursors == nil {
 		cursors = make(map[string]readingEnrollmentCursor)
@@ -206,20 +206,22 @@ func enrollReadingPreparation(ctx context.Context, db *gorm.DB, cursors map[stri
 			if err != nil {
 				return err
 			}
-			if !readingpolicy.HasAutomatic(p) || p.AutomaticEligibleAfter == nil {
+			if !readingpolicy.HasAutomatic(p) {
 				return nil
 			}
 
 			cursor := cursors[stored.UserID]
-			if !cursor.Epoch.Equal(*p.AutomaticEligibleAfter) {
-				cursor = readingEnrollmentCursor{Epoch: *p.AutomaticEligibleAfter}
+			// The legacy epoch is only a cursor reset hint, never eligibility.
+			var epoch time.Time
+			if p.AutomaticEligibleAfter != nil {
+				epoch = *p.AutomaticEligibleAfter
 			}
-			// Filter completed enrollment in SQL, not once per historical document.
-			enrolled := tx.Model(&orm.AsyncJob{}).Select("1").Where("job_type=? AND resource_type=? AND create_user_id=?", ReadingPreparationJob, "reading_automatic", stored.UserID).
-				Where("payload_json ->> 'dataset_id' = documents.dataset_id AND payload_json ->> 'document_id' = documents.id")
+			if !cursor.Epoch.Equal(epoch) {
+				cursor = readingEnrollmentCursor{Epoch: epoch}
+			}
 			query := tx.Table("documents").Select("documents.*").Joins("JOIN datasets ON datasets.id=documents.dataset_id").
-				Where("datasets.scene=? AND datasets.deleted_at IS NULL AND documents.deleted_at IS NULL AND documents.create_user_id=? AND documents.created_at>?", "academic_papers", stored.UserID, *p.AutomaticEligibleAfter).
-				Where("(LOWER(documents.document_type) = 'pdf' OR LOWER(documents.display_name) LIKE '%.pdf')").Where("NOT EXISTS (?)", enrolled)
+				Where("datasets.scene=? AND datasets.deleted_at IS NULL AND documents.deleted_at IS NULL AND documents.create_user_id=?", "academic_papers", stored.UserID).
+				Where("(LOWER(documents.document_type) = 'pdf' OR LOWER(documents.display_name) LIKE '%.pdf')")
 			if cursor.ID != "" {
 				query = query.Where("(documents.created_at > ? OR (documents.created_at = ? AND documents.id > ?))", cursor.CreatedAt, cursor.CreatedAt, cursor.ID)
 			}
@@ -227,10 +229,68 @@ func enrollReadingPreparation(ctx context.Context, db *gorm.DB, cursors map[stri
 			if err := query.Order("documents.created_at ASC, documents.id ASC").Limit(readingEnrollmentBatch).Find(&rows).Error; err != nil {
 				return err
 			}
+			// One history query per batch avoids per-document queries and hashing
+			// sources whose enabled categories are already durably enrolled.
+			documentIDs := make([]string, 0, len(rows))
+			for _, row := range rows {
+				documentIDs = append(documentIDs, row.ID)
+			}
+			var history []orm.AsyncJob
+			if len(documentIDs) > 0 {
+				if err := tx.Select("status", "payload_json").Where("job_type=? AND resource_type=? AND create_user_id=?", ReadingPreparationJob, "reading_automatic", stored.UserID).
+					Where("payload_json ->> 'document_id' IN ?", documentIDs).Find(&history).Error; err != nil {
+					return err
+				}
+			}
+			type documentKey struct{ dataset, document string }
+			covered := map[documentKey]map[string]bool{}
+			blocked := map[documentKey]bool{}
+			for _, job := range history {
+				var payload readingPreparationPayload
+				if err := json.Unmarshal(job.PayloadJSON, &payload); err != nil {
+					return err
+				}
+				key := documentKey{payload.DatasetID, payload.DocumentID}
+				if job.Status == "failed" || job.Status == "canceled" {
+					// A legacy combined job may have failed midway through a category.
+					// Only an explicit user retry may continue this document.
+					blocked[key] = true
+				}
+				if job.Status != "pending" && job.Status != "running" && job.Status != "succeeded" {
+					continue
+				}
+				if covered[key] == nil {
+					covered[key] = map[string]bool{}
+				}
+				for _, scope := range payload.Scopes {
+					covered[key][scope] = true
+				}
+			}
+			// Legacy custom policies could prepare only some study scopes. Merge
+			// their coverage across jobs, but require all three before skipping
+			// the complete study job (which reuses any existing cached outputs).
+			for _, scopes := range covered {
+				if scopes[readingpolicy.Formula] && scopes[readingpolicy.Figure] && scopes[readingpolicy.Table] {
+					scopes[readingpolicy.AIStudy] = true
+				}
+			}
 			processed := 0
 			for _, row := range rows {
 				cursor.CreatedAt, cursor.ID = row.CreatedAt, row.ID
 				processed++
+				key := documentKey{row.DatasetID, row.ID}
+				if blocked[key] {
+					continue
+				}
+				missing := []string{}
+				for _, category := range readingpolicy.Keys {
+					if readingpolicy.Mode(p, category) == readingpolicy.Automatic && !covered[key][category] {
+						missing = append(missing, category)
+					}
+				}
+				if len(missing) == 0 {
+					continue
+				}
 
 				var ext documentExt
 				_ = json.Unmarshal(row.Ext, &ext)
@@ -239,10 +299,7 @@ func enrollReadingPreparation(ctx context.Context, db *gorm.DB, cursors map[stri
 					continue
 				}
 				// Separate jobs allow exhausted study credit to yield to parsing.
-				for _, category := range readingpolicy.Keys {
-					if readingpolicy.Mode(p, category) != readingpolicy.Automatic {
-						continue
-					}
+				for _, category := range missing {
 					scopes := []string{readingpolicy.PDFParse}
 					if category == readingpolicy.AIStudy {
 						scopes = []string{readingpolicy.Formula, readingpolicy.Figure, readingpolicy.Table}
@@ -356,9 +413,8 @@ func runReadingPreparation(ctx context.Context, job asyncjob.Job, reporter async
 	if err != nil {
 		return result, err
 	}
-	// Enrollment already checked the policy epoch. A later mode change must
-	// not retroactively discard waiting work; per-call checks enforce the
-	// current modes, while the new epoch only filters future enrollment.
+	// Mode changes do not discard waiting work based on document age. Each
+	// paid operation checks its current category mode before doing new work.
 	if p.Automatic && !readingpolicy.HasAutomatic(policy) {
 		return result, errors.New("自动准备策略已停止")
 	}

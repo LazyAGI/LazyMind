@@ -15,7 +15,7 @@ import (
 	"time"
 )
 
-func TestAutomaticReadingEnrollmentFutureOnlyDurableAndBounded(t *testing.T) {
+func TestAutomaticReadingEnrollmentAllPDFsDurableAndBounded(t *testing.T) {
 	db := newDocumentTestDB(t)
 	if err := db.AutoMigrate(&orm.AsyncJob{}); err != nil {
 		t.Fatal(err)
@@ -48,13 +48,13 @@ func TestAutomaticReadingEnrollmentFutureOnlyDurableAndBounded(t *testing.T) {
 	}
 	var jobs []orm.AsyncJob
 	db.Where("job_type=?", ReadingPreparationJob).Find(&jobs)
-	if len(jobs) != 6 {
+	if len(jobs) != 8 {
 		t.Fatalf("quota/dedupe: %d", len(jobs))
 	}
 	for _, j := range jobs {
 		var payload readingPreparationPayload
 		json.Unmarshal(j.PayloadJSON, &payload)
-		if payload.DocumentID == "old" || payload.ItemLimit != 0 || !payload.Automatic || (len(payload.Scopes) != 1 && len(payload.Scopes) != 3) || j.MaxAttempts != 1 {
+		if payload.ItemLimit != 0 || !payload.Automatic || (len(payload.Scopes) != 1 && len(payload.Scopes) != 3) || j.MaxAttempts != 1 {
 			t.Fatalf("bad enrollment: %+v %+v", j, payload)
 		}
 	}
@@ -65,7 +65,7 @@ func TestAutomaticReadingEnrollmentFutureOnlyDurableAndBounded(t *testing.T) {
 	}
 	var count int64
 	db.Model(&orm.AsyncJob{}).Count(&count)
-	if count != 6 {
+	if count != 8 {
 		t.Fatal("failed job retried automatically")
 	}
 	p.Preset = "demand"
@@ -272,5 +272,179 @@ func TestAutomaticEnrollmentSkipsHistoryAndAdvancesPastUnavailableBatch(t *testi
 	json.Unmarshal(job.PayloadJSON, &payload)
 	if payload.DocumentID != "valid" {
 		t.Fatalf("wrong candidate: %+v", payload)
+	}
+}
+
+func TestAutomaticEnrollmentWithoutEpochRepairsMissingPDF(t *testing.T) {
+	db := newDocumentTestDB(t)
+	if err := db.AutoMigrate(&orm.AsyncJob{}); err != nil {
+		t.Fatal(err)
+	}
+	seedDocumentListDataset(t, db, "ds", "owner")
+	db.Model(&orm.Dataset{}).Where("id=?", "ds").Update("scene", "academic_papers")
+	p := readingpolicy.Defaults()
+	p.Modes[readingpolicy.PDFParse] = readingpolicy.Automatic
+	if err := db.Create(&orm.UserReadingPolicy{UserID: "owner", PolicyJSON: string(mustJSON(p))}).Error; err != nil {
+		t.Fatal(err)
+	}
+	seedDocumentListDoc(t, db, "ds", "old", "old.pdf", time.Now().Add(-24*time.Hour), "owner", nil)
+	cursors := map[string]readingEnrollmentCursor{}
+	if err := enrollReadingPreparation(t.Context(), db.DB, cursors); err != nil {
+		t.Fatal(err)
+	}
+	var count int64
+	db.Model(&orm.AsyncJob{}).Count(&count)
+	if count != 0 {
+		t.Fatal("missing PDF enrolled")
+	}
+	source := filepath.Join(t.TempDir(), "paper.pdf")
+	if err := os.WriteFile(source, []byte("%PDF-original"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	db.Model(&orm.Document{}).Where("id=?", "old").Update("ext", mustJSON(documentExt{StoredPath: source}))
+	for i := 0; i < 3; i++ {
+		if err := enrollReadingPreparation(t.Context(), db.DB, cursors); err != nil {
+			t.Fatal(err)
+		}
+	}
+	db.Model(&orm.AsyncJob{}).Count(&count)
+	if count != 1 {
+		t.Fatalf("repaired PDF jobs=%d want=1", count)
+	}
+}
+
+func TestAutomaticEnrollmentAddsOnlyMissingCategoryAndPreservesHistory(t *testing.T) {
+	for _, status := range []string{"pending", "running", "succeeded", "failed", "canceled"} {
+		for _, combined := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/combined=%t", status, combined), func(t *testing.T) {
+				db := newDocumentTestDB(t)
+				if err := db.AutoMigrate(&orm.AsyncJob{}); err != nil {
+					t.Fatal(err)
+				}
+				seedDocumentListDataset(t, db, "ds", "owner")
+				db.Model(&orm.Dataset{}).Where("id=?", "ds").Update("scene", "academic_papers")
+				p := readingpolicy.Defaults()
+				p.Preset = "advance"
+				if _, err := readingpolicy.Save(t.Context(), db.DB, "owner", p); err != nil {
+					t.Fatal(err)
+				}
+				source := filepath.Join(t.TempDir(), "paper.pdf")
+				if err := os.WriteFile(source, []byte("%PDF-original"), 0600); err != nil {
+					t.Fatal(err)
+				}
+				seedDocumentListDoc(t, db, "ds", "doc", "paper.pdf", time.Now().Add(time.Hour), "owner", mustJSON(documentExt{StoredPath: source}))
+				scopes := []string{readingpolicy.PDFParse}
+				if combined {
+					scopes = append(scopes, readingpolicy.Formula, readingpolicy.Figure, readingpolicy.Table)
+				}
+				history := orm.AsyncJob{ID: "history", JobType: ReadingPreparationJob, ResourceType: "reading_automatic", CreateUserID: "owner", Status: status, AttemptCount: 1, PayloadJSON: mustJSON(readingPreparationPayload{DatasetID: "ds", DocumentID: "doc", Scopes: scopes, Automatic: true})}
+				if err := db.Create(&history).Error; err != nil {
+					t.Fatal(err)
+				}
+				p.Preset = "full"
+				if _, err := readingpolicy.Save(t.Context(), db.DB, "owner", p); err != nil {
+					t.Fatal(err)
+				}
+				for i := 0; i < 3; i++ {
+					if err := enrollReadingPreparation(t.Context(), db.DB, nil); err != nil {
+						t.Fatal(err)
+					}
+				}
+				var jobs []orm.AsyncJob
+				db.Find(&jobs)
+				want := 1
+				if !combined && status != "failed" && status != "canceled" {
+					want = 2
+				}
+				if len(jobs) != want {
+					t.Fatalf("jobs=%d want=%d", len(jobs), want)
+				}
+				for _, job := range jobs {
+					if job.ID == "history" {
+						if job.Status != status || job.AttemptCount != 1 {
+							t.Fatalf("history changed: %+v", job)
+						}
+					} else {
+						var payload readingPreparationPayload
+						if err := json.Unmarshal(job.PayloadJSON, &payload); err != nil {
+							t.Fatal(err)
+						}
+						if len(payload.Scopes) != 3 {
+							t.Fatalf("wrong added category: %+v", payload)
+						}
+					}
+				}
+			})
+		}
+	}
+}
+
+func TestAutomaticEnrollmentCompletesLegacyPartialStudyScopes(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		scopes    [][]string
+		wantAdded int
+	}{
+		{"formula_only", [][]string{{"pdf_parse", "formula"}}, 1},
+		{"figure_only", [][]string{{"pdf_parse", "figure"}}, 1},
+		{"table_only", [][]string{{"pdf_parse", "table"}}, 1},
+		{"two_parts", [][]string{{"pdf_parse", "formula", "figure"}}, 1},
+		{"all_parts_across_jobs", [][]string{{"pdf_parse", "formula"}, {"figure"}, {"table"}}, 0},
+		{"explicit_study", [][]string{{"pdf_parse", "ai_study"}}, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			db := newDocumentTestDB(t)
+			if err := db.AutoMigrate(&orm.AsyncJob{}); err != nil {
+				t.Fatal(err)
+			}
+			seedDocumentListDataset(t, db, "ds", "owner")
+			if err := db.Model(&orm.Dataset{}).Where("id=?", "ds").Update("scene", "academic_papers").Error; err != nil {
+				t.Fatal(err)
+			}
+			source := filepath.Join(t.TempDir(), "paper.pdf")
+			if err := os.WriteFile(source, []byte("%PDF-original"), 0600); err != nil {
+				t.Fatal(err)
+			}
+			seedDocumentListDoc(t, db, "ds", "doc", "paper.pdf", time.Now().Add(-24*time.Hour), "owner", mustJSON(documentExt{StoredPath: source}))
+			for i, scopes := range tc.scopes {
+				history := orm.AsyncJob{ID: fmt.Sprintf("history-%d", i), JobType: ReadingPreparationJob, ResourceType: "reading_automatic", CreateUserID: "owner", Status: "succeeded", AttemptCount: 1, PayloadJSON: mustJSON(readingPreparationPayload{DatasetID: "ds", DocumentID: "doc", Scopes: scopes, Automatic: true})}
+				if err := db.Create(&history).Error; err != nil {
+					t.Fatal(err)
+				}
+			}
+			p := readingpolicy.Defaults()
+			p.Preset = "full"
+			if _, err := readingpolicy.Save(t.Context(), db.DB, "owner", p); err != nil {
+				t.Fatal(err)
+			}
+			// Restarted scans must add one complete study job at most.
+			for i := 0; i < 3; i++ {
+				if err := enrollReadingPreparation(t.Context(), db.DB, nil); err != nil {
+					t.Fatal(err)
+				}
+			}
+			var jobs []orm.AsyncJob
+			if err := db.Find(&jobs).Error; err != nil {
+				t.Fatal(err)
+			}
+			if len(jobs) != len(tc.scopes)+tc.wantAdded {
+				t.Fatalf("jobs=%d want=%d", len(jobs), len(tc.scopes)+tc.wantAdded)
+			}
+			for _, job := range jobs {
+				if job.Status == "succeeded" {
+					if job.AttemptCount != 1 {
+						t.Fatal("historical job was restarted")
+					}
+					continue
+				}
+				var payload readingPreparationPayload
+				if err := json.Unmarshal(job.PayloadJSON, &payload); err != nil {
+					t.Fatal(err)
+				}
+				if len(payload.Scopes) != 3 || payload.Scopes[0] != "formula" || payload.Scopes[1] != "figure" || payload.Scopes[2] != "table" {
+					t.Fatalf("incomplete added study: %+v", payload)
+				}
+			}
+		})
 	}
 }

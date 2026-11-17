@@ -274,13 +274,13 @@ func CreatePDFIR(w http.ResponseWriter, r *http.Request) {
 }
 func RegisterPDFIRJobs() { asyncjob.Register(pdfIRJobType, handlePDFIRJob) }
 func handlePDFIRJob(ctx context.Context, job asyncjob.Job, reporter asyncjob.Reporter) (asyncjob.Result, error) {
+	var p pdfIRPayload
 	fail := func(e error) (asyncjob.Result, error) {
 		if errors.Is(e, context.Canceled) {
 			return asyncjob.Result{Permanent: true, ErrorCode: asyncjob.ErrorCodeCanceled}, e
 		}
-		return asyncjob.Result{ErrorCode: "pdf_ir_failed"}, e
+		return asyncjob.Result{Permanent: p.Automatic, ErrorCode: "pdf_ir_failed"}, e
 	}
-	var p pdfIRPayload
 	if json.Unmarshal(job.PayloadJSON, &p) != nil || p.DocumentID == "" || p.DatasetID == "" {
 		return asyncjob.Result{Permanent: true}, errors.New("invalid PDF IR job")
 	}
