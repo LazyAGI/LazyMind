@@ -5,6 +5,7 @@ from lazymind.chat.workflow.external_ppt_tools import ExternalToolError
 
 PAPER_BINDING = '''"""Audited paper primitives; the executing Agent owns all generation and judgment."""
 from lazymind.document_tools.paper.agent_tools import (
+    paper_import_sources,
     paper_analyze, paper_plot, paper_prepare_candidate, paper_prepare_inputs,
     paper_execution_status, paper_cancel_execution, paper_preview_revision,
     paper_knowledge_documents, paper_knowledge_read,
@@ -13,7 +14,11 @@ from lazymind.document_tools.paper.agent_tools import (
 )
 '''
 
+# Existing immutable revisions keep their original audited import binding.
+LEGACY_PAPER_BINDING = PAPER_BINDING.replace('    paper_import_sources,\n', '')
+
 TOOL_NAMES = frozenset((
+    'paper_import_sources',
     'paper_prepare_inputs',
     'paper_read_material',
     'paper_search',

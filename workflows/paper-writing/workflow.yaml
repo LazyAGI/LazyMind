@@ -75,6 +75,7 @@ runtime:
       never ask for model responses.
     - Read the full pinned contract, actual input versions and both launch/current requests; preserve user scope and
       approval checkpoints.
+    - Register actual host-retrieved sources with paper_import_sources; use paper_search as fallback, never merely for receipts.
     - Use audited paper tools for sources and actual computations; publish the exact validated artifact bundle. Program
       checks are not scientific/visual checks.
     steps:
@@ -92,6 +93,8 @@ runtime:
         - name: paper_knowledge_read
           source: package
         - name: paper_prepare_candidate
+          source: package
+        - name: paper_import_sources
           source: package
         - name: paper_search
           source: package
@@ -112,6 +115,8 @@ runtime:
           source: package
         - name: paper_prepare_candidate
           source: package
+        - name: paper_import_sources
+          source: package
         - name: paper_search
           source: package
         - name: paper_read_paper
@@ -130,6 +135,8 @@ runtime:
         - name: paper_knowledge_read
           source: package
         - name: paper_prepare_candidate
+          source: package
+        - name: paper_import_sources
           source: package
         - name: paper_search
           source: package
@@ -255,6 +262,8 @@ runtime:
         - name: paper_knowledge_read
           source: package
         - name: paper_prepare_candidate
+          source: package
+        - name: paper_import_sources
           source: package
         - name: paper_search
           source: package
@@ -440,6 +449,7 @@ runtime:
         paper_prepare_candidate: 3
         paper_submit_candidate: 3
         paper_read_material: 80
+        paper_import_sources: 4
         paper_search: 6
         paper_read_paper: 32
     literature_review:
@@ -449,6 +459,7 @@ runtime:
         paper_prepare_candidate: 3
         paper_submit_candidate: 3
         paper_read_material: 80
+        paper_import_sources: 4
         paper_search: 12
         paper_read_paper: 32
     refine_topic:
@@ -458,6 +469,7 @@ runtime:
         paper_prepare_candidate: 3
         paper_submit_candidate: 3
         paper_read_material: 80
+        paper_import_sources: 4
         paper_search: 6
         paper_read_paper: 32
     experiment:
@@ -514,6 +526,7 @@ runtime:
         paper_prepare_candidate: 3
         paper_submit_candidate: 3
         paper_read_material: 80
+        paper_import_sources: 4
         paper_search: 6
         paper_read_paper: 32
     finish:
@@ -558,6 +571,7 @@ tool_scripts:
   - paper_prepare_inputs
   - paper_read_material
   - paper_prepare_candidate
+  - paper_import_sources
   - paper_search
   - paper_read_paper
   - paper_run_experiment

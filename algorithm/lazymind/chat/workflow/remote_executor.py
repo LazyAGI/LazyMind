@@ -214,6 +214,8 @@ class RemoteWorkflowExecutor:
                         'launch_request': context.get('launch_request') or '',
                         'lease_hash': hashlib.sha256(lease.encode()).hexdigest(), 'check_liveness': True,
                         'knowledge_scope': context.get('knowledge_scope'),
+                        'available_tools': [tool['name'] for tool in execution.get('tools', [])
+                                            if tool.get('source') == 'package'],
                     }
 
                 shared_instructions = [str(value) for value in execution.get('constraints', [])]

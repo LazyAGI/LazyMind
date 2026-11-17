@@ -15,6 +15,8 @@ import (
 	"lazymind/core/workflowtool"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -285,5 +287,68 @@ func TestTrustedContextDoesNotEnterBusinessArgumentsOrReplayHash(t *testing.T) {
 	}
 	if executed != 1 {
 		t.Fatal("context-only change re-executed the business operation")
+	}
+}
+
+func TestPaperHostSourceRegistrationKeepsPinnedBindingCompatibility(t *testing.T) {
+	builtin, err := os.ReadFile(filepath.Join("..", "..", "..", "..", "workflows", "paper-writing", "scripts", "agent_tools.py"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name, binding, tool string
+		allowed             bool
+	}{
+		{"current registration", string(builtin), "paper_import_sources", true},
+		{"legacy preparation", legacyBinding, "paper_prepare_inputs", true},
+		{"legacy cannot add registration", legacyBinding, "paper_import_sources", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			service, input := workflowToolFixture(t, func(*http.Request) (*http.Response, error) {
+				t.Fatal("binding validation unexpectedly executed a provider")
+				return nil, nil
+			})
+			var revision orm.WorkflowRevision
+			if err := service.DB.First(&revision, "id = ?", "pinned-revision").Error; err != nil {
+				t.Fatal(err)
+			}
+			var graph graphengine.CompiledStateGraph
+			if err := json.Unmarshal(revision.CompiledGraph, &graph); err != nil {
+				t.Fatal(err)
+			}
+			node := graph.Nodes["write_outline"]
+			node.Execution.OutputValidator = graphengine.PaperAgentOutputValidator
+			node.Execution.Tools = []graphengine.ExecutionTool{{Name: tc.tool, Source: "package"}}
+			graph.Nodes["write_outline"] = node
+			if err := service.DB.Model(&revision).Update("compiled_graph", graph.JSON()).Error; err != nil {
+				t.Fatal(err)
+			}
+			hash := fmt.Sprintf("%x", sha256.Sum256([]byte(tc.binding)))
+			if err := service.DB.Where("hash = ?", hash).FirstOrCreate(&orm.WorkflowBlob{
+				Hash: hash, Content: []byte(tc.binding), Size: int64(len(tc.binding))}).Error; err != nil {
+				t.Fatal(err)
+			}
+			if err := service.DB.Model(&orm.WorkflowRevisionEntry{}).Where("revision_id = ? AND path = ?",
+				"pinned-revision", "scripts/agent_tools.py").Update("blob_hash", hash).Error; err != nil {
+				t.Fatal(err)
+			}
+			contract, err := executor.AuthorizeExternalExecution(t.Context(), service.DB, "owner", "run", "attempt", "lease")
+			if err != nil {
+				t.Fatal(err)
+			}
+			input.ToolName = tc.tool
+			actual, err := (&Adapter{DB: service.DB}).Prepare(t.Context(), contract, input)
+			if tc.allowed {
+				if err != nil {
+					t.Fatal(err)
+				}
+				names, ok := actual["available_tools"].([]string)
+				if !ok || len(names) != 1 || names[0] != tc.tool {
+					t.Fatalf("wrong pinned tools: %#v", actual["available_tools"])
+				}
+			} else if err == nil {
+				t.Fatal("legacy binding gained an undeclared import")
+			}
+		})
 	}
 }

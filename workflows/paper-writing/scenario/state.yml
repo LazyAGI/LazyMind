@@ -66,7 +66,7 @@ steps:
       publication and completion. Never substitute a source filename or a summary for its content. Program
       validation does not establish scientific correctness. Stop at the current user-review boundary and do not
       claim approval.
-    tools: [paper_prepare_inputs, paper_read_material, paper_knowledge_documents, paper_knowledge_read, paper_search, paper_read_paper, paper_submit_candidate, paper_read_result]
+    tools: [paper_prepare_inputs, paper_read_material, paper_knowledge_documents, paper_knowledge_read, paper_import_sources, paper_search, paper_read_paper, paper_submit_candidate, paper_read_result]
     terminal_tools: [paper_submit_candidate]
     inputs:
       - {material: research_materials, required: false, transport: path}
@@ -107,7 +107,7 @@ steps:
       exact artifact bundle to the controller for publication and completion. Never substitute a source filename
       or a summary for its content. Program validation does not establish scientific correctness. Stop at the
       current user-review boundary and do not claim approval.
-    tools: [paper_prepare_inputs, paper_read_material, paper_knowledge_documents, paper_knowledge_read, paper_search, paper_read_paper, paper_submit_candidate, paper_read_result]
+    tools: [paper_prepare_inputs, paper_read_material, paper_knowledge_documents, paper_knowledge_read, paper_import_sources, paper_search, paper_read_paper, paper_submit_candidate, paper_read_result]
     terminal_tools: [paper_submit_candidate]
     inputs:
       - {material: research_materials, required: false, transport: path}
@@ -149,7 +149,7 @@ steps:
       paper_prepare_candidate and returns its exact artifact bundle to the controller for publication and
       completion. Never substitute a source filename or a summary for its content. Program validation does not
       establish scientific correctness. Stop at the current user-review boundary and do not claim approval.
-    tools: [paper_prepare_inputs, paper_read_material, paper_knowledge_documents, paper_knowledge_read, paper_search, paper_read_paper, paper_submit_candidate, paper_read_result]
+    tools: [paper_prepare_inputs, paper_read_material, paper_knowledge_documents, paper_knowledge_read, paper_import_sources, paper_search, paper_read_paper, paper_submit_candidate, paper_read_result]
     terminal_tools: [paper_submit_candidate]
     inputs:
       - {material: research_materials, required: false, transport: path}
@@ -517,7 +517,7 @@ steps:
       paper_prepare_candidate and returns its exact artifact bundle to the controller for publication and
       completion. Never substitute a source filename or a summary for its content. Program validation does not
       establish scientific correctness. Stop at the current user-review boundary and do not claim approval.
-    tools: [paper_prepare_inputs, paper_read_material, paper_knowledge_documents, paper_knowledge_read, paper_search, paper_read_paper, paper_submit_candidate, paper_read_result]
+    tools: [paper_prepare_inputs, paper_read_material, paper_knowledge_documents, paper_knowledge_read, paper_import_sources, paper_search, paper_read_paper, paper_submit_candidate, paper_read_result]
     terminal_tools: [paper_submit_candidate]
     inputs:
       - {material: seed_pool, required: false, transport: path}

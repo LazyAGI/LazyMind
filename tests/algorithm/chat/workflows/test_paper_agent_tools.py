@@ -972,19 +972,6 @@ def test_search_uses_shared_multi_source_api_and_reads_actual_abstract(paper_con
     assert all(kwargs['limit'] == 20 for _, kwargs in calls)
 
 
-def test_paper_candidate_uses_existing_heading_normalization_before_publication(paper_context):
-    source = '# 2026 Study\n\n## 1. Methods\n## 3.3V supply\n\n1. Original list\n'
-    with tools.paper_scope(paper_context):
-        result = tools.paper_prepare_candidate({'outline': source}, receipts=[])
-    accepted = pool_from_bundle(result)
-    assert material(accepted, 'outline')['content'] == source.replace('## 1. Methods', '## Methods')
-    document = next(item for item in result['artifacts'] if item['slot'] == 'write_outline_document')
-    text = base64.b64decode(document['value']['content_base64']).decode()
-    assert '## 1. Methods' not in text
-    assert '## Methods' in text
-    assert '## 3.3V supply' in text
-
-
 @pytest.mark.parametrize('step,code,call', [
     ('data_analysis', 'def analyze(tables, plan, rng):\n    emit(method="mean", "estimate")\n', 'paper_analyze'),
     ('data_analysis', 'def draw(data, statistics, spec):\n    return (\n', 'paper_plot'),

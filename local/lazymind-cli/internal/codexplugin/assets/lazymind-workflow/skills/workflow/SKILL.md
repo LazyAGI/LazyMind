@@ -50,6 +50,15 @@ the current execution (at most two corrections). Do not mark a step failed for
 the first correctable input error; report persistent failures without retrying
 a terminal step or bypassing user review.
 
+For paper steps, read paper_prepare_inputs.submission_contract before acting.
+Register actual host-retrieved/read sources with the declared paper_import_sources;
+do not repeat LazyMind searches just to obtain a receipt. After preparation returns
+status=validated, stop candidate repair. Accepted quality_warnings do not require
+resubmission. With result_directory, use the returned publication_outputs objects
+unchanged as workflow.artifact.publish output; do not rebuild signed files or
+receipts. Publication failures require fixing transport only, not regenerating
+accepted content. Keep the total to at most two corrections of rejected inputs.
+
 Publish results, await acknowledgements, then complete the step. Read
 workflow.state on continuation or recovery. Ask returned input questions, wait
 for actual user answers, and leave review decisions to the user. Deliver saved

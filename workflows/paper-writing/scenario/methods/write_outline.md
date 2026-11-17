@@ -22,3 +22,6 @@ See [the comparison](#block-actual-chart-id).
 Replace actual-chart-id with the exact supplied ID, preserve the actual caption and place the figure near its associated evidence. Do not invent figure numbers or duplicate objects; the editor handles numbering and the tool resolves the immutable SVG. Existing object anchors, images and prose links must remain consistent.
 
 Return output.outline as one Markdown string, not a JSON-encoded string or artifact bundle. Check the full outline against the request and supplied evidence, then submit and stop for actual user confirmation. An answer to a question is not outline approval.
+
+
+Follow submission_contract: one evidence-based outline is the candidate, not a second research project. Reuse bound literature, analysis and figure IDs; do not search or recompute to fill the outline. Check hierarchy, requested sections and real references before the first submission. Fix only a reported blocking defect after rejection, at most twice; do not keep generating alternatives without user feedback. The whole-paper word budget is an allocation target, not the required length of the outline. A validated outline proceeds to user confirmation, never automatic manuscript drafting.

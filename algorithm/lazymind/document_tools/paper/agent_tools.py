@@ -20,6 +20,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from . import contracts
+from .host_sources import HostSource
 from .workflow import (STEP_NODE, add_material, business_input, material,
                        paper_source_ids, pool_from_business, pool_from_inputs,
                        render_material, validate_pool, with_source_notice)
@@ -67,6 +68,7 @@ class PaperContext:
     lease_hash: str = ''
     check_liveness: bool = False
     knowledge_scope: dict | None = None
+    available_tools: list[str] | None = None
 
     @property
     def scope(self):
@@ -366,8 +368,15 @@ def _prepared_inputs(ctx, pool=None, value=None) -> dict:
                                          or ctx.knowledge_scope.get('documents'))),
               'source_handoff': ('For retrieved papers, prefer selected_paper_ids to copying source facts; '
                                  'in literature_review omit papers to resolve selected IDs from their actual receipts. '
-                                 'Never change source facts.'),
+                                 'When declared, register host-read sources with paper_import_sources; '
+                                 'do not repeat a search '
+                                 'to obtain a receipt. Never change source facts.'),
               'inputs_digest': digest(ctx.scope), 'checks': 'Program checks do not establish scientific correctness.'}
+    from .submission import submission_contract
+    registration = 'paper_import_sources' in (ctx.available_tools or [])
+    result['submission_contract'] = submission_contract(ctx.step_id, registration)
+    if ctx.step_id in {'research_topic', 'refine_topic', 'literature_review', 'reading_reflection'}:
+        result['source_registration'] = {'tool': 'paper_import_sources', 'available': registration}
     if ctx.step_id == 'literature_review':
         from .review.materials import SearchPlan
         from .prompts.literature_review_prompt import MATERIAL_SELECTION_PROMPT
@@ -486,7 +495,8 @@ def _prepared_inputs(ctx, pool=None, value=None) -> dict:
                                            'Return unchanged manuscript if no valid optional edit is possible.')
 
     # Native spill previews must show exact-reference guidance before long requests and material bodies.
-    first = ('step', 'expected_output_fields', 'candidate_contract', 'experiment_shape', 'table_catalog',
+    first = ('step', 'expected_output_fields', 'candidate_contract', 'submission_contract',
+             'experiment_shape', 'table_catalog',
              'source_handoff', 'candidate_analysis_shape', 'candidate_chart_shape',
              'code_contract', 'plot_code_contract')
     result['input'] = result.pop('input')
@@ -512,6 +522,8 @@ def paper_prepare_inputs() -> dict:
         if key == 'input':
             compact[key] = {name: _input_reference('input:' + name, item)
                             if len(_material_text(item)) > 1000 else item for name, item in value.items()}
+        elif key == 'submission_contract':
+            compact[key] = value
         elif key.endswith('_schema') or key in {'code_contract', 'plot_code_contract'}:
             compact[key] = _input_reference('contract:' + key, value)
         elif len(_material_text(value)) > 1000:
@@ -655,6 +667,46 @@ def _search_snapshot_path(ctx, identity, receipt):
                                                         'receipt': receipt}) + '.json')
 
 
+def _source_expansion_policy(ctx):
+    policy = ctx.values.get('paper_source_policy') or {}
+    request = ctx.launch_request + '\n' + ctx.request
+    import re
+    if (policy.get('allow_academic_search') is False
+            or re.search(r'仅(?:使用|分析|综述|基于)?(?:上传|附件|这些|所选)|'
+                         r'只(?:使用|分析|基于)(?:上传|附件|这|所选)|'
+                         r'only (?:the )?(?:attachments|uploaded|selected|these papers|this knowledge)', request, re.I)):
+        raise ValueError('本次输入范围禁止扩展学术检索')
+    return policy
+
+
+@json_arguments
+def paper_import_sources(papers: list[HostSource]) -> dict:
+    """Register 1–32 sources actually read with host tools, without searching again.
+
+    Each item: title, HTTP(S) url, exact text, reading={content_type:
+    abstract/excerpt/full_text, location: page/section or Abstract, truncated: bool}.
+    Optional actual metadata: doi, authors (list), year, venue; omit unknown fields.
+    No caller IDs, permissions or provenance. Return server IDs and a papers receipt
+    for paper_prepare_candidate(selected_paper_ids, receipts). Use returned objects
+    unchanged; abstract-only readings remain abstract-only. The receipt binds the
+    host-reported snapshot, not independently verified source truth. A single batch
+    can register the whole bibliography. Never search again merely to obtain a receipt.
+    """
+    ctx = context()
+    if ctx.step_id not in {'research_topic', 'refine_topic', 'literature_review', 'reading_reflection'}:
+        raise ValueError('当前步骤不允许登记新的文献来源')
+    if ctx.available_tools is not None and 'paper_import_sources' not in ctx.available_tools:
+        raise ValueError('当前固定版本步骤未声明 paper_import_sources，请使用本步骤已声明的工具')
+    policy = _source_expansion_policy(ctx)
+    from .host_sources import normalize_sources
+    existing = (material(base_pool(ctx), 'papers') or {}).get('content', [])
+    sources = normalize_sources(papers, existing, policy)
+    return {'papers': sources, 'selected_paper_ids': [paper['id'] for paper in sources],
+            'receipt': receipt_reference(ctx, 'papers', sources),
+            'verification': 'host_reported',
+            'notice': '已保存宿主提供的阅读快照；不表示 LazyMind 独立核实了来源或科学结论。'}
+
+
 @json_arguments
 def paper_search(query: str | list[str], count: int = 20, page: int = 1,
                  year_from: int | None = None, year_to: int | None = None,
@@ -673,14 +725,7 @@ def paper_search(query: str | list[str], count: int = 20, page: int = 1,
         raise ValueError('检索 query/count/page 超出范围')
     if year_from is not None and year_to is not None and year_from > year_to:
         raise ValueError('检索年份范围不合法')
-    policy = ctx.values.get('paper_source_policy') or {}
-    request = ctx.launch_request + '\n' + ctx.request
-    import re
-    if (policy.get('allow_academic_search') is False
-            or re.search(r'仅(?:使用|分析|综述|基于)?(?:上传|附件|这些|所选)|'
-                         r'只(?:使用|分析|基于)(?:上传|附件|这|所选)|'
-                         r'only (?:the )?(?:attachments|uploaded|selected|these papers|this knowledge)', request, re.I)):
-        raise ValueError('本次输入范围禁止扩展学术检索')
+    policy = _source_expansion_policy(ctx)
     if policy.get('year_from') is not None:
         year_from = max(year_from or policy['year_from'], policy['year_from'])
     if policy.get('year_to') is not None:
@@ -996,7 +1041,8 @@ def paper_analyze(code: str, plan: dict) -> dict:
                                  provenance['content'])['analysis']
     record = {'analysis': analysis, 'code': code, 'plan': plan, 'code_sha256': hashlib.sha256(code.encode()).hexdigest(),
               'versions': raw['versions'], 'seed': raw['seed']}
-    return {'receipt': receipt_reference(ctx, 'analysis', record), **record}
+    receipt = receipt_reference(ctx, 'analysis', record)
+    return {'receipt': receipt, 'candidate_analysis': {'receipt': receipt}, **record}
 
 
 @json_arguments
@@ -1135,6 +1181,11 @@ def _accepted_papers(pool, receipts):
     for receipt in receipts:
         if receipt.get('payload', {}).get('kind') in {'papers', 'search'}:
             for paper in _source_papers(context(), receipt):
+                from .host_sources import reading_quality
+                previous = known.get(paper['id'])
+                if (previous and paper.get('source') == 'host' and previous.get('source') == 'host'
+                        and reading_quality(previous) > reading_quality(paper)):
+                    continue
                 known[paper['id']] = paper
     return known
 
@@ -1336,7 +1387,7 @@ def paper_prepare_candidate(output: dict, receipts: list[dict]) -> dict:
                 if original is None:
                     raise ValueError('引用论文必须来自绑定材料或真实检索回执')
                 for key in ('title', 'text', 'abstract', 'doi', 'url', 'authors', 'year', 'venue',
-                            'source', 'source_version', 'reading'):
+                            'source', 'source_version', 'reading', 'provenance'):
                     if paper.get(key) != original.get(key):
                         raise ValueError(f'不能修改来源事实 paper.{key}')
                 if original.get('review_role') == 'background' and paper.get('review_role') != 'background':
@@ -1576,7 +1627,7 @@ def paper_prepare_candidate(output: dict, receipts: list[dict]) -> dict:
     manifest = _manifest(artifacts)
     artifacts.append({'slot': ctx.step_id + '_receipt', 'seq': 1, 'content_type': 'json',
                       'value': seal(ctx, 'publication', manifest)})
-    return {'status': 'validated', 'artifacts': artifacts,
+    return {'status': 'validated', 'publication_contract': VALIDATOR, 'artifacts': artifacts,
             'quality_warnings': quality_warnings,
             'quality_owner': 'executing_agent', 'notice': '程序校验不代表科学或视觉检查通过。'}
 

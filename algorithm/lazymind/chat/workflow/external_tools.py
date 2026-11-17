@@ -158,7 +158,10 @@ def _selected(request: ExternalToolRequest, *, listing: bool = False, files=None
             raise ExternalToolError('TOOL_ADAPTER_UNAVAILABLE',
                                     f'Package tool {name!r} needs an explicit LazyMind service adapter.')
         path, binding, function = entry
-        if owners.get(name) != path or files.get(path) != binding.encode():
+        valid_binding = files.get(path) == binding.encode()
+        if is_paper and name != 'paper_import_sources':
+            valid_binding = valid_binding or files.get(path) == paper_adapter.LEGACY_PAPER_BINDING.encode()
+        if owners.get(name) != path or not valid_binding:
             raise ExternalToolError('TOOL_NOT_ALLOWED', 'The package tool binding is not an audited service adapter.')
         if is_paper and not listing and name != getattr(request, 'tool_name', None):
             continue
@@ -192,7 +195,12 @@ def call_external_tool(request: ExternalToolCallRequest) -> dict[str, Any]:
     try:
         arguments = _arguments_model(function).model_validate(raw_arguments).model_dump()
     except ValidationError as exc:
-        raise ExternalToolError('INVALID_ARGUMENT', 'Arguments do not match the declared tool schema.') from exc
+        # Report field locations without echoing source text, credentials or the input object.
+        issues = exc.errors(include_url=False, include_context=False, include_input=False)[:5]
+        detail = '; '.join('.'.join(str(part) for part in item['loc']) + ': ' + item['msg'][:160]
+                           for item in issues)
+        raise ExternalToolError('INVALID_ARGUMENT', 'Arguments do not match the declared tool schema: '
+                                + detail + '. Correct these fields and call again.', public=True) from exc
     if request.tool_name in paper_adapter.TOOL_NAMES:
         return paper_adapter.call(request, function, arguments)
     with external_package_scope(files):

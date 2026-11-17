@@ -117,10 +117,16 @@ func PaperToolContext(ctx context.Context, db *gorm.DB, attempt AttemptContext) 
 	if err := db.WithContext(ctx).Where("id = ?", attempt.AttemptID).First(&row).Error; err != nil {
 		return nil, err
 	}
+	availableTools := []string{}
+	for _, tool := range attempt.Execution.Tools {
+		if tool.Source == "package" {
+			availableTools = append(availableTools, tool.Name)
+		}
+	}
 	leaseHash := fmt.Sprintf("%x", sha256.Sum256([]byte(row.LeaseToken)))
 	return map[string]any{"session_id": attempt.SessionID, "attempt_id": attempt.AttemptID,
 		"revision": attempt.WorkflowRevision, "step_id": attempt.StepID, "bindings": attempt.Inputs,
-		"request": attempt.UserRequest, "launch_request": attempt.LaunchRequest, "values": values, "lease_hash": leaseHash, "check_liveness": true, "knowledge_scope": attempt.KnowledgeScope}, nil
+		"request": attempt.UserRequest, "launch_request": attempt.LaunchRequest, "values": values, "lease_hash": leaseHash, "check_liveness": true, "available_tools": availableTools, "knowledge_scope": attempt.KnowledgeScope}, nil
 }
 
 func validatePaperCompletion(ctx context.Context, db *gorm.DB, attempt AttemptContext, rows []orm.WorkflowSlotRevision) error {

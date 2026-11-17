@@ -13,10 +13,12 @@ import (
 	"lazymind/core/workflow/executor"
 	"lazymind/core/workflowtool"
 	"net/http"
+	"strings"
 )
 
 const Binding = `"""Audited paper primitives; the executing Agent owns all generation and judgment."""
 from lazymind.document_tools.paper.agent_tools import (
+    paper_import_sources,
     paper_analyze, paper_plot, paper_prepare_candidate, paper_prepare_inputs,
     paper_execution_status, paper_cancel_execution, paper_preview_revision,
     paper_knowledge_documents, paper_knowledge_read,
@@ -25,7 +27,10 @@ from lazymind.document_tools.paper.agent_tools import (
 )
 `
 
+var legacyBinding = strings.Replace(Binding, "    paper_import_sources,\n", "", 1)
+
 var toolNames = map[string]bool{
+	"paper_import_sources": true,
 	"paper_prepare_inputs": true, "paper_read_material": true, "paper_search": true, "paper_read_paper": true,
 	"paper_knowledge_documents": true, "paper_knowledge_read": true, "paper_analyze": true, "paper_plot": true,
 	"paper_run_experiment": true, "paper_prepare_candidate": true, "paper_execution_status": true,
@@ -65,7 +70,7 @@ func (a *Adapter) Prepare(ctx context.Context, contract executor.AttemptContext,
 		return nil, controlstore.Reject("TOOL_NOT_ALLOWED", "Pinned paper binding is unavailable")
 	}
 	if err := a.DB.WithContext(ctx).Where("hash = ?", *entry.BlobHash).Take(&blob).Error; err != nil || blob.Binary ||
-		string(blob.Content) != Binding || fmt.Sprintf("%x", sha256.Sum256(blob.Content)) != *entry.BlobHash {
+		(string(blob.Content) != Binding && (input.ToolName == "paper_import_sources" || string(blob.Content) != legacyBinding)) || fmt.Sprintf("%x", sha256.Sum256(blob.Content)) != *entry.BlobHash {
 		return nil, controlstore.Reject("TOOL_NOT_ALLOWED", "Pinned paper binding is not an audited adapter")
 	}
 	return executor.PaperToolContext(ctx, a.DB, contract)
