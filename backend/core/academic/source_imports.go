@@ -32,6 +32,7 @@ type sourceImportPolicy struct {
 const sourceAlreadyPresent = "already_present"
 
 var errSourceAlreadyPresent = errors.New("所选论文已在此论文集，请更新选择")
+var errSourceTargetScene = errors.New("来源论文只能加入论文集，请选择论文集类型的资料库")
 
 const sourceTargetNotFoundCode = "TARGET_NOT_FOUND"
 const sourceTargetNotFoundMessage = "目标知识库不存在，请重新选择或新建知识库"
@@ -193,7 +194,7 @@ func enqueueSourceImport(ctx context.Context, c doc.DatasetCatalogCaller, batch 
 			return e
 		}
 		if scene, err := learning.NormalizeScene(dataset.Scene); err != nil || scene != "academic_papers" {
-			return errors.New("来源论文只能加入论文集")
+			return errSourceTargetScene
 		}
 		var replay orm.PaperImportBatch
 		if e := tx.Where("id = ?", batch.ID).Take(&replay).Error; e == nil {

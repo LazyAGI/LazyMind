@@ -1,3 +1,4 @@
+import ExternalLink from '@/components/ExternalLink';
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { CheckOutlined, ExportOutlined, InfoCircleOutlined, RightOutlined } from "@ant-design/icons";
 import { Button, Collapse, Drawer, Tooltip } from "antd";
@@ -121,20 +122,20 @@ export function ProviderInformationDrawer({ open, provider, providers, onClose, 
         <h3 id={`${sectionId}-sources`} className="provider-information-visually-hidden">{copy.sources}</h3>
         <ul>
           {guide.profile?.websiteUrl ? <li className="provider-information-website-item">
-            <a className="provider-information-website" href={guide.profile.websiteUrl}
+            <ExternalLink className="provider-information-website" href={guide.profile.websiteUrl}
               target="_blank" rel="noopener noreferrer" title={`${guide.profile.websiteUrl} · ${copy.newTab}`}
               aria-label={`${copy.website}: ${guide.profile.websiteUrl}`}>
               <span>{copy.website}</span>
               <span className="provider-information-website-host">{new URL(guide.profile.websiteUrl).hostname.replace(/^www\./, "")}</span>
               <ExportOutlined aria-hidden="true" />
-            </a>
+            </ExternalLink>
           </li> : null}
           {guide.links.map((link) => {
             const label = resourceCounts.get(link.kind) === 1 ? copy.resources[link.kind] : link.label;
             return <li key={link.url}>
-              <a href={link.url} target="_blank" rel="noopener noreferrer" title={`${link.label} · ${copy.newTab}`} aria-label={label === link.label ? link.label : `${label}: ${link.label}`}>
+              <ExternalLink href={link.url} target="_blank" rel="noopener noreferrer" title={`${link.label} · ${copy.newTab}`} aria-label={label === link.label ? link.label : `${label}: ${link.label}`}>
                 {label}<ExportOutlined aria-hidden="true" />
-              </a>
+              </ExternalLink>
             </li>;
           })}
         </ul>
@@ -145,7 +146,7 @@ export function ProviderInformationDrawer({ open, provider, providers, onClose, 
         <ul aria-label={copy.protocols}>{protocols.protocols.map(protocol => <li key={protocol.id}>{protocol.label}</li>)}</ul>
         <p className="provider-information-note">{copy.protocolScope}</p>
         <details><summary>{copy.sources}</summary><p>{protocols.note}</p>
-          {protocols.sources.map(source => <a key={source.url} href={source.url} target="_blank" rel="noopener noreferrer">{source.label}<ExportOutlined aria-hidden="true" /></a>)}
+          {protocols.sources.map(source => <ExternalLink key={source.url} href={source.url} target="_blank" rel="noopener noreferrer">{source.label}<ExportOutlined aria-hidden="true" /></ExternalLink>)}
         </details>
       </section> : null}
 

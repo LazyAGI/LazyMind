@@ -2116,6 +2116,7 @@
   "2005163": {"en-US": "There are no failed import items to retry", "zh-CN": "没有可重试的失败项"},
   "2005164": {"en-US": "This import is still being processed", "zh-CN": "本次导入正在处理中"},
   "2005165": {"en-US": "The report must preserve the research analysis and its actual research outcome", "zh-CN": "报告必须保留同一版本的研究分析及真实研究完成情况"},
+  "2005166": {"en-US": "Bibliographic lookup is temporarily unavailable; retry later", "zh-CN": "题录查询暂未完成，请稍后重试"},
   "2005300": {"en-US": "Invalid vocabulary sync configuration", "zh-CN": "生词同步配置无效"},
   "2005301": {"en-US": "Vocabulary service authorization failed; check the token", "zh-CN": "生词服务授权失败，请检查 Token"},
   "2005302": {"en-US": "Vocabulary credentials are unavailable on this device", "zh-CN": "当前设备无法读取生词服务凭据"},

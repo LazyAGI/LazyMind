@@ -1,3 +1,4 @@
+import ExternalLink from '@/components/ExternalLink';
 import { Alert, Form, Input, Modal } from "antd";
 import type { FormInstance } from "antd/es/form";
 import type { TFunction } from "i18next";
@@ -96,19 +97,19 @@ export default function CloudCredentialSetupModal({
         )}
         {isFeishu ? (
           <p style={{ marginTop: 12, marginBottom: 0 }}>
-            <a href={CLOUD_DOCUMENTS_FEISHU_SETUP_PATH} target="_blank" rel="noreferrer">
+            <ExternalLink href={CLOUD_DOCUMENTS_FEISHU_SETUP_PATH} target="_blank" rel="noreferrer">
               {t("admin.dataSourceFeishuSetupGuideAction")}
-            </a>
+            </ExternalLink>
           </p>
         ) : (
           <p style={{ marginTop: 12, marginBottom: 0 }}>
-            <a
+            <ExternalLink
               href={CLOUD_DOCUMENTS_NOTION_SETUP_PATH}
               target="_blank"
               rel="noreferrer"
             >
               {t("admin.dataSourceNotionSetupGuideAction")}
-            </a>
+            </ExternalLink>
             {t("admin.dataSourceNotionSetupGuideHint")}
           </p>
         )}

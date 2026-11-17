@@ -1,3 +1,4 @@
+import ExternalLink from '@/components/ExternalLink';
 import Markdown, { defaultUrlTransform } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
@@ -61,7 +62,7 @@ import HtmlBlock from "./HtmlBlock";
 import MermaidBlock from "./MermaidBlock";
 import EditableBlock from "./EditableBlock";
 import remarkLocalFiles, { localFilePath } from "./remarkLocalFiles";
-import { actOnLocalChatFile, openChatExternal } from "@/runtime/desktopBridge";
+import { actOnLocalChatFile, getExternalBrowserBridge, openChatExternal } from "@/runtime/desktopBridge";
 import remarkSourceCitations from "./remarkSourceCitations";
 import {
   getLanguageFromClassName,
@@ -199,14 +200,14 @@ function SourcePreview({ sources }: { sources: ChatSource[] }) {
           </span>
         )}
       </div>
-      {sourceHref ? <a
+      {sourceHref ? <ExternalLink
         className="md-source-preview-link"
         href={sourceHref}
         target="_blank"
         rel="noopener noreferrer"
       >
         {preview}
-      </a> : <div className="md-source-preview-link">{preview}</div>}
+      </ExternalLink> : <div className="md-source-preview-link">{preview}</div>}
       <SourceImportActions source={source} inline />
     </div>
   );
@@ -689,7 +690,7 @@ const LinkComponent = (props: any) => {
       </>
     );
     const chip = sourceHref ? (
-      <a
+      <ExternalLink
         className={classnames("md-source-chip", {
           "md-source-chip--pending": isStreaming,
           "md-source-chip--clickable": true,
@@ -701,7 +702,7 @@ const LinkComponent = (props: any) => {
         title={chipLabel}
       >
         {chipContent}
-      </a>
+      </ExternalLink>
     ) : (
       <span className={classnames("md-source-chip", { "md-source-chip--pending": !source || isStreaming })}
         tabIndex={source && !isStreaming ? 0 : undefined}>
@@ -759,9 +760,10 @@ const LinkComponent = (props: any) => {
   }
 
   return (
-    <a
+    <ExternalLink
       href={resolvedHref || undefined}
       onClick={event => {
+        if (/^https?:/i.test(resolvedHref) && getExternalBrowserBridge()) return;
         if (!/^(https?:|mailto:)/i.test(resolvedHref)) return;
         const opened = openChatExternal(resolvedHref);
         if (opened) {
@@ -773,7 +775,7 @@ const LinkComponent = (props: any) => {
       rel="noreferrer"
     >
       {props.children}
-    </a>
+    </ExternalLink>
   );
 };
 

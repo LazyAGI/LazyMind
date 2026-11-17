@@ -36,6 +36,7 @@ import type { ExternalExecutionProjection } from "@/modules/chat/utils/message";
 import { ChatServiceApi, decideToolLimit } from "@/modules/chat/utils/request";
 import { copyMessage } from "@/modules/chat/utils/copyMessage";
 import { useWorkflowStore } from "@/modules/chat/store/workflowPanel";
+import { askDraftStore } from "@/modules/chat/store/askAnswerDraft";
 import { WorkflowPanel } from "@/modules/chat/components/WorkflowPanel";
 import MultiAnswerDisplay, { type PreferenceType } from "../MultiAnswerDisplay";
 import FeedbackModal from "../FeedbackModal";
@@ -301,6 +302,12 @@ const AssistantMessage = (props: any) => {
   } = props;
   const currentItemRef = useRef(item);
   currentItemRef.current = item;
+  const askDraftKey = JSON.stringify([sessionId, item.history_id || item.id, item.ask_pending?.ask_id]);
+  const currentAskDraftKeyRef = useRef(askDraftKey);
+  currentAskDraftKeyRef.current = askDraftKey;
+  useEffect(() => {
+    if (item.ask_answered) askDraftStore.clearAnswers(askDraftKey);
+  }, [askDraftKey, item.ask_answered]);
   const selectionActionsRef = useRef<HTMLDivElement | null>(null);
   const citeSelectionTextRef = useRef("");
   const [translationSource, setTranslationSource] = useState("");
@@ -330,11 +337,17 @@ const AssistantMessage = (props: any) => {
         .catch(() => {});
     }, 600),
   );
-  useEffect(() => () => {
-    // Preserve the last edit when navigating away. The bound ask ID prevents
-    // this pending save from writing into a replacement card.
-    persistAskAnswersRef.current.flush();
-  }, [sessionId, item.history_id, item.ask_pending?.ask_id]);
+  useEffect(() => {
+    // A reload may restore an edit whose debounce never reached the server.
+    if (sessionId && item.history_id && item.ask_pending?.ask_id && !item.ask_answered) {
+      const draft = askDraftStore.getAnswers(askDraftKey);
+      if (draft) persistAskAnswersRef.current(sessionId, item.history_id, item.ask_pending.ask_id, draft);
+    }
+    return () => {
+      // The bound ask ID prevents this pending save from targeting a replacement card.
+      persistAskAnswersRef.current.flush();
+    };
+  }, [sessionId, item.history_id, item.ask_pending?.ask_id, askDraftKey]);
   const [feedbackState, dispatch] = useReducer(feedbackReducer, {
     showModal: false,
     isSubmitting: false,
@@ -1288,19 +1301,19 @@ const AssistantMessage = (props: any) => {
         <>
         {mailCards}
         <AskCard
-          key={askPending.ask_id}
+          key={askDraftKey}
+          navigationKey={askDraftKey}
           askPending={askPending}
           vlmReady={vlmReady}
           disabled={isReadOnly}
           answered={!!item.ask_answered}
-          savedAnswers={item.ask_saved_answers}
+          savedAnswers={(!item.ask_answered && askDraftStore.getAnswers(askDraftKey)) || item.ask_saved_answers}
           onAnswerChange={(idx, ans) => {
             const currentAnswers = {
-              ...(item.ask_saved_answers || {}),
+              ...(askDraftStore.getAnswers(askDraftKey) ?? item.ask_saved_answers),
               [idx]: ans,
             };
-            // Update in-memory message immediately so answers survive session switches.
-            updateMessage({ ...item, ask_saved_answers: currentAnswers });
+            askDraftStore.setAnswers(askDraftKey, currentAnswers);
             // Debounced write to backend so answers survive page reload.
             if (sessionId && item.history_id) {
               persistAskAnswersRef.current(
@@ -1312,7 +1325,6 @@ const AssistantMessage = (props: any) => {
             }
           }}
           onSubmit={async (payload) => {
-            persistAskAnswersRef.current.cancel();
             const started = await props.sendMessage?.(payload.text, undefined, {
               ask_answers_structured: payload.structured,
               ...(payload.files?.length ? { files: payload.files } : {}),
@@ -1320,7 +1332,9 @@ const AssistantMessage = (props: any) => {
             if (!started) return false;
             // Deletion confirmations are consumed by Core; history remains authoritative.
             if (askPending.user_env_delete) return true;
-            if (currentItemRef.current.ask_pending?.ask_id !== askPending.ask_id) return true;
+            askDraftStore.clearAnswers(askDraftKey);
+            if (currentAskDraftKeyRef.current !== askDraftKey) return true;
+            persistAskAnswersRef.current.cancel();
             updateMessage({
               ...currentItemRef.current,
               ask_answered: true,

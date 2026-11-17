@@ -5,11 +5,55 @@
     <link rel="icon" type="image/png" href="./src/public/Lazy.png" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>LazyMind</title>
+    <script>
+      window.addEventListener('error', event => {
+        if (event.target instanceof HTMLScriptElement && event.target.type === 'module') {
+          window.lazymindStartupFailed = true;
+          document.dispatchEvent(new Event('lazymind:startup-failed'));
+        }
+      }, true);
+    </script>
     <link rel="stylesheet" href="/js-preview-excel.css" />
     <script src="/js-preview-excel.umd.js"></script>
   </head>
   <body>
     <div id="app"></div>
-    <script type="module" src="/src/main.tsx"></script>
+    <section id="startup-error" hidden aria-labelledby="startup-error-title">
+      <h1 id="startup-error-title">页面暂时无法显示</h1>
+      <p id="startup-error-description">请点击重试，重新加载当前页面。未保存的内容可能丢失。</p>
+      <button id="startup-error-retry" type="button">重试</button>
+      <a id="startup-error-home" href="/">返回首页</a>
+    </section>
+    <style>
+      #startup-error:not([hidden]){box-sizing:border-box;min-height:100vh;padding:15vh 24px;text-align:center;background:#f6f8fc;color:#172033;font:16px system-ui,sans-serif}
+      #startup-error h1{font-size:24px}#startup-error p{line-height:1.6;color:#667085}
+      #startup-error button,#startup-error a{display:inline-block;margin:12px 6px;padding:10px 20px;border:1px solid #d0d5dd;border-radius:8px;font:inherit;text-decoration:none;cursor:pointer}
+      #startup-error button{background:#566eff;color:white}#startup-error a{background:white;color:#172033}
+      #startup-error button:focus-visible,#startup-error a:focus-visible{outline:3px solid #566eff;outline-offset:3px}
+    </style>
+    <script>
+      (() => {
+        const fallback = document.getElementById('startup-error');
+        const retry = document.getElementById('startup-error-retry');
+        const home = document.getElementById('startup-error-home');
+        let language = navigator.language;
+        try { language = localStorage.getItem('i18nextLng') || language; } catch {}
+        if (/^en/i.test(language)) {
+          document.getElementById('startup-error-title').textContent = 'This page cannot be displayed';
+          document.getElementById('startup-error-description').textContent = 'Try reloading this page. Unsaved changes may be lost.';
+          retry.textContent = 'Retry'; home.textContent = 'Back to home';
+        }
+        home.href = typeof window.BASENAME === 'string' && /^\/(?!\/)/.test(window.BASENAME) ? window.BASENAME : '/';
+        const show = () => {
+          if (document.getElementById('app').childElementCount) return;
+          fallback.hidden = false; retry.focus();
+          window.lazymindDesktop?.notifyAppReady?.();
+        };
+        document.addEventListener('lazymind:startup-failed', show);
+        if (window.lazymindStartupFailed) show();
+        retry.addEventListener('click', () => { if (retry.disabled) return; retry.disabled = true; window.location.reload(); });
+      })();
+    </script>
+    <script type="module" src="/src/bootstrap.ts"></script>
   </body>
 </html>

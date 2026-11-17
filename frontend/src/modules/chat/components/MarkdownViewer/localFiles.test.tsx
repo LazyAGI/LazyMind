@@ -1,9 +1,10 @@
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
+import { notification } from 'antd';
 import MarkdownViewer from './index';
 import { localFilePath } from './remarkLocalFiles';
 
-afterEach(() => { cleanup(); delete (window as any).lazymindDesktop; });
+afterEach(async () => { cleanup(); await act(async () => { notification.destroy(); }); delete (window as any).lazymindDesktop; });
 
 it('opens Codex output references and reveals their original file on right click', async () => {
   const localFileAction = vi.fn().mockResolvedValue({ ok: true });
@@ -32,6 +33,32 @@ it('preserves code examples and application routes', () => {
   render(<MarkdownViewer>{'`:codex-file-citation{path="/tmp/example.docx"}`\n\n[route](/agent/chat/home)'}</MarkdownViewer>);
   expect(screen.queryByRole('link', { name: 'example.docx' })).toBeNull();
   expect(screen.getByRole('link', { name: 'route' })).toHaveAttribute('href', '/agent/chat/home');
+});
+
+it('prefers the shared browser action for web links while retaining native mail links', async () => {
+  const openExternal = vi.fn().mockResolvedValue(undefined);
+  const openChatExternal = vi.fn().mockResolvedValue(undefined);
+  (window as any).lazymindDesktop = { openExternal, openChatExternal };
+  render(<MarkdownViewer>{'[web](https://example.com/page) [mail](mailto:test@example.com)'}</MarkdownViewer>);
+  const web = screen.getByRole('link', { name: 'web' });
+  expect(web).toHaveAttribute('data-external-link', 'true');
+  fireEvent.click(web);
+  await waitFor(() => expect(openExternal).toHaveBeenCalledWith('https://example.com/page'));
+  expect(openChatExternal).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('link', { name: 'mail' }));
+  expect(openChatExternal).toHaveBeenCalledWith('mailto:test@example.com');
+});
+
+it('keeps retry available when a Markdown web link fails to open on desktop', async () => {
+  const openExternal = vi.fn().mockRejectedValueOnce(new Error('unavailable')).mockResolvedValue(undefined);
+  const openChatExternal = vi.fn().mockResolvedValue(undefined);
+  (window as any).lazymindDesktop = { openExternal, openChatExternal };
+  render(<MarkdownViewer>{'[web](https://example.com/retry)'}</MarkdownViewer>);
+  fireEvent.click(screen.getByRole('link', { name: 'web' }));
+  fireEvent.click(await screen.findByRole('button', { name: /重\s*试/ }));
+  await waitFor(() => expect(openExternal).toHaveBeenCalledTimes(2));
+  expect(openExternal).toHaveBeenLastCalledWith('https://example.com/retry');
+  expect(openChatExternal).not.toHaveBeenCalled();
 });
 
 it('handles Windows and encoded file URLs while rejecting unsafe targets', () => {

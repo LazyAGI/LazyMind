@@ -1,3 +1,4 @@
+import { externalLinkProps } from '@/runtime/externalNavigation';
 import { useSettingsDraft } from "@/modules/settings/SettingsNavigationGuard";
 import { useCallback, useEffect, useRef, useState, type ChangeEvent, type ReactNode } from "react";
 import { Alert, Button, Card, Input, Modal, Popover, Space, Spin, Switch, Tag, Tooltip, Typography, message } from "antd";
@@ -1034,7 +1035,7 @@ function AgentConfigurationFlow({
         </Button>
       )}
       {!mcpPrepared && !mcpEnabled && (
-        <Button size="small" icon={<LinkOutlined />} href={agent.installURL} target="_blank">
+        <Button size="small" icon={<LinkOutlined />} {...externalLinkProps(agent.installURL)} target="_blank">
           {t("agentIntegration.viewInstallGuide")}
         </Button>
       )}
@@ -1069,7 +1070,7 @@ function AgentConfigurationFlow({
   const executorActions = executorSupported ? (
     <Space wrap size={8}>
       {!executorInstalled && (
-        <Button size="small" icon={<LinkOutlined />} href={agent.executorInstallURL || agent.installURL} target="_blank">
+        <Button size="small" icon={<LinkOutlined />} {...externalLinkProps(agent.executorInstallURL || agent.installURL)} target="_blank">
           {t("agentIntegration.viewExecutorGuide")}
         </Button>
       )}

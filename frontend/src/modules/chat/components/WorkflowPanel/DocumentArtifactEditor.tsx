@@ -1,3 +1,4 @@
+import ExternalLink from '@/components/ExternalLink';
 import { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { Modal } from 'antd';
 import { ExclamationCircleOutlined, ExportOutlined, ReloadOutlined } from '@ant-design/icons';
@@ -418,7 +419,7 @@ export function DocumentArtifactEditor({ slot: incomingSlot, sessionId, readOnly
               <span>{label}</span>
               {isObsidian && <small title={String(i18n.t('modelProvider.cloudDocuments.obsidianEnvironmentHint'))}>{i18n.t('modelProvider.cloudDocuments.obsidianEnvironmentSummary')}</small>}
             </span>
-            <a className='workflow-panel__provider-settings-link'
+            <ExternalLink className='workflow-panel__provider-settings-link'
               href={isObsidian ? CLOUD_DOCUMENTS_OBSIDIAN_SETUP_PATH : getCloudDocumentsUrl(provider.id === 'feishu' || provider.id === 'googledrive' || provider.id === 'wechat' ? provider.id : undefined)}
               target='_blank' rel='noopener noreferrer'
               aria-disabled={false}
@@ -426,7 +427,7 @@ export function DocumentArtifactEditor({ slot: incomingSlot, sessionId, readOnly
               onClick={event => event.stopPropagation()}
               onKeyDown={event => { if (event.key === 'Enter' || event.key === ' ') event.stopPropagation(); }}>
               {settingsAction}<ExportOutlined aria-hidden='true' />
-            </a>
+            </ExternalLink>
           </span> : label,
           icon: <span className='workflow-panel__provider-icon' aria-hidden='true'><WriterProviderIcon provider={provider.id} /></span>,
           onClick: () => chooseRef.current(provider.id),

@@ -34,6 +34,21 @@ def test_capability_denial_does_not_leak_across_positive_clause():
     ) is False
 
 
+@pytest.mark.parametrize('constraint', ['不要修改资料库', '不要删除知识库', '禁止修改资料库'])
+def test_read_only_library_request_keeps_content_tools(constraint):
+    lazyllm.globals['agentic_config'] = {'filters': {'kb_id': 'selected-kb'}}
+    configs = filter_tools(DEFAULT_TOOLS, user_query=f'读取已选择资料库的论文。{constraint}')
+    assert 'kb' in {cfg.name for cfg in configs}
+
+
+def test_selected_library_ids_are_available_to_metadata_tool_calls():
+    kb_config = next(cfg for cfg in DEFAULT_TOOLS if cfg.name == 'kb')
+    lazyllm.globals['agentic_config'] = {'filters': {'kb_id': ['library-one', 'library-two']}}
+    appendices = collect_system_prompt_appendices([kb_config])
+    policy = '\n'.join(appendices.get('tool_policy', []))
+    assert 'library-one' in policy and 'library-two' in policy
+
+
 @pytest.fixture(autouse=True)
 def reset_dynamic_tool_auth():
     old_auth = lazyllm.globals.config['dynamic_tool_auth']

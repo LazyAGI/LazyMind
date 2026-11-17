@@ -27,6 +27,7 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("@/runtime/desktopBridge", () => ({
+  getExternalBrowserBridge: () => undefined,
   agentIntegrationStatuses: mocks.statuses,
   agentIntegrationAction: mocks.action,
   executorIntegrationPolicies: mocks.executorPolicies,
