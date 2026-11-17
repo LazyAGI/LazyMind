@@ -321,6 +321,7 @@ export interface WorkflowSession {
 
 /** A single step execution record from workflow_session_steps. */
 export interface WorkflowSessionStep {
+  fencing_generation?: number;
   executor_host?: string;
   id: string;
   session_id: string;
@@ -364,12 +365,24 @@ export function applyOrdinaryWorkflowSnapshot(session: WorkflowSession, snapshot
     ordinary_revision: snapshot.revision, ordinary_error: false, steps: attachOrdinarySteps(session.steps, tasks) };
 }
 
+export interface WorkflowArtifactPreview {
+  attempt_id: string;
+  step_id: string;
+  attempt: number;
+  slot: string;
+  stream_id: string;
+  seq: number;
+  content: string;
+  state: 'streaming' | 'ended' | 'aborted';
+}
+
 export interface WorkflowRuntimeProjection {
+  artifact_previews?: Record<string, WorkflowArtifactPreview>;
   decided_routes?: string[];
   display?: WorkflowDisplayState;
   status?: string;
   current_step_id?: string;
-  attempt_history?: Record<string, Array<{ attempt: number; attempt_id?: string; task_id: string; status: string; validity: string; started_at: string; updated_at?: string; intent_context?: string }>>;
+  attempt_history?: Record<string, Array<{ attempt: number; fencing_generation?: number; executor_host?: string; attempt_id?: string; task_id: string; status: string; validity: string; started_at: string; updated_at?: string; intent_context?: string }>>;
   completed?: boolean;
   past?: string[];
   current?: string[];
@@ -393,7 +406,7 @@ export interface WorkflowRuntimeProjection {
 export function workflowSnapshotSteps(sessionId: string, history: WorkflowRuntimeProjection['attempt_history']): WorkflowSessionStep[] | undefined {
   if (!history) return undefined;
   return Object.entries(history).flatMap(([stepId, attempts]) => stepId === '__end__' ? [] : attempts.map((attempt) => ({
-    id: attempt.attempt_id ?? attempt.task_id, session_id: sessionId, step_id: stepId, task_id: attempt.task_id,
+    fencing_generation: attempt.fencing_generation, executor_host: attempt.executor_host, id: attempt.attempt_id ?? attempt.task_id, session_id: sessionId, step_id: stepId, task_id: attempt.task_id,
     attempt: attempt.attempt, status: attempt.status, validity: attempt.validity === "stale" ? "stale" as const : "effective" as const,
     created_at: attempt.started_at, updated_at: attempt.updated_at ?? attempt.started_at,
     intent_context: attempt.intent_context,
@@ -946,7 +959,7 @@ export const useWorkflowStore = create<WorkflowStore>()((set, get) => ({
             const snapshot = projectionRes?.data?.data ?? {};
             session.state_version = snapshot.state_version;
             session.projection = { ...snapshot.projection, display: snapshot.display, status: snapshot.status,
-              current_step_id: snapshot.current_step_id, attempt_history: snapshot.attempt_history };
+              current_step_id: snapshot.current_step_id, attempt_history: snapshot.attempt_history, artifact_previews: snapshot.artifact_previews };
             session.steps = workflowSnapshotSteps(session.session_id, snapshot.attempt_history) ?? [];
             session.current_step_id = snapshot.current_step_id ?? session.current_step_id;
             session.status = reconcileWorkflowSessionStatus(snapshot.status ?? session.status, session.projection);
@@ -1178,6 +1191,11 @@ export const useWorkflowStore = create<WorkflowStore>()((set, get) => ({
       if (!session || session.session_id !== sessionId) {
         return { projectionBySession: { ...state.projectionBySession, [sessionId]: projectionState } };
       }
+      if (event.type === 'artifact.preview' && !projectionState.resyncRequired) {
+        return { projectionBySession: { ...state.projectionBySession, [sessionId]: projectionState },
+          sessionByConversation: { ...state.sessionByConversation, [conversationId]: { ...session,
+            projection: { ...session.projection, artifact_previews: projectionState.projection.artifact_previews as WorkflowRuntimeProjection['artifact_previews'] } } } };
+      }
       const projection = projectionState.projection as WorkflowRuntimeProjection & { status?: string };
       if (projectionState === previous || projectionState.resyncRequired
         || projectionState.stateVersion < (session.state_version ?? 0)) {
@@ -1198,6 +1216,7 @@ export const useWorkflowStore = create<WorkflowStore>()((set, get) => ({
         },
       };
     });
+    if (event.type === 'artifact.preview') return;
     const projectionState = get().projectionBySession[sessionId];
     if (projectionState?.resyncRequired) {
       // Closing and reconnecting without Last-Event-ID asks the server for a fresh snapshot.

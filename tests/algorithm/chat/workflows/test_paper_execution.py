@@ -261,9 +261,10 @@ def test_macos_task_info_exit_race_does_not_weaken_running_checks(monkeypatch, t
     process = Mock(pid=123)
     process.poll.return_value = None
     if not exited:
-        process.wait.side_effect = subprocess.TimeoutExpired('worker', 0.05)
+        process.wait.side_effect = subprocess.TimeoutExpired('worker', 5)
         with pytest.raises(OSError, match='内存用量'):
             macos.check_limits(process, tmp_path)
+        process.wait.assert_called_once_with(timeout=5)
     else:
         process.wait.return_value = 0
         macos.check_limits(process, tmp_path)

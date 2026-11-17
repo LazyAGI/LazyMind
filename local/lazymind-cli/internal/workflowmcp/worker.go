@@ -29,7 +29,7 @@ type workerConnection struct {
 
 func registerWorkerGrant(server *mcp.Server, client *Client) {
 	mcp.AddTool(server, &mcp.Tool{Name: "workflow.worker.grant", Title: "Create a step-tool worker connection",
-		Description: "Controller-only: create restricted authorization for direct SubAgent tool calls. Saves the credential to a private runtime file, never the business contract or artifacts. Configure a worker-only MCP server with lazymind mcp workflow-worker <grant_file>. That server exposes only tool discovery and calls, never review, step control or publication. Host must support an isolated worker connection; do not claim inheritance without testing.", Annotations: annotations(false)},
+		Description: "Optional, controller-only: create restricted authorization for direct SubAgent tool calls when the host supports an isolated worker connection. Otherwise keep the SubAgent and proxy declared tool calls through the controller. Saves the credential to a private runtime file, never the business contract or artifacts. Configure a worker-only MCP server with lazymind mcp workflow-worker <grant_file>. That server exposes only tool discovery and calls, never review, step control or publication. Do not claim connection inheritance without testing.", Annotations: annotations(false)},
 		func(ctx context.Context, _ *mcp.CallToolRequest, input WorkerGrantInput) (*mcp.CallToolResult, map[string]any, error) {
 			path, err := executionToolPath(input.SessionID, input.ExecutionID, input.ExecutionHandle, "grant")
 			if err != nil {

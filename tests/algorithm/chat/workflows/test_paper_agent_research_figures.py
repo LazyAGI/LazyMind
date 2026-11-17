@@ -4,6 +4,7 @@ from dataclasses import replace
 import json
 from pathlib import Path
 
+import lazyllm
 import pytest
 
 from lazymind.document_tools.paper import agent_tools as tools
@@ -124,3 +125,18 @@ def test_shared_plot_renders_actual_files_with_existing_style_rules(context, pre
     assert payloads[0]['table']['rows'] == fixture['input']['data']['rows']
     if style == 'custom':
         assert 'def paper_axes' in payloads[0]['code']
+
+
+def test_online_vlm_configuration_uses_the_request_models(monkeypatch):
+    from lazymind import vision_model
+    from lazymind.model_config import inject_model_config, load_model_config
+    config_path = Path(__file__).resolve().parents[4] / 'algorithm/lazymind/common/runtime_models.online.yaml'
+    monkeypatch.setenv('LAZYMIND_MODEL_CONFIG_PATH', str(config_path))
+    assert load_model_config(str(config_path))['vlm'][0]['source'] == 'dynamic'
+    with lazyllm.new_session():
+        inject_model_config({'llm': {'source': 'openai', 'model': 'selected', 'vision': True}})
+        assert vision_model.select_vision_model_role() == 'llm'
+    with lazyllm.new_session():
+        inject_model_config({'llm': {'source': 'openai', 'model': 'selected', 'vision': True},
+                             'vlm': {'source': 'openai', 'model': 'explicit-vision', 'vision': True}})
+        assert vision_model.select_vision_model_role() == 'vlm'

@@ -22,6 +22,7 @@ import (
 	"lazymind/core/workflow/graphengine"
 	"lazymind/core/workflow/graphsnapshot"
 	"lazymind/core/workflow/runstate"
+	workflowstore "lazymind/core/workflow/store"
 )
 
 const workflowDefinitionChangedCode = "WORKFLOW_DEFINITION_CHANGED"
@@ -119,18 +120,19 @@ func loadRuntimeSnapshot(ctx context.Context, db *gorm.DB, sessionID string, gra
 }
 
 type projectionResponse struct {
-	Display        displaystate.View                `json:"display"`
-	Control        *controlstore.Snapshot           `json:"control,omitempty"`
-	Status         string                           `json:"status"`
-	CurrentStepID  string                           `json:"current_step_id"`
-	SessionID      string                           `json:"session_id"`
-	StateVersion   int64                            `json:"state_version"`
-	GraphHash      string                           `json:"graph_hash"`
-	SchemaVersion  string                           `json:"schema_version"`
-	Projection     graphengine.Projection           `json:"projection"`
-	Graph          *graphengine.CompiledStateGraph  `json:"graph"`
-	AttemptHistory map[string][]attemptHistoryDTO   `json:"attempt_history"`
-	InputWitnesses map[string][]graphengine.Witness `json:"input_witnesses"`
+	ArtifactPreviews map[string]workflowstore.ArtifactPreview `json:"artifact_previews,omitempty"`
+	Display          displaystate.View                        `json:"display"`
+	Control          *controlstore.Snapshot                   `json:"control,omitempty"`
+	Status           string                                   `json:"status"`
+	CurrentStepID    string                                   `json:"current_step_id"`
+	SessionID        string                                   `json:"session_id"`
+	StateVersion     int64                                    `json:"state_version"`
+	GraphHash        string                                   `json:"graph_hash"`
+	SchemaVersion    string                                   `json:"schema_version"`
+	Projection       graphengine.Projection                   `json:"projection"`
+	Graph            *graphengine.CompiledStateGraph          `json:"graph"`
+	AttemptHistory   map[string][]attemptHistoryDTO           `json:"attempt_history"`
+	InputWitnesses   map[string][]graphengine.Witness         `json:"input_witnesses"`
 }
 
 type StepProgress struct {
@@ -200,17 +202,19 @@ func recordedStepProgress(ctx context.Context, db *gorm.DB, sessionID string) ([
 }
 
 type attemptHistoryDTO struct {
-	AttemptID     string          `json:"attempt_id"`
-	Attempt       int             `json:"attempt"`
-	TaskID        string          `json:"task_id"`
-	Status        string          `json:"status"`
-	Validity      string          `json:"validity"`
-	DurationSec   float64         `json:"duration_sec"`
-	ArtifactCount int64           `json:"artifact_count"`
-	StartedAt     string          `json:"started_at"`
-	UpdatedAt     string          `json:"updated_at"`
-	IntentContext string          `json:"intent_context,omitempty"`
-	InputRequired json.RawMessage `json:"input_required,omitempty"`
+	FencingGeneration int64           `json:"fencing_generation,omitempty"`
+	ExecutorHost      string          `json:"executor_host,omitempty"`
+	AttemptID         string          `json:"attempt_id"`
+	Attempt           int             `json:"attempt"`
+	TaskID            string          `json:"task_id"`
+	Status            string          `json:"status"`
+	Validity          string          `json:"validity"`
+	DurationSec       float64         `json:"duration_sec"`
+	ArtifactCount     int64           `json:"artifact_count"`
+	StartedAt         string          `json:"started_at"`
+	UpdatedAt         string          `json:"updated_at"`
+	IntentContext     string          `json:"intent_context,omitempty"`
+	InputRequired     json.RawMessage `json:"input_required,omitempty"`
 }
 
 func projectSession(ctx context.Context, db *gorm.DB, session *orm.WorkflowSession) (projectionResponse, error) {
@@ -258,7 +262,7 @@ func projectSession(ctx context.Context, db *gorm.DB, session *orm.WorkflowSessi
 			_ = json.Unmarshal([]byte(attempt.ResultJSON), &pending)
 		}
 		attemptHistory[attempt.StepID] = append(attemptHistory[attempt.StepID], attemptHistoryDTO{
-			AttemptID: attempt.ID, Attempt: attempt.Attempt, TaskID: attempt.TaskID, Status: attempt.Status, Validity: validity,
+			FencingGeneration: attempt.FencingGeneration, ExecutorHost: attempt.ExecutorHost, AttemptID: attempt.ID, Attempt: attempt.Attempt, TaskID: attempt.TaskID, Status: attempt.Status, Validity: validity,
 			IntentContext: intentMap[attempt.StepID],
 			InputRequired: pending.InputRequired,
 			DurationSec:   duration, ArtifactCount: artifactCount, StartedAt: attempt.CreatedAt.UTC().Format(time.RFC3339), UpdatedAt: attempt.UpdatedAt.UTC().Format(time.RFC3339Nano),
@@ -295,10 +299,27 @@ func projectSession(ctx context.Context, db *gorm.DB, session *orm.WorkflowSessi
 	if display.Status == "waiting" || display.Status == "waiting_input" || display.Status == "paused" {
 		projection.Completed = false
 	}
+	previews := map[string]workflowstore.ArtifactPreview{}
+	if session.WorkflowID == "paper-writing" && session.Status != "stopped" && !session.Dismissed {
+		for _, row := range attempts {
+			if row.ExecutorHost != "external-agent" || row.Validity == "stale" ||
+				(row.Status != "claimed" && row.Status != "running") {
+				continue
+			}
+			preview, err := workflowstore.LatestArtifactPreview(ctx, db, session.ID, row.ID)
+			if err != nil {
+				return projectionResponse{}, err
+			}
+			if preview != nil && preview.StreamID == fmt.Sprintf("%s:%d", row.ID, row.FencingGeneration) {
+				previews[row.ID] = *preview
+			}
+		}
+	}
 	return projectionResponse{
-		Display: display,
-		Control: control,
-		Status:  session.Status, CurrentStepID: session.CurrentStepID,
+		ArtifactPreviews: previews,
+		Display:          display,
+		Control:          control,
+		Status:           session.Status, CurrentStepID: session.CurrentStepID,
 		SessionID: session.ID, StateVersion: session.StateVersion, GraphHash: graph.GraphHash, SchemaVersion: graph.SchemaVersion,
 		Projection: projection, Graph: graph, AttemptHistory: attemptHistory, InputWitnesses: inputWitnesses,
 	}, nil

@@ -1672,6 +1672,7 @@ function TabSlotGrid({
   tab,
   session,
   tasks,
+  allowExternalPreviews = true,
   onRefresh,
   onReference,
   onFocusSortOrder,
@@ -1680,6 +1681,7 @@ function TabSlotGrid({
   tab: TabDef;
   session: WorkflowSession;
   tasks: SubAgentTask[];
+  allowExternalPreviews?: boolean;
   onRefresh?: () => void;
   onReference?: (slot: SlotRevision) => void;
   onFocusSortOrder?: (sortOrder: number | undefined) => void;
@@ -1735,6 +1737,7 @@ function TabSlotGrid({
       getTabStepId(tab),
       slotDef.id,
       tasks,
+      allowExternalPreviews,
     )));
   };
   const isPaperReportTab = session.workflow_id === 'paper_expansion'
@@ -1751,11 +1754,11 @@ function TabSlotGrid({
     && step.validity !== 'stale' && (step.status === 'running' || step.status === 'pending'));
   const resultReady = process && !producerRunning
     && getTabSlotRevisions(session, tab, process.result_slot).some(revision => revision.selected)
-    && findWriterArtifactStream(session, getTabStepId(tab), process.result_slot, tasks)?.state !== 'streaming';
+    && findWriterArtifactStream(session, getTabStepId(tab), process.result_slot, tasks, allowExternalPreviews)?.state !== 'streaming';
   const processSlots = resultReady ? visibleSlots.filter(slot => slot.id !== process.result_slot && process.slots.includes(slot.id)) : [];
   const allHidden = visibleSlots.length === 0 || tab.composite_behavior?.hide_empty_columns !== false
     && visibleSlots.every(def => getTabSlotRevisions(session, tab, def.id).length === 0
-      && !findWriterArtifactStream(session, getTabStepId(tab), def.id, tasks));
+      && !findWriterArtifactStream(session, getTabStepId(tab), def.id, tasks, allowExternalPreviews));
   if (compactEmptyStates && allHidden) return <div className='workflow-panel__empty' role='status'>
     {t(workflowEmptyStateKey(session, resolveWorkflowTabStepId(tab, session.steps)))}
   </div>;
@@ -1767,6 +1770,7 @@ function TabSlotGrid({
       getTabStepId(tab),
       slotDef.id,
       tasks,
+      allowExternalPreviews,
     );
     const hideEmpty = tab.composite_behavior?.hide_empty_columns !== false;
     if (hideEmpty && revisions.length === 0 && !artifactStream) {
@@ -2252,7 +2256,7 @@ export function WorkflowPanel({
           ? { session_id: sessionId, kind: 'rewind', step_id: completedContinueStepId, expected_state_version: latest?.state_version ?? 0 }
           : display?.status === 'paused'
             ? { session_id: sessionId, kind: 'resume', expected_state_version: latest?.state_version ?? 0 }
-            : continueAction?.kind === 'regenerate' || continueAction?.kind === 'advance'
+            : continueAction?.kind === 'regenerate'
               ? { session_id: sessionId, kind: 'continue', expected_state_version: latest?.state_version ?? 0 } : undefined);
       } catch (error) { antdMessage.error(getLocalizedErrorMessage(error)); }
     }, undefined, true, continueAction?.kind === 'advance');
@@ -2645,6 +2649,7 @@ export function WorkflowPanel({
                     session={preview}
                     readOnly={previewing}
                     tasks={taskCenterTasks}
+                    allowExternalPreviews={!anySlotEditing}
                     onRefresh={refresh}
                     onReference={onReference}
                     onFocusSortOrder={handleFocusSortOrder}

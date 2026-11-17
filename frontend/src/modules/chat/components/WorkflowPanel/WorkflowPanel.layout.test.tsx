@@ -1180,6 +1180,7 @@ describe('shared workflow compact layout', () => {
   });
 
   it('shows a successful dynamic yield without failed or approval controls', async () => {
+    fixture.session.workflow_mode = 'dynamic';
     fixture.session.status = 'waiting';
     fixture.session.projection!.display = { status: 'waiting', reason: 'next_step_required', approval_step_id: '' };
     fixture.session.projection!.current = [];
@@ -1194,8 +1195,8 @@ describe('shared workflow compact layout', () => {
     const proceed = screen.getByRole('button', { name: '继续' });
     expect(proceed).toBeEnabled();
     await act(async () => fireEvent.click(proceed));
-    expect(send).toHaveBeenCalledWith('继续', expect.objectContaining({ kind: 'continue',
-      session_id: fixture.session.session_id }));
+    expect(send).toHaveBeenCalledOnce();
+    expect(send).toHaveBeenCalledWith('继续', undefined);
     expect(screen.queryByText('执行失败')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '继续执行' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '重试' })).not.toBeInTheDocument();

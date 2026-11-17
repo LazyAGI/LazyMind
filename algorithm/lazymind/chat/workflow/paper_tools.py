@@ -54,5 +54,9 @@ def call(request, function, arguments):
     try:
         with module.paper_scope(value):
             return {'result': function(**arguments)}
+    except SyntaxError as exc:
+        message = (f'Python syntax error at line {exc.lineno}, column {exc.offset}: {exc.msg}. '
+                   'Correct the code and call again.')
+        raise ExternalToolError('INVALID_ARGUMENT', message, public=True) from exc
     except ValueError as exc:
         raise ExternalToolError('INVALID_ARGUMENT', str(exc), public=True) from exc

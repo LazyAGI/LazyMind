@@ -79,7 +79,8 @@ function ModelOutput({ output, reasoning = false, title }: { output: Output; rea
 export function PaperAnalysisProgress({ session, active = true }: { session: WorkflowSession; active?: boolean }) {
   const step = (session.steps ?? []).filter(item => item.step_id === 'data_analysis' && item.validity !== 'stale')
     .slice().sort((a, b) => b.attempt - a.attempt || Date.parse(b.created_at) - Date.parse(a.created_at))[0];
-  const taskId = step?.task_id;
+  const native = (step?.executor_host ?? session.controller_host) !== 'external-agent';
+  const taskId = native ? step?.task_id : undefined;
   const task = useTaskCenterStore(state => state.tasksByConversation[session.conversation_id]?.find(item => item.task_id === taskId));
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
   const [expanded, setExpanded] = useState(false);
@@ -143,7 +144,7 @@ export function PaperAnalysisProgress({ session, active = true }: { session: Wor
     const timer = setInterval(() => setNow(Date.now() + offset.current), 1000);
     return () => clearInterval(timer);
   }, [active, running]);
-  if (!step) return null;
+  if (!step || !native) return null;
   const steps = view?.process_steps ?? [];
   const current = [...steps].reverse().find(item => item.status === 'running');
   const completed = steps.filter(item => item.status === 'succeeded');

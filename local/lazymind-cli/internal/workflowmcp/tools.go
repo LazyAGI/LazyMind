@@ -40,6 +40,7 @@ var ToolNames = []string{
 	"workflow.tool.list",
 	"workflow.tool.call",
 	"workflow.artifact.publish",
+	"workflow.artifact.preview",
 	"workflow.artifact.list",
 	"workflow.artifact.get",
 }
@@ -115,6 +116,7 @@ func Register(server *mcp.Server, client *Client) {
 	readOnly, write := annotations(true), annotations(false)
 	registerExecutionTools(server, client)
 	registerWorkerGrant(server, client)
+	registerPreview(server, client)
 	registerActionTools(server, client)
 	registerGenerationTools(server, client)
 	registerEditTools(server, client)

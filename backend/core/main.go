@@ -267,7 +267,7 @@ func externalAgentOperation(method, path string) externallease.Operation {
 				(strings.Contains(path, "/hosted-attempts/") &&
 					(strings.HasSuffix(path, ":begin") || strings.HasSuffix(path, ":resume") || strings.HasSuffix(path, ":submit") ||
 						strings.HasSuffix(path, ":complete") || strings.HasSuffix(path, "/artifacts") ||
-						strings.HasSuffix(path, "/workers:grant") || strings.HasSuffix(path, "/tools:call")))))) {
+						strings.HasSuffix(path, "/workers:grant") || strings.HasSuffix(path, "/preview") || strings.HasSuffix(path, "/tools:call")))))) {
 		return externallease.OperationWorkflowWrite
 	}
 	return ""

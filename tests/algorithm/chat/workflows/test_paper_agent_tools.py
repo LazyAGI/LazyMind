@@ -983,3 +983,30 @@ def test_paper_candidate_uses_existing_heading_normalization_before_publication(
     assert '## 1. Methods' not in text
     assert '## Methods' in text
     assert '## 3.3V supply' in text
+
+
+@pytest.mark.parametrize('step,code,call', [
+    ('data_analysis', 'def analyze(tables, plan, rng):\n    emit(method="mean", "estimate")\n', 'paper_analyze'),
+    ('data_analysis', 'def draw(data, statistics, spec):\n    return (\n', 'paper_plot'),
+])
+def test_external_generated_syntax_error_is_correctable_input(paper_context, step, code, call):
+    from dataclasses import asdict
+    from lazymind.chat.workflow import paper_tools
+    from lazymind.chat.workflow.external_tools import ExternalToolError
+    from lazymind.document_tools.paper.analysis import generated_executor
+    from lazymind.document_tools.paper.plotting import code as plotting_code
+
+    # Execute the actual validator through the external adapter's error boundary.
+    ctx = replace(paper_context, step_id=step)
+    request = SimpleNamespace(trusted_context=asdict(ctx), revision_id=ctx.revision, step_id=step)
+    validator = generated_executor.validate_code if call == 'paper_analyze' else plotting_code.validate_code
+    with pytest.raises(ExternalToolError) as failure:
+        paper_tools.call(request, validator, {'code': code})
+    assert failure.value.code == 'INVALID_ARGUMENT'
+    assert failure.value.public_message == str(failure.value)
+    assert 'line 2' in str(failure.value) and 'column' in str(failure.value)
+    assert 'Correct the code and call again' in str(failure.value)
+    # A repaired request is admitted within the very same attempt/context.
+    fixed = ('def analyze(tables, plan, rng):\n    return {}\n' if call == 'paper_analyze'
+             else 'def draw(data, statistics, spec):\n    return None\n')
+    assert paper_tools.call(request, validator, {'code': fixed}) == {'result': None}
