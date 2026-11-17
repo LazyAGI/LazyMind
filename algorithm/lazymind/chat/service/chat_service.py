@@ -105,6 +105,7 @@ from lazymind.chat.engine.tools.file_resources.tools import build_resource_read_
 from lazymind.chat.engine.tools.intent_writer import (
     append_intentwrite_guidance,
     build_intentwrite_tool,
+    intent_tools_for_query,
     render_intent_section,
 )
 from lazymind.chat.engine.tools.browser_vision import build_browser_visual_inspect_tool
@@ -1771,7 +1772,7 @@ async def _handle_chat_impl(
                 host_filesystem_enabled=bool(_cfg['trusted_local_mode']) or bound_local_workspace,
             )
         )
-        intent_tools = [] if workflow_turn_is_bound else [intentwriter]
+        intent_tools = [] if workflow_turn_is_bound else intent_tools_for_query(intentwriter, language_query)
         all_tools = (intent_tools + agent_tools + artifact_tools + subagent_tools + attachment_tools
                      + session_env_tools + user_env_tools + ask_user_tools
                      + vocabulary_review_tools + workflow_tools + mcp_tools)
@@ -2076,7 +2077,10 @@ async def _handle_chat_impl(
             'the actual source passage or table values, and page/table labels when available.'
         ),
         'backend.document_preview', priority=38, authoritative=True,
-        content_kind='instruction', skip_if=lambda: not is_document_preview_chat,
+        content_kind='instruction', skip_if=lambda: not is_document_preview_chat or not all(
+            isinstance(document_context.get(key), str) and document_context[key].strip()
+            for key in ('dataset_id', 'document_id')
+        ),
     )
     prompt_builder.runtime(
         'chat_quoted_message', 'Quoted Message', cited_message_context,

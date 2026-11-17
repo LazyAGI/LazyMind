@@ -183,28 +183,72 @@ func createLibraryImport(w http.ResponseWriter, r *http.Request, user string, in
 		replyError(w, 400, "INVALID_REQUEST", "题录格式无效")
 		return
 	}
-	guard, err := lockArxivImport(r.Context(), store.DB(), "request:"+user+":"+input.IdempotencyKey)
+	batch, ids, err := submitLibraryImport(r.Context(), user, store.UserName(r), input, libraryImportOptions{})
 	if err != nil {
 		replyLibraryError(w, err)
 		return
 	}
+	out, e := libraryResult(r, store.DB(), input.TargetDatasetID, ids)
+	if e != nil {
+		replyLibraryError(w, e)
+		return
+	}
+	for _, f := range input.Folders {
+		var row orm.PaperLibraryFolder
+		if e = store.DB().Where("dataset_id=? AND id=?", input.TargetDatasetID, f.ID).Take(&row).Error; e != nil {
+			replyLibraryError(w, e)
+			return
+		}
+		out.Data.Folders = append(out.Data.Folders, paperlibrary.Folder{ID: row.ID, Name: row.Name, ParentID: paperlibrary.Pointer(row.ParentID), Revision: row.Revision})
+	}
+	common.ReplyJSON(w, struct {
+		libraryChanges
+		BatchID string `json:"batch_id"`
+		Status  string `json:"status"`
+	}{out, batch.ID, batch.Status})
+}
+
+// submitLibraryImport is the shared metadata-first commit boundary for UI and Chat.
+// It saves library membership and a durable enrichment job without external lookup.
+type libraryImportOptions struct {
+	Source      *SourceContext
+	TenantID    string
+	RequestHash string
+	Sources     []SourceInspection
+	Decisions   []paperImportDecision
+	Fence       func(context.Context, *gorm.DB) error
+}
+
+func submitLibraryImport(ctx context.Context, user, userName string, input createImportRequest, options libraryImportOptions) (orm.PaperImportBatch, []string, error) {
+	guard, err := lockArxivImport(ctx, store.DB(), "request:"+user+":"+input.IdempotencyKey)
+	if err != nil {
+		return orm.PaperImportBatch{}, nil, err
+	}
 	defer guard.release()
-	r = r.WithContext(guard.ctx)
+	ctx = guard.ctx
 	requestHash := sourceHash([]string{string(marshal(struct {
 		Items                      []selectedImportItem
 		Folders                    []paperlibrary.Folder
 		FolderID, Format, FileName string
 	}{input.Items, input.Folders, input.FolderID, input.Format, input.FileName}))})
+	if options.RequestHash != "" {
+		requestHash = options.RequestHash
+	}
 	var batch orm.PaperImportBatch
 	ids := []string{}
-	err = store.DB().WithContext(r.Context()).Transaction(func(tx *gorm.DB) error {
+	err = store.DB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if options.Fence != nil {
+			if err := options.Fence(ctx, tx); err != nil {
+				return err
+			}
+		}
 		e := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("created_by=? AND idempotency_key=?", user, input.IdempotencyKey).Take(&batch).Error
 		if e == nil {
 			if batch.TargetDatasetID != input.TargetDatasetID || batch.EntryType != input.EntryType {
 				return invalidLibraryMutation("INVALID_REQUEST", "导入标识已用于其他请求")
 			}
 			if input.EntryType == "pdf_upload" {
-				id, e := confirmLibraryUpload(r.Context(), tx, user, batch, input)
+				id, e := confirmLibraryUpload(ctx, tx, user, batch, input)
 				if e != nil {
 					return e
 				}
@@ -212,7 +256,8 @@ func createLibraryImport(w http.ResponseWriter, r *http.Request, user string, in
 				return nil
 			}
 			var policy struct {
-				RequestHash string `json:"request_hash"`
+				RequestHash string   `json:"request_hash"`
+				PaperIDs    []string `json:"paper_ids"`
 			}
 			if e = json.Unmarshal(batch.PolicySnapshotJSON, &policy); e != nil {
 				return e
@@ -227,8 +272,12 @@ func createLibraryImport(w http.ResponseWriter, r *http.Request, user string, in
 			if len(items) != len(input.Items) {
 				return invalidLibraryMutation("INVALID_REQUEST", "导入请求与首次提交不同")
 			}
-			for _, item := range items {
-				ids = append(ids, item.LibraryPaperID)
+			if len(policy.PaperIDs) == len(input.Items) {
+				ids = policy.PaperIDs
+			} else {
+				for _, item := range items {
+					ids = append(ids, item.LibraryPaperID)
+				}
 			}
 			return nil
 		}
@@ -243,15 +292,19 @@ func createLibraryImport(w http.ResponseWriter, r *http.Request, user string, in
 		}
 		var receipt importPreviewReceipt
 		if input.EntryType == "paper_link" {
-			receipt, e = loadImportPreview(r.Context(), input.PreviewToken, user, input.TargetDatasetID)
+			receipt, e = loadImportPreview(ctx, input.PreviewToken, user, input.TargetDatasetID)
 			if e != nil {
 				return &libraryMutationError{409, "IMPORT_PREVIEW_EXPIRED", e.Error()}
 			}
 		}
 		now := time.Now().UTC()
 		batch = orm.PaperImportBatch{ID: uuid.NewString(), TargetDatasetID: input.TargetDatasetID, CreatedBy: user, IdempotencyKey: input.IdempotencyKey, EntryType: input.EntryType, Status: "succeeded", SourceContextJSON: marshal(map[string]string{"format": input.Format, "file_name": input.FileName}), SourceDocumentIDsJSON: marshal([]string{}), PolicySnapshotJSON: marshal(map[string]any{"request_hash": requestHash, "background_enrichment": input.EntryType == "paper_link", "folder_id": input.FolderID}), CreatedAt: now, UpdatedAt: now}
+		if options.Source != nil {
+			batch.SourceContextJSON = marshal(options.Source)
+			batch.PolicySnapshotJSON = marshal(map[string]any{"request_hash": requestHash, "background_enrichment": true, "source_context": options.Source, "origin_key": options.Source.key(), "tenant_id": options.TenantID, "paper_decisions": options.Decisions})
+		}
 		items := []orm.PaperImportItem{}
-		for _, selected := range input.Items {
+		for index, selected := range input.Items {
 			draft := selected.Paper
 			referenceIDs := []string{}
 			var work orm.AcademicWork
@@ -309,7 +362,11 @@ func createLibraryImport(w http.ResponseWriter, r *http.Request, user string, in
 				if e = validateLibraryMetadata(&draft.Metadata); e != nil {
 					return e
 				}
-				work, e = resolveLibraryWork(r.Context(), tx, input.TargetDatasetID, draft.ID, draft.Metadata)
+				if options.Source != nil && selected.WorkID != "" {
+					e = tx.Where("id=?", selected.WorkID).Take(&work).Error
+				} else {
+					work, e = resolveLibraryWork(ctx, tx, input.TargetDatasetID, draft.ID, draft.Metadata)
+				}
 				if e != nil {
 					return e
 				}
@@ -322,7 +379,7 @@ func createLibraryImport(w http.ResponseWriter, r *http.Request, user string, in
 			if e = tx.Model(&orm.PaperLibraryEntry{}).Where("dataset_id=? AND academic_work_id=? AND removed_at IS NULL", input.TargetDatasetID, work.ID).Count(&existing).Error; e != nil {
 				return e
 			}
-			row, e := importedLibraryEntry(r.Context(), tx, input.TargetDatasetID, work, draft, folder, paperlibrary.ImportMethod(input.EntryType), true)
+			row, e := importedLibraryEntry(ctx, tx, input.TargetDatasetID, work, draft, folder, paperlibrary.ImportMethod(input.EntryType), true)
 			if e != nil {
 				return e
 			}
@@ -334,6 +391,10 @@ func createLibraryImport(w http.ResponseWriter, r *http.Request, user string, in
 				batch.CompletedItems++
 			}
 			snapshot := marshal(map[string]any{})
+			presence := marshal(map[string]any{})
+			if draft != nil && draft.ArxivVersion != "" {
+				snapshot = marshal(FulltextCandidate{Version: draft.ArxivVersion, SourceProvider: "arxiv"})
+			}
 			if input.EntryType == "paper_link" {
 				for _, preview := range receipt.Items {
 					if preview.WorkID == work.ID {
@@ -343,15 +404,31 @@ func createLibraryImport(w http.ResponseWriter, r *http.Request, user string, in
 					}
 				}
 			}
+			if options.Source != nil {
+				source := options.Sources[index]
+				referenceIDs = []string{source.SourceID}
+				presence = marshal(map[string]string{"paper_key": source.PaperKey, "selection_key": sourceSelectionKey(source)})
+				var saved savedImportCandidate
+				_ = json.Unmarshal(snapshot, &saved)
+				saved.Requested = source.Requested
+				if saved.Requested != nil && publicationRequested(*saved.Requested) {
+					saved.Version, saved.SourceProvider = "publishedVersion", ""
+				}
+				snapshot = marshal(saved)
+			}
+			var desired savedImportCandidate
+			_ = json.Unmarshal(snapshot, &desired)
 			stage := "done"
 			enrich := isMetadataEnrichmentBatch(batch)
 			if enrich && existing > 0 {
-				enrich, e = needsLibraryPDFAcquisition(tx, input.TargetDatasetID, row.ID)
+				enrich, e = needsLibraryPDFAcquisition(tx, input.TargetDatasetID, row.ID, desired.FulltextCandidate)
 				if e != nil {
 					return e
 				}
 				for _, queued := range items {
-					if queued.LibraryPaperID == row.ID && queued.Status == "pending" {
+					var candidate FulltextCandidate
+					_ = json.Unmarshal(queued.SelectedCandidateJSON, &candidate)
+					if queued.LibraryPaperID == row.ID && queued.Status == "pending" && (desired.Version == "" || candidate.Version == desired.Version) {
 						enrich = false
 						break
 					}
@@ -367,9 +444,15 @@ func createLibraryImport(w http.ResponseWriter, r *http.Request, user string, in
 				}
 				batch.Status = "pending"
 			}
-			items = append(items, orm.PaperImportItem{ID: uuid.NewString(), BatchID: batch.ID, LibraryPaperID: row.ID, AcademicWorkID: work.ID, TitleSnapshot: work.CanonicalTitle, ResultKind: kind, Status: status, Stage: stage, ReferenceIDsJSON: marshal(referenceIDs), PresenceSnapshotJSON: marshal(map[string]any{}), SelectedCandidateJSON: snapshot, ErrorDetailsJSON: marshal(map[string]any{}), CreatedAt: now, UpdatedAt: now})
+			items = append(items, orm.PaperImportItem{ID: uuid.NewString(), BatchID: batch.ID, LibraryPaperID: row.ID, AcademicWorkID: work.ID, TitleSnapshot: work.CanonicalTitle, ResultKind: kind, Status: status, Stage: stage, ReferenceIDsJSON: marshal(referenceIDs), PresenceSnapshotJSON: presence, SelectedCandidateJSON: snapshot, ErrorDetailsJSON: marshal(map[string]any{}), CreatedAt: now, UpdatedAt: now})
 			ids = append(ids, row.ID)
 		}
+		var policy map[string]any
+		if e := json.Unmarshal(batch.PolicySnapshotJSON, &policy); e != nil {
+			return e
+		}
+		policy["paper_ids"] = ids
+		batch.PolicySnapshotJSON = marshal(policy)
 		batch.TotalItems = len(items)
 		if e = tx.Create(&batch).Error; e != nil {
 			return e
@@ -378,7 +461,7 @@ func createLibraryImport(w http.ResponseWriter, r *http.Request, user string, in
 			return e
 		}
 		if batch.Status == "pending" {
-			queued, err := asyncjob.EnqueueInTransaction(r.Context(), tx, asyncjob.EnqueueRequest{JobType: paperImportJobType, ResourceType: "paper_import_batch", ResourceID: batch.ID, IdempotencyKey: "paper-import:" + batch.ID, Payload: paperImportPayload{BatchID: batch.ID, UserID: user, UserName: store.UserName(r)}, CreateUserID: user, CreateUserName: store.UserName(r)})
+			queued, err := asyncjob.EnqueueInTransaction(ctx, tx, asyncjob.EnqueueRequest{JobType: paperImportJobType, ResourceType: "paper_import_batch", ResourceID: batch.ID, IdempotencyKey: "paper-import:" + batch.ID, Payload: paperImportPayload{BatchID: batch.ID, UserID: user, UserName: userName}, CreateUserID: user, CreateUserName: userName})
 			if err != nil {
 				return err
 			}
@@ -388,27 +471,9 @@ func createLibraryImport(w http.ResponseWriter, r *http.Request, user string, in
 		return nil
 	})
 	if err != nil {
-		replyLibraryError(w, err)
-		return
+		return orm.PaperImportBatch{}, nil, err
 	}
-	out, e := libraryResult(r, store.DB(), input.TargetDatasetID, ids)
-	if e != nil {
-		replyLibraryError(w, e)
-		return
-	}
-	for _, f := range input.Folders {
-		var row orm.PaperLibraryFolder
-		if e = store.DB().Where("dataset_id=? AND id=?", input.TargetDatasetID, f.ID).Take(&row).Error; e != nil {
-			replyLibraryError(w, e)
-			return
-		}
-		out.Data.Folders = append(out.Data.Folders, paperlibrary.Folder{ID: row.ID, Name: row.Name, ParentID: paperlibrary.Pointer(row.ParentID), Revision: row.Revision})
-	}
-	common.ReplyJSON(w, struct {
-		libraryChanges
-		BatchID string `json:"batch_id"`
-		Status  string `json:"status"`
-	}{out, batch.ID, batch.Status})
+	return batch, ids, nil
 }
 func libraryImportDataset(r *http.Request, dataset string) (orm.Dataset, error) {
 	var row orm.Dataset
@@ -559,16 +624,30 @@ func confirmLibraryUpload(ctx context.Context, tx *gorm.DB, user string, batch o
 
 // The caller holds the dataset lock, so reimports cannot schedule overlapping
 // acquisitions for the same library entry. A previous failure is retryable.
-func needsLibraryPDFAcquisition(tx *gorm.DB, dataset, paper string) (bool, error) {
-	var pending int64
-	if err := tx.Table("paper_import_items i").Joins("JOIN paper_import_batches b ON b.id=i.batch_id").Where("b.target_dataset_id=? AND i.library_paper_id=? AND b.status IN ? AND i.status IN ?", dataset, paper, []string{"pending", "running"}, []string{"pending", "running"}).Count(&pending).Error; err != nil {
+func needsLibraryPDFAcquisition(tx *gorm.DB, dataset, paper string, desired FulltextCandidate) (bool, error) {
+	version := desired.Version
+	var pending []orm.PaperImportItem
+	if err := tx.Table("paper_import_items i").Select("i.*").Joins("JOIN paper_import_batches b ON b.id=i.batch_id").Where("b.target_dataset_id=? AND i.library_paper_id=? AND b.status IN ? AND i.status IN ?", dataset, paper, []string{"pending", "running"}, []string{"pending", "running"}).Find(&pending).Error; err != nil {
 		return false, err
 	}
-	if pending > 0 {
-		return false, nil
+	for _, item := range pending {
+		var candidate FulltextCandidate
+		if err := json.Unmarshal(item.SelectedCandidateJSON, &candidate); err != nil {
+			return false, err
+		}
+		if version == "" || candidate.Version == version {
+			return false, nil
+		}
 	}
 	var documents []orm.Document
-	if err := activeSourceDocuments(tx, dataset).Select("d.*").Joins("JOIN paper_library_attachments a ON a.dataset_id=d.dataset_id AND a.document_id=d.id").Where("a.paper_id=? AND a.kind='pdf' AND a.detached_at IS NULL", paper).Find(&documents).Error; err != nil {
+	q := activeSourceDocuments(tx, dataset).Select("d.*").Joins("JOIN paper_library_attachments a ON a.dataset_id=d.dataset_id AND a.document_id=d.id").Where("a.paper_id=? AND a.kind='pdf' AND a.detached_at IS NULL", paper)
+	if version != "" {
+		q = q.Joins("JOIN academic_work_documents wd ON wd.document_id=d.id AND wd.dataset_id=d.dataset_id").Where("wd.source_version=?", version)
+		if desired.SourceProvider != "" {
+			q = q.Where("wd.source_provider=?", desired.SourceProvider)
+		}
+	}
+	if err := q.Find(&documents).Error; err != nil {
 		return false, err
 	}
 	for _, document := range documents {

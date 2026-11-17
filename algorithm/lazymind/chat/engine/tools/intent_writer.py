@@ -3,6 +3,7 @@ from __future__ import annotations
 from lazyllm.tools import fc_register
 
 import json
+import re
 from typing import Any, Dict, List, Literal, Optional
 
 from lazyllm.tools.agent import ToolExecutionError
@@ -17,6 +18,20 @@ SCALAR_FIELDS = {'goal', 'deliverable', 'execution_mode'}
 LIST_FIELDS = INTENT_FIELDS - SCALAR_FIELDS
 VALID_OPERATIONS = {'set', 'add', 'remove', 'supersede'}
 FIELD_ALIASES = {'constraint': 'constraints'}
+
+
+def intent_tools_for_query(tool: Any, query: str) -> List[Any]:
+    """Keep one-off paper imports out of durable intent mutation."""
+    persistent_change = re.search(
+        r'以后|今后|后续|从现在起|默认|始终|每次|长期|研究(?:计划|目标)|工作流|'
+        r'\b(?:future|always|ongoing|from now on|research (?:plan|goal))\b', query, re.I,
+    )
+    paper_import = (
+        re.search(r'论文|文献|\b(?:papers?|articles?)\b', query, re.I)
+        and re.search(r'导入|加入|添加|收录|入库|保存到|\b(?:import|add|save)\b', query, re.I)
+        and re.search(r'资料库|知识库|文献库|论文库|文献集|\b(?:library|collection)\b', query, re.I)
+    )
+    return [] if paper_import and not persistent_change else [tool]
 
 
 def normalize_intent_document(value: Any) -> Dict[str, Any]:

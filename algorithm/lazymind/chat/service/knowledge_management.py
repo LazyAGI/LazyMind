@@ -67,8 +67,11 @@ def _resolve_paper_sources(arguments):
     from lazymind.chat.engine.tools.workspace_context import get_tool_resolution_context
     from lazymind.chat.service.utils.citations import CITATION_REFS_KEY
 
-    if 'current_sources' in arguments:
+    # Strict-schema providers emit null/[] for optional fields. These carry no
+    # source evidence; only the trusted runtime may supply actual snapshots.
+    if arguments.get('current_sources') not in (None, []):
         raise ToolExecutionError('Select source IDs; current_sources is reserved for the chat runtime')
+    arguments = {key: value for key, value in arguments.items() if key != 'current_sources'}
     if arguments.get('answer_id') or arguments.get('papers') or not arguments.get('source_ids'):
         return arguments
     resolution = get_tool_resolution_context()

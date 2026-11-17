@@ -547,3 +547,12 @@ def test_paper_import_dispatch_binds_only_selected_current_search_evidence(monke
             with host.execution_context(prepared(wire, {**args, 'current_sources': [record]})):
                 pytest.fail('model-supplied source dispatched')
     assert [request[1]['arguments'] for request in requests] == [{**args, 'current_sources': [record]}] * 2
+
+@pytest.mark.parametrize('empty_sources', [None, []])
+def test_paper_import_accepts_empty_strict_schema_runtime_placeholder(empty_sources):
+    from lazymind.chat.service.knowledge_management import _resolve_paper_sources
+    args = {'knowledge_base_id': 'kb', 'papers': [{'arxiv_id': '1810.04805'}],
+            'current_sources': empty_sources}
+    resolved = _resolve_paper_sources(args)
+    assert resolved == {'knowledge_base_id': 'kb', 'papers': [{'arxiv_id': '1810.04805'}]}
+    assert 'current_sources' in args

@@ -657,6 +657,35 @@ def test_explicit_knowledge_base_overrides_inferred_web_source() -> None:
     assert profile.research_required is True
 
 
+@pytest.mark.parametrize('query', [
+    '读取资料库里的论文，不要修改资料库',
+    '读取资料库里的论文，不要联网搜索',
+])
+def test_library_read_constraint_does_not_conflict_with_itself(query):
+    profile = resolve_task_profile(query, enable_llm_fallback=False,
+                                   explicit_resources={'knowledge_base_ids': ['selected-library']})
+    assert not any(issue.issue_type == 'conflicting_requirements'
+                   for issue in profile.request_assessment.issues)
+
+
+@pytest.mark.parametrize('query,resources,missing', [
+    ('帮我精读 Rapid and Sensitive Chemical Analysis of Individual Picolitre Droplets by Mass Spectrometry 这篇论文',
+     {'knowledge_base_ids': ['papers']}, False),
+    ('帮我读一下这篇论文', {}, True),
+    ('把 arXiv:2210.01936 这篇论文加入翻译验收', {}, False),
+    ('把 DOI:10.1038/s41586-021-03819-2 这篇论文加入资料库', {}, False),
+    ('把《Attention Is All You Need》这篇论文加入资料库', {}, False),
+    ('精读资料库里已经上传的这篇论文', {'knowledge_base_ids': ['papers']}, False),
+    ('精读这篇论文，不要上传文件', {'knowledge_base_ids': ['papers']}, False),
+    ('读取附件里的论文', {'knowledge_base_ids': ['papers']}, True),
+    ('不要使用内部库，读一下这篇论文', {'knowledge_base_ids': ['papers'], 'mentions': [
+        {'resource_type': 'knowledge_base', 'resource_ref': 'papers', 'display_name': '内部库'}]}, True),
+])
+def test_document_reference_uses_available_library_without_inventing_attachments(query, resources, missing):
+    profile = resolve_task_profile(query, explicit_resources=resources, enable_llm_fallback=False)
+    assert any(issue.issue_type == 'missing_input' for issue in profile.request_assessment.issues) is missing
+
+
 def test_explicit_knowledge_base_and_explicit_web_request_use_mixed_sources() -> None:
     profile = resolve_task_profile(
         '基于资料库并联网搜索最新信息',

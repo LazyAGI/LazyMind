@@ -156,3 +156,29 @@ def test_subagent_current_edit_has_priority_over_original_style():
     assert '保留内容和讲稿' in section
     assert section.endswith('我不喜欢黑底ppt 给我换成 白底黑字')
     assert 'overrides conflicting original requirements' in section
+
+
+@pytest.mark.parametrize('query', [
+    '把这篇论文加入已选资料库：Test Paper。请尝试一次导入；未匹配就停止。',
+    '将BERT论文导入知识库',
+    '把这些文献添加到文献库',
+    'Import this paper into the selected library; stop if no match.',
+])
+def test_one_off_paper_import_omits_intent_tool(query):
+    from lazymind.chat.engine.tools.intent_writer import intent_tools_for_query
+    tool = build_intentwrite_tool(conversation_id='c', current_query=query)
+    assert intent_tools_for_query(tool, query) == []
+
+
+@pytest.mark.parametrize('query', [
+    '以后导入论文时都先确认题录再加入资料库',
+    '把研究目标改成比较不同论文检索方法',
+    '这篇论文加入资料库，同时把后续研究计划改为分析液滴质谱',
+    '暂停研究任务',
+    '精读资料库里的这篇论文',
+    'From now on, always confirm metadata before importing papers into the library.',
+])
+def test_other_requests_keep_intent_tool(query):
+    from lazymind.chat.engine.tools.intent_writer import intent_tools_for_query
+    tool = build_intentwrite_tool(conversation_id='c', current_query=query)
+    assert intent_tools_for_query(tool, query) == [tool]

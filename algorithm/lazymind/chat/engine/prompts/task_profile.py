@@ -388,6 +388,7 @@ def _assess_request(
     outcomes: list[Outcome],
     *,
     has_attachments: bool,
+    has_document_source: bool = False,
 ) -> RequestAssessment:
     issues: list[RequestIssue] = []
     questions: list[ClarificationQuestion] = []
@@ -416,7 +417,13 @@ def _assess_request(
         (r'不要修改|只读', r'修改|删除|部署|发布', 'read-only constraint conflicts with execution'),
     )
     for left, right, description in contradictions:
-        left_match, right_match = re.search(left, text), re.search(right, text)
+        left_matches = list(re.finditer(left, text))
+        left_match = left_matches[0] if left_matches else None
+        # "修改" inside "不要修改" is the same constraint, not a second
+        # instruction. Only independent, non-overlapping requests can conflict.
+        right_match = next((match for match in re.finditer(right, text)
+                            if not any(match.start() < negative.end() and negative.start() < match.end()
+                                       for negative in left_matches)), None)
         if left_match and right_match and left_match.group(0) != right_match.group(0):
             issues.append(RequestIssue(
                 'conflicting_requirements', description,
@@ -427,7 +434,14 @@ def _assess_request(
         r'这篇(?:文章|论文|报告)|附件|这张图|'
         r'attached\s+(?:file|document|image)', text, re.I,
     )
-    if attachment_reference and not has_attachments:
+    explicit_attachment = re.search(r'附件|attached\s+(?:file|document|image)', text, re.I)
+    identified_paper = re.search(
+        r'arxiv\s*:\s*\d{4}\.\d{4,5}|10\.\d{4,9}/[^\s]+|https?://\S+|'
+        r'《[^》]{2,}》|[A-Za-z][A-Za-z -]+(?:\s+[A-Za-z][A-Za-z -]+){2,}\s*这篇',
+        text, re.I,
+    )
+    has_document_source = has_document_source or bool(identified_paper)
+    if attachment_reference and not has_attachments and (not has_document_source or explicit_attachment):
         issues.append(RequestIssue(
             'missing_input', 'The request references an attachment that is not available.',
             attachment_reference.group(0), 'high',
@@ -479,7 +493,8 @@ def _assess_request(
     )
 
 
-def _rule_profile(query: str, *, has_attachments: bool = False) -> tuple[TaskProfile, bool]:
+def _rule_profile(query: str, *, has_attachments: bool = False,
+                  has_document_source: bool = False) -> tuple[TaskProfile, bool]:
     text = str(query or '').strip()
     platform_capability_query = bool(_PLATFORM_CAPABILITY_QUERY.search(text))
     explicit_skill = bool(_SKILL_EXPLICIT.search(text))
@@ -528,7 +543,8 @@ def _rule_profile(query: str, *, has_attachments: bool = False) -> tuple[TaskPro
         else 'create_artifact' if primary == 'create'
         else 'chat_only'
     )
-    assessment = _assess_request(text, matches, has_attachments=has_attachments)
+    assessment = _assess_request(text, matches, has_attachments=has_attachments,
+                                 has_document_source=has_document_source)
     reasons = []
     if matches:
         reasons.append('explicit outcome wording')
@@ -783,7 +799,10 @@ def resolve_task_profile(
     has_attachments: bool = False,
     explicit_resources: ExplicitResourceBindings | dict[str, Any] | None = None,
 ) -> TaskProfile:
-    rule, needs_llm = _rule_profile(query, has_attachments=has_attachments)
+    resources = _normalize_explicit_resources(explicit_resources)
+    active_resources, _, _ = _resource_usage_policy(query, resources)
+    rule, needs_llm = _rule_profile(query, has_attachments=has_attachments,
+                                    has_document_source=bool(active_resources.knowledge_base_ids))
     if history and _CONTEXT_REFERENCE.search(str(query or '').strip()):
         rule = replace(
             rule,
@@ -792,7 +811,6 @@ def resolve_task_profile(
             reasons=tuple(dict.fromkeys((*rule.reasons, 'conversation-context reference')))[:4],
         )
         needs_llm = True
-    resources = _normalize_explicit_resources(explicit_resources)
     rule = _apply_explicit_resources(rule, resources, query)
     stripped_query = str(query or '').strip()
     has_explicit_resources = bool(
