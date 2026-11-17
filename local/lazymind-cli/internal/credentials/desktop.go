@@ -128,7 +128,11 @@ func (s *Store) SaveDesktop(value Credentials, runtimeRoot string) error {
 	value.LocalRuntimeID = ""
 	if isLoopbackOrigin(value.ServerURL) {
 		if runtimeRoot == "" {
-			paths := runtimeStatePaths()
+			var discovery runtimeDiscovery
+			paths := runtimeStatePaths(&discovery)
+			if discovery.err != nil {
+				return discovery.err
+			}
 			if len(paths) > 0 {
 				runtimeRoot = filepath.Dir(filepath.Dir(paths[0]))
 			}

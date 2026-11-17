@@ -164,7 +164,9 @@ The assisted installer supports in-place upgrades and blocks downgrades. It offe
 - **Simple installation (default):** installs the bundled Python environment as a single archive, avoiding installation-time expansion and the long per-file firewall/antivirus scan. Python is expanded automatically on first launch.
 - **Full installation:** expands Python and warms the bundled Python, Node, and local services before setup completes, matching the previous installer behavior.
 
-Silent installs default to simple mode and accept `--simple-install` or `--full-install` explicitly. On a fresh or repair install, existing `%LOCALAPPDATA%\LazyMind` data can be retained (the default) or cleared. Upgrades always retain it. The uninstaller similarly defaults to removing the program only and can optionally clear Local AppData. Neither workflow reads, deletes, or moves `%USERPROFILE%\Documents\LazyMind`.
+Silent installs default to simple mode and accept `--simple-install` or `--full-install` explicitly. A clean installation chooses one storage root, such as `D:\Tools\LazyMind`: the program is installed in `App`, while settings, databases, uploads, caches and downloaded dependencies live in the sibling `Data` directory. The root must be a writable local fixed NTFS location belonging to the current user. Large installer staging and old-program backups stay on the same volume; small bootstrap files can still use Windows TEMP.
+
+Upgrades retain both original locations and do not offer relocation. Older installations keep their existing program and `%LOCALAPPDATA%\LazyMind` data paths without creating the new layout. Uninstalling defaults to removing only the program; retaining data also retains its current-user location record so reinstalling restores the same data and device identity. Explicit data removal only clears the verified application data root. User-selected external folders and `%USERPROFILE%\Documents\LazyMind` are never moved or deleted by setup.
 
 ## Trusted local mode
 
@@ -193,18 +195,21 @@ dependencies. Startup and dependency preparation must not add links or files to
 the signed `.app` resources. A staging failure disables that exporter entry point
 instead of falling back to writing into the installed application.
 
-Local and Desktop also share the existing device key for auth-service cloud credentials. The identity stays in `~/Library/Application Support/lazymind-desktop/credential-device.json` on macOS and `%LOCALAPPDATA%\LazyMind\Desktop\credential-device.json` on Windows. Empty `LAZYMIND_AUTH_CLOUD_SECRET_KEY` and the old development default select this device key; existing credentials encrypted with the old default remain readable. Explicit custom keys are preserved and must be configured consistently in both modes. Keep the identity file when retaining the database. An invalid identity stops auth-service startup instead of generating a replacement key.
+Local and Desktop also share the existing device key for auth-service cloud credentials. The identity stays in `~/Library/Application Support/lazymind-desktop/credential-device.json` on macOS. New Windows installations use `Data\Desktop\credential-device.json` under the selected storage root; legacy Windows installations keep `%LOCALAPPDATA%\LazyMind\Desktop\credential-device.json`. Empty `LAZYMIND_AUTH_CLOUD_SECRET_KEY` and the old development default select this device key; existing credentials encrypted with the old default remain readable. Explicit custom keys are preserved and must be configured consistently in both modes. Keep the identity file when retaining the database. An invalid identity, or a missing identity that protects existing encrypted credentials, stops startup instead of silently creating a replacement key.
 
-On Windows, all Desktop-generated files live under `%LOCALAPPDATA%\LazyMind`:
+New Windows installer layouts keep application-managed files under the selected `Data` root. A small current-user HKCU DataRoot value is shared by Desktop, Local and CLI discovery; no system LOCALAPPDATA or USERPROFILE value is changed:
 
 ```text
-%LOCALAPPDATA%\LazyMind\data             # SQLite, Milvus, uploads, and service data
-%LOCALAPPDATA%\LazyMind\Desktop          # Electron/Chromium profile and browser caches
-%LOCALAPPDATA%\LazyMind\Logs\desktop     # Electron startup and diagnostic logs
-%LOCALAPPDATA%\LazyMind\Logs\crash-dumps # Electron crash reports
+<storage-root>\Data\data             # SQLite, Milvus, uploads, and service data
+<storage-root>\Data\Desktop          # Electron/Chromium profile and device identity
+<storage-root>\Data\deps             # Downloaded components
+<storage-root>\Data\Cache            # Application dependency caches
+<storage-root>\Data\Logs             # Logs and crash reports
+<storage-root>\Data\tmp              # Application-created temporary files
+<storage-root>\Data\Inbox            # Default managed import directory
 ```
 
-Desktop does not read, migrate, or remove any legacy Electron profile outside this root. The Windows local document source is `%USERPROFILE%\Documents\LazyMind`; Desktop creates it at runtime startup and the file watcher scans it recursively.
+Legacy/portable Windows defaults remain under `%LOCALAPPDATA%\LazyMind`, with `%USERPROFILE%\Documents\LazyMind` as their managed import directory. Existing authorized external folder bindings remain at their original paths. A new-layout location that is missing, invalid or unavailable is a repair error; it must not create a second empty profile/database on C. Full Windows verification instructions and the deliberately isolated interactive lifecycle harness are in `desktop/scripts/windows-install-layout-smoke.ps1`.
 
 Local-folder discovery asks for consent before each parent-location selection and keeps broad search locations in Electron's profile only. Discovery uses a bounded, directory-only scan, skips the platform Desktop, Documents, Downloads, and media folders, and does not pass broad locations to the local runtime. When the user connects one or more folders, Desktop persists only the exact selected folders and updates file-watcher allowed roots dynamically without restarting the runtime. Existing `Documents\LazyMind` bindings keep their original virtual-root mapping.
 

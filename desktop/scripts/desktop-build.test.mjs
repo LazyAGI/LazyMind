@@ -997,12 +997,37 @@ test("Windows tray reopens the frontend and Exit removes the visible background 
   assert.match(source, /function destroyWindowsTray\(\)[\s\S]*tray\.destroy\(\);\s*tray = undefined/);
 });
 
-test("Windows installer path policy matches the maintenance helper trust boundary", () => {
+test("Windows installer offers directory selection while preserving the per-user boundary", () => {
   const source = readFileSync(electronBuilderConfig, "utf8");
-  assert.match(
-    source,
-    /allowToChangeInstallationDirectory:\s*false/,
-    "custom install directories require an authenticated path policy in installer-maintenance",
+  assert.equal(
+    source.match(/allowToChangeInstallationDirectory:\s*(true|false)\b/)?.[1],
+    "true",
+    "fresh installs must offer the selected storage root; authenticated maintenance is tested separately",
+  );
+  assert.match(source, /oneClick:\s*false/);
+  assert.match(source, /perMachine:\s*false/);
+  assert.match(source, /allowElevation:\s*false/);
+});
+
+test("Windows storage template changes use a locked dependency patch and the standard uninstaller pipeline", () => {
+  const pkg = JSON.parse(readFileSync(electronPackage, "utf8"));
+  assert.equal(pkg.devDependencies["electron-builder"], "24.13.3");
+  const patch = pkg.pnpm?.patchedDependencies?.["app-builder-lib@24.13.3"];
+  assert.equal(typeof patch, "string", "the reviewed NSIS changes need an exact-version patch");
+  const root = path.dirname(electronPackage);
+  const absolutePatch = path.resolve(root, patch);
+  assert.ok(absolutePatch.startsWith(`${path.join(root, "patches")}${path.sep}`));
+  const source = readFileSync(absolutePatch, "utf8");
+  const changedPaths = [...source.matchAll(/^\+\+\+ b\/(.+)$/gm)].map((match) => match[1]);
+  assert.deepEqual([...new Set(changedPaths)].sort(), [
+    "templates/nsis/assistedInstaller.nsh",
+    "templates/nsis/include/extractAppPackage.nsh",
+    "templates/nsis/include/installer.nsh",
+  ].sort());
+  assert.doesNotMatch(
+    readFileSync(electronBuilderConfig, "utf8"),
+    /\bscript:\s*[^,\n]+/,
+    "a full custom NSIS script would bypass the existing uninstaller generation/signing path",
   );
 });
 

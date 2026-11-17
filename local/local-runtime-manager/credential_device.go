@@ -4,14 +4,18 @@ import (
 	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
+	"database/sql"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
+
+	"github.com/mesotron7x/LazyMind/local/local-runtime-manager/internal/storagepath"
 )
 
 const cloudCredentialKeyEnvVar = "LAZYMIND_AUTH_CLOUD_SECRET_KEY"
@@ -25,21 +29,37 @@ type credentialDeviceIdentity struct {
 }
 
 func cloudCredentialKey() (string, error) {
+	return cloudCredentialKeyForPaths(RuntimePaths{})
+}
+
+func cloudCredentialKeyForPaths(paths RuntimePaths) (string, error) {
 	if configured := strings.TrimSpace(os.Getenv(cloudCredentialKeyEnvVar)); configured != "" && configured != legacyCloudCredentialKey {
 		return configured, nil
 	}
-	return deviceCredentialKey("cloud-oauth")
+	return deviceCredentialKeyForPaths("cloud-oauth", paths)
 }
 
 func modelCredentialKey() (string, error) {
+	return modelCredentialKeyForPaths(RuntimePaths{})
+}
+
+func modelCredentialKeyForPaths(paths RuntimePaths) (string, error) {
 	if configured := strings.TrimSpace(os.Getenv(modelCredentialKeyEnvVar)); configured != "" {
 		return configured, nil
 	}
-	return deviceCredentialKey("model-provider")
+	return deviceCredentialKeyForPaths("model-provider", paths)
 }
 
 func deviceCredentialKey(purpose string) (string, error) {
-	identity, err := loadOrCreateCredentialDevice(credentialDeviceIdentityPath())
+	return deviceCredentialKeyForPaths(purpose, RuntimePaths{})
+}
+
+func deviceCredentialKeyForPaths(purpose string, paths RuntimePaths) (string, error) {
+	path, err := checkedCredentialIdentityPath(paths)
+	if err != nil {
+		return "", err
+	}
+	identity, err := loadOrCreateCredentialDevice(path)
 	if err != nil {
 		return "", err
 	}
@@ -53,7 +73,130 @@ func deviceCredentialKey(purpose string) (string, error) {
 }
 
 func credentialDeviceIdentityPath() string {
-	return credentialDeviceIdentityPathForOS(runtime.GOOS, hostHomeDir(), os.Getenv("LOCALAPPDATA"))
+	path, _, _ := credentialIdentityLocation(RuntimePaths{})
+	return path
+}
+
+func credentialIdentityLocation(paths RuntimePaths) (string, string, error) {
+	root, installed, err := storagepath.Resolve(paths.DesktopAppDir)
+	if err != nil {
+		return "", "", err
+	}
+	if installed {
+		return filepath.Join(root, "Desktop", "credential-device.json"), root, nil
+	}
+	return credentialDeviceIdentityPathForOS(runtime.GOOS, hostHomeDir(), os.Getenv("LOCALAPPDATA")),
+		defaultRuntimePathLayout().DataRoot, nil
+}
+
+// checkedCredentialIdentityPath is also the preflight boundary used before
+// Electron creates its shared identity. It never creates an identity or store.
+func checkedCredentialIdentityPath(paths RuntimePaths) (string, error) {
+	path, root, err := credentialIdentityLocation(paths)
+	if err != nil {
+		return "", err
+	}
+	if _, err := readCredentialDevice(path); err == nil {
+		return path, nil
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return "", err
+	}
+	roots := []string{root, firstNonEmpty(paths.RuntimeRoot, root)}
+	seen := map[string]bool{}
+	for index, dataRoot := range roots {
+		sqliteRoot := filepath.Join(dataRoot, "data", "stores", "sqlite")
+		if index == 1 && paths.RuntimeRoot != "" {
+			sqliteRoot = envText(localSQLiteDirEnvVar, sqliteRoot)
+		}
+		authPath := filepath.Join(sqliteRoot, "auth", "authservice.db")
+		corePath := filepath.Join(sqliteRoot, "core", "core.db")
+		if index == 1 {
+			authPath = firstNonEmpty(paths.AuthServiceDBPath, authPath)
+			corePath = firstNonEmpty(paths.CoreDBPath, corePath)
+		}
+		for _, store := range []struct {
+			path   string
+			tables map[string][]string
+		}{
+			{authPath, map[string][]string{
+				"cloud_auth_connections": {"credential_ciphertext", "auth_state_ciphertext"},
+				"mcp_oauth_grants":       {"ciphertext"}, "mcp_oauth_states": {"ciphertext"},
+			}},
+			{corePath, map[string][]string{
+				"user_model_provider_groups": {"api_key_ciphertext"}, "mcp_servers": {"headers_json"},
+			}},
+		} {
+			if seen[store.path] {
+				continue
+			}
+			seen[store.path] = true
+			found, err := storedDeviceCredentials(store.path, store.tables)
+			if err != nil {
+				return "", fmt.Errorf("inspect credentials before creating a device identity: %w", err)
+			}
+			if found {
+				return "", fmt.Errorf("credential device identity is missing while encrypted credentials remain; restore the original identity")
+			}
+		}
+	}
+	return path, nil
+}
+
+func storedDeviceCredentials(path string, tables map[string][]string) (bool, error) {
+	if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) {
+		return false, nil
+	} else if err != nil {
+		return false, err
+	}
+	uriPath := filepath.ToSlash(path)
+	if runtime.GOOS == "windows" && !strings.HasPrefix(uriPath, "/") {
+		uriPath = "/" + uriPath
+	}
+	uri := url.URL{Scheme: "file", Path: uriPath, RawQuery: "mode=ro"}
+	db, err := sql.Open("sqlite", uri.String())
+	if err != nil {
+		return false, err
+	}
+	defer db.Close()
+	for table, fields := range tables {
+		rows, err := db.Query("PRAGMA table_info(" + table + ")")
+		if err != nil {
+			return false, err
+		}
+		columns := map[string]bool{}
+		for rows.Next() {
+			var cid, notNull, primaryKey int
+			var name, kind string
+			var defaultValue any
+			if err := rows.Scan(&cid, &name, &kind, &notNull, &defaultValue, &primaryKey); err != nil {
+				rows.Close()
+				return false, err
+			}
+			columns[name] = true
+		}
+		err = rows.Err()
+		rows.Close()
+		if err != nil {
+			return false, err
+		}
+		for _, field := range fields {
+			if !columns[field] {
+				continue
+			}
+			predicate := "TRIM(COALESCE(" + field + ", '')) <> ''"
+			if field == "headers_json" {
+				predicate = "CASE WHEN json_valid(headers_json) THEN json_extract(headers_json, '$.enc') = 'aes-gcm' ELSE 0 END"
+			}
+			var found bool
+			if err := db.QueryRow("SELECT EXISTS(SELECT 1 FROM " + table + " WHERE " + predicate + ")").Scan(&found); err != nil {
+				return false, err
+			}
+			if found {
+				return true, nil
+			}
+		}
+	}
+	return false, nil
 }
 
 func credentialDeviceIdentityPathForOS(goos, home, localAppData string) string {

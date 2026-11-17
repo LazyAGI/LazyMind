@@ -46,7 +46,7 @@ func TestMain(m *testing.M) {
 	_ = os.Setenv(localHostHomeEnvVar, home)
 	_ = os.Setenv("HOME", home)
 	_ = os.Setenv("LOCALAPPDATA", filepath.Join(home, "AppData", "Local"))
-	code := m.Run()
+	code := runStorageIsolated(m)
 	_ = os.RemoveAll(home)
 	os.Exit(code)
 }
