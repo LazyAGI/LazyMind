@@ -2734,7 +2734,7 @@ const enUS = {
       installStep: "Install components",
       enableStep: "Enable plugin",
       prepareDescription: "Save your conversations and fully quit DeepSeek Harness before installing. Keep it closed during installation.",
-      continue: "I have quit DeepSeek Harness, install",
+      continue: "I have quit, install",
       cancel: "Cancel",
       close: "Close",
       done: "Done",

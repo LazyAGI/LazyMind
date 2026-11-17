@@ -2697,7 +2697,7 @@ const zhCN = {
       installStep: "安装组件",
       enableStep: "开启插件",
       prepareDescription: "请先保存会话并完全退出 DeepSeek Harness，再开始安装。安装期间请勿启动应用。",
-      continue: "已退出 DeepSeek Harness，开始安装",
+      continue: "已退出，开始安装",
       cancel: "取消",
       close: "关闭",
       done: "完成",
