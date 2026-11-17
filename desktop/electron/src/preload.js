@@ -55,6 +55,8 @@ function createDesktopBridge(ipcRenderer) {
     clearObsidianRoot: () => ipcRenderer.invoke("lazymind:clearObsidianRoot"),
     selectExecutable: (target) => ipcRenderer.invoke("lazymind:selectExecutable", target),
     exportDiagnostics: () => ipcRenderer.invoke("lazymind:exportDiagnostics"),
+    localFileAction: (payload) => ipcRenderer.invoke("lazymind:localFileAction", payload),
+    openChatExternal: (url) => ipcRenderer.invoke("lazymind:openChatExternal", url),
     showItemInFolder: (payload) => ipcRenderer.invoke("lazymind:showItemInFolder", payload),
     saveFileAs: (payload) => ipcRenderer.invoke("lazymind:saveFileAs", payload),
     downloadFile: (payload) => ipcRenderer.invoke("lazymind:downloadFile", payload),
