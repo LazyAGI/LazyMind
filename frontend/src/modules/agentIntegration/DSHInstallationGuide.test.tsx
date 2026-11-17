@@ -115,7 +115,7 @@ describe("DeepSeek Harness connection verification", () => {
   it("shows a safe actionable failure, allows rechecking, and never reinstalls automatically", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     const connect = vi.fn();
-    const failed = { ...configured, issue: { code: "mcp_enable_required", operation_id: "dsh-check-test" },
+    const failed: DesktopAgentIntegrationStatus = { ...configured, issue: { code: "mcp_enable_required", operation_id: "dsh-check-test" },
       message: "private native output", connection: { ...configured.connection!, runtime_state: "unavailable" as const } };
     mocks.statuses.mockResolvedValue({ ok: true, data: { "deepseek-harness": failed } });
     render(<DSHInstallationGuide status={failed} onConnect={connect} onStatus={vi.fn()} onClose={vi.fn()} />);
@@ -136,6 +136,7 @@ describe("DeepSeek Harness connection verification", () => {
     render(<DSHInstallationGuide status={configured} onConnect={vi.fn()} onStatus={update} onClose={vi.fn()} />);
     fireEvent.click(screen.getByRole("button", { name: copy.check }));
     await screen.findByText(copy.checkFailedDescription);
+    expect(screen.getByRole("button", { name: zhCN.agentIntegration.repairRequest.copyHint })).toBeEnabled();
     expect(update).not.toHaveBeenCalled();
     expect(screen.getByRole("button", { name: copy.retryCheck })).toBeEnabled();
   });

@@ -42,6 +42,7 @@ import "./index.scss";
 import ExternalCapabilityAccess from "./ExternalCapabilityAccess";
 import WorkBuddyInstallationGuide from "./WorkBuddyInstallationGuide";
 import DSHInstallationGuide from "./DSHInstallationGuide";
+import RepairRequestCopy from "./RepairRequestCopy";
 import { isDisconnectPending, requiresAgentQuit } from "./agentActions";
 import { dshErrorMessage } from "./dshConnection";
 import { agentConnectionReady, agentConnectionStatusKey } from "./agentConnection";
@@ -106,6 +107,12 @@ const BRIDGE_RETRY_DELAYS_MS = [250, 750];
 type StatusMap = Partial<Record<DesktopAgent, DesktopAgentIntegrationStatus>>;
 type ExecutorPolicyMap = Partial<Record<DesktopExecutorProvider, DesktopExecutorPolicy>>;
 type BindingMap = Partial<Record<DesktopAgentBindingTarget, string>>;
+
+function unavailableInspections(current: StatusMap): StatusMap {
+  return Object.fromEntries(Object.entries(current).map(([agent, status]) => [agent, {
+    ...status, inspection_unavailable: true, connection: undefined,
+  }]));
+}
 
 async function retryBridgeResult<T extends { ok: boolean; reason?: string }>(call: () => Promise<T>): Promise<T> {
   let result = await call();
@@ -184,10 +191,14 @@ export default function AgentIntegrationPage() {
         else localBridgeUnavailable = true;
       };
       try {
-        const result = await retryBridgeResult(() => agentIntegrationStatuses(refreshInstallations));
+        const result = await retryBridgeResult(() => agentIntegrationStatuses(refreshInstallations))
+          .catch(() => ({ ok: false as const, reason: "operation_failed" }));
         if (!isCurrent()) return;
         if (result.ok) setStatuses(result.data);
-        else recordBridgeFailure(result.reason);
+        else {
+          setStatuses(unavailableInspections);
+          recordBridgeFailure(result.reason);
+        }
 
         const [policyResult, bindingResult] = await Promise.all([
           retryBridgeResult(executorIntegrationPolicies),
@@ -256,20 +267,7 @@ export default function AgentIntegrationPage() {
   useEffect(() => {
     let stopped = false;
     let inFlight = false;
-    const markUnavailable = () => setStatuses(current => {
-      const next = { ...current };
-      for (const agent of ["codex", "workbuddy", "deepseek-harness"] as const) {
-        const status = next[agent];
-        if (!status || !(status.enabled ?? status.state === "enabled")) continue;
-        const waitingForAction = requiresAgentQuit(status) || isDisconnectPending(status);
-        next[agent] = { ...status,
-          issue: waitingForAction || status.issue ? status.issue : { code: "host_unavailable" },
-          message: waitingForAction || status.issue ? status.message : "Connection status is unavailable.",
-          connection: { ...status.connection, mcp_configured: status.connection?.mcp_configured ?? false,
-            control_ready: false, presentation_status: "host-offline", runtime_state: "unavailable" } };
-      }
-      return next;
-    });
+    const markUnavailable = () => setStatuses(unavailableInspections);
     const check = async () => {
       if (stopped || inFlight || document.visibilityState !== "visible" || pendingAgentActions.current.size || refreshInFlight.current) return;
       inFlight = true;
@@ -612,6 +610,7 @@ function executablePathPlaceholderKey(target: DesktopAgentBindingTarget | null):
 function integrationErrorMessage(agent: DesktopAgent, status: DesktopAgentIntegrationStatus, t: TFunction): string {
   if (requiresAgentQuit(status)) return t("agentIntegration.quitRequired.description", { agent: status.display_name });
   if (isDisconnectPending(status)) return t("agentIntegration.quitRequired.exitedDescription", { agent: status.display_name });
+  if (status.inspection_unavailable && !status.issue) return t("agentIntegration.repairRequest.inspectionUnavailable");
   if (status.issue?.code === "configuration_unreadable") return t("agentIntegration.setupFeedback.readFailed");
   if (status.state === "conflict" || status.issue?.code === "environment_mismatch") return t("agentIntegration.setupFeedback.environmentMismatch");
   if (status.retry_action === "disconnect") return t("agentIntegration.setupFeedback.disableFailed");
@@ -621,10 +620,6 @@ function integrationErrorMessage(agent: DesktopAgent, status: DesktopAgentIntegr
   if (agent === "workbuddy") return workbuddyErrorMessage(status, t);
   const key = status.state === "error" ? "enableFailed" : "connectionUnavailable";
   return t(`agentIntegration.setupFeedback.${key}`);
-}
-
-function diagnosticText(status: DesktopAgentIntegrationStatus): string {
-  return [status.agent, status.state, status.issue?.code, status.diagnostic_id || status.issue?.operation_id, status.diagnostic_log].filter(Boolean).join("\n");
 }
 
 function AgentCard({
@@ -709,7 +704,7 @@ function AgentCard({
               mcpClientName={mcpClientName}
               mcpChecked={mcpChecked}
               mcpUnknown={mcpStatus?.issue?.code === "configuration_unreadable"}
-              mcpConnectionStatus={t(agentConnectionStatusKey(mcpStatus, mcpChecked))}
+              mcpConnectionStatus={t(agentConnectionStatusKey(mcpStatus, mcpChecked), { agent: mcpStatus?.display_name || agent.name })}
               mcpConnected={agentConnectionReady(mcpStatus)}
               mcpCanToggle={mcpCanToggle}
               executorEnabled={executorEnabled}
@@ -842,8 +837,8 @@ function CollapsedDetectionSummary({
       });
     }
   }
-  if (mcpStatus && (["error", "conflict"].includes(mcpStatus.state) || mcpStatus.issue)) {
-    items.push({ id: "mcp-error", label: t(agentConnectionStatusKey(mcpStatus, Boolean(mcpStatus.enabled))), ready: false });
+  if (mcpStatus && (mcpStatus.inspection_unavailable || ["error", "conflict"].includes(mcpStatus.state) || mcpStatus.issue)) {
+    items.push({ id: "mcp-error", label: t(agentConnectionStatusKey(mcpStatus, Boolean(mcpStatus.enabled)), { agent: mcpStatus.display_name || agent.name }), ready: false });
   }
   if (!items.length) {
     items.push({ id: "pending", label: t("agentIntegration.waitingForDetection"), ready: false });
@@ -1249,7 +1244,7 @@ function AgentConfigurationFlow({
                 {t(`agentIntegration.${agent.id === "deepseek-harness" ? "dshInstallGuide" : agent.id === "codex" ? "codexInstallGuide" : "workbuddyInstallGuide"}.entry`)}
               </Button>
             ) : undefined}
-            status={t(agentConnectionStatusKey(mcpStatus, mcpChecked))}
+            status={t(agentConnectionStatusKey(mcpStatus, mcpChecked), { agent: mcpStatus?.display_name || agent.name })}
             ready={agentConnectionReady(mcpStatus)}
             disabled={!mcpCanToggle}
             loading={busyAction === `${agent.id}:connect` || busyAction === `${agent.id}:disconnect`}
@@ -1282,15 +1277,17 @@ function AgentConfigurationFlow({
         {mcpChecked && !mcpStatus?.issue && mcpStatus?.connection?.runtime_state === "connection_required" && (
           <div className="agent-integration-stage-hint" role="status"><InfoCircleFilled />{t("agentIntegration.connectionErrors.connection_required", { agent: mcpClientName })}</div>
         )}
-        {mcpStatus && (mcpStatus.message || mcpStatus.issue) && (["error", "conflict"].includes(mcpState) || Boolean(mcpStatus.issue)) && (
+        {mcpStatus && (mcpStatus.inspection_unavailable || (mcpStatus.message || mcpStatus.issue) && (["error", "conflict"].includes(mcpState) || Boolean(mcpStatus.issue))) && (
           <div className={`agent-integration-stage-hint ${waitingForAction ? "is-warning" : "is-error"}`} role={waitingForAction ? "status" : "alert"}>
             <WarningOutlined />
             {integrationErrorMessage(agent.id, mcpStatus, t)}
-            <Typography.Text copyable={{ text: diagnosticText(mcpStatus) }}>
-              {t("agentIntegration.setupFeedback.copyDiagnostics")}
-            </Typography.Text>
+            {mcpStatus.inspection_unavailable && (waitingForAction || mcpStatus.issue) &&
+              <Typography.Text type="secondary">{t("agentIntegration.repairRequest.inspectionUnavailable")}</Typography.Text>}
           </div>
         )}
+        <RepairRequestCopy agent={agent.id} status={mcpStatus}
+          error={mcpStatus && (mcpStatus.issue || ["error", "conflict"].includes(mcpState))
+            ? integrationErrorMessage(agent.id, mcpStatus, t) : undefined} />
         {mcpState !== "enabled" && (
           <Space>
             {(mcpState === "error" || waitingForAction) && (retryDisconnect || mcpStatus?.can_connect) && (
