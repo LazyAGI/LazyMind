@@ -112,3 +112,30 @@ func TestPaperGuideLegacyPolicyAndOldClientPreserveDisabled(t *testing.T) {
 		t.Fatal("guide must be on demand")
 	}
 }
+
+func TestPaperGuideModeChangePreservesAutomaticEnrollmentEpoch(t *testing.T) {
+	db := orm.MigrateTestDB(t, &orm.UserReadingPolicy{})
+	ctx := context.Background()
+	p := Defaults()
+	p.Preset = "custom"
+	p.Modes[PDFParse], p.Modes[AIStudy] = Automatic, Automatic
+	p, err := Save(ctx, db.DB, "owner", p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	epoch := *p.AutomaticEligibleAfter
+	importedBeforeGuideChange := epoch.Add(time.Nanosecond)
+	for _, guideMode := range []string{Disabled, OnDemand} {
+		p.Modes[PaperGuide] = guideMode
+		p, err = Save(ctx, db.DB, "owner", p)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !p.AutomaticEligibleAfter.Equal(epoch) || !Eligible(p, importedBeforeGuideChange) {
+			t.Fatalf("guide mode %s excluded a pending import: epoch %v became %v", guideMode, epoch, p.AutomaticEligibleAfter)
+		}
+		if p.Modes[PaperGuide] != guideMode {
+			t.Fatalf("guide mode not saved: %+v", p.Modes)
+		}
+	}
+}

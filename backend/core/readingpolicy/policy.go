@@ -10,7 +10,6 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 	"lazymind/core/common/orm"
-	"reflect"
 	"time"
 )
 
@@ -127,7 +126,10 @@ func Save(ctx context.Context, db *gorm.DB, user string, p Policy) (Policy, erro
 		p.Modes[PaperGuide] = old.Modes[PaperGuide]
 	}
 	p.AutomaticEligibleAfter = old.AutomaticEligibleAfter
-	if HasAutomatic(p) && (!HasAutomatic(old) || !reflect.DeepEqual(p.Modes, old.Modes)) {
+	// Only the preparation categories define automatic enrollment. The
+	// independent on-demand guide must not exclude imports awaiting enrollment.
+	preparationModesChanged := p.Modes[PDFParse] != old.Modes[PDFParse] || p.Modes[AIStudy] != old.Modes[AIStudy]
+	if HasAutomatic(p) && (!HasAutomatic(old) || preparationModesChanged) {
 		now := time.Now().UTC()
 		p.AutomaticEligibleAfter = &now
 	}
