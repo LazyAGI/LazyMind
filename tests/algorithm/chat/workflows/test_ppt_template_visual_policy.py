@@ -78,11 +78,14 @@ def test_native_pptx_is_a_final_result_not_a_separate_tab():
     assert any(child.get('slot') == 'native_pptx' for child in final['composite_layout']['children'])
 
 
-def test_material_stage_only_displays_summary():
+def test_material_stage_displays_summary_and_registered_images():
     root = Path(__file__).resolve().parents[4]
     workflow = yaml.safe_load((root / 'workflows/ppt-workflow/workflow.yaml').read_text(encoding='utf-8'))
     tab = next(tab for tab in workflow['ui']['tabs'] if tab['id'] == 'materials')
-    assert tab['slots'] == [{'id': 'material_summary'}]
+    assert tab['step_id'] == 'collect_materials'
+    assert tab['layout'] == 'list'
+    assert tab['slots'] == [{'id': 'material_summary'}, {'id': 'material_images'}]
+    assert workflow['ui']['slots']['material_images']['widgetType'] == 'image-gallery'
     slots = {slot['id']: slot for slot in workflow['slots']}
-    for name in ('template_pptx', 'uploaded_materials', 'material_images'):
+    for name in ('template_pptx', 'uploaded_materials'):
         assert slots[name]['exposed'] is False

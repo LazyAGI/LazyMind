@@ -59,7 +59,10 @@ def _quiet_trace(kbs):
         inject_model_config(llm_config)
         args, kwargs = mark_embedding_query_arguments(args, kwargs)
         from lazymind.parsing.service.embedding_reset import index_operation
-        with index_operation((llm_config or {}).get('_embedding_generation')) as generation:
+        # LazyLLM registers the algorithm through _lazy_init during startup.
+        # Keep registration under the lock even when vector operations are blocked.
+        with index_operation((llm_config or {}).get('_embedding_generation'),
+                             initializing=args == ('_lazy_init',)) as generation:
             doc = kbs[kb_group]
             if getattr(doc, '_lazymind_store_generation', None) != generation:
                 if getattr(doc, '_lazy_init', None) is not None and doc._lazy_init.flag:

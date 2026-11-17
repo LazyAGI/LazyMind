@@ -49,14 +49,18 @@ export async function prepareManagedFontResources(page, htmls) {
       .map(match => match[0]).filter(block => [...block.matchAll(/src:url\(["']?([^\s"')]+)["']?\)/g)]
         .some(([, source]) => !source.startsWith('data:'))).join('');
     const fonts = portableFontFaces(required, localFaces, { resourceUrlsOnly: true });
-    let resolved = html;
+    const resolvedUrls = new Map();
     for (const face of fonts) {
       const extension = new URL(face.source, 'https://lazymind.invalid').pathname.split('.').at(-1);
       const url = `https://lazymind-fonts.invalid/static-files/presentation-fonts/${face.sha256}.${extension}`;
       resources.set(url, { body: face.data, contentType: `font/${extension}` });
-      resolved = resolved.replace(/<style\b[^>]*data-lazymind-font-required="true"[^>]*>[\s\S]*?<\/style>/gi,
-        block => block.replaceAll(face.source, url));
+      resolvedUrls.set(face.source, url);
     }
+    const resolved = html.replace(/<style\b[^>]*data-lazymind-font-required="true"[^>]*>[\s\S]*?<\/style>/gi,
+      block => block.replace(/src:url\((['"]?)([^\s"')]+)\1\)/g,
+        (match, quote, source) => resolvedUrls.has(source)
+          ? `src:url(${quote}${resolvedUrls.get(source)}${quote})`
+          : match));
     return {
       html: resolved,
       fontRequests: fonts.map(face => `${face.style} ${face.weight} 16px ${JSON.stringify(face.family)}`),

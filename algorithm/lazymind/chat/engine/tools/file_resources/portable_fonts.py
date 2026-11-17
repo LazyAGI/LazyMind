@@ -41,16 +41,20 @@ def _system_font_paths():
                         if p and '\ufffd' not in p)
         except (OSError, subprocess.SubprocessError, UnicodeError):
             pass
-    for root in (Path('/System/Library/Fonts'), Path('/Library/Fonts'), Path.home() / 'Library/Fonts',
-                 Path('/usr/share/fonts'), Path('/usr/local/share/fonts'),
-                 Path(os.environ.get('WINDIR', 'C:/Windows')) / 'Fonts'):
+    roots = [Path('/System/Library/Fonts'), Path('/Library/Fonts'), Path.home() / 'Library/Fonts',
+             Path('/usr/share/fonts'), Path('/usr/local/share/fonts'),
+             Path(os.environ.get('WINDIR', 'C:/Windows')) / 'Fonts']
+    if user_fonts := os.environ.get('LOCALAPPDATA'):
+        roots.append(Path(user_fonts) / 'Microsoft/Windows/Fonts')
+    for root in roots:
         if root.is_dir():
             yield from root.rglob('*')
 
 
-def portable_font_faces(family, allow_download=False):
+def portable_font_faces(family, allow_download=False, *, allow_system_only=False):
     family = ensure_font(family, allow_download)
     records = [r for r in local_fonts() if family.casefold() in {a.casefold() for a in r['aliases']}]
+    installed = False
     if not records:
         # Resolve by actual name-table entries, never by filename or a fallback.
         for source in dict.fromkeys(_system_font_paths()):
@@ -65,6 +69,7 @@ def portable_font_faces(family, allow_download=False):
                         aliases = {n.toUnicode().casefold() for n in font['name'].names if n.nameID in {1, 16}}
                         if family.casefold() not in aliases:
                             continue
+                        installed = True
                         if not editable_embedding(int(getattr(font.get('OS/2'), 'fsType', 0))):
                             continue
                         if collection:
@@ -81,13 +86,23 @@ def portable_font_faces(family, allow_download=False):
             except (OSError, ValueError, KeyError):
                 continue
     if not records:
+        if allow_system_only and installed and os.environ.get('LAZYMIND_RUNTIME_MODE', '').lower() == 'local':
+            return family, []
         raise ValueError(f'字体 {family!r} 没有可嵌入的字体文件；请导入允许嵌入的 TTF/OTF，或下载支持的开源字体')
-    for record in records:
+    usable = [record for record in records if editable_embedding(record['fs_type'])]
+    if not usable:
+        if allow_system_only and os.environ.get('LAZYMIND_RUNTIME_MODE', '').lower() == 'local':
+            # An imported face alone doesn't prove it is installed in the browser.
+            from .presentation_edit import available_font_families
+            if family.casefold() in {name.casefold() for name in available_font_families(include_managed=False)}:
+                return family, []
+        raise ValueError(f'字体 {family!r} 不允许嵌入可编辑文档；请选择其他字体')
+    for record in usable:
         font_bytes(record)
     # PowerPoint has four face slots. Resolve intermediate weights consistently
     # before packaging so preview and export use the same bytes per slot.
     variants = {}
-    for record in sorted(records, key=lambda r: (abs(r['weight'] - (700 if r['weight'] >= 600 else 400)), r['id'])):
+    for record in sorted(usable, key=lambda r: (abs(r['weight'] - (700 if r['weight'] >= 600 else 400)), r['id'])):
         variants.setdefault((record['style'], record['weight'] >= 600), record)
     return family, list(variants.values())
 

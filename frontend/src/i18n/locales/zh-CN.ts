@@ -4725,6 +4725,8 @@ const zhCN = {
     workflowExportingPptx: "正在导出…",
     workflowExportNoHtml: "暂无可导出的 HTML 幻灯片。",
     workflowExportFailed: "PPT 导出失败。",
+    workflowExportPageFailed: "第 {{page}} 页导出失败。",
+    workflowExportInvalidHtml: "未能读取有效的幻灯片内容，请重新加载后重试。",
     workflowExportSelectModeTitle: "选择导出格式",
     workflowExportSelectModeDesc: "可编辑 PPTX 保留文字、图形和普通图表的编辑能力，复杂图表优先保留原始外观。图片版 PPTX 与 PDF 保留页面视觉效果。",
     workflowExportEmbedFonts: "在可编辑 PPTX 中嵌入字体",

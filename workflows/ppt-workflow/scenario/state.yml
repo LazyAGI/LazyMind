@@ -249,6 +249,10 @@ steps:
       For external execution, list acknowledged artifacts with
       workflow.artifact.list (metadata_only=true) and record the material_images
       artifact IDs. For LazyMind execution, use ppt_register_material_images.
+      Always download remote image bytes before registration. Use the returned local
+      image path in page prompts; never use a remote URL or a Feishu file token as
+      a substitute for a downloaded image. Connector permission failures must be
+      reported accurately; do not describe them as image registration failures.
       - If a user-required photo is unavailable after trying alternative sources,
       report the missing photo and the actual download or capability error. Keep
       acknowledged assets for recovery. Fail the step or ask for a replacement
@@ -472,6 +476,11 @@ steps:
       For a new deck or unfinished planning in LazyMind, call ppt_plan_page_prompts
       with the saved output_format and the shared global_style. It checkpoints each prompt
       and speaker note and resumes from the first missing page after a failure.
+      If the model provider stops returning content and the call times out, report
+      the provider response timeout and suggest retrying later or switching provider.
+      If finish=length, report that the provider truncated the output at its limit.
+      Preserve completed prompts; report the failed page and original cause instead
+      of replacing it with a generic missing-deliverable error.
 
       Author each spoken script once, separately from slide copy and generation
       prompts. Use the allocated duration and cumulative range; explain the page's

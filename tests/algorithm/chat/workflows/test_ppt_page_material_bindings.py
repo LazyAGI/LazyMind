@@ -146,6 +146,34 @@ def test_text_only_and_remote_text_links_are_unchanged(runtime, deck):
     assert calls[0] == brief
 
 
+@pytest.mark.parametrize('origin', [
+    'https://example.org/download?id=1&size=large',
+    'https://example.org/%E5%9B%BE.png?token=one',
+])
+def test_registered_remote_origin_uses_downloaded_bytes_after_source_disappears(runtime, deck, tmp_path, origin):
+    from material_images import record_material_aliases
+    source = tmp_path / 'download.png'
+    source.write_bytes((deck / 'images/material_01.png').read_bytes())
+    record_material_aliases(deck, [{'path': str(source), 'origin': origin}])
+    source.unlink()
+    code, result, calls = generate(runtime, deck, f'Use `{origin}`', [html([origin])])
+    assert code == 0 and result['status'] == 'ok'
+    assert calls == ['Use `../images/material_01.png`']
+    assert origin not in (deck / 'pages/page_001.html').read_text()
+
+
+def test_remote_alias_does_not_match_different_query_or_filename(runtime, deck, tmp_path):
+    from material_images import bind_prompt_materials, normalize_material_sources, record_material_aliases
+    source = tmp_path / 'download.png'
+    source.write_bytes((deck / 'images/material_01.png').read_bytes())
+    origin = 'https://example.org/download?id=1'
+    record_material_aliases(deck, [{'path': str(source), 'origin': origin}])
+    other = origin + '2'
+    brief = f'Reference {other}'
+    assert bind_prompt_materials(deck, brief) == (brief, [])
+    assert normalize_material_sources(html([other]), deck) == html([other])
+
+
 def test_trusted_input_alias_survives_deleted_input_and_encoded_file_uri(runtime, deck, tmp_path):
     from material_images import bind_prompt_materials, record_material_aliases
     inputs = tmp_path / 'planning' / 'inputs' / 'material_images'
