@@ -681,3 +681,27 @@ it('paints imported PDF-space annotation geometry when highlights arrive after t
  view.rerender(<RenderPdf {...props} savedNoteHighlights={[{id:'zotero',page:1,color:'yellow',rects:[],pdfRects:[[60,600,180,640]]}]}/>);
  await waitFor(()=>expect(view.container.querySelector('[data-pdf-note-highlight="yellow"] path')).toHaveAttribute('d','M0.1 0.2H0.3V0.25H0.1Z'));
 });
+
+it('does not rewind continued scrolling when the parent echoes a reported page position',async()=>{
+ const report=vi.fn();
+ const props={fileData:'scroll-feedback.pdf',defaultPageWidth:600,onViewPositionChange:report};
+ const view=render(<RenderPdf {...props} viewPosition={{page:1,progress:0}}/>);
+ await act(async()=>{});
+ const viewport=view.container.querySelector('.pdf-reader-with-study')!.firstElementChild as HTMLElement;
+ const scroll=vi.spyOn(viewport,'scrollTo').mockImplementation(options=>{
+  if(typeof options==='object')viewport.scrollTop=options.top||0;
+ });
+ // Cross into page two, then keep moving before React receives the echoed prop.
+ viewport.scrollTop=1000;fireEvent.scroll(viewport);
+ const reported=report.mock.calls.at(-1)![0];
+ expect(reported.page).toBe(2);
+ viewport.scrollTop=1100;fireEvent.scroll(viewport);
+ scroll.mockClear();
+ view.rerender(<RenderPdf {...props} viewPosition={reported}/>);
+ expect(viewport.scrollTop).toBe(1100);
+ expect(scroll).not.toHaveBeenCalled();
+ // Explicit external navigation must still work.
+ view.rerender(<RenderPdf {...props} viewPosition={{page:3,progress:.5}}/>);
+ expect(scroll).toHaveBeenCalled();
+ expectPage(3);
+});

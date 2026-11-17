@@ -297,6 +297,7 @@ export default function RenderPdf({
   const appliedPositionRef = useRef("");
   const positionIdleTimer=useRef<ReturnType<typeof setTimeout>>();
   const pendingPosition=useRef<PdfViewPosition>();
+  const lastReportedScrollPosition=useRef<PdfViewPosition>();
   const reportedPage=useRef(viewPosition?.page||1);
   const reportPosition=useRef(onViewPositionChange);
   reportPosition.current=onViewPositionChange;
@@ -363,6 +364,7 @@ export default function RenderPdf({
     lastPageNavigation.current = "";
     clearTimeout(positionIdleTimer.current);
     pendingPosition.current=undefined;
+    lastReportedScrollPosition.current=undefined;
     reportedPage.current=viewPosition?.page||1;
     setScrollTop(0);
     appliedPositionRef.current = "";
@@ -462,7 +464,7 @@ export default function RenderPdf({
       };
       pendingPosition.current=position;
       clearTimeout(positionIdleTimer.current);
-      const publish=()=>{const latest=pendingPosition.current;if(!latest)return;pendingPosition.current=undefined;reportPosition.current?.(latest);};
+      const publish=()=>{const latest=pendingPosition.current;if(!latest)return;pendingPosition.current=undefined;lastReportedScrollPosition.current=latest;reportPosition.current?.(latest);};
       if(position.page!==reportedPage.current){reportedPage.current=position.page;publish();}
       else positionIdleTimer.current=setTimeout(publish,250);
     }
@@ -727,6 +729,10 @@ export default function RenderPdf({
     const key = `${page}:${progress.toFixed(4)}`;
     if (appliedPositionRef.current === key) return;
     appliedPositionRef.current = key;
+    // A parent's reading-progress update is an acknowledgement, not navigation.
+    // Replaying it can rewind newer wheel input or cancel momentum at page edges.
+    const reported = lastReportedScrollPosition.current;
+    if (reported?.page === page + 1 && reported.progress === progress) return;
     const top = (pageTops[page] || 0) + (pageHeightsPx[page] || 0) * progress;
     containerRef.current.scrollTo({ top, behavior: "auto" });
     setScrollTop(top);
