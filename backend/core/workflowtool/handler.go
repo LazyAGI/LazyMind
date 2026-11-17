@@ -10,6 +10,7 @@ import (
 	"github.com/gorilla/mux"
 	"gorm.io/gorm"
 	"lazymind/core/workflow/controlstore"
+	"lazymind/core/workflow/executor"
 	workflowstore "lazymind/core/workflow/store"
 )
 
@@ -75,7 +76,12 @@ func (h Handler) List(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	vars := mux.Vars(r)
-	result, err := h.Service.List(r.Context(), owner, vars["session_id"], vars["attempt_id"], input.ExecutionHandle)
+	handle, err := executor.ResolveToolWorker(r.Context(), h.Service.DB, owner, vars["session_id"], vars["attempt_id"], input.ExecutionHandle)
+	if err != nil {
+		serviceError(w, err)
+		return
+	}
+	result, err := h.Service.List(r.Context(), owner, vars["session_id"], vars["attempt_id"], handle)
 	if err != nil {
 		serviceError(w, err)
 		return
@@ -90,6 +96,28 @@ func (h Handler) Call(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	vars := mux.Vars(r)
+	handle, err := executor.ResolveToolWorker(r.Context(), h.Service.DB, owner, vars["session_id"], vars["attempt_id"], input.ExecutionHandle)
+	if err != nil {
+		serviceError(w, err)
+		return
+	}
+	input.ExecutionHandle = handle
+	if strings.HasPrefix(input.ToolName, "paper_") {
+		contract, _, authErr := executor.AuthorizeExternalToolCall(r.Context(), h.Service.DB, owner, vars["session_id"], vars["attempt_id"], handle, input.ToolName)
+		if authErr != nil {
+			serviceError(w, authErr)
+			return
+		}
+		scope, scopeErr := executor.PaperToolContext(r.Context(), h.Service.DB, contract)
+		if scopeErr != nil {
+			serviceError(w, scopeErr)
+			return
+		}
+		if input.Arguments == nil {
+			input.Arguments = map[string]any{}
+		}
+		input.Arguments["__paper_context"] = scope
+	}
 	result, err := h.Service.Call(withDataToolCaller(r.Context(), r.Header), owner, vars["session_id"], vars["attempt_id"], input)
 	if err != nil {
 		serviceError(w, err)
@@ -101,4 +129,23 @@ func (h Handler) Call(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	reply(w, http.StatusOK, result, nil)
+}
+
+// GrantWorker accepts only a controller handle. Workers cannot delegate control.
+func (h Handler) GrantWorker(w http.ResponseWriter, r *http.Request) {
+	var input struct {
+		ExecutionHandle string `json:"execution_handle"`
+		CommandID       string `json:"command_id"`
+	}
+	owner, ok := decode(w, r, &input)
+	if !ok {
+		return
+	}
+	vars := mux.Vars(r)
+	token, err := executor.GrantToolWorker(r.Context(), h.Service.DB, owner, vars["session_id"], vars["attempt_id"], input.ExecutionHandle, input.CommandID)
+	if err != nil {
+		serviceError(w, err)
+		return
+	}
+	reply(w, http.StatusOK, map[string]any{"worker_handle": token, "scope": "step_tools"}, nil)
 }

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import hashlib
 import inspect
 import json
 import logging
@@ -204,6 +205,17 @@ class RemoteWorkflowExecutor:
                 # Native tool bindings remain in the task; they do not replace
                 # the package's shared business instructions.
                 execution = context.get('execution') or {}
+                if execution.get('output_validator') == 'paper-agent-v1':
+                    params['_paper_execution'] = {
+                        'session_id': context['session_id'], 'attempt_id': context['attempt_id'],
+                        'revision': context['workflow_revision'], 'step_id': context['step_id'],
+                        'bindings': context.get('inputs') or {},
+                        'request': context.get('user_request') or '',
+                        'launch_request': context.get('launch_request') or '',
+                        'lease_hash': hashlib.sha256(lease.encode()).hexdigest(), 'check_liveness': True,
+                        'knowledge_scope': context.get('knowledge_scope'),
+                    }
+
                 shared_instructions = [str(value) for value in execution.get('constraints', [])]
                 for skill in execution.get('skill_files', []):
                     shared_instructions.append(

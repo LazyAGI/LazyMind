@@ -89,7 +89,7 @@ def configuration():
     return timeout
 
 
-def execute(payload):
+def execute(payload, *, cancelled=None):
     timeout = configuration()
     validate_code(payload['code'])
     raw = json.dumps(payload, ensure_ascii=False, allow_nan=False).encode()
@@ -97,7 +97,8 @@ def execute(payload):
         raise ValueError('统计执行输入超过 32 MiB')
     try:
         result = container.execute(payload, Path(__file__).with_name('generated_worker.py'),
-                                   timeout, label='生成统计代码')
+                                   timeout, label='生成统计代码',
+                                   **({'cancelled': cancelled} if cancelled is not None else {}))
     except container.ContainerEnvironmentError as exc:
         raise AnalysisEnvironmentError(str(exc)) from exc
     if set(result) != {'results', 'versions', 'seed'} or result['seed'] != payload['seed']:

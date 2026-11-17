@@ -222,3 +222,53 @@ finally:
     result = json.loads(completed.stdout.splitlines()[-1])
     assert Path(result['prefix']).resolve() == environment.resolve()
     assert result['result'] == {'mean': 3.0}
+
+
+def test_cancellation_terminates_the_actual_worker(monkeypatch, tmp_path):
+    from concurrent.futures import CancelledError
+    worker = tmp_path / 'cancellable.py'
+    worker.write_text('import time\ntime.sleep(30)\n')
+    children = []
+
+    class Child(subprocess.Popen):
+        def check_storage(self):
+            pass
+
+        def close(self):
+            if self.poll() is None:
+                self.kill()
+            self.wait(timeout=5)
+
+    def start(program, scratch, _timeout, streams, env):
+        child = Child([sys.executable, '-I', str(program)], cwd=scratch,
+                      stdin=streams[0], stdout=streams[1], stderr=streams[2], env=env)
+        children.append(child)
+        return child
+
+    monkeypatch.setattr(container, 'sys', SimpleNamespace(platform='win32', executable=sys.executable))
+    monkeypatch.setattr(windows, 'start', start)
+    with pytest.raises(CancelledError):
+        container.execute({}, worker, 30, label='cancellable', cancelled=lambda: True)
+    assert len(children) == 1 and children[0].poll() is not None
+
+
+@pytest.mark.parametrize('exited', [True, False])
+def test_macos_task_info_exit_race_does_not_weaken_running_checks(monkeypatch, tmp_path, exited):
+    import errno
+    from lazymind.document_tools.paper.execution import macos
+    monkeypatch.setattr(macos, '_process_info', lambda: lambda *args: 0)
+    monkeypatch.setattr(macos.ctypes, 'get_errno', lambda: errno.ESRCH)
+    process = Mock(pid=123)
+    process.poll.return_value = None
+    if not exited:
+        process.wait.side_effect = subprocess.TimeoutExpired('worker', 0.05)
+        with pytest.raises(OSError, match='内存用量'):
+            macos.check_limits(process, tmp_path)
+    else:
+        process.wait.return_value = 0
+        macos.check_limits(process, tmp_path)
+        # Even a completed job must pass the final scratch-storage inspection.
+        monkeypatch.setattr(macos, 'FILE_LIMIT', 1)
+        (tmp_path / 'oversized').write_bytes(b'xx')
+        with pytest.raises(RuntimeError, match='临时文件'):
+            macos.check_limits(process, tmp_path)

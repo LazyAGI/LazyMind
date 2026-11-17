@@ -21,8 +21,9 @@ type ExecutionPolicy struct {
 }
 
 const (
-	ExternalModelExecutor    = "external-agent"
-	PPTImagesOutputValidator = "ppt-images-v1"
+	ExternalModelExecutor     = "external-agent"
+	PPTImagesOutputValidator  = "ppt-images-v1"
+	PaperAgentOutputValidator = "paper-agent-v1"
 )
 
 // UsesExternalModels also accepts the executor value stored by earlier revisions.
@@ -121,7 +122,7 @@ func compileExecution(graph *CompiledStateGraph) []Diagnostic {
 			invalid(field, "every execution step requires a state.yml prompt and an explicit capability declaration")
 			continue
 		}
-		if step.OutputValidator != "" && step.OutputValidator != PPTImagesOutputValidator {
+		if step.OutputValidator != "" && step.OutputValidator != PPTImagesOutputValidator && step.OutputValidator != PaperAgentOutputValidator {
 			invalid(field+".output_validator", "unknown output validator")
 		}
 		step.Version = policy.Version

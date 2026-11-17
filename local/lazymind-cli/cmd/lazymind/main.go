@@ -27,6 +27,7 @@ import (
 	"lazymind/agentconnector/internal/executorpolicy"
 	"lazymind/agentconnector/internal/mcpbridge"
 	"lazymind/agentconnector/internal/workflowhost"
+	"lazymind/agentconnector/internal/workflowmcp"
 )
 
 const agentDiscoveryRetryDelay = 2 * time.Second
@@ -673,6 +674,14 @@ func waitAgentDiscovery(ctx context.Context) bool {
 }
 
 func runMCP(ctx context.Context, args []string) error {
+	if len(args) == 2 && args[0] == "workflow-worker" {
+		store, err := credentials.NewStore("", "")
+		if err != nil {
+			return err
+		}
+		return workflowmcp.RunToolWorker(ctx, store, args[1])
+	}
+
 	if len(args) == 1 && args[0] == "codex-workflow" {
 		return runCodexWorkflowMCP(ctx)
 	}

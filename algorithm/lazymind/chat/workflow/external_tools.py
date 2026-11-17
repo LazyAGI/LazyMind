@@ -15,6 +15,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, create_model
 import yaml
 
 from . import external_pdf_tools, external_ppt_tools, smoke_tools
+from lazymind.document_tools.paper import agent_tools as paper_tools
 from .external_ppt_tools import ExternalToolError
 from .external_tool_context import external_package_scope
 
@@ -44,6 +45,23 @@ _REGISTRY.update({
     name: ('scripts/external_generation_tools.py', GENERATION_BINDING, getattr(external_ppt_tools, name))
     for name in ('ppt_prepare_page', 'ppt_compute_timing', 'ppt_order_papers')
 })
+PAPER_BINDING = '''"""Audited paper primitives; the executing Agent owns all generation and judgment."""
+from lazymind.document_tools.paper.agent_tools import (
+    paper_analyze, paper_plot, paper_prepare_candidate, paper_prepare_inputs,
+    paper_execution_status, paper_cancel_execution, paper_preview_revision,
+    paper_knowledge_documents, paper_knowledge_read,
+    paper_read_material, paper_read_paper, paper_run_experiment, paper_search,
+    paper_submit_candidate, paper_read_result,
+)
+'''
+_REGISTRY.update({
+    name: ('scripts/agent_tools.py', PAPER_BINDING, getattr(paper_tools, name))
+    for name in ('paper_prepare_inputs', 'paper_read_material', 'paper_search', 'paper_read_paper',
+                 'paper_knowledge_documents', 'paper_knowledge_read',
+                 'paper_analyze', 'paper_plot', 'paper_run_experiment', 'paper_prepare_candidate',
+                 'paper_execution_status', 'paper_cancel_execution', 'paper_preview_revision')
+})
+
 MAX_PACKAGE_BYTES = 64 * 1024 * 1024
 
 SMOKE_BINDING = '''"""Shared deterministic tools for the Workflow smoke test."""
@@ -178,10 +196,20 @@ def call_external_tool(request: ExternalToolCallRequest) -> dict[str, Any]:
     function = _selected(request, files=files).get(request.tool_name)
     if function is None:
         raise ExternalToolError('TOOL_NOT_ALLOWED', 'This tool is not available to the pinned external step.')
+    raw_arguments = dict(request.arguments)
+    paper_context = raw_arguments.pop('__paper_context', None) if request.tool_name.startswith('paper_') else None
     try:
-        arguments = _arguments_model(function).model_validate(request.arguments).model_dump()
+        arguments = _arguments_model(function).model_validate(raw_arguments).model_dump()
     except ValidationError as exc:
         raise ExternalToolError('INVALID_ARGUMENT', 'Arguments do not match the declared tool schema.') from exc
+    if request.tool_name.startswith('paper_'):
+        if paper_context is None:
+            raise ExternalToolError('INVALID_ARGUMENT', 'Core-owned paper context is required.', public=True)
+        try:
+            with paper_tools.paper_scope(paper_context):
+                return {'result': function(**arguments)}
+        except ValueError as exc:
+            raise ExternalToolError('INVALID_ARGUMENT', str(exc), public=True) from exc
     with external_package_scope(files):
         try:
             return {'result': function(**arguments)}

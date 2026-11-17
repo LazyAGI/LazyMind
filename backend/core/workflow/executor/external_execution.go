@@ -19,7 +19,8 @@ import (
 // acceptance criteria and output declaration.
 type ExecutionContract struct {
 	graphengine.StepExecution
-	SkillFiles []SkillFile `json:"skill_files,omitempty"`
+	SkillFiles []SkillFile                 `json:"skill_files,omitempty"`
+	Limits     *graphengine.ExecutionLimit `json:"limits,omitempty"`
 }
 
 type SkillFile struct {

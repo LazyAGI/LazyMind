@@ -748,6 +748,8 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "POST", "/workflow-sessions/{session_id}/hosted-attempts/{attempt_id}:complete", []string{"qa.write"}, hostedHandler.Complete)
 	handleAPI(r, "POST", "/workflow-sessions/{session_id}/hosted-attempts/{attempt_id}/artifacts", []string{"qa.write"}, hostedHandler.Publish)
 	handleAPI(r, "POST", "/workflow-sessions/{session_id}/hosted-attempts/{attempt_id}/tools:list", []string{"qa.read"}, workflowToolHandler.List)
+	handleAPI(r, "POST", "/workflow-sessions/{session_id}/hosted-attempts/{attempt_id}/workers:grant", []string{"qa.write"}, workflowToolHandler.GrantWorker)
+	handleAPI(r, "POST", "/internal/workflow-attempts/{attempt_id}/paper-data", nil, workflowToolHandler.PaperData)
 	handleAPI(r, "POST", "/workflow-sessions/{session_id}/hosted-attempts/{attempt_id}/tools:call", []string{"qa.write"}, workflowToolHandler.Call)
 	handleAPI(r, "POST", "/workflow-sessions/{session_id}/input-bindings", []string{"qa.write"}, workflowFacade.BindInput)
 	handleAPI(r, "GET", "/workflow-sessions/{session_id}/input-bindings", []string{"qa.read"}, workflowFacade.ListInputs)

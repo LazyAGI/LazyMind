@@ -236,11 +236,17 @@ func (s *Service) Call(ctx context.Context, owner, sessionID, attemptID string, 
 	row := orm.WorkflowCommand{CommandID: commandID, OwnerUserID: owner, SessionID: sessionID,
 		ContractVersion: "workflow.tool.v1", RequestHash: controlstore.Hash(canonical), HTTPStatus: http.StatusAccepted,
 		ResponseJSON: json.RawMessage(`{}`), CreatedAt: time.Now().UTC()}
-	reservation := s.DB.WithContext(ctx).Clauses(clause.OnConflict{DoNothing: true}).Create(&row)
-	if reservation.Error != nil {
-		return Result{}, reservation.Error
+	created := false
+	if contract.Execution != nil && contract.Execution.OutputValidator == "paper-agent-v1" {
+		created, err = s.reservePaperToolCall(ctx, contract, input, row)
+	} else {
+		reservation := s.DB.WithContext(ctx).Clauses(clause.OnConflict{DoNothing: true}).Create(&row)
+		created, err = reservation.RowsAffected != 0, reservation.Error
 	}
-	if reservation.RowsAffected == 0 {
+	if err != nil {
+		return Result{}, err
+	}
+	if !created {
 		var previous orm.WorkflowCommand
 		if err := s.DB.WithContext(ctx).Where("command_id = ?", commandID).First(&previous).Error; err != nil {
 			return Result{}, err

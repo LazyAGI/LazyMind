@@ -81,6 +81,10 @@ func (loader DBContextLoader) LoadAttemptContext(ctx context.Context, id string)
 					node = node.ForExecutor(host)
 					if node.Execution != nil {
 						value.Execution = &ExecutionContract{StepExecution: *node.Execution}
+						if node.Execution.OutputValidator == "paper-agent-v1" {
+							limits := graph.Runtime.ExecutionLimits[row.StepID]
+							value.Execution.Limits = &limits
+						}
 					}
 					value.Prompt, value.Acceptance = node.Prompt, node.Acceptance
 					value.DeclaredInputTransports = node.InputTransports

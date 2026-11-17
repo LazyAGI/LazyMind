@@ -54,19 +54,20 @@ steps:
     mode: human
     route: choice
     tools_only: true
-    terminal_tools_only: true
     prompt: |
-      This is an already scheduled algorithm execution, not a planning or clarification task.
-      Immediately call run_paper_step exactly once with no arguments and wait for its result.
-      Do not substitute chat text for the tool call.
-      The tool reads the actual node, bound materials, current request, and retry flag from Runtime.
-      The currently viewed tab is not the execution node. Do not choose nodes, materials, or content
-      based on the viewed tab or an old launch request.
-      Independent modules implement the algorithms. The tool must save all artifacts; do not invent materials or results.
-      On tool failure, report the error and stop. Do not retry, fabricate, or save materials on your own.
-      On success, end this node and wait for user confirmation or selection; do not run other branches.
-    tools: [run_paper_step]
-    terminal_tools: [run_paper_step]
+      Identify the research problem, contribution, scope and feasibility from actual evidence. Compare
+      alternatives and state missing evidence. Develop a topic only when requested; retain the supplied methods,
+      observations and limitations. Output question text.  Read the complete pinned scenario/execution.md and this
+      step method before acting. Call paper_prepare_inputs to read actual inputs, output fields and schemas; use
+      paper_read_material for full source pages. You are the executing Agent: perform the reasoning, generation,
+      checking and finite repair yourself. Do not call run_paper_step or ask LazyMind for model responses. Keep
+      source and computation receipts. Native execution finishes through paper_submit_candidate; external
+      execution uses paper_prepare_candidate and returns its exact artifact bundle to the controller for
+      publication and completion. Never substitute a source filename or a summary for its content. Program
+      validation does not establish scientific correctness. Stop at the current user-review boundary and do not
+      claim approval.
+    tools: [paper_prepare_inputs, paper_read_material, paper_knowledge_documents, paper_knowledge_read, paper_search, paper_read_paper, paper_submit_candidate, paper_read_result]
+    terminal_tools: [paper_submit_candidate]
     inputs:
       - {material: research_materials, required: false, transport: path}
       - {material: seed_pool, required: false, transport: path}
@@ -75,29 +76,39 @@ steps:
       - {material: manuscript_text, required: false, transport: path}
       - {material: paper_topic, required: false, transport: path}
       - {material: review_request, required: false, transport: path}
+      - {material: paper_source_policy, required: false, transport: path}
+      - {material: paper_execution_policy, required: false, transport: path}
     outputs:
       - {material: research_topic_pool, required: true}
       - {material: research_topic_document, required: true}
-    acceptance_criteria: Tool validation succeeds and all declared artifacts are saved; never present demonstration outputs as real research findings.
+      - {material: research_topic_receipt, required: true}
+    acceptance_criteria: >
+      All required output files and the exact signed validation receipt are accepted atomically; input versions,
+      source facts and execution records are genuine. Agent provides honest semantic/visual checks; user approvals
+      remain human.
   literature_review:
     label: "文献综述"
     mode: human
     route: choice
     capabilities: [kb, academic_search]
     tools_only: true
-    terminal_tools_only: true
     prompt: |
-      This is an already scheduled algorithm execution, not a planning or clarification task.
-      Immediately call run_paper_step exactly once with no arguments and wait for its result.
-      Do not substitute chat text for the tool call.
-      The tool reads the actual node, bound materials, current request, and retry flag from Runtime.
-      The currently viewed tab is not the execution node. Do not choose nodes, materials, or content
-      based on the viewed tab or an old launch request.
-      Independent modules implement the algorithms. The tool must save all artifacts; do not invent materials or results.
-      On tool failure, report the error and stop. Do not retry, fabricate, or save materials on your own.
-      On success, end this node and wait for user confirmation or selection; do not run other branches.
-    tools: [run_paper_step]
-    terminal_tools: [run_paper_step]
+      Distinguish prior academic papers from user study/background material. Plan complementary queries, screen
+      real candidates, obtain actual text, record reading scope and compare methods, results and limitations.
+      Decide whether additional retrieval is needed within the source scope and budget. Write a synthesis and
+      research positioning, not a list of disconnected summaries. Only use real selected sources, with stable
+      source IDs and actual bibliographic facts. Background does not count as literature. Output evidence and
+      selected papers; preserve source facts exactly, adding only reading judgments and citation formatting.  Read
+      the complete pinned scenario/execution.md and this step method before acting. Call paper_prepare_inputs to
+      read actual inputs, output fields and schemas; use paper_read_material for full source pages. You are the
+      executing Agent: perform the reasoning, generation, checking and finite repair yourself. Do not call
+      run_paper_step or ask LazyMind for model responses. Keep source and computation receipts. Native execution
+      finishes through paper_submit_candidate; external execution uses paper_prepare_candidate and returns its
+      exact artifact bundle to the controller for publication and completion. Never substitute a source filename
+      or a summary for its content. Program validation does not establish scientific correctness. Stop at the
+      current user-review boundary and do not claim approval.
+    tools: [paper_prepare_inputs, paper_read_material, paper_knowledge_documents, paper_knowledge_read, paper_search, paper_read_paper, paper_submit_candidate, paper_read_result]
+    terminal_tools: [paper_submit_candidate]
     inputs:
       - {material: research_materials, required: false, transport: path}
       - {material: seed_pool, required: false, transport: path}
@@ -112,29 +123,34 @@ steps:
       - {material: recovery_research_document, required: false, transport: path}
       - {material: recovery_literature_pool, required: false, transport: path}
       - {material: recovery_literature_document, required: false, transport: path}
+      - {material: paper_source_policy, required: false, transport: path}
+      - {material: paper_execution_policy, required: false, transport: path}
     outputs:
       - {material: literature_review_pool, required: true}
       - {material: literature_review_document, required: true}
-    acceptance_criteria: Tool validation succeeds and all declared artifacts are saved; never present demonstration outputs as real research findings.
+      - {material: literature_review_receipt, required: true}
+    acceptance_criteria: >
+      All required output files and the exact signed validation receipt are accepted atomically; input versions,
+      source facts and execution records are genuine. Agent provides honest semantic/visual checks; user approvals
+      remain human.
   refine_topic:
     label: "调整选题"
     mode: human
     route: choice
     tools_only: true
-    terminal_tools_only: true
     prompt: |
-      This is an already scheduled algorithm execution, not a planning or clarification task.
-      Immediately call run_paper_step exactly once with no arguments and wait for its result.
-      Do not substitute chat text for the tool call.
-      The tool reads the actual node, bound materials, current request, and retry flag from Runtime.
-      The currently viewed tab is not the execution node. Do not choose nodes, materials, or content
-      based on the viewed tab or an old launch request.
-      Independent modules implement the algorithms. The tool must save all artifacts; do not invent materials or results.
-      On tool failure, report the error and stop. Do not retry, fabricate, or save materials on your own.
-      On success, end this node and wait for user confirmation or selection; do not run other branches.
-      When the user requests further literature research, use native rewind to literature_review; do not reinitialize materials.
-    tools: [run_paper_step]
-    terminal_tools: [run_paper_step]
+      Refine the existing research question using the confirmed review and current request. Preserve supplied
+      facts and unresolved limitations; do not invent results or expand the requested scope. Output the updated
+      question.  Read the complete pinned scenario/execution.md and this step method before acting. Call
+      paper_prepare_inputs to read actual inputs, output fields and schemas; use paper_read_material for full
+      source pages. You are the executing Agent: perform the reasoning, generation, checking and finite repair
+      yourself. Do not call run_paper_step or ask LazyMind for model responses. Keep source and computation
+      receipts. Native execution finishes through paper_submit_candidate; external execution uses
+      paper_prepare_candidate and returns its exact artifact bundle to the controller for publication and
+      completion. Never substitute a source filename or a summary for its content. Program validation does not
+      establish scientific correctness. Stop at the current user-review boundary and do not claim approval.
+    tools: [paper_prepare_inputs, paper_read_material, paper_knowledge_documents, paper_knowledge_read, paper_search, paper_read_paper, paper_submit_candidate, paper_read_result]
+    terminal_tools: [paper_submit_candidate]
     inputs:
       - {material: research_materials, required: false, transport: path}
       - {material: seed_pool, required: false, transport: path}
@@ -147,28 +163,39 @@ steps:
       - {material: research_topic_document, required: false, transport: path}
       - {material: literature_review_pool, required: false, transport: path}
       - {material: literature_review_document, required: false, transport: path}
+      - {material: paper_source_policy, required: false, transport: path}
+      - {material: paper_execution_policy, required: false, transport: path}
     outputs:
       - {material: refine_topic_pool, required: true}
       - {material: refine_topic_document, required: true}
-    acceptance_criteria: Tool validation succeeds and all declared artifacts are saved; never present demonstration outputs as real research findings.
+      - {material: refine_topic_receipt, required: true}
+    acceptance_criteria: >
+      All required output files and the exact signed validation receipt are accepted atomically; input versions,
+      source facts and execution records are genuine. Agent provides honest semantic/visual checks; user approvals
+      remain human.
   experiment:
     label: "实验研究"
     mode: human
     route: choice
     tools_only: true
-    terminal_tools_only: true
     prompt: |
-      This is an already scheduled algorithm execution, not a planning or clarification task.
-      Immediately call run_paper_step exactly once with no arguments and wait for its result.
-      Do not substitute chat text for the tool call.
-      The tool reads the actual node, bound materials, current request, and retry flag from Runtime.
-      The currently viewed tab is not the execution node. Do not choose nodes, materials, or content
-      based on the viewed tab or an old launch request.
-      Independent modules implement the algorithms. The tool must save all artifacts; do not invent materials or results.
-      On tool failure, report the error and stop. Do not retry, fabricate, or save materials on your own.
-      On success, end this node and wait for user confirmation or selection; do not run other branches.
-    tools: [run_paper_step]
-    terminal_tools: [run_paper_step]
+      Organize supplied observations and complete tables before considering new experiments. User data preparation
+      is not a new measurement. Design and author code only when needed; actual execution uses
+      paper_run_experiment and requires explicit current-task authorization. No network, dependency installation
+      or GPU; execution is bounded to 30 seconds. Existing-data analysis is not authorization for new experiments.
+      Report unavailable computation, never substitute synthetic values for failed real-data results. Simulate
+      only if explicitly permitted and useful, label every synthetic result and assumption. Output experiment,
+      code_files and result_meta matching the exposed business contract.  Read the complete pinned
+      scenario/execution.md and this step method before acting. Call paper_prepare_inputs to read actual inputs,
+      output fields and schemas; use paper_read_material for full source pages. You are the executing Agent:
+      perform the reasoning, generation, checking and finite repair yourself. Do not call run_paper_step or ask
+      LazyMind for model responses. Keep source and computation receipts. Native execution finishes through
+      paper_submit_candidate; external execution uses paper_prepare_candidate and returns its exact artifact
+      bundle to the controller for publication and completion. Never substitute a source filename or a summary for
+      its content. Program validation does not establish scientific correctness. Stop at the current user-review
+      boundary and do not claim approval.
+    tools: [paper_prepare_inputs, paper_read_material, paper_knowledge_documents, paper_knowledge_read, paper_run_experiment, paper_execution_status, paper_cancel_execution, paper_submit_candidate, paper_read_result]
+    terminal_tools: [paper_submit_candidate]
     inputs:
       - {material: research_materials, required: false, transport: path}
       - {material: seed_pool, required: false, transport: path}
@@ -189,31 +216,40 @@ steps:
       - {material: recovery_experiment_document, required: false, transport: path}
       - {material: recovery_data_analysis_pool, required: false, transport: path}
       - {material: recovery_data_analysis_document, required: false, transport: path}
+      - {material: paper_source_policy, required: false, transport: path}
+      - {material: paper_execution_policy, required: false, transport: path}
     outputs:
       - {material: experiment_pool, required: true}
       - {material: experiment_document, required: true}
       - {material: experiment_code, required: true}
       - {material: experiment_results, required: true}
-    acceptance_criteria: Tool validation succeeds and all declared artifacts are saved; never present demonstration outputs as real research findings.
+      - {material: experiment_receipt, required: true}
+    acceptance_criteria: >
+      All required output files and the exact signed validation receipt are accepted atomically; input versions,
+      source facts and execution records are genuine. Agent provides honest semantic/visual checks; user approvals
+      remain human.
   data_analysis:
     label: "数据分析"
     mode: human
     route: choice
     tools_only: true
-    terminal_tools_only: true
     prompt: |
-      This is an already scheduled algorithm execution, not a planning or clarification task.
-      Immediately call run_paper_step exactly once with no arguments and wait for its result.
-      Do not substitute chat text for the tool call.
-      The tool reads the actual node, bound materials, current request, and retry flag from Runtime.
-      The currently viewed tab is not the execution node. Do not choose nodes, materials, or content
-      based on the viewed tab or an old launch request.
-      Independent modules implement the algorithms. The tool must save all artifacts; do not invent materials or results.
-      On tool failure, report the error and stop. Do not retry, fabricate, or save materials on your own.
-      On success, end this node and wait for user confirmation or selection; do not run other branches.
-      For new data or updated preparation, use native rewind to experiment.
-    tools: [run_paper_step]
-    terminal_tools: [run_paper_step]
+      Use complete bound data with original units, observation scopes and measurement conditions. Author a
+      scientific analysis plan and code, execute through paper_analyze, paper_execution_status, paper_cancel_execution, then interpret actual results. Missing
+      comparisons remain unavailable; do not manufacture matches or results. Choose figures after computation and
+      render through paper_plot. Preserve signed numerical findings, input digests and source identities; add only
+      supported interpretation. For redraw, freeze analysis and unchanged charts and update linked manuscript
+      references. Output structured analysis and charts matching the returned schema.  Read the complete pinned
+      scenario/execution.md and this step method before acting. Call paper_prepare_inputs to read actual inputs,
+      output fields and schemas; use paper_read_material for full source pages. You are the executing Agent:
+      perform the reasoning, generation, checking and finite repair yourself. Do not call run_paper_step or ask
+      LazyMind for model responses. Keep source and computation receipts. Native execution finishes through
+      paper_submit_candidate; external execution uses paper_prepare_candidate and returns its exact artifact
+      bundle to the controller for publication and completion. Never substitute a source filename or a summary for
+      its content. Program validation does not establish scientific correctness. Stop at the current user-review
+      boundary and do not claim approval.
+    tools: [paper_prepare_inputs, paper_read_material, paper_knowledge_documents, paper_knowledge_read, paper_analyze, paper_execution_status, paper_cancel_execution, paper_plot, multimodal, paper_submit_candidate, paper_read_result]
+    terminal_tools: [paper_submit_candidate]
     inputs:
       - {material: seed_pool, required: false, transport: path}
       - {material: paper_input, required: false, transport: path}
@@ -237,30 +273,39 @@ steps:
       - {material: recovery_peer_review_document, required: false, transport: path}
       - {material: recovery_revise_document_pool, required: false, transport: path}
       - {material: recovery_revise_document_document, required: false, transport: path}
+      - {material: paper_source_policy, required: false, transport: path}
+      - {material: paper_execution_policy, required: false, transport: path}
     outputs:
       - {material: data_analysis_pool, required: true}
       - {material: data_analysis_document, required: true}
+      - {material: analysis_execution, required: true}
       - {material: analysis_chart, required: false}
       - {material: redrawn_manuscript_document, required: false}
-    acceptance_criteria: Tool validation succeeds and all declared artifacts are saved; never present demonstration outputs as real research findings.
+      - {material: data_analysis_receipt, required: true}
+    acceptance_criteria: >
+      All required output files and the exact signed validation receipt are accepted atomically; input versions,
+      source facts and execution records are genuine. Agent provides honest semantic/visual checks; user approvals
+      remain human.
   write_outline:
     label: "论文大纲"
     mode: human
     route: choice
     tools_only: true
-    terminal_tools_only: true
     prompt: |
-      This is an already scheduled algorithm execution, not a planning or clarification task.
-      Immediately call run_paper_step exactly once with no arguments and wait for its result.
-      Do not substitute chat text for the tool call.
-      The tool reads the actual node, bound materials, current request, and retry flag from Runtime.
-      The currently viewed tab is not the execution node. Do not choose nodes, materials, or content
-      based on the viewed tab or an old launch request.
-      Independent modules implement the algorithms. The tool must save all artifacts; do not invent materials or results.
-      On tool failure, report the error and stop. Do not retry, fabricate, or save materials on your own.
-      On success, end this node and wait for user confirmation or selection; do not run other branches.
-    tools: [run_paper_step]
-    terminal_tools: [run_paper_step]
+      Plan an editable paper outline from the actual research evidence and current request. State a coherent
+      contribution, argument, methods, evaluation, results and limitations as applicable. Honor language, total
+      word budget and required sections, allocate section budgets and chart ownership. Do not write the full
+      manuscript. Submit the outline, then stop for genuine user confirmation.  Read the complete pinned
+      scenario/execution.md and this step method before acting. Call paper_prepare_inputs to read actual inputs,
+      output fields and schemas; use paper_read_material for full source pages. You are the executing Agent:
+      perform the reasoning, generation, checking and finite repair yourself. Do not call run_paper_step or ask
+      LazyMind for model responses. Keep source and computation receipts. Native execution finishes through
+      paper_submit_candidate; external execution uses paper_prepare_candidate and returns its exact artifact
+      bundle to the controller for publication and completion. Never substitute a source filename or a summary for
+      its content. Program validation does not establish scientific correctness. Stop at the current user-review
+      boundary and do not claim approval.
+    tools: [paper_prepare_inputs, paper_read_material, paper_knowledge_documents, paper_knowledge_read, paper_submit_candidate, paper_read_result]
+    terminal_tools: [paper_submit_candidate]
     inputs:
       - {material: research_materials, required: false, transport: path}
       - {material: seed_pool, required: false, transport: path}
@@ -277,28 +322,36 @@ steps:
       - {material: experiment_document, required: false, transport: path}
       - {material: data_analysis_pool, required: false, transport: path}
       - {material: data_analysis_document, required: false, transport: path}
+      - {material: paper_source_policy, required: false, transport: path}
+      - {material: paper_execution_policy, required: false, transport: path}
     outputs:
       - {material: write_outline_pool, required: true}
       - {material: write_outline_document, required: true}
-    acceptance_criteria: Tool validation succeeds and all declared artifacts are saved; never present demonstration outputs as real research findings.
+      - {material: write_outline_receipt, required: true}
+    acceptance_criteria: >
+      All required output files and the exact signed validation receipt are accepted atomically; input versions,
+      source facts and execution records are genuine. Agent provides honest semantic/visual checks; user approvals
+      remain human.
   write_document:
     label: "论文写作"
     mode: human
     route: choice
     tools_only: true
-    terminal_tools_only: true
     prompt: |
-      This is an already scheduled algorithm execution, not a planning or clarification task.
-      Immediately call run_paper_step exactly once with no arguments and wait for its result.
-      Do not substitute chat text for the tool call.
-      The tool reads the actual node, bound materials, current request, and retry flag from Runtime.
-      The currently viewed tab is not the execution node. Do not choose nodes, materials, or content
-      based on the viewed tab or an old launch request.
-      Independent modules implement the algorithms. The tool must save all artifacts; do not invent materials or results.
-      On tool failure, report the error and stop. Do not retry, fabricate, or save materials on your own.
-      On success, end this node and wait for user confirmation or selection; do not run other branches.
-    tools: [run_paper_step]
-    terminal_tools: [run_paper_step]
+      Draft only from the confirmed outline and bound evidence. Preserve required sections, requested
+      language/length, real citations, exact measurements, units, source conditions and figure bindings. Explain
+      gaps where they matter; no fabricated results. Check the actual complete manuscript and repair before
+      submission. Do not bypass the confirmed outline. Output manuscript text.  Read the complete pinned
+      scenario/execution.md and this step method before acting. Call paper_prepare_inputs to read actual inputs,
+      output fields and schemas; use paper_read_material for full source pages. You are the executing Agent:
+      perform the reasoning, generation, checking and finite repair yourself. Do not call run_paper_step or ask
+      LazyMind for model responses. Keep source and computation receipts. Native execution finishes through
+      paper_submit_candidate; external execution uses paper_prepare_candidate and returns its exact artifact
+      bundle to the controller for publication and completion. Never substitute a source filename or a summary for
+      its content. Program validation does not establish scientific correctness. Stop at the current user-review
+      boundary and do not claim approval.
+    tools: [paper_prepare_inputs, paper_read_material, paper_knowledge_documents, paper_knowledge_read, paper_submit_candidate, paper_read_result]
+    terminal_tools: [paper_submit_candidate]
     inputs:
       - material: seed_pool
         required: true
@@ -332,28 +385,37 @@ steps:
       - {material: data_analysis_document, required: false, transport: path}
       - {material: write_outline_pool, required: false, transport: path}
       - {material: write_outline_document, required: false, transport: path}
+      - {material: paper_source_policy, required: false, transport: path}
+      - {material: paper_execution_policy, required: false, transport: path}
     outputs:
       - {material: write_document_pool, required: true}
       - {material: write_document_document, required: true}
-    acceptance_criteria: Tool validation succeeds and all declared artifacts are saved; never present demonstration outputs as real research findings.
+      - {material: write_document_receipt, required: true}
+    acceptance_criteria: >
+      All required output files and the exact signed validation receipt are accepted atomically; input versions,
+      source facts and execution records are genuine. Agent provides honest semantic/visual checks; user approvals
+      remain human.
   peer_review:
     label: "模拟审稿"
     mode: human
     route: choice
     tools_only: true
-    terminal_tools_only: true
     prompt: |
-      This is an already scheduled algorithm execution, not a planning or clarification task.
-      Immediately call run_paper_step exactly once with no arguments and wait for its result.
-      Do not substitute chat text for the tool call.
-      The tool reads the actual node, bound materials, current request, and retry flag from Runtime.
-      The currently viewed tab is not the execution node. Do not choose nodes, materials, or content
-      based on the viewed tab or an old launch request.
-      Independent modules implement the algorithms. The tool must save all artifacts; do not invent materials or results.
-      On tool failure, report the error and stop. Do not retry, fabricate, or save materials on your own.
-      On success, end this node and wait for user confirmation or selection; do not run other branches.
-    tools: [run_paper_step]
-    terminal_tools: [run_paper_step]
+      Review only the current bound manuscript and its actual references/figures. Judge method, evidence,
+      analysis, structure, language and citations. Return ReviewResult in review_result; provide exact quotes and
+      locations or explicit whole/missing-content locations. Stable IDs, source hashes and deterministic fact
+      checks are assigned by the tool, not invented. Distinguish facts, advice and insufficient evidence. A review
+      does not authorize manuscript edits.  Read the complete pinned scenario/execution.md and this step method
+      before acting. Call paper_prepare_inputs to read actual inputs, output fields and schemas; use
+      paper_read_material for full source pages. You are the executing Agent: perform the reasoning, generation,
+      checking and finite repair yourself. Do not call run_paper_step or ask LazyMind for model responses. Keep
+      source and computation receipts. Native execution finishes through paper_submit_candidate; external
+      execution uses paper_prepare_candidate and returns its exact artifact bundle to the controller for
+      publication and completion. Never substitute a source filename or a summary for its content. Program
+      validation does not establish scientific correctness. Stop at the current user-review boundary and do not
+      claim approval.
+    tools: [paper_prepare_inputs, paper_read_material, paper_knowledge_documents, paper_knowledge_read, paper_submit_candidate, paper_read_result]
+    terminal_tools: [paper_submit_candidate]
     inputs:
       - {material: seed_pool, required: false, transport: path}
       - {material: paper_input, required: false, transport: path}
@@ -373,30 +435,39 @@ steps:
       - {material: write_document_document, required: false, transport: path}
       - {material: recovery_review_pool, required: false, transport: path}
       - {material: recovery_review_document, required: false, transport: path}
+      - {material: paper_source_policy, required: false, transport: path}
+      - {material: paper_execution_policy, required: false, transport: path}
     outputs:
       - {material: peer_review_pool, required: true}
       - {material: peer_review_document, required: true}
       - {material: peer_review_data, required: true}
-    acceptance_criteria: Tool validation succeeds and all declared artifacts are saved; never present demonstration outputs as real research findings.
+      - {material: peer_review_receipt, required: true}
+    acceptance_criteria: >
+      All required output files and the exact signed validation receipt are accepted atomically; input versions,
+      source facts and execution records are genuine. Agent provides honest semantic/visual checks; user approvals
+      remain human.
   revise_document:
     label: "论文修订"
     mode: human
     route: choice
     tools_only: true
-    terminal_tools_only: true
     prompt: |
-      This is an already scheduled algorithm execution, not a planning or clarification task.
-      Immediately call run_paper_step exactly once with no arguments and wait for its result.
-      Do not substitute chat text for the tool call.
-      The tool reads the actual node, bound materials, current request, and retry flag from Runtime.
-      The currently viewed tab is not the execution node. Do not choose nodes, materials, or content
-      based on the viewed tab or an old launch request.
-      Independent modules implement the algorithms. The tool must save all artifacts; do not invent materials or results.
-      On tool failure, report the error and stop. Do not retry, fabricate, or save materials on your own.
-      On success, end this node and wait for user confirmation or selection; do not run other branches.
-      When the user requests another review, use native rewind to peer_review; finishing is also available.
-    tools: [run_paper_step]
-    terminal_tools: [run_paper_step]
+      Distinguish direct edits from changes driven by the current review. Honor explicitly selected issues and
+      exclusions; with review-driven revision and no selection, address current applicable issues. Direct edits
+      must not silently import historical review advice. Preserve untouched text, original citations, source facts
+      and scientific meaning. Missing experiments/material remain pending while authorized text edits proceed.
+      Return revised manuscript and fresh review_result for fact checking, bound to the new bytes. If optional
+      revision yields no valid change retain the existing manuscript. Do not claim all issues are resolved merely
+      because text changed.  Read the complete pinned scenario/execution.md and this step method before acting.
+      Call paper_prepare_inputs to read actual inputs, output fields and schemas; use paper_read_material for full
+      source pages. You are the executing Agent: perform the reasoning, generation, checking and finite repair
+      yourself. Do not call run_paper_step or ask LazyMind for model responses. Keep source and computation
+      receipts. Native execution finishes through paper_submit_candidate; external execution uses
+      paper_prepare_candidate and returns its exact artifact bundle to the controller for publication and
+      completion. Never substitute a source filename or a summary for its content. Program validation does not
+      establish scientific correctness. Stop at the current user-review boundary and do not claim approval.
+    tools: [paper_prepare_inputs, paper_read_material, paper_knowledge_documents, paper_knowledge_read, paper_submit_candidate, paper_read_result]
+    terminal_tools: [paper_submit_candidate]
     inputs:
       - {material: seed_pool, required: false, transport: path}
       - {material: paper_input, required: false, transport: path}
@@ -418,29 +489,36 @@ steps:
       - {material: peer_review_document, required: false, transport: path}
       - {material: recovery_revise_document_pool, required: false, transport: path}
       - {material: recovery_revise_document_document, required: false, transport: path}
+      - {material: paper_source_policy, required: false, transport: path}
+      - {material: paper_execution_policy, required: false, transport: path}
     outputs:
       - {material: revise_document_pool, required: true}
       - {material: revise_document_document, required: true}
       - {material: revision_fact_check_document, required: true}
-    acceptance_criteria: Tool validation succeeds and all declared artifacts are saved; never present demonstration outputs as real research findings.
+      - {material: revise_document_receipt, required: true}
+    acceptance_criteria: >
+      All required output files and the exact signed validation receipt are accepted atomically; input versions,
+      source facts and execution records are genuine. Agent provides honest semantic/visual checks; user approvals
+      remain human.
   reading_reflection:
     label: "阅读心得"
     mode: human
     route: choice
     tools_only: true
-    terminal_tools_only: true
     prompt: |
-      This is an already scheduled algorithm execution, not a planning or clarification task.
-      Immediately call run_paper_step exactly once with no arguments and wait for its result.
-      Do not substitute chat text for the tool call.
-      The tool reads the actual node, bound materials, current request, and retry flag from Runtime.
-      The currently viewed tab is not the execution node. Do not choose nodes, materials, or content
-      based on the viewed tab or an old launch request.
-      Independent modules implement the algorithms. The tool must save all artifacts; do not invent materials or results.
-      On tool failure, report the error and stop. Do not retry, fabricate, or save materials on your own.
-      On success, end this node and wait for user confirmation or selection; do not run other branches.
-    tools: [run_paper_step]
-    terminal_tools: [run_paper_step]
+      Read the actual selected papers, retaining their source IDs, contributions, methods, evidence and
+      limitations. Compare and reflect in relation to the current request. Distinguish source facts from personal
+      synthesis and suggestions. No invented quotations, page locations or full-text reading claims. Output
+      reflection text.  Read the complete pinned scenario/execution.md and this step method before acting. Call
+      paper_prepare_inputs to read actual inputs, output fields and schemas; use paper_read_material for full
+      source pages. You are the executing Agent: perform the reasoning, generation, checking and finite repair
+      yourself. Do not call run_paper_step or ask LazyMind for model responses. Keep source and computation
+      receipts. Native execution finishes through paper_submit_candidate; external execution uses
+      paper_prepare_candidate and returns its exact artifact bundle to the controller for publication and
+      completion. Never substitute a source filename or a summary for its content. Program validation does not
+      establish scientific correctness. Stop at the current user-review boundary and do not claim approval.
+    tools: [paper_prepare_inputs, paper_read_material, paper_knowledge_documents, paper_knowledge_read, paper_search, paper_read_paper, paper_submit_candidate, paper_read_result]
+    terminal_tools: [paper_submit_candidate]
     inputs:
       - {material: seed_pool, required: false, transport: path}
       - {material: paper_input, required: false, transport: path}
@@ -452,28 +530,41 @@ steps:
       - {material: research_topic_document, required: false, transport: path}
       - {material: literature_review_pool, required: false, transport: path}
       - {material: literature_review_document, required: false, transport: path}
+      - {material: paper_source_policy, required: false, transport: path}
+      - {material: paper_execution_policy, required: false, transport: path}
     outputs:
       - {material: reading_reflection_pool, required: true}
       - {material: reading_reflection_document, required: true}
-    acceptance_criteria: Tool validation succeeds and all declared artifacts are saved; never present demonstration outputs as real research findings.
+      - {material: reading_reflection_receipt, required: true}
+    acceptance_criteria: >
+      All required output files and the exact signed validation receipt are accepted atomically; input versions,
+      source facts and execution records are genuine. Agent provides honest semantic/visual checks; user approvals
+      remain human.
   finish:
     label: "结束"
     mode: auto
     route: choice
     tools_only: true
-    terminal_tools_only: true
     prompt: |
-      This is an already scheduled algorithm execution, not a planning or clarification task.
-      Immediately call run_paper_step exactly once with no arguments and wait for its result.
-      Do not substitute chat text for the tool call.
-      The tool reads the actual node, bound materials, current request, and retry flag from Runtime.
-      The currently viewed tab is not the execution node. Do not choose nodes, materials, or content
-      based on the viewed tab or an old launch request.
-      Independent modules implement the algorithms. The tool must save all artifacts; do not invent materials or results.
-      On tool failure, report the error and stop. Do not retry, fabricate, or save materials on your own.
-      On success, end this node and wait for user confirmation or selection; do not run other branches.
-    tools: [run_paper_step]
-    terminal_tools: [run_paper_step]
+      End only when the requested work is complete and required approvals are satisfied. Preserve all accepted
+      artifacts. Submit an empty output object to produce the deterministic finish document; this does not approve
+      any pending result.  Read the complete pinned scenario/execution.md and this step method before acting. Call
+      paper_prepare_inputs to read actual inputs, output fields and schemas; use paper_read_material for full
+      source pages. You are the executing Agent: perform the reasoning, generation, checking and finite repair
+      yourself. Do not call run_paper_step or ask LazyMind for model responses. Keep source and computation
+      receipts. Native execution finishes through paper_submit_candidate; external execution uses
+      paper_prepare_candidate and returns its exact artifact bundle to the controller for publication and
+      completion. Never substitute a source filename or a summary for its content. Program validation does not
+      establish scientific correctness. Stop at the current user-review boundary and do not claim approval.
+    tools: [paper_prepare_inputs, paper_read_material, paper_knowledge_documents, paper_knowledge_read, paper_submit_candidate, paper_read_result]
+    terminal_tools: [paper_submit_candidate]
+    inputs:
+      - {material: paper_source_policy, required: false, transport: path}
+      - {material: paper_execution_policy, required: false, transport: path}
     outputs:
       - {material: finish_document, required: true}
-    acceptance_criteria: Tool validation succeeds and all declared artifacts are saved; never present demonstration outputs as real research findings.
+      - {material: finish_receipt, required: true}
+    acceptance_criteria: >
+      All required output files and the exact signed validation receipt are accepted atomically; input versions,
+      source facts and execution records are genuine. Agent provides honest semantic/visual checks; user approvals
+      remain human.
