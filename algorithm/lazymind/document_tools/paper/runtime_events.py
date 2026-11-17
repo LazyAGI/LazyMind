@@ -10,6 +10,7 @@ import uuid
 
 from lazyllm.tools.writer.tools.base import WriterToolBase
 
+from ..artifacts import normalize_generated_markdown
 from ..writing import DraftMarkdownStreamEventEmitter
 from .model_response import normalize_response
 
@@ -73,8 +74,9 @@ class PaperRuntimeEvents:
     def _send(self, percent, phase, stages):
         self._sequence += 1
         event = {'type': 'progress', 'progress': percent, 'current_phase': phase,
-                 'public_display': {'schema_version': 1, 'event_key': f'paper-{self._sequence}',
+                 'public_display': {'schema_version': 1, 'event_key': 'paper:auto',
                                     'process_steps': stages}}
+        # Core assigns the persisted event key and stage order within the attempt.
         # One source supplies both the public timeline and legacy execution text.
         try:
             self._emit({'type': 'text', 'text': phase + '\n'})
@@ -266,6 +268,7 @@ def generate_markdown(model, prompt, *, bindings=None):
     ).strip()
     if re.match(r'^<think\b', text, re.I):
         raise ValueError('模型输出存在未闭合的思考内容。')
+    text = normalize_generated_markdown(text)
     if events and pending and not leading:
         events.delta(restore(pending))
     if events and not streaming:

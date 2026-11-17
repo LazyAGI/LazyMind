@@ -48,9 +48,10 @@ def _prompt(instruction: str, data: dict) -> str:
         return prompt
     data['truncated'] = True
     passages = []
-    for key in ('papers', 'sources', 'background'):
+    for key in ('papers', 'sources', 'background', 'candidates'):
         for paper in data.get(key, []):
-            field = max((name for name in ('note', 'text', 'abstract', 'snippet') if paper.get(name)),
+            field = max((name for name in ('note', 'text', 'abstract', 'snippet', 'abstract_or_snippet')
+                         if paper.get(name)),
                         key=lambda name: estimate_tokens(paper[name]), default=None)
             if field:
                 passages.append((paper, field, paper[field]))

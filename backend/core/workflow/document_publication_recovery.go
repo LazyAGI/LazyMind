@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"os"
+	"path/filepath"
 	"time"
 
 	"gorm.io/gorm"
@@ -12,6 +14,7 @@ import (
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
 	corestore "lazymind/core/store"
+	"lazymind/core/subagent"
 )
 
 type DocumentPublicationLookup struct {
@@ -41,6 +44,12 @@ func publicationStatus(op *DocumentPublicationOperation, now time.Time) Document
 	case "preparing":
 		result.Actions = []string{"cancel"}
 	case "write_started":
+		if raw, err := os.ReadFile(filepath.Join(subagent.WorkspaceRoot(), "document-publications", op.ID, "progress.json")); err == nil && len(raw) <= 1024 {
+			var progress DocumentPublicationStatus
+			if json.Unmarshal(raw, &progress) == nil {
+				result.Stage, result.Current, result.Total = progress.Stage, progress.Current, progress.Total
+			}
+		}
 		deadline := op.UpdatedAt.Add(algo.DocumentActionTimeout + 10*time.Second)
 		result.RecoveryAfter = &deadline
 		if !now.Before(deadline) {
@@ -58,6 +67,7 @@ func publicationStatus(op *DocumentPublicationOperation, now time.Time) Document
 		var receipt DocumentPublicationReceipt
 		if json.Unmarshal(op.ReceiptJSON, &receipt) == nil {
 			target = receipt.TargetDocument
+			result.Warnings = receipt.Warnings
 		}
 	}
 	if op.PublicationID != "" {

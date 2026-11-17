@@ -45,6 +45,7 @@ type DocumentPublicationReceipt struct {
 	TargetDocument json.RawMessage
 	ContentType    string
 	Value          json.RawMessage `json:",omitempty"`
+	Warnings       []string        `json:",omitempty"`
 }
 
 type publicationDomainError string

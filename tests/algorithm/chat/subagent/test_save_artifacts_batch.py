@@ -38,6 +38,7 @@ def test_batch_saves_mixed_outputs_and_repeated_keys(batch_context, monkeypatch,
               '## 1. 3.3V 电源\n## 一、背景\n## （一）背景\n## (a) 背景\n'
               '```markdown\n## 1. 代码示例\n```\n')
     expected = (report.replace('## 1. 背景', '## 背景').replace('### 1.1. 方法', '### 方法')
+                .replace('## 1.1 方法', '## 方法')
                 .replace('## 1.1. 结果', '## 结果').replace('## 1. 3.3V 电源', '## 3.3V 电源')
                 .replace('## 一、背景', '## 背景').replace('## （一）背景', '## 背景')
                 .replace('## (a) 背景', '## 背景'))

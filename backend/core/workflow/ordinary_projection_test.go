@@ -70,6 +70,36 @@ func TestOrdinaryWorkflowAdmittedAttemptsDisplayRunning(t *testing.T) {
 	}
 }
 
+func TestOrdinaryPaperSequenceOrdersStagesOnlyWhenRequested(t *testing.T) {
+	for _, automatic := range []bool{false, true} {
+		t.Run(fmt.Sprint(automatic), func(t *testing.T) {
+			events := []orm.WorkflowEvent{}
+			for _, id := range []string{"paper-z", "paper-a"} {
+				payload, _ := json.Marshal(attempt.PublicDisplay{SchemaVersion: 1, EventKey: id,
+					ProcessSteps: []taskdisplay.PublicProcessStep{{StepID: id, Revision: 1, Order: 0, Title: id, Status: "running"}}})
+				events = append(events, orm.WorkflowEvent{EntityID: "current", EventType: "attempt.public_display", PayloadJSON: payload})
+			}
+			want := []string{"paper-a", "paper-z"}
+			orders := []int{0, 0}
+			if automatic {
+				events = append(events, orm.WorkflowEvent{EntityID: "current", EventType: "attempt.progress",
+					PayloadJSON: json.RawMessage(`{"public_display":{"schema_version":1,"event_key":"paper:auto"}}`)})
+				want, orders = []string{"paper-z", "paper-a"}, []int{0, 1}
+			}
+			view := taskdisplay.OrdinaryTaskView{}
+			applyOrdinaryAttemptEvents(&view, orm.WorkflowSessionStep{ID: "current"}, events)
+			if len(view.ProcessSteps) != len(want) {
+				t.Fatalf("stage count: %+v", view.ProcessSteps)
+			}
+			for index, step := range view.ProcessSteps {
+				if step.StepID != want[index] || step.Order != orders[index] {
+					t.Fatalf("stage order: %+v", view.ProcessSteps)
+				}
+			}
+		})
+	}
+}
+
 func TestOrdinaryWorkflowHostedAttemptIdentityAndPublicReplay(t *testing.T) {
 	db, session, now := ordinaryFixture(t)
 	for _, row := range []orm.WorkflowSessionStep{

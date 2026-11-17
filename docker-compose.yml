@@ -1046,6 +1046,9 @@ services:
       LAZYMIND_WORKFLOWS_DIR: /app/workflows
       LAZYMIND_PAPER_REVIEW_MIN_PAPER_COUNT: ${LAZYMIND_PAPER_REVIEW_MIN_PAPER_COUNT:-12}
       LAZYMIND_PAPER_REVIEW_MAX_PAPER_COUNT: ${LAZYMIND_PAPER_REVIEW_MAX_PAPER_COUNT:-20}
+      SCIVERSE_API_KEY: ${SCIVERSE_API_KEY:-}
+      OPENALEX_API_KEY: ${OPENALEX_API_KEY:-}
+      SERPAPI_API_KEY: ${SERPAPI_API_KEY:-}
       LAZYMIND_OUTPUT_EDITABLE_PPT: ${LAZYMIND_OUTPUT_EDITABLE_PPT:-false}
       LAZYMIND_PPT_EXPORT_URL: ${LAZYMIND_PPT_EXPORT_URL:-http://ppt-export:8099}
       <<: [*runtime-home, *trace-config, *proxy-env, *db-conn, *core-db-conn, *llm-api-keys, *upload-paths, *ocr-env, *cache-env]

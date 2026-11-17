@@ -258,7 +258,7 @@
   &:hover { background: var(--ant-color-bg-container, #fff); color: var(--ant-color-primary, #326fff); }
   &:focus-visible { outline: 2px solid var(--ant-color-primary, #326fff); outline-offset: 3px; }
 }
-.document-publication-result-note, .document-publication-error {
+.document-publication-result-note, .document-publication-error, .document-publication-warning {
   flex-basis: 100%;
   min-width: 0;
   margin: 0;
@@ -266,3 +266,4 @@
   color: var(--ant-color-text-secondary, #667085);
 }
 .document-publication-error { color: var(--ant-color-error, #cf1322); }
+.document-publication-warning { color: var(--ant-color-warning-text, #ad6800); }
