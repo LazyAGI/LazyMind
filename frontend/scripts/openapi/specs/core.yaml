@@ -2258,18 +2258,12 @@ components:
                     items:
                         type: string
                     type: array
-                execution:
-                    $ref: '#/components/schemas/ExecutionContract'
                 inputs:
                     additionalProperties:
                         properties: {}
                         type: object
                     type: object
                 instruction:
-                    type: string
-                knowledge_scope:
-                    $ref: '#/components/schemas/KnowledgeScope'
-                launch_request:
                     type: string
                 legacy_tools:
                     items:
@@ -2280,8 +2274,6 @@ components:
                         type: string
                     type: object
                 objective:
-                    type: string
-                objective_ref:
                     type: string
                 operation:
                     type: string
@@ -2315,8 +2307,6 @@ components:
                     type: boolean
                 tools_only:
                     type: boolean
-                user_request:
-                    type: string
                 workflow_revision:
                     type: string
             required:
@@ -2572,26 +2562,6 @@ components:
                 - skipped_unverified_count
                 - total_count
                 - updated_count
-            type: object
-        CallInput:
-            properties:
-                arguments:
-                    additionalProperties:
-                        properties: {}
-                        type: object
-                    type: object
-                command_id:
-                    type: string
-                execution_handle:
-                    type: string
-                source:
-                    type: string
-                tool_name:
-                    type: string
-            required:
-                - command_id
-                - execution_handle
-                - tool_name
             type: object
         CanResult:
             properties:
@@ -8710,27 +8680,6 @@ components:
                 - review_after_complete
                 - step_contract
             type: object
-        ExecutionContract:
-            properties:
-                skill_files:
-                    items:
-                        $ref: '#/components/schemas/SkillFile'
-                    type: array
-                stepExecution:
-                    $ref: '#/components/schemas/StepExecution'
-            required:
-                - stepExecution
-            type: object
-        ExecutionTool:
-            properties:
-                name:
-                    type: string
-                source:
-                    type: string
-            required:
-                - name
-                - source
-            type: object
         ExportConversationsRequest:
             properties:
                 conversation_ids:
@@ -9317,29 +9266,6 @@ components:
                 - upload_mode
                 - upload_state
             type: object
-        InputRequest:
-            properties:
-                artifact_id:
-                    type: string
-                questions:
-                    items:
-                        additionalProperties:
-                            properties: {}
-                            type: object
-                        type: object
-                    type: array
-                revision:
-                    type: integer
-                slot:
-                    type: string
-                title:
-                    type: string
-            required:
-                - artifact_id
-                - revision
-                - slot
-                - title
-            type: object
         KBListResult:
             properties:
                 list:
@@ -9362,19 +9288,6 @@ components:
                     type: array
                 visibility:
                     type: string
-            type: object
-        KnowledgeDocumentRef:
-            properties:
-                dataset_id:
-                    type: string
-                document_id:
-                    type: string
-                resource_version:
-                    format: int64
-                    type: integer
-            required:
-                - dataset_id
-                - document_id
             type: object
         KnowledgeOperation:
             properties:
@@ -9414,17 +9327,6 @@ components:
             required:
                 - code
                 - message
-            type: object
-        KnowledgeScope:
-            properties:
-                dataset_ids:
-                    items:
-                        type: string
-                    type: array
-                documents:
-                    items:
-                        $ref: '#/components/schemas/KnowledgeDocumentRef'
-                    type: array
             type: object
         LearningBookRequest:
             properties:
@@ -10908,746 +10810,6 @@ components:
                 - sources
                 - stage_artifacts
             type: object
-        PaperGuideAssetDecision:
-            properties:
-                id:
-                    type: string
-                included:
-                    type: boolean
-                reason:
-                    type: string
-            required:
-                - id
-                - included
-                - reason
-            type: object
-        PaperGuideBlock:
-            properties:
-                asset_id:
-                    type: string
-                attribution:
-                    type: string
-                claim_ids:
-                    items:
-                        type: string
-                    type: array
-                evidence_ids:
-                    items:
-                        type: string
-                    type: array
-                id:
-                    type: string
-                kind:
-                    type: string
-                text:
-                    type: string
-            required:
-                - id
-                - kind
-                - text
-                - attribution
-                - claim_ids
-                - evidence_ids
-            type: object
-        PaperGuideCancellation:
-            properties:
-                canceled:
-                    type: boolean
-            type: object
-        PaperGuideCell:
-            properties:
-                column:
-                    format: int64
-                    type: integer
-                row:
-                    format: int64
-                    type: integer
-            required:
-                - row
-                - column
-            type: object
-        PaperGuideClaim:
-            properties:
-                argument_type:
-                    nullable: true
-                    type: string
-                attribution:
-                    type: string
-                conditions:
-                    items:
-                        type: string
-                    type: array
-                evidence_ids:
-                    items:
-                        type: string
-                    type: array
-                id:
-                    type: string
-                statement:
-                    type: string
-                support_status:
-                    type: string
-            required:
-                - id
-                - statement
-                - attribution
-                - evidence_ids
-                - argument_type
-                - conditions
-                - support_status
-            type: object
-        PaperGuideCoverage:
-            properties:
-                abstract_only:
-                    type: boolean
-                appendix:
-                    type: boolean
-                body:
-                    type: boolean
-                conclusion:
-                    type: boolean
-                limitations:
-                    type: boolean
-                page_warnings:
-                    items:
-                        format: int64
-                        type: integer
-                    type: array
-                references:
-                    type: boolean
-                warnings:
-                    items:
-                        type: string
-                    type: array
-            required:
-                - body
-                - conclusion
-                - limitations
-                - references
-                - appendix
-                - abstract_only
-                - page_warnings
-                - warnings
-            type: object
-        PaperGuideEvidence:
-            properties:
-                fragment_evidence_ids:
-                    items:
-                        type: string
-                    type: array
-                id:
-                    type: string
-                locator:
-                    $ref: '#/components/schemas/PaperGuideLocator'
-                parent_asset_id:
-                    type: string
-                source_block_id:
-                    type: string
-                source_region_id:
-                    type: string
-                source_type:
-                    type: string
-                text:
-                    type: string
-            required:
-                - id
-                - source_block_id
-                - source_type
-                - text
-                - locator
-            type: object
-        PaperGuideEvidenceResponse:
-            properties:
-                evidence:
-                    $ref: '#/components/schemas/PaperGuideEvidence'
-                original_display:
-                    allOf:
-                        - $ref: '#/components/schemas/PaperGuideOriginalDisplay'
-                    nullable: true
-                source_current:
-                    type: boolean
-            required:
-                - evidence
-                - source_current
-            type: object
-        PaperGuideFinding:
-            properties:
-                issue_type:
-                    type: string
-                suggestion:
-                    type: string
-                target_id:
-                    type: string
-                target_type:
-                    type: string
-            required:
-                - target_id
-                - target_type
-                - issue_type
-                - suggestion
-            type: object
-        PaperGuideGenerateRequest:
-            properties:
-                expected_source_hash:
-                    type: string
-                idempotency_key:
-                    type: string
-                language:
-                    type: string
-                model_ref:
-                    type: string
-                regenerate:
-                    type: boolean
-            required:
-                - language
-                - expected_source_hash
-                - idempotency_key
-                - regenerate
-            type: object
-        PaperGuideLocator:
-            properties:
-                bbox:
-                    items:
-                        type: number
-                    type: array
-                cells:
-                    items:
-                        $ref: '#/components/schemas/PaperGuideCell'
-                    type: array
-                end:
-                    format: int64
-                    type: integer
-                headers:
-                    items:
-                        type: string
-                    type: array
-                kind:
-                    type: string
-                latex:
-                    type: string
-                page:
-                    format: int64
-                    type: integer
-                start:
-                    format: int64
-                    type: integer
-            required:
-                - kind
-                - page
-            type: object
-        PaperGuideModelIdentity:
-            properties:
-                context_tokens:
-                    format: int64
-                    type: integer
-                id:
-                    type: string
-                name:
-                    type: string
-                output_reserve_tokens:
-                    format: int64
-                    type: integer
-                parameters_hash:
-                    type: string
-                protocol:
-                    type: string
-                ref:
-                    type: string
-            required:
-                - ref
-                - id
-                - name
-                - protocol
-                - parameters_hash
-                - context_tokens
-            type: object
-        PaperGuideOriginalDisplay:
-            properties:
-                bbox:
-                    items:
-                        type: number
-                    type: array
-                caption:
-                    type: string
-                kind:
-                    type: string
-                number:
-                    type: string
-                page:
-                    format: int64
-                    type: integer
-            required:
-                - kind
-                - page
-            type: object
-        PaperGuidePlan:
-            properties:
-                claims:
-                    items:
-                        $ref: '#/components/schemas/PaperGuideClaim'
-                    type: array
-                profiles:
-                    $ref: '#/components/schemas/PaperGuideProfiles'
-                questions:
-                    items:
-                        type: string
-                    type: array
-                required_assets:
-                    items:
-                        $ref: '#/components/schemas/PaperGuideAssetDecision'
-                    type: array
-                sections:
-                    items:
-                        $ref: '#/components/schemas/PaperGuideSectionPlan'
-                    type: array
-                term_policy:
-                    items:
-                        type: string
-                    type: array
-            required:
-                - profiles
-                - questions
-                - claims
-                - sections
-                - term_policy
-                - required_assets
-            type: object
-        PaperGuideProfiles:
-            properties:
-                primary:
-                    nullable: true
-                    type: string
-                secondary:
-                    items:
-                        type: string
-                    type: array
-                uncertainty_reason:
-                    type: string
-            required:
-                - primary
-                - secondary
-                - uncertainty_reason
-            type: object
-        PaperGuideProgressRequest:
-            properties:
-                block_id:
-                    type: string
-                mode:
-                    type: string
-                offset:
-                    format: int64
-                    type: integer
-                revision_id:
-                    type: string
-                section_key:
-                    type: string
-            required:
-                - revision_id
-                - section_key
-                - block_id
-                - offset
-                - mode
-            type: object
-        PaperGuidePublishedSection:
-            properties:
-                blocks:
-                    items:
-                        $ref: '#/components/schemas/PaperGuideBlock'
-                    type: array
-                change_version:
-                    format: int64
-                    type: integer
-                claim_ids:
-                    items:
-                        type: string
-                    type: array
-                claims:
-                    items:
-                        $ref: '#/components/schemas/PaperGuideClaim'
-                    type: array
-                key:
-                    type: string
-                publication_status:
-                    type: string
-                role:
-                    type: string
-                summary:
-                    type: string
-                title:
-                    type: string
-                version:
-                    format: int64
-                    type: integer
-            required:
-                - key
-                - change_version
-                - role
-                - title
-                - blocks
-                - claims
-                - claim_ids
-                - summary
-            type: object
-        PaperGuideReview:
-            properties:
-                findings:
-                    items:
-                        $ref: '#/components/schemas/PaperGuideFinding'
-                    type: array
-            required:
-                - findings
-            type: object
-        PaperGuideRevision:
-            properties:
-                coverage:
-                    $ref: '#/components/schemas/PaperGuideCoverage'
-                created_at:
-                    format: date-time
-                    type: string
-                id:
-                    type: string
-                ir_digest:
-                    type: string
-                model:
-                    $ref: '#/components/schemas/PaperGuideModelIdentity'
-                plan:
-                    allOf:
-                        - $ref: '#/components/schemas/PaperGuidePlan'
-                    nullable: true
-                review_summary:
-                    allOf:
-                        - $ref: '#/components/schemas/PaperGuideReview'
-                    nullable: true
-                run:
-                    $ref: '#/components/schemas/PaperGuideRunView'
-                sections:
-                    items:
-                        $ref: '#/components/schemas/PaperGuidePublishedSection'
-                    type: array
-                source_current:
-                    type: boolean
-                source_sha256:
-                    type: string
-                status:
-                    type: string
-                version:
-                    format: int64
-                    type: integer
-            required:
-                - id
-                - status
-                - source_sha256
-                - ir_digest
-                - version
-                - model
-                - run
-                - created_at
-                - coverage
-                - sections
-                - source_current
-            type: object
-        PaperGuideRevisionResponse:
-            properties:
-                coverage:
-                    $ref: '#/components/schemas/PaperGuideCoverage'
-                created_at:
-                    format: date-time
-                    type: string
-                id:
-                    type: string
-                ir_digest:
-                    type: string
-                model:
-                    $ref: '#/components/schemas/PaperGuideModelIdentity'
-                plan:
-                    allOf:
-                        - $ref: '#/components/schemas/PaperGuidePlan'
-                    nullable: true
-                review_summary:
-                    allOf:
-                        - $ref: '#/components/schemas/PaperGuideReview'
-                    nullable: true
-                run:
-                    $ref: '#/components/schemas/PaperGuideRunView'
-                sections:
-                    items:
-                        $ref: '#/components/schemas/PaperGuidePublishedSection'
-                    type: array
-                source_current:
-                    type: boolean
-                source_sha256:
-                    type: string
-                status:
-                    type: string
-                version:
-                    format: int64
-                    type: integer
-            required:
-                - id
-                - status
-                - source_sha256
-                - ir_digest
-                - version
-                - model
-                - run
-                - created_at
-                - coverage
-                - sections
-                - source_current
-            type: object
-        PaperGuideRevisionView:
-            properties:
-                created_at:
-                    format: date-time
-                    type: string
-                id:
-                    type: string
-                ir_digest:
-                    type: string
-                model:
-                    $ref: '#/components/schemas/PaperGuideModelIdentity'
-                run:
-                    $ref: '#/components/schemas/PaperGuideRunView'
-                source_sha256:
-                    type: string
-                status:
-                    type: string
-                version:
-                    format: int64
-                    type: integer
-            required:
-                - id
-                - status
-                - source_sha256
-                - ir_digest
-                - version
-                - model
-                - run
-                - created_at
-            type: object
-        PaperGuideRunView:
-            properties:
-                active_millis:
-                    format: int64
-                    type: integer
-                call_limit:
-                    format: int64
-                    type: integer
-                calls_used:
-                    format: int64
-                    type: integer
-                cost_known:
-                    type: boolean
-                error_code:
-                    type: string
-                id:
-                    type: string
-                job_id:
-                    type: string
-                resume_block_reason:
-                    type: string
-                stage:
-                    type: string
-            required:
-                - id
-                - stage
-                - job_id
-                - calls_used
-                - call_limit
-                - active_millis
-                - cost_known
-            type: object
-        PaperGuideSection:
-            properties:
-                blocks:
-                    items:
-                        $ref: '#/components/schemas/PaperGuideBlock'
-                    type: array
-                claim_ids:
-                    items:
-                        type: string
-                    type: array
-                claims:
-                    items:
-                        $ref: '#/components/schemas/PaperGuideClaim'
-                    type: array
-                publication_status:
-                    type: string
-                role:
-                    type: string
-                summary:
-                    type: string
-                title:
-                    type: string
-                version:
-                    format: int64
-                    type: integer
-            required:
-                - role
-                - title
-                - blocks
-                - claims
-                - claim_ids
-                - summary
-            type: object
-        PaperGuideSectionPlan:
-            properties:
-                asset_ids:
-                    items:
-                        type: string
-                    type: array
-                claim_ids:
-                    items:
-                        type: string
-                    type: array
-                evidence_ids:
-                    items:
-                        type: string
-                    type: array
-                focus:
-                    type: string
-                role:
-                    type: string
-                terms:
-                    items:
-                        type: string
-                    type: array
-                title:
-                    type: string
-            required:
-                - role
-                - title
-                - focus
-                - terms
-                - claim_ids
-                - evidence_ids
-                - asset_ids
-            type: object
-        PaperGuideSelectionContext:
-            properties:
-                block_id:
-                    type: string
-                claims:
-                    items:
-                        $ref: '#/components/schemas/PaperGuideClaim'
-                    type: array
-                evidence:
-                    items:
-                        $ref: '#/components/schemas/PaperGuideEvidence'
-                    type: array
-                ir_digest:
-                    type: string
-                revision_id:
-                    type: string
-                section_key:
-                    type: string
-                source_current:
-                    type: boolean
-                source_sha256:
-                    type: string
-                text:
-                    type: string
-            required:
-                - revision_id
-                - section_key
-                - block_id
-                - text
-                - evidence
-                - claims
-                - source_sha256
-                - ir_digest
-                - source_current
-            type: object
-        PaperGuideSelectionRequest:
-            properties:
-                block_id:
-                    type: string
-                end:
-                    format: int64
-                    type: integer
-                section_key:
-                    type: string
-                start:
-                    format: int64
-                    type: integer
-            required:
-                - section_key
-                - block_id
-                - start
-                - end
-            type: object
-        PaperGuideStatus:
-            properties:
-                can_generate:
-                    type: boolean
-                can_read:
-                    type: boolean
-                candidate_revision:
-                    allOf:
-                        - $ref: '#/components/schemas/PaperGuideRevisionView'
-                    nullable: true
-                enabled:
-                    type: boolean
-                progress:
-                    allOf:
-                        - $ref: '#/components/schemas/PaperGuideProgressRequest'
-                    nullable: true
-                published_revision:
-                    allOf:
-                        - $ref: '#/components/schemas/PaperGuideRevisionView'
-                    nullable: true
-                source_sha256:
-                    type: string
-                unavailable_reason:
-                    type: string
-                version:
-                    format: int64
-                    type: integer
-            required:
-                - enabled
-                - can_read
-                - can_generate
-                - source_sha256
-                - version
-                - published_revision
-                - candidate_revision
-            type: object
-        PaperGuideStatusResponse:
-            properties:
-                can_generate:
-                    type: boolean
-                can_read:
-                    type: boolean
-                candidate_revision:
-                    allOf:
-                        - $ref: '#/components/schemas/PaperGuideRevisionView'
-                    nullable: true
-                enabled:
-                    type: boolean
-                progress:
-                    allOf:
-                        - $ref: '#/components/schemas/PaperGuideProgressRequest'
-                    nullable: true
-                published_revision:
-                    allOf:
-                        - $ref: '#/components/schemas/PaperGuideRevisionView'
-                    nullable: true
-                source_sha256:
-                    type: string
-                unavailable_reason:
-                    type: string
-                version:
-                    format: int64
-                    type: integer
-            required:
-                - enabled
-                - can_read
-                - can_generate
-                - source_sha256
-                - version
-                - published_revision
-                - candidate_revision
-            type: object
         PaperLibraryAttachment:
             properties:
                 academicState:
@@ -13127,11 +12289,25 @@ components:
             type: object
         Result:
             properties:
+                artifacts:
+                    items:
+                        $ref: '#/components/schemas/WorkflowExecutionArtifact'
+                    type: array
+                control:
+                    $ref: '#/components/schemas/Control'
                 error:
-                    $ref: '#/components/schemas/ToolError'
-                result:
-                    properties: {}
+                    type: string
+                executor_ref:
+                    type: string
+                post_step_checkpoint:
+                    $ref: '#/components/schemas/PostStepCheckpoint'
+                projection:
+                    additionalProperties:
+                        properties: {}
+                        type: object
                     type: object
+                summary:
+                    type: string
             type: object
         ResumeTaskRequest:
             properties:
@@ -13822,19 +12998,6 @@ components:
                 - result
                 - title
             type: object
-        SkillFile:
-            properties:
-                content:
-                    type: string
-                path:
-                    type: string
-                sha256:
-                    type: string
-            required:
-                - content
-                - path
-                - sha256
-            type: object
         Snapshot:
             properties:
                 active_execution_ids:
@@ -13860,12 +13023,6 @@ components:
                     type: string
                 delivery:
                     $ref: '#/components/schemas/WorkflowHostAction'
-                expired_execution_ids:
-                    items:
-                        type: string
-                    type: array
-                input_request:
-                    $ref: '#/components/schemas/InputRequest'
                 native_execution_ids:
                     items:
                         type: string
@@ -13966,25 +13123,6 @@ components:
                 - failed_count
                 - requested_count
                 - started_count
-            type: object
-        StepExecution:
-            properties:
-                constraints:
-                    items:
-                        type: string
-                    type: array
-                output_validator:
-                    type: string
-                skills:
-                    items:
-                        type: string
-                    type: array
-                tools:
-                    items:
-                        $ref: '#/components/schemas/ExecutionTool'
-                    type: array
-                version:
-                    type: string
             type: object
         SuspendJobRequest:
             properties:
@@ -14625,28 +13763,6 @@ components:
                 - started_at
                 - thinking_elapsed_ms
             type: object
-        Tool:
-            properties:
-                available:
-                    type: boolean
-                description:
-                    type: string
-                input_schema:
-                    additionalProperties:
-                        properties: {}
-                        type: object
-                    type: object
-                name:
-                    type: string
-                reason:
-                    type: string
-                source:
-                    type: string
-            required:
-                - available
-                - name
-                - source
-            type: object
         ToolConfigurationAction:
             properties:
                 conversation_id:
@@ -14679,21 +13795,6 @@ components:
                     items:
                         $ref: '#/components/schemas/ToolConfigurationAction'
                     type: array
-            type: object
-        ToolError:
-            properties:
-                code:
-                    type: string
-                message:
-                    type: string
-                retryable:
-                    type: boolean
-                upstream:
-                    $ref: '#/components/schemas/UpstreamError'
-            required:
-                - code
-                - message
-                - retryable
             type: object
         ToolGroup:
             properties:
@@ -14972,17 +14073,6 @@ components:
                     type: string
                 uploaded_parts:
                     type: integer
-            type: object
-        UpstreamError:
-            properties:
-                code:
-                    type: string
-                http_status:
-                    type: integer
-                request_id:
-                    type: string
-            required:
-                - http_status
             type: object
         UserInfo:
             properties:
@@ -15276,16 +14366,10 @@ components:
             type: object
         WorkflowControlCommand:
             properties:
-                answer_text:
-                    type: string
                 command_id:
                     type: string
                 expected_state_version:
                     format: int64
-                    type: integer
-                input_artifact_id:
-                    type: string
-                input_revision:
                     type: integer
                 kind:
                     type: string
@@ -15305,8 +14389,6 @@ components:
                 runtime_instruction:
                     type: string
                 step_id:
-                    type: string
-                user_input:
                     type: string
             required:
                 - command_id
@@ -20221,8 +19303,6 @@ components:
                 created_at:
                     format: date-time
                     type: string
-                executor_host:
-                    type: string
                 intent_context:
                     type: string
                 status:
@@ -21008,46 +20088,6 @@ components:
                 - data
                 - message
             type: object
-        workflowToolCallReply:
-            properties:
-                contract_version:
-                    type: string
-                ok:
-                    type: boolean
-                result:
-                    $ref: '#/components/schemas/Result'
-            required:
-                - contract_version
-                - ok
-                - result
-            type: object
-        workflowToolListBody:
-            properties:
-                execution_handle:
-                    type: string
-            required:
-                - execution_handle
-            type: object
-        workflowToolListReply:
-            properties:
-                contract_version:
-                    type: string
-                ok:
-                    type: boolean
-                result:
-                    $ref: '#/components/schemas/workflowToolListResult'
-            required:
-                - contract_version
-                - ok
-                - result
-            type: object
-        workflowToolListResult:
-            properties:
-                tools:
-                    items:
-                        $ref: '#/components/schemas/Tool'
-                    type: array
-            type: object
         writerDocumentSaveOpenAPIRequest:
             properties:
                 base_draft_version:
@@ -21108,6 +20148,746 @@ components:
                     type: string
             required:
                 - base_revision
+            type: object
+        PaperGuideAssetDecision:
+            properties:
+                id:
+                    type: string
+                included:
+                    type: boolean
+                reason:
+                    type: string
+            required:
+                - id
+                - included
+                - reason
+            type: object
+        PaperGuideBlock:
+            properties:
+                asset_id:
+                    type: string
+                attribution:
+                    type: string
+                claim_ids:
+                    items:
+                        type: string
+                    type: array
+                evidence_ids:
+                    items:
+                        type: string
+                    type: array
+                id:
+                    type: string
+                kind:
+                    type: string
+                text:
+                    type: string
+            required:
+                - id
+                - kind
+                - text
+                - attribution
+                - claim_ids
+                - evidence_ids
+            type: object
+        PaperGuideCancellation:
+            properties:
+                canceled:
+                    type: boolean
+            type: object
+        PaperGuideCell:
+            properties:
+                column:
+                    format: int64
+                    type: integer
+                row:
+                    format: int64
+                    type: integer
+            required:
+                - row
+                - column
+            type: object
+        PaperGuideClaim:
+            properties:
+                argument_type:
+                    nullable: true
+                    type: string
+                attribution:
+                    type: string
+                conditions:
+                    items:
+                        type: string
+                    type: array
+                evidence_ids:
+                    items:
+                        type: string
+                    type: array
+                id:
+                    type: string
+                statement:
+                    type: string
+                support_status:
+                    type: string
+            required:
+                - id
+                - statement
+                - attribution
+                - evidence_ids
+                - argument_type
+                - conditions
+                - support_status
+            type: object
+        PaperGuideCoverage:
+            properties:
+                abstract_only:
+                    type: boolean
+                appendix:
+                    type: boolean
+                body:
+                    type: boolean
+                conclusion:
+                    type: boolean
+                limitations:
+                    type: boolean
+                page_warnings:
+                    items:
+                        format: int64
+                        type: integer
+                    type: array
+                references:
+                    type: boolean
+                warnings:
+                    items:
+                        type: string
+                    type: array
+            required:
+                - body
+                - conclusion
+                - limitations
+                - references
+                - appendix
+                - abstract_only
+                - page_warnings
+                - warnings
+            type: object
+        PaperGuideEvidence:
+            properties:
+                fragment_evidence_ids:
+                    items:
+                        type: string
+                    type: array
+                id:
+                    type: string
+                locator:
+                    $ref: '#/components/schemas/PaperGuideLocator'
+                parent_asset_id:
+                    type: string
+                source_block_id:
+                    type: string
+                source_region_id:
+                    type: string
+                source_type:
+                    type: string
+                text:
+                    type: string
+            required:
+                - id
+                - source_block_id
+                - source_type
+                - text
+                - locator
+            type: object
+        PaperGuideEvidenceResponse:
+            properties:
+                evidence:
+                    $ref: '#/components/schemas/PaperGuideEvidence'
+                original_display:
+                    allOf:
+                        - $ref: '#/components/schemas/PaperGuideOriginalDisplay'
+                    nullable: true
+                source_current:
+                    type: boolean
+            required:
+                - evidence
+                - source_current
+            type: object
+        PaperGuideFinding:
+            properties:
+                issue_type:
+                    type: string
+                suggestion:
+                    type: string
+                target_id:
+                    type: string
+                target_type:
+                    type: string
+            required:
+                - target_id
+                - target_type
+                - issue_type
+                - suggestion
+            type: object
+        PaperGuideGenerateRequest:
+            properties:
+                expected_source_hash:
+                    type: string
+                idempotency_key:
+                    type: string
+                language:
+                    type: string
+                model_ref:
+                    type: string
+                regenerate:
+                    type: boolean
+            required:
+                - language
+                - expected_source_hash
+                - idempotency_key
+                - regenerate
+            type: object
+        PaperGuideLocator:
+            properties:
+                bbox:
+                    items:
+                        type: number
+                    type: array
+                cells:
+                    items:
+                        $ref: '#/components/schemas/PaperGuideCell'
+                    type: array
+                end:
+                    format: int64
+                    type: integer
+                headers:
+                    items:
+                        type: string
+                    type: array
+                kind:
+                    type: string
+                latex:
+                    type: string
+                page:
+                    format: int64
+                    type: integer
+                start:
+                    format: int64
+                    type: integer
+            required:
+                - kind
+                - page
+            type: object
+        PaperGuideModelIdentity:
+            properties:
+                context_tokens:
+                    format: int64
+                    type: integer
+                id:
+                    type: string
+                name:
+                    type: string
+                output_reserve_tokens:
+                    format: int64
+                    type: integer
+                parameters_hash:
+                    type: string
+                protocol:
+                    type: string
+                ref:
+                    type: string
+            required:
+                - ref
+                - id
+                - name
+                - protocol
+                - parameters_hash
+                - context_tokens
+            type: object
+        PaperGuideOriginalDisplay:
+            properties:
+                bbox:
+                    items:
+                        type: number
+                    type: array
+                caption:
+                    type: string
+                kind:
+                    type: string
+                number:
+                    type: string
+                page:
+                    format: int64
+                    type: integer
+            required:
+                - kind
+                - page
+            type: object
+        PaperGuidePlan:
+            properties:
+                claims:
+                    items:
+                        $ref: '#/components/schemas/PaperGuideClaim'
+                    type: array
+                profiles:
+                    $ref: '#/components/schemas/PaperGuideProfiles'
+                questions:
+                    items:
+                        type: string
+                    type: array
+                required_assets:
+                    items:
+                        $ref: '#/components/schemas/PaperGuideAssetDecision'
+                    type: array
+                sections:
+                    items:
+                        $ref: '#/components/schemas/PaperGuideSectionPlan'
+                    type: array
+                term_policy:
+                    items:
+                        type: string
+                    type: array
+            required:
+                - profiles
+                - questions
+                - claims
+                - sections
+                - term_policy
+                - required_assets
+            type: object
+        PaperGuideProfiles:
+            properties:
+                primary:
+                    nullable: true
+                    type: string
+                secondary:
+                    items:
+                        type: string
+                    type: array
+                uncertainty_reason:
+                    type: string
+            required:
+                - primary
+                - secondary
+                - uncertainty_reason
+            type: object
+        PaperGuideProgressRequest:
+            properties:
+                block_id:
+                    type: string
+                mode:
+                    type: string
+                offset:
+                    format: int64
+                    type: integer
+                revision_id:
+                    type: string
+                section_key:
+                    type: string
+            required:
+                - revision_id
+                - section_key
+                - block_id
+                - offset
+                - mode
+            type: object
+        PaperGuidePublishedSection:
+            properties:
+                blocks:
+                    items:
+                        $ref: '#/components/schemas/PaperGuideBlock'
+                    type: array
+                change_version:
+                    format: int64
+                    type: integer
+                claim_ids:
+                    items:
+                        type: string
+                    type: array
+                claims:
+                    items:
+                        $ref: '#/components/schemas/PaperGuideClaim'
+                    type: array
+                key:
+                    type: string
+                publication_status:
+                    type: string
+                role:
+                    type: string
+                summary:
+                    type: string
+                title:
+                    type: string
+                version:
+                    format: int64
+                    type: integer
+            required:
+                - key
+                - change_version
+                - role
+                - title
+                - blocks
+                - claims
+                - claim_ids
+                - summary
+            type: object
+        PaperGuideReview:
+            properties:
+                findings:
+                    items:
+                        $ref: '#/components/schemas/PaperGuideFinding'
+                    type: array
+            required:
+                - findings
+            type: object
+        PaperGuideRevision:
+            properties:
+                coverage:
+                    $ref: '#/components/schemas/PaperGuideCoverage'
+                created_at:
+                    format: date-time
+                    type: string
+                id:
+                    type: string
+                ir_digest:
+                    type: string
+                model:
+                    $ref: '#/components/schemas/PaperGuideModelIdentity'
+                plan:
+                    allOf:
+                        - $ref: '#/components/schemas/PaperGuidePlan'
+                    nullable: true
+                review_summary:
+                    allOf:
+                        - $ref: '#/components/schemas/PaperGuideReview'
+                    nullable: true
+                run:
+                    $ref: '#/components/schemas/PaperGuideRunView'
+                sections:
+                    items:
+                        $ref: '#/components/schemas/PaperGuidePublishedSection'
+                    type: array
+                source_current:
+                    type: boolean
+                source_sha256:
+                    type: string
+                status:
+                    type: string
+                version:
+                    format: int64
+                    type: integer
+            required:
+                - id
+                - status
+                - source_sha256
+                - ir_digest
+                - version
+                - model
+                - run
+                - created_at
+                - coverage
+                - sections
+                - source_current
+            type: object
+        PaperGuideRevisionResponse:
+            properties:
+                coverage:
+                    $ref: '#/components/schemas/PaperGuideCoverage'
+                created_at:
+                    format: date-time
+                    type: string
+                id:
+                    type: string
+                ir_digest:
+                    type: string
+                model:
+                    $ref: '#/components/schemas/PaperGuideModelIdentity'
+                plan:
+                    allOf:
+                        - $ref: '#/components/schemas/PaperGuidePlan'
+                    nullable: true
+                review_summary:
+                    allOf:
+                        - $ref: '#/components/schemas/PaperGuideReview'
+                    nullable: true
+                run:
+                    $ref: '#/components/schemas/PaperGuideRunView'
+                sections:
+                    items:
+                        $ref: '#/components/schemas/PaperGuidePublishedSection'
+                    type: array
+                source_current:
+                    type: boolean
+                source_sha256:
+                    type: string
+                status:
+                    type: string
+                version:
+                    format: int64
+                    type: integer
+            required:
+                - id
+                - status
+                - source_sha256
+                - ir_digest
+                - version
+                - model
+                - run
+                - created_at
+                - coverage
+                - sections
+                - source_current
+            type: object
+        PaperGuideRevisionView:
+            properties:
+                created_at:
+                    format: date-time
+                    type: string
+                id:
+                    type: string
+                ir_digest:
+                    type: string
+                model:
+                    $ref: '#/components/schemas/PaperGuideModelIdentity'
+                run:
+                    $ref: '#/components/schemas/PaperGuideRunView'
+                source_sha256:
+                    type: string
+                status:
+                    type: string
+                version:
+                    format: int64
+                    type: integer
+            required:
+                - id
+                - status
+                - source_sha256
+                - ir_digest
+                - version
+                - model
+                - run
+                - created_at
+            type: object
+        PaperGuideRunView:
+            properties:
+                active_millis:
+                    format: int64
+                    type: integer
+                call_limit:
+                    format: int64
+                    type: integer
+                calls_used:
+                    format: int64
+                    type: integer
+                cost_known:
+                    type: boolean
+                error_code:
+                    type: string
+                id:
+                    type: string
+                job_id:
+                    type: string
+                resume_block_reason:
+                    type: string
+                stage:
+                    type: string
+            required:
+                - id
+                - stage
+                - job_id
+                - calls_used
+                - call_limit
+                - active_millis
+                - cost_known
+            type: object
+        PaperGuideSection:
+            properties:
+                blocks:
+                    items:
+                        $ref: '#/components/schemas/PaperGuideBlock'
+                    type: array
+                claim_ids:
+                    items:
+                        type: string
+                    type: array
+                claims:
+                    items:
+                        $ref: '#/components/schemas/PaperGuideClaim'
+                    type: array
+                publication_status:
+                    type: string
+                role:
+                    type: string
+                summary:
+                    type: string
+                title:
+                    type: string
+                version:
+                    format: int64
+                    type: integer
+            required:
+                - role
+                - title
+                - blocks
+                - claims
+                - claim_ids
+                - summary
+            type: object
+        PaperGuideSectionPlan:
+            properties:
+                asset_ids:
+                    items:
+                        type: string
+                    type: array
+                claim_ids:
+                    items:
+                        type: string
+                    type: array
+                evidence_ids:
+                    items:
+                        type: string
+                    type: array
+                focus:
+                    type: string
+                role:
+                    type: string
+                terms:
+                    items:
+                        type: string
+                    type: array
+                title:
+                    type: string
+            required:
+                - role
+                - title
+                - focus
+                - terms
+                - claim_ids
+                - evidence_ids
+                - asset_ids
+            type: object
+        PaperGuideSelectionContext:
+            properties:
+                block_id:
+                    type: string
+                claims:
+                    items:
+                        $ref: '#/components/schemas/PaperGuideClaim'
+                    type: array
+                evidence:
+                    items:
+                        $ref: '#/components/schemas/PaperGuideEvidence'
+                    type: array
+                ir_digest:
+                    type: string
+                revision_id:
+                    type: string
+                section_key:
+                    type: string
+                source_current:
+                    type: boolean
+                source_sha256:
+                    type: string
+                text:
+                    type: string
+            required:
+                - revision_id
+                - section_key
+                - block_id
+                - text
+                - evidence
+                - claims
+                - source_sha256
+                - ir_digest
+                - source_current
+            type: object
+        PaperGuideSelectionRequest:
+            properties:
+                block_id:
+                    type: string
+                end:
+                    format: int64
+                    type: integer
+                section_key:
+                    type: string
+                start:
+                    format: int64
+                    type: integer
+            required:
+                - section_key
+                - block_id
+                - start
+                - end
+            type: object
+        PaperGuideStatus:
+            properties:
+                can_generate:
+                    type: boolean
+                can_read:
+                    type: boolean
+                candidate_revision:
+                    allOf:
+                        - $ref: '#/components/schemas/PaperGuideRevisionView'
+                    nullable: true
+                enabled:
+                    type: boolean
+                progress:
+                    allOf:
+                        - $ref: '#/components/schemas/PaperGuideProgressRequest'
+                    nullable: true
+                published_revision:
+                    allOf:
+                        - $ref: '#/components/schemas/PaperGuideRevisionView'
+                    nullable: true
+                source_sha256:
+                    type: string
+                unavailable_reason:
+                    type: string
+                version:
+                    format: int64
+                    type: integer
+            required:
+                - enabled
+                - can_read
+                - can_generate
+                - source_sha256
+                - version
+                - published_revision
+                - candidate_revision
+            type: object
+        PaperGuideStatusResponse:
+            properties:
+                can_generate:
+                    type: boolean
+                can_read:
+                    type: boolean
+                candidate_revision:
+                    allOf:
+                        - $ref: '#/components/schemas/PaperGuideRevisionView'
+                    nullable: true
+                enabled:
+                    type: boolean
+                progress:
+                    allOf:
+                        - $ref: '#/components/schemas/PaperGuideProgressRequest'
+                    nullable: true
+                published_revision:
+                    allOf:
+                        - $ref: '#/components/schemas/PaperGuideRevisionView'
+                    nullable: true
+                source_sha256:
+                    type: string
+                unavailable_reason:
+                    type: string
+                version:
+                    format: int64
+                    type: integer
+            required:
+                - enabled
+                - can_read
+                - can_generate
+                - source_sha256
+                - version
+                - published_revision
+                - candidate_revision
             type: object
 info:
     description: LazyMind Go backend core API - proxies to algorithm services. text Kong text /api/core。
@@ -22029,23 +21809,6 @@ paths:
             summary: Add a note idempotently by stable note ID
             tags:
                 - AcademicWorkflows
-    /api/core/academic/library/papers/{library_paper_id}/notes/{note_id}:
-        patch:
-            parameters:
-                - in: path
-                  name: library_paper_id
-                  required: true
-                  schema:
-                    type: string
-                - in: path
-                  name: note_id
-                  required: true
-                  schema:
-                    type: string
-            responses:
-                "200":
-                    description: OK
-            summary: PATCH /academic/library/papers/{library_paper_id}/notes/{note_id}
     /api/core/academic/library/papers/{library_paper_id}/notes/{note_id}:delete:
         post:
             parameters:
@@ -28176,559 +27939,6 @@ paths:
             summary: Update document
             tags:
                 - documents
-    /api/core/datasets/{dataset}/documents/{document}/paper-guide:
-        get:
-            description: Lightweight status with ETag. Published and candidate revisions are separate; disabled generation does not prevent authorized reading.
-            parameters:
-                - in: query
-                  name: language
-                  schema:
-                    default: zh
-                    enum:
-                        - zh
-                        - en
-                    type: string
-                - in: path
-                  name: dataset
-                  required: true
-                  schema:
-                    type: string
-                - in: path
-                  name: document
-                  required: true
-                  schema:
-                    type: string
-            responses:
-                "200":
-                    content:
-                        application/json:
-                            schema:
-                                properties:
-                                    data:
-                                        $ref: '#/components/schemas/PaperGuideStatus'
-                                type: object
-                    description: Authorized personal result
-                "304":
-                    description: ETag unchanged
-                "400":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/ErrorResponse'
-                    description: Invalid input
-                "403":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/ErrorResponse'
-                    description: Generation disabled
-                "404":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/ErrorResponse'
-                    description: Resource missing or permission revoked
-                "409":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/ErrorResponse'
-                    description: Source changed, preparation required, or conflicting run
-                "422":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/ErrorResponse'
-                    description: Model unavailable, budget exhausted, context too long, invalid evidence, or insufficient material
-            summary: Read personal guide status
-    /api/core/datasets/{dataset}/documents/{document}/paper-guide/progress:
-        put:
-            parameters:
-                - in: query
-                  name: language
-                  schema:
-                    default: zh
-                    enum:
-                        - zh
-                        - en
-                    type: string
-                - in: path
-                  name: dataset
-                  required: true
-                  schema:
-                    type: string
-                - in: path
-                  name: document
-                  required: true
-                  schema:
-                    type: string
-            requestBody:
-                content:
-                    application/json:
-                        schema:
-                            $ref: '#/components/schemas/PaperGuideProgressRequest'
-                required: true
-            responses:
-                "200":
-                    content:
-                        application/json:
-                            schema:
-                                properties:
-                                    data:
-                                        $ref: '#/components/schemas/PaperGuideProgressRequest'
-                                type: object
-                    description: Authorized personal result
-                "400":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/ErrorResponse'
-                    description: Invalid input
-                "403":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/ErrorResponse'
-                    description: Generation disabled
-                "404":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/ErrorResponse'
-                    description: Resource missing or permission revoked
-                "409":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/ErrorResponse'
-                    description: Source changed, preparation required, or conflicting run
-                "422":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/ErrorResponse'
-                    description: Model unavailable, budget exhausted, context too long, invalid evidence, or insufficient material
-            summary: Save independent reading position; offset is a Unicode rune offset
-    /api/core/datasets/{dataset}/documents/{document}/paper-guide/revisions/{revision}:
-        get:
-            parameters:
-                - in: query
-                  name: language
-                  schema:
-                    default: zh
-                    enum:
-                        - zh
-                        - en
-                    type: string
-                - in: query
-                  name: after_version
-                  schema:
-                    minimum: 0
-                    type: integer
-                - in: path
-                  name: dataset
-                  required: true
-                  schema:
-                    type: string
-                - in: path
-                  name: document
-                  required: true
-                  schema:
-                    type: string
-                - in: path
-                  name: revision
-                  required: true
-                  schema:
-                    type: string
-            responses:
-                "200":
-                    content:
-                        application/json:
-                            schema:
-                                properties:
-                                    data:
-                                        $ref: '#/components/schemas/PaperGuideRevision'
-                                type: object
-                    description: Authorized personal result
-                "400":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/ErrorResponse'
-                    description: Invalid input
-                "403":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/ErrorResponse'
-                    description: Generation disabled
-                "404":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/ErrorResponse'
-                    description: Resource missing or permission revoked
-                "409":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/ErrorResponse'
-                    description: Source changed, preparation required, or conflicting run
-                "422":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/ErrorResponse'
-                    description: Model unavailable, budget exhausted, context too long, invalid evidence, or insufficient material
-            summary: Read published sections, optionally after a change version
-    /api/core/datasets/{dataset}/documents/{document}/paper-guide/revisions/{revision}/evidence/{evidence}:
-        get:
-            parameters:
-                - in: query
-                  name: language
-                  schema:
-                    default: zh
-                    enum:
-                        - zh
-                        - en
-                    type: string
-                - in: path
-                  name: dataset
-                  required: true
-                  schema:
-                    type: string
-                - in: path
-                  name: document
-                  required: true
-                  schema:
-                    type: string
-                - in: path
-                  name: revision
-                  required: true
-                  schema:
-                    type: string
-                - in: path
-                  name: evidence
-                  required: true
-                  schema:
-                    type: string
-            responses:
-                "200":
-                    content:
-                        application/json:
-                            schema:
-                                properties:
-                                    data:
-                                        $ref: '#/components/schemas/PaperGuideEvidenceResponse'
-                                type: object
-                    description: Authorized personal result
-                "400":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/ErrorResponse'
-                    description: Invalid input
-                "403":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/ErrorResponse'
-                    description: Generation disabled
-                "404":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/ErrorResponse'
-                    description: Resource missing or permission revoked
-                "409":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/ErrorResponse'
-                    description: Source changed, preparation required, or conflicting run
-                "422":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/ErrorResponse'
-                    description: Model unavailable, budget exhausted, context too long, invalid evidence, or insufficient material
-            summary: Read authorized original evidence; stale source coordinates cannot highlight the new PDF
-    /api/core/datasets/{dataset}/documents/{document}/paper-guide/revisions/{revision}:selection-context:
-        post:
-            parameters:
-                - in: query
-                  name: language
-                  schema:
-                    default: zh
-                    enum:
-                        - zh
-                        - en
-                    type: string
-                - in: path
-                  name: dataset
-                  required: true
-                  schema:
-                    type: string
-                - in: path
-                  name: document
-                  required: true
-                  schema:
-                    type: string
-                - in: path
-                  name: revision
-                  required: true
-                  schema:
-                    type: string
-            requestBody:
-                content:
-                    application/json:
-                        schema:
-                            $ref: '#/components/schemas/PaperGuideSelectionRequest'
-                required: true
-            responses:
-                "200":
-                    content:
-                        application/json:
-                            schema:
-                                properties:
-                                    data:
-                                        $ref: '#/components/schemas/PaperGuideSelectionContext'
-                                type: object
-                    description: Authorized personal result
-                "400":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/ErrorResponse'
-                    description: Invalid input
-                "403":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/ErrorResponse'
-                    description: Generation disabled
-                "404":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/ErrorResponse'
-                    description: Resource missing or permission revoked
-                "409":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/ErrorResponse'
-                    description: Source changed, preparation required, or conflicting run
-                "422":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/ErrorResponse'
-                    description: Model unavailable, budget exhausted, context too long, invalid evidence, or insufficient material
-            summary: Resolve a published block selection; start/end are half-open Unicode rune offsets
-    /api/core/datasets/{dataset}/documents/{document}/paper-guide/runs/{run}:cancel:
-        post:
-            parameters:
-                - in: query
-                  name: language
-                  schema:
-                    default: zh
-                    enum:
-                        - zh
-                        - en
-                    type: string
-                - in: path
-                  name: dataset
-                  required: true
-                  schema:
-                    type: string
-                - in: path
-                  name: document
-                  required: true
-                  schema:
-                    type: string
-                - in: path
-                  name: run
-                  required: true
-                  schema:
-                    type: string
-            responses:
-                "200":
-                    content:
-                        application/json:
-                            schema:
-                                properties:
-                                    data:
-                                        $ref: '#/components/schemas/PaperGuideCancellation'
-                                type: object
-                    description: Authorized personal result
-                "400":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/ErrorResponse'
-                    description: Invalid input
-                "403":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/ErrorResponse'
-                    description: Generation disabled
-                "404":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/ErrorResponse'
-                    description: Resource missing or permission revoked
-                "409":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/ErrorResponse'
-                    description: Source changed, preparation required, or conflicting run
-                "422":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/ErrorResponse'
-                    description: Model unavailable, budget exhausted, context too long, invalid evidence, or insufficient material
-            summary: Cancel future calls; retain published sections
-    /api/core/datasets/{dataset}/documents/{document}/paper-guide/runs/{run}:resume:
-        post:
-            parameters:
-                - in: query
-                  name: language
-                  schema:
-                    default: zh
-                    enum:
-                        - zh
-                        - en
-                    type: string
-                - in: path
-                  name: dataset
-                  required: true
-                  schema:
-                    type: string
-                - in: path
-                  name: document
-                  required: true
-                  schema:
-                    type: string
-                - in: path
-                  name: run
-                  required: true
-                  schema:
-                    type: string
-            responses:
-                "200":
-                    content:
-                        application/json:
-                            schema:
-                                properties:
-                                    data:
-                                        $ref: '#/components/schemas/PaperGuideStatus'
-                                type: object
-                    description: Authorized personal result
-                "400":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/ErrorResponse'
-                    description: Invalid input
-                "403":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/ErrorResponse'
-                    description: Generation disabled
-                "404":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/ErrorResponse'
-                    description: Resource missing or permission revoked
-                "409":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/ErrorResponse'
-                    description: Source changed, preparation required, or conflicting run
-                "422":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/ErrorResponse'
-                    description: Model unavailable, budget exhausted, context too long, invalid evidence, or insufficient material
-            summary: Resume with original model and remaining persisted budget
-    /api/core/datasets/{dataset}/documents/{document}/paper-guide:generate:
-        post:
-            parameters:
-                - in: path
-                  name: dataset
-                  required: true
-                  schema:
-                    type: string
-                - in: path
-                  name: document
-                  required: true
-                  schema:
-                    type: string
-            requestBody:
-                content:
-                    application/json:
-                        schema:
-                            $ref: '#/components/schemas/PaperGuideGenerateRequest'
-                required: true
-            responses:
-                "200":
-                    content:
-                        application/json:
-                            schema:
-                                properties:
-                                    data:
-                                        $ref: '#/components/schemas/PaperGuideRevisionView'
-                                type: object
-                    description: Authorized personal result
-                "202":
-                    content:
-                        application/json:
-                            schema:
-                                properties:
-                                    data:
-                                        $ref: '#/components/schemas/PaperGuideRevisionView'
-                                type: object
-                    description: Queued durable revision; model_ref only affects this run
-                "400":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/ErrorResponse'
-                    description: Invalid input
-                "403":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/ErrorResponse'
-                    description: Generation disabled
-                "404":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/ErrorResponse'
-                    description: Resource missing or permission revoked
-                "409":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/ErrorResponse'
-                    description: Source changed, preparation required, or conflicting run
-                "422":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/ErrorResponse'
-                    description: Model unavailable, budget exhausted, context too long, invalid evidence, or insufficient material
-            summary: Generate or explicitly regenerate a guide
     /api/core/datasets/{dataset}/documents/{document}/parse-status:
         get:
             parameters:
@@ -34560,7 +33770,7 @@ paths:
                 - model_providers
     /api/core/model_providers/{model_provider_id}/groups/{group_id}/models/{model_id}:probe:
         post:
-            description: Tests an owned model with its saved supplier protocol, shared API address and currently enabled key. No credential or metadata overrides are accepted. Ordinary tests are read-only. With verify=true, a successful chat inference verifies the model’s connection group without changing credentials, models or default selections. Media probes do not download output; accepted video tasks are distinct from completed inference.
+            description: Tests an owned model with its saved supplier protocol, shared API address and currently enabled key. No credential or metadata overrides are accepted. Does not modify verification, credentials, models or default selections. Media probes do not download output; accepted video tasks are distinct from completed inference.
             parameters:
                 - in: path
                   name: model_provider_id
@@ -34577,12 +33787,6 @@ paths:
                   required: true
                   schema:
                     type: string
-                - description: Explicitly verify the connection group using a saved chat model. Only a successful inference against the current saved configuration records verification.
-                  in: query
-                  name: verify
-                  required: false
-                  schema:
-                    type: boolean
             responses:
                 "200":
                     content:
@@ -37729,18 +36933,6 @@ paths:
                 "200":
                     description: OK
             summary: POST /system-dependencies/ffmpeg:install
-    /api/core/system-dependencies/node:
-        get:
-            responses:
-                "200":
-                    description: OK
-            summary: GET /system-dependencies/node
-    /api/core/system-dependencies/node:install:
-        post:
-            responses:
-                "200":
-                    description: OK
-            summary: POST /system-dependencies/node:install
     /api/core/system-dependencies/pdf-font:
         get:
             responses:
@@ -41344,62 +40536,6 @@ paths:
             summary: Read Workflow artifacts with document descriptors
             tags:
                 - workflow
-    /api/core/workflow-sessions/{session_id}/artifact-actions/{job_id}:
-        get:
-            parameters:
-                - in: path
-                  name: session_id
-                  required: true
-                  schema:
-                    type: string
-                - in: path
-                  name: job_id
-                  required: true
-                  schema:
-                    type: string
-            responses:
-                "200":
-                    description: OK
-            summary: GET /workflow-sessions/{session_id}/artifact-actions/{job_id}
-        post:
-            parameters:
-                - in: path
-                  name: session_id
-                  required: true
-                  schema:
-                    type: string
-                - in: path
-                  name: job_id
-                  required: true
-                  schema:
-                    type: string
-            responses:
-                "200":
-                    description: OK
-            summary: POST /workflow-sessions/{session_id}/artifact-actions/{job_id}
-    /api/core/workflow-sessions/{session_id}/artifact-edit:
-        get:
-            parameters:
-                - in: path
-                  name: session_id
-                  required: true
-                  schema:
-                    type: string
-            responses:
-                "200":
-                    description: OK
-            summary: GET /workflow-sessions/{session_id}/artifact-edit
-        post:
-            parameters:
-                - in: path
-                  name: session_id
-                  required: true
-                  schema:
-                    type: string
-            responses:
-                "200":
-                    description: OK
-            summary: POST /workflow-sessions/{session_id}/artifact-edit
     /api/core/workflow-sessions/{session_id}/artifacts:
         get:
             parameters:
@@ -41636,76 +40772,6 @@ paths:
             summary: Publish one artifact during execution
             tags:
                 - workflow-control
-    /api/core/workflow-sessions/{session_id}/hosted-attempts/{attempt_id}/tools:call:
-        post:
-            parameters:
-                - in: path
-                  name: session_id
-                  required: true
-                  schema:
-                    type: string
-                - in: path
-                  name: attempt_id
-                  required: true
-                  schema:
-                    type: string
-            requestBody:
-                content:
-                    application/json:
-                        schema:
-                            $ref: '#/components/schemas/CallInput'
-                required: true
-            responses:
-                "200":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/workflowToolCallReply'
-                    description: Workflow control result
-                "409":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/workflowControlErrorReply'
-                    description: Stale state, invalid admission, or conflicting command
-            summary: Invoke a declared tool under the current execution lease
-            tags:
-                - workflow-control
-    /api/core/workflow-sessions/{session_id}/hosted-attempts/{attempt_id}/tools:list:
-        post:
-            parameters:
-                - in: path
-                  name: session_id
-                  required: true
-                  schema:
-                    type: string
-                - in: path
-                  name: attempt_id
-                  required: true
-                  schema:
-                    type: string
-            requestBody:
-                content:
-                    application/json:
-                        schema:
-                            $ref: '#/components/schemas/workflowToolListBody'
-                required: true
-            responses:
-                "200":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/workflowToolListReply'
-                    description: Workflow control result
-                "409":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/workflowControlErrorReply'
-                    description: Stale state, invalid admission, or conflicting command
-            summary: Discover tools declared by a pinned external step
-            tags:
-                - workflow-control
     /api/core/workflow-sessions/{session_id}/hosted-attempts/{attempt_id}:begin:
         post:
             parameters:
@@ -41771,23 +40837,6 @@ paths:
             summary: Complete an execution using already published artifacts
             tags:
                 - workflow-control
-    /api/core/workflow-sessions/{session_id}/hosted-attempts/{attempt_id}:heartbeat:
-        post:
-            parameters:
-                - in: path
-                  name: session_id
-                  required: true
-                  schema:
-                    type: string
-                - in: path
-                  name: attempt_id
-                  required: true
-                  schema:
-                    type: string
-            responses:
-                "200":
-                    description: OK
-            summary: POST /workflow-sessions/{session_id}/hosted-attempts/{attempt_id}:heartbeat
     /api/core/workflow-sessions/{session_id}/hosted-attempts/{attempt_id}:resume:
         post:
             parameters:
@@ -41857,40 +40906,6 @@ paths:
                 "200":
                     description: OK
             summary: POST /workflow-sessions/{session_id}/input-bindings
-    /api/core/workflow-sessions/{session_id}/model-generations/{job_id}:claim:
-        post:
-            parameters:
-                - in: path
-                  name: session_id
-                  required: true
-                  schema:
-                    type: string
-                - in: path
-                  name: job_id
-                  required: true
-                  schema:
-                    type: string
-            responses:
-                "200":
-                    description: OK
-            summary: POST /workflow-sessions/{session_id}/model-generations/{job_id}:claim
-    /api/core/workflow-sessions/{session_id}/model-generations/{job_id}:respond:
-        post:
-            parameters:
-                - in: path
-                  name: session_id
-                  required: true
-                  schema:
-                    type: string
-                - in: path
-                  name: job_id
-                  required: true
-                  schema:
-                    type: string
-            responses:
-                "200":
-                    description: OK
-            summary: POST /workflow-sessions/{session_id}/model-generations/{job_id}:respond
     /api/core/workflow-sessions/{session_id}/product-artifacts/{stage}:
         get:
             parameters:
@@ -42620,6 +41635,559 @@ paths:
                 "200":
                     description: OK
             summary: POST /writer-download-conversions:convert
+    /api/core/datasets/{dataset}/documents/{document}/paper-guide:
+        get:
+            description: Lightweight status with ETag. Published and candidate revisions are separate; disabled generation does not prevent authorized reading.
+            parameters:
+                - in: query
+                  name: language
+                  schema:
+                    default: zh
+                    enum:
+                        - zh
+                        - en
+                    type: string
+                - in: path
+                  name: dataset
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: document
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                properties:
+                                    data:
+                                        $ref: '#/components/schemas/PaperGuideStatus'
+                                type: object
+                    description: Authorized personal result
+                "304":
+                    description: ETag unchanged
+                "400":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Invalid input
+                "403":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Generation disabled
+                "404":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Resource missing or permission revoked
+                "409":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Source changed, preparation required, or conflicting run
+                "422":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Model unavailable, budget exhausted, context too long, invalid evidence, or insufficient material
+            summary: Read personal guide status
+    /api/core/datasets/{dataset}/documents/{document}/paper-guide/progress:
+        put:
+            parameters:
+                - in: query
+                  name: language
+                  schema:
+                    default: zh
+                    enum:
+                        - zh
+                        - en
+                    type: string
+                - in: path
+                  name: dataset
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: document
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/PaperGuideProgressRequest'
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                properties:
+                                    data:
+                                        $ref: '#/components/schemas/PaperGuideProgressRequest'
+                                type: object
+                    description: Authorized personal result
+                "400":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Invalid input
+                "403":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Generation disabled
+                "404":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Resource missing or permission revoked
+                "409":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Source changed, preparation required, or conflicting run
+                "422":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Model unavailable, budget exhausted, context too long, invalid evidence, or insufficient material
+            summary: Save independent reading position; offset is a Unicode rune offset
+    /api/core/datasets/{dataset}/documents/{document}/paper-guide/revisions/{revision}:
+        get:
+            parameters:
+                - in: query
+                  name: language
+                  schema:
+                    default: zh
+                    enum:
+                        - zh
+                        - en
+                    type: string
+                - in: query
+                  name: after_version
+                  schema:
+                    minimum: 0
+                    type: integer
+                - in: path
+                  name: dataset
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: document
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: revision
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                properties:
+                                    data:
+                                        $ref: '#/components/schemas/PaperGuideRevision'
+                                type: object
+                    description: Authorized personal result
+                "400":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Invalid input
+                "403":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Generation disabled
+                "404":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Resource missing or permission revoked
+                "409":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Source changed, preparation required, or conflicting run
+                "422":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Model unavailable, budget exhausted, context too long, invalid evidence, or insufficient material
+            summary: Read published sections, optionally after a change version
+    /api/core/datasets/{dataset}/documents/{document}/paper-guide/revisions/{revision}/evidence/{evidence}:
+        get:
+            parameters:
+                - in: query
+                  name: language
+                  schema:
+                    default: zh
+                    enum:
+                        - zh
+                        - en
+                    type: string
+                - in: path
+                  name: dataset
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: document
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: revision
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: evidence
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                properties:
+                                    data:
+                                        $ref: '#/components/schemas/PaperGuideEvidenceResponse'
+                                type: object
+                    description: Authorized personal result
+                "400":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Invalid input
+                "403":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Generation disabled
+                "404":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Resource missing or permission revoked
+                "409":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Source changed, preparation required, or conflicting run
+                "422":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Model unavailable, budget exhausted, context too long, invalid evidence, or insufficient material
+            summary: Read authorized original evidence; stale source coordinates cannot highlight the new PDF
+    /api/core/datasets/{dataset}/documents/{document}/paper-guide/revisions/{revision}:selection-context:
+        post:
+            parameters:
+                - in: query
+                  name: language
+                  schema:
+                    default: zh
+                    enum:
+                        - zh
+                        - en
+                    type: string
+                - in: path
+                  name: dataset
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: document
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: revision
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/PaperGuideSelectionRequest'
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                properties:
+                                    data:
+                                        $ref: '#/components/schemas/PaperGuideSelectionContext'
+                                type: object
+                    description: Authorized personal result
+                "400":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Invalid input
+                "403":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Generation disabled
+                "404":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Resource missing or permission revoked
+                "409":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Source changed, preparation required, or conflicting run
+                "422":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Model unavailable, budget exhausted, context too long, invalid evidence, or insufficient material
+            summary: Resolve a published block selection; start/end are half-open Unicode rune offsets
+    /api/core/datasets/{dataset}/documents/{document}/paper-guide/runs/{run}:cancel:
+        post:
+            parameters:
+                - in: query
+                  name: language
+                  schema:
+                    default: zh
+                    enum:
+                        - zh
+                        - en
+                    type: string
+                - in: path
+                  name: dataset
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: document
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: run
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                properties:
+                                    data:
+                                        $ref: '#/components/schemas/PaperGuideCancellation'
+                                type: object
+                    description: Authorized personal result
+                "400":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Invalid input
+                "403":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Generation disabled
+                "404":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Resource missing or permission revoked
+                "409":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Source changed, preparation required, or conflicting run
+                "422":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Model unavailable, budget exhausted, context too long, invalid evidence, or insufficient material
+            summary: Cancel future calls; retain published sections
+    /api/core/datasets/{dataset}/documents/{document}/paper-guide/runs/{run}:resume:
+        post:
+            parameters:
+                - in: query
+                  name: language
+                  schema:
+                    default: zh
+                    enum:
+                        - zh
+                        - en
+                    type: string
+                - in: path
+                  name: dataset
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: document
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: run
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                properties:
+                                    data:
+                                        $ref: '#/components/schemas/PaperGuideStatus'
+                                type: object
+                    description: Authorized personal result
+                "400":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Invalid input
+                "403":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Generation disabled
+                "404":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Resource missing or permission revoked
+                "409":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Source changed, preparation required, or conflicting run
+                "422":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Model unavailable, budget exhausted, context too long, invalid evidence, or insufficient material
+            summary: Resume with original model and remaining persisted budget
+    /api/core/datasets/{dataset}/documents/{document}/paper-guide:generate:
+        post:
+            parameters:
+                - in: path
+                  name: dataset
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: document
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/PaperGuideGenerateRequest'
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                properties:
+                                    data:
+                                        $ref: '#/components/schemas/PaperGuideRevisionView'
+                                type: object
+                    description: Authorized personal result
+                "202":
+                    content:
+                        application/json:
+                            schema:
+                                properties:
+                                    data:
+                                        $ref: '#/components/schemas/PaperGuideRevisionView'
+                                type: object
+                    description: Queued durable revision; model_ref only affects this run
+                "400":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Invalid input
+                "403":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Generation disabled
+                "404":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Resource missing or permission revoked
+                "409":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Source changed, preparation required, or conflicting run
+                "422":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Model unavailable, budget exhausted, context too long, invalid evidence, or insufficient material
+            summary: Generate or explicitly regenerate a guide
 servers:
     - description: same origin; see paths with /api/core prefix
       url: /

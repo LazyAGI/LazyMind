@@ -331,22 +331,12 @@ func (c *zoteroClient) requestTo(ctx context.Context, target *url.URL, limit int
 
 func (c *zoteroClient) observeVersion(headers http.Header) error {
 	version := headers.Get("Last-Modified-Version")
-	if c.version != "" && version != c.version {
+	server := headers.Get("Zotero-Server-ID")
+	if (c.version != "" && version != c.version) || (c.serverID != "" && server != c.serverID) {
 		return zoteroFailure(409, "ZOTERO_SOURCE_CHANGED", "Zotero 文献库在读取期间发生变化，请重新预览")
-	}
-	if err := c.observeServer(headers); err != nil {
-		return err
 	}
 	if version != "" {
 		c.version = version
-	}
-	return nil
-}
-
-func (c *zoteroClient) observeServer(headers http.Header) error {
-	server := headers.Get("Zotero-Server-ID")
-	if c.serverID != "" && server != c.serverID {
-		return zoteroFailure(409, "ZOTERO_SOURCE_CHANGED", "Zotero 文献库在读取期间发生变化，请重新预览")
 	}
 	if server != "" {
 		c.serverID = server

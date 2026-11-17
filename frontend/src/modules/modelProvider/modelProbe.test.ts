@@ -29,11 +29,6 @@ describe("model probe API", () => {
     expect(mocks.request).toHaveBeenCalledWith({ modelProviderId: "provider", groupId: "group", modelId: "model" }, expect.objectContaining({ signal, timeout: 55000, silentError: true }));
     expect(result).toEqual({ status: "passed", code: "ok", model_type: "llm", elapsed_ms: 31 });
   });
-  it("requests persistent verification only when explicitly selected", async () => {
-    mocks.request.mockResolvedValue({ data: { data: { status: "passed", code: "ok", model_type: "llm", elapsed_ms: 31 } } });
-    await probeModel({ providerId: "p", groupId: "g", modelId: "m", verify: true });
-    expect(mocks.request).toHaveBeenCalledWith({ modelProviderId: "p", groupId: "g", modelId: "m", verify: true }, expect.any(Object));
-  });
   it("rejects invalid server output without surfacing raw response values", async () => {
     mocks.request.mockResolvedValue({ data: { data: { status: "secret-token", code: "raw-secret", message: "raw-secret" } } });
     await expect(probeModel({ providerId: "p", groupId: "g", modelId: "m" })).resolves.toEqual({ status: "failed", code: "invalid_response", model_type: "", elapsed_ms: 0 });

@@ -220,17 +220,6 @@ beforeEach(() => {
 });
 
 describe("supplier navigation accessibility", () => {
-  it("explicitly verifies an unverified saved chat model and refreshes the connection", async () => {
-    mocks.probe.mockResolvedValueOnce({ status: "passed", code: "ok", model_type: "llm", elapsed_ms: 24 });
-    const { setProvider, onReload } = setup();
-    act(() => setProvider({ ...provider, groups: [{ ...provider.groups[0], verified: false }] }));
-    const verify = screen.getByRole("button", { name: "modelProvider.probe.verifyAction" });
-    expect(screen.getByRole("button", { name: "modelProvider.probe.action" })).toBeEnabled();
-    fireEvent.click(verify);
-    await waitFor(() => expect(onReload).toHaveBeenCalledTimes(1));
-    expect(mocks.probe).toHaveBeenCalledWith({ providerId: "openai", groupId: "primary", modelId: "model-id", verify: true }, expect.any(AbortSignal));
-  });
-
   afterEach(() => vi.restoreAllMocks());
 
   function narrowViewport() {

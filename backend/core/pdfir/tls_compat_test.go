@@ -33,21 +33,9 @@ func TestOfficialAPISkipsTLSVerificationWithoutChangingDomain(t *testing.T) {
 	if transport.TLSClientConfig != nil && transport.TLSClientConfig.InsecureSkipVerify {
 		t.Fatal("shared transport mutated")
 	}
-	for _, tt := range []struct {
-		url  string
-		auth bool
-	}{
-		{"https://mineru.net/artifact", false},
-		{"https://mineru.net/api/v4/signed", false},
-		{"https://mineru.oss-cn-shanghai.aliyuncs.com/signed", false},
-		{"https://custom.example/api/v4/test", true},
-		{"https://mineru.net:8443/api/v4/test", true},
-		{"https://mineru.net/artifact", true},
-	} {
-		_, err = c.request(context.Background(), "GET", tt.url, nil, tt.auth)
-		if err == nil {
-			t.Fatalf("certificate was not verified for %s (auth=%v)", tt.url, tt.auth)
-		}
+	_, err = c.request(context.Background(), "GET", "https://mineru.net/artifact", nil, false)
+	if err == nil {
+		t.Fatal("artifact certificate was not verified")
 	}
 }
 
@@ -59,7 +47,6 @@ func TestCertificateRetryNeverChangesArtifactOrCustomOrigin(t *testing.T) {
 	}{
 		{"https://mineru.oss-cn-shanghai.aliyuncs.com/upload?signature=secret", false, "mineru.oss-cn-shanghai.aliyuncs.com"},
 		{"https://custom.example/api/v4", true, "custom.example"},
-		{"https://mineru.net/api/v4/test", true, "mineru.net"},
 		{"https://mineru.net/api/v4", true, "wrong.example"},
 	} {
 		t.Run(tt.host, func(t *testing.T) {

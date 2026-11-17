@@ -19,7 +19,7 @@ func TestFencedReporterRejectsStaleAttemptExpiryAndCancel(t *testing.T) {
 			if err != nil || row == nil {
 				t.Fatalf("claim: %v", err)
 			}
-			reporter := &jobReporter{db: db, jobID: job.ID, workerID: row.LockedBy, attemptCount: row.AttemptCount}
+			reporter := &jobReporter{db: db, jobID: job.ID, workerID: row.LockedBy, attemptCount: row.AttemptCount, requireLiveLease: true}
 			called := false
 			if err := reporter.WithLease(context.Background(), func(tx *gorm.DB) error { called = true; return nil }); err != nil || !called {
 				t.Fatalf("live lease: %v", err)
@@ -49,5 +49,22 @@ func TestFencedReporterRejectsStaleAttemptExpiryAndCancel(t *testing.T) {
 				t.Fatalf("stale writer admitted: called=%v err=%v", called, err)
 			}
 		})
+	}
+}
+
+func TestDefaultReporterRetainsExpiredLeaseHeartbeat(t *testing.T) {
+	db := newTestDB(t)
+	job := enqueueTestJob(t, db, "default-heartbeat", 3)
+	runner := newTestRunner(db)
+	row, err := runner.claimOne(context.Background(), time.Now())
+	if err != nil || row == nil {
+		t.Fatalf("claim: %v", err)
+	}
+	if err := db.Model(&orm.AsyncJob{}).Where("id = ?", job.ID).Update("lock_until", time.Now().Add(-time.Minute)).Error; err != nil {
+		t.Fatal(err)
+	}
+	reporter := &jobReporter{db: db, jobID: job.ID, workerID: row.LockedBy, attemptCount: row.AttemptCount, lockTTL: time.Minute}
+	if err := reporter.Heartbeat(context.Background()); err != nil {
+		t.Fatalf("default heartbeat changed: %v", err)
 	}
 }

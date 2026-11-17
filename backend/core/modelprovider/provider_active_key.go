@@ -92,6 +92,7 @@ func SetActiveProviderKey(w http.ResponseWriter, r *http.Request) {
 		if err := lockProvider(tx, &parent); err != nil {
 			return err
 		}
+		verified := false
 		if req.KeyID != "" {
 			if parent.ActiveKeyRevision != preferenceRevision {
 				return errConnectionChanged
@@ -113,12 +114,10 @@ func SetActiveProviderKey(w http.ResponseWriter, r *http.Request) {
 			if keyMatchingID(current.ID, req.KeyID, pool) != checkedKey {
 				return errConnectionChanged
 			}
-			if parent.ActiveKeyInitialized && parent.ActiveKeyGroupID == req.GroupID && parent.ActiveKeyID == req.KeyID {
-				return nil
-			}
+			verified = parent.ActiveKeyGroupID == req.GroupID && parent.ActiveKeyID == req.KeyID && current.IsVerified
 		}
 		now := time.Now()
-		if err := saveActiveProviderKey(tx, &parent, req.GroupID, req.KeyID, false, now); err != nil {
+		if err := saveActiveProviderKey(tx, &parent, req.GroupID, req.KeyID, verified, now); err != nil {
 			return err
 		}
 		return refreshProviderSelectionBackup(tx, parent, now)
@@ -262,13 +261,17 @@ func reconcileProviderActiveKey(tx *gorm.DB, parent *orm.UserModelProvider) erro
 		}
 		return nil
 	}
-	_, _, err := selectedProviderKey(tx, *parent)
+	group, key, err := selectedProviderKey(tx, *parent)
 	if errors.Is(err, ErrProviderKeyDisabled) {
 		return saveActiveProviderKey(tx, parent, "", "", false, time.Now())
 	}
-	// The same active key still applies. Group verification can come from a
-	// model in a different group, so do not copy the key group's status.
-	return err
+	if err != nil {
+		return err
+	}
+	if key == "" {
+		return saveActiveProviderKey(tx, parent, "", "", false, time.Now())
+	}
+	return setSupplierVerification(tx, *parent, group.IsVerified, time.Now())
 }
 
 func selectedProviderKey(tx *gorm.DB, parent orm.UserModelProvider) (orm.UserModelProviderGroup, string, error) {
@@ -496,11 +499,6 @@ func checkSharedProviderGroup(w http.ResponseWriter, r *http.Request, db *gorm.D
 				if hasKeys {
 					return errConnectionChanged
 				}
-			}
-			// A missing directory says nothing about the validity of the
-			// saved inference connection. Continue reporting discovery failure.
-			if result != nil && result.Reason == "model_list_unavailable" {
-				return nil
 			}
 			return setSupplierVerification(tx, parent, checkErr == nil && result != nil && result.Success, time.Now())
 		})

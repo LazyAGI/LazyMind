@@ -1077,30 +1077,27 @@ export default function ModelProviderPage({
         checkResponse.data,
       );
       const isVerified = checkResult?.success === true;
-      if (isVerified || checkResult?.reason === "model_list_unavailable") {
-        await loadModelProviders();
-      } else {
-        setAddedProviderList((current) =>
-          current.map((provider) =>
-            provider.id === providerId
-              ? {
-                  ...provider,
-                  groups: provider.groups.map((group) => {
-                    if (group.id !== groupId) return group;
-                    const models = visibleSavedProviderModels(provider, false, group.models);
-                    return {
-                      ...group,
-                      verified: false,
-                      models,
-                      ...(provider.isCustom ? { modelCount: models.length } : {}),
-                    };
-                  }),
-                }
-              : provider,
-          ),
-        );
-      }
+      setAddedProviderList((current) =>
+        current.map((provider) =>
+          provider.id === providerId
+            ? {
+                ...provider,
+                groups: provider.groups.map((group) => {
+                  if (group.id !== groupId) return group;
+                  const models = visibleSavedProviderModels(provider, isVerified, group.models);
+                  return {
+                    ...group,
+                    verified: isVerified,
+                    models,
+                    ...(provider.isCustom && !isVerified ? { modelCount: models.length } : {}),
+                  };
+                }),
+              }
+            : provider,
+        ),
+      );
       if (isVerified) {
+        await loadModelProviders();
         if (isCurrent()) message.success(t(checkResult?.reason === "credentials_recognized" ? "modelProvider.workspace.arkCredentialsRecognized" : "modelProvider.message.groupVerified"));
         void onConfigurationChanged?.();
         return true;

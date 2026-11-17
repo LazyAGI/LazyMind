@@ -1990,15 +1990,11 @@ export interface AttemptContext {
     'declared_input_types'?: { [key: string]: string; };
     'declared_output_types'?: { [key: string]: string; };
     'declared_outputs'?: Array<string>;
-    'execution'?: ExecutionContract;
     'inputs'?: { [key: string]: object; };
     'instruction'?: string;
-    'knowledge_scope'?: KnowledgeScope;
-    'launch_request'?: string;
     'legacy_tools'?: Array<string>;
     'metadata'?: { [key: string]: string; };
     'objective'?: string;
-    'objective_ref'?: string;
     'operation': string;
     'output_cardinality'?: { [key: string]: string; };
     'partial_selector'?: { [key: string]: Array<number>; };
@@ -2010,7 +2006,6 @@ export interface AttemptContext {
     'terminal_tools'?: Array<string>;
     'terminal_tools_only'?: boolean;
     'tools_only'?: boolean;
-    'user_request'?: string;
     'workflow_revision': string;
 }
 export interface AuthorizationSubjectGrant {
@@ -2123,13 +2118,6 @@ export interface BulkUpdateServerEnabledResponse {
     'skipped_unverified_count': number;
     'total_count': number;
     'updated_count': number;
-}
-export interface CallInput {
-    'arguments'?: { [key: string]: object; };
-    'command_id': string;
-    'execution_handle': string;
-    'source'?: string;
-    'tool_name': string;
 }
 export interface CanResult {
     'allowed'?: boolean;
@@ -5666,14 +5654,6 @@ export interface Execution {
     'review_after_complete': boolean;
     'step_contract': AttemptContext;
 }
-export interface ExecutionContract {
-    'skill_files'?: Array<SkillFile>;
-    'stepExecution': StepExecution;
-}
-export interface ExecutionTool {
-    'name': string;
-    'source': string;
-}
 export interface ExportConversationsRequest {
     'conversation_ids'?: Array<string>;
     'create_user_names'?: Array<string>;
@@ -5946,13 +5926,6 @@ export interface InitUploadResponse {
     'upload_scope'?: string;
     'upload_state': string;
 }
-export interface InputRequest {
-    'artifact_id': string;
-    'questions'?: Array<{ [key: string]: object; }>;
-    'revision': number;
-    'slot': string;
-    'title': string;
-}
 export interface InternalSkillCreateOpenAPIRequest {
     'category': string;
     'content': string;
@@ -5968,11 +5941,6 @@ export interface KBListRow {
     'name'?: string;
     'permissions'?: Array<string>;
     'visibility'?: string;
-}
-export interface KnowledgeDocumentRef {
-    'dataset_id': string;
-    'document_id': string;
-    'resource_version'?: number;
 }
 export interface KnowledgeMarketDetailOpenAPIResponse {
     'category': string;
@@ -6216,10 +6184,6 @@ export interface KnowledgeOperationError {
     'code': string;
     'details'?: { [key: string]: object; };
     'message': string;
-}
-export interface KnowledgeScope {
-    'dataset_ids'?: Array<string>;
-    'documents'?: Array<KnowledgeDocumentRef>;
 }
 export interface LatestVersionChangeOpenAPIResponse {
     'change_source': string;
@@ -8387,8 +8351,13 @@ export interface ResourceUpdateTaskOpenAPIResponse {
     'user_id': string;
 }
 export interface Result {
-    'error'?: ToolError;
-    'result'?: object;
+    'artifacts'?: Array<WorkflowExecutionArtifact>;
+    'control'?: Control;
+    'error'?: string;
+    'executor_ref'?: string;
+    'post_step_checkpoint'?: PostStepCheckpoint;
+    'projection'?: { [key: string]: object; };
+    'summary'?: string;
 }
 export interface ResumeTaskRequest {
     'task_id'?: string;
@@ -9117,11 +9086,6 @@ export interface SkillExistsOpenAPIResponse {
 export interface SkillFSListOpenAPIResponse {
     'items'?: Array<SkillTreeNodeOpenAPIResponse>;
 }
-export interface SkillFile {
-    'content': string;
-    'path': string;
-    'sha256': string;
-}
 export interface SkillFileOpenAPIResponse {
     'binary': boolean;
     'blob_hash'?: string;
@@ -9553,8 +9517,6 @@ export interface Snapshot {
     'binding': BindingView;
     'continuation': string;
     'delivery'?: WorkflowHostAction;
-    'expired_execution_ids'?: Array<string>;
-    'input_request'?: InputRequest;
     'native_execution_ids'?: Array<string>;
     'protocol': string;
     'reviews'?: Array<WorkflowReviewCheckpoint>;
@@ -9599,19 +9561,11 @@ export interface StartTasksResponse {
 export interface StepDTO {
     'attempt': number;
     'created_at': string;
-    'executor_host'?: string;
     'intent_context'?: string;
     'status': string;
     'step_id': string;
     'task_id': string;
     'validity': string;
-}
-export interface StepExecution {
-    'constraints'?: Array<string>;
-    'output_validator'?: string;
-    'skills'?: Array<string>;
-    'tools'?: Array<ExecutionTool>;
-    'version'?: string;
 }
 export interface SuspendJobRequest {
     'task_id'?: string;
@@ -9912,14 +9866,6 @@ export interface Timing {
     'started_at': string | null;
     'thinking_elapsed_ms': number | null;
 }
-export interface Tool {
-    'available': boolean;
-    'description'?: string;
-    'input_schema'?: { [key: string]: object; };
-    'name': string;
-    'reason'?: string;
-    'source': string;
-}
 export interface ToolConfigurationAction {
     'conversation_id': string;
     'history_id': string;
@@ -9931,12 +9877,6 @@ export interface ToolConfigurationAction {
 }
 export interface ToolConfigurationListResponse {
     'actions'?: Array<ToolConfigurationAction>;
-}
-export interface ToolError {
-    'code': string;
-    'message': string;
-    'retryable': boolean;
-    'upstream'?: UpstreamError;
 }
 export interface ToolGroup {
     'active'?: boolean;
@@ -10197,11 +10137,6 @@ export interface UploadPartResponse {
     'upload_id'?: string;
     'upload_state'?: string;
     'uploaded_parts'?: number;
-}
-export interface UpstreamError {
-    'code'?: string;
-    'http_status': number;
-    'request_id'?: string;
 }
 export interface UserChatSettingsOpenAPIResponse {
     'default_permission_mode': UserChatSettingsOpenAPIResponseDefaultPermissionModeEnum;
@@ -10482,11 +10417,8 @@ export interface WorkflowCapabilitiesReply {
     'message': string;
 }
 export interface WorkflowControlCommand {
-    'answer_text'?: string;
     'command_id': string;
     'expected_state_version': number;
-    'input_artifact_id'?: string;
-    'input_revision'?: number;
     'kind': string;
     'manifest_hash'?: string;
     'objective'?: string;
@@ -10496,7 +10428,6 @@ export interface WorkflowControlCommand {
     'review_version'?: number;
     'runtime_instruction'?: string;
     'step_id'?: string;
-    'user_input'?: string;
 }
 export interface WorkflowControlError {
     'code': string;
@@ -10675,22 +10606,6 @@ export interface WorkflowSlotsReadResponse {
     'code': number;
     'data': WorkflowSlotsReadData;
     'message': string;
-}
-export interface WorkflowToolCallReply {
-    'contract_version': string;
-    'ok': boolean;
-    'result': Result;
-}
-export interface WorkflowToolListBody {
-    'execution_handle': string;
-}
-export interface WorkflowToolListReply {
-    'contract_version': string;
-    'ok': boolean;
-    'result': WorkflowToolListResult;
-}
-export interface WorkflowToolListResult {
-    'tools'?: Array<Tool>;
 }
 export interface WorkflowTrashEmptyData {
     'purged'?: number;
@@ -20541,43 +20456,6 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             }
 
             const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
-            const localVarHeaderParameter = {} as any;
-            const localVarQueryParameter = {} as any;
-
-
-            setSearchParams(localVarUrlObj, localVarQueryParameter);
-            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
-            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
-
-            return {
-                url: toPathString(localVarUrlObj),
-                options: localVarRequestOptions,
-            };
-        },
-        /**
-         *
-         * @summary PATCH /academic/library/papers/{library_paper_id}/notes/{note_id}
-         * @param {string} libraryPaperId
-         * @param {string} noteId
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCoreAcademicLibraryPapersLibraryPaperIdNotesNoteIdPatch: async (libraryPaperId: string, noteId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
-            // verify required parameter 'libraryPaperId' is not null or undefined
-            assertParamExists('apiCoreAcademicLibraryPapersLibraryPaperIdNotesNoteIdPatch', 'libraryPaperId', libraryPaperId)
-            // verify required parameter 'noteId' is not null or undefined
-            assertParamExists('apiCoreAcademicLibraryPapersLibraryPaperIdNotesNoteIdPatch', 'noteId', noteId)
-            const localVarPath = `/api/core/academic/library/papers/{library_paper_id}/notes/{note_id}`
-                .replace(`{${"library_paper_id"}}`, encodeURIComponent(String(libraryPaperId)))
-                .replace(`{${"note_id"}}`, encodeURIComponent(String(noteId)));
-            // use dummy base URL string because the URL constructor only accepts absolute URLs.
-            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
-            let baseOptions;
-            if (configuration) {
-                baseOptions = configuration.baseOptions;
-            }
-
-            const localVarRequestOptions = { method: 'PATCH', ...baseOptions, ...options};
             const localVarHeaderParameter = {} as any;
             const localVarQueryParameter = {} as any;
 
@@ -31237,64 +31115,6 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
         },
         /**
          *
-         * @summary GET /system-dependencies/node
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCoreSystemDependenciesNodeGet: async (options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
-            const localVarPath = `/api/core/system-dependencies/node`;
-            // use dummy base URL string because the URL constructor only accepts absolute URLs.
-            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
-            let baseOptions;
-            if (configuration) {
-                baseOptions = configuration.baseOptions;
-            }
-
-            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
-            const localVarHeaderParameter = {} as any;
-            const localVarQueryParameter = {} as any;
-
-
-            setSearchParams(localVarUrlObj, localVarQueryParameter);
-            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
-            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
-
-            return {
-                url: toPathString(localVarUrlObj),
-                options: localVarRequestOptions,
-            };
-        },
-        /**
-         *
-         * @summary POST /system-dependencies/node:install
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCoreSystemDependenciesNodeInstallPost: async (options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
-            const localVarPath = `/api/core/system-dependencies/node:install`;
-            // use dummy base URL string because the URL constructor only accepts absolute URLs.
-            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
-            let baseOptions;
-            if (configuration) {
-                baseOptions = configuration.baseOptions;
-            }
-
-            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
-            const localVarHeaderParameter = {} as any;
-            const localVarQueryParameter = {} as any;
-
-
-            setSearchParams(localVarUrlObj, localVarQueryParameter);
-            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
-            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
-
-            return {
-                url: toPathString(localVarUrlObj),
-                options: localVarRequestOptions,
-            };
-        },
-        /**
-         *
          * @summary GET /system-dependencies/pdf-font
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
@@ -35098,146 +34918,6 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
         },
         /**
          *
-         * @summary GET /workflow-sessions/{session_id}/artifact-actions/{job_id}
-         * @param {string} sessionId
-         * @param {string} jobId
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCoreWorkflowSessionsSessionIdArtifactActionsJobIdGet: async (sessionId: string, jobId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
-            // verify required parameter 'sessionId' is not null or undefined
-            assertParamExists('apiCoreWorkflowSessionsSessionIdArtifactActionsJobIdGet', 'sessionId', sessionId)
-            // verify required parameter 'jobId' is not null or undefined
-            assertParamExists('apiCoreWorkflowSessionsSessionIdArtifactActionsJobIdGet', 'jobId', jobId)
-            const localVarPath = `/api/core/workflow-sessions/{session_id}/artifact-actions/{job_id}`
-                .replace(`{${"session_id"}}`, encodeURIComponent(String(sessionId)))
-                .replace(`{${"job_id"}}`, encodeURIComponent(String(jobId)));
-            // use dummy base URL string because the URL constructor only accepts absolute URLs.
-            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
-            let baseOptions;
-            if (configuration) {
-                baseOptions = configuration.baseOptions;
-            }
-
-            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
-            const localVarHeaderParameter = {} as any;
-            const localVarQueryParameter = {} as any;
-
-
-            setSearchParams(localVarUrlObj, localVarQueryParameter);
-            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
-            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
-
-            return {
-                url: toPathString(localVarUrlObj),
-                options: localVarRequestOptions,
-            };
-        },
-        /**
-         *
-         * @summary POST /workflow-sessions/{session_id}/artifact-actions/{job_id}
-         * @param {string} sessionId
-         * @param {string} jobId
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCoreWorkflowSessionsSessionIdArtifactActionsJobIdPost: async (sessionId: string, jobId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
-            // verify required parameter 'sessionId' is not null or undefined
-            assertParamExists('apiCoreWorkflowSessionsSessionIdArtifactActionsJobIdPost', 'sessionId', sessionId)
-            // verify required parameter 'jobId' is not null or undefined
-            assertParamExists('apiCoreWorkflowSessionsSessionIdArtifactActionsJobIdPost', 'jobId', jobId)
-            const localVarPath = `/api/core/workflow-sessions/{session_id}/artifact-actions/{job_id}`
-                .replace(`{${"session_id"}}`, encodeURIComponent(String(sessionId)))
-                .replace(`{${"job_id"}}`, encodeURIComponent(String(jobId)));
-            // use dummy base URL string because the URL constructor only accepts absolute URLs.
-            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
-            let baseOptions;
-            if (configuration) {
-                baseOptions = configuration.baseOptions;
-            }
-
-            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
-            const localVarHeaderParameter = {} as any;
-            const localVarQueryParameter = {} as any;
-
-
-            setSearchParams(localVarUrlObj, localVarQueryParameter);
-            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
-            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
-
-            return {
-                url: toPathString(localVarUrlObj),
-                options: localVarRequestOptions,
-            };
-        },
-        /**
-         *
-         * @summary GET /workflow-sessions/{session_id}/artifact-edit
-         * @param {string} sessionId
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCoreWorkflowSessionsSessionIdArtifactEditGet: async (sessionId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
-            // verify required parameter 'sessionId' is not null or undefined
-            assertParamExists('apiCoreWorkflowSessionsSessionIdArtifactEditGet', 'sessionId', sessionId)
-            const localVarPath = `/api/core/workflow-sessions/{session_id}/artifact-edit`
-                .replace(`{${"session_id"}}`, encodeURIComponent(String(sessionId)));
-            // use dummy base URL string because the URL constructor only accepts absolute URLs.
-            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
-            let baseOptions;
-            if (configuration) {
-                baseOptions = configuration.baseOptions;
-            }
-
-            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
-            const localVarHeaderParameter = {} as any;
-            const localVarQueryParameter = {} as any;
-
-
-            setSearchParams(localVarUrlObj, localVarQueryParameter);
-            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
-            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
-
-            return {
-                url: toPathString(localVarUrlObj),
-                options: localVarRequestOptions,
-            };
-        },
-        /**
-         *
-         * @summary POST /workflow-sessions/{session_id}/artifact-edit
-         * @param {string} sessionId
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCoreWorkflowSessionsSessionIdArtifactEditPost: async (sessionId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
-            // verify required parameter 'sessionId' is not null or undefined
-            assertParamExists('apiCoreWorkflowSessionsSessionIdArtifactEditPost', 'sessionId', sessionId)
-            const localVarPath = `/api/core/workflow-sessions/{session_id}/artifact-edit`
-                .replace(`{${"session_id"}}`, encodeURIComponent(String(sessionId)));
-            // use dummy base URL string because the URL constructor only accepts absolute URLs.
-            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
-            let baseOptions;
-            if (configuration) {
-                baseOptions = configuration.baseOptions;
-            }
-
-            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
-            const localVarHeaderParameter = {} as any;
-            const localVarQueryParameter = {} as any;
-
-
-            setSearchParams(localVarUrlObj, localVarQueryParameter);
-            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
-            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
-
-            return {
-                url: toPathString(localVarUrlObj),
-                options: localVarRequestOptions,
-            };
-        },
-        /**
-         *
          * @summary POST /workflow-sessions/{session_id}/artifacts
          * @param {string} sessionId
          * @param {*} [options] Override http request option.
@@ -35343,43 +35023,6 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
         },
         /**
          *
-         * @summary POST /workflow-sessions/{session_id}/hosted-attempts/{attempt_id}:heartbeat
-         * @param {string} sessionId
-         * @param {string} attemptId
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCoreWorkflowSessionsSessionIdHostedAttemptsAttemptIdHeartbeatPost: async (sessionId: string, attemptId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
-            // verify required parameter 'sessionId' is not null or undefined
-            assertParamExists('apiCoreWorkflowSessionsSessionIdHostedAttemptsAttemptIdHeartbeatPost', 'sessionId', sessionId)
-            // verify required parameter 'attemptId' is not null or undefined
-            assertParamExists('apiCoreWorkflowSessionsSessionIdHostedAttemptsAttemptIdHeartbeatPost', 'attemptId', attemptId)
-            const localVarPath = `/api/core/workflow-sessions/{session_id}/hosted-attempts/{attempt_id}:heartbeat`
-                .replace(`{${"session_id"}}`, encodeURIComponent(String(sessionId)))
-                .replace(`{${"attempt_id"}}`, encodeURIComponent(String(attemptId)));
-            // use dummy base URL string because the URL constructor only accepts absolute URLs.
-            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
-            let baseOptions;
-            if (configuration) {
-                baseOptions = configuration.baseOptions;
-            }
-
-            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
-            const localVarHeaderParameter = {} as any;
-            const localVarQueryParameter = {} as any;
-
-
-            setSearchParams(localVarUrlObj, localVarQueryParameter);
-            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
-            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
-
-            return {
-                url: toPathString(localVarUrlObj),
-                options: localVarRequestOptions,
-            };
-        },
-        /**
-         *
          * @summary POST /workflow-sessions/{session_id}/hosted-attempts/{attempt_id}:submit
          * @param {string} sessionId
          * @param {string} attemptId
@@ -35460,80 +35103,6 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             assertParamExists('apiCoreWorkflowSessionsSessionIdInputBindingsPost', 'sessionId', sessionId)
             const localVarPath = `/api/core/workflow-sessions/{session_id}/input-bindings`
                 .replace(`{${"session_id"}}`, encodeURIComponent(String(sessionId)));
-            // use dummy base URL string because the URL constructor only accepts absolute URLs.
-            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
-            let baseOptions;
-            if (configuration) {
-                baseOptions = configuration.baseOptions;
-            }
-
-            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
-            const localVarHeaderParameter = {} as any;
-            const localVarQueryParameter = {} as any;
-
-
-            setSearchParams(localVarUrlObj, localVarQueryParameter);
-            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
-            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
-
-            return {
-                url: toPathString(localVarUrlObj),
-                options: localVarRequestOptions,
-            };
-        },
-        /**
-         *
-         * @summary POST /workflow-sessions/{session_id}/model-generations/{job_id}:claim
-         * @param {string} sessionId
-         * @param {string} jobId
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCoreWorkflowSessionsSessionIdModelGenerationsJobIdClaimPost: async (sessionId: string, jobId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
-            // verify required parameter 'sessionId' is not null or undefined
-            assertParamExists('apiCoreWorkflowSessionsSessionIdModelGenerationsJobIdClaimPost', 'sessionId', sessionId)
-            // verify required parameter 'jobId' is not null or undefined
-            assertParamExists('apiCoreWorkflowSessionsSessionIdModelGenerationsJobIdClaimPost', 'jobId', jobId)
-            const localVarPath = `/api/core/workflow-sessions/{session_id}/model-generations/{job_id}:claim`
-                .replace(`{${"session_id"}}`, encodeURIComponent(String(sessionId)))
-                .replace(`{${"job_id"}}`, encodeURIComponent(String(jobId)));
-            // use dummy base URL string because the URL constructor only accepts absolute URLs.
-            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
-            let baseOptions;
-            if (configuration) {
-                baseOptions = configuration.baseOptions;
-            }
-
-            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
-            const localVarHeaderParameter = {} as any;
-            const localVarQueryParameter = {} as any;
-
-
-            setSearchParams(localVarUrlObj, localVarQueryParameter);
-            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
-            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
-
-            return {
-                url: toPathString(localVarUrlObj),
-                options: localVarRequestOptions,
-            };
-        },
-        /**
-         *
-         * @summary POST /workflow-sessions/{session_id}/model-generations/{job_id}:respond
-         * @param {string} sessionId
-         * @param {string} jobId
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCoreWorkflowSessionsSessionIdModelGenerationsJobIdRespondPost: async (sessionId: string, jobId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
-            // verify required parameter 'sessionId' is not null or undefined
-            assertParamExists('apiCoreWorkflowSessionsSessionIdModelGenerationsJobIdRespondPost', 'sessionId', sessionId)
-            // verify required parameter 'jobId' is not null or undefined
-            assertParamExists('apiCoreWorkflowSessionsSessionIdModelGenerationsJobIdRespondPost', 'jobId', jobId)
-            const localVarPath = `/api/core/workflow-sessions/{session_id}/model-generations/{job_id}:respond`
-                .replace(`{${"session_id"}}`, encodeURIComponent(String(sessionId)))
-                .replace(`{${"job_id"}}`, encodeURIComponent(String(jobId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -36545,20 +36114,6 @@ export const DefaultApiFp = function(configuration?: Configuration) {
             const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreAcademicLibraryPapersDeletePost(options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreAcademicLibraryPapersDeletePost']?.[localVarOperationServerIndex]?.url;
-            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
-        },
-        /**
-         *
-         * @summary PATCH /academic/library/papers/{library_paper_id}/notes/{note_id}
-         * @param {string} libraryPaperId
-         * @param {string} noteId
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        async apiCoreAcademicLibraryPapersLibraryPaperIdNotesNoteIdPatch(libraryPaperId: string, noteId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreAcademicLibraryPapersLibraryPaperIdNotesNoteIdPatch(libraryPaperId, noteId, options);
-            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
-            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreAcademicLibraryPapersLibraryPaperIdNotesNoteIdPatch']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
@@ -40597,30 +40152,6 @@ export const DefaultApiFp = function(configuration?: Configuration) {
         },
         /**
          *
-         * @summary GET /system-dependencies/node
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        async apiCoreSystemDependenciesNodeGet(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreSystemDependenciesNodeGet(options);
-            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
-            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreSystemDependenciesNodeGet']?.[localVarOperationServerIndex]?.url;
-            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
-        },
-        /**
-         *
-         * @summary POST /system-dependencies/node:install
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        async apiCoreSystemDependenciesNodeInstallPost(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreSystemDependenciesNodeInstallPost(options);
-            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
-            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreSystemDependenciesNodeInstallPost']?.[localVarOperationServerIndex]?.url;
-            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
-        },
-        /**
-         *
          * @summary GET /system-dependencies/pdf-font
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
@@ -42110,60 +41641,6 @@ export const DefaultApiFp = function(configuration?: Configuration) {
         },
         /**
          *
-         * @summary GET /workflow-sessions/{session_id}/artifact-actions/{job_id}
-         * @param {string} sessionId
-         * @param {string} jobId
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        async apiCoreWorkflowSessionsSessionIdArtifactActionsJobIdGet(sessionId: string, jobId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreWorkflowSessionsSessionIdArtifactActionsJobIdGet(sessionId, jobId, options);
-            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
-            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreWorkflowSessionsSessionIdArtifactActionsJobIdGet']?.[localVarOperationServerIndex]?.url;
-            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
-        },
-        /**
-         *
-         * @summary POST /workflow-sessions/{session_id}/artifact-actions/{job_id}
-         * @param {string} sessionId
-         * @param {string} jobId
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        async apiCoreWorkflowSessionsSessionIdArtifactActionsJobIdPost(sessionId: string, jobId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreWorkflowSessionsSessionIdArtifactActionsJobIdPost(sessionId, jobId, options);
-            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
-            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreWorkflowSessionsSessionIdArtifactActionsJobIdPost']?.[localVarOperationServerIndex]?.url;
-            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
-        },
-        /**
-         *
-         * @summary GET /workflow-sessions/{session_id}/artifact-edit
-         * @param {string} sessionId
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        async apiCoreWorkflowSessionsSessionIdArtifactEditGet(sessionId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreWorkflowSessionsSessionIdArtifactEditGet(sessionId, options);
-            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
-            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreWorkflowSessionsSessionIdArtifactEditGet']?.[localVarOperationServerIndex]?.url;
-            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
-        },
-        /**
-         *
-         * @summary POST /workflow-sessions/{session_id}/artifact-edit
-         * @param {string} sessionId
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        async apiCoreWorkflowSessionsSessionIdArtifactEditPost(sessionId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreWorkflowSessionsSessionIdArtifactEditPost(sessionId, options);
-            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
-            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreWorkflowSessionsSessionIdArtifactEditPost']?.[localVarOperationServerIndex]?.url;
-            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
-        },
-        /**
-         *
          * @summary POST /workflow-sessions/{session_id}/artifacts
          * @param {string} sessionId
          * @param {*} [options] Override http request option.
@@ -42204,20 +41681,6 @@ export const DefaultApiFp = function(configuration?: Configuration) {
         },
         /**
          *
-         * @summary POST /workflow-sessions/{session_id}/hosted-attempts/{attempt_id}:heartbeat
-         * @param {string} sessionId
-         * @param {string} attemptId
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        async apiCoreWorkflowSessionsSessionIdHostedAttemptsAttemptIdHeartbeatPost(sessionId: string, attemptId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreWorkflowSessionsSessionIdHostedAttemptsAttemptIdHeartbeatPost(sessionId, attemptId, options);
-            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
-            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreWorkflowSessionsSessionIdHostedAttemptsAttemptIdHeartbeatPost']?.[localVarOperationServerIndex]?.url;
-            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
-        },
-        /**
-         *
          * @summary POST /workflow-sessions/{session_id}/hosted-attempts/{attempt_id}:submit
          * @param {string} sessionId
          * @param {string} attemptId
@@ -42254,34 +41717,6 @@ export const DefaultApiFp = function(configuration?: Configuration) {
             const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreWorkflowSessionsSessionIdInputBindingsPost(sessionId, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreWorkflowSessionsSessionIdInputBindingsPost']?.[localVarOperationServerIndex]?.url;
-            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
-        },
-        /**
-         *
-         * @summary POST /workflow-sessions/{session_id}/model-generations/{job_id}:claim
-         * @param {string} sessionId
-         * @param {string} jobId
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        async apiCoreWorkflowSessionsSessionIdModelGenerationsJobIdClaimPost(sessionId: string, jobId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreWorkflowSessionsSessionIdModelGenerationsJobIdClaimPost(sessionId, jobId, options);
-            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
-            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreWorkflowSessionsSessionIdModelGenerationsJobIdClaimPost']?.[localVarOperationServerIndex]?.url;
-            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
-        },
-        /**
-         *
-         * @summary POST /workflow-sessions/{session_id}/model-generations/{job_id}:respond
-         * @param {string} sessionId
-         * @param {string} jobId
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        async apiCoreWorkflowSessionsSessionIdModelGenerationsJobIdRespondPost(sessionId: string, jobId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreWorkflowSessionsSessionIdModelGenerationsJobIdRespondPost(sessionId, jobId, options);
-            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
-            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreWorkflowSessionsSessionIdModelGenerationsJobIdRespondPost']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
@@ -42686,16 +42121,6 @@ export const DefaultApiFactory = function (configuration?: Configuration, basePa
          */
         apiCoreAcademicLibraryPapersDeletePost(options?: RawAxiosRequestConfig): AxiosPromise<void> {
             return localVarFp.apiCoreAcademicLibraryPapersDeletePost(options).then((request) => request(axios, basePath));
-        },
-        /**
-         *
-         * @summary PATCH /academic/library/papers/{library_paper_id}/notes/{note_id}
-         * @param {DefaultApiApiCoreAcademicLibraryPapersLibraryPaperIdNotesNoteIdPatchRequest} requestParameters Request parameters.
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCoreAcademicLibraryPapersLibraryPaperIdNotesNoteIdPatch(requestParameters: DefaultApiApiCoreAcademicLibraryPapersLibraryPaperIdNotesNoteIdPatchRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
-            return localVarFp.apiCoreAcademicLibraryPapersLibraryPaperIdNotesNoteIdPatch(requestParameters.libraryPaperId, requestParameters.noteId, options).then((request) => request(axios, basePath));
         },
         /**
          *
@@ -45657,24 +45082,6 @@ export const DefaultApiFactory = function (configuration?: Configuration, basePa
         },
         /**
          *
-         * @summary GET /system-dependencies/node
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCoreSystemDependenciesNodeGet(options?: RawAxiosRequestConfig): AxiosPromise<void> {
-            return localVarFp.apiCoreSystemDependenciesNodeGet(options).then((request) => request(axios, basePath));
-        },
-        /**
-         *
-         * @summary POST /system-dependencies/node:install
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCoreSystemDependenciesNodeInstallPost(options?: RawAxiosRequestConfig): AxiosPromise<void> {
-            return localVarFp.apiCoreSystemDependenciesNodeInstallPost(options).then((request) => request(axios, basePath));
-        },
-        /**
-         *
          * @summary GET /system-dependencies/pdf-font
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
@@ -46789,46 +46196,6 @@ export const DefaultApiFactory = function (configuration?: Configuration, basePa
         },
         /**
          *
-         * @summary GET /workflow-sessions/{session_id}/artifact-actions/{job_id}
-         * @param {DefaultApiApiCoreWorkflowSessionsSessionIdArtifactActionsJobIdGetRequest} requestParameters Request parameters.
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCoreWorkflowSessionsSessionIdArtifactActionsJobIdGet(requestParameters: DefaultApiApiCoreWorkflowSessionsSessionIdArtifactActionsJobIdGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
-            return localVarFp.apiCoreWorkflowSessionsSessionIdArtifactActionsJobIdGet(requestParameters.sessionId, requestParameters.jobId, options).then((request) => request(axios, basePath));
-        },
-        /**
-         *
-         * @summary POST /workflow-sessions/{session_id}/artifact-actions/{job_id}
-         * @param {DefaultApiApiCoreWorkflowSessionsSessionIdArtifactActionsJobIdPostRequest} requestParameters Request parameters.
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCoreWorkflowSessionsSessionIdArtifactActionsJobIdPost(requestParameters: DefaultApiApiCoreWorkflowSessionsSessionIdArtifactActionsJobIdPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
-            return localVarFp.apiCoreWorkflowSessionsSessionIdArtifactActionsJobIdPost(requestParameters.sessionId, requestParameters.jobId, options).then((request) => request(axios, basePath));
-        },
-        /**
-         *
-         * @summary GET /workflow-sessions/{session_id}/artifact-edit
-         * @param {DefaultApiApiCoreWorkflowSessionsSessionIdArtifactEditGetRequest} requestParameters Request parameters.
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCoreWorkflowSessionsSessionIdArtifactEditGet(requestParameters: DefaultApiApiCoreWorkflowSessionsSessionIdArtifactEditGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
-            return localVarFp.apiCoreWorkflowSessionsSessionIdArtifactEditGet(requestParameters.sessionId, options).then((request) => request(axios, basePath));
-        },
-        /**
-         *
-         * @summary POST /workflow-sessions/{session_id}/artifact-edit
-         * @param {DefaultApiApiCoreWorkflowSessionsSessionIdArtifactEditPostRequest} requestParameters Request parameters.
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCoreWorkflowSessionsSessionIdArtifactEditPost(requestParameters: DefaultApiApiCoreWorkflowSessionsSessionIdArtifactEditPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
-            return localVarFp.apiCoreWorkflowSessionsSessionIdArtifactEditPost(requestParameters.sessionId, options).then((request) => request(axios, basePath));
-        },
-        /**
-         *
          * @summary POST /workflow-sessions/{session_id}/artifacts
          * @param {DefaultApiApiCoreWorkflowSessionsSessionIdArtifactsPostRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
@@ -46859,16 +46226,6 @@ export const DefaultApiFactory = function (configuration?: Configuration, basePa
         },
         /**
          *
-         * @summary POST /workflow-sessions/{session_id}/hosted-attempts/{attempt_id}:heartbeat
-         * @param {DefaultApiApiCoreWorkflowSessionsSessionIdHostedAttemptsAttemptIdHeartbeatPostRequest} requestParameters Request parameters.
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCoreWorkflowSessionsSessionIdHostedAttemptsAttemptIdHeartbeatPost(requestParameters: DefaultApiApiCoreWorkflowSessionsSessionIdHostedAttemptsAttemptIdHeartbeatPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
-            return localVarFp.apiCoreWorkflowSessionsSessionIdHostedAttemptsAttemptIdHeartbeatPost(requestParameters.sessionId, requestParameters.attemptId, options).then((request) => request(axios, basePath));
-        },
-        /**
-         *
          * @summary POST /workflow-sessions/{session_id}/hosted-attempts/{attempt_id}:submit
          * @param {DefaultApiApiCoreWorkflowSessionsSessionIdHostedAttemptsAttemptIdSubmitPostRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
@@ -46896,26 +46253,6 @@ export const DefaultApiFactory = function (configuration?: Configuration, basePa
          */
         apiCoreWorkflowSessionsSessionIdInputBindingsPost(requestParameters: DefaultApiApiCoreWorkflowSessionsSessionIdInputBindingsPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
             return localVarFp.apiCoreWorkflowSessionsSessionIdInputBindingsPost(requestParameters.sessionId, options).then((request) => request(axios, basePath));
-        },
-        /**
-         *
-         * @summary POST /workflow-sessions/{session_id}/model-generations/{job_id}:claim
-         * @param {DefaultApiApiCoreWorkflowSessionsSessionIdModelGenerationsJobIdClaimPostRequest} requestParameters Request parameters.
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCoreWorkflowSessionsSessionIdModelGenerationsJobIdClaimPost(requestParameters: DefaultApiApiCoreWorkflowSessionsSessionIdModelGenerationsJobIdClaimPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
-            return localVarFp.apiCoreWorkflowSessionsSessionIdModelGenerationsJobIdClaimPost(requestParameters.sessionId, requestParameters.jobId, options).then((request) => request(axios, basePath));
-        },
-        /**
-         *
-         * @summary POST /workflow-sessions/{session_id}/model-generations/{job_id}:respond
-         * @param {DefaultApiApiCoreWorkflowSessionsSessionIdModelGenerationsJobIdRespondPostRequest} requestParameters Request parameters.
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCoreWorkflowSessionsSessionIdModelGenerationsJobIdRespondPost(requestParameters: DefaultApiApiCoreWorkflowSessionsSessionIdModelGenerationsJobIdRespondPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
-            return localVarFp.apiCoreWorkflowSessionsSessionIdModelGenerationsJobIdRespondPost(requestParameters.sessionId, requestParameters.jobId, options).then((request) => request(axios, basePath));
         },
         /**
          *
@@ -47197,15 +46534,6 @@ export interface DefaultApiApiCoreAcademicDocumentsDocumentIdReferencesGetReques
  */
 export interface DefaultApiApiCoreAcademicImportsBatchIdCancelPostRequest {
     readonly batchId: string
-}
-
-/**
- * Request parameters for apiCoreAcademicLibraryPapersLibraryPaperIdNotesNoteIdPatch operation in DefaultApi.
- */
-export interface DefaultApiApiCoreAcademicLibraryPapersLibraryPaperIdNotesNoteIdPatchRequest {
-    readonly libraryPaperId: string
-
-    readonly noteId: string
 }
 
 /**
@@ -49569,38 +48897,6 @@ export interface DefaultApiApiCoreWorkflowSessionsSessionIdApprovalPreferencePos
 }
 
 /**
- * Request parameters for apiCoreWorkflowSessionsSessionIdArtifactActionsJobIdGet operation in DefaultApi.
- */
-export interface DefaultApiApiCoreWorkflowSessionsSessionIdArtifactActionsJobIdGetRequest {
-    readonly sessionId: string
-
-    readonly jobId: string
-}
-
-/**
- * Request parameters for apiCoreWorkflowSessionsSessionIdArtifactActionsJobIdPost operation in DefaultApi.
- */
-export interface DefaultApiApiCoreWorkflowSessionsSessionIdArtifactActionsJobIdPostRequest {
-    readonly sessionId: string
-
-    readonly jobId: string
-}
-
-/**
- * Request parameters for apiCoreWorkflowSessionsSessionIdArtifactEditGet operation in DefaultApi.
- */
-export interface DefaultApiApiCoreWorkflowSessionsSessionIdArtifactEditGetRequest {
-    readonly sessionId: string
-}
-
-/**
- * Request parameters for apiCoreWorkflowSessionsSessionIdArtifactEditPost operation in DefaultApi.
- */
-export interface DefaultApiApiCoreWorkflowSessionsSessionIdArtifactEditPostRequest {
-    readonly sessionId: string
-}
-
-/**
  * Request parameters for apiCoreWorkflowSessionsSessionIdArtifactsPost operation in DefaultApi.
  */
 export interface DefaultApiApiCoreWorkflowSessionsSessionIdArtifactsPostRequest {
@@ -49624,15 +48920,6 @@ export interface DefaultApiApiCoreWorkflowSessionsSessionIdEventsGetRequest {
 }
 
 /**
- * Request parameters for apiCoreWorkflowSessionsSessionIdHostedAttemptsAttemptIdHeartbeatPost operation in DefaultApi.
- */
-export interface DefaultApiApiCoreWorkflowSessionsSessionIdHostedAttemptsAttemptIdHeartbeatPostRequest {
-    readonly sessionId: string
-
-    readonly attemptId: string
-}
-
-/**
  * Request parameters for apiCoreWorkflowSessionsSessionIdHostedAttemptsAttemptIdSubmitPost operation in DefaultApi.
  */
 export interface DefaultApiApiCoreWorkflowSessionsSessionIdHostedAttemptsAttemptIdSubmitPostRequest {
@@ -49653,24 +48940,6 @@ export interface DefaultApiApiCoreWorkflowSessionsSessionIdInputBindingsGetReque
  */
 export interface DefaultApiApiCoreWorkflowSessionsSessionIdInputBindingsPostRequest {
     readonly sessionId: string
-}
-
-/**
- * Request parameters for apiCoreWorkflowSessionsSessionIdModelGenerationsJobIdClaimPost operation in DefaultApi.
- */
-export interface DefaultApiApiCoreWorkflowSessionsSessionIdModelGenerationsJobIdClaimPostRequest {
-    readonly sessionId: string
-
-    readonly jobId: string
-}
-
-/**
- * Request parameters for apiCoreWorkflowSessionsSessionIdModelGenerationsJobIdRespondPost operation in DefaultApi.
- */
-export interface DefaultApiApiCoreWorkflowSessionsSessionIdModelGenerationsJobIdRespondPostRequest {
-    readonly sessionId: string
-
-    readonly jobId: string
 }
 
 /**
@@ -49924,17 +49193,6 @@ export class DefaultApi extends BaseAPI {
      */
     public apiCoreAcademicLibraryPapersDeletePost(options?: RawAxiosRequestConfig) {
         return DefaultApiFp(this.configuration).apiCoreAcademicLibraryPapersDeletePost(options).then((request) => request(this.axios, this.basePath));
-    }
-
-    /**
-     *
-     * @summary PATCH /academic/library/papers/{library_paper_id}/notes/{note_id}
-     * @param {DefaultApiApiCoreAcademicLibraryPapersLibraryPaperIdNotesNoteIdPatchRequest} requestParameters Request parameters.
-     * @param {*} [options] Override http request option.
-     * @throws {RequiredError}
-     */
-    public apiCoreAcademicLibraryPapersLibraryPaperIdNotesNoteIdPatch(requestParameters: DefaultApiApiCoreAcademicLibraryPapersLibraryPaperIdNotesNoteIdPatchRequest, options?: RawAxiosRequestConfig) {
-        return DefaultApiFp(this.configuration).apiCoreAcademicLibraryPapersLibraryPaperIdNotesNoteIdPatch(requestParameters.libraryPaperId, requestParameters.noteId, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**
@@ -53202,26 +52460,6 @@ export class DefaultApi extends BaseAPI {
 
     /**
      *
-     * @summary GET /system-dependencies/node
-     * @param {*} [options] Override http request option.
-     * @throws {RequiredError}
-     */
-    public apiCoreSystemDependenciesNodeGet(options?: RawAxiosRequestConfig) {
-        return DefaultApiFp(this.configuration).apiCoreSystemDependenciesNodeGet(options).then((request) => request(this.axios, this.basePath));
-    }
-
-    /**
-     *
-     * @summary POST /system-dependencies/node:install
-     * @param {*} [options] Override http request option.
-     * @throws {RequiredError}
-     */
-    public apiCoreSystemDependenciesNodeInstallPost(options?: RawAxiosRequestConfig) {
-        return DefaultApiFp(this.configuration).apiCoreSystemDependenciesNodeInstallPost(options).then((request) => request(this.axios, this.basePath));
-    }
-
-    /**
-     *
      * @summary GET /system-dependencies/pdf-font
      * @param {*} [options] Override http request option.
      * @throws {RequiredError}
@@ -54452,50 +53690,6 @@ export class DefaultApi extends BaseAPI {
 
     /**
      *
-     * @summary GET /workflow-sessions/{session_id}/artifact-actions/{job_id}
-     * @param {DefaultApiApiCoreWorkflowSessionsSessionIdArtifactActionsJobIdGetRequest} requestParameters Request parameters.
-     * @param {*} [options] Override http request option.
-     * @throws {RequiredError}
-     */
-    public apiCoreWorkflowSessionsSessionIdArtifactActionsJobIdGet(requestParameters: DefaultApiApiCoreWorkflowSessionsSessionIdArtifactActionsJobIdGetRequest, options?: RawAxiosRequestConfig) {
-        return DefaultApiFp(this.configuration).apiCoreWorkflowSessionsSessionIdArtifactActionsJobIdGet(requestParameters.sessionId, requestParameters.jobId, options).then((request) => request(this.axios, this.basePath));
-    }
-
-    /**
-     *
-     * @summary POST /workflow-sessions/{session_id}/artifact-actions/{job_id}
-     * @param {DefaultApiApiCoreWorkflowSessionsSessionIdArtifactActionsJobIdPostRequest} requestParameters Request parameters.
-     * @param {*} [options] Override http request option.
-     * @throws {RequiredError}
-     */
-    public apiCoreWorkflowSessionsSessionIdArtifactActionsJobIdPost(requestParameters: DefaultApiApiCoreWorkflowSessionsSessionIdArtifactActionsJobIdPostRequest, options?: RawAxiosRequestConfig) {
-        return DefaultApiFp(this.configuration).apiCoreWorkflowSessionsSessionIdArtifactActionsJobIdPost(requestParameters.sessionId, requestParameters.jobId, options).then((request) => request(this.axios, this.basePath));
-    }
-
-    /**
-     *
-     * @summary GET /workflow-sessions/{session_id}/artifact-edit
-     * @param {DefaultApiApiCoreWorkflowSessionsSessionIdArtifactEditGetRequest} requestParameters Request parameters.
-     * @param {*} [options] Override http request option.
-     * @throws {RequiredError}
-     */
-    public apiCoreWorkflowSessionsSessionIdArtifactEditGet(requestParameters: DefaultApiApiCoreWorkflowSessionsSessionIdArtifactEditGetRequest, options?: RawAxiosRequestConfig) {
-        return DefaultApiFp(this.configuration).apiCoreWorkflowSessionsSessionIdArtifactEditGet(requestParameters.sessionId, options).then((request) => request(this.axios, this.basePath));
-    }
-
-    /**
-     *
-     * @summary POST /workflow-sessions/{session_id}/artifact-edit
-     * @param {DefaultApiApiCoreWorkflowSessionsSessionIdArtifactEditPostRequest} requestParameters Request parameters.
-     * @param {*} [options] Override http request option.
-     * @throws {RequiredError}
-     */
-    public apiCoreWorkflowSessionsSessionIdArtifactEditPost(requestParameters: DefaultApiApiCoreWorkflowSessionsSessionIdArtifactEditPostRequest, options?: RawAxiosRequestConfig) {
-        return DefaultApiFp(this.configuration).apiCoreWorkflowSessionsSessionIdArtifactEditPost(requestParameters.sessionId, options).then((request) => request(this.axios, this.basePath));
-    }
-
-    /**
-     *
      * @summary POST /workflow-sessions/{session_id}/artifacts
      * @param {DefaultApiApiCoreWorkflowSessionsSessionIdArtifactsPostRequest} requestParameters Request parameters.
      * @param {*} [options] Override http request option.
@@ -54529,17 +53723,6 @@ export class DefaultApi extends BaseAPI {
 
     /**
      *
-     * @summary POST /workflow-sessions/{session_id}/hosted-attempts/{attempt_id}:heartbeat
-     * @param {DefaultApiApiCoreWorkflowSessionsSessionIdHostedAttemptsAttemptIdHeartbeatPostRequest} requestParameters Request parameters.
-     * @param {*} [options] Override http request option.
-     * @throws {RequiredError}
-     */
-    public apiCoreWorkflowSessionsSessionIdHostedAttemptsAttemptIdHeartbeatPost(requestParameters: DefaultApiApiCoreWorkflowSessionsSessionIdHostedAttemptsAttemptIdHeartbeatPostRequest, options?: RawAxiosRequestConfig) {
-        return DefaultApiFp(this.configuration).apiCoreWorkflowSessionsSessionIdHostedAttemptsAttemptIdHeartbeatPost(requestParameters.sessionId, requestParameters.attemptId, options).then((request) => request(this.axios, this.basePath));
-    }
-
-    /**
-     *
      * @summary POST /workflow-sessions/{session_id}/hosted-attempts/{attempt_id}:submit
      * @param {DefaultApiApiCoreWorkflowSessionsSessionIdHostedAttemptsAttemptIdSubmitPostRequest} requestParameters Request parameters.
      * @param {*} [options] Override http request option.
@@ -54569,28 +53752,6 @@ export class DefaultApi extends BaseAPI {
      */
     public apiCoreWorkflowSessionsSessionIdInputBindingsPost(requestParameters: DefaultApiApiCoreWorkflowSessionsSessionIdInputBindingsPostRequest, options?: RawAxiosRequestConfig) {
         return DefaultApiFp(this.configuration).apiCoreWorkflowSessionsSessionIdInputBindingsPost(requestParameters.sessionId, options).then((request) => request(this.axios, this.basePath));
-    }
-
-    /**
-     *
-     * @summary POST /workflow-sessions/{session_id}/model-generations/{job_id}:claim
-     * @param {DefaultApiApiCoreWorkflowSessionsSessionIdModelGenerationsJobIdClaimPostRequest} requestParameters Request parameters.
-     * @param {*} [options] Override http request option.
-     * @throws {RequiredError}
-     */
-    public apiCoreWorkflowSessionsSessionIdModelGenerationsJobIdClaimPost(requestParameters: DefaultApiApiCoreWorkflowSessionsSessionIdModelGenerationsJobIdClaimPostRequest, options?: RawAxiosRequestConfig) {
-        return DefaultApiFp(this.configuration).apiCoreWorkflowSessionsSessionIdModelGenerationsJobIdClaimPost(requestParameters.sessionId, requestParameters.jobId, options).then((request) => request(this.axios, this.basePath));
-    }
-
-    /**
-     *
-     * @summary POST /workflow-sessions/{session_id}/model-generations/{job_id}:respond
-     * @param {DefaultApiApiCoreWorkflowSessionsSessionIdModelGenerationsJobIdRespondPostRequest} requestParameters Request parameters.
-     * @param {*} [options] Override http request option.
-     * @throws {RequiredError}
-     */
-    public apiCoreWorkflowSessionsSessionIdModelGenerationsJobIdRespondPost(requestParameters: DefaultApiApiCoreWorkflowSessionsSessionIdModelGenerationsJobIdRespondPostRequest, options?: RawAxiosRequestConfig) {
-        return DefaultApiFp(this.configuration).apiCoreWorkflowSessionsSessionIdModelGenerationsJobIdRespondPost(requestParameters.sessionId, requestParameters.jobId, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**
@@ -61629,16 +60790,15 @@ export const ModelProvidersApiAxiosParamCreator = function (configuration?: Conf
             };
         },
         /**
-         * Tests an owned model with its saved supplier protocol, shared API address and currently enabled key. No credential or metadata overrides are accepted. Ordinary tests are read-only. With verify=true, a successful chat inference verifies the model’s connection group without changing credentials, models or default selections. Media probes do not download output; accepted video tasks are distinct from completed inference.
+         * Tests an owned model with its saved supplier protocol, shared API address and currently enabled key. No credential or metadata overrides are accepted. Does not modify verification, credentials, models or default selections. Media probes do not download output; accepted video tasks are distinct from completed inference.
          * @summary Test one saved model with a minimal inference request
          * @param {string} modelProviderId
          * @param {string} groupId
          * @param {string} modelId
-         * @param {boolean} [verify] Explicitly verify the connection group using a saved chat model. Only a successful inference against the current saved configuration records verification.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdProbePost: async (modelProviderId: string, groupId: string, modelId: string, verify?: boolean, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+        apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdProbePost: async (modelProviderId: string, groupId: string, modelId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
             // verify required parameter 'modelProviderId' is not null or undefined
             assertParamExists('apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdProbePost', 'modelProviderId', modelProviderId)
             // verify required parameter 'groupId' is not null or undefined
@@ -61659,10 +60819,6 @@ export const ModelProvidersApiAxiosParamCreator = function (configuration?: Conf
             const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
             const localVarHeaderParameter = {} as any;
             const localVarQueryParameter = {} as any;
-
-            if (verify !== undefined) {
-                localVarQueryParameter['verify'] = verify;
-            }
 
             localVarHeaderParameter['Accept'] = 'application/json';
 
@@ -62614,17 +61770,16 @@ export const ModelProvidersApiFp = function(configuration?: Configuration) {
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
-         * Tests an owned model with its saved supplier protocol, shared API address and currently enabled key. No credential or metadata overrides are accepted. Ordinary tests are read-only. With verify=true, a successful chat inference verifies the model’s connection group without changing credentials, models or default selections. Media probes do not download output; accepted video tasks are distinct from completed inference.
+         * Tests an owned model with its saved supplier protocol, shared API address and currently enabled key. No credential or metadata overrides are accepted. Does not modify verification, credentials, models or default selections. Media probes do not download output; accepted video tasks are distinct from completed inference.
          * @summary Test one saved model with a minimal inference request
          * @param {string} modelProviderId
          * @param {string} groupId
          * @param {string} modelId
-         * @param {boolean} [verify] Explicitly verify the connection group using a saved chat model. Only a successful inference against the current saved configuration records verification.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        async apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdProbePost(modelProviderId: string, groupId: string, modelId: string, verify?: boolean, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ModelProbeResponse>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdProbePost(modelProviderId, groupId, modelId, verify, options);
+        async apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdProbePost(modelProviderId: string, groupId: string, modelId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ModelProbeResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdProbePost(modelProviderId, groupId, modelId, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['ModelProvidersApi.apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdProbePost']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
@@ -63061,14 +62216,14 @@ export const ModelProvidersApiFactory = function (configuration?: Configuration,
             return localVarFp.apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdPatch(requestParameters.modelProviderId, requestParameters.groupId, requestParameters.modelId, requestParameters.updateModelProviderGroupModelOpenAPIRequest, options).then((request) => request(axios, basePath));
         },
         /**
-         * Tests an owned model with its saved supplier protocol, shared API address and currently enabled key. No credential or metadata overrides are accepted. Ordinary tests are read-only. With verify=true, a successful chat inference verifies the model’s connection group without changing credentials, models or default selections. Media probes do not download output; accepted video tasks are distinct from completed inference.
+         * Tests an owned model with its saved supplier protocol, shared API address and currently enabled key. No credential or metadata overrides are accepted. Does not modify verification, credentials, models or default selections. Media probes do not download output; accepted video tasks are distinct from completed inference.
          * @summary Test one saved model with a minimal inference request
          * @param {ModelProvidersApiApiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdProbePostRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
         apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdProbePost(requestParameters: ModelProvidersApiApiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdProbePostRequest, options?: RawAxiosRequestConfig): AxiosPromise<ModelProbeResponse> {
-            return localVarFp.apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdProbePost(requestParameters.modelProviderId, requestParameters.groupId, requestParameters.modelId, requestParameters.verify, options).then((request) => request(axios, basePath));
+            return localVarFp.apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdProbePost(requestParameters.modelProviderId, requestParameters.groupId, requestParameters.modelId, options).then((request) => request(axios, basePath));
         },
         /**
          * Creates a user_model_provider_group_models row with is_default false. An empty model_type saves an unclassified model without inferring a runtime capability. Name must be unique within the group among active rows. Explicit max_input_tokens is retained for unclassified and LLM/VLM models; when omitted for llm or vlm, resolves from config/model_context_windows.yaml by model name with a 128K fallback. Unclassified models cannot be selected or probed until assigned a supported type. provider_name and base_url are taken from the user provider and group. Response group_name is user_model_provider_groups.name (not stored on the model row).
@@ -63427,11 +62582,6 @@ export interface ModelProvidersApiApiCoreModelProvidersModelProviderIdGroupsGrou
     readonly groupId: string
 
     readonly modelId: string
-
-    /**
-     * Explicitly verify the connection group using a saved chat model. Only a successful inference against the current saved configuration records verification.
-     */
-    readonly verify?: boolean
 }
 
 /**
@@ -63764,14 +62914,14 @@ export class ModelProvidersApi extends BaseAPI {
     }
 
     /**
-     * Tests an owned model with its saved supplier protocol, shared API address and currently enabled key. No credential or metadata overrides are accepted. Ordinary tests are read-only. With verify=true, a successful chat inference verifies the model’s connection group without changing credentials, models or default selections. Media probes do not download output; accepted video tasks are distinct from completed inference.
+     * Tests an owned model with its saved supplier protocol, shared API address and currently enabled key. No credential or metadata overrides are accepted. Does not modify verification, credentials, models or default selections. Media probes do not download output; accepted video tasks are distinct from completed inference.
      * @summary Test one saved model with a minimal inference request
      * @param {ModelProvidersApiApiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdProbePostRequest} requestParameters Request parameters.
      * @param {*} [options] Override http request option.
      * @throws {RequiredError}
      */
     public apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdProbePost(requestParameters: ModelProvidersApiApiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdProbePostRequest, options?: RawAxiosRequestConfig) {
-        return ModelProvidersApiFp(this.configuration).apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdProbePost(requestParameters.modelProviderId, requestParameters.groupId, requestParameters.modelId, requestParameters.verify, options).then((request) => request(this.axios, this.basePath));
+        return ModelProvidersApiFp(this.configuration).apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdProbePost(requestParameters.modelProviderId, requestParameters.groupId, requestParameters.modelId, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**
@@ -79697,92 +78847,6 @@ export const WorkflowControlApiAxiosParamCreator = function (configuration?: Con
                 options: localVarRequestOptions,
             };
         },
-        /**
-         *
-         * @summary Invoke a declared tool under the current execution lease
-         * @param {string} sessionId
-         * @param {string} attemptId
-         * @param {CallInput} callInput
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCoreWorkflowSessionsSessionIdHostedAttemptsAttemptIdToolsCallPost: async (sessionId: string, attemptId: string, callInput: CallInput, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
-            // verify required parameter 'sessionId' is not null or undefined
-            assertParamExists('apiCoreWorkflowSessionsSessionIdHostedAttemptsAttemptIdToolsCallPost', 'sessionId', sessionId)
-            // verify required parameter 'attemptId' is not null or undefined
-            assertParamExists('apiCoreWorkflowSessionsSessionIdHostedAttemptsAttemptIdToolsCallPost', 'attemptId', attemptId)
-            // verify required parameter 'callInput' is not null or undefined
-            assertParamExists('apiCoreWorkflowSessionsSessionIdHostedAttemptsAttemptIdToolsCallPost', 'callInput', callInput)
-            const localVarPath = `/api/core/workflow-sessions/{session_id}/hosted-attempts/{attempt_id}/tools:call`
-                .replace(`{${"session_id"}}`, encodeURIComponent(String(sessionId)))
-                .replace(`{${"attempt_id"}}`, encodeURIComponent(String(attemptId)));
-            // use dummy base URL string because the URL constructor only accepts absolute URLs.
-            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
-            let baseOptions;
-            if (configuration) {
-                baseOptions = configuration.baseOptions;
-            }
-
-            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
-            const localVarHeaderParameter = {} as any;
-            const localVarQueryParameter = {} as any;
-
-            localVarHeaderParameter['Content-Type'] = 'application/json';
-            localVarHeaderParameter['Accept'] = 'application/json';
-
-            setSearchParams(localVarUrlObj, localVarQueryParameter);
-            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
-            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
-            localVarRequestOptions.data = serializeDataIfNeeded(callInput, localVarRequestOptions, configuration)
-
-            return {
-                url: toPathString(localVarUrlObj),
-                options: localVarRequestOptions,
-            };
-        },
-        /**
-         *
-         * @summary Discover tools declared by a pinned external step
-         * @param {string} sessionId
-         * @param {string} attemptId
-         * @param {WorkflowToolListBody} workflowToolListBody
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCoreWorkflowSessionsSessionIdHostedAttemptsAttemptIdToolsListPost: async (sessionId: string, attemptId: string, workflowToolListBody: WorkflowToolListBody, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
-            // verify required parameter 'sessionId' is not null or undefined
-            assertParamExists('apiCoreWorkflowSessionsSessionIdHostedAttemptsAttemptIdToolsListPost', 'sessionId', sessionId)
-            // verify required parameter 'attemptId' is not null or undefined
-            assertParamExists('apiCoreWorkflowSessionsSessionIdHostedAttemptsAttemptIdToolsListPost', 'attemptId', attemptId)
-            // verify required parameter 'workflowToolListBody' is not null or undefined
-            assertParamExists('apiCoreWorkflowSessionsSessionIdHostedAttemptsAttemptIdToolsListPost', 'workflowToolListBody', workflowToolListBody)
-            const localVarPath = `/api/core/workflow-sessions/{session_id}/hosted-attempts/{attempt_id}/tools:list`
-                .replace(`{${"session_id"}}`, encodeURIComponent(String(sessionId)))
-                .replace(`{${"attempt_id"}}`, encodeURIComponent(String(attemptId)));
-            // use dummy base URL string because the URL constructor only accepts absolute URLs.
-            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
-            let baseOptions;
-            if (configuration) {
-                baseOptions = configuration.baseOptions;
-            }
-
-            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
-            const localVarHeaderParameter = {} as any;
-            const localVarQueryParameter = {} as any;
-
-            localVarHeaderParameter['Content-Type'] = 'application/json';
-            localVarHeaderParameter['Accept'] = 'application/json';
-
-            setSearchParams(localVarUrlObj, localVarQueryParameter);
-            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
-            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
-            localVarRequestOptions.data = serializeDataIfNeeded(workflowToolListBody, localVarRequestOptions, configuration)
-
-            return {
-                url: toPathString(localVarUrlObj),
-                options: localVarRequestOptions,
-            };
-        },
     }
 };
 
@@ -79984,36 +79048,6 @@ export const WorkflowControlApiFp = function(configuration?: Configuration) {
             const localVarOperationServerBasePath = operationServerMap['WorkflowControlApi.apiCoreWorkflowSessionsSessionIdHostedAttemptsAttemptIdResumePost']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
-        /**
-         *
-         * @summary Invoke a declared tool under the current execution lease
-         * @param {string} sessionId
-         * @param {string} attemptId
-         * @param {CallInput} callInput
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        async apiCoreWorkflowSessionsSessionIdHostedAttemptsAttemptIdToolsCallPost(sessionId: string, attemptId: string, callInput: CallInput, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<WorkflowToolCallReply>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreWorkflowSessionsSessionIdHostedAttemptsAttemptIdToolsCallPost(sessionId, attemptId, callInput, options);
-            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
-            const localVarOperationServerBasePath = operationServerMap['WorkflowControlApi.apiCoreWorkflowSessionsSessionIdHostedAttemptsAttemptIdToolsCallPost']?.[localVarOperationServerIndex]?.url;
-            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
-        },
-        /**
-         *
-         * @summary Discover tools declared by a pinned external step
-         * @param {string} sessionId
-         * @param {string} attemptId
-         * @param {WorkflowToolListBody} workflowToolListBody
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        async apiCoreWorkflowSessionsSessionIdHostedAttemptsAttemptIdToolsListPost(sessionId: string, attemptId: string, workflowToolListBody: WorkflowToolListBody, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<WorkflowToolListReply>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreWorkflowSessionsSessionIdHostedAttemptsAttemptIdToolsListPost(sessionId, attemptId, workflowToolListBody, options);
-            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
-            const localVarOperationServerBasePath = operationServerMap['WorkflowControlApi.apiCoreWorkflowSessionsSessionIdHostedAttemptsAttemptIdToolsListPost']?.[localVarOperationServerIndex]?.url;
-            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
-        },
     }
 };
 
@@ -80161,26 +79195,6 @@ export const WorkflowControlApiFactory = function (configuration?: Configuration
         apiCoreWorkflowSessionsSessionIdHostedAttemptsAttemptIdResumePost(requestParameters: WorkflowControlApiApiCoreWorkflowSessionsSessionIdHostedAttemptsAttemptIdResumePostRequest, options?: RawAxiosRequestConfig): AxiosPromise<WorkflowHostedExecutionReply> {
             return localVarFp.apiCoreWorkflowSessionsSessionIdHostedAttemptsAttemptIdResumePost(requestParameters.sessionId, requestParameters.attemptId, options).then((request) => request(axios, basePath));
         },
-        /**
-         *
-         * @summary Invoke a declared tool under the current execution lease
-         * @param {WorkflowControlApiApiCoreWorkflowSessionsSessionIdHostedAttemptsAttemptIdToolsCallPostRequest} requestParameters Request parameters.
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCoreWorkflowSessionsSessionIdHostedAttemptsAttemptIdToolsCallPost(requestParameters: WorkflowControlApiApiCoreWorkflowSessionsSessionIdHostedAttemptsAttemptIdToolsCallPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<WorkflowToolCallReply> {
-            return localVarFp.apiCoreWorkflowSessionsSessionIdHostedAttemptsAttemptIdToolsCallPost(requestParameters.sessionId, requestParameters.attemptId, requestParameters.callInput, options).then((request) => request(axios, basePath));
-        },
-        /**
-         *
-         * @summary Discover tools declared by a pinned external step
-         * @param {WorkflowControlApiApiCoreWorkflowSessionsSessionIdHostedAttemptsAttemptIdToolsListPostRequest} requestParameters Request parameters.
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCoreWorkflowSessionsSessionIdHostedAttemptsAttemptIdToolsListPost(requestParameters: WorkflowControlApiApiCoreWorkflowSessionsSessionIdHostedAttemptsAttemptIdToolsListPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<WorkflowToolListReply> {
-            return localVarFp.apiCoreWorkflowSessionsSessionIdHostedAttemptsAttemptIdToolsListPost(requestParameters.sessionId, requestParameters.attemptId, requestParameters.workflowToolListBody, options).then((request) => request(axios, basePath));
-        },
     };
 };
 
@@ -80290,28 +79304,6 @@ export interface WorkflowControlApiApiCoreWorkflowSessionsSessionIdHostedAttempt
     readonly sessionId: string
 
     readonly attemptId: string
-}
-
-/**
- * Request parameters for apiCoreWorkflowSessionsSessionIdHostedAttemptsAttemptIdToolsCallPost operation in WorkflowControlApi.
- */
-export interface WorkflowControlApiApiCoreWorkflowSessionsSessionIdHostedAttemptsAttemptIdToolsCallPostRequest {
-    readonly sessionId: string
-
-    readonly attemptId: string
-
-    readonly callInput: CallInput
-}
-
-/**
- * Request parameters for apiCoreWorkflowSessionsSessionIdHostedAttemptsAttemptIdToolsListPost operation in WorkflowControlApi.
- */
-export interface WorkflowControlApiApiCoreWorkflowSessionsSessionIdHostedAttemptsAttemptIdToolsListPostRequest {
-    readonly sessionId: string
-
-    readonly attemptId: string
-
-    readonly workflowToolListBody: WorkflowToolListBody
 }
 
 /**
@@ -80468,28 +79460,6 @@ export class WorkflowControlApi extends BaseAPI {
      */
     public apiCoreWorkflowSessionsSessionIdHostedAttemptsAttemptIdResumePost(requestParameters: WorkflowControlApiApiCoreWorkflowSessionsSessionIdHostedAttemptsAttemptIdResumePostRequest, options?: RawAxiosRequestConfig) {
         return WorkflowControlApiFp(this.configuration).apiCoreWorkflowSessionsSessionIdHostedAttemptsAttemptIdResumePost(requestParameters.sessionId, requestParameters.attemptId, options).then((request) => request(this.axios, this.basePath));
-    }
-
-    /**
-     *
-     * @summary Invoke a declared tool under the current execution lease
-     * @param {WorkflowControlApiApiCoreWorkflowSessionsSessionIdHostedAttemptsAttemptIdToolsCallPostRequest} requestParameters Request parameters.
-     * @param {*} [options] Override http request option.
-     * @throws {RequiredError}
-     */
-    public apiCoreWorkflowSessionsSessionIdHostedAttemptsAttemptIdToolsCallPost(requestParameters: WorkflowControlApiApiCoreWorkflowSessionsSessionIdHostedAttemptsAttemptIdToolsCallPostRequest, options?: RawAxiosRequestConfig) {
-        return WorkflowControlApiFp(this.configuration).apiCoreWorkflowSessionsSessionIdHostedAttemptsAttemptIdToolsCallPost(requestParameters.sessionId, requestParameters.attemptId, requestParameters.callInput, options).then((request) => request(this.axios, this.basePath));
-    }
-
-    /**
-     *
-     * @summary Discover tools declared by a pinned external step
-     * @param {WorkflowControlApiApiCoreWorkflowSessionsSessionIdHostedAttemptsAttemptIdToolsListPostRequest} requestParameters Request parameters.
-     * @param {*} [options] Override http request option.
-     * @throws {RequiredError}
-     */
-    public apiCoreWorkflowSessionsSessionIdHostedAttemptsAttemptIdToolsListPost(requestParameters: WorkflowControlApiApiCoreWorkflowSessionsSessionIdHostedAttemptsAttemptIdToolsListPostRequest, options?: RawAxiosRequestConfig) {
-        return WorkflowControlApiFp(this.configuration).apiCoreWorkflowSessionsSessionIdHostedAttemptsAttemptIdToolsListPost(requestParameters.sessionId, requestParameters.attemptId, requestParameters.workflowToolListBody, options).then((request) => request(this.axios, this.basePath));
     }
 }
 

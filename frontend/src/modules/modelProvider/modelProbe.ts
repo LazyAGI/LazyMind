@@ -13,14 +13,12 @@ export interface ModelProbeIdentity {
   providerId: string;
   groupId: string;
   modelId: string;
-  verify?: boolean;
 }
 export interface ModelProbeContext {
   providerId: string;
   groupId: string;
   configurationKey: string;
   disabledReason?: string;
-  onVerified?: () => void;
 }
 export interface ModelProbeResult {
   status: ModelProbeStatus;
@@ -43,7 +41,6 @@ export async function probeModel(identity: ModelProbeIdentity, signal?: AbortSig
   const options: RawAxiosRequestConfig & { silentError: boolean } = { signal, timeout: 55000, silentError: true };
   const response = await modelProvidersApi.apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdProbePost({
     modelProviderId: identity.providerId, groupId: identity.groupId, modelId: identity.modelId,
-    ...(identity.verify ? { verify: true } : {}),
   }, options);
   const result = unwrapModelProviderData<Partial<ModelProbeResult>>(response.data);
   if (!result || !isCode(result.code) || !matchesOutcome(result.status, result.code) ||

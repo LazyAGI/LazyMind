@@ -931,14 +931,10 @@ const zhCN = {
     },
     connection: {
       reason: {
-        model_list_unavailable: "当前模型列表接口不可用，请检查 API 地址；也可以手动添加聊天模型，选择「验证并启用」。",
+        model_list_unavailable: "当前模型列表接口不可用，请检查 API 地址；也可以手动添加模型并测试连接。",
       },
     },
     probe: {
-      verifyButton: "验证并启用",
-      verifyAction: "验证并启用 {{name}}",
-      verifyHint: "向已保存的模型发送一条简短请求，以验证此连接。",
-
       embeddingDimensions: "向量维度：{{dimensions}}",
       action: "测试连接：{{name}}",
       running: "正在测试 {{name}}",

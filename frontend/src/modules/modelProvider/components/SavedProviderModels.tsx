@@ -88,25 +88,10 @@ export function SavedProviderModels(props: SavedProviderModelsProps) {
           model.vision !== undefined ? model.vision :
             lookupUpstreamModel(props.providerName, model.name)?.input.includes("image")
         );
-        const probe = props.probe && {
-          providerId: props.probe.providerId,
-          groupId: props.probe.groupId,
-          modelId: model.id,
-          modelName: model.name,
-          configurationKey: JSON.stringify([props.probe.configurationKey, model.capability, model.vision, model.maxInputTokens, model.inputTokenLimit, model.maxOutputTokens, model.modelSettings]),
-          disabled: removing.has(model.id) || probing.has(model.id),
-          disabledReason: props.probe.disabledReason || (type === "unknown" ? t("modelProvider.probe.reason.unknown_type") : unsupported ? t("modelProvider.probe.reason.unsupported_type") : undefined),
-          onPendingChange: (value: boolean) => {
-            if (value) activeProbes.current.add(model.id);
-            else activeProbes.current.delete(model.id);
-            setProbing(new Set(activeProbes.current));
-          },
-        };
-        const onVerified = chat && model.enabled ? props.probe?.onVerified : undefined;
         return (
           <li
             key={model.id}
-            className={`saved-provider-model-row${onVerified ? " is-verifiable" : ""}`}
+            className="saved-provider-model-row"
             aria-label={model.name}
           >
             <ModelIdentityIcon
@@ -150,8 +135,20 @@ export function SavedProviderModels(props: SavedProviderModelsProps) {
               {unsupported ? <small title={t("modelProvider.catalog.unsupportedType")}>{t("modelProvider.catalog.notSupportedYet")}</small> : null}
             </span>
             <span className="saved-provider-model-actions">
-              {probe && onVerified ? <ModelProbeButton {...probe} verify onVerified={onVerified} /> : null}
-              {probe ? <ModelProbeButton {...probe} /> : null}
+              {props.probe ? <ModelProbeButton
+                providerId={props.probe.providerId}
+                groupId={props.probe.groupId}
+                modelId={model.id}
+                modelName={model.name}
+                configurationKey={JSON.stringify([props.probe.configurationKey, model.capability, model.vision, model.maxInputTokens, model.inputTokenLimit, model.maxOutputTokens, model.modelSettings])}
+                disabled={removing.has(model.id)}
+                disabledReason={props.probe.disabledReason || (type === "unknown" ? t("modelProvider.probe.reason.unknown_type") : unsupported ? t("modelProvider.probe.reason.unsupported_type") : undefined)}
+                onPendingChange={(value) => {
+                  if (value) activeProbes.current.add(model.id);
+                  else activeProbes.current.delete(model.id);
+                  setProbing(new Set(activeProbes.current));
+                }}
+              /> : null}
               <Tooltip
                 title={t("modelProvider.editModelAria", {
                   name: model.name,

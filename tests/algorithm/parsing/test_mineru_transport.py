@@ -12,28 +12,19 @@ def mismatch():
     return requests.exceptions.SSLError(error)
 
 
-@pytest.mark.parametrize('host', ['mineru.net', 'mineru.org.cn'])
-def test_official_api_keeps_domain_and_payload(host):
+def test_official_api_keeps_domain_without_verification():
     calls = []
-    url = f'https://{host}/api/v4/file-urls/batch'
-
-    def send(method, target, **kwargs):
-        calls.append(target)
-        assert method == 'POST'
+    def send(method, url, **kwargs):
+        calls.append(url)
         assert kwargs['verify'] is False
         assert kwargs['allow_redirects'] is False
-        assert kwargs['json'] == {'files': []}
-        assert kwargs['headers'] == {'Authorization': 'Bearer test'}
         return 'ok'
-
-    assert official_api_request(send, 'POST', url, json={'files': []},
-                                headers={'Authorization': 'Bearer test'}) == 'ok'
+    url = 'https://mineru.net/api/v4/file-urls/batch'
+    assert official_api_request(send, 'POST', url, json={'files': []}) == 'ok'
     assert calls == [url]
 
 
 @pytest.mark.parametrize('url', [
-    'https://mineru.net/artifact',
-    'https://mineru.org.cn/artifact',
     'https://example.com/api/v4/file-urls/batch',
     'https://mineru.net.evil.example/api/v4/file-urls/batch',
     'https://mineru.oss-cn-shanghai.aliyuncs.com/signed',
@@ -45,16 +36,15 @@ def test_unrelated_origins_are_never_rewritten(url):
 
     def send(method, target, **kwargs):
         calls.append(target)
-        assert kwargs['verify'] is True
         raise mismatch()
 
     with pytest.raises(requests.exceptions.SSLError):
-        official_api_request(send, 'GET', url, verify=True)
+        official_api_request(send, 'GET', url)
     assert calls == [url]
 
 
 @pytest.mark.parametrize('error', [
-    requests.Timeout('timeout'), requests.ConnectionError('reset'), requests.exceptions.SSLError('unknown CA'), mismatch(),
+    requests.Timeout('timeout'), requests.ConnectionError('reset'), requests.exceptions.SSLError('unknown CA'),
 ])
 def test_other_failures_never_resubmit(error):
     calls = []

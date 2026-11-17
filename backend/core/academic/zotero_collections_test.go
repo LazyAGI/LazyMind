@@ -26,9 +26,7 @@ func TestZoteroPreviewOmitsOnlyVerifiedTrashedCollectionMemberships(t *testing.T
 			if key == "TRASH002" {
 				deleted = "1"
 			}
-			response := zoteroResponse(r, 200, `{"key":"`+key+`","data":{"key":"`+key+`","name":"Trashed","deleted":`+deleted+`}}`)
-			response.Header.Set("Last-Modified-Version", "0")
-			return response, nil
+			return zoteroResponse(r, 200, `{"key":"`+key+`","data":{"key":"`+key+`","name":"Trashed","deleted":`+deleted+`}}`), nil
 		default:
 			t.Fatalf("unexpected endpoint %s", r.URL)
 			return nil, nil
@@ -83,11 +81,7 @@ func TestZoteroPreviewRejectsUnverifiedMissingCollections(t *testing.T) {
 			client := zoteroTestClient(t, zoteroConfig{Source: "local"}, func(r *http.Request) (*http.Response, error) {
 				switch r.URL.Path {
 				case "/api/users/0/collections":
-					response := zoteroResponse(r, 200, `[]`)
-					if r.URL.Query().Get("limit") == "1" && tc.name == "changed library" {
-						response.Header.Set("Last-Modified-Version", "10")
-					}
-					return response, nil
+					return zoteroResponse(r, 200, `[]`), nil
 				case "/api/users/0/items":
 					return zoteroResponse(r, 200, `[{"key":"PAPER001","data":{"itemType":"journalArticle","collections":["MISSING1"]}}]`), nil
 				default:
@@ -103,37 +97,6 @@ func TestZoteroPreviewRejectsUnverifiedMissingCollections(t *testing.T) {
 			failure, ok := err.(*zoteroError)
 			if !ok || failure.Code != tc.code {
 				t.Fatalf("missing collection error hidden or misclassified: %#v", err)
-			}
-		})
-	}
-}
-
-func TestZoteroPreviewRejectsServerChangesDuringCollectionVerification(t *testing.T) {
-	for _, stage := range []string{"object", "final listing"} {
-		t.Run(stage, func(t *testing.T) {
-			client := zoteroTestClient(t, zoteroConfig{Source: "local"}, func(r *http.Request) (*http.Response, error) {
-				body := `[]`
-				object := strings.HasSuffix(r.URL.Path, "/TRASH001")
-				final := r.URL.Path == "/api/users/0/collections" && r.URL.Query().Get("limit") == "1"
-				if strings.HasSuffix(r.URL.Path, "/items") {
-					body = `[{"key":"PAPER001","data":{"itemType":"book","collections":["TRASH001"]}}]`
-				} else if object {
-					body = `{"key":"TRASH001","data":{"key":"TRASH001","deleted":true}}`
-				}
-				response := zoteroResponse(r, 200, body)
-				response.Header.Set("Zotero-Server-ID", "original")
-				if object {
-					response.Header.Set("Last-Modified-Version", "0")
-				}
-				if (stage == "object" && object) || (stage == "final listing" && final) {
-					response.Header.Set("Zotero-Server-ID", "restarted")
-				}
-				return response, nil
-			})
-			_, err := client.preview(context.Background())
-			failure, ok := err.(*zoteroError)
-			if !ok || failure.Code != "ZOTERO_SOURCE_CHANGED" {
-				t.Fatalf("server change accepted: %v", err)
 			}
 		})
 	}

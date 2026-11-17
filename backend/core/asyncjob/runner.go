@@ -297,11 +297,12 @@ func (r *Runner) claimOne(ctx context.Context, now time.Time) (*orm.AsyncJob, er
 func (r *Runner) runJob(ctx context.Context, row orm.AsyncJob) error {
 	handler, ok := lookupHandler(row.JobType)
 	reporter := &jobReporter{
-		db:           r.db,
-		jobID:        row.ID,
-		workerID:     r.opts.WorkerID,
-		attemptCount: row.AttemptCount,
-		lockTTL:      r.opts.LockTTL,
+		db:               r.db,
+		jobID:            row.ID,
+		workerID:         r.opts.WorkerID,
+		attemptCount:     row.AttemptCount,
+		lockTTL:          r.opts.LockTTL,
+		requireLiveLease: r.opts.RequireLiveLease,
 	}
 	var result Result
 	var err error
@@ -508,11 +509,12 @@ func stringsOrDefault(value, fallback string) string {
 }
 
 type jobReporter struct {
-	db           *gorm.DB
-	jobID        string
-	workerID     string
-	attemptCount int
-	lockTTL      time.Duration
+	requireLiveLease bool
+	db               *gorm.DB
+	jobID            string
+	workerID         string
+	attemptCount     int
+	lockTTL          time.Duration
 }
 
 var ErrLeaseLost = errors.New("async job lease lost")
@@ -537,12 +539,16 @@ func (r *jobReporter) SetProgress(ctx context.Context, current, total int64) err
 
 func (r *jobReporter) Heartbeat(ctx context.Context) error {
 	now := time.Now().UTC()
-	leaseCondition := "lock_until > ?"
-	if r.db.Dialector.Name() == "sqlite" {
-		leaseCondition = "julianday(lock_until) > julianday(?)"
+	query := r.db.WithContext(ctx).Model(&orm.AsyncJob{}).
+		Where("id = ? AND status = ? AND locked_by = ? AND attempt_count = ?", r.jobID, StatusRunning, r.workerID, r.attemptCount)
+	if r.requireLiveLease {
+		leaseCondition := "lock_until > ?"
+		if r.db.Dialector.Name() == "sqlite" {
+			leaseCondition = "julianday(lock_until) > julianday(?)"
+		}
+		query = query.Where(leaseCondition, now)
 	}
-	result := r.db.WithContext(ctx).Model(&orm.AsyncJob{}).
-		Where("id = ? AND status = ? AND locked_by = ? AND attempt_count = ?", r.jobID, StatusRunning, r.workerID, r.attemptCount).Where(leaseCondition, now).
+	result := query.
 		Updates(map[string]any{
 			"heartbeat_at": now,
 			"lock_until":   now.Add(r.lockTTL),

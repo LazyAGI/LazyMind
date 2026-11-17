@@ -937,14 +937,10 @@ const enUS = {
     },
     connection: {
       reason: {
-        model_list_unavailable: "The model-list endpoint is unavailable. Check the API URL, or add a chat model manually and choose Verify and enable.",
+        model_list_unavailable: "The model-list endpoint is unavailable. Check the API URL, or add a model manually and test its connection.",
       },
     },
     probe: {
-      verifyButton: "Verify and enable",
-      verifyAction: "Verify and enable {{name}}",
-      verifyHint: "Verify this connection with a short request to the saved model.",
-
       embeddingDimensions: "Embedding dimensions: {{dimensions}}",
       action: "Test connection: {{name}}",
       running: "Testing {{name}}",

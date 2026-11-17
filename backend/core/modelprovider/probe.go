@@ -36,36 +36,22 @@ type ModelProbeResponse struct {
 }
 
 type modelProbeSnapshot struct {
-	Model           string                    `json:"model"`
-	ModelType       string                    `json:"model_type"`
-	Source          string                    `json:"source"`
-	URL             string                    `json:"url"`
-	APIKey          string                    `json:"api_key"`
-	SkipAuth        bool                      `json:"skip_auth"`
-	Vision          bool                      `json:"vision"`
-	RequestAdvanced string                    `json:"-"`
-	ModelSettings   string                    `json:"-"`
-	Features        string                    `json:"-"`
-	Verification    probeVerificationSnapshot `json:"-"`
-}
-
-type probeVerificationSnapshot struct {
-	ActiveKeyRevision  int64
-	ActiveKeyID        string
-	ActiveKeyGroupID   string
-	ActiveInitialized  bool
-	CredentialGroupID  string
-	CredentialRevision int64
-	GroupRevision      int64
-	ProviderUpdatedAt  int64
-	ModelUpdatedAt     int64
-	RequestProtocol    string
+	Model           string `json:"model"`
+	ModelType       string `json:"model_type"`
+	Source          string `json:"source"`
+	URL             string `json:"url"`
+	APIKey          string `json:"api_key"`
+	SkipAuth        bool   `json:"skip_auth"`
+	Vision          bool   `json:"vision"`
+	RequestAdvanced string `json:"-"`
+	ModelSettings   string `json:"-"`
+	Features        string `json:"-"`
 }
 
 var runningModelProbes sync.Map
 
-// ProbeGroupModel tests one saved model. An explicit verify request can record
-// a successful chat connection for the model's group.
+// ProbeGroupModel tests one saved model without changing supplier verification,
+// key selection, model metadata or default-role configuration.
 func ProbeGroupModel(w http.ResponseWriter, r *http.Request) {
 	probeGroupModel(w, r, modelProbeTimeout)
 }
@@ -90,14 +76,6 @@ func probeGroupModel(w http.ResponseWriter, r *http.Request, timeout time.Durati
 			return
 		}
 	}
-	verify := false
-	if values, present := r.URL.Query()["verify"]; present {
-		if len(values) != 1 || (values[0] != "true" && values[0] != "false") {
-			common.ReplyErr(w, "invalid verify option", http.StatusBadRequest)
-			return
-		}
-		verify = values[0] == "true"
-	}
 	db := store.DB()
 	if db == nil {
 		common.ReplyErr(w, "store not initialized", http.StatusInternalServerError)
@@ -109,8 +87,7 @@ func probeGroupModel(w http.ResponseWriter, r *http.Request, timeout time.Durati
 		return
 	}
 	vars := mux.Vars(r)
-	providerID, groupID, modelID := vars["model_provider_id"], vars["group_id"], vars["model_id"]
-	snapshot, unavailable, err := loadSavedProbeSnapshot(r.Context(), db, userID, providerID, groupID, modelID, verify, nil)
+	snapshot, unavailable, err := loadProbeSnapshot(r.Context(), db, userID, vars["model_provider_id"], vars["group_id"], vars["model_id"])
 	if err != nil {
 		probeLookupError(w, err, "model not found")
 		return
@@ -127,15 +104,8 @@ func probeGroupModel(w http.ResponseWriter, r *http.Request, timeout time.Durati
 	defer runningModelProbes.Delete(probeKey)
 
 	result := executeModelProbe(r.Context(), snapshot, timeout)
-	if verify && result.Status == "accepted" {
-		result = ModelProbeResponse{Status: "failed", Code: "invalid_response", ModelType: snapshot.ModelType}
-	}
 	if result.Status == "passed" || result.Status == "accepted" {
-		var commit *modelProbeSnapshot
-		if verify {
-			commit = &snapshot
-		}
-		current, unavailable, err := loadSavedProbeSnapshot(r.Context(), db, userID, providerID, groupID, modelID, verify, commit)
+		current, unavailable, err := loadProbeSnapshot(r.Context(), db, userID, vars["model_provider_id"], vars["group_id"], vars["model_id"])
 		if err != nil || unavailable != nil || current != snapshot {
 			result = ModelProbeResponse{Status: "failed", Code: "configuration_changed", ModelType: snapshot.ModelType}
 		}
@@ -147,12 +117,6 @@ func probeGroupModel(w http.ResponseWriter, r *http.Request, timeout time.Durati
 // while reading. Endpoint, model and active key therefore belong to one saved
 // configuration; the transaction is released before any network request.
 func loadProbeSnapshot(ctx context.Context, db *gorm.DB, userID, providerID, groupID, modelID string) (modelProbeSnapshot, *ModelProbeResponse, error) {
-	return loadSavedProbeSnapshot(ctx, db, userID, providerID, groupID, modelID, false, nil)
-}
-
-// When commit is supplied, compare the successfully probed configuration and
-// persist verification under the same supplier lock used by config writers.
-func loadSavedProbeSnapshot(ctx context.Context, db *gorm.DB, userID, providerID, groupID, modelID string, verify bool, commit *modelProbeSnapshot) (modelProbeSnapshot, *ModelProbeResponse, error) {
 	var snapshot modelProbeSnapshot
 	var unavailable *ModelProbeResponse
 	err := db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
@@ -182,10 +146,6 @@ func loadSavedProbeSnapshot(ctx context.Context, db *gorm.DB, userID, providerID
 			reject("unsupported", "unknown_type")
 			return nil
 		}
-		if verify && ((modelType != "llm" && modelType != "vlm") || !model.Enabled) {
-			reject("unsupported", "unsupported_type")
-			return nil
-		}
 		if validateSupplierModelType(ctx, tx, parent, modelType) != nil {
 			reject("unsupported", "unsupported_type")
 			return nil
@@ -197,12 +157,10 @@ func loadSavedProbeSnapshot(ctx context.Context, db *gorm.DB, userID, providerID
 		}
 		features := modelsettings.Effective(settings, model.Vision, modelType)
 		snapshot = modelProbeSnapshot{Model: model.Name, ModelType: modelType, Source: RuntimeProviderName(parent), URL: connectionBaseURL(parent, group.BaseURL), Vision: features.Vision != nil && *features.Vision, ModelSettings: model.ModelSettings}
-		var protocol string
+		if (modelType == "llm" || modelType == "vlm") && savedRequestConfig(tx, parent).DefaultProtocol == "openai-responses" {
+			snapshot.Source = "OpenAIResponses"
+		}
 		if modelType == "llm" || modelType == "vlm" {
-			protocol = savedRequestConfig(tx, parent).DefaultProtocol
-			if protocol == "openai-responses" {
-				snapshot.Source = "OpenAIResponses"
-			}
 			encoded, err := json.Marshal(features)
 			if err != nil {
 				return err
@@ -227,42 +185,12 @@ func loadSavedProbeSnapshot(ctx context.Context, db *gorm.DB, userID, providerID
 		if normalizeProviderName(snapshot.Source) == "lmdeploy" {
 			snapshot.Source = "OpenAI"
 		}
-		key, credentialGroup, code := readProbeCredential(ctx, tx, parent, snapshot.URL)
+		key, code := readProbeCredential(ctx, tx, parent, snapshot.URL)
 		if code != "" {
 			reject("failed", code)
 			return nil
 		}
 		snapshot.APIKey, snapshot.SkipAuth = key, key == ""
-		if verify {
-			// Legacy suppliers are initialized by the settings page. Require an
-			// enabled key before recording a verification for a saved key pool.
-			if key != "" && !parent.ActiveKeyInitialized {
-				reject("failed", "key_disabled")
-				return nil
-			}
-			snapshot.Verification = probeVerificationSnapshot{
-				ActiveKeyRevision: parent.ActiveKeyRevision, ActiveKeyID: parent.ActiveKeyID,
-				ActiveKeyGroupID: parent.ActiveKeyGroupID, ActiveInitialized: parent.ActiveKeyInitialized,
-				CredentialGroupID: credentialGroup.ID, CredentialRevision: credentialGroup.CredentialRevision,
-				GroupRevision: group.CredentialRevision, ProviderUpdatedAt: parent.UpdatedAt.UnixNano(),
-				ModelUpdatedAt: model.UpdatedAt.UnixNano(), RequestProtocol: protocol,
-			}
-		}
-		if commit == nil {
-			return nil
-		}
-		if snapshot != *commit {
-			return errConnectionChanged
-		}
-		result := tx.Model(&orm.UserModelProviderGroup{}).
-			Where("id = ? AND user_model_provider_id = ? AND create_user_id = ? AND deleted_at IS NULL AND credential_revision = ?", group.ID, parent.ID, userID, group.CredentialRevision).
-			Update("is_verified", true)
-		if result.Error != nil {
-			return result.Error
-		}
-		if result.RowsAffected != 1 {
-			return errConnectionChanged
-		}
 		return nil
 	})
 	return snapshot, unavailable, err
@@ -279,10 +207,10 @@ func probeLookupError(w http.ResponseWriter, err error, missing string) {
 // readProbeCredential deliberately avoids the runtime resolver's initialization
 // and credential migration writes. An unverified active key may be tested; an
 // explicitly disabled pool cannot silently fall back to its first key.
-func readProbeCredential(ctx context.Context, db *gorm.DB, parent orm.UserModelProvider, baseURL string) (string, orm.UserModelProviderGroup, string) {
+func readProbeCredential(ctx context.Context, db *gorm.DB, parent orm.UserModelProvider, baseURL string) (string, string) {
 	var groups []orm.UserModelProviderGroup
 	if err := db.WithContext(ctx).Where("user_model_provider_id = ? AND create_user_id = ? AND deleted_at IS NULL", parent.ID, parent.CreateUserID).Order("created_at ASC, id ASC").Find(&groups).Error; err != nil {
-		return "", orm.UserModelProviderGroup{}, "configuration_changed"
+		return "", "configuration_changed"
 	}
 	hasKeys := false
 	for _, group := range groups {
@@ -294,25 +222,25 @@ func readProbeCredential(ctx context.Context, db *gorm.DB, parent orm.UserModelP
 		}
 		pool, err := readProbeKeyPool(group)
 		if err != nil {
-			return "", orm.UserModelProviderGroup{}, "configuration_changed"
+			return "", "configuration_changed"
 		}
 		keys := splitAPIKeys(pool)
 		if !parent.ActiveKeyInitialized && len(keys) > 0 {
-			return keys[0], group, ""
+			return keys[0], ""
 		}
 		if parent.ActiveKeyInitialized {
 			if key := keyMatchingID(group.ID, parent.ActiveKeyID, pool); key != "" {
-				return key, group, ""
+				return key, ""
 			}
 		}
 	}
 	if hasKeys || parent.ActiveKeyID != "" || parent.ActiveKeyGroupID != "" {
-		return "", orm.UserModelProviderGroup{}, "key_disabled"
+		return "", "key_disabled"
 	}
 	if providerAPIKeyRequiredForBaseURL(ctx, db, parent, baseURL) {
-		return "", orm.UserModelProviderGroup{}, "key_required"
+		return "", "key_required"
 	}
-	return "", orm.UserModelProviderGroup{}, ""
+	return "", ""
 }
 
 func readProbeKeyPool(group orm.UserModelProviderGroup) (string, error) {
