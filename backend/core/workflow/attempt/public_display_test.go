@@ -3,6 +3,7 @@ package attempt
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -14,7 +15,64 @@ import (
 	"github.com/gorilla/mux"
 	"gorm.io/gorm"
 	"lazymind/core/common/orm"
+	"lazymind/core/common/taskdisplay"
 )
+
+func TestPaperAutoSequenceContinuesAndDeduplicates(t *testing.T) {
+	db := orm.MigrateTestDB(t, &orm.WorkflowSession{}, &orm.WorkflowSessionStep{}, &orm.WorkflowOutbox{}, &orm.WorkflowEvent{})
+	if err := db.Create(&orm.WorkflowSession{ID: "s1", CreateUserID: "owner"}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if db.Dialector.Name() == "sqlite" {
+		connection, err := db.DB.DB()
+		if err != nil {
+			t.Fatal(err)
+		}
+		connection.SetMaxOpenConns(1)
+	}
+	service := New(db.DB, Config{LeaseDuration: time.Minute})
+	queue(t, service, "a1", "s1", "literature_review")
+	claim, err := service.Claim(t.Context(), "executor")
+	if err != nil {
+		t.Fatal(err)
+	}
+	legacy := json.RawMessage(`{"public_display":{"schema_version":1,"event_key":"paper-9","process_steps":[{"step_id":"paper-legacy","revision":1,"order":0,"title":"Read","status":"succeeded"}]}}`)
+	if err := service.Progress(t.Context(), "a1", claim.LeaseToken, legacy); err != nil {
+		t.Fatal(err)
+	}
+	results := make(chan error, 4)
+	for _, id := range []string{"paper-first", "paper-second"} {
+		display := PublicDisplay{SchemaVersion: 1, EventKey: PaperAutoEventKey,
+			ProcessSteps: []taskdisplay.PublicProcessStep{{StepID: id, Revision: 1, Order: 0, Title: "Read", Status: "running"}}}
+		request, _ := json.Marshal(map[string]any{"public_display": display})
+		for range 2 {
+			go func() {
+				results <- service.Progress(t.Context(), "a1", claim.LeaseToken, request)
+			}()
+		}
+	}
+	for range 4 {
+		if err := <-results; err != nil {
+			t.Error(err)
+		}
+	}
+	var events []orm.WorkflowEvent
+	if err := db.Where("entity_id = ? AND event_type = ?", "a1", "attempt.public_display").Order("id ASC").Find(&events).Error; err != nil {
+		t.Fatal(err)
+	}
+	if len(events) != 3 {
+		t.Fatalf("expected legacy event and two unique reports, got %d", len(events))
+	}
+	for index, event := range events {
+		var display PublicDisplay
+		if err := json.Unmarshal(event.PayloadJSON, &display); err != nil {
+			t.Fatal(err)
+		}
+		if display.EventKey != fmt.Sprintf("paper-%d", index+9) || len(display.ProcessSteps) != 1 || display.ProcessSteps[0].Order != index {
+			t.Fatalf("event sequence or stage order: %s", event.PayloadJSON)
+		}
+	}
+}
 
 func publicTestService(t *testing.T) (*Service, *gorm.DB) {
 	t.Helper()
