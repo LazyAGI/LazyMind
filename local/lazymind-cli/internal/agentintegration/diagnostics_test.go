@@ -31,9 +31,9 @@ func TestInspectionLogReusesIdentifierAndRecordsChangedConfiguration(t *testing.
 		t.Fatal("unchanged poll duplicated the log")
 	}
 	if status.DiagnosticContext == nil || status.DiagnosticContext.Action != "inspect" ||
-		status.DiagnosticContext.CurrentCLI != "~/current/lazymind" || status.DiagnosticContext.AppVersion != "test-app-version" ||
+		status.DiagnosticContext.CurrentCLI != filepath.Join("~", "current", "lazymind") || status.DiagnosticContext.AppVersion != "test-app-version" ||
 		status.DiagnosticContext.Environment["LAZYMIND_HOME"] != "~" || status.DiagnosticContext.Environment["LAZYMIND_RUNTIME_PROFILE"] != "desktop" ||
-		len(status.DiagnosticContext.Configuration) != 1 || status.DiagnosticContext.Configuration[0].Command != "~/old/lazymind" ||
+		len(status.DiagnosticContext.Configuration) != 1 || status.DiagnosticContext.Configuration[0].Command != filepath.Join("~", "old", "lazymind") ||
 		status.Issue.OperationID != id || status.Issue.Stage != "inspect" {
 		t.Fatalf("cached inspection lost current context: %+v", status)
 	}
@@ -94,7 +94,7 @@ func TestDiagnosticEnvironmentPreservesBootstrapWithoutCredentials(t *testing.T)
 	status := Status{Agent: "codex", State: Ready}
 	RecordInspection(filepath.Join(root, "installed"), "/current/lazymind", nil, &status)
 	env := status.DiagnosticContext.Environment
-	if env["LAZYMIND_HOME"] != "~/installed" || env["CODEX_HOME"] != "~/codex profile" {
+	if env["LAZYMIND_HOME"] != filepath.Join("~", "installed") || env["CODEX_HOME"] != filepath.Join("~", "codex profile") {
 		t.Fatal("lost the resolved installation home or selected profile")
 	}
 	if value, present := env["LAZYMIND_CONNECTOR_CONFIG"]; !present || value != "" {
@@ -107,7 +107,7 @@ func TestDiagnosticEnvironmentPreservesBootstrapWithoutCredentials(t *testing.T)
 	id := status.DiagnosticID
 	t.Setenv("CODEX_HOME", filepath.Join(root, "another profile"))
 	RecordInspection(filepath.Join(root, "installed"), "/current/lazymind", nil, &status)
-	if status.DiagnosticID == id || status.DiagnosticContext.Environment["CODEX_HOME"] != "~/another profile" {
+	if status.DiagnosticID == id || status.DiagnosticContext.Environment["CODEX_HOME"] != filepath.Join("~", "another profile") {
 		t.Fatal("a changed inspection environment reused the previous diagnostic")
 	}
 }
