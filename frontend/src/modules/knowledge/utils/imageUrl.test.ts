@@ -31,6 +31,26 @@ describe('resolveMarkdownImageSourceFromMap', () => {
       mediaUrls,
     )).toBe('other/diagram.png');
   });
+
+  it('maps encoded spaces and Unicode without changing the signed URL', () => {
+    const source = '/Users/test/Library/Application Support/配图.png';
+    const signed = '/static-files/image.png?expires=4102444800&sig=a%2Fb';
+    expect(resolveMarkdownImageSourceFromMap(encodeURI(source), { [source]: signed }))
+      .toBe(signed);
+  });
+
+  it('prefers an exact match over normalized alternatives', () => {
+    expect(resolveMarkdownImageSourceFromMap('images/photo%20one.png', {
+      'images/photo one.png': 'space.png',
+      'images/photo%20one.png': 'exact.png',
+    })).toBe('exact.png');
+  });
+
+  it('does not match an encoded slash to a different file path', () => {
+    expect(resolveMarkdownImageSourceFromMap('images/a%2Fb.png', {
+      'images/a/b.png': 'wrong.png',
+    })).toBe('images/a%2Fb.png');
+  });
 });
 
 describe('resolveMarkdownImageUrlAsync', () => {
