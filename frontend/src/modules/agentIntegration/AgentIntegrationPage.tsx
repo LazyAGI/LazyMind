@@ -42,6 +42,7 @@ import "./index.scss";
 import ExternalCapabilityAccess from "./ExternalCapabilityAccess";
 import WorkBuddyInstallationGuide from "./WorkBuddyInstallationGuide";
 import DSHInstallationGuide from "./DSHInstallationGuide";
+import RepairRequestCopy from "./RepairRequestCopy";
 import { isDisconnectPending, requiresAgentQuit } from "./agentActions";
 import { dshConnectionReady, dshErrorMessage } from "./dshConnection";
 
@@ -618,10 +619,6 @@ function integrationErrorMessage(agent: DesktopAgent, status: DesktopAgentIntegr
       : status.state === "conflict" || status.issue?.code === "environment_mismatch" ? "environmentMismatch"
         : "connectionUnavailable";
   return t(`agentIntegration.setupFeedback.${key}`);
-}
-
-function diagnosticText(status: DesktopAgentIntegrationStatus): string {
-  return [status.agent, status.state, status.issue?.code, status.diagnostic_id || status.issue?.operation_id, status.diagnostic_log].filter(Boolean).join("\n");
 }
 
 function AgentCard({
@@ -1280,11 +1277,11 @@ function AgentConfigurationFlow({
           <div className={`agent-integration-stage-hint ${waitingForAction ? "is-warning" : "is-error"}`} role={waitingForAction ? "status" : "alert"}>
             <WarningOutlined />
             {integrationErrorMessage(agent.id, mcpStatus, t)}
-            <Typography.Text copyable={{ text: diagnosticText(mcpStatus) }}>
-              {t("agentIntegration.setupFeedback.copyDiagnostics")}
-            </Typography.Text>
           </div>
         )}
+        <RepairRequestCopy agent={agent.id} status={mcpStatus}
+          error={mcpStatus && (mcpStatus.issue || ["error", "conflict"].includes(mcpState))
+            ? integrationErrorMessage(agent.id, mcpStatus, t) : undefined} />
         {mcpState !== "enabled" && (
           <Space>
             {(mcpState === "error" || waitingForAction) && (retryDisconnect || mcpStatus?.can_connect) && (

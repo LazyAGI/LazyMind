@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import { agentIntegrationStatuses, type DesktopAgentIntegrationStatus } from "@/runtime/desktopBridge";
 import { requiresAgentQuit } from "./agentActions";
 import { dshConnectionReady, dshErrorMessage } from "./dshConnection";
+import RepairRequestCopy from "./RepairRequestCopy";
 
 type Stage = "prepare" | "installing" | "quitRequired" | "installFailed" | "enable" | "checking" | "notReady" | "success" | "disconnectRequired";
 const imageURL = "/installation-guides/deepseek-harness/enable.png";
@@ -20,7 +21,8 @@ export default function DSHInstallationGuide({ status, onConnect, onStatus, onCl
     : status?.state === "enabled" && (status.connection?.mcp_configured ?? true) ? "enable" : "prepare");
   const [zoomed, setZoomed] = useState(false);
   const [error, setError] = useState("");
-  const [diagnostic, setDiagnostic] = useState(status?.issue?.operation_id || status?.diagnostic_id || "");
+  const [diagnostics, setDiagnostics] = useState(status);
+  const diagnostic = diagnostics?.diagnostic_id || diagnostics?.issue?.operation_id;
   const mounted = useRef(true);
   const busy = useRef(false);
   const requestVersion = useRef(0);
@@ -35,11 +37,11 @@ export default function DSHInstallationGuide({ status, onConnect, onStatus, onCl
     const request = ++requestVersion.current;
     setStage("installing");
     setError("");
-    setDiagnostic("");
+    setDiagnostics(undefined);
     try {
       const result = await onConnect();
       if (!mounted.current || request !== requestVersion.current) return;
-      setDiagnostic(result?.issue?.operation_id || result?.diagnostic_id || "");
+      setDiagnostics(result);
       if (result?.issue && !requiresAgentQuit(result)) setError(dshErrorMessage(result, t));
       setStage(requiresAgentQuit(result) ? "quitRequired"
         : result?.state === "enabled" && (result.connection?.mcp_configured ?? true) ? "enable" : "installFailed");
@@ -60,12 +62,12 @@ export default function DSHInstallationGuide({ status, onConnect, onStatus, onCl
       if (!mounted.current || request !== requestVersion.current) return;
       const current = result.ok ? result.data["deepseek-harness"] : undefined;
       if (current) onStatus(current);
-      if (current?.retry_action === "disconnect") { setStage("disconnectRequired"); return; }
+      if (current?.retry_action === "disconnect") { setDiagnostics(current); setStage("disconnectRequired"); return; }
       const ready = dshConnectionReady(current);
       // A normal startup may deliver its first heartbeat after the user returns.
       // Background checks never install, restart, or conceal an explicit failure.
       if (automatic && !ready) return;
-      setDiagnostic(current?.issue?.operation_id || current?.diagnostic_id || "");
+      setDiagnostics(current);
       if (!ready) setError(!current || !current.connection ? text("checkFailedDescription")
         : current.connection?.runtime_state === "waiting" ? text("waitingDescription")
           : current.issue ? dshErrorMessage(current, t)
@@ -73,7 +75,7 @@ export default function DSHInstallationGuide({ status, onConnect, onStatus, onCl
               : text("notReadyDescription"));
       setStage(ready ? "success" : "notReady");
     } catch {
-      if (mounted.current && request === requestVersion.current && !automatic) { setError(text("checkFailedDescription")); setStage("notReady"); }
+      if (mounted.current && request === requestVersion.current && !automatic) { setDiagnostics(undefined); setError(text("checkFailedDescription")); setStage("notReady"); }
     } finally { if (request === requestVersion.current) busy.current = false; }
   };
 
@@ -82,7 +84,7 @@ export default function DSHInstallationGuide({ status, onConnect, onStatus, onCl
     busy.current = false;
     setStage("prepare");
     setError("");
-    setDiagnostic("");
+    setDiagnostics(undefined);
   };
 
   useEffect(() => {
@@ -131,6 +133,11 @@ export default function DSHInstallationGuide({ status, onConnect, onStatus, onCl
         {["quitRequired", "installFailed", "notReady"].includes(stage) && diagnostic && <Typography.Text type="secondary" copyable>
           {t("agentIntegration.setupFeedback.diagnosticID")}: {diagnostic}
         </Typography.Text>}
+        {["quitRequired", "installFailed", "notReady", "disconnectRequired"].includes(stage) &&
+          <RepairRequestCopy agent="deepseek-harness" status={diagnostics} stage={stage}
+            error={error || (stage === "installFailed" ? text("installFailedDescription")
+              : stage === "disconnectRequired" ? text("disconnectPendingDescription")
+                : stage === "quitRequired" ? t("agentIntegration.quitRequired.description", { agent: "DeepSeek Harness" }) : "")} />}
         {stage === "enable" && <Alert type="success" showIcon
           message={text("installedTitle")} description={text("installedDescription")} />}
         {stage === "notReady" && <Alert type="warning" showIcon message={text("notReadyTitle")} description={error} />}

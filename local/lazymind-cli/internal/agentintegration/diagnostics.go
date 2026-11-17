@@ -52,7 +52,13 @@ func (o *Operation) Finish(status *Status) {
 		code = status.Issue.Code
 	}
 	status.DiagnosticID, status.DiagnosticLog = o.id, diagnosticPath(o.home)
+	status.DiagnosticContext = diagnosticContext(o.action, o.Stage, o.CLI, o.After)
 	o.record(string(status.State), code, status.Enabled)
+}
+
+func diagnosticContext(action, stage, cli string, inspections []Inspection) *DiagnosticContext {
+	return &DiagnosticContext{Action: action, Stage: stage, CurrentCLI: safePath(cli),
+		AppVersion: os.Getenv("LAZYMIND_DESKTOP_APP_VERSION"), Configuration: safeInspections(inspections)}
 }
 
 func (o *Operation) record(state, code string, configured *bool) {
@@ -107,6 +113,7 @@ func appendDiagnostic(home string, row any) {
 // RecordInspection reuses the diagnostic ID while a polled configuration stays unchanged.
 // The small cache is diagnostic metadata, never an input to installation or authorization.
 func RecordInspection(home, cli string, inspections []Inspection, status *Status) {
+	status.DiagnosticContext = diagnosticContext("inspect", "inspect", cli, inspections)
 	if os.MkdirAll(filepath.Join(home, "logs"), 0700) != nil {
 		return
 	}
@@ -129,7 +136,8 @@ func RecordInspection(home, cli string, inspections []Inspection, status *Status
 		State      State
 		Code       string
 		Connection *ConnectionStatus
-	}{cli, inspections, status.Enabled, status.State, code, status.Connection})
+		AppVersion string
+	}{cli, inspections, status.Enabled, status.State, code, status.Connection, status.DiagnosticContext.AppVersion})
 	hash := sha256.Sum256(body)
 	fingerprint := hex.EncodeToString(hash[:])
 	var previous struct {
@@ -139,6 +147,9 @@ func RecordInspection(home, cli string, inspections []Inspection, status *Status
 	old, _ := os.ReadFile(path)
 	if json.Unmarshal(old, &previous) == nil && previous.Fingerprint == fingerprint {
 		status.DiagnosticID, status.DiagnosticLog = previous.ID, diagnosticPath(home)
+		if status.Issue != nil {
+			status.Issue.Stage, status.Issue.OperationID = "inspect", previous.ID
+		}
 		return
 	}
 	operation := NewOperation(home, status.Agent, "inspect", cli)

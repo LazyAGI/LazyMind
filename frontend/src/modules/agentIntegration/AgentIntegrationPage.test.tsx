@@ -56,7 +56,7 @@ vi.mock("@/modules/modelProvider/api/systemDependencies", () => ({
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
     t: (key: string, options?: { defaultValue?: string; agent?: string; count?: number }) => {
-      if (key.startsWith("agentIntegration.quitRequired.") || key.startsWith("agentIntegration.dshErrors.")) return retryI18n.t(key, options);
+      if (key.startsWith("agentIntegration.quitRequired.") || key.startsWith("agentIntegration.dshErrors.") || key.startsWith("agentIntegration.repairRequest.")) return retryI18n.t(key, options);
       if (key.startsWith("agentIntegration.executablePathPlaceholder") || key === "agentIntegration.retryDisconnection" || key.startsWith("agentIntegration.workbuddyInstallGuide.") || key.startsWith("agentIntegration.codexInstallGuide.") || key.startsWith("agentIntegration.dshInstallGuide.") || key.startsWith("agentIntegration.workbuddyErrors.") || key.startsWith("agentIntegration.connectionErrors.") || key.startsWith("agentIntegration.setupFeedback.") || key.startsWith("agentIntegration.waitingForApplication") || key.startsWith("agentIntegration.loginStates.") ||
         key.startsWith("agentIntegration.cliSources.") || ["agentIntegration.selectedCLI", "agentIntegration.reselectCLI"].includes(key)) {
         return retryI18n.t(key, options);

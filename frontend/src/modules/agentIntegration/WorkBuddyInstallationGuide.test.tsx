@@ -56,6 +56,7 @@ describe("manual agent shutdown", () => {
     render(<WorkBuddyInstallationGuide onConnect={connect} onStatus={vi.fn()} onClose={vi.fn()} />);
     fireEvent.click(screen.getByRole("button", { name: copy.saveAndContinue }));
     await screen.findByText(copy.installFailedTitle);
+    expect(screen.getByRole("button", { name: zhCN.agentIntegration.repairRequest.copyHint })).toBeEnabled();
     expect(screen.queryByRole("button", { name: zhCN.agentIntegration.quitRequired.retryInstall })).not.toBeInTheDocument();
   });
 });
@@ -138,6 +139,7 @@ describe("Codex connection diagnostics", () => {
     mocks.statuses.mockResolvedValueOnce({ ok: false, reason: "failed" });
     await act(async () => { await vi.advanceTimersByTimeAsync(3000); });
     expect(screen.getByText(labels.checkFailedDescription)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: zhCN.agentIntegration.repairRequest.copyHint })).toBeEnabled();
     expect(screen.queryByText(/latest-check/)).not.toBeInTheDocument();
     expect(screen.queryByText(labels.checkingDescription)).not.toBeInTheDocument();
   });
