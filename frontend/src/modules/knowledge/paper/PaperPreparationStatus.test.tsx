@@ -2,7 +2,7 @@ import { act, cleanup, render, screen } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
 import PaperPreparationStatus from './PaperPreparationStatus';
 const api = vi.hoisted(() => ({ chat: vi.fn(), refresh: vi.fn(), loading: false }));
-vi.mock('../api/pdfIR', () => ({ usePdfIR: () => ({loading:api.loading,state:{status:'ready',document:{blocks:[{type:'formula'},{type:'image'}]}}, refresh:api.refresh}) }));
+vi.mock('../api/pdfIR', async original => ({ ...await original<typeof import('../api/pdfIR')>(), usePdfIR: () => ({loading:api.loading,state:{status:'ready',document:{blocks:[{type:'formula'},{type:'image'}]}}, refresh:api.refresh}) }));
 vi.mock('../api/pdfArtifacts', () => ({ getDocumentParseStatus:api.chat }));
 afterEach(() => {cleanup();vi.useRealTimers();vi.resetAllMocks();api.loading=false;});
 it('shows independent parse states and stops polling when closed', async () => {

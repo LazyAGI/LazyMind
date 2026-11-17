@@ -63,6 +63,21 @@ func (c *zoteroClient) normalizeTrashedCollections(ctx context.Context, preview 
 		preview.Items[i], _ = json.Marshal(envelope)
 	}
 	if removed > 0 {
+		// Single-object responses carry the object's version, not the library's.
+		// Recheck a collection listing after the individual lookups so actual
+		// library changes during verification still invalidate this preview.
+		u := c.apiURL("collections")
+		query := u.Query()
+		query.Set("format", "json")
+		query.Set("limit", "1")
+		u.RawQuery = query.Encode()
+		_, headers, err := c.request(ctx, u, 2<<20)
+		if err != nil {
+			return err
+		}
+		if err = c.observeVersion(headers); err != nil {
+			return err
+		}
 		preview.Warnings = append(preview.Warnings, fmt.Sprintf("已忽略 Zotero 中 %d 个已删除文件夹的 %d 条关联；文献及其有效文件夹关系均已保留。", len(deleted), removed))
 	}
 	return nil
@@ -77,7 +92,10 @@ func (c *zoteroClient) verifyTrashedCollection(ctx context.Context, key string) 
 	if err != nil {
 		return err
 	}
-	if err = c.observeVersion(headers); err != nil {
+	// https://www.zotero.org/support/dev/web_api/v3/syncing#last-modified-version
+	// This is a single collection: only the server identity is comparable to
+	// the listing snapshot. An unchanged deleted collection may have version 0.
+	if err = c.observeServer(headers); err != nil {
 		return err
 	}
 	c.metadataBytes += len(body)

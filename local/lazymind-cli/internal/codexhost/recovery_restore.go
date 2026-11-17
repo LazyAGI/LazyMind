@@ -15,7 +15,6 @@ import (
 	"strconv"
 	"time"
 
-	"lazymind/agentconnector/internal/agentexec"
 	"lazymind/agentconnector/internal/codexplugin"
 	"lazymind/agentconnector/internal/connectorconfig"
 	"lazymind/agentconnector/internal/credentials"
@@ -181,7 +180,6 @@ func deliverRecovery(ctx context.Context, home, request string, intent RecoveryI
 		return err
 	}
 	command := backgroundCommand(ctx, c.Node, script, "--recover-intent", "--pairing-file", c.PairingFile, "--cdp-port", strconv.Itoa(c.Port), "--bridge-url", "http://"+address)
-	command.Env = agentexec.SafeEnvironment()
 	command.Stdin = bytes.NewReader(body)
 	command.WaitDelay = time.Second
 	var stderr bytes.Buffer

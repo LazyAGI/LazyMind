@@ -365,6 +365,7 @@ export function applyOrdinaryWorkflowSnapshot(session: WorkflowSession, snapshot
 }
 
 export interface WorkflowRuntimeProjection {
+  decided_routes?: string[];
   display?: WorkflowDisplayState;
   status?: string;
   current_step_id?: string;
@@ -498,6 +499,8 @@ export interface TabDef {
   hide_when_material?: string;
   /** Hide an unexecuted dependent tab when its prerequisite branch was skipped. */
   hide_when_step_skipped?: string;
+  /** Defer this conditional tab until the named step has a persisted route decision. */
+  show_after_route?: string;
   /** Explicitly enable or disable artifact downloads for this tab. */
   allow_download?: boolean;
   /** Actions are rendered through provider modules; the composite stays domain-neutral. */
@@ -552,6 +555,7 @@ export function filterWorkflowTabs(
   const executionStarted = retained.size > 0 || Object.keys(projection?.nodes ?? {}).some(wasExecuted);
   return tabs.filter((tab) => {
     const steps = tab.status_step_ids?.length ? tab.status_step_ids : [tab.step_id || tab.id];
+    if (tab.show_after_route && !projection?.decided_routes?.includes(tab.show_after_route)) return false;
     if (hideUnstartedSteps && executionStarted && !steps.some(wasExecuted)
         && !tab.slots.some((slot) => present.has(slot.id))) return false;
     if (hideSkippedSteps) {
@@ -618,17 +622,30 @@ export interface WorkflowUI {
   tab_visibility_ready_material?: string;
   /** Opt in to hiding tabs whose runtime steps were explicitly skipped. */
   hide_skipped_steps?: boolean;
-  /** In dynamic sessions, show started steps and existing results once execution begins. */
+  /** Show started steps and existing results once execution begins. */
   hide_unstarted_steps?: boolean;
   /** Global widget config keyed by slot id. */
   slots?: Record<string, Record<string, unknown>>;
 }
 
-/**
- * The catalog keeps reusable slot metadata at the workflow root while UI tabs
- * commonly reference a slot with only `{ id }`.  Hydrate those references so
- * renderers can see properties such as `type`, `cardinality`, and `ordered`.
- */
+function restoreLegacyPptMaterialImages(ui: WorkflowUI, slotDefs: Map<string, SlotDef>): WorkflowUI {
+  const images = slotDefs.get('material_images');
+  const materials = ui.tabs?.find(tab => tab.id === 'materials' && tab.step_id === 'collect_materials');
+  if (images?.user_visible !== false || images.type !== 'image' || images.cardinality !== 'list'
+    || !Array.isArray(materials?.slots) || !materials.slots.some(slot => slot.id === 'material_summary')
+    || materials.slots.some(slot => slot.id === images.id)) return ui;
+
+  // Older pinned PPT definitions hid images that the material step already saved.
+  const visibleImages = { ...images, user_visible: true };
+  slotDefs.set(images.id, visibleImages);
+  return {
+    ...ui,
+    slots: { ...ui.slots, [images.id]: { widgetType: 'image-gallery' } },
+    tabs: ui.tabs?.map(tab => tab === materials ? { ...tab, slots: [...tab.slots, visibleImages] } : tab),
+  };
+}
+
+/** Fill tab slot references with root slot metadata and widget configuration. */
 export function hydrateWorkflowUI(raw: unknown, fallbackName?: string): WorkflowUI {
   if (!raw || typeof raw !== 'object') return {};
   const spec = raw as Record<string, unknown>;
@@ -637,7 +654,7 @@ export function hydrateWorkflowUI(raw: unknown, fallbackName?: string): Workflow
     return typeof spec.source_type === 'string' ? { source_type: spec.source_type } : {};
   }
 
-  const ui = typeof spec.source_type === 'string'
+  let ui = typeof spec.source_type === 'string'
     ? { ...(rawUI ?? {}) as WorkflowUI, source_type: spec.source_type }
     : (rawUI ?? {}) as WorkflowUI;
   const slotDefs = new Map<string, SlotDef>();
@@ -647,6 +664,10 @@ export function hydrateWorkflowUI(raw: unknown, fallbackName?: string): Workflow
       const slot = value as SlotDef;
       if (typeof slot.id === 'string' && slot.id) slotDefs.set(slot.id, slot);
     }
+  }
+
+  if (spec.id === 'ppt-workflow' && spec.source_type === 'builtin' && Array.isArray(ui.tabs)) {
+    ui = restoreLegacyPptMaterialImages(ui, slotDefs);
   }
 
   const name = typeof spec.name === 'string' ? spec.name : fallbackName;

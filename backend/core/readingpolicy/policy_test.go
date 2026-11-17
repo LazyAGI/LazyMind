@@ -11,23 +11,23 @@ func TestDefaultsValidationAndIsolation(t *testing.T) {
 	db := orm.MigrateTestDB(t, &orm.UserReadingPolicy{})
 	ctx := context.Background()
 	p, e := Load(ctx, db.DB, "one")
-	if e != nil || p.Preset != "demand" || p.Limits.DailyDocuments != 5 || p.Modes[Formula] != OnDemand {
+	if e != nil || p.Preset != "demand" || p.Limits.DailyPDFDocuments != 100 || p.Limits.DailyStudyDocuments != 50 || p.Modes[AIStudy] != OnDemand {
 		t.Fatalf("defaults: %+v %v", p, e)
 	}
 	p.Preset = "full"
 	saved, e := Save(ctx, db.DB, "one", p)
-	if e != nil || saved.Modes[ChatPrepare] != OnDemand || saved.Modes[Figure] != Automatic || saved.AutomaticEligibleAfter == nil {
+	if e != nil || saved.Modes[AIStudy] != Automatic || saved.AutomaticEligibleAfter == nil {
 		t.Fatalf("full: %+v %v", saved, e)
 	}
 	other, _ := Load(ctx, db.DB, "two")
-	if other.Modes[Figure] != OnDemand {
+	if other.Modes[AIStudy] != OnDemand {
 		t.Fatal("policy leaked")
 	}
 	p = saved
 	p.Preset = "custom"
 	p.Modes[PDFParse] = Disabled
-	if _, e = Save(ctx, db.DB, "one", p); e == nil {
-		t.Fatal("automatic studies need parser")
+	if _, e = Save(ctx, db.DB, "one", p); e != nil {
+		t.Fatal("automatic study may use cached structure", e)
 	}
 	p = saved
 	p.Limits.AutomaticConcurrency = 2
@@ -81,9 +81,10 @@ func TestPaperGuideLegacyPolicyAndOldClientPreserveDisabled(t *testing.T) {
 	p := Defaults()
 	p.Preset = "custom"
 	delete(p.Modes, "paper_guide")
+	delete(p.Modes, AIStudy)
 	p.Modes[Formula] = Disabled
 	normalized, e := Normalize(p)
-	if e != nil || normalized.Modes["paper_guide"] != OnDemand || normalized.Modes[Formula] != Disabled {
+	if e != nil || normalized.Modes["paper_guide"] != OnDemand || normalized.Modes[AIStudy] != Disabled {
 		t.Fatalf("legacy normalization: %+v %v", normalized, e)
 	}
 	p = Defaults()

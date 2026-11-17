@@ -276,7 +276,7 @@ export function buildZoteroImport(preview: ZoteroPreview, current: PaperLibraryD
         venue: text(data.publicationTitle) || text(data.proceedingsTitle) || text(data.publisher), year: Number(text(data.date).match(/\b(\d{4})\b/)?.[1]) || 0,
         abstract: text(data.abstractNote), identifiers: { doi: doi || undefined, arxiv }, confidence: {},
       }, sourceUrl: safeURL(data.url),
-      folderId: collections[0] || targetFolderId || null, status: 'unread', important: false, tags: tagsOf(data), source: 'zotero', parse: 'ready',
+      folderId: collections[0] || targetFolderId || null, status: 'unread', important: false, tags: tagsOf(data), source: 'zotero', parse: 'unknown',
       incomplete: standalone || !text(data.title),
       attachmentIds: [], noteIds: [], annotationIds: [], collectionIds: collections, relatedPaperIds: [], zoteroSources: [external],
     };

@@ -257,6 +257,10 @@ def _model_failure_details(exc: BaseException) -> dict[str, Any]:
             details.update(saved)
         terminal = getattr(current, 'terminal', None)
         failure = getattr(terminal, 'failure', None)
+        finish = getattr(terminal, 'finish', None)
+        finish = getattr(finish, 'value', finish)
+        if isinstance(finish, str):
+            details['finish'] = finish
         for field in ('model_call_id', 'attempt_count', 'duration_ms'):
             value = getattr(terminal, field, None)
             if isinstance(value, (str, int)):
@@ -4411,7 +4415,7 @@ def _sync_doc_title(html: str, old: str, new: str, applied: list[str]) -> str:
     return html[:match.start()] + match.group(1) + new + match.group(3) + html[match.end():]
 
 
-def _set_inline_styles(html: str, node: dict[str, Any], styles: Any, _font_children: bool = True) -> str:
+def _set_inline_styles(html: str, node: dict[str, Any], styles: Any) -> str:
     """Merge a constrained style map into one selected element's start tag."""
     if not isinstance(styles, dict) or not styles:
         raise ValueError('set_style requires a non-empty styles object')
@@ -4447,17 +4451,21 @@ def _set_inline_styles(html: str, node: dict[str, Any], styles: Any, _font_child
 
     inherited_text_styles = {key: value for key, value in clean.items()
                              if key in {'font-family', 'font-size', 'font-weight', 'font-style', 'text-decoration', 'color'}}
-    if _font_children and inherited_text_styles:
+    if inherited_text_styles:
         # Override inherited and explicit descendant fonts within this selection
         # only, including a prior deck-level !important override.
         fragment = html[node['start']:node['end']]
         tree = _HtmlTree(fragment)
         for child in reversed(tree.nodes):
             if child['tag'] not in {'style', 'script'}:
-                fragment = _set_inline_styles(fragment, child,
-                    clean if child['parent'] is None else inherited_text_styles, False)
+                child_styles = clean if child['parent'] is None else inherited_text_styles
+                fragment = _merge_inline_styles(fragment, child, child_styles)
         return html[:node['start']] + fragment + html[node['end']:]
 
+    return _merge_inline_styles(html, node, clean)
+
+
+def _merge_inline_styles(html: str, node: dict[str, Any], clean: dict[str, str]) -> str:
     start_tag = html[node['start']:node['open_end']]
     style_match = re.search(r'\sstyle\s*=\s*(["\'])(.*?)\1', start_tag, re.I | re.S)
     declarations: dict[str, str] = {}
@@ -4927,6 +4935,8 @@ def _apply_html_ops(html: str, ops: list[dict]) -> tuple[str, list[str], list[st
     families = [re.sub(r'\s*!important\s*$', '', str(op.get('styles', {}).get('font-family', '')),
                        flags=re.I).strip().strip('\"\'')
                 for op in ops if op.get('op') == 'set_style' and op.get('styles', {}).get('font-family')]
+    if removed_texts or any(op.get('op') == 'insert_sibling' for op in ops):
+        families.extend(_read_page_font_overrides(html).values())
     if families:
         html = _package_edited_html_fonts(html, families)
     if '/*lazymind-font:' in html and 'data:font/' in html:
@@ -5395,7 +5405,14 @@ def _agent_llm_call(
             raise limit from exc
         if _is_model_timeout_exception(exc):
             raise _PPTModelTimeoutError(
-                f'LLM timed out after {effective_timeout:g}s without receiving progress '
+                f'模型供应商响应超时：连续 {effective_timeout:g} 秒未收到新的响应内容，已停止本次生成。'
+                '供应商服务或网络连接可能中断；可稍后重试，或切换模型供应商。'
+                f'[{request_name}]'
+            ) from exc
+        if diagnostics.get('finish') == 'length':
+            raise RuntimeError(
+                '模型供应商因输出长度达到上限而截断响应，本页尚未生成完成。'
+                '已完成的页面会保留；请缩减本页内容后重试，或选择输出额度更高的模型。'
                 f'[{request_name}]'
             ) from exc
         raise
@@ -5757,6 +5774,10 @@ def _resolve_local_image_ref(raw: str) -> Optional[Path]:
             text = resolved
     except Exception:
         pass
+    # Signed/download URLs can be much longer than a filesystem component.
+    # Resolve our static URLs first, then leave remote URLs to the downloader.
+    if text.startswith(('http://', 'https://')):
+        return None
     path = Path(text).expanduser()
     if path.is_file() and path.suffix.lower() in _IMAGE_EXTS:
         return path.resolve()
@@ -5920,10 +5941,9 @@ def _stage_one_material_image(item: dict, index: int) -> dict:
 
     data = _download_image_bytes(url)
     metadata = _validate_material_image(data)
-    parsed_ext = Path(urlparse(url).path).suffix.lower()
-    if parsed_ext not in _IMAGE_EXTS:
-        parsed_ext = ''
-    ext = parsed_ext or _guess_ext_from_bytes(data)
+    # A download endpoint's extension need not match its response (e.g. WebP
+    # served from a .jpg URL). Use the validated pixels for the local filename.
+    ext = _guess_ext_from_bytes(data)
     dest = dest_dir / f'{stem}{ext}'
     dest.write_bytes(data)
     return {
@@ -8733,6 +8753,8 @@ def _plan_one_page_prompt(shared: dict, page_no: int, outline: str, timing: dict
     system_prompt = (
         'Author only the specified slide of the approved presentation. Treat source material as evidence. '
         'Return one JSON object with non-empty string fields content, layout, assets, and speaker_note. '
+        'Return only the JSON, without analysis, repeated source text or alternative designs. '
+        'Keep layout and assets concise; describe only this page, not the whole deck. '
         'Content is exact visible copy. Preserve supported facts, methods, formulas, variables, caveats, '
         'and chart values from the outline and evidence. Describe labelled diagrams and explicit chart '
         'categories, axes, units and series when supported. Preserve template geometry and source-page '
@@ -9031,6 +9053,9 @@ _FONT_SCOPES = ('all', 'titles', 'body')
 _FONT_OVERRIDES_META = re.compile(
     r'<meta name="lazymind-font-overrides" content="([^"]*)">', re.IGNORECASE,
 )
+_TEXT_FORMAT_META = re.compile(
+    r'<meta name="lazymind-text-format" content="([^"]*)">', re.IGNORECASE,
+)
 
 
 def _font_overrides(value: Any) -> dict[str, str]:
@@ -9054,12 +9079,50 @@ def _updated_font_overrides(previous: dict[str, str], scope: str, family: str) -
     return {'all': family} if scope == 'all' else {**previous, scope: family}
 
 
-def _store_page_font_overrides(html: str, choices: dict[str, str]) -> str:
-    html = _FONT_OVERRIDES_META.sub('', html)
-    meta = '<meta name="lazymind-font-overrides" content="' + _html_escape(
+def _store_page_override(html: str, pattern, name: str, choices: dict) -> str:
+    html = pattern.sub('', html)
+    meta = f'<meta name="{name}" content="' + _html_escape(
         json.dumps(choices, ensure_ascii=False), quote=True,
     ) + '">'
     return re.sub(r'</head\s*>', lambda match: meta + match[0], html, count=1, flags=re.I)
+
+
+def _store_page_font_overrides(html: str, choices: dict[str, str]) -> str:
+    return _store_page_override(html, _FONT_OVERRIDES_META, 'lazymind-font-overrides', choices)
+
+
+def _text_format_overrides(value: Any) -> dict:
+    if not isinstance(value, dict):
+        return {}
+    result = {}
+    for scope in _FONT_SCOPES:
+        formatting = value.get(scope)
+        if isinstance(formatting, dict):
+            try:
+                validated = _validate_text_format(**formatting)
+            except (TypeError, ValueError):
+                continue
+            if validated:
+                result[scope] = validated
+    return result
+
+
+def _read_page_text_format(html: str) -> dict:
+    match = _TEXT_FORMAT_META.search(html)
+    try:
+        return _text_format_overrides(json.loads(_html_unescape(match[1]))) if match else {}
+    except ValueError:
+        return {}
+
+
+def _update_text_format(choices: dict, scope: str, formatting: dict) -> dict:
+    result = {name: dict(values) for name, values in choices.items()}
+    if scope == 'all':
+        for name in ('titles', 'body'):
+            for property_name in formatting:
+                result.get(name, {}).pop(property_name, None)
+    result.setdefault(scope, {}).update(formatting)
+    return {name: values for name, values in result.items() if values}
 
 
 def _upsert_font_override(html: str, target_font: str, text_scope: str, *, allow_empty: bool = False) -> str:
@@ -9072,25 +9135,32 @@ def _capture_page_html(runtime, command, deck: Path, page: int, *args, **kwargs)
     """Reapply explicit font replacements to the rendered page before publication."""
     path = _page_html_path(deck, page)
     previous = path.read_text(encoding='utf-8') if path.is_file() else None
-    choices = _read_page_font_overrides(previous or '') or _font_overrides(
-        _read_style_spec(deck).get('font_overrides'),
-    )
+    style = _read_style_spec(deck)
+    choices = _read_page_font_overrides(previous or '') or _font_overrides(style.get('font_overrides'))
+    formatting = _read_page_text_format(previous or '') or _text_format_overrides(style.get('text_format_overrides'))
     code, payload = runtime._capture_cmd(command, deck, page, *args, **kwargs)
-    if not choices or code or not isinstance(payload, dict) or payload.get('status') != 'ok':
+    if not (choices or formatting) or code or not isinstance(payload, dict) or payload.get('status') != 'ok':
         return code, payload
 
     try:
         html = path.read_text(encoding='utf-8')
         for scope, font in choices.items():
             html = _upsert_font_override(html, font, scope, allow_empty=True)
-        html = _package_edited_html_fonts(html, choices.values())
-        path.write_text(_store_page_font_overrides(html, choices), encoding='utf-8')
+        if choices:
+            html = _package_edited_html_fonts(html, choices.values())
+            html = _store_page_font_overrides(html, choices)
+        for scope in _FONT_SCOPES:
+            if scope in formatting:
+                html = _apply_html_text_format(html, _format_css(formatting[scope]), scope, allow_empty=True)
+        if formatting:
+            html = _store_page_override(html, _TEXT_FORMAT_META, 'lazymind-text-format', formatting)
+        path.write_text(html, encoding='utf-8')
     except (OSError, ValueError) as exc:
         if previous is None:
             path.unlink(missing_ok=True)
         else:
             path.write_text(previous, encoding='utf-8')
-        return 1, {'status': 'failed', 'error': f'Cannot preserve slide {page} fonts: {exc}',
+        return 1, {'status': 'failed', 'error': f'Cannot preserve slide {page} typography: {exc}',
                    'diagnostics': {'code': 'font_override_failed'}}
     return code, payload
 
@@ -9103,7 +9173,7 @@ def ppt_import_font(filename: str) -> dict:
 
 def _prepare_portable_font(family):
     from lazymind.chat.engine.tools.file_resources.portable_fonts import portable_font_faces
-    return portable_font_faces(family)
+    return portable_font_faces(family, allow_system_only=True)
 
 
 def _resolve_requested_font(requested: str, allow_download: bool) -> str:
@@ -9113,8 +9183,13 @@ def _resolve_requested_font(requested: str, allow_download: bool) -> str:
     if allow_download:
         from lazymind.presentation_resources import font_families
         choices.update({family.casefold(): family for family in font_families()})
+    exact_aliases = {'微软雅黑': 'Microsoft YaHei', 'microsoft yahei': '微软雅黑'}
     if requested.casefold() in choices:
         chosen = choices[requested.casefold()]
+    elif alias := exact_aliases.get(requested.casefold()):
+        chosen = choices.get(alias.casefold())
+        if not chosen:
+            raise FontUnavailableError(f'请求的字体不可用：{requested}')
     else:
         plan = _extract_json_plan(_agent_llm_call(
             'Resolve the requested font semantically. Return JSON only: '
@@ -9202,6 +9277,8 @@ def ppt_replace_deck_fonts(
             updated = _upsert_font_override(html, target, scope) if target else html
             if formatting:
                 updated = _apply_html_text_format(updated, _format_css(formatting), scope)
+                formats = _update_text_format(_read_page_text_format(html), scope, formatting)
+                updated = _store_page_override(updated, _TEXT_FORMAT_META, 'lazymind-text-format', formats)
             if target:
                 updated = _package_edited_html_fonts(updated, [target], {target: font_records})
                 choices = _updated_font_overrides(_read_page_font_overrides(html), scope, target)
@@ -9213,9 +9290,14 @@ def ppt_replace_deck_fonts(
             temporary = _page_html_path(deck, page).with_suffix('.html.tmp')
             temporary.write_text(updated, encoding='utf-8')
             os.replace(temporary, _page_html_path(deck, page))
-        style_updated = page_list is None and target is not None
+        style_updated = page_list is None and bool(target or formatting)
         if style_updated:
             style = _read_style_spec(deck)
+            if formatting:
+                style['text_format_overrides'] = _update_text_format(
+                    _text_format_overrides(style.get('text_format_overrides')), scope, formatting,
+                )
+        if style_updated and target:
             style['font_overrides'] = _updated_font_overrides(
                 _font_overrides(style.get('font_overrides')), scope, target,
             )
@@ -9228,6 +9310,7 @@ def ppt_replace_deck_fonts(
                 typography['heading_font'] = css_family
             if scope in {'all', 'body'}:
                 typography['body_font'] = css_family
+        if style_updated:
             temporary_style = style_path.with_suffix('.json.tmp')
             temporary_style.write_text(json.dumps(style, ensure_ascii=False, indent=2), encoding='utf-8')
             os.replace(temporary_style, style_path)
@@ -9255,22 +9338,42 @@ def ppt_replace_deck_fonts(
         'layout_notice': 'Typography changed without moving boxes; inspect the preview for overflow before export.',
         'published_count': published['published_count'],
         'edit_mode': 'sparse_patch', 'regenerated_pages': [],
-        'font_portability': 'resource_url_html_and_required_for_pptx' if target else 'unchanged',
+        'font_portability': ('shared_font' if font_records else 'system_font_only') if target else 'unchanged',
+        'font_notice': ('此字体依赖系统安装。接收者未安装时，PowerPoint 可能替换字体；可导出 PDF 保留外观。'
+                        if target and not font_records else ''),
     })
 
 
 def _package_edited_html_fonts(html, families, prepared=None):
     from lazymind.chat.engine.tools.file_resources.portable_fonts import portable_font_faces, package_html_fonts
-    for family in set(families):
+    tree = _HtmlTree(html)
+    # Resolve each text node against its closest inline family so a title
+    # override is never checked against the surrounding body font.
+    effective = []
+    for node in tree.nodes:
+        parent = node['parent']
+        style = node['attrs'].get('style', '')
+        declaration = re.search(r'(?:^|;)\s*font-family\s*:\s*([^;]+)', style, re.I)
+        if node['tag'] in {'style', 'script', 'head'} or (parent is not None and effective[parent] is None):
+            effective.append(None)
+        elif declaration:
+            name = re.sub(r'\s*!important\s*$', '', declaration[1], flags=re.I).strip().strip('\"\'')
+            effective.append(name.casefold())
+        else:
+            effective.append(effective[parent] if parent is not None else '')
+    visible = {}
+    for span in tree.texts:
+        if span['parent'] is not None and (family_key := effective[span['parent']]):
+            visible.setdefault(family_key, []).append(span['text'])
+    for family in dict.fromkeys(families):
+        text = ''.join(visible.get(family.casefold(), []))
+        if not text:
+            continue
         records = (prepared or {}).get(family)
         if records is None:
-            family, records = portable_font_faces(family)
-        tree = _HtmlTree(html)
-        text = ''.join(_html_unescape(_strip_tags(re.sub(
-            r'<(script|style)\b[^>]*>[\s\S]*?</\1>', '', html[node['open_end']:node['end']], flags=re.I)))
-                       for node in tree.nodes
-                       if node['tag'] not in {'style', 'script', 'head'}
-                       and family.casefold() in node['attrs'].get('style', '').casefold())
+            family, records = portable_font_faces(family, allow_system_only=True)
+        if not records:
+            continue
         html = package_html_fonts(html, family, records, text)
     return html
 

@@ -6,10 +6,10 @@ import zhCN from '@/i18n/locales/zh-CN';
 import enUS from '@/i18n/locales/en-US';
 import type {PdfIRDocument} from '@/modules/knowledge/api/pdfIR';
 const returnPositionI18n=createInstance();
-const state=vi.hoisted(()=>({externalLinkTarget:undefined as string|undefined,externalLinkRel:undefined as string|undefined,nativeClick:undefined as undefined|((item:{pageNumber:number;dest?:unknown[]})=>void),pageLoads:new Map<number,(width:number,height:number)=>void>(),document:undefined as unknown,status:'ready',failLoad:false,deferLoad:false,load:undefined as undefined|(()=>void),pdfFile:undefined as unknown,text:undefined as undefined|((page:number)=>Promise<{items:Array<{str:string}>}>)}));
+const state=vi.hoisted(()=>({externalLinkTarget:undefined as string|undefined,externalLinkRel:undefined as string|undefined,nativeClick:undefined as undefined|((item:{pageNumber:number;dest?:unknown[]})=>void),pageLoads:new Map<number,(width:number,height:number)=>void>(),document:undefined as unknown,status:'ready',error_code:undefined as string|undefined,error_message:undefined as string|undefined,start:vi.fn(),failLoad:false,deferLoad:false,load:undefined as undefined|(()=>void),pdfFile:undefined as unknown,text:undefined as undefined|((page:number)=>Promise<{items:Array<{str:string}>}>)}));
 vi.mock('react-i18next',async original=>({...await original<typeof import('react-i18next')>(),useTranslation:()=>({t:(key:string)=>key==='pdfReader.returnPosition'?returnPositionI18n.t(key):key})}));
 vi.mock('react-pdf',()=>({pdfjs:{GlobalWorkerOptions:{}},Document:({children,onLoadSuccess,onLoadError,file,onItemClick,externalLinkTarget,externalLinkRel}:{externalLinkTarget?:string;externalLinkRel?:string;file:unknown;onItemClick?:typeof state.nativeClick;children:ReactNode;onLoadSuccess:(value:unknown)=>void;onLoadError:(error:Error)=>void})=>{state.externalLinkTarget=externalLinkTarget;state.externalLinkRel=externalLinkRel;state.pdfFile=file;state.nativeClick=onItemClick;useEffect(()=>{if(state.failLoad){onLoadError(new Error("Invalid PDF"));return;}state.load=()=>onLoadSuccess({numPages:3,getPage:async(page:number)=>({view:[0,0,600,800],getViewport:()=>({width:600,height:800,convertToViewportPoint:(x:number,y:number)=>[x,800-y]}),getTextContent:()=>state.text?state.text(page):Promise.resolve({items:[{str:page===3?'needle result':'ordinary text'}]})})});if(!state.deferLoad)state.load();},[file]);return <>{children}</>;},Page:({width,pageNumber,onLoadSuccess,devicePixelRatio,renderTextLayer}:{width:number;pageNumber:number;onLoadSuccess:(page:unknown)=>void;devicePixelRatio?:number;renderTextLayer?:boolean})=> {state.pageLoads.set(pageNumber,(w,h)=>onLoadSuccess({getViewport:()=>({width:w,height:h,convertToViewportPoint:(x:number,y:number)=>[x,h-y]})}));return <div data-testid="rendered-pdf-page" data-width={width} data-pixel-ratio={devicePixelRatio}>{renderTextLayer&&<span data-testid="pdf-text-layer">Selectable PDF sentence</span>}</div>;}}));
-vi.mock('@/modules/knowledge/api/pdfIR',async original=>({...await original<typeof import('@/modules/knowledge/api/pdfIR')>(),usePdfIR:()=>({state,starting:false,start:vi.fn()})}));
+vi.mock('@/modules/knowledge/api/pdfIR',async original=>({...await original<typeof import('@/modules/knowledge/api/pdfIR')>(),usePdfIR:()=>({state,starting:false,start:state.start})}));
 vi.mock('./pdfPinStore',async original=>({...await original<typeof import('./pdfPinStore')>(),readPdfPinBoard:vi.fn().mockResolvedValue([]),writePdfPinBoard:vi.fn().mockResolvedValue(true)}));
 vi.mock('./PdfVisualStudy',()=>({PdfVisualStudy:({autoExplain}:{autoExplain:boolean})=> <aside aria-label="visual-study" data-auto-explain={String(autoExplain)}/> }));
 vi.mock('./PdfFormulaStudy',()=>({PdfFormulaStudy:()=> <aside aria-label="formula-study"/>}));
@@ -22,7 +22,14 @@ function document(hash='hash'):PdfIRDocument{return {version:1,projection_versio
 function pageButton(page:number){return screen.getByRole('button',{name:`pdfReader.page ${page} / 3`});}
 function expectPage(page:number){expect(pageButton(page)).toBeInTheDocument();}
 
-beforeEach(()=>{vi.mocked(readPdfPinBoard).mockClear().mockResolvedValue([]);vi.mocked(writePdfPinBoard).mockClear().mockResolvedValue(true);state.pageLoads.clear();state.failLoad=false;state.text=undefined;state.deferLoad=false;sessionStorage.clear();state.document=document();state.status='ready';});
+// jsdom has no scrolling layout; model the browser's synchronous scroll offset
+// update so geometry tests exercise the live viewport rather than a no-op stub.
+beforeEach(()=>{vi.spyOn(HTMLElement.prototype,'scrollTo').mockImplementation(function(this:HTMLElement,options?:ScrollToOptions|number,y?:number){
+ if(typeof options==='number'){this.scrollLeft=options;this.scrollTop=y??0;}
+ else {if(options?.top!==undefined)this.scrollTop=options.top;if(options?.left!==undefined)this.scrollLeft=options.left;}
+});});
+
+beforeEach(()=>{vi.mocked(readPdfPinBoard).mockClear().mockResolvedValue([]);vi.mocked(writePdfPinBoard).mockClear().mockResolvedValue(true);state.pageLoads.clear();state.failLoad=false;state.text=undefined;state.deferLoad=false;sessionStorage.clear();state.document=document();state.status='ready';state.error_code=undefined;state.error_message=undefined;state.start.mockClear();});
 beforeEach(async()=>{await returnPositionI18n.init({lng:'zh-CN',fallbackLng:false,resources:{'zh-CN':{translation:zhCN},'en-US':{translation:enUS}}});});
 
 it('keeps the paper reader on the original document without an overview mode',async()=>{
@@ -108,6 +115,18 @@ describe('reader study integration',()=>{
   expect(screen.getByText('pdfFormula.serviceRequired')).toBeInTheDocument();
   expect(screen.getByRole('link',{name:'pdfFormula.configureService'})).toHaveAttribute('href',expect.stringContaining('section=model_defaults&service=parsing'));
   await act(async()=>{});
+ });
+ it('offers direct manual parsing while automatic quota is exhausted without hiding retained formulas',async()=>{
+  state.status='queued';state.error_code='reading_quota_exhausted';state.error_message='PDF 解析额度已用尽';
+  const view=render(<RenderPdf fileData="quota.pdf" pdfIRTarget={target} pdfSourceHash="hash"/>);
+  await act(async()=>{});
+  expect(view.container.querySelector('.pdf-formula-trigger')).not.toBeNull();
+  const display=screen.getByText('pdfReader.displaySettings').closest('details')!;
+  display.open=true;
+  expect(screen.getByText('PDF 解析额度已用尽')).toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button',{name:'pdfFormula.retry'}));
+  expect(state.start).toHaveBeenCalledOnce();
+  expect(state.start).toHaveBeenCalledWith(true);
  });
  it('switches between formula and table studies instead of opening two panels',async()=>{
   render(<RenderPdf fileData="test.pdf" pdfIRTarget={target} pdfSourceHash="hash"/>);
@@ -682,4 +701,99 @@ it('guide page-only navigation clears an old parent box and exact guide regions 
  view.rerender(<RenderPdf {...props} pdfNavigateToPosition={{page:2,progress:.2,requestId:3,sourceLocator:true,bbox:[.1,.3,.7,.4]}}/>);
  await waitFor(()=>expect(view.container.querySelector('.pdf-study-highlight')).toHaveStyle({left:'10%',top:'30%'}));
  height.mockRestore();width.mockRestore();
+});
+
+it('does not rewind continued scrolling when the parent echoes a reported page position',async()=>{
+ const report=vi.fn();
+ const props={fileData:'scroll-feedback.pdf',defaultPageWidth:600,onViewPositionChange:report};
+ const view=render(<RenderPdf {...props} viewPosition={{page:1,progress:0}}/>);
+ await act(async()=>{});
+ const viewport=view.container.querySelector('.pdf-reader-with-study')!.firstElementChild as HTMLElement;
+ const scroll=vi.spyOn(viewport,'scrollTo').mockImplementation(options=>{
+  if(typeof options==='object')viewport.scrollTop=options.top||0;
+ });
+ // Cross into page two, then keep moving before React receives the echoed prop.
+ viewport.scrollTop=1000;fireEvent.scroll(viewport);
+ const reported=report.mock.calls.at(-1)![0];
+ expect(reported.page).toBe(2);
+ viewport.scrollTop=1100;fireEvent.scroll(viewport);
+ scroll.mockClear();
+ view.rerender(<RenderPdf {...props} viewPosition={reported}/>);
+ expect(viewport.scrollTop).toBe(1100);
+ expect(scroll).not.toHaveBeenCalled();
+ // Explicit external navigation must still work.
+ view.rerender(<RenderPdf {...props} viewPosition={{page:3,progress:.5}}/>);
+ expect(scroll).toHaveBeenCalled();
+ expectPage(3);
+});
+
+it('does not rewind live scrolling when a newly loaded later page changes size',async()=>{
+ const width=vi.spyOn(HTMLElement.prototype,'clientWidth','get').mockReturnValue(800);
+ const height=vi.spyOn(HTMLElement.prototype,'clientHeight','get').mockReturnValue(600);
+ const view=render(<RenderPdf fileData="delayed-page.pdf" defaultPageWidth={600}/>);
+ await act(async()=>{});
+ const viewport=view.container.querySelector('.pdf-reader-with-study')!.firstElementChild as HTMLElement;
+ const scroll=vi.spyOn(viewport,'scrollTo').mockImplementation(options=>{
+  if(typeof options==='object')viewport.scrollTop=options.top||0;
+ });
+ viewport.scrollTop=1000;fireEvent.scroll(viewport);
+ // The compositor has advanced, but its next scroll event has not reached React.
+ viewport.scrollTop=1100;
+ scroll.mockClear();
+ await act(async()=>{state.pageLoads.get(3)!(600,900);});
+ expect(viewport.scrollTop).toBe(1100);
+ expect(scroll).not.toHaveBeenCalled();
+ view.unmount();width.mockRestore();height.mockRestore();
+});
+
+it('does not cancel scrolling when only an offscreen page height changes',async()=>{
+ const width=vi.spyOn(HTMLElement.prototype,'clientWidth','get').mockReturnValue(800);
+ const height=vi.spyOn(HTMLElement.prototype,'clientHeight','get').mockReturnValue(600);
+ const view=render(<RenderPdf fileData="offscreen-size.pdf" defaultPageWidth={600}/>);
+ await act(async()=>{});
+ const viewport=view.container.querySelector('.pdf-reader-with-study')!.firstElementChild as HTMLElement;
+ viewport.scrollTop=100;fireEvent.scroll(viewport);
+ const scroll=vi.spyOn(viewport,'scrollTo');scroll.mockClear();
+ await act(async()=>{state.pageLoads.get(3)!(600,900);});
+ expect(scroll).not.toHaveBeenCalled();
+ view.unmount();width.mockRestore();height.mockRestore();
+});
+
+it('ignores older progress acknowledgements after multiple pages load during fast scrolling',async()=>{
+ const report=vi.fn();
+ const props={fileData:'delayed-ack.pdf',defaultPageWidth:600,onViewPositionChange:report};
+ const view=render(<RenderPdf {...props} viewPosition={{page:1,progress:0}}/>);
+ await act(async()=>{});
+ const viewport=view.container.querySelector('.pdf-reader-with-study')!.firstElementChild as HTMLElement;
+ const scroll=vi.spyOn(viewport,'scrollTo').mockImplementation(options=>{
+  if(typeof options==='object')viewport.scrollTop=options.top||0;
+ });
+ viewport.scrollTop=1000;fireEvent.scroll(viewport);
+ const pageTwo=report.mock.calls.at(-1)![0];
+ viewport.scrollTop=1700;fireEvent.scroll(viewport);
+ const pageThree=report.mock.calls.at(-1)![0];
+ expect(pageTwo.page).toBe(2);expect(pageThree.page).toBe(3);
+ viewport.scrollTop=1800;fireEvent.scroll(viewport);scroll.mockClear();
+ view.rerender(<RenderPdf {...props} viewPosition={pageTwo}/>);
+ expect(viewport.scrollTop).toBe(1800);
+ view.rerender(<RenderPdf {...props} viewPosition={pageThree}/>);
+ expect(viewport.scrollTop).toBe(1800);
+ expect(scroll).not.toHaveBeenCalled();
+ // A fresh navigation object is a command, even if its coordinates were reported.
+ view.rerender(<RenderPdf {...props} viewPosition={{...pageTwo}}/>);
+ expect(viewport.scrollTop).toBe(1000);
+});
+
+it('shows only selectable document content in a control-free metadata preview',async()=>{
+ const report=vi.fn();
+ const view=render(<RenderPdf fileData="metadata-preview.pdf" pdfToolbarMode="none" pdfSelectableText defaultPageWidth={600} onViewPositionChange={report}/>);
+ await act(async()=>{});
+ expect(view.container.querySelector('.pdf-reader-header')).toBeNull();
+ expect(screen.queryByRole('button')).toBeNull();
+ expect(screen.queryByRole('navigation')).toBeNull();
+ expect(screen.getAllByTestId('pdf-text-layer').length).toBeGreaterThan(0);
+ const viewport=view.container.querySelector('.pdf-reader-with-study')!.firstElementChild as HTMLElement;
+ viewport.scrollTop=1000;fireEvent.scroll(viewport);
+ expect(viewport.scrollTop).toBe(1000);
+ expect(report).toHaveBeenLastCalledWith(expect.objectContaining({page:2}));
 });

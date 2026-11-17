@@ -1,14 +1,18 @@
 import json
 from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
 from urllib import parse, request
 from urllib.error import HTTPError, URLError
 
+from services import github_http
 from services.cloud_oauth_provider import (
     CloudAccountProfile,
     CloudOAuthProvider,
     CloudProviderError,
     CloudTokenPayload,
 )
+
+request = SimpleNamespace(Request=request.Request, urlopen=github_http.urlopen)
 
 _GITHUB_AUTHORIZE_URL = 'https://github.com/login/oauth/authorize'
 _GITHUB_TOKEN_URL = 'https://github.com/login/oauth/access_token'

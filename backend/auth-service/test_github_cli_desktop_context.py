@@ -26,6 +26,9 @@ class GitHubCLIDesktopContextTest(unittest.TestCase):
         }, clear=True)
         self.patch.start()
         self.addCleanup(self.patch.stop)
+        git_patch = patch('services.github_cli_runner.shutil.which', return_value='/fixture/git')
+        git_patch.start()
+        self.addCleanup(git_patch.stop)
         self.runner = GitHubCLIRunner(binary_path=self.root / 'gh', expected_sha256='', runtime_dir=self.root / 'state')
 
     def test_selected_host_gh_account_is_read_without_changing_service_home(self):
@@ -40,7 +43,7 @@ class GitHubCLIDesktopContextTest(unittest.TestCase):
         self.assertEqual(os.environ['HOME'], str(self.service))
         self.assertEqual(os.environ['XDG_CONFIG_HOME'], str(self.service / 'config'))
 
-    def test_git_keychain_fallback_uses_host_home_and_only_the_github_get_protocol(self):
+    def test_git_fallback_uses_host_home_and_only_noninteractive_github_fill(self):
         commands = []
 
         def run(args, **kwargs):
@@ -48,8 +51,12 @@ class GitHubCLIDesktopContextTest(unittest.TestCase):
             commands.append(args)
             if args[0] == '/usr/bin/security':
                 return subprocess.CompletedProcess(args, 44, '', '')
-            self.assertEqual(args, ['/usr/bin/git', 'credential-osxkeychain', 'get'])
+            self.assertEqual(args, [
+                '/fixture/git', '-c', 'credential.interactive=false', '-c', 'core.askPass=', 'credential', 'fill',
+            ])
             self.assertEqual(kwargs['input'], 'protocol=https\nhost=github.com\n\n')
+            self.assertEqual(kwargs['env']['GIT_TERMINAL_PROMPT'], '0')
+            self.assertEqual(kwargs['env']['GCM_INTERACTIVE'], '0')
             return subprocess.CompletedProcess(args, 0, 'password=fixture-git-token\n', '')
         with patch.object(self.runner, '_command', side_effect=run):
             self.assertEqual(self.runner.probe(), {'access_token': 'fixture-git-token'})

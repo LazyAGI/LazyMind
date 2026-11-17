@@ -67,10 +67,7 @@ import {
 
 import { DetailPageHeader } from "@/components/ui";
 import KnowledgeBaseSyncNow from "@/modules/knowledge/components/KnowledgeBaseSyncNow";
-import {
-  effectiveProcessingLevel,
-  type ProcessingLevel,
-} from "@/modules/knowledge/utils/processingLevel";
+import type { ProcessingLevel } from "@/modules/knowledge/utils/processingLevel";
 import { useRAGComponent } from "@/modules/modelProvider/contexts/RAGComponentContext";
 
 import "./index.scss";
@@ -556,8 +553,6 @@ const Detail = () => {
             onOpenAttachment={documentId => navigate(`/lib/knowledge/knowledge/${encodeURIComponent(id)}/${encodeURIComponent(documentId)}`)}
             onBack={() => returnToList()}
             onUploadPdf={uploadPaperPdf}
-            processingLevel={effectiveProcessingLevel(detail.processing_level)}
-            parsers={detail.parsers}
             canParse={documentParsingEnabled !== false}
           />
         </div>

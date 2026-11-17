@@ -248,6 +248,7 @@ class SyncDocumentResult(_StrictModel):
     provider: str | None = None
     write_result: dict[str, Any] | None = None
     target_document: dict[str, Any] | None = None
+    warnings: list[str] = Field(default_factory=list)
 
 
 class ConvertDocumentResult(_StrictModel):
@@ -380,6 +381,18 @@ def document_action_specs(
     })
 
 
+def _publication_progress(root: str, stage: str, **values: int) -> None:
+    if not root:
+        return
+    try:
+        temporary = Path(root) / 'progress.tmp'
+        temporary.parent.mkdir(parents=True, exist_ok=True)
+        temporary.write_text(json.dumps({'stage': stage, **values}), encoding='utf-8')
+        temporary.replace(temporary.with_suffix('.json'))
+    except OSError:
+        pass
+
+
 def invoke_document_action(reference: str, phase: DocumentActionPhase,
                            arguments: Mapping[str, Any], *, artifact: Any = None,
                            artifact_store: str = '', slot: str = '',
@@ -404,6 +417,8 @@ def invoke_document_action(reference: str, phase: DocumentActionPhase,
     context = DocumentActionContext(
         artifact=artifact, artifact_store=artifact_store, slot=slot
     )
+    from lazyllm.tools.writer.provider.wechat import wechat_progress
+    token = wechat_progress.set(lambda stage, **values: _publication_progress(artifact_store, stage, **values))
     try:
         call_arguments = {
             name: getattr(parsed, name) for name in type(parsed).model_fields
@@ -433,6 +448,8 @@ def invoke_document_action(reference: str, phase: DocumentActionPhase,
             retryable=bool(getattr(exc, 'retryable', retryable)),
             details=getattr(exc, 'details', None),
         ) from exc
+    finally:
+        wechat_progress.reset(token)
     try:
         validated = spec.result_model.model_validate(result)
     except ValidationError as exc:

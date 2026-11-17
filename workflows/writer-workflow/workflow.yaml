@@ -325,6 +325,7 @@ slots:
 ui:
   follow_mode:
     default: following
+  hide_skipped_steps: true
   slots:
     outline_document:
       widgetType: writer-document
@@ -343,31 +344,28 @@ ui:
 
     - id: outline
       step_id: outline
+      show_after_route: prepare
       label: Outline
       layout: list
       slots:
         - id: outline_document
       completed_continue_step: write_document
 
-    - id: result
-      status_step_ids:
-        - write_document
-        - write_flat_document
+    - id: write_document
+      step_id: write_document
+      show_after_route: prepare
       label: Final Document
       layout: list
       slots:
         - id: draft_document
+
+    - id: write_flat_document
+      step_id: write_flat_document
+      show_after_route: prepare
+      label: Short-form Draft
+      layout: list
+      slots:
         - id: flat_draft_document
-      composite_behavior:
-        hide_empty_columns: true
-        empty_column_scope: selected
-        mutually_exclusive:
-          - slots:
-              - draft_document
-              - flat_draft_document
-            prefer:
-              - draft_document
-              - flat_draft_document
 
 i18n:
   zh-CN:
@@ -380,7 +378,8 @@ i18n:
     tabs:
       prepare: {label: 写作准备}
       outline: {label: 大纲}
-      result: {label: 成稿}
+      write_document: {label: 成稿}
+      write_flat_document: {label: 短文成稿}
     slots:
       writing_task: {label: 写作任务}
       writer_command: {label: 写作控制命令}

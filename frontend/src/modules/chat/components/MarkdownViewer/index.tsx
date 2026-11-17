@@ -60,6 +60,8 @@ import { toArtifactFiles } from '../ArtifactCollectorCard/artifactFiles';
 import HtmlBlock from "./HtmlBlock";
 import MermaidBlock from "./MermaidBlock";
 import EditableBlock from "./EditableBlock";
+import remarkLocalFiles, { localFilePath } from "./remarkLocalFiles";
+import { actOnLocalChatFile, openChatExternal } from "@/runtime/desktopBridge";
 import remarkSourceCitations from "./remarkSourceCitations";
 import {
   getLanguageFromClassName,
@@ -560,7 +562,22 @@ function ArtifactFileLink({
   );
 }
 
+function LocalFileLink({ path, children }: { path: string; children: ReactNode }) {
+  const { t } = useTranslation();
+  const run = async (action: "open" | "reveal") => {
+    try { await actOnLocalChatFile(path, action); }
+    catch { message.error(t(action === "reveal" ? "chat.fileRevealFailed" : "chat.fileOpenFailed")); }
+  };
+  return <Dropdown trigger={["contextMenu"]} menu={{ items: [{
+    key: "reveal", label: t(isAppleDesktopPlatform() ? "chat.fileShowInFinder" : "chat.fileShowInFolder"),
+    onClick: () => void run("reveal"),
+  }] }}>
+    <a href="#" title={path} onClick={event => { event.preventDefault(); void run("open"); }}>{children}</a>
+  </Dropdown>;
+}
+
 const LinkComponent = (props: any) => {
+  const { t } = useTranslation();
   const { isStreaming, markSources, artifacts, conversationId } = useContext(
     MarkdownRenderContext,
   );
@@ -646,6 +663,9 @@ const LinkComponent = (props: any) => {
     inlineText,
     inlineBlobType,
   ]);
+  const localPath = localFilePath(href);
+  if (localPath) return <LocalFileLink path={localPath}>{props.children}</LocalFileLink>;
+
   const sourceCitationIds = parseSourceCitationIds(href);
 
   if (sourceCitationIds.length) {
@@ -741,6 +761,14 @@ const LinkComponent = (props: any) => {
   return (
     <a
       href={resolvedHref || undefined}
+      onClick={event => {
+        if (!/^(https?:|mailto:)/i.test(resolvedHref)) return;
+        const opened = openChatExternal(resolvedHref);
+        if (opened) {
+          event.preventDefault();
+          void opened.catch(() => message.error(t("chat.linkOpenFailed")));
+        }
+      }}
       target="_blank"
       rel="noreferrer"
     >
@@ -848,6 +876,7 @@ const MarkdownViewer = memo((props: any) => {
     [remarkGfm, { singleTilde: false }],
     [remarkSourceCitations, new Set(markSources.map(getSourceCitationId))],
     remarkMath,
+    remarkLocalFiles,
   ], [markSources]);
 
   const renderContextValue = useMemo(

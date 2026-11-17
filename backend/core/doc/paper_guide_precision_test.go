@@ -202,3 +202,45 @@ func TestGuideSnapshotPathBindsOriginalFigureProofEvenIfArtifactRehashesIt(t *te
 		t.Fatalf("rehashed proof replaced the path commitment: %v", err)
 	}
 }
+
+func TestGuideSharedLegacyArchiveStatusRemainsReadOnly(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("LAZYMIND_UPLOAD_ROOT", root)
+	source := filepath.Join(root, "nested", "paper.pdf")
+	hash := pdfir.Digest("shared-guide-source")
+	raw, _ := guidePrecisionFixture(t, hash)
+	canonical := pdfir.CachePath(source, hash, "vlm")
+	legacy := filepath.Join(filepath.Dir(source), ".lazymind-artifacts", "mineru-cache-v1", filepath.Base(canonical))
+	if err := os.MkdirAll(filepath.Dir(legacy), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(legacy, raw, 0600); err != nil {
+		t.Fatal(err)
+	}
+	row := orm.Document{Ext: mustJSON(documentExt{StoredPath: source})}
+	state := pdfIRStatusFromJobsWithProjection(row, hash, nil, false)
+	if state.Status != "ready" || state.Document == nil || state.Artifact.RawPath != legacy {
+		t.Fatalf("shared archive provenance missing: %+v", state)
+	}
+	if _, err := os.Stat(canonical); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("read-only guide promoted cache: %v", err)
+	}
+	_, precisionPath, err := loadGuidePrecision(*state.Document, state.Artifact, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(precisionPath); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("read-only guide wrote precision: %v", err)
+	}
+	if _, _, err := loadGuidePrecision(*state.Document, state.Artifact, true); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(precisionPath); err != nil {
+		t.Fatal(err)
+	}
+	// Normal reader access retains main's legacy cache promotion behavior.
+	pdfIRStatusFromJobsWithProjection(row, hash, nil, true)
+	if _, err := os.Stat(canonical); err != nil {
+		t.Fatalf("reader did not promote legacy cache: %v", err)
+	}
+}

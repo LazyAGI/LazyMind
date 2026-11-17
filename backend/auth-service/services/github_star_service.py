@@ -7,6 +7,7 @@ from urllib import request as urllib_request
 from urllib.error import HTTPError, URLError
 
 from core.errors import AppException, ErrorCodes
+from services import github_http
 from services.github_cli_runner import GitHubCLIError
 
 
@@ -19,8 +20,12 @@ class _NoRedirect(urllib_request.HTTPRedirectHandler):
         return None
 
 
+def _urlopen(req, *, timeout):
+    return github_http.urlopen(req, timeout=timeout, handlers=(_NoRedirect(),))
+
+
 # A private HTTP boundary prevents redirects without changing urllib's global opener.
-request = SimpleNamespace(urlopen=urllib_request.build_opener(_NoRedirect()).open)
+request = SimpleNamespace(urlopen=_urlopen)
 
 
 @dataclass

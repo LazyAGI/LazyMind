@@ -35,6 +35,7 @@ type EnsureDocumentParsedRequest struct {
 
 type EnsureDocumentParsedResult struct {
 	currentTaskSucceeded bool                  // Internal evidence; never part of the API response.
+	PDFStructure         *pdfStructureStatus   `json:"pdf_structure,omitempty"`
 	Error                *ProcessingDiagnostic `json:"error,omitempty"`
 	Status               string                `json:"status"`
 	TaskID               string                `json:"task_id,omitempty"`

@@ -502,6 +502,7 @@ def test_write_consumes_conversion_without_converting_again(monkeypatch):
                 "locator": "https://example.test/remote-1",
                 "persisted_document": persisted,
                 "representation": "ir",
+                "warnings": ["WECHAT_HTML_TRUNCATED"],
             }
 
     monkeypatch.setattr(
@@ -515,6 +516,7 @@ def test_write_consumes_conversion_without_converting_again(monkeypatch):
     assert [call[0] for call in calls] == ["require", "write"]
     assert calls[1][1].content == [{"text": "before"}]
     assert result["provider"] == "fake"
+    assert result["warnings"] == ["WECHAT_HTML_TRUNCATED"]
     assert result["persisted_document"]["provider_binding"]["provider"] == "fake"
 
     serialized = json.loads(WriterResourceCapabilities().write_document(

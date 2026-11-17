@@ -263,7 +263,7 @@ func TestProbeBoundsFailuresAndRejectsPayloadOverrides(t *testing.T) {
 	}
 }
 
-func TestProbeTimeoutAndDuplicateRequest(t *testing.T) {
+func TestProbeDuplicateRequest(t *testing.T) {
 	_, parent, group, model := setupProbeTest(t)
 	entered, release := make(chan struct{}), make(chan struct{})
 	algorithm := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -272,11 +272,19 @@ func TestProbeTimeoutAndDuplicateRequest(t *testing.T) {
 		_, _ = w.Write([]byte(`{"status":"passed","code":"ok"}`))
 	}))
 	defer algorithm.Close()
+	// Always release the handler, including assertion failures.
+	defer func() {
+		select {
+		case <-release:
+		default:
+			close(release)
+		}
+	}()
 	t.Setenv("LAZYMIND_CHAT_SERVICE_URL", algorithm.URL)
 	first := httptest.NewRecorder()
 	done := make(chan struct{})
 	go func() {
-		probeGroupModel(first, probeRequest(parent.ID, group.ID, model.ID), 20*time.Millisecond)
+		probeGroupModel(first, probeRequest(parent.ID, group.ID, model.ID), modelProbeTimeout)
 		close(done)
 	}()
 	<-entered
@@ -285,10 +293,26 @@ func TestProbeTimeoutAndDuplicateRequest(t *testing.T) {
 	if got := decodeProbeTest(t, second); got.Code != "probe_in_progress" {
 		t.Fatalf("duplicate request not rejected: %s", second.Body.String())
 	}
-	<-done
 	close(release)
-	if got := decodeProbeTest(t, first); got.Code != "timeout" {
-		t.Fatalf("timeout misclassified: %s", first.Body.String())
+	<-done
+	if got := decodeProbeTest(t, first); got.Code != "ok" {
+		t.Fatalf("first request failed: %s", first.Body.String())
+	}
+}
+
+func TestProbeTimeout(t *testing.T) {
+	_, parent, group, model := setupProbeTest(t)
+	release := make(chan struct{})
+	algorithm := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		<-release
+	}))
+	defer algorithm.Close()
+	defer close(release)
+	t.Setenv("LAZYMIND_CHAT_SERVICE_URL", algorithm.URL)
+	response := httptest.NewRecorder()
+	probeGroupModel(response, probeRequest(parent.ID, group.ID, model.ID), 20*time.Millisecond)
+	if got := decodeProbeTest(t, response); got.Code != "timeout" {
+		t.Fatalf("timeout misclassified: %s", response.Body.String())
 	}
 }
 

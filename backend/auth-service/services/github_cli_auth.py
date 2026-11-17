@@ -260,7 +260,14 @@ class GitHubCLIAuthService:
                             session.connection_id = result['connection_id']
                             self._finish(session, 'COMPLETED')
                     return
-            credential = None if force_web or not self.host_credentials_enabled else self.runner.probe()
+            credential = None
+            if not force_web and self.host_credentials_enabled:
+                try:
+                    credential = self.runner.probe()
+                except GitHubCLIError as exc:
+                    if not (sys.platform == 'win32' and self.web_authorization_enabled
+                            and exc.code in {'GITHUB_CREDENTIAL_UNREADABLE', 'GITHUB_CLI_UNAVAILABLE'}):
+                        raise
 
             def on_device(code, uri, expires_in):
                 if uri != DEVICE_URL or not re.fullmatch('[A-Z0-9]{4}-[A-Z0-9]{4}', code):
@@ -314,6 +321,6 @@ github_cli_auth_service = GitHubCLIAuthService(
     runner=GitHubCLIRunner.from_runtime(), connections=cloud_oauth_service,
     host_credentials_enabled=_host_credentials_enabled and _single_worker,
     web_authorization_enabled=(
-        (sys.platform == 'darwin' and _host_credentials_enabled) or _container_web_enabled
+        _host_credentials_enabled or _container_web_enabled
     ) and _single_worker,
 )

@@ -1203,3 +1203,27 @@ runtime:
 		}
 	}
 }
+
+func TestUIMaterialReuseAcrossTabs(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		tabs          []map[string]any
+		wantDuplicate bool
+	}{
+		{"across tabs", []map[string]any{{"slots": []string{"base"}}, {"slots": []string{"base"}}}, false},
+		{"within tab", []map[string]any{{"slots": []string{"base", "base"}}}, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			diagnostics := validateUI(map[string]any{"tabs": tc.tabs}, map[string]bool{"base": true}, map[string]bool{"base": true}, nil, Profile(""))
+			duplicate := false
+			for _, diagnostic := range diagnostics {
+				if diagnostic.Code == "E_UI_MATERIAL_DUPLICATE" {
+					duplicate = true
+				}
+			}
+			if duplicate != tc.wantDuplicate {
+				t.Fatalf("unexpected diagnostics: %+v", diagnostics)
+			}
+		})
+	}
+}

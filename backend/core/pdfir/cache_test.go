@@ -30,8 +30,8 @@ func TestSharedArchiveCacheValidatesSourceAndModel(t *testing.T) {
 		t.Fatal("model mismatch")
 	}
 	SaveCachedArchive(source, hash, "vlm", []byte("broken"))
-	if ReadCachedArchive(source, hash, "vlm") != nil {
-		t.Fatal("invalid archive reused")
+	if ReadCachedArchive(source, hash, "vlm") == nil {
+		t.Fatal("invalid archive replaced valid cache")
 	}
 }
 func TestMineruTransportDiagnosticDoesNotLeakURL(t *testing.T) {
@@ -108,4 +108,56 @@ func TestSharedArchiveLockInteroperatesWithPythonFlock(t *testing.T) {
 		t.Fatal(err)
 	}
 	unlock()
+}
+
+func TestSharedArchiveAcrossLocationsPrefersVLMOverLegacyPipeline(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("LAZYMIND_UPLOAD_ROOT", root)
+	a, b := filepath.Join(root, "first", "paper.pdf"), filepath.Join(root, "second", "different.pdf")
+	hash := Digest("identical PDF")
+	old := archive(t, `[{"type":"text","text":"pipeline","page_idx":0,"bbox":[0,0,20,20]}]`)
+	legacy := filepath.Join(filepath.Dir(a), ".lazymind-artifacts", "mineru-cache-v1", hash+"-pipeline.zip")
+	if err := os.MkdirAll(filepath.Dir(legacy), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(legacy, old, 0600); err != nil {
+		t.Fatal(err)
+	}
+	raw, d := ReadSharedArchive(a, hash)
+	if len(raw) == 0 || d.Parser.Model != "pipeline" {
+		t.Fatalf("legacy result unavailable: %+v", d)
+	}
+	if raw, d := ReadSharedArchive(b, hash); len(raw) == 0 || d.Parser.Model != "pipeline" {
+		t.Fatalf("compatible legacy result was not shared with the duplicate: %+v", d)
+	}
+	if err := SaveCachedArchive(b, hash, "vlm", archive(t, `[{"type":"text","text":"vlm","page_idx":0,"bbox":[0,0,20,20]}]`)); err != nil {
+		t.Fatal(err)
+	}
+	for _, source := range []string{a, b} {
+		raw, d = ReadSharedArchive(source, hash)
+		if len(raw) == 0 || d.Parser.Model != "vlm" || d.Blocks[0].Text != "vlm" {
+			t.Fatalf("globally published result unavailable from %s: %+v", source, d)
+		}
+	}
+}
+
+func TestSharedArchiveRejectsIncompleteLegacyStructureAndKeepsPreviousResult(t *testing.T) {
+	source := filepath.Join(t.TempDir(), "paper.pdf")
+	hash := Digest("source")
+	if err := SaveCachedArchive(source, hash, "pipeline", archive(t, `[{"type":"text","text":"no geometry","page_idx":0}]`)); err == nil {
+		t.Fatal("incomplete pipeline accepted")
+	}
+	if raw, _ := ReadSharedArchive(source, hash); raw != nil {
+		t.Fatal("incomplete legacy returned")
+	}
+	good := archive(t, `[{"type":"text","text":"good","page_idx":0,"bbox":[0,0,20,20]}]`)
+	if err := SaveCachedArchive(source, hash, "vlm", good); err != nil {
+		t.Fatal(err)
+	}
+	if err := SaveCachedArchive(source, hash, "vlm", []byte("corrupt")); err == nil {
+		t.Fatal("corrupt replacement accepted")
+	}
+	if raw, d := ReadSharedArchive(source, hash); len(raw) == 0 || d.Blocks[0].Text != "good" {
+		t.Fatal("good result disappeared")
+	}
 }

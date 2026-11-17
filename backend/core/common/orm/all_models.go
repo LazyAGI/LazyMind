@@ -90,6 +90,7 @@ func AllModelsForDDL() []interface{} {
 		&UserEnvironmentVariable{},
 		&UserUIPreferences{},
 		&UserReadingPolicy{},
+		&ReadingUsage{},
 		&UserNotificationPreferences{},
 		&TaskNotification{},
 		&DesktopNotificationReceipt{},

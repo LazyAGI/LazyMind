@@ -3,16 +3,18 @@ import {
   realmPlugin, rootEditor$, useCellValues, ImageNode,
 } from '@mdxeditor/editor';
 import {
-  $applyNodeReplacement, $copyNode, $createParagraphNode, $getRoot, $isElementNode, $isParagraphNode, $getNodeByKey, $getNearestNodeFromDOMNode, $isLineBreakNode, $isTextNode,
-  ElementNode, HISTORY_PUSH_TAG, RootNode, setDOMUnmanaged, type LexicalNode, type NodeKey, type SerializedElementNode,
+  $applyNodeReplacement, $copyNode, $createParagraphNode, $getRoot, $getState, $setState, $isElementNode, $isParagraphNode, $getNodeByKey, $getNearestNodeFromDOMNode, $isLineBreakNode, $isTextNode,
+  createState, ElementNode, HISTORY_MERGE_TAG, HISTORY_PUSH_TAG, RootNode, setDOMUnmanaged, type LexicalNode, type NodeKey, type SerializedElementNode,
 } from 'lexical';
-import { createContext, useContext, useEffect, useLayoutEffect, useState } from 'react';
+import { createContext, useContext, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { createPortal } from 'react-dom';
 import { WriterImageGroupControls } from './WriterImageGroupControls';
 import { startWriterImageDrag } from './writerImageDrag';
-import { imageGroupKey, imageGroupLayout, normalizeImageSource, setImageGroup, type WriterImageGroup, type WriterImageRef } from './writerImageGroups';
+import { imageGroups, imageGroupKey, imageGroupLayout, normalizeImageSource, setImageGroup, type WriterImageGroup, type WriterImageRef } from './writerImageGroups';
 import './writerImageGroups.scss';
+
+const imageGroupsState = createState('writer-image-groups', { parse: imageGroups });
 
 interface ImageGroupSettings {
   groups: WriterImageGroup[];
@@ -91,11 +93,20 @@ function groupState() {
 function GroupControls() {
   const settings = useContext(WriterImageGroupContext);
   if (!settings) throw new Error('Image group settings are required.');
-  const { groups: configuredGroups, onChange } = settings;
+  const { groups: configuredGroups } = settings;
+  const settingsRef = useRef(settings);
+  settingsRef.current = settings;
   const [editor] = useCellValues(rootEditor$);
   const { t } = useTranslation();
   const [groups, setGroups] = useState<ReturnType<typeof groupState>>([]);
   const [editable, setEditable] = useState(false);
+  useLayoutEffect(() => {
+    editor?.update(() => {
+      if (JSON.stringify($getState($getRoot(), imageGroupsState)) !== JSON.stringify(configuredGroups)) {
+        $setState($getRoot(), imageGroupsState, configuredGroups);
+      }
+    }, { tag: HISTORY_MERGE_TAG });
+  }, [editor, configuredGroups]);
   // Publish layout metadata in the same commit as the portal controls.
   useLayoutEffect(() => {
     for (const group of groups) {
@@ -110,7 +121,11 @@ function GroupControls() {
     if (!editor) return;
     const refresh = () => setGroups(editor.getEditorState().read(groupState));
     refresh(); setEditable(editor.isEditable());
-    const unsubscribe = editor.registerUpdateListener(refresh);
+    const unsubscribe = editor.registerUpdateListener(({ editorState }) => {
+      refresh();
+      const current = editorState.read(() => $getState($getRoot(), imageGroupsState));
+      if (JSON.stringify(current) !== JSON.stringify(settingsRef.current.groups)) settingsRef.current.onChange(current);
+    });
     let cancelDrag: (() => void) | undefined;
     const unsubscribeEditable = editor.registerEditableListener(value => { setEditable(value); if (!value) cancelDrag?.(); });
     const startDrag = (event: MouseEvent) => {
@@ -118,18 +133,19 @@ function GroupControls() {
       const source = event.target.closest<HTMLImageElement>('[data-editor-block-type="image"] img');
       const root = editor.getRootElement();
       if (!source || !root || !editor.read(() => $getNearestNodeFromDOMNode(source) instanceof ImageNode)) return;
-      const sourceGroup = source.closest('.writer-image-group');
+      const canJoinGroup = editor.read(() => imageParagraph($getNearestNodeFromDOMNode(source)!.getParentOrThrow()));
       cancelDrag?.();
       cancelDrag = startWriterImageDrag(event, source, root, (x, y) => {
         const hovered = document.elementFromPoint(x, y);
         if (!(hovered instanceof HTMLElement) || !root.contains(hovered) || hovered.closest('.writer-image-group-host')) return null;
         let target: HTMLElement | null = hovered;
-        const horizontal = sourceGroup?.getAttribute('data-layout') === 'sliding';
-        if (sourceGroup) {
+        const targetGroup = hovered.closest('.writer-image-group');
+        const horizontal = canJoinGroup && targetGroup?.getAttribute('data-layout') === 'sliding';
+        if (targetGroup && canJoinGroup) {
           target = hovered.closest('[data-editor-block-type="image"]')?.querySelector('img') ?? null;
-          if (!target && sourceGroup.contains(hovered)) target = nearestDropElement(
-            Array.from(sourceGroup.querySelectorAll('img')).filter(image => image !== source), horizontal ? x : y, horizontal);
-          if (!target || target.closest('.writer-image-group') !== sourceGroup) return null;
+          if (!target) target = nearestDropElement(
+            Array.from(targetGroup.querySelectorAll('img')).filter(image => image !== source), horizontal ? x : y, horizontal);
+          if (!target || target.closest('.writer-image-group') !== targetGroup) return null;
         } else if (hovered === root) {
           target = nearestDropElement(Array.from(root.children).filter((element): element is HTMLElement =>
             element instanceof HTMLElement && !element.contains(source)), y, false);
@@ -143,12 +159,12 @@ function GroupControls() {
       }, target => {
         if (!editor.isEditable()) return;
         editor.update(() => {
+          const previousGroups = groupState();
           const image = $getNearestNodeFromDOMNode(source), destination = $getNearestNodeFromDOMNode(target.element);
           if (!(image instanceof ImageNode) || !destination) throw new Error('The image has changed.');
-          if (sourceGroup) {
-            const group = image.getParentOrThrow().getParentOrThrow();
-            if (!(group instanceof WriterImageGroupNode) || !(destination instanceof ImageNode)) throw new Error('The image group has changed.');
-            normalizeImageParagraphs(group);
+          for (const node of [image, destination]) {
+            const group = node instanceof ImageNode ? node.getParent()?.getParent() : null;
+            if (group instanceof WriterImageGroupNode) normalizeImageParagraphs(group);
           }
           const parent = image.getParentOrThrow();
           const linked = parent.getType() === 'link';
@@ -159,8 +175,14 @@ function GroupControls() {
             if ($isParagraphNode(container) && container.isEmpty()) container.remove();
           }
           const paragraph = imageParagraph(parent) ? parent : $createParagraphNode().append(content);
-          const targetNode = sourceGroup ? destination.getParentOrThrow() : destination;
+          const targetNode = destination instanceof ImageNode ? destination.getParentOrThrow() : destination;
           if (target.position === 'before') targetNode.insertBefore(paragraph); else targetNode.insertAfter(paragraph);
+          const currentGroups = groupState();
+          $setState($getRoot(), imageGroupsState, $getState($getRoot(), imageGroupsState).flatMap(config => {
+            const previous = previousGroups.find(group => imageGroupKey(group.images) === imageGroupKey(config.images));
+            const current = currentGroups.find(group => group.key === previous?.key);
+            return current && current.images.length >= 2 ? [{ ...config, images: current.images }] : [];
+          }));
         }, { tag: HISTORY_PUSH_TAG });
       });
     };
@@ -180,9 +202,8 @@ function GroupControls() {
         const node = $getNodeByKey(group.key);
         if (!(node instanceof WriterImageGroupNode)) throw new Error('The image group has changed.');
         if (layout === 'sliding') normalizeImageParagraphs(node);
-        onChange(setImageGroup(configuredGroups, group.images, layout));
-        $getRoot().markDirty();
-      })} />, host, group.key);
+        $setState($getRoot(), imageGroupsState, setImageGroup($getState($getRoot(), imageGroupsState), group.images, layout));
+      }, { tag: HISTORY_PUSH_TAG })} />, host, group.key);
   })}</>;
 }
 

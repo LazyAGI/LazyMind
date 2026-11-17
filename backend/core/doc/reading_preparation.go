@@ -27,6 +27,8 @@ import (
 
 const ReadingPreparationJob = "document_reading_preparation"
 
+var errReadingStructureRequired = errors.New("等待 PDF 结构：请手动解析或开启自动解析，结构就绪后自动继续精读")
+
 type readingPreparationPayload struct {
 	DatasetID    string   `json:"dataset_id"`
 	DocumentID   string   `json:"document_id"`
@@ -43,6 +45,7 @@ type readingPreparationStatus struct {
 	ProgressCurrent int64                     `json:"progress_current"`
 	ProgressTotal   int64                     `json:"progress_total"`
 	ErrorMessage    string                    `json:"error_message,omitempty"`
+	ErrorCode       string                    `json:"error_code,omitempty"`
 	Scopes          []string                  `json:"scopes,omitempty"`
 }
 
@@ -54,7 +57,7 @@ func preparationStatus(j orm.AsyncJob) readingPreparationStatus {
 		ModelRequests int `json:"model_requests"`
 	}
 	_ = json.Unmarshal(j.ResultJSON, &result)
-	return readingPreparationStatus{ModelRequests: result.ModelRequests, JobID: j.ID, Status: j.Status, ProgressCurrent: j.ProgressCurrent, ProgressTotal: j.ProgressTotal, ErrorMessage: j.ErrorMessage, Scopes: p.Scopes}
+	return readingPreparationStatus{ModelRequests: result.ModelRequests, JobID: j.ID, Status: j.Status, ProgressCurrent: j.ProgressCurrent, ProgressTotal: j.ProgressTotal, ErrorMessage: j.ErrorMessage, ErrorCode: j.ErrorCode, Scopes: p.Scopes}
 }
 func GetReadingPreparation(w http.ResponseWriter, r *http.Request) {
 	row, ext, _, ok := loadPDFDocument(r, false)
@@ -85,6 +88,16 @@ func GetReadingPreparation(w http.ResponseWriter, r *http.Request) {
 	status := readingPreparationStatus{Status: "not_requested"}
 	if len(jobs) > 0 {
 		status = preparationStatus(jobs[0])
+		// An independently completed parse must not hide a still queued study.
+		for _, candidate := range jobs {
+			if candidate.Status == "running" {
+				status = preparationStatus(candidate)
+				break
+			}
+			if candidate.Status == "pending" && status.Status != "pending" {
+				status = preparationStatus(candidate)
+			}
+		}
 	}
 	status.Capabilities = capabilities
 	common.ReplyOK(w, status)
@@ -109,6 +122,15 @@ func PrepareReading(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "准备请求格式无效", 400)
 		return
 	}
+	expanded := []string{}
+	for _, scope := range req.Scopes {
+		if scope == readingpolicy.AIStudy {
+			expanded = append(expanded, readingpolicy.Formula, readingpolicy.Figure, readingpolicy.Table)
+		} else {
+			expanded = append(expanded, scope)
+		}
+	}
+	req.Scopes = expanded
 	seen := map[string]bool{}
 	for _, k := range req.Scopes {
 		if k != readingpolicy.PDFParse && k != readingpolicy.Formula && k != readingpolicy.Figure && k != readingpolicy.Table {
@@ -126,12 +148,12 @@ func PrepareReading(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, err.Error(), 409)
 		return
 	}
-	p, err := readingpolicy.Load(r.Context(), store.DB(), store.UserID(r))
+	_, err = readingpolicy.Load(r.Context(), store.DB(), store.UserID(r))
 	if err != nil {
 		common.ReplyErr(w, "读取准备设置失败", 500)
 		return
 	}
-	job, err := enqueueReadingPreparation(r.Context(), store.DB(), row, store.UserID(r), req.Scopes, false, hash, p.Limits.StudyItemsPerDocument)
+	job, err := enqueueReadingPreparation(r.Context(), store.DB(), row, store.UserID(r), req.Scopes, false, hash, 0)
 	if err != nil {
 		common.ReplyErr(w, err.Error(), 500)
 		return
@@ -145,7 +167,7 @@ func enqueueReadingPreparation(ctx context.Context, db *gorm.DB, row orm.Documen
 	key := "explicit:" + user + ":" + pdfIRResource(row.DatasetID, row.ID) + ":" + hash + ":" + strings.Join(sorted, ",")
 	if automatic {
 		kind = "reading_automatic"
-		key = "automatic:" + user + ":" + pdfIRResource(row.DatasetID, row.ID)
+		key = "automatic:v2:" + user + ":" + pdfIRResource(row.DatasetID, row.ID) + ":" + hash + ":" + strings.Join(sorted, ",")
 	}
 	enqueue := asyncjob.Enqueue
 	if automatic {
@@ -180,23 +202,14 @@ func enrollReadingPreparation(ctx context.Context, db *gorm.DB, cursors map[stri
 			if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("user_id=?", stored.UserID).Take(&locked).Error; err != nil {
 				return err
 			}
-			var p readingpolicy.Policy
-			if err := json.Unmarshal([]byte(locked.PolicyJSON), &p); err != nil {
+			p, err := readingpolicy.Decode([]byte(locked.PolicyJSON))
+			if err != nil {
 				return err
 			}
 			if !readingpolicy.HasAutomatic(p) || p.AutomaticEligibleAfter == nil {
 				return nil
 			}
-			now := time.Now().UTC()
-			day := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
-			var used int64
-			if err := tx.Model(&orm.AsyncJob{}).Where("job_type=? AND resource_type=? AND create_user_id=? AND created_at>=?", ReadingPreparationJob, "reading_automatic", stored.UserID, day).Count(&used).Error; err != nil {
-				return err
-			}
-			remaining := p.Limits.DailyDocuments - int(used)
-			if remaining <= 0 {
-				return nil
-			}
+
 			cursor := cursors[stored.UserID]
 			if !cursor.Epoch.Equal(*p.AutomaticEligibleAfter) {
 				cursor = readingEnrollmentCursor{Epoch: *p.AutomaticEligibleAfter}
@@ -216,27 +229,28 @@ func enrollReadingPreparation(ctx context.Context, db *gorm.DB, cursors map[stri
 			}
 			processed := 0
 			for _, row := range rows {
-				if remaining <= 0 {
-					break
-				}
 				cursor.CreatedAt, cursor.ID = row.CreatedAt, row.ID
 				processed++
-				scopes := []string{}
-				for _, k := range readingpolicy.Keys {
-					if p.Modes[k] == readingpolicy.Automatic {
-						scopes = append(scopes, k)
-					}
-				}
+
 				var ext documentExt
 				_ = json.Unmarshal(row.Ext, &ext)
 				hash, hashErr := pdfIRHash(ext)
 				if hashErr != nil {
 					continue
 				}
-				if _, err := enqueueReadingPreparation(ctx, tx, row, stored.UserID, scopes, true, hash, p.Limits.StudyItemsPerDocument); err != nil {
-					return err
+				// Separate jobs allow exhausted study credit to yield to parsing.
+				for _, category := range readingpolicy.Keys {
+					if readingpolicy.Mode(p, category) != readingpolicy.Automatic {
+						continue
+					}
+					scopes := []string{readingpolicy.PDFParse}
+					if category == readingpolicy.AIStudy {
+						scopes = []string{readingpolicy.Formula, readingpolicy.Figure, readingpolicy.Table}
+					}
+					if _, err := enqueueReadingPreparation(ctx, tx, row, stored.UserID, scopes, true, hash, 0); err != nil {
+						return err
+					}
 				}
-				remaining--
 			}
 			// Wrap only at exhaustion. Bad files cannot starve the next batch;
 			// wrapping gives a repaired/unavailable file another chance later.
@@ -293,7 +307,7 @@ func preparationRequestWithPermission(ctx context.Context, user string, p readin
 }
 func runReadingPreparation(ctx context.Context, job asyncjob.Job, reporter asyncjob.Reporter) (result asyncjob.Result, resultErr error) {
 	result = asyncjob.Result{Permanent: true}
-	counter := &readingCallCounter{jobID: job.ID}
+	counter := &readingCallCounter{jobID: job.ID, user: job.CreateUserID}
 	ctx = context.WithValue(ctx, readingCallCounterKey{}, counter)
 	defer func() {
 		counter.mu.Lock()
@@ -304,12 +318,25 @@ func runReadingPreparation(ctx context.Context, job asyncjob.Job, reporter async
 			details = map[string]any{}
 		}
 		details["model_requests"] = counter.calls
+		if errors.Is(resultErr, errReadingStructureRequired) {
+			result.Permanent = false
+			result.ErrorCode = "reading_structure_required"
+			result.RetryAt = time.Now().UTC().Add(time.Minute)
+			result.DeferAttempt = true
+		}
+		if errors.Is(resultErr, readingpolicy.ErrQuotaExceeded) {
+			result.Permanent = false
+			result.ErrorCode = readingpolicy.QuotaErrorCode
+			result.RetryAt = readingpolicy.NextDay(time.Now())
+			result.DeferAttempt = true
+		}
 		result.ResultJSON = mustJSON(details)
 	}()
 	var p readingPreparationPayload
 	if err := json.Unmarshal(job.PayloadJSON, &p); err != nil {
 		return result, err
 	}
+	counter.hash = p.SourceSHA256
 	if p.Automatic {
 		ctx = readingpolicy.AutomaticContext(ctx)
 	}
@@ -329,32 +356,17 @@ func runReadingPreparation(ctx context.Context, job asyncjob.Job, reporter async
 	if err != nil {
 		return result, err
 	}
-	if p.Automatic {
-		if !readingpolicy.Eligible(policy, row.CreatedAt) {
-			return result, errors.New("自动准备策略已变化，本篇不再符合条件")
-		}
-		now := time.Now().UTC()
-		day := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
-		var used int64
-		if err := store.DB().WithContext(ctx).Model(&orm.AsyncJob{}).Where("job_type=? AND resource_type=? AND create_user_id=? AND started_at>=? AND id<>?", ReadingPreparationJob, "reading_automatic", job.CreateUserID, day, job.ID).Count(&used).Error; err != nil {
-			return result, err
-		}
-		if used >= int64(policy.Limits.DailyDocuments) {
-			return result, errors.New("已达到每日自动准备文档上限")
-		}
-	}
-	limit := p.ItemLimit
-	if policy.Limits.StudyItemsPerDocument < limit {
-		limit = policy.Limits.StudyItemsPerDocument
-	}
-	if limit < 1 || limit > 100 {
-		return result, errors.New("无效的研读数量上限")
+	// Enrollment already checked the policy epoch. A later mode change must
+	// not retroactively discard waiting work; per-call checks enforce the
+	// current modes, while the new epoch only filters future enrollment.
+	if p.Automatic && !readingpolicy.HasAutomatic(policy) {
+		return result, errors.New("自动准备策略已停止")
 	}
 	scopes := map[string]bool{}
 	for _, k := range p.Scopes {
 		scopes[k] = true
 	}
-	total := int64(1 + limit)
+	total := int64(1)
 	if err := reporter.SetProgress(ctx, 0, total); err != nil {
 		return result, err
 	}
@@ -364,7 +376,10 @@ func runReadingPreparation(ctx context.Context, job asyncjob.Job, reporter async
 		if e != nil {
 			return result, e
 		}
-		if state.Status != "ready" {
+		if state.Document == nil {
+			if p.Automatic && readingpolicy.Mode(policy, readingpolicy.PDFParse) != readingpolicy.Automatic {
+				return result, errReadingStructureRequired
+			}
 			for key := range scopes {
 				if err := readingpolicy.Check(ctx, store.DB(), job.CreateUserID, key); err != nil {
 					return result, err
@@ -374,7 +389,7 @@ func runReadingPreparation(ctx context.Context, job asyncjob.Job, reporter async
 				return result, err
 			}
 			resource := pdfIRResource(row.DatasetID, row.ID)
-			parseJob, e := asyncjob.Enqueue(ctx, store.DB(), asyncjob.EnqueueRequest{JobType: pdfIRJobType, ResourceType: "document_pdf_ir", ResourceID: resource, IdempotencyKey: pdfir.Digest(resource + hash + pdfir.Revision), Payload: pdfIRPayload{Revision: pdfir.Revision, DatasetID: p.DatasetID, DocumentID: p.DocumentID, SourceSHA256: hash, Automatic: p.Automatic}, CreateUserID: job.CreateUserID, MaxAttempts: 2, SkipSucceeded: true})
+			parseJob, e := enqueuePDFIR(ctx, store.DB(), asyncjob.EnqueueRequest{JobType: pdfIRJobType, ResourceType: "document_pdf_ir", ResourceID: resource, IdempotencyKey: pdfir.Digest(resource + hash + pdfir.Revision), Payload: pdfIRPayload{Revision: pdfir.Revision, DatasetID: p.DatasetID, DocumentID: p.DocumentID, SourceSHA256: hash, Automatic: p.Automatic}, CreateUserID: job.CreateUserID, MaxAttempts: 2, SkipSucceeded: true}, p.Automatic)
 			if e != nil {
 				return result, e
 			}
@@ -384,6 +399,9 @@ func runReadingPreparation(ctx context.Context, job asyncjob.Job, reporter async
 				var current orm.AsyncJob
 				if e = store.DB().WithContext(waitCtx).Where("id=?", parseJob.ID).Take(&current).Error; e != nil {
 					return result, e
+				}
+				if current.ErrorCode == readingpolicy.QuotaErrorCode && current.Status == "pending" {
+					return result, fmt.Errorf("等待 PDF 解析自动额度：%s（%w）", current.ErrorMessage, readingpolicy.ErrQuotaExceeded)
 				}
 				if current.Status == "succeeded" {
 					break
@@ -423,7 +441,7 @@ func runReadingPreparation(ctx context.Context, job asyncjob.Job, reporter async
 			return result, e
 		}
 	}
-	count := 0
+	count, completed := 0, 0
 	if needsIR {
 		state, e := pdfIRStatus(ctx, row, hash)
 		if e != nil {
@@ -431,6 +449,16 @@ func runReadingPreparation(ctx context.Context, job asyncjob.Job, reporter async
 		}
 		if state.Document == nil {
 			return result, errors.New("PDF 结构尚未就绪")
+		}
+		total = 1
+		for _, block := range state.Document.Blocks {
+			key := map[string]string{"formula": readingpolicy.Formula, "image": readingpolicy.Figure, "table": readingpolicy.Table}[block.Type]
+			if key != "" && scopes[key] {
+				total++
+			}
+		}
+		if e := reporter.SetProgress(ctx, 1, total); e != nil {
+			return result, e
 		}
 		for _, block := range state.Document.Blocks {
 			key := ""
@@ -445,16 +473,7 @@ func runReadingPreparation(ctx context.Context, job asyncjob.Job, reporter async
 			if key == "" || !scopes[key] {
 				continue
 			}
-			if count >= limit {
-				break
-			}
-			current, e := readingpolicy.Load(ctx, store.DB(), job.CreateUserID)
-			if e != nil {
-				return result, e
-			}
-			if count >= current.Limits.StudyItemsPerDocument {
-				break
-			}
+
 			if e = readingpolicy.Check(ctx, store.DB(), job.CreateUserID, key); p.Automatic && e != nil {
 				return result, e
 			}
@@ -473,17 +492,17 @@ func runReadingPreparation(ctx context.Context, job asyncjob.Job, reporter async
 				result.ResultJSON = mustJSON(map[string]any{"failed_scope": key})
 				return result, readingPreparationModelError(key, e)
 			}
-			// Reusing a saved result spends no generation budget. A later
-			// explicit batch can therefore advance beyond a previous limit.
+			// Progress counts all finished blocks; model calls are tracked separately.
+			completed++
 			if cache != "hit" {
 				count++
 			}
-			if e = reporter.SetProgress(ctx, int64(1+count), total); e != nil {
+			if e = reporter.SetProgress(ctx, int64(1+completed), total); e != nil {
 				return result, e
 			}
 		}
 	}
-	if err := reporter.SetProgress(ctx, int64(1+count), int64(1+count)); err != nil {
+	if err := reporter.SetProgress(ctx, int64(1+completed), int64(1+completed)); err != nil {
 		return result, err
 	}
 	result.ResultJSON = mustJSON(map[string]any{"study_items": count, "source_sha256": hash})
@@ -500,6 +519,9 @@ type readingPreparationFailure struct {
 func (e *readingPreparationFailure) Error() string { return e.message }
 func (e *readingPreparationFailure) Unwrap() error { return e.cause }
 func readingPreparationModelError(scope string, err error) error {
+	if errors.Is(err, readingpolicy.ErrQuotaExceeded) {
+		return err
+	}
 	name := map[string]string{readingpolicy.Formula: "公式", readingpolicy.Figure: "图片", readingpolicy.Table: "表格"}[scope]
 	message := name + "研读生成失败，请重试或在 AI 阅读准备中更换研读模型。"
 	if isReadingModelTimeout(err) {
@@ -531,6 +553,8 @@ type readingCallCounterKey struct{}
 type readingCallCounter struct {
 	mu    sync.Mutex
 	jobID string
+	user  string
+	hash  string
 	calls int
 }
 
@@ -541,6 +565,9 @@ func recordReadingModelCall(ctx context.Context) error {
 	}
 	counter.mu.Lock()
 	defer counter.mu.Unlock()
+	if err := readingpolicy.Claim(ctx, store.DB(), counter.user, readingpolicy.AIStudy, counter.hash); err != nil {
+		return err
+	}
 	counter.calls++
 	return store.DB().WithContext(ctx).Model(&orm.AsyncJob{}).Where("id=?", counter.jobID).Update("result_json", mustJSON(map[string]any{"model_requests": counter.calls})).Error
 }

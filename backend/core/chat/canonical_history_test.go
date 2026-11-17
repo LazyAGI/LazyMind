@@ -2,12 +2,56 @@ package chat
 
 import (
 	"encoding/json"
-	"lazymind/core/common/orm"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"lazymind/core/common/orm"
 )
+
+func TestWorkflowQuestionReceiptReachesNextChatRequest(t *testing.T) {
+	const receipt = `{"status":"waiting_for_input","session_id":"session","checkpoint_token":"card"}`
+	messages := []map[string]any{
+		{"role": "assistant", "tool_calls": []map[string]any{{"id": "call", "type": "function", "function": map[string]any{"name": "advance_step", "arguments": `{"step_ids":["collect_materials"]}`}}}},
+		{"role": "tool", "name": "advance_step", "tool_call_id": "call", "content": receipt},
+	}
+	previous := orm.ChatHistory{Seq: 2, RunID: "run", RawContent: "Make a deck", Ext: withCanonicalHistory(nil, "run", messages)}
+	history := buildHistoryMessages([]orm.ChatHistory{previous}, nil)
+	serialized, err := json.Marshal(history)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decodedHistory []any
+	if err := json.Unmarshal(serialized, &decodedHistory); err != nil {
+		t.Fatal(err)
+	}
+	for _, input := range []any{history, decodedHistory} {
+		out, err := json.Marshal(buildLazyChatRequest(map[string]any{"query": "Celebrate BLG", "history": input}))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var payload struct {
+			Message struct {
+				History []struct {
+					HistorySeq       int              `json:"history_seq"`
+					CanonicalHistory []map[string]any `json:"canonical_messages"`
+				} `json:"history"`
+			} `json:"message"`
+		}
+		if err := json.Unmarshal(out, &payload); err != nil {
+			t.Fatal(err)
+		}
+		got := payload.Message.History
+		if len(got) != 2 || got[1].HistorySeq != 2 || len(got[1].CanonicalHistory) != 2 {
+			t.Fatalf("prior question turn was lost at the Chat request boundary: %+v", got)
+		}
+		tool := got[1].CanonicalHistory[1]
+		if tool["role"] != "tool" || tool["tool_call_id"] != "call" || tool["content"] != receipt {
+			t.Fatalf("checkpoint receipt changed in transport: %+v", tool)
+		}
+	}
+}
 
 func TestCanonicalHistoryThroughUpstreamStreamAndDatabase(t *testing.T) {
 	db, conversation, body := fallbackTestBody(t, "fixed")

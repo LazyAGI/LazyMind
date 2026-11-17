@@ -8,6 +8,8 @@ describe('standalone PDF IR',()=>{
  it('rejects wrong source and unknown versions',()=>{
  const document={version:1,source_sha256:'abc',coordinate_space:'normalized_top_left',pages:[],blocks:[]};
  expect(usablePdfIR({status:'ready',source_sha256:'abc',document} as never,'abc')).toEqual(document);
+ expect(usablePdfIR({status:'running',source_sha256:'abc',document} as never,'abc')).toEqual(document);
+ expect(usablePdfIR({status:'failed',source_sha256:'abc',document} as never,'abc')).toEqual(document);
  expect(usablePdfIR({status:'ready',document} as never,'other')).toBeUndefined();
  expect(usablePdfIR({status:'ready',document:{...document,version:2}} as never,'abc')).toBeUndefined();
  });

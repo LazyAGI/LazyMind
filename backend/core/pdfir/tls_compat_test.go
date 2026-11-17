@@ -4,30 +4,50 @@ import (
 	"context"
 	"crypto/x509"
 	"io"
+	"net"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 )
 
-func TestOfficialAPICertificateAliasRetryPreservesBody(t *testing.T) {
-	calls := 0
-	c := Client{BaseURL: "https://mineru.net/api/v4", APIKey: "secret", HTTP: &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
-		calls++
-		b, _ := io.ReadAll(r.Body)
-		if string(b) != "payload" || r.Header.Get("Authorization") != "Bearer secret" {
-			t.Fatal("lost API request")
+func TestOfficialAPISkipsTLSVerificationWithoutChangingDomain(t *testing.T) {
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Host != "mineru.net" || r.Header.Get("Authorization") != "Bearer secret" {
+			t.Errorf("unexpected API identity: %s", r.Host)
 		}
-		if calls == 1 {
-			return nil, x509.HostnameError{Host: "mineru.net", Certificate: &x509.Certificate{DNSNames: []string{"*.mineru.org.cn", "mineru.org.cn"}}}
+		io.WriteString(w, "ok")
+	}))
+	defer server.Close()
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport.Proxy = nil
+	transport.DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
+		return (&net.Dialer{}).DialContext(ctx, network, server.Listener.Addr().String())
+	}
+	defer transport.CloseIdleConnections()
+	c := Client{APIKey: "secret", HTTP: &http.Client{Transport: transport}}
+	got, err := c.request(context.Background(), "GET", "https://mineru.net/api/v4/test", nil, true)
+	if err != nil || string(got) != "ok" {
+		t.Fatalf("API: %q %v", got, err)
+	}
+	if transport.TLSClientConfig != nil && transport.TLSClientConfig.InsecureSkipVerify {
+		t.Fatal("shared transport mutated")
+	}
+	for _, tt := range []struct {
+		url  string
+		auth bool
+	}{
+		{"https://mineru.net/artifact", false},
+		{"https://mineru.net/api/v4/signed", false},
+		{"https://mineru.oss-cn-shanghai.aliyuncs.com/signed", false},
+		{"https://custom.example/api/v4/test", true},
+		{"https://mineru.net:8443/api/v4/test", true},
+		{"https://mineru.net/artifact", true},
+	} {
+		_, err = c.request(context.Background(), "GET", tt.url, nil, tt.auth)
+		if err == nil {
+			t.Fatalf("certificate was not verified for %s (auth=%v)", tt.url, tt.auth)
 		}
-		if r.URL.String() != "https://mineru.org.cn/api/v4/file-urls/batch" {
-			t.Fatal(r.URL)
-		}
-		return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(strings.NewReader("ok"))}, nil
-	})}}
-	got, err := c.request(context.Background(), "POST", c.BaseURL+"/file-urls/batch", strings.NewReader("payload"), true)
-	if err != nil || string(got) != "ok" || calls != 2 {
-		t.Fatalf("alias retry: %q %v calls=%d", got, err, calls)
 	}
 }
 
@@ -39,6 +59,7 @@ func TestCertificateRetryNeverChangesArtifactOrCustomOrigin(t *testing.T) {
 	}{
 		{"https://mineru.oss-cn-shanghai.aliyuncs.com/upload?signature=secret", false, "mineru.oss-cn-shanghai.aliyuncs.com"},
 		{"https://custom.example/api/v4", true, "custom.example"},
+		{"https://mineru.net/api/v4/test", true, "mineru.net"},
 		{"https://mineru.net/api/v4", true, "wrong.example"},
 	} {
 		t.Run(tt.host, func(t *testing.T) {

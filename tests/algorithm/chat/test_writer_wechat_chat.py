@@ -1,7 +1,9 @@
 from pathlib import Path
+from io import BytesIO
 
 import json
 import pytest
+import requests
 
 from lazyllm.tools.writer.data_models import (
     PatchHunk,
@@ -10,8 +12,9 @@ from lazyllm.tools.writer.data_models import (
     WriterBlock,
     WriterDocument,
 )
-from lazyllm.tools.writer.provider.wechat import WeChatWriterProvider
+from lazyllm.tools.writer.provider.wechat import WeChatWriterProvider, wechat_placeholder_cover_png
 from lazymind.document_tools import WriterResourceToolkit
+from lazymind.document_tools.resources import convert_document, write_document
 from lazyllm.tools.writer.provider.wechat import prepare_wechat_cover as _prepare_wechat_cover
 from PIL import Image
 
@@ -22,6 +25,7 @@ def test_wechat_prompt_title_load_patch_and_write_back(monkeypatch):
     class Client:
         def __init__(self, token):
             assert token == 'stable-token'
+            self.warnings = []
 
         def batch_get_drafts(self, offset, count, *, no_content=False):
             calls.append(('list', offset, count, no_content))
@@ -141,59 +145,69 @@ def _document() -> WriterDocument:
     )
 
 
-def test_new_wechat_draft_generates_normalized_cover(tmp_path: Path):
+@pytest.mark.parametrize('cover_source', ['article', 'generated', 'failed', 'unconfigured'])
+def test_new_wechat_draft_prepares_and_uploads_cover(monkeypatch, tmp_path: Path, cover_source):
+    with_images = cover_source == 'article'
     generated = tmp_path / 'generated.png'
-    Image.new('RGB', (1200, 600), 'red').save(generated)
+    Image.new('RGB', (1200, 600), 'blue').save(generated)
     calls = {}
 
     def generate(prompt, **kwargs):
         calls['prompt'] = prompt
         calls['kwargs'] = kwargs
+        if cover_source == 'failed':
+            raise RuntimeError('model failed')
         return {'local_path': str(generated)}
 
-    target = _prepare_wechat_cover(
-        TargetDocument(adapter='wechat', title='城市更新'),
-        _document(),
-        tmp_path,
-        model_available=lambda role: role == 'image_generator',
-        generator=generate,
-    )
+    def request(method, url, **kwargs):
+        assert method == 'POST'
+        if url.endswith('/material/add_material'):
+            calls['cover'] = kwargs['files']['media'][1]
+            payload = {'media_id': 'cover-media'}
+        elif url.endswith('/media/uploadimg'):
+            payload = {'url': 'https://mmbiz.qpic.cn/body.png'}
+        else:
+            assert url.endswith('/draft/add')
+            calls['article'] = json.loads(kwargs['data'])['articles'][0]
+            payload = {'media_id': 'draft-media'}
+        response = requests.Response()
+        response.status_code = 200
+        response._content = json.dumps(payload).encode()
+        return response
 
-    assert '城市更新' in calls['prompt']
-    assert calls['kwargs'] == {'image_size': '1024x1024', 'batch_size': 1}
-    with Image.open(target.meta['cover_path']) as cover:
+    monkeypatch.setattr('lazyllm.tools.writer.provider.wechat.requests.request', request)
+    monkeypatch.setattr(WeChatWriterProvider, '_access_token', staticmethod(lambda: 'stable-token'))
+    monkeypatch.setattr('lazymind.chat.engine.tools.multimodal.image_generator', generate)
+    monkeypatch.setattr('lazymind.model_config.is_model_role_available',
+                        lambda role: cover_source not in {'article', 'unconfigured'})
+    monkeypatch.setattr('lazymind.document_tools.resources._temp_root', lambda: tmp_path)
+    document, media = _document(), None
+    if with_images:
+        media = {'library_id': 'images', 'assets': {}}
+        for asset_id, color in [('second', 'green'), ('first', 'red')]:
+            path = tmp_path / f'{asset_id}.png'
+            Image.new('RGB', (1024, 1024), color).save(path)
+            media['assets'][asset_id] = {'media_asset_id': asset_id, 'asset_type': 'image',
+                                         'source_type': 'web_search', 'local_path': str(path)}
+        document.blocks.extend(WriterBlock(node_id=key, type='image', references=[
+            {'type': 'media_asset', 'id': key},
+        ]) for key in ('first', 'second'))
+    converted = convert_document(document, 'wechat', media_assets=media)
+    result = write_document(converted, media_assets=media)
+
+    assert result['success'] and calls['article']['thumb_media_id'] == 'cover-media'
+    if cover_source in {'article', 'unconfigured'}:
+        assert 'prompt' not in calls
+    else:
+        assert '城市更新' in calls['prompt']
+        assert calls['kwargs'] == {'image_size': '1024x1024', 'batch_size': 1}
+    with Image.open(BytesIO(calls['cover'])) as cover:
         assert cover.size == (900, 383)
         assert cover.format == 'PNG'
-
-
-def test_new_wechat_draft_falls_back_to_provider_placeholder(tmp_path: Path):
-    target = _prepare_wechat_cover(
-        TargetDocument(adapter='wechat'),
-        _document(),
-        tmp_path,
-        model_available=lambda role: False,
-    )
-
-    with Image.open(target.meta['cover_path']) as cover:
-        assert cover.size == (900, 383)
-        assert cover.format == 'PNG'
-
-
-def test_new_wechat_draft_falls_back_when_generation_fails(tmp_path: Path):
-    def fail(*args, **kwargs):
-        raise RuntimeError('model failed')
-
-    target = _prepare_wechat_cover(
-        TargetDocument(adapter='wechat'),
-        _document(),
-        tmp_path,
-        model_available=lambda role: True,
-        generator=fail,
-    )
-
-    with Image.open(target.meta['cover_path']) as cover:
-        assert cover.size == (900, 383)
-        assert cover.format == 'PNG'
+        if cover_source in {'article', 'generated'}:
+            assert cover.getpixel((450, 191)) == ((255, 0, 0) if with_images else (0, 0, 255))
+        else:
+            assert calls['cover'] == wechat_placeholder_cover_png()
 
 
 def test_wechat_cover_generation_does_not_run_for_existing_or_other_targets(

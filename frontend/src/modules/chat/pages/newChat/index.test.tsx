@@ -111,7 +111,12 @@ vi.mock("@/modules/chat/components/ChatInput", () => ({
   default: forwardRef(function MockChatInput(props: any, ref) {
     mocks.latestChatInputProps = props;
     useImperativeHandle(ref, () => ({
-      clearFiles: mocks.clearFiles,
+      clearFiles: () => {
+        mocks.clearFiles();
+        // Match the composer's public API: clearing files also discards its
+        // persisted attachments, even while the welcome composer is hidden.
+        useChatInputStore.getState().saveInputFiles(props.draftKey, []);
+      },
       focus: vi.fn(),
       element: null,
     }));
@@ -432,6 +437,32 @@ describe("NewChatPage featured templates", () => {
       expect(mocks.latestChatInputProps.runInBackground).toBe(true);
       expect(mocks.latestChatInputProps.value).toBe('继续完成这项后台任务');
     });
+  });
+
+  it.each(['welcome text', ''])('preserves independent attachment drafts when returning home with text %j', async text => {
+    const store = useChatInputStore.getState();
+    const homeFiles = [{ id: 'upload:home', name: 'home.png', input: { input_type: 'image' as const, uri: '/static-files/home.png', filename: 'home.png' } }];
+    const otherFiles = [{ id: 'upload:other', name: 'other.png', input: { input_type: 'image' as const, uri: '/static-files/other.png', filename: 'other.png' } }];
+    store.saveInputContent(NEW_CHAT_INPUT_DRAFT_KEY, text);
+    store.saveInputFiles(NEW_CHAT_INPUT_DRAFT_KEY, homeFiles);
+    await act(async () => render(<MemoryRouter><NewChatPage /></MemoryRouter>));
+    expect(useChatInputStore.getState().inputFiles[NEW_CHAT_INPUT_DRAFT_KEY]).toEqual(homeFiles);
+    const cleared = mocks.clearFiles.mock.calls.length;
+    for (let i = 0; i < 2; i++) {
+      act(() => window.dispatchEvent(new CustomEvent('lazymind:chat-select-conversation', {
+        detail: { conversationId: 'other', source: 'sidebar' },
+      })));
+      store.saveInputContent('other', 'other text');
+      store.saveInputFiles('other', otherFiles);
+      act(() => window.dispatchEvent(new CustomEvent('lazymind:chat-select-conversation', {
+        detail: { conversationId: '', runInBackground: false, source: 'sidebar' },
+      })));
+      expect(mocks.latestChatInputProps.value).toBe(text);
+      expect(useChatInputStore.getState().inputFiles[NEW_CHAT_INPUT_DRAFT_KEY]).toEqual(homeFiles);
+      expect(useChatInputStore.getState().inputFiles.other).toEqual(otherFiles);
+      expect(store.getInputContent('other')).toBe('other text');
+    }
+    expect(mocks.clearFiles).toHaveBeenCalledTimes(cleared);
   });
 
   it('restores the draft transferred from a historical conversation on mode change', async () => {

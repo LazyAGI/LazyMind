@@ -110,15 +110,40 @@ func findNode(ctx context.Context, preferred string) (string, error) {
 		return node, nil
 	}
 	candidates := []string{preferred}
-	if path, err := agentexec.FindExecutable("", []string{"node"}); err == nil {
-		candidates = append(candidates, path)
-	}
+	// Validate every discovered installation: an old or broken Node earlier in
+	// PATH must not hide a compatible Homebrew or Windows installation.
+	candidates = append(candidates, agentexec.FindExecutables([]string{"node"})...)
 	if home, err := os.UserHomeDir(); err == nil {
+		if host := strings.TrimSpace(os.Getenv("LAZYMIND_HOST_HOME")); host != "" {
+			home = host
+		}
 		name := "node"
 		if runtime.GOOS == "windows" {
 			name += ".exe"
 		}
 		candidates = append(candidates, filepath.Join(home, ".lazymind", "deps", "node", "bin", name))
+		// Compatibility with Node installed in the runtime service HOME.
+		root := ""
+		switch runtime.GOOS {
+		case "darwin":
+			root = filepath.Join(home, "Library", "Application Support", "LazyMind")
+		case "windows":
+			root = os.Getenv("LOCALAPPDATA")
+			if root == "" {
+				root = filepath.Join(home, "AppData", "Local")
+			}
+			root = filepath.Join(root, "LazyMind")
+		default:
+			root = os.Getenv("XDG_DATA_HOME")
+			if root == "" {
+				root = filepath.Join(home, ".local", "share")
+			}
+			root = filepath.Join(root, "LazyMind")
+		}
+		if state := connectorconfig.Value("LAZYMIND_RUNTIME_STATE_FILE"); state != "" {
+			root = filepath.Dir(filepath.Dir(state))
+		}
+		candidates = append(candidates, filepath.Join(root, "data", "homes", "services", ".lazymind", "deps", "node", "bin", name))
 	}
 	return agentexec.CompatibleNode(ctx, candidates...)
 }
@@ -321,4 +346,27 @@ func Registered(home string) bool {
 	}
 	enabled, err := Enabled(record.Profile, record.Marketplace)
 	return err == nil && enabled
+}
+
+// RefreshNode revalidates the runtime even when the plugin build is unchanged.
+func RefreshNode(ctx context.Context) (Installation, error) {
+	record, err := Read()
+	if err != nil {
+		return record, err
+	}
+	node, err := findNode(ctx, record.Node)
+	if err != nil {
+		return record, err
+	}
+	if record.Node != node {
+		record.Node = node
+		root, _, err := Paths()
+		if err != nil {
+			return record, err
+		}
+		if err := writeJSON(filepath.Join(root, ".lazymind-installation.json"), record); err != nil {
+			return record, err
+		}
+	}
+	return record, nil
 }

@@ -1,13 +1,16 @@
 import { act, cleanup, fireEvent, render, renderHook, screen, waitFor, within } from '@testing-library/react';
 import { ConfigProvider, Modal, message } from 'antd';
-import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
+import { matchPath, MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 import { webcrypto } from 'node:crypto';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import type { CloudConnectionResponse, GitHubCLISessionResponse } from '@/api/generated/auth-client';
 import i18n from '@/i18n';
 import GitHubAccountPage from '@/modules/modelProvider/pages/GitHubAccountPage';
 import { useGitHubConnections } from '@/modules/modelProvider/hooks/useGitHubConnections';
+import { CHAT_HOME_PATH, getChatConversationPath } from '@/modules/chat/constants/chat';
+import { useConversationRunningStore } from '@/modules/chat/store/conversationRunning';
 import GitHubStarPrompt from './GitHubStarPrompt';
+import GitHubStarProvider from './GitHubStarProvider';
 import * as starAPI from './api';
 
 const mocks = vi.hoisted(() => ({
@@ -97,6 +100,7 @@ beforeEach(async () => {
 });
 afterEach(() => {
   cleanup();
+  useConversationRunningStore.setState({ entries: {}, watchers: {} });
   act(() => { Modal.destroyAll(); message.destroy(); });
   vi.useRealTimers(); vi.unstubAllEnvs(); vi.unstubAllGlobals();
   Reflect.deleteProperty(window, 'lazymindDesktop');
@@ -173,4 +177,168 @@ it.each(['local', 'web'] as const)('real %s completion returns the intended acco
   expect(starAPI.writeGitHubStar).toHaveBeenCalledTimes(1);
   expect(starAPI.writeGitHubStar).toHaveBeenCalledWith({ connection_id: target.connection_id, expected_account_id: '10001', confirmed: true });
   expect(starAPI.writeLocalGitHubStar).not.toHaveBeenCalled();
+});
+
+const originalWorkPath = getChatConversationPath(opportunity.conversation_id);
+
+function OriginalWorkRoundTrip() {
+  const location = useLocation();
+  const conversationId = matchPath(`${CHAT_HOME_PATH}/:conversationId`, location.pathname)?.params.conversationId || '';
+  return <>
+    <output data-testid='round-trip-path'>{location.pathname + location.search}</output>
+    <GitHubStarProvider userId='owner-1' conversationId={conversationId}>
+      <Routes>
+        <Route path={`${CHAT_HOME_PATH}/:conversationId`} element={<div>原任务结果</div>} />
+        <Route path='/cloud-documents/github' element={<GitHubAccountPage />} />
+        <Route path='/task-center' element={<div>任务中心</div>} />
+      </Routes>
+    </GitHubStarProvider>
+  </>;
+}
+
+async function startWebAuthorizationFromOriginalWork() {
+  useConversationRunningStore.setState({ entries: {
+    [opportunity.conversation_id]: { status: 'idle', terminalStatus: 'completed', confirmedAt: Date.now() },
+  } });
+  vi.mocked(starAPI.claimGitHubStarPrompt).mockResolvedValue({
+    show: true, reason: 'eligible', task_id: opportunity.task_id,
+    min_successful_tasks: 3, cooldown_days: 7, max_prompts: 3,
+  });
+  vi.mocked(starAPI.writeLocalGitHubStar).mockResolvedValue({
+    repository: 'LazyAGI/LazyMind', state: 'connection_required', account_id: '', login: '', write_performed: false,
+  });
+  mocks.start.mockResolvedValue(session('WAITING_USER', { user_code: CODE, verification_uri: DEVICE_URL }));
+  render(<ConfigProvider theme={{ token: { motion: false } }}>
+    <MemoryRouter initialEntries={[originalWorkPath]}><OriginalWorkRoundTrip /></MemoryRouter>
+  </ConfigProvider>);
+  expect(screen.getByTestId('round-trip-path')).toHaveTextContent(originalWorkPath);
+  await act(async () => window.dispatchEvent(new CustomEvent(starAPI.GITHUB_STAR_OPPORTUNITY_EVENT, { detail: opportunity })));
+  const invitation = await screen.findByRole('dialog', { name: '支持 LazyMind' });
+  expect(starAPI.claimGitHubStarPrompt).toHaveBeenCalledTimes(1);
+  expect(starAPI.claimGitHubStarPrompt).toHaveBeenCalledWith(opportunity);
+  expect(starAPI.writeLocalGitHubStar).not.toHaveBeenCalled();
+  await act(async () => fireEvent.click(within(invitation).getByRole('button', { name: '为项目点 Star' })));
+  expect(starAPI.writeLocalGitHubStar).toHaveBeenCalledTimes(1);
+  expect(starAPI.writeLocalGitHubStar).toHaveBeenCalledWith({ confirmed: true });
+  expect(starAPI.writeGitHubStar).not.toHaveBeenCalled();
+  await act(async () => fireEvent.click(screen.getByRole('button', { name: '继续连接 GitHub' })));
+  expect(screen.getByTestId('round-trip-path')).toHaveTextContent('/cloud-documents/github');
+  const add = await screen.findByRole('button', { name: '添加账号' });
+  await waitFor(() => expect(add).toBeEnabled());
+  if (!screen.queryByRole('dialog', { name: '连接 GitHub' })) fireEvent.click(add);
+  const authorization = await screen.findByRole('dialog', { name: '连接 GitHub' });
+  vi.useFakeTimers();
+  await act(async () => fireEvent.click(within(authorization).getByRole('button', { name: '开始连接' })));
+  expect(mocks.start).toHaveBeenCalledTimes(1);
+  expect(mocks.start.mock.calls[0][0].gitHubCLISessionCreateBody).toMatchObject({ force_web: false });
+  expect(screen.getByText(CODE)).toBeInTheDocument();
+  expect(mocks.open).toHaveBeenCalledWith(DEVICE_URL);
+  expect(starAPI.writeGitHubStar).not.toHaveBeenCalled();
+}
+
+it('the full no-credential web flow returns to the original work and restores its claimed invitation', async () => {
+  await startWebAuthorizationFromOriginalWork();
+  await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+  vi.useRealTimers();
+  await waitFor(() => expect(completionRefresh).toBe(true));
+  await waitFor(() => expect(screen.getByTestId('round-trip-path').textContent).toBe(originalWorkPath));
+  const invitation = await screen.findByRole('dialog', { name: '支持 LazyMind' });
+  expect(starAPI.findGitHubStarOpportunity).toHaveBeenLastCalledWith(opportunity.conversation_id, undefined, [opportunity.task_id]);
+  expect(starAPI.claimGitHubStarPrompt).toHaveBeenCalledTimes(1);
+  expect(starAPI.writeLocalGitHubStar).toHaveBeenCalledTimes(1);
+  expect(starAPI.writeGitHubStar).not.toHaveBeenCalled();
+  await act(async () => fireEvent.click(within(invitation).getByRole('button', { name: '为项目点 Star' })));
+  expect(starAPI.writeGitHubStar).toHaveBeenCalledTimes(1);
+  expect(starAPI.writeGitHubStar).toHaveBeenCalledWith({
+    connection_id: target.connection_id, expected_account_id: target.provider_account_id, confirmed: true,
+  });
+  expect(starAPI.claimGitHubStarPrompt).toHaveBeenCalledTimes(1);
+  expect(starAPI.writeLocalGitHubStar).toHaveBeenCalledTimes(1);
+});
+
+it('a failed account-management refresh after authentication still returns and restores the same invitation', async () => {
+  mocks.list.mockImplementation(async ({ provider }: { provider: string }) => {
+    if (provider === 'github' && connections.length) {
+      completionRefresh = true;
+      throw new Error('Account-management listing is temporarily unavailable');
+    }
+    return { data: { items: [] } };
+  });
+  await startWebAuthorizationFromOriginalWork();
+  await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+  vi.useRealTimers();
+  await waitFor(() => expect(completionRefresh).toBe(true));
+  await waitFor(() => expect(screen.getByTestId('round-trip-path').textContent).toBe(originalWorkPath));
+  const invitation = await screen.findByRole('dialog', { name: '支持 LazyMind' });
+  expect(starAPI.findGitHubStarOpportunity).toHaveBeenLastCalledWith(opportunity.conversation_id, undefined, [opportunity.task_id]);
+  expect(starAPI.claimGitHubStarPrompt).toHaveBeenCalledTimes(1);
+  expect(starAPI.writeLocalGitHubStar).toHaveBeenCalledTimes(1);
+  expect(starAPI.writeGitHubStar).not.toHaveBeenCalled();
+  await act(async () => fireEvent.click(within(invitation).getByRole('button', { name: '为项目点 Star' })));
+  expect(starAPI.writeGitHubStar).toHaveBeenCalledTimes(1);
+  expect(starAPI.writeGitHubStar).toHaveBeenCalledWith({
+    connection_id: target.connection_id, expected_account_id: target.provider_account_id, confirmed: true,
+  });
+  expect(starAPI.writeLocalGitHubStar).toHaveBeenCalledTimes(1);
+});
+
+it('cancelling the no-credential web authorization does not restore or write the pending invitation', async () => {
+  await startWebAuthorizationFromOriginalWork();
+  const authorization = screen.getByRole('dialog', { name: '连接 GitHub' });
+  await act(async () => fireEvent.click(within(authorization).getByRole('button', { name: '取消授权' })));
+  await act(async () => { await vi.advanceTimersByTimeAsync(2000); });
+  vi.useRealTimers();
+  expect(mocks.cancel).toHaveBeenCalledTimes(1);
+  expect(mocks.poll).not.toHaveBeenCalled();
+  expect(screen.getByTestId('round-trip-path').textContent).toBe('/cloud-documents/github');
+  expect(screen.queryByRole('dialog', { name: '支持 LazyMind' })).not.toBeInTheDocument();
+  expect(starAPI.claimGitHubStarPrompt).toHaveBeenCalledTimes(1);
+  expect(starAPI.writeLocalGitHubStar).toHaveBeenCalledTimes(1);
+  expect(starAPI.writeGitHubStar).not.toHaveBeenCalled();
+  expect(starAPI.markGitHubStarSupported).not.toHaveBeenCalled();
+});
+
+it.each(['FAILED', 'EXPIRED'])('a %s web authorization does not restore or write the pending invitation', async status => {
+  mocks.poll.mockResolvedValue(session(status));
+  await startWebAuthorizationFromOriginalWork();
+  await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+  vi.useRealTimers();
+  expect(screen.getByTestId('round-trip-path').textContent).toBe('/cloud-documents/github');
+  expect(screen.queryByRole('dialog', { name: '支持 LazyMind' })).not.toBeInTheDocument();
+  expect(starAPI.claimGitHubStarPrompt).toHaveBeenCalledTimes(1);
+  expect(starAPI.writeLocalGitHubStar).toHaveBeenCalledTimes(1);
+  expect(starAPI.writeGitHubStar).not.toHaveBeenCalled();
+  expect(starAPI.markGitHubStarSupported).not.toHaveBeenCalled();
+});
+
+it.each(['unrelated account', 'no account'])('a completed connection returns and can retry without writing through %s', async available => {
+  mocks.poll.mockImplementation(async () => {
+    connections = available === 'unrelated account' ? [other] : [];
+    return session('COMPLETED', { connection_id: target.connection_id });
+  });
+  await startWebAuthorizationFromOriginalWork();
+  await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+  vi.useRealTimers();
+  await waitFor(() => expect(screen.getByTestId('round-trip-path').textContent).toBe(originalWorkPath));
+  const invitation = await screen.findByRole('dialog', { name: '支持 LazyMind' });
+  // Authentication success returns immediately; account readiness controls Star, not navigation.
+  const retry = within(invitation).getByRole('button', { name: /重\s*试/ });
+  expect(within(invitation).queryByRole('button', { name: '为项目点 Star' })).not.toBeInTheDocument();
+  expect(starAPI.claimGitHubStarPrompt).toHaveBeenCalledTimes(1);
+  expect(starAPI.writeLocalGitHubStar).toHaveBeenCalledTimes(1);
+  expect(starAPI.writeGitHubStar).not.toHaveBeenCalled();
+  expect(starAPI.markGitHubStarSupported).not.toHaveBeenCalled();
+
+  connections = [other, target];
+  await act(async () => fireEvent.click(retry));
+  const star = await within(invitation).findByRole('button', { name: '为项目点 Star' });
+  expect(starAPI.claimGitHubStarPrompt).toHaveBeenCalledTimes(1);
+  expect(starAPI.writeLocalGitHubStar).toHaveBeenCalledTimes(1);
+  expect(starAPI.writeGitHubStar).not.toHaveBeenCalled();
+  await act(async () => fireEvent.click(star));
+  expect(starAPI.writeGitHubStar).toHaveBeenCalledTimes(1);
+  expect(starAPI.writeGitHubStar).toHaveBeenCalledWith({
+    connection_id: target.connection_id, expected_account_id: target.provider_account_id, confirmed: true,
+  });
+  expect(starAPI.writeLocalGitHubStar).toHaveBeenCalledTimes(1);
 });

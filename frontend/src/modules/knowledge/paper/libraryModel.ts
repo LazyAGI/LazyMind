@@ -1,9 +1,13 @@
-import type { ImportSource, PaperImportMethod } from './model';
+import type { ImportSource, PaperImportMethod, ParseState } from './model';
+import type { PdfStructureStatus } from '../api/pdfArtifacts';
 import type { DocumentAcademic } from '../api/paperWorkflows';
 export type { PaperRecord, PaperLibraryData, PaperMetadata } from './model';
 export type AttachmentKind = 'pdf' | 'supplement' | 'snapshot' | 'other';
 export type NoteKind = 'note' | 'ai_summary' | 'method' | 'conclusion';
 export interface Attachment {
+    parse?: ParseState;
+    pdf_structure?: PdfStructureStatus;
+    processingError?: string;
     academicState?: DocumentAcademic['state'];
     id: string;
     paperId: string;

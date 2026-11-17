@@ -1,5 +1,6 @@
 import os
 from pathlib import Path
+import sys
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -18,7 +19,7 @@ class GitHubCLIRuntimePathsTest(unittest.TestCase):
 
     def metadata(self, binary):
         binary.parent.mkdir(parents=True, exist_ok=True)
-        binary.with_name('gh.sha256').write_text('fixture-digest\n')
+        binary.with_suffix('.sha256').write_text('fixture-digest\n')
 
     def test_docker_layout_initializes_without_optional_cli_configuration(self):
         with patch.object(github_cli_runner, '__file__', '/app/services/github_cli_runner.py'):
@@ -39,20 +40,22 @@ class GitHubCLIRuntimePathsTest(unittest.TestCase):
 
     def test_explicit_runtime_root_preserves_bundled_binary_location(self):
         runtime = self.root / 'resources'
-        self.metadata(runtime / 'bin/gh')
+        binary = runtime / 'bin' / ('github-auth-helper.exe' if sys.platform == 'win32' else 'gh')
+        self.metadata(binary)
         os.environ['LAZYMIND_RUNTIME_RESOURCES_ROOT'] = str(runtime)
         with patch.object(github_cli_runner, '__file__', '/app/services/github_cli_runner.py'):
             runner = github_cli_runner.GitHubCLIRunner.from_runtime()
-        self.assertEqual(runner.binary, runtime / 'bin/gh')
+        self.assertEqual(runner.binary, binary)
         self.assertEqual(runner.digest, 'fixture-digest')
 
     def test_packaged_layout_preserves_automatic_runtime_location(self):
         runtime = self.root / 'runtime'
-        self.metadata(runtime / 'bin/gh')
+        binary = runtime / 'bin' / ('github-auth-helper.exe' if sys.platform == 'win32' else 'gh')
+        self.metadata(binary)
         module = runtime / 'app/backend/auth-service/services/github_cli_runner.py'
         with patch.object(github_cli_runner, '__file__', str(module)):
             runner = github_cli_runner.GitHubCLIRunner.from_runtime()
-        self.assertEqual(runner.binary, runtime / 'bin/gh')
+        self.assertEqual(runner.binary, binary)
         self.assertEqual(runner.digest, 'fixture-digest')
 
 

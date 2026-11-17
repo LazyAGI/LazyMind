@@ -1247,6 +1247,9 @@ func validateUI(
 			out = append(out, diag("E_UI_TAB_EMPTY", "error", fmt.Sprintf("workflow.yaml.ui.tabs[%d].slots", i), "UI tab has no materials"))
 		}
 		for _, ref := range refs {
+			if exposed[ref.Material] && tabMaterials[ref.Material] {
+				out = append(out, materialDiag("E_UI_MATERIAL_DUPLICATE", "error", fmt.Sprintf("workflow.yaml.ui.tabs[%d].slots", i), ref.Material, "material is placed more than once in the same UI tab"))
+			}
 			tabMaterials[ref.Material] = true
 			if !known[ref.Material] {
 				out = append(out, materialDiag("E_UI_MATERIAL_UNKNOWN", "error", fmt.Sprintf("workflow.yaml.ui.tabs[%d].slots", i), ref.Material, "UI references an unknown material"))
@@ -1311,9 +1314,6 @@ func validateUI(
 	for id := range exposed {
 		if exposed[id] && placed[id] == 0 {
 			out = append(out, materialDiag("E_UI_EXPOSED_MATERIAL_UNPLACED", "error", "workflow.yaml.ui.tabs", id, "exposed material is not placed in the UI"))
-		}
-		if exposed[id] && placed[id] > 1 {
-			out = append(out, materialDiag("E_UI_MATERIAL_DUPLICATE", "error", "workflow.yaml.ui.tabs", id, "material is placed more than once in the UI"))
 		}
 	}
 	return out

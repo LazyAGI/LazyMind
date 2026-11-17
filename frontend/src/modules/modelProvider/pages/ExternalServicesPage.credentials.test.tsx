@@ -13,6 +13,7 @@ vi.mock("react-i18next", () => ({ useTranslation: () => ({ t: mocks.t, i18n: { l
 vi.mock("@/components/request", () => ({ localizeErrorCode: (code: string) => code, getLocalizedErrorMessage: () => "request failed" }));
 vi.mock("../api", () => ({
   modelProvidersApi: {
+    apiCoreModelProvidersProviderGroupsGet: async () => ({ data: { groups: [] } }),
     apiCoreModelProvidersGet: async () => ({ data: { providers: [provider] } }),
     apiCoreModelProvidersModelProviderIdGroupsGet: mocks.groups,
     apiCoreModelProvidersModelProviderIdGroupsGroupIdPatch: mocks.patch,
@@ -121,16 +122,15 @@ describe("personal external service credentials without Cloud login", () => {
     expect(screen.queryByText("modelProvider.external.noKeysConfigured")).not.toBeInTheDocument();
   });
 
-  it("retains the service selection when its address returns to the default and existing keys remain", async () => {
+  it("does not change the active parser when saving a configured OCR address", async () => {
     const customAddress = "https://previous.example/api";
     mocks.groups.mockResolvedValue({ data: { groups: [{ ...group, base_url: customAddress }] } });
     mocks.patch.mockResolvedValueOnce({ data: { id: group.id, base_url: provider.base_url, is_verified: false } });
     await openPage();
     fireEvent.change(screen.getByDisplayValue(customAddress), { target: { value: provider.base_url } });
     fireEvent.click(screen.getByText("modelProvider.external.saveConfig"));
-    await waitFor(() => expect(mocks.select).toHaveBeenCalledWith({
-      setSelectedProviderOpenAPIRequest: { selections: [{ category: "ocr", group_id: group.id }] },
-    }));
+    await waitFor(() => expect(screen.queryByRole("button", { name: "modelProvider.external.saveConfig" })).not.toBeInTheDocument());
+    expect(mocks.select).not.toHaveBeenCalled();
     expect(Modal.confirm).not.toHaveBeenCalled();
     expect(mocks.remove).not.toHaveBeenCalled();
   });

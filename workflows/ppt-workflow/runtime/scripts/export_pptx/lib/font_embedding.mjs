@@ -252,21 +252,40 @@ export function googleStylesheetUrls(html) {
   return urls;
 }
 
-function collectUsedFontWeights(pages) {
+function fontVariant(weight, style) {
+  if (style === 'italic') return weight >= 600 ? 'boldItalic' : 'italic';
+  return weight >= 600 ? 'bold' : 'regular';
+}
+
+function collectUsedFontWeights(pages, { textOnly = false } = {}) {
   const used = new Map();
   const record = (fontFamily, weight = 400, style = 'normal') => {
     const family = parseFontFamily(fontFamily, { genericFallback: false });
     const key = normalizeFamily(family);
     if (!key) return;
-    if (!used.has(key)) used.set(key, { family, weights: [], italic: false });
-    used.get(key).weights.push(parseWeight(weight));
-    if (String(style).toLowerCase() === 'italic') used.get(key).italic = true;
+    if (!used.has(key)) used.set(key, { family, weights: [], italic: false, variants: new Set() });
+    const usage = used.get(key);
+    const numericWeight = parseWeight(weight);
+    const normalizedStyle = String(style).toLowerCase();
+    usage.weights.push(numericWeight);
+    usage.variants.add(fontVariant(numericWeight, normalizedStyle));
+    if (normalizedStyle === 'italic') usage.italic = true;
   };
   const visit = node => {
     if (!node || typeof node !== 'object') return;
-    record(node.styles?.fontFamily, node.styles?.fontWeight, node.styles?.fontStyle);
-    for (const run of node.textRuns || []) record(run?.fontFamily, run?.bold ? 700 : 400, run?.italic ? 'italic' : 'normal');
-    for (const item of node.listData || []) record(item?.styles?.fontFamily, item?.styles?.fontWeight, item?.styles?.fontStyle);
+    if (!textOnly || String(node.text || '').trim()) {
+      record(node.styles?.fontFamily, node.styles?.fontWeight, node.styles?.fontStyle);
+    }
+    for (const run of node.textRuns || []) {
+      if (!textOnly || String(run?.text || '').trim()) {
+        record(run?.fontFamily, run?.bold ? 700 : 400, run?.italic ? 'italic' : 'normal');
+      }
+    }
+    for (const item of node.listData || []) {
+      if (!textOnly || String(item?.text || '').trim()) {
+        record(item?.styles?.fontFamily, item?.styles?.fontWeight, item?.styles?.fontStyle);
+      }
+    }
     for (const child of node.children || []) visit(child);
   };
   for (const page of pages || []) {
@@ -537,8 +556,7 @@ export function portableFontFaces(html, localFaces = [], { resourceUrlsOnly = fa
       if ((metadata.fsType & (2 | 512)) || ((metadata.fsType & 4) && !(metadata.fsType & 8))) {
         throw new Error(`Font ${record.family} does not permit editable embedding`);
       }
-      const variant = record.style === 'italic'
-        ? (record.weight >= 600 ? 'boldItalic' : 'italic') : (record.weight >= 600 ? 'bold' : 'regular');
+      const variant = fontVariant(record.weight, record.style);
       faces.push({ ...record, data, metadata, variant, source });
     }
   }
@@ -563,24 +581,55 @@ export async function verifyEmbeddedFaces(pptxPath, faces) {
   }
 }
 
+function selectRequiredFaces(faces, used) {
+  const families = new Map();
+  const exactFaces = new Map();
+  for (const face of faces) {
+    const family = normalizeFamily(face.family);
+    const exactKey = JSON.stringify([family, face.weight, face.style]);
+    const previous = exactFaces.get(exactKey);
+    if (previous && previous !== face.sha256) throw new Error(`Conflicting font files for ${face.family}`);
+    exactFaces.set(exactKey, face.sha256);
+    if (!families.has(family)) families.set(family, new Map());
+    const variants = families.get(family);
+    const current = variants.get(face.variant);
+    const targetWeight = ['bold', 'boldItalic'].includes(face.variant) ? 700 : 400;
+    if (!current || Math.abs(face.weight - targetWeight) < Math.abs(current.weight - targetWeight)) {
+      variants.set(face.variant, face);
+    }
+  }
+
+  const preferences = {
+    regular: ['regular', 'bold', 'italic', 'boldItalic'],
+    bold: ['bold', 'regular', 'boldItalic', 'italic'],
+    italic: ['italic', 'regular', 'boldItalic', 'bold'],
+    boldItalic: ['boldItalic', 'italic', 'bold', 'regular'],
+  };
+  return [...families].flatMap(([family, variants]) => {
+    if (!used.size) return [...variants.values()];
+    const requested = used.get(family)?.variants || [];
+    const selected = [...requested].map(variant => preferences[variant].find(key => variants.has(key)));
+    return [...new Set(selected)].map(variant => variants.get(variant));
+  });
+}
+
 /** Best-effort end-to-end web-font embedding for an exported deck. */
 export async function embedGoogleFontsFromPages(pptxPath, pages, options = {}) {
   const { localFontFaces } = await import('./local_fonts.mjs');
   const localFaces = await localFontFaces();
   let required = [];
   try {
+    const packagedFaces = [];
     for (const page of pages || []) {
       const html = page.path ? await readFile(page.path, 'utf8').catch(error => {
         if (error.code === 'ENOENT') return ''; // Synthetic IR callers have no source HTML.
         throw error;
       }) : '';
-      const packaged = portableFontFaces(html, localFaces);
-      for (const face of packaged) {
-        const previous = required.find(f => normalizeFamily(f.family) === normalizeFamily(face.family) && f.variant === face.variant);
-        if (previous && previous.sha256 !== face.sha256) throw new Error(`Conflicting font files for ${face.family}`);
-        if (!previous) required.push(face);
-      }
+      packagedFaces.push(...portableFontFaces(html, localFaces));
     }
+    // PowerPoint has four font slots per family. CSS can contain extra weights
+    // and aliases for preview; only embed faces represented by editable text.
+    required = selectRequiredFaces(packagedFaces, collectUsedFontWeights(pages, { textOnly: true }));
     if (required.reduce((size, face) => size + face.data.length, 0) > MAX_TOTAL_FONT_BYTES) {
       throw new Error('Required embedded fonts exceed the 64 MiB export limit');
     }

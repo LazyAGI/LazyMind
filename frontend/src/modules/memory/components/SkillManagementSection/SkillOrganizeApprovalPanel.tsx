@@ -17,6 +17,8 @@ interface Props {
   refreshToken: number;
   onExpandedChange: (expanded: boolean) => void;
   onApplied?: () => void | Promise<void>;
+  onPendingCountChange?: (count: number) => void;
+  onApplyingChange?: (busy: boolean) => void;
 }
 
 const typeLabel = (type: string) => {
@@ -38,6 +40,8 @@ export default function SkillOrganizeApprovalPanel({
   refreshToken,
   onExpandedChange,
   onApplied,
+  onPendingCountChange,
+  onApplyingChange,
 }: Props) {
   const [tasks, setTasks] = useState<SkillOrganizeApprovalTask[]>([]);
   const [loading, setLoading] = useState(true);
@@ -72,6 +76,9 @@ export default function SkillOrganizeApprovalPanel({
     .filter((task) => task.items.length > 0 || task.error);
   const pending = visible.flatMap((task) => task.items.filter((item) => item.status !== "accepted").map((item) => ({ task, item })));
   const accepted = visible.flatMap((task) => task.items.filter((item) => item.status === "accepted").map((item) => ({ task, item })));
+  useEffect(() => { onPendingCountChange?.(pending.length); }, [pending.length, onPendingCountChange]);
+  useEffect(() => { onApplyingChange?.(busy); }, [busy, onApplyingChange]);
+
   const pendingKey = (task: SkillOrganizeApprovalTask, item: SkillOrganizeApprovalItem) => `${task.requestId}:${item.id}`;
 
   const toggle = (bucket: "pending" | "accepted", key: string, checked: boolean) => {
@@ -119,16 +126,7 @@ export default function SkillOrganizeApprovalPanel({
     }
   };
 
-  if (!expanded) {
-    if (loading || (!pending.length && !accepted.length)) return null;
-    return (
-      <div className="skill-draft-review__actions">
-        <Button type="primary" onClick={() => onExpandedChange(true)}>
-          {t("admin.memorySkillOrganizeApprovalOpen", { count: pending.length })}
-        </Button>
-      </div>
-    );
-  }
+  if (!expanded) return null;
 
   const renderItem = (task: SkillOrganizeApprovalTask, item: SkillOrganizeApprovalItem, bucket: "pending" | "accepted") => {
     const key = pendingKey(task, item);

@@ -182,6 +182,7 @@ func PatchLibraryPaper(w http.ResponseWriter, r *http.Request) {
 		Revision            int64                  `json:"revision"`
 		Metadata            *paperlibrary.Metadata `json:"metadata,omitempty"`
 		Status              *string                `json:"status,omitempty"`
+		StatusIfUnread      bool                   `json:"status_if_unread,omitempty"`
 		Tags                *[]string              `json:"tags,omitempty"`
 		PrimaryAttachmentID *string                `json:"primary_attachment_id,omitempty"`
 	}
@@ -208,7 +209,8 @@ func PatchLibraryPaper(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	if input.Status != nil && *input.Status != "unread" && *input.Status != "reading" && *input.Status != "read" {
+	if (input.Status != nil && *input.Status != "unread" && *input.Status != "reading" && *input.Status != "read") ||
+		(input.StatusIfUnread && (input.Status == nil || *input.Status != "reading")) {
 		replyError(w, 400, "INVALID_REQUEST", "阅读状态无效")
 		return
 	}
@@ -240,7 +242,14 @@ func PatchLibraryPaper(w http.ResponseWriter, r *http.Request) {
 		}
 		if input.Status != nil {
 			state := orm.AcademicUserPaperState{UserID: store.UserID(r), DatasetID: dataset, PaperID: row.AcademicWorkID, ReadingStatus: *input.Status, UpdatedAt: time.Now().UTC()}
-			if err := tx.Clauses(clause.OnConflict{Columns: []clause.Column{{Name: "user_id"}, {Name: "dataset_id"}, {Name: "paper_id"}}, DoUpdates: clause.AssignmentColumns([]string{"reading_status", "updated_at"})}).Create(&state).Error; err != nil {
+			conflict := clause.OnConflict{
+				Columns:   []clause.Column{{Name: "user_id"}, {Name: "dataset_id"}, {Name: "paper_id"}},
+				DoUpdates: clause.AssignmentColumns([]string{"reading_status", "updated_at"}),
+			}
+			if input.StatusIfUnread {
+				conflict.Where = clause.Where{Exprs: []clause.Expression{clause.Eq{Column: clause.Column{Table: state.TableName(), Name: "reading_status"}, Value: "unread"}}}
+			}
+			if err := tx.Clauses(conflict).Create(&state).Error; err != nil {
 				return err
 			}
 		}

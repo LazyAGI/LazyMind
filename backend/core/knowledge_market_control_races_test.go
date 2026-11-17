@@ -115,7 +115,7 @@ func TestMarketControlIndexedRetryResponseLossDoesNotUseOldFailure(t *testing.T)
 	for _, repair := range []bool{false, true} {
 		t.Run(map[bool]string{false: "retry", true: "repair"}[repair], func(t *testing.T) {
 			f := newMarketControlFixture(t, "SUCCESS", "FAILED")
-			if err := f.db.AutoMigrate(&orm.UserUIPreferences{}, &orm.UserSelectedModel{}, &orm.UserSelectedProvider{}, &orm.UserModelProviderGroupModel{}, &orm.UserModelProviderGroup{}, &orm.UserModelProvider{}, &orm.UserSelectedCloudModel{}, &orm.EmbeddingIndexState{}); err != nil {
+			if err := f.db.AutoMigrate(&orm.UserReadingPolicy{}, &orm.UserUIPreferences{}, &orm.UserSelectedModel{}, &orm.UserSelectedProvider{}, &orm.UserModelProviderGroupModel{}, &orm.UserModelProviderGroup{}, &orm.UserModelProvider{}, &orm.UserSelectedCloudModel{}, &orm.EmbeddingIndexState{}); err != nil {
 				t.Fatal(err)
 			}
 			now := time.Now().UTC()
