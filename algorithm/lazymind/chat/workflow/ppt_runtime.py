@@ -10,6 +10,10 @@ from lazymind.chat.engine.subagent.extensions import RuntimeExtension
 _FONT_UNAVAILABLE_PREFIX = '请求的字体不可用：'
 
 
+def is_ppt_workflow(params: dict) -> bool:
+    return params.get('workflow_id') == 'ppt-workflow' or params.get('workflow_ref') == 'builtin:ppt-workflow'
+
+
 def _json_object(value: Any) -> dict[str, Any]:
     if isinstance(value, dict):
         return value
@@ -108,6 +112,7 @@ def _completion_failure(state: dict[str, Any]) -> tuple[str, str] | None:
 def runtime_extension(params: dict[str, Any]) -> RuntimeExtension:
     checks_generation = params.get('step_id') in ('generate_ppt', 'plan_page_prompts')
     return RuntimeExtension(
+        include_reasoning=False,
         tool_call_limits={'ppt_generate_background_images': 1},
         on_tool_step=_record_tool_step if checks_generation else None,
         completion_failure=_completion_failure if checks_generation else None,
