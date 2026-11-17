@@ -1,3 +1,4 @@
+import { externalLinkProps } from '@/runtime/externalNavigation';
 import { Alert, Form, Typography } from "antd";
 import type { FormInstance } from "antd/es/form";
 import { useTranslation } from "react-i18next";
@@ -36,7 +37,7 @@ export function FeishuCredentialHintAlert({
       message={
         <>
           {t("admin.dataSourceFeishuCredentialHintPrefix")}{" "}
-          <Link href={openPlatformUrl} target="_blank" rel="noreferrer">
+          <Link {...externalLinkProps(openPlatformUrl)} target="_blank" rel="noreferrer">
             {t("admin.dataSourceFeishuOpenPlatformLinkLabel")}
           </Link>
           {t("admin.dataSourceFeishuCredentialHintSuffix", { callbackUrl })}

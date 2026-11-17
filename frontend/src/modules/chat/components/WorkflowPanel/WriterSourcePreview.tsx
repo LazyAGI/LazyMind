@@ -1,3 +1,4 @@
+import ExternalLink from '@/components/ExternalLink';
 import { Children, isValidElement, useEffect, useMemo, useState, type ReactNode } from 'react';
 import ReactMarkdown, { type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -95,13 +96,13 @@ export function WriterSourcePreview({source,resolveImage=resolveMarkdownImageUrl
       let url=href;
       if(href?.startsWith('writer-note:')) {try{url=writerNoteTarget(decodeURIComponent(href.slice(12))).url;}catch{url=undefined;}}
       const safe=url&&writerSafeUrl(url);
-      return safe ? <a id={id} href={safe} target={safe.startsWith('#')?undefined:'_blank'} rel='noreferrer' onClick={(event)=>{
+      return safe ? <ExternalLink id={id} href={safe} target={safe.startsWith('#')?undefined:'_blank'} rel='noreferrer' onClick={(event)=>{
         if(!safe.startsWith('#'))return;
         const root=event.currentTarget.closest('[data-writer-source-preview]');
         let target=safe.slice(1);try{target=decodeURIComponent(target);}catch{return;}
         const nodes=Array.from(root?.querySelectorAll<HTMLElement>('[id]')??[]).filter((node)=>node.id===target||node.id===`user-content-${target}`);
         if(nodes.length===1){event.preventDefault();nodes[0].scrollIntoView?.({block:'start'});}
-      }}>{children}</a> : <span id={id} title={t('chat.writerSource.unavailable')}>{children}</span>;
+      }}>{children}</ExternalLink> : <span id={id} title={t('chat.writerSource.unavailable')}>{children}</span>;
     },
 
     video: ({src,children}) => <video src={src && writerSafeUrl(src)} controls preload='none'>{children}</video>,

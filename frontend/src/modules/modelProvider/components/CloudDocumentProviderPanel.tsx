@@ -1,3 +1,4 @@
+import ExternalLink from '@/components/ExternalLink';
 import { useState, type ReactNode } from "react";
 import { Button, Modal, Skeleton, Spin, Tag } from "antd";
 import {
@@ -244,13 +245,13 @@ export default function CloudDocumentProviderPanel({ vm, additionalCards }: { vm
               : t("modelProvider.cloudDocuments.obsidianUnavailableStatus")}
         </Tag>
         <div className="model-provider-cloud-doc-resource-controls">
-          <a className="model-provider-cloud-doc-resource-action"
+          <ExternalLink className="model-provider-cloud-doc-resource-action"
             href={CLOUD_DOCUMENTS_OBSIDIAN_SETUP_PATH} target="_blank" rel="noopener noreferrer"
             aria-label={t("modelProvider.cloudDocuments.obsidianSetupGuideAction")}
           >
             {t("modelProvider.cloudDocuments.obsidianSetupGuideShort")}
             <ArrowRightOutlined />
-          </a>
+          </ExternalLink>
           {isDesktopRuntime && (
             <button
               type="button"
@@ -452,9 +453,9 @@ export default function CloudDocumentProviderPanel({ vm, additionalCards }: { vm
             : t("modelProvider.cloudDocuments.obsidianUnavailableHint")}
         </p>
         <p style={{ marginTop: 12, marginBottom: 0 }}>
-          <a href={CLOUD_DOCUMENTS_OBSIDIAN_SETUP_PATH} target="_blank" rel="noreferrer">
+          <ExternalLink href={CLOUD_DOCUMENTS_OBSIDIAN_SETUP_PATH} target="_blank" rel="noreferrer">
             {t("modelProvider.cloudDocuments.obsidianSetupGuideAction")}
-          </a>
+          </ExternalLink>
         </p>
       </Modal>
     </>

@@ -1,3 +1,4 @@
+import { externalLinkProps } from '@/runtime/externalNavigation';
 import { Button, Table, Tag, Tooltip, Typography } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import {
@@ -116,7 +117,7 @@ export default function FeishuAccountTable({
         }
         const openPlatformUrl = getFeishuOpenPlatformAppUrl(appId);
         return (
-          <Link href={openPlatformUrl} target="_blank" rel="noreferrer" ellipsis>
+          <Link {...externalLinkProps(openPlatformUrl)} target="_blank" rel="noreferrer" ellipsis>
             {openPlatformUrl}
           </Link>
         );

@@ -1,3 +1,4 @@
+import ExternalLink from '@/components/ExternalLink';
 import { createPdfScrollSync } from "@/components/ui/pdfScrollSync";
 import FileUtils from "@/modules/knowledge/utils/file";
 import { TIME_FORMAT } from "@/modules/knowledge/constants/common";
@@ -994,14 +995,14 @@ const KnowledgeDocumentContent = () => {
           {
             label: t("knowledge.originalFile"),
             value: (
-              <a
+              <ExternalLink
                 href={isPdfDocument ? originalPreviewFile : previewFile}
                 rel="noreferrer noopener"
                 target="_blank"
                 title={knowledgeDetail?.display_name}
               >
                 {knowledgeDetail?.display_name}
-              </a>
+              </ExternalLink>
             ),
             hidden: !hasWritePermission,
           },

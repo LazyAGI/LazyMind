@@ -1,3 +1,4 @@
+import ExternalLink from '@/components/ExternalLink';
 import { PptPromptDocument } from './PptPromptDocument';
 import { ArtifactSourceButton } from './ArtifactSourceButton';
 import { downloadWorkflowFile, getWorkflowDownloadHost } from '@/modules/chat/utils/workflowDownload';
@@ -2702,9 +2703,9 @@ function WriterWriteBackSummary({
       )}
       <span>{tr(stateKey)}</span>
       {slot.write_back_url && (
-        <a href={slot.write_back_url} target='_blank' rel='noreferrer'>
+        <ExternalLink href={slot.write_back_url} target='_blank' rel='noreferrer'>
           {tr('chat.writerIR.openCloudDocument')}
-        </a>
+        </ExternalLink>
       )}
       {!slot.write_back_url && slot.write_back_local_path && (
         <a

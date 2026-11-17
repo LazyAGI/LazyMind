@@ -1,3 +1,4 @@
+import ExternalLink from '@/components/ExternalLink';
 import { useSettingsDraft, useSettingsEditor } from "@/modules/settings/SettingsNavigationGuard";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
@@ -405,14 +406,14 @@ export function renderExternalServiceDescription(description: string) {
   return parts.map((part, index) => {
     if (/^https?:\/\//.test(part)) {
       return (
-        <a
+        <ExternalLink
           href={part}
           key={`${part}-${index}`}
           rel="noreferrer"
           target="_blank"
         >
           {part}
-        </a>
+        </ExternalLink>
       );
     }
 
@@ -1331,10 +1332,10 @@ export default function ExternalServicesPage({
                 <div className="model-provider-translation-setup-head">
                   <strong>{t("modelProvider.external.translationGuideTitle", { name: serviceDisplayName(activeService) })}</strong>
                   {getTranslationSetupUrl(activeService) ? (
-                    <a href={getTranslationSetupUrl(activeService)} rel="noreferrer" target="_blank">
+                    <ExternalLink href={getTranslationSetupUrl(activeService)} rel="noreferrer" target="_blank">
                       {t("modelProvider.external.translationGuideOpenOfficial")}
                       <RightOutlined aria-hidden="true" />
-                    </a>
+                    </ExternalLink>
                   ) : null}
                 </div>
                 <ol>

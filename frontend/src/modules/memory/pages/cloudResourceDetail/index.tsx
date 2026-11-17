@@ -1,3 +1,4 @@
+import ExternalLink from '@/components/ExternalLink';
 import { Alert, Button, Space, Spin, Tabs, Tag, Tree } from "antd";
 import { ArrowLeftOutlined, ReloadOutlined } from "@ant-design/icons";
 import { Navigate } from "react-router-dom";
@@ -18,7 +19,7 @@ export default function CloudResourceDetail({ resourceType }: { resourceType: Cl
     <div className="cloud-resource-document">
       <div className="cloud-resource-file-path">{selected}</div>
       {content?.preview_status === "ready" ? (/\.(md|markdown)$/i.test(selected)
-        ? <Markdown remarkPlugins={[remarkGfm]} skipHtml components={{ a: ({ children, href }) => <a href={href} target="_blank" rel="noopener noreferrer">{children}</a>, img: ({ alt }) => <span>{alt || t("admin.memoryCloudBinaryPreview")}</span> }}>{text}</Markdown>
+        ? <Markdown remarkPlugins={[remarkGfm]} skipHtml components={{ a: ({ children, href }) => <ExternalLink href={href} target="_blank" rel="noopener noreferrer">{children}</ExternalLink>, img: ({ alt }) => <span>{alt || t("admin.memoryCloudBinaryPreview")}</span> }}>{text}</Markdown>
         : <pre>{text}</pre>)
         : content ? <Alert type="info" showIcon message={t(content.preview_status === "too_large" ? "admin.memoryCloudLargePreview" : "admin.memoryCloudBinaryPreview")} /> : null}
     </div>

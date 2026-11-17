@@ -1,3 +1,4 @@
+import ExternalLink from '@/components/ExternalLink';
 import { CheckCircleFilled, CloseCircleFilled, LoadingOutlined, WarningFilled } from '@ant-design/icons';
 import './PaperLinkProgress.scss';
 
@@ -30,7 +31,7 @@ export default function PaperLinkProgress({ phase, failurePhase, hasPDF, warning
       </li>;
     })}</ol>
     <p role="status" aria-live="polite">{phase === 'metadata' ? '正在查询题名、作者与出版信息…' : phase === 'pdf' ? '正在检查开放来源与 Sci-Hub，最多 6 秒…' : phase === 'submitting' ? '正在创建导入任务…' : phase === 'failed' ? '当前步骤失败，请查看错误详情后重试。' : hasPDF ? '已找到可用 PDF，确认后下载入库。' : '未找到可用 PDF；可以明确选择仅加入文献库。'}</p>
-    {!hasPDF && phase === 'ready' && !!links.length && <div className="paper-manual-download"><strong>查找其他 PDF 来源</strong><p>以下为检索入口，并不代表已有可用 PDF。下载后可添加到当前文献。</p><div>{links.map(({address, label}) => <a key={address} href={address} target="_blank" rel="noopener noreferrer">{label}</a>)}</div></div>}
+    {!hasPDF && phase === 'ready' && !!links.length && <div className="paper-manual-download"><strong>查找其他 PDF 来源</strong><p>以下为检索入口，并不代表已有可用 PDF。下载后可添加到当前文献。</p><div>{links.map(({address, label}) => <ExternalLink key={address} href={address} target="_blank" rel="noopener noreferrer">{label}</ExternalLink>)}</div></div>}
     {!!warnings.length && <details className="paper-link-progress-warnings"><summary>PDF 来源查询提示（{warnings.length}）</summary><ul>{warnings.map((warning, index) => <li key={index}>{warning}</li>)}</ul></details>}
   </section>;
 }

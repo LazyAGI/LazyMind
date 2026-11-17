@@ -72,6 +72,11 @@
   outline-offset: 3px;
 }
 
+.global-error__actions button:disabled {
+  cursor: wait;
+  opacity: 0.65;
+}
+
 .global-error__primary {
   color: #fff;
   background: #566eff;

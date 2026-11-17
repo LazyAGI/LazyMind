@@ -212,6 +212,7 @@ type DesktopBridgeCommand =
 interface LazyMindDesktopBridge {
   localFileAction?: (payload: { path: string; action: "open" | "reveal" }) => Promise<unknown>;
   openChatExternal?: (url: string) => Promise<unknown>;
+  openExternal?: (url: string) => Promise<void>;
   platform?: string;
   appVersion?: () => Promise<string>;
   openLogsDir?: () => Promise<void> | void;
@@ -269,6 +270,11 @@ function getDesktopBridge(): LazyMindDesktopBridge | undefined {
 
   return (window as Window & { lazymindDesktop?: LazyMindDesktopBridge })
     .lazymindDesktop;
+}
+
+export function getExternalBrowserBridge(): ((url: string) => Promise<void>) | undefined {
+  const bridge = getDesktopBridge();
+  return bridge?.openExternal ? url => bridge.openExternal!(url) : undefined;
 }
 
 function localBridgeFailure(error: unknown, fallback: "unavailable" | "failed" = "unavailable"): Extract<DesktopBridgeResult, { ok: false }> {
