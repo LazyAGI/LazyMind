@@ -17,9 +17,10 @@ export default function DSHInstallationGuide({ status, onConnect, onStatus, onCl
   const { t } = useTranslation();
   const text = (key: string) => t(`agentIntegration.dshInstallGuide.${key}`);
   const [stage, setStage] = useState<Stage>(status?.retry_action === "disconnect" ? "disconnectRequired" : requiresAgentQuit(status) ? "quitRequired"
+    : status?.issue?.code === "pairing_account_mismatch" ? "notReady"
     : status?.state === "enabled" && (status.connection?.mcp_configured ?? true) ? "enable" : "prepare");
   const [zoomed, setZoomed] = useState(false);
-  const [error, setError] = useState("");
+  const [error, setError] = useState(status?.issue?.code === "pairing_account_mismatch" ? dshErrorMessage(status, t) : "");
   const [diagnostic, setDiagnostic] = useState(status?.issue?.operation_id || status?.diagnostic_id || "");
   const mounted = useRef(true);
   const busy = useRef(false);
@@ -42,6 +43,7 @@ export default function DSHInstallationGuide({ status, onConnect, onStatus, onCl
       setDiagnostic(result?.issue?.operation_id || result?.diagnostic_id || "");
       if (result?.issue && !requiresAgentQuit(result)) setError(dshErrorMessage(result, t));
       setStage(requiresAgentQuit(result) ? "quitRequired"
+        : result?.issue?.code === "pairing_account_mismatch" ? "notReady"
         : result?.state === "enabled" && (result.connection?.mcp_configured ?? true) ? "enable" : "installFailed");
     } catch {
       if (mounted.current && request === requestVersion.current) setStage("installFailed");
@@ -64,11 +66,12 @@ export default function DSHInstallationGuide({ status, onConnect, onStatus, onCl
       const ready = dshConnectionReady(current);
       // A normal startup may deliver its first heartbeat after the user returns.
       // Background checks never install, restart, or conceal an explicit failure.
-      if (automatic && !ready) return;
+      if (automatic && !ready && !current?.issue) return;
       setDiagnostic(current?.issue?.operation_id || current?.diagnostic_id || "");
-      if (!ready) setError(!current || !current.connection ? text("checkFailedDescription")
-        : current.connection?.runtime_state === "waiting" ? text("waitingDescription")
-          : current.issue ? dshErrorMessage(current, t)
+      if (!ready) setError(!current ? text("checkFailedDescription")
+        : current.issue ? dshErrorMessage(current, t)
+          : !current.connection ? text("checkFailedDescription")
+          : current.connection.runtime_state === "waiting" ? text("waitingDescription")
             : !current.connection?.mcp_configured ? text("configurationMissingDescription")
               : text("notReadyDescription"));
       setStage(ready ? "success" : "notReady");

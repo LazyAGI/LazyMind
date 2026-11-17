@@ -13,13 +13,13 @@ const connectionIssueCodes = new Set([
 export function codexErrorMessage(status: DesktopAgentIntegrationStatus | undefined, t: TFunction,
   fallback = "controlUnavailableDescription"): string {
   const code = status?.issue?.code;
-  if (code === "mcp_enable_required") return t("agentIntegration.codexInstallGuide.notReadyDescription");
+  if (code === "mcp_enable_required") return t("agentIntegration.codexInstallGuide.enableRequiredDescription");
   if (code === "mcp_trust_required") return t("agentIntegration.codexInstallGuide.trustRequiredDescription");
   if (code === "environment_mismatch") return t("agentIntegration.setupFeedback.environmentMismatch");
   if (code === "configuration_unreadable") return t("agentIntegration.connectionErrors.configuration_failed");
   if (code === "quit_required") return t("agentIntegration.quitRequired.description", { agent: "Codex" });
-  if (code) return t(`agentIntegration.connectionErrors.${connectionIssueCodes.has(code) ? code : "operation_failed"}`);
+  if (code) return t(`agentIntegration.connectionErrors.${connectionIssueCodes.has(code) ? code : "operation_failed"}`, { agent: "Codex" });
   const runtime = status?.connection?.runtime_state;
-  if (runtime === "connection_required" || runtime === "waiting") return t(`agentIntegration.connectionErrors.${runtime}`);
+  if (runtime === "connection_required" || runtime === "waiting") return t(`agentIntegration.connectionErrors.${runtime}`, { agent: "Codex" });
   return t(`agentIntegration.codexInstallGuide.${fallback}`);
 }
