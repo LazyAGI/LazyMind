@@ -297,7 +297,7 @@ export default function RenderPdf({
   const appliedPositionRef = useRef("");
   const positionIdleTimer=useRef<ReturnType<typeof setTimeout>>();
   const pendingPosition=useRef<PdfViewPosition>();
-  const lastReportedScrollPosition=useRef<PdfViewPosition>();
+  const reportedScrollPositions=useRef(new WeakSet<PdfViewPosition>());
   const reportedPage=useRef(viewPosition?.page||1);
   const reportPosition=useRef(onViewPositionChange);
   reportPosition.current=onViewPositionChange;
@@ -364,7 +364,7 @@ export default function RenderPdf({
     lastPageNavigation.current = "";
     clearTimeout(positionIdleTimer.current);
     pendingPosition.current=undefined;
-    lastReportedScrollPosition.current=undefined;
+    reportedScrollPositions.current=new WeakSet<PdfViewPosition>();
     reportedPage.current=viewPosition?.page||1;
     setScrollTop(0);
     appliedPositionRef.current = "";
@@ -464,7 +464,7 @@ export default function RenderPdf({
       };
       pendingPosition.current=position;
       clearTimeout(positionIdleTimer.current);
-      const publish=()=>{const latest=pendingPosition.current;if(!latest)return;pendingPosition.current=undefined;lastReportedScrollPosition.current=latest;reportPosition.current?.(latest);};
+      const publish=()=>{const latest=pendingPosition.current;if(!latest)return;pendingPosition.current=undefined;reportedScrollPositions.current.add(latest);reportPosition.current?.(latest);};
       if(position.page!==reportedPage.current){reportedPage.current=position.page;publish();}
       else positionIdleTimer.current=setTimeout(publish,250);
     }
@@ -704,11 +704,15 @@ export default function RenderPdf({
     const previous = previousGeometry.current;
     previousGeometry.current = {width:pageWidthPx,tops:pageTops,heights:pageHeightsPx};
     if (previous.width === pageWidthPx && previous.heights.length === pageHeightsPx.length && previous.heights.every((height,index)=>height===pageHeightsPx[index]) && !zoomPosition.current) return;
-    const previousPage = previous.tops.reduce((page, top, index)=>top<=scrollTop+1?index:page,0);
-    const position = zoomPosition.current || {page:previousPage+1,progress:Math.max(0,(scrollTop-(previous.tops[previousPage]||0))/(previous.heights[previousPage]||1))};
+    // PDF page loading can commit before the compositor's latest scroll event.
+    // Anchor to the live viewport, not the last React scroll-state snapshot.
+    const liveTop = containerRef.current?.scrollTop ?? scrollTop;
+    const previousPage = previous.tops.reduce((page, top, index)=>top<=liveTop+1?index:page,0);
+    const position = zoomPosition.current || {page:previousPage+1,progress:Math.max(0,(liveTop-(previous.tops[previousPage]||0))/(previous.heights[previousPage]||1))};
     zoomPosition.current = undefined;
     const top = (pageTops[position.page-1]||0) + (pageHeightsPx[position.page-1]||0)*position.progress;
-    containerRef.current?.scrollTo({top,behavior:"auto"});
+    // An unrelated page measurement must not cancel native momentum scrolling.
+    if (Math.abs(top - liveTop) > .5) containerRef.current?.scrollTo({top,behavior:"auto"});
     setScrollTop(top);
   }, [pageWidthPx,pageTops,pageHeightsPx]);
   useLayoutEffect(()=>{
@@ -730,9 +734,10 @@ export default function RenderPdf({
     if (appliedPositionRef.current === key) return;
     appliedPositionRef.current = key;
     // A parent's reading-progress update is an acknowledgement, not navigation.
-    // Replaying it can rewind newer wheel input or cancel momentum at page edges.
-    const reported = lastReportedScrollPosition.current;
-    if (reported?.page === page + 1 && reported.progress === progress) return;
+    // Several reports may be in flight while new virtual pages load. Object
+    // identity recognizes every acknowledgement without swallowing a fresh
+    // external navigation command to previously visited coordinates.
+    if (reportedScrollPositions.current.has(viewPosition)) return;
     const top = (pageTops[page] || 0) + (pageHeightsPx[page] || 0) * progress;
     containerRef.current.scrollTo({ top, behavior: "auto" });
     setScrollTop(top);
