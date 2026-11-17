@@ -228,7 +228,12 @@ func init() {
 			"expansion report does not match the effective relation analysis version",
 			"expansion report must preserve the research analysis",
 		}},
+		{2005166, 503, "Bibliographic lookup is temporarily unavailable; retry later", []string{
+			"题录查询暂未完成（%d 个来源不可用），可重试",
+		}},
 		{2000103, 400, "Invalid request", []string{
+			"来源论文只能加入论文集，请选择论文集类型的资料库",
+			"未找到题名明确匹配的论文，可补充 DOI/arXiv 或完整标题：%w",
 			"new reviews support only quick or standard expansion",
 			"unsupported_source",
 			"unknown paper research step",
