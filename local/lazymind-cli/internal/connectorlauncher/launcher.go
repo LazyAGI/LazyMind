@@ -67,7 +67,7 @@ func ensure(ctx context.Context, home, self string, publish bool) (string, error
 	}
 	defer unlock()
 
-	previous, recordErr := readTargetFile(launcher)
+	previous, recordErr := readTargetFileUnlocked(launcher)
 	if recordErr != nil && !errors.Is(recordErr, os.ErrNotExist) {
 		return "", recordErr
 	}
@@ -125,6 +125,23 @@ func ensure(ctx context.Context, home, self string, publish bool) (string, error
 }
 
 func readTargetFile(launcher string) (target, error) {
+	if runtime.GOOS != "windows" {
+		return readTargetFileUnlocked(launcher)
+	}
+	// Windows cannot open the target while MoveFileEx is replacing it. Readers
+	// share the publication lock so forwarding never observes that transient gap.
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+	unlock, err := localfile.LockContext(ctx, launcher+".lock")
+	if err != nil {
+		return target{}, err
+	}
+	defer unlock()
+	return readTargetFileUnlocked(launcher)
+}
+
+// On Windows the caller must hold the publication lock, including during setup.
+func readTargetFileUnlocked(launcher string) (target, error) {
 	var record target
 	body, err := os.ReadFile(targetPath(launcher))
 	if err != nil {
