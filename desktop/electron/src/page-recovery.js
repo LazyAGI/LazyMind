@@ -75,8 +75,10 @@ function createPageRecovery({ BrowserWindow, ipcMain, dialog, locale = () => 'en
       owner.webContents.on('render-process-gone', (_event, details) => {
         if (details.reason !== 'clean-exit') void show(state).catch(() => report('PAGE_RECOVERY_VIEW_FAILED'));
       });
-      owner.webContents.on('did-fail-load', (_event, code, _description, _url, isMainFrame) => {
-        if (isMainFrame && code !== -3) void show(state).catch(() => report('PAGE_RECOVERY_VIEW_FAILED'));
+      owner.webContents.on('did-fail-load', (event, code, _description, url, isMainFrame) => {
+        if (!isMainFrame || code === -3) return;
+        remember(event, url);
+        void show(state).catch(() => report('PAGE_RECOVERY_VIEW_FAILED'));
       });
       owner.on('closed', () => { state.popup?.close(); states.delete(owner); });
     },

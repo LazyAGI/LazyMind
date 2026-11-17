@@ -37,6 +37,48 @@ test('crash offers recovery and restores the same trusted page without replaying
   assert.equal(f.windows[1].isDestroyed(), true);
 });
 
+test('retries the failed main-frame destination instead of the previous successful page', async () => {
+  const f = fixture();
+  f.owner.webContents.emit('did-navigate', {}, f.owner.webContents.getURL());
+  const destination = 'http://localhost:8090/agent/chat/home/456?tab=b#failed';
+  f.owner.webContents.emit('did-fail-load', {}, -105, 'failed', destination, true);
+  await tick();
+  assert.deepEqual(f.loads, []);
+  await f.invoke();
+  assert.deepEqual(f.loads, [destination]);
+});
+
+for (const [name, destination] of [
+  ['external origin', 'https://example.org/failed'],
+  ['credentials', 'http://user:password@localhost:8090/agent/chat/home/456'],
+  ['malformed URL', 'not a URL'],
+]) {
+  test(`a failed navigation with ${name} cannot replace the trusted recovery target`, async () => {
+    const f = fixture();
+    const previous = f.owner.webContents.getURL();
+    f.owner.webContents.emit('did-navigate', {}, previous);
+    f.owner.webContents.emit('did-fail-load', {}, -105, 'failed', destination, true);
+    await tick();
+    await f.invoke();
+    assert.deepEqual(f.loads, [previous]);
+  });
+}
+
+for (const [name, code, isMainFrame] of [['cancelled navigation', -3, true], ['subframe failure', -105, false]]) {
+  test(`${name} cannot replace the trusted recovery target`, async () => {
+    const f = fixture();
+    const previous = f.owner.webContents.getURL();
+    f.owner.webContents.emit('did-navigate', {}, previous);
+    f.owner.webContents.emit('did-fail-load', {}, code, 'failed', 'http://localhost:8090/agent/chat/home/456', isMainFrame);
+    await tick();
+    assert.equal(f.windows.length, 1);
+    f.owner.webContents.emit('render-process-gone', {}, { reason: 'crashed' });
+    await tick();
+    await f.invoke();
+    assert.deepEqual(f.loads, [previous]);
+  });
+}
+
 test('ignores clean shutdown, subframe failures, cancellation and shutdown work', async () => {
   const f = fixture();
   f.owner.webContents.emit('render-process-gone', {}, { reason: 'clean-exit' });
