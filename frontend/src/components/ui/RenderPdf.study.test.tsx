@@ -769,3 +769,17 @@ it('ignores older progress acknowledgements after multiple pages load during fas
  view.rerender(<RenderPdf {...props} viewPosition={{...pageTwo}}/>);
  expect(viewport.scrollTop).toBe(1000);
 });
+
+it('shows only selectable document content in a control-free metadata preview',async()=>{
+ const report=vi.fn();
+ const view=render(<RenderPdf fileData="metadata-preview.pdf" pdfToolbarMode="none" pdfSelectableText defaultPageWidth={600} onViewPositionChange={report}/>);
+ await act(async()=>{});
+ expect(view.container.querySelector('.pdf-reader-header')).toBeNull();
+ expect(screen.queryByRole('button')).toBeNull();
+ expect(screen.queryByRole('navigation')).toBeNull();
+ expect(screen.getAllByTestId('pdf-text-layer').length).toBeGreaterThan(0);
+ const viewport=view.container.querySelector('.pdf-reader-with-study')!.firstElementChild as HTMLElement;
+ viewport.scrollTop=1000;fireEvent.scroll(viewport);
+ expect(viewport.scrollTop).toBe(1000);
+ expect(report).toHaveBeenLastCalledWith(expect.objectContaining({page:2}));
+});
