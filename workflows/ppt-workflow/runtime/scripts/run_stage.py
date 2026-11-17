@@ -42,10 +42,11 @@ import threading
 import time
 from concurrent.futures import as_completed
 from pathlib import Path
+from urllib.parse import unquote
 
 from lazymind.chat.workflow.ppt_generation import (
     HTML_DOCUMENT as _HTML_DOC_RE,
-    page_generation_query, page_generation_system,
+    background_suffix_mismatch, page_generation_query, page_generation_system,
     sanitize_page_html as _sanitize_page_html,
 )
 
@@ -1622,15 +1623,35 @@ def _html_has_foreground_image(html: str, expected_path: str) -> bool:
     return False
 
 
-def _restore_background_image(html: str, expected_path: str) -> tuple[str, bool]:
+def _restore_background_image(html: str, deck: Path, expected_path: str) -> tuple[str, bool]:
     """Repair a known background layer without asking the model to redraw text/layout."""
-    if not expected_path or _html_has_background_image(html, expected_path):
-        return html, False
-    if not re.search(r'<[^>]+\bid\s*=\s*(["\'])bg\1', html, re.IGNORECASE):
-        return html, False
-    if not re.search(r'</head\s*>', html, re.IGNORECASE):
+    if not expected_path:
         return html, False
     src = _page_relative_asset_path(expected_path)
+    background = deck / expected_path
+    root = deck.resolve()
+
+    def correct_suffix(match: re.Match) -> str:
+        value = match.group(2).strip()
+        if re.match(r'^(?:[a-z][\w+.-]*:|//|#)', value, re.I):
+            return match.group(0)
+        reference = Path(unquote(re.split(r'[?#]', value, maxsplit=1)[0]))
+        if not background_suffix_mismatch(reference, background):
+            return match.group(0)
+        candidate = (deck / 'pages' / reference).resolve()
+        if candidate.is_relative_to(root) and candidate.is_file():
+            return match.group(0)
+        return 'url(' + json.dumps(src) + ')'
+
+    original = html
+    html = re.sub(r'url\(\s*(["\']?)([^)"\']+)\1\s*\)', correct_suffix, html, flags=re.I)
+    repaired = html != original
+    if _html_has_background_image(html, expected_path):
+        return html, repaired
+    if not re.search(r'<[^>]+\bid\s*=\s*(["\'])bg\1', html, re.IGNORECASE):
+        return html, repaired
+    if not re.search(r'</head\s*>', html, re.IGNORECASE):
+        return html, repaired
     # JSON quoting escapes special characters in the filesystem path for CSS strings.
     css = '<style data-lazymind-background>#bg{background-image:url(' + json.dumps(src) + ')!important;background-size:cover!important;background-position:center!important}</style>'
     return re.sub(r'</head\s*>', lambda m: css + m.group(0), html, count=1, flags=re.IGNORECASE), True
@@ -2149,6 +2170,11 @@ def _write_page_html_from_query(
     rewritten_query = (rewritten_query or '').strip()
     if not rewritten_query:
         return _fail(f'page-html p{page_no}: empty query', page_no=page_no)
+    required_background_path = (background_image or {}).get('local_path')
+    if required_background_path and prompt_mode == 'complete-page-prompt':
+        src = _page_relative_asset_path(required_background_path)
+        rewritten_query += ('\n\nAI BACKGROUND IMAGE: Set #bg background-image to '
+                            f'url({json.dumps(src, ensure_ascii=False)}). Copy the path and extension exactly.')
 
     try:
         template_context = template_html.page_context(deck, page_no, rewritten_query, page_plan)
@@ -2222,8 +2248,7 @@ def _write_page_html_from_query(
         image_error = str(exc)
 
     required_image_path = (inherited_image or {}).get('local_path')
-    required_background_path = (background_image or {}).get('local_path')
-    html, background_restored = _restore_background_image(html, required_background_path)
+    html, background_restored = _restore_background_image(html, deck, required_background_path)
     required_materials = list(dict.fromkeys([*(material_images or []), *extra_paths]))
     missing_materials = missing_material_images(html, deck, required_materials)
     missing_foreground = bool(
@@ -2294,7 +2319,7 @@ def _write_page_html_from_query(
             return _fail(f'page-html p{page_no}: {exc}', page_no=page_no)
         fixed += retry_fixed
         imgs_localized += retry_localized
-        html, retry_background_restored = _restore_background_image(html, required_background_path)
+        html, retry_background_restored = _restore_background_image(html, deck, required_background_path)
         background_restored = background_restored or retry_background_restored
         missing_materials = missing_material_images(html, deck, required_materials)
         if missing_materials:

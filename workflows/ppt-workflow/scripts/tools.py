@@ -2622,6 +2622,7 @@ def _portable_ppt_source_path(source_path: Path) -> str:
 
 def _inline_preview_images(
     html: str, deck: Path, html_path: Path, *, inline_assets: bool = False,
+    background_image: Path | None = None,
 ) -> tuple[str, int]:
     """Use durable local asset references; inline only legacy files outside uploads.
 
@@ -2629,6 +2630,7 @@ def _inline_preview_images(
     contain expiring URLs. On-disk HTML retains relative paths for offline export.
     """
     from lazymind.chat.engine.tools.file_resources.font_library import local_font_css, inline_shared_font_resource
+    from lazymind.chat.workflow.ppt_generation import background_suffix_mismatch
     if 'id="lazymind-local-fonts"' not in html:
         font_css = local_font_css(html)
         if font_css:
@@ -2639,7 +2641,7 @@ def _inline_preview_images(
     page_root = html_path.parent.resolve()
     inlined = 0
 
-    def _data_uri(src: str) -> Optional[str]:
+    def _data_uri(src: str, *, css: bool = False) -> Optional[str]:
         nonlocal inlined
         value = (src or '').strip()
         if not value or value.startswith(('data:', 'http://', 'https://', '//', '#')):
@@ -2656,6 +2658,10 @@ def _inline_preview_images(
             if inline_assets:
                 raise ValueError('Selected image is outside the current presentation workspace') from None
             return None
+        if (inline_assets and css and background_image
+                and background_suffix_mismatch(candidate, background_image) and not candidate.is_file()
+                and background_image.is_relative_to(deck_root) and background_image.is_file()):
+            candidate = background_image
         mime = _PREVIEW_IMAGE_MIME.get(candidate.suffix.lower())
         if not mime or not candidate.is_file():
             if inline_assets:
@@ -2696,7 +2702,7 @@ def _inline_preview_images(
         if font_uri:
             inlined += 1
             return f'{match.group(1)}"{font_uri}"{match.group(5)}'
-        data_uri = _data_uri(match.group(3))
+        data_uri = _data_uri(match.group(3), css=True)
         if not data_uri:
             return match.group(0)
         quote = match.group(2)
@@ -8272,6 +8278,9 @@ def ppt_export_deck() -> dict:
     order = _ui_slot_order_list('preview_html')
     if not order or len(order) != len(_ui_slot_order_list('preview_notes')):
         return _tool_error('ppt_export_deck', 'Publish every approved HTML page and matching notes before export')
+    conversation_root = _conversation_root()
+    deck = _bound_workflow_deck()
+    runtime = _load_sn_ppt_modules()[1] if deck is not None else None
     pages = []
     for number in range(1, len(order) + 1):
         html, _ = _resolve_artifact_text(ctx, 'preview_html', sort_order=number)
@@ -8280,9 +8289,10 @@ def ppt_export_deck() -> dict:
                 or not isinstance(notes, str) or not notes.strip() or _is_ppt_placeholder(notes)):
             return _tool_error('ppt_export_deck', f'Page {number} has incomplete HTML or notes; export was not started')
         try:
+            background = runtime._resolve_background_image(deck, number) if runtime is not None else None
             html, _ = _inline_preview_images(
-                html, _conversation_root(), _conversation_root() / 'pages' / f'page_{number:03d}.html',
-                inline_assets=True,
+                html, conversation_root, conversation_root / 'pages' / f'page_{number:03d}.html',
+                inline_assets=True, background_image=(deck / background['local_path']) if background else None,
             )
         except (OSError, ValueError) as exc:
             return _tool_error('ppt_export_deck', f'Page {number} export resource failed: {exc}. '
