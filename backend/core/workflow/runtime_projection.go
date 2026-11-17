@@ -288,6 +288,10 @@ func projectSession(ctx context.Context, db *gorm.DB, session *orm.WorkflowSessi
 	if err != nil {
 		return projectionResponse{}, err
 	}
+	// A normal Chat handoff cannot turn a proven graph end back into waiting.
+	if projection.Completed && (display.Reason == "next_step_required" || display.Reason == "preparing" || display.Reason == "no_advance") {
+		display.Status, display.Reason = "completed", "completed"
+	}
 	if display.Status == "waiting" || display.Status == "waiting_input" || display.Status == "paused" {
 		projection.Completed = false
 	}
@@ -323,6 +327,18 @@ func GetSessionProjection(w http.ResponseWriter, r *http.Request) {
 		}
 		var err error
 		projection, err = projectSession(r.Context(), tx, &session)
+		// Recover previously completed runs masked by the old handoff projection.
+		if err == nil && projection.Projection.Completed && projection.Display.Status == "completed" && session.Status != SessionStatusCompleted {
+			locked, lockErr := artifactgraph.LockSession(tx, session.ID)
+			if lockErr != nil {
+				return lockErr
+			}
+			projection, err = projectSession(r.Context(), tx, locked)
+			if err == nil && projection.Projection.Completed && projection.Display.Status == "completed" && locked.Status != SessionStatusCompleted {
+				err = writeSessionProjection(r.Context(), tx, locked, projection)
+				projection.Status, projection.StateVersion = locked.Status, locked.StateVersion
+			}
+		}
 		return err
 	})
 	if errors.Is(err, gorm.ErrRecordNotFound) {

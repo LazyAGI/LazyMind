@@ -15,7 +15,8 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, create_model
 import yaml
 
 from . import external_pdf_tools, external_ppt_tools, smoke_tools
-from lazymind.document_tools.paper import agent_tools as paper_tools
+from . import paper_tools as paper_adapter
+from .paper_tools import PAPER_BINDING
 from .external_ppt_tools import ExternalToolError
 from .external_tool_context import external_package_scope
 
@@ -45,22 +46,6 @@ _REGISTRY.update({
     name: ('scripts/external_generation_tools.py', GENERATION_BINDING, getattr(external_ppt_tools, name))
     for name in ('ppt_prepare_page', 'ppt_compute_timing', 'ppt_order_papers')
 })
-PAPER_BINDING = '''"""Audited paper primitives; the executing Agent owns all generation and judgment."""
-from lazymind.document_tools.paper.agent_tools import (
-    paper_analyze, paper_plot, paper_prepare_candidate, paper_prepare_inputs,
-    paper_execution_status, paper_cancel_execution, paper_preview_revision,
-    paper_knowledge_documents, paper_knowledge_read,
-    paper_read_material, paper_read_paper, paper_run_experiment, paper_search,
-    paper_submit_candidate, paper_read_result,
-)
-'''
-_REGISTRY.update({
-    name: ('scripts/agent_tools.py', PAPER_BINDING, getattr(paper_tools, name))
-    for name in ('paper_prepare_inputs', 'paper_read_material', 'paper_search', 'paper_read_paper',
-                 'paper_knowledge_documents', 'paper_knowledge_read',
-                 'paper_analyze', 'paper_plot', 'paper_run_experiment', 'paper_prepare_candidate',
-                 'paper_execution_status', 'paper_cancel_execution', 'paper_preview_revision')
-})
 
 MAX_PACKAGE_BYTES = 64 * 1024 * 1024
 
@@ -87,6 +72,7 @@ class ExternalToolRequest(BaseModel):
 class ExternalToolCallRequest(ExternalToolRequest):
     tool_name: str = Field(min_length=1)
     arguments: dict[str, Any] = Field(default_factory=dict)
+    trusted_context: dict[str, Any] | None = None
 
 
 def package_tree_hash(files: dict[str, bytes]) -> str:
@@ -160,6 +146,10 @@ def _selected(request: ExternalToolRequest, *, listing: bool = False, files=None
         if not isinstance(name, str):
             raise ExternalToolError('INVALID_PACKAGE', 'Invalid external tool name.')
         entry = _REGISTRY.get(name)
+        is_paper = name in paper_adapter.TOOL_NAMES
+        if is_paper:
+            paper_adapter.validate_step(request.step_id, step)
+            entry = ('scripts/agent_tools.py', PAPER_BINDING, None)
         if entry is None:
             if listing or name != getattr(request, 'tool_name', None):
                 # Core serves its separately audited data adapters from the same
@@ -170,7 +160,9 @@ def _selected(request: ExternalToolRequest, *, listing: bool = False, files=None
         path, binding, function = entry
         if owners.get(name) != path or files.get(path) != binding.encode():
             raise ExternalToolError('TOOL_NOT_ALLOWED', 'The package tool binding is not an audited service adapter.')
-        selected[name] = function
+        if is_paper and not listing and name != getattr(request, 'tool_name', None):
+            continue
+        selected[name] = paper_adapter.load(name) if is_paper else function
     return selected
 
 
@@ -197,19 +189,12 @@ def call_external_tool(request: ExternalToolCallRequest) -> dict[str, Any]:
     if function is None:
         raise ExternalToolError('TOOL_NOT_ALLOWED', 'This tool is not available to the pinned external step.')
     raw_arguments = dict(request.arguments)
-    paper_context = raw_arguments.pop('__paper_context', None) if request.tool_name.startswith('paper_') else None
     try:
         arguments = _arguments_model(function).model_validate(raw_arguments).model_dump()
     except ValidationError as exc:
         raise ExternalToolError('INVALID_ARGUMENT', 'Arguments do not match the declared tool schema.') from exc
-    if request.tool_name.startswith('paper_'):
-        if paper_context is None:
-            raise ExternalToolError('INVALID_ARGUMENT', 'Core-owned paper context is required.', public=True)
-        try:
-            with paper_tools.paper_scope(paper_context):
-                return {'result': function(**arguments)}
-        except ValueError as exc:
-            raise ExternalToolError('INVALID_ARGUMENT', str(exc), public=True) from exc
+    if request.tool_name in paper_adapter.TOOL_NAMES:
+        return paper_adapter.call(request, function, arguments)
     with external_package_scope(files):
         try:
             return {'result': function(**arguments)}

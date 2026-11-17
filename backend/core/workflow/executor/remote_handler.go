@@ -118,17 +118,6 @@ func (h RemoteHandler) Context(w http.ResponseWriter, r *http.Request) {
 		remoteReply(w, 503, nil, "ATTEMPT_CONTEXT_FAILED", err.Error())
 		return
 	}
-	if UsesPaperAgentContract(value) {
-		if err := FreezeControlledInputs(r.Context(), h.DB, value.AttemptID); err != nil {
-			remoteReply(w, http.StatusConflict, nil, "PAPER_INPUT_UNAVAILABLE", "Cannot freeze paper input scope")
-			return
-		}
-		value, err = h.Contexts.LoadAttemptContext(r.Context(), value.AttemptID)
-		if err != nil {
-			remoteReply(w, http.StatusConflict, nil, "PAPER_INPUT_UNAVAILABLE", "Cannot load frozen paper inputs")
-			return
-		}
-	}
 
 	remoteReply(w, 200, value, "", "")
 }

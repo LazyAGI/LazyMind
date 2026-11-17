@@ -165,3 +165,15 @@ func validatePaperCompletion(ctx context.Context, db *gorm.DB, attempt AttemptCo
 	}
 	return nil
 }
+
+// FreezePaperInputs runs inside the claim transaction, after the lease is assigned.
+func FreezePaperInputs(ctx context.Context, tx *gorm.DB, attemptID string) error {
+	value, err := (DBContextLoader{DB: tx}).LoadAttemptContext(ctx, attemptID)
+	if err != nil {
+		return err
+	}
+	if !UsesPaperAgentContract(value) {
+		return nil
+	}
+	return FreezeControlledInputs(ctx, tx, attemptID)
+}

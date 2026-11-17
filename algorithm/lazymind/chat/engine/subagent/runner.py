@@ -1284,6 +1284,7 @@ async def run_subagent_stream(
     outbound_model_output: Optional[Dict[str, Any]] = None
     translator: Optional[AgentEventFrameTranslator] = None
     output_checkpoint: Optional[tuple[str, str]] = None
+    candidate_preview = None
     _pending_text = ''
     _pending_think = ''
 
@@ -1583,7 +1584,7 @@ async def run_subagent_stream(
                 .current_input
             )
             plan.history = [{'role': 'user', 'content': objective_message}, *(resume_history or [])]
-        progress = 5
+        progress = 0 if ctx.agent_type == 'workflow_step' else 5
         yield _sse({'type': 'progress', 'task_id': task_id, 'progress': progress,
                     'current_phase': '恢复执行...' if resume else '开始执行...'})
 
@@ -1636,6 +1637,10 @@ async def run_subagent_stream(
         # Accumulate streaming text/think chunks; flush to DB when a tool step follows or at end.
         workflow_tool_in_flight = False
 
+        if params.get('workflow_id') == 'paper-writing' or params.get('workflow_ref') == 'builtin:paper-writing':
+            from lazymind.document_tools.paper.runtime_events import AgentCandidatePreview
+            candidate_preview = AgentCandidatePreview(params.get('step_id', ''))
+
         executor = AgentExecutor()
         agent = executor.create_agent(llm, plan) if plan.execution_options.model_candidates else None
         # Package publisher tools can emit several durable artifacts during one
@@ -1686,6 +1691,9 @@ async def run_subagent_stream(
                 if kind == 'event':
                     item = payload
                     tag = item.get('tag')
+                    if candidate_preview is not None:
+                        for preview_event in candidate_preview.feed(item):
+                            yield _sse({**preview_event, 'task_id': task_id})
                     if tag == 'knowledge_operation_result':
                         yield _sse({'type': 'knowledge_operation_result', 'task_id': task_id,
                                     'execution_id': (task.get('execution_id')
@@ -1790,7 +1798,7 @@ async def run_subagent_stream(
                             ev = emitted.pop(0)
                             ev['task_id'] = task_id
                             yield _sse(ev)
-                        if tag == 'tool_results' and progress < 90:
+                        if tag == 'tool_results' and ctx.agent_type != 'workflow_step' and progress < 90:
                             progress = min(90, progress + 15)
                             yield _sse({'type': 'progress', 'task_id': task_id, 'progress': progress,
                                         'current_phase': '执行中...'})
@@ -1967,6 +1975,9 @@ async def run_subagent_stream(
         })
         yield 'data: [DONE]\n\n'
     except UserCancelledError:
+        if candidate_preview is not None:
+            for preview_event in candidate_preview.abort():
+                yield _sse({**preview_event, 'task_id': task_id})
         for event in _rollback_open_output(RunOutcome.CANCELLED):
             yield _sse(event)
         yield _sse({'type': 'done', 'task_id': task_id, 'status': 'interrupted',
@@ -1974,6 +1985,9 @@ async def run_subagent_stream(
         yield 'data: [DONE]\n\n'
     except Exception as exc:  # noqa: BLE001
         LOG.exception('[SubAgent] run failed')
+        if candidate_preview is not None:
+            for preview_event in candidate_preview.abort():
+                yield _sse({**preview_event, 'task_id': task_id})
         for event in _rollback_open_output(RunOutcome.FAILED):
             yield _sse(event)
         pending_event = _drain_outbound_text()

@@ -396,11 +396,13 @@ def _prepared_inputs(ctx, pool=None) -> dict:
                                       'report': 'Replace with the actual preparation findings and limitations.'},
                        'code_files': [], 'result_meta': {
                            'execution_status': 'not_run', 'data_origin': 'user_supplied', 'method': 'empirical',
-                           'reason': 'Bound observations only; no new execution.', 'assumptions': [],
-                           'metrics': [], 'seed': None, 'input_table_ids': ids}}, 'receipts': []}
+                           'reason': 'Bound observations only; no new execution.',
+                           'input_table_ids': ids}}, 'receipts': []}
         result['submission_guidance'] = (
             'For preparation of existing observations without new execution, use the example types and actual '
-            'table IDs. The server restores complete original tables; never copy rows into the submission. '
+            'table IDs. The server restores complete original tables and their column types; never copy rows '
+            'into the submission. Omit seed and column_types for existing-data preparation; metrics and '
+            'assumptions may be omitted when inapplicable. '
             'Keep plan and report concise (normally 100-300 words each); do not repeat the source documents, '
             'research review or future analysis in both fields. Use JSON false, [], null and arrays of strings '
             'as declared, not quoted booleans or {item:...} objects. A cut-off JSON response must be regenerated '
@@ -419,7 +421,8 @@ def _prepared_inputs(ctx, pool=None) -> dict:
         from .analysis.schema import Chart
         from .plotting.code import ALLOWED_IMPORTS, FORBIDDEN, FORBIDDEN_ATTRIBUTES
         result['code_contract'].update(
-            tables='Mapping of actual table_id to complete DataTable dict: columns, column_types, units, rows.',
+            tables=('Mapping of actual table_id to complete DataTable dict: '
+                    'id, table_id, columns, column_types, units, rows.'),
             return_value=('Return an ExecutedAnalysis object, not final Analysis: results is a list of actual '
                           'ExecutedResult rows. Use plan.questions question_id values and actual column references.'),
             return_schema=ExecutedAnalysis.model_json_schema(),
@@ -1033,6 +1036,7 @@ def paper_prepare_candidate(output: dict, receipts: list[dict]) -> dict:
     ctx, receipts = context(), [resolve_receipt(item) for item in (receipts or [])]
     pool = base_pool(ctx) if ctx.step_id != 'finish' else None
     output = copy.deepcopy(output)
+    quality_warnings = []
     selected_ids = output.pop('selected_paper_ids', [])
     source_imports = []
     if selected_ids:
@@ -1127,11 +1131,15 @@ def paper_prepare_candidate(output: dict, receipts: list[dict]) -> dict:
             meta = generated.get('result_meta') or {}
             if (meta.get('data_origin') == 'user_supplied' and meta.get('execution_status') == 'not_run'
                     and generated.get('experiment', {}).get('executed') is False
-                    and not generated.get('code_files')):
-                if generated.get('code_files') == '':
-                    generated['code_files'] = []
+                    and generated.get('code_files', []) in ([], '')):
+                generated['code_files'] = []
                 generated['experiment']['results'] = resolve_bound_tables(
                     generated['experiment'].get('results'), inputs)
+                # Bound tables carry their types; preparation has no new execution seed.
+                meta.update(seed=None, column_types=None)
+                for field in ('metrics', 'assumptions'):
+                    if meta.get(field) in (None, ''):
+                        meta[field] = []
             if meta.get('data_origin') == 'synthetic':
                 policy = ctx.values.get('paper_execution_policy') or {}
                 supplied = inputs.get('input_is_demo') and matches_bound_data(
@@ -1210,7 +1218,7 @@ def paper_prepare_candidate(output: dict, receipts: list[dict]) -> dict:
         if module in {'write_outline', 'write_document', 'revise_document'}:
             from .writing.common import _heading_signature, validate_result
             if module == 'write_document':
-                validate_result(generated, inputs)
+                validate_result(generated, inputs, quality_warnings=quality_warnings)
             else:
                 _heading_signature(generated['outline' if module == 'write_outline' else 'manuscript'])
             from .publication import validate_citations, validate_chart_references, figure_catalog
@@ -1218,7 +1226,12 @@ def paper_prepare_candidate(output: dict, receipts: list[dict]) -> dict:
             body = generated['outline' if module == 'write_outline' else 'manuscript']
             validate_citations(body, inputs.get('papers', []))
             validate_chart_references(body, figure_catalog(inputs.get('charts', []), inputs.get('media_assets')))
-            validate_required_sections(body, inputs.get('constraints', {}))
+            try:
+                validate_required_sections(body, inputs.get('constraints', {}))
+            except ValueError as error:
+                if module != 'write_document':
+                    raise
+                quality_warnings.append(str(error))
         if module == 'write_document':
             import re
             from .publication import split_references, prose
@@ -1229,7 +1242,7 @@ def paper_prepare_candidate(output: dict, receipts: list[dict]) -> dict:
                 if inputs['constraints']['paper_language'] == 'zh-CN':
                     count += len(re.findall(r'[\u4e00-\u9fff]', body))
                 if not 0.9 * target <= count <= 1.1 * target:
-                    raise ValueError(f'稿件篇幅 {count} 与目标 {target} 不符，允许 ±10%；请在已有证据范围修复')
+                    quality_warnings.append(f'稿件篇幅 {count} 与目标 {target} 存在偏差（参考范围 ±10%），已保存供审阅')
             from .publication import publish_charts, publish_citations, figure_catalog
             generated['manuscript'] = publish_charts(
                 generated['manuscript'], figure_catalog(inputs.get('charts', []), inputs.get('media_assets')))
@@ -1245,8 +1258,16 @@ def paper_prepare_candidate(output: dict, receipts: list[dict]) -> dict:
         main = {'research_topic': 'question', 'literature_review': 'evidence', 'experiment': 'experiment',
                 'data_analysis': 'analysis', 'write_outline': 'outline', 'write_document': 'manuscript',
                 'peer_review': 'review', 'revise_document': 'manuscript', 'reading_reflection': 'reflection'}[module]
+        if isinstance(generated[main], str) and module != 'revise_document':
+            from ..artifacts import normalize_generated_markdown
+            generated[main] = normalize_generated_markdown(generated[main])
         is_demo = generated['is_demo'] or any(material(pool, key)['mock'] for key in relevant if material(pool, key))
         document = (generated[main] if isinstance(generated[main], str) else render_material(main, generated[main]))
+        if module == 'experiment' and generated['experiment']['results']:
+            from .experiment.render import render_tables
+            results = generated['experiment']['results']
+            tables = results.get('tables') or [{'description': '', 'table': results}]
+            document += '\n\n' + render_tables(tables)
         if main == 'analysis':
             from .analysis.render import render
             document = render(generated[main])
@@ -1278,6 +1299,8 @@ def paper_prepare_candidate(output: dict, receipts: list[dict]) -> dict:
         pool['sequence'] += 1
         pool['history'].append({'node': STEP_NODE[ctx.step_id], 'step': ctx.step_id,
                                 'request': ctx.request, 'inputs': derived, 'outputs': refs})
+        if quality_warnings:
+            pool['history'][-1]['quality_warnings'] = quality_warnings
         if module == 'data_analysis':
             pool['history'][-1]['analysis_input_sha256'] = analysis_input_digest(inputs)
             pool['history'][-1]['analysis_execution'] = [
@@ -1294,10 +1317,10 @@ def paper_prepare_candidate(output: dict, receipts: list[dict]) -> dict:
         if module == 'revise_document':
             artifacts.append(_file('revision_fact_check_document', '修订后事实核对.md', generated['review']))
         if module == 'experiment':
-            artifacts.extend([
-                _file('experiment_code', 'experiment-code.json', canonical(generated['code_files'])),
-                _file('experiment_results', 'experiment-results.json', canonical(generated['result_meta'])),
-            ])
+            from .experiment.artifacts import export_experiment
+            with tempfile.TemporaryDirectory(prefix='paper-experiment-') as directory:
+                files = export_experiment(generated, directory, inputs.get('data') or inputs.get('source_data'))
+                artifacts.extend(_file(slot, Path(path).name, Path(path).read_bytes()) for slot, path in files.items())
         if module == 'data_analysis':
             executions = [unseal(ctx, item, 'analysis') for item in receipts
                           if item.get('payload', {}).get('kind') == 'analysis']
@@ -1324,6 +1347,7 @@ def paper_prepare_candidate(output: dict, receipts: list[dict]) -> dict:
     artifacts.append({'slot': ctx.step_id + '_receipt', 'seq': 1, 'content_type': 'json',
                       'value': seal(ctx, 'publication', manifest)})
     return {'status': 'validated', 'artifacts': artifacts,
+            'quality_warnings': quality_warnings,
             'quality_owner': 'executing_agent', 'notice': '程序校验不代表科学或视觉检查通过。'}
 
 
@@ -1360,9 +1384,11 @@ def paper_submit_candidate(output: dict, receipts: list[dict]) -> dict:
             artifacts.append({'key': item['slot'], 'content_type': item['content_type'], 'value': value,
                               })
         saved = [save_artifacts(artifacts[start:start + 50]) for start in range(0, len(artifacts), 50)]
-    return {'status': 'completed', 'saved': saved,
+    return {'status': 'completed', 'saved': saved, 'quality_warnings': result['quality_warnings'],
             '_agent_control': {'stop': True, 'reason': 'paper_candidate_submitted',
-                               'final_text': '产物已保存，请在工作流中查看。'}}
+                               'final_text': '产物已保存，请在工作流中查看。'
+                               + ('\n质量提示：' + '；'.join(result['quality_warnings'])
+                                  if result['quality_warnings'] else '')}}
 
 
 @json_arguments

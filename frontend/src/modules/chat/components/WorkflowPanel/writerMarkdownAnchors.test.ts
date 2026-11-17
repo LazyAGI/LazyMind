@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { isWriterSystemAnchorBlock } from './writerIR';
 import {
+  normalizePaperHeadingNumbers,
   applyWriterMarkdownInternalReference,
   collectWriterMarkdownDomAnchors,
   collectWriterMarkdownOutline,
@@ -576,4 +577,13 @@ describe('paper bibliography references', () => {
     expect(removeWriterMarkdownInternalReference(source, 'Alpha[1] beta[1]', 5, '[1]'))
       .toBe(`Alpha beta${citation}\n\n${bibliography}`);
   });
+});
+
+
+it('normalizes paper heading labels without changing quantities, lists or fenced examples', () => {
+  const source = '# 2026 Study\r\n## 1. Background\r\n### 1.2 Methods ###\r\n## 一、结果\r\n'
+    + '## 3.3V supply\r\n## 1.5℃ rise\r\n1. List item\r\n```md\r\n## 1. Example\r\n```\r\n';
+  const result = normalizePaperHeadingNumbers(source);
+  expect(result).toBe(source.replace('## 1. Background', '## Background')
+    .replace('### 1.2 Methods', '### Methods').replace('## 一、结果', '## 结果'));
 });

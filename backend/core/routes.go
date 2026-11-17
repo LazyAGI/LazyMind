@@ -66,6 +66,7 @@ import (
 	workflowexecutor "lazymind/core/workflow/executor"
 	workflowfacade "lazymind/core/workflow/facade"
 	workflowhosted "lazymind/core/workflow/hosted"
+	"lazymind/core/workflow/paperadapter"
 	workflowstore "lazymind/core/workflow/store"
 	workflowstream "lazymind/core/workflow/stream"
 	"lazymind/core/workflowtool"
@@ -248,7 +249,7 @@ func registerAllRoutes(r *mux.Router) {
 		Contexts:  workflowexecutor.DBContextLoader{DB: corestore.DB()},
 		Artifacts: workflowexecutor.DBArtifactSink{DB: corestore.DB()},
 	}
-	attemptHandler := workflowattempt.Handler{Service: workflowattempt.New(corestore.DB(), workflowattempt.Config{})}
+	attemptHandler := workflowattempt.Handler{Service: workflowattempt.New(corestore.DB(), workflowattempt.Config{OnClaim: workflowexecutor.FreezePaperInputs})}
 	remoteExecutorHandler := workflowexecutor.RemoteHandler{
 		DB: corestore.DB(), Attempts: attemptHandler.Service,
 		Finish: func(ctx context.Context, owner, sessionID, attemptID string, input workflowexecutor.Completion) error {
@@ -271,7 +272,10 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "POST", "/internal/workflow-attempts/{attempt_id}:stop-ack", nil, workflow.ConfirmNativeStopHTTP)
 	handleAPI(r, "POST", "/internal/workflow-attempts/{attempt_id}/model/v1/chat/completions", nil, workflow.ModelCompletion)
 	hostedHandler := workflowhosted.Handler{Service: hostedService}
-	workflowToolHandler := workflowtool.Handler{Service: &workflowtool.Service{DB: corestore.DB()}}
+	workflowToolService := &workflowtool.Service{DB: corestore.DB()}
+	paperToolAdapter := &paperadapter.Adapter{DB: corestore.DB(), ReadKnowledge: workflowToolService.ReadSelectedKnowledge}
+	workflowToolService.Adapters = map[string]workflowtool.ToolAdapter{"paper-agent-v1": paperToolAdapter}
+	workflowToolHandler := workflowtool.Handler{Service: workflowToolService}
 	workflowControl := workflow.WorkflowControlHandler{Service: workflow.WorkflowControlService{DB: corestore.DB()}}
 	handleAPI(r, "GET", "/workflow-control/capabilities", []string{"qa.read"}, workflowControl.Capabilities)
 
@@ -749,7 +753,7 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "POST", "/workflow-sessions/{session_id}/hosted-attempts/{attempt_id}/artifacts", []string{"qa.write"}, hostedHandler.Publish)
 	handleAPI(r, "POST", "/workflow-sessions/{session_id}/hosted-attempts/{attempt_id}/tools:list", []string{"qa.read"}, workflowToolHandler.List)
 	handleAPI(r, "POST", "/workflow-sessions/{session_id}/hosted-attempts/{attempt_id}/workers:grant", []string{"qa.write"}, workflowToolHandler.GrantWorker)
-	handleAPI(r, "POST", "/internal/workflow-attempts/{attempt_id}/paper-data", nil, workflowToolHandler.PaperData)
+	handleAPI(r, "POST", "/internal/workflow-attempts/{attempt_id}/paper-data", nil, paperToolAdapter.Data)
 	handleAPI(r, "POST", "/workflow-sessions/{session_id}/hosted-attempts/{attempt_id}/tools:call", []string{"qa.write"}, workflowToolHandler.Call)
 	handleAPI(r, "POST", "/workflow-sessions/{session_id}/input-bindings", []string{"qa.write"}, workflowFacade.BindInput)
 	handleAPI(r, "GET", "/workflow-sessions/{session_id}/input-bindings", []string{"qa.read"}, workflowFacade.ListInputs)

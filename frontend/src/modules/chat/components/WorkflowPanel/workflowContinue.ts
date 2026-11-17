@@ -21,6 +21,11 @@ export function resolveWorkflowContinueAction(
   const nodes = session.projection?.nodes ?? {};
   if (Object.values(nodes).some((node) => node.validity !== 'stale'
     && ['pending', 'queued', 'claimed', 'running', 'failed'].includes(node.execution))) return undefined;
+  if (displayStatus === 'waiting' && session.projection?.display?.reason === 'next_step_required'
+    && !session.projection.completed) {
+    const stepId = session.projection.ready?.[0];
+    return stepId ? { kind: 'advance', stepId } : undefined;
+  }
   if (session.projection?.display?.reason === 'inputs_changed') {
     const stepId = session.projection.ready?.[0];
     return stepId ? { kind: 'regenerate', stepId } : undefined;

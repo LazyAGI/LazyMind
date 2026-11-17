@@ -1763,8 +1763,10 @@ def test_run_subagent_stream_task_not_found(monkeypatch):
 # ---------------------------------------------------------------------------
 
 @pytest.mark.parametrize("display_plan", [["Read inputs", "Analyze data", "Write result"], None])
-def test_run_subagent_stream_happy_path(monkeypatch, display_plan):
-    db = _install_fake_db(monkeypatch)
+@pytest.mark.parametrize('agent_type', ['test', 'workflow_step'])
+def test_run_subagent_stream_happy_path(monkeypatch, display_plan, agent_type):
+    task = {**_DEFAULT_TASK, 'agent_type': agent_type}
+    db = _install_fake_db(monkeypatch, task)
     _install_fake_lazyllm(monkeypatch)
     _install_fake_build(monkeypatch)
     _install_fake_translator(monkeypatch)
@@ -1802,7 +1804,7 @@ def test_run_subagent_stream_happy_path(monkeypatch, display_plan):
 
     async def run():
         return await _collect(runner_mod.run_subagent_stream(
-            _DEFAULT_TASK_ID, task_spec={**_DEFAULT_TASK},
+            _DEFAULT_TASK_ID, task_spec=task,
         ))
 
     raw = asyncio.run(run())
@@ -1820,7 +1822,8 @@ def test_run_subagent_stream_happy_path(monkeypatch, display_plan):
         assert 'plan' not in types_out
 
     assert 'text' in types_out
-    assert 'progress' in types_out   # tool_results progress bump
+    progress = [event['progress'] for event in events_out if event['type'] == 'progress']
+    assert progress == ([0] if agent_type == 'workflow_step' else [5, 20])
     assert 'done' in types_out
     assert raw.endswith('data: [DONE]\n\n')
 
@@ -2861,3 +2864,44 @@ async def test_workflow_refinements_preserve_record_acceptance(monkeypatch, tmp_
     if not saved:
         assert _terminal(events)['current_phase'] == 'missing_required_artifacts'
     model.share.assert_not_called()
+
+
+
+def test_paper_candidate_preview_is_forwarded_before_tool_call_completes(monkeypatch):
+    task = {**_DEFAULT_TASK, 'agent_type': 'workflow_step', 'params': {
+        'workflow_id': 'paper-writing', 'step_id': 'write_outline',
+        'required_output_artifact_keys': ['write_outline_document']}}
+    _install_fake_db(monkeypatch, task)
+    _install_fake_lazyllm(monkeypatch)
+    _install_fake_build(monkeypatch)
+    _install_fake_translator(monkeypatch)
+    monkeypatch.setattr(runner_mod, 'set_context', lambda ctx: ctx.record_local_artifact(
+        'write_outline_document', 'text', {'text': '# Live outline'}, 1))
+    delivered = asyncio.Event()
+
+    class CandidateExecutor:
+        async def stream(self, llm, plan):
+            yield 'event', {'tag': 'tool_call_delta', 'delta': json.dumps([{
+                'index': 0, 'function': {'name': 'paper_submit_candidate',
+                    'arguments': '{"output":{"outline":"# Live outline'}}])}
+            await asyncio.wait_for(delivered.wait(), timeout=3)
+            yield 'event', {'tag': 'tool_call_delta', 'delta': json.dumps([{
+                'index': 0, 'function': {'arguments': '"},"receipts":[]}'}}])}
+            yield 'event', {'tag': 'tool_calls', 'tool_calls': [{
+                'id': 'candidate', 'name': 'paper_submit_candidate',
+                'args': {'output': {'outline': '# Live outline'}, 'receipts': []}}]}
+            yield 'event', {'tag': 'tool_results', 'tool_results': [{
+                'id': 'candidate', 'name': 'paper_submit_candidate', 'result': 'ok'}]}
+            yield 'final', 'done'
+
+    monkeypatch.setattr(runner_mod, 'AgentExecutor', CandidateExecutor)
+    def on_chunk(chunk):
+        if any(event.get('type') == 'artifact_stream' for event in _sse_to_events(chunk)):
+            delivered.set()
+    async def run():
+        return await _collect(runner_mod.run_subagent_stream(_DEFAULT_TASK_ID, task_spec=task), on_chunk=on_chunk)
+    events = _sse_to_events(asyncio.run(run()))
+    types = [event.get('type') for event in events]
+    assert types.index('artifact_stream') < types.index('tool_calls')
+    assert ''.join(event.get('delta', '') for event in events if event.get('type') == 'artifact_stream') == '# Live outline'
+    assert all(event['task_id'] == _DEFAULT_TASK_ID for event in events if event.get('type', '').startswith('artifact_stream'))

@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 import re
 import time
+from urllib.parse import quote
 from uuid import UUID
 
 import httpx
@@ -60,6 +61,22 @@ async def authorized_task(task_id, authorization):
         if (task.get('task_id') != task_id or task.get('agent_type') != 'workflow_step'
                 or task.get('title') != 'paper-writing:data_analysis'):
             raise HTTPException(404, 'Task not found')
+        # Reuse Core's owner-checked durable Agent history; no second execution trace or model call.
+        conversation_id = task.get('conversation_id')
+        if conversation_id:
+            async with httpx.AsyncClient(timeout=10, trust_env=False, follow_redirects=False) as client:
+                response = await client.get(
+                    GATEWAY + '/api/core/conversations/' + quote(conversation_id, safe='') + '/tasks',
+                    headers={'Authorization': authorization})
+            if response.status_code != 200:
+                raise HTTPException(503, 'Analysis history is temporarily unavailable')
+            body = response.json()
+            value = body.get('data', body)
+            for item in value.get('tasks', []):
+                if (item.get('task_id') == task_id
+                        and item.get('execution_id') == task.get('execution_id')):
+                    task['analysis_steps'] = item.get('steps', [])
+                    break
         return task
     except (httpx.HTTPError, ValueError, TypeError, AttributeError):
         raise HTTPException(503, 'Progress is temporarily unavailable') from None
@@ -114,6 +131,11 @@ def read_snapshot(task_id, task):
                         value['error'] = public_error(saved.get('error'))
         except (OSError, ValueError, KeyError, TypeError):
             pass  # Startup and atomic replacement may briefly have no readable public snapshot.
+    if not value['process_steps']:
+        from .agent_progress import project
+        progress = project(task)
+        if progress:
+            value.update(progress)
     value['status'] = task['status']
     if value['status'] in ('succeeded', 'failed', 'canceled', 'interrupted') and not value['timing']['finished_at']:
         value['timing']['finished_at'] = task.get('updated_at')

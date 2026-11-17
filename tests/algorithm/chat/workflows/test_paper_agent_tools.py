@@ -371,7 +371,7 @@ def test_real_external_registry_uses_same_candidate_function(paper_context):
     assert 'paper_prepare_candidate' in names
     assert 'paper_submit_candidate' not in names and 'run_paper_step' not in names
     result = call_external_tool(ExternalToolCallRequest(**request, tool_name='paper_prepare_candidate',
-                                arguments={'output': outline(), 'receipts': [], '__paper_context': asdict(paper_context)}))
+                                trusted_context=asdict(paper_context), arguments={'output': outline(), 'receipts': []}))
     assert tools.verify_publication(paper_context, result['result']['artifacts']) == {'valid': True}
 
 
@@ -445,14 +445,26 @@ def test_native_tool_schemas_and_spill_reader_keep_restricted_surface(paper_cont
             tools.paper_read_result('workspace://tool_spills/anything.txt')
 
 
-def test_explicit_manuscript_length_is_enforced_without_new_facts(paper_context):
+@pytest.mark.parametrize('words', [4105, 5766])
+def test_manuscript_quality_checks_warn_without_blocking_publication(paper_context, words):
     pool = pool_from_business({'topic': 'Study', 'evidence': 'Known evidence',
-                              'constraints': {'paper_language': 'en', 'word_target': 5000},
+                              'constraints': {'paper_language': 'en', 'word_target': 5000,
+                                              'required_sections': ['conclusion']},
                               'outline': '# Study\n\n## Methods\nDescribe observations.'})
     ctx = replace(paper_context, step_id='write_document', values={'seed_pool': pool})
+    manuscript = '# Study\n\n### Observations\n' + 'evidence ' * words
     with tools.paper_scope(ctx):
-        with pytest.raises(ValueError, match='篇幅'):
-            tools.paper_prepare_candidate({'manuscript': '# Study\n\n## Methods\nToo short.'}, receipts=[])
+        result = tools.paper_prepare_candidate({'manuscript': manuscript}, receipts=[])
+    assert result['status'] == 'validated'
+    assert any('篇幅' in warning for warning in result['quality_warnings'])
+    assert any('大纲' in warning for warning in result['quality_warnings'])
+    assert any('章节' in warning for warning in result['quality_warnings'])
+    stored = pool_from_bundle(result, 'write_document')
+    assert stored['history'][-1]['quality_warnings'] == result['quality_warnings']
+    assert 'evidence' in material(stored, 'manuscript')['content']
+    assert tools.verify_publication(ctx, result['artifacts']) == {'valid': True}
+    with tools.paper_scope(ctx), pytest.raises(ValueError):
+        tools.paper_prepare_candidate({'manuscript': manuscript + '\n[文献:invented-source]'}, receipts=[])
 
 
 def test_new_reading_sources_are_recorded_from_receipts(paper_context):
@@ -653,7 +665,12 @@ def test_native_steps_offer_only_the_saving_candidate_boundary():
 
 
 @pytest.mark.parametrize('no_code', [[], ''])
-def test_existing_table_references_preserve_all_measurements(paper_context, no_code):
+@pytest.mark.parametrize('metadata', [
+    {},
+    {'seed': '', 'metrics': '', 'assumptions': ''},
+    {'seed': 42, 'column_types': {'observed': {'score': 'number'}}},
+])
+def test_existing_table_references_preserve_all_measurements(paper_context, no_code, metadata):
     table = {'columns': ['score'], 'column_types': ['number'], 'units': ['s'], 'rows': [[2.0], [3.0]]}
     data = {'tables': [{'id': 'observed', 'description': 'Actual observations', 'table': table}]}
     ctx = replace(paper_context, step_id='experiment', values={'seed_pool': pool_from_business({
@@ -662,8 +679,8 @@ def test_existing_table_references_preserve_all_measurements(paper_context, no_c
                              'results': {'table_ids': ['observed']}, 'report': 'No new experiment.'},
               'code_files': no_code, 'result_meta': {
                   'execution_status': 'not_run', 'data_origin': 'user_supplied', 'method': 'empirical',
-                  'reason': 'Supplied observations.', 'assumptions': [], 'metrics': [], 'seed': None,
-                  'column_types': {'score': 'number'}, 'input_table_ids': ['observed']}}
+                  'reason': 'Supplied observations.', 'input_table_ids': ['observed'], **metadata}}
+    original = copy.deepcopy(output)
     with tools.paper_scope(ctx):
         bundle = tools.paper_prepare_candidate(output, receipts=[])
         invalid_code = copy.deepcopy(output)
@@ -674,11 +691,63 @@ def test_existing_table_references_preserve_all_measurements(paper_context, no_c
         wrong['experiment']['results'] = {'table_id': 'not-bound'}
         with pytest.raises(ValueError, match='固定输入'):
             tools.paper_prepare_candidate(wrong, receipts=[])
+        for state in ({'execution_status': 'succeeded'}, {'data_origin': 'observed'}):
+            false_claim = copy.deepcopy(output)
+            false_claim['result_meta'].update(state)
+            with pytest.raises(ValueError):
+                tools.paper_prepare_candidate(false_claim, receipts=[])
     pool = pool_from_bundle(bundle, 'experiment')
-    assert material(pool, 'experiment')['content']['results'] == data
+    experiment = material(pool, 'experiment')['content']
+    meta = material(pool, 'result_meta')['content']
+    assert experiment['results'] == data
     assert material(pool, 'code_files')['content'] == []
-    assert output['experiment']['results'] == {'table_ids': ['observed']}
+    assert meta['seed'] is None and meta['column_types'] is None
+    assert meta['metrics'] == meta['assumptions'] == []
+    from lazymind.document_tools.paper.experiment.handoff import to_analysis
+    assert to_analysis({'topic': 'Study', 'experiment': experiment, 'result_meta': meta})['data'] == data
+    assert output == original
 
+
+
+def test_experiment_publication_includes_actual_rows_and_complete_downloads(paper_context):
+    import io
+    import json
+    from zipfile import ZipFile
+
+    data = {'tables': [
+        {'id': 'correctness', 'description': 'Uploaded material；Deletion results；来源 upload，原文第 1—4 行。',
+         'table': {'columns': ['criterion', 'success', 'total'], 'column_types': ['string', 'integer', 'integer'],
+                   'units': [None, None, None], 'rows': [['Final task success', 28, 30]]}},
+        {'id': 'timing', 'description': 'Uploaded material；Runtime observations',
+         'table': {'columns': ['duration', 'note'], 'column_types': ['number', 'string'],
+                   'units': ['s', None], 'rows': [[154.697, None]]}},
+    ]}
+    ctx = replace(paper_context, step_id='experiment', values={'seed_pool': pool_from_business({
+        'topic': 'Study', 'data': data})})
+    output = {'experiment': {'executed': False, 'plan': 'Organize the original observations.',
+                             'results': {'table_ids': ['correctness', 'timing']},
+                             'report': 'Two tables were prepared without new measurements.'},
+              'code_files': [], 'result_meta': {
+                  'execution_status': 'not_run', 'data_origin': 'user_supplied', 'method': 'empirical',
+                  'reason': 'Use existing observations.', 'input_table_ids': ['correctness', 'timing']}}
+    original = copy.deepcopy(output)
+    with tools.paper_scope(ctx):
+        bundle = tools.paper_prepare_candidate(output, receipts=[])
+    files = {item['slot']: base64.b64decode(item['value']['content_base64'])
+             for item in bundle['artifacts'] if item['content_type'] == 'file'}
+    report = files['experiment_document'].decode()
+    assert '| Final task success | 28 | 30 |' in report
+    assert '| 154.697 | 缺失 |' in report and 'duration（s）' in report
+    manifest = json.loads(files['experiment_results'])
+    assert manifest['experiment']['results'] == data
+    assert manifest['result_meta']['data_origin'] == 'user_supplied'
+    with ZipFile(io.BytesIO(files['experiment_code'])) as archive:
+        assert json.loads(archive.read('results.json')) == data
+        assert '28,30' in archive.read('correctness.csv').decode()
+        assert '154.697,' in archive.read('timing.csv').decode()
+        assert 'experiment.py' not in archive.namelist()
+    assert tools.verify_publication(ctx, bundle['artifacts']) == {'valid': True}
+    assert output == original
 
 def test_raw_table_import_survives_literature_filtering_without_duplicates(paper_context):
     from lazymind.document_tools.paper.workflow import add_material
@@ -811,8 +880,8 @@ def test_compact_contract_preserves_full_materials_and_schema_pages(paper_contex
     assert pool == original
 
 
-
-def test_native_and_registered_external_adapter_share_compact_index(paper_context, monkeypatch, tmp_path):
+@pytest.mark.parametrize('step', ['write_outline', 'experiment'])
+def test_native_and_registered_external_adapter_share_preparation(paper_context, monkeypatch, tmp_path, step):
     import json
     from dataclasses import asdict
     from pathlib import Path
@@ -823,7 +892,12 @@ def test_native_and_registered_external_adapter_share_compact_index(paper_contex
     from lazymind.document_tools.paper.workflow import add_material
     add_material(pool, 'papers', [{'id': 'p1', 'title': 'Source', 'text': 'Actual source. ' * 2000,
                                  'citation': 'Source.'}], [], [])
-    ctx = replace(paper_context, values={'seed_pool': pool})
+    if step == 'experiment':
+        add_material(pool, 'source_data', {'tables': [{
+            'id': 'observed', 'description': 'Actual observations',
+            'table': {'columns': ['score'], 'column_types': ['number'], 'units': ['s'], 'rows': [[2.0], [3.0]]},
+        }]}, [], [])
+    ctx = replace(paper_context, step_id=step, values={'seed_pool': pool})
     path = tmp_path / 'bound-pool.json'
     path.write_text(json.dumps(pool))
     identity = asdict(ctx)
@@ -842,11 +916,21 @@ def test_native_and_registered_external_adapter_share_compact_index(paper_contex
 
     def external(name, arguments):
         return call_external_tool(ExternalToolCallRequest(
-            **envelope, tool_name=name, arguments={**arguments, '__paper_context': asdict(ctx)}))['result']
+            **envelope, tool_name=name, trusted_context=asdict(ctx), arguments=arguments))['result']
     assert external('paper_prepare_inputs', {}) == native_index
     ref = native_index['input']['papers']['material_id']
     args = {'material_id': ref, 'offset': 100, 'limit': 4000}
     assert external('paper_read_material', args) == tools.paper_read_material(**args)
+    if step == 'experiment':
+        candidate = copy.deepcopy(native_index['existing_data_candidate_example'])
+        candidate['output']['result_meta'].update(seed='', metrics='', column_types={'observed': {'score': 'number'}})
+        native_bundle = tools.paper_prepare_candidate(**candidate)
+        external_bundle = external('paper_prepare_candidate', candidate)
+        assert pool_from_bundle(external_bundle, step) == pool_from_bundle(native_bundle, step)
+        assert tools.verify_publication(ctx, external_bundle['artifacts']) == {'valid': True}
+        accepted = pool_from_bundle(external_bundle, step)
+        assert material(accepted, 'result_meta')['content']['seed'] is None
+        assert material(accepted, 'experiment')['content']['results'] == material(pool, 'source_data')['content']
     assert path.read_text() == json.dumps(pool)
 
 
@@ -873,3 +957,16 @@ def test_search_uses_shared_multi_source_api_and_reads_actual_abstract(paper_con
         assert read['paper']['reading']['content_type'] == 'abstract'
         assert tools.unseal(ctx, read['receipt'], 'papers')[0] == read['paper']
     assert all(kwargs['limit'] == 2 for _, kwargs in calls)
+
+
+def test_paper_candidate_uses_existing_heading_normalization_before_publication(paper_context):
+    source = '# 2026 Study\n\n## 1. Methods\n## 3.3V supply\n\n1. Original list\n'
+    with tools.paper_scope(paper_context):
+        result = tools.paper_prepare_candidate({'outline': source}, receipts=[])
+    accepted = pool_from_bundle(result)
+    assert material(accepted, 'outline')['content'] == source.replace('## 1. Methods', '## Methods')
+    document = next(item for item in result['artifacts'] if item['slot'] == 'write_outline_document')
+    text = base64.b64decode(document['value']['content_base64']).decode()
+    assert '## 1. Methods' not in text
+    assert '## Methods' in text
+    assert '## 3.3V supply' in text

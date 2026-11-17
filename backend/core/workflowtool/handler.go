@@ -102,22 +102,6 @@ func (h Handler) Call(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	input.ExecutionHandle = handle
-	if strings.HasPrefix(input.ToolName, "paper_") {
-		contract, _, authErr := executor.AuthorizeExternalToolCall(r.Context(), h.Service.DB, owner, vars["session_id"], vars["attempt_id"], handle, input.ToolName)
-		if authErr != nil {
-			serviceError(w, authErr)
-			return
-		}
-		scope, scopeErr := executor.PaperToolContext(r.Context(), h.Service.DB, contract)
-		if scopeErr != nil {
-			serviceError(w, scopeErr)
-			return
-		}
-		if input.Arguments == nil {
-			input.Arguments = map[string]any{}
-		}
-		input.Arguments["__paper_context"] = scope
-	}
 	result, err := h.Service.Call(withDataToolCaller(r.Context(), r.Header), owner, vars["session_id"], vars["attempt_id"], input)
 	if err != nil {
 		serviceError(w, err)

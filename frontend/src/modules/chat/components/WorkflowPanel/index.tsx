@@ -2252,7 +2252,7 @@ export function WorkflowPanel({
           ? { session_id: sessionId, kind: 'rewind', step_id: completedContinueStepId, expected_state_version: latest?.state_version ?? 0 }
           : display?.status === 'paused'
             ? { session_id: sessionId, kind: 'resume', expected_state_version: latest?.state_version ?? 0 }
-            : continueAction?.kind === 'regenerate'
+            : continueAction?.kind === 'regenerate' || continueAction?.kind === 'advance'
               ? { session_id: sessionId, kind: 'continue', expected_state_version: latest?.state_version ?? 0 } : undefined);
       } catch (error) { antdMessage.error(getLocalizedErrorMessage(error)); }
     }, undefined, true, continueAction?.kind === 'advance');

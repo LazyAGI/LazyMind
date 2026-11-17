@@ -4,6 +4,7 @@ import { AgentAppsAuth } from '@/components/auth';
 import { axiosInstance, BASE_URL } from '@/components/request';
 import { Method, SSE } from '@/modules/chat/utils/sse';
 import type { WorkflowSession } from '@/modules/chat/store/workflowPanel';
+import { useTaskCenterStore } from '@/modules/chat/store/taskCenter';
 import './PaperAnalysisProgress.scss';
 
 type Output = { text: string; estimated_tokens: number; format: 'json' | 'python' | 'text'; mode: 'streaming' | 'buffered' | 'complete' | 'interrupted'; truncated?: boolean };
@@ -40,14 +41,14 @@ function duration(ms: number) {
   return seconds < 60 ? `${seconds} 秒` : `${Math.floor(seconds / 60)} 分 ${String(seconds % 60).padStart(2, '0')} 秒`;
 }
 
-function ModelOutput({ output, reasoning = false }: { output: Output; reasoning?: boolean }) {
+function ModelOutput({ output, reasoning = false, title }: { output: Output; reasoning?: boolean; title?: string }) {
   const [visible, setVisible] = useState(!reasoning && output.mode === 'buffered' ? '' : output.text);
   const [reasoningOpen, setReasoningOpen] = useState(false);
   const body = useRef<HTMLPreElement>(null);
   const follow = useRef(true);
-  const label = reasoning ? `模型推理 · ${output.mode === 'streaming' ? '正在返回' : output.mode === 'interrupted' ? '已中断' : '已返回'}`
+  const label = title ?? (reasoning ? `模型推理 · ${output.mode === 'streaming' ? '正在返回' : output.mode === 'interrupted' ? '已中断' : '已返回'}`
     : output.mode === 'streaming' ? '模型正在返回内容' : output.mode === 'buffered'
-    ? '结果已返回，分段展示' : output.mode === 'interrupted' ? '本次返回已中断' : '模型返回内容 · 仍以最终校验结果为准';
+    ? '结果已返回，分段展示' : output.mode === 'interrupted' ? '本次返回已中断' : '模型返回内容 · 仍以最终校验结果为准');
   useEffect(() => {
     if (reasoning || output.mode !== 'buffered' || window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) {
       setVisible(output.text); return;
@@ -74,11 +75,12 @@ function ModelOutput({ output, reasoning = false }: { output: Output; reasoning?
   </details>;
 }
 
-/** F4-only public execution view; no raw task/debug endpoint is requested. */
+/** Legacy F4 phases and current Agent activity share the same bound task. */
 export function PaperAnalysisProgress({ session, active = true }: { session: WorkflowSession; active?: boolean }) {
   const step = (session.steps ?? []).filter(item => item.step_id === 'data_analysis' && item.validity !== 'stale')
     .slice().sort((a, b) => b.attempt - a.attempt || Date.parse(b.created_at) - Date.parse(a.created_at))[0];
   const taskId = step?.task_id;
+  const task = useTaskCenterStore(state => state.tasksByConversation[session.conversation_id]?.find(item => item.task_id === taskId));
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
   const [expanded, setExpanded] = useState(false);
   const [connected, setConnected] = useState(true);
@@ -133,7 +135,8 @@ export function PaperAnalysisProgress({ session, active = true }: { session: Wor
     return () => { alive = false; stream?.close(); if (retry) clearTimeout(retry); };
   }, [taskId, active, reload]);
   const view = snapshot?.task_id === taskId ? snapshot : null;
-  const status = view?.status ?? step?.status ?? 'pending';
+  const status = step && terminal.has(step.status) ? step.status : view && terminal.has(view.status) ? view.status
+    : task?.status ?? view?.status ?? step?.status ?? 'pending';
   const running = !terminal.has(status);
   useEffect(() => {
     if (!active || !running) return;
@@ -150,14 +153,14 @@ export function PaperAnalysisProgress({ session, active = true }: { session: Wor
   const currentWait = current?.started_at ? now - Date.parse(current.started_at) : 0;
   const retrying = !!current?.summary?.includes('连接已断开');
   const label = status === 'succeeded' ? '分析完成，产物已保存' : status === 'failed' ? '本次分析未完成'
-    : status === 'canceled' || status === 'interrupted' ? '本次分析已停止' : current?.title ?? (steps.length ? '正在确认阶段结果' : '正在启动数据分析');
+    : status === 'canceled' || status === 'interrupted' ? '本次分析已停止' : current?.title ?? (steps.length ? '正在确认阶段结果' : status === 'pending' ? '等待执行数据分析' : '正在准备分析内容');
   const Mark = status === 'succeeded' ? CheckCircleOutlined : status === 'failed' || retrying ? WarningOutlined : LoadingOutlined;
   return <section className={`paper-f4-progress is-${status}`} aria-label='数据分析执行进度'>
     <div className='paper-f4-progress__overview'>
       <div className='paper-f4-progress__heading'><Mark /><strong role='status' aria-live='polite'>{label}</strong>
         <span>总耗时 {duration(Number.isFinite(start) ? end - start : 0)}</span></div>
       {running && current && <p className='paper-f4-progress__wait'>本阶段已用时 {duration(currentWait)}{current.summary ? ` · ${current.summary}` : ''}</p>}
-      <p className='paper-f4-progress__confirmed'>{completed.length ? `已完成 ${completed.length} 个执行阶段` : '等待阶段记录'}
+      <p className='paper-f4-progress__confirmed'>{completed.length ? `已完成 ${completed.length} 个执行阶段` : running ? '分析方案和阶段结果提交后将在此展示。' : '本次任务未记录可展示的分析内容。'}
         {completed.find(item => item.summary?.startsWith('计划已确定'))?.summary && ` · ${completed.find(item => item.summary?.startsWith('计划已确定'))!.summary}`}</p>
       {!connected && <div className='paper-f4-progress__notice' role='status'>进度连接暂时中断，正在重连；执行状态尚待确认。<button type='button' onClick={() => setReload(value => value + 1)}>重新连接</button></div>}
       {connected && running && currentWait >= 60000 && !current?.output?.text && !retrying && <div className='paper-f4-progress__notice'><ClockCircleOutlined />{current?.summary?.startsWith('已收到推理片段')
@@ -175,11 +178,12 @@ export function PaperAnalysisProgress({ session, active = true }: { session: Wor
           <div><div className='paper-f4-progress__step-heading'><strong>{item.title}</strong><span>{item.elapsed_ms != null ? duration(item.elapsed_ms) : item.started_at ? `已等待 ${duration(now - Date.parse(item.started_at))}` : ''}</span></div>
             {item.summary && <p>{item.summary}</p>}
             {item.reasoning?.text && (!running || item.step_id !== current?.step_id || expanded) && <ModelOutput output={item.reasoning} reasoning />}
-            {item.output && (!running || item.step_id !== current?.step_id || expanded) && <ModelOutput output={item.output} />}
+            {item.output && (!running || item.step_id !== current?.step_id || expanded) && <ModelOutput output={item.output} title={item.step_id.startsWith('f4-agent-')
+              ? item.output.format === 'python' ? '查看本轮代码' : '查看阶段内容' : undefined} />}
           </div>
         </li>)}
-        {!steps.length && <li>当前任务尚无详细阶段记录。</li>}
       </ol>
+      {!steps.length && <p className='paper-f4-progress__empty'>当前任务尚无可展示的执行记录。</p>}
     </details>
   </section>;
 }
