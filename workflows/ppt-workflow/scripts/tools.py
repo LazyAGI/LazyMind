@@ -10406,6 +10406,15 @@ def _single_selection_edit_ops(
     if not command:
         raise ValueError('instruction must not be empty')
 
+    exact_font = re.fullmatch(
+        r'(?:(?:把|将)?\s*(?:这个|该)?\s*字体\s*)?(?:换成|换为|改成|改为|设为)\s*'
+        r'(微软雅黑|Microsoft YaHei)[。！.!]?', command, re.I,
+    )
+    if exact_font and old_text:
+        family = _resolve_requested_font(exact_font[1], False)
+        styles = {'font-family': json.dumps(family, ensure_ascii=False)}
+        return [{'op': 'set_style', **target_ref, 'styles': styles}], old_text, old_text
+
     styles = _deterministic_selection_styles(command, selection)
 
     academic_op = _academic_selection_op(
