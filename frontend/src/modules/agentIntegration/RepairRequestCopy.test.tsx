@@ -6,7 +6,7 @@ import type { DesktopAgentIntegrationStatus } from "@/runtime/desktopBridge";
 import zhCN from "@/i18n/locales/zh-CN";
 import enUS from "@/i18n/locales/en-US";
 import RepairRequestCopy from "./RepairRequestCopy";
-import { AGENT_REPAIR_GUIDE_URL } from "./repairRequest";
+import { AGENT_REPAIR_DOCS_URL } from "./repairRequest";
 
 const execCommandDescriptor = Object.getOwnPropertyDescriptor(document, "execCommand");
 let copied = "";
@@ -44,7 +44,7 @@ describe("copying an Agent repair request", () => {
     };
     const view = render(<I18nextProvider i18n={i18n}><RepairRequestCopy agent="codex" status={status} /></I18nextProvider>);
     fireEvent.click(screen.getByRole("button", { name: labels.copyHint }));
-    await waitFor(() => expect(copied).toContain(AGENT_REPAIR_GUIDE_URL));
+    await waitFor(() => expect(copied).toContain(AGENT_REPAIR_DOCS_URL));
     expect(copied).toContain(`${labels.diagnosticID}: latest-check`);
     expect(copied).toContain(`${labels.mcpTrusted}: false`);
     expect(copied).toContain(`${labels.mcpConfigured}: true`);
