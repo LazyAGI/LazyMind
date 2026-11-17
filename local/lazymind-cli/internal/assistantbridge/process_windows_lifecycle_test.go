@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 	"unsafe"
@@ -228,10 +229,37 @@ func waitDetachedLifecycleFile(path, want string, timeout time.Duration) error {
 		if err == nil && (want == "" || string(body) == want) {
 			return nil
 		}
-		if err != nil && !errors.Is(err, os.ErrNotExist) {
+		// Publishing the signal can briefly deny opens on Windows.
+		if err != nil && !errors.Is(err, os.ErrNotExist) && !errors.Is(err, windows.ERROR_SHARING_VIOLATION) {
 			return err
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
 	return fmt.Errorf("timed out waiting for %s=%q", filepath.Base(path), want)
+}
+
+func TestWaitDetachedLifecycleFileRetriesSharingViolation(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "ready")
+	if err := os.WriteFile(path, []byte("ready"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	name, err := windows.UTF16PtrFromString(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	handle, err := windows.CreateFile(name, windows.GENERIC_READ, 0, nil, windows.OPEN_EXISTING, windows.FILE_ATTRIBUTE_NORMAL, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	locked := os.NewFile(uintptr(handle), path)
+	defer locked.Close()
+	if err := waitDetachedLifecycleFile(path, "ready", 50*time.Millisecond); err == nil || !strings.Contains(err.Error(), "timed out waiting for") {
+		t.Fatalf("sharing violation must remain pending until the deadline: %v", err)
+	}
+	if err := locked.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := waitDetachedLifecycleFile(path, "ready", time.Second); err != nil {
+		t.Fatalf("released signal did not become readable: %v", err)
+	}
 }
