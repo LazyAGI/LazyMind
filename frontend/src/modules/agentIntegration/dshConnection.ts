@@ -1,13 +1,6 @@
 import type { TFunction } from "i18next";
 import type { DesktopAgentIntegrationStatus } from "@/runtime/desktopBridge";
-
-export function dshConnectionReady(status?: DesktopAgentIntegrationStatus): boolean {
-  const connection = status?.connection;
-  return status?.state === "enabled" && status.enabled !== false && status.retry_action !== "disconnect"
-    && !status.issue && connection?.mcp_configured === true
-    && connection.mcp_enabled === true && connection.mcp_trusted === true
-    && connection.control_ready === true && connection.runtime_state === "connected";
-}
+export { agentConnectionReady as dshConnectionReady } from "./agentConnection";
 
 // Errors come from known status codes. Native output may contain local paths or
 // credentials and must never be presented as setup instructions.

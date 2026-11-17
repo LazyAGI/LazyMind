@@ -8,7 +8,6 @@ import TaskCenter from "./index";
 import type { OrdinaryTaskView } from "@/modules/chat/types/ordinaryTask";
 import { ordinary } from "./ordinaryTestFixtures";
 import type { ChatModelSwitchRecord } from "@/api/generated/core-client";
-import { useWorkflowStore } from "@/modules/chat/store/workflowPanel";
 import { workflowUICacheKey } from '@/modules/chat/utils/workflowUIIdentity';
 
 vi.mock("@/modules/knowledge/components/FileViewer", () => ({ default: () => <div>File viewer</div> }));
@@ -421,7 +420,7 @@ describe("TaskCenter display modes", () => {
     const initial = ordinary("plan-live", { agent_type: "research", conversation_id: "conversation-1", status: "running" });
     useTaskCenterStore.getState().applyOrdinarySnapshot("conversation-1", initial);
     render(<TaskCenter sessionId="conversation-1" />);
-    expect(screen.getByText("taskCenter.ordinaryNoProcessSteps")).toBeInTheDocument();
+    expect(screen.getByText("taskCenter.ordinaryProcessingWithoutProgress")).toBeInTheDocument();
     act(() => useTaskCenterStore.getState().applyOrdinarySnapshot("conversation-1", {
       ...initial, revision: 2, plan_steps: ["Read requirements", "Check constraints", "Write brief"],
     }));
@@ -433,7 +432,7 @@ describe("TaskCenter display modes", () => {
       ...initial, revision: 3, display_key: "task:plan-live:next", execution_id: "next",
     }));
     expect(screen.queryByText("Read requirements")).not.toBeInTheDocument();
-    expect(screen.getByText("taskCenter.ordinaryNoProcessSteps")).toBeInTheDocument();
+    expect(screen.getByText("taskCenter.ordinaryProcessingWithoutProgress")).toBeInTheDocument();
     expect(screen.queryByRole("progressbar")).not.toBeInTheDocument();
   });
 

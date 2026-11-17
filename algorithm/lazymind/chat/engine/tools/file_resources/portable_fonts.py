@@ -56,8 +56,13 @@ def portable_font_faces(family, allow_download=False, *, allow_system_only=False
     records = [r for r in local_fonts() if family.casefold() in {a.casefold() for a in r['aliases']}]
     installed = False
     if not records:
+        from .presentation_edit import office_yahei_font_paths
+        office_fonts = office_yahei_font_paths()
         # Resolve by actual name-table entries, never by filename or a fallback.
-        for source in dict.fromkeys(_system_font_paths()):
+        sources = dict.fromkeys(_system_font_paths(), True)
+        for source in office_fonts:
+            sources.setdefault(source, False)
+        for source, is_system_font in sources.items():
             if source.suffix.lower() not in {'.ttf', '.otf', '.ttc'}:
                 continue
             try:
@@ -69,7 +74,7 @@ def portable_font_faces(family, allow_download=False, *, allow_system_only=False
                         aliases = {n.toUnicode().casefold() for n in font['name'].names if n.nameID in {1, 16}}
                         if family.casefold() not in aliases:
                             continue
-                        installed = True
+                        installed |= is_system_font
                         if not editable_embedding(int(getattr(font.get('OS/2'), 'fsType', 0))):
                             continue
                         if collection:

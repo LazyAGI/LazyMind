@@ -16,6 +16,7 @@ import (
 	"lazymind/agentconnector/internal/codexhost"
 	"lazymind/agentconnector/internal/codexplugin"
 	"lazymind/agentconnector/internal/connectorconfig"
+	"lazymind/agentconnector/internal/connectorlauncher"
 	"lazymind/agentconnector/internal/credentials"
 	"lazymind/agentconnector/internal/localfile"
 	"lazymind/agentconnector/internal/mcpbridge"
@@ -84,6 +85,9 @@ func New(binary, self string, bridge *mcpbridge.Bridge) (*Adapter, error) {
 	if err != nil {
 		return nil, fmt.Errorf("resolve LazyMind Agent Host identity: %w", err)
 	}
+	if _, err := connectorlauncher.Ensure(context.Background(), home, resolvedSelf); err != nil {
+		return nil, fmt.Errorf("prepare LazyMind connector launcher: %w", err)
+	}
 	return &Adapter{
 		binary: resolvedBinary, configured: binary, discoveryError: discoveryError,
 		self: resolvedSelf, bridge: bridge, home: home, hostID: hostID,
@@ -93,9 +97,26 @@ func New(binary, self string, bridge *mcpbridge.Bridge) (*Adapter, error) {
 var startupHealth = codexhost.StartupHealth
 
 func (a *Adapter) Status(ctx context.Context) (status agentintegration.Status) {
+	return a.currentStatusWithRepair(ctx, a.Reconcile(ctx))
+}
+
+func (a *Adapter) currentStatus(ctx context.Context) (status agentintegration.Status) {
+	return a.currentStatusWithRepair(ctx, nil)
+}
+
+func (a *Adapter) currentStatusWithRepair(ctx context.Context, repairErr error) (status agentintegration.Status) {
 	status = a.status(ctx)
 	details := a.inspectConfiguration(&status)
 	defer func() { agentintegration.RecordInspection(a.home, a.self, details, &status) }()
+	if repairErr != nil {
+		if status.Issue == nil {
+			status = agentintegration.FailError(status, repairErr)
+			status.Issue = &agentintegration.Issue{Code: "configuration_failed"}
+		} else {
+			status.DiagnosticReason = agentintegration.ErrorReason(repairErr)
+		}
+		return status
+	}
 	if status.Enabled != nil && *status.Enabled && status.State == agentintegration.Enabled {
 		agentintegration.SetRuntimeIssue(&status, startupHealth(ctx, a.home))
 	}
@@ -160,6 +181,12 @@ func (a *Adapter) status(context.Context) agentintegration.Status {
 }
 
 func (a *Adapter) Connect(ctx context.Context) (result agentintegration.Status) {
+	if err := a.Reconcile(ctx); err != nil {
+		return agentintegration.FailError(agentintegration.Status{Agent: "codex", DisplayName: "Codex"}, err)
+	}
+	if _, err := connectorlauncher.Publish(ctx, a.home, a.self); err != nil {
+		return agentintegration.FailError(agentintegration.Status{Agent: "codex", DisplayName: "Codex"}, err)
+	}
 	operation := agentintegration.NewOperation(a.home, "codex", "connect", a.self)
 	operation.Enter("configuration")
 	defer func() {
@@ -191,9 +218,9 @@ func (a *Adapter) Connect(ctx context.Context) (result agentintegration.Status) 
 	defer unlock()
 
 	if err := CleanupLegacyControl(); err != nil {
-		return agentintegration.Fail(a.Status(ctx), "clean up legacy Codex control configuration: "+err.Error())
+		return agentintegration.Fail(a.currentStatus(ctx), "clean up legacy Codex control configuration: "+err.Error())
 	}
-	status := a.Status(ctx)
+	status := a.currentStatus(ctx)
 	operation.Before = a.inspectConfiguration(&status)
 	if status.Enabled == nil || agentintegration.MissingRequirement(status.Requirements) {
 		return status
@@ -255,7 +282,7 @@ func (a *Adapter) connectDesktop(ctx context.Context, account string, status age
 		return codexConnectionFailure(status, err)
 	}
 	since := time.Now()
-	current := a.Status(setup)
+	current := a.currentStatus(setup)
 	// A user-disabled plugin cannot produce a heartbeat until the enable step.
 	// Preserve that explicit choice and let the guide explain how to enable it.
 	if current.Connection != nil && current.Connection.MCPConfigured && !current.Connection.MCPEnabled {
@@ -266,13 +293,16 @@ func (a *Adapter) connectDesktop(ctx context.Context, account string, status age
 		return codexConnectionFailure(current, err)
 	}
 	operation.Enter("verify")
-	return a.Status(setup)
+	return a.currentStatus(setup)
 }
 
 // Refresh updates an already enabled, owned plugin without performing desktop
 // lifecycle control. Connect is the explicit install/restart flow; it must not
 // be reused as a harmless refresh while a user is working in Codex.
 func (a *Adapter) Refresh(ctx context.Context) (result agentintegration.Status) {
+	if err := a.Reconcile(ctx); err != nil {
+		return agentintegration.FailError(agentintegration.Status{Agent: "codex", DisplayName: "Codex"}, err)
+	}
 	defer func() {
 		details := a.inspectConfiguration(&result)
 		agentintegration.RecordInspection(a.home, a.self, details, &result)
@@ -333,6 +363,9 @@ func (a *Adapter) Refresh(ctx context.Context) (result agentintegration.Status) 
 }
 
 func (a *Adapter) Disconnect(ctx context.Context) (result agentintegration.Status) {
+	if err := a.Reconcile(ctx); err != nil {
+		return agentintegration.FailError(agentintegration.Status{Agent: "codex", DisplayName: "Codex"}, err)
+	}
 	operation := agentintegration.NewOperation(a.home, "codex", "disconnect", a.self)
 	operation.Enter("disconnect")
 	defer func() {
@@ -364,9 +397,9 @@ func (a *Adapter) Disconnect(ctx context.Context) (result agentintegration.Statu
 	defer unlock()
 
 	if err := CleanupLegacyControl(); err != nil {
-		return agentintegration.Fail(a.Status(ctx), "clean up legacy Codex control configuration: "+err.Error())
+		return agentintegration.Fail(a.currentStatus(ctx), "clean up legacy Codex control configuration: "+err.Error())
 	}
-	status := a.Status(ctx)
+	status := a.currentStatus(ctx)
 	operation.Before = a.inspectConfiguration(&status)
 	if status.Enabled == nil {
 		return status
@@ -401,7 +434,7 @@ func (a *Adapter) Disconnect(ctx context.Context) (result agentintegration.Statu
 			return agentintegration.Fail(status, "remove Codex MCP configuration: "+err.Error())
 		}
 	}
-	return a.Status(ctx)
+	return a.currentStatus(ctx)
 }
 
 func (a *Adapter) Login(ctx context.Context) agentintegration.Status {
@@ -485,7 +518,7 @@ func (a *Adapter) isOwned(config mcpConfig) bool {
 			return false
 		}
 	}
-	return agentexec.SameExecutable(config.Transport.Command, a.self) &&
+	return a.ownedCommand(config.Transport.Command) &&
 		len(config.Transport.Args) == 2 &&
 		config.Transport.Args[0] == "mcp" && config.Transport.Args[1] == "proxy"
 }
@@ -503,7 +536,7 @@ func codexHome() (string, error) {
 
 func (a *Adapter) pluginEnabled() bool {
 	record, err := codexplugin.Read()
-	if err != nil || record.Home != a.home || record.BuildID != codexplugin.BuildID() || !agentexec.SameExecutable(record.Self, a.self) {
+	if err != nil || record.Home != a.home || !a.ownedCommand(record.Self) {
 		return false
 	}
 	profile, err := codexHome()
@@ -515,4 +548,8 @@ func (a *Adapter) pluginEnabled() bool {
 		return false
 	}
 	return true
+}
+
+func (a *Adapter) ownedCommand(command string) bool {
+	return filepath.Clean(command) == connectorlauncher.Path(a.home) || agentexec.SameExecutable(command, a.self)
 }

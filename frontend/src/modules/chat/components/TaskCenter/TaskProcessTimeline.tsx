@@ -48,7 +48,7 @@ export function TaskProcessTimeline({ steps, legacyPlan = [], state, progress }:
       <h3 className="ordinary-section-heading" id={headingId}>
         <BulbOutlined aria-hidden="true" /><span>{t(hasPlan ? "taskCenter.ordinaryPlan" : "taskCenter.ordinaryThinking")}</span>
       </h3>
-      {sorted.length === 0 ? (legacyPlan.length === 0 && <p className="ordinary-process-empty">{t("taskCenter.ordinaryNoProcessSteps")}</p>) : (
+      {sorted.length === 0 ? (legacyPlan.length === 0 && <p className="ordinary-process-empty" role={state === "running" ? "status" : undefined}>{t(state === "running" ? "taskCenter.ordinaryProcessingWithoutProgress" : "taskCenter.ordinaryNoProcessSteps")}</p>) : (
         <ol className="ordinary-thinking-list">
           {sorted.map(step => {
             // A stopped task may retain the last running progress event.
@@ -72,17 +72,20 @@ export function TaskProcessTimeline({ steps, legacyPlan = [], state, progress }:
       )}
       {hasPlan && (
         <>
-          <p className="ordinary-plan-description" id={descriptionId}>{t("taskCenter.ordinaryPlanDescription")}</p>
+          <p className="ordinary-plan-description" id={descriptionId}>{t(percentage === undefined ? "taskCenter.ordinaryLegacyPlanDescription" : "taskCenter.ordinaryPlanDescription")}</p>
           <div className={`ordinary-plan-progress is-${state}`}>
-            <span>{t("taskCenter.ordinaryPlanProgress", { current: percentage === undefined ? "—" : completed, total: legacyPlan.length })}</span>
-            <strong>{percentage === undefined ? t(state === "running" ? "taskCenter.ordinaryStatusRunning" : "taskCenter.ordinaryProgressUnknown") : `${percentage}%`}</strong>
+            {percentage === undefined
+              ? <span role={state === "running" ? "status" : undefined}>{t(state === "running" ? "taskCenter.ordinaryProcessingWithoutProgress" : "taskCenter.ordinaryProgressUnknown")}</span>
+              : <><span>{t("taskCenter.ordinaryPlanProgress", { current: completed, total: legacyPlan.length })}</span><strong>{percentage}%</strong></>}
             <progress aria-label={t("taskCenter.ordinaryPlan")} aria-describedby={descriptionId}
               className={percentage === undefined && state === "running" ? "is-indeterminate" : undefined}
               value={percentage} max={100} />
           </div>
           <ol className="ordinary-thinking-list" aria-describedby={descriptionId}>
             {legacyPlan.map((title, index) => {
-              const stepState = index < completed ? "complete" : index === completed ? state : "waiting";
+              // An unmeasured outline cannot identify the currently executing item.
+              const stepState = percentage === undefined ? "waiting"
+                : index < completed ? "complete" : index === completed ? state : "waiting";
               return <li className={`ordinary-thinking-item ordinary-plan-item is-${stepState}`} key={index}
                 aria-current={stepState === "running" ? "step" : undefined}>
                 <span className="ordinary-thinking-marker" aria-hidden="true">

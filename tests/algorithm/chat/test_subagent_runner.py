@@ -1986,8 +1986,13 @@ def test_run_subagent_stream_agent_exception_emits_error(monkeypatch, argument_f
 # Test: text/think frames from AgentEventFrameTranslator appear in SSE
 # ---------------------------------------------------------------------------
 
-def test_run_subagent_stream_text_think_events(monkeypatch):
-    db = _install_fake_db(monkeypatch)
+@pytest.mark.parametrize('ppt', [False, True])
+def test_run_subagent_stream_text_think_events(monkeypatch, ppt):
+    task = {**_DEFAULT_TASK}
+    if ppt:
+        task['agent_type'] = 'workflow_step'
+        task['params'] = {**task['params'], 'workflow_ref': 'builtin:ppt-workflow'}
+    db = _install_fake_db(monkeypatch, task)
     _install_fake_lazyllm(monkeypatch)
     _install_fake_build(monkeypatch)
     _install_fake_translator(monkeypatch)
@@ -1996,7 +2001,7 @@ def test_run_subagent_stream_text_think_events(monkeypatch):
         {'tag': 'think', 'delta': 'reasoning...'},
         {'tag': 'text', 'delta': 'answer'},
     ]
-    _install_fake_drive(monkeypatch, events)
+    _install_fake_drive(monkeypatch, events, final_value='<think>final reasoning</think>answer')
 
     # Pre-populate saved key.
     def pre_save_ctx(ctx):
@@ -2005,14 +2010,17 @@ def test_run_subagent_stream_text_think_events(monkeypatch):
 
     async def run():
         return await _collect(runner_mod.run_subagent_stream(
-            _DEFAULT_TASK_ID, task_spec={**_DEFAULT_TASK},
+            _DEFAULT_TASK_ID, task_spec=task,
         ))
 
     raw = asyncio.run(run())
     events_out = _sse_to_events(raw)
     types_out = [e['type'] for e in events_out]
-    assert 'think' in types_out
+    assert ('think' in types_out) is not ppt
+    assert any(step['role'] == 'think' for step in db.steps) is not ppt
     assert 'text' in types_out
+    if ppt:
+        assert next(event['summary'] for event in events_out if event['type'] == 'done') == 'answer'
 
 
 def test_run_subagent_stream_coalesces_tiny_text_deltas(monkeypatch):

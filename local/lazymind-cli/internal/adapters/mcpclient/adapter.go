@@ -19,6 +19,7 @@ import (
 	"lazymind/agentconnector/internal/agentexec"
 	"lazymind/agentconnector/internal/agentintegration"
 	"lazymind/agentconnector/internal/connectorconfig"
+	"lazymind/agentconnector/internal/connectorlauncher"
 	"lazymind/agentconnector/internal/credentials"
 	"lazymind/agentconnector/internal/mcpbridge"
 	"lazymind/agentconnector/internal/workbuddyhost"
@@ -44,6 +45,7 @@ type Adapter struct {
 	dshRunning   func(context.Context, string) (bool, error)
 	kind         Kind
 	self         string
+	actualSelf   string // Installation executable; self is the stable external binding.
 	bridge       interface {
 		Probe(context.Context) (mcpbridge.ProbeResult, error)
 	}
@@ -84,20 +86,38 @@ func New(kind Kind, self string, bridge *mcpbridge.Bridge) (*Adapter, error) {
 	if err != nil {
 		return nil, fmt.Errorf("resolve LazyMind Agent Host identity: %w", err)
 	}
-	return &Adapter{kind: kind, self: resolvedSelf, bridge: bridge, home: home, hostID: hostID}, nil
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	launcher, err := connectorlauncher.Ensure(ctx, home, resolvedSelf)
+	if err != nil {
+		return nil, fmt.Errorf("prepare LazyMind connector launcher: %w", err)
+	}
+	return &Adapter{kind: kind, self: launcher, actualSelf: resolvedSelf, bridge: bridge, home: home, hostID: hostID}, nil
+}
+
+func (a *Adapter) diagnosticExecutable() string {
+	if a.actualSelf != "" {
+		return a.actualSelf
+	}
+	return a.self
 }
 
 var workBuddyStartupHealth = workbuddyhost.StartupHealth
 var workBuddyAuthentication = workbuddyadapter.AuthenticationStatus
 
 func (a *Adapter) Status(ctx context.Context) (status agentintegration.Status) {
+	repairErr := a.Reconcile(ctx)
 	status = a.status(ctx)
 	details := a.inspectConfiguration(&status)
+	if repairErr != nil && status.Issue == nil {
+		status = agentintegration.FailError(status, repairErr)
+		status.Issue = &agentintegration.Issue{Code: "configuration_failed"}
+	}
 	if a.kind == DeepSeekHarness {
 		a.inspectDSHPendingDisconnect(ctx, &status)
 		a.inspectDSHConnection(ctx, &status)
 	}
-	defer func() { agentintegration.RecordInspection(a.home, a.self, details, &status) }()
+	defer func() { agentintegration.RecordInspection(a.home, a.diagnosticExecutable(), details, &status) }()
 	if a.kind == WorkBuddy {
 		status.CanConnect = status.Enabled != nil && !agentintegration.MissingRequirement(status.Requirements) && len(status.Requirements) > 0
 		if status.Enabled != nil && *status.Enabled && status.State == agentintegration.Enabled {
@@ -122,7 +142,12 @@ func (a *Adapter) Status(ctx context.Context) (status agentintegration.Status) {
 }
 
 func (a *Adapter) Connect(ctx context.Context) (result agentintegration.Status) {
-	operation := agentintegration.NewOperation(a.home, string(a.kind), "connect", a.self)
+	if a.actualSelf != "" {
+		if _, err := connectorlauncher.Publish(ctx, a.home, a.actualSelf); err != nil {
+			return agentintegration.FailError(agentintegration.Status{Agent: string(a.kind)}, err)
+		}
+	}
+	operation := agentintegration.NewOperation(a.home, string(a.kind), "connect", a.diagnosticExecutable())
 	operation.Enter("inspect")
 	defer func() {
 		if result.State == agentintegration.Failed {
@@ -285,7 +310,7 @@ func (a *Adapter) Connect(ctx context.Context) (result agentintegration.Status) 
 }
 
 func (a *Adapter) Disconnect(ctx context.Context) (result agentintegration.Status) {
-	operation := agentintegration.NewOperation(a.home, string(a.kind), "disconnect", a.self)
+	operation := agentintegration.NewOperation(a.home, string(a.kind), "disconnect", a.diagnosticExecutable())
 	operation.Enter("disconnect")
 	defer func() {
 		if result.State == agentintegration.Failed {

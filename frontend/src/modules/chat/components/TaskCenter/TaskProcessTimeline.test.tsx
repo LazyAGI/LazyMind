@@ -7,7 +7,7 @@ vi.mock("react-i18next", () => ({ useTranslation: () => ({ t: (key: string) => k
 afterEach(cleanup);
 
 it("stops stale process spinners on pause, preserves finished steps and resumes correctly", () => {
-  const steps: PublicProcessStep[] = ["running", "pending", "succeeded", "failed", "canceled"].map((status, order) => ({
+  const steps: PublicProcessStep[] = (["running", "pending", "succeeded", "failed", "canceled"] as const).map((status, order) => ({
     step_id: status, revision: 1, order, title: status, status,
     started_at: null, finished_at: null, elapsed_ms: null,
   }));
@@ -24,4 +24,27 @@ it("stops stale process spinners on pause, preserves finished steps and resumes 
   view.rerender(<TaskProcessTimeline steps={steps} state="running" />);
   expect(view.container.querySelectorAll(".ordinary-task-spinner")).toHaveLength(1);
   expect(steps[0].status).toBe("running");
+});
+
+it.each(["running", "paused", "failed", "canceled"] as const)("keeps an unmeasured plan neutral while %s", state => {
+  const view = render(<TaskProcessTimeline steps={[]} legacyPlan={["Read", "Check", "Write"]} state={state} />);
+  expect(view.container.querySelector('[aria-current="step"]')).toBeNull();
+  expect(view.container.querySelectorAll(".ordinary-plan-item.is-waiting")).toHaveLength(3);
+  expect(view.queryByText("taskCenter.ordinaryPlanProgress")).not.toBeInTheDocument();
+  expect(view.getByText("taskCenter.ordinaryLegacyPlanDescription")).toBeInTheDocument();
+  expect(view.getByRole("progressbar")).not.toHaveAttribute("value");
+  expect(view.queryByText("100%")).not.toBeInTheDocument();
+});
+
+it("keeps measured estimates for ordinary tasks and completes only on success", () => {
+  const plan = ["Read", "Check", "Write", "Publish"];
+  const view = render(<TaskProcessTimeline steps={[]} legacyPlan={plan} state="running" progress={25} />);
+  expect(view.getByRole("progressbar")).toHaveAttribute("value", "25");
+  expect(view.getByText("Check").closest("li")).toHaveAttribute("aria-current", "step");
+  view.rerender(<TaskProcessTimeline steps={[]} legacyPlan={plan} state="failed" progress={100} />);
+  expect(view.getByRole("progressbar")).toHaveAttribute("value", "99");
+  expect(view.getByText("Publish").closest("li")).toHaveClass("is-failed");
+  view.rerender(<TaskProcessTimeline steps={[]} legacyPlan={plan} state="complete" />);
+  expect(view.getByRole("progressbar")).toHaveAttribute("value", "100");
+  expect(view.container.querySelectorAll(".ordinary-plan-item.is-complete")).toHaveLength(4);
 });
