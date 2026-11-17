@@ -5331,6 +5331,7 @@ def _agent_llm_call(
     timeout: float | None = None,
     retries: int = 0,
     request_name: str = 'llm',
+    content_only: bool = False,
     _budget: _PPTGenerationBudget | None = None,
     _page_deadline: float | None = None,
 ) -> str:
@@ -5351,6 +5352,7 @@ def _agent_llm_call(
     )
     llm = AutoModel(model='llm').share(
         prompt=ChatPrompter(instruction=instruction),
+        format=_model_response_text if content_only else None,
         # Keep consuming provider chunks so timeout measures inactivity rather
         # than the total time needed to generate a complete HTML document.
         # AutoModel still merges the chunks and returns one final string here.
@@ -5417,7 +5419,7 @@ def _agent_llm_call(
             ) from exc
         raise
     text = _model_response_text(out)
-    if not text:
+    if not text and not content_only:
         raise RuntimeError(f'AutoModel llm returned empty text [{request_name}]')
     return text
 
@@ -8772,8 +8774,11 @@ def _plan_one_page_prompt(shared: dict, page_no: int, outline: str, timing: dict
     for attempt in range(2):
         raw = _agent_llm_call(
             system_prompt, json.dumps(payload, ensure_ascii=False), request_name='ppt_page_prompt',
+            content_only=True,
         ).strip()
         try:
+            # Some providers put reasoning in the text field itself.
+            raw = re.sub(r'\A(?:<think>.*?</think>\s*)+', '', raw, flags=re.S)
             if raw.startswith('```') and raw.endswith('```'):
                 raw = raw.partition('\n')[2][:-3].strip()
             plan = json.loads(raw)

@@ -55,6 +55,42 @@ class AdapterModel:
         return self.respond(prompt, control)
 
 
+@pytest.mark.parametrize('response_kind', ['separate_reasoning', 'tagged_reasoning', 'empty_content'])
+def test_page_prompt_parses_only_model_content(monkeypatch, tools, response_kind):
+    from lazyllm.components import EmptyFormatter
+
+    plan = json.dumps({
+        'content': '保留正文中的 <think>示例</think>', 'layout': '两列',
+        'assets': '无', 'speaker_note': '独立的口播稿',
+    }, ensure_ascii=False)
+    role = 'assistant'
+    message = {'role': role, 'content': plan, 'reasoning_content': '分析标签 </think> 和示例 {invalid}'}
+    if response_kind == 'tagged_reasoning':
+        message = {'role': role, 'content': f'<think>草稿 {{invalid}}</think>\n```json\n{plan}\n```'}
+    responses = [message]
+    if response_kind == 'empty_content':
+        responses.insert(0, {**message, 'content': ''})
+    requests = []
+
+    def share(format=None, **_kwargs):
+        formatter = format or EmptyFormatter()
+
+        def call(prompt, **_options):
+            requests.append(json.loads(prompt))
+            return formatter(responses.pop(0))
+
+        return call
+
+    monkeypatch.setattr(lazyllm, 'AutoModel', lambda **_: SimpleNamespace(share=share))
+    monkeypatch.setattr(tools, '_required_output_format', lambda: 'native_pptx')
+    result = tools._plan_one_page_prompt({'global_style': '简洁', 'output_format': 'native_pptx'}, 2, '大纲', {})
+    assert '保留正文中的 <think>示例</think>' in result['brief']
+    assert result['note'] == '独立的口播稿'
+    assert [request['page'] for request in requests] == ([2, 2] if response_kind == 'empty_content' else [2])
+    if response_kind == 'empty_content':
+        assert 'repair' in requests[1]
+
+
 @pytest.mark.parametrize('kind', ['timeout', 'length'])
 def test_provider_failure_explains_original_cause_and_keeps_safe_diagnostics(monkeypatch, tools, kind):
     def respond(*_):
