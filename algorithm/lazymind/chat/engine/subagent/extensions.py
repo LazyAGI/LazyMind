@@ -18,10 +18,6 @@ class RuntimeExtension:
     completion_failure: Callable[[dict], tuple[str, str] | None] | None = None
 
 
-def is_ppt_workflow(params: dict) -> bool:
-    return params.get('workflow_id') == 'ppt-workflow' or params.get('workflow_ref') == 'builtin:ppt-workflow'
-
-
 def resolve_runtime_extension(agent_type: str = '', params: dict | None = None) -> RuntimeExtension:
     # Resolve only host-owned implementations, never import paths from task input.
     # Preserve selection for persisted tasks carrying the original session binding.
@@ -29,7 +25,8 @@ def resolve_runtime_extension(agent_type: str = '', params: dict | None = None) 
     if agent_type == 'pptx_edit' or params.get('_pptx_edit_session_id'):
         from .pptx_edit import runtime_extension
         return runtime_extension()
-    if agent_type == 'workflow_step' and is_ppt_workflow(params):
-        from lazymind.chat.workflow.ppt_runtime import runtime_extension
-        return runtime_extension(params)
+    if agent_type == 'workflow_step':
+        from lazymind.chat.workflow import ppt_runtime
+        if ppt_runtime.is_ppt_workflow(params):
+            return ppt_runtime.runtime_extension(params)
     return RuntimeExtension()

@@ -9,8 +9,8 @@ from lazyllm import AutoModel, LOG
 
 from lazymind.chat.engine.agent_runtime import AgentRole, PromptBuilder
 from lazymind.chat.engine.agent_runtime.message_fields import model_response_text
-from lazymind.chat.engine.subagent.extensions import is_ppt_workflow
 from lazymind.model_config import inject_model_config
+from .ppt_runtime import is_ppt_workflow
 
 _THINK_RE = re.compile(r'<(?:redacted_thinking|think)>.*?</(?:redacted_thinking|think)>', re.S | re.I)
 _OUTPUT_SECTION_RE = re.compile(r'\n##\s*Output format[\s\S]*$', re.I)

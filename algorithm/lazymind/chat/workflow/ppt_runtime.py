@@ -10,6 +10,10 @@ from lazymind.chat.engine.subagent.extensions import RuntimeExtension
 _FONT_UNAVAILABLE_PREFIX = '请求的字体不可用：'
 
 
+def is_ppt_workflow(params: dict) -> bool:
+    return params.get('workflow_id') == 'ppt-workflow' or params.get('workflow_ref') == 'builtin:ppt-workflow'
+
+
 def _json_object(value: Any) -> dict[str, Any]:
     if isinstance(value, dict):
         return value
