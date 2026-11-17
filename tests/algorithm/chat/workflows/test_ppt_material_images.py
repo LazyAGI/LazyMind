@@ -288,12 +288,15 @@ def test_visual_call_sends_actual_image_to_selected_role(monkeypatch, tmp_path, 
     tools = _load_ppt_tools()
     picture = tmp_path / 'figure.png'
     picture.write_bytes(b'image')
-    model = Mock(return_value='Visible flow diagram')
+    model = Mock(return_value='<think>image analysis</think>Visible flow diagram')
+    model.share.return_value = model
     factory = Mock(return_value=model)
     monkeypatch.setattr(lazyllm, 'AutoModel', factory)
     monkeypatch.setattr(tools, 'select_vision_model_role', lambda: role)
     assert tools._agent_vlm_call('Inspect', 'Explain the flow', [str(picture)]) == 'Visible flow diagram'
     factory.assert_called_once_with(model=role, type='vlm')
+    formatter = model.share.call_args.kwargs['format']
+    assert formatter({'content': 'Visible flow diagram', 'reasoning_content': 'image analysis'}) == 'Visible flow diagram'
     from lazyllm.components.formatter import decode_query_with_filepaths
     query = decode_query_with_filepaths(model.call_args.args[0])
     assert query['files'] == [str(picture.resolve())]

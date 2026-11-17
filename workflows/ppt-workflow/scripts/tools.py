@@ -63,6 +63,7 @@ from lazyllm import ThreadPoolExecutor
 from lazyllm.tools.agent import ToolExecutionError
 
 from lazymind.chat.engine.agent_runtime.cancellation import make_cancel_stop_condition
+from lazymind.chat.engine.agent_runtime.message_fields import strip_leading_reasoning
 from lazymind.chat.engine.subagent.context import require_context
 from lazymind.document_tools.artifacts import _markdown_heading_rows, normalize_generated_markdown
 from lazymind.chat.engine.subagent.tools import (
@@ -5331,14 +5332,14 @@ def _agent_llm_call(
     timeout: float | None = None,
     retries: int = 0,
     request_name: str = 'llm',
-    content_only: bool = False,
+    allow_empty: bool = False,
     _budget: _PPTGenerationBudget | None = None,
     _page_deadline: float | None = None,
 ) -> str:
     from lazymind.chat.workflow.action_generation import generate
     external = generate(system_prompt, user_prompt, request_name)
     if external is not None:
-        return external
+        return strip_leading_reasoning(external)
 
     from lazyllm import AutoModel
     from lazyllm.components import ChatPrompter
@@ -5352,7 +5353,7 @@ def _agent_llm_call(
     )
     llm = AutoModel(model='llm').share(
         prompt=ChatPrompter(instruction=instruction),
-        format=_model_response_text if content_only else None,
+        format=_model_response_text,
         # Keep consuming provider chunks so timeout measures inactivity rather
         # than the total time needed to generate a complete HTML document.
         # AutoModel still merges the chunks and returns one final string here.
@@ -5418,8 +5419,8 @@ def _agent_llm_call(
                 f'[{request_name}]'
             ) from exc
         raise
-    text = _model_response_text(out)
-    if not text and not content_only:
+    text = strip_leading_reasoning(_model_response_text(out))
+    if not text and not allow_empty:
         raise RuntimeError(f'AutoModel llm returned empty text [{request_name}]')
     return text
 
@@ -5445,8 +5446,9 @@ def _agent_vlm_call(
         paths,
     )
     role = select_vision_model_role()
-    out = AutoModel(model=role, type='vlm')(encoded, stream_output=False, llm_chat_history=[], lazyllm_files=None)
-    text = _model_response_text(out)
+    llm = AutoModel(model=role, type='vlm').share(format=_model_response_text)
+    out = llm(encoded, stream_output=False, llm_chat_history=[], lazyllm_files=None)
+    text = strip_leading_reasoning(_model_response_text(out))
     if not text:
         raise RuntimeError('Visual model returned empty text')
     return text
@@ -8774,11 +8776,9 @@ def _plan_one_page_prompt(shared: dict, page_no: int, outline: str, timing: dict
     for attempt in range(2):
         raw = _agent_llm_call(
             system_prompt, json.dumps(payload, ensure_ascii=False), request_name='ppt_page_prompt',
-            content_only=True,
-        ).strip()
+            allow_empty=True,
+        )
         try:
-            # Some providers put reasoning in the text field itself.
-            raw = re.sub(r'\A(?:<think>.*?</think>\s*)+', '', raw, flags=re.S)
             if raw.startswith('```') and raw.endswith('```'):
                 raw = raw.partition('\n')[2][:-3].strip()
             plan = json.loads(raw)

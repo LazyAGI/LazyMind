@@ -9,12 +9,17 @@ class RuntimeExtension:
     output_instruction: str = ''
     publisher_owned_outputs: bool = False
     inherit_skills: bool = True
+    include_reasoning: bool = True
     tool_failure_limits: dict[str, int] = field(default_factory=dict)
     tool_call_limits: dict[str, int] = field(default_factory=dict)
     on_tool_results: Callable[[dict, dict], None] | None = None
     # This hook also receives saved tool steps when an attempt resumes.
     on_tool_step: Callable[[dict, dict], None] | None = None
     completion_failure: Callable[[dict], tuple[str, str] | None] | None = None
+
+
+def is_ppt_workflow(params: dict) -> bool:
+    return params.get('workflow_id') == 'ppt-workflow' or params.get('workflow_ref') == 'builtin:ppt-workflow'
 
 
 def resolve_runtime_extension(agent_type: str = '', params: dict | None = None) -> RuntimeExtension:
@@ -24,9 +29,7 @@ def resolve_runtime_extension(agent_type: str = '', params: dict | None = None) 
     if agent_type == 'pptx_edit' or params.get('_pptx_edit_session_id'):
         from .pptx_edit import runtime_extension
         return runtime_extension()
-    if agent_type == 'workflow_step' and (
-        params.get('workflow_id') == 'ppt-workflow' or params.get('workflow_ref') == 'builtin:ppt-workflow'
-    ):
+    if agent_type == 'workflow_step' and is_ppt_workflow(params):
         from lazymind.chat.workflow.ppt_runtime import runtime_extension
         return runtime_extension(params)
     return RuntimeExtension()

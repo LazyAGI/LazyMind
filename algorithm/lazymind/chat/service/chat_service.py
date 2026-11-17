@@ -1500,6 +1500,8 @@ async def _handle_chat_impl(
     effective_workflow_context = workflow.workflow_context
     if str((effective_workflow_context or {}).get('workflow_ref') or '') in excluded_workflow_refs:
         effective_workflow_context = None
+    from lazymind.chat.engine.subagent.extensions import is_ppt_workflow
+    translator.include_reasoning = not is_ppt_workflow(effective_workflow_context or {})
     effective_workflow_catalog = [
         item for item in workflow.catalog
         if str(item.get('workflow_ref') or '') not in excluded_workflow_refs

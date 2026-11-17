@@ -29,7 +29,9 @@ from lazymind.chat.engine.tool_auth import inject_tool_config
 from lazymind.chat.engine.agent_runtime.env_runtime import inject_runtime_env
 from lazymind.chat.engine.agent_runtime.executor import AGENT_MODULE_TRACE
 from lazymind.chat.engine.agent_runtime.tool_call_guard import ToolArgumentRetryExhausted
-from lazymind.chat.engine.agent_runtime.message_fields import model_response_text, canonical_history_message
+from lazymind.chat.engine.agent_runtime.message_fields import (
+    canonical_history_message, model_response_text, strip_leading_reasoning,
+)
 from lazymind.chat.engine.agent_runtime.env_redaction import redact_session_env_arguments
 
 from lazymind.chat.engine.agent_runtime import (
@@ -1286,6 +1288,7 @@ async def run_subagent_stream(
     output_checkpoint: Optional[tuple[str, str]] = None
     _pending_text = ''
     _pending_think = ''
+    include_reasoning = True
 
     def _drain_outbound_text() -> Optional[Dict[str, Any]]:
         nonlocal outbound_text_type, outbound_text, outbound_text_started, outbound_model_output
@@ -1360,6 +1363,8 @@ async def run_subagent_stream(
             return []
         ready = []
         for event_type in ('think', 'text'):
+            if event_type == 'think' and not include_reasoning:
+                continue
             content = frame.get(event_type) or ''
             ready.extend(_buffer_outbound_text(event_type, content, metadata))
             if event_type == 'think':
@@ -1386,6 +1391,8 @@ async def run_subagent_stream(
 
     def _emit(ev: Dict[str, Any]) -> None:
         event_type = ev.get('type')
+        if event_type == 'think' and not include_reasoning:
+            return
         if (
             event_type in DRAFT_STREAM_EVENT_TYPES
             or (event_type == 'artifact' and stream_merge_active)
@@ -1437,6 +1444,8 @@ async def run_subagent_stream(
         # SubAgents collect searched sources for their Task Center card only.
         # Tool results remain citation-free so the model does not emit body references.
         effective_agent_type = str(task.get('agent_type') or agent_type or '')
+        extension = resolve_runtime_extension(effective_agent_type, params)
+        include_reasoning = extension.include_reasoning
         output_keys, required_output_keys = resolve_output_contract(
             effective_agent_type, output_keys, params,
         )
@@ -1628,7 +1637,6 @@ async def run_subagent_stream(
         terminal_workflow_tools = set(_coerce_str_list(ctx.params.get('terminal_tools')))
         workflow_terminal_completed = False
         workflow_terminal_error = ''
-        extension = resolve_runtime_extension(effective_agent_type, ctx.params)
         extension_state = {}
         if resume and extension.on_tool_step is not None:
             for step in db.load_steps(task_id):
@@ -1804,7 +1812,8 @@ async def run_subagent_stream(
                         for buffered_event in _translate_frame(frame):
                             yield _sse(buffered_event)
                 else:  # 'final' -- AgentExecutor propagates future exceptions before yielding this.
-                    final_result = payload
+                    final_result = (strip_leading_reasoning(payload)
+                                    if not include_reasoning and isinstance(payload, str) else payload)
                     # Flush any remaining accumulated text/think as the final step.
                     if _pending_think:
                         ctx.db.append_step(task_id, step_seq, 'think', {'content': _pending_think})
