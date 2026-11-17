@@ -1,11 +1,15 @@
 import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import type { ComponentProps } from 'react';
 import PaperAttachmentPreview from './PaperAttachmentPreview';
 import { libraryFixture } from './__tests__/fixtures';
 
-const { getDocument } = vi.hoisted(() => ({ getDocument: vi.fn() }));
+const { getDocument, renderFileViewer } = vi.hoisted(() => ({ getDocument: vi.fn(), renderFileViewer: vi.fn() }));
 vi.mock('../utils/request', () => ({ DocumentServiceApi: () => ({ documentServiceGetDocument: getDocument }), normalizeProxyableUrl: (url: string) => url }));
-vi.mock('../components/FileViewer', () => ({ default: ({ file, fileName }: { file: string; fileName: string }) => <div aria-label="原文件预览" data-file={file}>{fileName}</div> }));
+vi.mock('../components/FileViewer', () => ({ default: (props: ComponentProps<typeof import('../components/FileViewer')['default']>) => {
+    renderFileViewer(props);
+    return <div aria-label="原文件预览" data-file={props.file}>{props.fileName}</div>;
+} }));
 afterEach(() => { cleanup(); vi.resetAllMocks(); });
 
 describe('stored attachment preview', () => {
@@ -24,6 +28,21 @@ describe('stored attachment preview', () => {
         getDocument.mockResolvedValueOnce({data:{file_url:'/processed.pdf',download_file_url:'/source.pdf'}});
         render(<PaperAttachmentPreview datasetId="library" attachment={{...libraryFixture().attachments[0],contentRef:'document',name:'source.pdf'}} onPositionChange={vi.fn()} />);
         expect(await screen.findByLabelText('原文件预览')).toHaveAttribute('data-file', `${window.location.origin}/api/core/source.pdf`);
+    });
+
+    it('previews attachments without reader controls or study tools while retaining text and reading position', async () => {
+        getDocument.mockResolvedValueOnce({ data: { file_url: '/source.pdf' } });
+        const position = { page: 3, progress: .25 };
+        const onPositionChange = vi.fn();
+        render(<PaperAttachmentPreview datasetId="library" attachment={{ ...libraryFixture().attachments[0], contentRef: 'document' }} canWrite position={position} onPositionChange={onPositionChange} />);
+        await screen.findByLabelText('原文件预览');
+        const props = renderFileViewer.mock.calls.at(-1)![0];
+        expect(props).toMatchObject({ pdfToolbarMode: 'none', pdfSelectableText: true });
+        expect(props.pdfIRTarget).toBeUndefined();
+        expect(props.pdfViewPosition).toBe(position);
+        const nextPosition = { page: 4, progress: .5 };
+        act(() => props.onPdfViewPositionChange(nextPosition));
+        expect(onPositionChange).toHaveBeenCalledWith(nextPosition);
     });
 
 });
