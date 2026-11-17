@@ -127,4 +127,7 @@ def execute(payload, worker: Path, timeout: int, *, label: str) -> dict:
                         os.killpg(process.pid, signal.SIGKILL)
                     except ProcessLookupError:
                         pass
+                    except PermissionError:
+                        if sys.platform != 'darwin' or process.poll() is None:
+                            raise
                     process.wait(timeout=5)

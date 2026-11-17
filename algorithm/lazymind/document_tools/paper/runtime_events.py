@@ -10,6 +10,7 @@ import uuid
 
 from lazyllm.tools.writer.tools.base import WriterToolBase
 
+from ..artifacts import normalize_generated_markdown
 from ..writing import DraftMarkdownStreamEventEmitter
 from .model_response import normalize_response
 
@@ -267,6 +268,7 @@ def generate_markdown(model, prompt, *, bindings=None):
     ).strip()
     if re.match(r'^<think\b', text, re.I):
         raise ValueError('模型输出存在未闭合的思考内容。')
+    text = normalize_generated_markdown(text)
     if events and pending and not leading:
         events.delta(restore(pending))
     if events and not streaming:

@@ -88,8 +88,12 @@ def check_limits(process, scratch: Path):
     info = TaskInfo()
     size = ctypes.sizeof(info)
     if _process_info()(process.pid, PROC_PIDTASKINFO, 0, ctypes.byref(info), size) != size:
-        if process.poll() is None:
-            raise OSError(ctypes.get_errno() or errno.EIO, '无法读取 macOS Python 沙箱内存用量')
+        error = ctypes.get_errno() or errno.EIO
+        if error == errno.ESRCH:
+            # The task can disappear before waitpid reports the child's exit.
+            process.wait(timeout=5)
+        elif process.poll() is None:
+            raise OSError(error, '无法读取 macOS Python 沙箱内存用量')
     elif info.resident_size > MEMORY_LIMIT:
         raise RuntimeError('macOS Python 沙箱内存超过 1 GiB')
     pending, total, count = [scratch], 0, 0

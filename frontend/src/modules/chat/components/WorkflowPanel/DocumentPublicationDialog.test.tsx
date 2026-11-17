@@ -131,7 +131,15 @@ it.each([
   { savedTemplate: 'warm_humanist', chosenTemplate: 'editorial_contrast' },
 ])('publishes WeChat with the $chosenTemplate template', async ({ savedTemplate, chosenTemplate }) => {
   state.targets.push({ provider: 'wechat', bound: true, template: savedTemplate, connection_id: 'wechat-account' });
-  render(view({ initialProvider: 'wechat', providers: [{ id: 'wechat', capabilities: ['create', 'replace'], templates: [
+  api.createPublicationGroup.mockImplementationOnce(async () => {
+    state.targets.find(target => target.provider === 'wechat')!.operation = {
+      operation_id: 'success', status: 'succeeded', provider: 'wechat', provider_synced: true,
+      updated_at: '2026-11-15T00:00:00Z', actions: [], source_slot_id: 'draft', item_index: -1,
+      warnings: ['WECHAT_IMAGES_COMPRESSED', 'WECHAT_HTML_TRUNCATED'],
+    };
+    return { data: { data: structuredClone(state) } };
+  });
+  const { rerender } = render(view({ initialProvider: 'wechat', providers: [{ id: 'wechat', capabilities: ['create', 'replace'], templates: [
     { id: 'clean', name: 'Clean Reading' },
     { id: 'warm_humanist', name: 'Warm Humanist' },
     { id: 'editorial_contrast', name: 'Editorial Contrast' },
@@ -151,6 +159,11 @@ it.each([
   const body = api.createPublicationGroup.mock.calls[0][1];
   expect(body.targets).toEqual([expect.objectContaining({ provider: 'wechat', connection_id: 'wechat-account', template: chosenTemplate })]);
   expect(api.preflightPublication).toHaveBeenCalledWith('latest-draft', body, expect.anything());
+  rerender(view({ open: false }));
+  for (const code of ['WECHAT_IMAGES_COMPRESSED', 'WECHAT_HTML_TRUNCATED']) {
+    await waitFor(() => expect(screen.getByText(i18n.t(`chat.publication.warnings.${code}`))).toBeVisible());
+  }
+  expect(screen.getByText(i18n.t('chat.publication.status.succeeded'))).toBeVisible();
 });
 
 it('opens the platform results as soon as publication is accepted', async () => {

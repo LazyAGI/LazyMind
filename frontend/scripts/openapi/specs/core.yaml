@@ -7686,6 +7686,8 @@ components:
                     type: array
                 artifact_id:
                     type: string
+                current:
+                    type: integer
                 error_code:
                     type: string
                 item_index:
@@ -7701,13 +7703,21 @@ components:
                     type: string
                 source_slot_id:
                     type: string
+                stage:
+                    type: string
                 status:
                     type: string
                 target_url:
                     type: string
+                total:
+                    type: integer
                 updated_at:
                     format: date-time
                     type: string
+                warnings:
+                    items:
+                        type: string
+                    type: array
             required:
                 - actions
                 - item_index
@@ -7830,6 +7840,10 @@ components:
                 status:
                     type: string
                 target_document: {}
+                warnings:
+                    items:
+                        type: string
+                    type: array
             required:
                 - artifact_id
                 - artifact_saved

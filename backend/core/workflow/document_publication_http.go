@@ -50,6 +50,7 @@ type DocumentPublishResult struct {
 	Document       json.RawMessage `json:"document"`
 	PatchResult    map[string]any  `json:"patch_result"`
 	TargetDocument json.RawMessage `json:"target_document,omitempty"`
+	Warnings       []string        `json:"warnings,omitempty"`
 }
 type DocumentPublicationStatus struct {
 	OperationID    string     `json:"operation_id" required:"true"`
@@ -57,6 +58,10 @@ type DocumentPublicationStatus struct {
 	Provider       string     `json:"provider" required:"true"`
 	ArtifactID     string     `json:"artifact_id,omitempty"`
 	ErrorCode      string     `json:"error_code,omitempty"`
+	Warnings       []string   `json:"warnings,omitempty"`
+	Stage          string     `json:"stage,omitempty"`
+	Current        int        `json:"current,omitempty"`
+	Total          int        `json:"total,omitempty"`
 	UpdatedAt      time.Time  `json:"updated_at" required:"true"`
 	RecoveryAfter  *time.Time `json:"recovery_after,omitempty"`
 	ProviderSynced bool       `json:"provider_synced" required:"true"`
@@ -372,6 +377,14 @@ func executeDocumentPublication(ctx context.Context, db *gorm.DB, owner string, 
 		if json.Unmarshal(converted.Result, &value) != nil || value.Provider != op.Provider || value.Format == "" || len(value.Content) == 0 || string(value.Content) == "null" || value.SourceDocument == nil || value.MediaReferences == nil {
 			return failBefore(documentFailure("DOCUMENT_CONVERSION_FAILED", 502))
 		}
+		if op.Provider == "wechat" && !sameProvider && len(value.MediaReferences) == 0 {
+			coverConfig, configErr := modelconfig.LoadLLMConfig(ctx, db, owner)
+			if configErr != nil {
+				appLog.Logger.Warn().Str("operation_id", op.ID).Msg("WeChat cover model configuration unavailable; using placeholder cover")
+			} else if imageModel, ok := coverConfig["text2image"]; ok {
+				request.LLMConfig = map[string]any{"text2image": imageModel}
+			}
+		}
 		if op.Provider == "obsidian" || op.Provider == "github" && len(target) == 0 {
 			title := op.Title
 			if title == "" {
@@ -454,7 +467,7 @@ func executeDocumentPublication(ctx context.Context, db *gorm.DB, owner string, 
 		}
 		if op.Provider == "wechat" && errors.As(err, &upstream) && json.Unmarshal(upstream.Body, &rejected) == nil {
 			switch code := rejected.Detail.Code; code {
-			case "WECHAT_BODY_IMAGE_TOO_LARGE", "WECHAT_IMAGE_FORMAT_UNSUPPORTED", "WECHAT_HTML_TOO_LARGE":
+			case "WECHAT_IMAGE_FORMAT_UNSUPPORTED", "WECHAT_WRITE_REJECTED":
 				if err := finishPublicationBeforeWrite(clean, db, owner, op.ID, "failed_no_write", code, "write_started"); err != nil {
 					return publicationFailureState(clean, db, owner, op, err)
 				}
@@ -517,6 +530,7 @@ func publicationReceiptFromResult(op *DocumentPublicationOperation, raw, target 
 		Representation *string         `json:"representation"`
 		Persisted      json.RawMessage `json:"persisted_document"`
 		Target         json.RawMessage `json:"target_document"`
+		Warnings       []string        `json:"warnings"`
 		Patch          struct {
 			Success bool `json:"success"`
 		} `json:"patch_result"`
@@ -566,7 +580,7 @@ func publicationReceiptFromResult(op *DocumentPublicationOperation, raw, target 
 		}
 	}
 	artifact, _ := json.Marshal(map[string]any{"schema": schema, "data": source.Value, "meta": map[string]any{"lazymind_provider_sync": map[string]any{"provider": op.Provider, "confirmed": true, "target_document": binding}}})
-	return DocumentPublicationReceipt{Provider: op.Provider, TargetDocument: target, ContentType: "json", Value: artifact}, nil
+	return DocumentPublicationReceipt{Provider: op.Provider, TargetDocument: target, ContentType: "json", Value: artifact, Warnings: value.Warnings}, nil
 }
 func publicationLocalFailure(err error) error {
 	if errors.Is(err, ErrConflict) || errors.Is(err, ErrDraftVersionConflict) || errors.Is(err, ErrDraftVersionRequired) || errors.Is(err, ErrArtifactInUse) {
@@ -595,7 +609,7 @@ func publicationSavedResult(ctx context.Context, db *gorm.DB, op *DocumentPublic
 		if json.Unmarshal(op.ReceiptJSON, &receipt) != nil {
 			return nil, publicationError("DOCUMENT_ACTION_RESULT_INVALID")
 		}
-		return &DocumentPublishResult{OperationID: op.ID, Provider: op.Provider, ProviderSynced: true, Status: "synced", TargetDocument: receipt.TargetDocument}, nil
+		return &DocumentPublishResult{OperationID: op.ID, Provider: op.Provider, ProviderSynced: true, Status: "synced", TargetDocument: receipt.TargetDocument, Warnings: receipt.Warnings}, nil
 	}
 	var revision orm.WorkflowSlotRevision
 	if err := db.WithContext(ctx).First(&revision, "id = ?", op.ResultRevisionID).Error; err != nil {
@@ -628,7 +642,7 @@ func publicationSavedResult(ctx context.Context, db *gorm.DB, op *DocumentPublic
 	if receipt.NoLocalChange {
 		status = "no_change"
 	}
-	return &DocumentPublishResult{OperationID: op.ID, ArtifactID: revision.ID, Revision: revision.Revision, DraftVersion: draft, Provider: op.Provider, ProviderSynced: true, ArtifactSaved: !receipt.NoLocalChange, Status: status, Representation: representation, Document: value.Data, PatchResult: map[string]any{"success": true}, TargetDocument: receipt.TargetDocument}, nil
+	return &DocumentPublishResult{OperationID: op.ID, ArtifactID: revision.ID, Revision: revision.Revision, DraftVersion: draft, Provider: op.Provider, ProviderSynced: true, ArtifactSaved: !receipt.NoLocalChange, Status: status, Representation: representation, Document: value.Data, PatchResult: map[string]any{"success": true}, TargetDocument: receipt.TargetDocument, Warnings: receipt.Warnings}, nil
 }
 func replyPublicationResult(w http.ResponseWriter, result *DocumentPublishResult, op *DocumentPublicationOperation, err error) {
 	if err == nil {

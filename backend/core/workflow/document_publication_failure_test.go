@@ -20,9 +20,8 @@ func TestDocumentPublicationReportsFailureReasons(t *testing.T) {
 		{"github", "DOCUMENT_CONVERSION_FAILED"},
 		{"wechat", "DOCUMENT_CONVERSION_FAILED"},
 		{"obsidian", "DOCUMENT_CONVERSION_FAILED"},
-		{"wechat", "WECHAT_BODY_IMAGE_TOO_LARGE"},
 		{"wechat", "WECHAT_IMAGE_FORMAT_UNSUPPORTED"},
-		{"wechat", "WECHAT_HTML_TOO_LARGE"},
+		{"wechat", "WECHAT_WRITE_REJECTED"},
 	} {
 		t.Run(test.provider+"/"+test.code, func(t *testing.T) {
 			provider := test.provider
@@ -33,6 +32,12 @@ func TestDocumentPublicationReportsFailureReasons(t *testing.T) {
 			t.Cleanup(func() { appLog.Logger = previousLogger })
 			f, input := publicationFixture(t, false)
 			input.Provider = provider
+			if provider == "wechat" && write {
+				mustPublicationErrorNil(t, f.db.AutoMigrate(&orm.UserModelProvider{}, &orm.UserModelProviderGroup{}, &orm.UserModelProviderGroupModel{}, &orm.UserSelectedModel{}))
+				seedWorkflowModelSelection(t, f.db, "owner")
+				mustPublicationErrorNil(t, f.db.Model(&orm.UserModelProviderGroupModel{}).Where("id = ?", "owner-model").Updates(map[string]any{"model_type": "text2image", "name": "gpt-image-1"}).Error)
+				mustPublicationErrorNil(t, f.db.Model(&orm.UserSelectedModel{}).Where("user_id = ?", "owner").Update("model_type", "text2image").Error)
+			}
 			failures := 0
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				w.Header().Set("Content-Type", "application/json")
@@ -50,7 +55,8 @@ func TestDocumentPublicationReportsFailureReasons(t *testing.T) {
 					_ = json.NewEncoder(w).Encode(map[string]any{"data": map[string]any{"connection_id": "fixture-connection", "provider": provider, "status": "ACTIVE", "access_token": "fixture-conversion-token"}})
 				case "/api/document/actions:invoke":
 					var request struct {
-						Reference string `json:"reference"`
+						Reference string         `json:"reference"`
+						LLMConfig map[string]any `json:"llm_config"`
 					}
 					_ = json.NewDecoder(r.Body).Decode(&request)
 					if write && request.Reference == documentConvertReference {
@@ -63,6 +69,9 @@ func TestDocumentPublicationReportsFailureReasons(t *testing.T) {
 					}
 					if request.Reference != reference {
 						t.Errorf("unexpected action: %s", request.Reference)
+					}
+					if provider == "wechat" && write && request.LLMConfig["text2image"] == nil {
+						t.Error("WeChat publication lost the owner's cover image model")
 					}
 					failures++
 					w.WriteHeader(http.StatusUnprocessableEntity)

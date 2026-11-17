@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"lazymind/core/common/orm"
 )
@@ -65,7 +66,7 @@ func TestPublicationGroupWorkersSendFixedContentAndKeepLatestDraft(t *testing.T)
 			}
 			content := converted["content"].(string)
 			writes = append(writes, content)
-			json.NewEncoder(w).Encode(map[string]any{"result": map[string]any{"success": true, "provider_synced": true, "provider": converted["provider"], "patch_result": map[string]any{"success": true}, "persisted_document": content, "representation": "markdown", "target_document": map[string]any{"adapter": converted["provider"], "uri": "https://example.test/fixture-document"}}})
+			json.NewEncoder(w).Encode(map[string]any{"result": map[string]any{"success": true, "provider_synced": true, "warnings": []string{"Content adjusted"}, "provider": converted["provider"], "patch_result": map[string]any{"success": true}, "persisted_document": content, "representation": "markdown", "target_document": map[string]any{"adapter": converted["provider"], "uri": "https://example.test/fixture-document"}}})
 		default:
 			t.Errorf("unexpected endpoint %s", r.URL.Path)
 			w.WriteHeader(404)
@@ -104,6 +105,13 @@ func TestPublicationGroupWorkersSendFixedContentAndKeepLatestDraft(t *testing.T)
 	}
 	if len(writes) != 2 {
 		t.Fatal("worker replay repeated external write")
+	}
+	state, err := ReadDocumentPublicationGroup(t.Context(), f.db.DB, "owner", f.currentRevisionID)
+	mustPublicationErrorNil(t, err)
+	for _, target := range state.Targets {
+		if target.Bound && (target.Operation == nil || len(target.Operation.Warnings) != 1 || target.Operation.Warnings[0] != "Content adjusted") {
+			t.Fatal("publication result lost the provider warning")
+		}
 	}
 }
 
@@ -214,6 +222,7 @@ func TestPublicationGroupRetryRequiresSameContentAndDoesNotRequeueSuccess(t *tes
 	mustPublicationErrorNil(t, f.db.First(&next, "publication_id = ?", id).Error)
 	mustPublicationErrorNil(t, ClaimDocumentPublicationWrite(t.Context(), f.db.DB, "owner", next.ID))
 	receipt := publicationReceipt()
+	receipt.Warnings = []string{"Content adjusted"}
 	receipt.Provider = "github"
 	receipt.TargetDocument = json.RawMessage(`{"adapter":"github","uri":"https://github.com/fixture/repo/blob/main/guide.md","meta":{"revision":"fixture-sha"}}`)
 	mustPublicationErrorNil(t, ConfirmDocumentPublication(t.Context(), f.db.DB, "owner", next.ID, receipt))
@@ -226,6 +235,10 @@ func TestPublicationGroupRetryRequiresSameContentAndDoesNotRequeueSuccess(t *tes
 	mustPublicationErrorNil(t, f.db.First(&unchanged, "publication_id = ?", id).Error)
 	if unchanged.Status != "succeeded" || len(unchanged.SourceValue) != 0 {
 		t.Fatal("unchanged content was requeued")
+	}
+	status := publicationStatus(&unchanged, time.Now())
+	if len(status.Warnings) != 1 || status.Warnings[0] != "Content adjusted" {
+		t.Fatal("unchanged publication lost the provider warning")
 	}
 	var count int64
 	mustPublicationErrorNil(t, f.db.Model(&orm.AsyncJob{}).Where("resource_id = ?", unchanged.ID).Count(&count).Error)

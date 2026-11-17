@@ -4,7 +4,7 @@ import { filterWorkflowTabs, type CompositePanelNode, type CompositeLayoutNode, 
 export function workflowTabsForAudience(ui: WorkflowUI, session: Pick<WorkflowSession, 'slots' | 'steps' | 'projection'> & Partial<Pick<WorkflowSession, 'workflow_mode'>>, developer: boolean) {
   const visibleUI = workflowUIForAudience(ui, developer);
   return filterWorkflowTabs(visibleUI.tabs, session.slots, visibleUI.tab_visibility_ready_material, session,
-    visibleUI.hide_skipped_steps, visibleUI.hide_unstarted_steps && session.workflow_mode === 'dynamic');
+    visibleUI.hide_skipped_steps, visibleUI.hide_unstarted_steps);
 }
 
 export function hiddenUserSlots(ui: WorkflowUI): Set<string> {

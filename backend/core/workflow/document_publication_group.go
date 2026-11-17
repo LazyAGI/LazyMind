@@ -170,16 +170,19 @@ func CreateDocumentPublicationGroup(ctx context.Context, db *gorm.DB, owner, art
 				return err
 			}
 			unchanged := binding.LastSuccessHash == op.SourceHash && len(binding.TargetDocument) > 0
-			if unchanged && op.Template != "" {
-				// A presentation change still needs a provider write when the prose is unchanged.
-				var matchingTemplate int64
-				if err := tx.Model(&DocumentPublicationOperation{}).Where("id = ? AND template = ?", binding.LastOperationID, op.Template).Count(&matchingTemplate).Error; err != nil {
+			var previous DocumentPublicationOperation
+			if unchanged {
+				if err := tx.Select("template", "receipt_json").First(&previous, "id = ?", binding.LastOperationID).Error; err != nil {
 					return err
 				}
-				unchanged = matchingTemplate > 0
+				unchanged = op.Template == "" || previous.Template == op.Template
 			}
 			if unchanged {
-				receipt, _ := json.Marshal(DocumentPublicationReceipt{Provider: op.Provider, TargetDocument: binding.TargetDocument, NoLocalChange: true})
+				var previousReceipt DocumentPublicationReceipt
+				if err := json.Unmarshal(previous.ReceiptJSON, &previousReceipt); err != nil {
+					return err
+				}
+				receipt, _ := json.Marshal(DocumentPublicationReceipt{Provider: op.Provider, TargetDocument: binding.TargetDocument, NoLocalChange: true, Warnings: previousReceipt.Warnings})
 				values := map[string]any{"status": "succeeded", "receipt_json": json.RawMessage(receipt)}
 				clearPublicationPayload(values)
 				if err := tx.Model(op).Updates(values).Error; err != nil {
