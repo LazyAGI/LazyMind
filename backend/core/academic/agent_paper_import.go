@@ -177,6 +177,29 @@ func AgentImportPapers(ctx context.Context, call capability.InvocationContext, i
 			inspected = append(inspected, item)
 		}
 	}
+	// A caller-supplied pair is not evidence that two identifiers name one work.
+	// Keep the selected edition's authority, including in the durable worker input.
+	// Existing WorkIDs are checked against the saved identity in agentImportDraft.
+	for i := range inspected {
+		item := &inspected[i]
+		if item.Requested == nil || item.Requested.WorkID != "" || !item.Eligible {
+			continue
+		}
+		p := *item.Requested
+		if p.DOI == "" || p.ArxivID == "" {
+			continue
+		}
+		if publicationRequested(p) {
+			p.ArxivID = ""
+		} else {
+			p.DOI = ""
+		}
+		accepted, err := inspectPaperSelection(item.SourceID, p)
+		if err != nil {
+			return result, err
+		}
+		item.Requested, item.PaperKey = accepted.Requested, accepted.PaperKey
+	}
 	unique := importableSources(inspected)
 	for _, item := range inspected {
 		view := agentPaperSource(item)
@@ -292,7 +315,7 @@ func agentImportDraft(ctx context.Context, db *gorm.DB, source SourceInspection)
 		}
 	}
 	base, version := NormalizeArxivID(p.ArxivID)
-	if version == "" {
+	if version == "" && base != "" && source.Candidate.SourceProvider == "arxiv" {
 		version = source.Candidate.Version
 	}
 	// An explicitly requested published edition uses its DOI, not a preprint fallback.

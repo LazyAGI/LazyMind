@@ -58,7 +58,7 @@ func searchCrossrefTitle(ctx context.Context, title string) ([]WorkInput, error)
 		if !doiPattern.MatchString(doi) {
 			continue
 		}
-		w := WorkInput{Title: item.Title[0], DOI: doi, Provider: "crossref", ProviderWorkID: doi}
+		w := WorkInput{Title: item.Title[0], DOI: doi, Provider: "crossref", ProviderWorkID: doi, Provenance: map[string]any{"work_type": item.Type}}
 		for _, a := range item.Author {
 			if name := strings.TrimSpace(a.Given + " " + a.Family); name != "" {
 				w.Authors = append(w.Authors, name)

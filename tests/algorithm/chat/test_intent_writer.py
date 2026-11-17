@@ -161,6 +161,12 @@ def test_subagent_current_edit_has_priority_over_original_style():
 @pytest.mark.parametrize('query', [
     '把这篇论文加入已选资料库：Test Paper。请尝试一次导入；未匹配就停止。',
     '将BERT论文导入知识库',
+    '将 Attention Is All You Need 加入已选资料库',
+    '将 Always Learning 加入资料库',
+    '把这篇论文加入默认资料库',
+    '将论文加入资料库；不要修改后续研究计划',
+    '把《未来研究计划》这篇论文加入资料库',
+    '将论文加入资料库，不要从现在起每次都这样做',
     '把这些文献添加到文献库',
     'Import this paper into the selected library; stop if no match.',
 ])
@@ -172,6 +178,11 @@ def test_one_off_paper_import_omits_intent_tool(query):
 
 @pytest.mark.parametrize('query', [
     '以后导入论文时都先确认题录再加入资料库',
+    '以后不要自动把论文加入资料库',
+    '以后自动把论文加入资料库',
+    '今后将找到的论文加入资料库',
+    '把论文加入资料库，并将研究目标设为机器学习',
+    '把论文加入资料库，并将研究目标设成机器学习',
     '把研究目标改成比较不同论文检索方法',
     '这篇论文加入资料库，同时把后续研究计划改为分析液滴质谱',
     '暂停研究任务',
@@ -182,3 +193,17 @@ def test_other_requests_keep_intent_tool(query):
     from lazymind.chat.engine.tools.intent_writer import intent_tools_for_query
     tool = build_intentwrite_tool(conversation_id='c', current_query=query)
     assert intent_tools_for_query(tool, query) == [tool]
+
+
+@pytest.mark.parametrize('query,omitted', [
+    ('将 Attention Is All You Need 加入', True),
+    ('把这篇论文导入', True),
+    ('编辑研究计划.md文件', False),
+    ('把论文标题加入报告文件', False),
+    ('把这篇论文加入资料库，同时修改研究目标为机器学习', False),
+    ('把这篇论文加入资料库；不要修改后续研究计划，但把研究目标改成机器学习', False),
+])
+def test_selected_library_import_filter_preserves_editing_and_durable_changes(query, omitted):
+    from lazymind.chat.engine.tools.intent_writer import intent_tools_for_query
+    tool = object()
+    assert intent_tools_for_query(tool, query, has_selected_library=True) == ([] if omitted else [tool])

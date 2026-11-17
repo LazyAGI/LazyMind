@@ -777,6 +777,16 @@ def _has_document_preview_input(request: ChatRequest) -> bool:
     )
 
 
+def _allow_library_document_lookup(request: ChatRequest) -> bool:
+    # A library is a search scope, not a replacement for broken preview identity.
+    filters = request.retrieval.filters or {}
+    preview_requested = (
+        request.conversation.surface == 'knowledge_document_preview'
+        or request.document_context or filters.get('docid') or filters.get('doc_id')
+    )
+    return not preview_requested or _has_document_preview_input(request)
+
+
 def _task_profile_inputs(request: ChatRequest) -> dict[str, Any]:
     query, _ = _normalize_cite_message_query_for_agent(request.message.query)
     user_input, _ = _normalize_cite_message_query_for_agent(request.message.user_query or query)
@@ -806,6 +816,7 @@ def _task_profile_inputs(request: ChatRequest) -> dict[str, Any]:
         ),
         'intent': request.conversation.intent_context,
         'has_attachments': bool(request.message.files) or _has_document_preview_input(request),
+        'allow_library_document_lookup': _allow_library_document_lookup(request),
         'explicit_resources': explicit_resources,
         'thinking_depth': thinking_depth,
     }
@@ -1465,6 +1476,7 @@ async def _handle_chat_impl(
                 enable_llm_fallback=False,
                 thinking_depth=thinking_depth,
                 has_attachments=bool(files_map) or _has_document_preview_input(request),
+                allow_library_document_lookup=_allow_library_document_lookup(request),
                 explicit_resources=explicit_resource_payload,
             )
         profile_latency_ms = int((time.monotonic() - profile_started) * 1000)
@@ -1772,7 +1784,9 @@ async def _handle_chat_impl(
                 host_filesystem_enabled=bool(_cfg['trusted_local_mode']) or bound_local_workspace,
             )
         )
-        intent_tools = [] if workflow_turn_is_bound else intent_tools_for_query(intentwriter, language_query)
+        intent_tools = [] if workflow_turn_is_bound else intent_tools_for_query(
+            intentwriter, language_query, has_selected_library=bool(selected_kb_ids),
+        )
         all_tools = (intent_tools + agent_tools + artifact_tools + subagent_tools + attachment_tools
                      + session_env_tools + user_env_tools + ask_user_tools
                      + vocabulary_review_tools + workflow_tools + mcp_tools)

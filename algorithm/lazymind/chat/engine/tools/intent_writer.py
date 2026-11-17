@@ -20,17 +20,37 @@ VALID_OPERATIONS = {'set', 'add', 'remove', 'supersede'}
 FIELD_ALIASES = {'constraint': 'constraints'}
 
 
-def intent_tools_for_query(tool: Any, query: str) -> List[Any]:
-    """Keep one-off paper imports out of durable intent mutation."""
-    persistent_change = re.search(
-        r'以后|今后|后续|从现在起|默认|始终|每次|长期|研究(?:计划|目标)|工作流|'
-        r'\b(?:future|always|ongoing|from now on|research (?:plan|goal))\b', query, re.I,
+def intent_tools_for_query(
+    tool: Any, query: str, *, has_selected_library: bool = False,
+) -> List[Any]:
+    """Keep one-off library imports out of durable intent mutation."""
+    # Title keywords and refusals to modify a plan are not durable changes.
+    instruction = re.sub(r'《[^》]*》|“[^”]*”|"[^"]*"', '', query)
+    clauses = re.split(r'[，,；;。\n]|但是|但|同时|\band\b', instruction, flags=re.I)
+    persistent_change = any(
+        re.search(
+            r'^\s*(?:请)?(?:以后|今后|后续|从现在起|始终|每次|长期)|'
+            r'^\s*(?:please\s+)?(?:from now on|always|every time)\b', clause, re.I,
+        ) or (
+            not re.search(r'不要|无需|不必|别|\b(?:do not|don\'t|never)\b', clause, re.I)
+            and re.search(
+                r'(?:修改|更新|调整|设置|改变).{0,12}(?:研究(?:计划|目标)|工作流|长期目标)|'
+                r'(?:研究(?:计划|目标)|工作流|长期目标).{0,12}(?:改为|改成|设为|设成|修改|更新|调整)|'
+                r'\b(?:change|update|set)\b.{0,30}\b(?:research (?:plan|goal)|workflow)\b',
+                clause, re.I,
+            )
+        )
+        for clause in clauses
     )
-    paper_import = (
-        re.search(r'论文|文献|\b(?:papers?|articles?)\b', query, re.I)
-        and re.search(r'导入|加入|添加|收录|入库|保存到|\b(?:import|add|save)\b', query, re.I)
-        and re.search(r'资料库|知识库|文献库|论文库|文献集|\b(?:library|collection)\b', query, re.I)
-    )
+    library = r'(?:资料库|知识库|文献库|论文库|文献集|\b(?:library|collection)\b)'
+    action = r'(?:导入|加入|添加|收录|入库|保存到|\b(?:import|add|save)\b)'
+    # An explicit library destination also covers a title without the word paper.
+    paper_import = re.search(action + r'[^，,；;。\n]{0,80}' + library, query, re.I)
+    if has_selected_library and not paper_import:
+        # Only infer an omitted destination, never override an explicit file target.
+        paper_import = re.search(
+            r'(?:把|将).+' + action + r'(?:到)?\s*[。.!！]?$', query, re.I,
+        )
     return [] if paper_import and not persistent_change else [tool]
 
 

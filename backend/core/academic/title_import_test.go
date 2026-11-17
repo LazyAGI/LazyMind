@@ -53,6 +53,9 @@ func TestTitleImportProviderFailureAndAmbiguity(t *testing.T) {
 		want         string
 	}{
 		{"supplement is not another paper", `{"results":[]}`, `{"message":{"items":[{"title":["A useful paper"],"DOI":"10.1234/test","type":"journal-article"},{"title":["A useful paper"],"DOI":"10.1234/test.s001","type":"component"}]}}`, 200, "10.1234/test"},
+		{"same-title chapter is not the requested paper", `{"results":[]}`, `{"message":{"items":[{"title":["A useful paper"],"DOI":"10.1234/chapter","type":"book-chapter"}]}}`, 200, ""},
+		{"openalex chapter is not the requested paper", `{"results":[{"title":"A useful paper","doi":"10.1234/chapter","type":"book-chapter"}]}`, `{"message":{"items":[]}}`, 200, ""},
+		{"chapter classification survives duplicate provider record", `{"results":[{"title":"A useful paper","doi":"10.1234/chapter"}]}`, `{"message":{"items":[{"title":["A useful paper"],"DOI":"10.1234/chapter","type":"book-chapter"}]}}`, 200, ""},
 		{"crossref only", `{}`, `{"message":{"items":[{"title":["A useful paper"],"DOI":"10.1234/test"}]}}`, 429, "10.1234/test"},
 		{"different identities", `{"results":[{"title":"A useful paper","doi":"10.1234/other"}]}`, `{"message":{"items":[{"title":["A useful paper"],"DOI":"10.1234/test"}]}}`, 200, ""},
 		{"no exact title", `{"results":[]}`, `{"message":{"items":[{"title":["A different paper"],"DOI":"10.1234/test"}]}}`, 200, ""},

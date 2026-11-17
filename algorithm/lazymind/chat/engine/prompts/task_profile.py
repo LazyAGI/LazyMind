@@ -797,12 +797,16 @@ def resolve_task_profile(
     enable_llm_fallback: bool = True,
     thinking_depth: ThinkingDepth = 'low',
     has_attachments: bool = False,
+    allow_library_document_lookup: bool = True,
     explicit_resources: ExplicitResourceBindings | dict[str, Any] | None = None,
 ) -> TaskProfile:
     resources = _normalize_explicit_resources(explicit_resources)
     active_resources, _, _ = _resource_usage_policy(query, resources)
-    rule, needs_llm = _rule_profile(query, has_attachments=has_attachments,
-                                    has_document_source=bool(active_resources.knowledge_base_ids))
+    rule, needs_llm = _rule_profile(
+        query, has_attachments=has_attachments,
+        has_document_source=(allow_library_document_lookup
+                             and bool(active_resources.knowledge_base_ids)),
+    )
     if history and _CONTEXT_REFERENCE.search(str(query or '').strip()):
         rule = replace(
             rule,

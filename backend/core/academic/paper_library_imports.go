@@ -411,6 +411,16 @@ func submitLibraryImport(ctx context.Context, user, userName string, input creat
 				var saved savedImportCandidate
 				_ = json.Unmarshal(snapshot, &saved)
 				saved.Requested = source.Requested
+				if source.Candidate.URL != "" {
+					saved.FulltextCandidate = source.Candidate
+					// Non-arXiv candidates come from a trusted saved work; preserve
+					// its verification receipt so enrichment need not rediscover it.
+					if source.Candidate.SourceProvider != "arxiv" {
+						ref := paperRef(work)
+						ref.SourceProvider, ref.SourceVersion, ref.PDFURL = source.Candidate.SourceProvider, source.Candidate.Version, source.Candidate.URL
+						saved.VerifiedPaper = &ref
+					}
+				}
 				if saved.Requested != nil && publicationRequested(*saved.Requested) {
 					saved.Version, saved.SourceProvider = "publishedVersion", ""
 				}

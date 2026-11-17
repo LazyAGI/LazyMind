@@ -40,6 +40,7 @@ func resolveSelectedTitle(ctx context.Context, user string, p capability.PaperSe
 	}()
 	go func() { works, err := searchCrossrefTitle(lookupCtx, p.Title); results <- outcome{works, err} }()
 	matches := map[string]WorkInput{}
+	excluded := map[string]bool{}
 	failures := 0
 	for i := 0; i < 2; i++ {
 		var result outcome
@@ -73,6 +74,11 @@ func resolveSelectedTitle(ctx context.Context, user string, p capability.PaperSe
 			if key == "" {
 				continue
 			}
+			// A bare title cannot disambiguate a same-named chapter/data object.
+			// Preserve a provider's explicit exclusion even if its duplicate omits type.
+			if len(p.Authors) == 0 && p.Year == 0 && strings.TrimSpace(p.Venue) == "" && nonPaperTitleCandidate(w) {
+				excluded[key] = true
+			}
 			if old, ok := matches[key]; ok {
 				// Prefer Crossref deterministically for DOI metadata, fill omissions from the other provider.
 				if w.Provider != "crossref" {
@@ -94,6 +100,9 @@ func resolveSelectedTitle(ctx context.Context, user string, p capability.PaperSe
 			matches[key] = w
 		}
 	}
+	for key := range excluded {
+		delete(matches, key)
+	}
 	if ctx.Err() != nil {
 		return WorkInput{}, ctx.Err()
 	}
@@ -114,4 +123,17 @@ func resolveSelectedTitle(ctx context.Context, user string, p capability.PaperSe
 		return WorkInput{}, fmt.Errorf("题录查询暂未完成（%d 个来源不可用），可重试", failures)
 	}
 	return WorkInput{}, fmt.Errorf("未找到题名明确匹配的论文，可补充 DOI/arXiv 或完整标题：%w", errPaperSelectionUnconfirmed)
+}
+
+// Only reject explicit non-paper types. Missing provider metadata does not add
+// another blocking validation requirement to the lightweight import path.
+func nonPaperTitleCandidate(w WorkInput) bool {
+	kind, _ := w.Provenance["work_type"].(string)
+	switch kind {
+	case "book", "book-chapter", "book-section", "book-part", "book-series", "book-set",
+		"book-track", "monograph", "edited-book", "reference-book", "reference-entry",
+		"dataset", "component", "grant", "standard", "journal", "journal-issue", "journal-volume":
+		return true
+	}
+	return false
 }
