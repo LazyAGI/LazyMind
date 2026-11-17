@@ -911,6 +911,7 @@ const AssistantMessage = (props: any) => {
               <ChatExportActions
                 key={`${sessionId}:${answerHistoryId}`}
                 content={answer.content || ""}
+                rawContent={answer.raw_delta}
                 exports={answer.exports}
                 sources={answer.sources}
                 conversationId={sessionId}
@@ -1021,7 +1022,8 @@ const AssistantMessage = (props: any) => {
             {!item.fork_read_only && sessionId && item.exports?.length > 0 && (
               <ChatExportActions
                 key={`${sessionId}:${item.history_id || item.id}`}
-                content={item.display_delta || item.delta || ""}
+                content={item.delta || ""}
+                rawContent={item.raw_delta}
                 exports={item.exports}
                 sources={item.sources}
                 conversationId={sessionId}

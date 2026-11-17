@@ -167,7 +167,7 @@ func persistTaskModelEvent(ctx context.Context, tx *gorm.DB, req *RunRequest, ca
 		call.pending = append(call.pending, *ev)
 		return true, nil
 	}
-	if ev.Type != "model_output" || ev.Text != "" || ev.Think != "" || ev.ProcessStep != nil || len(ev.Sources) > 0 || len(ev.Value) > 0 || len(ev.ToolCalls) > 0 || len(ev.ToolResults) > 0 || len(ev.DurableToolResults) > 0 || ev.Delta != "" || ev.ArtifactKey != "" || ev.ContentType != "" || ev.V2ArtifactID != "" || ev.V2RevisionID != "" || len(ev.Steps) > 0 || len(ev.WritingSubtasks) > 0 || ev.StreamID != "" || ev.Status != "" || ev.Summary != "" || ev.Message != "" {
+	if ev.Type != "model_output" || ev.Text != "" || ev.Think != "" || ev.ProcessStep != nil || len(ev.Sources) > 0 || len(ev.Value) > 0 || len(ev.ToolCalls) > 0 || len(ev.ToolResults) > 0 || len(ev.DurableToolResults) > 0 || len(ev.DurableAssistantMessage) > 0 || ev.Delta != "" || ev.ArtifactKey != "" || ev.ContentType != "" || ev.V2ArtifactID != "" || ev.V2RevisionID != "" || len(ev.Steps) > 0 || len(ev.WritingSubtasks) > 0 || ev.StreamID != "" || ev.Status != "" || ev.Summary != "" || ev.Message != "" {
 		return false, errors.New("task model boundary contains content")
 	}
 	if ev.RuntimeEvent != nil && (m.Phase != "commit" || ev.RuntimeEvent.Type != "model_switched") {

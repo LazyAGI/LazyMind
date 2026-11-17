@@ -8,19 +8,19 @@ import {PdfPinDock} from "./PdfPinDock";
 import {usePdfPinBoard} from "./usePdfPinBoard";
 import {isPersistablePdfPin,type PdfPinRecord,type PdfRegionPinRecord,type PdfStudyPinRecord} from "./pdfPinStore";
 import {usePdfHandPan} from "./usePdfHandPan";
-import {PdfStudyActivation,StudySparkle} from "./PdfStudyActivation";
 import {usePdfReaderPreferences} from "./usePdfReaderPreferences";
 import {AgentAppsAuth} from "@/components/auth";
 import {authServiceApiUrl} from "@/runtime/apiBase";
 import {usePaperReaderSession,type VisualExplanation} from "@/modules/knowledge/api/paperReader";
 import {PdfVisualStudy} from "./PdfVisualStudy";
 import {PdfFigureLayer} from "./PdfFigureLayer";
-import {usePaperReaderLabels,paperVisualLabel} from "./paperReaderLabels";
+import {usePaperReaderLabels} from "./paperReaderLabels";
 import "./PdfPaperReader.css";
 import { useTranslation } from "react-i18next";
 import { message } from "antd";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Document, Page, pdfjs } from "react-pdf";
+import { pdfDocumentOptions } from "./pdfDocumentOptions";
 import { PdfCitationLayer } from "./PdfCitationLayer";
 import { restorePdfLinkAnnotationBorders } from "./pdfNativeLinkBorders";
 import { groupPdfCitationTargets, type PdfCitationTarget } from "./pdfCitationReferences";
@@ -28,7 +28,7 @@ import { createPdfCitationPreviewCache } from "./pdfCitationPreview";
 import { addCitationToPaperLibrary } from "@/modules/knowledge/api/academicReferences";
 import { getImportErrorMessage } from "@/modules/knowledge/utils/importError";
 import {PdfSelectionComposer, type PdfComposerAction} from "./PdfSelectionComposer";
-import {pdfNoteHighlightBackground,pdfNoteHighlightHitAreas,pdfNoteHighlightPaths,readPdfNoteHighlights,writePdfNoteHighlights,type PdfNoteColor,type PdfNoteHighlight} from "./pdfNoteHighlights";
+import {resolvePdfNoteHighlight,type PdfHighlightViewport,pdfNoteHighlightBackground,pdfNoteHighlightHitAreas,pdfNoteHighlightPaths,readPdfNoteHighlights,writePdfNoteHighlights,type PdfNoteColor,type PdfNoteHighlight} from "./pdfNoteHighlights";
 import {ControlOutlined, MinusOutlined, PlusOutlined, LeftOutlined, RightOutlined} from "@ant-design/icons";
 import "react-pdf/dist/Page/AnnotationLayer.css";
 import "react-pdf/dist/Page/TextLayer.css";
@@ -47,7 +47,7 @@ import { formulaNumberMap, formulaReferenceForClick } from "./pdfFormulaReferenc
 import type { FormulaEvidence,FormulaExplanation } from "@/modules/knowledge/api/formulaExplanation";
 import type { PdfIRBlock, PdfIRDocument } from "@/modules/knowledge/api/pdfIR";
 import { PdfFormulaLayer, hasFormulaGeometry } from "./PdfFormulaLayer";
-import { usePdfIR, usablePdfIR, type PdfIRTarget } from "@/modules/knowledge/api/pdfIR";
+import { usePdfIR, usablePdfIR, pdfIRQuotaWaiting, type PdfIRTarget } from "@/modules/knowledge/api/pdfIR";
 import {readNativePdfOutline,type PdfNativeOutlineItem} from "@/modules/knowledge/api/pdfOutline";
 import pdfWorkerUrl from "@react-pdf-worker/pdf.worker.min.mjs?url";
 export type { LearningSelectionAction } from "./learningSelection";
@@ -217,7 +217,6 @@ export default function RenderPdf({
   currentSource.current = fileData;
   const [visualSelection,setVisualSelection]=useState<PdfIRBlock>();
   const readerFrame=useRef<HTMLDivElement>(null);
-  const [studyPulse,setStudyPulse]=useState(0);
   const [visualPreview,setVisualPreview]=useState<string>();
   const lastRequestedNavigation=useRef("");
   const pdfIR = usePdfIR(pdfIRTarget);
@@ -271,7 +270,8 @@ export default function RenderPdf({
     return pages;
   }, [formulaDocument]);
   const formulaCount = Array.from(formulaPages.values()).reduce((count, blocks) => count + blocks.length, 0);
-  const formulaBusy = pdfIR.starting || pdfIR.state.status === "queued" || pdfIR.state.status === "running";
+  const quotaWaiting = pdfIRQuotaWaiting(pdfIR.state);
+  const formulaBusy = pdfIR.starting || (pdfIR.state.status === "queued" && !quotaWaiting) || pdfIR.state.status === "running";
   const [toolsOpen,setToolsOpen] = useState(false);
   const toolsRef = useRef<HTMLDivElement>(null);
   useEffect(()=>{
@@ -289,6 +289,8 @@ export default function RenderPdf({
   const [pageSizesMap, setPageSizesMap] = useState<
     Record<number, { width: number; height: number }>
   >({});
+  const [highlightViewports,setHighlightViewports]=useState<{source:RenderPdfProps["fileData"];pages:Record<number,PdfHighlightViewport>}>({source:fileData,pages:{}});
+  const resolvedSavedHighlights=useMemo(()=>savedNoteHighlights.map(note=>resolvePdfNoteHighlight(note,highlightViewports.source===fileData?highlightViewports.pages[note.page-1]:undefined)),[savedNoteHighlights,highlightViewports,fileData]);
   const pageRefs = useRef<(HTMLDivElement | null)[]>([]);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const handPan=usePdfHandPan(containerRef,fileData);
@@ -441,7 +443,11 @@ export default function RenderPdf({
       return;
     }
     setScrollTop(containerRef.current.scrollTop);
-    setSelectionAction(null);
+    // Focusing or typing in the note editor can scroll its caret into view.
+    // Keep the captured quote and draft while the user is editing the toolbar.
+    if (!containerRef.current.querySelector('[data-pdf-selection-toolbar]')?.contains(document.activeElement)) {
+      setSelectionAction(null);
+    }
     if (reportPosition.current && pageTops.length) {
       const currentTop = containerRef.current.scrollTop;
       let currentPage = 0;
@@ -1184,7 +1190,7 @@ export default function RenderPdf({
           if (!bounds.width || !bounds.height) return;
           const x = (event.clientX - bounds.left) / bounds.width;
           const y = (event.clientY - bounds.top) / bounds.height;
-          const hit = pdfNoteHighlightHitAreas(savedNoteHighlights,index+1).find(({rect}) => x >= rect[0] && x <= rect[2] && y >= rect[1] && y <= rect[3]);
+          const hit = pdfNoteHighlightHitAreas(resolvedSavedHighlights,index+1).find(({rect}) => x >= rect[0] && x <= rect[2] && y >= rect[1] && y <= rect[3]);
           if (hit) onNoteHighlightClick(hit.id);
         }}
         ref={(el) => (pageRefs.current[index] = el)}
@@ -1217,14 +1223,15 @@ export default function RenderPdf({
           onRenderTextLayerSuccess={() => tagReferenceTextLayer(index)}
           onLoadSuccess={(page) => {
             const viewport = page.getViewport({ scale: 1 });
+            setHighlightViewports(previous=>previous.source===fileData&&previous.pages[index]?.width===viewport.width&&previous.pages[index]?.height===viewport.height?previous:{source:fileData,pages:{...(previous.source===fileData?previous.pages:{}),[index]:viewport}});
             setPageSizesMap(prev => prev[index]?.width === viewport.width && prev[index]?.height === viewport.height ? prev : {
               ...prev,[index]:{width:viewport.width,height:viewport.height},
             });
           }}
         />
         </div>
-        {pdfNoteHighlightPaths([...noteHighlights,...savedNoteHighlights],index+1).map(({color,path})=><svg key={color} data-pdf-note-highlight={color} aria-hidden="true" viewBox="0 0 1 1" preserveAspectRatio="none" style={{position:'absolute',inset:0,width:'100%',height:'100%',mixBlendMode:'multiply',pointerEvents:'none',zIndex:5}}><path d={path} fill={pdfNoteHighlightBackground(color)} fillRule="nonzero"/></svg>)}
-        {onNoteHighlightClick&&savedNoteHighlights.filter(note=>note.page===index+1&&note.rects.length>0).map(note=><button key={note.id} type="button" className="pdf-note-highlight-marker" aria-label={readerLanguage==='zh'?'打开笔记':'Open note'} onClick={event=>{event.stopPropagation();onNoteHighlightClick(note.id);}} style={{top:`${note.rects[0][1]*100}%`}}>✎</button>)}
+        {pdfNoteHighlightPaths([...noteHighlights,...resolvedSavedHighlights],index+1).map(({color,path})=><svg key={color} data-pdf-note-highlight={color} aria-hidden="true" viewBox="0 0 1 1" preserveAspectRatio="none" style={{position:'absolute',inset:0,width:'100%',height:'100%',mixBlendMode:'multiply',pointerEvents:'none',zIndex:5}}><path d={path} fill={pdfNoteHighlightBackground(color)} fillRule="nonzero"/></svg>)}
+        {onNoteHighlightClick&&resolvedSavedHighlights.filter(note=>note.page===index+1&&note.rects.length>0).map(note=><button key={note.id} type="button" className="pdf-note-highlight-marker" aria-label={readerLanguage==='zh'?'打开笔记':'Open note'} onClick={event=>{event.stopPropagation();onNoteHighlightClick(note.id);}} style={{top:`${note.rects[0][1]*100}%`}}>✎</button>)}
         {studyHighlight?.page === index && <div className="pdf-study-highlight" style={(() => {
           const box = studyHighlight.bbox;
           const valid = box && box.length === 4 && box.every(value=>Number.isFinite(value)&&value>=0&&value<=1) && box[0]<box[2] && box[1]<box[3];
@@ -1248,15 +1255,12 @@ export default function RenderPdf({
     <div className="pdf-reader-modebar pdf-reader-toolbar" hidden={typeof pdfHeaderEnd !== "function" && !toolsOpen} style={{maxWidth:containerWidth ? Math.max(180,containerWidth-24) : undefined}}>
       {pdfIRTarget && <div className="pdf-formula-controls" onMouseUp={event => event.stopPropagation()}>
 
-        {!formulaDocument && !formulaBusy && <div className="pdf-reader-service-notice"><span>{t("pdfFormula.serviceRequired")}</span><a href={`/settings?section=model_defaults&service=parsing&return_to=${encodeURIComponent(window.location.pathname+window.location.search)}`}>{t("pdfFormula.configureService")}</a></div>}
+        {!formulaDocument && !formulaBusy && !quotaWaiting && <div className="pdf-reader-service-notice"><span>{t("pdfFormula.serviceRequired")}</span><a href={`/settings?section=model_defaults&service=parsing&return_to=${encodeURIComponent(window.location.pathname+window.location.search)}`}>{t("pdfFormula.configureService")}</a></div>}
         <details className="pdf-reader-parser-details"><summary>{readerLabel("displaySettings")}</summary><div><span role="status">{formulaBusy ? t("pdfFormula.processing") : pdfIR.state.status === "ready" ? !globalThis.crypto?.subtle ? t("pdfFormula.insecure") : !pdfSourceHash ? t("pdfFormula.checking") : formulaDocument ? formulaCount ? t("pdfFormula.count", {count:formulaCount}) : t("pdfFormula.empty") : t("pdfFormula.mismatch") : pdfIR.state.error_message || t("pdfFormula.intro")}</span>
         {formulaDocument && formulaCount > 0 && <button onClick={() => setFormulasEnabled(value => !value)} aria-pressed={formulasEnabled}>{formulasEnabled ? t("pdfFormula.hide") : t("pdfFormula.show")}</button>}
         {tableBlocks.length > 0 && <button onClick={() => setTablesEnabled(value => !value)} aria-pressed={tablesEnabled}>{t(tablesEnabled ? "pdfTable.hide" : "pdfTable.show")}</button>}
-        {!formulaBusy && pdfIRTarget.canWrite !== false && <button onClick={() => void pdfIR.start(pdfIR.state.status === "ready" || pdfIR.state.status === "failed")}>{pdfIR.state.status === "not_requested" ? t("pdfFormula.enable") : t("pdfFormula.retry")}</button>}
+        {!formulaBusy && pdfIRTarget.canWrite !== false && <button onClick={() => void pdfIR.start(pdfIR.state.status === "ready" || pdfIR.state.status === "failed" || (quotaWaiting && !!formulaDocument))}>{pdfIR.state.status === "not_requested" ? t("pdfFormula.enable") : t("pdfFormula.retry")}</button>}
         </div></details>
-        {formulaDocument && studyBlocks.length > 0 && <button type="button" className="pdf-study-ai-button" onClick={() => {releasePinnedStudy();setStudyPulse(value=>value+1);setVisualSelection(undefined);setTableStudyOpen(false);setStudyOpen(true);}}><StudySparkle/><span>{t("pdfFormula.openCatalog")}</span></button>}
-        {tableBlocks.length > 0 && <button onClick={() => {releasePinnedStudy();setVisualSelection(undefined);setStudyOpen(false);setTableStudyOpen(true);}}>{t("pdfTable.openCatalog", {count:tableBlocks.length})}</button>}
-        {imageBlocks.length>0&&<select aria-label={readerLabel("visuals")} value="" onChange={event=>{const block=imageBlocks.find(item=>item.id===event.target.value);if(block)openVisualStudy(block);}}><option value="" disabled>{readerLabel("imageRegion")} ({imageBlocks.length})</option>{imageBlocks.filter(block=>block.image?.number).map(block=><option key={block.id} value={block.id}>{paperVisualLabel(block,formulaDocument!.blocks,readerLabel)}</option>)}{imageBlocks.some(block=>!block.image?.number)&&<optgroup label={readerLabel("imageRegion")}>{imageBlocks.filter(block=>!block.image?.number).map(block=><option key={block.id} value={block.id}>{paperVisualLabel(block,formulaDocument!.blocks,readerLabel)}</option>)}</optgroup>}</select>}
 
       </div>}
     </div>
@@ -1286,7 +1290,6 @@ export default function RenderPdf({
   if (error && errorSource.current === fileData) {
     return (
       <div ref={readerFrame} className="pdf-reader-workspace" data-reader-mode="original" style={{height:style?.height || "100%",width:"100%"}}>
-        {studyPulse>0&&<PdfStudyActivation key={studyPulse} frame={readerFrame}/>}
     {readerHeader}
         <div role="alert" style={{padding:20,textAlign:"center",color:"#a6574c"}}>加载失败: {error}</div>
       </div>
@@ -1318,7 +1321,6 @@ export default function RenderPdf({
   }
   return (
     <div ref={readerFrame} className="pdf-reader-workspace" data-reader-mode="original" style={{height:style?.height || "calc(100vh - 220px)",width:"100%"}}>
-    {studyPulse>0&&<PdfStudyActivation key={studyPulse} frame={readerFrame}/>}
     {readerHeader}
     <div ref={pinStageRef} className="pdf-reader-stage">
     {noteReturn&&<button type="button" className="pdf-reader-note-return" aria-label={t('pdfReader.returnPosition')} onClick={()=>{
@@ -1401,6 +1403,7 @@ export default function RenderPdf({
         </div>
       ) : null}
       <Document
+        options={pdfDocumentOptions}
         externalLinkTarget="_blank"
         externalLinkRel="noopener noreferrer"
         // react-pdf retains this handler from mount; read the active source from a ref.

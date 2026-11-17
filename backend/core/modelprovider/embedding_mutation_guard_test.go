@@ -116,10 +116,23 @@ func TestActiveEmbeddingSupplierEndpointAndKeyCannotChangeWithIndex(t *testing.T
 	requireEmbeddingConflictResponse(t, keyRec, "active_index_owner")
 	requestConfigRec := httptest.NewRecorder()
 	SetProviderRequestConfig(requestConfigRec, requestConfigRequest(http.MethodPut, parent.ID, parent.CreateUserID, `{"default_protocol":"openai","advanced":{"extra_body":{"test":"changed"}}}`))
-	requireEmbeddingConflictResponse(t, requestConfigRec, "active_index_owner")
+	if requestConfigRec.Code != http.StatusOK {
+		t.Fatalf("active supplier request config change=%d %s", requestConfigRec.Code, requestConfigRec.Body.String())
+	}
 	var saved orm.UserModelProvider
 	if err := db.Take(&saved, "id = ?", parent.ID).Error; err != nil {
 		t.Fatal(err)
+	}
+	advanced, err := ResolveProviderRequestAdvanced(saved)
+	if err != nil || advanced.ExtraBody["test"] != "changed" {
+		t.Fatalf("advanced settings were not saved: %+v, %v", advanced, err)
+	}
+	var index orm.EmbeddingIndexState
+	if err := db.Take(&index, "scope = ?", globalEmbeddingScope).Error; err != nil {
+		t.Fatal(err)
+	}
+	if index.Signature != validTestEmbeddingFingerprint || index.Generation != 1 || index.ActiveModelID != model.ID {
+		t.Fatalf("saving request options changed the existing index: %+v", index)
 	}
 	if saved.BaseURL != parent.BaseURL || saved.ActiveKeyID != groupKeyID(group.ID, "first-key") {
 		t.Fatalf("rejected supplier change was persisted: %+v", saved)

@@ -394,8 +394,18 @@ func EnsureParsed(w http.ResponseWriter, r *http.Request) {
 		Caller: caller,
 	})
 	if err != nil {
+		var nativeFailure *nativeParseError
+		if errors.As(err, &nativeFailure) && nativeFailure.content {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusUnprocessableEntity)
+			common.ReplyJSON(w, result)
+			return
+		}
 		common.ReplyErr(w, err.Error(), http.StatusBadGateway)
 		return
+	}
+	if r.Method == http.MethodGet {
+		result.PDFStructure = observePDFStructure(r.Context(), datasetID, documentID)
 	}
 	if result.Status == "parsing" {
 		w.WriteHeader(http.StatusAccepted)

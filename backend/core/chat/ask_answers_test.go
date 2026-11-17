@@ -78,3 +78,37 @@ func TestAskSubmissionChecksSelectedOptions(t *testing.T) {
 		})
 	}
 }
+
+func TestAskSubmissionAllowsAllUnansweredOnlyForOptionalQuestions(t *testing.T) {
+	questions := []any{}
+	answers := []any{}
+	for _, kind := range []string{"text", "single", "multiple", "boolean"} {
+		questions = append(questions, map[string]any{
+			"id": kind, "text": kind + "?", "type": kind, "required": false,
+		})
+		answers = append(answers, map[string]any{
+			"id": kind, "text": kind + "?", "type": kind, "answer": nil,
+		})
+	}
+	pending := map[string]any{"ask_id": "optional", "questions": questions}
+	submission := map[string]any{"ask_id": "optional", "questions": answers}
+	validate := func() error {
+		ext, err := json.Marshal(map[string]any{"ask_pending": pending})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return validateWorkspaceAskSubmission([]orm.ChatHistory{{Ext: ext}},
+			map[string]any{"ask_answers_structured": submission})
+	}
+	if err := validate(); err != nil {
+		t.Fatalf("all-optional empty submission rejected: %v", err)
+	}
+	for _, question := range questions {
+		question := question.(map[string]any)
+		question["required"] = true
+		if validate() == nil {
+			t.Fatalf("required %s question accepted without an answer", question["type"])
+		}
+		question["required"] = false
+	}
+}

@@ -2,9 +2,12 @@ package taskcenter
 
 import (
 	"context"
+	"encoding/json"
+	"strings"
 	"time"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 	"lazymind/core/common/orm"
 	"lazymind/core/workflow/displaystate"
 )
@@ -13,13 +16,32 @@ import (
 // registers a standalone workflow task. The caller holds the conversation lock
 // and runs this inside the session-creation transaction.
 func EnsureWorkflowTask(ctx context.Context, db *gorm.DB, session orm.WorkflowSession) error {
-	if session.ConversationID == "" {
+	if session.ConversationID == "" && (session.OriginHost != "external-agent" || session.ControllerHost != "external-agent") {
 		return nil
 	}
 	var count int64
 	if err := db.WithContext(ctx).Model(&orm.TaskCenterTask{}).
 		Where("plugin_session_id = ?", session.ID).Count(&count).Error; err != nil || count > 0 { // workflow-naming: persistence
 		return err
+	}
+	if session.ConversationID == "" {
+		title := session.WorkflowRef
+		if title == "" {
+			title = session.WorkflowID
+		}
+		var intent struct {
+			Text string `json:"text"`
+		}
+		if json.Unmarshal([]byte(session.IntentContext), &intent) == nil && strings.TrimSpace(intent.Text) != "" {
+			title = strings.TrimSpace(strings.SplitN(intent.Text, "\n", 2)[0])
+			if runes := []rune(title); len(runes) > 100 {
+				title = string(runes[:100]) + "…"
+			}
+		}
+		return CreateTask(ctx, db, &orm.TaskCenterTask{
+			UserID: session.CreateUserID, WorkflowSessionID: &session.ID,
+			TaskType: "workflow_run", Title: &title, Status: "running", CreatedAt: session.CreatedAt,
+		})
 	}
 	var triggers []orm.TaskCenterTask
 	if err := db.WithContext(ctx).
@@ -50,6 +72,31 @@ func EnsureWorkflowTask(ctx context.Context, db *gorm.DB, session orm.WorkflowSe
 		WorkflowSessionID: &session.ID, TaskType: "workflow_run", Title: &title,
 		Status: "running", CreatedAt: session.CreatedAt,
 	})
+}
+
+// RecoverExternalWorkflowTasks makes previously stored, conversation-free runs
+// discoverable without attaching them to an unrelated LazyMind conversation.
+// Existing task rows, including archived ones, are never recreated.
+func RecoverExternalWorkflowTasks(ctx context.Context, db *gorm.DB, owner string) error {
+	var sessions []orm.WorkflowSession
+	if err := db.WithContext(ctx).Where("create_user_id = ? AND origin_host = ? AND controller_host = ? AND conversation_id = ? AND dismissed = ?",
+		owner, "external-agent", "external-agent", "", false).
+		Where("NOT EXISTS (SELECT 1 FROM task_center_tasks t WHERE t.plugin_session_id = plugin_sessions.id)"). // workflow-naming: persistence
+		Order("created_at DESC").Limit(100).Find(&sessions).Error; err != nil {
+		return err
+	}
+	for _, session := range sessions {
+		if err := db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+			var current orm.WorkflowSession
+			if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ? AND create_user_id = ? AND dismissed = ?", session.ID, owner, false).Take(&current).Error; err != nil {
+				return err
+			}
+			return EnsureWorkflowTask(ctx, tx, current)
+		}); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // HistoricalWorkflowMatches groups unclaimed sessions within each persisted

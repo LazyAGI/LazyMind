@@ -69,6 +69,19 @@ def test_heading_validation_failure_is_recovered_and_checkpointed(monkeypatch, t
     monkeypatch.setattr(writer, '_write_input_artifact', lambda *args, **kwargs: '/input.json')
     (tmp_path / 'temporary').mkdir()
     checkpoint_dir = tmp_path / 'checkpoints'
+    # Reproduce a writable final path whose old temporary filename exceeded MAX_PATH.
+    checkpoint_dir /= 'x' * max(1, 199 - len(str(checkpoint_dir)))
+    create_temporary = writer.tempfile.mkstemp
+    temporary_paths = []
+
+    def windows_temporary(**kwargs):
+        descriptor, filename = create_temporary(**kwargs)
+        temporary_paths.append(filename)
+        assert len(filename) < 260
+        assert writer.Path(filename).parent == checkpoint_dir
+        return descriptor, filename
+
+    monkeypatch.setattr(writer.tempfile, 'mkstemp', windows_temporary)
     instructions = json.dumps({'instructions': [{'section_title': '研究方法',
                                                 'required_points': ['说明来源'], 'expected_blocks': ['说明来源']}]})
     toolkit = writer.WriterWritingCapabilities()
@@ -116,6 +129,9 @@ def test_heading_validation_failure_is_recovered_and_checkpointed(monkeypatch, t
         on_delta=lambda value: None, checkpoint_dir=str(checkpoint_dir),
     ))
     assert len(calls) == 6
+    assert len(temporary_paths) == 6
+    assert len(set(temporary_paths)) == 6
+    assert not list(checkpoint_dir.glob('*.tmp'))
 
 
 @pytest.mark.parametrize('failure', [False, True])

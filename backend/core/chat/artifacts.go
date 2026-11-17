@@ -209,11 +209,16 @@ func canonicalConversationFileValue(
 	if err != nil || !info.Mode().IsRegular() {
 		return nil, errors.New("file artifact must be a regular file")
 	}
-	canonical, err := json.Marshal(map[string]any{
-		"filename": filename,
-		"path":     resolvedPath,
-		"size":     info.Size(),
-	})
+	canonicalValue := map[string]any{"filename": filename, "path": resolvedPath, "size": info.Size()}
+	if rawGroup, exists := value["preview_group"]; exists {
+		group, ok := rawGroup.(string)
+		group = strings.TrimSpace(group)
+		if !ok || group == "" || len([]rune(group)) > 255 {
+			return nil, errors.New("invalid artifact preview_group")
+		}
+		canonicalValue["preview_group"] = group
+	}
+	canonical, err := json.Marshal(canonicalValue)
 	if err != nil {
 		return nil, errors.New("file artifact value is invalid")
 	}

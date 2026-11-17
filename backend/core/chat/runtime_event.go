@@ -150,6 +150,10 @@ func validateModelCallFinished(raw json.RawMessage) error {
 		if _, ok := validModelFinishes[*data.Finish]; !ok {
 			return errors.New("unsupported model finish")
 		}
+	case "cancelled":
+		if data.Finish != nil || data.Failure != nil {
+			return errors.New("model_call_finished cancelled outcome is invalid")
+		}
 	case "failure":
 		if data.Finish != nil || data.Failure == nil {
 			return errors.New("model_call_finished failure outcome is invalid")
@@ -318,7 +322,7 @@ func storedRunEvent(runID string, raw json.RawMessage) *ChatRuntimeEvent {
 }
 
 func hasBusinessStreamPayload(chunk UpstreamStreamChunk) bool {
-	return chunk.Text != "" || chunk.ReasoningText != "" || len(chunk.Sources) > 0 ||
+	return len(chunk.CanonicalMessages) > 0 || chunk.Text != "" || chunk.ReasoningText != "" || len(chunk.Sources) > 0 ||
 		chunk.KnowledgeOperationResult != nil || chunk.TaskCreated != nil || chunk.ArtifactCreated != nil || chunk.AskPending != nil ||
 		chunk.ToolLimitPending != nil || chunk.IntentUpdated != nil || chunk.WorkflowPreflightUpdated != nil ||
 		chunk.CapabilityDependency != nil || chunk.ToolConfiguration != nil ||

@@ -121,66 +121,93 @@ func TestAcquirePackageRejectsChangedLockedVersionAndDoesNotCache(t *testing.T) 
 }
 
 func TestAcquirePackageAppliesOnlyLockedPatchSet(t *testing.T) {
-	root := t.TempDir()
-	cacheRoot := filepath.Join(root, "user-cache")
-	origin := map[string]string{"SKILL.md": "# Upstream\n", "script.py": "print('upstream')\n"}
-	originPath := filepath.Join(root, "origin.zip")
-	writeCatalogZip(t, originPath, origin)
-	originBody, err := os.ReadFile(originPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	originFiles := map[string][]byte{"SKILL.md": []byte(origin["SKILL.md"]), "script.py": []byte(origin["script.py"])}
-	newSkill := "---\nname: demo\ndescription: patched\n---\n# Upstream\n"
-	patchRoot := filepath.Join(root, "patches")
-	patchDir := filepath.Join(patchRoot, "demo", "add-frontmatter")
-	if err := os.MkdirAll(filepath.Join(patchDir, "files"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	writeTestFile(t, filepath.Join(patchRoot, "catalog.yaml"), "schema_version: 1\npatches:\n  - demo/add-frontmatter/patch.yaml\n")
-	writeTestFile(t, filepath.Join(patchDir, "files", "SKILL.md"), newSkill)
-	before := sha256.Sum256(originFiles["SKILL.md"])
-	writeTestFile(t, filepath.Join(patchDir, "patch.yaml"), fmt.Sprintf("schema_version: 1\nid: demo/add-frontmatter\ntarget:\n  uid: bsk_demo\n  version: 1.0.0\n  origin_tree_sha256: %s\noperations:\n  - op: upsert\n    path: SKILL.md\n    file: files/SKILL.md\n    before_sha256: %s\n", skillpackage.TreeHash(originFiles), hex.EncodeToString(before[:])))
-	patchCatalog, err := skillpatch.LoadCatalog(filepath.Join(patchRoot, "catalog.yaml"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	patched, err := skillpatch.Apply(skillpatch.Target{UID: "bsk_demo", Version: "1.0.0", OriginTreeHash: skillpackage.TreeHash(originFiles)}, originFiles, patchCatalog)
-	if err != nil {
-		t.Fatal(err)
-	}
-	finalPath, err := skillpackage.WriteZip(patched.Files, root)
-	if err != nil {
-		t.Fatal(err)
-	}
-	finalBody, err := os.ReadFile(finalPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		_, _ = w.Write(originBody)
-	}))
-	defer server.Close()
-	entry := testRemoteEntry(server.URL+"/skill.zip", finalBody, map[string]string{"SKILL.md": newSkill, "script.py": origin["script.py"]})
-	entry.OriginArchiveSHA256 = digestHex(originBody)
-	entry.OriginArchiveSize = int64(len(originBody))
-	entry.OriginTreeSHA256 = skillpackage.TreeHash(originFiles)
-	entry.PatchSetSHA256 = patched.PatchSetSHA256
-	entry.AppliedPatches = []CatalogPatch{{ID: patched.AppliedPatches[0].ID, SHA256: patched.AppliedPatches[0].SHA256}}
-	catalogPath := filepath.Join(root, "catalog.json")
-	writeCatalog(t, catalogPath, entry)
-	pkg, err := catalogAcquirePackageByUID(context.Background(), catalogPath, entry.UID, cacheRoot, server.Client())
-	if err != nil || string(pkg.Files["SKILL.md"]) != newSkill {
-		t.Fatalf("patched package = %#v, err=%v", pkg, err)
-	}
+	for _, versionKind := range []string{"unchanged", "explicit-change", "tree-derived"} {
+		t.Run(versionKind, func(t *testing.T) {
+			root := t.TempDir()
+			cacheRoot := filepath.Join(root, "user-cache")
+			origin := map[string]string{"SKILL.md": "# Upstream\n", "script.py": "print('upstream')\n"}
+			originPath := filepath.Join(root, "origin.zip")
+			writeCatalogZip(t, originPath, origin)
+			originBody, err := os.ReadFile(originPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			originFiles := map[string][]byte{"SKILL.md": []byte(origin["SKILL.md"]), "script.py": []byte(origin["script.py"])}
+			originVersion := "1.0.0"
+			if versionKind == "tree-derived" {
+				originVersion = "0.0.0+" + skillpackage.TreeHash(originFiles)[:12]
+			}
+			newSkill := "---\nname: demo\ndescription: patched\n---\n# Upstream\n"
+			patchRoot := filepath.Join(root, "patches")
+			patchDir := filepath.Join(patchRoot, "demo", "add-frontmatter")
+			if err := os.MkdirAll(filepath.Join(patchDir, "files"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			writeTestFile(t, filepath.Join(patchRoot, "catalog.yaml"), "schema_version: 1\npatches:\n  - demo/add-frontmatter/patch.yaml\n")
+			writeTestFile(t, filepath.Join(patchDir, "files", "SKILL.md"), newSkill)
+			before := sha256.Sum256(originFiles["SKILL.md"])
+			writeTestFile(t, filepath.Join(patchDir, "patch.yaml"), fmt.Sprintf("schema_version: 1\nid: demo/add-frontmatter\ntarget:\n  uid: bsk_demo\n  version: %s\n  origin_tree_sha256: %s\noperations:\n  - op: upsert\n    path: SKILL.md\n    file: files/SKILL.md\n    before_sha256: %s\n", originVersion, skillpackage.TreeHash(originFiles), hex.EncodeToString(before[:])))
+			patchCatalog, err := skillpatch.LoadCatalog(filepath.Join(patchRoot, "catalog.yaml"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			patched, err := skillpatch.Apply(skillpatch.Target{UID: "bsk_demo", Version: originVersion, OriginTreeHash: skillpackage.TreeHash(originFiles)}, originFiles, patchCatalog)
+			if err != nil {
+				t.Fatal(err)
+			}
+			finalPath, err := skillpackage.WriteZip(patched.Files, root)
+			if err != nil {
+				t.Fatal(err)
+			}
+			finalBody, err := os.ReadFile(finalPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				_, _ = w.Write(originBody)
+			}))
+			defer server.Close()
+			entry := testRemoteEntry(server.URL+"/skill.zip", finalBody, map[string]string{"SKILL.md": newSkill, "script.py": origin["script.py"]})
+			entry.OriginVersion = originVersion
+			if versionKind == "explicit-change" {
+				entry.Version = "2.0.0"
+			}
+			if versionKind == "tree-derived" {
+				entry.Version = "0.0.0+" + skillpackage.TreeHash(patched.Files)[:12]
+			}
+			entry.OriginArchiveSHA256 = digestHex(originBody)
+			entry.OriginArchiveSize = int64(len(originBody))
+			entry.OriginTreeSHA256 = skillpackage.TreeHash(originFiles)
+			entry.PatchSetSHA256 = patched.PatchSetSHA256
+			entry.AppliedPatches = []CatalogPatch{{ID: patched.AppliedPatches[0].ID, SHA256: patched.AppliedPatches[0].SHA256}}
+			catalogPath := filepath.Join(root, "catalog.json")
+			writeCatalog(t, catalogPath, entry)
+			pkg, err := catalogAcquirePackageByUID(context.Background(), catalogPath, entry.UID, cacheRoot, server.Client())
+			if err != nil || string(pkg.Files["SKILL.md"]) != newSkill {
+				t.Fatalf("patched package = %#v, err=%v", pkg, err)
+			}
 
-	if err := os.Remove(cachePathForEntry(cacheRoot, entry)); err != nil {
-		t.Fatal(err)
-	}
-	writeTestFile(t, filepath.Join(patchDir, "files", "SKILL.md"), newSkill+"changed")
-	_, err = catalogAcquirePackageByUID(context.Background(), catalogPath, entry.UID, cacheRoot, server.Client())
-	if err == nil || !strings.Contains(err.Error(), "patch") {
-		t.Fatalf("changed patch error = %v", err)
+			if err := os.Remove(cachePathForEntry(cacheRoot, entry)); err != nil {
+				t.Fatal(err)
+			}
+			for _, invalidVersion := range []string{"", "wrong-version"} {
+				entry.OriginVersion = invalidVersion
+				writeCatalog(t, catalogPath, entry)
+				if _, err := catalogAcquirePackageByUID(context.Background(), catalogPath, entry.UID, cacheRoot, server.Client()); err == nil {
+					t.Fatalf("invalid origin version %q was accepted", invalidVersion)
+				}
+				if _, err := os.Stat(cachePathForEntry(cacheRoot, entry)); !os.IsNotExist(err) {
+					t.Fatalf("invalid origin version was cached: %v", err)
+				}
+			}
+			entry.OriginVersion = originVersion
+			writeCatalog(t, catalogPath, entry)
+			writeTestFile(t, filepath.Join(patchDir, "files", "SKILL.md"), newSkill+"changed")
+			_, err = catalogAcquirePackageByUID(context.Background(), catalogPath, entry.UID, cacheRoot, server.Client())
+			if err == nil || !strings.Contains(err.Error(), "patch") {
+				t.Fatalf("changed patch error = %v", err)
+			}
+		})
 	}
 }
 

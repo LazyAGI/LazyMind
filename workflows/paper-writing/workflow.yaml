@@ -1,36 +1,29 @@
 id: paper-writing
 name: 论文写作
-description: 支持选题、综述、实验、分析、写作、审稿与阅读心得；轻量实验可授权运行，复杂实验提供模拟数据，结果可继续分析绘图。
+description: 支持选题、综述、实验、分析、写作、审稿与阅读心得；轻量实验按环境受限运行，按研究目标准备数据，结果可继续分析绘图。
 when_to_use: >
   按用户明确要求且尚未完成的工作选择入口；同时要求检索、分析与写作时，先综述，再 F3 数据准备、F4 分析、论文大纲与成稿。
   仅要求实验或数据分析时，先选择 experiment（F3 实验与数据准备），再按阶段确认规则进入 data_analysis。
   F3 从材料池中读取已提取的依据和完整数据表；已有结果仅整理展示，需要新计算时才运行实验。
   补传附件先提取有效信息入池，已处理的附件不重复读取，不将原文全文复制到后续上下文。
   Use when the user requests the paper-writing workflow or review of an uploaded academic manuscript.
-  Start broad paper-writing requests at research_topic, retaining the supplied study methods and results.
+  Select the earliest unfinished stage explicitly requested by the user. For a new paper requiring
+  literature retrieval, start at literature_review, even with research notes, data or a tentative title.
+  Use research_topic for requested topic development, not as a mandatory first step.
   Literature reviews retain supplied papers and expand references through available academic sources and knowledge bases.
   Honor explicit source restrictions, dates, counts and focus. Frozen review handoffs use only their selection
   unless the user explicitly asks to expand it. Never substitute model knowledge for missing literature.
   Start review handoffs at literature_review with the frozen selection.
-  Do not ask about experiment data or execution when starting unrelated stages (F1/F2/F5/F6/F7).
-  When reaching experiment (F3), inspect the current request, attachments and material pool for usable
-  user experiment data/results. Read existing materials when needed; filenames alone and reference-paper
-  tables are not evidence of user measurements.
-  If usable user data exists, directly use it in F3 without ask_user, a data-choice confirmation,
-  or an execution-permission question just to organize existing results.
-  Only when usable data is absent and the user has not already specified how to proceed, use framework
-  ask_user to ask whether they will supply real data or want labeled simulation, then wait for the answer.
-  Tailor the question to the actual research goal and missing data; do not use a fixed environment questionnaire.
-  If the user chooses to supply data, wait for it. If they already requested simulation, reuse that answer.
-  Preserve the answer and original research goal through the existing request_context/user_input mechanism.
-  Do not add a required input field, data-mode binding, or preparation node for this decision.
-  Only for a requested new computation needing code execution, ask about unresolved execution permission
-  in the current LazyMind deployment: bounded CPU execution, no network, dependency installation or GPU,
-  and at most 30 seconds. Bind the existing experiment_execution to allow_local only for explicit consent,
-  otherwise simulate_only. Refusing execution does not request synthetic data.
-  Failed computations on real data must report missing results, never substitute synthetic results.
-  If ask_user is unavailable, ask in Chat only for the missing information. A tool validation failure is
-  not a user answer: report it and stop.
+  Do not ask a fixed experiment-execution question before startup or when entering F3.
+  Decide from the current request, supplied materials and available execution environment.
+  Use existing observations directly; run new computations only within the experiment tool's
+  bounded CPU policy (no network, dependency installation or GPU, at most 30 seconds).
+  Honor an explicit user refusal to run code by binding experiment_execution to simulate_only;
+  otherwise leave it unbound and let the experiment tool assess execution. Do not ask for this field.
+  With no observations, generate clearly labeled simulation only when it fits the user's goal;
+  if actual empirical results are required, explain the missing data instead of fabricating findings.
+  Failed computations on real user data must report missing results, never synthetic replacements.
+  Execution takes place in the current LazyMind deployment, not necessarily the browser user's computer.
   For direct experiment entry, bind the user's stated goal to experiment_question; ask if missing for
   a new experiment. Existing data does not require a new experimental question.
   F1/F2 entries reuse the accumulated question and evidence. F3 returns final results for F4.
@@ -45,8 +38,10 @@ when_to_use: >
   Markdown materials, images or existing data do not establish that literature retrieval or analysis is complete.
   Enter write_outline directly only for an outline-only request, or when required earlier work is complete
   or explicitly out of scope. Do not skip requested research or analysis just because the final deliverable is a paper.
-  Bind existing manuscripts to manuscript_file, regardless of format. Do not bind background/data/outline materials
-  as manuscripts or transcribe them into paper_input; steps read actual attachments and initialize their pool.
+  Bind existing manuscripts to manuscript_file, regardless of format. Bind raw research notes,
+  background and measurement attachments to research_materials, not seed_pool or manuscript_file.
+  Do not put local file paths in paper_input.writing_materials. seed_pool accepts only an existing
+  paper-material-pool.v2 JSON pool. Steps extract research_materials into source passages and complete tables.
   write_outline publishes an editable outline and
   requires user confirmation before write_document. Stop after the outline even when the launch request
   also asks for a complete manuscript or peer review. Continue only after the user confirms the outline.
@@ -81,7 +76,240 @@ when_to_use: >
   Retry only when the user explicitly requests a retry after seeing the failure.
   Always relay necessary user_notice messages from tools.
 runtime:
-  trigger_inputs: [manuscript_file, manuscript_text, paper_topic, review_request, paper_input, experiment_execution, experiment_question]
+  execution:
+    version: '1'
+    model_executor: external-agent
+    skills:
+    - scenario/execution.md
+    constraints:
+    - Follow the shared state.yml step specification, declared output schemas and acceptance criteria; preserve the
+      user request and bound input revisions.
+    - Validate actual artifacts before completion, honor questions and review pauses, and report missing capabilities
+      without fabricating output.
+    steps:
+      research_topic:
+        tools:
+        - name: academic_context
+          source: package
+        - name: academic_read_paper
+          source: package
+        - name: knowledge_list_documents
+          source: package
+        - name: knowledge_read_document
+          source: package
+      literature_review:
+        tools:
+        - name: academic_context
+          source: package
+        - name: academic_read_paper
+          source: package
+        - name: knowledge_list_documents
+          source: package
+        - name: knowledge_read_document
+          source: package
+      refine_topic:
+        tools:
+        - name: academic_context
+          source: package
+        - name: academic_read_paper
+          source: package
+        - name: knowledge_list_documents
+          source: package
+        - name: knowledge_read_document
+          source: package
+      experiment:
+        tools:
+        - name: academic_context
+          source: package
+        - name: academic_read_paper
+          source: package
+      data_analysis:
+        tools:
+        - name: academic_context
+          source: package
+        - name: academic_read_paper
+          source: package
+      write_outline:
+        tools:
+        - name: academic_context
+          source: package
+        - name: academic_read_paper
+          source: package
+      write_document:
+        tools:
+        - name: academic_context
+          source: package
+        - name: academic_read_paper
+          source: package
+      peer_review:
+        tools:
+        - name: academic_context
+          source: package
+        - name: academic_read_paper
+          source: package
+        - name: knowledge_list_documents
+          source: package
+        - name: knowledge_read_document
+          source: package
+      revise_document:
+        tools:
+        - name: academic_context
+          source: package
+        - name: academic_read_paper
+          source: package
+        - name: knowledge_list_documents
+          source: package
+        - name: knowledge_read_document
+          source: package
+      reading_reflection:
+        tools:
+        - name: academic_context
+          source: package
+        - name: academic_read_paper
+          source: package
+        - name: knowledge_list_documents
+          source: package
+        - name: knowledge_read_document
+          source: package
+      finish:
+        tools:
+        - name: academic_context
+          source: package
+        - name: academic_read_paper
+          source: package
+  trigger_inputs: [research_materials, manuscript_file, manuscript_text, paper_topic, review_request, paper_input, experiment_execution, experiment_question]
+  input_contracts:
+    research_materials:
+      description: >
+        Raw research/background/data attachments (Markdown, TXT, PDF or DOCX), in source order.
+        Steps preserve source identities, selected passages and complete tables. An attachment does not
+        mean literature retrieval or data analysis is complete. Do not use seed_pool or manuscript_file
+        for these materials, or put local file paths in paper_input.writing_materials.
+    seed_pool:
+      description: >
+        Existing structured paper-material-pool.v2 JSON pool, not a raw attachment.
+        For Markdown research notes and supplied observations use research_materials instead.
+      schema:
+        $defs:
+          ref:
+            type: object
+            required: [id, version]
+            properties:
+              id: {type: string, minLength: 1}
+              version: {type: integer, minimum: 1}
+          pool:
+            type: object
+            required: [schema, topic, sequence, materials, current, history]
+            properties:
+              schema: {const: paper-material-pool.v2}
+              topic: {type: string, pattern: '\S'}
+              sequence: {type: integer, minimum: 0}
+              materials:
+                type: array
+                items:
+                  type: object
+                  required: [id, kind, version, content, source_refs, derived_from, mock]
+                  properties:
+                    id: {type: string, minLength: 1}
+                    kind: {enum: [papers, question, evidence, writing_materials, data, source_data, experiment, code_files, result_meta, data_context, study_design, analysis, charts, outline, manuscript, review, review_data, media_assets, reflection]}
+                    version: {type: integer, minimum: 1}
+                    content: {}
+                    source_refs: {type: array, items: {type: string, minLength: 1}}
+                    derived_from: {type: array, items: {$ref: '#/$defs/ref'}}
+                    mock: {type: boolean}
+              current: {type: object, additionalProperties: {$ref: '#/$defs/ref'}}
+              history:
+                type: array
+                items:
+                  type: object
+                  required: [node, inputs, outputs]
+                  properties:
+                    node: {enum: [F1, F2, F3, F4, F5, F6, F7]}
+                    inputs: {type: array, items: {$ref: '#/$defs/ref'}}
+                    outputs: {type: array, items: {$ref: '#/$defs/ref'}}
+        anyOf:
+          - {$ref: '#/$defs/pool'}
+          - type: object
+            not: {required: [topic]}
+            anyOf:
+              - required: [data]
+                properties: {data: {$ref: '#'}}
+              - required: [text]
+                properties: {text: {$ref: '#'}}
+    paper_topic:
+      description: >
+        Plain-text research topic. For research_topic, bind the user's topic here and retain
+        the full requirements in request_context. This input can be used on its own.
+        If paper_input.topic is also supplied, equivalent topics are accepted after ignoring
+        whitespace, case, character width and common quote differences. Different topics conflict.
+    paper_input:
+      description: >
+        Optional structured business JSON matching this schema. For a plain-text topic,
+        use paper_topic and request_context. Writing preferences belong in constraints.
+        Experiment execution is decided from the request, materials and current environment.
+        constraints.citation_style must be one of APA 7, Chicago Author-Date, MLA 9, IEEE,
+        Vancouver or GB/T 7714; abbreviations such as APA are not accepted.
+      schema:
+        $defs:
+          business:
+            type: object
+            additionalProperties: false
+            dependentRequired:
+              execution_preference: [experiment, result_meta]
+              execution_available: [experiment, result_meta]
+              notice: [experiment, result_meta]
+            properties:
+              topic: {type: string, minLength: 1}
+              request: {type: string}
+              demo: {type: boolean}
+              selected_issue_ids: {type: array, items: {type: string, minLength: 1}, uniqueItems: true}
+              constraints:
+                type: object
+                additionalProperties: false
+                properties:
+                  paper_language: {enum: [zh-CN, en]}
+                  word_target: {type: [integer, 'null'], minimum: 1}
+                  paper_type: {enum: [null, research, empirical, literature_review, theoretical, case_study, conference]}
+                  citation_style: {enum: ['APA 7', 'Chicago Author-Date', 'MLA 9', IEEE, Vancouver, 'GB/T 7714']}
+                  focus: {type: array, items: {type: string, minLength: 1}}
+                  required_sections:
+                    type: array
+                    uniqueItems: true
+                    items: {enum: [abstract, introduction, methods, evaluation, results, discussion, limitations, conclusion]}
+              papers: {}
+              question: {}
+              evidence: {}
+              writing_materials: {}
+              data: {}
+              source_data: {}
+              data_context: {}
+              study_design: {}
+              result_meta: {}
+              analysis: {}
+              charts: {}
+              experiment: {}
+              code_files: {}
+              outline: {}
+              manuscript: {}
+              review: {}
+              review_data: {}
+              media_assets: {}
+              reflection: {}
+              execution_preference: {}
+              execution_available: {}
+              notice: {}
+            examples:
+              - topic: 研究主题
+                request: 用户的研究要求与证据限制
+        anyOf:
+          - {$ref: '#/$defs/business'}
+          - type: object
+            not: {required: [topic]}
+            anyOf:
+              - required: [data]
+                properties: {data: {$ref: '#'}}
+              - required: [text]
+                properties: {text: {$ref: '#'}}
   transactional_outputs: true
   recovery_inputs:
     experiment:
@@ -152,7 +380,8 @@ slots:
   - {id: recovery_research_document, type: file, cardinality: single, external: true, exposed: false}
   - {id: recovery_review_pool, type: file, cardinality: single, external: true, exposed: false}
   - {id: recovery_review_document, type: file, cardinality: single, external: true, exposed: false}
-  - {id: seed_pool, label: 输入材料池, type: file, cardinality: single, external: true, exposed: false}
+  - {id: research_materials, label: 原始研究材料, type: file, cardinality: list, external: true}
+  - {id: seed_pool, label: 输入材料池, type: json, cardinality: single, external: true, exposed: false}
   - {id: research_topic_pool, label: "研究选题材料池", type: file, cardinality: single, exposed: false}
   - {id: research_topic_document, label: "研究选题", type: file, cardinality: single}
   - {id: literature_review_pool, label: "文献综述材料池", type: file, cardinality: single, exposed: false}

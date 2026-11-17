@@ -4,7 +4,9 @@ import hashlib
 import json
 import re
 import math
+from typing import get_args
 
+from .analysis.schema import Constraints
 from .analysis.validation import validate_svg
 
 from .review.schema import SavedReview, text_digest
@@ -42,6 +44,8 @@ DEFAULT_CONSTRAINTS = {
     'citation_style': 'GB/T 7714', 'focus': [], 'required_sections': [],
 }
 
+CITATION_STYLES = get_args(Constraints.model_fields['citation_style'].annotation)
+
 REQUIRED_SECTIONS = {'abstract', 'introduction', 'methods', 'evaluation', 'results',
                      'discussion', 'limitations', 'conclusion'}
 
@@ -75,6 +79,9 @@ def normalize_constraints(value):
                                     'theoretical', 'case_study', 'conference'):
         raise ValueError('paper_type 不合法')
     text(result['citation_style'], 'citation_style')
+    if result['citation_style'] not in CITATION_STYLES:
+        raise ValueError(f"引用格式 citation_style={result['citation_style']!r} 不受支持，允许值："
+                         + '、'.join(CITATION_STYLES))
     if not isinstance(result['focus'], list):
         raise ValueError('focus 必须是文本列表')
     for item in result['focus']:

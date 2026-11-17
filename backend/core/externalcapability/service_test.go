@@ -221,6 +221,9 @@ func TestBuiltinImageToolUsesSelectedVerifiedModelThroughLazyMind(t *testing.T) 
 			t.Fatalf("unexpected request: %#v", request)
 		}
 		imageConfig := request.LLMConfig["image_editing"]
+		if len(request.LLMConfig) != 1 {
+			t.Fatalf("image tool received unrelated model roles: %v", len(request.LLMConfig))
+		}
 		if imageConfig["api_key"] != secret || imageConfig["model"] != "Kwai-Kolors/Kolors" {
 			t.Fatalf("selected image model was not injected: %#v", imageConfig)
 		}
@@ -232,6 +235,12 @@ func TestBuiltinImageToolUsesSelectedVerifiedModelThroughLazyMind(t *testing.T) 
 	t.Setenv("LAZYMIND_CHAT_SERVICE_URL", chatServer.URL)
 	seedModel(t, db, "https://model.example/v1", secret)
 	now := time.Now().UTC()
+	if err := db.Create(&orm.UserSelectedModel{
+		UserID: "user-1", ModelKey: "llm", UserModelProviderGroupModelID: "model-1",
+		CreatedAt: now, UpdatedAt: now,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
 	if err := db.Create(&orm.UserModelProviderGroupModel{
 		ID: "image-model-1", UserModelProviderID: "provider-1", UserModelProviderGroupID: "group-1",
 		ProviderName: "SiliconFlow", Name: "Kwai-Kolors/Kolors", ModelType: "image_editing",

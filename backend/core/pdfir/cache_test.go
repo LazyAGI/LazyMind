@@ -1,12 +1,18 @@
 package pdfir
 
 import (
+	"bufio"
+	"context"
 	"crypto/x509"
 	"errors"
 	"net/url"
+	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestSharedArchiveCacheValidatesSourceAndModel(t *testing.T) {
@@ -24,8 +30,8 @@ func TestSharedArchiveCacheValidatesSourceAndModel(t *testing.T) {
 		t.Fatal("model mismatch")
 	}
 	SaveCachedArchive(source, hash, "vlm", []byte("broken"))
-	if ReadCachedArchive(source, hash, "vlm") != nil {
-		t.Fatal("invalid archive reused")
+	if ReadCachedArchive(source, hash, "vlm") == nil {
+		t.Fatal("invalid archive replaced valid cache")
 	}
 }
 func TestMineruTransportDiagnosticDoesNotLeakURL(t *testing.T) {
@@ -36,5 +42,122 @@ func TestMineruTransportDiagnosticDoesNotLeakURL(t *testing.T) {
 	}
 	if strings.Contains(mineruTransportError(errors.New("secret=token")).Error(), "secret") {
 		t.Fatal("leaked transport detail")
+	}
+}
+
+func TestSharedArchiveLockCancellationAndRelease(t *testing.T) {
+	source := filepath.Join(t.TempDir(), "paper.pdf")
+	hash := strings.Repeat("a", 64)
+	unlock, err := LockCachedArchive(context.Background(), source, hash, "vlm")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Millisecond)
+	defer cancel()
+	_, err = LockCachedArchive(ctx, source, hash, "vlm")
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("wanted canceled lock wait, got %v", err)
+	}
+	unlock()
+	unlock, err = LockCachedArchive(context.Background(), source, hash, "vlm")
+	if err != nil {
+		t.Fatal(err)
+	}
+	unlock()
+}
+
+func TestSharedArchiveLockInteroperatesWithPythonFlock(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Unix flock interoperability")
+	}
+	python, err := exec.LookPath("python3")
+	if err != nil {
+		t.Skip("python3 unavailable")
+	}
+	source := filepath.Join(t.TempDir(), "paper.pdf")
+	hash := strings.Repeat("a", 64)
+	path := CachePath(source, hash, "vlm")
+	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, python, "-c", "import fcntl,sys; f=open(sys.argv[1], 'w'); fcntl.flock(f, fcntl.LOCK_EX); print('locked', flush=True); sys.stdin.read(1)", path+".lock")
+	out, _ := cmd.StdoutPipe()
+	in, _ := cmd.StdinPipe()
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { in.Close(); _ = cmd.Wait() }()
+	line, err := bufio.NewReader(out).ReadString('\n')
+	if err != nil || line != "locked\n" {
+		t.Fatalf("Python lock: %q %v", line, err)
+	}
+	waitCtx, stop := context.WithTimeout(ctx, 30*time.Millisecond)
+	defer stop()
+	_, err = LockCachedArchive(waitCtx, source, hash, "vlm")
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("Python flock did not exclude Go: %v", err)
+	}
+	in.Close()
+	if err := cmd.Wait(); err != nil {
+		t.Fatal(err)
+	}
+	unlock, err := LockCachedArchive(ctx, source, hash, "vlm")
+	if err != nil {
+		t.Fatal(err)
+	}
+	unlock()
+}
+
+func TestSharedArchiveAcrossLocationsPrefersVLMOverLegacyPipeline(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("LAZYMIND_UPLOAD_ROOT", root)
+	a, b := filepath.Join(root, "first", "paper.pdf"), filepath.Join(root, "second", "different.pdf")
+	hash := Digest("identical PDF")
+	old := archive(t, `[{"type":"text","text":"pipeline","page_idx":0,"bbox":[0,0,20,20]}]`)
+	legacy := filepath.Join(filepath.Dir(a), ".lazymind-artifacts", "mineru-cache-v1", hash+"-pipeline.zip")
+	if err := os.MkdirAll(filepath.Dir(legacy), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(legacy, old, 0600); err != nil {
+		t.Fatal(err)
+	}
+	raw, d := ReadSharedArchive(a, hash)
+	if len(raw) == 0 || d.Parser.Model != "pipeline" {
+		t.Fatalf("legacy result unavailable: %+v", d)
+	}
+	if raw, d := ReadSharedArchive(b, hash); len(raw) == 0 || d.Parser.Model != "pipeline" {
+		t.Fatalf("compatible legacy result was not shared with the duplicate: %+v", d)
+	}
+	if err := SaveCachedArchive(b, hash, "vlm", archive(t, `[{"type":"text","text":"vlm","page_idx":0,"bbox":[0,0,20,20]}]`)); err != nil {
+		t.Fatal(err)
+	}
+	for _, source := range []string{a, b} {
+		raw, d = ReadSharedArchive(source, hash)
+		if len(raw) == 0 || d.Parser.Model != "vlm" || d.Blocks[0].Text != "vlm" {
+			t.Fatalf("globally published result unavailable from %s: %+v", source, d)
+		}
+	}
+}
+
+func TestSharedArchiveRejectsIncompleteLegacyStructureAndKeepsPreviousResult(t *testing.T) {
+	source := filepath.Join(t.TempDir(), "paper.pdf")
+	hash := Digest("source")
+	if err := SaveCachedArchive(source, hash, "pipeline", archive(t, `[{"type":"text","text":"no geometry","page_idx":0}]`)); err == nil {
+		t.Fatal("incomplete pipeline accepted")
+	}
+	if raw, _ := ReadSharedArchive(source, hash); raw != nil {
+		t.Fatal("incomplete legacy returned")
+	}
+	good := archive(t, `[{"type":"text","text":"good","page_idx":0,"bbox":[0,0,20,20]}]`)
+	if err := SaveCachedArchive(source, hash, "vlm", good); err != nil {
+		t.Fatal(err)
+	}
+	if err := SaveCachedArchive(source, hash, "vlm", []byte("corrupt")); err == nil {
+		t.Fatal("corrupt replacement accepted")
+	}
+	if raw, d := ReadSharedArchive(source, hash); len(raw) == 0 || d.Blocks[0].Text != "good" {
+		t.Fatal("good result disappeared")
 	}
 }

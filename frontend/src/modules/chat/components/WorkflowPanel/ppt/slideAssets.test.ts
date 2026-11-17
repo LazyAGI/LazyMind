@@ -22,6 +22,26 @@ describe('slide assets', () => {
 
 
 describe('offline editable export assets', () => {
+  const fontPath = `/static-files/presentation-fonts/${'a'.repeat(64)}.ttf`;
+  it('keeps verified font references for server embedding without downloading font bytes', async () => {
+    const fetcher = vi.fn();
+    vi.stubGlobal('fetch', fetcher);
+    try {
+      const html = `<style>@font-face{font-family:Test;src:url(${fontPath})}</style>`;
+      expect(await embedSlideAssetsForExport(html, { embedFonts: false })).toBe(html);
+      expect(fetcher).not.toHaveBeenCalled();
+    } finally { vi.unstubAllGlobals(); }
+  });
+  it('embeds managed font resources for raster capture and signs them for ordinary preview', async () => {
+    const fetcher = vi.fn(async () => ({ ok: true, blob: async () => new Blob(['font-bytes'], { type: 'font/ttf' }) }));
+    vi.stubGlobal('fetch', fetcher);
+    try {
+      const html = `<style>@font-face{font-family:Test;src:url(${fontPath})}</style>`;
+      expect(await resolveSlideAssets(html)).toContain('sig=fresh');
+      expect(await embedSlideAssetsForExport(html)).toContain('data:font/ttf;base64,');
+      expect(fetcher).toHaveBeenCalledTimes(1);
+    } finally { vi.unstubAllGlobals(); }
+  });
   it('embeds both background and foreground images, downloading each once', async () => {
     const fetcher = vi.fn(async () => ({ ok: true, blob: async () => new Blob(['image-bytes'], { type: 'image/png' }) }));
     vi.stubGlobal('fetch', fetcher);

@@ -460,6 +460,12 @@ func (r *Runner) markFailedAttempt(ctx context.Context, row orm.AsyncJob, result
 			"lock_until":         nil,
 			"updated_at":         now,
 		}
+		// Failed handlers may return partial outcomes (for example the exact
+		// reading scope that failed). Keep these under the same lease guard as
+		// the status transition; an empty result preserves live progress data.
+		if len(result.ResultJSON) > 0 {
+			updates["result_json"] = result.ResultJSON
+		}
 		deferred := !result.Permanent && result.DeferAttempt && result.RetryAt.After(now)
 		if !result.Permanent && (deferred || row.AttemptCount < row.MaxAttempts) {
 			updates["status"] = string(StatusPending)

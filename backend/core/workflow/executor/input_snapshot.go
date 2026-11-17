@@ -31,6 +31,9 @@ func FreezeControlledInputs(ctx context.Context, db *gorm.DB, attemptID string) 
 	if !controlstore.Controlled(session) {
 		return nil
 	}
+	if err := freezeKnowledgeScope(ctx, db, session, &value); err != nil {
+		return err
+	}
 	materials := make([]string, 0, len(value.Inputs))
 	for material := range value.Inputs {
 		materials = append(materials, material)

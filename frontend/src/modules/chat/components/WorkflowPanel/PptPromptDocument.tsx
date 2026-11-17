@@ -1,4 +1,4 @@
-import { useContext, useEffect, useId, useMemo, useRef } from 'react';
+import { useContext, useEffect, useId, useMemo, useRef, type CSSProperties } from 'react';
 import { useTranslation } from 'react-i18next';
 import { SlotEditingContext } from './slotEditingContext';
 import './PptPromptDocument.scss';
@@ -15,7 +15,9 @@ export function splitPptPrompt(text: string): PromptSection[] {
   let current: PromptSection = { title: '', body: '' };
   let fence = '';
   for (const line of text.split('\n')) {
-    if (!fence && line.trim() === '<!-- ppt-page-prompt:v1 -->') continue;
+    const marker = line.trim();
+    if (!fence && (marker === '<!-- ppt-page-prompt:v1 -->'
+      || (marker.startsWith('<!-- ppt-material-images:') && marker.endsWith('-->')))) continue;
     const fenceMatch = line.trim().match(/^(`{3,}|~{3,})/);
     if (fenceMatch) {
       fence = fence ? '' : fenceMatch[1][0];
@@ -68,7 +70,8 @@ export function PptPromptDocument({ text, onEdit, maxHeight }: {
         {onEdit && <button type='button' onClick={() => { if (documentRef.current) onEdit(documentRef.current); }}>{t('chat.slots.editText')}</button>}
       </div>
     </div>}
-    <div className='ppt-prompt-document__body' style={maxHeight ? { maxHeight, overflowY: 'auto' } : undefined}>
+    <div className='ppt-prompt-document__body' style={maxHeight
+      ? { '--workflow-ppt-prompt-max-height': `${maxHeight}px` } as CSSProperties : undefined}>
       {sections.map((section, index) => (
         section.title ? <details className='ppt-prompt-document__section' key={index} open>
           <summary>{section.title}</summary>

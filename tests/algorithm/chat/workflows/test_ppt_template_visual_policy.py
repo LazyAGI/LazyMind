@@ -11,13 +11,13 @@ def test_template_collection_preserves_visuals_and_text_evidence():
     steps = state['steps']
     collect = steps['collect_materials']
     assert {'material': 'template_mode', 'required': False} in collect['inputs']
-    assert 'A template disables AI backgrounds, not evidence screenshots' in collect['prompt']
-    assert 'image_topk=0' in collect['prompt']
-    assert 'No applicable KB alone is not a reason' in collect['prompt']
-    assert 'must not skip required text sources' in collect['prompt']
+    assert 'Evidence diagrams/product screenshots are still valid' in collect['prompt']
+    assert 'avoid unrelated decorative' in collect['prompt']
+    assert 'only for a concrete remaining gap' in collect['prompt']
+    assert 'required papers or other explicitly required sources are unread' in collect['prompt']
     assert 'ppt_collect_github_prs' in collect['tools']
     assert steps['generate_backgrounds']['skip_if'] == {'material': 'skip_background_images'}
-    assert 'Reuse registered evidence screenshots/figures' in steps['generate_ppt']['prompt']
+    assert 'bound slide_outline, background_images, material_images' in steps['generate_ppt']['prompt']
 
 
 def test_template_is_read_before_material_collection():
@@ -31,7 +31,7 @@ def test_template_is_read_before_material_collection():
     assert 'read_template' not in state['steps']
     read = state['steps']['analyze_requirements']
     assert read['tools'] == ['pptx_analyzer']
-    assert 'all_pages=true' in read['prompt']
+    assert 'across every page' in read['prompt']
     assert {'material': 'template_content_brief', 'required': False} in read['outputs']
     workflow = yaml.safe_load((root / 'workflows/ppt-workflow/workflow.yaml').read_text(encoding='utf-8'))
     analysis = next(tab for tab in workflow['ui']['tabs'] if tab['id'] == 'analysis')
@@ -78,11 +78,14 @@ def test_native_pptx_is_a_final_result_not_a_separate_tab():
     assert any(child.get('slot') == 'native_pptx' for child in final['composite_layout']['children'])
 
 
-def test_material_stage_only_displays_summary():
+def test_material_stage_displays_summary_and_registered_images():
     root = Path(__file__).resolve().parents[4]
     workflow = yaml.safe_load((root / 'workflows/ppt-workflow/workflow.yaml').read_text(encoding='utf-8'))
     tab = next(tab for tab in workflow['ui']['tabs'] if tab['id'] == 'materials')
-    assert tab['slots'] == [{'id': 'material_summary'}]
+    assert tab['step_id'] == 'collect_materials'
+    assert tab['layout'] == 'list'
+    assert tab['slots'] == [{'id': 'material_summary'}, {'id': 'material_images'}]
+    assert workflow['ui']['slots']['material_images']['widgetType'] == 'image-gallery'
     slots = {slot['id']: slot for slot in workflow['slots']}
-    for name in ('template_pptx', 'uploaded_materials', 'material_images'):
+    for name in ('template_pptx', 'uploaded_materials'):
         assert slots[name]['exposed'] is False

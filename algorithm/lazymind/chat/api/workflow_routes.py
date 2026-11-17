@@ -5,6 +5,7 @@ Routes:
     POST /api/writer/documents:convert   Convert Writer document content.
     POST /api/document/actions:invoke    Invoke a shared built-in document action.
     POST /api/document:inspect           Inspect Markdown or Writer IR content.
+    POST /api/document:normalize-generated Normalize generated Markdown headings.
     GET  /api/document/providers         List registered document providers.
     POST /api/subagent/tasks:cancel      LazyMind task cancellation callback.
 """
@@ -38,6 +39,7 @@ from lazymind.document_tools import (
     list_document_providers,
     sync_writer_documents,
 )
+from lazymind.document_tools.artifacts import normalize_generated_markdown
 from lazymind.config import config
 from lazymind.model_config import inject_model_config
 from lazymind.workflow_sdk import WorkflowClient
@@ -197,6 +199,7 @@ class WorkflowActionInvokeRequest(BaseModel):
     arguments: Dict[str, Any] = Field(default_factory=dict)
     artifact_store: str = ''
     llm_config: Optional[Dict[str, Any]] = None
+    generation_responses: Optional[list[Dict[str, Any]]] = None
     tool_config: Optional[Dict[str, Any]] = None
 
 
@@ -213,6 +216,10 @@ class DocumentActionInvokeRequest(BaseModel):
 class DocumentInspectRequest(BaseModel):
     artifact: Any
     document_schema: str = Field(default='', alias='schema')
+
+
+class GeneratedMarkdownRequest(BaseModel):
+    text: str
 
 
 @router.post(
@@ -323,6 +330,11 @@ def inspect_document_artifact(request: DocumentInspectRequest) -> Dict[str, Any]
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
+@router.post('/api/document:normalize-generated', summary='Normalize generated Markdown headings')
+def normalize_generated_document(request: GeneratedMarkdownRequest) -> Dict[str, str]:
+    return {'text': normalize_generated_markdown(request.text)}
+
+
 @router.get('/api/document/providers', summary='List document providers')
 def document_providers() -> Dict[str, Any]:
     return {'providers': list_document_providers()}
@@ -412,7 +424,12 @@ def invoke_workflow_action(request: WorkflowActionInvokeRequest) -> Dict[str, An
             kwargs['artifact_store'] = request.artifact_store
         if 'slot' in parameters:
             kwargs['slot'] = request.slot
-        return {'result': tool(**kwargs)}
+        from lazymind.chat.workflow.action_generation import generation_scope, GenerationRequired
+        try:
+            with generation_scope(request.generation_responses):
+                return {'result': tool(**kwargs)}
+        except GenerationRequired as pending:
+            return {'result': {'status': 'needs_generation', 'generation_request': pending.request}}
     except HTTPException:
         raise
     except DocumentActionError as exc:

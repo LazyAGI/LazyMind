@@ -392,3 +392,16 @@ def test_router_internal_proxy_requires_and_replaces_service_token(monkeypatch):
     assert captured['headers'][routes.INTERNAL_TOKEN_HEADER] == 'server-token'
     assert captured['url'] == 'http://child.test/internal/knowledge:search'
     assert captured['client_kwargs']['timeout'] == 30.0
+
+
+def test_internal_route_reports_missing_embedding_as_dependency_error(monkeypatch):
+    monkeypatch.setattr(routes, 'expected_internal_token', lambda: 'secret-token')
+    monkeypatch.setattr(svc, 'is_model_role_available', lambda role: False)
+    monkeypatch.setattr(svc, '_ensure_kb_search_runtime', lambda: pytest.fail('loaded vector runtime'))
+    response = TestClient(create_search_app()).post(
+        '/internal/knowledge:search', headers={routes.INTERNAL_TOKEN_HEADER: 'secret-token'},
+        json={'user_id': 'user', 'query': 'q', 'kb_ids': ['kb'], 'top_k': 2},
+    )
+    assert response.status_code == 422
+    assert response.json()['detail']['code'] == 'CAPABILITY_REQUIRED'
+    assert '默认向量模型' in response.json()['detail']['message']

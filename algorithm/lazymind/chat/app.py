@@ -21,6 +21,7 @@ from lazymind.chat.api import (
     directory_file_routes,
     model_features_routes,
     workflow_routes,
+    external_workflow_tool_routes,
     subagent_routes,
 )
 from lazymind.document_tools.paper.analysis.progress_routes import router as paper_progress_router
@@ -58,6 +59,7 @@ def register_chat_routers(app: FastAPI) -> FastAPI:
     app.include_router(academic_routes.router)
     # Workflow actions, Writer sync, and LazyMind task cancellation callbacks.
     app.include_router(workflow_routes.router)
+    app.include_router(external_workflow_tool_routes.router)
 
     if not config['enable_router']:
         app.include_router(chat_routes.router)

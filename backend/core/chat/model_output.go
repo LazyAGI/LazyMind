@@ -12,6 +12,14 @@ import (
 type ChatModelOutput = common.ModelOutput
 
 func validateModelOutputChunk(chunk UpstreamStreamChunk) error {
+	if len(chunk.CanonicalMessages) > 0 {
+		public := chunk
+		public.CanonicalMessages = nil
+		if hasBusinessStreamPayload(public) || chunk.Think != "" || chunk.RuntimeEvent != nil ||
+			chunk.ExportSnapshot != nil || chunk.ModelContextUpdated != nil || chunk.PerformanceMetrics != nil {
+			return errors.New("canonical model state must use a separate internal frame")
+		}
+	}
 	m := chunk.ModelOutput
 	if m == nil {
 		return nil
@@ -35,6 +43,9 @@ func validateModelOutputChunk(chunk UpstreamStreamChunk) error {
 }
 
 type chatOutputProjection struct {
+	canonicalMessages                    []map[string]any
+	canonicalTextOffset                  int
+	canonicalEnabled                     bool
 	text, result, pendingThink           string
 	sources                              []any
 	exportSnapshot                       *ChatExportSnapshot
@@ -127,6 +138,7 @@ func (o *chatModelOutput) committed(p chatOutputProjection) chatOutputProjection
 	return p
 }
 func (o *chatModelOutput) ext(raw json.RawMessage, p chatOutputProjection, convID, historyID string) json.RawMessage {
+	raw = withCanonicalHistory(raw, o.cursor.RunID, o.committed(p).durableCanonical())
 	if !o.enabled() {
 		return raw
 	}

@@ -1708,6 +1708,9 @@ components:
             type: object
         AcademicSourceImportItem:
             properties:
+                batch_created_at:
+                    format: date-time
+                    type: string
                 batch_id:
                     type: string
                 created_library:
@@ -5278,8 +5281,33 @@ components:
             required:
                 - task
             type: object
+        CreateTaskOutcome:
+            properties:
+                code:
+                    type: string
+                display_name:
+                    type: string
+                input_index:
+                    type: integer
+                message:
+                    type: string
+                status:
+                    type: string
+                target_pid:
+                    type: string
+                task_ids:
+                    items:
+                        type: string
+                    type: array
+            required:
+                - display_name
+                - input_index
+                - status
+            type: object
         CreateTaskRequest:
             properties:
+                allow_partial:
+                    type: boolean
                 items:
                     items:
                         $ref: '#/components/schemas/CreateTaskItem'
@@ -5308,6 +5336,10 @@ components:
             type: object
         CreateTasksResponse:
             properties:
+                outcomes:
+                    items:
+                        $ref: '#/components/schemas/CreateTaskOutcome'
+                    type: array
                 paper_import_batch_id:
                     type: string
                 tasks:
@@ -9006,6 +9038,46 @@ components:
                 kb_id:
                     type: string
             type: object
+        GitHubStarPromptClaim:
+            additionalProperties: false
+            properties:
+                task_id:
+                    type: string
+            required:
+                - task_id
+            type: object
+        GitHubStarPromptDecision:
+            properties:
+                cooldown_days:
+                    type: integer
+                max_prompts:
+                    type: integer
+                min_successful_tasks:
+                    type: integer
+                reason:
+                    type: string
+                show:
+                    type: boolean
+                task_id:
+                    type: string
+            required:
+                - show
+                - reason
+                - task_id
+                - min_successful_tasks
+                - cooldown_days
+                - max_prompts
+            type: object
+        GitHubStarPromptSupport:
+            additionalProperties: false
+            properties:
+                supported:
+                    enum:
+                        - true
+                    type: boolean
+            required:
+                - supported
+            type: object
         GrantPrincipal:
             properties:
                 grantee_id:
@@ -9895,6 +9967,7 @@ components:
                     enum:
                         - finish
                         - failure
+                        - cancelled
                     type: string
                 model_call_id:
                     type: string
@@ -10605,6 +10678,8 @@ components:
             properties:
                 document:
                     $ref: '#/components/schemas/PDFIRDocument'
+                error_code:
+                    type: string
                 error_message:
                     type: string
                 source_sha256:
@@ -10634,6 +10709,26 @@ components:
                     description: Original PDF SHA-256; a supplied request hash must match the current source or the server returns409 before cache/model access.
                     pattern: ^[a-fA-F0-9]{64}$
                     type: string
+            type: object
+        PDFStructureStatus:
+            properties:
+                available:
+                    type: boolean
+                error_code:
+                    type: string
+                error_message:
+                    type: string
+                model:
+                    type: string
+                source_sha256:
+                    description: Original PDF SHA-256; a supplied request hash must match the current source or the server returns409 before cache/model access.
+                    pattern: ^[a-fA-F0-9]{64}$
+                    type: string
+                status:
+                    type: string
+            required:
+                - status
+                - available
             type: object
         PDFVisualExplanation:
             properties:
@@ -11864,6 +11959,57 @@ components:
                         $ref: '#/components/schemas/QuestionTypeOption'
                     type: array
             type: object
+        ReadingCapabilityStatus:
+            properties:
+                completed:
+                    minimum: 0
+                    type: integer
+                error_message:
+                    type: string
+                failed:
+                    minimum: 0
+                    type: integer
+                id:
+                    enum:
+                        - formula
+                        - figure
+                        - table
+                    type: string
+                running:
+                    minimum: 0
+                    type: integer
+                status:
+                    enum:
+                        - not_requested
+                        - pending
+                        - running
+                        - partial
+                        - succeeded
+                        - failed
+                        - unavailable
+                        - empty
+                    type: string
+                total:
+                    minimum: 0
+                    type: integer
+            required:
+                - id
+                - status
+                - completed
+                - total
+            type: object
+        ReadingDailyUsage:
+            properties:
+                limit:
+                    minimum: 1
+                    type: integer
+                used:
+                    minimum: 0
+                    type: integer
+            required:
+                - used
+                - limit
+            type: object
         ReadingPreparationPolicy:
             properties:
                 automatic_eligible_after:
@@ -11874,26 +12020,36 @@ components:
                             enum:
                                 - 1
                             type: integer
-                        daily_documents:
-                            maximum: 100
+                        daily_pdf_documents:
+                            maximum: 10000
                             minimum: 1
                             type: integer
-                        study_items_per_document:
-                            maximum: 100
+                        daily_study_documents:
+                            maximum: 10000
                             minimum: 1
                             type: integer
                     required:
-                        - daily_documents
-                        - study_items_per_document
+                        - daily_pdf_documents
+                        - daily_study_documents
                         - automatic_concurrency
                     type: object
                 modes:
-                    additionalProperties:
-                        enum:
-                            - on_demand
-                            - automatic
-                            - disabled
-                        type: string
+                    properties:
+                        ai_study:
+                            enum:
+                                - on_demand
+                                - automatic
+                                - disabled
+                            type: string
+                        pdf_parse:
+                            enum:
+                                - on_demand
+                                - automatic
+                                - disabled
+                            type: string
+                    required:
+                        - pdf_parse
+                        - ai_study
                     type: object
                 parser_ref:
                     type: string
@@ -11913,6 +12069,13 @@ components:
                     type: object
                 study_model_ref:
                     type: string
+                usage:
+                    properties:
+                        ai_study:
+                            $ref: '#/components/schemas/ReadingDailyUsage'
+                        pdf_parse:
+                            $ref: '#/components/schemas/ReadingDailyUsage'
+                    type: object
             required:
                 - preset
                 - modes
@@ -11924,6 +12087,7 @@ components:
                     items:
                         enum:
                             - pdf_parse
+                            - ai_study
                             - formula
                             - figure
                             - table
@@ -11934,6 +12098,12 @@ components:
             type: object
         ReadingPreparationStatus:
             properties:
+                capabilities:
+                    items:
+                        $ref: '#/components/schemas/ReadingCapabilityStatus'
+                    type: array
+                error_code:
+                    type: string
                 error_message:
                     type: string
                 job_id:
@@ -20787,6 +20957,9 @@ paths:
                                         - reading
                                         - read
                                     type: string
+                                status_if_unread:
+                                    description: Set reading status only if the current status is unread. Requires status=reading.
+                                    type: boolean
                                 tags:
                                     items:
                                         type: string
@@ -27031,6 +27204,8 @@ paths:
                         application/json:
                             schema:
                                 properties:
+                                    pdf_structure:
+                                        $ref: '#/components/schemas/PDFStructureStatus'
                                     status:
                                         enum:
                                             - not_requested
@@ -27048,11 +27223,13 @@ paths:
                         application/json:
                             schema:
                                 properties:
+                                    pdf_structure:
+                                        $ref: '#/components/schemas/PDFStructureStatus'
                                     status:
                                         type: string
                                 type: object
                     description: Existing parsing in progress
-            summary: Observe chat parsing without submitting new work
+            summary: Observe shared PDF structure and retrieval readiness without submitting new work
     /api/core/datasets/{dataset}/documents/{document}/pdf-artifacts/{artifact}:
         delete:
             parameters:
@@ -36204,6 +36381,22 @@ paths:
             summary: Idempotent system-notification receipt; delivered means submitted, not seen by the user
             tags:
                 - TaskNotifications
+    /api/core/task-center/github-star-prompt/claim:
+        post:
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/GitHubStarPromptClaim'
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/GitHubStarPromptDecision'
+                    description: Invitation eligibility
+            summary: Atomically claim an optional GitHub Star invitation after a successful complete Work task
     /api/core/task-center/notification-events/{notification_id}:claim:
         post:
             description: Internal service token required; atomically grant one segment against the global gate. Configuration bodies are limited to 16 KiB; errors include stable data.detail.reason and request_id.
@@ -36316,6 +36509,11 @@ paths:
     /api/core/task-center/tasks:
         get:
             parameters:
+                - in: query
+                  name: conversation_id
+                  required: false
+                  schema:
+                    type: string
                 - in: query
                   name: status
                   required: false
@@ -36517,6 +36715,14 @@ paths:
                   required: false
                   schema:
                     type: integer
+                - in: query
+                  name: page_size
+                  required: false
+                  schema:
+                    default: 4
+                    maximum: 100
+                    minimum: 1
+                    type: integer
             responses:
                 "200":
                     content:
@@ -36524,7 +36730,7 @@ paths:
                             schema:
                                 $ref: '#/components/schemas/TaskCenterWorkbenchResponse'
                     description: Task-center workbench
-            summary: Summarize task categories with four previews per page
+            summary: Summarize task categories with paginated previews
     /api/core/task-center/workflow-events:
         get:
             responses:
@@ -37026,6 +37232,32 @@ paths:
                 "200":
                     description: OK
             summary: PATCH /user/env-vars/{id}
+    /api/core/user/github-star-prompt/support:
+        put:
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/GitHubStarPromptSupport'
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                properties:
+                                    code:
+                                        type: integer
+                                    data:
+                                        properties:
+                                            supported:
+                                                type: boolean
+                                        type: object
+                                    message:
+                                        type: string
+                                type: object
+                    description: Invitation preference saved
+            summary: Stop future invitations for the authenticated user; does not perform or prove a GitHub write
     /api/core/user/notification-preferences:
         get:
             description: Read scheduled-task notification defaults and global gate. Configuration bodies are limited to 16 KiB; errors include stable data.detail.reason and request_id.

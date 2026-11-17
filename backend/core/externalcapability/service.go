@@ -290,7 +290,7 @@ func (s *Service) InvocationHistory(ctx context.Context, userID, agent string, l
 		return InvocationPage{}, err
 	}
 	for i := range rows {
-		if rows[i].CapabilityType == CapabilityTool && rows[i].CapabilityID == "builtin:image_generator" {
+		if rows[i].CapabilityType == CapabilityTool && isBuiltinMediaTool(rows[i].CapabilityID) {
 			rows[i].ResultJSON = orm.InvocationResultJSON(rewriteImageResult(rows[i].ResultJSON, true))
 		}
 	}
@@ -464,7 +464,10 @@ func (s *Service) InvokeExternalTool(ctx context.Context, call capability.Invoca
 		raw, toolName, err = mcp.CallAuthorizedTool(ctx, s.db, call.Principal.UserID, input.ToolID, input.Arguments)
 	}
 	if err != nil {
-		return result, capability.NewError(capability.Unavailable, op, "tool execution failed; check the tool connection and authorization in Settings", false, err)
+		if _, ok := capability.CodeOf(err); ok {
+			return result, err
+		}
+		return result, capability.NewError(capability.Unavailable, op, "tool execution failed without public error details; check its service logs", false, err)
 	}
 	if len(raw) > maxProxyBytes {
 		return result, capability.NewError(capability.ResultTooLarge, op, "tool result exceeds 2 MiB", false, nil)
@@ -474,7 +477,7 @@ func (s *Service) InvokeExternalTool(ctx context.Context, call capability.Invoca
 	}
 	// Audit the original local references, not the external presentation URLs.
 	auditResult = result.Result
-	if row.Builtin && row.Name == "image_generator" {
+	if row.Builtin && isBuiltinMediaTool(row.ID) {
 		var external any
 		if err := json.Unmarshal(externalImageResult(raw), &external); err == nil {
 			result.Result = external
@@ -534,7 +537,11 @@ func (s *Service) allTools(ctx context.Context, userID string) ([]toolRow, error
 }
 
 func (s *Service) builtinTools(ctx context.Context, userID string) ([]toolRow, error) {
-	raw, err := s.requestBuiltinTools(ctx, userID, "/api/chat/tools/external-catalog", "", nil)
+	return s.loadBuiltinTools(ctx, userID, "")
+}
+
+func (s *Service) loadBuiltinTools(ctx context.Context, userID, name string) ([]toolRow, error) {
+	raw, err := s.requestBuiltinTools(ctx, userID, "/api/chat/tools/external-catalog", name, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -552,6 +559,20 @@ func (s *Service) builtinTools(ctx context.Context, userID string) ([]toolRow, e
 	}
 	rows := make([]toolRow, 0, len(catalog.Items))
 	for _, item := range catalog.Items {
+		if name != "" && item.Name != name {
+			continue
+		}
+		// The unconfigured catalog contains metadata, not credentials. Probe each
+		// media tool independently so a broken provider cannot hide ordinary tools.
+		if name == "" && len(builtinModelRoles(item.Name)) > 0 {
+			resolved, probeErr := s.loadBuiltinTools(ctx, userID, item.Name)
+			if probeErr == nil && len(resolved) == 1 {
+				rows = append(rows, resolved[0])
+				continue
+			}
+			item.Available = false
+			item.Reason = "Required model could not be loaded; configure this capability in LazyMind Settings and retry"
+		}
 		rows = append(rows, toolRow{
 			ID: builtinToolPrefix + item.Name, Name: item.Name,
 			Description: item.Description, InputSchema: item.InputSchema,
@@ -563,7 +584,13 @@ func (s *Service) builtinTools(ctx context.Context, userID string) ([]toolRow, e
 }
 
 func (s *Service) tool(ctx context.Context, userID, id string) (toolRow, error) {
-	rows, err := s.allTools(ctx, userID)
+	var rows []toolRow
+	var err error
+	if strings.HasPrefix(id, builtinToolPrefix) {
+		rows, err = s.loadBuiltinTools(ctx, userID, strings.TrimPrefix(id, builtinToolPrefix))
+	} else {
+		rows, err = s.tools(ctx, userID)
+	}
 	if err != nil {
 		return toolRow{}, err
 	}
@@ -590,13 +617,30 @@ func (s *Service) callBuiltinTool(ctx context.Context, userID, name string, argu
 }
 
 func (s *Service) requestBuiltinTools(ctx context.Context, userID, endpoint, name string, arguments map[string]any) (json.RawMessage, error) {
-	llmConfig, err := modelconfig.LoadLLMConfig(ctx, s.db, userID)
+	llmConfig, err := modelconfig.LoadOwnedToolModels(ctx, s.db, userID, builtinModelRoles(name))
+	if name == "multimodal" && len(llmConfig) == 0 {
+		// A configured VLM does not need the main chat model or its credentials.
+		llmConfig, err = modelconfig.LoadOwnedToolModels(ctx, s.db, userID, []string{"llm"})
+		mainModel, _ := llmConfig["llm"].(map[string]any)
+		if mainModel["vision"] != true {
+			delete(llmConfig, "llm")
+		}
+	}
 	if err != nil {
 		return nil, fmt.Errorf("load built-in tool model: %w", err)
+	}
+	if endpoint == "/api/chat/tools/execute" {
+		arguments, err = s.resolveMediaInputs(ctx, userID, name, arguments)
+		if err != nil {
+			return nil, capability.NewError(capability.InvalidArgument, "tool.call", "Media inputs must use resource:<id> for your imported immutable images. Import the image with workflow.input.import and retry; local paths and remote URLs are not accepted.", false, err)
+		}
 	}
 	toolConfig := map[string]any{}
 	// External calls must not inherit another user's shared or unverified provider.
 	for category, capabilityName := range map[string]string{"search": "web_search", "datasource": "academic_search"} {
+		if name != "" && name != capabilityName {
+			continue
+		}
 		var count int64
 		err := s.db.WithContext(ctx).Table("user_selected_providers AS selected").
 			Joins("JOIN user_model_provider_groups AS g ON g.id = selected.user_model_provider_group_id AND g.deleted_at IS NULL AND g.is_verified = ?", true).
@@ -605,7 +649,7 @@ func (s *Service) requestBuiltinTools(ctx context.Context, userID, endpoint, nam
 		if err != nil {
 			return nil, errors.New("cannot check tool configuration")
 		}
-		if count == 0 || (name != "" && name != capabilityName) {
+		if count == 0 {
 			continue
 		}
 		config, err := modelconfig.LoadToolConfigForCapabilities(ctx, s.db, userID, []string{capabilityName})
@@ -639,9 +683,26 @@ func (s *Service) requestBuiltinTools(ctx context.Context, userID, endpoint, nam
 		return nil, errors.New("built-in tool result could not be read or exceeded 2 MiB")
 	}
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
-		return nil, fmt.Errorf("built-in tool request failed (%d)", resp.StatusCode)
+		return nil, builtinToolError(resp.StatusCode, raw)
 	}
 	return raw, nil
+}
+
+func builtinModelRoles(name string) []string {
+	switch name {
+	case "multimodal":
+		return []string{"vlm"}
+	case "image_generator":
+		// An editable image model can also serve text-to-image, matching the
+		// Python runtime's existing one-way image-role mirroring.
+		return []string{"text2image", "image_editing", "image_generator", "image_editor"}
+	case "image_editor":
+		return []string{"image_editing", "image_editor"}
+	case "video_generator":
+		return []string{"text2video", "video_generator"}
+	default:
+		return nil
+	}
 }
 
 func modelAvailability(row modelRow) (bool, string) {
@@ -767,7 +828,7 @@ func (s *Service) finishAudit(call capability.InvocationContext, row *orm.Extern
 	}
 	now := time.Now().UTC()
 	usageJSON, _ := json.Marshal(usage)
-	if row.CapabilityType == CapabilityTool && row.CapabilityID == "builtin:image_generator" {
+	if row.CapabilityType == CapabilityTool && isBuiltinMediaTool(row.CapabilityID) {
 		// Strip temporary signatures before bounding/truncating the audit preview.
 		if encoded, err := json.Marshal(result); err == nil {
 			_ = json.Unmarshal(rewriteImageResult(encoded, false), &result)
@@ -789,6 +850,10 @@ func (s *Service) finishAudit(call capability.InvocationContext, row *orm.Extern
 		updates["status"] = "failed"
 		updates["error_code"] = string(code)
 		updates["error_message"] = auditErrorMessage(code)
+		var public *capability.Error
+		if errors.As(callErr, &public) && public.Upstream != nil {
+			updates["error_message"] = public.Message
+		}
 	}
 	_ = s.db.Model(&orm.ExternalCapabilityInvocation{}).Where("id = ?", row.ID).Updates(updates).Error
 }

@@ -23,6 +23,7 @@ const mocks = vi.hoisted(() => ({
   capabilities: vi.fn(),
   invocations: vi.fn(),
   setCapability: vi.fn(),
+  nodeDependencyStatus: vi.fn(),
 }));
 
 vi.mock("@/runtime/desktopBridge", () => ({
@@ -45,6 +46,10 @@ vi.mock("./externalCapabilitiesApi", () => ({
   loadExternalCapabilities: mocks.capabilities,
   loadExternalCapabilityInvocations: mocks.invocations,
   setExternalCapabilityGrant: mocks.setCapability,
+}));
+
+vi.mock("@/modules/modelProvider/api/systemDependencies", () => ({
+  getNodeDependencyStatus: mocks.nodeDependencyStatus,
 }));
 
 vi.mock("react-i18next", () => ({
@@ -222,6 +227,7 @@ describe("AgentIntegrationPage", () => {
       resources: { "zh-CN": { translation: zhCN }, "en-US": { translation: enUS } },
     });
     Object.values(mocks).forEach((mock) => mock.mockReset());
+    mocks.nodeDependencyStatus.mockResolvedValue({ installed: true, installSupported: true });
     mocks.platform.mockReturnValue("win32");
     mocks.statuses.mockResolvedValue({ ok: true, data: { codex: readyCodexStatus } });
     mocks.executors.mockResolvedValue({ data: { data: { executors: [readyCodexExecutor] } } });

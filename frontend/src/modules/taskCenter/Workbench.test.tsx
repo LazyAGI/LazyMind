@@ -196,7 +196,7 @@ describe('Task Center workbench sections', () => {
     await waitFor(() => expect(mocks.getWorkbench).toHaveBeenLastCalledWith(expect.objectContaining({ keyword: '全局' })));
   });
 
-  it('shows four attention cards by default and renders counts as icon bubbles', async () => {
+  it('renders server previews and counts as icon bubbles', async () => {
     const waiting = Array.from({ length: 5 }, (_, index) => ({
       ...failedTask,
       id: `waiting-${index}`,
@@ -212,6 +212,84 @@ describe('Task Center workbench sections', () => {
     expect(screen.queryByRole('button', { name: /taskCenter.statusInterrupted/ })).not.toBeInTheDocument();
     expect(container.querySelector('.metric-count-badge')).toHaveTextContent('5');
     expect(container.querySelector('.section-count-badge')).toHaveTextContent('5');
+  });
+
+  it('fits complete rows to the available space and resets pagination when capacity changes', async () => {
+    let height = 768;
+    let columns = 3;
+    const callbacks: (() => void)[] = [];
+    vi.stubGlobal('ResizeObserver', class {
+      constructor(callback: () => void) { callbacks.push(callback); }
+      observe() {}
+      disconnect() {}
+    });
+    const computedStyle = window.getComputedStyle.bind(window);
+    const style = vi.spyOn(window, 'getComputedStyle').mockImplementation((element, pseudo) => {
+      const result = computedStyle(element, pseudo);
+      if (element.classList.contains('workbench-results')) {
+        const values: Record<string, string> = {
+          '--workbench-columns': String(columns), '--workbench-card-min-height': '152px',
+          '--workbench-card-max-height': '220px', '--workbench-card-gap': '12px', '--workbench-page-chrome': '144px',
+        };
+        result.getPropertyValue = key => values[key] ?? '';
+      }
+      return result;
+    });
+    const clientHeight = vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get')
+      .mockImplementation(function (this: HTMLElement) { return this.classList.contains('task-center-page') ? height : 0; });
+    const clientWidth = vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get')
+      .mockImplementation(function (this: HTMLElement) { return this.classList.contains('workbench-results') ? 1200 : 0; });
+    const rect = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      const scrollTop = this.closest('.task-center-page')?.scrollTop ?? 0;
+      return { top: this.classList.contains('workbench-results') ? 268 - scrollTop : 0 } as DOMRect;
+    });
+    const tasks = Array.from({ length: 30 }, (_, index) => ({ ...failedTask, id: `adaptive-${index}`, title: `自适应任务 ${index}`, status: 'waiting' }));
+    mocks.getWorkbench.mockImplementation(async ({ page_size, page, category }) => {
+      const result = response(tasks);
+      result.page_size = page_size;
+      const currentPage = category === 'attention' ? page : 1;
+      result.groups.attention = { items: tasks.slice((currentPage - 1) * page_size, currentPage * page_size), total: tasks.length, page: currentPage };
+      return result;
+    });
+    try {
+      const { container } = render(<div className='task-center-page'><Workbench active /></div>);
+      await waitFor(() => expect(container.querySelectorAll('.attention-task-card')).toHaveLength(6));
+      expect(mocks.getWorkbench).toHaveBeenLastCalledWith(expect.objectContaining({ page_size: 6, page: 1 }));
+      expect((container.querySelector('.workbench-results') as HTMLElement).style.getPropertyValue('--workbench-card-height')).toBe('172px');
+      fireEvent.click(screen.getByTitle('2'));
+      expect(await screen.findByText('自适应任务 6', { selector: 'strong' })).toBeInTheDocument();
+      expect(screen.queryByText('自适应任务 0', { selector: 'strong' })).not.toBeInTheDocument();
+
+      height = 1000;
+      act(() => callbacks.forEach(callback => callback()));
+      await waitFor(() => expect(container.querySelectorAll('.attention-task-card')).toHaveLength(9));
+      expect(mocks.getWorkbench).toHaveBeenLastCalledWith(expect.objectContaining({ page_size: 9, page: 1 }));
+      expect(screen.getByText('自适应任务 0', { selector: 'strong' })).toBeInTheDocument();
+
+      columns = 1;
+      height = 768;
+      act(() => callbacks.forEach(callback => callback()));
+      await waitFor(() => expect(container.querySelectorAll('.attention-task-card')).toHaveLength(2));
+      expect(mocks.getWorkbench).toHaveBeenLastCalledWith(expect.objectContaining({ page_size: 2, page: 1 }));
+      const calls = mocks.getWorkbench.mock.calls.length;
+      container.querySelector('.task-center-page')!.scrollTop = 200;
+      act(() => callbacks.forEach(callback => callback()));
+      expect(mocks.getWorkbench).toHaveBeenCalledTimes(calls);
+
+      columns = 2;
+      act(() => callbacks.forEach(callback => callback()));
+      await waitFor(() => expect(container.querySelectorAll('.attention-task-card')).toHaveLength(4));
+      expect(mocks.getWorkbench).toHaveBeenLastCalledWith(expect.objectContaining({ page_size: 4, page: 1 }));
+
+      height = 600;
+      act(() => callbacks.forEach(callback => callback()));
+      await waitFor(() => expect(container.querySelectorAll('.attention-task-card')).toHaveLength(2));
+      expect(mocks.getWorkbench).toHaveBeenLastCalledWith(expect.objectContaining({ page_size: 2, page: 1 }));
+    } finally {
+      cleanup();
+      style.mockRestore(); clientHeight.mockRestore(); clientWidth.mockRestore(); rect.mockRestore();
+      vi.unstubAllGlobals();
+    }
   });
 
 

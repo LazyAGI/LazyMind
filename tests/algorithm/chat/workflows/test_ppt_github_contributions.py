@@ -136,7 +136,7 @@ def test_workflow_declares_cloud_credentials_and_pr_tools_only_in_collection():
     assert {'cloud_files', 'kb', 'ppt_source_connections', 'ppt_collect_github_prs',
             'ppt_read_pr_description'} <= set(tools)
     assert 'cloud_files' not in state['steps']['generate_ppt']['tools']
-    declared = set(workflow['tool_scripts'][0]['functions'])
+    declared = {name for script in workflow['tool_scripts'] for name in script['functions']}
     assert {'ppt_source_connections', 'ppt_collect_github_prs', 'ppt_read_pr_description'} <= declared
 
 

@@ -32,8 +32,10 @@ describe('independent HostAction delivery', () => {
     const f = fixture(); f.busy(); await f.dispatcher.deliver(f.action)
     expect(f.action.status).toBe('pending'); expect(f.bridge.claim).not.toHaveBeenCalled(); expect(f.bridge.state).not.toHaveBeenCalled(); expect(f.sends()).toBe(0)
   })
-  it('acknowledges admission with no invented event sequence', async () => {
-    const f = fixture(); await f.dispatcher.deliver(f.action)
+  it.each(['continue', 'model_generate'] as const)('acknowledges %s admission with no invented event sequence', async kind => {
+    const f = fixture(); f.action.kind = kind
+    if (kind === 'model_generate') f.control.continuation = 'awaiting_executor'
+    await f.dispatcher.deliver(f.action)
     expect(f.action.status).toBe('accepted'); expect(f.sends()).toBe(1)
     expect(f.bridge.settle).toHaveBeenCalledWith('action-1', 'worker', 'lease', 'accepted', 0, '', expect.any(AbortSignal))
   })

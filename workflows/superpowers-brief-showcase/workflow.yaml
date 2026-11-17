@@ -8,6 +8,22 @@ tool_scripts:
   - copy_bound_brief
   - check_showcase_brief
 runtime:
+  execution:
+    version: '1'
+    skills:
+    - scenario/execution.md
+    constraints:
+    - Follow the shared state.yml step specification, declared output schemas and acceptance criteria; preserve the
+      user request and bound input revisions.
+    - Validate actual artifacts before completion, honor questions and review pauses, and report missing capabilities
+      without fabricating output.
+    steps:
+      prepare:
+        tools: []
+      implement:
+        tools: []
+      validate_brief:
+        tools: []
   post_step_checks:
   - step_id: validate_brief
     tool: check_showcase_brief

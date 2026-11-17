@@ -39,7 +39,7 @@ class KnowledgeSearchHit:
 
 def _ensure_kb_search_runtime():
     from lazymind.chat.engine.tools.kb import _ensure_kb_search_runtime as impl
-    return impl()
+    return impl(include_images=False)
 
 
 def _serialize_kb_result(raw):

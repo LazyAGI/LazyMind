@@ -798,10 +798,10 @@ export default function DefaultModelConfigPanel({
   });
 
   const toolCards = onConfigureToolService ? ([
-    { key: "searchEngine", category: "search", title: "搜索引擎", icon: SearchOutlined },
-    { key: "academicSearch", category: "academic", title: "学术搜索引擎", icon: ReadOutlined },
-    { key: "cloudParsing", category: "parsing", title: "文档解析（OCR）", icon: ScanOutlined },
-    { key: "machineTranslation", category: "translation", title: "机器翻译", icon: TranslationOutlined },
+    { key: "searchEngine", category: "search", title: t("modelProvider.defaults.services.search"), icon: SearchOutlined },
+    { key: "academicSearch", category: "academic", title: t("modelProvider.defaults.services.academic"), icon: ReadOutlined },
+    { key: "cloudParsing", category: "parsing", title: t("modelProvider.defaults.services.parsing"), icon: ScanOutlined },
+    { key: "machineTranslation", category: "translation", title: t("modelProvider.defaults.services.translation"), icon: TranslationOutlined },
   ] as const).map((service) => ({
     key: service.key,
     configured: Boolean(toolServiceSummaries?.[service.category]),
@@ -810,7 +810,7 @@ export default function DefaultModelConfigPanel({
       <div className="model-provider-default-controls">
         <button type="button" className="default-services-tool-picker" aria-label={t("modelProvider.configureCapability")} onClick={() => onConfigureToolService(service.category)}>
           <span className="default-services-tool-icon" aria-hidden="true"><service.icon /></span>
-          <span className="default-services-summary" title={toolServiceSummaries?.[service.category] || "尚未配置"}>{toolServiceSummaries?.[service.category] || "尚未配置"}</span>
+          <span className="default-services-summary" title={toolServiceSummaries?.[service.category] || t("modelProvider.defaults.notConfigured")}>{toolServiceSummaries?.[service.category] || t("modelProvider.defaults.notConfigured")}</span>
           <span className="default-services-tool-action">{t("modelProvider.configureCapability")}<RightOutlined aria-hidden="true" /></span>
         </button>
       </div>

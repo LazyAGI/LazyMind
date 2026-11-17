@@ -1,4 +1,5 @@
 import { WriterDocumentOptions } from './WriterDocumentOptions';
+import { useWriterPageWidth } from './useWriterPageWidth';
 import { selectedIRParagraphs } from './writerIRRewriteSelection';
 import { mergeIRRewrite } from './mergeRewritePreview';
 import { WriterFormula, WriterSourcePreview } from './WriterSourcePreview';
@@ -68,7 +69,6 @@ const WRITER_IR_SAVE_FOLLOWUP_MS = 400;
 
 type WriterIRSaveRunResult = 'noop' | 'saved' | 'error' | 'busy';
 export type WriterIRSaveMode = 'draft' | 'checkpoint';
-type WriterIRPageWidth = 'default' | 'wide' | 'reading';
 
 export interface WriterIRControlProps {
   savePaused?: boolean;
@@ -335,7 +335,7 @@ export function WriterIRControl({
   const [sourceMode, setSourceMode] = useState(false);
 
   const [outlineInstructionsExpanded, setOutlineInstructionsExpanded] = useState(true);
-  const [pageWidth, setPageWidth] = useState<WriterIRPageWidth>('default');
+  const [pageWidth, setPageWidth] = useWriterPageWidth();
   const [readOnlySelection, setReadOnlySelection] = useState<
     (WriterIRRewriteSelection & { anchor: SelectionActionAnchor }) | null
   >(null);

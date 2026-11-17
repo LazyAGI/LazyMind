@@ -3,7 +3,7 @@ import { axiosInstance, BASE_URL } from "@/components/request";
 export interface SourceContext { conversation_id?: string; history_id?: string; task_id?: string; workflow_session_id?: string; work_display_key?: string }
 export interface InspectedSource { source_id: string; url: string; title: string; eligible: boolean; needs_pdf_lookup?: boolean; pdf_lookup_failed?: boolean; paper_key?: string; reason?: string; target_presence?: "already_present" }
 export interface ImportItem {
-  item_id: string; batch_id: string; title: string; paper_key: string;
+  item_id: string; batch_id: string; batch_created_at?: string; title: string; paper_key: string;
   target_dataset_id: string; target_name: string; created_library: boolean;
   status: string; stage: string; state_unavailable?: boolean; processing_status?: string; processing_level?: string; document_id?: string;
   error_message?: string; retry_at?: string; retryable: boolean; retry_batch_id?: string; retry_item_id?: string;

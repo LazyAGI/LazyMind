@@ -1,7 +1,8 @@
 /** Presentation identity comes from the committed main-chat view, never binds a run. */
 export function readCodexView() {
   const scrollers = Array.from(document.querySelectorAll<HTMLElement>('[data-app-action-timeline-scroll]'))
-    .filter(element => element.getBoundingClientRect().width > 0)
+    .filter(element => element.getBoundingClientRect().width > 0
+      && !element.closest('[data-app-shell-tab-panel-controller]'))
   if (scrollers.length !== 1) return null
   const scroller = scrollers[0]
   const fiberKey = Object.keys(scroller).find(key => key.startsWith('__reactFiber$'))
@@ -28,7 +29,7 @@ export function readCodexView() {
 export function readPresentationSession(readView = readCodexView) {
   const host = window as any
   const key = '__lazymindCodexPresentationSession'
-  const version = 'codex-view-v1'
+  const version = 'codex-view-v2'
   if (host[key]?.version !== version) host[key]?.dispose()
   if (!host[key]) {
     let view = readView(), epoch = crypto.randomUUID(), queued = false

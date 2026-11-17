@@ -4,6 +4,7 @@ import "net/http"
 
 // Catalog desktop resource failures without exposing low-level diagnostics as UI messages.
 func init() {
+	registerAdditionalErrorAlias("unable to prepare editable pptx export; please retry", "Resource download or verification failed", http.StatusServiceUnavailable, 2003154)
 	registerAdditionalErrorAlias("too many catalog redirects", "Python dependency installation failed", http.StatusBadGateway, 2003155)
 	registerAdditionalErrorPattern("download %s catalog", "Python dependency installation failed", http.StatusBadGateway, 2003155)
 	registerAdditionalErrorPattern("%s catalog returned HTTP %d", "Python dependency installation failed", http.StatusBadGateway, 2003155)

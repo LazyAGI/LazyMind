@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import importlib.util
+import io
 from pathlib import Path
+from unittest.mock import Mock
 
 import yaml
 import pytest
@@ -20,6 +22,52 @@ def _load_ppt_tools():
     return module
 
 
+@pytest.mark.parametrize('response_kind', ['image', 'html', 'forbidden'])
+def test_remote_registration_downloads_and_validates_bytes_before_publishing(monkeypatch, tmp_path, response_kind):
+    import requests
+    from PIL import Image, ImageDraw
+
+    tools = _load_ppt_tools()
+    image = Image.new('RGB', (128, 128), 'white')
+    ImageDraw.Draw(image).rectangle((10, 10, 90, 90), fill='blue')
+    buffer = io.BytesIO()
+    image.save(buffer, format='PNG')
+    data = buffer.getvalue() if response_kind == 'image' else b'<html>Access denied</html>' * 10
+    response = requests.Response()
+    response.status_code = 403 if response_kind == 'forbidden' else 200
+    response.raw = io.BytesIO(data)
+    response.close = Mock(wraps=response.close)
+    # Exercise a long, extension-mismatched signed URL in the path field, too.
+    origin = 'https://example.org/photo.jpg?token=' + 'x' * 1000
+    requested = []
+
+    def get(url, **options):
+        requested.append((url, options))
+        return response
+
+    monkeypatch.setattr(tools.requests, 'get', get)
+    monkeypatch.setattr(tools, '_material_root', lambda: tmp_path)
+    monkeypatch.setattr(tools, 'select_vision_model_role', lambda: 'vlm')
+    monkeypatch.setattr(tools, '_inspect_material_image', lambda path, role: {
+        'status': 'inspected', 'description': 'A blue figure',
+    })
+    monkeypatch.setattr(tools, '_ui_slot_order_list', lambda slot: [])
+    published = []
+    monkeypatch.setattr(tools, '_save_artifact', lambda **item: published.append(item) or {'ok': True})
+    if response_kind != 'image':
+        with pytest.raises(tools.ToolExecutionError):
+            tools.ppt_register_material_images([{'path': origin}])
+        assert published == [] and not tools._material_manifest_path().exists()
+    else:
+        result = tools.ppt_register_material_images([{'path': origin}])
+        assert result['count'] == result['ui_published'] == 1
+        path = Path(published[0]['value'])
+        assert path.suffix == '.png' and path.read_bytes() == data
+        assert tools._load_material_manifest()['images'][0]['origin'] == origin
+    assert requested[0][0] == origin and requested[0][1]['stream'] is True
+    response.close.assert_called_once()
+
+
 def test_ppt_material_slot_uses_same_image_list_contract_as_image_workflow():
     ppt = yaml.safe_load(
         (_repo_root() / 'workflows' / 'ppt-workflow' / 'workflow.yaml').read_text(
@@ -33,12 +81,8 @@ def test_ppt_material_slot_uses_same_image_list_contract_as_image_workflow():
     assert ppt_slot == {
         **image_slot,
         'label': 'Material Images',
-        'exposed': False,
+        'user_visible': True,
     }
-
-    materials_tab = next(tab for tab in ppt['ui']['tabs'] if tab['id'] == 'materials')
-    assert materials_tab['layout'] == 'list'
-    assert materials_tab['slots'] == [{'id': 'material_summary'}]
     assert all(slot['id'] != 'academic_brief' for slot in ppt['slots'])
 
 
@@ -138,6 +182,61 @@ def test_register_material_images_publishes_one_previewable_image_per_new_file(
     assert [item['caption'] for item in saved] == ['基础示意图', '杆塔基础']
     assert [item['sort_order'] for item in saved] == [None, None]
     assert result['ui_published'] == 2
+
+
+def test_inspection_stages_candidates_and_only_registration_publishes_selection(monkeypatch, tmp_path):
+    from PIL import Image, ImageDraw
+
+    tools = _load_ppt_tools()
+    material_root = tmp_path / 'materials'
+    material_root.mkdir()
+    monkeypatch.setattr(tools, '_material_root', lambda: material_root)
+    monkeypatch.setattr(tools, 'select_vision_model_role', lambda: 'vlm')
+    monkeypatch.setattr(tools, 'get_model_role_runtime_identity', lambda role: 'configured-vision')
+    candidates = {}
+    for color in ('red', 'blue'):
+        path = tmp_path / f'{color}.png'
+        image = Image.new('RGB', (128, 128), 'white')
+        ImageDraw.Draw(image).rectangle((16, 16, 96, 96), fill=color)
+        image.save(path)
+        candidates[f'https://example.com/{path.name}'] = path.read_bytes()
+    monkeypatch.setattr(tools, '_download_image_bytes', candidates.__getitem__)
+    observed = []
+
+    def describe(system, instruction, paths):
+        observed.append(Path(paths[0]).read_bytes())
+        return f'Candidate figure {len(observed)}'
+
+    monkeypatch.setattr(tools, '_agent_vlm_call', describe)
+    saved = []
+    monkeypatch.setattr(tools, '_ui_slot_order_list', lambda slot: [])
+    monkeypatch.setattr(tools, '_save_artifact', lambda **item: saved.append(item) or {'success': True})
+
+    inspected = tools.ppt_inspect_material_images([
+        {'url': url, 'caption': Path(url).stem, 'source': 'web'} for url in candidates
+    ])
+
+    assert [item['visual_inspection']['description'] for item in inspected['images']] == [
+        'Candidate figure 1', 'Candidate figure 2',
+    ]
+    assert not saved and not tools._material_manifest_path().exists()
+    selected = inspected['images'][1]
+    result = tools.ppt_register_material_images([selected])
+
+    assert observed == list(candidates.values())
+    assert result['ui_published'] == 1
+    assert [(item['key'], item['caption'], item['value']) for item in saved] == [
+        ('material_images', 'blue', selected['path']),
+    ]
+    [registered] = tools._load_material_manifest()['images']
+    assert registered['origin'] == 'https://example.com/blue.png'
+    assert registered['sha256'] == selected['sha256']
+
+    stale = inspected['images'][0]
+    Path(stale['path']).write_bytes(candidates['https://example.com/blue.png'])
+    with pytest.raises(tools.ToolExecutionError, match='Prepared image changed'):
+        tools.ppt_register_material_images([stale])
+    assert len(saved) == 1 and len(observed) == 2
 
 
 def test_replace_material_images_overwrites_cards_and_removes_stale_tail(

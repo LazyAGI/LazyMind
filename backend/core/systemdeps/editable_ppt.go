@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"golang.org/x/sync/singleflight"
 	"io"
 	"net/http"
 	"os"
@@ -139,7 +140,36 @@ func validateEditablePPTBundleManifest(installDir string) error {
 	return nil
 }
 
+var editablePPTPreparation singleflight.Group
+
+// EnsureEditablePPT shares preparation across workflows and export requests.
+// A disconnected caller must not cancel preparation needed by other callers.
+func EnsureEditablePPT(ctx context.Context, runtimeRoot string) (EditablePPTStatus, error) {
+	result := editablePPTPreparation.DoChan(filepath.Clean(runtimeRoot), func() (any, error) {
+		prepareCtx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
+		defer cancel()
+		status, err := DetectEditablePPT(runtimeRoot)
+		if err != nil || status.Installed {
+			return status, err
+		}
+		return installEditablePPT(prepareCtx, runtimeRoot)
+	})
+	select {
+	case <-ctx.Done():
+		return EditablePPTStatus{}, ctx.Err()
+	case value := <-result:
+		if value.Err != nil {
+			return EditablePPTStatus{}, value.Err
+		}
+		return value.Val.(EditablePPTStatus), nil
+	}
+}
+
 func InstallEditablePPT(ctx context.Context, runtimeRoot string) (EditablePPTStatus, error) {
+	return EnsureEditablePPT(ctx, runtimeRoot)
+}
+
+func installEditablePPT(ctx context.Context, runtimeRoot string) (EditablePPTStatus, error) {
 	if !IsLocalRuntime() {
 		return EditablePPTStatus{}, errors.New("editable PPTX dependency install is only supported in local/desktop runtime")
 	}

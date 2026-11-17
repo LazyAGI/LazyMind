@@ -18,6 +18,7 @@ import (
 
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
+	"lazymind/core/taskcenter"
 	"lazymind/core/workflow/artifactfile"
 	"lazymind/core/workflow/artifactgraph"
 	"lazymind/core/workflow/publication"
@@ -102,11 +103,19 @@ func NormalizeArtifact(attempt AttemptContext, artifact Artifact) (Artifact, err
 	if err := validateDeclaredArtifactType(attempt, artifact); err != nil {
 		return artifact, controlstore.Reject("OUTPUT_TYPE_MISMATCH", err.Error())
 	}
+	value, err := artifactfile.NormalizeImageValue(artifact.ContentType, artifact.Value)
+	if err != nil {
+		return artifact, controlstore.Reject("INVALID_ARTIFACT", err.Error())
+	}
+	artifact.Value = value
 	return artifact, nil
 }
 
 // Immutable files have content hashes; their generated storage path is not identity.
 func artifactIdentity(raw json.RawMessage, contentType string) []byte {
+	if normalized, err := artifactfile.NormalizeImageValue(contentType, raw); err == nil {
+		raw = normalized
+	}
 	var value any
 	decoder := json.NewDecoder(bytes.NewReader(raw))
 	decoder.UseNumber()
@@ -137,6 +146,19 @@ func (sink DBArtifactSink) Save(ctx context.Context, attempt AttemptContext, art
 		return err
 	}
 	controlled := controlstore.Controlled(sessionInfo)
+	validatePPT := attempt.Metadata["executor_host"] == "external-agent" && UsesPPTImageContract(attempt)
+	if validatePPT && (artifact.Slot == "material_images" || artifact.Slot == "background_images") {
+		imageValue, err := normalizePPTImageUpload(artifact.Slot, artifact.Value)
+		if err != nil {
+			return err
+		}
+		artifact.Value = imageValue
+	}
+	value, err := artifactfile.NormalizeImageValue(artifact.ContentType, artifact.Value)
+	if err != nil {
+		return controlstore.Reject("INVALID_ARTIFACT", err.Error())
+	}
+	artifact.Value = value
 	var storedValue json.RawMessage
 	var cleanupDirectory string
 	transactionalOutputs, err := publication.PublicationEnabled(sink.DB.WithContext(ctx), sessionInfo)
@@ -184,7 +206,14 @@ func (sink DBArtifactSink) Save(ctx context.Context, attempt AttemptContext, art
 				if err := tx.First(&saved, "id = ?", *existing.HumanArtifactID).Error; err != nil {
 					return err
 				}
-				if saved.ContentType != artifact.ContentType || !bytes.Equal(artifactIdentity(saved.Value, saved.ContentType), artifactIdentity(storedValue, artifact.ContentType)) {
+				replayValue := storedValue
+				if validatePPT {
+					replayValue, err = preparePPTOutput(tx, attempt, artifact.Slot, storedValue, existing.ListIndex)
+					if err != nil {
+						return err
+					}
+				}
+				if saved.ContentType != artifact.ContentType || !bytes.Equal(artifactIdentity(saved.Value, saved.ContentType), artifactIdentity(replayValue, artifact.ContentType)) {
 					return controlstore.Reject("COMMAND_CONFLICT", "artifact sequence was already published with different content")
 				}
 				return nil
@@ -226,6 +255,13 @@ func (sink DBArtifactSink) Save(ctx context.Context, attempt AttemptContext, art
 		if err != nil {
 			return err
 		}
+		preparedValue := storedValue
+		if validatePPT {
+			preparedValue, err = preparePPTOutput(tx, attempt, artifact.Slot, storedValue, listIndex)
+			if err != nil {
+				return err
+			}
+		}
 		revision, err := nextArtifactRevision(tx, attempt.SessionID, artifact.Slot, cardinality, listIndex)
 		if err != nil {
 			return err
@@ -260,7 +296,7 @@ func (sink DBArtifactSink) Save(ctx context.Context, attempt AttemptContext, art
 		}
 		seq := artifact.Seq
 		if err := tx.Create(&orm.WorkflowHumanArtifact{ID: valueID, SessionID: attempt.SessionID,
-			Slot: artifact.Slot, ContentType: artifact.ContentType, Value: storedValue,
+			Slot: artifact.Slot, ContentType: artifact.ContentType, Value: preparedValue,
 			Caption: caption, CreatedAt: now}).Error; err != nil {
 			return err
 		}
@@ -296,6 +332,9 @@ func (sink DBArtifactSink) Save(ctx context.Context, attempt AttemptContext, art
 		if err := tx.Create(&orm.WorkflowEvent{SessionID: attempt.SessionID, OwnerUserID: session.CreateUserID,
 			ContractVersion: "workflow.v1", EventType: "artifact.upsert", EntityID: row.ID,
 			StateVersion: stateVersion, PayloadJSON: payload, CreatedAt: now}).Error; err != nil {
+			return err
+		}
+		if err := taskcenter.EnsureExternalWorkflowConversation(ctx, tx, *session, now); err != nil {
 			return err
 		}
 		persisted = true
@@ -452,7 +491,8 @@ func stringValue(value any) string {
 // ValidateRequiredOutputs keeps completion policy shared by managed, remote,
 // and externally hosted execution paths.
 func ValidateRequiredOutputs(ctx context.Context, db *gorm.DB, attempt AttemptContext) error {
-	if len(attempt.RequiredOutputs) == 0 {
+	validatePPT := attempt.Metadata["executor_host"] == "external-agent" && UsesPPTImageContract(attempt)
+	if len(attempt.RequiredOutputs) == 0 && !validatePPT {
 		return nil
 	}
 	var rows []orm.WorkflowSlotRevision
@@ -469,6 +509,9 @@ func ValidateRequiredOutputs(ctx context.Context, db *gorm.DB, attempt AttemptCo
 		if !seen[slot] {
 			return errors.New("required output missing: " + slot)
 		}
+	}
+	if validatePPT {
+		return validatePPTCompletion(db.WithContext(ctx), attempt, rows)
 	}
 	return nil
 }

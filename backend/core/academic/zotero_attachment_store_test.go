@@ -141,6 +141,9 @@ func TestZoteroAttachmentStoredTaskFailureIsLinkedAndReported(t *testing.T) {
 	if err == nil || !strings.Contains(string(marshal(result.Data)), "contentRef") || !strings.Contains(string(marshal(result.Data)), "processingError") {
 		t.Fatalf("stored task failure was hidden: %+v %v", result.Data, err)
 	}
+	if len(result.Data.Attachments) != 1 || result.Data.Attachments[0].Parse != "failed" || result.Data.Attachments[0].ProcessingError == "" {
+		t.Fatalf("attachment submission failure lost: %+v", result.Data.Attachments)
+	}
 }
 
 func TestZoteroAttachmentRejectsMissingTargetAndInvalidPDF(t *testing.T) {

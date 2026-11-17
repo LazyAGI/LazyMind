@@ -386,67 +386,27 @@ class StyleFlowCombinationTest(unittest.TestCase):
             }), encoding='utf-8')
         return deck
 
-    def test_each_of_four_combinations_builds_outline_ten_times(self) -> None:
+    def test_outline_publication_preserves_prepared_style_and_background_choices(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
-            for flow, backgrounds, _expected_mode in self.COMBINATIONS:
-                for run in range(10):
-                    deck = self._prepared_deck(root, flow, backgrounds, run)
-                    stage_calls: list[tuple[str, str | None]] = []
-
-                    def run_stage(deck_dir: str, *, stage: str, sample=None, **_kwargs):
-                        stage_calls.append((stage, sample))
-                        if stage == 'style':
-                            style = {
-                                'design_style': {'id': 1},
-                                'color_tone': {'id': 1},
-                                'primary_color': {'id': 1},
-                                'palette': {'primary': '#1976D2'},
-                            }
-                            if sample:
-                                style['_selected_sample'] = {'sample_id': sample}
-                            (Path(deck_dir) / 'style_spec.json').write_text(
-                                json.dumps(style), encoding='utf-8',
-                            )
-                        if stage == 'content-outline':
-                            (Path(deck_dir) / 'outline.json').write_text(
-                                json.dumps({'pages': [
-                                    {'page_no': 1, 'title': '第一页'},
-                                    {'page_no': 2, 'title': '第二页'},
-                                ]}),
-                                encoding='utf-8',
-                            )
-                        return {'status': 'ok', 'pages': 2}
-
-                    with mock.patch.object(
-                        TOOLS, '_resolve_deck_dir', return_value=deck,
-                    ), mock.patch.object(
-                        TOOLS, '_attach_material_images_to_deck',
-                        return_value={'attached': 0, 'reference_images': []},
-                    ), mock.patch.object(
-                        TOOLS, 'ppt_run_stage', side_effect=run_stage,
-                    ), mock.patch.object(
-                        TOOLS, '_publish_deck_outline',
-                        return_value={'ok': True, 'page_count': 2, 'chars': 80},
-                    ):
+            for flow, backgrounds, _mode in self.COMBINATIONS:
+                with self.subTest(flow=flow, backgrounds=backgrounds):
+                    deck = self._prepared_deck(root, flow, backgrounds, 1)
+                    with mock.patch.object(TOOLS, '_resolve_deck_dir', return_value=deck), \
+                         mock.patch.object(TOOLS, '_conversation_root', return_value=root), \
+                         mock.patch.object(TOOLS, '_attach_material_images_to_deck', return_value={'attached': 0}), \
+                         mock.patch.object(TOOLS, 'ppt_run_stage') as model, \
+                         mock.patch.object(TOOLS, '_save_artifact', return_value={'ok': True}) as publish:
                         result = TOOLS.ppt_build_outline(
-                            user_query='两页测试 PPT', page_count=2,
-                            deck_dir=str(deck), style_flow=flow,
-                            style_selection='B' if flow == 'preview_choice' else None,
+                            user_query='两页测试 PPT', outline_markdown='## 第一页\n内容一\n\n## 第二页\n内容二',
+                            page_count=2, deck_dir=str(deck), style_flow=flow,
                             generate_background_images=backgrounds,
                         )
-
                     self.assertEqual(result['style_flow'], flow)
                     self.assertIs(result['background_images_enabled'], backgrounds)
-                    self.assertEqual(
-                        stage_calls,
-                        [
-                            ('preflight', None),
-                            ('style', 'B' if flow == 'preview_choice' else None),
-                            ('preflight', None),
-                            ('content-outline', None),
-                        ],
-                    )
+                    self.assertEqual(result['page_count'], 2)
+                    self.assertEqual(publish.call_args.kwargs['key'], 'deck_outline')
+                    model.assert_not_called()
 
     def test_skipped_previews_do_not_require_candidates_or_selection(self):
         for requested in (None, 'B'):
@@ -503,30 +463,23 @@ class StyleFlowCombinationTest(unittest.TestCase):
             self.assertEqual(result['published_count'], 1)
             self.assertEqual(publish.call_args.kwargs['value'], prompt)
 
-    def test_complete_prompts_skip_structure_generation_but_legacy_sessions_keep_it(self):
-        for complete in (True, False):
-            with self.subTest(complete=complete), tempfile.TemporaryDirectory() as temp:
-                deck = Path(temp)
-                (deck / 'task_pack.json').write_text('{"params":{"page_count":1}}')
-                (deck / 'info_pack.json').write_text('{}')
-                if complete:
-                    (deck / 'complete_page_prompts.json').write_text('{"version":1}')
-                def stage(_deck, *, stage):
-                    if stage == 'content-outline':
-                        (deck / 'outline.json').write_text('{"pages":[{"page_no":1}]}')
-                    return {'status': 'ok'}
-                with mock.patch.object(TOOLS, '_selected_slide_outline_items',
-                                       return_value=[(0, '完整提示词，红金配色')] if complete else []), \
-                     mock.patch.object(TOOLS, '_resolve_artifact_text', return_value=('## 春节\n习俗', 'text')), \
-                     mock.patch.object(TOOLS, 'ppt_run_stage', side_effect=stage) as generate:
-                    result = TOOLS._prepare_deferred_outline(deck)
-                if complete:
-                    self.assertEqual(result['status'], 'direct')
-                    generate.assert_not_called()
-                else:
-                    self.assertEqual(result['status'], 'ok')
-                    self.assertEqual([c.kwargs['stage'] for c in generate.call_args_list],
-                                     ['preflight', 'content-outline'])
+    def test_approved_prompts_build_index_without_regenerating_content(self):
+        with tempfile.TemporaryDirectory() as temp:
+            deck = Path(temp)
+            (deck / 'task_pack.json').write_text('{"params":{"page_count":1}}')
+            with mock.patch.object(TOOLS, '_selected_slide_outline_items',
+                                   return_value=[(7, '完整提示词，红金配色')]), \
+                 mock.patch.object(TOOLS, 'ppt_run_stage') as generate:
+                result = TOOLS._prepare_deferred_outline(deck)
+            self.assertEqual(result['status'], 'direct')
+            self.assertEqual(json.loads((deck / 'outline.json').read_text())['pages'][0]['page_no'], 1)
+            generate.assert_not_called()
+            with mock.patch.object(TOOLS, '_selected_slide_outline_items', return_value=[]), \
+                 mock.patch.object(TOOLS, 'ppt_run_stage') as generate:
+                result = TOOLS._prepare_deferred_outline(deck)
+            self.assertEqual(result['status'], 'failed')
+            self.assertIn('plan_page_prompts', result['reason'])
+            generate.assert_not_called()
 
     def test_legacy_standard_without_samples_recovers_as_auto(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
@@ -541,58 +494,24 @@ class StyleFlowCombinationTest(unittest.TestCase):
             self.assertEqual(pack['ppt_mode'], 'fast')
             self.assertEqual(pack['params']['style_flow'], 'auto')
 
-    def test_explicit_background_choice_overrides_prepared_deck_both_ways(self) -> None:
+    def test_explicit_background_choice_overrides_prepared_deck_both_ways(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
-            cases = ((True, False), (False, True))
-            for index, (stored, requested) in enumerate(cases):
+            for index, (stored, requested) in enumerate(((True, False), (False, True))):
                 deck = self._prepared_deck(root, 'auto', stored, index)
-
-                def run_stage(deck_dir: str, *, stage: str, **_kwargs):
-                    if stage == 'style':
-                        (Path(deck_dir) / 'style_spec.json').write_text(
-                            json.dumps({
-                                'design_style': {'id': 1},
-                                'color_tone': {'id': 1},
-                                'primary_color': {'id': 1},
-                                'palette': {'primary': '#1976D2'},
-                            }),
-                            encoding='utf-8',
-                        )
-                    if stage == 'content-outline':
-                        (Path(deck_dir) / 'outline.json').write_text(
-                            json.dumps({'pages': [
-                                {'page_no': 1, 'title': '第一页'},
-                                {'page_no': 2, 'title': '第二页'},
-                            ]}),
-                            encoding='utf-8',
-                        )
-                    return {'status': 'ok'}
-
-                with mock.patch.object(
-                    TOOLS, '_resolve_deck_dir', return_value=deck,
-                ), mock.patch.object(
-                    TOOLS, '_attach_material_images_to_deck',
-                    return_value={'attached': 0, 'reference_images': []},
-                ), mock.patch.object(
-                    TOOLS, 'ppt_run_stage', side_effect=run_stage,
-                ), mock.patch.object(
-                    TOOLS, '_publish_deck_outline',
-                    return_value={'ok': True, 'page_count': 2, 'chars': 80},
-                ):
+                with mock.patch.object(TOOLS, '_resolve_deck_dir', return_value=deck), \
+                     mock.patch.object(TOOLS, '_conversation_root', return_value=root), \
+                     mock.patch.object(TOOLS, '_attach_material_images_to_deck', return_value={'attached': 0}), \
+                     mock.patch.object(TOOLS, 'ppt_run_stage') as generate, \
+                     mock.patch.object(TOOLS, '_save_artifact', return_value={'ok': True}):
                     result = TOOLS.ppt_build_outline(
-                        user_query='两页测试 PPT', deck_dir=str(deck),
-                        style_flow='auto',
-                        generate_background_images=requested,
+                        '两页测试 PPT', '## 第一页\n内容一\n\n## 第二页\n内容二', page_count=2,
+                        deck_dir=str(deck), style_flow='auto', generate_background_images=requested,
                     )
-
-                pack = json.loads(
-                    (deck / 'task_pack.json').read_text(encoding='utf-8')
-                )
                 self.assertIs(result['background_images_enabled'], requested)
-                self.assertIs(
-                    pack['params']['generate_background_images'], requested,
-                )
+                pack = json.loads((deck / 'task_pack.json').read_text())
+                self.assertIs(pack['params']['generate_background_images'], requested)
+                generate.assert_not_called()
 
     def test_capability_gate_accepts_all_four_independent_combinations(self) -> None:
         for flow, backgrounds, _mode in self.COMBINATIONS:

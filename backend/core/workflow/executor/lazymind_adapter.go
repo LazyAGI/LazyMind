@@ -35,6 +35,8 @@ func (loader DBContextLoader) LoadAttemptContext(ctx context.Context, id string)
 		}
 	}
 	value.ContractVersion, value.SessionID, value.AttemptID, value.StepID, value.AttemptNo = attempt.ContractVersion, row.SessionID, row.ID, row.StepID, row.Attempt
+	// Execution instructions are authoritative only in the immutable revision.
+	value.Execution = nil
 	var session orm.WorkflowSession
 	if err := loader.DB.WithContext(ctx).Where("id = ?", row.SessionID).First(&session).Error; err != nil {
 		return AttemptContext{}, err
@@ -43,7 +45,9 @@ func (loader DBContextLoader) LoadAttemptContext(ctx context.Context, id string)
 	if value.Metadata == nil {
 		value.Metadata = map[string]string{}
 	}
+	delete(value.Metadata, "model_executor")
 	value.Metadata["controller_host"] = session.ControllerHost
+	value.Metadata["executor_host"] = row.ExecutorHost
 	value.Metadata["control_protocol"] = session.ControlProtocol
 	value.Metadata["origin_host"] = session.OriginHost
 	value.Metadata["conversation_id"] = session.ConversationID
@@ -55,6 +59,13 @@ func (loader DBContextLoader) LoadAttemptContext(ctx context.Context, id string)
 		if err := loader.DB.WithContext(ctx).Where("id = ?", session.WorkflowRevisionID).First(&revision).Error; err == nil {
 			var graph graphengine.CompiledStateGraph
 			if json.Unmarshal(revision.CompiledGraph, &graph) == nil {
+				binding, err := controlstore.DecodeBinding(session)
+				if err != nil {
+					return AttemptContext{}, err
+				}
+				if controlstore.Controlled(session) && binding.Provider != "" && graph.Runtime.Execution.UsesExternalModels() {
+					value.Metadata["model_executor"] = graphengine.ExternalModelExecutor
+				}
 				for materialID, cardinality := range graph.MaterialCardinalities {
 					listMaterials[materialID] = cardinality == "list"
 				}
@@ -63,6 +74,14 @@ func (loader DBContextLoader) LoadAttemptContext(ctx context.Context, id string)
 					value.DeclaredInputTypes[materialID] = materialType
 				}
 				if node, ok := graph.Nodes[row.StepID]; ok {
+					host := "lazymind"
+					if controlstore.Controlled(session) {
+						host = row.ExecutorHost
+					}
+					node = node.ForExecutor(host)
+					if node.Execution != nil {
+						value.Execution = &ExecutionContract{StepExecution: *node.Execution}
+					}
 					value.Prompt, value.Acceptance = node.Prompt, node.Acceptance
 					value.DeclaredInputTransports = node.InputTransports
 					value.DeclaredOutputs, value.RequiredOutputs = node.Outputs, node.RequiredOutputs
@@ -78,6 +97,9 @@ func (loader DBContextLoader) LoadAttemptContext(ctx context.Context, id string)
 			}
 			value.OutputCardinality = cardinality
 		}
+	}
+	if err := loadExecutionSkillFiles(ctx, loader.DB, &value); err != nil {
+		return AttemptContext{}, err
 	}
 	if controlstore.Controlled(session) && value.Metadata[frozenInputsKey] == "true" {
 		return value, nil

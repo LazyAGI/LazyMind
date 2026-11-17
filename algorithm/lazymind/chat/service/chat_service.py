@@ -51,6 +51,7 @@ from lazymind.chat.service.document_selection import (
     resolve_document_selection_context,
 )
 from lazymind.chat.service.component.tool_policy import build_sidechat_tool_configs
+from lazymind.chat.service.component.tool_rendering import _preview_language
 from lazymind.chat.service.component import (
     AgentEventFrameTranslator,
     ASK_USER_TOOL_CONFIG,
@@ -680,18 +681,22 @@ def _build_ask_user_tool(
     from lazymind.chat.engine.tools.ask_user import ask_user
     from lazymind.chat.workflow.workflow_manager import enforce_startup_clarification_policy
 
-    if not runtime_policy and not (discovery_mode and workflow_catalog):
-        return [ask_user]
-
     @wraps(ask_user)
     def governed_ask_user(questions, title=None, description=None):
-        return ask_user(
-            enforce_startup_clarification_policy(
-                questions, runtime_policy, workflow_catalog, discovery_mode=discovery_mode,
-            ),
-            title=title,
-            description=description,
+        questions = enforce_startup_clarification_policy(
+            questions, runtime_policy, workflow_catalog, discovery_mode=discovery_mode,
         )
+        if (discovery_mode or not runtime_policy) and isinstance(questions, list):
+            # A discoverable workflow is not an active workflow. Generic chat
+            # questions are skippable; host-issued workflow cards retain their
+            # required fields. Preserve malformed values for schema validation.
+            questions = [
+                {**question, 'required': False}
+                if isinstance(question, dict) and isinstance(question.get('required'), bool)
+                else question
+                for question in questions
+            ]
+        return ask_user(questions, title=title, description=description)
 
     return [governed_ask_user]
 
@@ -965,7 +970,7 @@ async def _run_chat_with_parse_status(
     if not names or inspect:
         return await _handle_chat_impl(request, **kwargs)
 
-    query = str(request.message.query or '')
+    query = str(request.message.user_query or request.message.query or '')
     session_id = request.conversation.session_id
     started = time.time()
     translator = AgentEventFrameTranslator(query=query, run_id='parse-uploads')
@@ -1065,7 +1070,10 @@ async def handle_chat(request: ChatRequest) -> Union[Dict[str, Any], StreamingRe
                 ).strip(),
                 session_id=request.conversation.session_id,
             ))
-            for status_delta in ('正在', '分析', '用户意图', '，请稍后'):
+            status_deltas = (('正在', '分析', '用户意图', '，请稍后')
+                             if _preview_language(filter_query) == 'zh'
+                             else ('Analyzing ', 'your request', ', please wait…'))
+            for status_delta in status_deltas:
                 yield log_and_emit_frame(
                     {'think': status_delta, 'text': None, 'sources': []},
                     round(time.time() - started, 3),
@@ -1306,7 +1314,7 @@ async def _handle_chat_impl(
         agent_history, agent.loaded_skills, excluded=agent.excluded_skills,
     )
     translator = AgentEventFrameTranslator(
-        query=query,
+        query=user_input,
         run_id=run_id,
         started_at=metrics_started_at,
     )
@@ -1343,6 +1351,7 @@ async def _handle_chat_impl(
         'mode': conversation.mode if conversation.mode in ('auto', 'manual') else 'auto',
         'has_subagents': bool(agent.has_subagents),
         'document_preview_chat': is_document_preview_chat,
+        'document_context': document_context,
         'document_selection_context_available': has_document_selection,
         'conversation_id': conversation_id,
         'query': query or '',
@@ -2258,6 +2267,12 @@ async def _handle_chat_impl(
             ),
             required_tool_names=() if sidechat_readonly else (
                 *workflow_contribution.required_tool_names,
+                *(('KBToolkit_read_document',) if (
+                    any(cfg.name == 'kb' for cfg in active_configs)
+                    and (is_document_preview_chat or (
+                        has_document_selection and document_context.get('expand_paper_context') is True
+                    ))
+                ) else ()),
                 *(getattr(tool, '__name__', '') for tool in [
                     *attachment_tools,
                     *([directory_runtime.list_document_directories, directory_runtime.open_document_directory,

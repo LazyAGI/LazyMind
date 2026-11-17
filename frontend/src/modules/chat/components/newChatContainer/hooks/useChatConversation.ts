@@ -93,6 +93,15 @@ type RuntimeWaitingOperation = "chat" | "workflow";
 
 const MEDIA_CAPABILITY_PENDING_STORAGE_PREFIX = "chat-capability-pending:";
 
+function hasTerminalChatRun(record?: {
+  run_terminal?: { status?: string } | null;
+  run_status?: string | null;
+}): boolean {
+  const status = record?.run_terminal?.status || record?.run_status;
+  return status === "completed" || status === "failed" ||
+    status === "interrupted" || status === "cancelled";
+}
+
 function pendingMediaCapabilityStorageKey(conversationId: string): string {
   return `${MEDIA_CAPABILITY_PENDING_STORAGE_PREFIX}${conversationId}`;
 }
@@ -567,7 +576,7 @@ export function useChatConversation({
     const latestAssistant = list.findLast(
       (item) => item?.role === RoleTypes.ASSISTANT,
     );
-    return Boolean(latestAssistant?.run_terminal || latestAssistant?.run_status);
+    return hasTerminalChatRun(latestAssistant);
   }
 
   function applyReconciledHistory(conversationId: string, apiList: any[]) {
@@ -638,9 +647,7 @@ export function useChatConversation({
               : latest,
           undefined,
         );
-      const historyHasTerminal = Boolean(
-        latestHistory?.run_terminal || latestHistory?.run_status,
-      );
+      const historyHasTerminal = hasTerminalChatRun(latestHistory);
       const apiList = buildChatMessageListFromHistory(
         history as Parameters<typeof buildChatMessageListFromHistory>[0],
         {
@@ -1899,7 +1906,7 @@ export function useChatConversation({
       ),
       role: RoleTypes.USER,
       images: [...(tempGroup?.image || []), ...(params.referencedFiles || []).filter(file => file.input_type === 'image' && !tempFileGroup?.image?.some(upload => upload.uri === file.uri)).map(file => ({ uid: file.uri, base64: file.input_base64 || file.uri }))],
-      files: [...(tempGroup?.file || []), ...(params.referencedFiles || []).filter(file => file.input_type === 'file' && !tempFileGroup?.file?.some(upload => upload.uri === file.uri)).map(file => ({ uid: file.uri, name: file.filename }))],
+      files: [...(tempGroup?.file || []).map(file => ({ ...file, uri: tempFileGroup?.file?.find(upload => upload.uid === file.uid)?.uri })), ...(params.referencedFiles || []).filter(file => file.input_type === 'file' && !tempFileGroup?.file?.some(upload => upload.uri === file.uri)).map(file => ({ uid: file.uri, name: file.filename, uri: file.uri }))],
       fileList: submittedFileList,
       inputs,
       finish_reason: ChatConversationsResponseFinishReasonEnum.FinishReasonStop,

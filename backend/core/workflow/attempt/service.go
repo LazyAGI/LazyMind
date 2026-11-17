@@ -272,6 +272,13 @@ func (s *Service) claimCandidate(ctx context.Context, candidate orm.WorkflowSess
 		if result.RowsAffected != 1 {
 			return ErrNotClaimable
 		}
+		// Return the stored precision on the first claim too, so retrying a
+		// claim does not change its deadline on PostgreSQL.
+		var stored orm.WorkflowSessionStep
+		if err := tx.Select("lease_expires_at").First(&stored, "id = ?", candidate.ID).Error; err != nil {
+			return err
+		}
+		expires = *stored.LeaseExpiresAt
 		if err := tx.Model(&orm.WorkflowOutbox{}).Where("attempt_id = ? AND status IN ('pending','claimed')", candidate.ID).
 			Updates(map[string]any{"status": "claimed", "updated_at": now}).Error; err != nil {
 			return err

@@ -280,6 +280,56 @@ func TestStoppedWorkflowIsPausedUntilExplicitRetry(t *testing.T) {
 	}
 }
 
+func TestRecoverExternalWorkflowTasksPreservesOwnerAndArchivedRecords(t *testing.T) {
+	db := orm.MigrateTestDB(t, &orm.TaskCenterTask{}, &orm.WorkflowSession{})
+	now := time.Now().UTC()
+	for _, session := range []orm.WorkflowSession{
+		{ID: "visible", CreateUserID: "owner", OriginHost: "external-agent", ControllerHost: "external-agent", IntentContext: `{"text":"四页论文总结\n参数"}`, Status: "completed", CreatedAt: now, UpdatedAt: now},
+		{ID: "other", CreateUserID: "other", OriginHost: "external-agent", ControllerHost: "external-agent", CreatedAt: now, UpdatedAt: now},
+		{ID: "dismissed", CreateUserID: "owner", OriginHost: "external-agent", ControllerHost: "external-agent", Dismissed: true, CreatedAt: now, UpdatedAt: now},
+		{ID: "archived", CreateUserID: "owner", OriginHost: "external-agent", ControllerHost: "external-agent", CreatedAt: now, UpdatedAt: now},
+	} {
+		if err := db.Create(&session).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	archived := "archived"
+	if err := db.Create(&orm.TaskCenterTask{ID: "old-task", UserID: "owner", WorkflowSessionID: &archived, TaskType: "workflow_run", Status: "succeeded", ArchivedAt: &now, CreatedAt: now, UpdatedAt: now}).Error; err != nil {
+		t.Fatal(err)
+	}
+	// An unrelated conversation-free trigger must not be claimed by recovery.
+	if err := db.Create(&orm.TaskCenterTask{ID: "trigger", UserID: "owner", TaskType: "scheduled", Status: "running", CreatedAt: now.Add(-time.Minute), UpdatedAt: now}).Error; err != nil {
+		t.Fatal(err)
+	}
+	for range 2 {
+		if err := RecoverExternalWorkflowTasks(t.Context(), db.DB, "owner"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var tasks []orm.TaskCenterTask
+	if err := db.Find(&tasks).Error; err != nil {
+		t.Fatal(err)
+	}
+	if len(tasks) != 3 {
+		t.Fatalf("unexpected task recovery: %#v", tasks)
+	}
+	var found bool
+	for _, task := range tasks {
+		if task.ID == "trigger" && task.WorkflowSessionID != nil {
+			t.Fatal("unrelated trigger was claimed")
+		}
+		if task.WorkflowSessionID != nil && *task.WorkflowSessionID == "visible" {
+			found = true
+			if task.ConversationID != "" || task.Title == nil || *task.Title != "四页论文总结" {
+				t.Fatalf("invalid recovered task: %#v", task)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("historical external run was not recovered")
+	}
+}
+
 func TestWorkflowInputCheckpointBelongsToAttention(t *testing.T) {
 	db := orm.MigrateTestDB(t, &orm.TaskCenterTask{}, &orm.WorkflowSession{}, &orm.WorkflowSessionStep{}, &orm.WorkflowRevision{}, &orm.WorkflowApprovalPreference{}, &orm.WorkflowReviewCheckpoint{}, &orm.WorkflowSlotRevision{})
 	now := time.Now().UTC()

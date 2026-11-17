@@ -1,0 +1,14 @@
+.pdf-parse-status { display: inline-flex; align-items: center; gap: 5px; min-height: 28px; padding: 3px 8px; border: 0; border-radius: 5px; font: inherit; font-size: 12px; line-height: 20px; white-space: nowrap; cursor: pointer; }
+.pdf-parse-status:hover { filter: brightness(.96); }
+.pdf-parse-status:focus-visible { outline: 2px solid currentColor; outline-offset: 3px; }
+.pdf-parse-details { max-width: min(320px, 75vw); }
+.pdf-parse-details p { margin: 0 0 10px; }
+.pdf-parse-details summary { cursor: pointer; margin-bottom: 10px; }
+.pdf-parse-details pre { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; max-height: 180px; overflow: auto; }
+.pdf-parse-actions { display: flex; gap: 8px; }
+.paper-library-materials { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+.paper-attachment-name .pdf-parse-status { margin-top: 8px; }
+@media (pointer: coarse) { .pdf-parse-status { min-height: 44px; } }
+@media (prefers-reduced-motion: reduce) { .pdf-parse-status .anticon-spin { animation: none; } }
+
+.knowledge-pdf-processing { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; }

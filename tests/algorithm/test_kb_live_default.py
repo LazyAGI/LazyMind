@@ -1,6 +1,7 @@
 from types import SimpleNamespace
 
 from lazymind.chat.engine.tools import kb
+from lazymind.model_config import inject_model_config
 
 
 DEFAULT_AGENTIC_CONFIG = {
@@ -9,7 +10,11 @@ DEFAULT_AGENTIC_CONFIG = {
 SEED_KEYWORD = '铁路路基设计规范'
 
 
-def test_kb_search_core_flow(monkeypatch):
+def test_kb_search_core_flow(monkeypatch, tmp_path):
+    runtime = tmp_path / 'models.yaml'
+    runtime.write_text('embed_main: {source: dynamic, type: embed}\n', encoding='utf-8')
+    monkeypatch.setenv('LAZYMIND_MODEL_CONFIG_PATH', str(runtime))
+    model_config = {'embed_main': {'source': 'openai', 'model': 'test-embedding', 'type': 'embed'}}
     captured = {}
 
     def fake_search_kb(
@@ -48,23 +53,22 @@ def test_kb_search_core_flow(monkeypatch):
     monkeypatch.setattr(
         kb,
         '_ensure_kb_search_runtime',
-        lambda: (['retriever'], 'reranker', 'image-retriever'),
+        lambda **kwargs: (['retriever'], 'reranker', 'image-retriever'),
     )
-    original_config = kb.lazyllm.globals.get('agentic_config')
-    kb.lazyllm.globals['agentic_config'] = {
-        'filters': {'kb_id': DEFAULT_AGENTIC_CONFIG['kb_id']},
-        'user_id': 'user-007',
-    }
-    try:
+    with kb.lazyllm.new_session():
+        inject_model_config(model_config)
+        kb.lazyllm.globals['agentic_config'] = {
+            'filters': {'kb_id': DEFAULT_AGENTIC_CONFIG['kb_id']},
+            'user_id': 'user-007',
+        }
         result = kb.KBToolkit().kb_search(SEED_KEYWORD)
-    finally:
-        kb.lazyllm.globals['agentic_config'] = original_config or {}
 
     assert captured == {
         'payload': {
             'query': SEED_KEYWORD,
             'filters': {'kb_id': [DEFAULT_AGENTIC_CONFIG['kb_id']]},
             'user_id': 'user-007',
+            'llm_config': model_config,
         },
         'retrievers': ['retriever'],
         'image_retriever': 'image-retriever',

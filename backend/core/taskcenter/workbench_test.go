@@ -70,7 +70,7 @@ func TestWorkbenchSummariesPreviewsAndPagination(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	read := func(query string) map[string]*workbenchGroup {
+	read := func(query string, expectedPageSize ...int) map[string]*workbenchGroup {
 		t.Helper()
 		req := httptest.NewRequest(http.MethodGet, "/task-center/workbench"+query, nil)
 		req.Header.Set("X-User-Id", "owner")
@@ -86,7 +86,11 @@ func TestWorkbenchSummariesPreviewsAndPagination(t *testing.T) {
 		if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
 			t.Fatal(err)
 		}
-		if response.PageSize != 4 || len(response.Groups) != 6 {
+		wantSize := 4
+		if len(expectedPageSize) > 0 {
+			wantSize = expectedPageSize[0]
+		}
+		if response.PageSize != wantSize || len(response.Groups) != 6 {
 			t.Fatalf("unexpected response: %s", rec.Body.String())
 		}
 		return response.Groups
@@ -113,5 +117,24 @@ func TestWorkbenchSummariesPreviewsAndPagination(t *testing.T) {
 	groups = read("?category=attention&page=999999")
 	if groups["attention"].Page != 2 {
 		t.Fatal("page should clamp to the last nonempty page")
+	}
+	groups = read("?page_size=6", 6)
+	if len(groups["attention"].Items) != 6 || len(groups["recent"].Items) != 6 {
+		t.Fatal("larger pages must return all requested previews")
+	}
+	groups = read("?category=attention&page=2&page_size=3", 3)
+	if groups["attention"].Page != 2 || len(groups["attention"].Items) != 3 || groups["attention"].Items[0].ID != "waiting-2" {
+		t.Fatalf("incorrect adaptive second page: %#v", groups["attention"])
+	}
+	groups = read("?category=attention&page=999&page_size=6", 6)
+	if groups["attention"].Page != 1 || len(groups["attention"].Items) != 6 {
+		t.Fatal("page clamping must use the requested page size")
+	}
+	groups = read("?page_size=999", 100)
+	if len(groups["recent"].Items) != 100 {
+		t.Fatal("page size must be bounded")
+	}
+	for _, invalid := range []string{"0", "-1", "invalid"} {
+		read("?page_size=" + invalid)
 	}
 }

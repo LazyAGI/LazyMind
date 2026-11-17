@@ -204,7 +204,7 @@ func TestPersistConversationFileArtifactValidatesSharedWorkspace(t *testing.T) {
 		t.Fatalf("write artifact file: %v", err)
 	}
 	value, _ := json.Marshal(map[string]any{
-		"filename": "report.docx", "path": path, "size": 999,
+		"filename": "report.docx", "path": path, "size": 999, "preview_group": "diagram-a",
 	})
 	event := &ArtifactCreatedEvent{
 		ArtifactID: artifactID, Filename: "report.docx", ContentType: "file", Value: value,
@@ -222,6 +222,9 @@ func TestPersistConversationFileArtifactValidatesSharedWorkspace(t *testing.T) {
 	}
 	if responseValue["url"] == nil || responseValue["path"] != nil {
 		t.Fatalf("response did not replace the storage path with a signed URL: %#v", responseValue)
+	}
+	if responseValue["preview_group"] != "diagram-a" {
+		t.Fatalf("preview group lost from signed response: %#v", responseValue)
 	}
 	var stored orm.ConversationArtifact
 	if err := db.First(&stored, "id = ?", artifactID).Error; err != nil {

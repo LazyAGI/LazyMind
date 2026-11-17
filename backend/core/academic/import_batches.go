@@ -165,7 +165,7 @@ func observeOperationProcessing(r *http.Request, db *gorm.DB, dataset string, ba
 	out.Metadata = metadata
 	result := make([]operationProcessing, 0, len(metadata))
 	for id, current := range metadata {
-		status := doc.DocumentProcessingStatus(current.ProcessingLevel, current.ProcessingState)
+		status := doc.DocumentProcessingStatus(current.ObservedProcessingLevel, current.ProcessingState)
 		if status == "not_requested" {
 			status = "ready"
 		}
@@ -497,6 +497,11 @@ func loadOperationPage(r *http.Request, db *gorm.DB, batch orm.PaperImportBatch,
 	for _, s := range states {
 		row := &result[byID[s.ID]]
 		row.CurrentState = s.CurrentState
+		// Normalize historical diagnostics as well as newly recorded failures.
+		if row.CurrentState == "failed" && row.ResultKind == "enrichment" && row.LibraryPaperID != "" && row.CurrentDocument == nil {
+			diagnostic := metadataEnrichmentFailure(importFailureDetails{Message: row.ErrorMessage, Recovery: row.ErrorRecovery})
+			row.ErrorMessage, row.ErrorRecovery = diagnostic.Message, diagnostic.Recovery
+		}
 		row.ResolvedLater = s.ResolvedLater > 0
 		if row.CurrentState == "processing_failed" {
 			row.ErrorMessage = "PDF 已保存，正文处理失败"

@@ -16,6 +16,25 @@ vi.mock("@/modules/chat/utils/chunkUpload", () => ({
 }));
 
 describe("AskCard read-only history", () => {
+  it("submits every optional question as unanswered without requiring any input", async () => {
+    const submit = vi.fn().mockResolvedValue(true);
+    render(<AskCard onSubmit={submit} askPending={{ ask_id: "optional", questions: [
+      { id: "text", text: "Text?", type: "text", required: false, validation: { min_length: 5 } },
+      { id: "single", text: "Single?", type: "single", required: false, choices: ["A", "B"] },
+      { id: "multiple", text: "Multiple?", type: "multiple", required: false, choices: ["A", "B"] },
+      { id: "boolean", text: "Boolean?", type: "boolean", required: false },
+    ] }} />);
+    for (let index = 0; index < 3; index++) {
+      fireEvent.click(screen.getByRole("button", { name: /chat.askCardNext/ }));
+    }
+    const button = screen.getByRole("button", { name: "chat.askCardSubmit" });
+    expect(button).toBeEnabled();
+    fireEvent.click(button);
+    await waitFor(() => expect(submit).toHaveBeenCalledTimes(1));
+    expect(submit.mock.calls[0][0].structured.questions.map((q: { answer: unknown }) => q.answer))
+      .toEqual([null, null, null, null]);
+  });
+
   it("does not carry answers from a previous card into a different field", () => {
     const props = { onSubmit: vi.fn() };
     const { rerender } = render(<AskCard {...props} askPending={{ ask_id: "first", questions: [

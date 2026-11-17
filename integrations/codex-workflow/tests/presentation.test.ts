@@ -100,6 +100,18 @@ it('rejects hidden or ambiguous main-chat layouts',()=>{
   other.getBoundingClientRect=()=>({width:0} as DOMRect)
   expect(readCodexView()?.session).toBe(threadA)
 })
+it('keeps the main workflow panel when a subagent chat is visible in a side tab',async()=>{
+  const f=fixture(), side=document.createElement('div')
+  side.dataset.appShellTabPanelController='right'
+  const other=f.scroller.cloneNode(true) as HTMLElement
+  other.getBoundingClientRect=()=>({width:500} as DOMRect)
+  ;(other as any).__reactFiber$fixture={memoizedProps:{conversationId:threadB,hostId:'local'}}
+  side.append(other);document.body.append(side)
+  await Promise.resolve()
+  expect(readCodexView()?.session).toBe(threadA)
+  expect(readPresentationSession().epoch).toBe(f.target.epoch)
+  expect(f.window.__lazymindCodexWorkflowTail.status().status).toBe('mounted')
+})
 it('moves scroll listeners with a replacement scroller while preserving the panel',async()=>{
   const f=fixture(), next=f.scroller.cloneNode(true) as HTMLElement
   next.querySelector('[data-lazymind-workflow-tail]')?.remove()

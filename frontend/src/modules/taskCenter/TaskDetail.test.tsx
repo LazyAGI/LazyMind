@@ -29,6 +29,7 @@ const translations: Record<string, string> = {
   'taskCenter.noSteps': '暂无执行步骤',
   'taskCenter.noTitle': '（无标题）',
   'taskCenter.openConversation': '打开任务对话',
+  'taskCenter.openWorkflow': '查看过程与产物',
   'taskCenter.statusCompleted': '已完成',
   'taskCenter.statusPending': '待执行',
   'taskCenter.statusSkipped': '已跳过',
@@ -39,6 +40,7 @@ const translations: Record<string, string> = {
   'taskCenter.statusSucceeded': '已完成',
   'taskCenter.statusWaiting': '等待审批',
   'taskCenter.statusWaitingInput': '等待输入',
+  'taskCenter.statusUnknown': '状态待确认',
   'taskCenter.stepFallback': '执行步骤 {{index}}',
   'taskCenter.stepPrepare': '准备任务',
   'taskCenter.taskGoal': '任务目标',
@@ -107,6 +109,18 @@ beforeEach(() => {
 afterEach(() => { cleanup(); vi.useRealTimers(); });
 
 describe('TaskDetail', () => {
+  it('opens an external workflow with no LazyMind conversation', async () => {
+    const external = { ...task, conversation_id: '', conversation_state: 'missing' as const, workflow_session_id: 'external-run' };
+    vi.mocked(getTask).mockResolvedValue(external);
+    const openWorkflow = vi.fn();
+    const openConversation = vi.fn();
+    render(<TaskDetail task={external} onClose={vi.fn()} onOpenConversation={openConversation} onOpenWorkflow={openWorkflow} />);
+    fireEvent.click(await screen.findByRole('button', { name: '查看过程与产物' }));
+    expect(openWorkflow).toHaveBeenCalledWith('external-run');
+    expect(openConversation).not.toHaveBeenCalled();
+    expect(screen.queryByRole('button', { name: '打开任务对话' })).not.toBeInTheDocument();
+  });
+
   it.each(['paused', 'failed', 'canceled'])('uses the existing empty state instead of spinning forever for a %s task', async status => {
     const current = { ...task, status, workflow_session_id: 'planning-session' };
     vi.mocked(getTask).mockResolvedValue(current);
@@ -182,6 +196,31 @@ describe('TaskDetail', () => {
     act(() => window.dispatchEvent(new CustomEvent(DEVELOPER_ACTIVE_EVENT)));
     await waitFor(() => expect(screen.queryByText('每页提示词')).not.toBeInTheDocument());
     expect(screen.getByText('幻灯片')).toBeInTheDocument();
+  });
+
+  it.each(['queued', 'claimed'])('shows the current PPT %s attempt as running', async status => {
+    const { pptTask, projection } = mockPptWorkflow();
+    projection.attempt_history.generate_ppt[0].status = status;
+    render(<TaskDetail task={pptTask} onClose={vi.fn()} onOpenConversation={vi.fn()} />);
+
+    const step = (await screen.findByText('幻灯片')).closest('.task-step');
+    expect(step).toHaveTextContent('进行中');
+    expect(step).toHaveTextContent('当前步骤');
+    expect(step).toHaveClass('is-running', 'is-current');
+    expect(step?.querySelector('.anticon-sync')).toBeInTheDocument();
+    expect(screen.queryByText('状态待确认')).not.toBeInTheDocument();
+  });
+
+  it.each(['queued', 'claimed'])('focuses a %s execution before a future pending step', async status => {
+    const current = { ...task, steps: [
+      { step_id: 'prepare', status: 'pending' },
+      { step_id: 'write', status },
+    ] };
+    vi.mocked(getTask).mockResolvedValue(current);
+    render(<TaskDetail task={current} onClose={vi.fn()} onOpenConversation={vi.fn()} />);
+
+    expect((await screen.findByText('准备任务')).closest('.task-step')).not.toHaveClass('is-current');
+    expect(document.querySelector('.task-step.is-current')).toHaveTextContent('进行中');
   });
 
   it('keeps a visible but bypassed prompt-planning step and labels it as skipped', async () => {

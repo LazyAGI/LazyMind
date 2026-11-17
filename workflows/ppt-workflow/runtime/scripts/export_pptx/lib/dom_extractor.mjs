@@ -5,7 +5,7 @@
  */
 
 import path from 'node:path';
-import { hiddenChromiumLaunchOptions, installHiddenProcessHooks } from './browser_setup.mjs';
+import { externalOfflineMode, hiddenChromiumLaunchOptions, installHiddenProcessHooks, loadOfflineSlide } from './browser_setup.mjs';
 
 // ---------------------------------------------------------------------------
 // 浏览器端执行的 DOM 提取脚本
@@ -764,10 +764,16 @@ export async function extractPage(page, htmlPath) {
 
   // 先用较大 viewport 加载，以便检测实际画布尺寸
   await page.setViewportSize({ width: 1920, height: 1080 });
-  await page.goto(fileUrl, { waitUntil: 'load' });
-  const { localFontCss, installMissingFontFallbacks } = await import('./local_fonts.mjs');
-  // Large CJK fonts can exceed Chromium's message limit when sent as CSS data URLs.
-  const fontOptions = { useFileUrls: true };
+  const offline = externalOfflineMode();
+  if (offline) await loadOfflineSlide(page, htmlPath);
+  else await page.goto(fileUrl, { waitUntil: 'load' });
+  const { localFontCss, installMissingFontFallbacks, loadManagedFontResources } = await import('./local_fonts.mjs');
+  if (!offline) {
+    try { await loadManagedFontResources(page); }
+    catch (error) { error.fontPortability = true; throw error; }
+  }
+  // Keep large local fonts out of Chromium's protocol payload when file URLs are allowed.
+  const fontOptions = { useFileUrls: !offline };
   const managedFontCss = await localFontCss(await page.content(), fontOptions);
   if (managedFontCss) await page.addStyleTag({ content: managedFontCss });
   await installMissingFontFallbacks(page, fontOptions);
@@ -944,7 +950,7 @@ export async function extractPages(htmlPaths) {
   const results = [];
 
   try {
-    const page = await browser.newPage();
+    const page = await browser.newPage(externalOfflineMode() ? { serviceWorkers: 'block' } : {});
 
     for (const htmlPath of htmlPaths) {
       try {
@@ -963,6 +969,9 @@ export async function extractPages(htmlPaths) {
         }
         results.push({ path: htmlPath, ir, fallbackImageDataUri });
       } catch (err) {
+        // A fallback screenshot would preserve the wrong font metrics while
+        // PPTX embeds another face. Required font failures must stop export.
+        if (err.fontPortability) throw err;
         process.stderr.write(`[dom_extractor] Failed to extract ${htmlPath}: ${err.message}\n`);
         let fallbackImageDataUri = null;
         try {

@@ -9,6 +9,7 @@ import (
 
 const localHostHomeEnvVar = "LAZYMIND_HOST_HOME"
 const githubHostConfigEnvVar = "LAZYMIND_GITHUB_HOST_CONFIG_DIR"
+const hostXDGConfigEnvVar = "LAZYMIND_HOST_XDG_CONFIG_HOME"
 
 func scopedRuntimeEnv(paths RuntimePaths, home string) []string {
 	return []string{
@@ -19,6 +20,7 @@ func scopedRuntimeEnv(paths RuntimePaths, home string) []string {
 		"XDG_STATE_HOME=" + paths.XDGStateDir,
 		localHostHomeEnvVar + "=" + hostHomeDir(),
 		githubHostConfigEnvVar + "=" + githubHostConfigDir(),
+		hostXDGConfigEnvVar + "=" + hostXDGConfigDir(),
 		"PYTHONDONTWRITEBYTECODE=1",
 		"NUMBA_CACHE_DIR=" + filepath.Join(paths.XDGCacheDir, "numba"),
 	}
@@ -77,6 +79,15 @@ func githubHostConfigDir() string {
 		return filepath.Join(value, "gh")
 	}
 	return filepath.Join(hostHomeDir(), ".config", "gh")
+}
+
+func hostXDGConfigDir() string {
+	for _, key := range []string{hostXDGConfigEnvVar, "XDG_CONFIG_HOME"} {
+		if value := strings.TrimSpace(os.Getenv(key)); value != "" {
+			return filepath.Clean(value)
+		}
+	}
+	return filepath.Join(hostHomeDir(), ".config")
 }
 
 func cleanHostCacheEnv(key string, paths RuntimePaths, fallback string) string {

@@ -93,9 +93,9 @@ def test_embedding_probe_rejects_inconsistent_vector_dimensions():
 
 
 def test_embedding_probe_uses_saved_query_prefix_without_leaking_it():
-    result, requests = run_probe('embed', embedding={'query_prefix': 'query: ', 'passage_prefix': 'passage: ',
-                                                   'batch_size': 2},
-                                 response={'data': [{'embedding': [0.1, 0.2]}]})
+    result, requests = run_probe(
+        'embed', embedding={'query_prefix': 'query: ', 'passage_prefix': 'passage: ', 'batch_size': 2},
+        response={'data': [{'embedding': [0.1, 0.2]}]})
     assert result['status'] == 'passed'
     assert json.loads(requests[0].content)['input'] == 'query: test'
     assert 'query: ' not in json.dumps(result)
@@ -314,8 +314,9 @@ def test_missing_runtime_adapters_never_produce_false_positive_probes(source, ki
 
 
 @pytest.mark.parametrize(('source', 'kind'), [
-    (source, kind) for source in ['OpenAI', 'VLLM', 'LMDeploy']
-    for kind in ['text2image', 'text2video', 'image_editing', 'tts', 'stt']
+    (source, kind)
+    for source in ('OpenAI', 'VLLM', 'LMDeploy')
+    for kind in ('text2image', 'text2video', 'image_editing', 'tts', 'stt')
     if (source, kind) != ('OpenAI', 'text2image')
 ])
 def test_compatible_protocol_does_not_imply_missing_runtime_media_support(source, kind):
@@ -323,6 +324,17 @@ def test_compatible_protocol_does_not_imply_missing_runtime_media_support(source
     assert result['status'] == 'unsupported'
     assert result['code'] == 'unsupported_provider'
     assert requests == []
+
+
+def test_openai_image_probe_accepts_base64_image_response():
+    result, requests = run_probe('text2image', model='gpt-image-2.5-flare',
+                                 response={'data': [{'b64_json': 'iVBORw0KGgo='}]})
+    assert result['status'] == 'passed'
+    assert len(requests) == 1
+    assert requests[0].url.path == '/v1/images/generations'
+    assert json.loads(requests[0].content) == {
+        'model': 'gpt-image-2.5-flare', 'prompt': 'A blue square.', 'n': 1,
+    }
 
 
 @pytest.mark.parametrize(('status', 'body', 'code'), [

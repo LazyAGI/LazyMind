@@ -2,7 +2,7 @@ import { AdmissionRejected, type RuntimeAdapter, type ToolCall, type HostInput }
 import { BridgeError, type HostTransport, type ActionClaim } from './transport'
 import { interaction, object, readControl, type RunLink, type WorkflowControl } from './protocol'
 
-const READS = new Set(['list', 'get', 'input_get', 'state', 'session_list', 'artifact_list', 'artifact_get'])
+const READS = new Set(['list', 'get', 'input_get', 'state', 'session_list', 'artifact_list', 'artifact_get', 'tool_list'])
 const ACQUIRE = new Set(['step_begin', 'step_claim', 'step_resume'])
 const PAUSED = new Set(['awaiting_user', 'awaiting_executor', 'draining', 'stopped', 'binding_required'])
 
@@ -12,6 +12,7 @@ export interface Scope<A> {
   control?: WorkflowControl
   unknown: boolean
   grants: Set<string>
+  modelJobs: Set<string>
   manual: boolean
   activeOwned: boolean
   automatic: boolean
@@ -40,6 +41,12 @@ export function createCoordinator<A>(runtime: RuntimeAdapter<A>, bridge: HostTra
   const completion = (scope: Scope<A>) => driver(scope.agent) !== scope.agent && scope.returnPending
     && !!runtime.canReturnResult?.(scope.agent)
 
+  function hasModelWork(scope: Scope<A>) {
+    const owner = scopes.get(driver(scope.agent))
+    return !scope.unknown && (scope.modelJobs.size > 0
+      || !!scope.runId && owner?.runId === scope.runId && !owner.unknown && owner.modelJobs.size > 0)
+  }
+
   function publish(runId: string, control: WorkflowControl) {
     if (control.protocol !== 'workflow.control.v1' || control.session_id !== runId) throw new Error('Invalid workflow control response')
     for (const scope of scopes.values()) {
@@ -55,7 +62,7 @@ export function createCoordinator<A>(runtime: RuntimeAdapter<A>, bridge: HostTra
 
   function suspendGoal(scope: Scope<A>) {
     if (!scope.runId || !scope.automatic || driver(scope.agent) !== scope.agent || !scope.control
-      || !PAUSED.has(scope.control.continuation)) return
+      || !PAUSED.has(scope.control.continuation) || hasModelWork(scope)) return
     runtime.suspendGoal?.(scope.agent, { runId: scope.runId, goalId: scope.goalId, continuation: scope.control.continuation })
   }
 
@@ -66,15 +73,21 @@ export function createCoordinator<A>(runtime: RuntimeAdapter<A>, bridge: HostTra
   function remember(scope: Scope<A>) {
     const root = driver(scope.agent)
     const finished = new Set<string>()
+    const finishedModels = new Set<string>()
     let ownedAt = 0
     let ownedSeq = -1
     let latestInputSeq = -1
     for (const event of [...(runtime.history?.(scope.agent) ?? [])].reverse()) {
       if (event.user && latestInputSeq < 0) latestInputSeq = event.seq
       const run = event.run
-      if (!run || run.hostSessionId !== runtime.id(root) || !run.operation || !['start', 'step_begin', 'step_claim', 'step_resume', 'step_complete'].includes(run.operation)) continue
+      if (!run || run.hostSessionId !== runtime.id(root) || !run.operation || !['start', 'step_begin', 'step_claim', 'step_resume', 'step_complete', 'generation_claim', 'generation_respond'].includes(run.operation)) continue
       if (!scope.runId) { scope.runId = run.runId; scope.automatic = true; ownedAt = event.time; ownedSeq = event.seq }
-      if (run.runId !== scope.runId || !run.executionId) continue
+      if (run.runId !== scope.runId) continue
+      if (run.modelJobId) {
+        if (run.operation === 'generation_respond' || !['running', 'cancel_requested'].includes(run.modelJobStatus ?? '')) finishedModels.add(run.modelJobId)
+        else if (!finishedModels.has(run.modelJobId)) scope.modelJobs.add(run.modelJobId)
+      }
+      if (!run.executionId) continue
       if (run.operation === 'step_complete') finished.add(run.executionId)
       else if (ACQUIRE.has(run.operation) && !finished.has(run.executionId)) scope.grants.add(run.executionId)
     }
@@ -91,7 +104,7 @@ export function createCoordinator<A>(runtime: RuntimeAdapter<A>, bridge: HostTra
   function ensure(agent: A): Scope<A> {
     const existing = scopes.get(agent)
     if (existing) return existing
-    const scope: Scope<A> = { agent, unknown: false, grants: new Set(), manual: false,
+    const scope: Scope<A> = { agent, unknown: false, grants: new Set(), modelJobs: new Set(), manual: false,
       activeOwned: false, automatic: false, returnPending: false }
     scopes.set(agent, scope)
     remember(scope)
@@ -115,6 +128,7 @@ export function createCoordinator<A>(runtime: RuntimeAdapter<A>, bridge: HostTra
         scope.control = undefined
         scope.runId = undefined
         scope.grants.clear()
+        scope.modelJobs.clear()
         return undefined
       }
       publish(scope.runId, state)
@@ -132,8 +146,12 @@ export function createCoordinator<A>(runtime: RuntimeAdapter<A>, bridge: HostTra
     const fields = object(object(value)?.structuredContent)
     const run = interaction(value, webUrl) ?? (returned ? { runId: returned.session_id,
       url: new URL(`/workflow-runs/${encodeURIComponent(returned.session_id)}`, webUrl).href } : null)
-    const runId = returned?.session_id ?? run?.runId
+    const modelOperation = operation === 'generation_claim' || operation === 'generation_respond'
+    const runId = returned?.session_id ?? run?.runId ?? (modelOperation && typeof fields?.session_id === 'string' ? fields.session_id : undefined)
     if (!runId) return null
+    if (operation === 'generation_respond' && fields?.accepted === true && typeof fields.job_id === 'string') {
+      for (const linked of scopes.values()) if (linked.runId === runId) linked.modelJobs.delete(fields.job_id)
+    }
     // Reading another run is discovery, not ownership of its driver session.
     if (operation && READS.has(operation) && runId !== scope.runId && runId !== rootScope.runId) return returned
     const execution = object(fields?.execution)
@@ -162,12 +180,24 @@ export function createCoordinator<A>(runtime: RuntimeAdapter<A>, bridge: HostTra
         if (scope !== rootScope) { scope.runId = runId; publish(runId, fresh); return scope.control ?? fresh }
         return null
       }
+      if (rootScope.runId !== runId) rootScope.modelJobs.clear()
+      if (scope.runId !== runId) scope.modelJobs.clear()
       scope.runId = rootScope.runId = runId
+      if (modelOperation && typeof fields?.job_id === 'string') {
+        if (operation === 'generation_claim' && ['running', 'cancel_requested'].includes(String(fields.status))) rootScope.modelJobs.add(fields.job_id)
+        else rootScope.modelJobs.delete(fields.job_id)
+        scope.activeOwned = scope.automatic = rootScope.activeOwned = rootScope.automatic = true
+        scope.manual = rootScope.manual = false
+      }
       if (operation === 'start') { rootScope.activeOwned = rootScope.automatic = true; rootScope.manual = false; rootScope.goalId = runtime.goal?.(root)?.id }
       publish(runId, fresh)
       suspendGoal(rootScope)
       if (exec.nested && run) ptcLinks.set(exec.callId, { ...run, hostSessionId: runtime.id(root), operation: operation ?? undefined,
         ...(typeof fields?.execution_id === 'string' ? { executionId: fields.execution_id } : typeof execution?.execution_id === 'string' ? { executionId: execution.execution_id } : {}) })
+      if (exec.nested && modelOperation && typeof fields?.job_id === 'string') ptcLinks.set(exec.callId, {
+        runId, url: new URL(`/workflow-runs/${encodeURIComponent(runId)}`, webUrl).href,
+        hostSessionId: runtime.id(root), operation: operation ?? undefined, modelJobId: fields.job_id, modelJobStatus: String(fields.status),
+      })
       return scope.control ?? fresh
     } catch (error) {
       scope.runId = runId
@@ -194,12 +224,13 @@ export function createCoordinator<A>(runtime: RuntimeAdapter<A>, bridge: HostTra
     return undefined
   }
 
-  async function beforeTurn(payload: { agent: A; turn: number; messages: readonly HostInput[]; signal: AbortSignal }): Promise<boolean> {
+  async function beforeTurn(payload: { agent: A; turn: number; messages: readonly HostInput[]; signal: AbortSignal }): Promise<boolean | 'skip'> {
     const scope = ensure(payload.agent)
     if (scope.turn !== payload.turn) { scope.turn = payload.turn; scope.manual = false; scope.activeOwned = scope.automatic }
     try {
       const action = await lookupInput(payload.agent, payload.messages, payload.signal)
       if (action) {
+        if (scope.runId !== action.action.session_id) scope.modelJobs.clear()
         scope.runId = action.action.session_id
         scope.activeOwned = scope.automatic = true
         scope.manual = false
@@ -208,9 +239,25 @@ export function createCoordinator<A>(runtime: RuntimeAdapter<A>, bridge: HostTra
         scope.manual = true; scope.activeOwned = scope.automatic = false
       }
       if ((!scope.manual || scope.activeOwned) && !completion(scope)) await refresh(scope, payload.signal)
-      if (action && !paused(scope)) resumeGoal(scope)
+      if (action?.action.kind === 'model_generate' && action.action.execution_id) {
+        const binding = scope.control?.binding
+        scope.modelJobs.delete(action.action.execution_id)
+        // Another worker may have completed this queued notification already.
+        // Consume its input without blocking the host's remaining queued turns.
+        if (action.action.consumed_at && scope.runId === action.action.session_id && binding?.bound
+          && binding.driver_session_id === runtime.id(driver(scope.agent)) && !!binding.connector_id
+          && binding.connector_id === action.action.connector_id
+          && payload.messages.every(message => message.user && message.requestId === action.action.id)) return 'skip'
+        if (!action.action.consumed_at && ['pending', 'dispatching', 'accepted', 'unknown'].includes(action.action.status)
+          && scope.runId === action.action.session_id && binding?.bound
+          && binding.driver_session_id === runtime.id(driver(scope.agent)) && !!binding.connector_id
+          && binding.connector_id === action.action.connector_id) {
+          scope.modelJobs.add(action.action.execution_id)
+        }
+      }
+      if (action && (!paused(scope) || hasModelWork(scope))) resumeGoal(scope)
       suspendGoal(ensure(driver(scope.agent)))
-      if (scope.runId && scope.activeOwned && paused(scope) && !scope.manual && scope.grants.size === 0 && !completion(scope)) return false
+      if (scope.runId && scope.activeOwned && paused(scope) && !scope.manual && scope.grants.size === 0 && !hasModelWork(scope) && !completion(scope)) return false
       return true
     } catch (error) {
       runtime.warn(`lazymind-workflow: control gate deferred a step: ${String(error)}`)
@@ -238,7 +285,7 @@ export function createCoordinator<A>(runtime: RuntimeAdapter<A>, bridge: HostTra
     cacheClaim(claim: ActionClaim) { actionCache.set(claim.action.id, claim) },
     shouldConclude(agent: A, control: WorkflowControl | null) {
       const scope = ensure(agent)
-      return scope.activeOwned && !completion(scope) && (scope.unknown || !!scope.runId
+      return scope.activeOwned && !completion(scope) && !hasModelWork(scope) && (scope.unknown || !!scope.runId
         && ['awaiting_user', 'awaiting_executor'].includes(control?.continuation ?? ''))
     },
     takeNestedLink(callId: string) { const link = ptcLinks.get(callId); ptcLinks.delete(callId); return link },

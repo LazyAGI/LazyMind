@@ -116,11 +116,11 @@ func testWorkflowToolDescriptions(t *testing.T, provider string) {
 	for _, tool := range listed.Tools {
 		got[tool.Name] = tool.Description
 	}
-	if !containsAll(got["workflow.start"], "workflow.step.begin", "workflow_id", "revision_id") {
+	if !containsAll(got["workflow.start"], "revision-bound", "workflow.get", "needs_input", "idempotency_key") {
 		t.Fatalf("workflow.start description=%q", got["workflow.start"])
 	}
-	if !containsAll(got["workflow.start"], "inputs", "imported and bound", "absolute", "input_bindings") ||
-		!containsAll(got["workflow.input.import"], "absolute", "does not attach", "prefer workflow.start inputs") {
+	if !containsAll(got["workflow.start"], "inputs", "bound before creation", "absolute", "resource references") ||
+		!containsAll(got["workflow.input.import"], "absolute", "does not attach", "workflow.start") {
 		t.Fatalf("missing file handoff guidance: start=%q import=%q", got["workflow.start"], got["workflow.input.import"])
 	}
 	for _, hint := range []string{"interaction_url", "open_in_codex", "placement=bottom", "Do not open a duplicate browser panel"} {
@@ -128,21 +128,21 @@ func testWorkflowToolDescriptions(t *testing.T, provider string) {
 			t.Fatalf("incorrect Codex presentation scope for %q: %q", provider, got["workflow.start"])
 		}
 	}
-	if !containsAll(got["workflow.get"], "inspecting package scripts", "tool_scripts", "compiled_graph") {
+	if !containsAll(got["workflow.get"], "startup_contract", "workflow.step.begin") {
 		t.Fatalf("workflow.get description=%q", got["workflow.get"])
 	}
-	if !containsAll(got["workflow.step.begin"], "execution_handle", "executor_host is lazymind", "no handle is issued") {
+	if !containsAll(got["workflow.step.begin"], "execution_handle", "admission.can_begin", "command_id", "without a handle") {
 		t.Fatalf("workflow.step.begin description=%q", got["workflow.step.begin"])
 	}
 	for _, name := range []string{"workflow.start", "workflow.step.begin"} {
-		if containsAny(got[name], "workflow.get", "legacy_tools") {
+		if containsAny(got[name], "legacy_tools", "external_execution", "hidden LazyMind") {
 			t.Errorf("%s retains obsolete script guidance: %q", name, got[name])
 		}
 	}
-	if !containsAll(got["workflow.artifact.get"], "artifact_id", "slot key", "get_artifact/read_artifact") {
+	if !containsAll(got["workflow.artifact.get"], "artifact_id", "slot key", "workflow.artifact.list", "result_directory") {
 		t.Fatalf("workflow.artifact.get description=%q", got["workflow.artifact.get"])
 	}
-	if !containsAll(got["workflow.artifact.publish"], "text, json, image, file, or file_list", "local_path", "value", "save_artifact/save_artifacts", "key becomes slot", "immediately") {
+	if !containsAll(got["workflow.artifact.publish"], "local_path", "value_file", "save_artifact/save_artifacts", "key maps to slot", "stable positive seq", "acknowledgements") {
 		t.Fatalf("workflow.artifact.publish description=%q", got["workflow.artifact.publish"])
 	}
 }
@@ -167,12 +167,13 @@ func containsAny(value string, parts ...string) bool {
 
 func TestReadOnlyClassificationCoversEveryWorkflowTool(t *testing.T) {
 	readOnly := map[string]bool{
+		"workflow.action.get": true, "workflow.edit.context": true,
 		"workflow.list": true, "workflow.get": true, "workflow.input.get": true,
 		"workflow.state": true, "workflow.session.list": true,
-		"workflow.artifact.list": true, "workflow.artifact.get": true,
+		"workflow.artifact.list": true, "workflow.artifact.get": true, "workflow.tool.list": true,
 	}
-	if len(ToolNames) != 16 {
-		t.Fatalf("tool count=%d, want 16", len(ToolNames))
+	if len(ToolNames) != 26 {
+		t.Fatalf("tool count=%d, want 26", len(ToolNames))
 	}
 	for _, name := range ToolNames {
 		if IsReadOnlyTool(name) != readOnly[name] {
@@ -272,7 +273,7 @@ func TestEncodeOutputRequiresStableSequenceAcrossCalls(t *testing.T) {
 	}
 }
 
-func TestKeepHostGetFilesDropsGraphAndKeepsScripts(t *testing.T) {
+func TestKeepHostGetFilesDropsRuntimeImplementation(t *testing.T) {
 	pkg := map[string]any{
 		"workflow_id":    "image-workflow",
 		"compiled_graph": map[string]any{"steps": []any{}},
@@ -287,8 +288,28 @@ func TestKeepHostGetFilesDropsGraphAndKeepsScripts(t *testing.T) {
 	if _, ok := pkg["compiled_graph"]; ok {
 		t.Fatal("compiled_graph should be omitted")
 	}
-	files, _ := pkg["files"].(map[string]string)
-	if len(files) != 1 || files["scripts/tools.py"] != "def f():\n    pass\n" {
-		t.Fatalf("files=%#v", files)
+	if _, exists := pkg["files"]; exists {
+		t.Fatal("runtime source must not be sent to the agent")
+	}
+}
+
+func TestOutputRejectsNestedLocalPath(t *testing.T) {
+	_, err := encodeOutput(Output{Slot: "native_pptx", Seq: 1, Value: map[string]any{"local_path": "/tmp/deck.pptx"}})
+	if err == nil || !strings.Contains(err.Error(), "output.local_path") {
+		t.Fatalf("misleading publication must fail: %v", err)
+	}
+}
+
+func TestProjectionDoesNotResendCompiledGraph(t *testing.T) {
+	var p Projection
+	if err := json.Unmarshal([]byte(`{"session_id":"s","state_version":2,"graph":{"runtime":{"prompt":"huge repeated prompt"}},"projection":{"ready":["step"]}}`), &p); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := json.Marshal(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), "huge repeated") || len(p.Projection.Ready) != 1 {
+		t.Fatal("compact state lost readiness or leaked graph")
 	}
 }

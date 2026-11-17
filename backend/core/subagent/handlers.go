@@ -18,6 +18,8 @@ import (
 	"lazymind/core/store"
 	"lazymind/core/tasktiming"
 	"lazymind/core/userenv"
+	"lazymind/core/workflow/controlstore"
+	"lazymind/core/workflow/graphengine"
 )
 
 func authorizeWorkflowExecutor(w http.ResponseWriter, r *http.Request) bool {
@@ -89,7 +91,10 @@ func InternalGetExecutionSpec(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "invalid execution parameters", http.StatusServiceUnavailable)
 		return
 	}
-	config, err := modelconfig.LoadConversationLLMConfig(r.Context(), store.DB(), task.CreateUserID, task.ConversationID)
+	var config map[string]any
+	if !usesExternalModels(task.ID, r.Header.Get("X-Workflow-Lease-Token")) {
+		config, err = modelconfig.LoadConversationLLMConfig(r.Context(), store.DB(), task.CreateUserID, task.ConversationID)
+	}
 	if err != nil {
 		common.ReplyErr(w, "model config unavailable", http.StatusServiceUnavailable)
 		return
@@ -131,7 +136,7 @@ func InternalGetExecutionSpec(w http.ResponseWriter, r *http.Request) {
 	}
 	stepDTOs := make([]stepDTO, 0, len(steps))
 	for i := range steps {
-		stepDTOs = append(stepDTOs, toStepDTO(&steps[i]))
+		stepDTOs = append(stepDTOs, toPrivateStepDTO(&steps[i]))
 	}
 	params["_tool_visibility"] = visibility
 	privateTask := executionTaskDTO{taskDTO: toTaskDTO(task), Params: params, ExecutionID: visibility.ExecutionID}
@@ -142,6 +147,31 @@ func InternalGetExecutionSpec(w http.ResponseWriter, r *http.Request) {
 		"system_mcp_config": visibleKnowledgeConfig(append([]string{}, runtimeParams.LegacyTools...), visibility.Disabled),
 		"tool_config":       toolConfig, "user_env_vars": userEnvVars, "workspace_path": task.WorkspacePath,
 	})
+}
+
+// The task and its immutable package determine routing. An executor-supplied
+// header or model configuration cannot bypass the native model configuration.
+func usesExternalModels(taskID, lease string) bool {
+	if lease == "" {
+		return false
+	}
+	var step orm.WorkflowSessionStep
+	if store.DB().Where("task_id = ? AND executor_host = 'lazymind' AND lease_token = ?", taskID, lease).First(&step).Error != nil {
+		return false
+	}
+	var session orm.WorkflowSession
+	if store.DB().First(&session, "id = ?", step.SessionID).Error != nil || !controlstore.Controlled(session) ||
+		(session.WorkflowID != "paper-writing" && session.WorkflowID != "writer-workflow") {
+		return false
+	}
+	var revision orm.WorkflowRevision
+	var graph graphengine.CompiledStateGraph
+	binding, err := controlstore.DecodeBinding(session)
+	if err != nil || binding.Provider == "" {
+		return false
+	}
+	return store.DB().First(&revision, "id = ?", session.WorkflowRevisionID).Error == nil &&
+		json.Unmarshal(revision.CompiledGraph, &graph) == nil && graph.Runtime.Execution.UsesExternalModels()
 }
 
 func workflowToolConfigCapabilities(capabilities, legacyTools []string) []string {
@@ -199,6 +229,7 @@ func InternalIngestTaskEvent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	event.DurableToolResults = nil
+	event.DurableAssistantMessage = nil
 	// Publish and invoke hooks only after the fenced transaction commits.
 	if accepted {
 		publishTaskEvent(r.Context(), store.DB(), store.State(), event, false, true)
@@ -241,7 +272,12 @@ func remoteStepContent(event TaskEvent) (string, json.RawMessage) {
 		if json.Unmarshal(event.ToolCalls, &calls) != nil {
 			calls = []map[string]any{}
 		}
-		role, value = "assistant", map[string]any{"text": "", "tool_calls": calls}
+		content := map[string]any{"text": "", "tool_calls": calls}
+		var assistant map[string]any
+		if json.Unmarshal(event.DurableAssistantMessage, &assistant) == nil && assistant["role"] == "assistant" {
+			content["assistant_message"] = assistant
+		}
+		role, value = "assistant", content
 	case "tool_results":
 		var incoming []map[string]any
 		persistedResults := event.DurableToolResults
@@ -405,6 +441,18 @@ func toArtifactDTO(a *orm.SubAgentArtifact, workspacePath string) artifactDTO {
 }
 
 func toStepDTO(s *orm.SubAgentStep) stepDTO {
+	dto := toPrivateStepDTO(s)
+	var content map[string]json.RawMessage
+	if json.Unmarshal(dto.Content, &content) == nil {
+		delete(content, "assistant_message")
+		if raw, err := json.Marshal(content); err == nil {
+			dto.Content = raw
+		}
+	}
+	return dto
+}
+
+func toPrivateStepDTO(s *orm.SubAgentStep) stepDTO {
 	return stepDTO{
 		Seq:         s.Seq,
 		ExecutionID: s.ExecutionID,

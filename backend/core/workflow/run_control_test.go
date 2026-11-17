@@ -12,7 +12,7 @@ import (
 func TestControlledAdvanceRequiresReviewWhileSiblingDrains(t *testing.T) {
 	for _, provider := range []string{"deepseek-harness", "workbuddy", "codex"} {
 		for _, siblingStatus := range []string{"pending", "queued", "claimed", "running"} {
-			for _, operation := range []string{"execute", "retry"} {
+			for _, operation := range []string{"execute", "retry", "user-retry", "user-rewind"} {
 				t.Run(provider+"/"+siblingStatus+"/"+operation, func(t *testing.T) {
 					must := func(err error) {
 						t.Helper()
@@ -37,8 +37,12 @@ func TestControlledAdvanceRequiresReviewWhileSiblingDrains(t *testing.T) {
 					must(controlstore.CreateReview(db.DB, session, reviewed, nil))
 					must(db.Create(&orm.WorkflowSessionStep{ID: "sibling", TaskID: "sibling-task", SessionID: session.ID, StepID: "sibling", Attempt: 1, Status: siblingStatus, Validity: "effective", ExecutorHost: "external-agent"}).Error)
 					var wantAttempts int64
-					if operation == "retry" {
-						must(db.Create(&orm.WorkflowSessionStep{ID: "failed", TaskID: "failed-task", SessionID: session.ID, StepID: "target", Attempt: 1, Status: "failed", Validity: "effective"}).Error)
+					if operation != "execute" {
+						status := "failed"
+						if operation == "user-rewind" {
+							status = "succeeded"
+						}
+						must(db.Create(&orm.WorkflowSessionStep{ID: "failed", TaskID: "failed-task", SessionID: session.ID, StepID: "target", Attempt: 1, Status: status, Validity: "effective"}).Error)
 						wantAttempts = 1
 					}
 					state, err := controlstore.Read(db.DB, session)
@@ -48,7 +52,11 @@ func TestControlledAdvanceRequiresReviewWhileSiblingDrains(t *testing.T) {
 					}
 
 					svc := WorkflowControlService{DB: db.DB}
-					_, err = svc.Execute(t.Context(), session.CreateUserID, session.ID, WorkflowControlCommand{CommandID: "blocked", Kind: "begin", StepID: "target", StateVersion: session.StateVersion})
+					origin := "automatic"
+					if operation == "user-retry" || operation == "user-rewind" {
+						origin = "user"
+					}
+					_, err = svc.Execute(t.Context(), session.CreateUserID, session.ID, WorkflowControlCommand{CommandID: "blocked", Kind: "begin", StepID: "target", StateVersion: session.StateVersion, RetryOrigin: origin})
 					expectControlCode(t, err, "WORKFLOW_APPROVAL_REQUIRED")
 					var count int64
 					must(db.Model(&orm.WorkflowSessionStep{}).Where("session_id = ? AND step_id = ?", session.ID, "target").Count(&count).Error)
@@ -60,7 +68,7 @@ func TestControlledAdvanceRequiresReviewWhileSiblingDrains(t *testing.T) {
 					if session.StateVersion != version {
 						t.Fatalf("rejected advance changed session version: got %d want %d", session.StateVersion, version)
 					}
-					if operation == "retry" {
+					if operation != "execute" {
 						var failed orm.WorkflowSessionStep
 						must(db.First(&failed, "id = ?", "failed").Error)
 						if failed.Validity != "effective" {

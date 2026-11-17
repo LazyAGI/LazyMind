@@ -71,6 +71,7 @@ type sessionDTO struct {
 
 // stepDTO summarises one plugin_session_steps attempt for UI history.  // workflow-naming: persistence
 type stepDTO struct {
+	ExecutorHost  string    `json:"executor_host,omitempty"`
 	StepID        string    `json:"step_id"`
 	Attempt       int       `json:"attempt"`
 	TaskID        string    `json:"task_id"`
@@ -143,12 +144,13 @@ func toSessionDTO(s *orm.WorkflowSession) sessionDTO {
 
 func toStepDTO(r *orm.WorkflowSessionStep) stepDTO {
 	return stepDTO{
-		StepID:    r.StepID,
-		Attempt:   r.Attempt,
-		TaskID:    r.TaskID,
-		Status:    r.Status,
-		Validity:  r.Validity,
-		CreatedAt: r.CreatedAt,
+		ExecutorHost: r.ExecutorHost,
+		StepID:       r.StepID,
+		Attempt:      r.Attempt,
+		TaskID:       r.TaskID,
+		Status:       r.Status,
+		Validity:     r.Validity,
+		CreatedAt:    r.CreatedAt,
 	}
 }
 

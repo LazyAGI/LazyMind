@@ -34,6 +34,28 @@ func queue(t *testing.T, service *Service, id, session, step string) {
 	}
 }
 
+func TestClaimReturnsPersistedDeadline(t *testing.T) {
+	db := orm.MigrateTestDB(t, &orm.WorkflowSession{}, &orm.WorkflowSessionStep{}, &orm.WorkflowOutbox{}, &orm.WorkflowEvent{})
+	if err := db.Create(&orm.WorkflowSession{ID: "session", CreateUserID: "owner"}).Error; err != nil {
+		t.Fatal(err)
+	}
+	service := New(db.DB, Config{LeaseDuration: time.Minute})
+	now := time.Now().UTC().Truncate(time.Second).Add(123456789 * time.Nanosecond)
+	service.now = func() time.Time { return now }
+	queue(t, service, "attempt", "session", "step")
+	claim, err := service.Claim(t.Context(), "worker")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var stored orm.WorkflowSessionStep
+	if err := db.First(&stored, "id = ?", claim.AttemptID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if stored.LeaseExpiresAt == nil || !claim.LeaseExpiresAt.Equal(*stored.LeaseExpiresAt) {
+		t.Fatalf("claim deadline %v differs from stored deadline %v", claim.LeaseExpiresAt, stored.LeaseExpiresAt)
+	}
+}
+
 func TestNativeClaimPreservesExternalControllerNotification(t *testing.T) {
 	service, db := testService(t)
 	if err := db.AutoMigrate(&orm.WorkflowSession{}, &orm.WorkflowHostAction{}); err != nil {

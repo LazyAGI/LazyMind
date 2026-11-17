@@ -101,5 +101,11 @@
   "1001103": {"en-US": "MCP OAuth provider request failed", "zh-CN": "MCP 授权服务请求失败"},
   "1001104": {"en-US": "MCP authorization is busy; retry shortly", "zh-CN": "MCP 正在刷新授权，请稍后重试"},
   "1001105": {"en-US": "MCP OAuth public callback is not configured correctly", "zh-CN": "MCP OAuth 回调地址配置不正确"},
-  "1001106": {"en-US": "MCP OAuth storage or encryption is unavailable", "zh-CN": "MCP 授权存储或加密服务不可用"}
+  "1001106": {"en-US": "MCP OAuth storage or encryption is unavailable", "zh-CN": "MCP 授权存储或加密服务不可用"},
+  "1001301": {"en-US": "GitHub account changed; confirm the account again", "zh-CN": "GitHub 账号已变化，请重新确认账号"},
+  "1001302": {"en-US": "Connect an active GitHub user account", "zh-CN": "请连接有效的 GitHub 用户账号"},
+  "1001303": {"en-US": "The GitHub Star result could not be confirmed; check again later", "zh-CN": "暂未确认是否已点 Star，请稍后查看"},
+  "1001304": {"en-US": "GitHub Star is temporarily unavailable; try again later", "zh-CN": "GitHub Star 暂时不可用，请稍后重试"},
+  "1001305": {"en-US": "GitHub Star permission is missing; authorize the account again", "zh-CN": "GitHub Star 权限不足，请重新授权账号"},
+  "1001306": {"en-US": "GitHub sign-in expired; reconnect this account", "zh-CN": "GitHub 登录已失效，请重新连接账号"}
 }

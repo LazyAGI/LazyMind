@@ -681,8 +681,8 @@ func conversationModelSwitchBlock(ctx context.Context, db *gorm.DB, userID, conv
 		}
 		var session orm.WorkflowSession
 		err := db.WithContext(ctx).Where(
-			"id = ? AND conversation_id = ? AND create_user_id = ? AND dismissed = ? AND status = ? AND controller_host = ?",
-			*task.WorkflowSessionID, conversationID, userID, false, workflow.SessionStatusWaiting, "lazymind",
+			"id = ? AND conversation_id = ? AND create_user_id = ? AND dismissed = ? AND controller_host = ?",
+			*task.WorkflowSessionID, conversationID, userID, false, "lazymind",
 		).Take(&session).Error
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return "background_task_running", nil
@@ -690,12 +690,14 @@ func conversationModelSwitchBlock(ctx context.Context, db *gorm.DB, userID, conv
 		if err != nil {
 			return "", err
 		}
-		// Workflow task rows stay running while their execution is waiting for the user.
+		// Resumable workflow task rows stay running while waiting or paused.
+		// Use execution facts: live attempts and an unconfirmed stop still block
+		// switching even if the session already carries a stop marker.
 		view, err := displaystate.Read(db.WithContext(ctx), session)
 		if err != nil {
 			return "", err
 		}
-		if view.Status != "waiting" {
+		if view.Status != "waiting" && view.Status != "paused" {
 			return "background_task_running", nil
 		}
 	}

@@ -53,6 +53,34 @@ when_to_use: >
   for text content, quizzes, reports, summaries, or any non-visual task.
 
 runtime:
+  execution:
+    version: '1'
+    skills:
+    - scenario/execution.md
+    constraints:
+    - Follow the shared state.yml step specification, declared output schemas and acceptance criteria; preserve the
+      user request and bound input revisions.
+    - Validate actual artifacts before completion, honor questions and review pauses, and report missing capabilities
+      without fabricating output.
+    steps:
+      analyze_subject:
+        tools: []
+      collect_materials:
+        tools:
+        - name: knowledge_list_documents
+          source: package
+        - name: knowledge_read_document
+          source: package
+      optimize_prompt:
+        tools: []
+      generate_image:
+        tools:
+        - name: image_generator
+          source: global
+      enhance_image:
+        tools:
+        - name: image_editor
+          source: global
   clarification_fields:
     - id: image_goal
       label: 图片主体或修改要求
@@ -204,11 +232,10 @@ slots:
     ordered: true
 
   - id: enhancement_status
-    user_visible: true
+    user_visible: false
     label: Enhancement Status
     type: json
     cardinality: single
-    exposed: true
 
   - id: meme_static_output
     user_visible: true
@@ -295,7 +322,6 @@ ui:
       slot_scope: selected
       composite_tab_position: left
       slots:
-        - {id: enhancement_status}
         - id: generated_first_frame
         - id: generated_last_frame
         - id: material_images
@@ -306,7 +332,6 @@ ui:
       composite_layout:
         direction: row
         children:
-          - {slot: enhancement_status}
           - weight: 1
             slot: generated_first_frame
           - weight: 1
@@ -325,7 +350,6 @@ ui:
         hide_empty_columns: true
         empty_column_scope: selected
         repeat_single_slots:
-          - enhancement_status
           - generated_first_frame
           - generated_last_frame
           - material_images

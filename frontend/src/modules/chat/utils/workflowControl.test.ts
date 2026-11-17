@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { controlActions, deliveryBanner, overlayInfoBanner, REVIEW_CHANGED_NOTICE, ReviewRefreshRequired, type WorkflowControlView } from './workflowControl';
+import { controlActions, deliveryBanner, overlayInfoBanner, REVIEW_CHANGED_NOTICE, ReviewRefreshRequired, InputRefreshRequired, type WorkflowControlView } from './workflowControl';
 
 const state = (): WorkflowControlView => ({
   protocol: 'workflow.control.v1', session_id: 'run-1', state_version: 3, continuation: 'awaiting_user',
@@ -9,6 +9,37 @@ const state = (): WorkflowControlView => ({
 });
 
 describe('typed workflow user commands', () => {
+  it('saves input against the displayed checkpoint without resuming a paused run', async () => {
+    const current = state();
+    current.continuation = 'stopped';
+    current.input_request = { artifact_id: 'question-1', revision: 4, slot: 'runtime.input_checkpoint', questions: [] };
+    const write = vi.fn().mockResolvedValue(undefined);
+    const actions = controlActions(async () => current, write, () => 'answer-1');
+    await actions.execute({ kind: 'answer_input', input: current.input_request, answerText: 'Use four slides.' });
+    expect(write).toHaveBeenCalledOnce();
+    expect(write).toHaveBeenCalledWith({ command_id: 'answer-1', kind: 'answer_input', expected_state_version: 3,
+      input_artifact_id: 'question-1', input_revision: 4, answer_text: 'Use four slides.' });
+  });
+  it.each(['changed', 'answered'])('rejects an answer when its checkpoint has %s', async scenario => {
+    const current = state();
+    current.input_request = scenario === 'changed' ? { artifact_id: 'question-1', revision: 5, slot: 'runtime.input_checkpoint', questions: [] } : null;
+    const write = vi.fn();
+    const actions = controlActions(async () => current, write);
+    await expect(actions.execute({ kind: 'answer_input', input: { artifact_id: 'question-1', revision: 4 }, answerText: 'old answer' }))
+      .rejects.toBeInstanceOf(InputRefreshRequired);
+    expect(write).not.toHaveBeenCalled();
+  });
+  it('retries an uncertain answer with the same command after the checkpoint disappears', async () => {
+    const current = state();
+    current.input_request = { artifact_id: 'question-1', revision: 4, slot: 'runtime.input_checkpoint', questions: [] };
+    const intent = { kind: 'answer_input' as const, input: current.input_request, answerText: 'Four slides' };
+    const write = vi.fn().mockRejectedValueOnce(new Error('connection lost')).mockResolvedValueOnce(undefined);
+    const actions = controlActions(async () => current, write, () => 'answer-1');
+    await expect(actions.execute(intent)).rejects.toThrow('connection lost');
+    current.input_request = null;
+    await actions.execute(intent);
+    expect(write.mock.calls[1][0]).toEqual(write.mock.calls[0][0]);
+  });
   it('never silently confirms content changed by saving or another editor', async () => {
     const displayed = state();
     const fresh = state(); fresh.reviews[0] = { ...fresh.reviews[0], version: 2, manifest_hash: 'hash-2' };

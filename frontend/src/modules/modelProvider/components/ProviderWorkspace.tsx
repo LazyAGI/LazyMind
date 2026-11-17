@@ -865,6 +865,7 @@ export function ProviderWorkspace(props: Props) {
                     disabled={endpointDirty || endpointSaving || keySaving}
                     changingKey={changingActiveKey}
                     removingKey={removingKey}
+                    removesModelsOnDelete={!provider.isCustom && !["vLLM", "LMDeploy"].includes(getSupplierBrandKey(provider) || "")}
                     onAdd={openAddKey}
                     onCreate={(apiKey) => addKey({ apiKey })}
                     onDelete={deleteKey}

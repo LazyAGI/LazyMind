@@ -16,6 +16,50 @@ class StopReceiptRuntime:
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize('compact_objective', [False, True])
+async def test_native_executor_consumes_pinned_shared_skills_and_constraints(monkeypatch, tmp_path, compact_objective):
+    from unittest.mock import AsyncMock
+    from lazymind.chat.engine.subagent import runner
+
+    worker = RemoteWorkflowExecutor()
+    runtime = AsyncMock()
+    runtime.context.return_value = {
+        'metadata': {'task_id': 'shared-task'}, 'inputs': {},
+        'execution': {
+            'version': '1', 'constraints': ['Keep the exact requested page count.'],
+            'skill_files': [{'path': 'scenario/execution.md', 'content': 'Inspect the actual output.'}],
+        },
+    }
+    runtime.execution_spec.return_value = {
+        'task': {'objective': 'Create one slide.', 'input_slots': [], 'output_slots': []},
+        'workspace_path': str(tmp_path), 'params': {'tools_only': True},
+        'steps': [], 'llm_config': {},
+    }
+    if compact_objective:
+        runtime.context.return_value.update({
+            'prompt': 'Create one slide.', 'objective_ref': '#/prompt',
+            'objective': 'Preserve the supplied source facts.',
+        })
+        runtime.execution_spec.return_value['task']['objective'] = ''
+    worker.runtime = runtime
+
+    async def stream(**kwargs):
+        task = kwargs['task_spec']
+        assert 'Create one slide.' in task['objective']
+        if compact_objective:
+            assert 'Runtime objective:\nPreserve the supplied source facts.' in task['objective']
+        assert 'Keep the exact requested page count.' in task['objective']
+        assert 'Pinned workflow Skill (scenario/execution.md):\nInspect the actual output.' in task['objective']
+        assert task['params']['tools_only'] is True
+        yield 'data: ' + json.dumps({'type': 'done', 'status': 'interrupted'}) + '\n\n'
+
+    monkeypatch.setattr(runner, 'run_subagent_stream', stream)
+    await worker._run_claim(object(), {'attempt_id': 'shared-attempt', 'lease_token': 'lease'})
+    runtime.cancel.assert_awaited_once()
+    runtime.fail.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_stop_receipt_retries_transport_and_service_errors_without_rerunning_tools(monkeypatch):
     from unittest.mock import AsyncMock
     from lazymind.chat.workflow.client import RemoteExecutorClient
@@ -959,7 +1003,7 @@ async def test_remote_executor_keeps_workflow_inputs_out_of_user_attachments(
             return {
                 'metadata': {'task_id': 'task-1'},
                 'declared_input_types': {'brief': 'text'},
-                'inputs': {'brief': {'source_type': 'input_resource'}},
+                'inputs': {'brief': {'source_type': 'input_resource', 'source_revision': '3'}},
             }
 
         async def input(self, *_):
@@ -999,6 +1043,9 @@ async def test_remote_executor_keeps_workflow_inputs_out_of_user_attachments(
     assert captured['remote_input_types'] == {'brief': 'text'}
     assert captured['remote_input_transports'] == {'brief': 'value'}
     assert captured['remote_input_value_slots'] == ['brief']
+    assert captured['remote_input_bindings'] == {
+        'brief': {'source_type': 'input_resource', 'source_revision': '3'},
+    }
     assert '_attachment_context' not in captured
     agentic = runner._build_agentic_config(
         {
@@ -1033,6 +1080,10 @@ def test_workflow_material_bindings_keep_values_paths_and_references_distinct():
             'topic': 'value', 'outline_document': 'path', 'source_image': 'reference',
         },
         'remote_input_value_slots': ['source_image', 'topic'],
+        'remote_input_bindings': {
+            'outline_document': {'source_type': 'artifact', 'source_revision': '2',
+                                 'source_revision_id': 'saved-revision-2'},
+        },
     }
     prompt = _workflow_material_bindings_section(params)
 
@@ -1040,6 +1091,8 @@ def test_workflow_material_bindings_keep_values_paths_and_references_distinct():
     assert '"path": "/workspace/inputs/outline_document.md"' in prompt
     assert '"kind": "reference"' in prompt
     assert '"reference": {"path": "https://images.example.test/source.png"}' in prompt
+    binding = json.loads(prompt.splitlines()[-1])['outline_document']
+    assert binding['revision_binding'] == params['remote_input_bindings']['outline_document']
     assert _resolve_attachment_configs({}, 'workflow_step', params) == []
     assert _resolve_attachment_configs(
         {'history_files_per_turn': {'1': ['/uploads/real-user-file.txt']}},

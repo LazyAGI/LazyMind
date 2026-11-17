@@ -96,7 +96,16 @@ export default function DefaultServicesPage({
   const [setupAvailability, setSetupAvailability] = useState<SetupAvailability>(loadingSetupAvailability);
   const [selectionRevision, setSelectionRevision] = useState(0);
   const [activeFocusCategory, setActiveFocusCategory] = useState(focusServiceCategory);
-  const [toolServiceSummaries, setToolServiceSummaries] = useState<Partial<Record<ServiceCategory, string>>>({});
+  const [toolServiceGroups, setToolServiceGroups] = useState<Partial<Record<ServiceCategory, { name?: string; provider_name?: string }[]>>>({});
+  const toolServiceSummaries: Partial<Record<ServiceCategory, string>> = {};
+  for (const category of ["parsing", "search", "academic", "translation"] as const) {
+    const groups = toolServiceGroups[category];
+    if (!groups?.length) continue;
+    toolServiceSummaries[category] = category === "translation"
+      ? t("modelProvider.defaults.translationSourceCount", { count: groups.length })
+      : groups.map((group) => group.name || group.provider_name).filter(Boolean).join(t("modelProvider.defaults.serviceSeparator"))
+        || t("modelProvider.defaults.serviceCount", { count: groups.length });
+  }
   const latestRequest = useRef(0);
 
   const checkSetupAvailability = useCallback(async (preserveCurrent = false) => {
@@ -115,7 +124,7 @@ export default function DefaultServicesPage({
         if (requestId !== latestRequest.current) return;
         setSetupAvailability((current) => ({ ...current, modelProvider: "error" }));
       });
-    const [parsingResult, searchResult, academicResult, translationResult] = await Promise.allSettled([
+    const [parsingResult, searchResult, academicResult, translationResult, selectedResult] = await Promise.allSettled([
       modelProvidersApi.apiCoreModelProvidersProviderGroupsGet(
         { category: "ocr" },
         silentSetupCheckOptions,
@@ -126,6 +135,7 @@ export default function DefaultServicesPage({
       ),
       modelProvidersApi.apiCoreModelProvidersProviderGroupsGet({ category: "datasource" }, silentSetupCheckOptions),
       modelProvidersApi.apiCoreModelProvidersProviderGroupsGet({ category: "translation" }, silentSetupCheckOptions),
+      modelProvidersApi.apiCoreModelProvidersSelectedProvidersGet(silentSetupCheckOptions),
     ]);
     if (requestId !== latestRequest.current) return;
 
@@ -137,15 +147,20 @@ export default function DefaultServicesPage({
       : "error";
 
     setSetupAvailability((current) => ({ ...current, cloudParsing, searchEngine }));
-    const summaries: Partial<Record<ServiceCategory, string>> = {};
+    const serviceGroups: Partial<Record<ServiceCategory, { name?: string; provider_name?: string }[]>> = {};
     for (const [category, result] of [["parsing", parsingResult], ["search", searchResult], ["academic", academicResult], ["translation", translationResult]] as const) {
       if (result.status !== "fulfilled") continue;
       const groups = unwrapModelProviderData<{ groups?: { name?: string; provider_name?: string }[] }>(result.value.data).groups || [];
-      if (groups.length) summaries[category] = category === "translation"
-        ? `已配置 ${groups.length} 个翻译源`
-        : groups.map((group) => group.name || group.provider_name).filter(Boolean).join("、") || `已配置 ${groups.length} 个服务`;
+      serviceGroups[category] = groups;
     }
-    setToolServiceSummaries(summaries);
+    // Configured OCR credentials are alternatives, not concurrently active services.
+    serviceGroups.parsing = [];
+    if (selectedResult.status === "fulfilled") {
+      const selections = unwrapModelProviderData<{ selections?: { category: string; provider_name: string; group_name: string }[] }>(selectedResult.value.data).selections || [];
+      const parser = selections.find(item => item.category === "ocr");
+      if (parser) serviceGroups.parsing = [{ name: parser.provider_name, provider_name: parser.provider_name }];
+    }
+    setToolServiceGroups(serviceGroups);
   }, []);
 
   useEffect(() => {
@@ -210,7 +225,7 @@ export default function DefaultServicesPage({
       </DefaultModelConfigRefreshContext.Provider>
       <Modal
         open={Boolean(activeFocusCategory)}
-        title={activeFocusCategory ? ({ search: "搜索引擎", academic: "学术搜索引擎", parsing: "文档解析（OCR）", translation: "机器翻译" }[activeFocusCategory]) : ""}
+        title={activeFocusCategory ? t(`modelProvider.defaults.services.${activeFocusCategory}`) : ""}
         width={1000}
         footer={null}
         destroyOnHidden

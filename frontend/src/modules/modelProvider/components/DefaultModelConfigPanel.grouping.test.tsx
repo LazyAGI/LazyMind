@@ -595,7 +595,7 @@ describe("default capability configuration groups", () => {
     const footer = config.footer as (buttons: React.ReactNode, extra: never) => React.ReactNode;
     render(<>{config.content}{footer(<button>Confirm</button>, {} as never)}</>);
     expect(screen.getByText("modelProvider.embeddingSignatureMatched")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "前往索引管理" })).toHaveAttribute("href", "/lib/knowledge/list?index_management=open");
+    expect(screen.getByRole("link", { name: "modelProvider.defaults.openIndexManagement" })).toHaveAttribute("href", "/lib/knowledge/list?index_management=open");
     await act(async () => { (confirm.mock.calls[0][0].onOk as () => void)(); });
     await waitFor(() => expect(mocks.saveModel).toHaveBeenCalledOnce());
   });
@@ -883,7 +883,7 @@ describe("default capability configuration groups", () => {
     const retrieval = await screen.findByRole("region", { name: "modelProvider.defaults.retrievalTitle" });
     const rows = within(retrieval).getAllByRole("group");
     expect(rows.slice(0, 4).map((row) => row.getAttribute("aria-label")))
-      .toEqual(["搜索引擎", "学术搜索引擎", "文档解析（OCR）", "机器翻译"]);
+      .toEqual(["modelProvider.defaults.services.search", "modelProvider.defaults.services.academic", "modelProvider.defaults.services.parsing", "modelProvider.defaults.services.translation"]);
     for (const [index, category] of ["search", "academic", "parsing", "translation"].entries()) {
       fireEvent.click(within(rows[index]).getByRole("button", { name: "modelProvider.configureCapability" }));
       expect(configureTool).toHaveBeenLastCalledWith(category);

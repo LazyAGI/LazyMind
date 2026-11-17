@@ -191,3 +191,23 @@ func TestSessionLifecycleCommandIsIdempotentAndInterruptsAttempt(t *testing.T) {
 		t.Fatalf("terminal session stop: %v", err)
 	}
 }
+
+func TestExternalRunWithoutConversationRegistersTask(t *testing.T) {
+	repo := testRepo(t)
+	if err := repo.db.AutoMigrate(&orm.WorkflowSession{}, &orm.TaskCenterTask{}, &orm.Conversation{}); err != nil {
+		t.Fatal(err)
+	}
+	for range 2 {
+		if _, _, err := repo.CreateHostSession(t.Context(), "owner", "external-run", "", "external-agent", "mcp", "external-agent",
+			WorkflowPackage{WorkflowID: "ppt", WorkflowRef: "builtin:ppt-workflow", RevisionID: "rev"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var tasks []orm.TaskCenterTask
+	if err := repo.db.Find(&tasks).Error; err != nil {
+		t.Fatal(err)
+	}
+	if len(tasks) != 1 || tasks[0].ConversationID != "" || tasks[0].WorkflowSessionID == nil || *tasks[0].WorkflowSessionID != "external-run" {
+		t.Fatalf("external run must be discoverable once without an invented conversation: %#v", tasks)
+	}
+}

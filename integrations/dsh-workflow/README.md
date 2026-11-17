@@ -4,6 +4,12 @@ LazyMind distributes this precompiled bundle with its connector. Connect DeepSee
 
 The supported SDK baseline is DSH 0.1.6-alpha.1. The Node Host adapter uses public scoped tools, lifecycle gates and SessionController; the browser adapter projects standard tool events into a session-scoped Workbench window. It never appends a custom `lazymind-workflow/open` event and never reads DSH's signing credentials.
 
+DSH 0.2.2-rc.2 removed `agents.isOwnedBy`. The adapter uses
+`subagents.rootOf` on that host and retains the registry ownership API for older
+hosts. Ordinary Session forks remain independent; delegated sessions without a
+live runtime owner cannot acquire an independent Workflow binding. The plugin
+accepts the Cordis 4.0.2 and 4.1.x hosts used by these SDK versions.
+
 Workflow approval, execution fencing and delivery intent live in Core. The local Bridge authenticates the plugin with a scoped pairing file and relays protocol messages. `concludeTurn` is used only on successful results; already granted workers can drain, including their required structured output. Delivery uncertainty is reconciled against standard host input records and is not blindly retried.
 
 ## Shared integration

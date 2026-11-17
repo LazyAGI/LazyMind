@@ -18,6 +18,10 @@
   --writer-ir-page-max-width: 1080px;
 }
 
+.writer-ir--width-reading {
+  --writer-ir-page-max-width: 640px;
+}
+
 .writer-ir--outline-open {
   grid-template-columns: minmax(132px, 176px) minmax(0, 1fr);
   column-gap: 12px;

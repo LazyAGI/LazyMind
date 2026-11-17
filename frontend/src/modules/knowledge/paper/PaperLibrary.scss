@@ -159,6 +159,10 @@
 .paper-library-child-count { flex: none; margin-left: auto; color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
 .paper-pdf-review { display: grid; gap: 14px; margin: 14px 0; }
 .paper-pdf-review .ant-select { width: 100%; }
+.paper-pdf-metadata-editor { display: grid; gap: 12px; min-width: 0; }
+.paper-pdf-metadata-editor h4 { margin: 0; }
+.paper-pdf-metadata-editor label { display: grid; gap: 6px; min-width: 0; }
+.paper-pdf-metadata-editor .ant-input-number { width: 100%; }
 .paper-pdf-comparison { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; padding: 14px; background: #f7f9fc; border-radius: 6px; }
 .paper-pdf-comparison section { min-width: 0; overflow-wrap: anywhere; }
 .paper-pdf-comparison h4 { margin: 0 0 8px; font-size: 12px; color: #66758a; font-weight: 500; }

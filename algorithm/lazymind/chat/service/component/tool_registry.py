@@ -10,7 +10,6 @@ from typing import Any, Callable, Literal
 
 import docstring_parser
 import lazyllm
-from lazymind.common.optional_components import component_enabled
 from lazyllm.tools.fs.supplier.feishu import FeishuFS
 from lazyllm.tools.fs.supplier.googledrive import GoogleDriveFS
 from lazyllm.tools.fs.supplier.notion import NotionFS
@@ -43,7 +42,7 @@ from lazymind.chat.engine.tools.calculator import calculator
 from lazymind.chat.engine.tools.vocab_learn import vocab_learn
 from lazymind.chat.engine.tools.memory import MemoryTools
 from lazymind.chat.engine.tools.github_prs import GitHubPRToolkit, GITHUB_PR_POLICY
-from lazymind.chat.engine.tools.lazy_kb import KBToolkit, kb_tmp_search
+from lazymind.chat.engine.tools.lazy_kb import KBToolkit, kb_tmp_search, has_active_document
 from lazymind.model_config import get_model_role_runtime_identity, is_model_role_available
 from lazymind.chat.engine.tools.ask_user import ask_user
 from lazymind.chat.engine.agent_runtime.conversation_env import ConversationEnvLease, ConversationEnvStore
@@ -255,6 +254,7 @@ ASK_USER_TOOL_POLICY_APPENDIX: SystemPromptAppendix = {
         'an already feasible answer. Respect "you decide" for optional preferences. Choose the number of separate '
         'decision dimensions based on the task; there is no fixed question-count limit. Follow the ask_user parameter schema: every question needs id, text, type, '
         'reason and required. The text is the question body, not title or description. '
+        'Ordinary chat questions are skippable; use required=false. Workflow input contracts may require answers. '
         'Suggested single choices have at most 3 options; multiple choices at most 4; do not pad them. '
         'The system adds Other for free input. Multiple allows one selection. Fixed business '
         'enums remain complete and declare choice_policy=fixed; never use fixed to evade suggestion limits. '
@@ -1008,7 +1008,7 @@ def _tool_summary(tool: Any) -> str:
 def _extract_methods(instance: Any) -> list[dict]:
     if isinstance(instance, dict):
         return _extract_group_methods(instance.get('tools', []))
-    public_apis = getattr(instance, '__public_apis__', None)
+    public_apis = getattr(instance, '__tool_public_apis__', getattr(instance, '__public_apis__', None))
     if public_apis is not None:
         methods = []
         for method_name in public_apis:
@@ -1073,11 +1073,9 @@ def _registration_key_source(tool: Any) -> Callable[[], Any] | None:
 
 
 def tool_is_active(cfg: ToolConfig) -> bool:
-    if cfg.name == 'kb' and not component_enabled('rag'):
-        return False
     if cfg.name == 'kb':
         context = lazyllm.globals.get('agentic_config') or {}
-        if not (context.get('filters') or {}).get('kb_id'):
+        if not (context.get('filters') or {}).get('kb_id') and not has_active_document(context):
             return False
     if cfg.model_role and not is_model_role_available(cfg.model_role):
         # Probe only when an image is actually read, never while enumerating tools.

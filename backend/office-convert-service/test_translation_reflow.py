@@ -1,3 +1,4 @@
+import unicodedata
 import json
 import tempfile
 import unittest
@@ -117,7 +118,7 @@ class TranslationReflowTests(unittest.TestCase):
             self.assertEqual(result['supplemental_block_count'], 0)
             with fitz.open(root / 'output.pdf') as d:
                 self.assertIn(
-                    '最后一句。', ''.join(p.get_text() for p in d).replace('\n', '')
+                    '最后一句。', unicodedata.normalize('NFKC', ''.join(p.get_text() for p in d)).replace('\n', '')
                 )
                 self.assertGreater(len(d), 1)
 

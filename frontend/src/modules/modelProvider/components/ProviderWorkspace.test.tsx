@@ -1376,6 +1376,18 @@ describe("compact provider workspace", () => {
     expect(mocks.addKey).not.toHaveBeenCalled();
     expect(mocks.createGroup).not.toHaveBeenCalled();
   });
+  it.each([
+    ["OpenAI", false, "deleteKeyModelsHint"],
+    ["vLLM", false, "deleteKeyHint"],
+    ["LMDeploy", false, "deleteKeyHint"],
+    ["Custom", true, "deleteKeyHint"],
+  ])("explains key deletion for %s", async (name, isCustom, hint) => {
+    const callbacks = setup();
+    await act(async () => callbacks.setProvider({ ...provider, name, isCustom }));
+    fireEvent.click(screen.getByRole("button", { name: "modelProvider.workspace.deleteKeyNumber" }));
+    await waitFor(() => expect(screen.getByText(`modelProvider.workspace.${hint}`)).toBeVisible());
+    expect(mocks.deleteKey).not.toHaveBeenCalled();
+  });
   it("deletes a saved key by opaque ID without submitting masked text", async () => {
     setup();
     fireEvent.click(

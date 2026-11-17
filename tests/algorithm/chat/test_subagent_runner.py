@@ -2529,7 +2529,8 @@ async def test_subagent_forwards_knowledge_confirmation_during_tool_execution(mo
     assert [event['ask_pending'] for event in events if event.get('type') == 'ask_pending'] == [card]
 
 
-def test_old_pinned_workflow_kb_retains_query_shims_but_new_group_uses_five_reads(monkeypatch):
+@pytest.mark.parametrize('rag_enabled', ['1', '0'])
+def test_old_pinned_workflow_kb_retains_query_shims_but_new_group_uses_five_reads(monkeypatch, rag_enabled):
     from types import SimpleNamespace
     from lazymind.chat.engine.tools.lazy_kb import KBToolkit
     monkeypatch.setattr(runner_mod, 'DEFAULT_TOOLS', [SimpleNamespace(name='kb', tool=KBToolkit())])
@@ -2537,15 +2538,22 @@ def test_old_pinned_workflow_kb_retains_query_shims_but_new_group_uses_five_read
     validated = []
     monkeypatch.setattr(runner_mod, 'load_workflow_tools', lambda params, names: validated.append(
         (params.get('revision_id'), tuple(names))) or {})
+    monkeypatch.setenv('LAZYMIND_RAG_ENABLED', rag_enabled)
     params = {'workflow_id': 'ppt-workflow', 'revision_id': 'fixed-old-revision'}
     old = runner_mod._resolve_runtime_tools(['kb'], params)[0]
-    assert 'list_knowledge_bases' in old.__tool_public_apis__
+    if rag_enabled == '1':
+        assert old.__tool_public_apis__ == [
+            'list_knowledge_bases', 'list_knowledge_base_documents',
+            'aggregate_knowledge_base_documents', *old.__public_apis__,
+        ]
+    else:
+        assert old.__tool_public_apis__ == ['read_document']
     assert validated == [('fixed-old-revision', ('kb',))]
     new = runner_mod._resolve_runtime_tools(['kb', 'knowledge_management'], params)[0]
     assert len(new.__public_apis__) == 5
-    assert not hasattr(new, '__tool_public_apis__')
+    assert new.__tool_public_apis__ == (new.__public_apis__ if rag_enabled == '1' else ['read_document'])
     normal = runner_mod._resolve_runtime_tools(['kb'], {})[0]
-    assert not hasattr(normal, '__tool_public_apis__')
+    assert normal.__tool_public_apis__ == (normal.__public_apis__ if rag_enabled == '1' else ['read_document'])
 
 
 def test_new_ppt_revision_uses_shared_management_discovery():
@@ -2778,6 +2786,54 @@ async def test_ppt_completion_preserves_page_generation_failure(
         assert terminal['current_phase'] == 'ppt_generation_incomplete'
         assert '第 2 页失败' in terminal['summary']
     model.share.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('recovered', [True, False])
+async def test_ppt_prompt_planning_preserves_provider_error_before_delivery_checks(monkeypatch, tmp_path, recovered):
+    reason = 'Page 2 prompt failed: 模型供应商响应超时，连续 90 秒未收到新的响应内容。'
+    events = [{'tag': 'tool_results', 'tool_results': [
+        {'name': 'ppt_plan_page_prompts', 'result': {'error': reason}},
+    ]}]
+    if recovered:
+        events.append({'tag': 'tool_results', 'tool_results': [
+            {'name': 'ppt_plan_page_prompts', 'result': {'page_count': 4, 'published_count': 3}},
+        ]})
+    _, output = await _run_completion_review_scenario(
+        monkeypatch, tmp_path, MagicMock(), agent_type='workflow_step',
+        params={'workflow_id': 'ppt-workflow', 'step_id': 'plan_page_prompts',
+                'required_output_artifact_keys': ['slide_outline'] if not recovered else [],
+                'output_slot_types': {'slide_outline': 'text'}},
+        output_slots=['slide_outline'], artifacts=[], tool_events=events, final='本步骤已完成。',
+    )
+    terminal = _terminal(output)
+    assert terminal['status'] == ('succeeded' if recovered else 'failed')
+    if not recovered:
+        assert reason in terminal['summary']
+        assert terminal['current_phase'] == 'ppt_generation_incomplete'
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('retry', [None, 'formatting', 'font'])
+async def test_missing_ppt_font_is_reported_before_delivery_check(monkeypatch, tmp_path, retry):
+    reason = '请求的字体不可用：微软雅黑'
+    tool_name = 'ppt_replace_deck_fonts'
+    events = [{'tag': 'tool_results', 'tool_results': [{'name': tool_name, 'result': {'ok': False, 'value': reason}}]}]
+    if retry:
+        events.append({'tag': 'tool_results', 'tool_results': [{'name': tool_name, 'result': {
+            'ok': True, 'value': {'target_font': 'PingFang SC' if retry == 'font' else None, 'published_count': 4},
+        }}]})
+    _, output = await _run_completion_review_scenario(
+        monkeypatch, tmp_path, MagicMock(), agent_type='workflow_step',
+        params={'workflow_id': 'ppt-workflow', 'step_id': 'generate_ppt',
+                'required_output_artifact_keys': ['preview_html'] if retry != 'font' else []},
+        output_slots=['preview_html'], artifacts=[], tool_events=events, final='完成处理。',
+    )
+    terminal = _terminal(output)
+    assert terminal['status'] == ('succeeded' if retry == 'font' else 'failed')
+    if retry != 'font':
+        assert terminal['current_phase'] == 'ppt_font_edit_failed'
+        assert reason in terminal['summary'] and '安装或导入' in terminal['summary']
 
 
 @pytest.mark.asyncio

@@ -267,7 +267,7 @@ func handleImportBatchJob(ctx context.Context, job asyncjob.Job, reporter asyncj
 			if e := store.DB().WithContext(ctx).Where("id=?", item.ID).Take(&current).Error; e != nil {
 				return asyncjob.Result{}, e
 			}
-			failure := importFailure(err, current.Stage, current.DocumentID != "")
+			failure := importItemFailure(err, current)
 			if code != "already_present" {
 				code = failure.Code
 			}

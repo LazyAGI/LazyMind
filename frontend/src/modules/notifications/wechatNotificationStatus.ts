@@ -39,24 +39,20 @@ export function wechatStatusHint(status: WeChatNotificationStatus): string {
     unavailable: 'wechatConnectionUnavailableHint', disconnected: 'wechatReconnectHint', targetUnavailable: 'wechatTargetUnavailableHint', checking: 'wechatCheckingHint', unconfigured: 'wechatRecipientUnconfirmedHint' })[status];
 }
 
-export function wechatEditorStatus({ accounts, status, accountId, recipientId, aggregate }: {
+export function wechatEditorStatus({ accounts, status, accountId, recipientId }: {
   accounts: ChannelAccount[]; status?: WeChatNotificationStatus;
-  accountId?: string; recipientId?: string; aggregate: boolean;
+  accountId?: string; recipientId?: string;
 }): WeChatNotificationStatus {
   // Live checks describe confirmed recipients only. An incomplete draft must
   // use its selected account, never a different account's recipient status.
-  if (!aggregate) {
-    if (!accountId) {
-      const states = accounts.map(account => wechatAccountStatus(account));
-      if (states.some(state => state === 'connected' || state === 'pending')) return 'unconfigured';
-      return (['connecting', 'reauthorization', 'unavailable'] as const).find(state => states.includes(state)) ?? 'disconnected';
-    }
-    if (recipientId && status && status !== 'unconfigured') return status;
-    const accountStatus = wechatAccountStatus(accounts.find(account => account.id === accountId));
-    return accountStatus === 'connected' ? 'unconfigured' : accountStatus;
+  if (!accountId) {
+    const states = accounts.map(account => wechatAccountStatus(account));
+    if (states.some(state => state === 'connected' || state === 'pending')) return 'unconfigured';
+    return (['connecting', 'reauthorization', 'unavailable'] as const).find(state => states.includes(state)) ?? 'disconnected';
   }
-  if (status && status !== 'unconfigured') return status;
-  const states = accounts.map(account => wechatAccountStatus(account));
-  if (states.includes('connected')) return 'unconfigured';
-  return (['connecting', 'pending', 'reauthorization', 'unavailable'] as const).find(state => states.includes(state)) ?? 'disconnected';
+  if (recipientId && status && status !== 'unconfigured') return status;
+  const accountStatus = wechatAccountStatus(accounts.find(account => account.id === accountId));
+  // Pausing checks does not clear the configured recipient. Without a live
+  // result, show the account state and reserve recipient guidance for drafts.
+  return accountStatus === 'connected' && !recipientId ? 'unconfigured' : accountStatus;
 }

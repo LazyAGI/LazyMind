@@ -7,7 +7,9 @@ and retry only the request that failed.
 """
 
 import hashlib
+import io
 import json
+import ntpath
 import os
 import re
 import tempfile
@@ -15,7 +17,7 @@ import time
 import uuid
 import zipfile
 from concurrent.futures import as_completed
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from urllib.parse import urlsplit
 
 import requests
@@ -26,6 +28,8 @@ from lazyllm.common import AllKeysExhaustedError, KeyAuthError, KeyPool
 from lazyllm.common.threading import ThreadPoolExecutor
 from lazyllm.tools.rag.readers.ocrReader.dynamic_pdf_reader import DynamicPDFReader as _DynamicPDFReader
 from lazyllm.tools.rag.readers.ocrReader.mineru_pdf_reader import MineruPDFReader as _MineruPDFReader
+from lazymind.common.mineru_transport import official_api_request
+from lazymind.config import config as project_config
 
 
 _PENDING_STATES = frozenset({'waiting-file', 'uploading', 'pending', 'running', 'converting'})
@@ -39,6 +43,8 @@ def _safe_message(value) -> str:
 
 
 def _retryable_transport(error: requests.RequestException) -> bool:
+    if isinstance(error, requests.exceptions.SSLError):
+        return False
     if isinstance(error, (requests.Timeout, requests.ConnectionError)):
         return True
     if isinstance(error, requests.HTTPError):
@@ -61,6 +67,32 @@ class LazyMindMineruPDFReader(_MineruPDFReader):
         # LazyLLM derives the dynamic auth lookup from the concrete class
         # name. Preserve the configured `ocr_auth.mineru` contract.
         self._auth_source_key = 'mineru'
+
+    def _online_model_version(self) -> str:
+        return 'vlm'
+
+    @property
+    def appendix_hash_key(self):
+        return super().appendix_hash_key + '|shared-vlm-v1'
+
+    def _load_data(self, file, extra_info=None, use_cache=True, **kwargs):
+        if self._offline_mode:
+            return super()._load_data(file, extra_info, use_cache, **kwargs)
+        # Parse the exact original bytes read by Go; in-place normalization
+        # changes the content identity and places coordinates on different pages.
+        path = Path(file)
+        response, task_dir = self._fetch_async(path, use_cache)
+        info = dict(extra_info or {})
+        if task_dir is not None:
+            info['image_cache_dir'] = str(task_dir)
+        return self._build_nodes_from_response(response, path, info)
+
+    def _http_execute(self, method: str, url: str, **kwargs):
+        return official_api_request(super()._http_execute, method, url, **kwargs)
+
+    def _online_request_kwargs(self):
+        # Signed storage URLs must also validate their own host and trust chain.
+        return {'verify': True}
 
     def _get_active_pool(self):
         if not self._dynamic_auth:
@@ -191,10 +223,91 @@ class LazyMindMineruPDFReader(_MineruPDFReader):
         # sibling so a document task can resume after a worker restart.
         return self._image_cache_dir.parent / '.mineru_batches' / name
 
+    @staticmethod
+    def _archive_cache_path(file_path: str, source_digest: str, model_version: str,
+                            legacy: bool = False) -> Path:
+        directory = Path(file_path).parent
+        root = Path(project_config['shared_upload_dir'])
+        if not legacy and directory.is_relative_to(root):
+            directory = root
+        path = directory / '.lazymind-artifacts' / 'mineru-cache-v1' / f'{source_digest}-{model_version}.zip'
+        if os.name == 'nt':
+            # The shared sidecar exceeds MAX_PATH even for ordinary desktop
+            # uploads. Use Win32's extended namespace without relocating it:
+            # Go and Python must still lock and publish the same cache file.
+            absolute = ntpath.abspath(str(path))
+            if not absolute.startswith('\\\\?\\'):
+                absolute = ('\\\\?\\UNC\\' + absolute[2:] if absolute.startswith('\\\\')
+                            else '\\\\?\\' + absolute)
+            return Path(absolute)
+        return path
+
     def _batch_lock_path(self, file_path: str, source_digest: str, model_version: str) -> Path:
-        identity = '\0'.join((str(Path(file_path).resolve()), source_digest, model_version))
-        name = hashlib.sha256(identity.encode()).hexdigest() + '.lock'
-        return self._image_cache_dir.parent / '.mineru_batches' / name
+        # Go uses flock on this exact persistent sidecar; never unlink a lock file.
+        return Path(str(self._archive_cache_path(file_path, source_digest, model_version)) + '.lock')
+
+    @staticmethod
+    def _archive_content(archive: bytes, model_version: str) -> list:
+        if len(archive) > 256 * 1024 * 1024:
+            raise ValueError('MinerU archive exceeds size limit')
+        with zipfile.ZipFile(io.BytesIO(archive)) as zipped:
+            members = zipped.infolist()
+            if any(PurePosixPath(m.filename).is_absolute() or '..' in PurePosixPath(m.filename).parts
+                   or '\\' in m.filename for m in members):
+                raise ValueError('unsafe MinerU archive member')
+            lists = [m for m in members if m.filename.endswith('_content_list.json')]
+            if len(lists) != 1 or lists[0].file_size > 32 * 1024 * 1024:
+                raise ValueError('invalid MinerU content list')
+            if sum(m.file_size for m in members) > 256 * 1024 * 1024:
+                raise ValueError('MinerU archive exceeds extraction limit')
+            content = json.loads(zipped.read(lists[0]))
+            if not isinstance(content, list) or not content:
+                raise ValueError('MinerU result contains no structured blocks')
+            for item in content:
+                if (not isinstance(item, dict) or not isinstance(item.get('type'), str)
+                        or not item['type'].strip() or type(item.get('page_idx')) is not int
+                        or not 0 <= item['page_idx'] <= 100000):
+                    raise ValueError('invalid MinerU structure')
+                if model_version == 'pipeline':
+                    bbox = item.get('bbox')
+                    if (not isinstance(bbox, list) or len(bbox) != 4
+                            or not all(type(v) in (int, float) and 0 <= v <= 1000 for v in bbox)
+                            or not (bbox[0] < bbox[2] and bbox[1] < bbox[3])):
+                        raise ValueError('MinerU pipeline result lacks page geometry')
+            return content
+
+    @staticmethod
+    def _save_archive(cache_path: Path, archive: bytes):
+        cache_path.parent.mkdir(parents=True, exist_ok=True)
+        fd, temp_path = tempfile.mkstemp(prefix='.archive-', dir=cache_path.parent)
+        try:
+            with os.fdopen(fd, 'wb') as output:
+                output.write(archive)
+            os.replace(temp_path, cache_path)
+        finally:
+            if os.path.exists(temp_path):
+                os.unlink(temp_path)
+
+    def _read_shared_archive(self, file_path: str, digest: str, task_dir: Path, *, promote=False):
+        for model in ('vlm', 'pipeline'):
+            target = self._archive_cache_path(file_path, digest, model)
+            legacy = self._archive_cache_path(file_path, digest, model, legacy=True)
+            for candidate in dict.fromkeys((target, legacy)):
+                try:
+                    with candidate.open('rb') as cached:
+                        archive = cached.read(256 * 1024 * 1024 + 1)
+                    self._archive_content(archive, model)
+                    extracted = self._extract_content_from_zip(archive, task_dir=task_dir)
+                except (OSError, zipfile.BadZipFile, ValueError, TypeError, KeyError,
+                        AttributeError, IndexError, RuntimeError):
+                    continue
+                if promote and candidate == legacy and target != legacy:
+                    try:
+                        self._save_archive(target, archive)
+                    except OSError:
+                        LOG.warning('[MineruPDFReader] could not promote shared parsing archive')
+                return extracted
+        return None
 
     def _candidate_auth_keys(self) -> list[str]:
         # A new reader can choose another key from the same configured pool.
@@ -255,51 +368,99 @@ class LazyMindMineruPDFReader(_MineruPDFReader):
 
     def _fetch_async(self, file, use_cache: bool = True):
         file_str = str(file)
-        splits = self._split_large_pdf(file_str)
         task_dir = self._image_cache_dir / str(uuid.uuid4())
-        if len(splits) == 1:
-            return self._fetch_async_by_upload(splits[0][0], task_dir=task_dir)
-
-        results = {}
-        with ThreadPoolExecutor(max_workers=min(len(splits), 5)) as executor:
-            futures = {
-                executor.submit(self._fetch_async_by_upload, sub_path, task_dir=task_dir): start_page
-                for sub_path, start_page in splits
-            }
-            for future in as_completed(futures):
-                results[futures[future]] = future.result()
-        return self._merge_split_results(results)
-
-    def _fetch_async_by_upload(self, file_path: str, task_dir: Path | None = None):
-        fname = os.path.basename(file_path)
-        model_version = self._online_model_version()
-        source_digest = self._source_digest(file_path)
-        cache_path = (Path(file_path).parent / '.lazymind-artifacts' / 'mineru-cache-v1'
-                      / f'{source_digest}-{model_version}.zip')
-        lock_path = self._batch_lock_path(file_path, source_digest, model_version)
+        digest = self._source_digest(file_str)
+        model = self._online_model_version()
+        lock_path = self._batch_lock_path(file_str, digest, model)
         lock_path.parent.mkdir(parents=True, exist_ok=True)
         try:
             with FileLock(str(lock_path), timeout=self._timeout or _DEFAULT_WAIT_SECONDS):
-                for marker_key in self._candidate_auth_keys():
-                    marker_path = self._batch_marker_path(
-                        file_path, source_digest, marker_key, model_version)
-                    resumed_batch = self._load_batch_marker(marker_path)
-                    if resumed_batch:
-                        LOG.info(f'[MineruPDFReader] resuming batch {resumed_batch} for {fname}')
-                        batch_id, auth_key = resumed_batch, marker_key
-                        break
-                else:
-                    batch_id, auth_key, marker_path = self._submit_and_upload(
-                        file_path, fname, source_digest, model_version)
+                if use_cache:
+                    cached = self._read_shared_archive(file_str, digest, task_dir, promote=True)
+                    if cached is not None:
+                        return cached
+                splits = self._split_large_pdf(file_str)
+                if len(splits) == 1:
+                    return self._fetch_locked(splits[0][0], digest, task_dir, use_cache)
+
+                # Part lock keys have distinct source hashes. Retain successful
+                # parts for retry but publish the original only after every part.
+                with ThreadPoolExecutor(max_workers=min(len(splits), 5)) as executor:
+                    futures = {
+                        executor.submit(self._fetch_async_by_upload, sub_path,
+                                        task_dir=task_dir / str(start_page), use_cache=use_cache): start_page
+                        for sub_path, start_page in splits
+                    }
+                    results = {futures[f]: f.result() for f in as_completed(futures)}
+                return self._publish_split_archive(file_str, digest, task_dir, results)
         except FileLockTimeout:
-            raise TimeoutError(f'[MineruPDFReader] waiting to submit {fname} exceeded '
+            raise TimeoutError(f'[MineruPDFReader] waiting to submit {Path(file_str).name} exceeded '
                                f'{self._timeout or _DEFAULT_WAIT_SECONDS}s') from None
-        # Release the cross-process lock before potentially hour-long polling.
+
+    def _fetch_async_by_upload(self, file_path: str, task_dir: Path | None = None, use_cache: bool = True):
+        source_digest = self._source_digest(file_path)
+        lock_path = self._batch_lock_path(file_path, source_digest, self._online_model_version())
+        lock_path.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            with FileLock(str(lock_path), timeout=self._timeout or _DEFAULT_WAIT_SECONDS):
+                if use_cache:
+                    # A split VLM parse cannot mix legacy and VLM parts and
+                    # mislabel the provenance of the aggregate.
+                    path = self._archive_cache_path(file_path, source_digest, 'vlm')
+                    try:
+                        with path.open('rb') as cached:
+                            raw = cached.read(256 * 1024 * 1024 + 1)
+                        self._archive_content(raw, 'vlm')
+                        return self._extract_content_from_zip(raw, task_dir=task_dir)
+                    except (OSError, zipfile.BadZipFile, ValueError, TypeError, KeyError, AttributeError):
+                        pass
+                return self._fetch_locked(file_path, source_digest, task_dir, use_cache)
+        except FileLockTimeout:
+            raise TimeoutError(f'[MineruPDFReader] waiting to submit {Path(file_path).name} exceeded '
+                               f'{self._timeout or _DEFAULT_WAIT_SECONDS}s') from None
+
+    def _fetch_locked(self, file_path: str, digest: str, task_dir: Path, use_cache: bool):
+        fname = os.path.basename(file_path)
+        model = self._online_model_version()
+        cache_path = self._archive_cache_path(file_path, digest, model)
+        for marker_key in self._candidate_auth_keys() if use_cache else []:
+            marker_path = self._batch_marker_path(file_path, digest, marker_key, model)
+            resumed_batch = self._load_batch_marker(marker_path)
+            if resumed_batch:
+                LOG.info(f'[MineruPDFReader] resuming batch {resumed_batch} for {fname}')
+                batch_id, auth_key = resumed_batch, marker_key
+                break
+        else:
+            batch_id, auth_key, marker_path = self._submit_and_upload(file_path, fname, digest, model)
         return self._wait_for_batch(batch_id, auth_key, task_dir, fname, marker_path, cache_path=cache_path)
+
+    def _publish_split_archive(self, file_path, digest, task_dir, results):
+        content = []
+        archive = io.BytesIO()
+        model = self._online_model_version()
+        with zipfile.ZipFile(archive, 'w', zipfile.ZIP_DEFLATED) as output:
+            for start_page, (response, directory) in sorted(results.items()):
+                items = json.loads(response)
+                for item in items:
+                    item['page_idx'] += start_page
+                    for key in ('img_path', 'image_path'):
+                        if isinstance(item.get(key), str) and item[key]:
+                            item[key] = f'{start_page}/{item[key]}'
+                content.extend(items)
+                for asset in directory.rglob('*'):
+                    relative = asset.relative_to(directory)
+                    if asset.is_file() and 'images' in relative.parts:
+                        output.write(asset, f'{start_page}/{relative.as_posix()}')
+            output.writestr('paper_content_list.json', json.dumps(content))
+        if content:
+            raw = archive.getvalue()
+            self._archive_content(raw, model)
+            self._save_archive(self._archive_cache_path(file_path, digest, model), raw)
+        return json.dumps(content), task_dir
 
     def _submit_and_upload(self, file_path: str, fname: str,
                            source_digest: str, model_version: str):
-        payload = {'files': [{'name': fname}], 'model_version': model_version}
+        payload = {'files': [{'name': fname}], 'model_version': model_version, 'enable_formula': True}
         submit, auth_key = self._request_before_upload(
             lambda: self._submit_with_key('POST', 'https://mineru.net/api/v4/file-urls/batch',
                                           json=payload, headers={'Content-Type': 'application/json'},
@@ -375,18 +536,14 @@ class LazyMindMineruPDFReader(_MineruPDFReader):
                     LOG.info(f'[BENCHMARK] file={fname} phase=wait '
                              f'elapsed={time.monotonic() - wait_started:.3f}s')
                     try:
+                        self._archive_content(archive, self._online_model_version())
                         extracted = self._extract_content_from_zip(archive, task_dir=task_dir)
                     except (zipfile.BadZipFile, ValueError, TypeError, KeyError):
                         self._clear_batch_marker(marker_path, batch_id)
                         raise
-                    # Keep the completed receipt for the marker TTL. Another
-                    # split part or concurrent parse may still need this batch.
-                    if cache_path is not None and len(archive) <= 256 * 1024 * 1024:
+                    if cache_path is not None:
                         try:
-                            cache_path.parent.mkdir(parents=True, exist_ok=True)
-                            with tempfile.NamedTemporaryFile(dir=cache_path.parent, delete=False) as cached:
-                                cached.write(archive)
-                            os.replace(cached.name, cache_path)
+                            self._save_archive(cache_path, archive)
                         except OSError:
                             LOG.warning('[MineruPDFReader] could not retain shared parsing archive')
                     return extracted
@@ -423,6 +580,19 @@ class LazyMindMineruPDFReader(_MineruPDFReader):
 
 class LazyMindDynamicPDFReader(_DynamicPDFReader):
     """Use the bounded MinerU reader for LazyMind knowledge-base imports."""
+
+    @property
+    def appendix_hash_key(self):
+        return super().appendix_hash_key + '|shared-vlm-v1'
+
+    def _load_data(self, file, extra_info=None, **kwargs):
+        ocr_type, url = self._resolve_route(extra_info)
+        reader_type, url = self._reader_cache_key(ocr_type, url, file)
+        if reader_type == 'mineru':
+            reader = self._get_reader(reader_type, url)
+            if not reader._offline_mode:
+                return reader.forward(file, extra_info=extra_info, **kwargs)
+        return super()._load_data(file, extra_info=extra_info, **kwargs)
 
     def _build_reader(self, reader_type: str, ocr_url: str):
         if reader_type != 'mineru':

@@ -1,11 +1,12 @@
 import { useEffect, useId, useMemo, useRef, useState, type ChangeEvent } from "react";
-import { Button } from "antd";
+import { Button, Modal } from "antd";
 import { UndoOutlined, UploadOutlined } from "@ant-design/icons";
 import { CustomLogoError, isCustomLogoDataUrl, prepareCustomLogo, type CustomLogoErrorCode } from "../customLogo";
 import "./CustomLogoPicker.scss";
 
 export interface CustomLogoPickerCopy {
   label: string;
+  preview: string;
   upload: string;
   replace: string;
   reset: string;
@@ -25,6 +26,7 @@ export interface CustomLogoPickerProps {
 /** A controlled Form field; only the parent owns the saved or draft logo. */
 export function CustomLogoPicker(props: CustomLogoPickerProps) {
   const { copy } = props;
+  const [previewOpen, setPreviewOpen] = useState(false);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<CustomLogoErrorCode>();
   const input = useRef<HTMLInputElement>(null);
@@ -46,6 +48,7 @@ export function CustomLogoPicker(props: CustomLogoPickerProps) {
   useEffect(() => {
     valueRevision.current += 1;
     setError(undefined);
+    setPreviewOpen(false);
   }, [props.value]);
   useEffect(() => {
     mounted.current = true;
@@ -104,11 +107,14 @@ export function CustomLogoPicker(props: CustomLogoPickerProps) {
 
   return <div className="custom-logo-picker" role="group" aria-label={copy.label} aria-busy={pending} aria-describedby={descriptionId}>
     <input ref={input} type="file" accept="image/png,image/jpeg,image/webp" hidden disabled={unavailable} onChange={changed} />
-    <button id={props.id} type="button" className="custom-logo-picker-preview" aria-label={`${copy.label}: ${action}`} disabled={unavailable} onClick={choose}>
+    <button id={props.id} type="button" className="custom-logo-picker-preview" aria-label={`${copy.label}: ${custom ? copy.preview : action}`} disabled={unavailable} onClick={() => custom ? setPreviewOpen(true) : choose()}>
       <img src={preview} alt="" onError={(event) => {
         if (event.currentTarget.getAttribute("src") !== "/provider-icons/custom.svg") event.currentTarget.src = "/provider-icons/custom.svg";
       }} />
     </button>
+    <Modal open={previewOpen && custom} title={copy.preview} footer={null} onCancel={() => setPreviewOpen(false)} destroyOnHidden>
+      <img className="custom-logo-picker-full-image" src={preview} alt={copy.label} />
+    </Modal>
     <div className="custom-logo-picker-content">
       <span className="custom-logo-picker-label">{copy.label}</span>
       <div className="custom-logo-picker-actions">

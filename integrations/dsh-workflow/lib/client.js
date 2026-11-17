@@ -5,6 +5,32 @@ let react_dom = require("react-dom");
 let react_jsx_runtime = require("react/jsx-runtime");
 
 //#region ../workflow-agent-core/src/protocol.ts
+const WORKFLOW_OPERATIONS = new Set([
+	"list",
+	"get",
+	"input_import",
+	"input_get",
+	"input_answer",
+	"start",
+	"state",
+	"session_list",
+	"session_stop",
+	"session_resume",
+	"step_begin",
+	"step_claim",
+	"step_resume",
+	"step_complete",
+	"artifact_publish",
+	"artifact_list",
+	"artifact_get",
+	"tool_list",
+	"tool_call",
+	"generation_claim",
+	"generation_respond"
+]);
+function workflowOperationName(value) {
+	return WORKFLOW_OPERATIONS.has(value) ? value : null;
+}
 function object(value) {
 	return typeof value === "object" && value !== null && !Array.isArray(value) ? value : null;
 }
@@ -56,32 +82,15 @@ function presentationRun(meta, webUrl) {
 		...run,
 		...typeof value.hostSessionId === "string" ? { hostSessionId: value.hostSessionId } : {},
 		...typeof value.operation === "string" ? { operation: value.operation } : {},
-		...typeof value.executionId === "string" ? { executionId: value.executionId } : {}
+		...typeof value.executionId === "string" ? { executionId: value.executionId } : {},
+		...typeof value.modelJobId === "string" ? { modelJobId: value.modelJobId } : {},
+		...typeof value.modelJobStatus === "string" ? { modelJobStatus: value.modelJobStatus } : {}
 	};
 }
-const OPERATIONS = new Set([
-	"list",
-	"get",
-	"input_import",
-	"input_get",
-	"start",
-	"state",
-	"session_list",
-	"session_stop",
-	"session_resume",
-	"step_begin",
-	"step_claim",
-	"step_resume",
-	"step_complete",
-	"artifact_publish",
-	"artifact_list",
-	"artifact_get"
-]);
 function workflowOperation(name, serverName) {
 	const prefix = `mcp__${serverName}__workflow_`;
 	if (!name.startsWith(prefix)) return null;
-	const operation = name.slice(prefix.length).replace(/_[0-9a-f]{12}$/, "");
-	return OPERATIONS.has(operation) ? operation : null;
+	return workflowOperationName(name.slice(prefix.length).replace(/_[0-9a-f]{12}$/, ""));
 }
 function visitTexts(value, into) {
 	const item = object(value);
@@ -120,10 +129,13 @@ function eventRun(event, serverName, webUrl) {
 	if (value?.type !== "tool/ptc-dispatch" || data?.isError !== false || typeof data.name !== "string" || ![
 		"start",
 		"state",
+		"input_answer",
 		"step_begin",
 		"step_claim",
 		"step_resume",
-		"step_complete"
+		"step_complete",
+		"generation_claim",
+		"generation_respond"
 	].includes(workflowOperation(data.name, serverName) ?? "") || !Array.isArray(data.content)) return null;
 	for (const raw of [...data.content].reverse()) {
 		const content = object(raw);

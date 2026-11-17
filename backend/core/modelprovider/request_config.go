@@ -372,7 +372,10 @@ func SetProviderRequestConfig(w http.ResponseWriter, r *http.Request) {
 		if unchanged {
 			return nil
 		}
-		if protocolChanged || advancedChanged {
+		// Advanced options are user-managed request defaults. Validate their shape
+		// above, but do not gate saving them on embedding usage. Protocol and
+		// endpoint changes retain their existing index protections.
+		if protocolChanged {
 			if err := guardEmbeddingRuntimeMutation(tx, parent.CreateUserID, parent.ID, "", ""); err != nil {
 				return err
 			}

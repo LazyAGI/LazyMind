@@ -126,6 +126,8 @@ export interface ChatMessage {
   files?: {
     name?: string;
     uid?: string;
+    uri?: string;
+    unavailable?: boolean;
   }[];
   finish_reason?: string;
   run_status?: "completed" | "interrupted" | "failed" | "cancelled";

@@ -47,10 +47,37 @@ it('the shipped panel discovers indirectly loaded browser modules', async () => 
       fetched.push(url)
       return new Response(url.includes('/index-') ? 'import("./app-main-current.js")' : 'import{a}from"./app-initial-current.js"')
     },
-    load:async (url:string) => {imported.push(url);return {minified:manager}},
+    load:async (url:string) => {imported.push(url);return url.includes('/app-initial-') ? {minified:manager} : {}},
   }, {timeout:250})
   expect(fetched).toEqual(['app://-/assets/index-current.js','app://-/assets/app-main-current.js'])
-  expect(imported).toEqual(['app://-/assets/app-initial-current.js'])
+  expect(imported).toEqual(['app://-/assets/index-current.js','app://-/assets/app-main-current.js','app://-/assets/app-initial-current.js'])
+  expect(host.__lazymindCodexBrowser).toBe(manager)
+})
+
+it('the shipped panel discovers the browser through the numbered Rspack entry cache', async () => {
+  const bundle = readFileSync(new URL('../../../local/lazymind-cli/internal/codexplugin/assets/dispatcher.mjs', import.meta.url), 'utf8')
+  const start = bundle.indexOf('async function prepareCodexBrowser(')
+  const end = bundle.indexOf('\nfunction createCodexSurface(', start)
+  expect(start).toBeGreaterThanOrEqual(0)
+  expect(end).toBeGreaterThan(start)
+  const host: any = {}
+  const manager = {pages:{getWebview(){},disposeHost(){}},getSnapshot(){}}
+  const factory = () => {throw Error('Unloaded factory must not execute')}
+  const foreignWindow = {get pages(): any {throw new Error('Blocked cross-origin property access')}}
+  const pending = {get value(): any {throw new Error('Module export is not initialized')}}
+  const runtime = Object.assign(factory, {c:{foreign:{exports:{foreignWindow}},pending:{exports:pending},
+    loaded:{exports:{p:manager}}},m:{unloaded:factory,loaded:()=> 'getWebview disposeHost getSnapshot'}})
+  const urls = ['782259.7a3e865ee5.js','727403.da6b00f04b.js','158624.0baba19172.js','348410.46c6a64506.js']
+    .map(name => `app://-/assets/${name}`)
+  const imported: string[] = []
+  await runInNewContext(`${bundle.slice(start,end)};prepareCodexBrowser(load)`, {
+    window:host, document:{querySelectorAll:()=>urls.map(src=>({src}))},
+    load:async (url:string) => {
+      imported.push(url)
+      return url === urls[3] ? {__webpack_require__:runtime} : {__webpack_modules__:{unloaded:factory}}
+    },
+  }, {timeout:250})
+  expect(imported).toEqual(urls)
   expect(host.__lazymindCodexBrowser).toBe(manager)
 })
 
@@ -83,4 +110,25 @@ it('the shipped RPC reports host ownership and refuses an unfenced interruption'
   expect(result.read).toMatchObject({owner:true, ownerScope:'host', ready:true})
   expect(result.stop.rejected).toContain('Stop the current response in Codex')
   expect(result.interrupts).toBe(0)
+})
+
+it('the shipped panel discovers the cached browser in numeric Rspack entries', async () => {
+  const bundle = readFileSync(new URL('../../../local/lazymind-cli/internal/codexplugin/assets/dispatcher.mjs', import.meta.url), 'utf8')
+  const start = bundle.indexOf('async function prepareCodexBrowser(')
+  const end = bundle.indexOf('\nfunction createCodexSurface(', start)
+  expect(start).toBeGreaterThanOrEqual(0)
+  expect(end).toBeGreaterThan(start)
+  const host: any = {}
+  const manager = {pages:{getWebview(){},disposeHost(){}},getSnapshot(){}}
+  let executions = 0
+  const runtime = Object.assign(() => {executions++}, {
+    c:{browser:{exports:{instance:manager}}},
+    m:{browser:()=>'getWebview disposeHost getSnapshot'},
+  })
+  await runInNewContext(`${bundle.slice(start,end)};prepareCodexBrowser(load)`, {
+    window:host, document:{querySelectorAll:()=>[{src:'app://-/assets/348410.fcfef000d0.js'}]},
+    load:async () => ({__webpack_require__:runtime}), setTimeout,
+  }, {timeout:250})
+  expect(host.__lazymindCodexBrowser).toBe(manager)
+  expect(executions).toBe(0)
 })

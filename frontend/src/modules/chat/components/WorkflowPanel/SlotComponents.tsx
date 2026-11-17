@@ -69,7 +69,7 @@ import { SlotHtmlSlide, type SlideNavigation } from './ppt/SlotHtmlSlide';
 import { SlotJsonSlide } from './ppt/SlotJsonSlide';
 import { isSlideSpecArtifact } from './ppt/slideSchema';
 import type { TaskArtifactStream } from '@/modules/chat/store/taskCenter';
-import { Image as AntImage, Modal } from 'antd';
+import { Alert, Image as AntImage, Modal } from 'antd';
 import { isVideoArtifactValue } from './artifactMedia';
 
 export { SlotEditingContext } from './slotEditingContext';
@@ -1579,10 +1579,10 @@ export function SlotImage({
     if (e.key === 'Escape') setCaptionEditing(false);
   }, [handleCaptionSave]);
 
-  if (!hasSource || pending) {
+  if (pending) {
     return <SlotPending type='image' cardMode={cardMode} />;
   }
-  if (!url) {
+  if (!hasSource || !url) {
     return (
       <div className='workflow-slot workflow-slot--image' role='status'>
         <span>图片加载失败</span>
@@ -2271,7 +2271,7 @@ export function SlotText({ slot, widget, sessionId, slotId, revisionCount, onRef
       if (e.key === 'Enter') handleEdit(e.currentTarget);
     } : undefined,
     style: typeof widget?.maxHeight === 'number'
-      ? { maxHeight: widget.maxHeight, overflowY: 'auto' as const }
+      ? { '--workflow-text-max-height': `${widget.maxHeight}px` } as React.CSSProperties
       : undefined,
   };
 
@@ -5409,6 +5409,17 @@ export function SlotRenderer({
   useTranslation();
   if (slot.artifact_value === undefined || slot.artifact_value === null) {
     return <SlotPending type={expectedType ?? 'text'} cardMode={cardMode} />;
+  }
+
+  // Reserved PPT text is a generation status, not an editable document.
+  // Keep HTML slide placeholders in their existing slide preview renderer.
+  const artifactText = typeof slot.artifact_value === 'string'
+    ? slot.artifact_value : slot.artifact_value?.text;
+  const pptPlaceholder = typeof artifactText === 'string'
+    ? /^\s*<!--\s*lazymind-ppt-placeholder\s*-->([\s\S]*)$/.exec(artifactText)
+    : null;
+  if (pptPlaceholder && pptPlaceholder[1].trim() && !pptPlaceholder[1].trim().startsWith('<')) {
+    return <Alert type='info' showIcon message={pptPlaceholder[1].trim()} />;
   }
 
   // Presentation research/outline Markdown can include HTML comments, formulas

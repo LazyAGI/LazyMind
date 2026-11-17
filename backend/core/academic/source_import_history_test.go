@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"lazymind/core/common/orm"
 	"lazymind/core/store"
@@ -24,11 +25,15 @@ func TestSourceImportHistoryUsesSavedOriginalAndObservedStage(t *testing.T) {
 	source := SourceContext{ConversationID: "chat", HistoryID: "answer"}
 	owner := orm.BaseModel{CreateUserID: "alice"}
 	batch := newSourceImportBatch(sourceImportCaller(orm.PaperImportBatch{CreatedBy: "alice"}), source, "papers", "batch", "key", "hash", 4, false)
+	followBatch := newSourceImportBatch(sourceImportCaller(batch), source, "papers", "follow-batch", "follow-key", "follow-hash", 1, false)
+	followBatch.CreatedAt = batch.CreatedAt.Add(time.Minute)
+	followBatch.UpdatedAt = followBatch.CreatedAt
 	for _, row := range []any{
 		&orm.Dataset{ID: "papers", Scene: "academic_papers", ProcessingLevel: "chunked", ProcessingRevision: 1, BaseModel: owner},
 		&orm.Conversation{ID: "chat", BaseModel: owner},
 		&orm.ChatHistory{ID: "answer", ConversationID: "chat", RetrievalResult: json.RawMessage(`[]`)},
 		&batch,
+		&followBatch,
 	} {
 		if err := db.Create(row).Error; err != nil {
 			t.Fatal(err)
@@ -53,16 +58,30 @@ func TestSourceImportHistoryUsesSavedOriginalAndObservedStage(t *testing.T) {
 			}
 		}
 	}
+	if err := db.Create(&orm.PaperImportItem{
+		ID: "follow", BatchID: followBatch.ID, Status: "pending", Stage: "follow",
+		ReferenceIDsJSON: json.RawMessage(`[]`), PresenceSnapshotJSON: json.RawMessage(`{"follows_item_id":"parsed"}`),
+		SelectedCandidateJSON: json.RawMessage(`{}`), ErrorDetailsJSON: json.RawMessage(`{}`),
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
 	req := httptest.NewRequest(http.MethodGet, "/academic/imports?conversation_id=chat&history_id=answer", nil)
 	req.Header.Set("X-User-Id", "alice")
 	rec := httptest.NewRecorder()
 	ListImports(rec, req)
 	var body struct{ Items []SourceImportView }
-	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil || rec.Code != 200 || len(body.Items) != 4 {
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil || rec.Code != 200 || len(body.Items) != 5 {
 		t.Fatal(rec.Code, rec.Body.String(), err)
 	}
-	want := map[string]string{"original": "not_requested", "parsed": "ready", "failed": "failed", "unknown": "unknown"}
+	want := map[string]string{"original": "not_requested", "parsed": "ready", "failed": "failed", "unknown": "unknown", "follow": "ready"}
 	for _, row := range body.Items {
+		expectedBatch := batch
+		if row.ItemID == "follow" {
+			expectedBatch = followBatch
+		}
+		if row.BatchID != expectedBatch.ID || !row.BatchCreatedAt.Equal(expectedBatch.CreatedAt) {
+			t.Fatalf("history item %q lost its submission time: %+v", row.ItemID, row)
+		}
 		if row.Status != "added" || row.ProcessingStatus != want[row.ItemID] ||
 			row.Retryable != (row.ItemID == "failed") || row.StateUnavailable != (row.ItemID == "unknown") {
 			t.Fatalf("incorrect import history: %+v", row)

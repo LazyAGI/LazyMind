@@ -258,6 +258,7 @@ func externalAgentOperation(method, path string) externallease.Operation {
 		(strings.HasPrefix(path, "/workflow-sessions/") &&
 			(strings.HasSuffix(path, ":stop") || strings.HasSuffix(path, ":resume") ||
 				strings.HasSuffix(path, "/executions:begin") || strings.HasSuffix(path, "/host-binding") ||
+				(strings.Contains(path, "/model-generations/") && (strings.HasSuffix(path, ":claim") || strings.HasSuffix(path, ":respond"))) ||
 				strings.HasSuffix(path, ":advance-step-and-hand-off") ||
 				(strings.Contains(path, "/hosted-attempts/") &&
 					(strings.HasSuffix(path, ":begin") || strings.HasSuffix(path, ":resume") || strings.HasSuffix(path, ":submit") ||
@@ -936,11 +937,7 @@ func run(ctx context.Context) error {
 			vocabularyRunner := asyncjob.Start(runtimeCtx, store.DB(), asyncjob.Options{JobTypes: []string{vocabulary.CloudSyncJobType}, SerializeResources: true, Concurrency: 2, PollInterval: 2 * time.Second, LockTTL: 2 * time.Minute})
 			backgroundDone = append(backgroundDone, vocabularyRunner.Done(), vocabulary.StartAnkiSync(runtimeCtx, store.DB()))
 		}
-		excludedJobs := append([]string{doc.ReadingPreparationJob, vocabulary.CloudSyncJobType, documentdirectory.PlanJob, documentdirectory.OrganizeJob, academic.ChatLaunchJobType, academic.PreparationJobType}, chat.ConversationTitleJobTypes...)
-		if !systemdeps.PythonComponentActive("rag") {
-			excludedJobs = append(excludedJobs, doc.MarketInstallJobType, doc.MarketUpdateJobType,
-				doc.MarketUpdateAllJobType, "document_pdf_translation")
-		}
+		excludedJobs := defaultAsyncJobExcludedTypes(systemdeps.PythonComponentActive("rag"))
 		runner = asyncjob.Start(runtimeCtx, store.DB(), asyncjob.Options{
 			Concurrency:     asyncConfig.Concurrency,
 			ExcludeJobTypes: excludedJobs,

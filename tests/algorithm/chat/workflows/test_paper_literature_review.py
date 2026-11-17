@@ -25,7 +25,12 @@ def paper():
 
 
 @pytest.fixture
-def selection(monkeypatch):
+def selection(monkeypatch, tmp_path):
+    # Selection tests fake retrieval at the toolkit boundary; use an available static role.
+    runtime = tmp_path / 'review-models.yaml'
+    runtime.write_text('embed_main: {source: openai, type: embed, name: test-embed}\n')
+    monkeypatch.setenv('LAZYMIND_MODEL_CONFIG_PATH', str(runtime))
+
     def use(*plans):
         values = iter(plans)
         calls = []
@@ -753,3 +758,29 @@ def test_supplied_papers_are_read_synthesized_and_published_for_downstream(tmp_p
     assert downstream['papers'][1]['reading']['content_type'] == 'abstract'
     assert downstream['evidence'] == body
     assert json.loads(entry.read_text()) == inputs
+
+
+@pytest.mark.parametrize('supplied', [False, True])
+def test_review_with_model_without_provider_skips_unavailable_kb(monkeypatch, tmp_path, selection, supplied):
+    from lazymind.chat.engine.tools.lazy_kb import KBToolkit
+    from lazymind.model_config import inject_model_config
+
+    path = tmp_path / 'models.yaml'
+    path.write_text('embed_main: {source: dynamic, type: embed}\n')
+    monkeypatch.setenv('LAZYMIND_MODEL_CONFIG_PATH', str(path))
+    lazyllm.init_session()
+    inject_model_config({'embed_main': {'model': 'embedding-without-provider'}})
+    search = Mock(side_effect=AssertionError('unconfigured embedding reached retrieval'))
+    monkeypatch.setattr(KBToolkit, 'kb_search', search)
+    selection({'material_roles': {'M1': 'paper'} if supplied else {}, 'queries': {'related': 3}})
+    try:
+        if supplied:
+            result = review_materials.prepare({'papers': [copy.deepcopy(PAPER)]}, ['library'])
+            assert result[0]['text'] == PAPER['text']
+            assert any('文本向量模型' in warning for warning in result[0]['retrieval_warnings'])
+        else:
+            with pytest.raises(contracts.MissingMaterials, match='文本向量模型'):
+                review_materials.prepare({'papers': []}, ['library'])
+        search.assert_not_called()
+    finally:
+        lazyllm.globals.clear()

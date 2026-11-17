@@ -103,23 +103,24 @@ it.each([
   expect(mocks.accounts).toHaveBeenCalledWith('wechat', { silentError: true });
 });
 
-it('requests catalog refresh on manual settings reload without probing on mount or switch changes', async () => {
+it('requests catalog refresh only for enabled confirmed recipients', async () => {
   const requested = vi.fn();
   window.addEventListener(WECHAT_NOTIFICATION_CHECK_REQUESTED_EVENT, requested);
   try {
     const view = renderHook(value => useWeChatNotificationStatus(value), {
-      initialProps: { enabled: true, aggregate: true, refreshKey: 0 },
+      initialProps: { ...props, refreshKey: 0 },
     }); await flush();
     expect(requested).not.toHaveBeenCalled();
-    view.rerender({ enabled: false, aggregate: true, refreshKey: 0 }); await flush();
-    view.rerender({ enabled: true, aggregate: true, refreshKey: 0 }); await flush();
+    view.rerender({ ...props, enabled: false, refreshKey: 1 }); await flush();
+    view.rerender({ ...props, refreshKey: 1 }); await flush();
     expect(requested).not.toHaveBeenCalled();
-    view.rerender({ enabled: true, aggregate: true, refreshKey: 1 }); await flush();
+    view.rerender({ ...props, refreshKey: 2 }); await flush();
     expect(requested).toHaveBeenCalledTimes(1);
     await act(async () => { view.result.current.refresh(); });
     expect(requested).toHaveBeenCalledTimes(2);
-    expect(mocks.targets).not.toHaveBeenCalled();
-    expect(mocks.accounts).not.toHaveBeenCalled();
+    // Only the two enable transitions check the draft; refresh is delegated.
+    expect(mocks.targets).toHaveBeenCalledTimes(2);
+    expect(mocks.accounts).toHaveBeenCalledTimes(2);
   } finally { window.removeEventListener(WECHAT_NOTIFICATION_CHECK_REQUESTED_EVENT, requested); }
 });
 
@@ -149,20 +150,20 @@ it.each(['recipient', 'account'])('isolates late results after switching the sel
   expect(view.result.current.account?.id).toBe(next.accountId);
 });
 
-it('shares confirmed status with the aggregate settings view without letting settings probe', async () => {
+it('shares updates between editors of the same recipient without affecting incomplete drafts', async () => {
   const { result } = renderHook(() => ({
     task: useWeChatNotificationStatus(props),
-    settings: useWeChatNotificationStatus({ enabled: true, aggregate: true }),
+    otherEditor: useWeChatNotificationStatus(props),
     unconfiguredTask: useWeChatNotificationStatus({ enabled: true, accountId: 'another-account' }),
   })); await flush();
   expect(result.current.task.status).toBe('connected');
-  expect(result.current.settings.status).toBe('connected');
+  expect(result.current.otherEditor.status).toBe('connected');
   expect(result.current.unconfiguredTask.status).toBe('unconfigured');
   expect(mocks.targets).toHaveBeenCalledTimes(1);
   mocks.targets.mockResolvedValue({ items: [target('recipient-a', false)] });
   await act(async () => { await checkWeChatNotificationTarget({ account_id: 'chosen', recipient_id: 'recipient-a' }); });
   expect(result.current.task.status).toBe('pending');
-  expect(result.current.settings.status).toBe('pending');
+  expect(result.current.otherEditor.status).toBe('pending');
   expect(result.current.unconfiguredTask.status).toBe('unconfigured');
   expect(mocks.targets).toHaveBeenCalledTimes(2);
 });

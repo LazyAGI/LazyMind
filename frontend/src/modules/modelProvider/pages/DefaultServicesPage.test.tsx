@@ -1,3 +1,6 @@
+import { createInstance } from "i18next";
+import enUS from "@/i18n/locales/en-US";
+import zhCN from "@/i18n/locales/zh-CN";
 import { act, fireEvent, render as renderComponent, screen, waitFor, within } from "@testing-library/react";
 import { ConfigProvider } from "antd";
 import { useEffect, useState, type ComponentProps, type ReactNode } from "react";
@@ -97,6 +100,7 @@ describe("DefaultServicesPage", () => {
   };
 
   beforeEach(() => {
+    mocks.translate = (key: string) => key;
     mocks.actualPanel = false;
     mocks.listModels.mockReset();
     mocks.listProviderGroups.mockReset();
@@ -106,6 +110,30 @@ describe("DefaultServicesPage", () => {
     mocks.panelMounts.mockReset();
     mocks.listProviderGroups.mockResolvedValue({ data: { groups: [] } });
     Element.prototype.scrollIntoView = vi.fn();
+  });
+
+  it("localizes service cards, summaries and dialog titles and updates after changing language", async () => {
+    const language = createInstance();
+    await language.init({ lng: "en-US", resources: { "en-US": { translation: enUS }, "zh-CN": { translation: zhCN } } });
+    mocks.translate = language.getFixedT("en-US");
+    mocks.actualPanel = true;
+    mocks.listModels.mockResolvedValue({ data: { models: [] } });
+    mocks.listProviderGroups.mockImplementation(({ category }: { category: string }) =>
+      Promise.resolve({ data: { groups: category === "translation" ? [{ name: "Bing" }] : [] } }));
+    const page = () => <DefaultServicesPage {...defaultOcrProps} onConfigureCloudService={vi.fn()} onConfigureProviders={vi.fn()} onModelSelectionChanged={vi.fn()} />;
+    const rendered = render(page());
+    const translation = await screen.findByRole("group", { name: "Machine translation" });
+    await waitFor(() => expect(translation).toHaveTextContent("1 translation source configured"));
+    expect(screen.getByRole("group", { name: "Search engine" })).toHaveTextContent("Not configured");
+    expect(screen.getByRole("group", { name: "Academic search" })).toBeVisible();
+    expect(screen.getByRole("group", { name: "Document parsing (OCR)" })).toBeVisible();
+    expect(rendered.container.textContent).not.toMatch(/modelProvider\./);
+    fireEvent.click(within(translation).getByRole("button"));
+    await waitFor(() => expect(screen.getByRole("dialog", { name: "Machine translation" })).toBeVisible());
+    mocks.translate = language.getFixedT("zh-CN");
+    rendered.rerender(<ConfigProvider theme={{ token: { motion: false } }}>{page()}</ConfigProvider>);
+    await waitFor(() => expect(screen.getByRole("dialog", { name: "机器翻译" })).toBeVisible());
+    await waitFor(() => expect(screen.getByRole("group", { name: "机器翻译", hidden: true })).toHaveTextContent("已配置 1 个翻译源"));
   });
 
   it("allows configuration when any verified provider model exists without an LLM", async () => {
@@ -232,7 +260,7 @@ describe("DefaultServicesPage", () => {
 
     expect(screen.queryByTestId("external-services")).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "configure parsing" }));
-    await waitFor(() => expect(screen.getByRole("dialog", { name: "文档解析（OCR）" })).toBeVisible());
+    await waitFor(() => expect(screen.getByRole("dialog", { name: "modelProvider.defaults.services.parsing" })).toBeVisible());
     const services = screen.getByTestId("external-services");
     expect(services).toHaveAttribute("data-variant", "default-models");
     expect(services).toHaveAttribute("data-categories", "parsing");
@@ -277,7 +305,7 @@ describe("DefaultServicesPage", () => {
   const candidate = (id: string, name: string) => ({ ...selection(id, name), id });
   const selected = (id: string, name: string) => ({ data: { selections: [selection(id, name)] } });
   const modelRow = () => screen.getByRole("group", { name: "modelProvider.module.llmChatTitle" });
-  const openSearchService = () => fireEvent.click(within(screen.getByRole("group", { name: "搜索引擎" }))
+  const openSearchService = () => fireEvent.click(within(screen.getByRole("group", { name: "modelProvider.defaults.services.search" }))
     .getByRole("button", { name: "modelProvider.configureCapability" }));
 
   it("refreshes persisted models after a service save and ignores a slower earlier selection response", async () => {
@@ -357,17 +385,17 @@ describe("DefaultServicesPage", () => {
       controlsDisabled={false}
       onDocumentParsingChange={vi.fn()}
     />);
-    await waitFor(() => expect(screen.getByRole("dialog", { name: "文档解析（OCR）" })).toBeVisible());
+    await waitFor(() => expect(screen.getByRole("dialog", { name: "modelProvider.defaults.services.parsing" })).toBeVisible());
     fireEvent.click(screen.getByRole("button", { name: "Close" }));
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
     fireEvent.click(screen.getByRole("button", { name: "configure parsing" }));
     expect(onConfigureCloudService).toHaveBeenCalledWith("cloudParsing");
     await waitFor(() => expect(screen.getByTestId("external-services")).toHaveAttribute("data-focus", "parsing"));
-    await waitFor(() => expect(screen.getByRole("dialog", { name: "文档解析（OCR）" })).toBeVisible());
+    await waitFor(() => expect(screen.getByRole("dialog", { name: "modelProvider.defaults.services.parsing" })).toBeVisible());
   });
 
   it.each([
-    ["search", "搜索引擎"], ["academic", "学术搜索引擎"], ["translation", "机器翻译"],
+    ["search", "modelProvider.defaults.services.search"], ["academic", "modelProvider.defaults.services.academic"], ["translation", "modelProvider.defaults.services.translation"],
   ])("opens only the requested %s configuration", async (category, title) => {
     mocks.listModels.mockResolvedValue({ data: { models: [] } });
     render(<DefaultServicesPage {...defaultOcrProps} onConfigureCloudService={vi.fn()} onConfigureProviders={vi.fn()} onModelSelectionChanged={vi.fn()} />);

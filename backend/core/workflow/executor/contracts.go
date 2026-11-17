@@ -3,12 +3,17 @@ package executor
 import (
 	"context"
 	"encoding/json"
+	"strings"
 )
 
 // AttemptContext is the immutable Host-neutral execution snapshot used by
 // trusted Executor boundaries. It never contains a model configuration, API
 // credential or Host-local path. Public adapters must redact Metadata.
 type AttemptContext struct {
+	Execution               *ExecutionContract  `json:"execution,omitempty"`
+	KnowledgeScope          *KnowledgeScope     `json:"knowledge_scope,omitempty"`
+	LaunchRequest           string              `json:"launch_request,omitempty"`
+	UserRequest             string              `json:"user_request,omitempty"`
 	ExecutionHandle         string              `json:"-"`
 	PostStepCheckpoint      *PostStepCheckpoint `json:"post_step_checkpoint,omitempty"`
 	ContractVersion         string              `json:"contract_version"`
@@ -18,6 +23,7 @@ type AttemptContext struct {
 	AttemptNo               int                 `json:"attempt_no"`
 	Operation               string              `json:"operation"`
 	Objective               string              `json:"objective,omitempty"`
+	ObjectiveRef            string              `json:"objective_ref,omitempty"`
 	Prompt                  string              `json:"prompt,omitempty"`
 	Acceptance              []string            `json:"acceptance_criteria,omitempty"`
 	Instruction             string              `json:"instruction,omitempty"`
@@ -36,6 +42,43 @@ type AttemptContext struct {
 	ToolsOnly               bool                `json:"tools_only,omitempty"`
 	TerminalToolsOnly       bool                `json:"terminal_tools_only,omitempty"`
 	Metadata                map[string]string   `json:"metadata,omitempty"`
+}
+
+// MarshalJSON keeps shared business instructions in one place on the wire.
+// Readers restore the complete objective before passing it to an executor.
+func (value AttemptContext) MarshalJSON() ([]byte, error) {
+	type plain AttemptContext
+	if value.Execution == nil || !value.Execution.Supported() {
+		return json.Marshal(plain(value))
+	}
+	// Remove only an exact prompt prefix, retaining runtime refinements verbatim.
+	if value.Prompt != "" && value.ObjectiveRef == "" {
+		if value.Objective == value.Prompt {
+			value.Objective, value.ObjectiveRef = "", "#/prompt"
+		} else if prefix := value.Prompt + "\n\nRuntime objective:\n"; len(value.Objective) > len(prefix) && strings.HasPrefix(value.Objective, prefix) {
+			value.Objective, value.ObjectiveRef = strings.TrimPrefix(value.Objective, prefix), "#/prompt"
+		}
+	}
+	return json.Marshal(plain(value))
+}
+
+// UnmarshalJSON restores the objective referenced by the shared wire contract.
+func (value *AttemptContext) UnmarshalJSON(data []byte) error {
+	type plain AttemptContext
+	var decoded plain
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	*value = AttemptContext(decoded)
+	if value.ObjectiveRef == "#/prompt" {
+		if value.Objective == "" {
+			value.Objective = value.Prompt
+		} else {
+			value.Objective = value.Prompt + "\n\nRuntime objective:\n" + value.Objective
+		}
+		value.ObjectiveRef = ""
+	}
+	return nil
 }
 
 type Artifact struct {

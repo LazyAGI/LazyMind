@@ -423,7 +423,7 @@ func TestRuntimeSnapshotUsesDeclaredProducerForStartupNameCollision(t *testing.T
 					t.Fatalf("normalized output must be the sole witness: %+v", mode)
 				}
 				binding := attemptInputBindingFromWitness(db.DB, session.ID, "next-attempt", mode.Witnesses[0], now)
-				if binding.SourceType != "artifact" || binding.MaterialRevisionID != "normalized-output" {
+				if binding.SourceType != "artifact" || binding.MaterialRevisionID != "normalized-output" || binding.SourceRevision != "1" {
 					t.Fatalf("wrong frozen input: %+v", binding)
 				}
 			} else if mode.Satisfied || len(mode.Witnesses) != 0 {

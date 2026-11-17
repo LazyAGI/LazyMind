@@ -823,7 +823,7 @@ func TestRunCanPatchInvalidSkillMetadataBeforeStrictInspection(t *testing.T) {
 	if err != nil || meta.Name != "repaired" || meta.Description != "repaired skill" {
 		t.Fatalf("patched SKILL.md metadata = %#v, err=%v", meta, err)
 	}
-	if string(files["SKILL.md"]) != "---\nname: broken\n---\n# Broken\n" || entry.OriginTreeSHA256 != originTree || len(entry.AppliedPatches) != 1 {
+	if string(files["SKILL.md"]) != "---\nname: broken\n---\n# Broken\n" || entry.OriginVersion != version || entry.OriginTreeSHA256 != originTree || len(entry.AppliedPatches) != 1 {
 		t.Fatalf("source or patch provenance changed: source=%q catalog=%#v", files["SKILL.md"], entry)
 	}
 }

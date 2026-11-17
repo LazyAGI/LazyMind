@@ -10,9 +10,13 @@ import (
 	"lazymind/core/doc"
 )
 
-var generatedImagePath = regexp.MustCompile(`^/static-files/ai_generated/[A-Za-z0-9_-]+\.(png|jpg|jpeg|webp|gif)$`)
+var generatedImagePath = regexp.MustCompile(`^/static-files/ai_generated/[A-Za-z0-9_-]+\.(png|jpg|jpeg|webp|gif|mp4|webm|mov)$`)
 
-// Only trusted builtin image results are passed here. Never sign arbitrary MCP
+func isBuiltinMediaTool(id string) bool {
+	return id == "builtin:image_generator" || id == "builtin:image_editor" || id == "builtin:video_generator"
+}
+
+// Only trusted builtin image/video results are passed here. Never sign arbitrary MCP
 // output, remote URLs, or filesystem paths. History ownership is checked first.
 func rewriteImageResult(raw []byte, fresh bool) json.RawMessage {
 	return mapImageResultURLs(raw, func(path string, _ *url.URL) string {
@@ -59,22 +63,24 @@ func mapImageResultURLs(raw []byte, rewrite func(string, *url.URL) string) json.
 			for _, child := range item {
 				walk(child)
 			}
-			original, ok := item["image_url"].(string)
-			if !ok {
-				return
-			}
-			u, err := url.Parse(original)
-			if err != nil || u.IsAbs() || u.Host != "" || u.RawPath != "" || u.Fragment != "" {
-				return
-			}
-			path := strings.TrimPrefix(u.Path, "/api/core")
-			if !generatedImagePath.MatchString(path) {
-				return
-			}
-			replacement := rewrite(path, u)
-			item["image_url"] = replacement
-			if markdown, ok := item["image_markdown"].(string); ok {
-				item["image_markdown"] = strings.ReplaceAll(markdown, original, replacement)
+			for _, kind := range []string{"image", "video"} {
+				original, ok := item[kind+"_url"].(string)
+				if !ok {
+					continue
+				}
+				u, err := url.Parse(original)
+				if err != nil || u.IsAbs() || u.Host != "" || u.RawPath != "" || u.Fragment != "" {
+					continue
+				}
+				path := strings.TrimPrefix(u.Path, "/api/core")
+				if !generatedImagePath.MatchString(path) {
+					continue
+				}
+				replacement := rewrite(path, u)
+				item[kind+"_url"] = replacement
+				if markdown, ok := item[kind+"_markdown"].(string); ok {
+					item[kind+"_markdown"] = strings.ReplaceAll(markdown, original, replacement)
+				}
 			}
 		}
 	}

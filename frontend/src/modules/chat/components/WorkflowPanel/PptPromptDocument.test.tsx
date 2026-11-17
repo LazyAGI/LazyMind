@@ -19,7 +19,7 @@ it('uses one card title and moves editing into the enclosing header', async () =
   fireEvent.click(await within(header).findByRole('button', { name: '编辑文本' }));
   expect(onEdit).toHaveBeenCalledTimes(1);
   expect(screen.getByText('浅色背景')).toBeVisible();
-  expect(container.querySelector('.ppt-prompt-document__body')).toHaveStyle({ maxHeight: '320px', overflowY: 'auto' });
+  expect(container.querySelector('.ppt-prompt-document__body')).toHaveStyle({ '--workflow-ppt-prompt-max-height': '320px' });
   rerender(view(false));
   await waitFor(() => expect(screen.queryByRole('button', { name: '编辑文本' })).not.toBeInTheDocument());
 });
@@ -51,4 +51,11 @@ it('shows one marked page document with style before the page prompt', () => {
   expect([...container.querySelectorAll('summary')].map(item => item.textContent)).toEqual(['风格', '布局', '页面正文']);
   expect(container.textContent).not.toContain('ppt-page-prompt:v1');
   expect(container.textContent).toContain('浅色背景');
+});
+
+it('keeps the image revision comment out of the prompt preview', () => {
+  const text = '## Assets\nPalace panorama\n<!-- ppt-material-images: ["image-revision"] -->';
+  const { container } = render(<PptPromptDocument text={text} />);
+  expect(container.textContent).toContain('Palace panorama');
+  expect(container.textContent).not.toContain('image-revision');
 });

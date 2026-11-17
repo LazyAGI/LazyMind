@@ -1142,7 +1142,7 @@ export function useDefaultModelConfig({
         onClick: (event: React.MouseEvent<HTMLElement>) => {
           if (savingCapabilitiesRef.current.has(capability)) event.preventDefault();
         },
-      }, "前往索引管理"), createElement("div", {
+      }, t("modelProvider.defaults.openIndexManagement")), createElement("div", {
         style: { display: "flex", alignItems: "center", gap: 8, marginLeft: "auto" },
       }, buttons)),
     };

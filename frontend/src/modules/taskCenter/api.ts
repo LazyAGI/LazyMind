@@ -128,9 +128,10 @@ export async function getWorkbench(params: {
   task_type?: string;
   category?: WorkbenchCategory;
   page?: number;
+  page_size?: number;
 }): Promise<WorkbenchResponse> {
   const response = await defaultClient.apiCoreTaskCenterWorkbenchGet({
-    taskType: params.task_type, keyword: params.keyword, category: params.category, page: params.page,
+    taskType: params.task_type, keyword: params.keyword, category: params.category, page: params.page, pageSize: params.page_size,
   });
   return response.data as unknown as WorkbenchResponse;
 }

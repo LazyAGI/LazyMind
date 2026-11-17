@@ -196,7 +196,7 @@ def test_native_notes_are_resolved_by_reference_without_model_text(monkeypatch):
     assert pages[0]['notes'] == 'unwanted regeneration'  # Caller data is not mutated.
     import pytest
     with pytest.raises(ValueError, match='count differs'):
-        tools._pages_with_saved_notes(pages[:1], 'speaker_notes_source')
+        tools._pages_with_saved_notes([{}], 'speaker_notes_source')
     with pytest.raises(ValueError, match='not a path'):
         tools._load_saved_notes('/tmp/arbitrary.json')
 
@@ -207,8 +207,7 @@ def test_missing_or_duplicate_note_pages_fail_instead_of_regenerating(monkeypatc
     tools = _load_ppt_tools()
     monkeypatch.setattr(tools, 'require_context', lambda: object())
     monkeypatch.setattr(tools, '_resolve_artifact_text', lambda *_: (None, 'text'))
-    with pytest.raises(ValueError, match='Missing speaker_notes_source'):
-        tools._load_saved_notes('speaker_notes_source')
+    assert tools._load_saved_notes('speaker_notes_source') is None
     monkeypatch.setattr(tools, '_resolve_artifact_text', lambda *_: (json.dumps({
         'schema_version': 1, 'pages': [{'page': 1, 'text': 'a'}, {'page': 1, 'text': 'b'}]
     }), 'file'))
@@ -236,7 +235,7 @@ def test_notes_source_is_hidden_and_bound_to_generation():
     state = yaml.safe_load((root / 'workflows/ppt-workflow/scenario/state.yml').read_text(encoding='utf-8'))
     source = next(s for s in workflow['slots'] if s['id'] == 'speaker_notes_source')
     assert source['user_visible'] is False and source['type'] == 'file'
-    assert {'material': 'speaker_notes_source'} in state['steps']['plan_page_prompts']['outputs']
+    assert {'material': 'speaker_notes_source', 'required': False} in state['steps']['plan_page_prompts']['outputs']
     assert {'material': 'speaker_notes_source', 'required': False} in state['steps']['generate_ppt']['inputs']
     assert all(s.get('id') != 'speaker_notes_source' for tab in workflow['ui']['tabs'] for s in tab.get('slots', []))
 
@@ -332,11 +331,12 @@ def test_planning_authors_scripts_and_generation_only_references_them():
     root = Path(__file__).resolve().parents[4]
     steps = yaml.safe_load((root / 'workflows/ppt-workflow/scenario/state.yml').read_text(encoding='utf-8'))['steps']
     plan, generate = steps['plan_page_prompts'], steps['generate_ppt']
+    assert 'Author each spoken script once' in plan['prompt']
+    assert {'material': 'presentation_timing', 'required': False} in plan['inputs']
     assert 'checkpoints each prompt' in plan['prompt']
     assert 'ppt_plan_page_prompts' in plan['terminal_tools']
-    assert 'Talk timing plan:' in plan['prompt']
     assert 'Speaker scripts were authored once' not in plan['prompt']
-    assert 'Speaker scripts were authored once' in generate['prompt']
+    assert 'rewrite the saved scripts' in generate['prompt']
     assert 'Write speakable prose that fits this duration' not in generate['prompt']
     assert 'ppt_update_speaker_notes' not in generate['tools']
     assert 'ppt_update_speaker_notes' in steps['plan_page_prompts']['tools']
@@ -351,8 +351,8 @@ def test_planning_authors_scripts_and_generation_only_references_them():
             assert material not in producers, (step_name, material)
             producers[material] = step_name
     assert all(x['material'] != 'speaker_notes_source' for x in steps['analyze_requirements']['outputs'])
-    for name in ['build_outline', 'plan_page_prompts', 'generate_ppt']:
-        assert 'Never display PR/issue/work-log identifiers' in steps[name]['prompt']
+    shared = (root / 'workflows/ppt-workflow/scenario/execution.md').read_text()
+    assert 'PR/issue/work-log identifiers and evidence citations in notes' in shared
 
 
 @pytest.mark.parametrize('failure', ['model', 'publish'])
@@ -448,3 +448,10 @@ def test_no_vlm_removes_previously_attached_automatic_materials(tmp_path, monkey
     assert result['reason'] == 'vision_unavailable'
     data = json.loads((tmp_path / 'info_pack.json').read_text(encoding='utf-8'))
     assert data['user_assets']['reference_images'] == ['/images/user-logo.png']
+
+
+def test_existing_native_notes_need_no_source_artifact(monkeypatch):
+    tools = _load_ppt_tools()
+    monkeypatch.setattr(tools, '_load_saved_notes', lambda *_: pytest.fail('notes source is not required'))
+    pages = [{'title': 'A', 'notes': 'Existing speaker script'}]
+    assert tools._pages_with_saved_notes(pages, 'speaker_notes_source') == pages

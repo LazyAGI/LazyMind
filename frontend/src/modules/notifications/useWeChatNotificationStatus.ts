@@ -1,25 +1,25 @@
 import { useCallback, useEffect, useRef, useSyncExternalStore } from 'react';
 import { checkWeChatNotificationTarget, hasConfiguredWeChatTarget, readWeChatTarget, registerWeChatTarget, subscribeWeChatNotificationState,
-  visibleWeChatTargets, wechatNotificationStateVersion } from './wechatNotificationState';
+  wechatNotificationStateVersion } from './wechatNotificationState';
 import { WECHAT_NOTIFICATION_CHECK_REQUESTED_EVENT } from './notificationEvents';
 
-export default function useWeChatNotificationStatus({ enabled, ready = true, accountId, recipientId, refreshKey = 0, aggregate = false }: {
-  enabled: boolean; ready?: boolean; accountId?: string; recipientId?: string; refreshKey?: string | number; aggregate?: boolean;
+export default function useWeChatNotificationStatus({ enabled, ready = true, accountId, recipientId, refreshKey = 0 }: {
+  enabled: boolean; ready?: boolean; accountId?: string; recipientId?: string; refreshKey?: string | number;
 }) {
   useSyncExternalStore(subscribeWeChatNotificationState, wechatNotificationStateVersion);
   const confirmed = Boolean(enabled && accountId && recipientId);
   const checkedSelection = useRef<string>();
   const previousRefreshKey = useRef(refreshKey);
   const refresh = useCallback(() => {
-    if (enabled && (confirmed || aggregate)) window.dispatchEvent(new Event(WECHAT_NOTIFICATION_CHECK_REQUESTED_EVENT));
-  }, [confirmed, enabled, aggregate]);
+    if (confirmed) window.dispatchEvent(new Event(WECHAT_NOTIFICATION_CHECK_REQUESTED_EVENT));
+  }, [confirmed]);
   useEffect(() => {
     const requested = previousRefreshKey.current !== refreshKey;
     previousRefreshKey.current = refreshKey;
-    // A settings reload requests checks through the saved-target catalog. A
-    // settings mount or switch change alone must never choose a recipient.
+    // Manual refresh requests checks through the saved-target catalog;
+    // unconfigured or disabled selections must not trigger checks.
     if (requested && enabled) refresh();
-  }, [refreshKey, enabled, aggregate, refresh]);
+  }, [refreshKey, enabled, refresh]);
   useEffect(() => {
     if (!confirmed) { checkedSelection.current = undefined; return; }
     if (!ready) return;
@@ -37,9 +37,8 @@ export default function useWeChatNotificationStatus({ enabled, ready = true, acc
     // An editor selection can be checked immediately without becoming saved.
     return release;
   }, [confirmed, ready, accountId, recipientId]);
-  const snapshots = enabled ? visibleWeChatTargets() : [];
   const snapshot = confirmed ? readWeChatTarget({ account_id: accountId!, recipient_id: recipientId! })
-    : aggregate ? snapshots.find(value => !['connected', 'connecting', 'checking'].includes(value.status)) || snapshots[0] : undefined;
+    : undefined;
   return { status: enabled ? snapshot?.status ?? 'unconfigured' as const : undefined,
     account: snapshot?.account, refresh };
 }

@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { createHash } from 'node:crypto';
-import { localFontFaces, localFontCss } from '../lib/local_fonts.mjs';
+import { localFontFaces, localFontCss, prepareManagedFontResources } from '../lib/local_fonts.mjs';
 
 import JSZip from 'jszip';
 import { buildPptx } from '../lib/pptx_builder.mjs';
@@ -20,9 +20,9 @@ import {
   verifyEmbeddedFaces,
 } from '../lib/font_embedding.mjs';
 
-function portableHtml(data = makeTestTtf(), sha256 = createHash('sha256').update(data).digest('hex')) {
-  const token = Buffer.from(JSON.stringify({ family: 'Test Web Font', weight: 400, style: 'normal', sha256 })).toString('base64');
-  return `<html><head><style data-lazymind-font-required="true">/*lazymind-font:${token}*/@font-face{font-family:"Test Web Font";font-weight:400;font-style:normal;src:url(data:font/ttf;base64,${data.toString('base64')})}</style></head><body>Keep content</body></html>`;
+function portableHtml(data = makeTestTtf(), sha256 = createHash('sha256').update(data).digest('hex'), family = 'Test Web Font', weight = 400) {
+  const token = Buffer.from(JSON.stringify({ family, weight, style: 'normal', sha256 })).toString('base64');
+  return `<html><head><style data-lazymind-font-required="true">/*lazymind-font:${token}*/@font-face{font-family:"${family}";font-weight:${weight};font-style:normal;src:url(data:font/ttf;base64,${data.toString('base64')})}</style></head><body>Keep content</body></html>`;
 }
 
 test('portable font package rejects corruption and preview-only embedding', () => {
@@ -34,6 +34,13 @@ test('portable font package rejects corruption and preview-only embedding', () =
   assert.throws(() => portableFontFaces('<style data-lazymind-font-required="true"></style>'), /empty or invalid/);
   assert.throws(() => portableFontFaces(portableHtml().replace('</style>',
     '/*lazymind-font:broken*/@font-face{src:url(missing.ttf)}</style>')), /empty or invalid/);
+});
+
+test('inline OpenType resources preserve full verified font bytes', () => {
+  const data = makeTestTtf();
+  const html = portableHtml(data).replace('data:font/ttf', 'data:font/otf');
+  assert.ok(portableFontFaces(html)[0].data.equals(data));
+  assert.throws(() => portableFontFaces(html.replace(data.toString('base64'), Buffer.from('corrupt').toString('base64'))), /corrupted/);
 });
 
 test('subset HTML embeds verified original bytes and fails when the original is missing', async () => {
@@ -66,6 +73,62 @@ test('subset HTML embeds verified original bytes and fails when the original is 
     await rm(path.join(folder, record.file));
     await assert.rejects(embedGoogleFontsFromPages(output, [{ path: source }]),
       error => error.fontPortability && /Original font resource unavailable/.test(error.message));
+  } finally {
+    if (previous === undefined) delete process.env.LAZYMIND_FONT_DIR;
+    else process.env.LAZYMIND_FONT_DIR = previous;
+    await rm(folder, { recursive: true, force: true });
+  }
+});
+
+test('resource URL fonts embed their verified local bytes without fetching the preview URL', async () => {
+  const folder = await mkdtemp(path.join(os.tmpdir(), 'font-resource-export-'));
+  const previous = process.env.LAZYMIND_FONT_DIR;
+  process.env.LAZYMIND_FONT_DIR = folder;
+  try {
+    const data = makeTestTtf();
+    const id = createHash('sha256').update(data).digest('hex');
+    const record = { id, file: `${id}.ttf`, aliases: ['Test Web Font', '测试字体'], family: 'Test Web Font',
+      weight: 400, style: 'normal', embeddable: true };
+    await writeFile(path.join(folder, record.file), data);
+    await writeFile(path.join(folder, `${id}.json`), JSON.stringify(record));
+    const html = portableHtml().replace(/data:font\/ttf;base64,[A-Za-z0-9+/=]+/,
+      `/static-files/presentation-fonts/${id}.ttf`);
+    const aliasStyle = portableHtml(data, id, '测试字体').match(/<style.*<\/style>/)[0]
+      .replace(/data:font\/ttf;base64,[A-Za-z0-9+/=]+/, `/static-files/presentation-fonts/${id}.ttf`);
+    const [prepared] = await prepareManagedFontResources({ route: async () => {} },
+      [html.replace('</head>', `${aliasStyle}</head>`)]);
+    assert.deepEqual([...prepared.html.matchAll(/src:url\(([^)]+)\)/g)].map(match => match[1]),
+      Array(2).fill(`https://lazymind-fonts.invalid/static-files/presentation-fonts/${id}.ttf`));
+    const faces = portableFontFaces(html, await localFontFaces());
+    assert.ok(faces[0].data.equals(data));
+    assert.throws(() => portableFontFaces(html), /Original font resource unavailable/);
+    for (const prefix of ['https://preview.invalid', 'https://preview.invalid/api/core']) {
+      const signed = html.replace(`/static-files/presentation-fonts/${id}.ttf`,
+        `${prefix}/static-files/presentation-fonts/${id}.ttf?signature=test&expires=1`);
+      assert.ok(portableFontFaces(signed, await localFontFaces())[0].data.equals(data));
+    }
+    for (const invalid of ['https://example.com/font.ttf', `/static-files/presentation-fonts/${'f'.repeat(64)}.ttf`,
+      `file:///tmp/${id}.ttf`]) {
+      assert.throws(() => portableFontFaces(html.replace(`/static-files/presentation-fonts/${id}.ttf`, invalid), faces),
+        /resource URL is invalid/);
+    }
+    for (const [before, after] of [['font-family:"Test Web Font"', 'font-family:"Another Font"'],
+      ['font-weight:400', 'font-weight:700'], ['font-style:normal', 'font-style:italic']]) {
+      assert.throws(() => portableFontFaces(html.replace(before, after), faces), /declarations do not match/);
+    }
+    const source = path.join(folder, 'page.html');
+    const output = path.join(folder, 'deck.pptx');
+    await writeFile(source, html);
+    const zip = new JSZip();
+    zip.file('[Content_Types].xml', '<Types></Types>');
+    zip.file('ppt/_rels/presentation.xml.rels', '<Relationships></Relationships>');
+    zip.file('ppt/presentation.xml', '<p:presentation><p:defaultTextStyle/></p:presentation>');
+    await writeFile(output, await zip.generateAsync({ type: 'nodebuffer' }));
+    const fonts = await embedGoogleFontsFromPages(output, [{ path: source }], {
+      fetchImpl: () => { throw new Error('managed font export must not access network'); },
+    });
+    assert.deepEqual(fonts, ['Test Web Font:regular']);
+    await verifyEmbeddedFaces(output, faces);
   } finally {
     if (previous === undefined) delete process.env.LAZYMIND_FONT_DIR;
     else process.env.LAZYMIND_FONT_DIR = previous;
@@ -115,6 +178,39 @@ test('required font failure preserves the previous exported file', async () => {
       bounds: { x: 0, y: 0, w: 300, h: 80 }, styles: { fontFamily: 'Test Web Font' },
     } } }], folder, output), /corrupted/);
     assert.equal(await readFile(output, 'utf8'), 'previous export');
+  } finally {
+    await rm(folder, { recursive: true, force: true });
+  }
+});
+
+test('editable text embeds used font variants without duplicate weights or unused aliases', async () => {
+  const folder = await mkdtemp(path.join(os.tmpdir(), 'used-font-variants-'));
+  try {
+    const source = path.join(folder, 'page.html');
+    const output = path.join(folder, 'deck.pptx');
+    const face = weight => {
+      const data = makeTestTtf();
+      data.writeUInt16BE(weight, data.readUInt32BE(20) + 4);
+      return portableHtml(data, undefined, 'Test Web Font', weight);
+    };
+    const extraStyles = [face(400), face(700), portableHtml(undefined, undefined, '测试字体')]
+      .map(html => html.match(/<style.*<\/style>/)[0]).join('');
+    const html = face(300).replace('</head>', `${extraStyles}</head>`);
+    await writeFile(source, html);
+    const zip = new JSZip();
+    zip.file('[Content_Types].xml', '<Types></Types>');
+    zip.file('ppt/_rels/presentation.xml.rels', '<Relationships></Relationships>');
+    zip.file('ppt/presentation.xml', '<p:presentation><p:defaultTextStyle/></p:presentation>');
+    await writeFile(output, await zip.generateAsync({ type: 'nodebuffer' }));
+    const result = await embedGoogleFontsFromPages(output, [{
+      path: source,
+      ir: { ct: { children: ['400', '700'].map(fontWeight => ({
+        text: 'Editable', styles: { fontFamily: '"Test Web Font", "测试字体"', fontWeight },
+      })) } },
+    }]);
+    assert.deepEqual(result, ['Test Web Font:regular', 'Test Web Font:bold']);
+    await verifyEmbeddedFaces(output, portableFontFaces(html)
+      .filter(face => face.family === 'Test Web Font' && face.weight !== 300));
   } finally {
     await rm(folder, { recursive: true, force: true });
   }

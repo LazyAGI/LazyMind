@@ -181,7 +181,7 @@ func organizeApprovalSummary(t *testing.T) string {
 	t.Helper()
 	raw, err := json.Marshal(map[string]any{
 		"status": "completed",
-		"approval_items": []map[string]any{
+		"fs_apply": map[string]any{"approval_items": []map[string]any{
 			{
 				"id": "0", "type": "merge",
 				"source_keys":       []string{"research/论文精读", "research/论文精读-skill2"},
@@ -202,6 +202,7 @@ func organizeApprovalSummary(t *testing.T) string {
 				"delete_keys":       []string{},
 				"depends_on":        []string{},
 			},
+		},
 		},
 	})
 	if err != nil {
@@ -279,5 +280,12 @@ func assertSkillUntouched(t *testing.T, db *testutil.TestDB, skillID, name, revi
 	}
 	if skill.SkillName != name || skill.DeletedAt != nil || skill.HeadRevisionID == nil || *skill.HeadRevisionID != revisionID || skill.Field != "" {
 		t.Fatalf("skill %s changed before approval: %#v", skillID, skill)
+	}
+}
+
+func TestParseOrganizeApprovalItemsLegacySummary(t *testing.T) {
+	items, err := parseOrganizeApprovalItems(`{"approval_items":[{"id":"old","type":"refactor","content":"legacy proposal"}]}`)
+	if err != nil || len(items) != 1 || items[0].ID != "old" {
+		t.Fatalf("items=%#v err=%v", items, err)
 	}
 }

@@ -1,3 +1,4 @@
+import unicodedata
 import unittest
 from pathlib import Path
 import fitz
@@ -100,7 +101,7 @@ class PreservationTests(unittest.TestCase):
                 [self.block('huge', [30, 85, 150, 105], 'Source')],
                 {'huge': translation},
             )
-            text = ''.join(p.get_text() for p in doc)
+            text = unicodedata.normalize('NFKC', ''.join(p.get_text() for p in doc))
             self.assertIn(visible(translation), visible(text))
             self.assertLess(text.index('BEFORE'), text.index('完整译文'))
             self.assertLess(text.index('这是最后一句'), text.index('AFTER'))

@@ -69,10 +69,7 @@ import {
 } from "@/utils/developerMode";
 
 import KnowledgeBaseSyncNow from "@/modules/knowledge/components/KnowledgeBaseSyncNow";
-import {
-  effectiveProcessingLevel,
-  type ProcessingLevel,
-} from "@/modules/knowledge/utils/processingLevel";
+import type { ProcessingLevel } from "@/modules/knowledge/utils/processingLevel";
 import { useRAGComponent } from "@/modules/modelProvider/contexts/RAGComponentContext";
 
 import "./index.scss";
@@ -129,11 +126,6 @@ const Detail = () => {
   const { t } = useTranslation();
   const { availability: ragAvailability } = useRAGComponent();
   const ragReady = ragAvailability === "ready";
-  const ragUnavailableReason = ragAvailability === "checking"
-    ? "正在检查本地知识库组件状态"
-    : ragAvailability === "error"
-      ? "无法确认本地知识库组件状态，请重试"
-      : "请先安装本地知识库组件，并重启本地服务";
   const knowledgeListRef = useRef<IKnowledgeListRef>(null);
   const createFolderRef = useRef<RenameModalRef>(null);
   const importKnowledgeRef = useRef<IImportKnowledgeModalRef>();
@@ -546,9 +538,7 @@ const Detail = () => {
             onOpenAttachment={documentId => navigate(`/lib/knowledge/knowledge/${encodeURIComponent(id)}/${encodeURIComponent(documentId)}`)}
             onBack={() => returnToList()}
             onUploadPdf={uploadPaperPdf}
-            processingLevel={effectiveProcessingLevel(detail.processing_level)}
-            parsers={detail.parsers}
-            canParse={ragReady && documentParsingEnabled !== false}
+            canParse={documentParsingEnabled !== false}
           />
         </div>
       ) : null}
@@ -639,7 +629,6 @@ const Detail = () => {
                             )}
                           </>
                         ),
-                        disabled: !ragReady,
                       },
                     ],
                     onClick: ({ key }: { key: string }) => {
@@ -682,8 +671,6 @@ const Detail = () => {
             {hasWritePermission && (
               <Button
                 icon={<FolderAddOutlined aria-hidden />}
-                disabled={!ragReady}
-                title={!ragReady ? ragUnavailableReason : undefined}
                 onClick={() => {
                   createFolderRef.current?.onOpen({
                     title: t("knowledge.createFolder"),
@@ -737,7 +724,6 @@ const Detail = () => {
                     {
                       key: "batchMove",
                       label: t("knowledge.batchMove"),
-                      disabled: !ragReady,
                       onClick: () => {
                         knowledgeListRef.current?.openBatchMove?.();
                       },
@@ -745,7 +731,6 @@ const Detail = () => {
                     {
                       key: "batchDelete",
                       label: t("knowledge.batchDelete"),
-                      disabled: !ragReady,
                       onClick: () => {
                         knowledgeListRef.current?.deleteKnowledge();
                       },

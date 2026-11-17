@@ -17,8 +17,26 @@ from lazymind.common.token_estimation import estimate_tokens
 from .live import MAX_REASONING, public_error
 
 router = APIRouter()
-WORKSPACES = Path(os.environ.get('LAZYMIND_SUBAGENT_WORKSPACE_ROOT', '/data/subagent'))
-GATEWAY = os.environ.get('LAZYMIND_F4_GATEWAY_URL', 'http://kong:8000').rstrip('/')
+
+
+def _default_gateway():
+    # Local runtimes (desktop) have no Kong: the local proxy replaces it and validates
+    # the bearer the same way. Connect via loopback even if it binds a wildcard address.
+    port = os.environ.get('LAZYMIND_LOCAL_PROXY_PORT', '').strip()
+    if not port:
+        return 'http://kong:8000'
+    host = os.environ.get('LAZYMIND_LOCAL_PROXY_ADDRESS', '').strip() or '127.0.0.1'
+    if host in ('0.0.0.0', '::', '[::]'):
+        host = '127.0.0.1'
+    if ':' in host and not host.startswith('['):
+        host = f'[{host}]'
+    return f'http://{host}:{port}'
+
+
+# LAZYMIND_SUBAGENT_WORKSPACE is the subagent root every launcher sets (see lazymind/config.py).
+WORKSPACES = Path(os.environ.get('LAZYMIND_SUBAGENT_WORKSPACE_ROOT')
+                  or os.environ.get('LAZYMIND_SUBAGENT_WORKSPACE') or '/data/subagent')
+GATEWAY = (os.environ.get('LAZYMIND_F4_GATEWAY_URL') or _default_gateway()).rstrip('/')
 
 
 async def authorized_task(task_id, authorization):

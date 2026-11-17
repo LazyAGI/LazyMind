@@ -6,7 +6,7 @@ func pdfIROpenAPISchemas() map[string]any {
 	document := objReq([]string{"version", "source_sha256", "parser", "coordinate_space", "pages", "blocks"}, prop("version", intSchema()), prop("source_sha256", strSchema()), prop("parser", objReq([]string{"name", "model"}, prop("name", strSchema()), prop("model", strSchema()))), prop("coordinate_space", enumStringSchema("normalized_top_left")), prop("pages", array(objReq([]string{"index"}, prop("index", intSchema()), prop("width", map[string]any{"type": "number"}), prop("height", map[string]any{"type": "number"})))), prop("blocks", array(refSchema("PDFIRBlock"))), prop("warnings", array(strSchema())))
 	return map[string]any{
 		"PDFIRBlock": block, "PDFIRDocument": document,
-		"PDFIRState":    objReq([]string{"status"}, prop("status", enumStringSchema("not_requested", "queued", "running", "ready", "failed", "unavailable")), prop("source_sha256", strSchema()), prop("error_message", strSchema()), prop("document", refSchema("PDFIRDocument"))),
+		"PDFIRState":    objReq([]string{"status"}, prop("status", enumStringSchema("not_requested", "queued", "running", "ready", "failed", "unavailable")), prop("source_sha256", strSchema()), prop("error_message", strSchema()), prop("error_code", strSchema()), prop("document", refSchema("PDFIRDocument"))),
 		"PDFIREnvelope": objReq([]string{"data"}, prop("data", refSchema("PDFIRState"))),
 		"PDFIRRequest":  obj(prop("force", boolSchema())),
 	}
