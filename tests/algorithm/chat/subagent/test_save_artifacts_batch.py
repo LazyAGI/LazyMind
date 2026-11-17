@@ -37,11 +37,11 @@ def test_batch_saves_mixed_outputs_and_repeated_keys(batch_context, monkeypatch,
               '## 3.3V 电源\n## 1.5℃ 温升\n## 1.0版本说明\n## 1.标题\n## 1.1 方法\n'
               '## 1. 3.3V 电源\n## 一、背景\n## （一）背景\n## (a) 背景\n'
               '```markdown\n## 1. 代码示例\n```\n')
-    expected = (report.replace('## 1. 背景', '## 背景').replace('### 1.1. 方法', '### 方法')
-                .replace('## 1.1 方法', '## 方法')
-                .replace('## 1.1. 结果', '## 结果').replace('## 1. 3.3V 电源', '## 3.3V 电源')
-                .replace('## 一、背景', '## 背景').replace('## （一）背景', '## 背景')
-                .replace('## (a) 背景', '## 背景'))
+    expected = ('# 1. 2026 年报告\n\n## 背景\n### 方法 ###\n'
+                '1. 正文列表\n\n## 结果\n## 2026 年展望\n## 3D 方法\n'
+                '## V 电源\n## ℃ 温升\n## 版本说明\n## 标题\n## 方法\n'
+                '## 3.3V 电源\n## 背景\n## 背景\n## 背景\n'
+                '```markdown\n## 1. 代码示例\n```\n')
     result = tools.save_artifacts([
         {'key': 'report', 'value': {'text': report}},
         {'key': 'summary', 'value': {'ok': True}, 'content_type': 'json'},
