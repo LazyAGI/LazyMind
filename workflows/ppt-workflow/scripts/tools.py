@@ -5663,6 +5663,7 @@ def _stage_tool_result(stage_name: str, payload: dict) -> dict:
 _MATERIAL_DIR_NAME = 'material_images'
 _MATERIAL_MANIFEST = 'manifest.json'
 _MAX_MATERIAL_IMAGES = 12
+_MAX_MATERIAL_IMAGE_BYTES = 12 * 1024 * 1024
 _IMAGE_EXTS = ('.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp')
 _PPT_BACKGROUND_PIXEL_SIZE = (1280, 720)
 _DOWNLOAD_TIMEOUT = 25
@@ -5673,7 +5674,7 @@ def _validate_material_image(data: bytes) -> dict[str, Any]:
     """Decode raster assets before registration; reject tracking/blank placeholders."""
     from PIL import Image, UnidentifiedImageError
 
-    if not 32 <= len(data) <= 12 * 1024 * 1024:
+    if not 32 <= len(data) <= _MAX_MATERIAL_IMAGE_BYTES:
         raise ValueError('image payload size is outside the supported range')
     try:
         with Image.open(io.BytesIO(data)) as image:
@@ -5810,7 +5811,7 @@ def _download_image_bytes(url: str) -> bytes:
                 continue
             chunks.append(chunk)
             total += len(chunk)
-            if total > 12 * 1024 * 1024:
+            if total > _MAX_MATERIAL_IMAGE_BYTES:
                 raise ValueError('image larger than 12MB')
     finally:
         resp.close()
@@ -6167,6 +6168,112 @@ def ppt_collect_kb_images(
     return collect_document_images(knowledge_base_id, document_id, page_token, page_size)
 
 
+def _feishu_image_request_error(exc: Exception) -> str:
+    from lazyllm.common import KeyAuthError
+    from lazyllm.tools.fs.limits import FSReadLimitError
+
+    cause = exc.__cause__ or exc
+    if isinstance(cause, (FSReadLimitError, TimeoutError)):
+        return str(cause)
+    response = getattr(cause, 'response', None)
+    status = getattr(response, 'status_code', None)
+    if isinstance(cause, KeyAuthError):
+        match = re.match(r'^(401|403)\b', str(cause))
+        status = int(match[1]) if match else None
+    if status == 401:
+        return 'Feishu returned HTTP 401; reconnect the Feishu account'
+    if status == 403:
+        return 'Feishu returned HTTP 403; check document and media permissions'
+    return f'Feishu returned HTTP {status}' if status else f'Feishu request failed ({type(cause).__name__})'
+
+
+def ppt_download_feishu_images(document: str, image_tokens: Optional[list[str]] = None) -> dict:
+    """List or download original images from an authorized Feishu document for PPT.
+
+    Call with only the document to list its image blocks. Then pass selected
+    image_tokens to download the original files. Use the returned local_path
+    records with ppt_inspect_material_images and ppt_register_material_images.
+
+    Args:
+        document: Feishu Docx/Wiki link or its resolved /~docx/ or /~node/ path.
+        image_tokens: Optional list of up to 12 tokens from this document's image blocks.
+    """
+    import lazyllm
+    from lazyllm.tools.fs.base import clean_document_ref
+    from lazyllm.tools.fs.limits import fs_read_limits
+    from lazyllm.tools.fs.supplier.feishu import FeishuWikiFS
+
+    tool_name = 'ppt_download_feishu_images'
+    locator = clean_document_ref(document)
+    try:
+        url = urlparse(locator)
+    except ValueError:
+        return _tool_error(tool_name, 'Provide a Feishu Docx/Wiki link or resolved document path')
+    if re.fullmatch(r'/?~(?:docx|doc|node)/[\w-]+/?', locator, re.ASCII):
+        source = locator
+    elif (url.scheme == 'https' and (url.hostname == 'feishu.cn' or (url.hostname or '').endswith('.feishu.cn'))
+          and not url.username and not url.password
+          and re.fullmatch(r'/(?:docx|docs|wiki)/[\w-]+/?', url.path, re.ASCII)):
+        source = f'https://{url.hostname}{url.path}'
+    else:
+        return _tool_error(tool_name, 'Provide a Feishu Docx/Wiki link or resolved document path')
+    if image_tokens is not None and (not image_tokens or len(image_tokens) > _MAX_MATERIAL_IMAGES):
+        return _tool_error(tool_name, 'Select between 1 and 12 image tokens to download')
+    if not (lazyllm.globals.config['dynamic_fs_auth'] or {}).get('feishu'):
+        return _tool_error(tool_name, 'Connect a Feishu account and enable it for chat before reading document images')
+
+    client = FeishuWikiFS(dynamic_auth=True, skip_instance_cache=True)
+    try:
+        with fs_read_limits(seconds=_DOWNLOAD_TIMEOUT):
+            blocks = client.get_doc_blocks(source, with_descendants=True)
+    except Exception as exc:
+        return _tool_error(tool_name, 'Could not read Feishu document blocks: ' + _feishu_image_request_error(exc))
+    if not blocks:
+        return _tool_error(tool_name, 'Feishu returned no document blocks; could not verify the image list')
+    images: dict[str, dict] = {}
+    for block in blocks:
+        image = block.get('image') if isinstance(block, dict) and block.get('block_type') == 27 else None
+        token = _coerce_str(image.get('token')) if isinstance(image, dict) else ''
+        if token:
+            images.setdefault(token, {'image_token': token, 'block_id': block.get('block_id')})
+    if image_tokens is None:
+        return {'document': source, 'count': len(images), 'images': list(images.values())}
+
+    selected = list(dict.fromkeys(image_tokens))
+    if any(token not in images for token in selected):
+        return _tool_error(tool_name, 'Select tokens from image blocks in this Feishu document')
+    root = _material_root()
+    downloaded, errors = [], []
+    for token in selected:
+        try:
+            with fs_read_limits(seconds=_DOWNLOAD_TIMEOUT, max_bytes=_MAX_MATERIAL_IMAGE_BYTES):
+                data = client.download_media(token)
+        except Exception as exc:
+            errors.append({**images[token], 'error': _feishu_image_request_error(exc)})
+            continue
+        try:
+            metadata = _validate_material_image(data)
+            ext = _guess_ext_from_bytes(data, fallback='')
+            if not ext:
+                raise ValueError('Feishu returned an unsupported image format')
+            digest = hashlib.sha256(data).hexdigest()
+            path = root / f'feishu_{digest}{ext}'
+            temporary = root / f'.feishu_{uuid.uuid4().hex}.tmp'
+            try:
+                temporary.write_bytes(data)
+                os.replace(temporary, path)
+            finally:
+                temporary.unlink(missing_ok=True)
+        except (OSError, ValueError) as exc:
+            errors.append({**images[token], 'error': str(exc)})
+            continue
+        downloaded.append({
+            **images[token], **metadata, 'source': 'feishu', 'origin': source,
+            'local_path': str(path.resolve()), 'sha256': digest,
+        })
+    return {'document': source, 'count': len(downloaded), 'images': downloaded, 'errors': errors}
+
+
 def ppt_inspect_material_images(images_json: Union[str, list, None] = None) -> dict:
     """Stage and inspect up to 12 PPT image candidates before selecting them.
 
@@ -6205,7 +6312,7 @@ def ppt_register_material_images(
     images_json: Union[str, list, None] = None,
     replace: Union[bool, str, None] = False,
 ) -> dict:
-    """Stage KB, PDF or web images for both HTML and native PPTX embedding.
+    """Stage KB, PDF, Feishu or web images for both HTML and native PPTX embedding.
 
     In collect_materials, pass only selected records from ppt_inspect_material_images
     or selected PDF images with a successful visual_inspection.
