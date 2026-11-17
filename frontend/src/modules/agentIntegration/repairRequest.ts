@@ -1,7 +1,8 @@
 import type { TFunction } from "i18next";
 import type { DesktopAgent, DesktopAgentIntegrationStatus } from "@/runtime/desktopBridge";
 
-export const AGENT_REPAIR_DOCS_URL = "https://modelscope.cn/api/v1/datasets/209835/repo/tree?Revision=master&Root=docs&Recursive=True&PageNumber=1&PageSize=100";
+export const AGENT_REPAIR_DOCS_URL = "https://modelscope.cn/datasets/CarlosShaoting/lazymind-cst/tree/master/docs";
+const AGENT_REPAIR_DOCS_LIST_URL = "https://modelscope.cn/api/v1/datasets/209835/repo/tree?Revision=master&Root=docs&Recursive=True&PageNumber=1&PageSize=100";
 
 const CHECK_ENVIRONMENT_KEYS = [
   "LAZYMIND_HOME", "LAZYMIND_RUNTIME_PROFILE", "LAZYMIND_CONNECTOR_CONFIG",
@@ -59,6 +60,8 @@ export function buildAgentRepairRequest({ agent, status, error, stage }: AgentRe
   return [
     text("intro"),
     `${text("guide")}: ${AGENT_REPAIR_DOCS_URL}`,
+    `${text("guideListing")}: ${AGENT_REPAIR_DOCS_LIST_URL}`,
+    text("guideInstructions"),
     "",
     text("snapshot"),
     field("agent", status?.display_name ? `${status.display_name} (${agent})` : agent),
