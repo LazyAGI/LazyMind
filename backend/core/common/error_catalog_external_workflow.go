@@ -13,6 +13,7 @@ func init() {
 	registerAdditionalError("workflow state unavailable", http.StatusInternalServerError, 2004905)
 	registerAdditionalError("task cancellation rejected", http.StatusInternalServerError, 2004906)
 	registerAdditionalErrorPattern("task cancellation rejected: HTTP %d", "task cancellation rejected", http.StatusInternalServerError, 2004906)
+	registerAdditionalError("workflow recovery requires a single Chat run", http.StatusConflict, 2004907)
 	registerAdditionalErrorPattern("collect recovered task %s", "Internal server error", http.StatusInternalServerError, 2000000)
 	for _, source := range []string{
 		"task_description is required", "invalid skill import url", "skill import url must use http or https",
