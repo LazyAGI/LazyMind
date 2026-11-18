@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"lazymind/core/asyncjob"
 	"lazymind/core/pdfir"
 	"reflect"
 	"testing"
@@ -133,46 +132,6 @@ func TestPrecisionDigestDisablesHistoricalV4CoordinatesButKeepsBody(t *testing.T
 		t.Fatalf("historical selection changed: %+v %v", selected, err)
 	}
 }
-func TestV5CandidateCannotSpendAfterPrecisionContractChange(t *testing.T) {
-	d, id := fixture(t)
-	snap, _ := BuildSourceSnapshot(d, id)
-	repo := Repository{DB: guideDB(t)}
-	scope := Scope{OwnerID: id.OwnerID, DatasetID: id.DatasetID, DocumentID: id.DocumentID, Language: "en"}
-	model := ModelIdentity{ID: "m", ContextTokens: 128000}
-	rev, err := repo.Create(t.Context(), CreateRevision{Scope: scope, SourceSHA256: id.SourceSHA256, IRDigest: snap.IRDigest, SnapshotPath: "old", Model: model})
-	if err != nil {
-		t.Fatal(err)
-	}
-	repo.DB.Model(&rev).Update("fingerprint", digest([]any{id.SourceSHA256, snap.IRDigest, "paper-guide-source-v2", "paper-guide-v5", model}))
-	calls := 0
-	service := Service{Repo: repo, Source: &fixtureSource{s: snap}, Authorize: func(context.Context, Scope, bool) error { return nil }, ResolveModel: func(context.Context, Scope, string) (ModelIdentity, map[string]any, error) { return model, nil, nil }, Call: func(context.Context, string, map[string]any, map[string]any) (json.RawMessage, error) {
-		calls++
-		return nil, nil
-	}}
-	_, err = service.Run(t.Context(), asyncjob.Job{ID: rev.JobID, PayloadJSON: mustJSON(JobPayload{rev.ID, rev.Epoch})}, testFence{repo.DB})
-	if !errors.Is(err, ErrRegenerate) || calls != 0 {
-		t.Fatalf("old contract spent: %d %v", calls, err)
-	}
-}
-
-func TestExpandedCatalogAdmissionNeverTruncatesEvidenceOrSections(t *testing.T) {
-	x := execution{model: ModelIdentity{ContextTokens: 10000000}}
-	evidence := make([]GuideEvidence, 2049)
-	if x.inputFits("paper.guide.extract", map[string]any{"evidence": evidence}) {
-		t.Fatal("2049 page entries silently admitted")
-	}
-	if !x.inputFits("paper.guide.extract", map[string]any{"evidence": evidence[:2048]}) {
-		t.Fatal("2048 evidence contract changed")
-	}
-	x.snap.Sections = make([]SourceSection, 513)
-	if _, _, err := x.planInput(t.Context()); !errors.Is(err, ErrContext) {
-		t.Fatalf("513 source sections were not rejected before spending: %v", err)
-	}
-	if len(x.snap.Sections) != 513 {
-		t.Fatal("source sections truncated")
-	}
-}
-
 func TestContainmentMetadataIsRequiredAndBound(t *testing.T) {
 	d, id := fixture(t)
 	d.Blocks = d.Blocks[:2]

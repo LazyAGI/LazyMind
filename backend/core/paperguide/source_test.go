@@ -121,34 +121,6 @@ func TestPreserveAmbiguousHyphensAndExplicitSoftHyphen(t *testing.T) {
 	}
 }
 
-func TestCatalogAssetsWithoutOptionalMetadata(t *testing.T) {
-	for _, kind := range []string{"chart", "image", "table", "formula"} {
-		t.Run(kind, func(t *testing.T) {
-			d, id := fixture(t)
-			d.Blocks = []pdfir.Block{{ID: "bare", Type: kind, Page: 0, BBox: []float64{0.1, 0.2, 0.7, 0.8}}}
-			snap, err := BuildSourceSnapshot(d, id)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if len(snap.Assets) != 1 || snap.Assets[0].ID != snap.Evidence[0].ID {
-				t.Fatalf("lost real %s asset: %+v", kind, snap)
-			}
-			expected := "page"
-			if snap.Evidence[0].Text != "" || snap.Evidence[0].Locator.Kind != expected || len(snap.Assets[0].Warnings) == 0 || len(snap.Coverage.PageWarnings) == 0 || len(snap.Coverage.Warnings) == 0 {
-				t.Fatalf("invented material or hidden gap: %+v", snap)
-			}
-			if err = ValidateSnapshot(snap, id, snap.IRDigest); err != nil {
-				t.Fatal(err)
-			}
-			plan := baselinePlan(snap)
-			plan.RequiredAssets = []GuideAssetDecision{{ID: snap.Assets[0].ID, Included: false, Reason: "Original region is present but readable content is missing."}}
-			if err = ValidatePlan(snap, plan); err != nil {
-				t.Fatalf("honest excluded asset rejected: %v", err)
-			}
-		})
-	}
-}
-
 func TestLegacySnapshotRemainsReadableAndCatalogIdentityChanges(t *testing.T) {
 	raw, err := os.ReadFile("testdata/legacy-snapshot-v1.json")
 	if err != nil {
@@ -180,41 +152,5 @@ func TestLegacySnapshotRemainsReadableAndCatalogIdentityChanges(t *testing.T) {
 	json.Unmarshal(raw, &current)
 	if ValidateSnapshot(current, id, current.IRDigest) == nil {
 		t.Fatal("unknown catalog accepted")
-	}
-}
-
-func TestLiveChartExclusionsBindToVersionedCanonicalCatalog(t *testing.T) {
-	raw, err := os.ReadFile("../../../tests/fixtures/paper-guide-live-contract.json")
-	if err != nil {
-		t.Fatal(err)
-	}
-	var live struct {
-		Evidence  []GuideEvidence      `json:"chart_evidence"`
-		Decisions []GuideAssetDecision `json:"chart_decisions"`
-	}
-	if err = json.Unmarshal(raw, &live); err != nil {
-		t.Fatal(err)
-	}
-	d, id := fixture(t)
-	d.Blocks = nil
-	d.Pages = nil
-	for _, e := range live.Evidence {
-		d.Pages = append(d.Pages, pdfir.Page{Index: e.Locator.Page})
-		d.Blocks = append(d.Blocks, pdfir.Block{ID: e.SourceBlockID, Type: e.SourceType, Page: e.Locator.Page, Text: e.Text})
-	}
-	snap, err := BuildSourceSnapshot(d, id)
-	if err != nil {
-		t.Fatal(err)
-	}
-	plan := baselinePlan(snap)
-	for i, decision := range live.Decisions {
-		decision.ID = snap.Evidence[i].ID
-		plan.RequiredAssets = append(plan.RequiredAssets, decision)
-		if decision.Included || snap.Evidence[i].Text != "" || snap.Evidence[i].Locator.Kind != "page" {
-			t.Fatal("invented visual contents")
-		}
-	}
-	if err = ValidatePlan(snap, plan); err != nil {
-		t.Fatal(err)
 	}
 }

@@ -90,13 +90,16 @@ it("uses the authorized original bounds independently from the citation and repo
     getPage: async () => ({ getViewport: () => ({ width: 600, height: 800 }) }),
     destroy: async () => {},
   }) });
-  const hook = renderHook(() => useGuideSourcePreview("asset", hash, true, hash, () => new ArrayBuffer(4)));
+  const readOriginal = vi.fn(async () => new ArrayBuffer(4));
+  const hook = renderHook(() => useGuideSourcePreview("asset", hash, true, hash, readOriginal));
+  expect(readOriginal).not.toHaveBeenCalled();
   const result = await hook.result.current.preview({
     id: "figure", source_block_id: "image", source_type: "image", text: "A separate legend.",
     locator: { kind: "page", page: 2 },
   }, { kind: "figure", page: 2, bbox: [.2,.1,.4,.3] });
   expect(previewMocks.get.mock.calls[0][1].regions).toEqual([{ page: 3, bbox: [120, 80, 240, 240] }]);
   expect(result).toMatchObject({ mode: "region", url: "blob:actual-figure" });
+  expect(readOriginal).toHaveBeenCalledTimes(1);
 });
 
 it("does not pass different bytes to PDF.js even when revision metadata claims the source is current", async () => {

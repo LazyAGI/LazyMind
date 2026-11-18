@@ -10,7 +10,7 @@ import Detail from './index';
 const state=vi.hoisted(()=>({viewer:{} as Record<string,any>,guide:{} as Record<string,any>,outline:{} as Record<string,any>}));
 vi.mock('react-pdf',()=>({pdfjs:{GlobalWorkerOptions:{}},Document:()=>null,Page:()=>null}));
 vi.mock('@/modules/knowledge/components/FileViewer',async()=>({default:(await import('react')).forwardRef((props:Record<string,any>,_ref)=>{state.viewer=props;return <div/>;})}));
-vi.mock('@/modules/knowledge/components/PaperReadingWorkspace',()=>({default:(props:Record<string,any>)=>{state.guide=props;return props.source as ReactNode;}}));
+vi.mock('@/modules/knowledge/components/PaperReadingWorkspace',()=>({default:(props:Record<string,any>)=>{state.guide=props;return (typeof props.source === "function" ? props.source(null) : props.source) as ReactNode;}}));
 vi.mock('./components/PaperOutlineRail',()=>({PaperOutlineRail:(props:Record<string,any>)=>{state.outline=props;return null;}}));
 vi.mock('@/modules/knowledge/components/PdfTemporaryChat',async()=>({default:(await import('react')).forwardRef(()=>null)}));
 const adapter=axiosInstance.defaults.adapter;

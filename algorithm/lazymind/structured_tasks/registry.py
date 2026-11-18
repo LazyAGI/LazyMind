@@ -4,11 +4,8 @@ from typing import Callable
 from pydantic import BaseModel
 
 from .paper import formula_prompt, visual_prompt
-from .paper_guide import extract_prompt, plan_prompt, review_prompt, section_prompt
-from .paper_guide_schemas import (
-    Extract, GuideInput, Plan, PlanInput, Review, ReviewInput, Section, SectionInput, bind_output,
-)
 from .schemas import FormulaInput, FormulaOutput, VisualInput, VisualOutput
+from . import paper_explainer
 
 
 @dataclass(frozen=True)
@@ -24,19 +21,15 @@ class TaskSpec:
     prefer_native_json: bool = False
 
 
-PAPER_GUIDE_VERSION = 'paper-guide-v22'
-
-
-def _guide(input_schema, output_schema, prompt, *, timeout_seconds=120):
-    return TaskSpec(PAPER_GUIDE_VERSION, input_schema, output_schema, prompt, timeout_seconds=timeout_seconds,
-                    validate_output=bind_output, reject_duplicate_keys=True, prefer_native_json=True)
-
-
 TASKS = {
-    'paper.guide.extract': _guide(GuideInput, Extract, extract_prompt),
-    'paper.guide.plan': _guide(PlanInput, Plan, plan_prompt, timeout_seconds=180),
-    'paper.guide.section': _guide(SectionInput, Section, section_prompt),
-    'paper.guide.review': _guide(ReviewInput, Review, review_prompt),
+    'paper.explainer.plan': TaskSpec(paper_explainer.EXPLAINER_VERSION, paper_explainer.PlanInput,
+                                   paper_explainer.Plan, paper_explainer.plan_prompt,
+                                   validate_output=paper_explainer.bind_plan,
+                                   timeout_seconds=120, reject_duplicate_keys=True, prefer_native_json=True),
+    'paper.explainer.chapter': TaskSpec(paper_explainer.EXPLAINER_VERSION, paper_explainer.ChapterInput,
+                                      paper_explainer.Chapter, paper_explainer.chapter_prompt,
+                                      timeout_seconds=120, validate_output=paper_explainer.bind_chapter,
+                                      reject_duplicate_keys=True, prefer_native_json=True),
     'paper.formula.explain': TaskSpec('formula-explanation-v7-low-latency', FormulaInput,
                                       FormulaOutput, formula_prompt),
     'paper.visual.explain': TaskSpec('paper-reading-v2-grounded-findings', VisualInput,

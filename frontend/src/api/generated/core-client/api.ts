@@ -7240,7 +7240,9 @@ export interface PaperGuideBlock {
     'claim_ids': Array<string>;
     'evidence_ids': Array<string>;
     'id': string;
+    'interaction'?: PaperGuideInteraction | null;
     'kind': string;
+    'playground'?: PaperGuidePlayground | null;
     'text': string;
 }
 export interface PaperGuideCancellation {
@@ -7297,6 +7299,60 @@ export interface PaperGuideGenerateRequest {
     'model_ref'?: string;
     'regenerate': boolean;
 }
+export interface PaperGuideInteraction {
+    'explanation': string;
+    'higher_is_better': boolean;
+    'kind': PaperGuideInteractionKindEnum;
+    'metric': string;
+    'outputs': Array<PaperGuideInteractionOutput>;
+    'parameters': Array<PaperGuideInteractionParameter>;
+    'provenance': PaperGuideInteractionProvenanceEnum;
+    'rows': Array<PaperGuideInteractionRow>;
+    'steps': Array<PaperGuideInteractionStep>;
+    'title': string;
+    'unit': string;
+}
+
+export const PaperGuideInteractionKindEnum = {
+    Stepper: 'stepper',
+    Comparison: 'comparison',
+    Results: 'results',
+    Calculator: 'calculator'
+} as const;
+
+export type PaperGuideInteractionKindEnum = typeof PaperGuideInteractionKindEnum[keyof typeof PaperGuideInteractionKindEnum];
+export const PaperGuideInteractionProvenanceEnum = {
+    Reported: 'reported',
+    Derived: 'derived',
+    Illustrative: 'illustrative'
+} as const;
+
+export type PaperGuideInteractionProvenanceEnum = typeof PaperGuideInteractionProvenanceEnum[keyof typeof PaperGuideInteractionProvenanceEnum];
+
+export interface PaperGuideInteractionOutput {
+    'label': string;
+    'tokens': Array<string>;
+    'unit': string;
+}
+export interface PaperGuideInteractionParameter {
+    'id': string;
+    'label': string;
+    'max': number;
+    'min': number;
+    'step': number;
+    'unit': string;
+    'value': number;
+}
+export interface PaperGuideInteractionRow {
+    'group': string;
+    'label': string;
+    'note': string;
+    'value': number;
+}
+export interface PaperGuideInteractionStep {
+    'label': string;
+    'text': string;
+}
 export interface PaperGuideLocator {
     'bbox'?: Array<number>;
     'cells'?: Array<PaperGuideCell>;
@@ -7325,11 +7381,17 @@ export interface PaperGuideOriginalDisplay {
 }
 export interface PaperGuidePlan {
     'claims': Array<PaperGuideClaim>;
+    'layout'?: string;
     'profiles': PaperGuideProfiles;
     'questions': Array<string>;
     'required_assets': Array<PaperGuideAssetDecision>;
     'sections': Array<PaperGuideSectionPlan>;
+    'subtitle'?: string;
     'term_policy': Array<string>;
+    'title'?: string;
+}
+export interface PaperGuidePlayground {
+    'html': string;
 }
 export interface PaperGuideProfiles {
     'primary': string | null;

@@ -16,7 +16,7 @@ func paperGuideService() paperguide.Service {
 	return paperguide.Service{FeatureEnabled: PaperGuideEnabled, Repo: paperguide.Repository{DB: store.DB(), PrepareCheckpoint: preparePaperGuideCheckpoint, CheckpointGuard: paperGuideCheckpointGuard}, Source: paperGuideSource{}, Authorize: authorizePaperGuide, ResolveModel: resolvePaperGuideModel, Call: func(ctx context.Context, task string, input map[string]any, cfg map[string]any) (json.RawMessage, error) {
 		result, e := algo.RunStructuredTask(ctx, algo.StructuredTaskRequest{
 			Task: task, Version: paperguide.TaskVersion, Input: input, LLMConfig: cfg,
-			TransportTimeout: paperguide.ModelAttemptTimeout(task),
+			TransportTimeout: paperguide.ModelAttemptTimeout,
 		})
 		if e != nil {
 			// Preserve only safe cancellation causes, never raw provider errors.

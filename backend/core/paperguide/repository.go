@@ -346,7 +346,7 @@ func (r Repository) fenced(ctx context.Context, f asyncjob.FencedReporter, id st
 
 type StepWrite struct {
 	Key, InputHash string
-	Output, Review json.RawMessage
+	Output         json.RawMessage
 	Published      bool
 	ActiveMillis   int64
 }
@@ -356,7 +356,7 @@ func (r Repository) PutStep(ctx context.Context, f asyncjob.FencedReporter, id s
 		var old orm.PaperGuideStep
 		e := tx.Where("revision_id = ? AND step_key = ?", id, w.Key).Take(&old).Error
 		if e == nil {
-			if old.InputHash == w.InputHash && old.OutputJSON == string(w.Output) && old.ReviewJSON == string(w.Review) && old.Published == w.Published {
+			if old.InputHash == w.InputHash && old.OutputJSON == string(w.Output) && old.Published == w.Published {
 				return nil
 			}
 			return ErrConflict
@@ -365,7 +365,7 @@ func (r Repository) PutStep(ctx context.Context, f asyncjob.FencedReporter, id s
 			return e
 		}
 		rev.ChangeVersion++
-		step := orm.PaperGuideStep{ID: uuid.NewString(), RevisionID: id, StepKey: w.Key, InputHash: w.InputHash, OutputJSON: string(w.Output), ReviewJSON: string(w.Review), Epoch: epoch, Version: rev.ChangeVersion, Published: w.Published, CreatedAt: time.Now().UTC()}
+		step := orm.PaperGuideStep{ID: uuid.NewString(), RevisionID: id, StepKey: w.Key, InputHash: w.InputHash, OutputJSON: string(w.Output), Epoch: epoch, Version: rev.ChangeVersion, Published: w.Published, CreatedAt: time.Now().UTC()}
 		if e = tx.Create(&step).Error; e != nil {
 			return e
 		}

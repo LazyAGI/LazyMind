@@ -157,7 +157,7 @@ func ProjectSourcePrecision(base Document, raw []byte) (Document, error) {
 }
 
 // ProjectGuideSourcePrecision obtains figure proofs from the same archive
-// verification pass. The returned Document is byte-identical to the v3 IR.
+// verification pass. Tables with ambiguous caption locations are omitted from the guide.
 func ProjectGuideSourcePrecision(base Document, raw []byte) (Document, []OriginalFigureProof, error) {
 	proofs := []OriginalFigureProof{}
 	d, err := projectSourcePrecision(base, raw, &proofs)
@@ -265,7 +265,11 @@ func projectSourcePrecision(base Document, raw []byte, figures *[]OriginalFigure
 		return fail(err)
 	}
 	projection := &SourcePrecision{Version: SourcePrecisionVersion, SourceSHA256: base.SourceSHA256, BaseIRDigest: Digest(string(baseJSON)), ArchiveDigest: Digest(string(raw)), Regions: []SourceRegion{}}
-	tableRegions, tableParents, err := projectPrecisionTables(base, l.Pages, index)
+	var omitted map[string]bool
+	if figures != nil {
+		omitted = make(map[string]bool)
+	}
+	tableRegions, tableParents, err := projectPrecisionTables(base, l.Pages, index, omitted)
 	if err != nil {
 		return fail(err)
 	}
@@ -403,8 +407,35 @@ func projectSourcePrecision(base Document, raw []byte, figures *[]OriginalFigure
 	}
 	// Only fully verified text can authorize the original box. Appended caption
 	// blocks have no canonical content-item proof and stay conservatively page-only.
+	out := base
+	if len(omitted) > 0 {
+		// Drop dedicated captions with their table. Keep ordinary paragraphs
+		// that mention it and keep the shared reader IR intact.
+		captions := map[string]bool{}
+		for _, b := range base.Blocks {
+			if omitted[b.ID] && b.Table != nil {
+				for _, link := range b.Table.RelatedBlocks {
+					if link.Relation == "caption" {
+						captions[link.BlockID] = true
+					}
+				}
+			}
+		}
+		out.Blocks = make([]Block, 0, len(base.Blocks))
+		for _, b := range base.Blocks {
+			if b.Type == "table_caption" && captions[b.ID] {
+				omitted[b.ID] = true
+			}
+			if !omitted[b.ID] {
+				out.Blocks = append(out.Blocks, b)
+			}
+		}
+	}
 	pageOnly := []string{}
 	for i, b := range base.Blocks {
+		if omitted[b.ID] {
+			continue
+		}
 		unsafe := (b.Text != "" || b.Latex != "") && (i >= len(covered) || !covered[i])
 		if b.Image != nil && strings.Join(append(append([]string{}, b.Image.Captions...), b.Image.Footnotes...), "") != "" {
 			unsafe = true // a body crop is not a proof for associated image text
@@ -427,7 +458,6 @@ func projectSourcePrecision(base Document, raw []byte, figures *[]OriginalFigure
 		}
 	}
 	projection.PageOnlyBlockIDs = &pageOnly
-	out := base
 	out.Precision = projection
 	out.Pages = append([]Page(nil), base.Pages...)
 	for _, p := range l.Pages {

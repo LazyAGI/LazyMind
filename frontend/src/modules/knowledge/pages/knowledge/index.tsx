@@ -178,8 +178,8 @@ const KnowledgeDocumentContent = () => {
   const [guideMode, setGuideMode] = useState(false);
   const [guidePreviousPdfPosition,setGuidePreviousPdfPosition]=useState<{page:number;progress:number}>();
   useEffect(()=>setGuidePreviousPdfPosition(undefined),[knowledgeBaseId,knowledgeId]);
-  const getGuidePdfData = useCallback(() => fileViewerRef.current?.getPdfData() || null, []);
-  const getGuidePdfVersion = useCallback(() => fileViewerRef.current?.getPdfVersion() ?? null, []);
+  const [sourceMounted, setSourceMounted] = useState(false);
+  const sourcePaneRef = useCallback((node: HTMLDivElement | null) => setSourceMounted(!!node), []);
   const paperChatRef = useRef<PdfTemporaryChatHandle>(null);
   const [canExportImagePdf, setCanExportImagePdf] = useState(false);
   const [exportingImagePdf, setExportingImagePdf] = useState(false);
@@ -211,14 +211,14 @@ const KnowledgeDocumentContent = () => {
   const [pdfNavigateToPage, setPdfNavigateToPage] = useState<{page:number;requestId:number}>();
   const [pdfNavigateToPosition,setPdfNavigateToPosition]=useState<{page:number;progress:number;requestId:number;sourceLocator?:boolean;bbox?:number[]}>();
   useEffect(()=>{
-    if(!isPaperDocument)return;
+    if(!isPaperDocument || !sourceMounted)return;
     const key=`${knowledgeBaseId}/${knowledgeId}`;
     let cancelled=false;
     void listPdfDocumentHighlights(knowledgeBaseId,knowledgeId).then(highlights=>{
       if(!cancelled)setSavedNotes({key,highlights});
     }).catch(()=>{/* Notes remain usable while the library request is unavailable. */});
     return()=>{cancelled=true;};
-  },[isPaperDocument,knowledgeBaseId,knowledgeId,notesRevision]);
+  },[isPaperDocument,sourceMounted,knowledgeBaseId,knowledgeId,notesRevision]);
   const [nativePdfOutline,setNativePdfOutline]=useState<import('@/modules/knowledge/api/pdfOutline').PdfNativeOutlineItem[]>([]);
   const workspaceRef = useRef<HTMLDivElement>(null);
   const previewPaperAssistantWidth = useCallback((width: number | undefined) => {
@@ -393,7 +393,7 @@ const KnowledgeDocumentContent = () => {
     }
   }, [knowledgeBaseId, knowledgeId]);
 
-  useEffect(() => { void refreshPdfCapabilities(); }, [refreshPdfCapabilities]);
+  useEffect(() => { if (sourceMounted) void refreshPdfCapabilities(); }, [sourceMounted, refreshPdfCapabilities]);
 
   useEffect(() => {
     cancelledPdfJobsRef.current.clear();
@@ -420,7 +420,7 @@ const KnowledgeDocumentContent = () => {
   }, [knowledgeId]);
 
 
-  useEffect(()=>{ if(!knowledgeBaseId)return; Promise.all([getLearningCatalog(),getKnowledgeBaseCapabilities(knowledgeBaseId)]).then(([catalog,configured])=>{const enabled=new Set(configured.filter(x=>x.enabled).map(x=>x.capability_key));setLearningCapabilities(catalog.capabilities.filter(x=>enabled.has(x.key)));setLearningLocalAvailable(catalog.local_available)}).catch(()=>setLearningCapabilities([])); },[knowledgeBaseId]);
+  useEffect(()=>{ if(!sourceMounted || !knowledgeBaseId)return; Promise.all([getLearningCatalog(),getKnowledgeBaseCapabilities(knowledgeBaseId)]).then(([catalog,configured])=>{const enabled=new Set(configured.filter(x=>x.enabled).map(x=>x.capability_key));setLearningCapabilities(catalog.capabilities.filter(x=>enabled.has(x.key)));setLearningLocalAvailable(catalog.local_available)}).catch(()=>setLearningCapabilities([])); },[sourceMounted,knowledgeBaseId]);
 
   useEffect(()=>setLearningAnalysisSelection(undefined),[knowledgeId]);
 
@@ -558,7 +558,7 @@ const KnowledgeDocumentContent = () => {
       });
   }, [knowledgeId, isPaperDocument]);
 
-  useEffect(() => { preanalyzeReferences(); }, [preanalyzeReferences, referencePreanalysisRetry]);
+  useEffect(() => { if (sourceMounted) preanalyzeReferences(); }, [sourceMounted, preanalyzeReferences, referencePreanalysisRetry]);
 
 
   const handleSegmentViewOptionsChange = useCallback(
@@ -691,6 +691,12 @@ const KnowledgeDocumentContent = () => {
   }, [knowledgeDetail?.display_name, knowledgeDetail?.download_file_url, knowledgeDetail?.file_url]);
 
   const previewFile = originalPreviewFile;
+  const sourceVersion = useMemo(() => ({ url: originalPreviewFile, updated: knowledgeDetail?.update_time }),
+    [originalPreviewFile, knowledgeDetail?.update_time]);
+  const getGuidePdfVersion = useCallback(() => fileViewerRef.current?.getPdfVersion() ??
+    (originalPreviewFile ? sourceVersion : null), [sourceVersion, originalPreviewFile]);
+  const getGuidePdfData = useCallback(() => fileViewerRef.current?.getPdfData() ??
+    (originalPreviewFile ? getPdfData(originalPreviewFile) : null), [originalPreviewFile]);
 
   const handleExportImagePdf = useCallback(async () => {
     if (!canExportImagePdf || exportingImagePdf) {
@@ -1070,7 +1076,7 @@ const KnowledgeDocumentContent = () => {
           onSelection={selection=>{setDocumentChatSelection(selection);setPreviewSideTab("chat");setPreviewSideCollapsed(false);}}
           onReturnSource={guidePreviousPdfPosition?()=>{setPdfNavigateToPosition({...guidePreviousPdfPosition,requestId:++navigationSequence.current});setGuidePreviousPdfPosition(undefined);}:undefined}
           onNavigate={e=>{setGuidePreviousPdfPosition(pdfViewPosition);setPdfNavigateTo(undefined);const bbox=e.locator.kind==="page"?undefined:e.locator.bbox;setPdfNavigateToPosition({page:e.locator.page+1,progress:Math.max(0,(bbox?.[1]||0)-.1),requestId:++navigationSequence.current,sourceLocator:true,bbox});}}
-          source={<>        <div className="knowledge-preview-file-column paper-reader-pane">
+          source={(readingModeSwitch) => <>        <div ref={sourcePaneRef} className="knowledge-preview-file-column paper-reader-pane">
           {!isPdfDocument && <header className="document-reader-header">{readerBackButton}<span title={knowledgeDetail?.display_name}>{knowledgeDetail?.display_name}</span>{readerDocumentActions()}</header>}
           {isPdfDocument && !guideMode && <PaperOutlineRail document={paperIR} nativeOutline={nativePdfOutline} currentPage={pdfViewPosition.page} onNavigate={navigatePaperBlock} onNavigatePage={navigatePaperPage}/> }
             <FileViewer
@@ -1078,6 +1084,7 @@ const KnowledgeDocumentContent = () => {
               pdfScrollSync={guideMode ? undefined : scrollSync.source}
               paperMode={isPaperDocument}
               pdfHeaderStart={readerBackButton}
+              pdfHeaderCenter={readingModeSwitch}
               pdfHeaderEnd={readerDocumentActions}
               pdfIRTarget={isPaperDocument ? {dataset: knowledgeBaseId, document: knowledgeId, canWrite: hasWritePermission} : undefined}
               onPdfIRDocumentChange={setPaperIR}

@@ -14,7 +14,7 @@ export function useGuideSourcePreview(
   revisionHash: string | undefined,
   sourceCurrent: boolean,
   currentHash: string | undefined,
-  getPdfData: () => ArrayBuffer | null,
+  getPdfData: () => ArrayBuffer | null | Promise<ArrayBuffer>,
   getPdfVersion?: () => object | null,
 ) {
   const versionAtRender = getPdfVersion?.();
@@ -32,7 +32,7 @@ export function useGuideSourcePreview(
   useEffect(() => {
     const session: NonNullable<typeof active.current> = {
       scope,
-      cache: createPdfCitationPreviewCache(),
+      cache: createPdfCitationPreviewCache({ renderScale: 3 }),
     };
     active.current = session;
     return () => {
@@ -52,7 +52,8 @@ export function useGuideSourcePreview(
     if (!session.bytes || session.bytes.version !== version || (fresh && !getPdfVersion)) {
       const data = getPdfData();
       if (!data) return;
-      session.bytes = { version, verified: computeBufferSha256(data).then(hash => hash === revisionHash ? data : undefined) };
+      session.bytes = { version, verified: Promise.resolve(data).then(async bytes =>
+        (await computeBufferSha256(bytes)) === revisionHash ? bytes : undefined) };
     }
     const result = session.bytes;
     const data = await result.verified;

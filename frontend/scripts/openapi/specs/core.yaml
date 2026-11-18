@@ -20178,8 +20178,16 @@ components:
                     type: array
                 id:
                     type: string
+                interaction:
+                    allOf:
+                        - $ref: '#/components/schemas/PaperGuideInteraction'
+                    nullable: true
                 kind:
                     type: string
+                playground:
+                    allOf:
+                        - $ref: '#/components/schemas/PaperGuidePlayground'
+                    nullable: true
                 text:
                     type: string
             required:
@@ -20345,6 +20353,151 @@ components:
                 - idempotency_key
                 - regenerate
             type: object
+        PaperGuideInteraction:
+            additionalProperties: false
+            properties:
+                explanation:
+                    maxLength: 1500
+                    type: string
+                higher_is_better:
+                    type: boolean
+                kind:
+                    enum:
+                        - stepper
+                        - comparison
+                        - results
+                        - calculator
+                    type: string
+                metric:
+                    maxLength: 120
+                    type: string
+                outputs:
+                    items:
+                        $ref: '#/components/schemas/PaperGuideInteractionOutput'
+                    maxItems: 4
+                    type: array
+                parameters:
+                    items:
+                        $ref: '#/components/schemas/PaperGuideInteractionParameter'
+                    maxItems: 4
+                    type: array
+                provenance:
+                    enum:
+                        - reported
+                        - derived
+                        - illustrative
+                    type: string
+                rows:
+                    items:
+                        $ref: '#/components/schemas/PaperGuideInteractionRow'
+                    maxItems: 40
+                    type: array
+                steps:
+                    items:
+                        $ref: '#/components/schemas/PaperGuideInteractionStep'
+                    maxItems: 12
+                    type: array
+                title:
+                    maxLength: 180
+                    type: string
+                unit:
+                    maxLength: 60
+                    type: string
+            required:
+                - kind
+                - title
+                - provenance
+                - explanation
+                - steps
+                - rows
+                - metric
+                - unit
+                - higher_is_better
+                - parameters
+                - outputs
+            type: object
+        PaperGuideInteractionOutput:
+            additionalProperties: false
+            properties:
+                label:
+                    maxLength: 120
+                    type: string
+                tokens:
+                    items:
+                        type: string
+                    maxItems: 48
+                    minItems: 1
+                    type: array
+                unit:
+                    maxLength: 60
+                    type: string
+            required:
+                - label
+                - unit
+                - tokens
+            type: object
+        PaperGuideInteractionParameter:
+            additionalProperties: false
+            properties:
+                id:
+                    pattern: ^[a-z][a-z0-9_]{0,23}$
+                    type: string
+                label:
+                    maxLength: 120
+                    type: string
+                max:
+                    type: number
+                min:
+                    type: number
+                step:
+                    type: number
+                unit:
+                    maxLength: 60
+                    type: string
+                value:
+                    type: number
+            required:
+                - id
+                - label
+                - min
+                - max
+                - step
+                - value
+                - unit
+            type: object
+        PaperGuideInteractionRow:
+            additionalProperties: false
+            properties:
+                group:
+                    maxLength: 120
+                    type: string
+                label:
+                    maxLength: 160
+                    type: string
+                note:
+                    maxLength: 500
+                    type: string
+                value:
+                    type: number
+            required:
+                - label
+                - value
+                - group
+                - note
+            type: object
+        PaperGuideInteractionStep:
+            additionalProperties: false
+            properties:
+                label:
+                    maxLength: 120
+                    type: string
+                text:
+                    maxLength: 1500
+                    type: string
+            required:
+                - label
+                - text
+            type: object
         PaperGuideLocator:
             properties:
                 bbox:
@@ -20421,12 +20574,21 @@ components:
                 - kind
                 - page
             type: object
+        PaperGuidePlayground:
+            properties:
+                html:
+                    type: string
+            required:
+                - html
+            type: object
         PaperGuidePlan:
             properties:
                 claims:
                     items:
                         $ref: '#/components/schemas/PaperGuideClaim'
                     type: array
+                layout:
+                    type: string
                 profiles:
                     $ref: '#/components/schemas/PaperGuideProfiles'
                 questions:
@@ -20441,10 +20603,14 @@ components:
                     items:
                         $ref: '#/components/schemas/PaperGuideSectionPlan'
                     type: array
+                subtitle:
+                    type: string
                 term_policy:
                     items:
                         type: string
                     type: array
+                title:
+                    type: string
             required:
                 - profiles
                 - questions

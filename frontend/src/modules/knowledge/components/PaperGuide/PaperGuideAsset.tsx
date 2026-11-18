@@ -1,4 +1,5 @@
 import { Modal } from "antd";
+import PaperGuideText from "./PaperGuideText";
 import { useEffect, useRef, useState } from "react";
 import type { PaperGuideEvidence, PaperGuideOriginalDisplay } from "@/api/generated/core-client";
 type AssetImage = { url: string; width: number; height: number; mode: "region" | "page" };
@@ -14,7 +15,9 @@ export default function PaperGuideAsset({
   unavailable = false,
   onEvidence,
   onOpenPage,
+  compactCaption = false,
 }: {
+  compactCaption?: boolean;
   evidence?: PaperGuideEvidence;
   originalDisplay?: PaperGuideOriginalDisplay | null;
   unavailable?: boolean;
@@ -100,31 +103,23 @@ export default function PaperGuideAsset({
           </div>
         )}
       </div>
+      {compactCaption ? <figcaption>
+        <PaperGuideText mapSource={false} text={(() => {
+          const caption = originalDisplay?.caption?.trim() || "";
+          const match = caption.match(/^(?:Figure|Fig\.?|图)\s*([A-Za-z]?\d+[A-Za-z]?)\s*[:：.．]?\s*/i);
+          const number = originalDisplay?.number || match?.[1];
+          const title = match ? caption.slice(match[0].length) : caption;
+          return `${zh ? "原图" : "Original figure"}${number ? ` ${number}` : ""}${title ? `：${title}` : ""}`;
+        })()} />
+      </figcaption> : <>
       <figcaption>
         {label} · {pageText}
-        {loaded?.mode === "page" && !table && <p>{formula
-          ? (zh ? "未定位到单独公式区域。" : "No separate formula region is available.")
-          : (zh ? "未定位到单独原图区域。" : "No separate figure region is available.")}</p>}
+        {loaded?.mode === "page" && !table && <p>{formula ? (zh ? "未定位到单独公式区域。" : "No separate formula region is available.") : (zh ? "未定位到单独原图区域。" : "No separate figure region is available.")}</p>}
         {originalDisplay?.caption && <p>{originalDisplay.caption}</p>}
-        {!unavailable && evidence && onOpenPage && (
-          <button type="button" className="paper-guide-citation"
-            onClick={() => onOpenPage({ ...evidence, locator: { kind: "page", page: evidence.locator.page } })}>
-            {zh ? `打开 PDF 第 ${page} 页` : `Open PDF page ${page}`}
-          </button>
-        )}
+        {!unavailable && evidence && onOpenPage && <button type="button" className="paper-guide-citation" onClick={() => onOpenPage({ ...evidence, locator: { kind: "page", page: evidence.locator.page } })}>{zh ? `打开 PDF 第 ${page} 页` : `Open PDF page ${page}`}</button>}
       </figcaption>
-      {!unavailable && onEvidence && !!evidence?.fragment_evidence_ids?.length && (
-        <nav aria-label={zh ? "表格逐页来源" : "Physical table sources"}>
-          <p>{zh ? "各片段打开其已核实的物理页，包含该页表体、题注或脚注。" : "Each fragment opens its verified physical page, including table rows, captions or notes."}</p>
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-            {evidence.fragment_evidence_ids.map((id, index) => (
-              <button key={id} onClick={(event) => onEvidence(id, event.currentTarget)}>
-                {zh ? `表格来源片段 ${index + 1}` : `Table source fragment ${index + 1}`}
-              </button>
-            ))}
-          </div>
-        </nav>
-      )}
+      {!unavailable && onEvidence && !!evidence?.fragment_evidence_ids?.length && <nav aria-label={zh ? "表格逐页来源" : "Physical table sources"}><div>{evidence.fragment_evidence_ids.map((id, index) => <button key={id} onClick={event => onEvidence(id, event.currentTarget)}>{zh ? `表格来源片段 ${index + 1}` : `Table source fragment ${index + 1}`}</button>)}</div></nav>}
+      </>}
       {loaded && (
         <Modal
           open={large}
@@ -137,10 +132,13 @@ export default function PaperGuideAsset({
           title={label}
           footer={null}
           onCancel={() => setLarge(false)}
-          width="90vw"
+          centered
+          width="fit-content"
         >
           <img
-            style={{ maxWidth: "100%" }}
+            width={loaded.width}
+            height={loaded.height}
+            style={{ display: "block", margin: "0 auto", width: "auto", height: "auto", maxWidth: "100%", maxHeight: "75dvh" }}
             src={loaded.url}
             alt={alt}
           />

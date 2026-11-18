@@ -9,7 +9,6 @@ import (
 	"lazymind/core/common/orm"
 	"path/filepath"
 	"testing"
-	"time"
 )
 
 func guideDB(t *testing.T) *gorm.DB {
@@ -37,7 +36,7 @@ func TestRepositoryReuseEpochBudgetAndImmutableSteps(t *testing.T) {
 		t.Fatalf("reuse: %v", e)
 	}
 	fence := testFence{repo.DB}
-	if e = repo.Reserve(ctx, fence, a.ID, a.Epoch, "plan", false); e != nil {
+	if e = repo.DB.Model(&a).Update("calls_used", 1).Error; e != nil {
 		t.Fatal(e)
 	}
 	if e = repo.PutStep(ctx, fence, a.ID, a.Epoch, StepWrite{Key: "plan", InputHash: "input", Output: json.RawMessage(`{"ok":true}`)}); e != nil {
@@ -87,35 +86,6 @@ func (f testFence) WithLease(ctx context.Context, cb func(*gorm.DB) error) error
 }
 func (f testFence) SetProgress(context.Context, int64, int64) error { return nil }
 func (f testFence) Heartbeat(context.Context) error                 { return nil }
-func TestBudgetNeverRefundsUnconfirmedRequests(t *testing.T) {
-	repo := Repository{DB: guideDB(t)}
-	ctx := context.Background()
-	scope := Scope{OwnerID: "u", DatasetID: "d", DocumentID: "p", Language: "en"}
-	row, e := repo.Create(ctx, CreateRevision{Scope: scope, SourceSHA256: "hash", Model: ModelIdentity{ID: "model"}})
-	if e != nil {
-		t.Fatal(e)
-	}
-	fence := testFence{repo.DB}
-	for i := 0; i < 24; i++ {
-		kind := "section"
-		if i < 8 {
-			kind = "extract"
-		}
-		if e = repo.Reserve(ctx, fence, row.ID, row.Epoch, kind, i >= 22); e != nil {
-			t.Fatalf("reservation %d: %v", i, e)
-		}
-	}
-	if e = repo.Reserve(ctx, fence, row.ID, row.Epoch, "review", false); !errors.Is(e, ErrBudget) {
-		t.Fatalf("25th request: %v", e)
-	}
-	if e = repo.DB.Model(&orm.PaperGuideRevision{}).Where("id = ?", row.ID).Update("active_millis", int64((30*time.Minute)/time.Millisecond)).Error; e != nil {
-		t.Fatal(e)
-	}
-	if e = repo.Reserve(ctx, fence, row.ID, row.Epoch, "review", false); !errors.Is(e, ErrBudget) {
-		t.Fatal(e)
-	}
-}
-
 func TestDeletedDocumentCancelsOnlyGuideJobsAndHidesAllRevisions(t *testing.T) {
 	db := guideDB(t)
 	repo := Repository{DB: db}
@@ -140,26 +110,5 @@ func TestDeletedDocumentCancelsOnlyGuideJobsAndHidesAllRevisions(t *testing.T) {
 	db.Where("id = ?", "other-job").Take(&job)
 	if job.Status != "pending" {
 		t.Fatal("unrelated job canceled")
-	}
-}
-
-func TestWholeReviewCheckpointBindingsAreImmutable(t *testing.T) {
-	repo := Repository{DB: guideDB(t)}
-	scope := Scope{OwnerID: "u", DatasetID: "ds", DocumentID: "doc", Language: "zh"}
-	rev, err := repo.Create(t.Context(), CreateRevision{Scope: scope, SourceSHA256: "hash", Model: ModelIdentity{ID: "m"}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	write := StepWrite{Key: "whole_review:1", InputHash: "input", Output: mustJSON(GuideReview{Findings: []GuideFinding{}}), Review: wholeReviewBindings([]GuideSection{{Role: RoleBackground, Version: 2}})}
-	if err = repo.PutStep(t.Context(), testFence{repo.DB}, rev.ID, rev.Epoch, write); err != nil {
-		t.Fatal(err)
-	}
-	steps, err := repo.Steps(t.Context(), rev.ID)
-	if err != nil || len(steps) != 1 || steps[0].ReviewJSON != string(write.Review) {
-		t.Fatalf("missing atomic review bindings: %+v %v", steps, err)
-	}
-	write.Review = wholeReviewBindings([]GuideSection{{Role: RoleBackground, Version: 1}})
-	if err = repo.PutStep(t.Context(), testFence{repo.DB}, rev.ID, rev.Epoch, write); !errors.Is(err, ErrConflict) {
-		t.Fatalf("accepted different review bindings: %v", err)
 	}
 }

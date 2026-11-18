@@ -68,7 +68,7 @@ export function usePaperGuide(
         return;
       }
       const followLatest =
-        !session.revision?.sections.length &&
+        !session.revision?.sections.some(section => section.blocks.length > 0) &&
         !session.status?.published_revision;
       session.etag = response.etag || session.etag;
       session.status = response.data || session.status;

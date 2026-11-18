@@ -27,6 +27,18 @@ func paperGuideOpenAPISchemas() map[string]any {
 		}
 		switch t.Kind() {
 		case reflect.String:
+			switch t {
+			case reflect.TypeOf(paperguide.InteractionKind("")):
+				return map[string]any{"type": "string", "enum": []string{
+					string(paperguide.InteractionStepper), string(paperguide.InteractionComparison),
+					string(paperguide.InteractionResults), string(paperguide.InteractionCalculator),
+				}}
+			case reflect.TypeOf(paperguide.InteractionProvenance("")):
+				return map[string]any{"type": "string", "enum": []string{
+					string(paperguide.InteractionReported), string(paperguide.InteractionDerived),
+					string(paperguide.InteractionIllustrative),
+				}}
+			}
 			return strSchema()
 		case reflect.Bool:
 			return boolSchema()
@@ -88,7 +100,35 @@ func paperGuideOpenAPISchemas() map[string]any {
 		schemas[name] = schemas[strings.TrimPrefix(ref, "#/components/schemas/")]
 	}
 	schemas["PaperGuideCancellation"] = obj(prop("canceled", boolSchema()))
+	addPaperGuideInteractionLimits(schemas)
 	return schemas
+}
+
+func addPaperGuideInteractionLimits(schemas map[string]any) {
+	for name, lengths := range map[string]map[string]int{
+		"PaperGuideInteraction":          {"title": 180, "explanation": 1500, "metric": 120, "unit": 60},
+		"PaperGuideInteractionStep":      {"label": 120, "text": 1500},
+		"PaperGuideInteractionRow":       {"label": 160, "group": 120, "note": 500},
+		"PaperGuideInteractionParameter": {"label": 120, "unit": 60},
+		"PaperGuideInteractionOutput":    {"label": 120, "unit": 60},
+	} {
+		object := schemas[name].(map[string]any)
+		object["additionalProperties"] = false
+		properties := object["properties"].(map[string]any)
+		for field, limit := range lengths {
+			properties[field].(map[string]any)["maxLength"] = limit
+		}
+	}
+
+	interaction := schemas["PaperGuideInteraction"].(map[string]any)["properties"].(map[string]any)
+	for field, limit := range map[string]int{"steps": 12, "rows": 40, "parameters": 4, "outputs": 4} {
+		interaction[field].(map[string]any)["maxItems"] = limit
+	}
+	parameter := schemas["PaperGuideInteractionParameter"].(map[string]any)["properties"].(map[string]any)
+	parameter["id"].(map[string]any)["pattern"] = `^[a-z][a-z0-9_]{0,23}$`
+	output := schemas["PaperGuideInteractionOutput"].(map[string]any)["properties"].(map[string]any)
+	output["tokens"].(map[string]any)["minItems"] = 1
+	output["tokens"].(map[string]any)["maxItems"] = 48
 }
 func paperGuideOpenAPIPaths() map[string]any {
 	paths := map[string]any{}

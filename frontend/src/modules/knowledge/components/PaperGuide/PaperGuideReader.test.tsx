@@ -1,5 +1,5 @@
 import { act, render, screen, fireEvent, within } from "@testing-library/react";
-import type { PaperGuideClaim, PaperGuidePlan } from "@/api/generated/core-client";
+import type { PaperGuideClaim, PaperGuideInteraction, PaperGuidePlan } from "@/api/generated/core-client";
 import { expect, it, vi } from "vitest";
 import PaperGuideReader from "./PaperGuideReader";
 import { revision } from "./fixtures";
@@ -258,7 +258,7 @@ it("offers a keyboard selection action bound to the visible immutable section", 
 it("moves keyboard focus and scrolls to the requested outline heading", () => {
   const scroll = vi.fn();
   Element.prototype.scrollIntoView = scroll;
-  render(
+  const view = render(
     <PaperGuideReader
       revision={revision()}
       title="Paper"
@@ -267,6 +267,11 @@ it("moves keyboard focus and scrolls to the requested outline heading", () => {
       onSelection={() => {}}
     />,
   );
+  const scroller = view.container.querySelector(".paper-guide-scroll") as HTMLDivElement;
+  const heading = screen.getByRole("heading", { name: "Learning contextual representations" });
+  scroller.scrollTop = 40;
+  vi.spyOn(scroller, "getBoundingClientRect").mockReturnValue({ top: 80 } as DOMRect);
+  vi.spyOn(heading, "getBoundingClientRect").mockReturnValue({ top: 680 } as DOMRect);
   fireEvent.click(
     screen.getByRole("button", { name: "Learning contextual representations" }),
   );
@@ -275,7 +280,8 @@ it("moves keyboard focus and scrolls to the requested outline heading", () => {
       name: "Learning contextual representations",
     }),
   ).toHaveFocus();
-  expect(scroll).toHaveBeenCalledWith({ block: "start" });
+  expect(scroll).not.toHaveBeenCalled();
+  expect(scroller.scrollTop).toBe(616);
 });
 it("preserves reading position when reviewed sections append and never injects model HTML", () => {
   const scroll = vi.fn();
@@ -698,4 +704,179 @@ it('keeps historical text readable but disables follow-up selection after positi
  for(const button of screen.getAllByRole('button',{name:'Explain this passage'})){expect(button).toBeDisabled();fireEvent.click(button);}
  for(const button of screen.getAllByRole('button',{name:'Give an example'}))expect(button).toBeDisabled();
  expect(choose).not.toHaveBeenCalled();
+});
+
+function renderInteractive(
+  config: Partial<PaperGuideInteraction> & Pick<PaperGuideInteraction, "kind">,
+  text = "Stable static explanation.",
+) {
+  const r = revision();
+  const block = r.sections[0].blocks[0];
+  Object.assign(block, {
+    kind: "interactive",
+    text,
+    interaction: {
+      title: "Explore the method",
+      provenance: "illustrative",
+      explanation: "This example assumes a fixed baseline.",
+      higher_is_better: false,
+      metric: "",
+      unit: "",
+      steps: [],
+      parameters: [],
+      outputs: [],
+      rows: [],
+      ...config,
+    } satisfies PaperGuideInteraction,
+  });
+  const choose = vi.fn();
+  const view = render(
+    <PaperGuideReader revision={r} title="Paper" language="en" onEvidence={() => {}} onSelection={choose} />,
+  );
+  return { ...view, choose, r, block };
+}
+
+const steps = [
+  { label: "Define", text: "Define the reference point." },
+  { label: "Measure", text: "Measure the change." },
+  { label: "Interpret", text: "Interpret the estimate." },
+];
+
+it("shows calculator default substitutions and recalculates when the rank changes", () => {
+  renderInteractive({
+    kind: "calculator",
+    parameters: [{ id: "x", label: "Input", min: 0, max: 4, step: 1, value: 1, unit: "" }],
+    outputs: [
+      { label: "Variable", tokens: ["x", "2", "mul"], unit: "ms" },
+      { label: "Reference", tokens: ["3"], unit: "ms" },
+    ],
+  });
+  expect(screen.getByText("x × 2")).toBeVisible();
+  expect(screen.getByText("1 × 2 = 2 ms")).toBeVisible();
+  expect(screen.getByText("2 ms")).toBeVisible();
+  expect(screen.getByText("3 ms")).toBeVisible();
+  fireEvent.change(screen.getByRole("slider", { name: "Input" }), { target: { value: "2" } });
+  expect(screen.getByText("4 ms")).toBeVisible();
+  expect(screen.getByText("1 × 2 = 2 ms")).toBeVisible();
+  fireEvent.click(screen.getByRole("button", { name: "Reset" }));
+  expect(screen.getByText("2 ms")).toBeVisible();
+});
+
+it.each([
+  ["division by zero", ["1", "x", "div"]],
+  ["nonpositive logarithm", ["x", "log"]],
+  ["unbounded intermediate", ["1e15", "x", "div", "1e15", "div"]],
+])("marks unavailable calculator values for %s", (_name, tokens) => {
+  renderInteractive({
+    kind: "calculator",
+    parameters: [{ id: "x", label: "Input", min: 0, max: 2, step: 0.5, value: 1, unit: "" }],
+    outputs: [{ label: "Value", tokens, unit: "" }],
+  });
+  fireEvent.change(screen.getByRole("slider", { name: "Input" }), {
+    target: { value: _name === "unbounded intermediate" ? "0.5" : "0" },
+  });
+  expect(screen.getByText("N/A")).toBeVisible();
+  expect(screen.getByText(/outside the supported range or domain/i)).toBeVisible();
+});
+
+it("navigates steps and resets the selected step", () => {
+  renderInteractive({ kind: "stepper", steps });
+  expect(screen.getByText(steps[0].text)).toBeVisible();
+  expect(screen.getByRole("button", { name: "Previous" })).toBeDisabled();
+  fireEvent.click(screen.getByRole("button", { name: "Next" }));
+  expect(screen.getByText(steps[1].text)).toBeVisible();
+  fireEvent.click(screen.getByRole("button", { name: "3 Interpret" }));
+  expect(screen.getByText(steps[2].text)).toBeVisible();
+  expect(screen.getByRole("button", { name: "Next" })).toBeDisabled();
+  fireEvent.click(screen.getByRole("button", { name: "Reset" }));
+  expect(screen.getByText(steps[0].text)).toBeVisible();
+});
+
+it("selects a comparison while retaining its fixed reference", () => {
+  renderInteractive({ kind: "comparison", steps });
+  fireEvent.click(screen.getByRole("button", { name: "Interpret" }));
+  expect(screen.getByText(steps[0].text)).toBeVisible();
+  expect(screen.getByText(steps[2].text)).toBeVisible();
+  expect(screen.queryByText(steps[1].text)).not.toBeInTheDocument();
+});
+
+it("filters only reported rows and shows original values, units and notes in the table", () => {
+  renderInteractive({
+    kind: "results",
+    provenance: "reported",
+    metric: "Accuracy",
+    higher_is_better: true,
+    unit: "%",
+    rows: [
+      { label: "Base", group: "A", note: "Table 2 · held-out cohort", value: 82.15 },
+      { label: "Variant", group: "B", note: "Table 2 · comparison row", value: -0.44 },
+    ],
+  });
+  const table = within(screen.getByRole("table", { name: "Accuracy (%)" }));
+  expect(table.getByText("82.15")).toBeVisible();
+  expect(table.getByText("-0.44")).toBeVisible();
+  expect(table.getByText("Table 2 · comparison row")).toBeVisible();
+  expect(screen.getByText("Reported by the paper")).toBeVisible();
+  fireEvent.change(screen.getByRole("combobox", { name: "Filter by group" }), { target: { value: "2" } });
+  expect(table.queryByText("82.15")).not.toBeInTheDocument();
+  expect(table.getByText("-0.44")).toBeVisible();
+});
+
+it("keeps static prose and its Unicode selection separate from interaction content", () => {
+  const { choose, block } = renderInteractive({ kind: "stepper", steps }, "甲😀乙𐐀丙");
+  expect(screen.getByText("Illustrative example")).toBeVisible();
+  expect(screen.getByText("This example assumes a fixed baseline.")).toBeVisible();
+  const prose = screen.getByText(block.text).closest("[data-guide-text]")!;
+  expect(prose).toHaveTextContent(/^甲😀乙𐐀丙$/);
+  expect(prose).not.toContainElement(screen.getByRole("button", { name: "Next" }));
+  const range = document.createRange();
+  range.setStart(prose.firstChild!.firstChild!, 1);
+  range.setEnd(prose.firstChild!.firstChild!, 6);
+  window.getSelection()!.removeAllRanges();
+  window.getSelection()!.addRange(range);
+  fireEvent.mouseUp(prose);
+  fireEvent.click(within(screen.getByRole("toolbar")).getByRole("button", { name: "Explain this passage" }));
+  expect(choose).toHaveBeenCalledWith(expect.objectContaining({
+    text: "😀乙𐐀",
+    guideRef: expect.objectContaining({ start: 1, end: 4 }),
+  }));
+});
+
+it("navigates legacy subsection headings by immutable section and block IDs", () => {
+  const r = revision();
+  for (const [index, section] of r.sections.slice(0, 2).entries()) {
+    section.blocks.push({ ...section.blocks[0], id: "duplicate-heading-id", kind: "heading", text: `Subsection ${index + 1}` });
+  }
+  render(<PaperGuideReader revision={r} title="Paper" language="en" onEvidence={() => {}} onSelection={() => {}} />);
+  const outline = within(screen.getByRole("navigation", { name: "Article outline" }));
+  fireEvent.click(outline.getByRole("button", { name: "Subsection 2" }));
+  expect(screen.getByRole("heading", { name: "Subsection 2" })).toHaveFocus();
+  expect(screen.getByRole("heading", { name: "Subsection 1" })).not.toHaveFocus();
+});
+
+it("preserves an authored calculator default that is off the step grid", () => {
+  renderInteractive({
+    kind: "calculator",
+    parameters: [{ id: "amount", label: "Amount", min: 0, max: 10, step: 3, value: 5, unit: "" }],
+    outputs: [{ label: "Doubled", tokens: ["amount", "2", "mul"], unit: "" }],
+  });
+  const input = screen.getByRole("spinbutton", { name: "Amount" });
+  expect(input).toHaveValue(5);
+  expect(screen.getByLabelText("Doubled")).toHaveTextContent(/^10$/);
+  fireEvent.change(input, { target: { value: "6" } });
+  expect(screen.getByLabelText("Doubled")).toHaveTextContent(/^12$/);
+  fireEvent.change(input, { target: { value: "4" } });
+  expect(input).toHaveAttribute("aria-invalid", "true");
+  expect(screen.getByLabelText("Doubled")).toHaveTextContent(/^N\/A$/);
+});
+
+it("groups a negated base in both the power formula and its default substitution", () => {
+  renderInteractive({
+    kind: "calculator",
+    parameters: [{ id: "x", label: "Input", min: 0, max: 4, step: 1, value: 3, unit: "" }],
+    outputs: [{ label: "Squared negative", tokens: ["x", "neg", "2", "pow"], unit: "" }],
+  });
+  expect(screen.getByText("(−(x)) ^ 2")).toBeVisible();
+  expect(screen.getByText("(−(3)) ^ 2 = 9")).toBeVisible();
+  expect(screen.getByLabelText("Squared negative")).toHaveTextContent(/^9$/);
 });

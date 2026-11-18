@@ -3,7 +3,7 @@ package paperguide
 
 import "lazymind/core/pdfir"
 
-const TaskVersion = "paper-guide-v22"
+const TaskVersion = "paper-guide-v26"
 const SourceCatalogVersion = "paper-guide-source-v6"
 const sourceCatalogV5 = "paper-guide-source-v5"
 const legacySourceNamespace = "paper-guide-v1"
@@ -56,24 +56,24 @@ type SourceIdentity struct {
 
 type GuideSourceSnapshot struct {
 	// originalCandidates is populated only on a scoped Plan input, never in the frozen artifact.
-	originalCandidates *originalAssetCandidates
-	FigureProofs       []pdfir.OriginalFigureProof `json:"figure_proofs,omitempty"`
-	FigureProofDigest  string                      `json:"figure_proof_digest,omitempty"`
-	Precision          *pdfir.SourcePrecision      `json:"source_precision,omitempty"`
-	CatalogVersion     string                      `json:"catalog_version,omitempty"`
-	SourceWarnings     []string                    `json:"source_warnings,omitempty"`
-	Identity           SourceIdentity              `json:"identity"`
-	IRDigest           string                      `json:"ir_digest"`
-	Parser             pdfir.Parser                `json:"parser"`
-	IRVersion          int                         `json:"ir_version"`
-	ProjectionVersion  int                         `json:"projection_version"`
-	CoordinateSpace    string                      `json:"coordinate_space"`
-	Pages              []pdfir.Page                `json:"pages"`
-	Coverage           GuideCoverage               `json:"coverage"`
-	Blocks             []pdfir.Block               `json:"blocks"`
-	Assets             []GuideAsset                `json:"assets"`
-	Sections           []SourceSection             `json:"sections"`
-	Evidence           []GuideEvidence             `json:"evidence"`
+
+	FigureProofs      []pdfir.OriginalFigureProof `json:"figure_proofs,omitempty"`
+	FigureProofDigest string                      `json:"figure_proof_digest,omitempty"`
+	Precision         *pdfir.SourcePrecision      `json:"source_precision,omitempty"`
+	CatalogVersion    string                      `json:"catalog_version,omitempty"`
+	SourceWarnings    []string                    `json:"source_warnings,omitempty"`
+	Identity          SourceIdentity              `json:"identity"`
+	IRDigest          string                      `json:"ir_digest"`
+	Parser            pdfir.Parser                `json:"parser"`
+	IRVersion         int                         `json:"ir_version"`
+	ProjectionVersion int                         `json:"projection_version"`
+	CoordinateSpace   string                      `json:"coordinate_space"`
+	Pages             []pdfir.Page                `json:"pages"`
+	Coverage          GuideCoverage               `json:"coverage"`
+	Blocks            []pdfir.Block               `json:"blocks"`
+	Assets            []GuideAsset                `json:"assets"`
+	Sections          []SourceSection             `json:"sections"`
+	Evidence          []GuideEvidence             `json:"evidence"`
 }
 
 type GuideCoverage struct {
@@ -160,10 +160,6 @@ type GuideClaim struct {
 	SupportStatus SupportStatus `json:"support_status"`
 }
 
-type GuideExtract struct {
-	Claims        []GuideClaim `json:"claims"`
-	OpenQuestions []string     `json:"open_questions"`
-}
 type GuideProfiles struct {
 	Primary           *ArgumentType  `json:"primary"`
 	Secondary         []ArgumentType `json:"secondary"`
@@ -184,6 +180,9 @@ type GuideAssetDecision struct {
 	Reason   string `json:"reason"`
 }
 type GuidePlan struct {
+	Layout         string               `json:"layout,omitempty"`
+	Title          string               `json:"title,omitempty"`
+	Subtitle       string               `json:"subtitle,omitempty"`
 	Profiles       GuideProfiles        `json:"profiles"`
 	Questions      []string             `json:"questions"`
 	Claims         []GuideClaim         `json:"claims"`
@@ -191,14 +190,20 @@ type GuidePlan struct {
 	TermPolicy     []string             `json:"term_policy"`
 	RequiredAssets []GuideAssetDecision `json:"required_assets"`
 }
+type GuidePlayground struct {
+	HTML string `json:"html"`
+}
+
 type GuideBlock struct {
-	ID          string      `json:"id"`
-	Kind        string      `json:"kind"`
-	Text        string      `json:"text"`
-	Attribution Attribution `json:"attribution"`
-	ClaimIDs    []string    `json:"claim_ids"`
-	EvidenceIDs []string    `json:"evidence_ids"`
-	AssetID     string      `json:"asset_id,omitempty"`
+	Playground  *GuidePlayground  `json:"playground,omitempty"`
+	ID          string            `json:"id"`
+	Kind        string            `json:"kind"`
+	Text        string            `json:"text"`
+	Attribution Attribution       `json:"attribution"`
+	ClaimIDs    []string          `json:"claim_ids"`
+	EvidenceIDs []string          `json:"evidence_ids"`
+	AssetID     string            `json:"asset_id,omitempty"`
+	Interaction *GuideInteraction `json:"interaction,omitempty"`
 }
 type GuideSection struct {
 	Role              Role         `json:"role"`

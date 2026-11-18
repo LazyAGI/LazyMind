@@ -62,6 +62,7 @@ interface RenderPdfProps {
   paperMode?: boolean;
   pdfToolbarMode?: "full" | "navigation" | "none";
   pdfSelectableText?: boolean;
+  pdfHeaderCenter?: React.ReactNode;
   pdfHeaderStart?: React.ReactNode;
   pdfHeaderEnd?: React.ReactNode | ((tools: React.ReactNode) => React.ReactNode);
   onStudyOpenChange?: (open: boolean) => void;
@@ -154,6 +155,7 @@ export default function RenderPdf({
   pdfSelectableText = false,
   pdfScrollSync,
   pdfHeaderStart,
+  pdfHeaderCenter,
   pdfHeaderEnd,
   onStudyOpenChange,
   onPdfIRDocumentChange,
@@ -1323,6 +1325,7 @@ export default function RenderPdf({
   const readerHeader = pdfToolbarMode === "none" ? null : (
     <nav className={`pdf-reader-modebar pdf-reader-header${pdfToolbarMode === "navigation" ? " pdf-reader-header--compact" : ""}`} aria-label={paperMode ? readerLabel("reading") : t("paperShell.document",{defaultValue:"Document"})}>
       <div className="pdf-reader-header-start">{pdfHeaderStart}</div>
+      {pdfHeaderCenter && <div className="paper-mode-switch-slot">{pdfHeaderCenter}</div>}
       <div className="pdf-reader-header-end">
         {pdfToolbarMode === "navigation" ? <>{typeof pdfHeaderEnd === "function" ? pdfHeaderEnd(null) : pdfHeaderEnd}{pageControls}</> : <>
         {pageControls}

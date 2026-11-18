@@ -134,3 +134,10 @@ it.each(["$$x$", "$$$x$", "甲😀 $$x$ tail", "$$x$ then $y$"])(
     ).toBe(Array.from(text).length);
   },
 );
+
+it("renders bare formula blocks without changing their source offsets", () => {
+  const text = String.raw`h=W_0x+\frac{α}{r}BAx`;
+  const { container } = render(<PaperGuideText text={text} displayMath />);
+  expect(container.querySelector('.katex-display')).not.toBeNull();
+  expect(container.querySelector('[data-guide-source-end]')).toHaveAttribute('data-guide-source-end', String(Array.from(text).length));
+});

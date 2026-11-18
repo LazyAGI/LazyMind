@@ -65,14 +65,20 @@ export default function PaperGuideText({
   text,
   sourceOffset = 0,
   mapSource = true,
+  displayMath = false,
 }: {
   text: string;
   sourceOffset?: number;
   mapSource?: boolean;
+  displayMath?: boolean;
 }) {
   const segments = useMemo(
-    () =>
-      guideTextSegments(text).map((segment) => {
+    () => {
+      const parsed = guideTextSegments(text);
+      const pieces: Segment[] = displayMath && !parsed.some(segment => segment.latex !== undefined)
+        ? [{ text, start: 0, end: Array.from(text).length, latex: text.trim(), display: true }]
+        : parsed.map(segment => displayMath && parsed.length === 1 && segment.latex !== undefined ? { ...segment, display: true } : segment);
+      return pieces.map((segment) => {
         let html: string | undefined;
         if (
           segment.latex !== undefined &&
@@ -93,8 +99,9 @@ export default function PaperGuideText({
           }
         }
         return { ...segment, html };
-      }),
-    [text],
+      });
+    },
+    [text, displayMath],
   );
   return (
     <>

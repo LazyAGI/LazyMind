@@ -341,3 +341,45 @@ func TestTableAncestryRejectsIgnoredNestedOrAncestorPayload(t *testing.T) {
 		})
 	}
 }
+
+func TestGuideOmitsOnlyTableWithAmbiguousCaption(t *testing.T) {
+	for _, grouped := range []bool{true, false} {
+		t.Run(fmt.Sprintf("grouped=%t", grouped), func(t *testing.T) {
+			var layout map[string]any
+			if err := json.Unmarshal([]byte(payloadTableLayout), &layout); err != nil {
+				t.Fatal(err)
+			}
+			page := layout["pdf_info"].([]any)[0].(map[string]any)
+			table := page["para_blocks"].([]any)[0].(map[string]any)
+			body := page["preproc_blocks"].([]any)[0]
+			caption := map[string]any{"type": "table_caption", "lines": []any{map[string]any{"spans": []any{map[string]any{"type": "text", "content": "Table 1.", "bbox": []int{10, 10, 90, 20}}}}}}
+			table["blocks"] = append(table["blocks"].([]any), caption)
+			physical := []any{body, caption, caption}
+			if grouped {
+				physical = []any{map[string]any{"type": "table", "bbox": table["bbox"], "blocks": physical}}
+			}
+			page["preproc_blocks"] = physical
+			var clean map[string]any
+			json.Unmarshal([]byte(payloadTableLayout), &clean)
+			other := clean["pdf_info"].([]any)[0].(map[string]any)
+			other["page_idx"] = 1
+			layout["pdf_info"] = []any{page, other}
+			data, _ := json.Marshal(layout)
+			const items = `[{"type":"table","table_caption":["Table 1."],"table_body":"<table><tr><td>home</td></tr></table>","page_idx":0,"bbox":[100,100,900,800]},{"type":"table","table_body":"<table><tr><td>home</td></tr></table>","page_idx":1,"bbox":[100,100,900,800]}]`
+			raw, base := precisionPayloadArchive(t, items, string(data))
+			if _, err := ProjectSourcePrecision(base, raw); err == nil {
+				t.Fatal("strict projection accepted an ambiguous caption")
+			}
+			got, _, err := ProjectGuideSourcePrecision(base, raw)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(got.Blocks) != 1 || got.Blocks[0].ID != base.Blocks[1].ID || base.Blocks[0].Page != 0 {
+				t.Fatal("wrong table omitted or base blocks mutated")
+			}
+			if len(got.Precision.Regions) != 1 || got.Precision.Regions[0].ParentBlockID != got.Blocks[0].ID {
+				t.Fatal("unexpected table fragments")
+			}
+		})
+	}
+}

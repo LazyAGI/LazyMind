@@ -39,53 +39,6 @@ func mergedBoundaryDocument(t *testing.T) (pdfir.Document, SourceIdentity) {
 	return d, id
 }
 
-func TestCellMergeSnapshotRebuildsPhysicalEvidence(t *testing.T) {
-	d, id := mergedBoundaryDocument(t)
-	s, err := BuildSourceSnapshot(d, id)
-	if err != nil {
-		t.Fatal(err)
-	}
-	b, err := json.Marshal(s)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var frozen GuideSourceSnapshot
-	if err := json.Unmarshal(b, &frozen); err != nil {
-		t.Fatal(err)
-	}
-	if err := ValidateSnapshot(frozen, id, s.IRDigest); err != nil {
-		t.Fatal(err)
-	}
-	var parent, later GuideEvidence
-	for _, ev := range frozen.Evidence {
-		if ev.SourceBlockID == "continuation" {
-			t.Fatal("deleted placeholder listed as a table")
-		}
-		if ev.SourceBlockID != "physical-parent" {
-			continue
-		}
-		if ev.SourceRegionID == "" {
-			parent = ev
-		} else if ev.Locator.Page == 1 {
-			later = ev
-		}
-	}
-	if parent.ID == "" || parent.Locator.Kind != "page" || parent.Locator.Page != 0 || len(parent.Locator.BBox) != 0 ||
-		later.ID == "" || later.Locator.Kind != "page" || later.Text != "east | \nlater | 22" || later.ParentAssetID != parent.ID {
-		t.Fatalf("wrong parent or later physical evidence: %+v %+v", parent, later)
-	}
-	packet, err := RestrictEvidence(frozen, []string{later.ID})
-	if err != nil || len(packet.Evidence) != 3 {
-		t.Fatalf("continuation lost table evidence: got %d entries, err=%v", len(packet.Evidence), err)
-	}
-	for _, asset := range packet.Assets {
-		if asset.ID == parent.ID && len(asset.FragmentEvidenceIDs) == 2 {
-			return
-		}
-	}
-	t.Fatal("continuation lost the parent asset or its fragment references")
-}
-
 func TestCellMergeSnapshotRejectsAlteredProof(t *testing.T) {
 	tests := []struct {
 		name, reason string

@@ -32,6 +32,9 @@ it("restores the enlarged figure opener after Escape closes the guide modal", as
   opener.focus();
   fireEvent.click(opener);
   const dialog = await screen.findByRole("dialog");
+  expect(dialog).toHaveStyle({ width: "fit-content" });
+  const image = dialog.querySelector("img");
+  expect(image).toHaveStyle({ maxWidth: "100%", maxHeight: "75dvh", height: "auto" });
   const close = screen.getByRole("button", { name: "Close" });
   close.focus();
   fireEvent.keyDown(dialog, { key: "Escape", code: "Escape", keyCode: 27 });
@@ -87,4 +90,10 @@ it("keeps the formula crop and physical page action without labeling an unverifi
   expect(screen.getByText(/Original formula · PDF page 4/)).toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", { name: "Open PDF page 4" }));
   expect(open).toHaveBeenCalledWith(expect.objectContaining({ locator: { kind: "page", page: 3 } }));
+});
+
+it("shows only the numbered caption for an explainer original figure", async () => {
+  const view = render(<PaperGuideAsset compactCaption language="zh" evidence={{ id: "figure", source_type: "image", source_block_id: "image", text: "Figure 1", locator: {kind: "page", page: 0} }} originalDisplay={{kind:"figure",page:0,caption:"Figure 1: Our reparametrization."}} preview={async()=>({url:"blob:figure",width:100,height:100,mode:"region"})} onOpenPage={vi.fn()} />);
+  expect(view.container.querySelector('figcaption')).toHaveTextContent('原图 1：Our reparametrization.');
+  expect(screen.queryByRole('button',{name:/打开 PDF/})).toBeNull();
 });

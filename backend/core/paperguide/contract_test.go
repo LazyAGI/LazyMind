@@ -4,10 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
-	"lazymind/core/asyncjob"
 	"lazymind/core/common/orm"
-	"lazymind/core/pdfir"
 	"os"
 	"testing"
 )
@@ -63,40 +60,6 @@ func TestLegacyPublishedGuideAndSelectionRemainReadable(t *testing.T) {
 	}
 }
 
-func TestPristineWaitingSourceAdoptsCurrentContract(t *testing.T) {
-	d, id := fixture(t)
-	d.Blocks = append(d.Blocks, pdfir.Block{ID: "body", Type: "text", Page: 1, Text: "The original study reports additional sample conditions."})
-	snap, _ := BuildSourceSnapshot(d, id)
-	repo := Repository{DB: guideDB(t)}
-	scope := Scope{OwnerID: id.OwnerID, DatasetID: id.DatasetID, DocumentID: id.DocumentID, Language: "en"}
-	model := ModelIdentity{ID: "m", ContextTokens: 128000}
-	rev, err := repo.Create(t.Context(), CreateRevision{Scope: scope, SourceSHA256: id.SourceSHA256, Model: model, DependencyID: "parser"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err = repo.DB.Model(&rev).Update("fingerprint", digest([]any{id.SourceSHA256, "", SourceCatalogVersion, "paper-guide-v15", model})).Error; err != nil {
-		t.Fatal(err)
-	}
-	calls := 0
-	service := Service{Repo: repo, Source: &fixtureSource{s: snap}, Authorize: func(context.Context, Scope, bool) error { return nil }, ResolveModel: func(context.Context, Scope, string) (ModelIdentity, map[string]any, error) { return model, nil, nil }, Call: func(ctx context.Context, task string, input map[string]any, cfg map[string]any) (json.RawMessage, error) {
-		calls++
-		switch task {
-		case "paper.guide.plan":
-			return json.Marshal(baselinePlan(snap))
-		case "paper.guide.section":
-			return json.Marshal(teachingSection(input["role"].(Role)))
-		}
-		return json.Marshal(GuideReview{Findings: []GuideFinding{}})
-	}}
-	if _, err = service.Run(t.Context(), asyncjob.Job{ID: rev.JobID, PayloadJSON: mustJSON(JobPayload{rev.ID, rev.Epoch})}, testFence{repo.DB}); err != nil {
-		t.Fatal(err)
-	}
-	got, err := repo.Revision(t.Context(), scope, rev.ID)
-	if err != nil || got.Fingerprint != contractFingerprint(id.SourceSHA256, snap.IRDigest, model) || got.Stage != "completed" || calls != 10 {
-		t.Fatalf("first freeze: %+v calls=%d err=%v", got, calls, err)
-	}
-}
-
 func TestUncertainLegacyAttemptCannotAdoptContract(t *testing.T) {
 	repo := Repository{DB: guideDB(t)}
 	scope := Scope{OwnerID: "u", DatasetID: "ds", DocumentID: "doc", Language: "en"}
@@ -109,32 +72,6 @@ func TestUncertainLegacyAttemptCannotAdoptContract(t *testing.T) {
 	repo.DB.Create(&orm.PaperGuideStep{ID: "ticket", RevisionID: rev.ID, StepKey: "request:plan:unknown"})
 	if err = repo.CheckContract(t.Context(), rev); !errors.Is(err, ErrRegenerate) {
 		t.Fatalf("uncertain attempt adopted: %v", err)
-	}
-}
-
-func TestImpossibleOutputReserveMakesZeroModelCalls(t *testing.T) {
-	for _, reserve := range []int{1024, 2048} {
-		t.Run(fmt.Sprint(reserve), func(t *testing.T) {
-			d, id := fixture(t)
-			snap, _ := BuildSourceSnapshot(d, id)
-			repo := Repository{DB: guideDB(t)}
-			scope := Scope{OwnerID: id.OwnerID, DatasetID: id.DatasetID, DocumentID: id.DocumentID, Language: "en"}
-			model := ModelIdentity{ID: "m", ContextTokens: 1024, OutputReserveTokens: reserve}
-			rev, err := repo.Create(t.Context(), CreateRevision{Scope: scope, SourceSHA256: id.SourceSHA256, IRDigest: snap.IRDigest, SnapshotPath: "current", Model: model})
-			if err != nil {
-				t.Fatal(err)
-			}
-			calls := 0
-			service := Service{Repo: repo, Source: &fixtureSource{s: snap}, Authorize: func(context.Context, Scope, bool) error { return nil }, ResolveModel: func(context.Context, Scope, string) (ModelIdentity, map[string]any, error) { return model, nil, nil }, Call: func(context.Context, string, map[string]any, map[string]any) (json.RawMessage, error) {
-				calls++
-				return nil, nil
-			}}
-			_, err = service.Run(t.Context(), asyncjob.Job{ID: rev.JobID, PayloadJSON: mustJSON(JobPayload{rev.ID, rev.Epoch})}, testFence{repo.DB})
-			if !errors.Is(err, ErrContext) || calls != 0 {
-				t.Fatalf("impossible request spent calls=%d err=%v", calls, err)
-			}
-
-		})
 	}
 }
 

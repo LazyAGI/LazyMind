@@ -261,7 +261,9 @@ type physicalTable struct {
 	cellMerge []int
 }
 
-func projectPrecisionTables(base Document, pages []precisionPage, index map[string]map[int]int) ([]SourceRegion, map[string]bool, error) {
+var errAmbiguousTableCaption = precisionError("ambiguous physical table caption")
+
+func projectPrecisionTables(base Document, pages []precisionPage, index map[string]map[int]int, omitted map[string]bool) ([]SourceRegion, map[string]bool, error) {
 	all := []physicalTable{}
 	seen := map[string]bool{}
 	for pageOrder, p := range pages {
@@ -379,6 +381,7 @@ func projectPrecisionTables(base Document, pages []precisionPage, index map[stri
 		r.ID = "region_" + Digest(string(data))
 		regions = append(regions, r)
 	}
+tables:
 	for _, home := range all {
 		if home.deleted {
 			continue
@@ -430,6 +433,13 @@ func projectPrecisionTables(base Document, pages []precisionPage, index map[stri
 			fragments = append(fragments, f)
 			skips = append(skips, c.skip)
 		}
+		start := len(regions)
+		omitTable := func() {
+			regions = regions[:start]
+			for _, f := range fragments {
+				omitted[f.parent.ID] = true
+			}
+		}
 		for i, f := range fragments {
 			box, e := precisionBox(f.span.BBox, f.page.Size)
 			if e != nil {
@@ -454,6 +464,10 @@ func projectPrecisionTables(base Document, pages []precisionPage, index map[stri
 		}
 		if grouped == len(fragments) {
 			ancillary, err := physicalTableText(home, fragments)
+			if err == errAmbiguousTableCaption && omitted != nil {
+				omitTable()
+				continue
+			}
 			if err != nil {
 				return nil, nil, err
 			}
@@ -488,6 +502,10 @@ func projectPrecisionTables(base Document, pages []precisionPage, index map[stri
 					}
 					for p, n := range candidates {
 						if n != 1 || page != -1 {
+							if kind == "table_identity" && omitted != nil {
+								omitTable()
+								continue tables
+							}
 							return nil, nil, precisionError("ambiguous table text physical page")
 						}
 						page = p
@@ -648,6 +666,9 @@ func physicalTableText(home physicalTable, fragments []physicalTable) ([]SourceR
 					if p.kind == c.Type && (c.Type != "table_caption" || p.page == home.parent.Page) {
 						matches = append(matches, p)
 					}
+				}
+				if c.Type == "table_caption" && len(matches) > 1 {
+					return nil, errAmbiguousTableCaption
 				}
 				if len(matches) != 1 {
 					return nil, precisionError("table text lacks unique physical ancestor")

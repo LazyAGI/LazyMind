@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 	"lazymind/core/common/orm"
@@ -24,12 +25,13 @@ type SourceLoader interface {
 	Read(context.Context, string) (GuideSourceSnapshot, error)
 }
 type Service struct {
-	FeatureEnabled func() bool
-	Repo           Repository
-	Source         SourceLoader
-	Authorize      func(context.Context, Scope, bool) error
-	ResolveModel   func(context.Context, Scope, string) (ModelIdentity, map[string]any, error)
-	Call           func(context.Context, string, map[string]any, map[string]any) (json.RawMessage, error)
+	ChapterConcurrency int // Defaults to four; bounded to eight.
+	FeatureEnabled     func() bool
+	Repo               Repository
+	Source             SourceLoader
+	Authorize          func(context.Context, Scope, bool) error
+	ResolveModel       func(context.Context, Scope, string) (ModelIdentity, map[string]any, error)
+	Call               func(context.Context, string, map[string]any, map[string]any) (json.RawMessage, error)
 }
 type GenerateRequest struct {
 	Language           string `json:"language"`
@@ -335,7 +337,26 @@ func (s Service) Revision(ctx context.Context, scope Scope, id string, after int
 			}
 		}
 	}
-	for _, role := range Roles() {
+	order := []Role{}
+	if out.Plan != nil && out.Plan.Layout == "flashpapers" {
+		for _, chapter := range out.Plan.Sections {
+			order = append(order, chapter.Role)
+			if _, exists := latest[chapter.Role]; !exists {
+				state := "queued"
+				for _, step := range steps {
+					if step.StepKey == fmt.Sprintf("chapter-start:%d:%s", r.Epoch, chapter.Role) {
+						state = "generating"
+					}
+				}
+				latest[chapter.Role] = PublishedSection{Key: sectionKey(chapter.Role, 1), ChangeVersion: out.Version, GuideSection: GuideSection{Role: chapter.Role, Title: chapter.Title, Blocks: []GuideBlock{}, Claims: []GuideClaim{}, ClaimIDs: []string{}, PublicationStatus: state}}
+			}
+		}
+	} else {
+		for _, role := range Roles() {
+			order = append(order, role)
+		}
+	}
+	for _, role := range order {
 		if section, ok := latest[role]; ok && section.ChangeVersion > after {
 			out.Sections = append(out.Sections, section)
 		}
@@ -517,4 +538,30 @@ func (s Service) observedView(ctx context.Context, r orm.PaperGuideRevision) Rev
 		}
 	}
 	return out
+}
+
+// Metadata persisted by historical guide revisions.
+type reviewedSection struct {
+	Key     string `json:"key"`
+	Version int    `json:"version"`
+}
+
+func sectionHasTarget(s GuideSection, p GuidePlan, f GuideFinding) bool {
+	if f.TargetType == "block" {
+		for _, b := range s.Blocks {
+			if b.ID == f.TargetID {
+				return true
+			}
+		}
+	}
+	return contains(s.ClaimIDs, f.TargetID)
+}
+
+const extractedReviewWarning = "全篇审核覆盖独立抽取保留的原文证据及完整表格组，不是全部原文逐段审核；抽取未保留的内容可能未被检查。这不代表原文缺失，也不豁免已发现的事实或解释缺陷。"
+
+const originalAssetsReviewWarning = "全篇审核覆盖抽取证据、完整表格和预选原件，并非逐段审核全部原文；其他原件和内容可能未被检查。范围限制不豁免已发现的缺陷。"
+
+type planningScope struct {
+	Extracted      bool `json:"independent_extracted_scope"`
+	OriginalAssets bool `json:"original_assets_scope,omitempty"`
 }

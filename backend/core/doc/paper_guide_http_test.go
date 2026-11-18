@@ -736,7 +736,7 @@ func TestPaperGuideAdapterPreservesDeadlineAndCancellation(t *testing.T) {
 			ctx, cancel = context.WithCancel(t.Context())
 			cancel()
 		}
-		_, err := paperGuideService().Call(ctx, "paper.guide.plan", map[string]any{}, map[string]any{})
+		_, err := paperGuideService().Call(ctx, "paper.explainer.plan", map[string]any{}, map[string]any{})
 		cancel()
 		if !errors.Is(err, want) {
 			t.Fatalf("lost safe context cause: deadline=%t err=%v", deadline, err)
@@ -785,19 +785,14 @@ func TestPaperGuideClientContractFailuresReachRunnerAsEvidenceErrors(t *testing.
 					}
 					tasks = append(tasks, request.Task)
 					switch request.Task {
-					case "paper.guide.plan":
-						plan := paperguide.GuidePlan{
-							Profiles:  paperguide.GuideProfiles{Secondary: []paperguide.ArgumentType{}, UncertaintyReason: "Synthetic material."},
-							Questions: []string{"What was measured?"}, TermPolicy: []string{},
-							Claims: []paperguide.GuideClaim{}, RequiredAssets: []paperguide.GuideAssetDecision{},
-						}
-						for _, role := range paperguide.Roles() {
-							plan.Sections = append(plan.Sections, paperguide.GuideSectionPlan{Role: role, Title: string(role), Focus: "Explain the measurement.",
-								Terms: []string{}, ClaimIDs: []string{}, EvidenceIDs: []string{}, AssetIDs: []string{}})
+					case "paper.explainer.plan":
+						plan := paperguide.ExplainerPlan{Title: "Synthetic paper", Subtitle: "Explanation"}
+						for _, id := range []string{"overview", "why-it-matters", "big-idea", "how-it-works", "rank-playground", "results", "limitations", "glossary"} {
+							plan.Chapters = append(plan.Chapters, paperguide.ExplainerChapterPlan{ID: id, Title: id})
 						}
 						return testJSONResponse(200, string(mustJSON(map[string]any{"status": "succeeded", "output": plan,
 							"usage": map[string]any{"task_type": request.Task, "task_version": paperguide.TaskVersion, "model_calls": 1}}))), nil
-					case "paper.guide.section":
+					case "paper.explainer.chapter":
 						// The registered Algorithm task rejects the entire marked response.
 						return testJSONResponse(502, `{"detail":{"error_code":"invalid_model_output","usage":{"model_calls":1,"elapsed_ms":19}}}`), nil
 					default:
@@ -810,7 +805,7 @@ func TestPaperGuideClientContractFailuresReachRunnerAsEvidenceErrors(t *testing.
 				if kind == "timeout" {
 					return testJSONResponse(504, `{"detail":{"error_code":"task_timeout","usage":{"model_calls":1,"elapsed_ms":120000}}}`), nil
 				}
-				usage := map[string]any{"task_type": "paper.guide.plan", "task_version": paperguide.TaskVersion, "model_calls": 1, "elapsed_ms": 19}
+				usage := map[string]any{"task_type": "paper.explainer.plan", "task_version": paperguide.TaskVersion, "model_calls": 1, "elapsed_ms": 19}
 				if kind == "model_calls" {
 					usage[kind] = 2
 				} else {
@@ -829,12 +824,13 @@ func TestPaperGuideClientContractFailuresReachRunnerAsEvidenceErrors(t *testing.
 				t.Fatal(err)
 			}
 			service := paperGuideService()
+			service.ChapterConcurrency = 1
 			result, err := service.Run(t.Context(), asyncjob.Job{ID: rev.JobID, PayloadJSON: mustJSON(paperguide.JobPayload{RevisionID: rev.ID, Epoch: rev.Epoch})}, guideCheckpointFence{db: db.DB})
 			want, class := paperguide.ErrEvidence, "schema"
-			wantCalls := 2
+			wantCalls := 1
 			if kind == "section_schema" {
-				wantCalls = 3
-				if !reflect.DeepEqual(tasks, []string{"paper.guide.plan", "paper.guide.section", "paper.guide.section"}) {
+				wantCalls = 9
+				if !reflect.DeepEqual(tasks, []string{"paper.explainer.plan", "paper.explainer.chapter", "paper.explainer.chapter", "paper.explainer.chapter", "paper.explainer.chapter", "paper.explainer.chapter", "paper.explainer.chapter", "paper.explainer.chapter", "paper.explainer.chapter"}) {
 					t.Fatalf("wrong SECTION retry sequence: %v", tasks)
 				}
 			}
@@ -850,13 +846,13 @@ func TestPaperGuideClientContractFailuresReachRunnerAsEvidenceErrors(t *testing.
 			if err = db.First(&rev, "id = ?", rev.ID).Error; err != nil {
 				t.Fatal(err)
 			}
-			if rev.ErrorCode != want.Error() || rev.Stage != "paused" || rev.CallsUsed != wantCalls || rev.RecoveryCalls != 1 {
+			if rev.ErrorCode != want.Error() || rev.Stage != "paused" || rev.CallsUsed != wantCalls || rev.RecoveryCalls != 0 {
 				t.Fatalf("bad persisted failure: %+v", rev)
 			}
 			if kind == "section_schema" {
 				var written int64
 				if err = db.Model(&orm.PaperGuideStep{}).Where("revision_id = ? AND (step_key LIKE ? OR published = ?)", rev.ID, "section:%", true).Count(&written).Error; err != nil || written != 0 ||
-					rev.PlannedCalls != 2 || rev.CorrectionCount != 0 {
+					rev.PlannedCalls != wantCalls || rev.CorrectionCount != 0 {
 					t.Fatalf("rejected SECTION left a draft/publication or changed repair counters: written=%d rev=%+v err=%v", written, rev, err)
 				}
 			}
@@ -872,7 +868,7 @@ func TestPaperGuideClientContractFailuresReachRunnerAsEvidenceErrors(t *testing.
 					Class string `json:"error_class"`
 				}
 				wantMarkerClass := class
-				if kind == "section_schema" && strings.HasPrefix(marker.StepKey, "request:plan:") {
+				if kind == "section_schema" && strings.HasPrefix(marker.StepKey, "request:fast:plan:") {
 					wantMarkerClass = "success"
 				}
 				if json.Unmarshal([]byte(marker.OutputJSON), &diagnostic) != nil || diagnostic.Class != wantMarkerClass || strings.Contains(marker.OutputJSON, "provider-secret") {
@@ -883,102 +879,6 @@ func TestPaperGuideClientContractFailuresReachRunnerAsEvidenceErrors(t *testing.
 	}
 }
 
-func TestPaperGuideServiceHTTPVersionMatchesDurableAndPythonContract(t *testing.T) {
-	// This fixture is independently checked against the real Python registry and
-	// measured task templates. Never derive the server response from the request:
-	// echoing it would accept an obsolete Go adapter version on both sides.
-	raw, err := os.ReadFile("../paperguide/testdata/request-budget.json")
-	if err != nil {
-		t.Fatal(err)
-	}
-	var expected struct {
-		Version string `json:"task_version"`
-	}
-	if err := json.Unmarshal(raw, &expected); err != nil {
-		t.Fatal(err)
-	}
-	if expected.Version == "" || expected.Version != paperguide.TaskVersion {
-		t.Fatalf("durable/Python contract mismatch: fixture=%s durable=%s", expected.Version, paperguide.TaskVersion)
-	}
-	for _, task := range []string{"paper.guide.extract", "paper.guide.plan", "paper.guide.section", "paper.guide.review"} {
-		t.Run(task, func(t *testing.T) {
-			calls := 0
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				calls++
-				var request struct {
-					Task    string `json:"task_type"`
-					Options struct {
-						Version string `json:"task_version"`
-					} `json:"options"`
-				}
-				if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
-					t.Errorf("decode actual HTTP request: %v", err)
-				}
-				if r.URL.Path != "/api/chat/llm-task:run" || request.Task != task || request.Options.Version != expected.Version {
-					t.Errorf("worker HTTP contract: task=%s version=%s; want %s %s", request.Task, request.Options.Version, task, expected.Version)
-				}
-				w.Header().Set("Content-Type", "application/json")
-				_ = json.NewEncoder(w).Encode(map[string]any{
-					"status": "succeeded", "output": map[string]any{"accepted": true},
-					"usage": map[string]any{"task_type": task, "task_version": expected.Version, "model_calls": 1},
-				})
-			}))
-			defer server.Close()
-			t.Setenv("LAZYMIND_CHAT_SERVICE_URL", server.URL)
-			// Exercise the actual worker callback, not a hand-built client request.
-			output, err := paperGuideService().Call(t.Context(), task, map[string]any{"language": "en"}, nil)
-			if err != nil || string(output) != `{"accepted":true}` || calls != 1 {
-				t.Fatalf("worker did not receive successful contract output: output=%s err=%v calls=%d", output, err, calls)
-			}
-		})
-	}
-}
-
-func TestPaperGuideFragmentFixtureUsesCurrentActualTransport(t *testing.T) {
-	guideHTTPFixture(t)
-	raw, err := os.ReadFile("../paperguide/testdata/table-fragment-transport.json")
-	if err != nil {
-		t.Fatal(err)
-	}
-	var fixture struct {
-		Input  map[string]any  `json:"input"`
-		Output json.RawMessage `json:"output"`
-	}
-	if err = json.Unmarshal(raw, &fixture); err != nil {
-		t.Fatal(err)
-	}
-	previous := http.DefaultTransport
-	t.Cleanup(func() { http.DefaultTransport = previous })
-	calls := 0
-	http.DefaultTransport = roundTripFunc(func(r *http.Request) (*http.Response, error) {
-		calls++
-		var wire struct {
-			Options map[string]string `json:"options"`
-			Input   struct {
-				Data map[string]any `json:"data"`
-			} `json:"input"`
-		}
-		if err := json.NewDecoder(r.Body).Decode(&wire); err != nil {
-			t.Fatal(err)
-		}
-		if wire.Options["task_version"] != paperguide.TaskVersion || !reflect.DeepEqual(wire.Input.Data, fixture.Input) {
-			t.Fatalf("changed canonical physical transport %+v", wire)
-		}
-		return testJSONResponse(200, string(mustJSON(map[string]any{"status": "succeeded", "output": fixture.Output, "usage": map[string]any{"model_calls": 1, "task_type": "paper.guide.extract", "task_version": paperguide.TaskVersion}}))), nil
-	})
-	t.Setenv("LAZYMIND_CHAT_SERVICE_URL", "http://fixture.invalid")
-	got, err := paperGuideService().Call(t.Context(), "paper.guide.extract", fixture.Input, map[string]any{})
-	if err != nil || calls != 1 {
-		t.Fatalf("calls=%d err=%v output=%s", calls, err, got)
-	}
-	var actual, expected any
-	json.Unmarshal(got, &actual)
-	json.Unmarshal(fixture.Output, &expected)
-	if !reflect.DeepEqual(actual, expected) {
-		t.Fatal("canonical output changed")
-	}
-}
-
 func TestPaperGuideAdapterSelectsHTTPDeadlineWithoutChangingOptions(t *testing.T) {
 	guideHTTPFixture(t)
 	t.Setenv("LAZYMIND_CHAT_SERVICE_URL", "http://fixture.invalid")
@@ -986,11 +886,9 @@ func TestPaperGuideAdapterSelectsHTTPDeadlineWithoutChangingOptions(t *testing.T
 		task  string
 		limit time.Duration
 	}{
-		{"paper.guide.plan", 180 * time.Second},
-		{"paper.guide.extract", 120 * time.Second},
-		{"paper.guide.section", 120 * time.Second},
-		{"paper.guide.review", 120 * time.Second},
-		{"paper.guide.plan", 2 * time.Second},
+		{"paper.explainer.plan", 120 * time.Second},
+		{"paper.explainer.chapter", 120 * time.Second},
+		{"paper.explainer.plan", 2 * time.Second},
 	} {
 		t.Run(tc.task+"/"+tc.limit.String(), func(t *testing.T) {
 			previous := http.DefaultTransport
@@ -1025,6 +923,32 @@ func TestPaperGuideAdapterSelectsHTTPDeadlineWithoutChangingOptions(t *testing.T
 			})
 			if _, err := paperGuideService().Call(ctx, tc.task, map[string]any{}, nil); err != nil || calls != 1 {
 				t.Fatalf("calls=%d err=%v", calls, err)
+			}
+		})
+	}
+}
+
+func TestFlashpapersHTTPTaskVersion(t *testing.T) {
+	for _, task := range []string{"paper.explainer.plan", "paper.explainer.chapter"} {
+		t.Run(task, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				var request struct {
+					Task    string            `json:"task_type"`
+					Options map[string]string `json:"options"`
+				}
+				if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+					t.Error(err)
+				}
+				if request.Task != task || request.Options["task_version"] != paperguide.TaskVersion {
+					t.Errorf("incorrect new transport: %+v", request)
+				}
+				w.Header().Set("Content-Type", "application/json")
+				json.NewEncoder(w).Encode(map[string]any{"status": "succeeded", "output": map[string]any{"accepted": true}, "usage": map[string]any{"model_calls": 1, "task_type": task, "task_version": paperguide.TaskVersion}})
+			}))
+			defer server.Close()
+			t.Setenv("LAZYMIND_CHAT_SERVICE_URL", server.URL)
+			if _, err := paperGuideService().Call(t.Context(), task, map[string]any{}, map[string]any{}); err != nil {
+				t.Fatal(err)
 			}
 		})
 	}

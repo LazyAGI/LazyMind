@@ -2,6 +2,9 @@ const activeStages = [
   "queued",
   "waiting_source",
   "analyzing",
+  "reading",
+  "planning",
+  "checking",
   "writing",
   "reviewing",
 ];

@@ -1,4 +1,10 @@
+import GuideGlossaryEntry from "./GuideGlossaryEntry";
+import GuideSectionIcon from "./GuideSectionIcon";
+import { GuideSkeleton } from "./GuideGenerationProgress";
+import PaperGuidePlayground from "./PaperGuidePlayground";
+import "./FlashpapersReader.scss";
 import PaperGuideTableText from "./PaperGuideTableText";
+import PaperGuideInteraction from "./PaperGuideInteraction";
 import { coverageWarning } from "./coverageWarning";
 import { useLayoutEffect, useRef, useState } from "react";
 import type {
@@ -13,6 +19,12 @@ import { restoreTextPosition, visibleTextOffset } from "./readingPosition";
 import PaperGuideText, { guideTextSegments } from "./PaperGuideText";
 import { sourceBoundary } from "./sourceText";
 import { isGuideRunActive } from "./guideRunState";
+
+function headingId(revisionId: string, sectionKey: string, blockId?: string) {
+  return blockId === undefined
+    ? `guide-${revisionId}-${sectionKey}`
+    : `guide-subsection-${[revisionId, sectionKey, blockId].map(encodeURIComponent).join("/")}`;
+}
 
 function blockEvidenceIds(block: PaperGuideBlock, claims: readonly PaperGuideClaim[]) {
   const ids = new Set(block.evidence_ids);
@@ -48,6 +60,24 @@ export default function PaperGuideReader({
   renderAsset,
 }: Props) {
   const zh = language === "zh";
+  const flash = revision.plan?.layout === "flashpapers";
+  const running = isGuideRunActive(revision.run.stage);
+  const chapterState = (section: PaperGuidePublishedSection) => section.blocks.length ? (zh ? "可阅读" : "Ready") : !running ? (zh ? "已暂停" : "Paused") : section.publication_status === "generating" ? (zh ? "生成中" : "Generating") : (zh ? "排队中" : "Queued");
+  const fixedTitles: Record<string, string> = zh
+    ? { overview: "论文简述", "why-it-matters": "问题与瓶颈", "big-idea": "核心想法", results: "实验结果", limitations: "局限", glossary: "术语表" }
+    : { overview: "Paper Summary", "why-it-matters": "Problem and Bottlenecks", "big-idea": "The Big Idea", results: "Experimental Results", limitations: "Limitations", glossary: "Glossary" };
+  const rawSections: PaperGuidePublishedSection[] = flash && revision.plan?.sections.length
+    ? revision.plan.sections.map(planned => revision.sections.find(section => section.role === planned.role) ?? {
+      key: `section:${planned.role}:v1`, role: planned.role, title: planned.title, blocks: [], claims: [], claim_ids: [], summary: "", change_version: 0, publication_status: "pending",
+    }) : revision.sections;
+  const orderedSections = rawSections.map(section => flash ? { ...section, title: fixedTitles[section.role] ?? section.title } : section);
+  const resultsIndex = orderedSections.findIndex(section => section.role === "results");
+  const limitationsIndex = orderedSections.findIndex(section => section.role === "limitations");
+  function renderSectionIcon(section: PaperGuidePublishedSection, index: number) {
+    const optional = resultsIndex >= 0 && index > resultsIndex && index < limitationsIndex;
+    return <GuideSectionIcon role={section.role} title={section.title} optional={optional}
+      description={revision.plan?.sections.find(planned => planned.role === section.role)?.focus}/>;
+  }
   const root = useRef<HTMLDivElement>(null);
   const restored = useRef("");
   const [active, setActive] = useState("");
@@ -72,7 +102,7 @@ export default function PaperGuideReader({
     }
   }, [revision, selected]);
   const numbers = new Map<string, number>();
-  const sectionsWithSources = revision.sections.map((section) => {
+  const sectionsWithSources = orderedSections.map((section) => {
     // Match server selection context: direct sources, then plan and local claims.
     const claims = [...(revision.plan?.claims ?? []), ...(section.claims ?? [])];
     const blocks = section.blocks.map((block) => {
@@ -113,7 +143,10 @@ export default function PaperGuideReader({
         element.dataset.guideSection === saved.section_key,
     );
     const text = block?.querySelector<HTMLElement>("[data-guide-text]");
-    if (text) restoreTextPosition(container, text, saved.offset);
+    if (text) {
+      if (text instanceof HTMLDetailsElement && saved.offset > 0) text.open = true;
+      restoreTextPosition(container, text, saved.offset);
+    }
   }
   function scheduleLayoutRestore() {
     layoutPending.current = true;
@@ -246,35 +279,50 @@ export default function PaperGuideReader({
     });
   }
   function navigate(id: string) {
-    const el = document.getElementById(`guide-${revision.id}-${id}`);
-    el?.scrollIntoView?.({ block: "start" });
+    const el = document.getElementById(id);
+    setActive(id);
+    const scroller = root.current;
+    if (el && scroller?.contains(el)) {
+      // scrollIntoView also scrolls ancestor panes and can hide the mode toolbar.
+      scroller.scrollTop += el.getBoundingClientRect().top - scroller.getBoundingClientRect().top - 24;
+    }
     el?.focus({ preventScroll: true });
   }
   return (
-    <div className={`paper-guide-reader${compact ? " is-comparing" : ""}`}>
+    <div className={`paper-guide-reader${flash ? " is-flashpapers" : ""}${compact ? " is-comparing" : ""}`}>
       <nav
         className="paper-guide-outline"
         aria-label={zh ? "本文目录" : "Article outline"}
       >
-        <details open={!compact}>
+        <details open={flash || !compact}>
           <summary>{zh ? "本文目录" : "Article outline"}</summary>
-          {revision.sections.map((s) => (
-            <button
-              key={s.role}
-              aria-current={active === s.key ? "location" : undefined}
-              onClick={() => navigate(s.key)}
-            >
-              {s.title}
-            </button>
-          ))}
+          {orderedSections.map((section, sectionIndex) => {
+            const sectionId = headingId(revision.id, section.key);
+            return (
+              <div key={section.role}>
+                <button type="button" aria-current={active === sectionId || (flash && !active && sectionIndex === 0) ? "location" : undefined} onClick={() => navigate(sectionId)}>
+                  {flash && renderSectionIcon(section, sectionIndex)}
+                  <span className={flash ? "guide-outline-label" : undefined}>{section.title}{flash && <small className={section.blocks.length ? "guide-ready-label" : undefined} data-state={section.blocks.length ? "ready" : running ? section.publication_status : "paused"}>{chapterState(section)}</small>}</span>
+                </button>
+                {!flash && section.blocks.filter(({ kind }) => kind === "heading").map((block) => {
+                  const id = headingId(revision.id, section.key, block.id);
+                  return (
+                    <button key={id} type="button" className="paper-guide-outline-subsection" aria-current={active === id ? "location" : undefined} onClick={() => navigate(id)}>
+                      {block.text}
+                    </button>
+                  );
+                })}
+              </div>
+            );
+          })}
         </details>
       </nav>
       <div
         className="paper-guide-scroll"
         ref={root}
-        onMouseUp={capture}
-        onKeyUp={capture}
-        onTouchEnd={capture}
+        onMouseUp={flash ? undefined : capture}
+        onKeyUp={flash ? undefined : capture}
+        onTouchEnd={flash ? undefined : capture}
         onScroll={() => {
           const geometry = root.current?.getBoundingClientRect();
           if (
@@ -296,7 +344,10 @@ export default function PaperGuideReader({
             (s) => s.key === el?.dataset.guideSection,
           );
           if (el && section) {
-            setActive(section.key);
+            let index = section.blocks.findIndex((block) => block.id === el.dataset.guideBlock);
+            while (index >= 0 && section.blocks[index].kind !== "heading") index--;
+            const subsection = section.blocks[index];
+            setActive(headingId(revision.id, section.key, flash ? undefined : subsection?.id));
             const position: PaperGuideProgressRequest = {
               revision_id: revision.id,
               section_key: section.key,
@@ -315,12 +366,19 @@ export default function PaperGuideReader({
         }}
       >
         <article className="paper-guide-article">
-          <h1>{title}</h1>
-          {sectionsWithSources.map(({ section, blocks }) => (
-            <section key={section.role} aria-label={section.title}>
-              <h2 id={`guide-${revision.id}-${section.key}`} tabIndex={-1}>
+          {flash && <div className="guide-article-kicker"><GuideSectionIcon role="glossary"/>{zh ? "论文导读" : "PAPER GUIDE"}<span>{orderedSections.length} {zh ? "个章节" : "SECTIONS"}</span></div>}
+          <h1>{flash ? revision.plan?.title || title : title}</h1>
+          {flash && revision.plan?.subtitle && <p className="flashpapers-subtitle">{revision.plan.subtitle}</p>}
+          {sectionsWithSources.map(({ section, blocks }, sectionIndex) => (
+            <section key={section.role} aria-label={section.title} data-guide-role={section.role}>
+              <h2 id={headingId(revision.id, section.key)} tabIndex={-1}>
+                {flash && renderSectionIcon(section, sectionIndex)}
                 {section.title}
               </h2>
+              {flash && section.blocks.length === 0 && <div className="guide-chapter-placeholder" aria-busy={running}>
+                <p role="status"><strong>{chapterState(section)}</strong> · {running ? (zh ? "整篇预计约 2 分钟，完成后自动展示本章内容。" : "The guide usually takes about 2 minutes. This chapter updates automatically.") : (zh ? "本章尚未完成，继续生成后会自动更新。" : "Resume generation to finish this chapter.")}</p>
+                {running && <GuideSkeleton/>}
+              </div>}
               {section.publication_status === "correction_required" && (
                 <p role="status" className="paper-guide-warning">
                   {zh
@@ -335,7 +393,7 @@ export default function PaperGuideReader({
                   data-guide-section={section.key}
                   className={`paper-guide-block paper-guide-block--${block.kind}`}
                 >
-                  <strong className="paper-guide-attribution">
+                  {!flash && <strong className="paper-guide-attribution">
                     {block.attribution === "external_background"
                       ? zh
                         ? "外部背景 · 未核实为本篇论文依据"
@@ -355,8 +413,12 @@ export default function PaperGuideReader({
                             : zh
                               ? "论文陈述 · 导读转述"
                               : "Paper statement · guide paraphrase"}
-                  </strong>
-                  {block.kind === "table" ? (
+                  </strong>}
+                  {flash && section.role === "glossary" && block.kind === "paragraph" ? (
+                    <GuideGlossaryEntry text={block.text} id={block.id}/>
+                  ) : block.kind === "formula" ? (
+                    <div data-guide-text={block.id}><PaperGuideText text={block.text} displayMath /></div>
+                  ) : block.kind === "table" ? (
                     <div
                       className="paper-guide-table-text"
                       data-guide-text={block.id}
@@ -376,7 +438,7 @@ export default function PaperGuideReader({
                       </p>
                     </details>
                   ) : block.kind === "heading" ? (
-                    <h3 data-guide-text={block.id}>
+                    <h3 data-guide-text={block.id} id={headingId(revision.id, section.key, block.id)} tabIndex={-1}>
                       <PaperGuideText text={block.text} />
                     </h3>
                   ) : (
@@ -384,8 +446,12 @@ export default function PaperGuideReader({
                       <PaperGuideText text={block.text} />
                     </p>
                   )}
+                  {flash && block.kind === "playground" && block.playground && <PaperGuidePlayground html={block.playground.html} language={language} title={`${section.title} · ${zh ? "交互探索" : "Interactive exploration"}`} />}
+                  {block.kind === "interactive" && block.interaction && (
+                    <PaperGuideInteraction key={revision.id} interaction={block.interaction} language={language} />
+                  )}
                   {block.asset_id && renderAsset?.(block)}
-                  {!block.asset_id && sources.length > 0 &&
+                  {!flash && !block.asset_id && sources.length > 0 &&
                     (block.kind === "paragraph" || block.kind === "callout") &&
                     guideTextSegments(block.text).some(segment =>
                       segment.display || segment.latex?.includes("=")
@@ -396,8 +462,8 @@ export default function PaperGuideReader({
                         : "Guide equation explanation · Open the source to see the original in context."}
                     </small>
                   )}
-                  <div className="paper-guide-block-tools">
-                    {sources.map((id) => (
+                  {!flash && <div className="paper-guide-block-tools">
+                    {!flash && sources.map((id) => (
                       <button
                         key={id}
                         className="paper-guide-citation"
@@ -426,12 +492,12 @@ export default function PaperGuideReader({
                         </button>
                       )}
                     </details>
-                  </div>
+                  </div>}
                 </div>
               ))}
             </section>
           ))}
-          {revision.status === "partial" &&
+          {!flash && revision.status === "partial" &&
             isGuideRunActive(revision.run.stage) && (
               <p className="paper-guide-next" role="status">
                 {zh
@@ -440,18 +506,18 @@ export default function PaperGuideReader({
               </p>
             )}
           {revision.coverage?.warnings?.length > 0 && (
-            <aside className="paper-guide-warning">
-              <h2>{zh ? "材料与覆盖范围" : "Materials and coverage"}</h2>
+            <details open={!flash} className="paper-guide-warning flashpapers-materials">
+              <summary>{zh ? "材料与覆盖范围" : "Materials and coverage"}</summary>
               <ul>
                 {revision.coverage.warnings.map((warning, i) => (
                   <li key={i}>{coverageWarning(warning, zh)}</li>
                 ))}
               </ul>
-            </aside>
+            </details>
           )}
         </article>
       </div>
-      {selected && (
+      {!flash && selected && (
         <div
           className="paper-guide-selection"
           role="toolbar"

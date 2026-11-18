@@ -61,6 +61,7 @@ interface FileViewerProps {
   onPdfNoteSelection?: (selection: PdfTextSelection, note: string, color: PdfNoteColor, id: string) => Promise<void>;
   pdfNoteHighlights?: PdfNoteHighlight[];
   onPdfNoteHighlightClick?: (id:string) => void;
+  pdfHeaderCenter?: ReactNode;
   pdfHeaderStart?: ReactNode;
   pdfHeaderEnd?: ReactNode | ((tools: ReactNode) => ReactNode);
   onPdfStudyOpenChange?: (open: boolean) => void;
@@ -429,6 +430,7 @@ const FileViewer = forwardRef<FileViewerRef, FileViewerProps>((props, ref) => {
             pdfToolbarMode={props.pdfToolbarMode}
             pdfSelectableText={props.pdfSelectableText}
             pdfHeaderStart={props.pdfHeaderStart}
+            pdfHeaderCenter={props.pdfHeaderCenter}
             pdfHeaderEnd={props.pdfHeaderEnd}
             key={`${props.pdfIRTarget?.dataset || ""}:${props.pdfIRTarget?.document || ""}:${props.file || ""}`}
             onStudyOpenChange={props.onPdfStudyOpenChange}
@@ -566,6 +568,7 @@ const FileViewer = forwardRef<FileViewerRef, FileViewerProps>((props, ref) => {
     props.pdfNoteHighlights,
     props.onPdfNoteHighlightClick,
     props.pdfHeaderStart,
+    props.pdfHeaderCenter,
     props.pdfHeaderEnd,
     props.file,
     props.fileName,
@@ -625,6 +628,7 @@ const FileViewer = forwardRef<FileViewerRef, FileViewerProps>((props, ref) => {
       {fileType === "pdf" && (loading || !fileData || !pdfPreviewData) && (props.pdfHeaderStart || props.pdfHeaderEnd) && <div className="pdf-reader-workspace" style={{flexShrink:0}}>
         <nav className="pdf-reader-modebar pdf-reader-header" aria-label={t("pdfReader.reading")}>
           <div className="pdf-reader-header-start">{props.pdfHeaderStart}</div>
+          {props.pdfHeaderCenter && <div className="paper-mode-switch-slot">{props.pdfHeaderCenter}</div>}
           <div />
           <div className="pdf-reader-header-end">{typeof props.pdfHeaderEnd === "function" ? props.pdfHeaderEnd(null) : props.pdfHeaderEnd}</div>
         </nav>

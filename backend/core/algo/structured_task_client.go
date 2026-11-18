@@ -12,10 +12,10 @@ import (
 )
 
 const (
-	PaperGuideExtractTask         = "paper.guide.extract"
-	PaperGuidePlanTask            = "paper.guide.plan"
-	PaperGuideSectionTask         = "paper.guide.section"
-	PaperGuideReviewTask          = "paper.guide.review"
+
+
+
+
 	FormulaExplanationTask        = "paper.formula.explain"
 	FormulaExplanationTaskVersion = "formula-explanation-v7-low-latency"
 	VisualExplanationTask         = "paper.visual.explain"

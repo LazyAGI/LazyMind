@@ -17,7 +17,7 @@ export interface PdfCitationPreviewDocument {
 }
 export interface PdfCitationPreview { url: string; width: number; height: number; region?: PdfCitationRegion }
 interface RenderedPreview extends PdfCitationPreview { bytes: number }
-export interface PdfCitationPreviewOptions { maxEntries?: number; maxBytes?: number }
+export interface PdfCitationPreviewOptions { maxEntries?: number; maxBytes?: number; renderScale?: number }
 
 const PREVIEW_SCALE = 1.5;
 const MAX_DIMENSION = 2048;
@@ -171,13 +171,13 @@ async function findFallbackRegion(
   return weakMatch;
 }
 
-async function renderPreview(pdf: PdfCitationPreviewDocument, target: PdfCitationTarget, padding: number): Promise<RenderedPreview | undefined> {
+async function renderPreview(pdf: PdfCitationPreviewDocument, target: PdfCitationTarget, padding: number, requestedScale = PREVIEW_SCALE): Promise<RenderedPreview | undefined> {
   const pages = new Map<number, { page: PreviewPage; base: PreviewViewport; viewport: PreviewViewport; scale: number }>();
   for (const region of target.regions) {
     if (pages.has(region.page)) continue;
     const page = await pdf.getPage(region.page);
     const base = page.getViewport({ scale: 1, rotation: 0 });
-    const scale = Math.min(PREVIEW_SCALE, MAX_DIMENSION / Math.max(base.width, base.height));
+    const scale = Math.min(requestedScale, MAX_DIMENSION / Math.max(base.width, base.height));
     pages.set(region.page, { page, base, viewport: page.getViewport({ scale }), scale });
   }
   const crops = target.regions.map(region => {
@@ -260,6 +260,7 @@ async function renderPreview(pdf: PdfCitationPreviewDocument, target: PdfCitatio
 }
 
 export function createPdfCitationPreviewCache(options: PdfCitationPreviewOptions = {}) {
+  const renderScale = Number.isFinite(options.renderScale) && options.renderScale! > 0 ? Math.min(options.renderScale!, 4) : PREVIEW_SCALE;
   interface DocumentState {
     active: boolean;
     resolved: Map<string, Entry>;
@@ -341,7 +342,7 @@ export function createPdfCitationPreviewCache(options: PdfCitationPreviewOptions
         requestState.missing.add(key);
         return undefined;
       }
-      const rendered = await renderPreview(pdf, region ? { ...target, regions: [region] } : target, options?.exact ? 0 : PADDING);
+      const rendered = await renderPreview(pdf, region ? { ...target, regions: [region] } : target, options?.exact ? 0 : PADDING, renderScale);
       return rendered && region ? { ...rendered, region } : rendered;
     })().then(rendered => {
       try {

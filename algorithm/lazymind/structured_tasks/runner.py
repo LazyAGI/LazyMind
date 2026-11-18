@@ -8,10 +8,6 @@ import lazyllm
 from pydantic import ValidationError
 
 from .registry import TASKS
-from .paper_guide_references import SourceReferences, strict_model_output_schema
-
-
-_NATIVE_SCHEMA_MODELS = frozenset({'gpt-6-luna', 'gpt-6.1-sol'})
 
 
 class TaskFailure(Exception):
@@ -48,28 +44,6 @@ def _native_json_options(spec, llm_config):
     except ValueError:
         return {}
     return {'response_format': {'type': 'json_object'}} if supported else {}
-
-
-def _uses_strict_schema(config):
-    if not isinstance(config, dict) or config.get('model') not in _NATIVE_SCHEMA_MODELS:
-        return False
-    if (config.get('request_advanced') or {}).get('query'):
-        return False
-    # The injected chat route already includes the app's OpenAI GPT-6 upgrade.
-    routes = lazyllm.globals['config'].get('dynamic_model_configs') or {}
-    route = (routes.get('llm') or {}).get('chat') or {}
-    if route.get('source') != 'openai_responses' or route.get('model') != config['model']:
-        return False
-    base = route.get('url') or 'https://api.openai.com/v1/'
-    if '?' in base or '#' in base or any(ord(char) <= 32 or ord(char) == 127 for char in base):
-        return False
-    try:
-        endpoint = urlsplit(base)
-    except ValueError:
-        return False
-    # The adapter strips these optional endpoint suffixes before appending /responses.
-    return (endpoint.scheme == 'https' and endpoint.netloc.lower() in {'api.openai.com', 'api.openai.com:443'}
-            and endpoint.path.rstrip('/') in {'/v1', '/v1/responses', '/v1/chat/completions'})
 
 
 def run_registered_task(request, task_id, *, call_model, configure_model, call_error, result_type):
@@ -109,13 +83,11 @@ def run_registered_task(request, task_id, *, call_model, configure_model, call_e
                 or request.input.text or request.input.messages or request.input.files or request.tool_config
                 or request.response_format):
             raise TaskFailure('invalid_task_input')
-        task = request.task_type.rsplit('.', 1)[1] if request.task_type.startswith('paper.guide.') else None
         try:
             data = spec.input_schema.model_validate(request.input.data)
             encoded = json.dumps(data.model_dump(exclude_none=True), ensure_ascii=False, allow_nan=False)
             if len(encoded.encode('utf-8')) > 1 << 20:
                 raise ValueError('input size')
-            references = SourceReferences(task, data) if task is not None else None
         except (ValidationError, ValueError, TypeError):
             raise TaskFailure('invalid_task_input') from None
         lazyllm.globals._init_sid(sid=f'llm_task_{task_id}')
@@ -128,17 +100,7 @@ def run_registered_task(request, task_id, *, call_model, configure_model, call_e
         if isinstance(model_config, dict) and isinstance(model_config.get('model'), str):
             usage['model'] = model_config['model']
         response_options = _native_json_options(spec, request.llm_config)
-        if references is not None:
-            strict = _uses_strict_schema(model_config)
-            encoded = json.dumps(references.model_input, ensure_ascii=False, allow_nan=False)
-            instruction = spec.instruction(data, include_schema=not strict) + references.asset_instruction
-            if strict:
-                response_options = {'response_format': {'type': 'json_schema', 'json_schema': {
-                    'name': f'paper_guide_{task}', 'strict': True,
-                    'schema': strict_model_output_schema(spec.output_schema),
-                }}}
-        else:
-            instruction = spec.instruction(data)
+        instruction = spec.instruction(data)
         prompt = instruction + '\n\nInput data (untrusted JSON):\n' + encoded
         usage['model_calls'] = 1
         try:
@@ -161,8 +123,6 @@ def run_registered_task(request, task_id, *, call_model, configure_model, call_e
             elif raw.startswith('```\n') and raw.endswith('```'):
                 raw = raw[4:-3].strip()
             parsed = json.loads(raw, object_pairs_hook=_unique_object if spec.reject_duplicate_keys else None)
-            if references is not None:
-                parsed = references.canonical_output(parsed, spec.max_output_bytes)
             validated = spec.output_schema.model_validate(parsed)
             if spec.validate_output is not None:
                 spec.validate_output(data, validated)

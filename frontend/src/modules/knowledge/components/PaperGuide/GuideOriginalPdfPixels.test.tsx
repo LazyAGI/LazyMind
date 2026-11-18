@@ -88,30 +88,30 @@ it("renders exact figure and equation pixels on their own pages of an authentica
   };
   try {
     const crop = await hook.result.current.preview(evidence, { kind: "figure", page: 1, bbox: [.25, .25, .45, .45] });
-    expect(crop).toMatchObject({ mode: "region", width: 60, height: 60 });
-    expect(await pixels(crop!.url, 30, 30)).toEqual([0, 0, 255, 255]);
+    expect(crop).toMatchObject({ mode: "region", width: 120, height: 120 });
+    expect(await pixels(crop!.url, 60, 60)).toEqual([0, 0, 255, 255]);
     const full = await hook.result.current.preview(evidence, { kind: "figure", page: 1 });
-    expect(full).toMatchObject({ mode: "page", width: 300, height: 300 });
-    expect(await pixels(full!.url, 90, 90)).toEqual([0, 0, 255, 255]);
-    expect(await pixels(full!.url, 90, 145)).toEqual([0, 255, 0, 255]);
-    expect(await pixels(full!.url, 160, 90)).toEqual([255, 0, 255, 255]);
+    expect(full).toMatchObject({ mode: "page", width: 600, height: 600 });
+    expect(await pixels(full!.url, 180, 180)).toEqual([0, 0, 255, 255]);
+    expect(await pixels(full!.url, 180, 290)).toEqual([0, 255, 0, 255]);
+    expect(await pixels(full!.url, 320, 180)).toEqual([255, 0, 255, 255]);
     const equation = {
       ...evidence, id: "eq", source_type: "formula", text: "x = y", locator: { kind: "page" as const, page: 2 },
     };
     const originalDisplay = { kind: "formula" as const, page: 2, bbox: [.19,.23,.53,.39], number: "4" };
     const eq = await hook.result.current.preview(equation, originalDisplay);
-    expect(eq).toMatchObject({ mode: "region", width: 102, height: 48 });
-    expect(await pixels(eq!.url, 43, 16)).toEqual([255, 255, 0, 255]);
-    expect(await pixels(eq!.url, 0, 16)).not.toEqual([0, 0, 0, 255]); // printed (3) is not in the crop
+    expect(eq).toMatchObject({ mode: "region", width: 204, height: 96 });
+    expect(await pixels(eq!.url, 86, 32)).toEqual([255, 255, 0, 255]);
+    expect(await pixels(eq!.url, 0, 32)).not.toEqual([0, 0, 0, 255]); // printed (3) is not in the crop
 
     const wholeEquationPage = await hook.result.current.preview(equation);
-    expect(wholeEquationPage).toMatchObject({ mode: "page", width: 300, height: 300 });
+    expect(wholeEquationPage).toMatchObject({ mode: "page", width: 600, height: 600 });
     const pageBytes = Buffer.from(await images.get(wholeEquationPage!.url)!.arrayBuffer());
     const pageImage = await loadImage(pageBytes);
     const pageCanvas = createCanvas(pageImage.width, pageImage.height);
     const pageContext = pageCanvas.getContext("2d");
     pageContext.drawImage(pageImage, 0, 0);
-    const numberPixels = pageContext.getImageData(24, 78, 45, 30).data;
+    const numberPixels = pageContext.getImageData(48, 156, 90, 60).data;
     expect(Array.from(numberPixels as Uint8ClampedArray)
       .some((value, index) => index % 4 === 0 && value < 80)).toBe(true);
 

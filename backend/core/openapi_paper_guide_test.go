@@ -65,3 +65,39 @@ func TestPaperGuideGeneratedClientPreservesNull(t *testing.T) {
 		}
 	}
 }
+
+func TestPaperGuideInteractionIsOptionalAndTyped(t *testing.T) {
+	schemas := paperGuideOpenAPISchemas()
+	block := schemas["PaperGuideBlock"].(map[string]any)
+	field, ok := block["properties"].(map[string]any)["interaction"].(map[string]any)
+	if !ok || field["nullable"] != true || slices.Contains(block["required"].([]string), "interaction") {
+		t.Fatalf("interaction must be optional and nullable on a block: %+v", block)
+	}
+	interaction := schemas["PaperGuideInteraction"].(map[string]any)
+	properties := interaction["properties"].(map[string]any)
+	if len(interaction["required"].([]string)) != 11 || interaction["additionalProperties"] != false {
+		t.Fatalf("interaction fields must be strict and required: %+v", interaction)
+	}
+	if properties["rows"].(map[string]any)["maxItems"] != 40 ||
+		schemas["PaperGuideInteractionRow"].(map[string]any)["properties"].(map[string]any)["value"].(map[string]any)["type"] != "number" {
+		t.Fatalf("result rows must be bounded and numeric: %+v", properties["rows"])
+	}
+	kind := properties["kind"].(map[string]any)
+	if values, ok := kind["enum"].([]string); !ok || !slices.Contains(values, "calculator") {
+		t.Fatalf("expected a typed interaction kind: %+v", kind)
+	}
+}
+
+func TestFlashpapersPublicSchema(t *testing.T) {
+	schemas := paperGuideOpenAPISchemas()
+	plan := schemas["PaperGuidePlan"].(map[string]any)["properties"].(map[string]any)
+	for _, field := range []string{"layout", "title", "subtitle"} {
+		if plan[field] == nil {
+			t.Fatalf("missing plan.%s", field)
+		}
+	}
+	block := schemas["PaperGuideBlock"].(map[string]any)["properties"].(map[string]any)
+	if block["playground"] == nil || schemas["PaperGuidePlayground"] == nil {
+		t.Fatal("missing playground contract")
+	}
+}

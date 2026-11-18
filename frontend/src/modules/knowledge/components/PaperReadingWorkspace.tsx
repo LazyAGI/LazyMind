@@ -1,4 +1,6 @@
-import { Modal } from "antd";
+import GuideSectionIcon from "./PaperGuide/GuideSectionIcon";
+import GuideGenerationProgress, { GuideSkeleton } from "./PaperGuide/GuideGenerationProgress";
+import { Modal, Popover } from "antd";
 import {
   useCallback,
   useEffect,
@@ -23,6 +25,7 @@ import {
   getReadingPreferences,
   type ReadingProviderSelection,
 } from "../api/readingPreparation";
+import { usePaperReaderSession } from "../api/paperReader";
 import { paperGuideApi } from "../api/paperGuide";
 import { usePaperGuide } from "./PaperGuide/usePaperGuide";
 import { isGuideRunActive } from "./PaperGuide/guideRunState";
@@ -32,7 +35,6 @@ import PaperGuideAsset, {
   type GuidePreview,
 } from "./PaperGuide/PaperGuideAsset";
 import { useGuideSourcePreview } from "./PaperGuide/useGuideSourcePreview";
-import PaperGuideGenerationDetails from "./PaperGuide/PaperGuideGenerationDetails";
 import type { PdfIRDocument } from "../api/pdfIR";
 
 const qualityStopCode = "paper_guide_review_required";
@@ -43,7 +45,7 @@ interface Props {
   document: string;
   title: string;
   eligible: boolean;
-  source: ReactNode;
+  source: ReactNode | ((readingModeSwitch: ReactNode) => ReactNode);
   auxiliary: ReactNode;
   dock: ReactNode;
   divider?: ReactNode;
@@ -54,24 +56,43 @@ interface Props {
   onSelection: (s: DocumentChatSelection) => void;
   onNavigate: (e: PaperGuideEvidence) => void;
   onReturnSource?: () => void;
-  getPdfData: () => ArrayBuffer | null;
+  getPdfData: () => ArrayBuffer | null | Promise<ArrayBuffer>;
   getPdfVersion?: () => object | null;
   ir?: PdfIRDocument;
   onModeChange?: (guide: boolean) => void;
 }
 export default function PaperReadingWorkspace(p: Props) {
   const { i18n } = useTranslation();
-  const language = i18n.language.startsWith("zh") ? "zh" : "en",
-    zh = language === "zh";
+  const zh = i18n.language.startsWith("zh");
+  const account = usePaperReaderSession();
+  const languageKey = `paper-guide-language/${account}/${p.dataset}/${p.document}`;
+  const [languageChoice, setLanguageChoice] = useState<{ key: string; value: "zh" | "en" }>();
+  const savedLanguage = localStorage.getItem(languageKey);
+  const language = languageChoice?.key === languageKey ? languageChoice.value
+    : savedLanguage === "zh" || savedLanguage === "en" ? savedLanguage : zh ? "zh" : "en";
+  const [draftLanguage, setDraftLanguage] = useState<{ key: string; value: "zh" | "en" }>();
+  const generationLanguage = draftLanguage?.key === languageKey ? draftLanguage.value : language;
+  const selectLanguage = (value: "zh" | "en") => {
+    setLanguageChoice({ key: languageKey, value });
+    setDraftLanguage(undefined);
+    localStorage.setItem(languageKey, value);
+    setModeChoice({ key: storageKey, value: "article" });
+    localStorage.setItem(storageKey, "article");
+  };
   const guide = usePaperGuide(p.dataset, p.document, language, p.eligible);
   const storageKey = `paper-guide-mode/${guide.identity}/${p.dataset}/${p.document}`;
-  const [mode, setMode] = useState("source");
+  const [modeChoice, setModeChoice] = useState<{ key: string; value: string }>();
+  const savedMode = modeChoice?.key === storageKey ? modeChoice.value : localStorage.getItem(storageKey);
+  const [mountedSourceKey, setMountedSourceKey] = useState<string>();
+  const [guideChatKey, setGuideChatKey] = useState<string>();
   const [sourceOpen, setSourceOpen] = useState(false);
   const [width, setWidth] = useState(0);
   const container = useRef<HTMLDivElement>(null);
   const [model, setModel] = useState("");
+  const [regenerateOpen, setRegenerateOpen] = useState(false);
   const [models, setModels] = useState<ReadingProviderSelection>();
   const [busy, setBusy] = useState(false);
+  const [pendingGeneration, setPendingGeneration] = useState(false);
   const [error, setError] = useState("");
   const candidate = guide.status?.candidate_revision || guide.revision;
   const mutationScope = `${storageKey}/${language}/${candidate?.id || ""}`;
@@ -102,7 +123,7 @@ export default function PaperReadingWorkspace(p: Props) {
   const evidenceAbort = useRef<AbortController>();
   const evidenceOpener = useRef<HTMLButtonElement>();
   const latest = useRef("");
-  latest.current = storageKey;
+  latest.current = `${storageKey}/${language}`;
   const progressTimer = useRef<ReturnType<typeof setTimeout>>();
   const opened = useRef(false);
   const target = useMemo(
@@ -115,17 +136,23 @@ export default function PaperReadingWorkspace(p: Props) {
     (guide.status?.can_read &&
       (guide.status.published_revision || guide.status.candidate_revision))
   );
-  const showGuide = p.eligible && mode === "article" && canEnter;
+  const restoringGuide = !guide.status && !guide.error && savedMode === "article";
+  const showGuide = p.eligible && (restoringGuide || (canEnter &&
+    (savedMode === "article" || (!savedMode && !!guide.status?.published_revision))));
+  useEffect(() => {
+    if (showGuide && !savedMode) localStorage.setItem(storageKey, "article");
+  }, [showGuide, savedMode, storageKey]);
   const revisionId = guide.revision?.id;
   const evidenceCurrent = !!(
     evidence?.source_current && guide.revision?.source_current
   );
   useEffect(() => {
-    setMode(localStorage.getItem(storageKey) || "source");
+    setGuideChatKey(undefined);
     setSourceOpen(false);
     setError("");
     setBusy(false);
     setModel("");
+    setRegenerateOpen(false);
     setModels(undefined);
     localProgress.current = undefined;
     opened.current = false;
@@ -133,11 +160,7 @@ export default function PaperReadingWorkspace(p: Props) {
       evidenceAbort.current?.abort();
       clearTimeout(progressTimer.current);
     };
-  }, [storageKey]);
-  useEffect(() => {
-    if (guide.status?.published_revision && !localStorage.getItem(storageKey))
-      setMode("article");
-  }, [guide.status?.published_revision?.id, storageKey]);
+  }, [storageKey, language]);
   useEffect(() => {
     p.onModeChange?.(showGuide);
   }, [showGuide, p.onModeChange]);
@@ -155,15 +178,17 @@ export default function PaperReadingWorkspace(p: Props) {
     p.onAuxiliary(undefined);
     void getReadingPreferences()
       .then((v) => {
-        if (latest.current === storageKey)
+        if (latest.current === `${storageKey}/${language}`)
           setModels(v.provider_selections?.study);
       })
       .catch(() => {});
-  }, [showGuide, storageKey]);
+  }, [showGuide, storageKey, language]);
   const setReadingMode = (value: string) => {
-    setMode(value);
+    setModeChoice({ key: storageKey, value });
+    setGuideChatKey(undefined);
     localStorage.setItem(storageKey, value);
-    if (value === "source") setSourceOpen(false);
+    setSourceOpen(false);
+    if (value === "article") p.onAuxiliary(undefined);
   };
   const run = async (
     action: "generate" | "regenerate" | "cancel" | "resume",
@@ -173,11 +198,12 @@ export default function PaperReadingWorkspace(p: Props) {
       latestMutationScope.current === mutationScope &&
       mutationSequence.current === sequence;
     setBusy(true);
+    if (action === "generate" || action === "regenerate" || action === "resume") setPendingGeneration(true);
     setError("");
     try {
       if (action === "generate" || action === "regenerate") {
-        await paperGuideApi.generate(target, {
-          language,
+        await paperGuideApi.generate({ ...target, language: generationLanguage }, {
+          language: generationLanguage,
           expected_source_hash: guide.status?.source_sha256 || "",
           idempotency_key: crypto.randomUUID(),
           regenerate: action === "regenerate",
@@ -186,8 +212,15 @@ export default function PaperReadingWorkspace(p: Props) {
       } else if (candidate) {
         await paperGuideApi[action](target, candidate.id);
       }
-      if (isCurrent()) await guide.refresh();
+      if (isCurrent()) {
+        if ((action === "generate" || action === "regenerate") && generationLanguage !== language) {
+          setEvidence(undefined);
+          evidenceAbort.current?.abort();
+          selectLanguage(generationLanguage);
+        } else await guide.refresh();
+      }
     } catch (e) {
+      setPendingGeneration(false);
       if (isCurrent()) {
         const code = action === "resume" ? extractErrorCode(e) : undefined;
         const reason =
@@ -211,7 +244,7 @@ export default function PaperReadingWorkspace(p: Props) {
   const requestEvidence = useCallback(
     async (id: string) => {
       if (!revisionId) return;
-      const key = storageKey;
+      const key = `${storageKey}/${language}`;
       evidenceAbort.current?.abort();
       const abort = new AbortController();
       evidenceAbort.current = abort;
@@ -233,7 +266,7 @@ export default function PaperReadingWorkspace(p: Props) {
           setEvidenceLoading(false);
       }
     },
-    [storageKey, target, revisionId],
+    [storageKey, language, target, revisionId],
   );
   const openEvidence = (id: string, opener: HTMLButtonElement) => {
     evidenceOpener.current = opener;
@@ -248,11 +281,12 @@ export default function PaperReadingWorkspace(p: Props) {
     evidenceOpener.current = undefined;
     closeEvidence();
   }, [storageKey, target, revisionId, showGuide, closeEvidence]);
+  const currentSourceHash = p.ir?.source_sha256 ?? guide.status?.source_sha256;
   const { preview, sourceVerified, verifyCurrentSource } = useGuideSourcePreview(
     `${storageKey}/${revisionId ?? ""}`,
     guide.revision?.source_sha256,
     !!guide.revision?.source_current,
-    p.ir?.source_sha256,
+    currentSourceHash,
     p.getPdfData,
     p.getPdfVersion,
   );
@@ -264,11 +298,28 @@ export default function PaperReadingWorkspace(p: Props) {
     }, 700);
   };
   const sourceVisible = !showGuide || sourceOpen;
-  const auxVisible = p.auxiliaryOpen && !sourceOpen;
+  useEffect(() => {
+    if (sourceVisible) setMountedSourceKey(storageKey);
+  }, [sourceVisible, storageKey]);
+  const mountSource = sourceVisible || mountedSourceKey === storageKey;
+  const mountAuxiliary = mountSource || guideChatKey === storageKey;
+  const auxVisible = mountAuxiliary && p.auxiliaryOpen && !sourceOpen;
   const dual = width >= 1100;
   const stage = candidate?.run.stage;
   const resumable = !!stage && ["paused", "failed", "canceled"].includes(stage);
   const active = isGuideRunActive(stage);
+  useEffect(() => { if (active || resumable || stage === "completed") setPendingGeneration(false); }, [active, resumable, stage]);
+  useEffect(() => { setPendingGeneration(false); }, [storageKey, language]);
+  const generating = active || pendingGeneration;
+  const generationClock = useRef<{ active: boolean; startedAt: number; generationStartedAt?: number }>({ active: false, startedAt: Date.now() });
+  if (generating && !generationClock.current.active) {
+    generationClock.current.startedAt = Date.now();
+    generationClock.current.generationStartedAt = undefined;
+  }
+  if (generating && active && stage && stage !== "queued" && generationClock.current.generationStartedAt === undefined) {
+    generationClock.current.generationStartedAt = Date.now();
+  }
+  generationClock.current.active = generating;
   const errorNames = [
     "source_changed",
     "preparation_required",
@@ -310,8 +361,11 @@ export default function PaperReadingWorkspace(p: Props) {
     ? {
         queued: "正在排队",
         waiting_source: "正在准备论文结构",
+        reading: "正在读取论文",
+        planning: "正在规划章节",
+        checking: "正在检查章节格式",
         analyzing: "正在梳理论文主线与依据",
-        writing: "正在撰写并核验后续章节",
+        writing: "正在并行撰写章节",
         reviewing: "正在核对全文依据",
         completed: "导读已就绪",
         paused: "生成已中断，已完成内容保留",
@@ -322,8 +376,11 @@ export default function PaperReadingWorkspace(p: Props) {
     : {
         queued: "Queued",
         waiting_source: "Preparing the paper structure",
+        reading: "Reading the paper",
+        planning: "Planning chapters",
+        checking: "Checking chapter format",
         analyzing: "Tracing the argument and evidence",
-        writing: "Writing and reviewing upcoming sections",
+        writing: "Writing chapters in parallel",
         reviewing: "Reviewing the complete guide",
         completed: "Guide ready",
         paused: "Generation interrupted; published passages remain available",
@@ -343,6 +400,7 @@ export default function PaperReadingWorkspace(p: Props) {
     return (
       <GuideInlineAsset
         key={`${guide.revision?.id}/${block.id}`}
+        compactCaption={guide.revision?.plan?.layout === "flashpapers"}
         id={block.asset_id}
         revision={guide.revision!.id}
         target={target}
@@ -354,15 +412,7 @@ export default function PaperReadingWorkspace(p: Props) {
       />
     );
   }
-  return (
-    <div
-      ref={container}
-      className={`paper-reading-workspace${showGuide ? " is-guide" : ""}${sourceOpen ? " has-source" : ""}${auxVisible ? " has-auxiliary" : ""}`}
-      data-dual={dual}
-    >
-      {p.eligible && canEnter && (
-        <header className="paper-guide-toolbar">
-          {showGuide && p.back}
+  const readingModeSwitch = p.eligible && (canEnter || restoringGuide) ? (
           <div role="group" aria-label={zh ? "阅读模式" : "Reading mode"}>
             <button
               aria-pressed={!showGuide}
@@ -377,71 +427,13 @@ export default function PaperReadingWorkspace(p: Props) {
               {zh ? "导读" : "Guide"}
             </button>
           </div>
-          {showGuide && (
-            <>
-              <button
-                aria-pressed={sourceOpen}
-                onClick={() => {
-                  setSourceOpen(!sourceOpen);
-                  p.onAuxiliary(undefined);
-                }}
-              >
-                {sourceOpen
-                  ? zh
-                    ? "返回导读"
-                    : "Back to guide"
-                  : zh
-                    ? "对照原文"
-                    : "Compare original"}
-              </button>
-              {sourceOpen && p.onReturnSource && (
-                <button onClick={p.onReturnSource}>
-                  {zh ? "返回上个原文位置" : "Previous source position"}
-                </button>
-              )}
-              {[
-                ["chat", zh ? "追问" : "Assistant"],
-                ["notes", zh ? "笔记" : "Notes"],
-                ["translation", zh ? "翻译" : "Translation"],
-              ].map(([id, label]) => (
-                <button
-                  key={id}
-                  aria-pressed={auxVisible && p.auxiliaryTab === id}
-                  onClick={() => {
-                    setSourceOpen(false);
-                    p.onAuxiliary(
-                      auxVisible && p.auxiliaryTab === id ? undefined : id,
-                    );
-                  }}
-                >
-                  {label}
-                </button>
-              ))}
-              <PaperGuideGenerationDetails
-                zh={zh}
-                model={model}
-                setModel={setModel}
-                models={models}
-                revision={guide.revision}
-                busy={busy}
-                canGenerate={!!guide.status?.can_generate}
-                unavailableReason={reasonText(guide.status?.unavailable_reason)}
-                active={active}
-                onRegenerate={() => void run("regenerate")}
-              />
-            </>
-          )}
-        </header>
-      )}
-      <div className="paper-reading-panes">
-        {showGuide && (
-          <main
-            className="paper-guide-main"
-            hidden={!dual && (sourceOpen || auxVisible)}
-          >
+  ) : null;
+  const generationProgress = generating && <GuideGenerationProgress generationStartedAt={generationClock.current.generationStartedAt} startedAt={generationClock.current.startedAt} compact zh={zh} stage={pendingGeneration && !active ? "submitting" : stage || "queued"} total={candidate?.id === guide.revision?.id ? guide.revision?.plan?.sections.length || 0 : 0} done={candidate?.id === guide.revision?.id ? guide.revision?.sections.filter(section => section.blocks.length > 0).length || 0 : 0}/>;
+  const toolbarDetails = <div className="guide-toolbar-details">
+    {generating && <GuideGenerationProgress generationStartedAt={generationClock.current.generationStartedAt} startedAt={generationClock.current.startedAt} zh={zh} stage={pendingGeneration && !active ? "submitting" : stage || "queued"} total={candidate?.id === guide.revision?.id ? guide.revision?.plan?.sections.length || 0 : 0} done={candidate?.id === guide.revision?.id ? guide.revision?.sections.filter(section => section.blocks.length > 0).length || 0 : 0}/>}
             {Boolean(error || guide.error) && (
-              <p role="alert">
-                {error || getLocalizedErrorMessage(guide.error)}
+              <p role="alert" className="guide-error-notice">
+                <GuideSectionIcon role="limitations"/>{error || getLocalizedErrorMessage(guide.error)}
               </p>
             )}
             {guide.availableRevision && guide.revision && (
@@ -460,10 +452,12 @@ export default function PaperReadingWorkspace(p: Props) {
                 </button>
               </div>
             )}
+
             {stage && stage !== "completed" && (
               <div className="paper-guide-status" role="status">
                 <span>
                   {labels[stage] || (zh ? "正在准备" : "Preparing")}{" "}
+                  {guide.revision?.id === candidate?.id && guide.revision?.plan?.layout === "flashpapers" && guide.revision.plan.sections.length > 0 && <span>{guide.revision.sections.filter(section => section.blocks.length > 0).length} / {guide.revision.plan.sections.length} {zh ? "章已完成" : "chapters ready"} </span>}
                   {runReason && <span>{runReason}</span>}
                 </span>
                 {active ? (
@@ -473,6 +467,13 @@ export default function PaperReadingWorkspace(p: Props) {
                 ) : (
                   (requiresRegeneration || qualityBlocked || resumable) && (
                     <>
+                      <label>
+                        {zh ? "本次研读模型" : "Model for this run"}
+                        <select value={model} onChange={(event) => setModel(event.target.value)}>
+                          <option value="">{zh ? "跟随阅读偏好" : "Use reading preference"}</option>
+                          {models?.options.map(option => <option key={option.id} value={option.id}>{option.label}</option>)}
+                        </select>
+                      </label>
                       {!requiresRegeneration && !qualityBlocked && (
                         <button
                           disabled={busy || !guide.status?.can_generate}
@@ -483,7 +484,7 @@ export default function PaperReadingWorkspace(p: Props) {
                       )}
                       <button
                         disabled={busy || !guide.status?.can_generate}
-                        onClick={() => void run("regenerate")}
+                        onClick={() => { setDraftLanguage({ key: languageKey, value: language }); setRegenerateOpen(true); }}
                       >
                         {zh ? "重新生成导读" : "Generate a new guide"}
                       </button>
@@ -499,31 +500,86 @@ export default function PaperReadingWorkspace(p: Props) {
                   : "Historical version: source content or positioning was updated; source navigation and guide follow-up are disabled."}
               </p>
             )}
-            {guide.revision?.status === "limited" && (
+            {guide.revision?.status === "limited" && guide.revision.plan?.layout !== "flashpapers" && (
               <p className="paper-guide-warning">
                 {zh
                   ? "有限完成：部分材料未能解读，请查看文末覆盖范围。"
                   : "Limited coverage: some materials could not be interpreted. See coverage below."}
               </p>
             )}
-            {guide.revision?.sections.length ? (
+
+  </div>;
+  const languageSelect = <label className="guide-language-field">{zh ? "导读语言" : "Guide language"}
+    <select value={generationLanguage} disabled={busy || generating} onChange={event => setDraftLanguage({ key: languageKey, value: event.target.value as "zh" | "en" })}>
+      <option value="zh">简体中文</option><option value="en">English</option>
+    </select>
+  </label>;
+  const hasDetails = Boolean(generating || error || guide.error || guide.availableRevision || (stage && stage !== "completed") || (guide.revision && !guide.revision.source_current) || guide.revision?.status === "limited");
+  return (
+    <div
+      ref={container}
+      className={`paper-reading-workspace${showGuide ? " is-guide" : ""}${sourceOpen ? " has-source" : ""}${auxVisible ? " has-auxiliary" : ""}`}
+      data-dual={dual}
+    >
+      {readingModeSwitch && (showGuide || typeof p.source !== "function") && (
+        <header className="paper-guide-toolbar">
+          <div className="paper-guide-back">{showGuide && p.back}</div>{readingModeSwitch}
+          {showGuide && <div className="guide-toolbar-actions">
+            {(guide.revision || savedLanguage === "zh" || savedLanguage === "en") && <select className="guide-reading-language" aria-label={zh ? "阅读语言" : "Reading language"} value={language} disabled={busy || generating} onChange={event => selectLanguage(event.target.value as "zh" | "en")}><option value="zh">简体中文</option><option value="en">English</option></select>}
+            {hasDetails && <Popover trigger="click" placement="bottomRight" getPopupContainer={node => node.parentElement!} content={toolbarDetails}>
+              <button className="guide-status-trigger" aria-label={zh ? "生成状态与操作" : "Generation status and actions"}>
+                {generating ? generationProgress : <span>{error || guide.error ? (zh ? "生成遇到问题" : "Generation issue") : guide.availableRevision ? (zh ? "新版已就绪" : "New version ready") : labels[stage || ""] || (zh ? "版本提示" : "Version notice")}</span>}
+                <span aria-hidden="true">⌄</span>
+              </button>
+            </Popover>}
+            {guide.revision?.run.stage === "completed" && !generating && <button className="guide-regenerate-trigger" disabled={busy} onClick={() => { setDraftLanguage({ key: languageKey, value: language }); setRegenerateOpen(true); }}>{zh ? "重新生成" : "Regenerate"}</button>}
+          </div>}
+        </header>
+      )}
+      <Modal open={regenerateOpen && showGuide} title={zh ? "重新生成论文导读" : "Regenerate paper guide"} onCancel={() => setRegenerateOpen(false)}
+        okText={zh ? "开始重新生成" : "Start regeneration"} cancelText={zh ? "取消" : "Cancel"}
+        okButtonProps={{ disabled: busy || generating || !guide.status?.can_generate }}
+        onOk={() => { setRegenerateOpen(false); void run("regenerate"); }}>
+        <div className="guide-regenerate-dialog">
+          <p>{zh ? "选择本次导读的语言和模型。同语言生成期间可继续阅读当前版本；切换语言后会显示对应语言的导读。" : "Choose the guide language and model. Keep reading during same-language regeneration; choosing another language opens its guide."}</p>
+          {languageSelect}
+          <label>{zh ? "本次生成模型" : "Model for this run"}
+            <select value={model} onChange={event => setModel(event.target.value)}>
+              <option value="">{zh ? "跟随阅读偏好" : "Use reading preference"}</option>
+              {models?.options.map(option => <option key={option.id} value={option.id}>{option.label}</option>)}
+            </select>
+          </label>
+          <p>{zh ? "预计约 2 分钟，实际时间随论文长度和模型速度变化。" : "Usually about 2 minutes, depending on the paper and model."}</p>
+          {!guide.status?.can_generate && <p role="alert">{reasonText(guide.status?.unavailable_reason)}</p>}
+        </div>
+      </Modal>
+      <div className="paper-reading-panes">
+        {showGuide && (
+          <main
+            className="paper-guide-main"
+            hidden={!dual && (sourceOpen || auxVisible)}
+          >
+            {guide.revision && (guide.revision.sections.length > 0 || guide.revision.plan?.layout === "flashpapers") ? (
               <PaperGuideReader
                 revision={guide.revision}
                 title={p.title}
                 language={language}
-                compact={sourceOpen || auxVisible || !dual}
+                compact={sourceOpen || auxVisible || width < 720}
                 progress={localProgress.current || guide.status?.progress}
                 onProgress={saveProgress}
                 onEvidence={openEvidence}
                 onSelection={(selection) => {
                   setSourceOpen(false);
+                  setGuideChatKey(storageKey);
                   p.onSelection(selection);
                   p.onAuxiliary("chat");
                 }}
                 renderAsset={renderAsset}
               />
-            ) : (
+            ) : generating || restoringGuide ? (<div className="paper-guide-preparing" aria-busy="true"><GuideSkeleton/></div>) : (
               <div className="paper-guide-empty">
+                <div className="guide-empty-symbol"><GuideSectionIcon role="glossary"/></div>
+                <div className="guide-article-kicker">{zh ? "论文导读" : "PAPER GUIDE"}</div>
                 <h1>{p.title}</h1>
                 <h2>
                   {zh
@@ -535,8 +591,12 @@ export default function PaperReadingWorkspace(p: Props) {
                     ? "从研究背景与核心问题开始，理解主要贡献，并逐项对照原文依据。"
                     : "Understand the background, central question, contribution, and supporting evidence."}
                 </p>
+                <div className="guide-empty-features">
+                  {[["big-idea", zh ? "核心思路" : "Key ideas"], ["how-it-works", zh ? "方法拆解" : "How it works"], ["playground", zh ? "交互探索" : "Interactive exploration"]].map(([role, label]) => <span key={role}><GuideSectionIcon role={role}/>{label}</span>)}
+                </div>
                 {!active && !candidate && (
                   <>
+                    {languageSelect}
                     <button
                       disabled={busy || !guide.status?.can_generate}
                       onClick={() => void run("generate")}
@@ -566,11 +626,11 @@ export default function PaperReadingWorkspace(p: Props) {
           </main>
         )}
         <div className="paper-reading-source" hidden={!sourceVisible}>
-          {p.source}
+          {mountSource && (typeof p.source === "function" ? p.source(showGuide ? null : readingModeSwitch) : p.source)}
         </div>
         {!showGuide && p.divider}
         <div className="paper-reading-auxiliary" hidden={!auxVisible}>
-          {p.auxiliary}
+          {mountAuxiliary && p.auxiliary}
         </div>
       </div>
       {!showGuide && p.dock}
@@ -597,7 +657,7 @@ export default function PaperReadingWorkspace(p: Props) {
         {evidence && guide.revision ? (
           <PaperGuideEvidencePreview
             value={{ ...evidence, source_current: evidenceCurrent }}
-            currentSourceHash={p.ir?.source_sha256}
+            currentSourceHash={currentSourceHash}
             revisionSourceHash={guide.revision.source_sha256}
             language={language}
             onClose={closeEvidence}
@@ -636,7 +696,9 @@ function GuideInlineAsset({
   current,
   onEvidence,
   onOpenPage,
+  compactCaption,
 }: {
+  compactCaption?: boolean;
   id?: string;
   revision: string;
   target: Parameters<typeof paperGuideApi.evidence>[0];
@@ -674,7 +736,7 @@ function GuideInlineAsset({
     return () => abort.abort();
   }, [id, revision, target, current]);
   return (
-    <PaperGuideAsset
+    <PaperGuideAsset compactCaption={compactCaption}
       evidence={value?.evidence}
       originalDisplay={value?.original_display}
       onEvidence={onEvidence}
