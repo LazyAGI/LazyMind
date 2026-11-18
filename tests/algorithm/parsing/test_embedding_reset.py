@@ -254,3 +254,29 @@ def test_clear_preserves_source_rebuild_requirement(reset_index):
     with reset_index.core.connect() as conn:
         versions = conn.execute(text("SELECT embedding_version FROM document_processing_states WHERE document_id <> 'legacy-doc'")).scalars().all()
     assert versions and all(value == 'rebuild:manual' for value in versions)
+
+
+@pytest.mark.parametrize('residue', ['', 'running', 'failed', 'succeeded', 'task', 'fingerprint', 'unknown'])
+def test_empty_only_after_completed_clear_preserves_reindex_safety(reset_index, residue):
+    f = reset_index
+    embedding_reset.clear_chunks(7)
+    f.deleted.clear()
+    with f.core.begin() as conn:
+        if residue in ('running', 'failed', 'succeeded'):
+            conn.execute(text("UPDATE document_processing_states SET index_status=:status "
+                              "WHERE document_id='doc-indexed'"), {'status': residue})
+        elif residue == 'task':
+            conn.execute(text("UPDATE document_processing_states SET index_artifact_ref='core-task:queued' "
+                              "WHERE document_id='doc-indexed'"))
+        elif residue == 'fingerprint':
+            conn.execute(text("UPDATE document_processing_states SET index_fingerprint='old-vector' "
+                              "WHERE document_id='doc-indexed'"))
+        elif residue == 'unknown':
+            conn.execute(text("DELETE FROM document_processing_states WHERE document_id='doc-indexed'"))
+    if residue:
+        with pytest.raises(embedding_reset.IndexBusy):
+            embedding_reset.clear_chunks(7, empty_only=True)
+        assert not f.deleted
+    else:
+        assert embedding_reset.clear_chunks(7, empty_only=True)['cleared']
+    assert f.original.exists() and f.artifact.exists()

@@ -489,6 +489,17 @@ func TestGlobalEmbeddingSelectionOnlySwitchesWithVerifiedCompatibleVectors(t *te
 		}
 	}
 	algorithm := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/internal/knowledge:clear-chunks" {
+			var payload struct {
+				Generation int64 `json:"generation"`
+				EmptyOnly  bool  `json:"empty_only"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&payload); err != nil || !payload.EmptyOnly {
+				t.Errorf("expected guarded empty-index reset: %+v %v", payload, err)
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"cleared": true, "generation": payload.Generation})
+			return
+		}
 		var body struct {
 			Model string `json:"model"`
 		}
@@ -597,6 +608,34 @@ func TestGlobalEmbeddingSelectionOnlySwitchesWithVerifiedCompatibleVectors(t *te
 	if err := db.Take(&state, "scope = ?", globalEmbeddingScope).Error; err != nil ||
 		state.ActiveModelID != second.ID || state.Signature == "" || state.Phase != "ready" {
 		t.Fatalf("post-clear selection did not establish the new identity: %+v %v", state, err)
+	}
+	// Online cleanup retains originals and writes this manual-reindex state.
+	if err := db.Create(&orm.DocumentProcessingState{DatasetID: "kb", DocumentID: "kb-doc", IndexStatus: "pending", EmbeddingVersion: "reembed:manual"}).Error; err != nil {
+		t.Fatal(err)
+	}
+	for _, modelID := range []string{third.ID, second.ID, third.ID} {
+		previewReq := httptest.NewRequest(http.MethodPost, "/embedding/switch-preview", strings.NewReader(`{"model_id":"`+modelID+`","source":"own"}`))
+		previewReq.Header.Set("X-User-Id", first.CreateUserID)
+		previewReq.Header.Set("X-User-Role", "admin")
+		previewRec := httptest.NewRecorder()
+		PreviewEmbeddingModelSwitch(previewRec, previewReq)
+		if err := json.Unmarshal(previewRec.Body.Bytes(), &preview); err != nil || !preview.Data.CanSwitch || preview.Data.Outcome != "empty" {
+			t.Fatalf("cleared documents blocked repeated preview: %s (%v)", previewRec.Body.String(), err)
+		}
+		if rec := selectModel(modelID); rec.Code != http.StatusOK {
+			t.Fatalf("cleared documents blocked repeated selection: %d %s", rec.Code, rec.Body.String())
+		}
+	}
+	// Once any retained document is indexed again, incompatible switches must
+	// require cleanup even if other documents are still awaiting manual work.
+	if err := db.Create(&orm.Document{ID: "kb-indexed", DatasetID: "kb"}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&orm.DocumentProcessingState{DatasetID: "kb", DocumentID: "kb-indexed", IndexStatus: "succeeded"}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if rec := selectModel(second.ID); rec.Code != http.StatusConflict {
+		t.Fatalf("new vectors lost switch protection: %d %s", rec.Code, rec.Body.String())
 	}
 	_ = parent
 	_ = group
