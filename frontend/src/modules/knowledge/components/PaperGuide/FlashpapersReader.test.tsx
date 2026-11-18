@@ -53,7 +53,7 @@ it("renders the five planned layers inside the pending overview", () => {
 
   const overview = section("overview");
   const paragraph = overview.blocks[0];
-  overview.blocks = [paragraph, { ...paragraph, id: "summary", kind: "callout", text: "摘要" }];
+  overview.blocks = [{ ...paragraph, id: "summary", kind: "paragraph", text: "摘要" }, paragraph];
   view.rerender(<PaperGuideReader revision={{ ...r, sections: [overview] }} {...props} />);
   const readyGraph = screen.getByRole("figure", { name: "论文脉络图" });
   expect(readyGraph.previousElementSibling).toHaveAttribute("data-guide-block", "summary");

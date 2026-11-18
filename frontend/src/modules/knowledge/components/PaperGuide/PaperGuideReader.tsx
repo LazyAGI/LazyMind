@@ -126,8 +126,7 @@ export default function PaperGuideReader({
       return { block, sources };
     });
     const flow = section.role === "overview" ? revision.plan?.paper_flow : undefined;
-    const summary = flow && blocks.find(({ block }) => block.kind === "callout");
-    return { section, blocks: summary ? [summary, ...blocks.filter(item => item !== summary)] : blocks, flow, summary };
+    return { section, blocks, flow };
   });
   const selectedSourceId =
     selected && selected.revisionId === revision.id
@@ -384,13 +383,13 @@ export default function PaperGuideReader({
         <article className="paper-guide-article">
           <h1>{header.title}</h1>
           {header.subtitle && header.subtitle !== header.title && <p className="flashpapers-subtitle">{header.subtitle}</p>}
-          {sectionsWithSources.map(({ section, blocks, flow, summary }, sectionIndex) => (
+          {sectionsWithSources.map(({ section, blocks, flow }, sectionIndex) => (
             <section key={section.role} aria-label={section.title} data-guide-role={section.role}>
               <h2 id={headingId(revision.id, section.key)} tabIndex={-1}>
                 {flash && renderSectionIcon(section, sectionIndex)}
                 {section.title}
               </h2>
-              {flow && !summary && <PaperGuideFlow flow={flow} zh={zh} />}
+              {flow && blocks.length === 0 && <PaperGuideFlow flow={flow} zh={zh} />}
               {flash && section.blocks.length === 0 && <div className="guide-chapter-placeholder" aria-busy={running}>
                 <p role="status"><strong>{chapterState(section)}</strong> · {running ? (zh ? "整篇预计约 2 分钟，完成后自动展示本章内容。" : "The guide usually takes about 2 minutes. This chapter updates automatically.") : (zh ? "本章尚未完成，继续生成后会自动更新。" : "Resume generation to finish this chapter.")}</p>
                 {running && <GuideSkeleton/>}
@@ -402,7 +401,7 @@ export default function PaperGuideReader({
                     : "Correction pending"}
                 </p>
               )}
-              {blocks.map(({ block, sources }) => (
+              {blocks.map(({ block, sources }, blockIndex) => (
                 <Fragment key={`${section.key}/${block.id}`}>
                 <div
                   data-guide-block={block.id}
@@ -512,7 +511,7 @@ export default function PaperGuideReader({
                     </details>
                   </div>}
                 </div>
-                {flow && summary?.block === block && <PaperGuideFlow flow={flow} zh={zh} />}
+                {flow && blockIndex === 0 && <PaperGuideFlow flow={flow} zh={zh} />}
                 </Fragment>
               ))}
             </section>
