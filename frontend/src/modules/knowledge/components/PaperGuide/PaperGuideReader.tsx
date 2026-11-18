@@ -7,7 +7,7 @@ import "./FlashpapersReader.scss";
 import PaperGuideTableText from "./PaperGuideTableText";
 import PaperGuideInteraction from "./PaperGuideInteraction";
 import { coverageWarning } from "./coverageWarning";
-import { useLayoutEffect, useRef, useState } from "react";
+import { Fragment, useLayoutEffect, useRef, useState } from "react";
 import type {
   PaperGuideBlock,
   PaperGuideClaim,
@@ -125,7 +125,9 @@ export default function PaperGuideReader({
         if (!numbers.has(id)) numbers.set(id, numbers.size + 1);
       return { block, sources };
     });
-    return { section, blocks };
+    const flow = section.role === "overview" ? revision.plan?.paper_flow : undefined;
+    const summary = flow && blocks.find(({ block }) => block.kind === "callout");
+    return { section, blocks: summary ? [summary, ...blocks.filter(item => item !== summary)] : blocks, flow, summary };
   });
   const selectedSourceId =
     selected && selected.revisionId === revision.id
@@ -382,13 +384,13 @@ export default function PaperGuideReader({
         <article className="paper-guide-article">
           <h1>{header.title}</h1>
           {header.subtitle && header.subtitle !== header.title && <p className="flashpapers-subtitle">{header.subtitle}</p>}
-          {sectionsWithSources.map(({ section, blocks }, sectionIndex) => (
+          {sectionsWithSources.map(({ section, blocks, flow, summary }, sectionIndex) => (
             <section key={section.role} aria-label={section.title} data-guide-role={section.role}>
               <h2 id={headingId(revision.id, section.key)} tabIndex={-1}>
                 {flash && renderSectionIcon(section, sectionIndex)}
                 {section.title}
               </h2>
-              {section.role === "overview" && revision.plan?.paper_flow && <PaperGuideFlow flow={revision.plan.paper_flow} zh={zh} />}
+              {flow && !summary && <PaperGuideFlow flow={flow} zh={zh} />}
               {flash && section.blocks.length === 0 && <div className="guide-chapter-placeholder" aria-busy={running}>
                 <p role="status"><strong>{chapterState(section)}</strong> · {running ? (zh ? "整篇预计约 2 分钟，完成后自动展示本章内容。" : "The guide usually takes about 2 minutes. This chapter updates automatically.") : (zh ? "本章尚未完成，继续生成后会自动更新。" : "Resume generation to finish this chapter.")}</p>
                 {running && <GuideSkeleton/>}
@@ -401,8 +403,8 @@ export default function PaperGuideReader({
                 </p>
               )}
               {blocks.map(({ block, sources }) => (
+                <Fragment key={`${section.key}/${block.id}`}>
                 <div
-                  key={`${section.key}/${block.id}`}
                   data-guide-block={block.id}
                   data-guide-section={section.key}
                   className={`paper-guide-block paper-guide-block--${block.kind}`}
@@ -510,6 +512,8 @@ export default function PaperGuideReader({
                     </details>
                   </div>}
                 </div>
+                {flow && summary?.block === block && <PaperGuideFlow flow={flow} zh={zh} />}
+                </Fragment>
               ))}
             </section>
           ))}

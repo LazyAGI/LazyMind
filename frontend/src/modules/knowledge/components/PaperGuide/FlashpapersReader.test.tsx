@@ -44,11 +44,20 @@ it("renders the five planned layers inside the pending overview", () => {
   }, sections: [{ role: "overview", title: "论文简述", focus: "", terms: [], asset_ids: [], claim_ids: [], evidence_ids: [] }] };
   r.sections = [];
   r.run.stage = "writing";
-  render(<PaperGuideReader revision={r} title="DDPM" language="zh" onEvidence={vi.fn()} onSelection={vi.fn()} />);
+  const props = { title: "DDPM", language: "zh", onEvidence: vi.fn(), onSelection: vi.fn() };
+  const view = render(<PaperGuideReader revision={r} {...props} />);
   const graph = screen.getByRole("figure", { name: "论文脉络图" });
   expect(within(graph).getAllByRole("term").map(node => node.textContent)).toEqual(["领域", "存在问题", "提出方法", "主要模块", "实验验证"]);
   expect(within(graph).getAllByRole("list").map(row => row.children.length)).toEqual([1, 2, 1, 2, 1]);
   expect(graph.querySelectorAll("svg")).toHaveLength(4);
+
+  const overview = section("overview");
+  const paragraph = overview.blocks[0];
+  overview.blocks = [paragraph, { ...paragraph, id: "summary", kind: "callout", text: "摘要" }];
+  view.rerender(<PaperGuideReader revision={{ ...r, sections: [overview] }} {...props} />);
+  const readyGraph = screen.getByRole("figure", { name: "论文脉络图" });
+  expect(readyGraph.previousElementSibling).toHaveAttribute("data-guide-block", "summary");
+  expect(readyGraph.nextElementSibling).toHaveAttribute("data-guide-block", paragraph.id);
 });
 
 it("reads a legacy overview and renders a dataset-free English flow when present", () => {
