@@ -147,7 +147,8 @@ export default function PaperReadingWorkspace(p: Props) {
     (guide.status?.can_read &&
       (guide.status.published_revision || guide.status.candidate_revision))
   );
-  const restoringGuide = !guide.status && !guide.error && savedMode === "article";
+  const awaitingGuideStatus = !guide.status && !guide.error;
+  const restoringGuide = awaitingGuideStatus && savedMode === "article";
   const showGuide = p.eligible && (restoringGuide || (canEnter &&
     (savedMode === "article" || (!savedMode && !!guide.status?.published_revision))));
   useEffect(() => {
@@ -421,7 +422,7 @@ export default function PaperReadingWorkspace(p: Props) {
       />
     );
   }
-  const readingModeSwitch = p.eligible && (canEnter || restoringGuide) ? (
+  const readingModeSwitch = p.eligible && (awaitingGuideStatus || canEnter) ? (
           <div role="group" aria-label={zh ? "阅读模式" : "Reading mode"}>
             <button
               aria-pressed={!showGuide}

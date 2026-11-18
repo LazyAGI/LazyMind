@@ -9,6 +9,7 @@ import {
   screen,
   fireEvent,
   waitFor,
+  within,
 } from "@testing-library/react";
 import { it, expect, vi, beforeEach, afterEach } from "vitest";
 import { axiosInstance } from "@/components/request";
@@ -221,6 +222,19 @@ it("keeps an open preview readable but disables its jump when refreshed source p
   expect(screen.getByText("Retained source evidence")).toBeInTheDocument();
   expect(screen.getByRole("button", { name: "Open PDF page 3" })).toBeDisabled();
 });
+it("shows the mode switch with the PDF toolbar before guide status arrives", async () => {
+  const ready = state.value;
+  state.value = { ...ready, status: undefined, revision: undefined, loading: true };
+  const view = render(<Harness inlineSwitch />);
+  const toolbar = screen.getByRole("navigation", { name: "PDF tools" });
+  expect(within(toolbar).getByRole("button", { name: "Original" })).toHaveAttribute("aria-pressed", "true");
+  fireEvent.click(within(toolbar).getByRole("button", { name: "Guide" }));
+  expect(screen.getByRole("button", { name: "Guide" })).toHaveAttribute("aria-pressed", "true");
+  state.value = ready;
+  view.rerender(<Harness inlineSwitch />);
+  expect(await screen.findByRole("article")).toBeVisible();
+});
+
 it("restores a saved guide before status arrives and mounts the original only on request", async () => {
   localStorage.setItem("paper-guide-mode/u/ds/doc", "article");
   const ready = state.value;
