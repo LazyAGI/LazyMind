@@ -432,8 +432,10 @@ export default function DefaultModelConfigPanel({
               : selectedOption.model.unavailableReason === "index_cleanup_in_progress" ? t("knowledge.embeddingIndexClearing")
               : selectedOption.model.unavailableReason === "index_cleanup_incomplete" ? t("knowledge.embeddingIndexCleanupFailed")
               : selectedOption.model.unavailableReason === "index_cleared" ? t("knowledge.embeddingIndexCleared")
-              : selectedOption.model.unavailableReason
-          } />
+              : t(`modelProvider.unavailableReasons.${["credentials_unavailable", "disabled", "runtime_unsupported"].includes(selectedOption.model.unavailableReason || "") ? selectedOption.model.unavailableReason : "unknown"}`)
+          } action={!selectedOption.model.unavailableReason?.startsWith("index_") &&
+            <Button size="small" onClick={onConfigureProviders}>{t("modelProvider.configureUnavailableModel")}</Button>}
+          />
         ) : null}
         {!isAdmin && capabilityReadyStates[module.key] === "error" ? (
           <Alert type="warning" showIcon message={t("modelProvider.capabilityStatusLoadFailed")}

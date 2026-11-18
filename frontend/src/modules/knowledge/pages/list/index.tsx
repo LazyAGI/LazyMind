@@ -255,6 +255,22 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
   const navigate = useNavigate();
   const location = useLocation();
   const entryParams = new URLSearchParams(location.search);
+  const consumeIndexManagementEntry = useCallback(() => {
+    const params = new URLSearchParams(location.search);
+    if (params.get("index_management") !== "open") return;
+    params.delete("index_management");
+    const search = params.size ? `?${params.toString()}` : "";
+    const savedScroll = location.state?.knowledgeListScroll;
+    // Replace this history entry before a detail page captures its return URL.
+    navigate({ pathname: location.pathname, search, hash: location.hash }, {
+      replace: true,
+      preventScrollReset: true,
+      state: {
+        ...location.state,
+        ...(savedScroll ? { knowledgeListScroll: { ...savedScroll, url: location.pathname + search + location.hash } } : {}),
+      },
+    });
+  }, [location, navigate]);
   const readingEntryType = parseShowcaseEntryType(entryParams.get(SHOWCASE_ENTRY_QUERY_PARAM));
   const fromPaperReading = readingEntryType !== null;
   const listState = useMemo(() => readKnowledgeListState(location.search), [location.search]);
@@ -1864,7 +1880,7 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
       event.preventDefault();
       navigate(modelSettingsPath);
     }}>
-      {t("knowledge.goToConfig")}
+      {t("knowledge.goToDefaultEmbeddingConfig")}
     </a>
   ) : null;
   const showEmbeddingNotice = indexNotice
@@ -2032,7 +2048,7 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
               ))}
             </div> : <strong>{t(paperReading ? "showcase.choosePaperLibrary" : "chat.selectKnowledgeBase")}</strong>}
             <div className="knowledge-source-actions" role="group" aria-label={t("knowledge.libraryActions")}>
-              <TextIndexManager autoOpen={entryParams.get("index_management") === "open"} />
+              <TextIndexManager autoOpen={entryParams.get("index_management") === "open"} onAutoOpen={consumeIndexManagementEntry} />
               {backgroundTasksButton}
               {createKnowledgeButton}
             </div>

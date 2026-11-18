@@ -60,7 +60,7 @@ func (state *chatFallbackState) candidate(id string) *modelconfig.ChatModelCandi
 }
 func (state *chatFallbackState) identity(id string) ModelSwitchIdentity {
 	model := state.models[id]
-	return ModelSwitchIdentity{CandidateID: id, Source: model.Source, ModelID: model.ID, ProviderGroupID: model.ProviderGroupID, ProviderName: model.ProviderName, ModelName: model.ModelName}
+	return ModelSwitchIdentity{CandidateID: id, Source: model.Source, ModelID: model.ID, ProviderGroupID: model.ProviderGroupID, ProviderName: model.ProviderName, ProviderDisplayName: model.ProviderDisplayName, ProviderIsCustom: model.ProviderIsCustom, ModelName: model.ModelName}
 }
 func chatModelRouteFromSnapshot(conversation *orm.Conversation, mode string) *chatModelRoute {
 	var snapshot chatModelSnapshot
@@ -75,7 +75,7 @@ func chatModelRouteFromSnapshot(conversation *orm.Conversation, mode string) *ch
 	if snapshot.Source != "own" && snapshot.Source != "shared" && snapshot.Source != "cloud" {
 		return nil
 	}
-	return &chatModelRoute{Mode: mode, Strategy: mode, TaskClass: mode, Reason: "model_unavailable", ModelID: snapshot.ModelID, ProviderID: snapshot.ProviderID, ProviderName: snapshot.ProviderName, ModelName: snapshot.ModelName, Source: snapshot.Source, snapshot: &snapshot}
+	return &chatModelRoute{Mode: mode, Strategy: mode, TaskClass: mode, Reason: "model_unavailable", ModelID: snapshot.ModelID, ProviderID: snapshot.ProviderID, ProviderName: snapshot.ProviderName, ProviderDisplayName: snapshot.ProviderDisplayName, ProviderIsCustom: snapshot.ProviderIsCustom, ModelName: snapshot.ModelName, Source: snapshot.Source, snapshot: &snapshot}
 }
 func initialFallbackChatCandidate(prepared *modelconfig.ChatRuntimeConfig, original *availableChatModel) (*availableChatModel, *modelconfig.ChatModelCandidate) {
 	var window *int64
@@ -88,7 +88,7 @@ func (state *chatFallbackState) setInitialSwitch(from *chatModelRoute, window *i
 	if from == nil {
 		return
 	}
-	identity := ModelSwitchIdentity{CandidateID: modelconfig.ChatCandidateID(from.Source, from.ModelID), Source: from.Source, ModelID: from.ModelID, ProviderName: from.ProviderName, ModelName: from.ModelName}
+	identity := ModelSwitchIdentity{CandidateID: modelconfig.ChatCandidateID(from.Source, from.ModelID), Source: from.Source, ModelID: from.ModelID, ProviderName: from.ProviderName, ProviderDisplayName: from.ProviderDisplayName, ProviderIsCustom: from.ProviderIsCustom, ModelName: from.ModelName}
 	if from.snapshot != nil {
 		identity.ProviderGroupID = from.snapshot.ProviderGroupID
 	}
@@ -290,7 +290,7 @@ func inheritedTaskModelOrigin(body map[string]any) *subagent.InheritedModelOrigi
 	if route == nil || route.ModelID == "" || route.Source != "own" && route.Source != "shared" && route.Source != "cloud" {
 		return nil
 	}
-	identity := ModelSwitchIdentity{CandidateID: modelconfig.ChatCandidateID(route.Source, route.ModelID), Source: route.Source, ModelID: route.ModelID, ProviderName: route.ProviderName, ModelName: route.ModelName}
+	identity := ModelSwitchIdentity{CandidateID: modelconfig.ChatCandidateID(route.Source, route.ModelID), Source: route.Source, ModelID: route.ModelID, ProviderName: route.ProviderName, ProviderDisplayName: route.ProviderDisplayName, ProviderIsCustom: route.ProviderIsCustom, ModelName: route.ModelName}
 	if route.snapshot != nil {
 		identity.ProviderGroupID = route.snapshot.ProviderGroupID
 	}
