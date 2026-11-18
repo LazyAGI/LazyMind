@@ -2,9 +2,11 @@ package doc
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"sync"
 	"testing"
 	"time"
@@ -42,11 +44,34 @@ func TestAutomaticReadingEnrollmentUpdatePause(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	count := func(want int64) {
+	checkJobs := func(documents ...string) {
 		t.Helper()
-		var got int64
-		if err := db.Model(&orm.AsyncJob{}).Where("job_type=?", ReadingPreparationJob).Count(&got).Error; err != nil || got != want {
-			t.Fatalf("enrolled jobs: got %d, want %d, error %v", got, want, err)
+		var jobs []orm.AsyncJob
+		if err := db.Where("job_type=?", ReadingPreparationJob).Find(&jobs).Error; err != nil {
+			t.Fatal(err)
+		}
+		if want := 2 * len(documents); len(jobs) != want {
+			t.Fatalf("enrolled jobs: got %d, want %d", len(jobs), want)
+		}
+		parse, study := map[string]int{}, map[string]int{}
+		for _, job := range jobs {
+			var payload readingPreparationPayload
+			if err := json.Unmarshal(job.PayloadJSON, &payload); err != nil {
+				t.Fatal(err)
+			}
+			switch {
+			case slices.Equal(payload.Scopes, []string{readingpolicy.PDFParse}):
+				parse[payload.DocumentID]++
+			case slices.Equal(payload.Scopes, []string{readingpolicy.Formula, readingpolicy.Figure, readingpolicy.Table}):
+				study[payload.DocumentID]++
+			default:
+				t.Fatalf("unexpected preparation scopes: %v", payload.Scopes)
+			}
+		}
+		for _, id := range documents {
+			if parse[id] != 1 || study[id] != 1 {
+				t.Fatalf("document %s has %d PDF parse jobs and %d study jobs", id, parse[id], study[id])
+			}
 		}
 	}
 	pause := func(epoch uint64) *maintenancegate.Ticket {
@@ -66,7 +91,7 @@ func TestAutomaticReadingEnrollmentUpdatePause(t *testing.T) {
 	if err := enrollReadingPreparation(ctx, db.DB, nil); err != nil {
 		t.Fatal(err)
 	}
-	count(0)
+	checkJobs()
 	if err := ResumeDeferredIndexingFromUpdate(1); err != nil {
 		t.Fatal(err)
 	}
@@ -113,7 +138,7 @@ func TestAutomaticReadingEnrollmentUpdatePause(t *testing.T) {
 	}
 	cancel()
 	<-done
-	count(1)
+	checkJobs("first")
 	if err := ResumeDeferredIndexingFromUpdate(2); err != nil {
 		t.Fatal(err)
 	}
@@ -124,5 +149,5 @@ func TestAutomaticReadingEnrollmentUpdatePause(t *testing.T) {
 	if err := enrollReadingPreparation(ctx, db.DB, nil); err != nil {
 		t.Fatal(err)
 	}
-	count(2)
+	checkJobs("first", "second")
 }

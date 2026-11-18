@@ -14,3 +14,14 @@ func TestPaperReadingOpenAPIContract(t *testing.T) {
 		}
 	}
 }
+
+func TestReadingPreparationCapabilityStatusContract(t *testing.T) {
+	schemas := paperReadingOpenAPISchemas()
+	status := schemas["ReadingPreparationStatus"].(map[string]any)
+	if status["properties"].(map[string]any)["capabilities"] == nil {
+		t.Fatal("preparation response must expose per-capability status")
+	}
+	if schemas["ReadingCapabilityStatus"] == nil {
+		t.Fatal("missing capability status schema")
+	}
+}

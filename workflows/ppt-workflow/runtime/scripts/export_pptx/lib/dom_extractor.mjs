@@ -5,7 +5,7 @@
  */
 
 import path from 'node:path';
-import { hiddenChromiumLaunchOptions, installHiddenProcessHooks } from './browser_setup.mjs';
+import { externalOfflineMode, hiddenChromiumLaunchOptions, installHiddenProcessHooks, loadOfflineSlide } from './browser_setup.mjs';
 
 // ---------------------------------------------------------------------------
 // 浏览器端执行的 DOM 提取脚本
@@ -312,6 +312,26 @@ underline: cs.getPropertyValue('text-decoration-line').includes('underline'),
     return runs;
   }
 
+  function rendersOnSingleLine(el) {
+    const textNodes = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+    const range = document.createRange();
+    let top = -Infinity;
+    let bottom = Infinity;
+    for (let node = textNodes.nextNode(); node; node = textNodes.nextNode()) {
+      if (!node.textContent.trim()) continue;
+      range.selectNodeContents(node);
+      for (const rect of range.getClientRects()) {
+        if (!rect.width || !rect.height) continue;
+        // Compare the middle of each fragment so slightly overlapping adjacent
+        // lines stay distinct while inline runs can use different font sizes.
+        top = Math.max(top, rect.top + rect.height / 4);
+        bottom = Math.min(bottom, rect.bottom - rect.height / 4);
+        if (top >= bottom) return false;
+      }
+    }
+    return Number.isFinite(top);
+  }
+
   /**
    * 判断节点是否应跳过。
    * @param {Element} el
@@ -593,6 +613,9 @@ underline: cs.getPropertyValue('text-decoration-line').includes('underline'),
     // 混合内容 → textRuns
     if (hasMixedContent(el)) {
       node.textRuns = extractTextRuns(el);
+      if (node.textRuns.length && node.textRuns.every(run => !run.isBlock && !run.text.includes('\n'))) {
+        node.singleLine = rendersOnSingleLine(el);
+      }
       // 装饰子元素（如 <span class="pill" style="background:yellow">01</span>）
       // 由独立 IR 节点处理，这样能输出独立 shape+text 双图层（pill 背景才不会丢）。
       // 它们的文字在 textRuns 中已被跳过（见 extractTextRuns 的 hasOwnDecoration 检测）。
@@ -617,6 +640,7 @@ underline: cs.getPropertyValue('text-decoration-line').includes('underline'),
       const text = el.innerText || el.textContent || '';
       if (text.trim()) {
         node.text = text;
+        if (!text.includes('\n')) node.singleLine = rendersOnSingleLine(el);
       }
       return node;
     }
@@ -740,11 +764,19 @@ export async function extractPage(page, htmlPath) {
 
   // 先用较大 viewport 加载，以便检测实际画布尺寸
   await page.setViewportSize({ width: 1920, height: 1080 });
-  await page.goto(fileUrl, { waitUntil: 'load' });
-  const { localFontCss, installMissingFontFallbacks } = await import('./local_fonts.mjs');
-  const managedFontCss = await localFontCss(await page.content());
+  const offline = externalOfflineMode();
+  if (offline) await loadOfflineSlide(page, htmlPath);
+  else await page.goto(fileUrl, { waitUntil: 'load' });
+  const { localFontCss, installMissingFontFallbacks, loadManagedFontResources } = await import('./local_fonts.mjs');
+  if (!offline) {
+    try { await loadManagedFontResources(page); }
+    catch (error) { error.fontPortability = true; throw error; }
+  }
+  // Keep large local fonts out of Chromium's protocol payload when file URLs are allowed.
+  const fontOptions = { useFileUrls: !offline };
+  const managedFontCss = await localFontCss(await page.content(), fontOptions);
   if (managedFontCss) await page.addStyleTag({ content: managedFontCss });
-  await installMissingFontFallbacks(page);
+  await installMissingFontFallbacks(page, fontOptions);
   await page.waitForTimeout(200);
 
   // CSS @import web fonts may finish after the document load event. Waiting
@@ -918,7 +950,7 @@ export async function extractPages(htmlPaths) {
   const results = [];
 
   try {
-    const page = await browser.newPage();
+    const page = await browser.newPage(externalOfflineMode() ? { serviceWorkers: 'block' } : {});
 
     for (const htmlPath of htmlPaths) {
       try {
@@ -937,6 +969,9 @@ export async function extractPages(htmlPaths) {
         }
         results.push({ path: htmlPath, ir, fallbackImageDataUri });
       } catch (err) {
+        // A fallback screenshot would preserve the wrong font metrics while
+        // PPTX embeds another face. Required font failures must stop export.
+        if (err.fontPortability) throw err;
         process.stderr.write(`[dom_extractor] Failed to extract ${htmlPath}: ${err.message}\n`);
         let fallbackImageDataUri = null;
         try {

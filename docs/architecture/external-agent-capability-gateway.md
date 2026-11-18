@@ -14,11 +14,36 @@ one MCP server with four tools:
   for the calling Agent.
 - `model.chat` proxies an OpenAI-compatible chat completion through LazyMind.
 - `tool.call` executes an authorized MCP tool or an explicitly exposed
-  LazyMind built-in tool. The first built-in adapter is `image_generator`.
+  LazyMind built-in tool, including configured image, image editing and video capabilities.
 
 Users manage grants per Agent under **Settings → Assistants**. The management
 API is `GET/PUT /external-agent-capabilities`; invocation history is available
-from `GET /external-agent-capability-invocations`. New grants default to off.
+from `GET /external-agent-capability-invocations`. Existing capabilities default
+to allowed in the absence of an explicit grant; explicit opt-outs take precedence.
+Availability and connection checks still apply independently of the grant.
+
+Workflow execution does not require a configured LazyMind text model. Built-in
+catalog discovery loads no blanket LLM configuration. Each media invocation loads
+only its required, user-owned model roles; ordinary tools use their own provider
+configuration. A missing video model does not hide an otherwise available image
+tool. If the external host lacks a required capability and its LazyMind fallback
+is unavailable, the host asks the user to configure that feature in LazyMind and
+retry the affected step.
+
+`workflow.tool.list` and `workflow.tool.call` provide a narrower surface for an
+active external execution. They require its current execution handle and only
+permit tools in its pinned step contract. The external Agent identity is taken
+from the persisted host binding. Calls reserve a stable command ID before invoking
+the provider, replay completed receipts and reject conflicting arguments. Stop or
+reclaim fences late results. This surface does not publish artifacts or complete
+steps; those remain explicit host operations.
+
+For image editing and image-conditioned video, external inputs use `resource:<id>`
+from `workflow.input.import`. Core verifies resource ownership and content hash and
+sends authorized bytes internally; Chat creates a bounded temporary input directory
+and removes it after execution. Arbitrary server paths and caller-supplied remote
+image URLs are not accepted as input files. Returned media references must be
+usable outside the service. See [the developer contract](../dev/external-workflow.md).
 
 ## Enforcement and credentials
 

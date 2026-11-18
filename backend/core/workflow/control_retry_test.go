@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"testing"
 
+	"gorm.io/gorm"
 	"lazymind/core/common/orm"
 	"lazymind/core/workflow/controlstore"
 )
@@ -38,6 +39,60 @@ func TestControlledFailedRunNativeRetryPreservesExecutorOwnership(t *testing.T) 
 	}
 	if replacement.ExecutorHost != "lazymind" || replacement.Attempt != 2 || result.Control.Continuation != "awaiting_executor" || result.Control.Admission.CanBegin {
 		t.Fatalf("native retry lost ownership or allowed overlapping work: %+v %+v", replacement, result.Control)
+	}
+}
+
+func TestControlledBeginReplaysWithRefreshedStateVersion(t *testing.T) {
+	db, _ := setupBatchTransitionSession(t)
+	first := beginControlledExternalStep(t, db, nil, "id: batch-plugin\n")
+	if first.Control.StateVersion <= 4 {
+		t.Fatalf("begin did not advance workflow state: %+v", first)
+	}
+	service := WorkflowControlService{DB: db.DB}
+	command := WorkflowControlCommand{CommandID: "host-begin", Kind: "begin", StepID: "branch_b", StateVersion: first.Control.StateVersion}
+	replay, err := service.Execute(t.Context(), "batch-user", "batch-session", command)
+	if err != nil || replay.Receipt != first.Receipt {
+		t.Fatalf("retry did not recover the original grant: %+v %v", replay, err)
+	}
+	command.Objective = "different objective"
+	_, err = service.Execute(t.Context(), "batch-user", "batch-session", command)
+	expectControlCode(t, err, "COMMAND_CONFLICT")
+	command.CommandID, command.StateVersion = "new-command", 4
+	_, err = service.Execute(t.Context(), "batch-user", "batch-session", command)
+	expectControlCode(t, err, "STATE_VERSION_CONFLICT")
+}
+
+func TestControlledFailedRunNativeRetryLaunchFailureRollsBackActivation(t *testing.T) {
+	db, svc, first := failedControlledRetryFixture(t, "image_generator")
+	before, err := GetSession(t.Context(), db.DB, "batch-session")
+	if err != nil {
+		t.Fatal(err)
+	}
+	launchErr := errors.New("native task creation failed")
+	if err := db.Callback().Create().Before("gorm:create").Register("fail_native_retry_launch", func(tx *gorm.DB) {
+		if tx.Statement.Schema != nil && tx.Statement.Schema.Name == "SubAgentTask" {
+			tx.AddError(launchErr)
+		}
+	}); err != nil {
+		t.Fatal(err)
+	}
+	_, err = svc.Execute(t.Context(), "batch-user", before.ID, WorkflowControlCommand{
+		CommandID: "failed-native-retry-launch", Kind: "retry", StepID: "branch_b", StateVersion: before.StateVersion,
+	})
+	if !errors.Is(err, launchErr) {
+		t.Fatalf("expected launch error, got %v", err)
+	}
+	after, err := GetSession(t.Context(), db.DB, before.ID)
+	if err != nil || after.Status != "failed" || after.StateVersion != before.StateVersion {
+		t.Fatalf("failed launch committed activation: %+v %v", after, err)
+	}
+	var previous orm.WorkflowSessionStep
+	if err := db.First(&previous, "id = ?", first.Receipt.ExecutionID).Error; err != nil || previous.Validity != "effective" || previous.Status != "failed" {
+		t.Fatalf("failed launch invalidated the previous attempt: %+v %v", previous, err)
+	}
+	var count int64
+	if err := db.Model(&orm.WorkflowSessionStep{}).Where("session_id = ? AND step_id = ?", before.ID, "branch_b").Count(&count).Error; err != nil || count != 1 {
+		t.Fatalf("failed launch left a replacement attempt: count=%d %v", count, err)
 	}
 }
 

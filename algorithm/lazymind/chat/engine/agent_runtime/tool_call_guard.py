@@ -39,6 +39,7 @@ from .telemetry import append_event, emit_tool_call, emit_tool_result
 _EXPANDED_BUDGET_TOOLS = {
     'advance_step',
     'advance_step_and_hand_off',
+    'resume_and_rerun_step',
     'create_workflow_draft',
     'create_subagent',
 }

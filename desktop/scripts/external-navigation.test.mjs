@@ -5,10 +5,42 @@ import { createRequire } from "node:module";
 const require = createRequire(import.meta.url);
 const {
   canOpenExternally,
+  canOpenWebURL,
   installExternalNavigationHandler,
   isOAuthPopup,
   isSameOrigin,
 } = require("../electron/src/external-navigation.js");
+
+test("same-window navigation leaves LazyMind intact and opens the browser once", async () => {
+  const handlers = new Map(), opened = [];
+  installExternalNavigationHandler({
+    getURL: () => 'http://127.0.0.1:8090/agent/chat/home',
+    setWindowOpenHandler: () => {}, on: (name, fn) => handlers.set(name, fn),
+  }, async url => opened.push(url));
+  let cancelled = false;
+  handlers.get('will-navigate')({ preventDefault: () => { cancelled = true; } }, 'https://example.org');
+  await Promise.resolve();
+  assert.equal(cancelled, true); assert.deepEqual(opened, ['https://example.org']);
+  cancelled = false;
+  handlers.get('will-navigate')({ preventDefault: () => { cancelled = true; } }, 'http://127.0.0.1:8090/lib/knowledge/list');
+  assert.equal(cancelled, false);
+});
+
+test("unsafe and credential-bearing external targets are rejected", () => {
+  for (const url of ['javascript:alert(1)', 'file:///tmp/a', 'https://user:secret@example.org', 'https://example.org/\nsecret']) {
+    assert.equal(canOpenExternally(url), false); assert.equal(canOpenWebURL(url), false);
+  }
+  assert.equal(canOpenWebURL('mailto:test@example.org'), false);
+  assert.equal(canOpenWebURL('https://example.org/docs'), true);
+});
+
+test('an arbitrary named popup cannot bypass external navigation', () => {
+  let handler;
+  const opened = [];
+  installExternalNavigationHandler({ getURL: () => 'http://localhost:8090/', on: () => {}, setWindowOpenHandler: fn => { handler = fn; } }, async url => { opened.push(url); });
+  assert.deepEqual(handler({ url: 'https://example.org', frameName: 'Fake OAuth', features: 'width=560,height=760' }), { action: 'deny' });
+  assert.deepEqual(opened, ['https://example.org']);
+});
 
 test("recognizes same-origin LazyMind links", () => {
   assert.equal(
@@ -40,6 +72,26 @@ test("only sends supported external protocols to the operating system", () => {
 test("recognizes the named, sized OAuth windows used by the frontend", () => {
   assert.equal(isOAuthPopup({ frameName: "Feishu OAuth", features: "width=560,height=760" }), true);
   assert.equal(isOAuthPopup({ frameName: "_blank", features: "" }), false);
+});
+
+test("OAuth windows receive the native app icon without local preload privileges", () => {
+  let handler;
+  installExternalNavigationHandler({
+    getURL: () => "http://127.0.0.1:8090/agent/chat/home",
+    setWindowOpenHandler: (value) => { handler = value; },
+    on: () => {},
+  }, async () => {}, () => {}, {
+    icon: "/runtime/LazyMind.ico",
+    webPreferences: { preload: "/runtime/preload.js" },
+  });
+  assert.deepEqual(handler({
+    url: "https://open.feishu.cn/oauth/authorize",
+    frameName: "Feishu OAuth",
+    features: "width=560,height=760",
+  }), {
+    action: "allow",
+    overrideBrowserWindowOptions: { icon: "/runtime/LazyMind.ico" },
+  });
 });
 
 test("opens Obsidian notes without allowing write actions or callbacks", () => {

@@ -831,11 +831,15 @@ export function SlotHtmlSlide({
   }, [clearSelection, editable, selectElements]);
 
   const cancelPreview = useCallback(() => {
+    const token = editPreviewRef.current?.commit?.token;
+    if (sessionId && token?.startsWith('external:')) {
+      void WorkflowSessionApi().cancelArtifactActionPreview(sessionId, token).catch(() => undefined);
+    }
     setEditPreview(null);
     editPreviewRef.current = null;
     setApplyError(undefined);
     clearSelection();
-  }, [clearSelection]);
+  }, [clearSelection, sessionId]);
 
   const persistPreview = useCallback(async (preview: RewriteSelectionPreview) => {
     const token = preview.commit?.token;
@@ -959,13 +963,13 @@ export function SlotHtmlSlide({
                   : editPreview.target.el || '所选元素'}…`
                 : applyError
                   ? '自动保存失败'
-                  : '正在准备保存…'}
+                  : editPreview.commit?.token?.startsWith('external:') ? '请确认修改，确认后同时保存预览和 PPTX。' : '正在准备保存…'}
             </span>
             {applyError && <span className='slot-html-slide__edit-error'>{applyError}</span>}
-            {applyError && (
+            {(applyError || (!applying && editPreview.commit?.token?.startsWith('external:'))) && (
               <>
                 <button type='button' onClick={cancelPreview}>取消候选</button>
-                <button type='button' className='is-primary' onClick={retryPersistPreview}>重试保存</button>
+                <button type='button' className='is-primary' onClick={retryPersistPreview}>{applyError ? '重试保存' : '确认修改'}</button>
               </>
             )}
           </div>
@@ -991,7 +995,7 @@ export function SlotHtmlSlide({
             editPreviewRef.current = preview;
             setEditPreview(preview);
             setExpanded(false);
-            void persistPreview(preview);
+            if (!preview.commit?.token?.startsWith('external:')) void persistPreview(preview);
           }}
         />
       )}

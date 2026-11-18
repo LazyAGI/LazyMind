@@ -89,13 +89,13 @@ it.each([
 });
 
 it('requests one workbench summary with global filters and category pagination', async () => {
-  const summary = { groups: {}, page_size: 4 };
+  const summary = { groups: {}, page_size: 6 };
   http.request.mockResolvedValueOnce({ data: summary });
-  expect(await getWorkbench({ keyword: '研究', task_type: 'workflow_run', category: 'attention', page: 2 })).toEqual(summary);
+  expect(await getWorkbench({ keyword: '研究', task_type: 'workflow_run', category: 'attention', page: 2, page_size: 6 })).toEqual(summary);
   expect(http.request).toHaveBeenCalledTimes(1);
   const request = http.request.mock.lastCall![0];
   const url = new URL(request.url, 'http://localhost');
   expect(request.method).toBe('GET');
   expect(url.pathname).toBe('/api/core/task-center/workbench');
-  expect(Object.fromEntries(url.searchParams)).toEqual({ task_type: 'workflow_run', keyword: '研究', category: 'attention', page: '2' });
+  expect(Object.fromEntries(url.searchParams)).toEqual({ task_type: 'workflow_run', keyword: '研究', category: 'attention', page: '2', page_size: '6' });
 });

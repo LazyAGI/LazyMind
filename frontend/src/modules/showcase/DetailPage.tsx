@@ -1,3 +1,4 @@
+import ExternalLink from '@/components/ExternalLink';
 import { useEffect, useRef, useState } from "react";
 import {
   ArrowLeftOutlined,
@@ -324,14 +325,14 @@ export default function DetailPage() {
         <div className="showcase-detail-heading">
           <h1>
             {hasExternalSource ? (
-              <a
+              <ExternalLink
                 className="showcase-detail-source-link"
                 href={sourceURL}
                 target="_blank"
                 rel="noreferrer"
               >
                 {item.detail_title}
-              </a>
+              </ExternalLink>
             ) : item.detail_title}
           </h1>
           <p>{item.detail_description}</p>

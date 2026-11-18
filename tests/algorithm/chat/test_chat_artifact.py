@@ -53,7 +53,8 @@ def test_save_chat_artifact_file_copies_to_persistent_workspace(tmp_path, monkey
     assert emitted[0]['value']['size'] == len(b'fake-docx')
 
 
-def test_save_chat_artifact_emits_logical_key_and_hash(monkeypatch):
+def test_save_chat_artifact_emits_logical_key_and_hash(monkeypatch, tmp_path):
+    monkeypatch.setitem(conversation_workspace._cfg._impl, 'agentic_workspace', str(tmp_path))
     emitted = []
     monkeypatch.setattr(
         chat_artifact, '_current_artifact_scope', lambda: ('user-1', 'conversation-1'),
@@ -205,3 +206,32 @@ def test_artifact_event_translator_preserves_structured_payload():
             'value': {'text': 'a'},
         },
     }]
+
+
+@pytest.mark.parametrize('content_type', ['text', 'file'])
+def test_save_visual_formats_preserves_explicit_preview_group(tmp_path, monkeypatch, content_type):
+    monkeypatch.setitem(conversation_workspace._cfg._impl, 'agentic_workspace', str(tmp_path / 'agent'))
+    monkeypatch.setenv('LAZYMIND_SUBAGENT_WORKSPACE', str(tmp_path / 'shared'))
+    monkeypatch.setattr(chat_artifact, '_current_artifact_scope', lambda: ('u1', 'c1'))
+    emitted = []
+    monkeypatch.setattr(chat_artifact, '_write_agent_data', lambda tag, **payload: emitted.append(payload))
+    workspace = Path(conversation_workspace.chat_agent_workspace('u1', 'c1'))
+    workspace.mkdir(parents=True, exist_ok=True)
+    for filename, body in [('diagram.html', '<main>Diagram</main>'), ('diagram.svg', '<svg />')]:
+        (workspace / filename).write_text(body)
+        chat_artifact.save_chat_artifact(
+            filename, filename if content_type == 'file' else body,
+            content_type=content_type, preview_group=' diagram-a ',
+        )
+    assert len({event['artifact_id'] for event in emitted}) == 2
+    assert [event['value']['preview_group'] for event in emitted] == ['diagram-a', 'diagram-a']
+    translator = AgentEventFrameTranslator(query='Create diagram')
+    for event in emitted:
+        frames = translator.feed({'tag': 'artifact_created', **event})
+        assert frames[0]['artifact_created']['value']['preview_group'] == 'diagram-a'
+
+
+@pytest.mark.parametrize('group', ['', '  ', 'x' * 256, 123])
+def test_save_chat_artifact_rejects_invalid_preview_group(group):
+    with pytest.raises(ToolExecutionError, match='preview_group'):
+        chat_artifact.save_chat_artifact('diagram.svg', '<svg />', preview_group=group)

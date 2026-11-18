@@ -33,6 +33,7 @@ const { createNativeUpdateInstaller } = require("./native-update-installer");
 const { createUpdateRuntimeClient } = require("./update-runtime-client");
 const { readRuntimeUpdateState } = require("./runtime-update-state");
 const { guardDesktopStartup, prepareDesktopStartup, adoptDesktopRepair } = require("./update-startup");
+const { localFileAction, openChatExternal } = require("./chat-link-actions");
 const { revealDirectoryFile } = require("./directory-file");
 const {
   desktopRuntimeReady,
@@ -55,6 +56,7 @@ const {
 const { clearFrontendCaches } = require("./frontend-cache");
 const {
   installExternalNavigationHandler,
+  canOpenWebURL,
   isTrustedCloudNavigation,
   isTrustedFeishuCLINavigation,
   isTrustedGitHubCLINavigation,
@@ -67,6 +69,7 @@ const { createDesktopNotifications, isTrustedNotificationSender } = require("./n
 const { createNotificationRuntimeReader } = require("./notification-runtime.js");
 const { createNotificationSession } = require("./notification-session.js");
 const { createAgentRecovery, runRecoveryCommand } = require("./agent-recovery.js");
+const { createPageRecovery } = require("./page-recovery.js");
 const { registerNotificationSettingsIPC } = require("./notification-settings.js");
 const {
   desktopNotificationAPIOrigin,
@@ -239,6 +242,7 @@ let homeReadyStatus = null;
 let homeReadyWaiters = [];
 let guardProcess;
 let guardPID = 0;
+let guardReadyPromise;
 let guardWatchTimer;
 let currentStatus = null;
 let cloudOAuthCallbackRelay = null;
@@ -1166,7 +1170,11 @@ function disposeInstallationWarmupWindow(window) {
 
 async function runMacInstallationWarmupIfNeeded() {
   const version = app.getVersion();
-  if (!isMac || !isPackaged || macWarmupCompleted(macInstallationWarmupMarker, version)) {
+  if (!isMac || !isPackaged) {
+    return;
+  }
+  await startGuard();
+  if (macWarmupCompleted(macInstallationWarmupMarker, version)) {
     return;
   }
   startupMetricsRecorder.mark("macWarmupStarted");
@@ -1181,8 +1189,14 @@ async function runMacInstallationWarmupIfNeeded() {
 }
 
 function startGuard() {
-  if (guardProcess || guardPID || !fs.existsSync(sidecarPath)) {
+  if (guardPID) {
     return;
+  }
+  if (guardProcess) {
+    return guardReadyPromise;
+  }
+  if (!fs.existsSync(sidecarPath)) {
+    throw new Error("Desktop runtime guard executable is missing");
   }
   ensureDesktopLogDirs();
   const shutdownLog = path.join(desktopLogsDir, "desktop-shutdown.log");
@@ -1210,26 +1224,43 @@ function startGuard() {
   try {
     guardProcess = spawn(sidecarPath, sidecarArgs("guard", ["--owner-pid", String(process.pid)]), {
       env: sidecarShutdownEnv(),
-      stdio: ["ignore", "ignore", errFd],
+      stdio: ["ignore", "pipe", errFd],
       detached: true,
       windowsHide: isWindows,
     });
   } catch (error) {
     appendStartupLog("error", `failed to start desktop runtime guard: ${serializeError(error)}`);
-    return;
+    throw error;
   } finally {
     if (typeof errFd === "number") {
       fs.closeSync(errFd);
     }
   }
-  guardProcess.once("exit", (code, signal) => {
-    appendStartupLog(
-      "desktop",
-      `runtime guard exited with code ${code ?? "null"} signal ${signal ?? "null"}`,
-    );
-    guardProcess = null;
+  const child = guardProcess;
+  guardReadyPromise = new Promise((resolve, reject) => {
+    let output = "";
+    let ready = false;
+    child.stdout.on("data", (chunk) => {
+      output += String(chunk);
+      if (output.split(/\r?\n/).includes("desktop-guard-ready")) {
+        ready = true;
+        resolve();
+      }
+    });
+    child.once("error", (error) => {
+      guardProcess = null;
+      guardReadyPromise = undefined;
+      reject(error);
+    });
+    child.once("exit", (code, signal) => {
+      appendStartupLog("desktop", `runtime guard exited with code ${code ?? "null"} signal ${signal ?? "null"}`);
+      guardProcess = null;
+      guardReadyPromise = undefined;
+      if (!ready) reject(new Error("Desktop runtime guard exited before it was ready"));
+    });
   });
-  guardProcess.unref();
+  child.unref();
+  return guardReadyPromise;
 }
 
 function quoteWindowsArgument(value) {
@@ -1741,7 +1772,7 @@ async function waitForRuntimeReady(options = {}) {
       if (ownedReady && status.config?.frontendPort) {
         if (!targetCapability) {
           startupMetricsRecorder.mark("runtimeReady");
-          startGuard();
+          await startGuard();
           updateStartupState({ status: "ready", phase: "Ready", message: "LazyMind is ready." });
         }
         return status;
@@ -1973,7 +2004,7 @@ function loadingHTML() {
       <div class="summary">
         <div id="steps" class="steps"></div>
       </div>
-      <pre id="log" class="log empty">Waiting for startup output...</pre>
+      <pre id="log" class="log empty" tabindex="0" aria-label="Startup output">Waiting for startup output...</pre>
     </div>
   </aside>
   <script>
@@ -2139,13 +2170,39 @@ function browserWindowOptions(show = true) {
   };
 }
 
-function attachExternalNavigationHandler(window) {
+const pageRecovery = createPageRecovery({
+  BrowserWindow, ipcMain, dialog, locale: () => app.getLocale(),
+  enabled: () => !isQuitting && startupState.status === 'ready',
+  report: code => appendStartupLog('error', code),
+});
+
+async function showExternalNavigationFailure(window, url) {
+  appendStartupLog('error', 'EXTERNAL_BROWSER_OPEN_FAILED');
+  const zh = /^zh/i.test(app.getLocale());
+  while (!isQuitting && !window.isDestroyed()) {
+    const { response } = await dialog.showMessageBox(window, {
+      type: 'error', message: zh ? '无法打开浏览器，请重试' : 'Unable to open the browser. Please try again.',
+      buttons: zh ? ['重试', '复制链接', '取消'] : ['Retry', 'Copy link', 'Cancel'], defaultId: 0, cancelId: 2,
+    });
+    if (response === 1) clipboard.writeText(url);
+    if (response !== 0) return;
+    try { await shell.openExternal(url); return; } catch { /* Keep explicit recovery available. */ }
+  }
+}
+
+function attachExternalNavigationHandler(window, frontendURL) {
   installExternalNavigationHandler(
     window.webContents,
     (url) => shell.openExternal(url),
-    (error) => appendStartupLog("error", `failed to open external URL: ${serializeError(error)}`),
-    { webPreferences: { preload: path.join(__dirname, "preload.js") } },
+    (_error, url) => { void showExternalNavigationFailure(window, url).catch(() => {}); },
+    { icon: windowsDesktopIconPath(), webPreferences: { preload: path.join(__dirname, "preload.js") } },
+    frontendURL,
   );
+  pageRecovery.attach(window, frontendURL);
+  window.webContents.on('did-create-window', (child, details) => {
+    try { if (new URL(details.url).origin === new URL(frontendURL).origin) pageRecovery.attach(child, frontendURL); }
+    catch { /* External popups have no application recovery target. */ }
+  });
 }
 
 function configuredCloudOrigin() {
@@ -2382,7 +2439,7 @@ function createRendererReadyWait(window) {
 
 function createHiddenRendererAttempt(frontendPort) {
   const window = new BrowserWindow(browserWindowOptions(false));
-  attachExternalNavigationHandler(window);
+  attachExternalNavigationHandler(window, `${desktopFrontendOrigin(frontendPort)}/agent/chat/home`);
   mainWindow = window;
   window.once("closed", () => {
     if (mainWindow === window) {
@@ -2421,7 +2478,7 @@ function createHiddenRendererAttempt(frontendPort) {
 
 async function createDesktopDevWindow() {
   const window = new BrowserWindow(browserWindowOptions(false));
-  attachExternalNavigationHandler(window);
+  attachExternalNavigationHandler(window, desktopDevRendererURL(desktopDevURL));
   mainWindow = window;
   window.once("closed", () => {
     if (mainWindow === window) {
@@ -2566,6 +2623,14 @@ ipcMain.on("lazymind:renderer-ready", (event) => {
 });
 
 ipcMain.handle("lazymind:runtimeStatus", () => readStatus());
+ipcMain.handle('lazymind:openExternal', async (event, url) => {
+  const owner = BrowserWindow.fromWebContents(event.sender);
+  if (isQuitting || !isTrustedNotificationSender(event, owner, notificationFrontendOrigin()) || !canOpenWebURL(url)) {
+    throw new Error('EXTERNAL_NAVIGATION_REJECTED');
+  }
+  try { await shell.openExternal(url); }
+  catch { throw new Error('EXTERNAL_BROWSER_OPEN_FAILED'); }
+});
 ipcMain.handle("lazymind:appVersion", () => app.getVersion());
 ipcMain.handle("lazymind:agentIntegrationStatuses", (_event, refreshInstallations) => runAgentConnector("all", "status", refreshInstallations === true));
 handleDesktopWork("lazymind:agentIntegrationAction", (_event, agent, action) => runAgentConnector(agent, action));
@@ -3320,6 +3385,9 @@ async function materializeArtifactFile(payload, destPath) {
   return destPath;
 }
 
+ipcMain.handle("lazymind:localFileAction", (_event, payload) => localFileAction(payload, shell));
+ipcMain.handle("lazymind:openChatExternal", (_event, url) => openChatExternal(url, shell));
+
 ipcMain.handle("lazymind:showItemInFolder", async (_event, payload) => {
   if (payload?.directoryEntry) {
     return revealDirectoryFile(payload.directoryEntry, {
@@ -3397,6 +3465,15 @@ if (!hasSingleInstanceLock) {
     app.quit();
   }
 } else {
+  if (isMac && isPackaged) {
+    const executablePath = app.getPath("exe");
+    fs.watchFile(executablePath, { persistent: false, interval: 1000 }, (current) => {
+      if (current.nlink === 0) {
+        beginFastQuit("application-removed");
+      }
+    });
+    app.once("will-quit", () => fs.unwatchFile(executablePath));
+  }
   app.on("second-instance", () => {
     void showActiveWindow();
   });
@@ -3468,16 +3545,26 @@ if (!hasSingleInstanceLock) {
         }
         return showActiveWindow();
       },
-      (error) => {
+      async (error) => {
         finishStartupMetrics("failed", "mac-installation-warmup");
         console.error("LazyMind macOS installation warmup failed:", error);
-        dialog.showErrorBox(
-          "LazyMind installation warmup failed",
-          `LazyMind could not prepare its local runtime. Reopen the app to retry.\n\n${serializeError(error)}`,
+        setStartupFailure(
+          error,
+          "LazyMind could not prepare its local runtime. Review the startup log below, then reopen the app to retry.",
         );
-        app.exit(1);
+        const failureWindow = new BrowserWindow(browserWindowOptions(true));
+        startupWindow = failureWindow;
+        failureWindow.once("closed", () => {
+          startupWindow = undefined;
+          beginFastQuit("warmup-failed");
+        });
+        await failureWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(loadingHTML())}`);
+        broadcastStartupDiagnostics();
       },
     ).then((result) => {
+      if (!frontendOpeningAllowed) {
+        return result;
+      }
       // Keep discovery out of the startup critical path, including background
       // launches where the renderer was closed while services were preparing.
       const updateStart = setTimeout(() => { void desktopUpdater.start(); }, 15_000);

@@ -329,13 +329,13 @@ const ChatModelSelector = ({
     : loadStatus === "loading"
       ? t("chat.modelSelectorLoading")
       : (disabled ? disabledReason : undefined) || catalogBlockedReason;
+  const interactionDisabled = disabled || saving || loadStatus === "loading";
   const controlDisabled =
-    disabled ||
-    saving ||
-    loadStatus === "loading" ||
+    interactionDisabled ||
     (loadStatus === "ready" && catalog?.switch_allowed === false);
   const depthDisabled = thinkingDepthDisabled || saving || !onThinkingDepthChange;
-  const triggerDisabled = controlDisabled && (!combined || depthDisabled);
+  // A cached server block must not prevent opening the menu to revalidate it.
+  const triggerDisabled = interactionDisabled && (!combined || depthDisabled);
 
   useEffect(() => {
     setPreviewDepth(thinkingDepth ?? "medium");
@@ -382,10 +382,11 @@ const ChatModelSelector = ({
       ).detail;
       const requestedId = detail?.conversationId?.trim();
       if (requestedId && requestedId !== normalizedConversationId) return;
-      if (controlDisabled) {
+      if (disabled || savingRef.current) {
         message.warning(switchBlockedReason);
         return;
       }
+      void loadCatalog();
       setModelsExpanded(true);
       setOpen(true);
     };
@@ -395,7 +396,7 @@ const ChatModelSelector = ({
         CHAT_OPEN_MODEL_SELECTOR_EVENT,
         handleOpenRequest,
       );
-  }, [controlDisabled, normalizedConversationId, switchBlockedReason]);
+  }, [disabled, loadCatalog, normalizedConversationId, switchBlockedReason]);
 
   const currentSelection = catalog?.selection;
   const currentProvider = useMemo(
@@ -613,9 +614,10 @@ const ChatModelSelector = ({
               aria-label={t("chat.modelSelectorChoose")}
               aria-expanded={modelsExpanded}
               aria-controls={showModelList ? modelListId : undefined}
-              disabled={controlDisabled}
-              title={controlDisabled ? switchBlockedReason : triggerLabel}
+              disabled={interactionDisabled}
+              title={interactionDisabled ? switchBlockedReason : triggerLabel}
               onClick={() => {
+                if (!modelsExpanded && catalog?.switch_allowed === false) void loadCatalog();
                 setModelsExpanded((current) => !current);
                 setSearchQuery("");
               }}
@@ -711,6 +713,15 @@ const ChatModelSelector = ({
 
       {loadStatus === "ready" && catalog ? (
         <>
+          {catalog.switch_allowed === false ? (
+            <div className="chat-model-selector-state" role="status">
+              <span>{catalogBlockedReason}</span>
+              <button type="button" onClick={() => void loadCatalog()}>
+                <ReloadOutlined aria-hidden="true" />
+                {t("chat.modelSelectorReload")}
+              </button>
+            </div>
+          ) : null}
           {hasProviderModels ? (
             <label className="chat-model-selector-search">
               <SearchOutlined aria-hidden="true" />
@@ -976,6 +987,7 @@ const ChatModelSelector = ({
         trigger="click"
         onOpenChange={(nextOpen: boolean) => {
           if (nextOpen && triggerDisabled) return;
+          if (nextOpen && catalog?.switch_allowed === false) void loadCatalog();
           if (!nextOpen) {
             setSearchQuery("");
             setModelsExpanded(false);

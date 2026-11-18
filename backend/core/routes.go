@@ -66,8 +66,10 @@ import (
 	workflowexecutor "lazymind/core/workflow/executor"
 	workflowfacade "lazymind/core/workflow/facade"
 	workflowhosted "lazymind/core/workflow/hosted"
+	"lazymind/core/workflow/paperadapter"
 	workflowstore "lazymind/core/workflow/store"
 	workflowstream "lazymind/core/workflow/stream"
+	"lazymind/core/workflowtool"
 
 	"github.com/gorilla/mux"
 )
@@ -247,7 +249,7 @@ func registerAllRoutes(r *mux.Router) {
 		Contexts:  workflowexecutor.DBContextLoader{DB: corestore.DB()},
 		Artifacts: workflowexecutor.DBArtifactSink{DB: corestore.DB()},
 	}
-	attemptHandler := workflowattempt.Handler{Service: workflowattempt.New(corestore.DB(), workflowattempt.Config{})}
+	attemptHandler := workflowattempt.Handler{Service: workflowattempt.New(corestore.DB(), workflowattempt.Config{OnClaim: workflowexecutor.FreezePaperInputs})}
 	remoteExecutorHandler := workflowexecutor.RemoteHandler{
 		DB: corestore.DB(), Attempts: attemptHandler.Service,
 		Finish: func(ctx context.Context, owner, sessionID, attemptID string, input workflowexecutor.Completion) error {
@@ -268,7 +270,12 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "POST", "/internal/workflow-attempts/{attempt_id}:fail", nil, remoteExecutorHandler.Fail)
 	handleAPI(r, "POST", "/internal/workflow-attempts/{attempt_id}:cancel", nil, remoteExecutorHandler.Cancel)
 	handleAPI(r, "POST", "/internal/workflow-attempts/{attempt_id}:stop-ack", nil, workflow.ConfirmNativeStopHTTP)
+	handleAPI(r, "POST", "/internal/workflow-attempts/{attempt_id}/model/v1/chat/completions", nil, workflow.ModelCompletion)
 	hostedHandler := workflowhosted.Handler{Service: hostedService}
+	workflowToolService := &workflowtool.Service{DB: corestore.DB()}
+	paperToolAdapter := &paperadapter.Adapter{DB: corestore.DB(), ReadKnowledge: workflowToolService.ReadSelectedKnowledge}
+	workflowToolService.Adapters = map[string]workflowtool.ToolAdapter{"paper-agent-v1": paperToolAdapter}
+	workflowToolHandler := workflowtool.Handler{Service: workflowToolService}
 	workflowControl := workflow.WorkflowControlHandler{Service: workflow.WorkflowControlService{DB: corestore.DB()}}
 	handleAPI(r, "GET", "/workflow-control/capabilities", []string{"qa.read"}, workflowControl.Capabilities)
 
@@ -282,14 +289,16 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "POST", "/datasets/processing/preflight", []string{"document.write"}, doc.ProcessingPreflight)
 	handleAPI(r, "GET", "/datasets/{dataset}", []string{"document.read"}, doc.GetDataset)
 	handleAPI(r, "GET", "/datasets/{dataset}/deletion", []string{"document.read"}, doc.GetDatasetDeletion)
-	handleAPI(r, "DELETE", "/datasets/{dataset}", []string{"document.write"}, systemdeps.RequireRAG(doc.DeleteDataset))
-	handleAPI(r, "PATCH", "/datasets/{dataset}", []string{"document.write"}, systemdeps.RequireRAG(doc.UpdateDataset))
+	handleAPI(r, "DELETE", "/datasets/{dataset}", []string{"document.write"}, doc.DeleteDataset)
+	handleAPI(r, "PATCH", "/datasets/{dataset}", []string{"document.write"}, doc.UpdateDataset)
 	handleAPI(r, "PATCH", "/datasets/{dataset}/processing-level", []string{"document.write"}, doc.UpdateProcessingLevel)
 	handleAPI(r, "GET", "/datasets/{dataset}/documents/{document}/parse-status", []string{"document.read"}, doc.EnsureParsed)
 	handleAPI(r, "POST", "/datasets/{dataset}/documents/{document}:ensure-parsed", []string{"document.read"}, doc.EnsureParsed)
 	handleAPI(r, "POST", "/datasets/{dataset}/documents/{document}:reparse", []string{"document.write"}, doc.ReparseDocument)
 	handleAPI(r, "GET", "/datasets/{dataset}/documents/{document}:read", []string{"document.read"}, doc.ReadDocument)
 	handleAPI(r, "GET", "/datasets/{dataset}/processing-status", []string{"document.read"}, doc.GetProcessingStatus)
+	handleAPI(r, "GET", "/datasets/{dataset}/text-index", []string{"document.read"}, doc.GetTextIndex)
+	handleAPI(r, "POST", "/datasets/{dataset}/text-index", []string{"document.write"}, doc.ReindexText)
 
 	// ----- Academic references and paper imports -----
 	handleAPI(r, "POST", "/academic/zotero/preview", []string{"document.write"}, academic.PreviewZoteroLibrary)
@@ -317,8 +326,8 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "POST", "/academic/expansions/{expansion_id}/papers:resolve", []string{"qa.read"}, academic.ResolveExpansionPapers)
 	handleAPI(r, "DELETE", "/academic/expansions/{expansion_id}", []string{"qa.write"}, academic.DeleteExpansion)
 
-	handleAPI(r, "GET", "/academic/documents/{document_id}/references", []string{"document.read"}, systemdeps.RequireRAG(academic.ListReferences))
-	handleAPI(r, "POST", "/academic/documents/{document_id}/references:extract", []string{"document.write"}, systemdeps.RequireRAG(academic.ExtractReferences))
+	handleAPI(r, "GET", "/academic/documents/{document_id}/references", []string{"document.read"}, academic.ListReferences)
+	handleAPI(r, "POST", "/academic/documents/{document_id}/references:extract", []string{"document.write"}, academic.ExtractReferences)
 	handleAPI(r, "GET", "/academic/library", []string{"document.read"}, academic.GetPaperLibrary)
 	handleAPI(r, "PATCH", "/academic/library/papers/{library_paper_id}", []string{"document.read"}, academic.PatchLibraryPaper)
 	handleAPI(r, "POST", "/academic/library/papers:move", []string{"document.write"}, academic.MoveLibraryPapers)
@@ -326,6 +335,7 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "POST", "/academic/library/papers:delete", []string{"document.write"}, academic.DeleteLibraryPapers)
 	handleAPI(r, "POST", "/academic/library/papers/{library_paper_id}/attachments/{attachment_id}:detach", []string{"document.write"}, academic.DetachLibraryAttachment)
 	handleAPI(r, "POST", "/academic/library/papers/{library_paper_id}/notes", []string{"document.write"}, academic.AddLibraryNote)
+	handleAPI(r, "PATCH", "/academic/library/papers/{library_paper_id}/notes/{note_id}", []string{"document.write"}, academic.UpdateLibraryNote)
 	handleAPI(r, "POST", "/academic/library/papers/{library_paper_id}/notes/{note_id}:delete", []string{"document.write"}, academic.DeleteLibraryNote)
 	handleAPI(r, "POST", "/academic/library/folders", []string{"document.write"}, academic.CreateLibraryFolder)
 	handleAPI(r, "PATCH", "/academic/library/folders/{folder_id}", []string{"document.write"}, academic.RenameLibraryFolder)
@@ -334,20 +344,22 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "POST", "/academic/sources:inspect", []string{"document.read"}, academic.InspectSources)
 	handleAPI(r, "POST", "/academic/sources:lookup-pdfs", []string{"document.write"}, academic.LookupSourcePDFs)
 	handleAPI(r, "GET", "/academic/source-targets", []string{"document.read"}, academic.ListSourceTargets)
-	handleAPI(r, "POST", "/academic/works:presence", []string{"document.read"}, systemdeps.RequireRAG(academic.CheckPresence))
-	handleAPI(r, "POST", "/academic/imports:preview", []string{"document.read"}, systemdeps.RequireRAG(academic.PreviewImport))
-	handleAPI(r, "POST", "/academic/imports", []string{"document.write"}, systemdeps.RequireRAG(academic.CreateImport))
-	handleAPI(r, "GET", "/academic/imports", []string{"document.read"}, systemdeps.RequireRAG(academic.ListImports))
-	handleAPI(r, "GET", "/academic/imports/{batch_id}", []string{"document.read"}, systemdeps.RequireRAG(academic.GetImport))
-	handleAPI(r, "POST", "/academic/imports/{batch_id}:cancel", []string{"document.write"}, systemdeps.RequireRAG(academic.CancelImport))
-	handleAPI(r, "POST", "/academic/imports/{batch_id}:retry", []string{"document.write"}, systemdeps.RequireRAG(academic.RetryImport))
-	handleAPI(r, "POST", "/datasets/{dataset}:setDefault", []string{"document.write"}, systemdeps.RequireRAG(doc.SetDefault))
-	handleAPI(r, "POST", "/datasets/{dataset}:unsetDefault", []string{"document.write"}, systemdeps.RequireRAG(doc.UnsetDefault))
+	handleAPI(r, "POST", "/academic/works:presence", []string{"document.read"}, academic.CheckPresence)
+	handleAPI(r, "POST", "/academic/imports:preview", []string{"document.read"}, academic.PreviewImport)
+	handleAPI(r, "POST", "/academic/imports", []string{"document.write"}, academic.CreateImport)
+	handleAPI(r, "GET", "/academic/imports", []string{"document.read"}, academic.ListImports)
+	handleAPI(r, "GET", "/academic/imports/{batch_id}", []string{"document.read"}, academic.GetImport)
+	handleAPI(r, "POST", "/academic/imports/{batch_id}:cancel", []string{"document.write"}, academic.CancelImport)
+	handleAPI(r, "POST", "/academic/imports/{batch_id}:retry", []string{"document.write"}, academic.RetryImport)
+	handleAPI(r, "POST", "/datasets/{dataset}:setDefault", []string{"document.write"}, doc.SetDefault)
+	handleAPI(r, "POST", "/datasets/{dataset}:unsetDefault", []string{"document.write"}, doc.UnsetDefault)
 	handleAPI(r, "GET", "/data-sources/local-fs-chat-setting", []string{"document.read"}, datasource.GetLocalFSChatSetting)
 	handleAPI(r, "PUT", "/data-sources/local-fs-chat-setting", []string{"document.write"}, datasource.SetLocalFSChatSetting)
 	handleAPI(r, "GET", "/system-dependencies/pdf-font", []string{"document.read"}, systemdeps.GetPDFFont)
 	handleAPI(r, "GET", "/system-dependencies/python", []string{"document.read"}, systemdeps.GetPythonComponents)
 	handleAPI(r, "POST", "/system-dependencies/python:install", []string{"document.write"}, systemdeps.InstallPythonComponent)
+	handleAPI(r, "GET", "/system-dependencies/node", []string{"document.read"}, systemdeps.GetNodeDependency)
+	handleAPI(r, "POST", "/system-dependencies/node:install", []string{"document.write"}, systemdeps.InstallNodeDependency)
 	handleAPI(r, "GET", "/system-dependencies/ffmpeg", []string{"document.read"}, systemdeps.GetFFmpegDependency)
 	handleAPI(r, "PUT", "/system-dependencies/ffmpeg", []string{"document.write"}, systemdeps.UpdateFFmpegDependency)
 	handleAPI(r, "POST", "/system-dependencies/ffmpeg:check", []string{"document.read"}, systemdeps.CheckFFmpegDependency)
@@ -398,28 +410,28 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "POST", "/datasets/{dataset}/documents/{document}/pdf-ir/formulas/{block}/explanation", []string{"document.read"}, doc.ExplainPDFFormula)
 	handleAPI(r, "POST", "/datasets/{dataset}/documents/{document}/pdf-ir/blocks/{block}/explanation", []string{"document.read"}, doc.ExplainPDFVisual)
 	handleAPI(r, "POST", "/datasets/{dataset}/documents/{document}/pdf-ir", []string{"document.write"}, doc.CreatePDFIR)
-	handleAPI(r, "GET", "/datasets/{dataset}/documents/{document}/pdf-capabilities", []string{"document.read"}, systemdeps.RequireRAG(doc.GetPDFCapabilities))
-	handleAPI(r, "POST", "/datasets/{dataset}/documents/{document}/pdf-artifacts/searchable", []string{"document.write"}, systemdeps.RequireRAG(doc.CreateSearchablePDFJob))
-	handleAPI(r, "POST", "/datasets/{dataset}/documents/{document}/pdf-translations", []string{"document.write"}, systemdeps.RequireRAG(doc.CreateTranslationPDFJob))
-	handleAPI(r, "GET", "/datasets/{dataset}/documents/{document}/pdf-translations", []string{"document.read"}, systemdeps.RequireRAG(doc.ListPDFTranslations))
-	handleAPI(r, "PATCH", "/datasets/{dataset}/documents/{document}/pdf-render-jobs/{job}", []string{"document.write"}, systemdeps.RequireRAG(doc.UpdatePDFRenderJob))
-	handleAPI(r, "POST", "/datasets/{dataset}/documents/{document}/pdf-render-jobs/{job}:complete", []string{"document.write"}, systemdeps.RequireRAG(doc.CompletePDFRenderJob))
-	handleAPI(r, "GET", "/datasets/{dataset}/documents/{document}/pdf-artifacts/{artifact}:content", []string{"document.read"}, systemdeps.RequireRAG(doc.GetPDFArtifact))
-	handleAPI(r, "GET", "/datasets/{dataset}/documents/{document}/pdf-artifacts/{artifact}:layout", []string{"document.read"}, systemdeps.RequireRAG(doc.GetPDFArtifactLayout))
-	handleAPI(r, "GET", "/datasets/{dataset}/documents/{document}/pdf-artifacts/{artifact}:draft", []string{"document.read"}, systemdeps.RequireRAG(doc.GetPDFTranslationDraft))
-	handleAPI(r, "POST", "/datasets/{dataset}/documents/{document}/pdf-artifacts/{artifact}:retranslate", []string{"document.write"}, systemdeps.RequireRAG(doc.RetranslatePDFDraftBlock))
-	handleAPI(r, "POST", "/datasets/{dataset}/documents/{document}/pdf-artifacts/{artifact}:revise", []string{"document.write"}, systemdeps.RequireRAG(doc.RevisePDFTranslation))
-	handleAPI(r, "DELETE", "/datasets/{dataset}/documents/{document}/pdf-artifacts/{artifact}", []string{"document.write"}, systemdeps.RequireRAG(doc.DeletePDFArtifact))
-	handleAPI(r, "DELETE", "/datasets/{dataset}/documents/{document}", []string{"document.write"}, systemdeps.RequireRAG(doc.DeleteDocument))
-	handleAPI(r, "PATCH", "/datasets/{dataset}/documents/{document}", []string{"document.write"}, systemdeps.RequireRAG(doc.UpdateDocument))
+	handleAPI(r, "GET", "/datasets/{dataset}/documents/{document}/pdf-capabilities", []string{"document.read"}, doc.GetPDFCapabilities)
+	handleAPI(r, "POST", "/datasets/{dataset}/documents/{document}/pdf-artifacts/searchable", []string{"document.write"}, doc.CreateSearchablePDFJob)
+	handleAPI(r, "POST", "/datasets/{dataset}/documents/{document}/pdf-translations", []string{"document.write"}, doc.CreateTranslationPDFJob)
+	handleAPI(r, "GET", "/datasets/{dataset}/documents/{document}/pdf-translations", []string{"document.read"}, doc.ListPDFTranslations)
+	handleAPI(r, "PATCH", "/datasets/{dataset}/documents/{document}/pdf-render-jobs/{job}", []string{"document.write"}, doc.UpdatePDFRenderJob)
+	handleAPI(r, "POST", "/datasets/{dataset}/documents/{document}/pdf-render-jobs/{job}:complete", []string{"document.write"}, doc.CompletePDFRenderJob)
+	handleAPI(r, "GET", "/datasets/{dataset}/documents/{document}/pdf-artifacts/{artifact}:content", []string{"document.read"}, doc.GetPDFArtifact)
+	handleAPI(r, "GET", "/datasets/{dataset}/documents/{document}/pdf-artifacts/{artifact}:layout", []string{"document.read"}, doc.GetPDFArtifactLayout)
+	handleAPI(r, "GET", "/datasets/{dataset}/documents/{document}/pdf-artifacts/{artifact}:draft", []string{"document.read"}, doc.GetPDFTranslationDraft)
+	handleAPI(r, "POST", "/datasets/{dataset}/documents/{document}/pdf-artifacts/{artifact}:retranslate", []string{"document.write"}, doc.RetranslatePDFDraftBlock)
+	handleAPI(r, "POST", "/datasets/{dataset}/documents/{document}/pdf-artifacts/{artifact}:revise", []string{"document.write"}, doc.RevisePDFTranslation)
+	handleAPI(r, "DELETE", "/datasets/{dataset}/documents/{document}/pdf-artifacts/{artifact}", []string{"document.write"}, doc.DeletePDFArtifact)
+	handleAPI(r, "DELETE", "/datasets/{dataset}/documents/{document}", []string{"document.write"}, doc.DeleteDocument)
+	handleAPI(r, "PATCH", "/datasets/{dataset}/documents/{document}", []string{"document.write"}, doc.UpdateDocument)
 	// File-directory filtering is a local catalog read, not semantic RAG search.
 	handleAPI(r, "POST", "/datasets/{dataset}/documents:search", []string{"document.read"}, doc.SearchDocuments)
-	handleAPI(r, "POST", "/datasets/{dataset}/documents:batchUpdateTags", []string{"document.write"}, systemdeps.RequireRAG(doc.BatchUpdateDocumentTags))
-	handleAPI(r, "POST", "/documents:listByDatasets", []string{"document.read"}, systemdeps.RequireRAG(doc.ListDocumentsByDatasets))
-	handleAPI(r, "POST", "/documents:search", []string{"document.read"}, systemdeps.RequireRAG(doc.SearchAllDocuments))
-	handleAPI(r, "POST", "/system-query/documents:aggregate", []string{"document.read"}, systemdeps.RequireRAG(doc.AggregateDocuments))
-	handleAPI(r, "POST", "/datasets/{dataset}:batchDelete", []string{"document.write"}, systemdeps.RequireRAG(doc.BatchDeleteDocument))
-	handleAPI(r, "GET", "/document/creators", []string{"document.read"}, systemdeps.RequireRAG(doc.AllDocumentCreators))
+	handleAPI(r, "POST", "/datasets/{dataset}/documents:batchUpdateTags", []string{"document.write"}, doc.BatchUpdateDocumentTags)
+	handleAPI(r, "POST", "/documents:listByDatasets", []string{"document.read"}, doc.ListDocumentsByDatasets)
+	handleAPI(r, "POST", "/documents:search", []string{"document.read"}, doc.SearchAllDocuments)
+	handleAPI(r, "POST", "/system-query/documents:aggregate", []string{"document.read"}, doc.AggregateDocuments)
+	handleAPI(r, "POST", "/datasets/{dataset}:batchDelete", []string{"document.write"}, doc.BatchDeleteDocument)
+	handleAPI(r, "GET", "/document/creators", []string{"document.read"}, doc.AllDocumentCreators)
 	handleAPI(r, "GET", "/document/tags", []string{"document.read"}, doc.AllDocumentTags)
 	// ----- text -----
 	handleAPI(r, "GET", "/datasets/{dataset}/documents/{document}/segments", []string{"document.read"}, doc.ListSegments)
@@ -429,14 +441,15 @@ func registerAllRoutes(r *mux.Router) {
 	// ----- DatasetMembertext -----
 	handleAPI(r, "GET", "/datasets/{dataset}/members", []string{"document.read"}, doc.ListDatasetMembers)
 	handleAPI(r, "GET", "/datasets/{dataset}/members/{user_id}", []string{"document.read"}, doc.GetDatasetMember)
-	handleAPI(r, "DELETE", "/datasets/{dataset}/members/{user_id}", []string{"document.write"}, systemdeps.RequireRAG(doc.DeleteDatasetMember))
-	handleAPI(r, "PATCH", "/datasets/{dataset}/members/{user_id}", []string{"document.write"}, systemdeps.RequireRAG(doc.UpdateDatasetMember))
-	handleAPI(r, "DELETE", "/datasets/{dataset}/members/groups/{group_id}", []string{"document.write"}, systemdeps.RequireRAG(doc.DeleteDatasetGroupMember))
-	handleAPI(r, "PATCH", "/datasets/{dataset}/members/groups/{group_id}", []string{"document.write"}, systemdeps.RequireRAG(doc.UpdateDatasetGroupMember))
-	handleAPI(r, "POST", "/datasets/{dataset}/members:search", []string{"document.read"}, systemdeps.RequireRAG(doc.SearchDatasetMember))
-	handleAPI(r, "POST", "/datasets/{dataset}:batchAddMember", []string{"document.write"}, systemdeps.RequireRAG(doc.BatchAddDatasetMember))
+	handleAPI(r, "DELETE", "/datasets/{dataset}/members/{user_id}", []string{"document.write"}, doc.DeleteDatasetMember)
+	handleAPI(r, "PATCH", "/datasets/{dataset}/members/{user_id}", []string{"document.write"}, doc.UpdateDatasetMember)
+	handleAPI(r, "DELETE", "/datasets/{dataset}/members/groups/{group_id}", []string{"document.write"}, doc.DeleteDatasetGroupMember)
+	handleAPI(r, "PATCH", "/datasets/{dataset}/members/groups/{group_id}", []string{"document.write"}, doc.UpdateDatasetGroupMember)
+	handleAPI(r, "POST", "/datasets/{dataset}/members:search", []string{"document.read"}, doc.SearchDatasetMember)
+	handleAPI(r, "POST", "/datasets/{dataset}:batchAddMember", []string{"document.write"}, doc.BatchAddDatasetMember)
 
 	// ----- Tasktext（text Task，text Job） -----
+	handleAPI(r, "GET", "/knowledge-processing/tasks", []string{"document.read"}, doc.ListProcessingTasks)
 	handleAPI(r, "GET", "/datasets/{dataset}/tasks", []string{"document.read"}, doc.ListTasks)
 	handleAPI(r, "POST", "/datasets/{dataset}/tasks", []string{"document.write"}, doc.CreateTask)
 	handleAPI(r, "POST", "/datasets/{dataset}/tasks:search", []string{"document.read"}, doc.SearchTasks)
@@ -451,10 +464,10 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "GET", "/datasets/{dataset}/uploads/{upload_file_id}:download", []string{"document.read"}, doc.DownloadUploadedFile)
 	handleAPI(r, "POST", "/datasets/{dataset}/tasks:batchUpload", []string{"document.write"}, doc.BatchUploadTasks)
 	handleAPI(r, "GET", "/datasets/{dataset}/tasks/{task}", []string{"document.read"}, doc.GetTask)
-	handleAPI(r, "DELETE", "/datasets/{dataset}/tasks/{task}", []string{"document.write"}, systemdeps.RequireRAG(doc.DeleteTask))
+	handleAPI(r, "DELETE", "/datasets/{dataset}/tasks/{task}", []string{"document.write"}, doc.DeleteTask)
 	handleAPI(r, "POST", "/datasets/{dataset}/tasks:start", []string{"document.write"}, doc.StartTask)
-	handleAPI(r, "POST", "/datasets/{dataset}/tasks/{task}:resume", []string{"document.write"}, systemdeps.RequireRAG(doc.ResumeTask))
-	handleAPI(r, "POST", "/datasets/{dataset}/tasks/{task}:suspend", []string{"document.write"}, systemdeps.RequireRAG(doc.SuspendTask))
+	handleAPI(r, "POST", "/datasets/{dataset}/tasks/{task}:resume", []string{"document.write"}, doc.ResumeTask)
+	handleAPI(r, "POST", "/datasets/{dataset}/tasks/{task}:suspend", []string{"document.write"}, doc.SuspendTask)
 	handleAPI(r, "POST", "/datasets/{dataset}/uploads:initUpload", []string{"document.write"}, doc.InitUpload)
 	handleAPI(r, "PUT", "/datasets/{dataset}/uploads/{upload_id}/parts/{part_number}", []string{"document.write"}, doc.UploadPart)
 	handleAPI(r, "POST", "/datasets/{dataset}/uploads/{upload_id}:complete", []string{"document.write"}, doc.CompleteUpload)
@@ -646,6 +659,8 @@ func registerAllRoutes(r *mux.Router) {
 
 	// ----- Task Center -----
 	handleAPI(r, "GET", "/task-center/tasks", []string{"qa.read"}, taskcenter.ListTasks)
+	handleAPI(r, "POST", "/task-center/github-star-prompt/claim", []string{"qa.read"}, taskcenter.ClaimGitHubStarPrompt)
+	handleAPI(r, "PUT", "/user/github-star-prompt/support", []string{}, taskcenter.SupportGitHubStarPrompt)
 	handleAPI(r, "GET", "/task-center/workbench", []string{"qa.read"}, taskcenter.Workbench)
 	handleAPI(r, "GET", "/task-center/workflow-events", []string{"qa.read"}, taskcenter.WorkflowChanges)
 	handleAPI(r, "GET", "/user/notification-preferences", []string{"qa.read"}, taskcenter.NotificationPreferences)
@@ -732,9 +747,15 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "POST", "/workflow-sessions/{session_id}:advance-step-and-hand-off", []string{"qa.write"}, workflowFacade.Command(http.HandlerFunc(workflow.TransitionWorkflowSession)))
 	handleAPI(r, "POST", "/workflow-sessions/{session_id}/hosted-attempts/{attempt_id}:begin", []string{"qa.write"}, hostedHandler.Begin)
 	handleAPI(r, "POST", "/workflow-sessions/{session_id}/hosted-attempts/{attempt_id}:resume", []string{"qa.write"}, hostedHandler.Resume)
+	handleAPI(r, "POST", "/workflow-sessions/{session_id}/hosted-attempts/{attempt_id}:heartbeat", []string{"qa.write"}, hostedHandler.Heartbeat)
 	handleAPI(r, "POST", "/workflow-sessions/{session_id}/hosted-attempts/{attempt_id}:submit", []string{"qa.write"}, hostedHandler.Submit)
 	handleAPI(r, "POST", "/workflow-sessions/{session_id}/hosted-attempts/{attempt_id}:complete", []string{"qa.write"}, hostedHandler.Complete)
+	handleAPI(r, "POST", "/workflow-sessions/{session_id}/hosted-attempts/{attempt_id}/preview", []string{"qa.write"}, hostedHandler.Preview)
 	handleAPI(r, "POST", "/workflow-sessions/{session_id}/hosted-attempts/{attempt_id}/artifacts", []string{"qa.write"}, hostedHandler.Publish)
+	handleAPI(r, "POST", "/workflow-sessions/{session_id}/hosted-attempts/{attempt_id}/tools:list", []string{"qa.read"}, workflowToolHandler.List)
+	handleAPI(r, "POST", "/workflow-sessions/{session_id}/hosted-attempts/{attempt_id}/workers:grant", []string{"qa.write"}, workflowToolHandler.GrantWorker)
+	handleAPI(r, "POST", "/internal/workflow-attempts/{attempt_id}/paper-data", nil, paperToolAdapter.Data)
+	handleAPI(r, "POST", "/workflow-sessions/{session_id}/hosted-attempts/{attempt_id}/tools:call", []string{"qa.write"}, workflowToolHandler.Call)
 	handleAPI(r, "POST", "/workflow-sessions/{session_id}/input-bindings", []string{"qa.write"}, workflowFacade.BindInput)
 	handleAPI(r, "GET", "/workflow-sessions/{session_id}/input-bindings", []string{"qa.read"}, workflowFacade.ListInputs)
 	handleAPI(r, "GET", "/workflow-sessions/{session_id}/artifacts", []string{"qa.read"}, workflowFacade.ListArtifacts)
@@ -808,6 +829,12 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "POST", "/internal/workflow-sessions/{session_id}:transition", nil, workflow.TransitionWorkflowSession)
 	handleAPI(r, "GET", "/internal/workflow-transition-commands/{command_id}", nil, workflow.GetTransitionCommand)
 	handleAPI(r, "PATCH", "/workflow-sessions/{session_id}/slots/{slot_id}", []string{"qa.write"}, workflowFacade.SessionAccess(http.HandlerFunc(workflow.PatchSessionSlot)))
+	handleAPI(r, "GET", "/workflow-sessions/{session_id}/artifact-edit", []string{"qa.read"}, workflowFacade.SessionAccess(http.HandlerFunc(workflow.GetArtifactEditContext)))
+	handleAPI(r, "POST", "/workflow-sessions/{session_id}/artifact-edit", []string{"qa.write"}, workflowFacade.SessionAccess(http.HandlerFunc(workflow.CommitArtifactEdit)))
+	handleAPI(r, "GET", "/workflow-sessions/{session_id}/artifact-actions/{job_id}", []string{"qa.read"}, workflowFacade.SessionAccess(http.HandlerFunc(workflow.GetArtifactActionJob)))
+	handleAPI(r, "POST", "/workflow-sessions/{session_id}/artifact-actions/{job_id}", []string{"qa.write"}, workflowFacade.SessionAccess(http.HandlerFunc(workflow.SubmitArtifactActionJob)))
+	handleAPI(r, "POST", "/workflow-sessions/{session_id}/model-generations/{job_id}:claim", []string{"qa.write"}, workflowFacade.SessionAccess(http.HandlerFunc(workflow.ClaimModelGeneration)))
+	handleAPI(r, "POST", "/workflow-sessions/{session_id}/model-generations/{job_id}:respond", []string{"qa.write"}, workflowFacade.SessionAccess(http.HandlerFunc(workflow.SubmitModelGeneration)))
 	handleAPI(r, "POST", "/workflow-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}:action-preview", []string{"qa.write"}, workflowFacade.SessionAccess(http.HandlerFunc(workflow.PreviewArtifactAction)))
 	handleAPI(r, "POST", "/workflow-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}:action-execute", []string{"qa.write"}, workflowFacade.SessionAccess(http.HandlerFunc(workflow.ExecuteArtifactAction)))
 	handleAPI(r, "POST", "/workflow-sessions/{session_id}:sync-search-config", []string{"qa.write"}, workflowFacade.SessionAccess(http.HandlerFunc(workflow.SyncSessionSearchConfig)))

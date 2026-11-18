@@ -6,7 +6,6 @@ import Workbench from './Workbench';
 import TaskList from './TaskList';
 import ScheduleList from './ScheduleList';
 import './index.scss';
-import { useWorkflowChanges } from './useWorkflowChanges';
 
 type TaskCenterTab = 'workbench' | 'tasks' | 'schedules';
 
@@ -19,7 +18,6 @@ interface TaskCenterPageProps {
 }
 
 export default function TaskCenterPage({ embedded = false }: TaskCenterPageProps) {
-  useWorkflowChanges();
   const { t } = useTranslation();
   const [searchParams, setSearchParams] = useSearchParams();
   const requestedTab = parseTaskCenterTab(searchParams.get('tab'));

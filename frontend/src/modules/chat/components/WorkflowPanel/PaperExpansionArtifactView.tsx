@@ -1,3 +1,4 @@
+import ExternalLink from '@/components/ExternalLink';
 import { useMemo, type ReactNode } from 'react';
 import { CheckOutlined, DownOutlined, ReadOutlined, RightOutlined } from '@ant-design/icons';
 import { Tag, Typography } from 'antd';
@@ -74,7 +75,7 @@ export function PaperDetail({ item, analysis, reading }: { item: WorkflowPaper; 
   const visible = fields.filter(field => visiblePaperAnalysis(item[field]));
   const sourceUrl = item.paper.paper_url || item.paper.pdf_url;
   return <div className='paper-workflow-detail'>
-    {sourceUrl && /^https?:\/\//i.test(sourceUrl) && <p><a href={sourceUrl} target='_blank' rel='noopener noreferrer'>{t('paperTasks.workflowResult.openPaperSource')}</a></p>}
+    {sourceUrl && /^https?:\/\//i.test(sourceUrl) && <p><ExternalLink href={sourceUrl} target='_blank' rel='noopener noreferrer'>{t('paperTasks.workflowResult.openPaperSource')}</ExternalLink></p>}
     {(item.paper.published_at || item.paper.source_version_date) && <dl className='paper-workflow-dates'>
       {([['published_at', 'firstPublishedAt'], ['source_version_date', 'sourceVersionDate']] as const).map(([field, label]) => {
         const value = item.paper[field];

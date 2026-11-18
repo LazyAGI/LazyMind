@@ -26,12 +26,13 @@ def configuration() -> int:
     return timeout
 
 
-def execute_plot(payload: dict) -> dict:
+def execute_plot(payload: dict, *, cancelled=None) -> dict:
     timeout = configuration()
     raw = json.dumps(payload, ensure_ascii=False, allow_nan=False).encode()
     if len(raw) > 40 * 1024 * 1024:
         raise ValueError('绘图输入超过 40 MiB')
     try:
-        return container.execute(payload, Path(__file__).with_name('worker.py'), timeout, label='绘图')
+        return container.execute(payload, Path(__file__).with_name('worker.py'), timeout,
+                                 label='绘图', **({'cancelled': cancelled} if cancelled is not None else {}))
     except container.ContainerEnvironmentError as exc:
         raise PlotEnvironmentError(str(exc)) from exc

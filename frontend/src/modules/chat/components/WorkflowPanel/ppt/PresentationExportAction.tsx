@@ -1,7 +1,6 @@
 import { embedSlideAssetsForExport } from './slideAssets';
-import { useCallback, useState } from 'react';
-import { Modal } from 'antd';
-import { useNavigate } from 'react-router-dom';
+import { useCallback, useEffect, useState } from 'react';
+import { Checkbox, Modal } from 'antd';
 import { useTranslation } from 'react-i18next';
 import { axiosInstance, BASE_URL } from '@/components/request';
 import type {
@@ -12,28 +11,13 @@ import type {
 } from '@/modules/chat/store/workflowPanel';
 import { resolveCoreAssetUrl, resolveMarkdownImageUrlAsync, isExpiredSignedUrl } from '@/modules/knowledge/utils/imageUrl';
 import {
+  declaredSlideFontFamilies,
   extractHtmlFromArtifact,
   exportHtmlSlidesAsRasterPdf,
   exportHtmlSlidesAsRasterPptx,
 } from './exportHtmlToPptx';
 
 type PresentationExportMode = 'editable' | 'raster' | 'pdf';
-
-interface ExporterDependency {
-  id: string;
-  settings_url?: string;
-}
-
-interface ExporterFormatCapability {
-  id: string;
-  available: boolean;
-  dependency?: ExporterDependency;
-}
-
-interface ExporterCapabilities {
-  provider_id: string;
-  formats: ExporterFormatCapability[];
-}
 
 function getTabSlotRevisions(
   session: WorkflowSession,
@@ -57,19 +41,42 @@ function findSlotRevision(
   slotId: string,
   sortOrder: number,
 ): SlotRevision | undefined {
-  return getTabSlotRevisions(session, tab, slotId).find(
-    (slot) => slot.sort_order === sortOrder,
-  );
+  const revisions = getTabSlotRevisions(session, tab, slotId);
+  return revisions.find(slot => slot.selected && slot.sort_order === sortOrder)
+    ?? revisions.find(slot => slot.sort_order === sortOrder);
 }
 
-async function loadHtmlArtifact(raw: unknown): Promise<string> {
-  const inline = extractHtmlFromArtifact(raw);
-  if (inline) return inline;
+// Prefer the selected native delivery when it represents the complete visible
+// deck. Re-converting its HTML loses native charts and can require another service.
+export function selectedNativePresentation(action: WorkflowTabAction, tab: TabDef, session: WorkflowSession, rows: number[]): SlotRevision | undefined {
+  const pageSlots = getTabSlotRevisions(session, tab, action.inputs.pages).filter(slot => slot.selected);
+  if (pageSlots.length !== rows.length || pageSlots.some(slot => !rows.includes(slot.sort_order ?? -1))) return undefined;
+  const declared = action.inputs.native_file ? [action.inputs.native_file] : tab.slots.map(slot => slot.id);
+  const candidates = (session.slots ?? []).filter(slot => {
+    const value = slot.artifact_value;
+    const filename = String(value?.filename ?? value?.name ?? value?.path ?? value?.url ?? '').split('?')[0];
+    return slot.selected && declared.includes(slot.slot) && slot.content_type === 'file' && /\.pptx$/i.test(filename);
+  });
+  if (candidates.length !== 1) return undefined;
+  const native = candidates[0];
+  const inputs = [...pageSlots, ...getTabSlotRevisions(session, tab, action.inputs.notes ?? '').filter(slot => slot.selected)];
+  if (inputs.some(slot => (slot.draft_version ?? 1) > 1 || (!(native.producer_attempt_id && slot.producer_attempt_id === native.producer_attempt_id) && Date.parse(slot.created_at) > Date.parse(native.created_at)))) return undefined;
+  return native;
+}
+
+async function loadExportText(raw: unknown): Promise<string> {
+  if (typeof raw === 'string') return raw;
   if (!raw || typeof raw !== 'object') return '';
   const value = raw as Record<string, unknown>;
   if (typeof value.text === 'string') return value.text;
+  // Completed edits from older Connectors uploaded text files in the same
+  // envelope as binary artifacts. Decode their bytes, not their metadata.
+  if (value.storage === 'inline_base64' && typeof value.content_base64 === 'string') {
+    const bytes = Uint8Array.from(atob(value.content_base64), char => char.charCodeAt(0));
+    return new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+  }
   const path = String(value.path ?? value.url ?? '').trim();
-  if (!path) return '';
+  if (!path) return artifactText(raw);
   const direct = value.url ? resolveCoreAssetUrl(String(value.url)) : '';
   const url = direct && !isExpiredSignedUrl(direct)
     ? direct
@@ -77,6 +84,19 @@ async function loadHtmlArtifact(raw: unknown): Promise<string> {
   const response = await fetch(url);
   if (!response.ok) throw Object.assign(new Error("Failed to load export input"), { response });
   return response.text();
+}
+
+class ExportPageError extends Error {
+  constructor(readonly page: number, readonly cause?: unknown) {
+    super('Export page unavailable');
+  }
+}
+
+function isApplicationShell(html: string): boolean {
+  const document = new DOMParser().parseFromString(html, 'text/html');
+  const root = document.querySelector('body > #root, body > #app');
+  return Boolean(root && !root.children.length && !root.textContent?.trim()
+    && document.querySelector('script[type="module"][src]'));
 }
 
 function artifactText(raw: unknown): string {
@@ -95,17 +115,24 @@ async function collectPresentationPages(
   const pageSlotId = action.inputs.pages;
   if (!pageSlotId) return [];
   const notesSlotId = action.inputs.notes;
-  const pages = await Promise.all(rows.map(async (sortOrder) => {
+  return Promise.all(rows.map(async (sortOrder, index) => {
     const pageRevision = findSlotRevision(session, tab, pageSlotId, sortOrder);
     const notesRevision = notesSlotId
       ? findSlotRevision(session, tab, notesSlotId, sortOrder)
       : undefined;
-    return {
-      html: await loadHtmlArtifact(pageRevision?.artifact_value),
-      notes: artifactText(notesRevision?.artifact_value),
-    };
+    try {
+      const text = await loadExportText(pageRevision?.artifact_value);
+      const html = extractHtmlFromArtifact(text);
+      // Never silently drop a missing/invalid page or export an SPA fallback
+      // returned with HTTP 200 in place of the requested artifact.
+      if (!html || isApplicationShell(html)) {
+        throw new ExportPageError(index + 1);
+      }
+      return { html, notes: await loadExportText(notesRevision?.artifact_value) };
+    } catch (error) {
+      throw error instanceof ExportPageError ? error : new ExportPageError(index + 1, error);
+    }
   }));
-  return pages.filter((page) => page.html.trim());
 }
 
 function downloadBlob(blob: Blob, filename: string): void {
@@ -152,29 +179,41 @@ export function PresentationExportAction({
   rows: number[];
 }) {
   const { t } = useTranslation();
-  const navigate = useNavigate();
   const [exporting, setExporting] = useState(false);
   const [exportError, setExportError] = useState<string | null>(null);
   const [choiceOpen, setChoiceOpen] = useState(false);
+  const [embedFonts, setEmbedFonts] = useState(true);
+  const [fontFamilies, setFontFamilies] = useState<string[]>([]);
   const formatIds = action.formats?.length
     ? action.formats.filter((format) => FORMAT_MODES[format])
     : ['raster-pptx', 'pdf', 'editable-pptx'];
+  const editableOffered = formatIds.includes('editable-pptx');
 
-  const showDependencyPrompt = useCallback((dependency?: ExporterDependency) => {
-    Modal.confirm({
-      title: t('chat.editablePptRequiredTitle'),
-      content: t('chat.editablePptRequiredDesc'),
-      okText: t('chat.configureEditablePpt'),
-      cancelText: t('common.close'),
-      onOk: () => navigate(dependency?.settings_url || '/settings?section=system_tools#editable-ppt-dependency'),
-    });
-  }, [navigate, t]);
+  useEffect(() => {
+    if (!choiceOpen || !editableOffered) return;
+    let current = true;
+    void collectPresentationPages(action, tab, session, rows)
+      .then(pages => declaredSlideFontFamilies(pages.map(page => page.html)))
+      .then(families => { if (current) setFontFamilies(families); })
+      .catch(() => { if (current) setFontFamilies([]); });
+    return () => { current = false; };
+  }, [action, choiceOpen, editableOffered, rows, session, tab]);
 
   const runExport = useCallback(async (mode: PresentationExportMode) => {
     if (exporting) return;
     setExporting(true);
     setExportError(null);
     try {
+      const native = mode === 'editable' ? selectedNativePresentation(action, tab, session, rows) : undefined;
+      if (native) {
+        const value = native.artifact_value as Record<string, unknown>;
+        const direct = value.url ? resolveCoreAssetUrl(String(value.url)) : '';
+        const url = direct && !isExpiredSignedUrl(direct) ? direct : await resolveMarkdownImageUrlAsync(String(value.path ?? value.url ?? ''));
+        const response = await fetch(url);
+        if (!response.ok) throw new Error(t('chat.workflowExportFailed'));
+        downloadBlob(await response.blob(), String(value.filename ?? value.name ?? 'presentation.pptx'));
+        return;
+      }
       const pages = await collectPresentationPages(action, tab, session, rows);
       if (!pages.length) throw new Error(t('chat.workflowExportNoHtml'));
       const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
@@ -185,32 +224,25 @@ export function PresentationExportAction({
       } else if (mode === 'raster') {
         await exportHtmlSlidesAsRasterPptx(slideInputs, filename, { sessionId: session.session_id });
       } else {
-        const capabilitiesResponse = await axiosInstance.get(
-          `${BASE_URL}/api/core/exporters/${encodeURIComponent(action.provider)}:capabilities`,
-        );
-        const capabilities = ((capabilitiesResponse.data as { data?: ExporterCapabilities })?.data
-          ?? capabilitiesResponse.data) as ExporterCapabilities;
-        const editable = capabilities.formats?.find((format) => format.id === 'editable-pptx');
-        if (!editable?.available) {
-          showDependencyPrompt(editable?.dependency);
-          throw new Error(t('chat.editablePptRequiredDesc'));
-        }
         const exportPages = await Promise.all(pages.map(async page => ({
-          ...page, html: await embedSlideAssetsForExport(page.html),
+          ...page, html: await embedSlideAssetsForExport(page.html, { embedFonts: false }),
         })));
         const response = await axiosInstance.post(
           `${BASE_URL}/api/core/exporters/${encodeURIComponent(action.provider)}:export`,
-          { format: 'editable-pptx', pages: exportPages, filename },
+          { format: 'editable-pptx', pages: exportPages, filename, embed_fonts: embedFonts },
           { responseType: 'blob', timeout: 20 * 60 * 1000 },
         );
         downloadBlob(response.data as Blob, filename);
       }
     } catch (error) {
-      setExportError(await resolveExportError(error, t('chat.workflowExportFailed')));
+      setExportError(error instanceof ExportPageError
+        ? t('chat.workflowExportPageFailed', { page: error.page }) + ' ' +
+          await resolveExportError(error.cause, t('chat.workflowExportInvalidHtml'))
+        : await resolveExportError(error, t('chat.workflowExportFailed')));
     } finally {
       setExporting(false);
     }
-  }, [action, exporting, rows, session, showDependencyPrompt, t, tab]);
+  }, [action, embedFonts, exporting, rows, session, t, tab]);
 
   return (
     <>
@@ -219,7 +251,11 @@ export function PresentationExportAction({
           type='button'
           className='composite-toolbar__export'
           disabled={exporting}
-          onClick={() => setChoiceOpen(true)}
+          onClick={() => {
+            setEmbedFonts(true);
+            setFontFamilies([]);
+            setChoiceOpen(true);
+          }}
         >
           {exporting ? t('chat.workflowExportingPptx') : (action.label || t('chat.workflowExportPptx'))}
         </button>
@@ -233,6 +269,17 @@ export function PresentationExportAction({
       >
         <div className='composite-toolbar__export-mode'>
           <p>{t('chat.workflowExportSelectModeDesc')}</p>
+          {editableOffered && (
+            <>
+              <Checkbox checked={embedFonts} onChange={event => setEmbedFonts(event.target.checked)}>
+                {t('chat.workflowExportEmbedFonts')}
+              </Checkbox>
+              {fontFamilies.length > 0 && (
+                <p>{t('chat.workflowExportDeclaredFonts', { fonts: fontFamilies.join(', ') })}</p>
+              )}
+              <p>{t('chat.workflowExportUnembeddedFontsHelp')}</p>
+            </>
+          )}
           <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 12 }}>
             {formatIds.map((formatId) => {
               const mode = FORMAT_MODES[formatId];

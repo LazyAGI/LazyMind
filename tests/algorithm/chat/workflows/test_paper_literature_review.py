@@ -25,7 +25,12 @@ def paper():
 
 
 @pytest.fixture
-def selection(monkeypatch):
+def selection(monkeypatch, tmp_path):
+    # Selection tests fake retrieval at the toolkit boundary; use an available static role.
+    runtime = tmp_path / 'review-models.yaml'
+    runtime.write_text('embed_main: {source: openai, type: embed, name: test-embed}\n')
+    monkeypatch.setenv('LAZYMIND_MODEL_CONFIG_PATH', str(runtime))
+
     def use(*plans):
         values = iter(plans)
         calls = []
@@ -35,6 +40,11 @@ def selection(monkeypatch):
             value = next(values)
             if isinstance(value, Exception):
                 raise value
+            if value.get('external_query'):
+                value.setdefault('arxiv_terms', ['related research'])
+            if 'selected' in schema.model_fields and 'material_roles' in value:
+                value = {'selected': [key for key, role in value['material_roles'].items() if role == 'paper']}
+                value['selected'] = value['selected'][:schema.model_json_schema()['properties']['selected']['maxItems']]
             return schema.model_validate(value)
 
         monkeypatch.setattr(review_materials, 'AutoModel', lambda **_: None)
@@ -59,12 +69,12 @@ def test_scope_selects_requested_papers_and_keeps_background(paper, selection):
 
 def test_singleton_query_count_arrays_are_normalized_before_retrieval(paper, sciverse, selection):
     selection({'material_roles': {'M1': 'paper'}, 'queries': {'unused library query': ['12']},
-               'external_queries': {'related': ['10']}},
+               'external_query': 'related'},
               {'material_roles': {'M1': 'paper'}, 'queries': {}})
     result = review_materials.prepare({'papers': [paper]}, [])
     assert [p['title'] for p in result] == ['Test paper', 'Related research']
     sciverse.meta_search.assert_called_once_with(
-        query='related', page_size=30, include_content=False, year_from=None, year_to=None)
+        query='related', page_size=20, include_content=False, year_from=None, year_to=None)
 
 
 def test_imported_study_background_keeps_its_role_during_material_reselection(paper, selection):
@@ -77,18 +87,9 @@ def test_imported_study_background_keeps_its_role_during_material_reselection(pa
 
 
 @pytest.mark.parametrize('count', [[], ['12', '15'], ['not a count'], ['0'], ['201'], [['12']]])
-@pytest.mark.parametrize('field', ['queries', 'external_queries'])
-def test_query_count_normalization_still_rejects_invalid_or_ambiguous_values(count, field):
+def test_query_count_normalization_still_rejects_invalid_or_ambiguous_values(count):
     with pytest.raises(ValueError):
-        review_materials.SearchPlan.model_validate({'queries': {}, field: {'related': count}})
-
-
-def test_fixed_scope_preserves_exact_selection_without_model_or_kb(paper, monkeypatch):
-    monkeypatch.setattr(review_materials, '_select', lambda *_: pytest.fail('frozen papers were reselected'))
-    result = review_materials.prepare({'papers': [paper]}, ['other-library'], fixed_scope=True)
-    assert result == [paper]
-    result[0]['user_annotations']['focus'] = 'changed'
-    assert paper['user_annotations']['focus'] == 'composition'
+        review_materials.SearchPlan.model_validate({'queries': {'related': count}})
 
 
 def test_scope_cannot_add_unavailable_material(paper, selection):
@@ -166,20 +167,36 @@ def sciverse(monkeypatch):
         'extra': {'content_read': {'content_type': 'document', 'fallback': False, 'more': False}},
     }
     monkeypatch.setattr(review_materials, 'sciverse_provider', lambda: provider)
+    monkeypatch.setattr(review_materials, '_api_keys', lambda: {'sciverse': 'test'})
+
+    def fetch(source, query, limit, key, year_from=None, year_to=None):
+        if source != 'sciverse':
+            return []
+        result = provider.meta_search(query=query, page_size=limit, include_content=False,
+                                      year_from=year_from, year_to=year_to)
+        papers = []
+        for item in result['items'][:limit]:
+            extra = item.get('extra') or {}
+            papers.append(review_materials.search._paper(
+                'sciverse', item['title'], item.get('url'), item.get('snippet'),
+                doc_id=extra.get('doc_id'), doi=extra.get('doi'), year=extra.get('year')))
+        return papers
+
+    monkeypatch.setattr(review_materials.search, '_fetch', fetch)
     return provider
 
 
 def test_topic_only_searches_real_papers_with_explicit_years(sciverse, selection):
-    calls = selection({'material_roles': {}, 'queries': {}, 'external_queries': {'learning methods': 5},
+    calls = selection({'material_roles': {}, 'queries': {}, 'external_query': 'learning methods',
                        'year_from': 2024, 'year_to': 2026},
                       {'material_roles': {'M1': 'paper'}, 'queries': {}})
     result = review_materials.prepare({'topic': 'Learning', 'request': 'Find five papers from 2024 to 2026'}, [])
     sciverse.meta_search.assert_called_once_with(
-        query='learning methods', page_size=15, include_content=False, year_from=2024, year_to=2026)
+        query='learning methods', page_size=20, include_content=False, year_from=2024, year_to=2026)
     assert result[0]['text'] == 'Complete Sciverse paper'
     assert result[0]['doi'] == '10.1/related' and result[0]['year'] == 2025
     assert result[0]['reading']['truncated'] is False
-    assert calls[1]['plan_search'] is False
+    assert calls[1]['candidates'][0]['abstract_or_snippet'] == 'Retrieved abstract'
 
 
 @pytest.mark.parametrize('bounds,requested,expected', [
@@ -191,7 +208,7 @@ def test_review_count_limits_retrieval_and_fulltext_reads(
         {'title': f'Related paper {index}', 'snippet': 'Actual abstract', 'extra': {'doc_id': str(index)}}
         for index in range(45)
     ]
-    calls = selection({'material_roles': {'M1': 'paper'}, 'queries': {}, 'external_queries': {'related': 50},
+    calls = selection({'material_roles': {'M1': 'paper'}, 'queries': {}, 'external_query': 'related',
                        'requested_paper_count': requested},
                       {'material_roles': {f'M{index + 1}': 'paper' for index in range(len(hits))}, 'queries': {}})
     # A provider returning more than requested must not bypass the reading limit.
@@ -199,23 +216,25 @@ def test_review_count_limits_retrieval_and_fulltext_reads(
     with review_materials.config.temp('paper_review_min_paper_count', bounds[0]), \
             review_materials.config.temp('paper_review_max_paper_count', bounds[1]):
         result = review_materials.prepare({'papers': [paper], 'request': 'Use related papers'}, [])
-    assert len(result) == expected and result[0] == paper
-    assert sciverse.meta_search.call_args.kwargs['page_size'] == (expected - 1) * 3
-    assert sciverse.get_content.call_count == expected - 1
-    assert calls[1]['paper_count_range'] == {'min': requested or bounds[0], 'max': expected}
+    assert len(result) == min(expected, 21)
+    assert {key: value for key, value in result[0].items() if key != 'retrieval_warnings'} == paper
+    assert sciverse.meta_search.call_args.kwargs['page_size'] == 20
+    assert sciverse.get_content.call_count == min(expected - 1, 20)
+    assert len(calls[1]['candidates']) == 20
 
 
 @pytest.mark.parametrize('count', [12, 14, 17, 20])
 def test_default_range_accepts_selected_coverage_without_filling_the_maximum(paper, sciverse, selection, count):
     hits = [{'title': f'Related paper {i}', 'snippet': 'Relevant evidence', 'extra': {'doc_id': str(i)}}
             for i in range(30)]
-    calls = selection({'material_roles': {'M1': 'paper'}, 'queries': {}, 'external_queries': {'related': 50}},
+    calls = selection({'material_roles': {'M1': 'paper'}, 'queries': {}, 'external_query': 'related'},
                       {'material_roles': {f'M{i + 1}': 'paper' if i < count - 1 else 'exclude'
                                           for i in range(30)}, 'queries': {}})
     sciverse.meta_search.return_value = {'items': hits, 'total_pages': 3}
     result = review_materials.prepare({'papers': [paper]}, [])
     assert review_materials._paper_count(result) == count
-    assert calls[0]['paper_count_range'] == calls[1]['paper_count_range'] == {'min': 12, 'max': 20}
+    assert calls[0]['paper_count_range'] == {'min': 12, 'max': 20}
+    assert len(calls[1]['candidates']) == 20
     assert sciverse.meta_search.call_count == 1
     assert sciverse.get_content.call_count == count - 1
 
@@ -223,7 +242,7 @@ def test_default_range_accepts_selected_coverage_without_filling_the_maximum(pap
 def test_existing_papers_within_range_do_not_trigger_filling_to_maximum(sciverse, selection):
     papers = [{'id': f'P{i}', 'title': f'Supplied {i}', 'text': 'Paper content'} for i in range(14)]
     selection({'material_roles': {f'M{i + 1}': 'paper' for i in range(14)},
-               'queries': {}, 'external_queries': {'related': 20}})
+               'queries': {}, 'external_query': 'related'})
     assert review_materials.prepare({'papers': papers}, []) == papers
     sciverse.meta_search.assert_not_called()
 
@@ -239,21 +258,21 @@ def test_invalid_default_range_is_rejected_before_model_calls(selection):
 def test_all_queries_and_sources_share_the_remaining_budget(paper, sciverse, selection, monkeypatch):
     from lazymind.chat.engine.tools.lazy_kb import KBToolkit
     selection({'material_roles': {'M1': 'paper'}, 'queries': {'methods': 50, 'applications': 50},
-               'external_queries': {'related': 50}},
+               'external_query': 'related'},
               {'material_roles': {'M1': 'paper'}, 'queries': {}})
     search = Mock(return_value={'items': []})
     monkeypatch.setattr(KBToolkit, 'kb_search', search)
     result = review_materials.prepare({'papers': [paper]}, ['library'])
     counts = [call.kwargs['k_max'] for call in search.call_args_list]
-    counts.append(sciverse.meta_search.call_args.kwargs['page_size'])
     assert all(count > 0 for count in counts) and sum(counts) == 57
+    assert sciverse.meta_search.call_args.kwargs['page_size'] == 20
     assert len(result) == 2
 
 
 def test_supplied_papers_above_default_are_preserved_without_more_retrieval(sciverse, selection):
     papers = [{'id': f'P{index}', 'title': f'Supplied {index}', 'text': 'Source text'} for index in range(25)]
     selection({'material_roles': {f'M{index + 1}': 'paper' for index in range(len(papers))},
-               'queries': {}, 'external_queries': {'related': 50}})
+               'queries': {}, 'external_query': 'related'})
     assert review_materials.prepare({'papers': papers}, []) == papers
     sciverse.meta_search.assert_not_called()
     sciverse.get_content.assert_not_called()
@@ -262,17 +281,18 @@ def test_supplied_papers_above_default_are_preserved_without_more_retrieval(sciv
 def test_rerun_limits_old_retrieved_papers_but_keeps_upload(paper, sciverse, selection):
     papers = [paper, *[
         {'id': f'R{index}', 'title': f'Retrieved {index}', 'text': 'Source text',
-         'source': 'sciverse' if index % 2 else 'knowledge_base'} for index in range(40)
+         'source': ('arxiv', 'openalex', 'google_scholar', 'sciverse', 'knowledge_base')[index % 5]}
+        for index in range(40)
     ]]
     selection({'material_roles': {f'M{index + 1}': 'paper' for index in range(len(papers))},
-               'queries': {}, 'external_queries': {'related': 50}})
+               'queries': {}, 'external_query': 'related'})
     result = review_materials.prepare({'papers': papers}, [])
     assert len(result) == 20 and result[0] == paper
     assert len(papers) == 41
     sciverse.meta_search.assert_not_called()
 
 
-def test_candidate_screening_shortfall_fetches_next_page_within_range(paper, sciverse, selection):
+def test_external_search_uses_one_bounded_batch_after_screening(paper, sciverse, selection):
     second = {'id': 'P2', 'title': 'Second uploaded paper', 'text': 'Full source'}
     brief = {'id': 'BRIEF', 'title': 'System brief', 'text': 'Background constraints'}
 
@@ -281,24 +301,21 @@ def test_candidate_screening_shortfall_fetches_next_page_within_range(paper, sci
                 for index in range(start, start + 12)]
     calls = selection(
         {'material_roles': {'M1': 'background', 'M2': 'paper', 'M3': 'paper'},
-         'queries': {}, 'external_queries': {'research agents': 50}},
+         'queries': {}, 'external_query': 'research agents'},
         {'material_roles': {f'M{index + 1}': 'paper' if index < 4 else 'exclude' for index in range(12)},
          'queries': {}},
-        {'material_roles': {f'M{index + 1}': 'paper' for index in range(12)}, 'queries': {}},
     )
-    sciverse.meta_search.side_effect = [
-        {'items': hits(0), 'total_pages': 2}, {'items': hits(12), 'total_pages': 2},
-    ]
+    sciverse.meta_search.return_value = {'items': hits(0)}
     result = review_materials.prepare({'papers': [brief, paper, second]}, [])
-    assert review_materials._paper_count(result) == 18
-    assert len(result) == 19 and result[0]['review_role'] == 'background'
-    assert sciverse.get_content.call_count == 16
-    assert [call.kwargs.get('page', 1) for call in sciverse.meta_search.call_args_list] == [1, 2]
-    assert calls[2]['paper_count_range'] == {'min': 12, 'max': 20} and len(calls[2]['retained_papers']) == 7
+    assert review_materials._paper_count(result) == 6
+    assert len(result) == 7 and result[0]['review_role'] == 'background'
+    assert sciverse.get_content.call_count == 4
+    assert [call.kwargs.get('page', 1) for call in sciverse.meta_search.call_args_list] == [1]
+    assert len(calls[1]['candidates']) == 12
 
 
 def test_exhausted_results_disclose_shortfall_without_padding(paper, sciverse, selection):
-    selection({'material_roles': {'M1': 'paper'}, 'queries': {}, 'external_queries': {'related': 5}},
+    selection({'material_roles': {'M1': 'paper'}, 'queries': {}, 'external_query': 'related'},
               {'material_roles': {'M1': 'paper'}, 'queries': {}})
     result = review_materials.prepare({'papers': [paper]}, [])
     assert review_materials._paper_count(result) == 2
@@ -306,40 +323,20 @@ def test_exhausted_results_disclose_shortfall_without_padding(paper, sciverse, s
     assert sciverse.meta_search.call_count == 1
 
 
-def test_repeated_pages_are_bounded_and_do_not_reread_papers(paper, sciverse, selection):
-    selection({'material_roles': {'M1': 'paper'}, 'queries': {}, 'external_queries': {'related': 5}},
-              {'material_roles': {'M1': 'paper'}, 'queries': {}})
-    sciverse.meta_search.return_value['total_pages'] = 10
-    result = review_materials.prepare({'papers': [paper]}, [])
-    assert review_materials._paper_count(result) == 2
-    assert sciverse.meta_search.call_count == 3
-    sciverse.get_content.assert_called_once()
-
-
 def test_only_supplied_scope_never_calls_retrieval(paper, sciverse, selection, monkeypatch):
     from lazymind.chat.engine.tools.lazy_kb import KBToolkit
     search = Mock(side_effect=AssertionError('Excluded knowledge base was queried'))
     monkeypatch.setattr(KBToolkit, 'kb_search', search)
-    selection({'material_roles': {'M1': 'paper'}, 'queries': {}, 'external_queries': {}})
+    selection({'material_roles': {'M1': 'paper'}, 'queries': {}, 'external_query': ''})
     assert review_materials.prepare({'papers': [paper], 'request': 'Only use this attachment'}, ['library']) == [paper]
     search.assert_not_called()
     sciverse.meta_search.assert_not_called()
 
 
-def test_explicit_expansion_can_extend_a_frozen_selection(paper, sciverse, selection):
-    calls = selection({'material_roles': {'M1': 'paper'}, 'queries': {}, 'external_queries': {'related': 2}},
-                      {'material_roles': {'M1': 'paper'}, 'queries': {}})
-    result = review_materials.prepare(
-        {'papers': [paper], 'request': 'Add related Sciverse papers'}, [], fixed_scope=True)
-    assert calls[0]['fixed_scope'] is True
-    assert result[0]['id'] == paper['id'] and len(result) == 2
-    assert sciverse.meta_search.call_count == 1
-
-
 def test_sciverse_duplicate_preserves_uploaded_identity_and_skips_read(paper, sciverse, selection):
     paper['doi'] = 'https://doi.org/10.1/RELATED'
     before = copy.deepcopy(paper)
-    selection({'material_roles': {'M1': 'paper'}, 'queries': {}, 'external_queries': {'related': 2}})
+    selection({'material_roles': {'M1': 'paper'}, 'queries': {}, 'external_query': 'related'})
     result = review_materials.prepare({'papers': [paper]}, [])
     assert [{key: value for key, value in item.items() if key != 'retrieval_warnings'} for item in result] == [before]
     assert paper == before
@@ -349,7 +346,8 @@ def test_sciverse_duplicate_preserves_uploaded_identity_and_skips_read(paper, sc
 def test_kb_and_sciverse_expand_together_without_querying_other_libraries(paper, sciverse, selection, monkeypatch):
     from lazymind.chat.engine.tools.lazy_kb import KBToolkit
     selection({'material_roles': {'M1': 'paper'}, 'queries': {'learning': 3},
-               'external_queries': {'related': 4}},
+               'external_query': 'related'},
+              {'material_roles': {'M1': 'paper'}, 'queries': {}},
               {'material_roles': {'M1': 'paper', 'M2': 'paper'}, 'queries': {}})
     search = Mock(return_value={'items': [
         {'kb_id': 'library', 'docid': 'kb-new', 'file_name': 'KB paper', 'text': 'KB excerpt'},
@@ -366,11 +364,11 @@ def test_kb_and_sciverse_expand_together_without_querying_other_libraries(paper,
 
 
 def test_search_failure_keeps_supplied_papers_and_discloses_it(paper, sciverse, selection):
-    selection({'material_roles': {'M1': 'paper'}, 'queries': {}, 'external_queries': {'related': 3}})
+    selection({'material_roles': {'M1': 'paper'}, 'queries': {}, 'external_query': 'related'})
     sciverse.meta_search.side_effect = ReadTimeout('service unavailable')
     result = review_materials.prepare({'papers': [paper]}, [])
     assert result[0]['id'] == paper['id'] and result[0]['text'] == paper['text']
-    assert 'Sciverse' in result[0]['retrieval_warnings'][0]
+    assert any('Sciverse' in message for message in result[0]['retrieval_warnings'])
     assert 'retrieval_warnings' not in paper
 
 
@@ -392,14 +390,14 @@ def test_kb_read_failure_keeps_actual_excerpt_and_other_sources(paper, selection
 
 
 def test_no_search_results_cannot_become_a_successful_review(sciverse, selection):
-    selection({'material_roles': {}, 'queries': {}, 'external_queries': {'nothing': 3}})
+    selection({'material_roles': {}, 'queries': {}, 'external_query': 'nothing'})
     sciverse.meta_search.return_value = {'items': []}
-    with pytest.raises(contracts.MissingMaterials, match='Sciverse.*未找到'):
+    with pytest.raises(contracts.MissingMaterials, match='未找到'):
         review_materials.prepare({'topic': 'Learning'}, [])
 
 
 def test_partial_content_is_not_replaced_with_a_later_fallback(sciverse, selection):
-    selection({'material_roles': {}, 'queries': {}, 'external_queries': {'related': 3}},
+    selection({'material_roles': {}, 'queries': {}, 'external_query': 'related'},
               {'material_roles': {'M1': 'paper'}, 'queries': {}})
     sciverse.get_content.side_effect = [
         {'content': 'Verified first page', 'extra': {'content_read': {
@@ -409,7 +407,7 @@ def test_partial_content_is_not_replaced_with_a_later_fallback(sciverse, selecti
     result = review_materials.prepare({'topic': 'Learning'}, [])
     assert result[0]['text'] == 'Verified first page'
     assert result[0]['reading']['truncated'] is True
-    assert '全文未完整取得' in result[0]['retrieval_warnings'][0]
+    assert any('全文未完整取得' in message for message in result[0]['retrieval_warnings'])
     assert [call.kwargs['offset'] for call in sciverse.get_content.call_args_list] == [0, 100]
 
 
@@ -548,11 +546,13 @@ def test_handoff_lookup_distinguishes_ordinary_chat_from_denied_access(monkeypat
 
 
 @pytest.mark.parametrize('resume', [False, True], ids=['first-entry', 'saved-pool'])
-def test_handoff_enters_f2_and_publishes_reusable_artifacts(handoff, tmp_path, monkeypatch, resume, selection):
+def test_handoff_enters_f2_and_publishes_reusable_artifacts(handoff, tmp_path, monkeypatch, resume):
     from lazymind.chat.engine.subagent.context import SubAgentContext
 
     monkeypatch.setattr(workflow, '_conversation_papers', lambda *_: pytest.fail('handoff read other attachments'))
-    plans = selection({'material_roles': {'M1': 'paper'}, 'queries': {}})
+    monkeypatch.setattr(review_materials, 'prepare',
+                        lambda *_, **__: pytest.fail('handoff entered material selection and retrieval'))
+    handoff[0]['input']['user_instruction'] = 'Search for more papers and compare them'
     received = []
 
     def review(inputs):
@@ -578,12 +578,11 @@ def test_handoff_enters_f2_and_publishes_reusable_artifacts(handoff, tmp_path, m
         task_id='handoff-review', conversation_id='test', agent_type='workflow_step',
         objective='Review selected papers', workspace_path=str(tmp_path), input_slots=[],
         output_slots=slots, db=None, emit=events.append,
-        params={'step_id': 'literature_review', 'user_input': 'Generate the review',
+        params={'step_id': 'literature_review', 'user_input': 'Search for more papers and generate the review',
                 'remote_inputs': bound, 'output_slot_types': dict.fromkeys(slots, 'file')},
     )
     assert workflow.run_paper_step()['status'] == 'completed'
     assert [paper['id'] for paper in received[0]['papers']] == ['global-paper']
-    assert plans[0]['fixed_scope'] is True
     saved = next(e for e in events if e['type'] == 'artifact' and e['slot'] == slots[0])
     pool = workflow._read_bound(saved['value']['path'])
     if resume:
@@ -678,7 +677,7 @@ def test_supplied_papers_are_read_synthesized_and_published_for_downstream(tmp_p
     ]}
     selection({'material_roles': {'M1': 'paper', 'M2': 'paper', 'M3': 'background', 'M4': 'paper', 'M5': 'paper'},
                'queries': {},
-               'external_queries': {'related': 3}},
+               'external_query': 'related'},
               {'material_roles': {'M1': 'paper'}, 'queries': {}})
 
     def share(*, stream):
@@ -753,3 +752,53 @@ def test_supplied_papers_are_read_synthesized_and_published_for_downstream(tmp_p
     assert downstream['papers'][1]['reading']['content_type'] == 'abstract'
     assert downstream['evidence'] == body
     assert json.loads(entry.read_text()) == inputs
+
+
+@pytest.mark.parametrize('supplied', [False, True])
+def test_review_with_model_without_provider_skips_unavailable_kb(monkeypatch, tmp_path, selection, supplied):
+    from lazymind.chat.engine.tools.lazy_kb import KBToolkit
+    from lazymind.model_config import inject_model_config
+
+    path = tmp_path / 'models.yaml'
+    path.write_text('embed_main: {source: dynamic, type: embed}\n')
+    monkeypatch.setenv('LAZYMIND_MODEL_CONFIG_PATH', str(path))
+    lazyllm.init_session()
+    inject_model_config({'embed_main': {'model': 'embedding-without-provider'}})
+    search = Mock(side_effect=AssertionError('unconfigured embedding reached retrieval'))
+    monkeypatch.setattr(KBToolkit, 'kb_search', search)
+    selection({'material_roles': {'M1': 'paper'} if supplied else {}, 'queries': {'related': 3}})
+    try:
+        if supplied:
+            result = review_materials.prepare({'papers': [copy.deepcopy(PAPER)]}, ['library'])
+            assert result[0]['text'] == PAPER['text']
+            assert any('文本向量模型' in warning for warning in result[0]['retrieval_warnings'])
+        else:
+            with pytest.raises(contracts.MissingMaterials, match='文本向量模型'):
+                review_materials.prepare({'papers': []}, ['library'])
+        search.assert_not_called()
+    finally:
+        lazyllm.globals.clear()
+
+
+@pytest.mark.parametrize('selected', [['M1', 'M1'], ['missing'], []])
+def test_ranking_rejects_duplicates_unknown_ids_and_missing_requested_papers(selection, selected):
+    selection({'selected': selected})
+    with pytest.raises(ValueError):
+        review_materials._rank_candidates({}, [PAPER], 1, exact_count=True)
+
+
+def test_workflow_deduplication_preserves_distinct_works_and_merged_aliases():
+    from lazymind.document_tools.paper.review.retrieval import unique_candidates
+    search = review_materials.search
+    distinct = search.fuse([{'papers': [
+        {'source': 'crossref', 'title': 'Survey', 'doi': '10.1000/one', 'authors': ['Alice Smith']},
+        {'source': 'openalex', 'title': 'Survey', 'doi': '10.1000/two', 'authors': ['Bob Jones']},
+    ]}])
+    assert len(unique_candidates([], distinct)) == 2
+    merged = search.fuse([{'papers': [
+        {'source': 'arxiv', 'title': 'Initial title', 'arxiv_id': '2401.12345',
+         'doi': '10.1000/shared', 'abstract': 'Short'},
+        {'source': 'crossref', 'title': 'Published title', 'doi': '10.1000/shared',
+         'abstract': 'Longer publisher abstract'},
+    ]}])
+    assert unique_candidates([{'title': 'Initial title.pdf', 'arxiv_id': '2401.12345'}], merged) == []

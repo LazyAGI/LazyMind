@@ -1,6 +1,7 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ConfigProvider } from "antd";
+import type { DesktopAgent, DesktopAgentIntegrationStatus } from "@/runtime/desktopBridge";
 
 import { createInstance } from "i18next";
 import zhCN from "@/i18n/locales/zh-CN";
@@ -23,9 +24,11 @@ const mocks = vi.hoisted(() => ({
   capabilities: vi.fn(),
   invocations: vi.fn(),
   setCapability: vi.fn(),
+  nodeDependencyStatus: vi.fn(),
 }));
 
 vi.mock("@/runtime/desktopBridge", () => ({
+  getExternalBrowserBridge: () => undefined,
   agentIntegrationStatuses: mocks.statuses,
   agentIntegrationAction: mocks.action,
   executorIntegrationPolicies: mocks.executorPolicies,
@@ -47,11 +50,15 @@ vi.mock("./externalCapabilitiesApi", () => ({
   setExternalCapabilityGrant: mocks.setCapability,
 }));
 
+vi.mock("@/modules/modelProvider/api/systemDependencies", () => ({
+  getNodeDependencyStatus: mocks.nodeDependencyStatus,
+}));
+
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
     t: (key: string, options?: { defaultValue?: string; agent?: string; count?: number }) => {
-      if (key.startsWith("agentIntegration.quitRequired.") || key.startsWith("agentIntegration.dshErrors.")) return retryI18n.t(key, options);
-      if (key === "agentIntegration.retryDisconnection" || key.startsWith("agentIntegration.workbuddyInstallGuide.") || key.startsWith("agentIntegration.codexInstallGuide.") || key.startsWith("agentIntegration.dshInstallGuide.") || key.startsWith("agentIntegration.workbuddyErrors.") || key.startsWith("agentIntegration.connectionErrors.") || key.startsWith("agentIntegration.setupFeedback.") || key.startsWith("agentIntegration.waitingForApplication") || key.startsWith("agentIntegration.loginStates.") ||
+      if (key.startsWith("agentIntegration.quitRequired.") || key.startsWith("agentIntegration.dshErrors.") || key.startsWith("agentIntegration.repairRequest.")) return retryI18n.t(key, options);
+      if (key.startsWith("agentIntegration.executablePathPlaceholder") || ["agentIntegration.retryDisconnection", "agentIntegration.connected", "agentIntegration.enabledPendingConnection"].includes(key) || key.startsWith("agentIntegration.workbuddyInstallGuide.") || key.startsWith("agentIntegration.codexInstallGuide.") || key.startsWith("agentIntegration.dshInstallGuide.") || key.startsWith("agentIntegration.workbuddyErrors.") || key.startsWith("agentIntegration.connectionErrors.") || key.startsWith("agentIntegration.connectionIssues.") || key.startsWith("agentIntegration.setupFeedback.") || key.startsWith("agentIntegration.waitingForApplication") || key.startsWith("agentIntegration.loginStates.") ||
         key.startsWith("agentIntegration.cliSources.") || ["agentIntegration.selectedCLI", "agentIntegration.reselectCLI"].includes(key)) {
         return retryI18n.t(key, options);
       }
@@ -164,11 +171,6 @@ vi.mock("react-i18next", () => ({
         "agentIntegration.enterExecutablePath": "输入本机路径",
         "agentIntegration.executablePathTitle": "配置本机程序路径",
         "agentIntegration.executablePathDescription": "输入运行 Docker 的主机上的完整可执行文件路径",
-        "agentIntegration.executablePathPlaceholderMacCodexDesktop": "例如 /Applications/ChatGPT.app/Contents/MacOS/ChatGPT",
-        "agentIntegration.executablePathPlaceholderMacCLI": "例如 /opt/homebrew/bin/codex",
-        "agentIntegration.executablePathPlaceholderMacDesktop": "例如 /Applications/Cursor.app/Contents/MacOS/Cursor",
-        "agentIntegration.executablePathPlaceholderWindowsCLI": "例如 C:\\Agents\\codex.exe",
-        "agentIntegration.executablePathPlaceholderWindowsDesktop": "例如 C:\\Program Files\\ChatGPT\\ChatGPT.exe",
         "agentIntegration.restoreAutoDetection": "恢复自动检测",
         "agentIntegration.operationFailed": "操作未完成",
         "agentIntegration.loginStarted": `已打开 ${agent} 登录流程`,
@@ -219,6 +221,20 @@ function expandAgent(id: string) {
   return panel;
 }
 
+const inboundAgents = ["codex", "cursor", "workbuddy", "raccoon", "traework", "deepseek-harness"] as const;
+const inboundAgentNames: Record<DesktopAgent, string> = {
+  codex: "Codex", cursor: "Cursor", workbuddy: "WorkBuddy", raccoon: "Raccoon", traework: "TRAE Work", "deepseek-harness": "DeepSeek Harness",
+};
+
+function connectedInboundStatus(agent: DesktopAgent): DesktopAgentIntegrationStatus {
+  return {
+    agent, display_name: inboundAgentNames[agent], state: "enabled", enabled: true, can_connect: true, can_disconnect: true,
+    requirements: [{ id: "installed", description: "Desktop app installed", satisfied: true }],
+    connection: { mcp_configured: true, mcp_trusted: true, mcp_enabled: true,
+      control_ready: true, runtime_state: "connected", presentation_status: "available" },
+  };
+}
+
 describe("AgentIntegrationPage", () => {
   afterEach(() => { vi.useRealTimers(); });
   beforeEach(async () => {
@@ -227,6 +243,7 @@ describe("AgentIntegrationPage", () => {
       resources: { "zh-CN": { translation: zhCN }, "en-US": { translation: enUS } },
     });
     Object.values(mocks).forEach((mock) => mock.mockReset());
+    mocks.nodeDependencyStatus.mockResolvedValue({ installed: true, installSupported: true });
     mocks.platform.mockReturnValue("win32");
     mocks.statuses.mockResolvedValue({ ok: true, data: { codex: readyCodexStatus } });
     mocks.executors.mockResolvedValue({ data: { data: { executors: [readyCodexExecutor] } } });
@@ -246,6 +263,126 @@ describe("AgentIntegrationPage", () => {
       summary: { total: 0, succeeded: 0, failed: 0, running: 0, model_calls: 0, tool_calls: 0, capabilities: [] },
     });
     mocks.setCapability.mockResolvedValue(undefined);
+  });
+
+  describe("uniform inbound connection status", () => {
+    it.each(inboundAgents)("shows verified %s inbound connections as connected", async (agent) => {
+      const status = connectedInboundStatus(agent);
+      mocks.statuses.mockResolvedValue({ ok: true, data: { [agent]: status } });
+      render(<AgentIntegrationPage />);
+      const panel = expandAgent(agent);
+      const toggle = await within(panel).findByRole("switch", { name: /使用 LazyMind/ });
+      await waitFor(() => expect(toggle).toBeChecked());
+      const method = toggle.closest<HTMLElement>(".agent-integration-method");
+      expect(method).not.toBeNull();
+      expect(method?.querySelector(".agent-integration-method-status")).toHaveTextContent("已连接");
+      expect(method).toHaveClass("is-ready");
+      expect(mocks.action).not.toHaveBeenCalled();
+    });
+
+    it.each(inboundAgents.flatMap(agent => (["unavailable", "missing"] as const).map(connection => ({ agent, connection }))))(
+      "keeps enabled $agent pending without verified connection evidence ($connection)", async ({ agent, connection }) => {
+        const healthy = connectedInboundStatus(agent);
+        const status: DesktopAgentIntegrationStatus = { ...healthy,
+          connection: connection === "missing" ? undefined : { ...healthy.connection!, control_ready: false, runtime_state: "unavailable" } };
+        mocks.statuses.mockResolvedValue({ ok: true, data: { [agent]: status } });
+        render(<AgentIntegrationPage />);
+        const panel = expandAgent(agent);
+        const toggle = await within(panel).findByRole("switch", { name: /使用 LazyMind/ });
+        await waitFor(() => expect(toggle).toBeChecked());
+        const method = toggle.closest<HTMLElement>(".agent-integration-method");
+        expect(method).not.toBeNull();
+        expect(method?.querySelector(".agent-integration-method-status")).toHaveTextContent("已启用，待连接");
+        expect(method).not.toHaveClass("is-ready");
+        expect(within(panel).queryByText("已连接")).not.toBeInTheDocument();
+        expect(toggle).toBeEnabled();
+        expect(mocks.action).not.toHaveBeenCalled();
+      },
+    );
+
+    it.each(inboundAgents)("keeps the specific %s account issue above waiting without disabling inbound access", async (agent) => {
+      const healthy = connectedInboundStatus(agent);
+      const status: DesktopAgentIntegrationStatus = { ...healthy, issue: { code: "pairing_account_mismatch" },
+        connection: { ...healthy.connection!, control_ready: false, runtime_state: "waiting" } };
+      mocks.statuses.mockResolvedValue({ ok: true, data: { [agent]: status } });
+      render(<AgentIntegrationPage />);
+      const panel = expandAgent(agent);
+      const toggle = await within(panel).findByRole("switch", { name: /使用 LazyMind/ });
+      await waitFor(() => expect(toggle).toBeChecked());
+      const method = toggle.closest<HTMLElement>(".agent-integration-method");
+      expect(method).not.toBeNull();
+      expect(method?.querySelector(".agent-integration-method-status")).toHaveTextContent("配对账号不一致");
+      expect(method?.querySelector(".agent-integration-method-status")).not.toHaveTextContent(/Codex|WorkBuddy|DeepSeek Harness|\bDSH\b/i);
+      expect(method).not.toHaveClass("is-ready");
+      if (["codex", "workbuddy", "deepseek-harness"].includes(agent)) {
+        const group = agent === "codex" ? "connectionErrors" : agent === "workbuddy" ? "workbuddyErrors" : "dshErrors";
+        expect(await within(panel).findByRole("alert")).toHaveTextContent(retryI18n.t(`agentIntegration.${group}.pairing_account_mismatch`, { agent: status.display_name }));
+      }
+      expect(panel).not.toHaveTextContent(retryI18n.t("agentIntegration.waitingForApplicationDescription", { agent: status.display_name }));
+      expect(within(panel).queryByText("已启用，待连接")).not.toBeInTheDocument();
+      expect(toggle).toBeChecked();
+      expect(toggle).toBeEnabled();
+      expect(mocks.action).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      { mcp_configured: false }, { mcp_trusted: false }, { mcp_enabled: false },
+      { control_ready: false }, { runtime_state: undefined },
+    ])("does not report a connected state with incomplete validation: %j", async (incomplete) => {
+      const healthy = connectedInboundStatus("codex");
+      const status: DesktopAgentIntegrationStatus = { ...healthy, connection: { ...healthy.connection!, ...incomplete } };
+      mocks.statuses.mockResolvedValue({ ok: true, data: { codex: status } });
+      render(<AgentIntegrationPage />);
+      const toggle = await within(expandAgent("codex")).findByRole("switch", { name: /使用 LazyMind/ });
+      const method = toggle.closest<HTMLElement>(".agent-integration-method");
+      await waitFor(() => expect(method).toHaveTextContent(zhCN.agentIntegration.enabledPendingConnection));
+      expect(method).not.toHaveClass("is-ready");
+      expect(toggle).toBeChecked();
+    });
+
+    it.each(["codex", "workbuddy"] as const)("shows the specific control connection failure for %s in both layouts", async (agent) => {
+      const status: DesktopAgentIntegrationStatus = { ...connectedInboundStatus(agent), state: "error", issue: { code: "cdp_unavailable" } };
+      mocks.statuses.mockResolvedValue({ ok: true, data: { [agent]: status } });
+      render(<AgentIntegrationPage />);
+      const panel = expandAgent(agent);
+      const toggle = await within(panel).findByRole("switch", { name: /使用 LazyMind/ });
+      const method = toggle.closest<HTMLElement>(".agent-integration-method");
+      expect(method?.querySelector(".agent-integration-method-status")).toHaveTextContent(zhCN.agentIntegration.connectionIssues.cdp_unavailable);
+      expect(method).not.toHaveClass("is-ready");
+      expect(toggle).toBeChecked();
+      fireEvent.click(panel.querySelector<HTMLButtonElement>(".agent-integration-card-toggle")!);
+      expect(panel).toHaveTextContent(zhCN.agentIntegration.connectionIssues.cdp_unavailable);
+      expect(mocks.action).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      ...inboundAgents.flatMap(agent => [true, false].map(connected => ({ agent, connected, language: "zh-CN" }))),
+      ...[true, false].map(connected => ({ agent: "codex" as const, connected, language: "en-US" })),
+    ])("keeps compact status and color consistent for $agent ($connected, $language)", async ({ agent, connected, language }) => {
+      await retryI18n.changeLanguage(language);
+      const status: DesktopAgentIntegrationStatus = { ...connectedInboundStatus(agent),
+        connection: connected ? connectedInboundStatus(agent).connection : undefined };
+      mocks.statuses.mockResolvedValue({ ok: true, data: { [agent]: status } });
+      mocks.executors.mockResolvedValue({ data: { data: { executors: ["codex", "cursor", "workbuddy"].map(id => ({
+        id, installed: true, host_online: true, available: true,
+      })) } } });
+      mocks.executorPolicies.mockResolvedValue({ ok: true, data: Object.fromEntries(["codex", "cursor", "workbuddy"].map(provider => [provider, {
+        provider, enabled: false, installed: true, ready: true,
+      }])) });
+      render(<AgentIntegrationPage />);
+      const panel = expandAgent(agent);
+      await within(panel).findByRole("switch", { name: /使用 LazyMind/ });
+      fireEvent.click(panel.querySelector<HTMLButtonElement>(".agent-integration-card-toggle")!);
+      const toggle = within(panel).getByRole("switch", { name: /使用 LazyMind/ });
+      const control = toggle.closest<HTMLElement>(".agent-integration-compact-control");
+      expect(control).not.toBeNull();
+      expect(control?.classList.contains("is-ready")).toBe(connected);
+      expect(toggle).toBeChecked();
+      fireEvent.mouseOver(control!);
+      const expected = retryI18n.t(connected ? "agentIntegration.connected" : "agentIntegration.enabledPendingConnection");
+      expect(await screen.findByRole("tooltip")).toHaveTextContent(expected);
+      expect(mocks.action).not.toHaveBeenCalled();
+    });
   });
 
   it("offers retry for a partial DSH installation without a separate cleanup button", async () => {
@@ -360,7 +497,7 @@ describe("AgentIntegrationPage", () => {
     mocks.statuses.mockResolvedValue({ ok: true, data: { "deepseek-harness": status } });
     render(<AgentIntegrationPage />);
     const key = retryI18n.t(`agentIntegration.dshErrors.${code}`);
-    expect(await screen.findAllByText(new RegExp(key))).toHaveLength(1);
+    expect(await screen.findAllByText(retryI18n.t(`agentIntegration.connectionIssues.${code}`))).toHaveLength(1);
     const panel = expandAgent("deepseek-harness");
     expect(within(panel).getAllByText(new RegExp(key))).toHaveLength(1);
     expect(within(panel).queryByText(/raw stack/)).not.toBeInTheDocument();
@@ -641,7 +778,7 @@ describe("AgentIntegrationPage", () => {
     fireEvent.click(within(card).getByRole("switch", { name: "WorkBuddy 使用 LazyMind" }));
     let dialog = await screen.findByRole("dialog");
     expect(mocks.action).not.toHaveBeenCalled();
-    expect(dialog).toHaveTextContent("即将重启 WorkBuddy，请先保存会话并结束运行中的任务。");
+    expect(dialog).toHaveTextContent(zhCN.agentIntegration.workbuddyInstallGuide.saveDescription);
     fireEvent.click(within(dialog).getByRole("button", { name: /取\s*消/ }));
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
     expect(mocks.action).not.toHaveBeenCalled();
@@ -1468,7 +1605,7 @@ describe("AgentIntegrationPage", () => {
     mocks.action.mockResolvedValue({ok:true,data:{...readyCodexStatus,state:"ready",enabled:false}});
     render(<AgentIntegrationPage />);
     const card=expandAgent("codex");
-    await within(card).findByText(zhCN.agentIntegration.setupFeedback.connectionUnavailable);
+    await within(card).findByText(retryI18n.t("agentIntegration.connectionErrors.cdp_unavailable", { agent: "Codex" }));
     expect(within(card).queryByRole("button",{name:"agentIntegration.retryConnection"})).not.toBeInTheDocument();
     const toggle=within(card).getByRole("switch",{name:"Codex 桌面端使用 LazyMind"});
     expect(toggle).toBeChecked();
@@ -1491,8 +1628,7 @@ describe("AgentIntegrationPage", () => {
     mocks.action.mockResolvedValue({ ok: true, data: { ...configured, state: "ready", enabled: false, can_disconnect: false, issue: undefined, message: "" } });
     render(<AgentIntegrationPage />);
     const card = expandAgent(agent);
-    await within(card).findByText(agent === "deepseek-harness" ? zhCN.agentIntegration.dshErrors.environment_mismatch
-      : zhCN.agentIntegration.setupFeedback.environmentMismatch);
+    await within(card).findByText(zhCN.agentIntegration.setupFeedback.environmentMismatch);
     expect(within(card).queryByText(/MCP server named/)).not.toBeInTheDocument();
     const toggle = within(card).getAllByRole("switch")[0];
     expect(toggle).toBeChecked();
@@ -1539,7 +1675,7 @@ describe("AgentIntegrationPage", () => {
     render(<AgentIntegrationPage />);
     const card = expandAgent("raccoon");
     await within(card).findByText(zhCN.agentIntegration.setupFeedback.readFailed);
-    expect(within(card).getByText(zhCN.agentIntegration.setupFeedback.unknown)).toBeInTheDocument();
+    expect(within(card).getByText(zhCN.agentIntegration.connectionIssues.configuration_unreadable)).toBeInTheDocument();
     expect(within(card).queryByRole("switch")).not.toBeInTheDocument();
     expect(card).not.toHaveTextContent("private raw failure");
   });
@@ -1549,7 +1685,7 @@ describe("AgentIntegrationPage", () => {
       connection:{mcp_configured:true,control_ready:false,presentation_status:"host-offline",runtime_state:"waiting"}}}});
     render(<AgentIntegrationPage />);
     const card=expandAgent("codex");
-    await within(card).findByText(zhCN.agentIntegration.waitingForApplication);
+    await within(card).findByText(zhCN.agentIntegration.enabledPendingConnection);
     expect(within(card).queryByRole("alert")).not.toBeInTheDocument();
     expect(within(card).getByRole("switch",{name:"Codex 桌面端使用 LazyMind"})).toBeChecked();
   });
@@ -1590,7 +1726,7 @@ describe("AgentIntegrationPage", () => {
     fireEvent.click(within(dialog).getByRole("button", { name: zhCN.agentIntegration.codexInstallGuide.check }));
     expect(await within(dialog).findByText(zhCN.agentIntegration.codexInstallGuide.notReadyTitle)).toBeInTheDocument();
     expect(within(dialog).getByText(issue
-      ? zhCN.agentIntegration.connectionErrors[issue as "capability_unavailable" | "cdp_unavailable"]
+      ? retryI18n.t(`agentIntegration.connectionErrors.${issue}`, { agent: "Codex" })
       : zhCN.agentIntegration.codexInstallGuide.controlUnavailableDescription)).toBeInTheDocument();
     expect(within(dialog).queryByText(zhCN.agentIntegration.codexInstallGuide.successTitle)).not.toBeInTheDocument();
     expect(within(dialog).queryByRole("button", { name: zhCN.agentIntegration.codexInstallGuide.done })).not.toBeInTheDocument();
@@ -1633,7 +1769,7 @@ describe("AgentIntegrationPage", () => {
       connection:{...installed.connection,control_ready:false,runtime_state:"unavailable"}}}});
     await waitFor(() => {
       fireEvent.focus(window);
-      expect(within(card).getByText(zhCN.agentIntegration.setupFeedback.connectionUnavailable)).toBeInTheDocument();
+      expect(within(card).getByText(retryI18n.t("agentIntegration.connectionErrors.startup_unavailable", { agent: "Codex" }))).toBeInTheDocument();
     });
     expect(within(card).getByRole("switch",{name:"Codex 桌面端使用 LazyMind"})).toBeChecked();
     expect(mocks.action).not.toHaveBeenCalled();
@@ -1681,6 +1817,50 @@ describe("AgentIntegrationPage", () => {
     expect(mocks.action).not.toHaveBeenCalled();
   });
 
+  it.each(["zh-CN", "en-US"].flatMap(language => (["codex", "workbuddy", "deepseek-harness"] as const).map(agent => ({ language, agent }))))("prioritizes account pairing feedback and opens the confirmation guide for $agent ($language)", async ({ language, agent }) => {
+    await retryI18n.changeLanguage(language);
+    const status = { agent, display_name: inboundAgentNames[agent], state: "enabled", enabled: true,
+      can_connect: true, can_disconnect: true, issue: { code: "pairing_account_mismatch" },
+      requirements: [{ id: "installed", satisfied: true }],
+      connection: { mcp_configured: true, mcp_trusted: true, mcp_enabled: true, control_ready: false, runtime_state: "waiting" } };
+    mocks.statuses.mockResolvedValue({ ok: true, data: { [agent]: status } });
+    render(<AgentIntegrationPage />);
+    const card = expandAgent(agent);
+    const group = agent === "codex" ? "connectionErrors" : agent === "workbuddy" ? "workbuddyErrors" : "dshErrors";
+    const expected = retryI18n.t(`agentIntegration.${group}.pairing_account_mismatch`, { agent: status.display_name });
+    expect(await within(card).findByRole("alert")).toHaveTextContent(expected);
+    expect(card.querySelector(".agent-integration-method-status")).not.toHaveTextContent(/Codex|WorkBuddy|DeepSeek Harness|\bDSH\b/i);
+    expect(within(card).queryByText(retryI18n.t("agentIntegration.waitingForApplicationDescription", { agent: status.display_name }))).not.toBeInTheDocument();
+    expect(within(card).queryByText(zhCN.agentIntegration.setupFeedback.connectionUnavailable)).not.toBeInTheDocument();
+    expect(within(card).queryByText("等待应用启动")).not.toBeInTheDocument();
+    mocks.statuses.mockResolvedValue({ ok: false, reason: "unavailable" });
+    await act(async () => { fireEvent.focus(window); });
+    expect(within(card).getByRole("alert")).toHaveTextContent(expected);
+    expect(within(card).getByRole("alert")).toHaveTextContent(retryI18n.t("agentIntegration.repairRequest.inspectionUnavailable"));
+    expect(within(card).getByText(retryI18n.t("agentIntegration.setupFeedback.unknown"))).toBeInTheDocument();
+    fireEvent.click(within(card).getByRole("button", { name: retryI18n.t("agentIntegration.workbuddyInstallGuide.reconnect") }));
+    expect(await screen.findByRole("dialog")).toBeInTheDocument();
+    expect(mocks.action).not.toHaveBeenCalled();
+    expect(within(card).getByRole("switch", { name: /使用 LazyMind/ })).toBeChecked();
+  });
+
+  it.each(["codex", "workbuddy"] as const)("explains missing session control and opens its guide without reconnecting %s", async (agent) => {
+    mocks.statuses.mockResolvedValue({ ok: true, data: { [agent]: {
+      agent, display_name: inboundAgentNames[agent], state: "enabled", enabled: true, can_connect: true,
+      requirements: [{ id: "installed", satisfied: true }],
+      connection: { mcp_configured: true, mcp_trusted: true, mcp_enabled: true, control_ready: false, runtime_state: "connection_required" },
+    } } });
+    render(<AgentIntegrationPage />);
+    const card = expandAgent(agent);
+    const expected = retryI18n.t("agentIntegration.connectionErrors.connection_required", { agent: retryI18n.t(`agentIntegration.mcpClients.${agent}`) });
+    expect(await within(card).findByText(expected)).toBeInTheDocument();
+    expect(card.querySelector(".agent-integration-method-status")).not.toHaveTextContent(/Codex|WorkBuddy|DeepSeek Harness|\bDSH\b/i);
+    expect(within(card).queryByRole("alert")).not.toBeInTheDocument();
+    fireEvent.click(within(card).getByRole("button", { name: "重新连接" }));
+    expect(await screen.findByRole("dialog")).toBeInTheDocument();
+    expect(mocks.action).not.toHaveBeenCalled();
+  });
+
   it.each(["host_unavailable", "cdp_unavailable", "configuration_unreadable", "pairing_disabled"])("does not infer incomplete WorkBuddy setup from %s", async (code) => {
     const status = { agent: "workbuddy", display_name: "WorkBuddy", state: "enabled", enabled: true,
       message: "Connection check failed.", issue: { code },
@@ -1689,7 +1869,8 @@ describe("AgentIntegrationPage", () => {
     render(<AgentIntegrationPage />);
     await screen.findByText("外部 Agent 集成");
     const card = expandAgent("workbuddy");
-    expect(await within(card).findByRole("alert")).toHaveTextContent(retryI18n.t(`agentIntegration.setupFeedback.${code === "configuration_unreadable" ? "readFailed" : "connectionUnavailable"}`));
+    expect(await within(card).findByRole("alert")).toHaveTextContent(retryI18n.t(code === "configuration_unreadable" ? "agentIntegration.setupFeedback.readFailed"
+      : `agentIntegration.${code === "cdp_unavailable" ? "connectionErrors" : "workbuddyErrors"}.${code}`, { agent: "WorkBuddy" }));
     expect(within(card).queryByText(zhCN.agentIntegration.workbuddyErrors.mcp_trust_required)).not.toBeInTheDocument();
     expect(within(card).queryByText(zhCN.agentIntegration.workbuddyErrors.mcp_enable_required)).not.toBeInTheDocument();
   });
@@ -1708,9 +1889,9 @@ describe("AgentIntegrationPage", () => {
     const card = expandAgent("workbuddy");
     expect(within(card).getByRole("switch", { name: "WorkBuddy 使用 LazyMind" })).toBeChecked();
     if (scenario === "waiting") {
-      expect(within(card).getByText(zhCN.agentIntegration.waitingForApplication)).toBeInTheDocument();
+      expect(within(card).getByText(zhCN.agentIntegration.enabledPendingConnection)).toBeInTheDocument();
       expect(within(card).queryByRole("alert")).not.toBeInTheDocument();
-    } else expect(within(card).getByText(zhCN.agentIntegration.setupFeedback.connectionUnavailable)).toBeInTheDocument();
+    } else expect(within(card).getByText(retryI18n.t(`agentIntegration.connectionErrors.${scenario === "missing" ? "installation_unavailable" : "cdp_unavailable"}`, { agent: "WorkBuddy" }))).toBeInTheDocument();
     expect(mocks.action).not.toHaveBeenCalled();
   });
 
@@ -1753,18 +1934,18 @@ describe("AgentIntegrationPage", () => {
     expect(card.querySelector(".agent-integration-stage-hint.is-warning")).not.toBeNull();
     mocks.statuses.mockResolvedValue({ ok: true, data: { [agent]: exited } });
     fireEvent.focus(window);
-    await within(card).findByText("DeepSeek Harness 已退出，请点击「重试关闭接入」完成关闭。");
+    await within(card).findByText(retryI18n.t("agentIntegration.quitRequired.exitedDescription", { agent: "DeepSeek Harness" }));
     expect(toggle).toBeChecked();
     expect(mocks.action).toHaveBeenCalledTimes(1);
     first.unmount();
     render(<AgentIntegrationPage />);
     card = expandAgent(agent);
-    await within(card).findByText("DeepSeek Harness 已退出，请点击「重试关闭接入」完成关闭。");
+    await within(card).findByText(retryI18n.t("agentIntegration.quitRequired.exitedDescription", { agent: "DeepSeek Harness" }));
     // A failed health refresh must not erase the user action either.
     mocks.statuses.mockResolvedValue({ ok: false, reason: "unavailable" });
     await act(async () => { await vi.advanceTimersByTimeAsync(5100); });
     expect(card.querySelector(".agent-integration-stage-hint.is-warning")).not.toBeNull();
-    expect(within(card).getByText("DeepSeek Harness 已退出，请点击「重试关闭接入」完成关闭。")).toBeInTheDocument();
+    expect(within(card).getByText(retryI18n.t("agentIntegration.quitRequired.exitedDescription", { agent: "DeepSeek Harness" }))).toBeInTheDocument();
     mocks.action.mockResolvedValue({ ok: true, data: disconnected });
     mocks.statuses.mockResolvedValue({ ok: true, data: { [agent]: disconnected } });
     fireEvent.click(within(card).getByRole("button", { name: zhCN.agentIntegration.quitRequired.retryDisconnect }));
@@ -1799,12 +1980,12 @@ describe("AgentIntegrationPage", () => {
     mocks.statuses.mockResolvedValue({ ok: true, data: { workbuddy: { ...installed, message: "startup missing", issue: { code: "startup_unavailable" },
       connection: { ...installed.connection, control_ready: false, runtime_state: "unavailable" } } } });
     fireEvent.focus(window);
-    await within(card).findByText(zhCN.agentIntegration.setupFeedback.connectionUnavailable);
+    await within(card).findByText(zhCN.agentIntegration.workbuddyErrors.startup_unavailable);
     expect(within(card).getByRole("switch", { name: "WorkBuddy 使用 LazyMind" })).toBeChecked();
     expect(mocks.action).not.toHaveBeenCalled();
   });
 
-  it("marks DSH unavailable after bridge loss and recovers on focus without changing the enabled choice", async () => {
+  it("marks DSH health unknown after bridge loss and recovers on focus without changing the enabled choice", async () => {
     const connected = { agent: "deepseek-harness", display_name: "DeepSeek Harness", state: "enabled", enabled: true,
       can_connect: true, can_disconnect: true, requirements: [{ id: "dsh_desktop", satisfied: true }],
       connection: { mcp_configured: true, mcp_trusted: true, mcp_enabled: true, control_ready: true,
@@ -1813,15 +1994,17 @@ describe("AgentIntegrationPage", () => {
     render(<AgentIntegrationPage />);
     const card = expandAgent("deepseek-harness");
     const toggle = await within(card).findByRole("switch", { name: "DeepSeek Harness Web 使用 LazyMind MCP" });
-    await within(card).findByText(zhCN.agentIntegration.dshInstallGuide.connected);
+    await within(card).findByText(zhCN.agentIntegration.connected);
     mocks.statuses.mockResolvedValue({ ok: false, reason: "unavailable" });
     fireEvent.focus(window);
-    await within(card).findByText(zhCN.agentIntegration.dshErrors.host_unavailable);
+    await within(card).findByText(zhCN.agentIntegration.repairRequest.inspectionUnavailable);
+    expect(within(card).queryByText(zhCN.agentIntegration.dshErrors.host_unavailable)).not.toBeInTheDocument();
     expect(toggle).toBeChecked();
-    expect(within(card).queryByText(zhCN.agentIntegration.dshInstallGuide.connected)).not.toBeInTheDocument();
+    expect(within(card).getByText(zhCN.agentIntegration.setupFeedback.unknown)).toBeInTheDocument();
+    expect(within(card).queryByText(zhCN.agentIntegration.connected)).not.toBeInTheDocument();
     mocks.statuses.mockResolvedValue({ ok: true, data: { "deepseek-harness": connected } });
     fireEvent.focus(window);
-    await within(card).findByText(zhCN.agentIntegration.dshInstallGuide.connected);
+    await within(card).findByText(zhCN.agentIntegration.connected);
     expect(toggle).toBeChecked();
     expect(within(card).queryByRole("alert")).not.toBeInTheDocument();
     expect(mocks.action).not.toHaveBeenCalled();
@@ -1840,6 +2023,74 @@ describe("AgentIntegrationPage", () => {
     expect(within(card).getByRole("switch", { name: "DeepSeek Harness Web 使用 LazyMind MCP" })).toBeChecked();
     expect(card).not.toHaveTextContent("authentication_required");
     expect(card).not.toHaveTextContent(zhCN.agentIntegration.dshErrors.lazymind_auth_required);
+    expect(mocks.action).not.toHaveBeenCalled();
+  });
+
+  it.each(["poll", "poll rejection", "refresh", "refresh rejection"])("copies unknown status after an unsuccessful %s and recovers on recheck", async failure => {
+    const labels = zhCN.agentIntegration.repairRequest;
+    let copied = "";
+    const descriptor = Object.getOwnPropertyDescriptor(document, "execCommand");
+    Object.defineProperty(document, "execCommand", { configurable: true, value: vi.fn(() => {
+      copied = document.getSelection()?.toString() || "";
+      return true;
+    }) });
+    const installed = { ...readyCodexStatus, state: "enabled", enabled: true, diagnostic_id: "healthy-inspection",
+      diagnostic_log: "~/logs/agent-setup.log",
+      diagnostic_context: { action: "inspect", stage: "inspect", current_cli: "/installed/lazymind",
+        environment: { LAZYMIND_HOME: "~/installed-home", LAZYMIND_CONNECTOR_CONFIG: "" } },
+      connection: { mcp_configured: true, mcp_enabled: true, mcp_trusted: true,
+        control_ready: true, presentation_status: "ready", runtime_state: "connected" } };
+    try {
+      mocks.statuses.mockResolvedValue({ ok: true, data: { codex: installed } });
+      render(<AgentIntegrationPage />);
+      const card = expandAgent("codex");
+      await waitFor(() => expect(within(card).getByRole("switch", { name: "Codex 桌面端使用 LazyMind" })).toBeChecked());
+      await waitFor(() => expect(mocks.executors).toHaveBeenCalled());
+      await act(async () => {});
+      if (failure.endsWith("rejection")) mocks.statuses.mockRejectedValue(new Error("bridge query failed"));
+      else mocks.statuses.mockResolvedValue({ ok: false, reason: "failed" });
+      if (failure.startsWith("refresh")) fireEvent.click(within(card).getByRole("button", { name: /重新检测/ }));
+      else fireEvent.focus(window);
+      await within(card).findByText(labels.inspectionUnavailable, {}, { timeout: 3000 });
+      expect(within(card).getByRole("switch", { name: "Codex 桌面端使用 LazyMind" })).toBeChecked();
+      const copyButton = within(card).getByRole("button", { name: labels.copyHint });
+      fireEvent.click(copyButton);
+      await waitFor(() => expect(copied).toContain(labels.inspectionUnavailable));
+      for (const key of ["code", "control", "runtime", "diagnosticID"] as const) {
+        expect(copied).toContain(`${labels[key]}: ${labels.unknown}`);
+      }
+      expect(copied).toContain("/installed/lazymind");
+      expect(copied).toContain('"LAZYMIND_HOME": "~/installed-home"');
+      expect(copied).not.toMatch(/healthy-inspection|host_unavailable|host-offline/);
+      mocks.statuses.mockResolvedValue({ ok: true, data: { codex: { ...installed, diagnostic_id: "fresh-inspection" } } });
+      await act(async () => {});
+      await waitFor(() => {
+        fireEvent.focus(window);
+        expect(within(card).queryByText(labels.inspectionUnavailable)).not.toBeInTheDocument();
+      });
+      fireEvent.click(copyButton);
+      await waitFor(() => expect(copied).toContain(`${labels.diagnosticID}: fresh-inspection`));
+      expect(copied).toContain(`${labels.control}: true`);
+      expect(mocks.action).not.toHaveBeenCalled();
+    } finally {
+      if (descriptor) Object.defineProperty(document, "execCommand", descriptor);
+      else Reflect.deleteProperty(document, "execCommand");
+    }
+  });
+
+  it("preserves a pending disconnect when the status query fails", async () => {
+    const pending = { ...readyCodexStatus, state: "action_required", enabled: true, retry_action: "disconnect",
+      action: { kind: "quit_agent" }, issue: { code: "quit_required" }, can_disconnect: true };
+    mocks.statuses.mockResolvedValue({ ok: true, data: { codex: pending } });
+    render(<AgentIntegrationPage />);
+    const card = expandAgent("codex");
+    await within(card).findByRole("button", { name: zhCN.agentIntegration.quitRequired.retryDisconnect });
+    await waitFor(() => expect(mocks.executors).toHaveBeenCalled());
+    await act(async () => {});
+    mocks.statuses.mockResolvedValue({ ok: false, reason: "failed" });
+    fireEvent.focus(window);
+    await within(card).findByText(zhCN.agentIntegration.repairRequest.inspectionUnavailable);
+    expect(within(card).getByRole("button", { name: zhCN.agentIntegration.quitRequired.retryDisconnect })).toBeEnabled();
     expect(mocks.action).not.toHaveBeenCalled();
   });
 

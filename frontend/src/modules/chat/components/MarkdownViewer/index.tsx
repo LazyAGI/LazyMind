@@ -1,10 +1,11 @@
+import ExternalLink from '@/components/ExternalLink';
 import Markdown, { defaultUrlTransform } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
 import classnames from "classnames";
 import "katex/dist/katex.min.css";
-import { Dropdown, Image, Popover, message } from "antd";
+import { Dropdown, Image, Popover, Tooltip, message } from "antd";
 import type { MenuProps } from "antd";
 import { SourceImportActions } from "../SourceImports";
 import rehypeSanitize from "rehype-sanitize";
@@ -60,6 +61,8 @@ import { toArtifactFiles } from '../ArtifactCollectorCard/artifactFiles';
 import HtmlBlock from "./HtmlBlock";
 import MermaidBlock from "./MermaidBlock";
 import EditableBlock from "./EditableBlock";
+import remarkLocalFiles, { localFilePath } from "./remarkLocalFiles";
+import { actOnLocalChatFile, getExternalBrowserBridge, openChatExternal } from "@/runtime/desktopBridge";
 import remarkSourceCitations from "./remarkSourceCitations";
 import {
   getLanguageFromClassName,
@@ -197,14 +200,14 @@ function SourcePreview({ sources }: { sources: ChatSource[] }) {
           </span>
         )}
       </div>
-      {sourceHref ? <a
+      {sourceHref ? <ExternalLink
         className="md-source-preview-link"
         href={sourceHref}
         target="_blank"
         rel="noopener noreferrer"
       >
         {preview}
-      </a> : <div className="md-source-preview-link">{preview}</div>}
+      </ExternalLink> : <div className="md-source-preview-link">{preview}</div>}
       <SourceImportActions source={source} inline />
     </div>
   );
@@ -330,7 +333,6 @@ const ImageComponent = (props: any) => {
         onError={() => setImageLoadError(true)}
         onLoad={() => setImageLoadError(false)}
       />
-      {props.alt ? <figcaption>{props.alt}</figcaption> : null}
     </figure>
   );
 };
@@ -442,12 +444,14 @@ function ArtifactFileLink({
   children,
   href,
   filename,
+  source,
   pending,
   target,
 }: {
   children: ReactNode;
   href: string;
   filename: string;
+  source?: string;
   pending?: boolean;
   target?: ArtifactPreviewTarget;
 }) {
@@ -540,6 +544,7 @@ function ArtifactFileLink({
   );
 
   return (
+    <Tooltip title={source || href || undefined} mouseEnterDelay={1.5}>
     <span className="md-file-actions">
     <Dropdown
       trigger={["contextMenu"]}
@@ -554,10 +559,26 @@ function ArtifactFileLink({
       {t('chat.fileDownload')}
     </button>}
     </span>
+    </Tooltip>
   );
 }
 
+function LocalFileLink({ path, children }: { path: string; children: ReactNode }) {
+  const { t } = useTranslation();
+  const run = async (action: "open" | "reveal") => {
+    try { await actOnLocalChatFile(path, action); }
+    catch { message.error(t(action === "reveal" ? "chat.fileRevealFailed" : "chat.fileOpenFailed")); }
+  };
+  return <Dropdown trigger={["contextMenu"]} menu={{ items: [{
+    key: "reveal", label: t(isAppleDesktopPlatform() ? "chat.fileShowInFinder" : "chat.fileShowInFolder"),
+    onClick: () => void run("reveal"),
+  }] }}>
+    <a href="#" title={path} onClick={event => { event.preventDefault(); void run("open"); }}>{children}</a>
+  </Dropdown>;
+}
+
 const LinkComponent = (props: any) => {
+  const { t } = useTranslation();
   const { isStreaming, markSources, artifacts, conversationId } = useContext(
     MarkdownRenderContext,
   );
@@ -643,6 +664,9 @@ const LinkComponent = (props: any) => {
     inlineText,
     inlineBlobType,
   ]);
+  const localPath = localFilePath(href);
+  if (localPath) return <LocalFileLink path={localPath}>{props.children}</LocalFileLink>;
+
   const sourceCitationIds = parseSourceCitationIds(href);
 
   if (sourceCitationIds.length) {
@@ -666,7 +690,7 @@ const LinkComponent = (props: any) => {
       </>
     );
     const chip = sourceHref ? (
-      <a
+      <ExternalLink
         className={classnames("md-source-chip", {
           "md-source-chip--pending": isStreaming,
           "md-source-chip--clickable": true,
@@ -678,7 +702,7 @@ const LinkComponent = (props: any) => {
         title={chipLabel}
       >
         {chipContent}
-      </a>
+      </ExternalLink>
     ) : (
       <span className={classnames("md-source-chip", { "md-source-chip--pending": !source || isStreaming })}
         tabIndex={source && !isStreaming ? 0 : undefined}>
@@ -708,6 +732,9 @@ const LinkComponent = (props: any) => {
       <ArtifactFileLink
         href={resolvedHref}
         filename={artifactFilename}
+        source={typeof linkedArtifact?.value?.path === 'string'
+          ? linkedArtifact.value.path.trim() || artifactSignSource
+          : artifactSignSource}
         target={linkedArtifact && toArtifactFiles([linkedArtifact])[0]
           ? filePreviewTarget(toArtifactFiles([linkedArtifact])[0])
           : urlPreviewTarget(resolvedHref, artifactFilename || String(props.children || 'file'), conversationId)}
@@ -723,6 +750,7 @@ const LinkComponent = (props: any) => {
       <ArtifactFileLink
         href={resolvedHref}
         filename={basenameFromPath(href)}
+        source={href}
         target={urlPreviewTarget(resolvedHref || href, basenameFromPath(href), conversationId)}
         pending={!resolvedHref}
       >
@@ -732,13 +760,22 @@ const LinkComponent = (props: any) => {
   }
 
   return (
-    <a
+    <ExternalLink
       href={resolvedHref || undefined}
+      onClick={event => {
+        if (/^https?:/i.test(resolvedHref) && getExternalBrowserBridge()) return;
+        if (!/^(https?:|mailto:)/i.test(resolvedHref)) return;
+        const opened = openChatExternal(resolvedHref);
+        if (opened) {
+          event.preventDefault();
+          void opened.catch(() => message.error(t("chat.linkOpenFailed")));
+        }
+      }}
       target="_blank"
       rel="noreferrer"
     >
       {props.children}
-    </a>
+    </ExternalLink>
   );
 };
 
@@ -841,6 +878,7 @@ const MarkdownViewer = memo((props: any) => {
     [remarkGfm, { singleTilde: false }],
     [remarkSourceCitations, new Set(markSources.map(getSourceCitationId))],
     remarkMath,
+    remarkLocalFiles,
   ], [markSources]);
 
   const renderContextValue = useMemo(

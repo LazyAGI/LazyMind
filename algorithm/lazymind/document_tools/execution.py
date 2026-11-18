@@ -1433,12 +1433,12 @@ def _writer_generate_draft_document_body(
                     temporary.replace(raw_path)
             if await_media is not None:
                 resolved_media_assets_path = await_media()
-            document = finalize_short_document(
-                document, _read_json_file(resolved_media_assets_path) if resolved_media_assets_path else None,
-            )
+            resolved_media = _read_json_file(resolved_media_assets_path) if resolved_media_assets_path else None
+            document = finalize_short_document(document, resolved_media)
             if representation == 'ir':
                 document = markdown_to_writer_document(
                     document, document_id=str(task.get('task_id') or uuid.uuid4()), stage='draft',
+                    media_assets=resolved_media,
                 )
             elif representation != 'markdown':
                 raise ValueError('Unsupported whole-document representation.')

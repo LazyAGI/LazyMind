@@ -87,6 +87,7 @@ import "@/modules/modelProvider/index.scss";
 import "./index.scss";
 import { SettingsNavigationGuard } from "./SettingsNavigationGuard";
 import { useSettingsChange } from "./useSettingsChange";
+import { CLOUD_DOCUMENTS_GITHUB_PATH } from "@/modules/modelProvider/utils/cloudDocumentUrls";
 
 import NotificationSettings from "@/modules/notifications/NotificationSettings";
 
@@ -448,7 +449,7 @@ function SettingsPageContent() {
     if (result.mcp && result.enabled && result.mcp.skippedUnverifiedCount > 0) {
       message.warning(t("settingsPage.confirm.mcpEnabledToast", { updated: result.mcp.updatedCount, skipped: result.mcp.skippedUnverifiedCount }));
     } else message.success(t("settingsPage.saved"));
-  });
+  }, () => navigate(CLOUD_DOCUMENTS_GITHUB_PATH));
   const saving = preferenceSaving || (settingsChange.saving === "developer_mode_active" ? "developer" : settingsChange.saving);
   const requestMasterChange = (key: MasterSetting, enabled: boolean) => settingsChange.requestChange(key, enabled);
   const requestDeveloperChange = (enabled: boolean) => settingsChange.requestChange("developer_mode_active", enabled);
@@ -520,7 +521,9 @@ function SettingsPageContent() {
       {overview?.issues.length ? <div className="settings-ref-issues" role="status" aria-live="polite">{overview.issues.map((issue) => <Alert key={issue.id} type={issue.severity === "warning" ? "warning" : "info"} showIcon message={issue.message} action={<Button type="link" size="small" onClick={() => selectSection(issue.section as SectionID)}>{t("settingsPage.view")}</Button>} />)}</div> : null}
       <div className="settings-dashboard-grid">
         {dashboardCard("models", <ApiOutlined />, t("settingsPage.sections.models"), t("settingsPage.overview.modelServicesDesc"), [
-          dashboardRow(t("settingsPage.sections.models"), t("modelProvider.workspace.suppliers"), formatCount(models, t), <Button className="settings-dashboard-quick-action" size="small" onClick={() => selectSection("models")}>{t("settingsPage.quickConfig")}</Button>),
+          dashboardRow(t("settingsPage.sections.models"), models.counts.model_providers !== undefined && models.counts.external_services !== undefined
+            ? t("settingsPage.counts.providerBreakdown", { models: models.counts.model_providers, services: models.counts.external_services })
+            : t("modelProvider.workspace.suppliers"), formatCount(models, t), <Button className="settings-dashboard-quick-action" size="small" onClick={() => selectSection("models")}>{t("settingsPage.quickConfig")}</Button>),
         ])}
         {dashboardCard("model_defaults", <RobotOutlined />, t("settingsPage.sections.defaultModels"), t("settingsPage.overview.modelsDesc"), [
           <QuickModelSettings canConfigureEmbedding={isAdmin} key="quick-models" onSaved={syncOverview} />,

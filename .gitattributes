@@ -4,6 +4,10 @@
 # Keep text source bytes stable when checked out on Windows.
 skills/** text=auto eol=lf
 
+# Workflow packages also use exact adapter bindings and pinned content hashes.
+# Keep their scripts and prompts identical in Windows and Unix checkouts.
+workflows/** text=auto eol=lf
+
 # Published showcase ZIPs are identified by exact source bytes on every OS.
 # Disable checkout line-ending conversion for both text and binary assets.
 skills/featured/**/assets/** -text

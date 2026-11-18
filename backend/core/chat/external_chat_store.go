@@ -1,6 +1,7 @@
 package chat
 
 import (
+	"archive/zip"
 	"bytes"
 	"context"
 	"crypto/rand"
@@ -390,7 +391,7 @@ func (a *externalChatApplication) appendAttachment(
 		!validArtifactFilename(attachment.Filename) {
 		return 0, errInvalidExternalChatAttachment
 	}
-	extension, err := externalChatImageExtension(attachment.Content, attachment.MediaType)
+	extension, err := externalChatAttachmentExtension(attachment.Content, attachment.MediaType)
 	if err != nil {
 		return 0, err
 	}
@@ -415,6 +416,10 @@ func (a *externalChatApplication) appendAttachment(
 		return 0, errors.New("create external Agent attachment reference")
 	}
 	text := fmt.Sprintf("\n\n![Generated image](%s)\n\n", reference)
+	if extension == ".pptx" {
+		label := strings.NewReplacer("\\", "\\\\", "[", "\\[", "]", "\\]", "\n", " ", "\r", " ").Replace(attachment.Filename)
+		text = fmt.Sprintf("\n\n[%s](%s)\n\n", label, reference)
+	}
 	sequence, err := a.appendEvent(ctx, owner, runID, hostID, leaseToken, externalChatEvent{
 		EventID: attachment.EventID, Type: "message", Text: text,
 	})
@@ -462,6 +467,25 @@ func externalChatImageExtension(content []byte, supplied string) (string, error)
 		return "", errInvalidExternalChatAttachment
 	}
 	return extension, nil
+}
+
+func externalChatAttachmentExtension(content []byte, supplied string) (string, error) {
+	if supplied != "application/vnd.openxmlformats-officedocument.presentationml.presentation" {
+		return externalChatImageExtension(content, supplied)
+	}
+	reader, err := zip.NewReader(bytes.NewReader(content), int64(len(content)))
+	if err != nil {
+		return "", errInvalidExternalChatAttachment
+	}
+	var types, presentation bool
+	for _, file := range reader.File {
+		types = types || file.Name == "[Content_Types].xml"
+		presentation = presentation || file.Name == "ppt/presentation.xml"
+	}
+	if !types || !presentation {
+		return "", errInvalidExternalChatAttachment
+	}
+	return ".pptx", nil
 }
 
 func persistExternalChatAttachment(target string, content []byte) (bool, error) {
@@ -765,6 +789,13 @@ func markdownTargetAndSuffix(value string) (string, string) {
 
 func hostLocalTarget(target string) bool {
 	value := strings.TrimSpace(target)
+	if value == "" || strings.HasPrefix(value, "//") || strings.HasPrefix(value, "#") || strings.HasPrefix(value, "/static-files/") {
+		return false
+	}
+	parsed, err := url.Parse(value)
+	if err == nil && parsed.Scheme == "" && !strings.HasPrefix(value, "/") {
+		return true
+	}
 	return strings.HasPrefix(value, "/") && !strings.HasPrefix(value, "/static-files/") ||
 		strings.HasPrefix(strings.ToLower(value), "file://") ||
 		(len(value) >= 3 && value[1] == ':' && (value[2] == '\\' || value[2] == '/'))
@@ -827,6 +858,17 @@ func (a *externalChatApplication) executionProjections(
 		result[run.HistoryID] = basicExternalExecutionProjection(run, a.now())
 		runByID[run.ID] = run
 		runIDs = append(runIDs, run.ID)
+	}
+	var models []orm.ExternalChatRunEvent
+	if err := a.db.WithContext(ctx).Where("run_id IN ? AND type = ?", runIDs, "model").
+		Order("sequence ASC").Find(&models).Error; err != nil {
+		return nil, err
+	}
+	for _, event := range models {
+		historyID := runByID[event.RunID].HistoryID
+		projection := result[historyID]
+		projection.Model = event.Text
+		result[historyID] = projection
 	}
 
 	var invocations []orm.AgentInvocation

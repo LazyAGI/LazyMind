@@ -1,3 +1,5 @@
+import ExternalLink from '@/components/ExternalLink';
+import { externalLinkProps } from '@/runtime/externalNavigation';
 import { Badge, Button, Empty, Input, List, message, Modal, Spin, Tag, Tooltip, Typography } from "antd";
 import { CloudDownloadOutlined, DownloadOutlined, ExportOutlined, LoadingOutlined, SearchOutlined } from "@ant-design/icons";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -266,14 +268,14 @@ export default function DocumentReferencesPanel({ documentId, targetDatasetId, i
             : existing
               ? null
               : external
-                ? <Tooltip title="打开 GitHub"><Button key="external" type="text" size="small" aria-label="打开链接" icon={<ExportOutlined />} href={external} target="_blank" rel="noreferrer" /></Tooltip>
+                ? <Tooltip title="打开 GitHub"><Button key="external" type="text" size="small" aria-label="打开链接" icon={<ExportOutlined />} {...externalLinkProps(external)} target="_blank" rel="noreferrer" /></Tooltip>
               : <Tooltip title="下载并加入知识库"><Button key="download" type="text" size="small" aria-label="下载" icon={<DownloadOutlined />} onClick={() => void runImport([id])} /></Tooltip>;
         return <List.Item style={{ padding: "10px 12px", marginBottom: 8, border: "1px solid #edf0f5", borderRadius: 8, background: "#fff" }}>
           <div style={{ display: "grid", gridTemplateColumns: "28px minmax(0, 1fr) auto", alignItems: "center", gap: 8, minWidth: 0, width: "100%" }}>
             <Typography.Text type="secondary" style={{ textAlign: "center", fontSize: 13 }}>{index + 1}</Typography.Text>
             <Tooltip title={<div style={{ maxWidth: 560 }}>{rawText}</div>} mouseEnterDelay={0.5} placement="topLeft">
               {href || external
-                ? <a href={href || external} target={external && !href ? "_blank" : undefined} rel={external && !href ? "noreferrer" : undefined} style={{ display: "block", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "#1677ff" }}>{rawText}</a>
+                ? <ExternalLink href={href || external} target={external && !href ? "_blank" : undefined} rel={external && !href ? "noreferrer" : undefined} style={{ display: "block", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "#1677ff" }}>{rawText}</ExternalLink>
                 : <Typography.Text ellipsis style={{ minWidth: 0 }}>{rawText}</Typography.Text>}
             </Tooltip>
             {action}

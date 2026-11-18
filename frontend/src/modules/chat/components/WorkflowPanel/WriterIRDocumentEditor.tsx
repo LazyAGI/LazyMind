@@ -1,6 +1,7 @@
 import { writerOutlineDescription } from './writerOutlineDescription';
 import { irImageCandidates, imageGroups, imageGroupKey, imageGroupLayout, setImageGroup } from './writerImageGroups';
 import { WriterImageGroupControls } from './WriterImageGroupControls';
+import { startWriterImageDrag } from './writerImageDrag';
 import './writerImageGroups.scss';
 import { mergeIRRewrite } from './mergeRewritePreview';
 import { createPortal } from 'react-dom';
@@ -1342,7 +1343,9 @@ export function WriterIRDocumentEditor({
   }), [t]);
   const dragLabel = t('chat.writerIR.dragBlock');
 
-  const syncImageGroups = () => {
+  const imageGroupScrollPositions = () => new Map(Array.from(editorRef.current?.querySelectorAll<HTMLElement>('.writer-image-group') ?? [],
+    group => [group.dataset.imageGroupKey!, group.querySelector<HTMLElement>('.writer-image-group-images')?.scrollLeft ?? 0]));
+  const syncImageGroups = (scrollPositions = imageGroupScrollPositions()) => {
     const editor = editorRef.current;
     if (!editor) return;
     for (const group of editor.querySelectorAll<HTMLElement>('.writer-image-group')) {
@@ -1362,6 +1365,9 @@ export function WriterIRDocumentEditor({
       const host = window.document.createElement('div'); host.className = 'writer-image-group-host'; host.contentEditable = 'false';
       const children = window.document.createElement('div'); children.className = 'writer-image-group-images';
       elements[0]!.before(group); group.append(host, children); elements.forEach(element => children.append(element!));
+      const restoreScroll = () => { children.scrollLeft = scrollPositions.get(group.dataset.imageGroupKey!) ?? 0; };
+      children.querySelectorAll('img').forEach(image => image.addEventListener('load', restoreScroll, { once: true }));
+      restoreScroll();
       hosts.push({ host, images });
     }
     setImageGroupHosts(hosts);
@@ -1393,6 +1399,7 @@ export function WriterIRDocumentEditor({
     const selectionToRestore = pendingSelectionRef.current ?? readEditorSelection(editor, true);
     const scrollContainer = closestVerticalScrollContainer(editor);
     const previousScrollTop = scrollContainer?.scrollTop;
+    const galleryScrollPositions = imageGroupScrollPositions();
     pendingSelectionRef.current = null;
     editor.innerHTML = renderDocument(
       document,
@@ -1407,7 +1414,7 @@ export function WriterIRDocumentEditor({
     lastRenderedNumberingRef.current = numbering;
     lastCollapseVersionRef.current = collapseVersion;
     syncBlockControlPositions(editor);
-    syncImageGroups();
+    syncImageGroups(galleryScrollPositions);
     if (scrollContainer && previousScrollTop != null) {
       scrollContainer.scrollTop = previousScrollTop;
     }
@@ -1633,15 +1640,43 @@ export function WriterIRDocumentEditor({
       editor.classList.remove('writer-ir__document--dragging');
     };
 
+    const moveBlock = (sourceId: string, hint: WriterBlockRelocateTarget) => {
+      const nextDocument = relocateWriterBlock(document, sourceId, hint);
+      if (nextDocument !== document) {
+        pendingSelectionRef.current = findWriterBlock(document.blocks, sourceId)?.type === 'image'
+          ? null : { nodeId: sourceId, start: 0, end: 0 };
+        lastEmittedDocumentRef.current = undefined;
+        onChange(nextDocument);
+      }
+    };
+    let cancelImageDrag: (() => void) | undefined;
     const handleMouseDown = (event: MouseEvent) => {
       if (event.button !== 0) return;
       const target = event.target;
       if (!(target instanceof Element)) return;
       const handle = target.closest<HTMLElement>('[data-writer-drag-handle]');
-      const image = target.closest<HTMLElement>('.writer-image-group-images .writer-ir__image img');
+      const image = target.closest<HTMLImageElement>('.writer-ir__image img');
       const nodeId = handle?.dataset.dragNodeId
         ?? image?.closest<HTMLElement>('[data-writer-block]')?.dataset.nodeId;
       if (!nodeId) return;
+      const block = editor.querySelector<HTMLElement>(`[data-writer-block][data-node-id="${CSS.escape(nodeId)}"]`);
+      const draggedImage = block?.dataset.nodeType === 'image' ? block.querySelector<HTMLImageElement>('.writer-ir__image img') : null;
+      if (draggedImage) {
+        if (findWriterBlock(document.blocks, nodeId)?.editable === false) return;
+        cancelImageDrag?.();
+        cancelImageDrag = startWriterImageDrag(event, draggedImage, editor, (x, y) => {
+          const hint = resolveDropHint(x, y, nodeId);
+          if (!hint) return null;
+          const id = hint.type === 'child' ? hint.parentId : hint.type === 'after' ? hint.afterId : hint.beforeId;
+          const element = editor.querySelector<HTMLElement>(`[data-writer-block][data-node-id="${CSS.escape(id)}"]`);
+          return element ? { element, position: hint.type } : null;
+        }, ({ element, position }) => {
+          const id = element.dataset.nodeId!;
+          moveBlock(nodeId, position === 'child' ? { type: 'child', parentId: id }
+            : position === 'before' ? { type: 'before', beforeId: id } : { type: 'after', afterId: id });
+        });
+        return;
+      }
       event.preventDefault();
       event.stopPropagation();
       draggingNodeIdRef.current = nodeId;
@@ -1662,18 +1697,7 @@ export function WriterIRDocumentEditor({
       const sourceId = draggingNodeIdRef.current;
       const hint = dropHintRef.current;
       if (!sourceId) return;
-      if (hint) {
-        const nextDocument = relocateWriterBlock(document, sourceId, hint);
-        if (nextDocument !== document) {
-          pendingSelectionRef.current = {
-            nodeId: sourceId,
-            start: 0,
-            end: 0,
-          };
-          lastEmittedDocumentRef.current = undefined;
-          onChange(nextDocument);
-        }
-      }
+      if (hint) moveBlock(sourceId, hint);
       stopDragging();
     };
 
@@ -1681,6 +1705,7 @@ export function WriterIRDocumentEditor({
     window.addEventListener('mousemove', handleMouseMove);
     window.addEventListener('mouseup', handleMouseUp);
     return () => {
+      cancelImageDrag?.();
       editor.removeEventListener('mousedown', handleMouseDown);
       window.removeEventListener('mousemove', handleMouseMove);
       window.removeEventListener('mouseup', handleMouseUp);

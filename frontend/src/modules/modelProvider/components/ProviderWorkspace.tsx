@@ -1,3 +1,4 @@
+import ExternalLink from '@/components/ExternalLink';
 import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   ArrowLeftOutlined,
@@ -51,6 +52,7 @@ import { useSupplierOrder } from "../hooks/useSupplierOrder";
 import { useFocusModality } from "../hooks/useFocusModality";
 import { canDiscoverWithoutApiKey } from "../providerAuthentication";
 import { getProviderConnectionFailureMessage } from "../connectionFailure";
+import { getEmbeddingDeletionWarning } from "../embeddingRecovery";
 import { SortableSupplierList } from "./SortableSupplierList";
 import { ModelTaskTabs, matchesModelTaskFilter, type ModelTaskFilter } from "./ModelTaskTabs";
 import { SavedProviderModels } from "./SavedProviderModels";
@@ -548,11 +550,9 @@ export function ProviderWorkspace(props: Props) {
       if (target.isCustom) setSelectedId("");
       message.success(label(target.isCustom ? "supplierDeleted" : "supplierReset"));
     } catch (error) {
-      const response = (error as { response?: { status?: number; data?: { code?: number; detail?: string; message?: string } } })?.response;
-      const detail = String(response?.data?.detail || response?.data?.message || "");
-      if (response?.status === 409 && ([2005039, 2005081, 2005089].includes(response.data?.code ?? -1) || detail.includes("embedding model is in use") || detail.includes("requires confirmation to downgrade"))) {
-        message.warning(t("modelProvider.embeddingInUse"));
-      } else message.error(getLocalizedErrorMessage(error));
+      const warning = getEmbeddingDeletionWarning(error, t);
+      if (warning) message.warning({ key: "embedding-in-use", ...warning });
+      else message.error(getLocalizedErrorMessage(error));
     } finally {
       setProviderDeleting(false);
     }
@@ -848,7 +848,7 @@ export function ProviderWorkspace(props: Props) {
                 {hasProgrammingScopeNotice(provider) ? <Alert
                   className="provider-workspace-service-scope" type="info" showIcon
                   message={<span>{label(getSupplierBrandKey(provider) === "GLM" ? "serviceScopeGlm" : getSupplierBrandKey(provider) === "Qwen" ? "serviceScopeQwen" : "serviceScopeGeneric")} {" "}
-                    <a href={programmingScopeLink(provider)} target="_blank" rel="noopener noreferrer">{label("serviceScopeOfficialLink")}</a></span>}
+                    <ExternalLink href={programmingScopeLink(provider)} target="_blank" rel="noopener noreferrer">{label("serviceScopeOfficialLink")}</ExternalLink></span>}
                 /> : null}
                 <section
                   className="provider-workspace-api-keys"
@@ -866,6 +866,7 @@ export function ProviderWorkspace(props: Props) {
                     disabled={endpointDirty || endpointSaving || keySaving}
                     changingKey={changingActiveKey}
                     removingKey={removingKey}
+                    removesModelsOnDelete={!provider.isCustom && !["vLLM", "LMDeploy"].includes(getSupplierBrandKey(provider) || "")}
                     onAdd={openAddKey}
                     onCreate={(apiKey) => addKey({ apiKey })}
                     onDelete={deleteKey}

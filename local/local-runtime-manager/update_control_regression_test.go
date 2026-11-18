@@ -35,8 +35,8 @@ func TestDesktopUpdateRuntimePlanSelection(t *testing.T) {
 	defer scan.Close()
 	for _, mode := range []string{"rag-disabled", "rag-enabled", "required-scan-unavailable"} {
 		t.Run(mode, func(t *testing.T) {
-			cfg := RuntimeConfig{LocalProxy: LocalProxyConfig{CoreHostPort: core.Listener.Addr().(*net.TCPAddr).Port}, Algorithm: AlgorithmConfig{RAGDisabled: mode == "rag-disabled"}}
-			if mode == "rag-enabled" {
+			cfg := RuntimeConfig{LocalProxy: LocalProxyConfig{CoreHostPort: core.Listener.Addr().(*net.TCPAddr).Port}, Algorithm: AlgorithmConfig{RAGDisabled: mode != "rag-enabled"}}
+			if mode != "required-scan-unavailable" {
 				cfg.LocalProxy.ScanHostPort = scan.Listener.Addr().(*net.TCPAddr).Port
 			}
 			for _, action := range []string{"status", "pause", "resume"} {
@@ -47,11 +47,7 @@ func TestDesktopUpdateRuntimePlanSelection(t *testing.T) {
 					}
 					continue
 				}
-				want := int64(1)
-				if mode == "rag-enabled" {
-					want = 3
-				}
-				if err != nil || state.Active != want || state.Paused != (action == "pause") {
+				if err != nil || state.Active != 3 || state.Paused != (action == "pause") {
 					t.Fatalf("%s: %+v %v", action, state, err)
 				}
 			}

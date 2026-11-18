@@ -15,7 +15,7 @@ func ReadLocalArtifactFile(path string, limit int64) ([]byte, error) {
 	if !filepath.IsAbs(path) || limit < 1 {
 		return nil, errors.New("invalid artifact file")
 	}
-	path = filepath.Clean(rewriteCanonicalUploadPath(path))
+	path = filepath.Clean(ResolveCanonicalUploadPath(path))
 	for _, directory := range []string{UploadRoot(), subagentWorkspaceRoot()} {
 		directory, err := filepath.Abs(directory)
 		if err != nil {

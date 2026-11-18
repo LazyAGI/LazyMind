@@ -92,13 +92,14 @@ func productArtifactMIME(name string) string {
 }
 
 func (r *Repository) resolveProductArtifactPath(ctx context.Context, session orm.WorkflowSession, artifact Artifact, path string) (string, error) {
-	if !filepath.IsAbs(path) {
-		return "", repositoryError("PRODUCT_ARTIFACT_PATH_INVALID")
-	}
-	for _, component := range strings.Split(path, string(os.PathSeparator)) {
+	for _, component := range strings.Split(filepath.ToSlash(path), "/") {
 		if component == ".." {
 			return "", repositoryError("PRODUCT_ARTIFACT_PATH_INVALID")
 		}
+	}
+	path = doc.ResolveCanonicalUploadPath(path)
+	if !filepath.IsAbs(path) {
+		return "", repositoryError("PRODUCT_ARTIFACT_PATH_INVALID")
 	}
 	resolved, err := filepath.EvalSymlinks(path)
 	if err != nil {
@@ -132,7 +133,7 @@ func (r *Repository) resolveProductArtifactPath(ctx context.Context, session orm
 		case map[string]any:
 			storedPath, _ = value["path"].(string)
 		}
-		if storedPath == "" || filepath.Clean(storedPath) != filepath.Clean(path) {
+		if storedPath == "" || filepath.Clean(doc.ResolveCanonicalUploadPath(storedPath)) != filepath.Clean(path) {
 			return "", repositoryError("PRODUCT_ARTIFACT_PATH_INVALID")
 		}
 		ownerRoot, absErr := filepath.Abs(doc.TempUserFilesRoot(session.CreateUserID))
@@ -1001,7 +1002,7 @@ func (r *Repository) productArtifactBytes(ctx context.Context, session orm.Workf
 		if !info.Mode().IsRegular() || info.Size() > 20<<20 {
 			return "", "", nil, repositoryError("PRODUCT_ARTIFACT_TOO_LARGE")
 		}
-		content, err := doc.ReadLocalArtifactFile(path, 20<<20)
+		content, err := doc.ReadLocalArtifactFile(doc.ResolveCanonicalUploadPath(path), 20<<20)
 		return filepath.Base(path), productArtifactMIME(path), content, err
 	}
 	if text != "" {

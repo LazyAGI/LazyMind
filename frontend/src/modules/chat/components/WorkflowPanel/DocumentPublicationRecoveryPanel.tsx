@@ -1,3 +1,4 @@
+import ExternalLink from '@/components/ExternalLink';
 import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { Button, Modal, Space } from 'antd';
 import { useTranslation } from 'react-i18next';
@@ -109,13 +110,13 @@ export function DocumentPublicationRecoveryPanel({ artifactId, slotId, itemIndex
   const target=documentPublicationUrl(operation?.target_url,operation?.provider);
   const hasFooterTarget=Boolean(onTarget && operation?.source_slot_id===slotId && operation?.item_index===itemIndex);
   if(operation && terminal.has(operation.status) && operation.status!=='succeeded' && !error) {
-    return target && !hasFooterTarget ? <a className='document-publication-recovery__link' href={target} target='_blank' rel='noreferrer'>{t('chat.writerIR.openCloudDocument')}</a> : null;
+    return target && !hasFooterTarget ? <ExternalLink className='document-publication-recovery__link' href={target} target='_blank' rel='noreferrer'>{t('chat.writerIR.openCloudDocument')}</ExternalLink> : null;
   }
   if(operation?.status==='succeeded' && !error) {
     const needsLink=operation.provider==='wechat' && !target;
     if(onPublished && !needsRefresh && !needsLink)return null;
     return <Space>
-      {!onPublished && (target ? <a href={target} target='_blank' rel='noreferrer'>{t('chat.writerIR.openCloudDocument')}</a> : <span>{t(needsLink?'chat.writerIR.wechatDraftLinkUnavailable':'chat.writerIR.writeBackSuccess')}</span>)}
+      {!onPublished && (target ? <ExternalLink href={target} target='_blank' rel='noreferrer'>{t('chat.writerIR.openCloudDocument')}</ExternalLink> : <span>{t(needsLink?'chat.writerIR.wechatDraftLinkUnavailable':'chat.writerIR.writeBackSuccess')}</span>)}
       {needsLink && <Button size='small' type='link' disabled={busy || publishing} onClick={()=>void load()}>{t('chat.writerIR.refreshWechatDraftLink')}</Button>}
       {needsRefresh && <Button size='small' type='link' disabled={disabled} onClick={()=>callbacks.current.onResolved()}>{label('updateDraft')}</Button>}
     </Space>;
@@ -129,7 +130,7 @@ export function DocumentPublicationRecoveryPanel({ artifactId, slotId, itemIndex
       {loaded && operation && <>
         <span>{label(known?`states.${operation.status}`:'unknownState')}</span>
         {(operation.source_slot_id!==slotId || operation.item_index!==itemIndex) && <span>{label('otherDraft')}</span>}
-        {target?<a href={target} target='_blank' rel='noreferrer'>{label('openTarget')}</a>:<span>{label('noTarget')}</span>}
+        {target?<ExternalLink href={target} target='_blank' rel='noreferrer'>{label('openTarget')}</ExternalLink>:<span>{label('noTarget')}</span>}
       </>}
       {error && <span role='alert'>{label(error)}</span>}
       <Space wrap size={6}>

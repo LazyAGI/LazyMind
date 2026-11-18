@@ -17,6 +17,40 @@ when_to_use: >
   不用于仅编写商务报价、资质证明或制作 PPT 的请求。
 
 runtime:
+  execution:
+    version: '1'
+    skills:
+    - scenario/execution.md
+    constraints:
+    - Follow the shared state.yml step specification, declared output schemas and acceptance criteria; preserve the
+      user request and bound input revisions.
+    - Validate actual artifacts before completion, honor questions and review pauses, and report missing capabilities
+      without fabricating output.
+    steps:
+      parse_bid_document:
+        tools: []
+      extract_tech_requirements:
+        tools: []
+      extract_disqualification_items:
+        tools: []
+      search_reference_materials:
+        tools:
+        - name: knowledge_list_documents
+          source: package
+        - name: knowledge_read_document
+          source: package
+      build_chapter_outline:
+        tools: []
+      write_chapter_contents:
+        tools: []
+      generate_proposal_images:
+        tools:
+        - name: image_generator
+          source: global
+      compose_proposal_docx:
+        tools: []
+      validate_proposal:
+        tools: []
   exclusive_tool_capabilities: [writer.create, writer.revise]
   collects_knowledge: true
   clarification_fields:

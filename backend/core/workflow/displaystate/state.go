@@ -120,7 +120,7 @@ func readState(db *gorm.DB, session orm.WorkflowSession) (View, error) {
 		return View{Status: "waiting", Reason: "approval_required", ApprovalStepID: approval}, nil
 	}
 	if session.Status == "active" || session.Status == "waiting" {
-		pending, err := pendingInput(db, session, latest)
+		pending, err := pendingInput(db, session)
 		if err != nil {
 			return View{}, err
 		}
@@ -134,7 +134,7 @@ func readState(db *gorm.DB, session orm.WorkflowSession) (View, error) {
 	// Only an admitted driver or explicit user resume can enter active. Historical
 	// stop markers must not hide that preparation before its new attempt exists.
 	if session.Status == "active" {
-		return View{Status: "running", Reason: "preparing"}, nil
+		return preparingState(db, session, current)
 	}
 	if session.Status == "failed" {
 		return View{Status: "failed", Reason: "execution_failed"}, nil
@@ -147,7 +147,7 @@ func readState(db *gorm.DB, session orm.WorkflowSession) (View, error) {
 		return View{Status: "waiting", Reason: "inputs_changed"}, nil
 	}
 	if len(current) == 0 {
-		return View{Status: "running", Reason: "preparing"}, nil
+		return preparingState(db, session, current)
 	}
 	step := current[0]
 	if step.Status != "succeeded" {
@@ -233,68 +233,83 @@ func legacyUserStoppedAt(db *gorm.DB, current []orm.WorkflowSessionStep) (time.T
 	return stoppedAt, nil
 }
 
-// A checkpoint is waiting only after its producer finished and the host persisted
-// a question-card token. Answers clear this state without reopening the producer.
-func pendingInput(db *gorm.DB, session orm.WorkflowSession, latest map[string]orm.WorkflowSessionStep) (string, error) {
-	if session.WorkflowRevisionID == "" || session.ControllerHost != "lazymind" {
-		return "", nil
-	}
-	var revision orm.WorkflowRevision
-	if err := db.Where("id = ?", session.WorkflowRevisionID).First(&revision).Error; err != nil {
-		return "", err
-	}
-	var graph graphengine.CompiledStateGraph
-	if err := json.Unmarshal(revision.CompiledGraph, &graph); err != nil {
-		return "", err
-	}
-	checkpoint := graph.Runtime.InputCheckpoint
-	if checkpoint == nil || latest[checkpoint.AfterStep].Status != "succeeded" {
-		return "", nil
-	}
-	for _, id := range checkpoint.BeforeSteps {
-		if step, ok := latest[id]; ok && !step.CreatedAt.Before(latest[checkpoint.AfterStep].CreatedAt) {
-			return "", nil
+func preparingState(db *gorm.DB, session orm.WorkflowSession, current []orm.WorkflowSessionStep) (View, error) {
+	preparing := View{Status: "running", Reason: "preparing"}
+	if session.ControllerHost == "lazymind" && len(current) > 0 {
+		historyID, err := ChatHistoryID(session)
+		if err != nil {
+			return View{}, err
+		}
+		if historyID != "" {
+			var history orm.ChatHistory
+			err := db.Select("run_status").Where("id = ? AND conversation_id = ?", historyID, session.ConversationID).Take(&history).Error
+			if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+				return View{}, err
+			}
+			if err == nil && history.RunStatus == "completed" {
+				for _, step := range current {
+					if step.Status != "succeeded" {
+						return View{Status: "failed", Reason: step.Status}, nil
+					}
+				}
+				return View{Status: "waiting", Reason: "next_step_required"}, nil
+			}
 		}
 	}
-	var rows []orm.WorkflowSlotRevision
-	if err := db.Where("session_id = ? AND slot_id = ? AND selected = ? AND validity <> ?", session.ID, checkpoint.Slot, true, "stale").Order("revision DESC").Limit(1).Find(&rows).Error; err != nil {
-		return "", err
+	if session.ControllerHost != "external-agent" || !strings.HasPrefix(session.OriginRef, "run_") {
+		return preparing, nil
 	}
-	if len(rows) == 0 {
-		return "", nil
+	var origin orm.ExternalChatRun
+	err := db.Where("id = ? AND actor_user_id = ? AND conversation_id = ?", session.OriginRef, session.CreateUserID, session.ConversationID).Take(&origin).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return preparing, nil
 	}
-	raw := rows[0].ContentSnapshot
-	if rows[0].HumanArtifactID != nil {
-		var artifact orm.WorkflowHumanArtifact
-		if err := db.Where("id = ?", *rows[0].HumanArtifactID).First(&artifact).Error; err != nil {
-			return "", err
+	if err != nil {
+		return View{}, err
+	}
+	runs := db.Model(&orm.ExternalChatRun{}).Where("actor_user_id = ? AND conversation_id = ? AND created_at >= ?", session.CreateUserID, session.ConversationID, origin.CreatedAt).Session(&gorm.Session{})
+	var active int64
+	if err := runs.Where("status IN ?", []string{"pending", "running"}).Count(&active).Error; err != nil {
+		return View{}, err
+	}
+	if active > 0 {
+		return preparing, nil
+	}
+	var latest orm.ExternalChatRun
+	if err := runs.Order("created_at DESC, id DESC").Take(&latest).Error; err != nil {
+		return View{}, err
+	}
+	// A completed Chat reply does not prove the workflow started. Preserve real
+	// execution/review states above, and distinguish failure from normal handoff.
+	switch latest.Status {
+	case "stopped":
+		return View{Status: "paused", Reason: "user_stopped"}, nil
+	case "completed", "failed":
+		if len(current) == 0 {
+			return View{Status: "failed", Reason: "execution_not_started"}, nil
 		}
-		raw = artifact.Value
+		for _, step := range current {
+			if step.Status != "succeeded" {
+				return View{Status: "failed", Reason: step.Status}, nil
+			}
+		}
+		if latest.Status == "failed" {
+			return View{Status: "failed", Reason: "external_driver_failed"}, nil
+		}
+		return View{Status: "waiting", Reason: "next_step_required"}, nil
+	default:
+		return preparing, nil
 	}
-	if len(raw) == 0 {
-		return "", nil
-	}
-	var envelope struct {
-		Data json.RawMessage `json:"data"`
-	}
-	if err := json.Unmarshal(raw, &envelope); err != nil {
+}
+
+// Native and external displays resolve the same pinned question artifact while
+// retaining the producing step used to highlight the input checkpoint.
+func pendingInput(db *gorm.DB, session orm.WorkflowSession) (string, error) {
+	request, err := PendingInput(db, session)
+	if err != nil || request == nil {
 		return "", err
 	}
-	if len(envelope.Data) > 0 {
-		raw = envelope.Data
-	}
-	var value struct {
-		Token     string            `json:"checkpoint_token"`
-		Answer    string            `json:"answer_text"`
-		Questions []json.RawMessage `json:"questions"`
-	}
-	if err := json.Unmarshal(raw, &value); err != nil {
-		return "", err
-	}
-	if value.Token != "" && strings.TrimSpace(value.Answer) == "" && len(value.Questions) > 0 {
-		return checkpoint.AfterStep, nil
-	}
-	return "", nil
+	return request.StepID, nil
 }
 
 func pendingApproval(db *gorm.DB, session orm.WorkflowSession, current []orm.WorkflowSessionStep) (string, error) {

@@ -73,20 +73,21 @@ def search_kb(
         results = parallel(*retrievers)(
             expanded, **retrieval_kwargs
         )
-        return filter_active_nodes(_fuse_retriever_results(results), user_id=payload['user_id'])
+        return filter_active_nodes(
+            _fuse_retriever_results(results), user_id=payload['user_id'], require_current_index=True)
 
     text_nodes = filter_active_nodes(
         _search_text(expanded, _kb_retrieve, reranker, rerank_topk, k_max),
-        user_id=payload['user_id'],
+        user_id=payload['user_id'], require_current_index=True,
     )
 
-    if image_retriever is None:
+    if image_topk <= 0 or image_retriever is None:
         return text_nodes
 
     image_kwargs = {'filters': payload.get('filters') or {}, 'topk': image_topk}
     if payload.get('llm_config'):
         image_kwargs['llm_config'] = payload['llm_config']
     image_nodes = filter_active_nodes(
-        list(image_retriever(query, **image_kwargs) or []), user_id=payload['user_id'],
+        list(image_retriever(query, **image_kwargs) or []), user_id=payload['user_id'], require_current_index=True,
     )
     return list(text_nodes or []) + image_nodes[:image_topk]

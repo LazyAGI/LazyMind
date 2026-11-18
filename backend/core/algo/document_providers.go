@@ -10,8 +10,13 @@ import (
 // DocumentProvider exposes registry declarations, not user configuration or
 // authorization to perform a provider operation. IDs/capabilities are opaque.
 type DocumentProvider struct {
-	ID           string   `json:"id"`
-	Capabilities []string `json:"capabilities" required:"true"`
+	ID           string                     `json:"id"`
+	Capabilities []string                   `json:"capabilities" required:"true"`
+	Templates    []DocumentProviderTemplate `json:"templates,omitempty"`
+}
+type DocumentProviderTemplate struct {
+	ID   string `json:"id" required:"true"`
+	Name string `json:"name" required:"true"`
 }
 type DocumentProviderCatalog struct {
 	Providers []*DocumentProvider `json:"providers" required:"true"`

@@ -24,6 +24,8 @@ const mocks = vi.hoisted(() => ({
   fetchPreferences: vi.fn().mockResolvedValue({ document_directories_enabled: true }),
 }));
 
+vi.mock('@/modules/taskCenter/useWorkflowChanges', () => ({ useWorkflowChanges: vi.fn() }));
+
 vi.mock("@/modules/user/uiPreferencesApi", () => ({
  fetchUserUiPreferences: mocks.fetchPreferences,
  USER_UI_PREFERENCES_CHANGED_EVENT: "lazymind:user-ui-preferences-changed",
@@ -178,6 +180,19 @@ describe("MainLayout conversation removal", () => {
       expect(screen.queryByText("v0.5")).not.toBeInTheDocument();
       fireEvent.click(screen.getByRole("button", { name: "layout.expandMenu" }));
       expect(screen.getByText("v0.5")).toBeVisible();
+    } finally {
+      vi.unstubAllGlobals();
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it.each([undefined, "", "   "])("shows the default version in local mode when the build version is %s", async (version) => {
+    vi.stubEnv("VITE_LAZYMIND_MODE", "local");
+    vi.stubEnv("VITE_APP_VERSION", version);
+    vi.stubGlobal("lazymindDesktop", undefined);
+    try {
+      render(<MemoryRouter><MainLayout /></MemoryRouter>);
+      expect(await screen.findByText("v0.5")).toBeVisible();
     } finally {
       vi.unstubAllGlobals();
       vi.unstubAllEnvs();

@@ -21,6 +21,7 @@ type GlobalEmbeddingChoice struct {
 	ProviderName string
 	Phase        string
 	Legacy       bool
+	indexState   embeddingIndexClassification
 }
 
 func ResolveGlobalEmbeddingChoice(ctx context.Context, db *gorm.DB) (GlobalEmbeddingChoice, bool, error) {
@@ -30,13 +31,15 @@ func ResolveGlobalEmbeddingChoice(ctx context.Context, db *gorm.DB) (GlobalEmbed
 	var state orm.EmbeddingIndexState
 	err := db.WithContext(ctx).Where("scope = ?", globalEmbeddingScope).Take(&state).Error
 	if err == nil {
-		phase := state.Phase
-		if state.ActiveModelID != "" && !validEmbeddingFingerprint(state.Signature) && phase != "clearing" && phase != "cleanup_failed" {
-			phase = "unverified"
+		counts, countErr := loadEmbeddingIndexKnowledgeBaseCounts(ctx, db)
+		if countErr != nil {
+			return GlobalEmbeddingChoice{}, false, countErr
 		}
+		indexState := classifyEmbeddingIndexState(state, true, counts.Affected, counts.Pending)
+		phase := embeddingChoiceCompatibilityPhase(state.Phase, indexState)
 		choice := GlobalEmbeddingChoice{
 			ModelID: state.ActiveModelID, Source: state.ActiveSource,
-			ModelName: state.ActiveModelName, ProviderName: state.ActiveProviderName, Phase: phase,
+			ModelName: state.ActiveModelName, ProviderName: state.ActiveProviderName, Phase: phase, indexState: indexState,
 		}
 		if choice.Source == "own" && choice.ModelID != "" {
 			var row struct{ CreateUserID string }
@@ -51,6 +54,12 @@ func ResolveGlobalEmbeddingChoice(ctx context.Context, db *gorm.DB) (GlobalEmbed
 	if !errors.Is(err, gorm.ErrRecordNotFound) {
 		return GlobalEmbeddingChoice{}, false, err
 	}
+	counts, err := loadEmbeddingIndexKnowledgeBaseCounts(ctx, db)
+	if err != nil {
+		return GlobalEmbeddingChoice{}, false, err
+	}
+	indexState := classifyEmbeddingIndexState(orm.EmbeddingIndexState{}, false, counts.Affected, counts.Pending)
+	phase := embeddingChoiceCompatibilityPhase("", indexState)
 	// Upgrade path: converge future runtime calls on one pre-existing selection.
 	// A signed state is created only by a new, successful selection probe.
 	var legacy struct {
@@ -67,13 +76,9 @@ func ResolveGlobalEmbeddingChoice(ctx context.Context, db *gorm.DB) (GlobalEmbed
 		Where("usm.model_type = ? AND m.model_type IN ? AND m.enabled = ?", "embed_main", []string{"embed", "embedding", "embed_main"}, true).
 		Order("usm.share DESC, usm.updated_at DESC, usm.user_id ASC, m.id ASC").Take(&legacy).Error
 	if err == nil {
-		phase, phaseErr := legacyEmbeddingPhase(ctx, db)
-		if phaseErr != nil {
-			return GlobalEmbeddingChoice{}, false, phaseErr
-		}
 		return GlobalEmbeddingChoice{
 			ModelID: legacy.ModelID, Source: "own", OwnerID: legacy.OwnerID,
-			ModelName: legacy.ModelName, ProviderName: legacy.ProviderName, Phase: phase, Legacy: true,
+			ModelName: legacy.ModelName, ProviderName: legacy.ProviderName, Phase: phase, Legacy: true, indexState: indexState,
 		}, true, nil
 	}
 	if !errors.Is(err, gorm.ErrRecordNotFound) {
@@ -83,17 +88,37 @@ func ResolveGlobalEmbeddingChoice(ctx context.Context, db *gorm.DB) (GlobalEmbed
 		var cloud orm.UserSelectedCloudModel
 		err := db.WithContext(ctx).Where("model_type = ?", "embed_main").Order("updated_at DESC, user_id ASC").Take(&cloud).Error
 		if err == nil {
-			phase, phaseErr := legacyEmbeddingPhase(ctx, db)
-			if phaseErr != nil {
-				return GlobalEmbeddingChoice{}, false, phaseErr
-			}
-			return GlobalEmbeddingChoice{ModelID: cloud.PublicModelKey, Source: "cloud", ModelName: cloud.DisplayNameSnapshot, ProviderName: CloudSystemProviderName, Phase: phase, Legacy: true}, true, nil
+			return GlobalEmbeddingChoice{ModelID: cloud.PublicModelKey, Source: "cloud", ModelName: cloud.DisplayNameSnapshot, ProviderName: CloudSystemProviderName, Phase: phase, Legacy: true, indexState: indexState}, true, nil
 		}
 		if !errors.Is(err, gorm.ErrRecordNotFound) {
 			return GlobalEmbeddingChoice{}, false, err
 		}
 	}
+	// Index evidence is authoritative even when there is no model selection to
+	// display. Preserve an abnormal classification so readiness cannot fall
+	// through to a static runtime and bypass an unverified historical index.
+	if indexState.ReadinessReason != "" {
+		return GlobalEmbeddingChoice{Phase: phase, indexState: indexState}, true, nil
+	}
 	return GlobalEmbeddingChoice{}, false, nil
+}
+
+func embeddingChoiceCompatibilityPhase(persistedPhase string, indexState embeddingIndexClassification) string {
+	if persistedPhase == "detached" {
+		return "detached"
+	}
+	switch indexState.ReadinessReason {
+	case "index_identity_unverified":
+		return "unverified"
+	case "index_cleanup_in_progress":
+		return "clearing"
+	case "index_cleanup_incomplete":
+		return "cleanup_failed"
+	case "index_cleared":
+		return "cleared"
+	default:
+		return persistedPhase
+	}
 }
 
 func validEmbeddingFingerprint(value string) bool {
@@ -103,30 +128,6 @@ func validEmbeddingFingerprint(value string) bool {
 	}
 	dimensions, err := strconv.Atoi(parts[1])
 	return err == nil && dimensions > 0 && dimensions <= 65536
-}
-
-// Before the global state was introduced, users could index with different
-// models. No single historical selection can identify all of those vectors.
-func legacyEmbeddingPhase(ctx context.Context, db *gorm.DB) (string, error) {
-	if !db.Migrator().HasTable(&orm.Dataset{}) {
-		return "", nil
-	}
-	nonIndexedLevels := []string{"stored", "parsed", "chunked"}
-	var affected int64
-	query := db.WithContext(ctx).Table("datasets d").Where("d.deleted_at IS NULL")
-	if db.Migrator().HasTable(&orm.DocumentProcessingState{}) {
-		query = query.Joins("LEFT JOIN document_processing_states s ON s.dataset_id = d.id").
-			Where("d.processing_level NOT IN ? OR s.index_status = ?", nonIndexedLevels, "succeeded").Distinct("d.id")
-	} else {
-		query = query.Where("d.processing_level NOT IN ?", nonIndexedLevels)
-	}
-	if err := query.Count(&affected).Error; err != nil {
-		return "", err
-	}
-	if affected > 0 {
-		return "unverified", nil
-	}
-	return "", nil
 }
 
 func globalEmbeddingReadiness(ctx context.Context, db *gorm.DB, userID string) (modelReadyResponse, bool, error) {
@@ -142,7 +143,11 @@ func globalEmbeddingReadiness(ctx context.Context, db *gorm.DB, userID string) (
 		response.Source = "shared"
 		response.SharedByID = choice.OwnerID
 	}
-	if choice.ModelID == "" || choice.Phase == "clearing" || choice.Phase == "cleanup_failed" || choice.Phase == "unverified" {
+	if choice.indexState.ReadinessReason != "" {
+		response.Reason = choice.indexState.ReadinessReason
+		return response, true, nil
+	}
+	if choice.ModelID == "" {
 		return response, true, nil
 	}
 	if choice.Source == "cloud" {

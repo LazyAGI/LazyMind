@@ -13,17 +13,20 @@ import { useArtifactPreview } from '../../ArtifactPreview/context';
 import { filePreviewTarget } from '../../ArtifactPreview/target';
 
 import { exportCitationMarkdown } from "@/modules/chat/utils/chatExportCitations";
+import { chatExportContent } from "@/modules/chat/utils/chatExportContent";
 import type { ChatSourceCollection } from "@/modules/chat/utils/sourceAdapter";
 
 interface Props {
   sources?: ChatSourceCollection;
   content: string;
+  rawContent?: string;
   exports: ChatExport[];
   conversationId: string;
   historyId: string;
 }
 
-export default function ChatExportActions({ content, exports, conversationId, historyId, sources = [] }: Props) {
+export default function ChatExportActions({ content, rawContent, exports, conversationId, historyId, sources = [] }: Props) {
+  content = chatExportContent(content, rawContent);
   const { t } = useTranslation();
   const preview = useArtifactPreview();
   const artifacts = useTaskCenterStore((state) => state.artifactsByConversation[conversationId]);

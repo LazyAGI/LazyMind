@@ -352,6 +352,69 @@ afterEach(() => {
 });
 
 describe('WriterIRDocumentEditor image previews', () => {
+  it('retains gallery scroll when a reorder and its saved revision rebuild the view', () => {
+    const photos = ['first', 'second'].map(name => ({ node_id: name, type: 'image', content: name,
+      references: [{ type: 'preview_asset', url: `https://example.com/${name}.png` }] }));
+    const source: WriterDocument = { ...document, blocks: photos,
+      metadata: { image_groups: [{ layout: 'sliding', images: photos.map(photo => ({ source: photo.references[0].url, occurrence: 0 })) }] } };
+    const props = { document: source, ariaLabel: 'Writer document', onChange: vi.fn(), onFocus: vi.fn(), onBlur: vi.fn() };
+    const view = render(<WriterIRDocumentEditor {...props} />);
+    view.container.querySelector<HTMLElement>('.writer-image-group-images')!.scrollLeft = 120;
+    const reordered = { ...source, blocks: [...photos].reverse() };
+    view.rerender(<WriterIRDocumentEditor {...props} document={reordered} />);
+    const rail = view.container.querySelector<HTMLElement>('.writer-image-group-images')!;
+    fireEvent.load(view.getByAltText('second'));
+    expect(rail.scrollLeft).toBe(120);
+    expect(Array.from(rail.querySelectorAll('img')).map(image => image.alt)).toEqual(['second', 'first']);
+    view.rerender(<WriterIRDocumentEditor {...props} document={{ ...reordered, metadata: { ...reordered.metadata, revision: 2 } }} />);
+    expect(view.container.querySelector<HTMLElement>('.writer-image-group-images')!.scrollLeft).toBe(120);
+  });
+
+  it('commits a standalone image drag on release using the existing heading nesting rule', () => {
+    const source: WriterDocument = { ...document, blocks: [...document.blocks, {
+      node_id: 'photo', type: 'image', content: 'Photo',
+      references: [{ type: 'preview_asset', url: 'https://example.com/photo.png' }],
+    }] };
+    const onChange = vi.fn();
+    const view = render(<WriterIRDocumentEditor document={source} ariaLabel='Writer document'
+      onChange={onChange} onFocus={vi.fn()} onBlur={vi.fn()} />);
+    const image = view.getByAltText('Photo');
+    const heading = view.container.querySelector<HTMLElement>('[data-node-id="sec-1"]')!;
+    const hitTest = Object.getOwnPropertyDescriptor(window.document, 'elementFromPoint');
+    Object.defineProperty(window.document, 'elementFromPoint', { configurable: true, value: () => heading });
+    vi.spyOn(heading, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 0, 300, 100));
+    vi.spyOn(image, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 150, 100, 100));
+    try {
+      fireEvent.mouseDown(image, { button: 0, clientX: 20, clientY: 170 });
+      fireEvent.mouseMove(window, { clientX: 100, clientY: 60 });
+      expect(window.document.querySelector('.writer-image-drag-preview')).toBeInTheDocument();
+      expect(onChange).not.toHaveBeenCalled();
+      fireEvent.keyDown(window, { key: 'Escape' });
+      fireEvent.mouseUp(window, { clientX: 100, clientY: 60 });
+      expect(onChange).not.toHaveBeenCalled();
+
+      fireEvent.mouseDown(image, { button: 0, clientX: 20, clientY: 170 });
+      fireEvent.mouseMove(window, { clientX: 100, clientY: 60 });
+      fireEvent.mouseUp(window, { clientX: 100, clientY: 60 });
+      expect(onChange).toHaveBeenCalledOnce();
+      const result = onChange.mock.calls[0][0] as WriterDocument;
+      expect(result.blocks.map(block => block.node_id)).toEqual(['sec-1', 'p-1']);
+      expect(result.blocks[0].children).toEqual([source.blocks[2]]);
+      expect(window.document.querySelector('.writer-image-drag-preview')).toBeNull();
+
+      onChange.mockClear();
+      const paragraphHandle = view.container.querySelector<HTMLElement>('[data-node-id="p-1"] [data-writer-drag-handle]')!;
+      fireEvent.mouseDown(paragraphHandle, { button: 0, clientX: 10, clientY: 130 });
+      fireEvent.mouseMove(window, { clientX: 100, clientY: 10 });
+      expect(window.document.querySelector('.writer-image-drag-preview')).toBeNull();
+      fireEvent.mouseUp(window, { clientX: 100, clientY: 10 });
+      expect((onChange.mock.calls[0][0] as WriterDocument).blocks.map(block => block.node_id)).toEqual(['p-1', 'sec-1', 'photo']);
+    } finally {
+      if (hitTest) Object.defineProperty(window.document, 'elementFromPoint', hitTest);
+      else Reflect.deleteProperty(window.document, 'elementFromPoint');
+    }
+  });
+
   it.each(['before', 'after'] as const)('keeps images visible when the first URL resolves %s numbering arrives', async (timing) => {
     let resolveFirst!: (url: string) => void;
     vi.spyOn(imageUrl, 'resolveMarkdownImageUrlAsync')

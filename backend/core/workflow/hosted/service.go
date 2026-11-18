@@ -58,12 +58,15 @@ func executorID(owner string) string {
 }
 
 func (s *Service) Begin(ctx context.Context, owner, sessionID, attemptID string) (Execution, error) {
-	return s.begin(ctx, owner, sessionID, attemptID, false)
+	return s.begin(ctx, owner, sessionID, attemptID, false, "")
 }
 
-func (s *Service) begin(ctx context.Context, owner, sessionID, attemptID string, resume bool) (Execution, error) {
+func (s *Service) begin(ctx context.Context, owner, sessionID, attemptID string, resume bool, claimID string) (Execution, error) {
 	if strings.TrimSpace(owner) == "" || strings.TrimSpace(sessionID) == "" || strings.TrimSpace(attemptID) == "" {
 		return Execution{}, &ProtocolError{Code: "INVALID_EXECUTION", Message: "owner, session_id and execution_id are required"}
+	}
+	if len(claimID) > 255 {
+		return Execution{}, &ProtocolError{Code: "INVALID_EXECUTION", Message: "claim command ID must be at most 255 characters"}
 	}
 	if err := s.Store.AuthorizeSession(ctx, sessionID, owner); err != nil {
 		return Execution{}, err
@@ -72,8 +75,8 @@ func (s *Service) begin(ctx context.Context, owner, sessionID, attemptID string,
 	if err := s.DB.WithContext(ctx).Where("id = ?", sessionID).First(&session).Error; err != nil {
 		return Execution{}, err
 	}
-	if controlstore.Controlled(session) {
-		return s.beginControlled(ctx, owner, sessionID, attemptID, resume)
+	if controlstore.Controlled(session) || claimID != "" {
+		return s.claimExecution(ctx, owner, sessionID, attemptID, resume, claimID)
 	}
 	row, err := s.Attempts.Attempt(ctx, attemptID)
 	if err != nil || row.SessionID != sessionID {
@@ -96,7 +99,7 @@ func (s *Service) begin(ctx context.Context, owner, sessionID, attemptID string,
 }
 
 func (s *Service) Resume(ctx context.Context, owner, sessionID, attemptID string) (Execution, error) {
-	return s.begin(ctx, owner, sessionID, attemptID, true)
+	return s.begin(ctx, owner, sessionID, attemptID, true, "")
 }
 
 func (s *Service) authorizeExecution(ctx context.Context, owner, sessionID, attemptID string) error {
@@ -141,7 +144,51 @@ func (s *Service) Publish(ctx context.Context, owner, sessionID, attemptID strin
 	if err != nil {
 		return err
 	}
+	input.Artifact, err = s.normalizeGeneratedText(ctx, sessionID, input.Artifact)
+	if err != nil {
+		return err
+	}
 	return s.Artifacts.Save(ctx, contract, input.Artifact)
+}
+
+func (s *Service) normalizeGeneratedText(ctx context.Context, sessionID string, artifact executor.Artifact) (executor.Artifact, error) {
+	if !common.IsTextArtifactContentType(artifact.ContentType) {
+		return artifact, nil
+	}
+	var object map[string]json.RawMessage
+	if json.Unmarshal(common.CanonicalizeTextArtifactValue(artifact.ContentType, artifact.Value), &object) != nil {
+		return artifact, nil
+	}
+	key := "text"
+	if _, ok := object[key]; !ok {
+		key = "data"
+	}
+	var value string
+	if json.Unmarshal(object[key], &value) != nil || !strings.Contains(value, "##") {
+		return artifact, nil
+	}
+	var session orm.WorkflowSession
+	if err := s.DB.WithContext(ctx).First(&session, "id = ?", sessionID).Error; err != nil {
+		return artifact, err
+	}
+	markdown, err := s.Store.PinnedMarkdownHint(ctx, &session, artifact.Slot)
+	if err != nil || !markdown {
+		return artifact, err
+	}
+	var result struct {
+		Text *string `json:"text"`
+	}
+	err = common.ApiPost(ctx, common.JoinURL(common.ChatServiceEndpoint(), "/api/document:normalize-generated"),
+		map[string]string{"text": value}, nil, &result, 5*time.Second)
+	if err != nil {
+		return artifact, err
+	}
+	if result.Text == nil {
+		return artifact, fmt.Errorf("invalid generated Markdown normalization response")
+	}
+	object[key], _ = json.Marshal(*result.Text)
+	artifact.Value, err = json.Marshal(object)
+	return artifact, err
 }
 
 type Submission struct {
@@ -249,6 +296,12 @@ func (s *Service) Submit(ctx context.Context, owner, sessionID, attemptID string
 	artifacts, err := validateArtifacts(contract, submission.Artifacts)
 	if err != nil {
 		return SubmissionResult{}, err
+	}
+	for i := range artifacts {
+		artifacts[i], err = s.normalizeGeneratedText(ctx, sessionID, artifacts[i])
+		if err != nil {
+			return SubmissionResult{}, &ProtocolError{Code: "ARTIFACT_WRITE_FAILED", Message: "artifact could not be prepared", Cause: err}
+		}
 	}
 	for _, artifact := range artifacts {
 		if err := s.Artifacts.Save(ctx, contract, artifact); err != nil {

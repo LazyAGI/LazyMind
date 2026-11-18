@@ -1,0 +1,15 @@
+a[data-external-link='true']::after {
+  content: '';
+  display: inline-block;
+  width: 0.85em;
+  height: 0.85em;
+  margin-inline-start: 0.3em;
+  flex-shrink: 0;
+  vertical-align: -0.05em;
+  background: currentColor;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M14 3h7v7h-2V6.4l-9.3 9.3-1.4-1.4L17.6 5H14V3ZM5 5h6v2H5v12h12v-6h2v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2Z'/%3E%3C/svg%3E") center / contain no-repeat;
+}
+
+// Existing icon-only actions already communicate the same destination.
+a[data-external-link='true']:has(.anticon-export)::after { display: none; }
+a[data-external-link='true']:focus-visible { outline: 2px solid currentColor; outline-offset: 3px; }

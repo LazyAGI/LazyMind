@@ -65,6 +65,12 @@ func enqueueCanonicalAttempt(ctx context.Context, db *gorm.DB, request subagent.
 	}
 	_ = json.Unmarshal(task.Params, &taskParams)
 	value.DeclaredOutputTypes = taskParams.OutputTypes
+	var workflowParams WorkflowStepParams
+	_ = json.Unmarshal(task.Params, &workflowParams)
+	if execution := workflowParams.Runtime.Execution; execution != nil && execution.Steps[step.StepID].OutputValidator == "paper-agent-v1" {
+		value.LaunchRequest = workflowParams.LaunchUserInput
+		value.UserRequest = workflowParams.CurrentUserInput
+	}
 	if required, ok := request.Params["required_output_artifact_keys"].([]string); ok {
 		value.RequiredOutputs = required
 	}

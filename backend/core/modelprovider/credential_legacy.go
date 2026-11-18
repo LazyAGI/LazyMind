@@ -32,7 +32,14 @@ func legacyModelProviderEncryptionKey() string {
 }
 
 func decodeLegacyModelProviderCiphertext(ciphertext string) (string, error) {
-	decoded, ok, err := secretcrypto.DecodeAESGCM(json.RawMessage(ciphertext), legacyModelProviderEncryptionKey())
+	key := legacyModelProviderEncryptionKey()
+	decoded, ok, err := secretcrypto.DecodeAESGCM(json.RawMessage(ciphertext), key)
+	if err != nil && key != legacyModelProviderDefaultSecret {
+		// Local credentials saved before device-key sharing retain their original ciphertext.
+		if legacy, recognized, legacyErr := secretcrypto.DecodeAESGCM(json.RawMessage(ciphertext), legacyModelProviderDefaultSecret); legacyErr == nil && recognized {
+			return string(legacy), nil
+		}
+	}
 	if err != nil {
 		return "", err
 	}

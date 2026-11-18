@@ -2235,3 +2235,25 @@ func TestOpenAPIModelOutputProjectionMetadata(t *testing.T) {
 		t.Fatal("static failed attempts must not acquire an active cursor")
 	}
 }
+
+func TestOpenAPIModelCallFinishedIncludesCancellation(t *testing.T) {
+	router := mux.NewRouter()
+	registerCoreRoutes(router)
+	raw, err := buildOpenAPISpecFromRouter(router)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var spec map[string]any
+	if err := json.Unmarshal(raw, &spec); err != nil {
+		t.Fatal(err)
+	}
+	schemas := spec["components"].(map[string]any)["schemas"].(map[string]any)
+	finished := schemaPropertiesForTest(t, schemas, "ModelCallFinishedData")
+	kinds := finished["kind"].(map[string]any)["enum"].([]any)
+	for _, kind := range kinds {
+		if kind == "cancelled" {
+			return
+		}
+	}
+	t.Fatal("model cancellation is missing from public OpenAPI")
+}

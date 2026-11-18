@@ -11,6 +11,8 @@ import (
 	"runtime"
 	"strings"
 	"time"
+
+	"github.com/mesotron7x/LazyMind/local/local-runtime-manager/internal/winfile"
 )
 
 type pythonComponent struct {
@@ -35,6 +37,49 @@ type pythonComponentCatalog struct {
 
 var componentDigestPattern = regexp.MustCompile(`^[a-f0-9]{64}$`)
 var pythonComponentIDs = []string{"rag", "cluster"}
+
+// Run with the startup lock held after stopping the previous runtime.
+func prepareDesktopPythonComponents(ctx context.Context, cfg RuntimeConfig, paths RuntimePaths) error {
+	version := strings.TrimSpace(os.Getenv(desktopAppVersionEnvVar))
+	if cfg.Profile != "desktop" || version == "" {
+		return nil
+	}
+	catalog, err := loadPythonComponentCatalog(paths)
+	if err != nil || catalog == nil {
+		return err
+	}
+	for _, id := range pythonComponentIDs {
+		if _, deferred := catalog.Components[id]; !deferred {
+			continue
+		}
+		// The native update already selected and verified the target RAG bundle.
+		preserveInstallation := id == "rag" && cfg.UpdateBootstrap != nil
+		if err := prepareDesktopPythonComponentVersion(ctx, paths, id, version, preserveInstallation); err != nil {
+			return fmt.Errorf("prepare Python component %s for app version %s: %w", id, version, err)
+		}
+	}
+	return nil
+}
+
+func prepareDesktopPythonComponentVersion(ctx context.Context, paths RuntimePaths, id, version string, preserveInstallation bool) error {
+	marker := filepath.Join(paths.StateDir, id+"-component-app-version")
+	previous, err := os.ReadFile(marker)
+	if err == nil && strings.TrimSpace(string(previous)) == version {
+		return nil
+	}
+	if err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	if !preserveInstallation {
+		componentDir := filepath.Join(paths.RuntimeRoot, "deps", "python-components", id)
+		if err := winfile.RetryOperation(ctx, func() error {
+			return os.RemoveAll(componentDir)
+		}, winfile.RetryOptions{MaxWait: pythonPayloadRenameWait}); err != nil {
+			return err
+		}
+	}
+	return writeFileAtomically(ctx, marker, []byte(version+"\n"), 0o644, nil)
+}
 
 func sourceRAGInstalled(paths RuntimePaths) bool {
 	data, err := os.ReadFile(filepath.Join(paths.RuntimeRoot, "deps", "python-components", "rag", "source.ready"))
@@ -172,11 +217,12 @@ func (m *RuntimeManager) prepareDesktopCluster(ctx context.Context, cfg RuntimeC
 	m.startupEvent("phase.started", "python-cluster", started, nil)
 	prepareCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
+	environment := append(serviceRuntimeEnv(paths), pythonComponentEnvironment(paths, cfg.Algorithm.RAGDisabled)...)
 	result, err := m.runner.Run(prepareCtx, Command{
 		Name: paths.CoreBin,
 		Args: []string{"--prepare-cluster-component"},
 		Dir:  filepath.Join(paths.RepoRoot, coreSourceDirName),
-		Env: append(pythonComponentEnvironment(paths, cfg.Algorithm.RAGDisabled),
+		Env: append(environment,
 			"LAZYMIND_RUNTIME_MODE=local",
 			"LAZYMIND_RUNTIME_ROOT="+paths.RuntimeRoot),
 	})

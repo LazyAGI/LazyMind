@@ -1,5 +1,6 @@
 """Keep the reviewer focused on the submitted manuscript and its references/figures."""
 from copy import deepcopy
+from pathlib import Path
 import re
 
 from ..publication import chart_uri, prose
@@ -14,6 +15,10 @@ def select_materials(inputs):
     result = {key: deepcopy(inputs[key]) for key in ('topic', 'request', 'manuscript') if key in inputs}
     papers = []
     for paper in inputs.get('papers') or []:
+        if paper.get('source_tables') or (
+                paper.get('source') == 'input' and not paper.get('citation')
+                and Path(paper.get('filename') or paper.get('title') or '').suffix.lower() in {'.csv', '.tsv'}):
+            continue
         identifier = paper.get('id')
         if identifier is not None and not isinstance(identifier, str):
             raise ValueError('paper.id 必须是字符串')

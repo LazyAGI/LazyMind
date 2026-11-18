@@ -20,6 +20,7 @@ import (
 	"lazymind/core/state"
 	"lazymind/core/store"
 	"lazymind/core/workflow"
+	"lazymind/core/workflow/controlstore"
 	"lazymind/core/workflow/graphengine"
 )
 
@@ -1227,6 +1228,12 @@ func TestWorkflowTaskModelSwitchProtection(t *testing.T) {
 	}{
 		{"approval", ""},
 		{"linked background workflow", ""},
+		{"stopped workflow", ""},
+		{"legacy paused workflow", ""},
+		{"stopping workflow", "background_task_running"},
+		{"stopped with running sibling", "background_task_running"},
+		{"stopped with queued sibling", "background_task_running"},
+		{"stopped with other background chat", "background_task_running"},
 		{"active workflow", "workflow_running"},
 		{"running sibling", "background_task_running"},
 		{"queued sibling", "background_task_running"},
@@ -1255,6 +1262,12 @@ func TestWorkflowTaskModelSwitchProtection(t *testing.T) {
 				task.TaskType = "background_chat"
 			case "active workflow":
 				session.Status = "active"
+			case "stopped workflow", "stopped with running sibling", "stopped with queued sibling", "stopped with other background chat":
+				session.Status = "stopped"
+			case "legacy paused workflow":
+				session.LastStoppedAt = &now
+			case "stopping workflow":
+				session.Status = "pausing"
 			case "automatic waiting":
 				session.WorkflowMode, mode = "auto", "auto"
 			case "unlinked task":
@@ -1284,13 +1297,13 @@ func TestWorkflowTaskModelSwitchProtection(t *testing.T) {
 			if err := db.Create(&task).Error; err != nil {
 				t.Fatal(err)
 			}
-			if tc.name == "running sibling" || tc.name == "queued sibling" {
-				status := strings.TrimSuffix(tc.name, " sibling")
+			if strings.HasSuffix(tc.name, " sibling") {
+				status := strings.TrimSuffix(strings.TrimPrefix(tc.name, "stopped with "), " sibling")
 				if err := db.Create(&orm.WorkflowSessionStep{ID: "sibling", SessionID: session.ID, StepID: "sibling", TaskID: "sibling-task", Status: status, Validity: "effective", Attempt: 1, CreatedAt: now, UpdatedAt: now}).Error; err != nil {
 					t.Fatal(err)
 				}
 			}
-			if tc.name == "other background chat" {
+			if tc.name == "other background chat" || tc.name == "stopped with other background chat" {
 				if err := db.Create(&orm.TaskCenterTask{ID: "background", UserID: "owner", ConversationID: "conversation", TaskType: "background_chat", Status: "running", CreatedAt: now, UpdatedAt: now}).Error; err != nil {
 					t.Fatal(err)
 				}
@@ -1300,6 +1313,92 @@ func TestWorkflowTaskModelSwitchProtection(t *testing.T) {
 				t.Fatalf("switch blocked reason=%q error=%v, want %q", reason, err, tc.want)
 			}
 		})
+	}
+}
+
+func TestStoppedWorkflowCanSwitchModelAndResume(t *testing.T) {
+	db := newChatModelTestDB(t).DB
+	if err := db.AutoMigrate(&orm.WorkflowSessionStep{}, &orm.WorkflowOutbox{}, &orm.WorkflowHostAction{},
+		&orm.WorkflowRevision{}, &orm.WorkflowApprovalPreference{}, &orm.WorkflowReviewCheckpoint{}); err != nil {
+		t.Fatal(err)
+	}
+	store.Init(db, nil, nil)
+	t.Cleanup(func() { store.Init(nil, nil, nil) })
+	seedAvailableChatModel(t, db, "owner", "provider-a", "group-a", "model-a", "OpenAI", "A", "gpt-a", "llm", true, "fake-a")
+	seedAvailableChatModel(t, db, "owner", "provider-b", "group-b", "model-b", "OpenAI", "B", "gpt-b", "llm", true, "fake-b")
+	seedSelectedChatModel(t, db, "owner", "model-a", false)
+	binding, err := resolveInitialChatModelBinding(t.Context(), db, "owner", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	conversation := orm.Conversation{ID: "stop-model-resume", BaseModel: orm.BaseModel{CreateUserID: "owner", CreatedAt: now, UpdatedAt: now}}
+	applyResolvedChatModelBinding(&conversation, binding)
+	session := orm.WorkflowSession{ID: "resumable-workflow", ConversationID: conversation.ID, CreateUserID: "owner",
+		ControllerHost: "lazymind", ControlProtocol: "workflow.control.v1", WorkflowID: "test", Status: "active", CreatedAt: now, UpdatedAt: now}
+	task := orm.TaskCenterTask{ID: "resumable-task", UserID: "owner", ConversationID: conversation.ID,
+		WorkflowSessionID: &session.ID, TaskType: "workflow_run", Status: "running", CreatedAt: now, UpdatedAt: now}
+	attempt := orm.WorkflowSessionStep{ID: "running-attempt", SessionID: session.ID, StepID: "generate", TaskID: "native-task",
+		ExecutorHost: "lazymind", Status: "running", Validity: "effective", Attempt: 1, CreatedAt: now, UpdatedAt: now}
+	for _, row := range []any{&conversation, &session, &task, &attempt, &orm.SubAgentTask{
+		ID: "native-task", Status: "running", InputSlots: json.RawMessage(`[]`), OutputSlots: json.RawMessage(`[]`),
+	}} {
+		if err := db.Create(row).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	setStopped := func(stopped bool) {
+		t.Helper()
+		if err := db.Transaction(func(tx *gorm.DB) error {
+			_, _, err := controlstore.ApplyLifecycle(tx, &session, "model-switch-lifecycle", stopped)
+			return err
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	assertBlock := func(want string) {
+		t.Helper()
+		if reason, err := conversationModelSwitchBlock(t.Context(), db, "owner", conversation.ID); err != nil || reason != want {
+			t.Fatalf("switch block=%q error=%v, want %q", reason, err, want)
+		}
+	}
+	assertBlock("workflow_running")
+	setStopped(true)
+	assertBlock("")
+
+	listRequest := httptest.NewRequest(http.MethodGet, "/api/core/chat/models?conversation_id="+conversation.ID, nil)
+	listRequest.Header.Set("X-User-Id", "owner")
+	listed := httptest.NewRecorder()
+	ListChatModels(listed, listRequest)
+	var catalog struct {
+		Data chatModelsResponse `json:"data"`
+	}
+	if err := json.Unmarshal(listed.Body.Bytes(), &catalog); err != nil || listed.Code != http.StatusOK || !catalog.Data.SwitchAllowed {
+		t.Fatalf("paused catalog status=%d body=%s error=%v", listed.Code, listed.Body.String(), err)
+	}
+	request := httptest.NewRequest(http.MethodPatch, "/api/core/conversations/"+conversation.ID+"/model", strings.NewReader(`{"mode":"fixed","model_id":"model-b","expected_version":1}`))
+	request.Header.Set("X-User-Id", "owner")
+	request = mux.SetURLVars(request, map[string]string{"conversation_id": conversation.ID})
+	response := httptest.NewRecorder()
+	PatchConversationModel(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("paused model switch status=%d body=%s", response.Code, response.Body.String())
+	}
+	// Switching only changes the conversation's model, not the resumable run.
+	if err := db.First(&session, "id = ?", session.ID).Error; err != nil || session.Status != "stopped" {
+		t.Fatalf("switch changed paused session: %+v error=%v", session, err)
+	}
+	if err := db.First(&task, "id = ?", task.ID).Error; err != nil || task.Status != "running" || task.FinishedAt != nil {
+		t.Fatalf("switch finalized resumable task: %+v error=%v", task, err)
+	}
+	setStopped(false)
+	assertBlock("workflow_running")
+	config, err := LoadConversationLLMConfig(t.Context(), db, "owner", conversation.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := config["llm"].(map[string]any)["model"]; got != "gpt-b" {
+		t.Fatalf("resumed workflow config still uses %v", got)
 	}
 }
 

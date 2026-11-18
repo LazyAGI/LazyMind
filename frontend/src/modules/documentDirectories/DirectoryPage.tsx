@@ -1,3 +1,5 @@
+import { externalLinkProps } from '@/runtime/externalNavigation';
+import ExternalLink from '@/components/ExternalLink';
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ChangeEvent } from 'react';
 import { ArrowLeftOutlined, CloudOutlined, FileTextOutlined, FolderOpenOutlined, FolderOutlined, InfoCircleOutlined, MoreOutlined, PlusOutlined, PushpinFilled, PushpinOutlined, SearchOutlined } from '@ant-design/icons';
 import { Alert, Badge, Breadcrumb, Button, Collapse, Drawer, Dropdown, Empty, Form, Input, Modal, message, Pagination, Popover, Select, Space, Spin, Switch, Table, Tag, Tooltip, Typography, theme, type TableColumnsType } from 'antd';
@@ -166,7 +168,7 @@ export default function DirectoryPage() {
     { title: t('directories.document'), key: 'title', render: (_: unknown, e: DocumentDirectoryEntry) => <div className="directory-document">
       <span className="directory-item-icon">{e.source === 'feishu' || e.source === 'google_drive' ? <CloudOutlined /> : <FileTextOutlined />}</span>
       <div className="directory-document-text">
-        <div className="directory-document-title"><Tooltip title={entryTitle(e)}>{e.source === 'local' ? <button type="button" className="directory-title-button" onClick={() => setLocalEntry(e)}>{entryTitle(e)}</button> : e.source === 'mail' ? <button type="button" className="directory-title-button" onClick={() => setMailEntry(e)}>{entryTitle(e)}</button> : entryURL(e) ? <a href={entryURL(e)} target="_blank" rel="noreferrer">{entryTitle(e)}</a> : <button type="button" className="directory-title-button" onClick={() => setSelectedEntry(e)}>{entryTitle(e)}</button>}</Tooltip>{e.pinned && <Tooltip title={t('directories.entryPin')}><PushpinFilled /></Tooltip>}</div>
+        <div className="directory-document-title"><Tooltip title={entryTitle(e)}>{e.source === 'local' ? <button type="button" className="directory-title-button" onClick={() => setLocalEntry(e)}>{entryTitle(e)}</button> : e.source === 'mail' ? <button type="button" className="directory-title-button" onClick={() => setMailEntry(e)}>{entryTitle(e)}</button> : entryURL(e) ? <ExternalLink href={entryURL(e)} target="_blank" rel="noreferrer">{entryTitle(e)}</ExternalLink> : <button type="button" className="directory-title-button" onClick={() => setSelectedEntry(e)}>{entryTitle(e)}</button>}</Tooltip>{e.pinned && <Tooltip title={t('directories.entryPin')}><PushpinFilled /></Tooltip>}</div>
         <div className="directory-document-summary">
           <Typography.Text type="secondary" className="directory-document-meta">{sourceLabel(e.source)} · {groupName(e.group_id)}</Typography.Text>
           {(!e.confirmed || inaccessible(e) || e.content_state === 'changed') && <span className="directory-entry-states">
@@ -402,7 +404,7 @@ export default function DirectoryPage() {
           <Space wrap>
             {selected.source === 'local' && <Button type="primary" icon={<FileTextOutlined />} onClick={() => setLocalEntry(selected)}>{t('directories.previewFile')}</Button>}
             {selected.source === 'mail' && <Button type="primary" onClick={() => setMailEntry(selected)}>{t('directories.viewMail')}</Button>}
-            {entryURL(selected) && <Button type="primary" href={entryURL(selected)} target="_blank" rel="noreferrer">{t('directories.openOriginal')}</Button>}
+            {entryURL(selected) && <Button type="primary" {...externalLinkProps(entryURL(selected))} target="_blank" rel="noreferrer">{t('directories.openOriginal')}</Button>}
           </Space>
           <section className="directory-entry-section">
             <Typography.Title level={5}>{t('directories.evidence')}</Typography.Title>

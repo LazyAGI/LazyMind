@@ -151,3 +151,13 @@
 .pdf-reader-header--compact .pdf-reader-header-start { display: none; }
 .pdf-reader-header--compact .pdf-reader-header-end { display: flex; flex: 1 0 auto; flex-wrap: nowrap; justify-content: space-between; gap: 8px; }
 .pdf-reader-header--compact .pdf-reader-tools { flex: 0 0 auto; flex-wrap: nowrap; }
+
+/* The canvas already paints the glyphs. Native selection can otherwise paint
+   transparent text-layer glyphs in the system highlight text color, doubling
+   the page text with the text layer's approximate font metrics. */
+.pdf-reader-workspace .textLayer ::selection {
+  color: transparent;
+  background: rgba(0, 100, 255, .25);
+  text-shadow: none;
+}
+.pdf-reader-workspace .textLayer br::selection { background: transparent; }

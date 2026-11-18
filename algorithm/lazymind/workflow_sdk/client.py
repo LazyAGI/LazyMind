@@ -60,6 +60,7 @@ class AdvanceRequest:
     handoff: bool = False
     retry_origin: str = 'automatic'
     command_id: str = field(default_factory=lambda: str(uuid.uuid4()))
+    resume_for_rerun: bool = False
 
 
 @dataclass(frozen=True)
@@ -459,6 +460,9 @@ class WorkflowClient:
                    'workflow_mode': request.workflow_mode,
                    'retry_origin': request.retry_origin,
                    'steps': [asdict(step) for step in request.steps]}
+        if request.resume_for_rerun:
+            payload['resume_for_rerun'] = True
+            payload['trigger_history_id'] = self.trigger_history_id
         if self.enable_tool_retrieval is not None:
             payload['parent_agentic_config'] = {'enable_tool_retrieval': self.enable_tool_retrieval}
         if self.trace_context is not None:

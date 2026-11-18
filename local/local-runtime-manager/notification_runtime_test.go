@@ -19,7 +19,7 @@ func TestNotificationRuntimeUsesMatchingServiceIdentityAndLoopback(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	core, gateway := coreServiceEnv(cfg, paths), channelGatewayEnv(cfg, paths)
+	core, gateway := mustCoreServiceEnv(t, cfg, paths), channelGatewayEnv(cfg, paths)
 	assertEnvContains(t, core, "LAZYMIND_CHANNEL_GATEWAY_BASE_URL=http://127.0.0.1:"+strconv.Itoa(cfg.ChannelGateway.Port))
 	assertEnvContains(t, gateway, "LAZYMIND_CHANNEL_GATEWAY_CORE_BASE_URL=http://127.0.0.1:"+strconv.Itoa(cfg.LocalProxy.CoreHostPort))
 	for _, env := range [][]string{core, gateway} {

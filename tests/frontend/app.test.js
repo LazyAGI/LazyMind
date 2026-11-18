@@ -9,6 +9,7 @@ import {
   loginSource,
   mainLayoutSource,
   mainEntry,
+  readFrontendFile,
   routePaths,
   runtimeApiBaseSource,
   runtimeDesktopBridgeSource,
@@ -20,7 +21,10 @@ import {
 describe('Vite entrypoint', () => {
   it('mounts the React app through the current module entry', () => {
     expect(indexHtml).toContain('<div id="app"></div>');
-    expect(indexHtml).toContain('<script type="module" src="/src/main.tsx"></script>');
+    expect(indexHtml).toContain('<script type="module" src="/src/bootstrap.ts"></script>');
+    const bootstrapEntry = readFrontendFile('src/bootstrap.ts');
+    expect(bootstrapEntry).toContain("import('./main').catch(");
+    expect(bootstrapEntry).toContain("new Event('lazymind:startup-failed')");
     expect(mainEntry).toContain('createRoot');
     expect(mainEntry).toContain('document.getElementById("app")');
     expect(mainEntry).toContain('<GlobalErrorBoundary>');

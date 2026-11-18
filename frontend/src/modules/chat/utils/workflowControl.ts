@@ -1,7 +1,16 @@
 import type { Snapshot, WorkflowControlCommand, WorkflowHostAction, WorkflowReviewCheckpoint } from '@/api/generated/core-client/api';
 import type { WorkflowSession } from '@/modules/chat/store/workflowPanel';
+import type { AskQuestion } from '@/modules/chat/components/AskCard';
 
-export type WorkflowActionKind = 'save' | 'confirm' | 'confirm_and_continue' | 'continue' | 'retry' | 'rewind' | 'stop' | 'resume';
+export type WorkflowActionKind = 'save' | 'confirm' | 'confirm_and_continue' | 'continue' | 'retry' | 'rewind' | 'stop' | 'resume' | 'answer_input';
+
+export interface WorkflowInputRequest {
+  artifact_id: string;
+  revision: number;
+  slot: string;
+  title?: string;
+  questions: Array<AskQuestion & { options?: string[] }>;
+}
 
 export type WorkflowReview = Pick<WorkflowReviewCheckpoint, 'id' | 'step_id' | 'execution_id' | 'status' | 'version' | 'manifest_hash'>;
 
@@ -11,6 +20,7 @@ export interface WorkflowControlView extends Pick<Snapshot, 'session_id' | 'stat
   active_execution_ids: string[];
   delivery: Pick<WorkflowHostAction, 'id' | 'kind' | 'status' | 'execution_id' | 'consumed_at' | 'last_error'> | null;
   available_actions: string[];
+  input_request?: WorkflowInputRequest | null;
 }
 
 export interface WorkflowActionIntent {
@@ -19,11 +29,28 @@ export interface WorkflowActionIntent {
   completedStepId?: string;
   review?: Pick<WorkflowReview, 'id' | 'version' | 'manifest_hash'>;
   preferenceScope?: 'step' | 'following';
+  input?: Pick<WorkflowInputRequest, 'artifact_id' | 'revision'>;
+  answerText?: string;
 }
 
 /** User intent from the shared panel, independent of the host protocol. */
 export interface WorkflowPanelActionIntent extends Omit<WorkflowActionIntent, 'kind' | 'review'> {
   kind: 'approve' | 'continue' | 'retry' | 'rewind' | 'stop' | 'resume';
+}
+
+/** A completed host notification may hand control back before the next step begins. */
+export function externalContinuationStep(session: WorkflowSession, control?: WorkflowControlView): string | undefined {
+  const delivery = control?.delivery;
+  if (!control || control.session_id !== session.session_id || !control.binding?.bound
+    || control.continuation !== 'continue' || !control.admission.can_begin || control.active_executions !== 0
+    || !control.available_actions.includes('continue') || control.reviews.some(review => review.status === 'pending')
+    || !['active', 'waiting'].includes(session.status) || !session.projection?.ready?.length
+    || delivery?.kind !== 'continue' || delivery.status !== 'accepted' || delivery.consumed_at || !delivery.execution_id) return undefined;
+  const completed = session.steps?.find(step => step.step_id === session.current_step_id
+    && step.status === 'succeeded' && step.validity !== 'stale');
+  const node = completed && session.projection.nodes?.[completed.step_id];
+  return node?.execution === 'succeeded' && node.validity !== 'stale' && !node.requires_approval
+    ? completed?.step_id : undefined;
 }
 
 /** Translate the shared action using the snapshot the user saw when clicking. */
@@ -51,11 +78,19 @@ export function externalPanelAction(
 export interface WorkflowControlRequest extends Pick<WorkflowControlCommand, 'command_id' | 'expected_state_version' | 'step_id' | 'review_id' | 'review_version' | 'manifest_hash'> {
   kind: Exclude<WorkflowActionKind, 'save'>;
   preference_scope?: 'step' | 'following';
+  input_artifact_id?: string;
+  input_revision?: number;
+  answer_text?: string;
 }
 
 export class ReviewRefreshRequired extends Error {}
+export class InputRefreshRequired extends Error {}
 
 export const REVIEW_CHANGED_NOTICE = 'chat.workflowControlReviewChanged';
+export const INPUT_CHANGED_NOTICE = 'chat.workflowControlInputChanged';
+export const INPUT_SAVED_EXTERNAL_NOTICE = 'chat.workflowInputSavedExternal';
+export const INPUT_SAVED_PAUSED_NOTICE = 'chat.workflowInputSavedPaused';
+export const INPUT_SAVED_NOTICE = 'chat.workflowInputSaved';
 
 export type OverlayInfoBanner = { key: string; tone: 'info' | 'warning' };
 
@@ -72,7 +107,7 @@ export function deliveryBanner(delivery: WorkflowControlView['delivery'] | null 
 
 /** At most one info/warning strip so the panel workspace is not squeezed by stacked Alerts. */
 export function overlayInfoBanner(noticeKey: string, delivery: WorkflowControlView['delivery'] | null | undefined, binding?: WorkflowControlView['binding']): OverlayInfoBanner | undefined {
-  if (noticeKey === REVIEW_CHANGED_NOTICE) return { key: noticeKey, tone: 'info' };
+  if ([REVIEW_CHANGED_NOTICE, INPUT_CHANGED_NOTICE, INPUT_SAVED_EXTERNAL_NOTICE, INPUT_SAVED_PAUSED_NOTICE, INPUT_SAVED_NOTICE].includes(noticeKey)) return { key: noticeKey, tone: 'info' };
   return deliveryBanner(delivery, binding);
 }
 
@@ -89,6 +124,12 @@ export function controlActions(
     const key = JSON.stringify(intent);
     if (!pending || pending.key !== key) {
       const current = await read();
+      if (intent.kind === 'answer_input') {
+        if (!intent.input || current.input_request?.artifact_id !== intent.input.artifact_id
+          || current.input_request.revision !== intent.input.revision) {
+          throw new InputRefreshRequired('Input request changed before submitting');
+        }
+      }
       if (intent.kind === 'confirm' || intent.kind === 'confirm_and_continue') {
         const review = current.reviews.find(item => item.id === intent.review?.id);
         // A fresh read may include another editor's change. Never silently approve it.
@@ -108,6 +149,10 @@ export function controlActions(
         ...(stepId ? { step_id: stepId } : {}),
         ...(intent.review ? { review_id: intent.review.id, review_version: intent.review.version, manifest_hash: intent.review.manifest_hash } : {}),
         ...(intent.preferenceScope ? { preference_scope: intent.preferenceScope } : {}),
+        ...(intent.kind === 'answer_input' && intent.input ? {
+          input_artifact_id: intent.input.artifact_id, input_revision: intent.input.revision,
+          answer_text: intent.answerText,
+        } : {}),
       } };
     }
     try {

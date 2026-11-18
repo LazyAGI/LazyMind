@@ -26,6 +26,7 @@ from lazyllm.tools.writer.provider import (
 )
 from lazyllm.tools.writer.tools import WriterResourceTools, WriterRevisionTools
 from lazyllm.tools.writer.tools.revision_tools import apply_patch_to_ir
+from lazyllm.tools.writer.templates.wechat import list_wechat_templates
 from .obsidian import LazyMindObsidianProvider
 from .artifacts import (
     WRITER_BLOCK_SCHEMA,
@@ -50,7 +51,11 @@ def get_writer_provider(provider: str):
 
 
 def list_document_providers() -> list[dict[str, Any]]:
-    return list_writer_providers()
+    providers = list_writer_providers()
+    for provider in providers:
+        if provider['id'] == 'wechat':
+            provider['templates'] = list_wechat_templates()
+    return providers
 
 
 def _provider_name_from_document(document: WriterDocument) -> str:
@@ -139,6 +144,7 @@ def sync_writer_documents(
         candidate.metadata['source'] = written['target_document']
         candidate.revision = written['target_document']['meta']['publication_revision']
         return {**written, 'persisted_document': candidate.model_dump(), 'patch_set': patch.model_dump()}
+    warnings = []
     if changed:
         output = WriterResourceTools(
             llm=None,
@@ -148,6 +154,7 @@ def sync_writer_documents(
             _result_data(output, 'persisted_document')
         )
         result = PatchResult.model_validate(_result_data(output, 'patch_result'))
+        warnings = output['metadata']['warnings']
     else:
         persisted = source
         result = PatchResult(
@@ -164,6 +171,7 @@ def sync_writer_documents(
         'patch_set': patch.model_dump(),
         'patch_result': result.model_dump(),
         'persisted_document': candidate.model_dump(),
+        'warnings': warnings,
     }
 
 
@@ -259,6 +267,15 @@ def write_document(
     target.adapter = converted.provider
     media_library = MediaAssetLibrary.model_validate(media_assets) if media_assets else None
     provider.require_capability(mode)
+    if converted.provider == 'wechat':
+        from lazyllm.tools.writer.provider.wechat import prepare_wechat_cover
+        from lazymind.chat.engine.tools.multimodal import image_generator
+        from lazymind.model_config import is_model_role_available
+
+        target = prepare_wechat_cover(
+            target, converted.source_document, _temp_root(), media_assets=media_library,
+            model_available=is_model_role_available, generator=image_generator,
+        )
     try:
         write_result = provider.write_document(
             converted,
@@ -320,6 +337,7 @@ def write_document(
         'provider': converted.provider,
         'write_result': normalized_write_result,
         'target_document': refreshed_target.model_dump(exclude_defaults=True),
+        'warnings': list(write_result.get('warnings') or []),
     }
 
 

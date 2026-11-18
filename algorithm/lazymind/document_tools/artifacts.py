@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any, Mapping
 from lazyllm.tools.agent import ToolExecutionError
 from lazyllm.tools.writer.data_models import (
+    MediaAssetLibrary,
     SectionInstruction,
     WriterDocument,
     WritingContext,
@@ -338,6 +339,9 @@ def normalize_generated_markdown(markdown: str) -> str:
     for index, level, title in _markdown_heading_rows([line.rstrip('\r\n') for line in lines]):
         if level == 1:
             continue
+        # A decimal directly followed by a unit/name is content, not a section number.
+        if re.match(r'^\d+(?:\.\d+)+[^\W\d_]', title.lstrip('《')):
+            continue
         clean = strip_heading_numbering(title)
         if clean != title:
             heading = _MARKDOWN_ATX_HEADING_RE.match(lines[index].rstrip('\r\n'))
@@ -431,12 +435,14 @@ def markdown_to_writer_document(
     *,
     document_id: str,
     stage: str = 'final',
+    media_assets: dict[str, Any] | None = None,
 ) -> WriterDocument:
     """Convert the established Markdown subset to Writer IR."""
     return parse_document_markdown(
         markdown,
         document_id=document_id,
         stage=stage,
+        media_assets=MediaAssetLibrary.model_validate(media_assets) if media_assets is not None else None,
     )
 
 

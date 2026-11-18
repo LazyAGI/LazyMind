@@ -182,7 +182,11 @@ func TestClearedChunksRequireManualReparseAndIgnoreOldSuccess(t *testing.T) {
 	if err := db.Model(&current).Update("status", "SUCCESS").Error; err != nil {
 		t.Fatal(err)
 	}
-	syncProcessingTaskStates(req, "dataset-1")
+	// Lowering the default while explicit indexing runs must not strand its result.
+	if err := db.Model(&orm.Dataset{}).Where("id = ?", "dataset-1").Update("processing_level", ProcessingLevelParsed).Error; err != nil {
+		t.Fatal(err)
+	}
+	reconcileDeferredIndexingWithReady(context.Background(), func(context.Context, string) (bool, error) { return true, nil })
 	if err := db.Where("dataset_id = ? AND document_id = ?", "dataset-1", "doc-1").Take(&state).Error; err != nil {
 		t.Fatal(err)
 	}

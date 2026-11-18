@@ -1,3 +1,4 @@
+import { externalLinkProps } from '@/runtime/externalNavigation';
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Alert,
@@ -206,7 +207,7 @@ export default function WeChatOfficialAccountPage() {
                   {ip}
                 </Text>
               ) : null}
-              <Link href={WECHAT_OFFICIAL_ACCOUNT_PLATFORM_URL} target="_blank" rel="noreferrer">
+              <Link {...externalLinkProps(WECHAT_OFFICIAL_ACCOUNT_PLATFORM_URL)} target="_blank" rel="noreferrer">
                 {t("modelProvider.wechatOfficialAccount.openPlatform")}
               </Link>
             </Space>
@@ -411,7 +412,7 @@ export default function WeChatOfficialAccountPage() {
           </div>
           <Link
             className="model-provider-cloud-doc-open-platform"
-            href={WECHAT_OFFICIAL_ACCOUNT_PLATFORM_URL}
+            {...externalLinkProps(WECHAT_OFFICIAL_ACCOUNT_PLATFORM_URL)}
             target="_blank"
             rel="noreferrer"
           >

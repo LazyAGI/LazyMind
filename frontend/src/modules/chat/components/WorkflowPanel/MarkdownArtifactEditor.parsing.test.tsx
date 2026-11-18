@@ -23,9 +23,9 @@ describe('MarkdownArtifactEditor real Markdown parsing', () => {
     const options = container.querySelector('details.writer-document-options')!;
     options.setAttribute('open', '');
     fireEvent(options, new Event('toggle'));
-    fireEvent.click(screen.getByRole('button', { name: '源码' }));
-    expect(screen.getByRole('textbox', { name: '源码' }).getAttribute('readonly')).not.toBeNull();
-    expect(screen.getByRole('textbox', { name: '源码' })).toHaveValue(
+    fireEvent.click(screen.getByRole('button', { name: '查看源码' }));
+    expect(screen.getByRole('textbox', { name: '查看源码' }).getAttribute('readonly')).not.toBeNull();
+    expect(screen.getByRole('textbox', { name: '查看源码' })).toHaveValue(
       `# 素材收集结果\n\n页面 HTML 作为前景 <${tag}> 嵌入（叠蒙版使用）。\n\n## 后续步骤\n\n继续生成页面。`,
     );
     expect(onSave).not.toHaveBeenCalled();

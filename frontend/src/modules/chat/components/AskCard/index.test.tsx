@@ -1,8 +1,13 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { message } from "antd";
+import { StrictMode } from "react";
 
 import AskCard, { type AskPending } from "./index";
+
+import { askDraftStore } from "@/modules/chat/store/askAnswerDraft";
+
+beforeEach(() => { askDraftStore.clear(); sessionStorage.clear(); });
 
 vi.mock("react-i18next", () => ({
   initReactI18next: { type: "3rdParty", init: vi.fn() },
@@ -16,6 +21,123 @@ vi.mock("@/modules/chat/utils/chunkUpload", () => ({
 }));
 
 describe("AskCard read-only history", () => {
+  it.each(["getItem", "setItem"] as const)("allows typing and navigation when browser storage.%s fails", method => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const storage = vi.spyOn(sessionStorage, method).mockImplementation(() => { throw new DOMException("Storage unavailable", method === "getItem" ? "SecurityError" : "QuotaExceededError"); });
+    try {
+      const props = { navigationKey: "storage-failure", askPending: { ask_id: "storage-failure", questions: [
+        { text: "First", type: "text" as const }, { text: "Second", type: "text" as const },
+      ] }, onSubmit: vi.fn() };
+      const view = render(<AskCard {...props} />);
+      fireEvent.change(screen.getByRole("textbox"), { target: { value: "Still editable" } });
+      expect(screen.getByRole("textbox")).toHaveValue("Still editable");
+      fireEvent.click(screen.getByRole("button", { name: /chat.askCardNext/ }));
+      act(() => { window.dispatchEvent(new Event("pagehide")); });
+      expect(screen.getByText("Second")).toBeVisible();
+      view.unmount();
+      render(<AskCard {...props} />);
+      expect(screen.getByText("Second")).toBeVisible();
+      expect(warn).toHaveBeenCalled();
+    } finally { storage.mockRestore(); warn.mockRestore(); }
+  });
+
+  it("remembers the question without an answer edit and isolates conversation and card scopes", () => {
+    const props = { askPending: { ask_id: "ask", questions: [
+      { text: "First", type: "text" as const },
+      { text: "Second", type: "text" as const },
+      { text: "Third", type: "text" as const },
+    ] }, onSubmit: vi.fn(), onAnswerChange: vi.fn(), navigationKey: "conversation-a:history:ask" };
+    const view = render(<AskCard {...props} />);
+    fireEvent.click(screen.getByRole("button", { name: /chat.askCardNext/ }));
+    fireEvent.click(screen.getByRole("button", { name: /chat.askCardNext/ }));
+    expect(screen.getByText("Third")).toBeVisible();
+    view.unmount();
+    const restored = render(<AskCard {...props} />);
+    expect(screen.getByText("Third")).toBeVisible();
+    restored.rerender(<AskCard {...props} navigationKey="conversation-b:history:ask" />);
+    expect(screen.getByText("First")).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "Go to question 2" }));
+    restored.rerender(<AskCard {...props} />);
+    expect(screen.getByText("Third")).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: /chat.askCardPrev/ }));
+    restored.unmount();
+    render(<AskCard {...props} />);
+    expect(screen.getByText("Second")).toBeVisible();
+    expect(props.onAnswerChange).not.toHaveBeenCalled();
+  });
+
+  it("remembers automatic advance after selecting an option", () => {
+    vi.useFakeTimers();
+    const props = { navigationKey: "auto-advance", askPending: { ask_id: "auto", questions: [
+      { text: "Choose", type: "single" as const, choices: ["A", "B"] },
+      { text: "Follow-up", type: "text" as const },
+    ] }, onSubmit: vi.fn() };
+    try {
+      const view = render(<AskCard {...props} />);
+      fireEvent.click(screen.getByRole("radio", { name: "A" }));
+      act(() => { vi.advanceTimersByTime(180); });
+      expect(screen.getByText("Follow-up")).toBeVisible();
+      view.unmount();
+      render(<AskCard {...props} />);
+      expect(screen.getByText("Follow-up")).toBeVisible();
+    } finally { vi.useRealTimers(); }
+  });
+
+  it.each(["-1", "3", "invalid"])("ignores an invalid saved question index (%s)", saved => {
+    sessionStorage.setItem("askDraft:bounds", JSON.stringify({ questionIndex: saved === "invalid" ? saved : Number(saved) }));
+    render(<AskCard navigationKey="bounds" askPending={{ ask_id: "bounds", questions: [
+      { text: "Only question", type: "text" },
+    ] }} onSubmit={vi.fn()} />);
+    expect(screen.getByText("Only question")).toBeVisible();
+  });
+
+  it("does not write navigation storage while typing", () => {
+    const write = vi.spyOn(sessionStorage, "setItem");
+    try {
+      render(<AskCard navigationKey="typing" askPending={{ ask_id: "typing", questions: [
+        { text: "Text?", type: "text" },
+      ] }} onSubmit={vi.fn()} />);
+      write.mockClear();
+      fireEvent.change(screen.getByRole("textbox"), { target: { value: "a" } });
+      fireEvent.change(screen.getByRole("textbox"), { target: { value: "ab" } });
+      expect(write).not.toHaveBeenCalled();
+    } finally { write.mockRestore(); }
+  });
+
+  it("notifies draft changes once per edit when React replays state updaters", () => {
+    const changed = vi.fn();
+    render(<StrictMode><AskCard askPending={{ ask_id: "typing", questions: [
+      { id: "text", text: "Text?", type: "text" },
+    ] }} onAnswerChange={changed} onSubmit={vi.fn()} /></StrictMode>);
+    const input = screen.getByRole("textbox");
+    fireEvent.change(input, { target: { value: "a" } });
+    fireEvent.change(input, { target: { value: "ab" } });
+    expect(input).toHaveValue("ab");
+    expect(changed.mock.calls).toEqual([
+      [0, { type: "text", value: "a" }],
+      [0, { type: "text", value: "ab" }],
+    ]);
+  });
+
+  it("submits every optional question as unanswered without requiring any input", async () => {
+    const submit = vi.fn().mockResolvedValue(true);
+    render(<AskCard onSubmit={submit} askPending={{ ask_id: "optional", questions: [
+      { id: "text", text: "Text?", type: "text", required: false, validation: { min_length: 5 } },
+      { id: "single", text: "Single?", type: "single", required: false, choices: ["A", "B"] },
+      { id: "multiple", text: "Multiple?", type: "multiple", required: false, choices: ["A", "B"] },
+      { id: "boolean", text: "Boolean?", type: "boolean", required: false },
+    ] }} />);
+    for (let index = 0; index < 3; index++) {
+      fireEvent.click(screen.getByRole("button", { name: /chat.askCardNext/ }));
+    }
+    const button = screen.getByRole("button", { name: "chat.askCardSubmit" });
+    expect(button).toBeEnabled();
+    fireEvent.click(button);
+    await waitFor(() => expect(submit).toHaveBeenCalledTimes(1));
+    expect(submit.mock.calls[0][0].structured.questions.map((q: { answer: unknown }) => q.answer))
+      .toEqual([null, null, null, null]);
+  });
+
   it("does not carry answers from a previous card into a different field", () => {
     const props = { onSubmit: vi.fn() };
     const { rerender } = render(<AskCard {...props} askPending={{ ask_id: "first", questions: [

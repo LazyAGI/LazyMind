@@ -5,8 +5,9 @@ import type { CloudDocumentProvidersVm } from "../hooks/useCloudDocumentProvider
 import CloudDocumentCredentialForm from "./CloudDocumentCredentialForm";
 import "./githubConnectionSection.scss";
 
-export default function GitHubConnectionSection({ vm, logo, management = false }: {
+export default function GitHubConnectionSection({ vm, logo, management = false, preferExistingCredentials = false, onConnectCancelled }: {
   vm: CloudDocumentProvidersVm; logo: ReactNode; management?: boolean;
+  preferExistingCredentials?: boolean; onConnectCancelled?: () => void;
 }) {
   const { t, github } = vm;
   const trigger = useRef<HTMLElement | null>(null);
@@ -27,6 +28,7 @@ export default function GitHubConnectionSection({ vm, logo, management = false }
   }, [github.session, vm.setGitHubDialogOpen]);
 
   function closeDialog() {
+    onConnectCancelled?.();
     if (github.active || github.retryCreate) { void github.cancel(); return; }
     if (vm.feishuSetupSubmitting) return;
     vm.setGitHubDialogOpen(false);
@@ -126,7 +128,7 @@ export default function GitHubConnectionSection({ vm, logo, management = false }
             {t("modelProvider.cloudDocuments.credentialSaveAndAuthorize")}
           </Button>
           : <Button type="primary" aria-label={label(github.retryCreate ? "retry" : "start")}
-            onClick={() => void (github.retryCreate ? github.retry() : github.start("", management))}>
+            onClick={() => void (github.retryCreate ? github.retry() : github.start("", management && !preferExistingCredentials))}>
             {label(github.retryCreate ? "retry" : "start")}
           </Button>)}
       </Space>}>

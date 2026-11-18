@@ -110,8 +110,18 @@ export interface DesktopAgentConnectionStatus {
 }
 
 export interface DesktopAgentIntegrationStatus {
+  // Client-only: the latest inspection failed; retained fields are historical.
+  inspection_unavailable?: boolean;
   diagnostic_id?: string;
   diagnostic_log?: string;
+  diagnostic_context?: {
+    action: string;
+    stage?: string;
+    current_cli?: string;
+    app_version?: string;
+    environment?: Record<string, string>;
+    configuration?: Array<{ config_path: string; configured_cli?: string; connection_file?: string; reason?: string }>;
+  };
   enabled?: boolean;
   login?: { state: "running" | "succeeded" | "failed" | "cancelled"; message?: string };
   issue?: { stage?: string; operation_id?: string; code: "environment_mismatch" | "configuration_unreadable" | "workbuddy_login_required" | "workbuddy_auth_unreadable" | "quit_required" | "disconnect_pending" | "process_inspection_failed" | "control_port_conflict" | "control_window_unavailable" | "launch_failed" | "startup_timeout" | "runtime_unavailable" | "lazymind_auth_required" | "lazymind_unavailable" | "configuration_failed" | "operation_busy" | "operation_cancelled" | "startup_unavailable" | "pairing_required" | "pairing_disabled" | "pairing_account_mismatch" | "pairing_credential_mismatch" | "pairing_invalid" | "pairing_unreadable" | "mcp_trust_required" | "mcp_enable_required" | "unsupported_version" | "dependency_environment" | "operation_failed" | "version_unreadable" | "capability_unavailable" | "host_unavailable" | "startup_unavailable" | "installation_unavailable" | "cdp_unavailable"; path?: string };
@@ -210,6 +220,9 @@ type DesktopBridgeCommand =
   | "openCloudRegister";
 
 interface LazyMindDesktopBridge {
+  localFileAction?: (payload: { path: string; action: "open" | "reveal" }) => Promise<unknown>;
+  openChatExternal?: (url: string) => Promise<unknown>;
+  openExternal?: (url: string) => Promise<void>;
   platform?: string;
   appVersion?: () => Promise<string>;
   openLogsDir?: () => Promise<void> | void;
@@ -267,6 +280,11 @@ function getDesktopBridge(): LazyMindDesktopBridge | undefined {
 
   return (window as Window & { lazymindDesktop?: LazyMindDesktopBridge })
     .lazymindDesktop;
+}
+
+export function getExternalBrowserBridge(): ((url: string) => Promise<void>) | undefined {
+  const bridge = getDesktopBridge();
+  return bridge?.openExternal ? url => bridge.openExternal!(url) : undefined;
 }
 
 function localBridgeFailure(error: unknown, fallback: "unavailable" | "failed" = "unavailable"): Extract<DesktopBridgeResult, { ok: false }> {
@@ -823,4 +841,14 @@ export function downloadDesktopFile(
   payload: DesktopArtifactFilePayload,
 ): Promise<DesktopFileActionResult> {
   return callDesktopFileAction("downloadFile", payload);
+}
+
+export async function actOnLocalChatFile(path: string, action: "open" | "reveal"): Promise<void> {
+  const bridge = getDesktopBridge();
+  if (!bridge?.localFileAction) throw new Error("Local files require the LazyMind desktop app");
+  await bridge.localFileAction({ path, action });
+}
+
+export function openChatExternal(url: string): Promise<unknown> | undefined {
+  return getDesktopBridge()?.openChatExternal?.(url);
 }

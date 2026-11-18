@@ -11,6 +11,7 @@ type Facts struct {
 	Status                  string
 	Dismissed               bool
 	PendingReviews          int64
+	PendingInput            bool
 	ActiveAttempts          int64
 	NativeAttempts          int64
 	BindingRequired         bool
@@ -29,6 +30,12 @@ func Decide(f Facts) (continuation string, admission Admission) {
 	}
 	if f.BindingRequired && !f.Bound {
 		return "binding_required", Admission{Reason: "binding_required"}
+	}
+	if f.PendingInput {
+		if f.ActiveAttempts > 0 {
+			return "draining", Admission{Reason: "input_required"}
+		}
+		return "awaiting_user", Admission{Reason: "input_required"}
 	}
 	if f.PendingReviews > 0 {
 		if f.ActiveAttempts > 0 {

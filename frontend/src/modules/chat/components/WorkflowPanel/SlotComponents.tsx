@@ -1,8 +1,10 @@
+import ExternalLink from '@/components/ExternalLink';
 import { PptPromptDocument } from './PptPromptDocument';
 import { ArtifactSourceButton } from './ArtifactSourceButton';
 import { downloadWorkflowFile, getWorkflowDownloadHost } from '@/modules/chat/utils/workflowDownload';
 import { WriterProviderChoice } from "./DocumentProviderChoice";
 export { WriterProviderChoice } from "./DocumentProviderChoice";
+import { paperChartMediaUrls } from './paperCharts';
 import { DocumentArtifactEditor } from "./DocumentArtifactEditor";
 import { useState, useCallback, useLayoutEffect, useRef, useEffect, useMemo, createContext, useContext } from "react";
 import ReactDOM from "react-dom";
@@ -69,7 +71,7 @@ import { SlotHtmlSlide, type SlideNavigation } from './ppt/SlotHtmlSlide';
 import { SlotJsonSlide } from './ppt/SlotJsonSlide';
 import { isSlideSpecArtifact } from './ppt/slideSchema';
 import type { TaskArtifactStream } from '@/modules/chat/store/taskCenter';
-import { Image as AntImage, Modal } from 'antd';
+import { Alert, Image as AntImage, Modal } from 'antd';
 import { isVideoArtifactValue } from './artifactMedia';
 
 export { SlotEditingContext } from './slotEditingContext';
@@ -1579,10 +1581,10 @@ export function SlotImage({
     if (e.key === 'Escape') setCaptionEditing(false);
   }, [handleCaptionSave]);
 
-  if (!hasSource || pending) {
+  if (pending) {
     return <SlotPending type='image' cardMode={cardMode} />;
   }
-  if (!url) {
+  if (!hasSource || !url) {
     return (
       <div className='workflow-slot workflow-slot--image' role='status'>
         <span>图片加载失败</span>
@@ -2032,8 +2034,10 @@ export function SlotText({ slot, widget, sessionId, slotId, revisionCount, onRef
   const handleChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     const val = e.target.value;
     const minimumHeight = editViewportRef.current?.height ?? 0;
-    e.target.style.height = 'auto';
-    e.target.style.height = `${Math.max(minimumHeight, e.target.scrollHeight)}px`;
+    if (widget?.widgetType !== 'ppt-prompt') {
+      e.target.style.height = 'auto';
+      e.target.style.height = `${Math.max(minimumHeight, e.target.scrollHeight)}px`;
+    }
     setDraft(val);
     if (sessionId && slotId) {
       const draftPayload: Record<string, unknown> = { text: val };
@@ -2234,7 +2238,7 @@ export function SlotText({ slot, widget, sessionId, slotId, revisionCount, onRef
     if (!editor) return;
 
     const viewport = editViewportRef.current;
-    if (viewport) {
+    if (viewport && widget?.widgetType !== 'ppt-prompt') {
       editor.style.height = 'auto';
       editor.style.height = `${Math.max(viewport.height, editor.scrollHeight)}px`;
     }
@@ -2251,7 +2255,7 @@ export function SlotText({ slot, widget, sessionId, slotId, revisionCount, onRef
         viewport.scrollContainer.scrollTop = viewport.scrollTop;
       }
     }
-  }, [editing]);
+  }, [editing, widget?.widgetType]);
 
   if (showPending) {
     return <SlotPending type='text' />;
@@ -2269,7 +2273,7 @@ export function SlotText({ slot, widget, sessionId, slotId, revisionCount, onRef
       if (e.key === 'Enter') handleEdit(e.currentTarget);
     } : undefined,
     style: typeof widget?.maxHeight === 'number'
-      ? { maxHeight: widget.maxHeight, overflowY: 'auto' as const }
+      ? { '--workflow-text-max-height': `${widget.maxHeight}px` } as React.CSSProperties
       : undefined,
   };
 
@@ -2375,7 +2379,7 @@ export function SlotText({ slot, widget, sessionId, slotId, revisionCount, onRef
         <>
           {widget?.widgetType === 'ppt-prompt' ? (
             <PptPromptDocument key={editingKey} text={displayText}
-              onEdit={canEdit ? () => handleEdit() : undefined} maxHeight={widget.maxHeight} />
+              onEdit={canEdit ? (source) => handleEdit(source) : undefined} maxHeight={widget.maxHeight} />
           ) : widget?.widgetType === 'text-markdown' ? (
             <div
               className={`workflow-slot__text workflow-slot__text--markdown${canEdit ? ' workflow-slot__text--editable' : ''}`}
@@ -2700,9 +2704,9 @@ function WriterWriteBackSummary({
       )}
       <span>{tr(stateKey)}</span>
       {slot.write_back_url && (
-        <a href={slot.write_back_url} target='_blank' rel='noreferrer'>
+        <ExternalLink href={slot.write_back_url} target='_blank' rel='noreferrer'>
           {tr('chat.writerIR.openCloudDocument')}
-        </a>
+        </ExternalLink>
       )}
       {!slot.write_back_url && slot.write_back_local_path && (
         <a
@@ -2809,7 +2813,7 @@ function useRegisterWriterWriteBack({
     try {
       const currentRevision = getLatestRevision?.() ?? revision;
       const template = initialDelivery && targetProvider === 'wechat'
-        ? 'structured'
+        ? 'editorial_contrast'
         : undefined;
       const response = await WorkflowSessionApi().writeBackWriterDocument(
         sessionId,
@@ -5409,6 +5413,17 @@ export function SlotRenderer({
     return <SlotPending type={expectedType ?? 'text'} cardMode={cardMode} />;
   }
 
+  // Reserved PPT text is a generation status, not an editable document.
+  // Keep HTML slide placeholders in their existing slide preview renderer.
+  const artifactText = typeof slot.artifact_value === 'string'
+    ? slot.artifact_value : slot.artifact_value?.text;
+  const pptPlaceholder = typeof artifactText === 'string'
+    ? /^\s*<!--\s*lazymind-ppt-placeholder\s*-->([\s\S]*)$/.exec(artifactText)
+    : null;
+  if (pptPlaceholder && pptPlaceholder[1].trim() && !pptPlaceholder[1].trim().startsWith('<')) {
+    return <Alert type='info' showIcon message={pptPlaceholder[1].trim()} />;
+  }
+
   // Presentation research/outline Markdown can include HTML comments, formulas
   // and inline source notation. Render it as Markdown, not as an MDX document;
   // keep source-text editing and the existing revision/permission guards.
@@ -5430,7 +5445,8 @@ export function SlotRenderer({
   }
 
   if (slot.artifact_id && slot.document) {
-    return <DocumentArtifactEditor slot={slot} sessionId={sessionId ?? ''} readOnly={readOnly || widget?.readOnly} onRefresh={onRefresh}
+    return <DocumentArtifactEditor slot={slot} sessionId={sessionId ?? ''} paperDocument={workflowSession?.workflow_id === 'paper-writing'} boundMediaUrls={workflowSession?.workflow_id === 'paper-writing'
+      ? paperChartMediaUrls(workflowSession.slots ?? []) : undefined} readOnly={readOnly || widget?.readOnly} onRefresh={onRefresh}
       revisionCount={revisionCount} VersionHistory={SlotVersionPopover} />;
   }
   const effectiveReadOnly = readOnly || widget?.readOnly;

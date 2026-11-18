@@ -38,6 +38,15 @@ describe("SkillOrganizeApprovalPanel", () => {
     api.resolveSkillOrganizeApprovals.mockResolvedValue([{ id: "0", status: "accepted", error: "" }]);
   });
 
+  it("only reports the pending count while the review page is closed", async () => {
+    const onPendingCountChange = vi.fn();
+    render(<SkillOrganizeApprovalPanel t={t} expanded={false} refreshToken={1}
+      hiddenRequestId="running-task" onExpandedChange={vi.fn()} onPendingCountChange={onPendingCountChange} />);
+    await waitFor(() => expect(onPendingCountChange).toHaveBeenLastCalledWith(2));
+    expect(screen.queryByRole("button")).toBeNull();
+    expect(screen.queryByText("merged body")).toBeNull();
+  });
+
   it("hides the running task and applies one merge item without the independent change", async () => {
     const onApplied = vi.fn();
     render(

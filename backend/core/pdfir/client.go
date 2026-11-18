@@ -3,10 +3,13 @@ package pdfir
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -28,7 +31,11 @@ func FromConfig(cfg map[string]any) (Client, error) {
 		return c, errors.New("Select a MinerU OCR credential in model settings")
 	}
 	endpoint, _ := cfg["ocr_url"].(string)
-	u, e := url.Parse(strings.TrimSpace(endpoint))
+	endpoint = strings.TrimSpace(endpoint)
+	if endpoint == "" {
+		endpoint = c.BaseURL
+	}
+	u, e := url.Parse(endpoint)
 	if e != nil || u.Scheme != "https" || u.Host != "mineru.net" || u.User != nil {
 		return c, errors.New("Selected local/custom MinerU service does not support PDF IR; no cloud upload was performed")
 	}
@@ -87,9 +94,26 @@ func (c Client) request(ctx context.Context, method, target string, body io.Read
 	}
 	safe := *client
 	safe.CheckRedirect = func(_ *http.Request, _ []*http.Request) error { return http.ErrUseLastResponse }
+	// Keep the official API identity even when regional endpoints present a
+	// certificate for another MinerU domain. Never apply this to artifact URLs.
+	if auth && u.Scheme == "https" && u.Host == "mineru.net" && strings.HasPrefix(u.Path, "/api/v4/") {
+		transport := safe.Transport
+		if transport == nil {
+			transport = http.DefaultTransport
+		}
+		if base, ok := transport.(*http.Transport); ok {
+			cloned := base.Clone()
+			if cloned.TLSClientConfig == nil {
+				cloned.TLSClientConfig = &tls.Config{}
+			}
+			cloned.TLSClientConfig.InsecureSkipVerify = true //nolint:gosec // MinerU API compatibility.
+			safe.Transport = cloned
+			defer cloned.CloseIdleConnections()
+		}
+	}
 	res, e := safe.Do(req)
 	if e != nil {
-		return nil, errors.New("MinerU request failed")
+		return nil, mineruTransportError(e)
 	}
 	defer res.Body.Close()
 	if res.StatusCode < 200 || res.StatusCode >= 300 {
@@ -173,5 +197,25 @@ func (c Client) Parse(ctx context.Context, p string) ([]byte, error) {
 			return nil, ctx.Err()
 		case <-timer.C:
 		}
+	}
+}
+
+// Do not expose signed artifact URLs or credentials from url.Error.
+func mineruTransportError(err error) error {
+	var hostname x509.HostnameError
+	var authority x509.UnknownAuthorityError
+	var invalid x509.CertificateInvalidError
+	var network net.Error
+	switch {
+	case errors.As(err, &hostname):
+		return errors.New("MinerU TLS certificate hostname mismatch; check the endpoint, DNS or proxy certificate")
+	case errors.As(err, &authority), errors.As(err, &invalid):
+		return errors.New("MinerU TLS certificate verification failed; check the certificate trust chain")
+	case errors.Is(err, context.Canceled):
+		return context.Canceled
+	case errors.As(err, &network) && network.Timeout():
+		return errors.New("MinerU request timed out; retry when the service is reachable")
+	default:
+		return errors.New("MinerU network connection failed; check DNS, proxy and service connectivity")
 	}
 }

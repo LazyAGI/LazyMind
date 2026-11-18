@@ -1,3 +1,4 @@
+import ExternalLink from '@/components/ExternalLink';
 import { Alert, Form, Input } from "antd";
 import { FeishuCredentialHintAlertFromForm } from "@/modules/dataSource/common/FeishuCredentialHintAlert";
 import type { CloudDocumentProvidersVm } from "../hooks/useCloudDocumentProviders";
@@ -48,27 +49,27 @@ export default function CloudDocumentCredentialForm({ vm }: { vm: CloudDocumentP
         )}
         {cloudSetupProvider === "github" ? (
           <p style={{ marginTop: 12, marginBottom: 0 }}>
-            <a href={CLOUD_DOCUMENTS_GITHUB_SETUP_PATH} target="_blank" rel="noreferrer">
+            <ExternalLink href={CLOUD_DOCUMENTS_GITHUB_SETUP_PATH} target="_blank" rel="noreferrer">
               {t("modelProvider.cloudDocuments.githubSetupGuideAction")}
-            </a>
+            </ExternalLink>
             {t("modelProvider.cloudDocuments.githubSetupGuideHint")}
           </p>
         ) : cloudSetupProvider !== "feishu" ? (
           <p style={{ marginTop: 12, marginBottom: 0 }}>
-            <a
+            <ExternalLink
               href={`${CLOUD_DOCUMENTS_NOTION_SETUP_PATH}?from=cloud-documents`}
               target="_blank"
               rel="noreferrer"
             >
               {t("modelProvider.cloudDocuments.notionSetupGuideAction")}
-            </a>
+            </ExternalLink>
             {t("modelProvider.cloudDocuments.notionSetupGuideHint")}
           </p>
         ) : (
           <p style={{ marginTop: 12, marginBottom: 0 }}>
-            <a href={CLOUD_DOCUMENTS_FEISHU_SETUP_PATH} target="_blank" rel="noreferrer">
+            <ExternalLink href={CLOUD_DOCUMENTS_FEISHU_SETUP_PATH} target="_blank" rel="noreferrer">
               {t("modelProvider.cloudDocuments.feishuSetupGuideAction")}
-            </a>
+            </ExternalLink>
           </p>
         )}
       </Form>

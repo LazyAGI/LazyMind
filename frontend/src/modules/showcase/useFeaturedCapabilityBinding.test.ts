@@ -77,4 +77,20 @@ describe("useFeaturedCapabilityBinding", () => {
     await waitFor(() => expect(result.current.status).toBe("idle"));
     expect(result.current.mentions).toEqual([]);
   });
+
+  it("keeps a failed page idle but starts a new attempt after a page remount", async () => {
+    enableBuiltinSkillMock.mockRejectedValue(new Error("package verification failed"));
+    const capability = { type: "chat" as const, title: "Diagram", builtin_skill_uid: "bsk-diagram" };
+    const first = renderHook(() => useFeaturedCapabilityBinding(capability));
+    await waitFor(() => expect(first.result.current.status).toBe("failed"));
+    first.rerender();
+    expect(first.result.current.status).toBe("failed");
+    expect(enableBuiltinSkillMock).toHaveBeenCalledTimes(1);
+    first.unmount();
+
+    enableBuiltinSkillMock.mockResolvedValueOnce({ skillId: "diagram-1", name: "Diagram" } as never);
+    const refreshed = renderHook(() => useFeaturedCapabilityBinding(capability));
+    await waitFor(() => expect(refreshed.result.current.status).toBe("ready"));
+    expect(enableBuiltinSkillMock).toHaveBeenCalledTimes(2);
+  });
 });

@@ -29,7 +29,7 @@ LazyMind:
 | SenseNova skill piece | In this workflow? | Why |
 |---|---|---|
 | `sn-ppt-standard` run_stage + prompts | Yes → `runtime/` | HTML generation |
-| `export_pptx` (Playwright) | Yes → `runtime/scripts/export_pptx/` | Used by **UI/API** editable export only — **not** a skill tool |
+| `export_pptx` (Playwright) | Yes → `runtime/scripts/export_pptx/` | Shared by UI/API export and the explicit file-delivery tools |
 | `sn-image-base` T2I runner | No | Removed; AI material images use framework `image_generator` in collect_materials |
 | `sn-ppt-entry` | No | Replaced by `ppt_init_deck` + workflow scenario |
 | `sn-ppt-creative` | No | Not used (standard HTML mode only) |
@@ -42,7 +42,7 @@ specific file into `runtime/` and note it here.
 
 ## Material images → final HTML
 
-`collect_materials` always follows analysis. It searches a supplied KB first and
+`collect_materials` follows analysis when source evidence is required. It searches a supplied KB first and
 uses web tools only for a concrete gap; it can complete without web access when
 the request, uploads, or KB are sufficient:
 
@@ -50,7 +50,7 @@ the request, uploads, or KB are sufficient:
 image result does not fail collection or block outline/page generation; the deck
 can use CSS, SVG, and ECharts instead.
 
-1. KB/web hits → `ppt_register_material_images`
+1. KB/web/PDF candidates → `ppt_inspect_material_images` → select → `ppt_register_material_images`
 2. **Only if the user explicitly asks** for AI-generated material images →
    `ppt_generate_material_images` (framework `image_generator`) → same Pool B
 3. Every registered visual is published as an ordered `image` artifact, so the
@@ -58,8 +58,8 @@ can use CSS, SVG, and ECharts instead.
    instead of local paths
 4. `ppt_build_outline` auto-inits the deck and attaches them into
    `info_pack.user_assets.reference_images`, then publishes one Markdown `deck_outline`
-5. `plan_page_prompts` publishes one editable `slide_outline` prompt per page;
-   outline assigns `use_image.reference_image_index`
+5. `plan_page_prompts` publishes one complete editable `slide_outline` per page
+   and a separate `speaker_notes_source` file
 6. `ppt_generate_pages` runs asset-plan + batch-page-html (incl. UI edits) and
    embeds foreground `<img>`
 
@@ -71,16 +71,20 @@ Startup clarification asks whether the user wants a dedicated AI background for
 every slide. The default remains the export-safe CSS/SVG path unless the user
 explicitly enables it.
 
-When enabled, background creation is split into an automatic prompt stage and a human image checkpoint
-immediately after material collection and before outline generation:
+When enabled, background creation has a prompt stage and a generation
+stage before outline planning. Host approval mode controls review pauses:
 
 1. `plan_background_prompts` publishes one editable prompt per page without pausing for approval. Every
    prompt repeats the same visual-series anchor (palette, medium, light,
    texture, camera grammar, edge-detail strategy, recurring motif) while its
    page scene evolves with the deck narrative.
 2. `generate_backgrounds` sends the approved prompts to the configured framework
-   `image_generator`, writes `images/page_NNN_background.*`, publishes aligned
+   `image_generator`, writes `images/page_NNN_background.*`, normalizes to 1280×720, then publishes aligned
    `background_images`, and records `background_images.json`.
+   Pixel inspection is advisory: report findings or unavailable checks without
+   blocking publication or automatically regenerating usable files. Generation
+   prompts still request no text; provider-added generation labels/watermarks do
+   not fail the step.
 
 The prompt step prepares the conversation-scoped deck first; `build_outline`
 later reuses that same deck so approved prompts and generated files are retained.
@@ -111,16 +115,16 @@ or to choose quick/full generation. An already supplied template is bound to
 Both template routes skip style questions and AI backgrounds. HTML recreates
 the template style with components, without using full-slide background images.
 Native PPTX composition can repeat, omit and reorder source layouts to meet the
-requested page count. The template itself is never treated as source evidence.
-The selected route is saved as `presentation_output_format`; old sessions
-without that artifact retain their previous route.
+requested page count. Template samples are not evidence; a prior work deck may also be evidence when
+the user designates it as such. The selected route is saved as
+`presentation_output_format`; missing route data requires resuming analysis.
 
 When a template is present, `generate_ppt` calls `ppt_analyze_template` first.
 The analyzer caches the original template plus a deterministic OOXML profile
 (slide size, masters, layouts/placeholders, theme fonts and theme colors) and
 applies its palette, typography and layout hints to the existing deck-wide HTML
-style contract before page rendering. Template analysis stays inside the final
-step rather than adding another Workflow checkpoint.
+style contract before page rendering. Whole-template reading happens in analysis; generation reuses and validates
+the bound template before composition, without another visible checkpoint.
 
 ## Deck storage (conversation-scoped)
 
@@ -270,10 +274,11 @@ artifact-size limits still apply; large fonts can cause an explicit size error.
 ## Defaults
 
 - Preview: iframe HTML (`preview_html`), auto-published after `page-html` stages
-- Page generation: one HTML-model call per page by default; set
-  `PPT_PAGE_PROMPT_MODE=llm-rewrite` to restore the legacy per-page rewrite call
-- Page concurrency: 4 by default (the tool accepts 1–8; lower it for rate-limited providers)
-- Export: **click Export in WorkflowPanel** (not part of SubAgent tools). Default =
+- Page generation uses approved complete page prompts directly; rewrite prompts
+  are reserved for requested edits.
+- Page generation is sequential by default; publication preserves approved order.
+- Export: UI export remains available. An explicit request for a PPTX file uses
+  `ppt_export_deck` or `ppt_export_html` and publishes `native_pptx`. UI default =
   browser raster PPTX. Local/Desktop enables editable export automatically after
   its dependency bundle is detected; container deployments use
   `LAZYMIND_OUTPUT_EDITABLE_PPT=true`.

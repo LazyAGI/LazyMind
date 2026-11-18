@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"lazymind/core/academic/arxivsource"
+	"lazymind/core/common/orm"
 	"lazymind/core/doc"
 )
 
@@ -77,4 +78,20 @@ func importFailure(err error, stage string, saved bool) importFailureDetails {
 		d.Message += "，论文尚未入库"
 	}
 	return d
+}
+
+// Enrichment begins after the bibliography has already been saved. A missing
+// attachment must not tell the user to import that bibliography again.
+func metadataEnrichmentFailure(details importFailureDetails) importFailureDetails {
+	details.Message = "题录已保存，附件补全失败：" + strings.TrimPrefix(strings.TrimSuffix(details.Message, "，论文尚未入库"), "题录已保存，附件补全失败：")
+	details.Recovery = "可重试补全或手动添加 PDF，无需重新导入题录。"
+	return details
+}
+
+func importItemFailure(err error, item orm.PaperImportItem) importFailureDetails {
+	details := importFailure(err, item.Stage, item.DocumentID != "")
+	if item.DocumentID == "" && item.LibraryPaperID != "" && item.ResultKind == "enrichment" {
+		return metadataEnrichmentFailure(details)
+	}
+	return details
 }

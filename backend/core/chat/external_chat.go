@@ -76,6 +76,7 @@ type externalExecutionProjection struct {
 	RunID                 string                       `json:"run_id"`
 	HistoryID             string                       `json:"history_id"`
 	Provider              string                       `json:"provider"`
+	Model                 string                       `json:"model,omitempty"`
 	Status                string                       `json:"status"`
 	HostID                string                       `json:"host_id,omitempty"`
 	HostOnline            bool                         `json:"host_online"`
@@ -197,8 +198,25 @@ func externalChatUnavailableError(ctx context.Context, owner, provider string) e
 	return fmt.Errorf("%s is unavailable: %s", provider, reason)
 }
 
-func externalAgentPrompt(query string) string {
-	return strings.TrimSpace(query)
+func externalAgentPrompt(query string, body map[string]any) string {
+	prompt := strings.TrimSpace(query)
+	if enabled, _ := body["enable_workflow"].(bool); !enabled {
+		return prompt
+	}
+	workflowContext, _ := body["workflow_context"].(map[string]any)
+	sessionID, _ := workflowContext["session_id"].(string)
+	if sessionID != "" {
+		encoded, _ := json.Marshal(sessionID)
+		return prompt + "\n\nLazyMind workflow selection: continue the existing session " + string(encoded) +
+			". Call workflow.state first and follow its current control/admission state. Do not create a new workflow or replace it with standalone generation. Publish step outputs with workflow.artifact.publish and use its returned file references in the reply."
+	}
+	refs := stringSlice(body["allowed_workflow_refs"])
+	if len(refs) == 0 {
+		return prompt
+	}
+	encoded, _ := json.Marshal(refs[0])
+	return prompt + "\n\nLazyMind workflow selection: the user explicitly selected " + string(encoded) +
+		". Use the LazyMind MCP tools to call workflow.start for this workflow, passing the user's request as request_context. Resolve the selected reference with workflow.list/workflow.get if needed. Follow the startup contract, ask for missing inputs, and execute the returned step contracts; do not replace this workflow with standalone generation. Publish step outputs with workflow.artifact.publish and use its returned file references in the reply. Stop for human review when requested by the workflow."
 }
 
 func streamChatOutput(
@@ -285,7 +303,7 @@ func streamExternalChat(
 	record := orm.ExternalChatRun{
 		ID: runID, RequestID: requestKey, ConversationID: conversationID, HistoryID: historyID,
 		Provider: provider, HostID: hostID, ProviderThreadID: threadID, ActorUserID: owner, Action: action,
-		Prompt: externalAgentPrompt(query), Query: query,
+		Prompt: externalAgentPrompt(query, reqBody), Query: query,
 		Sequence: sequence, HistoryExt: historyExt,
 	}
 	app := newExternalChatApplication(db)
@@ -349,6 +367,7 @@ func streamExistingExternalChat(
 		ticker := time.NewTicker(200 * time.Millisecond)
 		defer ticker.Stop()
 		var cursor int64
+		var model string
 		hasSemanticOutput := false
 		lastHeartbeat := time.Time{}
 		for {
@@ -363,7 +382,16 @@ func streamExistingExternalChat(
 			for _, event := range events {
 				cursor = event.Sequence
 				projection := basicExternalExecutionProjection(current, time.Now().UTC())
+				projection.Model = model
 				switch event.Type {
+				case "model":
+					model = event.Text
+					projection.Model = model
+					select {
+					case out <- UpstreamStreamChunk{Heartbeat: true, Execution: &projection}:
+					case <-ctx.Done():
+						return
+					}
 				case "message":
 					if event.Text != "" {
 						hasSemanticOutput = true
@@ -436,6 +464,7 @@ func streamExistingExternalChat(
 			if lastHeartbeat.IsZero() || now.Sub(lastHeartbeat) >= time.Second {
 				lastHeartbeat = now
 				projection := basicExternalExecutionProjection(current, now.UTC())
+				projection.Model = model
 				select {
 				case out <- UpstreamStreamChunk{Heartbeat: true, Execution: &projection}:
 				case <-ctx.Done():

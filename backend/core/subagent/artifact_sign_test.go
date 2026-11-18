@@ -2,11 +2,62 @@ package subagent
 
 import (
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"lazymind/core/doc"
+
+	"github.com/gorilla/mux"
 )
+
+func TestSignArtifactImageValuePreservesExternalStaticFileURLs(t *testing.T) {
+	t.Setenv("LAZYMIND_PUBLIC_BASE_URL", "https://core.example/team/api/core")
+	const source = "https://cdn.example/static-files/figure.png?token=a%2Fb+c&part=1&part=2#preview"
+	for _, contentType := range []string{"", "image", "image/png"} {
+		for _, key := range []string{"url", "path"} {
+			raw, _ := json.Marshal(map[string]any{key: source, "caption": "figure"})
+			signed := SignArtifactImageValue(contentType, raw)
+			var value map[string]any
+			if err := json.Unmarshal(signed, &value); err != nil || value["url"] != source || value["caption"] != "figure" {
+				t.Fatalf("external image changed (%q, %q): %s (%v)", contentType, key, signed, err)
+			}
+		}
+	}
+}
+
+func TestSignArtifactImageValueRefreshesConfiguredCoreURL(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("LAZYMIND_UPLOAD_ROOT", root)
+	t.Setenv("LAZYMIND_PUBLIC_BASE_URL", "https://core.example:8443/team/api/core/")
+	if err := os.WriteFile(filepath.Join(root, "figure one.png"), []byte("image content"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, contentType := range []string{"", "image", "image/png"} {
+		raw := json.RawMessage(`{"path":"https://core.example:8443/team/api/core/static-files/figure%20one.png?expires=1&sig=old"}`)
+		signed := SignArtifactImageValue(contentType, raw)
+		var value map[string]any
+		if err := json.Unmarshal(signed, &value); err != nil {
+			t.Fatal(err)
+		}
+		imageURL, _ := value["url"].(string)
+		u, err := url.Parse(imageURL)
+		if err != nil || u.Host != "" || u.Path != "/static-files/figure one.png" || u.Query().Get("sig") == "old" {
+			t.Fatalf("Core image was not re-signed (%q): %s (%v)", contentType, signed, err)
+		}
+		req := httptest.NewRequest(http.MethodGet, imageURL, nil)
+		req = mux.SetURLVars(req, map[string]string{"path": "figure%20one.png"})
+		rec := httptest.NewRecorder()
+		doc.GetSignedStaticFile(rec, req)
+		if rec.Code != http.StatusOK || rec.Body.String() != "image content" {
+			t.Fatalf("refreshed image could not be read (%q): status=%d body=%s", contentType, rec.Code, rec.Body.String())
+		}
+	}
+}
 
 func TestSignArtifactImageValueAcceptsMIMEContentType(t *testing.T) {
 	root := t.TempDir()

@@ -2,11 +2,14 @@ package product
 
 import (
 	"encoding/json"
+	"os"
+	"path/filepath"
+	"testing"
+	"time"
+
 	"github.com/glebarez/sqlite"
 	"gorm.io/gorm"
 	"lazymind/core/common/orm"
-	"testing"
-	"time"
 )
 
 func reviewWorkspace() map[string]any {
@@ -228,5 +231,41 @@ func TestRelayKeepsPinnedPackageWhenNewHeadExists(t *testing.T) {
 		if binding.MaterialID == "word_target" {
 			t.Fatal("host injected business default")
 		}
+	}
+}
+
+func TestProductProjectPreviewsPortableSampleArtifact(t *testing.T) {
+	repo := seedReviewProduct(t)
+	if err := repo.db.AutoMigrate(&orm.WorkflowSessionStep{}); err != nil {
+		t.Fatal(err)
+	}
+	root := t.TempDir()
+	t.Setenv("LAZYMIND_UPLOAD_ROOT", root)
+	relative := "workflow-artifacts/session/attempt/design.html"
+	physicalPath := filepath.Join(root, filepath.FromSlash(relative))
+	if err := os.MkdirAll(filepath.Dir(physicalPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	content := "<!doctype html><h1>Product sample</h1>"
+	if err := os.WriteFile(physicalPath, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	attempt := orm.WorkflowSessionStep{ID: "attempt", SessionID: "session", StepID: "design", Attempt: 1, TaskID: "task", Status: "succeeded"}
+	if err := repo.db.Create(&attempt).Error; err != nil {
+		t.Fatal(err)
+	}
+	raw, err := json.Marshal(map[string]string{"path": "/var/lib/lazymind/uploads/" + relative})
+	if err != nil {
+		t.Fatal(err)
+	}
+	row := orm.WorkflowSlotRevision{ID: "preview", SessionID: "session", SlotID: "design_document_html",
+		Slot: "design_document_html", StepID: "design", Attempt: 1, ProducerAttemptID: attempt.ID,
+		Revision: 1, Selected: true, ContentSnapshot: raw, Validity: "effective", ChangeSource: "host"}
+	if err := repo.db.Create(&row).Error; err != nil {
+		t.Fatal(err)
+	}
+	result, err := repo.ProductProjectArtifact(t.Context(), "owner", "session", "design", "html")
+	if err != nil || result["content"] != content || result["content_format"] != "html" {
+		t.Fatalf("preview = %#v, %v", result, err)
 	}
 }

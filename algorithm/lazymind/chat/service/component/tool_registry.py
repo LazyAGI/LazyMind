@@ -10,7 +10,6 @@ from typing import Any, Callable, Literal
 
 import docstring_parser
 import lazyllm
-from lazymind.common.optional_components import component_enabled
 from lazyllm.tools.fs.supplier.feishu import FeishuFS
 from lazyllm.tools.fs.supplier.googledrive import GoogleDriveFS
 from lazyllm.tools.fs.supplier.notion import NotionFS
@@ -43,7 +42,7 @@ from lazymind.chat.engine.tools.calculator import calculator
 from lazymind.chat.engine.tools.vocab_learn import vocab_learn
 from lazymind.chat.engine.tools.memory import MemoryTools
 from lazymind.chat.engine.tools.github_prs import GitHubPRToolkit, GITHUB_PR_POLICY
-from lazymind.chat.engine.tools.lazy_kb import KBToolkit, kb_tmp_search
+from lazymind.chat.engine.tools.lazy_kb import KBToolkit, kb_tmp_search, has_active_document
 from lazymind.model_config import get_model_role_runtime_identity, is_model_role_available
 from lazymind.chat.engine.tools.ask_user import ask_user
 from lazymind.chat.engine.agent_runtime.conversation_env import ConversationEnvLease, ConversationEnvStore
@@ -255,6 +254,7 @@ ASK_USER_TOOL_POLICY_APPENDIX: SystemPromptAppendix = {
         'an already feasible answer. Respect "you decide" for optional preferences. Choose the number of separate '
         'decision dimensions based on the task; there is no fixed question-count limit. Follow the ask_user parameter schema: every question needs id, text, type, '
         'reason and required. The text is the question body, not title or description. '
+        'Ordinary chat questions are skippable; use required=false. Workflow input contracts may require answers. '
         'Suggested single choices have at most 3 options; multiple choices at most 4; do not pad them. '
         'The system adds Other for free input. Multiple allows one selection. Fixed business '
         'enums remain complete and declare choice_policy=fixed; never use fixed to evade suggestion limits. '
@@ -297,40 +297,22 @@ KNOWLEDGE_SEARCH_TOOL_POLICY_APPENDIX: SystemPromptAppendix = {
         "# Selected Knowledge Base Rules (CRITICAL — follow strictly)\n"
         "In Chinese, ‘资料库’ is an alias of ‘知识库’; both mean knowledge base. "
         "The user selected or @mentioned one or more knowledge bases in this request. "
-        "This is an explicit instruction to search them, not merely permission to do so. "
-        "Concrete methods such as `KBToolkit_kb_search` and `KBToolkit_kb_keyword_search` "
-        "are available, so call the appropriate search method directly. "
-        "Your first substantive action for the turn MUST be one of those searches. Do not answer "
-        "from memory, announce that you could search later, ask whether you should search, or start "
-        "a workflow before searching. Use the knowledge-base search method FIRST for every retrieval "
-        "need — no exceptions. Do not skip it because you think the web might have "
-        "better information, or because the topic seems general, popular, or common "
-        "knowledge. The knowledge base is your primary evidence source.\n\n"
-        "Only after the knowledge-base search returns zero results or explicitly irrelevant results "
-        "may you fall back to provider-specific search tools. "
-        "You MUST NOT use any non-knowledge-base retrieval tool before trying knowledge-base tools.\n\n"
-        "**Keyword search vs semantic search — which one to use:**\n"
-        "When the user mentions a specific document name (e.g., 'xxx.pdf', 'report.docx', "
-        "'slides.pptx') and asks about particular terms, phrases, or content within that "
-        "document, prefer `kb_keyword_search` with `target=<document name>`, "
-        "`target_type='file_name'`, and `keyword=<specific terms>`. This is faster and more precise "
-        "for document-scoped exact matching.\n"
-        "For `keyword`, extract the core term(s) the user is asking about (e.g., a single "
-        "word or short phrase like 'file1' or 'Redis timeout'), not the entire query "
-        "sentence. If the first attempt returns zero results, try a shorter or alternative "
-        "keyword before considering fallback.\n"
-        "When the keyword search returns results, answer directly from them — do not "
-        "follow up with semantic search unless the returned content is clearly irrelevant "
-        "or empty.\n"
-        "Use semantic search only for open-ended queries where no specific document "
-        "is named. If keyword search returns zero results after trying alternative "
-        "keywords, fall back to semantic search.\n\n"
-        "When the user gives a concrete URL or asks you to inspect a specific page, "
-        "still try the knowledge-base search first; use `url_fetch` only when the knowledge base has "
-        "no relevant result.\n\n"
-        "For papers, research topics, arXiv ids, abstracts, or author-related questions, "
-        "still try the knowledge-base search first; after knowledge-base evidence is unavailable or "
-        "insufficient, prefer `AcademicSearchToolkit` over general web search tools.\n"
+        "Treat the selected libraries as the primary evidence source. Do not answer from memory "
+        "or ask the user to identify a selection already provided in the current context.\n"
+        "For listing papers or reading a specific/first document, call knowledge.document.list "
+        "with the selected IDs, then KBToolkit_read_document with the returned document ID. "
+        "Read the original content before summarizing methods, findings, or experimental results. "
+        "Direct reading starts on-demand parsing and does not require semantic chunks or embeddings.\n"
+        "For open-ended questions across indexed documents, use KBToolkit_kb_search. For exact "
+        "phrases in indexed documents, use KBToolkit_kb_keyword_search with a short keyword. "
+        "If search returns no results or indexing is unavailable, inspect metadata and read the "
+        "relevant document directly before concluding that the library lacks evidence. "
+        "If a read spills to a file, inspect it with search_file_resource/read_file_resource.\n"
+        "Use external research only if the library evidence is insufficient and the user permits it. "
+        "For papers, prefer AcademicSearchToolkit. Never replace a requested library-paper read "
+        "with a web summary or assume that an empty retrieval result means the library is empty. "
+        "A request to import, move, or otherwise manage resources uses the corresponding knowledge "
+        "management tools; selecting a library does not require an unrelated content search first.\n"
     ),
 }
 DOCUMENT_PREVIEW_CHAT_TOOL_POLICY_APPENDIX: SystemPromptAppendix = {
@@ -565,7 +547,21 @@ def _kb_prompt_appendix() -> SystemPromptAppendix:
             if agentic_config.get('document_preview_chat')
             else KNOWLEDGE_SEARCH_TOOL_POLICY_APPENDIX
         )
-        appendix['tool_policy'] = policy['tool_policy']
+        if agentic_config.get('document_preview_chat'):
+            appendix['tool_policy'] = policy['tool_policy']
+            return appendix
+        kb_ids = (agentic_config.get('filters') or {})['kb_id']
+        kb_ids = [kb_ids] if isinstance(kb_ids, str) else list(kb_ids)
+        appendix['tool_policy'] = (
+            policy['tool_policy'] + '\nSelected Core knowledge-base IDs: '
+            + json.dumps(kb_ids, ensure_ascii=False)
+            + '. Use these IDs for knowledge.document.list; do not infer the selection '
+            'from library names, recency, or knowledge.list ordering. For a named paper or '
+            'a request to read a library document, list its metadata in this scope, then call '
+            'KBToolkit_read_document with the returned document ID. This direct read works '
+            'without semantic chunks or an embedding model. A zero-result search does not '
+            'mean the library has no documents.'
+        )
     return appendix
 
 
@@ -1008,7 +1004,7 @@ def _tool_summary(tool: Any) -> str:
 def _extract_methods(instance: Any) -> list[dict]:
     if isinstance(instance, dict):
         return _extract_group_methods(instance.get('tools', []))
-    public_apis = getattr(instance, '__public_apis__', None)
+    public_apis = getattr(instance, '__tool_public_apis__', getattr(instance, '__public_apis__', None))
     if public_apis is not None:
         methods = []
         for method_name in public_apis:
@@ -1073,11 +1069,9 @@ def _registration_key_source(tool: Any) -> Callable[[], Any] | None:
 
 
 def tool_is_active(cfg: ToolConfig) -> bool:
-    if cfg.name == 'kb' and not component_enabled('rag'):
-        return False
     if cfg.name == 'kb':
         context = lazyllm.globals.get('agentic_config') or {}
-        if not (context.get('filters') or {}).get('kb_id'):
+        if not (context.get('filters') or {}).get('kb_id') and not has_active_document(context):
             return False
     if cfg.model_role and not is_model_role_available(cfg.model_role):
         # Probe only when an image is actually read, never while enumerating tools.
@@ -1265,7 +1259,15 @@ def filter_tools(
             continue
         terms = _TOOL_CAPABILITY_TERMS.get(cfg.name)
         patterns = _TOOL_CAPABILITY_REQUEST_PATTERNS.get(cfg.name, ())
-        if terms and user_query and _capability_is_denied(user_query, terms, patterns):
+        policy_query = user_query
+        if cfg.name == 'kb':
+            # This toolkit reads content. A prohibition on writes must not hide
+            # it (or its selected-library context) from a read-only request.
+            policy_query = re.sub(
+                r'(?:不要|禁止|不得|无需|不许|别)\s*(?:修改|删除|写入|上传|移动|重命名)',
+                '', policy_query,
+            )
+        if terms and policy_query and _capability_is_denied(policy_query, terms, patterns):
             continue
         # Chat's discoverable configuration surface must expose media tools even
         # for short requests and clarification replies without routing keywords.

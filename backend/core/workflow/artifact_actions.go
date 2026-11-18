@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"lazymind/core/algo"
 	"lazymind/core/common"
@@ -42,6 +43,10 @@ func isPortableDocumentConversion(body artifactActionPreviewBody) bool {
 func PreviewArtifactAction(w http.ResponseWriter, r *http.Request) {
 	target, body, ok := prepareArtifactActionPreview(w, r)
 	if !ok {
+		return
+	}
+	if target.session.ControllerHost == "external-agent" {
+		enqueueArtifactAction(w, r, target, body)
 		return
 	}
 	var llmConfig map[string]any
@@ -92,6 +97,16 @@ func PreviewArtifactAction(w http.ResponseWriter, r *http.Request) {
 }
 
 type artifactActionResult struct {
+	Companion *struct {
+		SlotID       string          `json:"slot_id"`
+		Slot         string          `json:"slot"`
+		Revision     int             `json:"revision"`
+		DraftVersion *int64          `json:"draft_version"`
+		StepID       string          `json:"step_id"`
+		Attempt      int             `json:"attempt"`
+		Value        json.RawMessage `json:"value"`
+	} `json:"native_companion"`
+
 	Artifact struct {
 		ContentType string          `json:"content_type"`
 		Value       json.RawMessage `json:"value"`
@@ -107,12 +122,18 @@ func ExecuteArtifactAction(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	llmConfig, err := modelconfig.LoadLLMConfig(r.Context(), target.db, store.UserID(r))
-	if err != nil {
-		common.ReplyErr(w, "load model config failed", http.StatusInternalServerError)
-		return
+	externalToken, _ := body.Input["commit_token"].(string)
+	var llmConfig map[string]any
+	var actionWorkflow artifactActionWorkflowVersion
+	var err error
+	if target.session.ControllerHost == "external-agent" {
+		actionWorkflow, err = loadExternalActionCommit(r, target, &body)
+	} else {
+		llmConfig, err = modelconfig.LoadLLMConfig(r.Context(), target.db, store.UserID(r))
+		if err == nil {
+			actionWorkflow, err = resolveArtifactActionWorkflow(r.Context(), target, body.Action)
+		}
 	}
-	actionWorkflow, err := resolveArtifactActionWorkflow(r.Context(), target, body.Action)
 	if err != nil {
 		common.ReplyErr(w, "workflow artifact action failed", http.StatusInternalServerError)
 		return
@@ -148,14 +169,27 @@ func ExecuteArtifactAction(w http.ResponseWriter, r *http.Request) {
 		cardinality = "list"
 	}
 	expected := body.BaseRevision
-	newRevision, err := WriteSlotRevisionWithHumanArtifact(
-		r.Context(), target.db,
-		target.revision.SessionID, target.revision.SlotID, target.revision.Slot,
-		target.revision.StepID, target.revision.Attempt, cardinality,
-		target.revision.ListIndex, actionResult.Artifact.ContentType,
-		resolveValuePaths(actionResult.Artifact.Value), actionResult.Artifact.Caption,
-		"human", &expected, body.BaseDraftVersion,
-	)
+	var newRevision *orm.WorkflowSlotRevision
+	err = target.db.WithContext(r.Context()).Transaction(func(tx *gorm.DB) error {
+		newRevision, err = WriteSlotRevisionWithHumanArtifact(
+			r.Context(), tx,
+			target.revision.SessionID, target.revision.SlotID, target.revision.Slot,
+			target.revision.StepID, target.revision.Attempt, cardinality,
+			target.revision.ListIndex, actionResult.Artifact.ContentType,
+			resolveValuePaths(actionResult.Artifact.Value), actionResult.Artifact.Caption,
+			"human", &expected, body.BaseDraftVersion,
+		)
+		if err != nil {
+			return err
+		}
+		if companion := actionResult.Companion; companion != nil {
+			_, err = WriteSlotRevisionWithHumanArtifact(r.Context(), tx, target.session.ID, companion.SlotID, companion.Slot, companion.StepID, companion.Attempt, "single", nil, "file", resolveValuePaths(companion.Value), nil, "human", &companion.Revision, companion.DraftVersion)
+		}
+		if err == nil && strings.HasPrefix(externalToken, "external:") {
+			err = tx.Model(&orm.WorkflowActionJob{}).Where("id = ? AND session_id = ? AND status = ?", strings.TrimPrefix(externalToken, "external:"), target.session.ID, "ready").Update("status", "applied").Error
+		}
+		return err
+	})
 	if err != nil {
 		if replyDraftVersionPreconditionError(w, err) {
 			return
@@ -269,6 +303,10 @@ func prepareArtifactActionPreview(
 	var body artifactActionPreviewBody
 	if json.NewDecoder(r.Body).Decode(&body) != nil || body.Action == "" || body.Input == nil {
 		common.ReplyErr(w, "invalid artifact action preview request", http.StatusBadRequest)
+		return nil, body, false
+	}
+	if _, supplied := body.Input["native_companion"]; supplied {
+		common.ReplyErr(w, "companion artifacts are server-owned", 400)
 		return nil, body, false
 	}
 	if body.BaseRevision <= 0 {

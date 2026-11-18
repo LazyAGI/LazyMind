@@ -18,10 +18,6 @@ import { getImportErrorMessage } from "@/modules/knowledge/utils/importError";
 import TagSelect from "@/modules/knowledge/components/TagSelect";
 import { useDatasetPermissionStore } from "@/modules/knowledge/store/dataset_permission";
 import { localizeErrorCode } from "@/components/request";
-import {
-  RuntimeReadinessError,
-  waitForRuntimeCapability,
-} from "@/runtime/readiness";
 
 const SINGLE_FILE_MAX_SIZE = 500 * 1024 * 1024;
 const TOTAL_FILE_MAX_SIZE = 1 * 1024 * 1024 * 1024;
@@ -72,11 +68,10 @@ const ImportKnowledgeModal = (props: IProps, ref: Ref<unknown> | undefined) => {
   const [uploadOptions, setUploadOptions] = useState<KnowledgeOptions["upload"]>();
   const [visible, setVisible] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [runtimeWaiting, setRuntimeWaiting] = useState(false);
   const [importError, setImportError] = useState("");
+  const retryParents = useRef(new Map<File, string>());
   const [tags, setTags] = useState<string[]>([]);
   const [hasZipError, setHasZipError] = useState(false);
-  const runtimeWaitAbortRef = useRef<AbortController | null>(null);
   const hasOnlyReadPermission = useDatasetPermissionStore((state) =>
     state.hasOnlyReadPermission(),
   );
@@ -99,7 +94,6 @@ const ImportKnowledgeModal = (props: IProps, ref: Ref<unknown> | undefined) => {
 
   useEffect(() => {
     getTags();
-    return () => runtimeWaitAbortRef.current?.abort();
   }, []);
 
   function getTags() {
@@ -126,13 +120,11 @@ const ImportKnowledgeModal = (props: IProps, ref: Ref<unknown> | undefined) => {
   const isZipMode = importMode === "zip";
 
   function handleClose() {
-    runtimeWaitAbortRef.current?.abort();
-    runtimeWaitAbortRef.current = null;
+    retryParents.current.clear();
     form.resetFields();
     setData(InitData);
     setVisible(false);
     setLoading(false);
-    setRuntimeWaiting(false);
     setHasZipError(false);
     setImportError("");
   }
@@ -156,33 +148,27 @@ const ImportKnowledgeModal = (props: IProps, ref: Ref<unknown> | undefined) => {
         : undefined;
 
     try {
-      const controller = new AbortController();
-      runtimeWaitAbortRef.current = controller;
-      if (!storageOnly) await waitForRuntimeCapability("parser", {
-        signal: controller.signal,
-        onWaiting: () => setRuntimeWaiting(true),
-      });
-      setRuntimeWaiting(false);
-
-      const tasks = await submitWithHashReuse(fileItems, values.tags, startMode);
+      const {tasks, failures, retryFiles} = await submitWithHashReuse(fileItems, values.tags, startMode);
+      if (tasks.length) onOk({ pId: data.p_id, tasks });
+      if (failures.length) {
+        form.setFieldValue("fileList", (values.fileList || []).filter((file: any) => retryFiles.has(file.originFile ?? file)));
+        const summary = failures.join("\n");
+        setImportError(summary);
+        message.warning(tasks.length ? "部分文件已保存，未成功的文件可修正后重试" : "文件未保存，请查看具体原因");
+        return;
+      }
       message.success(props.storageOnly ? "文件已保留在知识库内，未解析、未建立索引"
-        : availability !== "ready" ? "原文件、解析文本和基础切片已保存；组件及模型就绪后将自动建立索引"
-        : t("knowledge.uploadCompleteParsingStarted"));
+        : "原文件已保存，可在知识库中查看解析和索引状态");
       handleClose();
-      onOk({ pId: data.p_id, tasks });
     } catch (err) {
       if ((err as Error)?.name === "AbortError") {
         return;
       }
       console.error(err);
-      const errorMessage = getImportErrorMessage(err, err instanceof RuntimeReadinessError
-        ? t("runtime.initializationFailed")
-        : localizeErrorCode("2000509"));
+      const errorMessage = getImportErrorMessage(err, localizeErrorCode("2000509"));
       setImportError(errorMessage);
       message.error(errorMessage);
     } finally {
-      runtimeWaitAbortRef.current = null;
-      setRuntimeWaiting(false);
       setLoading(false);
     }
   }
@@ -208,39 +194,96 @@ const ImportKnowledgeModal = (props: IProps, ref: Ref<unknown> | undefined) => {
   ) {
     onUploadStart?.();
     try {
+      const failures: string[] = [];
+      const retryFiles = new Set<File>();
+      const failedUploads = new Set<File>();
       const items = await buildUploadTaskItems({
         datasetId: data.dataset_id,
         fileItems,
         tags,
         documentPid: data.p_id,
         folderMode: isDirectoryMode,
+        onFileError: (item, error) => {
+          failedUploads.add(item.originFile);
+          retryFiles.add(item.originFile);
+          failures.push(`${item.path}：${getImportErrorMessage(error)}`);
+        },
       });
 
       if (!items.length) {
+        if (failures.length) return {tasks: [] as ImportTaskRef[], failures, retryFiles};
         throw new Error(t("knowledge.uploadResultMissing"));
       }
+      const uploadedFiles = fileItems.filter(item => !failedUploads.has(item.originFile));
 
       const createRes = await TaskServiceApi().createTasks(data.dataset_id, {
-        items,
+        items: items.map((item, index) => {
+          const parent = retryParents.current.get(uploadedFiles[index]?.originFile);
+          return parent ? {...item, task: {...item.task, document_pid: parent}} : item;
+        }),
+        allow_partial: true,
       });
+      for (const outcome of createRes.data.outcomes || []) {
+        if (outcome.status === "CREATED") continue;
+        const file = uploadedFiles[outcome.input_index];
+        const partialNotice = outcome.status === "PARTIAL" ? "；部分成员已保存，请在知识库核对后仅重传失败成员" : "";
+        failures.push(`${file?.path || outcome.display_name}：${getImportErrorMessage(outcome)}${partialNotice}`);
+        if (file && outcome.target_pid) retryParents.current.set(file.originFile, outcome.target_pid);
+        // A partially committed archive/input must be inspected, not re-uploaded wholesale.
+        if (file && outcome.status === "FAILED" && !outcome.task_ids?.length) retryFiles.add(file.originFile);
+      }
+
+      // Upload/hash failures never reach CreateTask, so they have no outcome of
+      // their own. Reuse the folder created for a successful sibling prefix.
+      if (isDirectoryMode && !data.p_id && failedUploads.size) {
+        const prefixOf = (path: string) => {
+          const parts = path.trim().replace(/\\/g, "/").split("/");
+          return parts.length > 1 ? parts[0].trim() : "";
+        };
+        const parentsByPrefix = new Map<string, string>();
+        for (const outcome of createRes.data.outcomes || []) {
+          const file = uploadedFiles[outcome.input_index];
+          if (file && outcome.target_pid) {
+            const prefix = prefixOf(file.path);
+            if (prefix) parentsByPrefix.set(prefix, outcome.target_pid);
+          }
+        }
+        for (const file of fileItems) {
+          if (!failedUploads.has(file.originFile) || retryParents.current.has(file.originFile)) continue;
+          const parent = parentsByPrefix.get(prefixOf(file.path));
+          if (parent) retryParents.current.set(file.originFile, parent);
+        }
+      }
 
       const taskIds = (createRes.data.tasks || [])
         .map((task) => task.task_id)
         .filter(Boolean) as string[];
 
       if (!taskIds.length) {
+        if (failures.length) return {tasks: [] as ImportTaskRef[], failures, retryFiles};
         throw new Error(localizeErrorCode("2000509"));
       }
 
-      const started = await startTasksAfterUpload(taskIds, startMode);
-      return (started.data.tasks || []).map((task): ImportTaskRef => {
-        const created = createRes.data.tasks?.find((item) => item.task_id === task.task_id || (task.document_id && item.document_id === task.document_id));
+      let startedTasks;
+      try {
+        const started = await startTasksAfterUpload(taskIds, startMode);
+        startedTasks = started.data.tasks || [];
+      } catch {
+        // Creation already committed the originals. A processing outage must
+        // not ask the user to upload the same files again.
+        message.warning("原文件已保存，处理暂未启动；服务就绪后可在知识库中重试");
+        startedTasks = createRes.data.tasks || [];
+      }
+      // Track every saved task even if start returns only a subset of outcomes.
+      const tasks = (createRes.data.tasks || []).map((created): ImportTaskRef => {
+        const task = startedTasks.find(item => item.task_id === created.task_id) || created;
         return {
           task_id: task.task_id,
           target_pid: created?.target_pid || data.p_id,
           display_name: task.display_name || created?.display_name,
         };
       });
+      return {tasks, failures, retryFiles};
     } finally {
       onUploadSettled?.();
     }
@@ -276,17 +319,13 @@ const ImportKnowledgeModal = (props: IProps, ref: Ref<unknown> | undefined) => {
       {storageOnly && (
         <Alert type="info" showIcon style={{ marginBottom: 16 }}
           message={props.storageOnly ? "文件将保留在知识库内，仅保存原文件，不解析、不建立索引。"
-            : "无需安装 RAG 即可保存解析文本和基础切片。安装组件并配置 embedding 后自动建立索引；扫描件需要 OCR。"} />
+            : "原文件可以正常上传。解析和索引进度可在知识库中查看，服务未就绪时可稍后重试。"} />
       )}
       {importError && <Alert type="error" showIcon message={importError} style={{ marginBottom: 16, whiteSpace: "pre-wrap" }} />}
       {loading && (
         <Alert
-          message={
-            storageOnly ? "正在上传并保存文件，请勿关闭页面" : runtimeWaiting
-              ? t("runtime.aiServiceInitializingDocument")
-              : t("knowledge.documentParsingKeepTabOpen")
-          }
-          type={runtimeWaiting ? "info" : "warning"}
+          message="正在上传并保存文件，请勿关闭页面"
+          type="info"
           showIcon
           style={{ marginBottom: 16 }}
         />

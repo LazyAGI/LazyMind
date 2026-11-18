@@ -49,3 +49,10 @@ def test_container_editable_ppt_still_uses_deploy_flag(monkeypatch):
     monkeypatch.setenv('LAZYMIND_OUTPUT_EDITABLE_PPT', 'true')
 
     assert workflow_routes.editable_pptx_enabled() is True
+
+
+def test_generated_markdown_uses_shared_heading_normalization():
+    source = '# 2026 报告\n## 1. 素材来源\n正文 2026 年\n```md\n## 2. 示例\n```\n### 二、结论\n'
+    assert workflow_routes.normalize_generated_document(workflow_routes.GeneratedMarkdownRequest(text=source)) == {
+        'text': '# 2026 报告\n## 素材来源\n正文 2026 年\n```md\n## 2. 示例\n```\n### 结论\n',
+    }

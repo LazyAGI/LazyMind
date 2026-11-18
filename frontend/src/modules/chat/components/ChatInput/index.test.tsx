@@ -31,6 +31,7 @@ vi.mock("../SkillRecording", () => ({ default: () => null }));
 const promptMocks = vi.hoisted(() => ({ polish: vi.fn() }));
 const editorFocus = vi.hoisted(() => ({ atEnd: vi.fn(), draftWithoutMentions: vi.fn(), restoreMentionsOnValueChange: false }));
 const rag = vi.hoisted(() => ({ availability: "ready" }));
+const uploadCompletion = vi.hoisted(() => ({ deferred: false, finish: undefined as undefined | (() => void) }));
 vi.mock("@/modules/modelProvider/contexts/RAGComponentContext", () => ({
   useRAGComponent: () => ({ availability: rag.availability }),
 }));
@@ -141,6 +142,14 @@ vi.mock("../ImageUpload", async () => {
             files.current.push(Object.assign(file, { uid: file.name, uri: `/uploads/${file.name}` }));
             accepted.push(file);
           }
+          if (uploadCompletion.deferred) {
+            const pending = files.current;
+            accepted.forEach(file => { (file as File & { uri: string }).uri = ''; });
+            uploadCompletion.finish = () => {
+              pending.forEach(file => { file.uri = `/uploads/${file.name}`; });
+              props.updateFiles(pending);
+            };
+          }
           props.updateFiles(files.current);
           if (accepted.length > 0) props.onFilesAdded?.(accepted);
         },
@@ -210,6 +219,186 @@ describe("ChatInput model switch save lock", () => {
   beforeEach(() => {
     vi.mocked(getRuntimeMode).mockReturnValue("local");
     editorFocus.draftWithoutMentions.mockReset();
+  });
+
+  it.each(['remove', 'send'])('does not restore an attachment after %s when an old uploader finishes another file', async action => {
+    uploadCompletion.deferred = true;
+    onTestFinished(() => { uploadCompletion.deferred = false; uploadCompletion.finish = undefined; });
+    const ref = createRef<ChatInputImperativeProps>();
+    const props = { ref, onSend: vi.fn(), value: 'draft', onChange: vi.fn(), isChatContent: true,
+      showConversationConfig: false, showHistoryButton: false, showPromptSuggestions: false };
+    const view = render(<ChatInput {...props} sessionId="review-removed-a" />);
+    await act(async () => ref.current?.uploadFiles([new File(['first'], 'first.png', { type: 'image/png' })]));
+    await act(async () => uploadCompletion.finish?.());
+    await screen.findByRole('button', { name: 'first.png' });
+    await act(async () => ref.current?.uploadFiles([new File(['late'], 'late.png', { type: 'image/png' })]));
+    const finish = uploadCompletion.finish!;
+    view.rerender(<ChatInput {...props} sessionId="review-removed-b" />);
+    view.rerender(<ChatInput {...props} sessionId="review-removed-a" />);
+    fireEvent.click(screen.getByRole('button', { name: action === 'remove' ? 'first.png' : 'chat.send' }));
+    await waitFor(() => expect(useChatInputStore.getState().inputFiles['review-removed-a'] ?? []).toEqual([]));
+    await act(async () => finish());
+    await screen.findByRole('button', { name: 'late.png' });
+    expect(useChatInputStore.getState().inputFiles['review-removed-a'].map(f => f.name)).toEqual(['late.png']);
+    view.rerender(<ChatInput {...props} sessionId="review-removed-b" />);
+    view.rerender(<ChatInput {...props} sessionId="review-removed-a" />);
+    expect(screen.queryByRole('button', { name: 'first.png' })).not.toBeInTheDocument();
+  });
+
+  it.each([['image.png', 'rejected.pdf'], ['paper.pdf', 'rejected.png']])('preserves upload exclusion after restoring %s', async (original, rejected) => {
+    const oldCreate = URL.createObjectURL;
+    const oldRevoke = URL.revokeObjectURL;
+    URL.createObjectURL = vi.fn(() => 'blob:review-pdf');
+    URL.revokeObjectURL = vi.fn();
+    onTestFinished(() => { URL.createObjectURL = oldCreate; URL.revokeObjectURL = oldRevoke; });
+
+    const ref = createRef<ChatInputImperativeProps>();
+    const props = { ref, value: 'draft', onChange: vi.fn(), isChatContent: true,
+      showConversationConfig: false, showHistoryButton: false, showPromptSuggestions: false };
+    const view = render(<ChatInput {...props} sessionId="review-types-a" />);
+    await act(async () => ref.current?.uploadFiles([new File(['original'], original)]));
+    await screen.findByRole('button', { name: original });
+    await act(async () => ref.current?.uploadFiles([new File(['rejected'], rejected)]));
+    expect(screen.queryByRole('button', { name: rejected })).not.toBeInTheDocument();
+    view.rerender(<ChatInput {...props} sessionId="review-types-b" />);
+    view.rerender(<ChatInput {...props} sessionId="review-types-a" />);
+    await act(async () => ref.current?.uploadFiles([new File(['rejected'], rejected)]));
+    expect(screen.queryByRole('button', { name: rejected })).not.toBeInTheDocument();
+    // A mixed incoming batch intentionally replaces existing files with documents.
+    await act(async () => ref.current?.uploadFiles([new File(['image'], 'new.png'), new File(['PDF'], 'new.pdf')]));
+    await screen.findByRole('button', { name: 'new.pdf' });
+    expect(screen.queryByRole('button', { name: original })).not.toBeInTheDocument();
+    expect(contextPreview.build?.().input).toEqual([
+      { input_type: 'text', text: 'draft' },
+      { input_type: 'file', uri: '/uploads/new.pdf', filename: 'new.pdf' },
+    ]);
+    view.rerender(<ChatInput {...props} sessionId="review-types-b" />);
+    view.rerender(<ChatInput {...props} sessionId="review-types-a" />);
+    expect(screen.queryByRole('button', { name: original })).not.toBeInTheDocument();
+  });
+
+  it.each(['conversation', 'welcome'])('restores the %s attachment draft after leaving the page', async kind => {
+    const createObjectURL = URL.createObjectURL;
+    const revokeObjectURL = URL.revokeObjectURL;
+    URL.createObjectURL = vi.fn(() => 'blob:draft-pdf');
+    URL.revokeObjectURL = vi.fn();
+    onTestFinished(() => { URL.createObjectURL = createObjectURL; URL.revokeObjectURL = revokeObjectURL; });
+    const key = `attachment-${kind}`;
+    const ref = createRef<ChatInputImperativeProps>();
+    const onSend = vi.fn();
+    const input = () => <ChatInput ref={ref} value="Summarize" onChange={vi.fn()} onSend={onSend}
+      {...(kind === 'welcome' ? { draftKey: key } : { sessionId: key })}
+      isChatContent showConversationConfig={false} showHistoryButton={false} showPromptSuggestions={false} />;
+    const view = render(input());
+    fireEvent.click(screen.getByTestId('attach-test-pdf'));
+    await screen.findByRole('button', { name: 'paper.pdf' });
+    view.unmount();
+    await useChatInputStore.persist.rehydrate();
+    const restored = render(input());
+    expect(screen.getByRole('button', { name: 'paper.pdf' })).toBeInTheDocument();
+    expect(screen.getByTestId('upload-slots')).toHaveAttribute('data-max', '2');
+    expect(contextPreview.build?.().input).toContainEqual({ input_type: 'file', uri: '/uploads/paper.pdf', filename: 'paper.pdf' });
+    fireEvent.click(screen.getByRole('button', { name: 'chat.send' }));
+    await waitFor(() => expect(onSend).toHaveBeenCalledWith(expect.objectContaining({
+      referencedFiles: [{ input_type: 'file', uri: '/uploads/paper.pdf', filename: 'paper.pdf' }],
+    })));
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'paper.pdf' })).not.toBeInTheDocument());
+    restored.unmount();
+    render(input());
+    expect(screen.queryByRole('button', { name: 'paper.pdf' })).not.toBeInTheDocument();
+  });
+
+  it('isolates attachment-only drafts when switching conversations and remembers removal', async () => {
+    const ref = createRef<ChatInputImperativeProps>();
+    const props = { ref, value: '', onChange: vi.fn(), isChatContent: true,
+      showConversationConfig: false, showHistoryButton: false, showPromptSuggestions: false };
+    const view = render(<ChatInput {...props} sessionId="attachment-only-a" />);
+    await act(async () => ref.current?.uploadFiles([new File(['image'], 'photo.png', { type: 'image/png' })]));
+    await screen.findByRole('button', { name: 'photo.png' });
+    view.rerender(<ChatInput {...props} sessionId="attachment-only-b" />);
+    expect(screen.queryByRole('button', { name: 'photo.png' })).not.toBeInTheDocument();
+    view.rerender(<ChatInput {...props} sessionId="attachment-only-a" />);
+    expect(screen.getByRole('button', { name: 'photo.png' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'chat.send' })).toBeEnabled();
+    fireEvent.click(screen.getByRole('button', { name: 'photo.png' }));
+    view.rerender(<ChatInput {...props} sessionId="attachment-only-b" />);
+    view.rerender(<ChatInput {...props} sessionId="attachment-only-a" />);
+    expect(screen.queryByRole('button', { name: 'photo.png' })).not.toBeInTheDocument();
+  });
+
+  it('saves a late upload completion to its original conversation', async () => {
+    uploadCompletion.deferred = true;
+    onTestFinished(() => { uploadCompletion.deferred = false; uploadCompletion.finish = undefined; });
+    useChatInputStore.getState().saveInputFiles('upload-in-progress', [{ id: 'upload:removed', name: 'removed.png',
+      input: { input_type: 'image', uri: '/uploads/removed.png', filename: 'removed.png' } }]);
+    const ref = createRef<ChatInputImperativeProps>();
+    const props = { ref, value: '', onChange: vi.fn(), isChatContent: true,
+      showConversationConfig: false, showHistoryButton: false, showPromptSuggestions: false };
+    const view = render(<ChatInput {...props} sessionId="upload-in-progress" />);
+    await act(async () => ref.current?.uploadFiles([new File(['image'], 'late.png', { type: 'image/png' })]));
+    fireEvent.click(screen.getByRole('button', { name: 'removed.png' }));
+    view.rerender(<ChatInput {...props} sessionId="other-conversation" />);
+    await act(async () => uploadCompletion.finish?.());
+    expect(screen.queryByRole('button', { name: 'late.png' })).not.toBeInTheDocument();
+    view.rerender(<ChatInput {...props} sessionId="upload-in-progress" />);
+    expect(screen.getByRole('button', { name: 'late.png' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'removed.png' })).not.toBeInTheDocument();
+    expect(contextPreview.build?.().input).toContainEqual({ input_type: 'image', uri: '/uploads/late.png', filename: 'late.png' });
+  });
+
+  it('keeps two conversations with text and same-named image attachments independent', async () => {
+    const store = useChatInputStore.getState();
+    store.saveInputContent('two-drafts-a', 'draft A');
+    store.saveInputContent('two-drafts-b', 'draft B');
+    const ref = createRef<ChatInputImperativeProps>();
+    const input = (sessionId: string) => <ChatInput ref={ref} sessionId={sessionId}
+      value={store.getInputContent(sessionId)} onChange={vi.fn()} isChatContent
+      showConversationConfig={false} showHistoryButton={false} showPromptSuggestions={false} />;
+    const view = render(input('two-drafts-a'));
+    await act(async () => ref.current?.uploadFiles([new File(['A'], 'image.png', { type: 'image/png' })]));
+    await screen.findByRole('button', { name: 'image.png' });
+    view.rerender(input('two-drafts-b'));
+    expect(screen.queryByRole('button', { name: 'image.png' })).not.toBeInTheDocument();
+    await act(async () => ref.current?.uploadFiles([new File(['B'], 'image.png', { type: 'image/png' })]));
+    await screen.findByRole('button', { name: 'image.png' });
+    for (const id of ['two-drafts-a', 'two-drafts-b', 'two-drafts-a']) {
+      view.rerender(input(id));
+      expect(within(screen.getByLabelText('attachments')).getAllByRole('button')).toHaveLength(1);
+      expect(contextPreview.build?.().input).toContainEqual({ input_type: 'image', uri: '/uploads/image.png', filename: 'image.png' });
+    }
+    fireEvent.click(screen.getByRole('button', { name: 'image.png' }));
+    view.rerender(input('two-drafts-b'));
+    expect(screen.getByRole('button', { name: 'image.png' })).toBeInTheDocument();
+    expect(store.getInputContent('two-drafts-a')).toBe('draft A');
+    expect(store.getInputContent('two-drafts-b')).toBe('draft B');
+    view.rerender(input('two-drafts-a'));
+    expect(screen.queryByRole('button', { name: 'image.png' })).not.toBeInTheDocument();
+  });
+
+  it('preserves sendable late uploads after returning to the same conversation', async () => {
+    uploadCompletion.deferred = true;
+    onTestFinished(() => { uploadCompletion.deferred = false; uploadCompletion.finish = undefined; });
+    const ref = createRef<ChatInputImperativeProps>();
+    const onSend = vi.fn();
+    const props = { ref, onSend, value: 'draft', onChange: vi.fn(), isChatContent: true,
+      showConversationConfig: false, showHistoryButton: false, showPromptSuggestions: false };
+    const view = render(<ChatInput {...props} sessionId="review-return-a" />);
+    await act(async () => ref.current?.uploadFiles([new File(['A'], 'late.png', { type: 'image/png' })]));
+    const finish = uploadCompletion.finish!;
+    view.rerender(<ChatInput {...props} sessionId="review-return-b" />);
+    view.rerender(<ChatInput {...props} sessionId="review-return-a" />);
+    uploadCompletion.deferred = false;
+    await act(async () => ref.current?.uploadFiles([new File(['B'], 'current.png', { type: 'image/png' })]));
+    await screen.findByRole('button', { name: 'current.png' });
+    await act(async () => finish());
+    await screen.findByRole('button', { name: 'late.png' });
+    expect(contextPreview.build?.().input).toContainEqual({ input_type: 'image', uri: '/uploads/late.png', filename: 'late.png' });
+    expect(contextPreview.build?.().input).toContainEqual({ input_type: 'image', uri: '/uploads/current.png', filename: 'current.png' });
+    fireEvent.click(screen.getByRole('button', { name: 'chat.send' }));
+    await waitFor(() => expect(onSend).toHaveBeenCalledWith(expect.objectContaining({ referencedFiles: expect.arrayContaining([
+      { input_type: 'image', uri: '/uploads/late.png', filename: 'late.png' },
+      { input_type: 'image', uri: '/uploads/current.png', filename: 'current.png' },
+    ]) })));
   });
 
   it("warns about missing visual understanding only when an image attachment is added", async () => {

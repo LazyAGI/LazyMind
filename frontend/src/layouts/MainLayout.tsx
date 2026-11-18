@@ -1,4 +1,5 @@
 import { TASKS_REMOVED_EVENT, type TasksRemovedDetail } from '@/modules/taskCenter/events';
+import { useWorkflowChanges } from '@/modules/taskCenter/useWorkflowChanges';
 import { useChatInputStore } from "@/modules/chat/store/chatInput";
 import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
@@ -54,6 +55,7 @@ import RecordList, {
   type RecordListImperativeProps,
 } from "@/modules/chat/components/RecordList";
 import { useConversationRunningSync } from "@/modules/chat/store/conversationRunning";
+import GitHubStarProvider from '@/modules/githubStar/GitHubStarProvider';
 import {
   CHAT_CONVERSATION_FILTER_EVENT,
   CHAT_CONVERSATION_LIST_REFRESH_EVENT,
@@ -172,6 +174,7 @@ export default function MainLayout() {
     return () => { disposed = true; window.removeEventListener(USER_UI_PREFERENCES_CHANGED_EVENT, changed); };
   }, [isLoggedIn, directoryUser]);
   useConversationRunningSync(isLoggedIn ? userInfo?.userId || userInfo?.username || "" : "", routeConversationId);
+  useWorkflowChanges(isLoggedIn ? userInfo?.userId || userInfo?.username || '' : '');
   const userName = userInfo?.username || "";
   const isAdminUser = isAdminRole(userInfo?.role);
   const hideLocalUserControls = shouldHideLocalUserControls();
@@ -1365,6 +1368,7 @@ export default function MainLayout() {
         <DesktopUpdateNotice />
         <Content className="main-layout-body">
           <div className="sub-app-container">
+            <GitHubStarProvider key={userInfo?.userId || ''} userId={isLoggedIn ? userInfo?.userId || '' : ''} conversationId={routeConversationId}>
             <Suspense fallback={<div className="main-layout-page-loading"><Spin /></div>}>
               {pathname.startsWith("/document-directories") && !directoriesEnabled ? (
                 directoriesEnabled === false ? <Navigate to="/settings?section=knowledge" replace /> : <Spin />
@@ -1375,6 +1379,7 @@ export default function MainLayout() {
                 }}
               />}
             </Suspense>
+            </GitHubStarProvider>
           </div>
         </Content>
       </Layout>

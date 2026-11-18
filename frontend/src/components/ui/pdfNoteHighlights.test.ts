@@ -33,3 +33,18 @@ it('keeps each saved note id on its clickable highlight rectangles',()=>{
   {id:'note-a',color:'yellow',rect:[.1,.25,.4,.29]},
  ]);
 });
+
+it('converts Zotero PDF rectangles through the cropped rotated page viewport',async()=>{
+ const {resolvePdfNoteHighlight}=await import('./pdfNoteHighlights');
+ const note={id:'zotero',page:2,color:'yellow' as const,rects:[],pdfRects:[[110,220,150,240] as [number,number,number,number]]};
+ expect(resolvePdfNoteHighlight(note,{width:600,height:800,convertToViewportPoint:(x,y)=>[x-10,820-y]}).rects).toEqual([[100/600,580/800,140/600,600/800]]);
+ expect(resolvePdfNoteHighlight(note,{width:800,height:600,convertToViewportPoint:(x,y)=>[y-20,x-10]}).rects).toEqual([[200/800,100/600,220/800,140/600]]);
+ expect(resolvePdfNoteHighlight(note).rects).toEqual([]);
+});
+
+it('ignores malformed imported rectangle values without crashing the PDF reader',async()=>{
+ const {resolvePdfNoteHighlight}=await import('./pdfNoteHighlights');
+ const viewport={width:600,height:800,convertToViewportPoint:(x:number,y:number)=>[x,800-y]};
+ expect(resolvePdfNoteHighlight({id:'bad',page:1,color:'yellow',rects:[],pdfRects:[null,{},[1,2,3],['1',2,3,4]]} as any,viewport).rects).toEqual([]);
+ expect(resolvePdfNoteHighlight({id:'bad',page:1,color:'yellow',rects:[],pdfRects:'broken'} as any,viewport).rects).toEqual([]);
+});

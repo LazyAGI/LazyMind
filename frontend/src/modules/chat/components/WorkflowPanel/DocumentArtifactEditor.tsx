@@ -1,3 +1,4 @@
+import ExternalLink from '@/components/ExternalLink';
 import { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { Modal } from 'antd';
 import { ExclamationCircleOutlined, ExportOutlined, ReloadOutlined } from '@ant-design/icons';
@@ -7,6 +8,7 @@ import { WorkflowSessionApi, type RewriteSelectionPreview, type WriterNumberingS
 import { resolveCoreAssetUrl, resolveMarkdownImageUrlFromMap } from '@/modules/knowledge/utils/imageUrl';
 import { CLOUD_DOCUMENTS_OBSIDIAN_SETUP_PATH, getCloudDocumentsUrl } from '@/modules/modelProvider/utils/cloudDocumentUrls';
 import i18n from '@/i18n';
+import { normalizePaperHeadingNumbers } from './writerMarkdownAnchors';
 import { MarkdownArtifactEditor, type MarkdownSaveMode } from './MarkdownArtifactEditor';
 import { WriterIRControl, type WriterIRSaveMode } from './WriterIRControl';
 import { isWriterDocument, normalizeWriterDocumentForSync, type WriterDocument } from './writerIR';
@@ -52,7 +54,9 @@ async function readDocumentValue(value: unknown, representation: string): Promis
   return representation === 'ir' ? unwrap(JSON.parse(text)) : text;
 }
 
-export function DocumentArtifactEditor({ slot: incomingSlot, sessionId, readOnly, onRefresh, revisionCount, VersionHistory }: {
+export function DocumentArtifactEditor({ slot: incomingSlot, sessionId, readOnly, onRefresh, revisionCount, VersionHistory, paperDocument = false, boundMediaUrls }: {
+  paperDocument?: boolean;
+  boundMediaUrls?: Record<string, string>;
   slot: SlotRevision; sessionId: string; readOnly?: boolean; onRefresh?: () => void;
   revisionCount?: number; VersionHistory?: typeof SlotVersionPopover;
 }) {
@@ -86,7 +90,8 @@ export function DocumentArtifactEditor({ slot: incomingSlot, sessionId, readOnly
       };
     },
   }), [editingContext, editingKey]);
-  const initial: Baseline = { id: slot.artifact_id!, revision: slot.revision, draft: slot.draft_version, value: unwrap(slot.artifact_value) };
+  const paperValue = (value: unknown) => paperDocument && typeof value === 'string' ? normalizePaperHeadingNumbers(value) : value;
+  const initial: Baseline = { id: slot.artifact_id!, revision: slot.revision, draft: slot.draft_version, value: paperValue(unwrap(slot.artifact_value)) };
   const latest = useRef(initial);
   const external = useRef(initial);
   const dirty = useRef(false);
@@ -155,7 +160,7 @@ export function DocumentArtifactEditor({ slot: incomingSlot, sessionId, readOnly
   });
   const mediaKey = JSON.stringify([sessionId, slot.artifact_id, slot.revision, slot.draft_version, writerSlot, mediaRevision]);
   const [media, setMedia] = useState<{ key: string; urls?: Record<string, string> }>();
-  const mediaUrls = media?.key === mediaKey || retainedPublicationSource.current !== undefined ? media?.urls : undefined;
+  const mediaUrls = boundMediaUrls ?? (media?.key === mediaKey || retainedPublicationSource.current !== undefined ? media?.urls : undefined);
   const latestMediaUrls = useRef(mediaUrls);
   latestMediaUrls.current = mediaUrls;
   const resolveImageUrl = useCallback(async (url: string) => {
@@ -195,6 +200,7 @@ export function DocumentArtifactEditor({ slot: incomingSlot, sessionId, readOnly
         content = await readDocumentValue(content, descriptor.representation);
       }
       if (canceled) return;
+      content = paperValue(content);
       seen.current = signature;
       const next = { id: slot.artifact_id!, revision: slot.revision, draft: slot.draft_version, value: content };
       // A delayed parent refresh must not undo a save or publication we accepted.
@@ -253,7 +259,7 @@ export function DocumentArtifactEditor({ slot: incomingSlot, sessionId, readOnly
         && item.slot_id === slot.slot_id && (item.list_index ?? -1) === (slot.list_index ?? -1)
         && item.revision === revision);
       if (!selected?.artifact_id || !selected.document) throw new Error('selected document unavailable');
-      const content = await readDocumentValue(selected.artifact_value, selected.document.representation);
+      const content = paperValue(await readDocumentValue(selected.artifact_value, selected.document.representation));
       // Replace the save baseline as well as the visible text, before editing resumes.
       dirty.current = false;
       draftContent.current = content;
@@ -413,7 +419,7 @@ export function DocumentArtifactEditor({ slot: incomingSlot, sessionId, readOnly
               <span>{label}</span>
               {isObsidian && <small title={String(i18n.t('modelProvider.cloudDocuments.obsidianEnvironmentHint'))}>{i18n.t('modelProvider.cloudDocuments.obsidianEnvironmentSummary')}</small>}
             </span>
-            <a className='workflow-panel__provider-settings-link'
+            <ExternalLink className='workflow-panel__provider-settings-link'
               href={isObsidian ? CLOUD_DOCUMENTS_OBSIDIAN_SETUP_PATH : getCloudDocumentsUrl(provider.id === 'feishu' || provider.id === 'googledrive' || provider.id === 'wechat' ? provider.id : undefined)}
               target='_blank' rel='noopener noreferrer'
               aria-disabled={false}
@@ -421,7 +427,7 @@ export function DocumentArtifactEditor({ slot: incomingSlot, sessionId, readOnly
               onClick={event => event.stopPropagation()}
               onKeyDown={event => { if (event.key === 'Enter' || event.key === ' ') event.stopPropagation(); }}>
               {settingsAction}<ExportOutlined aria-hidden='true' />
-            </a>
+            </ExternalLink>
           </span> : label,
           icon: <span className='workflow-panel__provider-icon' aria-hidden='true'><WriterProviderIcon provider={provider.id} /></span>,
           onClick: () => chooseRef.current(provider.id),
@@ -438,7 +444,7 @@ export function DocumentArtifactEditor({ slot: incomingSlot, sessionId, readOnly
     currentVersionNumber={slot.version_number} currentValue={value} currentChangeSource={slot.change_source}
     readCurrentValue={() => getSnapshot?.(editingKey) ?? draftContent.current} contentType='text'
     readOnly={!writable} triggerLabel={String(i18n.t('chat.slots.versionHistory'))} onRollback={rollback} /> : undefined;
-  return <SlotEditingContext.Provider value={editorContext}><div className='workflow-slot workflow-slot--artifact'>
+  return <SlotEditingContext.Provider value={editorContext}><div className={`workflow-slot workflow-slot--artifact${paperDocument ? ' workflow-slot--paper-document' : ''}`}>
     <div className={`workflow-slot__artifact-body${representation === 'markdown' ? ' workflow-slot__artifact-body--markdown' : ''}`} onClick={imageDownloads.onImageClick}>
     {representation === 'markdown' && typeof value === 'string'
       ? <MarkdownArtifactEditor renderContext={descriptor.render_context} markdown={value} sourceRevision={version} editingKey={editingKey} readOnly={!writable} allowMultipleParagraphs

@@ -74,7 +74,7 @@ PPT 的 `lazymind-ppt-source` 元数据必须记录当前源 HTML 的 SHA-256；
    `history-injection/<category>/<bundle-id>.zip`。
 5. 上传外层 ZIP 到 ModelScope，并更新
    `desktop/history-injection-package.json` 的 URL、文件名、大小、SHA-256 和
-   `conversationIds`。该 ID 列表用于 Docker 在下载前查询 PostgreSQL。
+   `conversationIds`，供发布校验确认包内样例。
 6. 不要用 `git add -f` 提交任何内层或外层 ZIP。
 
 Desktop 默认不再把案例 ZIP 放入安装包。Windows/macOS 构建脚本只复制发布描述文件，
@@ -93,20 +93,21 @@ Actions 的 `defer_history` 和本地 `LAZYMIND_DESKTOP_DEFER_HISTORY` 默认开
 `LAZYMIND_HISTORY_INJECTION_ENABLED=false` 仍用于关闭 Core 的案例注入；该开关不改变安装包构建方式。
 
 Docker 不在 Core 镜像构建阶段下载数据。`history-injection-init` 是复用 Chat/algorithm
-镜像的一次性容器：它先查询持久化 PostgreSQL；五条对话全部存在时直接退出，缺少时才把外层 ZIP 下载并缓存到
-`data/core/uploads/.history-injection/cache/`，然后校验、解压到相邻的 `bundles/`。
-Core 等该容器成功结束后启动。已校验的下载和解压缓存都会复用，因此重新构建 Core、重启
-Core 或再次执行 `make up` 不会重复下载。
+镜像的一次性容器。它按发布清单的 SHA-256 检查已解压目录和 ZIP 缓存，缺少当前版本时才下载。
+ZIP 缓存在 `data/core/uploads/.history-injection/cache/`，解压到相邻的 `bundles/`。
+Core 等该容器成功结束后启动。
 
 ## 启动顺序
 
 ```text
 GitHub Action 只写案例下载元数据 → Desktop warmup 准备 Python → 下载/复用缓存、校验并解压到用户数据目录
 → Core 数据库迁移 → 内置 Workflow seed → 发现/解压内层 bundle ZIP → 登录本地 admin 获取 user_id
-→ 校验 manifest/SHA-256 → 原子复制文件 → 单事务导入 SQL → Core 对外 healthy
+→ 校验 manifest/SHA-256 → 按标记导入或替换 → Core 对外 healthy
 
-Docker: history-injection-init 查询 PostgreSQL → 已存在则跳过；缺少则复用缓存或下载、校验、解压
+Docker: history-injection-init 按 SHA-256 复用缓存或下载、校验、解压
 → Core 数据库迁移 → 内置 Workflow seed → 注入内层 bundle → Core 对外 healthy
 ```
 
-注入按 conversation ID 幂等：同一用户已有该对话时仅补齐/校验文件；若相同 ID 已属于其他用户则拒绝覆盖。warmup 失败时安装器本身仍可完成，但 Core 日志会明确报告 bundle；普通首次启动也会再次执行同一流程，因此不是只能依赖安装器 warmup。
+Core 使用会话的 `_lazymind_history_injection` 标记识别安装样例。包 ID 和内容指纹匹配时只补齐缺失文件。旧标记仅含包 ID 时，同包 ID 首次升级会补写指纹。标记属于当前用户且包 ID 或已记录的指纹变化时，Core 会在事务中替换该样例的历史、工作流记录和产物。没有导入标记的同 ID 会话会保留。
+
+发布包变更会话 ID 时，可按已知的旧会话 ID 和旧包 ID 识别前任样例。新版导入成功后，旧版退出会话列表和任务中心。同名或属于其他用户的会话不参与替换。

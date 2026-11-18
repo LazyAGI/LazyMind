@@ -15,6 +15,8 @@ import (
 )
 
 func TestPanelURLScopeOnMCPWire(t *testing.T) {
+	t.Setenv("LAZYMIND_CONNECTOR_CONFIG", "")
+	t.Setenv("LAZYMIND_RUNTIME_PROFILE", "")
 	t.Setenv("LAZYMIND_WEB_URL", "https://panel.example")
 	for _, provider := range []string{"codex", "workbuddy", "deepseek-harness", ""} {
 		t.Run(provider, func(t *testing.T) {
@@ -77,6 +79,10 @@ func TestPanelURLScopeOnMCPWire(t *testing.T) {
 				result, err := cs.CallTool(ctx, &mcp.CallToolParams{Name: call.name, Arguments: call.args})
 				if err != nil || result.IsError {
 					t.Fatalf("%s: %v %+v", call.name, err, result)
+				}
+				encodedResult, _ := json.Marshal(result.StructuredContent)
+				if !strings.Contains(string(encodedResult), "https://panel.example/workflow-runs/run-1") {
+					t.Fatalf("%s missing browser fallback: %s", call.name, encodedResult)
 				}
 				for _, channel := range []any{result.Content, result.StructuredContent} {
 					encoded, _ := json.Marshal(channel)

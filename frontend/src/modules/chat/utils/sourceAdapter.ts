@@ -1,3 +1,4 @@
+import { externalWebURL, openExternalUrl } from '@/runtime/externalNavigation';
 import type { PublicSource } from "@/modules/chat/types/ordinaryTask";
 
 interface BaseChatSource {
@@ -182,7 +183,8 @@ export function getSourceOriginalHref(source: ChatSource) {
 export function openSource(source: ChatSource) {
   const href = getSourceOriginalHref(source);
   if (!href) return false;
-  window.open(href, "_blank", "noopener,noreferrer");
+  if (externalWebURL(href)) void openExternalUrl(href);
+  else window.open(href, "_blank", "noopener,noreferrer");
   return true;
 }
 

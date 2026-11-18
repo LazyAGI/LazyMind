@@ -5,6 +5,7 @@ Routes:
     POST /api/writer/documents:convert   Convert Writer document content.
     POST /api/document/actions:invoke    Invoke a shared built-in document action.
     POST /api/document:inspect           Inspect Markdown or Writer IR content.
+    POST /api/document:normalize-generated Normalize generated Markdown headings.
     GET  /api/document/providers         List registered document providers.
     POST /api/subagent/tasks:cancel      LazyMind task cancellation callback.
 """
@@ -38,6 +39,7 @@ from lazymind.document_tools import (
     list_document_providers,
     sync_writer_documents,
 )
+from lazymind.document_tools.artifacts import normalize_generated_markdown
 from lazymind.config import config
 from lazymind.model_config import inject_model_config
 from lazymind.workflow_sdk import WorkflowClient
@@ -173,6 +175,7 @@ class PptExportPage(BaseModel):
 class PptExportRequest(BaseModel):
     pages: List[PptExportPage]
     filename: Optional[str] = None
+    embed_fonts: bool = True
 
 
 def _writer_artifact(result: dict, key: Optional[str] = None) -> str:
@@ -196,6 +199,7 @@ class WorkflowActionInvokeRequest(BaseModel):
     arguments: Dict[str, Any] = Field(default_factory=dict)
     artifact_store: str = ''
     llm_config: Optional[Dict[str, Any]] = None
+    generation_responses: Optional[list[Dict[str, Any]]] = None
     tool_config: Optional[Dict[str, Any]] = None
 
 
@@ -212,6 +216,10 @@ class DocumentActionInvokeRequest(BaseModel):
 class DocumentInspectRequest(BaseModel):
     artifact: Any
     document_schema: str = Field(default='', alias='schema')
+
+
+class GeneratedMarkdownRequest(BaseModel):
+    text: str
 
 
 @router.post(
@@ -322,6 +330,11 @@ def inspect_document_artifact(request: DocumentInspectRequest) -> Dict[str, Any]
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
+@router.post('/api/document:normalize-generated', summary='Normalize generated Markdown headings')
+def normalize_generated_document(request: GeneratedMarkdownRequest) -> Dict[str, str]:
+    return {'text': normalize_generated_markdown(request.text)}
+
+
 @router.get('/api/document/providers', summary='List document providers')
 def document_providers() -> Dict[str, Any]:
     return {'providers': list_document_providers()}
@@ -411,7 +424,12 @@ def invoke_workflow_action(request: WorkflowActionInvokeRequest) -> Dict[str, An
             kwargs['artifact_store'] = request.artifact_store
         if 'slot' in parameters:
             kwargs['slot'] = request.slot
-        return {'result': tool(**kwargs)}
+        from lazymind.chat.workflow.action_generation import generation_scope, GenerationRequired
+        try:
+            with generation_scope(request.generation_responses):
+                return {'result': tool(**kwargs)}
+        except GenerationRequired as pending:
+            return {'result': {'status': 'needs_generation', 'generation_request': pending.request}}
     except HTTPException:
         raise
     except DocumentActionError as exc:
@@ -601,6 +619,11 @@ async def export_ppt_from_html(req: PptExportRequest):
         document = re.search(r'(?is)(<!doctype\s+html\b[\s\S]*?</html>|<html\b[\s\S]*?</html>)', value)
         return document.group(1).strip() if document else value
 
+    def export_error_for_log(detail: str) -> str:
+        detail = re.sub(r'''(?i)data:[^\s"'<>]+''', 'data:[redacted]', detail)
+        detail = re.sub(r'''(?i)(https?://[^\s"'<>?]+)\?[^\s"'<>]+''', r'\1?[redacted]', detail)
+        return detail.strip()[-4000:]
+
     workspace = Path(os.environ.get('LAZYMIND_SUBAGENT_WORKSPACE') or '/data/subagent')
     job_id = f'ppt_export_{uuid.uuid4().hex[:12]}'
     deck_dir = workspace / '.ppt_on_demand' / job_id
@@ -625,8 +648,11 @@ async def export_ppt_from_html(req: PptExportRequest):
         export_env['LAZYMIND_FONT_SUBSET_PYTHON'] = sys.executable
         if export_env.get('LAZYMIND_NODE_RUN_AS_NODE', '').strip().lower() == 'true':
             export_env['ELECTRON_RUN_AS_NODE'] = '1'
+        args = [export_node, export_cli, '--deck-dir', str(deck_dir), '--force']
+        if not req.embed_fonts:
+            args.append('--no-embed-fonts')
         process = await asyncio.create_subprocess_exec(
-            export_node, export_cli, '--deck-dir', str(deck_dir), '--force',
+            *args,
             stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
             env=export_env, **options,
         )
@@ -634,6 +660,8 @@ async def export_ppt_from_html(req: PptExportRequest):
         raw = stdout.decode('utf-8', errors='replace')
         if process.returncode != 0:
             detail = stderr.decode('utf-8', errors='replace') or raw
+            logger.error('PPTX export failed: job=%s pages=%d exit_code=%s error=%s',
+                         job_id, len(pages), process.returncode, export_error_for_log(detail))
             shutil.rmtree(deck_dir, ignore_errors=True)
             raise HTTPException(status_code=502, detail=f'ppt-export failed: {detail[-1500:]}')
     else:
@@ -642,8 +670,11 @@ async def export_ppt_from_html(req: PptExportRequest):
             or 'http://ppt-export:8099'
         ).rstrip('/')
         url = f'{export_base}/export'
+        export_body: Dict[str, Any] = {'deck_dir': str(deck_dir)}
+        if not req.embed_fonts:
+            export_body['embed_fonts'] = False
         request = urllib.request.Request(
-            url, data=json.dumps({'deck_dir': str(deck_dir)}).encode('utf-8'),
+            url, data=json.dumps(export_body).encode('utf-8'),
             headers={'Content-Type': 'application/json'}, method='POST',
         )
         try:
@@ -651,6 +682,7 @@ async def export_ppt_from_html(req: PptExportRequest):
                 raw = response.read().decode('utf-8', errors='replace')
         except urllib.error.HTTPError as exc:
             detail = exc.read().decode('utf-8', errors='replace') if exc.fp else str(exc)
+            logger.error('PPTX export failed: job=%s pages=%d upstream_status=%s', job_id, len(pages), exc.code)
             shutil.rmtree(deck_dir, ignore_errors=True)
             raise HTTPException(status_code=502, detail=f'ppt-export failed: {detail[:1500]}') from exc
         except Exception as exc:
@@ -662,6 +694,11 @@ async def export_ppt_from_html(req: PptExportRequest):
     except json.JSONDecodeError:
         payload = {}
     ok = isinstance(payload, dict) and (payload.get('status') == 'ok' or payload.get('success') is True)
+    if ok and not req.embed_fonts and payload.get('fontEmbeddingEnabled') is not False:
+        shutil.rmtree(deck_dir, ignore_errors=True)
+        raise HTTPException(
+            status_code=502, detail='The installed PPTX exporter does not support exporting without embedded fonts.',
+        )
     pptx_path = deck_dir / f'{job_id}.pptx'
     if not pptx_path.exists():
         candidates = list(deck_dir.glob('*.pptx'))
@@ -672,6 +709,8 @@ async def export_ppt_from_html(req: PptExportRequest):
             if isinstance(payload, dict)
             else ''
         )
+        logger.error('PPTX export produced no file: job=%s pages=%d exporter_ok=%s error=%s',
+                     job_id, len(pages), ok, export_error_for_log(detail))
         shutil.rmtree(deck_dir, ignore_errors=True)
         raise HTTPException(status_code=502, detail=detail or 'PPTX not produced')
 

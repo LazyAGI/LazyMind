@@ -1,3 +1,4 @@
+import ExternalLink from '@/components/ExternalLink';
 import { createPdfScrollSync } from "@/components/ui/pdfScrollSync";
 import FileUtils from "@/modules/knowledge/utils/file";
 import { TIME_FORMAT } from "@/modules/knowledge/constants/common";
@@ -88,7 +89,6 @@ import { isVocabularyEnabled } from "@/runtime/mode";
 import AddLearningContentModal, { type LearningSelection } from "@/modules/learning/AddLearningContentModal";
 import { getKnowledgeBaseCapabilities, getLearningCatalog, type LearningCapability } from "@/modules/learning/api";
 import DocumentLearningPanel from "@/modules/learning/DocumentLearningPanel";
-import DocumentReferencesPanel from "@/modules/knowledge/components/DocumentReferencesPanel";
 import { extractAcademicReferences, listAcademicReferences } from "@/modules/knowledge/api/academicReferences";
 import { capabilityFamilies, capabilityFamily, capabilityFamilyI18nKey, chooseFamilyCapability, type CapabilityFamily } from "@/modules/learning/capabilityFamilies";
 import { normalizePdfSelectionText } from "@/components/ui/pdfSelectionText";
@@ -322,7 +322,6 @@ const KnowledgeDocumentContent = () => {
     }
     setPreviewSideCollapsed(false);
   };
-  const [referenceImportSelection, setReferenceImportSelection] = useState<{ text: string; referenceId?: string; requestId: number }>();
   const [referenceActions, setReferenceActions] = useState<PdfReferenceAction[]>([]);
   const [referenceCount, setReferenceCount] = useState<number>();
   const referencePreanalysisDocument = useRef("");
@@ -428,7 +427,6 @@ const KnowledgeDocumentContent = () => {
   useEffect(() => {
     referencePreanalysisDocument.current = "";
     setReferencePreanalysisRetry(0);
-    setReferenceImportSelection(undefined);
     setReferenceActions([]);
     setReferenceCount(undefined);
   }, [knowledgeId]);
@@ -517,16 +515,8 @@ const KnowledgeDocumentContent = () => {
     setFloatingPosition({x:Math.min(Math.max(8,x),Math.max(8,bounds.width-panel.width-8)),y:Math.min(Math.max(8,y),Math.max(8,bounds.height-panel.height-8))});
   };
 
-  const importReferenceSelection = useCallback((selection: PdfTextSelection) => {
-
-    setReferenceImportSelection({ text: selection.text, referenceId: selection.referenceId, requestId: Date.now() });
-    setPreviewSideCollapsed(false);
-    setPreviewSideTab("navigation");
-    setPaperNavTab("references");
-  }, []);
-
   const preanalyzeReferences = useCallback(() => {
-    if (!knowledgeId || referencePreanalysisDocument.current === knowledgeId) return;
+    if (!isPaperDocument || !knowledgeId || referencePreanalysisDocument.current === knowledgeId) return;
     referencePreanalysisDocument.current = knowledgeId;
     void listAcademicReferences(knowledgeId)
       .then((items) => items.length ? items : extractAcademicReferences(knowledgeId, true))
@@ -561,7 +551,7 @@ const KnowledgeDocumentContent = () => {
           setReferenceCount(0);
         }
       });
-  }, [knowledgeId]);
+  }, [knowledgeId, isPaperDocument]);
 
   useEffect(() => { preanalyzeReferences(); }, [preanalyzeReferences, referencePreanalysisRetry]);
 
@@ -930,7 +920,7 @@ const KnowledgeDocumentContent = () => {
   }, [knowledgeBaseId, knowledgeId, pdfCapabilities?.jobs, pdfProgress, showFullTranslation, selectTranslationArtifact]);
 
 
-  useEffect(() => { setPaperNavTab(isPaperDocument?"outline":"references");  }, [isPaperDocument, knowledgeId]);
+  useEffect(() => { setPaperNavTab("outline");  }, [isPaperDocument, knowledgeId]);
   useLayoutEffect(() => {
     if (!documentReady) return;
     const width = workspaceRef.current?.getBoundingClientRect().width || 1440;
@@ -1005,14 +995,14 @@ const KnowledgeDocumentContent = () => {
           {
             label: t("knowledge.originalFile"),
             value: (
-              <a
+              <ExternalLink
                 href={isPdfDocument ? originalPreviewFile : previewFile}
                 rel="noreferrer noopener"
                 target="_blank"
                 title={knowledgeDetail?.display_name}
               >
                 {knowledgeDetail?.display_name}
-              </a>
+              </ExternalLink>
             ),
             hidden: !hasWritePermission,
           },
@@ -1085,11 +1075,11 @@ const KnowledgeDocumentContent = () => {
               pdfNavigateToPosition={pdfNavigateToPosition}
               pdfNoteHighlights={savedNotes?.key===`${knowledgeBaseId}/${knowledgeId}`?savedNotes.highlights:[]}
               onPdfNoteHighlightClick={id=>{setPaperNotesTab('notes');setSelectedNoteId(id);setPreviewSideTab('notes');setPreviewSideCollapsed(false);}}
+              parsedFallbackTarget={{dataset: knowledgeBaseId, document: knowledgeId}}
               file={previewFile}
               fileName={knowledgeDetail?.display_name || ""}
               segment={segmentDetail}
               onExportReadyChange={setCanExportImagePdf}
-              onImportReferenceSelection={!isPaperDocument ? importReferenceSelection : undefined}
               referenceActions={referenceActions}
               onPdfNoteSelection={isPaperDocument && hasWritePermission ? notePdfSelection : undefined}
               onPdfSelection={askPdfSelection}
@@ -1097,7 +1087,7 @@ const KnowledgeDocumentContent = () => {
               onPdfRetranslateSelection={pdfCapabilities?.translations.length
                 ? (selection) => void openTranslationRevision(selection, "source")
                 : undefined}
-              onAddVocabularySelection={isVocabularyEnabled() ? addVocabularySelection : undefined}
+              onAddVocabularySelection={isPaperDocument && isVocabularyEnabled() ? addVocabularySelection : undefined}
               translationConfigured={translationConfigured}
               learningSelectionActions={[
                 ...(isPaperDocument ? [{key:"explanation",label:t("knowledge.pdfQuickExplain")}] : []),
@@ -1142,8 +1132,6 @@ const KnowledgeDocumentContent = () => {
               </div></div>
               {!isPaperDocument && <div className="paper-assistant-pane document-navigation-pane" hidden={previewSideTab !== "navigation"}>
           <PaperReaderSidebar paperMode={datasetIdentified&&isPaperLibrary(currentDataset?.scene)} currentPage={pdfViewPosition.page} isPdf={isPdfDocument} document={paperIR} nativeOutline={nativePdfOutline} activeTab={paperNavTab} onTabChange={setPaperNavTab} onNavigate={navigatePaperBlock} onNavigatePage={navigatePaperPage} onCollapse={()=>setPreviewSideCollapsed(true)} referenceCount={referenceCount}
-            references={<DocumentReferencesPanel documentId={knowledgeId} targetDatasetId={knowledgeBaseId} importSelection={referenceImportSelection} onActionsChange={setReferenceActions} onReferenceCountChange={setReferenceCount}/>}
-            vocabulary={isVocabularyEnabled()?<DocumentVocabularyPanel documentId={knowledgeId} refreshToken={vocabularyRefreshToken}/>:undefined}
             segments={canShowSegments&&knowledgeDetail?<><div className="paper-segment-options"><Select value={segmentViewKey||undefined} options={segmentViewOptions} onChange={setSegmentViewKey}/><label>{t("knowledge.sequence")} <Switch size="small" checked={showSegmentSequence} onChange={setShowSegmentSequence}/></label></div><KnowledgeTabs knowledgeDetail={knowledgeDetail} onGetItemInfo={setSegmentDetail} onAskSegment={askSegment} activeKey={segmentViewKey} onActiveKeyChange={setSegmentViewKey} onOptionsChange={handleSegmentViewOptionsChange} showSequence={showSegmentSequence}/></>:undefined}
           />
               </div>}

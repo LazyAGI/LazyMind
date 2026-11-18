@@ -7,7 +7,7 @@ from urllib.parse import urlparse
 import lazyllm
 from lazyllm.common.globals import init_session
 
-from lazymind.model_config import inject_model_config
+from lazymind.model_config import inject_model_config, is_model_role_available
 from lazymind.common.optional_components import ComponentRequiredError, require_component
 
 _DEFAULT_RETRIEVER_TOPK = 20
@@ -39,7 +39,7 @@ class KnowledgeSearchHit:
 
 def _ensure_kb_search_runtime():
     from lazymind.chat.engine.tools.kb import _ensure_kb_search_runtime as impl
-    return impl()
+    return impl(include_images=False)
 
 
 def _serialize_kb_result(raw):
@@ -76,6 +76,11 @@ def search(user_id: str, query: str, kb_ids: List[str], top_k: int,
     try:
         require_component('rag')
         inject_model_config(llm_config)
+        if not is_model_role_available('embed_main'):
+            raise KnowledgeSearchError(
+                'CAPABILITY_REQUIRED',
+                '向量检索需要默认向量模型。请前往设置中的默认模型配置；原文件、解析和阅读不受影响。',
+            )
         retrievers, reranker, image_retriever = _ensure_kb_search_runtime()
         raw = search_kb(
             {

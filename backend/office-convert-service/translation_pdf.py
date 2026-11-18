@@ -1,5 +1,7 @@
 """Adaptive in-page PDF translation; never append overflow pages."""
 
+from pathlib import Path
+
 import math
 import unicodedata
 import fitz
@@ -53,7 +55,9 @@ def render_preserving_pages(document, blocks, translations, font_path):
         diagnostics.append({'code': code, **detail})
     fonts = [
         fitz.Font(fontfile=str(font_path)),
-        fitz.Font(fontfile='/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf'),
+        (fitz.Font(fontfile='/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf')
+         if Path('/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf').is_file()
+         else fitz.Font('helv')),
     ]
     original_graphics = [graphics_signature(p) for p in document]
     spans = [source_spans(p) for p in document]

@@ -16,10 +16,10 @@ func TestPythonComponentsLegacyAndDeferredProcessPlans(t *testing.T) {
 	cfg := RuntimeConfig{Algorithm: AlgorithmConfig{RAGDisabled: true}}
 	cfg.ModeProfile.VectorStore.ManagedProcess = false
 	plan := buildRuntimeProcessPlan(cfg)
-	if !plan.includes(chatProcessName) || !plan.includes(coreProcessName) {
+	if !plan.includes(chatProcessName) || !plan.includes(coreProcessName) || !plan.includes(scanControlPlaneProcessName) || !plan.includes(fileWatcherProcessName) {
 		t.Fatal("base services missing")
 	}
-	for _, name := range []string{scanControlPlaneProcessName, fileWatcherProcessName, milvusLiteProcessName, processorWorkerProcessName, algoProcessName, docServerProcessName} {
+	for _, name := range []string{milvusLiteProcessName, processorWorkerProcessName, algoProcessName, docServerProcessName} {
 		if plan.includes(name) {
 			t.Fatalf("started optional service %s", name)
 		}
@@ -74,6 +74,8 @@ func TestPythonComponentEnvironmentRequiresAtomicCompatibleInstallation(t *testi
 
 func TestPythonClusterComponentActivatesIndependentlyOfRAG(t *testing.T) {
 	paths := RuntimePaths{ResourcesRoot: t.TempDir(), RuntimeRoot: t.TempDir(), RepoRoot: t.TempDir(), CoreBin: "bundled-core"}
+	paths.StateDir = t.TempDir()
+	t.Setenv(desktopAppVersionEnvVar, "0.5.0")
 	cfg := RuntimeConfig{Profile: "desktop", Algorithm: AlgorithmConfig{RAGDisabled: true}}
 	runner := &fakeRunner{handlers: []func(Command) (CommandResult, error){
 		func(cmd Command) (CommandResult, error) {
@@ -116,11 +118,14 @@ func TestPythonClusterComponentActivatesIndependentlyOfRAG(t *testing.T) {
 	}
 	catalog.Components[cluster.ID] = cluster
 	writeJSON(catalogPath, catalog)
+	if err := prepareDesktopPythonComponents(context.Background(), cfg, paths); err != nil {
+		t.Fatal(err)
+	}
 	manager.prepareDesktopCluster(context.Background(), cfg, paths)
 	if len(runner.calls) != 1 {
 		t.Fatal("missing clustering must be prepared at Desktop startup")
 	}
-	if !slices.Contains(coreServiceEnv(cfg, paths), "LAZYMIND_CLUSTER_ENABLED=0") ||
+	if !slices.Contains(mustCoreServiceEnv(t, cfg, paths), "LAZYMIND_CLUSTER_ENABLED=0") ||
 		!slices.Contains(algorithmServiceEnv(cfg, paths, chatProcessName), "LAZYMIND_CLUSTER_ENABLED=0") {
 		t.Fatal("Core and Chat must both gate an uninstalled clustering component")
 	}
@@ -132,18 +137,22 @@ func TestPythonClusterComponentActivatesIndependentlyOfRAG(t *testing.T) {
 		t.Fatal(err)
 	}
 	writeJSON(filepath.Join(root, "bundle-manifest.json"), selected)
-	writeJSON(filepath.Join(filepath.Dir(root), "catalog-"+selected.Tag+".json"), selected)
+	receipt := filepath.Join(filepath.Dir(root), "catalog-"+selected.Tag+".json")
+	writeJSON(receipt, selected)
 	if sites := pythonComponentSites(paths); len(sites) != 0 {
 		t.Fatalf("partial install added to import path: %v", sites)
 	}
 	if err := os.WriteFile(filepath.Join(root, ".ready"), []byte(selected.SHA256), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	if err := prepareDesktopPythonComponents(context.Background(), cfg, paths); err != nil {
+		t.Fatal(err)
+	}
 	manager.prepareDesktopCluster(context.Background(), cfg, paths)
 	if len(runner.calls) != 1 {
 		t.Fatal("installed clustering must be reused on restart")
 	}
-	for service, env := range map[string][]string{"Core": coreServiceEnv(cfg, paths), "Chat": algorithmServiceEnv(cfg, paths, chatProcessName)} {
+	for service, env := range map[string][]string{"Core": mustCoreServiceEnv(t, cfg, paths), "Chat": algorithmServiceEnv(cfg, paths, chatProcessName)} {
 		if !slices.Contains(env, "LAZYMIND_CLUSTER_ENABLED=1") || !slices.Contains(env, "LAZYMIND_RAG_ENABLED=0") ||
 			!slices.Contains(env, "LAZYMIND_PYTHON_COMPONENT_PATHS="+site) {
 			t.Fatalf("%s did not activate clustering independently of RAG", service)
@@ -151,6 +160,22 @@ func TestPythonClusterComponentActivatesIndependentlyOfRAG(t *testing.T) {
 	}
 	if sites := pythonComponentSites(paths); len(sites) != 1 || sites[0] != site {
 		t.Fatalf("unexpected Python import paths: %v", sites)
+	}
+
+	// The installer still pins the same bundle channel after the app upgrade.
+	t.Setenv(desktopAppVersionEnvVar, "0.5.1")
+	if err := prepareDesktopPythonComponents(context.Background(), cfg, paths); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(receipt); !os.IsNotExist(err) {
+		t.Fatalf("old clustering receipt survived upgrade: %v", err)
+	}
+	if sites := pythonComponentSites(paths); len(sites) != 0 {
+		t.Fatalf("old clustering bundle was reused after upgrade: %v", sites)
+	}
+	manager.prepareDesktopCluster(context.Background(), cfg, paths)
+	if len(runner.calls) != 2 || !slices.Equal(runner.calls[1].Args, []string{"--prepare-cluster-component"}) {
+		t.Fatal("upgraded desktop did not run the clustering installer again")
 	}
 }
 
@@ -170,12 +195,12 @@ func TestLocalRAGFlagDisablesKnowledgeProcessesAndEnvironment(t *testing.T) {
 		t.Fatal("managed vector store remained enabled")
 	}
 	plan := buildRuntimeProcessPlan(cfg)
-	for _, name := range []string{scanControlPlaneProcessName, fileWatcherProcessName, milvusLiteProcessName, processorServerProcessName, processorWorkerProcessName, algoProcessName, docServerProcessName} {
+	for _, name := range []string{milvusLiteProcessName, processorServerProcessName, processorWorkerProcessName, algoProcessName, docServerProcessName} {
 		if plan.includes(name) {
 			t.Fatalf("started disabled RAG service %s", name)
 		}
 	}
-	if !plan.includes(chatProcessName) || !plan.includes(coreProcessName) {
+	if !plan.includes(chatProcessName) || !plan.includes(coreProcessName) || !plan.includes(scanControlPlaneProcessName) || !plan.includes(fileWatcherProcessName) {
 		t.Fatal("disabled RAG removed a base chat service")
 	}
 	if env := strings.Join(pythonComponentEnvironment(paths, cfg.Algorithm.RAGDisabled), "\n"); !strings.Contains(env, ragEnabledEnvVar+"=0") {
@@ -237,5 +262,83 @@ func TestPythonComponentOnlineReceiptSurvivesOfflineRestart(t *testing.T) {
 	write(receipt, selected)
 	if sites := pythonComponentSites(paths); len(sites) != 0 {
 		t.Fatal("accepted incompatible receipt")
+	}
+}
+
+func TestDesktopRAGUpgradeRequiresFreshInstallation(t *testing.T) {
+	root := t.TempDir()
+	paths := RuntimePaths{ResourcesRoot: t.TempDir(), RuntimeRoot: root, StateDir: root}
+	cfg := RuntimeConfig{Profile: "desktop"}
+	rag := pythonComponent{ID: "rag", Revision: strings.Repeat("a", 64),
+		SHA256: strings.Repeat("b", 64), BaseFingerprint: strings.Repeat("c", 64)}
+	catalog := pythonComponentCatalog{SchemaVersion: 1, Platform: runtime.GOOS, Arch: runtime.GOARCH,
+		Components: map[string]pythonComponent{"rag": rag}}
+	write := func(path string, data []byte) {
+		t.Helper()
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, data, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	catalogData, err := json.Marshal(catalog)
+	if err != nil {
+		t.Fatal(err)
+	}
+	write(filepath.Join(paths.ResourcesRoot, "config", "python-components.json"), catalogData)
+	manifest, err := json.Marshal(rag)
+	if err != nil {
+		t.Fatal(err)
+	}
+	deps := filepath.Join(root, "deps", "python-components")
+	ragDir := filepath.Join(deps, "rag")
+	revision := filepath.Join(ragDir, rag.Revision)
+	install := func() {
+		t.Helper()
+		write(filepath.Join(revision, "bundle-manifest.json"), manifest)
+		write(filepath.Join(revision, "site-packages", "test.py"), nil)
+		write(filepath.Join(revision, ".ready"), []byte(rag.SHA256))
+	}
+	prepare := func(version string) {
+		t.Helper()
+		t.Setenv(desktopAppVersionEnvVar, version)
+		if err := prepareDesktopPythonComponents(context.Background(), cfg, paths); err != nil {
+			t.Fatal(err)
+		}
+	}
+	install()
+	prepare("0.5.0")
+	if sites := pythonComponentSites(paths); len(sites) != 0 {
+		t.Fatalf("installation from a legacy build was reused: %v", sites)
+	}
+	install()
+	receipt := filepath.Join(ragDir, "catalog-"+rag.Revision+".json")
+	cluster := filepath.Join(deps, "cluster", ".ready")
+	data := filepath.Join(root, "data", "knowledge.db")
+	write(receipt, manifest)
+	write(cluster, nil)
+	write(data, nil)
+
+	prepare("0.5.0")
+	if sites := pythonComponentSites(paths); len(sites) != 1 {
+		t.Fatalf("same-version restart discarded the installation: %v", sites)
+	}
+	prepare("0.5.1")
+	if sites := pythonComponentSites(paths); len(sites) != 0 {
+		t.Fatalf("upgrade reused the old installation: %v", sites)
+	}
+	if _, err := os.Stat(ragDir); !os.IsNotExist(err) {
+		t.Fatalf("upgrade left old RAG files or receipts: %v", err)
+	}
+	for _, path := range []string{cluster, data} {
+		if _, err := os.Stat(path); err != nil {
+			t.Fatal(err)
+		}
+	}
+	install()
+	prepare("0.5.1")
+	if sites := pythonComponentSites(paths); len(sites) != 1 {
+		t.Fatalf("restart discarded newly installed RAG: %v", sites)
 	}
 }

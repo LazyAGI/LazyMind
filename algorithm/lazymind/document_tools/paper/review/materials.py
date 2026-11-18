@@ -5,31 +5,34 @@ import time
 from typing import Annotated, Literal
 
 from httpx import HTTPStatusError
-from lazyllm import AutoModel
+from lazyllm import AutoModel, globals as runtime_globals
 from lazyllm.tools.writer.tools.base import WriterToolBase
 from pydantic import BaseModel, ConfigDict, Field, create_model, field_validator, model_validator
 
-from lazymind.config import config
+from lazymind.config import EMBED_MAIN, config
+from lazymind.model_config import is_model_role_available
 
 from ..contracts import MissingMaterials
 from ..literature_review import _prompt
 from ..material_bindings import MaterialBindings
-from ..prompts.literature_review_prompt import MATERIAL_SELECTION_PROMPT
+from ..prompts.literature_review_prompt import MATERIAL_SELECTION_PROMPT, RANKING_PROMPT
 from ..runtime_events import report_progress
-from .retrieval import RETRIEVAL_ERRORS, read_sciverse, sciverse_provider, search_sciverse, unique_candidates
+from .retrieval import RETRIEVAL_ERRORS, read_sciverse, sciverse_provider, unique_candidates
+from . import search
 
 
 class SearchPlan(BaseModel):
     model_config = ConfigDict(extra='forbid')
     queries: dict[str, Annotated[int, Field(ge=1, le=200)]] = Field(default_factory=dict)
-    external_queries: dict[str, Annotated[int, Field(ge=1, le=200)]] = Field(default_factory=dict)
+    arxiv_terms: list[str] = Field(default_factory=list, max_length=3)
+    external_query: str = Field(default='', max_length=160)
     requested_paper_count: int | None = Field(
         default=None, ge=1, description='Final total only when the user explicitly specifies a count.',
     )
     year_from: Annotated[int, Field(ge=1, le=9999)] | None = None
     year_to: Annotated[int, Field(ge=1, le=9999)] | None = None
 
-    @field_validator('queries', 'external_queries', mode='before')
+    @field_validator('queries', mode='before')
     @classmethod
     def normalize_query_counts(cls, value):
         if not isinstance(value, dict):
@@ -40,8 +43,11 @@ class SearchPlan(BaseModel):
 
     @model_validator(mode='after')
     def valid_queries(self):
-        if any(not query.strip() for query in (*self.queries, *self.external_queries)):
+        if any(not query.strip() for query in self.queries):
             raise ValueError('检索关键词不能为空')
+        if self.external_query:
+            search.validate_arxiv_terms(self.arxiv_terms)
+            search.validate_query(self.external_query)
         if self.year_from is not None and self.year_to is not None and self.year_from > self.year_to:
             raise ValueError('检索起始年份不能晚于结束年份')
         return self
@@ -96,7 +102,7 @@ def handoff_input(context: dict) -> dict:
             'request': request + json.dumps(directions, ensure_ascii=False), 'papers': papers}
 
 
-def _select(papers: list[dict], inputs: dict, knowledge_bases: list[str], *, fixed_scope=False,
+def _select(papers: list[dict], inputs: dict, knowledge_bases: list[str], *,
             plan_search=True, retained=(), count_range=None):
     minimum, maximum = count_range or (config['paper_review_min_paper_count'], config['paper_review_max_paper_count'])
     if minimum > maximum:
@@ -110,7 +116,8 @@ def _select(papers: list[dict], inputs: dict, knowledge_bases: list[str], *, fix
         _prompt(MATERIAL_SELECTION_PROMPT, bindings.model_view({
             'research': {key: inputs.get(key) for key in ('topic', 'request', 'question')},
             'knowledge_bases': knowledge_bases,
-            'fixed_scope': fixed_scope, 'plan_search': plan_search,
+            'external_sources': search.external_sources(_api_keys()),
+            'plan_search': plan_search,
             'paper_count_range': {'min': minimum, 'max': maximum},
             'material_role_keys': list(bindings.materials),
             'retained_papers': [{'title': paper['title'], 'review_role': paper.get('review_role', 'paper')}
@@ -132,15 +139,15 @@ def _select(papers: list[dict], inputs: dict, knowledge_bases: list[str], *, fix
     if not knowledge_bases or not plan_search:
         selection.queries = {}
     if not plan_search:
-        selection.external_queries = {}
+        selection.external_query = ''
+        selection.arxiv_terms = []
     return selected, selection
 
 
 def _limit_queries(plan, remaining):
     # Search previews need room for duplicates and exclusions; full-text reads have their own cap.
     remaining *= 3
-    queries = [(source, query, min(200, count * 3)) for source in (plan.queries, plan.external_queries)
-               for query, count in source.items()]
+    queries = [(plan.queries, query, min(200, count * 3)) for query, count in plan.queries.items()]
     for index, (source, query, count) in enumerate(queries):
         allowed = min(count, max(1, remaining // (len(queries) - index))) if remaining else 0
         if allowed:
@@ -182,58 +189,119 @@ def _search_kb(toolkit, queries, knowledge_bases, warnings):
     return list(documents.values()), more_queries
 
 
-def prepare(inputs: dict, knowledge_bases: list[str], *, fixed_scope: bool = False) -> list[dict]:
+def _api_keys():
+    keys = search.configured_keys()
+    dynamic = runtime_globals.config['dynamic_tool_auth'] or {}
+    return {source: dynamic.get(source) or key for source, key in keys.items()}
+
+
+def _rank_candidates(inputs, candidates, count, *, exact_count=False):
+    bindings = MaterialBindings(sorted(candidates, key=lambda p: p['title'].casefold()))
+    count = min(count, len(candidates))
+
+    class Selection(BaseModel):
+        model_config = ConfigDict(extra='forbid')
+        selected: list[Literal[tuple(bindings.materials)]] = Field(
+            min_length=count if exact_count else 0, max_length=count)
+
+        @field_validator('selected')
+        @classmethod
+        def distinct_ids(cls, value):
+            if len(set(value)) != len(value):
+                raise ValueError('Each selected paper must appear only once')
+            return value
+
+    selection = WriterToolBase(llm=AutoModel(model='llm'))._call_llm_structured(
+        _prompt(RANKING_PROMPT, {
+            'research': {key: inputs.get(key) for key in ('topic', 'request', 'question')},
+            'count': count, 'exact_count': exact_count,
+            'candidates': [{'id': key, 'title': paper['title'], 'abstract_or_snippet': paper.get('abstract', '')[:2000],
+                            'year': paper.get('year'), 'citation_count': paper.get('citation_count')}
+                           for key, paper in bindings.materials.items()],
+        }), Selection)
+    return [bindings.materials[key] for key in selection.selected]
+
+
+def _external_candidates(inputs, plan, retained, target_count, warnings):
+    keys = _api_keys()
+    result = search.search_papers(plan.external_query, api_keys=keys, arxiv_terms=plan.arxiv_terms,
+                                  year_from=plan.year_from, year_to=plan.year_to)
+    for source in result['sources']:
+        if source['status'] != 'ok':
+            warnings.append(f'{source["source"].title()} 检索失败，已使用其他平台实际返回的文献。')
+    if not result['papers']:
+        warnings.append('所选学术平台未找到可用文献。')
+    candidates = unique_candidates(retained, result['papers'])
+    if not candidates:
+        return []
+    selected = _rank_candidates(inputs, candidates, max(1, target_count - _paper_count(retained)),
+                                exact_count=plan.requested_paper_count is not None)
+    for paper in selected:
+        doc_id = paper.get('doc_id')
+        paper.update(kind='paper', text=paper.get('abstract') or '',
+                     snippet=paper.get('abstract') or '', metadata={'doc_id': doc_id} if doc_id else {},
+                     reading={'content_type': 'search_preview' if paper['source'] == 'google_scholar' else 'abstract'})
+        if doc_id:
+            paper.update(doc_id=doc_id, extra={'doc_id': doc_id})
+    return selected
+
+
+def prepare(inputs: dict, knowledge_bases: list[str]) -> list[dict]:
     papers = copy.deepcopy(inputs.get('papers') or [])
-    if fixed_scope and not inputs.get('request'):
-        return papers
     for paper in papers:
         paper.pop('retrieval_warnings', None)
     report_progress(10, '正在选择本轮综述材料')
-    selected, plan = _select(papers, inputs, knowledge_bases, fixed_scope=fixed_scope)
+    selected, plan = _select(papers, inputs, knowledge_bases)
     selected = unique_candidates([], selected)
     target_count = plan.requested_paper_count or config['paper_review_max_paper_count']
     minimum_count = plan.requested_paper_count or config['paper_review_min_paper_count']
     if plan.requested_paper_count is not None:
         selected = selected[:target_count]
-    elif not fixed_scope:
+    else:
+        retrieved_sources = {'arxiv', 'crossref', *search.KEY_NAMES, 'knowledge_base'}
         supplied = [paper for paper in selected
-                    if paper.get('source') not in {'sciverse', 'crossref', 'knowledge_base'}]
+                    if paper.get('source') not in retrieved_sources]
         retrieved = [paper for paper in selected
-                     if paper.get('source') in {'sciverse', 'crossref', 'knowledge_base'}]
+                     if paper.get('source') in retrieved_sources]
         selected = supplied + retrieved[:max(0, target_count - _paper_count(supplied))]
-    _limit_queries(plan, max(0, target_count - _paper_count(selected))
-                   if _paper_count(selected) < minimum_count else 0)
+    remaining = max(0, target_count - _paper_count(selected)) if _paper_count(selected) < minimum_count else 0
     warnings, seen = [], list(selected)
-    expanding = bool(plan.queries or plan.external_queries)
+    expanding = bool(plan.queries or plan.external_query)
+    if remaining and plan.queries and not is_model_role_available(EMBED_MAIN):
+        plan.queries = {}
+        message = '知识库检索需要可用的文本向量模型，请在设置中的默认模型配置补全服务来源后重试。'
+        if not any(paper.get('review_role') != 'background' for paper in selected) and not plan.external_query:
+            raise MissingMaterials(message)
+        warnings.append(message + '本轮已跳过知识库检索，仅使用实际取得的材料。')
+    _limit_queries(plan, remaining)
     toolkit, provider = None, None
+    if not remaining:
+        plan.external_query = ''
     if plan.queries:
         from lazymind.chat.engine.tools.lazy_kb import KBToolkit
 
         toolkit = KBToolkit(kb_scope=knowledge_bases)
-    if plan.external_queries:
-        provider = sciverse_provider()
-        if getattr(provider, 'source_name', 'sciverse') == 'crossref':
-            warnings.append('Sciverse 检索凭据未配置，本轮使用 Crossref 元数据与实际取得的论文摘要。')
-    kb_queries, external_queries = plan.queries, plan.external_queries
+    kb_queries, external_query = plan.queries, plan.external_query
     for page in range(1, 4):
-        if not (kb_queries or external_queries):
+        if not (kb_queries or external_query):
             break
         report_progress(10 + page * 3, f'正在检索候选文献（第 {page} 轮，已选 {_paper_count(selected)} 篇）')
         candidates = []
         if kb_queries:
             hits, kb_queries = _search_kb(toolkit, kb_queries, knowledge_bases, warnings)
             candidates.extend(hits)
-        if external_queries:
-            hits, external_queries = search_sciverse(
-                provider, external_queries, plan.year_from, plan.year_to, warnings, page=page,
-            )
-            candidates.extend(hits)
+        if external_query:
+            candidates.extend(_external_candidates(inputs, plan, selected, target_count, warnings))
+            external_query = ''
         candidates = unique_candidates(seen, candidates)
         seen.extend(candidates)
         if not candidates:
             continue
-        additions, _ = _select(candidates, inputs, [], plan_search=False, retained=selected,
-                               count_range=(minimum_count, target_count))
+        if any(paper['source'] == 'knowledge_base' for paper in candidates):
+            additions, _ = _select(candidates, inputs, [], plan_search=False, retained=selected,
+                                   count_range=(minimum_count, target_count))
+        else:
+            additions = candidates
         for paper in additions:
             if _paper_count(selected) >= target_count:
                 break
@@ -251,15 +319,19 @@ def prepare(inputs: dict, knowledge_bases: list[str], *, fixed_scope: bool = Fal
                 except RETRIEVAL_ERRORS:
                     warnings.append(f'《{paper["title"]}》知识库全文读取失败，仅使用检索节选。')
                     paper['reading'] = {'content_type': 'knowledge_base_excerpt', 'truncated': True}
-            else:
+            elif paper.get('doc_id'):
+                provider = provider or sciverse_provider()
                 paper = read_sciverse(provider, paper, warnings)
+            elif not paper.get('text', '').strip():
+                warnings.append(f'《{paper["title"]}》没有可读的摘要或节选，本次未纳入综述。')
+                paper = None
             if paper:
                 selected.append(paper)
         if _paper_count(selected) >= minimum_count:
             break
     if expanding and _paper_count(selected) < minimum_count:
         warnings.append(f'本轮目标为 {minimum_count}–{target_count} 篇论文，实际仅取得 {_paper_count(selected)} 篇相关可读论文；'
-                        '已在最多三轮候选检索内补充，未以不相关文献凑数。')
+                        '已使用本轮实际取得的相关文献。')
     if not any(paper.get('review_role') != 'background' for paper in selected):
         detail = '；'.join(dict.fromkeys(warnings))
         raise MissingMaterials('指定范围内没有可综述的论文，请补充论文或调整检索范围。' + detail)

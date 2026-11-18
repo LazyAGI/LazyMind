@@ -1,13 +1,41 @@
+import { getNodeDependencyStatus, type NodeDependencyStatus } from "@/modules/modelProvider/api/systemDependencies";
+import { isDesktopRuntime, isLocalRuntime } from "@/runtime/mode";
 import { useEffect, useRef, useState } from "react";
-import { Alert, Button, Modal, Space, Spin, Steps, Typography } from "antd";
+import { Alert, Button, Modal, Space, Spin, Steps, Tag, Typography } from "antd";
 import { useTranslation } from "react-i18next";
 import { agentIntegrationStatuses, type DesktopAgentIntegrationStatus } from "@/runtime/desktopBridge";
 
 import { workbuddyErrorMessage } from "./workbuddyErrors";
 import { codexErrorMessage } from "./codexErrors";
 import { requiresAgentQuit } from "./agentActions";
+import RepairRequestCopy from "./RepairRequestCopy";
 
-type Stage = "prepare" | "installing" | "login" | "quitRequired" | "installFailed" | "entry" | "trust" | "enable" | "verify" | "checking" | "notReady" | "success";
+type Stage = "nodeRequired" | "prepare" | "installing" | "login" | "quitRequired" | "installFailed" | "entry" | "trust" | "enable" | "verify" | "checking" | "notReady" | "success";
+
+function NodePrerequisite() {
+  const { t } = useTranslation();
+  const [status, setStatus] = useState<NodeDependencyStatus>();
+  const [failed, setFailed] = useState(false);
+  const [attempt, setAttempt] = useState(0);
+  useEffect(() => {
+    let cancelled = false;
+    setStatus(undefined);
+    setFailed(false);
+    void getNodeDependencyStatus().then(value => {
+      if (!cancelled) setStatus(value);
+    }).catch(() => {
+      if (!cancelled) setFailed(true);
+    });
+    return () => { cancelled = true; };
+  }, [attempt]);
+  return <div className="agent-integration-node-prerequisite" aria-live="polite">
+    <div className="agent-integration-node-prerequisite__copy">
+      <div><strong>{t("nodeDependency.title")}</strong> {status && <Tag color={status.installed ? "success" : "warning"}>{status.installed ? t("nodeDependency.ready") : t("nodeDependency.missing")}{status.version ? ` · ${status.version}` : ""}</Tag>}</div>
+      <Typography.Text type="secondary">{failed ? t("nodeDependency.failed") : t("nodeDependency.guidePrerequisite")}</Typography.Text>
+    </div>
+    {!status && !failed ? <Spin size="small" aria-label={t("nodeDependency.checking")} /> : failed ? <Button size="small" onClick={() => setAttempt(value => value + 1)}>{t("nodeDependency.refresh")}</Button> : !status?.installed && <Button size="small" href="/settings?section=system_tools#node-dependency">{t("nodeDependency.goto")}</Button>}
+  </div>;
+}
 
 export default function WorkBuddyInstallationGuide({ status, onConnect, onLogin, onStatus, onClose, agent = "workbuddy" }: {
   agent?: "workbuddy" | "codex";
@@ -20,6 +48,7 @@ export default function WorkBuddyInstallationGuide({ status, onConnect, onLogin,
   const { t } = useTranslation();
   const text = (key: string) => t(`agentIntegration.${agent === "codex" ? "codexInstallGuide" : "workbuddyInstallGuide"}.${key}`);
   const confirmationStage = agent === "codex" ? "enable" : "entry";
+  const checkLocalNode = agent === "codex" && (isLocalRuntime() || isDesktopRuntime());
   // An installed plugin survives a normal Codex launch without CDP. It must
   // still go through the explicit connection/restart step before confirmation.
   const [stage, setStage] = useState<Stage>(requiresAgentQuit(status) ? "quitRequired" : status?.state === "enabled" && status.connection?.mcp_configured
@@ -27,7 +56,8 @@ export default function WorkBuddyInstallationGuide({ status, onConnect, onLogin,
       : !status.issue || ["mcp_trust_required", "mcp_enable_required"].includes(status.issue.code)) ? confirmationStage : "prepare");
   const [error, setError] = useState("");
   const [zoomed, setZoomed] = useState(false);
-  const [diagnostic, setDiagnostic] = useState("");
+  const [diagnostics, setDiagnostics] = useState(status);
+  const diagnostic = diagnostics?.diagnostic_id || diagnostics?.issue?.operation_id;
   const mounted = useRef(true);
   const busy = useRef(false);
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
@@ -36,10 +66,16 @@ export default function WorkBuddyInstallationGuide({ status, onConnect, onLogin,
     if (busy.current) return;
     busy.current = true;
     setStage("installing"); setError("");
+    setDiagnostics(undefined);
     try {
+      if (checkLocalNode) {
+        const node = await getNodeDependencyStatus();
+        if (!mounted.current) return;
+        if (!node.installed) { setStage("nodeRequired"); return; }
+      }
       const result = await onConnect();
       if (!mounted.current) return;
-      setDiagnostic(result?.diagnostic_id || result?.issue?.operation_id || "");
+      setDiagnostics(result);
       if (requiresAgentQuit(result)) {
         setStage("quitRequired"); return;
       }
@@ -47,6 +83,7 @@ export default function WorkBuddyInstallationGuide({ status, onConnect, onLogin,
         setStage("login");
         const login = await onLogin();
         if (!mounted.current) return;
+        setDiagnostics(login);
         if (!login) { setError(text("loginFailed")); setStage("installFailed"); }
         return;
       }
@@ -75,6 +112,7 @@ export default function WorkBuddyInstallationGuide({ status, onConnect, onLogin,
         const result = await agentIntegrationStatuses();
         if (stopped || !mounted.current || !result.ok) return;
         const current = result.data[agent];
+        setDiagnostics(current);
         if (current) onStatus(current);
         if (current?.login?.state === "succeeded") { stopped = true; await install(); }
         else if (current?.login && ["failed", "cancelled"].includes(current.login.state)) {
@@ -95,8 +133,8 @@ export default function WorkBuddyInstallationGuide({ status, onConnect, onLogin,
     busy.current = true;
     if (!automatic) { setStage("checking"); setError(""); }
     const checkFailed = () => {
-      if (!automatic || agent === "codex" && ["notReady", "installFailed"].includes(stage)) {
-        setError(text("checkFailedDescription")); setDiagnostic("");
+      if (!automatic || agent === "codex" && stage === "notReady") {
+        setError(text("checkFailedDescription")); setDiagnostics(undefined);
         if (!automatic) setStage("notReady");
       }
     };
@@ -110,9 +148,17 @@ export default function WorkBuddyInstallationGuide({ status, onConnect, onLogin,
       const configured = current?.state === "enabled" && connection?.mcp_configured;
       const connectorReady = configured && connection?.mcp_enabled && connection.mcp_trusted;
       const ready = connectorReady && connection.control_ready && !current?.issue;
-      if (!automatic || agent === "codex" || ready) setDiagnostic(current?.diagnostic_id || current?.issue?.operation_id || "");
+      // Keep the failed operation and its diagnostic together until retry or recovery.
+      if (automatic && stage === "installFailed" && !ready) return;
+      if (automatic && current?.issue?.code === "pairing_account_mismatch") {
+        setDiagnostics(current);
+        setError(agent === "codex" ? codexErrorMessage(current, t) : workbuddyErrorMessage(current, t));
+        setStage("notReady");
+        return;
+      }
+      if (!automatic || agent === "codex" || ready) setDiagnostics(current);
       if (automatic && !ready) {
-        if (agent === "codex" && ["notReady", "installFailed"].includes(stage)) {
+        if (agent === "codex" && stage === "notReady") {
           setError(codexErrorMessage(current, t, connectorReady ? "controlUnavailableDescription" : "notReadyDescription"));
         }
         return;
@@ -138,9 +184,10 @@ export default function WorkBuddyInstallationGuide({ status, onConnect, onLogin,
     return () => { window.clearInterval(timer); window.removeEventListener("focus", recheck); };
   }, [stage, agent]);
   const installing = stage === "installing", checking = stage === "checking", loggingIn = stage === "login";
-  const current = stage === "prepare" ? 0 : ["installing", "login", "quitRequired", "installFailed", "entry", "trust", "enable"].includes(stage) ? 1 : 2;
+  const current = ["prepare", "nodeRequired"].includes(stage) ? 0 : ["installing", "login", "quitRequired", "installFailed", "entry", "trust", "enable"].includes(stage) ? 1 : 2;
   let primary;
   if (stage === "prepare" || stage === "installFailed") primary = <Button type="primary" onClick={() => void install()}>{text(stage === "prepare" ? "saveAndContinue" : "retryInstall")}</Button>;
+  else if (stage === "nodeRequired") primary = <Space><Button onClick={() => void install()}>{t("nodeDependency.refresh")}</Button><Button type="primary" href="/settings?section=system_tools#node-dependency">{t("nodeDependency.goto")}</Button></Space>;
   else if (stage === "quitRequired") primary = <Button type="primary" onClick={() => void install()}>{t("agentIntegration.quitRequired.retryInstall")}</Button>;
   else if (stage === "entry") primary = <Button type="primary" onClick={() => setStage(agent === "codex" ? "enable" : "trust")}>{text("next")}</Button>;
   else if (stage === "trust") primary = <Button type="primary" onClick={() => setStage("enable")}>{text("trustConfirmation")}</Button>;
@@ -170,6 +217,8 @@ export default function WorkBuddyInstallationGuide({ status, onConnect, onLogin,
     <Steps size="small" current={current} items={["saveStep", "installStep", "checkStep"].map(key => ({ title: text(key) }))} />
     <div className="agent-integration-installation-content" aria-live="polite">
       {stage === "prepare" && <Typography.Paragraph>{text("saveDescription")}</Typography.Paragraph>}
+      {checkLocalNode && stage === "prepare" && <NodePrerequisite />}
+      {stage === "nodeRequired" && <Alert type="warning" showIcon message={t("nodeDependency.title")} description={t("nodeDependency.required")} />}
       {loggingIn && <Alert type="info" showIcon message={text("waitingForLogin")} description={text("loginDescription")} />}
       {stage === "quitRequired" && <Alert type="warning" showIcon
         message={t("agentIntegration.quitRequired.title", { agent: status?.display_name || (agent === "codex" ? "Codex" : "WorkBuddy") })}
@@ -177,6 +226,10 @@ export default function WorkBuddyInstallationGuide({ status, onConnect, onLogin,
       {(installing || checking) && <Space direction="vertical" align="center" className="agent-integration-installation-progress"><Spin /><Typography.Text>{text(installing ? "installingDescription" : "checkingDescription")}</Typography.Text></Space>}
       {stage === "installFailed" && <Alert type="error" showIcon message={text("installFailedTitle")} description={error} />}
       {["installFailed", "quitRequired", "notReady"].includes(stage) && diagnostic && <Typography.Text type="secondary" copyable>{t("agentIntegration.setupFeedback.diagnosticID")}: {diagnostic}</Typography.Text>}
+      {["nodeRequired", "installFailed", "quitRequired", "notReady"].includes(stage) &&
+        <RepairRequestCopy agent={agent} status={diagnostics} stage={stage}
+          error={error || (stage === "nodeRequired" ? t("nodeDependency.required")
+            : stage === "quitRequired" ? t("agentIntegration.quitRequired.description", { agent: diagnostics?.display_name || agent }) : "")} />}
       {(stage === "entry" || stage === "trust" || stage === "enable") &&
         <Alert type="success" showIcon message={text("installedTitle")} description={text("installedDescription")} />
       }

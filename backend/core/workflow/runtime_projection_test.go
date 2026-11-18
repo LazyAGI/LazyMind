@@ -423,7 +423,7 @@ func TestRuntimeSnapshotUsesDeclaredProducerForStartupNameCollision(t *testing.T
 					t.Fatalf("normalized output must be the sole witness: %+v", mode)
 				}
 				binding := attemptInputBindingFromWitness(db.DB, session.ID, "next-attempt", mode.Witnesses[0], now)
-				if binding.SourceType != "artifact" || binding.MaterialRevisionID != "normalized-output" {
+				if binding.SourceType != "artifact" || binding.MaterialRevisionID != "normalized-output" || binding.SourceRevision != "1" {
 					t.Fatalf("wrong frozen input: %+v", binding)
 				}
 			} else if mode.Satisfied || len(mode.Witnesses) != 0 {
@@ -438,5 +438,43 @@ func TestRuntimeSnapshotUsesDeclaredProducerForStartupNameCollision(t *testing.T
 				t.Fatalf("startup answer was modified: count=%d error=%v", count, err)
 			}
 		})
+	}
+}
+
+func TestNativeTerminalHandoffCannotHideGraphCompletion(t *testing.T) {
+	db, hash := setupBatchTransitionSession(t)
+	graph := graphengine.CompiledStateGraph{
+		SchemaVersion: graphengine.SchemaVersion, GraphHash: hash, StartRoute: "all",
+		Nodes:        map[string]graphengine.CompiledNode{"finish": {ID: "finish", Route: "choice"}},
+		ControlEdges: []graphengine.CompiledEdge{{From: "__start__", To: "finish"}, {From: "finish", To: "__end__", When: "Finish"}},
+	}
+	if err := db.Model(&orm.WorkflowRevision{}).Where("id = ?", "batch-revision").Update("compiled_graph", graph.JSON()).Error; err != nil {
+		t.Fatal(err)
+	}
+	session, err := GetSession(t.Context(), db.DB, "batch-session")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Model(session).Updates(map[string]any{"status": "waiting", "controller_host": "lazymind", "trigger_history_id": "completed-turn"}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&orm.ChatHistory{ID: "completed-turn", ConversationID: session.ConversationID, RunStatus: "completed"}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&orm.WorkflowSessionStep{ID: "finish-attempt", SessionID: session.ID, StepID: "finish", TaskID: "finish-task", Status: "succeeded", Validity: "effective", Attempt: 1}).Error; err != nil {
+		t.Fatal(err)
+	}
+	projected, err := projectSession(t.Context(), db.DB, session)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !projected.Projection.Completed || projected.Display.Status != "completed" {
+		t.Fatalf("terminal projection: %+v", projected)
+	}
+	if err := reconcileRunStatus(t.Context(), db.DB, session); err != nil {
+		t.Fatal(err)
+	}
+	if session.Status != "completed" {
+		t.Fatalf("session status = %s", session.Status)
 	}
 }

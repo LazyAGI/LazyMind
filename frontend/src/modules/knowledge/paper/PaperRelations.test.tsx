@@ -57,7 +57,9 @@ describe('paper relations in the detail drawer', () => {
             { ID: 'unresolved', RawText: 'Author. A reference without an identifier. 2024.' },
         ]);
         const onOpenPaper = vi.fn();
-        show(fixture(), { onOpenPaper });
+        const data = fixture();
+        data.papers[0].parse = 'ready'; // Reference extraction requires observed parsing success.
+        show(data, { onOpenPaper });
         const citations = screen.getByRole('region', { name: '引用文献' });
         const external = await within(citations).findByRole('link', { name: /打开来源：.*External method/ });
         expect(external).toHaveAttribute('href', 'https://arxiv.org/abs/2305.14314');
@@ -112,7 +114,9 @@ describe('paper relations in the detail drawer', () => {
         ]);
         vi.mocked(listExpansions).mockResolvedValue([expansion(), { ...expansion(), id: 'unpublished', version: 0, title: 'Unpublished expansion' }]);
         const onOpenPaper = vi.fn();
-        show(fixture(), { onOpenPaper });
+        const data = fixture();
+        data.papers[0].parse = 'ready'; // Reference extraction requires observed parsing success.
+        show(data, { onOpenPaper });
         expect(await screen.findByRole('link', { name: /External method/ })).toHaveAttribute('href', 'https://arxiv.org/abs/2305.14314');
         expect(extractAcademicReferences).toHaveBeenCalledWith('pdf-current', true);
         const expansionRegion = screen.getByRole('region', { name: '论文扩展' });

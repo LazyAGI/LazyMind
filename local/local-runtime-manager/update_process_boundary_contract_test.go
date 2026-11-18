@@ -214,15 +214,8 @@ func TestUpdateBootstrapRuntimePlanFixtures(t *testing.T) {
 			}
 			local := f.measure(t)
 			component := bootstrapSelectedComponent(t, f, local.Components["rag"])
-			want := []string{"core"}
-			if installed {
-				want = append(want, "scan")
-			}
-			if !reflect.DeepEqual(bootstrapPeerNames(f.cfg), want) || (component != nil) != installed {
+			if !reflect.DeepEqual(bootstrapPeerNames(f.cfg), []string{"core", "scan"}) || (component != nil) != installed {
 				t.Fatalf("fixture mode=%v plan=%v component=%v", installed, bootstrapPeerNames(f.cfg), component)
-			}
-			if buildRuntimeProcessPlan(f.cfg).includes(scanControlPlaneProcessName) != installed {
-				t.Fatal("fixture incorrectly starts or omits Scan")
 			}
 			if installed && (component["revision"] != local.Components["rag"] || component["tag"] == "") {
 				t.Fatal("installed fixture lacks exact source component evidence")
@@ -345,6 +338,7 @@ func TestUpdateBootstrapValidIntentBindsActualCLIToCustomStorageAndSealedPeers(t
 			mode = "installed"
 		}
 		t.Run(mode+"/"+phase, func(t *testing.T) {
+			t.Setenv(desktopAppVersionEnvVar, "1.1.0")
 			f := actualUpdateFormatFixture(t, 2)
 			if installed {
 				installBootstrapFixtureRAG(t, f)
@@ -407,12 +401,6 @@ func TestUpdateBootstrapValidIntentBindsActualCLIToCustomStorageAndSealedPeers(t
 					}
 					for _, name := range []string{coreProcessName, scanControlPlaneProcessName} {
 						process, ok := generated.Processes[name]
-						if name == scanControlPlaneProcessName && !installed {
-							if ok {
-								t.Error("lightweight target unexpectedly starts Scan")
-							}
-							continue
-						}
 						if !ok {
 							t.Errorf("sealed startup omitted peer %s", name)
 							continue
@@ -427,6 +415,13 @@ func TestUpdateBootstrapValidIntentBindsActualCLIToCustomStorageAndSealedPeers(t
 					persisted, err := readRuntimeState(f.paths.StateFile)
 					if err != nil || persisted.Config.UpdateStorage == nil || persisted.Config.UpdateStorage.Databases["auth"] != custom {
 						t.Errorf("target replaced custom source path: %v", err)
+					}
+					if err == nil {
+						ragDisabled := persisted.Config.Algorithm.RAGDisabled
+						components, componentErr := measuredUpdateComponents(f.paths, ragDisabled)
+						if componentErr != nil || ragDisabled == installed || (components["rag"] != "") != installed {
+							t.Errorf("target did not preserve RAG state: installed=%v disabled=%v components=%v error=%v", installed, ragDisabled, components, componentErr)
+						}
 					}
 					select {
 					case ready <- struct{}{}:
@@ -462,6 +457,15 @@ func TestUpdateBootstrapValidIntentBindsActualCLIToCustomStorageAndSealedPeers(t
 					}
 				case <-time.After(3 * time.Second):
 					t.Fatal("startup monitor did not close")
+				}
+				if installed {
+					if err := prepareDesktopPythonComponents(t.Context(), f.cfg, f.paths); err != nil {
+						t.Fatal(err)
+					}
+					components, err := measuredUpdateComponents(f.paths, false)
+					if err != nil || components["rag"] == "" {
+						t.Fatalf("ordinary restart lost the installed RAG component: %v %v", components, err)
+					}
 				}
 			}
 			after, _ := os.ReadFile(f.paths.StateFile)

@@ -1,7 +1,8 @@
 /** Presentation identity comes from the committed main-chat view, never binds a run. */
 export function readCodexView() {
   const scrollers = Array.from(document.querySelectorAll<HTMLElement>('[data-app-action-timeline-scroll]'))
-    .filter(element => element.getBoundingClientRect().width > 0)
+    .filter(element => element.getBoundingClientRect().width > 0
+      && !element.closest('[data-app-shell-tab-panel-controller]'))
   if (scrollers.length !== 1) return null
   const scroller = scrollers[0]
   const fiberKey = Object.keys(scroller).find(key => key.startsWith('__reactFiber$'))
@@ -18,9 +19,10 @@ export function readCodexView() {
   const transcript = scroller.querySelector<HTMLElement>('[data-thread-user-message-navigation-content]')
   const content = transcript?.parentElement
   if (!transcript || !content || content.parentElement !== scroller) return null
-  // The last native child reserves space for the absolutely-positioned composer.
-  // Insert before it, outside the message list and any virtualized turn.
-  const spacer = Array.from(content.children).find(element => element !== transcript && element.classList.contains('sticky')) ?? null
+  // Codex sizes its composer spacer with this variable in both chat layouts.
+  // Older versions also mark it as sticky.
+  const spacer = content.querySelector(':scope > [aria-hidden="true"][class*="--thread-scroll-padding-bottom"]')
+    ?? Array.from(content.children).find(element => element !== transcript && element.classList.contains('sticky')) ?? null
   return { session, scroller, content, transcript, spacer }
 }
 
@@ -28,7 +30,7 @@ export function readCodexView() {
 export function readPresentationSession(readView = readCodexView) {
   const host = window as any
   const key = '__lazymindCodexPresentationSession'
-  const version = 'codex-view-v1'
+  const version = 'codex-view-v2'
   if (host[key]?.version !== version) host[key]?.dispose()
   if (!host[key]) {
     let view = readView(), epoch = crypto.randomUUID(), queued = false

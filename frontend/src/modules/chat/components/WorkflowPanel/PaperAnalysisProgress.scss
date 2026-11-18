@@ -20,6 +20,7 @@
       p { margin: 3px 0 0; color: var(--ant-color-text-secondary, #657288); font-size: 12px; overflow-wrap: anywhere; }
     }
   }
+  &__empty { margin: 0; padding: 0 18px 16px; color: var(--ant-color-text-secondary, #657288); }
   &__marker { padding-top: 3px; color: var(--ant-color-primary, #356dff); }
   .is-succeeded > &__marker { color: var(--ant-color-success, #248658); }
   .is-failed > &__marker { color: var(--ant-color-warning, #b9650d); }

@@ -98,7 +98,7 @@
   font-size: 12px; font-weight: 600; line-height: 22px;
   &.is-connected { color: #159765; background: #e9f8f1; }
   &.is-pending, &.is-expired { color: #ad6800; background: #fff6df; }
-  &.is-disconnected, &.is-off { color: #7d8899; background: #f0f2f5; }
+  &.is-disconnected { color: #7d8899; background: #f0f2f5; }
   &.is-connected::before, &.is-pending::before, &.is-expired::before { content: ''; display: inline-block; width: 6px; height: 6px; margin-inline-end: 7px; border-radius: 50%; background: currentColor; vertical-align: 1px; }
 }
 .notification-browser-permission {

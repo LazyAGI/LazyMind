@@ -1,3 +1,4 @@
+import MarkdownIt from 'markdown-it';
 import { AgentAppsAuth } from '@/components/auth';
 import { BASE_URL, localizeErrorCode } from '@/components/request';
 import { normalizeProxyableUrl } from '@/modules/knowledge/utils/request';
@@ -7,6 +8,7 @@ const UPLOAD_ROOT_MARKER = '/var/lib/lazymind/uploads/';
 const SUBAGENT_ROOT_MARKER = '/data/subagent/';
 const signCache = new Map<string, string>();
 const signInflight = new Map<string, Promise<string>>();
+const markdownParser = new MarkdownIt();
 
 export type MarkdownImageResolver = (url: string) => Promise<string>;
 
@@ -16,7 +18,22 @@ export function resolveMarkdownImageSourceFromMap(
 ): string {
   const trimmed = (url || '').trim();
   if (!trimmed) return trimmed;
-  return mediaUrls?.[trimmed]?.trim() || trimmed;
+  const exact = mediaUrls?.[trimmed]?.trim();
+  if (exact || !mediaUrls) return exact || trimmed;
+
+  // Markdown parsers encode spaces and Unicode in image references, while the
+  // media map can retain the original path. Compare using the same encoding,
+  // without decoding reserved characters or changing authorized display URLs.
+  const normalized = markdownParser.normalizeLink(trimmed);
+  let matched = '';
+  for (const [source, displayUrl] of Object.entries(mediaUrls)) {
+    const candidate = displayUrl.trim();
+    if (!candidate || markdownParser.normalizeLink(source.trim()) !== normalized) continue;
+    // Preserve exact-match priority and avoid guessing between distinct assets.
+    if (matched && matched !== candidate) return trimmed;
+    matched = candidate;
+  }
+  return matched || trimmed;
 }
 
 function extractStaticFilesPath(raw: string): string {

@@ -622,6 +622,28 @@ describe('SlotText editing', () => {
     ));
   });
 
+  it('keeps PPT prompt editing at the preview height while typing', () => {
+    const text = '<!-- ppt-page-prompt:v1 -->\n## 风格\n浅色背景';
+    const { container } = render(<SlotRenderer
+      slot={{ slot_id: 'prompt', revision: 1, selected: true, slot: 'prompt',
+        created_at: '2026-08-31T00:00:00Z', artifact_value: { text }, content_type: 'text' }}
+      widget={{ widgetType: 'ppt-prompt', maxHeight: 400 }}
+      sessionId='prompt-session' slotId='prompt'
+    />);
+    const preview = container.querySelector<HTMLElement>('.ppt-prompt-document')!;
+    vi.spyOn(preview, 'getBoundingClientRect').mockReturnValue({
+      height: 400, width: 600, top: 0, left: 0, right: 600, bottom: 400,
+      x: 0, y: 0, toJSON: () => ({}),
+    });
+    fireEvent.click(screen.getByRole('button', { name: '编辑文本' }));
+    const editor = container.querySelector<HTMLTextAreaElement>('.workflow-slot__text-editor')!;
+    expect(editor).toHaveStyle({ height: '400px', minHeight: '400px' });
+    expect(editor.value).toBe(text);
+    Object.defineProperty(editor, 'scrollHeight', { configurable: true, value: 1800 });
+    fireEvent.change(editor, { target: { value: `${text}\n补充说明` } });
+    expect(editor).toHaveStyle({ height: '400px' });
+  });
+
   it('keeps the preview footprint and focuses the clicked plain text', () => {
     const text = '## First line\n\n**middle target**\n\nlast line';
     const targetOffset = text.indexOf('middle target') + 7;

@@ -165,8 +165,8 @@ def test_document_inspection_distinguishes_supported_representations():
 
 
 def test_document_provider_projection_matches_registered_adapters():
-    providers = {provider['id']: provider['capabilities']
-                 for provider in list_document_providers()}
+    catalog = list_document_providers()
+    providers = {provider['id']: provider['capabilities'] for provider in catalog}
 
     assert set(providers) == {
         'feishu', 'github', 'googledrive', 'notion', 'obsidian', 'wechat',
@@ -174,6 +174,8 @@ def test_document_provider_projection_matches_registered_adapters():
     assert providers['googledrive'] == ['load']
     assert 'append' in providers['github']
     assert 'append' not in providers['wechat']
+    templates = next(provider['templates'] for provider in catalog if provider['id'] == 'wechat')
+    assert [item['id'] for item in templates] == ['clean', 'editorial_contrast', 'warm_humanist']
 
 
 def test_chat_tool_calls_work_without_a_workflow_context():
@@ -500,6 +502,7 @@ def test_write_consumes_conversion_without_converting_again(monkeypatch):
                 "locator": "https://example.test/remote-1",
                 "persisted_document": persisted,
                 "representation": "ir",
+                "warnings": ["WECHAT_HTML_TRUNCATED"],
             }
 
     monkeypatch.setattr(
@@ -513,6 +516,7 @@ def test_write_consumes_conversion_without_converting_again(monkeypatch):
     assert [call[0] for call in calls] == ["require", "write"]
     assert calls[1][1].content == [{"text": "before"}]
     assert result["provider"] == "fake"
+    assert result["warnings"] == ["WECHAT_HTML_TRUNCATED"]
     assert result["persisted_document"]["provider_binding"]["provider"] == "fake"
 
     serialized = json.loads(WriterResourceCapabilities().write_document(

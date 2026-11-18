@@ -1,6 +1,8 @@
 package doc
 
 import (
+	"archive/zip"
+	"bytes"
 	"github.com/gorilla/mux"
 	"lazymind/core/asyncjob"
 	"lazymind/core/common/orm"
@@ -83,7 +85,7 @@ func TestPDFIRWorkerRehydratesNondefaultTenantAndRejectsRevokedIdentity(t *testi
 		case "/api/scan/internal/source-access/by-dataset:batch":
 			scanCalls++
 			if r.Header.Get("X-Tenant-ID") != "company" {
-				t.Error("scan authorization lost current tenant")
+				t.Error("knowledge parsing must not ask Scan for authorization")
 			}
 			return testJSONResponse(200, `{"items":[{"dataset_id":"tenant-dataset","exists":false,"allowed":true}]}`), nil
 		default:
@@ -96,13 +98,13 @@ func TestPDFIRWorkerRehydratesNondefaultTenantAndRejectsRevokedIdentity(t *testi
 	t.Setenv("LAZYMIND_SCAN_CONTROL_PLANE_URL", "http://scan.test")
 	job := asyncjob.Job{CreateUserID: "owner", PayloadJSON: mustJSON(pdfIRPayload{DatasetID: "tenant-dataset", DocumentID: "tenant-doc", SourceSHA256: "changed", Revision: pdfir.Revision})}
 	_, err := handlePDFIRJob(t.Context(), job, nil)
-	if err == nil || err.Error() != "PDF source changed; request parsing again" || identityCalls != 1 || scanCalls != 1 {
+	if err == nil || err.Error() != "PDF source changed; request parsing again" || identityCalls != 1 || scanCalls != 0 {
 		t.Fatalf("worker denied legitimate tenant before validating source: identity=%d scan=%d err=%v", identityCalls, scanCalls, err)
 	}
 	hash, _ := pdfir.SourceHash(path)
 	stopped := job
 	stopped.PayloadJSON = mustJSON(pdfIRPayload{DatasetID: "tenant-dataset", DocumentID: "tenant-doc", SourceSHA256: hash, Revision: pdfir.Revision, Automatic: true})
-	if _, err := handlePDFIRJob(t.Context(), stopped, nil); err == nil || !strings.Contains(err.Error(), "自动准备已停止") {
+	if _, err := handlePDFIRJob(t.Context(), stopped, nil); err == nil || !strings.Contains(err.Error(), "未开启自动准备") {
 		t.Fatalf("queued automatic parser reached configuration after policy stopped: %v", err)
 	}
 	for _, test := range []struct {
@@ -148,5 +150,72 @@ func TestPDFIRStatusReportsPermanentArtifactSizeFailure(t *testing.T) {
 	state, err = pdfIRStatus(t.Context(), row, "hash")
 	if err != nil || state.Status != "failed" || !strings.Contains(state.ErrorMessage, "smaller PDF") {
 		t.Fatalf("legacy oversized artifact must report size failure: %+v %v", state, err)
+	}
+}
+
+func TestPDFIRStatusRetainsPreviousSuccessfulResultWhenReparseFails(t *testing.T) {
+	db := newDocumentTestDB(t)
+	if err := db.AutoMigrate(&orm.AsyncJob{}); err != nil {
+		t.Fatal(err)
+	}
+	row := orm.Document{ID: "doc", DatasetID: "ds"}
+	hash := pdfir.Digest("source")
+	path := filepath.Join(t.TempDir(), "previous.json")
+	if err := os.WriteFile(path, mustJSON(pdfir.Document{Version: 1, SourceSHA256: hash}), 0600); err != nil {
+		t.Fatal(err)
+	}
+	payload := mustJSON(pdfIRPayload{Revision: pdfir.Revision, SourceSHA256: hash})
+	for _, job := range []orm.AsyncJob{
+		{ID: "worked", Status: "succeeded", ResultJSON: mustJSON(pdfIRResult{IRPath: path}), CreatedAt: time.Now().Add(-time.Minute)},
+		{ID: "failed", Status: "failed", CreatedAt: time.Now()},
+	} {
+		job.JobType, job.ResourceType, job.ResourceID, job.PayloadJSON = pdfIRJobType, "document_pdf_ir", pdfIRResource(row.DatasetID, row.ID), payload
+		if err := db.Create(&job).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	state, err := pdfIRStatus(t.Context(), row, hash)
+	if err != nil || state.Status != "failed" || state.Document == nil {
+		t.Fatalf("previous result lost: %+v %v", state, err)
+	}
+}
+
+func TestPDFParseStatusExposesIngestionStructureWithoutChangingRetrievalStatus(t *testing.T) {
+	installOriginalSourceTransport(t)
+	db := newDocumentTestDB(t)
+	if err := db.AutoMigrate(&orm.AsyncJob{}); err != nil {
+		t.Fatal(err)
+	}
+	root := t.TempDir()
+	t.Setenv("LAZYMIND_UPLOAD_ROOT", root)
+	seedDocumentListDataset(t, db, "ds", "owner")
+	seedDocumentListDoc(t, db, "ds", "doc", "paper.pdf", time.Now(), "owner", nil)
+	source := filepath.Join(root, "paper.pdf")
+	if err := os.WriteFile(source, []byte("%PDF-source"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Model(&orm.Document{}).Where("id = ?", "doc").Update("ext", mustJSON(documentExt{StoredPath: source, OriginalFilename: "paper.pdf"})).Error; err != nil {
+		t.Fatal(err)
+	}
+	hash, _ := pdfir.SourceHash(source)
+	buf := new(bytes.Buffer)
+	zipWriter := zip.NewWriter(buf)
+	content, _ := zipWriter.Create("paper_content_list.json")
+	_, _ = content.Write([]byte(`[{"type":"text","text":"from ingestion","page_idx":0,"bbox":[0,0,100,100]}]`))
+	if err := zipWriter.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := pdfir.SaveCachedArchive(filepath.Join(root, "other", "copy.pdf"), hash, "vlm", buf.Bytes()); err != nil {
+		t.Fatal(err)
+	}
+
+	r := httptest.NewRequest("GET", "/parse-status", nil)
+	r.Header.Set("X-User-Id", "owner")
+	r = mux.SetURLVars(r, map[string]string{"dataset": "ds", "document": "doc"})
+	out := httptest.NewRecorder()
+	EnsureParsed(out, r)
+	if out.Code != http.StatusOK || !strings.Contains(out.Body.String(), `"status":"not_requested"`) ||
+		!strings.Contains(out.Body.String(), `"pdf_structure":{"status":"ready","available":true`) {
+		t.Fatalf("unexpected parse status: %d %s", out.Code, out.Body)
 	}
 }

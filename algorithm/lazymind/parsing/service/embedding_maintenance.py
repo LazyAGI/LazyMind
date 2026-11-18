@@ -212,7 +212,9 @@ def _finalize_core(core_engine: Engine) -> int:
     with core_engine.begin() as connection:
         result = connection.execute(text('''UPDATE document_processing_states
             SET index_status='pending', index_error_code='', index_error_message='',
-                index_artifact_ref='', index_fingerprint='', embedding_version='reembed:pending',
+                index_artifact_ref='', index_fingerprint='',
+                embedding_version=CASE WHEN embedding_version='rebuild:manual' THEN 'rebuild:manual'
+                    ELSE 'reembed:pending' END,
                 revision=revision+1, updated_at=CURRENT_TIMESTAMP
             WHERE EXISTS (
                 SELECT 1 FROM documents d JOIN datasets ds ON ds.id=d.dataset_id
@@ -275,7 +277,7 @@ def clear_text_vectors_with_core_handoff(
                     raise RuntimeError('Core phase is cleared but text vectors still exist; inspect writers')
                 return {'dropped_collections': [], 'phase': 'cleared',
                         'reset_document_states': 0, 'queue_check': queue_check}
-            if phase not in {None, 'ready', 'clearing', 'cleanup_failed'}:
+            if phase not in {None, 'ready', 'clearing', 'cleanup_failed', 'detached'}:
                 raise RuntimeError(f'cannot clear text vectors from Core phase {phase!r}')
             _mark_clearing(core_engine)
             for name in names:

@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -14,6 +16,19 @@ import (
 )
 
 var ErrInvalidPublicDisplay = errors.New("invalid public display event")
+
+// PaperAutoEventKey requests attempt-scoped allocation of paper progress IDs.
+const PaperAutoEventKey = "paper:auto"
+
+func canonicalProgressRequest(raw json.RawMessage) ([]byte, error) {
+	var value any
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.UseNumber()
+	if err := decoder.Decode(&value); err != nil {
+		return nil, err
+	}
+	return json.Marshal(value)
+}
 
 // PublicDisplay is an optional, explicit public progress contract. It never
 // derives display text from executor logs, prompts or model reasoning.
@@ -79,22 +94,42 @@ func decodePublicDisplay(progress json.RawMessage) (*PublicDisplay, error) {
 
 // The caller holds the attempt write lock. Event-key deduplication and process
 // state validation therefore share the same transaction as lease validation.
-func persistPublicDisplay(tx *gorm.DB, row orm.WorkflowSessionStep, display *PublicDisplay, now time.Time) (bool, error) {
+func persistPublicDisplay(tx *gorm.DB, row orm.WorkflowSessionStep, display *PublicDisplay, request json.RawMessage, now time.Time) (bool, error) {
 	if display == nil {
 		return false, nil
 	}
 	var events []orm.WorkflowEvent
-	if err := tx.Where("session_id = ? AND entity_id = ? AND event_type = ?", row.SessionID, row.ID, "attempt.public_display").Order("id ASC").Find(&events).Error; err != nil {
+	automatic := display.EventKey == PaperAutoEventKey
+	eventTypes := []string{"attempt.public_display"}
+	var originalRequest []byte
+	if automatic {
+		eventTypes = append(eventTypes, "attempt.progress")
+		var err error
+		originalRequest, err = canonicalProgressRequest(request)
+		if err != nil {
+			return false, ErrInvalidPublicDisplay
+		}
+	}
+	if err := tx.Where("session_id = ? AND entity_id = ? AND event_type IN ?", row.SessionID, row.ID, eventTypes).Order("id ASC").Find(&events).Error; err != nil {
 		return false, err
 	}
 	encoded, _ := json.Marshal(display)
 	previous := map[string]taskdisplay.PublicProcessStep{}
+	stageOrders := map[string]int{}
+	sequence := 0
 	for _, event := range events {
+		if event.EventType == "attempt.progress" {
+			canonical, err := canonicalProgressRequest(event.PayloadJSON)
+			if err == nil && bytes.Equal(canonical, originalRequest) {
+				return true, nil
+			}
+			continue
+		}
 		var prior PublicDisplay
 		if json.Unmarshal(event.PayloadJSON, &prior) != nil {
 			continue
 		}
-		if prior.EventKey == display.EventKey {
+		if !automatic && prior.EventKey == display.EventKey {
 			if len(prior.Sources) > 0 {
 				prior.Sources, _ = json.Marshal(taskdisplay.NormalizeSources(prior.Sources))
 			}
@@ -104,9 +139,34 @@ func persistPublicDisplay(tx *gorm.DB, row orm.WorkflowSessionStep, display *Pub
 			}
 			return true, nil
 		}
+		if automatic {
+			if suffix, ok := strings.CutPrefix(prior.EventKey, "paper-"); ok {
+				if number, err := strconv.Atoi(suffix); err == nil && number > sequence {
+					sequence = number
+				}
+			}
+		}
 		for _, step := range prior.ProcessSteps {
+			if _, exists := stageOrders[step.StepID]; !exists {
+				stageOrders[step.StepID] = len(stageOrders)
+			}
 			previous[step.StepID] = step
 		}
+	}
+	if automatic {
+		sequence++
+		if sequence <= 0 {
+			return false, ErrInvalidPublicDisplay
+		}
+		display.EventKey = fmt.Sprintf("paper-%d", sequence)
+		for index := range display.ProcessSteps {
+			step := &display.ProcessSteps[index]
+			if _, exists := stageOrders[step.StepID]; !exists {
+				stageOrders[step.StepID] = len(stageOrders)
+			}
+			step.Order = stageOrders[step.StepID]
+		}
+		encoded, _ = json.Marshal(display)
 	}
 	for _, step := range display.ProcessSteps {
 		if prior, ok := previous[step.StepID]; ok && (step.Revision <= prior.Revision || taskdisplay.ValidateTransition(prior, step) != nil) {
@@ -168,7 +228,7 @@ func finishPublicProgress(tx *gorm.DB, row orm.WorkflowSessionStep, status strin
 			sort.Slice(changed, func(i, j int) bool { return changed[i].StepID < changed[j].StepID })
 			display := PublicDisplay{SchemaVersion: taskdisplay.SchemaVersion,
 				EventKey: "terminal:" + row.ID + ":" + status, ProcessSteps: changed}
-			if _, err := persistPublicDisplay(tx, row, &display, now); err != nil {
+			if _, err := persistPublicDisplay(tx, row, &display, nil, now); err != nil {
 				return err
 			}
 			progress["public_display"], _ = json.Marshal(display)

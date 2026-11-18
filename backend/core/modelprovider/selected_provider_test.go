@@ -275,3 +275,22 @@ func TestLoadSelectedProvidersSkipsCrossUserGroups(t *testing.T) {
 		t.Fatalf("expected cross-user selected provider to be hidden, got %#v", out)
 	}
 }
+
+func TestOCRProvidersAreMutuallyExclusive(t *testing.T) {
+	db := setupSelectedProviderTestDB(t)
+	seedProviderGroup(t, db, "user-1", "provider-mineru", "group-mineru", "MinerU", "ocr")
+	seedProviderGroup(t, db, "user-1", "provider-paddle", "group-paddle", "PaddleOCR", "ocr")
+	for _, group := range []string{"group-mineru", "group-paddle", "group-mineru"} {
+		rec := performSetSelectedProvider(`{"selections":[{"category":"ocr","group_id":"` + group + `"}]}`)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("select: %d %s", rec.Code, rec.Body.String())
+		}
+		var rows []orm.UserSelectedProvider
+		if err := db.Where("user_id = ? AND category = ?", "user-1", "ocr").Find(&rows).Error; err != nil {
+			t.Fatal(err)
+		}
+		if len(rows) != 1 || rows[0].UserModelProviderGroupID != group {
+			t.Fatalf("expected only %s, got %#v", group, rows)
+		}
+	}
+}

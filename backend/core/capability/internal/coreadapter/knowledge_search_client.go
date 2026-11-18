@@ -91,6 +91,20 @@ func (c *HTTPKnowledgeSearchBackendClient) Search(ctx context.Context, input Kno
 	if len(body) > knowledgeSearchMaxResponse {
 		return KnowledgeSearchBackendResponse{}, capability.NewError(capability.ResultTooLarge, "knowledge.search.client", "search response exceeds 4 MiB", false, nil)
 	}
+	if response.StatusCode == http.StatusUnprocessableEntity {
+		var dependency struct {
+			Detail struct {
+				Code string `json:"code"`
+			} `json:"detail"`
+		}
+		if json.Unmarshal(body, &dependency) == nil && dependency.Detail.Code == "CAPABILITY_REQUIRED" {
+			return KnowledgeSearchBackendResponse{}, &capability.Error{
+				Code: capability.Unavailable, Operation: "knowledge.search.client",
+				Message: "知识库检索需要可用的文本向量模型，请在设置中的默认模型配置补全服务来源后重试。",
+				Reason:  "CAPABILITY_REQUIRED", Retryable: false,
+			}
+		}
+	}
 	if response.StatusCode == http.StatusBadRequest || response.StatusCode == http.StatusUnprocessableEntity {
 		return KnowledgeSearchBackendResponse{}, capability.NewError(capability.InvalidArgument, "knowledge.search.client", "invalid search request", false, nil)
 	}

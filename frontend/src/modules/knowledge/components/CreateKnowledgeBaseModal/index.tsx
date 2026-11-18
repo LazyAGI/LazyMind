@@ -8,7 +8,7 @@ import {
   useRef,
   useState,
 } from "react";
-import { Modal, Form, Input, Select, Tabs, Typography, Button, Collapse, Tooltip, message } from "antd";
+import { Modal, Form, Input, Select, Tabs, Typography, Button, Collapse, Tooltip, Radio, message } from "antd";
 import { QuestionCircleOutlined, SettingOutlined } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
 import { Dataset, Algo } from "@/api/generated/knowledge-client";
@@ -24,6 +24,7 @@ import {
 import DataSourceProviderPicker from "@/modules/dataSource/components/management/DataSourceProviderPicker";
 import type { SyncKnowledgeBaseCreationVm } from "@/modules/knowledge/hooks/useSyncKnowledgeBaseCreation";
 import TagSelect from "../TagSelect";
+import KnowledgeLibraryLogo from "../KnowledgeLibraryLogo";
 import { isDeveloperModeActive } from "@/utils/developerMode";
 import {
   PROCESSING_LEVEL_ORDER,
@@ -164,8 +165,8 @@ const CreateKnowledgeBaseModal = forwardRef<
 
   const selectedScene = Form.useWatch("learning_profile_key", form);
   function onSceneChange(key: string) {
-    if (key === "academic_papers" && form.getFieldValue("processing_level") === "stored") {
-      form.setFieldValue("processing_level", processingLevels.find(level => level !== "stored") || "parsed");
+    if (key === "academic_papers") {
+      form.setFieldValue("processing_level", "parsed");
     }
     const builtin = learningCatalog?.profiles.find(item => item.key === key);
     if (builtin) {
@@ -331,6 +332,29 @@ const CreateKnowledgeBaseModal = forwardRef<
                     maxLength={KNOWLEDGE_BASE_NAME_MAX_LENGTH}
                   />
                 </Form.Item>
+                <Form.Item name="learning_profile_key" label={t("learning.capabilityProfile")}>
+                  <Radio.Group className="knowledge-scene-grid" aria-label={t("learning.capabilityProfile")}
+                    onChange={(event) => onSceneChange(event.target.value)}>
+                    {[...(learningCatalog?.profiles || []).map(profile => ({
+                      value: profile.key, label: t(profile.name_i18n_key), scene: profile.key,
+                      disabled: profile.key === "academic_papers" && !processingLevels.some(level => level !== "stored"),
+                    })), ...customProfiles.map(profile => ({value: profile.id, label: profile.custom_name, scene: "custom", disabled: false})),
+                    ...(developerModeActive ? [{value: "custom", label: t("learning.customProfile"), scene: "custom", disabled: false}] : [])].map(option => (
+                      <Radio key={option.value} value={option.value} disabled={option.disabled} className="knowledge-scene-card">
+                        <KnowledgeLibraryLogo scene={option.scene} />
+                        <span>{option.label}</span>
+                      </Radio>
+                    ))}
+                  </Radio.Group>
+                </Form.Item>
+                <Form.Item noStyle shouldUpdate={(a,b)=>a.learning_profile_key!==b.learning_profile_key}>{({getFieldValue})=>getFieldValue("learning_profile_key")==="custom"?<Form.Item name="learning_profile_name" label={t("learning.customProfileName")} ><Input/></Form.Item>:null}</Form.Item>
+                <Collapse
+                  className="knowledge-create-advanced"
+                  ghost
+                  items={[{
+                    key: "advanced",
+                    label: <span className="knowledge-create-advanced-title"><SettingOutlined />{t("knowledge.advancedOptions")}</span>,
+                    children: <>
                 <Form.Item name="desc" label={t("knowledge.knowledgeDesc")}>
                   <TextArea
                     placeholder={t("knowledge.maxLength300Chars")}
@@ -344,9 +368,7 @@ const CreateKnowledgeBaseModal = forwardRef<
                   label={t("knowledge.knowledgeTags")}
                   rules={[
                     {
-                      required: true,
                       type: "array",
-                      min: 1,
                       max: KNOWLEDGE_BASE_TAG_MAX_COUNT,
                       message: t("knowledge.selectKnowledgeTags"),
                     },
@@ -379,18 +401,6 @@ const CreateKnowledgeBaseModal = forwardRef<
                     onLengthErrorChange={handleTagLengthErrorChange}
                   />
                 </Form.Item>
-                <Form.Item name="learning_profile_key" label={t("learning.capabilityProfile")}>
-                  <Select options={[...(learningCatalog?.profiles || []).map((profile) => ({ value:profile.key, label:t(profile.name_i18n_key), disabled: profile.key === "academic_papers" && !processingLevels.some(level => level !== "stored") })),...customProfiles.map(profile=>({value:profile.id,label:profile.custom_name})), ...(developerModeActive ? [{value:"custom",label:t("learning.customProfile")}] : [])]}
-                    onChange={onSceneChange} />
-                </Form.Item>
-                <Form.Item noStyle shouldUpdate={(a,b)=>a.learning_profile_key!==b.learning_profile_key}>{({getFieldValue})=>getFieldValue("learning_profile_key")==="custom"?<Form.Item name="learning_profile_name" label={t("learning.customProfileName")} ><Input/></Form.Item>:null}</Form.Item>
-                {developerModeActive && <Collapse
-                  className="knowledge-create-advanced"
-                  ghost
-                  items={[{
-                    key: "advanced",
-                    label: <span className="knowledge-create-advanced-title"><SettingOutlined />{t("learning.advancedSettings")}</span>,
-                    children: <>
                       <Form.Item
                         name="processing_level"
                         label={<span>{t("knowledge.processingLevel")} <Tooltip title={t("knowledge.processingLevelHint")}><QuestionCircleOutlined className="knowledge-create-help-icon" /></Tooltip></span>}
@@ -401,6 +411,7 @@ const CreateKnowledgeBaseModal = forwardRef<
                           disabled: !processingLevels.includes(level) || (selectedScene === "academic_papers" && level === "stored"),
                         }))} />
                       </Form.Item>
+                      {developerModeActive && <>
                       {ragReady && algorithm.length !== 1 && (
                         <Form.Item
                           name="algo_id"
@@ -422,9 +433,10 @@ const CreateKnowledgeBaseModal = forwardRef<
                         <Select mode="multiple" options={(learningCatalog?.capabilities || []).map((item) => ({value:item.key,label:t(item.name_i18n_key),disabled:learningCatalog?.local_available===false}))} onChange={() => form.setFieldValue("learning_profile_key","custom")} />
                       </Form.Item>
                       <Form.Item noStyle shouldUpdate={(a,b)=>a.learning_capability_keys!==b.learning_capability_keys}>{({getFieldValue})=><CapabilitySettings capabilities={learningCatalog?.capabilities || []} selectedKeys={getFieldValue("learning_capability_keys") || []}/>}</Form.Item>
+                      </>}
                     </>,
                   }]}
-                />}
+                />
               </Form>
             ),
           },

@@ -1,3 +1,4 @@
+import ExternalLink from '@/components/ExternalLink';
 import { useState, useEffect } from "react";
 import Markdown from "react-markdown";
 import rehypeRaw from "rehype-raw";
@@ -57,9 +58,9 @@ const MarkdownViewer = (props: any) => {
             components={{
               a(props: any) {
                 return (
-                  <a href={props.href} target="_blank">
+                  <ExternalLink href={props.href} target="_blank" rel="noopener noreferrer">
                     {props.children}
-                  </a>
+                  </ExternalLink>
                 );
               },
               script() {

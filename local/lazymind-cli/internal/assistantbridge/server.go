@@ -116,7 +116,7 @@ func Start(ctx context.Context, address string) (map[string]any, error) {
 		return nil, err
 	}
 	command := exec.Command(self, "assistant", "serve", "--listen", address)
-	command.Env = connectorconfig.ServiceEnvironment(home)
+	command.Env = detachedServiceEnvironment(home)
 	command.SysProcAttr = detachedProcessAttributes()
 	command.Stdout = logFile
 	command.Stderr = logFile

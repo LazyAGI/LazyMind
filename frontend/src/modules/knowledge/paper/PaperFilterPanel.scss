@@ -1,5 +1,7 @@
 .paper-filter-panel {
+  box-sizing: border-box;
   width: 302px;
+  padding: 2px 4px 4px;
   max-width: calc(100vw - 48px);
   max-height: calc(100vh - 100px);
   max-height: calc(100dvh - 100px);
@@ -82,13 +84,13 @@
 .paper-filter-empty.paper-filter-tags-empty { margin-top: 0; }
 
 .paper-filter-range-group {
-  padding-top: 15px;
+  padding: 15px 0 12px;
   border-top: 1px solid #eaedf2;
 }
 
 .paper-filter-range-title { color: #667085; font-size: 12px; }
 .paper-filter-range-values { display: flex; justify-content: space-between; color: #667085; font-size: 12px; font-variant-numeric: tabular-nums; }
-.paper-filter-panel .ant-slider { margin: 18px 7px 12px; }
+.paper-filter-panel .ant-slider { margin: 18px 12px 12px; }
 .paper-filter-panel .ant-slider-track { background-color: #b6c8ed; }
 .paper-filter-panel .ant-slider-handle::after { box-shadow: 0 0 0 2px #6385c7; }
 .paper-filter-panel .ant-slider-rail { background-color: #edf0f5; }

@@ -271,7 +271,12 @@ func TestResourceBatchMoveRechecksConfirmedHeaderInsideRootTransaction(t *testin
 			op.OperationKey = "confirmed-batch"
 			op.ExpectedSnapshot = snapshot.Digest
 			armed, injected := false, false
-			s.sourceAccess = func(_ context.Context, _ DatasetCatalogCaller, dataset, action string) error {
+			if err := db.Callback().Query().After("gorm:query").Register("test:move-confirmation-race", func(tx *gorm.DB) {
+				row, ok := tx.Statement.Dest.(*orm.Dataset)
+				if !ok || resourceTransaction(tx) {
+					return
+				}
+				dataset := row.ID
 				// The first target read after the durable header is the wrapper's
 				// destination check. Inject at the following source read, which starts
 				// moveAtomic's fresh tree, so its own preparation snapshot includes the
@@ -296,8 +301,10 @@ func TestResourceBatchMoveRechecksConfirmedHeaderInsideRootTransaction(t *testin
 						t.Fatal(err)
 					}
 				}
-				return nil
+			}); err != nil {
+				t.Fatal(err)
 			}
+			defer db.Callback().Query().Remove("test:move-confirmation-race")
 			result, err := s.Move(ctx, op, req)
 			if err != nil {
 				t.Fatal(err)
@@ -372,17 +379,24 @@ func TestResourceMoveDoesNotReplaceConfirmedDestinationDuringPreflight(t *testin
 			op.ExpectedSnapshot = snapshot.Digest
 			op.OperationKey = "destination-during-preflight"
 			changed := false
-			s.sourceAccess = func(_ context.Context, _ DatasetCatalogCaller, id, action string) error {
+			if err := db.Callback().Query().After("gorm:query").Register("test:move-destination-race", func(tx *gorm.DB) {
+				row, ok := tx.Statement.Dest.(*orm.Dataset)
+				if !ok || resourceTransaction(tx) {
+					return
+				}
+				id := row.ID
 				if id == "target" && !changed {
 					changed = true
-					// Dataset resolution has read its old row before calling source policy.
+					// The callback runs after reading the old destination row.
 					// A separate subsequent destination capture would accept this new name.
 					if err := db.Model(&orm.Dataset{}).Where("id = ?", "target").Update("display_name", "renamed-target").Error; err != nil {
 						t.Fatal(err)
 					}
 				}
-				return nil
+			}); err != nil {
+				t.Fatal(err)
 			}
+			defer db.Callback().Query().Remove("test:move-destination-race")
 			result, err := s.Move(ctx, op, req)
 			if err == nil && result.Summary.Succeeded != 0 {
 				t.Fatalf("confirmation silently rebound to changed destination: %+v", result)

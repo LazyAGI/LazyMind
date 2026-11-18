@@ -214,6 +214,12 @@
     background: #f2f6ff;
     box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.9);
 
+    &.is-loading {
+      border-color: transparent;
+      background: transparent;
+      box-shadow: none;
+    }
+
     svg {
       width: 16px;
       height: 16px;

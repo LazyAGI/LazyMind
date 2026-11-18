@@ -22,11 +22,13 @@ import (
 	"lazymind/agentconnector/internal/assistantbridge"
 	"lazymind/agentconnector/internal/chatagent"
 	"lazymind/agentconnector/internal/connectorconfig"
+	"lazymind/agentconnector/internal/connectorlauncher"
 	"lazymind/agentconnector/internal/coreapi"
 	"lazymind/agentconnector/internal/credentials"
 	"lazymind/agentconnector/internal/executorpolicy"
 	"lazymind/agentconnector/internal/mcpbridge"
 	"lazymind/agentconnector/internal/workflowhost"
+	"lazymind/agentconnector/internal/workflowmcp"
 )
 
 const agentDiscoveryRetryDelay = 2 * time.Second
@@ -37,6 +39,12 @@ const maxInternalSessionBytes = 1 << 20
 var invalidateDesktopApplications = agentexec.InvalidateDesktopApplications
 
 func main() {
+	if handled, code, err := connectorlauncher.Forward(os.Args[1:]); handled {
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "Error:", err)
+		}
+		os.Exit(code)
+	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	if err := run(ctx, os.Args[1:], os.Stdout, os.Stderr); err != nil {
@@ -377,6 +385,8 @@ func runInternalCodex(ctx context.Context, action, binary string, bridge *mcpbri
 	switch action {
 	case "connect":
 		status = adapter.Connect(ctx)
+	case "refresh":
+		status = adapter.Refresh(ctx)
 	case "status":
 		status = adapter.Status(ctx)
 	case "disconnect":
@@ -389,7 +399,7 @@ func runInternalCodex(ctx context.Context, action, binary string, bridge *mcpbri
 	if err := printJSON(stdout, status); err != nil {
 		return err
 	}
-	if action == "connect" && status.State != agentintegration.Enabled {
+	if (action == "connect" || action == "refresh") && status.State != agentintegration.Enabled {
 		return fmt.Errorf("Codex plugin installation did not complete: %s", status.Message)
 	}
 	return nil
@@ -608,6 +618,11 @@ func newAgentRunner(provider, binary string) (chatagent.Runner, error) {
 }
 
 func runAgentHosts(ctx context.Context, api *coreapi.Client, policy *executorpolicy.Store, providers []string, binary string, stderr io.Writer) error {
+	// This runs once per desktop/Assistant startup, rather than in a provider's
+	// retry loop. A still-running older process must not republish its location.
+	if err := assistantbridge.ReconcileInstallations(ctx); err != nil {
+		_, _ = fmt.Fprintln(stderr, "LazyMind Agent installation migration:", err)
+	}
 	runCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	results := make(chan error, len(providers))
@@ -671,6 +686,14 @@ func waitAgentDiscovery(ctx context.Context) bool {
 }
 
 func runMCP(ctx context.Context, args []string) error {
+	if len(args) == 2 && args[0] == "workflow-worker" {
+		store, err := credentials.NewStore("", "")
+		if err != nil {
+			return err
+		}
+		return workflowmcp.RunToolWorker(ctx, store, args[1])
+	}
+
 	if len(args) == 1 && args[0] == "codex-workflow" {
 		return runCodexWorkflowMCP(ctx)
 	}

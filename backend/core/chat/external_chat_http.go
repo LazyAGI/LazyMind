@@ -331,13 +331,17 @@ func PublishExternalChatEvent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	input.Type = strings.ToLower(strings.TrimSpace(input.Type))
-	if input.Type != "thread_started" && input.Type != "message" && input.Type != "turn_completed" &&
+	if input.Type != "thread_started" && input.Type != "message" && input.Type != "model" && input.Type != "turn_completed" &&
 		input.Type != "completed" && input.Type != "failed" {
 		common.ReplyErr(w, "unsupported external chat event", http.StatusBadRequest)
 		return
 	}
 	input.ProviderThreadID = strings.TrimSpace(input.ProviderThreadID)
 	input.Error = strings.TrimSpace(input.Error)
+	if input.Type == "model" && (strings.TrimSpace(input.Text) == "" || len(input.Text) > 256) {
+		common.ReplyErr(w, "invalid external model name", http.StatusBadRequest)
+		return
+	}
 	if len(input.ProviderThreadID) > 128 || len(input.Text) > 1<<20 || len(input.Error) > 64<<10 {
 		common.ReplyErr(w, "external chat event payload is too large", http.StatusBadRequest)
 		return

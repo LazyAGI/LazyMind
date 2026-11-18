@@ -1,5 +1,6 @@
 import importlib
 import os
+from contextlib import nullcontext
 from pathlib import Path
 import subprocess
 import sys
@@ -27,6 +28,29 @@ def test_quiet_trace_clears_previous_request_model_configuration():
         assert build_document._quiet_trace({'kb': backend})('kb', 'retrieve') == 'ok'
 
     assert seen == [{}]
+
+
+@pytest.mark.parametrize('phase', ['clearing', 'cleanup_failed', 'cleared', 'detached'])
+def test_algorithm_initializes_while_vector_requests_remain_blocked(monkeypatch, phase):
+    from lazymind.parsing.service import embedding_reset
+
+    state = {'generation': 1, 'phase': phase}
+    monkeypatch.setattr(embedding_reset, 'index_lock', nullcontext)
+    monkeypatch.setattr(embedding_reset, 'index_state', lambda: state)
+    calls = []
+
+    def backend(method):
+        calls.append(method)
+
+    dispatch = build_document._quiet_trace({'kb': backend})
+    with lazyllm.new_session():
+        dispatch('kb', '_lazy_init')
+        with pytest.raises(embedding_reset.IndexBusy):
+            dispatch('kb', 'retrieve')
+        state['phase'] = 'ready'
+        dispatch('kb', 'retrieve')
+
+    assert calls == ['_lazy_init', 'retrieve']
 
 
 def test_processor_entrypoint_clears_previous_task_model_configuration(monkeypatch, tmp_path):
@@ -124,11 +148,13 @@ class Store:
 class Processor:
     def __init__(self):
         self._store = Store()
+        self._reparse_docs = lambda *_args, **_kwargs: None
         self._reembed_group = lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError('old fallback'))
 
 processor = Processor()
 impl._get_processor.__func__.__globals__['_BaseDocumentWorkerImpl']._get_processor = lambda _self: processor
 assert impl._get_processor() is processor
+assert processor._lazymind_deferred_group_guard
 processor._reembed_group('code', {'code': {'parent': 'lazyllm_root'}}, doc_ids=['doc'], kb_id='kb')
 '''
     result = subprocess.run(

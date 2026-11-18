@@ -164,6 +164,45 @@ def test_model_validation_preserves_input_and_optional_false():
     assert original == before
 
 
+@pytest.mark.parametrize('discovery', [False, True])
+def test_chat_tool_emits_skippable_questions_even_when_model_marks_them_required(discovery, emitted):
+    questions = [
+        question('text', id='free_text', validation={'min_length': 5}),
+        question('single', id='single_choice', choices=['A']),
+        question('multiple', id='multiple_choice', choices=['A']),
+        question('boolean', id='yes_no', boolean_labels={'yes': 'Do it', 'no': 'Skip it'}),
+    ]
+    original = copy.deepcopy(questions)
+    catalog = [{'runtime': {'clarification_fields': [
+        {'id': 'free_text', 'question': questions[0]['text'], 'type': 'text', 'required': True},
+    ]}}]
+    tool = _build_ask_user_tool({}, catalog, discovery_mode=discovery)[0]
+    ToolManager([tool]).all_tools[0]({'questions': questions})
+    sent = emitted[0][1]['questions']
+    assert len(sent) == 4
+    assert all(item['required'] is False for item in sent)
+    assert sent[0]['validation']['min_length'] == 5
+    assert questions == original
+
+
+def test_bound_workflow_question_keeps_required_contract(emitted):
+    runtime = {'clarification_fields': [
+        {'id': 'workflow_source', 'question': 'Workflow source?', 'type': 'text', 'required': True},
+    ]}
+    tool = _build_ask_user_tool(runtime)[0]
+    questions = [question('text', id='workflow_source', text='Workflow source?')]
+    ToolManager([tool]).all_tools[0]({'questions': questions})
+    sent = emitted[0][1]['questions']
+    assert sent[0]['required'] is True
+
+
+def test_host_workflow_startup_card_retains_required_fields_without_bound_session():
+    card = module.question_card_payload(
+        [question('text')], workflow={'workflow_ref': 'builtin:writer-workflow'},
+    )
+    assert card['questions'][0]['required'] is True
+
+
 def test_function_call_sends_schema_and_all_errors_to_the_next_model_round(emitted):
     class RecordingLLM:
         def __init__(self, outputs):

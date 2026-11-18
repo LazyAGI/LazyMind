@@ -265,7 +265,7 @@ describe('notification settings and task UI', () => {
   it('adds the visual hooks used by the notification settings design', async () => {
     mocks.accounts.mockImplementation((provider: string) => Promise.resolve({ items: provider === 'feishu' ? [{ id: 'feishu-1', provider: 'feishu', label: 'Feishu', status: 'connected' }] : [] }));
     const { container } = mount(<RuleEditor value={defaults} onChange={vi.fn()} />);
-    await waitFor(() => expect(mocks.accounts).toHaveBeenCalled());
+    await waitFor(() => expect(container.querySelector('.ant-spin')).not.toBeInTheDocument());
     expect(container.querySelector('.notification-channel-block.is-desktop')).toBeInTheDocument();
     expect(container.querySelector('.notification-channel-block.is-wechat')).toBeInTheDocument();
     expect(container.querySelector('.notification-channel-block.is-feishu')).toBeInTheDocument();
@@ -280,8 +280,8 @@ describe('notification settings and task UI', () => {
     expect(container.querySelector('.notification-brand.is-desktop .anticon-desktop')).toBeInTheDocument();
     expect(container.querySelector('.notification-channel-block.is-desktop .notification-status')).toBeNull();
     expect(container.querySelector('.notification-channel-block.is-desktop')).toHaveTextContent('notifications.nativeDesktopHint');
-    expect(container.querySelector('.notification-channel-block.is-feishu .notification-status.is-off')).toHaveTextContent('notifications.off');
-    expect(container.querySelector('.notification-channel-block.is-wecom .notification-status.is-off')).toHaveTextContent('notifications.off');
+    expect(container.querySelector('.notification-channel-block.is-feishu .notification-status')).toHaveTextContent('notifications.connected');
+    expect(container.querySelector('.notification-channel-block.is-wecom .notification-status')).toHaveTextContent('notifications.notConnected');
     const connectionAction = container.querySelector<HTMLButtonElement>('.notification-link-action');
     expect(connectionAction).toBeInTheDocument();
     expect(connectionAction?.querySelector('.anticon-arrow-right')).toBeInTheDocument();
@@ -299,7 +299,7 @@ describe('notification settings and task UI', () => {
     { variant: 'task', gate: 'channel' },
     { variant: 'task', gate: 'master' },
     { variant: 'task', gate: 'settings' },
-  ] as const)('shows the same off status for all channels in $variant when the $gate gate is closed', async ({ variant, gate }) => {
+  ] as const)('preserves connection status in $variant when the $gate gate is closed', async ({ variant, gate }) => {
     const providers = ['feishu', 'wecom', 'wechat'] as const;
     const config = { ...defaults, channels: { ...defaults.channels } };
     const globalDefaults = { ...defaults, channels: { ...defaults.channels } };
@@ -319,15 +319,16 @@ describe('notification settings and task UI', () => {
     for (const provider of ['desktop', ...providers] as const) {
       const block = container.querySelector(`.notification-channel-block.is-${provider}`)!;
       const badge = block.querySelector('.notification-status');
-      expect(badge).toHaveTextContent('notifications.off');
-      expect(badge).toHaveClass('is-off');
+      if (provider === 'desktop') expect(badge).toBeNull();
+      else expect(badge).toHaveTextContent('notifications.' + ({ feishu: 'notConnected', wecom: 'connected', wechat: 'pendingActivation' }[provider]));
       expect(block.querySelector('.notification-warning, .notification-activation-warning')).not.toBeInTheDocument();
     }
     expect(mocks.targets.mock.calls.every(call => !call[3]?.checkConnection)).toBe(true);
     expect(JSON.stringify(config)).toBe(original);
     expect(onChange).not.toHaveBeenCalled();
   });
-  it('shows desktop as authorized only after browser notification permission is granted', async () => {
+  it('shows browser permission independently of the closed desktop notification switch', async () => {
+    defaults.channels.desktop = { enabled: false };
     mocks.desktop.mockReturnValue(false);
     Object.defineProperty(window, 'isSecureContext', { configurable: true, value: true });
     Object.defineProperty(navigator, 'locks', { configurable: true, value: {} });
@@ -352,7 +353,7 @@ describe('notification settings and task UI', () => {
     const view = mount(<RuleEditor variant={variant} value={config} onChange={onChange} />);
 
     await waitFor(() => expect(mocks.accounts).toHaveBeenCalled());
-    expect(view.container.querySelector('.notification-channel-block.is-desktop .notification-status')).toHaveTextContent('notifications.off');
+    expect(view.container.querySelector('.notification-channel-block.is-desktop .notification-status')).toBeNull();
     const toggle = screen.getByRole('switch', { name: 'notifications.desktop' });
     expect(toggle).toBeEnabled();
     fireEvent.click(toggle);
@@ -453,7 +454,8 @@ describe('notification status vocabulary and scope', () => {
     expect(channel.querySelector('.notification-status')).toHaveTextContent('notifications.notConnected');
     expect(channel.querySelector('.notification-status')).not.toHaveTextContent('notifications.wechatRecipientUnconfirmed');
     expect(channel).not.toHaveTextContent('notifications.wechatReconnectHint');
-    expect(channel).toHaveTextContent('notifications.wechatConnectRequired');
+    if (variant === 'task') expect(channel).toHaveTextContent('notifications.wechatConnectRequired');
+    else expect(channel.querySelector('.notification-activation-warning')).toBeNull();
     expect(onChange).not.toHaveBeenCalled();
     expect(mocks.targets.mock.calls.every(call => !call[3]?.checkConnection)).toBe(true);
   });
@@ -508,4 +510,37 @@ describe('notification status vocabulary and scope', () => {
     else expect(block.querySelector('.notification-status')).toBeNull();
     expect(block).toHaveTextContent(supported ? 'notifications.browserPermission_denied' : 'notifications.browserUnsupported');
   });
+});
+
+it.each(['focus', 'lazymind:channel-accounts-changed'])('refreshes connected accounts on %s without enabling notifications', async event => {
+  let connected = false;
+  mocks.accounts.mockImplementation((provider: string) => Promise.resolve({ items: connected && provider === 'feishu'
+    ? [{ id: 'new-account', provider, label: 'Feishu', status: 'connected', runtime_status: 'running' }] : [] }));
+  const onChange = vi.fn();
+  const config = { ...emptyRule(), channels: { feishu: { enabled: false } } };
+  const { container } = mount(<RuleEditor value={config} onChange={onChange} />);
+  const row = () => container.querySelector<HTMLElement>('.is-feishu')!;
+  await waitFor(() => expect(row().querySelector('.notification-status')).toHaveTextContent('notifications.notConnected'));
+  expect(within(row()).getByRole('button', { name: /notifications\.connect/ })).toBeInTheDocument();
+  connected = true;
+  fireEvent(window, new Event(event));
+  await waitFor(() => expect(row().querySelector('.notification-status')).toHaveTextContent('notifications.connected'));
+  expect(within(row()).queryByRole('button', { name: /notifications\.connect/ })).not.toBeInTheDocument();
+  expect(within(row()).getByRole('switch', { name: 'notifications.feishu' })).not.toBeChecked();
+  expect(onChange).not.toHaveBeenCalled();
+  expect(mocks.patch).not.toHaveBeenCalled();
+});
+
+it.each([
+  { provider: 'wecom', runtime_status: 'running', capabilities: { authorization_required: true }, label: 'notAuthorized' },
+  { provider: 'feishu', runtime_status: 'starting', capabilities: {}, label: 'connecting' },
+  { provider: 'wechat', runtime_status: 'failed', capabilities: {}, label: 'unavailable' },
+])('shows $label for $provider even with the master and channel switches off', async account => {
+  mocks.accounts.mockImplementation((provider: string) => Promise.resolve({ items: provider === account.provider
+    ? [{ ...account, id: 'account', status: 'connected' }] : [] }));
+  const config = emptyRule(), onChange = vi.fn();
+  const { container } = mount(<RuleEditor value={config} preferences={{ enabled: false, revision: 1, defaults: config }} onChange={onChange} />);
+  await waitFor(() => expect(container.querySelector(`.is-${account.provider} .notification-status`)).toHaveTextContent(`notifications.${account.label}`));
+  expect(onChange).not.toHaveBeenCalled();
+  expect(mocks.targets).not.toHaveBeenCalled();
 });

@@ -29,6 +29,14 @@ describe("Cloud and local authentication boundaries", () => {
     expect(mocks.restore).not.toHaveBeenCalled(); expect(mocks.refresh).not.toHaveBeenCalled(); expect(mocks.logout).not.toHaveBeenCalled();
   });
 
+  it("keeps a failed GitHub Star credential separate from the LazyMind login", async () => {
+    const error = unauthorized(1001306, "/api/authservice/v1/cloud/github/star");
+    await expect(handleError(error)).rejects.toBe(error);
+    expect(mocks.restore).not.toHaveBeenCalled();
+    expect(mocks.refresh).not.toHaveBeenCalled();
+    expect(mocks.logout).not.toHaveBeenCalled();
+  });
+
   it("continues local authentication recovery for a real local 401 on a cloud URL", async () => {
     const error = unauthorized(2000104);
     await expect(handleError(error)).rejects.toThrow("fixture local restoration unavailable");

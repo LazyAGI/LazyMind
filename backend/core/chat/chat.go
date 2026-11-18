@@ -45,9 +45,10 @@ func upstreamTotalTimeout() time.Duration {
 }
 
 type ChatMessage struct {
-	Role       string `json:"role"`
-	Content    string `json:"content"`
-	HistorySeq int    `json:"history_seq,omitempty"`
+	Role              string           `json:"role"`
+	Content           string           `json:"content"`
+	HistorySeq        int              `json:"history_seq,omitempty"`
+	CanonicalMessages []map[string]any `json:"canonical_messages,omitempty"`
 }
 
 type DatasetFilters struct {
@@ -165,6 +166,7 @@ type ChatWorkflowOptions struct {
 
 // LazyChatData text data text。
 type LazyChatData struct {
+	CanonicalMessages        []map[string]any               `json:"canonical_messages,omitempty"`
 	SteeringApplied          []steeringApplied              `json:"steering_applied,omitempty"`
 	ModelOutput              *ChatModelOutput               `json:"model_output,omitempty"`
 	Text                     string                         `json:"text"`
@@ -497,6 +499,7 @@ func lazyStreamHandler(ctx context.Context, resp *http.Response) <-chan *LazyStr
 
 // UpstreamStreamChunk text ChatConversations text，text LazyChatResponse.Data。
 type UpstreamStreamChunk struct {
+	CanonicalMessages        []map[string]any               `json:"canonical_messages,omitempty"`
 	SteeringApplied          []steeringApplied              `json:"steering_applied,omitempty"`
 	ModelOutput              *ChatModelOutput               `json:"model_output,omitempty"`
 	Text                     string                         `json:"text"`
@@ -843,6 +846,16 @@ func chatMessageFromMap(m map[string]any) ChatMessage {
 	role, _ := m["role"].(string)
 	content, _ := m["content"].(string)
 	msg := ChatMessage{Role: role, Content: content}
+	switch canonical := m["canonical_messages"].(type) {
+	case []map[string]any:
+		msg.CanonicalMessages = canonical
+	case []any:
+		for _, entry := range canonical {
+			if message, ok := entry.(map[string]any); ok {
+				msg.CanonicalMessages = append(msg.CanonicalMessages, message)
+			}
+		}
+	}
 	switch seq := m["history_seq"].(type) {
 	case int:
 		msg.HistorySeq = seq
@@ -1181,6 +1194,7 @@ func upstreamStreamErrorKind(kind lazyStreamErrorKind) UpstreamStreamErrorKind {
 
 func upstreamStreamChunkFromData(data LazyChatData) UpstreamStreamChunk {
 	return UpstreamStreamChunk{
+		CanonicalMessages:        data.CanonicalMessages,
 		SteeringApplied:          data.SteeringApplied,
 		ModelOutput:              data.ModelOutput,
 		Text:                     data.Text,

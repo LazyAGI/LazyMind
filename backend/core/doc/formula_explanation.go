@@ -123,7 +123,11 @@ func formulaExplanationError(w http.ResponseWriter, status int, message string) 
 	case 502, 503, 504:
 		kind = "Upstream service error"
 	}
-	common.ReplyErrWithData(w, kind, map[string]any{"error_message": message}, status)
+	data := map[string]any{"error_message": message}
+	if status == http.StatusGatewayTimeout {
+		data["error_code"] = "request_timeout"
+	}
+	common.ReplyErrWithData(w, kind, data, status)
 }
 
 func (h formulaExplanationHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -182,7 +186,7 @@ func (h formulaExplanationHandler) explain(r *http.Request, request formulaReadi
 	if err != nil {
 		return formulaExplanation{}, "", formulaExplanationFailure{500, "Cannot read the PDF structure. Retry later."}
 	}
-	if state.Status != "ready" || state.Document == nil {
+	if state.Document == nil {
 		return formulaExplanation{}, "", formulaExplanationFailure{409, "Parse the original PDF before requesting a formula explanation."}
 	}
 	if state.Document.Version != 1 || state.Document.CoordinateSpace != "normalized_top_left" {
@@ -241,7 +245,7 @@ func (h formulaExplanationHandler) explain(r *http.Request, request formulaReadi
 	if request.Force {
 		flightKey += ":force:" + modelID
 	}
-	result, shared, flightErr := formulaExplanationFlights.do(ctx, flightKey, func(runCtx context.Context) (formulaExplanation, error) {
+	result, shared, flightErr := formulaExplanationFlights.do(ctx, flightKey, func(runCtx context.Context) (result formulaExplanation, resultErr error) {
 		if err := runCtx.Err(); err != nil {
 			return formulaExplanation{}, err
 		}
@@ -251,6 +255,10 @@ func (h formulaExplanationHandler) explain(r *http.Request, request formulaReadi
 			if cached, ok := readCache(); ok {
 				return cached, nil
 			}
+		}
+		if request.FocusSymbol == nil {
+			finish := startReadingWork(cachePath)
+			defer func() { finish(resultErr) }()
 		}
 		sources := make([]map[string]string, 0, len(evidence))
 		for _, item := range evidence {
@@ -278,7 +286,7 @@ func (h formulaExplanationHandler) explain(r *http.Request, request formulaReadi
 			}
 			raw, err := h.generate(attemptCtx, string(input), task, config)
 			if err != nil {
-				return formulaExplanation{}, formulaExplanationFailure{502, "The selected model could not explain this formula. Check the model connection and retry."}
+				return formulaExplanation{}, err
 			}
 			result, err := validateFormulaExplanation(raw, evidence)
 			if err == nil && request.FocusSymbol == nil && !hasSubstantiveFormulaReading(result) {

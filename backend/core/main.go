@@ -247,6 +247,10 @@ func externalAgentOperation(method, path string) externallease.Operation {
 		(strings.HasSuffix(path, ":start") || strings.HasSuffix(path, ":finish")) {
 		return externallease.OperationInvocationWrite
 	}
+	if method == http.MethodPost && strings.HasPrefix(path, "/workflow-sessions/") &&
+		strings.Contains(path, "/hosted-attempts/") && strings.HasSuffix(path, "/tools:list") {
+		return externallease.OperationWorkflowRead
+	}
 	if method == http.MethodGet && (path == "/workflow-runtime/v1/workflows" ||
 		strings.HasPrefix(path, "/workflow-runtime/v1/workflows/") || path == "/workflow-sessions" ||
 		strings.HasPrefix(path, "/workflow-input-resources/") || strings.HasPrefix(path, "/workflow-artifacts/") ||
@@ -258,9 +262,13 @@ func externalAgentOperation(method, path string) externallease.Operation {
 		(strings.HasPrefix(path, "/workflow-preparations/") && strings.HasSuffix(path, ":consume")) ||
 		(strings.HasPrefix(path, "/workflow-sessions/") &&
 			(strings.HasSuffix(path, ":stop") || strings.HasSuffix(path, ":resume") ||
+				strings.HasSuffix(path, "/executions:begin") || strings.HasSuffix(path, "/host-binding") ||
+				(strings.Contains(path, "/model-generations/") && (strings.HasSuffix(path, ":claim") || strings.HasSuffix(path, ":respond"))) ||
 				strings.HasSuffix(path, ":advance-step-and-hand-off") ||
 				(strings.Contains(path, "/hosted-attempts/") &&
-					(strings.HasSuffix(path, ":begin") || strings.HasSuffix(path, ":resume") || strings.HasSuffix(path, ":submit")))))) {
+					(strings.HasSuffix(path, ":begin") || strings.HasSuffix(path, ":resume") || strings.HasSuffix(path, ":submit") ||
+						strings.HasSuffix(path, ":complete") || strings.HasSuffix(path, "/artifacts") ||
+						strings.HasSuffix(path, "/workers:grant") || strings.HasSuffix(path, "/preview") || strings.HasSuffix(path, "/tools:call")))))) {
 		return externallease.OperationWorkflowWrite
 	}
 	return ""
@@ -1022,11 +1030,7 @@ func run(ctx context.Context) error {
 					vocabularyRunner := updateControl.startRunner(runtimeCtx, store.DB(), asyncjob.Options{JobTypes: []string{vocabulary.CloudSyncJobType}, SerializeResources: true, Concurrency: 2, PollInterval: 2 * time.Second, LockTTL: 2 * time.Minute})
 					backgroundDone = append(backgroundDone, vocabularyRunner.Done(), vocabulary.StartAnkiSync(runtimeCtx, store.DB()))
 				}
-				excludedJobs := append([]string{doc.ReadingPreparationJob, vocabulary.CloudSyncJobType, documentdirectory.PlanJob, documentdirectory.OrganizeJob, academic.ChatLaunchJobType, academic.PreparationJobType}, chat.ConversationTitleJobTypes...)
-				if !systemdeps.PythonComponentActive("rag") {
-					excludedJobs = append(excludedJobs, doc.MarketInstallJobType, doc.MarketUpdateJobType,
-						doc.MarketUpdateAllJobType, "document_pdf_translation")
-				}
+				excludedJobs := defaultAsyncJobExcludedTypes(systemdeps.PythonComponentActive("rag"))
 				runner = updateControl.startRunner(runtimeCtx, store.DB(), asyncjob.Options{
 					Concurrency:     asyncConfig.Concurrency,
 					ExcludeJobTypes: excludedJobs,
@@ -1059,13 +1063,12 @@ func run(ctx context.Context) error {
 				backgroundDone = append(backgroundDone,
 					evalset.StartImportPreviewCleanup(runtimeCtx, store.DB(), importConfig.CleanupInterval))
 
-				backgroundDone = append(backgroundDone, updateControl.startResourceUpdates(runtimeCtx, store.DB(), store.State(), resourceupdate.DefaultConfig(), resourceupdate.EnabledFromEnv())...)
 				resourceUpdateEnabled := resourceupdate.EnabledFromEnv()
 				resourceupdate.LogStartup(resourceUpdateEnabled)
 				if resourceUpdateEnabled {
 					resourceupdate.SetResolveChatLLM(chat.LoadDefaultChatLLMConfig)
-
 				}
+				backgroundDone = append(backgroundDone, updateControl.startResourceUpdates(runtimeCtx, store.DB(), store.State(), resourceupdate.DefaultConfig(), resourceupdate.EnabledFromEnv())...)
 				backgroundDone = append(backgroundDone, recovery.Start(runtimeCtx, store.DB(), recovery.DefaultCleanupInterval))
 
 				// Mark stale running SubAgent tasks (no heartbeat for >5m) as interrupted on startup.
@@ -1088,7 +1091,6 @@ func run(ctx context.Context) error {
 			if err := initializeCredentialRestore(store.DB(), credentialKeys); err != nil {
 				log.Logger.Warn().Str("error_type", fmt.Sprintf("%T", err)).Msg("credential restore is unavailable")
 			}
-
 		})
 		return jobsError
 	}

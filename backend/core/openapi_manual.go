@@ -4,6 +4,12 @@ import "lazymind/core/chat"
 
 func manualOpenAPISpec() map[string]any {
 	schemas, paths := manualSchemas(), manualPaths()
+	for name, schema := range githubStarSchemas() {
+		schemas[name] = schema
+	}
+	for path, operations := range githubStarPaths() {
+		paths[path] = operations
+	}
 	for name, schema := range academicWorkflowSchemas() {
 		schemas[name] = schema
 	}
@@ -625,6 +631,9 @@ func manualSchemas() map[string]any {
 			prop("status", strSchema()),
 			prop("error_message", strSchema()),
 		),
+		"ProcessingTaskStage":        obj(prop("name", strSchema()), prop("status", strSchema())),
+		"ProcessingTaskItem":         obj(prop("id", strSchema()), prop("dataset_id", strSchema()), prop("dataset_name", strSchema()), prop("document_id", strSchema()), prop("document_name", strSchema()), prop("level", strSchema()), prop("status", strSchema()), prop("created_at", strSchema()), prop("error", strSchema()), prop("stages", array(refSchema("ProcessingTaskStage")))),
+		"ProcessingTasksResponse":    obj(prop("items", array(refSchema("ProcessingTaskItem"))), prop("total", intSchema()), prop("page", intSchema()), prop("page_size", intSchema()), prop("unfinished_count", intSchema()), prop("counts", map[string]any{"type": "object", "additionalProperties": intSchema()})),
 		"ListTasksResponse":          obj(prop("tasks", array(refSchema("TaskResponse"))), prop("total_size", intSchema()), prop("next_page_token", strSchema())),
 		"PromptRequest":              objReq([]string{"display_name", "content"}, prop("display_name", strSchema()), prop("content", strSchema()), prop("category", strSchema())),
 		"PromptPatchRequest":         obj(prop("display_name", strSchema()), prop("content", strSchema()), prop("category", strSchema())),
@@ -949,7 +958,7 @@ func manualSchemas() map[string]any {
 		"ChatModelSwitchedData":       modelSwitchDataSchema(),
 		"ChatModelOutput":             objReq([]string{"run_id", "call_index"}, prop("run_id", strSchema()), prop("call_index", map[string]any{"type": "integer", "minimum": 0, "description": "Monotonic within this run. Host model calls start at 1; Core uses a closed 0 cursor to bind a new run."}), prop("phase", map[string]any{"type": "string", "enum": []string{"begin", "commit", "rollback"}, "description": "Absent on model content. Boundaries checkpoint, commit, or restore the current call. Fenced delta_mode=replace snapshots replace body, reasoning_content, sources, and exports including explicit empty values. The first resume snapshot hydrates its cursor even when already closed."})),
 		"ChatModelSwitchRecord":       map[string]any{"allOf": []any{refSchema("ChatModelSwitchedData"), objReq([]string{"event_id"}, prop("event_id", strSchema()))}},
-		"ModelCallFinishedData":       objReq([]string{"model_call_id", "attempt_count", "kind", "has_semantic_output"}, prop("model_call_id", strSchema()), prop("attempt_count", intSchema()), prop("kind", enumStringSchema("finish", "failure")), prop("has_semantic_output", boolSchema()), prop("finish", strSchema()), prop("failure", obj(prop("origin", strSchema()), prop("code", strSchema()), prop("diagnostic_id", strSchema())))),
+		"ModelCallFinishedData":       objReq([]string{"model_call_id", "attempt_count", "kind", "has_semantic_output"}, prop("model_call_id", strSchema()), prop("attempt_count", intSchema()), prop("kind", enumStringSchema("finish", "failure", "cancelled")), prop("has_semantic_output", boolSchema()), prop("finish", strSchema()), prop("failure", obj(prop("origin", strSchema()), prop("code", strSchema()), prop("diagnostic_id", strSchema())))),
 		"ChatRuntimeEvent":            obj(prop("schema_version", intSchema()), prop("event_id", strSchema()), prop("run_id", strSchema()), prop("type", enumStringSchema("model_retry_scheduled", "model_call_finished", "model_switched", "run_finished")), prop("data", obj())),
 		"ChatChunkResponse":           obj(prop("exports", array(refSchema("ChatExport"))), prop("conversation_id", strSchema()), prop("seq", intSchema()), prop("message", strSchema()), prop("delta", strSchema()), prop("delta_mode", enumStringSchema("append", "replace")), prop("history_id", strSchema()), prop("sources", array(obj())), prop("prompt_questions", array(strSchema())), prop("reasoning_content", strSchema()), prop("thinking_duration_s", int64Schema()), prop("capability_dependency", obj()), prop("runtime_event", refSchema("ChatRuntimeEvent")), prop("performance_metrics", refSchema("RunPerformanceMetrics")), prop("execution", refSchema("ExternalExecutionProjection")), prop("model_route", refSchema("ChatModelRoute")), prop("model_switches", array(refSchema("ChatModelSwitchRecord"))), prop("model_output", refSchema("ChatModelOutput"))),
 		"ACLApiResponse":              obj(prop("code", intSchema()), prop("message", strSchema()), prop("data", obj())),
@@ -1067,6 +1076,7 @@ func manualPaths() map[string]any {
 		},
 		"/datasets/{dataset}/members:search": map[string]any{"post": op("Search dataset members", queryParams(param("query", "name_prefix", false, strSchema())), jsonBody(refSchema("SearchDatasetMemberRequest"), false), response(200, "Member search results", refSchema("ListDatasetMembersResponse")))},
 		"/datasets/{dataset}:batchAddMember": map[string]any{"post": op("Batch add dataset members", nil, jsonBody(refSchema("BatchAddDatasetMemberRequest"), true), response(200, "Added members", refSchema("BatchAddDatasetMemberResponse")))},
+		"/knowledge-processing/tasks":        map[string]any{"get": op("Latest document processing tasks", queryParams(param("query", "page", false, intSchema()), param("query", "status", false, strSchema()), param("query", "level", false, strSchema()), param("query", "q", false, strSchema())), nil, response(200, "Permission-scoped latest processing attempts", refSchema("ProcessingTasksResponse")))},
 		"/datasets/{dataset}/tasks": map[string]any{
 			"get":  op("Task list", queryParams(param("query", "page_token", false, strSchema()), param("query", "page_size", false, intSchema()), param("query", "task_state", false, strSchema()), param("query", "task_type", false, strSchema()), param("query", "document_id", false, strSchema()), param("query", "document_pid", false, strSchema())), nil, response(200, "Task list", refSchema("ListTasksResponse"))),
 			"post": op("Create task", nil, jsonBody(refSchema("CreateTaskRequest"), true), response(200, "Created task", refSchema("CreateTasksResponse"))),
@@ -1236,14 +1246,16 @@ func manualPaths() map[string]any {
 			jsonBody(refSchema("ScheduleMoveRequest"), true), map[string]any{"description": "Schedule moved"},
 		)},
 		"/task-center/workbench": map[string]any{"get": op(
-			"Summarize task categories with four previews per page", queryParams(
+			"Summarize task categories with paginated previews", queryParams(
 				param("query", "task_type", false, strSchema()), param("query", "keyword", false, strSchema()),
 				param("query", "category", false, enumStringSchema("attention", "running", "paused", "failed", "recent", "canceled")),
 				param("query", "page", false, intSchema()),
+				param("query", "page_size", false, map[string]any{"type": "integer", "minimum": 1, "maximum": 100, "default": 4}),
 			), nil, response(200, "Task-center workbench", refSchema("TaskCenterWorkbenchResponse")),
 		)},
 		"/task-center/tasks": map[string]any{"get": op(
 			"List task-center tasks", queryParams(
+				param("query", "conversation_id", false, strSchema()),
 				param("query", "status", false, strSchema()), param("query", "task_type", false, strSchema()),
 				param("query", "keyword", false, strSchema()), param("query", "page", false, intSchema()), param("query", "page_size", false, intSchema()),
 			), nil, response(200, "Task-center task page", refSchema("TaskCenterTaskListResponse")),

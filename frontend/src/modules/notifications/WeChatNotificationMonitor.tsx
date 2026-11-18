@@ -10,7 +10,7 @@ import { checkWeChatNotificationTarget, setConfiguredWeChatTargets, subscribeWeC
 import { WECHAT_NOTIFICATION_CHECK_REQUESTED_EVENT, WECHAT_NOTIFICATION_CONFIG_CHANGED_EVENT, subscribeNotificationChange } from './notificationEvents';
 import { wechatStatusHint, type WeChatNotificationStatus } from './wechatNotificationStatus';
 
-// Settings only starts probes for already-configured task recipients. Checks
+// The monitor only probes already-configured task recipients. Checks
 // initiated by confirming a recipient publish to the same state as this banner.
 export default function WeChatNotificationMonitor({ userKey }: { userKey: string }) {
   const { t } = useTranslation();

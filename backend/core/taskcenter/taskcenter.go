@@ -706,11 +706,16 @@ func ListTasks(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "db unavailable", http.StatusInternalServerError)
 		return
 	}
+	if err := RecoverExternalWorkflowTasks(r.Context(), db, userID); err != nil {
+		common.ReplyErr(w, "workflow tasks unavailable", http.StatusInternalServerError)
+		return
+	}
 
 	q := r.URL.Query()
 	status := strings.TrimSpace(q.Get("status"))
 	taskType := strings.TrimSpace(q.Get("task_type"))
 	keyword := strings.TrimSpace(q.Get("keyword"))
+	conversationID := strings.TrimSpace(q.Get("conversation_id"))
 	page, _ := strconv.Atoi(q.Get("page"))
 	if page < 1 {
 		page = 1
@@ -746,6 +751,9 @@ func ListTasks(w http.ResponseWriter, r *http.Request) {
 		"paused":         0,
 	}
 	for _, row := range rows {
+		if conversationID != "" && row.ConversationID != conversationID {
+			continue
+		}
 		t, err := resolveTaskForResponse(r.Context(), db, row.TaskCenterTask)
 		if err != nil {
 			common.ReplyErr(w, err.Error(), http.StatusInternalServerError)

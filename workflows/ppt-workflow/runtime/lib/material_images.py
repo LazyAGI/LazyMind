@@ -11,14 +11,19 @@ from urllib.parse import unquote
 # Keep spaces inside paths, but do not start at a standalone prose slash.
 # Quotes and backticks delimit paths without becoming part of the alias.
 _LOCAL_IMAGE = re.compile(
-    r'(?<![\w:/])(?:file://)?(?:/(?!\s)|[A-Za-z]:[\\/]|\.{1,2}/|images/)'
+    r'(?<![\w:/])(?:file://)?(?:/(?!\s)|[A-Za-z]:[\\/]|\.{1,2}/|images/|inputs[\\/]background_images[\\/])'
     r"[^\n<>\"'`]+?\.(?:png|jpe?g|gif|webp|bmp|svg)(?=$|[\s\"'`<>),;，。])", re.I,
 )
 _IMG_SRC = re.compile(r"(<img\b[^>]*?\bsrc\s*=\s*)([\"'])(.*?)\2", re.I)
 
 
 def _key(value: str) -> str:
-    key = unquote(unescape(str(value))).replace('\\', '/')
+    text = unescape(str(value))
+    # Signed URL paths/queries are opaque identities; decoding percent escapes
+    # could alias two distinct remote resources to the same local image.
+    if text.startswith(('http://', 'https://')):
+        return text
+    key = unquote(text).replace('\\', '/')
     if key.lower().startswith('file://'):
         key = key[len('file://'):]
         # Windows as_uri() adds a slash before the drive; native aliases do not.
@@ -27,42 +32,52 @@ def _key(value: str) -> str:
     return key
 
 
-def _materials(deck: Path) -> tuple[dict[str, str], dict[str, list[str]]]:
-    path = deck / 'info_pack.json'
-    assets = json.loads(path.read_text(encoding='utf-8')).get('user_assets', {}) if path.is_file() else {}
+def _image_bindings(deck: Path, images: list) -> tuple[dict[str, str], dict[str, list[str]]]:
     aliases: dict[str, str] = {}
     hashes: dict[str, list[str]] = {}
-    for item in assets.get('reference_images', []):
+    root = deck.resolve()
+    for item in images:
         source = (item.get('path') or item.get('local_path')) if isinstance(item, dict) else item
         if not source or str(source).startswith(('http:', 'https:', 'data:')):
             continue
-        file = Path(source)
-        if not file.is_absolute():
-            file = deck / file
-        file = file.resolve()
-        try:
-            relative = file.relative_to(deck.resolve()).as_posix()
-        except ValueError:
+        file = (root / Path(source)).resolve()
+        if not file.is_relative_to(root):
             continue
+        relative = file.relative_to(root).as_posix()
         canonical = '../' + relative
         for alias in (source, str(file), relative, canonical):
             aliases[_key(alias)] = canonical
         if file.is_file():
             digest = hashlib.sha256(file.read_bytes()).hexdigest()
             hashes.setdefault(digest[:16], []).append(canonical)
+    return aliases, hashes
+
+
+def _materials(deck: Path) -> tuple[dict[str, str], dict[str, list[str]]]:
+    path = deck / 'info_pack.json'
+    assets = json.loads(path.read_text(encoding='utf-8')).get('user_assets', {}) if path.is_file() else {}
+    aliases, hashes = _image_bindings(deck, assets.get('reference_images', []))
     for alias, target in assets.get('reference_image_aliases', {}).items():
         canonical = aliases.get(_key(target))
         if canonical:
             aliases[_key(alias)] = canonical
+            aliases[str(alias)] = canonical
     return aliases, hashes
+
+
+def _basename_aliases(aliases: dict[str, str]) -> dict[str, str]:
+    matches: dict[str, set[str]] = {}
+    for canonical in set(aliases.values()):
+        matches.setdefault(Path(canonical).name, set()).add(canonical)
+    return {name: next(iter(paths)) for name, paths in matches.items() if len(paths) == 1}
 
 
 def _resolve(source: str, aliases: dict[str, str], hashes: dict[str, list[str]]) -> str | None:
     key = _key(source)
-    if key.lower().startswith(('http:', 'https:', 'data:', '//')):
-        return None
     if key in aliases:
         return aliases[key]
+    if key.lower().startswith(('http:', 'https:', 'data:', '//')):
+        return None
     # Core input snapshots carry a content-hash suffix. This also recognizes
     # prior attempts after their workspace was removed, without opening a path
     # supplied by the model or guessing a material from its display filename.
@@ -71,31 +86,77 @@ def _resolve(source: str, aliases: dict[str, str], hashes: dict[str, list[str]])
     return next(iter(matches)) if len(matches) == 1 else None
 
 
-def bind_prompt_materials(deck: Path, brief: str) -> tuple[str, list[str]]:
+def bind_prompt_materials(
+    deck: Path, brief: str, *, background_image: dict | None = None,
+) -> tuple[str, list[str]]:
     aliases, hashes = _materials(deck)
+    background_aliases, background_hashes = _image_bindings(deck, [background_image] if background_image else [])
     required: list[str] = []
+    # Old editable briefs may refer to a registered asset by its display name.
+    # Match a bare name only when it identifies one exact foreground file.
+    bare = _basename_aliases(aliases)
+    for canonical in set(background_aliases.values()):
+        bare.pop(Path(canonical).name, None)
 
     def replace(match: re.Match) -> str:
         source = match[0]
-        canonical = _resolve(source, aliases, hashes)
+        key = _key(source)
+        input_slot = re.search(r'(?:^|/)inputs/(background_images|material_images)/', key)
+        if input_slot and input_slot[1] == 'background_images':
+            material = None
+            background = _resolve(source, background_aliases, background_hashes)
+        elif input_slot and input_slot[1] == 'material_images':
+            material = _resolve(source, aliases, hashes)
+            background = None
+        else:
+            material = aliases.get(key) or bare.get(source)
+            background = background_aliases.get(key) if not material else None
+            if not (material or background):
+                material = _resolve(source, aliases, hashes)
+                background = _resolve(source, background_aliases, background_hashes)
+                if material and background and material != background:
+                    raise ValueError(f'Ambiguous material image reference: {Path(source).name}; '
+                                     'use its registered deck path')
+        canonical = material or background
         if not canonical:
             raise ValueError(f'Unregistered material image reference: {Path(source).name}')
         file = (deck / 'pages' / canonical).resolve()
         if not file.is_file():
             raise ValueError(f'Required material image is missing: {canonical}')
         relative = file.relative_to(deck.resolve()).as_posix()
-        if relative not in required:
+        if material and relative not in required:
             required.append(relative)
         return canonical
 
-    return _LOCAL_IMAGE.sub(replace, brief), required
+    pattern = _LOCAL_IMAGE
+    if bare:
+        names = '|'.join(re.escape(name) for name in sorted(bare, key=lambda name: (-len(name), name)))
+        # Path alternatives take precedence, so an unknown path with a known
+        # basename is still rejected. The left boundary excludes URL/path parts.
+        bare_pattern = (
+            r'(?<![\w/\\:.%+@?&#=-])(?-i:' + names
+            + r""")(?=$|[\s"'\x60<>),;，。]|\.(?=\s|$))"""
+        )
+        pattern = re.compile(_LOCAL_IMAGE.pattern + '|' + bare_pattern, re.I)
+    # Match only registered remote origins, not arbitrary citation links. The
+    # complete URL (including query) identifies the downloaded bytes; matching
+    # a basename or URL prefix can bind a different image from the same host.
+    remote = [key for key in aliases if key.startswith(('http://', 'https://'))]
+    if remote:
+        urls = '|'.join(re.escape(key) for key in sorted(remote, key=len, reverse=True))
+        pattern = re.compile(
+            r'(?<![\w/])(?-i:' + urls + r""")(?=$|[\s"'`<>),;，。]|\.(?=\s|$))"""
+            + '|' + pattern.pattern, re.I,
+        )
+    return pattern.sub(replace, brief), required
 
 
 def normalize_material_sources(html: str, deck: Path) -> str:
     aliases, hashes = _materials(deck)
+    bare = _basename_aliases(aliases)
 
     def replace(match: re.Match) -> str:
-        canonical = _resolve(match[3], aliases, hashes)
+        canonical = _resolve(match[3], aliases, hashes) or bare.get(match[3])
         return f'{match[1]}{match[2]}{canonical}{match[2]}' if canonical else match[0]
 
     return _IMG_SRC.sub(replace, html)
@@ -137,7 +198,7 @@ def record_material_aliases(deck: Path, sources: list[dict], input_dir: Path | N
             if target:
                 for key in ('path', 'origin'):
                     source = item.get(key)
-                    if source and not str(source).startswith(('http:', 'https:', 'data:')):
+                    if source and not str(source).startswith('data:'):
                         saved[str(source)] = target
     if input_dir and input_dir.is_dir():
         for path in input_dir.iterdir():

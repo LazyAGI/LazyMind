@@ -15,8 +15,6 @@ const requiredDesktopServices = [
 ];
 
 const ragDesktopServices = new Set([
-  "scan-control-plane",
-  "file-watcher",
   "lazyllm-doc-server",
   "lazyllm-parse-server",
   "lazyllm-parse-worker",

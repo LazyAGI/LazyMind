@@ -153,7 +153,9 @@ DELIVERABLE_GUIDANCE = {
     'artifact': (
         'Deliver the requested finished artifact in the requested format, not merely advice about it. '
         'For a downloadable file, call save_chat_artifact as soon as the complete file exists, before '
-        'optional refinements, extra validation, or the final response.'
+        'optional refinements, extra validation, or the final response. '
+        'For alternate visual formats of the same work (such as HTML and SVG), pass the same '
+        'unique preview_group to each save_chat_artifact call. Independent works must not share a group.'
     ),
     'execution_result': 'Perform the authorized action and report the concrete result, including any failure.',
 }
@@ -201,16 +203,16 @@ KNOWLEDGE_OPERATIONS_GUIDANCE = (
     "The UI renders trusted resource entry cards; do not construct page URLs or infer the Host. "
     "Upload uses absolute local paths on the shared filesystem. Resolve attachments to original paths, "
     "and download or export other sources first; reading file_ref values are not upload paths. "
-    "Importing found or cited papers into a paper collection means importing original PDF files only. "
+    "Paper import saves a library bibliography entry first and acquires original PDFs in the background. "
     "Use knowledge.paper.import only for the papers the user requests. Select the matching source_ids from "
     "current search results or use knowledge.paper.sources to get source IDs from an earlier answer. "
-    "You can also pass the requested papers by DOI, arXiv ID, or exact title and known authors/year. "
+    "Pass a supplied DOI or arXiv ID directly without searching to validate title, authors or year. For a title-only request, call paper_import directly: it searches OpenAlex and Crossref in parallel and confirms bibliographic identity before saving; do not run a separate preflight search. Omit unknown metadata. "
     "If the user refers to a list in an earlier answer, use the papers named in that answer. Mark exact_version only "
     "if the user specified the edition. Ask the user to choose only when the requested selection is ambiguous. "
-    "The backend locates and verifies the originals; do not repeat web searches just to get source IDs. "
+    "Report metadata_saved as added to the collection with background completion, not as PDF-ready. Report already_present as success without duplication. The backend locates originals; do not repeat web searches just to get source IDs. "
     "If a new collection is requested, use the knowledge.create confirmation, then import into it. "
     "If a PDF cannot be obtained, do not generate or "
-    "upload bibliography Markdown, metadata records, or summaries in its place. Use the regular "
+    "upload fabricated PDF substitutes or summary files; the saved bibliography entry remains available even when its PDF is unavailable. Use the regular "
     "upload tool for an explicitly requested local or attached file. "
     "An optional paper overview may use existing attachment text and must not delay the upload report."
 )

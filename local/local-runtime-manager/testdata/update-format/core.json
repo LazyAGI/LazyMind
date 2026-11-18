@@ -1,5 +1,5 @@
 {
-  "producer": "actual merged LazyAGI/LazyMind main 6cd2d1bb: migrate.NewRunner.Up(0) + episode.Initialize; isolated schema only",
+  "producer": "actual merge candidate (feat-v05-1019 d148835a9 + LazyAGI/LazyMind main 388474c8f): migrate.NewRunner.Up(0) + episode.Initialize; isolated schema only",
   "shape": {
     "present": true,
     "applicationId": 0,
@@ -292,6 +292,12 @@
         "name": "idx_async_jobs_type_status",
         "table": "async_jobs",
         "sql": "CREATE INDEX `idx_async_jobs_type_status` ON `async_jobs`(`job_type`)"
+      },
+      {
+        "type": "index",
+        "name": "idx_automatic_reading_usage_day",
+        "table": "reading_usage",
+        "sql": "CREATE INDEX idx_automatic_reading_usage_day ON reading_usage (user_id, category, charged_at)"
       },
       {
         "type": "index",
@@ -1843,6 +1849,12 @@
       },
       {
         "type": "index",
+        "name": "idx_workflow_action_jobs_session",
+        "table": "workflow_action_jobs",
+        "sql": "CREATE INDEX idx_workflow_action_jobs_session ON workflow_action_jobs(session_id)"
+      },
+      {
+        "type": "index",
         "name": "idx_workflow_commands_owner",
         "table": "workflow_commands",
         "sql": "CREATE INDEX idx_workflow_commands_owner ON workflow_commands(owner_user_id)"
@@ -3217,6 +3229,12 @@
       },
       {
         "type": "table",
+        "name": "reading_usage",
+        "table": "reading_usage",
+        "sql": "CREATE TABLE reading_usage (\n user_id VARCHAR(255) NOT NULL,\n category VARCHAR(32) NOT NULL,\n source_sha256 VARCHAR(64) NOT NULL,\n charged_at TIMESTAMP NOT NULL,\n PRIMARY KEY (user_id, category, source_sha256)\n)"
+      },
+      {
+        "type": "table",
         "name": "rejected_document_publications",
         "table": "rejected_document_publications",
         "sql": "CREATE TABLE rejected_document_publications (\n dataset_id VARCHAR(255) NOT NULL,\n external_doc_id VARCHAR(128) NOT NULL,\n PRIMARY KEY (dataset_id,external_doc_id)\n)"
@@ -3493,6 +3511,12 @@
       },
       {
         "type": "table",
+        "name": "user_github_star_prompts",
+        "table": "user_github_star_prompts",
+        "sql": "CREATE TABLE user_github_star_prompts (\n    user_id VARCHAR(255) PRIMARY KEY,\n    prompted_task_ids TEXT NOT NULL DEFAULT '[]',\n    last_prompt_at DATETIME NULL,\n    supported BOOLEAN NOT NULL DEFAULT FALSE,\n    created_at DATETIME NOT NULL,\n    updated_at DATETIME NOT NULL\n)"
+      },
+      {
+        "type": "table",
         "name": "user_model_provider_group_models",
         "table": "user_model_provider_group_models",
         "sql": "CREATE TABLE `user_model_provider_group_models` (`id` varchar(64),`user_model_provider_id` varchar(64) NOT NULL,`user_model_provider_group_id` varchar(64) NOT NULL,`provider_name` varchar(255) NOT NULL DEFAULT \"\",`name` varchar(512) NOT NULL,`model_type` varchar(64) NOT NULL,`max_input_tokens` varchar(16),`is_default` boolean NOT NULL DEFAULT false,`create_user_id` varchar(255) NOT NULL,`create_user_name` varchar(255) NOT NULL,`created_at` datetime NOT NULL,`updated_at` datetime NOT NULL,`deleted_at` datetime, free_auto_select_priority INTEGER NOT NULL DEFAULT 0, free_auto_select_base_urls TEXT NOT NULL DEFAULT '', vision BOOLEAN NOT NULL DEFAULT FALSE, input_token_limit VARCHAR(16), max_output_tokens VARCHAR(16), model_settings TEXT NOT NULL DEFAULT '{}', enabled BOOLEAN NOT NULL DEFAULT TRUE,PRIMARY KEY (`id`))"
@@ -3709,6 +3733,12 @@
       },
       {
         "type": "table",
+        "name": "workflow_action_jobs",
+        "table": "workflow_action_jobs",
+        "sql": "CREATE TABLE workflow_action_jobs (\n id VARCHAR(36) PRIMARY KEY,\n session_id VARCHAR(36) NOT NULL,\n slot_id VARCHAR(128) NOT NULL,\n list_index INTEGER NOT NULL,\n base_revision INTEGER NOT NULL,\n base_draft_version BIGINT,\n status VARCHAR(24) NOT NULL,\n version BIGINT NOT NULL,\n request_json TEXT NOT NULL,\n result_json TEXT NOT NULL,\n created_at TIMESTAMP NOT NULL,\n updated_at TIMESTAMP NOT NULL\n)"
+      },
+      {
+        "type": "table",
         "name": "workflow_approval_preferences",
         "table": "workflow_approval_preferences",
         "sql": "CREATE TABLE workflow_approval_preferences (\n    user_id VARCHAR(255) NOT NULL,\n    workflow_id VARCHAR(64) NOT NULL,\n    step_id VARCHAR(64) NOT NULL,\n    approval_required BOOLEAN NOT NULL,\n    created_at DATETIME NOT NULL,\n    updated_at DATETIME NOT NULL,\n    PRIMARY KEY (user_id, workflow_id, step_id)\n)"
@@ -3816,7 +3846,7 @@
         "sql": "CREATE TRIGGER knowledge_document_version AFTER UPDATE ON documents\nWHEN NEW.resource_version = OLD.resource_version AND (\n NEW.dataset_id IS NOT OLD.dataset_id OR NEW.p_id IS NOT OLD.p_id OR NEW.display_name IS NOT OLD.display_name OR\n NEW.document_type IS NOT OLD.document_type OR NEW.tags IS NOT OLD.tags OR NEW.file_id IS NOT OLD.file_id OR\n NEW.ext IS NOT OLD.ext OR NEW.deleted_at IS NOT OLD.deleted_at)\nBEGIN\n UPDATE documents SET resource_version = OLD.resource_version + 1 WHERE id = NEW.id;\nEND"
       }
     ],
-    "coreVersion": 320261106040849,
+    "coreVersion": 320261116090000,
     "coreHistory": [
       {
         "version": 20260321131500,
@@ -4767,12 +4797,24 @@
         "name": "v0_3/index_reading_preparation"
       },
       {
+        "version": 320261104075803,
+        "name": "v0_3/github_star_prompts"
+      },
+      {
         "version": 320261105090000,
         "name": "v0_3/add_paper_note_source"
       },
       {
         "version": 320261106040849,
         "name": "v0_3/embedding_index_state"
+      },
+      {
+        "version": 320261109100000,
+        "name": "v0_3/workflow_action_jobs"
+      },
+      {
+        "version": 320261116090000,
+        "name": "v0_3/create_reading_usage"
       }
     ]
   }

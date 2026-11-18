@@ -55,7 +55,7 @@ test('serialized heading and pill insets match the CSS sides in PowerPoint', asy
   }
 });
 
-test('short lines and keep-all/pre-line still wrap; only explicit nowrap/pre disable it', () => {
+test('text without browser line measurements follows CSS wrapping rules', () => {
   for (const whiteSpace of ['normal', 'pre-line', 'pre-wrap', 'nowrap', 'pre']) {
     const n = node({ whiteSpace, wordBreak: 'keep-all' });
     n.text = '研究问题';

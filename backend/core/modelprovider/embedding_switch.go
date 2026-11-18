@@ -45,7 +45,7 @@ func embeddingFingerprint(result EmbeddingSignatureResponse) string {
 }
 
 func assessEmbeddingSwitch(state orm.EmbeddingIndexState, indexed int64, modelID, source, fingerprint string) string {
-	if state.Phase == "clearing" || state.Phase == "cleanup_failed" {
+	if state.Phase == "clearing" || state.Phase == "cleanup_failed" || state.Phase == "detached" {
 		return "clear_required"
 	}
 	if state.Phase == "cleared" {

@@ -1,4 +1,5 @@
 import { axiosInstance, BASE_URL } from "@/components/request";
+import type { PdfIRState } from "./pdfIR";
 
 interface Envelope<T> { data: T }
 
@@ -99,17 +100,26 @@ export async function createSearchablePdfJob(datasetId: string, documentId: stri
   return response.data.data;
 }
 
+export interface PdfStructureStatus {
+  status: PdfIRState['status'] | 'unknown';
+  available: boolean;
+  error_code?: string;
+  error_message?: string;
+  source_sha256?: string;
+  model?: string;
+}
 export interface DocumentParseResult {
   status: "parsed" | "parsing" | "failed" | "unknown" | "not_requested";
   task_id?: string;
+  pdf_structure?: PdfStructureStatus;
   error?: { code: string; message: string; recovery?: string };
 }
-export async function getDocumentParseStatus(datasetId: string, documentId: string): Promise<DocumentParseResult> {
-  const response = await axiosInstance.get<Envelope<DocumentParseResult>>(`${documentBase(datasetId, documentId)}/parse-status`, { silentError: true } as never);
+export async function getDocumentParseStatus(datasetId: string, documentId: string, signal?: AbortSignal): Promise<DocumentParseResult> {
+  const response = await axiosInstance.get<Envelope<DocumentParseResult>>(`${documentBase(datasetId, documentId)}/parse-status`, { silentError: true, ...(signal ? { signal } : {}) } as never);
   return response.data.data || response.data as unknown as DocumentParseResult;
 }
 export async function ensureDocumentParsed(datasetId: string, documentId: string): Promise<DocumentParseResult> {
-  const response = await axiosInstance.post<Envelope<DocumentParseResult>>(`${documentBase(datasetId, documentId)}:ensure-parsed`, {});
+  const response = await axiosInstance.post<Envelope<DocumentParseResult>>(`${documentBase(datasetId, documentId)}:ensure-parsed`, {}, { silentError: true } as never);
   return response.data.data || response.data as unknown as DocumentParseResult;
 }
 export async function retryDocumentParsed(datasetId: string, documentId: string): Promise<void> {

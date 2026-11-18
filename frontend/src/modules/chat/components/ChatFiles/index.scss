@@ -29,6 +29,15 @@
       }
     }
 
+    .chat-files-download {
+      padding: 0;
+      border: 0;
+      background: transparent;
+      font: inherit;
+      cursor: pointer;
+      text-decoration: underline;
+    }
+
     .chat-files-remove {
       position: absolute;
       top: -8px;

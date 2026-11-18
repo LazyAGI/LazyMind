@@ -1,6 +1,7 @@
 function createDesktopBridge(ipcRenderer) {
   return {
     platform: process.platform,
+    openExternal: (url) => ipcRenderer.invoke("lazymind:openExternal", url),
     ...(process.platform === "darwin" ? {
       recordingNativeStart: () => ipcRenderer.invoke("lazymind:recordingNativeStart"),
       recordingNativeStop: (id) => ipcRenderer.invoke("lazymind:recordingNativeStop", id),
@@ -68,6 +69,8 @@ function createDesktopBridge(ipcRenderer) {
     clearObsidianRoot: () => ipcRenderer.invoke("lazymind:clearObsidianRoot"),
     selectExecutable: (target) => ipcRenderer.invoke("lazymind:selectExecutable", target),
     exportDiagnostics: () => ipcRenderer.invoke("lazymind:exportDiagnostics"),
+    localFileAction: (payload) => ipcRenderer.invoke("lazymind:localFileAction", payload),
+    openChatExternal: (url) => ipcRenderer.invoke("lazymind:openChatExternal", url),
     showItemInFolder: (payload) => ipcRenderer.invoke("lazymind:showItemInFolder", payload),
     saveFileAs: (payload) => ipcRenderer.invoke("lazymind:saveFileAs", payload),
     downloadFile: (payload) => ipcRenderer.invoke("lazymind:downloadFile", payload),

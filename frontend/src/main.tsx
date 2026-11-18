@@ -5,6 +5,7 @@ import { createRoot } from "react-dom/client";
 import App from "./App";
 import GlobalErrorBoundary from "./components/GlobalErrorBoundary";
 import "./index.scss";
+import "./components/ExternalLink/index.scss";
 import "./i18n";
 import { installWorkflowEmbedFrameClock } from "./modules/chat/utils/workflowEmbedFrameClock";
 import { installWorkflowEmbedBlobDownloads } from "./modules/chat/utils/workflowEmbedBlobDownload";

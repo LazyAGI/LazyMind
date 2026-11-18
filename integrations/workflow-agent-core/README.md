@@ -33,8 +33,9 @@ as proof of driver ownership.
 Create a coordinator and dispatcher with one shared AbortSignal. Wire host hooks:
 
 1. Before each turn/step, call `beforeTurn`; false means reject automatic entry.
-2. Before tools, call `beforeTool`; a returned reason means deny the call. Use
-   `denial` for synchronous host guards, with the actual caller's handle.
+2. Forward recognized Workflow tools through the original MCP implementation.
+   Normalize operation names with `workflowOperationName`; execution handles and
+   Core admission remain authoritative for mutations.
 3. After successful Workflow tools, call `afterResult`, then `shouldConclude` to
    end the turn when required. Keep the original MCP result successful if only
    post-commit control synchronization failed.
@@ -56,9 +57,19 @@ must act on the supplied handle without silently switching to another session.
 Optional goal hooks adapt a host's autonomous-loop facility; its private goal
 formats and revision handling remain in the host adapter.
 
-DSH is the production adapter. The SDK-free fake adapter in
-`../dsh-workflow/tests/shared-runtime.test.ts` exercises the same shared runtime.
+An `awaiting_user` state may carry `control.input_request`. Show the returned
+questions and wait for an actual user answer; `workflow.input.answer` submits that
+answer against its artifact revision. It does not approve a separate review or
+resume a stopped run. An explicit user turn can answer while automatic turns remain
+paused. Only a subsequent Core control response may admit the next execution.
+
+DSH provides the SDK-hook adapter. Codex has a separate native-session adapter in
+`../codex-workflow` that reuses the shared dispatcher; availability of its native
+control channel must be checked on the installed host. Sharing this library alone
+does not prove that panel-to-host wake or cancellation works on a particular machine.
+The SDK-free adapter in `../dsh-workflow/tests/shared-runtime.test.ts` exercises the
+same coordination and delivery rules without depending on either host SDK.
 Run `pnpm typecheck`, `pnpm test`, and `pnpm bundle` in `../dsh-workflow` to validate
 both the shared library and DSH. See that package's README for deterministic CLI
-archive generation. A second production host still needs its native adapter and
-installation integration.
+archive generation. Additional hosts implement their native adapter and installation
+integration while preserving the same MCP contracts and receipt rules.

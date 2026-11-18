@@ -662,7 +662,7 @@ func TestMarketControlStopDuringImportKeepsTraceableResults(t *testing.T) {
 	for _, kind := range []string{"knowledge_market_install", "knowledge_market_update"} {
 		t.Run(kind, func(t *testing.T) {
 			f := newMarketControlFixture(t)
-			if err := f.db.AutoMigrate(&orm.UserSelectedCloudModel{}, &orm.UserSelectedModel{}, &orm.UserUIPreferences{}, &orm.UserSelectedProvider{}, &orm.UserModelProviderGroupModel{}, &orm.UserModelProviderGroup{}, &orm.UserModelProvider{}); err != nil {
+			if err := f.db.AutoMigrate(&orm.UserReadingPolicy{}, &orm.UserSelectedCloudModel{}, &orm.UserSelectedModel{}, &orm.UserUIPreferences{}, &orm.UserSelectedProvider{}, &orm.UserModelProviderGroupModel{}, &orm.UserModelProviderGroup{}, &orm.UserModelProvider{}); err != nil {
 				t.Fatal(err)
 			}
 			if err := f.db.Model(&orm.Dataset{}).Where("id = ?", "control-dataset").Update("processing_level", "indexed").Error; err != nil {

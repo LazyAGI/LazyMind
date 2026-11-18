@@ -2,7 +2,9 @@ package modelprovider
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -11,6 +13,15 @@ import (
 
 	"lazymind/core/common/orm"
 )
+
+type embeddingCatalogTestProvider struct {
+	catalog CloudModelCatalog
+	err     error
+}
+
+func (provider embeddingCatalogTestProvider) CloudModelCatalog(context.Context) (CloudModelCatalog, error) {
+	return provider.catalog, provider.err
+}
 
 func TestAssessEmbeddingSwitchRequiresMatchingRuntimeFingerprint(t *testing.T) {
 	active := orm.EmbeddingIndexState{
@@ -133,6 +144,9 @@ func TestLegacyEmbeddingChoiceIsUnavailableWhenOldVectorsHaveUnknownIdentity(t *
 	if err := db.Create(&orm.Dataset{ID: "old-kb", KbID: "old-kb", ProcessingLevel: "indexed", BaseModel: orm.BaseModel{CreateUserID: first.CreateUserID, CreatedAt: now, UpdatedAt: now}}).Error; err != nil {
 		t.Fatal(err)
 	}
+	if err := db.Create(&orm.Document{ID: "legacy-doc", DatasetID: "old-kb"}).Error; err != nil {
+		t.Fatal(err)
+	}
 	choice, present, err := ResolveGlobalEmbeddingChoice(t.Context(), db)
 	if err != nil || !present || choice.Phase != "unverified" {
 		t.Fatalf("legacy choice must expose unsigned vector status: %+v present=%t err=%v", choice, present, err)
@@ -196,6 +210,263 @@ func TestSelectedEmbeddingIsUnavailableWhileVectorCleanupIsIncomplete(t *testing
 			ready, err := IsModelReady(t.Context(), db, active.CreateUserID, "embed_main")
 			if err != nil || ready {
 				t.Fatalf("embedding readiness diverged from cleanup phase: ready=%v err=%v", ready, err)
+			}
+		})
+	}
+}
+
+func TestEmbeddingReadinessAndSelectionExposeExactIndexReasons(t *testing.T) {
+	verifiedSignature := "v1:1:" + strings.Repeat("a", 64) + ":" + strings.Repeat("b", 64)
+	tests := []struct {
+		name, phase, signature, activeModelID, activeSource, wantReason string
+		skipSelected                                                    bool
+	}{
+		{
+			name: "unverified identity", phase: "ready", signature: "malformed",
+			activeModelID: "selected", activeSource: "own", wantReason: "index_identity_unverified",
+		},
+		{
+			name: "blank index source", phase: "ready", signature: verifiedSignature,
+			activeModelID: "selected", wantReason: "index_identity_unverified", skipSelected: true,
+		},
+		{
+			name: "unknown index source", phase: "ready", signature: verifiedSignature,
+			activeModelID: "selected", activeSource: "future_source", wantReason: "index_identity_unverified", skipSelected: true,
+		},
+		{
+			name: "cleanup in progress", phase: "clearing", signature: verifiedSignature,
+			activeModelID: "selected", activeSource: "own", wantReason: "index_cleanup_in_progress",
+		},
+		{
+			name: "cleanup incomplete", phase: "cleanup_failed", signature: verifiedSignature,
+			activeModelID: "selected", activeSource: "own", wantReason: "index_cleanup_incomplete",
+		},
+		{
+			name: "strictly cleared", phase: "cleared", wantReason: "index_cleared",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			db, _, _, selectedModel := setupProbeTest(t, &orm.UserSelectedModel{}, &orm.EmbeddingIndexState{})
+			if err := db.Model(&selectedModel).Updates(map[string]any{
+				"model_type": "embed", "name": "Selected Embed", "provider_name": "OpenAI",
+			}).Error; err != nil {
+				t.Fatal(err)
+			}
+			activeModelID := tc.activeModelID
+			if activeModelID != "" {
+				activeModelID = selectedModel.ID
+			}
+			now := time.Now().UTC()
+			if err := db.Create(&orm.UserSelectedModel{
+				UserID: selectedModel.CreateUserID, ModelKey: "embed_main", UserModelProviderGroupModelID: selectedModel.ID,
+				CreatedAt: now, UpdatedAt: now,
+			}).Error; err != nil {
+				t.Fatal(err)
+			}
+			if err := db.Create(&orm.EmbeddingIndexState{
+				Scope: globalEmbeddingScope, ActiveModelID: activeModelID, ActiveSource: tc.activeSource,
+				ActiveModelName:    map[bool]string{true: "Selected Embed"}[activeModelID != ""],
+				ActiveProviderName: map[bool]string{true: "OpenAI"}[activeModelID != ""],
+				Signature:          tc.signature, Phase: tc.phase, Generation: 1, UpdatedAt: now,
+			}).Error; err != nil {
+				t.Fatal(err)
+			}
+
+			readyReq := httptest.NewRequest(http.MethodGet, "/model_providers/model-ready?model_type=embed_main", nil)
+			readyReq.Header.Set("X-User-Id", selectedModel.CreateUserID)
+			readyRec := httptest.NewRecorder()
+			GetModelReady(readyRec, readyReq)
+			var readyBody struct {
+				Data modelReadyResponse `json:"data"`
+			}
+			if err := json.Unmarshal(readyRec.Body.Bytes(), &readyBody); err != nil {
+				t.Fatal(err)
+			}
+			if readyRec.Code != http.StatusOK || readyBody.Data.Ready || readyBody.Data.Reason != tc.wantReason {
+				t.Fatalf("model-ready reason = %d %+v, want %q", readyRec.Code, readyBody.Data, tc.wantReason)
+			}
+			if tc.skipSelected {
+				status, err := loadEmbeddingIndexStatus(t.Context(), db)
+				if err != nil || status.Status != "unknown" || status.IndexIdentity != "legacy_unknown" {
+					t.Fatalf("unsupported source status = %+v err=%v", status, err)
+				}
+				return
+			}
+
+			selectedReq := httptest.NewRequest(http.MethodGet, "/model_providers/selected", nil)
+			selectedReq.Header.Set("X-User-Id", selectedModel.CreateUserID)
+			selectedRec := httptest.NewRecorder()
+			GetSelectedModels(selectedRec, selectedReq)
+			var selectedBody struct {
+				Data selectedModelsResponse `json:"data"`
+			}
+			if err := json.Unmarshal(selectedRec.Body.Bytes(), &selectedBody); err != nil {
+				t.Fatal(err)
+			}
+			if tc.wantReason == "index_cleared" {
+				if selectedRec.Code != http.StatusOK || len(selectedBody.Data.Selections) != 0 {
+					t.Fatalf("cleared selection shadows model catalog: %+v", selectedBody)
+				}
+				return
+			}
+			if selectedRec.Code != http.StatusOK || len(selectedBody.Data.Selections) != 1 || selectedBody.Data.Selections[0].ModelID != selectedModel.ID || selectedBody.Data.Selections[0].Availability != "unavailable" || selectedBody.Data.Selections[0].UnavailableReason != tc.wantReason {
+				t.Fatalf("selected reason = %d %+v, want retained model with %q", selectedRec.Code, selectedBody.Data.Selections, tc.wantReason)
+			}
+		})
+	}
+}
+
+func TestEmbeddingReadinessPreservesRuntimeFailureReasonsForVerifiedIndex(t *testing.T) {
+	verifiedSignature := "v1:1:" + strings.Repeat("a", 64) + ":" + strings.Repeat("b", 64)
+	t.Run("model unavailable", func(t *testing.T) {
+		db, _, _, model := setupProbeTest(t, &orm.EmbeddingIndexState{})
+		if err := db.Create(&orm.EmbeddingIndexState{
+			Scope: globalEmbeddingScope, ActiveModelID: "missing", ActiveSource: "own",
+			Signature: verifiedSignature, Phase: "ready", Generation: 1, UpdatedAt: time.Now().UTC(),
+		}).Error; err != nil {
+			t.Fatal(err)
+		}
+		ready, present, err := globalEmbeddingReadiness(t.Context(), db, model.CreateUserID)
+		if err != nil || !present || ready.Ready || ready.Reason != "model_unavailable" {
+			t.Fatalf("verified index changed missing-model reason: %+v present=%t err=%v", ready, present, err)
+		}
+	})
+	t.Run("credentials unavailable", func(t *testing.T) {
+		db, parent, group, model := setupProbeTest(t, &orm.EmbeddingIndexState{})
+		if err := db.Model(&model).Updates(map[string]any{"model_type": "embed", "enabled": true}).Error; err != nil {
+			t.Fatal(err)
+		}
+		if err := db.Model(&group).Updates(map[string]any{"api_key": ""}).Error; err != nil {
+			t.Fatal(err)
+		}
+		if err := db.Model(&parent).Updates(map[string]any{"is_custom": false, "active_key_initialized": true, "active_key_id": ""}).Error; err != nil {
+			t.Fatal(err)
+		}
+		if err := db.Create(&orm.EmbeddingIndexState{
+			Scope: globalEmbeddingScope, ActiveModelID: model.ID, ActiveSource: "own",
+			Signature: verifiedSignature, Phase: "ready", Generation: 1, UpdatedAt: time.Now().UTC(),
+		}).Error; err != nil {
+			t.Fatal(err)
+		}
+		ready, present, err := globalEmbeddingReadiness(t.Context(), db, model.CreateUserID)
+		if err != nil || !present || ready.Ready || ready.Reason != "credentials_unavailable" {
+			t.Fatalf("verified index changed credential reason: %+v present=%t err=%v", ready, present, err)
+		}
+	})
+}
+
+func TestLegacyUnknownWithoutDisplaySelectionBlocksStaticReadiness(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		historical bool
+		wantReady  bool
+		wantReason string
+	}{
+		{name: "historical vectors", historical: true, wantReason: "index_identity_unverified"},
+		{name: "empty index", wantReady: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			db, _, _, model := setupProbeTest(t,
+				&orm.UserSelectedModel{}, &orm.UserSelectedCloudModel{},
+				&orm.EmbeddingIndexState{}, &orm.Dataset{}, &orm.DocumentProcessingState{})
+			if tc.historical {
+				now := time.Now().UTC()
+				if err := db.Create(&orm.Dataset{
+					ID: "legacy-kb", KbID: "legacy-kb", ProcessingLevel: "indexed",
+					BaseModel: orm.BaseModel{CreateUserID: model.CreateUserID, CreatedAt: now, UpdatedAt: now},
+				}).Error; err != nil {
+					t.Fatal(err)
+				}
+				if err := db.Create(&orm.DocumentProcessingState{
+					DatasetID: "legacy-kb", DocumentID: "legacy-doc", IndexStatus: "succeeded", UpdatedAt: now,
+				}).Error; err != nil {
+					t.Fatal(err)
+				}
+			}
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path != "/api/model/role_type" || r.URL.Query().Get("role") != "embed_main" {
+					t.Errorf("unexpected role request: %s", r.URL)
+				}
+				_, _ = w.Write([]byte(`{"type":"embed_main","is_dynamic":false}`))
+			}))
+			defer server.Close()
+			t.Setenv("LAZYMIND_CHAT_SERVICE_URL", server.URL)
+			roleTypeCache.Delete("embed_main")
+			t.Cleanup(func() { roleTypeCache.Delete("embed_main") })
+
+			index := getEmbeddingIndexStatus(t)
+			readyReq := httptest.NewRequest(http.MethodGet, "/model_providers/model-ready?model_type=embed_main", nil)
+			readyReq.Header.Set("X-User-Id", model.CreateUserID)
+			readyRec := httptest.NewRecorder()
+			GetModelReady(readyRec, readyReq)
+			var readyBody struct {
+				Data modelReadyResponse `json:"data"`
+			}
+			if err := json.Unmarshal(readyRec.Body.Bytes(), &readyBody); err != nil {
+				t.Fatal(err)
+			}
+			ready, err := IsModelReady(t.Context(), db, model.CreateUserID, "embed_main")
+			if err != nil {
+				t.Fatal(err)
+			}
+			choice, present, err := ResolveGlobalEmbeddingChoice(t.Context(), db)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if readyRec.Code != http.StatusOK || readyBody.Data.Ready != tc.wantReady || readyBody.Data.Reason != tc.wantReason || ready != tc.wantReady {
+				t.Fatalf("readiness bypassed index evidence: index=%+v http=%d %+v direct=%t", index, readyRec.Code, readyBody.Data, ready)
+			}
+			if tc.historical {
+				if index.IndexIdentity != "legacy_unknown" || !present || choice.ModelID != "" || choice.indexState.ReadinessReason != tc.wantReason {
+					t.Fatalf("legacy evidence was dropped without a display choice: index=%+v choice=%+v present=%t", index, choice, present)
+				}
+			} else if index.IndexIdentity != "empty" || present {
+				t.Fatalf("empty index fabricated a placeholder choice: index=%+v choice=%+v present=%t", index, choice, present)
+			}
+		})
+	}
+}
+
+func TestClearedCloudSelectionDoesNotShadowAvailableModels(t *testing.T) {
+	tests := []struct {
+		name     string
+		provider CloudCatalogProvider
+	}{
+		{name: "unknown catalog"},
+		{name: "network failure", provider: embeddingCatalogTestProvider{err: errors.New("offline")}},
+		{name: "known unavailable catalog", provider: embeddingCatalogTestProvider{catalog: CloudModelCatalog{Known: true, Reason: "cloud_session_unavailable"}}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			SetCloudCatalogProvider(tc.provider)
+			t.Cleanup(func() { SetCloudCatalogProvider(nil) })
+			db, _, _, model := setupProbeTest(t, &orm.UserSelectedModel{}, &orm.UserSelectedCloudModel{}, &orm.EmbeddingIndexState{})
+			now := time.Now().UTC()
+			if err := db.Create(&orm.EmbeddingIndexState{
+				Scope: globalEmbeddingScope, Phase: "cleared", Generation: 2, UpdatedAt: now,
+			}).Error; err != nil {
+				t.Fatal(err)
+			}
+			if err := db.Create(&orm.UserSelectedCloudModel{
+				UserID: model.CreateUserID, ModelType: "embed_main", PublicModelKey: "cloud-embed-saved",
+				DisplayNameSnapshot: "Saved Cloud Embed", CreatedAt: now, UpdatedAt: now,
+			}).Error; err != nil {
+				t.Fatal(err)
+			}
+
+			req := httptest.NewRequest(http.MethodGet, "/model_providers/selected", nil)
+			req.Header.Set("X-User-Id", model.CreateUserID)
+			rec := httptest.NewRecorder()
+			GetSelectedModels(rec, req)
+			var body struct {
+				Data selectedModelsResponse `json:"data"`
+			}
+			if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+				t.Fatal(err)
+			}
+			if rec.Code != http.StatusOK || len(body.Data.Selections) != 0 {
+				t.Fatalf("cleared index retained a disabled selection: status=%d selections=%+v", rec.Code, body.Data.Selections)
 			}
 		})
 	}
@@ -302,7 +573,17 @@ func TestGlobalEmbeddingSelectionOnlySwitchesWithVerifiedCompatibleVectors(t *te
 		}).Error; err != nil {
 		t.Fatal(err)
 	}
-	previewReq = httptest.NewRequest(http.MethodPost, "/embedding/switch-preview", strings.NewReader(`{"model_id":"`+third.ID+`","source":"own"}`))
+	selectionReq := httptest.NewRequest(http.MethodGet, "/model_providers/selected", nil)
+	selectionReq.Header.Set("X-User-Id", first.CreateUserID)
+	selectionRec := httptest.NewRecorder()
+	GetSelectedModels(selectionRec, selectionReq)
+	var selectionBody struct {
+		Data selectedModelsResponse `json:"data"`
+	}
+	if err := json.Unmarshal(selectionRec.Body.Bytes(), &selectionBody); err != nil || selectionRec.Code != 200 || len(selectionBody.Data.Selections) != 0 {
+		t.Fatalf("clear must leave the original model selectable: %s err=%v", selectionRec.Body.String(), err)
+	}
+	previewReq = httptest.NewRequest(http.MethodPost, "/embedding/switch-preview", strings.NewReader(`{"model_id":"`+second.ID+`","source":"own"}`))
 	previewReq.Header.Set("X-User-Id", first.CreateUserID)
 	previewReq.Header.Set("X-User-Role", "admin")
 	previewRec = httptest.NewRecorder()
@@ -310,11 +591,11 @@ func TestGlobalEmbeddingSelectionOnlySwitchesWithVerifiedCompatibleVectors(t *te
 	if err := json.Unmarshal(previewRec.Body.Bytes(), &preview); err != nil || previewRec.Code != http.StatusOK || preview.Data.Outcome != "empty" || !preview.Data.CanSwitch {
 		t.Fatalf("post-clear preview = %d %s (%v)", previewRec.Code, previewRec.Body.String(), err)
 	}
-	if rec := selectModel(third.ID); rec.Code != http.StatusOK {
+	if rec := selectModel(second.ID); rec.Code != http.StatusOK {
 		t.Fatalf("first post-clear selection = %d: %s", rec.Code, rec.Body.String())
 	}
 	if err := db.Take(&state, "scope = ?", globalEmbeddingScope).Error; err != nil ||
-		state.ActiveModelID != third.ID || state.Signature == "" || state.Phase != "ready" {
+		state.ActiveModelID != second.ID || state.Signature == "" || state.Phase != "ready" {
 		t.Fatalf("post-clear selection did not establish the new identity: %+v %v", state, err)
 	}
 	_ = parent

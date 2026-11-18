@@ -1,7 +1,70 @@
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, field_validator
+from pydantic_core import PydanticCustomError
+
+
+class GitHubStarBody(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    connection_id: str = Field(min_length=1, max_length=64)
+    expected_account_id: str = Field(min_length=1, max_length=64, pattern=r'^[0-9]+$')
+    confirmed: StrictBool = Field(json_schema_extra={'const': True})
+
+    @field_validator('confirmed')
+    @classmethod
+    def require_confirmation(cls, value):
+        if value is not True:
+            raise PydanticCustomError('confirmation_required', 'Confirm the GitHub Star operation')
+        return value
+
+
+class GitHubStarAccount(BaseModel):
+    connection_id: str
+    account_id: str
+    login: str
+    state: Literal['starred', 'not_starred', 'unknown']
+    eligible: bool
+
+
+class GitHubStarStatus(BaseModel):
+    repository: str
+    accounts: list[GitHubStarAccount]
+    can_star: bool = False
+
+
+class GitHubStarResult(BaseModel):
+    repository: str
+    connection_id: str
+    account_id: str
+    login: str
+    state: Literal['starred']
+    write_performed: bool
+
+
+class GitHubStarLocalBody(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    confirmed: StrictBool = Field(json_schema_extra={'const': True})
+
+    @field_validator('confirmed')
+    @classmethod
+    def require_confirmation(cls, value):
+        if value is not True:
+            raise PydanticCustomError('confirmation_required', 'Confirm the GitHub Star operation')
+        return value
+
+
+class GitHubStarLocalResult(BaseModel):
+    repository: str
+    state: Literal['starred', 'connection_required']
+    account_id: str
+    login: str
+    write_performed: bool
+
+
+class GitHubStarLocalCapability(BaseModel):
+    repository: str
+    eligible: bool
 
 
 class CloudOAuthAuthorizeURLBody(BaseModel):

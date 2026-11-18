@@ -2,7 +2,7 @@
 /**
  * Minimal HTTP wrapper around html_to_pptx.mjs for the ppt-export compose service.
  *
- * POST /export  JSON: { "deck_dir": "/data/subagent/.../ppt_decks/<id>" }
+ * POST /export  JSON: { "deck_dir": "/data/subagent/.../ppt_decks/<id>", "embed_fonts": true }
  * GET  /health
  *
  * Returns the last JSON status line from html_to_pptx.mjs.
@@ -33,9 +33,11 @@ function readJson(req) {
   });
 }
 
-function runExport(deckDir) {
+function runExport(deckDir, embedFonts) {
   return new Promise((resolveResult) => {
-    const child = spawn(process.execPath, [CLI, '--deck-dir', deckDir, '--force'], {
+    const args = [CLI, '--deck-dir', deckDir, '--force'];
+    if (!embedFonts) args.push('--no-embed-fonts');
+    const child = spawn(process.execPath, args, {
       cwd: __dirname,
       env: process.env,
       stdio: ['ignore', 'pipe', 'pipe'],
@@ -91,7 +93,7 @@ const server = createServer(async (req, res) => {
         res.end(JSON.stringify({ status: 'failed', error: `deck_dir not found: ${deckDir}` }));
         return;
       }
-      const payload = await runExport(deckDir);
+      const payload = await runExport(deckDir, body.embed_fonts !== false);
       // html_to_pptx.mjs emits {success:true,...}; normalize for callers.
       if (payload.success === true && !payload.status) {
         payload.status = 'ok';

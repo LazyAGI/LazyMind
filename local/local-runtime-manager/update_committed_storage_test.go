@@ -176,7 +176,11 @@ func assertCommittedStorage(t *testing.T, cfg RuntimeConfig, paths RuntimePaths,
 	if cfg.UpdateBootstrap != nil {
 		t.Error("completed storage re-sealed bootstrap")
 	}
-	for family, env := range map[string][]string{"core-state": coreServiceEnv(cfg, paths), "scan-state": scanControlPlaneEnv(cfg, paths)} {
+	core, err := coreServiceEnv(cfg, paths)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for family, env := range map[string][]string{"core-state": core, "scan-state": scanControlPlaneEnv(cfg, paths)} {
 		if got := committedEnvValue(env, "LAZYMIND_STATE_SQLITE_PATH"); got != want.Databases[family] {
 			t.Errorf("%s actual service env=%q; want %q", family, got, want.Databases[family])
 		}

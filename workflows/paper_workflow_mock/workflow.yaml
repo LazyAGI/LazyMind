@@ -17,6 +17,22 @@ slots:
   type: text
   cardinality: single
 runtime:
+  execution:
+    version: '1'
+    skills:
+    - scenario/execution.md
+    constraints:
+    - Follow the shared state.yml step specification, declared output schemas and acceptance criteria; preserve the
+      user request and bound input revisions.
+    - Validate actual artifacts before completion, honor questions and review pauses, and report missing capabilities
+      without fabricating output.
+    steps:
+      acknowledge:
+        tools:
+        - name: academic_context
+          source: package
+        - name: academic_read_paper
+          source: package
   publisher_owned_slots: [handoff_receipt]
   trigger_inputs:
   - task_context

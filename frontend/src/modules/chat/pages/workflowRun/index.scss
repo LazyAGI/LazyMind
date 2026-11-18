@@ -12,6 +12,19 @@ html.workflow-run-embed #app {
 }
 
 .workflow-run {
+  &__heading {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex: 0 0 auto;
+    h1 { font-size: 20px; margin: 0; overflow-wrap: anywhere; }
+  }
+
+  &.workflow-run--results {
+    padding: 0;
+    > .ask-wizard { max-height: 45%; flex: 0 1 auto; overflow: auto; margin: 0; }
+  }
+
   &--embedded {
     display: flex;
     flex: 1 1 auto;
@@ -55,6 +68,17 @@ html.workflow-run-embed #app {
 
   .workflow-panel__header, .workflow-panel__tabs, .workflow-panel__footer,
   .workflow-panel__approval-bar { flex-shrink: 0; }
+
+  // Bound iframe tabs so document surfaces receive the available scroll height.
+  html.workflow-run-embed & {
+    .workflow-panel__body { overflow: hidden; }
+    .workflow-panel__body > [role='tabpanel']:not([hidden]) { overflow: hidden; flex: 1 1 0px; }
+    // Analysis progress and artifacts share the tab's scroll viewport.
+    .workflow-panel__body > .workflow-panel__f4-tab[role='tabpanel']:not([hidden]) {
+      overflow: hidden auto;
+      > .workflow-panel__tab-content { flex: none; overflow: visible; }
+    }
+  }
 }
 
 // Scoped to the external presentation opt-in; native panels retain upstream styles.
@@ -88,4 +112,88 @@ html.workflow-run-embed #app {
 @keyframes workflow-external-progress { from { transform: translateX(0); } to { transform: translateX(230%); } }
 @media (prefers-reduced-motion: reduce) {
   .workflow-external-activity__progress--indeterminate > span { animation: none; }
+}
+
+// Reuse the native chat message styles, with a bounded request above the workbench.
+.workflow-run .workflow-request-message.chat-chat-container {
+  flex: 0 1 auto;
+  height: auto;
+  max-height: 35%;
+  min-height: 80px;
+  padding: 16px 24px 0;
+  overflow: auto;
+  align-items: stretch;
+  .chat-box { flex: 0 0 auto; overflow: visible; }
+  .chat-item { width: min(100%, 1100px); margin: 0 auto; }
+  .user-wrap { min-width: 0; }
+  .chat-user-mention-text { overflow-wrap: anywhere; }
+}
+@media (max-width: 600px) {
+  .workflow-run .workflow-request-message.chat-chat-container {
+    padding: 12px 8px 0;
+    .user-message-row { flex-wrap: wrap; }
+    .chat-time { order: 1; }
+  }
+}
+
+.workflow-run__content,
+.workflow-run__canvas {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+
+.workflow-run__canvas > .ask-wizard {
+  flex: 0 1 auto;
+  max-height: 45%;
+  overflow: auto;
+}
+
+.workflow-run__workspace {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) clamp(280px, 28%, 380px);
+  flex: 1 1 0;
+  min-height: 0;
+  gap: 12px;
+}
+
+.workflow-run.workflow-run--workbench {
+  padding: 12px;
+
+  .workflow-run__canvas {
+    overflow: hidden;
+  }
+
+  .workflow-run__rail {
+    min-width: 0;
+    min-height: 0;
+    overflow: hidden;
+    border: 1px solid #e3e9f3;
+    border-radius: 12px;
+    background: #fff;
+
+    > .ant-tabs { height: 100%; }
+    .ant-tabs-nav { flex: none; margin: 0; padding: 0 16px; }
+    .ant-tabs-content-holder,
+    .ant-tabs-content,
+    .ant-tabs-tabpane { min-height: 0; height: 100%; }
+    .ant-tabs-tabpane { overflow: auto; padding: 12px; }
+  }
+
+  .workflow-request-message.chat-chat-container {
+    height: auto;
+    min-height: 0;
+    max-height: none;
+    padding: 0;
+    overflow: visible;
+  }
+}
+
+@media (max-width: 760px) {
+  .workflow-run__workspace {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(260px, 1fr) minmax(160px, 35%);
+  }
 }

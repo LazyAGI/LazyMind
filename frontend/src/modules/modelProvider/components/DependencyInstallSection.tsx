@@ -1,3 +1,4 @@
+import NodeDependencyCard from "./NodeDependencyCard";
 import PythonComponentDependencies from "./PythonComponentDependencies";
 import { useCallback, useEffect, useMemo, useState, type ChangeEvent } from "react";
 import {
@@ -156,6 +157,7 @@ export default function DependencyInstallSection() {
     return status.installed ? ("configured" as const) : ("missing" as const);
   }, [status]);
   const normalizedSearchValue = searchValue.trim().toLowerCase();
+  const shouldShowNodeCard = !normalizedSearchValue || `${t("nodeDependency.title")} ${t("nodeDependency.summary")}`.toLowerCase().includes(normalizedSearchValue);
   const shouldShowFFmpegCard = useMemo(() => {
     if (!normalizedSearchValue) {
       return true;
@@ -408,6 +410,7 @@ export default function DependencyInstallSection() {
 
         <Spin spinning={loading && !status}>
           <div className="model-provider-service-grid">
+            <NodeDependencyCard visible={shouldShowNodeCard} />
             {shouldShowFFmpegCard ? (
               <button
                 className="model-provider-service-card tone-violet"
@@ -495,7 +498,7 @@ export default function DependencyInstallSection() {
               </button>
             ) : null}
           </div>
-          {!loading && !loadError && !shouldShowFFmpegCard && !shouldShowPptCard && !shouldShowBrowserCard ? (
+          {!loading && !loadError && !shouldShowFFmpegCard && !shouldShowPptCard && !shouldShowBrowserCard && !shouldShowNodeCard ? (
             <div className="model-provider-category-empty">
               <Empty description={t("modelProvider.external.noMatchedServices")} image={Empty.PRESENTED_IMAGE_SIMPLE} />
             </div>

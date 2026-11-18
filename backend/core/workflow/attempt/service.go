@@ -38,6 +38,7 @@ type protocolError string
 func (e protocolError) Error() string { return string(e) }
 
 type Config struct {
+	OnClaim       func(context.Context, *gorm.DB, string) error
 	LeaseDuration time.Duration
 }
 
@@ -272,9 +273,21 @@ func (s *Service) claimCandidate(ctx context.Context, candidate orm.WorkflowSess
 		if result.RowsAffected != 1 {
 			return ErrNotClaimable
 		}
+		// Return the stored precision on the first claim too, so retrying a
+		// claim does not change its deadline on PostgreSQL.
+		var stored orm.WorkflowSessionStep
+		if err := tx.Select("lease_expires_at").First(&stored, "id = ?", candidate.ID).Error; err != nil {
+			return err
+		}
+		expires = *stored.LeaseExpiresAt
 		if err := tx.Model(&orm.WorkflowOutbox{}).Where("attempt_id = ? AND status IN ('pending','claimed')", candidate.ID).
 			Updates(map[string]any{"status": "claimed", "updated_at": now}).Error; err != nil {
 			return err
+		}
+		if s.config.OnClaim != nil {
+			if err := s.config.OnClaim(ctx, tx, candidate.ID); err != nil {
+				return err
+			}
 		}
 		// A worker claim is not receipt by the external controller. Keep its
 		// notification pending until the controller observes it through MCP.
@@ -349,16 +362,25 @@ func (s *Service) Progress(ctx context.Context, attemptID, token string, progres
 		if err := tx.Where("id = ?", attemptID).First(&row).Error; err != nil {
 			return err
 		}
-		duplicate, err := persistPublicDisplay(tx, row, display, now)
+		automatic := display != nil && display.EventKey == PaperAutoEventKey
+		duplicate, err := persistPublicDisplay(tx, row, display, progress, now)
 		if duplicate {
 			taskdisplay.Observe(ctx, taskdisplay.EventDuplicate, 0, 1)
 		}
 		if err != nil || duplicate {
 			return err
 		}
-		if err := tx.Model(&row).Updates(map[string]any{"status": "running", "progress_json": progress, "updated_at": now}).Error; err != nil {
+		storedProgress := progress
+		if automatic {
+			var envelope map[string]json.RawMessage
+			_ = json.Unmarshal(progress, &envelope)
+			envelope["public_display"], _ = json.Marshal(display)
+			storedProgress, _ = json.Marshal(envelope)
+		}
+		if err := tx.Model(&row).Updates(map[string]any{"status": "running", "progress_json": storedProgress, "updated_at": now}).Error; err != nil {
 			return err
 		}
+		// Retain the original request for replay detection after server allocation.
 		return appendEvent(tx, row, "", "attempt.progress", progress, now)
 	})
 }

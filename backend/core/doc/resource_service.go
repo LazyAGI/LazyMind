@@ -23,7 +23,6 @@ type ResourceService struct {
 	submitReparse func(context.Context, DatasetCatalogCaller, string, string) (StartTaskResult, error)
 	db            *gorm.DB
 	budget        ResourceBudget
-	sourceAccess  func(context.Context, DatasetCatalogCaller, string, string) error
 	provision     func(context.Context, DatasetCatalogCaller, *orm.Dataset) error
 	originals     *OriginalService
 }
@@ -45,16 +44,13 @@ func NewResourceService(d ResourceServiceDeps) (*ResourceService, error) {
 	if d.Budget.CopyBytesPerSecond <= 0 {
 		d.Budget.CopyBytesPerSecond = defaults.CopyBytesPerSecond
 	}
-	if d.SourceAccess == nil {
-		d.SourceAccess = strictResourceSourceAccess
-	}
 	if d.ProvisionKnowledge == nil {
 		d.ProvisionKnowledge = provisionResourceKnowledge
 	}
 	if d.SubmitReparse == nil {
 		d.SubmitReparse = SubmitReparseTask
 	}
-	return &ResourceService{db: d.DB, budget: d.Budget, sourceAccess: d.SourceAccess, provision: d.ProvisionKnowledge, originals: d.Originals, lazyDB: d.LazyDB, submitReparse: d.SubmitReparse}, nil
+	return &ResourceService{db: d.DB, budget: d.Budget, provision: d.ProvisionKnowledge, originals: d.Originals, lazyDB: d.LazyDB, submitReparse: d.SubmitReparse}, nil
 }
 func resourceErr(code, message string) *ResourceError {
 	return &ResourceError{Code: code, Message: message}
@@ -76,31 +72,14 @@ func resourceAccount(c DatasetCatalogCaller) error {
 	}
 	return resourceErr("FORBIDDEN", "document.write permission required")
 }
-func strictResourceSourceAccess(ctx context.Context, c DatasetCatalogCaller, id, action string) error {
-	items, ok := scanSourceAccessByDatasetForCaller(ctx, c, []string{id}, action)
-	if !ok {
-		return resourceErr("UNAVAILABLE", "source permission service unavailable")
-	}
-	item, ok := items[id]
-	if !ok {
-		return resourceErr("UNAVAILABLE", "source permission result missing")
-	}
-	if item.Exists && !item.Allowed {
-		return resourceErr("FORBIDDEN", "source does not allow requested action")
-	}
-	return nil
-}
 
-// ResolveResourceDataset uses the caller's current ACL and a strict source-policy check.
+// ResolveResourceDataset uses the caller's current tenant and knowledge-base ACL.
 func ResolveResourceDataset(ctx context.Context, tx *gorm.DB, c DatasetCatalogCaller, id, action string) (orm.Dataset, error) {
 	ds, err := resolveResourceDatasetACL(ctx, tx, c, id, action)
-	if err != nil {
-		return ds, err
+	if err == nil && resourceTransaction(tx) {
+		err = resourcePreparedPolicy(tx, c, id, action)
 	}
-	if resourceTransaction(tx) {
-		return ds, resourcePreparedPolicy(tx, c, id, action)
-	}
-	return ds, strictResourceSourceAccess(ctx, c, id, action)
+	return ds, err
 }
 func resolveResourceDatasetACL(ctx context.Context, tx *gorm.DB, c DatasetCatalogCaller, id, action string) (orm.Dataset, error) {
 	var ds orm.Dataset
@@ -134,7 +113,10 @@ func (s *ResourceService) dataset(ctx context.Context, tx *gorm.DB, op ResourceO
 	if err != nil {
 		return ds, err
 	}
-	return ds, s.checkSource(ctx, tx, op.Caller, id, action)
+	if resourceTransaction(tx) {
+		return ds, resourcePreparedPolicy(tx, op.Caller, id, action)
+	}
+	return ds, nil
 }
 func resourceHash(v any) string {
 	b, _ := json.Marshal(v)
@@ -166,7 +148,7 @@ func (s *ResourceService) mutate(ctx context.Context, op ResourceOperationContex
 		}
 	}
 	ctx = s.prepareGroups(ctx, op.Caller, requests)
-	ctx, err = prepareResourceAuthorization(ctx, op.Caller, requests, s.sourceAccess)
+	ctx, err = PrepareResourceAuthorization(ctx, op.Caller, requests)
 	if err != nil {
 		return out, err
 	}

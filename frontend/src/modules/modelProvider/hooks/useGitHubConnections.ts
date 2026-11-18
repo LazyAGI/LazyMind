@@ -102,10 +102,10 @@ export function useGitHubConnections(onChanged: (items: CloudConnectionResponse[
     }
   }
 
-  function finish(status: string, key = "") {
+  function finish(status: string, key = "", connectionId = "") {
     clearRecovery(attempt.current?.body.attempt_id);
     stopPolling(); busy.current = false; attempt.current = null;
-    setSession({ session_id: "", status }); setNotice(key); setBrowserBlocked(false); setRetryCreate(false);
+    setSession({ session_id: "", status, ...(connectionId ? { connection_id: connectionId } : {}) }); setNotice(key); setBrowserBlocked(false); setRetryCreate(false);
   }
 
   async function persist(version: number) {
@@ -158,7 +158,7 @@ export function useGitHubConnections(onChanged: (items: CloudConnectionResponse[
     attempt.current.sessionId = value.session_id;
     if (value.status === "COMPLETED") {
       if (!value.connection_id) { finish("FAILED", "failed"); return; }
-      finish("COMPLETED");
+      finish("COMPLETED", "", value.connection_id);
       const items = await refresh();
       if (current(version) && !items.some(item => item.connection_id === value.connection_id && item.status === "ACTIVE")) {
         setNotice("refreshFailed");

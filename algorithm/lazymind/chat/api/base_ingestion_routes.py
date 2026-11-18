@@ -1,4 +1,5 @@
 from typing import Annotated, Optional
+import logging
 
 from fastapi import APIRouter, Header, HTTPException
 from pydantic import BaseModel, Field
@@ -6,7 +7,7 @@ from starlette.concurrency import run_in_threadpool
 
 from lazymind.chat.api.knowledge_search_routes import INTERNAL_TOKEN_HEADER, require_internal_token
 from lazymind.config import config
-from lazymind.common.base_ingestion import ARTIFACT_SUFFIX, prepare_document
+from lazymind.common.base_ingestion import ARTIFACT_SUFFIX, DocumentContentError, prepare_document
 
 from lazymind.parsing.service.embedding_reset import IndexBusy
 
@@ -28,8 +29,12 @@ async def prepare(
         data = await run_in_threadpool(_prepare_guarded, request)
     except IndexBusy:
         raise HTTPException(409, detail={'code': 'INDEX_BUSY'}) from None
-    except (ValueError, OSError) as exc:
-        raise HTTPException(422, detail=str(exc)) from None
+    except DocumentContentError as exc:
+        raise HTTPException(422, detail={'code': exc.code, 'message': str(exc)}) from None
+    except OSError:
+        raise HTTPException(503, detail={'code': 'READER_UNAVAILABLE'}) from None
+    except ValueError:
+        raise HTTPException(422, detail={'code': 'DOCUMENT_READ_FAILED'}) from None
     return {'artifact_ref': request.source_path + ARTIFACT_SUFFIX,
             'source_sha256': data['source_sha256'],
             'parser_version': data['parser_version'], 'chunker_version': data['chunker_version']}
@@ -52,10 +57,10 @@ async def clear_knowledge_chunks(
     except IndexBusy:
         raise HTTPException(409, detail={'code': 'INDEX_BUSY'}) from None
     except Exception:
+        logging.getLogger(__name__).exception('Text-vector cleanup failed')
         raise HTTPException(503, detail={'code': 'INDEX_CLEANUP_FAILED'}) from None
 
 
 def _prepare_guarded(request):
-    from lazymind.parsing.service.embedding_reset import index_operation
-    with index_operation(request.embedding_generation):
-        return prepare_document(request.source_path, config['shared_upload_dir'])
+    # This only writes a retained parse artifact, never vectors.
+    return prepare_document(request.source_path, config['shared_upload_dir'])

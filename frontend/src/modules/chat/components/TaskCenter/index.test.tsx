@@ -8,7 +8,6 @@ import TaskCenter from "./index";
 import type { OrdinaryTaskView } from "@/modules/chat/types/ordinaryTask";
 import { ordinary } from "./ordinaryTestFixtures";
 import type { ChatModelSwitchRecord } from "@/api/generated/core-client";
-import { useWorkflowStore } from "@/modules/chat/store/workflowPanel";
 import { workflowUICacheKey } from '@/modules/chat/utils/workflowUIIdentity';
 
 vi.mock("@/modules/knowledge/components/FileViewer", () => ({ default: () => <div>File viewer</div> }));

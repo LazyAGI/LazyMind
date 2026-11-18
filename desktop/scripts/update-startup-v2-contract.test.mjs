@@ -75,6 +75,32 @@ test("target startup activates, starts sealed, verifies both peers, then complet
     "normal runtime must receive the startup transaction before its first loop");
 });
 
+test("target startup waits for runtime guard readiness before verifying", async t => {
+  const f = fixture();
+  let acknowledge;
+  const guardReady = new Promise(resolve => { acknowledge = resolve; });
+  t.after(acknowledge);
+  f.parameters.onRuntimeStarted = () => guardReady;
+
+  const attempt = prepare(f);
+  await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(f.calls.map(call => call.action), ["inspect", "activate", "up"]);
+  acknowledge();
+  assert.equal((await attempt).allowed, true);
+  assert.deepEqual(f.calls.map(call => call.action), ["inspect", "activate", "up", "verify", "complete"]);
+});
+
+test("target startup stops the sealed runtime if the guard cannot start", async () => {
+  const f = fixture();
+  const error = new Error("Desktop runtime guard exited before it was ready");
+  const guardReady = Promise.reject(error);
+  void guardReady.catch(() => {});
+  f.parameters.onRuntimeStarted = () => guardReady;
+
+  await assert.rejects(prepare(f), error);
+  assert.deepEqual(f.calls.map(call => call.action), ["inspect", "activate", "up", "down"]);
+});
+
 test("activation failure starts no service and does not complete the intent", async () => {
   const f = fixture({ intercept: action => action === "activate"
     ? { status: "blocked", reason: "component_update_incompatible" } : undefined });

@@ -36,8 +36,9 @@
 .writer-source__inline-formula { display: inline; }
 
 .writer-markdown-editor__main--source { display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
-.writer-markdown-editor__main--source > .writer-source-controls, .writer-markdown-editor__main--source > .writer-markdown-editor__display-toolbar { flex-shrink: 0; }
+.writer-markdown-editor__main--source > .writer-source-controls, .writer-markdown-editor__main--source > .writer-markdown-editor__display-toolbar, .writer-markdown-editor__main--source > .writer-document-toolbar { flex-shrink: 0; }
 .writer-markdown-editor__main--source { align-self: stretch; height: 100%; max-height: 100%; }
+.writer-markdown-editor__main--source > .writer-source-input { flex-basis: 360px; min-height: 0; resize: none; }
 .writer-markdown-editor__main--source > .writer-markdown-editor__surface,
 .writer-markdown-editor__main--source > .writer-markdown-editor__parse-fallback { display: none; }
 

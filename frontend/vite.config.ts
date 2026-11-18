@@ -3,6 +3,7 @@ import { defineConfig, loadEnv, Plugin } from "vite";
 import react from "@vitejs/plugin-react";
 import svgr from "vite-plugin-svgr";
 import path from "node:path";
+import { pdfCmapsPlugin } from "./scripts/vite/pdfCmaps";
 
 // Expose the globally loaded Excel preview library as an ES module.
 function jsPreviewExcelShimPlugin(): Plugin {
@@ -23,13 +24,16 @@ function jsPreviewExcelShimPlugin(): Plugin {
 }
 
 export default defineConfig(({ mode }) => {
+  const require = createRequire(import.meta.url);
+  // React-PDF may resolve a different PDF.js version than the direct dependency.
+  const pdfjsRoot = path.dirname(require.resolve("pdfjs-dist/package.json", { paths: [path.dirname(require.resolve("react-pdf/package.json"))] }));
   const env = loadEnv(mode, __dirname);
   // Read the same mode-specific environment files as the application.
   const devProxyTarget = env.VITE_PROXY_TARGET || "http://localhost:8090";
   const isDesktopBuild = env.VITE_LAZYMIND_MODE === "desktop";
 
   return {
-    plugins: [jsPreviewExcelShimPlugin(), react(), svgr()],
+    plugins: [jsPreviewExcelShimPlugin(), pdfCmapsPlugin(pdfjsRoot), react(), svgr()],
     base: "/",
     optimizeDeps: {
       // The PDF worker is loaded as an asset URL, not as a prebundled module.
@@ -39,7 +43,7 @@ export default defineConfig(({ mode }) => {
       // Keep application imports independent of the current file location.
       alias: {
         "@": path.resolve(__dirname, "src"),
-        "@react-pdf-worker": path.dirname(createRequire(import.meta.url).resolve("pdfjs-dist/build/pdf.worker.min.mjs", { paths: [path.dirname(createRequire(import.meta.url).resolve("react-pdf/package.json"))] })),
+        "@react-pdf-worker": path.join(pdfjsRoot, "build"),
       },
     },
     css: {
@@ -55,6 +59,8 @@ export default defineConfig(({ mode }) => {
     },
     server: {
       port: 5173,
+      // The local proxy allowlist expects this origin; do not silently switch ports.
+      strictPort: true,
       // Forward API and local-service requests to the selected backend.
       proxy: {
         "/api": {
