@@ -5,6 +5,16 @@ import pytest
 from lazymind.chat.engine.agent_runtime import AgentRole, PromptBuilder
 
 
+@pytest.mark.parametrize('skip', [True, lambda: True])
+def test_runtime_skip_condition_omits_inactive_document_contract(skip):
+    bundle = (PromptBuilder.for_role(AgentRole.CHAT)
+              .runtime('inactive-document', 'Active Document', 'document_id=None',
+                       'backend.document_preview', skip_if=skip)
+              .input('Read the selected library', source='user')
+              .build())
+    assert 'document_id=None' not in bundle.current_input
+
+
 def test_prompt_builder_renders_stable_sections_and_boundaries() -> None:
     bundle = (
         PromptBuilder.for_role(AgentRole.CHAT)

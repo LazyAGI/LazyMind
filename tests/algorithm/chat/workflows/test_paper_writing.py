@@ -228,7 +228,7 @@ def test_experiment_runtime_decides_execution_without_a_question(runtime, tmp_pa
     assert batches
 
 
-def test_runtime_wrapper_uses_host_inputs_and_saves_all_declared_outputs(runtime, tmp_path, reflection_calls):
+def test_historical_runtime_wrapper_saves_legacy_outputs(runtime, tmp_path, reflection_calls):
     ctx, batches = runtime
     workflow = yaml.safe_load((PACKAGE / 'workflow.yaml').read_text())
     state = yaml.safe_load((PACKAGE / 'scenario/state.yml').read_text())
@@ -251,7 +251,10 @@ def test_runtime_wrapper_uses_host_inputs_and_saves_all_declared_outputs(runtime
         tools.run_paper_step()
         actual = {item['key'] for item in batches[-1]}
         declared = {item['material'] for item in state['steps'][step]['outputs']}
-        required = {item['material'] for item in state['steps'][step]['outputs'] if item.get('required', True)}
+        # The historical wrapper predates Agent receipts and compute-record slots.
+        required = {item['material'] for item in state['steps'][step]['outputs']
+                    if item.get('required', True) and not item['material'].endswith('_receipt')
+                    and item['material'] != 'analysis_execution'}
         assert required <= actual <= declared
         document = next(item for item in batches[-1] if item['key'].endswith('_document'))
         assert document['content_type'] == 'file'
@@ -1034,7 +1037,7 @@ def test_business_manuscript_entry_publishes_visible_preparation_then_review(run
     assert {item['key'] for item in batches[-1]} == {'peer_review_pool', 'peer_review_document'}
 
 
-def test_config_logical_edges_and_no_real_external_calls():
+def test_shared_agent_contract_preserves_logical_edges():
     state = yaml.safe_load((PACKAGE / 'scenario/state.yml').read_text())
     # Core uses these capabilities to forward KB and Sciverse credentials to F2.
     assert {'kb', 'academic_search'} <= set(state['steps']['literature_review']['capabilities'])
@@ -1043,8 +1046,9 @@ def test_config_logical_edges_and_no_real_external_calls():
         # old launch request redefine a deterministic Mock tool invocation.
         assert '{{runtime_instruction}}' not in step['prompt']
         assert '{{user_input}}' not in step['prompt']
-        assert 'Do not substitute chat text for the tool call.' in step['prompt']
-        assert 'The currently viewed tab is not the execution node.' in step['prompt']
+        assert 'paper_prepare_inputs' in step['prompt']
+        assert 'paper_prepare_candidate' in step['prompt']
+        assert step['terminal_tools'] == ['paper_submit_candidate']
         assert step['prompt'].isascii()
         assert step['acceptance_criteria'].isascii()
     assert all(edge['when'].isascii() for edges in state['transitions'].values() for edge in edges)
@@ -1068,7 +1072,9 @@ def test_config_logical_edges_and_no_real_external_calls():
         else:
             assert actual == set(tools.ROUTES[node])
         assert state['steps'][step]['mode'] == 'human'
-        assert state['steps'][step]['tools'] == ['run_paper_step']
+        assert {'paper_prepare_inputs', 'paper_submit_candidate'} <= set(
+            state['steps'][step]['tools'])
+        assert 'run_paper_step' not in state['steps'][step]['tools']
 
 
 @pytest.mark.parametrize('content', [

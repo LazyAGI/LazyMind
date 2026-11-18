@@ -1,3 +1,4 @@
+import { externalLinkProps } from '@/runtime/externalNavigation';
 import {
   CheckCircleOutlined,
   ExclamationCircleOutlined,
@@ -257,7 +258,7 @@ export default function VocabularySettings() {
         footer={
           <Button
             type="primary"
-            href="https://apps.ankiweb.net/"
+            {...externalLinkProps("https://apps.ankiweb.net/")}
             target="_blank"
           >
             {t("ankiSettings.downloadAnki")}

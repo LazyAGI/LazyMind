@@ -746,7 +746,7 @@ def test_plugin_contains_only_thin_entry_and_calls_shared_runtime(tmp_path, monk
         files[relative.as_posix()] = base64.b64encode(source.read_bytes()).decode()
     scripts = PACKAGE / 'scripts'
     assert {path.relative_to(scripts).as_posix() for path in scripts.rglob('*.py')} == {
-        'tools.py', 'external_academic_tools.py', 'external_knowledge_tools.py',
+        'tools.py', 'agent_tools.py', 'external_academic_tools.py', 'external_knowledge_tools.py',
     }
     for adapter in ('external_academic_tools.py', 'external_knowledge_tools.py'):
         declarations = ast.parse((scripts / adapter).read_text(encoding='utf-8')).body
@@ -755,8 +755,9 @@ def test_plugin_contains_only_thin_entry_and_calls_shared_runtime(tmp_path, monk
         assert isinstance(target, ast.Name) and target.id == 'ADAPTER_ID'
         assert isinstance(declarations[0].value, ast.Constant)
     assert len((PACKAGE / 'scripts/tools.py').read_text().splitlines()) < 15
-    loaded = load_workflow_package_tools({'files': files}, ['run_paper_step'],
+    from lazymind.document_tools.paper import agent_tools
+    monkeypatch.setattr(agent_tools, 'paper_prepare_inputs', lambda: {'status': 'shared-runtime'})
+    loaded = load_workflow_package_tools({'files': files}, ['paper_prepare_inputs'],
                                         'paper-writing', 'isolated-revision', package_root=tmp_path)
-    monkeypatch.setattr(tools, 'run_paper_step', lambda: {'status': 'shared-runtime'})
-    assert loaded['run_paper_step']() == {'status': 'shared-runtime'}
+    assert loaded['paper_prepare_inputs']() == {'status': 'shared-runtime'}
     assert api.run_algorithm('research_topic', {'topic': 'T'})['question']

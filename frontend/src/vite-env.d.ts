@@ -52,6 +52,7 @@ declare global {
       openCloudRegister?: () => Promise<unknown> | unknown;
       openCloudTokenPlan?: (url: string) => Promise<unknown> | unknown;
       notifyAppReady?: () => void;
+      openExternal?: (url: string) => Promise<void>;
     };
   }
 }

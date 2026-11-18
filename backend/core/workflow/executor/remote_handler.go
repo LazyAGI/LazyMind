@@ -118,6 +118,7 @@ func (h RemoteHandler) Context(w http.ResponseWriter, r *http.Request) {
 		remoteReply(w, 503, nil, "ATTEMPT_CONTEXT_FAILED", err.Error())
 		return
 	}
+
 	remoteReply(w, 200, value, "", "")
 }
 

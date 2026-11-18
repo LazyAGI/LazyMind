@@ -1,6 +1,7 @@
 """The standalone retrieval entry fans out requests and keeps quota failures explicit."""
 import importlib.util
 import threading
+import time
 from pathlib import Path
 
 import httpx
@@ -110,3 +111,55 @@ def test_fusion_uses_publisher_url_doi_and_preserves_conflicting_records():
     assert next(p for p in merged if p['title'] == 'Survey')['sources'] == ['openalex', 'google_scholar']
     assert next(p for p in merged if p['title'] == 'Versioned paper')['citation_count'] == 7
     assert set(next(p for p in merged if p['title'].startswith('A Detailed'))['sources']) == {'arxiv', 'sciverse'}
+
+
+def test_complementary_queries_run_together_and_deduplicate(monkeypatch):
+    barrier = threading.Barrier(4, timeout=1)
+    seen = []
+
+    def fetch(source, query, *args, **kwargs):
+        seen.append((source, query))
+        barrier.wait()
+        return [search._paper(source, 'Shared paper', doi='10.1/shared', abstract='Real abstract')]
+
+    monkeypatch.setattr(search, '_fetch', fetch)
+    result = search.search_papers(['writing assistance', 'document revision'], time_budget=2)
+    assert len(seen) == 4 and len(result['papers']) == 1
+    assert all(run['status'] == 'ok' for run in result['sources'])
+    assert {run['query'] for run in result['sources']} == {'writing assistance', 'document revision'}
+
+
+def test_deadline_returns_completed_sources_without_waiting_for_slow_provider(monkeypatch):
+    release = threading.Event()
+    stopped = threading.Event()
+
+    def fetch(source, *args, **kwargs):
+        if source == 'arxiv':
+            try:
+                assert release.wait(timeout=2)
+            finally:
+                stopped.set()
+        return [search._paper(source, 'Available evidence', abstract='Real abstract')]
+
+    monkeypatch.setattr(search, '_fetch', fetch)
+    started = time.monotonic()
+    try:
+        result = search.search_papers('writing assistance', time_budget=0.15)
+        assert time.monotonic() - started < 1
+        assert not stopped.is_set()
+        assert [(run['source'], run['status']) for run in result['sources']] == [
+            ('arxiv', 'timed_out'), ('crossref', 'ok')]
+        assert result['papers'][0]['sources'] == ['crossref']
+    finally:
+        release.set()
+        assert stopped.wait(timeout=1)
+    assert result['sources'][0]['papers'] == []
+
+
+def test_fetch_http_timeout_respects_remaining_search_budget(monkeypatch):
+    def request(method, url, **kwargs):
+        assert 0 < kwargs['timeout'] <= 0.3
+        return httpx.Response(200, json={'message': {'items': []}}, request=httpx.Request(method, url))
+
+    monkeypatch.setattr(search.httpx, 'request', request)
+    assert search._fetch('crossref', 'revision', 20, '', deadline=time.monotonic() + 0.3) == []

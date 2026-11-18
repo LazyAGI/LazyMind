@@ -493,9 +493,15 @@ def _matches_outline(actual, signature):
 
 
 def _validate_manuscript_structure(body, *, signature=None, charts=None,
-                                   candidates=None, original=None):
+                                   candidates=None, original=None, quality_warnings=None):
     """Shared mechanical checks for generation and the API result boundary."""
-    actual = _heading_signature(body)
+    try:
+        actual = _heading_signature(body)
+    except ValueError as error:
+        if quality_warnings is None:
+            raise
+        quality_warnings.append(str(error))
+        actual = []
     if signature is not None and not _matches_outline(actual, signature):
         raise ValueError('Writer manuscript headings do not match the outline.')
     if charts is not None:
@@ -542,7 +548,7 @@ def validate_inputs(inputs):
         raise contracts.MissingMaterials('请明确本轮需要修改的内容。')
 
 
-def validate_result(value, inputs):
+def validate_result(value, inputs, *, quality_warnings=None):
     """Check writing output independently of storage and public field validation."""
     for key in ('outline', 'manuscript'):
         if value.get(key) is not None and len(value[key]) > 2_000_000:
@@ -552,8 +558,15 @@ def validate_result(value, inputs):
         charts=figure_catalog(inputs['charts'], inputs.get('media_assets')) if inputs else None,
         candidates=_reference_candidates(inputs['papers']) if inputs else None,
         original=inputs['manuscript'] if inputs else None,
+        quality_warnings=quality_warnings,
     )
     if inputs and inputs['mode'] == 'revise':
         return
-    if inputs and (not inputs['outline'] or not _matches_outline(signature, _heading_signature(inputs['outline']))):
-        raise ValueError('确认的大纲与稿件不一致')
+    if inputs:
+        try:
+            if not inputs['outline'] or not _matches_outline(signature, _heading_signature(inputs['outline'])):
+                raise ValueError('确认的大纲与稿件不一致')
+        except ValueError as error:
+            if quality_warnings is None:
+                raise
+            quality_warnings.append(str(error))

@@ -1,3 +1,4 @@
+import ExternalLink from '@/components/ExternalLink';
 import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   ArrowLeftOutlined,
@@ -847,7 +848,7 @@ export function ProviderWorkspace(props: Props) {
                 {hasProgrammingScopeNotice(provider) ? <Alert
                   className="provider-workspace-service-scope" type="info" showIcon
                   message={<span>{label(getSupplierBrandKey(provider) === "GLM" ? "serviceScopeGlm" : getSupplierBrandKey(provider) === "Qwen" ? "serviceScopeQwen" : "serviceScopeGeneric")} {" "}
-                    <a href={programmingScopeLink(provider)} target="_blank" rel="noopener noreferrer">{label("serviceScopeOfficialLink")}</a></span>}
+                    <ExternalLink href={programmingScopeLink(provider)} target="_blank" rel="noopener noreferrer">{label("serviceScopeOfficialLink")}</ExternalLink></span>}
                 /> : null}
                 <section
                   className="provider-workspace-api-keys"

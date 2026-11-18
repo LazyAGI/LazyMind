@@ -28,7 +28,7 @@ func FreezeControlledInputs(ctx context.Context, db *gorm.DB, attemptID string) 
 	if err := db.WithContext(ctx).Where("id = ?", value.SessionID).First(&session).Error; err != nil {
 		return err
 	}
-	if !controlstore.Controlled(session) {
+	if !controlstore.Controlled(session) && !UsesPaperAgentContract(value) {
 		return nil
 	}
 	if err := freezeKnowledgeScope(ctx, db, session, &value); err != nil {

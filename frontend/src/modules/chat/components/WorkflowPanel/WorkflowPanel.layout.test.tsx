@@ -1180,6 +1180,7 @@ describe('shared workflow compact layout', () => {
   });
 
   it('shows a successful dynamic yield without failed or approval controls', async () => {
+    fixture.session.workflow_mode = 'dynamic';
     fixture.session.status = 'waiting';
     fixture.session.projection!.display = { status: 'waiting', reason: 'next_step_required', approval_step_id: '' };
     fixture.session.projection!.current = [];
@@ -1187,9 +1188,15 @@ describe('shared workflow compact layout', () => {
     fixture.session.projection!.nodes = { write_document: {
       execution: 'succeeded', requires_approval: false, validity: 'effective', reachability: '', readiness: '', branch: '',
     } };
-    render(<WorkflowPanel conversationId='layout-test' onSendMessage={vi.fn()} />);
+    const send = vi.fn(async () => true);
+    render(<WorkflowPanel conversationId='layout-test' onSendMessage={send} />);
     await screen.findByRole('tab', { name: '成稿' });
     expect(screen.getByText('等待下一步')).toBeInTheDocument();
+    const proceed = screen.getByRole('button', { name: '继续' });
+    expect(proceed).toBeEnabled();
+    await act(async () => fireEvent.click(proceed));
+    expect(send).toHaveBeenCalledOnce();
+    expect(send).toHaveBeenCalledWith('继续', undefined);
     expect(screen.queryByText('执行失败')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '继续执行' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '重试' })).not.toBeInTheDocument();
@@ -2219,4 +2226,46 @@ it('does not approve obsolete results when saving edits invalidates the checkpoi
   expect(await screen.findByText('等待重新生成')).toBeVisible();
   await act(async () => fireEvent.click(screen.getByRole('button', { name: '重新生成' })));
   expect(send).toHaveBeenCalledWith('继续', { session_id: 'layout-test', kind: 'continue', expected_state_version: 1 });
+});
+
+
+it.each([false, true])('shows the scientific plan, code and error instead of tool rows (external=%s)', async external => {
+  fixture.ui = { tabs: [{ id: 'data_analysis', step_id: 'data_analysis', label: '数据分析', layout: 'list', slots: [] }] };
+  fixture.session = { ...fixture.session, workflow_id: 'paper-writing', status: 'active', current_step_id: 'data_analysis',
+    projection: { current: ['data_analysis'] }, slots: [],
+    steps: [{ id: 'analysis-attempt', session_id: 'layout-test', step_id: 'data_analysis', task_id: 'owner',
+      attempt: 2, status: 'running', created_at: '', updated_at: '' }] };
+  const base = { order: 1, started_at: null, finished_at: null, elapsed_ms: null };
+  fixture.getPaperProgress.mockResolvedValue({ data: { task_id: 'owner', execution_id: 'agent-run', revision: 10,
+    status: 'failed', process_steps: [
+      { ...base, step_id: 'f4-agent-1', title: '分析方案 · 第 1 次', status: 'succeeded', summary: '比较真实样本的平均得分。' },
+      { ...base, step_id: 'f4-agent-2', title: '统计代码 · 第 1 次', status: 'succeeded',
+        output: { text: 'def analyze(tables, plan, rng): return missing_value', format: 'python', mode: 'complete', estimated_tokens: 12 } },
+      { ...base, step_id: 'f4-agent-3', title: '统计执行与结果校验 · 第 1 次', status: 'failed', summary: 'NameError: missing_value' },
+    ], timing: { started_at: null, finished_at: null, measured_at: '' } } });
+  useTaskCenterStore.getState().upsertTask('layout-test', { task_id: 'owner', status: 'running', execution_log: [
+    { type: 'tool_calls', content: '', tool_calls: [{ id: 'analysis', name: 'paper_analyze', args: {} }] }] });
+  render(<WorkflowPanel conversationId='layout-test' controlAdapter={external ? { execute: vi.fn() } : undefined} />);
+  expect(await screen.findByText('本次分析未完成', { selector: '[role="status"]' })).toBeVisible();
+  fireEvent.click(screen.getByText('查看执行记录'));
+  expect(screen.getByText('比较真实样本的平均得分。')).toBeVisible();
+  expect(screen.getByRole('alert')).toHaveTextContent('NameError: missing_value');
+  expect(screen.getByText('查看本轮代码')).toBeVisible();
+  expect(screen.getByText('def analyze(tables, plan, rng): return missing_value')).toBeInTheDocument();
+  expect(screen.queryByText('paper_analyze')).not.toBeInTheDocument();
+  expect(screen.queryByText(/次工具调用/)).not.toBeInTheDocument();
+});
+
+it('places the analysis empty state outside the narrow timeline marker column', async () => {
+  fixture.ui = { tabs: [{ id: 'data_analysis', step_id: 'data_analysis', label: '数据分析', layout: 'list', slots: [] }] };
+  fixture.session = { ...fixture.session, workflow_id: 'paper-writing', status: 'active', current_step_id: 'data_analysis',
+    projection: { current: ['data_analysis'] }, slots: [],
+    steps: [{ id: 'analysis-attempt', session_id: 'layout-test', step_id: 'data_analysis', task_id: 'owner',
+      attempt: 1, status: 'running', created_at: '', updated_at: '' }] };
+  fixture.getPaperProgress.mockResolvedValue({ data: { task_id: 'owner', execution_id: 'pending', revision: 0,
+    status: 'running', process_steps: [], timing: { started_at: null, finished_at: null, measured_at: '' } } });
+  render(<WorkflowPanel conversationId='layout-test' />);
+  const empty = await screen.findByText('当前任务尚无可展示的执行记录。');
+  expect(empty.tagName).toBe('P');
+  expect(empty.closest('li')).toBeNull();
 });

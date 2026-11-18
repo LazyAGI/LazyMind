@@ -1,3 +1,4 @@
+import ExternalLink from '@/components/ExternalLink';
 import { useCallback, useEffect, useState } from "react";
 import {
   Alert,
@@ -109,9 +110,9 @@ function GuideText({ text }: { text: string }) {
     <>
       {parts.map((part, index) =>
         part.startsWith("http") ? (
-          <a key={`${part}-${index}`} href={part} target="_blank" rel="noreferrer">
+          <ExternalLink key={`${part}-${index}`} href={part} target="_blank" rel="noreferrer">
             {part}
-          </a>
+          </ExternalLink>
         ) : (
           part
         ),
@@ -481,15 +482,15 @@ export default function EmailConnectionPage() {
             <div>
               <p>{t("modelProvider.mail.gmail.setupHint")}</p>
               <p>
-                <a href={GMAIL_TWO_STEP_URL} target="_blank" rel="noreferrer">
+                <ExternalLink href={GMAIL_TWO_STEP_URL} target="_blank" rel="noreferrer">
                   {t("modelProvider.mail.gmail.twoStepLabel")}
-                </a>
+                </ExternalLink>
                 <span> {GMAIL_TWO_STEP_URL}</span>
               </p>
               <p>
-                <a href={GMAIL_APP_PASSWORD_URL} target="_blank" rel="noreferrer">
+                <ExternalLink href={GMAIL_APP_PASSWORD_URL} target="_blank" rel="noreferrer">
                   {t("modelProvider.mail.gmail.appPasswordLabel")}
-                </a>
+                </ExternalLink>
                 <span> {GMAIL_APP_PASSWORD_URL}</span>
               </p>
             </div>

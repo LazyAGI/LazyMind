@@ -5,7 +5,6 @@ import (
 	"os"
 	"path/filepath"
 
-	"lazymind/agentconnector/internal/agentexec"
 	"lazymind/agentconnector/internal/agentintegration"
 	"lazymind/agentconnector/internal/codexplugin"
 	"lazymind/agentconnector/internal/connectorconfig"
@@ -38,7 +37,7 @@ func (a *Adapter) inspectConfiguration(status *agentintegration.Status) []agenti
 			exists = true
 			item.Command = record.Self
 			item.Reference = connectorconfig.Path(record.Home, "codex", record.Profile)
-			mismatch = mismatch || record.Home != a.home || record.Profile != profile || !agentexec.SameExecutable(record.Self, a.self)
+			mismatch = mismatch || record.Home != a.home || record.Profile != profile || !a.ownedCommand(record.Self)
 		}
 	} else if !errors.Is(recordErr, os.ErrNotExist) {
 		unreadable = true

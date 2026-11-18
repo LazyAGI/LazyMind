@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"lazymind/agentconnector/internal/connectorconfig"
+	"lazymind/agentconnector/internal/connectorlauncher"
 	"lazymind/agentconnector/internal/credentials"
 	"lazymind/agentconnector/internal/workflowhost"
 )
@@ -95,7 +96,7 @@ func TestInstallPairsConfiguresAndReinstallsWithoutDuplicates(t *testing.T) {
 	if loadErr != nil {
 		t.Fatal(loadErr)
 	}
-	if server["command"] != self || server["args"].([]any)[1] != "codex-workflow" || connection.PairingFile != first.PairingFile || len(env) != 1 || len(connection.Overrides) != 0 {
+	if server["command"] != connectorlauncher.Path(home) || first.Self != connectorlauncher.Path(home) || server["args"].([]any)[1] != "codex-workflow" || connection.PairingFile != first.PairingFile || len(env) != 1 || len(connection.Overrides) != 0 {
 		t.Fatal("incomplete plugin configuration")
 	}
 	store, _ := credentials.NewStore(home, "")
@@ -112,6 +113,22 @@ func TestInstallPairsConfiguresAndReinstallsWithoutDuplicates(t *testing.T) {
 	record, err := Read()
 	if err != nil || record.BuildID != BuildID() {
 		t.Fatalf("missing installation record: %v", err)
+	}
+	skill, err := os.ReadFile(filepath.Join(root, "skills", "workflow", "SKILL.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	skillText := strings.Join(strings.Fields(string(skill)), " ")
+	for _, guidance := range []string{"delegate each step to a fresh subagent by default", "Execute directly", "including for paper-agent-v1", "proxy declared tool calls through the root", "Do not stop solely"} {
+		if !strings.Contains(skillText, guidance) {
+			t.Fatalf("installed Skill lost optional delegation guidance %q", guidance)
+		}
+	}
+	if strings.Contains(string(skill), "stop that execution") {
+		t.Fatal("installed Skill still blocks hosts without isolated worker MCP")
+	}
+	if !Registered(home) {
+		t.Fatal("stable launcher registration was not recognised by the host")
 	}
 }
 

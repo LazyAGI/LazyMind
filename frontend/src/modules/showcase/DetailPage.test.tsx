@@ -114,7 +114,7 @@ describe("Showcase DetailPage", () => {
     const sourceLink = screen.getByRole("link", { name: "Configured detail title" });
     expect(sourceLink).toHaveAttribute("href", "https://skillhub.example/demo");
     expect(sourceLink).toHaveAttribute("target", "_blank");
-    expect(sourceLink).toHaveAttribute("rel", "noreferrer");
+    expect(sourceLink).toHaveAttribute("rel", "noopener noreferrer");
     expect(screen.queryByText("showcase.chooseTask")).not.toBeInTheDocument();
     expect(await screen.findByText("Single result")).toBeInTheDocument();
   });

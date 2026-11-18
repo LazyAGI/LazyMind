@@ -1,3 +1,4 @@
+import { externalWebURL, openExternalUrl } from '@/runtime/externalNavigation';
 import DocumentPdfParseStatus from './DocumentPdfParseStatus';
 import { requestPdfIR, pdfIRQuotaWaiting, pdfIRSubmissionMessage } from '../api/pdfIR';
 import ReadingPreferencesModal from "./ReadingPreferencesModal";
@@ -812,7 +813,8 @@ function PaperLibraryContent({ userId, datasetId, onUploadPdf, title = "论文�
                     { key: "link", label: "打开原文", disabled: !originalUrl(item), onClick: () => {
                             const href = originalUrl(item);
                             if (href)
-                                window.open(href, "_blank", "noopener");
+                                if (externalWebURL(href)) void openExternalUrl(href);
+                                else window.open(href, "_blank", "noopener");
                         } },
                     { key: "reparse", label: "重新解析", disabled: disabled || !!menuParseDisabledReason(item),
                         title: menuParseDisabledReason(item), onClick: () => reparseFromMenu(item) },

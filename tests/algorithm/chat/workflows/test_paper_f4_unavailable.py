@@ -42,13 +42,11 @@ def test_unavailable_question_preserves_identity_reason_and_real_sources_without
 
 
 @pytest.mark.parametrize('fault', [
-    'unknown', 'duplicate', 'also_answered', 'missing_reason', 'empty_sources', 'fake_source'])
+    'duplicate', 'also_answered', 'missing_reason', 'empty_sources', 'fake_source'])
 def test_unavailable_entry_cannot_bypass_question_or_source_validation(case, fault):
     inputs, plan, results = case
     item = results['unavailable_questions'][0]
-    if fault == 'unknown':
-        item['question_id'] = 'unknown'
-    elif fault == 'duplicate':
+    if fault == 'duplicate':
         results['unavailable_questions'].append(copy.deepcopy(item))
     elif fault == 'also_answered':
         item['question_id'] = 'q1'
@@ -199,3 +197,17 @@ def test_all_unavailable_respects_one_attempt_budget(case, monkeypatch):
     assert failure.value.code == 'MISSING_MATERIAL'
     generate.assert_called_once()
     execute.assert_called_once()
+
+
+def test_extra_unavailable_question_is_preserved_as_a_sourced_limitation(case):
+    inputs, plan, results = case
+    results['unavailable_questions'].append(dict(
+        question_id='q3_no_control', reason='No control arm was supplied.',
+        columns=[dict(table_id='data', column='cohort')]))
+    analysis = pipeline.build_analysis(inputs, plan, results)
+    assert len(analysis['findings']) == 1
+    assert len(analysis['targets']) == 2
+    assert any('No control arm was supplied.' in item and 'data.cohort' in item for item in analysis['limitations'])
+    results['unavailable_questions'][-1]['columns'][0]['table_id'] = 'invented'
+    with pytest.raises(ValueError):
+        pipeline.build_analysis(inputs, plan, results)

@@ -15,6 +15,8 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, create_model
 import yaml
 
 from . import external_pdf_tools, external_ppt_tools, smoke_tools
+from . import paper_tools as paper_adapter
+from .paper_tools import PAPER_BINDING
 from .external_ppt_tools import ExternalToolError
 from .external_tool_context import external_package_scope
 
@@ -44,6 +46,7 @@ _REGISTRY.update({
     name: ('scripts/external_generation_tools.py', GENERATION_BINDING, getattr(external_ppt_tools, name))
     for name in ('ppt_prepare_page', 'ppt_compute_timing', 'ppt_order_papers')
 })
+
 MAX_PACKAGE_BYTES = 64 * 1024 * 1024
 
 SMOKE_BINDING = '''"""Shared deterministic tools for the Workflow smoke test."""
@@ -69,6 +72,7 @@ class ExternalToolRequest(BaseModel):
 class ExternalToolCallRequest(ExternalToolRequest):
     tool_name: str = Field(min_length=1)
     arguments: dict[str, Any] = Field(default_factory=dict)
+    trusted_context: dict[str, Any] | None = None
 
 
 def package_tree_hash(files: dict[str, bytes]) -> str:
@@ -142,6 +146,10 @@ def _selected(request: ExternalToolRequest, *, listing: bool = False, files=None
         if not isinstance(name, str):
             raise ExternalToolError('INVALID_PACKAGE', 'Invalid external tool name.')
         entry = _REGISTRY.get(name)
+        is_paper = name in paper_adapter.TOOL_NAMES
+        if is_paper:
+            paper_adapter.validate_step(request.step_id, step)
+            entry = ('scripts/agent_tools.py', PAPER_BINDING, None)
         if entry is None:
             if listing or name != getattr(request, 'tool_name', None):
                 # Core serves its separately audited data adapters from the same
@@ -150,9 +158,14 @@ def _selected(request: ExternalToolRequest, *, listing: bool = False, files=None
             raise ExternalToolError('TOOL_ADAPTER_UNAVAILABLE',
                                     f'Package tool {name!r} needs an explicit LazyMind service adapter.')
         path, binding, function = entry
-        if owners.get(name) != path or files.get(path) != binding.encode():
+        valid_binding = files.get(path) == binding.encode()
+        if is_paper and name != 'paper_import_sources':
+            valid_binding = valid_binding or files.get(path) == paper_adapter.LEGACY_PAPER_BINDING.encode()
+        if owners.get(name) != path or not valid_binding:
             raise ExternalToolError('TOOL_NOT_ALLOWED', 'The package tool binding is not an audited service adapter.')
-        selected[name] = function
+        if is_paper and not listing and name != getattr(request, 'tool_name', None):
+            continue
+        selected[name] = paper_adapter.load(name) if is_paper else function
     return selected
 
 
@@ -178,10 +191,18 @@ def call_external_tool(request: ExternalToolCallRequest) -> dict[str, Any]:
     function = _selected(request, files=files).get(request.tool_name)
     if function is None:
         raise ExternalToolError('TOOL_NOT_ALLOWED', 'This tool is not available to the pinned external step.')
+    raw_arguments = dict(request.arguments)
     try:
-        arguments = _arguments_model(function).model_validate(request.arguments).model_dump()
+        arguments = _arguments_model(function).model_validate(raw_arguments).model_dump()
     except ValidationError as exc:
-        raise ExternalToolError('INVALID_ARGUMENT', 'Arguments do not match the declared tool schema.') from exc
+        # Report field locations without echoing source text, credentials or the input object.
+        issues = exc.errors(include_url=False, include_context=False, include_input=False)[:5]
+        detail = '; '.join('.'.join(str(part) for part in item['loc']) + ': ' + item['msg'][:160]
+                           for item in issues)
+        raise ExternalToolError('INVALID_ARGUMENT', 'Arguments do not match the declared tool schema: '
+                                + detail + '. Correct these fields and call again.', public=True) from exc
+    if request.tool_name in paper_adapter.TOOL_NAMES:
+        return paper_adapter.call(request, function, arguments)
     with external_package_scope(files):
         try:
             return {'result': function(**arguments)}

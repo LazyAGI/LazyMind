@@ -1,0 +1,9 @@
+<!doctype html>
+<html lang="zh-CN">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'unsafe-inline'">
+<title>LazyMind</title>
+<style>
+body{margin:0;background:#f6f8fc;color:#172033;font:15px system-ui,sans-serif;display:grid;min-height:100vh;place-items:center}main{padding:28px;text-align:center}h1{font-size:23px}p{line-height:1.6;color:#667085}.actions{display:flex;justify-content:center;gap:12px;margin-top:24px}button{padding:10px 20px;border-radius:8px;border:1px solid #d0d5dd;background:white;color:#172033;font:inherit;cursor:pointer}#retry{background:#566eff;color:white;border-color:#566eff}button:disabled{opacity:.6;cursor:wait}button:focus-visible{outline:3px solid #566eff;outline-offset:3px}
+</style></head>
+<body><main aria-labelledby="title"><h1 id="title">页面暂时无法显示</h1><p id="description">请点击重试，重新加载当前页面。未保存的内容可能丢失。</p><p id="status" role="status"></p><div class="actions"><button id="retry" type="button">重试</button><button id="home" type="button">返回首页</button></div></main><script src="page-recovery-view.js"></script></body></html>

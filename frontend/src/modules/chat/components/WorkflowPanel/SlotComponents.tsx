@@ -1,8 +1,10 @@
+import ExternalLink from '@/components/ExternalLink';
 import { PptPromptDocument } from './PptPromptDocument';
 import { ArtifactSourceButton } from './ArtifactSourceButton';
 import { downloadWorkflowFile, getWorkflowDownloadHost } from '@/modules/chat/utils/workflowDownload';
 import { WriterProviderChoice } from "./DocumentProviderChoice";
 export { WriterProviderChoice } from "./DocumentProviderChoice";
+import { paperChartMediaUrls } from './paperCharts';
 import { DocumentArtifactEditor } from "./DocumentArtifactEditor";
 import { useState, useCallback, useLayoutEffect, useRef, useEffect, useMemo, createContext, useContext } from "react";
 import ReactDOM from "react-dom";
@@ -2702,9 +2704,9 @@ function WriterWriteBackSummary({
       )}
       <span>{tr(stateKey)}</span>
       {slot.write_back_url && (
-        <a href={slot.write_back_url} target='_blank' rel='noreferrer'>
+        <ExternalLink href={slot.write_back_url} target='_blank' rel='noreferrer'>
           {tr('chat.writerIR.openCloudDocument')}
-        </a>
+        </ExternalLink>
       )}
       {!slot.write_back_url && slot.write_back_local_path && (
         <a
@@ -5443,7 +5445,8 @@ export function SlotRenderer({
   }
 
   if (slot.artifact_id && slot.document) {
-    return <DocumentArtifactEditor slot={slot} sessionId={sessionId ?? ''} readOnly={readOnly || widget?.readOnly} onRefresh={onRefresh}
+    return <DocumentArtifactEditor slot={slot} sessionId={sessionId ?? ''} paperDocument={workflowSession?.workflow_id === 'paper-writing'} boundMediaUrls={workflowSession?.workflow_id === 'paper-writing'
+      ? paperChartMediaUrls(workflowSession.slots ?? []) : undefined} readOnly={readOnly || widget?.readOnly} onRefresh={onRefresh}
       revisionCount={revisionCount} VersionHistory={SlotVersionPopover} />;
   }
   const effectiveReadOnly = readOnly || widget?.readOnly;

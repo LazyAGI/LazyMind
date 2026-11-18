@@ -174,6 +174,15 @@ func saveExecutionResult(parent string, result map[string]any) (map[string]any, 
 				files = append(files, map[string]any{"local_path": path, "name": name, "sha256": hash, "size_bytes": len(data), "mime_type": file["mime_type"]})
 			}
 		}
+		if value["publication_contract"] == "paper-agent-v1" && value["status"] == "validated" {
+			outputs, err := savePaperPublicationOutputs(dir, value["artifacts"])
+			if err != nil {
+				return nil, err
+			}
+			summary["publication_outputs"] = outputs
+			summary["publication_contract"] = "paper-agent-v1"
+			summary["publication_handoff"] = "Pass each publication_outputs object unchanged as workflow.artifact.publish output; await every acknowledgement before completing."
+		}
 		value, _ = value["result"].(map[string]any)
 	}
 	summary["files"] = files

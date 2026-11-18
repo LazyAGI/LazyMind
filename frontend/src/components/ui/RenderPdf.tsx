@@ -1,3 +1,4 @@
+import { externalWebURL, openExternalUrl } from '@/runtime/externalNavigation';
 import type { PdfScrollSyncEndpoint } from "./pdfScrollSync";
 import { resolvePdfAnchorScrollTop } from "./pdfReadingAnchor";
 import { createPdfViewportScheduler } from "./pdfViewportScheduler";
@@ -1456,7 +1457,7 @@ export default function RenderPdf({
               if(onAddVocabularySelection && /[A-Za-z]/.test(selectionAction.selection.text))actions.push({key:"vocabulary",label:addVocabularySelectionLabel,onClick:()=>onAddVocabularySelection(selectionAction.selection)});
               for(const action of visibleLearningSelectionActions(learningSelectionActions,selectionAction.selection.text,Boolean(onTranslateSelection)))actions.push({key:action.key,label:action.label,disabled:action.disabled,title:action.disabledTip,onClick:()=>onLearningSelection?.(action.key,selectionAction.selection)});
               const reference=selectionAction.referenceAction;
-              if(reference?.href && (reference.kind==="open" || reference.kind==="external"))actions.push({key:"reference",label:reference.kind==="open"?"打开知识库文档":"打开链接",onClick:()=>{if(reference.kind==="external")window.open(reference.href,"_blank","noopener,noreferrer");else window.location.assign(reference.href!);}});
+              if(reference?.href && (reference.kind==="open" || reference.kind==="external"))actions.push({key:"reference",label:reference.kind==="open"?"打开知识库文档":"打开链接",onClick:()=>{if(reference.kind==="external"){if(externalWebURL(reference.href))void openExternalUrl(reference.href!);else window.open(reference.href,"_blank","noopener,noreferrer");}else window.location.assign(reference.href!);}});
               return actions;
             })()}
           />

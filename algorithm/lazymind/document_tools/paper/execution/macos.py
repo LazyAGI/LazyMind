@@ -91,7 +91,10 @@ def check_limits(process, scratch: Path):
         error = ctypes.get_errno() or errno.EIO
         if error == errno.ESRCH:
             # The task can disappear before waitpid reports the child's exit.
-            process.wait(timeout=5)
+            try:
+                process.wait(timeout=5)
+            except subprocess.TimeoutExpired as exc:
+                raise OSError(error, '无法读取 macOS Python 沙箱内存用量') from exc
         elif process.poll() is None:
             raise OSError(error, '无法读取 macOS Python 沙箱内存用量')
     elif info.resident_size > MEMORY_LIMIT:

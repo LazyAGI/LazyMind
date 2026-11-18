@@ -29,13 +29,14 @@ type PaperSelection struct {
 }
 
 type PaperSource struct {
-	SourceID string `json:"source_id"`
-	Title    string `json:"title"`
-	URL      string `json:"url,omitempty"`
-	PaperKey string `json:"paper_key,omitempty"`
-	Cited    bool   `json:"cited,omitempty"`
-	Status   string `json:"status"`
-	Reason   string `json:"reason,omitempty"`
+	LibraryPaperID string `json:"library_paper_id,omitempty"`
+	SourceID       string `json:"source_id"`
+	Title          string `json:"title"`
+	URL            string `json:"url,omitempty"`
+	PaperKey       string `json:"paper_key,omitempty"`
+	Cited          bool   `json:"cited,omitempty"`
+	Status         string `json:"status"`
+	Reason         string `json:"reason,omitempty"`
 }
 
 // PaperSourceSnapshot is filled by the trusted Chat runtime from current tool
@@ -51,7 +52,7 @@ type PaperImportInput struct {
 	KnowledgeBaseID string                `json:"knowledge_base_id" jsonschema:"Existing writable academic_papers library ID; use knowledge.create first if the user requests a new collection."`
 	AnswerID        string                `json:"answer_id,omitempty" jsonschema:"Earlier answer ID. When using source_ids, omit to select current-turn sources."`
 	SourceIDs       []string              `json:"source_ids,omitempty" jsonschema:"Select saved sources from answer_id or current-turn citation indexes. Supply either source_ids or papers."`
-	Papers          []PaperSelection      `json:"papers,omitempty" jsonschema:"Papers the user explicitly asked to import, identified by work ID, DOI, arXiv ID or title and known authors/year. Supply either papers or source_ids."`
+	Papers          []PaperSelection      `json:"papers,omitempty" jsonschema:"Papers the user explicitly asked to import. A work ID, DOI, arXiv ID or title alone is sufficient. Title-only requests resolve OpenAlex and Crossref metadata in parallel before saving; ambiguous or unmatched titles are not saved. PDF acquisition runs in the background. Omit unknown metadata; no separate preflight search is needed. Supply either papers or source_ids."`
 	CurrentSources  []PaperSourceSnapshot `json:"current_sources,omitempty" jsonschema:"Reserved for the runtime; omit."`
 }
 

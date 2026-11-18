@@ -124,7 +124,7 @@ describe("external service configuration description", () => {
     const link = screen.getByRole("link", { name: apiKeyUrl });
     expect(link).toHaveAttribute("href", apiKeyUrl);
     expect(link).toHaveAttribute("target", "_blank");
-    expect(link).toHaveAttribute("rel", "noreferrer");
+    expect(link).toHaveAttribute("rel", "noopener noreferrer");
   });
 
   it("does not turn non-HTTP schemes into links", () => {

@@ -24,7 +24,7 @@ func TestWorkBuddyRelocatesOnlySameHostManagedEntry(t *testing.T) {
 	for _, mutate := range []func(*stdioMCPDefinition){
 		func(v *stdioMCPDefinition) { v.Env["LAZYMIND_AGENT_HOST_ID"] = "foreign" },
 		func(v *stdioMCPDefinition) { v.Env["LAZYMIND_HOME"] = "/other" },
-		func(v *stdioMCPDefinition) { v.Command = "/unrelated/lazymind" },
+		func(v *stdioMCPDefinition) { v.Args = []string{"mcp", "other"} },
 	} {
 		candidate := legacyTestStdio(old.Command, home, "host-test", WorkBuddy)
 		mutate(&candidate)

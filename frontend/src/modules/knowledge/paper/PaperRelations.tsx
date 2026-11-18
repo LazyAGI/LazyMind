@@ -1,3 +1,4 @@
+import ExternalLink from '@/components/ExternalLink';
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { Alert, Button, Spin, Tooltip, Typography } from 'antd';
 import { ArrowRightOutlined, BranchesOutlined, DownOutlined, ExportOutlined, InfoCircleOutlined, LinkOutlined, ReadOutlined, ReloadOutlined, UpOutlined } from '@ant-design/icons';
@@ -29,7 +30,7 @@ function PaperRelationItem({ item, onOpenPaper }: {
     const [detailEllipsized, setDetailEllipsized] = useState(false);
     const action = item.paper && onOpenPaper
         ? <button type="button" className="paper-relation-action" aria-label={`查看库内论文：${item.title}`} onClick={() => onOpenPaper(item.paper!.id)}>查看库内论文<ArrowRightOutlined aria-hidden /></button>
-        : item.url ? <a className="paper-relation-action" aria-label={`打开来源：${item.title}`} href={item.url} target="_blank" rel="noopener noreferrer">打开来源<ExportOutlined aria-hidden /></a>
+        : item.url ? <ExternalLink className="paper-relation-action" aria-label={`打开来源：${item.title}`} href={item.url} target="_blank" rel="noopener noreferrer">打开来源<ExportOutlined aria-hidden /></ExternalLink>
             : <Tooltip title="暂未识别到 DOI、arXiv 或可打开的库内论文"><span className="paper-relation-unresolved"><InfoCircleOutlined aria-hidden />未识别来源</span></Tooltip>;
     return <article className="paper-relation-item">
     <div className="paper-relation-card-top"><span>{item.source}</span>{item.paper && <span className="paper-relation-badge">库内文献</span>}</div>

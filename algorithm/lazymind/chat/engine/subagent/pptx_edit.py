@@ -219,6 +219,7 @@ def runtime_extension():
         ),
         publisher_owned_outputs=True,
         inherit_skills=False,
+        include_reasoning=False,
         tool_failure_limits={tool.__name__: 2 for tool in edit_tools()},
         tool_call_limits={'read_pptx_edit_material': 4, 'publish_pptx_edit': 3},
         on_tool_results=enforce_failure_budget,
