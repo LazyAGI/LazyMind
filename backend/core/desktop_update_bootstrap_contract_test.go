@@ -121,6 +121,14 @@ func TestDesktopUpdateBootstrapProductionResourceAssemblyIncludesIdleOnly(t *tes
 				bootstrapAt = call.Pos()
 			}
 			if ok && selector.Sel.Name == "startResourceUpdates" {
+				if len(call.Args) != 5 {
+					t.Fatal("Core must supply the resource runtime context and enable flag")
+				}
+				runtimeContext, contextOK := call.Args[0].(*ast.Ident)
+				enabled, enabledOK := call.Args[4].(*ast.Ident)
+				if !contextOK || runtimeContext.Name != "runtimeCtx" || !enabledOK || enabled.Name != "resourceUpdateEnabled" {
+					t.Fatal("Core must pass its runtime context and configured resource update flag")
+				}
 				wired = true
 				workAt = call.Pos()
 			}

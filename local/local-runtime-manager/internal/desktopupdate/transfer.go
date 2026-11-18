@@ -91,7 +91,22 @@ func Download(ctx context.Context, c Config, state LocalState, root, expectedRel
 			}
 		}
 	}
-	artifacts := []Artifact{target.Package, target.Feed, target.Components}
+	receipt := DownloadReceipt{Status: "downloaded", ReleaseID: target.ID, Version: target.Version, PolicySequence: decision.PolicySequence, PolicyDigest: decision.PolicyDigest}
+	packageExtension := ".zip"
+	if target.Platform == "windows" {
+		packageExtension = ".exe"
+	}
+	type downloadArtifact struct {
+		Artifact
+		extension string
+		path      *string
+	}
+	artifacts := []downloadArtifact{{target.Package, packageExtension, &receipt.PackagePath}}
+	// V2 Electron builds generate their feed locally from the verified package.
+	if c.UpdaterProtocol == 1 {
+		artifacts = append(artifacts, downloadArtifact{target.Feed, ".yml", &receipt.FeedPath})
+	}
+	artifacts = append(artifacts, downloadArtifact{target.Components, ".json", &receipt.ComponentsPath})
 	var total, completed, reported int64
 	var lastSent time.Time
 	var lastDelivered int64
@@ -120,19 +135,13 @@ func Download(ctx context.Context, c Config, state LocalState, root, expectedRel
 		}
 	}
 	report(0)
-	packageExtension := ".zip"
-	if target.Platform == "windows" {
-		packageExtension = ".exe"
-	}
-	extensions := []string{packageExtension, ".yml", ".json"}
-	paths := make([]string, len(artifacts))
-	for index, a := range artifacts {
+	for _, a := range artifacts {
 		if err := ctx.Err(); err != nil {
 			return DownloadReceipt{}, err
 		}
-		destination := filepath.Join(dir, a.SHA256+extensions[index])
-		paths[index] = destination
-		valid, err := verifyCachedArtifact(ctx, destination, a)
+		destination := filepath.Join(dir, a.SHA256+a.extension)
+		*a.path = destination
+		valid, err := verifyCachedArtifact(ctx, destination, a.Artifact)
 		if err != nil {
 			return DownloadReceipt{}, failure("cache_read", err)
 		}
@@ -142,7 +151,7 @@ func Download(ctx context.Context, c Config, state LocalState, root, expectedRel
 				return DownloadReceipt{}, failure("cache_write", err)
 			}
 			err := withHTTP(ctx, c, client, a.URL, func(attemptCtx context.Context, response *http.Response) error {
-				return writeArtifact(attemptCtx, response, a, destination, report)
+				return writeArtifact(attemptCtx, response, a.Artifact, destination, report)
 			})
 			if err != nil {
 				return DownloadReceipt{}, err
@@ -154,7 +163,7 @@ func Download(ctx context.Context, c Config, state LocalState, root, expectedRel
 	if err := ctx.Err(); err != nil {
 		return DownloadReceipt{}, err
 	}
-	return DownloadReceipt{Status: "downloaded", ReleaseID: target.ID, Version: target.Version, PolicySequence: decision.PolicySequence, PolicyDigest: decision.PolicyDigest, PackagePath: paths[0], FeedPath: paths[1], ComponentsPath: paths[2]}, nil
+	return receipt, nil
 }
 
 func verifyCachedArtifact(ctx context.Context, name string, a Artifact) (bool, error) {

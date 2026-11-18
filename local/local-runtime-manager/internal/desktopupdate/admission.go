@@ -12,14 +12,9 @@ import (
 	"runtime"
 	"sort"
 	"strings"
-	"sync"
 	"time"
 )
 
-type StartupLease struct {
-	root, path string
-	mu         sync.Mutex
-}
 type startupRecord struct {
 	Version     int             `json:"version"`
 	Scope       UpdateScope     `json:"scope"`
@@ -254,68 +249,36 @@ func CheckStartup(ctx context.Context, root string, scope UpdateScope) error {
 	return checkJournals(root, scope)
 }
 
-func BeginStartup(ctx context.Context, root string, scope UpdateScope, owner, role string, actor ProcessIdentity) (*StartupLease, error) {
+func RegisterCoordinatorScope(ctx context.Context, root string, scope UpdateScope, owner string, actor ProcessIdentity) error {
 	root, err := canonicalPath(root)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	scope, err = normalizeScope(scope)
 	if err != nil {
-		return nil, err
-	}
-	if role != "writer" && role != "coordinator" {
-		return nil, failure("registration_invalid", nil)
+		return err
 	}
 	live, err := SameProcess(actor)
 	if err != nil || !live {
-		return nil, failure("process_identity", err)
+		return failure("process_identity", err)
 	}
 	lock, err := acquireAdmission(ctx, root)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	defer releaseLock(lock)
 	if err = checkJournals(root, scope); err != nil {
-		return nil, err
+		return err
 	}
 	dir := filepath.Join(root, "startup", "v1")
 	if err = ensureDirectory(dir); err != nil {
-		return nil, err
+		return err
 	}
-	id, err := randomTransactionID()
-	if err != nil {
-		return nil, err
-	}
-	path := filepath.Join(dir, id+".json")
-	raw, err := json.Marshal(startupRecord{1, scope, digestBytes([]byte(owner)), role, actor})
-	if err != nil {
-		return nil, err
-	}
-	if err = atomicWrite(path, raw); err != nil {
-		return nil, err
-	}
-	return &StartupLease{root: root, path: path}, nil
-}
-
-// Coordinator registration deliberately outlives the short guard command;
-// its record is reclaimed only after the recorded parent identity is gone.
-func (lease *StartupLease) Close() error {
-	lease.mu.Lock()
-	defer lease.mu.Unlock()
-	if lease.path == "" {
-		return nil
-	}
-	lock, err := acquireAdmission(context.Background(), lease.root)
+	// Keep distinct runtime scopes available for recovery without adding a file on every launch.
+	key := scope.Installation + "\x00" + strings.Join(scope.DataRoots, "\x00")
+	raw, err := json.Marshal(startupRecord{1, scope, digestBytes([]byte(owner)), "coordinator", actor})
 	if err != nil {
 		return err
 	}
-	defer releaseLock(lock)
-	if err = os.Remove(lease.path); err != nil && !os.IsNotExist(err) {
-		return err
-	}
-	if err = syncDirectory(filepath.Dir(lease.path)); err != nil {
-		return err
-	}
-	lease.path = ""
-	return nil
+	return atomicWrite(filepath.Join(dir, digestBytes([]byte(key))+".json"), raw)
 }

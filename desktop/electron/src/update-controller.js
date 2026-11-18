@@ -24,7 +24,8 @@ function createDesktopUpdater({ currentVersion, invokeHelper, readLocalState, re
   };
   const offerFields = () => offer ? { releaseId: offer.next.releaseId, nextVersion: offer.next.version,
     targetVersion: offer.targetVersion || offer.next.version, route: [...offer.route], downloadedBytes: 0,
-    totalBytes: offer.next.package.size + (offer.next.feed?.size || 0) + (offer.next.components?.size || 0) } : clearOffer();
+    totalBytes: offer.next.package.size + (offer.next.components?.size || 0)
+      + (config?.config?.updaterProtocol === 2 ? 0 : offer.next.feed?.size || 0) } : clearOffer();
 
   const check = (continuing = false, explicit = false) => {
     if (disposed || active || queued || receipt || (!continuing && (interrupted || resuming || installFlow?.pending()))) return Promise.resolve(getState());

@@ -42,11 +42,9 @@ function createInstallIntentStore(filename) {
 }
 module.exports = { createInstallIntentStore };
 
-// v2 has one backend-owned intent. The frontend holds only a transient view;
-// the existing v1 file remains readable for already-published old consumers.
+// v2 uses a backend-owned intent. The existing v1 file remains readable.
 function createCLIInstallIntentStore(filename, { invokeSync, invoke }) {
   const legacy = createInstallIntentStore(filename);
-  let view;
   const readBackend = () => {
     const raw = invokeSync("inspect-store");
     if (typeof raw !== "string" || Buffer.byteLength(raw) > 1024 * 1024) throw new Error("update_record_read");
@@ -55,19 +53,14 @@ function createCLIInstallIntentStore(filename, { invokeSync, invoke }) {
     return value.transactionId ? value : null;
   };
   return {
-    read() { view = readBackend(); return view || legacy.read(); },
+    read() { return readBackend() || legacy.read(); },
     write(record) {
       if (record.version !== 2 && !record.transactionId) return legacy.write(record);
-      if (!record.transactionId) { view = record; return; }
-      const tx = record.transactionId;
-      if (record.phase === "installing" || record.phase === "repair") {
-        return invoke(record.phase, tx, record.epoch).then(raw => {
-          const result = typeof raw === "string" ? JSON.parse(raw) : raw;
-          if (result?.status !== record.phase) throw new Error("update_record_write");
-          view = record;
-        });
-      }
-      view = record;
+      if (!record.transactionId || !["installing", "repair"].includes(record.phase)) return;
+      return invoke(record.phase, record.transactionId, record.epoch).then(raw => {
+        const result = typeof raw === "string" ? JSON.parse(raw) : raw;
+        if (result?.status !== record.phase) throw new Error("update_record_write");
+      });
     },
     clear() {
       const active = readBackend();
@@ -75,7 +68,6 @@ function createCLIInstallIntentStore(filename, { invokeSync, invoke }) {
         const result = JSON.parse(invokeSync("cancel", active.transactionId));
         if (result.status !== "cancelled") throw new Error("update_record_write");
       } else legacy.clear();
-      view = undefined;
     },
   };
 }

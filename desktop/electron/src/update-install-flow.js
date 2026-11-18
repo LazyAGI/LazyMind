@@ -120,7 +120,6 @@ function createUpdateInstallFlow({ currentVersion, store, nativeInstaller, runti
         }
         if (op.incompatible && !op.resumeFailed && !disposed) {
           try {
-            await nativeInstaller?.discardPreparation?.();
             try { clearDownloadIntent(); store.clear(); saved = undefined; }
             catch { throw failure("update_record_write"); }
             publish({ ...invalidateOffer(), phase: "blocked", reason: "component_update_incompatible", updating: false,
@@ -155,7 +154,6 @@ function createUpdateInstallFlow({ currentVersion, store, nativeInstaller, runti
       cancelDownload();
       const op = operation;
       if (op) { op.cancelled = true; await runtime.cancelPreparation?.(); if (op.timer) clock.clearTimeout(op.timer); op.wake?.(); await op.promise; if (op.resumeFailed) throw failure("update_resume_failed"); }
-      await nativeInstaller?.discardPreparation?.();
       // A complete cache stays intact. The separate download reminder retains
       // explicit continuation after restart when no installation is pending.
       try { store.clear(); saved = undefined; } catch { throw failure("update_record_write"); }

@@ -40,11 +40,11 @@ func TestRuntimeAdmissionEntryChild(t *testing.T) {
 	defer cancel()
 	runner := &fakeRunner{t: t, handlers: []func(Command) (CommandResult, error){func(Command) (CommandResult, error) { os.Exit(3); return CommandResult{}, nil }}}
 	output := io.Writer(os.Stdout)
-	if mode == "writer" {
+	if mode == "up" {
 		output = io.Discard
 	}
 	cli := NewCLI(output, io.Discard, runner, "synthetic-unit-manager")
-	if mode == "writer" {
+	if mode == "up" {
 		cli.newManager = func(r CommandRunner, exe string) *RuntimeManager {
 			m := NewRuntimeManager(r, exe)
 			var entered sync.Once
@@ -94,7 +94,7 @@ func admissionCommand(t *testing.T, f *updateStateFixture, root, mode string) *e
 		t.Fatal(err)
 	}
 	command := "startup-guard"
-	if mode == "writer" {
+	if mode == "up" {
 		command = "up"
 	}
 	args := []string{command, "--profile", "desktop", "--repo-root", f.cfg.RepoRoot, "--resources-root", f.paths.ResourcesRoot, "--runtime-root", f.paths.RuntimeRoot, "--owner-token", f.cfg.OwnerToken}
@@ -131,10 +131,10 @@ func TestRuntimeStartupGuardRegistersItsLivingCoordinatorAfterReturning(t *testi
 	}
 }
 
-func TestRuntimeNormalUpEntryKeepsWriterRegistrationUntilExit(t *testing.T) {
+func TestRuntimeNormalUpEntryDoesNotPersistWriterRegistration(t *testing.T) {
 	f := newUpdateStateFixture(t)
 	root := t.TempDir()
-	cmd := admissionCommand(t, f, root, "writer")
+	cmd := admissionCommand(t, f, root, "up")
 	in, err := cmd.StdinPipe()
 	if err != nil {
 		t.Fatal(err)
@@ -161,9 +161,8 @@ func TestRuntimeNormalUpEntryKeepsWriterRegistrationUntilExit(t *testing.T) {
 	if result.Actor.PID != cmd.Process.Pid || result.Actor.StartID == 0 {
 		t.Fatal("not the actual long-lived CLI process")
 	}
-	records := readAdmissionRecords(t, root)
-	if len(records) != 1 || records[0].Role != "writer" || records[0].Actor != result.Actor {
-		t.Fatalf("normal up entry omitted its actual writer registration: %+v", records)
+	if records := readAdmissionRecords(t, root); len(records) != 0 {
+		t.Fatalf("normal up entry created a writer registration: %+v", records)
 	}
 	if alive, err := desktopupdate.SameProcess(result.Actor); err != nil || !alive {
 		t.Fatalf("live CLI was declared stopped: %v %v", alive, err)
@@ -174,7 +173,7 @@ func TestRuntimeNormalUpEntryKeepsWriterRegistrationUntilExit(t *testing.T) {
 		t.Fatal(err)
 	}
 	if records := readAdmissionRecords(t, root); len(records) != 0 {
-		t.Fatalf("exited CLI left a writer lease: %+v", records)
+		t.Fatalf("exited CLI left a writer registration: %+v", records)
 	}
 	if alive, err := desktopupdate.SameProcess(result.Actor); err != nil || alive {
 		t.Fatalf("exited CLI still alive: %v %v", alive, err)

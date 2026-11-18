@@ -128,7 +128,7 @@ func (c *CLI) desktopUpdateCommand(ctx context.Context, manager *RuntimeManager,
 		}
 		return json.NewEncoder(c.out).Encode(result)
 	}
-	return withRuntimeUpdateLease(ctx, cfg, paths, func() error {
+	return withRuntimeUpdateAdmission(ctx, cfg, paths, func() error {
 		work, err := controlDesktopUpdate(ctx, cfg, "pause", *epoch)
 		if err != nil {
 			return err

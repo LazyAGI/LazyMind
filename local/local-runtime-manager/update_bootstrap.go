@@ -1184,11 +1184,9 @@ func (c *CLI) installComponentCommand(ctx context.Context, args []string) error 
 	if cfg.Profile != "desktop" {
 		return updateStateFailure("component_state_unknown")
 	}
-	lease, err := registerRuntimeUpdateLease(ctx, cfg, paths)
-	if err != nil {
+	if err := checkRuntimeUpdateAdmission(ctx, cfg, paths); err != nil {
 		return err
 	}
-	defer lease.Close()
 	command := exec.Command(paths.CoreBin, "--component-maintenance", "independent")
 	input, err := command.StdinPipe()
 	if err != nil {

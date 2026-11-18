@@ -65,16 +65,6 @@ function prepare(f) {
   return startup.prepareDesktopStartup(f.parameters);
 }
 
-test("target startup activates, starts sealed, verifies both peers, then completes", async () => {
-  const f = fixture();
-  const result = await prepare(f);
-  assert.equal(result.allowed, true);
-  assert.equal(result.runtimeStarted, true);
-  assert.deepEqual(f.calls.map(call => call.action), ["inspect", "activate", "up", "verify", "complete"]);
-  assert.ok(f.calls.find(call => call.action === "up").args.includes(tx),
-    "normal runtime must receive the startup transaction before its first loop");
-});
-
 test("target startup waits for runtime guard readiness before verifying", async t => {
   const f = fixture();
   let acknowledge;
@@ -86,8 +76,11 @@ test("target startup waits for runtime guard readiness before verifying", async 
   await new Promise(resolve => setImmediate(resolve));
   assert.deepEqual(f.calls.map(call => call.action), ["inspect", "activate", "up"]);
   acknowledge();
-  assert.equal((await attempt).allowed, true);
+  const result = await attempt;
+  assert.equal(result.allowed, true);
+  assert.equal(result.runtimeStarted, true);
   assert.deepEqual(f.calls.map(call => call.action), ["inspect", "activate", "up", "verify", "complete"]);
+  assert.ok(f.calls[2].args.includes(tx), "normal runtime must receive the startup transaction before its first loop");
 });
 
 test("target startup stops the sealed runtime if the guard cannot start", async () => {
@@ -153,7 +146,6 @@ test("cold target import can exceed fifteen seconds without starting business", 
       return { status: "activated", transactionId: tx, owner };
     }
   } });
-  assert.equal(typeof startup.prepareDesktopStartup, "function");
   t.mock.timers.enable({ apis: ["setTimeout"] });
   let settled = false;
   const attempt = prepare(f).finally(() => { settled = true; });

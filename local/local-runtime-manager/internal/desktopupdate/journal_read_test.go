@@ -64,19 +64,6 @@ func TestPersistedJournalStagesPreserveStartupAdmission(t *testing.T) {
 			if (err == nil) != (want == "") || err != nil && ErrorCode(err) != want {
 				t.Fatalf("startup: %v, want %s", err, want)
 			}
-			actor, err := CurrentProcessIdentity()
-			if err != nil {
-				t.Fatal(err)
-			}
-			lease, err := BeginStartup(context.Background(), root, j.Plan.Scope, "fixture-owner", "writer", actor)
-			if (err == nil) != (want == "") || err != nil && ErrorCode(err) != want {
-				t.Fatalf("registration: %v, want %s", err, want)
-			}
-			if lease != nil {
-				if err := lease.Close(); err != nil {
-					t.Fatal(err)
-				}
-			}
 			all, err := ReadUpdateJournals(context.Background(), root)
 			if err != nil || len(all) != 1 || all[0].Stage != stage {
 				t.Fatalf("read: %+v %v", all, err)

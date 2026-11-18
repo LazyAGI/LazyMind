@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"testing"
 	"time"
 )
@@ -84,7 +85,7 @@ func TestStartupAdmissionKeepsLockAndProcessIdentityChecks(t *testing.T) {
 	if alive, err := SameProcess(stale); err != nil || alive {
 		t.Fatalf("PID reuse accepted: %v %v", alive, err)
 	}
-	if _, err := BeginStartup(context.Background(), root, j.Plan.Scope, "owner", "writer", stale); ErrorCode(err) != "process_identity" {
+	if err := RegisterCoordinatorScope(context.Background(), root, j.Plan.Scope, "owner", stale); ErrorCode(err) != "process_identity" {
 		t.Fatalf("stale identity registered: %v", err)
 	}
 	lock, err := acquireAdmission(context.Background(), root)
@@ -94,19 +95,34 @@ func TestStartupAdmissionKeepsLockAndProcessIdentityChecks(t *testing.T) {
 	defer func() { releaseLock(lock) }()
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel()
-	if _, err := BeginStartup(ctx, root, j.Plan.Scope, "owner", "writer", actor); ErrorCode(err) != "journal_busy" {
+	if err := RegisterCoordinatorScope(ctx, root, j.Plan.Scope, "owner", actor); ErrorCode(err) != "journal_busy" {
 		t.Fatalf("registration ignored admission lock: %v", err)
 	}
 	releaseLock(lock)
 	lock = nil
-	lease, err := BeginStartup(context.Background(), root, j.Plan.Scope, "owner", "writer", actor)
+	if err := RegisterCoordinatorScope(context.Background(), root, j.Plan.Scope, "owner", actor); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestCoordinatorRegistrationReusesScope(t *testing.T) {
+	root, j := journalReadFixture(t)
+	ctx := context.Background()
+	actor, err := CurrentProcessIdentity()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := lease.Close(); err != nil {
-		t.Fatal(err)
+	// Missing descendants retain their exact spelling on both sensitive and insensitive volumes.
+	rootDir := t.TempDir()
+	upper := UpdateScope{Installation: j.Plan.Scope.Installation, DataRoots: []string{filepath.Join(rootDir, "Data")}}
+	lower := UpdateScope{Installation: j.Plan.Scope.Installation, DataRoots: []string{filepath.Join(rootDir, "data")}}
+	for _, scope := range []UpdateScope{upper, upper, lower} {
+		if err := RegisterCoordinatorScope(ctx, root, scope, "owner", actor); err != nil {
+			t.Fatal(err)
+		}
 	}
-	if err := lease.Close(); err != nil {
-		t.Fatal(err)
+	scopes, err := RegisteredCoordinatorScopes(ctx, root)
+	if err != nil || len(scopes) != 2 {
+		t.Fatalf("want two distinct coordinator scopes, got %d: %v", len(scopes), err)
 	}
 }

@@ -97,11 +97,9 @@ func (c *CLI) Run(ctx context.Context, args []string) error {
 		if err != nil {
 			return err
 		}
-		lease, err := registerRuntimeUpdateLease(ctx, cfg, paths)
-		if err != nil {
+		if err := checkRuntimeUpdateAdmission(ctx, cfg, paths); err != nil {
 			return err
 		}
-		defer lease.Close()
 		if cfg.Profile != "local" {
 			return fmt.Errorf("source RAG installation requires local profile")
 		}
@@ -146,7 +144,7 @@ func (c *CLI) Run(ctx context.Context, args []string) error {
 		if err := bindNativeStartup(ctx, &cfg, &paths, opts.UpdateBootstrapTx, opts.UpdateBootstrapOwner); err != nil {
 			return err
 		}
-		return withRuntimeUpdateLease(ctx, cfg, paths, func() error { return manager.Up(ctx, cfg, paths) })
+		return withRuntimeUpdateAdmission(ctx, cfg, paths, func() error { return manager.Up(ctx, cfg, paths) })
 	case "warmup":
 		opts, err := parseCommonArgs("warmup", args[1:], c.errOut)
 		if err != nil {
@@ -159,7 +157,7 @@ func (c *CLI) Run(ctx context.Context, args []string) error {
 		if err != nil {
 			return err
 		}
-		return withRuntimeUpdateLease(ctx, cfg, paths, func() error { return manager.Warmup(ctx, cfg, paths) })
+		return withRuntimeUpdateAdmission(ctx, cfg, paths, func() error { return manager.Warmup(ctx, cfg, paths) })
 	case "down":
 		opts, err := parseCommonArgs("down", args[1:], c.errOut)
 		if err != nil {
@@ -169,7 +167,7 @@ func (c *CLI) Run(ctx context.Context, args []string) error {
 		if err != nil {
 			return err
 		}
-		return withRuntimeUpdateLease(ctx, cfg, paths, func() error { return manager.Down(ctx, cfg, paths) })
+		return withRuntimeUpdateAdmission(ctx, cfg, paths, func() error { return manager.Down(ctx, cfg, paths) })
 	case "status":
 		asJSON, opts, err := parseStatusArgs(args[1:], c.errOut)
 		if err != nil {
@@ -197,7 +195,7 @@ func (c *CLI) Run(ctx context.Context, args []string) error {
 		if err != nil {
 			return err
 		}
-		return withRuntimeUpdateLease(ctx, cfg, paths, func() error { return manager.Reset(ctx, cfg, paths, scope) })
+		return withRuntimeUpdateAdmission(ctx, cfg, paths, func() error { return manager.Reset(ctx, cfg, paths, scope) })
 	case "service":
 		service, action, opts, err := parseServiceArgs(args[1:], c.errOut)
 		if err != nil {
@@ -207,7 +205,7 @@ func (c *CLI) Run(ctx context.Context, args []string) error {
 		if err != nil {
 			return err
 		}
-		return withRuntimeUpdateLease(ctx, cfg, paths, func() error { return manager.RunServiceAction(ctx, cfg, paths, service, action) })
+		return withRuntimeUpdateAdmission(ctx, cfg, paths, func() error { return manager.RunServiceAction(ctx, cfg, paths, service, action) })
 	case "guard":
 		ownerPID, opts, err := parseGuardArgs(args[1:], c.errOut)
 		if err != nil {
@@ -220,7 +218,7 @@ func (c *CLI) Run(ctx context.Context, args []string) error {
 		if err := validateRequestedRuntimeOwner(cfg); err != nil {
 			return err
 		}
-		return withRuntimeUpdateLease(ctx, cfg, paths, func() error {
+		return withRuntimeUpdateAdmission(ctx, cfg, paths, func() error {
 			if runtime.GOOS != "windows" {
 				if _, err := fmt.Fprintln(c.out, "desktop-guard-ready"); err != nil {
 					return err
@@ -262,9 +260,9 @@ func (c *CLI) runInternal(ctx context.Context, manager *RuntimeManager, args []s
 			if err := bindNativeStartup(ctx, &cfg, &paths, bootstrapTransaction(cfg), cfg.OwnerToken); err != nil {
 				return err
 			}
-			return withRuntimeUpdateLease(ctx, cfg, paths, func() error { return manager.algorithm.Run(ctx, cfg, paths, service) })
+			return withRuntimeUpdateAdmission(ctx, cfg, paths, func() error { return manager.algorithm.Run(ctx, cfg, paths, service) })
 		}
-		return withRuntimeUpdateLease(ctx, cfg, paths, func() error { return manager.algorithm.Down(ctx, paths, service) })
+		return withRuntimeUpdateAdmission(ctx, cfg, paths, func() error { return manager.algorithm.Down(ctx, paths, service) })
 	}
 	opts, err := parseCommonArgs("internal", subArgs, c.errOut)
 	if err != nil {
@@ -283,11 +281,9 @@ func (c *CLI) runInternal(ctx context.Context, manager *RuntimeManager, args []s
 		}
 	}
 
-	lease, err := registerRuntimeUpdateLease(ctx, cfg, paths)
-	if err != nil {
+	if err := checkRuntimeUpdateAdmission(ctx, cfg, paths); err != nil {
 		return err
 	}
-	defer lease.Close()
 	switch sub {
 	case "local-proxy-run":
 		return manager.localProxy.Run(ctx, cfg, paths)

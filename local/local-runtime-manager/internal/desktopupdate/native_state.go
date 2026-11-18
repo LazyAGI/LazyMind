@@ -266,21 +266,18 @@ func NativeUpdateStateCommand(ctx context.Context, root, action string, input []
 		return blocked("update_request_invalid")
 	}
 	var req struct {
-		TransactionID    string            `json:"transactionId"`
-		ReleaseID        string            `json:"releaseId"`
-		RuntimeRoot      string            `json:"runtimeRoot"`
-		InstallationRoot string            `json:"installationRoot"`
-		Scope            UpdateScope       `json:"scope"`
-		DataProfile      string            `json:"dataProfile"`
-		ComponentMode    string            `json:"componentMode"`
-		SourcePaused     bool              `json:"sourcePaused"`
-		SourceActive     int64             `json:"sourceActive"`
-		Dirty            bool              `json:"dirty"`
-		BootID           string            `json:"bootId,omitempty"`
-		Components       map[string]string `json:"components"`
-		Owner            string            `json:"owner"`
-		Actor            *ProcessIdentity  `json:"actor,omitempty"`
-		Peers            map[string]struct {
+		TransactionID string            `json:"transactionId"`
+		ReleaseID     string            `json:"releaseId"`
+		DataProfile   string            `json:"dataProfile"`
+		ComponentMode string            `json:"componentMode"`
+		SourcePaused  bool              `json:"sourcePaused"`
+		SourceActive  int64             `json:"sourceActive"`
+		Dirty         bool              `json:"dirty"`
+		BootID        string            `json:"bootId,omitempty"`
+		Components    map[string]string `json:"components"`
+		Owner         string            `json:"owner"`
+		Actor         *ProcessIdentity  `json:"actor,omitempty"`
+		Peers         map[string]struct {
 			TransactionID string `json:"transactionId"`
 			Owner         string `json:"owner"`
 			Ready         bool   `json:"ready"`
@@ -296,41 +293,6 @@ func NativeUpdateStateCommand(ctx context.Context, root, action string, input []
 	}
 	if action != "create" && decodeStrict(input, &req) != nil {
 		return blocked("update_request_invalid")
-	}
-	if action == "inspect" {
-		r, err := ReadNativeRecord(root)
-		if err != nil {
-			return blocked("update_record_read")
-		}
-		if r == nil {
-			return result("allowed", "")
-		}
-		scope := req.Scope
-		if scope.Installation == "" {
-			scope = UpdateScope{Installation: req.InstallationRoot, DataRoots: []string{req.RuntimeRoot}}
-		}
-		normalized, err := normalizeScope(scope)
-		if err != nil {
-			return blocked("update_request_invalid")
-		}
-		existing, _ := normalizeScope(r.Scope)
-		if !scopesOverlap(normalized, existing) {
-			return result("allowed", "")
-		}
-		status := "maintenance_required"
-		effective, _, _, _ := r.EffectiveTarget()
-		if r.Phase == "pending" && req.ReleaseID == r.SourceReleaseID {
-			status = "allowed"
-		} else if r.Phase == "repair" {
-			status = "repair"
-		} else if req.ReleaseID != effective {
-			status = "repair"
-		}
-		raw, _ := json.Marshal(r)
-		var view map[string]any
-		_ = json.Unmarshal(raw, &view)
-		view["status"] = status
-		return json.Marshal(view)
 	}
 	lock, err := nativeStateLock(ctx, root)
 	if err != nil {

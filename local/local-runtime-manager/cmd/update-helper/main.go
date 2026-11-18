@@ -20,12 +20,6 @@ import (
 var embeddedConfig string
 var resolveRecoveryBase = desktopupdate.RecoveryBase
 
-// Windows trust must remain machine-local: Roaming profiles can be replaced
-// outside the helper's file lock by profile synchronization at login/logout.
-func recoveryBaseForPlatform(platform string, getenv func(string) string, userConfigDir func() (string, error)) (string, error) {
-	return desktopupdate.RecoveryBaseForPlatform(platform, getenv, userConfigDir)
-}
-
 // embeddedConfig is populated with -X at build time. The runtime never reads
 // trust keys, policy URLs or the trust-root location from command-line flags.
 func main() {

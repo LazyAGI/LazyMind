@@ -107,7 +107,7 @@ func (f *helperProcessFixture) check(t *testing.T, sequence int) (desktopupdate.
 
 func TestActualEntrypointPersistsAcrossExitAndMirrorChange(t *testing.T) {
 	f := newHelperProcessFixture(t)
-	if d, err := f.check(t, 42); err != nil || d.Status != "up_to_date" || d.PolicySequence != 42 {
+	if d, err := f.check(t, 42); err != nil || d.Status != "up_to_date" || d.PolicySequence != 42 || len(d.PolicyDigest) != 64 {
 		t.Fatalf("actual entrypoint: %+v err=%v", d, err)
 	}
 	if _, err := f.check(t, 41); err == nil {

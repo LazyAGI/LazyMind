@@ -103,11 +103,9 @@ func TestNativeRepairCommittedBootstrapRecoversThroughActualInspect(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	lease, err := desktopupdate.BeginStartup(t.Context(), root, scope, f.cfg.OwnerToken, "coordinator", actor)
-	if err != nil {
+	if err := desktopupdate.RegisterCoordinatorScope(t.Context(), root, scope, f.cfg.OwnerToken, actor); err != nil {
 		t.Fatal(err)
 	}
-	defer lease.Close()
 	t.Setenv(runtimeRootEnvVar, "")
 	var output bytes.Buffer
 	cli := NewCLI(&output, &output, &fakeRunner{t: t}, "fixture-manager")
@@ -206,7 +204,7 @@ func TestNativeRepairCommittedBootstrapCanStopDeadOwner(t *testing.T) {
 	}
 }
 
-func TestNativeRepairInternalCoreCannotIgnoreCorruptNativeIntent(t *testing.T) {
+func TestNativeRepairCorruptIntentBlocksInspectAndInternalCore(t *testing.T) {
 	f := newUpdateStateFixture(t)
 	root := t.TempDir()
 	old := resolveRuntimeRecoveryRoot
@@ -221,7 +219,15 @@ func TestNativeRepairInternalCoreCannotIgnoreCorruptNativeIntent(t *testing.T) {
 	}
 	var out bytes.Buffer
 	cli := NewCLI(&out, &out, &fakeRunner{t: t}, "fixture-manager")
-	err := cli.Run(t.Context(), []string{"internal", "core-run", "--profile", "desktop", "--repo-root", f.cfg.RepoRoot, "--runtime-root", f.paths.RuntimeRoot, "--resources-root", f.paths.ResourcesRoot, "--owner-token", f.cfg.OwnerToken})
+	args := []string{"--profile", "desktop", "--repo-root", f.cfg.RepoRoot, "--runtime-root", f.paths.RuntimeRoot, "--resources-root", f.paths.ResourcesRoot, "--owner-token", f.cfg.OwnerToken}
+	if err := cli.Run(t.Context(), append([]string{"update-bootstrap", "--action", "inspect"}, args...)); err != nil {
+		t.Fatal(err)
+	}
+	var response struct{ Status, Reason string }
+	if err := json.Unmarshal(out.Bytes(), &response); err != nil || response.Status != "blocked" || response.Reason != "update_record_read" {
+		t.Fatalf("inspect did not reject the corrupt native intent: %s (%v)", out.String(), err)
+	}
+	err := cli.Run(t.Context(), append([]string{"internal", "core-run"}, args...))
 	t.Logf("internal core-run returned %v", err)
 	if desktopupdate.ErrorCode(err) != "update_record_read" {
 		t.Fatalf("internal Core did not consume the corrupt native intent: %v", err)

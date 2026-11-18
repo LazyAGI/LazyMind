@@ -1068,7 +1068,7 @@ func run(ctx context.Context) error {
 				if resourceUpdateEnabled {
 					resourceupdate.SetResolveChatLLM(chat.LoadDefaultChatLLMConfig)
 				}
-				backgroundDone = append(backgroundDone, updateControl.startResourceUpdates(runtimeCtx, store.DB(), store.State(), resourceupdate.DefaultConfig(), resourceupdate.EnabledFromEnv())...)
+				backgroundDone = append(backgroundDone, updateControl.startResourceUpdates(runtimeCtx, store.DB(), store.State(), resourceupdate.DefaultConfig(), resourceUpdateEnabled)...)
 				backgroundDone = append(backgroundDone, recovery.Start(runtimeCtx, store.DB(), recovery.DefaultCleanupInterval))
 
 				// Mark stale running SubAgent tasks (no heartbeat for >5m) as interrupted on startup.

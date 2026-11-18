@@ -4,6 +4,8 @@ import (
 	"errors"
 	"path/filepath"
 	"testing"
+
+	"github.com/mesotron7x/LazyMind/local/local-runtime-manager/internal/desktopupdate"
 )
 
 func TestWindowsRecoveryRootUsesLocalAppDataAndNeverRoaming(t *testing.T) {
@@ -13,13 +15,13 @@ func TestWindowsRecoveryRootUsesLocalAppDataAndNeverRoaming(t *testing.T) {
 	environment := map[string]string{"LOCALAPPDATA": local, "APPDATA": roaming}
 	called := false
 	getConfig := func() (string, error) { called = true; return roaming, nil }
-	got, err := recoveryBaseForPlatform("windows", func(key string) string { return environment[key] }, getConfig)
+	got, err := desktopupdate.RecoveryBaseForPlatform("windows", func(key string) string { return environment[key] }, getConfig)
 	if err != nil || got != local || called {
 		t.Fatalf("root=%q err=%v used roaming resolver=%v", got, err, called)
 	}
 	for _, value := range []string{"", "relative-path"} {
 		environment["LOCALAPPDATA"] = value
-		if got, err := recoveryBaseForPlatform("windows", func(key string) string { return environment[key] }, getConfig); err == nil || got != "" {
+		if got, err := desktopupdate.RecoveryBaseForPlatform("windows", func(key string) string { return environment[key] }, getConfig); err == nil || got != "" {
 			t.Fatalf("invalid local path %q fell back to %q", value, got)
 		}
 	}
@@ -30,12 +32,12 @@ func TestWindowsRecoveryRootUsesLocalAppDataAndNeverRoaming(t *testing.T) {
 
 func TestMacRecoveryRootKeepsApplicationSupportAndPropagatesErrors(t *testing.T) {
 	base := filepath.Join(t.TempDir(), "Application Support")
-	got, err := recoveryBaseForPlatform("darwin", func(string) string { t.Fatal("macOS consulted Windows environment"); return "" }, func() (string, error) { return base, nil })
+	got, err := desktopupdate.RecoveryBaseForPlatform("darwin", func(string) string { t.Fatal("macOS consulted Windows environment"); return "" }, func() (string, error) { return base, nil })
 	if err != nil || got != base {
 		t.Fatalf("root=%q err=%v", got, err)
 	}
 	want := errors.New("directory unavailable")
-	if _, err := recoveryBaseForPlatform("darwin", func(string) string { return "" }, func() (string, error) { return "", want }); !errors.Is(err, want) {
+	if _, err := desktopupdate.RecoveryBaseForPlatform("darwin", func(string) string { return "" }, func() (string, error) { return "", want }); !errors.Is(err, want) {
 		t.Fatalf("lookup failure hidden: %v", err)
 	}
 }

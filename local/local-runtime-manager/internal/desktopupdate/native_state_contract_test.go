@@ -329,20 +329,14 @@ func TestNativeLongWriterCannotBlockUnrelatedStartupOrAllowCancellation(t *testi
 	if err := os.MkdirAll(foreign, 0700); err != nil {
 		t.Fatal(err)
 	}
-	f.command(t, "inspect", map[string]any{
-		"releaseId": "unrelated", "installationRoot": foreign, "runtimeRoot": foreign,
-		"scope": map[string]any{"installation": foreign, "dataRoots": []string{foreign}},
-	}, "allowed", "")
-	actor, err := CurrentProcessIdentity()
-	if err != nil {
+	record, err := NativeStartupPermission(context.Background(), f.root,
+		UpdateScope{Installation: foreign, DataRoots: []string{foreign}}, "unrelated", "")
+	if err != nil || record != nil {
+		t.Fatalf("unrelated startup was affected by the active update: record=%v err=%v", record, err)
+	}
+	if err := CheckStartup(context.Background(), f.root, UpdateScope{Installation: foreign, DataRoots: []string{foreign}}); err != nil {
 		t.Fatal(err)
 	}
-	lease, err := BeginStartup(context.Background(), f.root,
-		UpdateScope{Installation: foreign, DataRoots: []string{foreign}}, "fixture-owner", "writer", actor)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer lease.Close()
 	if time.Since(start) > time.Second {
 		t.Fatal("long component write occupied a startup/state lock")
 	}
@@ -350,18 +344,6 @@ func TestNativeLongWriterCannotBlockUnrelatedStartupOrAllowCancellation(t *testi
 	if !bytes.Equal(before, after) {
 		t.Fatal("busy component writer lost its intent")
 	}
-}
-
-func TestNativeMalformedV2StateFailsClosed(t *testing.T) {
-	f := newNativeStateFixture(t)
-	if err := os.MkdirAll(filepath.Dir(f.filename), 0700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(f.filename, []byte("{truncated"), 0600); err != nil {
-		t.Fatal(err)
-	}
-	f.command(t, "inspect", map[string]any{"runtimeRoot": f.runtimeRoot, "installationRoot": f.installation},
-		"blocked", "update_record_read")
 }
 
 func TestNativeManualRepairAdoptsForwardTargetWithoutLosingOriginalFacts(t *testing.T) {

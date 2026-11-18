@@ -66,7 +66,7 @@ export async function prepareRelease({ resources, packagePath, baseURL, minimumS
     minimumSystemVersion, minUpdaterProtocol: config.updaterProtocol, updaterProtocol: config.updaterProtocol, signingIdentity: config.signingIdentity };
   const prefix = new URL(`releases/${config.releaseId}/`, base.href.endsWith("/") ? base.href : base.href + "/");
   for (const [kind, filename] of [["package", `package${extension}`], ["feed", "feed.json"], ["components", "components.json"]]) {
-    const { size, sha256 } = await fingerprint(path.join(directory, filename));
+    const { size, sha256 } = kind === "package" ? packageHash : await fingerprint(path.join(directory, filename));
     release[kind] = { url: new URL(filename, prefix).href, size, sha256 };
   }
   if (config.updaterProtocol === 2) {

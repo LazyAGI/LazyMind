@@ -60,6 +60,26 @@ test("unconfigured and failed checks are distinguishable from up to date", async
   assert.doesNotMatch(JSON.stringify(failed.updater.getState()), /private path/);
 });
 
+for (const [updaterProtocol, totalBytes] of [[undefined, 160], [1, 160], [2, 140]]) {
+  test(`the offer matches the download size for updater protocol ${updaterProtocol}`, async () => {
+    const decision = available();
+    decision.next.feed = { size: 20 };
+    decision.next.components = { size: 40 };
+    const f = fixture({ helper: async (command, _request, options) => {
+      if (command === "config") return { status: "enabled", config: { channel: "stable", updaterProtocol } };
+      if (command === "discover") return decision;
+      assert.equal(command, "download");
+      options.onProgress({ status: "downloading", downloadedBytes: totalBytes, totalBytes });
+      return { status: "downloaded", releaseId: "r2", packagePath: "/fixture/cache/package.zip" };
+    } });
+    const offer = await f.updater.check();
+    const downloaded = await f.updater.download(offer.releaseId);
+    assert.equal(downloaded.phase, "downloaded");
+    assert.equal(downloaded.downloadedBytes, totalBytes);
+    assert.equal(offer.totalBytes, downloaded.totalBytes);
+  });
+}
+
 test("double download click does not start another helper or execute an installer", async () => {
   const gate = deferred();
   let reveal;
@@ -170,34 +190,52 @@ for (const [sample, minutes] of [[0, 25], [0.5, 30], [1, 35]]) test(`background 
   await timers[1].callback(); assert.equal(calls.filter((command) => command === "discover").length, 2);
 });
 
+const updateActions = [
+  ["status", "updateStatus"], ["check", "updateCheck"], ["download", "updateDownload", true],
+  ["cancel", "updateCancel"], ["reveal", "updateReveal"], ["resume", "updateResume"],
+  ["install", "updateInstall", true], ["later", "updateLater"],
+];
+
 test("update IPC verifies the actual main frame and origin before every privileged action", async () => {
-  const handlers = new Map(); const f = fixture();
+  const handlers = new Map(); const f = fixture(); const forwarded = [];
   const frame = { url: "http://127.0.0.1:3131/settings" };
   const contents = { mainFrame: frame, isDestroyed: () => false };
   const window = { webContents: contents, isDestroyed: () => false };
-  registerUpdateIPC({ ipcMain: { handle: (name, handler) => handlers.set(name, handler) }, updater: f.updater,
+  const updater = { ...f.updater,
+    resumeDownload: (...args) => { forwarded.push(["resume", ...args]); return { phase: "checking" }; },
+    install: (...args) => forwarded.push(["install", ...args]),
+    later: (...args) => forwarded.push(["later", ...args]),
+  };
+  registerUpdateIPC({ ipcMain: { handle: (name, handler) => handlers.set(name, handler) }, updater,
     authorize: (event) => isTrustedNotificationSender(event, window, "http://127.0.0.1:3131") });
-  for (const name of ["status", "check", "download", "cancel", "reveal"]) {
+  for (const [name] of updateActions) {
     const handler = handlers.get(`lazymind:update:${name}`);
     assert.equal(typeof handler, "function");
     for (const event of [{ sender: {}, senderFrame: frame }, { sender: contents, senderFrame: {} }]) {
-      await assert.rejects(async () => handler(event, "r2"));
+      await assert.rejects(handler(event, "r2"), { code: "update_sender_untrusted" });
     }
     frame.url = "https://attacker.invalid";
-    await assert.rejects(async () => handler({ sender: contents, senderFrame: frame }, "r2"));
+    await assert.rejects(handler({ sender: contents, senderFrame: frame }, "r2"), { code: "update_sender_untrusted" });
     frame.url = "http://127.0.0.1:3131/settings";
   }
   assert.equal(f.calls.length, 0);
-  await handlers.get("lazymind:update:check")({ sender: contents, senderFrame: frame });
+  assert.deepEqual(forwarded, []);
+  const event = { sender: contents, senderFrame: frame };
+  await handlers.get("lazymind:update:check")(event);
   assert.equal(f.updater.getState().phase, "available");
+  assert.deepEqual(await handlers.get("lazymind:update:resume")(event, { url: "https://ignored.invalid/" }), { phase: "checking" });
+  await handlers.get("lazymind:update:install")(event, "r2");
+  await handlers.get("lazymind:update:later")(event);
+  assert.deepEqual(forwarded, [["resume"], ["install", "r2"], ["later"]]);
 });
 
 test("preload exposes only fixed update commands and cleans event listeners", async () => {
   const calls = []; const listeners = new Map();
   const bridge = createDesktopBridge({ invoke: async (...args) => { calls.push(args); },
     on: (name, listener) => listeners.set(name, listener), removeListener: (name, listener) => { assert.equal(listeners.get(name), listener); listeners.delete(name); } });
-  await bridge.updateStatus(); await bridge.updateCheck(); await bridge.updateDownload("r2"); await bridge.updateCancel(); await bridge.updateReveal();
-  assert.deepEqual(calls, [["lazymind:update:status"], ["lazymind:update:check"], ["lazymind:update:download", "r2"], ["lazymind:update:cancel"], ["lazymind:update:reveal"]]);
+  for (const [, method] of updateActions) await bridge[method]("r2");
+  assert.deepEqual(calls, updateActions.map(([name, , sendReleaseId]) =>
+    sendReleaseId ? [`lazymind:update:${name}`, "r2"] : [`lazymind:update:${name}`]));
   let received; const unsubscribe = bridge.onUpdateState((state) => { received = state; });
   listeners.get("lazymind:update:state")({ sender: "must not escape" }, { phase: "available" });
   assert.deepEqual(received, { phase: "available" }); unsubscribe(); assert.equal(listeners.size, 0);

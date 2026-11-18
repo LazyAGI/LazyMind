@@ -30,7 +30,7 @@ function fixture(t, check) {
   const u = createDesktopUpdater({ currentVersion: "1.0.0", installIntent: store, downloadIntent: download, runtime,
     clock: { setTimeout(fn, ms) { const timer = { fn, ms }; timers.add(timer); return timer; }, clearTimeout(t) { timers.delete(t); } },
     readLocalState: async () => ({ dataProfile: "fixture", dirty: false }),
-    nativeInstaller: { capability: () => ({ supported: true }), dispose() {}, async discardPreparation() { calls.push("discard"); },
+    nativeInstaller: { capability: () => ({ supported: true }), dispose() {},
       async prepare() { calls.push("prepare"); return { async install() { calls.push("install"); return { handoff: true }; } }; } },
     invokeHelper: async command => command === "config" ? { status: "enabled", config: { version: "1.0.0" } }
       : command === "discover" ? { status: "direct", next: target, route: [target.releaseId] } : receipt,

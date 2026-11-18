@@ -42,15 +42,12 @@ func loadUpdateBootstrap(tx, owner, raw string) (*updateBootstrapContext, error)
 
 // Generated recipe hashes come from isolated actual schema owners.
 // This inspection never creates a database or executes a migration.
-func verifyBootstrapDatabase(ctx context.Context, filename, want string, core, optional bool) error {
+func verifyBootstrapDatabase(ctx context.Context, filename, want string) error {
 	fail := func() error { return errors.New("update_bootstrap_invalid") }
 	if !filepath.IsAbs(filename) {
 		return fail()
 	}
 	info, err := os.Stat(filename)
-	if os.IsNotExist(err) && optional {
-		return nil
-	}
 	if err != nil || !info.Mode().IsRegular() {
 		return fail()
 	}
@@ -100,34 +97,6 @@ func verifyBootstrapDatabase(ctx context.Context, filename, want string, core, o
 	if err != nil {
 		return fail()
 	}
-	if core {
-		var version uint64
-		var dirty bool
-		var count int
-		if tx.QueryRowContext(ctx, "SELECT count(*) FROM schema_migrations").Scan(&count) != nil || count != 1 || tx.QueryRowContext(ctx, "SELECT version,dirty FROM schema_migrations").Scan(&version, &dirty) != nil || dirty {
-			return fail()
-		}
-		field(strconv.FormatUint(version, 10))
-		history, err := tx.QueryContext(ctx, "SELECT version,name FROM schema_migration_history ORDER BY version")
-		if err != nil {
-			return fail()
-		}
-		for history.Next() {
-			var v uint64
-			var name string
-			if history.Scan(&v, &name) != nil {
-				history.Close()
-				return fail()
-			}
-			field(strconv.FormatUint(v, 10))
-			field(name)
-		}
-		err = history.Err()
-		history.Close()
-		if err != nil {
-			return fail()
-		}
-	}
 	if hex.EncodeToString(hash.Sum(nil)) != want {
 		return fail()
 	}
@@ -138,10 +107,10 @@ func verifyOwnBootstrapStorage(ctx context.Context, b *updateBootstrapContext) e
 	if b == nil {
 		return nil
 	}
-	if err := verifyBootstrapDatabase(ctx, b.Databases["scan"], expectedScanFormatSHA, false, false); err != nil {
+	if err := verifyBootstrapDatabase(ctx, b.Databases["scan"], expectedScanFormatSHA); err != nil {
 		return err
 	}
-	if err := verifyBootstrapDatabase(ctx, b.Databases["scan-state"], expectedScanStateFormatSHA, false, false); err != nil {
+	if err := verifyBootstrapDatabase(ctx, b.Databases["scan-state"], expectedScanStateFormatSHA); err != nil {
 		return err
 	}
 	return nil

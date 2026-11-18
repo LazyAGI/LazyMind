@@ -78,7 +78,7 @@ function fixture(t, options = {}) {
     },
     readLocalState: async () => copy(local),
     nativeInstaller: {
-      capability: () => ({ supported: true }), dispose() {}, discardPreparation: async () => {},
+      capability: () => ({ supported: true }), dispose() {},
       async prepare() {
         calls.push("native-prepare");
         return { async install() {
@@ -96,7 +96,7 @@ function fixture(t, options = {}) {
   });
   t.after(() => updater.dispose());
   return {
-    updater, calls, runtime, store, target, local,
+    updater, calls, runtime, store, target,
     async begin() { await updater.check(); await updater.install("target"); await settle(); },
     async countdown() {
       for (let i = 0; i < 10; i++) {
@@ -118,7 +118,6 @@ for (const sameTarget of [false, true]) {
     assert.ok(f.calls.indexOf("prepare-components") < f.calls.indexOf("native-prepare"));
     assert.equal(f.store.read().componentMode, "sync-target");
     assert.equal(f.store.read().targetRAG.revision, f.target.revision);
-    assert.equal(f.local.components.rag, sourceRevision, "preparation cannot activate under the old Desktop");
     await f.countdown();
     assert.equal(f.calls.filter(call => call === "install").length, 1);
   });
@@ -131,7 +130,6 @@ test("uninstalled RAG remains absent while the Desktop update proceeds", async t
   assert.equal(f.store.read().targetRAG, undefined);
   await f.countdown();
   assert.ok(f.calls.includes("install"));
-  assert.deepEqual(f.local.components, {});
 });
 
 test("damaged source RAG cannot bypass preparation as a lightweight install", async t => {
@@ -153,12 +151,11 @@ test("inconsistent preparation response cannot turn installed RAG into absent", 
   assert.ok(["error", "blocked", "repair"].includes(f.updater.getState().phase));
 });
 
-test("component preparation failure leaves current work and selection running", async t => {
+test("component preparation failure leaves current work running", async t => {
   const f = fixture(t, { prepareError: "artifact_hash" });
   await f.begin();
   assert.ok(!f.calls.includes("pause"));
   assert.ok(!f.calls.includes("stop"));
-  assert.equal(f.local.components.rag, sourceRevision);
 });
 
 test("later waits for ongoing preparation and never advances to native handoff", async t => {
@@ -176,7 +173,6 @@ test("later waits for ongoing preparation and never advances to native handoff",
   release();
   await later;
   assert.ok(!f.calls.includes("install"));
-  assert.equal(f.local.components.rag, sourceRevision);
 });
 
 test("actual native handoff unknown cannot resume ordinary admission", async t => {

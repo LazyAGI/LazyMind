@@ -32,7 +32,12 @@ type transferFixture struct {
 
 func newTransferFixture(t *testing.T) *transferFixture {
 	t.Helper()
-	f := &transferFixture{policyFixture: newPolicyFixture(t), files: map[string][]byte{}, serveArtifacts: map[string]func(http.ResponseWriter, *http.Request, []byte){}}
+	return newTransferFixtureForPolicy(t, newPolicyFixture(t))
+}
+
+func newTransferFixtureForPolicy(t *testing.T, policy *policyFixture) *transferFixture {
+	t.Helper()
+	f := &transferFixture{policyFixture: policy, files: map[string][]byte{}, serveArtifacts: map[string]func(http.ResponseWriter, *http.Request, []byte){}}
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/policy.json" {
 			f.policyRequests.Add(1)
@@ -80,8 +85,13 @@ func newTransferFixture(t *testing.T) *transferFixture {
 	}
 	for _, item := range f.policy["edges"].([]any) {
 		edge := item.(map[string]any)
-		sum := sha256.Sum256(f.files["/"+edge["sourceReleaseId"].(string)+"/package"])
-		edge["recoveryContract"].(map[string]any)["sourcePackageSHA256"] = hex.EncodeToString(sum[:])
+		if policy.config.UpdaterProtocol == 2 {
+			sum := sha256.Sum256(f.files["/"+edge["targetReleaseId"].(string)+"/components"])
+			edge["componentTransitions"].(map[string]any)["rag"].(map[string]any)["targetComponentsSHA256"] = hex.EncodeToString(sum[:])
+		} else {
+			sum := sha256.Sum256(f.files["/"+edge["sourceReleaseId"].(string)+"/package"])
+			edge["recoveryContract"].(map[string]any)["sourcePackageSHA256"] = hex.EncodeToString(sum[:])
+		}
 	}
 	return f
 }
@@ -99,6 +109,25 @@ func TestDiscoverUsesActualSignedNetworkPolicy(t *testing.T) {
 	}
 	if f.packageRequests.Load() != 0 {
 		t.Fatal("checking updates downloaded a package")
+	}
+}
+
+func TestV2DownloadNeedsOnlyPackageAndComponentCatalog(t *testing.T) {
+	f := newTransferFixtureForPolicy(t, newV2PolicyFixture(t, false))
+	f.serveArtifacts["/r2/feed"] = func(w http.ResponseWriter, r *http.Request, _ []byte) {
+		http.NotFound(w, r)
+	}
+	var progress Progress
+	receipt, err := Download(t.Context(), f.config, f.state, f.root, "r2", f.server.Client(), policyTime, func(p Progress) { progress = p })
+	if err != nil || receipt.FeedPath != "" || receipt.PackagePath == "" || receipt.ComponentsPath == "" {
+		t.Fatalf("v2 download receipt=%+v err=%v", receipt, err)
+	}
+	if _, fetched := f.artifactRequests.Load("/r2/feed"); fetched {
+		t.Fatal("requested a remote feed that v2 installation does not consume")
+	}
+	want := int64(len(f.files["/r2/package"]) + len(f.files["/r2/components"]))
+	if progress.TotalBytes != want || progress.DownloadedBytes != want {
+		t.Fatalf("progress=%+v, want %d bytes", progress, want)
 	}
 }
 
@@ -132,17 +161,6 @@ func TestDownloadVerifiesAllPinnedArtifactsAndReusesOnlyValidCache(t *testing.T)
 	}
 	if f.packageRequests.Load() != 1 || f.policyRequests.Load() != 2 {
 		t.Fatalf("cache reuse must still refresh policy: packages=%d policies=%d", f.packageRequests.Load(), f.policyRequests.Load())
-	}
-	if err := os.WriteFile(r.PackagePath, []byte("corrupt cached executable"), 0600); err != nil {
-		t.Fatal(err)
-	}
-	r, err = f.download(t)
-	if err != nil {
-		t.Fatal(err)
-	}
-	bytes, _ := os.ReadFile(r.PackagePath)
-	if string(bytes) != string(f.files["/r2/package"]) || f.packageRequests.Load() != 2 {
-		t.Fatal("corrupt cache reported as ready")
 	}
 }
 

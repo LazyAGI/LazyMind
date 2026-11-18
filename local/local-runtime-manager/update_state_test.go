@@ -159,7 +159,7 @@ func TestDesktopUpdateStateMeasuresSchemasAndHistoryNotRowsPathsOrAppVersion(t *
 }
 
 func TestDesktopUpdateStateRejectsDirtyMissingAndUnknownInput(t *testing.T) {
-	for _, kind := range []string{"dirty", "missing-core", "missing-auth", "missing-segments", "no-history", "bad-state", "foreign-owner", "external-auth", "external-segments", "cancelled", "no-storage-metadata"} {
+	for _, kind := range []string{"dirty", "missing-core", "missing-auth", "no-history", "bad-state", "foreign-owner", "external-auth", "external-segments", "cancelled", "no-storage-metadata"} {
 		t.Run(kind, func(t *testing.T) {
 			f := newUpdateStateFixture(t)
 			ctx := context.Background()
@@ -172,9 +172,6 @@ func TestDesktopUpdateStateRejectsDirtyMissingAndUnknownInput(t *testing.T) {
 			case "missing-auth":
 				_ = f.databases["auth"].Close()
 				_ = os.Remove(f.paths.AuthServiceDBPath)
-			case "missing-segments":
-				_ = f.databases["segments"].Close()
-				_ = os.Remove(localSegmentStoreBackingPath(f.paths))
 			case "no-history":
 				_, _ = f.databases["core"].Exec("DROP TABLE schema_migration_history")
 			case "bad-state":

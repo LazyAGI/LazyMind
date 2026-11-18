@@ -59,20 +59,16 @@ func runtimeUpdateScope(cfg RuntimeConfig, paths RuntimePaths) (desktopupdate.Up
 	sort.Strings(scope.DataRoots)
 	return scope, nil
 }
-func registerRuntimeUpdateLease(ctx context.Context, cfg RuntimeConfig, paths RuntimePaths) (*desktopupdate.StartupLease, error) {
+func checkRuntimeUpdateAdmission(ctx context.Context, cfg RuntimeConfig, paths RuntimePaths) error {
 	root, err := resolveRuntimeRecoveryRoot()
 	if err != nil {
-		return nil, err
+		return err
 	}
 	scope, err := runtimeUpdateScope(cfg, paths)
 	if err != nil {
-		return nil, err
+		return err
 	}
-	actor, err := desktopupdate.CurrentProcessIdentity()
-	if err != nil {
-		return nil, err
-	}
-	return desktopupdate.BeginStartup(ctx, root, scope, cfg.OwnerToken, "writer", actor)
+	return desktopupdate.CheckStartup(ctx, root, scope)
 }
 func registerDesktopUpdateCoordinator(ctx context.Context, cfg RuntimeConfig, paths RuntimePaths) error {
 	if err := nativeShellStartup(ctx, cfg, paths); err != nil {
@@ -90,15 +86,12 @@ func registerDesktopUpdateCoordinator(ctx context.Context, cfg RuntimeConfig, pa
 	if err != nil {
 		return err
 	}
-	_, err = desktopupdate.BeginStartup(ctx, root, scope, cfg.OwnerToken, "coordinator", actor)
-	return err
+	return desktopupdate.RegisterCoordinatorScope(ctx, root, scope, cfg.OwnerToken, actor)
 }
 
-func withRuntimeUpdateLease(ctx context.Context, cfg RuntimeConfig, paths RuntimePaths, action func() error) error {
-	lease, err := registerRuntimeUpdateLease(ctx, cfg, paths)
-	if err != nil {
+func withRuntimeUpdateAdmission(ctx context.Context, cfg RuntimeConfig, paths RuntimePaths, action func() error) error {
+	if err := checkRuntimeUpdateAdmission(ctx, cfg, paths); err != nil {
 		return err
 	}
-	defer lease.Close()
 	return action()
 }

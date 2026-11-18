@@ -70,10 +70,9 @@ func TestCoreStartsResourceUpdateRuntime(t *testing.T) {
 	}
 	content := string(body)
 	for _, token := range []string{
-		"resourceupdate.EnabledFromEnv()",
+		"resourceUpdateEnabled := resourceupdate.EnabledFromEnv()",
 		"resourceupdate.LogStartup(resourceUpdateEnabled)",
 		"resourceupdate.SetResolveChatLLM(chat.LoadDefaultChatLLMConfig)",
-		"updateControl.startResourceUpdates(runtimeCtx, store.DB(), store.State(), resourceupdate.DefaultConfig(), resourceupdate.EnabledFromEnv())",
 	} {
 		if !strings.Contains(content, token) {
 			t.Fatalf("core main must wire resource update runtime: missing %q", token)

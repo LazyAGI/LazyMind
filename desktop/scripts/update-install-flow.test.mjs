@@ -5,7 +5,7 @@ import { mkdtempSync, rmSync, writeFileSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 const require = createRequire(import.meta.url);
-const { createDesktopUpdater, registerUpdateIPC } = require("../electron/src/update-controller");
+const { createDesktopUpdater } = require("../electron/src/update-controller");
 const { createDownloadIntentStore } = require("../electron/src/update-download-intent");
 const { createInstallIntentStore } = require("../electron/src/update-install-intent");
 const { createUpdateRuntimeClient } = require("../electron/src/update-runtime-client");
@@ -125,10 +125,4 @@ test("runtime bridge locks local admission before remote pause and validates all
   assert.equal((await client.status()).active, 2); remote = { active: 1, paused: true, epoch: 4 }; assert.equal((await client.pause(4)).active, 3); assert.equal(calls.at(-1)[2], false);
   await assert.rejects(client.stop(4), { code: "tasks_active" }); remote = { active: 0, paused: false, epoch: 0 }; await client.resume(4); assert.equal(open, true);
   remote = {}; await assert.rejects(client.status(), { code: "task_state_unknown" });
-});
-test("install and later IPC require the trusted main frame", async () => {
-  const handlers = new Map(); let called = 0;
-  registerUpdateIPC({ ipcMain: { handle: (name, fn) => handlers.set(name, fn) }, updater: { install: () => { called++; }, later: () => { called++; } }, authorize: event => event.trusted });
-  for (const name of ["install", "later"]) await assert.rejects(handlers.get(`lazymind:update:${name}`)({ trusted: false }, release.releaseId), { code: "update_sender_untrusted" });
-  assert.equal(called, 0); await handlers.get("lazymind:update:install")({ trusted: true }, release.releaseId); assert.equal(called, 1);
 });
