@@ -50,7 +50,7 @@ export interface Schedule {
   file_ids?: string[];
   group_id?: string;
   group_position: number;
-  dependencies?: ScheduleDependency[];
+  dependencies?: ScheduleDependency[] | null;
   enabled: boolean;
   run_count: number;
   last_run_at?: string;

@@ -12,8 +12,9 @@ const mainSource = readFileSync(
 );
 
 function ipcHandler(channel, nextChannel) {
-  const start = mainSource.indexOf(`ipcMain.handle("${channel}"`);
-  const end = mainSource.indexOf(`ipcMain.handle("${nextChannel}"`, start + 1);
+  const start = mainSource.indexOf(`handleDesktopWork("${channel}"`);
+  const registration = nextChannel === "lazymind:selectExecutable" ? "ipcMain.handle" : "handleDesktopWork";
+  const end = mainSource.indexOf(`${registration}("${nextChannel}"`, start + 1);
   assert.ok(start >= 0, `missing ${channel} IPC handler`);
   assert.ok(end > start, `cannot locate end of ${channel} IPC handler`);
   return mainSource.slice(start, end);
@@ -72,7 +73,7 @@ test("Desktop reauthorization validates the selected directory and returns a usa
   vm.runInNewContext(ipcHandler(
     "lazymind:reauthorizeLocalWorkspace", "lazymind:authorizeLocalWorkspace",
   ), {
-    ipcMain: { handle: (_channel, callback) => { handler = callback; } },
+    handleDesktopWork: (_channel, callback) => { handler = callback; },
     desktopWorkspaceRuntime: async () => ({ corePort: 8080, session: {}, userId: "user" }),
     fetch: async () => ({ ok: true, json: async () => ({ code: 0, data: {
       canonical_path: "stored-project", display_name: "Project",

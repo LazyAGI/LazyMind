@@ -1,10 +1,10 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { beforeEach, vi } from "vitest";
+import { beforeEach, expect, it, vi } from "vitest";
 import AddLearningContentModal from "./AddLearningContentModal";
 import * as api from "./api";
 
 vi.mock("./api",()=>({getLearningCatalog:vi.fn(),listLearningBooks:vi.fn(),resolveLearningContent:vi.fn(),createLearningBook:vi.fn()}));
-const capability={key:"classical_definition",version:1,name_i18n_key:"文言解释",description_i18n_key:"",local_only:true,languages:["lzh"],subject_kinds:["word"],provider_pipeline:[],allowed_question_types:["text_input"],default_question_types:["text_input"],fields:[{key:"meaning_in_context",type:"text",label_i18n_key:"语境义",help_i18n_key:"",required:true,editable:true}]};
+const capability={key:"classical_definition",version:1,name_i18n_key:"文言解释",description_i18n_key:"",local_only:true,cache_policy:{default_scope:"context",allowed_scopes:["context"],context_sensitive:true},languages:["lzh"],subject_kinds:["word"],provider_pipeline:[],allowed_question_types:["text_input"],default_question_types:["text_input"],fields:[{key:"meaning_in_context",type:"text",label_i18n_key:"语境义",help_i18n_key:"",required:true,editable:true}]};
 
 beforeEach(()=>vi.clearAllMocks());
 

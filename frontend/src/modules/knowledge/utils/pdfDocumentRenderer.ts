@@ -1,7 +1,7 @@
 import { jsPDF } from "jspdf";
 import { getCjkFont } from "./pdfFont";
 import { pdfjs } from "react-pdf";
-import type { PDFPageProxy } from "pdfjs-dist";
+type PDFPageProxy = Awaited<ReturnType<Awaited<ReturnType<typeof pdfjs.getDocument>["promise"]>["getPage"]>>;
 import { isRasterLayoutBlock, validatePdfLayoutBlocks, type PdfLayoutBlock } from "../api/pdfArtifacts";
 
 export interface PdfRenderProgress { page: number; pages: number; progress: number; stage?: "font" | "render" }

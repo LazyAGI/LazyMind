@@ -275,7 +275,8 @@ func coreServiceEnv(cfg RuntimeConfig, paths RuntimePaths) ([]string, error) {
 		"LAZYMIND_MCP_SECRET_KEY=" + envText("LAZYMIND_MCP_SECRET_KEY", "lazymind-core-mcp-default-secret"),
 	}
 	environment = append(environment, pythonComponentEnvironment(paths, cfg.Algorithm.RAGDisabled)...)
-	return append(environment, feishuCLIRuntimeEnv(paths)...), nil
+	environment = append(environment, feishuCLIRuntimeEnv(paths)...)
+	return append(environment, bootstrapStateEnvironment(cfg, "core-state")...), nil
 }
 
 func feishuCLIRuntimeEnv(paths RuntimePaths) []string {

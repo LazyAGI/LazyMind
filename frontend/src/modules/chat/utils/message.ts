@@ -12,6 +12,7 @@ import type {
 } from "@/api/generated/core-client";
 import { RoleTypes } from "@/modules/chat/constants/common";
 import { splitModelOutputContent, splitThinkingContent } from "@/modules/chat/utils/thinking";
+import type { ChatMessage } from "@/modules/chat/components/newChatContainer/types";
 import type { ChatMention } from "@/modules/chat/components/ChatInput/MentionEditor";
 import type { ChatSourceCollection } from "@/modules/chat/utils/sourceAdapter";
 import { mailConfirmationMetadata, mailConfirmationTurnSignature, type MailConfirmationMetadata } from "./mailConfirmationReplay";
@@ -186,6 +187,9 @@ export type ConversationHistoryRecord = Omit<
     second_thinking_time_s?: number | string;
     tool_call_turns?: number | string;
     mentions?: ChatMention[] | null;
+    ask_pending?: ChatMessage["ask_pending"];
+    ask_answered?: ChatMessage["ask_answered"];
+    ask_saved_answers?: ChatMessage["ask_saved_answers"];
     mail_confirmation?: MailConfirmationMetadata;
     execution?: ExternalExecutionProjection;
     external_user_only?: boolean;

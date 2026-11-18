@@ -1,0 +1,96 @@
+import assert from "node:assert/strict";
+import { generateKeyPairSync } from "node:crypto";
+import { execFileSync } from "node:child_process";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import test from "node:test";
+import { fileURLToPath } from "node:url";
+import { prepareUpdateBuildConfig, readUpdateBuildConfig } from "./prepare-update-build-config.mjs";
+
+function options() {
+  const key = generateKeyPairSync("ed25519").publicKey.export({ type: "spki", format: "der" }).subarray(-32).toString("base64");
+  return { packageVersion: "1.0.0", platform: "darwin", arch: "arm64", signingMode: "developer-id",
+    configuration: { trustDomain: "fixture", audience: "official", channel: "stable", mode: "official", releaseId: "fixture-1.0.0", signingIdentity: "FIXTURE_TEAM", updaterProtocol: 1,
+      policyURL: "https://updates.example.invalid/policy.json", allowedOrigins: ["https://updates.example.invalid"], publicKeys: { key } } };
+}
+
+test("an unconfigured build stays disabled without inventing trust keys or a source", () => {
+  assert.equal(prepareUpdateBuildConfig({ ...options(), configuration: undefined }), "");
+});
+
+test("public update config is bound to the actual package version and target", () => {
+  const input = options();
+  const result = JSON.parse(Buffer.from(prepareUpdateBuildConfig(input), "base64").toString("utf8"));
+  assert.equal(result.version, "1.0.0"); assert.equal(result.platform, "darwin"); assert.equal(result.arch, "arm64");
+  assert.deepEqual(result.publicKeys, input.configuration.publicKeys);
+  for (const mismatch of [{ version: "2.0.0" }, { platform: "windows" }, { arch: "amd64" }]) {
+    assert.throws(() => prepareUpdateBuildConfig({ ...input, configuration: { ...input.configuration, ...mismatch } }), /mismatch/);
+  }
+});
+
+test("update sources are supplied by the build and never replaced with a personal source", () => {
+  for (const origin of ["https://mirror.example.invalid", "https://updates.example.invalid"]) {
+    const input = options();
+    input.configuration.policyURL = `${origin}/channel/stable.json`;
+    input.configuration.allowedOrigins = [origin];
+    const result = JSON.parse(Buffer.from(prepareUpdateBuildConfig(input), "base64").toString("utf8"));
+    assert.equal(result.policyURL, input.configuration.policyURL);
+    assert.deepEqual(result.allowedOrigins, [origin]);
+  }
+});
+
+test("official configuration cannot be embedded in unsigned packages or stable prereleases", () => {
+  const input = options();
+  for (const signingMode of ["adhoc", "none", ""]) assert.throws(() => prepareUpdateBuildConfig({ ...input, signingMode }), /sign/);
+  assert.throws(() => prepareUpdateBuildConfig({ ...input, packageVersion: "1.1.0-alpha.1" }), /channel/);
+  assert.throws(() => prepareUpdateBuildConfig({ ...input, platform: "windows", arch: "amd64", signingMode: "none" }), /sign/);
+});
+
+test("normal builds reject local test mode even with the old opt-in flag", () => {
+  const input = options();
+  assert.throws(() => prepareUpdateBuildConfig({ ...input, allowUnsignedTest: true,
+    configuration: { ...input.configuration, mode: "unsigned-test" } }), /Invalid update mode/);
+});
+
+test("unknown build fields cannot accidentally embed a private key", () => {
+  const input = options();
+  assert.throws(() => prepareUpdateBuildConfig({ ...input, configuration: { ...input.configuration, privateKey: "DO-NOT-EMBED" } }), /unknown/i);
+});
+
+test("the build CLI emits only the public configuration consumed by both platform builds", (t) => {
+  const root = mkdtempSync(path.join(os.tmpdir(), "lm-update-config-")); t.after(() => rmSync(root, { recursive: true, force: true }));
+  const configPath = path.join(root, "public.json"), packagePath = path.join(root, "package.json");
+  const input = options(); writeFileSync(configPath, JSON.stringify(input.configuration)); writeFileSync(packagePath, JSON.stringify({ version: input.packageVersion }));
+  const output = execFileSync(process.execPath, [fileURLToPath(new URL("./prepare-update-build-config.mjs", import.meta.url)),
+    "--platform", "darwin", "--arch", "arm64", "--signing-mode", "developer-id", "--package", packagePath],
+    { encoding: "utf8", env: { ...process.env, LAZYMIND_DESKTOP_UPDATE_CONFIG: configPath } }).trim();
+  const value = JSON.parse(Buffer.from(output, "base64").toString("utf8"));
+  assert.equal(value.releaseId, "fixture-1.0.0"); assert.equal(value.version, "1.0.0");
+  for (const file of ["build-darwin-arm64.sh", "build-windows-x64.ps1"]) {
+    const source = readFileSync(new URL(`./${file}`, import.meta.url), "utf8");
+    assert.ok(source.includes("prepare-update-build-config.mjs"), `${file} must prepare fixed build config`);
+    assert.ok(source.includes("main.embeddedConfig="), `${file} must embed the validated configuration`);
+    assert.match(source, /cmd[\\/]update-helper/);
+  }
+});
+
+ test("build JSON and file inputs are exclusive and produce the same public configuration", t => {
+  const dir = mkdtempSync(path.join(os.tmpdir(), "lm-public-input-"));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const config = options().configuration;
+  const file = path.join(dir, "public.json"); writeFileSync(file, JSON.stringify(config));
+  assert.deepEqual(readUpdateBuildConfig({ LAZYMIND_DESKTOP_UPDATE_CONFIG_JSON: JSON.stringify(config) }), config);
+  assert.deepEqual(readUpdateBuildConfig({ LAZYMIND_DESKTOP_UPDATE_CONFIG: file }), config);
+  assert.equal(readUpdateBuildConfig({}), undefined);
+  assert.throws(() => readUpdateBuildConfig({ LAZYMIND_DESKTOP_UPDATE_CONFIG: file, LAZYMIND_DESKTOP_UPDATE_CONFIG_JSON: "{}" }), /only one/);
+  assert.throws(() => readUpdateBuildConfig({ LAZYMIND_DESKTOP_UPDATE_CONFIG_JSON: "not-json" }), /Unable/);
+});
+
+test("omitted release identity is bound to platform, architecture and package version", () => {
+  const input = options(); delete input.configuration.releaseId;
+  for (const version of ["1.2.3", "1.2.4+build.1"]) {
+    const config = JSON.parse(Buffer.from(prepareUpdateBuildConfig({ ...input, packageVersion: version }), "base64").toString());
+    assert.equal(config.releaseId, `darwin-arm64-${version.replace(/\+/g, "_")}`);
+  }
+});

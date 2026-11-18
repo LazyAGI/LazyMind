@@ -58,7 +58,7 @@ afterEach(cleanup);
 const show = (slot: SlotRevision, readOnly = false) => render(<SlotRenderer slot={slot} sessionId='history-fixture'
   slotId='flat_draft_document' revisionCount={3} readOnly={readOnly} />);
 async function openHistory() {
-  fireEvent.click(await screen.findByRole('button', { name: '版本历史', exact: true }));
+  fireEvent.click(await screen.findByRole('button', { name: '版本历史' }));
   return screen.findByRole('dialog');
 }
 async function applyFirstVersion() {
@@ -70,7 +70,7 @@ async function applyFirstVersion() {
 it.each(['markdown', 'ir'] as const)('shows history in the %s toolbar and previews version differences', async representation => {
   const view = show(slotFor(representation));
   const dialog = await openHistory();
-  expect(view.container.querySelector('.writer-document-toolbar')).toContainElement(screen.getByRole('button', { name: '版本历史', exact: true }));
+  expect(view.container.querySelector('.writer-document-toolbar')).toContainElement(screen.getByRole('button', { name: '版本历史' }));
   expect(api.getSlotItemVersions).toHaveBeenCalledWith('history-fixture', 'flat_draft_document', -1);
   expect(within(dialog).getAllByRole('option')).toHaveLength(3);
   await waitFor(() => expect(dialog).toHaveTextContent('Version'));

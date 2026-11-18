@@ -69,7 +69,6 @@ import KnowledgeLibraryLogo from "@/modules/knowledge/components/KnowledgeLibrar
 import TextIndexManager from "@/modules/knowledge/components/TextIndexManager";
 import FileUtils from "@/modules/knowledge/utils/file";
 import {
-  effectiveProcessingLevel,
   type ProcessingLevel,
 } from "@/modules/knowledge/utils/processingLevel";
 import { isPaperLibrary } from "@/modules/knowledge/paper/store";

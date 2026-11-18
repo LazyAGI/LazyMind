@@ -94,6 +94,7 @@ function createRecordingHelper({ source, root, onEvent = () => {}, log = () => {
     });
   }
   return {
+    isActive: () => active,
     async start() {
       if (active) throw new Error('recording-busy');
       // A fresh permission-owning process sees newly granted TCC permissions.

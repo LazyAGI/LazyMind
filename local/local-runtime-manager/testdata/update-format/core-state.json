@@ -1,0 +1,42 @@
+{
+  "producer": "backend/core/state.NewSQLiteStore",
+  "sourceCommit": "70b5b4835c4e01fce60e87b91ba86b613893df41",
+  "lazyllmCommit": "d53007dd95ce5f9180399a095cf81fb0b643093a",
+  "shape": {
+    "present": true,
+    "applicationId": 0,
+    "userVersion": 0,
+    "schema": [
+      {
+        "type": "index",
+        "name": "idx_state_list_key_id",
+        "table": "state_list",
+        "sql": "CREATE INDEX idx_state_list_key_id ON state_list(key, id)"
+      },
+      {
+        "type": "table",
+        "name": "state_hash",
+        "table": "state_hash",
+        "sql": "CREATE TABLE state_hash (key TEXT NOT NULL, field TEXT NOT NULL, value BLOB NOT NULL, expires_at INTEGER NOT NULL, PRIMARY KEY (key, field))"
+      },
+      {
+        "type": "table",
+        "name": "state_kv",
+        "table": "state_kv",
+        "sql": "CREATE TABLE state_kv (key TEXT PRIMARY KEY, value BLOB NOT NULL, expires_at INTEGER NOT NULL)"
+      },
+      {
+        "type": "table",
+        "name": "state_list",
+        "table": "state_list",
+        "sql": "CREATE TABLE state_list (id INTEGER PRIMARY KEY AUTOINCREMENT, key TEXT NOT NULL, value BLOB NOT NULL, expires_at INTEGER NOT NULL)"
+      },
+      {
+        "type": "table",
+        "name": "state_zset",
+        "table": "state_zset",
+        "sql": "CREATE TABLE state_zset (key TEXT NOT NULL, member TEXT NOT NULL, score REAL NOT NULL, expires_at INTEGER NOT NULL, PRIMARY KEY (key, member))"
+      }
+    ]
+  }
+}

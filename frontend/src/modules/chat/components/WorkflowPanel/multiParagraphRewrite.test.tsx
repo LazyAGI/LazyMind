@@ -105,7 +105,7 @@ it('captures IR headings and list items without including unselected descendants
  document.body.append(root);
  const range=document.createRange();range.setStart(root.querySelector('h2')!.firstChild!,0);range.setEnd(root.querySelector('[data-node-id="li"] > p')!.firstChild!,4);
  const selection=window.getSelection()!;selection.removeAllRanges();selection.addRange(range);
- const value={document_id:'fixture',blocks:[{node_id:'h',type:'heading',content:'Heading',children:[{node_id:'p',type:'paragraph',content:'Body'}]},{node_id:'li',type:'list_item',content:'Item',children:[{node_id:'child',type:'list_item',content:'Child'}]}]};
+ const value={document_id:'fixture',stage:'draft' as const,title:'Fixture',blocks:[{node_id:'h',type:'heading',content:'Heading',children:[{node_id:'p',type:'paragraph',content:'Body'}]},{node_id:'li',type:'list_item',content:'Item',children:[{node_id:'child',type:'list_item',content:'Child'}]}]};
  expect(selectedIRParagraphs(root,value)?.nodeSelections).toEqual([{node_id:'h',selected_text:'Heading'},{node_id:'p',selected_text:'Body'},{node_id:'li',selected_text:'Item'}]);
  selection.removeAllRanges();root.remove();
 });

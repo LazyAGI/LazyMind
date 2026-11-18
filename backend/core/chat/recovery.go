@@ -477,6 +477,10 @@ func RestoreConversation(w http.ResponseWriter, r *http.Request) {
 }
 
 func purgeConversation(ctxDB *gorm.DB, conversationID, userID string) error {
+	return purgeConversationWithNotify(ctxDB, conversationID, userID, notifySessionEnvClear)
+}
+
+func purgeConversationWithNotify(ctxDB *gorm.DB, conversationID, userID string, notify func(...string)) error {
 	ctx := ctxDB.Statement.Context
 	if ctx == nil {
 		ctx = context.Background()
@@ -610,7 +614,7 @@ func purgeConversation(ctxDB *gorm.DB, conversationID, userID string) error {
 	if err != nil {
 		return err
 	}
-	notifySessionEnvClear(conversationIDs...)
+	notify(conversationIDs...)
 	// Only remove files after the database transaction commits. A rollback or
 	// process exit before commit therefore leaves every live conversation and its
 	// workspace intact; a post-commit interruption can only leave unreachable
@@ -879,7 +883,7 @@ func PurgeExpiredConversationTrash(ctx context.Context, db *gorm.DB, now time.Ti
 		return 0, 1
 	}
 	for _, row := range rows {
-		if err := purgeConversation(db.WithContext(ctx), row.ID, row.CreateUserID); errors.Is(err, errSidechatRequestBusy) {
+		if err := purgeConversationWithNotify(db.WithContext(ctx), row.ID, row.CreateUserID, notifySessionEnvClearAndWait); errors.Is(err, errSidechatRequestBusy) {
 			continue
 		} else if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
 			failed++

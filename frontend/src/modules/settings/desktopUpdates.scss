@@ -1,0 +1,22 @@
+.desktop-update-settings .settings-detail-group { margin-top: 20px; }
+.desktop-update-settings .settings-detail-row { gap: 16px; flex-wrap: wrap; }
+.desktop-update-progress { padding: 16px 20px; }
+.desktop-update-progress p,
+.desktop-update-ready { color: var(--settings-muted, #64748b); font-size: 13px; }
+.desktop-update-ready { margin: 0; padding: 0 20px 20px; }
+.desktop-update-notice {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  min-height: 40px;
+  padding: 8px 16px;
+  color: #172033;
+  background: #eaf3ff;
+  border-bottom: 1px solid #dbe4ef;
+  font-size: 13px;
+}
+.desktop-update-notice a { color: #0958d9; text-underline-offset: 3px; }
+.desktop-update-notice a:focus-visible { outline: 2px solid #0958d9; outline-offset: 3px; }

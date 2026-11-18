@@ -39,6 +39,7 @@ vi.mock('../NewWorkflowModal', () => ({
 
 const skill: SkillAssetRecord = {
   id: 'skill-report',
+  callMode: 'on_demand',
   skillId: 'report',
   name: 'Report skill',
   skillName: 'Report skill',

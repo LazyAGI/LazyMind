@@ -313,10 +313,10 @@ describe("ChatContainerComponent wheel forwarding", () => {
   });
 
   it("disables workspace controls for document previews but enables them for ordinary chats", () => {
-    const view = render(<ChatContainerComponent sessionId="pdf-preview" allowLocalWorkspace={false} />);
+    const view = render(<ChatContainerComponent onOpenSSE={vi.fn()} parseErrorData={(data) => data} setIsChatContent={vi.fn()} setChatConfigFn={vi.fn()} sessionId="pdf-preview" allowLocalWorkspace={false} />);
     expect(screen.getByTestId("model-fallback-notifications")).toBeInTheDocument();
     expect(mocks.latestChatInputProps.allowLocalWorkspace).toBe(false);
-    view.rerender(<ChatContainerComponent sessionId="conversation-1" />);
+    view.rerender(<ChatContainerComponent onOpenSSE={vi.fn()} parseErrorData={(data) => data} setIsChatContent={vi.fn()} setChatConfigFn={vi.fn()} sessionId="conversation-1" />);
     expect(mocks.latestChatInputProps.allowLocalWorkspace).toBe(true);
   });
 

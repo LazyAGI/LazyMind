@@ -46,6 +46,9 @@ func TestMain(m *testing.M) {
 	_ = os.Setenv(localHostHomeEnvVar, home)
 	_ = os.Setenv("HOME", home)
 	_ = os.Setenv("LOCALAPPDATA", filepath.Join(home, "AppData", "Local"))
+	// Production uses the OS account rather than the service-scoped HOME.
+	// All ordinary CLI tests must still write only within this test fixture.
+	resolveRuntimeRecoveryRoot = func() (string, error) { return filepath.Join(home, "LazyMindUpdater"), nil }
 	code := m.Run()
 	_ = os.RemoveAll(home)
 	os.Exit(code)

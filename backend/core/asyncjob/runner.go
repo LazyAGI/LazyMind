@@ -10,6 +10,7 @@ import (
 
 	"gorm.io/gorm"
 
+	"lazymind/core/common/maintenancegate"
 	"lazymind/core/common/orm"
 	"lazymind/core/log"
 )
@@ -30,9 +31,12 @@ const (
 )
 
 type Runner struct {
-	db   *gorm.DB
-	opts Options
-	done chan struct{}
+	db              *gorm.DB
+	opts            Options
+	done            chan struct{}
+	recoveryTicker  func(time.Duration) (<-chan time.Time, func())
+	admission       *maintenancegate.Gate
+	bootstrapTicket *maintenancegate.Ticket
 }
 
 func Start(ctx context.Context, db *gorm.DB, opts Options) *Runner {
@@ -98,11 +102,24 @@ func recoverStaleJobs(ctx context.Context, db *gorm.DB, now time.Time, jobTypes,
 
 func newRunner(db *gorm.DB, opts Options) *Runner {
 	opts = normalizeOptions(opts)
-	return &Runner{
-		db:   db,
-		opts: opts,
-		done: make(chan struct{}),
+	runner := &Runner{
+		db:        db,
+		opts:      opts,
+		done:      make(chan struct{}),
+		admission: maintenancegate.New(),
+		recoveryTicker: func(interval time.Duration) (<-chan time.Time, func()) {
+			ticker := time.NewTicker(interval)
+			return ticker.C, ticker.Stop
+		},
 	}
+	if opts.BootstrapKey != "" {
+		var err error
+		runner.bootstrapTicket, err = runner.admission.Seal(opts.BootstrapKey)
+		if err != nil {
+			panic(err)
+		}
+	}
+	return runner
 }
 
 func normalizeOptions(opts Options) Options {
@@ -127,6 +144,10 @@ func normalizeOptions(opts Options) Options {
 
 func (r *Runner) run(ctx context.Context) {
 	defer close(r.done)
+	defer r.BeginDrain()
+	if r.draining() {
+		return
+	}
 
 	if err := r.recoverStaleJobs(ctx, time.Now().UTC()); err != nil {
 		log.Logger.Warn().Err(err).Msg("asyncjob: recover stale jobs failed")
@@ -136,13 +157,15 @@ func (r *Runner) run(ctx context.Context) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		ticker := time.NewTicker(r.opts.LockTTL / 2)
-		defer ticker.Stop()
+		ticks, stop := r.recoveryTicker(r.opts.LockTTL / 2)
+		defer stop()
 		for {
 			select {
 			case <-ctx.Done():
 				return
-			case now := <-ticker.C:
+			case <-r.admission.Stopping():
+				return
+			case now := <-ticks:
 				if err := r.recoverStaleJobs(ctx, now); err != nil {
 					log.Logger.Warn().Err(err).Msg("asyncjob: recover stale jobs failed")
 				}
@@ -160,6 +183,10 @@ func (r *Runner) run(ctx context.Context) {
 }
 
 func (r *Runner) recoverStaleJobs(ctx context.Context, now time.Time) error {
+	if !r.admission.Enter() {
+		return nil
+	}
+	defer r.admission.Leave()
 	return recoverStaleJobs(ctx, r.db, now, r.opts.JobTypes, r.opts.ExcludeJobTypes)
 }
 
@@ -174,6 +201,8 @@ func (r *Runner) workerLoop(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
+			return
+		case <-r.admission.Stopping():
 			return
 		case <-timer.C:
 		}
@@ -192,6 +221,10 @@ func (r *Runner) workerLoop(ctx context.Context) {
 }
 
 func (r *Runner) runOnce(ctx context.Context) (bool, error) {
+	if !r.admission.Enter() {
+		return false, nil
+	}
+	defer r.admission.Leave()
 	now := time.Now().UTC()
 	if err := RecoverStaleJobs(ctx, r.db, now); err != nil {
 		return false, err

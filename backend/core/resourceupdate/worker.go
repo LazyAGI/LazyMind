@@ -75,6 +75,10 @@ func (w *Worker) applySkillTaskLLM(ctx context.Context, userID string, configs m
 }
 
 func (w *Worker) RunOnce(ctx context.Context) (WorkerRunResult, error) {
+	if !updateWork.Enter() {
+		return WorkerRunResult{}, nil
+	}
+	defer updateWork.Leave()
 	var result WorkerRunResult
 	if w == nil || w.db == nil {
 		return result, errors.New("resource update worker db is nil")

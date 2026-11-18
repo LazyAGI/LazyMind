@@ -284,7 +284,7 @@ func runtimeCommandEnv(paths RuntimePaths, cfg RuntimeConfig) []string {
 }
 
 func runtimeProcessEnvironment(base []string, cfg RuntimeConfig, plan runtimeProcessPlan, processName string) []string {
-	env := append([]string(nil), base...)
+	env := append(append([]string(nil), base...), updateBootstrapEnvironment(cfg)...)
 	if processName == chatProcessName {
 		env = append(env,
 			"LAZYLLM_OBSIDIAN_VAULT_PATH="+envText("LAZYLLM_OBSIDIAN_VAULT_PATH", ""),

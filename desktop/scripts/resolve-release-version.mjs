@@ -59,6 +59,8 @@ function main(argv) {
     `release_tag=${metadata.releaseTag}`,
     `package_version=${metadata.packageVersion}`,
     `artifact_version=${metadata.artifactVersion}`,
+    `release_channel=${metadata.packageVersion.split("-")[1]?.split(".")[0] || "stable"}`,
+    `is_prerelease=${metadata.packageVersion.includes("-")}`,
   ].join("\n");
   if (options["github-output"]) {
     fs.appendFileSync(options["github-output"], `${output}\n`);

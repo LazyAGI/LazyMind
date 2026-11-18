@@ -1,0 +1,250 @@
+{
+  "producer": "Pinned DocManager + DocumentProcessor._Impl._lazy_init; only parser health and background polling stubbed",
+  "shape": {
+    "present": true,
+    "applicationId": 0,
+    "userVersion": 0,
+    "schema": [
+      {
+        "type": "index",
+        "name": "idx_doc_service_task_doc",
+        "table": "lazyllm_doc_service_tasks",
+        "sql": "CREATE INDEX idx_doc_service_task_doc ON lazyllm_doc_service_tasks(doc_id, kb_id)"
+      },
+      {
+        "type": "index",
+        "name": "idx_doc_service_task_status",
+        "table": "lazyllm_doc_service_tasks",
+        "sql": "CREATE INDEX idx_doc_service_task_status ON lazyllm_doc_service_tasks(status, updated_at)"
+      },
+      {
+        "type": "index",
+        "name": "idx_docs_path",
+        "table": "lazyllm_documents",
+        "sql": "CREATE INDEX idx_docs_path ON lazyllm_documents(path)"
+      },
+      {
+        "type": "index",
+        "name": "idx_documents_updated_at",
+        "table": "lazyllm_documents",
+        "sql": "CREATE INDEX idx_documents_updated_at ON lazyllm_documents(updated_at)"
+      },
+      {
+        "type": "index",
+        "name": "idx_documents_upload_status",
+        "table": "lazyllm_documents",
+        "sql": "CREATE INDEX idx_documents_upload_status ON lazyllm_documents(upload_status)"
+      },
+      {
+        "type": "index",
+        "name": "idx_kb_algorithm_algo_id",
+        "table": "lazyllm_kb_algorithm",
+        "sql": "CREATE INDEX idx_kb_algorithm_algo_id ON lazyllm_kb_algorithm(algo_id)"
+      },
+      {
+        "type": "index",
+        "name": "idx_kb_created_at",
+        "table": "lazyllm_knowledge_bases",
+        "sql": "CREATE INDEX idx_kb_created_at ON lazyllm_knowledge_bases(created_at)"
+      },
+      {
+        "type": "index",
+        "name": "idx_kb_doc_count",
+        "table": "lazyllm_knowledge_bases",
+        "sql": "CREATE INDEX idx_kb_doc_count ON lazyllm_knowledge_bases(doc_count)"
+      },
+      {
+        "type": "index",
+        "name": "idx_kb_documents_doc_id",
+        "table": "lazyllm_kb_documents",
+        "sql": "CREATE INDEX idx_kb_documents_doc_id ON lazyllm_kb_documents(doc_id)"
+      },
+      {
+        "type": "index",
+        "name": "idx_kb_documents_kb_id",
+        "table": "lazyllm_kb_documents",
+        "sql": "CREATE INDEX idx_kb_documents_kb_id ON lazyllm_kb_documents(kb_id)"
+      },
+      {
+        "type": "index",
+        "name": "idx_kb_updated_at",
+        "table": "lazyllm_knowledge_bases",
+        "sql": "CREATE INDEX idx_kb_updated_at ON lazyllm_knowledge_bases(updated_at)"
+      },
+      {
+        "type": "index",
+        "name": "idx_ng_status_doc_kb",
+        "table": "lazyllm_doc_node_group_status",
+        "sql": "CREATE INDEX idx_ng_status_doc_kb ON lazyllm_doc_node_group_status(doc_id, kb_id)"
+      },
+      {
+        "type": "index",
+        "name": "idx_ng_status_kb_ng",
+        "table": "lazyllm_doc_node_group_status",
+        "sql": "CREATE INDEX idx_ng_status_kb_ng ON lazyllm_doc_node_group_status(kb_id, node_group_id, status)"
+      },
+      {
+        "type": "index",
+        "name": "idx_parse_kb_status",
+        "table": "lazyllm_doc_parse_state",
+        "sql": "CREATE INDEX idx_parse_kb_status ON lazyllm_doc_parse_state(kb_id, status)"
+      },
+      {
+        "type": "index",
+        "name": "idx_parse_lease",
+        "table": "lazyllm_doc_parse_state",
+        "sql": "CREATE INDEX idx_parse_lease ON lazyllm_doc_parse_state(status, lease_until)"
+      },
+      {
+        "type": "index",
+        "name": "idx_parse_sched",
+        "table": "lazyllm_doc_parse_state",
+        "sql": "CREATE INDEX idx_parse_sched ON lazyllm_doc_parse_state(status, task_score, updated_at)"
+      },
+      {
+        "type": "index",
+        "name": "idx_parse_task_type_status",
+        "table": "lazyllm_doc_parse_state",
+        "sql": "CREATE INDEX idx_parse_task_type_status ON lazyllm_doc_parse_state(task_type, status, updated_at)"
+      },
+      {
+        "type": "index",
+        "name": "uq_callback_id",
+        "table": "lazyllm_callback_records",
+        "sql": "CREATE UNIQUE INDEX uq_callback_id ON lazyllm_callback_records(callback_id)"
+      },
+      {
+        "type": "index",
+        "name": "uq_doc_service_task_id",
+        "table": "lazyllm_doc_service_tasks",
+        "sql": "CREATE UNIQUE INDEX uq_doc_service_task_id ON lazyllm_doc_service_tasks(task_id)"
+      },
+      {
+        "type": "index",
+        "name": "uq_idempotency_endpoint_key",
+        "table": "lazyllm_idempotency_records",
+        "sql": "CREATE UNIQUE INDEX uq_idempotency_endpoint_key ON lazyllm_idempotency_records(endpoint, idempotency_key)"
+      },
+      {
+        "type": "index",
+        "name": "uq_kb_algorithm",
+        "table": "lazyllm_kb_algorithm",
+        "sql": "CREATE UNIQUE INDEX uq_kb_algorithm ON lazyllm_kb_algorithm(kb_id, algo_id)"
+      },
+      {
+        "type": "index",
+        "name": "uq_kb_display_name",
+        "table": "lazyllm_knowledge_bases",
+        "sql": "CREATE UNIQUE INDEX uq_kb_display_name ON lazyllm_knowledge_bases(display_name) WHERE display_name IS NOT NULL"
+      },
+      {
+        "type": "index",
+        "name": "uq_kb_documents",
+        "table": "lazyllm_kb_documents",
+        "sql": "CREATE UNIQUE INDEX uq_kb_documents ON lazyllm_kb_documents(kb_id, doc_id)"
+      },
+      {
+        "type": "index",
+        "name": "uq_ng_status_key",
+        "table": "lazyllm_doc_node_group_status",
+        "sql": "CREATE UNIQUE INDEX uq_ng_status_key ON lazyllm_doc_node_group_status(doc_id, kb_id, node_group_id)"
+      },
+      {
+        "type": "index",
+        "name": "uq_parse_state_key",
+        "table": "lazyllm_doc_parse_state",
+        "sql": "CREATE UNIQUE INDEX uq_parse_state_key ON lazyllm_doc_parse_state(doc_id, kb_id)"
+      },
+      {
+        "type": "table",
+        "name": "lazyllm_algorithm",
+        "table": "lazyllm_algorithm",
+        "sql": "CREATE TABLE lazyllm_algorithm (\n\tid TEXT NOT NULL, \n\tdisplay_name TEXT NOT NULL, \n\tdescription TEXT NOT NULL, \n\tinfo_pickle TEXT NOT NULL, \n\tnode_group_ids TEXT, \n\tcreated_at DATETIME NOT NULL, \n\tupdated_at DATETIME NOT NULL, \n\tPRIMARY KEY (id)\n)"
+      },
+      {
+        "type": "table",
+        "name": "lazyllm_callback_records",
+        "table": "lazyllm_callback_records",
+        "sql": "CREATE TABLE lazyllm_callback_records (\n\tid INTEGER NOT NULL, \n\tcallback_id TEXT NOT NULL, \n\ttask_id TEXT NOT NULL, \n\tcreated_at DATETIME NOT NULL, \n\tPRIMARY KEY (id)\n)"
+      },
+      {
+        "type": "table",
+        "name": "lazyllm_doc_node_group_status",
+        "table": "lazyllm_doc_node_group_status",
+        "sql": "CREATE TABLE lazyllm_doc_node_group_status (\n\tid INTEGER NOT NULL, \n\tdoc_id TEXT NOT NULL, \n\tkb_id TEXT NOT NULL, \n\tnode_group_id TEXT NOT NULL, \n\tfile_path TEXT, \n\tstatus TEXT NOT NULL, \n\terror_msg TEXT, \n\tcreated_at DATETIME NOT NULL, \n\tupdated_at DATETIME NOT NULL, \n\tPRIMARY KEY (id)\n)"
+      },
+      {
+        "type": "table",
+        "name": "lazyllm_doc_parse_state",
+        "table": "lazyllm_doc_parse_state",
+        "sql": "CREATE TABLE lazyllm_doc_parse_state (\n\tid INTEGER NOT NULL, \n\tdoc_id TEXT NOT NULL, \n\tkb_id TEXT NOT NULL, \n\tstatus TEXT NOT NULL, \n\tcurrent_task_id TEXT, \n\ttask_type TEXT, \n\tidempotency_key TEXT, \n\tpriority INTEGER NOT NULL, \n\ttask_score INTEGER, \n\tretry_count INTEGER NOT NULL, \n\tmax_retry INTEGER NOT NULL, \n\tlease_owner TEXT, \n\tlease_until DATETIME, \n\tlast_error_code TEXT, \n\tlast_error_msg TEXT, \n\tfailed_stage TEXT, \n\tqueued_at DATETIME, \n\tstarted_at DATETIME, \n\tfinished_at DATETIME, \n\tcreated_at DATETIME NOT NULL, \n\tupdated_at DATETIME NOT NULL, \n\tPRIMARY KEY (id)\n)"
+      },
+      {
+        "type": "table",
+        "name": "lazyllm_doc_path_locks",
+        "table": "lazyllm_doc_path_locks",
+        "sql": "CREATE TABLE lazyllm_doc_path_locks (\n\tpath TEXT NOT NULL, \n\tcreated_at DATETIME NOT NULL, \n\tPRIMARY KEY (path)\n)"
+      },
+      {
+        "type": "table",
+        "name": "lazyllm_doc_service_tasks",
+        "table": "lazyllm_doc_service_tasks",
+        "sql": "CREATE TABLE lazyllm_doc_service_tasks (\n\tid INTEGER NOT NULL, \n\ttask_id TEXT NOT NULL, \n\ttask_type TEXT NOT NULL, \n\tdoc_id TEXT NOT NULL, \n\tkb_id TEXT NOT NULL, \n\tstatus TEXT NOT NULL, \n\tmessage TEXT, \n\terror_code TEXT, \n\terror_msg TEXT, \n\tcreated_at DATETIME NOT NULL, \n\tupdated_at DATETIME NOT NULL, \n\tstarted_at DATETIME, \n\tfinished_at DATETIME, \n\tPRIMARY KEY (id)\n)"
+      },
+      {
+        "type": "table",
+        "name": "lazyllm_documents",
+        "table": "lazyllm_documents",
+        "sql": "CREATE TABLE lazyllm_documents (\n\tdoc_id TEXT NOT NULL, \n\tfilename TEXT NOT NULL, \n\tpath TEXT NOT NULL, \n\tmeta TEXT, \n\tupload_status TEXT NOT NULL, \n\tsource_type TEXT NOT NULL, \n\tfile_type TEXT, \n\tcontent_hash TEXT, \n\tsize_bytes INTEGER, \n\tcreated_at DATETIME NOT NULL, \n\tupdated_at DATETIME NOT NULL, \n\tPRIMARY KEY (doc_id)\n)"
+      },
+      {
+        "type": "table",
+        "name": "lazyllm_finished_task_queue",
+        "table": "lazyllm_finished_task_queue",
+        "sql": "CREATE TABLE lazyllm_finished_task_queue (\n\tid INTEGER NOT NULL, \n\ttask_id TEXT NOT NULL, \n\ttask_type TEXT NOT NULL, \n\ttask_status TEXT NOT NULL, \n\tfinished_at DATETIME NOT NULL, \n\tcallback_url TEXT, \n\ttask_context_json TEXT, \n\terror_code TEXT, \n\terror_msg TEXT, \n\tPRIMARY KEY (id)\n)"
+      },
+      {
+        "type": "table",
+        "name": "lazyllm_idempotency_records",
+        "table": "lazyllm_idempotency_records",
+        "sql": "CREATE TABLE lazyllm_idempotency_records (\n\tid INTEGER NOT NULL, \n\tendpoint TEXT NOT NULL, \n\tidempotency_key TEXT NOT NULL, \n\treq_hash TEXT NOT NULL, \n\tstatus TEXT NOT NULL, \n\tresponse_json TEXT, \n\tcreated_at DATETIME NOT NULL, \n\tupdated_at DATETIME NOT NULL, \n\tPRIMARY KEY (id)\n)"
+      },
+      {
+        "type": "table",
+        "name": "lazyllm_kb_algorithm",
+        "table": "lazyllm_kb_algorithm",
+        "sql": "CREATE TABLE lazyllm_kb_algorithm (\n\tid INTEGER NOT NULL, \n\tkb_id TEXT NOT NULL, \n\talgo_id TEXT NOT NULL, \n\tcreated_at DATETIME NOT NULL, \n\tupdated_at DATETIME NOT NULL, \n\tPRIMARY KEY (id)\n)"
+      },
+      {
+        "type": "table",
+        "name": "lazyllm_kb_documents",
+        "table": "lazyllm_kb_documents",
+        "sql": "CREATE TABLE lazyllm_kb_documents (\n\tid INTEGER NOT NULL, \n\tkb_id TEXT NOT NULL, \n\tdoc_id TEXT NOT NULL, \n\tcreated_at DATETIME NOT NULL, \n\tupdated_at DATETIME NOT NULL, \n\tPRIMARY KEY (id)\n)"
+      },
+      {
+        "type": "table",
+        "name": "lazyllm_knowledge_bases",
+        "table": "lazyllm_knowledge_bases",
+        "sql": "CREATE TABLE lazyllm_knowledge_bases (\n\tkb_id TEXT NOT NULL, \n\tdisplay_name TEXT, \n\tdescription TEXT, \n\tdoc_count INTEGER NOT NULL, \n\tstatus TEXT NOT NULL, \n\towner_id TEXT, \n\tmeta TEXT, \n\tcreated_at DATETIME NOT NULL, \n\tupdated_at DATETIME NOT NULL, \n\tPRIMARY KEY (kb_id)\n)"
+      },
+      {
+        "type": "table",
+        "name": "lazyllm_node_group",
+        "table": "lazyllm_node_group",
+        "sql": "CREATE TABLE lazyllm_node_group (\n\tid TEXT NOT NULL, \n\tname TEXT NOT NULL, \n\tsignature TEXT NOT NULL, \n\tinfo_pickle TEXT NOT NULL, \n\tcreated_at DATETIME NOT NULL, \n\tupdated_at DATETIME NOT NULL, \n\tPRIMARY KEY (id)\n)"
+      },
+      {
+        "type": "table",
+        "name": "lazyllm_schema_migrations",
+        "table": "lazyllm_schema_migrations",
+        "sql": "CREATE TABLE lazyllm_schema_migrations (  version TEXT PRIMARY KEY,  name TEXT NOT NULL,  applied_at TIMESTAMP NOT NULL)"
+      },
+      {
+        "type": "table",
+        "name": "lazyllm_waiting_task_queue",
+        "table": "lazyllm_waiting_task_queue",
+        "sql": "CREATE TABLE lazyllm_waiting_task_queue (\n\tid INTEGER NOT NULL, \n\ttask_id TEXT NOT NULL, \n\ttask_type TEXT NOT NULL, \n\tuser_priority INTEGER NOT NULL, \n\ttask_score INTEGER NOT NULL, \n\tmessage TEXT NOT NULL, \n\tstatus TEXT NOT NULL, \n\tworker_id TEXT, \n\tlease_expires_at DATETIME, \n\tcreated_at DATETIME NOT NULL, \n\tupdated_at DATETIME NOT NULL, \n\tPRIMARY KEY (id)\n)"
+      }
+    ]
+  }
+}

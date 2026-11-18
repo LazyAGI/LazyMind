@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync/atomic"
 	"testing"
 )
 
@@ -331,5 +332,81 @@ func TestPythonComponentInstallAPIUsesCatalogSource(t *testing.T) {
 	}
 	if response.Code != http.StatusBadRequest {
 		t.Fatalf("bad checksum accepted: %d", response.Code)
+	}
+}
+
+func TestPythonClusterInstallUsesOwnCatalogAndRespectsUpdateLocks(t *testing.T) {
+	updater, err := componentUpdaterRoot()
+	if err != nil {
+		t.Fatal(err)
+	}
+	namespace, err := filepath.Rel(filepath.Dir(updater), t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	previousNamespace := componentStateNamespace
+	componentStateNamespace = namespace
+	t.Cleanup(func() { componentStateNamespace = previousNamespace })
+	updater, err = componentUpdaterRoot()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, gate := range []string{"idle", "writer", "update"} {
+		t.Run(gate, func(t *testing.T) {
+			root := t.TempDir()
+			t.Setenv("LAZYMIND_RUNTIME_MODE", "local")
+			t.Setenv("LAZYMIND_RUNTIME_ROOT", root)
+			// The existing manager command installs RAG only. A cluster request
+			// must reach its own catalog source even when that manager is present.
+			t.Setenv("LAZYMIND_COMPONENT_MAINTENANCE_MANAGER", filepath.Join(root, "rag-only-manager"))
+			var called atomic.Bool
+			server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				called.Store(r.URL.Path == "/cluster.zip")
+				_, _ = w.Write([]byte("test")) // Reject at checksum, before launching Python.
+			}))
+			defer server.Close()
+			transport := http.DefaultTransport
+			http.DefaultTransport = server.Client().Transport
+			defer func() { http.DefaultTransport = transport }()
+			entry := testPythonEntry()
+			entry.ID, entry.Filename, entry.URL = "cluster", "cluster.zip", server.URL+"/cluster.zip"
+			catalog := pythonCatalog{SchemaVersion: 1, Platform: runtime.GOOS, Arch: runtime.GOARCH,
+				Components: map[string]PythonComponent{"rag": testPythonEntry(), "cluster": entry}}
+			raw, err := json.Marshal(catalog)
+			if err != nil {
+				t.Fatal(err)
+			}
+			filename := filepath.Join(root, "catalog.json")
+			if err := os.WriteFile(filename, raw, 0600); err != nil {
+				t.Fatal(err)
+			}
+			t.Setenv("LAZYMIND_PYTHON_COMPONENT_CATALOG", filename)
+			switch gate {
+			case "writer":
+				writer, err := acquireComponentWriter(root)
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer releaseComponentLock(writer)
+			case "update":
+				active := filepath.Join(updater, "native-v2", "active.json")
+				if err := os.MkdirAll(filepath.Dir(active), 0700); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(active, []byte("{}"), 0600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			response := httptest.NewRecorder()
+			InstallPythonComponent(response, httptest.NewRequest("POST", "/", bytes.NewBufferString(`{"id":"cluster"}`)))
+			if gate == "idle" {
+				if !called.Load() || response.Code != http.StatusBadRequest {
+					t.Fatalf("cluster did not use its catalog URL: called=%v status=%d body=%s", called.Load(), response.Code, response.Body.String())
+				}
+			} else if called.Load() || response.Code != http.StatusConflict {
+				t.Fatalf("component write bypassed %s gate: called=%v status=%d", gate, called.Load(), response.Code)
+			}
+		})
 	}
 }

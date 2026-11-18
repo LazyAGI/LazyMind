@@ -5,9 +5,10 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vite
 import { deferred, desktopTestTranslation as t, installDesktopTestDOM } from "@/test/desktopResourceFixtures";
 
 const mocks = vi.hoisted(() => ({
-  openCreate: vi.fn(), list: vi.fn(), catalog: vi.fn(), scan: vi.fn(), cloudCreate: vi.fn(), scenes: vi.fn(), remove: vi.fn(), get: vi.fn(),
-  post: vi.fn(), put: vi.fn(), patch: vi.fn(), delete: vi.fn(), features: vi.fn(), imageEmbedRequired: false, role: "user",
+  openCreate: vi.fn(), list: vi.fn(), catalog: vi.fn(), scan: vi.fn(), scanSource: vi.fn(), cloudCreate: vi.fn(), scenes: vi.fn(), remove: vi.fn(), get: vi.fn(),
+  post: vi.fn(), put: vi.fn(), patch: vi.fn(), delete: vi.fn(), features: vi.fn(), imageEmbedRequired: false, role: "user", ragAvailability: "ready",
 }));
+vi.mock("@/modules/modelProvider/contexts/RAGComponentContext", () => ({ useRAGComponent: () => ({ availability: mocks.ragAvailability }) }));
 vi.mock("@/modules/learning/api", () => ({ getLearningCatalog: mocks.scenes }));
 vi.mock("react-i18next", async (load) => ({ ...await load<typeof import("react-i18next")>(), useTranslation: () => ({ t }) }));
 vi.mock("@/modules/knowledge/api/knowledgeMarket", () => ({
@@ -33,7 +34,7 @@ vi.mock("@/components/auth", () => ({ AgentAppsAuth: { getUserInfo: () => ({ rol
 vi.mock("@/components/request", () => ({ BASE_URL: "", localizeErrorCode: (_code: string, fallback: string) => fallback,
   axiosInstance: { get: mocks.get, post: mocks.post, put: mocks.put, patch: mocks.patch, delete: mocks.delete } }));
 vi.mock("@/modules/knowledge/utils/request", () => ({ KnowledgeBaseServiceApi: () => ({ datasetServiceListDatasets: mocks.list, datasetServiceDeleteDataset: mocks.remove }) }));
-vi.mock("@/modules/dataSource/api/clients", () => ({ dataSourceScanApi: { listSources: mocks.scan } }));
+vi.mock("@/modules/dataSource/api/clients", () => ({ dataSourceScanApi: { listSources: mocks.scan, getSource: mocks.scanSource } }));
 vi.mock("@/hooks/useModelFeatures", () => ({ fetchModelFeatures: mocks.features, isImageEmbedRequired: () => mocks.imageEmbedRequired, MODEL_FEATURES_CHANGED_EVENT: "features-changed" }));
 vi.mock("@/runtime/mode", async (load) => ({ ...await load<object>(), isDesktopRuntime: () => false }));
 vi.mock("@/components/ui", () => ({
@@ -72,6 +73,7 @@ async function mount(search: string) {
 beforeAll(installDesktopTestDOM);
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.ragAvailability = "ready";
   mocks.role = "user";
   mocks.imageEmbedRequired = false;
   mocks.features.mockResolvedValue({});
@@ -715,6 +717,19 @@ describe("knowledge list URL and data restoration", () => {
     expect(await screen.findByRole("button", { name: /查看知识库.*官方手册|查看.*官方手册.*详情/ })).toBeVisible();
     expect(screen.getByDisplayValue("手册")).toBeVisible();
   });
+});
+
+it.each(["missing", "checking", "error"])("restores cloud-source results and pagination while RAG is %s", async (availability) => {
+  mocks.ragAvailability = availability;
+  const source = { source_id: "cloud-id", name: "云端手册" };
+  mocks.scan.mockResolvedValue({ data: { items: [source], total: 21 } });
+  mocks.scanSource.mockResolvedValue({ data: { source, bindings: [] } });
+  const router = await mount("?source=cloudArchive&page=3");
+  expect(await screen.findByRole("button", { name: "云端手册" })).toBeVisible();
+  expect(mocks.scan).toHaveBeenCalledWith({ keyword: undefined, page: 3, pageSize: 10 }, undefined);
+  expect(mocks.scan).toHaveBeenCalledTimes(1);
+  expect(new URLSearchParams(router.state.location.search).get("page")).toBe("3");
+  expect(screen.getByText("第 3 页")).toBeVisible();
 });
 
 it("reports cleanup acceptance after confirming a knowledge base deletion", async () => {

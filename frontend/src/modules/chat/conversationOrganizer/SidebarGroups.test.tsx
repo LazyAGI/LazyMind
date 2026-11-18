@@ -49,7 +49,6 @@ describe("group sidebar", () => {
         { conversation_id: "invalid", display_name: "无效时间", membership_revision: 1, updated_at: "invalid" },
       ],
       nextPageToken: "",
-      total: 3,
     });
     render(<MemoryRouter><SidebarGroups groups={[groups[0]]} onEdit={vi.fn()} onRemove={vi.fn()} batchSelection={batch ? { checkedIds: [], onToggle: vi.fn(), onToggleMany: vi.fn() } : undefined} /></MemoryRouter>);
     const dated = (await screen.findByText("有时间")).closest(".conversation-group-member")!;
@@ -141,9 +140,9 @@ describe("group sidebar", () => {
     expect(api.assignConversation).not.toHaveBeenCalled();
   });
 
-  it.each(["group", "project"])("opens the rename dialog from a %s member's context menu", async kind => {
+  it.each(["group", "project"] as const)("opens the rename dialog from a %s member's context menu", async kind => {
     render(<ConfigProvider theme={{ token: { motion: false } }}><MemoryRouter><SidebarGroups groups={[{ ...groups[0], kind }]} onEdit={vi.fn()} onRemove={vi.fn()} /></MemoryRouter></ConfigProvider>);
-    const title = await screen.findByRole("button", { name: "a对话0", exact: true });
+    const title = await screen.findByRole("button", { name: "a对话0" });
     fireEvent.contextMenu(title.closest(".conversation-group-member")!);
     fireEvent.click(await screen.findByRole("menuitem", { name: "conversationOrganizer.renameConversation" }));
     const input = await screen.findByRole("textbox", { name: "conversationRename.name" });
@@ -154,7 +153,7 @@ describe("group sidebar", () => {
     expect(screen.getByRole("dialog")).toBeInTheDocument();
     expect(input).toHaveValue("a对话0");
     fireEvent.keyDown(input, { key: "Escape" });
-    expect(screen.getByRole("button", { name: "a对话0", exact: true })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "a对话0" })).toBeInTheDocument();
   });
 
   it.each(["group", "project"])("dismisses a %s member's context menu when the pointer leaves without entering the button", async kind => {
@@ -587,7 +586,7 @@ describe("group sidebar", () => {
   });
   it('saves member drop positions within a group and across groups in one request', async () => {
     renderGroups();
-    const row = (await screen.findByRole('button', { name: 'a对话1', exact: true })).closest('.conversation-group-member')!;
+    const row = (await screen.findByRole('button', { name: 'a对话1' })).closest('.conversation-group-member')!;
     vi.spyOn(row, 'getBoundingClientRect').mockReturnValue({ top: 100, height: 32 } as DOMRect);
     fireEvent.dragOver(row, { clientY: 105, dataTransfer: transfer(CONVERSATION_DRAG, JSON.stringify({ id: 'a-0', groupId: 'a' })) });
     expect(row).toHaveClass('member-drop-before');
@@ -604,13 +603,13 @@ describe("group sidebar", () => {
   it('does not commit a failed drop or allow member drops in batch mode', async () => {
     vi.mocked(api.assignConversation).mockRejectedValueOnce(new Error('save failed'));
     const { rerender } = renderGroups();
-    const row = (await screen.findByRole('button', { name: 'a对话1', exact: true })).closest('.conversation-group-member')!;
+    const row = (await screen.findByRole('button', { name: 'a对话1' })).closest('.conversation-group-member')!;
     const dataTransfer = transfer(CONVERSATION_DRAG, JSON.stringify({ id: 'b-0', groupId: 'b' }));
     fireEvent.drop(row, { dataTransfer });
     await waitFor(() => expect(api.assignConversation).toHaveBeenCalledTimes(1));
     await waitFor(() => expect(row).toHaveAttribute('draggable', 'true'));
     expect(api.emitConversationGroupsChanged).not.toHaveBeenCalled();
-    expect(screen.getByRole('button', { name: 'b对话0', exact: true })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'b对话0' })).toBeInTheDocument();
     rerender(<MemoryRouter><SidebarGroups groups={groups} batchSelection={{ checkedIds: [], onToggle: vi.fn(), onToggleMany: vi.fn() }} onEdit={vi.fn()} onRemove={vi.fn()} /></MemoryRouter>);
     fireEvent.drop(await screen.findByRole('checkbox', { name: 'a对话1' }), { dataTransfer });
     expect(api.assignConversation).toHaveBeenCalledTimes(1);

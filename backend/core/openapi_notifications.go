@@ -96,7 +96,7 @@ func notificationPaths() map[string]any {
 		if entry.method == "put" {
 			params = append(params, param("path", "schedule_id", true, strSchema()))
 		}
-		operation := op("Save schedule and optional notification draft atomically", params, jsonBody(scheduleBody, true), response(200, "Schedule", obj(prop("id", strSchema()), prop("name", strSchema()))))
+		operation := op("Save schedule and optional notification draft atomically", params, jsonBody(scheduleBody, true), response(200, "Schedule", refSchema("ScheduleResponse")))
 		operation["description"] = "notification is optional. Omission retains legacy defaults on creation and preserves the rule on update. Send config or clear:true, not both. Updates compare notification.revision; conflicts roll back all task edits. Creation ignores the supplied revision. Runs and history are unchanged."
 		operation["tags"] = []string{"TaskNotifications"}
 		paths[entry.path] = map[string]any{entry.method: operation}

@@ -89,6 +89,13 @@ func notifyToolLimitDecision(convID, decisionID, action string) error {
 }
 
 func notifySessionEnvClear(conversationIDs ...string) {
+	ids := append([]string(nil), conversationIDs...)
+	go notifySessionEnvClearAndWait(ids...)
+}
+
+// Retention cleanup waits for this bounded post-commit request. Ordinary UI
+// mutations keep using the asynchronous wrapper above.
+func notifySessionEnvClearAndWait(conversationIDs ...string) {
 	ids := make([]string, 0, len(conversationIDs))
 	for _, id := range conversationIDs {
 		id = strings.TrimSpace(id)
@@ -99,24 +106,22 @@ func notifySessionEnvClear(conversationIDs ...string) {
 	if len(ids) == 0 {
 		return
 	}
-	go func() {
-		body, _ := json.Marshal(map[string]any{"conversation_ids": ids})
-		url := common.JoinURL(common.ChatServiceEndpoint(), "/api/chat/session-env:clear")
-		req, err := http.NewRequestWithContext(context.Background(), http.MethodPost, url, bytes.NewReader(body))
-		if err != nil {
-			fmt.Printf("[chat] notifySessionEnvClear: %v\n", err)
-			return
-		}
-		req.Header.Set("Content-Type", "application/json")
-		client := &http.Client{Timeout: 5 * time.Second}
-		resp, err := client.Do(req)
-		if err != nil {
-			fmt.Printf("[chat] notifySessionEnvClear: %v\n", err)
-			return
-		}
-		defer resp.Body.Close()
-		if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
-			fmt.Printf("[chat] notifySessionEnvClear: chat service returned status %d\n", resp.StatusCode)
-		}
-	}()
+	body, _ := json.Marshal(map[string]any{"conversation_ids": ids})
+	url := common.JoinURL(common.ChatServiceEndpoint(), "/api/chat/session-env:clear")
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodPost, url, bytes.NewReader(body))
+	if err != nil {
+		fmt.Printf("[chat] notifySessionEnvClear: %v\n", err)
+		return
+	}
+	req.Header.Set("Content-Type", "application/json")
+	client := &http.Client{Timeout: 5 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		fmt.Printf("[chat] notifySessionEnvClear: %v\n", err)
+		return
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		fmt.Printf("[chat] notifySessionEnvClear: chat service returned status %d\n", resp.StatusCode)
+	}
 }

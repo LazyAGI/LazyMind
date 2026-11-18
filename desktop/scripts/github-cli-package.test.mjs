@@ -108,7 +108,7 @@ for (const failure of [false, true]) {
       assert.ok(fn);
       let staged = false;
       const context = {
-        path, fs, createHash, process: { arch: "arm64" }, console: { log() {} }, macSigningMode: "developer-id",
+        path, fs, createHash, productName: "LazyMind", process: { arch: "arm64" }, console: { log() {} }, macSigningMode: "developer-id",
         collectRuntimeMachOBinaries: () => [binary],
         developerIdSigningContext: async () => ({ identity: "fixture identity", entitlements: "fixture.plist" }),
         codesignWithRetry: async (_args, target) => {
@@ -128,32 +128,42 @@ for (const failure of [false, true]) {
   });
 }
 
-test("final ad-hoc deep signing refreshes the digest before sealing the outer app", macOSOnly, () => {
+test("final ad-hoc builder signing refreshes the digest and manifest before sealing the outer app", async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "github-adhoc-test-"));
   try {
     const app = path.join(root, "LazyMind.app");
-    const binary = path.join(app, "Contents/Resources/runtime/bin/gh");
+    const runtime = path.join(app, "Contents/Resources/runtime");
+    const binary = path.join(runtime, "bin/gh");
     fs.mkdirSync(path.dirname(binary), { recursive: true });
     fs.writeFileSync(binary, "fixture executable");
     fs.writeFileSync(`${binary}.sha256`, digest(fs.readFileSync(binary)));
-    const tools = path.join(root, "tools"); fs.mkdirSync(tools);
-    fs.writeFileSync(path.join(tools, "codesign"), `#!/bin/bash
-set -euo pipefail
-if [[ "$*" == *--deep* ]]; then
-  printf ' fixture signature' >> "$APP_PATH/Contents/Resources/runtime/bin/gh"
-else
-  expected="$(shasum -a 256 "$APP_PATH/Contents/Resources/runtime/bin/gh" | awk '{print $1}')"
-  [[ "$(cat "$APP_PATH/Contents/Resources/runtime/bin/gh.sha256")" == "$expected" ]]
-fi
-`, { mode: 0o755 });
-    const block = source.match(/    codesign --force --deep --sign - "\$\{APP_PATH\}"\n[\s\S]*?    codesign --force --sign - "\$\{APP_PATH\}"/)?.[0];
-    assert.ok(block, "final ad-hoc sealing block must exist");
-    const result = spawnSync("/bin/bash", ["-c", `set -euo pipefail\n${block}`], {
-      env: { ...process.env, PATH: `${tools}:${process.env.PATH}`, APP_PATH: app }, encoding: "utf8",
-    });
-    assert.ifError(result.error);
-    assert.equal(result.status, 0, result.stderr);
-    assert.equal(fs.readFileSync(`${binary}.sha256`, "utf8").trim(), digest(fs.readFileSync(binary)));
+    fs.writeFileSync(path.join(runtime, "manifest.json"), JSON.stringify({ checksums: { "bin/gh": digest(fs.readFileSync(binary)), "bin/gh.sha256": digest(fs.readFileSync(`${binary}.sha256`)) } }));
+    const sign = builder.match(/async function signAndStageEmbeddedRuntime\(context\) \{[\s\S]*?\n\}/)?.[0];
+    const refresh = builder.match(/function refreshSignedRuntimeChecksums\(runtimeRoot\) \{[\s\S]*?\n\}/)?.[0];
+    assert.ok(sign && refresh, "builder must own final signing and all runtime pins");
+    let staged = false, sealed = false, verified = false;
+    const context = {
+      path, fs, createHash, productName: "LazyMind", process: { arch: "arm64" }, console: { log() {} }, macSigningMode: "adhoc",
+      collectRuntimeMachOBinaries: () => [binary],
+      codesignWithRetry: async (_args, target) => {
+        if (target === binary) { fs.appendFileSync(binary, " fixture signature"); return; }
+        assert.equal(target, app);
+        assert.equal(fs.readFileSync(`${binary}.sha256`, "utf8").trim(), digest(fs.readFileSync(binary)));
+        const manifest = JSON.parse(fs.readFileSync(path.join(runtime, "manifest.json")));
+        assert.equal(manifest.checksums["bin/gh"], digest(fs.readFileSync(binary)));
+        assert.equal(manifest.checksums["bin/gh.sha256"], digest(fs.readFileSync(`${binary}.sha256`)));
+        sealed = true;
+      },
+      splitPythonComponents: async () => {}, stageEmbeddedRuntime: () => { staged = true; },
+      adhocSignAppBundle: async () => { assert.equal(staged, true); },
+      restoreEmbeddedRuntime: () => runtime,
+      execFile: async () => { assert.equal(sealed, true); verified = true; },
+    };
+    vm.createContext(context);
+    vm.runInContext(`${refresh}\n${sign}\nthis.run = signAndStageEmbeddedRuntime;`, context);
+    await context.run({ electronPlatformName: "darwin", arch: 3, appOutDir: root });
+    assert.equal(verified, true);
+    assert.doesNotMatch(source, /codesign --force --deep --sign - "\$\{APP_PATH\}"/, "shell must not mutate the bundle after builder sealing");
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
 

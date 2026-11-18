@@ -14,7 +14,7 @@ function harness(platform = 'darwin', agent = 'codex') {
   const treeKills = [];
   let restarts = 0;
   const context = vm.createContext({
-    URL, process: { env: {} }, isWindows: platform === 'win32', isQuitting: false,
+    URL, desktopUpdateWork: 0, assertDesktopUpdateAdmission() {}, process: { env: {} }, isWindows: platform === 'win32', isQuitting: false,
     agentConnectorPath: '/fixture/connector', sidecarEnv: () => ({}),
     appendStartupLog() {}, serializeError: (error) => error.message,
     restartAgentHost: () => { restarts += 1; },

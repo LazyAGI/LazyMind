@@ -294,6 +294,10 @@ func (p *IdleProcessor) ProcessLatestWaitingConversation(ctx context.Context, co
 }
 
 func (p *IdleProcessor) RunFallbackOnce(ctx context.Context) (ConversationIdleFallbackResult, error) {
+	if !updateWork.Enter() {
+		return ConversationIdleFallbackResult{}, nil
+	}
+	defer updateWork.Leave()
 	var result ConversationIdleFallbackResult
 	if p == nil || p.db == nil {
 		return result, errors.New("idle processor db is nil")
@@ -339,6 +343,10 @@ func (p *IdleProcessor) RunFallbackOnce(ctx context.Context) (ConversationIdleFa
 }
 
 func (p *IdleProcessor) ProcessEvent(ctx context.Context, eventID string) error {
+	if !updateWork.Enter() {
+		return nil
+	}
+	defer updateWork.Leave()
 	if p == nil || p.db == nil {
 		return errors.New("idle processor db is nil")
 	}

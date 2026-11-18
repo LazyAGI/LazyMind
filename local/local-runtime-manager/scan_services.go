@@ -236,7 +236,7 @@ func (m *FileWatcherManager) Down(ctx context.Context, paths RuntimePaths) error
 
 func scanControlPlaneEnv(cfg RuntimeConfig, paths RuntimePaths) []string {
 	allowedRootsJSON, _ := json.Marshal(cfg.FileWatcher.AllowedRoots)
-	return []string{
+	environment := []string{
 		"LAZYMIND_RUNTIME_MODE=local",
 		"LAZYMIND_SCAN_CONTROL_PLANE_ADDRESS=127.0.0.1",
 		"LAZYMIND_SCAN_CONTROL_PLANE_PORT=" + strconv.Itoa(cfg.LocalProxy.ScanHostPort),
@@ -259,6 +259,7 @@ func scanControlPlaneEnv(cfg RuntimeConfig, paths RuntimePaths) []string {
 		"LAZYMIND_SCAN_CONTROL_PLANE_TEMP_DIR=" + paths.ScanControlPlaneTempDir,
 		"SOURCEENGINE_TARGET_SEARCH_CACHE_PREWARM_STAGGER=" + envText("SOURCEENGINE_TARGET_SEARCH_CACHE_PREWARM_STAGGER", "10s"),
 	}
+	return append(environment, bootstrapStateEnvironment(cfg, "scan-state")...)
 }
 
 func fileWatcherEnv(cfg RuntimeConfig, paths RuntimePaths) []string {

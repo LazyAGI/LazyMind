@@ -71,6 +71,19 @@ it("offers source RAG installation without a bundle URL", async () => {
   expect(screen.getByRole("button", { name: /下载并安装/ })).toBeEnabled();
 });
 
+it("uses a backend-approved loopback source and submits only the component ID", async () => {
+  const url = "http://127.0.0.1:18765/rag/fixture.zip";
+  mocks.get.mockResolvedValue([{ ...missing, url }]);
+  mount();
+  fireEvent.click(await screen.findByRole("button", { name: "安装组件" }));
+  expect(screen.getByLabelText("组件下载来源")).toHaveTextContent(url);
+  expect(screen.getByRole("button", { name: /下载并安装/ })).toBeEnabled();
+  fireEvent.click(screen.getByRole("button", { name: /下载并安装/ }));
+  await waitFor(() => expect(usePythonComponentTask.getState().phase).toBe("success"));
+  expect(mocks.install).toHaveBeenCalledWith("rag", expect.any(AbortSignal));
+  expect(mocks.install.mock.calls[0]).toHaveLength(2);
+});
+
 it("keeps source installation available for manual restart outside desktop", async () => {
   mocks.install.mockResolvedValue({ ...installed, installMethod: "source" });
   mocks.restart.mockResolvedValue({ ok: false, reason: "unavailable" });

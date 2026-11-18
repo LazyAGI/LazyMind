@@ -1,5 +1,8 @@
 *.sh text eol=lf
 
+# Core update-format fingerprints include SQLite schema text from migrations.
+backend/core/migrations/**/*.sql text eol=lf
+
 # Builtin Skill packages are hashed byte-for-byte into the frozen lockfile.
 # Keep text source bytes stable when checked out on Windows.
 skills/** text=auto eol=lf

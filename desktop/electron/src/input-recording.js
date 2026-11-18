@@ -11,6 +11,7 @@ function createInputRecorder({ spawn, now = Date.now }) {
     old.fail?.();
   }
   return {
+    isActive: () => Boolean(active && !active.exited),
     authorize(bounds) { cancel(); grant = { bounds, time: now() }; },
     cancel,
     async start(startedAt) {

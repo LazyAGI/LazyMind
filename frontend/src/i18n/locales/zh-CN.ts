@@ -1,9 +1,10 @@
 import notifications from './notifications-zh-CN';
+import desktopUpdates from './desktop-updates-zh-CN';
 import { evolutionControlsZh } from "@/modules/selfEvolution/shared/controlTranslations";
 import { zhCNErrorMessages } from "./error-codes";
 
 const zhCN = {
-
+  desktopUpdates,
   nodeDependency: {
     "guidePrerequisite": "需要 Node.js 22.19 或更高版本，已安装的兼容版本可直接使用。",
     "title": "Node.js 运行环境",

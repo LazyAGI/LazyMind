@@ -257,7 +257,12 @@ test("progress is streamed but only a successful completed command counts as rec
 test("cancelling the desktop listener cancels its recovery child", async () => {
   const child = commandFixture(), abort = new AbortController();
   const done = runRecoveryCommand({ spawn: () => child, executable: "connector", id: request.id, onStage: () => {}, signal: abort.signal });
-  abort.abort(); await assert.rejects(done, /cancelled/); assert.equal(child.kills, 1);
+  let settled = false;
+  const rejected = assert.rejects(done, /cancelled/).then(() => { settled = true; });
+  abort.abort(); await tick();
+  assert.equal(settled, false, "cancellation must wait for the child close event");
+  assert.equal(child.kills, 1);
+  child.emit("close", null); await rejected;
 });
 
 test("a verified panel clears a reconnect failure without another restart", async () => {
@@ -274,4 +279,41 @@ test("a verified panel clears a reconnect failure without another restart", asyn
   assert.equal(f.invoke("State").error, "");
   assert.equal(restarts, 1); assert.equal(completed, 1);
  } finally { await f.controller.stop(); }
+});
+
+test("stop waits for an admitted reconnect and prevents restart during teardown", async () => {
+  let finish;
+  const f = fixture(() => new Promise(resolve => { finish = resolve; }));
+  f.controller.start(); f.waits.shift()({ request }); await tick();
+  const confirmation = f.invoke("Confirm");
+  let stopped = false;
+  const stopping = f.controller.stop().then(() => { stopped = true; });
+  await tick();
+  assert.equal(stopped, false, "reconnect still owns work until it settles");
+  const waits = f.waits.length;
+  f.controller.start();
+  assert.equal(f.waits.length, waits, "stop must finish before a new listener starts");
+  finish(); await confirmation; await stopping;
+});
+
+test("recovery respects its owner's terminal start gate", async () => {
+  const f = fixture(undefined, { canStart: () => false });
+  f.controller.start();
+  assert.equal(f.waits.length, 0);
+  await f.controller.stop();
+});
+
+for (const failure of ["timeout", "invalid-progress"]) test(`${failure} keeps recovery ownership until child close`, async () => {
+  const child = commandFixture();
+  let killed;
+  const signalSent = new Promise(resolve => { killed = resolve; });
+  child.kill = () => { child.kills++; killed(); };
+  let settled = false;
+  const work = runRecoveryCommand({ spawn: () => child, executable: "fixture", id: request.id,
+    onStage() {}, timeoutMs: failure === "timeout" ? 5 : 1000 });
+  const rejected = assert.rejects(work, failure === "timeout" ? /timed out/ : /Invalid/).then(() => { settled = true; });
+  if (failure === "invalid-progress") child.stdout.write("invalid-json\n");
+  await signalSent; await tick();
+  assert.equal(settled, false);
+  child.emit("close", null); await rejected;
 });

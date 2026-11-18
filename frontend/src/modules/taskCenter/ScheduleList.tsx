@@ -223,7 +223,7 @@ function VisualScheduler({ value, onChange }: VisualSchedulerProps) {
       <TimePicker
         value={time}
         onChange={handleTimeChange}
-        onCalendarChange={handleTimeChange}
+        onCalendarChange={(value) => handleTimeChange(Array.isArray(value) ? value[0] : value)}
         format='HH:mm'
         needConfirm={false}
         allowClear={false}
@@ -580,6 +580,7 @@ export default function ScheduleList({ active }: ScheduleListProps) {
     setEditTarget(null);
     form.resetFields();
     form.setFieldValue('cron_expr', buildCronExpr([1, 2, 3, 4, 5], dayjs().hour(9).minute(0)));
+    form.setFieldValue('group_id', groupFilter || undefined);
     setFileList([]);
     setUploadedPaths([]);
     setCreationType('task');

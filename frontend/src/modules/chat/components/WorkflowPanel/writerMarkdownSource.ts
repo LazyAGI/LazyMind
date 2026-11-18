@@ -119,7 +119,7 @@ export function markdownSelectionRange(source: string, selection: {
   const paragraphs = sourceBlocks(source);
   let target: (typeof paragraphs)[number] | undefined;
   if (paragraph && visible !== undefined) {
-    const editor = paragraph.closest('.mdxeditor-root-contenteditable, [data-writer-source-preview]');
+    const editor = paragraph.closest<HTMLElement>('.mdxeditor-root-contenteditable, [data-writer-source-preview]');
     const kind = blockKind(paragraph);
     const siblings = editor ? markdownTextBlocks(editor)
       .filter(p => blockKind(p) === kind && markdownBlockText(p).replace(/\u00a0/g, ' ') === visible) : [paragraph];

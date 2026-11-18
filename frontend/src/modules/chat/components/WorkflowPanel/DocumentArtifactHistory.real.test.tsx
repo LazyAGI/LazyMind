@@ -76,7 +76,7 @@ it.each(['markdown', 'ir', 'ir-to-markdown'] as const)('preserves edits and resu
   const view = render(<SlotEditingContext.Provider value={{ onBrowse, setEditing: vi.fn(),
     registerFlush: () => () => {}, registerFooterAction: () => () => {},
   }}><SlotRenderer slot={slot(3)} sessionId='real-history' slotId='flat_draft_document' revisionCount={3} /></SlotEditingContext.Provider>);
-  await screen.findByRole('button', { name: '版本历史', exact: true });
+  await screen.findByRole('button', { name: '版本历史' });
   const typeTitle = async (text: string, markdown: boolean) => {
     if (markdown) {
       await act(async () => capture.editor!.setMarkdown(`# ${text}\n\nExisting paragraph.`));
@@ -88,7 +88,7 @@ it.each(['markdown', 'ir', 'ir-to-markdown'] as const)('preserves edits and resu
     }
   };
   await typeTitle('Saved before rollback', mode === 'markdown');
-  fireEvent.click(screen.getByRole('button', { name: '版本历史', exact: true }));
+  fireEvent.click(screen.getByRole('button', { name: '版本历史' }));
   expect(onBrowse).toHaveBeenCalledOnce();
   const dialog = await screen.findByRole('dialog');
   fireEvent.click(within(dialog).getAllByRole('option').at(-1)!);

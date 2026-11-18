@@ -1,9 +1,10 @@
 import notifications from './notifications-en-US';
+import desktopUpdates from './desktop-updates-en-US';
 import { evolutionControlsEn } from "@/modules/selfEvolution/shared/controlTranslations";
 import { enUSErrorMessages } from "./error-codes";
 
 const enUS = {
-
+  desktopUpdates,
   nodeDependency: {
     "guidePrerequisite": "Requires Node.js 22.19 or later. An existing compatible version can be used directly.",
     "title": "Node.js runtime",

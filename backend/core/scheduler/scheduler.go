@@ -272,19 +272,18 @@ func truncateRunes(s string, maxRunes int, suffix string) string {
 // resolveTaskStatus (chat_histories presence), so no periodic reconciler is
 // needed here.
 //
-// The returned channel only tracks the ticker goroutine. fireOne may launch
-// detached task-execution goroutines (sendScheduledChatRequest) that run with
-// context.Background and outlive this loop — they are deliberately not waited
-// on, because scheduled tasks are user business work that should complete even
-// when the process is stopping. Callers that close shared resources (e.g. the
-// DB pool) on Done() must account for those detached writes still being in
-// flight; in core, the DB/Redis pools are intentionally not closed on shutdown
-// for this reason.
+// Cancellation closes admission and waits for previously admitted dispatchers,
+// task execution and final result writes. Business work is not canceled with
+// the ticker. This completion signal covers scheduler work only.
 func RunScheduler(ctx context.Context, db *gorm.DB, chatBaseURL string) <-chan struct{} {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		repairFutureScheduleNextRunsAt(ctx, db, time.Now().UTC())
+		defer func() { <-BeginDrain() }()
+		if admitScheduledWork() {
+			repairFutureScheduleNextRunsAt(ctx, db, time.Now().UTC())
+			finishScheduledWork()
+		}
 		ticker := time.NewTicker(30 * time.Second)
 		defer ticker.Stop()
 		for {
@@ -360,6 +359,10 @@ const maxConcurrentFires = 50
 // fireSchedules queries all enabled schedules whose next_run_at <= now and fires them.
 // At most maxConcurrentFires goroutines run simultaneously to protect downstream services.
 func fireSchedules(ctx context.Context, db *gorm.DB, _ string) {
+	if !admitScheduledWork() {
+		return
+	}
+	defer finishScheduledWork()
 	now := time.Now().UTC()
 	var due []orm.UserSchedule
 	if err := db.WithContext(ctx).
@@ -392,6 +395,10 @@ func fireSchedules(ctx context.Context, db *gorm.DB, _ string) {
 }
 
 func fireOne(ctx context.Context, db *gorm.DB, s orm.UserSchedule, firedAt time.Time) {
+	if !admitScheduledWork() {
+		return
+	}
+	defer finishScheduledWork()
 	controls, err := settings.LoadFeatureControls(ctx, db, s.UserID)
 	if err != nil || !controls.SchedulesEnabled {
 		return
@@ -480,7 +487,7 @@ func fireOne(ctx context.Context, db *gorm.DB, s orm.UserSchedule, firedAt time.
 	if json.Unmarshal([]byte(s.FileIDs), &fileIDs) == nil && len(fileIDs) > 0 {
 		reqBody["file_ids"] = fileIDs
 	}
-	go sendScheduledChatRequest(s.UserID, convID, task.ID, db, reqBody)
+	continueScheduledWork(func() { sendScheduledChatRequest(s.UserID, convID, task.ID, db, reqBody) })
 }
 
 // createTaskConversation creates a new conversation flagged as is_task_conv=true.
@@ -953,6 +960,11 @@ func UpdateScheduleHandler(w http.ResponseWriter, r *http.Request) {
 // It immediately fires the schedule once without modifying next_run_at,
 // and increments run_count so the execution appears in the history.
 func RunNowHandler(w http.ResponseWriter, r *http.Request) {
+	if !admitScheduledWork() {
+		common.ReplyErr(w, "scheduler is stopping", http.StatusServiceUnavailable)
+		return
+	}
+	defer finishScheduledWork()
 	userID := store.UserID(r)
 	path := strings.TrimPrefix(r.URL.Path, "/schedules/")
 	id := strings.TrimSuffix(path, ":run-now")
@@ -985,7 +997,24 @@ func RunNowHandler(w http.ResponseWriter, r *http.Request) {
 			common.ReplyErr(w, "failed to create waiting task", http.StatusInternalServerError)
 			return
 		}
-		go resumeWaitingTasks(context.Background(), db)
+		continueScheduledWork(func() {
+			ctx := context.Background()
+			if resumeWaitingTasks(ctx, db) {
+				return
+			}
+			// Ordinary terminal shutdown may leave a durably queued request for
+			// the next startup. A reversible pause must retain this continuation,
+			// without admitting an independent scan of other waiting tasks.
+			select {
+			case <-scheduledWork.Stopping():
+				return
+			default:
+			}
+			var task orm.TaskCenterTask
+			if err := db.WithContext(ctx).First(&task, "id = ?", taskID).Error; err == nil {
+				resumeWaitingTask(ctx, db, task)
+			}
+		})
 		common.ReplyJSON(w, map[string]any{"task_id": taskID, "conversation_id": "", "status": "waiting_inputs"})
 		return
 	}
@@ -1040,6 +1069,6 @@ func RunNowHandler(w http.ResponseWriter, r *http.Request) {
 	if json.Unmarshal([]byte(s.FileIDs), &fileIDs) == nil && len(fileIDs) > 0 {
 		reqBody["file_ids"] = fileIDs
 	}
-	go sendScheduledChatRequest(s.UserID, convID, task.ID, db, reqBody)
+	continueScheduledWork(func() { sendScheduledChatRequest(s.UserID, convID, task.ID, db, reqBody) })
 	common.ReplyJSON(w, map[string]any{"task_id": task.ID, "conversation_id": convID})
 }

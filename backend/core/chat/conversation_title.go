@@ -65,9 +65,13 @@ func RegisterConversationTitleJobs(db *gorm.DB) {
 	}
 }
 
-func StartConversationTitle(ctx context.Context, db *gorm.DB) []<-chan struct{} {
+func StartConversationTitle(ctx context.Context, db *gorm.DB, register ...func(*asyncjob.Runner)) []<-chan struct{} {
 	live := asyncjob.Start(ctx, db, asyncjob.Options{Concurrency: 1, SerializeResources: true, LockTTL: time.Duration(conversationTitleOption("LAZYMIND_OPENING_TIMEOUT_SECONDS", 60)+30) * time.Second, JobTypes: []string{conversationTitleJobType}})
 	history := asyncjob.Start(ctx, db, asyncjob.Options{Concurrency: 1, SerializeResources: true, LockTTL: time.Duration(conversationTitleOption("LAZYMIND_OPENING_TIMEOUT_SECONDS", 60)+30) * time.Second, JobTypes: []string{conversationTitleBackfillJobType}, YieldToJobTypes: []string{conversationTitleJobType}})
+	for _, add := range register {
+		add(live)
+		add(history)
+	}
 	return []<-chan struct{}{live.Done(), history.Done()}
 }
 

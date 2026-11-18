@@ -109,7 +109,7 @@ describe('NewWorkflowModal skill pagination', () => {
   it('debounces rapid typing and requests only the final keyword after 300 ms', async () => {
     listSkillAssetsPage.mockResolvedValueOnce(page(1, 20, 40)).mockResolvedValueOnce(page(90, 1, 1));
     const { input } = openPicker();
-    await screen.findByRole('option', { name: 'Skill 20', exact: true });
+    await screen.findByRole('option', { name: 'Skill 20' });
     vi.useFakeTimers();
     fireEvent.change(input, { target: { value: 'Skill' } });
     await act(async () => { await vi.advanceTimersByTimeAsync(150); });
@@ -119,19 +119,19 @@ describe('NewWorkflowModal skill pagination', () => {
     expect(input).toHaveAttribute('aria-busy', 'true');
     await act(async () => { await vi.advanceTimersByTimeAsync(1); });
     expect(listSkillAssetsPage.mock.calls.map(([args]) => args.keyword)).toEqual(['', 'Skill 90']);
-    expect(screen.getByRole('option', { name: 'Skill 90', exact: true })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: 'Skill 90' })).toBeInTheDocument();
   });
 
   it('clears the keyword immediately and cancels its pending search', async () => {
     listSkillAssetsPage.mockResolvedValue(page(1, 20, 40));
     const { input } = openPicker();
-    await screen.findByRole('option', { name: 'Skill 20', exact: true });
+    await screen.findByRole('option', { name: 'Skill 20' });
     vi.useFakeTimers();
     fireEvent.change(input, { target: { value: 'pending' } });
     await act(async () => { await vi.advanceTimersByTimeAsync(100); });
     await act(async () => { fireEvent.change(input, { target: { value: '' } }); });
     expect(listSkillAssetsPage.mock.calls.map(([args]) => args.keyword)).toEqual(['', '']);
-    expect(screen.getByRole('option', { name: 'Skill 20', exact: true })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: 'Skill 20' })).toBeInTheDocument();
     await act(async () => { await vi.advanceTimersByTimeAsync(300); });
     expect(listSkillAssetsPage).toHaveBeenCalledTimes(2);
   });
@@ -141,21 +141,21 @@ describe('NewWorkflowModal skill pagination', () => {
     listSkillAssetsPage.mockResolvedValueOnce(page(1, 20, 40)).mockReturnValueOnce(oldPage.promise)
       .mockResolvedValueOnce(page(90, 1, 1));
     const { input } = openPicker();
-    await screen.findByRole('option', { name: 'Skill 20', exact: true });
+    await screen.findByRole('option', { name: 'Skill 20' });
     scrollToBottom();
     vi.useFakeTimers();
     fireEvent.change(input, { target: { value: 'Skill 90' } });
     await act(async () => { oldPage.resolve(page(21, 20, 40)); });
-    expect(screen.queryByRole('option', { name: 'Skill 21', exact: true })).not.toBeInTheDocument();
+    expect(screen.queryByRole('option', { name: 'Skill 21' })).not.toBeInTheDocument();
     expect(listSkillAssetsPage).toHaveBeenCalledTimes(2);
     await act(async () => { await vi.advanceTimersByTimeAsync(300); });
-    expect(screen.getByRole('option', { name: 'Skill 90', exact: true })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: 'Skill 90' })).toBeInTheDocument();
   });
 
   it.each(['cancel', 'close', 'mode', 'unmount'])('cancels a pending search on %s', async (action) => {
     listSkillAssetsPage.mockResolvedValue(page(1, 20, 40));
     const { input, rerender, unmount, props } = openPicker();
-    await screen.findByRole('option', { name: 'Skill 20', exact: true });
+    await screen.findByRole('option', { name: 'Skill 20' });
     vi.useFakeTimers();
     fireEvent.change(input, { target: { value: 'pending' } });
     if (action === 'cancel') fireEvent.click(screen.getByRole('button', { name: 'newWorkflowCancelBtn' }));
@@ -169,13 +169,13 @@ describe('NewWorkflowModal skill pagination', () => {
   it('appends pages on scroll, keeps earlier skills selectable, and stops at the total', async () => {
     listSkillAssetsPage.mockImplementation(async ({ page: number }) => page((number - 1) * 20 + 1, number === 3 ? 5 : 20, 45));
     openPicker();
-    await screen.findByRole('option', { name: 'Skill 20', exact: true });
+    await screen.findByRole('option', { name: 'Skill 20' });
     expect(listSkillAssetsPage).toHaveBeenCalledTimes(1);
     scrollToBottom();
-    await screen.findByRole('option', { name: 'Skill 40', exact: true });
-    expect(screen.getByRole('option', { name: 'Skill 1', exact: true })).toBeInTheDocument();
+    await screen.findByRole('option', { name: 'Skill 40' });
+    expect(screen.getByRole('option', { name: 'Skill 1' })).toBeInTheDocument();
     scrollToBottom();
-    const last = await screen.findByRole('option', { name: 'Skill 45', exact: true });
+    const last = await screen.findByRole('option', { name: 'Skill 45' });
     expect(screen.getByText('newWorkflowSkillsAllLoaded')).toBeInTheDocument();
     scrollToBottom();
     expect(listSkillAssetsPage.mock.calls.map(([args]) => [args.page, args.pageSize])).toEqual([[1, 20], [2, 20], [3, 20]]);
@@ -188,13 +188,13 @@ describe('NewWorkflowModal skill pagination', () => {
     const next = deferred<ReturnType<typeof page>>();
     listSkillAssetsPage.mockResolvedValueOnce(page(1, 20, 40)).mockReturnValueOnce(next.promise);
     openPicker();
-    await screen.findByRole('option', { name: 'Skill 20', exact: true });
+    await screen.findByRole('option', { name: 'Skill 20' });
     scrollToBottom();
     scrollToBottom();
     expect(listSkillAssetsPage).toHaveBeenCalledTimes(2);
     await act(async () => { next.resolve(page(20, 20, 40)); });
-    expect(screen.getAllByRole('option', { name: 'Skill 20', exact: true })).toHaveLength(1);
-    expect(screen.getByRole('option', { name: 'Skill 39', exact: true })).toBeInTheDocument();
+    expect(screen.getAllByRole('option', { name: 'Skill 20' })).toHaveLength(1);
+    expect(screen.getByRole('option', { name: 'Skill 39' })).toBeInTheDocument();
     scrollToBottom();
     expect(listSkillAssetsPage).toHaveBeenCalledTimes(2);
   });
@@ -204,27 +204,27 @@ describe('NewWorkflowModal skill pagination', () => {
     listSkillAssetsPage.mockResolvedValueOnce(page(1, 20, 60)).mockReturnValueOnce(oldPage.promise)
       .mockResolvedValueOnce(page(90, 1, 1)).mockResolvedValueOnce(page(1, 20, 60));
     const { input } = openPicker();
-    await screen.findByRole('option', { name: 'Skill 20', exact: true });
+    await screen.findByRole('option', { name: 'Skill 20' });
     scrollToBottom();
     fireEvent.change(input, { target: { value: 'Skill 90' } });
-    await screen.findByRole('option', { name: 'Skill 90', exact: true });
+    await screen.findByRole('option', { name: 'Skill 90' });
     await act(async () => { oldPage.resolve(page(21, 20, 60)); });
-    expect(screen.queryByRole('option', { name: 'Skill 21', exact: true })).not.toBeInTheDocument();
-    expect(screen.queryByRole('option', { name: 'Skill 1', exact: true })).not.toBeInTheDocument();
+    expect(screen.queryByRole('option', { name: 'Skill 21' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('option', { name: 'Skill 1' })).not.toBeInTheDocument();
     fireEvent.change(input, { target: { value: '' } });
-    await screen.findByRole('option', { name: 'Skill 1', exact: true });
+    await screen.findByRole('option', { name: 'Skill 1' });
     expect(listSkillAssetsPage.mock.calls.map(([args]) => [args.keyword, args.page])).toEqual([['', 1], ['', 2], ['Skill 90', 1], ['', 1]]);
   });
 
   it('keeps loaded options after failure and retries the same page', async () => {
     listSkillAssetsPage.mockResolvedValueOnce(page(1, 20, 21)).mockRejectedValueOnce(new Error('test page failure')).mockResolvedValueOnce(page(21, 1, 21));
     openPicker();
-    await screen.findByRole('option', { name: 'Skill 20', exact: true });
+    await screen.findByRole('option', { name: 'Skill 20' });
     scrollToBottom();
     await screen.findByText('newWorkflowSkillLoadFailed');
-    expect(screen.getByRole('option', { name: 'Skill 1', exact: true })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: 'Skill 1' })).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'common.retry' }));
-    await screen.findByRole('option', { name: 'Skill 21', exact: true });
+    await screen.findByRole('option', { name: 'Skill 21' });
     expect(listSkillAssetsPage.mock.calls.map(([args]) => args.page)).toEqual([1, 2, 2]);
     expect(screen.queryByText('newWorkflowSkillLoadFailed')).not.toBeInTheDocument();
   });
@@ -232,12 +232,12 @@ describe('NewWorkflowModal skill pagination', () => {
   it('restores the full list after selecting a search result', async () => {
     listSkillAssetsPage.mockResolvedValueOnce(page(1, 20, 60)).mockResolvedValueOnce(page(90, 1, 1)).mockResolvedValueOnce(page(1, 20, 60));
     const { input } = openPicker();
-    await screen.findByRole('option', { name: 'Skill 20', exact: true });
+    await screen.findByRole('option', { name: 'Skill 20' });
     fireEvent.change(input, { target: { value: 'Skill 90' } });
-    fireEvent.click(await screen.findByRole('option', { name: 'Skill 90', exact: true }));
+    fireEvent.click(await screen.findByRole('option', { name: 'Skill 90' }));
     fireEvent.mouseDown(input);
-    await screen.findByRole('option', { name: 'Skill 1', exact: true });
-    expect(screen.getByRole('option', { name: 'Skill 90', exact: true })).toBeInTheDocument();
+    await screen.findByRole('option', { name: 'Skill 1' });
+    expect(screen.getByRole('option', { name: 'Skill 90' })).toBeInTheDocument();
     expect(getName()).toHaveValue('Skill 90 Workflow');
     expect(listSkillAssetsPage.mock.calls.map(([args]) => [args.keyword, args.page])).toEqual([['', 1], ['Skill 90', 1], ['', 1]]);
   });
@@ -247,12 +247,12 @@ describe('NewWorkflowModal skill pagination', () => {
       ? { records: [{ id: 'summary', name: '中文 Summary 摘要' }], total: 1 }
       : page(1, 20, 42));
     const { input } = openPicker();
-    await screen.findByRole('option', { name: 'Skill 20', exact: true });
+    await screen.findByRole('option', { name: 'Skill 20' });
     fireEvent.change(input, { target: { value: ' SUMMARY 摘要 ' } });
-    const match = await screen.findByRole('option', { name: '中文 Summary 摘要', exact: true });
+    const match = await screen.findByRole('option', { name: '中文 Summary 摘要' });
     expect(listSkillAssetsPage).toHaveBeenLastCalledWith({ keyword: ' SUMMARY 摘要 ', nameOnly: true, page: 1, pageSize: 20, excludeBuiltinTemplates: true });
     expect(listSkillAssetsPage).toHaveBeenCalledTimes(2);
-    expect(screen.queryByRole('option', { name: 'Skill 1', exact: true })).not.toBeInTheDocument();
+    expect(screen.queryByRole('option', { name: 'Skill 1' })).not.toBeInTheDocument();
     expect(screen.getByText('newWorkflowSkillsAllLoaded')).toBeInTheDocument();
     fireEvent.click(match);
     expect(getName()).toHaveValue('中文 Summary 摘要 Workflow');
@@ -264,10 +264,10 @@ describe('NewWorkflowModal skill pagination', () => {
       ? { records: [], total: 0 }
       : page(1, 20, 20));
     const { input } = openPicker(initialSkill);
-    await screen.findByRole('option', { name: 'Source Skill', exact: true });
+    await screen.findByRole('option', { name: 'Source Skill' });
     fireEvent.change(input, { target: { value: 'summary' } });
     await screen.findByText('newWorkflowSkillsEmpty');
-    expect(screen.queryByRole('option', { name: 'Source Skill', exact: true })).not.toBeInTheDocument();
+    expect(screen.queryByRole('option', { name: 'Source Skill' })).not.toBeInTheDocument();
     expect(getName()).toHaveValue('Source Skill Workflow');
   });
 
@@ -287,8 +287,8 @@ describe('NewWorkflowModal skill pagination', () => {
   it('loads the first page even with a preset skill and preserves its selected label', async () => {
     listSkillAssetsPage.mockResolvedValue(page(1, 20, 20));
     openPicker(initialSkill);
-    await screen.findByRole('option', { name: 'Skill 1', exact: true });
-    expect(screen.getByRole('option', { name: 'Source Skill', exact: true })).toBeInTheDocument();
+    await screen.findByRole('option', { name: 'Skill 1' });
+    expect(screen.getByRole('option', { name: 'Source Skill' })).toBeInTheDocument();
     expect(getName()).toHaveValue('Source Skill Workflow');
     expect(listSkillAssetsPage).toHaveBeenCalledTimes(1);
   });
@@ -301,8 +301,8 @@ describe('NewWorkflowModal skill pagination', () => {
     await act(async () => { pending.resolve(page(1, 20, 20)); });
     fireEvent.click(screen.getByText('newWorkflowModeSkillTitle').closest('button')!);
     fireEvent.mouseDown(screen.getByRole('combobox'));
-    await screen.findByRole('option', { name: 'Skill 90', exact: true });
-    expect(screen.queryByRole('option', { name: 'Skill 1', exact: true })).not.toBeInTheDocument();
+    await screen.findByRole('option', { name: 'Skill 90' });
+    expect(screen.queryByRole('option', { name: 'Skill 1' })).not.toBeInTheDocument();
   });
 });
 

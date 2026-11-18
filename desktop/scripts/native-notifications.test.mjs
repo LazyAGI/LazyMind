@@ -626,7 +626,7 @@ for (const beforeShow of [false, true]) {
     };
     const source = fs.readFileSync(new URL("../electron/src/main.js", import.meta.url), "utf8");
     const start = source.indexOf('ipcMain.handle("lazymind:assistantSessionSet"');
-    const end = source.indexOf('ipcMain.handle("lazymind:restartRuntime"', start);
+    const end = source.indexOf('handleDesktopWork("lazymind:restartRuntime"', start);
     vm.runInNewContext(source.slice(start, end), context);
     const refreshed = handlers.get("lazymind:assistantSessionSet")({}, { ...session(), access_token: "synthetic-ipc-refresh" });
     await flush();

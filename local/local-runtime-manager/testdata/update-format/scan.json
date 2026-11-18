@@ -1,0 +1,126 @@
+{
+  "producer": "backend/scan-control-plane/internal/store/source.SQLRepository.AutoMigrate",
+  "sourceCommit": "70b5b4835c4e01fce60e87b91ba86b613893df41",
+  "lazyllmCommit": "d53007dd95ce5f9180399a095cf81fb0b643093a",
+  "shape": {
+    "present": true,
+    "applicationId": 0,
+    "userVersion": 0,
+    "schema": [
+      {
+        "type": "index",
+        "name": "idx_agent_commands_current_pending",
+        "table": "agent_commands",
+        "sql": "CREATE INDEX idx_agent_commands_current_pending ON agent_commands (queue_generation, agent_id, status, next_retry_at, created_at)"
+      },
+      {
+        "type": "index",
+        "name": "uk_create_operation",
+        "table": "data_source_create_operations",
+        "sql": "CREATE UNIQUE INDEX uk_create_operation ON data_source_create_operations (caller_id, request_id)"
+      },
+      {
+        "type": "index",
+        "name": "uk_documents_object",
+        "table": "documents",
+        "sql": "CREATE UNIQUE INDEX uk_documents_object ON documents (source_id, binding_id, object_key)"
+      },
+      {
+        "type": "index",
+        "name": "uk_parse_task_active",
+        "table": "parse_tasks",
+        "sql": "CREATE UNIQUE INDEX uk_parse_task_active ON parse_tasks (source_id, binding_id, object_key, target_version_id, task_action) WHERE status IN ('PENDING', 'RUNNING', 'SUBMITTED')"
+      },
+      {
+        "type": "index",
+        "name": "uk_parse_task_idempotency",
+        "table": "parse_tasks",
+        "sql": "CREATE UNIQUE INDEX uk_parse_task_idempotency ON parse_tasks (idempotency_key)"
+      },
+      {
+        "type": "index",
+        "name": "uk_source_binding_current_target",
+        "table": "source_bindings",
+        "sql": "CREATE UNIQUE INDEX uk_source_binding_current_target ON source_bindings (source_id, connector_type, target_type, target_fingerprint) WHERE status <> 'DELETING'"
+      },
+      {
+        "type": "index",
+        "name": "uk_source_sync_runs_scheduled_fire",
+        "table": "source_sync_runs",
+        "sql": "CREATE UNIQUE INDEX uk_source_sync_runs_scheduled_fire ON source_sync_runs (binding_id, binding_generation, scheduled_fire_at) WHERE trigger_type = 'scheduled' AND scheduled_fire_at IS NOT NULL AND status IN ('PENDING', 'RUNNING')"
+      },
+      {
+        "type": "table",
+        "name": "agent_commands",
+        "table": "agent_commands",
+        "sql": "CREATE TABLE `agent_commands` (`command_id` text,`agent_id` text,`queue_generation` integer NOT NULL DEFAULT 1,`command_type` text,`payload_json` jsonb,`status` text,`attempt_count` integer,`next_retry_at` datetime,`acked_at` datetime,`last_error` jsonb,`result_json` jsonb,`created_at` datetime,`dispatched_at` datetime,PRIMARY KEY (`command_id`))"
+      },
+      {
+        "type": "table",
+        "name": "agents",
+        "table": "agents",
+        "sql": "CREATE TABLE `agents` (`agent_id` text,`tenant_id` text,`hostname` text,`version` text,`status` text,`listen_addr` text,`last_heartbeat_at` datetime,`active_source_count` integer,`active_watch_count` integer,`active_task_count` integer,`updated_at` datetime,PRIMARY KEY (`agent_id`))"
+      },
+      {
+        "type": "table",
+        "name": "data_source_create_operations",
+        "table": "data_source_create_operations",
+        "sql": "CREATE TABLE `data_source_create_operations` (`operation_id` text,`caller_id` text,`request_id` text,`request_hash` text,`source_id` text,`dataset_id` text,`created_core_parent_document_ids_json` jsonb,`created_binding_ids_json` jsonb,`warning_json` jsonb,`status` text,`compensation_status` text,`compensation_error` jsonb,`created_at` datetime,`updated_at` datetime,PRIMARY KEY (`operation_id`))"
+      },
+      {
+        "type": "table",
+        "name": "documents",
+        "table": "documents",
+        "sql": "CREATE TABLE `documents` (`document_id` text,`tenant_id` text,`source_id` text,`binding_id` text,`object_key` text,`core_document_id` text,`current_version_id` text,`desired_version_id` text,`source_version` text,`display_name` text,`mime_type` text,`file_extension` text,`parse_status` text,`created_at` datetime,`updated_at` datetime,PRIMARY KEY (`document_id`))"
+      },
+      {
+        "type": "table",
+        "name": "parse_task_dead_letters",
+        "table": "parse_task_dead_letters",
+        "sql": "CREATE TABLE `parse_task_dead_letters` (`dead_letter_id` text,`task_id` text,`tenant_id` text,`source_id` text,`binding_id` text,`binding_generation` integer,`object_key` text,`document_id` text,`task_action` text,`target_version_id` text,`retry_count` integer,`error_code` text,`last_error` jsonb,`failed_at` datetime,`created_at` datetime,PRIMARY KEY (`dead_letter_id`))"
+      },
+      {
+        "type": "table",
+        "name": "parse_tasks",
+        "table": "parse_tasks",
+        "sql": "CREATE TABLE `parse_tasks` (`task_id` text,`tenant_id` text,`source_id` text,`binding_id` text,`binding_generation` integer,`object_key` text,`document_id` text,`task_action` text,`target_version_id` text,`source_version` text,`core_parent_document_id` text,`idempotency_key` text,`status` text,`core_task_id` text,`core_document_id` text,`lease_owner` text,`lease_until` datetime,`retry_count` integer,`next_run_at` datetime,`last_error` jsonb,`created_at` datetime,`updated_at` datetime,PRIMARY KEY (`task_id`))"
+      },
+      {
+        "type": "table",
+        "name": "source_bindings",
+        "table": "source_bindings",
+        "sql": "CREATE TABLE `source_bindings` (`binding_id` text,`source_id` text,`binding_type` text,`connector_type` text,`target_type` text,`target_ref` text,`target_fingerprint` text,`agent_id` text,`auth_connection_id` text,`provider_options_json` jsonb,`tree_key` text,`binding_generation` integer,`core_parent_document_id` text,`core_parent_document_name` text,`sync_mode` text,`schedule_policy_json` jsonb,`next_sync_at` datetime,`include_extensions_json` jsonb,`exclude_extensions_json` jsonb,`chat_enabled` numeric,`status` text,`last_error` jsonb,`deleted_at` datetime,`created_at` datetime,`updated_at` datetime,PRIMARY KEY (`binding_id`))"
+      },
+      {
+        "type": "table",
+        "name": "source_document_states",
+        "table": "source_document_states",
+        "sql": "CREATE TABLE `source_document_states` (`source_id` text,`binding_id` text,`binding_generation` integer,`object_key` text,`source_version` text,`baseline_version` text,`deleted_at_source` datetime,`source_state` text,`sync_state` text,`pending_action` text,`document_list_visible` numeric,`selectable` numeric,`parse_queue_state` text,`document_id` text,`active_task_id` text,`last_detected_at` datetime,`last_synced_at` datetime,`last_error` jsonb,`created_at` datetime,`updated_at` datetime,PRIMARY KEY (`source_id`,`binding_id`,`object_key`))"
+      },
+      {
+        "type": "table",
+        "name": "source_object_index",
+        "table": "source_object_index",
+        "sql": "CREATE TABLE `source_object_index` (`source_id` text,`binding_id` text,`tree_key` text,`object_key` text,`parent_key` text,`display_name` text,`search_name` text,`object_type` text,`is_document` numeric,`is_container` numeric,`has_children` numeric,`source_version` text,`size_bytes` integer,`mime_type` text,`file_extension` text,`modified_at` datetime,`deleted_at_source` datetime,`depth` integer,`provider_meta_json` jsonb,`last_seen_run_id` text,`created_at` datetime,`updated_at` datetime,PRIMARY KEY (`binding_id`,`object_key`))"
+      },
+      {
+        "type": "table",
+        "name": "source_sync_checkpoints",
+        "table": "source_sync_checkpoints",
+        "sql": "CREATE TABLE `source_sync_checkpoints` (`source_id` text,`binding_id` text,`binding_generation` integer,`cursor` text,`next_sync_at` datetime,`last_sync_at` datetime,`last_success_at` datetime,`lock_owner` text,`lock_until` datetime,`retry_count` integer,`last_error` jsonb,`created_at` datetime,`updated_at` datetime,PRIMARY KEY (`binding_id`))"
+      },
+      {
+        "type": "table",
+        "name": "source_sync_runs",
+        "table": "source_sync_runs",
+        "sql": "CREATE TABLE `source_sync_runs` (`run_id` text,`source_id` text,`binding_id` text,`binding_generation` integer,`trigger_type` text,`scheduled_fire_at` datetime,`scope_type` text,`scope_ref_json` jsonb,`coverage_json` jsonb,`status` text,`seen_count` integer,`new_count` integer,`modified_count` integer,`deleted_count` integer,`unchanged_count` integer,`error_code` text,`error_message` text,`started_at` datetime,`finished_at` datetime,PRIMARY KEY (`run_id`))"
+      },
+      {
+        "type": "table",
+        "name": "sources",
+        "table": "sources",
+        "sql": "CREATE TABLE `sources` (`source_id` text,`tenant_id` text,`created_by` text,`name` text,`dataset_id` text,`status` text,`source_options_json` jsonb,`include_extensions_json` jsonb,`exclude_extensions_json` jsonb,`config_version` integer,`deleted_at` datetime,`created_at` datetime,`updated_at` datetime,PRIMARY KEY (`source_id`))"
+      }
+    ]
+  }
+}

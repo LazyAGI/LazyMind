@@ -85,7 +85,7 @@ export default function PythonComponentDependencies() {
     })}
     <Modal title={selected ? t("ragComponent.installTitle", { name: t(`${componentLabel(selected.id)}.name`) }) : t("ragComponent.install")} open={!!selected}
       okText={t("ragComponent.downloadAndInstall")}
-      okButtonProps={{ disabled: busy || selected?.installing || (selected?.installMethod !== "source" && !selected?.url?.startsWith("https://")) }}
+      okButtonProps={{ disabled: busy || selected?.installing || (selected?.installMethod !== "source" && !selected?.url) }}
       cancelText={t("common.cancel")} onOk={beginInstall} onCancel={() => setSelected(null)}>
       <p>{selected?.installMethod === "source" ? t("ragComponent.sourceInstaller") : t("ragComponent.packageInstaller")}</p>
       <p>{selected?.installMethod === "source" ? t("ragComponent.sourceRestartNotice") : t("ragComponent.packageRestartNotice")}</p>

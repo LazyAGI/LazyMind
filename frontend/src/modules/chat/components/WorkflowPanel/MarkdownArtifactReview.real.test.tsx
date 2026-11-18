@@ -15,7 +15,7 @@ it('persists an individually accepted suggestion in a real mixed Markdown editor
  const paragraphs=Array.from(view.container.querySelectorAll<HTMLElement>('.mdxeditor-root-contenteditable p')).slice(0,2);
  const preview=documentRewritePreview({representation:'markdown',results:['First','Second'].map(text=>({target:{type:'block',block_type:'paragraph',target_start:source.indexOf(text),target_end:source.indexOf(text)+text.length},preview:{old_text:text,new_text:text+' better'},patch:{type:'string_replace_set',payload:{}}})),artifact:{content_type:'text',value:source},commit:{token:'00000000000000000000000000000001'}},3);
  view.rerender(<MarkdownArtifactEditor {...editorProps} rewritePreview={{paragraph:paragraphs[0],paragraphs,sourceMarkdown:source,sessionId:'test',slotId:'test',listIndex:-1,preview}} onRewritePreviewRejected={()=>view.rerender(<MarkdownArtifactEditor {...editorProps}/>)}/>);
- fireEvent.click(await screen.findAllByRole('button',{name:'接受',exact:true}).then(items=>items[0]));
+ fireEvent.click(await screen.findAllByRole('button',{name:'接受'}).then(items=>items[0]));
  await waitFor(()=>expect(save).toHaveBeenCalledTimes(1));
  expect(save.mock.calls[0][0]).toContain('First better');
  expect(save.mock.calls[0][0]).toContain('$x^2$');

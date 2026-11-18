@@ -1,8 +1,6 @@
 !include "LogicLib.nsh"
 !include "nsDialogs.nsh"
-!include "WordFunc.nsh"
 !include "FileFunc.nsh"
-!insertmacro VersionCompare
 !insertmacro GetParameters
 !insertmacro GetOptions
 !include "${BUILD_RESOURCES_DIR}\lazymind-installer-metadata.nsh"
@@ -54,6 +52,8 @@
   LangString LMPreflightFailed ${LANG_SIMPCHINESE} "当前临时目录或安装目录无法可靠安装 LazyMind。请确认 TEMP 位于可写的本地磁盘、至少有 ${LAZYMIND_MIN_FREE_SPACE_MB} MB 可用空间，并且路径不过长。"
   LangString LMDowngradeBlocked ${LANG_ENGLISH} "A newer LazyMind version is already installed. Downgrade is blocked to protect local data."
   LangString LMDowngradeBlocked ${LANG_SIMPCHINESE} "已安装更高版本的 LazyMind。为保护本地数据，禁止降级安装。"
+  LangString LMVersionInvalid ${LANG_ENGLISH} "LazyMind cannot safely compare the installed and candidate versions. Setup cannot continue."
+  LangString LMVersionInvalid ${LANG_SIMPCHINESE} "无法可靠比较已安装版本与候选版本，安装程序无法继续。"
   LangString LMUpgradePurgeBlocked ${LANG_ENGLISH} "Upgrades always keep Local AppData. Remove --purge-lazymind-local-data and retry."
   LangString LMUpgradePurgeBlocked ${LANG_SIMPCHINESE} "升级始终保留 Local AppData。请移除 --purge-lazymind-local-data 后重试。"
   LangString LMInstallTypePageTitle ${LANG_ENGLISH} "Installation type"
@@ -185,13 +185,24 @@
   ReadRegStr $InstalledVersion HKCU "${UNINSTALL_REGISTRY_KEY}" "DisplayVersion"
   ReadRegStr $LegacyUninstallString HKCU "${UNINSTALL_REGISTRY_KEY}" "UninstallString"
   ${If} $InstalledVersion != ""
-    ${VersionCompare} $InstalledVersion "${VERSION}" $0
-    ${If} $0 == "1"
+    nsExec::ExecToStack '"$InstallerHelper" compare-versions --installed "$InstalledVersion" --candidate "${VERSION}"'
+    Pop $0
+    Pop $1
+    ${If} $0 != 0
+      MessageBox MB_OK|MB_ICONSTOP "$(LMVersionInvalid)" /SD IDOK
+      SetErrorLevel 2
+      Quit
+    ${EndIf}
+    ${If} $1 == "1"
       MessageBox MB_OK|MB_ICONSTOP "$(LMDowngradeBlocked)" /SD IDOK
       SetErrorLevel 2
       Quit
-    ${ElseIf} $0 == "2"
+    ${ElseIf} $1 == "-1"
       StrCpy $IsManualUpgrade "1"
+    ${ElseIf} $1 != "0"
+      MessageBox MB_OK|MB_ICONSTOP "$(LMVersionInvalid)" /SD IDOK
+      SetErrorLevel 2
+      Quit
     ${EndIf}
   ${EndIf}
 
