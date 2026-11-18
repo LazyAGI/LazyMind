@@ -1,6 +1,9 @@
 package common
 
 func init() {
+	registerAdditionalError("paper_guide_source_precision_unavailable", 409, 2004416)
+	registerAdditionalErrorAlias("source precision unavailable", "paper_guide_source_precision_unavailable", 409, 2004416)
+	registerAdditionalErrorAlias("immutable source precision artifact mismatch", "paper_guide_source_precision_unavailable", 409, 2004416)
 	registerAdditionalError("paper_guide_model_timeout", 504, 2004414)
 	registerAdditionalError("paper_guide_model_request_failed", 502, 2004415)
 	registerAdditionalError("paper_guide_regeneration_required", 409, 2004413)

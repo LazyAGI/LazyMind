@@ -4,8 +4,8 @@ import (
 	"archive/zip"
 	"bytes"
 	"encoding/json"
-	"errors"
 	"fmt"
+	"io/fs"
 	"math"
 	"path"
 	"reflect"
@@ -91,7 +91,8 @@ func precisionBox(box, size []float64) ([]float64, error) {
 	return out, nil
 }
 
-var errPrecisionSkip = errors.New("skip verified table descendants")
+// The walker uses SkipDir to skip the children of a verified table.
+var errPrecisionSkip = fs.SkipDir
 
 func walkPrecision(bs []precisionBlock, depth int, visit func(precisionBlock) error) error {
 	if depth > 16 {
@@ -472,7 +473,7 @@ func projectSourcePrecision(base Document, raw []byte, figures *[]OriginalFigure
 		}
 	}
 	if len(projection.Regions) > 20000 {
-		return fail(errors.New("source precision region limit"))
+		return fail(precisionError("region limit"))
 	}
 	return out, nil
 }

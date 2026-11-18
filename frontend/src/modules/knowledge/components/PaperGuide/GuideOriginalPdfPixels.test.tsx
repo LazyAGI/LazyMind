@@ -39,9 +39,13 @@ it("renders exact figure and equation pixels on their own pages of an authentica
   source.line(61, 63, 77, 63);
   source.line(85, 50, 93, 61);
   source.line(101, 50, 89, 73);
-  source.setTextColor(0, 0, 0);
-  source.setFontSize(14);
-  source.text("(3)", 20, 64); // physical equation number, outside the equation crop
+  // Draw the printed (3) as PDF paths so rasterization is independent of system fonts.
+  source.setDrawColor(0, 0, 0);
+  source.setLineWidth(1);
+  source.lines([[-2, 2], [0, 8], [2, 2]], 22, 53);
+  source.lines([[5, 0], [0, 10], [-5, 0]], 24, 54);
+  source.line(24, 59, 29, 59);
+  source.lines([[2, 2], [0, 8], [-2, 2]], 31, 53);
   const data = source.output("arraybuffer");
   const sha256 = createHash("sha256").update(new Uint8Array(data)).digest("hex");
 

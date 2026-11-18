@@ -2249,5 +2249,6 @@
   "2004412": { "en-US": "Guide generation failed. Resume later; used budget and published content are preserved.", "zh-CN": "导读生成失败，请稍后续跑；已用预算和已发布内容会保留。" },
   "2004413": { "en-US": "The guide format or generation instructions changed. Generate a new revision; existing content remains readable.", "zh-CN": "导读格式或生成规则已更新，请重新生成；已有内容仍可阅读。" },
   "2004414": { "en-US": "The model request timed out. Published content and used budget are preserved; resume later or explicitly generate with another model.", "zh-CN": "模型请求超时，已保留已发布内容和已用预算；可稍后续跑，或明确选择其他模型重新生成。" },
-  "2004415": { "en-US": "The model service could not complete the request. Published content and used budget are preserved; retry later.", "zh-CN": "模型服务未能完成请求，已保留已发布内容和已用预算，请稍后重试。" }
+  "2004415": { "en-US": "The model service could not complete the request. Published content and used budget are preserved; retry later.", "zh-CN": "模型服务未能完成请求，已保留已发布内容和已用预算，请稍后重试。" },
+  "2004416": { "en-US": "The source pages could not be verified. The original PDF and earlier guides are still available.", "zh-CN": "无法核实来源页码。仍可阅读原文和已有导读。" }
 }
