@@ -60,8 +60,8 @@ it("falls back to the original whole page when its source region cannot render",
     text: "original",
     source_block_id: "b",
     source_type: "image",
-    locator: { kind: "bbox", page: 2, bbox: [0.1, 0.2, 0.4, 0.6] },
-  });
+    locator: { kind: "page", page: 2 },
+  }, { kind: "figure", page: 2, bbox: [0.1, 0.2, 0.4, 0.6] });
   expect(result).toMatchObject({ url: "blob:whole-page", mode: "page" });
   expect(previewMocks.getDocument).toHaveBeenCalledWith(expect.objectContaining({
     cMapUrl: expect.stringMatching(/pdfjs\/cmaps\/$/), cMapPacked: true,
@@ -144,8 +144,8 @@ it("does not surface a completed render from an old revision sharing the same PD
   expect(destroy).toHaveBeenCalledTimes(1);
 });
 
-it("preserves the legacy evidence region and reports unavailable when both paths fail", async () => {
-  previewMocks.get.mockReset().mockRejectedValueOnce(new Error("bad region")).mockResolvedValueOnce(undefined);
+it("uses the physical page when a legacy figure only has citation bounds", async () => {
+  previewMocks.get.mockReset().mockResolvedValueOnce({ url: "blob:page", width: 600, height: 800 });
   previewMocks.getDocument.mockReturnValue({ promise: Promise.resolve({
     getPage: async () => ({ getViewport: () => ({ width: 600, height: 800 }) }),
     destroy: async () => {},
@@ -155,8 +155,22 @@ it("preserves the legacy evidence region and reports unavailable when both paths
     id: "historical", source_block_id: "image", source_type: "image", text: "",
     locator: { kind: "figure_region", page: 2, bbox: [.2,.1,.4,.3] },
   });
-  expect(result).toBeUndefined();
+  expect(result?.mode).toBe("page");
   expect(previewMocks.get.mock.calls.map(call => call[1].regions[0])).toEqual([
-    { page: 3, bbox: [120, 80, 240, 240] }, { page: 3, bbox: [0, 0, 600, 800] },
+    { page: 3, bbox: [0, 0, 600, 800] },
   ]);
+});
+
+it("uses the whole rotated page where the figure coordinate orientation is unproven", async () => {
+  previewMocks.get.mockReset().mockResolvedValue({ url: "blob:rotated-page", width: 800, height: 600 });
+  previewMocks.getDocument.mockReturnValue({ promise: Promise.resolve({
+    getPage: async () => ({ rotate: 90, getViewport: () => ({ width: 600, height: 800 }) }),
+    destroy: async () => {},
+  }) });
+  const hook = renderHook(() => useGuideSourcePreview("rotated", hash, true, hash, () => new ArrayBuffer(4)));
+  const preview = await hook.result.current.preview({id: "f", source_type: "image", source_block_id: "b",
+    text: "", locator: {kind: "page", page: 0}}, {kind: "figure", page: 0, bbox: [.2, .1, .5, .6]});
+  expect(preview?.mode).toBe("page");
+  expect(previewMocks.get).toHaveBeenCalledTimes(1);
+  expect(previewMocks.get.mock.calls[0][1].regions).toEqual([{ page: 1, bbox: [0, 0, 600, 800] }]);
 });

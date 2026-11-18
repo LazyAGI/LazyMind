@@ -241,7 +241,7 @@ func TestOriginalDisplayEvidenceIsCurrentAndRevisionScoped(t *testing.T) {
 	contained := []string{}
 	d.Precision = &pdfir.SourcePrecision{Version: 3, SourceSHA256: identity.SourceSHA256, BaseIRDigest: pdfir.Digest("synthetic-base"), ArchiveDigest: pdfir.Digest("synthetic-archive"), PageOnlyBlockIDs: &contained}
 	current, err := BuildSourceSnapshotWithFigureProofs(d, identity, []pdfir.OriginalFigureProof{
-		{BlockID: "synthetic-chart", Type: "chart", Page: 1, Parts: [][]float64{{.1, .2, .3, .4}}},
+		{BlockID: "synthetic-chart", Type: "chart", Page: 1, Caption: "Figure 1: chart", Parts: [][]float64{{.1, .2, .3, .4}}},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -263,6 +263,31 @@ func TestOriginalDisplayEvidenceIsCurrentAndRevisionScoped(t *testing.T) {
 	got, err := service.Evidence(t.Context(), scope, rev.ID, id)
 	if err != nil || !got.SourceCurrent || got.OriginalDisplay == nil || !reflect.DeepEqual(got.OriginalDisplay.BBox, []float64{.1, .2, .3, .4}) {
 		t.Fatalf("current ACL could not resolve frozen original: %+v %v", got, err)
+	}
+	// A published guide with the same source and caption can gain an exact crop
+	// without changing its immutable source or evidence locator.
+	old, err := BuildSourceSnapshotWithFigureProofs(d, identity, []pdfir.OriginalFigureProof{
+		{BlockID: "synthetic-chart", Type: "chart", Page: 1, Caption: "Figure 1: chart"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	source.legacy = old
+	got, err = service.Evidence(t.Context(), scope, rev.ID, id)
+	if err != nil || got.OriginalDisplay == nil || !reflect.DeepEqual(got.OriginalDisplay.BBox, current.Assets[0].OriginalDisplay.BBox) ||
+		len(old.Assets[0].OriginalDisplay.BBox) != 0 {
+		t.Fatalf("caption-only display was not safely upgraded: %+v %v", got, err)
+	}
+	otherCaption, err := BuildSourceSnapshotWithFigureProofs(d, identity, []pdfir.OriginalFigureProof{
+		{BlockID: "synthetic-chart", Type: "chart", Page: 1, Caption: "Figure 2: different"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	source.legacy = otherCaption
+	got, err = service.Evidence(t.Context(), scope, rev.ID, id)
+	if err != nil || got.OriginalDisplay == nil || len(got.OriginalDisplay.BBox) != 0 {
+		t.Fatalf("mismatched caption reused a crop: %+v %v", got, err)
 	}
 	foreign := scope
 	foreign.DocumentID = "other-document"

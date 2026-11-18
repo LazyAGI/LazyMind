@@ -3,6 +3,8 @@ import { expect, it, vi } from "vitest";
 import PaperGuideReader from "./PaperGuideReader";
 import PaperGuidePlayground, { playgroundDocument } from "./PaperGuidePlayground";
 import { revision, section } from "./fixtures";
+import GuideGlossaryEntry from "./GuideGlossaryEntry";
+import { sourceBoundary } from "./sourceText";
 import { isGuideRunActive } from "./guideRunState";
 
 it("publishes arbitrary chapters in plan order with pending placeholders without source action buttons", () => {
@@ -202,6 +204,29 @@ it("renders existing glossary terms as collapsed entries with source offsets and
   expect(view.container.querySelectorAll(".guide-glossary-entry")).toHaveLength(1);
 });
 
+it.each([
+  ["Transformer（Transformer）", "Transformer"],
+  ["Transformer (transformer)", "Transformer"],
+  ["Transformer", "Transformer"],
+  ["生成对抗网络（Generative Adversarial Network，GAN）", "生成对抗网络（Generative Adversarial Network，GAN）"],
+  ["BERT (Bidirectional Encoder Representations from Transformers)", "BERT (Bidirectional Encoder Representations from Transformers)"],
+])("maps glossary title %s and explanation back to their stored text", (label, title) => {
+  const body = "𠮷是一个例子。";
+  const text = `• ${label}： ${body}`;
+  const { container } = render(<GuideGlossaryEntry id="term" text={text}/>);
+  const entry = container.querySelector("details")!;
+  const summary = entry.querySelector("summary")!;
+  expect(summary.textContent).toBe(title);
+  fireEvent.click(summary);
+  for (const [element, expected] of [[summary, title], [entry.querySelector("p")!, body]] as const) {
+    const range = document.createRange();
+    range.selectNodeContents(element);
+    const start = sourceBoundary(entry, range.startContainer, range.startOffset, "start");
+    const end = sourceBoundary(entry, range.endContainer, range.endOffset, "end");
+    expect(Array.from(text).slice(start, end).join("")).toBe(expected);
+  }
+});
+
 it("uses fixed labels for standard chapters and preserves paper-specific method titles", () => {
   const r = revision();
   const entries = [["overview", "概览：DDPM"], ["why-it-matters", "为什么重要：噪声"], ["big-idea", "核心想法：逐步加噪"], ["noise-training", "如何训练噪声预测器"], ["results", "结果：图像质量"], ["deep-dive", "渐进生成与压缩"], ["limitations", "局限：速度"], ["glossary", "术语表：领域"]];
@@ -221,4 +246,19 @@ it.each([
   const view = render(<PaperGuideReader revision={r} title={documentName} language="zh" onEvidence={vi.fn()} onSelection={vi.fn()} />);
   expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("Mamba: Linear-Time Sequence Modeling with Selective State Spaces");
   expect(view.container.querySelector(".flashpapers-subtitle")).toHaveTextContent("Mamba：用选择性状态空间进行线性时间序列建模");
+});
+
+it("presents a published results playground as evidence and keeps method controls", () => {
+  const r = revision();
+  r.plan = { layout: "flashpapers", sections: [], claims: [], questions: [], required_assets: [], term_policy: [],
+    profiles: { primary: null, secondary: [], uncertainty_reason: "" } };
+  r.sections = [section("method"), section("results")];
+  for (const chapter of r.sections) {
+    Object.assign(chapter.blocks[0], { kind: "playground", playground: { html: "<table><tr><td>17.4</td></tr></table>" } });
+  }
+  render(<PaperGuideReader revision={r} title="FlashAttention" language="zh" onEvidence={vi.fn()} onSelection={vi.fn()} />);
+  const results = screen.getByTitle("实验结果对照").closest(".guide-playground") as HTMLElement;
+  expect(within(results).getByText("实验结果")).toBeVisible();
+  expect(within(results).queryByRole("button", { name: "重载交互" })).toBeNull();
+  expect(screen.getAllByRole("button", { name: "重载交互" })).toHaveLength(1);
 });

@@ -389,7 +389,7 @@ func (s Service) Evidence(ctx context.Context, scope Scope, id, evidenceID strin
 			if same {
 				for _, asset := range snap.Assets {
 					if asset.ID == ev.ID {
-						out.OriginalDisplay = asset.OriginalDisplay
+						out.OriginalDisplay = evidenceDisplay(asset, current.Snapshot)
 						break
 					}
 				}
@@ -399,6 +399,29 @@ func (s Service) Evidence(ctx context.Context, scope Scope, id, evidenceID strin
 	}
 	return EvidenceResponse{}, ErrEvidence
 }
+
+// Evidence calls this only after verifying the revision's PDF hash and IR digest.
+// A newer figure proof can supply missing display geometry for a caption-only
+// snapshot. The stored citation, figure caption and revision stay immutable.
+func evidenceDisplay(asset GuideAsset, current *GuideSourceSnapshot) *GuideOriginalDisplay {
+	frozen := asset.OriginalDisplay
+	if frozen == nil || asset.Kind != "figure" || frozen.Kind != "figure" || len(frozen.BBox) != 0 || frozen.Caption == "" {
+		return frozen
+	}
+	for _, candidate := range current.Assets {
+		if candidate.ID != asset.ID || candidate.BlockID != asset.BlockID || candidate.Kind != asset.Kind {
+			continue
+		}
+		d := candidate.OriginalDisplay
+		if d != nil && d.Kind == frozen.Kind && d.Page == frozen.Page && d.Caption == frozen.Caption && validBBox(d.BBox) {
+			view := *d
+			view.Caption, view.Number = frozen.Caption, frozen.Number
+			return &view
+		}
+	}
+	return frozen
+}
+
 func (s Service) Selection(ctx context.Context, scope Scope, id string, in SelectionRequest) (SelectionContext, error) {
 	out := SelectionContext{RevisionID: id, SectionKey: in.SectionKey, BlockID: in.BlockID, Evidence: []GuideEvidence{}, Claims: []GuideClaim{}}
 	if e := s.Authorize(ctx, scope, false); e != nil {

@@ -13,7 +13,10 @@ export function glossaryEntry(text: string) {
     const rest = text.slice(offset + 1);
     const body = rest.trimStart();
     if (!term || term.length > 100 || /[\n。!?！？]/u.test(term) || !body) return undefined;
-    return { term, body, termOffset: Array.from(text.slice(0, prefix)).length,
+    // Older guides sometimes repeat an English name in the translation slot.
+    // Display its first occurrence, keeping both fragments at their original offsets.
+    const repeatedName = /^([A-Za-z][^()（）]*?)\s*[（(]\s*\1\s*[）)]$/iu.exec(term);
+    return { term: repeatedName?.[1] ?? term, body, termOffset: Array.from(text.slice(0, prefix)).length,
       bodyOffset: Array.from(text.slice(0, text.length - body.length)).length };
   }
 }

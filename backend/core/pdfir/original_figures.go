@@ -1,6 +1,9 @@
 package pdfir
 
-import "strings"
+import (
+	"reflect"
+	"strings"
+)
 
 // OriginalFigureProof belongs to the paper guide catalog. It records each
 // proved producer body component rather than reusing an evidence locator.
@@ -10,9 +13,13 @@ type OriginalFigureProof struct {
 	Page    int         `json:"page"`
 	Parts   [][]float64 `json:"parts,omitempty"`
 	Caption string      `json:"caption,omitempty"`
+	// An isolated top figure owns the page-wide strip above its caption, including
+	// panel labels or legends that the producer may have left outside image_body.
+	CaptionTop float64 `json:"isolated_caption_top,omitempty"`
 }
 
-func proveOriginalFigure(block Block, item contentItem, parent precisionBlock, size []float64) OriginalFigureProof {
+func proveOriginalFigure(block Block, item contentItem, parent precisionBlock, page precisionPage) OriginalFigureProof {
+	size := page.Size
 	proof := OriginalFigureProof{BlockID: block.ID, Type: block.Type, Page: block.Page}
 	// v3 has already matched all of this canonical item's caption content
 	// against the direct children of this parent, independently of projectImages.
@@ -28,13 +35,18 @@ func proveOriginalFigure(block Block, item contentItem, parent precisionBlock, s
 	}
 	var parts [][]float64
 	var ancillary, captions [][]float64
-	var captionLineHeight float64
+	var captionLineHeight, captionTop float64
+	captionCount := 0
 	for _, child := range parent.Blocks {
 		box, err := precisionBox(child.BBox, size)
 		if err != nil || child.Angle != 0 || len(child.Blocks) != 0 {
 			return proof
 		}
 		if child.Type == item.Type+"_caption" || child.Type == item.Type+"_footnote" {
+			if child.Type == item.Type+"_caption" {
+				captionCount++
+				captionTop = box[1]
+			}
 			ancillary = append(ancillary, box)
 			for _, line := range child.Lines {
 				for _, span := range line.Spans {
@@ -80,15 +92,66 @@ func proveOriginalFigure(block Block, item contentItem, parent precisionBlock, s
 			return proof
 		}
 	}
-	// Keep the page when the same group's caption extends a full text height
-	// beyond both sides of its body. Those margins are wide enough to hold
-	// labels whose extent the producer's narrower media box does not establish.
+	// A caption extending a text height beyond both sides leaves room for
+	// detached labels outside the media box. Retain the complete isolated
+	// strip when established, otherwise leave the figure page-only.
 	if text := originalEnvelope(captions); len(text) == 4 &&
 		(crop[0]-text[0])*size[0] >= captionLineHeight && (text[2]-crop[2])*size[0] >= captionLineHeight {
-		return proof
+		if proof.Caption == "" || captionCount != 1 || len(parent.Blocks) != len(parts)+1 ||
+			crop[3] > captionTop || !isolatedAboveCaption(page, parent, captionTop) {
+			return proof
+		}
+		proof.CaptionTop = captionTop
 	}
 	proof.Parts = parts
 	return proof
+}
+
+// Both retained layout passes must account for the same sole figure in this
+// strip. Running heads, neighboring columns and discarded text also disqualify it.
+func isolatedAboveCaption(page precisionPage, parent precisionBlock, bottom float64) bool {
+	for passIndex, pass := range [][]precisionBlock{page.Paras, page.Preproc, page.Discarded} {
+		owners := 0
+		for _, block := range pass {
+			if passIndex < 2 && reflect.DeepEqual(block, parent) {
+				owners++
+				continue
+			}
+			if !originalBlockBelow(block, page.Size, bottom, passIndex == 0) {
+				return false
+			}
+		}
+		if passIndex < 2 && owners != 1 {
+			return false
+		}
+	}
+	return true
+}
+
+func originalBlockBelow(block precisionBlock, size []float64, bottom float64, merged bool) bool {
+	box, err := precisionBox(block.BBox, size)
+	if err != nil || box[1] < bottom {
+		return false
+	}
+	for _, line := range block.Lines {
+		for _, span := range line.Spans {
+			// Merged paragraph continuations use the next physical page’s coordinates.
+			// The preprocessed and discarded passes below still check all local ink.
+			if merged && span.CrossPage {
+				continue
+			}
+			b, err := precisionBox(span.BBox, size)
+			if err != nil || b[1] < bottom || span.CrossPage {
+				return false
+			}
+		}
+	}
+	for _, child := range block.Blocks {
+		if !originalBlockBelow(child, size, bottom, merged) {
+			return false
+		}
+	}
+	return true
 }
 
 func originalBoxContains(parent, child []float64) bool {
@@ -143,11 +206,16 @@ func uniqueOriginalFigureProofs(proofs []OriginalFigureProof, blocks []Block) []
 		for _, part := range proof.Parts {
 			if components[key(proof.Page, part)] != 1 {
 				proof.Parts = nil
+				proof.CaptionTop = 0
 				break
 			}
 		}
 		if proof.Caption != "" && captions[strings.Join(strings.Fields(proof.Caption), " ")] != 1 {
 			proof.Caption = ""
+			if proof.CaptionTop != 0 {
+				proof.Parts = nil
+				proof.CaptionTop = 0
+			}
 		}
 		if len(proof.Parts) != 0 || proof.Caption != "" {
 			out = append(out, proof)

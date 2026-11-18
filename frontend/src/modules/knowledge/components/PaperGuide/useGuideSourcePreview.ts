@@ -97,14 +97,18 @@ export function useGuideSourcePreview(
       if (!isCurrent()) return;
       const viewport = page.getViewport({ scale: 1, rotation: 0 });
       const { width, height } = viewport;
-      const b = original ? original.bbox : e.locator.bbox;
+      // A citation may identify a caption, a paragraph, or the full figure group.
+      // Only a verified original display identifies the pixels of an image.
+      const figure = ["image", "chart"].includes(e.source_type);
+      const b = original ? original.bbox : figure ? undefined : e.locator.bbox;
       const target = { referenceId: e.id, referenceKey: e.id, rawText: e.text, kind: "open" as const };
-      if (b?.length === 4 && b.every(value => Number.isFinite(value) && value >= 0 && value <= 1) &&
+      if ((!figure || !(page.rotate % 360)) && b?.length === 4 && b.every(value => Number.isFinite(value) && value >= 0 && value <= 1) &&
           b[0] < b[2] && b[1] < b[3] && !(b[0] === 0 && b[1] === 0 && b[2] === 1 && b[3] === 1)) {
         try {
           const crop = await session.cache.get(doc, {
             ...target, regions: [{ page: pageNumber, bbox: [b[0] * width, b[1] * height, b[2] * width, b[3] * height] }],
-          }, { exact: !!original });
+          }, { exact: !!original, trimWhitespace: original?.kind === "figure" &&
+            b[0] === 0 && b[1] === 0 && b[2] === 1 });
           if (!isCurrent()) return;
           if (crop) return { ...crop, mode: "region" };
         } catch {

@@ -1,3 +1,6 @@
+import katexRuntime from "katex/dist/katex.min.js?raw";
+import autoRender from "katex/dist/contrib/auto-render.min.js?raw";
+import playgroundMath from "./playgroundMath.js?raw";
 import { defaultTreeAdapter, parse, parseFragment, serializeOuter, type DefaultTreeAdapterTypes } from "parse5";
 import { useEffect, useMemo, useRef, useState } from "react";
 
@@ -39,10 +42,17 @@ export function playgroundDocument(html: string, tokens: Record<string, string> 
   });
   (()=>{const send=(type,extra={})=>parent.postMessage({type,...extra},'*');addEventListener('error',()=>send('guide-playground-error'));addEventListener('unhandledrejection',()=>send('guide-playground-error'));addEventListener('DOMContentLoaded',()=>{send('guide-playground-ready');const size=()=>send('guide-playground-height',{height:Math.ceil(Math.max(document.body.getBoundingClientRect().height,document.body.scrollHeight))});new ResizeObserver(size).observe(document.body);size()});document.addEventListener('click',e=>{if(e.target.closest?.('a,area'))e.preventDefault()},true);document.addEventListener('submit',e=>e.preventDefault(),true)})();`;
   const shell = parseFragment(`<meta http-equiv="Content-Security-Policy" content="${policy}"><style>${style}</style><script>${bootstrap}</script>`);
+  // Attach bundled scripts as text nodes so the HTML parser only processes
+  // the small shell above. All three execute exclusively in the sandbox.
+  for (const source of [katexRuntime, autoRender, playgroundMath]) {
+    const script = defaultTreeAdapter.createElement("script", head.namespaceURI, []);
+    defaultTreeAdapter.insertText(script, source.replace(/<\/script/gi, "<\\/script"));
+    shell.childNodes.push(script);
+  }
   head.childNodes.unshift(...shell.childNodes);
   return "<!doctype html>" + serializeOuter(root);
 }
-export default function PaperGuidePlayground({ html, language, title }: { html: string; language: string; title: string }) {
+export default function PaperGuidePlayground({ html, language, title, results = false }: { html: string; language: string; title: string; results?: boolean }) {
   const zh = language === "zh";
   const frame = useRef<HTMLIFrameElement>(null);
   const container = useRef<HTMLDivElement>(null);
@@ -97,11 +107,15 @@ export default function PaperGuidePlayground({ html, language, title }: { html: 
     return () => window.removeEventListener("message", receive);
   }, [srcDoc, reset]);
   return <div className="guide-playground" ref={container}>
-    <div className="guide-playground-toolbar"><span>{zh ? "动手探索" : "Explore the idea"}</span><div>
-      <button type="button" onClick={() => { setReset(value => value + 1); }}>{zh ? "重载交互" : "Reset"}</button>
+    <div className="guide-playground-toolbar"><span>{results ? (zh ? "实验结果" : "Experimental results") : (zh ? "动手探索" : "Explore the idea")}</span><div>
+      {(!results || failed) && <button type="button" onClick={() => setReset(value => value + 1)}>
+        {results ? (zh ? "重新加载图表" : "Retry chart") : (zh ? "重载交互" : "Reset")}
+      </button>}
       {height > collapsedHeight && <button type="button" aria-expanded={expanded} onClick={() => setExpanded(value => !value)}>{expanded ? (zh ? "收起" : "Collapse") : (zh ? "展开" : "Expand")}</button>}
     </div></div>
-    {failed && <p role="status">{zh ? "交互未能运行，可先阅读上方说明，或重载交互。" : "This interaction could not run. Read the explanation above or reset it."}</p>}
+    {failed && <p role="status">{results
+      ? (zh ? "图表未能显示，可先阅读上方的结果说明。" : "The chart could not be displayed. The results are described above.")
+      : (zh ? "交互未能运行，可先阅读上方说明，或重载交互。" : "This interaction could not run. Read the explanation above or reset it.")}</p>}
     {srcDoc && <iframe key={reset} ref={frame} title={title} onLoad={applyTheme} sandbox="allow-scripts" referrerPolicy="no-referrer" srcDoc={srcDoc} style={{ height: expanded ? height : Math.min(height, collapsedHeight) }} />}
   </div>;
 }

@@ -297,6 +297,8 @@
   .paper-reading-workspace.is-guide .paper-chat-open-content { width: 100%; }
 }
 .paper-guide-image-frame { height: 320px; display: grid; place-items: center; overflow: hidden; background: var(--paper-canvas); }
+.paper-guide-page-link { min-height: 0; }
+.paper-guide-page-link .paper-guide-image-frame { height: auto; padding: 12px; }
 .paper-guide-image-frame .paper-guide-image-button { height: 100%; }
 .paper-guide-image-frame img { width: 100%; height: 100%; object-fit: contain; }
 .paper-guide-image-frame > div[role=status] { padding: 20px; }

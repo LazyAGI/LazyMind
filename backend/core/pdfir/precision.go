@@ -254,7 +254,7 @@ func projectSourcePrecision(base Document, raw []byte, figures *[]OriginalFigure
 	if figures != nil {
 		collectFigure = func(i int, item contentItem, parent precisionBlock, size []float64) {
 			if item.Type == "image" || item.Type == "chart" {
-				*figures = append(*figures, proveOriginalFigure(base.Blocks[i], item, parent, size))
+				*figures = append(*figures, proveOriginalFigure(base.Blocks[i], item, parent, pages[base.Blocks[i].Page]))
 			}
 		}
 	}

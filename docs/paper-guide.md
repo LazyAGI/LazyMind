@@ -19,9 +19,11 @@ The light check does not certify every scientific statement or execute generated
 
 ## Article and paper-specific interactions
 
-The article has a chapter directory, a concise overview, substantial mechanism explanations, worked examples and paper-specific topics. Examples include LoRA's parameter and subspace explorations, a noise-process demonstration, or a search-tree walkthrough. Interaction designs are selected for the learning question, rather than from a fixed set of four widgets. The planner assigns distinct learning goals to avoid duplicate scenes and reserves a compact HTML table or chart for primary reported results when available. Headline variants keep their configuration labels. Plain prose uses text and math; richer formatting belongs inside the HTML module.
+The article has a chapter directory, a concise overview, substantial mechanism explanations, worked examples and paper-specific topics. Examples include LoRA's parameter and subspace explorations, a noise-process demonstration, or a search-tree walkthrough. Interaction designs are selected for the learning question, rather than from a fixed set of four widgets. The planner assigns distinct learning goals to avoid duplicate scenes and reserves a compact HTML table or chart for primary reported results when available. Tables and charts in Experimental Results open as comparisons. The reader offers reset for hands-on demonstrations and retry for a results chart that failed to load. Headline variants keep their configuration labels. Plain prose uses text and math; richer formatting belongs inside the HTML module.
 
 A chapter's playground is a self-contained document with inline styles, SVG/canvas and ordinary JavaScript. It can manipulate geometry, matrices, paths, plots and calculations locally. The host supplies the theme and places it in an opaque-origin iframe with `sandbox="allow-scripts"`, without same-origin or top-navigation permissions. The host prepares markup using an HTML parser that cannot load resources. Inside the iframe, CSP blocks external subresources and fetch connections. Browser sandboxing prevents top-level navigation but permits a script to navigate its own frame. Generated content runs only inside the sandbox. See the [iframe srcdoc isolation guidance](https://developer.mozilla.org/en-US/docs/Web/API/HTMLIFrameElement/srcdoc).
+
+The reader bundles KaTeX inside each sandbox and renders delimited TeX in HTML text as native MathML, including labels updated by controls. Use `$...$` for inline formulas and `$$...$$` for display formulas. SVG text, canvas drawings and native option labels use Unicode notation or positioned SVG spans. Put longer formulas in HTML alongside the graphic.
 
 The explanatory text outside the scene remains readable when an interaction is unavailable. Source controls belong to the article and open the source preview/PDF; generated scenes do not receive application credentials or document API access. A module's runtime failure can show its static explanation and a reload control rather than blocking the rest of the article.
 
@@ -54,4 +56,4 @@ Fast chapter blocks use `paragraph`, `heading`, `formula`, `figure` or `playgrou
 
 规划区分“这个概念是什么”与“这一步为什么成立”。共享算例固定场景、输入、单位和约束；交互用同一配置与计算函数产生所有派生显示值，正文不另行硬编码一套交互默认结果。交互必须展示能够回答教学问题的对照。概览标题由本地轻量处理移除，例子引用与控制字符由协议校验，不尝试自动科学审查自由文本。
 
-术语表以领域问题、核心概念、方法类别及其与本文的关系为主，不再主要罗列公式变量；符号在正文首次使用时解释。排队显示“开始后约 2 分钟”，排队耗时与开始后的生成估计分开。
+术语表以领域问题、核心概念、方法类别及其与本文的关系为主，不再主要罗列公式变量；符号在正文首次使用时解释。中文导读采用领域通行的术语名。有通行中文名时附英文全称和常用缩写，如“生成对抗网络（Generative Adversarial Network，GAN）”；通常直接使用英文名时只显示一次，如“Transformer”。排队显示“开始后约 2 分钟”，排队耗时与开始后的生成估计分开。

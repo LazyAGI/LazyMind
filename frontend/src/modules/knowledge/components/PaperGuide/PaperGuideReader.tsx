@@ -460,7 +460,9 @@ export default function PaperGuideReader({
                       <PaperGuideText text={block.text} emphasis={block.kind === "paragraph" ? block.emphasis : undefined} />
                     </p>
                   )}
-                  {flash && block.kind === "playground" && block.playground && <PaperGuidePlayground html={block.playground.html} language={language} title={`${section.title} · ${zh ? "交互探索" : "Interactive exploration"}`} />}
+                  {flash && block.kind === "playground" && block.playground && <PaperGuidePlayground html={block.playground.html} language={language}
+                    results={section.role === "results"}
+                    title={section.role === "results" ? (zh ? "实验结果对照" : "Experimental comparison") : `${section.title} · ${zh ? "交互探索" : "Interactive exploration"}`} />}
                   {block.kind === "interactive" && block.interaction && (
                     <PaperGuideInteraction key={revision.id} interaction={block.interaction} language={language} />
                   )}

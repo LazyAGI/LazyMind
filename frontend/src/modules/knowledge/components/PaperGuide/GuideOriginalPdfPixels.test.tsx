@@ -94,6 +94,15 @@ it("renders exact figure and equation pixels on their own pages of an authentica
     const crop = await hook.result.current.preview(evidence, { kind: "figure", page: 1, bbox: [.25, .25, .45, .45] });
     expect(crop).toMatchObject({ mode: "region", width: 120, height: 120 });
     expect(await pixels(crop!.url, 60, 60)).toEqual([0, 0, 255, 255]);
+    // A top-of-page figure strip includes detached annotations beyond the body.
+    // Here the blue body and magenta legend share a strip; the green caption is below it.
+    const strip = await hook.result.current.preview(evidence, { kind: "figure", page: 1, bbox: [0, 0, 1, .46] });
+    expect(strip?.mode).toBe("region");
+    expect(strip!.width).toBeGreaterThan(269);
+    expect(strip!.width).toBeLessThan(285);
+    expect(strip!.height).toBeLessThan(132);
+    expect(await pixels(strip!.url, 30, 30)).toEqual([0, 0, 255, 255]);
+    expect(await pixels(strip!.url, 180, 30)).toEqual([255, 0, 255, 255]);
     const full = await hook.result.current.preview(evidence, { kind: "figure", page: 1 });
     expect(full).toMatchObject({ mode: "page", width: 600, height: 600 });
     expect(await pixels(full!.url, 180, 180)).toEqual([0, 0, 255, 255]);

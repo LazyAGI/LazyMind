@@ -61,6 +61,13 @@ func originalDisplayBuilder(d pdfir.Document, proofs []pdfir.OriginalFigureProof
 				box[2], box[3] = max(box[2], part[2]), max(box[3], part[3])
 			}
 		}
+		if proof.CaptionTop != 0 {
+			band := []float64{0, 0, 1, proof.CaptionTop}
+			if !validBBox(band) || proof.CaptionTop >= 1 || proof.Caption == "" || len(display.BBox) != 4 || display.BBox[3] > proof.CaptionTop {
+				return nil, fmt.Errorf("%w: invalid isolated figure band", ErrInvalidSource)
+			}
+			display.BBox = band
+		}
 		figures[proof.BlockID] = display
 	}
 	return func(b pdfir.Block, kind string, citationPageOnly bool) *GuideOriginalDisplay {

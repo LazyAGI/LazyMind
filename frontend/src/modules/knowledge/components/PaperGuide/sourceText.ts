@@ -20,6 +20,7 @@ export function sourceBoundary(
   point.setStart(node, offset);
   point.collapse(true);
   const parts = segments(element);
+  let previousEnd: number | undefined;
   for (const part of parts) {
     const span = document.createRange();
     span.selectNodeContents(part);
@@ -30,8 +31,12 @@ export function sourceBoundary(
     const start = Number(part.dataset.guideSourceStart),
       end = Number(part.dataset.guideSourceEnd);
     if (point.compareBoundaryPoints(Range.START_TO_START, first) <= 0)
-      return start;
-    if (point.compareBoundaryPoints(Range.START_TO_START, last) >= 0) continue;
+      // In a hidden source gap, map the boundary toward the selected content.
+      return edge === "end" ? previousEnd ?? start : start;
+    if (point.compareBoundaryPoints(Range.START_TO_START, last) >= 0) {
+      previousEnd = end;
+      continue;
+    }
     if (
       part.hasAttribute("data-guide-math") ||
       part.hasAttribute("data-guide-atomic")

@@ -197,12 +197,13 @@ Attribute research actions, choices, findings and conclusions to people: write �
 Keep “论文” when referring to the document itself, such as “论文第 3 节” or “论文中的图 2”.
 Apply this throughout titles, prose, glossary explanations and interaction labels; do not mechanically
 replace document references or add repetitive “作者” attribution to every sentence.
-For Chinese glossary labels, always put the Chinese name first, followed by full-width parentheses
-containing the established English full name and, when standard, its abbreviation:
+For Chinese glossary labels with an established Chinese name, give the Chinese name followed by
+the established English full name and any standard abbreviation in full-width parentheses:
 “生成对抗网络（Generative Adversarial Network，GAN）” or “马尔可夫链（Markov Chain）”.
-Use “中文名（English Full Name，ABBR）：解释” for each entry; omit the abbreviation and comma
-when there is no established abbreviation. Never invent expansions or abbreviations. Put this
-bilingual label in the collapsible term title, not only in its explanation. English guides stay English.
+When Chinese-speaking practitioners normally use the English name itself, use it directly:
+“Transformer：解释”. Never force a translation, repeat a name as “Transformer（Transformer）”,
+or invent an expansion or abbreviation. Put the label in the collapsible term title.
+English guides stay English.
 Use source IDs s0, s1, ... for relevant citations; do not put source IDs in reader-facing prose.
 Use only the supplied paper for reported facts. Mark invented teaching examples naturally and briefly.
 Return only schema-matching JSON. Escape LaTeX backslashes correctly in JSON; use literal Greek
@@ -311,7 +312,7 @@ families, with their relation to THIS paper. It is NOT a list of formula symbols
 Do not give standalone entries for x, beta, tensor dimensions, etc. Explain these where used in the
 main text. Each domain entry should say what it means concretely and how it helps understand the paper.
 Write each glossary entry as ONE paragraph block: "Term: explanation" (use ： in Chinese).
-Keep the term label concise and follow the Chinese-first bilingual glossary format above;
+Keep the term label concise and follow the glossary naming conventions above;
 English guides use English terms. The UI collapses the explanation under the term. Do not put a
 separate heading block or multiple glossary entries in one paragraph. Keep the domain-first focus.
 In substantive prose paragraphs, occasionally emphasize the phrase that carries the mechanism,
@@ -352,9 +353,10 @@ self-contained HTML document in html (inline CSS, SVG or canvas, and ordinary in
 The block's text explains what to do and what to notice, and serves as its static reading fallback.
 This is a paper-specific teaching scene, not a generic form. Couple controls to visible changes in
 geometry, flow, matrices, plots or calculations. Make the initial state useful before any click.
-Use a concise title, a large readable visualization, labeled controls, live values and reset.
+For hands-on demos use a concise title, labeled controls and live values. The reader supplies reset.
 For result modules, show a compact real HTML table/chart with metric direction, baseline and scope;
 make its key comparison immediately visible. Only add selectors when reported groups differ.
+Do not add a reset/reload button or exploration instructions to an experimental results display.
 Implement the planned teaching comparison, not merely some controls about the same topic.
 Put defaults and constraints in ONE config object, and compute derived values in ONE function used
 by every module label, chart and reset. Do not hardcode a second set of derived default outputs in
@@ -378,7 +380,10 @@ Use viewBox for responsive SVG; wrap controls at narrow widths; min-width:0; avo
 Use CSS variables --guide-bg, --guide-fg, --guide-muted, --guide-accent, --guide-border (host supplies
 these), with sensible fallbacks. Let the document body grow or shrink with the scene. Avoid viewport-height
 wrappers and fixed-height internal scroll panels.
-Use system fonts, accessible DOM controls, SVG text/tspan or HTML sub/sup for module math.
+Use system fonts and accessible DOM controls. In HTML prose, labels and live outputs, use $...$ for
+inline math and $$...$$ for display math. The reader typesets these locally on load and after updates.
+For plain-text option labels and canvas, use readable Unicode notation; in SVG use Unicode or positioned
+tspan subscripts/superscripts. Place complex formulas next to graphics in HTML.
 The host handles height; no parent communication or source/API requests are needed.
 Keep code readable and compact (normally 4–12 KB). Do not minify JavaScript: preserve statement
 newlines and explicit semicolons, especially after return-object statements. No placeholder functions,

@@ -97,3 +97,18 @@ it.each(["Figure 4: Our reparametrization.", "Fi ure 4: Our reparametrization."]
   expect(view.container.querySelector('figcaption')).toHaveTextContent('论文图4：低秩重参数化。');
   expect(screen.queryByRole('button',{name:/打开 PDF/})).toBeNull();
 });
+
+it("offers a page preview on demand without embedding a whole page as a figure", async () => {
+  const open = vi.fn();
+  render(<PaperGuideAsset compactCaption captionText="结构图" language="zh"
+    evidence={{ id: "figure", source_type: "image", source_block_id: "image", text: "", locator: {kind: "page", page: 7} }}
+    originalDisplay={{kind: "figure", page: 7, caption: "Figure 3: Architecture."}}
+    preview={async () => ({url: "blob:page", width: 612, height: 792, mode: "page"})} onOpenPage={open} />);
+  const button = await screen.findByRole("button", { name: "查看原文第 8 页" });
+  expect(screen.queryByRole("img")).not.toBeInTheDocument();
+  expect(screen.getByText("论文图3：结构图").closest("figcaption")).toHaveTextContent(/^论文图3：结构图$/);
+  fireEvent.click(button);
+  expect(await screen.findByRole("dialog")).toBeInTheDocument();
+  expect(screen.getByRole("img", { name: "PDF 第 8 页" })).toHaveAttribute("src", "blob:page");
+  expect(open).not.toHaveBeenCalled();
+});

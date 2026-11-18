@@ -66,6 +66,7 @@ export default function PaperGuideAsset({
   const regionLabel = formula ? (zh ? "原公式" : "Original formula") : (zh ? "原图区域" : "Original figure region");
   const pageLabel = loaded?.mode === "page" ? (zh ? "原文页" : "Source page") : regionLabel;
   const label = table ? (zh ? "表格起始页" : "Table start page") : loaded ? pageLabel : (zh ? "原文" : "Source");
+  const compactPage = compactCaption && !table && !formula && loaded?.mode === "page";
   const pageText = zh ? `PDF 第 ${page ?? "—"} 页` : `PDF page ${page ?? "—"}`;
   const alt = captionText || originalDisplay?.caption || (table ? evidence?.text : "") || `${label} · ${pageText}`;
   const enlargeLabel = table || (!formula && loaded?.mode !== "page")
@@ -74,24 +75,24 @@ export default function PaperGuideAsset({
       ? (zh ? "放大原文页" : "Enlarge source page")
       : (zh ? "放大原公式" : "Enlarge original formula");
   return (
-    <figure className="paper-guide-asset">
+    <figure className={compactPage ? "paper-guide-asset paper-guide-page-link" : "paper-guide-asset"}>
       <div className="paper-guide-image-frame">
         {loaded ? (
           <button
-            className="paper-guide-image-button"
+            className={compactPage ? "paper-guide-citation" : "paper-guide-image-button"}
             onClick={(event) => {
               opener.current = event.currentTarget;
               setLarge(true);
             }}
-            aria-label={enlargeLabel}
+            aria-label={compactPage ? undefined : enlargeLabel}
           >
-            <img
+            {compactPage ? (zh ? `查看原文第 ${page} 页` : `View PDF page ${page}`) : <img
               src={loaded.url}
               width={loaded.width}
               height={loaded.height}
               alt={alt}
               onError={() => { setImage(undefined); setFailed(true); }}
-            />
+            />}
           </button>
         ) : (
           <div role="status">
@@ -105,7 +106,7 @@ export default function PaperGuideAsset({
           </div>
         )}
       </div>
-      {compactCaption ? <figcaption>
+      {compactCaption && !table && !formula ? <figcaption>
         <PaperGuideText mapSource={false} text={(() => {
           const source = originalDisplay?.caption?.trim() || "";
           const prefix = /^(?:论文图|Figure|Fi\s+ure|Fig\.?|图)\s*([A-Za-z]?\d+(?:\.\d+)*[A-Za-z]?)\s*[:：.．]?\s*/i;
@@ -143,7 +144,7 @@ export default function PaperGuideAsset({
             height={loaded.height}
             style={{ display: "block", margin: "0 auto", width: "auto", height: "auto", maxWidth: "100%", maxHeight: "75dvh" }}
             src={loaded.url}
-            alt={alt}
+            alt={loaded.mode === "page" ? pageText : alt}
           />
         </Modal>
       )}

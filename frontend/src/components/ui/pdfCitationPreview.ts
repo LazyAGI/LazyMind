@@ -171,7 +171,38 @@ async function findFallbackRegion(
   return weakMatch;
 }
 
-async function renderPreview(pdf: PdfCitationPreviewDocument, target: PdfCitationTarget, padding: number, requestedScale = PREVIEW_SCALE): Promise<RenderedPreview | undefined> {
+// For an isolated figure the producer establishes the page strip, while the PDF
+// itself establishes the extent of its ink, including detached legends and labels.
+function trimWhiteMargins(canvas: HTMLCanvasElement, context: CanvasRenderingContext2D) {
+  const { width, height } = canvas;
+  const pixels = context.getImageData(0, 0, width, height).data;
+  let left = width, top = height, right = -1, bottom = -1;
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const i = 4 * (y * width + x);
+      if (pixels[i] === 255 && pixels[i + 1] === 255 && pixels[i + 2] === 255) continue;
+      left = Math.min(left, x);
+      right = Math.max(right, x);
+      top = Math.min(top, y);
+      bottom = y;
+    }
+  }
+  if (right < left) return undefined;
+  const border = 3;
+  left = Math.max(0, left - border);
+  top = Math.max(0, top - border);
+  right = Math.min(width - 1, right + border);
+  bottom = Math.min(height - 1, bottom + border);
+  const trimmed = document.createElement("canvas");
+  trimmed.width = right - left + 1;
+  trimmed.height = bottom - top + 1;
+  const target = trimmed.getContext("2d");
+  if (!target) return undefined;
+  target.drawImage(canvas, left, top, trimmed.width, trimmed.height, 0, 0, trimmed.width, trimmed.height);
+  return trimmed;
+}
+
+async function renderPreview(pdf: PdfCitationPreviewDocument, target: PdfCitationTarget, padding: number, requestedScale = PREVIEW_SCALE, trimWhitespace = false): Promise<RenderedPreview | undefined> {
   const pages = new Map<number, { page: PreviewPage; base: PreviewViewport; viewport: PreviewViewport; scale: number }>();
   for (const region of target.regions) {
     if (pages.has(region.page)) continue;
@@ -217,6 +248,7 @@ async function renderPreview(pdf: PdfCitationPreviewDocument, target: PdfCitatio
   const width = Math.ceil(naturalWidth * compositionScale);
   const height = Math.ceil(naturalHeight * compositionScale);
   const composition = document.createElement("canvas");
+  let output = composition;
   try {
     composition.width = width;
     composition.height = height;
@@ -241,12 +273,17 @@ async function renderPreview(pdf: PdfCitationPreviewDocument, target: PdfCitatio
         canvas.height = 0;
       }
     }
+    if (trimWhitespace) {
+      const trimmed = trimWhiteMargins(composition, context);
+      if (!trimmed) return undefined;
+      output = trimmed;
+    }
     const preview = await new Promise<RenderedPreview>((resolve, reject) => {
-      composition.toBlob(blob => {
+      output.toBlob(blob => {
         if (!blob) { reject(new Error("PDF preview encoding failed")); return; }
         try {
           // Deliver the owned URL with the encoding result, before cache validity is checked.
-          resolve({ url: URL.createObjectURL(blob), width, height, bytes: blob.size });
+          resolve({ url: URL.createObjectURL(blob), width: output.width, height: output.height, bytes: blob.size });
         } catch (error) {
           reject(error);
         }
@@ -254,6 +291,7 @@ async function renderPreview(pdf: PdfCitationPreviewDocument, target: PdfCitatio
     });
     return preview;
   } finally {
+    if (output !== composition) { output.width = 0; output.height = 0; }
     composition.width = 0;
     composition.height = 0;
   }
@@ -302,14 +340,14 @@ export function createPdfCitationPreviewCache(options: PdfCitationPreviewOptions
     disposed = true;
     for (const state of liveStates) disposeState(state);
   }
-  function get(pdf: PdfCitationPreviewDocument, target: PdfCitationTarget, options?: { exact?: boolean }): Promise<PdfCitationPreview | undefined> {
+  function get(pdf: PdfCitationPreviewDocument, target: PdfCitationTarget, options?: { exact?: boolean; trimWhitespace?: boolean }): Promise<PdfCitationPreview | undefined> {
     if (disposed || (!target.regions.length && !/^\d{1,4}$/.test(target.referenceKey))) return Promise.resolve(undefined);
     let state = documents.get(pdf);
     if (!state) {
       state = { active: true, resolved: new Map(), inflight: new Map(), missing: new Set(), fallbackPages: new Map() };
       documents.set(pdf, state);
     }
-    const key = JSON.stringify([target.referenceKey, target.regions, target.regions.length ? undefined : target.rawText, target.fallbackPage, options?.exact === true]);
+    const key = JSON.stringify([target.referenceKey, target.regions, target.regions.length ? undefined : target.rawText, target.fallbackPage, options?.exact === true, options?.trimWhitespace === true]);
     if (state.missing.has(key)) return Promise.resolve(undefined);
     const existing = state.resolved.get(key);
     if (existing) {
@@ -342,7 +380,7 @@ export function createPdfCitationPreviewCache(options: PdfCitationPreviewOptions
         requestState.missing.add(key);
         return undefined;
       }
-      const rendered = await renderPreview(pdf, region ? { ...target, regions: [region] } : target, options?.exact ? 0 : PADDING, renderScale);
+      const rendered = await renderPreview(pdf, region ? { ...target, regions: [region] } : target, options?.exact ? 0 : PADDING, renderScale, options?.trimWhitespace);
       return rendered && region ? { ...rendered, region } : rendered;
     })().then(rendered => {
       try {
