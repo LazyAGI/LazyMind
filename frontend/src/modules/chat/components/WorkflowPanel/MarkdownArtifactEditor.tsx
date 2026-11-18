@@ -37,6 +37,7 @@ import {
   PictureOutlined,
 } from '@ant-design/icons';
 import { Dropdown, message } from 'antd';
+import MarkdownIt from 'markdown-it';
 import { createPortal } from 'react-dom';
 import '@mdxeditor/editor/style.css';
 import {
@@ -78,6 +79,7 @@ import {
 } from '@/modules/knowledge/utils/imageUrl';
 import { WriterHeadingNumberingMenu } from './WriterHeadingNumberingMenu';
 import { writerEmptyHeadingPlugin } from './writerEmptyHeadingPlugin';
+import { writerColorPlugin } from './writerColorPlugin';
 import { writerImageDownloadPlugin } from './writerImageDownloadPlugin';
 import { writerListNumberingPlugin } from './writerListNumberingPlugin';
 import {
@@ -290,12 +292,6 @@ function restoreMarkdownEditorSelection(
   return true;
 }
 
-function backtickRunLength(value: string, start: number): number {
-  let end = start;
-  while (value[end] === '`') end += 1;
-  return end - start;
-}
-
 function isEscaped(value: string, index: number): boolean {
   let backslashes = 0;
   for (let cursor = index - 1; cursor >= 0 && value[cursor] === '\\'; cursor -= 1) {
@@ -304,7 +300,7 @@ function isEscaped(value: string, index: number): boolean {
   return backslashes % 2 === 1;
 }
 
-function mdxMarkupLength(line: string, start: number): number {
+function mdxMarkupLength(line: string, start: number, literalHtml: boolean): number {
   const linkDestination = /\]\([ \t]*$/.exec(line.slice(0, start));
   if (linkDestination && !isEscaped(line, linkDestination.index)) {
     // Angle brackets delimit Markdown destinations; escaping '<' makes it
@@ -315,7 +311,7 @@ function mdxMarkupLength(line: string, start: number): number {
     if (destination) return destination[0].length;
   }
   const markup = line.slice(start).match(
-    /^(?:<!--.*?-->|<(?:https?:\/\/|mailto:)[^<>\s]+>|<[^<>\s@]+@[^<>\s@]+>)/i,
+    /^(?:<(?:https?:\/\/|mailto:)[^<>\s]+>|<[^<>\s@]+@[^<>\s@]+>)/i,
   );
   if (markup) return markup[0].length;
   const tag = line.slice(start).match(/^<(\/?)([A-Za-z][A-Za-z0-9:._-]*)(?=[\s/>])[^<>]*>/);
@@ -324,70 +320,124 @@ function mdxMarkupLength(line: string, start: number): number {
     // such as <spring> or <img> are text, not unclosed JSX components.
     const supportedTag = /^(?:a|u|code|sup|sub)$/.test(tag[2]);
     const imageTag = tag[2] === 'img' && (tag[1] === '/' || /\ssrc\s*=/.test(tag[0]));
-    return supportedTag || imageTag ? tag[0].length : 0;
+    return !literalHtml && (supportedTag || imageTag) ? tag[0].length : 0;
   }
   return 0;
 }
 
-function escapeMdxPlainTextInLine(line: string): string {
-  let result = '';
-  let inlineCodeFence = 0;
+const markdownCompatibilityParser = new MarkdownIt({ html: false });
 
-  for (let index = 0; index < line.length;) {
-    if (line[index] === '`') {
-      const runLength = backtickRunLength(line, index);
-      if (inlineCodeFence === 0) inlineCodeFence = runLength;
-      else if (inlineCodeFence === runLength) inlineCodeFence = 0;
-      result += line.slice(index, index + runLength);
-      index += runLength;
+function delimitedEnd(source: string, start: number, delimiter: string, limit: number): number {
+  let cursor = start + delimiter.length;
+  while ((cursor = source.indexOf(delimiter[0], cursor)) >= 0 && cursor < limit) {
+    let end = cursor;
+    while (source[end] === delimiter[0]) end++;
+    if (end - cursor === delimiter.length && (delimiter[0] === '`' || !isEscaped(source, cursor))) return end;
+    cursor = end;
+  }
+  return -1;
+}
+
+function normalizeMarkdownForMdxEditor(markdown: string, literalHtml: boolean): string {
+  const sourceWithGroups = writerMarkdownForEditing(markdown);
+  // Image-group metadata belongs to editor state. It is stripped separately
+  // at the MDX import boundary, after the layout plugin has read it.
+  const source = stripImageGroupMarkdown(sourceWithGroups);
+  const imageGroupMetadata = sourceWithGroups.slice(source.length);
+  const lineStarts = [0];
+  for (let index = 0; index < source.length; index++) {
+    if (source[index] === '\n') lineStarts.push(index + 1);
+  }
+  // Markdown's block parser recognizes quoted/list fences and indented code.
+  // Protect those exact source spans before interpreting comments or MDX syntax.
+  const tokens = markdownCompatibilityParser.parse(source, {}) as Array<{ type: string; content: string; map?: [number, number] }>;
+  const codeRanges = tokens.flatMap(token => {
+    if (!token.map || !['fence', 'code_block'].includes(token.type)) return [];
+    const start = lineStarts[token.map[0]], end = lineStarts[token.map[1]] ?? source.length;
+    let value = source.slice(start, end);
+    if (token.type === 'code_block') {
+      // MDX disables indented code. Use an equivalent fenced representation;
+      // preserveMarkdownSource restores the user's indentation at save time.
+      const content = token.content.replace(/\n$/, '');
+      const firstLine = source.slice(start, lineStarts[token.map[0] + 1] ?? end);
+      const prefix = firstLine.slice(0, Math.max(0, firstLine.indexOf(content.split('\n')[0])))
+        .replace(/(?: {4}|\t)$/, '');
+      const continuation = prefix.replace(/(?:[-+*]|\d+[.)])\s/g, marker => ' '.repeat(marker.length));
+      const fence = '`'.repeat(Math.max(3, ...Array.from(content.matchAll(/`+/g), match => match[0].length + 1)));
+      value = `${prefix}${fence}\n${content.split('\n').map(line => continuation + line).join('\n')}\n${continuation}${fence}\n`;
+    }
+    return [{ start, end, value }];
+  });
+  const openTags: Array<{ name: string; offset: number }> = [];
+  const literalTags: number[] = [];
+  let codeIndex = 0;
+  let result = '';
+  for (let index = 0; index < source.length;) {
+    while (codeRanges[codeIndex]?.end <= index) codeIndex++;
+    const code = codeRanges[codeIndex];
+    if (code && index === code.start) {
+      result += code.value;
+      index = code.end;
       continue;
     }
-
-    if (inlineCodeFence === 0 && line[index] === '<' && !isEscaped(line, index)) {
-      const markupLength = mdxMarkupLength(line, index);
+    const escaped = isEscaped(source, index);
+    if (!escaped && source.startsWith('<!--', index)) {
+      const end = source.indexOf('-->', index + 4);
+      index = end < 0 ? source.length : end + 3;
+      continue;
+    }
+    if (!escaped && (source[index] === '`' || source[index] === '$')) {
+      const delimiter = source.slice(index).match(source[index] === '`' ? /^`+/ : /^\$+/)![0];
+      // Inline spans can cross soft line breaks, but not paragraph boundaries.
+      const paragraphEnd = source.slice(index).search(/\n[ \t>]*\n/);
+      const blockMath = delimiter[0] === '$' && delimiter.length > 1;
+      const limit = blockMath ? source.length : Math.min(code?.start ?? source.length,
+        paragraphEnd < 0 ? source.length : index + paragraphEnd);
+      const end = delimitedEnd(source, index, delimiter, limit);
+      if (end >= 0) {
+        const span = source.slice(index, end);
+        // CommonMark renders soft breaks inside code spans as spaces. Folding
+        // them also prevents MDX from treating a following '<' as a flow tag.
+        result += delimiter[0] === '`' ? span.replace(/\r?\n/g, ' ') : span;
+        index = end;
+        continue;
+      }
+      // An unmatched delimiter is ordinary text, so subsequent JSON and tags
+      // still need normalization. Never discard the rest of an unfinished span.
+      result += delimiter;
+      index += delimiter.length;
+      continue;
+    }
+    if (!escaped && source[index] === '<') {
+      const markupLength = mdxMarkupLength(source, index, literalHtml);
       if (markupLength > 0) {
-        result += line.slice(index, index + markupLength);
+        const markup = source.slice(index, index + markupLength);
+        const tag = markup.match(/^<(\/?)(a|u|code|sup|sub)(?=[\s/>])/);
+        if (tag && !/\/>$/.test(markup)) {
+          const offset = result.length;
+          if (!tag[1]) openTags.push({ name: tag[2], offset });
+          else {
+            const opening = openTags.findLastIndex(item => item.name === tag[2]);
+            if (opening < 0) literalTags.push(offset);
+            else {
+              literalTags.push(...openTags.splice(opening + 1).map(item => item.offset));
+              openTags.pop();
+            }
+          }
+        }
+        result += markup;
         index += markupLength;
         continue;
       }
       result += '\\';
     }
-    if (
-      (line[index] === '{' || line[index] === '}')
-      && inlineCodeFence === 0
-      && !isEscaped(line, index)
-    ) {
-      // Workflow artifacts can contain inline JSON such as
-      // `配图：{"reference_image_index": 0}`. MDX otherwise parses the braces
-      // as a JavaScript expression and replaces the whole document with an
-      // empty editor when that expression is invalid.
-      result += '\\';
-    }
-    result += line[index];
-    index += 1;
+    // Formula/code spans above keep their braces; prose JSON is literal text.
+    if (!escaped && (source[index] === '{' || source[index] === '}')) result += '\\';
+    result += source[index++];
   }
-  return result;
-}
-
-function normalizeMarkdownForMdxEditor(markdown: string): string {
-  let fenceCharacter = '';
-  let fenceLength = 0;
-
-  return writerMarkdownForEditing(markdown).split('\n').map((line) => {
-    const fence = line.match(/^\s*(`{3,}|~{3,})/);
-    if (fence) {
-      const marker = fence[1];
-      if (!fenceCharacter) {
-        fenceCharacter = marker[0];
-        fenceLength = marker.length;
-      } else if (marker[0] === fenceCharacter && marker.length >= fenceLength) {
-        fenceCharacter = '';
-        fenceLength = 0;
-      }
-      return line;
-    }
-    return fenceCharacter ? line : escapeMdxPlainTextInLine(line);
-  }).join('\n');
+  // Only unmatched tags become text. Complete formatting and anchors stay intact.
+  const unmatched = new Set([...literalTags, ...openTags.map(item => item.offset)]);
+  return result.replace(/</g, (tag, offset: number) => unmatched.has(offset) ? `\\${tag}` : tag) + imageGroupMetadata;
 }
 
 const MARKDOWN_CODE_LANGUAGES = {
@@ -439,6 +489,8 @@ interface MarkdownArtifactEditorProps {
   savePaused?: boolean;
   toolbarActions?: ReactNode;
   markdown: string;
+  /** Prompts keep HTML examples literal and do not acquire document navigation metadata. */
+  contentKind?: 'document' | 'prompt';
   resolveImageUrl?: MarkdownImageResolver;
   onDownloadImage?: (source: string) => Promise<void>;
   numbering?: WriterNumberingState;
@@ -516,6 +568,7 @@ export function MarkdownArtifactEditor({
   savePaused = false,
   toolbarActions,
   markdown,
+  contentKind = 'document',
   renderContext,
   resolveImageUrl,
   onDownloadImage,
@@ -545,9 +598,10 @@ export function MarkdownArtifactEditor({
   const tabActive = useContext(WorkflowPanelTabActiveContext);
   const { setEditing, registerFlush, registerFooterAction, registerSnapshot } = useContext(SlotEditingContext);
   const chatPresentation = presentation === 'chat';
+  const literalHtml = contentKind === 'prompt';
   const [editorMode, setEditorMode] = useState<'rich' | 'source'>('rich');
-  const [baseMarkdown, setBaseMarkdown] = useState(() => normalizeMarkdownForMdxEditor(markdown));
-  const [draftMarkdown, setDraftMarkdown] = useState(() => normalizeMarkdownForMdxEditor(markdown));
+  const [baseMarkdown, setBaseMarkdown] = useState(() => normalizeMarkdownForMdxEditor(markdown, literalHtml));
+  const [draftMarkdown, setDraftMarkdown] = useState(() => normalizeMarkdownForMdxEditor(markdown, literalHtml));
   const [anchorSourceMarkdown, setAnchorSourceMarkdown] = useState(markdown);
   const [baseRevision, setBaseRevision] = useState(sourceRevision);
   const [saving, setSaving] = useState(false);
@@ -596,7 +650,7 @@ export function MarkdownArtifactEditor({
   const autoSaveTimerRef = useRef<number | undefined>(undefined);
   const viewRestoreFrameRef = useRef<number | undefined>(undefined);
   const draftMarkdownRef = useRef(draftMarkdown);
-  const serializedBaselineRef = useRef<string | undefined>(normalizeMarkdownForMdxEditor(markdown).trim());
+  const serializedBaselineRef = useRef<string | undefined>(normalizeMarkdownForMdxEditor(markdown, literalHtml).trim());
   const sourceEditedRef = useRef(false);
   const richSourceRef = useRef<string>();
   const copySnapshotRef = useRef(markdown);
@@ -1171,7 +1225,7 @@ export function MarkdownArtifactEditor({
       return;
     }
 
-    const normalizedMarkdown = normalizeMarkdownForMdxEditor(markdown);
+    const normalizedMarkdown = normalizeMarkdownForMdxEditor(markdown, literalHtml);
     richSourceRef.current = undefined;
     sourceEditedRef.current = false;
     serializedBaselineRef.current = normalizedMarkdown.trim();
@@ -1187,7 +1241,7 @@ export function MarkdownArtifactEditor({
     setRenderErrorSource(undefined);
     setConflict(false);
     setPendingSource(undefined);
-  }, [dirty, markdown, replaceMarkdownSilently, sourceRevision]);
+  }, [dirty, literalHtml, markdown, replaceMarkdownSilently, sourceRevision]);
 
   const persistMarkdown = useCallback(async (
     nextDraft: string,
@@ -1215,7 +1269,7 @@ export function MarkdownArtifactEditor({
         : serializedBaselineRef.current === undefined || sourceEditedRef.current ? nextDraft :
           preserveMarkdownSource(richSourceRef.current ?? sourceBeforeSave.markdown, serializedBaselineRef.current, nextDraft);
       const savedMarkdown = writerMarkdownForSave(numberingOnly ? sourceDraft :
-        protectWriterMarkdownAnchors(numberingDocument ?? sourceBeforeSave.markdown, sourceDraft, true, true));
+        protectWriterMarkdownAnchors(numberingDocument ?? sourceBeforeSave.markdown, sourceDraft, !literalHtml, true));
       const result = await onSave(savedMarkdown, revisionBeforeSave, mode, numberingUpdate);
       const savedRevision = typeof result === 'number'
         ? result
@@ -1223,7 +1277,7 @@ export function MarkdownArtifactEditor({
       const persistedMarkdown = typeof result === 'object'
         ? result.markdown
         : savedMarkdown;
-      const backendMarkdown = normalizeMarkdownForMdxEditor(persistedMarkdown);
+      const backendMarkdown = normalizeMarkdownForMdxEditor(persistedMarkdown, literalHtml);
       // An unchanged save receipt confirms the current editor state. Reimporting
       // its source can discard transient empty paragraphs and move the caret.
       const acceptedDraft = persistedMarkdown === savedMarkdown ? nextDraft : backendMarkdown;
@@ -1273,7 +1327,7 @@ export function MarkdownArtifactEditor({
       savingRef.current = false;
       setSaving(false);
     }
-  }, [onSave, readOnly, savePaused, replaceMarkdownSilently, numberingDocument, t]);
+  }, [literalHtml, onSave, readOnly, savePaused, replaceMarkdownSilently, numberingDocument, t]);
 
   const saveChanges = useCallback(async (mode: MarkdownSaveMode = 'draft'): Promise<boolean> => {
     if (!dirty || savingRef.current || readOnly) return false;
@@ -1336,7 +1390,7 @@ export function MarkdownArtifactEditor({
 
   const useRemoteVersion = () => {
     if (!pendingSource || savingRef.current) return;
-    const nextMarkdown = normalizeMarkdownForMdxEditor(pendingSource.markdown);
+    const nextMarkdown = normalizeMarkdownForMdxEditor(pendingSource.markdown, literalHtml);
     richSourceRef.current = undefined;
     sourceEditedRef.current = false;
     serializedBaselineRef.current = nextMarkdown.trim();
@@ -1437,8 +1491,8 @@ export function MarkdownArtifactEditor({
     });
     sourceEditedRef.current = true;
     richSourceRef.current = merged;
-    replaceMarkdownSilently(normalizeMarkdownForMdxEditor(merged), true);
-    draftMarkdownRef.current = normalizeMarkdownForMdxEditor(merged);
+    replaceMarkdownSilently(normalizeMarkdownForMdxEditor(merged, literalHtml), true);
+    draftMarkdownRef.current = normalizeMarkdownForMdxEditor(merged, literalHtml);
     setDraftMarkdown(draftMarkdownRef.current);
     // The existing save path retains typing that happens while this request runs.
     void persistMarkdown(draftMarkdownRef.current, latestSourceRef.current.revision, 'checkpoint');
@@ -1575,7 +1629,7 @@ export function MarkdownArtifactEditor({
       || conflictRef.current
       || readOnly
     ) return;
-    const currentMarkdown = imageGroupMarkdown(normalizeMarkdownForMdxEditor(editor.getMarkdown()), documentImageGroups(draftMarkdownRef.current));
+    const currentMarkdown = imageGroupMarkdown(normalizeMarkdownForMdxEditor(editor.getMarkdown(), literalHtml), documentImageGroups(draftMarkdownRef.current));
     const paragraphText = referenceSelection.paragraph?.textContent ?? '';
     const nextDraft = applyWriterMarkdownInternalReference(
       currentMarkdown,
@@ -1600,7 +1654,7 @@ export function MarkdownArtifactEditor({
       || conflictRef.current
       || readOnly
     ) return;
-    const currentMarkdown = imageGroupMarkdown(normalizeMarkdownForMdxEditor(editor.getMarkdown()), documentImageGroups(draftMarkdownRef.current));
+    const currentMarkdown = imageGroupMarkdown(normalizeMarkdownForMdxEditor(editor.getMarkdown(), literalHtml), documentImageGroups(draftMarkdownRef.current));
     const nextDraft = removeWriterMarkdownInternalReference(
       currentMarkdown,
       referenceSelection.paragraph?.textContent ?? '',
@@ -2112,7 +2166,7 @@ export function MarkdownArtifactEditor({
             ref={editorRef}
             className='writer-markdown-editor__surface'
             contentEditableClassName='writer-markdown-editor__content'
-            markdown={stripImageGroupMarkdown(normalizeMarkdownForMdxEditor(draftMarkdown))}
+            markdown={stripImageGroupMarkdown(normalizeMarkdownForMdxEditor(draftMarkdown, literalHtml))}
             translation={editorTranslation}
             readOnly={readOnly}
             onChange={handleMarkdownChange}
@@ -2121,6 +2175,7 @@ export function MarkdownArtifactEditor({
             plugins={[
               headingsPlugin(),
               writerEmptyHeadingPlugin(),
+              writerColorPlugin(),
               writerLocalSourcePlugin(),
               listsPlugin(),
               writerListNumberingPlugin(),

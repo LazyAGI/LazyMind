@@ -247,7 +247,10 @@ export function preserveMarkdownSource(original: string, previousExport: string,
     const source = original.slice(normalization.from, normalization.to);
     shift += normalization.value.length - (normalization.to - normalization.from);
     if (touches(start,end) || editedLinks.some((link) => start < link.to && link.from < end)) continue;
-    if (start === end && source.trim() && !source.includes('\n')
+    // Hidden comments remain attached to the end of a rewritten text span.
+    // Other omitted syntax (e.g. emphasis delimiters) belongs to the old text.
+    const hiddenComment = /^\s*<!--[\s\S]*-->\s*$/.test(source);
+    if (start === end && !hiddenComment && source.trim() && !source.includes('\n')
       && changes.some((change) => change.from < start && start <= change.to)) continue;
     // Core's anchor protection may already have restored an omitted anchor.
     const insertions = changes.filter((change) => change.from === start && change.to === start).map((change) => change.value).join('');

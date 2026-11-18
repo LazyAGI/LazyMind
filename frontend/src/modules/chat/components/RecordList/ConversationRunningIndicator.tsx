@@ -1,4 +1,4 @@
-import { CheckCircleOutlined, CloseCircleOutlined, LoadingOutlined, QuestionCircleOutlined, StopOutlined } from "@ant-design/icons";
+import { CheckCircleOutlined, ClockCircleOutlined, CloseCircleOutlined, LoadingOutlined, QuestionCircleOutlined, StopOutlined } from "@ant-design/icons";
 import { Tooltip } from "antd";
 import { useTranslation } from "react-i18next";
 import { useConversationRunningStore } from "@/modules/chat/store/conversationRunning";
@@ -7,10 +7,12 @@ export default function ConversationRunningIndicator({ conversationId }: { conve
   const { t } = useTranslation();
   const status = useConversationRunningStore((state) => {
     const entry = state.entries[conversationId];
+    if ((!entry || entry.status === "idle") && state.checkingIds.includes(conversationId)) return "checking";
     return entry?.status === "idle" ? (entry.terminalRead ? undefined : entry.terminalStatus) : entry?.status;
   });
   if (!status) return null;
   const labels = {
+    checking: "chat.conversationStatusChecking",
     running: "chat.conversationRunning",
     unknown: "chat.conversationStatusUnavailable",
     completed: "chat.conversationCompleted",
@@ -18,6 +20,7 @@ export default function ConversationRunningIndicator({ conversationId }: { conve
     canceled: "chat.conversationCanceled",
   };
   const icons = {
+    checking: ClockCircleOutlined,
     running: LoadingOutlined,
     unknown: QuestionCircleOutlined,
     completed: CheckCircleOutlined,

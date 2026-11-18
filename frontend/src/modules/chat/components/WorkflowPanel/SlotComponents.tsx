@@ -1802,7 +1802,6 @@ interface SlotTextProps {
   revisionCount?: number;
   onRefresh?: () => void;
   readOnly?: boolean;
-  plainMarkdown?: boolean;
 }
 
 interface SlotTextEditViewport {
@@ -1858,7 +1857,7 @@ function rawTextOffsetAtPoint(
   return nearestRawTextOffset(rawText, offsetNode.textContent ?? '', offset, fallbackRatio);
 }
 
-export function SlotText({ slot, widget, sessionId, slotId, revisionCount, onRefresh, readOnly, plainMarkdown }: SlotTextProps) {
+export function SlotText({ slot, widget, sessionId, slotId, revisionCount, onRefresh, readOnly }: SlotTextProps) {
   const raw = slot.artifact_value;
   const isJsonBlock = widget?.widgetType === 'json-block';
   const { patchSlotCaption, patchSlotItemValue } = useWorkflowStore();
@@ -1940,7 +1939,8 @@ export function SlotText({ slot, widget, sessionId, slotId, revisionCount, onRef
   }, [isOffloaded, raw?.path, raw?.url]);
 
   const canEdit = Boolean(sessionId && slotId) && !readOnly;
-  const canEditMarkdown = canEdit && widget?.widgetType === 'text-markdown' && !plainMarkdown;
+  const canEditMarkdown = canEdit
+    && (widget?.widgetType === 'text-markdown' || (widget?.widgetType === 'ppt-prompt' && editing));
   // For single slots, list_index is undefined from the backend; use 0 as the canonical index
   // for localStorage keys (front-end only convention).
   const effectiveListIndex = slot.list_index ?? 0;
@@ -2337,6 +2337,7 @@ export function SlotText({ slot, widget, sessionId, slotId, revisionCount, onRef
         <>
           <MarkdownArtifactEditor
             markdown={displayText}
+            contentKind={widget?.widgetType === 'ppt-prompt' ? 'prompt' : 'document'}
             sourceRevision={localRevision}
             maxHeight={widget?.maxHeight}
             editingKey={`${editingKey}:markdown`}
@@ -2361,7 +2362,7 @@ export function SlotText({ slot, widget, sessionId, slotId, revisionCount, onRef
           {textMeta}
           {captionControl}
         </>
-      ) : editing ? (
+      ) : editing && canEdit ? (
         <textarea
           ref={textEditorRef}
           className='workflow-slot__text-editor'
@@ -5424,19 +5425,19 @@ export function SlotRenderer({
     return <Alert type='info' showIcon message={pptPlaceholder[1].trim()} />;
   }
 
-  // Presentation research/outline Markdown can include HTML comments, formulas
-  // and inline source notation. Render it as Markdown, not as an MDX document;
-  // keep source-text editing and the existing revision/permission guards.
+  // Historical presentation research/outline slots may lack a widget. Use the
+  // shared Markdown editor while retaining their revision/permission guards.
   if (['academic_brief', 'deck_outline'].includes(slot.slot)
     && (!widget?.widgetType || widget.widgetType === 'text-markdown')) {
-    return <SlotText slot={slot} widget={{ ...widget, widgetType: 'text-markdown' }} plainMarkdown
+    return <SlotText slot={slot} widget={{ ...widget, widgetType: 'text-markdown' }}
       sessionId={sessionId} slotId={slotId ?? slot.slot} revisionCount={revisionCount}
       onRefresh={onRefresh} readOnly={readOnly || widget?.readOnly || !slot.selected
         || Boolean(slot.document && (!slot.document.editable || !slot.document.capabilities.includes('save')))} />;
   }
 
-  // PPT page prompts are literal text, including HTML examples. Historical
-  // sessions may still carry a Markdown document descriptor for this slot.
+  // Keep PPT prompts in their section preview until editing. SlotText uses the
+  // shared Markdown editor, which preserves source comments and HTML examples,
+  // and saves to this list item even when it has a historical document descriptor.
   if (widget?.widgetType === 'ppt-prompt') {
     return <SlotText slot={slot} widget={widget} sessionId={sessionId} slotId={slotId ?? slot.slot}
       revisionCount={revisionCount} onRefresh={onRefresh}
