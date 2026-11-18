@@ -1292,6 +1292,57 @@ describe('paper composer scope',()=>{
  });
 });
 
+describe('resume presentation submission', () => {
+  afterEach(() => useFeaturedSelectionStore.setState({ selections: {} }));
+  const controls = {
+    skill: { value: 'tailored-resume-generator', selectedLabel: 'Resume', options: [{ value: 'tailored-resume-generator', label: 'Resume' }],
+      ariaLabel: 'capability', heading: 'capabilities', disabled: false, onChange: vi.fn() },
+  };
+  const mention: ChatMention = { mention_id: 'featured-resume', type: 'skill', resource_id: 'resume-skill', display_name: 'tailored-resume-generator' };
+
+  it('sends the selected layout and the explicitly chosen historical photo through the real composer', async () => {
+    const onSend = vi.fn();
+    const photos = [
+      { id: 'history:1:0', name: 'screenshot.png', input: { input_type: 'image' as const, uri: '/uploads/screenshot.png', filename: 'screenshot.png' } },
+      { id: 'history:2:0', name: 'portrait.png', input: { input_type: 'image' as const, uri: '/uploads/portrait.png', filename: 'portrait.png' } },
+    ];
+    useFeaturedSelectionStore.getState().setSelection('resume-test', { caseId: 'tailored-resume-generator', resumePresentation: { template: 'sidebar', photoFit: 'contain' } });
+    render(<ChatInput value='请优化并生成简历' onChange={vi.fn()} onSend={onSend} isChatContent sessionId='resume-test'
+      showcaseSelection={controls} boundMentions={[mention]} conversationFiles={photos}
+      showConversationConfig={false} showHistoryButton={false} showPromptSuggestions={false} />);
+    fireEvent.change(screen.getByRole('combobox', { name: 'chat.resumePresentation.photo' }), { target: { value: '/uploads/portrait.png' } });
+    fireEvent.change(screen.getByRole('combobox', { name: 'chat.resumePresentation.photoFit' }), { target: { value: 'cover' } });
+    fireEvent.click(screen.getByRole('button', { name: 'chat.send' }));
+    await waitFor(() => expect(onSend).toHaveBeenCalledTimes(1));
+    const submission = onSend.mock.calls[0][0];
+    expect(submission.text).toContain('专业侧栏（sidebar）');
+    expect(submission.text).toContain('居中裁切（cover）');
+    expect(submission.text).toContain('PDF');
+    expect(submission.text).toContain('Word');
+    expect(submission.text).not.toContain('screenshot.png');
+    expect(submission.referencedFiles).toEqual([photos[1].input]);
+    expect(submission.mentions).toEqual([mention]);
+    expect(submission.featuredSelection.resumePresentation).toEqual({ template: 'sidebar', photoUri: '/uploads/portrait.png', photoFit: 'cover' });
+  });
+
+  it('blocks a removed selected photo and allows the user to opt out before sending', async () => {
+    const onSend = vi.fn();
+    const warning = vi.spyOn(message, 'warning').mockImplementation(() => undefined as never);
+    onTestFinished(() => warning.mockRestore());
+    useFeaturedSelectionStore.getState().setSelection('removed-photo', { caseId: 'tailored-resume-generator',
+      resumePresentation: { template: 'business', photoFit: 'contain', photoUri: '/uploads/missing.png' } });
+    render(<ChatInput value='生成简历' onChange={vi.fn()} onSend={onSend} isChatContent sessionId='removed-photo' showcaseSelection={controls}
+      boundMentions={[mention]} showConversationConfig={false} showHistoryButton={false} showPromptSuggestions={false} />);
+    fireEvent.click(screen.getByRole('button', { name: 'chat.send' }));
+    expect(warning).toHaveBeenCalledWith('chat.resumePresentation.photoUnavailableHint');
+    expect(onSend).not.toHaveBeenCalled();
+    fireEvent.change(screen.getByRole('combobox', { name: 'chat.resumePresentation.photo' }), { target: { value: '' } });
+    fireEvent.click(screen.getByRole('button', { name: 'chat.send' }));
+    await waitFor(() => expect(onSend).toHaveBeenCalledTimes(1));
+    expect(onSend.mock.calls[0][0].text).toContain('照片：不添加照片');
+  });
+});
+
 it('paper draft uses its isolated model selection on the first send',async()=>{
  const selected={mode:'fixed' as const,model_id:'paper-model',source:'own' as const,version:0};
  useModelSelectionStore.getState().setSelection('pdf-draft',selected);

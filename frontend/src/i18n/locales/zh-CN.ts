@@ -3508,6 +3508,22 @@ const zhCN = {
   },
 
   chat: {
+    resumePresentation: {
+      template: '简历样式', photo: '照片', noPhoto: '不添加照片',
+      photoFit: '照片显示方式', contain: '完整显示', cover: '居中裁切',
+      uploadPhoto: '上传照片', unavailablePhoto: '照片已不可用',
+      photoUnavailableHint: '所选照片已不在当前附件中，请重新选择照片，或选择“不添加照片”。',
+      chooseTemplate: '选择简历模板', done: '使用此模板', formats: 'PDF 投递 · Word 编辑',
+      templateHint: '选择适合你的版式。所有模板均支持添加照片，并根据内容自动分页。',
+      templates: {
+        business: { name: '商务蓝', description: '清楚的章节与日期，适合技术、产品和运营岗位' },
+        modern: { name: '现代色带', description: '醒目页首与整齐内容，突出姓名和求职方向' },
+        sidebar: { name: '专业侧栏', description: '侧栏集中展示联系信息与技能，正文呈现经历' },
+        editorial: { name: '创意版式', description: '大标题与编号章节，适合设计和内容岗位' },
+        campus: { name: '校园清新', description: '轻盈配色与教育重点，适合实习和校招' },
+        minimal: { name: '黑白 ATS', description: '简洁单栏与标准章节，便于阅读和文本解析' },
+      },
+    },
     taskConversation: "任务对话",
     normalConversation: "普通对话",
     preview: {

@@ -1,12 +1,14 @@
 package builtin
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"crypto/tls"
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -209,6 +211,130 @@ func TestAcquirePackageAppliesOnlyLockedPatchSet(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestAcquireGitHubPackageMatchesPatchAgainstOriginalVersion(t *testing.T) {
+	for _, versioned := range []bool{false, true} {
+		name := "tree-derived version"
+		if versioned {
+			name = "declared version changed by patch"
+		}
+		t.Run(name, func(t *testing.T) {
+			root := t.TempDir()
+			cacheRoot := filepath.Join(root, "empty-user-cache")
+			originalSkill := "---\nname: demo\ndescription: original\n"
+			finalSkill := "---\nname: demo\ndescription: rendered resume\n"
+			if versioned {
+				originalSkill += "version: 1.0.0\n"
+				finalSkill += "version: 2.0.0\n"
+			}
+			originalSkill += "---\n# Original resume skill\n"
+			finalSkill += "---\n# Resume with downloadable files\n"
+			originFiles := map[string][]byte{"SKILL.md": []byte(originalSkill), "scripts/run.py": []byte("print('original')\n")}
+			originPath, err := skillpackage.WriteZip(originFiles, root)
+			if err != nil {
+				t.Fatal(err)
+			}
+			originBody, err := os.ReadFile(originPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			originVersion := "0.0.0+" + skillpackage.TreeHash(originFiles)[:12]
+			if versioned {
+				originVersion = "1.0.0"
+			}
+			patchRoot := filepath.Join(root, "patches")
+			patchDir := filepath.Join(patchRoot, "resume", "render-files")
+			if err := os.MkdirAll(filepath.Join(patchDir, "files"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			writeTestFile(t, filepath.Join(patchRoot, "catalog.yaml"), "schema_version: 1\npatches:\n  - resume/render-files/patch.yaml\n")
+			writeTestFile(t, filepath.Join(patchDir, "files", "SKILL.md"), finalSkill)
+			writeTestFile(t, filepath.Join(patchDir, "patch.yaml"), fmt.Sprintf("schema_version: 1\nid: resume/render-files\ntarget:\n  uid: bsk_demo\n  version: %s\n  origin_tree_sha256: %s\noperations:\n  - op: upsert\n    path: SKILL.md\n    file: files/SKILL.md\n    before_sha256: %s\n", originVersion, skillpackage.TreeHash(originFiles), digestHex(originFiles["SKILL.md"])))
+			patches, err := skillpatch.LoadCatalog(filepath.Join(patchRoot, "catalog.yaml"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			patched, err := skillpatch.Apply(skillpatch.Target{UID: "bsk_demo", Version: originVersion, OriginTreeHash: skillpackage.TreeHash(originFiles)}, originFiles, patches)
+			if err != nil {
+				t.Fatal(err)
+			}
+			finalPath, err := skillpackage.WriteZip(patched.Files, root)
+			if err != nil {
+				t.Fatal(err)
+			}
+			finalBody, err := os.ReadFile(finalPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			const downloadURL = "https://github.com/example/resume/archive/main.zip"
+			entry := testRemoteEntry(downloadURL, finalBody, map[string]string{"SKILL.md": finalSkill, "scripts/run.py": string(originFiles["scripts/run.py"])})
+			entry.SourceURL = "https://github.com/example/resume/tree/main/skills/demo"
+			entry.Version = "0.0.0+" + skillpackage.TreeHash(patched.Files)[:12]
+			if versioned {
+				entry.Version = "2.0.0"
+			}
+			if entry.Version == originVersion {
+				t.Fatal("fixture must exercise different source and distribution versions")
+			}
+			entry.OriginVersion = originVersion
+			entry.OriginArchiveSHA256 = digestHex(originBody)
+			entry.OriginArchiveSize = int64(len(originBody))
+			entry.OriginTreeSHA256 = skillpackage.TreeHash(originFiles)
+			entry.PatchSetSHA256 = patched.PatchSetSHA256
+			entry.AppliedPatches = []CatalogPatch{{ID: patched.AppliedPatches[0].ID, SHA256: patched.AppliedPatches[0].SHA256}}
+			catalogPath := filepath.Join(root, "catalog.json")
+			writeCatalog(t, catalogPath, entry)
+			repositoryPath := filepath.Join(root, "repository.zip")
+			writeCatalogZip(t, repositoryPath, map[string]string{
+				"resume-main/skills/demo/SKILL.md":       originalSkill,
+				"resume-main/skills/demo/scripts/run.py": string(originFiles["scripts/run.py"]),
+				"resume-main/README.md":                  "Repository metadata, not part of the Skill\n",
+			})
+			repositoryBody, err := os.ReadFile(repositoryPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var requests atomic.Int32
+			client := &http.Client{Transport: archiveRoundTripFunc(func(request *http.Request) (*http.Response, error) {
+				if request.URL.String() != downloadURL {
+					return nil, fmt.Errorf("unexpected download URL: %s", request.URL)
+				}
+				requests.Add(1)
+				return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(bytes.NewReader(repositoryBody)), Header: make(http.Header), Request: request}, nil
+			})}
+			if _, err := os.Stat(cachePathForEntry(cacheRoot, entry)); !os.IsNotExist(err) {
+				t.Fatalf("fresh install unexpectedly has a cached archive: %v", err)
+			}
+			pkg, err := catalogAcquirePackageByUID(context.Background(), catalogPath, entry.UID, cacheRoot, client)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if requests.Load() != 1 || string(pkg.Files["SKILL.md"]) != finalSkill || string(pkg.Files["scripts/run.py"]) != string(originFiles["scripts/run.py"]) {
+				t.Fatalf("fresh patched package: requests=%d files=%#v", requests.Load(), pkg.Files)
+			}
+			if _, err := verifiedPackage(entry, cachePathForEntry(cacheRoot, entry)); err != nil {
+				t.Fatalf("final archive verification failed: %v", err)
+			}
+			if err := os.Remove(cachePathForEntry(cacheRoot, entry)); err != nil {
+				t.Fatal(err)
+			}
+			writeTestFile(t, filepath.Join(patchDir, "files", "SKILL.md"), finalSkill+"unlocked modification\n")
+			_, err = catalogAcquirePackageByUID(context.Background(), catalogPath, entry.UID, cacheRoot, client)
+			if err == nil || !strings.Contains(err.Error(), "patch") || requests.Load() != 2 {
+				t.Fatalf("changed patch was not rejected: err=%v requests=%d", err, requests.Load())
+			}
+			if _, err := os.Stat(cachePathForEntry(cacheRoot, entry)); !os.IsNotExist(err) {
+				t.Fatalf("unlocked patch produced a cached archive: %v", err)
+			}
+		})
+	}
+}
+
+type archiveRoundTripFunc func(*http.Request) (*http.Response, error)
+
+func (transport archiveRoundTripFunc) RoundTrip(request *http.Request) (*http.Response, error) {
+	return transport(request)
 }
 
 func TestSelectOriginFindsLockedGitHubSubdirectory(t *testing.T) {

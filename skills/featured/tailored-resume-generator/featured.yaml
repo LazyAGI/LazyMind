@@ -1,7 +1,7 @@
 schema_version: 2
 id: tailored-resume-generator
 type: chat
-version: 1.0.0
+version: 1.1.0
 status: published
 default_locale: zh-CN
 provider: GitHub
@@ -22,6 +22,8 @@ classification:
     - 岗位匹配
     - ATS
     - 职业转型
+    - 多模板简历
+    - PDF 与 Word
 
 assets:
   cover:
@@ -49,28 +51,26 @@ assets:
 presentation:
   card:
     title: 简历优化助手
-    description: 根据目标岗位调整简历重点，保留真实经历并找出需要补充的证据
+    description: 保留真实经历，自选六种排版模板和照片，生成可预览的 PDF 与可编辑 Word 简历
     output_type: document
     output_label: 定制简历
     cover_asset: cover
-    result_summary: 查看岗位要求、经历匹配、简历改写和补强建议
+    result_summary: 自选简历模板，预览排版成品，下载 PDF 和 Word，并查看修改说明
   detail:
     title: 简历优化助手
-    description: 针对具体岗位分析职位描述，提炼关键要求，把真实经历重新组织成更匹配的简历，并检查 ATS 关键词和格式。会区分已有证据、需要补充的信息和不应该为了关键词硬加的内容，不编造经历。来源：awesome-claude-skills，经 LazyMind 适配。
-    attachment_hint: 目标岗位描述、现有简历、工作经历、项目成果或职业转型背景
+    description: 根据目标岗位梳理真实经历，支持商务蓝、现代色带、专业侧栏、创意版式、校园清新和黑白 ATS 六种模板；可使用用户选定的照片，按原比例完整显示或居中裁切。生成带排版的 PDF、可编辑 Word 和预览文件，修改说明单独展示。区分学习过、熟悉和实际负责的能力，不编造数字或职责。来源：awesome-claude-skills，经 LazyMind 适配。
+    attachment_hint: 上传现有简历和目标岗位描述，可补充工作经历、项目成果，以及希望放入简历的个人照片
 
 tasks:
   - id: tailor-for-job
     selector:
       title: 按岗位修改简历
-      description: 把最相关的经历和成果放到目标岗位需要的位置
-      output_label: 岗位定制简历
+      description: 按目标岗位优化真实经历，自选模板并下载排版好的 PDF 与 Word
+      output_label: PDF / Word 简历
     launch:
       prompt_short: 帮我按这个岗位改一下简历。
       prompt: >-
-        直接帮我把下面的材料整理成一版适合 SaaS 产品经理岗位的简历，不用先问我补充信息。只使用本条消息里的材料，不引用其他历史候选人资料；先提炼职位描述的重点，再按岗位需要重排我的真实经历，输出岗位重点、经历匹配、修改后的摘要和经历要点、待补充证据。没有依据的数字、职责、团队构成或技能标为“待补充”，不要把目标岗位要求写成我已经具备的经历。
-
-        已知信息：目标岗位是 SaaS 产品经理；我有 B2B SaaS 和企业知识库问答项目经验，协调 4 人团队完成首版上线，首答命中率从 62% 提升到 78%；用户访谈、定价经验和增长结果还没有提供。
+        根据我提供的简历、经历和目标岗位描述，整理一版适合投递的中文简历。先对照岗位要求梳理有证据的经历，再按我选定的模板生成可预览的 PDF 与可编辑 Word；未选模板时使用商务蓝。照片仅使用我明确选定的附件，没有照片时合理调整布局。保留学习、参与和负责的程度，不把岗位要求写成我已经具备的能力。使用 render_resume 生成真实文件，修改说明和待补充信息单独放在对话里。资料尚未提供时先提醒我上传或粘贴，不使用示例候选人的背景。
     replay:
       steps:
         - title: 读取岗位要求
@@ -81,26 +81,24 @@ tasks:
           description: 重排摘要、技能和经历要点，让最相关的内容先被看到
         - title: 保持内容真实
           description: 不补造项目、数字或职责，把需要确认的事实单独列出
-        - title: 输出修改建议
-          description: 给出可直接使用的简历版本，以及优势、缺口和面试准备建议
+        - title: 生成排版成品
+          description: 使用选定模板和照片生成 PDF、Word 与预览，修改说明和证据缺口单独展示
     result:
       template: html_preview_v1
       eyebrow: 岗位定制简历
       title: SaaS 产品经理岗位匹配
-      summary: 查看岗位要求、经历匹配、简历重点调整和待补充证据。
+      summary: 查看岗位匹配示例；实际生成支持自选模板、照片和 PDF / Word 成品下载。
       html_asset: resume_job_tailoring_demo
 
   - id: career-transition
     selector:
       title: 梳理转型经历
-      description: 把原岗位中能迁移到新岗位的能力写得更清楚
+      description: 梳理可迁移的真实经历，生成目标岗位的 PDF 与 Word 简历
       output_label: 转型简历
     launch:
       prompt_short: 我想转做产品经理，帮我看看经历怎么写。
       prompt: >-
-        直接帮我把下面的市场运营经历整理成申请产品经理的转型简历，不用先问我补充信息。只使用本条消息里的材料，不引用其他历史候选人资料；先列出可迁移能力和证据边界，再输出摘要、项目经历初稿、待补充信息和不能夸大的地方。未提供的经历、职责或技术细节标为“待补充”，不要把可迁移能力写成已经做过的产品工作。
-
-        已知信息：我有 4 年市场运营经验，做过一次新用户增长活动；根据用户访谈发现激活问题，协调设计和销售调整流程，注册转化提升 18%；是否参与产品方案和功能优先级还没有确认。
+        根据我提供的真实经历和转型目标，梳理与新岗位有关的可迁移能力和证据边界，不把可迁移能力写成已经做过的新岗位工作。按我选定的模板生成可预览的 PDF 与可编辑 Word；未选模板时使用商务蓝，仅使用我明确选定的照片。使用 render_resume 生成真实文件，待补充信息和不能夸大的地方单独放在对话里。尚未提供经历或目标岗位时先提醒我补充，不套用示例背景。
     replay:
       steps:
         - title: 确认转型目标
@@ -111,26 +109,24 @@ tasks:
           description: 调整摘要和经历顺序，让转型原因和能力连接更自然
         - title: 标记经验边界
           description: 区分做过、参与过、了解过和还没有接触过的内容
-        - title: 提出补强方向
-          description: 建议可以补充的项目、指标、作品或面试故事
+        - title: 交付转型简历
+          description: 生成选定版式的 PDF 与 Word，单独说明可以补充的项目、指标和面试故事
     result:
       template: html_preview_v1
       eyebrow: 转型简历
       title: 市场运营转产品经理
-      summary: 查看可迁移能力、职业叙事、证据边界和下一步补强方向。
+      summary: 查看转型简历示例；实际生成支持自选模板、照片和 PDF / Word 成品下载。
       html_asset: resume_career_transition_demo
 
   - id: check-ats-fit
     selector:
       title: 检查 ATS 匹配度
-      description: 找出关键词和格式问题，但不为了通过筛选堆砌术语
+      description: 检查有证据的关键词和结构，生成黑白单栏版或用户选定模板的简历
       output_label: ATS 检查报告
     launch:
       prompt_short: 帮我检查这版简历能不能过 ATS。
       prompt: >-
-        直接检查下面这版产品经理简历和职位描述是否适合 ATS，不用先问我补充信息。只使用本条消息里的材料，不引用其他历史候选人资料；先给出关键词匹配、结构检查、可以直接修改的内容、待补充证据和不应硬加的词，再输出一版简洁修改稿。没有真实经历支持的关键词、职责或技术细节不要添加，也不要把职位描述里的要求当成候选人已具备的能力。
-
-        已知信息：简历包含产品规划、用户研究、数据分析和 B2B 知识库产品经验，使用标准标题、倒序经历和普通项目符号；职位描述中的 SQL 和定价关键词目前没有真实经历证据。
+        根据我提供的简历和职位描述，检查关键词、标题、经历顺序和结构；将可直接修改、需要补充证据以及不应该硬加的词分开说明。不要把岗位要求当成我已具备的能力，也不承诺 ATS 分数或通过率。如果我需要修改稿，使用 render_resume 生成可预览的 PDF 与可编辑 Word，采用我选定的模板，未选时使用黑白 ATS 单栏版，照片尊重我的选择。尚未提供简历和岗位时先提醒我补充，不使用示例资料。
     replay:
       steps:
         - title: 提取岗位关键词
@@ -141,11 +137,11 @@ tasks:
           description: 检查标题、顺序、格式和可解析性，避免复杂排版造成信息丢失
         - title: 分开处理建议
           description: 区分可以直接改写、需要用户补充和不应硬加的内容
-        - title: 生成简洁版本
-          description: 在不夸大经历的前提下输出一版便于继续编辑和投递的简历
+        - title: 生成可下载版本
+          description: 在不夸大经历的前提下，按选定版式生成 PDF 和可编辑 Word
     result:
       template: html_preview_v1
       eyebrow: ATS 检查报告
       title: 产品经理简历 ATS 检查
-      summary: 查看关键词匹配、结构问题、证据缺口和不建议硬加的内容。
+      summary: 查看结构检查示例；实际修改稿可下载为 PDF 和 Word，不承诺 ATS 通过率。
       html_asset: resume_ats_check_demo

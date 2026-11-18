@@ -1,0 +1,20 @@
+schema_version: 1
+id: tailored-resume-generator/render-deliverable-v1
+description: Deliver truthful resumes through selectable templates with optional user photos and downloadable PDF and Word files
+target:
+  uid: bsk_F2E3212A06C965D1E4AF0CBE0C2A
+  version: 0.0.0+aa45551207cc
+  origin_tree_sha256: aa45551207cc53bf258369d1fde4aa31268bfe576c686ef26e2fd1ad3f736efc
+operations:
+  - op: upsert
+    path: SKILL.md
+    file: files/SKILL.md
+    before_sha256: 7a64d9aa79a21a24f50c90a10d1a30f3c8a686d4869648e976ef69a784ba16e6
+  - op: upsert
+    path: references/resume-delivery.md
+    file: files/references/resume-delivery.md
+    before_sha256: absent
+  - op: upsert
+    path: references/resume-editing.md
+    file: files/references/resume-editing.md
+    before_sha256: absent
