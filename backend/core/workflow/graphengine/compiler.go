@@ -462,6 +462,11 @@ func Compile(workflowYAML, stateYAML, scenario string, profile Profile) CompileR
 			}
 		}
 		field.Choices = choices
+		field.Recommended = strings.TrimSpace(field.Recommended)
+		if field.Recommended != "" && (field.Type != "single" || !seenChoices[field.Recommended]) {
+			result.Diagnostics = append(result.Diagnostics, diag("E_RUNTIME_CLARIFICATION_RECOMMENDATION_INVALID", "error",
+				path+".recommended_choice", "recommended_choice must exactly match a declared choice for a single-choice question"))
+		}
 		if field.Default != nil {
 			if err := validateClarificationValue(*field, canonicalClarification(*field, field.Default)); err != nil {
 				result.Diagnostics = append(result.Diagnostics, diag("E_RUNTIME_CLARIFICATION_DEFAULT_INVALID", "error",

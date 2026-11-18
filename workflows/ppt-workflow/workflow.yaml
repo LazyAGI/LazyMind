@@ -464,6 +464,7 @@ runtime:
       choice_policy: fixed
       allow_other: false
       choices: [HTML｜交互预览，可导出 PPTX, 原生 PPTX｜直接生成文件]
+      recommended_choice: HTML｜交互预览，可导出 PPTX
     - id: visual_style
       label: 风格
       resolution: model
@@ -527,6 +528,7 @@ runtime:
       choices:
         - 启用｜为每页生成独立 AI 底图
         - 不启用｜使用纯色、渐变和矢量装饰
+      recommended_choice: 启用｜为每页生成独立 AI 底图
 
 tool_scripts:
   - path: scripts/external_pdf_tools.py

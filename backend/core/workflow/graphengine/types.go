@@ -97,6 +97,7 @@ type ClarificationField struct {
 	AskWhen       string                   `json:"ask_when,omitempty" yaml:"ask_when,omitempty"`
 	Type          string                   `json:"type,omitempty" yaml:"type,omitempty"`
 	Choices       []string                 `json:"choices,omitempty" yaml:"choices,omitempty"`
+	Recommended   string                   `json:"recommended_choice,omitempty" yaml:"recommended_choice,omitempty"`
 	ChoicePolicy  string                   `json:"choice_policy,omitempty" yaml:"choice_policy,omitempty"`
 	Attachment    *ClarificationAttachment `json:"attachment,omitempty" yaml:"attachment,omitempty"`
 	Reason        string                   `json:"reason,omitempty" yaml:"reason,omitempty"`

@@ -8,6 +8,12 @@ state guidance. Discover the selected Workflow and execute its pinned step
 contract. Read its complete prompt, Skills, inputs, outputs and acceptance
 criteria before working. Business requirements come from that contract.
 
+When asking a startup question, use the workflow's recommended_choice from
+workflow.get or workflow.start when present. In a Codex choice card, put it first
+and mark it as recommended using the host tool's label convention. Wait for the
+user's answer and submit the original choice without the display marker. Honor
+choices the user already made.
+
 The root chat holds the execution_handle and submits state changes. When native
 subagents are available, delegate each step to a fresh subagent by default. The
 root coordinates workers, proxies tools and publishes their results; the worker
