@@ -34,6 +34,37 @@ it("publishes arbitrary chapters in plan order with pending placeholders without
   expect(screen.getAllByRole("heading", { level: 2 }).map(el => el.textContent)).toEqual(["Paper Summary", "rank-lab", "Experimental Results"]);
 });
 
+it("renders the five planned layers inside the pending overview", () => {
+  const r = revision();
+  r.plan = { ...r.plan!, layout: "flashpapers", paper_flow: {
+    field: "生成建模", problems: ["问题甲", "问题乙"], method: "扩散模型",
+    modules: ["前向扩散", "反向去噪"], datasets: ["CIFAR-10"],
+  }, sections: [{ role: "overview", title: "论文简述", focus: "", terms: [], asset_ids: [], claim_ids: [], evidence_ids: [] }] };
+  r.sections = [];
+  r.run.stage = "writing";
+  render(<PaperGuideReader revision={r} title="DDPM" language="zh" onEvidence={vi.fn()} onSelection={vi.fn()} />);
+  const graph = screen.getByRole("figure", { name: "论文脉络图" });
+  expect(within(graph).getAllByRole("term").map(node => node.textContent)).toEqual(["领域", "存在问题", "提出方法", "主要模块", "实验验证"]);
+  expect(within(graph).getAllByRole("list").map(row => row.children.length)).toEqual([1, 2, 1, 2, 1]);
+  expect(graph.querySelectorAll("svg")).toHaveLength(4);
+});
+
+it("reads a legacy overview and renders a dataset-free English flow when present", () => {
+  const r = revision();
+  r.plan = { layout: "flashpapers", sections: [], claims: [], questions: [], required_assets: [], term_policy: [], profiles: { primary: null, secondary: [], uncertainty_reason: "" } };
+  r.sections = [section("overview")];
+  const props = { revision: r, title: "Paper", language: "en", onEvidence: vi.fn(), onSelection: vi.fn() };
+  const view = render(<PaperGuideReader {...props} />);
+  expect(screen.getByRole("heading", { name: "Paper Summary" })).toBeVisible();
+  expect(screen.queryByRole("figure", { name: "Paper at a glance" })).toBeNull();
+  view.rerender(<PaperGuideReader {...props} revision={{ ...r, plan: { ...r.plan, paper_flow: {
+    field: "Theory", problems: ["Bound estimation"], method: "Analytical bound", modules: ["Proof"], datasets: [],
+  } } }} />);
+  const graph = screen.getByRole("figure", { name: "Paper at a glance" });
+  expect(within(graph).getAllByRole("term").map(node => node.textContent)).toEqual(["Field", "Problems", "Proposed method", "Main components", "Evaluation"]);
+  expect(within(graph).getByText("No dataset reported")).toBeVisible();
+});
+
 it("uses the same bookmark in the outline and heading for each optional deep dive", () => {
   const r = revision();
   const roles = ["overview", "attention-method", "results", "attention-analysis", "rank-budget", "limitations", "glossary"];
@@ -61,9 +92,26 @@ it("puts CSP before generated code and removes navigation and nested documents",
   expect(html).toContain("--guide-accent");
 });
 
+it("prepares full HTML without parsing generated markup in the host browser", () => {
+  const hostParser = vi.spyOn(DOMParser.prototype, "parseFromString");
+  let html: string;
+  try {
+    html = playgroundDocument('<html lang="zh"><head><title>排序</title></head><body class="demo"><template><a href="/reference">参考</a></template><svg viewBox="0 0 24 24"></svg></body></html>');
+    expect(hostParser).not.toHaveBeenCalled();
+  } finally {
+    hostParser.mockRestore();
+  }
+  const doc = new DOMParser().parseFromString(html, "text/html");
+  expect(doc.documentElement.lang).toBe("zh");
+  expect(doc.title).toBe("排序");
+  expect(doc.body.className).toBe("demo");
+  expect(doc.querySelector("svg")?.getAttribute("viewBox")).toBe("0 0 24 24");
+  expect(doc.querySelector("template")?.content.querySelector("a")?.getAttribute("href")).toBeNull();
+});
+
 it("isolates scripts and accepts only bounded height/error messages from its own frame", () => {
   const view = render(<PaperGuidePlayground html="<button>Change rank</button>" title="Rank experiment" language="en" />);
-  let frame = screen.getByTitle("Rank experiment") as HTMLIFrameElement;
+  const frame = screen.getByTitle("Rank experiment") as HTMLIFrameElement;
   expect(frame.getAttribute("sandbox")).toBe("allow-scripts");
   expect(view.container.querySelector("button")?.textContent).toBe("Reset");
   act(() => window.dispatchEvent(new MessageEvent("message", { source: window, data: { type: "guide-playground-height", height: 600 } })));
@@ -79,6 +127,26 @@ it("isolates scripts and accepts only bounded height/error messages from its own
   fireEvent.click(screen.getByText("Reset"));
   expect(screen.queryByRole("status")).toBeNull();
   expect(screen.getByTitle("Rank experiment")).not.toBe(frame);
+});
+
+it("offers expansion only for clipped content and preserves the running interaction", () => {
+  render(<PaperGuidePlayground html="<p>Scene</p>" title="Scene" language="en" />);
+  const frame = screen.getByTitle("Scene");
+  const resize = (height: number) => act(() => window.dispatchEvent(new MessageEvent("message", {
+    source: (frame as HTMLIFrameElement).contentWindow!, data: { type: "guide-playground-height", height },
+  })));
+  resize(180);
+  expect(frame.style.height).toBe("180px");
+  expect(screen.queryByRole("button", { name: "Expand" })).toBeNull();
+  resize(1040);
+  expect(frame.style.height).toBe("760px");
+  fireEvent.click(screen.getByRole("button", { name: "Expand" }));
+  expect(screen.getByTitle("Scene")).toBe(frame);
+  expect(frame.style.height).toBe("1040px");
+  fireEvent.click(screen.getByRole("button", { name: "Collapse" }));
+  expect(frame.style.height).toBe("760px");
+  resize(300);
+  expect(screen.queryByRole("button", { name: "Expand" })).toBeNull();
 });
 
 it.each(["reading", "planning", "writing", "checking"])("keeps %s runs polling", stage => expect(isGuideRunActive(stage)).toBe(true));
@@ -98,7 +166,7 @@ it("renders custom scenes only in the Flashpapers reader", () => {
 
 it("keeps a single-level icon outline while retaining subheadings in the article", () => {
   const r = revision();
-  r.plan = { layout: "flashpapers", title: "A paper", subtitle: "", sections: ["overview", "results"].map(role => ({ role, title: role, focus: "", terms: [], asset_ids: [], claim_ids: [], evidence_ids: [] })) } as typeof r.plan;
+  r.plan = { layout: "flashpapers", title: "A paper", subtitle: "", claims: [], questions: [], required_assets: [], term_policy: [], profiles: { primary: null, secondary: [], uncertainty_reason: "" }, sections: ["overview", "results"].map(role => ({ role, title: role, focus: "", terms: [], asset_ids: [], claim_ids: [], evidence_ids: [] })) } as typeof r.plan;
   r.sections = [section("overview"), section("results")];
   r.sections[0].blocks.push({ ...r.sections[0].blocks[0], id: "detail-title", kind: "heading", text: "Details stay in the article" });
   const view = render(<PaperGuideReader revision={r} title="Paper" language="en" onEvidence={() => {}} onSelection={() => {}} />);
@@ -142,4 +210,15 @@ it("uses fixed labels for standard chapters and preserves paper-specific method 
   render(<PaperGuideReader revision={r} title="DDPM" language="zh" onEvidence={() => {}} onSelection={() => {}} />);
   expect(screen.getAllByRole("heading", {level:2}).map(el => el.textContent)).toEqual(["论文简述", "问题与瓶颈", "核心想法", "如何训练噪声预测器", "实验结果", "渐进生成与压缩", "局限", "术语表"]);
   expect(screen.getByRole("button", {name:"核心想法 可阅读"})).toBeInTheDocument();
+});
+
+it.each([
+  ["Mamba: Linear-Time Sequence Modeling with Selective State Spaces", "Mamba：用选择性状态空间进行线性时间序列建模", "upload.pdf"],
+  ["Mamba：用选择性状态空间进行线性时间序列建模", "从选择性复制到硬件感知扫描", "Mamba: Linear-Time Sequence Modeling with Selective State Spaces (2312.00752v2).pdf"],
+])("renders English above Chinese for current and earlier plans", (title, subtitle, documentName) => {
+  const r = revision();
+  r.plan = { layout: "flashpapers", title, subtitle, sections: [], claims: [], questions: [], required_assets: [], term_policy: [], profiles: { primary: null, secondary: [], uncertainty_reason: "" } };
+  const view = render(<PaperGuideReader revision={r} title={documentName} language="zh" onEvidence={vi.fn()} onSelection={vi.fn()} />);
+  expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("Mamba: Linear-Time Sequence Modeling with Selective State Spaces");
+  expect(view.container.querySelector(".flashpapers-subtitle")).toHaveTextContent("Mamba：用选择性状态空间进行线性时间序列建模");
 });

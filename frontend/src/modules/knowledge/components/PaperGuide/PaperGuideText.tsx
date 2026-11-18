@@ -63,11 +63,13 @@ export function guideTextSegments(text: string): Segment[] {
 }
 export default function PaperGuideText({
   text,
+  emphasis,
   sourceOffset = 0,
   mapSource = true,
   displayMath = false,
 }: {
   text: string;
+  emphasis?: string;
   sourceOffset?: number;
   mapSource?: boolean;
   displayMath?: boolean;
@@ -78,7 +80,12 @@ export default function PaperGuideText({
       const pieces: Segment[] = displayMath && !parsed.some(segment => segment.latex !== undefined)
         ? [{ text, start: 0, end: Array.from(text).length, latex: text.trim(), display: true }]
         : parsed.map(segment => displayMath && parsed.length === 1 && segment.latex !== undefined ? { ...segment, display: true } : segment);
+      const phrase = emphasis && text.indexOf(emphasis) === text.lastIndexOf(emphasis) ? emphasis : undefined;
       return pieces.map((segment) => {
+        const index = phrase && segment.latex === undefined ? segment.text.indexOf(phrase) : -1;
+        const content = phrase && index >= 0
+          ? <>{segment.text.slice(0, index)}<strong>{phrase}</strong>{segment.text.slice(index + phrase.length)}</>
+          : segment.text;
         let html: string | undefined;
         if (
           segment.latex !== undefined &&
@@ -98,10 +105,10 @@ export default function PaperGuideText({
             /* Preserve the complete original text on invalid or excessive TeX. */
           }
         }
-        return { ...segment, html };
+        return { ...segment, html, content };
       });
     },
-    [text, displayMath],
+    [text, displayMath, emphasis],
   );
   return (
     <>
@@ -122,7 +129,7 @@ export default function PaperGuideText({
                   : "paper-guide-math",
                 dangerouslySetInnerHTML: { __html: segment.html },
               }
-            : { children: segment.text })}
+            : { children: segment.content })}
         />
       ))}
     </>

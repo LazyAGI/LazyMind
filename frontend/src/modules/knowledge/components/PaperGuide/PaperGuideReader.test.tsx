@@ -482,12 +482,16 @@ it("restores a Unicode reading anchor after width reflow and hidden-panel return
   }
 });
 
-it.each(["after", "after-surrogate", "inside", "across", "mathml", "boundary"])(
+it.each(["after", "after-surrogate", "inside", "across", "mathml", "boundary", "bold-to-math"])(
   "maps %s math selections to exact original Unicode intervals",
   (choice) => {
     const choose = vi.fn();
     const r = revision();
     r.sections[0].blocks[0].text = "甲😀 \\(x_1\\) 后 \\(x_1\\)𐐀尾";
+    r.sections[0].blocks[0].emphasis = "后";
+    if (choice === "bold-to-math") {
+      r.plan = { layout: "flashpapers", sections: [], claims: [], questions: [], required_assets: [], term_policy: [], profiles: { primary: null, secondary: [], uncertainty_reason: "" } };
+    }
     const view = render(
       <PaperGuideReader
         revision={r}
@@ -516,6 +520,12 @@ it.each(["after", "after-surrogate", "inside", "across", "mathml", "boundary"])(
       start = 20;
       end = 21;
       text = "𐐀";
+    } else if (choice === "bold-to-math") {
+      range.setStart(block.querySelector("strong")!.firstChild!, 0);
+      range.setEnd(formulaText, 1);
+      start = 11;
+      end = 20;
+      text = "后 \\(x_1\\)";
     } else if (choice === "across") {
       range.setStart(block.firstChild!.firstChild!, 1);
       range.setEnd(formulaText, 1);

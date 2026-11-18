@@ -4,7 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
- "regexp"
+	"reflect"
+	"regexp"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -13,10 +14,14 @@ import (
 
 	"lazymind/core/asyncjob"
 	"lazymind/core/common/orm"
+	"lazymind/core/pdfir"
 )
 
 func fastFixturePlan() ExplainerPlan {
-	p := ExplainerPlan{Title: "How the paper works", Subtitle: "An interactive explanation"}
+	p := ExplainerPlan{
+		Title: "How the paper works", Subtitle: "An interactive explanation",
+		PaperFlow: &GuideFlow{Field: "Adaptation", Problems: []string{"Memory cost"}, Method: "LoRA", Modules: []string{"Frozen weights", "Low-rank update"}, Datasets: []string{}},
+	}
 	for _, id := range []string{"overview", "why-it-matters", "big-idea", "how-it-works", "rank-playground", "results", "limitations", "glossary"} {
 		p.Chapters = append(p.Chapters, ExplainerChapterPlan{ID: id, Title: id, Purpose: "Explain", Outline: []string{"Idea"}, SourceIDs: []string{"s0"}})
 	}
@@ -97,6 +102,9 @@ func TestFastRunnerParallelOrderedPublicationAndNoReview(t *testing.T) {
 	out, err := svc.Revision(t.Context(), scope, rev.ID, 0)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(out.Plan.PaperFlow, fastFixturePlan().PaperFlow) {
+		t.Fatalf("published flow differs from plan: %+v", out.Plan.PaperFlow)
 	}
 	if out.Plan.Layout != "flashpapers" || len(out.Sections) != 8 {
 		t.Fatalf("bad view: %+v", out)
@@ -212,12 +220,16 @@ func TestFastLightChecksAndSourceSampling(t *testing.T) {
 
 func TestFastSourcePackingPreservesFullParagraphsAndWholePaperSpread(t *testing.T) {
 	x := execution{model: ModelIdentity{ContextTokens: 128000}, scope: Scope{Language: "en"}}
+	x.snap.Pages = []pdfir.Page{{Index: 0}, {Index: 99}}
 	for i := 0; i < 100; i++ {
 		x.snap.Evidence = append(x.snap.Evidence, GuideEvidence{ID: stringInt(int64(i)), Text: strings.Repeat("mechanism ", 50), Locator: GuideLocator{Page: i}})
 	}
 	input, aliases, err := x.explainerInput()
 	if err != nil {
 		t.Fatal(err)
+	}
+	if input["page_count"] != 100 {
+		t.Fatalf("physical page count = %v", input["page_count"])
 	}
 	if len(aliases) != 100 || strings.Count(input["source_text"].(string), strings.Repeat("mechanism ", 50)) != 100 {
 		t.Fatal("fitting paper was truncated")
@@ -352,5 +364,71 @@ func TestFastDynamicMethodsAndDeepDiveOrder(t *testing.T) {
 	bad.Chapters[2], bad.Chapters[3] = bad.Chapters[3], bad.Chapters[2]
 	if validateExplainerPlan(bad) == nil {
 		t.Fatal("method before core idea accepted")
+	}
+}
+
+func TestPublicChapterEmphasisPreservesSourceText(t *testing.T) {
+	const text = "Estimate noise at each noise level."
+	for _, tc := range []struct{ role, kind, phrase, want string }{
+		{"training", "paragraph", "Estimate noise", "Estimate noise"},
+		{"training", "paragraph", "noise", ""},
+		{"training", "paragraph", "missing", ""},
+		{"training", "formula", "Estimate noise", ""},
+		{"glossary", "paragraph", "Estimate noise", ""},
+	} {
+		c := ExplainerChapter{ID: tc.role, Blocks: []ExplainerBlock{{Kind: tc.kind, Text: text, Emphasis: tc.phrase}}}
+		b := publicChapter(c, nil).Blocks[0]
+		if b.Text != text || b.Emphasis != tc.want {
+			t.Errorf("%s/%s %q: got text %q, emphasis %q", tc.role, tc.kind, tc.phrase, b.Text, b.Emphasis)
+		}
+	}
+}
+
+func TestFastPackingFitsFigureHeavyEscapedSource(t *testing.T) {
+	x := execution{model: ModelIdentity{ContextTokens: 32768}, scope: Scope{Language: "zh"}}
+	x.snap.Sections = []SourceSection{{Title: strings.Repeat("题", 1100)}}
+	for i := 0; i < 100; i++ {
+		id := stringInt(int64(i))
+		caption := "Figure " + id + " " + strings.Repeat("A & B ", 18)
+		x.snap.Evidence = append(x.snap.Evidence, GuideEvidence{ID: id, Text: strings.Repeat("< & >", 100)})
+		x.snap.Assets = append(x.snap.Assets, GuideAsset{ID: id, Kind: "figure", OriginalDisplay: &GuideOriginalDisplay{Caption: caption}})
+	}
+	input, aliases, err := x.explainerInput()
+	if err != nil {
+		t.Fatal(err)
+	}
+	title := input["paper_title"].(string)
+	figures := input["figures"].([]ExplainerFigure)
+	if !x.inputFits(input) || len([]rune(title)) > 1000 || len(figures) == 0 || len(figures) >= len(x.snap.Assets) || input["source_text"] == "" {
+		t.Fatalf("unusable plan input, fits=%t title runes=%d figures=%d", x.inputFits(input), len([]rune(title)), len(figures))
+	}
+	for _, f := range figures {
+		if f.Caption != "Figure "+aliases[f.ID]+" "+strings.Repeat("A & B ", 17)+"A & B" {
+			t.Fatalf("damaged caption or alias: %+v", f)
+		}
+	}
+	input["plan"] = fastFixturePlan()
+	input["chapter_id"] = "overview"
+	if !x.inputFits(input) {
+		t.Fatal("no space left for the chapter plan")
+	}
+}
+
+func TestFastPackingRetainsResumableRequest(t *testing.T) {
+	x := execution{model: ModelIdentity{ContextTokens: 32768}}
+	text := strings.Repeat("a", 10000)
+	x.snap.Evidence = []GuideEvidence{{ID: "ev0", Text: text}}
+	for i := 0; i < 40; i++ {
+		x.snap.Assets = append(x.snap.Assets, GuideAsset{ID: stringInt(int64(i)), Kind: "figure",
+			OriginalDisplay: &GuideOriginalDisplay{Caption: strings.Repeat("x", 100)}})
+	}
+	input, _, err := x.explainerInput()
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The historical sampler truncates a 2,000-byte block before its ellipsis.
+	want := ("[s0 page 1] " + text)[:1995] + " …\n"
+	if input["source_text"] != want || len(input["figures"].([]ExplainerFigure)) != 40 {
+		t.Fatal("a request that previously fit changed during resume")
 	}
 }

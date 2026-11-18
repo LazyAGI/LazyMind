@@ -80,6 +80,28 @@ it("aborts and ignores late document responses, then loads with fresh ETag", asy
   expect(h.result.current.revision?.id).toBe("r1");
   expect(api.status.mock.calls[0][1].signal.aborted).toBe(true);
 });
+it("lets a slow revision finish across polling ticks", async () => {
+  let resolve!: (value: ReturnType<typeof revision>) => void;
+  const active = { ...revision(), run: { ...revision().run, stage: "writing" } };
+  api.status.mockResolvedValue({ data: { ...status(), candidate_revision: active }, etag: "writing" });
+  api.revision.mockImplementationOnce(() => new Promise(r => { resolve = r; }));
+  vi.useFakeTimers();
+  try {
+    const h = renderHook(() => usePaperGuide("ds", "doc", "zh", true));
+    await act(async () => {});
+    const signal = api.revision.mock.calls[0][3] as AbortSignal;
+    await act(() => vi.advanceTimersByTimeAsync(8000));
+    expect(signal.aborted).toBe(false);
+    expect(api.status).toHaveBeenCalledTimes(1);
+    await act(async () => resolve(revision()));
+    expect(h.result.current.revision?.id).toBe("r1");
+    await act(() => vi.advanceTimersByTimeAsync(4000));
+    expect(api.status).toHaveBeenCalledTimes(2);
+    h.unmount();
+  } finally {
+    vi.useRealTimers();
+  }
+});
 it("keeps data on 304 and requests incremental corrections", async () => {
   const h = renderHook(() => usePaperGuide("ds", "doc", "zh", true));
   await waitFor(() => expect(h.result.current.revision).toBeDefined());
@@ -128,14 +150,14 @@ it("uses ordinary polling to refresh source currentness and keeps the same reada
       .mockResolvedValueOnce({ data: summaries, etag: "after-ir-upgrade" })
       .mockResolvedValue({ etag: "after-ir-upgrade" });
     api.revision.mockResolvedValueOnce({ ...old, source_current: false, sections: [] });
-    await act(() => vi.advanceTimersByTimeAsync(4000));
+    await act(() => vi.advanceTimersByTimeAsync(60000));
     expect(api.status).toHaveBeenLastCalledWith(expect.anything(), expect.objectContaining({ etag: "before-ir-upgrade" }));
     expect(api.revision).toHaveBeenLastCalledWith(expect.anything(), old.id, old.version, expect.anything());
     expect(screen.getByRole("article")).toBe(article);
     expect(screen.getAllByText(/A concrete explanation of the argument/)[0]).toBe(body);
     for (const button of followUps()) expect(button).toBeDisabled();
 
-    await act(() => vi.advanceTimersByTimeAsync(4000));
+    await act(() => vi.advanceTimersByTimeAsync(60000));
     expect(api.status).toHaveBeenLastCalledWith(expect.anything(), expect.objectContaining({ etag: "after-ir-upgrade" }));
     expect(api.revision).toHaveBeenCalledTimes(2);
     view.unmount();
@@ -143,6 +165,37 @@ it("uses ordinary polling to refresh source currentness and keeps the same reada
     vi.useRealTimers();
   }
 });
+it("polls idle documents once a minute, skips hidden tabs and refreshes on return", async () => {
+  vi.useFakeTimers();
+  const visibility = vi.spyOn(window.document, "visibilityState", "get").mockReturnValue("hidden");
+  try {
+    const h = renderHook(() => usePaperGuide("ds", "doc", "zh", true));
+    await act(() => vi.advanceTimersByTimeAsync(60000));
+    expect(api.status).not.toHaveBeenCalled();
+    visibility.mockReturnValue("visible");
+    await act(async () => { window.document.dispatchEvent(new Event("visibilitychange")); });
+    expect(api.status).toHaveBeenCalledTimes(1);
+    await act(() => vi.advanceTimersByTimeAsync(59999));
+    expect(api.status).toHaveBeenCalledTimes(1);
+    await act(() => vi.advanceTimersByTimeAsync(1));
+    expect(api.status).toHaveBeenCalledTimes(2);
+    visibility.mockReturnValue("hidden");
+    await act(() => vi.advanceTimersByTimeAsync(120000));
+    expect(api.status).toHaveBeenCalledTimes(2);
+    visibility.mockReturnValue("visible");
+    await act(async () => { window.dispatchEvent(new Event("focus")); });
+    expect(api.status).toHaveBeenCalledTimes(3);
+    const refreshAfterMutation = h.result.current.refresh;
+    h.unmount();
+    await act(() => refreshAfterMutation());
+    await act(async () => { window.dispatchEvent(new Event("focus")); });
+    expect(api.status).toHaveBeenCalledTimes(3);
+  } finally {
+    visibility.mockRestore();
+    vi.useRealTimers();
+  }
+});
+
 it("retries a failed revision behind a cached status ETag, keeping its error until corrections arrive", async () => {
   const h = renderHook(() => usePaperGuide("ds", "doc", "zh", true));
   await waitFor(() => expect(h.result.current.revision?.version).toBe(1));
@@ -258,4 +311,18 @@ it("preserves an unfinished candidate with readable passages when another candid
   await act(() => h.result.current.refresh());
   expect(h.result.current.revision?.id).toBe("r1");
   expect(h.result.current.revision?.sections).toHaveLength(1);
+});
+
+it("reads new chapter progress without replacing the opened article", async () => {
+  const old = revision();
+  const writing = { ...revision(), id: "new", run: { ...old.run, stage: "writing" } };
+  api.status.mockResolvedValue({ data: { ...status(), published_revision: old, candidate_revision: writing }, etag: "writing" });
+  api.revision.mockImplementation(async (_scope, id) => id === "new" ? writing : old);
+  const h = renderHook(() => usePaperGuide("ds", "doc", "zh", true));
+  await waitFor(() => expect(h.result.current.writingRevision?.id).toBe("new"));
+  expect(h.result.current.revision?.id).toBe(old.id);
+  api.status.mockResolvedValue({ etag: "writing" });
+  await act(() => h.result.current.refresh());
+  expect(h.result.current.writingRevision?.id).toBe("new");
+  expect(api.revision).toHaveBeenCalledTimes(2);
 });

@@ -20172,6 +20172,8 @@ components:
                     items:
                         type: string
                     type: array
+                emphasis:
+                    type: string
                 evidence_ids:
                     items:
                         type: string
@@ -20581,6 +20583,31 @@ components:
             required:
                 - html
             type: object
+        PaperGuideFlow:
+            properties:
+                datasets:
+                    items:
+                        type: string
+                    type: array
+                field:
+                    type: string
+                method:
+                    type: string
+                modules:
+                    items:
+                        type: string
+                    type: array
+                problems:
+                    items:
+                        type: string
+                    type: array
+            required:
+                - field
+                - problems
+                - method
+                - modules
+                - datasets
+            type: object
         PaperGuidePlan:
             properties:
                 claims:
@@ -20589,6 +20616,10 @@ components:
                     type: array
                 layout:
                     type: string
+                paper_flow:
+                    allOf:
+                        - $ref: '#/components/schemas/PaperGuideFlow'
+                    nullable: true
                 profiles:
                     $ref: '#/components/schemas/PaperGuideProfiles'
                 questions:

@@ -108,8 +108,8 @@ export default function PaperGuideAsset({
       {compactCaption ? <figcaption>
         <PaperGuideText mapSource={false} text={(() => {
           const source = originalDisplay?.caption?.trim() || "";
-          const prefix = /^(?:论文图|Figure|Fig\.?|图)\s*([A-Za-z]?\d+(?:\.\d+)*[A-Za-z]?)\s*[:：.．]?\s*/i;
-          const number = originalDisplay?.number || (source || evidence?.text || "").match(prefix)?.[1];
+          const prefix = /^(?:论文图|Figure|Fi\s+ure|Fig\.?|图)\s*([A-Za-z]?\d+(?:\.\d+)*[A-Za-z]?)\s*[:：.．]?\s*/i;
+          const number = originalDisplay?.number || source.match(prefix)?.[1] || evidence?.text?.match(prefix)?.[1];
           const title = (captionText?.trim() || source).replace(prefix, "");
           const label = zh ? `论文图${number || ""}` : `Figure${number ? ` ${number}` : ""}`;
           return title ? label + (zh ? "：" : ": ") + title : label;

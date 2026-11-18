@@ -1,0 +1,33 @@
+.guide-flow {
+  margin: 0 0 28px;
+  padding: 20px 12px;
+  border: 1px solid var(--paper-border);
+  border-radius: 12px;
+  overflow-x: auto;
+  font-size: 15px;
+  line-height: 1.45;
+  dl { display: grid; grid-template-columns: 6em minmax(0, 1fr); margin: 0; }
+  dt { align-self: center; color: var(--paper-muted); font-weight: 600; padding-right: 8px; }
+  dt:not(:nth-last-child(2)) { margin-bottom: 28px; }
+  dd { margin: 0; min-width: 0; }
+  ul { display: grid; margin: 0; padding: 0; list-style: none; }
+  li {
+    box-sizing: border-box;
+    display: grid;
+    place-items: center;
+    justify-self: center;
+    width: calc(100% - 10px);
+    max-width: 23em;
+    padding: 9px 8px;
+    text-align: center;
+    overflow-wrap: anywhere;
+    border: 1px solid color-mix(in srgb, var(--paper-accent) 35%, var(--paper-border));
+    border-radius: 7px;
+    background: color-mix(in srgb, var(--paper-accent) 5%, var(--paper-surface));
+  }
+  .guide-flow-connector {
+    position: relative; height: 28px; color: var(--paper-muted);
+    svg { display: block; width: 100%; height: 100%; fill: none; stroke: currentColor; }
+    i { position: absolute; bottom: 1px; width: 6px; height: 6px; border: solid currentColor; border-width: 0 1px 1px 0; transform: translateX(-50%) rotate(45deg); }
+  }
+}

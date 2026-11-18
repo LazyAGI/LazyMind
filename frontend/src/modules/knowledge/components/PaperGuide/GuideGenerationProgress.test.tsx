@@ -30,3 +30,15 @@ it("keeps queue wait separate from the generation estimate", () => {
   view.rerender(<GuideGenerationProgress stage="planning" compact zh />);
   expect(screen.getByText("预计约 2 分钟")).toBeVisible();
 });
+
+it("shows the chapters actually being written and updates the queue as chapters finish", () => {
+  const view = render(<GuideGenerationProgress stage="writing" total={8} done={2} writing={["反向采样", "训练目标"]} zh />);
+  expect(screen.getByText("生成中 2 · 排队中 4")).toBeVisible();
+  expect(screen.getByText("反向采样")).toBeVisible();
+  view.rerender(<GuideGenerationProgress stage="writing" total={8} done={3} writing={["训练目标"]} zh />);
+  expect(screen.getByText("生成中 1 · 排队中 4")).toBeVisible();
+  expect(screen.queryByText("反向采样")).toBeNull();
+  view.rerender(<GuideGenerationProgress stage="checking" total={8} done={8} zh />);
+  expect(screen.queryByText("训练目标")).toBeNull();
+  expect(screen.getByRole("progressbar")).toHaveValue(8);
+});

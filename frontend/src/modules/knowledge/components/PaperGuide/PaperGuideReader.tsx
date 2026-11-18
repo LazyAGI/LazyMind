@@ -1,3 +1,4 @@
+import PaperGuideFlow from "./PaperGuideFlow";
 import GuideGlossaryEntry from "./GuideGlossaryEntry";
 import GuideSectionIcon from "./GuideSectionIcon";
 import { GuideSkeleton } from "./GuideGenerationProgress";
@@ -19,6 +20,18 @@ import { restoreTextPosition, visibleTextOffset } from "./readingPosition";
 import PaperGuideText, { guideTextSegments } from "./PaperGuideText";
 import { sourceBoundary } from "./sourceText";
 import { isGuideRunActive } from "./guideRunState";
+
+function articleHeader(documentName: string, title: string, subtitle: string, zh: boolean) {
+  // Earlier Chinese guides stored their localized headline in title.
+  if (zh && /\p{Script=Han}/u.test(title)) {
+    const source = documentName.replace(/\.pdf$/i, "").replace(/\s*\((?:arxiv:\s*)?\d{4}\.\d{4,5}(?:v\d+)?\)$/i, "").trim();
+    if (/[a-z]{2}/i.test(source) && !/\p{Script=Han}/u.test(source) &&
+        !/^(?:arxiv[: _-]*)?\d{4}\.\d{4,5}(?:v\d+)?$/i.test(source)) {
+      return { title: source, subtitle: title };
+    }
+  }
+  return { title: title || documentName, subtitle };
+}
 
 function headingId(revisionId: string, sectionKey: string, blockId?: string) {
   return blockId === undefined
@@ -61,6 +74,7 @@ export default function PaperGuideReader({
 }: Props) {
   const zh = language === "zh";
   const flash = revision.plan?.layout === "flashpapers";
+  const header = articleHeader(title, flash ? revision.plan?.title?.trim() || "" : "", flash ? revision.plan?.subtitle?.trim() || "" : "", zh);
   const running = isGuideRunActive(revision.run.stage);
   const chapterState = (section: PaperGuidePublishedSection) => section.blocks.length ? (zh ? "可阅读" : "Ready") : !running ? (zh ? "已暂停" : "Paused") : section.publication_status === "generating" ? (zh ? "生成中" : "Generating") : (zh ? "排队中" : "Queued");
   const fixedTitles: Record<string, string> = zh
@@ -320,9 +334,9 @@ export default function PaperGuideReader({
       <div
         className="paper-guide-scroll"
         ref={root}
-        onMouseUp={flash ? undefined : capture}
-        onKeyUp={flash ? undefined : capture}
-        onTouchEnd={flash ? undefined : capture}
+        onMouseUp={capture}
+        onKeyUp={capture}
+        onTouchEnd={capture}
         onScroll={() => {
           const geometry = root.current?.getBoundingClientRect();
           if (
@@ -366,15 +380,15 @@ export default function PaperGuideReader({
         }}
       >
         <article className="paper-guide-article">
-          {flash && <div className="guide-article-kicker"><GuideSectionIcon role="glossary"/>{zh ? "论文导读" : "PAPER GUIDE"}<span>{orderedSections.length} {zh ? "个章节" : "SECTIONS"}</span></div>}
-          <h1>{flash ? revision.plan?.title || title : title}</h1>
-          {flash && revision.plan?.subtitle && <p className="flashpapers-subtitle">{revision.plan.subtitle}</p>}
+          <h1>{header.title}</h1>
+          {header.subtitle && header.subtitle !== header.title && <p className="flashpapers-subtitle">{header.subtitle}</p>}
           {sectionsWithSources.map(({ section, blocks }, sectionIndex) => (
             <section key={section.role} aria-label={section.title} data-guide-role={section.role}>
               <h2 id={headingId(revision.id, section.key)} tabIndex={-1}>
                 {flash && renderSectionIcon(section, sectionIndex)}
                 {section.title}
               </h2>
+              {section.role === "overview" && revision.plan?.paper_flow && <PaperGuideFlow flow={revision.plan.paper_flow} zh={zh} />}
               {flash && section.blocks.length === 0 && <div className="guide-chapter-placeholder" aria-busy={running}>
                 <p role="status"><strong>{chapterState(section)}</strong> · {running ? (zh ? "整篇预计约 2 分钟，完成后自动展示本章内容。" : "The guide usually takes about 2 minutes. This chapter updates automatically.") : (zh ? "本章尚未完成，继续生成后会自动更新。" : "Resume generation to finish this chapter.")}</p>
                 {running && <GuideSkeleton/>}
@@ -443,7 +457,7 @@ export default function PaperGuideReader({
                     </h3>
                   ) : (
                     <p data-guide-text={block.id}>
-                      <PaperGuideText text={block.text} />
+                      <PaperGuideText text={block.text} emphasis={block.kind === "paragraph" ? block.emphasis : undefined} />
                     </p>
                   )}
                   {flash && block.kind === "playground" && block.playground && <PaperGuidePlayground html={block.playground.html} language={language} title={`${section.title} · ${zh ? "交互探索" : "Interactive exploration"}`} />}
@@ -517,7 +531,7 @@ export default function PaperGuideReader({
           )}
         </article>
       </div>
-      {!flash && selected && (
+      {selected && (
         <div
           className="paper-guide-selection"
           role="toolbar"

@@ -22,14 +22,16 @@ class TaskSpec:
 
 
 TASKS = {
-    'paper.explainer.plan': TaskSpec(paper_explainer.EXPLAINER_VERSION, paper_explainer.PlanInput,
-                                   paper_explainer.Plan, paper_explainer.plan_prompt,
-                                   validate_output=paper_explainer.bind_plan,
-                                   timeout_seconds=120, reject_duplicate_keys=True, prefer_native_json=True),
-    'paper.explainer.chapter': TaskSpec(paper_explainer.EXPLAINER_VERSION, paper_explainer.ChapterInput,
-                                      paper_explainer.Chapter, paper_explainer.chapter_prompt,
-                                      timeout_seconds=120, validate_output=paper_explainer.bind_chapter,
-                                      reject_duplicate_keys=True, prefer_native_json=True),
+    'paper.explainer.plan': TaskSpec(
+        paper_explainer.EXPLAINER_VERSION, paper_explainer.PlanInput, paper_explainer.Plan,
+        paper_explainer.plan_prompt, validate_output=paper_explainer.bind_plan,
+        timeout_seconds=120, reject_duplicate_keys=True, prefer_native_json=True,
+    ),
+    'paper.explainer.chapter': TaskSpec(
+        paper_explainer.EXPLAINER_VERSION, paper_explainer.ChapterInput, paper_explainer.Chapter,
+        paper_explainer.chapter_prompt, validate_output=paper_explainer.bind_chapter,
+        timeout_seconds=120, reject_duplicate_keys=True, prefer_native_json=True,
+    ),
     'paper.formula.explain': TaskSpec('formula-explanation-v7-low-latency', FormulaInput,
                                       FormulaOutput, formula_prompt),
     'paper.visual.explain': TaskSpec('paper-reading-v2-grounded-findings', VisualInput,

@@ -3,7 +3,7 @@ package paperguide
 
 import "lazymind/core/pdfir"
 
-const TaskVersion = "paper-guide-v27"
+const TaskVersion = "paper-guide-v28"
 const SourceCatalogVersion = "paper-guide-source-v6"
 const sourceCatalogV5 = "paper-guide-source-v5"
 const legacySourceNamespace = "paper-guide-v1"
@@ -179,7 +179,16 @@ type GuideAssetDecision struct {
 	Included bool   `json:"included"`
 	Reason   string `json:"reason"`
 }
+type GuideFlow struct {
+	Field    string   `json:"field"`
+	Problems []string `json:"problems"`
+	Method   string   `json:"method"`
+	Modules  []string `json:"modules"`
+	Datasets []string `json:"datasets"`
+}
+
 type GuidePlan struct {
+	PaperFlow      *GuideFlow           `json:"paper_flow,omitempty"`
 	Layout         string               `json:"layout,omitempty"`
 	Title          string               `json:"title,omitempty"`
 	Subtitle       string               `json:"subtitle,omitempty"`
@@ -195,6 +204,7 @@ type GuidePlayground struct {
 }
 
 type GuideBlock struct {
+	Emphasis    string            `json:"emphasis,omitempty"`
 	Playground  *GuidePlayground  `json:"playground,omitempty"`
 	ID          string            `json:"id"`
 	Kind        string            `json:"kind"`

@@ -1,11 +1,12 @@
 """Fast, chapter-first paper explainers. No claim grading or review model calls."""
 import json
+import re
 from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
 
 
-EXPLAINER_VERSION = 'paper-guide-v27'
+EXPLAINER_VERSION = 'paper-guide-v28'
 BACKBONE = ('overview', 'why-it-matters', 'big-idea', 'results', 'limitations', 'glossary')
 Slug = Annotated[str, StringConstraints(pattern=r'^[a-z][a-z0-9-]{0,63}$')]
 Title = Annotated[str, StringConstraints(min_length=1, max_length=200)]
@@ -24,6 +25,7 @@ class Figure(Shape):
 
 
 class PlanInput(Shape):
+    page_count: Annotated[int, Field(ge=1)] | None = None
     figures: list[Figure] = Field(default_factory=list)
     language: Literal['zh', 'en']
     paper_title: Annotated[str, StringConstraints(max_length=1000)]
@@ -51,12 +53,27 @@ class ChapterPlan(Shape):
     id: Slug
     title: Title
     purpose: Annotated[str, StringConstraints(min_length=1, max_length=2000)]
-    outline: Annotated[list[Annotated[str, StringConstraints(min_length=1, max_length=1200)]], Field(min_length=1, max_length=12)]
+    outline: Annotated[
+        list[Annotated[str, StringConstraints(min_length=1, max_length=1200)]],
+        Field(min_length=1, max_length=12),
+    ]
     interaction: Annotated[str, StringConstraints(max_length=3000)]
     source_ids: Annotated[list[SourceID], Field(max_length=80)]
 
 
+FlowLabel = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=200)]
+
+
+class GuideFlow(Shape):
+    field: FlowLabel
+    problems: Annotated[list[FlowLabel], Field(min_length=1)]
+    method: FlowLabel
+    modules: Annotated[list[FlowLabel], Field(min_length=1)]
+    datasets: Annotated[list[FlowLabel], Field(max_length=5)]
+
+
 class Plan(Shape):
+    paper_flow: GuideFlow
     reader_profile: Annotated[str, StringConstraints(max_length=600)] = ''
     shared_examples: list[SharedExample] = Field(default_factory=list, max_length=3)
     title: Title
@@ -93,6 +110,7 @@ class ChapterInput(PlanInput):
 
 
 class Block(Shape):
+    emphasis: str = ''
     kind: Literal['paragraph', 'heading', 'formula', 'playground', 'figure']
     figure_id: str = ''
     text: Annotated[str, StringConstraints(min_length=1, max_length=14000)]
@@ -137,10 +155,30 @@ def bind_plan(data, result):
         raise ValueError('unknown original figure')
 
 
+# Leave math source intact, including literal angle brackets and asterisks.
+_math_span = re.compile(
+    r'(\\\(.*?\\\)|\\\[.*?\\\]|\$\$.*?\$\$|(?<!\\)\$(?:\\.|[^\\$\n])*?\$)', re.DOTALL,
+)
+_emphasis_tag = re.compile(r'</?(?:em|strong|b|i)>', re.IGNORECASE)
+
+
 def bind_chapter(data, result):
     known = {figure.id for figure in data.figures}
     if any(block.kind == 'figure' and block.figure_id not in known for block in result.blocks):
         raise ValueError('unknown original figure')
+    # Keep emphasis out of the immutable quote used for passage selections.
+    for block in result.blocks:
+        if block.kind != 'paragraph':
+            continue
+        parts = _math_span.split(block.text)
+        for index in range(0, len(parts), 2):
+            prose = _emphasis_tag.sub('', parts[index])
+            if block.emphasis:
+                prose = prose.replace('**' + block.emphasis + '**', block.emphasis)
+            parts[index] = prose
+        block.text = ''.join(parts)
+        if not block.text.strip():
+            raise ValueError('empty paragraph after removing emphasis markup')
     if result.id != data.chapter_id:
         raise ValueError('chapter identity mismatch')
 
@@ -173,6 +211,10 @@ characters, never control characters or truncated Unicode escapes. No analysis, 
 
 PLAN_PROMPT = COMMON + """
 Read the paper and design the actual article directory and each chapter's contents in ONE response.
+For the article header only, write title in English in both languages. Prefer the original paper title
+from the source, preserving model names and acronyms. For zh, subtitle is a faithful Simplified Chinese
+translation of that title, without a tagline or chapter preview. For en, use an English subtitle
+only if it adds information; otherwise use an empty string. Chapter titles follow the guide language.
 Use this directory: Paper Summary → Problem and Bottlenecks → The Big Idea → 2–4 paper-specific
 method chapters → Experimental Results → 0–2 optional deep-dive chapters → Limitations → Glossary.
 Keep these fixed IDs in this relative order: overview, why-it-matters, big-idea, results, limitations,
@@ -193,7 +235,13 @@ must supply enough shared decisions
 for chapters to be written IN PARALLEL: consistent symbols, examples, boundaries, no dependency on
 another chapter's generated text. Assign each key concept a first explanation; avoid repetition.
 Overview is 200–350 Chinese characters (not 500+), no subheadings. It gives a one-sentence TL;DR and 2–3
-concrete contributions/results with their scope, then a short reading map. Do not open with a long
+concrete contributions/results with their scope, then stop. Omit reading order and chapter previews.
+Fill paper_flow with short, self-contained labels in the requested language. Give one research field,
+the specific obstacles motivating the work, one proposed method, and its main technical components.
+Prefer the few most informative problems and modules. Each node should fit in one or two lines.
+For datasets use only names of datasets actually evaluated here (up to five, [] if none reported).
+The reader supplies layer names, layout and arrows. Do not include chapters, markup or connectors. Do not
+open with a long
 hypothetical story. Why This Matters uses a concrete bottleneck.
 The Big Idea centers on one diagram and a simple intuition. The method chapters follow the actual operations,
 with a worked example and formula meanings. Results explains the experiments and comparisons.
@@ -203,8 +251,7 @@ relate to this paper. Choose 6–10 relevant concepts, each explaining what it i
 For example, a preference-learning paper needs preference learning, reward modeling, RLHF and
 policy regularization rather than entries for x, y, beta and Z. Adapt concepts to the actual paper.
 Explain symbols locally at their first use in mechanism chapters; do not move that task to Glossary.
-Target a genuinely deeper article, roughly 6,000–10,000 Chinese characters or 3,000–4,500 English
-words overall when the source supports it. Allocate most detail to mechanisms and paper-specific
+Allocate most detail to mechanisms and paper-specific
 chapters; do not pad. Adapt reviews/empirical/theoretical papers to their actual content.
 Assign 3–4 visual modules, at most one per chapter. Reserve one in Results for a compact HTML
 table/bar comparison of the main reported outcomes (model/configuration, baseline, metric, value).
@@ -215,7 +262,7 @@ signal/noise values, not only scalar arithmetic; staged algorithms need state ch
 Avoid two modules demonstrating the same mechanism. Do not invent measurements to fill a chart.
 Each interaction description states the learning question, controls, state/visual response, equations
 or concrete data, and a default example. Use custom HTML/SVG/canvas/JS with visible state changes, not buttons
-switching paragraphs.
+switching paragraphs. Design labels around the change the reader can see; omit generic provenance footers.
 If two chapters teach the same computation, give only ONE a module; the other uses a short worked
 example. Prefer a distinct geometric/process insight over a second matrix/arithmetic widget.
 Select relevant ORIGINAL paper figures using the supplied figures catalog (id, caption, page,
@@ -256,7 +303,8 @@ why an operation is needed and what would fail without it. Do not invent an auth
 distinguish a teaching explanation from the paper's stated rationale.
 Use shared_examples and the selected example_ids as the common source of scenario, inputs and
 constraints. Keep symbols/units stable; explicitly explain a necessary change of example.
-Reference other chapters by their exact title, never "the previous chapter" or invented prose.
+In the overview, omit all navigation prose, suggested reading order and lists of chapter titles. In other
+chapters, reference chapters by their exact title, never "the previous chapter" or invented prose.
 Overview: 200–350 Chinese characters, paragraphs only, NO subheadings.
 Glossary: 6–10 domain concepts, primarily introducing the research field, its problems and method
 families, with their relation to THIS paper. It is NOT a list of formula symbols or variable meanings.
@@ -266,7 +314,12 @@ Write each glossary entry as ONE paragraph block: "Term: explanation" (use ： i
 Keep the term label concise and follow the Chinese-first bilingual glossary format above;
 English guides use English terms. The UI collapses the explanation under the term. Do not put a
 separate heading block or multiple glossary entries in one paragraph. Keep the domain-first focus.
-The prose renderer supports plain text and math, NOT Markdown. No **bold**, pipe tables or fences.
+In substantive prose paragraphs, occasionally emphasize the phrase that carries the mechanism,
+causal link or scoped experimental result. Copy one short contiguous phrase verbatim from text
+into emphasis. Keep most paragraphs unstyled. Choose a meaningful action or claim rather than an
+isolated term. Exclude math and glossary entries. For all other blocks omit emphasis or use "".
+Never wrap the phrase in HTML tags or asterisks in text. The prose renderer supports plain text and math,
+NOT Markdown. No **bold**, pipe tables or fences.
 Use paragraph blocks for short prose or Unicode bullets; heading blocks for short
 subheadings; formula blocks for standalone LaTeX (without fences or $$); playground blocks for
 purpose-built visual explanations. Inline math uses $...$. Use real paragraph breaks, not literal \\n.
@@ -284,8 +337,7 @@ Write like a visual tutorial: direct claim first, short explanation, concrete il
 2–4 sentence paragraphs and descriptive subheadings to dense essays. Do not repeat the paper
 motivation, shared scenario or definition already assigned to an earlier chapter. Explain why
 operations exist, how variables connect to the picture, then walk through concrete numbers.
-Aim for 500–1100 Chinese characters or 300–600 English words per substantive chapter; overview
-200–350 Chinese characters, glossary 6–10 concise entries. Spend extra length on worked steps,
+Keep the glossary to 6–10 concise entries. Spend extra length on worked steps,
 comparisons and interpretation, not repeated background. Follow the plan's topic ownership.
 Keep the interface language consistent. Do not add attribution labels to every paragraph or narrate
 review/correction history. Keep one concise caveat where it changes interpretation; do not repeat disclaimers
@@ -310,8 +362,12 @@ surrounding prose: prose names the inputs, explains the relation and directs rea
 result. Hand-worked examples without an interactive counterpart may show their intermediate numbers.
 Check capacity/unit constraints before displaying a result; invalid states show N/A with a reason.
 Distinguish a trajectory of a stochastic process from marginal samples drawn with shared noise.
-Use deterministic examples or seeded resampling. Use Math.pow(x,2), not unary minus before **. Label
-simulations/illustrative examples versus reported data accurately.
+Use deterministic examples or seeded resampling. Use Math.pow(x,2), not unary minus before **.
+In both the playground HTML and its fallback text, explain what changes and what to look for.
+Show a slider value once at the control (e.g. "反向步数 900"). Do not repeat it in a status sentence.
+Omit defensive copy about what a schematic does not represent and generic statements that numbers
+come from the authors. If a plot mixes measured and simulated series, distinguish them in its legend.
+For a reported metric, put the dataset and unit beside the value.
 Show important formulas/units near outputs. Handle zero denominators and invalid inputs with N/A.
 Do not claim a toy animation is a trained model or create unmeasured experimental performance.
 
@@ -320,19 +376,53 @@ network/fetch/CDN/imports, eval/workers, nested frames, storage/cookies, navigat
 popups/forms or parent/top access. Use addEventListener, never javascript: links.
 Use viewBox for responsive SVG; wrap controls at narrow widths; min-width:0; avoid fixed page widths.
 Use CSS variables --guide-bg, --guide-fg, --guide-muted, --guide-accent, --guide-border (host supplies
-these), with sensible fallbacks. Keep the entire scene around 360–650px tall and content scrollable.
+these), with sensible fallbacks. Let the document body grow or shrink with the scene. Avoid viewport-height
+wrappers and fixed-height internal scroll panels.
 Use system fonts, accessible DOM controls, SVG text/tspan or HTML sub/sup for module math.
 The host handles height; no parent communication or source/API requests are needed.
 Keep code readable and compact (normally 4–12 KB). Do not minify JavaScript: preserve statement
-newlines and explicit semicolons, especially after return-object statements. No placeholder functions, TODOs, pretend controls, screenshots
+newlines and explicit semicolons, especially after return-object statements. No placeholder functions,
+TODOs, pretend controls, screenshots
 as substitutes for a working scene, or unrelated replacement interactions. A noninteractive visual
 can also be a playground if a control would add no teaching value.
 """
 
 
+def length_guidance(data):
+    # Thresholds are editorial defaults. Missing page metadata keeps the standard budget.
+    pages = data.page_count
+    if pages is not None and pages <= 12:
+        zh, en = ('3,500–5,500', '400–700'), ('1,800–2,800', '200–350')
+        focus = 'Prefer two focused method chapters; include a deep dive only for a distinct result.'
+    elif pages is not None and pages > 40:
+        zh, en = ('10,000–15,000', '1,000–1,600'), ('5,000–7,500', '500–800')
+        focus = ('Organize the main argument into distinct mechanisms or themes. Use the extra space '
+                 'for dependencies, worked examples and evidence; select representative material from books.')
+    else:
+        zh, en = ('6,000–10,000', '500–1,100'), ('3,000–4,500', '300–600')
+        focus = 'Give the main mechanisms and experimental comparisons enough room for worked examples.'
+    total, chapter = zh if data.language == 'zh' else en
+    unit = 'Chinese characters' if data.language == 'zh' else 'English words'
+    return (f'\nLength plan: aim for {total} {unit} across the guide, and about {chapter} {unit} '
+            f'per substantive chapter. {focus} Keep the overview brief and glossary entries concise. '
+            'Count explanatory prose only. Shorten when the source does not support more detail.\n')
+
+
 def plan_prompt(data):
-    return PLAN_PROMPT + '\nOutput schema:\n' + json.dumps(Plan.model_json_schema(), ensure_ascii=False)
+    schema = json.dumps(Plan.model_json_schema(), ensure_ascii=False)
+    return PLAN_PROMPT + length_guidance(data) + '\nOutput schema:\n' + schema
 
 
 def chapter_prompt(data):
-    return CHAPTER_PROMPT + '\nOutput schema:\n' + json.dumps(Chapter.model_json_schema(), ensure_ascii=False)
+    instruction = CHAPTER_PROMPT + length_guidance(data)
+    if data.chapter_id not in BACKBONE:
+        instruction += """
+Make the first block a short opening paragraph in the guide language, before any subheading,
+formula, figure or interaction. In 1–3 sentences, start from a concrete situation the reader can
+recognize, name the question this chapter answers, and give the idea that connects the two.
+Use the selected chapter's purpose and outline to choose those details. For a method, explain
+what the step accomplishes and why it is needed. For a deep dive, name the observation or result
+whose meaning is worth unpacking. Write for someone who jumped here from the contents.
+Go straight into the explanation afterwards. Skip chapter itineraries and generic introductions.
+"""
+    return instruction + '\nOutput schema:\n' + json.dumps(Chapter.model_json_schema(), ensure_ascii=False)

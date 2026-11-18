@@ -5,6 +5,8 @@ import type {
 } from "@/api/generated/core-client";
 import { paperGuideApi } from "../../api/paperGuide";
 import { usePaperReaderSession } from "../../api/paperReader";
+import { isGuideRunActive } from "./guideRunState";
+
 export function unicodeRange(text: string, start: number, end: number) {
   return {
     start: Array.from(text.slice(0, start)).length,
@@ -38,6 +40,7 @@ export function usePaperGuide(
     key: string;
     status?: PaperGuideStatusResponse;
     revision?: PaperGuideRevisionResponse;
+    writingRevision?: PaperGuideRevisionResponse;
     error?: unknown;
     loading?: boolean;
   }>({ key });
@@ -47,13 +50,15 @@ export function usePaperGuide(
     selected?: string;
     revisionPending?: boolean;
     revision?: PaperGuideRevisionResponse;
+    writingRevision?: PaperGuideRevisionResponse;
     status?: PaperGuideStatusResponse;
     controller?: AbortController;
-  }>({ key });
+    schedulePoll?: () => void;
+  }>();
   const refresh = useCallback(async () => {
     if (!enabled) return;
     const session = live.current;
-    if (session.key !== key) return;
+    if (!session || session.key !== key) return;
     session.controller?.abort();
     const controller = new AbortController();
     session.controller = controller;
@@ -64,7 +69,7 @@ export function usePaperGuide(
       );
       if (controller.signal.aborted || live.current !== session) return;
       if (!response.data && session.revision && !session.revisionPending) {
-        setState({ key, status: session.status, revision: session.revision });
+        setState({ key, status: session.status, revision: session.revision, writingRevision: session.writingRevision });
         return;
       }
       const followLatest =
@@ -93,15 +98,29 @@ export function usePaperGuide(
         session.revision = mergeRevision(session.revision, delta);
         session.revisionPending = false;
       }
-      setState({ key, status: session.status, revision: session.revision });
+      const candidate = session.status?.candidate_revision;
+      if (candidate && candidate.id !== selected && candidate.run.stage === "writing") {
+        const previous = session.writingRevision?.id === candidate.id ? session.writingRevision : undefined;
+        if (previous?.version !== candidate.version) {
+          const delta = await paperGuideApi.revision(
+            { dataset, document, language }, candidate.id, previous?.version ?? 0, controller.signal,
+          );
+          if (controller.signal.aborted || live.current !== session) return;
+          session.writingRevision = mergeRevision(previous, delta);
+        }
+      } else {
+        session.writingRevision = undefined;
+      }
+      setState({ key, status: session.status, revision: session.revision, writingRevision: session.writingRevision });
     } catch (error) {
       if (!controller.signal.aborted && live.current === session) {
+        session.etag = undefined;
         const status = (error as { response?: { status?: number } })?.response
           ?.status;
         if (status === 403 || status === 404) {
           session.status = undefined;
           session.revision = undefined;
-          session.etag = undefined;
+          session.writingRevision = undefined;
           session.selected = undefined;
           session.revisionPending = false;
         }
@@ -112,28 +131,49 @@ export function usePaperGuide(
           error,
         });
       }
+    } finally {
+      if (!controller.signal.aborted && session.controller === controller) {
+        session.controller = undefined;
+        session.schedulePoll?.();
+      }
     }
   }, [key, dataset, document, language, enabled]);
   useEffect(() => {
-    const session = { key };
-    live.current = session;
+    const session: NonNullable<typeof live.current> = { key };
+    live.current = enabled ? session : undefined;
     setState({ key, loading: enabled });
-    void refresh();
-    const timer = enabled
-      ? window.setInterval(() => void refresh(), 4000)
-      : undefined;
+    if (!enabled) return;
+    let timer: number | undefined;
+    const pollIfVisible = () => {
+      if (window.document.visibilityState !== "hidden" && !session.controller) {
+        void refresh();
+      }
+    };
+    session.schedulePoll = () => {
+      window.clearTimeout(timer);
+      const active = isGuideRunActive(session.status?.candidate_revision?.run.stage);
+      timer = window.setTimeout(pollIfVisible, active ? 4000 : 60000);
+    };
+    window.addEventListener("focus", pollIfVisible);
+    window.document.addEventListener("visibilitychange", pollIfVisible);
+    pollIfVisible();
     return () => {
-      window.clearInterval(timer);
-      live.current.controller?.abort();
+      window.removeEventListener("focus", pollIfVisible);
+      window.document.removeEventListener("visibilitychange", pollIfVisible);
+      window.clearTimeout(timer);
+      session.controller?.abort();
+      live.current = undefined;
     };
   }, [key, refresh, enabled]);
   const selectRevision = useCallback(
     async (id: string) => {
-      live.current.selected = id;
-      live.current.revision = undefined;
+      const session = live.current;
+      if (!session || session.key !== key) return;
+      session.selected = id;
+      session.revision = undefined;
       await refresh();
     },
-    [refresh],
+    [key, refresh],
   );
   const current = state.key === key ? state : { key, loading: enabled };
   const available =

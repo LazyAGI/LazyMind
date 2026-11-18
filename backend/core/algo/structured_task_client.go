@@ -12,10 +12,6 @@ import (
 )
 
 const (
-
-
-
-
 	FormulaExplanationTask        = "paper.formula.explain"
 	FormulaExplanationTaskVersion = "formula-explanation-v7-low-latency"
 	VisualExplanationTask         = "paper.visual.explain"

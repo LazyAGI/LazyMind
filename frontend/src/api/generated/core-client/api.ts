@@ -7238,6 +7238,7 @@ export interface PaperGuideBlock {
     'asset_id'?: string;
     'attribution': string;
     'claim_ids': Array<string>;
+    'emphasis'?: string;
     'evidence_ids': Array<string>;
     'id': string;
     'interaction'?: PaperGuideInteraction | null;
@@ -7291,6 +7292,13 @@ export interface PaperGuideFinding {
     'suggestion': string;
     'target_id': string;
     'target_type': string;
+}
+export interface PaperGuideFlow {
+    'datasets': Array<string>;
+    'field': string;
+    'method': string;
+    'modules': Array<string>;
+    'problems': Array<string>;
 }
 export interface PaperGuideGenerateRequest {
     'expected_source_hash': string;
@@ -7382,6 +7390,7 @@ export interface PaperGuideOriginalDisplay {
 export interface PaperGuidePlan {
     'claims': Array<PaperGuideClaim>;
     'layout'?: string;
+    'paper_flow'?: PaperGuideFlow | null;
     'profiles': PaperGuideProfiles;
     'questions': Array<string>;
     'required_assets': Array<PaperGuideAssetDecision>;

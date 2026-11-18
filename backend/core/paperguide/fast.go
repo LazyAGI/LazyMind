@@ -2,6 +2,7 @@ package paperguide
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"maps"
 	"regexp"
@@ -9,6 +10,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"gorm.io/gorm"
 	"lazymind/core/asyncjob"
@@ -17,6 +19,7 @@ import (
 // ExplainerPlan is the deliberately small model contract, independent of the
 // historical claims/review pipeline. Public artifacts retain the existing DTOs.
 type ExplainerPlan struct {
+	PaperFlow      *GuideFlow             `json:"paper_flow,omitempty"`
 	ReaderProfile  string                 `json:"reader_profile,omitempty"`
 	SharedExamples []ExplainerExample     `json:"shared_examples,omitempty"`
 	Title          string                 `json:"title"`
@@ -59,6 +62,7 @@ type ExplainerChapter struct {
 	Blocks []ExplainerBlock `json:"blocks"`
 }
 type ExplainerBlock struct {
+	Emphasis    string   `json:"emphasis,omitempty"`
 	FigureID    string   `json:"figure_id,omitempty"`
 	Kind        string   `json:"kind"`
 	Text        string   `json:"text"`
@@ -176,7 +180,7 @@ func (x *execution) executeFast(ctx context.Context) error {
 	}); err != nil {
 		return err
 	}
-	public := GuidePlan{Layout: "flashpapers", Title: plan.Title, Subtitle: plan.Subtitle, Questions: []string{}, Claims: []GuideClaim{}, TermPolicy: []string{}, RequiredAssets: []GuideAssetDecision{}, Sections: []GuideSectionPlan{}}
+	public := GuidePlan{PaperFlow: plan.PaperFlow, Layout: "flashpapers", Title: plan.Title, Subtitle: plan.Subtitle, Questions: []string{}, Claims: []GuideClaim{}, TermPolicy: []string{}, RequiredAssets: []GuideAssetDecision{}, Sections: []GuideSectionPlan{}}
 	for _, c := range plan.Chapters {
 		public.Sections = append(public.Sections, GuideSectionPlan{Role: Role(c.ID), Title: c.Title, Focus: c.Purpose, Terms: c.Outline, ClaimIDs: []string{}, EvidenceIDs: canonicalReferences(c.SourceIDs, aliases), AssetIDs: canonicalReferences(c.FigureIDs, aliases)})
 	}
@@ -278,6 +282,9 @@ func publicChapter(c ExplainerChapter, aliases map[string]string) GuideSection {
 	s := GuideSection{Role: Role(c.ID), Title: c.Title, Blocks: []GuideBlock{}, Claims: []GuideClaim{}, ClaimIDs: []string{}, Version: 1, PublicationStatus: "published"}
 	for i, b := range c.Blocks {
 		block := GuideBlock{ID: fmt.Sprintf("%s-b%d", c.ID, i+1), Kind: b.Kind, Text: b.Text, Attribution: AttributionTeaching, ClaimIDs: []string{}, EvidenceIDs: canonicalReferences(b.EvidenceIDs, aliases)}
+		if b.Kind == "paragraph" && c.ID != "glossary" && strings.TrimSpace(b.Emphasis) != "" && strings.Count(b.Text, b.Emphasis) == 1 {
+			block.Emphasis = b.Emphasis
+		}
 		if b.Kind == "figure" {
 			block.Attribution = AttributionPaper
 			block.AssetID = aliases[b.FigureID]
@@ -309,15 +316,105 @@ func (x *execution) explainerInput() (map[string]any, map[string]string, error) 
 	if sourceBudget < 500 || len(x.snap.Evidence) == 0 {
 		return nil, nil, ErrContext
 	}
+	aliases := map[string]string{}
+	title := "Research paper"
+	if len(x.snap.Sections) > 0 && x.snap.Sections[0].Title != "" {
+		title = x.snap.Sections[0].Title
+		if utf8.RuneCountInString(title) > 1000 {
+			title = string([]rune(title)[:1000])
+		}
+	} else {
+		title = truncateUTF8(x.snap.Evidence[0].Text, 180)
+	}
+	figures := []ExplainerFigure{}
+	sections := map[string]string{}
+	for _, part := range x.snap.Sections {
+		for _, id := range part.EvidenceIDs {
+			sections[id] = part.Title
+		}
+	}
+	evidenceText := map[string]string{}
+	for _, ev := range x.snap.Evidence {
+		evidenceText[ev.ID] = ev.Text
+	}
+	for _, asset := range x.snap.Assets {
+		if asset.Kind != "figure" || asset.OriginalDisplay == nil {
+			continue
+		}
+		display := asset.OriginalDisplay
+		caption := strings.TrimSpace(display.Caption)
+		if caption == "" {
+			caption = strings.TrimSpace(evidenceText[asset.ID])
+		}
+		if caption == "" {
+			continue
+		}
+		alias := fmt.Sprintf("f%d", len(figures))
+		figures = append(figures, ExplainerFigure{ID: alias, Page: display.Page + 1, Caption: caption, Section: sections[asset.ID]})
+		aliases[alias] = asset.ID
+	}
+	input := map[string]any{"language": x.scope.Language, "paper_title": title, "source_text": "", "figures": figures}
+	// Parsed pages use physical, zero-based indices and can skip blank pages.
+	pageCount := 0
+	for _, page := range x.snap.Pages {
+		pageCount = max(pageCount, page.Index+1)
+	}
+	if pageCount > 0 {
+		input["page_count"] = pageCount
+	}
+	// Preserve existing request hashes when recovering a partially written guide.
+	input["source_text"] = packExplainerSource(x.snap.Evidence, sourceBudget, aliases, false)
+	if x.inputFits(input) {
+		return input, aliases, nil
+	}
+	input["source_text"] = ""
+	// Keep room for the shared chapter plan. Cap only oversized catalogs and
+	// keep complete captions so figure translations always have the source text.
+	metadata, _ := json.MarshalIndent(input, "", "")
+	if len(metadata) > (budget-18000)/2 {
+		remaining := (budget - 18000) / 2
+		kept := []ExplainerFigure{}
+		for _, figure := range figures {
+			raw, _ := json.MarshalIndent(figure, "", "")
+			if len(raw)+2 > remaining {
+				delete(aliases, figure.ID)
+				continue
+			}
+			remaining -= len(raw) + 2
+			kept = append(kept, figure)
+		}
+		input["figures"] = kept
+	}
+	// Budget the JSON-encoded excerpts after reserving room for the chapter plan.
+	base, _ := json.MarshalIndent(input, "", "")
+	available := budget - 6000 - len(base)
+	sourceBudget = min(sourceBudget, available-min(12000, available/2))
+	if sourceBudget < 500 {
+		return nil, nil, ErrContext
+	}
+	input["source_text"] = packExplainerSource(x.snap.Evidence, sourceBudget, aliases, true)
+	if !x.inputFits(input) {
+		return nil, nil, ErrContext
+	}
+	return input, aliases, nil
+}
+func packExplainerSource(evidence []GuideEvidence, sourceBudget int, aliases map[string]string, escaped bool) string {
+	size := func(s string) int {
+		if !escaped {
+			return len(s)
+		}
+		return len(mustMarshal(s)) - 2
+	}
 	// Preserve the complete paper whenever it fits. For long papers, select
 	// whole paragraphs across the source before considering bounded excerpts of
 	// unusually large blocks (for example, a parsed table). Never truncate every
 	// paragraph to a fixed tiny prefix.
-	entries := make([]string, len(x.snap.Evidence))
+	entries := make([]string, len(evidence))
 	total := 0
-	for i, ev := range x.snap.Evidence {
+	for i, ev := range evidence {
+		delete(aliases, fmt.Sprintf("s%d", i))
 		entries[i] = fmt.Sprintf("[s%d page %d] %s\n", i, ev.Locator.Page+1, ev.Text)
-		total += len(entries[i])
+		total += size(entries[i])
 	}
 	selected := map[int]string{}
 	if total <= sourceBudget {
@@ -346,12 +443,16 @@ func (x *execution) explainerInput() (map[string]any, map[string]string, error) 
 		blockLimit := min(sourceBudget, max(2000, sourceBudget/8))
 		for _, i := range order {
 			entry := entries[i]
-			if len(entry) > blockLimit {
-				entry = truncateUTF8(entry, blockLimit-5) + " …\n"
+			if size(entry) > blockLimit {
+				limit := min(blockLimit-5, len(entry))
+				if escaped {
+					limit = sort.Search(limit+1, func(n int) bool { return size(truncateUTF8(entry, n)) > blockLimit-6 }) - 1
+				}
+				entry = truncateUTF8(entry, limit) + " …\n"
 			}
-			if len(entry) <= remaining {
+			if size(entry) <= remaining {
 				selected[i] = entry
-				remaining -= len(entry)
+				remaining -= size(entry)
 			}
 		}
 	}
@@ -361,50 +462,13 @@ func (x *execution) explainerInput() (map[string]any, map[string]string, error) 
 	}
 	sort.Ints(indices)
 	var text strings.Builder
-	aliases := map[string]string{}
 	for _, i := range indices {
 		text.WriteString(selected[i])
-		aliases[fmt.Sprintf("s%d", i)] = x.snap.Evidence[i].ID
+		aliases[fmt.Sprintf("s%d", i)] = evidence[i].ID
 	}
-	title := "Research paper"
-	if len(x.snap.Sections) > 0 && x.snap.Sections[0].Title != "" {
-		title = x.snap.Sections[0].Title
-	} else {
-		title = truncateUTF8(x.snap.Evidence[0].Text, 180)
-	}
-	figures := []ExplainerFigure{}
-	for _, asset := range x.snap.Assets {
-		if asset.Kind != "figure" || asset.OriginalDisplay == nil {
-			continue
-		}
-		display := asset.OriginalDisplay
-		caption := strings.TrimSpace(display.Caption)
-		if caption == "" {
-			for _, ev := range x.snap.Evidence {
-				if ev.ID == asset.ID {
-					caption = strings.TrimSpace(ev.Text)
-					break
-				}
-			}
-		}
-		if caption == "" {
-			continue
-		}
-		section := ""
-		for _, part := range x.snap.Sections {
-			for _, id := range part.EvidenceIDs {
-				if id == asset.ID {
-					section = part.Title
-				}
-			}
-		}
-		alias := fmt.Sprintf("f%d", len(figures))
-		figures = append(figures, ExplainerFigure{ID: alias, Page: display.Page + 1, Caption: caption, Section: section})
-		aliases[alias] = asset.ID
-	}
-	input := map[string]any{"language": x.scope.Language, "paper_title": title, "source_text": text.String(), "figures": figures}
-	return input, aliases, nil
+	return text.String()
 }
+
 func truncateUTF8(s string, n int) string {
 	if len(s) <= n {
 		return s

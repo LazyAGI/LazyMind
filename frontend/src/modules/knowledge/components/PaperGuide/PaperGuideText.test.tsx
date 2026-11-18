@@ -141,3 +141,9 @@ it("renders bare formula blocks without changing their source offsets", () => {
   expect(container.querySelector('.katex-display')).not.toBeNull();
   expect(container.querySelector('[data-guide-source-end]')).toHaveAttribute('data-guide-source-end', String(Array.from(text).length));
 });
+
+it.each(["a", "$a+b$", "missing"])("does not emphasize ambiguous, mathematical or missing text: %s", emphasis => {
+  const { container } = render(<PaperGuideText text="a and a: $a+b$" emphasis={emphasis} />);
+  expect(container.querySelector("strong")).toBeNull();
+  expect(container.querySelector(".katex")).not.toBeNull();
+});

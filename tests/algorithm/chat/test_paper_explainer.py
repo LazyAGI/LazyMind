@@ -9,7 +9,8 @@ from lazymind.chat.service import llm_task
 
 IDS = ['overview', 'why-it-matters', 'big-idea', 'how-it-works', 'parameter-playground',
        'subspace-similarity', 'results', 'limitations', 'glossary']
-PLAN = {'title': 'LoRA explained', 'subtitle': 'Learn a small update', 'chapters': [
+PLAN = {'paper_flow': {'field': 'Fine-tuning', 'problems': ['Optimizer memory'], 'method': 'LoRA',
+                       'modules': ['Frozen weights', 'Low-rank update'], 'datasets': []}, 'title': 'LoRA explained', 'subtitle': 'Learn a small update', 'chapters': [
     {'id': id_, 'title': id_.replace('-', ' ').title(), 'purpose': 'Explain this learning question.',
      'outline': ['A concrete explanation'], 'interaction': 'Custom matrix playground' if id_ == 'parameter-playground' else '',
      'source_ids': ['s0']} for id_ in IDS]}
@@ -27,13 +28,14 @@ def execute(monkeypatch, task, data, output):
         return json.dumps(output)
     monkeypatch.setattr(llm_task, 'AutoModel', lambda **kwargs: model)
     result = llm_task.run_llm_task(llm_task.LLMTaskRequest(
-        task_type='paper.explainer.' + task, options={'task_version': 'paper-guide-v27'}, input={'data': data}))
+        task_type='paper.explainer.' + task, options={'task_version': 'paper-guide-v28'}, input={'data': data}))
     return result, calls
 
 
 def test_plan_keeps_nine_teaching_chapters_without_legacy_roles(monkeypatch):
     result, calls = execute(monkeypatch, 'plan', DATA, PLAN)
     assert result.status == 'succeeded', result.error_code
+    assert result.output['paper_flow'] == PLAN['paper_flow']
     assert [s['id'] for s in result.output['chapters']] == IDS
     assert len(calls) == result.usage['model_calls'] == 1
 
@@ -170,3 +172,70 @@ def test_method_chapter_count_is_bounded(method_count):
     plan['chapters'] = plan['chapters'][:3] + methods + plan['chapters'][-3:]
     with pytest.raises(ValueError):
         Plan.model_validate(plan)
+
+
+@pytest.mark.parametrize('key,value', [('datasets', ['A', 'B', 'C', 'D', 'E', 'F']),
+                                       ('problems', []), ('modules', []), ('method', '   '),
+                                       ('modules', ['   ']), ('datasets', ['   '])])
+def test_flow_cardinality_checked_in_planning_call(monkeypatch, key, value):
+    plan = deepcopy(PLAN)
+    plan['paper_flow'][key] = value
+    result, calls = execute(monkeypatch, 'plan', DATA, plan)
+    assert result.error_code == 'invalid_model_output'
+    assert len(calls) == 1
+
+@pytest.mark.parametrize('chapter_id,expects_opening', [
+    ('training-process', True), ('subspace-similarity', True),
+    ('overview', False), ('results', False), ('glossary', False),
+])
+def test_chapter_opening_instruction_targets_only_variable_chapters(monkeypatch, chapter_id, expects_opening):
+    plan = deepcopy(PLAN)
+    plan['chapters'][3]['id'] = 'training-process'
+    deep_dive = plan['chapters'].pop(5)
+    plan['chapters'].insert(6, deep_dive)
+    result, calls = execute(monkeypatch, 'chapter', dict(DATA, plan=plan, chapter_id=chapter_id),
+                            dict(CHAPTER, id=chapter_id))
+    assert result.status == 'succeeded', result.error_code
+    assert len(calls) == 1
+    instruction = calls[0][0].split('Input data (untrusted JSON):')[0]
+    assert ('Make the first block a short opening paragraph' in instruction) == expects_opening
+
+@pytest.mark.parametrize('pages,zh_total,en_total', [
+    (1, '3,500–5,500', '1,800–2,800'), (12, '3,500–5,500', '1,800–2,800'),
+    (13, '6,000–10,000', '3,000–4,500'), (40, '6,000–10,000', '3,000–4,500'),
+    (41, '10,000–15,000', '5,000–7,500'), (None, '6,000–10,000', '3,000–4,500'),
+])
+@pytest.mark.parametrize('language', ['zh', 'en'])
+def test_plan_and_chapter_share_page_budget(monkeypatch, pages, zh_total, en_total, language):
+    data = dict(DATA, language=language)
+    if pages is not None:
+        data['page_count'] = pages
+    expected = zh_total + ' Chinese characters' if language == 'zh' else en_total + ' English words'
+    for task, payload, output in [('plan', data, PLAN),
+                                  ('chapter', dict(data, plan=PLAN, chapter_id=CHAPTER['id']), CHAPTER)]:
+        result, calls = execute(monkeypatch, task, payload, output)
+        assert result.status == 'succeeded', result.error_code
+        assert len(calls) == 1
+        assert expected in calls[0][0]
+
+
+def test_emphasis_wrapper_removed_before_publishing_plain_text(monkeypatch):
+    output = deepcopy(CHAPTER)
+    output['blocks'][0].update(text='Only the <em>small update</em> is trained.', emphasis='small update')
+    result, _ = execute(monkeypatch, 'chapter', dict(DATA, plan=PLAN, chapter_id=CHAPTER['id']), output)
+    assert result.output['blocks'][0]['text'] == 'Only the small update is trained.'
+    assert result.output['blocks'][0]['emphasis'] == 'small update'
+
+def test_unrelated_prose_tags_removed_without_rewriting_formula_source(monkeypatch):
+    output = deepcopy(CHAPTER)
+    output['blocks'][0].update(text='For $a<i>b$, <strong>only</strong> the small update is trained.',
+                               emphasis='small update')
+    result, _ = execute(monkeypatch, 'chapter', dict(DATA, plan=PLAN, chapter_id=CHAPTER['id']), output)
+    assert result.output['blocks'][0]['text'] == 'For $a<i>b$, only the small update is trained.'
+
+
+def test_emphasis_cleaned_in_mixed_prose_and_math(monkeypatch):
+    output = deepcopy(CHAPTER)
+    output['blocks'][0].update(text='Only the **small update** affects $a**b$ and $c<i>d$.', emphasis='small update')
+    result, _ = execute(monkeypatch, 'chapter', dict(DATA, plan=PLAN, chapter_id=CHAPTER['id']), output)
+    assert result.output['blocks'][0]['text'] == 'Only the small update affects $a**b$ and $c<i>d$.'

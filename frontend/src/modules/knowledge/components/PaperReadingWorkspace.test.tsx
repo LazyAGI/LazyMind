@@ -76,6 +76,11 @@ beforeEach(() => {
 });
 afterEach(() => vi.restoreAllMocks());
 
+async function chooseOption(label: string, option: string) {
+  fireEvent.mouseDown(screen.getByRole("combobox", { name: label }));
+  fireEvent.click(await screen.findByRole("option", { name: option }));
+}
+
 function openGuide(name = "Guide") {
   flushSync(() => fireEvent.click(screen.getByRole("button", { name })));
   const details = screen.queryByRole("button", { name: /Generation status and actions|生成状态与操作/ });
@@ -243,14 +248,14 @@ it("opens the original if a restored guide is no longer readable", () => {
 });
 
 it("switches with a stable two-button toolbar and preserves the mounted PDF", async () => {
-  const view = render(<Harness />);
+  render(<Harness />);
   const pdf = screen.getByText("PDF viewer");
   const modes = screen.getByRole("group", { name: "Reading mode" });
   expect(pdf).toBeVisible();
   openGuide("Guide");
   expect(await screen.findByRole("article")).toBeVisible();
   expect(pdf).not.toBeVisible();
-  expect(view.container.querySelectorAll(".paper-guide-toolbar button")).toHaveLength(3);
+  expect(modes.querySelectorAll("button")).toHaveLength(2);
   for (const name of ["Compare original", "Assistant", "Notes", "Translation"]) {
     expect(screen.queryByRole("button", { name })).toBeNull();
   }
@@ -528,6 +533,24 @@ it.each([
   }
 });
 
+it("offers regeneration after the source changes during the first generation", async () => {
+  const stopped = pausedCandidate("paper_guide_source_changed");
+  stopped.run.stage = "source_changed";
+  state.value = {
+    ...state.value,
+    status: { ...status(), published_revision: null, candidate_revision: stopped },
+    revision: stopped,
+  };
+  render(<Harness />);
+  await act(async () => openGuide("Guide"));
+  expect(screen.queryByRole("button", { name: "Resume" })).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Generate a new guide" }));
+  fireEvent.click(screen.getByRole("button", { name: "Start regeneration" }));
+  await waitFor(() => expect(api.generate).toHaveBeenCalledWith(
+    expect.anything(), expect.objectContaining({ regenerate: true, expected_source_hash: "hash" }),
+  ));
+});
+
 it("shows the old-contract explanation when the candidate also has a saved quality stop", async () => {
   const candidate = pausedCandidate("paper_guide_regeneration_required");
   state.value.status = {
@@ -597,11 +620,9 @@ it("replaces incompatible resume with an explicit new revision while preserving 
     screen.queryByRole("button", { name: "Resume" }),
   ).not.toBeInTheDocument();
   expect(screen.getByRole("status")).toHaveTextContent("errors.2004413");
-  await screen.findByRole("option", { name: "Per-run model" });
-  fireEvent.change(screen.getByLabelText("Model for this run"), {
-    target: { value: "own:run" },
-  });
+  expect(screen.queryByRole("combobox", { name: "Model for this run" })).toBeNull();
   fireEvent.click(screen.getByRole("button", { name: "Generate a new guide" }));
+  await chooseOption("Model for this run", "Per-run model");
   fireEvent.click(screen.getByRole("button", { name: "Start regeneration" }));
   await waitFor(() =>
     expect(api.generate).toHaveBeenCalledWith(
@@ -865,10 +886,9 @@ it("immediately acknowledges generation while the request is still pending", asy
 it("regenerates a completed guide with the selected model while retaining the current article", async () => {
   render(<ConfigProvider theme={{ token: { motion: false } }}><Harness /></ConfigProvider>);
   openGuide("Guide");
-  fireEvent.click(screen.getByRole("button", { name: "Regenerate", exact: true }));
+  fireEvent.click(screen.getByRole("button", { name: "Regenerate" }));
   await waitFor(() => expect(screen.getByRole("dialog")).toBeVisible());
-  await screen.findByRole("option", { name: "Per-run model" });
-  fireEvent.change(screen.getByLabelText("Model for this run"), { target: { value: "own:run" } });
+  await chooseOption("Model for this run", "Per-run model");
   fireEvent.click(screen.getByRole("button", { name: "Start regeneration" }));
   await waitFor(() => expect(api.generate).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({model_ref: "own:run", regenerate: true, expected_source_hash: "hash"})));
   expect(screen.getByRole("article")).toBeVisible();
@@ -876,9 +896,40 @@ it("regenerates a completed guide with the selected model while retaining the cu
 it("does not submit regeneration when the model dialog is canceled", () => {
   render(<ConfigProvider theme={{ token: { motion: false } }}><Harness /></ConfigProvider>);
   openGuide("Guide");
-  fireEvent.click(screen.getByRole("button", { name: "Regenerate", exact: true }));
-  fireEvent.click(screen.getByRole("button", { name: "Cancel", exact: true }));
+  fireEvent.click(screen.getByRole("button", { name: "Regenerate" }));
+  fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
   expect(api.generate).not.toHaveBeenCalled();
+});
+
+it("discards a canceled model choice before reopening regeneration", async () => {
+  render(<Harness />);
+  openGuide();
+  const open = () => fireEvent.click(screen.getByRole("button", { name: "Regenerate" }));
+  open();
+  await chooseOption("Model for this run", "Per-run model");
+  fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+  open();
+  fireEvent.click(screen.getByRole("button", { name: "Start regeneration" }));
+  await waitFor(() => expect(api.generate).toHaveBeenCalledTimes(1));
+  expect(api.generate.mock.calls[0][1]).not.toHaveProperty("model_ref");
+});
+
+it("keeps the second paper's pending feedback when the first paper's request fails late", async () => {
+  state.value = { ...state.value, revision: undefined, status: { ...status(), published_revision: null, candidate_revision: null } };
+  let rejectFirst!: (error: Error) => void;
+  api.generate.mockImplementationOnce(() => new Promise((_, reject) => { rejectFirst = reject; }));
+  api.generate.mockImplementationOnce(() => new Promise(() => {}));
+  const view = render(<Harness />);
+  const start = () => {
+    openGuide();
+    fireEvent.click(screen.getByRole("button", { name: "Prepare paper and generate guide" }));
+  };
+  start();
+  view.rerender(<Harness document="second" />);
+  start();
+  await act(async () => rejectFirst(new Error("First paper failed")));
+  expect(screen.getByText("Starting")).toBeVisible();
+  expect(screen.queryByText("First paper failed")).toBeNull();
 });
 
 it("keeps generation UI in the toolbar and out of the reading pane", async () => {
@@ -901,7 +952,7 @@ it("generates in a selected language without changing the application locale", a
   api.generate.mockResolvedValueOnce({});
   render(<Harness />);
   openGuide();
-  fireEvent.change(screen.getByLabelText("Guide language"), { target: { value: "zh" } });
+  await chooseOption("Guide language", "简体中文");
   fireEvent.click(screen.getByRole("button", { name: "Prepare paper and generate guide" }));
   await waitFor(() => expect(api.generate).toHaveBeenCalledWith(
     { dataset: "ds", document: "doc", language: "zh" }, expect.objectContaining({ language: "zh", regenerate: false })));
@@ -914,33 +965,51 @@ it("lets regeneration select another language and keeps cancel from applying it"
   api.generate.mockResolvedValueOnce({});
   render(<Harness />);
   openGuide();
-  fireEvent.click(screen.getByRole("button", { name: "Regenerate", exact: true }));
-  fireEvent.change(screen.getByLabelText("Guide language"), { target: { value: "zh" } });
-  fireEvent.click(screen.getByRole("button", { name: "Cancel", exact: true }));
+  fireEvent.click(screen.getByRole("button", { name: "Regenerate" }));
+  await chooseOption("Guide language", "简体中文");
+  fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
   expect(api.generate).not.toHaveBeenCalled();
-  fireEvent.click(screen.getByRole("button", { name: "Regenerate", exact: true }));
-  expect(screen.getByLabelText("Guide language")).toHaveValue("en");
-  fireEvent.change(screen.getByLabelText("Guide language"), { target: { value: "zh" } });
+  fireEvent.click(screen.getByRole("button", { name: "Regenerate" }));
+  expect(screen.getByRole("combobox", { name: "Guide language" }).closest(".ant-select")).toHaveTextContent("English");
+  await chooseOption("Guide language", "简体中文");
   fireEvent.click(screen.getByRole("button", { name: "Start regeneration" }));
   await waitFor(() => expect(api.generate).toHaveBeenCalledWith(
     { dataset: "ds", document: "doc", language: "zh" }, expect.objectContaining({ language: "zh", regenerate: true })));
 });
 
 
-it("switches reading language without generating and scopes the choice to the document", () => {
+it("switches reading language without generating and scopes the choice to the document", async () => {
   const view = render(<Harness />);
   openGuide();
-  fireEvent.change(screen.getByLabelText("Reading language"), { target: { value: "zh" } });
+  await chooseOption("Reading language", "简体中文");
   expect(state.read).toHaveBeenLastCalledWith("ds", "doc", "zh", true);
   expect(api.generate).not.toHaveBeenCalled();
   state.value = { ...state.value, revision: undefined, status: { ...status(), published_revision: null, candidate_revision: null } };
   view.rerender(<Harness />);
-  expect(screen.getByLabelText("Reading language")).toHaveValue("zh");
-  fireEvent.change(screen.getByLabelText("Reading language"), { target: { value: "en" } });
+  expect(screen.getByRole("combobox", { name: "Reading language" }).closest(".ant-select")).toHaveTextContent("简体中文");
+  await chooseOption("Reading language", "English");
   expect(state.read).toHaveBeenLastCalledWith("ds", "doc", "en", true);
-  fireEvent.change(screen.getByLabelText("Reading language"), { target: { value: "zh" } });
+  await chooseOption("Reading language", "简体中文");
   view.rerender(<Harness document="other" />);
   expect(state.read).toHaveBeenLastCalledWith("ds", "other", "en", true);
   view.rerender(<Harness document="doc" />);
   expect(state.read).toHaveBeenLastCalledWith("ds", "doc", "zh", true);
+});
+
+it("remembers paper color independently of lighting across papers", async () => {
+  const view = render(<Harness />);
+  openGuide();
+  fireEvent.click(screen.getByRole("button", { name: "Page color" }));
+  fireEvent.click(await screen.findByText("Warm paper"));
+  fireEvent.click(screen.getByRole("button", { name: "Lights off" }));
+  const workspace = view.container.querySelector(".paper-reading-workspace");
+  expect(workspace).toHaveAttribute("data-guide-paper", "cream");
+  expect(workspace).toHaveAttribute("data-guide-light", "night");
+  fireEvent.click(screen.getByRole("button", { name: "Original" }));
+  expect(workspace).not.toHaveAttribute("data-guide-paper");
+  view.unmount();
+  const next = render(<Harness document="another-paper" />);
+  openGuide();
+  fireEvent.click(screen.getByRole("button", { name: "Lights on" }));
+  expect(next.container.querySelector(".paper-reading-workspace")).toHaveAttribute("data-guide-paper", "cream");
 });

@@ -50,7 +50,7 @@ export function sectionIconKind({role, title = "", description = "", optional}: 
   if (optional) return "bookmark";
   // Titles take precedence; immutable plan context handles generic headings and
   // keeps the icon stable while chapter prose streams in.
-  for (const text of [title, role.replaceAll("-", " "), description]) {
+  for (const text of [title, role.replace(/-/g, " "), description]) {
     const match = topics.find(([, pattern]) => pattern.test(text));
     if (match) return match[0];
   }
