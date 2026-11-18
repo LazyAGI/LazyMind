@@ -109,9 +109,9 @@ and provider reason instead of silently falling back.
 
 ## Optional PPTX template
 
-HTML is the default output. Startup never asks whether to use/upload a template
-or to choose quick/full generation. An already supplied template is bound to
-`template_pptx`; only then is the user asked for HTML or PPTX if unspecified.
+At startup, ask the user to choose interactive HTML with PPTX export or direct
+native PPTX whenever the request leaves the route open. Reuse an explicit or
+previously confirmed choice. Bind a supplied template to `template_pptx`.
 Both template routes skip style questions and AI backgrounds. HTML recreates
 the template style with components, without using full-slide background images.
 Native PPTX composition can repeat, omit and reorder source layouts to meet the

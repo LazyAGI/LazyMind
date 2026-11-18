@@ -3,8 +3,8 @@ name: AI PPT Planner
 preflight_disabled: true
 description: >
   Plan a presentation from a user request, collect useful source material,
-  then generate HTML slides by default, or compose uploaded templates into a new
-  native PPTX. Native files are downloaded for viewing in PowerPoint or WPS.
+  then create interactive HTML slides with PPTX export or author a native PPTX
+  directly. Native files open in PowerPoint or WPS and can reuse uploaded layouts.
 
 when_to_use: >
   Trigger this workflow when the user explicitly asks to use the PPT workflow, or
@@ -22,13 +22,13 @@ when_to_use: >
   explicit request to enable AI backgrounds; an uploaded template takes precedence.
   Uploaded source materials are optional: text-only requests must start from
   the user's prompt. Never ask whether to use/upload a template. Bind a template
-  only when the user actually supplies one. Without a template, default to HTML
-  and do not ask an output-format question. With an uploaded template, ask once
-  for HTML or PPTX unless already specified. HTML reads and recreates its style;
-  PPTX reuses template layouts and can add, remove or repeat pages.
+  only when the user actually supplies one. Ask once before launch whether the
+  user wants interactive HTML slides with PPTX export or a directly authored
+  native PPTX file, unless the request or a confirmed answer already chooses a route.
+  With a template, HTML recreates its style and native PPTX reuses its layouts.
   Never ask for a source document merely because uploads are supported.
   Before starting, collect only missing declared fields: presentation topic,
-  slide count, target customer/audience, visual style, AI-generated per-slide
+  slide count, output format, target customer/audience, visual style, AI-generated per-slide
   backgrounds. Never ask quick/full generation mode, with or without a template.
   Read the original request as a whole and send all resolved startup parameters
   in one trigger call. The Host asks for any missing required values together.
@@ -297,6 +297,8 @@ runtime:
         template_mode: template_mode
     - step_id: generate_ppt
       tool: check_ppt_delivery
+      input_arguments:
+        output_format: presentation_output_format
       artifacts_argument: artifacts
   input_checkpoint:
     after_step: collect_materials
@@ -443,22 +445,25 @@ runtime:
       label: 输出格式
       required: true
       resolution: model
-      reason: HTML 会重建模板样式，PPTX 会保留并复用原生模板版式。
-      applies_when: {field: template_mode, equals: upload}
-      value_aliases: {HTML｜参考模板样式生成: html, PPTX｜复用模板并按需增删页面: native_pptx}
+      reason: HTML 版可以在网页中交互预览和编辑，也可以导出 PPTX。原生 PPTX 可直接在 PowerPoint 或 WPS 中打开和编辑。
+      value_aliases:
+        HTML｜交互预览，可导出 PPTX: html
+        原生 PPTX｜直接生成文件: native_pptx
+        HTML｜参考模板样式生成: html
+        PPTX｜复用模板并按需增删页面: native_pptx
       ask_when: >
-        Only after a PPTX template is actually uploaded, and the user has not chosen
-        HTML or PPTX output. Bind native_pptx for an explicit request such as
-        "生成12 页pptx" or "制作可编辑的 PowerPoint 文件", and html for explicitly
-        requested web/HTML slides. Extract the user's requested delivery format;
-        do not choose one on their behalf. A template filename or mention of
-        PPT/PPTX alone is not an output choice. Leave this field unbound when
-        the output choice is missing so the Host asks the required question.
-      question: 已收到模板，希望输出哪种格式？HTML 会读取并仿照模板样式生成；PPTX 会复用模板版式，可按目标页数增加、删除和修改页面。
+        Required for every new deck, with or without a template. Bind html for an
+        explicit request for interactive, web or HTML slides, including requests to
+        create HTML first and then export PPTX. Bind native_pptx for a request to
+        generate a PPTX or editable PowerPoint file directly, such as "生成12页pptx"
+        or "直接生成原生 PPTX". A template name, file extension, or generic request to
+        make a PPT does not choose a route. If unclear, leave this field unbound so
+        the Host asks in the initial card. Reuse an already confirmed choice.
+      question: 你想先生成可交互的 HTML 幻灯片并按需导出 PPTX，还是直接生成原生 PPTX 文件？
       type: single
       choice_policy: fixed
       allow_other: false
-      choices: [HTML｜参考模板样式生成, PPTX｜复用模板并按需增删页面]
+      choices: [HTML｜交互预览，可导出 PPTX, 原生 PPTX｜直接生成文件]
     - id: visual_style
       label: 风格
       resolution: model

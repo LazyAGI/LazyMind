@@ -71,12 +71,11 @@ steps:
       requests for reading reflections. Unless the user specified a count, budget
       three content pages per paper plus explicitly requested opening/closing
       pages. Explain an inferred count; a confirmed count takes precedence.
-      - Without an uploaded template, set template_mode=none and author HTML.
-      Preserve an explicit request for a downloadable/editable PPTX in the brief;
-      this requires export after HTML authoring. Do not ask an output-format or
-      template-upload question merely because those features exist.
-      - With a supplied template, set template_mode=upload and preserve the
-      confirmed HTML or native_pptx choice. Inspect the original PPTX directly,
+      - Preserve the confirmed presentation_output_format with or without a
+      template. If the user chose HTML and also explicitly requested a PPTX
+      download, record the requirement to export after HTML authoring.
+      - Set template_mode=none when there is no bound template. With a supplied
+      template, set template_mode=upload and inspect the original PPTX directly,
       across every page, including canvas, editable slots, layouts, typography,
       charts, images and sample content. Do not convert it to PDF just to read it.
       HTML recreates the inspected style; native_pptx reuses actual template
@@ -138,7 +137,7 @@ steps:
       style_flow must always be auto.
       generation_mode must be full, and template_mode must be
       exactly none or upload. presentation_output_format must be html or native_pptx;
-      without a template use html, with a template preserve the confirmed choice.
+      preserve the confirmed startup format in both template modes.
       When a template is uploaded, template_content_brief must cover every original
       page, source hash, required evidence and missing inputs before this step passes.
 
@@ -446,7 +445,8 @@ steps:
       1. Shared style: canvas, palette, typography, spacing, graphic language and
       output constraints. Retain user-approved style and template geometry.
       2. Layout: meaningful hierarchy, positions, chart/diagram structure and content
-      areas. HTML uses 1600×900; native PPTX uses the inspected template's dimensions.
+      areas. HTML uses 1600×900. Native PPTX uses the inspected template's dimensions
+      when one is bound and a standard 16:9 canvas otherwise.
       3. Exact visible copy: title, explanations, formulas, labels and source-backed
       data. Use readable Markdown, not internal JSON or duplicate object lists.
       4. Assets: approved evidence images, background binding and intended use. Reuse
@@ -460,9 +460,10 @@ steps:
       than visible citation footers unless the user requested visible references.
 
       Template rules apply to both representations: preserve its visual hierarchy,
-      typography and brand elements; remove unapproved sample claims. For native PPTX,
-      plan editable text/charts/tables and actual source-page mappings. For HTML,
-      recreate the inspected design without pretending the HTML is a native file.
+      typography and brand elements; remove unapproved sample claims. For native PPTX
+      with a template, plan editable text/charts/tables and actual source-page mappings.
+      For native PPTX without a template, plan ordered editable titles, body text and notes.
+      For HTML with a template, recreate the inspected design.
       AI backgrounds, when enabled, align one-to-one with pages and are already
       approved; do not regenerate or change them during prompt planning.
 
@@ -718,13 +719,16 @@ steps:
       merely to work around an export failure.
 
       Native route (presentation_output_format=native_pptx):
-      - Inspect/reuse the uploaded template's actual source pages, editable slots,
-      geometry and effective fonts. Select, repeat or omit source layouts to meet
-      the requested count. Do not assume the template length is the target count.
-      - Preserve unspecified artwork, layout and text styling; remove unapproved
-      sample claims. Keep native text, tables, charts and notes editable, with
-      truthful data and correct fonts. Use the same approved page copy as HTML
-      would use, not an independently shortened deck.
+      - With a template, reuse its actual source pages, editable slots, geometry
+      and fonts. Select, repeat or omit source layouts to meet the requested count.
+      Preserve unspecified artwork, layout and styling, remove unapproved sample
+      claims, and keep native text, tables, charts and notes editable.
+      - Without a template, create native slides from the approved page prompts
+      in order. Use speaker_notes_source when available. Report any requested
+      elements the generator cannot create.
+      - In LazyMind use ppt_fill_template for template-based creation and
+      ppt_generate_native_pptx for direct creation without a template.
+      - Preserve the approved page copy, truthful data and correct fonts.
       - Publish a real non-empty PPTX after validating page count, content and notes.
       Optional HTML previews are not required and cannot replace the file. Do not
       launch HTML generation after a successful native delivery.

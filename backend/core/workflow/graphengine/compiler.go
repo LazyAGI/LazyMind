@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 
@@ -336,6 +337,24 @@ func Compile(workflowYAML, stateYAML, scenario string, profile Profile) CompileR
 					"E_RUNTIME_POST_CHECK_MATERIAL_NOT_PRODUCED", "error", path+".arguments."+argument,
 					check.StepID, material,
 					"runtime post-step check may only consume an artifact produced by its step",
+				))
+			}
+		}
+		stepInputs := expressionMaterials(node.Input)
+		for _, input := range node.OptionalInputs {
+			stepInputs = append(stepInputs, input.Material)
+		}
+		for argument, material := range check.InputArguments {
+			_, duplicate := check.Arguments[argument]
+			if strings.TrimSpace(argument) == "" || strings.TrimSpace(material) == "" || duplicate || argument == check.ArtifactsArgument {
+				result.Diagnostics = append(result.Diagnostics, diag(
+					"E_RUNTIME_POST_CHECK_ARGUMENT_INVALID", "error", path+".input_arguments",
+					"input_arguments require distinct non-empty parameter names",
+				))
+			} else if stepExists && !slices.Contains(stepInputs, material) {
+				result.Diagnostics = append(result.Diagnostics, materialNodeDiag(
+					"E_RUNTIME_POST_CHECK_MATERIAL_NOT_BOUND", "error", path+".input_arguments."+argument,
+					check.StepID, material, "runtime post-step check input must be declared by its step",
 				))
 			}
 		}

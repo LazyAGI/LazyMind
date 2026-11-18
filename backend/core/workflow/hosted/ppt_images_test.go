@@ -256,6 +256,30 @@ func TestExternalPPTPreviewUsesPinnedForegroundAndPerPageBackground(t *testing.T
 	pptMust(t, complete())
 }
 
+func TestExternalNativePPTCompletesWithPublishedFile(t *testing.T) {
+	s, db := pptHostedFixture(t, "generate_ppt")
+	bindPPTFixture(t, db, "native-format", "presentation_output_format", nil, pptJSON(t, "native_pptx"))
+	grant, err := s.Begin(t.Context(), "owner", "session-1", "attempt-1")
+	pptMust(t, err)
+	complete := func() error {
+		_, err := s.Complete(t.Context(), "owner", "session-1", "attempt-1", executor.Completion{
+			ExecutionHandle: grant.ExecutionHandle, Outcome: "succeeded",
+		})
+		return err
+	}
+	if err := complete(); err == nil || !strings.Contains(err.Error(), "native_pptx has no published PPTX") {
+		t.Fatalf("completion without a PPTX returned %v", err)
+	}
+	pptMust(t, s.Publish(t.Context(), "owner", "session-1", "attempt-1", Publication{
+		ExecutionHandle: grant.ExecutionHandle,
+		Artifact: executor.Artifact{Slot: "native_pptx", Seq: 1, ContentType: "file", Value: pptJSON(t, map[string]any{
+			"storage": "inline_base64", "name": "deck.pptx",
+			"content_base64": base64.StdEncoding.EncodeToString([]byte("presentation fixture")),
+		})},
+	}))
+	pptMust(t, complete())
+}
+
 func TestExternalPPTPlanCannotSilentlyDropSelectedPhoto(t *testing.T) {
 	s, db := pptHostedFixture(t, "plan_page_prompts")
 	bindPPTFixture(t, db, "html-format", "presentation_output_format", nil, pptJSON(t, "html"))

@@ -64,7 +64,7 @@ from lazyllm.tools.agent import ToolExecutionError
 
 from lazymind.chat.engine.agent_runtime.cancellation import make_cancel_stop_condition
 from lazymind.chat.engine.agent_runtime.message_fields import strip_leading_reasoning
-from lazymind.chat.engine.subagent.context import require_context
+from lazymind.chat.engine.subagent.context import get_context, require_context
 from lazymind.document_tools.artifacts import _markdown_heading_rows, normalize_generated_markdown
 from lazymind.chat.engine.subagent.tools import (
     _resolve_artifact_text,
@@ -1708,7 +1708,11 @@ def _workflow_session_id() -> str:
 
 
 def _required_output_format() -> str:
-    """Resolve the route from durable selected artifacts, never model arguments."""
+    """Use the attempt's bound route, or the durable choice outside an attempt."""
+    ctx = get_context()
+    inputs = (ctx.params.get('remote_inputs') or {}) if ctx else {}
+    if 'presentation_output_format' in inputs:
+        return _validate_output_format(_artifact_text(inputs['presentation_output_format']))
     session = _workflow_session_id()
     if not session:
         return 'html'  # Standalone legacy HTML tools have no template contract.
@@ -1729,19 +1733,23 @@ def _required_output_format() -> str:
     if not formats:
         raise ToolExecutionError('PPT_OUTPUT_CONTRACT_UNAVAILABLE: missing presentation_output_format; '
                                  'resume analyze_requirements')
-    output = _artifact_text(max(formats, key=lambda item: int(item.get('revision') or 0)).get('value'))
-    if output not in ('html', 'native_pptx') or (mode == 'none' and output != 'html'):
-        raise ToolExecutionError('PPT_OUTPUT_CONTRACT_INVALID: invalid presentation_output_format for template mode')
-    return output
+    latest_format = max(formats, key=lambda item: int(item.get('revision') or 0))
+    return _validate_output_format(_artifact_text(latest_format.get('value')))
 
 
-def check_ppt_delivery(artifacts: list[dict]) -> dict[str, Any]:
+def _validate_output_format(output_format: str) -> str:
+    if output_format not in ('html', 'native_pptx'):
+        raise ToolExecutionError('PPT_OUTPUT_CONTRACT_INVALID: presentation_output_format must be html or native_pptx')
+    return output_format
+
+
+def check_ppt_delivery(artifacts: list[dict], output_format: str | None = None) -> dict[str, Any]:
     """Require a published presentation from this attempt in the selected format.
 
     This deterministic post-step check also covers partial edits: it requires an
     updated presentation, not regeneration of every page or optional notes.
     """
-    output_format = _required_output_format()
+    output_format = _required_output_format() if output_format is None else _validate_output_format(output_format)
     slot = 'native_pptx' if output_format == 'native_pptx' else 'preview_html'
     for artifact in artifacts:
         if artifact.get('slot') != slot:

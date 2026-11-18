@@ -25,11 +25,11 @@ Follow the actual declared transitions and skip markers. Self-contained requests
 may skip collection. Uploaded templates disable AI backgrounds, while evidence
 figures and screenshots remain allowed. Host approval mode controls review pauses.
 
-Without a template, author HTML by default. With a template, retain the confirmed
-HTML/native PPTX choice: recreate its inspected style in HTML or compose editable
-native pages from its actual layouts. An explicit request for a downloadable PPTX
-also requires a real file when using HTML authoring. Native delivery completes
-without an extra HTML pass or parent-chat visual-review task.
+Confirm the choice of interactive HTML with PPTX export or direct native PPTX at
+startup whenever the user has not specified a route. With a template, recreate
+its inspected style in HTML or compose editable native pages from its actual
+layouts. An explicit request to export the HTML deck also requires a real PPTX
+file. Native delivery completes once the file has been published.
 
 For follow-up edits, use workflow.yaml's completed actions and edit policy. Local
 edits preserve unaffected pages and current item identities. Regeneration requires
