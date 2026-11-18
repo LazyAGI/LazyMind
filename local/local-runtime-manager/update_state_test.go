@@ -21,7 +21,7 @@ type updateStateFixture struct {
 	databases map[string]*sql.DB
 }
 
-func newUpdateStateFixture(t *testing.T) *updateStateFixture {
+func newUpdateStateFixtureLayout(t *testing.T) *updateStateFixture {
 	t.Helper()
 	t.Setenv(ragEnabledEnvVar, "false")
 	t.Setenv(localSQLiteDirEnvVar, "")
@@ -43,7 +43,13 @@ func newUpdateStateFixture(t *testing.T) *updateStateFixture {
 	if err := writeRuntimeState(paths.StateFile, state); err != nil {
 		t.Fatal(err)
 	}
-	f := &updateStateFixture{cfg: cfg, paths: paths, databases: map[string]*sql.DB{}}
+	return &updateStateFixture{cfg: cfg, paths: paths, databases: map[string]*sql.DB{}}
+}
+
+func newUpdateStateFixture(t *testing.T) *updateStateFixture {
+	t.Helper()
+	f := newUpdateStateFixtureLayout(t)
+	paths := f.paths
 	for name, file := range map[string]string{"core": paths.CoreDBPath, "auth": paths.AuthServiceDBPath, "lazyllm": paths.LazyLLMDBPath, "segments": localSegmentStoreBackingPath(paths),
 		"channel": paths.ChannelGatewayDBPath, "scan": paths.ScanDBPath, "core-state": filepath.Join(paths.CoreStateDir, "core_state.db"),
 		"auth-state": filepath.Join(paths.AuthServiceStateDir, "auth_state.db"), "scan-state": filepath.Join(paths.ScanControlPlaneStateDir, "scan_state.db")} {

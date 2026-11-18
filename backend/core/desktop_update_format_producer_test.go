@@ -3,44 +3,41 @@ package main
 import (
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
 	"testing"
+	"time"
 
-	"github.com/glebarez/sqlite"
-	"gorm.io/gorm"
-	"lazymind/core/episode"
-	"lazymind/core/migrate"
+	"lazymind/core/internal/updateformattest"
 	"lazymind/core/state"
 )
 
 func TestDesktopUpdateCoreFormatFixtureMatchesSchemaOwner(t *testing.T) {
 	root := t.TempDir()
 	filename := filepath.Join(root, "core.db")
-	runner, err := migrate.NewRunner("sqlite", filename, "migrations")
-	if err != nil {
+	started := time.Now()
+	if err := updateformattest.CreateCoreDatabase(filename); err != nil {
 		t.Fatal(err)
 	}
-	if err := runner.Up(0); err != nil {
-		t.Fatal(err)
+	t.Logf("generated Core SQLite fixture in %s", time.Since(started).Round(time.Millisecond))
+	if err := verifyBootstrapDatabase(t.Context(), filename, expectedCoreFormatSHA, true, false); err != nil {
+		t.Fatalf("Core schema or migration history does not match the pinned format: %v", err)
 	}
-	if err := runner.Close(); err != nil {
-		t.Fatal(err)
-	}
-	db, err := gorm.Open(sqlite.Open(filename), &gorm.Config{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	raw, err := db.DB()
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer raw.Close()
-	if err := episode.Initialize(db); err != nil {
-		t.Fatal(err)
-	}
-	checkCoreFormatProducer(t, raw, "core")
+	t.Run("rejects schema drift", func(t *testing.T) {
+		db, err := sql.Open("sqlite", filename)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, err = db.Exec("CREATE TABLE unexpected_core_fixture_table (id INTEGER)")
+		if err := errors.Join(err, db.Close()); err != nil {
+			t.Fatal(err)
+		}
+		if err := verifyBootstrapDatabase(t.Context(), filename, expectedCoreFormatSHA, true, false); err == nil {
+			t.Fatal("accepted Core schema drift against the pinned format")
+		}
+	})
 	kvPath := filepath.Join(root, "core-state.db")
 	kv, err := state.NewSQLiteStore(kvPath)
 	if err != nil {
@@ -54,24 +51,18 @@ func TestDesktopUpdateCoreFormatFixtureMatchesSchemaOwner(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer kvDB.Close()
-	checkCoreFormatProducer(t, kvDB, "core-state")
+	checkCoreStateFormatProducer(t, kvDB)
 }
 
-func checkCoreFormatProducer(t *testing.T, db *sql.DB, family string) {
+func checkCoreStateFormatProducer(t *testing.T, db *sql.DB) {
 	t.Helper()
 	type object struct{ Type, Name, Table, SQL string }
-	type migration struct {
-		Version uint64
-		Name    string
-	}
 	var fixture struct {
 		Shape struct {
-			Schema      []object
-			CoreVersion uint64
-			CoreHistory []migration
+			Schema []object
 		}
 	}
-	file := filepath.Join("..", "..", "local", "local-runtime-manager", "testdata", "update-format", family+".json")
+	file := filepath.Join("..", "..", "local", "local-runtime-manager", "testdata", "update-format", "core-state.json")
 	data, err := os.ReadFile(file)
 	if err != nil || json.Unmarshal(data, &fixture) != nil {
 		t.Fatalf("read update format fixture: %v", err)
@@ -92,28 +83,6 @@ func checkCoreFormatProducer(t *testing.T, db *sql.DB, family string) {
 		t.Fatal(err)
 	}
 	if !reflect.DeepEqual(actual, fixture.Shape.Schema) {
-		t.Fatalf("%s producer drift: actual=%d objects fixture=%d; review the format recipe rather than silently accepting a new schema", family, len(actual), len(fixture.Shape.Schema))
-	}
-	if family == "core" {
-		var version uint64
-		if err := db.QueryRow("SELECT version FROM schema_migrations").Scan(&version); err != nil || version != fixture.Shape.CoreVersion {
-			t.Fatalf("core migration version drift: %d %v", version, err)
-		}
-		historyRows, err := db.Query("SELECT version,name FROM schema_migration_history ORDER BY version")
-		if err != nil {
-			t.Fatal(err)
-		}
-		defer historyRows.Close()
-		var history []migration
-		for historyRows.Next() {
-			var entry migration
-			if err := historyRows.Scan(&entry.Version, &entry.Name); err != nil {
-				t.Fatal(err)
-			}
-			history = append(history, entry)
-		}
-		if !reflect.DeepEqual(history, fixture.Shape.CoreHistory) {
-			t.Fatal("core migration history fixture no longer matches its actual owner")
-		}
+		t.Fatalf("core-state producer drift: actual=%d objects fixture=%d; review the format recipe rather than silently accepting a new schema", len(actual), len(fixture.Shape.Schema))
 	}
 }

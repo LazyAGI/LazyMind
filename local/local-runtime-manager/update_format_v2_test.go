@@ -10,29 +10,68 @@ import (
 	"runtime"
 	"sort"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 )
+
+var (
+	coreFixtureOnce  sync.Once
+	coreFixtureBytes []byte
+	coreFixtureErr   error
+	// Preserve the caller's Go cache settings before TestMain isolates HOME.
+	coreFixtureBuildEnv = append(os.Environ(), "GOWORK=off", "GOOS="+runtime.GOOS, "GOARCH="+runtime.GOARCH)
+)
+
+func generateCoreFormatFixture(t *testing.T) ([]byte, error) {
+	t.Helper()
+	dir, err := os.MkdirTemp("", "lazymind-core-update-fixture-*")
+	if err != nil {
+		return nil, err
+	}
+	defer os.RemoveAll(dir)
+	coreDir := filepath.Join("..", "..", "backend", "core")
+	binary := executablePath(dir, "update-format-producer")
+	build := exec.Command(executablePath(filepath.Join(runtime.GOROOT(), "bin"), "go"),
+		"build", "-mod=readonly", "-o", binary, "./testdata/update-format-producer")
+	build.Dir = coreDir
+	build.Env = coreFixtureBuildEnv
+	started := time.Now()
+	if output, err := build.CombinedOutput(); err != nil {
+		t.Logf("build Core SQLite fixture producer: %s", output)
+		return nil, err
+	}
+	buildTime := time.Since(started)
+
+	filename := filepath.Join(dir, "core.db")
+	generate := exec.Command(binary, filename)
+	generate.Dir = coreDir
+	started = time.Now()
+	if output, err := generate.CombinedOutput(); err != nil {
+		t.Logf("generate Core SQLite fixture: %s", output)
+		return nil, err
+	}
+	t.Logf("Core SQLite fixture: build %s, generate %s", buildTime.Round(time.Millisecond), time.Since(started).Round(time.Millisecond))
+	return os.ReadFile(filename)
+}
 
 func actualUpdateFormatFixture(t *testing.T, version int) *updateStateFixture {
 	t.Helper()
-	f := newUpdateStateFixture(t)
-	for family, db := range f.databases {
-		if err := db.Close(); err != nil {
+	f := newUpdateStateFixtureLayout(t)
+	coreFixtureOnce.Do(func() {
+		coreFixtureBytes, coreFixtureErr = generateCoreFormatFixture(t)
+	})
+	if coreFixtureErr != nil {
+		t.Fatalf("prepare Core SQLite fixture: %v", coreFixtureErr)
+	}
+	for family, filename := range f.cfg.UpdateStorage.Databases {
+		if err := os.MkdirAll(filepath.Dir(filename), 0700); err != nil {
 			t.Fatal(err)
 		}
-		filename := f.cfg.UpdateStorage.Databases[family]
-		for _, suffix := range []string{"", "-wal", "-shm"} {
-			if err := os.Remove(filename + suffix); err != nil && !os.IsNotExist(err) {
+		if family == "core" {
+			if err := os.WriteFile(filename, coreFixtureBytes, 0600); err != nil {
 				t.Fatal(err)
 			}
-		}
-		var captured struct {
-			Producer string
-			Shape    updateDatabaseShape
-		}
-		raw, err := os.ReadFile(filepath.Join("testdata", "update-format", family+".json"))
-		if err != nil || json.Unmarshal(raw, &captured) != nil || captured.Producer == "" {
-			t.Fatalf("read actual %s producer fixture: %v", family, err)
 		}
 		database, err := sql.Open("sqlite", filename)
 		if err != nil {
@@ -42,6 +81,18 @@ func actualUpdateFormatFixture(t *testing.T, version int) *updateStateFixture {
 		database.SetMaxOpenConns(1)
 		if err := database.Ping(); err != nil {
 			t.Fatal(err)
+		}
+		f.databases[family] = database
+		if family == "core" {
+			continue
+		}
+		var captured struct {
+			Producer string
+			Shape    updateDatabaseShape
+		}
+		raw, err := os.ReadFile(filepath.Join("testdata", "update-format", family+".json"))
+		if err != nil || json.Unmarshal(raw, &captured) != nil || captured.Producer == "" {
+			t.Fatalf("read actual %s producer fixture: %v", family, err)
 		}
 		transaction, err := database.Begin()
 		if err != nil {
@@ -69,20 +120,9 @@ func actualUpdateFormatFixture(t *testing.T, version int) *updateStateFixture {
 				t.Fatalf("restore %s object %s: %v", family, entry.Name, err)
 			}
 		}
-		if family == "core" {
-			if _, err := transaction.Exec("INSERT INTO schema_migrations(version,dirty) VALUES (?,0)", captured.Shape.CoreVersion); err != nil {
-				t.Fatal(err)
-			}
-			for _, entry := range captured.Shape.CoreHistory {
-				if _, err := transaction.Exec("INSERT INTO schema_migration_history(version,name) VALUES (?,?)", entry.Version, entry.Name); err != nil {
-					t.Fatal(err)
-				}
-			}
-		}
 		if err := transaction.Commit(); err != nil {
 			t.Fatal(err)
 		}
-		f.databases[family] = database
 	}
 	st, err := readRuntimeState(f.paths.StateFile)
 	if err != nil {
@@ -197,7 +237,7 @@ func TestUpdateFormatV2RowsAndLegalOptionalAbsenceDoNotChangeFormat(t *testing.T
 }
 
 func TestUpdateFormatV2RejectsUnknownStructureAndBrokenDynamicObjects(t *testing.T) {
-	for _, scenario := range []string{"extra-fixed-column", "extra-table", "broken-group", "orphan-fts", "dirty", "history-name"} {
+	for _, scenario := range []string{"extra-fixed-column", "extra-table", "core-extra-table", "broken-group", "orphan-fts", "dirty", "history-name"} {
 		t.Run(scenario, func(t *testing.T) {
 			f := actualUpdateFormatFixture(t, 2)
 			_ = f.measure(t)
@@ -208,6 +248,8 @@ func TestUpdateFormatV2RejectsUnknownStructureAndBrokenDynamicObjects(t *testing
 				db, statement = f.databases["core-state"], "ALTER TABLE state_kv ADD COLUMN unexpected TEXT"
 			case "extra-table":
 				db, statement = f.databases["auth"], "CREATE TABLE unexpected_table(id TEXT)"
+			case "core-extra-table":
+				db, statement = f.databases["core"], "CREATE TABLE unexpected_table(id TEXT)"
 			case "broken-group":
 				mutateActualSegmentStore(t, f, "write:col_finechunk")
 				db, statement = f.databases["segments"], "ALTER TABLE col_finechunk ADD COLUMN unexpected TEXT"

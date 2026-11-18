@@ -293,6 +293,7 @@ jobs:
         with:
           go-version: '1.25.11'
           cache-dependency-path: |
+            backend/core/go.sum
             local/local-proxy/go.sum
             local/local-runtime-manager/go.sum
             local/lazymind-cli/go.sum
@@ -311,7 +312,7 @@ jobs:
         run: go test ./... -v
       - name: Test Local Runtime Manager
         working-directory: local/local-runtime-manager
-        run: go test ./... -v
+        run: go test ./... -count=1 -v
       - name: Test LazyMind Agent Connector
         if: runner.os != 'Windows'
         working-directory: local/lazymind-cli
