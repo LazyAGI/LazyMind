@@ -414,7 +414,7 @@ export default function PaperGuideReader({
                               ? "论文陈述 · 导读转述"
                               : "Paper statement · guide paraphrase"}
                   </strong>}
-                  {flash && section.role === "glossary" && block.kind === "paragraph" ? (
+                  {block.kind === "figure" && renderAsset ? null : flash && section.role === "glossary" && block.kind === "paragraph" ? (
                     <GuideGlossaryEntry text={block.text} id={block.id}/>
                   ) : block.kind === "formula" ? (
                     <div data-guide-text={block.id}><PaperGuideText text={block.text} displayMath /></div>

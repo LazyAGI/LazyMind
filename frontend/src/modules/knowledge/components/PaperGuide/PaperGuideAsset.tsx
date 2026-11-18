@@ -16,8 +16,10 @@ export default function PaperGuideAsset({
   onEvidence,
   onOpenPage,
   compactCaption = false,
+  captionText,
 }: {
   compactCaption?: boolean;
+  captionText?: string;
   evidence?: PaperGuideEvidence;
   originalDisplay?: PaperGuideOriginalDisplay | null;
   unavailable?: boolean;
@@ -65,7 +67,7 @@ export default function PaperGuideAsset({
   const pageLabel = loaded?.mode === "page" ? (zh ? "原文页" : "Source page") : regionLabel;
   const label = table ? (zh ? "表格起始页" : "Table start page") : loaded ? pageLabel : (zh ? "原文" : "Source");
   const pageText = zh ? `PDF 第 ${page ?? "—"} 页` : `PDF page ${page ?? "—"}`;
-  const alt = originalDisplay?.caption || (table ? evidence?.text : "") || `${label} · ${pageText}`;
+  const alt = captionText || originalDisplay?.caption || (table ? evidence?.text : "") || `${label} · ${pageText}`;
   const enlargeLabel = table || (!formula && loaded?.mode !== "page")
     ? (zh ? "放大论文原图" : "Enlarge original figure")
     : loaded?.mode === "page"
@@ -105,11 +107,12 @@ export default function PaperGuideAsset({
       </div>
       {compactCaption ? <figcaption>
         <PaperGuideText mapSource={false} text={(() => {
-          const caption = originalDisplay?.caption?.trim() || "";
-          const match = caption.match(/^(?:Figure|Fig\.?|图)\s*([A-Za-z]?\d+[A-Za-z]?)\s*[:：.．]?\s*/i);
-          const number = originalDisplay?.number || match?.[1];
-          const title = match ? caption.slice(match[0].length) : caption;
-          return `${zh ? "原图" : "Original figure"}${number ? ` ${number}` : ""}${title ? `：${title}` : ""}`;
+          const source = originalDisplay?.caption?.trim() || "";
+          const prefix = /^(?:论文图|Figure|Fig\.?|图)\s*([A-Za-z]?\d+(?:\.\d+)*[A-Za-z]?)\s*[:：.．]?\s*/i;
+          const number = originalDisplay?.number || (source || evidence?.text || "").match(prefix)?.[1];
+          const title = (captionText?.trim() || source).replace(prefix, "");
+          const label = zh ? `论文图${number || ""}` : `Figure${number ? ` ${number}` : ""}`;
+          return title ? label + (zh ? "：" : ": ") + title : label;
         })()} />
       </figcaption> : <>
       <figcaption>

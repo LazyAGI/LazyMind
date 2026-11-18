@@ -401,6 +401,7 @@ export default function PaperReadingWorkspace(p: Props) {
       <GuideInlineAsset
         key={`${guide.revision?.id}/${block.id}`}
         compactCaption={guide.revision?.plan?.layout === "flashpapers"}
+        captionText={block.kind === "figure" ? block.text : undefined}
         id={block.asset_id}
         revision={guide.revision!.id}
         target={target}
@@ -697,7 +698,9 @@ function GuideInlineAsset({
   onEvidence,
   onOpenPage,
   compactCaption,
+  captionText,
 }: {
+  captionText?: string;
   compactCaption?: boolean;
   id?: string;
   revision: string;
@@ -736,7 +739,7 @@ function GuideInlineAsset({
     return () => abort.abort();
   }, [id, revision, target, current]);
   return (
-    <PaperGuideAsset compactCaption={compactCaption}
+    <PaperGuideAsset compactCaption={compactCaption} captionText={captionText}
       evidence={value?.evidence}
       originalDisplay={value?.original_display}
       onEvidence={onEvidence}

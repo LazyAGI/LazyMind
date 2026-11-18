@@ -4,7 +4,7 @@ Open a PDF in the paper reading workspace and switch between **Guide / Original*
 
 ## Fast generation
 
-The `paper-guide-v24` production pipeline has four steps:
+The `paper-guide-v27` pipeline has four steps:
 
 1. **Read the paper.** Use its existing parsed PDF snapshot. For large-context models, allow up to 128 KB of source text so typical full papers and primary result tables remain available; smaller models retain their context-based limit. Include full evidence paragraphs when they fit; otherwise retain whole paragraphs spread across the paper within the model input budget. Page markers and compact source references accompany the text. There is no model extraction call.
 2. **Plan chapters and their contents.** One `paper.explainer.plan` call returns the directory, learning objectives, outlines, source references and designs for paper-specific visual interactions. Every chapter receives the same plan so chapters can be written independently.
@@ -44,7 +44,7 @@ Routes are relative to `/api/core/datasets/{dataset}/documents/{document}` and u
 | `PUT /paper-guide/progress` | Saves revision, section key, block, Unicode offset and reading mode. |
 | `POST /paper-guide/revisions/{revision}:selection-context` | Resolves a selected passage against stored text and source references. |
 
-Fast chapter blocks use `paragraph`, `heading`, `formula` or `playground`. A playground carries `playground.html` and static explanatory `text`; its references use the same source-preview path as ordinary prose. Internal task names, planner data and generated code are not exposed as reading-flow instructions.
+Fast chapter blocks use `paragraph`, `heading`, `formula`, `figure` or `playground`. A figure block stores the translated source caption in `text`. The reader takes the figure number from the original and displays Chinese captions as **论文图4：图注译文**. A playground carries `playground.html` and static explanatory `text`; its references use the same source-preview path as ordinary prose. Internal task names, planner data and generated code are not exposed as reading-flow instructions.
 
 ### v26：解释问题与领域背景
 

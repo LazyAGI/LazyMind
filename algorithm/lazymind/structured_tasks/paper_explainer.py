@@ -5,7 +5,7 @@ from typing import Annotated, Literal
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
 
 
-EXPLAINER_VERSION = 'paper-guide-v26'
+EXPLAINER_VERSION = 'paper-guide-v27'
 BACKBONE = ('overview', 'why-it-matters', 'big-idea', 'results', 'limitations', 'glossary')
 Slug = Annotated[str, StringConstraints(pattern=r'^[a-z][a-z0-9-]{0,63}$')]
 Title = Annotated[str, StringConstraints(min_length=1, max_length=200)]
@@ -271,9 +271,12 @@ Use paragraph blocks for short prose or Unicode bullets; heading blocks for shor
 subheadings; formula blocks for standalone LaTeX (without fences or $$); playground blocks for
 purpose-built visual explanations. Inline math uses $...$. Use real paragraph breaks, not literal \\n.
 Insert the original figures assigned in the chapter's figure_ids near the corresponding explanation.
-Use a figure block with figure_id equal to an ID from the figures catalog, html="", and text explaining
-what the reader should notice based on the caption and paper. The host inserts the actual PDF crop
-and original caption; never generate an image URL, coordinates, a Markdown image, or put the original
+Use a figure block with the matching figure_id and html="". Its text is the original caption in the
+guide language: faithfully translate the complete catalog caption into Simplified Chinese for zh
+or English for en. If already in that language, keep the wording. Omit only the leading figure
+label and number; the reader supplies them. Preserve panel labels, quantities, units, and math.
+Do not summarize, add commentary, or infer missing details. Put teaching explanations in separate
+paragraphs. Never generate an image URL, coordinates, a Markdown image, or put the original
 inside playground HTML. You have captions, not image pixels: do not invent visual details such as
 colors or positions not described in the source. Do not force unrelated figures into the chapter.
 Normal blocks have html="". evidence_ids cite source IDs when useful; use [] for teaching-only text.

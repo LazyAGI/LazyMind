@@ -279,7 +279,7 @@ func publicChapter(c ExplainerChapter, aliases map[string]string) GuideSection {
 	for i, b := range c.Blocks {
 		block := GuideBlock{ID: fmt.Sprintf("%s-b%d", c.ID, i+1), Kind: b.Kind, Text: b.Text, Attribution: AttributionTeaching, ClaimIDs: []string{}, EvidenceIDs: canonicalReferences(b.EvidenceIDs, aliases)}
 		if b.Kind == "figure" {
-			block.Kind = "paragraph"
+			block.Attribution = AttributionPaper
 			block.AssetID = aliases[b.FigureID]
 			block.EvidenceIDs = unique(append(block.EvidenceIDs, block.AssetID))
 		}
@@ -399,7 +399,7 @@ func (x *execution) explainerInput() (map[string]any, map[string]string, error) 
 			}
 		}
 		alias := fmt.Sprintf("f%d", len(figures))
-		figures = append(figures, ExplainerFigure{ID: alias, Page: display.Page + 1, Caption: truncateUTF8(caption, 2000), Section: section})
+		figures = append(figures, ExplainerFigure{ID: alias, Page: display.Page + 1, Caption: caption, Section: section})
 		aliases[alias] = asset.ID
 	}
 	input := map[string]any{"language": x.scope.Language, "paper_title": title, "source_text": text.String(), "figures": figures}

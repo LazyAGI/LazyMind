@@ -331,7 +331,7 @@ func TestExplainerFigureCatalogAndPublication(t *testing.T) {
 		t.Fatal(err)
 	}
 	s := publicChapter(chapter, aliases)
-	if s.Blocks[0].AssetID != "ev-figure" || s.Blocks[0].Kind != "paragraph" {
+	if s.Blocks[0].AssetID != "ev-figure" || s.Blocks[0].Kind != "figure" || s.Blocks[0].Text != chapter.Blocks[0].Text {
 		t.Fatalf("lost image: %+v", s)
 	}
 	chapter.Blocks[0].FigureID = "f999"

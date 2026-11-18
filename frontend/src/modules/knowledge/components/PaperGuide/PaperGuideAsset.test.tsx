@@ -93,7 +93,7 @@ it("keeps the formula crop and physical page action without labeling an unverifi
 });
 
 it("shows only the numbered caption for an explainer original figure", async () => {
-  const view = render(<PaperGuideAsset compactCaption language="zh" evidence={{ id: "figure", source_type: "image", source_block_id: "image", text: "Figure 1", locator: {kind: "page", page: 0} }} originalDisplay={{kind:"figure",page:0,caption:"Figure 1: Our reparametrization."}} preview={async()=>({url:"blob:figure",width:100,height:100,mode:"region"})} onOpenPage={vi.fn()} />);
-  expect(view.container.querySelector('figcaption')).toHaveTextContent('原图 1：Our reparametrization.');
+  const view = render(<PaperGuideAsset compactCaption captionText="低秩重参数化。" language="zh" evidence={{ id: "figure", source_type: "image", source_block_id: "image", text: "Figure 1", locator: {kind: "page", page: 0} }} originalDisplay={{kind:"figure",page:0,caption:"Figure 4: Our reparametrization."}} preview={async()=>({url:"blob:figure",width:100,height:100,mode:"region"})} onOpenPage={vi.fn()} />);
+  expect(view.container.querySelector('figcaption')).toHaveTextContent('论文图4：低秩重参数化。');
   expect(screen.queryByRole('button',{name:/打开 PDF/})).toBeNull();
 });

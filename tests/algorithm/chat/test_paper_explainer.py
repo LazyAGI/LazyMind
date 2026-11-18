@@ -27,7 +27,7 @@ def execute(monkeypatch, task, data, output):
         return json.dumps(output)
     monkeypatch.setattr(llm_task, 'AutoModel', lambda **kwargs: model)
     result = llm_task.run_llm_task(llm_task.LLMTaskRequest(
-        task_type='paper.explainer.' + task, options={'task_version': 'paper-guide-v26'}, input={'data': data}))
+        task_type='paper.explainer.' + task, options={'task_version': 'paper-guide-v27'}, input={'data': data}))
     return result, calls
 
 
@@ -76,12 +76,13 @@ def test_unplanned_chapter_does_not_call_model(monkeypatch):
 
 
 def test_original_figure_reference_survives_single_chapter_call(monkeypatch):
-    data = dict(DATA, figures=[{'id': 'f0', 'page': 1, 'caption': 'Figure 1: LoRA paths', 'section': 'Introduction'}], plan=PLAN, chapter_id='big-idea')
+    data = dict(DATA, language='zh', figures=[{'id': 'f0', 'page': 1, 'caption': 'Figure 1: LoRA paths', 'section': 'Introduction'}], plan=PLAN, chapter_id='big-idea')
     chapter = {'id': 'big-idea', 'title': 'The Big Idea', 'blocks': [
-        {'kind': 'figure', 'text': 'The original diagram shows the low-rank branch.', 'figure_id': 'f0'}]}
+        {'kind': 'figure', 'text': 'LoRA 路径。', 'figure_id': 'f0'}]}
     result, calls = execute(monkeypatch, 'chapter', data, chapter)
     assert result.status == 'succeeded', result.error_code
     assert result.output['blocks'][0]['figure_id'] == 'f0'
+    assert result.output['blocks'][0]['text'] == 'LoRA 路径。'
     assert len(calls) == 1
     chapter['blocks'][0]['figure_id'] = 'f99'
     result, calls = execute(monkeypatch, 'chapter', data, chapter)
