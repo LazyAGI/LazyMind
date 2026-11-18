@@ -4005,6 +4005,7 @@ const enUS = {
     conversationFailed: "Task failed",
     conversationCanceled: "Task stopped",
     conversationStatusUnavailable: "Status temporarily unavailable",
+    conversationStatusChecking: "Checking status",
     conversationGroupRecent: "Recent",
     conversationMainLabel: "Main conversation",
     conversationChildSourceLabel: "Source",

@@ -3946,6 +3946,7 @@ const zhCN = {
     conversationFailed: "任务失败",
     conversationCanceled: "任务已停止",
     conversationStatusUnavailable: "状态暂时无法更新",
+    conversationStatusChecking: "状态确认中",
     conversationGroupRecent: "最近",
     conversationMainLabel: "主对话",
     conversationChildSourceLabel: "来源",
