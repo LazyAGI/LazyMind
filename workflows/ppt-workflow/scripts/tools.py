@@ -1148,7 +1148,7 @@ def _deliver_native_pptx(output: Path, root: Path, tool_name: str) -> dict[str, 
             ).strip()
             if response.startswith('```'):
                 response = response.split('\n', 1)[1].rsplit('```', 1)[0].strip()
-            candidate = root / f'refined-{uuid.uuid4().hex}.pptx'
+            candidate = root / f'refined-{uuid.uuid4().hex[:16]}.pptx'
             stats = apply_layout_repairs(working_output, candidate, json.loads(response),
                                          source_sha256=source_sha256, allowed_pages=problem_pages,
                                          allowed_shapes=problem_shapes)
@@ -1254,9 +1254,9 @@ def ppt_fill_template(template_file: str, source_sha256: str, edits: list[dict] 
         )
     payload = json.dumps([source_sha256, edits, pages, image_assets], ensure_ascii=False, sort_keys=True)
     digest = hashlib.sha256(payload.encode()).hexdigest()
-    root = _conversation_root() / 'native_pptx' / f'fill-v3-{digest}'
+    root = _conversation_root() / 'native_pptx' / f'f3-{digest[:24]}'
     output = root / 'presentation.pptx'
-    temporary = root / f'{uuid.uuid4().hex}.pptx'
+    temporary = root / f'{uuid.uuid4().hex[:16]}.pptx'
     try:
         # Validate every request, including retries; publication can safely reuse
         # deterministic content without modifying the original or another version.
@@ -1300,11 +1300,11 @@ def ppt_generate_native_pptx(slides: list[dict], template_file: str = '', notes_
     digest.update(font_family.encode())
     if template:
         digest.update(template.read_bytes())
-    root = _conversation_root() / 'native_pptx' / digest.hexdigest()
+    root = _conversation_root() / 'native_pptx' / digest.hexdigest()[:24]
     output = root / 'presentation.pptx'
     reused = output.is_file()
     if not reused:
-        temporary = root / f'{uuid.uuid4().hex}.pptx'
+        temporary = root / f'{uuid.uuid4().hex[:16]}.pptx'
         try:
             stats = build_native_pptx(slides, temporary, template, font_family=font_family)
             os.replace(temporary, output)
@@ -1800,25 +1800,28 @@ def _validate_prompt_output_format(output_format: str, page_prompts) -> str:
     return required
 
 
-def _workflow_deck_pointer() -> Path | None:
+def _workflow_deck_pointer(*, legacy: bool = False) -> Path | None:
     session = _workflow_session_id()
     if not session:
         return None
-    key = hashlib.sha256(session.encode()).hexdigest()
+    digest = hashlib.sha256(session.encode()).hexdigest()
+    key = digest if legacy else digest[:32]
     return _conversation_root() / '.workflow_decks' / f'{key}.json'
 
 
 def _bound_workflow_deck() -> Path | None:
     pointer = _workflow_deck_pointer()
-    if pointer is None or not pointer.is_file():
+    if pointer is None:
         return None
-    try:
-        candidate = _resolve_deck_dir(json.loads(pointer.read_text(encoding='utf-8'))['deck_dir'])
-        candidate.relative_to((_conversation_root() / 'ppt_decks').resolve())
-        if (candidate / 'task_pack.json').is_file():
+    for legacy in (False, True):
+        if legacy:
+            pointer = _workflow_deck_pointer(legacy=True)
+        try:
+            candidate = _resolve_deck_dir(json.loads(pointer.read_text(encoding='utf-8'))['deck_dir'])
+            candidate.relative_to((_conversation_root() / 'ppt_decks').resolve())
             return candidate
-    except (OSError, ValueError, KeyError, TypeError):
-        pass
+        except (OSError, ValueError, KeyError, TypeError):
+            continue
     return None
 
 
@@ -1826,9 +1829,7 @@ def _bind_workflow_deck(deck: Path) -> None:
     pointer = _workflow_deck_pointer()
     if pointer is not None:
         pointer.parent.mkdir(parents=True, exist_ok=True)
-        temporary = pointer.with_name(f'.{pointer.name}.{uuid.uuid4().hex}.tmp')
-        temporary.write_text(json.dumps({'deck_dir': str(deck.resolve())}), encoding='utf-8')
-        temporary.replace(pointer)
+        _write_json_atomic(pointer, {'deck_dir': str(deck.resolve())})
 
 
 def _ui_slot_order_list(slot: str) -> list[int]:
@@ -2184,9 +2185,15 @@ def _delete_page_files_and_renumber(deck: Path, page_no: int) -> dict[str, Any]:
 
 
 def _write_json_atomic(path: Path, value: Any) -> None:
-    tmp = path.with_name(path.name + '.tmp')
-    tmp.write_text(json.dumps(value, ensure_ascii=False, indent=2), encoding='utf-8')
-    os.replace(tmp, path)
+    temporary = tempfile.NamedTemporaryFile(
+        mode='w', encoding='utf-8', dir=path.parent, prefix='.ppt-', delete=False,
+    )
+    try:
+        with temporary:
+            json.dump(value, temporary, ensure_ascii=False, indent=2)
+        os.replace(temporary.name, path)
+    finally:
+        Path(temporary.name).unlink(missing_ok=True)
 
 
 def _parse_inserted_outline_page(page_json: Union[str, dict, None]) -> dict[str, Any]:
@@ -5055,11 +5062,7 @@ def _write_page_generation_checkpoint(deck: Path, page_no: int, input_hash: str)
     if _is_ppt_placeholder(html) or '<html' not in html.lower():
         return
     checkpoint = deck / f'.page_retry_{page_no:03d}.json'
-    temporary = checkpoint.with_name(checkpoint.name + '.' + uuid.uuid4().hex + '.tmp')
-    temporary.write_text(json.dumps({
-        'input_hash': input_hash, 'output_hash': _html_sha256(html),
-    }), encoding='utf-8')
-    temporary.replace(checkpoint)
+    _write_json_atomic(checkpoint, {'input_hash': input_hash, 'output_hash': _html_sha256(html)})
 
 
 def _page_checkpoint_matches(deck: Path, page_no: int, brief: str | None) -> bool:
@@ -7581,9 +7584,10 @@ def ppt_init_deck(
             key_points = []
 
     topic_text = _coerce_str(topic) or query.split('\n', 1)[0][:80]
-    deck_id = f"ppt_{_slugify(topic_text)}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-    deck_dir = _conversation_root() / 'ppt_decks' / deck_id
-    deck_dir.mkdir(parents=True, exist_ok=True)
+    decks = _conversation_root() / 'ppt_decks'
+    decks.mkdir(parents=True, exist_ok=True)
+    deck_dir = Path(tempfile.mkdtemp(prefix='ppt_', dir=decks))
+    deck_id = deck_dir.name
     (deck_dir / 'pages').mkdir(exist_ok=True)
     (deck_dir / 'images').mkdir(exist_ok=True)
 
@@ -8035,20 +8039,26 @@ def ppt_build_outline(
         'points': key_points_json, 'backgrounds': generate_background_images,
         'outline': outline_markdown,
     }, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
-    resume_path = _conversation_root() / '.outline_builds' / f'{request_key}.json'
+    resume_root = _conversation_root() / '.outline_builds'
+    resume_path = resume_root / f'{request_key[:32]}.json'
+    legacy_resume = resume_root / f'{request_key}.json'
+    resumed_from_legacy = False
     resolved_deck = _coerce_str(deck_dir)
     if not resolved_deck:
         bound = _bound_workflow_deck()
         if bound is not None:
             resolved_deck = str(bound)
-    if not resolved_deck and resume_path.is_file():
-        try:
-            saved = json.loads(resume_path.read_text(encoding='utf-8'))
-            candidate = _resolve_deck_dir(saved['deck_dir'])
-            candidate.relative_to((_conversation_root() / 'ppt_decks').resolve())
-            resolved_deck = str(candidate)
-        except (OSError, ValueError, KeyError, TypeError):
-            pass
+    if not resolved_deck:
+        for checkpoint in (resume_path, legacy_resume):
+            try:
+                saved = json.loads(checkpoint.read_text(encoding='utf-8'))
+                candidate = _resolve_deck_dir(saved['deck_dir'])
+                candidate.relative_to((_conversation_root() / 'ppt_decks').resolve())
+                resolved_deck = str(candidate)
+                resumed_from_legacy = checkpoint == legacy_resume
+                break
+            except (OSError, ValueError, KeyError, TypeError):
+                continue
     prepared_backgrounds_enabled = False
     if resolved_deck:
         try:
@@ -8096,7 +8106,9 @@ def ppt_build_outline(
             return _tool_error('ppt_build_outline', 'ppt_init_deck returned no deck_dir')
 
     resume_path.parent.mkdir(parents=True, exist_ok=True)
-    resume_path.write_text(json.dumps({'deck_dir': resolved_deck}), encoding='utf-8')
+    _write_json_atomic(resume_path, {'deck_dir': resolved_deck})
+    if resumed_from_legacy:
+        legacy_resume.unlink(missing_ok=True)
     build_deck = Path(resolved_deck)
     _bind_workflow_deck(build_deck)
     effective_backgrounds_enabled = (
@@ -8415,8 +8427,9 @@ def ppt_export_deck() -> dict:
                                'do not switch to native generation or restart planning.')
         pages.append((html, notes))
     node, cli = _cli()
-    root = _conversation_root() / 'ppt_exports' / uuid.uuid4().hex
-    root.mkdir(parents=True)
+    exports = conversation_root / 'ppt_exports'
+    exports.mkdir(parents=True, exist_ok=True)
+    root = Path(tempfile.mkdtemp(dir=exports))
     output = root / 'presentation.pptx'
     try:
         (root / 'pages').mkdir()
