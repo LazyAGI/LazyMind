@@ -63,6 +63,9 @@ it("falls back to the original whole page when its source region cannot render",
     locator: { kind: "bbox", page: 2, bbox: [0.1, 0.2, 0.4, 0.6] },
   });
   expect(result).toMatchObject({ url: "blob:whole-page", mode: "page" });
+  expect(previewMocks.getDocument).toHaveBeenCalledWith(expect.objectContaining({
+    cMapUrl: expect.stringMatching(/pdfjs\/cmaps\/$/), cMapPacked: true,
+  }));
   expect(previewMocks.get.mock.calls[0][1].regions).toEqual([
     { page: 3, bbox: [60, 160, 240, 480] },
   ]);

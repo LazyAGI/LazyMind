@@ -3,6 +3,7 @@ import {
   createPdfCitationPreviewCache,
   type PdfCitationPreviewDocument,
 } from "@/components/ui/pdfCitationPreview";
+import { pdfDocumentOptions } from "@/components/ui/pdfDocumentOptions";
 import { computeBufferSha256 } from "../../utils/fileHash";
 import type { GuidePreview } from "./PaperGuideAsset";
 
@@ -86,7 +87,7 @@ export function useGuideSourcePreview(
         session.pdf = { bytes: result, document: (async () => {
           const { pdfjs } = await import("react-pdf");
           if (!isCurrent()) return;
-          return pdfjs.getDocument({ data }).promise;
+          return pdfjs.getDocument({ ...pdfDocumentOptions, data }).promise;
         })() };
       }
       const doc = await session.pdf.document;
