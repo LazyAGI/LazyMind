@@ -1894,6 +1894,7 @@ const zhCN = {
     embeddingReadyTip: "向量模型已就绪",
     configureUnavailableModel: "去模型服务配置",
     unavailableReasons: {
+      cloud_signed_out: "LazyMind Cloud 已退出登录，当前云端模型不可用。请前往“模型服务”重新登录 LazyMind Cloud，或选择其他可用模型。",
       credentials_unavailable: "该模型没有可用的凭据，可能尚未启用、未填写或无法读取。请前往“模型服务”，打开对应供应商，填写并启用 API Key，再验证连接。",
       disabled: "该模型已停用。请前往“模型服务”启用该模型，或在此选择其他可用模型。",
       runtime_unsupported: "当前连接不支持此模型所需的能力。请前往“模型服务”检查连接协议和模型能力配置，或选择其他兼容模型。",

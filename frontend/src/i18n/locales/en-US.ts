@@ -1931,6 +1931,7 @@ const enUS = {
     embeddingReadyTip: "Embedding model is ready",
     configureUnavailableModel: "Configure model service",
     unavailableReasons: {
+      cloud_signed_out: "You are signed out of LazyMind Cloud, so this cloud model is unavailable. Sign in again through Model Services or select another available model.",
       credentials_unavailable: "This model has no usable credentials. They may be disabled, missing, or unreadable. Open its provider in Model Services, enter and enable an API key, then verify the connection.",
       disabled: "This model is disabled. Enable it in Model Services or select another available model here.",
       runtime_unsupported: "The current connection does not support the capabilities this model needs. Check the connection protocol and model capabilities in Model Services, or select a compatible model.",

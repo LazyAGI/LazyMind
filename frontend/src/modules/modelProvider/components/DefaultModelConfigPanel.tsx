@@ -432,7 +432,7 @@ export default function DefaultModelConfigPanel({
               : selectedOption.model.unavailableReason === "index_cleanup_in_progress" ? t("knowledge.embeddingIndexClearing")
               : selectedOption.model.unavailableReason === "index_cleanup_incomplete" ? t("knowledge.embeddingIndexCleanupFailed")
               : selectedOption.model.unavailableReason === "index_cleared" ? t("knowledge.embeddingIndexCleared")
-              : t(`modelProvider.unavailableReasons.${["credentials_unavailable", "disabled", "runtime_unsupported"].includes(selectedOption.model.unavailableReason || "") ? selectedOption.model.unavailableReason : "unknown"}`)
+              : t(`modelProvider.unavailableReasons.${["credentials_unavailable", "disabled", "runtime_unsupported", "cloud_signed_out"].includes(selectedOption.model.unavailableReason || "") ? selectedOption.model.unavailableReason : "unknown"}`)
           } action={!selectedOption.model.unavailableReason?.startsWith("index_") &&
             <Button size="small" onClick={onConfigureProviders}>{t("modelProvider.configureUnavailableModel")}</Button>}
           />
