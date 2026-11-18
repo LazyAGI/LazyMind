@@ -3149,6 +3149,7 @@ const zhCN = {
         stopped: "已停止",
         degraded: "降级",
         unsupported: "不支持",
+        failed: "失败",
       },
     },
     wecom: {
@@ -3276,6 +3277,7 @@ const zhCN = {
         stopped: "已停止",
         degraded: "降级",
         unsupported: "不支持",
+        failed: "失败",
       },
     },
   },

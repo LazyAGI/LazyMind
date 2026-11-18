@@ -40,7 +40,8 @@ type NativeControlCommand struct {
 // Native controllers bind their current Chat turn separately from the immutable
 // trigger history. A resumed workflow belongs to the newly admitted turn.
 type nativeTurnBinding struct {
-	HistoryID string `json:"chat_history_id"`
+	HistoryID          string `json:"chat_history_id"`
+	RecoveredAttemptID string `json:"recovered_attempt_id,omitempty"`
 }
 
 // BeginNativeControlTurn is called only after Chat has accepted a streaming run.
