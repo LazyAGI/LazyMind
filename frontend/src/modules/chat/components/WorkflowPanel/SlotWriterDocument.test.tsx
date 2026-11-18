@@ -622,7 +622,7 @@ describe('SlotText editing', () => {
     ));
   });
 
-  it('keeps PPT prompt editing at the preview height while typing', () => {
+  it('passes the complete PPT prompt and height limit to the Markdown editor on edit', () => {
     const text = '<!-- ppt-page-prompt:v1 -->\n## 风格\n浅色背景';
     const { container } = render(<SlotRenderer
       slot={{ slot_id: 'prompt', revision: 1, selected: true, slot: 'prompt',
@@ -630,18 +630,11 @@ describe('SlotText editing', () => {
       widget={{ widgetType: 'ppt-prompt', maxHeight: 400 }}
       sessionId='prompt-session' slotId='prompt'
     />);
-    const preview = container.querySelector<HTMLElement>('.ppt-prompt-document')!;
-    vi.spyOn(preview, 'getBoundingClientRect').mockReturnValue({
-      height: 400, width: 600, top: 0, left: 0, right: 600, bottom: 400,
-      x: 0, y: 0, toJSON: () => ({}),
-    });
     fireEvent.click(screen.getByRole('button', { name: '编辑文本' }));
-    const editor = container.querySelector<HTMLTextAreaElement>('.workflow-slot__text-editor')!;
-    expect(editor).toHaveStyle({ height: '400px', minHeight: '400px' });
-    expect(editor.value).toBe(text);
-    Object.defineProperty(editor, 'scrollHeight', { configurable: true, value: 1800 });
-    fireEvent.change(editor, { target: { value: `${text}\n补充说明` } });
-    expect(editor).toHaveStyle({ height: '400px' });
+    const editor = screen.getByRole('button', { name: 'save markdown draft' });
+    expect(editor).toHaveAttribute('data-markdown', text);
+    expect(editor).toHaveAttribute('data-max-height', '400');
+    expect(container.querySelector('.workflow-slot__text-editor')).toBeNull();
   });
 
   it('keeps the preview footprint and focuses the clicked plain text', () => {

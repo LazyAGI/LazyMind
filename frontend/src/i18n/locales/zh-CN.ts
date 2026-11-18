@@ -4371,6 +4371,18 @@ const zhCN = {
         unknown: "暂时无法完成本次回复，请稍后重试或切换模型。",
       },
     },
+    writerColors: {
+      edit: "修改颜色 {{color}}",
+      preview: "颜色 {{color}}",
+      title: "修改颜色",
+      description: "仅修改当前选中的颜色",
+      original: "原颜色",
+      updated: "新颜色",
+      opacity: "不透明度 {{value}}%",
+      choose: "选择颜色",
+      value: "颜色值",
+      invalid: "请输入有效的 HEX、RGB 或 RGBA 颜色值。",
+    },
     writerImageGroups: {
       title: "图片展示方式",
       setSliding: "设为滑动图组",

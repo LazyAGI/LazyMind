@@ -5,7 +5,7 @@ import { MarkdownArtifactEditor } from './MarkdownArtifactEditor';
 afterEach(() => vi.unstubAllGlobals());
 
 describe('MarkdownArtifactEditor real Markdown parsing', () => {
-  it.each(['img', 'spring'])('renders a bare <%s> in a material summary as text', async (tag) => {
+  it.each(['img', 'spring', 'sup', 'sub', 'u', 'code', 'a'])('renders a bare <%s> in a material summary as text', async (tag) => {
     const onSave = vi.fn(async () => 2);
     const { container } = render(
       <MarkdownArtifactEditor
@@ -81,6 +81,43 @@ describe('MarkdownArtifactEditor real Markdown parsing', () => {
     expect(content.querySelector('img[alt="预览图"]')).toHaveAttribute('src', '/static-files/preview.png');
     expect(content.querySelector('[class*="underline"]')).toHaveTextContent('下划线');
     expect(content.querySelector('sup')).toHaveTextContent('2');
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+
+  it('distinguishes unmatched examples from paired formatting and ignores code/comment tag pairs', () => {
+    const { container } = render(<MarkdownArtifactEditor sourceRevision={1} onSave={vi.fn()}
+      markdown={'示例 <sup>，实际 x<sup>2</sup>，独立结束标签 </u>。\n\n<u>跨行\n下划线</u>\n\n示例 <sub>，代码 `</sub>`，<!-- </sub> --> 备注。'} />);
+    const content = container.querySelector('.mdxeditor-root-contenteditable')!;
+    expect(content).toHaveTextContent('示例 <sup>，实际 x2，独立结束标签 </u>。');
+    expect(content.querySelector('sup')).toHaveTextContent('2');
+    expect(content.querySelector('[class*="underline"]')).toHaveTextContent('跨行');
+    expect(content).toHaveTextContent('示例 <sub>，代码 </sub>， 备注。');
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+
+  it.each([
+    ['multiline inline code', '代码 ``first\n<!-- 保留代码注释 -->\n<sup> {value}``。', '<!-- 保留代码注释 -->'],
+    ['quoted fenced code', '> ```html\n> <!-- 保留代码注释 -->\n> <sup> {value}\n> ```', '<!-- 保留代码注释 -->'],
+    ['indented code', '    <!-- 保留代码注释 -->\n    <sup> {value}', '<!-- 保留代码注释 -->'],
+    ['tilde fence containing backticks', '~~~html\n```nested\n<!-- 保留代码注释 -->\n<sup> {value}\n~~~', '<!-- 保留代码注释 -->'],
+    ['escaped comment', '文字 \\<!-- 保留字面注释 -->', '<!-- 保留字面注释 -->'],
+    ['unmatched backtick', '未配对 ` 字符后还有 {"value":1} 和 <sup>。', '{"value":1} 和 <sup>'],
+  ])('preserves literal content in %s', async (_kind, markdown, expected) => {
+    const onSave = vi.fn();
+    const { container } = render(<MarkdownArtifactEditor markdown={markdown} sourceRevision={1} onSave={onSave} />);
+    await waitFor(() => expect(container.querySelector('.mdxeditor-root-contenteditable')).toHaveTextContent(expected));
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    expect(onSave).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['quoted block', '> $$\n> \\frac{1}{n}\n> $$', '\\frac{1}{n}'],
+    ['list block', '- 公式\n\n  $$\n  \\frac{1}{n}\n  $$', '\\frac{1}{n}'],
+    ['multiline inline', '公式 $\\frac{1}\n{n}$。', '\\frac{1}\n{n}'],
+    ['comparison', '公式 $y_{<t}$。', 'y_{<t}'],
+  ])('passes %s math unchanged to the formula renderer', (_kind, markdown, expected) => {
+    const { container } = render(<MarkdownArtifactEditor markdown={markdown} sourceRevision={1} onSave={vi.fn()} />);
+    expect(container.querySelector('annotation[encoding="application/x-tex"]')?.textContent).toBe(expected);
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   });
 });

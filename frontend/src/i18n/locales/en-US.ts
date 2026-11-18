@@ -4446,6 +4446,18 @@ const enUS = {
         unknown: "Unable to complete this reply. Try again later or switch models.",
       },
     },
+    writerColors: {
+      edit: "Edit color {{color}}",
+      preview: "Color {{color}}",
+      title: "Edit color",
+      description: "Applies only to the selected color",
+      original: "Original",
+      updated: "New color",
+      opacity: "Opacity {{value}}%",
+      choose: "Choose color",
+      value: "Color value",
+      invalid: "Enter a valid HEX, RGB or RGBA color value.",
+    },
     writerImageGroups: {
       title: "Image display",
       setSliding: "Set as sliding gallery",
