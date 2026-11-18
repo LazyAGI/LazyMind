@@ -132,8 +132,6 @@ runtime:
           source: global
         - name: ppt_prepare_page
           source: package
-        - name: ppt_export_html
-          source: package
         - name: ppt_render_html
           source: package
         - name: ppt_inspect_pptx
@@ -453,8 +451,8 @@ runtime:
         PPTX｜复用模板并按需增删页面: native_pptx
       ask_when: >
         Required for every new deck, with or without a template. Bind html for an
-        explicit request for interactive, web or HTML slides, including requests to
-        create HTML first and then export PPTX. Bind native_pptx for a request to
+        explicit request for interactive, web or HTML slides. Users can export the
+        resulting HTML deck from the presentation panel. Bind native_pptx for a request to
         generate a PPTX or editable PowerPoint file directly, such as "生成12页pptx"
         or "直接生成原生 PPTX". A template name, file extension, or generic request to
         make a PPT does not choose a route. If unclear, leave this field unbound so
@@ -538,7 +536,7 @@ tool_scripts:
   - path: scripts/external_generation_tools.py
     functions: [ppt_prepare_page, ppt_compute_timing, ppt_order_papers]
   - path: scripts/external_tools.py
-    functions: [ppt_export_html, ppt_inspect_pptx, ppt_render_html]
+    functions: [ppt_inspect_pptx, ppt_render_html]
   - path: scripts/tools.py
     functions:
       - ppt_source_connections
@@ -571,7 +569,6 @@ tool_scripts:
       - ppt_insert_outline_page
       - ppt_publish_deck_outline
       - ppt_generate_pages
-      - ppt_export_deck
       - ppt_generate_native_pptx
       - ppt_restyle_pages
       - ppt_recolor_pages
@@ -611,11 +608,12 @@ artifact_edit:
     every nonempty linked page list in the same visual order. Preserve existing stable
     list_index values; new pages omit list_index. Refresh visible page numbers and notes.
     Use host tools for capabilities unavailable in LazyMind; do not replace these Skills.
-    Preserve editable text, charts, fonts and notes in an existing PPTX. Validate changed
-    content, page count and consistency of every existing representation. Apply the
+    Edit the current authoring representation. For native PPTX, preserve editable
+    text, charts, fonts and notes. Validate changed content and page count. Apply the
     generation step's visual-review policy and disclose any unperformed checks.
     Submit one atomic workflow.edit.commit bundle with all nonempty linked lists.
-    If native_pptx exists, include its updated file; HTML-only edits need no PPTX.
+    Include an updated native_pptx file for native PPTX edits. For HTML edits,
+    submit the linked HTML artifacts and notes without a PPTX file.
     Existing unchanged items carry only list_index. A user-requested edit
     authorizes this save; never use this API to bypass a pending AI preview confirmation.
     If a required operation cannot be validated, report the limitation and do not publish.
@@ -623,7 +621,6 @@ artifact_edit:
 artifact_actions:
   rewrite_selection:
     external_generation: true
-    companion_slot: native_pptx
     revision_policy: head
     slots:
       - preview_html

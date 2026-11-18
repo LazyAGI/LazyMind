@@ -24,7 +24,7 @@ Delete an entire slide (not a bullet):
   ppt_find_deck → ppt_delete_page(deck_dir, page=N)
     renumbers later pages on disk + outline; removes UI list items.
 
-ppt_export_deck publishes an actual PPTX when explicitly requested; UI export remains available.
+Interactive HTML slides can be exported from the presentation panel.
 Runtime lives under workflows/ppt-workflow/runtime/ (vendored SenseNova subset).
 Do NOT ppt_read_page_html + save_artifacts for full HTML — tool results >16KB
 are offloaded and the model never sees the body, so saves get stuck forever.
@@ -1238,7 +1238,7 @@ def ppt_fill_template(template_file: str, source_sha256: str, edits: list[dict] 
     if _workflow_session_id() and _required_output_format() != 'native_pptx':
         raise ToolExecutionError('PPT_OUTPUT_FORMAT_MISMATCH: saved output choice requires HTML; '
                                  'preserve existing pages and notes. '
-                                 'For a PPTX download use ppt_export_deck; do not switch generation routes')
+                                 'Use the presentation panel to download the current HTML slides as PPTX')
     if (edits is None) == (pages is None):
         raise ValueError('Supply exactly one of edits or pages')
     if notes_ref and pages is None:
@@ -1288,7 +1288,7 @@ def ppt_generate_native_pptx(slides: list[dict], template_file: str = '', notes_
     if _workflow_session_id() and _required_output_format() != 'native_pptx':
         raise ToolExecutionError('PPT_OUTPUT_FORMAT_MISMATCH: saved output choice requires HTML; '
                                  'preserve existing pages and notes. '
-                                 'For a PPTX download use ppt_export_deck; do not switch generation routes')
+                                 'Use the presentation panel to download the current HTML slides as PPTX')
 
     if template_file:
         raise ValueError('Uploaded templates must use ppt_inspect_template_page and ppt_fill_template; '
@@ -8370,7 +8370,7 @@ def ppt_generate_pages(
         'published': html_payload.get('published'),
         'stages': stages,
         'note': (
-            'HTML and notes published. Use ppt_export_deck only if a PPTX file was requested.'
+            'Interactive HTML slides and notes published.'
             if status == 'ok' else
             'Some pages failed; inspect failed_detail or redraw with page-html.'
         ),

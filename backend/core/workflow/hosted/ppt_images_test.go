@@ -204,6 +204,17 @@ func TestExternalPPTPreviewUsesPinnedForegroundAndPerPageBackground(t *testing.T
 	}
 	grant, err := s.Begin(t.Context(), "owner", "session-1", "attempt-1")
 	pptMust(t, err)
+	err = s.Publish(t.Context(), "owner", "session-1", "attempt-1", Publication{
+		ExecutionHandle: grant.ExecutionHandle,
+		Artifact: executor.Artifact{Slot: "native_pptx", Seq: 1, ContentType: "file", Value: pptJSON(t, map[string]any{
+			"storage": "inline_base64", "name": "deck.pptx",
+			"content_base64": base64.StdEncoding.EncodeToString([]byte("presentation fixture")),
+		})},
+	})
+	var mismatch *controlstore.Error
+	if !errors.As(err, &mismatch) || mismatch.Code != "INVALID_ARTIFACT" || !strings.Contains(mismatch.Message, "selected presentation format") {
+		t.Fatalf("HTML route accepted a PPTX or returned the wrong error: %v", err)
+	}
 	publish := func(page int, body string) error {
 		return s.Publish(t.Context(), "owner", "session-1", "attempt-1", Publication{ExecutionHandle: grant.ExecutionHandle,
 			Artifact: executor.Artifact{Slot: "preview_html", Seq: page, ContentType: "text", Value: pptJSON(t, body)}})
@@ -269,6 +280,13 @@ func TestExternalNativePPTCompletesWithPublishedFile(t *testing.T) {
 	}
 	if err := complete(); err == nil || !strings.Contains(err.Error(), "native_pptx has no published PPTX") {
 		t.Fatalf("completion without a PPTX returned %v", err)
+	}
+	err = s.Publish(t.Context(), "owner", "session-1", "attempt-1", Publication{
+		ExecutionHandle: grant.ExecutionHandle,
+		Artifact:        executor.Artifact{Slot: "preview_html", Seq: 1, ContentType: "text", Value: pptJSON(t, "<html>Slide</html>")},
+	})
+	if err == nil || !strings.Contains(err.Error(), "selected presentation format") {
+		t.Fatalf("native route accepted an HTML slide: %v", err)
 	}
 	pptMust(t, s.Publish(t.Context(), "owner", "session-1", "attempt-1", Publication{
 		ExecutionHandle: grant.ExecutionHandle,

@@ -277,9 +277,9 @@ artifact-size limits still apply; large fonts can cause an explicit size error.
 - Page generation uses approved complete page prompts directly; rewrite prompts
   are reserved for requested edits.
 - Page generation is sequential by default; publication preserves approved order.
-- Export: UI export remains available. An explicit request for a PPTX file uses
-  `ppt_export_deck` or `ppt_export_html` and publishes `native_pptx`. UI default =
-  browser raster PPTX. Local/Desktop enables editable export automatically after
+- Export: the interactive deck publishes HTML and notes. The panel exports
+  selected HTML on demand, with browser raster PPTX as the default. The native
+  route publishes the PowerPoint file. Local/Desktop enables editable export after
   its dependency bundle is detected; container deployments use
   `LAZYMIND_OUTPUT_EDITABLE_PPT=true`.
 

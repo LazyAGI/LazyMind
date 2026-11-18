@@ -28,10 +28,11 @@ figures and screenshots remain allowed. Host approval mode controls review pause
 Confirm the choice of interactive HTML with PPTX export or direct native PPTX at
 startup whenever the user has not specified a route. With a template, recreate
 its inspected style in HTML or compose editable native pages from its actual
-layouts. An explicit request to export the HTML deck also requires a real PPTX
-file. Native delivery completes once the file has been published.
+layouts. HTML runs publish slides and notes. The user can export those slides
+from the panel. Native delivery completes once the PowerPoint file is published.
 
 For follow-up edits, use workflow.yaml's completed actions and edit policy. Local
 edits preserve unaffected pages and current item identities. Regeneration requires
-an explicit request and is limited to its requested scope. Existing linked prompts,
-backgrounds, HTML, notes and downloadable files must remain synchronized.
+an explicit request and is limited to its requested scope. Keep linked prompts,
+backgrounds, HTML and notes aligned when editing an interactive deck. Native
+PPTX edits update the PowerPoint file on their own route.

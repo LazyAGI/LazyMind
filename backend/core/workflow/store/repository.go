@@ -277,6 +277,10 @@ func (r *Repository) ListArtifacts(ctx context.Context, owner, sessionID string)
 		Order("slot_id ASC, list_index ASC, revision ASC").Find(&revisions).Error; err != nil {
 		return nil, err
 	}
+	revisions, err := controlstore.PresentationSlots(r.db.WithContext(ctx), revisions)
+	if err != nil {
+		return nil, err
+	}
 	out := make([]Artifact, 0, len(revisions))
 	for _, revision := range revisions {
 		value, contentType, caption, draftVersion, err := r.resolveArtifact(ctx, revision)

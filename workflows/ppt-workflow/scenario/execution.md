@@ -44,10 +44,10 @@ scripts verbatim when available; existing non-empty per-page notes are sufficien
 and require no separate source artifact or source equality check. Background prompts/images stay aligned with
 pages; request text-free AI backgrounds and deliver 1280×720 images when enabled.
 
-Deliver the selected representation and any explicitly requested downloadable
-file. Use the same approved copy, formulas and chart data for HTML and PPTX, and
-compare their actual visible objects with that plan. An export button, screenshot
-or hidden metadata does not substitute for the requested file/editable content.
+Deliver HTML slides and notes for the interactive route. The presentation panel
+exports the current slides when the user requests it. Deliver the `native_pptx`
+file for the native route. Compare the visible copy, formulas and chart data in
+the selected representation with the approved plan.
 
 ## Validation
 

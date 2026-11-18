@@ -72,8 +72,8 @@ steps:
       three content pages per paper plus explicitly requested opening/closing
       pages. Explain an inferred count; a confirmed count takes precedence.
       - Preserve the confirmed presentation_output_format with or without a
-      template. If the user chose HTML and also explicitly requested a PPTX
-      download, record the requirement to export after HTML authoring.
+      template. HTML publishes interactive slides and notes; users can export
+      the current slides from the panel. Native PPTX publishes a PowerPoint file.
       - Set template_mode=none when there is no bound template. With a supplied
       template, set template_mode=upload and inspect the original PPTX directly,
       across every page, including canvas, editable slots, layouts, typography,
@@ -695,7 +695,7 @@ steps:
         foreground image in an <img data-ppt-image="ARTIFACT_ID"> in the intended
         layout with meaningful alt text. Core fills src from the saved bytes.
         Include a #bg layer for the bound AI background. Use the returned HTML
-        for rendering, export and publication. Keep the markers and embedded
+        for rendering and publication. Keep the markers and embedded
         assets intact. Publish using output.value_file (content_type=text) or
         an inline text value. For targeted regeneration use the partial selector
         or the existing preview list_index in the inline text object. Fix
@@ -707,16 +707,8 @@ steps:
       without asking a model to write them again. Publish each page/notes pair in
       approved order once checked. Buffer out-of-order worker results until earlier
       pages are acknowledged. A partial delivery is not a completed full run.
-      - Deliver the actual PPTX as native_pptx when the user explicitly requested a
-      downloadable/editable file, using the completed pages and scripts. HTML
-      previews or an export button do not satisfy that explicit request. Otherwise
-      the HTML pages and notes are the deliverable; no automatic export is needed.
-
-      Export recovery: use ppt_export_deck to convert existing HTML and notes to PPTX.
-      On font/asset/export failures preserve all pages and scripts and retry export
-      after fixing the resource. Never switch to ppt_generate_native_pptx or
-      ppt_fill_template, change presentation_output_format, or restart planning
-      merely to work around an export failure.
+      - Deliver the interactive HTML pages and notes. Do not convert the deck or
+      publish native_pptx. The panel can export the latest HTML on user action.
 
       Native route (presentation_output_format=native_pptx):
       - With a template, reuse its actual source pages, editable slots, geometry
@@ -730,8 +722,7 @@ steps:
       ppt_generate_native_pptx for direct creation without a template.
       - Preserve the approved page copy, truthful data and correct fonts.
       - Publish a real non-empty PPTX after validating page count, content and notes.
-      Optional HTML previews are not required and cannot replace the file. Do not
-      launch HTML generation after a successful native delivery.
+      Publish the native file as the sole slide deliverable.
 
       Visual review:
       - Render the delivered representation when available; inspect actual pixels
@@ -758,7 +749,7 @@ steps:
       replacement updates its binding and only the affected page.
       - Insert/delete/reorder operations keep every nonempty prompt/background/HTML/
       notes list in the same visual order, with stable identities and unchanged
-      revisions for unaffected items. Update an existing downloadable PPTX as well.
+      revisions for unaffected items. Native edits update the native file directly.
       - Reuse acknowledged outputs and generated files after interruption. Surface
       exact failures and missing capabilities, retaining useful progress; never
       restart the entire deck to repair one page.
@@ -775,7 +766,6 @@ steps:
       - pptx_analyzer
       - ppt_fill_template
       - ppt_generate_pages
-      - ppt_export_deck
       - ppt_find_deck
       - ppt_run_stage
       - ppt_list_pages
@@ -849,14 +839,11 @@ steps:
       Visual findings, missing screenshot/vision support, and unsuccessful
       optional layout repairs are advisory. They must never fail a step that
       already delivered a usable native_pptx; keep the last published version.
-      For HTML authoring with an explicitly requested PPTX download, native_pptx
-      must also contain the actual exported file with matching count, copy and notes.
       For a full HTML run: the exact requested number of preview_html HTML pages must
       be saved (DOCTYPE/html documents), with matching preview_notes sort_order.
       After page-level checks, publish each page and its matching notes in approved
       page order. Buffer any page that finishes early until all earlier pages and
       notes have been acknowledged. Preserve the approved page identities.
-      Keep saved HTML pages and notes if an optional PPTX export fails.
       preview_notes must be aligned with preview_html; the auto-generated draft
       must be a natural spoken explanation, not copied formula source. For
       academic pages explain intuition, key quantities, measured comparisons and
