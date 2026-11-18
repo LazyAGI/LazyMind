@@ -316,7 +316,7 @@ func CreateGroup(w http.ResponseWriter, r *http.Request) {
 		}
 		checkData = &CheckModelProviderData{Success: true, Message: checkResult.Message}
 	}
-	if req.Verify && !hasSharedProviderEndpoint(parent) && checkData == nil && apiKey != "" {
+	if req.Verify && !hasSharedProviderEndpoint(parent) && checkData == nil && (apiKey != "" || parent.HasCapability("keyless_search")) {
 		checkResult, checkErr := doProviderGroupCheck(r.Context(), parent.Category, RuntimeProviderName(parent), baseURL, apiKey, "", parent)
 		if checkErr != nil || checkResult == nil || !checkResult.Success {
 			msg := "verification failed"
@@ -346,7 +346,7 @@ func CreateGroup(w http.ResponseWriter, r *http.Request) {
 		APIKeyCiphertext:    apiKeyCiphertext,
 		CredentialVersion:   legacyModelProviderCredentialVersion,
 		CredentialRevision:  credentialRevision,
-		IsVerified:          checkData != nil || translationGroupConfigured(parent, apiKey),
+		IsVerified:          checkData != nil || providerGroupConfigured(parent, apiKey),
 		BaseModel: orm.BaseModel{
 			CreateUserID:   userID,
 			CreateUserName: userName,
@@ -697,7 +697,7 @@ func UpdateGroup(w http.ResponseWriter, r *http.Request) {
 		checkData = &CheckModelProviderData{Success: true, Message: checkResult.Message}
 		updates["is_verified"] = true
 	}
-	if translationGroupConfigured(parent, effectiveAPIKey) {
+	if providerGroupConfigured(parent, effectiveAPIKey) {
 		updates["is_verified"] = true
 	}
 	if err := db.WithContext(r.Context()).Transaction(func(tx *gorm.DB) error {
@@ -761,8 +761,14 @@ func UpdateGroup(w http.ResponseWriter, r *http.Request) {
 }
 
 func translationGroupConfigured(parent orm.UserModelProvider, apiKey string) bool {
-	return parent.Category == "translation" &&
-		(strings.TrimSpace(apiKey) != "" || parent.HasCapability("keyless_translation"))
+	return providerGroupConfigured(parent, apiKey)
+}
+
+func providerGroupConfigured(parent orm.UserModelProvider, apiKey string) bool {
+	if parent.Category == "translation" {
+		return strings.TrimSpace(apiKey) != "" || parent.HasCapability("keyless_translation")
+	}
+	return parent.Category == "search" && parent.HasCapability("keyless_search")
 }
 
 type deleteGroupResponse struct {
@@ -922,6 +928,9 @@ func isCustomBaseURL(ctx context.Context, db *gorm.DB, defaultProviderID, baseUR
 // their original catalog entry no longer exists. Official catalog endpoints
 // still require credentials, and an empty/invalid URL is never keyless.
 func providerAPIKeyRequiredForBaseURL(ctx context.Context, db *gorm.DB, parent orm.UserModelProvider, baseURL string) bool {
+	if parent.HasCapability("keyless_translation") || parent.HasCapability("keyless_search") {
+		return false
+	}
 	if strings.TrimSpace(baseURL) == "" {
 		return true
 	}

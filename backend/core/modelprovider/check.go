@@ -39,6 +39,7 @@ const (
 	googleSearchAcceptedMsg    = "Google Custom Search API key accepted"
 	bochaSearchAcceptedMsg     = "Bocha Search API key accepted"
 	sciverseSearchAcceptedMsg  = "Sciverse API key accepted"
+	keenableSearchAcceptedMsg  = "Keenable search accepted"
 )
 
 var sciverseDefaultMetaFields = []string{
@@ -175,7 +176,7 @@ func isSupportedOCRCloudProvider(providerName string) bool {
 
 func isSupportedSearchCloudProvider(providerName string) bool {
 	switch normalizeProviderName(providerName) {
-	case "openalex", "tavily", "bing", "bingsearch", "google", "googlesearch", "googlecustomsearch", "bocha", "bochasearch", "sciverse", "sciversesearch":
+	case "openalex", "tavily", "bing", "bingsearch", "google", "googlesearch", "googlecustomsearch", "bocha", "bochasearch", "sciverse", "sciversesearch", "keenable", "keenablesearch":
 		return true
 	default:
 		return false
@@ -232,6 +233,8 @@ func doSearchCloudServiceCheck(ctx context.Context, providerName, baseURL, apiKe
 		return doBochaSearchCloudServiceCheck(ctx, providerName, baseURL, apiKey)
 	case "sciverse", "sciversesearch":
 		return doSciverseSearchCloudServiceCheck(ctx, providerName, baseURL, apiKey)
+	case "keenable", "keenablesearch":
+		return doKeenableSearchCloudServiceCheck(ctx, providerName, baseURL, apiKey)
 	default:
 		return &modelCheckResponse{Success: false, Message: "unsupported search cloud service"}, nil
 	}
@@ -439,6 +442,40 @@ func sciverseMetaSearchEndpoint(baseURL string) string {
 		return base
 	}
 	return common.JoinURL(base, "meta-search")
+}
+
+func doKeenableSearchCloudServiceCheck(ctx context.Context, providerName, baseURL, apiKey string) (*modelCheckResponse, error) {
+	payload := map[string]any{
+		"query":       "lazymind key check",
+		"max_results": 1,
+	}
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return nil, fmt.Errorf("marshal keenable check body: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, keenableSearchEndpoint(baseURL, apiKey), bytes.NewReader(body))
+	if err != nil {
+		return &modelCheckResponse{Success: false, Message: safeCheckMessage(err.Error(), apiKey)}, nil
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Keenable-Title", "LazyMind")
+	if strings.TrimSpace(apiKey) != "" && strings.ToLower(strings.TrimSpace(apiKey)) != "public" {
+		req.Header.Set("X-API-Key", apiKey)
+	}
+
+	return doSearchServiceCheckRequest(req, providerName, baseURL, apiKey, keenableSearchAcceptedMsg)
+}
+
+func keenableSearchEndpoint(baseURL, apiKey string) string {
+	base := strings.TrimRight(strings.TrimSpace(baseURL), "/")
+	if strings.HasSuffix(base, "/v1/search") || strings.HasSuffix(base, "/v1/search/public") {
+		return base
+	}
+	if strings.TrimSpace(apiKey) != "" && strings.ToLower(strings.TrimSpace(apiKey)) != "public" {
+		return common.JoinURL(base, "v1/search")
+	}
+	return common.JoinURL(base, "v1/search/public")
 }
 
 func splitGoogleCustomSearchCredential(credential string) (string, string) {
