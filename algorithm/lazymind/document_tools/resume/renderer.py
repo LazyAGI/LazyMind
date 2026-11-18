@@ -44,9 +44,14 @@ def _normalize_resume(resume: dict) -> dict:
     basics = resume.get('basics') or {}
     if not isinstance(basics, dict):
         raise ValueError('basics must be an object.')
-    output = {'basics': {key: _text(basics.get(key)) for key in
-                        ('name', 'title', 'email', 'phone', 'location')},
-              'summary': _text(resume.get('summary')), 'sections': []}
+    output = {
+        'basics': {
+            key: _text(basics.get(key))
+            for key in ('name', 'title', 'email', 'phone', 'location')
+        },
+        'summary': _text(resume.get('summary')),
+        'sections': [],
+    }
     links = basics.get('links') or []
     if not isinstance(links, list):
         raise ValueError('basics.links must be a list.')
@@ -301,7 +306,7 @@ def _story_document(body: str, css: str, rect: Any, content_rect: Any, archive: 
         story = fitz.Story(body, user_css=css + breaks, archive=archive)
         document = story.write_with_links(
             lambda page_number, filled: (rect, content_rect, None),
-            positionfn=lambda position: layout_positions.append(vars(position).copy()),
+            positionfn=lambda position, current=layout_positions: current.append(vars(position).copy()),
         )
         # A section title and its first item share one break anchor. Breaking
         # both separately creates a page containing only the section title.
@@ -358,8 +363,10 @@ def _render_pdf(resume: dict, template: str, photo: Optional[bytes], path: str) 
         document = _story_document(main_body or '<p></p>', css, rect, main_rect, archive, positions, heading_groups)
         side_css = (css + '.contacts{font-size:8.3pt;}h1{font-size:24pt;}.portrait{width:60pt;height:80pt;}'
                     'h3,li{font-size:9pt;}')
-        sidebar = _story_document(_header(side, photo_uri, template, compact=True) + _sections(side, template),
-                                 side_css, rect, side_rect, archive)
+        sidebar = _story_document(
+            _header(side, photo_uri, template, compact=True) + _sections(side, template),
+            side_css, rect, side_rect, archive,
+        )
         while len(document) < len(sidebar):
             document.new_page(width=rect.width, height=rect.height)
         for number, page in enumerate(document):
