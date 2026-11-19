@@ -263,6 +263,6 @@ def test_workflow_pptx_analyzer_keeps_template_default_and_supports_content(tool
     assert template['quality_contract']
     assert template['pages'][0]['shapes'] and template['pages'][0]['slots']
     content = tools.pptx_analyzer(source.name, all_pages=True, mode='content')
-    assert content['pages'][0]['blocks'][0]['text'] == '模板标题'
+    assert content['pages'][0]['text'] == '模板标题'
     assert 'quality_contract' not in content
     assert tools.ppt_inspect_template_page(source.name)['slots']

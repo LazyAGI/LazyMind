@@ -38,7 +38,7 @@ def test_pptx_analyzer_reads_native_pages(monkeypatch, tmp_path):
     monkeypatch.setattr(tools, '_resolve_attachment', lambda filename, turn: (str(source), None))
     result = tools.pptx_analyzer('template.pptx')
     assert result['slide_count'] == 2 and result['next_page'] == 2
-    assert any(slot['text'] == 'Internship contribution' for slot in result['blocks'])
+    assert result['text'] == 'Internship contribution'
     assert tools.pptx_analyzer('template.pptx', page=2)['next_page'] is None
     assert source.read_bytes() == original
 
@@ -276,7 +276,7 @@ def test_pptx_reader_is_available_without_rag_runtime(monkeypatch, tmp_path):
     monkeypatch.setenv('LAZYMIND_RAG_ENABLED', 'false')
     monkeypatch.setattr(tools, '_resolve_attachment', lambda filename, turn: (str(path), None))
     result = tools.pptx_analyzer(path.name)
-    assert any(slot['text'] == 'presentation content' for slot in result['blocks'])
+    assert result['text'] == 'presentation content'
     assert result['slide_count'] == 1
     assert result['next_page'] is None
 
@@ -344,7 +344,7 @@ def test_office_attachment_reader_routes_without_pdf_conversion(monkeypatch, tmp
             from lazymind.chat.engine.subagent import tools
             monkeypatch.setattr(tools, '_resolve_attachment', lambda filename, turn: (str(path), None))
             result = tools.pptx_analyzer(path.name)
-            assert any(slot['text'] == 'native office text' for slot in result['blocks'])
+            assert result['text'] == 'native office text'
             assert result['slide_count'] == 1
             assert result['next_page'] is None
         else:
@@ -455,7 +455,7 @@ def test_pptx_analyzer_reads_whole_template_in_one_call(monkeypatch, tmp_path, c
     assert source.read_bytes() == original
     import json
     content = tools.pptx_analyzer(source.name, all_pages=True)
-    assert [p['blocks'][0]['text'] for p in content['pages']] == ['封面', '主管：待填写', '实习时间：待填写']
+    assert [p['text'] for p in content['pages']] == ['封面', '主管：待填写', '实习时间：待填写']
     assert len(json.dumps(content).encode()) < len(json.dumps(result).encode()) / 2
 
 
@@ -495,12 +495,11 @@ def test_pptx_content_preserves_text_tables_groups_notes_without_template_analys
     assert result['mode'] == 'content' and result['slide_count'] == 2
     assert result['next_page'] is None
     assert result['pages'][0] == {
-        'page': 1, 'notes': '演讲备注', 'blocks': [
-            {'type': 'text', 'text': '中文😀正文\n下一行'},
-            {'type': 'table', 'rows': [['项目', '金额'], ['A', '100']]},
-        ],
+        'page': 1,
+        'text': '中文😀正文\n下一行\n\n[Table: tab-separated cells; \\n = cell line break]\n'
+                '项目\t金额\nA\t100\n\n[Speaker notes]\n演讲备注',
     }
-    assert result['pages'][1] == {'page': 2, 'notes': '', 'blocks': []}
+    assert result['pages'][1] == {'page': 2, 'text': ''}
     assert not {'quality_contract', 'composition', 'sha256'} & result.keys()
     assert source.read_bytes() == original
 
@@ -539,7 +538,7 @@ def test_pptx_reading_multiple_decks_does_not_bind_template(monkeypatch, tmp_pat
     try:
         for name in ['first', 'second']:
             result = tools.pptx_analyzer(f'{name}.pptx', all_pages=True)
-            assert result['pages'][0]['blocks'][0]['text'] == name
+            assert result['pages'][0]['text'] == name
         assert not (tmp_path / 'cache').exists()
         # Reading two decks must not bind either one to the template cache.
         report = fill.inspect_template(tmp_path / 'second.pptx', cache_workspace=tmp_path / 'cache')

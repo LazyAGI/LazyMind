@@ -1003,7 +1003,7 @@ def ppt_read_pr_description(source_id: str, offset: int = 0, limit: int = 6000) 
 
 
 def pptx_analyzer(template_file: str, page: int = 1, all_pages: bool = False,
-                  mode: Literal['content', 'template'] = 'template') -> dict[str, Any]:
+                  mode: Literal['content', 'template'] = 'template', describe_images: bool = True) -> dict[str, Any]:
     """Read native template slots and geometry. Use all_pages=True once before filling.
 
     With all_pages=True, omit page: all pages are inspected internally in one call.
@@ -1015,7 +1015,7 @@ def pptx_analyzer(template_file: str, page: int = 1, all_pages: bool = False,
     source, _ = _resolve_template_file(template_file)
     if mode == 'content':
         from lazymind.chat.engine.tools.file_resources.pptx_reader import read_pptx_content
-        return read_pptx_content(source, page, all_pages=all_pages)
+        return read_pptx_content(source, page, all_pages=all_pages, describe_images=describe_images)
     if mode != 'template':
         raise ValueError('mode must be content or template')
     return inspect_template(source, page, all_pages=all_pages)
