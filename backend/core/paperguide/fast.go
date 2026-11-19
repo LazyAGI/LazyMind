@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"maps"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -223,18 +224,16 @@ func (x *execution) executeFast(ctx context.Context) error {
 					failures <- e
 					continue
 				}
-				chapterInput := maps.Clone(input)
-				chapterInput["plan"] = plan
-				chapterInput["chapter_id"] = c.ID
+				chapterInput, chapterAliases := worker.chapterInput(input, plan, c, aliases)
 				var chapter ExplainerChapter
 				e := worker.task(ctx, "fast:chapter:"+c.ID, "paper.explainer.chapter", chapterInput, &chapter, func() error {
 					if e := validateExplainerChapter(chapter, c.ID); e != nil {
 						return e
 					}
-					return validateExplainerFigures(plan, &chapter, input["figures"].([]ExplainerFigure))
+					return validateExplainerFigures(ExplainerPlan{}, &chapter, chapterInput["figures"].([]ExplainerFigure))
 				})
 				if e == nil {
-					section := publicChapter(chapter, aliases)
+					section := publicChapter(chapter, chapterAliases)
 					if _, e = worker.check(ctx); e == nil {
 						e = worker.s.Repo.PutStep(ctx, worker.f, worker.rev.ID, worker.rev.Epoch, StepWrite{Key: sectionKey(section.Role, 1), InputHash: digest(chapter), Output: mustMarshal(section), Published: true})
 					}
@@ -269,6 +268,78 @@ func (x *execution) executeFast(ctx context.Context) error {
 	}
 	return x.s.Repo.Transition(ctx, x.f, x.rev.ID, x.rev.Epoch, "completed", "", "complete")
 }
+func (x *execution) chapterInput(input map[string]any, plan ExplainerPlan, chapter ExplainerChapterPlan, aliases map[string]string) (map[string]any, map[string]string) {
+	chapterInput := maps.Clone(input)
+	chapterInput["plan"] = plan
+	chapterInput["chapter_id"] = chapter.ID
+	figures := input["figures"].([]ExplainerFigure)
+	// Preserve every request that could already have produced a checkpoint.
+	// When the shared plan pushes a chapter over budget, its writer only
+	// needs the full captions of figures assigned to this chapter.
+	if x.inputFits(chapterInput) {
+		return chapterInput, aliases
+	}
+	if len(figures) > 0 {
+		selected := make([]ExplainerFigure, 0, len(chapter.FigureIDs))
+		for _, figure := range figures {
+			if slices.Contains(chapter.FigureIDs, figure.ID) {
+				selected = append(selected, figure)
+			}
+		}
+		chapterInput["figures"] = selected
+	}
+	// Keep the exact excerpts selected during planning, including their stable
+	// aliases and page markers. Reserve assigned evidence before optional context.
+	source := input["source_text"].(string)
+	chapterInput["source_text"] = ""
+	header, _ := json.MarshalIndent(chapterInput, "", "")
+	chapterInput["source_text"] = source
+	remaining := min(1<<20, x.modelInputBudget()-6000) - len(header)
+	whole, _ := json.Marshal(source)
+	if len(whole)-2 <= remaining {
+		return chapterInput, aliases
+	}
+	selected := make([]bool, len(x.excerpts))
+	costs := make([]int, len(x.excerpts))
+	start := 0
+	for i, excerpt := range x.excerpts {
+		encoded, _ := json.Marshal(source[start:excerpt.end])
+		costs[i] = len(encoded) - 2
+		if slices.Contains(chapter.SourceIDs, excerpt.alias) {
+			selected[i] = true
+			remaining -= costs[i]
+		}
+		start = excerpt.end
+	}
+	if remaining < 0 {
+		return chapterInput, aliases
+	}
+	visible := maps.Clone(aliases)
+	var body strings.Builder
+	start = 0
+	for i, excerpt := range x.excerpts {
+		if selected[i] {
+			body.WriteString(source[start:excerpt.end])
+		} else if costs[i] <= remaining {
+			body.WriteString(source[start:excerpt.end])
+			remaining -= costs[i]
+		} else {
+			delete(visible, excerpt.alias)
+		}
+		start = excerpt.end
+	}
+	if body.Len() == 0 {
+		return chapterInput, aliases
+	}
+	chapterInput["source_text"] = body.String()
+	return chapterInput, visible
+}
+
+type sourceExcerpt struct {
+	alias string
+	end   int
+}
+
 func canonicalReferences(ids []string, aliases map[string]string) []string {
 	out := []string{}
 	for _, id := range ids {
@@ -302,14 +373,7 @@ func publicChapter(c ExplainerChapter, aliases map[string]string) GuideSection {
 // and small aliases. No additional model extraction call is needed. The byte
 // bound is conservative for both Latin and CJK tokenization.
 func (x *execution) explainerInput() (map[string]any, map[string]string, error) {
-	limit := x.model.ContextTokens
-	if limit <= 0 {
-		limit = 32768
-	}
-	budget := limit / 10 * 7
-	if x.model.OutputReserveTokens > 0 {
-		budget = min(budget, limit-x.model.OutputReserveTokens)
-	}
+	budget := x.modelInputBudget()
 	// Keep typical full papers (including result tables) for large-context models.
 	// Small contexts still use the same conservative per-model budget.
 	sourceBudget := min(128000, budget-18000)
@@ -363,7 +427,7 @@ func (x *execution) explainerInput() (map[string]any, map[string]string, error) 
 		input["page_count"] = pageCount
 	}
 	// Preserve existing request hashes when recovering a partially written guide.
-	input["source_text"] = packExplainerSource(x.snap.Evidence, sourceBudget, aliases, false)
+	input["source_text"], x.excerpts = packExplainerSource(x.snap.Evidence, sourceBudget, aliases, false)
 	if x.inputFits(input) {
 		return input, aliases, nil
 	}
@@ -392,13 +456,13 @@ func (x *execution) explainerInput() (map[string]any, map[string]string, error) 
 	if sourceBudget < 500 {
 		return nil, nil, ErrContext
 	}
-	input["source_text"] = packExplainerSource(x.snap.Evidence, sourceBudget, aliases, true)
+	input["source_text"], x.excerpts = packExplainerSource(x.snap.Evidence, sourceBudget, aliases, true)
 	if !x.inputFits(input) {
 		return nil, nil, ErrContext
 	}
 	return input, aliases, nil
 }
-func packExplainerSource(evidence []GuideEvidence, sourceBudget int, aliases map[string]string, escaped bool) string {
+func packExplainerSource(evidence []GuideEvidence, sourceBudget int, aliases map[string]string, escaped bool) (string, []sourceExcerpt) {
 	size := func(s string) int {
 		if !escaped {
 			return len(s)
@@ -462,11 +526,14 @@ func packExplainerSource(evidence []GuideEvidence, sourceBudget int, aliases map
 	}
 	sort.Ints(indices)
 	var text strings.Builder
+	excerpts := make([]sourceExcerpt, 0, len(indices))
 	for _, i := range indices {
 		text.WriteString(selected[i])
-		aliases[fmt.Sprintf("s%d", i)] = evidence[i].ID
+		alias := fmt.Sprintf("s%d", i)
+		aliases[alias] = evidence[i].ID
+		excerpts = append(excerpts, sourceExcerpt{alias: alias, end: text.Len()})
 	}
-	return text.String()
+	return text.String(), excerpts
 }
 
 func truncateUTF8(s string, n int) string {

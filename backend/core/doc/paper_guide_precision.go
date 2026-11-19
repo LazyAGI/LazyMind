@@ -19,14 +19,18 @@ func loadGuidePrecision(base pdfir.Document, result pdfIRResult, prepare bool) (
 }
 
 func loadGuidePrecisionWithFigures(base pdfir.Document, result pdfIRResult, prepare bool, figures *[]pdfir.OriginalFigureProof) (pdfir.Document, string, error) {
-	f, err := os.Open(result.RawPath)
-	if err != nil {
-		return pdfir.Document{}, "", err
-	}
-	raw, err := io.ReadAll(io.LimitReader(f, pdfir.MaxArchiveBytes+1))
-	f.Close()
-	if err != nil {
-		return pdfir.Document{}, "", err
+	raw := result.archive
+	var err error
+	if raw == nil {
+		f, err := os.Open(result.RawPath)
+		if err != nil {
+			return pdfir.Document{}, "", err
+		}
+		raw, err = io.ReadAll(io.LimitReader(f, pdfir.MaxArchiveBytes+1))
+		f.Close()
+		if err != nil {
+			return pdfir.Document{}, "", err
+		}
 	}
 	var enriched pdfir.Document
 	if figures == nil {
@@ -70,7 +74,7 @@ func loadGuidePrecisionWithFigures(base pdfir.Document, result pdfIRResult, prep
 	if !prepare {
 		return enriched, path, nil
 	}
-	f, err = os.CreateTemp(filepath.Dir(path), ".source-precision-*.tmp")
+	f, err := os.CreateTemp(filepath.Dir(path), ".source-precision-*.tmp")
 	if err != nil {
 		return pdfir.Document{}, "", err
 	}

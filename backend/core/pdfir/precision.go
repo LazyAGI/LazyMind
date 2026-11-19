@@ -1,13 +1,11 @@
 package pdfir
 
 import (
-	"archive/zip"
-	"bytes"
 	"encoding/json"
 	"fmt"
 	"io/fs"
 	"math"
-	"path"
+
 	"reflect"
 	"strings"
 )
@@ -111,45 +109,6 @@ func walkPrecision(bs []precisionBlock, depth int, visit func(precisionBlock) er
 	}
 	return nil
 }
-func readPrecisionLayout(raw []byte) ([]byte, error) {
-	if int64(len(raw)) > MaxArchiveBytes {
-		return nil, precisionError("archive size limit")
-	}
-	z, err := zip.NewReader(bytes.NewReader(raw), int64(len(raw)))
-	if err != nil {
-		return nil, err
-	}
-	if len(z.File) > 4096 {
-		return nil, precisionError("archive member limit")
-	}
-	var layout []byte
-	count := 0
-	for _, f := range z.File {
-		if path.IsAbs(f.Name) || strings.Contains(f.Name, "\\") || strings.Contains("/"+f.Name, "/../") {
-			return nil, precisionError("unsafe member")
-		}
-		if path.Base(f.Name) != "layout.json" && !strings.HasSuffix(f.Name, "_middle.json") {
-			continue
-		}
-		count++
-		if count > 1 {
-			return nil, precisionError("ambiguous layout")
-		}
-		r, e := f.Open()
-		if e != nil {
-			return nil, e
-		}
-		layout, e = bounded(r, maxJSONBytes)
-		r.Close()
-		if e != nil {
-			return nil, e
-		}
-	}
-	if count != 1 {
-		return nil, precisionError("missing retained layout")
-	}
-	return layout, nil
-}
 
 // ProjectSourcePrecision uses only a retained source-matched producer archive.
 // It has no parser/network dependency and either covers all merged text or fails.
@@ -173,11 +132,11 @@ func projectSourcePrecision(base Document, raw []byte, figures *[]OriginalFigure
 	if base.Precision != nil {
 		return fail(precisionError("expected base IR"))
 	}
-	layout, err := readPrecisionLayout(raw)
+	payload, err := readArchivePayload(raw, true)
 	if err != nil {
 		return fail(err)
 	}
-	original, err := AdaptZIP(raw, base.SourceSHA256, base.Parser.Model)
+	original, err := adaptPayload(baseDocument(base.SourceSHA256, base.Parser.Model), payload)
 	if err != nil {
 		return fail(err)
 	}
@@ -197,7 +156,7 @@ func projectSourcePrecision(base Document, raw []byte, figures *[]OriginalFigure
 		Backend string          `json:"_backend"`
 		Version string          `json:"_version_name"`
 	}
-	if json.Unmarshal(layout, &l) != nil || len(l.Pages) == 0 || len(l.Pages) > 10000 {
+	if json.Unmarshal(payload.layout, &l) != nil || len(l.Pages) == 0 || len(l.Pages) > 10000 {
 		return fail(precisionError("invalid layout pages"))
 	}
 	if l.Version != precisionProducerVersion || (l.Backend != "hybrid" && l.Backend != "vlm") {
@@ -245,10 +204,7 @@ func projectSourcePrecision(base Document, raw []byte, figures *[]OriginalFigure
 			return fail(err)
 		}
 	}
-	items, e := precisionContentItems(raw)
-	if e != nil {
-		return fail(e)
-	}
+	items := payload.items
 	covered := make([]bool, len(items))
 	var collectFigure func(int, contentItem, precisionBlock, []float64)
 	if figures != nil {
@@ -258,14 +214,14 @@ func projectSourcePrecision(base Document, raw []byte, figures *[]OriginalFigure
 			}
 		}
 	}
-	if e = verifyPrecisionPayloads(items, l.Pages, covered, collectFigure); e != nil {
+	if e := verifyPrecisionPayloads(items, l.Pages, covered, collectFigure); e != nil {
 		return fail(e)
 	}
 	baseJSON, err := json.Marshal(base)
 	if err != nil {
 		return fail(err)
 	}
-	projection := &SourcePrecision{Version: SourcePrecisionVersion, SourceSHA256: base.SourceSHA256, BaseIRDigest: Digest(string(baseJSON)), ArchiveDigest: Digest(string(raw)), Regions: []SourceRegion{}}
+	projection := &SourcePrecision{Version: SourcePrecisionVersion, SourceSHA256: base.SourceSHA256, BaseIRDigest: digestBytes(baseJSON), ArchiveDigest: digestBytes(raw), Regions: []SourceRegion{}}
 	var omitted map[string]bool
 	if figures != nil {
 		omitted = make(map[string]bool)
@@ -277,6 +233,12 @@ func projectSourcePrecision(base Document, raw []byte, figures *[]OriginalFigure
 	projection.Regions = append(projection.Regions, tableRegions...)
 	claimed := map[string]map[int]int{}
 	parents := map[string]bool{}
+	textOnPage := make(map[int][]int, len(pages))
+	for i, b := range base.Blocks {
+		if precisionTextType(b.Type) && len(b.BBox) == 4 {
+			textOnPage[b.Page] = append(textOnPage[b.Page], i)
+		}
+	}
 	for _, p := range l.Pages {
 		err = walkPrecision(append(append([]precisionBlock(nil), p.Paras...), p.Discarded...), 0, func(para precisionBlock) error {
 			if para.Type == "table" {
@@ -314,10 +276,8 @@ func projectSourcePrecision(base Document, raw []byte, figures *[]OriginalFigure
 				return e
 			}
 			candidates := []Block{}
-			for _, b := range base.Blocks {
-				if b.Page != *p.Index || !precisionTextType(b.Type) || len(b.BBox) != 4 {
-					continue
-				}
+			for _, i := range textOnPage[*p.Index] {
+				b := &base.Blocks[i]
 				match := true
 				for i, v := range norm {
 					if math.Abs(v-b.BBox[i]) > .001001 {
@@ -325,7 +285,7 @@ func projectSourcePrecision(base Document, raw []byte, figures *[]OriginalFigure
 					}
 				}
 				if match {
-					candidates = append(candidates, b)
+					candidates = append(candidates, *b)
 				}
 			}
 			if len(candidates) != 1 {
@@ -386,7 +346,7 @@ func projectSourcePrecision(base Document, raw []byte, figures *[]OriginalFigure
 			if cross {
 				for i := range regions {
 					b, _ := json.Marshal([]any{SourcePrecisionVersion, parent.ID, i, regions[i]})
-					regions[i].ID = "region_" + Digest(string(b))
+					regions[i].ID = "region_" + digestBytes(b)
 					projection.Regions = append(projection.Regions, regions[i])
 				}
 			}

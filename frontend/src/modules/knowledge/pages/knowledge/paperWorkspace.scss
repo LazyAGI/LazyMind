@@ -505,6 +505,9 @@
   ul { margin: 6px 0; padding-inline-start: 18px; color: var(--paper-muted); }
 }
 .guide-toolbar-details { width: min(420px, calc(100vw - 48px)); max-height: 65vh; overflow-y: auto; color: var(--paper-ink); }
+.guide-error-details { margin: 8px 0; font-size: 13px; }
+.guide-error-details p { margin: 6px 0; }
+.guide-error-details code { user-select: all; }
 .guide-toolbar-details .guide-generation-progress { padding: 8px 0 12px; border: 0; margin: 0; }
 .guide-toolbar-details .guide-generation-progress ol { gap: 12px; }
 .guide-toolbar-details .paper-guide-status { display: flex; flex-wrap: wrap; gap: 12px; padding: 12px 0; background: transparent; }

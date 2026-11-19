@@ -168,9 +168,10 @@ func TestPrecisionThreePhysicalPagesAndRepeatedHomeText(t *testing.T) {
 	}
 }
 func TestPrecisionBoundsAndUnsafeArchives(t *testing.T) {
-	raw, base := precisionFixture(t, nil)
+	source, original := precisionFixture(t, nil)
 	for _, name := range []string{"missing", "duplicate", "unsafe", "members", "large", "json", "depth"} {
 		t.Run(name, func(t *testing.T) {
+			raw, base := source, original
 			if name == "depth" {
 				raw, base = precisionFixture(t, func(l map[string]any) {
 					p := l["pdf_info"].([]any)[0].(map[string]any)

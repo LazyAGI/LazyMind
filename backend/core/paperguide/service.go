@@ -148,6 +148,10 @@ func (s Service) Status(ctx context.Context, scope Scope) (StatusResponse, error
 	out.SourceSHA256 = source.Hash
 	if source.Snapshot != nil {
 		out.CurrentIRDigest = source.Snapshot.IRDigest
+		if out.CanGenerate && !source.Snapshot.Coverage.hasGenerationMaterial() {
+			out.CanGenerate = false
+			out.UnavailableReason = ErrMaterial.Error()
+		}
 	}
 	if source.Snapshot == nil && !source.CanPrepare {
 		out.CanGenerate = false
@@ -237,7 +241,7 @@ func (s Service) Generate(ctx context.Context, scope Scope, in GenerateRequest) 
 	req := CreateRevision{Scope: scope, SourceSHA256: state.Hash, SnapshotPath: state.Path, DependencyID: state.DependencyID, Model: m, IdempotencyKey: in.IdempotencyKey, Regenerate: in.Regenerate}
 	if state.Snapshot != nil {
 		req.IRDigest = state.Snapshot.IRDigest
-		if !state.Snapshot.Coverage.Body || state.Snapshot.Coverage.AbstractOnly {
+		if !state.Snapshot.Coverage.hasGenerationMaterial() {
 			return RevisionView{}, false, ErrMaterial
 		}
 	}
@@ -266,7 +270,7 @@ func (s Service) Revision(ctx context.Context, scope Scope, id string, after int
 		}
 		out.Coverage = snap.Coverage
 	}
-	steps, e := s.Repo.Steps(ctx, id)
+	steps, e := s.Repo.articleSteps(ctx, r)
 	if e != nil {
 		return out, e
 	}

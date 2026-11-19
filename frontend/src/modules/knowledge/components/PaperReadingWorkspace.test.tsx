@@ -251,6 +251,21 @@ it("restores a saved guide before status arrives and mounts the original only on
   expect(screen.getByText("PDF viewer")).toBeVisible();
 });
 
+it("preserves an open guide and its request reference when the initial status read fails", () => {
+  localStorage.setItem("paper-guide-mode/u/ds/doc", "article");
+  const id = "4341046a-ec9d-4cd0-85c8-2c1ebe911956";
+  state.value = { ...state.value, status: undefined, revision: undefined, error: Object.assign(new Error("Service unavailable"), {
+    response: { status: 503, headers: { "x-request-id": id } },
+  }) };
+  render(<Harness inlineSwitch />);
+  expect(screen.queryByText("PDF viewer")).toBeNull();
+  const pane = screen.getByRole("main");
+  expect(within(pane).getByRole("alert")).toHaveTextContent("Service unavailable");
+  expect(within(pane).getByText(id)).toBeVisible();
+  fireEvent.click(within(pane).getByRole("button", { name: "Reload guide" }));
+  expect(state.value.refresh).toHaveBeenCalledOnce();
+});
+
 it("opens the original if a restored guide is no longer readable", () => {
   localStorage.setItem("paper-guide-mode/u/ds/doc", "article");
   state.value = { ...state.value, status: undefined, revision: undefined };
@@ -616,12 +631,13 @@ it("keeps a stale candidate blocked after receiving the quality 422 and refreshe
 it("keeps resume available after an unrelated 422", async () => {
   showPaused();
   api.resume.mockRejectedValueOnce(Object.assign(new Error("model unavailable"), {
-    response: { status: 422, data: { code: 2004403 } },
+    response: { status: 422, data: { code: 2004403, data: { request_id: "42ada1c1-167b-441f-abe6-424fd0985934" } } },
   }));
   render(<Harness />);
   await act(async () => openGuide("Guide"));
   fireEvent.click(screen.getByRole("button", { name: "Resume" }));
   expect(await screen.findByRole("alert")).toHaveTextContent("model unavailable");
+  expect(screen.getByRole("group", { name: "Diagnostic details" })).toHaveTextContent("42ada1c1-167b-441f-abe6-424fd0985934");
   expect(screen.getByRole("button", { name: "Resume" })).toBeEnabled();
   expect(screen.queryByText(qualityHelp)).not.toBeInTheDocument();
 });
@@ -787,6 +803,9 @@ it.each([
       openGuide("Guide"),
     );
     expect(screen.getByRole("status")).toHaveTextContent(message);
+    const details = screen.getByRole("group", { name: "Diagnostic details" });
+    expect(details).toHaveTextContent("Generation job j1");
+    expect(details).toHaveTextContent(code);
     expect(screen.getByRole("button", { name: "Resume" })).toBeEnabled();
     expect(screen.getByRole("article")).toBeVisible();
   },

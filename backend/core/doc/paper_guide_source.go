@@ -100,32 +100,9 @@ func (paperGuideSource) Load(ctx context.Context, scope paperguide.Scope, prepar
 		path := filepath.Join(dir, snapshot.SnapshotFilename())
 		// This immutable personal snapshot is independent of the shared parser cache.
 		// It contains no original PDF copy or model credentials.
-		if _, e = os.Stat(path); prepare && errors.Is(e, os.ErrNotExist) {
-			if e = os.MkdirAll(dir, 0700); e != nil {
-				return out, e
-			}
-			raw, e := json.Marshal(snapshot)
-			if e != nil {
-				return out, e
-			}
-			f, e := os.CreateTemp(dir, "snapshot-*.tmp")
-			if e != nil {
-				return out, e
-			}
-			temp := f.Name()
-			defer os.Remove(temp)
-			if _, e = f.Write(raw); e == nil {
-				e = f.Sync()
-			}
-			closeErr := f.Close()
-			if e != nil {
-				return out, e
-			}
-			if closeErr != nil {
-				return out, closeErr
-			}
-			if e = os.Rename(temp, path); e != nil {
-				return out, e
+		if prepare {
+			if err := freezeGuideSnapshot(ctx, path, snapshot); err != nil {
+				return out, err
 			}
 		}
 		out.Snapshot = &snapshot
@@ -171,6 +148,55 @@ func (paperGuideSource) Load(ctx context.Context, scope paperguide.Scope, prepar
 	out.DependencyID = job.ID
 	return out, nil
 }
+
+const maxGuideSnapshotBytes = 64 << 20
+
+func freezeGuideSnapshot(ctx context.Context, path string, snapshot paperguide.GuideSourceSnapshot) error {
+	verify := func() error {
+		frozen, err := (paperGuideSource{}).Read(ctx, path)
+		if err != nil || paperguide.ValidateSnapshot(frozen, snapshot.Identity, snapshot.IRDigest) != nil {
+			return paperguide.ErrEvidence
+		}
+		return nil
+	}
+	if _, err := os.Stat(path); err == nil {
+		return verify()
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	raw, err := json.Marshal(snapshot)
+	if err != nil {
+		return err
+	}
+	if len(raw) > maxGuideSnapshotBytes {
+		return paperguide.ErrEvidence
+	}
+	dir := filepath.Dir(path)
+	if err = os.MkdirAll(dir, 0700); err != nil {
+		return err
+	}
+	f, err := os.CreateTemp(dir, "snapshot-*.tmp")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(f.Name())
+	if _, err = f.Write(raw); err == nil {
+		err = f.Sync()
+	}
+	closeErr := f.Close()
+	if err != nil {
+		return err
+	}
+	if closeErr != nil {
+		return closeErr
+	}
+	// A simultaneous request may have already frozen the same snapshot.
+	if err = os.Link(f.Name(), path); errors.Is(err, os.ErrExist) {
+		return verify()
+	}
+	return err
+}
+
 func (paperGuideSource) Read(ctx context.Context, path string) (paperguide.GuideSourceSnapshot, error) {
 	var snap paperguide.GuideSourceSnapshot
 	if path == "" {
@@ -181,7 +207,7 @@ func (paperGuideSource) Read(ctx context.Context, path string) (paperguide.Guide
 		return snap, paperguide.ErrEvidence
 	}
 	defer f.Close()
-	e = json.NewDecoder(io.LimitReader(f, 64<<20)).Decode(&snap)
+	e = json.NewDecoder(io.LimitReader(f, maxGuideSnapshotBytes)).Decode(&snap)
 	name := filepath.Base(path)
 	boundPath := strings.Contains(name, "-"+paperguide.SourceCatalogVersion+"-")
 	if e == nil && (boundPath || snap.CatalogVersion == paperguide.SourceCatalogVersion) && name != snap.SnapshotFilename() {

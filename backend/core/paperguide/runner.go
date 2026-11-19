@@ -10,6 +10,7 @@ import (
 	"io"
 	"lazymind/core/asyncjob"
 	"lazymind/core/common/orm"
+	applog "lazymind/core/log"
 	"strings"
 	"time"
 )
@@ -25,6 +26,7 @@ type execution struct {
 	snap             GuideSourceSnapshot
 	f                asyncjob.FencedReporter
 	steps            map[string]orm.PaperGuideStep
+	excerpts         []sourceExcerpt
 }
 
 func (s Service) Run(ctx context.Context, job asyncjob.Job, reporter asyncjob.Reporter) (asyncjob.Result, error) {
@@ -185,7 +187,7 @@ func (x *execution) prepare(ctx context.Context) error {
 		if state.Hash != x.rev.SourceSHA256 {
 			return ErrSourceChanged
 		}
-		if !state.Snapshot.Coverage.Body || state.Snapshot.Coverage.AbstractOnly {
+		if !state.Snapshot.Coverage.hasGenerationMaterial() {
 			return ErrMaterial
 		}
 		e = x.s.Repo.fenced(ctx, x.f, x.rev.ID, x.rev.Epoch, func(tx *gorm.DB, r *orm.PaperGuideRevision, g *orm.PaperGuide) error {
@@ -228,10 +230,10 @@ func (x *execution) inputFits(input map[string]any) bool {
 	if err != nil {
 		return false
 	}
-	bound := len(raw) + 6000
-	if len(raw) > 1<<20 {
-		return false
-	}
+	return len(raw) <= 1<<20 && len(raw)+6000 <= x.modelInputBudget()
+}
+
+func (x *execution) modelInputBudget() int {
 	limit := x.model.ContextTokens
 	if limit <= 0 {
 		limit = 32768
@@ -240,7 +242,7 @@ func (x *execution) inputFits(input map[string]any) bool {
 	if x.model.OutputReserveTokens > 0 {
 		budget = min(budget, limit-x.model.OutputReserveTokens)
 	}
-	return bound <= budget
+	return budget
 }
 
 func unique(ids []string) []string {
@@ -353,6 +355,11 @@ func (x *execution) task(ctx context.Context, key, task string, input map[string
 	})
 	if e != nil {
 		return e
+	}
+	if callErr != nil {
+		applog.Logger.Warn().Str("job_id", x.rev.JobID).Str("revision_id", x.rev.ID).
+			Str("step", key).Str("attempt", ticket).Str("error_class", diagnostic).
+			Int64("elapsed_ms", elapsed).Msg("Paper guide model step failed")
 	}
 	if _, e = x.check(ctx); e != nil {
 		return e

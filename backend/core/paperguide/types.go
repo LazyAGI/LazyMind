@@ -87,6 +87,10 @@ type GuideCoverage struct {
 	Warnings     []string `json:"warnings"`
 }
 
+func (c GuideCoverage) hasGenerationMaterial() bool {
+	return c.Body && !c.AbstractOnly
+}
+
 type SourceSection struct {
 	ID          string   `json:"id"`
 	Title       string   `json:"title"`

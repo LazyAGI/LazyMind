@@ -244,3 +244,101 @@ func TestGuideSharedLegacyArchiveStatusRemainsReadOnly(t *testing.T) {
 		t.Fatalf("reader did not promote legacy cache: %v", err)
 	}
 }
+
+func TestConcurrentGuideSnapshotPreparationReusesOneVerifiedFile(t *testing.T) {
+	guideHTTPFixture(t)
+	scope := paperguide.Scope{OwnerID: "owner", DatasetID: "guide-ds", DocumentID: "guide-doc", Language: "zh"}
+	source := paperGuideSource{}
+	state, err := source.Load(t.Context(), scope, false)
+	if err != nil || state.Snapshot == nil {
+		t.Fatal("missing material", err)
+	}
+	start := make(chan struct{})
+	done := make(chan error, 8)
+	for i := 0; i < cap(done); i++ {
+		go func() { <-start; done <- freezeGuideSnapshot(t.Context(), state.Path, *state.Snapshot) }()
+	}
+	close(start)
+	for i := 0; i < cap(done); i++ {
+		if err := <-done; err != nil {
+			t.Fatal(err)
+		}
+	}
+	info, err := os.Stat(state.Path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = freezeGuideSnapshot(t.Context(), state.Path, *state.Snapshot); err != nil {
+		t.Fatal(err)
+	}
+	again, err := os.Stat(state.Path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	files, err := os.ReadDir(filepath.Dir(state.Path))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(files) != 1 || !os.SameFile(info, again) || !again.ModTime().Equal(info.ModTime()) {
+		t.Fatal("snapshot was replaced or temporary files remain")
+	}
+}
+
+func TestGuideUsesOnlySelectedParserArchive(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("LAZYMIND_UPLOAD_ROOT", root)
+	source := filepath.Join(root, "paper.pdf")
+	hash := pdfir.Digest("parser-archive-selection")
+	raw, vlm := guidePrecisionFixture(t, hash)
+	if err := pdfir.SaveCachedArchive(source, hash, "pipeline", raw); err != nil {
+		t.Fatal(err)
+	}
+	row := orm.Document{Ext: mustJSON(documentExt{StoredPath: source})}
+	resultPath := filepath.Join(root, "completed-ir.json")
+	if err := os.WriteFile(resultPath, mustJSON(vlm), 0600); err != nil {
+		t.Fatal(err)
+	}
+	job := orm.AsyncJob{
+		Status:      "succeeded",
+		PayloadJSON: mustJSON(pdfIRPayload{SourceSHA256: hash, Revision: pdfir.Revision}),
+		ResultJSON:  mustJSON(map[string]string{"ir_path": resultPath}),
+	}
+	state := pdfIRStatusFromJobsWithProjection(row, hash, []orm.AsyncJob{job}, false)
+	if state.Document == nil || state.Document.Parser.Model != "vlm" {
+		t.Fatal("preferred completed parser output missing")
+	}
+	if _, _, err := loadGuidePrecision(*state.Document, state.Artifact, false); err == nil {
+		t.Fatal("completed VLM job without archive borrowed another parser's retained ZIP")
+	}
+}
+
+func TestGuideArchiveReplacementBetweenReads(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("LAZYMIND_UPLOAD_ROOT", root)
+	source := filepath.Join(root, "paper.pdf")
+	hash := pdfir.Digest("archive-replacement")
+	raw, _ := guidePrecisionFixture(t, hash)
+	if err := pdfir.SaveCachedArchive(source, hash, "vlm", raw); err != nil {
+		t.Fatal(err)
+	}
+	row := orm.Document{Ext: mustJSON(documentExt{StoredPath: source})}
+	first := pdfIRStatusFromJobsWithProjection(row, hash, nil, false)
+	changed, _ := guidePrecisionFixtureWithBodyBox(t, hash, "80")
+	if err := pdfir.SaveCachedArchive(source, hash, "vlm", changed); err != nil {
+		t.Fatal(err)
+	}
+	second := pdfIRStatusFromJobsWithProjection(row, hash, nil, false)
+	for i, request := range []pdfIRResponse{first, second} {
+		if request.Document == nil {
+			t.Fatalf("request %d missing retained document", i)
+		}
+		verified, _, err := loadGuidePrecision(*request.Document, request.Artifact, false)
+		if err != nil {
+			t.Fatalf("request %d did not retain a consistent archive: %v", i, err)
+		}
+		want := []string{pdfir.Digest(string(raw)), pdfir.Digest(string(changed))}[i]
+		if verified.Precision.ArchiveDigest != want {
+			t.Fatalf("request %d projected an unexpected archive", i)
+		}
+	}
+}

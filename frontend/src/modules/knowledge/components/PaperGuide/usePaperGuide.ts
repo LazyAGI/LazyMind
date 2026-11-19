@@ -100,7 +100,6 @@ export function usePaperGuide(
         );
         if (controller.signal.aborted || live.current !== session) return;
         session.revision = mergeRevision(session.revision, delta);
-        session.revisionPending = false;
       }
       const candidate = session.status?.candidate_revision;
       if (candidate && candidate.id !== selected && candidate.run.stage === "writing") {
@@ -115,6 +114,7 @@ export function usePaperGuide(
       } else {
         session.writingRevision = undefined;
       }
+      session.revisionPending = false;
       setState({ key, status: session.status, revision: session.revision, writingRevision: session.writingRevision });
     } catch (error) {
       if (!controller.signal.aborted && live.current === session) {
@@ -132,6 +132,7 @@ export function usePaperGuide(
           key,
           status: session.status,
           revision: session.revision,
+          writingRevision: session.writingRevision,
           error,
         });
       }
@@ -163,10 +164,12 @@ export function usePaperGuide(
       timer = window.setTimeout(pollIfVisible, waitingForSummary ? 1500 : active ? 4000 : 60000);
     };
     window.addEventListener("focus", pollIfVisible);
+    window.addEventListener("online", pollIfVisible);
     window.document.addEventListener("visibilitychange", pollIfVisible);
     pollIfVisible();
     return () => {
       window.removeEventListener("focus", pollIfVisible);
+      window.removeEventListener("online", pollIfVisible);
       window.document.removeEventListener("visibilitychange", pollIfVisible);
       window.clearTimeout(timer);
       session.controller?.abort();

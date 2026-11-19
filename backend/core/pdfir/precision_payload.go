@@ -1,9 +1,6 @@
 package pdfir
 
 import (
-	"archive/zip"
-	"bytes"
-	"encoding/json"
 	"fmt"
 	"html"
 	"math"
@@ -19,29 +16,6 @@ import (
 // It proves FULL payload equality; it does not infer any parent rune offsets.
 const precisionProducerVersion = "3.4.4"
 
-func precisionContentItems(raw []byte) ([]contentItem, error) {
-	z, e := zip.NewReader(bytes.NewReader(raw), int64(len(raw)))
-	if e != nil {
-		return nil, e
-	}
-	for _, f := range z.File {
-		if strings.HasSuffix(f.Name, "_content_list.json") {
-			r, e := f.Open()
-			if e != nil {
-				return nil, e
-			}
-			data, e := bounded(r, maxJSONBytes)
-			r.Close()
-			if e != nil {
-				return nil, e
-			}
-			var items []contentItem
-			e = json.Unmarshal(data, &items)
-			return items, e
-		}
-	}
-	return nil, precisionError("missing content list")
-}
 func precisionNormalizeText(s string) string {
 	return strings.Map(func(r rune) rune {
 		if r >= 'Ａ' && r <= 'Ｚ' || r >= 'ａ' && r <= 'ｚ' || r >= '０' && r <= '９' {
@@ -195,24 +169,30 @@ func precisionItemType(item, para string) bool {
 	return item == para
 }
 func verifyPrecisionPayloads(items []contentItem, pages []precisionPage, covered []bool, collectFigure func(int, contentItem, precisionBlock, []float64)) error {
-	type placed struct {
-		page  int
-		size  []float64
-		block precisionBlock
+	type pageLayout struct {
+		size   []float64
+		blocks []precisionBlock
 	}
-	nodes := []placed{}
+	byPage := make(map[int]pageLayout, len(pages))
 	for _, p := range pages {
-		if e := walkPrecision(append(append([]precisionBlock(nil), p.Paras...), p.Discarded...), 0, func(b precisionBlock) error { nodes = append(nodes, placed{*p.Index, p.Size, b}); return nil }); e != nil {
-			return e
+		layout := pageLayout{size: p.Size}
+		if err := walkPrecision(append(append([]precisionBlock(nil), p.Paras...), p.Discarded...), 0, func(b precisionBlock) error {
+			layout.blocks = append(layout.blocks, b)
+			return nil
+		}); err != nil {
+			return err
 		}
+		byPage[*p.Index] = layout
 	}
 	for i, item := range items {
+		page := byPage[*item.Page]
+		size := page.size
 		matches := []precisionBlock{}
-		for _, node := range nodes {
-			if node.page != *item.Page || !precisionItemType(item.Type, node.block.Type) || len(item.BBox) != 4 {
+		for _, node := range page.blocks {
+			if !precisionItemType(item.Type, node.Type) || len(item.BBox) != 4 {
 				continue
 			}
-			box, e := precisionBox(node.block.BBox, node.size)
+			box, e := precisionBox(node.BBox, size)
 			if e != nil {
 				continue
 			}
@@ -223,7 +203,7 @@ func verifyPrecisionPayloads(items []contentItem, pages []precisionPage, covered
 				}
 			}
 			if same {
-				matches = append(matches, node.block)
+				matches = append(matches, node)
 			}
 		}
 		bad := func(reason string) error {
@@ -239,12 +219,6 @@ func verifyPrecisionPayloads(items []contentItem, pages []precisionPage, covered
 		canonicalBox := make([]float64, len(item.BBox))
 		for j, v := range item.BBox {
 			canonicalBox[j] = v / 1000
-		}
-		var size []float64
-		for _, page := range pages {
-			if *page.Index == *item.Page {
-				size = page.Size
-			}
 		}
 		spanCount := 0
 		for _, line := range para.Lines {

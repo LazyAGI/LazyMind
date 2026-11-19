@@ -378,7 +378,7 @@ func projectPrecisionTables(base Document, pages []precisionPage, index map[stri
 	used := map[string]bool{}
 	add := func(r SourceRegion) {
 		data, _ := json.Marshal([]any{SourcePrecisionVersion, r.ParentBlockID, len(regions), r})
-		r.ID = "region_" + Digest(string(data))
+		r.ID = "region_" + digestBytes(data)
 		regions = append(regions, r)
 	}
 tables:

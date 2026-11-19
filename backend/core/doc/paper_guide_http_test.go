@@ -7,10 +7,12 @@ import (
 	"errors"
 	"fmt"
 	"github.com/gorilla/mux"
+	"github.com/rs/zerolog"
 	"gorm.io/gorm"
 	"lazymind/core/acl"
 	"lazymind/core/asyncjob"
 	"lazymind/core/common/orm"
+	applog "lazymind/core/log"
 	"lazymind/core/paperguide"
 	"lazymind/core/pdfir"
 	"lazymind/core/readingpolicy"
@@ -755,10 +757,42 @@ func TestPaperGuideModelFailureHTTPMapping(t *testing.T) {
 		{paperguide.ErrEvidence, 422, "2004406"},
 	} {
 		w := httptest.NewRecorder()
-		paperGuideError(w, tc.err)
+		r := httptest.NewRequest(http.MethodPost, "/", nil)
+		r.Header.Set("X-Request-ID", "caller-supplied")
+		paperGuideError(w, r, tc.err)
+		requestID := w.Header().Get("X-Request-ID")
+		var envelope struct {
+			Data struct {
+				RequestID string `json:"request_id"`
+			} `json:"data"`
+		}
+		if err := json.Unmarshal(w.Body.Bytes(), &envelope); err != nil || requestID == "" || requestID == "caller-supplied" || envelope.Data.RequestID != requestID {
+			t.Fatalf("missing correlated paper guide error reference: %s", w.Body)
+		}
 		if w.Code != tc.status || !strings.Contains(w.Body.String(), tc.code) || !strings.Contains(w.Body.String(), tc.err.Error()) {
 			t.Fatalf("%d %s", w.Code, w.Body)
 		}
+	}
+}
+
+func TestGuideErrorReferenceMatchesLogAndRedactsWrappedCause(t *testing.T) {
+	var output strings.Builder
+	previous := applog.Logger
+	applog.Logger = zerolog.New(&output)
+	t.Cleanup(func() { applog.Logger = previous })
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/?source=PRIVATE_PATH", nil)
+	paperGuideError(w, req, fmt.Errorf("PRIVATE_DETAIL: %w", paperguide.ErrEvidence))
+	var entry struct {
+		RequestID string `json:"request_id"`
+		Code      string `json:"error_code"`
+	}
+	if err := json.Unmarshal([]byte(output.String()), &entry); err != nil {
+		t.Fatal(err)
+	}
+	if entry.RequestID == "" || entry.RequestID != w.Header().Get("X-Request-ID") || entry.Code != paperguide.ErrEvidence.Error() ||
+		strings.Contains(output.String()+w.Body.String(), "PRIVATE_") {
+		t.Fatal("failure must be traceable without disclosing provider or source details")
 	}
 }
 
@@ -823,6 +857,10 @@ func TestPaperGuideClientContractFailuresReachRunnerAsEvidenceErrors(t *testing.
 			if err := db.Take(&rev).Error; err != nil {
 				t.Fatal(err)
 			}
+			var logs strings.Builder
+			previousLogger := applog.Logger
+			applog.Logger = zerolog.New(zerolog.SyncWriter(&logs))
+			t.Cleanup(func() { applog.Logger = previousLogger })
 			service := paperGuideService()
 			service.ChapterConcurrency = 1
 			result, err := service.Run(t.Context(), asyncjob.Job{ID: rev.JobID, PayloadJSON: mustJSON(paperguide.JobPayload{RevisionID: rev.ID, Epoch: rev.Epoch})}, guideCheckpointFence{db: db.DB})
@@ -870,6 +908,10 @@ func TestPaperGuideClientContractFailuresReachRunnerAsEvidenceErrors(t *testing.
 				wantMarkerClass := class
 				if kind == "section_schema" && strings.HasPrefix(marker.StepKey, "request:fast:plan:") {
 					wantMarkerClass = "success"
+				}
+				if wantMarkerClass != "success" && (!strings.Contains(logs.String(), marker.StepKey) ||
+					!strings.Contains(logs.String(), rev.JobID) || strings.Contains(logs.String(), "provider-secret")) {
+					t.Fatal("the displayed job ID must lead to the failed model attempt without exposing provider data")
 				}
 				if json.Unmarshal([]byte(marker.OutputJSON), &diagnostic) != nil || diagnostic.Class != wantMarkerClass || strings.Contains(marker.OutputJSON, "provider-secret") {
 					t.Fatalf("wrong safe diagnostic: %s", marker.OutputJSON)
@@ -951,5 +993,30 @@ func TestFlashpapersHTTPTaskVersion(t *testing.T) {
 				t.Fatal(err)
 			}
 		})
+	}
+}
+
+func TestGenerationDoesNotQueueAnUnreadableFrozenSnapshot(t *testing.T) {
+	db, hash, _ := guideHTTPFixture(t)
+	t.Setenv("LAZYMIND_PAPER_GUIDE_ENABLED", "true")
+	svc := paperGuideService()
+	scope := paperguide.Scope{OwnerID: "owner", DatasetID: "guide-ds", DocumentID: "guide-doc", Language: "zh"}
+	state, err := svc.Source.Load(t.Context(), scope, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The retained PDF and parser archive are still valid, but the personal
+	// snapshot left on disk is incomplete. A worker cannot use this file.
+	if err = os.WriteFile(state.Path, []byte(`{"catalog_version":`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	out := httptest.NewRecorder()
+	GeneratePaperGuide(out, guideRequest("POST", `{"language":"zh","expected_source_hash":"`+hash+`"}`, "owner", nil))
+	var jobs int64
+	if err = db.Model(&orm.AsyncJob{}).Where("job_type = ?", PaperGuideJobType).Count(&jobs).Error; err != nil {
+		t.Fatal(err)
+	}
+	if out.Code != 422 || !strings.Contains(out.Body.String(), paperguide.ErrEvidence.Error()) || jobs != 0 {
+		t.Fatalf("status=%d queued_jobs=%d", out.Code, jobs)
 	}
 }

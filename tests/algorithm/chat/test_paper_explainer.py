@@ -21,11 +21,11 @@ CHAPTER = {'id': 'parameter-playground', 'title': 'Parameter playground', 'block
      'html': '<!doctype html><html><body><input type="range" id="rank" min="1" max="8"><output id="count"></output><script>rank.oninput=()=>count.textContent=2*8*rank.value;rank.oninput();</script></body></html>'}]}
 
 
-def execute(monkeypatch, task, data, output):
+def execute(monkeypatch, task, data, output, *, raw=False):
     calls = []
     def model(prompt, **options):
         calls.append((prompt, options))
-        return json.dumps(output)
+        return output if raw else json.dumps(output)
     monkeypatch.setattr(llm_task, 'AutoModel', lambda **kwargs: model)
     result = llm_task.run_llm_task(llm_task.LLMTaskRequest(
         task_type='paper.explainer.' + task, options={'task_version': 'paper-guide-v28'}, input={'data': data}))
@@ -69,6 +69,19 @@ def test_unusable_chapter_rejected_without_scientific_review(monkeypatch, change
     result, calls = execute(monkeypatch, 'chapter', dict(DATA, plan=PLAN, chapter_id='parameter-playground'), chapter)
     assert result.error_code == 'invalid_model_output'
     assert len(calls) == 1
+
+
+@pytest.mark.parametrize('wire', [
+    json.dumps(CHAPTER)[:-1],
+    json.dumps(CHAPTER).replace('"kind": "paragraph"', '"kind": "heading", "kind": "paragraph"', 1),
+    json.dumps(dict(CHAPTER, blocks="paragraph")),
+    json.dumps(dict(CHAPTER, blocks=[dict(CHAPTER['blocks'][0], text='x' * 14001)])),
+], ids=['truncated-json', 'duplicate-block-field', 'wrong-block-type', 'oversized-prose'])
+def test_invalid_chapter_wire_response_consumes_one_call_and_returns_no_chapter(monkeypatch, wire):
+    result, calls = execute(monkeypatch, 'chapter', dict(DATA, plan=PLAN, chapter_id=CHAPTER['id']), wire, raw=True)
+    assert result.error_code == 'invalid_model_output'
+    assert not result.output
+    assert len(calls) == result.usage['model_calls'] == 1
 
 
 def test_unplanned_chapter_does_not_call_model(monkeypatch):

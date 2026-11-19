@@ -231,6 +231,9 @@ func (r Repository) Cancel(ctx context.Context, s Scope, id string) error {
 		if rev.JobID != heldJob {
 			return ErrConflict
 		}
+		if rev.Stage == "canceled" {
+			return nil
+		}
 		if rev.Stage == "completed" {
 			return ErrConflict
 		}
@@ -290,6 +293,8 @@ func (r Repository) Resume(ctx context.Context, s Scope, id string, m ModelIdent
 		}
 		g.Epoch++
 		rev.Epoch = g.Epoch
+		// The new epoch resets unpublished chapter placeholders to queued.
+		rev.ChangeVersion++
 		rev.Stage = "queued"
 		rev.ErrorCode = ""
 		if e = tx.Save(&rev).Error; e != nil {
@@ -383,6 +388,17 @@ func (r Repository) Steps(ctx context.Context, id string) ([]orm.PaperGuideStep,
 	out := []orm.PaperGuideStep{}
 	e := r.DB.WithContext(ctx).Where("revision_id = ?", id).Order("version ASC").Find(&out).Error
 	return out, e
+}
+
+// The article needs public chapters and their display metadata. Raw model
+// responses and request receipts are retained separately for worker recovery.
+func (r Repository) articleSteps(ctx context.Context, revision orm.PaperGuideRevision) ([]orm.PaperGuideStep, error) {
+	var steps []orm.PaperGuideStep
+	err := r.DB.WithContext(ctx).Where("revision_id = ? AND version <= ?", revision.ID, revision.ChangeVersion).
+		Where("(published = ? OR step_key = ? OR step_key LIKE ? ESCAPE '!' OR step_key LIKE ?)",
+			true, "plan", "whole!_review:%", "chapter-start:"+stringInt(revision.Epoch)+":%").
+		Order("version ASC").Find(&steps).Error
+	return steps, err
 }
 func (r Repository) Transition(ctx context.Context, f asyncjob.FencedReporter, id string, epoch int64, stage, code string, finalStatus ...string) error {
 	return r.fenced(ctx, f, id, epoch, func(tx *gorm.DB, rev *orm.PaperGuideRevision, g *orm.PaperGuide) error {

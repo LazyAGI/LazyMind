@@ -44,6 +44,15 @@ const languageOptions = [{ value: "zh", label: "简体中文" }, { value: "en", 
 const qualityStopCode = "paper_guide_review_required";
 const regenerationCode = "paper_guide_regeneration_required";
 
+function guideRequestId(error: unknown): string | undefined {
+  const response = (error as { response?: {
+    data?: { data?: { request_id?: unknown } };
+    headers?: Record<string, unknown>;
+  } } | undefined)?.response;
+  const id = response?.data?.data?.request_id ?? response?.headers?.["x-request-id"];
+  return typeof id === "string" && /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/i.test(id) ? id : undefined;
+}
+
 interface Props {
   dataset: string;
   document: string;
@@ -106,7 +115,7 @@ export default function PaperReadingWorkspace(p: Props) {
   const [acceptedStage, setAcceptedStage] = useState("");
   const firstRead = useRef<{ key: string; revision: string; started: number; outline: boolean }>();
   const [pendingGeneration, setPendingGeneration] = useState(false);
-  const [error, setError] = useState("");
+  const [error, setError] = useState<{ message: string; requestId?: string }>();
   const candidate = guide.status?.candidate_revision || guide.revision;
   const mutationScope = `${storageKey}/${language}/${candidate?.id || ""}`;
   const latestMutationScope = useRef(mutationScope);
@@ -115,6 +124,7 @@ export default function PaperReadingWorkspace(p: Props) {
   const [rejectedResume, setRejectedResume] = useState<{
     scope: string;
     reason: typeof qualityStopCode | typeof regenerationCode;
+    requestId?: string;
   }>();
   const resumeRejection =
     rejectedResume?.scope === mutationScope ? rejectedResume.reason : undefined;
@@ -128,7 +138,7 @@ export default function PaperReadingWorkspace(p: Props) {
   useEffect(() => {
     mutationSequence.current += 1;
     setRejectedResume(undefined);
-    setError("");
+    setError(undefined);
     setBusy(false);
     setPendingGeneration(false);
   }, [mutationScope]);
@@ -151,7 +161,9 @@ export default function PaperReadingWorkspace(p: Props) {
       (guide.status.published_revision || guide.status.candidate_revision))
   );
   const awaitingGuideStatus = !guide.status && !guide.error;
-  const restoringGuide = awaitingGuideStatus && savedMode === "article";
+  const readErrorStatus = (guide.error as { response?: { status?: number } } | undefined)?.response?.status;
+  const initialReadFailed = !guide.status && !!guide.error && readErrorStatus !== 403 && readErrorStatus !== 404;
+  const restoringGuide = (awaitingGuideStatus || initialReadFailed) && savedMode === "article";
   const showGuide = p.eligible && (restoringGuide || (canEnter &&
     (savedMode === "article" || (!savedMode && !!guide.status?.published_revision))));
   useEffect(() => {
@@ -214,7 +226,7 @@ export default function PaperReadingWorkspace(p: Props) {
     setAcceptedStage("");
     setBusy(true);
     if (action === "generate" || action === "regenerate" || action === "resume") setPendingGeneration(true);
-    setError("");
+    setError(undefined);
     try {
       if (action === "generate" || action === "regenerate") {
         const accepted = await paperGuideApi.generate({ ...target, language: generationLanguage }, {
@@ -252,10 +264,10 @@ export default function PaperReadingWorkspace(p: Props) {
               : undefined;
         if (reason) {
           // Keep this revision blocked if the next status fetch fails or is stale.
-          setRejectedResume({ scope: mutationScope, reason });
+          setRejectedResume({ scope: mutationScope, reason, requestId: guideRequestId(e) });
           void guide.refresh().catch(() => {});
         } else {
-          setError(getLocalizedErrorMessage(e));
+          setError({ message: getLocalizedErrorMessage(e), requestId: guideRequestId(e) });
         }
       }
     } finally {
@@ -281,7 +293,7 @@ export default function PaperReadingWorkspace(p: Props) {
         if (!abort.signal.aborted && latest.current === key) setEvidence(e);
       } catch (e) {
         if (!abort.signal.aborted && latest.current === key)
-          setError(getLocalizedErrorMessage(e));
+          setError({ message: getLocalizedErrorMessage(e), requestId: guideRequestId(e) });
       } finally {
         if (!abort.signal.aborted && latest.current === key)
           setEvidenceLoading(false);
@@ -454,7 +466,7 @@ export default function PaperReadingWorkspace(p: Props) {
       />
     );
   }
-  const readingModeSwitch = p.eligible && (awaitingGuideStatus || canEnter) ? (
+  const readingModeSwitch = p.eligible && (awaitingGuideStatus || initialReadFailed || canEnter) ? (
           <div role="group" aria-label={zh ? "阅读模式" : "Reading mode"}>
             <button
               aria-pressed={!showGuide}
@@ -496,12 +508,22 @@ export default function PaperReadingWorkspace(p: Props) {
     options={languageOptions} virtual={false} value={generationLanguage} disabled={busy || generating}
     onChange={(value: "zh" | "en") => setDraftLanguage({ key: languageKey, value })}
   />;
+  const statusRequestId = guideRequestId(guide.error);
+  const requestId = error ? error.requestId : guide.error ? statusRequestId : resumeRejection && rejectedResume?.requestId;
+  const failedJob = candidate?.run.error_code ? candidate.run : undefined;
   const toolbarDetails = <div className="guide-toolbar-details">
     {generating && <GuideGenerationProgress {...progressProps} />}
             {Boolean(error || guide.error) && (
               <p role="alert" className="guide-error-notice">
-                <GuideSectionIcon role="limitations"/>{error || getLocalizedErrorMessage(guide.error)}
+                <GuideSectionIcon role="limitations"/>{error?.message || getLocalizedErrorMessage(guide.error)}
               </p>
+            )}
+            {(requestId || failedJob?.job_id) && (
+              <div className="guide-error-details" role="group" aria-label={zh ? "诊断信息" : "Diagnostic details"}>
+                {requestId && <p>{zh ? "请求编号" : "Request ID"} <code>{requestId}</code></p>}
+                {failedJob?.job_id && <p>{zh ? "生成任务" : "Generation job"} <code>{failedJob.job_id}</code></p>}
+                {failedJob?.error_code && <p>{zh ? "错误码" : "Error code"} <code>{failedJob.error_code}</code></p>}
+              </div>
             )}
             {guide.availableRevision && guide.revision && (
               <div className="paper-guide-status">
@@ -647,6 +669,12 @@ export default function PaperReadingWorkspace(p: Props) {
                 }}
                 renderAsset={renderAsset}
               />
+            ) : initialReadFailed ? (
+              <div className="paper-guide-empty">
+                <p role="alert">{getLocalizedErrorMessage(guide.error)}</p>
+                {statusRequestId && <p>{zh ? "请求编号" : "Request ID"} <code>{statusRequestId}</code></p>}
+                <Button onClick={() => void guide.refresh()}>{zh ? "重新加载导读" : "Reload guide"}</Button>
+              </div>
             ) : (generating && !submittingFirstGuide) || restoringGuide ? (<div className="paper-guide-preparing" aria-busy="true"><GuideSkeleton/></div>) : (
               <div className="paper-guide-empty">
                 <div className="guide-empty-symbol"><GuideSectionIcon role="glossary"/></div>

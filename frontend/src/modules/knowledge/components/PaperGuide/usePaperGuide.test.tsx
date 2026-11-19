@@ -346,4 +346,59 @@ it("reads new chapter progress without replacing the opened article", async () =
   await act(() => h.result.current.refresh());
   expect(h.result.current.writingRevision?.id).toBe("new");
   expect(api.revision).toHaveBeenCalledTimes(2);
+  api.status.mockRejectedValueOnce(new TypeError("offline"));
+  await act(() => h.result.current.refresh());
+  expect(h.result.current.writingRevision?.sections).toEqual(writing.sections);
+  expect(h.result.current.revision?.id).toBe(old.id);
+  api.status.mockRejectedValueOnce({ response: { status: 403 } });
+  await act(() => h.result.current.refresh());
+  expect(h.result.current.writingRevision).toBeUndefined();
+  expect(h.result.current.revision).toBeUndefined();
+});
+
+it("refreshes a visible draft immediately on network reconnect and coalesces concurrent wakeups", async () => {
+  const partial = { ...revision(), sections: [section("overview")], run: { ...revision().run, stage: "writing" } };
+  api.status.mockResolvedValue({ data: { ...status(), published_revision: null, candidate_revision: partial }, etag: "draft" });
+  api.revision.mockResolvedValue(partial);
+  const h = renderHook(() => usePaperGuide("ds", "doc", "zh", true));
+  await waitFor(() => expect(h.result.current.revision?.sections).toHaveLength(1));
+  api.status.mockRejectedValueOnce(new TypeError("offline"));
+  await act(() => h.result.current.refresh());
+  expect(h.result.current.revision?.sections).toHaveLength(1);
+  expect(h.result.current.error).toBeDefined();
+  api.status.mockResolvedValue({ data: status(), etag: "finished" });
+  api.revision.mockResolvedValue(revision());
+  const attempts = api.status.mock.calls.length;
+  await act(async () => {
+    window.dispatchEvent(new Event("online"));
+    window.dispatchEvent(new Event("online"));
+  });
+  expect(api.status).toHaveBeenCalledTimes(attempts + 1);
+  expect(h.result.current.revision?.run.stage).toBe("completed");
+  expect(h.result.current.error).toBeUndefined();
+  h.unmount();
+  window.dispatchEvent(new Event("online"));
+  expect(api.status).toHaveBeenCalledTimes(attempts + 1);
+});
+
+it("finishes the writing revision after a refresh interrupts its fetch and status returns 304", async () => {
+  const published = revision();
+  const writing = { ...revision(), id: "draft", run: { ...published.run, stage: "writing" } };
+  api.status.mockResolvedValueOnce({
+    data: { ...status(), published_revision: published, candidate_revision: writing },
+    etag: "both",
+  }).mockResolvedValue({ etag: "both" });
+  let finishInterrupted!: (value: typeof writing) => void;
+  api.revision
+    .mockResolvedValueOnce(published)
+    .mockImplementationOnce(() => new Promise(resolve => { finishInterrupted = resolve; }))
+    .mockImplementation(async (_, id) => id === "draft" ? writing : published);
+  const h = renderHook(() => usePaperGuide("ds", "doc", "zh", true));
+  await waitFor(() => expect(api.revision).toHaveBeenCalledTimes(2));
+  await act(() => h.result.current.refresh());
+  expect(api.revision.mock.calls[1][3].aborted).toBe(true);
+  await act(async () => finishInterrupted({ ...writing, version: 0 }));
+  expect(h.result.current.writingRevision?.version).toBe(writing.version);
+  expect(h.result.current.revision?.id).toBe(published.id);
+  h.unmount();
 });

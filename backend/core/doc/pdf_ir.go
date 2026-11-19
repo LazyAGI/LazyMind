@@ -37,6 +37,8 @@ type pdfIRPayload struct {
 type pdfIRResult struct {
 	IRPath  string `json:"ir_path"`
 	RawPath string `json:"raw_path"`
+	// Held only for the guide request that selected this shared archive.
+	archive []byte
 }
 type pdfIRResponse struct {
 	Artifact     pdfIRResult     `json:"-"`
@@ -95,6 +97,9 @@ func pdfIRStatusFromJobsWithProjection(row orm.Document, hash string, jobs []orm
 			encoded, err := json.Marshal(d)
 			if err == nil && int64(len(encoded)) <= pdfIRMaxArtifactBytes {
 				shared = &d
+				if !upgrade {
+					artifact.archive = raw
+				}
 				s.Artifact = artifact
 			} else {
 				s.Status, s.ErrorMessage, s.ErrorCode = "failed", pdfIRTooLargeMessage, pdfIRTooLargeCode
@@ -135,7 +140,7 @@ jobsLoop:
 				}
 			}
 		case "succeeded":
-			d, message := readPDFIRJobResult(j, hash, upgrade)
+			d, artifact, message := readPDFIRJobResult(j, hash, upgrade)
 			if d != nil {
 				if latest {
 					s.Status = "ready"
@@ -143,7 +148,7 @@ jobsLoop:
 				}
 				if shared == nil || shared.Parser.Model != "vlm" && d.Parser.Model == "vlm" {
 					shared = d
-					_ = json.Unmarshal(j.ResultJSON, &s.Artifact)
+					s.Artifact = artifact
 				}
 			} else if latest {
 				s.Status = "failed"
@@ -201,27 +206,27 @@ func lookupPDFIRSharedArtifact(source, hash string, upgrade bool) ([]byte, pdfir
 	return nil, pdfir.Document{}, incomplete, pdfIRResult{}
 }
 
-func readPDFIRJobResult(j orm.AsyncJob, hash string, upgrade bool) (*pdfir.Document, string) {
+func readPDFIRJobResult(j orm.AsyncJob, hash string, upgrade bool) (*pdfir.Document, pdfIRResult, string) {
 	var result pdfIRResult
 	if json.Unmarshal(j.ResultJSON, &result) != nil {
-		return nil, "PDF IR artifact is invalid; retry parsing"
+		return nil, result, "PDF IR artifact is invalid; retry parsing"
 	}
 	f, err := os.Open(result.IRPath)
 	if err != nil {
-		return nil, "PDF IR artifact is missing; retry parsing"
+		return nil, result, "PDF IR artifact is missing; retry parsing"
 	}
 	defer f.Close()
 	if info, err := f.Stat(); err == nil && info.Size() > pdfIRMaxArtifactBytes {
-		return nil, pdfIRTooLargeMessage
+		return nil, result, pdfIRTooLargeMessage
 	}
 	var d pdfir.Document
 	if err := json.NewDecoder(io.LimitReader(f, pdfIRMaxArtifactBytes)).Decode(&d); err != nil || d.SourceSHA256 != hash {
-		return nil, "PDF IR artifact is invalid; retry parsing"
+		return nil, result, "PDF IR artifact is invalid; retry parsing"
 	}
 	if upgrade {
 		upgradePDFIRProjection(&d, result)
 	}
-	return &d, ""
+	return &d, result, ""
 }
 
 type pdfStructureStatus = pdfir.StructureStatus
