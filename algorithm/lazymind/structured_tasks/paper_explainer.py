@@ -235,7 +235,8 @@ Aim for 2500–3500 Chinese characters total in the plan; source_ids locate data
 must supply enough shared decisions
 for chapters to be written IN PARALLEL: consistent symbols, examples, boundaries, no dependency on
 another chapter's generated text. Assign each key concept a first explanation; avoid repetition.
-For Overview, identify the central takeaway and 2–3 concrete contributions or results with their scope. Omit reading order and chapter previews.
+For Overview, identify the central takeaway and 2–3 concrete contributions or results with their scope.\
+ Omit reading order and chapter previews.
 Fill paper_flow with short, self-contained labels in the requested language. Give one research field,
 the specific obstacles motivating the work, one proposed method, and its main technical components.
 Prefer the few most informative problems and modules. Each node should fit in one or two lines.
