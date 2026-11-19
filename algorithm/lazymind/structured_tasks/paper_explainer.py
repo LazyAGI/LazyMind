@@ -235,8 +235,7 @@ Aim for 2500–3500 Chinese characters total in the plan; source_ids locate data
 must supply enough shared decisions
 for chapters to be written IN PARALLEL: consistent symbols, examples, boundaries, no dependency on
 another chapter's generated text. Assign each key concept a first explanation; avoid repetition.
-Overview is 200–350 Chinese characters (not 500+), no subheadings. It gives a one-sentence TL;DR and 2–3
-concrete contributions/results with their scope, then stop. Omit reading order and chapter previews.
+For Overview, identify the central takeaway and 2–3 concrete contributions or results with their scope. Omit reading order and chapter previews.
 Fill paper_flow with short, self-contained labels in the requested language. Give one research field,
 the specific obstacles motivating the work, one proposed method, and its main technical components.
 Prefer the few most informative problems and modules. Each node should fit in one or two lines.
@@ -248,7 +247,7 @@ The Big Idea centers on one diagram and a simple intuition. The method chapters 
 with a worked example and formula meanings. Results explains the experiments and comparisons.
 Limitations discusses practical boundaries. Glossary introduces the paper's FIELD, not a formula
 symbol dictionary: its central problems, families of methods, foundational concepts and how they
-relate to this paper. Choose 6–10 relevant concepts, each explaining what it is and why it matters here.
+relate to this paper. Typically choose 6–10 concepts; use fewer when they cover the necessary background.
 For example, a preference-learning paper needs preference learning, reward modeling, RLHF and
 policy regularization rather than entries for x, y, beta and Z. Adapt concepts to the actual paper.
 Explain symbols locally at their first use in mechanism chapters; do not move that task to Glossary.
@@ -261,8 +260,10 @@ For the others, choose the paper's defining operations: parameter-efficient meth
 size/rank/coverage calculator; image/noise processes need a visible image/field trajectory plus
 signal/noise values, not only scalar arithmetic; staged algorithms need state changes at each step.
 Avoid two modules demonstrating the same mechanism. Do not invent measurements to fill a chart.
-Each interaction description states the learning question, controls, state/visual response, equations
-or concrete data, and a default example. Use custom HTML/SVG/canvas/JS with visible state changes, not buttons
+Give each hands-on demo one learning question and one main observable outcome. Specify a default
+example, the input the reader changes, what stays fixed, and the visible response that answers the
+question. Prefer one or two controls; use linked views when comparing them reveals the mechanism.
+Ground the response in equations or concrete data. Use custom HTML/SVG/canvas/JS with visible state changes, not buttons
 switching paragraphs. Design labels around the change the reader can see; omit generic provenance footers.
 If two chapters teach the same computation, give only ONE a module; the other uses a short worked
 example. Prefer a distinct geometric/process insight over a second matrix/arithmetic widget.
@@ -283,8 +284,7 @@ Define 1–3 compact shared_examples with stable IDs, scenario, named inputs (va
 relationships/constraints. Reference example_ids from all chapters using that example. Reuse one
 main scenario across chapters; introduce another only for a distinct learning question. Do not copy
 large experimental tables into these examples. Keep these fields within the existing plan budget.
-For interactions, state what stays fixed, what changes, and the observation that answers the learning
-question. To explain associative scan, compare a serial chain and a tree grouping of the SAME ordered
+To explain associative scan, compare a serial chain and a tree grouping of the SAME ordered
 updates; swapping updates demonstrates noncommutativity, not associativity. Prefer mechanism
 insight over another size calculator. Results must cover the main application/model and its reported
 metric/configuration, not only convenient toy benchmarks. If no numeric result is available, say so.
@@ -306,8 +306,7 @@ Use shared_examples and the selected example_ids as the common source of scenari
 constraints. Keep symbols/units stable; explicitly explain a necessary change of example.
 In the overview, omit all navigation prose, suggested reading order and lists of chapter titles. In other
 chapters, reference chapters by their exact title, never "the previous chapter" or invented prose.
-Overview: 200–350 Chinese characters, paragraphs only, NO subheadings.
-Glossary: 6–10 domain concepts, primarily introducing the research field, its problems and method
+Glossary: explain the planned domain concepts, primarily introducing the research field, its problems and method
 families, with their relation to THIS paper. It is NOT a list of formula symbols or variable meanings.
 Do not give standalone entries for x, beta, tensor dimensions, etc. Explain these where used in the
 main text. Each domain entry should say what it means concretely and how it helps understand the paper.
@@ -324,7 +323,9 @@ NOT Markdown. No **bold**, pipe tables or fences.
 Use paragraph blocks for short prose or Unicode bullets; heading blocks for short
 subheadings; formula blocks for standalone LaTeX (without fences or $$); playground blocks for
 purpose-built visual explanations. Inline math uses $...$. Use real paragraph breaks, not literal \\n.
-Insert the original figures assigned in the chapter's figure_ids near the corresponding explanation.
+Insert each assigned original figure immediately after the first paragraph where seeing it helps
+the reader follow the argument. In that paragraph, identify the component, panel or comparison to
+look at and explain its relevance. Introduce any prerequisite terms before that paragraph.
 Use a figure block with the matching figure_id and html="". Its text is the original caption in the
 guide language: faithfully translate the complete catalog caption into Simplified Chinese for zh
 or English for en. If already in that language, keep the wording. Omit only the leading figure
@@ -333,12 +334,17 @@ Do not summarize, add commentary, or infer missing details. Put teaching explana
 paragraphs. Never generate an image URL, coordinates, a Markdown image, or put the original
 inside playground HTML. You have captions, not image pixels: do not invent visual details such as
 colors or positions not described in the source. Do not force unrelated figures into the chapter.
-Normal blocks have html="". evidence_ids cite source IDs when useful; use [] for teaching-only text.
+Normal blocks have html="". For each block reporting a paper-specific fact, method setting,
+experimental configuration, metric, comparison or author-stated limitation, put the supplied source
+IDs supporting those claims in that block's evidence_ids. Include the supporting source for each
+claim if a block draws on several excerpts. This also applies to values shown in results HTML.
+Use [] for a purely instructional example, deduction or transition. If an example also uses a
+reported value, cite its source. Keep these source IDs in evidence_ids, outside reader-visible content.
 Write like a visual tutorial: direct claim first, short explanation, concrete illustration. Prefer
 2–4 sentence paragraphs and descriptive subheadings to dense essays. Do not repeat the paper
 motivation, shared scenario or definition already assigned to an earlier chapter. Explain why
 operations exist, how variables connect to the picture, then walk through concrete numbers.
-Keep the glossary to 6–10 concise entries. Spend extra length on worked steps,
+Keep glossary entries concise. Spend extra length on worked steps,
 comparisons and interpretation, not repeated background. Follow the plan's topic ownership.
 Keep the interface language consistent. Do not add attribution labels to every paragraph or narrate
 review/correction history. Keep one concise caveat where it changes interpretation; do not repeat disclaimers
@@ -398,7 +404,10 @@ def length_guidance(data):
     pages = data.page_count
     if pages is not None and pages <= 12:
         zh, en = ('3,500–5,500', '400–700'), ('1,800–2,800', '200–350')
-        focus = 'Prefer two focused method chapters; include a deep dive only for a distinct result.'
+        focus = ('Prefer two focused method chapters; include a deep dive only for a distinct result. '
+                 'Prioritize worked derivations, examples and the main experimental comparison in '
+                 'the prose budget. The chapter range is a guide, not a minimum: keep bottlenecks and '
+                 'limitations as short as their explanation allows and use only the glossary terms needed.')
     elif pages is not None and pages > 40:
         zh, en = ('10,000–15,000', '1,000–1,600'), ('5,000–7,500', '500–800')
         focus = ('Organize the main argument into distinct mechanisms or themes. Use the extra space '
@@ -420,6 +429,11 @@ def plan_prompt(data):
 
 def chapter_prompt(data):
     instruction = CHAPTER_PROMPT + length_guidance(data)
+    if data.chapter_id == 'overview':
+        target = '200–350 Chinese characters' if data.language == 'zh' else '100–175 English words'
+        instruction += (f'\nOverview length: aim for {target}. Write paragraphs only, without subheadings. '
+                        'Open with a one-sentence takeaway, then give the planned contributions or results '
+                        'and the conditions under which they hold.\n')
     if data.chapter_id not in BACKBONE:
         instruction += """
 Make the first block a short opening paragraph in the guide language, before any subheading,

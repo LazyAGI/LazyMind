@@ -216,7 +216,19 @@ def test_plan_and_chapter_share_page_budget(monkeypatch, pages, zh_total, en_tot
         result, calls = execute(monkeypatch, task, payload, output)
         assert result.status == 'succeeded', result.error_code
         assert len(calls) == 1
-        assert expected in calls[0][0]
+        instruction = calls[0][0].split('Output schema:')[0]
+        assert expected in instruction
+        assert ('The chapter range is a guide, not a minimum' in instruction) == (pages is not None and pages <= 12)
+        assert 'Overview length:' not in instruction
+
+
+@pytest.mark.parametrize('language,budget', [('zh', '200–350 Chinese characters'), ('en', '100–175 English words')])
+def test_overview_writer_receives_language_specific_budget(monkeypatch, language, budget):
+    result, calls = execute(monkeypatch, 'chapter', dict(DATA, language=language, plan=PLAN, chapter_id='overview'),
+                            dict(CHAPTER, id='overview', blocks=CHAPTER['blocks'][:1]))
+    assert result.status == 'succeeded', result.error_code
+    assert len(calls) == 1
+    assert f'Overview length: aim for {budget}' in calls[0][0].split('Output schema:')[0]
 
 
 def test_emphasis_wrapper_removed_before_publishing_plain_text(monkeypatch):
