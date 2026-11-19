@@ -85,6 +85,10 @@ export function usePaperGuide(
       const selected = followLatest
         ? newest || session.selected
         : session.selected || newest;
+      // Expose the confirmed job stage while chapter content is in flight.
+      if (response.data && isGuideRunActive(session.status?.candidate_revision?.run.stage)) {
+        setState({ key, status: session.status, revision: session.revision, writingRevision: session.writingRevision });
+      }
       if (selected) {
         session.selected = selected;
         session.revisionPending = true;
@@ -152,7 +156,11 @@ export function usePaperGuide(
     session.schedulePoll = () => {
       window.clearTimeout(timer);
       const active = isGuideRunActive(session.status?.candidate_revision?.run.stage);
-      timer = window.setTimeout(pollIfVisible, active ? 4000 : 60000);
+      const stage = session.status?.candidate_revision?.run.stage;
+      const waitingForSummary = !session.status?.published_revision &&
+        (stage === "planning" || stage === "writing") &&
+        !session.revision?.sections.some(section => section.role === "overview" && section.blocks.length);
+      timer = window.setTimeout(pollIfVisible, waitingForSummary ? 1500 : active ? 4000 : 60000);
     };
     window.addEventListener("focus", pollIfVisible);
     window.document.addEventListener("visibilitychange", pollIfVisible);

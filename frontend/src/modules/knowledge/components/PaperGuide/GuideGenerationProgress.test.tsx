@@ -28,7 +28,7 @@ it("keeps queue wait separate from the generation estimate", () => {
   expect(screen.getByText("开始后约 2 分钟")).toBeVisible();
   expect(screen.queryByText("仍在生成")).toBeNull();
   view.rerender(<GuideGenerationProgress stage="planning" compact zh />);
-  expect(screen.getByText("预计约 2 分钟")).toBeVisible();
+  expect(screen.getByText("整篇通常约 2 分钟")).toBeVisible();
 });
 
 it("shows the chapters actually being written and updates the queue as chapters finish", () => {

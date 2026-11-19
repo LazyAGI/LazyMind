@@ -884,17 +884,39 @@ it("immediately acknowledges generation while the request is still pending", asy
   state.value = { ...state.value, revision: undefined, status: { ...status(), published_revision: null, candidate_revision: null } };
   let reject!: (error: Error) => void;
   api.generate.mockImplementationOnce(() => new Promise((_, fail) => { reject = fail; }));
-  const view = render(<Harness />);
+  render(<Harness />);
   openGuide("Guide");
   fireEvent.click(screen.getByRole("button", { name: "Prepare paper and generate guide" }));
   expect(screen.getByText("Starting")).toBeVisible();
   fireEvent.click(screen.getByRole("button", { name: "Generation status and actions" }));
   expect(screen.getByText(/generation usually takes about 2 minutes after it starts/)).toBeInTheDocument();
-  expect(view.container.querySelector(".guide-skeleton")).not.toBeNull();
+  expect(screen.getByRole("button", { name: "Submitting…" })).toBeDisabled();
   expect(screen.queryByRole("button", { name: "Prepare paper and generate guide" })).toBeNull();
   await act(async () => reject(new Error("Connection lost")));
   expect(screen.getByRole("alert")).toHaveTextContent("Connection lost");
   expect(screen.getByRole("button", { name: "Prepare paper and generate guide" })).toBeEnabled();
+});
+
+it("shows the acknowledged queue before refresh finishes and times the first readable draft", async () => {
+  state.value = { ...state.value, revision: undefined, status: { ...status(), published_revision: null, candidate_revision: null } };
+  const draft = { ...revision(), run: { ...revision().run, stage: "writing" } };
+  api.generate.mockResolvedValueOnce({ id: draft.id, run: { stage: "queued" } });
+  const view = render(<Harness />);
+  openGuide("Guide");
+  fireEvent.click(screen.getByRole("button", { name: "Prepare paper and generate guide" }));
+  expect(await screen.findByText("Queued")).toBeVisible();
+  const plan = { layout: "flashpapers", sections: [{ role: "overview", title: "Paper Summary" }] };
+  state.value = { ...state.value, revision: { ...draft, plan, sections: [] },
+    status: { ...status(), published_revision: null, candidate_revision: draft } };
+  view.rerender(<Harness />);
+  const timing = (key: string) => JSON.parse(localStorage.getItem("lazymind.paper-guide.click-to-" + key) || "null");
+  expect(timing("outline").samples).toHaveLength(1);
+  expect(timing("firstParagraph")).toBeNull();
+  state.value.revision = { ...draft, plan, sections: [{ ...draft.sections[0], role: "overview" }] };
+  view.rerender(<Harness />);
+  expect(timing("firstParagraph").p90).toBeGreaterThanOrEqual(timing("outline").p50);
+  view.rerender(<Harness />);
+  expect(timing("firstParagraph").samples).toHaveLength(1);
 });
 
 it("regenerates a completed guide with the selected model while retaining the current article", async () => {

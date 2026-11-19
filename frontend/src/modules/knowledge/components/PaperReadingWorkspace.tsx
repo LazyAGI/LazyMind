@@ -29,6 +29,7 @@ import {
 import { usePaperReaderSession } from "../api/paperReader";
 import { paperGuideApi } from "../api/paperGuide";
 import { usePaperGuide } from "./PaperGuide/usePaperGuide";
+import { recordGuideLatency } from "./PaperGuide/readingLatency";
 import { isGuideRunActive } from "./PaperGuide/guideRunState";
 import PaperGuideReader from "./PaperGuide/PaperGuideReader";
 import PaperGuideEvidencePreview from "./PaperGuide/PaperGuideEvidence";
@@ -102,6 +103,8 @@ export default function PaperReadingWorkspace(p: Props) {
   const [regenerateOpen, setRegenerateOpen] = useState(false);
   const [models, setModels] = useState<ReadingProviderSelection>();
   const [busy, setBusy] = useState(false);
+  const [acceptedStage, setAcceptedStage] = useState("");
+  const firstRead = useRef<{ key: string; revision: string; started: number; outline: boolean }>();
   const [pendingGeneration, setPendingGeneration] = useState(false);
   const [error, setError] = useState("");
   const candidate = guide.status?.candidate_revision || guide.revision;
@@ -207,18 +210,26 @@ export default function PaperReadingWorkspace(p: Props) {
     const isCurrent = () =>
       latestMutationScope.current === mutationScope &&
       mutationSequence.current === sequence;
+    const clickedAt = performance.now();
+    setAcceptedStage("");
     setBusy(true);
     if (action === "generate" || action === "regenerate" || action === "resume") setPendingGeneration(true);
     setError("");
     try {
       if (action === "generate" || action === "regenerate") {
-        await paperGuideApi.generate({ ...target, language: generationLanguage }, {
+        const accepted = await paperGuideApi.generate({ ...target, language: generationLanguage }, {
           language: generationLanguage,
           expected_source_hash: guide.status?.source_sha256 || "",
           idempotency_key: crypto.randomUUID(),
           regenerate: action === "regenerate",
           ...(action === "regenerate" && model ? { model_ref: model } : {}),
         });
+        if (isCurrent() && accepted?.id) {
+          setAcceptedStage(accepted.run?.stage || "");
+          if (action === "generate") {
+            firstRead.current = { key: storageKey, revision: accepted.id, started: clickedAt, outline: false };
+          }
+        }
       } else if (candidate) {
         await paperGuideApi[action](target, candidate.id);
       }
@@ -315,11 +326,32 @@ export default function PaperReadingWorkspace(p: Props) {
   const mountAuxiliary = mountSource || guideChatKey === storageKey;
   const auxVisible = mountAuxiliary && p.auxiliaryOpen && !sourceOpen;
   const dual = width >= 1100;
+  const articleVisible = showGuide && (dual || (!sourceOpen && !auxVisible));
+  useEffect(() => {
+    const timing = firstRead.current;
+    const revision = guide.revision;
+    if (!articleVisible || !timing || timing.key !== storageKey || timing.revision !== revision?.id || !revision) return;
+    const recordVisible = () => {
+      if (document.visibilityState === "hidden" || firstRead.current !== timing) return;
+      if (!timing.outline && revision.plan?.sections.length) {
+        recordGuideLatency("outline", timing.started);
+        timing.outline = true;
+      }
+      if (revision.sections.some(section => section.blocks.some(block => block.kind === "paragraph" && block.text.trim()))) {
+        recordGuideLatency("firstParagraph", timing.started);
+        firstRead.current = undefined;
+      }
+    };
+    recordVisible();
+    document.addEventListener("visibilitychange", recordVisible);
+    return () => document.removeEventListener("visibilitychange", recordVisible);
+  }, [articleVisible, guide.revision, storageKey]);
   const stage = candidate?.run.stage;
   const resumable = !!stage && ["paused", "failed", "canceled"].includes(stage);
   const active = isGuideRunActive(stage);
   useEffect(() => { if (active || resumable || stage === "completed" || stage === "source_changed") setPendingGeneration(false); }, [active, resumable, stage]);
   const generating = active || pendingGeneration;
+  const submittingFirstGuide = pendingGeneration && !candidate && !acceptedStage;
   const generationClock = useRef<{ active: boolean; startedAt: number; generationStartedAt?: number }>({ active: false, startedAt: Date.now() });
   if (generating && !generationClock.current.active) {
     generationClock.current.startedAt = Date.now();
@@ -444,9 +476,11 @@ export default function PaperReadingWorkspace(p: Props) {
     startedAt: Number.isFinite(submittedAt) ? Math.min(submittedAt, Date.now()) : generationClock.current.startedAt,
     generationStartedAt: generationClock.current.generationStartedAt,
     zh,
-    stage: pendingGeneration && !active ? "submitting" : stage || "queued",
+    stage: pendingGeneration && !active ? acceptedStage || "submitting" : stage || "queued",
     total: progressRevision?.plan?.sections.length ?? 0,
     done: progressRevision?.sections.filter(section => section.blocks.length > 0).length ?? 0,
+    writingSummary: progressRevision?.sections.some(section => section.role === "overview" &&
+      !section.blocks.length && section.publication_status === "generating"),
     writing: progressRevision?.sections.filter(section =>
       !section.blocks.length && section.publication_status === "generating"
     ).map(section => section.title) ?? [],
@@ -613,7 +647,7 @@ export default function PaperReadingWorkspace(p: Props) {
                 }}
                 renderAsset={renderAsset}
               />
-            ) : generating || restoringGuide ? (<div className="paper-guide-preparing" aria-busy="true"><GuideSkeleton/></div>) : (
+            ) : (generating && !submittingFirstGuide) || restoringGuide ? (<div className="paper-guide-preparing" aria-busy="true"><GuideSkeleton/></div>) : (
               <div className="paper-guide-empty">
                 <div className="guide-empty-symbol"><GuideSectionIcon role="glossary"/></div>
                 <div className="guide-article-kicker">{zh ? "论文导读" : "PAPER GUIDE"}</div>
@@ -635,10 +669,10 @@ export default function PaperReadingWorkspace(p: Props) {
                   <>
                     <div className="guide-language-field"><label htmlFor="guide-start-language">{languageLabel}</label>{languageSelect("guide-start-language")}</div>
                     <button
-                      disabled={busy || !guide.status?.can_generate}
+                      disabled={generating || busy || !guide.status?.can_generate}
                       onClick={() => void run("generate")}
                     >
-                      {p.ir
+                      {submittingFirstGuide ? (zh ? "正在提交…" : "Submitting…") : p.ir
                         ? zh
                           ? "生成论文导读"
                           : "Generate paper guide"

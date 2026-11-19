@@ -4,7 +4,7 @@ export function GuideSkeleton() {
   return <div className="guide-skeleton" aria-hidden="true"><span className="guide-skeleton-heading"/>{[0, 1, 2, 3].map(i => <span key={i}/>)}<div className="guide-skeleton-figure"/>{[4, 5, 6].map(i => <span key={i}/>)}</div>;
 }
 
-export default function GuideGenerationProgress({ stage, total = 0, done = 0, writing = [], zh, compact = false, startedAt, generationStartedAt: knownGenerationStart }: { generationStartedAt?: number; startedAt?: number; compact?: boolean; stage: string; total?: number; done?: number; writing?: string[]; zh: boolean }) {
+export default function GuideGenerationProgress({ stage, total = 0, done = 0, writing = [], writingSummary = false, zh, compact = false, startedAt, generationStartedAt: knownGenerationStart }: { generationStartedAt?: number; startedAt?: number; compact?: boolean; stage: string; total?: number; done?: number; writing?: string[]; writingSummary?: boolean; zh: boolean }) {
   const [mountedAt] = useState(Date.now);
   const started = startedAt ?? mountedAt;
   const [elapsed, setElapsed] = useState(() => Math.floor((Date.now() - started) / 1000));
@@ -22,10 +22,10 @@ export default function GuideGenerationProgress({ stage, total = 0, done = 0, wr
   const generationElapsed = activeStart === null ? 0 : Math.max(0, Math.floor((Date.now() - activeStart) / 1000));
   const estimate = waiting
     ? (zh ? "开始后约 2 分钟" : "About 2 min once started")
-    : generationElapsed < 120 ? (zh ? "预计约 2 分钟" : "About 2 min") : (zh ? "仍在生成" : "Still generating");
+    : generationElapsed < 120 ? (zh ? "整篇通常约 2 分钟" : "Full guide usually takes 2 min") : (zh ? "仍在生成" : "Still generating");
   const step = stage === "checking" ? 3 : stage === "writing" ? 2 : stage === "planning" ? 1 : 0;
   const labels = zh ? ["读取论文", "规划目录", "生成章节", "整理导读"] : ["Read paper", "Plan outline", "Write chapters", "Finish guide"];
-  const status = stage === "queued" ? (zh ? "排队中" : "Queued") : stage === "submitting" ? (zh ? "正在提交" : "Starting") : labels[step];
+  const status = stage === "queued" ? (zh ? "已提交，排队中" : "Queued") : stage === "submitting" ? (zh ? "正在提交" : "Starting") : stage === "writing" && writingSummary ? (zh ? "正在写论文简述" : "Writing paper summary") : labels[step];
   if (compact) return <span className="guide-progress-compact">
     <span className={`guide-progress-track${total ? "" : " is-indeterminate"}`} aria-hidden="true">
       <i style={total ? { transform: `scaleX(${Math.min(1, done / total)})` } : undefined} />

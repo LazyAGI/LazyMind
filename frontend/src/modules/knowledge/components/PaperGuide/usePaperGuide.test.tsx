@@ -102,6 +102,27 @@ it("lets a slow revision finish across polling ticks", async () => {
     vi.useRealTimers();
   }
 });
+it("checks a first-time draft sooner until the summary is readable", async () => {
+  vi.useFakeTimers();
+  try {
+    const draft = { ...revision(), sections: [], run: { ...revision().run, stage: "writing" } };
+    const writing = { ...status(), published_revision: null, candidate_revision: draft };
+    api.status.mockResolvedValue({ data: writing });
+    api.revision.mockResolvedValueOnce(draft).mockResolvedValue({ ...draft, sections: [section("overview")] });
+    const h = renderHook(() => usePaperGuide("ds", "doc", "zh", true));
+    await act(async () => {});
+    await act(() => vi.advanceTimersByTimeAsync(1500));
+    expect(h.result.current.revision?.sections[0]?.role).toBe("overview");
+    await act(() => vi.advanceTimersByTimeAsync(3999));
+    expect(api.status).toHaveBeenCalledTimes(2);
+    await act(() => vi.advanceTimersByTimeAsync(1));
+    expect(api.status).toHaveBeenCalledTimes(3);
+    h.unmount();
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
 it("keeps data on 304 and requests incremental corrections", async () => {
   const h = renderHook(() => usePaperGuide("ds", "doc", "zh", true));
   await waitFor(() => expect(h.result.current.revision).toBeDefined());
