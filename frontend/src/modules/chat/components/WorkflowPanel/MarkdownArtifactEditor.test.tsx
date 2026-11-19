@@ -6,6 +6,7 @@ import { useState } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mdxMocks = vi.hoisted(() => ({
+  rejectImport: false,
   onChange: undefined as ((value: string, initial?: boolean) => void) | undefined,
   imagePreviewHandler: undefined as ((url: string) => Promise<string>) | undefined,
 }));
@@ -42,7 +43,7 @@ vi.mock('@mdxeditor/editor', async (importOriginal) => {
     const hasInternalReference = renderedMarkdown.includes('[beta](#block-sec-1)');
     const hasSourceReference = renderedMarkdown.includes('[1](#source-4.1)');
     React.useEffect(() => {
-      if (renderedMarkdown.includes('<!-- unsupported -->')) {
+      if (mdxMocks.rejectImport) {
         (props.onError as ((payload: { error: string; source: string }) => void) | undefined)?.({
           error: 'MDX parse error',
           source: renderedMarkdown,
@@ -213,6 +214,7 @@ const rangeClientRectsDescriptor = Object.getOwnPropertyDescriptor(
 );
 
 beforeEach(() => {
+  mdxMocks.rejectImport = false;
   vi.stubGlobal('ResizeObserver', class {
     observe() {}
     disconnect() {}
@@ -458,6 +460,7 @@ describe('MarkdownArtifactEditor MDX compatibility', () => {
   });
 
   it('shows the original text when the MDX parser rejects a document', async () => {
+    mdxMocks.rejectImport = true;
     render(
       <MarkdownArtifactEditor
         markdown={'<!-- unsupported -->\n\n正文仍需可见'}
@@ -603,7 +606,7 @@ describe('MarkdownArtifactEditor rewrite selection highlight', () => {
       .toHaveTextContent('1.');
   });
 
-  it('keeps TeX expressions as Markdown text instead of parsing them as MDX', () => {
+  it('passes TeX expressions unchanged to the formula plugin', () => {
     const { container } = render(
       <MarkdownArtifactEditor
         markdown={'$\\mathcal{D}=\\{(x_i,y_i)\\}_{i=1}^{N}$ and $y_{<t}$'}
@@ -612,7 +615,7 @@ describe('MarkdownArtifactEditor rewrite selection highlight', () => {
       />,
     );
     expect(container.querySelector<HTMLElement>('.writer-markdown-editor__surface')?.dataset.markdown)
-      .toBe('$\\mathcal\\{D\\}=\\{(x_i,y_i)\\}_\\{i=1\\}^\\{N\\}$ and $y_\\{\\<t\\}$');
+      .toBe('$\\mathcal{D}=\\{(x_i,y_i)\\}_{i=1}^{N}$ and $y_{<t}$');
   });
 
   it.each(['editor', 'artifact', 'tab', 'composite'])('navigates the outline using the actual %s scroller', (owner) => {

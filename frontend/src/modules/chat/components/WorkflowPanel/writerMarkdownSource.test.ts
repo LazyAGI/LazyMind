@@ -72,6 +72,17 @@ it('keeps untouched inline URL and ampersand spelling while editing the same par
   expect(preserveMarkdownSource(source, normalized, normalized.replace('Old','New'))).toBe(source.replace('Old','New'));
 });
 
+it('retains hidden comments at the boundary of replaced text', () => {
+ const source = '原始段落<!-- 行内备注 -->。\n';
+ const saved = preserveMarkdownSource(source, '原始段落。', '修改段落。');
+ expect(saved).toBe('修改段落<!-- 行内备注 -->。\n');
+ expect(preserveMarkdownSource(saved, '修改段落。', '再次修改。')).toBe('再次修改<!-- 行内备注 -->。\n');
+});
+
+it('removes a hidden inline comment when its entire paragraph is removed', () => {
+ expect(preserveMarkdownSource('删除<!-- 备注 -->这段。\n\n保留。', '删除这段。\n\n保留。', '保留。')).toBe('保留。');
+});
+
 it('changes inline formatting without normalizing an unrelated URL in that paragraph', () => {
   const source = 'Old https://example.org A & B.\n';
   const normalized = 'Old [https://example.org](https://example.org) A \\& B.';
