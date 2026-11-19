@@ -176,7 +176,10 @@ try {
         if ($pair.Count -eq 2 -and $pair[0]) { [Environment]::SetEnvironmentVariable($pair[0], $pair[1], 'Process') }
     }
     $stage = 'prepare executable'
-    $executable = (Get-Item -LiteralPath $config.executable -ErrorAction Stop).FullName
+    $executable = [string]$config.executable
+    if (-not [IO.File]::Exists($executable)) {
+        throw [IO.FileNotFoundException]::new('Assistant Bridge executable unavailable')
+    }
     $arguments = @($config.arguments)
     Remove-Item -LiteralPath $configPath
     $stage = 'run executable'
