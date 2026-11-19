@@ -5,7 +5,27 @@ import { useConversationRunningStore as store } from "@/modules/chat/store/conve
 
 vi.mock("@/components/request", () => ({ axiosInstance: {}, BASE_URL: "" }));
 vi.mock("react-i18next", () => ({ useTranslation: () => ({ t: (key: string) => key }) }));
-beforeEach(() => store.setState({ entries: {}, watchers: {} }));
+beforeEach(() => store.setState({ entries: {}, watchers: {}, checkingIds: [] }));
+
+it("shows checking for an unconfirmed row and removes it after idle is confirmed", () => {
+  store.setState({ checkingIds: ["a"] });
+  render(<ConversationRunningIndicator conversationId="a" />);
+  expect(screen.getByRole("img", { name: "chat.conversationStatusChecking" })).toBeVisible();
+  expect(screen.queryByRole("img", { name: "chat.conversationRunning" })).not.toBeInTheDocument();
+  act(() => store.setState({ checkingIds: [], entries: { a: { status: "idle", confirmedAt: Date.now() } } }));
+  expect(screen.queryByRole("img")).not.toBeInTheDocument();
+});
+
+it("keeps confirmed running and unavailable statuses while refreshing", () => {
+  store.setState({ checkingIds: ["a", "b"], entries: {
+    a: { status: "running", confirmedAt: Date.now() },
+    b: { status: "unknown", confirmedAt: 0 },
+  } });
+  render(<><ConversationRunningIndicator conversationId="a" /><ConversationRunningIndicator conversationId="b" /></>);
+  expect(screen.getByRole("img", { name: "chat.conversationRunning" })).toBeVisible();
+  expect(screen.getByRole("img", { name: "chat.conversationStatusUnavailable" })).toBeVisible();
+  expect(screen.queryByRole("img", { name: "chat.conversationStatusChecking" })).not.toBeInTheDocument();
+});
 
 it("shows independent accessible indicators and removes only the completed conversation", () => {
   store.setState({ entries: { a: { status: "running", confirmedAt: Date.now() }, b: { status: "running", confirmedAt: Date.now() } } });

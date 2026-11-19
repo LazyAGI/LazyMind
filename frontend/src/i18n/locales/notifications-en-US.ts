@@ -131,6 +131,7 @@ export default {
   "configure": "Configure notifications",
   "connect": "Connect",
   "connected": "Connected",
+  "connectionFailed": "Could not establish the connection. Check the account status and try again.",
   "connecting": "Connecting",
   "connectingHint": "Establishing the connection. The status will update automatically.",
   "disconnected": "Disconnected",

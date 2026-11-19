@@ -119,7 +119,7 @@ func cloneTaskConfig(config map[string]any) map[string]any {
 }
 
 func taskModelIdentity(model modelconfig.AvailableChatModel) common.ModelSwitchIdentity {
-	return common.ModelSwitchIdentity{CandidateID: modelconfig.ChatCandidateID(model.Source, model.ID), Source: model.Source, ModelID: model.ID, ProviderGroupID: model.ProviderGroupID, ProviderName: model.ProviderName, ModelName: model.ModelName}
+	return common.ModelSwitchIdentity{CandidateID: modelconfig.ChatCandidateID(model.Source, model.ID), Source: model.Source, ModelID: model.ID, ProviderGroupID: model.ProviderGroupID, ProviderName: model.ProviderName, ProviderDisplayName: model.ProviderDisplayName, ProviderIsCustom: model.ProviderIsCustom, ModelName: model.ModelName}
 }
 func taskModelCandidate(req *RunRequest, id string) *modelconfig.ChatModelCandidate {
 	for i := range req.ModelFallbackCandidates {

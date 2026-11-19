@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import { emitConversationGroupsChanged } from "../../../conversationOrganizer/api";
 import { getLocalizedErrorMessage } from "@/components/request";
 import { useEffect, useRef, useState, type RefObject } from "react";
@@ -143,6 +144,7 @@ export function useChatConversation({
   onRequestPendingChange,
   t,
 }: UseChatConversationOptions) {
+  const { i18n } = useTranslation();
   const navigate = useNavigate();
   const [modelFallbackNotification, modelFallbackNotificationHolder] = notification.useNotification({
     placement: "bottomRight", duration: 0, pauseOnHover: false, stack: false,
@@ -919,8 +921,8 @@ export function useChatConversation({
       message: t("chat.modelFallbackSucceeded"),
       description: [
         t("chat.modelFallbackDescription", {
-          from: formatModelSwitchLabel(record.from, record.from_max_input_tokens, unknownWindow),
-          to: formatModelSwitchLabel(record.to, record.to_max_input_tokens, unknownWindow), reason,
+          from: formatModelSwitchLabel(record.from, record.from_max_input_tokens, unknownWindow, i18n.language),
+          to: formatModelSwitchLabel(record.to, record.to_max_input_tokens, unknownWindow, i18n.language), reason,
         }),
         record.context_compacted === true ? t("chat.modelFallbackContextAdapted") : undefined,
       ].filter(Boolean).join(" "),

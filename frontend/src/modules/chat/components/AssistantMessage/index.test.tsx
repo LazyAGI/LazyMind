@@ -140,7 +140,7 @@ vi.mock("react-i18next", () => ({
     type: "3rdParty",
     init: () => undefined,
   },
-  useTranslation: () => ({ t: (key: string) => key, i18n: { language: "en-US" } }),
+  useTranslation: () => ({ t: (key: string, values?: { model?: string }) => values?.model ? `${key}: ${values.model}` : key, i18n: { language: "en-US" } }),
 }));
 
 vi.mock("@/modules/chat/store/workflowPanel", () => ({
@@ -369,7 +369,7 @@ describe("AssistantMessage cancellation", () => {
     );
 
     const summary = screen.getByLabelText(
-      reason === "fixed" ? "chat.modelRouteFixedLabel" : "chat.modelRouteAutoLabel",
+      `${reason === "fixed" ? "chat.modelRouteFixedLabel" : "chat.modelRouteAutoLabel"}: Fast · fast-free`,
     );
     expect(summary).toBeInTheDocument();
     fireEvent.mouseOver(summary);
@@ -1315,5 +1315,15 @@ describe("ask answer drafts", () => {
     await act(async () => { vi.advanceTimersByTime(600); });
     expect(saveAskAnswers).toHaveBeenLastCalledWith(...saveRequest(props.sessionId, item.history_id, "new-ask", { 0: answer("New answer") }));
     expect(askDraftStore.getAnswers(JSON.stringify([props.sessionId, item.history_id, "new-ask"]))).toEqual({ 0: answer("New answer") });
+  });
+});
+
+describe("chat supplier label", () => {
+  it.each(["fixed", "auto"])("shows the supplier rather than adapter in %s mode", (mode) => {
+    render(<AssistantMessage item={{ role: "assistant", delta: "answer", model_route: {
+      mode, provider_name: "OpenAI", provider_display_name: "DoubaoAgentPlan", model_name: "DeepSeek-V4-Flash",
+    } }} index={0} length={1} sendMessage={vi.fn()} regenerate={vi.fn()} stopGeneration={vi.fn()} renderText={() => null} updateMessage={vi.fn()} />);
+    expect(screen.getByText(/Volcengine · Agent Plan · DeepSeek-V4-Flash/)).toBeVisible();
+    expect(screen.queryByText(/OpenAI · DeepSeek-V4-Flash/)).not.toBeInTheDocument();
   });
 });

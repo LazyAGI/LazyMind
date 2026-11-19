@@ -25,6 +25,7 @@ const LAZYMIND_CLOUD_SESSION_CHANGED_EVENT = "lazymind:cloud-session-changed";
 
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
+    i18n: { language: "zh-CN" },
     t: (key: string, params?: Record<string, string>) => {
       const labels: Record<string, string> = {
         "chat.modelSelectorDialogLabel": "对话模型选择",
@@ -341,7 +342,7 @@ describe("ChatModelSelector", () => {
     });
     await waitFor(() => expect(search).toHaveFocus());
     expect(
-      within(dialog).getByRole("region", { name: "DeepSeek" }),
+      within(dialog).getByRole("region", { name: "深度求索" }),
     ).toBeInTheDocument();
     expect(
       within(dialog).getByRole("region", { name: "OpenAI" }),
@@ -349,7 +350,7 @@ describe("ChatModelSelector", () => {
 
     fireEvent.change(search, { target: { value: "gpt" } });
     expect(
-      within(dialog).queryByRole("region", { name: "DeepSeek" }),
+      within(dialog).queryByRole("region", { name: "深度求索" }),
     ).not.toBeInTheDocument();
     expect(
       within(dialog).getByRole("button", { name: /GPT-4o/ }),
@@ -1064,4 +1065,24 @@ it('loads a paper draft catalog without a nonexistent conversation and isolates 
  render(<ChatModelSelector draftSelectionKey="pdf-reading-draft"/>);
  await waitFor(()=>expect(fetchCatalogMock).toHaveBeenCalledWith(undefined,expect.any(AbortSignal)));
  await waitFor(()=>expect(useModelSelectionStore.getState().selections['pdf-reading-draft']?.model_id).toBe('deepseek-v3'));
+});
+
+
+it("groups models by localized supplier and service with name-only rows", async () => {
+  const value = catalog();
+  value.providers.push({ id: "ark", name: "DoubaoAgentPlan", models: [{ id: "ark-model", name: "DeepSeek-V4-Flash", group_name: "Doubao", capabilities: ["chat"], badges: ["default"], availability: "available" }] });
+  fetchCatalogMock.mockResolvedValue(value);
+  render(<ChatModelSelector conversationId="supplier-labels" />);
+  fireEvent.click(await screen.findByRole("button", { name: "当前模型：DeepSeek · DeepSeek-V3" }));
+  const dialog = within(screen.getByRole("dialog"));
+  const deepseek = within(dialog.getByRole("region", { name: "深度求索" }));
+  expect(deepseek.getByRole("button", { name: "DeepSeek-V3" })).toHaveTextContent(/^DeepSeek-V3$/);
+  const ark = within(dialog.getByRole("region", { name: "火山引擎 · Agent Plan" }));
+  expect(ark.getByRole("button", { name: "DeepSeek-V4-Flash" })).toHaveTextContent(/^DeepSeek-V4-Flash$/);
+  const search = dialog.getByRole("searchbox");
+  fireEvent.change(search, { target: { value: "火山" } });
+  expect(dialog.getByRole("button", { name: "DeepSeek-V4-Flash" })).toBeInTheDocument();
+  expect(dialog.queryByRole("region", { name: "深度求索" })).not.toBeInTheDocument();
+  fireEvent.change(search, { target: { value: "Doubao" } });
+  expect(dialog.getByRole("button", { name: "DeepSeek-V4-Flash" })).toBeInTheDocument();
 });

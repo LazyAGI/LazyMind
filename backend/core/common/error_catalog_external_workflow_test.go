@@ -43,6 +43,7 @@ func TestResolveWorkflowControlErrors(t *testing.T) {
 		{"stream unavailable", http.StatusInternalServerError, 2004904},
 		{"workflow state unavailable", http.StatusInternalServerError, 2004905},
 		{"task cancellation rejected: HTTP 503", http.StatusInternalServerError, 2004906},
+		{"workflow recovery requires a single Chat run", http.StatusConflict, 2004907},
 	} {
 		t.Run(sample.message, func(t *testing.T) {
 			appErr := ResolveAppError(sample.message, sample.status)

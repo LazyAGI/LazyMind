@@ -514,10 +514,22 @@ func validatePPTCompletion(db *gorm.DB, attempt AttemptContext, rows []orm.Workf
 		return validatePPTPageCount(attempt, rows, "background_images", "background_prompts")
 	case "generate_ppt":
 		format, err := pptOption(db, attempt, "presentation_output_format")
-		if err != nil || format != "html" {
+		if err != nil {
 			return err
 		}
-		return validatePPTPageCount(attempt, rows, "preview_html", "slide_outline")
+		switch format {
+		case "native_pptx":
+			for _, row := range rows {
+				if row.SlotID == "native_pptx" {
+					return nil
+				}
+			}
+			return errors.New("native_pptx has no published PPTX file for this attempt")
+		case "html":
+			return validatePPTPageCount(attempt, rows, "preview_html", "slide_outline")
+		default:
+			return errors.New("presentation_output_format must be html or native_pptx")
+		}
 	default:
 		return nil
 	}

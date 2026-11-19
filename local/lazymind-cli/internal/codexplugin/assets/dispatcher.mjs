@@ -677,7 +677,9 @@ function installTailFollow(scroller, content, panel, initiallyFollowing, bottomB
 //#region src/presentation-view.ts
 /** Presentation identity comes from the committed main-chat view, never binds a run. */
 function readCodexView() {
-	const scrollers = Array.from(document.querySelectorAll("[data-app-action-timeline-scroll]")).filter((element) => element.getBoundingClientRect().width > 0 && !element.closest("[data-app-shell-tab-panel-controller]"));
+	const visibleMainScrollers = (selector) => Array.from(document.querySelectorAll(selector)).filter((element) => element.getBoundingClientRect().width > 0 && !element.closest("[data-app-shell-tab-panel-controller], [inert], [aria-hidden=\"true\"]"));
+	const timelineScrollers = visibleMainScrollers("[data-app-action-timeline-scroll]");
+	const scrollers = timelineScrollers.length > 0 ? timelineScrollers : visibleMainScrollers(".thread-scroll-container[data-mcp-app-scroll-host=\"true\"]");
 	if (scrollers.length !== 1) return null;
 	const scroller = scrollers[0];
 	const fiberKey = Object.keys(scroller).find((key) => key.startsWith("__reactFiber$"));
@@ -710,7 +712,7 @@ function readCodexView() {
 function readPresentationSession(readView = readCodexView) {
 	const host = window;
 	const key = "__lazymindCodexPresentationSession";
-	const version = "codex-view-v2";
+	const version = "codex-view-v3";
 	if (host[key]?.version !== version) host[key]?.dispose();
 	if (!host[key]) {
 		let view = readView(), epoch = crypto.randomUUID(), queued = false;

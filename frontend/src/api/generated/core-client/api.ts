@@ -2377,7 +2377,9 @@ export interface ChatModelRoute {
     'mode'?: ChatModelRouteModeEnum;
     'model_id'?: string;
     'model_name'?: string;
+    'provider_display_name'?: string;
     'provider_id'?: string;
+    'provider_is_custom'?: boolean;
     'provider_name'?: string;
     'reason'?: ChatModelRouteReasonEnum;
     'selection_version'?: number;
@@ -2465,7 +2467,9 @@ export interface ChatModelSwitchIdentity {
     'candidate_id': string;
     'model_id': string;
     'model_name'?: string;
+    'provider_display_name'?: string;
     'provider_group_id': string;
+    'provider_is_custom'?: boolean;
     'provider_name'?: string;
     'source': ChatModelSwitchIdentitySourceEnum;
 }
@@ -8069,6 +8073,10 @@ export interface ProviderRequestAdvanced {
 }
 export interface ProviderRequestConfigOpenAPIResponse {
     'advanced'?: ProviderRequestAdvanced;
+    /**
+     * Legacy encrypted options could not be read. Preserve them unless the user explicitly chooses to replace or clear them.
+     */
+    'advanced_unavailable'?: boolean;
     'default_protocol': ProviderRequestConfigOpenAPIResponseDefaultProtocolEnum;
     'protocols'?: Array<ProviderRequestProtocolOpenAPIItem>;
 }

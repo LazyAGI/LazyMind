@@ -165,11 +165,10 @@ MCP 工具名为 `workflow.input.answer`；HTTP 复用 `POST /workflow-sessions/
   "session_id": "<run>",
   "execution_id": "<attempt>",
   "execution_handle": "<current handle>",
-  "tool_name": "ppt_export_html",
+  "tool_name": "ppt_inspect_pptx",
   "source": "package",
   "arguments": {
-    "pages": [{"html": "<self-contained slide HTML>", "notes": "Speaker notes"}],
-    "filename": "summary.pptx"
+    "content_base64": "<PPTX bytes encoded in base64>"
   },
   "command_id": "<stable unique operation id>"
 }
@@ -192,7 +191,7 @@ HTTP body 对应 MCP 参数，路径中的 execution 使用 `attempt_id`；body 
 
 `package` 只运行服务明确注册的适配器，不动态执行来自 Workflow 包的 Python/JS。PPT 适配器通过固定 revision 的完整文件快照和 tree hash 调用内部 `/api/workflow/external-tools/list|call`；Core 校验 blob hash，Chat 再校验快照树与工具绑定。知识库和学术适配器在 Core 内复用已有数据服务，并校验固定 revision 中的审计标记文件。新增工具须增加适配器、严格参数 schema、资源限制和入口行为测试。
 
-PPT 的无模型工具包括 `ppt_prepare_page`、`ppt_compute_timing`、`ppt_order_papers`、`pdf_read_text`、`pdf_extract_images`，以及 `ppt_export_html`、`ppt_render_html`、`ppt_inspect_pptx`。后三项分别导出可编辑 PPTX、渲染 HTML 预览、检查实际 PPTX 页数/文本/备注。渲染和检查提供事实，不代替外部 worker 的视觉与语义判断。一页 PPTX 是合法请求，不额外生成封面。
+PPT 的无模型工具包括 `ppt_prepare_page`、`ppt_compute_timing`、`ppt_order_papers`、`pdf_read_text`、`pdf_extract_images`、`ppt_render_html` 和 `ppt_inspect_pptx`。渲染和检查工具分别提供 HTML 预览和 PPTX 的实际页数、文本及备注。HTML 路线发布幻灯片和讲稿，导出由用户从面板触发。原生路线发布 PPTX 文件。一页 PPTX 是合法请求，不额外生成封面。
 
 `ppt_prepare_page` 复用原生页面请求组装与 HTML 规范化，模板文字从当前固定 revision 读取。首次调用返回 `generation_request`；外部 Agent 按原样处理其中的 system/user prompt，再以相同页码、brief 和 `generation_responses: [{request_hash, text}]` 回传。返回 `ready` 后得到实际 HTML 文件；哈希不匹配会拒绝。它只完成确定性检查，视觉与语义检查由外部执行者完成。页面可并行生成，但通过检查的一页须立即发布，不能等待整套导出。计时与论文排序工具也复用原生实现。
 
@@ -276,7 +275,7 @@ PPT 工作流直接交付原生 runtime 的大纲、风格目录、页面生成�
 - `workflow.action.get` 读取当前请求；宿主将其中完整的 `system_prompt`、`user_prompt` 交给原生子代理。`workflow.action.respond` 提交文本及原样的 `version`、`request_hash`。请求哈希防止把其他选区或其他版本的模型回答复用到当前规划过程。
 - 若规划器需要下一次生成，返回新的 generation request；`ready` 表示预览就绪，外部 Agent 应结束该轮。MCP 不返回候选 HTML 和确认令牌，避免把大型产物重新灌入模型上下文。
 - 页面轮询同一请求并展示原来的差异预览；只有用户确认后才走原有 `:action-execute`。确认使用创建预览时固定的包版本，并检查产物 revision 和人工草稿版本。取消后禁止确认；相同响应重试幂等，不重复调用规划器。
-- 当前 PPT 包支持外部润色。存在 `native_pptx` 配套产物时，文本润色只对可唯一定位的原生文本做局部替换，保留其他 ZIP 部件（包括图表和字体），并将 HTML 与 PPTX 版本放在同一数据库事务中保存。无法唯一定位、多文本段结构变更或样式操作应转原生 PPTX 编辑器，不允许只改预览却留下旧下载文件。
+- HTML 选区编辑只生成和保存 HTML 候选。早期运行留下的 PPTX 保存在历史中。原生 PPTX 通过原生编辑入口修改。
 
 新增开发者接入只需实现已有通用 host action 交付及上述 MCP 工具，不需要复制 PPT 业务 Skill。其他工作流可复用 generation boundary，但必须在包内显式声明支持；不支持时返回升级工作流提示，不静默回退到 LazyMind 模型。
 

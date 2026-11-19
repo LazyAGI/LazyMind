@@ -6,9 +6,10 @@ the runtime Supervisor to launch an explicit Workflow SubAgent after acceptance.
 from __future__ import annotations
 
 import base64
+import hashlib
+import json
 import logging
 import os
-import re
 import tempfile
 import types
 import uuid
@@ -75,12 +76,10 @@ def materialize_workflow_package(
     only scripts/*.py from an in-memory pseudo path breaks those tools even though Core
     returned the complete pinned package.  The tree hash makes this cache immutable.
     """
-    safe_workflow = re.sub(r'[^0-9A-Za-z_.-]+', '_', workflow_id).strip('._') or 'workflow'
-    safe_revision = re.sub(r'[^0-9A-Za-z_.-]+', '_', revision_id).strip('._') or 'revision'
-    safe_tree = re.sub(r'[^0-9A-Za-z]+', '', tree_hash)[:64] or 'unhashed'
-    root = Path(tempfile.gettempdir()) / 'lazymind-workflow-packages' / (
-        f'{safe_workflow}@{safe_revision}-{safe_tree}'
-    )
+    identity = json.dumps([workflow_id, revision_id, tree_hash], separators=(',', ':'))
+    # Keep the cache root short so bundled relative paths fit on Windows.
+    key = hashlib.sha256(identity.encode('utf-8')).hexdigest()[:32]
+    root = Path(tempfile.gettempdir()) / 'lm-wf' / key
     root.mkdir(parents=True, exist_ok=True)
     resolved_root = root.resolve()
     for relative, encoded in files.items():
@@ -98,9 +97,13 @@ def materialize_workflow_package(
         if target.exists() and target.read_bytes() == raw:
             continue
         target.parent.mkdir(parents=True, exist_ok=True)
-        temporary = target.with_name(f'.{target.name}.{os.getpid()}.tmp')
-        temporary.write_bytes(raw)
-        os.replace(temporary, target)
+        temporary = tempfile.NamedTemporaryFile(dir=target.parent, prefix='.wf-', delete=False)
+        try:
+            with temporary:
+                temporary.write(raw)
+            os.replace(temporary.name, target)
+        finally:
+            Path(temporary.name).unlink(missing_ok=True)
     return root
 
 

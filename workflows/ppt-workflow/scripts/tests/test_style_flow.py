@@ -21,7 +21,12 @@ def _import_stubs() -> dict[str, types.ModuleType]:
     lazyllm_tools.agent = lazyllm_agent
 
     context = types.ModuleType('lazymind.chat.engine.subagent.context')
+    context.get_context = lambda: None
     context.require_context = lambda: None
+    cancellation = types.ModuleType('lazymind.chat.engine.agent_runtime.cancellation')
+    cancellation.make_cancel_stop_condition = lambda: None
+    message_fields = types.ModuleType('lazymind.chat.engine.agent_runtime.message_fields')
+    message_fields.strip_leading_reasoning = str.strip
     subagent_tools = types.ModuleType('lazymind.chat.engine.subagent.tools')
     subagent_tools._resolve_artifact_text = lambda value: str(value or '')
     subagent_tools._save_artifact = lambda **kwargs: {'ok': True, **kwargs}
@@ -70,6 +75,8 @@ def _import_stubs() -> dict[str, types.ModuleType]:
         'lazymind.document_tools.artifacts': artifacts,
         'lazymind.chat': types.ModuleType('lazymind.chat'),
         'lazymind.chat.engine': types.ModuleType('lazymind.chat.engine'),
+        'lazymind.chat.engine.agent_runtime.cancellation': cancellation,
+        'lazymind.chat.engine.agent_runtime.message_fields': message_fields,
         'lazymind.chat.engine.subagent': types.ModuleType('lazymind.chat.engine.subagent'),
         'lazymind.chat.engine.subagent.context': context,
         'lazymind.chat.engine.subagent.tools': subagent_tools,

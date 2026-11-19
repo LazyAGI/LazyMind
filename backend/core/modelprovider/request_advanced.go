@@ -9,8 +9,8 @@ import (
 	"lazymind/core/credentialvault"
 )
 
-// ResolveProviderRequestAdvanced decrypts settings for one supplier snapshot.
-// Callers must keep the result inside credential-bearing internal contracts.
+// ResolveProviderRequestAdvanced reads plaintext options and supports legacy
+// encrypted options until the supplier configuration is explicitly saved again.
 func ResolveProviderRequestAdvanced(parent orm.UserModelProvider) (credentialvault.ProviderRequestAdvanced, error) {
 	var stored savedProviderRequestConfig
 	if parent.RequestConfig == "" {
@@ -29,7 +29,7 @@ func ResolveProviderRequestAdvanced(parent orm.UserModelProvider) (credentialvau
 			return advanced, credentialvault.ErrInvalidContract
 		}
 	} else if stored.Advanced != nil {
-		// Portable values exist only during an encrypted restore transaction.
+		// New saves and restored settings use plaintext JSON.
 		advanced = *stored.Advanced
 	}
 	return advanced, credentialvault.ValidateProviderRequestAdvanced(advanced)
@@ -37,25 +37,6 @@ func ResolveProviderRequestAdvanced(parent orm.UserModelProvider) (credentialvau
 
 func requestAdvancedAAD(providerID string) string {
 	return "request-config:" + strings.TrimSpace(providerID)
-}
-
-func encryptRequestAdvanced(parent orm.UserModelProvider, advanced credentialvault.ProviderRequestAdvanced, managers ...*credentialvault.LocalKeyManager) (string, error) {
-	if err := credentialvault.ValidateProviderRequestAdvanced(advanced); err != nil {
-		return "", err
-	}
-	if advanced.Empty() {
-		return "", nil
-	}
-	encoded, err := json.Marshal(advanced)
-	if err != nil {
-		return "", err
-	}
-	defer clear(encoded)
-	manager := credentialKeyManager()
-	if len(managers) > 0 {
-		manager = managers[0]
-	}
-	return encryptModelProviderAPIKeyBytes(manager, parent.CreateUserID, requestAdvancedAAD(parent.ID), 1, encoded)
 }
 
 func portableProviderRequestConfig(parent orm.UserModelProvider) (string, error) {
@@ -87,27 +68,13 @@ func portableProviderRequestConfig(parent orm.UserModelProvider) (string, error)
 	return string(encoded), nil
 }
 
-func encryptRestoredRequestConfig(parent orm.UserModelProvider, raw string, managers ...*credentialvault.LocalKeyManager) (string, error) {
-	if raw == "" {
-		return "", nil
-	}
+// Restored options are already inside an authenticated backup payload. Local
+// request options do not require an additional encryption layer.
+func restoredRequestConfig(raw string) (string, error) {
 	if !credentialvault.ValidProviderRequestConfig(raw) {
 		return "", credentialvault.ErrInvalidContract
 	}
-	var stored savedProviderRequestConfig
-	if err := json.Unmarshal([]byte(raw), &stored); err != nil {
-		return "", err
-	}
-	if stored.Advanced == nil {
-		return raw, nil
-	}
-	ciphertext, err := encryptRequestAdvanced(parent, *stored.Advanced, managers...)
-	if err != nil {
-		return "", err
-	}
-	stored.Advanced, stored.AdvancedCiphertext = nil, ciphertext
-	encoded, err := json.Marshal(stored)
-	return string(encoded), err
+	return raw, nil
 }
 
 func applyProviderRequestAdvanced(req *http.Request, advanced credentialvault.ProviderRequestAdvanced) {

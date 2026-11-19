@@ -173,6 +173,25 @@ def test_init_deck_accepts_model_key_points_alias(monkeypatch, tmp_path):
     assert info['query_normalized']['key_points'] == ['canonical']
 
 
+def test_ppt_deck_saves_long_titles_and_reads_legacy_binding(monkeypatch, tmp_path):
+    tools = _load_ppt_tools()
+    monkeypatch.setattr(tools, '_conversation_root', lambda: tmp_path)
+    monkeypatch.setattr(tools, '_workflow_session_id', lambda: 'workflow-session')
+    monkeypatch.setattr(tools, '_attach_material_images_to_deck', lambda _: {'attached': 0})
+    topic = '训练加速：' * 40
+
+    first = tools.ppt_init_deck('Train faster', topic=topic)
+    deck = Path(first['deck_dir'])
+    assert len(deck.name) <= 16
+    info = json.loads((deck / 'info_pack.json').read_text(encoding='utf-8'))
+    assert info['query_normalized']['topic'] == topic
+
+    pointer = tools._workflow_deck_pointer()
+    assert len(pointer.name) <= 37
+    pointer.replace(tools._workflow_deck_pointer(legacy=True))
+    assert Path(tools.ppt_init_deck('Resume my deck')['deck_dir']) == deck
+
+
 def test_preview_images_use_small_durable_urls_but_disk_stays_relative(monkeypatch, tmp_path):
     tools = _load_ppt_tools()
     monkeypatch.setenv('LAZYMIND_UPLOAD_ROOT', str(tmp_path))

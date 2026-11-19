@@ -39,6 +39,7 @@ type Question struct {
 	Reason        string         `json:"reason,omitempty"`
 	Type          string         `json:"type"`
 	Choices       []string       `json:"choices,omitempty"`
+	Recommended   string         `json:"recommended_choice,omitempty"`
 	ChoicePolicy  string         `json:"choice_policy,omitempty"`
 	AllowOther    *bool          `json:"allow_other,omitempty"`
 	Required      bool           `json:"required,omitempty"`

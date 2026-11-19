@@ -126,7 +126,7 @@ func TestChatStopOwnershipSurvivesHandOffAndResume(t *testing.T) {
 		{"external workflow", "external-agent", `{"chat_history_id":"external"}`, ""},
 	} {
 		t.Run(sample.name, func(t *testing.T) {
-			db := orm.MigrateTestDB(t, &orm.WorkflowSessionStep{})
+			db := orm.MigrateTestDB(t, &orm.WorkflowSessionStep{}, &orm.ChatHistory{})
 			session := orm.WorkflowSession{ID: "session", Status: "active", ControllerHost: sample.host,
 				TriggerHistoryID: "trigger", ControlBindingJSON: sample.binding}
 			view, err := Read(db.DB, session)

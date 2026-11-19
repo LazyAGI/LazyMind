@@ -11,6 +11,7 @@ import (
 	"github.com/glebarez/sqlite"
 	"github.com/gorilla/mux"
 	"gorm.io/gorm"
+	"lazymind/core/algo"
 	"lazymind/core/common/orm"
 	"lazymind/core/store"
 )
@@ -39,7 +40,7 @@ func TestDeclaredHeadArtifactActionUsesCurrentRevision(t *testing.T) {
 	}).Error; err != nil {
 		t.Fatal(err)
 	}
-	manifest := []byte("id: ppt-workflow\nartifact_actions:\n  rewrite_selection:\n    revision_policy: head\n")
+	manifest := []byte("id: ppt-workflow\nartifact_actions:\n  rewrite_selection:\n    revision_policy: head\n    companion_slot: native_pptx\n")
 	hash := "manifest-hash"
 	if err := db.Create(&orm.WorkflowBlob{Hash: hash, Size: int64(len(manifest)), Mime: "text/yaml", FileType: "workflow", Content: manifest, CreatedAt: now}).Error; err != nil {
 		t.Fatal(err)
@@ -57,6 +58,10 @@ func TestDeclaredHeadArtifactActionUsesCurrentRevision(t *testing.T) {
 	}
 	if got.revisionID != "final" || got.treeHash != "final-tree" {
 		t.Fatalf("expected declared head action revision, got %#v", got)
+	}
+	req := algo.WorkflowActionInvokeRequest{WorkflowID: got.workflowID, Action: "rewrite_selection", Slot: "preview_html", RevisionID: got.revisionID}
+	if err := attachActionCompanion(httptest.NewRequest(http.MethodPost, "/artifact-action", nil), target, &req); err != nil || req.Arguments["native_companion"] != nil {
+		t.Fatalf("HTML edit tried to load the legacy native companion: %v", err)
 	}
 }
 
