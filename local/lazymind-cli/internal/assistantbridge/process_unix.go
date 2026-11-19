@@ -7,6 +7,8 @@ import (
 	"syscall"
 )
 
+const connectionRefused = syscall.ECONNREFUSED
+
 func ownerExited(pid int) bool { return syscall.Kill(pid, 0) == syscall.ESRCH }
 
 func detachedProcessAttributes() *syscall.SysProcAttr {

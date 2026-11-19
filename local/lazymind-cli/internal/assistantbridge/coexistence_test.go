@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -18,6 +19,24 @@ import (
 	"lazymind/agentconnector/internal/executorpolicy"
 	"lazymind/agentconnector/internal/mcpbridge"
 )
+
+func TestListenerAbsentRecognizesClosedLoopbackPort(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = listener.Close() })
+	address := listener.Addr().String()
+	if listenerAbsent(address) {
+		t.Fatal("an active loopback listener was reported absent")
+	}
+	if err := listener.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if !listenerAbsent(address) {
+		t.Fatal("a refused connection to the closed listener was not recognized")
+	}
+}
 
 func TestSharedBridgeDoesNotInheritDesktopProcessOwnership(t *testing.T) {
 	for _, key := range []string{"LAZYMIND_RUNTIME_ROOT", "LAZYMIND_RUNTIME_OWNER_TOKEN", "LAZYMIND_DESKTOP_OWNER_PID", "LAZYMIND_AGENT_RUN_ID", "LAZYMIND_WORKFLOW_RUN_ID"} {

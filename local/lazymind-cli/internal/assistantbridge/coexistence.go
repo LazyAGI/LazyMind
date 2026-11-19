@@ -22,7 +22,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 
 	"lazymind/agentconnector/internal/connectorconfig"
@@ -769,7 +768,7 @@ func listenerAbsent(address string) bool {
 		_ = connection.Close()
 		return false
 	}
-	return errors.Is(err, syscall.ECONNREFUSED)
+	return errors.Is(err, connectionRefused)
 }
 
 func (s *Server) originMatchesEnvironment(origin string) bool {

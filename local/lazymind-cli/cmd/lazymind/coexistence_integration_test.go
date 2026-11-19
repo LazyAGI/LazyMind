@@ -44,7 +44,7 @@ func TestMain(m *testing.M) {
 func TestDesktopComposeSharedBridgeLifecycle(t *testing.T) {
 	for _, desktopFirst := range []bool{true, false} {
 		t.Run(map[bool]string{true: "desktop-first", false: "compose-first"}[desktopFirst], func(t *testing.T) {
-			root := coexistenceTempDir(t)
+			root := t.TempDir()
 			t.Setenv("LAZYMIND_HOME", root)
 			t.Setenv("LAZYMIND_COEXISTENCE_TEST_HELPER", "1")
 			t.Setenv(connectorconfig.EnvironmentKey, "")
@@ -156,35 +156,10 @@ func TestDesktopComposeSharedBridgeLifecycle(t *testing.T) {
 
 func strconvQuote(value string) string { body, _ := json.Marshal(value); return string(body) }
 
-func coexistenceTempDir(t *testing.T) string {
-	t.Helper()
-	root := t.TempDir()
-	if runtime.GOOS == "windows" {
-		t.Cleanup(func() {
-			// ReleaseClient has already verified shutdown. Windows can still
-			// hold the staged test executable while its launcher unwinds.
-			bin := filepath.Join(root, "bridge", "bin")
-			deadline := time.Now().Add(10 * time.Second)
-			for {
-				err := os.RemoveAll(bin)
-				if err == nil {
-					return
-				}
-				if !errors.Is(err, os.ErrPermission) || !time.Now().Before(deadline) {
-					t.Errorf("could not remove staged Bridge executables after release: %v", err)
-					return
-				}
-				time.Sleep(50 * time.Millisecond)
-			}
-		})
-	}
-	return root
-}
-
 func TestBridgeSurvivesDesktopCrashOnlyWhileComposeUsesIt(t *testing.T) {
 	for _, withCompose := range []bool{false, true} {
 		t.Run(map[bool]string{false: "standalone", true: "shared"}[withCompose], func(t *testing.T) {
-			root := coexistenceTempDir(t)
+			root := t.TempDir()
 			t.Setenv("LAZYMIND_HOME", root)
 			t.Setenv("LAZYMIND_RUNTIME_PROFILE", "desktop")
 			t.Setenv("LAZYMIND_COEXISTENCE_TEST_HELPER", "1")
@@ -228,19 +203,24 @@ func TestBridgeSurvivesDesktopCrashOnlyWhileComposeUsesIt(t *testing.T) {
 			}
 			_ = owner.Wait()
 			deadline := time.Now().Add(8 * time.Second)
+			const windowsSharingViolation = syscall.Errno(32) // ERROR_SHARING_VIOLATION
 			for {
 				body, err := os.ReadFile(filepath.Join(root, "bridge-clients.json"))
-				var clients map[string]assistantbridge.ClientOptions
-				if err != nil || json.Unmarshal(body, &clients) != nil {
-					t.Fatalf("read bridge clients: %v", err)
-				}
-				_, hasDesktop := clients[desktop.ID]
-				_, healthErr := assistantbridge.Health(ctx, address)
-				if !hasDesktop && (withCompose || healthErr != nil) {
-					if withCompose && (healthErr != nil || clients[compose.ID].ID == "") {
-						t.Fatal("Desktop crash stopped Compose's bridge")
+				if err == nil {
+					var clients map[string]assistantbridge.ClientOptions
+					if err := json.Unmarshal(body, &clients); err != nil {
+						t.Fatalf("decode bridge clients: %v", err)
 					}
-					break
+					_, hasDesktop := clients[desktop.ID]
+					_, healthErr := assistantbridge.Health(ctx, address)
+					if !hasDesktop && (withCompose || healthErr != nil) {
+						if withCompose && (healthErr != nil || clients[compose.ID].ID == "") {
+							t.Fatal("Desktop crash stopped Compose's bridge")
+						}
+						break
+					}
+				} else if runtime.GOOS != "windows" || !errors.Is(err, windowsSharingViolation) {
+					t.Fatalf("read bridge clients: %v", err)
 				}
 				if time.Now().After(deadline) {
 					t.Fatal("Desktop crash did not release its bridge ownership")
